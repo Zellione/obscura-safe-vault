@@ -119,16 +119,7 @@ jobs:
           path: build/bin/Debug/osv
           retention-days: 7
 
-      # -----------------------------------------------------------------------
-      # Tests
-      # Phase 0: no test binary yet — this step becomes the primary gate from
-      # Phase 1 onwards when tests/crypto KAT vectors are added.
-      # -----------------------------------------------------------------------
-      - name: Run tests (${{ matrix.config }})
-        run: |
-          TEST_BIN="build/bin/${{ matrix.config }}/osv-tests"
-          if [ -f "$TEST_BIN" ]; then
-            "$TEST_BIN" --reporter console
-          else
-            echo "::notice::No test binary found at $TEST_BIN — tests are added from Phase 1 onwards."
-          fi
+      # NOTE: A dedicated test step is added in Phase 1, when the first
+      # `osv-tests` target (crypto known-answer vectors) exists. Until then
+      # the build step above is the only meaningful gate, so there is no
+      # separate test execution to run.
