@@ -1,0 +1,3 @@
+Place a single OFL-licensed TrueType font here (e.g. Inter-Regular.ttf or DejaVuSans.ttf).
+It is compiled into the binary via stb_truetype in Phase 4.
+See ROADMAP.md Phase 4 for download instructions.

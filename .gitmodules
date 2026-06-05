@@ -1,0 +1,9 @@
+[submodule "vendor/SDL3"]
+	path = vendor/SDL3
+	url = https://github.com/libsdl-org/SDL
+[submodule "vendor/monocypher"]
+	path = vendor/monocypher
+	url = https://github.com/LoupVaillant/Monocypher
+[submodule "vendor/stb"]
+	path = vendor/stb
+	url = https://github.com/nothings/stb

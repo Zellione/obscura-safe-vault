@@ -1,0 +1,36 @@
+# Build outputs
+build/
+bin/
+obj/
+
+# premake5 binary (downloaded by setup.sh, not committed)
+bin/premake5
+
+# Generated build files
+*.make
+Makefile
+*.ninja
+.ninja_deps
+.ninja_log
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Compiled objects
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Test vault files (contain personal data)
+*.osv
