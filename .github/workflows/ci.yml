@@ -91,6 +91,11 @@ jobs:
             -DSDL_TESTS=OFF            \
             -DSDL_EXAMPLES=OFF         \
             -DSDL_INSTALL_TESTS=OFF    \
+            -DSDL_X11_XTEST=OFF        \
+            -DSDL_JOYSTICK=OFF         \
+            -DSDL_HAPTIC=OFF           \
+            -DSDL_SENSOR=OFF           \
+            -DSDL_CAMERA=OFF           \
             -G "Ninja"
           cmake --build vendor/SDL3/build --parallel "$(nproc)"
 
