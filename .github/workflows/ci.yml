@@ -1,8 +1,11 @@
 name: CI
 
 on:
+  # Run on PRs, and on pushes to main only (post-merge validation).
+  # Feature-branch pushes are covered by the pull_request trigger, so this
+  # avoids running the workflow twice for the same commit on an open PR.
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
     branches: [main]
 
