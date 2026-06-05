@@ -130,7 +130,9 @@ scripts/build.sh --release   # Release
 build/bin/Debug/osv
 
 # Tests (Phase 1+):
-# TODO: add test runner command here
+scripts/test.sh              # build + run all tests (Debug)
+scripts/test.sh --asan       # same, under AddressSanitizer + UBSan/LSan
+scripts/test.sh --release    # optimised build
 ```
 
 The `bin/premake5` binary is downloaded by `setup.sh` from the official

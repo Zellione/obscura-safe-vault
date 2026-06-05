@@ -112,6 +112,13 @@ jobs:
         run: ninja ${{ matrix.config }}_x64
 
       # -----------------------------------------------------------------------
+      # Tests — crypto known-answer vectors + round-trip/tamper (Phase 1+).
+      # The build step above already compiles the osv_tests target.
+      # -----------------------------------------------------------------------
+      - name: Run tests (${{ matrix.config }})
+        run: ./build/bin/${{ matrix.config }}/osv_tests
+
+      # -----------------------------------------------------------------------
       # Upload artefact (Debug binary only, to keep storage low)
       # -----------------------------------------------------------------------
       - name: Upload build artefact
@@ -122,7 +129,52 @@ jobs:
           path: build/bin/Debug/osv
           retention-days: 7
 
-      # NOTE: A dedicated test step is added in Phase 1, when the first
-      # `osv-tests` target (crypto known-answer vectors) exists. Until then
-      # the build step above is the only meaningful gate, so there is no
-      # separate test execution to run.
+  # ===========================================================================
+  # Sanitiser gate — builds and runs the crypto tests under ASAN + UBSan + LSan.
+  # Enforces the Phase 1 acceptance criterion ("no leaks; mlock handled
+  # gracefully") on every PR. Only the osv_tests target is built (no SDL3 / no
+  # vault deps), so this job is fast and needs no SDL3 system packages.
+  # ===========================================================================
+  crypto-tests-asan:
+    name: ASAN+UBSan / crypto tests / Linux
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++
+
+      - name: Cache premake5 binary
+        uses: actions/cache@v4
+        id: cache-premake5
+        with:
+          path: bin/premake5
+          key: premake5-5.0.0-beta8-linux
+
+      - name: Download premake5
+        if: steps.cache-premake5.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p bin
+          curl -fsSL \
+            "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-linux.tar.gz" \
+            -o /tmp/premake5.tar.gz
+          tar -xzf /tmp/premake5.tar.gz -C bin/
+          chmod +x bin/premake5
+
+      - name: Generate Ninja build files (--asan)
+        run: bin/premake5 --asan ninja --cc=gcc
+
+      - name: Build osv_tests (ASAN)
+        run: ninja osv_tests_Debug_x64
+
+      - name: Run crypto tests under ASAN + UBSan + LSan
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: ./build/bin/Debug/osv_tests
