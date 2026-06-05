@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.compiler }} / ${{ matrix.config }} / Linux
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        config: [Debug, Release]
+
+    steps:
+      # -----------------------------------------------------------------------
+      # Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # -----------------------------------------------------------------------
+      # System packages
+      # -----------------------------------------------------------------------
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build \
+            gcc \
+            g++ \
+            clang \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxss-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libasound2-dev \
+            libpulse-dev
+
+      # -----------------------------------------------------------------------
+      # premake5 binary
+      # -----------------------------------------------------------------------
+      - name: Cache premake5 binary
+        uses: actions/cache@v4
+        id: cache-premake5
+        with:
+          path: bin/premake5
+          key: premake5-5.0.0-beta8-linux
+
+      - name: Download premake5
+        if: steps.cache-premake5.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p bin
+          curl -fsSL \
+            "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-linux.tar.gz" \
+            -o /tmp/premake5.tar.gz
+          tar -xzf /tmp/premake5.tar.gz -C bin/
+          chmod +x bin/premake5
+
+      # -----------------------------------------------------------------------
+      # Vendored SDL3 static build (cached by submodule commit hash)
+      # -----------------------------------------------------------------------
+      - name: Cache vendored SDL3 build
+        uses: actions/cache@v4
+        id: cache-sdl3
+        with:
+          path: vendor/SDL3/build
+          key: sdl3-linux-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored SDL3
+        if: steps.cache-sdl3.outputs.cache-hit != 'true'
+        run: |
+          cmake -S vendor/SDL3 -B vendor/SDL3/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSDL_STATIC=ON            \
+            -DSDL_SHARED=OFF           \
+            -DSDL_TESTS=OFF            \
+            -DSDL_EXAMPLES=OFF         \
+            -DSDL_INSTALL_TESTS=OFF    \
+            -G "Ninja"
+          cmake --build vendor/SDL3/build --parallel "$(nproc)"
+
+      # -----------------------------------------------------------------------
+      # Generate + compile
+      # -----------------------------------------------------------------------
+      - name: Generate Ninja build files (${{ matrix.compiler }})
+        run: bin/premake5 ninja --cc=${{ matrix.compiler }}
+
+      - name: Build (${{ matrix.config }})
+        run: ninja ${{ matrix.config }}_x64
+
+      # -----------------------------------------------------------------------
+      # Upload artefact (Debug binary only, to keep storage low)
+      # -----------------------------------------------------------------------
+      - name: Upload build artefact
+        if: matrix.config == 'Debug' && matrix.compiler == 'gcc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: osv-linux-debug
+          path: build/bin/Debug/osv
+          retention-days: 7
+
+      # -----------------------------------------------------------------------
+      # Tests
+      # Phase 0: no test binary yet — this step becomes the primary gate from
+      # Phase 1 onwards when tests/crypto KAT vectors are added.
+      # -----------------------------------------------------------------------
+      - name: Run tests (${{ matrix.config }})
+        run: |
+          TEST_BIN="build/bin/${{ matrix.config }}/osv-tests"
+          if [ -f "$TEST_BIN" ]; then
+            "$TEST_BIN" --reporter console
+          else
+            echo "::notice::No test binary found at $TEST_BIN — tests are added from Phase 1 onwards."
+          fi
