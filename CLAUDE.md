@@ -1,0 +1,202 @@
+# Obscura-Safe-Vault — CLAUDE.md
+
+All decisions recorded here were made interactively with the project owner.
+When developing with AI assistance, treat this file as the authoritative
+source of truth for every architectural and technology choice.
+
+---
+
+## Project goal
+
+A **multi-platform native encrypted photo gallery** stored in a single `.osv` vault
+file. Images are decrypted **into locked memory only** — no temporary files, no
+decrypted data ever written to disk. The gallery is browsable with a
+freely-nestable folder tree, a big zoomable image viewer, and a thumbnail strip
+navigable with arrow keys.
+
+---
+
+## Technology choices
+
+| Area | Choice | Why |
+|---|---|---|
+| Language / std | **C++20** | Owner requirement. `std::span`, `<filesystem>`, concepts, designated initialisers. |
+| Build system | **premake5 beta8 → Ninja** (gmake2 fallback) | Owner requirement. premake5 beta8 has native Ninja support (no module needed). Binary lives in `bin/premake5`, downloaded by `scripts/setup.sh`. |
+| Windowing / input | **SDL3 3.4.10** | Cross-platform window + renderer + file dialogs in one library. `SDL_ShowOpenFileDialog` removes the need for a separate platform layer. |
+| Rendering | **SDL_Renderer 2D** (GPU-accelerated) | Textures + destination-rect scaling cover zoom/pan and the thumbnail strip with minimal code. No shader authoring needed for Phase 0–7. |
+| Text rendering | **stb_truetype + baked atlas** | Header-only, trivial to vendor; bundle one OFL font in `assets/fonts/`. Added in Phase 4. |
+| Crypto library | **Monocypher 4.0.2** | Single `monocypher.c` / `monocypher.h` file, public domain. Has XChaCha20-Poly1305, Argon2id, `crypto_wipe`. Trivial to compile in premake. |
+| Platform RNG | `getrandom` (Linux), `getentropy` (macOS), `BCryptGenRandom` (Windows) | Monocypher has no built-in CSPRNG; a ~50-line platform shim in `src/crypto/random.*` fills the gap. |
+| Secure memory | `mlock`/`VirtualLock` + `crypto_wipe` | Master key and KEK are held in mlock'd buffers and wiped on vault lock / app exit. Never swap to disk. |
+| AEAD cipher | **XChaCha20-Poly1305** | 192-bit nonce → random nonces are safe per chunk with no counter state. Crash-safe: no nonce counter to track, persist, or corrupt. Fast without AES-NI. |
+| KDF | **Argon2id** (via Monocypher) | Memory-hard, anti-GPU/ASIC. Protects the real weak point: the password. |
+| Authentication | **Password + optional keyfile** | "Something you know + something you have." Final key = Argon2id(password ‖ keyfile, salt). Changing the password re-wraps the master key only (no bulk re-encrypt). |
+| Image decode | **stb_image** (header-only) | JPEG/PNG/GIF/BMP/TGA/HDR decoded directly from decrypted in-memory buffers. Zero dependencies, no temp files. |
+| Extra image formats | **libwebp** (Phase 9), **libheif/libavif** (Phase 9) | Heavier deps added only when their phase lands. |
+| Thumbnails | **Pre-generated, stored encrypted in vault** | Gallery scrolling decrypts only the small thumbnail blobs — no full-image decode needed while browsing. |
+| Gallery model | **Free-nesting galleries; images only in leaf galleries** | A folder shows either sub-folders *or* images, never a mix. Cleaner grid view and simpler tree logic. |
+| Dependency management | **Vendored git submodules** under `vendor/` | Hermetic, reproducible, offline. SDL3 is built from source by `scripts/setup.sh` (cmake once); monocypher/stb are compiled directly by premake. |
+| Primary platform | **Linux (Arch) → Windows → macOS** | Owner's dev machine is Arch Linux. Keep code portable from day one; add Windows/macOS premake configs and CI in Phase 8. |
+
+---
+
+## Vault container format (`.osv`)
+
+```
+[ Header — plaintext, fixed-size ]
+  magic     "OSVAULT\0"  (8 bytes)
+  version   u16
+  hdr_size  u16
+  flags     u32
+  KDF block:
+    algo        u8  (0 = Argon2id)
+    t_cost      u32
+    m_cost_kib  u32
+    parallelism u32
+    salt        u8[16]
+    keyfile_req u8
+  Master-key wrap (XChaCha20-Poly1305):
+    nonce               u8[24]
+    wrapped_master_key  u8[32]
+    tag                 u8[16]
+  Index slot A: offset u64 | length u64 | nonce u8[24]   ─┐ double-buffered
+  Index slot B: offset u64 | length u64 | nonce u8[24]   ─┘ crash-safe swap
+  active_slot  u8
+  [reserved padding to fixed header_size]
+
+[ Data region — append-only ]
+  Each chunk: nonce u8[24] | ciphertext (≤1 MiB) | tag u8[16]
+
+[ Index blobs (in data region) — encrypted, binary-serialised tree ]
+```
+
+**Key hierarchy:** `KEK = Argon2id(password [‖ keyfile_bytes], salt)` → unwraps
+a random 32-byte **master key**. All data/thumbnail/index chunks use the master
+key with a fresh random 24-byte nonce per chunk.
+
+**Write atomicity:** append chunks → fsync → write index to inactive slot →
+fsync → flip `active_slot` → fsync. A crash before the flip leaves the previous
+index valid; orphaned chunks are reclaimed by compaction.
+
+---
+
+## Module layout
+
+```
+src/
+  app/       main.cpp, app.{h,cpp}        ← state machine + event loop
+  crypto/    crypto.h, kdf.*, aead.*,     ← Monocypher wrappers (Phase 1)
+             secure_mem.*, random.*
+  vault/     vault.h, header.*, index.*,  ← container format (Phase 2)
+             chunk_store.*, vault.*
+  image/     image.h, decode.*,           ← stb_image decode + thumbs (Phase 3)
+             thumbnail.*
+  gfx/       window.{h,cpp},             ← SDL3 window + renderer (Phase 0)
+             renderer.{h,cpp},            ← texture cache, text atlas (Phase 4)
+             texture_cache.*, text.*
+  ui/        input.h,                    ← input abstraction (Phase 5)
+             unlock_screen.*,             ← unlock + create vault (Phase 5)
+             gallery_grid.*,              ← breadcrumb grid (Phase 5)
+             image_viewer.*,              ← zoom/pan + thumb strip (Phase 6)
+             widgets.*
+  platform/  paths.{h,cpp},              ← config dir + file dialogs (Phase 5)
+             file_dialog.*
+vendor/
+  SDL3/           ← git submodule, built by scripts/setup.sh (cmake)
+  monocypher/     ← git submodule, compiled by premake (single .c file)
+  stb/            ← git submodule, header-only
+tests/
+  crypto/         ← known-answer tests for KDF + AEAD (Phase 1)
+  vault/          ← round-trip tests: create → add → read → checksum (Phase 2)
+```
+
+---
+
+## Build / run / test
+
+```bash
+# First-time setup (downloads premake5, builds vendored SDL3):
+scripts/setup.sh
+
+# Generate Ninja build files:
+scripts/gen.sh               # Ninja (default)
+scripts/gen.sh --gmake       # GNU Make fallback
+
+# Compile:
+scripts/build.sh             # Debug
+scripts/build.sh --release   # Release
+
+# Run:
+build/bin/Debug/osv
+
+# Tests (Phase 1+):
+# TODO: add test runner command here
+```
+
+The `bin/premake5` binary is downloaded by `setup.sh` from the official
+premake-core GitHub releases. It is **not** committed to the repo.
+
+---
+
+## Code conventions
+
+### C++ style
+- **Standard:** C++20. Use `std::span`, designated initialisers, `[[nodiscard]]`, `constexpr` freely.
+- **Naming:** `snake_case` for everything except `ClassName` (PascalCase) and `CONSTANT` (UPPER_SNAKE). Prefix member variables with `_` (trailing underscore).
+- **Error handling:** no exceptions. Functions that can fail return `bool` or a `std::expected`-like result type. Log to `stderr` with a `[Module]` prefix.
+- **Includes:** prefer `#pragma once`. Keep includes minimal; forward-declare where possible.
+- **Comments:** document *why*, not *what*. Non-obvious invariants and TODOs with phase numbers are welcome.
+
+### Security invariants (enforce these at all times)
+1. **No plaintext to disk.** Decrypted image data must never be written to any file, temp dir, or mmap'd file. Only `mlock`'d heap buffers.
+2. **Wipe keys on destruction.** Every buffer holding a key, KEK, or password uses `crypto_wipe` (Monocypher) before freeing.
+3. **Random nonces.** Every XChaCha20-Poly1305 encrypt call uses a fresh 24-byte nonce from the CSPRNG. Never reuse nonces.
+4. **Authenticate before decrypt.** Always verify the Poly1305 tag before using any plaintext bytes.
+5. **No logging of key material.** Keys, passwords, and decrypted content must never appear in log output.
+
+### Testing policy
+- **Always write unit and integration tests** alongside any new feature or module.
+- Unit tests live in `tests/<module>/` and cover edge cases, error paths, and known-answer vectors.
+- Integration tests exercise end-to-end flows (e.g., create vault → add image → re-open → read image → compare checksum).
+- Tests must pass before a phase is considered complete.
+- For crypto primitives, include known-answer test (KAT) vectors sourced from the Monocypher test suite or RFC test vectors.
+
+---
+
+## UI / UX specification
+
+### Unlock screen (Phase 5)
+- Password field (text is masked).
+- Optional keyfile picker button (uses `SDL_ShowOpenFileDialog`).
+- On *Create New Vault*: passphrase-strength meter displayed; offer to generate a
+  random passphrase (password is the genuine security boundary).
+
+### Gallery grid (Phase 5)
+- Tile grid of sub-galleries (with folder icon) or image thumbnails (leaf gallery).
+- Breadcrumb bar at the top showing the current path.
+- Keyboard: `Enter`/`Space` to open, `Backspace`/`Esc` to go up.
+- Import via SDL file dialog; thumbnails generated and stored on import.
+
+### Image viewer (Phase 6)
+- Top ~75% of the window: big image, fit-to-window by default.
+  - Mouse wheel / `+` / `-`: zoom in/out.
+  - Drag or arrow keys (when zoomed): pan.
+- Bottom ~25%: horizontal thumbnail strip, scrolled to and highlighting the
+  current image.
+  - `Left` / `Right` arrow: previous / next image in the leaf gallery.
+  - `Up` / `Esc`: back to gallery grid.
+
+---
+
+## Decisions deferred to future phases
+
+| Topic | When | Notes |
+|---|---|---|
+| Video playback | Phase 10+ | ffmpeg; streaming decode from encrypted chunks. Much larger scope. |
+| Tags / search | Phase 10+ | Metadata index alongside the gallery tree. |
+| Multiple vaults | Phase 10+ | Separate vault files, possibly with a "vault manager" screen. |
+| HEIC / AVIF | Phase 9 | libheif + libavif; heavy codec deps. |
+| WebP | Phase 9 | libwebp; moderate dep. |
+| Windows / macOS builds | Phase 8 | premake configs + CI; macOS code-signing. |
+| Compaction | Phase 7 | Reclaim orphaned chunk space after deletes. |
+| Password strength meter | Phase 7 | On vault creation; encourage strong passphrases. |
