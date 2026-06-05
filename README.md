@@ -45,12 +45,24 @@ build/bin/Release/osv
 
 ## Testing
 
-Tests live in `tests/` and are added phase by phase alongside each feature (see `ROADMAP.md`). Phase 1 adds crypto known-answer tests; Phase 2 adds vault round-trip tests.
+Tests live in `tests/` and are added phase by phase alongside each feature (see `ROADMAP.md`). Phase 1 adds crypto known-answer + round-trip/tamper tests; Phase 2 adds vault round-trip tests.
+
+`scripts/test.sh` generates build files, compiles the `osv_tests` target, and runs it. It exits non-zero if any test fails (CI-friendly).
 
 ```bash
-# Phase 1+: run all tests (command TBD when the test runner is wired up)
-# build/bin/Debug/osv-tests
+scripts/test.sh             # Debug build, run all tests
+scripts/test.sh --asan      # build + run under AddressSanitizer + UBSan/LSan
+scripts/test.sh --release   # optimised build
+scripts/test.sh --gmake     # GNU Make instead of Ninja
 ```
+
+You can also run the binary directly after a build:
+
+```bash
+build/bin/Debug/osv_tests
+```
+
+Both the test suite and the ASAN/UBSan run are enforced in CI on every pull request (see `.github/workflows/ci.yml`).
 
 ---
 
@@ -58,17 +70,18 @@ Tests live in `tests/` and are added phase by phase alongside each feature (see 
 
 ### ASAN + UBSAN (recommended for development)
 
-Add to `premake5.lua` under the Debug filter or pass directly to the compiler:
+Pass `--asan` to the generator to add AddressSanitizer + UndefinedBehaviorSanitizer to every native project:
 
 ```bash
-# Recompile with sanitisers
-CXXFLAGS="-fsanitize=address,undefined" scripts/build.sh
-build/bin/Debug/osv
+scripts/test.sh --asan           # build + run the tests under ASAN/UBSan/LSan
+bin/premake5 --asan ninja        # ...or regenerate, then build any target by hand
+ninja Debug_x64 && build/bin/Debug/osv
 ```
 
 ### Valgrind (memory leaks / secure-wipe verification)
 
 ```bash
+valgrind --leak-check=full --track-origins=yes build/bin/Debug/osv_tests
 valgrind --leak-check=full --track-origins=yes build/bin/Debug/osv
 ```
 
@@ -98,7 +111,7 @@ vendor/
   monocypher/  git submodule (4.0.2-RC1)
   stb/         git submodule
 tests/         Unit and integration tests (Phase 1+)
-scripts/       setup.sh · gen.sh · build.sh
+scripts/       setup.sh · gen.sh · build.sh · test.sh
 ```
 
 ---

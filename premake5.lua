@@ -1,6 +1,14 @@
 -- Obscura-Safe-Vault — premake5 workspace
 -- Run:  ./bin/premake5 ninja    (primary)
 --       ./bin/premake5 gmake2   (fallback)
+--
+-- Pass --asan to add AddressSanitizer + UBSan to all native projects, e.g.:
+--       ./bin/premake5 --asan ninja
+
+newoption {
+    trigger     = "asan",
+    description = "Build with AddressSanitizer + UndefinedBehaviorSanitizer",
+}
 
 workspace "ObscuraSafeVault"
     configurations { "Debug", "Release" }
@@ -26,6 +34,11 @@ workspace "ObscuraSafeVault"
 
     filter "platforms:x64"
         architecture "x86_64"
+
+    -- Opt-in sanitizers (gcc/clang). Applies to every project in the workspace.
+    filter { "options:asan", "toolset:gcc or clang" }
+        buildoptions { "-fsanitize=address,undefined", "-fno-omit-frame-pointer" }
+        linkoptions  { "-fsanitize=address,undefined" }
 
     filter {}
 
@@ -99,4 +112,33 @@ project "osv"
         links { "dl", "pthread", "m" }
     filter "system:windows"
         links { "winmm", "imm32", "version", "setupapi" }
+    filter {}
+
+-- ---------------------------------------------------------------------------
+-- osv_tests — unit/integration tests for the crypto layer (Phase 1+)
+-- Compiles the test harness + the crypto sources directly (NOT src/app/main.cpp).
+-- ---------------------------------------------------------------------------
+project "osv_tests"
+    kind        "ConsoleApp"
+    targetname  "osv_tests"
+
+    files {
+        "tests/**.cpp",
+        "tests/**.h",
+        "src/crypto/*.cpp",
+        "src/crypto/*.h",
+    }
+
+    includedirs {
+        "src",                      -- so tests can #include "crypto/aead.h"
+        "tests",
+        "vendor/monocypher/src",
+    }
+
+    links { "monocypher" }
+
+    filter "system:linux"
+        links { "pthread", "m" }
+    filter "system:windows"
+        links { "bcrypt" }
     filter {}

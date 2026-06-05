@@ -1,0 +1,63 @@
+#include "aead.h"
+
+#include <cstdio>
+
+#include <monocypher.h>
+
+#include "random.h"
+
+namespace crypto {
+
+bool encrypt_chunk(std::span<const uint8_t, KEY_SIZE> key,
+                   std::span<const uint8_t>           plaintext,
+                   std::vector<uint8_t>&              out,
+                   std::span<const uint8_t>           ad) noexcept
+{
+    out.assign(NONCE_SIZE + plaintext.size() + TAG_SIZE, 0);
+
+    uint8_t* nonce  = out.data();
+    uint8_t* cipher = out.data() + NONCE_SIZE;
+    uint8_t* tag    = out.data() + NONCE_SIZE + plaintext.size();
+
+    if (!fill_random(std::span<uint8_t>(nonce, NONCE_SIZE))) {
+        std::fprintf(stderr, "[crypto::aead] nonce generation failed\n");
+        out.clear();
+        return false;
+    }
+
+    crypto_aead_lock(cipher, tag, key.data(), nonce,
+                     ad.data(), ad.size(),
+                     plaintext.data(), plaintext.size());
+    return true;
+}
+
+bool decrypt_chunk(std::span<const uint8_t, KEY_SIZE> key,
+                   std::span<const uint8_t>           chunk,
+                   std::vector<uint8_t>&              out_plaintext,
+                   std::span<const uint8_t>           ad) noexcept
+{
+    out_plaintext.clear();
+    if (chunk.size() < NONCE_SIZE + TAG_SIZE) {
+        return false;  // too small to even hold nonce + tag
+    }
+
+    const size_t   cipher_len = chunk.size() - NONCE_SIZE - TAG_SIZE;
+    const uint8_t* nonce  = chunk.data();
+    const uint8_t* cipher = chunk.data() + NONCE_SIZE;
+    const uint8_t* tag    = chunk.data() + NONCE_SIZE + cipher_len;
+
+    out_plaintext.resize(cipher_len);
+
+    // crypto_aead_unlock verifies the Poly1305 tag before writing plaintext and
+    // returns -1 on mismatch (tamper / wrong key). On failure we wipe and clear.
+    if (crypto_aead_unlock(out_plaintext.data(), tag, key.data(), nonce,
+                           ad.data(), ad.size(),
+                           cipher, cipher_len) != 0) {
+        crypto_wipe(out_plaintext.data(), out_plaintext.size());
+        out_plaintext.clear();
+        return false;
+    }
+    return true;
+}
+
+} // namespace crypto
