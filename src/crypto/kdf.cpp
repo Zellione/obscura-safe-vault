@@ -1,6 +1,5 @@
 #include "kdf.h"
 
-#include <memory>
 #include <print>
 #include <vector>
 
@@ -12,7 +11,7 @@ bool derive_key(std::span<const uint8_t>            password,
                 std::span<const uint8_t>            keyfile,
                 std::span<const uint8_t, SALT_SIZE> salt,
                 const KdfParams&                    params,
-                SecureBuffer<KEY_SIZE>&             out_key) noexcept
+                SecureBuffer<KEY_SIZE>&             out_key)
 {
     // Concatenate password ‖ keyfile into a scratch buffer that we wipe before
     // returning. (mlock here would need a runtime-sized SecureBuffer; the buffer
@@ -24,13 +23,7 @@ bool derive_key(std::span<const uint8_t>            password,
 
     // Argon2 needs a caller-allocated work area of 1024 * nb_blocks bytes.
     const size_t work_size = static_cast<size_t>(params.m_cost_kib) * 1024u;
-    auto work_area = std::unique_ptr<uint8_t[]>(new(std::nothrow) uint8_t[work_size]);
-    if (!work_area) {
-        std::println(stderr,
-            "[crypto::kdf] failed to allocate {}-byte Argon2 work area", work_size);
-        crypto_wipe(secret.data(), secret.size());
-        return false;
-    }
+    std::vector<uint8_t> work_area(work_size);
 
     const crypto_argon2_config config{
         .algorithm = CRYPTO_ARGON2_ID,
@@ -46,11 +39,9 @@ bool derive_key(std::span<const uint8_t>            password,
     };
 
     crypto_argon2(out_key.data(), static_cast<uint32_t>(crypto::KEY_SIZE),
-                  work_area.get(), config, inputs, crypto_argon2_no_extras);
+                  work_area.data(), config, inputs, crypto_argon2_no_extras);
 
-    // Wipe and free everything that touched the secret.
-    crypto_wipe(work_area.get(), work_size);
-    // std::unique_ptr destructor calls delete[] automatically
+    crypto_wipe(work_area.data(), work_size);
     crypto_wipe(secret.data(), secret.size());
     return true;
 }

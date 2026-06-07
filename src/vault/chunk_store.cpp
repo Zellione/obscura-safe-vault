@@ -1,6 +1,6 @@
 #include "chunk_store.h"
 
-#include <cstdio>
+#include <print>
 
 #include "crypto/aead.h"
 #include "file_util.h"
@@ -15,12 +15,12 @@ bool ChunkStore::append_at_end(std::span<const uint8_t> bytes, uint64_t& out_off
 {
     uint64_t end = 0;
     if (!seek_end(fp_, end)) {
-        std::fprintf(stderr, "[vault::chunk_store] seek to end failed\n");
+        std::println(stderr, "[vault::chunk_store] seek to end failed");
         return false;
     }
     if (!bytes.empty() &&
         std::fwrite(bytes.data(), 1, bytes.size(), fp_) != bytes.size()) {
-        std::fprintf(stderr, "[vault::chunk_store] write of %zu bytes failed\n", bytes.size());
+        std::println(stderr, "[vault::chunk_store] write of {} bytes failed", bytes.size());
         return false;
     }
     out_offset = end;
@@ -63,8 +63,7 @@ bool ChunkStore::read_chunk(ChunkSpan span, crypto::SecureBytes& out) const noex
     std::vector<uint8_t> disk(span.length);  // ciphertext is not secret
     if (!read_at(span.offset, disk)) return false;
 
-    const size_t plain_len = crypto::chunk_plaintext_len(disk.size());
-    if (!out.resize(plain_len)) return false;
+    if (const size_t plain_len = crypto::chunk_plaintext_len(disk.size()); !out.resize(plain_len)) return false;
     if (!crypto::decrypt_chunk_to(key_, disk, out.span())) {
         (void)out.resize(0);  // wipes the partial plaintext and empties the buffer
         return false;

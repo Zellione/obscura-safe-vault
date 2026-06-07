@@ -36,7 +36,7 @@ public:
 
 private:
     gfx::Window window_;
-    State       state_ = State::Running;
+    [[maybe_unused]] State state_ = State::Running;
 };
 
 } // namespace app

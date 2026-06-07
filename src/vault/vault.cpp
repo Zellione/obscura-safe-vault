@@ -1,8 +1,9 @@
 #include "vault.h"
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstring>
-#include <ctime>
 #include <utility>
 
 #include "crypto/aead.h"
@@ -58,14 +59,12 @@ IndexNode* child_named(IndexNode* node, std::string_view name)
 
 bool holds_images(const IndexNode& g)
 {
-    for (const auto& c : g.children) if (c.is_image()) return true;
-    return false;
+    return std::ranges::any_of(g.children, [](const auto& c) { return c.is_image(); });
 }
 
 bool holds_galleries(const IndexNode& g)
 {
-    for (const auto& c : g.children) if (c.is_gallery()) return true;
-    return false;
+    return std::ranges::any_of(g.children, [](const auto& c) { return c.is_gallery(); });
 }
 
 } // namespace
@@ -154,8 +153,7 @@ VaultResult Vault::create(const std::string&       path,
 
     // Reserve the fixed header region so the data region begins at HEADER_SIZE.
     // The real header is written by commit_index() below.
-    std::array<uint8_t, HEADER_SIZE> placeholder{};
-    if (std::fwrite(placeholder.data(), 1, placeholder.size(), fp) != placeholder.size()) {
+    if (const std::array<uint8_t, HEADER_SIZE> placeholder{}; std::fwrite(placeholder.data(), 1, placeholder.size(), fp) != placeholder.size()) {
         std::fclose(fp);
         return VaultResult::IoError;
     }
@@ -168,8 +166,7 @@ VaultResult Vault::create(const std::string&       path,
     out.unlocked_    = true;
 
     // Write the initial (empty) index + a valid header via the crash-safe path.
-    const VaultResult r = out.commit_index();
-    if (r != VaultResult::Ok) { out.reset(); return r; }
+    if (const VaultResult r = out.commit_index(); r != VaultResult::Ok) { out.reset(); return r; }
     return VaultResult::Ok;
 }
 
@@ -222,12 +219,11 @@ VaultResult Vault::unlock(std::span<const uint8_t> password,
 
     // Load the index from the active slot, falling back to the other slot if the
     // active one is unreadable (crash during a swap left it truncated/corrupt).
-    auto load_slot = [&](uint8_t idx) -> bool {
+    auto load_slot = [&](uint8_t idx) {
         const IndexSlot& s = header_.slot[idx];
         if (s.length == 0) return false;
         std::vector<uint8_t> on_disk;
-        ChunkStore store(fp_, master_key_.as_span());
-        if (!store.read_raw(s.offset, s.length, on_disk)) return false;
+        if (ChunkStore store(fp_, master_key_.as_span()); !store.read_raw(s.offset, s.length, on_disk)) return false;
         std::vector<uint8_t> blob;
         if (!crypto::open(master_key_.as_span(), s.nonce, on_disk, blob)) return false;
         IndexNode tmp;
@@ -236,8 +232,7 @@ VaultResult Vault::unlock(std::span<const uint8_t> password,
         return true;
     };
 
-    const uint8_t active = header_.active_slot == 0 ? 0 : 1;
-    if (!load_slot(active) && !load_slot(active == 0 ? 1 : 0)) {
+    if (const uint8_t active = header_.active_slot == 0 ? 0 : 1; !load_slot(active) && !load_slot(active == 0 ? 1 : 0)) {
         master_key_.wipe();
         return VaultResult::BadFormat;
     }
@@ -253,28 +248,29 @@ const IndexNode* Vault::find_gallery(std::string_view p) const { return resolve_
 
 VaultResult Vault::create_gallery(std::string_view gallery_path)
 {
-    if (!unlocked_) return VaultResult::Locked;
+    using enum VaultResult;
+    if (!unlocked_) return Locked;
 
     const auto segments = split_path(gallery_path);
-    if (segments.empty()) return VaultResult::AlreadyExists;  // root always exists
+    if (segments.empty()) return AlreadyExists;  // root always exists
 
     IndexNode* cur     = &root_;
     bool       created = false;
     for (std::string_view seg : segments) {
         IndexNode* child = child_named(cur, seg);
         if (child) {
-            if (!child->is_gallery()) return VaultResult::InvalidArg;  // name is an image
+            if (!child->is_gallery()) return InvalidArg;  // name is an image
             cur = child;
         } else {
             // A gallery holding images cannot also hold sub-galleries.
-            if (holds_images(*cur)) return VaultResult::InvalidArg;
+            if (holds_images(*cur)) return InvalidArg;
             cur->children.push_back(IndexNode::gallery(std::string(seg)));
             cur     = &cur->children.back();
             created = true;
         }
     }
 
-    if (!created) return VaultResult::AlreadyExists;
+    if (!created) return AlreadyExists;
     return commit_index();
 }
 
@@ -282,23 +278,26 @@ VaultResult Vault::add_image(std::string_view         gallery_path,
                              std::span<const uint8_t> file_data,
                              std::string_view         filename)
 {
-    if (!unlocked_)        return VaultResult::Locked;
-    if (filename.empty())  return VaultResult::InvalidArg;
+    using enum VaultResult;
+    if (!unlocked_)        return Locked;
+    if (filename.empty())  return InvalidArg;
 
     IndexNode* g = find_gallery(gallery_path);
-    if (!g) return VaultResult::NotFound;
-    if (holds_galleries(*g)) return VaultResult::InvalidArg;   // not a leaf gallery
-    if (child_named(g, filename)) return VaultResult::AlreadyExists;
+    if (!g) return NotFound;
+    if (holds_galleries(*g)) return InvalidArg;   // not a leaf gallery
+    if (child_named(g, filename)) return AlreadyExists;
 
     ChunkStore store(fp_, master_key_.as_span());
     ChunkSpan  span;
-    if (!store.append_chunk(file_data, span)) return VaultResult::IoError;
-    if (!store.sync())                         return VaultResult::IoError;
+    if (!store.append_chunk(file_data, span)) return IoError;
+    if (!store.sync())                         return IoError;
 
     IndexNode img = IndexNode::image(std::string(filename));
     img.meta.format      = ImageFormat::Unknown;  // Phase 3 fills format + dimensions
     img.meta.orig_size   = file_data.size();
-    img.meta.created_ts  = static_cast<uint64_t>(std::time(nullptr));
+    img.meta.created_ts  = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
     img.meta.data_offset = span.offset;
     img.meta.data_length = span.length;
     g->children.push_back(std::move(img));
@@ -308,22 +307,24 @@ VaultResult Vault::add_image(std::string_view         gallery_path,
 
 VaultResult Vault::read_image(const IndexNode& node, crypto::SecureBytes& out) const
 {
-    if (!unlocked_)      return VaultResult::Locked;
-    if (!node.is_image()) return VaultResult::InvalidArg;
+    using enum VaultResult;
+    if (!unlocked_)      return Locked;
+    if (!node.is_image()) return InvalidArg;
 
-    ChunkStore store(fp_, master_key_.as_span());
-    if (!store.read_chunk({node.meta.data_offset, node.meta.data_length}, out)) {
-        return VaultResult::AuthFailed;  // corrupt / tampered / unreadable chunk
+    if (ChunkStore store(fp_, master_key_.as_span());
+        !store.read_chunk({node.meta.data_offset, node.meta.data_length}, out)) {
+        return AuthFailed;  // corrupt / tampered / unreadable chunk
     }
-    return VaultResult::Ok;
+    return Ok;
 }
 
 VaultResult Vault::remove_image(std::string_view gallery_path, std::string_view filename)
 {
-    if (!unlocked_) return VaultResult::Locked;
+    using enum VaultResult;
+    if (!unlocked_) return Locked;
 
     IndexNode* g = find_gallery(gallery_path);
-    if (!g) return VaultResult::NotFound;
+    if (!g) return NotFound;
 
     for (auto it = g->children.begin(); it != g->children.end(); ++it) {
         if (it->is_image() && it->name == filename) {
@@ -331,7 +332,7 @@ VaultResult Vault::remove_image(std::string_view gallery_path, std::string_view 
             return commit_index();
         }
     }
-    return VaultResult::NotFound;
+    return NotFound;
 }
 
 std::vector<const IndexNode*> Vault::list(std::string_view gallery_path) const
@@ -357,12 +358,13 @@ bool Vault::write_header()
 
 VaultResult Vault::commit_index()
 {
+    using enum VaultResult;
     // Serialise + seal the index with a fresh random nonce.
     std::vector<uint8_t> blob;
     serialize_index(root_, blob);
 
     std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
-    if (!crypto::fill_random(nonce)) return VaultResult::CryptoError;
+    if (!crypto::fill_random(nonce)) return CryptoError;
 
     std::vector<uint8_t> sealed;
     crypto::seal(master_key_.as_span(), nonce, blob, sealed);
@@ -370,8 +372,8 @@ VaultResult Vault::commit_index()
     // Step A: append the new index blob and make it durable.
     ChunkStore store(fp_, master_key_.as_span());
     uint64_t offset = 0;
-    if (!store.append_raw(sealed, offset)) return VaultResult::IoError;
-    if (!store.sync())                     return VaultResult::IoError;
+    if (!store.append_raw(sealed, offset)) return IoError;
+    if (!store.sync())                     return IoError;
 
     const uint8_t inactive = header_.active_slot == 0 ? 1 : 0;
     header_.slot[inactive] = IndexSlot{.offset = offset,
@@ -380,14 +382,14 @@ VaultResult Vault::commit_index()
 
     // Step B: persist the new slot pointer with active_slot still pointing at the
     // old index — both slots are now valid on disk.
-    if (!write_header()) return VaultResult::IoError;
+    if (!write_header()) return IoError;
 
     // Step C: flip active_slot. This is the atomic commit point; a crash before
     // it leaves the previous index in force, after it the new one.
     header_.active_slot = inactive;
-    if (!write_header()) return VaultResult::IoError;
+    if (!write_header()) return IoError;
 
-    return VaultResult::Ok;
+    return Ok;
 }
 
 } // namespace vault

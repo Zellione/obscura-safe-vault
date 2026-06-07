@@ -46,11 +46,11 @@ bool decrypt_chunk_to(std::span<const uint8_t, KEY_SIZE> key,
     }
     const uint8_t* nonce  = chunk.data();
     const uint8_t* cipher = chunk.data() + NONCE_SIZE;
-    const uint8_t* tag    = chunk.data() + NONCE_SIZE + cipher_len;
 
     // crypto_aead_unlock verifies the Poly1305 tag before writing plaintext and
     // returns -1 on mismatch (tamper / wrong key). On failure we wipe the output.
-    if (crypto_aead_unlock(out.data(), tag, key.data(), nonce,
+    if (const uint8_t* tag = chunk.data() + NONCE_SIZE + cipher_len;
+        crypto_aead_unlock(out.data(), tag, key.data(), nonce,
                            ad.data(), ad.size(),
                            cipher, cipher_len) != 0) {
         if (!out.empty()) crypto_wipe(out.data(), out.size());
@@ -102,9 +102,9 @@ bool open_to(std::span<const uint8_t, KEY_SIZE>   key,
         return false;  // caller mis-sized the output buffer
     }
     const uint8_t* cipher = sealed.data();
-    const uint8_t* tag    = sealed.data() + cipher_len;
 
-    if (crypto_aead_unlock(out.data(), tag, key.data(), nonce.data(),
+    if (const uint8_t* tag = sealed.data() + cipher_len;
+        crypto_aead_unlock(out.data(), tag, key.data(), nonce.data(),
                            ad.data(), ad.size(),
                            cipher, cipher_len) != 0) {
         if (!out.empty()) crypto_wipe(out.data(), out.size());

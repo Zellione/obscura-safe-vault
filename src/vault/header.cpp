@@ -11,7 +11,7 @@ namespace vault {
 // after slot A's nonce (which ends at 158). We follow the documented offsets
 // verbatim so the on-disk layout matches the authoritative spec.
 namespace off {
-inline constexpr size_t MAGIC              = 0;    // 8
+inline constexpr size_t MAGIC_OFF          = 0;    // 8
 inline constexpr size_t VERSION            = 8;    // 2
 inline constexpr size_t HEADER_SIZE_F      = 10;   // 2
 inline constexpr size_t FLAGS              = 12;   // 4
@@ -37,7 +37,7 @@ void Header::serialize(std::span<uint8_t, HEADER_SIZE> out) const noexcept
 {
     std::memset(out.data(), 0, out.size());  // zero padding + reserved gaps
 
-    std::memcpy(out.data() + off::MAGIC, MAGIC, sizeof(MAGIC));
+    std::memcpy(out.data() + off::MAGIC_OFF, MAGIC.data(), MAGIC.size());
     put_u16_at(out, off::VERSION,       version);
     put_u16_at(out, off::HEADER_SIZE_F, static_cast<uint16_t>(HEADER_SIZE));
     put_u32_at(out, off::FLAGS,         flags);
@@ -66,7 +66,7 @@ void Header::serialize(std::span<uint8_t, HEADER_SIZE> out) const noexcept
 bool Header::parse(std::span<const uint8_t> raw, Header& out) noexcept
 {
     if (raw.size() < HEADER_SIZE) return false;
-    if (std::memcmp(raw.data() + off::MAGIC, MAGIC, sizeof(MAGIC)) != 0) return false;
+    if (std::memcmp(raw.data() + off::MAGIC_OFF, MAGIC.data(), MAGIC.size()) != 0) return false;
 
     out.version = get_u16_at(raw, off::VERSION);
     if (out.version != FORMAT_VERSION) return false;

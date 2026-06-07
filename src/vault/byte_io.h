@@ -45,8 +45,9 @@ inline void put_bytes_at(std::span<uint8_t> buf, size_t off,
 
 inline uint16_t get_u16_at(std::span<const uint8_t> buf, size_t off) noexcept
 {
-    return static_cast<uint16_t>(buf[off + 0]) |
-           static_cast<uint16_t>(buf[off + 1]) << 8;
+    return static_cast<uint16_t>(
+        static_cast<unsigned>(buf[off + 0]) |
+        (static_cast<unsigned>(buf[off + 1]) << 8));
 }
 
 inline uint32_t get_u32_at(std::span<const uint8_t> buf, size_t off) noexcept

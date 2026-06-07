@@ -1,5 +1,7 @@
 #include "index.h"
 
+#include <utility>
+
 #include "byte_io.h"
 
 namespace vault {
@@ -8,7 +10,7 @@ namespace {
 
 void write_node(ByteWriter& w, const IndexNode& node)
 {
-    w.u8(static_cast<uint8_t>(node.type));
+    w.u8(std::to_underlying(node.type));
 
     // name_len (u16) + name bytes (UTF-8). Names longer than 65535 bytes are
     // clamped — far beyond any real filename or gallery name.
@@ -24,7 +26,7 @@ void write_node(ByteWriter& w, const IndexNode& node)
         for (const auto& child : node.children) write_node(w, child);
     } else {
         const ImageMeta& m = node.meta;
-        w.u8(static_cast<uint8_t>(m.format));
+        w.u8(std::to_underlying(m.format));
         w.u32(m.width);
         w.u32(m.height);
         w.u64(m.orig_size);
@@ -44,8 +46,8 @@ bool read_node(ByteReader& r, IndexNode& node, uint32_t depth)
 
     const uint8_t type = r.u8();
     if (!r.ok()) return false;
-    if (type != static_cast<uint8_t>(IndexNode::Type::Gallery) &&
-        type != static_cast<uint8_t>(IndexNode::Type::Image)) {
+    if (type != std::to_underlying(IndexNode::Type::Gallery) &&
+        type != std::to_underlying(IndexNode::Type::Image)) {
         return false;  // unknown node type
     }
     node.type = static_cast<IndexNode::Type>(type);
@@ -97,8 +99,7 @@ void serialize_index(const IndexNode& root, std::vector<uint8_t>& out)
 bool deserialize_index(std::span<const uint8_t> in, IndexNode& out)
 {
     ByteReader r(in);
-    const uint8_t version = r.u8();
-    if (!r.ok() || version != INDEX_VERSION) return false;
+    if (const uint8_t version = r.u8(); !r.ok() || version != INDEX_VERSION) return false;
     if (!read_node(r, out, 0)) return false;
     // Trailing bytes after a well-formed tree indicate corruption.
     return r.remaining() == 0;

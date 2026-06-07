@@ -18,7 +18,7 @@
 
 namespace vault {
 
-inline constexpr char     MAGIC[8]       = {'O', 'S', 'V', 'A', 'U', 'L', 'T', '\0'};
+inline constexpr std::array<char, 8> MAGIC = {'O', 'S', 'V', 'A', 'U', 'L', 'T', '\0'};
 inline constexpr uint16_t FORMAT_VERSION = 1;
 
 // Fixed header length. The data region starts here. 4 KiB gives ample room for
@@ -53,7 +53,7 @@ struct Header {
     std::array<uint8_t, crypto::TAG_SIZE>   mk_tag{};
 
     // Double-buffered index pointer. slot[0] = A, slot[1] = B.
-    IndexSlot slot[2];
+    std::array<IndexSlot, 2> slot{};
     uint8_t   active_slot = 0;  // 0 = A, 1 = B
 
     // Serialise into a HEADER_SIZE buffer: magic, fields at fixed offsets, then

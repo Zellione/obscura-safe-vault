@@ -14,7 +14,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <print>
 #include <span>
 #include <utility>
@@ -32,19 +31,19 @@ namespace crypto {
 namespace detail {
 
 // Best-effort page-lock. Returns true on success. Never throws.
-inline bool mem_lock(uint8_t* p, size_t n) noexcept
+inline bool mem_lock(const uint8_t* p, size_t n) noexcept
 {
 #if defined(_WIN32)
-    return VirtualLock(p, n) != 0;
+    return VirtualLock(const_cast<uint8_t*>(p), n) != 0;
 #else
     return ::mlock(p, n) == 0;
 #endif
 }
 
-inline void mem_unlock(uint8_t* p, size_t n) noexcept
+inline void mem_unlock(const uint8_t* p, size_t n) noexcept
 {
 #if defined(_WIN32)
-    VirtualUnlock(p, n);
+    VirtualUnlock(const_cast<uint8_t*>(p), n);
 #else
     ::munlock(p, n);
 #endif
@@ -162,7 +161,7 @@ public:
         free_storage();
         if (n == 0) return true;
 
-        auto* p = static_cast<uint8_t*>(std::malloc(n));
+        auto* p = new(std::nothrow) uint8_t[n];
         if (!p) {
             std::println(stderr, "[crypto] SecureBytes alloc of {} bytes failed", n);
             return false;
@@ -195,7 +194,7 @@ private:
         if (!data_) return;
         crypto_wipe(data_, size_);
         if (locked_) detail::mem_unlock(data_, size_);
-        std::free(data_);
+        delete[] data_;
         data_   = nullptr;
         size_   = 0;
         locked_ = false;
