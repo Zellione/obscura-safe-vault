@@ -139,7 +139,8 @@ TEST(nonce_is_fresh_per_call)
     auto key = random_key();
     std::array<uint8_t, 8> plain; plain.fill(0xEE);
 
-    std::vector<uint8_t> a, b;
+    std::vector<uint8_t> a;
+    std::vector<uint8_t> b;
     REQUIRE(crypto::encrypt_chunk(key.as_span(), plain, a));
     REQUIRE(crypto::encrypt_chunk(key.as_span(), plain, b));
 

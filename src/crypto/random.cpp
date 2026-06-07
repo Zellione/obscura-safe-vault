@@ -1,6 +1,6 @@
 #include "random.h"
 
-#include <cstdio>
+#include <print>
 
 #if defined(_WIN32)
 #  include <windows.h>
@@ -10,8 +10,8 @@
 #  include <sys/random.h>   // getentropy
 #else
 #  include <cerrno>
+#  include <cstdio>
 #  include <sys/random.h>   // getrandom
-#  include <cstdio>         // /dev/urandom fallback
 #endif
 
 namespace crypto {
@@ -24,7 +24,7 @@ bool fill_random(std::span<uint8_t> out) noexcept
         nullptr, out.data(), static_cast<ULONG>(out.size()),
         BCRYPT_USE_SYSTEM_PREFERRED_RNG);
     if (s != 0) {
-        std::fprintf(stderr, "[crypto] BCryptGenRandom failed (0x%lx)\n",
+        std::println(stderr, "[crypto] BCryptGenRandom failed (0x{:lx})",
                      static_cast<unsigned long>(s));
         return false;
     }
@@ -41,7 +41,7 @@ bool fill_random(std::span<uint8_t> out) noexcept
         size_t chunk = out.size() - off;
         if (chunk > 256) chunk = 256;
         if (getentropy(out.data() + off, chunk) != 0) {
-            std::fprintf(stderr, "[crypto] getentropy failed\n");
+            std::println(stderr, "[crypto] getentropy failed");
             return false;
         }
         off += chunk;
@@ -55,13 +55,13 @@ static bool fill_from_urandom(std::span<uint8_t> out) noexcept
 {
     std::FILE* f = std::fopen("/dev/urandom", "rb");
     if (!f) {
-        std::fprintf(stderr, "[crypto] cannot open /dev/urandom\n");
+        std::println(stderr, "[crypto] cannot open /dev/urandom");
         return false;
     }
     size_t got = std::fread(out.data(), 1, out.size(), f);
     std::fclose(f);
     if (got != out.size()) {
-        std::fprintf(stderr, "[crypto] short read from /dev/urandom\n");
+        std::println(stderr, "[crypto] short read from /dev/urandom");
         return false;
     }
     return true;
@@ -76,7 +76,7 @@ bool fill_random(std::span<uint8_t> out) noexcept
             if (errno == ENOSYS) {                 // kernel too old: fall back
                 return fill_from_urandom(out.subspan(off));
             }
-            std::fprintf(stderr, "[crypto] getrandom failed (errno=%d)\n", errno);
+            std::println(stderr, "[crypto] getrandom failed (errno={})", errno);
             return false;
         } else {
             off += static_cast<size_t>(n);

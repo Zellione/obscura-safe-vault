@@ -1,7 +1,9 @@
 #include "test_framework.h"
 
+#include <print>
+
 int main()
 {
-    std::printf("Running osv crypto tests...\n\n");
+    std::println("Running osv crypto tests...\n");
     return ::testing::run_all_tests();
 }

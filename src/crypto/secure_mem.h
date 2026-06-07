@@ -14,8 +14,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
+#include <print>
 #include <span>
 #include <utility>
 
@@ -62,9 +62,9 @@ public:
     {
         if (!locked_) {
             // Non-fatal: we still wipe on destruction. Warn once per buffer.
-            std::fprintf(stderr,
-                "[crypto] mlock failed for %zu-byte secure buffer; "
-                "key material may be swappable (raise RLIMIT_MEMLOCK)\n", N);
+            std::println(stderr,
+                "[crypto] mlock failed for {}-byte secure buffer; "
+                "key material may be swappable (raise RLIMIT_MEMLOCK)", N);
         }
     }
 
@@ -163,16 +163,16 @@ public:
 
         auto* p = static_cast<uint8_t*>(std::malloc(n));
         if (!p) {
-            std::fprintf(stderr, "[crypto] SecureBytes alloc of %zu bytes failed\n", n);
+            std::println(stderr, "[crypto] SecureBytes alloc of {} bytes failed", n);
             return false;
         }
         data_   = p;
         size_   = n;
         locked_ = detail::mem_lock(data_, size_);
         if (!locked_) {
-            std::fprintf(stderr,
-                "[crypto] mlock failed for %zu-byte secure buffer; "
-                "key material may be swappable (raise RLIMIT_MEMLOCK)\n", n);
+            std::println(stderr,
+                "[crypto] mlock failed for {}-byte secure buffer; "
+                "key material may be swappable (raise RLIMIT_MEMLOCK)", n);
         }
         return true;
     }

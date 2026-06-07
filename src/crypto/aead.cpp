@@ -1,6 +1,6 @@
 #include "aead.h"
 
-#include <cstdio>
+#include <print>
 
 #include <monocypher.h>
 
@@ -20,7 +20,7 @@ bool encrypt_chunk(std::span<const uint8_t, KEY_SIZE> key,
     uint8_t* tag    = out.data() + NONCE_SIZE + plaintext.size();
 
     if (!fill_random(std::span<uint8_t>(nonce, NONCE_SIZE))) {
-        std::fprintf(stderr, "[crypto::aead] nonce generation failed\n");
+        std::println(stderr, "[crypto::aead] nonce generation failed");
         out.clear();
         return false;
     }

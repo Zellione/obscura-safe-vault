@@ -1,7 +1,7 @@
 #include "kdf.h"
 
-#include <cstdio>
 #include <memory>
+#include <print>
 #include <vector>
 
 #include <monocypher.h>
@@ -26,8 +26,8 @@ bool derive_key(std::span<const uint8_t>            password,
     const size_t work_size = static_cast<size_t>(params.m_cost_kib) * 1024u;
     auto work_area = std::unique_ptr<uint8_t[]>(new(std::nothrow) uint8_t[work_size]);
     if (!work_area) {
-        std::fprintf(stderr,
-            "[crypto::kdf] failed to allocate %zu-byte Argon2 work area\n", work_size);
+        std::println(stderr,
+            "[crypto::kdf] failed to allocate {}-byte Argon2 work area", work_size);
         crypto_wipe(secret.data(), secret.size());
         return false;
     }

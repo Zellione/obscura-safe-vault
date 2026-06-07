@@ -10,9 +10,9 @@
 // its body); CHECK records the failure and continues.
 
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <functional>
+#include <print>
 #include <source_location>
 #include <span>
 #include <string_view>
@@ -36,9 +36,8 @@ inline void check_failed(bool passed, std::string_view expr, int& failures,
                           std::source_location loc) noexcept
 {
     if (!passed) {
-        std::printf("    check failed: %.*s  (%s:%u)\n",
-                    static_cast<int>(expr.size()), expr.data(),
-                    loc.file_name(), loc.line());
+        std::println("    check failed: {}  ({}:{})",
+                    expr, loc.file_name(), loc.line());
         ++failures;
     }
 }
@@ -48,10 +47,8 @@ inline void check_eq_failed(bool passed, std::string_view lhs, std::string_view 
                              std::source_location loc) noexcept
 {
     if (!passed) {
-        std::printf("    check failed: %.*s == %.*s  (%s:%u)\n",
-                    static_cast<int>(lhs.size()), lhs.data(),
-                    static_cast<int>(rhs.size()), rhs.data(),
-                    loc.file_name(), loc.line());
+        std::println("    check failed: {} == {}  ({}:{})",
+                    lhs, rhs, loc.file_name(), loc.line());
         ++failures;
     }
 }
@@ -61,10 +58,8 @@ inline void check_bytes_failed(bool passed, std::string_view lhs, std::string_vi
                                 std::source_location loc) noexcept
 {
     if (!passed) {
-        std::printf("    check failed: bytes %.*s == %.*s  (%s:%u)\n",
-                    static_cast<int>(lhs.size()), lhs.data(),
-                    static_cast<int>(rhs.size()), rhs.data(),
-                    loc.file_name(), loc.line());
+        std::println("    check failed: bytes {} == {}  ({}:{})",
+                    lhs, rhs, loc.file_name(), loc.line());
         ++failures;
     }
 }
@@ -74,9 +69,8 @@ inline void require_failed(bool passed, std::string_view expr,
                             std::source_location loc) noexcept
 {
     if (!passed) {
-        std::printf("    REQUIRE failed: %.*s  (%s:%u)\n",
-                    static_cast<int>(expr.size()), expr.data(),
-                    loc.file_name(), loc.line());
+        std::println("    REQUIRE failed: {}  ({}:{})",
+                    expr, loc.file_name(), loc.line());
         ++failures;
     }
 }
@@ -101,15 +95,15 @@ inline int run_all_tests()
         int failures = 0;
         tc.fn(failures);
         if (failures == 0) {
-            std::printf("  PASS  %s\n", tc.name);
+            std::println("  PASS  {}", tc.name);
         } else {
-            std::printf("  FAIL  %s (%d check%s failed)\n",
+            std::println("  FAIL  {} ({} check{} failed)",
                         tc.name, failures, failures == 1 ? "" : "s");
             ++failed_tests;
         }
         total_failures += failures;
     }
-    std::printf("\n%zu tests, %d failed (%d total check failures)\n",
+    std::println("\n{} tests, {} failed ({} total check failures)",
                 registry().size(), failed_tests, total_failures);
     return failed_tests == 0 ? 0 : 1;
 }

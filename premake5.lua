@@ -21,7 +21,7 @@ workspace "ObscuraSafeVault"
 
     -- All projects share these
     language   "C++"
-    cppdialect "C++20"
+    cppdialect "C++23"
     warnings   "Extra"
 
     objdir  "build/obj/%{cfg.buildcfg}/%{prj.name}"
