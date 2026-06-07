@@ -71,16 +71,16 @@ bool fill_random(std::span<uint8_t> out) noexcept
 {
     size_t off = 0;
     while (off < out.size()) {
-        ssize_t n = getrandom(out.data() + off, out.size() - off, 0);
-        if (n < 0) {
+        if (ssize_t n = getrandom(out.data() + off, out.size() - off, 0); n < 0) {
             if (errno == EINTR) continue;          // interrupted, retry
             if (errno == ENOSYS) {                 // kernel too old: fall back
                 return fill_from_urandom(out.subspan(off));
             }
             std::fprintf(stderr, "[crypto] getrandom failed (errno=%d)\n", errno);
             return false;
+        } else {
+            off += static_cast<size_t>(n);
         }
-        off += static_cast<size_t>(n);
     }
     return true;
 }
