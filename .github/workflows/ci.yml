@@ -38,8 +38,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             cmake \
             ninja-build \
-            gcc \
-            g++ \
+            gcc-14 \
+            g++-14 \
             clang \
             libgl1-mesa-dev \
             libx11-dev \
@@ -105,6 +105,12 @@ jobs:
       # -----------------------------------------------------------------------
       # Generate + compile
       # -----------------------------------------------------------------------
+      - name: Use gcc-14 as default gcc
+        if: matrix.compiler == 'gcc'
+        run: |
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
+            --slave /usr/bin/g++ g++ /usr/bin/g++-14
+
       - name: Generate Ninja build files (${{ matrix.compiler }})
         run: bin/premake5 ninja --cc=${{ matrix.compiler }}
 
@@ -148,7 +154,12 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends cmake ninja-build g++
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++-14
+
+      - name: Use gcc-14 as default gcc
+        run: |
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
+            --slave /usr/bin/g++ g++ /usr/bin/g++-14
 
       - name: Cache premake5 binary
         uses: actions/cache@v4
@@ -178,3 +189,149 @@ jobs:
           ASAN_OPTIONS: detect_leaks=1
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: ./build/bin/Debug/osv_tests
+
+  # ===========================================================================
+  # SonarQube analysis — static analysis of src/ via the SonarSource C/C++
+  # build-wrapper, which captures the real compilation of the osv target.
+  #
+  # Requires one repository secret; without SONAR_TOKEN every step is skipped
+  # so the job stays green until analysis is configured:
+  #   SONAR_TOKEN  - project analysis token (Settings → Secrets → Actions)
+  # The host URL is hardcoded to https://sonarcloud.io in sonar-project.properties.
+  # ===========================================================================
+  sonarqube:
+    name: SonarQube analysis / Linux
+    runs-on: ubuntu-latest
+
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      BUILD_WRAPPER_OUT_DIR: bw-output
+
+    steps:
+      - name: Skip notice (no SONAR_TOKEN configured)
+        if: env.SONAR_TOKEN == ''
+        run: |
+          echo "::notice::SONAR_TOKEN is not set — skipping SonarQube analysis."
+          echo "Add the SONAR_TOKEN repository secret to enable it."
+
+      # Full history so Sonar can attribute new-code and blame accurately.
+      - name: Checkout (full history + submodules)
+        if: env.SONAR_TOKEN != ''
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        if: env.SONAR_TOKEN != ''
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build \
+            g++-14 \
+            unzip \
+            curl \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxss-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libasound2-dev \
+            libpulse-dev
+
+      - name: Cache premake5 binary
+        if: env.SONAR_TOKEN != ''
+        uses: actions/cache@v4
+        id: cache-premake5
+        with:
+          path: bin/premake5
+          key: premake5-5.0.0-beta8-linux
+
+      - name: Download premake5
+        if: env.SONAR_TOKEN != '' && steps.cache-premake5.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p bin
+          curl -fsSL \
+            "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-linux.tar.gz" \
+            -o /tmp/premake5.tar.gz
+          tar -xzf /tmp/premake5.tar.gz -C bin/
+          chmod +x bin/premake5
+
+      - name: Cache vendored SDL3 build
+        if: env.SONAR_TOKEN != ''
+        uses: actions/cache@v4
+        id: cache-sdl3
+        with:
+          path: vendor/SDL3/build
+          key: sdl3-linux-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored SDL3
+        if: env.SONAR_TOKEN != '' && steps.cache-sdl3.outputs.cache-hit != 'true'
+        run: |
+          cmake -S vendor/SDL3 -B vendor/SDL3/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSDL_STATIC=ON            \
+            -DSDL_SHARED=OFF           \
+            -DSDL_TESTS=OFF            \
+            -DSDL_EXAMPLES=OFF         \
+            -DSDL_INSTALL_TESTS=OFF    \
+            -DSDL_X11_XTEST=OFF        \
+            -DSDL_JOYSTICK=OFF         \
+            -DSDL_HAPTIC=OFF           \
+            -DSDL_SENSOR=OFF           \
+            -DSDL_CAMERA=OFF           \
+            -G "Ninja"
+          cmake --build vendor/SDL3/build --parallel "$(nproc)"
+
+      - name: Download SonarQube build-wrapper
+        if: env.SONAR_TOKEN != ''
+        run: |
+          curl -fsSLo /tmp/build-wrapper.zip \
+            "https://sonarcloud.io/static/cpp/build-wrapper-linux-x86.zip"
+          unzip -o /tmp/build-wrapper.zip -d /tmp/build-wrapper
+          echo "/tmp/build-wrapper/build-wrapper-linux-x86" >> "$GITHUB_PATH"
+
+      - name: Use gcc-14 as default gcc
+        if: env.SONAR_TOKEN != ''
+        run: |
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
+            --slave /usr/bin/g++ g++ /usr/bin/g++-14
+
+      - name: Generate Ninja build files (gcc, with coverage)
+        if: env.SONAR_TOKEN != ''
+        run: bin/premake5 --coverage ninja --cc=gcc
+
+      # Build the full osv target under the wrapper so all of src/ is analysed.
+      # Coverage flags are baked into the build, so .gcno files are emitted.
+      - name: Build under build-wrapper
+        if: env.SONAR_TOKEN != ''
+        run: |
+          build-wrapper-linux-x86-64 --out-dir "$BUILD_WRAPPER_OUT_DIR" \
+            ninja Debug_x64
+
+      # Running the tests produces .gcda files alongside the .gcno files.
+      - name: Run tests (generates .gcda coverage data)
+        if: env.SONAR_TOKEN != ''
+        run: ./build/bin/Debug/osv_tests
+
+      # Convert .gcda/.gcno pairs into .gcov files that SonarCFamily can read.
+      # --preserve-paths keeps path info so Sonar maps lines back to sources.
+      - name: Collect gcov coverage reports
+        if: env.SONAR_TOKEN != ''
+        run: |
+          find build/obj/Debug/osv_tests -name '*.gcda' \
+            | xargs gcov --preserve-paths 2>/dev/null || true
+
+      # GITHUB_TOKEN lets SonarCloud post inline PR comments and status checks.
+      - name: SonarQube scan
+        if: env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

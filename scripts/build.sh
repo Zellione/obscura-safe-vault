@@ -18,17 +18,21 @@ for arg in "$@"; do
     case "$arg" in
         --release) CONFIG="Release" ;;
         --gmake)   USE_GMAKE=true   ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
     esac
 done
 
-if [ "$USE_GMAKE" = true ]; then
-    if [ ! -f "Makefile" ]; then
+if [[ "$USE_GMAKE" = true ]]; then
+    if [[ ! -f "Makefile" ]]; then
         echo "No Makefile found — run: scripts/gen.sh --gmake"
         exit 1
     fi
     make config="${CONFIG,,}_x64" -j"$(nproc)"
 else
-    if [ ! -f "build.ninja" ]; then
+    if [[ ! -f "build.ninja" ]]; then
         echo "No build.ninja found — run: scripts/gen.sh"
         exit 1
     fi

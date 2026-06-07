@@ -24,7 +24,7 @@ git submodule update --init --recursive
 PREMAKE_BIN="$REPO_ROOT/bin/premake5"
 PREMAKE_VERSION="5.0.0-beta8"
 
-if [ ! -f "$PREMAKE_BIN" ]; then
+if [[ ! -f "$PREMAKE_BIN" ]]; then
     echo "==> Downloading premake5 $PREMAKE_VERSION..."
     mkdir -p bin
     OS="$(uname -s)"
@@ -48,7 +48,7 @@ fi
 SDL3_SRC="$REPO_ROOT/vendor/SDL3"
 SDL3_BUILD="$REPO_ROOT/vendor/SDL3/build"
 
-if [ ! -f "$SDL3_BUILD/libSDL3.a" ]; then
+if [[ ! -f "$SDL3_BUILD/libSDL3.a" ]]; then
     echo "==> Building vendored SDL3 (static)..."
     cmake -S "$SDL3_SRC" -B "$SDL3_BUILD" \
         -DCMAKE_BUILD_TYPE=Release    \

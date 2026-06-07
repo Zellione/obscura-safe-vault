@@ -1,16 +1,16 @@
 #include "app.h"
 
-#include <cstdio>
+#include <print>
 
 namespace app {
 
 bool App::init()
 {
     if (!window_.init()) {
-        std::fprintf(stderr, "[App] Window initialisation failed.\n");
+        std::println(stderr, "[App] Window initialisation failed.");
         return false;
     }
-    std::printf("[App] Initialised (Phase 0 — window only).\n");
+    std::println("[App] Initialised (Phase 0 — window only).");
     return true;
 }
 
@@ -32,7 +32,7 @@ void App::shutdown()
     // Future phases will tear down subsystems here in reverse-init order:
     //   image cache, vault (zero master key in memory), gfx, SDL.
     window_.shutdown();
-    std::printf("[App] Clean shutdown.\n");
+    std::println("[App] Clean shutdown.");
 }
 
 } // namespace app

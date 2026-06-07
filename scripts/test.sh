@@ -22,11 +22,15 @@ for arg in "$@"; do
         --release) CONFIG="Release" ;;
         --gmake)   USE_GMAKE=true   ;;
         --asan)    ASAN=true        ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
     esac
 done
 
 PREMAKE="$REPO_ROOT/bin/premake5"
-if [ ! -f "$PREMAKE" ]; then
+if [[ ! -f "$PREMAKE" ]]; then
     echo "premake5 not found at bin/premake5 — run scripts/setup.sh first"
     exit 1
 fi
@@ -35,7 +39,7 @@ fi
 PREMAKE_OPTS=()
 $ASAN && PREMAKE_OPTS+=("--asan")
 
-if [ "$USE_GMAKE" = true ]; then
+if [[ "$USE_GMAKE" = true ]]; then
     echo "==> Generating GNU Makefiles..."
     "$PREMAKE" "${PREMAKE_OPTS[@]}" gmake2
     echo "==> Building osv_tests ($CONFIG)..."
@@ -49,7 +53,7 @@ fi
 
 # --- Run --------------------------------------------------------------------
 BIN="build/bin/${CONFIG}/osv_tests"
-if [ ! -x "$BIN" ]; then
+if [[ ! -x "$BIN" ]]; then
     echo "Test binary not found at $BIN"
     exit 1
 fi

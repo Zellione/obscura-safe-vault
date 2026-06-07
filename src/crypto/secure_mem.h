@@ -14,7 +14,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
+#include <memory>
+#include <print>
 #include <span>
 #include <utility>
 
@@ -31,19 +32,19 @@ namespace crypto {
 namespace detail {
 
 // Best-effort page-lock. Returns true on success. Never throws.
-inline bool mem_lock(void* p, size_t n) noexcept
+inline bool mem_lock(const uint8_t* p, size_t n) noexcept
 {
 #if defined(_WIN32)
-    return VirtualLock(p, n) != 0;
+    return VirtualLock(const_cast<uint8_t*>(p), n) != 0;
 #else
     return ::mlock(p, n) == 0;
 #endif
 }
 
-inline void mem_unlock(void* p, size_t n) noexcept
+inline void mem_unlock(const uint8_t* p, size_t n) noexcept
 {
 #if defined(_WIN32)
-    VirtualUnlock(p, n);
+    VirtualUnlock(const_cast<uint8_t*>(p), n);
 #else
     ::munlock(p, n);
 #endif
@@ -57,13 +58,13 @@ class SecureBuffer {
 
 public:
     SecureBuffer() noexcept
+        : locked_(detail::mem_lock(bytes_.data(), bytes_.size()))
     {
-        locked_ = detail::mem_lock(bytes_.data(), bytes_.size());
         if (!locked_) {
             // Non-fatal: we still wipe on destruction. Warn once per buffer.
-            std::fprintf(stderr,
-                "[crypto] mlock failed for %zu-byte secure buffer; "
-                "key material may be swappable (raise RLIMIT_MEMLOCK)\n", N);
+            std::println(stderr,
+                "[crypto] mlock failed for {}-byte secure buffer; "
+                "key material may be swappable (raise RLIMIT_MEMLOCK)", N);
         }
     }
 
@@ -80,9 +81,10 @@ public:
     SecureBuffer& operator=(const SecureBuffer&) = delete;
 
     // Movable: copy the bytes into a freshly-locked buffer, then wipe the source.
-    SecureBuffer(SecureBuffer&& other) noexcept : SecureBuffer()
+    SecureBuffer(SecureBuffer&& other) noexcept
+        : bytes_(other.bytes_)
+        , locked_(detail::mem_lock(bytes_.data(), bytes_.size()))
     {
-        bytes_ = other.bytes_;
         crypto_wipe(other.bytes_.data(), other.bytes_.size());
     }
 
@@ -110,6 +112,95 @@ public:
 private:
     std::array<uint8_t, N> bytes_{};
     bool                   locked_ = false;
+};
+
+// SecureBytes — the runtime-sized sibling of SecureBuffer<N>.
+//
+// Decrypted image data has a length only known at read time, so it can't live in
+// a fixed-size SecureBuffer. SecureBytes owns an mlock'd heap allocation that is
+// crypto_wipe'd before it is freed, upholding invariant #1 (no plaintext to disk)
+// and invariant #2 (wipe on destruction) for variable-length secrets.
+//
+// Like SecureBuffer it is move-only: duplicating secret storage is a footgun.
+class SecureBytes {
+public:
+    SecureBytes() noexcept = default;
+
+    explicit SecureBytes(size_t n) { (void)resize(n); }
+
+    ~SecureBytes() { free_storage(); }
+
+    SecureBytes(const SecureBytes&)            = delete;
+    SecureBytes& operator=(const SecureBytes&) = delete;
+
+    SecureBytes(SecureBytes&& other) noexcept
+        : data_(std::move(other.data_)), size_(other.size_), locked_(other.locked_)
+    {
+        other.size_   = 0;
+        other.locked_ = false;
+    }
+
+    SecureBytes& operator=(SecureBytes&& other) noexcept
+    {
+        if (this != &other) {
+            free_storage();
+            data_         = std::move(other.data_);
+            size_         = other.size_;
+            locked_       = other.locked_;
+            other.size_   = 0;
+            other.locked_ = false;
+        }
+        return *this;
+    }
+
+    // Reallocate to exactly `n` bytes (wiping the old contents first). Returns
+    // false (and leaves the object empty) if allocation fails. n == 0 frees.
+    [[nodiscard]] bool resize(size_t n)
+    {
+        free_storage();
+        if (n == 0) return true;
+
+        try {
+            data_ = std::make_unique<uint8_t[]>(n);
+        } catch (const std::bad_alloc&) {
+            std::println(stderr, "[crypto] SecureBytes alloc of {} bytes failed", n);
+            return false;
+        }
+        size_   = n;
+        locked_ = detail::mem_lock(data_.get(), size_);
+        if (!locked_) {
+            std::println(stderr,
+                "[crypto] mlock failed for {}-byte secure buffer; "
+                "key material may be swappable (raise RLIMIT_MEMLOCK)", n);
+        }
+        return true;
+    }
+
+    [[nodiscard]] uint8_t*       data()       noexcept { return data_.get(); }
+    [[nodiscard]] const uint8_t* data() const noexcept { return data_.get(); }
+    [[nodiscard]] size_t         size()  const noexcept { return size_; }
+    [[nodiscard]] bool           empty() const noexcept { return size_ == 0; }
+    [[nodiscard]] bool           is_locked() const noexcept { return locked_; }
+
+    [[nodiscard]] std::span<uint8_t>       span()       noexcept { return {data_.get(), size_}; }
+    [[nodiscard]] std::span<const uint8_t> as_span() const noexcept { return {data_.get(), size_}; }
+
+    void wipe() noexcept { if (data_) crypto_wipe(data_.get(), size_); }
+
+private:
+    void free_storage() noexcept
+    {
+        if (!data_) return;
+        crypto_wipe(data_.get(), size_);
+        if (locked_) detail::mem_unlock(data_.get(), size_);
+        data_.reset();
+        size_   = 0;
+        locked_ = false;
+    }
+
+    std::unique_ptr<uint8_t[]> data_;
+    size_t                     size_   = 0;
+    bool                       locked_ = false;
 };
 
 } // namespace crypto

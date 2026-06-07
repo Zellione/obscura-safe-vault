@@ -1,13 +1,13 @@
 #include "window.h"
 
-#include <cstdio>
+#include <print>
 
 namespace gfx {
 
 bool Window::init(const WindowConfig& cfg)
 {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
-        std::fprintf(stderr, "[gfx::Window] SDL_Init failed: %s\n", SDL_GetError());
+        std::println(stderr, "[gfx::Window] SDL_Init failed: {}", SDL_GetError());
         return false;
     }
 
@@ -18,7 +18,7 @@ bool Window::init(const WindowConfig& cfg)
 
     window_ = SDL_CreateWindow(cfg.title.c_str(), cfg.width, cfg.height, flags);
     if (!window_) {
-        std::fprintf(stderr, "[gfx::Window] SDL_CreateWindow failed: %s\n", SDL_GetError());
+        std::println(stderr, "[gfx::Window] SDL_CreateWindow failed: {}", SDL_GetError());
         SDL_Quit();
         return false;
     }
@@ -26,7 +26,7 @@ bool Window::init(const WindowConfig& cfg)
     // Request GPU-accelerated renderer; fall back to software if unavailable.
     renderer_ = SDL_CreateRenderer(window_, nullptr);
     if (!renderer_) {
-        std::fprintf(stderr, "[gfx::Window] SDL_CreateRenderer failed: %s\n", SDL_GetError());
+        std::println(stderr, "[gfx::Window] SDL_CreateRenderer failed: {}", SDL_GetError());
         SDL_DestroyWindow(window_);
         window_ = nullptr;
         SDL_Quit();

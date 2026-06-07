@@ -13,8 +13,8 @@ namespace app {
 ///   Running  — Phase 0 placeholder: just clears the window
 enum class State {
     Running,   // Phase 0 placeholder
-    // TODO (Phase 5): Locked, Browsing
-    // TODO (Phase 6): Viewing
+    // Phase 5: Locked, Browsing
+    // Phase 6: Viewing
 };
 
 class App {
@@ -36,7 +36,7 @@ public:
 
 private:
     gfx::Window window_;
-    State       state_ = State::Running;
+    [[maybe_unused]] State state_ = State::Running;
 };
 
 } // namespace app

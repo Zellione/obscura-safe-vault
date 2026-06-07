@@ -1,6 +1,8 @@
 #include "test_framework.h"
 
+#include <array>
 #include <cstring>
+#include <memory>
 
 #include "crypto/secure_mem.h"
 
@@ -17,20 +19,20 @@ TEST(secure_buffer_wipes_on_destruction)
 
     // Raw storage we own; placement-new a SecureBuffer into it, then destroy it
     // explicitly and inspect the bytes.
-    alignas(Buf) unsigned char storage[sizeof(Buf)];
+    alignas(Buf) auto storage = std::array<unsigned char, sizeof(Buf)>();
 
-    Buf* buf = new (storage) Buf();
+    auto* buf = new (storage.data()) Buf();
     std::memset(buf->data(), 0xAB, N);
     // Sanity: the fill took effect.
     bool all_ab = true;
     for (size_t i = 0; i < N; ++i) all_ab &= (buf->data()[i] == 0xAB);
     CHECK_TRUE(all_ab);
 
-    buf->~Buf();  // destructor must crypto_wipe the bytes
+    std::destroy_at(buf);  // destructor must crypto_wipe the bytes
 
     bool all_zero = true;
     for (size_t i = 0; i < N; ++i) {
-        if (reinterpret_cast<unsigned char*>(storage)[i] != 0x00) all_zero = false;
+        if (storage[i] != 0x00) all_zero = false;
     }
     CHECK_TRUE(all_zero);
 }
@@ -49,9 +51,9 @@ TEST(secure_buffer_lock_state_is_queryable)
 TEST(secure_buffer_explicit_wipe)
 {
     crypto::SecureBuffer<16> buf;
-    std::memset(buf.data(), 0x7F, buf.size());
+    std::memset(buf.data(), 0x7F, decltype(buf)::size());
     buf.wipe();
     bool all_zero = true;
-    for (size_t i = 0; i < buf.size(); ++i) all_zero &= (buf.data()[i] == 0);
+    for (size_t i = 0; i < decltype(buf)::size(); ++i) all_zero &= (buf.data()[i] == 0);
     CHECK_TRUE(all_zero);
 }

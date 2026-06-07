@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <span>
 
-#include "crypto.h"        // KEY_SIZE, SALT_SIZE
+#include "crypto_sizes.h"   // KEY_SIZE, SALT_SIZE
 #include "secure_mem.h"
 
 namespace crypto {
@@ -35,6 +35,6 @@ inline constexpr KdfParams DEFAULT_KDF_PARAMS{
                               std::span<const uint8_t>            keyfile,
                               std::span<const uint8_t, SALT_SIZE> salt,
                               const KdfParams&                    params,
-                              SecureBuffer<KEY_SIZE>&             out_key) noexcept;
+                              SecureBuffer<KEY_SIZE>&             out_key);
 
 } // namespace crypto

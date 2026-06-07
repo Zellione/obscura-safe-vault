@@ -10,13 +10,18 @@ newoption {
     description = "Build with AddressSanitizer + UndefinedBehaviorSanitizer",
 }
 
+newoption {
+    trigger     = "coverage",
+    description = "Build with gcov code-coverage instrumentation (GCC/Clang)",
+}
+
 workspace "ObscuraSafeVault"
     configurations { "Debug", "Release" }
     platforms      { "x64" }
 
     -- All projects share these
     language   "C++"
-    cppdialect "C++20"
+    cppdialect "C++23"
     warnings   "Extra"
 
     objdir  "build/obj/%{cfg.buildcfg}/%{prj.name}"
@@ -39,6 +44,11 @@ workspace "ObscuraSafeVault"
     filter { "options:asan", "toolset:gcc or clang" }
         buildoptions { "-fsanitize=address,undefined", "-fno-omit-frame-pointer" }
         linkoptions  { "-fsanitize=address,undefined" }
+
+    -- Opt-in gcov coverage instrumentation. Used by the SonarCloud CI job.
+    filter { "options:coverage", "toolset:gcc or clang" }
+        buildoptions { "--coverage" }
+        linkoptions  { "--coverage" }
 
     filter {}
 
@@ -127,6 +137,8 @@ project "osv_tests"
         "tests/**.h",
         "src/crypto/*.cpp",
         "src/crypto/*.h",
+        "src/vault/*.cpp",
+        "src/vault/*.h",
     }
 
     includedirs {

@@ -10,16 +10,19 @@
 // its body); CHECK records the failure and continues.
 
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
+#include <functional>
+#include <print>
+#include <source_location>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace testing {
 
 struct TestCase {
     const char* name;
-    void (*fn)(int& failures);
+    std::function<void(int&)> fn;
 };
 
 inline std::vector<TestCase>& registry()
@@ -28,8 +31,52 @@ inline std::vector<TestCase>& registry()
     return tests;
 }
 
+// Helper functions for source_location-aware checking
+inline void check_failed(bool passed, std::string_view expr, int& failures,
+                          std::source_location loc) noexcept
+{
+    if (!passed) {
+        std::println("    check failed: {}  ({}:{})",
+                    expr, loc.file_name(), loc.line());
+        ++failures;
+    }
+}
+
+inline void check_eq_failed(bool passed, std::string_view lhs, std::string_view rhs,
+                             int& failures,
+                             std::source_location loc) noexcept
+{
+    if (!passed) {
+        std::println("    check failed: {} == {}  ({}:{})",
+                    lhs, rhs, loc.file_name(), loc.line());
+        ++failures;
+    }
+}
+
+inline void check_bytes_failed(bool passed, std::string_view lhs, std::string_view rhs,
+                                int& failures,
+                                std::source_location loc) noexcept
+{
+    if (!passed) {
+        std::println("    check failed: bytes {} == {}  ({}:{})",
+                    lhs, rhs, loc.file_name(), loc.line());
+        ++failures;
+    }
+}
+
+inline void require_failed(bool passed, std::string_view expr,
+                            int& failures,
+                            std::source_location loc) noexcept
+{
+    if (!passed) {
+        std::println("    REQUIRE failed: {}  ({}:{})",
+                    expr, loc.file_name(), loc.line());
+        ++failures;
+    }
+}
+
 struct Registrar {
-    Registrar(const char* name, void (*fn)(int&)) { registry().push_back({name, fn}); }
+    Registrar(const char* name, std::function<void(int&)> fn) { registry().push_back({name, std::move(fn)}); }
 };
 
 // Compare two byte ranges for equality.
@@ -48,15 +95,15 @@ inline int run_all_tests()
         int failures = 0;
         tc.fn(failures);
         if (failures == 0) {
-            std::printf("  PASS  %s\n", tc.name);
+            std::println("  PASS  {}", tc.name);
         } else {
-            std::printf("  FAIL  %s (%d check%s failed)\n",
+            std::println("  FAIL  {} ({} check{} failed)",
                         tc.name, failures, failures == 1 ? "" : "s");
             ++failed_tests;
         }
         total_failures += failures;
     }
-    std::printf("\n%zu tests, %d failed (%d total check failures)\n",
+    std::println("\n{} tests, {} failed ({} total check failures)",
                 registry().size(), failed_tests, total_failures);
     return failed_tests == 0 ? 0 : 1;
 }
@@ -71,41 +118,23 @@ inline int run_all_tests()
     static void test_##name([[maybe_unused]] int& _failures)
 
 // --- Assertion macros -----------------------------------------------------
-#define CHECK(cond)                                                           \
-    do {                                                                      \
-        if (!(cond)) {                                                        \
-            std::printf("    check failed: %s  (%s:%d)\n", #cond, __FILE__, __LINE__); \
-            ++_failures;                                                      \
-        }                                                                     \
-    } while (0)
+#define CHECK(cond)  \
+    ::testing::check_failed((cond), #cond, _failures, std::source_location::current())
 
-#define CHECK_TRUE(cond)  CHECK(cond)
-#define CHECK_FALSE(cond) CHECK(!(cond))
+#define CHECK_TRUE(cond)   CHECK(cond)
+#define CHECK_FALSE(cond)  ::testing::check_failed(!(cond), #cond, _failures, std::source_location::current())
 
-#define CHECK_EQ(a, b)                                                        \
-    do {                                                                      \
-        if (!((a) == (b))) {                                                  \
-            std::printf("    check failed: %s == %s  (%s:%d)\n",              \
-                        #a, #b, __FILE__, __LINE__);                          \
-            ++_failures;                                                      \
-        }                                                                     \
-    } while (0)
+#define CHECK_EQ(a, b)  \
+    ::testing::check_eq_failed((a) == (b), #a, #b, _failures, std::source_location::current())
 
-#define CHECK_BYTES_EQ(a, b)                                                  \
-    do {                                                                      \
-        if (!::testing::bytes_equal((a), (b))) {                             \
-            std::printf("    check failed: bytes %s == %s  (%s:%d)\n",        \
-                        #a, #b, __FILE__, __LINE__);                          \
-            ++_failures;                                                      \
-        }                                                                     \
-    } while (0)
+#define CHECK_BYTES_EQ(a, b)  \
+    ::testing::check_bytes_failed(::testing::bytes_equal((a), (b)), #a, #b, _failures, std::source_location::current())
 
 // REQUIRE: on failure, record and return from the test immediately.
-#define REQUIRE(cond)                                                         \
-    do {                                                                      \
-        if (!(cond)) {                                                        \
-            std::printf("    REQUIRE failed: %s  (%s:%d)\n", #cond, __FILE__, __LINE__); \
-            ++_failures;                                                      \
-            return;                                                           \
-        }                                                                     \
+#define REQUIRE(cond)                                                               \
+    do {                                                                            \
+        if (!(cond)) {                                                              \
+            ::testing::require_failed(false, #cond, _failures, std::source_location::current()); \
+            return;                                                                 \
+        }                                                                           \
     } while (0)
