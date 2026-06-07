@@ -15,7 +15,7 @@
 #include <span>
 #include <vector>
 
-#include "crypto.h"   // KEY_SIZE, NONCE_SIZE, TAG_SIZE
+#include "crypto_sizes.h"   // KEY_SIZE, NONCE_SIZE, TAG_SIZE
 
 namespace crypto {
 

@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <span>
 
-#include "crypto.h"        // KEY_SIZE, SALT_SIZE
+#include "crypto_sizes.h"   // KEY_SIZE, SALT_SIZE
 #include "secure_mem.h"
 
 namespace crypto {
