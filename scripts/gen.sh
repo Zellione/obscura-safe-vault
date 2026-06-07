@@ -11,12 +11,12 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 PREMAKE="$REPO_ROOT/bin/premake5"
-if [ ! -f "$PREMAKE" ]; then
+if [[ ! -f "$PREMAKE" ]]; then
     echo "premake5 not found at bin/premake5 — run scripts/setup.sh first"
     exit 1
 fi
 
-if [ "${1:-}" = "--gmake" ]; then
+if [[ "${1:-}" = "--gmake" ]]; then
     echo "==> Generating GNU Makefiles..."
     "$PREMAKE" gmake2
 else
