@@ -35,18 +35,18 @@ namespace detail {
 inline bool mem_lock(uint8_t* p, size_t n) noexcept
 {
 #if defined(_WIN32)
-    return VirtualLock(static_cast<LPVOID>(p), n) != 0;
+    return VirtualLock(p, n) != 0;
 #else
-    return ::mlock(static_cast<void*>(p), n) == 0;
+    return ::mlock(p, n) == 0;
 #endif
 }
 
 inline void mem_unlock(uint8_t* p, size_t n) noexcept
 {
 #if defined(_WIN32)
-    VirtualUnlock(static_cast<LPVOID>(p), n);
+    VirtualUnlock(p, n);
 #else
-    ::munlock(static_cast<void*>(p), n);
+    ::munlock(p, n);
 #endif
 }
 
@@ -81,9 +81,10 @@ public:
     SecureBuffer& operator=(const SecureBuffer&) = delete;
 
     // Movable: copy the bytes into a freshly-locked buffer, then wipe the source.
-    SecureBuffer(SecureBuffer&& other) noexcept : SecureBuffer()
+    SecureBuffer(SecureBuffer&& other) noexcept
+        : bytes_(other.bytes_)
+        , locked_(detail::mem_lock(bytes_.data(), bytes_.size()))
     {
-        bytes_ = other.bytes_;
         crypto_wipe(other.bytes_.data(), other.bytes_.size());
     }
 

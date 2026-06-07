@@ -24,12 +24,12 @@ TEST(argon2id_rfc9106_kat)
     std::array<uint8_t, 8>  secret;   secret.fill(0x03);
     std::array<uint8_t, 12> ad;       ad.fill(0x04);
 
-    static constexpr uint8_t expected[32] = {
+    static constexpr std::array<uint8_t, 32> expected = {{
         0x0d, 0x64, 0x0d, 0xf5, 0x8d, 0x78, 0x76, 0x6c,
         0x08, 0xc0, 0x37, 0xa3, 0x4a, 0x8b, 0x53, 0xc9,
         0xd0, 0x1e, 0xf0, 0x45, 0x2d, 0x75, 0xb6, 0x5e,
         0xb5, 0x25, 0x20, 0xe9, 0x6b, 0x01, 0xe6, 0x59,
-    };
+    }};
 
     const uint32_t m = 32;  // KiB == nb_blocks
     std::vector<uint8_t> work(static_cast<size_t>(m) * 1024u);
@@ -46,7 +46,7 @@ TEST(argon2id_rfc9106_kat)
     crypto_argon2(out.data(), 32, work.data(), config, inputs, extras);
 
     CHECK_BYTES_EQ(std::span<const uint8_t>(out),
-                   std::span<const uint8_t>(expected, 32));
+                   std::span<const uint8_t>(expected));
 }
 
 // derive_key() is deterministic: same inputs -> same key; different salt -> diff.
