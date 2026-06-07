@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <span>
 #include <utility>
 
@@ -110,6 +111,98 @@ public:
 private:
     std::array<uint8_t, N> bytes_{};
     bool                   locked_ = false;
+};
+
+// SecureBytes — the runtime-sized sibling of SecureBuffer<N>.
+//
+// Decrypted image data has a length only known at read time, so it can't live in
+// a fixed-size SecureBuffer. SecureBytes owns an mlock'd heap allocation that is
+// crypto_wipe'd before it is freed, upholding invariant #1 (no plaintext to disk)
+// and invariant #2 (wipe on destruction) for variable-length secrets.
+//
+// Like SecureBuffer it is move-only: duplicating secret storage is a footgun.
+class SecureBytes {
+public:
+    SecureBytes() noexcept = default;
+
+    explicit SecureBytes(size_t n) { (void)resize(n); }
+
+    ~SecureBytes() { free_storage(); }
+
+    SecureBytes(const SecureBytes&)            = delete;
+    SecureBytes& operator=(const SecureBytes&) = delete;
+
+    SecureBytes(SecureBytes&& other) noexcept
+        : data_(other.data_), size_(other.size_), locked_(other.locked_)
+    {
+        other.data_   = nullptr;
+        other.size_   = 0;
+        other.locked_ = false;
+    }
+
+    SecureBytes& operator=(SecureBytes&& other) noexcept
+    {
+        if (this != &other) {
+            free_storage();
+            data_         = other.data_;
+            size_         = other.size_;
+            locked_       = other.locked_;
+            other.data_   = nullptr;
+            other.size_   = 0;
+            other.locked_ = false;
+        }
+        return *this;
+    }
+
+    // Reallocate to exactly `n` bytes (wiping the old contents first). Returns
+    // false (and leaves the object empty) if allocation fails. n == 0 frees.
+    [[nodiscard]] bool resize(size_t n)
+    {
+        free_storage();
+        if (n == 0) return true;
+
+        auto* p = static_cast<uint8_t*>(std::malloc(n));
+        if (!p) {
+            std::fprintf(stderr, "[crypto] SecureBytes alloc of %zu bytes failed\n", n);
+            return false;
+        }
+        data_   = p;
+        size_   = n;
+        locked_ = detail::mem_lock(data_, size_);
+        if (!locked_) {
+            std::fprintf(stderr,
+                "[crypto] mlock failed for %zu-byte secure buffer; "
+                "key material may be swappable (raise RLIMIT_MEMLOCK)\n", n);
+        }
+        return true;
+    }
+
+    [[nodiscard]] uint8_t*       data()       noexcept { return data_; }
+    [[nodiscard]] const uint8_t* data() const noexcept { return data_; }
+    [[nodiscard]] size_t         size()  const noexcept { return size_; }
+    [[nodiscard]] bool           empty() const noexcept { return size_ == 0; }
+    [[nodiscard]] bool           is_locked() const noexcept { return locked_; }
+
+    [[nodiscard]] std::span<uint8_t>       span()       noexcept { return {data_, size_}; }
+    [[nodiscard]] std::span<const uint8_t> as_span() const noexcept { return {data_, size_}; }
+
+    void wipe() noexcept { if (data_) crypto_wipe(data_, size_); }
+
+private:
+    void free_storage() noexcept
+    {
+        if (!data_) return;
+        crypto_wipe(data_, size_);
+        if (locked_) detail::mem_unlock(data_, size_);
+        std::free(data_);
+        data_   = nullptr;
+        size_   = 0;
+        locked_ = false;
+    }
+
+    uint8_t* data_   = nullptr;
+    size_t   size_   = 0;
+    bool     locked_ = false;
 };
 
 } // namespace crypto

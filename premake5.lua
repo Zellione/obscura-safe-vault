@@ -127,6 +127,8 @@ project "osv_tests"
         "tests/**.h",
         "src/crypto/*.cpp",
         "src/crypto/*.h",
+        "src/vault/*.cpp",
+        "src/vault/*.h",
     }
 
     includedirs {

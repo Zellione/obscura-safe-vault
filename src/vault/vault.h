@@ -1,22 +1,126 @@
 #pragma once
 
-// Phase 2 stub: .osv vault container — header, index tree, chunk store.
-// Full implementation in Phase 2.
+// The .osv vault: the public API tying the header, chunk store, and index tree
+// into a usable encrypted gallery.
+//
+// Lifecycle / state machine:
+//   create()  -> file written, vault UNLOCKED (master key in hand)
+//   open()    -> header parsed, vault LOCKED (no master key yet)
+//   unlock()  -> KEK derived, master key unwrapped, index loaded -> UNLOCKED
+//   lock()    -> master key wiped, index dropped -> LOCKED (re-unlockable)
+//
+// Security invariants upheld here (see CLAUDE.md):
+//   * The master key lives only in an mlock'd SecureBuffer, wiped on lock/destroy.
+//   * Decrypted image data is returned in an mlock'd SecureBytes — never an
+//     unlocked heap buffer, never a temp file (invariant #1).
+//   * Index writes are crash-safe: the new index blob is appended and fsync'd,
+//     then the inactive header slot is pointed at it, then `active_slot` is
+//     flipped in a final one-byte-significant header write (double buffering).
 
 #include <cstdint>
+#include <cstdio>
+#include <span>
 #include <string>
+#include <string_view>
+#include <vector>
+
+#include "crypto/crypto.h"
+#include "crypto/kdf.h"
+#include "crypto/secure_mem.h"
+
+#include "header.h"
+#include "index.h"
 
 namespace vault {
 
-// Magic bytes at the start of every .osv file
-inline constexpr char MAGIC[8] = {'O','S','V','A','U','L','T','\0'};
-inline constexpr uint16_t FORMAT_VERSION = 1;
+enum class VaultResult {
+    Ok,
+    IoError,        // open/read/write/fsync failure
+    BadFormat,      // not a valid .osv / unparseable header or index
+    AuthFailed,     // wrong password/keyfile, or tampered/undecryptable chunk
+    Locked,         // operation needs an unlocked vault
+    NotFound,       // gallery / image path does not exist
+    AlreadyExists,  // gallery / image name already taken
+    InvalidArg,     // bad argument or leaf-invariant violation
+    CryptoError,    // RNG / KDF failure
+};
 
-// TODO (Phase 2): Header    — KDF params, master-key wrap, index slots
-// TODO (Phase 2): IndexNode — gallery tree (free-nesting; images only at leaves)
-// TODO (Phase 2): ChunkStore — append-only encrypted blobs with random nonces
-// TODO (Phase 2): Vault      — open/create, unlock(password, keyfile?),
-//                              add_image, remove_image, read_image_to_memory,
-//                              compaction, crash-safe index swap
+class Vault {
+public:
+    Vault() = default;
+    ~Vault();
+
+    Vault(const Vault&)            = delete;
+    Vault& operator=(const Vault&) = delete;
+    Vault(Vault&& other) noexcept;
+    Vault& operator=(Vault&& other) noexcept;
+
+    // Create a brand-new vault at `path` (truncating any existing file). On
+    // success `out` is returned UNLOCKED and ready to use. `keyfile` may be empty.
+    [[nodiscard]] static VaultResult create(const std::string&       path,
+                                            std::span<const uint8_t>  password,
+                                            std::span<const uint8_t>  keyfile,
+                                            const crypto::KdfParams&  params,
+                                            Vault&                    out);
+
+    // Open an existing vault and parse its header. Returns a LOCKED vault.
+    [[nodiscard]] static VaultResult open(const std::string& path, Vault& out);
+
+    // Derive the KEK, unwrap the master key, and load the index. On success the
+    // vault is UNLOCKED. Returns AuthFailed for a wrong password/keyfile.
+    [[nodiscard]] VaultResult unlock(std::span<const uint8_t> password,
+                                     std::span<const uint8_t> keyfile);
+
+    // Wipe the master key and drop the in-memory index. The file stays open and
+    // the vault can be unlocked again.
+    void lock() noexcept;
+
+    [[nodiscard]] bool is_unlocked() const noexcept { return unlocked_; }
+
+    // Create a gallery at `gallery_path` (slash-separated), creating intermediate
+    // galleries as needed. Fails with InvalidArg if any path segment is an image
+    // or would violate the leaf invariant (a gallery holding images can't gain a
+    // sub-gallery). AlreadyExists if the gallery already exists.
+    [[nodiscard]] VaultResult create_gallery(std::string_view gallery_path);
+
+    // Encrypt and store `file_data` as an image named `filename` in the leaf
+    // gallery `gallery_path` (root is ""). InvalidArg if the target holds
+    // sub-galleries. AlreadyExists if the name is taken.
+    [[nodiscard]] VaultResult add_image(std::string_view         gallery_path,
+                                        std::span<const uint8_t> file_data,
+                                        std::string_view         filename);
+
+    // Decrypt the image described by `node` into mlock'd memory. AuthFailed if the
+    // chunk fails authentication (tamper / corruption).
+    [[nodiscard]] VaultResult read_image(const IndexNode& node, crypto::SecureBytes& out) const;
+
+    // Remove an image from the index (its chunk is orphaned, reclaimed by Phase 7
+    // compaction). NotFound if the image does not exist.
+    [[nodiscard]] VaultResult remove_image(std::string_view gallery_path,
+                                           std::string_view filename);
+
+    // Immediate children of `gallery_path`. Pointers are valid until the next
+    // mutating call. Empty if the path is missing or not a gallery.
+    [[nodiscard]] std::vector<const IndexNode*> list(std::string_view gallery_path) const;
+
+private:
+    // Persist the in-memory index with the crash-safe double-buffer swap.
+    [[nodiscard]] VaultResult commit_index();
+    // Write the current header_ to offset 0 and fsync.
+    [[nodiscard]] bool write_header();
+    // Resolve a slash-separated gallery path to a node (nullptr if missing /
+    // not a gallery). Empty path resolves to the root.
+    [[nodiscard]] IndexNode*       find_gallery(std::string_view path);
+    [[nodiscard]] const IndexNode* find_gallery(std::string_view path) const;
+
+    void reset() noexcept;  // close file, wipe key, clear state
+
+    std::string                            path_;
+    std::FILE*                             fp_ = nullptr;
+    Header                                 header_;
+    bool                                   unlocked_ = false;
+    crypto::SecureBuffer<crypto::KEY_SIZE> master_key_;
+    IndexNode                              root_ = IndexNode::gallery("");
+};
 
 } // namespace vault

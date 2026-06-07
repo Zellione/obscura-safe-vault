@@ -178,3 +178,135 @@ jobs:
           ASAN_OPTIONS: detect_leaks=1
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: ./build/bin/Debug/osv_tests
+
+  # ===========================================================================
+  # SonarQube analysis — static analysis of src/ via the SonarSource C/C++
+  # build-wrapper, which captures the real compilation of the osv target.
+  #
+  # Requires two repository secrets; without SONAR_TOKEN every step is skipped
+  # so the job stays green until analysis is configured:
+  #   SONAR_TOKEN     - project analysis token
+  #   SONAR_HOST_URL  - https://sonarcloud.io or your self-hosted server URL
+  # ===========================================================================
+  sonarqube:
+    name: SonarQube analysis / Linux
+    runs-on: ubuntu-latest
+
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+      BUILD_WRAPPER_OUT_DIR: bw-output
+
+    steps:
+      - name: Skip notice (no SONAR_TOKEN configured)
+        if: env.SONAR_TOKEN == ''
+        run: |
+          echo "::notice::SONAR_TOKEN is not set — skipping SonarQube analysis."
+          echo "Add the SONAR_TOKEN and SONAR_HOST_URL repository secrets to enable it."
+
+      # Full history so Sonar can attribute new-code and blame accurately.
+      - name: Checkout (full history + submodules)
+        if: env.SONAR_TOKEN != ''
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        if: env.SONAR_TOKEN != ''
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build \
+            g++ \
+            unzip \
+            curl \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxss-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libasound2-dev \
+            libpulse-dev
+
+      - name: Cache premake5 binary
+        if: env.SONAR_TOKEN != ''
+        uses: actions/cache@v4
+        id: cache-premake5
+        with:
+          path: bin/premake5
+          key: premake5-5.0.0-beta8-linux
+
+      - name: Download premake5
+        if: env.SONAR_TOKEN != '' && steps.cache-premake5.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p bin
+          curl -fsSL \
+            "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-linux.tar.gz" \
+            -o /tmp/premake5.tar.gz
+          tar -xzf /tmp/premake5.tar.gz -C bin/
+          chmod +x bin/premake5
+
+      - name: Cache vendored SDL3 build
+        if: env.SONAR_TOKEN != ''
+        uses: actions/cache@v4
+        id: cache-sdl3
+        with:
+          path: vendor/SDL3/build
+          key: sdl3-linux-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored SDL3
+        if: env.SONAR_TOKEN != '' && steps.cache-sdl3.outputs.cache-hit != 'true'
+        run: |
+          cmake -S vendor/SDL3 -B vendor/SDL3/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSDL_STATIC=ON            \
+            -DSDL_SHARED=OFF           \
+            -DSDL_TESTS=OFF            \
+            -DSDL_EXAMPLES=OFF         \
+            -DSDL_INSTALL_TESTS=OFF    \
+            -DSDL_X11_XTEST=OFF        \
+            -DSDL_JOYSTICK=OFF         \
+            -DSDL_HAPTIC=OFF           \
+            -DSDL_SENSOR=OFF           \
+            -DSDL_CAMERA=OFF           \
+            -G "Ninja"
+          cmake --build vendor/SDL3/build --parallel "$(nproc)"
+
+      # SonarSource build-wrapper, downloaded from the configured Sonar host
+      # (works for both SonarCloud and self-hosted SonarQube).
+      - name: Download SonarQube build-wrapper
+        if: env.SONAR_TOKEN != ''
+        run: |
+          curl -fsSLo /tmp/build-wrapper.zip \
+            "${SONAR_HOST_URL%/}/static/cpp/build-wrapper-linux-x86.zip"
+          unzip -o /tmp/build-wrapper.zip -d /tmp/build-wrapper
+          echo "/tmp/build-wrapper/build-wrapper-linux-x86" >> "$GITHUB_PATH"
+
+      - name: Generate Ninja build files (gcc)
+        if: env.SONAR_TOKEN != ''
+        run: bin/premake5 ninja --cc=gcc
+
+      # Build the full osv target under the wrapper so all of src/ is analysed.
+      - name: Build under build-wrapper
+        if: env.SONAR_TOKEN != ''
+        run: |
+          build-wrapper-linux-x86-64 --out-dir "$BUILD_WRAPPER_OUT_DIR" \
+            ninja Debug_x64
+
+      - name: Run tests
+        if: env.SONAR_TOKEN != ''
+        run: ./build/bin/Debug/osv_tests
+
+      - name: SonarQube scan
+        if: env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
