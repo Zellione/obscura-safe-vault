@@ -14,6 +14,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <print>
 #include <span>
 #include <utility>
@@ -133,9 +134,8 @@ public:
     SecureBytes& operator=(const SecureBytes&) = delete;
 
     SecureBytes(SecureBytes&& other) noexcept
-        : data_(other.data_), size_(other.size_), locked_(other.locked_)
+        : data_(std::move(other.data_)), size_(other.size_), locked_(other.locked_)
     {
-        other.data_   = nullptr;
         other.size_   = 0;
         other.locked_ = false;
     }
@@ -144,10 +144,9 @@ public:
     {
         if (this != &other) {
             free_storage();
-            data_         = other.data_;
+            data_         = std::move(other.data_);
             size_         = other.size_;
             locked_       = other.locked_;
-            other.data_   = nullptr;
             other.size_   = 0;
             other.locked_ = false;
         }
@@ -161,14 +160,14 @@ public:
         free_storage();
         if (n == 0) return true;
 
-        auto* p = new(std::nothrow) uint8_t[n];
-        if (!p) {
+        try {
+            data_ = std::make_unique<uint8_t[]>(n);
+        } catch (const std::bad_alloc&) {
             std::println(stderr, "[crypto] SecureBytes alloc of {} bytes failed", n);
             return false;
         }
-        data_   = p;
         size_   = n;
-        locked_ = detail::mem_lock(data_, size_);
+        locked_ = detail::mem_lock(data_.get(), size_);
         if (!locked_) {
             std::println(stderr,
                 "[crypto] mlock failed for {}-byte secure buffer; "
@@ -177,32 +176,31 @@ public:
         return true;
     }
 
-    [[nodiscard]] uint8_t*       data()       noexcept { return data_; }
-    [[nodiscard]] const uint8_t* data() const noexcept { return data_; }
+    [[nodiscard]] uint8_t*       data()       noexcept { return data_.get(); }
+    [[nodiscard]] const uint8_t* data() const noexcept { return data_.get(); }
     [[nodiscard]] size_t         size()  const noexcept { return size_; }
     [[nodiscard]] bool           empty() const noexcept { return size_ == 0; }
     [[nodiscard]] bool           is_locked() const noexcept { return locked_; }
 
-    [[nodiscard]] std::span<uint8_t>       span()       noexcept { return {data_, size_}; }
-    [[nodiscard]] std::span<const uint8_t> as_span() const noexcept { return {data_, size_}; }
+    [[nodiscard]] std::span<uint8_t>       span()       noexcept { return {data_.get(), size_}; }
+    [[nodiscard]] std::span<const uint8_t> as_span() const noexcept { return {data_.get(), size_}; }
 
-    void wipe() noexcept { if (data_) crypto_wipe(data_, size_); }
+    void wipe() noexcept { if (data_) crypto_wipe(data_.get(), size_); }
 
 private:
     void free_storage() noexcept
     {
         if (!data_) return;
-        crypto_wipe(data_, size_);
-        if (locked_) detail::mem_unlock(data_, size_);
-        delete[] data_;
-        data_   = nullptr;
+        crypto_wipe(data_.get(), size_);
+        if (locked_) detail::mem_unlock(data_.get(), size_);
+        data_.reset();
         size_   = 0;
         locked_ = false;
     }
 
-    uint8_t* data_   = nullptr;
-    size_t   size_   = 0;
-    bool     locked_ = false;
+    std::unique_ptr<uint8_t[]> data_;
+    size_t                     size_   = 0;
+    bool                       locked_ = false;
 };
 
 } // namespace crypto
