@@ -73,7 +73,7 @@ TEST(header_writes_magic_at_offset_zero)
     vault::Header in = sample_header();
     std::array<uint8_t, vault::HEADER_SIZE> raw{};
     in.serialize(raw);
-    CHECK_EQ(std::memcmp(raw.data(), vault::MAGIC, sizeof(vault::MAGIC)), 0);
+    CHECK_EQ(std::memcmp(raw.data(), vault::MAGIC.data(), vault::MAGIC.size()), 0);
 }
 
 TEST(header_parse_rejects_bad_magic)
