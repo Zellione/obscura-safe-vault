@@ -10,6 +10,11 @@ newoption {
     description = "Build with AddressSanitizer + UndefinedBehaviorSanitizer",
 }
 
+newoption {
+    trigger     = "coverage",
+    description = "Build with gcov code-coverage instrumentation (GCC/Clang)",
+}
+
 workspace "ObscuraSafeVault"
     configurations { "Debug", "Release" }
     platforms      { "x64" }
@@ -39,6 +44,11 @@ workspace "ObscuraSafeVault"
     filter { "options:asan", "toolset:gcc or clang" }
         buildoptions { "-fsanitize=address,undefined", "-fno-omit-frame-pointer" }
         linkoptions  { "-fsanitize=address,undefined" }
+
+    -- Opt-in gcov coverage instrumentation. Used by the SonarCloud CI job.
+    filter { "options:coverage", "toolset:gcc or clang" }
+        buildoptions { "--coverage" }
+        linkoptions  { "--coverage" }
 
     filter {}
 

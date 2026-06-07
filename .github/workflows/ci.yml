@@ -289,24 +289,36 @@ jobs:
           unzip -o /tmp/build-wrapper.zip -d /tmp/build-wrapper
           echo "/tmp/build-wrapper/build-wrapper-linux-x86" >> "$GITHUB_PATH"
 
-      - name: Generate Ninja build files (gcc)
+      - name: Generate Ninja build files (gcc, with coverage)
         if: env.SONAR_TOKEN != ''
-        run: bin/premake5 ninja --cc=gcc
+        run: bin/premake5 --coverage ninja --cc=gcc
 
       # Build the full osv target under the wrapper so all of src/ is analysed.
+      # Coverage flags are baked into the build, so .gcno files are emitted.
       - name: Build under build-wrapper
         if: env.SONAR_TOKEN != ''
         run: |
           build-wrapper-linux-x86-64 --out-dir "$BUILD_WRAPPER_OUT_DIR" \
             ninja Debug_x64
 
-      - name: Run tests
+      # Running the tests produces .gcda files alongside the .gcno files.
+      - name: Run tests (generates .gcda coverage data)
         if: env.SONAR_TOKEN != ''
         run: ./build/bin/Debug/osv_tests
 
+      # Convert .gcda/.gcno pairs into .gcov files that SonarCFamily can read.
+      # --preserve-paths keeps path info so Sonar maps lines back to sources.
+      - name: Collect gcov coverage reports
+        if: env.SONAR_TOKEN != ''
+        run: |
+          find build/obj/Debug/osv_tests -name '*.gcda' \
+            | xargs gcov --preserve-paths 2>/dev/null || true
+
+      # GITHUB_TOKEN lets SonarCloud post inline PR comments and status checks.
       - name: SonarQube scan
         if: env.SONAR_TOKEN != ''
         uses: SonarSource/sonarqube-scan-action@v5
         env:
-          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
