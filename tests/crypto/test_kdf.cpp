@@ -1,7 +1,7 @@
 #include "test_framework.h"
 
 #include <array>
-#include <cstdlib>
+#include <string_view>
 #include <vector>
 
 #include <monocypher.h>
@@ -32,8 +32,7 @@ TEST(argon2id_rfc9106_kat)
     };
 
     const uint32_t m = 32;  // KiB == nb_blocks
-    void* work = std::malloc(static_cast<size_t>(m) * 1024u);
-    REQUIRE(work != nullptr);
+    std::vector<uint8_t> work(static_cast<size_t>(m) * 1024u);
 
     std::array<uint8_t, 32> out{};
     const crypto_argon2_config config{
@@ -44,8 +43,7 @@ TEST(argon2id_rfc9106_kat)
     const crypto_argon2_extras extras{
         .key = secret.data(), .ad = ad.data(), .key_size = 8, .ad_size = 12};
 
-    crypto_argon2(out.data(), 32, work, config, inputs, extras);
-    std::free(work);
+    crypto_argon2(out.data(), 32, work.data(), config, inputs, extras);
 
     CHECK_BYTES_EQ(std::span<const uint8_t>(out),
                    std::span<const uint8_t>(expected, 32));
@@ -54,9 +52,9 @@ TEST(argon2id_rfc9106_kat)
 // derive_key() is deterministic: same inputs -> same key; different salt -> diff.
 TEST(derive_key_deterministic)
 {
-    const char* pw = "correct horse battery staple";
-    std::span<const uint8_t> password(reinterpret_cast<const uint8_t*>(pw),
-                                      std::strlen(pw));
+    constexpr std::string_view pw = "correct horse battery staple";
+    std::span<const uint8_t> password(reinterpret_cast<const uint8_t*>(pw.data()),
+                                      pw.size());
     std::span<const uint8_t> no_keyfile{};
 
     std::array<uint8_t, crypto::SALT_SIZE> salt_a; salt_a.fill(0xAB);
@@ -65,7 +63,9 @@ TEST(derive_key_deterministic)
     // Keep the test fast: tiny Argon2 params (correctness, not hardness, here).
     const crypto::KdfParams params{.t_cost = 1, .m_cost_kib = 8, .parallelism = 1};
 
-    crypto::SecureBuffer<crypto::KEY_SIZE> k1, k2, k3;
+    crypto::SecureBuffer<crypto::KEY_SIZE> k1;
+    crypto::SecureBuffer<crypto::KEY_SIZE> k2;
+    crypto::SecureBuffer<crypto::KEY_SIZE> k3;
     REQUIRE(crypto::derive_key(password, no_keyfile,
                                std::span<const uint8_t, crypto::SALT_SIZE>(salt_a),
                                params, k1));
@@ -83,15 +83,16 @@ TEST(derive_key_deterministic)
 // A keyfile changes the derived key (password ‖ keyfile).
 TEST(derive_key_keyfile_changes_output)
 {
-    const char* pw = "hunter2";
-    std::span<const uint8_t> password(reinterpret_cast<const uint8_t*>(pw),
-                                      std::strlen(pw));
+    constexpr std::string_view pw = "hunter2";
+    std::span<const uint8_t> password(reinterpret_cast<const uint8_t*>(pw.data()),
+                                      pw.size());
     std::array<uint8_t, 32> keyfile; keyfile.fill(0x5A);
 
     std::array<uint8_t, crypto::SALT_SIZE> salt; salt.fill(0x11);
     const crypto::KdfParams params{.t_cost = 1, .m_cost_kib = 8, .parallelism = 1};
 
-    crypto::SecureBuffer<crypto::KEY_SIZE> with, without;
+    crypto::SecureBuffer<crypto::KEY_SIZE> with;
+    crypto::SecureBuffer<crypto::KEY_SIZE> without;
     REQUIRE(crypto::derive_key(password, keyfile,
                                std::span<const uint8_t, crypto::SALT_SIZE>(salt),
                                params, with));

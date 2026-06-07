@@ -1,7 +1,6 @@
 #include "kdf.h"
 
 #include <cstdio>
-#include <cstdlib>
 #include <vector>
 
 #include <monocypher.h>
@@ -24,13 +23,7 @@ bool derive_key(std::span<const uint8_t>            password,
 
     // Argon2 needs a caller-allocated work area of 1024 * nb_blocks bytes.
     const size_t work_size = static_cast<size_t>(params.m_cost_kib) * 1024u;
-    void* work_area = std::malloc(work_size);
-    if (!work_area) {
-        std::fprintf(stderr,
-            "[crypto::kdf] failed to allocate %zu-byte Argon2 work area\n", work_size);
-        crypto_wipe(secret.data(), secret.size());
-        return false;
-    }
+    std::vector<uint8_t> work_area(work_size);
 
     const crypto_argon2_config config{
         .algorithm = CRYPTO_ARGON2_ID,
@@ -45,12 +38,12 @@ bool derive_key(std::span<const uint8_t>            password,
         .salt_size = static_cast<uint32_t>(salt.size()),
     };
 
-    crypto_argon2(out_key.data(), static_cast<uint32_t>(out_key.size()),
-                  work_area, config, inputs, crypto_argon2_no_extras);
+    crypto_argon2(out_key.data(), static_cast<uint32_t>(crypto::KEY_SIZE),
+                  work_area.data(), config, inputs, crypto_argon2_no_extras);
 
     // Wipe and free everything that touched the secret.
-    crypto_wipe(work_area, work_size);
-    std::free(work_area);
+    crypto_wipe(work_area.data(), work_area.size());
+    // std::vector destructor handles deallocation - no free() needed
     crypto_wipe(secret.data(), secret.size());
     return true;
 }
