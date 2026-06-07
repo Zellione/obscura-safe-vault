@@ -32,21 +32,21 @@ namespace crypto {
 namespace detail {
 
 // Best-effort page-lock. Returns true on success. Never throws.
-inline bool mem_lock(void* p, size_t n) noexcept
+inline bool mem_lock(uint8_t* p, size_t n) noexcept
 {
 #if defined(_WIN32)
-    return VirtualLock(p, n) != 0;
+    return VirtualLock(static_cast<LPVOID>(p), n) != 0;
 #else
-    return ::mlock(p, n) == 0;
+    return ::mlock(static_cast<void*>(p), n) == 0;
 #endif
 }
 
-inline void mem_unlock(void* p, size_t n) noexcept
+inline void mem_unlock(uint8_t* p, size_t n) noexcept
 {
 #if defined(_WIN32)
-    VirtualUnlock(p, n);
+    VirtualUnlock(static_cast<LPVOID>(p), n);
 #else
-    ::munlock(p, n);
+    ::munlock(static_cast<void*>(p), n);
 #endif
 }
 
@@ -58,8 +58,8 @@ class SecureBuffer {
 
 public:
     SecureBuffer() noexcept
+        : locked_(detail::mem_lock(bytes_.data(), bytes_.size()))
     {
-        locked_ = detail::mem_lock(bytes_.data(), bytes_.size());
         if (!locked_) {
             // Non-fatal: we still wipe on destruction. Warn once per buffer.
             std::fprintf(stderr,
