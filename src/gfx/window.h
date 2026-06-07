@@ -19,11 +19,11 @@ public:
     Window()  = default;
     ~Window() { shutdown(); }
 
-    // Non-copyable, moveable
+    // Non-copyable, non-movable
     Window(const Window&)            = delete;
     Window& operator=(const Window&) = delete;
-    Window(Window&&)                 = default;
-    Window& operator=(Window&&)      = default;
+    Window(Window&&)                 = delete;
+    Window& operator=(Window&&)      = delete;
 
     /// Initialise SDL, create window + renderer.
     /// Returns false on failure (error logged to stderr).
