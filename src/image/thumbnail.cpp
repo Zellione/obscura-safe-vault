@@ -1,8 +1,11 @@
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 #define STB_IMAGE_RESIZE_IMPLEMENTATION
 #include <stb_image_resize2.h>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
+#pragma GCC diagnostic pop
 
 #include "image/thumbnail.h"
 
@@ -18,7 +21,8 @@ make_thumbnail(const ImageData& src, int max_side, int quality)
         return std::nullopt;
 
     // Fit within max_side preserving aspect ratio; never upscale.
-    int tw, th;
+    int tw = 0;
+    int th = 0;
     if (src.width >= src.height) {
         tw = std::min(src.width, max_side);
         th = std::max(1, static_cast<int>(static_cast<int64_t>(src.height) * tw / src.width));
@@ -36,7 +40,8 @@ make_thumbnail(const ImageData& src, int max_side, int quality)
         return std::nullopt;
 
     std::vector<uint8_t> jpeg;
-    auto write_fn = [](void* ctx, void* data, int size) {
+    // NOSONAR cpp:S5008 — void* is mandated by the stbi_write_func C callback signature.
+    auto write_fn = [](void* ctx, void* data, int size) { // NOSONAR cpp:S5008
         auto& out = *static_cast<std::vector<uint8_t>*>(ctx);
         const auto* p = static_cast<const uint8_t*>(data);
         out.insert(out.end(), p, p + size);
