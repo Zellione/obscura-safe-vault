@@ -94,6 +94,10 @@ public:
     // chunk fails authentication (tamper / corruption).
     [[nodiscard]] VaultResult read_image(const IndexNode& node, crypto::SecureBytes& out) const;
 
+    // Decrypt the thumbnail for `node` into mlock'd memory. NotFound if the node
+    // has no stored thumbnail (thumb_length == 0). AuthFailed on tamper/corruption.
+    [[nodiscard]] VaultResult read_thumbnail(const IndexNode& node, crypto::SecureBytes& out) const;
+
     // Remove an image from the index (its chunk is orphaned, reclaimed by Phase 7
     // compaction). NotFound if the image does not exist.
     [[nodiscard]] VaultResult remove_image(std::string_view gallery_path,

@@ -1,20 +1,30 @@
 #pragma once
 
-// Phase 3 stub: decode images from decrypted memory buffers + generate thumbnails.
-// Full implementation in Phase 3.
-
-#include <cstddef>
 #include <cstdint>
-#include <span>
 #include <vector>
 
 namespace image {
 
-// TODO (Phase 3): ImageFormat enum (JPEG, PNG, GIF, BMP, TGA, HDR, WebP, HEIC)
-// TODO (Phase 3): ImageData   { uint8_t* pixels, width, height, channels }
-//                              decoded via stb_image directly from encrypted buffer
-// TODO (Phase 3): decode_from_memory(std::span<const uint8_t> encrypted_buf) -> ImageData
-// TODO (Phase 3): make_thumbnail(ImageData, int max_side) -> ImageData
-//                 for pre-generating thumb entries stored encrypted in the vault
+// Format tag detected from magic bytes. Values deliberately match vault::ImageFormat
+// so that a static_cast between the two enums is always valid.
+enum class ImageFormat : uint8_t {
+    JPEG    = 0,
+    PNG     = 1,
+    GIF     = 2,
+    BMP     = 3,
+    TGA     = 4,
+    HDR     = 5,
+    Unknown = 0xFF,
+};
+
+// Decoded image: always 3-channel RGB, width*height*3 bytes, row-major.
+// std::vector is sufficient here; decoded pixels are transient (never written to
+// disk), so mlock is unnecessary for this intermediate buffer.
+struct ImageData {
+    std::vector<uint8_t> pixels;
+    int         width  = 0;
+    int         height = 0;
+    ImageFormat format = ImageFormat::Unknown;
+};
 
 } // namespace image

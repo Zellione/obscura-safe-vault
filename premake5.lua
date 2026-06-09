@@ -139,12 +139,15 @@ project "osv_tests"
         "src/crypto/*.h",
         "src/vault/*.cpp",
         "src/vault/*.h",
+        "src/image/*.cpp",
+        "src/image/*.h",
     }
 
     includedirs {
         "src",                      -- so tests can #include "crypto/aead.h"
         "tests",
         "vendor/monocypher/src",
+        "vendor/stb",
     }
 
     links { "monocypher" }
