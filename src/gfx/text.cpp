@@ -147,9 +147,9 @@ bool FontAtlas::draw_text(SDL_Renderer* r, float x, float y, std::string_view te
     for (unsigned char ch : text) {
         if (ch < FIRST_GLYPH || ch >= FIRST_GLYPH + GLYPH_COUNT) continue;
         const BakedGlyph& g = glyphs_[ch - FIRST_GLYPH];
-        if (const auto gw = static_cast<float>(g.x1 - g.x0),
-                       gh = static_cast<float>(g.y1 - g.y0);
-            gw > 0.0f && gh > 0.0f) {
+        if (g.x1 > g.x0 && g.y1 > g.y0) { // skip zero-area glyphs (e.g. space)
+            const auto gw = static_cast<float>(g.x1 - g.x0);
+            const auto gh = static_cast<float>(g.y1 - g.y0);
             const SDL_FRect src{static_cast<float>(g.x0), static_cast<float>(g.y0),
                                 gw, gh};
             const SDL_FRect dst{pen_x + g.xoff, baseline + g.yoff, gw, gh};
