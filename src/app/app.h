@@ -1,5 +1,6 @@
 #pragma once
 
+#include "gfx/text.h"
 #include "gfx/window.h"
 
 namespace app {
@@ -35,7 +36,9 @@ public:
     void shutdown();
 
 private:
-    gfx::Window window_;
+    gfx::Window    window_;
+    gfx::FontAtlas font_;
+    bool           font_ready_ = false;
     [[maybe_unused]] State state_ = State::Running;
 };
 
