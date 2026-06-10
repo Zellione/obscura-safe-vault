@@ -50,7 +50,7 @@ SDL_Texture* TextureCache::get(uint64_t key)
 
 bool TextureCache::contains(uint64_t key) const noexcept
 {
-    return map_.find(key) != map_.end();
+    return map_.contains(key);
 }
 
 SDL_Texture* TextureCache::get_or_upload(uint64_t key, const image::ImageData& img)

@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <print>
 
 namespace gfx {
 
@@ -40,17 +41,17 @@ bool FontAtlas::bake(std::span<const uint8_t> ttf, float pixel_height)
     // signalling for malformed data, so reject it up front.
     const int offset = stbtt_GetFontOffsetForIndex(ttf.data(), 0);
     if (offset < 0) return false;
-    stbtt_fontinfo info;
-    if (!stbtt_InitFont(&info, ttf.data(), offset)) return false;
+    if (stbtt_fontinfo info; !stbtt_InitFont(&info, ttf.data(), offset)) return false;
 
     // Grow the square atlas until every printable-ASCII glyph fits.
     for (int dim : {256, 512, 1024, 2048}) {
         std::vector<uint8_t>         bmp(static_cast<size_t>(dim) * dim);
         std::vector<stbtt_bakedchar> cd(GLYPH_COUNT);
-        const int rows = stbtt_BakeFontBitmap(ttf.data(), offset, pixel_height,
-                                              bmp.data(), dim, dim,
-                                              FIRST_GLYPH, GLYPH_COUNT, cd.data());
-        if (rows <= 0) continue; // didn't fit — try a larger atlas
+        if (const int rows = stbtt_BakeFontBitmap(ttf.data(), offset, pixel_height,
+                                                  bmp.data(), dim, dim,
+                                                  FIRST_GLYPH, GLYPH_COUNT, cd.data());
+            rows <= 0)
+            continue; // didn't fit — try a larger atlas
 
         aw_ = dim;
         ah_ = dim;
@@ -73,7 +74,7 @@ bool FontAtlas::bake_from_file(const char* path, float pixel_height)
     if (!path) return false;
     std::FILE* f = std::fopen(path, "rb");
     if (!f) {
-        std::fprintf(stderr, "[gfx::FontAtlas] cannot open font '%s'\n", path);
+        std::println(stderr, "[gfx::FontAtlas] cannot open font '{}'", path);
         return false;
     }
     std::fseek(f, 0, SEEK_END);
@@ -146,9 +147,9 @@ bool FontAtlas::draw_text(SDL_Renderer* r, float x, float y, std::string_view te
     for (unsigned char ch : text) {
         if (ch < FIRST_GLYPH || ch >= FIRST_GLYPH + GLYPH_COUNT) continue;
         const BakedGlyph& g = glyphs_[ch - FIRST_GLYPH];
-        const float gw = static_cast<float>(g.x1 - g.x0);
-        const float gh = static_cast<float>(g.y1 - g.y0);
-        if (gw > 0.0f && gh > 0.0f) {
+        if (const auto gw = static_cast<float>(g.x1 - g.x0),
+                       gh = static_cast<float>(g.y1 - g.y0);
+            gw > 0.0f && gh > 0.0f) {
             const SDL_FRect src{static_cast<float>(g.x0), static_cast<float>(g.y0),
                                 gw, gh};
             const SDL_FRect dst{pen_x + g.xoff, baseline + g.yoff, gw, gh};

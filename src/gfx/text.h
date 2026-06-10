@@ -17,9 +17,16 @@ inline constexpr int GLYPH_COUNT = 95;
 
 /// One baked glyph: its rectangle within the atlas bitmap plus placement metrics.
 struct BakedGlyph {
-    uint16_t x0 = 0, y0 = 0, x1 = 0, y1 = 0; // atlas pixel rect [x0,x1) x [y0,y1)
-    float    xoff = 0, yoff = 0;             // offset from pen to glyph top-left
-    float    xadvance = 0;                   // pen advance after this glyph
+    // Atlas pixel rect [x0,x1) x [y0,y1).
+    uint16_t x0 = 0;
+    uint16_t y0 = 0;
+    uint16_t x1 = 0;
+    uint16_t y1 = 0;
+    // Offset from the pen to the glyph's top-left.
+    float xoff = 0;
+    float yoff = 0;
+    // Pen advance after this glyph.
+    float xadvance = 0;
 };
 
 /// A baked glyph atlas for printable ASCII, rendered with stb_truetype.
