@@ -89,41 +89,65 @@ All vault tests pass. A vault file created by the test can be opened, unlocked, 
 
 ---
 
-## Phase 3 — Image decode & thumbnails
+## Phase 3 — Image decode & thumbnails ✅
 
 **Goal:** Decode images from decrypted memory buffers and generate encrypted thumbnails.
 
 ### Tasks
-- [ ] `src/image/image.{h,cpp}` — `ImageData{pixels, width, height, channels, format}`; owns heap pixel buffer.
-- [ ] `src/image/decode.{h,cpp}` — `decode_from_memory(std::span<const uint8_t> buf) -> ImageData` via `stb_image`. Detect format from buffer magic bytes.
-- [ ] `src/image/thumbnail.{h,cpp}` — `make_thumbnail(const ImageData&, int max_side) -> ImageData` — nearest/bilinear downscale using `stb_image_resize2`.
-- [ ] Wire thumbnail generation into `Vault::add_image`: decode → downscale (e.g., max 256 px) → re-encode to JPEG → encrypt → store as the image's thumb chunk.
-- [ ] `tests/image/`:
-  - [ ] Decode JPEG, PNG, BMP, GIF (static frame), TGA from memory buffers (ship small test fixtures).
-  - [ ] Thumbnail size is ≤ max_side in both dimensions.
-  - [ ] Decode of a malformed buffer returns an error, not a crash.
-  - [ ] Round-trip via vault: add image → read thumb chunk → decode thumb → verify dimensions.
+- [x] `src/image/image.{h,cpp}` — `ImageData{pixels, width, height, channels, format}`; owns heap pixel buffer.
+- [x] `src/image/decode.{h,cpp}` — `decode_from_memory(std::span<const uint8_t> buf) -> ImageData` via `stb_image`. Detect format from buffer magic bytes.
+- [x] `src/image/thumbnail.{h,cpp}` — `make_thumbnail(const ImageData&, int max_side) -> ImageData` — nearest/bilinear downscale using `stb_image_resize2`.
+- [x] Wire thumbnail generation into `Vault::add_image`: decode → downscale (e.g., max 256 px) → re-encode to JPEG → encrypt → store as the image's thumb chunk.
+- [x] `tests/image/`:
+  - [x] Decode JPEG, PNG, BMP, GIF (static frame), TGA from memory buffers (ship small test fixtures).
+  - [x] Thumbnail size is ≤ max_side in both dimensions.
+  - [x] Decode of a malformed buffer returns an error, not a crash.
+  - [x] Round-trip via vault: add image → read thumb chunk → decode thumb → verify dimensions.
 
 ### Acceptance criterion
 All image tests pass. A vault with 10 images (mixed JPEG/PNG) can be added and all thumbnails decoded without errors.
 
+**Status:** ✅ Merged in #4. Decode forces 3-channel RGB; `make_thumbnail` downscales with
+`stb_image_resize2` and re-encodes to JPEG; `Vault::add_image` stores the thumbnail as a
+separate encrypted chunk (best-effort: decode/thumb failure stores the image with
+`thumb_length=0` rather than failing the add). Image tests pass under `scripts/test.sh` and ASAN.
+
 ---
 
-## Phase 4 — Graphics layer
+## Phase 4 — Graphics layer ✅
 
 **Goal:** Implement the GPU texture cache and text atlas needed by the UI.
 
 ### Tasks
-- [ ] Download and commit an OFL-licensed TrueType font (e.g. [Inter Regular](https://github.com/rsms/inter)) to `assets/fonts/`.
-- [ ] `src/gfx/texture_cache.{h,cpp}` — upload `ImageData` to `SDL_Texture`; LRU eviction by GPU memory budget.
-- [ ] `src/gfx/text.{h,cpp}` — bake a glyph atlas from the bundled font using `stb_truetype`; `draw_text(renderer, x, y, text, colour)`.
-- [ ] `src/gfx/renderer.{h,cpp}` — expand stub: `draw_image`, `draw_rect`, `draw_text`, `draw_thumbnail_strip`.
-- [ ] `tests/gfx/` — headless smoke tests:
-  - [ ] Font atlas bakes without crash for all printable ASCII.
-  - [ ] Texture upload for a 1×1 pixel RGBA image succeeds.
+- [x] Download and commit an OFL-licensed TrueType font to `assets/fonts/`.
+- [x] `src/gfx/texture_cache.{h,cpp}` — upload `ImageData` to `SDL_Texture`; LRU eviction by GPU memory budget.
+- [x] `src/gfx/text.{h,cpp}` — bake a glyph atlas from the bundled font using `stb_truetype`; `draw_text(renderer, x, y, text, colour)`.
+- [x] `src/gfx/renderer.{h,cpp}` — expand stub: `draw_image`, `draw_rect`, `draw_text`, `draw_thumbnail_strip`.
+- [x] `tests/gfx/` — headless smoke tests:
+  - [x] Font atlas bakes without crash for all printable ASCII.
+  - [x] Texture upload for a 1×1 pixel RGBA image succeeds.
 
 ### Acceptance criterion
 App opens, clears, and can draw a text label and a coloured rectangle. Font atlas is visible.
+
+**Status:** ✅ 10 new gfx tests (font bake/measure/coverage/garbage-reject + draw, texture-cache
+upload/LRU-eviction/MRU-touch/clear, thumbnail-strip layout) — 88/88 total pass under
+`scripts/test.sh` and ASAN+UBSan+LSan. The gfx units are tested headlessly against an SDL
+software renderer (`SDL_CreateSoftwareRenderer`), so they need no display in CI. `App` now bakes
+the font atlas on init and draws a coloured rectangle + text label each frame.
+
+> **Notes / decisions made during implementation**
+> - **Bundled font:** the environment had no network access, so the bundled OFL/permissive font is
+>   **Noto Sans Regular** (`assets/fonts/NotoSans-Regular.ttf`, license in `NotoSans-LICENSE.txt`)
+>   rather than Inter. Swappable via the `OSV_DEFAULT_FONT` compile define.
+> - `FontAtlas::bake()` is pure CPU (8-bit alpha coverage bitmap + per-glyph metrics) and grows a
+>   square atlas 256→2048 until all printable ASCII (32–126) fits; the `SDL_Texture` is created
+>   lazily on the first `draw_text()`. `measure()` rounds each glyph advance independently so it is
+>   exactly additive.
+> - `TextureCache` keys on a caller-supplied `uint64_t`, accounts each entry as `w*h*4` GPU bytes,
+>   and evicts least-recently-used entries past the budget (default 256 MiB).
+> - premake: SDL3 linkage was factored into a shared `link_sdl3()` helper; `osv_tests` now compiles
+>   the headless-testable gfx units (`texture_cache`, `text`, `renderer`) and links SDL3.
 
 ---
 

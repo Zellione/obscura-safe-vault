@@ -15,6 +15,33 @@ newoption {
     description = "Build with gcov code-coverage instrumentation (GCC/Clang)",
 }
 
+-- ---------------------------------------------------------------------------
+-- SDL3 linkage helper — shared by the app and the test runner.
+-- Uses the vendored cmake build if scripts/setup.sh has produced it, otherwise
+-- falls back to a system SDL3 install.
+-- ---------------------------------------------------------------------------
+local function link_sdl3()
+    local vendored_sdl3_lib = path.join(os.getcwd(), "vendor/SDL3/build/libSDL3.a")
+    if os.isfile(vendored_sdl3_lib) then
+        includedirs { "vendor/SDL3/include" }
+        libdirs     { "vendor/SDL3/build" }
+        links       { "SDL3" }
+        defines     { "OSV_VENDORED_SDL3" }
+    else
+        filter "system:linux"
+            includedirs { "/usr/include/SDL3" }
+            links       { "SDL3" }
+        filter "system:windows"
+            includedirs { "C:/SDL3/include" }
+            libdirs     { "C:/SDL3/lib/x64" }
+            links       { "SDL3" }
+        filter "system:macosx"
+            includedirs { "/usr/local/include/SDL3" }
+            links       { "SDL3" }
+        filter {}
+    end
+end
+
 workspace "ObscuraSafeVault"
     configurations { "Debug", "Release" }
     platforms      { "x64" }
@@ -23,6 +50,9 @@ workspace "ObscuraSafeVault"
     language   "C++"
     cppdialect "C++23"
     warnings   "Extra"
+
+    -- Path (relative to the repo root / process cwd) of the bundled UI font.
+    defines { 'OSV_DEFAULT_FONT="assets/fonts/NotoSans-Regular.ttf"' }
 
     objdir  "build/obj/%{cfg.buildcfg}/%{prj.name}"
     targetdir "build/bin/%{cfg.buildcfg}"
@@ -88,34 +118,8 @@ project "osv"
 
     links { "monocypher" }
 
-    -- -----------------------------------------------------------------------
-    -- SDL3: use vendored cmake build if setup.sh has been run,
-    --       otherwise fall back to system SDL3 (pkg-config / header path).
-    -- -----------------------------------------------------------------------
-    local vendored_sdl3_lib = path.join(os.getcwd(), "vendor/SDL3/build/libSDL3.a")
-
-    if os.isfile(vendored_sdl3_lib) then
-        -- Hermetic vendored build (run scripts/setup.sh first)
-        includedirs { "vendor/SDL3/include" }
-        libdirs     { "vendor/SDL3/build" }
-        links       { "SDL3" }
-        defines     { "OSV_VENDORED_SDL3" }
-    else
-        -- System SDL3 (development shortcut; requires sdl3 system package)
-        -- On Arch: sudo pacman -S sdl3
-        filter "system:linux"
-            includedirs { "/usr/include/SDL3" }
-            links       { "SDL3" }
-        filter "system:windows"
-            -- Point at system or manually placed SDL3 (update path as needed)
-            includedirs { "C:/SDL3/include" }
-            libdirs     { "C:/SDL3/lib/x64" }
-            links       { "SDL3" }
-        filter "system:macosx"
-            includedirs { "/usr/local/include/SDL3" }
-            links       { "SDL3" }
-        filter {}
-    end
+    -- SDL3: vendored cmake build if present, else system SDL3.
+    link_sdl3()
 
     -- Platform link extras
     filter "system:linux"
@@ -141,6 +145,12 @@ project "osv_tests"
         "src/vault/*.h",
         "src/image/*.cpp",
         "src/image/*.h",
+        -- gfx: only the headless-testable units (NOT window.cpp, which needs a
+        -- real display). texture_cache + text + renderer run against an SDL
+        -- software renderer in tests/gfx/.
+        "src/gfx/texture_cache.cpp",
+        "src/gfx/text.cpp",
+        "src/gfx/renderer.cpp",
     }
 
     includedirs {
@@ -152,8 +162,11 @@ project "osv_tests"
 
     links { "monocypher" }
 
+    -- gfx units pull in SDL3 (software renderer is created headlessly in tests).
+    link_sdl3()
+
     filter "system:linux"
-        links { "pthread", "m" }
+        links { "dl", "pthread", "m" }
     filter "system:windows"
-        links { "bcrypt" }
+        links { "bcrypt", "winmm", "imm32", "version", "setupapi" }
     filter {}
