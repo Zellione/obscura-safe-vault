@@ -1,13 +1,20 @@
 #pragma once
 
-// Phase 5–6 stub: keyboard / mouse input abstraction for gallery and viewer navigation.
-// Full implementation in Phase 5.
+#include <SDL3/SDL.h>
 
 namespace ui {
 
-// TODO (Phase 5): InputAction enum (NavigateLeft, NavigateRight, NavigateUp,
-//                                   ZoomIn, ZoomOut, Select, Back, Quit, …)
-// TODO (Phase 5): InputState  — current keyboard/mouse state, mapping SDL events
-//                               → InputActions consumed by UI screens
+enum class InputAction {
+    None,
+    NavLeft, NavRight, NavUp, NavDown,
+    Select,      // Enter / KP-Enter / Space
+    Back,        // Backspace / Escape
+    Import,      // I
+    NewGallery,  // N
+    // Phase 6: ZoomIn, ZoomOut, ...
+};
+
+// Pure mapping of a key (modifiers reserved for later phases) to a UI action.
+[[nodiscard]] InputAction map_key(SDL_Keycode key, SDL_Keymod mods) noexcept;
 
 } // namespace ui

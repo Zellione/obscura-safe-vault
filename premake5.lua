@@ -152,6 +152,7 @@ project "osv_tests"
         "src/gfx/text.cpp",
         "src/gfx/renderer.cpp",
         "src/platform/paths.cpp",
+        "src/ui/input.cpp",
     }
 
     includedirs {
