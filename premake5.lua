@@ -154,6 +154,7 @@ project "osv_tests"
         "src/platform/paths.cpp",
         "src/ui/input.cpp",
         "src/ui/nav_model.cpp",
+        "src/ui/secure_text_field.cpp",
     }
 
     includedirs {
