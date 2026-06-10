@@ -13,7 +13,7 @@ struct WindowConfig {
 };
 
 /// Owns the SDL_Window + SDL_Renderer pair.
-/// Lifetime: init() → { process_events() / begin_frame() / end_frame() } → shutdown().
+/// Lifetime: init() → { poll_event() / begin_frame() / end_frame() } → shutdown().
 class Window {
 public:
     Window()  = default;
@@ -32,9 +32,9 @@ public:
     /// Destroy renderer, window, and SDL subsystems.
     void shutdown();
 
-    /// Poll all pending events. Sets quit=true when the window is closed or
-    /// Escape is pressed. Returns false only if SDL itself has a fatal error.
-    bool process_events(bool& quit);
+    /// Poll one pending event into `out`. Returns false when the queue is empty.
+    /// (App decides what quit/close means — the window no longer self-quits.)
+    [[nodiscard]] bool poll_event(SDL_Event& out);
 
     /// Clear the renderer to the given RGBA colour (0 = opaque black).
     void begin_frame(uint8_t r = 18, uint8_t g = 18, uint8_t b = 24, uint8_t a = 255);

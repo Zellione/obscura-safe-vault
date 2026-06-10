@@ -50,28 +50,9 @@ void Window::shutdown()
     SDL_Quit();
 }
 
-bool Window::process_events(bool& quit)
+bool Window::poll_event(SDL_Event& out)
 {
-    SDL_Event e;
-    while (SDL_PollEvent(&e)) {
-        switch (e.type) {
-        case SDL_EVENT_QUIT:
-            quit = true;
-            break;
-        case SDL_EVENT_KEY_DOWN:
-            if (e.key.key == SDLK_ESCAPE) {
-                quit = true;
-            }
-            break;
-        case SDL_EVENT_WINDOW_RESIZED:
-            width_  = e.window.data1;
-            height_ = e.window.data2;
-            break;
-        default:
-            break;
-        }
-    }
-    return true;
+    return SDL_PollEvent(&out);
 }
 
 void Window::begin_frame(uint8_t r, uint8_t g, uint8_t b, uint8_t a)
