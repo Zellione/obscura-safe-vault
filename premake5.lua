@@ -151,6 +151,7 @@ project "osv_tests"
         "src/gfx/texture_cache.cpp",
         "src/gfx/text.cpp",
         "src/gfx/renderer.cpp",
+        "src/platform/paths.cpp",
     }
 
     includedirs {

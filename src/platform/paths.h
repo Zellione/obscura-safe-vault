@@ -1,18 +1,20 @@
 #pragma once
 
-// Phase 5 stub: platform-specific paths (config dir, default vault location)
-// and SDL3 native file-dialog wrapper for import.
-// Full implementation in Phase 5.
-
+#include <cstdint>
 #include <filesystem>
+#include <optional>
+#include <vector>
 
 namespace platform {
 
-// TODO (Phase 5): config_dir()  — ~/.config/obscura-safe-vault/ (Linux),
-//                                  %APPDATA%/ObscuraSafeVault/ (Windows),
-//                                  ~/Library/Application Support/ (macOS)
-// TODO (Phase 5): default_vault_path() — default .osv file location
-// TODO (Phase 5): show_open_file_dialog(title, filter) -> std::filesystem::path
-//                  wraps SDL_ShowOpenFileDialog (SDL3 native, no extra dep)
+// Per-user data directory (created if needed). Empty path on failure.
+[[nodiscard]] std::filesystem::path config_dir();
+
+// config_dir() / "vault.osv"  (just the filename if config_dir() is empty).
+[[nodiscard]] std::filesystem::path default_vault_path();
+
+// Read an entire file into a byte vector. nullopt if it cannot be opened/read.
+[[nodiscard]] std::optional<std::vector<uint8_t>>
+read_file(const std::filesystem::path& path);
 
 } // namespace platform
