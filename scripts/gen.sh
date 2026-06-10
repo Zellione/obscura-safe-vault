@@ -22,4 +22,6 @@ if [[ "${1:-}" = "--gmake" ]]; then
 else
     echo "==> Generating Ninja build files..."
     "$PREMAKE" ninja
+    # Repair header-dependency tracking the premake beta8 ninja exporter omits.
+    "$REPO_ROOT/scripts/fix_ninja_deps.sh"
 fi

@@ -47,6 +47,8 @@ if [[ "$USE_GMAKE" = true ]]; then
 else
     echo "==> Generating Ninja build files..."
     "$PREMAKE" "${PREMAKE_OPTS[@]}" ninja
+    # Repair header-dependency tracking the premake beta8 ninja exporter omits.
+    "$REPO_ROOT/scripts/fix_ninja_deps.sh"
     echo "==> Building osv_tests ($CONFIG)..."
     ninja "osv_tests_${CONFIG}_x64"
 fi
