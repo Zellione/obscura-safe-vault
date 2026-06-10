@@ -38,3 +38,20 @@ TEST(stf_capacity_clamp)
     CHECK_EQ(f.length(), size_t{4});
     CHECK_BYTES_EQ(f.bytes(), bytes_of("abcd"));
 }
+
+// Security invariant #2: clear() must wipe the typed bytes, not just reset the
+// length. clear() wipes in place (no reallocation), so the pointer obtained
+// before clear() still addresses the same buffer and must read back as zero.
+TEST(stf_memory_wiped_after_clear)
+{
+    ui::SecureTextField f(16);
+    f.push_utf8("secret");
+    const uint8_t* raw = f.bytes().data();   // start of the mlock'd buffer
+    const size_t   n   = f.length();
+    REQUIRE(raw != nullptr);
+    REQUIRE(n == size_t{6});
+    f.clear();
+    bool all_zero = true;
+    for (size_t i = 0; i < n; ++i) all_zero = all_zero && (raw[i] == 0);
+    CHECK(all_zero);
+}
