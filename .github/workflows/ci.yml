@@ -136,13 +136,14 @@ jobs:
           retention-days: 7
 
   # ===========================================================================
-  # Sanitiser gate — builds and runs the crypto tests under ASAN + UBSan + LSan.
-  # Enforces the Phase 1 acceptance criterion ("no leaks; mlock handled
-  # gracefully") on every PR. Only the osv_tests target is built (no SDL3 / no
-  # vault deps), so this job is fast and needs no SDL3 system packages.
+  # Sanitiser gate — builds and runs the full test suite under ASAN + UBSan +
+  # LSan. Enforces the Phase 1 acceptance criterion ("no leaks; mlock handled
+  # gracefully") on every PR. As of Phase 4 the osv_tests target links the
+  # headless-testable gfx units, so this job provisions the vendored SDL3 build
+  # (shared cache with the build-and-test job).
   # ===========================================================================
-  crypto-tests-asan:
-    name: ASAN+UBSan / crypto tests / Linux
+  tests-asan:
+    name: ASAN+UBSan / tests / Linux
     runs-on: ubuntu-latest
 
     steps:
@@ -154,7 +155,22 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends cmake ninja-build g++-14
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build \
+            g++-14 \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxss-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libasound2-dev \
+            libpulse-dev
 
       - name: Use gcc-14 as default gcc
         run: |
@@ -178,14 +194,42 @@ jobs:
           tar -xzf /tmp/premake5.tar.gz -C bin/
           chmod +x bin/premake5
 
+      - name: Cache vendored SDL3 build
+        uses: actions/cache@v4
+        id: cache-sdl3
+        with:
+          path: vendor/SDL3/build
+          key: sdl3-linux-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored SDL3
+        if: steps.cache-sdl3.outputs.cache-hit != 'true'
+        run: |
+          cmake -S vendor/SDL3 -B vendor/SDL3/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSDL_STATIC=ON            \
+            -DSDL_SHARED=OFF           \
+            -DSDL_TESTS=OFF            \
+            -DSDL_EXAMPLES=OFF         \
+            -DSDL_INSTALL_TESTS=OFF    \
+            -DSDL_X11_XTEST=OFF        \
+            -DSDL_JOYSTICK=OFF         \
+            -DSDL_HAPTIC=OFF           \
+            -DSDL_SENSOR=OFF           \
+            -DSDL_CAMERA=OFF           \
+            -G "Ninja"
+          cmake --build vendor/SDL3/build --parallel "$(nproc)"
+
       - name: Generate Ninja build files (--asan)
         run: bin/premake5 --asan ninja --cc=gcc
 
       - name: Build osv_tests (ASAN)
         run: ninja osv_tests_Debug_x64
 
-      - name: Run crypto tests under ASAN + UBSan + LSan
+      - name: Run tests under ASAN + UBSan + LSan
         env:
+          # gfx tests use SDL's software renderer; force a headless video driver
+          # so SDL never tries to open a display on the CI runner.
+          SDL_VIDEODRIVER: dummy
           ASAN_OPTIONS: detect_leaks=1
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: ./build/bin/Debug/osv_tests
