@@ -156,6 +156,7 @@ project "osv_tests"
         "src/ui/nav_model.cpp",
         "src/ui/secure_text_field.cpp",
         "src/ui/unlock_logic.cpp",
+        "src/ui/widgets.cpp",
     }
 
     includedirs {
