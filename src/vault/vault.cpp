@@ -13,6 +13,9 @@
 #include "chunk_store.h"
 #include "file_util.h"
 
+#include "image/decode.h"
+#include "image/thumbnail.h"
+
 namespace vault {
 
 namespace {
@@ -290,16 +293,38 @@ VaultResult Vault::add_image(std::string_view         gallery_path,
     ChunkStore store(fp_, master_key_.as_span());
     ChunkSpan  span;
     if (!store.append_chunk(file_data, span)) return IoError;
-    if (!store.sync())                         return IoError;
+
+    // Phase 3: detect format/dims and generate an encrypted thumbnail chunk.
+    // Soft failure: if decode or thumbnail generation fails, we still store the image
+    // with format=Unknown and thumb_length=0 (same as Phase 2 behaviour).
+    ImageFormat detected_fmt    = ImageFormat::Unknown;
+    uint32_t    detected_width  = 0;
+    uint32_t    detected_height = 0;
+    ChunkSpan   thumb_span{};
+
+    if (auto decoded = image::decode_from_memory(file_data)) {
+        detected_fmt    = static_cast<ImageFormat>(decoded->format);
+        detected_width  = static_cast<uint32_t>(decoded->width);
+        detected_height = static_cast<uint32_t>(decoded->height);
+
+        if (auto thumb_jpeg = image::make_thumbnail(*decoded, 256, 85))
+            (void)store.append_chunk(*thumb_jpeg, thumb_span);  // best-effort
+    }
+
+    if (!store.sync()) return IoError;
 
     IndexNode img = IndexNode::image(std::string(filename));
-    img.meta.format      = ImageFormat::Unknown;  // Phase 3 fills format + dimensions
-    img.meta.orig_size   = file_data.size();
-    img.meta.created_ts  = static_cast<uint64_t>(
+    img.meta.format       = detected_fmt;
+    img.meta.width        = detected_width;
+    img.meta.height       = detected_height;
+    img.meta.orig_size    = file_data.size();
+    img.meta.created_ts   = static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()).count());
-    img.meta.data_offset = span.offset;
-    img.meta.data_length = span.length;
+    img.meta.data_offset  = span.offset;
+    img.meta.data_length  = span.length;
+    img.meta.thumb_offset = thumb_span.offset;
+    img.meta.thumb_length = thumb_span.length;
     g->children.push_back(std::move(img));
 
     return commit_index();
@@ -308,12 +333,26 @@ VaultResult Vault::add_image(std::string_view         gallery_path,
 VaultResult Vault::read_image(const IndexNode& node, crypto::SecureBytes& out) const
 {
     using enum VaultResult;
-    if (!unlocked_)      return Locked;
+    if (!unlocked_)       return Locked;
     if (!node.is_image()) return InvalidArg;
 
     if (ChunkStore store(fp_, master_key_.as_span());
         !store.read_chunk({node.meta.data_offset, node.meta.data_length}, out)) {
         return AuthFailed;  // corrupt / tampered / unreadable chunk
+    }
+    return Ok;
+}
+
+VaultResult Vault::read_thumbnail(const IndexNode& node, crypto::SecureBytes& out) const
+{
+    using enum VaultResult;
+    if (!unlocked_)              return Locked;
+    if (!node.is_image())        return InvalidArg;
+    if (node.meta.thumb_length == 0) return NotFound;
+
+    if (ChunkStore store(fp_, master_key_.as_span());
+        !store.read_chunk({node.meta.thumb_offset, node.meta.thumb_length}, out)) {
+        return AuthFailed;
     }
     return Ok;
 }
