@@ -24,4 +24,9 @@ else
     "$PREMAKE" ninja
     # Repair header-dependency tracking the premake beta8 ninja exporter omits.
     "$REPO_ROOT/scripts/fix_ninja_deps.sh"
+
+    # Emit a compilation database for clangd (code intelligence / LSP).
+    # Generated + machine-specific (absolute paths) → gitignored, not committed.
+    echo "==> Writing compile_commands.json..."
+    ninja -t compdb > "$REPO_ROOT/compile_commands.json"
 fi
