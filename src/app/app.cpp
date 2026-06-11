@@ -5,6 +5,7 @@
 #include "gfx/renderer.h"
 #include "platform/paths.h"
 #include "ui/gallery_grid.h"
+#include "ui/image_viewer.h"
 #include "ui/unlock_screen.h"
 
 #ifndef OSV_DEFAULT_FONT
@@ -39,10 +40,19 @@ void App::to_unlock()
     screen_->on_enter();
 }
 
-void App::to_gallery()
+void App::to_gallery(const std::string& path, int selected)
 {
     state_  = State::Browsing;
-    screen_ = std::make_unique<ui::GalleryGrid>(window_, font_, vault_, *cache_, dialog_);
+    screen_ = std::make_unique<ui::GalleryGrid>(window_, font_, vault_, *cache_, dialog_,
+                                                path, selected);
+    screen_->on_enter();
+}
+
+void App::to_viewer(const std::string& gallery_path, int index)
+{
+    state_  = State::Viewing;
+    screen_ = std::make_unique<ui::ImageViewer>(window_, font_, vault_, *cache_,
+                                                gallery_path, index);
     screen_->on_enter();
 }
 
@@ -75,8 +85,10 @@ void App::run()
 
         if (screen_) {
             using enum ui::NavKind;
-            switch (screen_->take_nav().kind) {
-                case ToGallery: screen_->on_exit(); to_gallery(); break;
+            const ui::Nav nav = screen_->take_nav();
+            switch (nav.kind) {
+                case ToGallery: screen_->on_exit(); to_gallery(nav.path, nav.index); break;
+                case ToViewer:  screen_->on_exit(); to_viewer(nav.path, nav.index);  break;
                 case ToUnlock:  screen_->on_exit(); to_unlock();  break;
                 case Quit:      running = false; break;
                 case None:      break;

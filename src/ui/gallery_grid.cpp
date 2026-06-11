@@ -28,14 +28,19 @@ GridSpec grid_spec(int cols) noexcept { return {cols, CELL, GAP, OX, OY}; }
 }
 
 GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                         gfx::TextureCache& cache, platform::FileDialog& dlg)
-    : win_(win), font_(font), vault_(vault), cache_(cache), dlg_(dlg)
+                         gfx::TextureCache& cache, platform::FileDialog& dlg,
+                         std::string initial_path, int initial_sel)
+    : win_(win), font_(font), vault_(vault), cache_(cache), dlg_(dlg),
+      initial_path_(std::move(initial_path)), initial_sel_(initial_sel)
 {
 }
 
 void GalleryGrid::on_enter()
 {
+    // Restore the saved location (e.g. when returning from the image viewer).
+    for (const auto& seg : split_path(initial_path_)) nav_.enter(seg);
     refresh();
+    nav_.select(initial_sel_);
     // Seed cols_ from the current window size so keyboard NavUp/Down and mouse
     // hit-testing work on the first frame's events (render() recomputes it each
     // frame to track window resizes).
@@ -66,7 +71,7 @@ void GalleryGrid::open_selected()
     if (s < 0 || s >= static_cast<int>(children_.size())) return;
     const vault::IndexNode* n = children_[s];
     if (n->is_gallery()) { nav_.enter(n->name); refresh(); }
-    // Image selection opens the viewer in Phase 6; no-op here.
+    else                 request(NavKind::ToViewer, nav_.path(), s);
 }
 
 void GalleryGrid::go_up()
@@ -187,7 +192,7 @@ void GalleryGrid::handle_event(const SDL_Event& e)
                                          grid_spec(cols_));
                 idx >= 0) {
                 nav_.select(idx);
-                if (children_[idx]->is_gallery()) open_selected();
+                open_selected();   // gallery → descend; image → open viewer
             }
             break;
         }

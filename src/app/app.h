@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include "gfx/text.h"
 #include "gfx/texture_cache.h"
@@ -11,7 +12,7 @@
 
 namespace app {
 
-enum class State { Locked, Browsing }; // Viewing reserved for Phase 6
+enum class State { Locked, Browsing, Viewing };
 
 class App {
 public:
@@ -27,7 +28,8 @@ public:
 
 private:
     void to_unlock();
-    void to_gallery();
+    void to_gallery(const std::string& path = {}, int selected = 0);
+    void to_viewer(const std::string& gallery_path, int index);
 
     gfx::Window                        window_;
     gfx::FontAtlas                     font_;
