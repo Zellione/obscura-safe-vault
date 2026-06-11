@@ -103,7 +103,8 @@ void ImageViewer::back_to_gallery()
 void ImageViewer::zoom_by(float factor, float cx, float cy)
 {
     const SDL_FRect vp = viewport_rect();
-    const ZoomResult z = zoom_at(img_w_, img_h_, zoom_, pan_, factor, cx, cy, vp.w, vp.h);
+    const ZoomResult z = zoom_at(Vec2{img_w_, img_h_}, zoom_, pan_, factor,
+                                 Vec2{cx, cy}, Vec2{vp.w, vp.h});
     zoom_ = z.zoom;
     pan_  = z.pan;
 }
@@ -164,8 +165,9 @@ int ImageViewer::strip_hit(float mx, float my) const
 {
     const SDL_FRect strip = strip_rect();
     const float thumb = strip_thumb(strip);
-    const float top   = strip.y + (strip.h - thumb) * 0.5f;
-    if (my < top || my > top + thumb) return -1;
+    if (const float top = strip.y + (strip.h - thumb) * 0.5f;
+        my < top || my > top + thumb)
+        return -1;
 
     const float scroll = strip_scroll_centered(index_, static_cast<int>(images_.size()),
                                                 thumb, STRIP_GAP, strip.w);
@@ -176,56 +178,49 @@ int ImageViewer::strip_hit(float mx, float my) const
     return -1;
 }
 
+void ImageViewer::handle_key(SDL_Keycode key)
+{
+    const SDL_FRect vp = viewport_rect();
+    switch (key) {
+        case SDLK_LEFT:  is_zoomed() ? pan_by(PAN_STEP, 0) : set_index(-1); break;
+        case SDLK_RIGHT: is_zoomed() ? pan_by(-PAN_STEP, 0) : set_index(1); break;
+        case SDLK_UP:    is_zoomed() ? pan_by(0, PAN_STEP) : back_to_gallery(); break;
+        case SDLK_DOWN:  if (is_zoomed()) pan_by(0, -PAN_STEP); break;
+        case SDLK_ESCAPE: back_to_gallery(); break;
+        case SDLK_0:      fitted_ = false; break;  // reset to fit-to-window
+        case SDLK_PLUS:
+        case SDLK_EQUALS:
+        case SDLK_KP_PLUS:  zoom_by(ZOOM_STEP, vp.w * 0.5f, vp.h * 0.5f); break;
+        case SDLK_MINUS:
+        case SDLK_KP_MINUS: zoom_by(1.0f / ZOOM_STEP, vp.w * 0.5f, vp.h * 0.5f); break;
+        default: break;
+    }
+}
+
+void ImageViewer::handle_mouse_down(const SDL_MouseButtonEvent& b)
+{
+    if (b.button != SDL_BUTTON_LEFT) return;
+    if (const int hit = strip_hit(b.x, b.y); hit >= 0)
+        show_image_at(hit);
+    else if (b.y < viewport_rect().h)
+        dragging_ = true;
+}
+
 void ImageViewer::handle_event(const SDL_Event& e)
 {
     switch (e.type) {
-        case SDL_EVENT_KEY_DOWN:
-            switch (e.key.key) {
-                case SDLK_LEFT:  is_zoomed() ? pan_by(PAN_STEP, 0) : set_index(-1); break;
-                case SDLK_RIGHT: is_zoomed() ? pan_by(-PAN_STEP, 0) : set_index(1); break;
-                case SDLK_UP:    is_zoomed() ? pan_by(0, PAN_STEP) : back_to_gallery(); break;
-                case SDLK_DOWN:  if (is_zoomed()) pan_by(0, -PAN_STEP); break;
-                case SDLK_ESCAPE: back_to_gallery(); break;
-                case SDLK_0:      fitted_ = false; break;  // reset to fit-to-window
-                case SDLK_PLUS:
-                case SDLK_EQUALS:
-                case SDLK_KP_PLUS: {
-                    const SDL_FRect vp = viewport_rect();
-                    zoom_by(ZOOM_STEP, vp.w * 0.5f, vp.h * 0.5f);
-                    break;
-                }
-                case SDLK_MINUS:
-                case SDLK_KP_MINUS: {
-                    const SDL_FRect vp = viewport_rect();
-                    zoom_by(1.0f / ZOOM_STEP, vp.w * 0.5f, vp.h * 0.5f);
-                    break;
-                }
-                default: break;
-            }
-            break;
-
+        case SDL_EVENT_KEY_DOWN: handle_key(e.key.key); break;
         case SDL_EVENT_MOUSE_WHEEL:
             zoom_by(e.wheel.y > 0 ? WHEEL_STEP : 1.0f / WHEEL_STEP,
                     e.wheel.mouse_x, e.wheel.mouse_y);
             break;
-
-        case SDL_EVENT_MOUSE_BUTTON_DOWN:
-            if (e.button.button == SDL_BUTTON_LEFT) {
-                if (const int hit = strip_hit(e.button.x, e.button.y); hit >= 0)
-                    show_image_at(hit);
-                else if (e.button.y < viewport_rect().h)
-                    dragging_ = true;
-            }
-            break;
-
+        case SDL_EVENT_MOUSE_BUTTON_DOWN: handle_mouse_down(e.button); break;
         case SDL_EVENT_MOUSE_BUTTON_UP:
             if (e.button.button == SDL_BUTTON_LEFT) dragging_ = false;
             break;
-
         case SDL_EVENT_MOUSE_MOTION:
             if (dragging_) pan_by(e.motion.xrel, e.motion.yrel);
             break;
-
         default: break;
     }
 }

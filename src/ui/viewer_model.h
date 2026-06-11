@@ -70,28 +70,28 @@ struct ZoomResult {
 };
 
 // Zoom by `factor` while keeping the image point currently under the cursor
-// (cx, cy in viewport coords) fixed on screen. The resulting zoom is clamped to
+// (`cursor`, in viewport coords) fixed on screen. `img` is the image's natural
+// size, `view` the viewport size. The resulting zoom is clamped to
 // [ZOOM_MIN, ZOOM_MAX] and the resulting pan is clamped via clamp_pan.
-[[nodiscard]] inline ZoomResult zoom_at(float iw, float ih, float zoom, Vec2 pan,
-                                        float factor, float cx, float cy,
-                                        float vw, float vh) noexcept
+[[nodiscard]] inline ZoomResult zoom_at(Vec2 img, float zoom, Vec2 pan, float factor,
+                                        Vec2 cursor, Vec2 view) noexcept
 {
     const float nz = clamp_zoom(zoom * factor);
-    if (iw <= 0.0f || ih <= 0.0f || zoom <= 0.0f)
+    if (img.x <= 0.0f || img.y <= 0.0f || zoom <= 0.0f)
         return ZoomResult{nz, pan};
 
     // Image-space (natural px) coordinate currently under the cursor.
-    const float draw_x = vw * 0.5f + pan.x - iw * zoom * 0.5f;
-    const float draw_y = vh * 0.5f + pan.y - ih * zoom * 0.5f;
-    const float u = (cx - draw_x) / zoom;
-    const float v = (cy - draw_y) / zoom;
+    const float draw_x = view.x * 0.5f + pan.x - img.x * zoom * 0.5f;
+    const float draw_y = view.y * 0.5f + pan.y - img.y * zoom * 0.5f;
+    const float u = (cursor.x - draw_x) / zoom;
+    const float v = (cursor.y - draw_y) / zoom;
 
     // Pin (u, v) under the cursor at the new zoom and back out the pan.
-    const float ndraw_x = cx - u * nz;
-    const float ndraw_y = cy - v * nz;
-    Vec2 npan{ndraw_x - vw * 0.5f + iw * nz * 0.5f,
-              ndraw_y - vh * 0.5f + ih * nz * 0.5f};
-    return ZoomResult{nz, clamp_pan(npan, iw * nz, ih * nz, vw, vh)};
+    const float ndraw_x = cursor.x - u * nz;
+    const float ndraw_y = cursor.y - v * nz;
+    Vec2 npan{ndraw_x - view.x * 0.5f + img.x * nz * 0.5f,
+              ndraw_y - view.y * 0.5f + img.y * nz * 0.5f};
+    return ZoomResult{nz, clamp_pan(npan, img.x * nz, img.y * nz, view.x, view.y)};
 }
 
 // Total content width of `count` thumbnails of side `thumb` separated by `gap`.

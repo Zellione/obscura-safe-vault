@@ -73,20 +73,20 @@ TEST(viewer_fit_zoom_uses_smaller_axis)
 TEST(viewer_zoom_at_keeps_cursor_point_fixed)
 {
     // Cursor at the viewport centre: zooming keeps pan at zero.
-    auto centre = ui::zoom_at(/*iw*/100, /*ih*/100, /*zoom*/1.0f, {0, 0},
-                              /*factor*/2.0f, /*cx*/100, /*cy*/100, /*vw*/200, /*vh*/200);
+    auto centre = ui::zoom_at(/*img*/{100, 100}, /*zoom*/1.0f, /*pan*/{0, 0},
+                              /*factor*/2.0f, /*cursor*/{100, 100}, /*view*/{200, 200});
     CHECK(approx(centre.zoom, 2.0f));
     CHECK(approx(centre.pan.x, 0.0f));
     CHECK(approx(centre.pan.y, 0.0f));
 
     // Cursor at the right edge of a viewport-sized image that grows past it: the
     // image-space point under the cursor stays under the cursor after zoom.
-    auto edge = ui::zoom_at(/*iw*/200, /*ih*/200, /*zoom*/1.0f, {0, 0},
-                            /*factor*/2.0f, /*cx*/200, /*cy*/100, /*vw*/200, /*vh*/200);
+    auto edge = ui::zoom_at(/*img*/{200, 200}, /*zoom*/1.0f, /*pan*/{0, 0},
+                            /*factor*/2.0f, /*cursor*/{200, 100}, /*view*/{200, 200});
     CHECK(approx(edge.zoom, 2.0f));
     CHECK(approx(edge.pan.x, -100.0f));
 
     // Zoom is clamped: a huge factor cannot exceed ZOOM_MAX.
-    auto clamped = ui::zoom_at(100, 100, 1.0f, {0, 0}, 9999.0f, 100, 100, 200, 200);
+    auto clamped = ui::zoom_at({100, 100}, 1.0f, {0, 0}, 9999.0f, {100, 100}, {200, 200});
     CHECK(approx(clamped.zoom, ui::ZOOM_MAX));
 }

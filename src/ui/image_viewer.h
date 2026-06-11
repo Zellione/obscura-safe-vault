@@ -37,6 +37,9 @@ public:
     void render(gfx::Renderer& r) override;
 
 private:
+    void handle_key(SDL_Keycode key);
+    void handle_mouse_down(const SDL_MouseButtonEvent& b);
+
     [[nodiscard]] SDL_FRect viewport_rect() const;  // top ~75%
     [[nodiscard]] SDL_FRect strip_rect() const;     // bottom ~25%
 
