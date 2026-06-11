@@ -70,15 +70,14 @@ void UnlockScreen::handle_event(const SDL_Event& e)
         }
         case SDL_EVENT_MOUSE_BUTTON_DOWN: {
             const Layout L = layout();
-            const float x = e.button.x;
-            const float y = e.button.y;
-            if (point_in_rect(x, y, L.mode_btn)) {
+            if (const SDL_FPoint p{e.button.x, e.button.y};
+                point_in_rect(p.x, p.y, L.mode_btn)) {
                 create_mode_ = !create_mode_; focus_ = 0; error_.clear();
-            } else if (point_in_rect(x, y, L.keyfile_btn)) {
+            } else if (point_in_rect(p.x, p.y, L.keyfile_btn)) {
                 pending_ = Pending::Keyfile; dlg_.open_keyfile(win_.sdl_window());
-            } else if (point_in_rect(x, y, L.other_btn)) {
+            } else if (point_in_rect(p.x, p.y, L.other_btn)) {
                 pending_ = Pending::Vault;   dlg_.open_vault(win_.sdl_window());
-            } else if (point_in_rect(x, y, L.submit_btn)) {
+            } else if (point_in_rect(p.x, p.y, L.submit_btn)) {
                 submit();
             }
             break;
