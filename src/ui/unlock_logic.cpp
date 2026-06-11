@@ -8,15 +8,16 @@ SubmitDecision decide_submit(bool                     create_mode,
                              std::span<const uint8_t> password,
                              std::span<const uint8_t> confirm) noexcept
 {
+    using enum SubmitAction;
     if (password.empty())
-        return {SubmitAction::None, "Password cannot be empty."};
+        return {None, "Password cannot be empty."};
 
     if (create_mode) {
         if (!std::ranges::equal(password, confirm))
-            return {SubmitAction::None, "Passwords do not match."};
-        return {SubmitAction::Create, nullptr};
+            return {None, "Passwords do not match."};
+        return {Create, nullptr};
     }
-    return {SubmitAction::Unlock, nullptr};
+    return {Unlock, nullptr};
 }
 
 } // namespace ui

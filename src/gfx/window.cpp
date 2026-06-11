@@ -50,7 +50,7 @@ void Window::shutdown()
     SDL_Quit();
 }
 
-bool Window::poll_event(SDL_Event& out)
+bool Window::poll_event(SDL_Event& out) const
 {
     return SDL_PollEvent(&out);
 }

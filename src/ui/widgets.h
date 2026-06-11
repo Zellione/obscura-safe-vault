@@ -17,13 +17,21 @@ namespace ui {
 // How many `cell`-wide columns (separated by `gap`) fit in `avail_w` (min 1).
 [[nodiscard]] int grid_columns(float avail_w, float cell, float gap) noexcept;
 
-// Rect of cell `index` in a `cols`-wide grid with the given cell/gap/origin.
-[[nodiscard]] SDL_FRect grid_cell_rect(int index, int cols, float cell, float gap,
-                                       float origin_x, float origin_y) noexcept;
+// Geometry of a uniform tile grid: `cols` columns of `cell`-wide square cells
+// separated by `gap`, laid out from the top-left `origin_x`/`origin_y`.
+struct GridSpec {
+    int   cols;
+    float cell;
+    float gap;
+    float origin_x;
+    float origin_y;
+};
+
+// Rect of cell `index` in the given grid.
+[[nodiscard]] SDL_FRect grid_cell_rect(int index, const GridSpec& g) noexcept;
 
 // Index of the cell under (mx,my), or -1. Considers indices [0,count).
-[[nodiscard]] int grid_hit(float mx, float my, int count, int cols, float cell,
-                           float gap, float origin_x, float origin_y) noexcept;
+[[nodiscard]] int grid_hit(float mx, float my, int count, const GridSpec& g) noexcept;
 
 // Aspect-fit a `w`x`h` source centred inside `box`.
 [[nodiscard]] SDL_FRect fit_rect(float w, float h, const SDL_FRect& box) noexcept;

@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -31,7 +32,7 @@ private:
     void start_import();
     void start_naming();
     void finish_naming();
-    void do_import(const std::string& file_path);
+    void do_import(const std::filesystem::path& file_path);
     [[nodiscard]] bool current_allows_images() const;
     [[nodiscard]] bool current_allows_galleries() const;
     SDL_Texture*       thumb_texture(const vault::IndexNode& node);

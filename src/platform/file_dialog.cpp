@@ -1,5 +1,6 @@
 #include "platform/file_dialog.h"
 
+#include <array>
 #include <print>
 
 namespace platform {
@@ -18,26 +19,39 @@ void SDLCALL FileDialog::on_files(void* userdata, const char* const* filelist, i
     self->state_ = St::Done;
 }
 
+bool FileDialog::begin_open()
+{
+    std::lock_guard lk(mtx_);
+    if (state_ == St::Open) return false;
+    state_ = St::Open;
+    paths_.clear();
+    return true;
+}
+
 void FileDialog::open_vault(SDL_Window* parent)
 {
-    { std::lock_guard lk(mtx_); if (state_ == St::Open) return; state_ = St::Open; paths_.clear(); }
-    static const SDL_DialogFileFilter f[] = {{"OSV Vault", "osv"}, {"All files", "*"}};
-    SDL_ShowOpenFileDialog(on_files, this, parent, f, 2, nullptr, /*allow_many*/ false);
+    if (!begin_open()) return;
+    static constexpr std::array f{SDL_DialogFileFilter{"OSV Vault", "osv"},
+                                  SDL_DialogFileFilter{"All files", "*"}};
+    SDL_ShowOpenFileDialog(on_files, this, parent, f.data(),
+                           static_cast<int>(f.size()), nullptr, /*allow_many*/ false);
 }
 
 void FileDialog::open_images(SDL_Window* parent)
 {
-    { std::lock_guard lk(mtx_); if (state_ == St::Open) return; state_ = St::Open; paths_.clear(); }
-    static const SDL_DialogFileFilter f[] = {{"Images", "jpg;jpeg;png;gif;bmp;tga;hdr"},
-                                             {"All files", "*"}};
-    SDL_ShowOpenFileDialog(on_files, this, parent, f, 2, nullptr, /*allow_many*/ true);
+    if (!begin_open()) return;
+    static constexpr std::array f{SDL_DialogFileFilter{"Images", "jpg;jpeg;png;gif;bmp;tga;hdr"},
+                                  SDL_DialogFileFilter{"All files", "*"}};
+    SDL_ShowOpenFileDialog(on_files, this, parent, f.data(),
+                           static_cast<int>(f.size()), nullptr, /*allow_many*/ true);
 }
 
 void FileDialog::open_keyfile(SDL_Window* parent)
 {
-    { std::lock_guard lk(mtx_); if (state_ == St::Open) return; state_ = St::Open; paths_.clear(); }
-    static const SDL_DialogFileFilter f[] = {{"All files", "*"}};
-    SDL_ShowOpenFileDialog(on_files, this, parent, f, 1, nullptr, /*allow_many*/ false);
+    if (!begin_open()) return;
+    static constexpr std::array f{SDL_DialogFileFilter{"All files", "*"}};
+    SDL_ShowOpenFileDialog(on_files, this, parent, f.data(),
+                           static_cast<int>(f.size()), nullptr, /*allow_many*/ false);
 }
 
 bool FileDialog::busy() const noexcept

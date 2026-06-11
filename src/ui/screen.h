@@ -16,8 +16,10 @@ class Screen {
 public:
     virtual ~Screen() = default;
 
-    virtual void on_enter() {}
-    virtual void on_exit()  {}
+    // Lifecycle hooks. Default to no-ops; screens override to acquire/release
+    // resources (e.g. start text input, refresh listings) on activation.
+    virtual void on_enter() { /* no-op by default */ }
+    virtual void on_exit()  { /* no-op by default */ }
 
     virtual void handle_event(const SDL_Event& e) = 0;
     virtual void update(double dt) { (void)dt; }

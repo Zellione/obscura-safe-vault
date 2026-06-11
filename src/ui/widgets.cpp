@@ -16,26 +16,24 @@ bool point_in_rect(float x, float y, const SDL_FRect& r) noexcept
 int grid_columns(float avail_w, float cell, float gap) noexcept
 {
     if (cell <= 0.0f) return 1;
-    int cols = static_cast<int>(std::floor((avail_w + gap) / (cell + gap)));
+    const auto cols = static_cast<int>(std::floor((avail_w + gap) / (cell + gap)));
     return cols < 1 ? 1 : cols;
 }
 
-SDL_FRect grid_cell_rect(int index, int cols, float cell, float gap,
-                         float origin_x, float origin_y) noexcept
+SDL_FRect grid_cell_rect(int index, const GridSpec& g) noexcept
 {
-    if (cols < 1) cols = 1;
+    const int cols = g.cols < 1 ? 1 : g.cols;
     const int row = index / cols;
     const int col = index % cols;
-    return SDL_FRect{origin_x + static_cast<float>(col) * (cell + gap),
-                     origin_y + static_cast<float>(row) * (cell + gap),
-                     cell, cell};
+    return SDL_FRect{g.origin_x + static_cast<float>(col) * (g.cell + g.gap),
+                     g.origin_y + static_cast<float>(row) * (g.cell + g.gap),
+                     g.cell, g.cell};
 }
 
-int grid_hit(float mx, float my, int count, int cols, float cell, float gap,
-             float origin_x, float origin_y) noexcept
+int grid_hit(float mx, float my, int count, const GridSpec& g) noexcept
 {
     for (int i = 0; i < count; ++i)
-        if (point_in_rect(mx, my, grid_cell_rect(i, cols, cell, gap, origin_x, origin_y)))
+        if (point_in_rect(mx, my, grid_cell_rect(i, g)))
             return i;
     return -1;
 }
@@ -44,16 +42,17 @@ SDL_FRect fit_rect(float w, float h, const SDL_FRect& box) noexcept
 {
     if (w <= 0.0f || h <= 0.0f) return box;
     const float scale = std::min(box.w / w, box.h / h);
-    const float nw = w * scale, nh = h * scale;
+    const float nw = w * scale;
+    const float nh = h * scale;
     return SDL_FRect{box.x + (box.w - nw) * 0.5f, box.y + (box.h - nh) * 0.5f, nw, nh};
 }
 
 void draw_button(gfx::Renderer& r, gfx::FontAtlas& font, const Button& b,
                  bool hover, bool active)
 {
-    gfx::Color bg = active ? gfx::Color{90, 60, 150, 255}
-                  : hover  ? gfx::Color{70, 70, 95, 255}
-                           : gfx::Color{55, 55, 70, 255};
+    gfx::Color bg{55, 55, 70, 255};
+    if (active)     bg = gfx::Color{90, 60, 150, 255};
+    else if (hover) bg = gfx::Color{70, 70, 95, 255};
     r.draw_rect(b.rect, bg);
     r.draw_rect(b.rect, gfx::Color{120, 80, 200, 255}, /*filled*/ false);
     const int tw = font.measure(b.label);

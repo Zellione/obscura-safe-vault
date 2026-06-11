@@ -26,7 +26,12 @@ public:
     void render(gfx::Renderer& r) override;
 
 private:
-    struct Layout { SDL_FRect keyfile_btn, other_btn, mode_btn, submit_btn; };
+    struct Layout {
+        SDL_FRect keyfile_btn;
+        SDL_FRect other_btn;
+        SDL_FRect mode_btn;
+        SDL_FRect submit_btn;
+    };
     [[nodiscard]] Layout layout() const;
     void submit();
 

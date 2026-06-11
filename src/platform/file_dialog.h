@@ -32,6 +32,10 @@ private:
     enum class St { Idle, Open, Done };
     static void SDLCALL on_files(void* userdata, const char* const* filelist, int filter);
 
+    // Transition Idle -> Open and clear any prior result. Returns false if a
+    // dialog is already open (caller should bail out without showing another).
+    bool begin_open();
+
     mutable std::mutex       mtx_;
     St                       state_ = St::Idle;
     std::vector<std::string> paths_;

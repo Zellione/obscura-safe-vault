@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <array>
 #include <cstdio>
 
 namespace platform {
@@ -29,10 +30,10 @@ std::optional<std::vector<uint8_t>> read_file(const std::filesystem::path& path)
     if (!f) return std::nullopt;
 
     std::vector<uint8_t> buf;
-    uint8_t chunk[64 * 1024];
+    std::array<uint8_t, 64 * 1024> chunk;
     size_t n;
-    while ((n = std::fread(chunk, 1, sizeof chunk, f)) > 0)
-        buf.insert(buf.end(), chunk, chunk + n);
+    while ((n = std::fread(chunk.data(), 1, chunk.size(), f)) > 0)
+        buf.insert(buf.end(), chunk.data(), chunk.data() + n);
 
     const bool ok = std::ferror(f) == 0;
     std::fclose(f);

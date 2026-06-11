@@ -74,11 +74,12 @@ void App::run()
         window_.end_frame();
 
         if (screen_) {
+            using enum ui::NavKind;
             switch (screen_->take_nav().kind) {
-                case ui::NavKind::ToGallery: screen_->on_exit(); to_gallery(); break;
-                case ui::NavKind::ToUnlock:  screen_->on_exit(); to_unlock();  break;
-                case ui::NavKind::Quit:      running = false; break;
-                case ui::NavKind::None:      break;
+                case ToGallery: screen_->on_exit(); to_gallery(); break;
+                case ToUnlock:  screen_->on_exit(); to_unlock();  break;
+                case Quit:      running = false; break;
+                case None:      break;
             }
         }
     }

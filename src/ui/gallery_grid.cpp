@@ -1,5 +1,6 @@
 #include "ui/gallery_grid.h"
 
+#include <algorithm>
 #include <filesystem>
 
 #include "crypto/secure_mem.h"
@@ -18,7 +19,12 @@
 namespace ui {
 
 namespace {
-constexpr float OX = 40, OY = 160, CELL = 160, GAP = 16;
+constexpr float OX = 40;
+constexpr float OY = 160;
+constexpr float CELL = 160;
+constexpr float GAP = 16;
+
+GridSpec grid_spec(int cols) noexcept { return {cols, CELL, GAP, OX, OY}; }
 }
 
 GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
@@ -44,14 +50,14 @@ void GalleryGrid::refresh()
 
 bool GalleryGrid::current_allows_images() const
 {
-    for (const auto* c : children_) if (c->is_gallery()) return false;
-    return true;
+    return std::ranges::none_of(children_,
+                                [](const vault::IndexNode* c) { return c->is_gallery(); });
 }
 
 bool GalleryGrid::current_allows_galleries() const
 {
-    for (const auto* c : children_) if (c->is_image()) return false;
-    return true;
+    return std::ranges::none_of(children_,
+                                [](const vault::IndexNode* c) { return c->is_image(); });
 }
 
 void GalleryGrid::open_selected()
@@ -80,13 +86,13 @@ void GalleryGrid::start_import()
     dlg_.open_images(win_.sdl_window());
 }
 
-void GalleryGrid::do_import(const std::string& file_path)
+void GalleryGrid::do_import(const std::filesystem::path& file_path)
 {
     using enum vault::VaultResult;
     auto bytes = platform::read_file(file_path);
-    if (!bytes) { error_ = "Could not read " + file_path; return; }
+    if (!bytes) { error_ = "Could not read " + file_path.string(); return; }
 
-    const std::string fname = std::filesystem::path(file_path).filename().string();
+    const std::string fname = file_path.filename().string();
     switch (vault_.add_image(nav_.path(), *bytes, fname)) {
         case Ok:            break;
         case AlreadyExists: error_ = "Already exists: " + fname; break;
@@ -115,8 +121,8 @@ void GalleryGrid::finish_naming()
     if (name_buf_.empty()) return;
 
     const std::string base = nav_.path();
-    const std::string full = base.empty() ? name_buf_ : base + "/" + name_buf_;
-    switch (vault_.create_gallery(full)) {
+    switch (const std::string full = base.empty() ? name_buf_ : base + "/" + name_buf_;
+            vault_.create_gallery(full)) {
         case Ok:            break;
         case AlreadyExists: error_ = "Gallery already exists."; break;
         case InvalidArg:    error_ = "Invalid gallery name/location."; break;
@@ -160,24 +166,26 @@ void GalleryGrid::handle_event(const SDL_Event& e)
     }
 
     switch (e.type) {
-        case SDL_EVENT_KEY_DOWN:
+        case SDL_EVENT_KEY_DOWN: {
+            using enum InputAction;
             switch (map_key(e.key.key, e.key.mod)) {
-                case InputAction::NavLeft:    nav_.move(-1);     break;
-                case InputAction::NavRight:   nav_.move(1);      break;
-                case InputAction::NavUp:      nav_.move(-cols_); break;
-                case InputAction::NavDown:    nav_.move(cols_);  break;
-                case InputAction::Select:     open_selected();   break;
-                case InputAction::Back:       go_up();           break;
-                case InputAction::Import:     start_import();    break;
-                case InputAction::NewGallery: start_naming();    break;
+                case NavLeft:    nav_.move(-1);     break;
+                case NavRight:   nav_.move(1);      break;
+                case NavUp:      nav_.move(-cols_); break;
+                case NavDown:    nav_.move(cols_);  break;
+                case Select:     open_selected();   break;
+                case Back:       go_up();           break;
+                case Import:     start_import();    break;
+                case NewGallery: start_naming();    break;
                 default: break;
             }
             break;
+        }
         case SDL_EVENT_MOUSE_BUTTON_DOWN: {
-            const int idx = grid_hit(e.button.x, e.button.y,
-                                     static_cast<int>(children_.size()),
-                                     cols_, CELL, GAP, OX, OY);
-            if (idx >= 0) {
+            if (const int idx = grid_hit(e.button.x, e.button.y,
+                                         static_cast<int>(children_.size()),
+                                         grid_spec(cols_));
+                idx >= 0) {
                 nav_.select(idx);
                 if (children_[idx]->is_gallery()) open_selected();
             }
@@ -199,8 +207,8 @@ void GalleryGrid::update(double)
 
 void GalleryGrid::render(gfx::Renderer& r)
 {
-    const float W = static_cast<float>(win_.width());
-    const float H = static_cast<float>(win_.height());
+    const auto W = static_cast<float>(win_.width());
+    const auto H = static_cast<float>(win_.height());
     cols_ = grid_columns(W - 2 * OX, CELL, GAP);
 
     std::string crumb = "/";
@@ -210,7 +218,7 @@ void GalleryGrid::render(gfx::Renderer& r)
                 gfx::Color{120, 120, 130, 255});
 
     for (size_t i = 0; i < children_.size(); ++i) {
-        const SDL_FRect cellr = grid_cell_rect(static_cast<int>(i), cols_, CELL, GAP, OX, OY);
+        const SDL_FRect cellr = grid_cell_rect(static_cast<int>(i), grid_spec(cols_));
         const vault::IndexNode* n = children_[i];
         const bool sel = (static_cast<int>(i) == nav_.selected());
         r.draw_rect(cellr, sel ? gfx::Color{70, 70, 90, 255} : gfx::Color{45, 45, 55, 255});
@@ -219,7 +227,8 @@ void GalleryGrid::render(gfx::Renderer& r)
             r.draw_rect({cellr.x + 30, cellr.y + 40, CELL - 60, CELL - 90},
                         gfx::Color{200, 170, 90, 255});
         } else if (SDL_Texture* tex = thumb_texture(*n)) {
-            float tw = 0, th = 0;
+            float tw = 0;
+            float th = 0;
             SDL_GetTextureSize(tex, &tw, &th);
             r.draw_image(tex, fit_rect(tw, th, {cellr.x + 6, cellr.y + 6,
                                                 CELL - 12, CELL - 40}));
@@ -236,7 +245,10 @@ void GalleryGrid::render(gfx::Renderer& r)
         r.draw_text(font_, OX, H - 36, error_, gfx::Color{230, 120, 120, 255});
 
     if (naming_) {
-        const float mw = W * 0.6f, mh = 120, mx = (W - mw) / 2, my = (H - mh) / 2;
+        const float mw = W * 0.6f;
+        const float mh = 120;
+        const float mx = (W - mw) / 2;
+        const float my = (H - mh) / 2;
         r.draw_rect({mx, my, mw, mh}, gfx::Color{30, 30, 40, 255});
         r.draw_rect({mx, my, mw, mh}, gfx::Color{120, 80, 200, 255}, /*filled*/ false);
         r.draw_text(font_, mx + 16, my + 16, "New gallery name:",

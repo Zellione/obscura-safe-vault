@@ -34,7 +34,7 @@ public:
 
     /// Poll one pending event into `out`. Returns false when the queue is empty.
     /// (App decides what quit/close means — the window no longer self-quits.)
-    [[nodiscard]] bool poll_event(SDL_Event& out);
+    [[nodiscard]] bool poll_event(SDL_Event& out) const;
 
     /// Clear the renderer to the given RGBA colour (0 = opaque black).
     void begin_frame(uint8_t r = 18, uint8_t g = 18, uint8_t b = 24, uint8_t a = 255);

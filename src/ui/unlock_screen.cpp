@@ -35,9 +35,12 @@ void UnlockScreen::on_exit()
 
 UnlockScreen::Layout UnlockScreen::layout() const
 {
-    const float W = static_cast<float>(win_.width());
-    const float H = static_cast<float>(win_.height());
-    const float bw = 200.0f, bh = 44.0f, gap = 16.0f, row = H - 140.0f;
+    const auto W = static_cast<float>(win_.width());
+    const auto H = static_cast<float>(win_.height());
+    const float bw = 200.0f;
+    const float bh = 44.0f;
+    const float gap = 16.0f;
+    const float row = H - 140.0f;
     return Layout{
         .keyfile_btn = {60.0f,                  row, bw, bh},
         .other_btn   = {60.0f + (bw + gap),     row, bw, bh},
@@ -67,7 +70,8 @@ void UnlockScreen::handle_event(const SDL_Event& e)
         }
         case SDL_EVENT_MOUSE_BUTTON_DOWN: {
             const Layout L = layout();
-            const float x = e.button.x, y = e.button.y;
+            const float x = e.button.x;
+            const float y = e.button.y;
             if (point_in_rect(x, y, L.mode_btn)) {
                 create_mode_ = !create_mode_; focus_ = 0; error_.clear();
             } else if (point_in_rect(x, y, L.keyfile_btn)) {
@@ -85,16 +89,17 @@ void UnlockScreen::handle_event(const SDL_Event& e)
 
 void UnlockScreen::update(double)
 {
+    using enum Pending;
     if (auto res = dlg_.take_result()) {
         if (!res->empty()) {
-            if (pending_ == Pending::Vault) {
+            if (pending_ == Vault) {
                 vault_path_  = (*res)[0];
                 create_mode_ = !std::filesystem::exists(vault_path_);
-            } else if (pending_ == Pending::Keyfile) {
+            } else if (pending_ == Keyfile) {
                 keyfile_path_ = (*res)[0];
             }
         }
-        pending_ = Pending::None;
+        pending_ = None;
     }
 }
 
@@ -148,15 +153,17 @@ void UnlockScreen::submit()
 
 void UnlockScreen::render(gfx::Renderer& r)
 {
-    const float W = static_cast<float>(win_.width());
-    const float H = static_cast<float>(win_.height());
+    const auto W = static_cast<float>(win_.width());
+    const auto H = static_cast<float>(win_.height());
 
     r.draw_text(font_, 60, 50, create_mode_ ? "Create Vault" : "Unlock Vault",
                 gfx::Color{240, 240, 245, 255});
     r.draw_text(font_, 60, 100, "Vault: " + vault_path_.string(),
                 gfx::Color{150, 150, 160, 255});
 
-    const float fx = 60, fw = W - 120, fh = 44;
+    const float fx = 60;
+    const float fw = W - 120;
+    const float fh = 44;
     r.draw_text(font_, fx, 134, "Password", gfx::Color{150, 150, 160, 255});
     draw_text_field(r, font_, {fx, 160, fw, fh},
                     std::string(pw_.length(), '*'), !create_mode_ || focus_ == 0);

@@ -18,8 +18,9 @@ TEST(widgets_grid_columns_and_cell)
     CHECK_EQ(ui::grid_columns(680.0f, 160.0f, 16.0f), 3); // floor((680+16)/176)=3
     CHECK(ui::grid_columns(0.0f, 160.0f, 16.0f) >= 1);    // never zero
 
-    SDL_FRect c = ui::grid_cell_rect(/*index*/5, /*cols*/4, /*cell*/160, /*gap*/16,
-                                     /*ox*/40, /*oy*/120);
+    SDL_FRect c = ui::grid_cell_rect(/*index*/5,
+                                     ui::GridSpec{/*cols*/4, /*cell*/160, /*gap*/16,
+                                                  /*ox*/40, /*oy*/120});
     // index 5 -> row 1, col 1
     CHECK_EQ(c.x, 40.0f + 1 * (160.0f + 16.0f));
     CHECK_EQ(c.y, 120.0f + 1 * (160.0f + 16.0f));
@@ -29,10 +30,10 @@ TEST(widgets_grid_columns_and_cell)
 TEST(widgets_grid_hit)
 {
     // 4 cells, cols 4, cell 160 gap 16, origin (40,120)
-    int hit = ui::grid_hit(40 + 1 * 176 + 5, 120 + 5, /*count*/4, /*cols*/4,
-                           160, 16, 40, 120);
+    const ui::GridSpec g{/*cols*/4, /*cell*/160, /*gap*/16, /*ox*/40, /*oy*/120};
+    int hit = ui::grid_hit(40 + 1 * 176 + 5, 120 + 5, /*count*/4, g);
     CHECK_EQ(hit, 1);
-    CHECK_EQ(ui::grid_hit(0, 0, 4, 4, 160, 16, 40, 120), -1);     // miss
+    CHECK_EQ(ui::grid_hit(0, 0, 4, g), -1);     // miss
 }
 
 TEST(widgets_fit_rect_preserves_aspect)
