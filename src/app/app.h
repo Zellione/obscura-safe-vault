@@ -1,22 +1,17 @@
 #pragma once
 
+#include <memory>
+
 #include "gfx/text.h"
+#include "gfx/texture_cache.h"
 #include "gfx/window.h"
+#include "platform/file_dialog.h"
+#include "ui/screen.h"
+#include "vault/vault.h"
 
 namespace app {
 
-/// Application-level state machine.
-///
-/// States (Phase 0 has only Running):
-///   Locked   — vault locked; unlock screen shown     (Phase 5)
-///   Browsing — gallery grid / breadcrumb navigation  (Phase 5–6)
-///   Viewing  — full image viewer + thumbnail strip   (Phase 6)
-///   Running  — Phase 0 placeholder: just clears the window
-enum class State {
-    Running,   // Phase 0 placeholder
-    // Phase 5: Locked, Browsing
-    // Phase 6: Viewing
-};
+enum class State { Locked, Browsing }; // Viewing reserved for Phase 6
 
 class App {
 public:
@@ -26,20 +21,22 @@ public:
     App(const App&)            = delete;
     App& operator=(const App&) = delete;
 
-    /// Initialise SDL, create window, and prepare all subsystems.
     [[nodiscard]] bool init();
-
-    /// Main event/render loop — runs until the user closes the window.
     void run();
-
-    /// Tear down all subsystems in reverse-init order.
     void shutdown();
 
 private:
-    gfx::Window    window_;
-    gfx::FontAtlas font_;
-    bool           font_ready_ = false;
-    [[maybe_unused]] State state_ = State::Running;
+    void to_unlock();
+    void to_gallery();
+
+    gfx::Window                        window_;
+    gfx::FontAtlas                     font_;
+    bool                               font_ready_ = false;
+    std::unique_ptr<gfx::TextureCache> cache_;
+    platform::FileDialog               dialog_;
+    vault::Vault                       vault_;
+    std::unique_ptr<ui::Screen>        screen_;
+    State                              state_ = State::Locked;
 };
 
 } // namespace app

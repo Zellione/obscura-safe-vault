@@ -3,6 +3,9 @@
 #include <print>
 
 #include "gfx/renderer.h"
+#include "platform/paths.h"
+#include "ui/gallery_grid.h"
+#include "ui/unlock_screen.h"
 
 #ifndef OSV_DEFAULT_FONT
 #define OSV_DEFAULT_FONT "assets/fonts/NotoSans-Regular.ttf"
@@ -17,45 +20,77 @@ bool App::init()
         return false;
     }
 
-    // Phase 4: bake the UI font atlas. A missing font is non-fatal — the app
-    // still runs, just without text.
     font_ready_ = font_.bake_from_file(OSV_DEFAULT_FONT, 28.0f);
     if (!font_ready_)
         std::println(stderr, "[App] Font atlas unavailable ('{}').", OSV_DEFAULT_FONT);
 
-    std::println("[App] Initialised (Phase 4 — graphics layer).");
+    cache_ = std::make_unique<gfx::TextureCache>(window_.sdl_renderer());
+    to_unlock();
+
+    std::println("[App] Initialised (Phase 5 — UI layer).");
     return true;
+}
+
+void App::to_unlock()
+{
+    state_  = State::Locked;
+    screen_ = std::make_unique<ui::UnlockScreen>(window_, font_, vault_, dialog_,
+                                                 platform::default_vault_path());
+    screen_->on_enter();
+}
+
+void App::to_gallery()
+{
+    state_  = State::Browsing;
+    screen_ = std::make_unique<ui::GalleryGrid>(window_, font_, vault_, *cache_, dialog_);
+    screen_->on_enter();
 }
 
 void App::run()
 {
-    bool quit = false;
-    while (!quit) {
-        window_.process_events(quit);
+    bool     running = true;
+    uint64_t prev    = SDL_GetTicks();
 
-        // Clear to the dark accent colour, then draw the Phase 4 demo: a coloured
-        // rectangle and a text label rendered from the baked font atlas.
+    while (running) {
+        SDL_Event e;
+        while (window_.poll_event(e)) {
+            if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
+                running = false;
+            else if (screen_)
+                screen_->handle_event(e);
+        }
+
+        const uint64_t now = SDL_GetTicks();
+        const double   dt  = static_cast<double>(now - prev) / 1000.0;
+        prev = now;
+
+        if (screen_) screen_->update(dt);
+
         window_.begin_frame(18, 18, 24);
-
-        gfx::Renderer r(window_.sdl_renderer());
-        r.draw_rect(SDL_FRect{40.0f, 40.0f, 220.0f, 120.0f},
-                    gfx::Color{120, 80, 200, 255});
-        if (font_ready_)
-            r.draw_text(font_, 48.0f, 84.0f, "Obscura-Safe-Vault",
-                        gfx::Color{240, 240, 245, 255});
-
+        if (screen_) {
+            gfx::Renderer r(window_.sdl_renderer());
+            screen_->render(r);
+        }
         window_.end_frame();
+
+        if (screen_) {
+            using enum ui::NavKind;
+            switch (screen_->take_nav().kind) {
+                case ToGallery: screen_->on_exit(); to_gallery(); break;
+                case ToUnlock:  screen_->on_exit(); to_unlock();  break;
+                case Quit:      running = false; break;
+                case None:      break;
+            }
+        }
     }
 }
 
 void App::shutdown()
 {
-    // Drop the font's GPU texture before the window destroys the renderer that
-    // owns it.
+    if (screen_) { screen_->on_exit(); screen_.reset(); }
+    vault_.lock();                 // wipe master key
+    if (cache_) cache_->clear();   // destroy thumbnail textures before the renderer
     font_.release_texture();
-
-    // Future phases will tear down subsystems here in reverse-init order:
-    //   image cache, vault (zero master key in memory), gfx, SDL.
     window_.shutdown();
     std::println("[App] Clean shutdown.");
 }
