@@ -17,8 +17,11 @@ namespace ui {
 
 class GalleryGrid : public Screen {
 public:
+    // `initial_path` / `initial_sel` restore the grid's location and selection
+    // when returning from the image viewer (empty path = root).
     GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                gfx::TextureCache& cache, platform::FileDialog& dlg);
+                gfx::TextureCache& cache, platform::FileDialog& dlg,
+                std::string initial_path = {}, int initial_sel = 0);
 
     void on_enter() override;
     void handle_event(const SDL_Event& e) override;
@@ -43,6 +46,8 @@ private:
     gfx::TextureCache&    cache_;
     platform::FileDialog& dlg_;
     NavModel              nav_;
+    std::string           initial_path_;
+    int                   initial_sel_ = 0;
     std::vector<const vault::IndexNode*> children_;
     int                   cols_ = 1;
     std::string           error_;
