@@ -70,7 +70,7 @@ navigable with arrow keys.
 | KDF | **Argon2id** (via Monocypher) | Memory-hard, anti-GPU/ASIC. Protects the real weak point: the password. |
 | Authentication | **Password + optional keyfile** | "Something you know + something you have." Final key = Argon2id(password ‖ keyfile, salt). Changing the password re-wraps the master key only (no bulk re-encrypt). |
 | Image decode | **stb_image** (header-only) | JPEG/PNG/GIF/BMP/TGA/HDR decoded directly from decrypted in-memory buffers. Zero dependencies, no temp files. |
-| Extra image formats | **libwebp** (Phase 9), **libheif/libavif** (Phase 9) | Heavier deps added only when their phase lands. |
+| Extra image formats | **libwebp 1.4.0** (WebP), **libheif 1.18.2** + **libde265 1.0.15** (HEIC) + **libaom 3.14.1** (AVIF, decoder-only) — all Phase 9 | Decode-only. Vendored git submodules, cmake-built static into `vendor/codecs-prefix/` by `scripts/build_codecs.{sh,bat}`. One `decode_heif_from_memory` covers HEIC+AVIF (libheif dispatches by brand). libaom needs **nasm**. |
 | Thumbnails | **Pre-generated, stored encrypted in vault** | Gallery scrolling decrypts only the small thumbnail blobs — no full-image decode needed while browsing. |
 | Gallery model | **Free-nesting galleries; images only in leaf galleries** | A folder shows either sub-folders *or* images, never a mix. Cleaner grid view and simpler tree logic. |
 | Dependency management | **Vendored git submodules** under `vendor/` | Hermetic, reproducible, offline. SDL3 is built from source by `scripts/setup.sh` (cmake once); monocypher/stb are compiled directly by premake. |
@@ -128,7 +128,9 @@ src/
   vault/     vault.h, header.*, index.*,  ← container format (Phase 2)
              chunk_store.*, vault.*
   image/     image.h, decode.*,           ← stb_image decode + thumbs (Phase 3)
-             thumbnail.*
+             thumbnail.*,                 ← format_registry + libwebp/libheif
+             format_registry.*,           ← decoders (Phase 9)
+             decode_webp.*, decode_heif.*
   gfx/       window.{h,cpp},             ← SDL3 window + renderer (Phase 0)
              renderer.{h,cpp},            ← texture cache, text atlas (Phase 4)
              texture_cache.*, text.*
@@ -143,6 +145,11 @@ vendor/
   SDL3/           ← git submodule, built by scripts/setup.sh (cmake)
   monocypher/     ← git submodule, compiled by premake (single .c file)
   stb/            ← git submodule, header-only
+  libwebp/        ← git submodule, cmake → vendor/codecs-prefix (Phase 9)
+  libde265/       ← git submodule, cmake → vendor/codecs-prefix (HEIC)
+  libaom/         ← git submodule, cmake → vendor/codecs-prefix (AVIF, decoder-only)
+  libheif/        ← git submodule, cmake → vendor/codecs-prefix (HEIC/AVIF)
+  codecs-prefix/  ← staging install prefix for the four codecs (gitignored)
 tests/
   crypto/         ← known-answer tests for KDF + AEAD (Phase 1)
   vault/          ← round-trip tests: create → add → read → checksum (Phase 2)
