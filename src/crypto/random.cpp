@@ -24,8 +24,8 @@ bool fill_random(std::span<uint8_t> out) noexcept
         nullptr, out.data(), static_cast<ULONG>(out.size()),
         BCRYPT_USE_SYSTEM_PREFERRED_RNG);
     if (s != 0) {
-        std::println(stderr, "[crypto] BCryptGenRandom failed (0x{:lx})",
-                     static_cast<unsigned long>(s));
+        std::println(stderr, "[crypto] BCryptGenRandom failed (0x{:08x})",
+                     static_cast<uint32_t>(s));
         return false;
     }
     return true;

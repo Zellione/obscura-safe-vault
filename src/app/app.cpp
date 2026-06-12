@@ -1,6 +1,9 @@
 #include "app.h"
 
+#include <SDL3/SDL.h>
+
 #include <print>
+#include <string>
 
 #include "gfx/renderer.h"
 #include "platform/paths.h"
@@ -21,7 +24,15 @@ bool App::init()
         return false;
     }
 
+    // Dev runs launch from the repo root (cwd-relative); packaged apps resolve
+    // assets next to the executable (= Contents/Resources inside a mac bundle).
     font_ready_ = font_.bake_from_file(OSV_DEFAULT_FONT, 28.0f);
+    if (!font_ready_) {
+        if (const char* base = SDL_GetBasePath(); base) {
+            const std::string fallback = std::string{base} + OSV_DEFAULT_FONT;
+            font_ready_ = font_.bake_from_file(fallback.c_str(), 28.0f);
+        }
+    }
     if (!font_ready_)
         std::println(stderr, "[App] Font atlas unavailable ('{}').", OSV_DEFAULT_FONT);
 
