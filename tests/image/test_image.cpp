@@ -11,6 +11,7 @@
 #include <monocypher.h>
 
 #include "image/decode.h"
+#include "image/format_registry.h"
 #include "image/thumbnail.h"
 #include "vault/vault.h"
 #include "fixtures.h"
@@ -103,10 +104,38 @@ TEST(decode_tga_format_and_dims)
     REQUIRE(!buf.empty());
     const auto img = image::decode_from_memory(buf);
     REQUIRE(img.has_value());
-    // TGA has no magic bytes; detect_format returns TGA as the fallback.
+    // TGA has no magic bytes; detect_format returns Unknown and the stb path
+    // tags the decoded image as TGA (its last-resort decoder).
     CHECK_EQ(img->format, image::ImageFormat::TGA);
     CHECK_EQ(img->width,  4);
     CHECK_EQ(img->height, 4);
+}
+
+// ---------------------------------------------------------------------------
+// format_registry magic-byte detection
+// ---------------------------------------------------------------------------
+
+TEST(detect_format_identifies_containers)
+{
+    using image::ImageFormat;
+    using image::detect_format;
+
+    CHECK_EQ(detect_format(std::span<const uint8_t>{}), ImageFormat::Unknown);
+    CHECK_EQ(detect_format(fixtures::solid_png(2, 2, 1, 2, 3)),  ImageFormat::PNG);
+    CHECK_EQ(detect_format(fixtures::solid_jpeg(2, 2, 1, 2, 3)), ImageFormat::JPEG);
+
+    // Hand-built container headers (just the magic bytes the registry inspects).
+    const std::vector<uint8_t> webp{'R','I','F','F', 0,0,0,0, 'W','E','B','P'};
+    CHECK_EQ(detect_format(webp), ImageFormat::WebP);
+
+    const std::vector<uint8_t> avif{0,0,0,0x18, 'f','t','y','p', 'a','v','i','f'};
+    CHECK_EQ(detect_format(avif), ImageFormat::AVIF);
+
+    const std::vector<uint8_t> heic{0,0,0,0x18, 'f','t','y','p', 'h','e','i','c'};
+    CHECK_EQ(detect_format(heic), ImageFormat::HEIC);
+
+    const std::vector<uint8_t> mif1{0,0,0,0x18, 'f','t','y','p', 'm','i','f','1'};
+    CHECK_EQ(detect_format(mif1), ImageFormat::HEIC);
 }
 
 // ---------------------------------------------------------------------------

@@ -14,6 +14,9 @@ enum class ImageFormat : uint8_t {
     BMP     = 3,
     TGA     = 4,
     HDR     = 5,
+    WebP    = 6,
+    HEIC    = 7,
+    AVIF    = 8,
     Unknown = 0xFF,
 };
 
