@@ -1,47 +1,35 @@
 @echo off
-rem build_codecs.bat — build vendored image codecs (WebP; HEIC/AVIF in Stage B)
-rem as static libs into vendor\codecs-prefix. Called by setup.bat and by CI.
-rem Requires cmake, Ninja, and (for libaom, Stage B) nasm on PATH.
+rem build_codecs.bat — build vendored image codecs (WebP, HEIC/AVIF) as static
+rem libs into vendor\codecs-prefix. Called by setup.bat and by CI.
+rem Requires cmake, Ninja, and nasm (for libaom) on PATH.
+rem
+rem Per-codec cmake flags are passed via the EXTRA variable rather than as
+rem subroutine arguments: cmd splits a "-DVAR=OFF" token on the '=' when it is a
+rem %1-style argument, which would corrupt the flags.
 setlocal enabledelayedexpansion
 pushd "%~dp0.."
 set "CODEC_PREFIX=%CD%\vendor\codecs-prefix"
 
-call :build_codec webp vendor\libwebp ^
-    -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_CWEBP=OFF ^
-    -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_GIF2WEBP=OFF ^
-    -DWEBP_BUILD_IMG2WEBP=OFF -DWEBP_BUILD_VWEBP=OFF ^
-    -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=OFF ^
-    -DWEBP_BUILD_EXTRAS=OFF || goto :fail
+set "EXTRA=-DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_CWEBP=OFF -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_GIF2WEBP=OFF -DWEBP_BUILD_IMG2WEBP=OFF -DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=OFF -DWEBP_BUILD_EXTRAS=OFF"
+call :build_codec webp vendor\libwebp || goto :fail
 
-call :build_codec de265 vendor\libde265 ^
-    -DENABLE_DECODER=OFF -DENABLE_ENCODER=OFF -DENABLE_SDL=OFF || goto :fail
+set "EXTRA=-DENABLE_DECODER=OFF -DENABLE_ENCODER=OFF -DENABLE_SDL=OFF"
+call :build_codec de265 vendor\libde265 || goto :fail
 
-call :build_codec aom vendor\libaom ^
-    -DCONFIG_AV1_ENCODER=0 -DENABLE_TESTS=OFF -DENABLE_EXAMPLES=OFF ^
-    -DENABLE_TOOLS=OFF -DENABLE_DOCS=OFF || goto :fail
+set "EXTRA=-DCONFIG_AV1_ENCODER=0 -DENABLE_TESTS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_TOOLS=OFF -DENABLE_DOCS=OFF"
+call :build_codec aom vendor\libaom || goto :fail
 
-call :build_codec heif vendor\libheif ^
-    -DWITH_LIBDE265=ON -DWITH_AOM_DECODER=ON -DWITH_AOM_ENCODER=OFF ^
-    -DWITH_X265=OFF -DWITH_EXAMPLES=OFF -DWITH_GDK_PIXBUF=OFF ^
-    -DENABLE_PLUGIN_LOADING=OFF -DBUILD_TESTING=OFF || goto :fail
+set "EXTRA=-DWITH_LIBDE265=ON -DWITH_AOM_DECODER=ON -DWITH_AOM_ENCODER=OFF -DWITH_X265=OFF -DWITH_EXAMPLES=OFF -DWITH_GDK_PIXBUF=OFF -DENABLE_PLUGIN_LOADING=OFF -DBUILD_TESTING=OFF"
+call :build_codec heif vendor\libheif || goto :fail
 
 echo ==^> Codecs installed into vendor\codecs-prefix
 popd
 exit /b 0
 
 :build_codec
-rem %1 = name  %2 = src dir  %3.. = extra cmake args
+rem %1 = name  %2 = src dir  (extra cmake flags come from EXTRA)
 set "CNAME=%~1"
 set "CSRC=%~2"
-shift
-shift
-set "CARGS="
-:collect_args
-if "%~1"=="" goto :do_build
-set "CARGS=!CARGS! %~1"
-shift
-goto :collect_args
-:do_build
 if exist "%CODEC_PREFIX%\lib\*%CNAME%*" (
     echo ==^> codec %CNAME% already installed — skipping.
     exit /b 0
@@ -54,7 +42,7 @@ cmake -S "%CSRC%" -B "%CSRC%\build" -G "Ninja" ^
     -DCMAKE_INSTALL_LIBDIR=lib ^
     -DCMAKE_PREFIX_PATH="%CODEC_PREFIX%" ^
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ^
-    !CARGS! || exit /b 1
+    !EXTRA! || exit /b 1
 cmake --build "%CSRC%\build" --parallel || exit /b 1
 cmake --install "%CSRC%\build" || exit /b 1
 exit /b 0
