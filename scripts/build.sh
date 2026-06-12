@@ -11,6 +11,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Core count: nproc is Linux-only; macOS uses sysctl.
+NPROC="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+
 CONFIG="Debug"
 USE_GMAKE=false
 
@@ -30,7 +33,8 @@ if [[ "$USE_GMAKE" = true ]]; then
         echo "No Makefile found — run: scripts/gen.sh --gmake"
         exit 1
     fi
-    make config="${CONFIG,,}_x64" -j"$(nproc)"
+    CONFIG_LC="$(printf '%s' "$CONFIG" | tr '[:upper:]' '[:lower:]')"
+    make config="${CONFIG_LC}_x64" -j"$NPROC"
 else
     if [[ ! -f "build.ninja" ]]; then
         echo "No build.ninja found — run: scripts/gen.sh"

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "image/fixtures.h"
+#include "vault/file_util.h"
 #include "vault/vault.h"
 
 namespace fs = std::filesystem;
@@ -193,4 +194,38 @@ TEST(compact_requires_unlocked_vault)
     REQUIRE(vault::Vault::open(tv.str(), v2) == vault::VaultResult::Ok);
     CHECK_EQ(v2.compact(), vault::VaultResult::Locked);
     CHECK_EQ(v2.wasted_bytes(), 0u);  // unknown while locked
+}
+
+TEST(compact_rename_failure_keeps_original_vault_usable)
+{
+    TempVault tv("renamefail");
+    const auto keep = pattern(8 * 1024, 9);
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", pattern(100 * 1024, 6), "gone.bin") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", keep, "keep.bin")                   == vault::VaultResult::Ok);
+    REQUIRE(v.remove_image("", "gone.bin") == vault::VaultResult::Ok);
+
+    // The atomic-commit rename fails: compact() must report IoError, leave the
+    // original vault file in place, and reacquire its handle (the temp file's
+    // contents must never become the vault without a successful rename).
+    vault::fileutil::inject_rename_failure(0);
+    CHECK_EQ(v.compact(), vault::VaultResult::IoError);
+    vault::fileutil::clear_rename_failure();
+
+    CHECK_TRUE(v.wasted_bytes() > 0);  // nothing was reclaimed
+    auto kids = v.list("");
+    REQUIRE(kids.size() == 1);
+    crypto::SecureBytes out;
+    REQUIRE(v.read_image(*kids[0], out) == vault::VaultResult::Ok);
+    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(keep));
+
+    // A later compact (rename now succeeding) completes normally.
+    REQUIRE(v.compact() == vault::VaultResult::Ok);
+    CHECK_EQ(v.wasted_bytes(), 0u);
+    crypto::SecureBytes again;
+    REQUIRE(v.read_image(*v.list("")[0], again) == vault::VaultResult::Ok);
+    CHECK_BYTES_EQ(again.as_span(), std::span<const uint8_t>(keep));
 }

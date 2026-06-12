@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 
 #if defined(_WIN32)
@@ -60,6 +61,30 @@ inline int& sync_fail_after() noexcept
 
 inline void inject_sync_failure(int after_calls) noexcept { sync_fail_after() = after_calls; }
 inline void clear_sync_failure() noexcept                 { sync_fail_after() = -1; }
+
+// Same arm-once pattern for rename: compaction's atomic commit is a rename,
+// and its failure-recovery path (reacquire the original handle) is otherwise
+// untestable — there is no portable way to make a real rename fail on demand.
+inline int& rename_fail_after() noexcept
+{
+    static int n = -1;
+    return n;
+}
+
+inline void inject_rename_failure(int after_calls) noexcept { rename_fail_after() = after_calls; }
+inline void clear_rename_failure() noexcept                 { rename_fail_after() = -1; }
+
+// Rename `from` over `to`. Returns false on failure (injected or real).
+[[nodiscard]] inline bool rename_file(const std::string& from, const std::string& to) noexcept
+{
+    if (int& n = rename_fail_after(); n >= 0) {
+        if (n == 0) { n = -1; return false; }
+        --n;
+    }
+    std::error_code ec;
+    std::filesystem::rename(from, to, ec);
+    return !ec;
+}
 
 // Flush stdio buffers and fsync to durable storage.
 [[nodiscard]] inline bool sync(std::FILE* fp) noexcept

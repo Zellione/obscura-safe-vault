@@ -37,3 +37,6 @@ Thumbs.db
 
 # Test vault files (contain personal data)
 *.osv
+
+# Packaging output
+dist/

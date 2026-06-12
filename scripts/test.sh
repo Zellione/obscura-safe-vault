@@ -13,6 +13,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Core count: nproc is Linux-only; macOS uses sysctl.
+NPROC="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+
 CONFIG="Debug"
 USE_GMAKE=false
 ASAN=false
@@ -43,7 +46,8 @@ if [[ "$USE_GMAKE" = true ]]; then
     echo "==> Generating GNU Makefiles..."
     "$PREMAKE" "${PREMAKE_OPTS[@]}" gmake2
     echo "==> Building osv_tests ($CONFIG)..."
-    make config="${CONFIG,,}_x64" osv_tests -j"$(nproc)"
+    CONFIG_LC="$(printf '%s' "$CONFIG" | tr '[:upper:]' '[:lower:]')"
+    make config="${CONFIG_LC}_x64" osv_tests -j"$NPROC"
 else
     echo "==> Generating Ninja build files..."
     "$PREMAKE" "${PREMAKE_OPTS[@]}" ninja

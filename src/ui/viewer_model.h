@@ -14,7 +14,6 @@
 //       (vw/2 + pan.x - scaled_w/2,  vh/2 + pan.y - scaled_h/2)
 
 #include <algorithm>
-#include <cmath>
 
 namespace ui {
 
@@ -59,8 +58,11 @@ struct Vec2 {
 [[nodiscard]] constexpr Vec2 clamp_pan(Vec2 pan, float scaled_w, float scaled_h,
                                        float vw, float vh) noexcept
 {
-    const float lx = std::abs(scaled_w - vw) * 0.5f;
-    const float ly = std::abs(scaled_h - vh) * 0.5f;
+    // Not std::abs: MSVC's <cmath> doesn't implement C++23 constexpr abs yet.
+    const float dx = scaled_w - vw;
+    const float dy = scaled_h - vh;
+    const float lx = (dx < 0.0f ? -dx : dx) * 0.5f;
+    const float ly = (dy < 0.0f ? -dy : dy) * 0.5f;
     return Vec2{std::clamp(pan.x, -lx, lx), std::clamp(pan.y, -ly, ly)};
 }
 

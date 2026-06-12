@@ -135,6 +135,188 @@ jobs:
           path: build/bin/Debug/osv
           retention-days: 7
 
+      # -----------------------------------------------------------------------
+      # Packaging (Release leg only) — tar.gz with install.sh
+      # -----------------------------------------------------------------------
+      - name: Package (tar.gz)
+        if: matrix.config == 'Release' && matrix.compiler == 'gcc'
+        run: scripts/package.sh
+
+      - name: Upload package
+        if: matrix.config == 'Release' && matrix.compiler == 'gcc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: osv-linux-tarball
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  # ===========================================================================
+  # Windows — MSVC via premake vs2022 + MSBuild. The vendored SDL3 static lib
+  # is cmake-built with Ninja (cl on PATH via msvc-dev-cmd) and lands at
+  # vendor/SDL3/build/SDL3-static.lib, which premake's link_sdl3() picks up.
+  # ===========================================================================
+  windows:
+    name: MSVC / ${{ matrix.config }} / Windows
+    runs-on: windows-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Debug, Release]
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Cache premake5 binary
+        uses: actions/cache@v4
+        id: cache-premake5
+        with:
+          path: bin/premake5.exe
+          key: premake5-5.0.0-beta8-windows
+
+      - name: Download premake5
+        if: steps.cache-premake5.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+          curl.exe -fsSL "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-windows.zip" -o "$env:TEMP\premake5.zip"
+          tar -xf "$env:TEMP\premake5.zip" -C bin
+
+      - name: Cache vendored SDL3 build
+        uses: actions/cache@v4
+        id: cache-sdl3
+        with:
+          path: vendor/SDL3/build
+          key: sdl3-windows-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored SDL3
+        if: steps.cache-sdl3.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          cmake -S vendor/SDL3 -B vendor/SDL3/build `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DSDL_STATIC=ON -DSDL_SHARED=OFF `
+            -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_INSTALL_TESTS=OFF `
+            -G "Ninja"
+          cmake --build vendor/SDL3/build --parallel
+
+      - name: Generate VS2022 solution
+        run: bin\premake5.exe vs2022
+
+      - name: Build (${{ matrix.config }})
+        run: msbuild ObscuraSafeVault.sln /m "/p:Configuration=${{ matrix.config }}" /p:Platform=x64
+
+      - name: Run tests (${{ matrix.config }})
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: ./build/bin/${{ matrix.config }}/osv_tests.exe
+
+      # -----------------------------------------------------------------------
+      # Packaging (Release leg only) — NSIS installer (installed via choco;
+      # PATH doesn't refresh mid-job, so call makensis by its install path)
+      # -----------------------------------------------------------------------
+      - name: Package (NSIS installer)
+        if: matrix.config == 'Release'
+        shell: pwsh
+        run: |
+          choco install nsis --no-progress -y
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" /DVERSION=dev packaging\windows\osv.nsi
+
+      - name: Upload package
+        if: matrix.config == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: osv-windows-installer
+          path: dist/*.exe
+          retention-days: 7
+
+  # ===========================================================================
+  # macOS — AppleClang via premake gmake2. Builds the native architecture
+  # (arm64 on current runners); the vendored SDL3 is cmake-built natively too.
+  # ===========================================================================
+  macos:
+    name: AppleClang / ${{ matrix.config }} / macOS
+    runs-on: macos-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Debug, Release]
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache premake5 binary
+        uses: actions/cache@v4
+        id: cache-premake5
+        with:
+          path: bin/premake5
+          key: premake5-5.0.0-beta8-macosx
+
+      - name: Download premake5
+        if: steps.cache-premake5.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p bin
+          curl -fsSL \
+            "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-macosx.tar.gz" \
+            -o /tmp/premake5.tar.gz
+          tar -xzf /tmp/premake5.tar.gz -C bin/
+          chmod +x bin/premake5
+
+      - name: Cache vendored SDL3 build
+        uses: actions/cache@v4
+        id: cache-sdl3
+        with:
+          path: vendor/SDL3/build
+          key: sdl3-macos-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored SDL3
+        if: steps.cache-sdl3.outputs.cache-hit != 'true'
+        run: |
+          cmake -S vendor/SDL3 -B vendor/SDL3/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSDL_STATIC=ON -DSDL_SHARED=OFF \
+            -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_INSTALL_TESTS=OFF
+          cmake --build vendor/SDL3/build --parallel 3
+
+      - name: Generate Makefiles
+        run: bin/premake5 gmake2
+
+      - name: Build (${{ matrix.config }})
+        run: |
+          CONFIG_LC="$(printf '%s' "${{ matrix.config }}" | tr '[:upper:]' '[:lower:]')"
+          make config="${CONFIG_LC}_x64" -j3
+
+      - name: Run tests (${{ matrix.config }})
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: ./build/bin/${{ matrix.config }}/osv_tests
+
+      # -----------------------------------------------------------------------
+      # Packaging (Release leg only) — ad-hoc-signed .app bundle, zipped
+      # -----------------------------------------------------------------------
+      - name: Package (.app bundle)
+        if: matrix.config == 'Release'
+        run: scripts/package_macos.sh
+
+      - name: Upload package
+        if: matrix.config == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: osv-macos-app
+          path: dist/*.zip
+          retention-days: 7
+
   # ===========================================================================
   # Sanitiser gate — builds and runs the full test suite under ASAN + UBSan +
   # LSan. Enforces the Phase 1 acceptance criterion ("no leaks; mlock handled
