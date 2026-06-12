@@ -67,6 +67,41 @@ else
     echo "==> vendored SDL3 already built — skipping cmake."
 fi
 
+# ---------------------------------------------------------------------------
+# Vendored image codecs (WebP now; HEIC/AVIF stack added in Phase 9 Stage B).
+# Each is cmake-built static and `cmake --install`ed into one staging prefix so
+# that dependents (libheif) can find their dependencies (libde265/libaom) via
+# CMAKE_PREFIX_PATH, and premake5.lua links the whole set from a single dir.
+# ---------------------------------------------------------------------------
+CODEC_PREFIX="$REPO_ROOT/vendor/codecs-prefix"
+
+build_codec() {  # name  src_dir  extra_cmake_args...
+    local name="$1"; local src="$2"; shift 2
+    if [[ -d "$CODEC_PREFIX/lib" ]] && \
+       find "$CODEC_PREFIX/lib" -name "*${name}*" 2>/dev/null | grep -q .; then
+        echo "==> codec $name already installed — skipping."
+        return
+    fi
+    echo "==> Building vendored $name (static)..."
+    cmake -S "$src" -B "$src/build"                 \
+        -DCMAKE_BUILD_TYPE=Release                  \
+        -DBUILD_SHARED_LIBS=OFF                     \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON        \
+        -DCMAKE_INSTALL_PREFIX="$CODEC_PREFIX"      \
+        -DCMAKE_INSTALL_LIBDIR=lib                  \
+        -DCMAKE_PREFIX_PATH="$CODEC_PREFIX"         \
+        "$@" -G "Ninja"
+    cmake --build "$src/build" --parallel "$NPROC"
+    cmake --install "$src/build"
+}
+
+build_codec webp "$REPO_ROOT/vendor/libwebp"                            \
+    -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_CWEBP=OFF                  \
+    -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_GIF2WEBP=OFF                    \
+    -DWEBP_BUILD_IMG2WEBP=OFF -DWEBP_BUILD_VWEBP=OFF                    \
+    -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=OFF                  \
+    -DWEBP_BUILD_EXTRAS=OFF
+
 echo ""
 echo "Setup complete. Next steps:"
 echo "  scripts/gen.sh    # generate Ninja build files"
