@@ -88,8 +88,8 @@ local function link_image_codecs()
         includedirs { path.join(prefix, "include") }
         libdirs     { path.join(prefix, "lib") }
         -- Static-link order matters: dependents before dependencies.
-        -- (heif -> de265, aom are added in Stage B; webp -> sharpyuv.)
-        links   { "webp", "sharpyuv" }
+        -- heif depends on de265 (HEIC) and aom (AVIF); webp depends on sharpyuv.
+        links   { "heif", "de265", "aom", "webp", "sharpyuv" }
         defines { "OSV_VENDORED_CODECS" }
     end
 end
