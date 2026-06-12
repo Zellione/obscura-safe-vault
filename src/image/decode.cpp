@@ -46,9 +46,4 @@ std::optional<ImageData> decode_from_memory(std::span<const uint8_t> data)
     }
 }
 
-// TEMP (Stage A scaffolding): the real decode_heif_from_memory lands in
-// decode_heif.cpp (Task B5), which removes this stub. decode_webp_from_memory is
-// implemented in decode_webp.cpp.
-std::optional<ImageData> decode_heif_from_memory(std::span<const uint8_t>) { return std::nullopt; }
-
 } // namespace image

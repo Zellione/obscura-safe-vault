@@ -162,6 +162,41 @@ TEST(decode_malformed_webp_returns_nullopt)
 }
 
 // ---------------------------------------------------------------------------
+// HEIC / AVIF decode (libheif: libde265 + libaom) — fixture-backed
+// ---------------------------------------------------------------------------
+
+TEST(decode_heic_format_and_dims)
+{
+    const auto buf = fixtures::load_heic();
+    REQUIRE(!buf.empty());  // fixture present
+    const auto img = image::decode_from_memory(buf);
+    REQUIRE(img.has_value());
+    CHECK_EQ(img->format, image::ImageFormat::HEIC);
+    CHECK_EQ(img->width,  8);
+    CHECK_EQ(img->height, 8);
+    CHECK_EQ(img->pixels.size(), static_cast<size_t>(8 * 8 * 3));
+}
+
+TEST(decode_avif_format_and_dims)
+{
+    const auto buf = fixtures::load_avif();
+    REQUIRE(!buf.empty());  // fixture present
+    const auto img = image::decode_from_memory(buf);
+    REQUIRE(img.has_value());
+    CHECK_EQ(img->format, image::ImageFormat::AVIF);
+    CHECK_EQ(img->width,  8);
+    CHECK_EQ(img->height, 8);
+    CHECK_EQ(img->pixels.size(), static_cast<size_t>(8 * 8 * 3));
+}
+
+TEST(decode_malformed_heif_returns_nullopt)
+{
+    // A truncated ISO-BMFF ftyp box with an HEIC brand but no image payload.
+    const std::vector<uint8_t> bad{0,0,0,0x18, 'f','t','y','p', 'h','e','i','c'};
+    CHECK_FALSE(image::decode_from_memory(bad).has_value());
+}
+
+// ---------------------------------------------------------------------------
 // thumbnail tests
 // ---------------------------------------------------------------------------
 
