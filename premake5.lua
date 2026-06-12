@@ -92,7 +92,9 @@ local function link_image_codecs()
         -- platform: on Unix `-lNAME` finds `libNAME.a`, but MSVC links the name
         -- verbatim and cmake keeps the `lib` prefix on libde265/libwebp/libsharpyuv
         -- (heif/aom have none), so Windows needs the prefixed names.
-        defines { "OSV_VENDORED_CODECS" }
+        -- We link libheif statically; without this its headers declare the API
+        -- as __declspec(dllimport) on MSVC (no-op elsewhere), which breaks the link.
+        defines { "OSV_VENDORED_CODECS", "LIBHEIF_STATIC_BUILD" }
         filter "system:windows"
             links { "heif", "libde265", "aom", "libwebp", "libsharpyuv" }
         filter { "system:not windows" }
