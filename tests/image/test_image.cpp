@@ -139,6 +139,29 @@ TEST(detect_format_identifies_containers)
 }
 
 // ---------------------------------------------------------------------------
+// WebP decode (libwebp) — fixture-backed
+// ---------------------------------------------------------------------------
+
+TEST(decode_webp_format_and_dims)
+{
+    const auto buf = fixtures::load_webp();
+    REQUIRE(!buf.empty());  // fixture present
+    const auto img = image::decode_from_memory(buf);
+    REQUIRE(img.has_value());
+    CHECK_EQ(img->format, image::ImageFormat::WebP);
+    CHECK_EQ(img->width,  8);
+    CHECK_EQ(img->height, 8);
+    CHECK_EQ(img->pixels.size(), static_cast<size_t>(8 * 8 * 3));
+}
+
+TEST(decode_malformed_webp_returns_nullopt)
+{
+    // Valid RIFF/WEBP magic but a bogus, truncated payload.
+    const std::vector<uint8_t> bad{'R','I','F','F', 4,0,0,0, 'W','E','B','P', 'X'};
+    CHECK_FALSE(image::decode_from_memory(bad).has_value());
+}
+
+// ---------------------------------------------------------------------------
 // thumbnail tests
 // ---------------------------------------------------------------------------
 
