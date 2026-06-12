@@ -535,16 +535,21 @@ VaultResult Vault::compact()
     std::fclose(tmp);
 
     // Atomic commit point: rename the fully-synced new vault over the original.
+    // Close our handle first — Windows refuses to replace a file that is open
+    // (POSIX would happily swap the inode under us).
+    std::fclose(fp_);
+    fp_ = nullptr;
     std::error_code ec;
     std::filesystem::rename(tmp_path, path_, ec);
     if (ec) {
         std::remove(tmp_path.c_str());
+        // The original is untouched; reacquire our handle to it.
+        fp_ = std::fopen(path_.c_str(), "r+b");
+        if (!fp_) reset();  // intact on disk; force a clean re-open
         return IoError;
     }
     fileutil::sync_dir_of(path_);
 
-    // Our handle still points at the old (now unlinked) inode; reopen the new one.
-    std::fclose(fp_);
     fp_ = std::fopen(path_.c_str(), "r+b");
     if (!fp_) {
         // The compacted vault is intact on disk but we lost our handle to it;

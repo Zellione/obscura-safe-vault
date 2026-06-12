@@ -16,10 +16,11 @@ std::filesystem::path config_dir()
 {
     char* pref = SDL_GetPrefPath("ObscuraSafeVault", "ObscuraSafeVault");
     if (!pref) return {};
-    // SDL_GetPrefPath returns a path with trailing slash; remove it for clean comparison.
+    // SDL_GetPrefPath returns a path with a trailing separator ('\' on
+    // Windows); remove it for clean comparison.
     std::string s{pref};
     SDL_free(pref);
-    if (!s.empty() && s.back() == '/') s.pop_back();
+    if (!s.empty() && (s.back() == '/' || s.back() == '\\')) s.pop_back();
     return std::filesystem::path{s};
 }
 
