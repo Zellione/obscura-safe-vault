@@ -76,6 +76,24 @@ local function link_platform_extras()
     filter {}
 end
 
+-- ---------------------------------------------------------------------------
+-- Vendored image codecs — WebP (+ HEIC/AVIF stack in Phase 9 Stage B).
+-- scripts/setup.sh cmake-builds each static and installs into one staging
+-- prefix (vendor/codecs-prefix); we link the whole set from there. Shared by
+-- the app and the test runner (osv_tests compiles src/image/*.cpp).
+-- ---------------------------------------------------------------------------
+local function link_image_codecs()
+    local prefix = path.join(os.getcwd(), "vendor/codecs-prefix")
+    if os.isdir(path.join(prefix, "include")) then
+        includedirs { path.join(prefix, "include") }
+        libdirs     { path.join(prefix, "lib") }
+        -- Static-link order matters: dependents before dependencies.
+        -- (heif -> de265, aom are added in Stage B; webp -> sharpyuv.)
+        links   { "webp", "sharpyuv" }
+        defines { "OSV_VENDORED_CODECS" }
+    end
+end
+
 workspace "ObscuraSafeVault"
     configurations { "Debug", "Release" }
     platforms      { "x64" }
@@ -166,6 +184,7 @@ project "osv"
     -- SDL3: vendored cmake build if present, else system SDL3.
     link_sdl3()
     link_platform_extras()
+    link_image_codecs()
 
     -- GUI app on Windows (no console window) for Release; keep the console in
     -- Debug so stderr logging is visible.
@@ -218,3 +237,4 @@ project "osv_tests"
     -- gfx units pull in SDL3 (software renderer is created headlessly in tests).
     link_sdl3()
     link_platform_extras()
+    link_image_codecs()
