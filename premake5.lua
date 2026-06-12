@@ -101,10 +101,19 @@ workspace "ObscuraSafeVault"
         optimize "Speed"
         symbols  "Off"
 
-    -- x86_64 on Linux/Windows; macOS uses the toolchain default so arm64
-    -- machines build natively (the vendored SDL3 is built natively by cmake).
+    -- The "x64" platform name implicitly sets architecture x86_64, so macOS
+    -- must override it to the host arch: arm64 machines need to build natively
+    -- to link the natively-cmake-built vendored SDL3.
     filter { "platforms:x64", "system:linux or windows" }
         architecture "x86_64"
+    filter { "platforms:x64", "system:macosx" }
+        architecture (string.find(os.outputof("uname -m") or "", "arm64") and "ARM64" or "x86_64")
+
+    -- Windows: stop windows.h defining min/max macros (they break std::min/max),
+    -- trim its include surface, and silence MSVC's fopen_s nagging (portable
+    -- stdio is deliberate; see vault/file_util.h).
+    filter "system:windows"
+        defines { "NOMINMAX", "WIN32_LEAN_AND_MEAN", "_CRT_SECURE_NO_WARNINGS" }
 
     -- Opt-in sanitizers (gcc/clang). Applies to every project in the workspace.
     filter { "options:asan", "toolset:gcc or clang" }
