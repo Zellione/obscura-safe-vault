@@ -15,6 +15,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Core count: nproc is Linux-only; macOS uses sysctl.
+NPROC="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+
 echo "==> Initialising git submodules..."
 git submodule update --init --recursive
 
@@ -58,7 +61,7 @@ if [[ ! -f "$SDL3_BUILD/libSDL3.a" ]]; then
         -DSDL_EXAMPLES=OFF            \
         -DSDL_INSTALL_TESTS=OFF       \
         -G "Ninja"
-    cmake --build "$SDL3_BUILD" --parallel "$(nproc)"
+    cmake --build "$SDL3_BUILD" --parallel "$NPROC"
     echo "    libSDL3.a built at vendor/SDL3/build/libSDL3.a"
 else
     echo "==> vendored SDL3 already built — skipping cmake."
