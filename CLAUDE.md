@@ -14,7 +14,7 @@ Standard delivery flow for every phase or feature:
 2. **`scripts/test.sh`** — all tests green.
 3. **`scripts/test.sh --asan`** — no memory/UB errors (for crypto/vault/memory changes).
 4. **Open a PR** — one PR per phase; include ROADMAP and docs updates in the same PR.
-5. **CI green** — all checks must pass on all platforms. Do NOT add SDL3 as a dep to the ASAN job.
+5. **CI green** — all checks must pass on all platforms.
 6. **SonarCloud** — use findings posted to the PR directly (do NOT install/authenticate sonarqube-cli — agents cannot complete the auth flow). Re-scan and confirm zero remaining issues before merging.
 7. **Post-merge verification** — after squash merge, `git fetch` and confirm ROADMAP.md and all doc changes are present on `origin/main`. Fix with a follow-up PR if anything is missing.
 8. **Update Serena memories** — if the phase added/removed source modules, changed deps, renamed symbols, or changed conventions, update the relevant `mem:*` memory (see ## Serena below).

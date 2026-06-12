@@ -33,6 +33,9 @@ if exist vendor\SDL3\build\Release\SDL3-static.lib (
     echo     SDL3-static.lib built at vendor\SDL3\build\Release\
 )
 
+echo ==^> Building vendored image codecs...
+call "%~dp0build_codecs.bat" || goto :fail
+
 echo.
 echo Setup complete. Next steps:
 echo   bin\premake5.exe vs2022
