@@ -87,10 +87,17 @@ local function link_image_codecs()
     if os.isdir(path.join(prefix, "include")) then
         includedirs { path.join(prefix, "include") }
         libdirs     { path.join(prefix, "lib") }
-        -- Static-link order matters: dependents before dependencies.
-        -- heif depends on de265 (HEIC) and aom (AVIF); webp depends on sharpyuv.
-        links   { "heif", "de265", "aom", "webp", "sharpyuv" }
+        -- Static-link order matters: dependents before dependencies
+        -- (heif → de265, aom ; webp → sharpyuv). The lib filenames differ by
+        -- platform: on Unix `-lNAME` finds `libNAME.a`, but MSVC links the name
+        -- verbatim and cmake keeps the `lib` prefix on libde265/libwebp/libsharpyuv
+        -- (heif/aom have none), so Windows needs the prefixed names.
         defines { "OSV_VENDORED_CODECS" }
+        filter "system:windows"
+            links { "heif", "libde265", "aom", "libwebp", "libsharpyuv" }
+        filter { "system:not windows" }
+            links { "heif", "de265", "aom", "webp", "sharpyuv" }
+        filter {}
     end
 end
 

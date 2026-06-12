@@ -59,6 +59,7 @@ build_codec aom "$REPO_ROOT/vendor/libaom"                             \
 build_codec heif "$REPO_ROOT/vendor/libheif"                           \
     -DWITH_LIBDE265=ON -DWITH_AOM_DECODER=ON -DWITH_AOM_ENCODER=OFF     \
     -DWITH_X265=OFF -DWITH_EXAMPLES=OFF -DWITH_GDK_PIXBUF=OFF           \
-    -DENABLE_PLUGIN_LOADING=OFF -DBUILD_TESTING=OFF
+    -DENABLE_PLUGIN_LOADING=OFF -DBUILD_TESTING=OFF                     \
+    -DCMAKE_DISABLE_FIND_PACKAGE_Doxygen=ON
 
 echo "==> Codecs installed into vendor/codecs-prefix"
