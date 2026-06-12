@@ -21,25 +21,59 @@ newoption {
 -- falls back to a system SDL3 install.
 -- ---------------------------------------------------------------------------
 local function link_sdl3()
-    local vendored_sdl3_lib = path.join(os.getcwd(), "vendor/SDL3/build/libSDL3.a")
-    if os.isfile(vendored_sdl3_lib) then
-        includedirs { "vendor/SDL3/include" }
-        libdirs     { "vendor/SDL3/build" }
-        links       { "SDL3" }
-        defines     { "OSV_VENDORED_SDL3" }
-    else
-        filter "system:linux"
-            includedirs { "/usr/include/SDL3" }
-            links       { "SDL3" }
-        filter "system:windows"
-            includedirs { "C:/SDL3/include" }
-            libdirs     { "C:/SDL3/lib/x64" }
-            links       { "SDL3" }
-        filter "system:macosx"
-            includedirs { "/usr/local/include/SDL3" }
-            links       { "SDL3" }
-        filter {}
+    -- CMake names the static lib libSDL3.a on Linux/macOS but SDL3-static.lib
+    -- on Windows; the Visual Studio generator nests it in a per-config dir.
+    local sdl3_build = path.join(os.getcwd(), "vendor/SDL3/build")
+    local candidates = {
+        { lib = "SDL3",        file = "libSDL3.a",               dir = sdl3_build },                        -- Linux/macOS (Ninja/Make)
+        { lib = "SDL3-static", file = "SDL3-static.lib",         dir = sdl3_build },                        -- Windows (Ninja)
+        { lib = "SDL3-static", file = "Release/SDL3-static.lib", dir = path.join(sdl3_build, "Release") },  -- Windows (VS generator)
+    }
+    for _, c in ipairs(candidates) do
+        if os.isfile(path.join(sdl3_build, c.file)) then
+            includedirs { "vendor/SDL3/include" }
+            libdirs     { c.dir }
+            links       { c.lib }
+            defines     { "OSV_VENDORED_SDL3" }
+            return
+        end
     end
+    -- Fall back to a system SDL3 install.
+    filter "system:linux"
+        includedirs { "/usr/include/SDL3" }
+        links       { "SDL3" }
+    filter "system:windows"
+        includedirs { "C:/SDL3/include" }
+        libdirs     { "C:/SDL3/lib/x64" }
+        links       { "SDL3" }
+    filter "system:macosx"
+        includedirs { "/usr/local/include/SDL3" }
+        links       { "SDL3" }
+    filter {}
+end
+
+-- OS libraries/frameworks needed by a static SDL3 link + our crypto shim.
+-- Shared by the app and the test runner.
+local function link_platform_extras()
+    filter "system:linux"
+        links { "dl", "pthread", "m" }
+    filter "system:windows"
+        -- bcrypt: crypto/random.cpp. The rest: static SDL3.
+        links { "bcrypt", "winmm", "imm32", "version", "setupapi",
+                "ole32", "oleaut32", "advapi32", "shell32", "user32",
+                "gdi32", "uuid" }
+    filter "system:macosx"
+        links {
+            "iconv",
+            "Cocoa.framework", "Carbon.framework", "IOKit.framework",
+            "ForceFeedback.framework", "CoreAudio.framework",
+            "AudioToolbox.framework", "AVFoundation.framework",
+            "CoreMedia.framework", "CoreVideo.framework",
+            "CoreHaptics.framework", "GameController.framework",
+            "Metal.framework", "QuartzCore.framework",
+            "UniformTypeIdentifiers.framework",
+        }
+    filter {}
 end
 
 workspace "ObscuraSafeVault"
@@ -67,7 +101,9 @@ workspace "ObscuraSafeVault"
         optimize "Speed"
         symbols  "Off"
 
-    filter "platforms:x64"
+    -- x86_64 on Linux/Windows; macOS uses the toolchain default so arm64
+    -- machines build natively (the vendored SDL3 is built natively by cmake).
+    filter { "platforms:x64", "system:linux or windows" }
         architecture "x86_64"
 
     -- Opt-in sanitizers (gcc/clang). Applies to every project in the workspace.
@@ -120,12 +156,13 @@ project "osv"
 
     -- SDL3: vendored cmake build if present, else system SDL3.
     link_sdl3()
+    link_platform_extras()
 
-    -- Platform link extras
-    filter "system:linux"
-        links { "dl", "pthread", "m" }
-    filter "system:windows"
-        links { "winmm", "imm32", "version", "setupapi" }
+    -- GUI app on Windows (no console window) for Release; keep the console in
+    -- Debug so stderr logging is visible.
+    filter { "system:windows", "configurations:Release" }
+        kind "WindowedApp"
+        entrypoint "mainCRTStartup"   -- keep standard main(), not WinMain
     filter {}
 
 -- ---------------------------------------------------------------------------
@@ -171,9 +208,4 @@ project "osv_tests"
 
     -- gfx units pull in SDL3 (software renderer is created headlessly in tests).
     link_sdl3()
-
-    filter "system:linux"
-        links { "dl", "pthread", "m" }
-    filter "system:windows"
-        links { "bcrypt", "winmm", "imm32", "version", "setupapi" }
-    filter {}
+    link_platform_extras()
