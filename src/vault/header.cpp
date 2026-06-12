@@ -63,6 +63,26 @@ void Header::serialize(std::span<uint8_t, HEADER_SIZE> out) const noexcept
     out[off::ACTIVE_SLOT] = active_slot;
 }
 
+namespace {
+
+// The KDF parameters come from an *untrusted* file and size the Argon2 work
+// area (m_cost_kib KiB), so a hostile header is an out-of-memory / DoS vector.
+// Reject anything outside a generous-but-finite policy window rather than
+// attempting a 4 TiB allocation. Argon2 itself requires nb_blocks >= 8 lanes.
+bool kdf_params_sane(uint8_t algo, const crypto::KdfParams& p) noexcept
+{
+    constexpr uint32_t MAX_T_COST      = 512;
+    constexpr uint32_t MAX_M_COST_KIB  = 4u * 1024 * 1024;  // 4 GiB
+    constexpr uint32_t MAX_PARALLELISM = 64;
+
+    return algo == 0 &&  // Argon2id is the only defined KDF
+           p.t_cost >= 1 && p.t_cost <= MAX_T_COST &&
+           p.parallelism >= 1 && p.parallelism <= MAX_PARALLELISM &&
+           p.m_cost_kib >= 8 * p.parallelism && p.m_cost_kib <= MAX_M_COST_KIB;
+}
+
+} // namespace
+
 bool Header::parse(std::span<const uint8_t> raw, Header& out) noexcept
 {
     if (raw.size() < HEADER_SIZE) return false;
@@ -78,6 +98,7 @@ bool Header::parse(std::span<const uint8_t> raw, Header& out) noexcept
     out.kdf.t_cost      = get_u32_at(raw, off::T_COST);
     out.kdf.m_cost_kib  = get_u32_at(raw, off::M_COST_KIB);
     out.kdf.parallelism = get_u32_at(raw, off::PARALLELISM);
+    if (!kdf_params_sane(out.kdf_algo, out.kdf)) return false;
     std::memcpy(out.salt.data(), raw.data() + off::SALT, out.salt.size());
     out.keyfile_required = raw[off::KEYFILE_REQUIRED];
 
@@ -95,8 +116,9 @@ bool Header::parse(std::span<const uint8_t> raw, Header& out) noexcept
     std::memcpy(out.slot[1].nonce.data(), raw.data() + off::SLOT_B_NONCE,
                 out.slot[1].nonce.size());
 
+    // active_slot indexes the 2-entry slot array; anything else is hostile.
     out.active_slot = raw[off::ACTIVE_SLOT];
-    return true;
+    return out.active_slot <= 1;
 }
 
 } // namespace vault

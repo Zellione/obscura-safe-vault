@@ -47,6 +47,13 @@ enum class VaultResult {
 
 class Vault {
 public:
+    // Auto-compaction gates (remove_image): rewrite the vault only when at
+    // least this much is reclaimable AND the waste is at least a quarter of
+    // the file — rewriting everything to reclaim a few KiB costs more I/O
+    // than it returns.
+    static constexpr uint64_t AUTO_COMPACT_MIN_WASTE   = 256 * 1024;
+    static constexpr uint64_t AUTO_COMPACT_WASTE_RATIO = 4;  // waste >= size/4
+
     Vault() = default;
     ~Vault();
 
@@ -74,6 +81,16 @@ public:
     // Wipe the master key and drop the in-memory index. The file stays open and
     // the vault can be unlocked again.
     void lock() noexcept;
+
+    // Re-wrap the master key under a KEK derived from the new credentials
+    // (fresh salt + nonce). The old credentials are verified first; AuthFailed
+    // leaves the vault untouched. Data chunks are NOT re-encrypted — the master
+    // key itself never changes. Works on any open vault, locked or unlocked,
+    // and preserves the lock state.
+    [[nodiscard]] VaultResult change_password(std::span<const uint8_t> old_password,
+                                              std::span<const uint8_t> old_keyfile,
+                                              std::span<const uint8_t> new_password,
+                                              std::span<const uint8_t> new_keyfile);
 
     [[nodiscard]] bool is_unlocked() const noexcept { return unlocked_; }
 
@@ -106,6 +123,18 @@ public:
     // Immediate children of `gallery_path`. Pointers are valid until the next
     // mutating call. Empty if the path is missing or not a gallery.
     [[nodiscard]] std::vector<const IndexNode*> list(std::string_view gallery_path) const;
+
+    // Reclaimable bytes: the part of the data region not referenced by any live
+    // image/thumbnail chunk or the active index blob (orphaned chunks from
+    // deletes plus superseded index blobs). 0 while locked — the index is
+    // needed to know what is live.
+    [[nodiscard]] uint64_t wasted_bytes() const;
+
+    // Rewrite the vault to hold only live data: copy live chunks verbatim into
+    // a new file, write a fresh index + header, fsync, then atomically rename
+    // over the original. Reclaims wasted_bytes(). Invalidates all IndexNode
+    // pointers previously returned by list().
+    [[nodiscard]] VaultResult compact();
 
 private:
     // Persist the in-memory index with the crash-safe double-buffer swap.

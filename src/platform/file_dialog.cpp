@@ -54,6 +54,15 @@ void FileDialog::open_keyfile(SDL_Window* parent)
                            static_cast<int>(f.size()), nullptr, /*allow_many*/ false);
 }
 
+void FileDialog::save_keyfile(SDL_Window* parent)
+{
+    if (!begin_open()) return;
+    static constexpr std::array f{SDL_DialogFileFilter{"Keyfile", "key"},
+                                  SDL_DialogFileFilter{"All files", "*"}};
+    SDL_ShowSaveFileDialog(on_files, this, parent, f.data(),
+                           static_cast<int>(f.size()), nullptr);
+}
+
 bool FileDialog::busy() const noexcept
 {
     std::lock_guard lk(mtx_);

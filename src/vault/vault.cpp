@@ -4,6 +4,7 @@
 #include <array>
 #include <chrono>
 #include <cstring>
+#include <filesystem>
 #include <utility>
 
 #include "crypto/aead.h"
@@ -68,6 +69,18 @@ bool holds_images(const IndexNode& g)
 bool holds_galleries(const IndexNode& g)
 {
     return std::ranges::any_of(g.children, [](const auto& c) { return c.is_gallery(); });
+}
+
+// Visit every image node in the tree rooted at `n` (templated so it serves
+// both const and non-const callers).
+template <typename NodeT, typename Fn>
+void for_each_image(NodeT& n, Fn&& fn)
+{
+    if (n.is_image()) {
+        fn(n);
+        return;
+    }
+    for (auto& c : n.children) for_each_image(c, fn);
 }
 
 } // namespace
@@ -244,6 +257,49 @@ VaultResult Vault::unlock(std::span<const uint8_t> password,
     return VaultResult::Ok;
 }
 
+VaultResult Vault::change_password(std::span<const uint8_t> old_password,
+                                   std::span<const uint8_t> old_keyfile,
+                                   std::span<const uint8_t> new_password,
+                                   std::span<const uint8_t> new_keyfile)
+{
+    using enum VaultResult;
+    if (fp_ == nullptr) return IoError;
+
+    // Verify the old credentials by unwrapping the master key from the header
+    // into a scratch buffer (the vault's own key state is untouched until the
+    // new wrap is safely on disk).
+    crypto::SecureBuffer<crypto::KEY_SIZE> kek;
+    if (!crypto::derive_key(old_password, old_keyfile, header_.salt, header_.kdf, kek)) {
+        return CryptoError;
+    }
+    std::array<uint8_t, crypto::KEY_SIZE + crypto::TAG_SIZE> sealed{};
+    std::memcpy(sealed.data(), header_.wrapped_master_key.data(), crypto::KEY_SIZE);
+    std::memcpy(sealed.data() + crypto::KEY_SIZE, header_.mk_tag.data(), crypto::TAG_SIZE);
+    crypto::SecureBuffer<crypto::KEY_SIZE> master;
+    if (!crypto::open_to(kek.as_span(), header_.mk_nonce, sealed, master.span())) {
+        return AuthFailed;  // wrong old password / keyfile
+    }
+
+    // Re-wrap under the new KEK with a fresh salt and nonce (never reuse
+    // either — a reused salt would let one cracked password open both wraps).
+    Header h = header_;
+    if (!crypto::fill_random(h.salt) || !crypto::fill_random(h.mk_nonce)) {
+        return CryptoError;
+    }
+    if (!crypto::derive_key(new_password, new_keyfile, h.salt, h.kdf, kek)) {
+        return CryptoError;
+    }
+    std::vector<uint8_t> wrapped;
+    crypto::seal(kek.as_span(), h.mk_nonce, master.as_span(), wrapped);
+    std::memcpy(h.wrapped_master_key.data(), wrapped.data(), crypto::KEY_SIZE);
+    std::memcpy(h.mk_tag.data(), wrapped.data() + crypto::KEY_SIZE, crypto::TAG_SIZE);
+    h.keyfile_required = new_keyfile.empty() ? 0 : 1;
+
+    header_ = h;
+    if (!write_header()) return IoError;
+    return Ok;
+}
+
 // --- structure ------------------------------------------------------------
 
 IndexNode*       Vault::find_gallery(std::string_view p)       { return resolve_gallery(&root_, p); }
@@ -367,8 +423,19 @@ VaultResult Vault::remove_image(std::string_view gallery_path, std::string_view 
 
     for (auto it = g->children.begin(); it != g->children.end(); ++it) {
         if (it->is_image() && it->name == filename) {
-            g->children.erase(it);  // chunk is orphaned; reclaimed by compaction
-            return commit_index();
+            g->children.erase(it);  // chunk is orphaned until compaction
+            if (const VaultResult r = commit_index(); r != Ok) return r;
+
+            // Best-effort space reclamation: the remove itself already
+            // succeeded, so a failed compaction only leaves waste behind.
+            uint64_t size = 0;
+            if (const uint64_t waste = wasted_bytes();
+                waste >= AUTO_COMPACT_MIN_WASTE &&
+                fileutil::file_size(fp_, size) &&
+                waste * AUTO_COMPACT_WASTE_RATIO >= size) {
+                (void)compact();
+            }
+            return Ok;
         }
     }
     return NotFound;
@@ -382,6 +449,112 @@ std::vector<const IndexNode*> Vault::list(std::string_view gallery_path) const
     out.reserve(g->children.size());
     for (const auto& c : g->children) out.push_back(&c);
     return out;
+}
+
+// --- compaction -------------------------------------------------------------
+
+uint64_t Vault::wasted_bytes() const
+{
+    if (!unlocked_ || !fp_) return 0;
+
+    uint64_t size = 0;
+    if (!fileutil::file_size(fp_, size)) return 0;
+
+    uint64_t live = HEADER_SIZE + header_.slot[header_.active_slot].length;
+    for_each_image(root_, [&live](const IndexNode& img) {
+        live += img.meta.data_length + img.meta.thumb_length;
+    });
+    return size > live ? size - live : 0;
+}
+
+VaultResult Vault::compact()
+{
+    using enum VaultResult;
+    if (!unlocked_) return Locked;
+
+    const std::string tmp_path = path_ + ".compact";
+    std::FILE* tmp = std::fopen(tmp_path.c_str(), "w+b");
+    if (!tmp) return IoError;
+
+    // Any failure below abandons the temp file; the original vault is untouched.
+    auto fail = [&](VaultResult r) {
+        std::fclose(tmp);
+        std::remove(tmp_path.c_str());
+        return r;
+    };
+
+    std::array<uint8_t, HEADER_SIZE> raw{};
+    if (std::fwrite(raw.data(), 1, raw.size(), tmp) != raw.size()) return fail(IoError);
+
+    // Copy each live chunk verbatim. A byte-identical `nonce|ciphertext|tag`
+    // copy under the same key reveals nothing new (it IS the old ciphertext),
+    // keeps invariant #1 (plaintext never touches an unlocked buffer here),
+    // and skips a pointless decrypt/re-encrypt pass.
+    IndexNode  new_root = root_;
+    ChunkStore src(fp_, master_key_.as_span());
+    ChunkStore dst(tmp, master_key_.as_span());
+
+    VaultResult copy_err = Ok;
+    for_each_image(new_root, [&copy_err, &src, &dst](IndexNode& img) {
+        auto copy_span = [&copy_err, &src, &dst](uint64_t& off, uint64_t len) {
+            if (copy_err != Ok || len == 0) return;
+            std::vector<uint8_t> blob;
+            uint64_t new_off = 0;
+            if (!src.read_raw(off, len, blob) || !dst.append_raw(blob, new_off)) {
+                copy_err = IoError;
+                return;
+            }
+            off = new_off;
+        };
+        copy_span(img.meta.data_offset, img.meta.data_length);
+        copy_span(img.meta.thumb_offset, img.meta.thumb_length);
+    });
+    if (copy_err != Ok) return fail(copy_err);
+
+    // Fresh sealed index into slot A; slot B starts empty in the new file.
+    std::vector<uint8_t> blob;
+    serialize_index(new_root, blob);
+    std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
+    if (!crypto::fill_random(nonce)) return fail(CryptoError);
+    std::vector<uint8_t> sealed;
+    crypto::seal(master_key_.as_span(), nonce, blob, sealed);
+
+    uint64_t idx_off = 0;
+    if (!dst.append_raw(sealed, idx_off) || !dst.sync()) return fail(IoError);
+
+    Header h      = header_;  // KDF params, salt, and master-key wrap carry over
+    h.slot[0]     = IndexSlot{.offset = idx_off, .length = sealed.size(), .nonce = nonce};
+    h.slot[1]     = IndexSlot{};
+    h.active_slot = 0;
+    h.serialize(raw);
+    if (!fileutil::seek_to(tmp, 0) ||
+        std::fwrite(raw.data(), 1, raw.size(), tmp) != raw.size() ||
+        !fileutil::sync(tmp)) {
+        return fail(IoError);
+    }
+    std::fclose(tmp);
+
+    // Atomic commit point: rename the fully-synced new vault over the original.
+    std::error_code ec;
+    std::filesystem::rename(tmp_path, path_, ec);
+    if (ec) {
+        std::remove(tmp_path.c_str());
+        return IoError;
+    }
+    fileutil::sync_dir_of(path_);
+
+    // Our handle still points at the old (now unlinked) inode; reopen the new one.
+    std::fclose(fp_);
+    fp_ = std::fopen(path_.c_str(), "r+b");
+    if (!fp_) {
+        // The compacted vault is intact on disk but we lost our handle to it;
+        // wipe keys and force a clean re-open rather than limp along.
+        reset();
+        return IoError;
+    }
+    header_ = h;
+    root_   = std::move(new_root);
+    return Ok;
 }
 
 // --- persistence ----------------------------------------------------------

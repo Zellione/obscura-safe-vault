@@ -6,10 +6,12 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <string>
 
 #if defined(_WIN32)
 #  include <io.h>
 #else
+#  include <fcntl.h>
 #  include <unistd.h>
 #endif
 
@@ -43,14 +45,56 @@ namespace vault::fileutil {
     return seek_end(fp, out_size);
 }
 
+// --- fault injection (crash-safety tests) ---------------------------------
+// The double-buffered index swap is only crash-safe if an fsync failure at any
+// step leaves a reopenable vault. There is no portable way to make a real
+// fsync fail on demand, so tests arm this counter to make the Nth upcoming
+// sync() call report failure (0 = the very next call). Disarmed by default and
+// after firing; a single branch on the cold sync() path in production.
+
+inline int& sync_fail_after() noexcept
+{
+    static int n = -1;
+    return n;
+}
+
+inline void inject_sync_failure(int after_calls) noexcept { sync_fail_after() = after_calls; }
+inline void clear_sync_failure() noexcept                 { sync_fail_after() = -1; }
+
 // Flush stdio buffers and fsync to durable storage.
 [[nodiscard]] inline bool sync(std::FILE* fp) noexcept
 {
+    if (int& n = sync_fail_after(); n >= 0) {
+        if (n == 0) { n = -1; return false; }
+        --n;
+    }
     if (std::fflush(fp) != 0) return false;
 #if defined(_WIN32)
     return _commit(_fileno(fp)) == 0;
 #else
     return fsync(fileno(fp)) == 0;
+#endif
+}
+
+// Best-effort fsync of the directory containing `path`, making a just-renamed
+// file durable on POSIX (the rename itself lives in directory metadata).
+// Windows has no directory handles to fsync this way; metadata durability is
+// handled by the filesystem there.
+inline void sync_dir_of(const std::string& path) noexcept
+{
+#if !defined(_WIN32)
+    std::string dir = path;
+    if (const auto slash = dir.find_last_of('/'); slash != std::string::npos) {
+        dir.resize(slash == 0 ? 1 : slash);
+    } else {
+        dir = ".";
+    }
+    if (const int fd = ::open(dir.c_str(), O_RDONLY); fd >= 0) {
+        (void)::fsync(fd);
+        ::close(fd);
+    }
+#else
+    (void)path;
 #endif
 }
 

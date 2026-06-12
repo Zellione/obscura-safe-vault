@@ -57,6 +57,10 @@ public:
     [[nodiscard]] bool sync() noexcept;
 
 private:
+    // True iff [offset, offset+length) lies inside the file. Callers must check
+    // this BEFORE allocating a buffer of `length` bytes: spans come from
+    // untrusted/corruptible metadata, so an unchecked length is an OOM vector.
+    [[nodiscard]] bool span_in_file(uint64_t offset, uint64_t length) const noexcept;
     // Read `length` raw bytes at `offset` into a span sized exactly `length`.
     [[nodiscard]] bool read_at(uint64_t offset, std::span<uint8_t> dst) const noexcept;
     // Append `bytes` at EOF, returning the start offset.

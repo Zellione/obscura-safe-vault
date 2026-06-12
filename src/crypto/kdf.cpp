@@ -1,5 +1,6 @@
 #include "kdf.h"
 
+#include <cstring>
 #include <print>
 #include <vector>
 
@@ -13,17 +14,33 @@ bool derive_key(std::span<const uint8_t>            password,
                 const KdfParams&                    params,
                 SecureBuffer<KEY_SIZE>&             out_key)
 {
-    // Concatenate password ‖ keyfile into a scratch buffer that we wipe before
-    // returning. (mlock here would need a runtime-sized SecureBuffer; the buffer
-    // is short-lived and explicitly wiped, satisfying invariant #2.)
-    std::vector<uint8_t> secret;
-    secret.reserve(password.size() + keyfile.size());
-    secret.insert(secret.end(), password.begin(), password.end());
-    secret.insert(secret.end(), keyfile.begin(),  keyfile.end());
-
     // Argon2 needs a caller-allocated work area of 1024 * nb_blocks bytes.
+    // Monocypher requires at least 8 blocks per lane; Header::parse enforces
+    // the same policy on untrusted vaults, this guards direct callers.
+    if (params.t_cost == 0 || params.parallelism == 0 ||
+        params.m_cost_kib < 8 * params.parallelism) {
+        std::println(stderr, "[crypto] rejected invalid Argon2 parameters");
+        return false;
+    }
+
+    // Concatenate password ‖ keyfile into an mlock'd scratch buffer (wiped on
+    // every exit path by SecureBytes' destructor).
+    SecureBytes secret;
+    if (!secret.resize(password.size() + keyfile.size())) return false;
+    if (!password.empty())
+        std::memcpy(secret.data(), password.data(), password.size());
+    if (!keyfile.empty())
+        std::memcpy(secret.data() + password.size(), keyfile.data(), keyfile.size());
+
     const size_t work_size = static_cast<size_t>(params.m_cost_kib) * 1024u;
-    std::vector<uint8_t> work_area(work_size);
+    std::vector<uint8_t> work_area;
+    try {
+        work_area.resize(work_size);
+    } catch (const std::bad_alloc&) {
+        std::println(stderr, "[crypto] Argon2 work area of {} KiB unavailable",
+                     params.m_cost_kib);
+        return false;
+    }
 
     const crypto_argon2_config config{
         .algorithm = CRYPTO_ARGON2_ID,
@@ -41,8 +58,7 @@ bool derive_key(std::span<const uint8_t>            password,
     crypto_argon2(out_key.data(), static_cast<uint32_t>(crypto::KEY_SIZE),
                   work_area.data(), config, inputs, crypto_argon2_no_extras);
 
-    crypto_wipe(work_area.data(), work_size);
-    crypto_wipe(secret.data(), secret.size());
+    crypto_wipe(work_area.data(), work_size);  // holds password-derived state
     return true;
 }
 

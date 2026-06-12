@@ -10,11 +10,27 @@
 #include "gfx/window.h"
 #include "platform/file_dialog.h"
 #include "platform/paths.h"
+#include "ui/passphrase.h"
 #include "ui/unlock_logic.h"
 #include "ui/widgets.h"
 #include "vault/vault.h"
 
 namespace ui {
+
+namespace {
+
+gfx::Color strength_color(Strength s)
+{
+    using enum Strength;
+    switch (s) {
+        case Medium: return {230, 200, 110, 255};
+        case Strong: return {130, 220, 140, 255};
+        case Weak:   break;
+    }
+    return {230, 120, 120, 255};
+}
+
+} // namespace
 
 UnlockScreen::UnlockScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                            platform::FileDialog& dlg, std::filesystem::path vault_path)
@@ -31,6 +47,7 @@ void UnlockScreen::on_exit()
     SDL_StopTextInput(win_.sdl_window());
     pw_.clear();
     confirm_.clear();
+    reveal_pw_ = false;
 }
 
 UnlockScreen::Layout UnlockScreen::layout() const
@@ -42,10 +59,12 @@ UnlockScreen::Layout UnlockScreen::layout() const
     const float gap = 16.0f;
     const float row = H - 140.0f;
     return Layout{
-        .keyfile_btn = {60.0f,                  row, bw, bh},
-        .other_btn   = {60.0f + (bw + gap),     row, bw, bh},
-        .mode_btn    = {60.0f + 2 * (bw + gap), row, bw, bh},
-        .submit_btn  = {W - 60.0f - bw,         row, bw, bh},
+        .keyfile_btn  = {60.0f,                  row, bw, bh},
+        .other_btn    = {60.0f + (bw + gap),     row, bw, bh},
+        .mode_btn     = {60.0f + 2 * (bw + gap), row, bw, bh},
+        .submit_btn   = {W - 60.0f - bw,         row, bw, bh},
+        .generate_btn    = {60.0f, 320.0f, bw + 40.0f, 36.0f},
+        .new_keyfile_btn = {60.0f + (bw + 40.0f) + gap, 320.0f, bw - 40.0f, 36.0f},
     };
 }
 
@@ -55,12 +74,13 @@ void UnlockScreen::handle_event(const SDL_Event& e)
         case SDL_EVENT_TEXT_INPUT: {
             SecureTextField& f = (create_mode_ && focus_ == 1) ? confirm_ : pw_;
             f.push_utf8(e.text.text);
+            reveal_pw_ = false;  // edited by hand: stop displaying it
             break;
         }
         case SDL_EVENT_KEY_DOWN: {
             SecureTextField& f = (create_mode_ && focus_ == 1) ? confirm_ : pw_;
             switch (e.key.key) {
-                case SDLK_BACKSPACE: f.backspace(); break;
+                case SDLK_BACKSPACE: f.backspace(); reveal_pw_ = false; break;
                 case SDLK_TAB:       if (create_mode_) focus_ ^= 1; break;
                 case SDLK_RETURN:
                 case SDLK_KP_ENTER:  submit(); break;
@@ -73,6 +93,19 @@ void UnlockScreen::handle_event(const SDL_Event& e)
             if (const SDL_FPoint p{e.button.x, e.button.y};
                 point_in_rect(p.x, p.y, L.mode_btn)) {
                 create_mode_ = !create_mode_; focus_ = 0; error_.clear();
+                reveal_pw_ = false;
+            } else if (create_mode_ && point_in_rect(p.x, p.y, L.generate_btn)) {
+                // Fill both fields with one random passphrase and show it so
+                // the user can write it down before creating the vault.
+                if (generate_passphrase(pw_)) {
+                    confirm_.clear();
+                    confirm_.push_utf8(std::string_view(
+                        reinterpret_cast<const char*>(pw_.bytes().data()), pw_.length()));
+                    reveal_pw_ = true;
+                    error_.clear();
+                }
+            } else if (create_mode_ && point_in_rect(p.x, p.y, L.new_keyfile_btn)) {
+                pending_ = Pending::NewKeyfile; dlg_.save_keyfile(win_.sdl_window());
             } else if (point_in_rect(p.x, p.y, L.keyfile_btn)) {
                 pending_ = Pending::Keyfile; dlg_.open_keyfile(win_.sdl_window());
             } else if (point_in_rect(p.x, p.y, L.other_btn)) {
@@ -88,17 +121,34 @@ void UnlockScreen::handle_event(const SDL_Event& e)
 
 void UnlockScreen::update(double)
 {
-    using enum Pending;
     if (auto res = dlg_.take_result()) {
-        if (!res->empty()) {
-            if (pending_ == Vault) {
-                vault_path_  = (*res)[0];
-                create_mode_ = !std::filesystem::exists(vault_path_);
-            } else if (pending_ == Keyfile) {
-                keyfile_path_ = (*res)[0];
+        if (!res->empty()) apply_dialog_result((*res)[0]);
+        pending_ = Pending::None;
+    }
+}
+
+void UnlockScreen::apply_dialog_result(const std::string& path)
+{
+    using enum Pending;
+    switch (pending_) {
+        case Vault:
+            vault_path_  = path;
+            create_mode_ = !std::filesystem::exists(vault_path_);
+            break;
+        case Keyfile:
+            keyfile_path_ = path;
+            error_.clear();  // a freshly picked keyfile invalidates old errors
+            break;
+        case NewKeyfile:
+            if (platform::write_new_keyfile(path)) {
+                keyfile_path_ = path;
+                error_.clear();
+            } else {
+                error_ = "Could not create the keyfile.";
             }
-        }
-        pending_ = None;
+            break;
+        case None:
+            break;
     }
 }
 
@@ -139,6 +189,7 @@ void UnlockScreen::submit()
     if (r == Ok) {
         pw_.clear();
         confirm_.clear();
+        reveal_pw_ = false;
         request(NavKind::ToGallery);
         return;
     }
@@ -170,6 +221,28 @@ void UnlockScreen::render(gfx::Renderer& r)
         r.draw_text(font_, fx, 234, "Confirm", gfx::Color{150, 150, 160, 255});
         draw_text_field(r, font_, {fx, 260, fw, fh},
                         std::string(confirm_.length(), '*'), focus_ == 1);
+
+        // The password is the vault's real security boundary: show what the
+        // user is committing to.
+        if (!pw_.empty()) {
+            const Strength s = classify_strength(pw_.bytes());
+            r.draw_text(font_, fx + 110, 134,
+                        std::string("strength: ") += strength_label(s),
+                        strength_color(s));
+        }
+
+        const Layout L0 = layout();
+        draw_button(r, font_, {L0.generate_btn, "Generate passphrase"}, false, false);
+        draw_button(r, font_, {L0.new_keyfile_btn, "New keyfile..."}, false, false);
+        if (reveal_pw_ && !pw_.empty()) {
+            // string_view straight over the mlock'd buffer — no unlocked copy.
+            r.draw_text(font_, fx, 372,
+                        std::string_view(reinterpret_cast<const char*>(pw_.bytes().data()),
+                                         pw_.length()),
+                        gfx::Color{200, 210, 160, 255});
+            r.draw_text(font_, fx, 398, "Write this down, then press Create.",
+                        gfx::Color{150, 150, 160, 255});
+        }
     }
 
     const Layout L = layout();

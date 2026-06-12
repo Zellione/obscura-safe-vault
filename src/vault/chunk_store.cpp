@@ -27,12 +27,16 @@ bool ChunkStore::append_at_end(std::span<const uint8_t> bytes, uint64_t& out_off
     return true;
 }
 
-bool ChunkStore::read_at(uint64_t offset, std::span<uint8_t> dst) const noexcept
+bool ChunkStore::span_in_file(uint64_t offset, uint64_t length) const noexcept
 {
     uint64_t size = 0;
-    if (!file_size(fp_, size)) return false;
+    return file_size(fp_, size) && offset <= size && length <= size - offset;
+}
+
+bool ChunkStore::read_at(uint64_t offset, std::span<uint8_t> dst) const noexcept
+{
     // Bounds-check before reading so a corrupt span can't read past EOF.
-    if (offset > size || dst.size() > size - offset) return false;
+    if (!span_in_file(offset, dst.size())) return false;
     if (!seek_to(fp_, offset)) return false;
     if (dst.empty()) return true;
     return std::fread(dst.data(), 1, dst.size(), fp_) == dst.size();
@@ -53,6 +57,10 @@ bool ChunkStore::append_chunk(std::span<const uint8_t> plaintext, ChunkSpan& out
 bool ChunkStore::read_chunk(ChunkSpan span, std::vector<uint8_t>& out) const noexcept
 {
     out.clear();
+    // The span comes from an (authenticated but possibly stale/hostile) index:
+    // bounds-check before sizing the buffer, or a corrupt length is an
+    // allocation-of-2^63-bytes DoS.
+    if (!span_in_file(span.offset, span.length)) return false;
     std::vector<uint8_t> disk(span.length);
     if (!read_at(span.offset, disk)) return false;
     return crypto::decrypt_chunk(key_, disk, out);
@@ -60,6 +68,7 @@ bool ChunkStore::read_chunk(ChunkSpan span, std::vector<uint8_t>& out) const noe
 
 bool ChunkStore::read_chunk(ChunkSpan span, crypto::SecureBytes& out) const noexcept
 {
+    if (!span_in_file(span.offset, span.length)) return false;
     std::vector<uint8_t> disk(span.length);  // ciphertext is not secret
     if (!read_at(span.offset, disk)) return false;
 
@@ -78,6 +87,8 @@ bool ChunkStore::append_raw(std::span<const uint8_t> bytes, uint64_t& out_offset
 
 bool ChunkStore::read_raw(uint64_t offset, uint64_t length, std::vector<uint8_t>& out) const noexcept
 {
+    out.clear();
+    if (!span_in_file(offset, length)) return false;  // before the allocation
     out.assign(length, 0);
     if (!read_at(offset, out)) {
         out.clear();
