@@ -309,6 +309,40 @@ TEST(vault_add_jpeg_sets_format_and_dims)
     CHECK_EQ(meta.height, 160u);
 }
 
+TEST(vault_add_webp_round_trip_imports_and_reads_back)
+{
+    // End-to-end import (decode -> thumbnail -> encrypt -> store) of a non-stb
+    // format, then re-open and read the original bytes back. Covers the Phase 9
+    // acceptance criterion ("WebP/HEIC/AVIF can be imported and displayed").
+    TempVault tv("webp");
+
+    const auto webp_buf = fixtures::load_webp();
+    REQUIRE(!webp_buf.empty());
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), {reinterpret_cast<const uint8_t*>("pw"), 2},
+                                 {}, kFastKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", webp_buf, "photo.webp") == vault::VaultResult::Ok);
+    v.lock();
+
+    vault::Vault v2;
+    REQUIRE(vault::Vault::open(tv.str(), v2) == vault::VaultResult::Ok);
+    REQUIRE(v2.unlock({reinterpret_cast<const uint8_t*>("pw"), 2}, {}) == vault::VaultResult::Ok);
+
+    const auto kids = v2.list("");
+    REQUIRE(kids.size() == 1);
+    const auto& meta = kids[0]->meta;
+    CHECK_EQ(meta.format, vault::ImageFormat::WebP);
+    CHECK_EQ(meta.width,  8u);
+    CHECK_EQ(meta.height, 8u);
+    CHECK(meta.thumb_length > 0);  // thumbnail generated from the decoded WebP
+
+    // Original bytes survive the round-trip unchanged.
+    crypto::SecureBytes out;
+    REQUIRE(v2.read_image(*kids[0], out) == vault::VaultResult::Ok);
+    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(webp_buf));
+}
+
 TEST(vault_add_jpeg_generates_thumbnail)
 {
     TempVault tv("thumb");
