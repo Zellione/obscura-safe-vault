@@ -3,6 +3,9 @@ build/
 bin/
 obj/
 
+# Vendored image-codec staging prefix (built by setup.sh; not committed)
+vendor/codecs-prefix/
+
 # premake5 binary (downloaded by setup.sh, not committed)
 bin/premake5
 

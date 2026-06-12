@@ -2,7 +2,7 @@
 
 A multi-platform native encrypted photo gallery. All photos live inside a single `.osv` vault file — images are decrypted **into locked memory only**, never written to a temporary file or disk. The gallery is browsable with a freely-nestable folder tree, a zoomable full-screen image viewer, and a thumbnail strip navigable with arrow keys.
 
-**Stack:** C++20 · SDL3 · SDL_Renderer · Monocypher (XChaCha20-Poly1305 + Argon2id) · stb_image · premake5 → Ninja
+**Stack:** C++20 · SDL3 · SDL_Renderer · Monocypher (XChaCha20-Poly1305 + Argon2id) · stb_image · libwebp / libheif (WebP / HEIC / AVIF) · premake5 → Ninja
 
 See [`CLAUDE.md`](CLAUDE.md) for all technology decisions and [`ROADMAP.md`](ROADMAP.md) for the full development plan.
 
@@ -10,12 +10,23 @@ See [`CLAUDE.md`](CLAUDE.md) for all technology decisions and [`ROADMAP.md`](ROA
 
 ## Building
 
+### Prerequisites
+
+`setup.sh` cmake-builds the vendored dependencies from source, so the following must be on `PATH`:
+
+| Tool | Why | Install |
+|---|---|---|
+| C++20 compiler | building the app | gcc 14+ / clang 17+ / MSVC 2022 / AppleClang |
+| `cmake`, `ninja` | configure + build vendored libs | Arch: `sudo pacman -S cmake ninja` · Debian/Ubuntu: `sudo apt install cmake ninja-build` · macOS: `brew install cmake ninja` · Windows: VS 2022 + `choco install ninja` |
+| `nasm` | assembler for the vendored **libaom** (AVIF decode) | Arch: `sudo pacman -S nasm` · Debian/Ubuntu: `sudo apt install nasm` · macOS: `brew install nasm` · Windows: `choco install nasm` |
+
 ### First-time setup
 
-Initialises git submodules, downloads the `premake5` binary, and cmake-builds vendored SDL3 as a static library. Requires `cmake`, `ninja`, and a C++20 compiler.
+Initialises git submodules, downloads the `premake5` binary, and cmake-builds the vendored static libraries (SDL3, plus the image codecs libwebp / libde265 / libaom / libheif into `vendor/codecs-prefix/`).
 
 ```bash
-scripts/setup.sh
+scripts/setup.sh         # Linux/macOS
+scripts\setup.bat        # Windows (VS 2022 Developer prompt)
 ```
 
 > **Development shortcut:** if SDL3 is already installed system-wide (e.g. `sudo pacman -S sdl3` on Arch), you can skip `setup.sh` and go straight to generating build files. The system SDL3 is used as a fallback automatically.
@@ -110,8 +121,12 @@ vendor/
   SDL3/        git submodule (3.4.10)
   monocypher/  git submodule (4.0.2-RC1)
   stb/         git submodule
+  libwebp/     git submodule — WebP decode
+  libde265/    git submodule — HEIC (HEVC) decode
+  libaom/      git submodule — AVIF (AV1) decode
+  libheif/     git submodule — HEIC/AVIF container
 tests/         Unit and integration tests (Phase 1+)
-scripts/       setup.sh · gen.sh · build.sh · test.sh
+scripts/       setup.sh · build_codecs.sh · gen.sh · build.sh · test.sh
 ```
 
 ---

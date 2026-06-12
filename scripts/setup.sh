@@ -67,6 +67,13 @@ else
     echo "==> vendored SDL3 already built — skipping cmake."
 fi
 
+# ---------------------------------------------------------------------------
+# Vendored image codecs (WebP, HEIC/AVIF) -> vendor/codecs-prefix.
+# Delegated to scripts/build_codecs.sh so CI can build them without re-running
+# the SDL3 / premake steps above.
+# ---------------------------------------------------------------------------
+"$REPO_ROOT/scripts/build_codecs.sh"
+
 echo ""
 echo "Setup complete. Next steps:"
 echo "  scripts/gen.sh    # generate Ninja build files"

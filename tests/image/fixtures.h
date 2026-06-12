@@ -24,4 +24,14 @@ std::vector<uint8_t> gif_1x1_red();
 // so that stb_image's decoder will reject it.
 std::vector<uint8_t> malformed_jpeg();
 
+// Load a committed binary fixture from tests/image/fixtures/ (used for WebP/HEIC/
+// AVIF, which have no in-memory encoder). The directory is resolved from
+// OSV_FIXTURE_DIR (set by premake to an absolute path) so tests run from any cwd.
+// Returns an empty vector if the file is missing.
+std::vector<uint8_t> load_fixture(const char* name);
+
+inline std::vector<uint8_t> load_webp() { return load_fixture("sample.webp"); }
+inline std::vector<uint8_t> load_heic() { return load_fixture("sample.heic"); }
+inline std::vector<uint8_t> load_avif() { return load_fixture("sample.avif"); }
+
 } // namespace fixtures

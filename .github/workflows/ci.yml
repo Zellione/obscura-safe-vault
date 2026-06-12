@@ -38,6 +38,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             cmake \
             ninja-build \
+            nasm \
             gcc-14 \
             g++-14 \
             clang \
@@ -111,6 +112,21 @@ jobs:
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
             --slave /usr/bin/g++ g++ /usr/bin/g++-14
 
+      # -----------------------------------------------------------------------
+      # Vendored image codecs (libwebp + HEIC/AVIF stack) -> vendor/codecs-prefix
+      # (cached by submodule commit hash, like SDL3).
+      # -----------------------------------------------------------------------
+      - name: Cache vendored codecs build
+        uses: actions/cache@v4
+        id: cache-codecs
+        with:
+          path: vendor/codecs-prefix
+          key: codecs-v2-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored codecs
+        if: steps.cache-codecs.outputs.cache-hit != 'true'
+        run: scripts/build_codecs.sh
+
       - name: Generate Ninja build files (${{ matrix.compiler }})
         run: bin/premake5 ninja --cc=${{ matrix.compiler }}
 
@@ -173,6 +189,13 @@ jobs:
       - name: Set up MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
 
+      # nasm is required to build libaom (Stage B); not preinstalled on the runner.
+      - name: Install nasm
+        shell: pwsh
+        run: |
+          choco install nasm --no-progress -y
+          echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
       - name: Cache premake5 binary
         uses: actions/cache@v4
         id: cache-premake5
@@ -205,6 +228,18 @@ jobs:
             -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_INSTALL_TESTS=OFF `
             -G "Ninja"
           cmake --build vendor/SDL3/build --parallel
+
+      - name: Cache vendored codecs build
+        uses: actions/cache@v4
+        id: cache-codecs
+        with:
+          path: vendor/codecs-prefix
+          key: codecs-v2-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored codecs
+        if: steps.cache-codecs.outputs.cache-hit != 'true'
+        shell: cmd
+        run: scripts\build_codecs.bat
 
       - name: Generate VS2022 solution
         run: bin\premake5.exe vs2022
@@ -256,6 +291,11 @@ jobs:
         with:
           submodules: recursive
 
+      # Ninja + nasm are needed to cmake-build the vendored codecs (libaom's
+      # assembly requires nasm); the macOS runner ships neither by default.
+      - name: Install codec build tools
+        run: brew install ninja nasm
+
       - name: Cache premake5 binary
         uses: actions/cache@v4
         id: cache-premake5
@@ -288,6 +328,17 @@ jobs:
             -DSDL_STATIC=ON -DSDL_SHARED=OFF \
             -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_INSTALL_TESTS=OFF
           cmake --build vendor/SDL3/build --parallel 3
+
+      - name: Cache vendored codecs build
+        uses: actions/cache@v4
+        id: cache-codecs
+        with:
+          path: vendor/codecs-prefix
+          key: codecs-v2-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored codecs
+        if: steps.cache-codecs.outputs.cache-hit != 'true'
+        run: scripts/build_codecs.sh
 
       - name: Generate Makefiles
         run: bin/premake5 gmake2
@@ -340,6 +391,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             cmake \
             ninja-build \
+            nasm \
             g++-14 \
             libgl1-mesa-dev \
             libx11-dev \
@@ -401,6 +453,19 @@ jobs:
             -G "Ninja"
           cmake --build vendor/SDL3/build --parallel "$(nproc)"
 
+      # Build the decoders too: running libwebp/libheif/libaom under ASAN+UBSan on
+      # untrusted input is the highest-value place to have the sanitisers.
+      - name: Cache vendored codecs build
+        uses: actions/cache@v4
+        id: cache-codecs
+        with:
+          path: vendor/codecs-prefix
+          key: codecs-v2-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored codecs
+        if: steps.cache-codecs.outputs.cache-hit != 'true'
+        run: scripts/build_codecs.sh
+
       - name: Generate Ninja build files (--asan)
         run: bin/premake5 --asan ninja --cc=gcc
 
@@ -455,6 +520,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             cmake \
             ninja-build \
+            nasm \
             g++-14 \
             unzip \
             curl \
@@ -528,6 +594,19 @@ jobs:
         run: |
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
             --slave /usr/bin/g++ g++ /usr/bin/g++-14
+
+      # osv links the image codecs, so the build-wrapper compile below needs them.
+      - name: Cache vendored codecs build
+        if: env.SONAR_TOKEN != ''
+        uses: actions/cache@v4
+        id: cache-codecs
+        with:
+          path: vendor/codecs-prefix
+          key: codecs-v2-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored codecs
+        if: env.SONAR_TOKEN != '' && steps.cache-codecs.outputs.cache-hit != 'true'
+        run: scripts/build_codecs.sh
 
       - name: Generate Ninja build files (gcc, with coverage)
         if: env.SONAR_TOKEN != ''

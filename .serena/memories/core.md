@@ -11,7 +11,9 @@ src/
                secure_mem.h, crypto.h
   vault/       vault.*, header.*, index.*,     — .osv container format
                chunk_store.*, byte_io.h, file_util.h
-  image/       decode.*, thumbnail.*           — stb_image decode, thumb gen
+  image/       decode.*, thumbnail.*,          — stb_image decode, thumb gen
+               format_registry.*,              — magic-byte format detection/dispatch
+               decode_webp.*, decode_heif.*    — libwebp (WebP), libheif (HEIC/AVIF)
   gfx/         window.*, renderer.*,           — SDL3 window/renderer, texture cache,
                texture_cache.*, text.*         — stb_truetype text atlas
   ui/          unlock_screen.*, gallery_grid.* — UI screens
@@ -27,6 +29,8 @@ vendor/
   SDL3/         git submodule, built by setup.sh (cmake)
   monocypher/   git submodule, single .c compiled by premake
   stb/          git submodule, header-only
+  libwebp/ libde265/ libaom/ libheif/   image codecs (Phase 9), cmake-built static
+  codecs-prefix/   staging install prefix for the four codecs (gitignored)
 assets/fonts/   bundled OFL font for stb_truetype
 ```
 

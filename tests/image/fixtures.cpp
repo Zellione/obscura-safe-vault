@@ -6,6 +6,13 @@
 #include "fixtures.h"
 
 #include <algorithm>
+#include <fstream>
+#include <iterator>
+#include <string>
+
+#ifndef OSV_FIXTURE_DIR
+#define OSV_FIXTURE_DIR "tests/image/fixtures"
+#endif
 
 namespace fixtures {
 
@@ -90,6 +97,13 @@ std::vector<uint8_t> malformed_jpeg()
 {
     // JPEG magic bytes followed by a truncated/invalid header.
     return {0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x01};
+}
+
+std::vector<uint8_t> load_fixture(const char* name)
+{
+    const std::string path = std::string(OSV_FIXTURE_DIR) + "/" + name;
+    std::ifstream f(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
 }
 
 } // namespace fixtures

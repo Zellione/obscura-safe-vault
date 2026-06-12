@@ -76,6 +76,33 @@ local function link_platform_extras()
     filter {}
 end
 
+-- ---------------------------------------------------------------------------
+-- Vendored image codecs — WebP (+ HEIC/AVIF stack in Phase 9 Stage B).
+-- scripts/setup.sh cmake-builds each static and installs into one staging
+-- prefix (vendor/codecs-prefix); we link the whole set from there. Shared by
+-- the app and the test runner (osv_tests compiles src/image/*.cpp).
+-- ---------------------------------------------------------------------------
+local function link_image_codecs()
+    local prefix = path.join(os.getcwd(), "vendor/codecs-prefix")
+    if os.isdir(path.join(prefix, "include")) then
+        includedirs { path.join(prefix, "include") }
+        libdirs     { path.join(prefix, "lib") }
+        -- Static-link order matters: dependents before dependencies
+        -- (heif → de265, aom ; webp → sharpyuv). The lib filenames differ by
+        -- platform: on Unix `-lNAME` finds `libNAME.a`, but MSVC links the name
+        -- verbatim and cmake keeps the `lib` prefix on libde265/libwebp/libsharpyuv
+        -- (heif/aom have none), so Windows needs the prefixed names.
+        -- We link libheif statically; without this its headers declare the API
+        -- as __declspec(dllimport) on MSVC (no-op elsewhere), which breaks the link.
+        defines { "OSV_VENDORED_CODECS", "LIBHEIF_STATIC_BUILD" }
+        filter "system:windows"
+            links { "heif", "libde265", "aom", "libwebp", "libsharpyuv" }
+        filter { "system:not windows" }
+            links { "heif", "de265", "aom", "webp", "sharpyuv" }
+        filter {}
+    end
+end
+
 workspace "ObscuraSafeVault"
     configurations { "Debug", "Release" }
     platforms      { "x64" }
@@ -92,9 +119,15 @@ workspace "ObscuraSafeVault"
     targetdir "build/bin/%{cfg.buildcfg}"
 
     filter "configurations:Debug"
-        defines  { "OSV_DEBUG", "_DEBUG" }
+        defines  { "OSV_DEBUG" }
         symbols  "On"
         optimize "Off"
+    -- _DEBUG selects the debug CRT + _ITERATOR_DEBUG_LEVEL=2 on MSVC, which can't
+    -- link against our Release-built vendored static libs (SDL3/codecs). Keep it
+    -- off on Windows; see the system:windows filter below which pins the release
+    -- runtime there for all configs.
+    filter { "configurations:Debug", "system:not windows" }
+        defines  { "_DEBUG" }
 
     filter "configurations:Release"
         defines  { "NDEBUG" }
@@ -114,6 +147,12 @@ workspace "ObscuraSafeVault"
     -- stdio is deliberate; see vault/file_util.h).
     filter "system:windows"
         defines { "NOMINMAX", "WIN32_LEAN_AND_MEAN", "_CRT_SECURE_NO_WARNINGS" }
+        -- All vendored static libs (SDL3, libheif/libde265/libaom/libwebp) are
+        -- built Release, so pin the whole workspace to the release dynamic CRT and
+        -- release iterators in every config; otherwise a Debug build hits LNK2038
+        -- (RuntimeLibrary / _ITERATOR_DEBUG_LEVEL mismatch) against them.
+        runtime "Release"
+        defines { "_ITERATOR_DEBUG_LEVEL=0" }
 
     -- Opt-in sanitizers (gcc/clang). Applies to every project in the workspace.
     filter { "options:asan", "toolset:gcc or clang" }
@@ -166,6 +205,7 @@ project "osv"
     -- SDL3: vendored cmake build if present, else system SDL3.
     link_sdl3()
     link_platform_extras()
+    link_image_codecs()
 
     -- GUI app on Windows (no console window) for Release; keep the console in
     -- Debug so stderr logging is visible.
@@ -181,6 +221,10 @@ project "osv"
 project "osv_tests"
     kind        "ConsoleApp"
     targetname  "osv_tests"
+
+    -- Absolute path to committed binary fixtures (WebP/HEIC/AVIF) so the test
+    -- runner finds them regardless of the working directory it is launched from.
+    defines { 'OSV_FIXTURE_DIR="' .. path.join(os.getcwd(), "tests/image/fixtures") .. '"' }
 
     files {
         "tests/**.cpp",
@@ -218,3 +262,4 @@ project "osv_tests"
     -- gfx units pull in SDL3 (software renderer is created headlessly in tests).
     link_sdl3()
     link_platform_extras()
+    link_image_codecs()

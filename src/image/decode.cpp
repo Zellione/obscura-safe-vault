@@ -3,30 +3,17 @@
 #include <stb_image.h>
 
 #include "image/decode.h"
+#include "image/format_registry.h"
 
 namespace image {
 
 namespace {
 
-ImageFormat detect_format(std::span<const uint8_t> d) noexcept
+// stb_image path for JPEG/PNG/GIF/BMP/TGA/HDR. `fmt` is the registry's verdict;
+// TGA has no magic (registry returns Unknown), so Unknown is tagged as TGA — stb
+// is the last-resort decoder for headerless raster data.
+std::optional<ImageData> decode_stb(std::span<const uint8_t> data, ImageFormat fmt)
 {
-    using enum ImageFormat;
-    // Magic-byte detection; values must stay in sync with the ImageFormat enum.
-    if (d.size() >= 2 && d[0] == 0xFF && d[1] == 0xD8)                               return JPEG;
-    if (d.size() >= 4 && d[0] == 0x89 && d[1] == 'P' && d[2] == 'N' && d[3] == 'G') return PNG;
-    if (d.size() >= 3 && d[0] == 'G'  && d[1] == 'I' && d[2] == 'F')                return GIF;
-    if (d.size() >= 2 && d[0] == 'B'  && d[1] == 'M')                                return BMP;
-    if (d.size() >= 2 && d[0] == '#'  && d[1] == '?')                                return HDR;
-    // TGA has no reliable magic bytes; treat as last resort.
-    return TGA;
-}
-
-} // namespace
-
-std::optional<ImageData> decode_from_memory(std::span<const uint8_t> data)
-{
-    if (data.empty()) return std::nullopt;
-
     int w      = 0;
     int h      = 0;
     int src_ch = 0;
@@ -38,10 +25,25 @@ std::optional<ImageData> decode_from_memory(std::span<const uint8_t> data)
     ImageData img;
     img.width  = w;
     img.height = h;
-    img.format = detect_format(data);
+    img.format = (fmt == ImageFormat::Unknown) ? ImageFormat::TGA : fmt;
     img.pixels.assign(raw, raw + static_cast<size_t>(w) * h * 3);
     stbi_image_free(raw);
     return img;
+}
+
+} // namespace
+
+std::optional<ImageData> decode_from_memory(std::span<const uint8_t> data)
+{
+    if (data.empty()) return std::nullopt;
+
+    const ImageFormat fmt = detect_format(data);
+    switch (fmt) {
+        case ImageFormat::WebP: return decode_webp_from_memory(data);
+        case ImageFormat::HEIC:
+        case ImageFormat::AVIF: return decode_heif_from_memory(data);
+        default:                return decode_stb(data, fmt);
+    }
 }
 
 } // namespace image
