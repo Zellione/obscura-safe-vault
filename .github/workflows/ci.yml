@@ -135,6 +135,21 @@ jobs:
           path: build/bin/Debug/osv
           retention-days: 7
 
+      # -----------------------------------------------------------------------
+      # Packaging (Release leg only) — tar.gz with install.sh
+      # -----------------------------------------------------------------------
+      - name: Package (tar.gz)
+        if: matrix.config == 'Release' && matrix.compiler == 'gcc'
+        run: scripts/package.sh
+
+      - name: Upload package
+        if: matrix.config == 'Release' && matrix.compiler == 'gcc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: osv-linux-tarball
+          path: dist/*.tar.gz
+          retention-days: 7
+
   # ===========================================================================
   # Windows — MSVC via premake vs2022 + MSBuild. The vendored SDL3 static lib
   # is cmake-built with Ninja (cl on PATH via msvc-dev-cmd) and lands at
@@ -202,6 +217,24 @@ jobs:
           SDL_VIDEODRIVER: dummy
         run: ./build/bin/${{ matrix.config }}/osv_tests.exe
 
+      # -----------------------------------------------------------------------
+      # Packaging (Release leg only) — NSIS installer (preinstalled on runners)
+      # -----------------------------------------------------------------------
+      - name: Package (NSIS installer)
+        if: matrix.config == 'Release'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          makensis /DVERSION=dev packaging\windows\osv.nsi
+
+      - name: Upload package
+        if: matrix.config == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: osv-windows-installer
+          path: dist/*.exe
+          retention-days: 7
+
   # ===========================================================================
   # macOS — AppleClang via premake gmake2. Builds the native architecture
   # (arm64 on current runners); the vendored SDL3 is cmake-built natively too.
@@ -266,6 +299,21 @@ jobs:
         env:
           SDL_VIDEODRIVER: dummy
         run: ./build/bin/${{ matrix.config }}/osv_tests
+
+      # -----------------------------------------------------------------------
+      # Packaging (Release leg only) — ad-hoc-signed .app bundle, zipped
+      # -----------------------------------------------------------------------
+      - name: Package (.app bundle)
+        if: matrix.config == 'Release'
+        run: scripts/package_macos.sh
+
+      - name: Upload package
+        if: matrix.config == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: osv-macos-app
+          path: dist/*.zip
+          retention-days: 7
 
   # ===========================================================================
   # Sanitiser gate — builds and runs the full test suite under ASAN + UBSan +
