@@ -78,18 +78,20 @@ double estimate_entropy_bits(std::span<const uint8_t> password) noexcept
 
 Strength classify_strength(std::span<const uint8_t> password) noexcept
 {
+    using enum Strength;
     const double bits = estimate_entropy_bits(password);
-    if (bits < WEAK_BELOW_BITS)  return Strength::Weak;
-    if (bits < STRONG_FROM_BITS) return Strength::Medium;
-    return Strength::Strong;
+    if (bits < WEAK_BELOW_BITS)  return Weak;
+    if (bits < STRONG_FROM_BITS) return Medium;
+    return Strong;
 }
 
 std::string_view strength_label(Strength s) noexcept
 {
+    using enum Strength;
     switch (s) {
-        case Strength::Weak:   return "weak";
-        case Strength::Medium: return "medium";
-        case Strength::Strong: return "strong";
+        case Weak:   return "weak";
+        case Medium: return "medium";
+        case Strong: return "strong";
     }
     return "weak";
 }
@@ -106,8 +108,10 @@ bool generate_passphrase(SecureTextField& out, int words)
 
     // The selector bytes determine the passphrase, so they are wiped like a key.
     std::array<uint8_t, PASSPHRASE_MAX_WORDS> pick{};
-    const std::span<uint8_t> used(pick.data(), static_cast<size_t>(words));
-    if (!crypto::fill_random(used)) return false;
+    if (const std::span<uint8_t> used(pick.data(), static_cast<size_t>(words));
+        !crypto::fill_random(used)) {
+        return false;
+    }
 
     for (int i = 0; i < words; ++i) {
         if (i > 0) out.push_utf8(" ");

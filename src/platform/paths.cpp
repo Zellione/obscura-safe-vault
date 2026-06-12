@@ -53,8 +53,7 @@ std::optional<std::vector<uint8_t>> read_file(const std::filesystem::path& path)
 
 bool write_new_keyfile(const std::filesystem::path& path)
 {
-    std::error_code ec;
-    if (std::filesystem::exists(path, ec)) {
+    if (std::error_code ec; std::filesystem::exists(path, ec)) {
         std::println(stderr, "[Platform] refusing to overwrite existing keyfile {}",
                      path.string());
         return false;

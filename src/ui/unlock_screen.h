@@ -36,6 +36,7 @@ private:
     };
     [[nodiscard]] Layout layout() const;
     void submit();
+    void apply_dialog_result(const std::string& path);
 
     enum class Pending { None, Vault, Keyfile, NewKeyfile };
 

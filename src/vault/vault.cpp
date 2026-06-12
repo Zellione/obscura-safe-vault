@@ -461,7 +461,7 @@ uint64_t Vault::wasted_bytes() const
     if (!fileutil::file_size(fp_, size)) return 0;
 
     uint64_t live = HEADER_SIZE + header_.slot[header_.active_slot].length;
-    for_each_image(root_, [&](const IndexNode& img) {
+    for_each_image(root_, [&live](const IndexNode& img) {
         live += img.meta.data_length + img.meta.thumb_length;
     });
     return size > live ? size - live : 0;
@@ -495,8 +495,8 @@ VaultResult Vault::compact()
     ChunkStore dst(tmp, master_key_.as_span());
 
     VaultResult copy_err = Ok;
-    for_each_image(new_root, [&](IndexNode& img) {
-        auto copy_span = [&](uint64_t& off, uint64_t len) {
+    for_each_image(new_root, [&copy_err, &src, &dst](IndexNode& img) {
+        auto copy_span = [&copy_err, &src, &dst](uint64_t& off, uint64_t len) {
             if (copy_err != Ok || len == 0) return;
             std::vector<uint8_t> blob;
             uint64_t new_off = 0;

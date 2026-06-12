@@ -17,6 +17,21 @@
 
 namespace ui {
 
+namespace {
+
+gfx::Color strength_color(Strength s)
+{
+    using enum Strength;
+    switch (s) {
+        case Medium: return {230, 200, 110, 255};
+        case Strong: return {130, 220, 140, 255};
+        case Weak:   break;
+    }
+    return {230, 120, 120, 255};
+}
+
+} // namespace
+
 UnlockScreen::UnlockScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                            platform::FileDialog& dlg, std::filesystem::path vault_path)
     : win_(win), font_(font), vault_(vault), dlg_(dlg),
@@ -106,25 +121,34 @@ void UnlockScreen::handle_event(const SDL_Event& e)
 
 void UnlockScreen::update(double)
 {
-    using enum Pending;
     if (auto res = dlg_.take_result()) {
-        if (!res->empty()) {
-            if (pending_ == Vault) {
-                vault_path_  = (*res)[0];
-                create_mode_ = !std::filesystem::exists(vault_path_);
-            } else if (pending_ == Keyfile) {
-                keyfile_path_ = (*res)[0];
-                error_.clear();  // a freshly picked keyfile invalidates old errors
-            } else if (pending_ == NewKeyfile) {
-                if (platform::write_new_keyfile((*res)[0])) {
-                    keyfile_path_ = (*res)[0];
-                    error_.clear();
-                } else {
-                    error_ = "Could not create the keyfile.";
-                }
+        if (!res->empty()) apply_dialog_result((*res)[0]);
+        pending_ = Pending::None;
+    }
+}
+
+void UnlockScreen::apply_dialog_result(const std::string& path)
+{
+    using enum Pending;
+    switch (pending_) {
+        case Vault:
+            vault_path_  = path;
+            create_mode_ = !std::filesystem::exists(vault_path_);
+            break;
+        case Keyfile:
+            keyfile_path_ = path;
+            error_.clear();  // a freshly picked keyfile invalidates old errors
+            break;
+        case NewKeyfile:
+            if (platform::write_new_keyfile(path)) {
+                keyfile_path_ = path;
+                error_.clear();
+            } else {
+                error_ = "Could not create the keyfile.";
             }
-        }
-        pending_ = None;
+            break;
+        case None:
+            break;
     }
 }
 
@@ -202,11 +226,9 @@ void UnlockScreen::render(gfx::Renderer& r)
         // user is committing to.
         if (!pw_.empty()) {
             const Strength s = classify_strength(pw_.bytes());
-            const gfx::Color col = s == Strength::Weak   ? gfx::Color{230, 120, 120, 255}
-                                 : s == Strength::Medium ? gfx::Color{230, 200, 110, 255}
-                                                         : gfx::Color{130, 220, 140, 255};
             r.draw_text(font_, fx + 110, 134,
-                        std::string("strength: ") += strength_label(s), col);
+                        std::string("strength: ") += strength_label(s),
+                        strength_color(s));
         }
 
         const Layout L0 = layout();
