@@ -31,11 +31,13 @@ private:
         SDL_FRect other_btn;
         SDL_FRect mode_btn;
         SDL_FRect submit_btn;
+        SDL_FRect generate_btn;     // create mode only
+        SDL_FRect new_keyfile_btn;  // create mode only
     };
     [[nodiscard]] Layout layout() const;
     void submit();
 
-    enum class Pending { None, Vault, Keyfile };
+    enum class Pending { None, Vault, Keyfile, NewKeyfile };
 
     gfx::Window&          win_;
     gfx::FontAtlas&       font_;
@@ -48,7 +50,8 @@ private:
     SecureTextField       confirm_;
     std::string           keyfile_path_;
     std::string           error_;
-    Pending               pending_ = Pending::None;
+    Pending               pending_   = Pending::None;
+    bool                  reveal_pw_ = false;  // show a freshly generated passphrase
 };
 
 } // namespace ui
