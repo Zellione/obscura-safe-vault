@@ -2,8 +2,10 @@
 
 ## First-time setup
 ```bash
-scripts/setup.sh          # downloads premake5, builds SDL3 via cmake
+scripts/setup.sh          # premake5 + SDL3 + image codecs (calls build_codecs.sh)
+scripts/build_codecs.sh   # (re)build just the vendored image codecs into vendor/codecs-prefix
 ```
+Prerequisites: `cmake`, `ninja`, a C++20 compiler, and **nasm** (for libaom / AVIF).
 
 ## Generate build files
 ```bash
