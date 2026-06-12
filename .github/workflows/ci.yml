@@ -218,14 +218,16 @@ jobs:
         run: ./build/bin/${{ matrix.config }}/osv_tests.exe
 
       # -----------------------------------------------------------------------
-      # Packaging (Release leg only) — NSIS installer (preinstalled on runners)
+      # Packaging (Release leg only) — NSIS installer (installed via choco;
+      # PATH doesn't refresh mid-job, so call makensis by its install path)
       # -----------------------------------------------------------------------
       - name: Package (NSIS installer)
         if: matrix.config == 'Release'
         shell: pwsh
         run: |
+          choco install nsis --no-progress -y
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          makensis /DVERSION=dev packaging\windows\osv.nsi
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" /DVERSION=dev packaging\windows\osv.nsi
 
       - name: Upload package
         if: matrix.config == 'Release'

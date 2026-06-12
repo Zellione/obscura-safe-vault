@@ -4,7 +4,6 @@
 #include <array>
 #include <chrono>
 #include <cstring>
-#include <filesystem>
 #include <utility>
 
 #include "crypto/aead.h"
@@ -539,9 +538,7 @@ VaultResult Vault::compact()
     // (POSIX would happily swap the inode under us).
     std::fclose(fp_);
     fp_ = nullptr;
-    std::error_code ec;
-    std::filesystem::rename(tmp_path, path_, ec);
-    if (ec) {
+    if (!fileutil::rename_file(tmp_path, path_)) {
         std::remove(tmp_path.c_str());
         // The original is untouched; reacquire our handle to it.
         fp_ = std::fopen(path_.c_str(), "r+b");
