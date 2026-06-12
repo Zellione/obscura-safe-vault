@@ -31,6 +31,7 @@ build_codec() {  # name  src_dir  extra_cmake_args...
         -DCMAKE_INSTALL_PREFIX="$CODEC_PREFIX"      \
         -DCMAKE_INSTALL_LIBDIR=lib                  \
         -DCMAKE_PREFIX_PATH="$CODEC_PREFIX"         \
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.5          \
         "$@" -G "Ninja"
     cmake --build "$src/build" --parallel "$NPROC"
     cmake --install "$src/build"
@@ -43,6 +44,21 @@ build_codec webp "$REPO_ROOT/vendor/libwebp"                            \
     -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=OFF                  \
     -DWEBP_BUILD_EXTRAS=OFF
 
-# HEIC/AVIF stack (libde265 + libaom + libheif) is appended in Phase 9 Stage B.
+# HEIC decoder (HEVC). Skip the bundled example apps (dec265/enc265/...).
+build_codec de265 "$REPO_ROOT/vendor/libde265"                         \
+    -DENABLE_DECODER=OFF -DENABLE_ENCODER=OFF -DENABLE_SDL=OFF
+
+# AV1 decoder for AVIF. Decoder-only (no encoder/tests/tools/docs) to cut the
+# build down. Requires nasm for its assembly.
+build_codec aom "$REPO_ROOT/vendor/libaom"                             \
+    -DCONFIG_AV1_ENCODER=0 -DENABLE_TESTS=OFF -DENABLE_EXAMPLES=OFF     \
+    -DENABLE_TOOLS=OFF -DENABLE_DOCS=OFF
+
+# libheif ties it together; decoders are baked in statically (no plugin loading)
+# and it finds libde265/libaom via CMAKE_PREFIX_PATH (the staging prefix).
+build_codec heif "$REPO_ROOT/vendor/libheif"                           \
+    -DWITH_LIBDE265=ON -DWITH_AOM_DECODER=ON -DWITH_AOM_ENCODER=OFF     \
+    -DWITH_X265=OFF -DWITH_EXAMPLES=OFF -DWITH_GDK_PIXBUF=OFF           \
+    -DENABLE_PLUGIN_LOADING=OFF -DBUILD_TESTING=OFF
 
 echo "==> Codecs installed into vendor/codecs-prefix"

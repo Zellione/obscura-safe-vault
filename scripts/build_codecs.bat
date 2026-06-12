@@ -13,7 +13,17 @@ call :build_codec webp vendor\libwebp ^
     -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=OFF ^
     -DWEBP_BUILD_EXTRAS=OFF || goto :fail
 
-rem HEIC/AVIF stack (libde265 + libaom + libheif) is appended in Phase 9 Stage B.
+call :build_codec de265 vendor\libde265 ^
+    -DENABLE_DECODER=OFF -DENABLE_ENCODER=OFF -DENABLE_SDL=OFF || goto :fail
+
+call :build_codec aom vendor\libaom ^
+    -DCONFIG_AV1_ENCODER=0 -DENABLE_TESTS=OFF -DENABLE_EXAMPLES=OFF ^
+    -DENABLE_TOOLS=OFF -DENABLE_DOCS=OFF || goto :fail
+
+call :build_codec heif vendor\libheif ^
+    -DWITH_LIBDE265=ON -DWITH_AOM_DECODER=ON -DWITH_AOM_ENCODER=OFF ^
+    -DWITH_X265=OFF -DWITH_EXAMPLES=OFF -DWITH_GDK_PIXBUF=OFF ^
+    -DENABLE_PLUGIN_LOADING=OFF -DBUILD_TESTING=OFF || goto :fail
 
 echo ==^> Codecs installed into vendor\codecs-prefix
 popd
@@ -43,6 +53,7 @@ cmake -S "%CSRC%" -B "%CSRC%\build" -G "Ninja" ^
     -DCMAKE_INSTALL_PREFIX="%CODEC_PREFIX%" ^
     -DCMAKE_INSTALL_LIBDIR=lib ^
     -DCMAKE_PREFIX_PATH="%CODEC_PREFIX%" ^
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ^
     !CARGS! || exit /b 1
 cmake --build "%CSRC%\build" --parallel || exit /b 1
 cmake --install "%CSRC%\build" || exit /b 1
