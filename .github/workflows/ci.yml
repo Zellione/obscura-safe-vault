@@ -121,7 +121,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          key: codecs-v2-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
@@ -234,7 +234,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          key: codecs-v2-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
@@ -334,7 +334,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          key: codecs-v2-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
@@ -460,7 +460,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          key: codecs-v2-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
@@ -602,7 +602,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          key: codecs-v2-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: env.SONAR_TOKEN != '' && steps.cache-codecs.outputs.cache-hit != 'true'

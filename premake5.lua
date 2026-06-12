@@ -119,9 +119,15 @@ workspace "ObscuraSafeVault"
     targetdir "build/bin/%{cfg.buildcfg}"
 
     filter "configurations:Debug"
-        defines  { "OSV_DEBUG", "_DEBUG" }
+        defines  { "OSV_DEBUG" }
         symbols  "On"
         optimize "Off"
+    -- _DEBUG selects the debug CRT + _ITERATOR_DEBUG_LEVEL=2 on MSVC, which can't
+    -- link against our Release-built vendored static libs (SDL3/codecs). Keep it
+    -- off on Windows; see the system:windows filter below which pins the release
+    -- runtime there for all configs.
+    filter { "configurations:Debug", "system:not windows" }
+        defines  { "_DEBUG" }
 
     filter "configurations:Release"
         defines  { "NDEBUG" }
@@ -141,6 +147,12 @@ workspace "ObscuraSafeVault"
     -- stdio is deliberate; see vault/file_util.h).
     filter "system:windows"
         defines { "NOMINMAX", "WIN32_LEAN_AND_MEAN", "_CRT_SECURE_NO_WARNINGS" }
+        -- All vendored static libs (SDL3, libheif/libde265/libaom/libwebp) are
+        -- built Release, so pin the whole workspace to the release dynamic CRT and
+        -- release iterators in every config; otherwise a Debug build hits LNK2038
+        -- (RuntimeLibrary / _ITERATOR_DEBUG_LEVEL mismatch) against them.
+        runtime "Release"
+        defines { "_ITERATOR_DEBUG_LEVEL=0" }
 
     -- Opt-in sanitizers (gcc/clang). Applies to every project in the workspace.
     filter { "options:asan", "toolset:gcc or clang" }
