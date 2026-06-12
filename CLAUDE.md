@@ -138,6 +138,32 @@ scripts/test.sh --release    # optimised build
 The `bin/premake5` binary is downloaded by `setup.sh` from the official
 premake-core GitHub releases. It is **not** committed to the repo.
 
+### Platform-specific build notes (Phase 8)
+
+| Platform | Setup | Generate | Build |
+|---|---|---|---|
+| **Linux** | `scripts/setup.sh` | `scripts/gen.sh` (Ninja) | `scripts/build.sh` |
+| **Windows** | `scripts\setup.bat` (needs git, cmake, VS 2022) | `bin\premake5.exe vs2022` | `msbuild ObscuraSafeVault.sln /m /p:Configuration=Debug /p:Platform=x64` |
+| **macOS** | `scripts/setup.sh` | `scripts/gen.sh --gmake` | `scripts/build.sh --gmake` |
+
+- **Architecture:** Linux/Windows are built x86_64; macOS builds the toolchain's
+  native arch (arm64 on Apple Silicon) so the natively-cmake-built SDL3 links.
+  `premake5 xcode4` also works on macOS for IDE users; CI uses gmake2.
+- **SDL3 static lib paths** (auto-detected by `link_sdl3()` in premake5.lua):
+  `vendor/SDL3/build/libSDL3.a` (Linux/macOS), `vendor/SDL3/build/SDL3-static.lib`
+  (Windows Ninja), `vendor/SDL3/build/Release/SDL3-static.lib` (Windows VS generator —
+  what `setup.bat` produces).
+- **Windows Release** builds `osv` as a `WindowedApp` (no console window) with the
+  standard `main()` entry point; Debug keeps the console for stderr logging.
+- **Asset resolution:** the app first loads `assets/…` relative to the cwd (dev
+  workflow), then falls back to `SDL_GetBasePath()` (exe dir; `Contents/Resources/`
+  inside a mac bundle) so packaged installs work from anywhere.
+- **Packaging:** `scripts/package.sh` (Linux tar.gz + install.sh),
+  `makensis /DVERSION=… packaging/windows/osv.nsi` (Windows installer; `dist/` must
+  exist first), `scripts/package_macos.sh` (.app bundle, ad-hoc signed — Developer-ID
+  signing/notarisation deferred until Apple credentials exist). CI uploads all three
+  as artifacts from the Release legs.
+
 ---
 
 ## Code conventions
