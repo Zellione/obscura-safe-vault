@@ -32,13 +32,24 @@ src/
   ui/          unlock_screen.*, gallery_grid.* — UI screens; gallery has Grid +
                                                  detailed List views (key L), live
                                                  width reflow, centred/elided labels
-               image_viewer.*, widgets.*       — viewer has Fit + FillScroll modes,
-                                                 bottom/left strip toggle (keys F/T);
-                                                 widgets has button_state + elide_middle
+               image_viewer.*, widgets.*       — viewer has Fit + FillScroll + Slideshow
+                                                 modes, bottom/left strip toggle (keys
+                                                 F/T, P starts slideshow); widgets has
+                                                 button_state + elide_middle
+               full_tex_cache.*                — shared decode→GPU full-res texture cache
+                                                 (decrypt into mlock'd SecureBytes, wipe
+                                                 after upload); used by viewer + slideshow
+               slideshow_view.*                — full-screen slideshow SDL plumbing
+                                                 (owns SlideshowModel + cross-fade render);
+                                                 Phase 11
                strip_layout.*                  — orientation-aware strip geometry +
                                                  half-size thumbnails (pure/tested)
                scroll_model.*                  — fill-width continuous scroll maths
                                                  (pure/tested)
+               slideshow_model.*               — slideshow auto-advance/wrap/shuffle/
+                                                 cross-fade maths (Phase 11, pure/tested;
+                                                 driven by ImageViewer's Slideshow view
+                                                 mode via update(dt))
                meta_format.*                   — list-view metadata formatting:
                                                  size/dimensions/date/type (pure/tested)
                selection_model.*               — multi-select state for export

@@ -139,9 +139,12 @@ src/
   ui/        input.h,                    ← input abstraction (Phase 5)
              unlock_screen.*,             ← unlock + create vault (Phase 5)
              gallery_grid.*,              ← breadcrumb grid (Phase 5)
-             image_viewer.*,              ← zoom/pan + thumb strip + fill-scroll
+             image_viewer.*,              ← zoom/pan + thumb strip + fill-scroll + slideshow mode
+             full_tex_cache.*,            ← shared decode→GPU texture cache (Phase 11 extract)
+             slideshow_view.*,            ← full-screen slideshow SDL plumbing (Phase 11)
              strip_layout.*,              ← orientation-aware strip geometry (UI overhaul)
              scroll_model.*,              ← fill-width continuous scroll maths (UI overhaul)
+             slideshow_model.*,           ← auto-advance/shuffle/cross-fade maths (Phase 11)
              meta_format.*,               ← list-view metadata formatting (UI overhaul)
              selection_model.*,           ← multi-select state for export (Phase 10)
              consent_dialog.*,            ← modal "export anyway?" confirm (Phase 10)

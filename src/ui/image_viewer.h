@@ -2,15 +2,14 @@
 
 #include <SDL3/SDL.h>
 
-#include <cstdint>
-#include <span>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "ui/export_ui.h"
+#include "ui/full_tex_cache.h"
 #include "ui/screen.h"
 #include "ui/scroll_model.h"
+#include "ui/slideshow_view.h"
 #include "ui/strip_layout.h"
 #include "ui/viewer_model.h"
 
@@ -20,27 +19,31 @@ namespace platform { class FolderDialog; }
 
 namespace ui {
 
-// Full-window image viewer with two view modes and a movable thumbnail strip:
+// Full-window image viewer with three view modes and a movable thumbnail strip:
 //
 //   * Fit (default): a big zoom/pan image area with the thumbnail strip beside
 //     it. Wheel zooms, drag/arrows pan.
 //   * FillScroll: the image is scaled to fill the viewport width and the wheel
 //     scrolls vertically, flowing continuously into the next image across the
 //     whole leaf gallery; the active thumbnail tracks the viewport centre.
+//   * Slideshow: a full-screen auto-advancing show with a cross-fade and a live
+//     dwell time (the whole concern lives in SlideshowView; `P` starts it,
+//     `Esc`/`Up` returns here at the current image).
 //
 // The strip sits at the Bottom (horizontal) or Left (vertical); `T` toggles it,
-// `F` toggles the view mode. Both choices persist while the viewer is open.
+// `F` toggles between Fit and FillScroll. The choices persist while the viewer
+// is open.
 //
 // Decrypted image bytes live only in a transient mlock'd SecureBytes during
-// decode (invariant #1); the resulting GPU textures are owned here. Fit mode
-// keeps just the current image decoded; FillScroll keeps the on-screen images
-// plus their immediate neighbours (a small bounded set), evicting the rest.
+// decode (invariant #1); the resulting GPU textures are owned by FullTexCache.
+// Fit mode keeps just the current image decoded; FillScroll keeps the on-screen
+// images plus their immediate neighbours (a small bounded set), evicting the rest.
 class ImageViewer : public Screen {
 public:
     ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                 gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
                 std::string gallery_path, int start_index);
-    ~ImageViewer() override;
+    ~ImageViewer() override = default;
 
     ImageViewer(const ImageViewer&)            = delete;
     ImageViewer& operator=(const ImageViewer&) = delete;
@@ -52,10 +55,7 @@ public:
     void render(gfx::Renderer& r) override;
 
 private:
-    enum class ViewMode { Fit, FillScroll };
-
-    // A decoded full-resolution texture and its natural pixel size.
-    struct FullTex { SDL_Texture* tex = nullptr; float w = 0.0f; float h = 0.0f; };
+    enum class ViewMode { Fit, FillScroll, Slideshow };
 
     void handle_key(SDL_Keycode key);
     void handle_key_fit(SDL_Keycode key);
@@ -79,10 +79,6 @@ private:
     [[nodiscard]] float       scaled_height(const vault::IndexNode& n, float vp_w) const;
     void scroll_to_image(int idx);                  // place image `idx` at the top
     void scroll_by(float dy);
-
-    // Decoded full-texture cache (bounded). Returns nullptr on decode failure.
-    FullTex* acquire_full(const vault::IndexNode& node);
-    void     evict_full_except(std::span<const uint64_t> keep);
 
     SDL_Texture* thumb_texture(const vault::IndexNode& node);  // shared cache
     [[nodiscard]] int strip_hit(float mx, float my) const;     // thumb under cursor, or -1
@@ -108,18 +104,18 @@ private:
     float zoom_     = 1.0f;
     float fit_zoom_ = 1.0f;
     Vec2  pan_;
+    Vec2  img_size_;                // natural pixel size of the current image
     bool  fitted_   = false;
     bool  dragging_ = false;
-    float img_w_    = 0.0f;
-    float img_h_    = 0.0f;
 
     // FillScroll-mode state.
     float scroll_y_ = 0.0f;
 
-    // Bounded set of decoded full-res textures, keyed by chunk data_offset.
-    std::unordered_map<uint64_t, FullTex> full_cache_;
+    // Full-screen slideshow (active while mode_ == Slideshow).
+    SlideshowView slideshow_;
 
-    std::string error_;
+    // Bounded set of decoded full-res textures (shared with the slideshow).
+    FullTexCache full_cache_;
 };
 
 } // namespace ui
