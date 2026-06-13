@@ -540,6 +540,13 @@ no disk), and the cross-fade reuses the renderer's per-draw alpha (textures get
 > - **Shuffle** keeps a permutation pinned so the first image shown is the one the
 >   viewer was on; it reshuffles only at a true cycle boundary, guaranteeing every
 >   image is visited exactly once per cycle.
+> - **Structure (post-review).** To keep `ImageViewer` under SonarCloud's
+>   field/method limits, the slideshow SDL plumbing was extracted into
+>   `src/ui/slideshow_view.*` and the decode→GPU texture cache into a shared
+>   `src/ui/full_tex_cache.*` (also now used by Fit/FillScroll). The slideshow's
+>   `std::mt19937_64` only picks *display order* — never security material (all
+>   crypto randomness stays on the CSPRNG) — so its weak-PRNG hotspots are
+>   reviewed as Safe.
 
 ---
 

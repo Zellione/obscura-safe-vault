@@ -23,7 +23,7 @@ SlideshowModel::SlideshowModel(int count, int start_index, double dwell, bool sh
     if (shuffle_ && count_ > 0) {
         order_.resize(static_cast<size_t>(count_));
         std::iota(order_.begin(), order_.end(), 0);
-        std::shuffle(order_.begin(), order_.end(), rng_);
+        std::ranges::shuffle(order_, rng_);
         // Pin the requested start image to the front so it is shown first; the
         // rest of this cycle still visits every other image exactly once.
         const auto it = std::ranges::find(order_, cur_);
@@ -52,7 +52,7 @@ void SlideshowModel::step(int delta) noexcept
     }
     int np = pos_ + delta;
     if (np < 0 || np >= count_) {                 // crossed a cycle boundary
-        std::shuffle(order_.begin(), order_.end(), rng_);
+        std::ranges::shuffle(order_, rng_);
         np = ((np % count_) + count_) % count_;
     }
     pos_ = np;

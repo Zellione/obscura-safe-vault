@@ -29,13 +29,9 @@ ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& v
                          gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
                          std::string gallery_path, int start_index)
     : win_(win), font_(font), vault_(vault), cache_(cache), export_(folder_dlg, win),
-      gallery_path_(std::move(gallery_path)), index_(start_index)
+      gallery_path_(std::move(gallery_path)), index_(start_index),
+      full_cache_(vault, win.sdl_renderer())
 {
-}
-
-ImageViewer::~ImageViewer()
-{
-    evict_full_except({});   // destroy all cached textures
 }
 
 void ImageViewer::on_enter()
@@ -53,7 +49,7 @@ void ImageViewer::on_enter()
 
 void ImageViewer::on_exit()
 {
-    evict_full_except({});   // destroy all cached textures
+    full_cache_.evict_except({});   // destroy all cached textures
 }
 
 // --- Geometry --------------------------------------------------------------
@@ -75,8 +71,6 @@ SDL_FRect ImageViewer::strip_rect() const
                           static_cast<float>(win_.height()), thumb_size());
 }
 
-// --- Mode / layout toggles -------------------------------------------------
-
 // --- Fit-mode view state ---------------------------------------------------
 
 bool ImageViewer::is_zoomed() const noexcept
@@ -90,7 +84,6 @@ void ImageViewer::show_image_at(int idx)
     index_    = std::clamp(idx, 0, static_cast<int>(images_.size()) - 1);
     fitted_   = false;
     dragging_ = false;
-    error_.clear();
     if (mode_ == ViewMode::FillScroll) scroll_to_image(index_);
 }
 
@@ -107,7 +100,7 @@ void ImageViewer::back_to_gallery()
 void ImageViewer::zoom_by(float factor, float cx, float cy)
 {
     const SDL_FRect vp = viewport_rect();
-    const ZoomResult z = zoom_at(Vec2{img_w_, img_h_}, zoom_, pan_, factor,
+    const ZoomResult z = zoom_at(img_size_, zoom_, pan_, factor,
                                  Vec2{cx - vp.x, cy - vp.y}, Vec2{vp.w, vp.h});
     zoom_ = z.zoom;
     pan_  = z.pan;
@@ -116,8 +109,8 @@ void ImageViewer::zoom_by(float factor, float cx, float cy)
 void ImageViewer::pan_by(float dx, float dy)
 {
     const SDL_FRect vp = viewport_rect();
-    pan_ = clamp_pan(Vec2{pan_.x + dx, pan_.y + dy}, img_w_ * zoom_, img_h_ * zoom_,
-                     vp.w, vp.h);
+    pan_ = clamp_pan(Vec2{pan_.x + dx, pan_.y + dy}, img_size_.x * zoom_,
+                     img_size_.y * zoom_, vp.w, vp.h);
 }
 
 // --- FillScroll-mode helpers ----------------------------------------------
@@ -151,49 +144,7 @@ void ImageViewer::scroll_by(float dy)
     index_    = m.active_index(scroll_y_);
 }
 
-// --- Decoded full-texture cache -------------------------------------------
-
-ImageViewer::FullTex* ImageViewer::acquire_full(const vault::IndexNode& node)
-{
-    const uint64_t key = node.meta.data_offset;
-    if (auto it = full_cache_.find(key); it != full_cache_.end()) return &it->second;
-
-    crypto::SecureBytes sb;
-    if (vault_.read_image(node, sb) != vault::VaultResult::Ok) {
-        error_ = "Could not decrypt image.";
-        return nullptr;
-    }
-    auto img = image::decode_from_memory(sb.as_span());
-    if (!img) { error_ = "Could not decode image."; return nullptr; }
-
-    SDL_Texture* tex = SDL_CreateTexture(win_.sdl_renderer(), SDL_PIXELFORMAT_RGB24,
-                                         SDL_TEXTUREACCESS_STATIC, img->width, img->height);
-    if (!tex) { error_ = "Could not upload image."; return nullptr; }
-    // Enable alpha blending so the slideshow cross-fade's per-draw alpha takes
-    // effect (a no-op for the opaque Fit/FillScroll draws).
-    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-    if (!SDL_UpdateTexture(tex, nullptr, img->pixels.data(), img->width * 3)) {
-        SDL_DestroyTexture(tex);
-        error_ = "Could not upload image.";
-        return nullptr;
-    }
-    // SecureBytes `sb` wipes the decrypted plaintext on scope exit; the pixels
-    // now live only in the GPU texture.
-    auto [it, _] = full_cache_.try_emplace(key, FullTex{tex,
-                                                        static_cast<float>(img->width),
-                                                        static_cast<float>(img->height)});
-    return &it->second;
-}
-
-void ImageViewer::evict_full_except(std::span<const uint64_t> keep)
-{
-    std::erase_if(full_cache_, [keep](const auto& entry) {
-        const auto& [key, ft] = entry;
-        if (std::ranges::find(keep, key) != keep.end()) return false;
-        SDL_DestroyTexture(ft.tex);
-        return true;
-    });
-}
+// --- Thumbnail strip -------------------------------------------------------
 
 SDL_Texture* ImageViewer::thumb_texture(const vault::IndexNode& node)
 {
@@ -234,7 +185,15 @@ void ImageViewer::handle_key(SDL_Keycode key)
 {
     using enum StripSide;
     using enum ViewMode;
-    if (mode_ == Slideshow) { handle_key_slideshow(key); return; }
+    if (mode_ == Slideshow) {
+        if (!slideshow_.handle_key(key)) {   // user exited the slideshow
+            index_  = slideshow_.index();
+            slideshow_.stop();
+            mode_   = Fit;
+            fitted_ = false;
+        }
+        return;
+    }
     switch (key) {
         case SDLK_T:      // toggle the strip between bottom and left
             strip_side_ = (strip_side_ == Bottom) ? Left : Bottom;
@@ -246,7 +205,10 @@ void ImageViewer::handle_key(SDL_Keycode key)
             else              { mode_ = Fit; fitted_ = false; }
             return;
         case SDLK_P:      // start the full-screen slideshow
-            enter_slideshow();
+            if (!images_.empty()) {
+                slideshow_.start(static_cast<int>(images_.size()), index_);
+                mode_ = Slideshow;
+            }
             return;
         case SDLK_X:      // export the current image (consent modal first)
             if (!images_.empty())
@@ -288,69 +250,10 @@ void ImageViewer::handle_key_scroll(SDL_Keycode key)
     }
 }
 
-void ImageViewer::handle_key_slideshow(SDL_Keycode key)
-{
-    if (!show_) return;
-    switch (key) {
-        case SDLK_P:
-        case SDLK_SPACE:  show_->toggle();          break;   // play / pause
-        case SDLK_ESCAPE:
-        case SDLK_UP:     exit_slideshow();         return;  // back to the viewer
-        case SDLK_RIGHT:  show_->advance(1);  index_ = show_->index(); break;
-        case SDLK_LEFT:   show_->advance(-1); index_ = show_->index(); break;
-        case SDLK_S:      rebuild_slideshow(show_->running()); break;  // toggle shuffle
-        case SDLK_LEFTBRACKET:
-        case SDLK_MINUS:
-        case SDLK_KP_MINUS: show_->adjust_dwell(-SLIDESHOW_DWELL_STEP);
-                            dwell_ = show_->dwell(); break;
-        case SDLK_RIGHTBRACKET:
-        case SDLK_PLUS:
-        case SDLK_EQUALS:
-        case SDLK_KP_PLUS:  show_->adjust_dwell(SLIDESHOW_DWELL_STEP);
-                            dwell_ = show_->dwell(); break;
-        default: break;
-    }
-}
-
-void ImageViewer::enter_slideshow()
-{
-    if (images_.empty()) return;
-    mode_ = ViewMode::Slideshow;
-    show_.emplace(static_cast<int>(images_.size()), index_, dwell_, shuffle_,
-                  static_cast<uint64_t>(SDL_GetTicks()));
-}
-
-void ImageViewer::exit_slideshow()
-{
-    if (show_) index_ = show_->index();
-    show_.reset();
-    mode_   = ViewMode::Fit;
-    fitted_ = false;                 // re-fit the still image
-}
-
-void ImageViewer::rebuild_slideshow(bool keep_running)
-{
-    shuffle_ = !shuffle_;
-    show_.emplace(static_cast<int>(images_.size()), index_, dwell_, shuffle_,
-                  static_cast<uint64_t>(SDL_GetTicks()));
-    show_->set_running(keep_running);
-}
-
-SDL_FRect ImageViewer::fit_dest(float iw, float ih, const SDL_FRect& vp) const
-{
-    const float z  = clamp_zoom(fit_zoom(iw, ih, vp.w, vp.h));
-    const float sw = iw * z;
-    const float sh = ih * z;
-    return SDL_FRect{vp.x + (vp.w - sw) * 0.5f, vp.y + (vp.h - sh) * 0.5f, sw, sh};
-}
-
 void ImageViewer::handle_mouse_down(const SDL_MouseButtonEvent& b)
 {
     if (b.button != SDL_BUTTON_LEFT) return;
-    if (mode_ == ViewMode::Slideshow) {                            // click = pause/play
-        if (show_) show_->toggle();
-        return;
-    }
+    if (mode_ == ViewMode::Slideshow) { slideshow_.toggle_play(); return; }  // click = pause/play
     if (const int hit = strip_hit(b.x, b.y); hit >= 0) {
         show_image_at(hit);
     } else if (mode_ == ViewMode::Fit) {
@@ -370,9 +273,9 @@ void ImageViewer::handle_wheel(const SDL_MouseWheelEvent& w)
 
 void ImageViewer::update(double dt)
 {
-    if (mode_ == ViewMode::Slideshow && show_) {
-        show_->tick(dt);
-        index_ = show_->index();
+    if (mode_ == ViewMode::Slideshow) {
+        slideshow_.update(dt);
+        index_ = slideshow_.index();
     }
 
     if (auto dest = export_.take_destination(); dest && !images_.empty()) {
@@ -411,23 +314,23 @@ void ImageViewer::handle_event(const SDL_Event& e)
 
 void ImageViewer::render_fit(gfx::Renderer& r, const SDL_FRect& vp)
 {
-    FullTex* ft = acquire_full(*images_[index_]);
+    FullTex* ft = full_cache_.acquire(*images_[index_]);
     const std::array<uint64_t, 1> keep{images_[index_]->meta.data_offset};
-    evict_full_except(keep);
+    full_cache_.evict_except(keep);
 
     if (!ft) {
-        if (!error_.empty())
-            r.draw_text(font_, vp.x + 20, vp.y + vp.h * 0.5f, error_, gfx::theme::DANGER);
+        if (!full_cache_.error().empty())
+            r.draw_text(font_, vp.x + 20, vp.y + vp.h * 0.5f, full_cache_.error(),
+                        gfx::theme::DANGER);
         return;
     }
-    img_w_ = ft->w;
-    img_h_ = ft->h;
+    img_size_ = Vec2{ft->w, ft->h};
 
-    fit_zoom_ = clamp_zoom(fit_zoom(img_w_, img_h_, vp.w, vp.h));
+    fit_zoom_ = clamp_zoom(fit_zoom(img_size_.x, img_size_.y, vp.w, vp.h));
     if (!fitted_) { zoom_ = fit_zoom_; pan_ = Vec2{}; fitted_ = true; }
 
-    const float sw = img_w_ * zoom_;
-    const float sh = img_h_ * zoom_;
+    const float sw = img_size_.x * zoom_;
+    const float sh = img_size_.y * zoom_;
     pan_ = clamp_pan(pan_, sw, sh, vp.w, vp.h);
     const float dx = vp.x + vp.w * 0.5f + pan_.x - sw * 0.5f;
     const float dy = vp.y + vp.h * 0.5f + pan_.y - sh * 0.5f;
@@ -454,7 +357,7 @@ void ImageViewer::render_scroll(gfx::Renderer& r, const SDL_FRect& vp)
     std::vector<uint64_t> keep;
     keep.reserve(static_cast<size_t>(hi - lo + 1));
     for (int i = lo; i <= hi; ++i) keep.push_back(images_[i]->meta.data_offset);
-    evict_full_except(keep);
+    full_cache_.evict_except(keep);
 
     const SDL_Rect clip{static_cast<int>(vp.x), static_cast<int>(vp.y),
                         static_cast<int>(vp.w), static_cast<int>(vp.h)};
@@ -462,64 +365,12 @@ void ImageViewer::render_scroll(gfx::Renderer& r, const SDL_FRect& vp)
     for (int i = first; i <= last; ++i) {
         const float top = vp.y + m.image_top(i) - scroll_y_;
         const float h   = scaled_height(*images_[i], vp.w);
-        if (FullTex* ft = acquire_full(*images_[i]))
+        if (FullTex* ft = full_cache_.acquire(*images_[i]))
             r.draw_image(ft->tex, SDL_FRect{vp.x, top, vp.w, h});
         else
             r.draw_rect(SDL_FRect{vp.x, top, vp.w, h}, gfx::theme::SURFACE);
     }
     SDL_SetRenderClipRect(r.sdl(), nullptr);
-}
-
-void ImageViewer::render_slideshow(gfx::Renderer& r, const SDL_FRect& vp)
-{
-    if (images_.empty() || !show_) return;
-    const int n    = static_cast<int>(images_.size());
-    const int cur  = std::clamp(index_, 0, n - 1);
-    const int nxt  = wrap_index(cur, 1, n);
-    const int prev = show_->prev_index();   // outgoing during a cross-fade, else -1
-
-    // Decode the current, outgoing and next frames (next is prefetched so the
-    // upcoming advance is seamless); evict everything else to keep a bounded set.
-    FullTex* cur_ft  = acquire_full(*images_[cur]);
-    FullTex* prev_ft = prev >= 0 ? acquire_full(*images_[prev]) : nullptr;
-    acquire_full(*images_[nxt]);
-    std::vector<uint64_t> keep{images_[cur]->meta.data_offset,
-                               images_[nxt]->meta.data_offset};
-    if (prev >= 0) keep.push_back(images_[prev]->meta.data_offset);
-    evict_full_except(keep);
-
-    const SDL_Rect clip{static_cast<int>(vp.x), static_cast<int>(vp.y),
-                        static_cast<int>(vp.w), static_cast<int>(vp.h)};
-    SDL_SetRenderClipRect(r.sdl(), &clip);
-
-    // Cross-fade: the outgoing frame is drawn opaque, the incoming frame on top at
-    // alpha = fade_progress, so the blend resolves to in*p + out*(1-p).
-    const float p = static_cast<float>(show_->fade_progress());
-    if (prev_ft)
-        r.draw_image(prev_ft->tex, fit_dest(prev_ft->w, prev_ft->h, vp));
-    if (cur_ft) {
-        const auto a = static_cast<uint8_t>(std::clamp(p, 0.0f, 1.0f) * 255.0f + 0.5f);
-        r.draw_image(cur_ft->tex, fit_dest(cur_ft->w, cur_ft->h, vp),
-                     gfx::Color{255, 255, 255, prev_ft ? a : static_cast<uint8_t>(255)});
-    } else if (!error_.empty()) {
-        r.draw_text(font_, vp.x + 20, vp.y + vp.h * 0.5f, error_, gfx::theme::DANGER);
-    }
-    SDL_SetRenderClipRect(r.sdl(), nullptr);
-}
-
-void ImageViewer::render_slideshow_hud(gfx::Renderer& r, const SDL_FRect& vp)
-{
-    if (images_.empty() || !show_) return;
-    const char* state = show_->running() ? "Playing" : "Paused";
-    const std::string hud =
-        std::format("{}   {} of {}   {}   {:.0f}s per slide{}", images_[index_]->name,
-                    index_ + 1, images_.size(), state, show_->dwell(),
-                    shuffle_ ? "   Shuffle on" : "");
-    r.draw_text(font_, vp.x + 16, vp.y + 12, hud, gfx::theme::TEXT);
-    r.draw_text(font_, vp.x + 16, vp.y + 44,
-                "[Space] Play/Pause   [<-/->] Prev/Next   [+/-] Slower/Faster   "
-                "[S] Shuffle   [Esc] Exit",
-                gfx::theme::TEXT_FAINT);
 }
 
 void ImageViewer::render_strip(gfx::Renderer& r)
@@ -566,13 +417,11 @@ void ImageViewer::render_hud(gfx::Renderer& r, const SDL_FRect& vp)
 
 void ImageViewer::render(gfx::Renderer& r)
 {
-    // Slideshow is full-screen (no thumbnail strip): use the whole window.
+    // Slideshow is full-screen (no thumbnail strip): it owns the whole window.
     if (mode_ == ViewMode::Slideshow) {
-        const SDL_FRect full{0.0f, 0.0f, static_cast<float>(win_.width()),
-                             static_cast<float>(win_.height())};
-        r.draw_rect(full, gfx::theme::IMG_BG);
-        render_slideshow(r, full);
-        render_slideshow_hud(r, full);
+        slideshow_.render(r, font_, full_cache_, images_,
+                          static_cast<float>(win_.width()),
+                          static_cast<float>(win_.height()));
         return;
     }
 
