@@ -4,10 +4,31 @@ on:
   # Run on PRs, and on pushes to main only (post-merge validation).
   # Feature-branch pushes are covered by the pull_request trigger, so this
   # avoids running the workflow twice for the same commit on an open PR.
+  #
+  # paths-ignore: skip the whole workflow when a push/PR touches *only* docs.
+  # Any change that also touches a non-doc file (src/, tests/, scripts/,
+  # premake5.lua, vendored submodules, this workflow, sonar config, …) still
+  # runs the full matrix. This is a blocklist, not an allowlist, so new
+  # build-relevant files are never accidentally excluded from CI.
+  #
+  # Safe because `main` has no required status checks — a skipped workflow
+  # reports nothing and blocks nothing. If branch protection with required
+  # checks is added later, switch to per-job gating (e.g. dorny/paths-filter)
+  # so the required checks still report a (neutral/success) result.
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
 
 jobs:
   build-and-test:
