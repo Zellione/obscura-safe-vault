@@ -11,6 +11,7 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "image/decode.h"
+#include "ui/export.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
 #include "vault/vault.h"
@@ -25,9 +26,9 @@ constexpr float SCROLL_STEP = 96.0f;   // arrow-key / wheel scroll distance (px)
 } // namespace
 
 ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                         gfx::TextureCache& cache, std::string gallery_path,
-                         int start_index)
-    : win_(win), font_(font), vault_(vault), cache_(cache),
+                         gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
+                         std::string gallery_path, int start_index)
+    : win_(win), font_(font), vault_(vault), cache_(cache), export_(folder_dlg, win),
       gallery_path_(std::move(gallery_path)), index_(start_index)
 {
 }
@@ -240,6 +241,10 @@ void ImageViewer::handle_key(SDL_Keycode key)
             if (mode_ == Fit) { mode_ = FillScroll; scroll_to_image(index_); }
             else              { mode_ = Fit; fitted_ = false; }
             return;
+        case SDLK_X:      // export the current image (consent modal first)
+            if (!images_.empty())
+                export_.begin(std::format("Export \"{}\"?", images_[index_]->name));
+            return;
         case SDLK_ESCAPE: back_to_gallery(); return;
         default: break;
     }
@@ -295,8 +300,26 @@ void ImageViewer::handle_wheel(const SDL_MouseWheelEvent& w)
         zoom_by(w.y > 0 ? WHEEL_STEP : 1.0f / WHEEL_STEP, w.mouse_x, w.mouse_y);
 }
 
+void ImageViewer::update(double)
+{
+    if (auto dest = export_.take_destination(); dest && !images_.empty()) {
+        const std::array<const vault::IndexNode*, 1> one{images_[index_]};
+        const ExportSummary sum =
+            export_images(vault_, one, *dest, ExportConsent::Confirm);
+        export_.set_status(sum.written == 1
+                               ? std::format("Exported to {}", dest->string())
+                               : "Export failed.");
+    }
+}
+
 void ImageViewer::handle_event(const SDL_Event& e)
 {
+    // The export consent modal owns all input while it is up.
+    if (export_.modal_active()) {
+        if (e.type == SDL_EVENT_KEY_DOWN) export_.consume_key(e.key.key);
+        return;
+    }
+
     switch (e.type) {
         case SDL_EVENT_KEY_DOWN:          handle_key(e.key.key);        break;
         case SDL_EVENT_MOUSE_WHEEL:       handle_wheel(e.wheel);        break;
@@ -408,9 +431,12 @@ void ImageViewer::render_hud(gfx::Renderer& r, const SDL_FRect& vp)
         r.draw_text(font_, vp.x + 16, vp.y + 12, hud, gfx::theme::TEXT);
     }
     const char* legend = (mode_ == FillScroll)
-        ? "[Wheel] Scroll   [<-/->] Prev/Next   [F] Fit   [T] Strip side   [Esc] Back"
-        : "[<-/->] Prev/Next   [Wheel/+/-] Zoom   [F] Fill-scroll   [T] Strip side   [Esc] Back";
+        ? "[Wheel] Scroll   [<-/->] Prev/Next   [F] Fit   [T] Strip   [X] Export   [Esc] Back"
+        : "[<-/->] Prev/Next   [Wheel/+/-] Zoom   [F] Fill-scroll   [T] Strip   [X] Export   [Esc] Back";
     r.draw_text(font_, vp.x + 16, vp.y + 44, legend, gfx::theme::TEXT_FAINT);
+
+    if (!export_.status().empty())
+        r.draw_text(font_, vp.x + 16, vp.y + vp.h - 32, export_.status(), gfx::theme::OK);
 }
 
 void ImageViewer::render(gfx::Renderer& r)
@@ -423,6 +449,9 @@ void ImageViewer::render(gfx::Renderer& r)
 
     render_hud(r, vp);
     render_strip(r);
+
+    export_.render(r, font_, static_cast<float>(win_.width()),
+                   static_cast<float>(win_.height()));
 }
 
 } // namespace ui

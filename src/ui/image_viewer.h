@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "ui/export_ui.h"
 #include "ui/screen.h"
 #include "ui/scroll_model.h"
 #include "ui/strip_layout.h"
@@ -15,6 +16,7 @@
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
 namespace vault { class Vault; struct IndexNode; }
+namespace platform { class FolderDialog; }
 
 namespace ui {
 
@@ -36,7 +38,8 @@ namespace ui {
 class ImageViewer : public Screen {
 public:
     ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                gfx::TextureCache& cache, std::string gallery_path, int start_index);
+                gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
+                std::string gallery_path, int start_index);
     ~ImageViewer() override;
 
     ImageViewer(const ImageViewer&)            = delete;
@@ -45,6 +48,7 @@ public:
     void on_enter() override;
     void on_exit() override;
     void handle_event(const SDL_Event& e) override;
+    void update(double dt) override;
     void render(gfx::Renderer& r) override;
 
 private:
@@ -87,11 +91,12 @@ private:
     void render_strip(gfx::Renderer& r);
     void render_hud(gfx::Renderer& r, const SDL_FRect& vp);
 
-    gfx::Window&       win_;
-    gfx::FontAtlas&    font_;
-    vault::Vault&      vault_;
-    gfx::TextureCache& cache_;
-    std::string        gallery_path_;
+    gfx::Window&            win_;
+    gfx::FontAtlas&         font_;
+    vault::Vault&           vault_;
+    gfx::TextureCache&      cache_;
+    ExportUi                export_;
+    std::string             gallery_path_;
     std::vector<const vault::IndexNode*> images_;
     int   index_ = 0;
 

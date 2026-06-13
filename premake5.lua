@@ -251,6 +251,8 @@ project "osv_tests"
         "src/ui/strip_layout.cpp",
         "src/ui/scroll_model.cpp",
         "src/ui/meta_format.cpp",
+        "src/ui/selection_model.cpp",
+        "src/ui/export.cpp",
     }
 
     includedirs {

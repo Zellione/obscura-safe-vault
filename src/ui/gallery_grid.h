@@ -7,22 +7,29 @@
 #include <string_view>
 #include <vector>
 
+#include "ui/consent_dialog.h"
 #include "ui/nav_model.h"
 #include "ui/screen.h"
+#include "ui/selection_model.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
 namespace vault { class Vault; struct IndexNode; }
-namespace platform { class FileDialog; }
+namespace platform { class FileDialog; class FolderDialog; }
 
 namespace ui {
 
+// Where to (re)open the grid: a gallery path (empty = root) and the selected
+// tile index. Used to restore position when returning from the image viewer.
+struct GridLocation {
+    std::string path;
+    int         selected = 0;
+};
+
 class GalleryGrid : public Screen {
 public:
-    // `initial_path` / `initial_sel` restore the grid's location and selection
-    // when returning from the image viewer (empty path = root).
     GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                 gfx::TextureCache& cache, platform::FileDialog& dlg,
-                std::string initial_path = {}, int initial_sel = 0);
+                platform::FolderDialog& folder_dlg, GridLocation at = {});
 
     void on_enter() override;
     void handle_event(const SDL_Event& e) override;
@@ -32,9 +39,15 @@ public:
 private:
     enum class GalleryView { Grid, List };
 
+    void handle_key_down(const SDL_KeyboardEvent& key);  // browse-mode keys
+    void handle_naming_key(const SDL_Event& e);          // new-gallery text entry
+    void toggle_or_open();                               // Space: select image / open
     void refresh();
     void open_selected();
     void go_up();
+    void toggle_select();          // toggle the current item in the export selection
+    void start_export();           // open the consent modal for the current selection
+    void do_export(const std::filesystem::path& dest);
     void start_import();
     void start_naming();
     void finish_naming();
@@ -50,18 +63,22 @@ private:
     [[nodiscard]] int  hit_test(float mx, float my) const;  // item under cursor, or -1
     [[nodiscard]] std::string fit_name(std::string_view name, float max_w) const;
 
-    gfx::Window&          win_;
-    gfx::FontAtlas&       font_;
-    vault::Vault&         vault_;
-    gfx::TextureCache&    cache_;
-    platform::FileDialog& dlg_;
-    NavModel              nav_;
+    gfx::Window&            win_;
+    gfx::FontAtlas&         font_;
+    vault::Vault&           vault_;
+    gfx::TextureCache&      cache_;
+    platform::FileDialog&   dlg_;
+    platform::FolderDialog& folder_dlg_;
+    NavModel                nav_;
+    SelectionModel          sel_;
+    ConsentDialog           consent_;
     std::string           initial_path_;
     int                   initial_sel_ = 0;
     std::vector<const vault::IndexNode*> children_;
     int                   cols_ = 1;
     GalleryView           view_ = GalleryView::Grid;
     std::string           error_;
+    std::string           status_;   // transient export result message
     bool                  naming_ = false;
     std::string           name_buf_;
 };
