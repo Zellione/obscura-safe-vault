@@ -56,7 +56,8 @@ void App::to_gallery(const std::string& path, int selected)
 {
     state_  = State::Browsing;
     screen_ = std::make_unique<ui::GalleryGrid>(window_, font_, vault_, *cache_, dialog_,
-                                                folder_dialog_, path, selected);
+                                                folder_dialog_,
+                                                ui::GridLocation{path, selected});
     screen_->on_enter();
 }
 

@@ -145,6 +145,7 @@ src/
              meta_format.*,               ← list-view metadata formatting (UI overhaul)
              selection_model.*,           ← multi-select state for export (Phase 10)
              consent_dialog.*,            ← modal "export anyway?" confirm (Phase 10)
+             export_ui.*,                 ← shared consent+folder-pick plumbing (Phase 10)
              export.*,                    ← decrypt→write-verbatim→wipe (Phase 10)
              widgets.*
   platform/  paths.{h,cpp},              ← config dir + file dialogs (Phase 5)

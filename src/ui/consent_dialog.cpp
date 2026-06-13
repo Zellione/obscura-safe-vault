@@ -16,19 +16,20 @@ void ConsentDialog::close() { active_ = false; }
 
 ConsentDialog::Result ConsentDialog::handle_key(SDL_Keycode key)
 {
-    if (!active_) return Result::Pending;
+    using enum Result;
+    if (!active_) return Pending;
     switch (key) {
         case SDLK_Y:                 // confirming requires a deliberate, distinct key
             close();
-            return Result::Confirmed;
+            return Confirmed;
         case SDLK_RETURN:            // Enter triggers the default action: Cancel
         case SDLK_KP_ENTER:
         case SDLK_ESCAPE:
         case SDLK_N:
             close();
-            return Result::Cancelled;
+            return Cancelled;
         default:
-            return Result::Pending;
+            return Pending;
     }
 }
 
@@ -49,7 +50,7 @@ void ConsentDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
     r.draw_round_rect({px, py, pw, ph}, RADIUS, DANGER, /*filled*/ false);
 
     auto centered = [&](const std::string& s, float y, gfx::Color c) {
-        const float tw = font.measure(s);
+        const float tw = static_cast<float>(font.measure(s));
         r.draw_text(font, px + (pw - tw) / 2, y, s, c);
     };
 

@@ -3,13 +3,12 @@
 #include <SDL3/SDL.h>
 
 #include <cstdint>
-#include <filesystem>
 #include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-#include "ui/consent_dialog.h"
+#include "ui/export_ui.h"
 #include "ui/screen.h"
 #include "ui/scroll_model.h"
 #include "ui/strip_layout.h"
@@ -71,8 +70,6 @@ private:
     void show_image_at(int idx);                    // absolute, clamped, refit
     void set_index(int delta);                      // wrap, reset view, rebuild
     void back_to_gallery();
-    void start_export();                            // consent modal for current image
-    void do_export(const std::filesystem::path& dest);
     void zoom_by(float factor, float cx, float cy); // centred on (cx, cy)
     void pan_by(float dx, float dy);
     [[nodiscard]] bool is_zoomed() const noexcept;  // zoomed past fit-to-window
@@ -98,9 +95,7 @@ private:
     gfx::FontAtlas&         font_;
     vault::Vault&           vault_;
     gfx::TextureCache&      cache_;
-    platform::FolderDialog& folder_dlg_;
-    ConsentDialog           consent_;
-    std::string             export_status_;
+    ExportUi                export_;
     std::string             gallery_path_;
     std::vector<const vault::IndexNode*> images_;
     int   index_ = 0;

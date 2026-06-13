@@ -14,8 +14,9 @@
 // the consent dialog and folder picker live in the UI/platform layers.
 
 #include <filesystem>
-#include <functional>
+#include <format>
 #include <span>
+#include <string>
 #include <string_view>
 
 #include "vault/vault.h"
@@ -32,11 +33,24 @@ struct ExportSummary {
 
 // Resolve a non-colliding output path. Returns `dir/filename` if `exists`
 // reports it free; otherwise appends " (1)", " (2)", ... before the extension
-// until a free name is found. Pure — `exists` injects the filesystem probe.
+// until a free name is found. Pure — `exists(path) -> bool` injects the
+// filesystem probe (templated on the callable to avoid a std::function alloc).
+template <class Exists>
 [[nodiscard]] std::filesystem::path unique_export_path(
-    const std::filesystem::path&                                 dir,
-    std::string_view                                             filename,
-    const std::function<bool(const std::filesystem::path&)>&     exists);
+    const std::filesystem::path& dir, std::string_view filename, Exists&& exists)
+{
+    std::filesystem::path candidate = dir / filename;
+    if (!exists(candidate)) return candidate;
+
+    // Split "name.ext" so the counter goes before the extension: "name (1).ext".
+    const std::filesystem::path base(filename);
+    const std::string stem = base.stem().string();
+    const std::string ext  = base.extension().string();
+    for (int n = 1;; ++n) {
+        candidate = dir / std::format("{} ({}){}", stem, n, ext);
+        if (!exists(candidate)) return candidate;
+    }
+}
 
 // Decrypt `node`'s ORIGINAL stored bytes into `scratch` (mlock'd) and write them
 // verbatim to `out_path`, then crypto_wipe `scratch`. `scratch` is reused/resized

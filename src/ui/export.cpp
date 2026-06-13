@@ -2,28 +2,10 @@
 
 #include <cstdio>
 #include <print>
-#include <string>
 
 namespace ui {
 
 namespace fs = std::filesystem;
-
-std::filesystem::path unique_export_path(
-    const fs::path& dir, std::string_view filename,
-    const std::function<bool(const fs::path&)>& exists)
-{
-    fs::path candidate = dir / filename;
-    if (!exists(candidate)) return candidate;
-
-    // Split "name.ext" so the counter goes before the extension: "name (1).ext".
-    const fs::path base(filename);
-    const std::string stem = base.stem().string();
-    const std::string ext  = base.extension().string();
-    for (int n = 1;; ++n) {
-        candidate = dir / (stem + " (" + std::to_string(n) + ")" + ext);
-        if (!exists(candidate)) return candidate;
-    }
-}
 
 vault::VaultResult export_one_image(const vault::Vault&          vault,
                                     const vault::IndexNode&      node,

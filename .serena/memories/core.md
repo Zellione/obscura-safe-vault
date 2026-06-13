@@ -45,6 +45,8 @@ src/
                                                  (Phase 10, pure/tested)
                consent_dialog.*                — modal "export anyway?" confirm
                                                  (Phase 10, SDL plumbing)
+               export_ui.*                     — shared consent+folder-pick plumbing
+                                                 used by gallery + viewer (Phase 10)
                export.*                        — decrypt→write-verbatim→wipe export
                                                  (Phase 10; the ONE gated deviation
                                                  from invariant #1, SDL-free/tested)

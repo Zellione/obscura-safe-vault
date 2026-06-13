@@ -18,14 +18,18 @@ namespace platform { class FileDialog; class FolderDialog; }
 
 namespace ui {
 
+// Where to (re)open the grid: a gallery path (empty = root) and the selected
+// tile index. Used to restore position when returning from the image viewer.
+struct GridLocation {
+    std::string path;
+    int         selected = 0;
+};
+
 class GalleryGrid : public Screen {
 public:
-    // `initial_path` / `initial_sel` restore the grid's location and selection
-    // when returning from the image viewer (empty path = root).
     GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                 gfx::TextureCache& cache, platform::FileDialog& dlg,
-                platform::FolderDialog& folder_dlg,
-                std::string initial_path = {}, int initial_sel = 0);
+                platform::FolderDialog& folder_dlg, GridLocation at = {});
 
     void on_enter() override;
     void handle_event(const SDL_Event& e) override;
@@ -35,6 +39,9 @@ public:
 private:
     enum class GalleryView { Grid, List };
 
+    void handle_key_down(const SDL_KeyboardEvent& key);  // browse-mode keys
+    void handle_naming_key(const SDL_Event& e);          // new-gallery text entry
+    void toggle_or_open();                               // Space: select image / open
     void refresh();
     void open_selected();
     void go_up();

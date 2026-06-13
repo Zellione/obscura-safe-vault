@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <format>
 
 #include "crypto/secure_mem.h"
 #include "gfx/renderer.h"
@@ -48,11 +49,10 @@ GridSpec grid_spec(float win_w, int cols) noexcept
 
 GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                          gfx::TextureCache& cache, platform::FileDialog& dlg,
-                         platform::FolderDialog& folder_dlg,
-                         std::string initial_path, int initial_sel)
+                         platform::FolderDialog& folder_dlg, GridLocation at)
     : win_(win), font_(font), vault_(vault), cache_(cache), dlg_(dlg),
       folder_dlg_(folder_dlg),
-      initial_path_(std::move(initial_path)), initial_sel_(initial_sel)
+      initial_path_(std::move(at.path)), initial_sel_(at.selected)
 {
 }
 
@@ -121,7 +121,7 @@ void GalleryGrid::start_export()
     error_.clear();
     status_.clear();
     const std::size_t n = sel_.count();
-    consent_.open("Export " + std::to_string(n) + (n == 1 ? " image?" : " images?"));
+    consent_.open(std::format("Export {} {}", n, n == 1 ? "image?" : "images?"));
 }
 
 void GalleryGrid::do_export(const std::filesystem::path& dest)
@@ -135,9 +135,9 @@ void GalleryGrid::do_export(const std::filesystem::path& dest)
         ui::export_images(vault_, picked, dest, ui::ExportConsent::Confirm);
 
     if (sum.failed > 0)
-        error_ = "Export: " + std::to_string(sum.failed) + " failed.";
-    status_ = "Exported " + std::to_string(sum.written) + " image" +
-              (sum.written == 1 ? "" : "s") + " to " + dest.string();
+        error_ = std::format("Export: {} failed.", sum.failed);
+    status_ = std::format("Exported {} image{} to {}", sum.written,
+                          sum.written == 1 ? "" : "s", dest.string());
     sel_.clear();
 }
 
@@ -211,6 +211,53 @@ SDL_Texture* GalleryGrid::thumb_texture(const vault::IndexNode& node)
     return cache_.get_or_upload(key, *img);
 }
 
+void GalleryGrid::handle_naming_key(const SDL_Event& e)
+{
+    if (e.type == SDL_EVENT_TEXT_INPUT) { name_buf_ += e.text.text; return; }
+    if (e.type != SDL_EVENT_KEY_DOWN) return;
+    if (e.key.key == SDLK_BACKSPACE && !name_buf_.empty())
+        name_buf_.pop_back();
+    else if (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER)
+        finish_naming();
+    else if (e.key.key == SDLK_ESCAPE) {
+        naming_ = false; name_buf_.clear();
+        SDL_StopTextInput(win_.sdl_window());
+    }
+}
+
+void GalleryGrid::toggle_or_open()
+{
+    if (const int s = nav_.selected();
+        s >= 0 && s < static_cast<int>(children_.size()) && children_[s]->is_image())
+        toggle_select();
+    else
+        open_selected();
+}
+
+void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
+{
+    using enum GalleryView;
+    if (key.key == SDLK_L) { view_ = (view_ == Grid) ? List : Grid; return; }
+    if (key.key == SDLK_X) { start_export(); return; }   // export selection
+    if (key.key == SDLK_SPACE) { toggle_or_open(); return; }
+
+    using enum InputAction;
+    switch (map_key(key.key, key.mod)) {
+        case NavLeft:    nav_.move(-1);     break;
+        case NavRight:   nav_.move(1);      break;
+        case NavUp:      nav_.move(-cols_); break;
+        case NavDown:    nav_.move(cols_);  break;
+        case Select:     open_selected();   break;
+        case Back:
+            if (!sel_.empty()) { sel_.clear(); status_.clear(); }
+            else               go_up();
+            break;
+        case Import:     start_import();    break;
+        case NewGallery: start_naming();    break;
+        default: break;
+    }
+}
+
 void GalleryGrid::handle_event(const SDL_Event& e)
 {
     // The export consent modal owns all input while it is up.
@@ -221,58 +268,12 @@ void GalleryGrid::handle_event(const SDL_Event& e)
         return;
     }
 
-    if (naming_) {
-        switch (e.type) {
-            case SDL_EVENT_TEXT_INPUT: name_buf_ += e.text.text; break;
-            case SDL_EVENT_KEY_DOWN:
-                if (e.key.key == SDLK_BACKSPACE && !name_buf_.empty())
-                    name_buf_.pop_back();
-                else if (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER)
-                    finish_naming();
-                else if (e.key.key == SDLK_ESCAPE) {
-                    naming_ = false; name_buf_.clear();
-                    SDL_StopTextInput(win_.sdl_window());
-                }
-                break;
-            default: break;
-        }
-        return;
-    }
+    if (naming_) { handle_naming_key(e); return; }
 
     switch (e.type) {
-        case SDL_EVENT_KEY_DOWN: {
-            using enum GalleryView;
-            if (e.key.key == SDLK_L) {   // toggle grid <-> detailed list view
-                view_ = (view_ == Grid) ? List : Grid;
-                break;
-            }
-            if (e.key.key == SDLK_X) { start_export(); break; }   // export selection
-            if (e.key.key == SDLK_SPACE) {   // toggle selection on images, else open
-                const int s = nav_.selected();
-                if (s >= 0 && s < static_cast<int>(children_.size()) &&
-                    children_[s]->is_image())
-                    toggle_select();
-                else
-                    open_selected();
-                break;
-            }
-            using enum InputAction;
-            switch (map_key(e.key.key, e.key.mod)) {
-                case NavLeft:    nav_.move(-1);     break;
-                case NavRight:   nav_.move(1);      break;
-                case NavUp:      nav_.move(-cols_); break;
-                case NavDown:    nav_.move(cols_);  break;
-                case Select:     open_selected();   break;
-                case Back:
-                    if (!sel_.empty()) { sel_.clear(); status_.clear(); }
-                    else               go_up();
-                    break;
-                case Import:     start_import();    break;
-                case NewGallery: start_naming();    break;
-                default: break;
-            }
+        case SDL_EVENT_KEY_DOWN:
+            handle_key_down(e.key);
             break;
-        }
         case SDL_EVENT_MOUSE_BUTTON_DOWN: {
             if (const int idx = hit_test(e.button.x, e.button.y); idx >= 0) {
                 nav_.select(idx);
@@ -312,8 +313,7 @@ void GalleryGrid::render(gfx::Renderer& r)
                 TEXT_FAINT);
 
     if (!sel_.empty())
-        r.draw_text(font_, OX, 120,
-                    std::to_string(sel_.count()) + " selected", ACCENT);
+        r.draw_text(font_, OX, 120, std::format("{} selected", sel_.count()), ACCENT);
 
     if (view_ == GalleryView::List) render_list(r, W, H);
     else                            render_grid(r, W, H);
