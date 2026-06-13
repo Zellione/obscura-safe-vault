@@ -41,10 +41,18 @@ src/
                                                  (pure/tested)
                meta_format.*                   — list-view metadata formatting:
                                                  size/dimensions/date/type (pure/tested)
+               selection_model.*               — multi-select state for export
+                                                 (Phase 10, pure/tested)
+               consent_dialog.*                — modal "export anyway?" confirm
+                                                 (Phase 10, SDL plumbing)
+               export.*                        — decrypt→write-verbatim→wipe export
+                                                 (Phase 10; the ONE gated deviation
+                                                 from invariant #1, SDL-free/tested)
                input.*, nav_model.*, viewer_model.h
                passphrase.*, screen.h
                secure_text_field.*, unlock_logic.*
-  platform/    paths.*, file_dialog.*          — config dirs, SDL file dialogs
+  platform/    paths.*, file_dialog.*,         — config dirs, SDL file dialogs
+               folder_dialog.*                 — export destination picker (Phase 10)
 tests/
   crypto/ gfx/ image/ platform/ ui/ vault/
   test_framework.h  test_main.cpp
@@ -60,6 +68,9 @@ assets/fonts/   bundled OFL font for stb_truetype
 ## Project-wide invariants (NEVER violate)
 
 1. No decrypted bytes to disk — only `mlock`'d heap buffers.
+   EXCEPTION (documented, gated): `src/ui/export.*` deliberately writes decrypted
+   originals to disk on explicit user consent (selection-only, never thumbnails,
+   buffer wiped right after write). No other path may write plaintext.
 2. All key/KEK/password buffers wiped with `crypto_wipe` before free.
 3. Every XChaCha20-Poly1305 encrypt call uses a fresh 24-byte CSPRNG nonce.
 4. Tag verified before any plaintext bytes are consumed.

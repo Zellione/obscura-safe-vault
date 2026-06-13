@@ -7,12 +7,14 @@
 #include <string_view>
 #include <vector>
 
+#include "ui/consent_dialog.h"
 #include "ui/nav_model.h"
 #include "ui/screen.h"
+#include "ui/selection_model.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
 namespace vault { class Vault; struct IndexNode; }
-namespace platform { class FileDialog; }
+namespace platform { class FileDialog; class FolderDialog; }
 
 namespace ui {
 
@@ -22,6 +24,7 @@ public:
     // when returning from the image viewer (empty path = root).
     GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                 gfx::TextureCache& cache, platform::FileDialog& dlg,
+                platform::FolderDialog& folder_dlg,
                 std::string initial_path = {}, int initial_sel = 0);
 
     void on_enter() override;
@@ -35,6 +38,9 @@ private:
     void refresh();
     void open_selected();
     void go_up();
+    void toggle_select();          // toggle the current item in the export selection
+    void start_export();           // open the consent modal for the current selection
+    void do_export(const std::filesystem::path& dest);
     void start_import();
     void start_naming();
     void finish_naming();
@@ -50,18 +56,22 @@ private:
     [[nodiscard]] int  hit_test(float mx, float my) const;  // item under cursor, or -1
     [[nodiscard]] std::string fit_name(std::string_view name, float max_w) const;
 
-    gfx::Window&          win_;
-    gfx::FontAtlas&       font_;
-    vault::Vault&         vault_;
-    gfx::TextureCache&    cache_;
-    platform::FileDialog& dlg_;
-    NavModel              nav_;
+    gfx::Window&            win_;
+    gfx::FontAtlas&         font_;
+    vault::Vault&           vault_;
+    gfx::TextureCache&      cache_;
+    platform::FileDialog&   dlg_;
+    platform::FolderDialog& folder_dlg_;
+    NavModel                nav_;
+    SelectionModel          sel_;
+    ConsentDialog           consent_;
     std::string           initial_path_;
     int                   initial_sel_ = 0;
     std::vector<const vault::IndexNode*> children_;
     int                   cols_ = 1;
     GalleryView           view_ = GalleryView::Grid;
     std::string           error_;
+    std::string           status_;   // transient export result message
     bool                  naming_ = false;
     std::string           name_buf_;
 };

@@ -7,6 +7,7 @@
 #include "gfx/texture_cache.h"
 #include "gfx/window.h"
 #include "platform/file_dialog.h"
+#include "platform/folder_dialog.h"
 #include "ui/screen.h"
 #include "vault/vault.h"
 
@@ -36,6 +37,7 @@ private:
     bool                               font_ready_ = false;
     std::unique_ptr<gfx::TextureCache> cache_;
     platform::FileDialog               dialog_;
+    platform::FolderDialog             folder_dialog_;
     vault::Vault                       vault_;
     std::unique_ptr<ui::Screen>        screen_;
     State                              state_ = State::Locked;

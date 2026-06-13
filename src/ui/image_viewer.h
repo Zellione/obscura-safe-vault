@@ -3,11 +3,13 @@
 #include <SDL3/SDL.h>
 
 #include <cstdint>
+#include <filesystem>
 #include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include "ui/consent_dialog.h"
 #include "ui/screen.h"
 #include "ui/scroll_model.h"
 #include "ui/strip_layout.h"
@@ -15,6 +17,7 @@
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
 namespace vault { class Vault; struct IndexNode; }
+namespace platform { class FolderDialog; }
 
 namespace ui {
 
@@ -36,7 +39,8 @@ namespace ui {
 class ImageViewer : public Screen {
 public:
     ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                gfx::TextureCache& cache, std::string gallery_path, int start_index);
+                gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
+                std::string gallery_path, int start_index);
     ~ImageViewer() override;
 
     ImageViewer(const ImageViewer&)            = delete;
@@ -45,6 +49,7 @@ public:
     void on_enter() override;
     void on_exit() override;
     void handle_event(const SDL_Event& e) override;
+    void update(double dt) override;
     void render(gfx::Renderer& r) override;
 
 private:
@@ -66,6 +71,8 @@ private:
     void show_image_at(int idx);                    // absolute, clamped, refit
     void set_index(int delta);                      // wrap, reset view, rebuild
     void back_to_gallery();
+    void start_export();                            // consent modal for current image
+    void do_export(const std::filesystem::path& dest);
     void zoom_by(float factor, float cx, float cy); // centred on (cx, cy)
     void pan_by(float dx, float dy);
     [[nodiscard]] bool is_zoomed() const noexcept;  // zoomed past fit-to-window
@@ -87,11 +94,14 @@ private:
     void render_strip(gfx::Renderer& r);
     void render_hud(gfx::Renderer& r, const SDL_FRect& vp);
 
-    gfx::Window&       win_;
-    gfx::FontAtlas&    font_;
-    vault::Vault&      vault_;
-    gfx::TextureCache& cache_;
-    std::string        gallery_path_;
+    gfx::Window&            win_;
+    gfx::FontAtlas&         font_;
+    vault::Vault&           vault_;
+    gfx::TextureCache&      cache_;
+    platform::FolderDialog& folder_dlg_;
+    ConsentDialog           consent_;
+    std::string             export_status_;
+    std::string             gallery_path_;
     std::vector<const vault::IndexNode*> images_;
     int   index_ = 0;
 

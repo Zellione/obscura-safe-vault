@@ -56,7 +56,7 @@ void App::to_gallery(const std::string& path, int selected)
 {
     state_  = State::Browsing;
     screen_ = std::make_unique<ui::GalleryGrid>(window_, font_, vault_, *cache_, dialog_,
-                                                path, selected);
+                                                folder_dialog_, path, selected);
     screen_->on_enter();
 }
 
@@ -64,7 +64,7 @@ void App::to_viewer(const std::string& gallery_path, int index)
 {
     state_  = State::Viewing;
     screen_ = std::make_unique<ui::ImageViewer>(window_, font_, vault_, *cache_,
-                                                gallery_path, index);
+                                                folder_dialog_, gallery_path, index);
     screen_->on_enter();
 }
 

@@ -12,7 +12,9 @@
 #include "gfx/window.h"
 #include "image/decode.h"
 #include "platform/file_dialog.h"
+#include "platform/folder_dialog.h"
 #include "platform/paths.h"
+#include "ui/export.h"
 #include "ui/input.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
@@ -46,8 +48,10 @@ GridSpec grid_spec(float win_w, int cols) noexcept
 
 GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                          gfx::TextureCache& cache, platform::FileDialog& dlg,
+                         platform::FolderDialog& folder_dlg,
                          std::string initial_path, int initial_sel)
     : win_(win), font_(font), vault_(vault), cache_(cache), dlg_(dlg),
+      folder_dlg_(folder_dlg),
       initial_path_(std::move(initial_path)), initial_sel_(initial_sel)
 {
 }
@@ -68,6 +72,7 @@ void GalleryGrid::refresh()
 {
     children_ = vault_.list(nav_.path());
     nav_.set_count(static_cast<int>(children_.size()));
+    sel_.clear();   // selection indices are only valid against the current listing
 }
 
 bool GalleryGrid::current_allows_images() const
@@ -95,6 +100,45 @@ void GalleryGrid::go_up()
 {
     if (!nav_.up()) { vault_.lock(); request(NavKind::ToUnlock); return; }
     refresh();
+}
+
+void GalleryGrid::toggle_select()
+{
+    const int s = nav_.selected();
+    if (s < 0 || s >= static_cast<int>(children_.size())) return;
+    if (!children_[s]->is_image()) return;   // only images are exportable
+    sel_.toggle(s);
+    status_.clear();
+}
+
+void GalleryGrid::start_export()
+{
+    if (folder_dlg_.busy() || consent_.active()) return;
+    if (sel_.empty()) {
+        error_ = "Select images first (Space), then [X] to export.";
+        return;
+    }
+    error_.clear();
+    status_.clear();
+    const std::size_t n = sel_.count();
+    consent_.open("Export " + std::to_string(n) + (n == 1 ? " image?" : " images?"));
+}
+
+void GalleryGrid::do_export(const std::filesystem::path& dest)
+{
+    std::vector<const vault::IndexNode*> picked;
+    for (int idx : sel_.indices())
+        if (idx >= 0 && idx < static_cast<int>(children_.size()))
+            picked.push_back(children_[idx]);
+
+    const ui::ExportSummary sum =
+        ui::export_images(vault_, picked, dest, ui::ExportConsent::Confirm);
+
+    if (sum.failed > 0)
+        error_ = "Export: " + std::to_string(sum.failed) + " failed.";
+    status_ = "Exported " + std::to_string(sum.written) + " image" +
+              (sum.written == 1 ? "" : "s") + " to " + dest.string();
+    sel_.clear();
 }
 
 void GalleryGrid::start_import()
@@ -169,6 +213,14 @@ SDL_Texture* GalleryGrid::thumb_texture(const vault::IndexNode& node)
 
 void GalleryGrid::handle_event(const SDL_Event& e)
 {
+    // The export consent modal owns all input while it is up.
+    if (consent_.active()) {
+        if (e.type == SDL_EVENT_KEY_DOWN &&
+            consent_.handle_key(e.key.key) == ConsentDialog::Result::Confirmed)
+            folder_dlg_.open(win_.sdl_window());
+        return;
+    }
+
     if (naming_) {
         switch (e.type) {
             case SDL_EVENT_TEXT_INPUT: name_buf_ += e.text.text; break;
@@ -194,6 +246,16 @@ void GalleryGrid::handle_event(const SDL_Event& e)
                 view_ = (view_ == Grid) ? List : Grid;
                 break;
             }
+            if (e.key.key == SDLK_X) { start_export(); break; }   // export selection
+            if (e.key.key == SDLK_SPACE) {   // toggle selection on images, else open
+                const int s = nav_.selected();
+                if (s >= 0 && s < static_cast<int>(children_.size()) &&
+                    children_[s]->is_image())
+                    toggle_select();
+                else
+                    open_selected();
+                break;
+            }
             using enum InputAction;
             switch (map_key(e.key.key, e.key.mod)) {
                 case NavLeft:    nav_.move(-1);     break;
@@ -201,7 +263,10 @@ void GalleryGrid::handle_event(const SDL_Event& e)
                 case NavUp:      nav_.move(-cols_); break;
                 case NavDown:    nav_.move(cols_);  break;
                 case Select:     open_selected();   break;
-                case Back:       go_up();           break;
+                case Back:
+                    if (!sel_.empty()) { sel_.clear(); status_.clear(); }
+                    else               go_up();
+                    break;
                 case Import:     start_import();    break;
                 case NewGallery: start_naming();    break;
                 default: break;
@@ -227,6 +292,9 @@ void GalleryGrid::update(double)
             refresh();
         }
     }
+    if (auto dest = folder_dlg_.take_result()) {
+        if (!dest->empty()) do_export(*dest);   // empty => the picker was cancelled
+    }
 }
 
 void GalleryGrid::render(gfx::Renderer& r)
@@ -239,14 +307,23 @@ void GalleryGrid::render(gfx::Renderer& r)
     for (const auto& s : nav_.segments()) { crumb += s; crumb += '/'; }
     r.draw_text(font_, OX, 40, crumb, TEXT_DIM);
     r.draw_text(font_, OX, 90,
-                "[I] Import   [N] New Gallery   [Enter] Open   [Esc] Up   [L] List/Grid",
+                "[I] Import  [N] New  [Enter] Open  [Space] Select  [X] Export  "
+                "[Esc] Back  [L] List/Grid",
                 TEXT_FAINT);
+
+    if (!sel_.empty())
+        r.draw_text(font_, OX, 120,
+                    std::to_string(sel_.count()) + " selected", ACCENT);
 
     if (view_ == GalleryView::List) render_list(r, W, H);
     else                            render_grid(r, W, H);
 
     if (!error_.empty())
         r.draw_text(font_, OX, H - 36, error_, DANGER);
+    else if (!status_.empty())
+        r.draw_text(font_, OX, H - 36, status_, OK);
+
+    consent_.render(r, font_, W, H);
 
     if (naming_) {
         const float mw = W * 0.6f;
@@ -278,6 +355,13 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float /*H*/)
         draw_tile_thumb(r, *n, {cellr.x + 6, cellr.y + 6,
                                 CELL - 12, label_y - cellr.y - 12.0f});
         r.draw_text(font_, cellr.x + 8, label_y, fit_name(n->name, CELL - 16), TEXT);
+
+        // Export-selection badge: a small accent square in the top-left corner.
+        if (sel_.contains(static_cast<int>(i))) {
+            const SDL_FRect badge{cellr.x + 8, cellr.y + 8, 18, 18};
+            r.draw_round_rect(badge, RADIUS_SMALL, ACCENT);
+            r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
+        }
     }
 }
 
@@ -313,6 +397,9 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float /*H*/)
             r.draw_round_rect(row, RADIUS_SMALL, SURFACE_HI);
             r.draw_round_rect(row, RADIUS_SMALL, ACCENT, /*filled*/ false);
         }
+        // Export-selection marker: an accent bar down the row's left edge.
+        if (sel_.contains(static_cast<int>(i)))
+            r.draw_rect({row.x, row.y, 4, row.h}, ACCENT);
 
         const SDL_FRect thumb{row.x + 5, row.y + 5, row.h - 10, row.h - 10};
         draw_tile_thumb(r, *n, thumb);

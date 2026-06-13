@@ -11,6 +11,8 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "image/decode.h"
+#include "platform/folder_dialog.h"
+#include "ui/export.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
 #include "vault/vault.h"
@@ -25,9 +27,9 @@ constexpr float SCROLL_STEP = 96.0f;   // arrow-key / wheel scroll distance (px)
 } // namespace
 
 ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                         gfx::TextureCache& cache, std::string gallery_path,
-                         int start_index)
-    : win_(win), font_(font), vault_(vault), cache_(cache),
+                         gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
+                         std::string gallery_path, int start_index)
+    : win_(win), font_(font), vault_(vault), cache_(cache), folder_dlg_(folder_dlg),
       gallery_path_(std::move(gallery_path)), index_(start_index)
 {
 }
@@ -101,6 +103,25 @@ void ImageViewer::set_index(int delta)
 void ImageViewer::back_to_gallery()
 {
     request(NavKind::ToGallery, gallery_path_, index_);
+}
+
+void ImageViewer::start_export()
+{
+    if (folder_dlg_.busy() || consent_.active()) return;
+    if (images_.empty()) return;
+    export_status_.clear();
+    consent_.open("Export \"" + images_[index_]->name + "\"?");
+}
+
+void ImageViewer::do_export(const std::filesystem::path& dest)
+{
+    if (images_.empty()) return;
+    const std::array<const vault::IndexNode*, 1> one{images_[index_]};
+    const ui::ExportSummary sum =
+        ui::export_images(vault_, one, dest, ui::ExportConsent::Confirm);
+    export_status_ = (sum.written == 1)
+                         ? "Exported to " + dest.string()
+                         : "Export failed.";
 }
 
 void ImageViewer::zoom_by(float factor, float cx, float cy)
@@ -240,6 +261,7 @@ void ImageViewer::handle_key(SDL_Keycode key)
             if (mode_ == Fit) { mode_ = FillScroll; scroll_to_image(index_); }
             else              { mode_ = Fit; fitted_ = false; }
             return;
+        case SDLK_X:      start_export(); return;   // export the current image
         case SDLK_ESCAPE: back_to_gallery(); return;
         default: break;
     }
@@ -295,8 +317,23 @@ void ImageViewer::handle_wheel(const SDL_MouseWheelEvent& w)
         zoom_by(w.y > 0 ? WHEEL_STEP : 1.0f / WHEEL_STEP, w.mouse_x, w.mouse_y);
 }
 
+void ImageViewer::update(double)
+{
+    if (auto dest = folder_dlg_.take_result()) {
+        if (!dest->empty()) do_export(*dest);   // empty => the picker was cancelled
+    }
+}
+
 void ImageViewer::handle_event(const SDL_Event& e)
 {
+    // The export consent modal owns all input while it is up.
+    if (consent_.active()) {
+        if (e.type == SDL_EVENT_KEY_DOWN &&
+            consent_.handle_key(e.key.key) == ConsentDialog::Result::Confirmed)
+            folder_dlg_.open(win_.sdl_window());
+        return;
+    }
+
     switch (e.type) {
         case SDL_EVENT_KEY_DOWN:          handle_key(e.key.key);        break;
         case SDL_EVENT_MOUSE_WHEEL:       handle_wheel(e.wheel);        break;
@@ -408,9 +445,12 @@ void ImageViewer::render_hud(gfx::Renderer& r, const SDL_FRect& vp)
         r.draw_text(font_, vp.x + 16, vp.y + 12, hud, gfx::theme::TEXT);
     }
     const char* legend = (mode_ == FillScroll)
-        ? "[Wheel] Scroll   [<-/->] Prev/Next   [F] Fit   [T] Strip side   [Esc] Back"
-        : "[<-/->] Prev/Next   [Wheel/+/-] Zoom   [F] Fill-scroll   [T] Strip side   [Esc] Back";
+        ? "[Wheel] Scroll   [<-/->] Prev/Next   [F] Fit   [T] Strip   [X] Export   [Esc] Back"
+        : "[<-/->] Prev/Next   [Wheel/+/-] Zoom   [F] Fill-scroll   [T] Strip   [X] Export   [Esc] Back";
     r.draw_text(font_, vp.x + 16, vp.y + 44, legend, gfx::theme::TEXT_FAINT);
+
+    if (!export_status_.empty())
+        r.draw_text(font_, vp.x + 16, vp.y + vp.h - 32, export_status_, gfx::theme::OK);
 }
 
 void ImageViewer::render(gfx::Renderer& r)
@@ -423,6 +463,9 @@ void ImageViewer::render(gfx::Renderer& r)
 
     render_hud(r, vp);
     render_strip(r);
+
+    consent_.render(r, font_, static_cast<float>(win_.width()),
+                    static_cast<float>(win_.height()));
 }
 
 } // namespace ui

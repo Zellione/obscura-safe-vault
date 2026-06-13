@@ -143,9 +143,13 @@ src/
              strip_layout.*,              ← orientation-aware strip geometry (UI overhaul)
              scroll_model.*,              ← fill-width continuous scroll maths (UI overhaul)
              meta_format.*,               ← list-view metadata formatting (UI overhaul)
+             selection_model.*,           ← multi-select state for export (Phase 10)
+             consent_dialog.*,            ← modal "export anyway?" confirm (Phase 10)
+             export.*,                    ← decrypt→write-verbatim→wipe (Phase 10)
              widgets.*
   platform/  paths.{h,cpp},              ← config dir + file dialogs (Phase 5)
-             file_dialog.*
+             file_dialog.*,
+             folder_dialog.*              ← export destination picker (Phase 10)
 vendor/
   SDL3/           ← git submodule, built by scripts/setup.sh (cmake)
   monocypher/     ← git submodule, compiled by premake (single .c file)
@@ -227,6 +231,7 @@ premake-core GitHub releases. It is **not** committed to the repo.
 
 ### Security invariants (enforce these at all times)
 1. **No plaintext to disk.** Decrypted image data must never be written to any file, temp dir, or mmap'd file. Only `mlock`'d heap buffers.
+   - **Documented, gated exception — Export (Phase 10, `src/ui/export.*`).** This is the one feature that *deliberately* writes decrypted bytes to disk, on explicit user request. The deviation is mitigated by **consent + scope**: a per-export modal warning (`consent_dialog`, default-cancel), selection-only output (never a whole-tree dump), originals only (never thumbnails). The plaintext lives in an `mlock`'d `SecureBytes` right up to the `write()` and is `crypto_wipe`'d immediately after. No other code path may write plaintext to disk.
 2. **Wipe keys on destruction.** Every buffer holding a key, KEK, or password uses `crypto_wipe` (Monocypher) before freeing.
 3. **Random nonces.** Every XChaCha20-Poly1305 encrypt call uses a fresh 24-byte nonce from the CSPRNG. Never reuse nonces.
 4. **Authenticate before decrypt.** Always verify the Poly1305 tag before using any plaintext bytes.
