@@ -39,6 +39,10 @@ src/
                                                  half-size thumbnails (pure/tested)
                scroll_model.*                  — fill-width continuous scroll maths
                                                  (pure/tested)
+               slideshow_model.*               — slideshow auto-advance/wrap/shuffle/
+                                                 cross-fade maths (Phase 11, pure/tested;
+                                                 driven by ImageViewer's Slideshow view
+                                                 mode via update(dt))
                meta_format.*                   — list-view metadata formatting:
                                                  size/dimensions/date/type (pure/tested)
                selection_model.*               — multi-select state for export

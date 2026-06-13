@@ -253,6 +253,7 @@ project "osv_tests"
         "src/ui/meta_format.cpp",
         "src/ui/selection_model.cpp",
         "src/ui/export.cpp",
+        "src/ui/slideshow_model.cpp",
     }
 
     includedirs {

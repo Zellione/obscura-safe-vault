@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -11,6 +12,7 @@
 #include "ui/export_ui.h"
 #include "ui/screen.h"
 #include "ui/scroll_model.h"
+#include "ui/slideshow_model.h"
 #include "ui/strip_layout.h"
 #include "ui/viewer_model.h"
 
@@ -30,6 +32,10 @@ namespace ui {
 //
 // The strip sits at the Bottom (horizontal) or Left (vertical); `T` toggles it,
 // `F` toggles the view mode. Both choices persist while the viewer is open.
+//
+// `P` starts/stops a full-screen Slideshow that auto-advances across the leaf
+// gallery with a live-adjustable dwell time and a cross-fade between frames (the
+// timing/wrap/shuffle/fade maths live in the pure SlideshowModel).
 //
 // Decrypted image bytes live only in a transient mlock'd SecureBytes during
 // decode (invariant #1); the resulting GPU textures are owned here. Fit mode
@@ -52,7 +58,7 @@ public:
     void render(gfx::Renderer& r) override;
 
 private:
-    enum class ViewMode { Fit, FillScroll };
+    enum class ViewMode { Fit, FillScroll, Slideshow };
 
     // A decoded full-resolution texture and its natural pixel size.
     struct FullTex { SDL_Texture* tex = nullptr; float w = 0.0f; float h = 0.0f; };
@@ -60,6 +66,7 @@ private:
     void handle_key(SDL_Keycode key);
     void handle_key_fit(SDL_Keycode key);
     void handle_key_scroll(SDL_Keycode key);
+    void handle_key_slideshow(SDL_Keycode key);
     void handle_mouse_down(const SDL_MouseButtonEvent& b);
     void handle_wheel(const SDL_MouseWheelEvent& w);
 
@@ -80,6 +87,12 @@ private:
     void scroll_to_image(int idx);                  // place image `idx` at the top
     void scroll_by(float dy);
 
+    // Slideshow helpers.
+    void enter_slideshow();                         // build the model, full-screen
+    void exit_slideshow();                          // back to Fit at current image
+    void rebuild_slideshow(bool keep_running);      // re-seed (e.g. shuffle toggle)
+    [[nodiscard]] SDL_FRect fit_dest(float iw, float ih, const SDL_FRect& vp) const;
+
     // Decoded full-texture cache (bounded). Returns nullptr on decode failure.
     FullTex* acquire_full(const vault::IndexNode& node);
     void     evict_full_except(std::span<const uint64_t> keep);
@@ -88,6 +101,8 @@ private:
     [[nodiscard]] int strip_hit(float mx, float my) const;     // thumb under cursor, or -1
     void render_fit(gfx::Renderer& r, const SDL_FRect& vp);
     void render_scroll(gfx::Renderer& r, const SDL_FRect& vp);
+    void render_slideshow(gfx::Renderer& r, const SDL_FRect& vp);
+    void render_slideshow_hud(gfx::Renderer& r, const SDL_FRect& vp);
     void render_strip(gfx::Renderer& r);
     void render_hud(gfx::Renderer& r, const SDL_FRect& vp);
 
@@ -115,6 +130,13 @@ private:
 
     // FillScroll-mode state.
     float scroll_y_ = 0.0f;
+
+    // Slideshow-mode state. The model exists only while the slideshow is active;
+    // `dwell_`/`shuffle_` persist the user's choices across enter/exit (session-
+    // scoped, never written to the vault).
+    std::optional<SlideshowModel> show_;
+    double dwell_   = SLIDESHOW_DWELL_DEFAULT;
+    bool   shuffle_ = false;
 
     // Bounded set of decoded full-res textures, keyed by chunk data_offset.
     std::unordered_map<uint64_t, FullTex> full_cache_;

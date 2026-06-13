@@ -142,6 +142,7 @@ src/
              image_viewer.*,              ← zoom/pan + thumb strip + fill-scroll
              strip_layout.*,              ← orientation-aware strip geometry (UI overhaul)
              scroll_model.*,              ← fill-width continuous scroll maths (UI overhaul)
+             slideshow_model.*,           ← auto-advance/shuffle/cross-fade maths (Phase 11)
              meta_format.*,               ← list-view metadata formatting (UI overhaul)
              selection_model.*,           ← multi-select state for export (Phase 10)
              consent_dialog.*,            ← modal "export anyway?" confirm (Phase 10)
