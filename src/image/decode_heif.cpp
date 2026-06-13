@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "image/decode.h"
+#include "image/decoder.h"
 #include "image/format_registry.h"
 
 namespace image {
@@ -72,5 +73,24 @@ std::optional<ImageData> decode_heif_from_memory(std::span<const uint8_t> data)
     heif_image_handle_release(handle);
     return out;
 }
+
+namespace {
+
+class HeifDecoder final : public Decoder {
+public:
+    [[nodiscard]] bool can_decode(std::span<const uint8_t> data) const noexcept override
+    {
+        const ImageFormat fmt = detect_format(data);
+        return fmt == ImageFormat::HEIC || fmt == ImageFormat::AVIF;
+    }
+    [[nodiscard]] std::optional<ImageData> decode(std::span<const uint8_t> data) const override
+    {
+        return decode_heif_from_memory(data);
+    }
+};
+
+} // namespace
+
+std::unique_ptr<Decoder> make_heif_decoder() { return std::make_unique<HeifDecoder>(); }
 
 } // namespace image

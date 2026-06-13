@@ -1,6 +1,8 @@
 #include <webp/decode.h>
 
 #include "image/decode.h"
+#include "image/decoder.h"
+#include "image/format_registry.h"
 
 namespace image {
 
@@ -27,5 +29,23 @@ std::optional<ImageData> decode_webp_from_memory(std::span<const uint8_t> data)
 
     return img;
 }
+
+namespace {
+
+class WebpDecoder final : public Decoder {
+public:
+    [[nodiscard]] bool can_decode(std::span<const uint8_t> data) const noexcept override
+    {
+        return detect_format(data) == ImageFormat::WebP;
+    }
+    [[nodiscard]] std::optional<ImageData> decode(std::span<const uint8_t> data) const override
+    {
+        return decode_webp_from_memory(data);
+    }
+};
+
+} // namespace
+
+std::unique_ptr<Decoder> make_webp_decoder() { return std::make_unique<WebpDecoder>(); }
 
 } // namespace image
