@@ -446,18 +446,178 @@ Security invariants unchanged — the fill-scroll texture window reuses the exis
 
 ---
 
-## Phase 10+ — Future ideas
+## Phase 10 — Export (selective, hard-gated) ⬜
 
-These are intentionally unscoped. Each deserves its own planning session before work begins.
+**Goal:** Let the user deliberately extract decrypted images out of the vault to
+ordinary files on disk, with explicit per-export consent. This is the **one
+feature that intentionally breaks security invariant #1** ("no plaintext to
+disk"); it is gated and documented as a deliberate deviation, never a silent or
+bulk operation.
 
-| Idea | Notes |
-|---|---|
-| **Video playback** | ffmpeg/libav; streaming decode directly from encrypted chunks (no temp file); audio output; seek bar. Large scope. |
-| **Tags & search** | Per-image metadata; tag-based filtering; full-text search over filenames/tags. |
-| **Multiple vaults** | Vault manager screen; open several vaults simultaneously; move images between vaults. |
-| **Export** | Selectively export decrypted images to a directory (with explicit user consent). |
-| **Slideshow mode** | Auto-advance with configurable interval and transition. |
-| **Remote vaults** | `.osv` file on a network share or cloud storage; read-only streaming mode. |
+### Tasks
+- [ ] **Selection model** — multi-select in the gallery grid (`Space`/click toggles, `Esc` clears), plus an "export this image" action from the viewer. Pure, headlessly-tested selection state (no SDL).
+- [ ] **Consent dialog** — a modal confirmation widget that names the danger explicitly ("Exported files are written **decrypted** to disk, outside the vault's protection") and requires an explicit confirm; cancel/deny is the default focus. Reuse `gfx::Renderer` round-rect/panel primitives.
+- [ ] `src/platform/folder_dialog.{h,cpp}` — async destination-folder picker over `SDL_ShowOpenFolderDialog`, mirroring the existing `file_dialog` mutex-guarded result pattern.
+- [ ] **Export writer** — for each selected image: decrypt the **original stored bytes** into an mlock'd `SecureBytes`, write them verbatim to `dest/<original_filename>`, `crypto_wipe` the buffer immediately after the write. Thumbnails are never exported. Name-collision handling appends ` (n)` rather than overwriting.
+- [ ] **No bulk-tree export** — only the current explicit selection (or a single viewer image) is ever written; there is no "export entire vault" path.
+- [ ] Update `CLAUDE.md`: record export as a documented, gated deviation from invariant #1; add `src/platform/folder_dialog.*` and the export module to the module layout.
+- [ ] `tests/` — exported files are byte-identical to the originally-imported bytes (BLAKE2b checksum); collision suffixing; declining the consent dialog writes **zero** files; a wiped-buffer assertion after each write.
+
+### Acceptance criterion
+Selecting N images and confirming the export produces exactly N files on disk
+whose checksums match the originally-imported bytes; declining the confirmation
+writes nothing; thumbnails are never emitted.
+
+> **Design note.** Export deliberately violates invariant #1. The mitigation is
+> *consent + scope*: a per-export warning, default-cancel, and selection-only
+> output. The decrypted bytes still live only in mlock'd memory right up to the
+> `write()` call, and the buffer is wiped immediately after.
+
+---
+
+## Phase 11 — Slideshow ⬜
+
+**Goal:** Auto-advancing full-screen viewing of a leaf gallery, with a
+user-configurable dwell time and a clear on/off toggle.
+
+### Tasks
+- [ ] `src/ui/slideshow_model.{h,cpp}` — pure, SDL-free state machine (mirrors `viewer_model`/`scroll_model`): running/paused state, elapsed-time accumulation, advance + wrap (loop at gallery end), optional shuffle (visits each image once per cycle), and cross-fade progress `0..1`. Fully unit-tested headlessly.
+- [ ] **Configurable dwell** — the per-image display duration is user-adjustable live (e.g. `[`/`]` or `+`/`-` to shorten/lengthen), session-scoped (not persisted into the vault), with a sane default (~4 s) and clamp range.
+- [ ] **On/off toggle** — a single key starts/stops the slideshow (`P` play/pause); `Space` also pauses; `Esc`/`Up` exits to the viewer. The running state is reflected on-screen (a small play/pause + interval indicator).
+- [ ] **Frame prefetch** — reuse the viewer's existing bounded neighbour-decode window to pre-decode the next image so advances are seamless; decrypted bytes stay in the existing mlock'd `SecureBytes` window (no disk, wiped after GPU upload).
+- [ ] **Cross-fade** — simple alpha blend between outgoing and incoming frames driven by the model's transition progress.
+- [ ] `tests/ui/` — advance timing fires at the configured dwell; wrap/loop at the last image; shuffle visits each index exactly once per cycle; pause halts the timer; dwell clamps to the valid range; transition progress clamps to `[0,1]`.
+
+### Acceptance criterion
+Starting a slideshow in a leaf gallery auto-advances at the configured dwell
+time, cross-fades between images, loops at the end, and the on/off toggle plus
+live dwell adjustment work; exiting returns to the viewer at the current image.
+
+---
+
+## Phase 12 — Tags & Search ⬜
+
+**Goal:** Per-node tags on **both images and galleries**, with gallery tags
+cascading to descendants, and a scoped search across the whole vault.
+
+### Tasks
+- [ ] **Index format extension** — add a tag list (`u16 count` + length-prefixed UTF-8 strings) to **both** gallery and image nodes; bump `INDEX_VERSION`. Deserialisation reads pre-tags vaults as having empty tag lists (back-compat). Enforce count/length bounds so the Phase 7 fuzz suite stays crash-free.
+- [ ] **Cascade (read-time)** — a node's *effective tags* = its own tags ∪ the tags of all ancestor galleries, computed on the fly during traversal/search. Gallery tags are never copied onto descendants, so editing or removing a gallery tag stays consistent automatically.
+- [ ] `Vault` API — `set_tags(node_path, tags)` / `add_tag` / `remove_tag` for both node kinds, persisted via the existing crash-safe double-buffer index swap; `search(query, scope)` where `scope ∈ {Images, Galleries, Both}` walks the decrypted in-memory tree and matches `name` + effective tags (case-insensitive substring). No OCR, no disk access.
+- [ ] `src/ui/search_model.{h,cpp}` — pure query tokenisation + match/rank against name and effective tags; unit-tested.
+- [ ] **UI** — `/` opens a search overlay with a live-filtered result grid and an **Images / Galleries** scope toggle; a tag-editor widget (add/remove tags) reachable from the viewer and from a gallery tile's context action.
+- [ ] Update `CLAUDE.md` (index node now carries tags; `INDEX_VERSION` bump) and the relevant Serena `mem:core`/`mem:conventions` memory.
+- [ ] `tests/` — tag round-trip across lock/reopen for images **and** galleries; a gallery tag is reported in a descendant image's effective tags; search scope correctly returns only images / only galleries / both; case-insensitive matching; a pre-tags vault opens with empty tags; the fuzz corpus is extended to tagged gallery + image nodes and stays crash-free.
+
+### Acceptance criterion
+Tags added to images and galleries survive a lock/reopen; a gallery's tags are
+inherited by its descendant images; scoped search returns the correct set of
+images or galleries across the whole tree; a pre-tags vault opens cleanly with no
+tags; the extended fuzz suite passes.
+
+---
+
+## Phase 13 — Favorites ⬜
+
+**Goal:** Mark images or galleries as *favorite* and browse them through two
+dedicated screens — an **Image Favorites** section and a **Gallery Favorites**
+section.
+
+### Tasks
+- [ ] **Index format extension** — a dedicated `favorite` `u8` flag on both gallery and image nodes (bump `INDEX_VERSION` again; pre-existing vaults read as not-favorited). A dedicated flag, *not* a reserved tag, keeps favorites out of the tag namespace and out of tag search.
+- [ ] `Vault` API — `toggle_favorite(node_path)`; `list_favorite_images()` (flat, whole-tree) and `list_favorite_galleries()`; persisted via the crash-safe index swap.
+- [ ] **Toggle UX** — a single key marks/unmarks the focused image or gallery (e.g. `B` for bookmark — `F`/`L`/`T` are already bound in the viewer); favorited tiles show a small star badge in the grid.
+- [ ] **Two distinct screens** — `src/ui/favorites_images.{h,cpp}` (a flat grid of every favorited image across the vault, opens the viewer on activate) and `src/ui/favorites_galleries.{h,cpp}` (a list/grid of favorited galleries; activating one navigates to that gallery in the normal grid). Both reachable via keys from the gallery grid (and listed in the breadcrumb/nav).
+- [ ] Update `CLAUDE.md` module layout + `mem:core`.
+- [ ] `tests/` — favorite flag round-trip for images and galleries; favoriting images populates the image-favorites list across the tree; favoriting a gallery populates the gallery-favorites list; un-favorite removes from both; a pre-favorites vault opens with none favorited.
+
+### Acceptance criterion
+Favoriting images and galleries populates the two distinct favorites screens;
+the flags survive a lock/reopen; opening a favorite gallery navigates to it and
+opening a favorite image opens the viewer.
+
+---
+
+## Phase 14 — Multiple vaults ⬜
+
+**Goal:** Manage and open several vaults; move images between them.
+
+### Tasks
+- [ ] **Recent-vaults registry** — `src/platform/vault_registry.{h,cpp}`: a config-dir list of known vault **paths only** (add/list/remove). It stores **no secrets** — no passwords, no keys, no keyfile contents.
+- [ ] `src/ui/vault_manager.{h,cpp}` — becomes the app's first screen: lists known vaults, plus create / open-other (file dialog) / remove-from-list. Selecting a vault transitions to the unlock screen for that path.
+- [ ] **Multiple unlocked vaults** — `App` owns a collection of unlocked `Vault` instances with one *active* vault driving the gallery, plus a switcher (key or manager UI) to change the active vault. Each vault keeps its own mlock'd master key; locking one wipes only its keys.
+- [ ] **Move between vaults** — `move_image(src_vault, src_path, dst_vault, dst_path)`: `read_image` from the source into mlock'd `SecureBytes` → `add_image` into the destination → `remove_image` from the source; both indices committed via the crash-safe swap. Plaintext exists only in the locked buffer during transfer (invariant #1 holds). Thumbnail is carried over or regenerated.
+- [ ] Update `CLAUDE.md` (vault manager as first screen; new platform module) + `mem:core`.
+- [ ] `tests/` — registry add/list/remove and a "no secrets persisted" assertion; two vaults unlocked simultaneously; `move_image` yields a checksum-matching image in the destination and removes it from the source (verified across a reopen of both); both indices remain valid after the move.
+
+### Acceptance criterion
+The manager lists multiple vaults; two can be unlocked at once; an image moved
+between them matches its checksum in the destination and is gone from the source
+after reopen; the registry never persists secrets.
+
+---
+
+## Phase 15 — Video playback (frames + seek) ⬜
+
+**Goal:** Store video files in the vault and play their **video** track,
+streaming decode directly from encrypted chunks with **no temp file**. Audio is
+added in Phase 16.
+
+### Tasks
+- [ ] **Vendor FFmpeg/libav** — add a decode-only static build (minimal codec set: H.264/H.265 video, plus the demuxers; encoders disabled). cmake/configure-built into the codec staging prefix like the Phase 9 codecs (needs **nasm**, like libaom); `scripts/build_codecs.{sh,bat}` and `premake5.lua` `link_image_codecs()`/a new `link_av()` updated.
+- [ ] **Encrypted-chunk streaming** — `src/media/chunk_avio.{h,cpp}`: a custom `AVIOContext` with read + seek callbacks backed by the vault's `ChunkStore`. Bytes are decrypted on demand into mlock'd buffers and wiped after use; seeks map a byte offset to the right encrypted chunk(s). **No bytes are ever written to a temp file.**
+- [ ] **Index/format extension** — a video node type (or a `media_kind` discriminator on the existing node), new format codes appended to the enum, version bump; import stores the original container chunked and a **first-frame poster** as the gallery thumbnail.
+- [ ] `src/media/video_decoder.{h,cpp}` — demux + video decode → frames; YUV `SDL_Texture` upload path added to `gfx::Renderer`.
+- [ ] `src/ui/video_viewer.{h,cpp}` (or extend `image_viewer`) — play/pause, a **seek bar**, frame stepping; poster preview in the gallery grid.
+- [ ] Update `CLAUDE.md` tech table (FFmpeg/libav, nasm) + `mem:tech_stack`/`mem:core`.
+- [ ] `tests/` — the AVIO callback returns the correct bytes from encrypted chunks and **creates no filesystem file** (fs-write assertion); a short H.264 clip decodes the expected frame count; seek lands on the correct timestamp; a truncated/malformed video is rejected without crashing (extend the fuzz corpus).
+
+### Acceptance criterion
+A short H.264 clip imported into the vault plays its video track, seeks
+correctly, shows a poster thumbnail in the grid, and a test asserts that **no
+decrypted bytes are ever written to disk** during playback.
+
+---
+
+## Phase 16 — Audio & A/V sync ⬜
+
+**Goal:** Add the audio track to the video pipeline with proper
+audio/video synchronisation.
+
+### Tasks
+- [ ] **Audio decode** — extend `src/media/video_decoder` to decode the audio track (AAC/Opus; enable those decoders in the FFmpeg build) into PCM frames.
+- [ ] **Audio output** — route decoded PCM to an `SDL_AudioStream`; resample to the device format as needed.
+- [ ] `src/media/av_sync.{h,cpp}` — pure, unit-tested sync logic: presentation timestamps tracked against the **audio clock**, with video frame drop/hold decisions returned as data (no SDL in the unit).
+- [ ] **Viewer controls** — volume + mute; the seek bar now seeks both tracks; pause stops audio cleanly.
+- [ ] **Memory hygiene** — decoded audio PCM is treated like decoded pixels (transient buffers, no disk); the streaming AVIO path is unchanged.
+- [ ] `tests/` — the audio decoder produces the expected sample count for a known clip; `av_sync` holds/drops frames correctly for fabricated PTS streams (drift ahead/behind); seek re-aligns both tracks; volume/mute math.
+
+### Acceptance criterion
+A short H.264+AAC clip plays with synchronised audio and video, seeks both
+tracks correctly, and volume/mute/pause behave correctly — still with no
+decrypted bytes written to disk.
+
+---
+
+## Phase 17 — Remote vaults (read-only streaming) ⬜
+
+**Goal:** Open an `.osv` file on a network share or cloud storage in
+**read-only** streaming mode. Read-only by design — it sidesteps the atomicity
+and concurrency problems of remote writes.
+
+### Tasks
+- [ ] **Source abstraction** — refactor chunk/header/index access behind a `RandomAccessSource` interface (`read(offset, len) -> bytes`, `size()`). A local-file implementation wraps today's code byte-for-byte (a targeted refactor that also tightens the I/O boundary).
+- [ ] `src/vault/http_source.{h,cpp}` — an HTTPS **range-request** source (libcurl): fetches the header + index once, then individual encrypted chunks on demand via `Range:` requests, backed by a small **mlock'd LRU chunk cache**. HTTPS only.
+- [ ] **Read-only vault path** — `Vault::open_readonly(source)`; import / delete / compact / tag-edit / favorite-toggle / move are disabled and visibly greyed in this mode. Decrypted bytes still live only in mlock'd memory; the crypto path is unchanged.
+- [ ] **Dependency** — vendor or system libcurl; `premake5.lua` link + CI provisioning across all three platforms.
+- [ ] Update `CLAUDE.md` tech table (libcurl, `RandomAccessSource`) + `mem:tech_stack`/`mem:core`, and document the **known limitation**: the remote host observes ciphertext **and chunk-access patterns** (which chunks are fetched, and when).
+- [ ] `tests/` — `RandomAccessSource` parity (local impl is byte-for-byte identical to direct file reads); a local HTTP test server serves an `.osv` and the vault opens read-only and reads images with matching checksums; every write operation is rejected in read-only mode; the LRU cache returns bytes identical to the origin; a network-share path works unchanged through the local-file source.
+
+### Acceptance criterion
+An `.osv` served over local HTTP(S) range requests opens read-only, browses, and
+reads images with matching checksums while performing **no writes**;
+import/delete/compaction are disabled; a network-share path works via the
+local-file source.
 
 ---
 
@@ -521,3 +681,15 @@ Offset  Size  Description
     thumb_offset u64
     thumb_length u64
 ```
+
+> **Planned format extensions (Phases 12–16).** The index serialisation is
+> versioned; each of these bumps `INDEX_VERSION` and reads older versions with
+> the new fields defaulted, so existing vaults keep opening cleanly:
+> - **Phase 12 (Tags):** a tag list (`u16 count` + length-prefixed UTF-8) on
+>   **both** gallery and image nodes. Gallery tags cascade to descendants at read
+>   time (effective tags = own ∪ ancestors'); they are not copied onto children.
+> - **Phase 13 (Favorites):** a `favorite u8` flag on both node types.
+> - **Phases 15–16 (Video):** a video node kind (a `media_kind` discriminator)
+>   and new `format` codes appended after `8=AVIF` (e.g. `9=MP4/H.264`); video
+>   nodes reuse the same `data_*`/`thumb_*` layout (thumb = poster frame), with
+>   the container stored across multiple encrypted chunks.
