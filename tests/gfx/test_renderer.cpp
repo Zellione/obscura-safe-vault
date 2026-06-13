@@ -103,6 +103,30 @@ TEST(renderer_draw_thumbnail_strip_runs_headless)
     }
 }
 
+TEST(renderer_draw_round_rect_and_glow_run_headless)
+{
+    SoftRenderer sr;
+    REQUIRE(sr.r != nullptr);
+    {
+        gfx::Renderer rr(sr.r);
+
+        SDL_SetRenderDrawColor(sr.r, 0, 0, 0, 255);
+        SDL_RenderClear(sr.r);
+
+        // Filled + outlined rounded rects exercise the SDL_RenderGeometry and
+        // SDL_RenderLines paths; the glow stacks several outlines with blending.
+        rr.draw_round_rect(SDL_FRect{4, 4, 80, 40}, 10.0f, gfx::Color{120, 90, 220, 255});
+        rr.draw_round_rect(SDL_FRect{100, 4, 80, 40}, 10.0f,
+                           gfx::Color{200, 200, 210, 255}, /*filled*/ false);
+        // radius <= 0 falls through to a square rect.
+        rr.draw_round_rect(SDL_FRect{4, 60, 40, 40}, 0.0f, gfx::Color{40, 200, 80, 255});
+        rr.draw_selection_glow(SDL_FRect{100, 60, 40, 40}, 8.0f,
+                               gfx::Color{139, 124, 246, 255});
+
+        SDL_RenderPresent(sr.r);
+    }
+}
+
 TEST(renderer_draw_text_runs_headless)
 {
     SoftRenderer sr;

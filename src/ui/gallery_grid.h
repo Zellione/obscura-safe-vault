@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "ui/nav_model.h"
@@ -29,6 +30,8 @@ public:
     void render(gfx::Renderer& r) override;
 
 private:
+    enum class GalleryView { Grid, List };
+
     void refresh();
     void open_selected();
     void go_up();
@@ -40,6 +43,13 @@ private:
     [[nodiscard]] bool current_allows_galleries() const;
     SDL_Texture*       thumb_texture(const vault::IndexNode& node);
 
+    void render_grid(gfx::Renderer& r, float W, float H);
+    void render_list(gfx::Renderer& r, float W, float H);
+    void draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
+                         const SDL_FRect& box);
+    [[nodiscard]] int  hit_test(float mx, float my) const;  // item under cursor, or -1
+    [[nodiscard]] std::string fit_name(std::string_view name, float max_w) const;
+
     gfx::Window&          win_;
     gfx::FontAtlas&       font_;
     vault::Vault&         vault_;
@@ -50,6 +60,7 @@ private:
     int                   initial_sel_ = 0;
     std::vector<const vault::IndexNode*> children_;
     int                   cols_ = 1;
+    GalleryView           view_ = GalleryView::Grid;
     std::string           error_;
     bool                  naming_ = false;
     std::string           name_buf_;

@@ -45,14 +45,16 @@ public:
     // Accessors
     SDL_Window*   sdl_window()   const noexcept { return window_; }
     SDL_Renderer* sdl_renderer() const noexcept { return renderer_; }
-    int           width()        const noexcept { return width_; }
-    int           height()       const noexcept { return height_; }
+
+    // Live renderer output size in pixels — tracks window resizes and matches the
+    // coordinate space the renderer actually draws into (incl. HiDPI scaling), so
+    // layout reflows correctly. Queried each call (cheap); never cached/stale.
+    int           width()        const noexcept;
+    int           height()       const noexcept;
 
 private:
     SDL_Window*   window_   = nullptr;
     SDL_Renderer* renderer_ = nullptr;
-    int           width_    = 0;
-    int           height_   = 0;
 };
 
 } // namespace gfx

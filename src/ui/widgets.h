@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <functional>
 #include <string>
 #include <string_view>
 
@@ -42,5 +43,18 @@ void draw_button(gfx::Renderer& r, gfx::FontAtlas& font, const Button& b,
                  bool hover, bool active);
 void draw_text_field(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& box,
                      std::string_view shown, bool focused);
+
+// Hover/active state for a button under the mouse. `active` (pressed) requires
+// the cursor to be over the button while the mouse button is held down.
+struct ButtonState { bool hover = false; bool active = false; };
+[[nodiscard]] ButtonState button_state(const SDL_FRect& rect, float mx, float my,
+                                        bool mouse_down) noexcept;
+
+// Truncate `name` in the middle with "..." so its measured width fits within
+// `max_w` px. `measure` returns the pixel width of a string (e.g.
+// FontAtlas::measure). Returns the name unchanged if it already fits, or "" if
+// even the ellipsis alone won't fit. Pure / unit-testable via a fake measure.
+[[nodiscard]] std::string elide_middle(std::string_view name, int max_w,
+                                       const std::function<int(std::string_view)>& measure);
 
 } // namespace ui

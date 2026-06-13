@@ -248,6 +248,9 @@ project "osv_tests"
         "src/ui/secure_text_field.cpp",
         "src/ui/unlock_logic.cpp",
         "src/ui/widgets.cpp",
+        "src/ui/strip_layout.cpp",
+        "src/ui/scroll_model.cpp",
+        "src/ui/meta_format.cpp",
     }
 
     includedirs {

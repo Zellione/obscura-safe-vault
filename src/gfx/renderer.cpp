@@ -1,5 +1,8 @@
 #include "gfx/renderer.h"
 
+#include <algorithm>
+#include <cmath>
+
 namespace gfx {
 
 void Renderer::draw_rect(const SDL_FRect& dst, Color c, bool filled)
@@ -36,37 +39,136 @@ void Renderer::draw_text(FontAtlas& font, float x, float y, std::string_view tex
 
 float Renderer::draw_thumbnail_strip(std::span<SDL_Texture* const> thumbs,
                                      const SDL_FRect& strip, float thumb_size,
-                                     float gap, float scroll_x, int selected,
-                                     Color highlight)
+                                     float gap, float scroll, int selected,
+                                     Color highlight, bool vertical)
 {
     SDL_Rect clip{static_cast<int>(strip.x), static_cast<int>(strip.y),
                   static_cast<int>(strip.w), static_cast<int>(strip.h)};
     SDL_SetRenderClipRect(r_, &clip);
 
-    const float top = strip.y + (strip.h - thumb_size) * 0.5f;
-    for (int i = 0; i < static_cast<int>(thumbs.size()); ++i) {
-        const float cell_x = strip.x - scroll_x +
-                             static_cast<float>(i) * (thumb_size + gap);
-        // Skip cells entirely outside the strip.
-        if (cell_x + thumb_size < strip.x || cell_x > strip.x + strip.w)
-            continue;
+    // Lay cells out along the strip's long axis; centre them on the short axis.
+    const float cross  = vertical ? strip.x + (strip.w - thumb_size) * 0.5f
+                                   : strip.y + (strip.h - thumb_size) * 0.5f;
+    const float origin = vertical ? strip.y : strip.x;
+    const float extent = vertical ? strip.h : strip.w;
 
-        const SDL_FRect dst{cell_x, top, thumb_size, thumb_size};
+    for (int i = 0; i < static_cast<int>(thumbs.size()); ++i) {
+        const float along = origin - scroll + static_cast<float>(i) * (thumb_size + gap);
+        if (along + thumb_size < origin || along > origin + extent) continue;  // culled
+
+        const SDL_FRect dst = vertical
+            ? SDL_FRect{cross, along, thumb_size, thumb_size}
+            : SDL_FRect{along, cross, thumb_size, thumb_size};
+
+        // Black backing so the letterbox bands around a non-square thumbnail
+        // read as solid black rather than the strip colour.
+        SDL_SetRenderDrawColor(r_, 0, 0, 0, 255);
+        SDL_RenderFillRect(r_, &dst);
+
         if (thumbs[i]) {
+            // Aspect-fit into the square cell: largest size that keeps the
+            // thumbnail's own proportions, centred (no stretching).
+            float tw = 0.0f;
+            float th = 0.0f;
+            SDL_GetTextureSize(thumbs[i], &tw, &th);
+            SDL_FRect img = dst;
+            if (tw > 0.0f && th > 0.0f) {
+                const float scale = std::min(dst.w / tw, dst.h / th);
+                const float w = tw * scale;
+                const float h = th * scale;
+                img = SDL_FRect{dst.x + (dst.w - w) * 0.5f,
+                                dst.y + (dst.h - h) * 0.5f, w, h};
+            }
             SDL_SetTextureColorMod(thumbs[i], 255, 255, 255);
             SDL_SetTextureAlphaMod(thumbs[i], 255);
-            SDL_RenderTexture(r_, thumbs[i], nullptr, &dst);
+            SDL_RenderTexture(r_, thumbs[i], nullptr, &img);
         }
-        if (i == selected) {
-            SDL_SetRenderDrawColor(r_, highlight.r, highlight.g, highlight.b,
-                                   highlight.a);
-            SDL_RenderRect(r_, &dst);
-        }
+        if (i == selected) draw_selection_glow(dst, 6.0f, highlight);
     }
 
     SDL_SetRenderClipRect(r_, nullptr);
     return thumbnail_strip_content_width(static_cast<int>(thumbs.size()),
                                          thumb_size, gap);
+}
+
+namespace { constexpr float PI = 3.14159265358979323846f; }
+
+std::vector<SDL_FPoint> round_rect_outline(const SDL_FRect& dst, float radius,
+                                           int segments)
+{
+    const float r = std::max(0.0f, std::min(radius, std::min(dst.w, dst.h) * 0.5f));
+    if (segments < 1) segments = 1;
+
+    // Corner arc centres and start angles, swept clockwise: TL, TR, BR, BL. Each
+    // arc spans a quarter turn; in screen coords (+y down) cos/sin still trace a
+    // circle, so the loop touches all four edges -> its bbox equals `dst`.
+    struct Corner { float cx, cy, a0; };
+    const Corner corners[4] = {
+        {dst.x + r,         dst.y + r,         PI},          // TL: 180 -> 270
+        {dst.x + dst.w - r, dst.y + r,         PI * 1.5f},   // TR: 270 -> 360
+        {dst.x + dst.w - r, dst.y + dst.h - r, 0.0f},        // BR: 0   -> 90
+        {dst.x + r,         dst.y + dst.h - r, PI * 0.5f},   // BL: 90  -> 180
+    };
+
+    std::vector<SDL_FPoint> out;
+    out.reserve(static_cast<size_t>(4 * (segments + 1)));
+    const float quarter = PI * 0.5f;
+    for (const Corner& c : corners)
+        for (int s = 0; s <= segments; ++s) {
+            const float a = c.a0 + quarter * (static_cast<float>(s) / static_cast<float>(segments));
+            out.push_back(SDL_FPoint{c.cx + r * std::cos(a), c.cy + r * std::sin(a)});
+        }
+    return out;
+}
+
+void Renderer::draw_round_rect(const SDL_FRect& dst, float radius, Color c, bool filled)
+{
+    if (radius <= 0.0f) { draw_rect(dst, c, filled); return; }
+    const std::vector<SDL_FPoint> loop = round_rect_outline(dst, radius);
+    if (loop.empty()) return;
+
+    if (!filled) {
+        SDL_SetRenderDrawColor(r_, c.r, c.g, c.b, c.a);
+        std::vector<SDL_FPoint> closed = loop;
+        closed.push_back(loop.front());          // close the loop
+        SDL_RenderLines(r_, closed.data(), static_cast<int>(closed.size()));
+        return;
+    }
+
+    // Triangle fan from the rect centre over the outline loop.
+    const SDL_FColor fc{c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, c.a / 255.0f};
+    const SDL_FPoint centre{dst.x + dst.w * 0.5f, dst.y + dst.h * 0.5f};
+    const int n = static_cast<int>(loop.size());
+
+    std::vector<SDL_Vertex> verts;
+    verts.reserve(loop.size() + 1);
+    verts.push_back(SDL_Vertex{centre, fc, {0, 0}});
+    for (const auto& p : loop) verts.push_back(SDL_Vertex{p, fc, {0, 0}});
+
+    std::vector<int> idx;
+    idx.reserve(static_cast<size_t>(n) * 3);
+    for (int i = 0; i < n; ++i) {
+        idx.push_back(0);
+        idx.push_back(1 + i);
+        idx.push_back(1 + (i + 1) % n);
+    }
+    SDL_RenderGeometry(r_, nullptr, verts.data(), static_cast<int>(verts.size()),
+                       idx.data(), static_cast<int>(idx.size()));
+}
+
+void Renderer::draw_selection_glow(const SDL_FRect& dst, float radius, Color accent)
+{
+    // A few progressively larger, fainter rounded outlines just outside `dst`.
+    SDL_SetRenderDrawBlendMode(r_, SDL_BLENDMODE_BLEND);
+    constexpr int rings = 3;
+    for (int i = 0; i < rings; ++i) {
+        const float grow = static_cast<float>(i + 1) * 2.0f;
+        const SDL_FRect rr{dst.x - grow, dst.y - grow,
+                           dst.w + 2.0f * grow, dst.h + 2.0f * grow};
+        Color c = accent;
+        c.a = static_cast<uint8_t>(accent.a / (i + 2));
+        draw_round_rect(rr, radius + grow, c, /*filled*/ false);
+    }
 }
 
 } // namespace gfx

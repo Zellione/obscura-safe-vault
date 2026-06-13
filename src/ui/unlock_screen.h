@@ -53,6 +53,11 @@ private:
     std::string           error_;
     Pending               pending_   = Pending::None;
     bool                  reveal_pw_ = false;  // show a freshly generated passphrase
+
+    // Mouse tracking for button hover/active states.
+    float                 mouse_x_    = -1.0f;
+    float                 mouse_y_    = -1.0f;
+    bool                  mouse_down_ = false;
 };
 
 } // namespace ui

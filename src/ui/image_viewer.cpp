@@ -7,26 +7,20 @@
 #include "gfx/renderer.h"
 #include "gfx/text.h"
 #include "gfx/texture_cache.h"
+#include "gfx/theme.h"
 #include "gfx/window.h"
 #include "image/decode.h"
+#include "ui/widgets.h"
 #include "vault/index.h"
 #include "vault/vault.h"
 
 namespace ui {
 
 namespace {
-constexpr float VIEWPORT_FRACTION = 0.75f;  // top share of the window for the image
-constexpr float STRIP_MARGIN      = 16.0f;  // padding above/below thumbnails
-constexpr float STRIP_GAP         = 10.0f;  // gap between thumbnails
-constexpr float PAN_STEP          = 64.0f;  // arrow-key pan distance (px)
-constexpr float ZOOM_STEP         = 1.25f;  // keyboard +/- zoom factor
-constexpr float WHEEL_STEP        = 1.10f;  // per-notch wheel zoom factor
-
-// Thumbnail side for a strip of the given height.
-float strip_thumb(const SDL_FRect& strip) noexcept
-{
-    return std::max(8.0f, strip.h - 2.0f * STRIP_MARGIN);
-}
+constexpr float PAN_STEP    = 64.0f;   // arrow-key pan distance (px)
+constexpr float ZOOM_STEP   = 1.25f;   // keyboard +/- zoom factor
+constexpr float WHEEL_STEP  = 1.10f;   // per-notch wheel zoom factor (fit mode)
+constexpr float SCROLL_STEP = 96.0f;   // arrow-key / wheel scroll distance (px)
 } // namespace
 
 ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
@@ -39,7 +33,7 @@ ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& v
 
 ImageViewer::~ImageViewer()
 {
-    if (full_tex_) SDL_DestroyTexture(full_tex_);
+    clear_full_cache();
 }
 
 void ImageViewer::on_enter()
@@ -57,24 +51,49 @@ void ImageViewer::on_enter()
 
 void ImageViewer::on_exit()
 {
-    if (full_tex_) { SDL_DestroyTexture(full_tex_); full_tex_ = nullptr; }
-    full_key_ = 0;
+    clear_full_cache();
+}
+
+// --- Geometry --------------------------------------------------------------
+
+float ImageViewer::thumb_size() const
+{
+    return strip_thumb_size(static_cast<float>(win_.height()));
 }
 
 SDL_FRect ImageViewer::viewport_rect() const
 {
-    const auto W = static_cast<float>(win_.width());
-    const auto H = static_cast<float>(win_.height());
-    return SDL_FRect{0.0f, 0.0f, W, H * VIEWPORT_FRACTION};
+    return viewport_rect_for(strip_side_, static_cast<float>(win_.width()),
+                             static_cast<float>(win_.height()), thumb_size());
 }
 
 SDL_FRect ImageViewer::strip_rect() const
 {
-    const auto W = static_cast<float>(win_.width());
-    const auto H = static_cast<float>(win_.height());
-    const float top = H * VIEWPORT_FRACTION;
-    return SDL_FRect{0.0f, top, W, H - top};
+    return strip_rect_for(strip_side_, static_cast<float>(win_.width()),
+                          static_cast<float>(win_.height()), thumb_size());
 }
+
+// --- Mode / layout toggles -------------------------------------------------
+
+void ImageViewer::toggle_strip_side()
+{
+    strip_side_ = (strip_side_ == StripSide::Bottom) ? StripSide::Left : StripSide::Bottom;
+    fitted_ = false;             // viewport changed: refit the fit-mode image
+    if (mode_ == ViewMode::FillScroll) scroll_to_image(index_);
+}
+
+void ImageViewer::toggle_mode()
+{
+    if (mode_ == ViewMode::Fit) {
+        mode_ = ViewMode::FillScroll;
+        scroll_to_image(index_);
+    } else {
+        mode_ = ViewMode::Fit;
+        fitted_ = false;         // force fit-to-window for the current image
+    }
+}
+
+// --- Fit-mode view state ---------------------------------------------------
 
 bool ImageViewer::is_zoomed() const noexcept
 {
@@ -85,9 +104,10 @@ void ImageViewer::show_image_at(int idx)
 {
     if (images_.empty()) return;
     index_    = std::clamp(idx, 0, static_cast<int>(images_.size()) - 1);
-    fitted_   = false;   // force fit-to-window for the newly shown image
+    fitted_   = false;
     dragging_ = false;
     error_.clear();
+    if (mode_ == ViewMode::FillScroll) scroll_to_image(index_);
 }
 
 void ImageViewer::set_index(int delta)
@@ -104,7 +124,7 @@ void ImageViewer::zoom_by(float factor, float cx, float cy)
 {
     const SDL_FRect vp = viewport_rect();
     const ZoomResult z = zoom_at(Vec2{img_w_, img_h_}, zoom_, pan_, factor,
-                                 Vec2{cx, cy}, Vec2{vp.w, vp.h});
+                                 Vec2{cx - vp.x, cy - vp.y}, Vec2{vp.w, vp.h});
     zoom_ = z.zoom;
     pan_  = z.pan;
 }
@@ -116,13 +136,43 @@ void ImageViewer::pan_by(float dx, float dy)
                      vp.w, vp.h);
 }
 
-SDL_Texture* ImageViewer::full_texture()
-{
-    if (images_.empty()) return nullptr;
-    const vault::IndexNode& node = *images_[index_];
-    if (full_tex_ && full_key_ == node.meta.data_offset) return full_tex_;
+// --- FillScroll-mode helpers ----------------------------------------------
 
-    if (full_tex_) { SDL_DestroyTexture(full_tex_); full_tex_ = nullptr; }
+float ImageViewer::scaled_height(const vault::IndexNode& n, float vp_w) const
+{
+    const float w = n.meta.width  ? static_cast<float>(n.meta.width)  : 1.0f;
+    const float h = n.meta.height ? static_cast<float>(n.meta.height) : 1.0f;
+    return vp_w * (h / w);
+}
+
+ScrollModel ImageViewer::build_scroll_model() const
+{
+    const SDL_FRect vp = viewport_rect();
+    std::vector<float> heights;
+    heights.reserve(images_.size());
+    for (const vault::IndexNode* n : images_) heights.push_back(scaled_height(*n, vp.w));
+    return ScrollModel(std::move(heights), vp.h);
+}
+
+void ImageViewer::scroll_to_image(int idx)
+{
+    const ScrollModel m = build_scroll_model();
+    scroll_y_ = m.clamp_scroll(m.image_top(std::clamp(idx, 0, m.count() - 1)));
+}
+
+void ImageViewer::scroll_by(float dy)
+{
+    const ScrollModel m = build_scroll_model();
+    scroll_y_ = m.clamp_scroll(scroll_y_ + dy);
+    index_    = m.active_index(scroll_y_);
+}
+
+// --- Decoded full-texture cache -------------------------------------------
+
+ImageViewer::FullTex* ImageViewer::acquire_full(const vault::IndexNode& node)
+{
+    const uint64_t key = node.meta.data_offset;
+    if (auto it = full_cache_.find(key); it != full_cache_.end()) return &it->second;
 
     crypto::SecureBytes sb;
     if (vault_.read_image(node, sb) != vault::VaultResult::Ok) {
@@ -140,12 +190,30 @@ SDL_Texture* ImageViewer::full_texture()
         error_ = "Could not upload image.";
         return nullptr;
     }
+    // SecureBytes `sb` wipes the decrypted plaintext on scope exit; the pixels
+    // now live only in the GPU texture.
+    auto [it, _] = full_cache_.try_emplace(key, FullTex{tex,
+                                                        static_cast<float>(img->width),
+                                                        static_cast<float>(img->height)});
+    return &it->second;
+}
 
-    full_tex_ = tex;
-    full_key_ = node.meta.data_offset;
-    img_w_    = static_cast<float>(img->width);
-    img_h_    = static_cast<float>(img->height);
-    return full_tex_;
+void ImageViewer::evict_full_except(std::span<const uint64_t> keep)
+{
+    for (auto it = full_cache_.begin(); it != full_cache_.end();) {
+        if (std::find(keep.begin(), keep.end(), it->first) == keep.end()) {
+            SDL_DestroyTexture(it->second.tex);
+            it = full_cache_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void ImageViewer::clear_full_cache()
+{
+    for (auto& [key, ft] : full_cache_) SDL_DestroyTexture(ft.tex);
+    full_cache_.clear();
 }
 
 SDL_Texture* ImageViewer::thumb_texture(const vault::IndexNode& node)
@@ -163,22 +231,39 @@ SDL_Texture* ImageViewer::thumb_texture(const vault::IndexNode& node)
 
 int ImageViewer::strip_hit(float mx, float my) const
 {
-    const SDL_FRect strip = strip_rect();
-    const float thumb = strip_thumb(strip);
-    if (const float top = strip.y + (strip.h - thumb) * 0.5f;
-        my < top || my > top + thumb)
-        return -1;
+    const SDL_FRect strip   = strip_rect();
+    const float     thumb   = thumb_size();
+    const bool      vertical = (strip_side_ == StripSide::Left);
 
+    const float cross0 = vertical ? strip.x + (strip.w - thumb) * 0.5f
+                                   : strip.y + (strip.h - thumb) * 0.5f;
+    const float cross  = vertical ? mx : my;
+    if (cross < cross0 || cross > cross0 + thumb) return -1;
+
+    const float extent = vertical ? strip.h : strip.w;
     const float scroll = strip_scroll_centered(index_, static_cast<int>(images_.size()),
-                                                thumb, STRIP_GAP, strip.w);
-    for (int i = 0; i < static_cast<int>(images_.size()); ++i) {
-        const float cell_x = strip.x - scroll + static_cast<float>(i) * (thumb + STRIP_GAP);
-        if (mx >= cell_x && mx <= cell_x + thumb) return i;
-    }
-    return -1;
+                                               thumb, STRIP_GAP, extent);
+    const float along  = vertical ? my : mx;
+    const float origin = vertical ? strip.y : strip.x;
+    return strip_hit_axis(along, origin, scroll, thumb, STRIP_GAP,
+                          static_cast<int>(images_.size()));
 }
 
+// --- Input -----------------------------------------------------------------
+
 void ImageViewer::handle_key(SDL_Keycode key)
+{
+    switch (key) {
+        case SDLK_T:      toggle_strip_side(); return;
+        case SDLK_F:      toggle_mode();       return;
+        case SDLK_ESCAPE: back_to_gallery();   return;
+        default: break;
+    }
+    if (mode_ == ViewMode::FillScroll) handle_key_scroll(key);
+    else                               handle_key_fit(key);
+}
+
+void ImageViewer::handle_key_fit(SDL_Keycode key)
 {
     const SDL_FRect vp = viewport_rect();
     switch (key) {
@@ -186,13 +271,23 @@ void ImageViewer::handle_key(SDL_Keycode key)
         case SDLK_RIGHT: is_zoomed() ? pan_by(-PAN_STEP, 0) : set_index(1); break;
         case SDLK_UP:    is_zoomed() ? pan_by(0, PAN_STEP) : back_to_gallery(); break;
         case SDLK_DOWN:  if (is_zoomed()) pan_by(0, -PAN_STEP); break;
-        case SDLK_ESCAPE: back_to_gallery(); break;
-        case SDLK_0:      fitted_ = false; break;  // reset to fit-to-window
+        case SDLK_0:     fitted_ = false; break;  // reset to fit-to-window
         case SDLK_PLUS:
         case SDLK_EQUALS:
-        case SDLK_KP_PLUS:  zoom_by(ZOOM_STEP, vp.w * 0.5f, vp.h * 0.5f); break;
+        case SDLK_KP_PLUS:  zoom_by(ZOOM_STEP, vp.x + vp.w * 0.5f, vp.y + vp.h * 0.5f); break;
         case SDLK_MINUS:
-        case SDLK_KP_MINUS: zoom_by(1.0f / ZOOM_STEP, vp.w * 0.5f, vp.h * 0.5f); break;
+        case SDLK_KP_MINUS: zoom_by(1.0f / ZOOM_STEP, vp.x + vp.w * 0.5f, vp.y + vp.h * 0.5f); break;
+        default: break;
+    }
+}
+
+void ImageViewer::handle_key_scroll(SDL_Keycode key)
+{
+    switch (key) {
+        case SDLK_DOWN:  scroll_by(SCROLL_STEP);  break;
+        case SDLK_UP:    scroll_by(-SCROLL_STEP); break;
+        case SDLK_RIGHT: set_index(1);            break;  // jump to next image top
+        case SDLK_LEFT:  set_index(-1);           break;  // jump to prev image top
         default: break;
     }
 }
@@ -200,86 +295,146 @@ void ImageViewer::handle_key(SDL_Keycode key)
 void ImageViewer::handle_mouse_down(const SDL_MouseButtonEvent& b)
 {
     if (b.button != SDL_BUTTON_LEFT) return;
-    if (const int hit = strip_hit(b.x, b.y); hit >= 0)
+    if (const int hit = strip_hit(b.x, b.y); hit >= 0) {
         show_image_at(hit);
-    else if (b.y < viewport_rect().h)
-        dragging_ = true;
+    } else if (mode_ == ViewMode::Fit) {
+        const SDL_FRect vp = viewport_rect();
+        if (point_in_rect(b.x, b.y, vp)) dragging_ = true;
+    }
+}
+
+void ImageViewer::handle_wheel(const SDL_MouseWheelEvent& w)
+{
+    if (mode_ == ViewMode::FillScroll)
+        scroll_by(w.y > 0 ? -SCROLL_STEP : SCROLL_STEP);
+    else
+        zoom_by(w.y > 0 ? WHEEL_STEP : 1.0f / WHEEL_STEP, w.mouse_x, w.mouse_y);
 }
 
 void ImageViewer::handle_event(const SDL_Event& e)
 {
     switch (e.type) {
-        case SDL_EVENT_KEY_DOWN: handle_key(e.key.key); break;
-        case SDL_EVENT_MOUSE_WHEEL:
-            zoom_by(e.wheel.y > 0 ? WHEEL_STEP : 1.0f / WHEEL_STEP,
-                    e.wheel.mouse_x, e.wheel.mouse_y);
-            break;
-        case SDL_EVENT_MOUSE_BUTTON_DOWN: handle_mouse_down(e.button); break;
+        case SDL_EVENT_KEY_DOWN:          handle_key(e.key.key);        break;
+        case SDL_EVENT_MOUSE_WHEEL:       handle_wheel(e.wheel);        break;
+        case SDL_EVENT_MOUSE_BUTTON_DOWN: handle_mouse_down(e.button);  break;
         case SDL_EVENT_MOUSE_BUTTON_UP:
             if (e.button.button == SDL_BUTTON_LEFT) dragging_ = false;
             break;
         case SDL_EVENT_MOUSE_MOTION:
-            if (dragging_) pan_by(e.motion.xrel, e.motion.yrel);
+            if (dragging_ && mode_ == ViewMode::Fit) pan_by(e.motion.xrel, e.motion.yrel);
             break;
         default: break;
     }
 }
 
-void ImageViewer::render(gfx::Renderer& r)
+// --- Rendering -------------------------------------------------------------
+
+void ImageViewer::render_fit(gfx::Renderer& r, const SDL_FRect& vp)
 {
-    const SDL_FRect vp    = viewport_rect();
+    FullTex* ft = acquire_full(*images_[index_]);
+    const uint64_t keep[1] = {images_[index_]->meta.data_offset};
+    evict_full_except(keep);
+
+    if (!ft) {
+        if (!error_.empty())
+            r.draw_text(font_, vp.x + 20, vp.y + vp.h * 0.5f, error_, gfx::theme::DANGER);
+        return;
+    }
+    img_w_ = ft->w;
+    img_h_ = ft->h;
+
+    fit_zoom_ = clamp_zoom(fit_zoom(img_w_, img_h_, vp.w, vp.h));
+    if (!fitted_) { zoom_ = fit_zoom_; pan_ = Vec2{}; fitted_ = true; }
+
+    const float sw = img_w_ * zoom_;
+    const float sh = img_h_ * zoom_;
+    pan_ = clamp_pan(pan_, sw, sh, vp.w, vp.h);
+    const float dx = vp.x + vp.w * 0.5f + pan_.x - sw * 0.5f;
+    const float dy = vp.y + vp.h * 0.5f + pan_.y - sh * 0.5f;
+
+    const SDL_Rect clip{static_cast<int>(vp.x), static_cast<int>(vp.y),
+                        static_cast<int>(vp.w), static_cast<int>(vp.h)};
+    SDL_SetRenderClipRect(r.sdl(), &clip);
+    r.draw_image(ft->tex, SDL_FRect{dx, dy, sw, sh});
+    SDL_SetRenderClipRect(r.sdl(), nullptr);
+}
+
+void ImageViewer::render_scroll(gfx::Renderer& r, const SDL_FRect& vp)
+{
+    const ScrollModel m = build_scroll_model();
+    scroll_y_ = m.clamp_scroll(scroll_y_);
+    index_    = m.active_index(scroll_y_);
+
+    const auto [first, last] = m.visible_range(scroll_y_);
+    if (first > last) return;
+
+    // Keep the visible images plus one neighbour each side decoded; evict rest.
+    const int lo = std::max(0, first - 1);
+    const int hi = std::min(m.count() - 1, last + 1);
+    std::vector<uint64_t> keep;
+    keep.reserve(static_cast<size_t>(hi - lo + 1));
+    for (int i = lo; i <= hi; ++i) keep.push_back(images_[i]->meta.data_offset);
+    evict_full_except(keep);
+
+    const SDL_Rect clip{static_cast<int>(vp.x), static_cast<int>(vp.y),
+                        static_cast<int>(vp.w), static_cast<int>(vp.h)};
+    SDL_SetRenderClipRect(r.sdl(), &clip);
+    for (int i = first; i <= last; ++i) {
+        const float top = vp.y + m.image_top(i) - scroll_y_;
+        const float h   = scaled_height(*images_[i], vp.w);
+        if (FullTex* ft = acquire_full(*images_[i]))
+            r.draw_image(ft->tex, SDL_FRect{vp.x, top, vp.w, h});
+        else
+            r.draw_rect(SDL_FRect{vp.x, top, vp.w, h}, gfx::theme::SURFACE);
+    }
+    SDL_SetRenderClipRect(r.sdl(), nullptr);
+}
+
+void ImageViewer::render_strip(gfx::Renderer& r)
+{
     const SDL_FRect strip = strip_rect();
+    r.draw_rect(strip, gfx::theme::STRIP_BG);
 
-    SDL_Texture* tex = full_texture();
-
-    // Keep fit_zoom_ tracking the live viewport so is_zoomed() stays meaningful
-    // across resizes; (re)fit only when a new image hasn't been fitted yet.
-    if (tex) {
-        fit_zoom_ = clamp_zoom(fit_zoom(img_w_, img_h_, vp.w, vp.h));
-        if (!fitted_) { zoom_ = fit_zoom_; pan_ = Vec2{}; fitted_ = true; }
-    }
-
-    // --- Image area --------------------------------------------------------
-    r.draw_rect(vp, gfx::Color{12, 12, 16, 255});
-    if (tex) {
-        const float sw = img_w_ * zoom_;
-        const float sh = img_h_ * zoom_;
-        pan_ = clamp_pan(pan_, sw, sh, vp.w, vp.h);  // keep on-screen after resize
-        const float dx = vp.x + vp.w * 0.5f + pan_.x - sw * 0.5f;
-        const float dy = vp.y + vp.h * 0.5f + pan_.y - sh * 0.5f;
-
-        const SDL_Rect clip{static_cast<int>(vp.x), static_cast<int>(vp.y),
-                            static_cast<int>(vp.w), static_cast<int>(vp.h)};
-        SDL_SetRenderClipRect(r.sdl(), &clip);
-        r.draw_image(tex, SDL_FRect{dx, dy, sw, sh});
-        SDL_SetRenderClipRect(r.sdl(), nullptr);
-    } else if (!error_.empty()) {
-        r.draw_text(font_, vp.x + 20, vp.y + vp.h * 0.5f, error_,
-                    gfx::Color{230, 120, 120, 255});
-    }
-
-    // --- HUD ---------------------------------------------------------------
-    if (!images_.empty()) {
-        const std::string hud = std::format("{}   {}/{}   {}%", images_[index_]->name,
-                                             index_ + 1, images_.size(),
-                                             static_cast<int>(zoom_ * 100.0f + 0.5f));
-        r.draw_text(font_, vp.x + 16, vp.y + 12, hud, gfx::Color{220, 220, 230, 255});
-    }
-    r.draw_text(font_, vp.x + 16, vp.y + 44,
-                "[<-/->] Prev/Next   [Wheel/+/-] Zoom   [Drag] Pan   [Esc] Back",
-                gfx::Color{120, 120, 130, 255});
-
-    // --- Thumbnail strip ---------------------------------------------------
-    r.draw_rect(strip, gfx::Color{24, 24, 30, 255});
-    const float thumb = strip_thumb(strip);
+    const float thumb = thumb_size();
+    const bool  vertical = (strip_side_ == StripSide::Left);
     std::vector<SDL_Texture*> thumbs;
     thumbs.reserve(images_.size());
     for (const vault::IndexNode* n : images_) thumbs.push_back(thumb_texture(*n));
 
+    const float extent = vertical ? strip.h : strip.w;
     const float scroll = strip_scroll_centered(index_, static_cast<int>(images_.size()),
-                                               thumb, STRIP_GAP, strip.w);
+                                               thumb, STRIP_GAP, extent);
     r.draw_thumbnail_strip(thumbs, strip, thumb, STRIP_GAP, scroll, index_,
-                           gfx::Color{180, 140, 240, 255});
+                           gfx::theme::ACCENT, vertical);
+}
+
+void ImageViewer::render_hud(gfx::Renderer& r, const SDL_FRect& vp)
+{
+    if (!images_.empty()) {
+        const char* mode = (mode_ == ViewMode::FillScroll) ? "fill" : "fit";
+        const std::string hud = (mode_ == ViewMode::FillScroll)
+            ? std::format("{}   {}/{}   {}", images_[index_]->name, index_ + 1,
+                          images_.size(), mode)
+            : std::format("{}   {}/{}   {}%", images_[index_]->name, index_ + 1,
+                          images_.size(), static_cast<int>(zoom_ * 100.0f + 0.5f));
+        r.draw_text(font_, vp.x + 16, vp.y + 12, hud, gfx::theme::TEXT);
+    }
+    const char* legend = (mode_ == ViewMode::FillScroll)
+        ? "[Wheel] Scroll   [<-/->] Prev/Next   [F] Fit   [T] Strip side   [Esc] Back"
+        : "[<-/->] Prev/Next   [Wheel/+/-] Zoom   [F] Fill-scroll   [T] Strip side   [Esc] Back";
+    r.draw_text(font_, vp.x + 16, vp.y + 44, legend, gfx::theme::TEXT_FAINT);
+}
+
+void ImageViewer::render(gfx::Renderer& r)
+{
+    const SDL_FRect vp = viewport_rect();
+    r.draw_rect(vp, gfx::theme::IMG_BG);
+
+    if (mode_ == ViewMode::FillScroll) render_scroll(r, vp);
+    else                               render_fit(r, vp);
+
+    render_hud(r, vp);
+    render_strip(r);
 }
 
 } // namespace ui

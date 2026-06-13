@@ -92,3 +92,15 @@ TEST(font_atlas_draw_text_runs_headless)
     SDL_DestroyRenderer(r);
     SDL_DestroySurface(surf);
 }
+
+TEST(text_top_for_center_straddles_center)
+{
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(kFontPath, 24.0f));
+    const float c = 100.0f;
+    const float y = font.text_top_for_center(c);
+    // The returned top sits above the centre, and the baseline (y + px_) sits
+    // below it, so the rendered ink straddles `c`.
+    CHECK(y < c);
+    CHECK(y + font.pixel_height() > c);
+}

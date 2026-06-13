@@ -5,6 +5,7 @@
 
 #include "gfx/renderer.h"
 #include "gfx/text.h"
+#include "gfx/theme.h"
 
 namespace ui {
 
@@ -50,25 +51,57 @@ SDL_FRect fit_rect(float w, float h, const SDL_FRect& box) noexcept
 void draw_button(gfx::Renderer& r, gfx::FontAtlas& font, const Button& b,
                  bool hover, bool active)
 {
-    gfx::Color bg{55, 55, 70, 255};
-    if (active)     bg = gfx::Color{90, 60, 150, 255};
-    else if (hover) bg = gfx::Color{70, 70, 95, 255};
-    r.draw_rect(b.rect, bg);
-    r.draw_rect(b.rect, gfx::Color{120, 80, 200, 255}, /*filled*/ false);
+    using namespace gfx::theme;
+    gfx::Color bg = SURFACE;
+    if (active)     bg = ACCENT_DIM;
+    else if (hover) bg = SURFACE_HI;
+    r.draw_round_rect(b.rect, RADIUS_SMALL, bg);
+    r.draw_round_rect(b.rect, RADIUS_SMALL, (hover || active) ? ACCENT : BORDER,
+                      /*filled*/ false);
     const int tw = font.measure(b.label);
     r.draw_text(font, b.rect.x + (b.rect.w - static_cast<float>(tw)) * 0.5f,
-                b.rect.y + b.rect.h * 0.5f - 14.0f, b.label,
-                gfx::Color{235, 235, 240, 255});
+                font.text_top_for_center(b.rect.y + b.rect.h * 0.5f), b.label, TEXT);
 }
 
 void draw_text_field(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& box,
                      std::string_view shown, bool focused)
 {
-    r.draw_rect(box, gfx::Color{40, 40, 50, 255});
-    r.draw_rect(box, focused ? gfx::Color{120, 80, 200, 255}
-                             : gfx::Color{80, 80, 95, 255}, /*filled*/ false);
-    r.draw_text(font, box.x + 10.0f, box.y + box.h * 0.5f - 14.0f, shown,
-                gfx::Color{230, 230, 235, 255});
+    using namespace gfx::theme;
+    r.draw_round_rect(box, RADIUS_SMALL, SURFACE);
+    r.draw_round_rect(box, RADIUS_SMALL, focused ? ACCENT : BORDER, /*filled*/ false);
+    r.draw_text(font, box.x + 12.0f, font.text_top_for_center(box.y + box.h * 0.5f),
+                shown, TEXT);
+}
+
+// STUB — intentionally wrong until the test is red.
+ButtonState button_state(const SDL_FRect& rect, float mx, float my,
+                         bool mouse_down) noexcept
+{
+    const bool hover = point_in_rect(mx, my, rect);
+    return {hover, hover && mouse_down};
+}
+
+std::string elide_middle(std::string_view name, int max_w,
+                         const std::function<int(std::string_view)>& measure)
+{
+    if (measure(name) <= max_w) return std::string(name);
+
+    constexpr std::string_view ell = "...";
+    if (measure(ell) > max_w) return std::string();
+
+    // Shrink the kept character count, splitting evenly between head and tail
+    // (head gets the odd one), until the "head…tail" form fits.
+    const int n = static_cast<int>(name.size());
+    for (int keep = n - 1; keep >= 0; --keep) {
+        const int head = (keep + 1) / 2;
+        const int tail = keep / 2;
+        std::string cand;
+        cand.append(name.substr(0, static_cast<size_t>(head)));
+        cand.append(ell);
+        cand.append(name.substr(static_cast<size_t>(n - tail)));
+        if (measure(cand) <= max_w) return cand;
+    }
+    return std::string(ell);
 }
 
 } // namespace ui

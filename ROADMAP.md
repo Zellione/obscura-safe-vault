@@ -395,6 +395,57 @@ libwebp (WebP), libheif (HEIC via libde265, AVIF via libaom). 154/154 tests pass
 
 ---
 
+## UI Overhaul — modern restyle, strip toggle & fill-scroll ✅
+
+**Goal:** Modernise the look of all screens and extend the image viewer. Shipped on
+the `feat/ui-overhaul` branch (a feature, not a numbered phase).
+
+### Tasks
+- [x] `src/gfx/theme.h` — centralised "Refined Slate" colour tokens; replaced the
+  scattered inline colour literals across every screen and widget.
+- [x] `gfx::Renderer::draw_round_rect` + `draw_selection_glow` (via `SDL_RenderGeometry`)
+  and a pure, unit-tested `round_rect_outline` helper. Tiles, fields, buttons and
+  panels are now rounded; selection uses an accent glow.
+- [x] `draw_button` finally renders its hover/active states; `ui::button_state`
+  (pure, tested) wires live mouse hover/press on the unlock screen.
+- [x] Image-viewer thumbnails halved (`src/ui/strip_layout.{h,cpp}`,
+  `strip_thumb_size`).
+- [x] **Strip-position toggle** (`T`): bottom (horizontal) ↔ left (vertical),
+  orientation-aware layout/scroll/hit-testing; persists for the session.
+- [x] **Fill-width continuous scroll** view mode (`F`): images scaled to viewport
+  width, wheel scrolls vertically across the whole leaf gallery, active thumbnail
+  tracks the viewport centre. Pure `src/ui/scroll_model.{h,cpp}` drives the maths;
+  only the on-screen images + immediate neighbours are decoded (bounded texture
+  set, decrypted into locked memory, wiped after GPU upload — never to disk).
+- [x] **Gallery responsiveness & detailed list view**: `Window::width()/height()`
+  now report the live renderer output size, so the grid reflows on resize and is
+  centred; thumbnails are aspect-fit on black (no stretch); filenames are
+  middle-elided to fit (`ui::elide_middle`). A `L` key toggles a detailed list
+  view with very small thumbnails + columns (name, dimensions, size, type, date)
+  formatted by pure `src/ui/meta_format.{h,cpp}`.
+- [x] **Text centring**: `FontAtlas::text_top_for_center` centres text by real
+  glyph extents (the font bakes at 28px with baseline = y + px), used by buttons,
+  fields, list rows and headers.
+
+### Acceptance criterion
+All screens use the shared theme; the viewer supports half-size thumbnails, the
+bottom/left strip toggle, and the fill-width scroll mode. All tests pass.
+
+**Status:** ✅ Pure logic (strip layout, scroll model, button state, rounded-rect
+tessellation) is TDD-covered; 174/174 tests pass under `scripts/test.sh` and `--asan`.
+Security invariants unchanged — the fill-scroll texture window reuses the existing
+`SecureBytes` decrypt-then-wipe path.
+
+> **Notes / decisions made during implementation**
+> - **Strip side & view mode** reset to defaults (`Bottom`, `Fit`) when the viewer
+>   is re-entered from the gallery; they persist only while the viewer is open.
+> - **Bottom strip** keeps its full bar height; the smaller thumbnails just sit
+>   centred in it.
+> - **Scroll heights** come from `ImageMeta.width/height`, so the scroll model is
+>   built without decrypting any image up front.
+
+---
+
 ## Phase 10+ — Future ideas
 
 These are intentionally unscoped. Each deserves its own planning session before work begins.
