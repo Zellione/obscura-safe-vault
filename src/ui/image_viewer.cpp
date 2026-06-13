@@ -510,14 +510,15 @@ void ImageViewer::render_slideshow(gfx::Renderer& r, const SDL_FRect& vp)
 void ImageViewer::render_slideshow_hud(gfx::Renderer& r, const SDL_FRect& vp)
 {
     if (images_.empty() || !show_) return;
-    const char* state = show_->running() ? "> Play" : "|| Pause";
+    const char* state = show_->running() ? "Playing" : "Paused";
     const std::string hud =
-        std::format("{}   {}/{}   {}   {:.0f}s{}", images_[index_]->name, index_ + 1,
-                    images_.size(), state, show_->dwell(), shuffle_ ? "   shuffle" : "");
+        std::format("{}   {} of {}   {}   {:.0f}s per slide{}", images_[index_]->name,
+                    index_ + 1, images_.size(), state, show_->dwell(),
+                    shuffle_ ? "   Shuffle on" : "");
     r.draw_text(font_, vp.x + 16, vp.y + 12, hud, gfx::theme::TEXT);
     r.draw_text(font_, vp.x + 16, vp.y + 44,
-                "[P/Space] Play/Pause   [<-/->] Prev/Next   [ [ / ] ] Speed   "
-                "[S] Shuffle   [Esc] Back",
+                "[Space] Play/Pause   [<-/->] Prev/Next   [+/-] Slower/Faster   "
+                "[S] Shuffle   [Esc] Exit",
                 gfx::theme::TEXT_FAINT);
 }
 
