@@ -1,7 +1,9 @@
 #include "gfx/renderer.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <numbers>
 
 namespace gfx {
 
@@ -38,25 +40,25 @@ void Renderer::draw_text(FontAtlas& font, float x, float y, std::string_view tex
 }
 
 float Renderer::draw_thumbnail_strip(std::span<SDL_Texture* const> thumbs,
-                                     const SDL_FRect& strip, float thumb_size,
-                                     float gap, float scroll, int selected,
-                                     Color highlight, bool vertical)
+                                     const SDL_FRect& strip, const ThumbnailStrip& opts)
 {
+    const float thumb_size = opts.size;
     SDL_Rect clip{static_cast<int>(strip.x), static_cast<int>(strip.y),
                   static_cast<int>(strip.w), static_cast<int>(strip.h)};
     SDL_SetRenderClipRect(r_, &clip);
 
     // Lay cells out along the strip's long axis; centre them on the short axis.
-    const float cross  = vertical ? strip.x + (strip.w - thumb_size) * 0.5f
-                                   : strip.y + (strip.h - thumb_size) * 0.5f;
-    const float origin = vertical ? strip.y : strip.x;
-    const float extent = vertical ? strip.h : strip.w;
+    const float cross  = opts.vertical ? strip.x + (strip.w - thumb_size) * 0.5f
+                                        : strip.y + (strip.h - thumb_size) * 0.5f;
+    const float origin = opts.vertical ? strip.y : strip.x;
+    const float extent = opts.vertical ? strip.h : strip.w;
 
     for (int i = 0; i < static_cast<int>(thumbs.size()); ++i) {
-        const float along = origin - scroll + static_cast<float>(i) * (thumb_size + gap);
+        const float along = origin - opts.scroll +
+                            static_cast<float>(i) * (thumb_size + opts.gap);
         if (along + thumb_size < origin || along > origin + extent) continue;  // culled
 
-        const SDL_FRect dst = vertical
+        const SDL_FRect dst = opts.vertical
             ? SDL_FRect{cross, along, thumb_size, thumb_size}
             : SDL_FRect{along, cross, thumb_size, thumb_size};
 
@@ -83,36 +85,39 @@ float Renderer::draw_thumbnail_strip(std::span<SDL_Texture* const> thumbs,
             SDL_SetTextureAlphaMod(thumbs[i], 255);
             SDL_RenderTexture(r_, thumbs[i], nullptr, &img);
         }
-        if (i == selected) draw_selection_glow(dst, 6.0f, highlight);
+        if (i == opts.selected) draw_selection_glow(dst, 6.0f, opts.highlight);
     }
 
     SDL_SetRenderClipRect(r_, nullptr);
     return thumbnail_strip_content_width(static_cast<int>(thumbs.size()),
-                                         thumb_size, gap);
+                                         thumb_size, opts.gap);
 }
-
-namespace { constexpr float PI = 3.14159265358979323846f; }
 
 std::vector<SDL_FPoint> round_rect_outline(const SDL_FRect& dst, float radius,
                                            int segments)
 {
+    constexpr float pi = std::numbers::pi_v<float>;
     const float r = std::max(0.0f, std::min(radius, std::min(dst.w, dst.h) * 0.5f));
     if (segments < 1) segments = 1;
 
     // Corner arc centres and start angles, swept clockwise: TL, TR, BR, BL. Each
     // arc spans a quarter turn; in screen coords (+y down) cos/sin still trace a
     // circle, so the loop touches all four edges -> its bbox equals `dst`.
-    struct Corner { float cx, cy, a0; };
-    const Corner corners[4] = {
-        {dst.x + r,         dst.y + r,         PI},          // TL: 180 -> 270
-        {dst.x + dst.w - r, dst.y + r,         PI * 1.5f},   // TR: 270 -> 360
-        {dst.x + dst.w - r, dst.y + dst.h - r, 0.0f},        // BR: 0   -> 90
-        {dst.x + r,         dst.y + dst.h - r, PI * 0.5f},   // BL: 90  -> 180
+    struct Corner {
+        float cx;
+        float cy;
+        float a0;
     };
+    const std::array<Corner, 4> corners{{
+        {dst.x + r,         dst.y + r,         pi},          // TL: 180 -> 270
+        {dst.x + dst.w - r, dst.y + r,         pi * 1.5f},   // TR: 270 -> 360
+        {dst.x + dst.w - r, dst.y + dst.h - r, 0.0f},        // BR: 0   -> 90
+        {dst.x + r,         dst.y + dst.h - r, pi * 0.5f},   // BL: 90  -> 180
+    }};
 
     std::vector<SDL_FPoint> out;
     out.reserve(static_cast<size_t>(4 * (segments + 1)));
-    const float quarter = PI * 0.5f;
+    const float quarter = pi * 0.5f;
     for (const Corner& c : corners)
         for (int s = 0; s <= segments; ++s) {
             const float a = c.a0 + quarter * (static_cast<float>(s) / static_cast<float>(segments));
@@ -138,7 +143,7 @@ void Renderer::draw_round_rect(const SDL_FRect& dst, float radius, Color c, bool
     // Triangle fan from the rect centre over the outline loop.
     const SDL_FColor fc{c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, c.a / 255.0f};
     const SDL_FPoint centre{dst.x + dst.w * 0.5f, dst.y + dst.h * 0.5f};
-    const int n = static_cast<int>(loop.size());
+    const auto n = static_cast<int>(loop.size());
 
     std::vector<SDL_Vertex> verts;
     verts.reserve(loop.size() + 1);

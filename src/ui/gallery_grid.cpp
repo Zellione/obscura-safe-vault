@@ -189,9 +189,9 @@ void GalleryGrid::handle_event(const SDL_Event& e)
 
     switch (e.type) {
         case SDL_EVENT_KEY_DOWN: {
+            using enum GalleryView;
             if (e.key.key == SDLK_L) {   // toggle grid <-> detailed list view
-                view_ = (view_ == GalleryView::Grid) ? GalleryView::List
-                                                     : GalleryView::Grid;
+                view_ = (view_ == Grid) ? List : Grid;
                 break;
             }
             using enum InputAction;
@@ -332,7 +332,7 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float /*H*/)
         } else {
             r.draw_text(font_, dims_x, ty, format_dimensions(m.width, m.height), meta_c);
             r.draw_text(font_, size_x, ty, format_size(m.orig_size), meta_c);
-            r.draw_text(font_, type_x, ty, std::string(image_format_name(m.format)), meta_c);
+            r.draw_text(font_, type_x, ty, image_format_name(m.format), meta_c);
             r.draw_text(font_, date_x, ty, format_date(m.created_ts), meta_c);
         }
     }
@@ -361,11 +361,11 @@ void GalleryGrid::draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
 
 int GalleryGrid::hit_test(float mx, float my) const
 {
-    const int count = static_cast<int>(children_.size());
+    const auto count = static_cast<int>(children_.size());
     if (view_ == GalleryView::List) {
         const float top = OY + LIST_HEADER;
         if (mx < OX || mx > static_cast<float>(win_.width()) - OX || my < top) return -1;
-        const int idx = static_cast<int>((my - top) / ROW_H);
+        const auto idx = static_cast<int>((my - top) / ROW_H);
         return (idx >= 0 && idx < count) ? idx : -1;
     }
     return grid_hit(mx, my, count, grid_spec(static_cast<float>(win_.width()), cols_));

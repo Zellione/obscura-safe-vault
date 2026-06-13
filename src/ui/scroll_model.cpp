@@ -4,7 +4,7 @@
 
 namespace ui {
 
-ScrollModel::ScrollModel(std::vector<float> scaled_heights, float viewport_h)
+ScrollModel::ScrollModel(const std::vector<float>& scaled_heights, float viewport_h)
     : vh_(viewport_h)
 {
     tops_.reserve(scaled_heights.size() + 1);

@@ -35,6 +35,7 @@ private:
         SDL_FRect new_keyfile_btn;  // create mode only
     };
     [[nodiscard]] Layout layout() const;
+    void handle_click(const SDL_MouseButtonEvent& b);
     void submit();
     void apply_dialog_result(const std::string& path);
 

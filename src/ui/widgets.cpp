@@ -73,35 +73,11 @@ void draw_text_field(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& bo
                 shown, TEXT);
 }
 
-// STUB — intentionally wrong until the test is red.
 ButtonState button_state(const SDL_FRect& rect, float mx, float my,
                          bool mouse_down) noexcept
 {
     const bool hover = point_in_rect(mx, my, rect);
     return {hover, hover && mouse_down};
-}
-
-std::string elide_middle(std::string_view name, int max_w,
-                         const std::function<int(std::string_view)>& measure)
-{
-    if (measure(name) <= max_w) return std::string(name);
-
-    constexpr std::string_view ell = "...";
-    if (measure(ell) > max_w) return std::string();
-
-    // Shrink the kept character count, splitting evenly between head and tail
-    // (head gets the odd one), until the "head…tail" form fits.
-    const int n = static_cast<int>(name.size());
-    for (int keep = n - 1; keep >= 0; --keep) {
-        const int head = (keep + 1) / 2;
-        const int tail = keep / 2;
-        std::string cand;
-        cand.append(name.substr(0, static_cast<size_t>(head)));
-        cand.append(ell);
-        cand.append(name.substr(static_cast<size_t>(n - tail)));
-        if (measure(cand) <= max_w) return cand;
-    }
-    return std::string(ell);
 }
 
 } // namespace ui

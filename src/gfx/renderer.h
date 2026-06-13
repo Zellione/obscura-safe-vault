@@ -29,6 +29,16 @@ thumbnail_strip_content_width(int count, float thumb_size, float gap) noexcept
 [[nodiscard]] std::vector<SDL_FPoint>
 round_rect_outline(const SDL_FRect& dst, float radius, int segments = 6);
 
+/// Parameters for draw_thumbnail_strip (grouped to keep the call signature small).
+struct ThumbnailStrip {
+    float size      = 0.0f;    // thumbnail side length (square cell)
+    float gap       = 0.0f;    // gap between cells
+    float scroll    = 0.0f;    // scroll offset along the long axis
+    int   selected  = -1;      // index of the highlighted cell
+    Color highlight {};        // selection-glow colour
+    bool  vertical  = false;   // lay out top-to-bottom instead of left-to-right
+};
+
 /// Higher-level draw operations over an SDL_Renderer. Does not own the renderer.
 class Renderer {
 public:
@@ -58,15 +68,13 @@ public:
     /// Draw `text` with its top-left at (x, y).
     void draw_text(FontAtlas& font, float x, float y, std::string_view text, Color c);
 
-    /// Lay out `thumbs` inside `strip`, each fit into a `thumb_size` square with
-    /// `gap` between cells, scrolled by `scroll` along the strip's long axis
-    /// (horizontal by default; vertical when `vertical` is true). The cell at
+    /// Lay out `thumbs` inside `strip`, each fit into a `ThumbnailStrip::size`
+    /// square with `gap` between cells, scrolled by `scroll` along the strip's
+    /// long axis (horizontal, or vertical when `vertical` is true). The cell at
     /// index `selected` gets a `highlight` selection glow. Drawing is clipped to
     /// `strip`. Returns the content length (for scroll clamping by the caller).
     float draw_thumbnail_strip(std::span<SDL_Texture* const> thumbs,
-                               const SDL_FRect& strip, float thumb_size, float gap,
-                               float scroll, int selected, Color highlight,
-                               bool vertical = false);
+                               const SDL_FRect& strip, const ThumbnailStrip& opts);
 
 private:
     SDL_Renderer* r_ = nullptr;

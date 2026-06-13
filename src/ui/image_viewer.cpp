@@ -1,6 +1,7 @@
 #include "ui/image_viewer.h"
 
 #include <algorithm>
+#include <array>
 #include <format>
 
 #include "crypto/secure_mem.h"
@@ -33,7 +34,7 @@ ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& v
 
 ImageViewer::~ImageViewer()
 {
-    clear_full_cache();
+    evict_full_except({});   // destroy all cached textures
 }
 
 void ImageViewer::on_enter()
@@ -51,7 +52,7 @@ void ImageViewer::on_enter()
 
 void ImageViewer::on_exit()
 {
-    clear_full_cache();
+    evict_full_except({});   // destroy all cached textures
 }
 
 // --- Geometry --------------------------------------------------------------
@@ -74,24 +75,6 @@ SDL_FRect ImageViewer::strip_rect() const
 }
 
 // --- Mode / layout toggles -------------------------------------------------
-
-void ImageViewer::toggle_strip_side()
-{
-    strip_side_ = (strip_side_ == StripSide::Bottom) ? StripSide::Left : StripSide::Bottom;
-    fitted_ = false;             // viewport changed: refit the fit-mode image
-    if (mode_ == ViewMode::FillScroll) scroll_to_image(index_);
-}
-
-void ImageViewer::toggle_mode()
-{
-    if (mode_ == ViewMode::Fit) {
-        mode_ = ViewMode::FillScroll;
-        scroll_to_image(index_);
-    } else {
-        mode_ = ViewMode::Fit;
-        fitted_ = false;         // force fit-to-window for the current image
-    }
-}
 
 // --- Fit-mode view state ---------------------------------------------------
 
@@ -200,20 +183,12 @@ ImageViewer::FullTex* ImageViewer::acquire_full(const vault::IndexNode& node)
 
 void ImageViewer::evict_full_except(std::span<const uint64_t> keep)
 {
-    for (auto it = full_cache_.begin(); it != full_cache_.end();) {
-        if (std::find(keep.begin(), keep.end(), it->first) == keep.end()) {
-            SDL_DestroyTexture(it->second.tex);
-            it = full_cache_.erase(it);
-        } else {
-            ++it;
-        }
-    }
-}
-
-void ImageViewer::clear_full_cache()
-{
-    for (auto& [key, ft] : full_cache_) SDL_DestroyTexture(ft.tex);
-    full_cache_.clear();
+    std::erase_if(full_cache_, [keep](const auto& entry) {
+        const auto& [key, ft] = entry;
+        if (std::ranges::find(keep, key) != keep.end()) return false;
+        SDL_DestroyTexture(ft.tex);
+        return true;
+    });
 }
 
 SDL_Texture* ImageViewer::thumb_texture(const vault::IndexNode& node)
@@ -237,8 +212,8 @@ int ImageViewer::strip_hit(float mx, float my) const
 
     const float cross0 = vertical ? strip.x + (strip.w - thumb) * 0.5f
                                    : strip.y + (strip.h - thumb) * 0.5f;
-    const float cross  = vertical ? mx : my;
-    if (cross < cross0 || cross > cross0 + thumb) return -1;
+    if (const float cross = vertical ? mx : my; cross < cross0 || cross > cross0 + thumb)
+        return -1;
 
     const float extent = vertical ? strip.h : strip.w;
     const float scroll = strip_scroll_centered(index_, static_cast<int>(images_.size()),
@@ -253,14 +228,23 @@ int ImageViewer::strip_hit(float mx, float my) const
 
 void ImageViewer::handle_key(SDL_Keycode key)
 {
+    using enum StripSide;
+    using enum ViewMode;
     switch (key) {
-        case SDLK_T:      toggle_strip_side(); return;
-        case SDLK_F:      toggle_mode();       return;
-        case SDLK_ESCAPE: back_to_gallery();   return;
+        case SDLK_T:      // toggle the strip between bottom and left
+            strip_side_ = (strip_side_ == Bottom) ? Left : Bottom;
+            fitted_ = false;                      // viewport changed: refit
+            if (mode_ == FillScroll) scroll_to_image(index_);
+            return;
+        case SDLK_F:      // toggle fit <-> fill-width scroll
+            if (mode_ == Fit) { mode_ = FillScroll; scroll_to_image(index_); }
+            else              { mode_ = Fit; fitted_ = false; }
+            return;
+        case SDLK_ESCAPE: back_to_gallery(); return;
         default: break;
     }
-    if (mode_ == ViewMode::FillScroll) handle_key_scroll(key);
-    else                               handle_key_fit(key);
+    if (mode_ == FillScroll) handle_key_scroll(key);
+    else                     handle_key_fit(key);
 }
 
 void ImageViewer::handle_key_fit(SDL_Keycode key)
@@ -332,7 +316,7 @@ void ImageViewer::handle_event(const SDL_Event& e)
 void ImageViewer::render_fit(gfx::Renderer& r, const SDL_FRect& vp)
 {
     FullTex* ft = acquire_full(*images_[index_]);
-    const uint64_t keep[1] = {images_[index_]->meta.data_offset};
+    const std::array<uint64_t, 1> keep{images_[index_]->meta.data_offset};
     evict_full_except(keep);
 
     if (!ft) {
@@ -404,22 +388,26 @@ void ImageViewer::render_strip(gfx::Renderer& r)
     const float extent = vertical ? strip.h : strip.w;
     const float scroll = strip_scroll_centered(index_, static_cast<int>(images_.size()),
                                                thumb, STRIP_GAP, extent);
-    r.draw_thumbnail_strip(thumbs, strip, thumb, STRIP_GAP, scroll, index_,
-                           gfx::theme::ACCENT, vertical);
+    r.draw_thumbnail_strip(thumbs, strip,
+                           gfx::ThumbnailStrip{.size = thumb, .gap = STRIP_GAP,
+                                               .scroll = scroll, .selected = index_,
+                                               .highlight = gfx::theme::ACCENT,
+                                               .vertical = vertical});
 }
 
 void ImageViewer::render_hud(gfx::Renderer& r, const SDL_FRect& vp)
 {
+    using enum ViewMode;
     if (!images_.empty()) {
-        const char* mode = (mode_ == ViewMode::FillScroll) ? "fill" : "fit";
-        const std::string hud = (mode_ == ViewMode::FillScroll)
+        const char* mode = (mode_ == FillScroll) ? "fill" : "fit";
+        const std::string hud = (mode_ == FillScroll)
             ? std::format("{}   {}/{}   {}", images_[index_]->name, index_ + 1,
                           images_.size(), mode)
             : std::format("{}   {}/{}   {}%", images_[index_]->name, index_ + 1,
                           images_.size(), static_cast<int>(zoom_ * 100.0f + 0.5f));
         r.draw_text(font_, vp.x + 16, vp.y + 12, hud, gfx::theme::TEXT);
     }
-    const char* legend = (mode_ == ViewMode::FillScroll)
+    const char* legend = (mode_ == FillScroll)
         ? "[Wheel] Scroll   [<-/->] Prev/Next   [F] Fit   [T] Strip side   [Esc] Back"
         : "[<-/->] Prev/Next   [Wheel/+/-] Zoom   [F] Fill-scroll   [T] Strip side   [Esc] Back";
     r.draw_text(font_, vp.x + 16, vp.y + 44, legend, gfx::theme::TEXT_FAINT);

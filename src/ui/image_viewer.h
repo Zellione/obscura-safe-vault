@@ -63,9 +63,6 @@ private:
     [[nodiscard]] SDL_FRect viewport_rect() const;
     [[nodiscard]] SDL_FRect strip_rect() const;
 
-    void toggle_strip_side();
-    void toggle_mode();
-
     void show_image_at(int idx);                    // absolute, clamped, refit
     void set_index(int delta);                      // wrap, reset view, rebuild
     void back_to_gallery();
@@ -82,7 +79,6 @@ private:
     // Decoded full-texture cache (bounded). Returns nullptr on decode failure.
     FullTex* acquire_full(const vault::IndexNode& node);
     void     evict_full_except(std::span<const uint64_t> keep);
-    void     clear_full_cache();
 
     SDL_Texture* thumb_texture(const vault::IndexNode& node);  // shared cache
     [[nodiscard]] int strip_hit(float mx, float my) const;     // thumb under cursor, or -1

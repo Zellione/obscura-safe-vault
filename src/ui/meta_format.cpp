@@ -11,7 +11,7 @@ std::string format_size(uint64_t bytes)
     if (bytes < 1024) return std::format("{} B", bytes);
 
     constexpr std::array<const char*, 3> units{"KB", "MB", "GB"};
-    double value = static_cast<double>(bytes);
+    auto value = static_cast<double>(bytes);
     size_t u = 0;
     value /= 1024.0;                                  // -> KB
     while (value >= 1024.0 && u + 1 < units.size()) {

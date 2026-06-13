@@ -13,7 +13,7 @@ class ScrollModel {
 public:
     // `scaled_heights[i]` = drawn height of image i at the current viewport
     // width. `viewport_h` = visible height. Negative heights are treated as 0.
-    ScrollModel(std::vector<float> scaled_heights, float viewport_h);
+    ScrollModel(const std::vector<float>& scaled_heights, float viewport_h);
 
     [[nodiscard]] int   count() const noexcept;
     [[nodiscard]] float total_height() const noexcept;

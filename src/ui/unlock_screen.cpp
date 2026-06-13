@@ -96,37 +96,42 @@ void UnlockScreen::handle_event(const SDL_Event& e)
         case SDL_EVENT_MOUSE_BUTTON_UP:
             if (e.button.button == SDL_BUTTON_LEFT) mouse_down_ = false;
             break;
-        case SDL_EVENT_MOUSE_BUTTON_DOWN: {
-            mouse_down_ = (e.button.button == SDL_BUTTON_LEFT);
-            mouse_x_ = e.button.x;
-            mouse_y_ = e.button.y;
-            const Layout L = layout();
-            if (const SDL_FPoint p{e.button.x, e.button.y};
-                point_in_rect(p.x, p.y, L.mode_btn)) {
-                create_mode_ = !create_mode_; focus_ = 0; error_.clear();
-                reveal_pw_ = false;
-            } else if (create_mode_ && point_in_rect(p.x, p.y, L.generate_btn)) {
-                // Fill both fields with one random passphrase and show it so
-                // the user can write it down before creating the vault.
-                if (generate_passphrase(pw_)) {
-                    confirm_.clear();
-                    confirm_.push_utf8(std::string_view(
-                        reinterpret_cast<const char*>(pw_.bytes().data()), pw_.length()));
-                    reveal_pw_ = true;
-                    error_.clear();
-                }
-            } else if (create_mode_ && point_in_rect(p.x, p.y, L.new_keyfile_btn)) {
-                pending_ = Pending::NewKeyfile; dlg_.save_keyfile(win_.sdl_window());
-            } else if (point_in_rect(p.x, p.y, L.keyfile_btn)) {
-                pending_ = Pending::Keyfile; dlg_.open_keyfile(win_.sdl_window());
-            } else if (point_in_rect(p.x, p.y, L.other_btn)) {
-                pending_ = Pending::Vault;   dlg_.open_vault(win_.sdl_window());
-            } else if (point_in_rect(p.x, p.y, L.submit_btn)) {
-                submit();
-            }
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            handle_click(e.button);
             break;
-        }
         default: break;
+    }
+}
+
+void UnlockScreen::handle_click(const SDL_MouseButtonEvent& b)
+{
+    mouse_down_ = (b.button == SDL_BUTTON_LEFT);
+    mouse_x_ = b.x;
+    mouse_y_ = b.y;
+
+    const Layout L = layout();
+    const SDL_FPoint p{b.x, b.y};
+    if (point_in_rect(p.x, p.y, L.mode_btn)) {
+        create_mode_ = !create_mode_; focus_ = 0; error_.clear();
+        reveal_pw_ = false;
+    } else if (create_mode_ && point_in_rect(p.x, p.y, L.generate_btn)) {
+        // Fill both fields with one random passphrase and show it so the user
+        // can write it down before creating the vault.
+        if (generate_passphrase(pw_)) {
+            confirm_.clear();
+            confirm_.push_utf8(std::string_view(
+                reinterpret_cast<const char*>(pw_.bytes().data()), pw_.length()));
+            reveal_pw_ = true;
+            error_.clear();
+        }
+    } else if (create_mode_ && point_in_rect(p.x, p.y, L.new_keyfile_btn)) {
+        pending_ = Pending::NewKeyfile; dlg_.save_keyfile(win_.sdl_window());
+    } else if (point_in_rect(p.x, p.y, L.keyfile_btn)) {
+        pending_ = Pending::Keyfile; dlg_.open_keyfile(win_.sdl_window());
+    } else if (point_in_rect(p.x, p.y, L.other_btn)) {
+        pending_ = Pending::Vault;   dlg_.open_vault(win_.sdl_window());
+    } else if (point_in_rect(p.x, p.y, L.submit_btn)) {
+        submit();
     }
 }
 

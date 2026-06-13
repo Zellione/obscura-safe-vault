@@ -95,8 +95,9 @@ TEST(renderer_draw_thumbnail_strip_runs_headless)
 
         const SDL_FRect strip{0, 96, 256, 32};
         const float content = rr.draw_thumbnail_strip(
-            thumbs, strip, /*thumb_size=*/28.0f, /*gap=*/4.0f,
-            /*scroll_x=*/10.0f, /*selected=*/2, gfx::Color{255, 255, 0, 255});
+            thumbs, strip,
+            gfx::ThumbnailStrip{.size = 28.0f, .gap = 4.0f, .scroll = 10.0f,
+                                .selected = 2, .highlight = {255, 255, 0, 255}});
 
         // 4 cells of 28 + 3 gaps of 4 = 124.
         CHECK_EQ(content, 124.0f);
