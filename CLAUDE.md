@@ -128,9 +128,10 @@ src/
   vault/     vault.h, header.*, index.*,  ← container format (Phase 2)
              chunk_store.*, vault.*
   image/     image.h, decode.*,           ← stb_image decode + thumbs (Phase 3)
-             thumbnail.*,                 ← format_registry + libwebp/libheif
+             thumbnail.*,                 ← format detection + libwebp/libheif
              format_registry.*,           ← decoders (Phase 9)
-             decode_webp.*, decode_heif.*
+             decoder.*,                   ← Decoder interface + DecoderRegistry
+             decode_webp.*, decode_heif.*    (polymorphic dispatch, Phase 9)
   gfx/       window.{h,cpp},             ← SDL3 window + renderer (Phase 0)
              renderer.{h,cpp},            ← texture cache, text atlas (Phase 4)
              texture_cache.*, text.*

@@ -3,6 +3,7 @@
 #include <stb_image.h>
 
 #include "image/decode.h"
+#include "image/decoder.h"
 #include "image/format_registry.h"
 
 namespace image {
@@ -31,19 +32,25 @@ std::optional<ImageData> decode_stb(std::span<const uint8_t> data, ImageFormat f
     return img;
 }
 
+// Last-resort decoder: stb handles JPEG/PNG/GIF/BMP/HDR (by magic) and TGA
+// (headerless). It claims every buffer, so it must be registered last.
+class StbDecoder final : public Decoder {
+public:
+    [[nodiscard]] bool can_decode(std::span<const uint8_t>) const noexcept override { return true; }
+    [[nodiscard]] std::optional<ImageData> decode(std::span<const uint8_t> data) const override
+    {
+        return decode_stb(data, detect_format(data));
+    }
+};
+
 } // namespace
+
+std::unique_ptr<Decoder> make_stb_decoder() { return std::make_unique<StbDecoder>(); }
 
 std::optional<ImageData> decode_from_memory(std::span<const uint8_t> data)
 {
     if (data.empty()) return std::nullopt;
-
-    const ImageFormat fmt = detect_format(data);
-    switch (fmt) {
-        case ImageFormat::WebP: return decode_webp_from_memory(data);
-        case ImageFormat::HEIC:
-        case ImageFormat::AVIF: return decode_heif_from_memory(data);
-        default:                return decode_stb(data, fmt);
-    }
+    return default_registry().decode(data);
 }
 
 } // namespace image

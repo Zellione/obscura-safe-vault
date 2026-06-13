@@ -12,7 +12,10 @@ src/
   vault/       vault.*, header.*, index.*,     — .osv container format
                chunk_store.*, byte_io.h, file_util.h
   image/       decode.*, thumbnail.*,          — stb_image decode, thumb gen
-               format_registry.*,              — magic-byte format detection/dispatch
+               format_registry.*,              — magic-byte format detection
+               decoder.*,                      — Decoder interface + DecoderRegistry
+                                                 (polymorphic dispatch; default_registry()
+                                                 wires WebP/HEIF/stb decoders)
                decode_webp.*, decode_heif.*    — libwebp (WebP), libheif (HEIC/AVIF)
   gfx/         window.*, renderer.*,           — SDL3 window/renderer, texture cache,
                texture_cache.*, text.*         — stb_truetype text atlas

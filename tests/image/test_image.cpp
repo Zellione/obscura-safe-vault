@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdio>
 #include <filesystem>
+#include <memory>
 #include <span>
 #include <string>
 #include <vector>
@@ -11,6 +12,7 @@
 #include <monocypher.h>
 
 #include "image/decode.h"
+#include "image/decoder.h"
 #include "image/format_registry.h"
 #include "image/thumbnail.h"
 #include "vault/vault.h"
@@ -136,6 +138,72 @@ TEST(detect_format_identifies_containers)
 
     const std::vector<uint8_t> mif1{0,0,0,0x18, 'f','t','y','p', 'm','i','f','1'};
     CHECK_EQ(detect_format(mif1), ImageFormat::HEIC);
+}
+
+// ---------------------------------------------------------------------------
+// Decoder registry — polymorphic dispatch
+// ---------------------------------------------------------------------------
+
+namespace {
+// Stand-in decoder that unconditionally claims (or declines) any buffer and
+// tags its output with a fixed format. Lets us assert dispatch order without
+// real codec data.
+class FakeDecoder final : public image::Decoder {
+public:
+    FakeDecoder(image::ImageFormat tag, bool claims) noexcept : tag_(tag), claims_(claims) {}
+
+    [[nodiscard]] bool can_decode(std::span<const uint8_t>) const noexcept override
+    {
+        return claims_;
+    }
+    [[nodiscard]] std::optional<image::ImageData> decode(std::span<const uint8_t>) const override
+    {
+        image::ImageData d;
+        d.width  = 1;
+        d.height = 1;
+        d.format = tag_;
+        d.pixels = {1, 2, 3};
+        return d;
+    }
+
+private:
+    image::ImageFormat tag_;
+    bool               claims_;
+};
+} // namespace
+
+TEST(registry_dispatches_to_first_decoder_that_claims_the_buffer)
+{
+    image::DecoderRegistry reg;
+    reg.add(std::make_unique<FakeDecoder>(image::ImageFormat::PNG,  false));  // declines
+    reg.add(std::make_unique<FakeDecoder>(image::ImageFormat::WebP, true));   // first to claim
+    reg.add(std::make_unique<FakeDecoder>(image::ImageFormat::JPEG, true));   // never reached
+
+    const std::array<uint8_t, 1> buf{0};
+    const auto out = reg.decode(buf);
+    REQUIRE(out.has_value());
+    CHECK_EQ(out->format, image::ImageFormat::WebP);
+}
+
+TEST(registry_returns_nullopt_when_no_decoder_claims_the_buffer)
+{
+    image::DecoderRegistry reg;
+    reg.add(std::make_unique<FakeDecoder>(image::ImageFormat::PNG, false));
+
+    const std::array<uint8_t, 1> buf{0};
+    CHECK_FALSE(reg.decode(buf).has_value());
+}
+
+TEST(default_registry_decodes_known_format)
+{
+    const auto reg = image::default_registry();
+    const auto buf = fixtures::solid_png(3, 4, 9, 9, 9);
+    REQUIRE(!buf.empty());
+    const auto img = reg.decode(buf);
+    REQUIRE(img.has_value());
+    CHECK_EQ(img->format, image::ImageFormat::PNG);
+    CHECK_EQ(img->width,  3);
+    CHECK_EQ(img->height, 4);
 }
 
 // ---------------------------------------------------------------------------
