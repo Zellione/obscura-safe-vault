@@ -134,7 +134,7 @@ ScrollModel ImageViewer::build_scroll_model() const
     std::vector<float> heights;
     heights.reserve(images_.size());
     for (const vault::IndexNode* n : images_) heights.push_back(scaled_height(*n, vp.w));
-    return ScrollModel(std::move(heights), vp.h);
+    return ScrollModel(heights, vp.h);
 }
 
 void ImageViewer::scroll_to_image(int idx)
