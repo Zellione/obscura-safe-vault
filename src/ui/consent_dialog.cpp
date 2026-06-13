@@ -50,7 +50,7 @@ void ConsentDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
     r.draw_round_rect({px, py, pw, ph}, RADIUS, DANGER, /*filled*/ false);
 
     auto centered = [&](const std::string& s, float y, gfx::Color c) {
-        const float tw = static_cast<float>(font.measure(s));
+        const auto tw = static_cast<float>(font.measure(s));
         r.draw_text(font, px + (pw - tw) / 2, y, s, c);
     };
 
