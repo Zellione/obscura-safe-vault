@@ -43,4 +43,38 @@ void draw_button(gfx::Renderer& r, gfx::FontAtlas& font, const Button& b,
 void draw_text_field(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& box,
                      std::string_view shown, bool focused);
 
+// Hover/active state for a button under the mouse. `active` (pressed) requires
+// the cursor to be over the button while the mouse button is held down.
+struct ButtonState { bool hover = false; bool active = false; };
+[[nodiscard]] ButtonState button_state(const SDL_FRect& rect, float mx, float my,
+                                        bool mouse_down) noexcept;
+
+// Truncate `name` in the middle with "..." so its measured width fits within
+// `max_w` px. `measure(string_view) -> int` returns the pixel width of a string
+// (e.g. FontAtlas::measure). Returns the name unchanged if it already fits, or
+// "" if even the ellipsis alone won't fit. Pure / unit-testable via a fake
+// measure (templated on the callable to avoid a std::function allocation).
+template <class Measure>
+[[nodiscard]] std::string elide_middle(std::string_view name, int max_w, Measure&& measure)
+{
+    if (measure(name) <= max_w) return std::string(name);
+
+    constexpr std::string_view ell = "...";
+    if (measure(ell) > max_w) return std::string();
+
+    // Shrink the kept character count, splitting evenly between head and tail
+    // (head gets the odd one), until the "head…tail" form fits.
+    const auto n = static_cast<int>(name.size());
+    for (int keep = n - 1; keep >= 0; --keep) {
+        const int head = (keep + 1) / 2;
+        const int tail = keep / 2;
+        std::string cand;
+        cand.append(name.substr(0, static_cast<size_t>(head)));
+        cand.append(ell);
+        cand.append(name.substr(static_cast<size_t>(n - tail)));
+        if (measure(cand) <= max_w) return cand;
+    }
+    return std::string(ell);
+}
+
 } // namespace ui

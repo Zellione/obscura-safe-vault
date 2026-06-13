@@ -7,6 +7,7 @@
 #include "crypto/kdf.h"
 #include "gfx/renderer.h"
 #include "gfx/text.h"
+#include "gfx/theme.h"
 #include "gfx/window.h"
 #include "platform/file_dialog.h"
 #include "platform/paths.h"
@@ -23,11 +24,11 @@ gfx::Color strength_color(Strength s)
 {
     using enum Strength;
     switch (s) {
-        case Medium: return {230, 200, 110, 255};
-        case Strong: return {130, 220, 140, 255};
+        case Medium: return gfx::theme::WARN;
+        case Strong: return gfx::theme::OK;
         case Weak:   break;
     }
-    return {230, 120, 120, 255};
+    return gfx::theme::DANGER;
 }
 
 } // namespace
@@ -88,34 +89,49 @@ void UnlockScreen::handle_event(const SDL_Event& e)
             }
             break;
         }
-        case SDL_EVENT_MOUSE_BUTTON_DOWN: {
-            const Layout L = layout();
-            if (const SDL_FPoint p{e.button.x, e.button.y};
-                point_in_rect(p.x, p.y, L.mode_btn)) {
-                create_mode_ = !create_mode_; focus_ = 0; error_.clear();
-                reveal_pw_ = false;
-            } else if (create_mode_ && point_in_rect(p.x, p.y, L.generate_btn)) {
-                // Fill both fields with one random passphrase and show it so
-                // the user can write it down before creating the vault.
-                if (generate_passphrase(pw_)) {
-                    confirm_.clear();
-                    confirm_.push_utf8(std::string_view(
-                        reinterpret_cast<const char*>(pw_.bytes().data()), pw_.length()));
-                    reveal_pw_ = true;
-                    error_.clear();
-                }
-            } else if (create_mode_ && point_in_rect(p.x, p.y, L.new_keyfile_btn)) {
-                pending_ = Pending::NewKeyfile; dlg_.save_keyfile(win_.sdl_window());
-            } else if (point_in_rect(p.x, p.y, L.keyfile_btn)) {
-                pending_ = Pending::Keyfile; dlg_.open_keyfile(win_.sdl_window());
-            } else if (point_in_rect(p.x, p.y, L.other_btn)) {
-                pending_ = Pending::Vault;   dlg_.open_vault(win_.sdl_window());
-            } else if (point_in_rect(p.x, p.y, L.submit_btn)) {
-                submit();
-            }
+        case SDL_EVENT_MOUSE_MOTION:
+            mouse_x_ = e.motion.x;
+            mouse_y_ = e.motion.y;
             break;
-        }
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+            if (e.button.button == SDL_BUTTON_LEFT) mouse_down_ = false;
+            break;
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            handle_click(e.button);
+            break;
         default: break;
+    }
+}
+
+void UnlockScreen::handle_click(const SDL_MouseButtonEvent& b)
+{
+    mouse_down_ = (b.button == SDL_BUTTON_LEFT);
+    mouse_x_ = b.x;
+    mouse_y_ = b.y;
+
+    const Layout L = layout();
+    const SDL_FPoint p{b.x, b.y};
+    if (point_in_rect(p.x, p.y, L.mode_btn)) {
+        create_mode_ = !create_mode_; focus_ = 0; error_.clear();
+        reveal_pw_ = false;
+    } else if (create_mode_ && point_in_rect(p.x, p.y, L.generate_btn)) {
+        // Fill both fields with one random passphrase and show it so the user
+        // can write it down before creating the vault.
+        if (generate_passphrase(pw_)) {
+            confirm_.clear();
+            confirm_.push_utf8(std::string_view(
+                reinterpret_cast<const char*>(pw_.bytes().data()), pw_.length()));
+            reveal_pw_ = true;
+            error_.clear();
+        }
+    } else if (create_mode_ && point_in_rect(p.x, p.y, L.new_keyfile_btn)) {
+        pending_ = Pending::NewKeyfile; dlg_.save_keyfile(win_.sdl_window());
+    } else if (point_in_rect(p.x, p.y, L.keyfile_btn)) {
+        pending_ = Pending::Keyfile; dlg_.open_keyfile(win_.sdl_window());
+    } else if (point_in_rect(p.x, p.y, L.other_btn)) {
+        pending_ = Pending::Vault;   dlg_.open_vault(win_.sdl_window());
+    } else if (point_in_rect(p.x, p.y, L.submit_btn)) {
+        submit();
     }
 }
 
@@ -203,22 +219,27 @@ void UnlockScreen::submit()
 
 void UnlockScreen::render(gfx::Renderer& r)
 {
+    using namespace gfx::theme;
     const auto W = static_cast<float>(win_.width());
     const auto H = static_cast<float>(win_.height());
 
-    r.draw_text(font_, 60, 50, create_mode_ ? "Create Vault" : "Unlock Vault",
-                gfx::Color{240, 240, 245, 255});
-    r.draw_text(font_, 60, 100, "Vault: " + vault_path_.string(),
-                gfx::Color{150, 150, 160, 255});
+    // Draw a button wired to live hover/active state.
+    auto btn = [&](const SDL_FRect& rect, std::string_view label) {
+        const ButtonState s = button_state(rect, mouse_x_, mouse_y_, mouse_down_);
+        draw_button(r, font_, {rect, std::string(label)}, s.hover, s.active);
+    };
+
+    r.draw_text(font_, 60, 44, create_mode_ ? "Create Vault" : "Unlock Vault", TEXT);
+    r.draw_text(font_, 60, 92, "Vault: " + vault_path_.string(), TEXT_DIM);
 
     const float fx = 60;
     const float fw = W - 120;
     const float fh = 44;
-    r.draw_text(font_, fx, 134, "Password", gfx::Color{150, 150, 160, 255});
+    r.draw_text(font_, fx, 126, "Password", TEXT_DIM);
     draw_text_field(r, font_, {fx, 160, fw, fh},
                     std::string(pw_.length(), '*'), !create_mode_ || focus_ == 0);
     if (create_mode_) {
-        r.draw_text(font_, fx, 234, "Confirm", gfx::Color{150, 150, 160, 255});
+        r.draw_text(font_, fx, 226, "Confirm", TEXT_DIM);
         draw_text_field(r, font_, {fx, 260, fw, fh},
                         std::string(confirm_.length(), '*'), focus_ == 1);
 
@@ -226,35 +247,32 @@ void UnlockScreen::render(gfx::Renderer& r)
         // user is committing to.
         if (!pw_.empty()) {
             const Strength s = classify_strength(pw_.bytes());
-            r.draw_text(font_, fx + 110, 134,
+            r.draw_text(font_, fx + 110, 126,
                         std::string("strength: ") += strength_label(s),
                         strength_color(s));
         }
 
         const Layout L0 = layout();
-        draw_button(r, font_, {L0.generate_btn, "Generate passphrase"}, false, false);
-        draw_button(r, font_, {L0.new_keyfile_btn, "New keyfile..."}, false, false);
+        btn(L0.generate_btn, "Generate passphrase");
+        btn(L0.new_keyfile_btn, "New keyfile...");
         if (reveal_pw_ && !pw_.empty()) {
             // string_view straight over the mlock'd buffer — no unlocked copy.
             r.draw_text(font_, fx, 372,
                         std::string_view(reinterpret_cast<const char*>(pw_.bytes().data()),
                                          pw_.length()),
                         gfx::Color{200, 210, 160, 255});
-            r.draw_text(font_, fx, 398, "Write this down, then press Create.",
-                        gfx::Color{150, 150, 160, 255});
+            r.draw_text(font_, fx, 398, "Write this down, then press Create.", TEXT_DIM);
         }
     }
 
     const Layout L = layout();
-    draw_button(r, font_, {L.keyfile_btn,
-                keyfile_path_.empty() ? "Keyfile: none" : "Keyfile: set"}, false, false);
-    draw_button(r, font_, {L.other_btn, "Open other..."}, false, false);
-    draw_button(r, font_, {L.mode_btn,
-                create_mode_ ? "Have a vault?" : "New vault?"}, false, false);
-    draw_button(r, font_, {L.submit_btn, create_mode_ ? "Create" : "Unlock"}, false, false);
+    btn(L.keyfile_btn, keyfile_path_.empty() ? "Keyfile: none" : "Keyfile: set");
+    btn(L.other_btn, "Open other...");
+    btn(L.mode_btn, create_mode_ ? "Have a vault?" : "New vault?");
+    btn(L.submit_btn, create_mode_ ? "Create" : "Unlock");
 
     if (!error_.empty())
-        r.draw_text(font_, 60, H - 70, error_, gfx::Color{230, 120, 120, 255});
+        r.draw_text(font_, 60, H - 70, error_, DANGER);
 }
 
 } // namespace ui

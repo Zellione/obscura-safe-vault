@@ -7,6 +7,8 @@
 #include "gfx/renderer.h"
 #include "gfx/text.h"
 #include "gfx/texture_cache.h"
+#include "gfx/theme.h"
+#include "ui/meta_format.h"
 #include "gfx/window.h"
 #include "image/decode.h"
 #include "platform/file_dialog.h"
@@ -21,10 +23,25 @@ namespace ui {
 namespace {
 constexpr float OX = 40;
 constexpr float OY = 160;
-constexpr float CELL = 160;
+constexpr float CELL = 188;     // tile side (slightly larger thumbnails)
 constexpr float GAP = 16;
+constexpr float ROW_H = 44;     // detailed-list row pitch (very small thumbnails)
+constexpr float LIST_HEADER = 30;  // column-header band above the list rows
+// Right-anchored metadata column widths (px) for the detailed list view.
+constexpr float COL_DIMS = 165;   // wide enough for the "DIMENSIONS" header
+constexpr float COL_SIZE = 100;
+constexpr float COL_TYPE = 70;
+constexpr float COL_DATE = 120;
 
-GridSpec grid_spec(int cols) noexcept { return {cols, CELL, GAP, OX, OY}; }
+// Centre the `cols` columns horizontally in a `win_w`-wide window so the left and
+// right margins match (never tighter than OX).
+GridSpec grid_spec(float win_w, int cols) noexcept
+{
+    const float used = static_cast<float>(cols) * CELL +
+                       static_cast<float>(cols > 0 ? cols - 1 : 0) * GAP;
+    const float ox = std::max(OX, (win_w - used) * 0.5f);
+    return {cols, CELL, GAP, ox, OY};
+}
 }
 
 GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
@@ -172,6 +189,11 @@ void GalleryGrid::handle_event(const SDL_Event& e)
 
     switch (e.type) {
         case SDL_EVENT_KEY_DOWN: {
+            using enum GalleryView;
+            if (e.key.key == SDLK_L) {   // toggle grid <-> detailed list view
+                view_ = (view_ == Grid) ? List : Grid;
+                break;
+            }
             using enum InputAction;
             switch (map_key(e.key.key, e.key.mod)) {
                 case NavLeft:    nav_.move(-1);     break;
@@ -187,10 +209,7 @@ void GalleryGrid::handle_event(const SDL_Event& e)
             break;
         }
         case SDL_EVENT_MOUSE_BUTTON_DOWN: {
-            if (const int idx = grid_hit(e.button.x, e.button.y,
-                                         static_cast<int>(children_.size()),
-                                         grid_spec(cols_));
-                idx >= 0) {
+            if (const int idx = hit_test(e.button.x, e.button.y); idx >= 0) {
                 nav_.select(idx);
                 open_selected();   // gallery → descend; image → open viewer
             }
@@ -214,52 +233,148 @@ void GalleryGrid::render(gfx::Renderer& r)
 {
     const auto W = static_cast<float>(win_.width());
     const auto H = static_cast<float>(win_.height());
-    cols_ = grid_columns(W - 2 * OX, CELL, GAP);
 
+    using namespace gfx::theme;
     std::string crumb = "/";
     for (const auto& s : nav_.segments()) { crumb += s; crumb += '/'; }
-    r.draw_text(font_, OX, 40, crumb, gfx::Color{200, 200, 210, 255});
-    r.draw_text(font_, OX, 90, "[I] Import   [N] New Gallery   [Enter] Open   [Esc] Up",
-                gfx::Color{120, 120, 130, 255});
+    r.draw_text(font_, OX, 40, crumb, TEXT_DIM);
+    r.draw_text(font_, OX, 90,
+                "[I] Import   [N] New Gallery   [Enter] Open   [Esc] Up   [L] List/Grid",
+                TEXT_FAINT);
 
-    for (size_t i = 0; i < children_.size(); ++i) {
-        const SDL_FRect cellr = grid_cell_rect(static_cast<int>(i), grid_spec(cols_));
-        const vault::IndexNode* n = children_[i];
-        const bool sel = (static_cast<int>(i) == nav_.selected());
-        r.draw_rect(cellr, sel ? gfx::Color{70, 70, 90, 255} : gfx::Color{45, 45, 55, 255});
-
-        if (n->is_gallery()) {
-            r.draw_rect({cellr.x + 30, cellr.y + 40, CELL - 60, CELL - 90},
-                        gfx::Color{200, 170, 90, 255});
-        } else if (SDL_Texture* tex = thumb_texture(*n)) {
-            float tw = 0;
-            float th = 0;
-            SDL_GetTextureSize(tex, &tw, &th);
-            r.draw_image(tex, fit_rect(tw, th, {cellr.x + 6, cellr.y + 6,
-                                                CELL - 12, CELL - 40}));
-        } else {
-            r.draw_text(font_, cellr.x + 10, cellr.y + CELL / 2 - 14, "(no thumb)",
-                        gfx::Color{150, 150, 160, 255});
-        }
-        r.draw_text(font_, cellr.x + 8, cellr.y + CELL - 30, n->name,
-                    gfx::Color{230, 230, 235, 255});
-        if (sel) r.draw_rect(cellr, gfx::Color{120, 80, 200, 255}, /*filled*/ false);
-    }
+    if (view_ == GalleryView::List) render_list(r, W, H);
+    else                            render_grid(r, W, H);
 
     if (!error_.empty())
-        r.draw_text(font_, OX, H - 36, error_, gfx::Color{230, 120, 120, 255});
+        r.draw_text(font_, OX, H - 36, error_, DANGER);
 
     if (naming_) {
         const float mw = W * 0.6f;
         const float mh = 120;
         const float mx = (W - mw) / 2;
         const float my = (H - mh) / 2;
-        r.draw_rect({mx, my, mw, mh}, gfx::Color{30, 30, 40, 255});
-        r.draw_rect({mx, my, mw, mh}, gfx::Color{120, 80, 200, 255}, /*filled*/ false);
-        r.draw_text(font_, mx + 16, my + 16, "New gallery name:",
-                    gfx::Color{220, 220, 225, 255});
+        r.draw_round_rect({mx, my, mw, mh}, RADIUS, SURFACE);
+        r.draw_round_rect({mx, my, mw, mh}, RADIUS, ACCENT, /*filled*/ false);
+        r.draw_text(font_, mx + 16, my + 16, "New gallery name:", TEXT);
         draw_text_field(r, font_, {mx + 16, my + 56, mw - 32, 44}, name_buf_, true);
     }
+}
+
+void GalleryGrid::render_grid(gfx::Renderer& r, float W, float /*H*/)
+{
+    using namespace gfx::theme;
+    cols_ = grid_columns(W - 2 * OX, CELL, GAP);
+    for (size_t i = 0; i < children_.size(); ++i) {
+        const SDL_FRect cellr = grid_cell_rect(static_cast<int>(i), grid_spec(W, cols_));
+        const vault::IndexNode* n = children_[i];
+        const bool sel = (static_cast<int>(i) == nav_.selected());
+        if (sel) r.draw_selection_glow(cellr, RADIUS, ACCENT);
+        r.draw_round_rect(cellr, RADIUS, sel ? SURFACE_HI : SURFACE);
+        r.draw_round_rect(cellr, RADIUS, sel ? ACCENT : BORDER, /*filled*/ false);
+
+        // Leave a 12px gap below the label so it never touches the tile border.
+        const float ph      = font_.pixel_height();
+        const float label_y = cellr.y + CELL - ph - 12.0f;
+        draw_tile_thumb(r, *n, {cellr.x + 6, cellr.y + 6,
+                                CELL - 12, label_y - cellr.y - 12.0f});
+        r.draw_text(font_, cellr.x + 8, label_y, fit_name(n->name, CELL - 16), TEXT);
+    }
+}
+
+void GalleryGrid::render_list(gfx::Renderer& r, float W, float /*H*/)
+{
+    using namespace gfx::theme;
+    cols_ = 1;   // up/down move one row at a time
+    const float rw    = W - 2 * OX;
+    const float right = OX + rw;
+
+    // Right-anchored metadata columns; the name column flexes to fill the rest.
+    const float dims_x = right - (COL_DIMS + COL_SIZE + COL_TYPE + COL_DATE);
+    const float size_x = dims_x + COL_DIMS;
+    const float type_x = size_x + COL_SIZE;
+    const float date_x = type_x + COL_TYPE;
+
+    // Column header + separator.
+    const float hy = font_.text_top_for_center(OY + (LIST_HEADER - 6) * 0.5f);
+    r.draw_text(font_, OX, hy, "NAME", TEXT_FAINT);
+    r.draw_text(font_, dims_x, hy, "DIMENSIONS", TEXT_FAINT);
+    r.draw_text(font_, size_x, hy, "SIZE", TEXT_FAINT);
+    r.draw_text(font_, type_x, hy, "TYPE", TEXT_FAINT);
+    r.draw_text(font_, date_x, hy, "DATE", TEXT_FAINT);
+    r.draw_rect({OX, OY + LIST_HEADER - 6, rw, 1.0f}, BORDER);
+
+    for (size_t i = 0; i < children_.size(); ++i) {
+        const vault::IndexNode* n = children_[i];
+        const auto& m  = n->meta;
+        const bool sel = (static_cast<int>(i) == nav_.selected());
+        const SDL_FRect row{OX, OY + LIST_HEADER + static_cast<float>(i) * ROW_H,
+                            rw, ROW_H - 6};
+        if (sel) {
+            r.draw_round_rect(row, RADIUS_SMALL, SURFACE_HI);
+            r.draw_round_rect(row, RADIUS_SMALL, ACCENT, /*filled*/ false);
+        }
+
+        const SDL_FRect thumb{row.x + 5, row.y + 5, row.h - 10, row.h - 10};
+        draw_tile_thumb(r, *n, thumb);
+
+        const float ty = font_.text_top_for_center(row.y + row.h * 0.5f);  // vertically centred
+        const float nx = thumb.x + thumb.w + 12;
+        r.draw_text(font_, nx, ty, fit_name(n->name, dims_x - nx - 10),
+                    sel ? TEXT : TEXT_DIM);
+
+        // Galleries have no image metadata; show a folder marker instead.
+        const gfx::Color meta_c = sel ? TEXT : TEXT_DIM;
+        if (n->is_gallery()) {
+            r.draw_text(font_, dims_x, ty, "-", meta_c);
+            r.draw_text(font_, size_x, ty, "-", meta_c);
+            r.draw_text(font_, type_x, ty, "DIR", meta_c);
+            r.draw_text(font_, date_x, ty, "-", meta_c);
+        } else {
+            r.draw_text(font_, dims_x, ty, format_dimensions(m.width, m.height), meta_c);
+            r.draw_text(font_, size_x, ty, format_size(m.orig_size), meta_c);
+            r.draw_text(font_, type_x, ty, image_format_name(m.format), meta_c);
+            r.draw_text(font_, date_x, ty, format_date(m.created_ts), meta_c);
+        }
+    }
+}
+
+void GalleryGrid::draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
+                                  const SDL_FRect& box)
+{
+    using namespace gfx::theme;
+    if (n.is_gallery()) {
+        const float ix = box.w * 0.18f;
+        r.draw_round_rect({box.x + ix, box.y + box.h * 0.28f,
+                           box.w - 2 * ix, box.h * 0.48f}, RADIUS_SMALL, FOLDER);
+        return;
+    }
+    r.draw_rect(box, gfx::Color{0, 0, 0, 255});   // black backing, never stretched
+    if (SDL_Texture* tex = thumb_texture(n)) {
+        float tw = 0;
+        float th = 0;
+        SDL_GetTextureSize(tex, &tw, &th);
+        r.draw_image(tex, fit_rect(tw, th, box));
+    } else {
+        r.draw_text(font_, box.x + 6, box.y + box.h * 0.5f - 14, "(no thumb)", TEXT_DIM);
+    }
+}
+
+int GalleryGrid::hit_test(float mx, float my) const
+{
+    const auto count = static_cast<int>(children_.size());
+    if (view_ == GalleryView::List) {
+        const float top = OY + LIST_HEADER;
+        if (mx < OX || mx > static_cast<float>(win_.width()) - OX || my < top) return -1;
+        const auto idx = static_cast<int>((my - top) / ROW_H);
+        return (idx >= 0 && idx < count) ? idx : -1;
+    }
+    return grid_hit(mx, my, count, grid_spec(static_cast<float>(win_.width()), cols_));
+}
+
+std::string GalleryGrid::fit_name(std::string_view name, float max_w) const
+{
+    return elide_middle(name, static_cast<int>(max_w),
+                        [this](std::string_view s) { return font_.measure(s); });
 }
 
 } // namespace ui

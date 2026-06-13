@@ -95,11 +95,36 @@ TEST(renderer_draw_thumbnail_strip_runs_headless)
 
         const SDL_FRect strip{0, 96, 256, 32};
         const float content = rr.draw_thumbnail_strip(
-            thumbs, strip, /*thumb_size=*/28.0f, /*gap=*/4.0f,
-            /*scroll_x=*/10.0f, /*selected=*/2, gfx::Color{255, 255, 0, 255});
+            thumbs, strip,
+            gfx::ThumbnailStrip{.size = 28.0f, .gap = 4.0f, .scroll = 10.0f,
+                                .selected = 2, .highlight = {255, 255, 0, 255}});
 
         // 4 cells of 28 + 3 gaps of 4 = 124.
         CHECK_EQ(content, 124.0f);
+    }
+}
+
+TEST(renderer_draw_round_rect_and_glow_run_headless)
+{
+    SoftRenderer sr;
+    REQUIRE(sr.r != nullptr);
+    {
+        gfx::Renderer rr(sr.r);
+
+        SDL_SetRenderDrawColor(sr.r, 0, 0, 0, 255);
+        SDL_RenderClear(sr.r);
+
+        // Filled + outlined rounded rects exercise the SDL_RenderGeometry and
+        // SDL_RenderLines paths; the glow stacks several outlines with blending.
+        rr.draw_round_rect(SDL_FRect{4, 4, 80, 40}, 10.0f, gfx::Color{120, 90, 220, 255});
+        rr.draw_round_rect(SDL_FRect{100, 4, 80, 40}, 10.0f,
+                           gfx::Color{200, 200, 210, 255}, /*filled*/ false);
+        // radius <= 0 falls through to a square rect.
+        rr.draw_round_rect(SDL_FRect{4, 60, 40, 40}, 0.0f, gfx::Color{40, 200, 80, 255});
+        rr.draw_selection_glow(SDL_FRect{100, 60, 40, 40}, 8.0f,
+                               gfx::Color{139, 124, 246, 255});
+
+        SDL_RenderPresent(sr.r);
     }
 }
 

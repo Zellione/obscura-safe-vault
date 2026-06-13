@@ -33,8 +33,23 @@ bool Window::init(const WindowConfig& cfg)
         return false;
     }
 
-    SDL_GetWindowSize(window_, &width_, &height_);
     return true;
+}
+
+int Window::width() const noexcept
+{
+    int w = 0;
+    int h = 0;
+    if (renderer_) SDL_GetCurrentRenderOutputSize(renderer_, &w, &h);
+    return w;
+}
+
+int Window::height() const noexcept
+{
+    int w = 0;
+    int h = 0;
+    if (renderer_) SDL_GetCurrentRenderOutputSize(renderer_, &w, &h);
+    return h;
 }
 
 void Window::shutdown()

@@ -4,6 +4,7 @@
 
 #include <span>
 #include <string_view>
+#include <vector>
 
 #include "gfx/color.h"
 #include "gfx/text.h"
@@ -20,6 +21,24 @@ thumbnail_strip_content_width(int count, float thumb_size, float gap) noexcept
            static_cast<float>(count - 1) * gap;
 }
 
+/// Outline polygon (closed loop) of a rounded rectangle: the 4 corners replaced
+/// by `segments`-step arcs. The loop touches all four rectangle edges, so its
+/// bounding box equals `dst`. `radius` is clamped to min(w,h)/2; radius <= 0
+/// yields the 4 plain corners. Pure / unit-testable. The renderer fans this into
+/// triangles (filled) or strokes it (outline).
+[[nodiscard]] std::vector<SDL_FPoint>
+round_rect_outline(const SDL_FRect& dst, float radius, int segments = 6);
+
+/// Parameters for draw_thumbnail_strip (grouped to keep the call signature small).
+struct ThumbnailStrip {
+    float size      = 0.0f;    // thumbnail side length (square cell)
+    float gap       = 0.0f;    // gap between cells
+    float scroll    = 0.0f;    // scroll offset along the long axis
+    int   selected  = -1;      // index of the highlighted cell
+    Color highlight {};        // selection-glow colour
+    bool  vertical  = false;   // lay out top-to-bottom instead of left-to-right
+};
+
 /// Higher-level draw operations over an SDL_Renderer. Does not own the renderer.
 class Renderer {
 public:
@@ -29,6 +48,15 @@ public:
 
     /// Fill (or outline) a rectangle in colour `c`.
     void draw_rect(const SDL_FRect& dst, Color c, bool filled = true);
+
+    /// Fill (or outline) a rounded rectangle of corner `radius` in colour `c`.
+    /// radius <= 0 falls through to a square draw_rect.
+    void draw_round_rect(const SDL_FRect& dst, float radius, Color c,
+                         bool filled = true);
+
+    /// Soft selection halo: a few progressively fainter rounded-rect outlines
+    /// just outside `dst`. No shaders / render targets.
+    void draw_selection_glow(const SDL_FRect& dst, float radius, Color accent);
 
     /// Draw the whole texture into `dst`, modulated by `tint`.
     void draw_image(SDL_Texture* tex, const SDL_FRect& dst, Color tint = {});
@@ -40,14 +68,13 @@ public:
     /// Draw `text` with its top-left at (x, y).
     void draw_text(FontAtlas& font, float x, float y, std::string_view text, Color c);
 
-    /// Lay out `thumbs` left-to-right inside `strip`, each fit into a
-    /// `thumb_size` square with `gap` between cells, horizontally scrolled by
-    /// `scroll_x`. The cell at index `selected` gets a `highlight` border.
-    /// Drawing is clipped to `strip`. Returns the content width (for scroll
-    /// clamping by the caller).
+    /// Lay out `thumbs` inside `strip`, each fit into a `ThumbnailStrip::size`
+    /// square with `gap` between cells, scrolled by `scroll` along the strip's
+    /// long axis (horizontal, or vertical when `vertical` is true). The cell at
+    /// index `selected` gets a `highlight` selection glow. Drawing is clipped to
+    /// `strip`. Returns the content length (for scroll clamping by the caller).
     float draw_thumbnail_strip(std::span<SDL_Texture* const> thumbs,
-                               const SDL_FRect& strip, float thumb_size, float gap,
-                               float scroll_x, int selected, Color highlight);
+                               const SDL_FRect& strip, const ThumbnailStrip& opts);
 
 private:
     SDL_Renderer* r_ = nullptr;

@@ -6,6 +6,7 @@
 #include <string>
 
 #include "gfx/renderer.h"
+#include "gfx/theme.h"
 #include "platform/paths.h"
 #include "ui/gallery_grid.h"
 #include "ui/image_viewer.h"
@@ -87,7 +88,7 @@ void App::run()
 
         if (screen_) screen_->update(dt);
 
-        window_.begin_frame(18, 18, 24);
+        window_.begin_frame(gfx::theme::BG.r, gfx::theme::BG.g, gfx::theme::BG.b);
         if (screen_) {
             gfx::Renderer r(window_.sdl_renderer());
             screen_->render(r);

@@ -18,9 +18,29 @@ src/
                                                  wires WebP/HEIF/stb decoders)
                decode_webp.*, decode_heif.*    — libwebp (WebP), libheif (HEIC/AVIF)
   gfx/         window.*, renderer.*,           — SDL3 window/renderer, texture cache,
-               texture_cache.*, text.*         — stb_truetype text atlas
-  ui/          unlock_screen.*, gallery_grid.* — UI screens
-               image_viewer.*, widgets.*
+               texture_cache.*, text.*,        — stb_truetype text atlas
+               theme.h                         — "Refined Slate" colour tokens +
+                                                 RADIUS consts; renderer has
+                                                 draw_round_rect / draw_selection_glow
+                                                 (round_rect_outline is pure/tested).
+                                                 Window::width()/height() are LIVE
+                                                 (SDL_GetCurrentRenderOutputSize, px) so
+                                                 layout reflows on resize. Font baked at
+                                                 28px; draw_text y = top, baseline=y+px;
+                                                 use FontAtlas::text_top_for_center to
+                                                 vertically centre text in a box.
+  ui/          unlock_screen.*, gallery_grid.* — UI screens; gallery has Grid +
+                                                 detailed List views (key L), live
+                                                 width reflow, centred/elided labels
+               image_viewer.*, widgets.*       — viewer has Fit + FillScroll modes,
+                                                 bottom/left strip toggle (keys F/T);
+                                                 widgets has button_state + elide_middle
+               strip_layout.*                  — orientation-aware strip geometry +
+                                                 half-size thumbnails (pure/tested)
+               scroll_model.*                  — fill-width continuous scroll maths
+                                                 (pure/tested)
+               meta_format.*                   — list-view metadata formatting:
+                                                 size/dimensions/date/type (pure/tested)
                input.*, nav_model.*, viewer_model.h
                passphrase.*, screen.h
                secure_text_field.*, unlock_logic.*

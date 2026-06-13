@@ -15,6 +15,11 @@
 ## Comments
 - Document *why*, not *what*. Non-obvious invariants and `// TODO(PhaseN):` only.
 
+## UI colours & drawing
+- Pull every colour from `gfx::theme` (theme.h) — do NOT hardcode inline `gfx::Color{...}` literals in screens/widgets.
+- Use `draw_round_rect` / `draw_selection_glow` for surfaces and selection; `theme::RADIUS` / `RADIUS_SMALL` for corner radii.
+- Keep pixel/layout maths in pure, headless, unit-tested helpers (e.g. `strip_layout`, `scroll_model`, `viewer_model.h`); screens own only SDL plumbing.
+
 ## Module boundaries
 - `src/crypto/` wraps Monocypher — no SDL or UI deps.
 - `src/vault/` depends on crypto only.

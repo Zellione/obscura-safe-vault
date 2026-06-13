@@ -6,6 +6,7 @@
 #include <stb_truetype.h>
 #pragma GCC diagnostic pop
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <print>
@@ -101,6 +102,29 @@ int FontAtlas::measure(std::string_view text) const noexcept
         width += static_cast<int>(std::lround(glyphs_[ch - FIRST_GLYPH].xadvance));
     }
     return width;
+}
+
+float FontAtlas::text_top_for_center(float center_y) const noexcept
+{
+    if (!baked_) return center_y - px_ * 0.5f;
+
+    // Real vertical ink extent relative to the baseline, across all glyphs:
+    // tops are negative (above baseline), bottoms positive (descenders below).
+    float top    = 0.0f;
+    float bottom = 0.0f;
+    bool  any    = false;
+    for (const BakedGlyph& g : glyphs_) {
+        if (g.x1 <= g.x0 || g.y1 <= g.y0) continue;  // skip blanks (e.g. space)
+        const float gtop = g.yoff;
+        const float gbot = g.yoff + static_cast<float>(g.y1 - g.y0);
+        if (!any) { top = gtop; bottom = gbot; any = true; }
+        else      { top = std::min(top, gtop); bottom = std::max(bottom, gbot); }
+    }
+    if (!any) return center_y - px_ * 0.5f;
+
+    // draw_text places the baseline at (y + px_); ink centre relative to the
+    // baseline is (top + bottom)/2. Solve for the y that centres ink on center_y.
+    return center_y - px_ - (top + bottom) * 0.5f;
 }
 
 bool FontAtlas::ensure_texture(SDL_Renderer* r)

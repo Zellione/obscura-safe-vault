@@ -35,6 +35,7 @@ private:
         SDL_FRect new_keyfile_btn;  // create mode only
     };
     [[nodiscard]] Layout layout() const;
+    void handle_click(const SDL_MouseButtonEvent& b);
     void submit();
     void apply_dialog_result(const std::string& path);
 
@@ -53,6 +54,11 @@ private:
     std::string           error_;
     Pending               pending_   = Pending::None;
     bool                  reveal_pw_ = false;  // show a freshly generated passphrase
+
+    // Mouse tracking for button hover/active states.
+    float                 mouse_x_    = -1.0f;
+    float                 mouse_y_    = -1.0f;
+    bool                  mouse_down_ = false;
 };
 
 } // namespace ui

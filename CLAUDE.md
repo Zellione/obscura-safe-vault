@@ -134,11 +134,15 @@ src/
              decode_webp.*, decode_heif.*    (polymorphic dispatch, Phase 9)
   gfx/       window.{h,cpp},             ← SDL3 window + renderer (Phase 0)
              renderer.{h,cpp},            ← texture cache, text atlas (Phase 4)
-             texture_cache.*, text.*
+             texture_cache.*, text.*,
+             theme.h                      ← "Refined Slate" colour tokens (UI overhaul)
   ui/        input.h,                    ← input abstraction (Phase 5)
              unlock_screen.*,             ← unlock + create vault (Phase 5)
              gallery_grid.*,              ← breadcrumb grid (Phase 5)
-             image_viewer.*,              ← zoom/pan + thumb strip (Phase 6)
+             image_viewer.*,              ← zoom/pan + thumb strip + fill-scroll
+             strip_layout.*,              ← orientation-aware strip geometry (UI overhaul)
+             scroll_model.*,              ← fill-width continuous scroll maths (UI overhaul)
+             meta_format.*,               ← list-view metadata formatting (UI overhaul)
              widgets.*
   platform/  paths.{h,cpp},              ← config dir + file dialogs (Phase 5)
              file_dialog.*

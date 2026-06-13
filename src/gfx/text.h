@@ -64,6 +64,11 @@ public:
     /// Characters outside the printable-ASCII range are skipped.
     [[nodiscard]] int measure(std::string_view text) const noexcept;
 
+    /// The `y` to pass to draw_text so a single line's rendered ink is vertically
+    /// centred on `center_y`. Uses the baked glyphs' real vertical extents, so it
+    /// is correct regardless of the nominal pixel height / baseline convention.
+    [[nodiscard]] float text_top_for_center(float center_y) const noexcept;
+
     /// Draw `text` with its top-left at (x, y), tinted `c`. Uploads the atlas
     /// texture lazily on first call. Returns false if not baked or upload fails.
     [[nodiscard]] bool draw_text(SDL_Renderer* r, float x, float y,
