@@ -208,6 +208,26 @@ TEST(tags_set_tags_normalisation)
     CHECK_EQ(children[0]->tags[1], "Sunset");
 }
 
+// Normalisation trims SURROUNDING whitespace only — interior spaces are part of
+// the tag (so multi-word tags like "new york" survive). The tag editor relies
+// on this contract rather than stripping spaces itself.
+TEST(tags_preserve_interior_whitespace)
+{
+    TempVault tv("interior_ws");
+    auto img = pattern(1000, 5);
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", img, "pic.jpg") == vault::VaultResult::Ok);
+
+    REQUIRE(v.add_tag("pic.jpg", "  new york  ") == vault::VaultResult::Ok);
+
+    auto children = v.list("");
+    REQUIRE(children[0]->tags.size() == 1);
+    CHECK_EQ(children[0]->tags[0], "new york");  // surrounding trimmed, interior kept
+}
+
 TEST(tags_tag_cascade_global)
 {
     TempVault tv("cascade_global");

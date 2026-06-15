@@ -1,7 +1,6 @@
 #include "ui/tag_editor.h"
 
 #include <algorithm>
-#include <cctype>
 
 #include "gfx/renderer.h"
 #include "gfx/text.h"
@@ -100,13 +99,14 @@ bool TagEditor::handle_event(const SDL_Event& e)
 
         case SDLK_RETURN:
         case SDLK_KP_ENTER: {
-            // Trim and add the new tag
-            std::string trimmed;
-            for (char c : new_tag_buf_) {
-                if (!std::isspace(static_cast<unsigned char>(c))) {
-                    trimmed += c;
-                }
-            }
+            // Trim only SURROUNDING whitespace so multi-word tags ("new york")
+            // survive; the vault owns the canonical normalisation/dedup.
+            const auto first = new_tag_buf_.find_first_not_of(" \t\n\r");
+            const std::string trimmed =
+                first == std::string::npos
+                    ? std::string{}
+                    : new_tag_buf_.substr(first,
+                          new_tag_buf_.find_last_not_of(" \t\n\r") - first + 1);
 
             if (!trimmed.empty()) {
                 using enum vault::VaultResult;
