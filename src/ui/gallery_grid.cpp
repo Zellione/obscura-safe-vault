@@ -281,7 +281,7 @@ void GalleryGrid::handle_event(const SDL_Event& e)
     // Overlays take input in priority order: search > tag_editor > consent/naming
     if (search_.active()) {
         if (search_.handle_event(e)) {
-            const Nav nav = search_.take_nav();
+            Nav nav = search_.take_nav();
             if (nav.kind != NavKind::None) request(nav.kind, std::move(nav.path), nav.index);
         }
         return;

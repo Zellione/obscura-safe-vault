@@ -5,7 +5,6 @@
 #include <string>
 #include <vector>
 
-#include "ui/nav_model.h"
 #include "ui/screen.h"
 #include "vault/vault.h"
 
@@ -43,7 +42,11 @@ public:
     void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
 
 private:
-    void refresh_results();  // rebuild the result list based on query_ and scope_
+    void refresh_results();        // rebuild the result list based on query_ and scope_
+    void cycle_scope();            // Both -> Images -> Galleries -> Both
+    void move_selection(int delta); // clamp the highlighted row
+    void activate_selected();      // turn the highlighted result into a nav request
+    [[nodiscard]] Nav nav_for_image(const vault::SearchHit& hit) const;
 
     vault::Vault&                  vault_;
     gfx::Window&                   win_;

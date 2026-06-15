@@ -4,7 +4,6 @@
 #include <array>
 #include <chrono>
 #include <cstring>
-#include <functional>
 #include <utility>
 
 #include "crypto/aead.h"
@@ -149,7 +148,7 @@ std::vector<std::string> normalise_tags(const std::vector<std::string>& input)
             }
         }
         if (!found) {
-            out.push_back(std::string(trimmed));
+            out.emplace_back(trimmed);
         }
     }
     return out;
@@ -174,6 +173,57 @@ std::vector<std::string> compute_effective_tags(const std::vector<std::string>& 
         }
     }
     return out;
+}
+
+// --- search helpers (Phase 12) --------------------------------------------
+
+bool node_in_scope(const IndexNode& n, SearchScope scope)
+{
+    using enum SearchScope;
+    return n.is_gallery() ? (scope == Galleries || scope == Both)
+                          : (scope == Images || scope == Both);
+}
+
+// True if `query` is a case-insensitive substring of the name or any effective tag.
+bool node_matches(std::string_view name, std::string_view query,
+                  const std::vector<std::string>& effective)
+{
+    if (ci_contains(name, query)) return true;
+    for (const auto& t : effective)
+        if (ci_contains(t, query)) return true;
+    return false;
+}
+
+std::string join_child_path(std::string_view prefix, std::string_view name)
+{
+    if (prefix.empty()) return std::string(name);
+    return std::string(prefix) + "/" + std::string(name);
+}
+
+// Walk the tree, accumulating ancestor-gallery tags as `inherited`, collecting
+// in-scope nodes that match `query`. Gallery tags cascade to descendants here.
+void search_dfs(const IndexNode& node, std::string_view prefix,
+                const std::vector<std::string>& inherited,
+                std::string_view query, SearchScope scope,
+                std::vector<SearchHit>& out)
+{
+    for (const auto& child : node.children) {
+        auto              effective = compute_effective_tags(child.tags, inherited);
+        const std::string full_path = join_child_path(prefix, child.name);
+
+        if (node_in_scope(child, scope) && node_matches(child.name, query, effective)) {
+            out.push_back(SearchHit{
+                .path           = full_path,
+                .is_gallery     = child.is_gallery(),
+                .name           = child.name,
+                .effective_tags = effective,
+                .node           = &child,
+            });
+        }
+
+        if (child.is_gallery())
+            search_dfs(child, full_path, effective, query, scope, out);
+    }
 }
 
 } // namespace
@@ -610,7 +660,7 @@ VaultResult Vault::add_tag(std::string_view node_path, std::string_view tag)
     }
 
     // Not found, add it.
-    node->tags.push_back(std::string(trimmed));
+    node->tags.emplace_back(trimmed);
     return commit_index();
 }
 
@@ -638,67 +688,12 @@ VaultResult Vault::remove_tag(std::string_view node_path, std::string_view tag)
 
 std::vector<SearchHit> Vault::search(std::string_view query, SearchScope scope) const
 {
-    using enum SearchScope;
     std::vector<SearchHit> out;
     if (!unlocked_) return out;
 
-    // Helper to recursively walk the tree, passing down inherited tags from galleries.
-    // path_prefix is the current path (without trailing '/').
-    std::function<void(const IndexNode&, std::string_view, const std::vector<std::string>&)>
-    dfs = [&](const IndexNode& node, std::string_view path_prefix,
-              const std::vector<std::string>& inherited_tags) {
-        for (const auto& child : node.children) {
-            // Compute the effective tags: child's tags + inherited tags.
-            auto effective = compute_effective_tags(child.tags, inherited_tags);
-
-            // Build the full path for this child.
-            std::string full_path;
-            if (path_prefix.empty()) {
-                full_path = child.name;
-            } else {
-                full_path = std::string(path_prefix) + "/" + child.name;
-            }
-
-            // Check if the child matches the query.
-            bool matches_name = ci_contains(child.name, query);
-            bool matches_tag = false;
-            for (const auto& t : effective) {
-                if (ci_contains(t, query)) {
-                    matches_tag = true;
-                    break;
-                }
-            }
-            bool matches = matches_name || matches_tag;
-
-            // Determine if this node is in scope.
-            bool in_scope = false;
-            if (child.is_gallery()) {
-                in_scope = (scope == Galleries || scope == Both);
-            } else {
-                in_scope = (scope == Images || scope == Both);
-            }
-
-            // Add to results if in scope and matches.
-            if (in_scope && matches) {
-                out.push_back(SearchHit{
-                    .path            = full_path,
-                    .is_gallery      = child.is_gallery(),
-                    .name            = child.name,
-                    .effective_tags  = effective,
-                    .node            = &child,
-                });
-            }
-
-            // Recurse into galleries, passing down their tags as inherited.
-            if (child.is_gallery()) {
-                dfs(child, full_path, effective);
-            }
-        }
-    };
-
-    // Start the DFS from the root, with root's tags as globally inherited.
-    dfs(root_, "", root_.tags);
-
+    // Seed inherited tags with the root's own tags so they cascade globally; the
+    // unnamed root itself is never a hit.
+    search_dfs(root_, "", root_.tags, query, scope, out);
     return out;
 }
 

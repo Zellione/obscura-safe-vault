@@ -1,6 +1,8 @@
 #include "ui/tag_editor.h"
 
 #include <algorithm>
+#include <string>
+#include <string_view>
 
 #include "gfx/renderer.h"
 #include "gfx/text.h"
@@ -20,6 +22,15 @@ constexpr float PAD = 16.0f;
 constexpr float INPUT_BOX_H = 40.0f;
 constexpr float TAG_ROW_H = 32.0f;
 constexpr float TAG_LIST_GAP = 6.0f;
+
+// Trim surrounding ASCII whitespace only; interior spaces are kept so multi-word
+// tags survive (the vault performs the canonical normalisation/dedup).
+std::string trim_surrounding(std::string_view s)
+{
+    const auto first = s.find_first_not_of(" \t\n\r");
+    if (first == std::string_view::npos) return {};
+    return std::string(s.substr(first, s.find_last_not_of(" \t\n\r") - first + 1));
+}
 }
 
 void TagEditor::open(std::string node_path)
@@ -101,14 +112,7 @@ bool TagEditor::handle_event(const SDL_Event& e)
         case SDLK_KP_ENTER: {
             // Trim only SURROUNDING whitespace so multi-word tags ("new york")
             // survive; the vault owns the canonical normalisation/dedup.
-            const auto first = new_tag_buf_.find_first_not_of(" \t\n\r");
-            const std::string trimmed =
-                first == std::string::npos
-                    ? std::string{}
-                    : new_tag_buf_.substr(first,
-                          new_tag_buf_.find_last_not_of(" \t\n\r") - first + 1);
-
-            if (!trimmed.empty()) {
+            if (const std::string trimmed = trim_surrounding(new_tag_buf_); !trimmed.empty()) {
                 using enum vault::VaultResult;
                 switch (vault_.add_tag(node_path_, trimmed)) {
                     case Ok:
@@ -148,16 +152,12 @@ bool TagEditor::handle_event(const SDL_Event& e)
             // Delete the selected tag
             if (selected_ >= 0 && selected_ < static_cast<int>(tags_.size())) {
                 const std::string tag_to_remove = tags_[selected_];
-                using enum vault::VaultResult;
-                switch (vault_.remove_tag(node_path_, tag_to_remove)) {
-                    case Ok:
-                        refresh_tags();
-                        selected_ = std::min(selected_, static_cast<int>(tags_.size()) - 1);
-                        error_.clear();
-                        break;
-                    default:
-                        error_ = "Failed to remove tag.";
-                        break;
+                if (vault_.remove_tag(node_path_, tag_to_remove) == vault::VaultResult::Ok) {
+                    refresh_tags();
+                    selected_ = std::min(selected_, static_cast<int>(tags_.size()) - 1);
+                    error_.clear();
+                } else {
+                    error_ = "Failed to remove tag.";
                 }
             }
             return true;
@@ -206,7 +206,7 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
 
     const float tags_start = list_y + 24;
     for (int i = 0; i < static_cast<int>(tags_.size()); ++i) {
-        const float row_y = tags_start + i * (TAG_ROW_H + TAG_LIST_GAP);
+        const float row_y = tags_start + static_cast<float>(i) * (TAG_ROW_H + TAG_LIST_GAP);
         if (row_y + TAG_ROW_H > my + MODAL_H - 50) break;
 
         const SDL_FRect tag_rect{mx + PAD, row_y, MODAL_W - 2 * PAD, TAG_ROW_H};

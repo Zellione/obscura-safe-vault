@@ -58,34 +58,22 @@ std::vector<std::string> tokenize(std::string_view query)
     return tokens;
 }
 
+// True if `token` is a case-insensitive substring of any tag.
+static bool any_tag_contains(const std::vector<std::string>& tags, std::string_view token)
+{
+    for (const auto& tag : tags)
+        if (contains_ci(tag, token)) return true;
+    return false;
+}
+
 bool matches(const std::vector<std::string>& tokens, std::string_view name,
              const std::vector<std::string>& tags)
 {
-    // Empty token list matches everything.
-    if (tokens.empty()) return true;
-
-    // Every token must appear in name or at least one tag.
+    // Every token must appear in the name or at least one tag (AND semantics).
+    // An empty token list matches everything.
     for (const auto& token : tokens) {
-        bool found = false;
-
-        // Check name
-        if (contains_ci(name, token)) {
-            found = true;
-        }
-
-        // Check tags
-        if (!found) {
-            for (const auto& tag : tags) {
-                if (contains_ci(tag, token)) {
-                    found = true;
-                    break;
-                }
-            }
-        }
-
-        if (!found) return false;  // Token not found anywhere
+        if (!contains_ci(name, token) && !any_tag_contains(tags, token)) return false;
     }
-
     return true;
 }
 
@@ -93,35 +81,17 @@ int score(const std::vector<std::string>& tokens, std::string_view name,
           const std::vector<std::string>& tags)
 {
     // Return 0 if not all tokens match (consistency with matches()).
-    if (!matches(tokens, name, tags)) {
-        return 0;
-    }
+    if (!matches(tokens, name, tags)) return 0;
 
+    constexpr int name_weight = 2;
+    constexpr int tag_weight  = 1;
+
+    // Name matches outrank tag-only matches; a token can score in both fields.
     int total_score = 0;
-    const int name_weight = 2;
-    const int tag_weight = 1;
-
-    // For each token, accumulate score based on where it matches.
     for (const auto& token : tokens) {
-        bool found_in_name = contains_ci(name, token);
-        bool found_in_tags = false;
-
-        for (const auto& tag : tags) {
-            if (contains_ci(tag, token)) {
-                found_in_tags = true;
-                break;
-            }
-        }
-
-        // Contribute to score: name match is worth more, and both can add.
-        if (found_in_name) {
-            total_score += name_weight;
-        }
-        if (found_in_tags) {
-            total_score += tag_weight;
-        }
+        if (contains_ci(name, token))        total_score += name_weight;
+        if (any_tag_contains(tags, token))   total_score += tag_weight;
     }
-
     return total_score;
 }
 
