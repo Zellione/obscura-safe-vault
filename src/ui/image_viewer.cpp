@@ -29,7 +29,7 @@ ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& v
                          gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
                          std::string gallery_path, int start_index)
     : win_(win), font_(font), vault_(vault), cache_(cache), export_(folder_dlg, win),
-      gallery_path_(std::move(gallery_path)), index_(start_index),
+      tag_editor_(vault, win), gallery_path_(std::move(gallery_path)), index_(start_index),
       full_cache_(vault, win.sdl_renderer())
 {
 }
@@ -214,6 +214,14 @@ void ImageViewer::handle_key(SDL_Keycode key)
             if (!images_.empty())
                 export_.begin(std::format("Export \"{}\"?", images_[index_]->name));
             return;
+        case SDLK_G:      // edit tags for the current image
+            if (!images_.empty()) {
+                const std::string full_path = gallery_path_.empty()
+                    ? images_[index_]->name
+                    : gallery_path_ + "/" + images_[index_]->name;
+                tag_editor_.open(full_path);
+            }
+            return;
         case SDLK_ESCAPE: back_to_gallery(); return;
         default: break;
     }
@@ -290,6 +298,12 @@ void ImageViewer::update(double dt)
 
 void ImageViewer::handle_event(const SDL_Event& e)
 {
+    // Tag editor takes priority
+    if (tag_editor_.active()) {
+        (void)tag_editor_.handle_event(e);
+        return;
+    }
+
     // The export consent modal owns all input while it is up.
     if (export_.modal_active()) {
         if (e.type == SDL_EVENT_KEY_DOWN) export_.consume_key(e.key.key);
@@ -407,8 +421,8 @@ void ImageViewer::render_hud(gfx::Renderer& r, const SDL_FRect& vp)
         r.draw_text(font_, vp.x + 16, vp.y + 12, hud, gfx::theme::TEXT);
     }
     const char* legend = (mode_ == FillScroll)
-        ? "[Wheel] Scroll   [<-/->] Prev/Next   [F] Fit   [T] Strip   [P] Slideshow   [X] Export   [Esc] Back"
-        : "[<-/->] Prev/Next   [Wheel/+/-] Zoom   [F] Fill-scroll   [T] Strip   [P] Slideshow   [X] Export   [Esc] Back";
+        ? "[Wheel] Scroll   [<-/->] Prev/Next   [F] Fit   [T] Strip   [P] Slideshow   [G] Tags   [X] Export   [Esc] Back"
+        : "[<-/->] Prev/Next   [Wheel/+/-] Zoom   [F] Fill-scroll   [T] Strip   [P] Slideshow   [G] Tags   [X] Export   [Esc] Back";
     r.draw_text(font_, vp.x + 16, vp.y + 44, legend, gfx::theme::TEXT_FAINT);
 
     if (!export_.status().empty())
@@ -436,6 +450,8 @@ void ImageViewer::render(gfx::Renderer& r)
 
     export_.render(r, font_, static_cast<float>(win_.width()),
                    static_cast<float>(win_.height()));
+    tag_editor_.render(r, font_, static_cast<float>(win_.width()),
+                       static_cast<float>(win_.height()));
 }
 
 } // namespace ui

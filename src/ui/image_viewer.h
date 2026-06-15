@@ -11,6 +11,7 @@
 #include "ui/scroll_model.h"
 #include "ui/slideshow_view.h"
 #include "ui/strip_layout.h"
+#include "ui/tag_editor.h"
 #include "ui/viewer_model.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
@@ -92,6 +93,7 @@ private:
     vault::Vault&           vault_;
     gfx::TextureCache&      cache_;
     ExportUi                export_;
+    TagEditor               tag_editor_;
     std::string             gallery_path_;
     std::vector<const vault::IndexNode*> images_;
     int   index_ = 0;

@@ -51,7 +51,7 @@ GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& v
                          gfx::TextureCache& cache, platform::FileDialog& dlg,
                          platform::FolderDialog& folder_dlg, GridLocation at)
     : win_(win), font_(font), vault_(vault), cache_(cache), dlg_(dlg),
-      folder_dlg_(folder_dlg),
+      folder_dlg_(folder_dlg), search_(vault, win), tag_editor_(vault, win),
       initial_path_(std::move(at.path)), initial_sel_(at.selected)
 {
 }
@@ -198,6 +198,22 @@ void GalleryGrid::finish_naming()
     refresh();
 }
 
+void GalleryGrid::start_search()
+{
+    search_.open();
+}
+
+void GalleryGrid::start_tag_editor()
+{
+    const int s = nav_.selected();
+    if (s < 0 || s >= static_cast<int>(children_.size())) return;
+
+    const vault::IndexNode* n = children_[s];
+    const std::string base = nav_.path();
+    const std::string full_path = base.empty() ? n->name : base + "/" + n->name;
+    tag_editor_.open(full_path);
+}
+
 SDL_Texture* GalleryGrid::thumb_texture(const vault::IndexNode& node)
 {
     if (node.meta.thumb_length == 0) return nullptr;
@@ -240,6 +256,8 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
     if (key.key == SDLK_L) { view_ = (view_ == Grid) ? List : Grid; return; }
     if (key.key == SDLK_X) { start_export(); return; }   // export selection
     if (key.key == SDLK_SPACE) { toggle_or_open(); return; }
+    if (key.key == SDLK_SLASH) { start_search(); return; }  // search (/)
+    if (key.key == SDLK_G) { start_tag_editor(); return; }  // tag editor (G)
 
     using enum InputAction;
     switch (map_key(key.key, key.mod)) {
@@ -260,6 +278,20 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
 
 void GalleryGrid::handle_event(const SDL_Event& e)
 {
+    // Overlays take input in priority order: search > tag_editor > consent/naming
+    if (search_.active()) {
+        if (search_.handle_event(e)) {
+            const Nav nav = search_.take_nav();
+            if (nav.kind != NavKind::None) request(nav.kind, std::move(nav.path), nav.index);
+        }
+        return;
+    }
+
+    if (tag_editor_.active()) {
+        (void)tag_editor_.handle_event(e);
+        return;
+    }
+
     // The export consent modal owns all input while it is up.
     if (consent_.active()) {
         if (e.type == SDL_EVENT_KEY_DOWN &&
@@ -308,8 +340,8 @@ void GalleryGrid::render(gfx::Renderer& r)
     for (const auto& s : nav_.segments()) { crumb += s; crumb += '/'; }
     r.draw_text(font_, OX, 40, crumb, TEXT_DIM);
     r.draw_text(font_, OX, 90,
-                "[I] Import  [N] New  [Enter] Open  [Space] Select  [X] Export  "
-                "[Esc] Back  [L] List/Grid",
+                "[I] Import  [N] New  [/] Search  [G] Tags  [Enter] Open  [Space] Select  "
+                "[X] Export  [Esc] Back  [L] List/Grid",
                 TEXT_FAINT);
 
     if (!sel_.empty())
@@ -335,6 +367,9 @@ void GalleryGrid::render(gfx::Renderer& r)
         r.draw_text(font_, mx + 16, my + 16, "New gallery name:", TEXT);
         draw_text_field(r, font_, {mx + 16, my + 56, mw - 32, 44}, name_buf_, true);
     }
+
+    search_.render(r, font_, W, H);
+    tag_editor_.render(r, font_, W, H);
 }
 
 void GalleryGrid::render_grid(gfx::Renderer& r, float W, float /*H*/)
