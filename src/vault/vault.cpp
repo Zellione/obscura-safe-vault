@@ -4,6 +4,7 @@
 #include <array>
 #include <chrono>
 #include <cstring>
+#include <functional>
 #include <utility>
 
 #include "crypto/aead.h"
@@ -80,6 +81,99 @@ void for_each_image(NodeT& n, Fn&& fn)
         return;
     }
     for (auto& c : n.children) for_each_image(c, fn);
+}
+
+// Trim ASCII whitespace from start and end of a string_view.
+std::string_view trim_ws(std::string_view s)
+{
+    size_t start = 0;
+    while (start < s.size() && (s[start] == ' ' || s[start] == '\t' ||
+                                 s[start] == '\n' || s[start] == '\r')) ++start;
+    size_t end = s.size();
+    while (end > start && (s[end - 1] == ' ' || s[end - 1] == '\t' ||
+                            s[end - 1] == '\n' || s[end - 1] == '\r')) --end;
+    return s.substr(start, end - start);
+}
+
+// Case-insensitive comparison of strings.
+bool ci_equal(std::string_view a, std::string_view b)
+{
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        auto to_lower = [](char c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; };
+        if (to_lower(a[i]) != to_lower(b[i])) return false;
+    }
+    return true;
+}
+
+// Case-insensitive substring check.
+bool ci_contains(std::string_view haystack, std::string_view needle)
+{
+    if (needle.empty()) return true;
+    if (needle.size() > haystack.size()) return false;
+    auto to_lower = [](char c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; };
+    for (size_t i = 0; i <= haystack.size() - needle.size(); ++i) {
+        bool match = true;
+        for (size_t j = 0; j < needle.size(); ++j) {
+            if (to_lower(haystack[i + j]) != to_lower(needle[j])) {
+                match = false;
+                break;
+            }
+        }
+        if (match) return true;
+    }
+    return false;
+}
+
+// Normalise a single tag: trim whitespace, return empty_view if empty after trim.
+std::string_view normalise_tag(std::string_view tag)
+{
+    return trim_ws(tag);
+}
+
+// Normalise and deduplicate a list of tags (case-insensitively, keeping first
+// occurrence's casing). Empties and whitespace-only tags are dropped.
+std::vector<std::string> normalise_tags(const std::vector<std::string>& input)
+{
+    std::vector<std::string> out;
+    for (const auto& tag : input) {
+        auto trimmed = normalise_tag(tag);
+        if (trimmed.empty()) continue;
+
+        // Check for case-insensitive duplicate.
+        bool found = false;
+        for (const auto& existing : out) {
+            if (ci_equal(existing, trimmed)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            out.push_back(std::string(trimmed));
+        }
+    }
+    return out;
+}
+
+// Build effective_tags: union of node's own tags and inherited tags, case-insensitively
+// de-duplicated, preserving the node's own tags' casing first.
+std::vector<std::string> compute_effective_tags(const std::vector<std::string>& node_tags,
+                                                const std::vector<std::string>& inherited_tags)
+{
+    std::vector<std::string> out = node_tags;
+    for (const auto& inh : inherited_tags) {
+        bool found = false;
+        for (const auto& own : node_tags) {
+            if (ci_equal(own, inh)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            out.push_back(inh);
+        }
+    }
+    return out;
 }
 
 } // namespace
@@ -304,6 +398,38 @@ VaultResult Vault::change_password(std::span<const uint8_t> old_password,
 IndexNode*       Vault::find_gallery(std::string_view p)       { return resolve_gallery(&root_, p); }
 const IndexNode* Vault::find_gallery(std::string_view p) const { return resolve_gallery(&root_, p); }
 
+// Resolve a path to any node (gallery or image). The final segment may be either.
+// Intermediate segments must be galleries.
+template <typename NodeT>
+NodeT* resolve_node_impl(NodeT* root, std::string_view path)
+{
+    auto segments = split_path(path);
+    if (segments.empty()) return root;  // Empty path -> root.
+
+    NodeT* cur = root;
+    // All but the last segment must be galleries.
+    for (size_t i = 0; i < segments.size() - 1; ++i) {
+        NodeT* next = nullptr;
+        for (auto& child : cur->children) {
+            if (child.is_gallery() && child.name == segments[i]) {
+                next = &child;
+                break;
+            }
+        }
+        if (!next) return nullptr;
+        cur = next;
+    }
+
+    // The last segment can be any node.
+    for (auto& child : cur->children) {
+        if (child.name == segments.back()) return &child;
+    }
+    return nullptr;
+}
+
+IndexNode*       Vault::resolve_node(std::string_view path)       { return resolve_node_impl(&root_, path); }
+const IndexNode* Vault::resolve_node(std::string_view path) const { return resolve_node_impl(&root_, path); }
+
 VaultResult Vault::create_gallery(std::string_view gallery_path)
 {
     using enum VaultResult;
@@ -447,6 +573,132 @@ std::vector<const IndexNode*> Vault::list(std::string_view gallery_path) const
     if (!g) return out;
     out.reserve(g->children.size());
     for (const auto& c : g->children) out.push_back(&c);
+    return out;
+}
+
+VaultResult Vault::set_tags(std::string_view node_path, const std::vector<std::string>& tags)
+{
+    using enum VaultResult;
+    if (!unlocked_) return Locked;
+
+    IndexNode* node = resolve_node(node_path);
+    if (!node) return NotFound;
+
+    auto normalised = normalise_tags(tags);
+
+    // Only commit if the tags changed.
+    if (node->tags == normalised) return Ok;
+
+    node->tags = std::move(normalised);
+    return commit_index();
+}
+
+VaultResult Vault::add_tag(std::string_view node_path, std::string_view tag)
+{
+    using enum VaultResult;
+    if (!unlocked_) return Locked;
+
+    auto trimmed = normalise_tag(tag);
+    if (trimmed.empty()) return InvalidArg;
+
+    IndexNode* node = resolve_node(node_path);
+    if (!node) return NotFound;
+
+    // Check for case-insensitive duplicate.
+    for (const auto& existing : node->tags) {
+        if (ci_equal(existing, trimmed)) return Ok;
+    }
+
+    // Not found, add it.
+    node->tags.push_back(std::string(trimmed));
+    return commit_index();
+}
+
+VaultResult Vault::remove_tag(std::string_view node_path, std::string_view tag)
+{
+    using enum VaultResult;
+    if (!unlocked_) return Locked;
+
+    auto trimmed = normalise_tag(tag);
+    if (trimmed.empty()) return Ok;  // Idempotent: removing nonexistent empty tag is Ok.
+
+    IndexNode* node = resolve_node(node_path);
+    if (!node) return NotFound;
+
+    // Find and remove the tag case-insensitively.
+    for (auto it = node->tags.begin(); it != node->tags.end(); ++it) {
+        if (ci_equal(*it, trimmed)) {
+            node->tags.erase(it);
+            return commit_index();
+        }
+    }
+
+    return Ok;  // Idempotent: tag not found.
+}
+
+std::vector<SearchHit> Vault::search(std::string_view query, SearchScope scope) const
+{
+    using enum SearchScope;
+    std::vector<SearchHit> out;
+    if (!unlocked_) return out;
+
+    // Helper to recursively walk the tree, passing down inherited tags from galleries.
+    // path_prefix is the current path (without trailing '/').
+    std::function<void(const IndexNode&, std::string_view, const std::vector<std::string>&)>
+    dfs = [&](const IndexNode& node, std::string_view path_prefix,
+              const std::vector<std::string>& inherited_tags) {
+        for (const auto& child : node.children) {
+            // Compute the effective tags: child's tags + inherited tags.
+            auto effective = compute_effective_tags(child.tags, inherited_tags);
+
+            // Build the full path for this child.
+            std::string full_path;
+            if (path_prefix.empty()) {
+                full_path = child.name;
+            } else {
+                full_path = std::string(path_prefix) + "/" + child.name;
+            }
+
+            // Check if the child matches the query.
+            bool matches_name = ci_contains(child.name, query);
+            bool matches_tag = false;
+            for (const auto& t : effective) {
+                if (ci_contains(t, query)) {
+                    matches_tag = true;
+                    break;
+                }
+            }
+            bool matches = matches_name || matches_tag;
+
+            // Determine if this node is in scope.
+            bool in_scope = false;
+            if (child.is_gallery()) {
+                in_scope = (scope == Galleries || scope == Both);
+            } else {
+                in_scope = (scope == Images || scope == Both);
+            }
+
+            // Add to results if in scope and matches.
+            if (in_scope && matches) {
+                out.push_back(SearchHit{
+                    .path            = full_path,
+                    .is_gallery      = child.is_gallery(),
+                    .name            = child.name,
+                    .effective_tags  = effective,
+                    .node            = &child,
+                });
+            }
+
+            // Recurse into galleries, passing down their tags as inherited.
+            if (child.is_gallery()) {
+                dfs(child, full_path, effective);
+            }
+        }
+    };
+
+    // Start the DFS from the root, with root's tags as globally inherited.
+    dfs(root_, "", root_.tags);
+
     return out;
 }
 
