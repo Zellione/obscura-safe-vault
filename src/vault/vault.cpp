@@ -188,10 +188,8 @@ bool node_in_scope(const IndexNode& n, SearchScope scope)
 bool node_matches(std::string_view name, std::string_view query,
                   const std::vector<std::string>& effective)
 {
-    if (ci_contains(name, query)) return true;
-    for (const auto& t : effective)
-        if (ci_contains(t, query)) return true;
-    return false;
+    return ci_contains(name, query) ||
+           std::ranges::any_of(effective, [&](const auto& t) { return ci_contains(t, query); });
 }
 
 std::string join_child_path(std::string_view prefix, std::string_view name)

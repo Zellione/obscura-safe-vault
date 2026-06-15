@@ -1,5 +1,6 @@
 #include "ui/search_model.h"
 
+#include <algorithm>
 #include <cctype>
 
 namespace ui {
@@ -61,9 +62,7 @@ std::vector<std::string> tokenize(std::string_view query)
 // True if `token` is a case-insensitive substring of any tag.
 static bool any_tag_contains(const std::vector<std::string>& tags, std::string_view token)
 {
-    for (const auto& tag : tags)
-        if (contains_ci(tag, token)) return true;
-    return false;
+    return std::ranges::any_of(tags, [&](const auto& tag) { return contains_ci(tag, token); });
 }
 
 bool matches(const std::vector<std::string>& tokens, std::string_view name,
@@ -71,10 +70,9 @@ bool matches(const std::vector<std::string>& tokens, std::string_view name,
 {
     // Every token must appear in the name or at least one tag (AND semantics).
     // An empty token list matches everything.
-    for (const auto& token : tokens) {
-        if (!contains_ci(name, token) && !any_tag_contains(tags, token)) return false;
-    }
-    return true;
+    return std::ranges::all_of(tokens, [&](const auto& token) {
+        return contains_ci(name, token) || any_tag_contains(tags, token);
+    });
 }
 
 int score(const std::vector<std::string>& tokens, std::string_view name,
