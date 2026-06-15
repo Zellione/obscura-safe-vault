@@ -26,6 +26,7 @@ static IndexNode make_image(const std::string& name, uint64_t off, uint64_t len)
 static bool nodes_equal(const IndexNode& a, const IndexNode& b)
 {
     if (a.type != b.type || a.name != b.name) return false;
+    if (a.tags != b.tags) return false;
     if (a.type == IndexNode::Type::Image) {
         const auto& x = a.meta;
         const auto& y = b.meta;
@@ -129,4 +130,149 @@ TEST(index_deserialize_rejects_garbage)
     std::vector<uint8_t> garbage = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     IndexNode out;
     CHECK_FALSE(vault::deserialize_index(garbage, out));
+}
+
+TEST(index_image_tags_roundtrip)
+{
+    IndexNode root = IndexNode::gallery("");
+    IndexNode img = make_image("photo.png", 777, 888);
+    img.tags.push_back("vacation");
+    img.tags.push_back("beach");
+    img.tags.push_back("2024");
+    root.children.push_back(std::move(img));
+
+    std::vector<uint8_t> blob;
+    vault::serialize_index(root, blob);
+
+    IndexNode out;
+    REQUIRE(vault::deserialize_index(blob, out));
+    REQUIRE(out.children.size() == 1);
+    const auto& tags = out.children[0].tags;
+    REQUIRE(tags.size() == 3);
+    CHECK_EQ(tags[0], std::string("vacation"));
+    CHECK_EQ(tags[1], std::string("beach"));
+    CHECK_EQ(tags[2], std::string("2024"));
+}
+
+TEST(index_gallery_tags_roundtrip)
+{
+    IndexNode root = IndexNode::gallery("");
+    IndexNode gal = IndexNode::gallery("my_gallery");
+    gal.tags.push_back("important");
+    gal.tags.push_back("archived");
+    root.children.push_back(std::move(gal));
+
+    std::vector<uint8_t> blob;
+    vault::serialize_index(root, blob);
+
+    IndexNode out;
+    REQUIRE(vault::deserialize_index(blob, out));
+    REQUIRE(out.children.size() == 1);
+    const auto& tags = out.children[0].tags;
+    REQUIRE(tags.size() == 2);
+    CHECK_EQ(tags[0], std::string("important"));
+    CHECK_EQ(tags[1], std::string("archived"));
+}
+
+TEST(index_nested_tree_with_tags_roundtrips)
+{
+    IndexNode root = IndexNode::gallery("");
+    root.tags.push_back("root_tag");
+
+    IndexNode a = IndexNode::gallery("vacation");
+    a.tags.push_back("gal_tag");
+    IndexNode b = IndexNode::gallery("2024");
+    b.tags.push_back("year");
+    b.children.push_back(make_image("beach.png", 4096, 9000));
+    b.children[0].tags.push_back("img_tag");
+    a.children.push_back(std::move(b));
+    root.children.push_back(std::move(a));
+
+    std::vector<uint8_t> blob;
+    vault::serialize_index(root, blob);
+
+    IndexNode out;
+    REQUIRE(vault::deserialize_index(blob, out));
+    CHECK_TRUE(nodes_equal(root, out));
+}
+
+TEST(index_deserialize_v1_blob_has_empty_tags)
+{
+    // Hand-crafted version 1 blob: magic 0x01, then a gallery node
+    // type=0x00, name_len=0x00 0x00, 0 children (u32=0x00 0x00 0x00 0x00)
+    std::vector<uint8_t> v1_blob = {
+        0x01,                          // INDEX_VERSION = 1
+        0x00,                          // type = Gallery
+        0x00, 0x00,                    // name_len = 0
+        0x00, 0x00, 0x00, 0x00        // child_count = 0
+    };
+
+    IndexNode out;
+    REQUIRE(vault::deserialize_index(v1_blob, out));
+    CHECK_EQ(out.type, IndexNode::Type::Gallery);
+    CHECK_EQ(out.name, std::string(""));
+    CHECK_TRUE(out.tags.empty());
+    CHECK_TRUE(out.children.empty());
+}
+
+TEST(index_deserialize_v1_gallery_with_v1_image_child)
+{
+    // Hand-crafted version 1 blob: gallery with one image child
+    std::vector<uint8_t> v1_blob = {
+        0x01,                                      // INDEX_VERSION = 1
+        0x00,                                      // type = Gallery
+        0x00, 0x00,                                // name_len = 0
+        0x01, 0x00, 0x00, 0x00,                   // child_count = 1
+        // Child image node:
+        0x01,                                      // type = Image
+        0x04, 0x00,                                // name_len = 4
+        'p', 'i', 'c', '.',                        // name = "pic."
+        0x01,                                      // format = PNG
+        0x00, 0x00, 0x00, 0x00,                   // width = 0
+        0x00, 0x00, 0x00, 0x00,                   // height = 0
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // orig_size
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // created_ts
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // data_offset
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // data_length
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // thumb_offset
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // thumb_length
+    };
+
+    IndexNode out;
+    REQUIRE(vault::deserialize_index(v1_blob, out));
+    CHECK_EQ(out.type, IndexNode::Type::Gallery);
+    CHECK_TRUE(out.tags.empty());
+    REQUIRE(out.children.size() == 1);
+    CHECK_EQ(out.children[0].type, IndexNode::Type::Image);
+    CHECK_EQ(out.children[0].name, std::string("pic."));
+    CHECK_TRUE(out.children[0].tags.empty());
+}
+
+TEST(index_deserialize_rejects_future_version)
+{
+    // Blob with version 0xFF (unknown future version)
+    std::vector<uint8_t> future_blob = {
+        0xFF,                          // version = 255 (unknown)
+        0x00,                          // type = Gallery
+        0x00, 0x00,                    // name_len = 0
+        0x00, 0x00, 0x00, 0x00        // child_count = 0
+    };
+
+    IndexNode out;
+    CHECK_FALSE(vault::deserialize_index(future_blob, out));
+}
+
+TEST(index_deserialize_rejects_hostile_tag_count)
+{
+    // Blob claiming massive tag count but with truncated tag data
+    std::vector<uint8_t> hostile_blob = {
+        0x02,                          // version = 2 (tags version)
+        0x00,                          // type = Gallery
+        0x00, 0x00,                    // name_len = 0
+        0xFF, 0xFF,                    // tag_count = 65535 (but no tag data follows)
+        0x00, 0x00, 0x00, 0x00        // child_count = 0 (never reached)
+    };
+
+    IndexNode out;
+    CHECK_FALSE(vault::deserialize_index(hostile_blob, out));
 }

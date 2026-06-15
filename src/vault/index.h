@@ -52,8 +52,9 @@ struct ImageMeta {
 struct IndexNode {
     enum class Type : uint8_t { Gallery = 0, Image = 1 };
 
-    Type        type = Type::Gallery;
-    std::string name;
+    Type                       type = Type::Gallery;
+    std::string                name;
+    std::vector<std::string>   tags;  // per-node tags (Phase 12)
 
     // Gallery payload (meaningful when type == Gallery).
     std::vector<IndexNode> children;
@@ -82,11 +83,14 @@ struct IndexNode {
 };
 
 // Current serialised-blob version (first byte of the blob).
-inline constexpr uint8_t INDEX_VERSION = 1;
+inline constexpr uint8_t INDEX_VERSION = 2;
 
 // Maximum tree depth accepted on deserialisation — guards against stack overflow
 // from a deeply-nested hostile blob.
 inline constexpr uint32_t INDEX_MAX_DEPTH = 128;
+
+// Maximum tags per node — prevents OOM/DoS from a malicious tag_count (Phase 12).
+inline constexpr uint16_t INDEX_MAX_TAGS = 4096;
 
 // Serialise the whole tree rooted at `root` into `out` (cleared first).
 void serialize_index(const IndexNode& root, std::vector<uint8_t>& out);

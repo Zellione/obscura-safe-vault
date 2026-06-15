@@ -189,10 +189,14 @@ TEST(fuzz_index_deserialize_survives_3000_malformed_blobs)
 {
     Prng rng(0xDEADBEEF);
 
-    // Valid serialised tree as a mutation base.
+    // Valid serialised tree as a mutation base. Add tags to exercise Phase 12 parsing.
     vault::IndexNode root = vault::IndexNode::gallery("");
+    root.tags.push_back("root_tag");
     root.children.push_back(vault::IndexNode::gallery("a"));
+    root.children[0].tags.push_back("gal_tag");
+    root.children[0].tags.push_back("another");
     root.children[0].children.push_back(vault::IndexNode::image("i.jpg"));
+    root.children[0].children[0].tags.push_back("img_tag");
     root.children[0].children[0].meta.data_offset = 4096;
     root.children[0].children[0].meta.data_length = 1234;
     std::vector<uint8_t> valid;

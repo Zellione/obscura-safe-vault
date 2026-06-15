@@ -21,6 +21,18 @@ void write_node(ByteWriter& w, const IndexNode& node)
     w.bytes(std::span<const uint8_t>(
         reinterpret_cast<const uint8_t*>(name.data()), name_len));
 
+    // Write tags (Phase 12): tag_count (u16) + per-tag (tag_len u16 + bytes).
+    // Clamp tag_count to INDEX_MAX_TAGS; clamp each tag_len to 0xFFFF.
+    const uint16_t tag_count = node.tags.size() > INDEX_MAX_TAGS ? INDEX_MAX_TAGS
+                                                                 : static_cast<uint16_t>(node.tags.size());
+    w.u16(tag_count);
+    for (uint16_t i = 0; i < tag_count; ++i) {
+        const auto& tag = node.tags[i];
+        const uint16_t tag_len = tag.size() > 0xFFFF ? 0xFFFF : static_cast<uint16_t>(tag.size());
+        w.u16(tag_len);
+        w.bytes(std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(tag.data()), tag_len));
+    }
+
     if (node.type == IndexNode::Type::Gallery) {
         w.u32(static_cast<uint32_t>(node.children.size()));
         for (const auto& child : node.children) write_node(w, child);
@@ -39,8 +51,8 @@ void write_node(ByteWriter& w, const IndexNode& node)
 }
 
 // Returns false on malformed input. Depth-limited to guard against stack
-// overflow from a deeply nested blob.
-bool read_node(ByteReader& r, IndexNode& node, uint32_t depth)
+// overflow from a deeply nested blob. Version-aware: reads tags only if version >= 2.
+bool read_node(ByteReader& r, IndexNode& node, uint32_t depth, uint8_t version)
 {
     if (depth > INDEX_MAX_DEPTH) return false;
 
@@ -60,6 +72,25 @@ bool read_node(ByteReader& r, IndexNode& node, uint32_t depth)
         if (!r.ok()) return false;
     }
 
+    // Read tags (Phase 12) only if version >= 2. Otherwise leave tags empty.
+    node.tags.clear();
+    if (version >= 2) {
+        const uint16_t tag_count = r.u16();
+        if (!r.ok()) return false;
+        if (tag_count > INDEX_MAX_TAGS) return false;
+        for (uint16_t i = 0; i < tag_count; ++i) {
+            if (!r.ok()) return false;  // bail early on malformed input
+            const uint16_t tag_len = r.u16();
+            if (!r.ok()) return false;
+            std::string tag(tag_len, '\0');
+            if (tag_len > 0) {
+                r.bytes(std::span<uint8_t>(reinterpret_cast<uint8_t*>(tag.data()), tag_len));
+                if (!r.ok()) return false;
+            }
+            node.tags.push_back(std::move(tag));
+        }
+    }
+
     if (node.type == IndexNode::Type::Gallery) {
         const uint32_t child_count = r.u32();
         if (!r.ok()) return false;
@@ -67,7 +98,7 @@ bool read_node(ByteReader& r, IndexNode& node, uint32_t depth)
         for (uint32_t i = 0; i < child_count; ++i) {
             if (!r.ok()) return false;  // bail early — don't spin on a bogus count
             IndexNode child;
-            if (!read_node(r, child, depth + 1)) return false;
+            if (!read_node(r, child, depth + 1, version)) return false;
             node.children.push_back(std::move(child));
         }
     } else {
@@ -99,8 +130,11 @@ void serialize_index(const IndexNode& root, std::vector<uint8_t>& out)
 bool deserialize_index(std::span<const uint8_t> in, IndexNode& out)
 {
     ByteReader r(in);
-    if (const uint8_t version = r.u8(); !r.ok() || version != INDEX_VERSION) return false;
-    if (!read_node(r, out, 0)) return false;
+    const uint8_t version = r.u8();
+    if (!r.ok()) return false;
+    // Accept version 1 (no tags) and version 2 (with tags). Reject unknown versions.
+    if (version < 1 || version > INDEX_VERSION) return false;
+    if (!read_node(r, out, 0, version)) return false;
     // Trailing bytes after a well-formed tree indicate corruption.
     return r.remaining() == 0;
 }
