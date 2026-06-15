@@ -150,6 +150,9 @@ src/
              consent_dialog.*,            ← modal "export anyway?" confirm (Phase 10)
              export_ui.*,                 ← shared consent+folder-pick plumbing (Phase 10)
              export.*,                    ← decrypt→write-verbatim→wipe (Phase 10)
+             search_model.*,              ← pure query tokenise/match/rank (Phase 12)
+             search_overlay.*,            ← `/` live-filtered search modal (Phase 12)
+             tag_editor.*,                ← `G` add/remove tags modal (Phase 12)
              widgets.*
   platform/  paths.{h,cpp},              ← config dir + file dialogs (Phase 5)
              file_dialog.*,
