@@ -83,7 +83,9 @@ private:
     std::unordered_set<uint64_t> inflight_;   // submitted, result not yet taken
     bool                         stop_       = false;
     uint32_t                     wake_event_ = 0;
-    std::jthread                 thread_;
+    // std::thread (not jthread): jthread is absent from AppleClang's libc++. The
+    // destructor explicitly signals stop + joins, so the RAII guarantee holds.
+    std::thread                  thread_;
 };
 
 } // namespace image
