@@ -4,8 +4,7 @@
 
 #include <vector>
 
-#include "ui/nav_model.h"
-#include "ui/screen.h"
+#include "ui/favorites_screen.h"
 #include "vault/vault.h"   // vault::SearchHit
 
 namespace gfx { class Window; class FontAtlas; class Renderer; }
@@ -16,24 +15,21 @@ namespace ui {
 // A flat grid of every favorited *gallery* across the whole vault (Phase 13).
 // Activating one navigates to that gallery in the normal grid. Reached from the
 // gallery grid with Shift+F; Esc/Backspace returns to the root gallery.
-class FavoritesGalleries : public Screen {
+class FavoritesGalleries : public FavoritesScreen {
 public:
-    FavoritesGalleries(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault);
+    FavoritesGalleries(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault)
+        : FavoritesScreen(win, font, vault) {}
 
-    void on_enter() override;
-    void handle_event(const SDL_Event& e) override;
-    void render(gfx::Renderer& r) override;
-
-private:
-    void open_selected();
-    [[nodiscard]] int hit_test(float mx, float my) const;
-
-    gfx::Window&    win_;
-    gfx::FontAtlas& font_;
-    vault::Vault&   vault_;
-    NavModel        nav_;   // selection only (no path stack used here)
-    std::vector<vault::SearchHit> favs_;
-    int             cols_ = 1;
+protected:
+    [[nodiscard]] std::vector<vault::SearchHit> fetch() const override;
+    void draw_tile_content(gfx::Renderer& r, const vault::SearchHit& hit,
+                           const SDL_FRect& box) override;
+    void activate(const vault::SearchHit& hit) override;
+    [[nodiscard]] const char* title() const override { return "Favorite Galleries"; }
+    [[nodiscard]] const char* empty_hint() const override
+    {
+        return "No favorite galleries yet. Press [B] on a gallery tile to bookmark it.";
+    }
 };
 
 } // namespace ui
