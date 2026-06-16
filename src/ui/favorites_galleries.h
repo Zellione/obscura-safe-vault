@@ -17,8 +17,7 @@ namespace ui {
 // gallery grid with Shift+F; Esc/Backspace returns to the root gallery.
 class FavoritesGalleries : public FavoritesScreen {
 public:
-    FavoritesGalleries(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault)
-        : FavoritesScreen(win, font, vault) {}
+    using FavoritesScreen::FavoritesScreen;
 
 protected:
     [[nodiscard]] std::vector<vault::SearchHit> fetch() const override;

@@ -12,7 +12,7 @@ namespace ui {
 
 std::vector<vault::SearchHit> FavoritesImages::fetch() const
 {
-    return vault_.list_favorite_images();
+    return vault_ref().list_favorite_images();
 }
 
 void FavoritesImages::update(double)
@@ -31,7 +31,7 @@ void FavoritesImages::activate(const vault::SearchHit& hit)
         home = join_path(segs);
     }
     int viewer_index = 0;
-    const auto siblings = vault_.list(home);
+    const auto siblings = vault_ref().list(home);
     for (size_t i = 0; i < siblings.size(); ++i) {
         if (siblings[i] == hit.node) { viewer_index = static_cast<int>(i); break; }
     }
@@ -46,7 +46,7 @@ SDL_Texture* FavoritesImages::thumb_texture(const vault::IndexNode& node)
 
     if (failed_.contains(key) || worker_.pending(key)) return nullptr;
     crypto::SecureBytes sb;
-    if (vault_.read_thumbnail(node, sb) != vault::VaultResult::Ok) return nullptr;
+    if (vault_ref().read_thumbnail(node, sb) != vault::VaultResult::Ok) return nullptr;
     worker_.submit(key, std::move(sb));
     return nullptr;
 }
@@ -75,7 +75,7 @@ void FavoritesImages::draw_tile_content(gfx::Renderer& r, const vault::SearchHit
         SDL_GetTextureSize(tex, &tw, &th);
         r.draw_image(tex, fit_rect(tw, th, box));
     } else {
-        r.draw_text(font_, box.x + 6, box.y + box.h * 0.5f - 14, "(no thumb)",
+        r.draw_text(font_ref(), box.x + 6, box.y + box.h * 0.5f - 14, "(no thumb)",
                     gfx::theme::TEXT_DIM);
     }
 }

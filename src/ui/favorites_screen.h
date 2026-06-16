@@ -37,16 +37,22 @@ protected:
 
     void reload();   // re-fetch favs_ + reset selection + seed cols_
 
+    // Accessors for the two collaborators subclasses need (the data members stay
+    // private — see S3656). Named with a `_ref` suffix so `vault_ref()` doesn't
+    // shadow the `vault` namespace inside the class.
+    [[nodiscard]] gfx::FontAtlas& font_ref()  const noexcept { return font_; }
+    [[nodiscard]] vault::Vault&   vault_ref() const noexcept { return vault_; }
+
+private:
+    void open_selected();
+    [[nodiscard]] int hit_test(float mx, float my) const;
+
     gfx::Window&    win_;
     gfx::FontAtlas& font_;
     vault::Vault&   vault_;
     NavModel        nav_;   // selection only (no path stack used here)
     std::vector<vault::SearchHit> favs_;
     int             cols_ = 1;
-
-private:
-    void open_selected();
-    [[nodiscard]] int hit_test(float mx, float my) const;
 };
 
 } // namespace ui

@@ -7,7 +7,7 @@ namespace ui {
 
 std::vector<vault::SearchHit> FavoritesGalleries::fetch() const
 {
-    return vault_.list_favorite_galleries();
+    return vault_ref().list_favorite_galleries();
 }
 
 void FavoritesGalleries::draw_tile_content(gfx::Renderer& r, const vault::SearchHit&,
