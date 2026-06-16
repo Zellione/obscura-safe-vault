@@ -2,11 +2,14 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
+#include "image/decode_worker.h"
 #include "ui/consent_dialog.h"
 #include "ui/nav_model.h"
 #include "ui/screen.h"
@@ -31,7 +34,8 @@ class GalleryGrid : public Screen {
 public:
     GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                 gfx::TextureCache& cache, platform::FileDialog& dlg,
-                platform::FolderDialog& folder_dlg, GridLocation at = {});
+                platform::FolderDialog& folder_dlg, uint32_t decode_wake,
+                GridLocation at = {});
 
     void on_enter() override;
     void handle_event(const SDL_Event& e) override;
@@ -59,6 +63,7 @@ private:
     [[nodiscard]] bool current_allows_images() const;
     [[nodiscard]] bool current_allows_galleries() const;
     SDL_Texture*       thumb_texture(const vault::IndexNode& node);
+    bool               pump_thumbs();   // upload finished off-thread thumb decodes
 
     void render_grid(gfx::Renderer& r, float W, float H);
     void render_list(gfx::Renderer& r, float W, float H);
@@ -87,6 +92,11 @@ private:
     std::string           status_;   // transient export result message
     bool                  naming_ = false;
     std::string           name_buf_;
+
+    // Off-thread thumbnail decoder, scoped to this grid (its own worker; see the
+    // note in ImageViewer for why each screen keeps a separate one).
+    image::DecodeWorker          decode_worker_;
+    std::unordered_set<uint64_t> thumb_failed_;   // thumbs that failed to decode
 };
 
 } // namespace ui

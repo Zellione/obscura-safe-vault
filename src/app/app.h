@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -41,6 +42,11 @@ private:
     vault::Vault                       vault_;
     std::unique_ptr<ui::Screen>        screen_;
     State                              state_ = State::Locked;
+
+    // SDL event type pushed by a screen's decode worker when an off-thread image
+    // decode finishes, so the event-driven loop wakes to upload it. 0 = the
+    // registration failed and we fall back to the loop's idle heartbeat.
+    uint32_t                           decode_wake_ = 0;
 };
 
 } // namespace app

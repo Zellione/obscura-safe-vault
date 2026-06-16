@@ -140,6 +140,7 @@ void UnlockScreen::update(double)
     if (auto res = dlg_.take_result()) {
         if (!res->empty()) apply_dialog_result((*res)[0]);
         pending_ = Pending::None;
+        mark_dirty();   // keyfile/vault picker closed — repaint
     }
 }
 

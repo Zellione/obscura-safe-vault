@@ -44,6 +44,11 @@ public:
     // transition is active (the current image is fully shown).
     [[nodiscard]] double fade_progress() const noexcept;
 
+    // True while the slideshow needs continuous redraws: either auto-advancing
+    // (running) or playing out an in-flight cross-fade. When paused with the
+    // fade settled, nothing changes until the next input, so this is false.
+    [[nodiscard]] bool animating() const noexcept { return running_ || fade_ < SLIDESHOW_FADE; }
+
     void set_running(bool on) noexcept { running_ = on; }
     void toggle() noexcept { running_ = !running_; }
     void set_dwell(double dwell) noexcept { dwell_ = clamp_dwell(dwell); }

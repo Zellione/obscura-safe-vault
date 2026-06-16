@@ -6,7 +6,15 @@ Multi-platform encrypted photo gallery. Single `.osv` vault file. Decrypted data
 
 ```
 src/
-  app/         main.cpp, app.{h,cpp}          — state machine + SDL event loop
+  app/         main.cpp, app.{h,cpp}          — state machine + SDL event loop.
+                                               Event-driven: blocks on
+                                               SDL_WaitEventTimeout when idle and
+                                               renders only on input / async result /
+                                               animation (Screen::animating() +
+                                               mark_dirty/consume_dirty), so the GPU
+                                               idles instead of free-running. VSync on
+                                               (Window::vsync()); manual ~60fps cap
+                                               fallback when VSync is unavailable.
   crypto/      aead.*, kdf.*, random.*,        — Monocypher wrappers
                secure_mem.h, crypto.h
   vault/       vault.*, header.*, index.*,     — .osv container format
@@ -30,6 +38,14 @@ src/
                                                  (polymorphic dispatch; default_registry()
                                                  wires WebP/HEIF/stb decoders)
                decode_webp.*, decode_heif.*    — libwebp (WebP), libheif (HEIC/AVIF)
+               decode_worker.*                 — off-thread image decoder: caller
+                                                 reads+decrypts on its thread, worker
+                                                 runs decode_from_memory() on one bg
+                                                 thread, caller uploads result to GPU.
+                                                 Coalesces by key, SDL wake event,
+                                                 retain()/pending() (each screen owns
+                                                 its own worker; FullTexCache +
+                                                 GalleryGrid use it for async decode)
   gfx/         window.*, renderer.*,           — SDL3 window/renderer, texture cache,
                texture_cache.*, text.*,        — stb_truetype text atlas
                theme.h                         — "Refined Slate" colour tokens +
@@ -42,6 +58,11 @@ src/
                                                  28px; draw_text y = top, baseline=y+px;
                                                  use FontAtlas::text_top_for_center to
                                                  vertically centre text in a box.
+                                                 draw_text batches a run into ONE
+                                                 SDL_RenderGeometry call (per-vertex
+                                                 colour) via build_text_geometry
+                                                 (pure/tested); draw_round_rect reuses
+                                                 scratch buffers + a cached arc table.
   ui/          unlock_screen.*, gallery_grid.* — UI screens; gallery has Grid +
                                                  detailed List views (key L), live
                                                  width reflow, centred/elided labels

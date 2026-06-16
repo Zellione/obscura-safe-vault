@@ -2,8 +2,10 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstdint>
 #include <optional>
 #include <span>
+#include <vector>
 
 #include "ui/slideshow_model.h"
 
@@ -28,6 +30,10 @@ public:
     [[nodiscard]] bool active() const noexcept { return show_.has_value(); }
     [[nodiscard]] int  index() const noexcept { return show_ ? show_->index() : 0; }
 
+    // True while the slideshow needs continuous redraws (auto-advance or an
+    // in-flight cross-fade); lets the app loop idle when the slideshow is paused.
+    [[nodiscard]] bool animating() const noexcept { return show_ && show_->animating(); }
+
     void toggle_play() { if (show_) show_->toggle(); }
     void update(double dt) { if (show_) show_->tick(dt); }
 
@@ -47,6 +53,7 @@ private:
     std::optional<SlideshowModel> show_;
     double dwell_   = SLIDESHOW_DWELL_DEFAULT;
     bool   shuffle_ = false;
+    std::vector<uint64_t> keep_scratch_;   // reused per-frame evict keep-list
 };
 
 } // namespace ui

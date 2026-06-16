@@ -52,9 +52,15 @@ public:
     int           width()        const noexcept;
     int           height()       const noexcept;
 
+    // True when the renderer presents in sync with the display refresh. When
+    // false (some software/headless backends), the app loop must cap its own
+    // frame rate to avoid spinning the GPU at 100%.
+    bool          vsync()        const noexcept { return vsync_; }
+
 private:
     SDL_Window*   window_   = nullptr;
     SDL_Renderer* renderer_ = nullptr;
+    bool          vsync_    = false;
 };
 
 } // namespace gfx

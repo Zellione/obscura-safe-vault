@@ -11,7 +11,6 @@
 #include "gfx/theme.h"
 #include "ui/meta_format.h"
 #include "gfx/window.h"
-#include "image/decode.h"
 #include "platform/file_dialog.h"
 #include "platform/folder_dialog.h"
 #include "platform/paths.h"
@@ -49,10 +48,12 @@ GridSpec grid_spec(float win_w, int cols) noexcept
 
 GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                          gfx::TextureCache& cache, platform::FileDialog& dlg,
-                         platform::FolderDialog& folder_dlg, GridLocation at)
+                         platform::FolderDialog& folder_dlg, uint32_t decode_wake,
+                         GridLocation at)
     : win_(win), font_(font), vault_(vault), cache_(cache), dlg_(dlg),
       folder_dlg_(folder_dlg), search_(vault, win), tag_editor_(vault, win),
-      initial_path_(std::move(at.path)), initial_sel_(at.selected)
+      initial_path_(std::move(at.path)), initial_sel_(at.selected),
+      decode_worker_(decode_wake)
 {
 }
 
@@ -220,11 +221,28 @@ SDL_Texture* GalleryGrid::thumb_texture(const vault::IndexNode& node)
     const uint64_t key = node.meta.data_offset;
     if (SDL_Texture* t = cache_.get(key)) return t;
 
+    // A thumbnail that already failed to decode is not retried; an in-flight
+    // decode lands via pump_thumbs(). Otherwise read+decrypt here (fast) and
+    // enqueue the slow decode off-thread, drawing a placeholder until it lands.
+    if (thumb_failed_.contains(key) || decode_worker_.pending(key)) return nullptr;
     crypto::SecureBytes sb;
     if (vault_.read_thumbnail(node, sb) != vault::VaultResult::Ok) return nullptr;
-    auto img = image::decode_from_memory(sb.as_span());
-    if (!img) return nullptr;
-    return cache_.get_or_upload(key, *img);
+    decode_worker_.submit(key, std::move(sb));
+    return nullptr;
+}
+
+bool GalleryGrid::pump_thumbs()
+{
+    bool any = false;
+    while (auto res = decode_worker_.take_result()) {
+        if (res->image) {
+            cache_.get_or_upload(res->key, *res->image);
+            any = true;
+        } else {
+            thumb_failed_.insert(res->key);
+        }
+    }
+    return any;
 }
 
 void GalleryGrid::handle_naming_key(const SDL_Event& e)
@@ -325,14 +343,18 @@ void GalleryGrid::handle_event(const SDL_Event& e)
 
 void GalleryGrid::update(double)
 {
+    if (pump_thumbs()) mark_dirty();   // off-thread thumbnail decode(s) landed
+
     if (auto res = dlg_.take_result()) {
         if (!res->empty()) {
             for (const auto& p : *res) do_import(p);
             refresh();
         }
+        mark_dirty();   // dialog closed (imported or cancelled) — repaint
     }
     if (auto dest = folder_dlg_.take_result()) {
         if (!dest->empty()) do_export(*dest);   // empty => the picker was cancelled
+        mark_dirty();
     }
 }
 

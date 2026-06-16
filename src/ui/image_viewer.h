@@ -2,9 +2,11 @@
 
 #include <SDL3/SDL.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "image/decode_worker.h"
 #include "ui/export_ui.h"
 #include "ui/full_tex_cache.h"
 #include "ui/screen.h"
@@ -44,7 +46,7 @@ class ImageViewer : public Screen {
 public:
     ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                 gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
-                std::string gallery_path, int start_index);
+                uint32_t decode_wake, std::string gallery_path, int start_index);
     ~ImageViewer() override = default;
 
     ImageViewer(const ImageViewer&)            = delete;
@@ -55,6 +57,13 @@ public:
     void handle_event(const SDL_Event& e) override;
     void update(double dt) override;
     void render(gfx::Renderer& r) override;
+
+    // Only the slideshow cross-fade/auto-advance animates; Fit and FillScroll are
+    // static between inputs, so the app loop can idle in those modes.
+    [[nodiscard]] bool animating() const override
+    {
+        return mode_ == ViewMode::Slideshow && slideshow_.animating();
+    }
 
 private:
     enum class ViewMode { Fit, FillScroll, Slideshow };
@@ -76,8 +85,10 @@ private:
     void pan_by(float dx, float dy);
     [[nodiscard]] bool is_zoomed() const noexcept;  // zoomed past fit-to-window
 
-    // Fill-scroll helpers.
-    [[nodiscard]] ScrollModel build_scroll_model() const;
+    // Fill-scroll helpers. The model is cached and rebuilt only when the
+    // viewport size changes (the image list is fixed for the session), since
+    // render/scroll query it several times per frame.
+    [[nodiscard]] const ScrollModel& build_scroll_model() const;
     [[nodiscard]] float       scaled_height(const vault::IndexNode& n, float vp_w) const;
     void scroll_to_image(int idx);                  // place image `idx` at the top
     void scroll_by(float dy);
@@ -119,8 +130,27 @@ private:
     // FillScroll-mode state.
     float scroll_y_ = 0.0f;
 
+    // Cached fill-scroll model + the viewport size it was built for; rebuilt
+    // lazily when that size changes. Avoids reallocating the height/prefix-sum
+    // vectors every frame (build_scroll_model() is queried several times/frame).
+    mutable std::optional<ScrollModel> scroll_cache_;
+    mutable float                      scroll_cache_w_ = -1.0f;
+    mutable float                      scroll_cache_h_ = -1.0f;
+    mutable size_t                     scroll_cache_n_ = 0;
+
+    // Reused render-path scratch buffers (cleared, not reallocated, each frame).
+    std::vector<uint64_t>     keep_scratch_;
+    std::vector<SDL_Texture*> thumb_scratch_;
+
     // Full-screen slideshow (active while mode_ == Slideshow).
     SlideshowView slideshow_;
+
+    // Off-thread decoder for full-res images, scoped to this viewer so its
+    // pending decodes are dropped when the viewer closes. Declared before
+    // full_cache_ so the cache can hold a pointer to it. (Each screen owns its
+    // own worker: thumbnail and full-image decodes key on the same data_offset,
+    // so a shared worker would risk cross-contaminating the two caches.)
+    image::DecodeWorker decode_worker_;
 
     // Bounded set of decoded full-res textures (shared with the slideshow).
     FullTexCache full_cache_;
