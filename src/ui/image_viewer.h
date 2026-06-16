@@ -9,6 +9,7 @@
 #include "ui/full_tex_cache.h"
 #include "ui/screen.h"
 #include "ui/scroll_model.h"
+#include "ui/search_overlay.h"
 #include "ui/slideshow_view.h"
 #include "ui/strip_layout.h"
 #include "ui/tag_editor.h"
@@ -94,6 +95,7 @@ private:
     gfx::TextureCache&      cache_;
     ExportUi                export_;
     TagEditor               tag_editor_;
+    SearchOverlay           search_;
     std::string             gallery_path_;
     std::vector<const vault::IndexNode*> images_;
     int   index_ = 0;

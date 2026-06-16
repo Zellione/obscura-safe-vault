@@ -29,7 +29,8 @@ ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& v
                          gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
                          std::string gallery_path, int start_index)
     : win_(win), font_(font), vault_(vault), cache_(cache), export_(folder_dlg, win),
-      tag_editor_(vault, win), gallery_path_(std::move(gallery_path)), index_(start_index),
+      tag_editor_(vault, win), search_(vault, win),
+      gallery_path_(std::move(gallery_path)), index_(start_index),
       full_cache_(vault, win.sdl_renderer())
 {
 }
@@ -298,6 +299,16 @@ void ImageViewer::update(double dt)
 
 void ImageViewer::handle_event(const SDL_Event& e)
 {
+    // Search overlay takes priority while open; a selected result becomes a nav
+    // request the app consumes (jumping to another gallery/image or back to grid).
+    if (search_.active()) {
+        if (search_.handle_event(e)) {
+            Nav nav = search_.take_nav();
+            if (nav.kind != NavKind::None) request(nav.kind, std::move(nav.path), nav.index);
+        }
+        return;
+    }
+
     // Tag editor takes priority
     if (tag_editor_.active()) {
         (void)tag_editor_.handle_event(e);
@@ -311,7 +322,18 @@ void ImageViewer::handle_event(const SDL_Event& e)
     }
 
     switch (e.type) {
-        case SDL_EVENT_KEY_DOWN:          handle_key(e.key.key);        break;
+        case SDL_EVENT_KEY_DOWN:
+            // `/` opens search. It is a shifted key on many non-US layouts, so
+            // resolve the produced character from scancode + modifiers (the base
+            // keycode in e.key.key would be the unshifted symbol). Not while the
+            // slideshow owns the keyboard.
+            if (mode_ != ViewMode::Slideshow &&
+                SDL_GetKeyFromScancode(e.key.scancode, e.key.mod, false) == SDLK_SLASH) {
+                search_.open();
+            } else {
+                handle_key(e.key.key);
+            }
+            break;
         case SDL_EVENT_MOUSE_WHEEL:       handle_wheel(e.wheel);        break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN: handle_mouse_down(e.button);  break;
         case SDL_EVENT_MOUSE_BUTTON_UP:
@@ -452,6 +474,8 @@ void ImageViewer::render(gfx::Renderer& r)
                    static_cast<float>(win_.height()));
     tag_editor_.render(r, font_, static_cast<float>(win_.width()),
                        static_cast<float>(win_.height()));
+    search_.render(r, font_, static_cast<float>(win_.width()),
+                   static_cast<float>(win_.height()));
 }
 
 } // namespace ui
