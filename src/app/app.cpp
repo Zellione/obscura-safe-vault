@@ -106,8 +106,7 @@ bool App::apply_nav()
 {
     if (!screen_) return false;
     using enum ui::NavKind;
-    const ui::Nav nav = screen_->take_nav();
-    switch (nav.kind) {
+    switch (const ui::Nav nav = screen_->take_nav(); nav.kind) {
         case ToGallery: screen_->on_exit(); to_gallery(nav.path, nav.index); return true;
         case ToViewer:  screen_->on_exit(); to_viewer(nav.path, nav.index);  return true;
         case ToUnlock:  screen_->on_exit(); to_unlock();                     return true;
