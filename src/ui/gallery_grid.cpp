@@ -213,6 +213,20 @@ void GalleryGrid::start_tag_editor()
     tag_editor_.open(full_path);
 }
 
+void GalleryGrid::toggle_favorite_current()
+{
+    const int s = nav_.selected();
+    if (s < 0 || s >= static_cast<int>(children_.size())) return;
+
+    const vault::IndexNode* n = children_[s];
+    const std::string base = nav_.path();
+    const std::string full_path = base.empty() ? n->name : base + "/" + n->name;
+    // The flag flips on the same in-memory node children_[s] points at, so the
+    // star badge re-renders next frame; the key event already triggers a repaint.
+    // No refresh() — that would needlessly clear the export selection.
+    (void)vault_.toggle_favorite(full_path);
+}
+
 SDL_Texture* GalleryGrid::thumb_texture(const vault::IndexNode& node)
 {
     if (node.meta.thumb_length == 0) return nullptr;
@@ -280,6 +294,12 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         return;
     }
     if (key.key == SDLK_G) { start_tag_editor(); return; }  // tag editor (G)
+    if (key.key == SDLK_B) { toggle_favorite_current(); return; }  // favorite (B)
+    if (key.key == SDLK_F) {  // open a favorites screen (Shift+F = galleries)
+        request((key.mod & SDL_KMOD_SHIFT) ? NavKind::ToFavoriteGalleries
+                                           : NavKind::ToFavoriteImages);
+        return;
+    }
 
     using enum InputAction;
     switch (map_key(key.key, key.mod)) {
@@ -366,8 +386,9 @@ void GalleryGrid::render(gfx::Renderer& r)
     for (const auto& s : nav_.segments()) { crumb += s; crumb += '/'; }
     r.draw_text(font_, OX, 40, crumb, TEXT_DIM);
     r.draw_text(font_, OX, 90,
-                "[I] Import  [N] New  [/] Search  [G] Tags  [Enter] Open  [Space] Select  "
-                "[X] Export  [Esc] Back  [L] List/Grid",
+                "[I] Import  [N] New  [/] Search  [G] Tags  [B] Fav  [F] Fav Images  "
+                "[Shift+F] Fav Galleries  [Enter] Open  [Space] Select  [X] Export  "
+                "[Esc] Back  [L] List/Grid",
                 TEXT_FAINT);
 
     if (!sel_.empty())
@@ -423,6 +444,13 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float /*H*/)
             r.draw_round_rect(badge, RADIUS_SMALL, ACCENT);
             r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
         }
+
+        // Favorite badge: a small gold square in the top-right corner.
+        if (n->favorite) {
+            const SDL_FRect badge{cellr.x + CELL - 8 - 18, cellr.y + 8, 18, 18};
+            r.draw_round_rect(badge, RADIUS_SMALL, FAVORITE);
+            r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
+        }
     }
 }
 
@@ -461,6 +489,9 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float /*H*/)
         // Export-selection marker: an accent bar down the row's left edge.
         if (sel_.contains(static_cast<int>(i)))
             r.draw_rect({row.x, row.y, 4, row.h}, ACCENT);
+        // Favorite marker: a gold bar down the row's right edge.
+        if (n->favorite)
+            r.draw_rect({row.x + row.w - 4, row.y, 4, row.h}, FAVORITE);
 
         const SDL_FRect thumb{row.x + 5, row.y + 5, row.h - 10, row.h - 10};
         draw_tile_thumb(r, *n, thumb);

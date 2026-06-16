@@ -155,6 +155,17 @@ public:
     // all in-scope nodes. Empty result if locked. Computes the cascade as it descends.
     [[nodiscard]] std::vector<SearchHit> search(std::string_view query, SearchScope scope) const;
 
+    // Flip a node's favorite flag (gallery OR image). Persisted via the crash-safe
+    // index swap. Locked if not unlocked; NotFound if node_path doesn't resolve.
+    [[nodiscard]] VaultResult toggle_favorite(std::string_view node_path);
+
+    // Every favorited image (resp. gallery) across the whole tree, flat. Each hit's
+    // `path` is the full slash-path; `node` is valid until the next mutating call.
+    // `effective_tags` is left empty (favorites lists don't compute the tag cascade).
+    // Empty while locked.
+    [[nodiscard]] std::vector<SearchHit> list_favorite_images() const;
+    [[nodiscard]] std::vector<SearchHit> list_favorite_galleries() const;
+
     // Reclaimable bytes: the part of the data region not referenced by any live
     // image/thumbnail chunk or the active index blob (orphaned chunks from
     // deletes plus superseded index blobs). 0 while locked — the index is

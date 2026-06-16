@@ -224,6 +224,30 @@ void search_dfs(const IndexNode& node, std::string_view prefix,
     }
 }
 
+// Walk the tree collecting every favorited node of the requested kind (galleries
+// when `want_galleries`, otherwise images) into `out`, flat, with full paths.
+// effective_tags is intentionally left empty — favorites lists don't cascade tags.
+void collect_favorites(const IndexNode& node, std::string_view prefix,
+                       bool want_galleries, std::vector<SearchHit>& out)
+{
+    for (const auto& child : node.children) {
+        const std::string full_path = join_child_path(prefix, child.name);
+
+        if (child.favorite && child.is_gallery() == want_galleries) {
+            out.push_back(SearchHit{
+                .path           = full_path,
+                .is_gallery     = child.is_gallery(),
+                .name           = child.name,
+                .effective_tags = {},
+                .node           = &child,
+            });
+        }
+
+        if (child.is_gallery())
+            collect_favorites(child, full_path, want_galleries, out);
+    }
+}
+
 } // namespace
 
 // --- lifecycle ------------------------------------------------------------
@@ -692,6 +716,34 @@ std::vector<SearchHit> Vault::search(std::string_view query, SearchScope scope) 
     // Seed inherited tags with the root's own tags so they cascade globally; the
     // unnamed root itself is never a hit.
     search_dfs(root_, "", root_.tags, query, scope, out);
+    return out;
+}
+
+VaultResult Vault::toggle_favorite(std::string_view node_path)
+{
+    using enum VaultResult;
+    if (!unlocked_) return Locked;
+
+    IndexNode* node = resolve_node(node_path);
+    if (!node) return NotFound;
+
+    node->favorite = !node->favorite;
+    return commit_index();
+}
+
+std::vector<SearchHit> Vault::list_favorite_images() const
+{
+    std::vector<SearchHit> out;
+    if (!unlocked_) return out;
+    collect_favorites(root_, "", /*want_galleries=*/false, out);
+    return out;
+}
+
+std::vector<SearchHit> Vault::list_favorite_galleries() const
+{
+    std::vector<SearchHit> out;
+    if (!unlocked_) return out;
+    collect_favorites(root_, "", /*want_galleries=*/true, out);
     return out;
 }
 

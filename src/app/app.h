@@ -31,6 +31,9 @@ private:
     void to_unlock();
     void to_gallery(const std::string& path = {}, int selected = 0);
     void to_viewer(const std::string& gallery_path, int index);
+    void to_favorite_images();
+    void to_favorite_galleries();
+    void to_favorite_viewer(int index);   // viewer over the whole favorites set
 
     // run() helpers (kept small so the loop stays readable).
     void dispatch_event(const SDL_Event& e);     // quit/close here, else to screen

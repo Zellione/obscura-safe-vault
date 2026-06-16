@@ -8,6 +8,8 @@
 #include "gfx/renderer.h"
 #include "gfx/theme.h"
 #include "platform/paths.h"
+#include "ui/favorites_galleries.h"
+#include "ui/favorites_images.h"
 #include "ui/gallery_grid.h"
 #include "ui/image_viewer.h"
 #include "ui/unlock_screen.h"
@@ -64,8 +66,45 @@ void App::to_gallery(const std::string& path, int selected)
 void App::to_viewer(const std::string& gallery_path, int index)
 {
     state_  = State::Viewing;
-    screen_ = std::make_unique<ui::ImageViewer>(window_, font_, vault_, *cache_,
-                                                folder_dialog_, gallery_path, index);
+    screen_ = std::make_unique<ui::ImageViewer>(
+        window_, font_, vault_, *cache_, folder_dialog_,
+        ui::ImageViewer::Album::gallery(gallery_path), index);
+    screen_->on_enter();
+}
+
+void App::to_favorite_images()
+{
+    state_  = State::Browsing;
+    screen_ = std::make_unique<ui::FavoritesImages>(window_, font_, vault_, *cache_);
+    screen_->on_enter();
+}
+
+void App::to_favorite_galleries()
+{
+    state_  = State::Browsing;
+    screen_ = std::make_unique<ui::FavoritesGalleries>(window_, font_, vault_);
+    screen_->on_enter();
+}
+
+void App::to_favorite_viewer(int index)
+{
+    // Build a viewer collection from the favorites set (same ordering the
+    // favorites grid used), so prev/next iterate the favorites. Exiting returns
+    // to the favorites-images grid.
+    ui::ImageViewer::Album album;
+    album.from_collection = true;
+    album.back            = ui::Nav{ui::NavKind::ToFavoriteImages, {}, 0};
+    auto favs = vault_.list_favorite_images();
+    album.images.reserve(favs.size());
+    album.paths.reserve(favs.size());
+    for (auto& h : favs) {
+        album.images.push_back(h.node);
+        album.paths.push_back(std::move(h.path));
+    }
+
+    state_  = State::Viewing;
+    screen_ = std::make_unique<ui::ImageViewer>(
+        window_, font_, vault_, *cache_, folder_dialog_, std::move(album), index);
     screen_->on_enter();
 }
 
@@ -109,6 +148,9 @@ bool App::apply_nav()
     switch (const ui::Nav nav = screen_->take_nav(); nav.kind) {
         case ToGallery: screen_->on_exit(); to_gallery(nav.path, nav.index); return true;
         case ToViewer:  screen_->on_exit(); to_viewer(nav.path, nav.index);  return true;
+        case ToFavoriteImages:    screen_->on_exit(); to_favorite_images();    return true;
+        case ToFavoriteGalleries: screen_->on_exit(); to_favorite_galleries(); return true;
+        case ToFavoriteViewer:    screen_->on_exit(); to_favorite_viewer(nav.index); return true;
         case ToUnlock:  screen_->on_exit(); to_unlock();                     return true;
         case Quit:      running_ = false;                                    return false;
         case None:      return false;

@@ -27,6 +27,7 @@ static bool nodes_equal(const IndexNode& a, const IndexNode& b)
 {
     if (a.type != b.type || a.name != b.name) return false;
     if (a.tags != b.tags) return false;
+    if (a.favorite != b.favorite) return false;
     if (a.type == IndexNode::Type::Image) {
         const auto& x = a.meta;
         const auto& y = b.meta;
@@ -275,4 +276,97 @@ TEST(index_deserialize_rejects_hostile_tag_count)
 
     IndexNode out;
     CHECK_FALSE(vault::deserialize_index(hostile_blob, out));
+}
+
+// --- Phase 13: favorite flag ----------------------------------------------
+
+TEST(index_image_favorite_roundtrips)
+{
+    IndexNode root = IndexNode::gallery("");
+    IndexNode img = make_image("photo.png", 12, 34);
+    img.favorite = true;
+    root.children.push_back(std::move(img));
+
+    std::vector<uint8_t> blob;
+    vault::serialize_index(root, blob);
+
+    IndexNode out;
+    REQUIRE(vault::deserialize_index(blob, out));
+    REQUIRE(out.children.size() == 1);
+    CHECK_TRUE(out.children[0].favorite);
+}
+
+TEST(index_gallery_favorite_roundtrips)
+{
+    IndexNode root = IndexNode::gallery("");
+    IndexNode gal = IndexNode::gallery("starred");
+    gal.favorite = true;
+    IndexNode plain = IndexNode::gallery("plain");  // favorite stays false
+    root.children.push_back(std::move(gal));
+    root.children.push_back(std::move(plain));
+
+    std::vector<uint8_t> blob;
+    vault::serialize_index(root, blob);
+
+    IndexNode out;
+    REQUIRE(vault::deserialize_index(blob, out));
+    REQUIRE(out.children.size() == 2);
+    CHECK_TRUE(out.children[0].favorite);
+    CHECK_FALSE(out.children[1].favorite);
+}
+
+TEST(index_favorite_combines_with_tags_in_nested_tree)
+{
+    IndexNode root = IndexNode::gallery("");
+    IndexNode a = IndexNode::gallery("trip");
+    a.favorite = true;
+    a.tags.push_back("gal_tag");
+    IndexNode img = make_image("beach.png", 4096, 9000);
+    img.favorite = true;
+    img.tags.push_back("img_tag");
+    a.children.push_back(std::move(img));
+    root.children.push_back(std::move(a));
+
+    std::vector<uint8_t> blob;
+    vault::serialize_index(root, blob);
+
+    IndexNode out;
+    REQUIRE(vault::deserialize_index(blob, out));
+    CHECK_TRUE(nodes_equal(root, out));
+}
+
+TEST(index_deserialize_v2_blob_has_no_favorite)
+{
+    // Hand-crafted version 2 blob (tags, but no favorite byte): a gallery with
+    // zero tags and zero children. A v2 reader/writer never wrote a favorite
+    // byte, so it must read back as not-favorited under the v3 parser.
+    std::vector<uint8_t> v2_blob = {
+        0x02,                          // INDEX_VERSION = 2
+        0x00,                          // type = Gallery
+        0x00, 0x00,                    // name_len = 0
+        0x00, 0x00,                    // tag_count = 0
+        0x00, 0x00, 0x00, 0x00        // child_count = 0
+    };
+
+    IndexNode out;
+    REQUIRE(vault::deserialize_index(v2_blob, out));
+    CHECK_EQ(out.type, IndexNode::Type::Gallery);
+    CHECK_TRUE(out.tags.empty());
+    CHECK_FALSE(out.favorite);
+    CHECK_TRUE(out.children.empty());
+}
+
+TEST(index_deserialize_v1_blob_has_no_favorite)
+{
+    // Pre-tags, pre-favorites blob still opens with favorite=false.
+    std::vector<uint8_t> v1_blob = {
+        0x01,                          // INDEX_VERSION = 1
+        0x00,                          // type = Gallery
+        0x00, 0x00,                    // name_len = 0
+        0x00, 0x00, 0x00, 0x00        // child_count = 0
+    };
+
+    IndexNode out;
+    REQUIRE(vault::deserialize_index(v1_blob, out));
+    CHECK_FALSE(out.favorite);
 }

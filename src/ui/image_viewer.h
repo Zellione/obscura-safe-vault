@@ -44,9 +44,32 @@ namespace ui {
 // images plus their immediate neighbours (a small bounded set), evicting the rest.
 class ImageViewer : public Screen {
 public:
+    // The viewer's navigable image set. Two ways to populate it:
+    //   * gallery mode — set `gallery_path`; the images are listed on entry and
+    //     `back`/`paths` are derived (exit returns to that gallery).
+    //   * collection mode — set `from_collection` + an explicit `images`/`paths`
+    //     set (e.g. favorites) and a `back` target (exit returns there).
+    // Bundled into one struct so the viewer carries a single source field and a
+    // single constructor (keeps the class within its field/param/method budgets).
+    struct Album {
+        std::vector<const vault::IndexNode*> images;
+        std::vector<std::string>             paths;         // full slash-path per image
+        std::string                          gallery_path;  // leaf gallery (gallery mode)
+        Nav                                  back;           // exit target (collection mode)
+        bool                                 from_collection = false;
+
+        static Album gallery(std::string path)
+        {
+            Album a;
+            a.gallery_path = std::move(path);
+            return a;
+        }
+    };
+
     ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                 gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
-                std::string gallery_path, int start_index);
+                Album album, int start_index);
+
     ~ImageViewer() override = default;
 
     ImageViewer(const ImageViewer&)            = delete;
@@ -78,9 +101,10 @@ private:
     [[nodiscard]] SDL_FRect viewport_rect() const;
     [[nodiscard]] SDL_FRect strip_rect() const;
 
+    void toggle_favorite_current();                 // flip favorite on the current image
     void show_image_at(int idx);                    // absolute, clamped, refit
     void set_index(int delta);                      // wrap, reset view, rebuild
-    void back_to_gallery();
+    void go_back();                                 // return to gallery / favorites
     void zoom_by(float factor, float cx, float cy); // centred on (cx, cy)
     void pan_by(float dx, float dy);
     [[nodiscard]] bool is_zoomed() const noexcept;  // zoomed past fit-to-window
@@ -107,8 +131,7 @@ private:
     ExportUi                export_;
     TagEditor               tag_editor_;
     SearchOverlay           search_;
-    std::string             gallery_path_;
-    std::vector<const vault::IndexNode*> images_;
+    Album album_;                            // the navigable image set (see Album)
     int   index_ = 0;
 
     // Persistent layout/mode choices (reset on construction, i.e. per viewer).

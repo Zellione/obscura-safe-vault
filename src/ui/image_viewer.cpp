@@ -27,24 +27,32 @@ constexpr float SCROLL_STEP = 96.0f;   // arrow-key / wheel scroll distance (px)
 
 ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                          gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
-                         std::string gallery_path, int start_index)
+                         Album album, int start_index)
     : win_(win), font_(font), vault_(vault), cache_(cache), export_(folder_dlg, win),
       tag_editor_(vault, win), search_(vault, win),
-      gallery_path_(std::move(gallery_path)), index_(start_index),
+      album_(std::move(album)), index_(start_index),
       full_cache_(vault, win.sdl_renderer(), &decode_worker_)
 {
 }
 
 void ImageViewer::on_enter()
 {
-    // Snapshot the leaf gallery's images. A leaf gallery holds only images, but
-    // filter defensively so a stray sub-gallery can never be "viewed".
-    images_.clear();
-    for (const vault::IndexNode* n : vault_.list(gallery_path_))
-        if (n->is_image()) images_.push_back(n);
+    // Gallery mode snapshots the leaf gallery's images (a leaf holds only images,
+    // but filter defensively). Collection mode (e.g. favorites) was handed an
+    // explicit image set + parallel paths at construction — don't re-list.
+    if (!album_.from_collection) {
+        album_.images.clear();
+        album_.paths.clear();
+        for (const vault::IndexNode* n : vault_.list(album_.gallery_path)) {
+            if (!n->is_image()) continue;
+            album_.images.push_back(n);
+            album_.paths.push_back(album_.gallery_path.empty() ? n->name
+                                                   : album_.gallery_path + "/" + n->name);
+        }
+    }
 
-    if (images_.empty()) { back_to_gallery(); return; }
-    index_  = std::clamp(index_, 0, static_cast<int>(images_.size()) - 1);
+    if (album_.images.empty()) { go_back(); return; }
+    index_  = std::clamp(index_, 0, static_cast<int>(album_.images.size()) - 1);
     fit_.fitted = false;
 }
 
@@ -81,8 +89,8 @@ bool ImageViewer::is_zoomed() const noexcept
 
 void ImageViewer::show_image_at(int idx)
 {
-    if (images_.empty()) return;
-    index_    = std::clamp(idx, 0, static_cast<int>(images_.size()) - 1);
+    if (album_.images.empty()) return;
+    index_    = std::clamp(idx, 0, static_cast<int>(album_.images.size()) - 1);
     fit_.fitted   = false;
     fit_.dragging = false;
     if (mode_ == ViewMode::FillScroll) scroll_to_image(index_);
@@ -90,12 +98,15 @@ void ImageViewer::show_image_at(int idx)
 
 void ImageViewer::set_index(int delta)
 {
-    show_image_at(wrap_index(index_, delta, static_cast<int>(images_.size())));
+    show_image_at(wrap_index(index_, delta, static_cast<int>(album_.images.size())));
 }
 
-void ImageViewer::back_to_gallery()
+void ImageViewer::go_back()
 {
-    request(NavKind::ToGallery, gallery_path_, index_);
+    // Collection mode returns to wherever it was launched from (e.g. the favorites
+    // grid); gallery mode returns to its leaf gallery at the current image.
+    if (album_.from_collection) request(album_.back.kind, album_.back.path, album_.back.index);
+    else                  request(NavKind::ToGallery, album_.gallery_path, index_);
 }
 
 void ImageViewer::zoom_by(float factor, float cx, float cy)
@@ -128,14 +139,14 @@ const ScrollModel& ImageViewer::build_scroll_model()
 {
     if (const SDL_FRect vp = viewport_rect();
         !scroll_cache_.model || scroll_cache_.w != vp.w || scroll_cache_.h != vp.h ||
-        scroll_cache_.n != images_.size()) {
+        scroll_cache_.n != album_.images.size()) {
         std::vector<float> heights;   // transient; ScrollModel copies into prefix sums
-        heights.reserve(images_.size());
-        for (const vault::IndexNode* n : images_) heights.push_back(scaled_height(*n, vp.w));
+        heights.reserve(album_.images.size());
+        for (const vault::IndexNode* n : album_.images) heights.push_back(scaled_height(*n, vp.w));
         scroll_cache_.model.emplace(heights, vp.h);
         scroll_cache_.w = vp.w;
         scroll_cache_.h = vp.h;
-        scroll_cache_.n = images_.size();
+        scroll_cache_.n = album_.images.size();
     }
     return *scroll_cache_.model;
 }
@@ -180,12 +191,12 @@ int ImageViewer::strip_hit(float mx, float my) const
         return -1;
 
     const float extent = vertical ? strip.h : strip.w;
-    const float scroll = strip_scroll_centered(index_, static_cast<int>(images_.size()),
+    const float scroll = strip_scroll_centered(index_, static_cast<int>(album_.images.size()),
                                                thumb, STRIP_GAP, extent);
     const float along  = vertical ? my : mx;
     const float origin = vertical ? strip.y : strip.x;
     return strip_hit_axis(along, origin, scroll, thumb, STRIP_GAP,
-                          static_cast<int>(images_.size()));
+                          static_cast<int>(album_.images.size()));
 }
 
 // --- Input -----------------------------------------------------------------
@@ -214,28 +225,34 @@ void ImageViewer::handle_key(SDL_Keycode key)
             else              { mode_ = Fit; fit_.fitted = false; }
             return;
         case SDLK_P:      // start the full-screen slideshow
-            if (!images_.empty()) {
-                slideshow_.start(static_cast<int>(images_.size()), index_);
+            if (!album_.images.empty()) {
+                slideshow_.start(static_cast<int>(album_.images.size()), index_);
                 mode_ = Slideshow;
             }
             return;
         case SDLK_X:      // export the current image (consent modal first)
-            if (!images_.empty())
-                export_.begin(std::format("Export \"{}\"?", images_[index_]->name));
+            if (!album_.images.empty())
+                export_.begin(std::format("Export \"{}\"?", album_.images[index_]->name));
             return;
         case SDLK_G:      // edit tags for the current image
-            if (!images_.empty()) {
-                const std::string full_path = gallery_path_.empty()
-                    ? images_[index_]->name
-                    : gallery_path_ + "/" + images_[index_]->name;
-                tag_editor_.open(full_path);
-            }
+            if (!album_.images.empty()) tag_editor_.open(album_.paths[index_]);
             return;
-        case SDLK_ESCAPE: back_to_gallery(); return;
+        case SDLK_B:      // toggle favorite (bookmark) on the current image
+            toggle_favorite_current();
+            return;
+        case SDLK_ESCAPE: go_back(); return;
         default: break;
     }
     if (mode_ == FillScroll) handle_key_scroll(key);
     else                     handle_key_fit(key);
+}
+
+void ImageViewer::toggle_favorite_current()
+{
+    if (album_.images.empty()) return;
+    // The in-memory tree node album_.images[index_] points at is the one toggled, so the
+    // HUD star reflects the new state immediately; commit_index() persists it.
+    (void)vault_.toggle_favorite(album_.paths[index_]);
 }
 
 void ImageViewer::handle_key_fit(SDL_Keycode key)
@@ -244,7 +261,7 @@ void ImageViewer::handle_key_fit(SDL_Keycode key)
     switch (key) {
         case SDLK_LEFT:  is_zoomed() ? pan_by(PAN_STEP, 0) : set_index(-1); break;
         case SDLK_RIGHT: is_zoomed() ? pan_by(-PAN_STEP, 0) : set_index(1); break;
-        case SDLK_UP:    is_zoomed() ? pan_by(0, PAN_STEP) : back_to_gallery(); break;
+        case SDLK_UP:    is_zoomed() ? pan_by(0, PAN_STEP) : go_back(); break;
         case SDLK_DOWN:  if (is_zoomed()) pan_by(0, -PAN_STEP); break;
         case SDLK_0:     fit_.fitted = false; break;  // reset to fit-to-window
         case SDLK_PLUS:
@@ -297,8 +314,8 @@ void ImageViewer::update(double dt)
         index_ = slideshow_.index();
     }
 
-    if (auto dest = export_.take_destination(); dest && !images_.empty()) {
-        const std::array<const vault::IndexNode*, 1> one{images_[index_]};
+    if (auto dest = export_.take_destination(); dest && !album_.images.empty()) {
+        const std::array<const vault::IndexNode*, 1> one{album_.images[index_]};
         const ExportSummary sum =
             export_images(vault_, one, *dest, ExportConsent::Confirm);
         export_.set_status(sum.written == 1
@@ -361,8 +378,8 @@ void ImageViewer::handle_event(const SDL_Event& e)
 
 void ImageViewer::render_fit(gfx::Renderer& r, const SDL_FRect& vp)
 {
-    FullTex* ft = full_cache_.acquire(*images_[index_]);
-    const std::array<uint64_t, 1> keep{images_[index_]->meta.data_offset};
+    FullTex* ft = full_cache_.acquire(*album_.images[index_]);
+    const std::array<uint64_t, 1> keep{album_.images[index_]->meta.data_offset};
     full_cache_.evict_except(keep);
 
     if (!ft) {
@@ -403,7 +420,7 @@ void ImageViewer::render_scroll(gfx::Renderer& r, const SDL_FRect& vp)
     const int hi = std::min(m.count() - 1, last + 1);
     scratch_.keep.clear();
     scratch_.keep.reserve(static_cast<size_t>(hi - lo + 1));
-    for (int i = lo; i <= hi; ++i) scratch_.keep.push_back(images_[i]->meta.data_offset);
+    for (int i = lo; i <= hi; ++i) scratch_.keep.push_back(album_.images[i]->meta.data_offset);
     full_cache_.evict_except(scratch_.keep);
 
     const SDL_Rect clip{static_cast<int>(vp.x), static_cast<int>(vp.y),
@@ -411,8 +428,8 @@ void ImageViewer::render_scroll(gfx::Renderer& r, const SDL_FRect& vp)
     SDL_SetRenderClipRect(r.sdl(), &clip);
     for (int i = first; i <= last; ++i) {
         const float top = vp.y + m.image_top(i) - scroll_y_;
-        const float h   = scaled_height(*images_[i], vp.w);
-        if (FullTex* ft = full_cache_.acquire(*images_[i]))
+        const float h   = scaled_height(*album_.images[i], vp.w);
+        if (FullTex* ft = full_cache_.acquire(*album_.images[i]))
             r.draw_image(ft->tex, SDL_FRect{vp.x, top, vp.w, h});
         else
             r.draw_rect(SDL_FRect{vp.x, top, vp.w, h}, gfx::theme::SURFACE);
@@ -428,11 +445,11 @@ void ImageViewer::render_strip(gfx::Renderer& r)
     const float thumb = thumb_size();
     const bool  vertical = (strip_side_ == StripSide::Left);
     scratch_.thumbs.clear();
-    scratch_.thumbs.reserve(images_.size());
-    for (const vault::IndexNode* n : images_) scratch_.thumbs.push_back(thumb_texture(*n));
+    scratch_.thumbs.reserve(album_.images.size());
+    for (const vault::IndexNode* n : album_.images) scratch_.thumbs.push_back(thumb_texture(*n));
 
     const float extent = vertical ? strip.h : strip.w;
-    const float scroll = strip_scroll_centered(index_, static_cast<int>(images_.size()),
+    const float scroll = strip_scroll_centered(index_, static_cast<int>(album_.images.size()),
                                                thumb, STRIP_GAP, extent);
     r.draw_thumbnail_strip(scratch_.thumbs, strip,
                            gfx::ThumbnailStrip{.size = thumb, .gap = STRIP_GAP,
@@ -444,18 +461,22 @@ void ImageViewer::render_strip(gfx::Renderer& r)
 void ImageViewer::render_hud(gfx::Renderer& r, const SDL_FRect& vp)
 {
     using enum ViewMode;
-    if (!images_.empty()) {
+    if (!album_.images.empty()) {
+        // A leading "* " marks the current image as favorited (the baked font is
+        // ASCII-only, so an asterisk stands in for a star glyph).
+        const char* star = album_.images[index_]->favorite ? "* " : "";
         const char* mode = (mode_ == FillScroll) ? "fill" : "fit";
         const std::string hud = (mode_ == FillScroll)
-            ? std::format("{}   {}/{}   {}", images_[index_]->name, index_ + 1,
-                          images_.size(), mode)
-            : std::format("{}   {}/{}   {}%", images_[index_]->name, index_ + 1,
-                          images_.size(), static_cast<int>(fit_.zoom * 100.0f + 0.5f));
-        r.draw_text(font_, vp.x + 16, vp.y + 12, hud, gfx::theme::TEXT);
+            ? std::format("{}{}   {}/{}   {}", star, album_.images[index_]->name, index_ + 1,
+                          album_.images.size(), mode)
+            : std::format("{}{}   {}/{}   {}%", star, album_.images[index_]->name, index_ + 1,
+                          album_.images.size(), static_cast<int>(fit_.zoom * 100.0f + 0.5f));
+        r.draw_text(font_, vp.x + 16, vp.y + 12, hud,
+                    album_.images[index_]->favorite ? gfx::theme::FAVORITE : gfx::theme::TEXT);
     }
     const char* legend = (mode_ == FillScroll)
-        ? "[Wheel] Scroll   [<-/->] Prev/Next   [F] Fit   [T] Strip   [P] Slideshow   [G] Tags   [X] Export   [Esc] Back"
-        : "[<-/->] Prev/Next   [Wheel/+/-] Zoom   [F] Fill-scroll   [T] Strip   [P] Slideshow   [G] Tags   [X] Export   [Esc] Back";
+        ? "[Wheel] Scroll   [<-/->] Prev/Next   [F] Fit   [T] Strip   [P] Slideshow   [B] Fav   [G] Tags   [X] Export   [Esc] Back"
+        : "[<-/->] Prev/Next   [Wheel/+/-] Zoom   [F] Fill-scroll   [T] Strip   [P] Slideshow   [B] Fav   [G] Tags   [X] Export   [Esc] Back";
     r.draw_text(font_, vp.x + 16, vp.y + 44, legend, gfx::theme::TEXT_FAINT);
 
     if (!export_.status().empty())
@@ -466,7 +487,7 @@ void ImageViewer::render(gfx::Renderer& r)
 {
     // Slideshow is full-screen (no thumbnail strip): it owns the whole window.
     if (mode_ == ViewMode::Slideshow) {
-        slideshow_.render(r, font_, full_cache_, images_,
+        slideshow_.render(r, font_, full_cache_, album_.images,
                           static_cast<float>(win_.width()),
                           static_cast<float>(win_.height()));
         return;
