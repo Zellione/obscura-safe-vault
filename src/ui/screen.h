@@ -9,7 +9,9 @@ namespace gfx { class Renderer; }
 
 namespace ui {
 
-enum class NavKind { None, ToUnlock, ToGallery, ToViewer, Quit };
+enum class NavKind {
+    None, ToUnlock, ToGallery, ToViewer, ToFavoriteImages, ToFavoriteGalleries, Quit
+};
 
 // A transition request. `path`/`index` carry context for the destination:
 //   ToGallery — reopen the grid at `path` with `index` selected (used when the

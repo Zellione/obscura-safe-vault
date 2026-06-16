@@ -78,6 +78,7 @@ private:
     [[nodiscard]] SDL_FRect viewport_rect() const;
     [[nodiscard]] SDL_FRect strip_rect() const;
 
+    void toggle_favorite_current();                 // flip favorite on the current image
     void show_image_at(int idx);                    // absolute, clamped, refit
     void set_index(int delta);                      // wrap, reset view, rebuild
     void back_to_gallery();

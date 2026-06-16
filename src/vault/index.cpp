@@ -33,6 +33,10 @@ void write_node(ByteWriter& w, const IndexNode& node)
         w.bytes(std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(tag.data()), tag_len));
     }
 
+    // Favorite flag (Phase 13): one byte after the tag block, uniform for both
+    // node kinds, so the reader parses it version-gated without branching on type.
+    w.u8(node.favorite ? 1 : 0);
+
     if (node.type == IndexNode::Type::Gallery) {
         w.u32(static_cast<uint32_t>(node.children.size()));
         for (const auto& child : node.children) write_node(w, child);
@@ -111,6 +115,15 @@ bool read_node(ByteReader& r, IndexNode& node, uint32_t depth, uint8_t version)
     // Tags (Phase 12) exist only from version 2 on; older blobs carry none.
     node.tags.clear();
     if (version >= 2 && !read_tags(r, node.tags)) return false;
+
+    // Favorite flag (Phase 13) exists only from version 3 on; older blobs read
+    // as not-favorited. Any non-zero byte counts as favorited.
+    node.favorite = false;
+    if (version >= 3) {
+        const uint8_t fav = r.u8();
+        if (!r.ok()) return false;
+        node.favorite = fav != 0;
+    }
 
     if (node.type == IndexNode::Type::Image) {
         read_image_meta(r, node.meta);

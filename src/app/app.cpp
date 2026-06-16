@@ -8,6 +8,8 @@
 #include "gfx/renderer.h"
 #include "gfx/theme.h"
 #include "platform/paths.h"
+#include "ui/favorites_galleries.h"
+#include "ui/favorites_images.h"
 #include "ui/gallery_grid.h"
 #include "ui/image_viewer.h"
 #include "ui/unlock_screen.h"
@@ -69,6 +71,20 @@ void App::to_viewer(const std::string& gallery_path, int index)
     screen_->on_enter();
 }
 
+void App::to_favorite_images()
+{
+    state_  = State::Browsing;
+    screen_ = std::make_unique<ui::FavoritesImages>(window_, font_, vault_, *cache_);
+    screen_->on_enter();
+}
+
+void App::to_favorite_galleries()
+{
+    state_  = State::Browsing;
+    screen_ = std::make_unique<ui::FavoritesGalleries>(window_, font_, vault_);
+    screen_->on_enter();
+}
+
 namespace {
 // Manual frame-rate floor, used only when the renderer can't VSync (software /
 // headless backends); otherwise SDL_RenderPresent paces presentation.
@@ -109,6 +125,8 @@ bool App::apply_nav()
     switch (const ui::Nav nav = screen_->take_nav(); nav.kind) {
         case ToGallery: screen_->on_exit(); to_gallery(nav.path, nav.index); return true;
         case ToViewer:  screen_->on_exit(); to_viewer(nav.path, nav.index);  return true;
+        case ToFavoriteImages:    screen_->on_exit(); to_favorite_images();    return true;
+        case ToFavoriteGalleries: screen_->on_exit(); to_favorite_galleries(); return true;
         case ToUnlock:  screen_->on_exit(); to_unlock();                     return true;
         case Quit:      running_ = false;                                    return false;
         case None:      return false;

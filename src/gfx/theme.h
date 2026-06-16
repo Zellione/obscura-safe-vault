@@ -21,6 +21,7 @@ inline constexpr Color TEXT_DIM   {139, 147, 161, 255}; // secondary text
 inline constexpr Color TEXT_FAINT {91, 98, 112, 255};   // hints / key legends
 
 inline constexpr Color FOLDER     {200, 170, 90, 255};  // folder glyph
+inline constexpr Color FAVORITE   {245, 205, 70, 255};  // favorite (bookmark) badge
 inline constexpr Color DANGER     {230, 120, 120, 255}; // error text
 inline constexpr Color WARN       {230, 200, 110, 255}; // medium strength
 inline constexpr Color OK         {130, 220, 140, 255}; // strong strength

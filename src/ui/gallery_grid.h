@@ -59,6 +59,7 @@ private:
     void do_import(const std::filesystem::path& file_path);
     void start_search();       // open the search overlay
     void start_tag_editor();   // open the tag editor for the focused tile
+    void toggle_favorite_current();  // flip favorite on the focused tile (B)
     [[nodiscard]] bool current_allows_images() const;
     [[nodiscard]] bool current_allows_galleries() const;
     SDL_Texture*       thumb_texture(const vault::IndexNode& node);

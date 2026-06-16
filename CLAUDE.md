@@ -153,6 +153,8 @@ src/
              search_model.*,              ← pure query tokenise/match/rank (Phase 12)
              search_overlay.*,            ← `/` live-filtered search modal (Phase 12)
              tag_editor.*,                ← `G` add/remove tags modal (Phase 12)
+             favorites_images.*,          ← flat grid of favorited images (Phase 13)
+             favorites_galleries.*,       ← flat grid of favorited galleries (Phase 13)
              widgets.*
   platform/  paths.{h,cpp},              ← config dir + file dialogs (Phase 5)
              file_dialog.*,

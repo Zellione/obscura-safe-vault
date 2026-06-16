@@ -20,10 +20,16 @@ src/
   vault/       vault.*, header.*, index.*,     — .osv container format
                chunk_store.*, byte_io.h, file_util.h
                                                — index.h: IndexNode carries
-                                                 std::vector<std::string> tags
-                                                 (gallery + image); INDEX_VERSION=2
-                                                 (v1 read back-compat, empty tags);
-                                                 INDEX_MAX_TAGS=4096. Vault has tag
+                                                 std::vector<std::string> tags +
+                                                 bool favorite (gallery + image);
+                                                 INDEX_VERSION=3 (v1/v2 read back-
+                                                 compat: empty tags, favorite=false);
+                                                 INDEX_MAX_TAGS=4096. Favorites
+                                                 (Phase 13): Vault::toggle_favorite
+                                                 (node_path) + flat whole-tree
+                                                 list_favorite_images()/
+                                                 list_favorite_galleries()->vector
+                                                 <SearchHit>. Vault has tag
                                                  API + scoped search (Phase 12):
                                                  set_tags/add_tag/remove_tag(node_path),
                                                  search(query, SearchScope{Images,
@@ -103,6 +109,14 @@ src/
                                                  (Both/Images/Galleries) (Phase 12)
                tag_editor.*                    — `G` add/remove-tags modal in both
                                                  GalleryGrid + ImageViewer (Phase 12)
+               favorites_images.*              — flat grid of favorited images across
+                                                 the vault; opens viewer in home gallery
+                                                 (Phase 13; F from gallery grid)
+               favorites_galleries.*           — flat grid of favorited galleries;
+                                                 navigates the normal grid (Phase 13;
+                                                 Shift+F). `B` toggles favorite on the
+                                                 focused grid tile / current viewer image;
+                                                 gold star badge on favorited tiles
                input.*, nav_model.*, viewer_model.h
                passphrase.*, screen.h
                secure_text_field.*, unlock_logic.*

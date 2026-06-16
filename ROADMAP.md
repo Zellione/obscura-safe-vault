@@ -599,24 +599,49 @@ read time); the pure `ui::search_model` drives the overlay's live filter/rank.
 
 ---
 
-## Phase 13 — Favorites ⬜
+## Phase 13 — Favorites ✅
 
 **Goal:** Mark images or galleries as *favorite* and browse them through two
 dedicated screens — an **Image Favorites** section and a **Gallery Favorites**
 section.
 
 ### Tasks
-- [ ] **Index format extension** — a dedicated `favorite` `u8` flag on both gallery and image nodes (bump `INDEX_VERSION` again; pre-existing vaults read as not-favorited). A dedicated flag, *not* a reserved tag, keeps favorites out of the tag namespace and out of tag search.
-- [ ] `Vault` API — `toggle_favorite(node_path)`; `list_favorite_images()` (flat, whole-tree) and `list_favorite_galleries()`; persisted via the crash-safe index swap.
-- [ ] **Toggle UX** — a single key marks/unmarks the focused image or gallery (e.g. `B` for bookmark — `F`/`L`/`T` are already bound in the viewer); favorited tiles show a small star badge in the grid.
-- [ ] **Two distinct screens** — `src/ui/favorites_images.{h,cpp}` (a flat grid of every favorited image across the vault, opens the viewer on activate) and `src/ui/favorites_galleries.{h,cpp}` (a list/grid of favorited galleries; activating one navigates to that gallery in the normal grid). Both reachable via keys from the gallery grid (and listed in the breadcrumb/nav).
-- [ ] Update `CLAUDE.md` module layout + `mem:core`.
-- [ ] `tests/` — favorite flag round-trip for images and galleries; favoriting images populates the image-favorites list across the tree; favoriting a gallery populates the gallery-favorites list; un-favorite removes from both; a pre-favorites vault opens with none favorited.
+- [x] **Index format extension** — a dedicated `favorite` `u8` flag on both gallery and image nodes (bump `INDEX_VERSION` again; pre-existing vaults read as not-favorited). A dedicated flag, *not* a reserved tag, keeps favorites out of the tag namespace and out of tag search.
+- [x] `Vault` API — `toggle_favorite(node_path)`; `list_favorite_images()` (flat, whole-tree) and `list_favorite_galleries()`; persisted via the crash-safe index swap.
+- [x] **Toggle UX** — a single key marks/unmarks the focused image or gallery (`B` for bookmark — `F`/`L`/`T` are already bound in the viewer); favorited tiles show a small gold star badge in the grid (and a gold bar in the list view).
+- [x] **Two distinct screens** — `src/ui/favorites_images.{h,cpp}` (a flat grid of every favorited image across the vault, opens the viewer on activate) and `src/ui/favorites_galleries.{h,cpp}` (a list/grid of favorited galleries; activating one navigates to that gallery in the normal grid). Both reachable via keys from the gallery grid (`F` images, `Shift+F` galleries).
+- [x] Update `CLAUDE.md` module layout + `mem:core`.
+- [x] `tests/` — favorite flag round-trip for images and galleries; favoriting images populates the image-favorites list across the tree; favoriting a gallery populates the gallery-favorites list; un-favorite removes from both; a pre-favorites vault opens with none favorited.
 
 ### Acceptance criterion
 Favoriting images and galleries populates the two distinct favorites screens;
 the flags survive a lock/reopen; opening a favorite gallery navigates to it and
 opening a favorite image opens the viewer.
+
+**Status:** ✅ 273/273 tests pass under `scripts/test.sh` and `--asan` (8 new
+vault favorites tests + 5 new index favorite round-trip/back-compat tests). The
+index format bumped to `INDEX_VERSION = 3` and reads v1/v2 blobs back-compatibly
+with `favorite = false`; the fuzz corpus now seeds favorited gallery + image
+nodes. The favorite flag lives on `IndexNode` (gallery + image); the vault layer
+adds `toggle_favorite` + flat whole-tree `list_favorite_images`/
+`list_favorite_galleries` (persisted via the crash-safe double-buffer swap). The
+two favorites screens are first-class `Screen`s (`NavKind::ToFavoriteImages`/
+`ToFavoriteGalleries`); `B` toggles the focused tile in the grid and the current
+image in the viewer.
+
+> **Notes / decisions made during implementation**
+> - **Favorite byte placement.** The `favorite u8` is written immediately after the
+>   tag block, uniform for both node kinds, so the reader parses it version-gated
+>   (`version >= 3`) without branching on node type — mirroring the Phase 12 tag block.
+> - **Favorites lists reuse `SearchHit`.** `list_favorite_*` return `SearchHit`
+>   (path + node + kind) for consistency with `search`, leaving `effective_tags`
+>   empty (favorites don't compute the tag cascade).
+> - **Toggle doesn't disturb selection.** In the grid, `B` flips the flag on the
+>   same in-memory node the tile points at and repaints on the input event — no
+>   `refresh()`, so the export multi-selection is preserved.
+> - **Favorites images open in their home gallery.** Activating a favorited image
+>   opens the viewer at its parent leaf gallery and index, so `<-`/`->` browse that
+>   gallery (not the flat favorites set); favorited galleries navigate the normal grid.
 
 ---
 
@@ -742,7 +767,7 @@ Offset  Size  Description
   nonce[24] | ciphertext[plaintext_len] | tag[16]
 ```
 
-**Index tree node** (binary serialised; `INDEX_VERSION = 2`):
+**Index tree node** (binary serialised; `INDEX_VERSION = 3`):
 ```
   node_type  u8  (0 = gallery, 1 = image)
   name_len   u16
@@ -750,6 +775,8 @@ Offset  Size  Description
 
   tag_count  u16                     (Phase 12; v2+. Omitted entirely in v1 blobs.)
   tags       { tag_len u16; tag u8[tag_len] (UTF-8) } [tag_count]
+
+  favorite   u8                      (Phase 13; v3+. Omitted in v1/v2 blobs → 0.)
 
   if gallery:
     child_count  u32
@@ -775,7 +802,9 @@ Offset  Size  Description
 >   (`INDEX_VERSION = 2`; v1 blobs read with empty tags). Gallery tags cascade to
 >   descendants at read time (effective tags = own ∪ ancestors'); they are not
 >   copied onto children.
-> - **Phase 13 (Favorites):** a `favorite u8` flag on both node types.
+> - **Phase 13 (Favorites):** ✅ shipped — a `favorite u8` flag on both node types,
+>   written after the tag block (`INDEX_VERSION = 3`; v1/v2 blobs read as
+>   not-favorited).
 > - **Phases 15–16 (Video):** a video node kind (a `media_kind` discriminator)
 >   and new `format` codes appended after `8=AVIF` (e.g. `9=MP4/H.264`); video
 >   nodes reuse the same `data_*`/`thumb_*` layout (thumb = poster frame), with

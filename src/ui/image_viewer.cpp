@@ -231,11 +231,25 @@ void ImageViewer::handle_key(SDL_Keycode key)
                 tag_editor_.open(full_path);
             }
             return;
+        case SDLK_B:      // toggle favorite (bookmark) on the current image
+            toggle_favorite_current();
+            return;
         case SDLK_ESCAPE: back_to_gallery(); return;
         default: break;
     }
     if (mode_ == FillScroll) handle_key_scroll(key);
     else                     handle_key_fit(key);
+}
+
+void ImageViewer::toggle_favorite_current()
+{
+    if (images_.empty()) return;
+    const std::string full_path = gallery_path_.empty()
+        ? images_[index_]->name
+        : gallery_path_ + "/" + images_[index_]->name;
+    // The in-memory tree node images_[index_] points at is the one toggled, so the
+    // HUD star reflects the new state immediately; commit_index() persists it.
+    (void)vault_.toggle_favorite(full_path);
 }
 
 void ImageViewer::handle_key_fit(SDL_Keycode key)
@@ -445,17 +459,21 @@ void ImageViewer::render_hud(gfx::Renderer& r, const SDL_FRect& vp)
 {
     using enum ViewMode;
     if (!images_.empty()) {
+        // A leading "* " marks the current image as favorited (the baked font is
+        // ASCII-only, so an asterisk stands in for a star glyph).
+        const char* star = images_[index_]->favorite ? "* " : "";
         const char* mode = (mode_ == FillScroll) ? "fill" : "fit";
         const std::string hud = (mode_ == FillScroll)
-            ? std::format("{}   {}/{}   {}", images_[index_]->name, index_ + 1,
+            ? std::format("{}{}   {}/{}   {}", star, images_[index_]->name, index_ + 1,
                           images_.size(), mode)
-            : std::format("{}   {}/{}   {}%", images_[index_]->name, index_ + 1,
+            : std::format("{}{}   {}/{}   {}%", star, images_[index_]->name, index_ + 1,
                           images_.size(), static_cast<int>(fit_.zoom * 100.0f + 0.5f));
-        r.draw_text(font_, vp.x + 16, vp.y + 12, hud, gfx::theme::TEXT);
+        r.draw_text(font_, vp.x + 16, vp.y + 12, hud,
+                    images_[index_]->favorite ? gfx::theme::FAVORITE : gfx::theme::TEXT);
     }
     const char* legend = (mode_ == FillScroll)
-        ? "[Wheel] Scroll   [<-/->] Prev/Next   [F] Fit   [T] Strip   [P] Slideshow   [G] Tags   [X] Export   [Esc] Back"
-        : "[<-/->] Prev/Next   [Wheel/+/-] Zoom   [F] Fill-scroll   [T] Strip   [P] Slideshow   [G] Tags   [X] Export   [Esc] Back";
+        ? "[Wheel] Scroll   [<-/->] Prev/Next   [F] Fit   [T] Strip   [P] Slideshow   [B] Fav   [G] Tags   [X] Export   [Esc] Back"
+        : "[<-/->] Prev/Next   [Wheel/+/-] Zoom   [F] Fill-scroll   [T] Strip   [P] Slideshow   [B] Fav   [G] Tags   [X] Export   [Esc] Back";
     r.draw_text(font_, vp.x + 16, vp.y + 44, legend, gfx::theme::TEXT_FAINT);
 
     if (!export_.status().empty())

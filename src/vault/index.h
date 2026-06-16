@@ -55,6 +55,7 @@ struct IndexNode {
     Type                       type = Type::Gallery;
     std::string                name;
     std::vector<std::string>   tags;  // per-node tags (Phase 12)
+    bool                       favorite = false;  // bookmark flag (Phase 13)
 
     // Gallery payload (meaningful when type == Gallery).
     std::vector<IndexNode> children;
@@ -83,7 +84,8 @@ struct IndexNode {
 };
 
 // Current serialised-blob version (first byte of the blob).
-inline constexpr uint8_t INDEX_VERSION = 2;
+// v1: no tags. v2: per-node tags (Phase 12). v3: per-node favorite flag (Phase 13).
+inline constexpr uint8_t INDEX_VERSION = 3;
 
 // Maximum tree depth accepted on deserialisation — guards against stack overflow
 // from a deeply-nested hostile blob.
