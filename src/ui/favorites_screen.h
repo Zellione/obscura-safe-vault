@@ -31,7 +31,9 @@ protected:
     [[nodiscard]] virtual std::vector<vault::SearchHit> fetch() const = 0;
     virtual void draw_tile_content(gfx::Renderer& r, const vault::SearchHit& hit,
                                    const SDL_FRect& box) = 0;
-    virtual void activate(const vault::SearchHit& hit) = 0;
+    // Open the focused favorite. `index` is its position in the favorites list
+    // (used by the images screen to open the viewer over the whole set).
+    virtual void activate(const vault::SearchHit& hit, int index) = 0;
     [[nodiscard]] virtual const char* title() const = 0;
     [[nodiscard]] virtual const char* empty_hint() const = 0;
 

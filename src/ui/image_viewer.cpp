@@ -35,15 +35,35 @@ ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& v
 {
 }
 
+ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
+                         gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
+                         std::vector<const vault::IndexNode*> images,
+                         std::vector<std::string> paths, int start_index, Nav back)
+    : win_(win), font_(font), vault_(vault), cache_(cache), export_(folder_dlg, win),
+      tag_editor_(vault, win), search_(vault, win),
+      images_(std::move(images)), paths_(std::move(paths)), back_(std::move(back)),
+      from_collection_(true), index_(start_index),
+      full_cache_(vault, win.sdl_renderer(), &decode_worker_)
+{
+}
+
 void ImageViewer::on_enter()
 {
-    // Snapshot the leaf gallery's images. A leaf gallery holds only images, but
-    // filter defensively so a stray sub-gallery can never be "viewed".
-    images_.clear();
-    for (const vault::IndexNode* n : vault_.list(gallery_path_))
-        if (n->is_image()) images_.push_back(n);
+    // Gallery mode snapshots the leaf gallery's images (a leaf holds only images,
+    // but filter defensively). Collection mode (e.g. favorites) was handed an
+    // explicit image set + parallel paths at construction — don't re-list.
+    if (!from_collection_) {
+        images_.clear();
+        paths_.clear();
+        for (const vault::IndexNode* n : vault_.list(gallery_path_)) {
+            if (!n->is_image()) continue;
+            images_.push_back(n);
+            paths_.push_back(gallery_path_.empty() ? n->name
+                                                   : gallery_path_ + "/" + n->name);
+        }
+    }
 
-    if (images_.empty()) { back_to_gallery(); return; }
+    if (images_.empty()) { go_back(); return; }
     index_  = std::clamp(index_, 0, static_cast<int>(images_.size()) - 1);
     fit_.fitted = false;
 }
@@ -93,9 +113,12 @@ void ImageViewer::set_index(int delta)
     show_image_at(wrap_index(index_, delta, static_cast<int>(images_.size())));
 }
 
-void ImageViewer::back_to_gallery()
+void ImageViewer::go_back()
 {
-    request(NavKind::ToGallery, gallery_path_, index_);
+    // Collection mode returns to wherever it was launched from (e.g. the favorites
+    // grid); gallery mode returns to its leaf gallery at the current image.
+    if (from_collection_) request(back_.kind, back_.path, back_.index);
+    else                  request(NavKind::ToGallery, gallery_path_, index_);
 }
 
 void ImageViewer::zoom_by(float factor, float cx, float cy)
@@ -224,17 +247,12 @@ void ImageViewer::handle_key(SDL_Keycode key)
                 export_.begin(std::format("Export \"{}\"?", images_[index_]->name));
             return;
         case SDLK_G:      // edit tags for the current image
-            if (!images_.empty()) {
-                const std::string full_path = gallery_path_.empty()
-                    ? images_[index_]->name
-                    : gallery_path_ + "/" + images_[index_]->name;
-                tag_editor_.open(full_path);
-            }
+            if (!images_.empty()) tag_editor_.open(paths_[index_]);
             return;
         case SDLK_B:      // toggle favorite (bookmark) on the current image
             toggle_favorite_current();
             return;
-        case SDLK_ESCAPE: back_to_gallery(); return;
+        case SDLK_ESCAPE: go_back(); return;
         default: break;
     }
     if (mode_ == FillScroll) handle_key_scroll(key);
@@ -244,12 +262,9 @@ void ImageViewer::handle_key(SDL_Keycode key)
 void ImageViewer::toggle_favorite_current()
 {
     if (images_.empty()) return;
-    const std::string full_path = gallery_path_.empty()
-        ? images_[index_]->name
-        : gallery_path_ + "/" + images_[index_]->name;
     // The in-memory tree node images_[index_] points at is the one toggled, so the
     // HUD star reflects the new state immediately; commit_index() persists it.
-    (void)vault_.toggle_favorite(full_path);
+    (void)vault_.toggle_favorite(paths_[index_]);
 }
 
 void ImageViewer::handle_key_fit(SDL_Keycode key)
@@ -258,7 +273,7 @@ void ImageViewer::handle_key_fit(SDL_Keycode key)
     switch (key) {
         case SDLK_LEFT:  is_zoomed() ? pan_by(PAN_STEP, 0) : set_index(-1); break;
         case SDLK_RIGHT: is_zoomed() ? pan_by(-PAN_STEP, 0) : set_index(1); break;
-        case SDLK_UP:    is_zoomed() ? pan_by(0, PAN_STEP) : back_to_gallery(); break;
+        case SDLK_UP:    is_zoomed() ? pan_by(0, PAN_STEP) : go_back(); break;
         case SDLK_DOWN:  if (is_zoomed()) pan_by(0, -PAN_STEP); break;
         case SDLK_0:     fit_.fitted = false; break;  // reset to fit-to-window
         case SDLK_PLUS:

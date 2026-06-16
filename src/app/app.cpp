@@ -85,6 +85,26 @@ void App::to_favorite_galleries()
     screen_->on_enter();
 }
 
+void App::to_favorite_viewer(int index)
+{
+    // Build a viewer collection from the favorites set (same ordering the
+    // favorites grid used), so prev/next iterate the favorites. Exiting returns
+    // to the favorites-images grid.
+    auto favs = vault_.list_favorite_images();
+    std::vector<const vault::IndexNode*> images;
+    std::vector<std::string>             paths;
+    images.reserve(favs.size());
+    paths.reserve(favs.size());
+    for (auto& h : favs) { images.push_back(h.node); paths.push_back(std::move(h.path)); }
+
+    state_  = State::Viewing;
+    screen_ = std::make_unique<ui::ImageViewer>(
+        window_, font_, vault_, *cache_, folder_dialog_,
+        std::move(images), std::move(paths), index,
+        ui::Nav{ui::NavKind::ToFavoriteImages, {}, 0});
+    screen_->on_enter();
+}
+
 namespace {
 // Manual frame-rate floor, used only when the renderer can't VSync (software /
 // headless backends); otherwise SDL_RenderPresent paces presentation.
@@ -127,6 +147,7 @@ bool App::apply_nav()
         case ToViewer:  screen_->on_exit(); to_viewer(nav.path, nav.index);  return true;
         case ToFavoriteImages:    screen_->on_exit(); to_favorite_images();    return true;
         case ToFavoriteGalleries: screen_->on_exit(); to_favorite_galleries(); return true;
+        case ToFavoriteViewer:    screen_->on_exit(); to_favorite_viewer(nav.index); return true;
         case ToUnlock:  screen_->on_exit(); to_unlock();                     return true;
         case Quit:      running_ = false;                                    return false;
         case None:      return false;

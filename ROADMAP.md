@@ -639,9 +639,13 @@ image in the viewer.
 > - **Toggle doesn't disturb selection.** In the grid, `B` flips the flag on the
 >   same in-memory node the tile points at and repaints on the input event — no
 >   `refresh()`, so the export multi-selection is preserved.
-> - **Favorites images open in their home gallery.** Activating a favorited image
->   opens the viewer at its parent leaf gallery and index, so `<-`/`->` browse that
->   gallery (not the flat favorites set); favorited galleries navigate the normal grid.
+> - **Favorites images open a favorites-scoped viewer.** Activating a favorited
+>   image opens the viewer over the *whole* favorites set (`NavKind::ToFavoriteViewer`),
+>   so `<-`/`->`, the strip, and the slideshow iterate the favorites rather than one
+>   gallery; `Esc`/`Up` returns to the favorites grid. The viewer gained a "collection
+>   mode" — an explicit image set with a per-image full path and an exit target — so it
+>   is no longer tied to a single `gallery_path_`. Favorited galleries navigate the
+>   normal grid.
 
 ---
 

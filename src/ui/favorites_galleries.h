@@ -23,7 +23,7 @@ protected:
     [[nodiscard]] std::vector<vault::SearchHit> fetch() const override;
     void draw_tile_content(gfx::Renderer& r, const vault::SearchHit& hit,
                            const SDL_FRect& box) override;
-    void activate(const vault::SearchHit& hit) override;
+    void activate(const vault::SearchHit& hit, int index) override;
     [[nodiscard]] const char* title() const override { return "Favorite Galleries"; }
     [[nodiscard]] const char* empty_hint() const override
     {

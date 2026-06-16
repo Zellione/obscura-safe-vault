@@ -10,7 +10,8 @@ namespace gfx { class Renderer; }
 namespace ui {
 
 enum class NavKind {
-    None, ToUnlock, ToGallery, ToViewer, ToFavoriteImages, ToFavoriteGalleries, Quit
+    None, ToUnlock, ToGallery, ToViewer, ToFavoriteImages, ToFavoriteGalleries,
+    ToFavoriteViewer, Quit
 };
 
 // A transition request. `path`/`index` carry context for the destination:

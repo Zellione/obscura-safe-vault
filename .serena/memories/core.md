@@ -110,8 +110,16 @@ src/
                tag_editor.*                    — `G` add/remove-tags modal in both
                                                  GalleryGrid + ImageViewer (Phase 12)
                favorites_images.*              — flat grid of favorited images across
-                                                 the vault; opens viewer in home gallery
-                                                 (Phase 13; F from gallery grid)
+                                                 the vault; opens a favorites-scoped
+                                                 viewer (ToFavoriteViewer: prev/next
+                                                 iterate the favorites set, Esc returns
+                                                 to the grid) (Phase 13; F from gallery
+                                                 grid). favorites_screen.* is the shared
+                                                 base (grid/selection/badge) for both
+                                                 favorites screens.
+                                                 ImageViewer has a "collection mode"
+                                                 (explicit image set + per-image path +
+                                                 exit Nav) so it isn't tied to one gallery.
                favorites_galleries.*           — flat grid of favorited galleries;
                                                  navigates the normal grid (Phase 13;
                                                  Shift+F). `B` toggles favorite on the

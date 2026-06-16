@@ -20,7 +20,7 @@ void FavoritesGalleries::draw_tile_content(gfx::Renderer& r, const vault::Search
                       gfx::theme::RADIUS_SMALL, gfx::theme::FOLDER);
 }
 
-void FavoritesGalleries::activate(const vault::SearchHit& hit)
+void FavoritesGalleries::activate(const vault::SearchHit& hit, int /*index*/)
 {
     request(NavKind::ToGallery, hit.path, 0);
 }

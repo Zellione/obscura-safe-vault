@@ -44,9 +44,19 @@ namespace ui {
 // images plus their immediate neighbours (a small bounded set), evicting the rest.
 class ImageViewer : public Screen {
 public:
+    // Gallery mode: view the images of a single leaf gallery, returning to that
+    // gallery on exit.
     ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                 gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
                 std::string gallery_path, int start_index);
+
+    // Collection mode: view an explicit cross-tree set of images (e.g. favorites),
+    // each carrying its own full slash-path, returning to `back` on exit.
+    ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
+                gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
+                std::vector<const vault::IndexNode*> images,
+                std::vector<std::string> paths, int start_index, Nav back);
+
     ~ImageViewer() override = default;
 
     ImageViewer(const ImageViewer&)            = delete;
@@ -81,7 +91,7 @@ private:
     void toggle_favorite_current();                 // flip favorite on the current image
     void show_image_at(int idx);                    // absolute, clamped, refit
     void set_index(int delta);                      // wrap, reset view, rebuild
-    void back_to_gallery();
+    void go_back();                                 // return to gallery / favorites
     void zoom_by(float factor, float cx, float cy); // centred on (cx, cy)
     void pan_by(float dx, float dy);
     [[nodiscard]] bool is_zoomed() const noexcept;  // zoomed past fit-to-window
@@ -108,8 +118,11 @@ private:
     ExportUi                export_;
     TagEditor               tag_editor_;
     SearchOverlay           search_;
-    std::string             gallery_path_;
+    std::string             gallery_path_;   // leaf gallery (gallery mode); "" in collection mode
     std::vector<const vault::IndexNode*> images_;
+    std::vector<std::string> paths_;          // full slash-path per image (parallel to images_)
+    Nav   back_;                              // exit target (collection mode)
+    bool  from_collection_ = false;           // images_ supplied explicitly, don't re-list
     int   index_ = 0;
 
     // Persistent layout/mode choices (reset on construction, i.e. per viewer).

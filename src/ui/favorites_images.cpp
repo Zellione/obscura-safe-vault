@@ -4,7 +4,6 @@
 #include "gfx/renderer.h"
 #include "gfx/texture_cache.h"
 #include "gfx/theme.h"
-#include "ui/nav_model.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
 
@@ -20,22 +19,12 @@ void FavoritesImages::update(double)
     if (pump_thumbs()) mark_dirty();   // off-thread thumbnail decode(s) landed
 }
 
-void FavoritesImages::activate(const vault::SearchHit& hit)
+void FavoritesImages::activate(const vault::SearchHit&, int index)
 {
-    // Open the viewer in the image's home gallery, positioned on it. The leaf
-    // gallery holds only images, so its listing index is the viewer's index.
-    auto segs = split_path(hit.path);
-    std::string home;
-    if (segs.size() > 1) {
-        segs.pop_back();
-        home = join_path(segs);
-    }
-    int viewer_index = 0;
-    const auto siblings = vault_ref().list(home);
-    for (size_t i = 0; i < siblings.size(); ++i) {
-        if (siblings[i] == hit.node) { viewer_index = static_cast<int>(i); break; }
-    }
-    request(NavKind::ToViewer, home, viewer_index);
+    // Open the viewer over the whole favorites set, positioned on this image, so
+    // prev/next iterate the favorites rather than one gallery. App rebuilds the
+    // same list_favorite_images() ordering to construct the collection.
+    request(NavKind::ToFavoriteViewer, "", index);
 }
 
 SDL_Texture* FavoritesImages::thumb_texture(const vault::IndexNode& node)

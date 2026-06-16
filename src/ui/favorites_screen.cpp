@@ -50,7 +50,7 @@ void FavoritesScreen::open_selected()
 {
     const int s = nav_.selected();
     if (s < 0 || s >= static_cast<int>(favs_.size())) return;
-    activate(favs_[s]);
+    activate(favs_[s], s);
 }
 
 void FavoritesScreen::handle_event(const SDL_Event& e)
