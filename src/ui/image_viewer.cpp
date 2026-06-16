@@ -45,7 +45,7 @@ void ImageViewer::on_enter()
 
     if (images_.empty()) { back_to_gallery(); return; }
     index_  = std::clamp(index_, 0, static_cast<int>(images_.size()) - 1);
-    fitted_ = false;
+    fit_.fitted = false;
 }
 
 void ImageViewer::on_exit()
@@ -76,15 +76,15 @@ SDL_FRect ImageViewer::strip_rect() const
 
 bool ImageViewer::is_zoomed() const noexcept
 {
-    return zoom_ > fit_zoom_ * 1.001f;
+    return fit_.zoom > fit_.fit_zoom * 1.001f;
 }
 
 void ImageViewer::show_image_at(int idx)
 {
     if (images_.empty()) return;
     index_    = std::clamp(idx, 0, static_cast<int>(images_.size()) - 1);
-    fitted_   = false;
-    dragging_ = false;
+    fit_.fitted   = false;
+    fit_.dragging = false;
     if (mode_ == ViewMode::FillScroll) scroll_to_image(index_);
 }
 
@@ -101,17 +101,18 @@ void ImageViewer::back_to_gallery()
 void ImageViewer::zoom_by(float factor, float cx, float cy)
 {
     const SDL_FRect vp = viewport_rect();
-    const ZoomResult z = zoom_at(img_size_, zoom_, pan_, factor,
+    const ZoomResult z = zoom_at(fit_.img_size, fit_.zoom, fit_.pan, factor,
                                  Vec2{cx - vp.x, cy - vp.y}, Vec2{vp.w, vp.h});
-    zoom_ = z.zoom;
-    pan_  = z.pan;
+    fit_.zoom = z.zoom;
+    fit_.pan  = z.pan;
 }
 
 void ImageViewer::pan_by(float dx, float dy)
 {
     const SDL_FRect vp = viewport_rect();
-    pan_ = clamp_pan(Vec2{pan_.x + dx, pan_.y + dy}, img_size_.x * zoom_,
-                     img_size_.y * zoom_, vp.w, vp.h);
+    fit_.pan = clamp_pan(Vec2{fit_.pan.x + dx, fit_.pan.y + dy},
+                         fit_.img_size.x * fit_.zoom, fit_.img_size.y * fit_.zoom,
+                         vp.w, vp.h);
 }
 
 // --- FillScroll-mode helpers ----------------------------------------------
@@ -191,19 +192,19 @@ void ImageViewer::handle_key(SDL_Keycode key)
             index_  = slideshow_.index();
             slideshow_.stop();
             mode_   = Fit;
-            fitted_ = false;
+            fit_.fitted = false;
         }
         return;
     }
     switch (key) {
         case SDLK_T:      // toggle the strip between bottom and left
             strip_side_ = (strip_side_ == Bottom) ? Left : Bottom;
-            fitted_ = false;                      // viewport changed: refit
+            fit_.fitted = false;                      // viewport changed: refit
             if (mode_ == FillScroll) scroll_to_image(index_);
             return;
         case SDLK_F:      // toggle fit <-> fill-width scroll
             if (mode_ == Fit) { mode_ = FillScroll; scroll_to_image(index_); }
-            else              { mode_ = Fit; fitted_ = false; }
+            else              { mode_ = Fit; fit_.fitted = false; }
             return;
         case SDLK_P:      // start the full-screen slideshow
             if (!images_.empty()) {
@@ -238,7 +239,7 @@ void ImageViewer::handle_key_fit(SDL_Keycode key)
         case SDLK_RIGHT: is_zoomed() ? pan_by(-PAN_STEP, 0) : set_index(1); break;
         case SDLK_UP:    is_zoomed() ? pan_by(0, PAN_STEP) : back_to_gallery(); break;
         case SDLK_DOWN:  if (is_zoomed()) pan_by(0, -PAN_STEP); break;
-        case SDLK_0:     fitted_ = false; break;  // reset to fit-to-window
+        case SDLK_0:     fit_.fitted = false; break;  // reset to fit-to-window
         case SDLK_PLUS:
         case SDLK_EQUALS:
         case SDLK_KP_PLUS:  zoom_by(ZOOM_STEP, vp.x + vp.w * 0.5f, vp.y + vp.h * 0.5f); break;
@@ -267,7 +268,7 @@ void ImageViewer::handle_mouse_down(const SDL_MouseButtonEvent& b)
         show_image_at(hit);
     } else if (mode_ == ViewMode::Fit) {
         const SDL_FRect vp = viewport_rect();
-        if (point_in_rect(b.x, b.y, vp)) dragging_ = true;
+        if (point_in_rect(b.x, b.y, vp)) fit_.dragging = true;
     }
 }
 
@@ -337,10 +338,10 @@ void ImageViewer::handle_event(const SDL_Event& e)
         case SDL_EVENT_MOUSE_WHEEL:       handle_wheel(e.wheel);        break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN: handle_mouse_down(e.button);  break;
         case SDL_EVENT_MOUSE_BUTTON_UP:
-            if (e.button.button == SDL_BUTTON_LEFT) dragging_ = false;
+            if (e.button.button == SDL_BUTTON_LEFT) fit_.dragging = false;
             break;
         case SDL_EVENT_MOUSE_MOTION:
-            if (dragging_ && mode_ == ViewMode::Fit) pan_by(e.motion.xrel, e.motion.yrel);
+            if (fit_.dragging && mode_ == ViewMode::Fit) pan_by(e.motion.xrel, e.motion.yrel);
             break;
         default: break;
     }
@@ -360,16 +361,16 @@ void ImageViewer::render_fit(gfx::Renderer& r, const SDL_FRect& vp)
                         gfx::theme::DANGER);
         return;
     }
-    img_size_ = Vec2{ft->w, ft->h};
+    fit_.img_size = Vec2{ft->w, ft->h};
 
-    fit_zoom_ = clamp_zoom(fit_zoom(img_size_.x, img_size_.y, vp.w, vp.h));
-    if (!fitted_) { zoom_ = fit_zoom_; pan_ = Vec2{}; fitted_ = true; }
+    fit_.fit_zoom = clamp_zoom(fit_zoom(fit_.img_size.x, fit_.img_size.y, vp.w, vp.h));
+    if (!fit_.fitted) { fit_.zoom = fit_.fit_zoom; fit_.pan = Vec2{}; fit_.fitted = true; }
 
-    const float sw = img_size_.x * zoom_;
-    const float sh = img_size_.y * zoom_;
-    pan_ = clamp_pan(pan_, sw, sh, vp.w, vp.h);
-    const float dx = vp.x + vp.w * 0.5f + pan_.x - sw * 0.5f;
-    const float dy = vp.y + vp.h * 0.5f + pan_.y - sh * 0.5f;
+    const float sw = fit_.img_size.x * fit_.zoom;
+    const float sh = fit_.img_size.y * fit_.zoom;
+    fit_.pan = clamp_pan(fit_.pan, sw, sh, vp.w, vp.h);
+    const float dx = vp.x + vp.w * 0.5f + fit_.pan.x - sw * 0.5f;
+    const float dy = vp.y + vp.h * 0.5f + fit_.pan.y - sh * 0.5f;
 
     const SDL_Rect clip{static_cast<int>(vp.x), static_cast<int>(vp.y),
                         static_cast<int>(vp.w), static_cast<int>(vp.h)};
@@ -439,7 +440,7 @@ void ImageViewer::render_hud(gfx::Renderer& r, const SDL_FRect& vp)
             ? std::format("{}   {}/{}   {}", images_[index_]->name, index_ + 1,
                           images_.size(), mode)
             : std::format("{}   {}/{}   {}%", images_[index_]->name, index_ + 1,
-                          images_.size(), static_cast<int>(zoom_ * 100.0f + 0.5f));
+                          images_.size(), static_cast<int>(fit_.zoom * 100.0f + 0.5f));
         r.draw_text(font_, vp.x + 16, vp.y + 12, hud, gfx::theme::TEXT);
     }
     const char* legend = (mode_ == FillScroll)
