@@ -69,44 +69,91 @@ void App::to_viewer(const std::string& gallery_path, int index)
     screen_->on_enter();
 }
 
+namespace {
+// Manual frame-rate floor, used only when the renderer can't VSync (software /
+// headless backends); otherwise SDL_RenderPresent paces presentation.
+constexpr uint64_t FRAME_CAP_NS = 1'000'000'000ULL / 60;
+// Upper bound on how long the loop blocks for input while idle, so async results
+// (file dialogs, the decode worker) surface promptly even without a wake event.
+constexpr int32_t IDLE_HEARTBEAT_MS = 250;
+} // namespace
+
+void App::dispatch_event(const SDL_Event& e)
+{
+    if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
+        running_ = false;
+    else if (screen_)
+        screen_->handle_event(e);
+}
+
+bool App::pump_events(bool animating)
+{
+    SDL_Event e;
+    bool      had_event = false;
+    if (animating) {
+        // Keep ticking the animation: never block, just drain the queue.
+        while (window_.poll_event(e)) { dispatch_event(e); had_event = true; }
+    } else if (SDL_WaitEventTimeout(&e, IDLE_HEARTBEAT_MS)) {
+        // Idle: block until an event (or the heartbeat) rather than spinning.
+        dispatch_event(e);
+        had_event = true;
+        while (window_.poll_event(e)) dispatch_event(e);
+    }
+    return had_event;
+}
+
+bool App::apply_nav()
+{
+    if (!screen_) return false;
+    using enum ui::NavKind;
+    switch (const ui::Nav nav = screen_->take_nav(); nav.kind) {
+        case ToGallery: screen_->on_exit(); to_gallery(nav.path, nav.index); return true;
+        case ToViewer:  screen_->on_exit(); to_viewer(nav.path, nav.index);  return true;
+        case ToUnlock:  screen_->on_exit(); to_unlock();                     return true;
+        case Quit:      running_ = false;                                    return false;
+        case None:      return false;
+    }
+    return false;
+}
+
+void App::render_frame()
+{
+    const uint64_t render_start = SDL_GetTicksNS();
+    window_.begin_frame(gfx::theme::BG.r, gfx::theme::BG.g, gfx::theme::BG.b);
+    if (screen_) {
+        gfx::Renderer r(window_.sdl_renderer());
+        screen_->render(r);
+    }
+    window_.end_frame();
+
+    if (!window_.vsync()) {
+        const uint64_t spent = SDL_GetTicksNS() - render_start;
+        if (spent < FRAME_CAP_NS) SDL_DelayNS(FRAME_CAP_NS - spent);
+    }
+}
+
 void App::run()
 {
-    bool     running = true;
-    uint64_t prev    = SDL_GetTicks();
+    running_       = true;
+    uint64_t prev  = SDL_GetTicksNS();
 
-    while (running) {
-        SDL_Event e;
-        while (window_.poll_event(e)) {
-            if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
-                running = false;
-            else if (screen_)
-                screen_->handle_event(e);
-        }
+    while (running_) {
+        const bool animating = screen_ && screen_->animating();
+        const bool had_event = pump_events(animating);
 
-        const uint64_t now = SDL_GetTicks();
-        const double   dt  = static_cast<double>(now - prev) / 1000.0;
+        const uint64_t now = SDL_GetTicksNS();
+        const double   dt  = static_cast<double>(now - prev) / 1'000'000'000.0;
         prev = now;
 
         if (screen_) screen_->update(dt);
 
-        window_.begin_frame(gfx::theme::BG.r, gfx::theme::BG.g, gfx::theme::BG.b);
-        if (screen_) {
-            gfx::Renderer r(window_.sdl_renderer());
-            screen_->render(r);
-        }
-        window_.end_frame();
+        // Resolve a transition before rendering so the destination screen paints
+        // this frame instead of after another idle heartbeat.
+        const bool transitioned = apply_nav();
 
-        if (screen_) {
-            using enum ui::NavKind;
-            const ui::Nav nav = screen_->take_nav();
-            switch (nav.kind) {
-                case ToGallery: screen_->on_exit(); to_gallery(nav.path, nav.index); break;
-                case ToViewer:  screen_->on_exit(); to_viewer(nav.path, nav.index);  break;
-                case ToUnlock:  screen_->on_exit(); to_unlock();  break;
-                case Quit:      running = false; break;
-                case None:      break;
-            }
-        }
+        bool redraw = animating || had_event || transitioned;
+        if (screen_ && screen_->consume_dirty()) redraw = true;
+        if (running_ && redraw) render_frame();
     }
 }
 

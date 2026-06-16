@@ -33,6 +33,14 @@ bool Window::init(const WindowConfig& cfg)
         return false;
     }
 
+    // Cap presentation to the display refresh so the render loop can't saturate
+    // the GPU. Not every backend supports it (software/headless); when it fails
+    // the app loop falls back to a manual frame-time floor (see App::run).
+    vsync_ = SDL_SetRenderVSync(renderer_, 1);
+    if (!vsync_)
+        std::println(stderr, "[gfx::Window] VSync unavailable ({}); using frame cap.",
+                     SDL_GetError());
+
     return true;
 }
 

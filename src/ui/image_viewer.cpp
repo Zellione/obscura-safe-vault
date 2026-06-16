@@ -31,7 +31,7 @@ ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& v
     : win_(win), font_(font), vault_(vault), cache_(cache), export_(folder_dlg, win),
       tag_editor_(vault, win), search_(vault, win),
       gallery_path_(std::move(gallery_path)), index_(start_index),
-      full_cache_(vault, win.sdl_renderer())
+      full_cache_(vault, win.sdl_renderer(), &decode_worker_)
 {
 }
 
@@ -124,24 +124,31 @@ float ImageViewer::scaled_height(const vault::IndexNode& n, float vp_w) const
     return vp_w * (h / w);
 }
 
-ScrollModel ImageViewer::build_scroll_model() const
+const ScrollModel& ImageViewer::build_scroll_model()
 {
-    const SDL_FRect vp = viewport_rect();
-    std::vector<float> heights;
-    heights.reserve(images_.size());
-    for (const vault::IndexNode* n : images_) heights.push_back(scaled_height(*n, vp.w));
-    return ScrollModel(heights, vp.h);
+    if (const SDL_FRect vp = viewport_rect();
+        !scroll_cache_.model || scroll_cache_.w != vp.w || scroll_cache_.h != vp.h ||
+        scroll_cache_.n != images_.size()) {
+        std::vector<float> heights;   // transient; ScrollModel copies into prefix sums
+        heights.reserve(images_.size());
+        for (const vault::IndexNode* n : images_) heights.push_back(scaled_height(*n, vp.w));
+        scroll_cache_.model.emplace(heights, vp.h);
+        scroll_cache_.w = vp.w;
+        scroll_cache_.h = vp.h;
+        scroll_cache_.n = images_.size();
+    }
+    return *scroll_cache_.model;
 }
 
 void ImageViewer::scroll_to_image(int idx)
 {
-    const ScrollModel m = build_scroll_model();
+    const ScrollModel& m = build_scroll_model();
     scroll_y_ = m.clamp_scroll(m.image_top(std::clamp(idx, 0, m.count() - 1)));
 }
 
 void ImageViewer::scroll_by(float dy)
 {
-    const ScrollModel m = build_scroll_model();
+    const ScrollModel& m = build_scroll_model();
     scroll_y_ = m.clamp_scroll(scroll_y_ + dy);
     index_    = m.active_index(scroll_y_);
 }
@@ -283,6 +290,8 @@ void ImageViewer::handle_wheel(const SDL_MouseWheelEvent& w)
 
 void ImageViewer::update(double dt)
 {
+    if (full_cache_.pump()) mark_dirty();   // an off-thread decode landed — repaint
+
     if (mode_ == ViewMode::Slideshow) {
         slideshow_.update(dt);
         index_ = slideshow_.index();
@@ -295,6 +304,7 @@ void ImageViewer::update(double dt)
         export_.set_status(sum.written == 1
                                ? std::format("Exported to {}", dest->string())
                                : "Export failed.");
+        mark_dirty();   // export folder picker resolved — repaint the status line
     }
 }
 
@@ -381,7 +391,7 @@ void ImageViewer::render_fit(gfx::Renderer& r, const SDL_FRect& vp)
 
 void ImageViewer::render_scroll(gfx::Renderer& r, const SDL_FRect& vp)
 {
-    const ScrollModel m = build_scroll_model();
+    const ScrollModel& m = build_scroll_model();
     scroll_y_ = m.clamp_scroll(scroll_y_);
     index_    = m.active_index(scroll_y_);
 
@@ -391,10 +401,10 @@ void ImageViewer::render_scroll(gfx::Renderer& r, const SDL_FRect& vp)
     // Keep the visible images plus one neighbour each side decoded; evict rest.
     const int lo = std::max(0, first - 1);
     const int hi = std::min(m.count() - 1, last + 1);
-    std::vector<uint64_t> keep;
-    keep.reserve(static_cast<size_t>(hi - lo + 1));
-    for (int i = lo; i <= hi; ++i) keep.push_back(images_[i]->meta.data_offset);
-    full_cache_.evict_except(keep);
+    scratch_.keep.clear();
+    scratch_.keep.reserve(static_cast<size_t>(hi - lo + 1));
+    for (int i = lo; i <= hi; ++i) scratch_.keep.push_back(images_[i]->meta.data_offset);
+    full_cache_.evict_except(scratch_.keep);
 
     const SDL_Rect clip{static_cast<int>(vp.x), static_cast<int>(vp.y),
                         static_cast<int>(vp.w), static_cast<int>(vp.h)};
@@ -417,14 +427,14 @@ void ImageViewer::render_strip(gfx::Renderer& r)
 
     const float thumb = thumb_size();
     const bool  vertical = (strip_side_ == StripSide::Left);
-    std::vector<SDL_Texture*> thumbs;
-    thumbs.reserve(images_.size());
-    for (const vault::IndexNode* n : images_) thumbs.push_back(thumb_texture(*n));
+    scratch_.thumbs.clear();
+    scratch_.thumbs.reserve(images_.size());
+    for (const vault::IndexNode* n : images_) scratch_.thumbs.push_back(thumb_texture(*n));
 
     const float extent = vertical ? strip.h : strip.w;
     const float scroll = strip_scroll_centered(index_, static_cast<int>(images_.size()),
                                                thumb, STRIP_GAP, extent);
-    r.draw_thumbnail_strip(thumbs, strip,
+    r.draw_thumbnail_strip(scratch_.thumbs, strip,
                            gfx::ThumbnailStrip{.size = thumb, .gap = STRIP_GAP,
                                                .scroll = scroll, .selected = index_,
                                                .highlight = gfx::theme::ACCENT,

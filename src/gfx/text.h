@@ -71,8 +71,21 @@ public:
 
     /// Draw `text` with its top-left at (x, y), tinted `c`. Uploads the atlas
     /// texture lazily on first call. Returns false if not baked or upload fails.
+    /// Issues a single SDL_RenderGeometry call for the whole run (one textured
+    /// quad per drawable glyph) rather than one draw call per glyph.
     [[nodiscard]] bool draw_text(SDL_Renderer* r, float x, float y,
                                  std::string_view text, Color c);
+
+    /// Append the textured-quad geometry for `text` placed with its top-left at
+    /// (x, y), tinted `c`, into `verts`/`idx`: 4 vertices + 6 indices per
+    /// drawable glyph (zero-area glyphs like space are skipped). Texture coords
+    /// are normalised against the atlas size; indices are offset by the current
+    /// `verts.size()` so callers may batch several runs into one buffer pair.
+    /// Pure CPU work (no SDL renderer) — the layout/UV maths is unit-testable
+    /// headlessly. Does nothing if the atlas is not baked.
+    void build_text_geometry(float x, float y, std::string_view text, Color c,
+                             std::vector<SDL_Vertex>& verts,
+                             std::vector<int>& idx) const;
 
     /// Destroy the cached GPU texture (call before the owning renderer is torn
     /// down or recreated). The CPU-side bake is kept; the texture is rebuilt
@@ -89,6 +102,11 @@ private:
     std::vector<uint8_t>    bitmap_;            // 8-bit alpha, aw_ * ah_
     std::vector<BakedGlyph> glyphs_;            // GLYPH_COUNT entries when baked
     SDL_Texture*            tex_ = nullptr;     // lazily created from bitmap_
+
+    // Reused per draw_text() to batch a run's glyph quads into one geometry
+    // submission without per-call heap churn (cleared, not reallocated).
+    mutable std::vector<SDL_Vertex> verts_;
+    mutable std::vector<int>        idx_;
 };
 
 } // namespace gfx

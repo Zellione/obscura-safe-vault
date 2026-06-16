@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -91,6 +92,64 @@ TEST(font_atlas_draw_text_runs_headless)
 
     SDL_DestroyRenderer(r);
     SDL_DestroySurface(surf);
+}
+
+// ---------------------------------------------------------------------------
+// Batched glyph geometry (CPU-only — no SDL renderer needed)
+// ---------------------------------------------------------------------------
+
+TEST(build_text_geometry_emits_quad_per_drawable_glyph)
+{
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(kFontPath, 24.0f));
+
+    std::vector<SDL_Vertex> verts;
+    std::vector<int>        idx;
+    // "AB" — two drawable glyphs, no spaces.
+    font.build_text_geometry(0.0f, 0.0f, "AB", gfx::Color{255, 255, 255, 255}, verts, idx);
+    CHECK_EQ(verts.size(), size_t{8});   // 4 vertices per glyph
+    CHECK_EQ(idx.size(),   size_t{12});  // 6 indices  per glyph
+
+    // Every index must reference a valid vertex.
+    for (int i : idx) CHECK(i >= 0 && i < static_cast<int>(verts.size()));
+
+    // Texture coords are normalised into the atlas.
+    for (const auto& v : verts) {
+        CHECK(v.tex_coord.x >= 0.0f && v.tex_coord.x <= 1.0f);
+        CHECK(v.tex_coord.y >= 0.0f && v.tex_coord.y <= 1.0f);
+    }
+}
+
+TEST(build_text_geometry_skips_spaces)
+{
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(kFontPath, 24.0f));
+
+    std::vector<SDL_Vertex> verts;
+    std::vector<int>        idx;
+    // Three spaces are zero-area glyphs and contribute no geometry.
+    font.build_text_geometry(0.0f, 0.0f, "   ", gfx::Color{255, 255, 255, 255}, verts, idx);
+    CHECK_EQ(verts.size(), size_t{0});
+    CHECK_EQ(idx.size(),   size_t{0});
+}
+
+TEST(build_text_geometry_offsets_indices_when_batching)
+{
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(kFontPath, 24.0f));
+
+    std::vector<SDL_Vertex> verts;
+    std::vector<int>        idx;
+    font.build_text_geometry(0.0f, 0.0f, "A", gfx::Color{255, 255, 255, 255}, verts, idx);
+    const size_t after_first = idx.size();
+    // Appending a second run must reference the newly added vertices (offset by
+    // the prior vertex count), never re-index the first run's vertices.
+    font.build_text_geometry(50.0f, 0.0f, "B", gfx::Color{255, 255, 255, 255}, verts, idx);
+    CHECK_EQ(verts.size(), size_t{8});
+    CHECK_EQ(idx.size(),   size_t{12});
+    int min_second = verts.size();
+    for (size_t i = after_first; i < idx.size(); ++i) min_second = std::min(min_second, idx[i]);
+    CHECK(min_second >= 4);   // second run indices point past the first run's 4 verts
 }
 
 TEST(text_top_for_center_straddles_center)

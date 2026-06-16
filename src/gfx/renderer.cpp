@@ -93,48 +93,81 @@ float Renderer::draw_thumbnail_strip(std::span<SDL_Texture* const> thumbs,
                                          thumb_size, opts.gap);
 }
 
-std::vector<SDL_FPoint> round_rect_outline(const SDL_FRect& dst, float radius,
-                                           int segments)
+// Fill `out` with the rounded-rectangle outline loop (see round_rect_outline).
+// The per-point angle trig depends only on `segments` — not on `dst`/`radius` —
+// so it is computed once and cached per segment count, leaving the hot path to
+// just scale + translate. `out` is cleared and reused (no per-call allocation).
+static void round_rect_outline_into(std::vector<SDL_FPoint>& out, const SDL_FRect& dst,
+                                    float radius, int segments)
 {
     constexpr float pi = std::numbers::pi_v<float>;
     const float r = std::max(0.0f, std::min(radius, std::min(dst.w, dst.h) * 0.5f));
     if (segments < 1) segments = 1;
 
-    // Corner arc centres and start angles, swept clockwise: TL, TR, BR, BL. Each
-    // arc spans a quarter turn; in screen coords (+y down) cos/sin still trace a
-    // circle, so the loop touches all four edges -> its bbox equals `dst`.
-    struct Corner {
-        float cx;
-        float cy;
-        float a0;
+    // Cached unit-circle samples for the four quarter arcs (TL, TR, BR, BL),
+    // swept clockwise. In screen coords (+y down) cos/sin still trace a circle,
+    // so the loop touches all four edges -> its bbox equals `dst`.
+    struct ArcCache {
+        int                segments = -1;
+        std::vector<float> cosv;
+        std::vector<float> sinv;
     };
+    static thread_local ArcCache ac;
+    if (ac.segments != segments) {
+        ac.segments = segments;
+        ac.cosv.clear();
+        ac.sinv.clear();
+        const float quarter = pi * 0.5f;
+        const std::array<float, 4> a0{pi, pi * 1.5f, 0.0f, pi * 0.5f};
+        for (const float start : a0)
+            for (int s = 0; s <= segments; ++s) {
+                const float a = start + quarter * (static_cast<float>(s) /
+                                                   static_cast<float>(segments));
+                ac.cosv.push_back(std::cos(a));
+                ac.sinv.push_back(std::sin(a));
+            }
+    }
+
+    struct Corner { float cx; float cy; };
     const std::array<Corner, 4> corners{{
-        {dst.x + r,         dst.y + r,         pi},          // TL: 180 -> 270
-        {dst.x + dst.w - r, dst.y + r,         pi * 1.5f},   // TR: 270 -> 360
-        {dst.x + dst.w - r, dst.y + dst.h - r, 0.0f},        // BR: 0   -> 90
-        {dst.x + r,         dst.y + dst.h - r, pi * 0.5f},   // BL: 90  -> 180
+        {dst.x + r,         dst.y + r},          // TL
+        {dst.x + dst.w - r, dst.y + r},          // TR
+        {dst.x + dst.w - r, dst.y + dst.h - r},  // BR
+        {dst.x + r,         dst.y + dst.h - r},  // BL
     }};
 
+    const int per = segments + 1;
+    out.clear();
+    out.reserve(static_cast<size_t>(4 * per));
+    for (int k = 0; k < 4 * per; ++k) {
+        const Corner& c = corners[static_cast<size_t>(k / per)];
+        out.push_back(SDL_FPoint{c.cx + r * ac.cosv[static_cast<size_t>(k)],
+                                 c.cy + r * ac.sinv[static_cast<size_t>(k)]});
+    }
+}
+
+std::vector<SDL_FPoint> round_rect_outline(const SDL_FRect& dst, float radius,
+                                           int segments)
+{
     std::vector<SDL_FPoint> out;
-    out.reserve(static_cast<size_t>(4 * (segments + 1)));
-    const float quarter = pi * 0.5f;
-    for (const Corner& c : corners)
-        for (int s = 0; s <= segments; ++s) {
-            const float a = c.a0 + quarter * (static_cast<float>(s) / static_cast<float>(segments));
-            out.push_back(SDL_FPoint{c.cx + r * std::cos(a), c.cy + r * std::sin(a)});
-        }
+    round_rect_outline_into(out, dst, radius, segments);
     return out;
 }
 
 void Renderer::draw_round_rect(const SDL_FRect& dst, float radius, Color c, bool filled)
 {
     if (radius <= 0.0f) { draw_rect(dst, c, filled); return; }
-    const std::vector<SDL_FPoint> loop = round_rect_outline(dst, radius);
+
+    // Reused across calls (single-threaded render loop) to avoid per-call heap
+    // churn — a gallery frame issues dozens of rounded rects.
+    static thread_local std::vector<SDL_FPoint> loop;
+    round_rect_outline_into(loop, dst, radius, 6);
     if (loop.empty()) return;
 
     if (!filled) {
         SDL_SetRenderDrawColor(r_, c.r, c.g, c.b, c.a);
-        std::vector<SDL_FPoint> closed = loop;
+        static thread_local std::vector<SDL_FPoint> closed;
+        closed.assign(loop.begin(), loop.end());
         closed.push_back(loop.front());          // close the loop
         SDL_RenderLines(r_, closed.data(), static_cast<int>(closed.size()));
         return;
@@ -145,17 +178,23 @@ void Renderer::draw_round_rect(const SDL_FRect& dst, float radius, Color c, bool
     const SDL_FPoint centre{dst.x + dst.w * 0.5f, dst.y + dst.h * 0.5f};
     const auto n = static_cast<int>(loop.size());
 
-    std::vector<SDL_Vertex> verts;
+    static thread_local std::vector<SDL_Vertex> verts;
+    verts.clear();
     verts.reserve(loop.size() + 1);
     verts.push_back(SDL_Vertex{centre, fc, {0, 0}});
     for (const auto& p : loop) verts.push_back(SDL_Vertex{p, fc, {0, 0}});
 
-    std::vector<int> idx;
-    idx.reserve(static_cast<size_t>(n) * 3);
-    for (int i = 0; i < n; ++i) {
-        idx.push_back(0);
-        idx.push_back(1 + i);
-        idx.push_back(1 + (i + 1) % n);
+    // The index pattern depends only on `n` (constant per segment count); rebuild
+    // only when that changes.
+    static thread_local std::vector<int> idx;
+    if (static_cast<int>(idx.size()) != n * 3) {
+        idx.clear();
+        idx.reserve(static_cast<size_t>(n) * 3);
+        for (int i = 0; i < n; ++i) {
+            idx.push_back(0);
+            idx.push_back(1 + i);
+            idx.push_back(1 + (i + 1) % n);
+        }
     }
     SDL_RenderGeometry(r_, nullptr, verts.data(), static_cast<int>(verts.size()),
                        idx.data(), static_cast<int>(idx.size()));

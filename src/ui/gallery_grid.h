@@ -2,11 +2,14 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
+#include "image/decode_worker.h"
 #include "ui/consent_dialog.h"
 #include "ui/nav_model.h"
 #include "ui/screen.h"
@@ -59,6 +62,7 @@ private:
     [[nodiscard]] bool current_allows_images() const;
     [[nodiscard]] bool current_allows_galleries() const;
     SDL_Texture*       thumb_texture(const vault::IndexNode& node);
+    bool               pump_thumbs();   // upload finished off-thread thumb decodes
 
     void render_grid(gfx::Renderer& r, float W, float H);
     void render_list(gfx::Renderer& r, float W, float H);
@@ -78,8 +82,7 @@ private:
     ConsentDialog           consent_;
     SearchOverlay           search_;
     TagEditor               tag_editor_;
-    std::string           initial_path_;
-    int                   initial_sel_ = 0;
+    GridLocation          initial_;   // where to (re)open: path + selected tile
     std::vector<const vault::IndexNode*> children_;
     int                   cols_ = 1;
     GalleryView           view_ = GalleryView::Grid;
@@ -87,6 +90,15 @@ private:
     std::string           status_;   // transient export result message
     bool                  naming_ = false;
     std::string           name_buf_;
+
+    // Off-thread thumbnail decoding, scoped to this grid (its own worker; see the
+    // note in ImageViewer for why each screen keeps a separate one). Grouped to
+    // keep the field count down.
+    struct ThumbDecode {
+        image::DecodeWorker          worker{image::decode_wake_event()};
+        std::unordered_set<uint64_t> failed;   // thumbs that gave up decoding
+    };
+    ThumbDecode thumbs_;
 };
 
 } // namespace ui

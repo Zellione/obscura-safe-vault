@@ -155,14 +155,15 @@ bool FontAtlas::ensure_texture(SDL_Renderer* r)
     return true;
 }
 
-bool FontAtlas::draw_text(SDL_Renderer* r, float x, float y, std::string_view text,
-                          Color c)
+void FontAtlas::build_text_geometry(float x, float y, std::string_view text, Color c,
+                                    std::vector<SDL_Vertex>& verts,
+                                    std::vector<int>& idx) const
 {
-    if (!baked_ || !r) return false;
-    if (!ensure_texture(r)) return false;
+    if (!baked_ || aw_ <= 0 || ah_ <= 0) return;
 
-    SDL_SetTextureColorMod(tex_, c.r, c.g, c.b);
-    SDL_SetTextureAlphaMod(tex_, c.a);
+    const SDL_FColor fc{c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, c.a / 255.0f};
+    const float      inv_w = 1.0f / static_cast<float>(aw_);
+    const float      inv_h = 1.0f / static_cast<float>(ah_);
 
     // Caller passes (x, y) as the text's top-left. Approximate the baseline as
     // one pixel-height below the top; glyph yoff (negative) lifts it up.
@@ -171,17 +172,48 @@ bool FontAtlas::draw_text(SDL_Renderer* r, float x, float y, std::string_view te
     for (unsigned char ch : text) {
         if (ch < FIRST_GLYPH || ch >= FIRST_GLYPH + GLYPH_COUNT) continue;
         const BakedGlyph& g = glyphs_[ch - FIRST_GLYPH];
-        if (g.x1 > g.x0 && g.y1 > g.y0) { // skip zero-area glyphs (e.g. space)
+        if (g.x1 > g.x0 && g.y1 > g.y0) {   // skip zero-area glyphs (e.g. space)
             const auto gw = static_cast<float>(g.x1 - g.x0);
             const auto gh = static_cast<float>(g.y1 - g.y0);
-            const SDL_FRect src{static_cast<float>(g.x0), static_cast<float>(g.y0),
-                                gw, gh};
-            const SDL_FRect dst{pen_x + g.xoff, baseline + g.yoff, gw, gh};
-            SDL_RenderTexture(r, tex_, &src, &dst);
+            const float px0 = pen_x + g.xoff;
+            const float py0 = baseline + g.yoff;
+            const float px1 = px0 + gw;
+            const float py1 = py0 + gh;
+            const float u0  = static_cast<float>(g.x0) * inv_w;
+            const float v0  = static_cast<float>(g.y0) * inv_h;
+            const float u1  = static_cast<float>(g.x1) * inv_w;
+            const float v1  = static_cast<float>(g.y1) * inv_h;
+
+            const auto base = static_cast<int>(verts.size());
+            verts.push_back(SDL_Vertex{{px0, py0}, fc, {u0, v0}});   // TL
+            verts.push_back(SDL_Vertex{{px1, py0}, fc, {u1, v0}});   // TR
+            verts.push_back(SDL_Vertex{{px1, py1}, fc, {u1, v1}});   // BR
+            verts.push_back(SDL_Vertex{{px0, py1}, fc, {u0, v1}});   // BL
+            idx.push_back(base + 0);
+            idx.push_back(base + 1);
+            idx.push_back(base + 2);
+            idx.push_back(base + 0);
+            idx.push_back(base + 2);
+            idx.push_back(base + 3);
         }
         pen_x += g.xadvance;
     }
-    return true;
+}
+
+bool FontAtlas::draw_text(SDL_Renderer* r, float x, float y, std::string_view text,
+                          Color c)
+{
+    if (!baked_ || !r) return false;
+    if (!ensure_texture(r)) return false;
+
+    // Colour is baked into the per-vertex colour, so no SetTextureColorMod churn.
+    verts_.clear();
+    idx_.clear();
+    build_text_geometry(x, y, text, c, verts_, idx_);
+    if (idx_.empty()) return true;   // nothing drawable (e.g. all spaces)
+
+    return SDL_RenderGeometry(r, tex_, verts_.data(), static_cast<int>(verts_.size()),
+                              idx_.data(), static_cast<int>(idx_.size()));
 }
 
 } // namespace gfx

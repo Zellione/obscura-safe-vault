@@ -36,6 +36,18 @@ public:
     virtual void update(double dt) { (void)dt; }
     virtual void render(gfx::Renderer& r) = 0;
 
+    // True while the screen is actively animating (e.g. a slideshow cross-fade)
+    // and needs continuous redraws. Static screens leave this false so the app
+    // loop can block on events and idle without spinning the GPU.
+    [[nodiscard]] virtual bool animating() const { return false; }
+
+    // Redraw request. Screens call mark_dirty() when something changed outside
+    // of input handling — typically an async result (file dialog, decode worker)
+    // picked up in update(). The app loop consumes it to decide whether to
+    // repaint; input events trigger a repaint on their own.
+    void mark_dirty() noexcept { dirty_ = true; }
+    [[nodiscard]] bool consume_dirty() noexcept { const bool d = dirty_; dirty_ = false; return d; }
+
     [[nodiscard]] Nav take_nav() { Nav n = std::move(nav_); nav_ = {}; return n; }
 
 protected:
@@ -46,7 +58,8 @@ protected:
     }
 
 private:
-    Nav nav_{};
+    Nav  nav_{};
+    bool dirty_ = true;   // draw the first frame after activation
 };
 
 } // namespace ui

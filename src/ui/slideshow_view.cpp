@@ -83,10 +83,11 @@ void SlideshowView::render(gfx::Renderer& r, gfx::FontAtlas& font, FullTexCache&
     FullTex* cur_ft  = cache.acquire(*images[cur]);
     FullTex* prev_ft = prev >= 0 ? cache.acquire(*images[prev]) : nullptr;
     cache.acquire(*images[nxt]);
-    std::vector<uint64_t> keep{images[cur]->meta.data_offset,
-                               images[nxt]->meta.data_offset};
-    if (prev >= 0) keep.push_back(images[prev]->meta.data_offset);
-    cache.evict_except(keep);
+    keep_scratch_.clear();
+    keep_scratch_.push_back(images[cur]->meta.data_offset);
+    keep_scratch_.push_back(images[nxt]->meta.data_offset);
+    if (prev >= 0) keep_scratch_.push_back(images[prev]->meta.data_offset);
+    cache.evict_except(keep_scratch_);
 
     const SDL_Rect clip{static_cast<int>(vp.x), static_cast<int>(vp.y),
                         static_cast<int>(vp.w), static_cast<int>(vp.h)};

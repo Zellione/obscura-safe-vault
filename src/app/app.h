@@ -32,6 +32,12 @@ private:
     void to_gallery(const std::string& path = {}, int selected = 0);
     void to_viewer(const std::string& gallery_path, int index);
 
+    // run() helpers (kept small so the loop stays readable).
+    void dispatch_event(const SDL_Event& e);     // quit/close here, else to screen
+    bool pump_events(bool animating);            // wait/poll + dispatch; had-event?
+    bool apply_nav();                            // resolve a transition; transitioned?
+    void render_frame();                         // draw + present + frame-cap fallback
+
     gfx::Window                        window_;
     gfx::FontAtlas                     font_;
     bool                               font_ready_ = false;
@@ -40,7 +46,8 @@ private:
     platform::FolderDialog             folder_dialog_;
     vault::Vault                       vault_;
     std::unique_ptr<ui::Screen>        screen_;
-    State                              state_ = State::Locked;
+    State                              state_   = State::Locked;
+    bool                               running_ = false;   // main-loop run flag
 };
 
 } // namespace app
