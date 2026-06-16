@@ -34,8 +34,7 @@ class GalleryGrid : public Screen {
 public:
     GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                 gfx::TextureCache& cache, platform::FileDialog& dlg,
-                platform::FolderDialog& folder_dlg, uint32_t decode_wake,
-                GridLocation at = {});
+                platform::FolderDialog& folder_dlg, GridLocation at = {});
 
     void on_enter() override;
     void handle_event(const SDL_Event& e) override;
@@ -83,8 +82,7 @@ private:
     ConsentDialog           consent_;
     SearchOverlay           search_;
     TagEditor               tag_editor_;
-    std::string           initial_path_;
-    int                   initial_sel_ = 0;
+    GridLocation          initial_;   // where to (re)open: path + selected tile
     std::vector<const vault::IndexNode*> children_;
     int                   cols_ = 1;
     GalleryView           view_ = GalleryView::Grid;
@@ -93,10 +91,14 @@ private:
     bool                  naming_ = false;
     std::string           name_buf_;
 
-    // Off-thread thumbnail decoder, scoped to this grid (its own worker; see the
-    // note in ImageViewer for why each screen keeps a separate one).
-    image::DecodeWorker          decode_worker_;
-    std::unordered_set<uint64_t> thumb_failed_;   // thumbs that failed to decode
+    // Off-thread thumbnail decoding, scoped to this grid (its own worker; see the
+    // note in ImageViewer for why each screen keeps a separate one). Grouped to
+    // keep the field count down.
+    struct ThumbDecode {
+        image::DecodeWorker          worker{image::decode_wake_event()};
+        std::unordered_set<uint64_t> failed;   // thumbs that gave up decoding
+    };
+    ThumbDecode thumbs_;
 };
 
 } // namespace ui

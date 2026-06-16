@@ -7,10 +7,19 @@
 
 namespace image {
 
+uint32_t decode_wake_event()
+{
+    static const uint32_t ev = [] {
+        const uint32_t e = SDL_RegisterEvents(1);
+        return e == static_cast<uint32_t>(-1) ? 0u : e;
+    }();
+    return ev;
+}
+
 DecodeWorker::DecodeWorker(uint32_t wake_event)
     : wake_event_(wake_event)
 {
-    thread_ = std::thread([this] { run(); });
+    thread_ = std::jthread([this] { run(); });
 }
 
 DecodeWorker::~DecodeWorker()
@@ -29,7 +38,7 @@ void DecodeWorker::submit(uint64_t key, crypto::SecureBytes&& encoded)
     {
         std::lock_guard lock(mtx_);
         if (!inflight_.insert(key).second) return;   // already queued / decoding
-        queue_.push_back(Job{key, std::move(encoded)});
+        queue_.emplace_back(key, std::move(encoded));
     }
     cv_.notify_one();
 }
@@ -53,7 +62,7 @@ std::optional<DecodeWorker::Result> DecodeWorker::take_result()
 void DecodeWorker::retain(std::span<const uint64_t> keep)
 {
     std::lock_guard lock(mtx_);
-    std::erase_if(queue_, [&](const Job& j) {
+    std::erase_if(queue_, [&keep, this](const Job& j) {
         if (std::ranges::find(keep, j.key) != keep.end()) return false;
         inflight_.erase(j.key);   // queued-only items can be safely forgotten
         return true;
@@ -78,7 +87,7 @@ void DecodeWorker::run()
 
         {
             std::lock_guard lock(mtx_);
-            done_.push_back(Result{job.key, std::move(img)});
+            done_.emplace_back(job.key, std::move(img));
         }
         if (wake_event_ != 0) {
             SDL_Event e{};

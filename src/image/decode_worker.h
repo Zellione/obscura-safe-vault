@@ -17,6 +17,12 @@
 
 namespace image {
 
+// Lazily register (once) and return the SDL event type used to wake the app's
+// event loop when an off-thread decode finishes. Returns 0 if registration
+// fails (the loop then relies on its idle heartbeat). Must be called after
+// SDL_Init; safe to call from multiple screens (the registration is memoised).
+[[nodiscard]] uint32_t decode_wake_event();
+
 // Off-thread image decoder so the UI never stalls on a slow decode.
 //
 // Decryption stays on the caller's (render) thread — it is fast and touches the
@@ -77,7 +83,7 @@ private:
     std::unordered_set<uint64_t> inflight_;   // submitted, result not yet taken
     bool                         stop_       = false;
     uint32_t                     wake_event_ = 0;
-    std::thread                  thread_;
+    std::jthread                 thread_;
 };
 
 } // namespace image

@@ -48,21 +48,19 @@ GridSpec grid_spec(float win_w, int cols) noexcept
 
 GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                          gfx::TextureCache& cache, platform::FileDialog& dlg,
-                         platform::FolderDialog& folder_dlg, uint32_t decode_wake,
-                         GridLocation at)
+                         platform::FolderDialog& folder_dlg, GridLocation at)
     : win_(win), font_(font), vault_(vault), cache_(cache), dlg_(dlg),
       folder_dlg_(folder_dlg), search_(vault, win), tag_editor_(vault, win),
-      initial_path_(std::move(at.path)), initial_sel_(at.selected),
-      decode_worker_(decode_wake)
+      initial_(std::move(at))
 {
 }
 
 void GalleryGrid::on_enter()
 {
     // Restore the saved location (e.g. when returning from the image viewer).
-    for (const auto& seg : split_path(initial_path_)) nav_.enter(seg);
+    for (const auto& seg : split_path(initial_.path)) nav_.enter(seg);
     refresh();
-    nav_.select(initial_sel_);
+    nav_.select(initial_.selected);
     // Seed cols_ from the current window size so keyboard NavUp/Down and mouse
     // hit-testing work on the first frame's events (render() recomputes it each
     // frame to track window resizes).
@@ -224,22 +222,22 @@ SDL_Texture* GalleryGrid::thumb_texture(const vault::IndexNode& node)
     // A thumbnail that already failed to decode is not retried; an in-flight
     // decode lands via pump_thumbs(). Otherwise read+decrypt here (fast) and
     // enqueue the slow decode off-thread, drawing a placeholder until it lands.
-    if (thumb_failed_.contains(key) || decode_worker_.pending(key)) return nullptr;
+    if (thumbs_.failed.contains(key) || thumbs_.worker.pending(key)) return nullptr;
     crypto::SecureBytes sb;
     if (vault_.read_thumbnail(node, sb) != vault::VaultResult::Ok) return nullptr;
-    decode_worker_.submit(key, std::move(sb));
+    thumbs_.worker.submit(key, std::move(sb));
     return nullptr;
 }
 
 bool GalleryGrid::pump_thumbs()
 {
     bool any = false;
-    while (auto res = decode_worker_.take_result()) {
+    while (auto res = thumbs_.worker.take_result()) {
         if (res->image) {
             cache_.get_or_upload(res->key, *res->image);
             any = true;
         } else {
-            thumb_failed_.insert(res->key);
+            thumbs_.failed.insert(res->key);
         }
     }
     return any;
