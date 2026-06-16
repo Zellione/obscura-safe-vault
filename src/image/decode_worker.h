@@ -17,6 +17,16 @@
 
 namespace image {
 
+// std::jthread is the cleaner choice (RAII auto-join), but it is absent from
+// AppleClang's libc++, so fall back to std::thread on Apple. Either way the
+// DecodeWorker destructor explicitly signals stop and joins, so behaviour is
+// identical; the alias only changes the underlying type.
+#if defined(__APPLE__)
+using WorkerThread = std::thread;
+#else
+using WorkerThread = std::jthread;
+#endif
+
 // Lazily register (once) and return the SDL event type used to wake the app's
 // event loop when an off-thread decode finishes. Returns 0 if registration
 // fails (the loop then relies on its idle heartbeat). Must be called after
@@ -83,9 +93,7 @@ private:
     std::unordered_set<uint64_t> inflight_;   // submitted, result not yet taken
     bool                         stop_       = false;
     uint32_t                     wake_event_ = 0;
-    // std::thread (not jthread): jthread is absent from AppleClang's libc++. The
-    // destructor explicitly signals stop + joins, so the RAII guarantee holds.
-    std::thread                  thread_;
+    WorkerThread                 thread_;     // std::jthread, or std::thread on Apple
 };
 
 } // namespace image

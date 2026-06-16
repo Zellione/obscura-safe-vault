@@ -19,7 +19,7 @@ uint32_t decode_wake_event()
 DecodeWorker::DecodeWorker(uint32_t wake_event)
     : wake_event_(wake_event)
 {
-    thread_ = std::thread([this] { run(); });
+    thread_ = WorkerThread([this] { run(); });
 }
 
 DecodeWorker::~DecodeWorker()
