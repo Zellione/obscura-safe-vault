@@ -9,8 +9,10 @@
 #include "ui/full_tex_cache.h"
 #include "ui/screen.h"
 #include "ui/scroll_model.h"
+#include "ui/search_overlay.h"
 #include "ui/slideshow_view.h"
 #include "ui/strip_layout.h"
+#include "ui/tag_editor.h"
 #include "ui/viewer_model.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
@@ -92,6 +94,8 @@ private:
     vault::Vault&           vault_;
     gfx::TextureCache&      cache_;
     ExportUi                export_;
+    TagEditor               tag_editor_;
+    SearchOverlay           search_;
     std::string             gallery_path_;
     std::vector<const vault::IndexNode*> images_;
     int   index_ = 0;
@@ -100,13 +104,17 @@ private:
     StripSide strip_side_ = StripSide::Bottom;
     ViewMode  mode_       = ViewMode::Fit;
 
-    // Fit-mode view state for the current image.
-    float zoom_     = 1.0f;
-    float fit_zoom_ = 1.0f;
-    Vec2  pan_;
-    Vec2  img_size_;                // natural pixel size of the current image
-    bool  fitted_   = false;
-    bool  dragging_ = false;
+    // Fit-mode view state for the current image (grouped to keep the field count
+    // in check and to document the cluster as one cohesive unit).
+    struct FitState {
+        float zoom     = 1.0f;
+        float fit_zoom = 1.0f;
+        Vec2  pan;
+        Vec2  img_size;             // natural pixel size of the current image
+        bool  fitted   = false;
+        bool  dragging = false;
+    };
+    FitState fit_;
 
     // FillScroll-mode state.
     float scroll_y_ = 0.0f;

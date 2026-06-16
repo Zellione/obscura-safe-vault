@@ -10,7 +10,9 @@
 #include "ui/consent_dialog.h"
 #include "ui/nav_model.h"
 #include "ui/screen.h"
+#include "ui/search_overlay.h"
 #include "ui/selection_model.h"
+#include "ui/tag_editor.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
 namespace vault { class Vault; struct IndexNode; }
@@ -52,6 +54,8 @@ private:
     void start_naming();
     void finish_naming();
     void do_import(const std::filesystem::path& file_path);
+    void start_search();       // open the search overlay
+    void start_tag_editor();   // open the tag editor for the focused tile
     [[nodiscard]] bool current_allows_images() const;
     [[nodiscard]] bool current_allows_galleries() const;
     SDL_Texture*       thumb_texture(const vault::IndexNode& node);
@@ -72,6 +76,8 @@ private:
     NavModel                nav_;
     SelectionModel          sel_;
     ConsentDialog           consent_;
+    SearchOverlay           search_;
+    TagEditor               tag_editor_;
     std::string           initial_path_;
     int                   initial_sel_ = 0;
     std::vector<const vault::IndexNode*> children_;

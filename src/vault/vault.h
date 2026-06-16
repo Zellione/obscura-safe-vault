@@ -45,6 +45,19 @@ enum class VaultResult {
     CryptoError,    // RNG / KDF failure
 };
 
+enum class SearchScope { Images, Galleries, Both };
+
+// A node matched by search. `path` is the full slash-path to the node (including
+// its own name); `effective_tags` = the node's own tags unioned with all ancestor
+// gallery tags (cascade, computed at read time, case-insensitively de-duplicated).
+struct SearchHit {
+    std::string              path;
+    bool                     is_gallery = false;
+    std::string              name;
+    std::vector<std::string> effective_tags;
+    const IndexNode*         node = nullptr;  // valid until the next mutating call
+};
+
 class Vault {
 public:
     // Auto-compaction gates (remove_image): rewrite the vault only when at
@@ -124,6 +137,24 @@ public:
     // mutating call. Empty if the path is missing or not a gallery.
     [[nodiscard]] std::vector<const IndexNode*> list(std::string_view gallery_path) const;
 
+    // Replace a node's tag list (gallery OR image). Tags are normalised: each trimmed
+    // of surrounding whitespace, empties dropped, de-duplicated case-insensitively
+    // (first occurrence's casing kept). Persisted via the crash-safe index swap.
+    // Locked if not unlocked; NotFound if node_path doesn't resolve.
+    [[nodiscard]] VaultResult set_tags(std::string_view node_path, const std::vector<std::string>& tags);
+
+    // Add one tag (no-op success if already present case-insensitively). InvalidArg
+    // if the tag is empty/whitespace after trimming.
+    [[nodiscard]] VaultResult add_tag(std::string_view node_path, std::string_view tag);
+
+    // Remove one tag (case-insensitive; idempotent — Ok even if absent).
+    [[nodiscard]] VaultResult remove_tag(std::string_view node_path, std::string_view tag);
+
+    // Walk the decrypted in-memory tree; return every in-scope node whose name OR any
+    // effective tag contains `query` (case-insensitive substring). Empty query matches
+    // all in-scope nodes. Empty result if locked. Computes the cascade as it descends.
+    [[nodiscard]] std::vector<SearchHit> search(std::string_view query, SearchScope scope) const;
+
     // Reclaimable bytes: the part of the data region not referenced by any live
     // image/thumbnail chunk or the active index blob (orphaned chunks from
     // deletes plus superseded index blobs). 0 while locked — the index is
@@ -145,6 +176,11 @@ private:
     // not a gallery). Empty path resolves to the root.
     [[nodiscard]] IndexNode*       find_gallery(std::string_view path);
     [[nodiscard]] const IndexNode* find_gallery(std::string_view path) const;
+    // Resolve a slash-separated path to any node (gallery OR image). Intermediate
+    // segments must be galleries; the final segment may be any node kind. Empty
+    // path resolves to the root. Returns nullptr if any segment is missing.
+    [[nodiscard]] IndexNode*       resolve_node(std::string_view path);
+    [[nodiscard]] const IndexNode* resolve_node(std::string_view path) const;
 
     void reset() noexcept;  // close file, wipe key, clear state
 

@@ -11,6 +11,19 @@ src/
                secure_mem.h, crypto.h
   vault/       vault.*, header.*, index.*,     — .osv container format
                chunk_store.*, byte_io.h, file_util.h
+                                               — index.h: IndexNode carries
+                                                 std::vector<std::string> tags
+                                                 (gallery + image); INDEX_VERSION=2
+                                                 (v1 read back-compat, empty tags);
+                                                 INDEX_MAX_TAGS=4096. Vault has tag
+                                                 API + scoped search (Phase 12):
+                                                 set_tags/add_tag/remove_tag(node_path),
+                                                 search(query, SearchScope{Images,
+                                                 Galleries,Both})->vector<SearchHit>;
+                                                 read-time cascade (effective tags =
+                                                 own ∪ ancestor galleries; root tags
+                                                 global); resolve_node resolves a path
+                                                 to a gallery OR image.
   image/       decode.*, thumbnail.*,          — stb_image decode, thumb gen
                format_registry.*,              — magic-byte format detection
                decoder.*,                      — Decoder interface + DecoderRegistry
@@ -61,6 +74,14 @@ src/
                export.*                        — decrypt→write-verbatim→wipe export
                                                  (Phase 10; the ONE gated deviation
                                                  from invariant #1, SDL-free/tested)
+               search_model.*                  — pure query tokenise/match/rank
+                                                 (Phase 12, pure/tested); used by the
+                                                 search overlay for live filter+rank
+               search_overlay.*                — `/` live-filtered search modal in
+                                                 GalleryGrid; Tab cycles scope
+                                                 (Both/Images/Galleries) (Phase 12)
+               tag_editor.*                    — `G` add/remove-tags modal in both
+                                                 GalleryGrid + ImageViewer (Phase 12)
                input.*, nav_model.*, viewer_model.h
                passphrase.*, screen.h
                secure_text_field.*, unlock_logic.*
