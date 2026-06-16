@@ -24,6 +24,9 @@ constexpr float SEARCH_BOX_H = 44.0f;
 constexpr float SCOPE_TOGGLE_H = 36.0f;
 constexpr float RESULT_ROW_H = 40.0f;
 constexpr float RESULT_LIST_GAP = 8.0f;
+// Baseline-to-baseline spacing for the 28px UI font; smaller gaps let the title
+// crowd the search box on the way down.
+constexpr float LINE = 34.0f;
 
 // Build a one-line result label: kind icon + path + up to two effective tags.
 std::string format_hit_label(const vault::SearchHit& hit)
@@ -89,8 +92,11 @@ void SearchOverlay::refresh_results()
                           return a->name < b->name;
                       });
 
-    // Clamp selection to valid range
-    selected_ = std::clamp(selected_, 0, static_cast<int>(filtered_.size()) - 1);
+    // Clamp selection to valid range. Guard the empty case: with no results the
+    // upper bound would be -1, and std::clamp(x, 0, -1) trips a hi<lo assertion.
+    selected_ = filtered_.empty()
+                    ? 0
+                    : std::clamp(selected_, 0, static_cast<int>(filtered_.size()) - 1);
 }
 
 bool SearchOverlay::handle_event(const SDL_Event& e)
@@ -181,7 +187,7 @@ void SearchOverlay::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
     r.draw_text(font, mx + PAD, my + PAD, "Search", TEXT);
 
     // Search input box
-    const float search_y = my + PAD + 28;
+    const float search_y = my + PAD + LINE;
     const SDL_FRect search_box{mx + PAD, search_y, MODAL_W - 2 * PAD, SEARCH_BOX_H};
     draw_text_field(r, font, search_box, query_, true);
 
@@ -222,7 +228,7 @@ void SearchOverlay::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
 
         const std::string display = format_hit_label(hit);
         const float text_y =
-            row_rect.y + font.text_top_for_center(row_rect.y + row_rect.h * 0.5f);
+            font.text_top_for_center(row_rect.y + row_rect.h * 0.5f);
         r.draw_text(font, row_rect.x + 8, text_y, display, TEXT);
 
         visible++;

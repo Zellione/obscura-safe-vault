@@ -22,6 +22,9 @@ constexpr float PAD = 16.0f;
 constexpr float INPUT_BOX_H = 40.0f;
 constexpr float TAG_ROW_H = 32.0f;
 constexpr float TAG_LIST_GAP = 6.0f;
+// Baseline-to-baseline spacing for the 28px UI font; 24px was too tight and
+// caused the title/subtitle and the "Current tags:" label/first row to collide.
+constexpr float LINE = 34.0f;
 
 // Trim surrounding ASCII whitespace only; interior spaces are kept so multi-word
 // tags survive (the vault performs the canonical normalisation/dedup).
@@ -187,24 +190,24 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     r.draw_text(font, mx + PAD, my + PAD, "Edit Tags", TEXT);
 
     // Node path display (secondary text)
-    r.draw_text(font, mx + PAD, my + PAD + 24, node_path_, TEXT_FAINT);
+    r.draw_text(font, mx + PAD, my + PAD + LINE, node_path_, TEXT_FAINT);
 
     // Input box for new tag
-    const float input_y = my + PAD + 60;
+    const float input_y = my + PAD + 2 * LINE + 8;
     const SDL_FRect input_box{mx + PAD, input_y, MODAL_W - 2 * PAD, INPUT_BOX_H};
     r.draw_round_rect(input_box, gfx::theme::RADIUS_SMALL, gfx::theme::SURFACE);
     r.draw_round_rect(input_box, gfx::theme::RADIUS_SMALL, gfx::theme::ACCENT,
                       /*filled*/ false);
     r.draw_text(font, input_box.x + 8,
-                input_box.y + font.text_top_for_center(input_box.y + input_box.h * 0.5f),
+                font.text_top_for_center(input_box.y + input_box.h * 0.5f),
                 new_tag_buf_, TEXT);
 
     // Current tags list
-    const float list_y = input_y + INPUT_BOX_H + 12;
+    const float list_y = input_y + INPUT_BOX_H + 16;
 
     r.draw_text(font, mx + PAD, list_y, "Current tags:", TEXT_DIM);
 
-    const float tags_start = list_y + 24;
+    const float tags_start = list_y + LINE;
     for (int i = 0; i < static_cast<int>(tags_.size()); ++i) {
         const float row_y = tags_start + static_cast<float>(i) * (TAG_ROW_H + TAG_LIST_GAP);
         if (row_y + TAG_ROW_H > my + MODAL_H - 50) break;
@@ -220,7 +223,7 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
 
         const std::string display = tags_[i] + " [Delete]";
         const float text_y =
-            tag_rect.y + font.text_top_for_center(tag_rect.y + tag_rect.h * 0.5f);
+            font.text_top_for_center(tag_rect.y + tag_rect.h * 0.5f);
         r.draw_text(font, tag_rect.x + 8, text_y, display, TEXT);
     }
 
