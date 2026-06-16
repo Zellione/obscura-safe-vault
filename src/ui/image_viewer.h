@@ -44,18 +44,31 @@ namespace ui {
 // images plus their immediate neighbours (a small bounded set), evicting the rest.
 class ImageViewer : public Screen {
 public:
-    // Gallery mode: view the images of a single leaf gallery, returning to that
-    // gallery on exit.
-    ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
-                std::string gallery_path, int start_index);
+    // The viewer's navigable image set. Two ways to populate it:
+    //   * gallery mode — set `gallery_path`; the images are listed on entry and
+    //     `back`/`paths` are derived (exit returns to that gallery).
+    //   * collection mode — set `from_collection` + an explicit `images`/`paths`
+    //     set (e.g. favorites) and a `back` target (exit returns there).
+    // Bundled into one struct so the viewer carries a single source field and a
+    // single constructor (keeps the class within its field/param/method budgets).
+    struct Album {
+        std::vector<const vault::IndexNode*> images;
+        std::vector<std::string>             paths;         // full slash-path per image
+        std::string                          gallery_path;  // leaf gallery (gallery mode)
+        Nav                                  back;           // exit target (collection mode)
+        bool                                 from_collection = false;
 
-    // Collection mode: view an explicit cross-tree set of images (e.g. favorites),
-    // each carrying its own full slash-path, returning to `back` on exit.
+        static Album gallery(std::string path)
+        {
+            Album a;
+            a.gallery_path = std::move(path);
+            return a;
+        }
+    };
+
     ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                 gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
-                std::vector<const vault::IndexNode*> images,
-                std::vector<std::string> paths, int start_index, Nav back);
+                Album album, int start_index);
 
     ~ImageViewer() override = default;
 
@@ -118,11 +131,7 @@ private:
     ExportUi                export_;
     TagEditor               tag_editor_;
     SearchOverlay           search_;
-    std::string             gallery_path_;   // leaf gallery (gallery mode); "" in collection mode
-    std::vector<const vault::IndexNode*> images_;
-    std::vector<std::string> paths_;          // full slash-path per image (parallel to images_)
-    Nav   back_;                              // exit target (collection mode)
-    bool  from_collection_ = false;           // images_ supplied explicitly, don't re-list
+    Album album_;                            // the navigable image set (see Album)
     int   index_ = 0;
 
     // Persistent layout/mode choices (reset on construction, i.e. per viewer).

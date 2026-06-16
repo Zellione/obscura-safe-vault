@@ -66,8 +66,9 @@ void App::to_gallery(const std::string& path, int selected)
 void App::to_viewer(const std::string& gallery_path, int index)
 {
     state_  = State::Viewing;
-    screen_ = std::make_unique<ui::ImageViewer>(window_, font_, vault_, *cache_,
-                                                folder_dialog_, gallery_path, index);
+    screen_ = std::make_unique<ui::ImageViewer>(
+        window_, font_, vault_, *cache_, folder_dialog_,
+        ui::ImageViewer::Album::gallery(gallery_path), index);
     screen_->on_enter();
 }
 
@@ -90,18 +91,20 @@ void App::to_favorite_viewer(int index)
     // Build a viewer collection from the favorites set (same ordering the
     // favorites grid used), so prev/next iterate the favorites. Exiting returns
     // to the favorites-images grid.
+    ui::ImageViewer::Album album;
+    album.from_collection = true;
+    album.back            = ui::Nav{ui::NavKind::ToFavoriteImages, {}, 0};
     auto favs = vault_.list_favorite_images();
-    std::vector<const vault::IndexNode*> images;
-    std::vector<std::string>             paths;
-    images.reserve(favs.size());
-    paths.reserve(favs.size());
-    for (auto& h : favs) { images.push_back(h.node); paths.push_back(std::move(h.path)); }
+    album.images.reserve(favs.size());
+    album.paths.reserve(favs.size());
+    for (auto& h : favs) {
+        album.images.push_back(h.node);
+        album.paths.push_back(std::move(h.path));
+    }
 
     state_  = State::Viewing;
     screen_ = std::make_unique<ui::ImageViewer>(
-        window_, font_, vault_, *cache_, folder_dialog_,
-        std::move(images), std::move(paths), index,
-        ui::Nav{ui::NavKind::ToFavoriteImages, {}, 0});
+        window_, font_, vault_, *cache_, folder_dialog_, std::move(album), index);
     screen_->on_enter();
 }
 
