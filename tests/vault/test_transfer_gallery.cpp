@@ -143,7 +143,9 @@ TEST(gallery_target_parents_lists_image_free_galleries_and_root)
 
     auto t = vault::gallery_target_parents(v);
     auto has = [&](std::string_view s) {
-        for (auto& g : t) if (g == s) return true; return false;
+        for (const auto& g : t)
+            if (g == s) return true;
+        return false;
     };
     CHECK(has(""));            // root holds only sub-galleries
     CHECK(has("Empty"));
