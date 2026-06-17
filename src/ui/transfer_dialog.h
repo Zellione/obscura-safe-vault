@@ -31,6 +31,10 @@ public:
 
     // Activate to move `filenames` (image names within `src_gallery`).
     void open(std::string src_gallery, std::vector<std::string> filenames);
+
+    // Activate to move a whole GALLERY subtree (`src_gallery`, a gallery path).
+    void open_gallery(std::string src_gallery);
+
     void close();                                   // wipes dest_.vault key, deactivates
     [[nodiscard]] bool active() const noexcept { return active_; }
 
@@ -63,6 +67,9 @@ private:
     Stage       stage_  = Stage::PickVault;
     std::string src_gallery_;
     std::vector<std::string> filenames_;
+
+    enum class Source { Images, Gallery };
+    Source      source_ = Source::Images;
 
     std::vector<std::filesystem::path> candidates_;   // PickVault: registry minus src
     int         vault_sel_ = 0;

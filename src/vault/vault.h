@@ -133,6 +133,12 @@ public:
     [[nodiscard]] VaultResult remove_image(std::string_view gallery_path,
                                            std::string_view filename);
 
+    // Remove a gallery and its whole subtree from the index. Every descendant
+    // image/thumbnail chunk is orphaned (reclaimed by compaction, like remove_image).
+    // Locked if not unlocked; InvalidArg for the root (""); NotFound if the path is
+    // missing or names an image rather than a gallery. Persisted via the index swap.
+    [[nodiscard]] VaultResult remove_gallery(std::string_view gallery_path);
+
     // Immediate children of `gallery_path`. Pointers are valid until the next
     // mutating call. Empty if the path is missing or not a gallery.
     [[nodiscard]] std::vector<const IndexNode*> list(std::string_view gallery_path) const;

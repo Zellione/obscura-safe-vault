@@ -638,6 +638,41 @@ VaultResult Vault::remove_image(std::string_view gallery_path, std::string_view 
     return NotFound;
 }
 
+VaultResult Vault::remove_gallery(std::string_view gallery_path)
+{
+    using enum VaultResult;
+    if (!unlocked_) return Locked;
+
+    const auto segments = split_path(gallery_path);
+    if (segments.empty()) return InvalidArg;   // the root cannot be removed
+
+    // Walk to the parent of the target (all segments but the last).
+    IndexNode* parent = &root_;
+    for (size_t i = 0; i + 1 < segments.size(); ++i) {
+        parent = child_named(parent, segments[i]);
+        if (!parent || !parent->is_gallery()) return NotFound;
+    }
+
+    const std::string_view name = segments.back();
+    for (auto it = parent->children.begin(); it != parent->children.end(); ++it) {
+        if (it->is_gallery() && it->name == name) {
+            parent->children.erase(it);  // whole subtree's chunks orphaned until compaction
+            if (const VaultResult r = commit_index(); r != Ok) return r;
+
+            // Best-effort reclamation (same gate as remove_image).
+            uint64_t size = 0;
+            if (const uint64_t waste = wasted_bytes();
+                waste >= AUTO_COMPACT_MIN_WASTE &&
+                fileutil::file_size(fp_, size) &&
+                waste * AUTO_COMPACT_WASTE_RATIO >= size) {
+                (void)compact();
+            }
+            return Ok;
+        }
+    }
+    return NotFound;
+}
+
 std::vector<const IndexNode*> Vault::list(std::string_view gallery_path) const
 {
     std::vector<const IndexNode*> out;
