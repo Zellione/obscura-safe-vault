@@ -31,4 +31,23 @@ namespace vault {
 // populate the transfer dialog's destination-gallery list. Empty while locked.
 [[nodiscard]] std::vector<std::string> image_target_galleries(const Vault& v);
 
+// Move a whole gallery subtree from `src` (the gallery at `src_gallery`) into `dst`
+// under `dst_parent`, keeping the gallery's own name. Copy-then-delete: the subtree
+// is recreated + every descendant image copied into `dst` FIRST, then the source
+// subtree is removed — so a crash mid-move leaves a recoverable duplicate, never a
+// loss. Image plaintext lives only in mlock'd memory (invariant #1).
+//   NotFound      - src gallery missing / not a gallery
+//   AlreadyExists - dst_parent already holds a child of the same name
+//   InvalidArg    - dst_parent cannot hold a sub-gallery (it holds images), or
+//                   src_gallery is the root ("")
+//   AuthFailed / IoError / Locked - propagated; the source is left intact if any
+//                   copy fails before the final remove.
+[[nodiscard]] VaultResult move_gallery(Vault& src, std::string_view src_gallery,
+                                       Vault& dst, std::string_view dst_parent);
+
+// Slash-paths of every gallery in `v` that may legally accept a SUB-gallery (i.e.
+// holds no images), including "" (root) when root holds no images. Empty while
+// locked. Used to populate the transfer dialog when the source is a gallery.
+[[nodiscard]] std::vector<std::string> gallery_target_parents(const Vault& v);
+
 } // namespace vault
