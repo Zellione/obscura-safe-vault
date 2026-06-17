@@ -11,7 +11,7 @@ namespace ui {
 
 enum class NavKind {
     None, ToUnlock, ToGallery, ToViewer, ToFavoriteImages, ToFavoriteGalleries,
-    ToFavoriteViewer, Quit
+    ToFavoriteViewer, ToVaultManager, LockActive, Quit
 };
 
 // A transition request. `path`/`index` carry context for the destination:
