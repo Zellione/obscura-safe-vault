@@ -50,7 +50,7 @@ GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& v
                          gfx::TextureCache& cache, GridDialogs dialogs,
                          GridVaultCtx vault_ctx, GridLocation at)
     : win_(win), font_(font), vault_(vault), cache_(cache), dlg_(dialogs.file),
-      folder_dlg_(dialogs.folder), registry_(vault_ctx.registry),
+      folder_dlg_(dialogs.folder),
       search_(vault, win), tag_editor_(vault, win),
       transfer_(vault, std::move(vault_ctx.active_vault_path), vault_ctx.registry,
                 dialogs.file, win),

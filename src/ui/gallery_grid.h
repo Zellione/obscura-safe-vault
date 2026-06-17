@@ -94,7 +94,6 @@ private:
     gfx::TextureCache&      cache_;
     platform::FileDialog&   dlg_;
     platform::FolderDialog& folder_dlg_;
-    platform::VaultRegistry& registry_;
     NavModel                nav_;
     SelectionModel          sel_;
     ConsentDialog           consent_;

@@ -37,7 +37,7 @@ public:
     [[nodiscard]] bool handle_event(const SDL_Event& e);   // true if consumed
     void update();                                          // poll the keyfile dialog
     [[nodiscard]] bool consume_completed(std::string& status_out);
-    void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
+    void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H) const;
 
 private:
     enum class Stage { PickVault, Unlock, PickGallery };
@@ -51,6 +51,7 @@ private:
     bool handle_pick_vault_key(SDL_Keycode k);   // per-stage key handler
     bool handle_unlock_key(SDL_Keycode k);
     bool handle_gallery_key(SDL_Keycode k);
+    bool handle_naming_event(const SDL_Event& e);   // new-gallery name overlay
 
     vault::Vault&            src_;
     std::string              src_path_;            // active vault's path (excluded as a dest)

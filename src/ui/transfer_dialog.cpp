@@ -143,7 +143,7 @@ void TransferDialog::do_move(std::string_view dst_gallery)
 
 bool TransferDialog::handle_pick_vault_key(SDL_Keycode k)
 {
-    const int n = static_cast<int>(candidates_.size());
+    const auto n = static_cast<int>(candidates_.size());
     if (k == SDLK_UP)   vault_sel_ = clamp_index(vault_sel_ - 1, n);
     if (k == SDLK_DOWN) vault_sel_ = clamp_index(vault_sel_ + 1, n);
     if (k == SDLK_RETURN || k == SDLK_KP_ENTER) choose_vault();
@@ -160,10 +160,39 @@ bool TransferDialog::handle_unlock_key(SDL_Keycode k)
 
 bool TransferDialog::handle_gallery_key(SDL_Keycode k)
 {
-    const int n = static_cast<int>(targets_.size());
+    const auto n = static_cast<int>(targets_.size());
     if (k == SDLK_UP)   gallery_sel_ = clamp_index(gallery_sel_ - 1, n);
     if (k == SDLK_DOWN) gallery_sel_ = clamp_index(gallery_sel_ + 1, n);
     if (k == SDLK_RETURN || k == SDLK_KP_ENTER) choose_gallery();
+    return true;
+}
+
+bool TransferDialog::handle_naming_event(const SDL_Event& e)
+{
+    if (e.type == SDL_EVENT_TEXT_INPUT) { name_buf_ += e.text.text; return true; }
+    if (e.type != SDL_EVENT_KEY_DOWN) return true;
+    switch (e.key.key) {
+        case SDLK_BACKSPACE:
+            if (!name_buf_.empty()) name_buf_.pop_back();
+            break;
+        case SDLK_ESCAPE:
+            naming_ = false;
+            break;
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER:
+            if (!name_buf_.empty() &&
+                dest_.vault.create_gallery(name_buf_) == vault::VaultResult::Ok) {
+                rebuild_targets();
+                naming_ = false;
+                do_move(name_buf_);     // move straight into the new gallery
+            } else {
+                error_ = "Could not create that gallery.";
+                naming_ = false;
+            }
+            break;
+        default:
+            break;
+    }
     return true;
 }
 
@@ -174,34 +203,7 @@ bool TransferDialog::handle_event(const SDL_Event& e)
     if (!active_) return false;
 
     // New-gallery name entry (overlays the PickGallery stage).
-    if (naming_) {
-        if (e.type == SDL_EVENT_TEXT_INPUT) { name_buf_ += e.text.text; return true; }
-        if (e.type == SDL_EVENT_KEY_DOWN) {
-            switch (e.key.key) {
-                case SDLK_BACKSPACE:
-                    if (!name_buf_.empty()) name_buf_.pop_back();
-                    break;
-                case SDLK_ESCAPE:
-                    naming_ = false;
-                    break;
-                case SDLK_RETURN:
-                case SDLK_KP_ENTER:
-                    if (!name_buf_.empty() &&
-                        dest_.vault.create_gallery(name_buf_) == vault::VaultResult::Ok) {
-                        rebuild_targets();
-                        naming_ = false;
-                        do_move(name_buf_);     // move straight into the new gallery
-                    } else {
-                        error_ = "Could not create that gallery.";
-                        naming_ = false;
-                    }
-                    break;
-                default:
-                    break;
-            }
-        }
-        return true;
-    }
+    if (naming_) return handle_naming_event(e);
 
     if (e.type == SDL_EVENT_TEXT_INPUT && stage_ == Stage::Unlock) {
         dest_.pw.push_utf8(e.text.text);
@@ -212,13 +214,11 @@ bool TransferDialog::handle_event(const SDL_Event& e)
     const SDL_Keycode k = e.key.key;
     if (k == SDLK_ESCAPE) { close(); return true; }
 
+    using enum Stage;
     switch (stage_) {
-        case Stage::PickVault:
-            return handle_pick_vault_key(k);
-        case Stage::Unlock:
-            return handle_unlock_key(k);
-        case Stage::PickGallery:
-            return handle_gallery_key(k);
+        case PickVault:   return handle_pick_vault_key(k);
+        case Unlock:      return handle_unlock_key(k);
+        case PickGallery: return handle_gallery_key(k);
     }
     return true;
 }
@@ -242,26 +242,26 @@ bool TransferDialog::consume_completed(std::string& status_out)
 
 // --- render ---------------------------------------------------------------
 
-void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
+void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H) const
 {
     if (!active_) return;
     using namespace gfx::theme;
 
-    const auto mw = static_cast<float>(W * 0.6);
-    const auto mh = static_cast<float>(H * 0.6);
-    const auto mx = static_cast<float>((W - mw) / 2);
-    const auto my = static_cast<float>((H - mh) / 2);
+    const float mw = W * 0.6f;
+    const float mh = H * 0.6f;
+    const float mx = (W - mw) / 2;
+    const float my = (H - mh) / 2;
     r.draw_round_rect({mx, my, mw, mh}, RADIUS, SURFACE);
     r.draw_round_rect({mx, my, mw, mh}, RADIUS, ACCENT, /*filled*/ false);
 
-    const auto ix = static_cast<float>(mx + 20);
-    const auto iy = static_cast<float>(my + 20);
+    const float ix = mx + 20;
+    const float iy = my + 20;
     r.draw_text(font, ix, iy,
                 std::format("Move {} image(s)", filenames_.size()), TEXT);
 
     auto row_list = [&](const std::vector<std::string>& items, int sel, float top) {
         for (size_t i = 0; i < items.size(); ++i) {
-            const auto ry = static_cast<float>(top + static_cast<float>(i) * 34.0);
+            const float ry = top + static_cast<float>(i) * 34.0f;
             const bool on = (static_cast<int>(i) == sel);
             if (on) r.draw_round_rect({ix, ry, mw - 40, 30}, RADIUS_SMALL, SURFACE_HI);
             r.draw_text(font, ix + 8, ry + 4, items[i], on ? TEXT : TEXT_DIM);
