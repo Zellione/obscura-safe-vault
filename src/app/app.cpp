@@ -82,9 +82,11 @@ void App::promote_pending()
 void App::to_gallery(const std::string& path, int selected)
 {
     state_  = State::Browsing;
-    screen_ = std::make_unique<ui::GalleryGrid>(window_, font_, *active_, *cache_, dialog_,
-                                                folder_dialog_, registry_, active_path_,
-                                                ui::GridLocation{path, selected});
+    screen_ = std::make_unique<ui::GalleryGrid>(
+        window_, font_, *active_, *cache_,
+        ui::GalleryGrid::GridDialogs{dialog_, folder_dialog_},
+        ui::GalleryGrid::GridVaultCtx{registry_, active_path_},
+        ui::GridLocation{path, selected});
     screen_->on_enter();
 }
 

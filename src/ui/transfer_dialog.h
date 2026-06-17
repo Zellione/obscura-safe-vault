@@ -31,7 +31,7 @@ public:
 
     // Activate to move `filenames` (image names within `src_gallery`).
     void open(std::string src_gallery, std::vector<std::string> filenames);
-    void close();                                   // wipes dst_ key, deactivates
+    void close();                                   // wipes dest_.vault key, deactivates
     [[nodiscard]] bool active() const noexcept { return active_; }
 
     [[nodiscard]] bool handle_event(const SDL_Event& e);   // true if consumed
@@ -42,11 +42,15 @@ public:
 private:
     enum class Stage { PickVault, Unlock, PickGallery };
 
-    void choose_vault();      // PickVault Enter: open dst_ for the selected path
-    void try_unlock();        // Unlock Enter: open()+unlock() dst_
+    void choose_vault();      // PickVault Enter: open dest_.vault for the selected path
+    void try_unlock();        // Unlock Enter: open()+unlock() dest_.vault
     void choose_gallery();    // PickGallery Enter: move into the selected target (or "New")
     void do_move(std::string_view dst_gallery);   // run the transfer + re-lock
-    void rebuild_targets();   // image_target_galleries(dst_) + the "New gallery…" row
+    void rebuild_targets();   // image_target_galleries(dest_.vault) + the "New gallery…" row
+
+    bool handle_pick_vault_key(SDL_Keycode k);   // per-stage key handler
+    bool handle_unlock_key(SDL_Keycode k);
+    bool handle_gallery_key(SDL_Keycode k);
 
     vault::Vault&            src_;
     std::string              src_path_;            // active vault's path (excluded as a dest)
@@ -62,11 +66,15 @@ private:
     std::vector<std::filesystem::path> candidates_;   // PickVault: registry minus src
     int         vault_sel_ = 0;
 
-    vault::Vault dst_;                                  // transient destination
-    std::string  dst_path_;
-    SecureTextField pw_;
-    std::string  keyfile_path_;
-    bool         awaiting_keyfile_ = false;
+    // Destination unlock state — bundled to fix S1820 (>20 data members).
+    struct Dest {
+        vault::Vault     vault;           // transient destination vault
+        std::string      path;
+        SecureTextField  pw;
+        std::string      keyfile_path;
+        bool             awaiting_keyfile = false;
+    };
+    Dest dest_;
 
     std::vector<std::string> targets_;                 // PickGallery: leaf paths + "<new>"
     int         gallery_sel_ = 0;

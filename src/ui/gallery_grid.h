@@ -33,10 +33,21 @@ struct GridLocation {
 
 class GalleryGrid : public Screen {
 public:
+    // Dialog pair for import/export file/folder selection.
+    struct GridDialogs {
+        platform::FileDialog&   file;
+        platform::FolderDialog& folder;
+    };
+
+    // Vault context: registry and active vault path (used to construct TransferDialog).
+    struct GridVaultCtx {
+        platform::VaultRegistry& registry;
+        std::string              active_vault_path;
+    };
+
     GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                gfx::TextureCache& cache, platform::FileDialog& dlg,
-                platform::FolderDialog& folder_dlg, platform::VaultRegistry& registry,
-                std::string active_vault_path, GridLocation at = {});
+                gfx::TextureCache& cache, GridDialogs dialogs,
+                GridVaultCtx vault_ctx, GridLocation at = {});
 
     void on_enter() override;
     void handle_event(const SDL_Event& e) override;
@@ -60,6 +71,8 @@ private:
     void start_naming();
     void finish_naming();
     void do_import(const std::filesystem::path& file_path);
+    void pump_transfer();          // poll the transfer dialog and handle completion
+    void pump_import();            // poll the file dialog while transfer is not active
     void start_search();       // open the search overlay
     void start_tag_editor();   // open the tag editor for the focused tile
     void toggle_favorite_current();  // flip favorite on the focused tile (B)
@@ -94,8 +107,13 @@ private:
     GalleryView           view_ = GalleryView::Grid;
     std::string           error_;
     std::string           status_;   // transient export result message
-    bool                  naming_ = false;
-    std::string           name_buf_;
+
+    // New-gallery naming state — bundled to fix S1820 (>20 data members).
+    struct Naming {
+        bool        active = false;
+        std::string buf;
+    };
+    Naming naming_;
 
     // Off-thread thumbnail decoding, scoped to this grid (its own worker; see the
     // note in ImageViewer for why each screen keeps a separate one). Grouped to

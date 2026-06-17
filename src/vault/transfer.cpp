@@ -1,5 +1,7 @@
 #include "vault/transfer.h"
 
+#include <algorithm>
+
 #include "crypto/secure_mem.h"
 
 namespace vault {
@@ -18,9 +20,8 @@ std::string child_path(std::string_view gallery, std::string_view name)
 // Does this gallery hold any sub-gallery? (If so it cannot accept images.)
 bool holds_subgalleries(const Vault& v, std::string_view gallery)
 {
-    for (const auto* c : v.list(gallery))
-        if (c->is_gallery()) return true;
-    return false;
+    return std::ranges::any_of(v.list(gallery),
+                               [](const auto* c) { return c->is_gallery(); });
 }
 
 void collect_targets(const Vault& v, std::string_view gallery,
