@@ -85,6 +85,7 @@ void UnlockScreen::handle_event(const SDL_Event& e)
                 case SDLK_TAB:       if (create_mode_) focus_ ^= 1; break;
                 case SDLK_RETURN:
                 case SDLK_KP_ENTER:  submit(); break;
+                case SDLK_ESCAPE:    request(NavKind::ToVaultManager); break;
                 default: break;
             }
             break;

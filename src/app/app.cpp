@@ -13,6 +13,7 @@
 #include "ui/gallery_grid.h"
 #include "ui/image_viewer.h"
 #include "ui/unlock_screen.h"
+#include "ui/vault_manager.h"
 
 #ifndef OSV_DEFAULT_FONT
 #define OSV_DEFAULT_FONT "assets/fonts/NotoSans-Regular.ttf"
@@ -40,24 +41,48 @@ bool App::init()
         std::println(stderr, "[App] Font atlas unavailable ('{}').", OSV_DEFAULT_FONT);
 
     cache_ = std::make_unique<gfx::TextureCache>(window_.sdl_renderer());
-    to_unlock();
 
-    std::println("[App] Initialised (Phase 5 — UI layer).");
+    registry_ = platform::VaultRegistry::default_location();
+    registry_.seed_if_empty(platform::default_vault_path());
+    to_manager();
+
+    std::println("[App] Initialised (Phase 14 — multiple vaults).");
     return true;
 }
 
-void App::to_unlock()
+void App::to_manager()
 {
-    state_  = State::Locked;
-    screen_ = std::make_unique<ui::UnlockScreen>(window_, font_, vault_, dialog_,
-                                                 platform::default_vault_path());
+    state_  = State::Managing;
+    screen_ = std::make_unique<ui::VaultManager>(
+        window_, font_, registry_, dialog_, active_ ? active_path_ : std::string{});
     screen_->on_enter();
+}
+
+void App::to_unlock(const std::string& path)
+{
+    // App owns the vault the unlock screen operates on; on success it is promoted
+    // to active_. Create-vs-open is auto-selected by the screen from file existence.
+    state_        = State::Locked;
+    pending_      = std::make_unique<vault::Vault>();
+    pending_path_ = path;
+    screen_ = std::make_unique<ui::UnlockScreen>(window_, font_, *pending_, dialog_, path);
+    screen_->on_enter();
+}
+
+void App::promote_pending()
+{
+    if (!pending_) return;
+    if (active_) active_->lock();                 // lock-on-switch: wipe the old key
+    active_      = std::move(pending_);
+    active_path_ = std::move(pending_path_);
+    pending_path_.clear();
+    registry_.add(active_path_);                  // move-to-front in the recent list
 }
 
 void App::to_gallery(const std::string& path, int selected)
 {
     state_  = State::Browsing;
-    screen_ = std::make_unique<ui::GalleryGrid>(window_, font_, vault_, *cache_, dialog_,
+    screen_ = std::make_unique<ui::GalleryGrid>(window_, font_, *active_, *cache_, dialog_,
                                                 folder_dialog_,
                                                 ui::GridLocation{path, selected});
     screen_->on_enter();
@@ -67,7 +92,7 @@ void App::to_viewer(const std::string& gallery_path, int index)
 {
     state_  = State::Viewing;
     screen_ = std::make_unique<ui::ImageViewer>(
-        window_, font_, vault_, *cache_, folder_dialog_,
+        window_, font_, *active_, *cache_, folder_dialog_,
         ui::ImageViewer::Album::gallery(gallery_path), index);
     screen_->on_enter();
 }
@@ -75,14 +100,14 @@ void App::to_viewer(const std::string& gallery_path, int index)
 void App::to_favorite_images()
 {
     state_  = State::Browsing;
-    screen_ = std::make_unique<ui::FavoritesImages>(window_, font_, vault_, *cache_);
+    screen_ = std::make_unique<ui::FavoritesImages>(window_, font_, *active_, *cache_);
     screen_->on_enter();
 }
 
 void App::to_favorite_galleries()
 {
     state_  = State::Browsing;
-    screen_ = std::make_unique<ui::FavoritesGalleries>(window_, font_, vault_);
+    screen_ = std::make_unique<ui::FavoritesGalleries>(window_, font_, *active_);
     screen_->on_enter();
 }
 
@@ -94,7 +119,7 @@ void App::to_favorite_viewer(int index)
     ui::ImageViewer::Album album;
     album.from_collection = true;
     album.back            = ui::Nav{ui::NavKind::ToFavoriteImages, {}, 0};
-    auto favs = vault_.list_favorite_images();
+    auto favs = active_->list_favorite_images();
     album.images.reserve(favs.size());
     album.paths.reserve(favs.size());
     for (auto& h : favs) {
@@ -104,7 +129,7 @@ void App::to_favorite_viewer(int index)
 
     state_  = State::Viewing;
     screen_ = std::make_unique<ui::ImageViewer>(
-        window_, font_, vault_, *cache_, folder_dialog_, std::move(album), index);
+        window_, font_, *active_, *cache_, folder_dialog_, std::move(album), index);
     screen_->on_enter();
 }
 
@@ -146,14 +171,25 @@ bool App::apply_nav()
     if (!screen_) return false;
     using enum ui::NavKind;
     switch (const ui::Nav nav = screen_->take_nav(); nav.kind) {
-        case ToGallery: screen_->on_exit(); to_gallery(nav.path, nav.index); return true;
-        case ToViewer:  screen_->on_exit(); to_viewer(nav.path, nav.index);  return true;
-        case ToFavoriteImages:    screen_->on_exit(); to_favorite_images();    return true;
-        case ToFavoriteGalleries: screen_->on_exit(); to_favorite_galleries(); return true;
-        case ToFavoriteViewer:    screen_->on_exit(); to_favorite_viewer(nav.index); return true;
-        case ToUnlock:  screen_->on_exit(); to_unlock();                     return true;
-        case Quit:      running_ = false;                                    return false;
-        case None:      return false;
+        case ToGallery:
+            screen_->on_exit();
+            if (state_ == State::Locked) promote_pending();   // unlock-screen success
+            if (active_) to_gallery(nav.path, nav.index);
+            else         to_manager();                        // defensive: nothing unlocked
+            return true;
+        case ToViewer:            screen_->on_exit(); to_viewer(nav.path, nav.index);  return true;
+        case ToFavoriteImages:    screen_->on_exit(); to_favorite_images();            return true;
+        case ToFavoriteGalleries: screen_->on_exit(); to_favorite_galleries();         return true;
+        case ToFavoriteViewer:    screen_->on_exit(); to_favorite_viewer(nav.index);   return true;
+        case ToUnlock:            screen_->on_exit(); to_unlock(nav.path);             return true;
+        case ToVaultManager:      screen_->on_exit(); pending_.reset(); to_manager();  return true;
+        case LockActive:
+            screen_->on_exit();
+            if (active_) { active_->lock(); active_.reset(); active_path_.clear(); }
+            to_manager();
+            return true;
+        case Quit:                running_ = false;                                    return false;
+        case None:                return false;
     }
     return false;
 }
@@ -202,8 +238,11 @@ void App::run()
 void App::shutdown()
 {
     if (screen_) { screen_->on_exit(); screen_.reset(); }
-    vault_.lock();                 // wipe master key
-    if (cache_) cache_->clear();   // destroy thumbnail textures before the renderer
+    if (active_)  active_->lock();      // wipe master key
+    if (pending_) pending_->lock();
+    active_.reset();
+    pending_.reset();
+    if (cache_) cache_->clear();        // destroy thumbnail textures before the renderer
     font_.release_texture();
     window_.shutdown();
     std::println("[App] Clean shutdown.");
