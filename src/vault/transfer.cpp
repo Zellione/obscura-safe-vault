@@ -27,9 +27,8 @@ bool holds_subgalleries(const Vault& v, std::string_view gallery)
 // Does this gallery directly hold any image? (If so it cannot accept a sub-gallery.)
 bool holds_images(const Vault& v, std::string_view gallery)
 {
-    for (const auto* c : v.list(gallery))
-        if (c->is_image()) return true;
-    return false;
+    return std::ranges::any_of(v.list(gallery),
+                               [](const auto* c) { return c->is_image(); });
 }
 
 void collect_parents(const Vault& v, std::string_view gallery,
@@ -50,7 +49,7 @@ struct GallerySnap {
 
 // Walk `abs` (a gallery in `src`) parent-before-child, recording each gallery's
 // relative path + its image filenames. `rel` is the path relative to the subtree root.
-void snapshot_subtree(const Vault& src, std::string_view abs, std::string rel,
+void snapshot_subtree(const Vault& src, std::string_view abs, const std::string& rel,
                       std::vector<GallerySnap>& out)
 {
     GallerySnap snap;
@@ -94,6 +93,32 @@ void collect_targets(const Vault& v, std::string_view gallery,
             collect_targets(v, child_path(gallery, c->name), out);
 }
 
+// Locate an image node by name in `gallery` (nullptr if absent).
+const IndexNode* find_image_node(const Vault& v, std::string_view gallery,
+                                 std::string_view name)
+{
+    for (const auto* c : v.list(gallery))
+        if (c->is_image() && c->name == name) return c;
+    return nullptr;
+}
+
+// Copy every image named in `images` from `src`/`src_gallery` into `dst`/`dst_gallery`,
+// decrypting through one reused mlock'd buffer. Copy only — the source is untouched.
+VaultResult copy_images(Vault& src, std::string_view src_gallery,
+                        Vault& dst, std::string_view dst_gallery,
+                        const std::vector<std::string>& images, crypto::SecureBytes& plain)
+{
+    using enum VaultResult;
+    for (const auto& fname : images) {
+        const IndexNode* node = find_image_node(src, src_gallery, fname);
+        if (!node) return NotFound;
+        if (VaultResult r = src.read_image(*node, plain); r != Ok) return r;
+        if (VaultResult r = dst.add_image(dst_gallery, plain.as_span(), fname); r != Ok)
+            return r;
+    }
+    return Ok;
+}
+
 } // namespace
 
 VaultResult move_image(Vault& src, std::string_view src_gallery,
@@ -103,9 +128,7 @@ VaultResult move_image(Vault& src, std::string_view src_gallery,
     using enum VaultResult;
 
     // Locate the source image node (intermediate path segments must be galleries).
-    const IndexNode* node = nullptr;
-    for (const auto* c : src.list(src_gallery))
-        if (c->is_image() && c->name == filename) { node = c; break; }
+    const IndexNode* node = find_image_node(src, src_gallery, filename);
     if (!node) return NotFound;
 
     // Decrypt into mlock'd memory, then re-encrypt into the destination.
@@ -166,22 +189,14 @@ VaultResult move_gallery(Vault& src, std::string_view src_gallery,
     for (const auto& snap : snaps) {
         const std::string dst_gallery = snap.rel.empty() ? dest_root
                                                          : dest_root + "/" + snap.rel;
-        const std::string src_gallery_abs = snap.rel.empty()
-            ? std::string(src_gallery)
-            : std::string(src_gallery) + "/" + snap.rel;
+        const std::string src_abs = snap.rel.empty() ? std::string(src_gallery)
+                                                      : std::string(src_gallery) + "/" + snap.rel;
 
         if (VaultResult r = dst.create_gallery(dst_gallery); r != Ok && r != AlreadyExists)
             return r;
-        for (const auto& fname : snap.images) {
-            // Find the source image node, decrypt into mlock'd memory, re-encrypt into dst.
-            const IndexNode* node = nullptr;
-            for (const auto* c : src.list(src_gallery_abs))
-                if (c->is_image() && c->name == fname) { node = c; break; }
-            if (!node) return NotFound;
-            if (VaultResult r = src.read_image(*node, plain); r != Ok) return r;
-            if (VaultResult r = dst.add_image(dst_gallery, plain.as_span(), fname); r != Ok)
-                return r;
-        }
+        if (VaultResult r = copy_images(src, src_abs, dst, dst_gallery, snap.images, plain);
+            r != Ok)
+            return r;
     }
 
     // Everything copied into dst — now drop the source subtree (copy-then-delete).
