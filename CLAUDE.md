@@ -130,9 +130,12 @@ src/
              secure_mem.*, random.*
   vault/     vault.h, header.*, index.*,  ← container format (Phase 2)
              chunk_store.*, vault.*,
-             transfer.*                   ← move_image + image_target_galleries:
-                                            move an image between two unlocked vaults
-                                            (decrypt→re-encrypt in mlock'd mem) (Phase 14)
+             transfer.*                   ← move_image + image_target_galleries (PR2);
+                                            move_gallery (recursive copy-then-delete) +
+                                            gallery_target_parents (PR3). Move images or a
+                                            whole gallery subtree between two unlocked
+                                            vaults (decrypt→re-encrypt in mlock'd mem).
+                                            Vault::remove_gallery drops a subtree (PR3).
   image/     image.h, decode.*,           ← stb_image decode + thumbs (Phase 3)
              thumbnail.*,                 ← format detection + libwebp/libheif
              format_registry.*,           ← decoders (Phase 9)
@@ -163,8 +166,9 @@ src/
              favorites_galleries.*,       ← flat grid of favorited galleries (Phase 13)
              vault_manager.*,             ← multi-vault home screen: list/open/create/
                                             remove/lock known vaults (Phase 14)
-             transfer_dialog.*,           ← `M` modal: move selected images to another
-                                            vault (pick→unlock→pick gallery→move) (Phase 14)
+             transfer_dialog.*,           ← `M` modal: move selected images OR a focused
+                                            gallery subtree to another vault
+                                            (pick→unlock→pick gallery→move) (Phase 14 PR2/3)
              widgets.*
   platform/  paths.{h,cpp},              ← config dir + file dialogs (Phase 5)
              file_dialog.*,               ← + save_vault() for new-vault paths (Phase 14)

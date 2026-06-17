@@ -33,7 +33,15 @@ src/
                                                  loss; plaintext in mlock'd SecureBytes) +
                                                  image_target_galleries(v) (leaf paths that
                                                  can hold images, incl. eligible root).
-                                                 Pure over public Vault API (Phase 14 PR2).
+                                                 PR3: move_gallery(src,src_gallery,dst,
+                                                 dst_parent) recursive copy-then-delete
+                                                 (snapshot subtree → recreate + copy images →
+                                                 Vault::remove_gallery(src) LAST; crash = dup)
+                                                 + gallery_target_parents(v) (image-free
+                                                 galleries that can hold a sub-gallery).
+                                                 Pure over public Vault API. Vault::
+                                                 remove_gallery drops a subtree, orphaning its
+                                                 chunks (reclaimed by compaction) (Phase 14).
                                                — index.h: IndexNode carries
                                                  std::vector<std::string> tags +
                                                  bool favorite (gallery + image);
@@ -145,15 +153,19 @@ src/
                                                  open/create(save dialog)/remove/lock/
                                                  select. Emits NavKind::ToVaultManager /
                                                  LockActive / ToUnlock(path) / ToGallery.
-               transfer_dialog.*               — `M` modal in GalleryGrid (Phase 14 PR2):
-                                                 move selected images to another vault.
+               transfer_dialog.*               — `M` modal in GalleryGrid (Phase 14 PR2/3):
+                                                 move selected images OR (PR3) a focused
+                                                 gallery subtree to another vault. Source enum
+                                                 {Images,Gallery}; open()/open_gallery().
                                                  Stages: pick dest vault (registry minus
-                                                 active) → unlock transiently (owns a
-                                                 vault::Vault dst_; pw in SecureTextField,
-                                                 optional keyfile) → pick leaf gallery / new
-                                                 → vault::move_image each → re-lock dst_ on
-                                                 every exit (~Vault backstop). Grid skips its
-                                                 import dlg_ poll while transfer_.active().
+                                                 active) → unlock transiently (owns Dest{vault,
+                                                 pw in SecureTextField, optional keyfile}) →
+                                                 pick leaf gallery (images) / parent gallery
+                                                 (gallery) / new → vault::move_image each or
+                                                 move_gallery once → re-lock on every exit
+                                                 (~Vault backstop). Grid skips its import dlg_
+                                                 poll while transfer_.active(); M with no
+                                                 selection acts on the focused tile.
                input.*, nav_model.*, viewer_model.h
                passphrase.*, screen.h
                secure_text_field.*, unlock_logic.*
