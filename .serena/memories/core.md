@@ -15,6 +15,14 @@ src/
                                                idles instead of free-running. VSync on
                                                (Window::vsync()); manual ~60fps cap
                                                fallback when VSync is unavailable.
+                                               Phase 14: VaultManager is the home
+                                               screen; App owns ONE unlocked vault
+                                               (active_) at a time + a transient
+                                               pending_ during unlock. Single-active /
+                                               lock-on-switch: opening another vault
+                                               wipes the old key; shutdown wipes both.
+                                               promote_pending() runs only on unlock
+                                               success (ToGallery while state==Locked).
   crypto/      aead.*, kdf.*, random.*,        — Monocypher wrappers
                secure_mem.h, crypto.h
   vault/       vault.*, header.*, index.*,     — .osv container format
@@ -125,11 +133,21 @@ src/
                                                  Shift+F). `B` toggles favorite on the
                                                  focused grid tile / current viewer image;
                                                  gold star badge on favorited tiles
+               vault_manager.*                 — multi-vault home screen (Phase 14):
+                                                 lists known vaults from VaultRegistry;
+                                                 open/create(save dialog)/remove/lock/
+                                                 select. Emits NavKind::ToVaultManager /
+                                                 LockActive / ToUnlock(path) / ToGallery.
                input.*, nav_model.*, viewer_model.h
                passphrase.*, screen.h
                secure_text_field.*, unlock_logic.*
   platform/    paths.*, file_dialog.*,         — config dirs, SDL file dialogs
+                                                 (file_dialog has save_vault(), Phase 14)
                folder_dialog.*                 — export destination picker (Phase 10)
+               vault_registry.*                — recent-vaults list (Phase 14): config-dir
+                                                 file of known vault PATHS ONLY (no
+                                                 secrets); list/add(move-to-front,dedup)/
+                                                 remove/seed_if_empty; atomic temp+rename.
 tests/
   crypto/ gfx/ image/ platform/ ui/ vault/
   test_framework.h  test_main.cpp

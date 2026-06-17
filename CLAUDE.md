@@ -122,7 +122,10 @@ index valid; orphaned chunks are reclaimed by compaction.
 
 ```
 src/
-  app/       main.cpp, app.{h,cpp}        ← state machine + event loop
+  app/       main.cpp, app.{h,cpp}        ← state machine + event loop;
+                                            VaultManager is the home screen and the
+                                            App owns ONE unlocked vault at a time
+                                            (single-active / lock-on-switch, Phase 14)
   crypto/    crypto.h, kdf.*, aead.*,     ← Monocypher wrappers (Phase 1)
              secure_mem.*, random.*
   vault/     vault.h, header.*, index.*,  ← container format (Phase 2)
@@ -155,10 +158,14 @@ src/
              tag_editor.*,                ← `G` add/remove tags modal (Phase 12)
              favorites_images.*,          ← flat grid of favorited images (Phase 13)
              favorites_galleries.*,       ← flat grid of favorited galleries (Phase 13)
+             vault_manager.*,             ← multi-vault home screen: list/open/create/
+                                            remove/lock known vaults (Phase 14)
              widgets.*
   platform/  paths.{h,cpp},              ← config dir + file dialogs (Phase 5)
-             file_dialog.*,
-             folder_dialog.*              ← export destination picker (Phase 10)
+             file_dialog.*,               ← + save_vault() for new-vault paths (Phase 14)
+             folder_dialog.*,             ← export destination picker (Phase 10)
+             vault_registry.*             ← recent-vaults list, paths only, atomic
+                                            write — stores NO secrets (Phase 14)
 vendor/
   SDL3/           ← git submodule, built by scripts/setup.sh (cmake)
   monocypher/     ← git submodule, compiled by premake (single .c file)

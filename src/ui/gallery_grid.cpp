@@ -97,7 +97,7 @@ void GalleryGrid::open_selected()
 
 void GalleryGrid::go_up()
 {
-    if (!nav_.up()) { vault_.lock(); request(NavKind::ToUnlock); return; }
+    if (!nav_.up()) { request(NavKind::ToVaultManager); return; }
     refresh();
 }
 

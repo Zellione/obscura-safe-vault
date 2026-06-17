@@ -8,12 +8,13 @@
 #include "gfx/window.h"
 #include "platform/file_dialog.h"
 #include "platform/folder_dialog.h"
+#include "platform/vault_registry.h"
 #include "ui/screen.h"
 #include "vault/vault.h"
 
 namespace app {
 
-enum class State { Locked, Browsing, Viewing };
+enum class State { Locked, Managing, Browsing, Viewing };
 
 class App {
 public:
@@ -28,12 +29,14 @@ public:
     void shutdown();
 
 private:
-    void to_unlock();
+    void to_manager();
+    void to_unlock(const std::string& path);
     void to_gallery(const std::string& path = {}, int selected = 0);
     void to_viewer(const std::string& gallery_path, int index);
     void to_favorite_images();
     void to_favorite_galleries();
     void to_favorite_viewer(int index);   // viewer over the whole favorites set
+    void promote_pending();               // unlock success: pending_ -> active_ (locks old)
 
     // run() helpers (kept small so the loop stays readable).
     void dispatch_event(const SDL_Event& e);     // quit/close here, else to screen
@@ -47,7 +50,11 @@ private:
     std::unique_ptr<gfx::TextureCache> cache_;
     platform::FileDialog               dialog_;
     platform::FolderDialog             folder_dialog_;
-    vault::Vault                       vault_;
+    std::unique_ptr<vault::Vault>      active_;          // the single unlocked vault
+    std::string                        active_path_;
+    std::unique_ptr<vault::Vault>      pending_;         // vault being unlocked right now
+    std::string                        pending_path_;
+    platform::VaultRegistry            registry_;
     std::unique_ptr<ui::Screen>        screen_;
     State                              state_   = State::Locked;
     bool                               running_ = false;   // main-loop run flag

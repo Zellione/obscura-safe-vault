@@ -34,6 +34,7 @@ jobs:
   build-and-test:
     name: ${{ matrix.compiler }} / ${{ matrix.config }} / Linux
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     strategy:
       fail-fast: false
@@ -55,6 +56,11 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Install build dependencies
         run: |
+          # CI's apt mirror occasionally hangs the connection indefinitely; bound
+          # each fetch (30s) and retry so a stuck mirror fails fast instead of
+          # hanging the whole job. Backed by the job-level timeout-minutes too.
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+            | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             cmake \
@@ -399,6 +405,7 @@ jobs:
   tests-asan:
     name: ASAN+UBSan / tests / Linux
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout (with submodules)
@@ -408,6 +415,11 @@ jobs:
 
       - name: Install build dependencies
         run: |
+          # CI's apt mirror occasionally hangs the connection indefinitely; bound
+          # each fetch (30s) and retry so a stuck mirror fails fast instead of
+          # hanging the whole job. Backed by the job-level timeout-minutes too.
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+            | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             cmake \
@@ -514,6 +526,7 @@ jobs:
   sonarqube:
     name: SonarQube analysis / Linux
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -537,6 +550,11 @@ jobs:
       - name: Install build dependencies
         if: env.SONAR_TOKEN != ''
         run: |
+          # CI's apt mirror occasionally hangs the connection indefinitely; bound
+          # each fetch (30s) and retry so a stuck mirror fails fast instead of
+          # hanging the whole job. Backed by the job-level timeout-minutes too.
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+            | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             cmake \
