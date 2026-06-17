@@ -104,7 +104,7 @@ const IndexNode* find_image_node(const Vault& v, std::string_view gallery,
 
 // Copy every image named in `images` from `src`/`src_gallery` into `dst`/`dst_gallery`,
 // decrypting through one reused mlock'd buffer. Copy only — the source is untouched.
-VaultResult copy_images(Vault& src, std::string_view src_gallery,
+VaultResult copy_images(const Vault& src, std::string_view src_gallery,
                         Vault& dst, std::string_view dst_gallery,
                         const std::vector<std::string>& images, crypto::SecureBytes& plain)
 {
