@@ -91,7 +91,7 @@ void VaultManager::handle_key(const SDL_KeyboardEvent& key)
     }
 }
 
-int VaultManager::hit_test(float mx, float my) const
+int VaultManager::hit_test(float my) const
 {
     const Layout L = layout();
     if (my < L.list_top) return -1;
@@ -112,7 +112,7 @@ void VaultManager::handle_click(const SDL_MouseButtonEvent& b)
     if (point_in_rect(b.x, b.y, L.open_btn)) {
         dlg_.open_vault(win_.sdl_window()); awaiting_dialog_ = true; return;
     }
-    if (const int row = hit_test(b.x, b.y); row >= 0) {
+    if (const int row = hit_test(b.y); row >= 0) {
         selected_ = row;
         open_selected();
     }

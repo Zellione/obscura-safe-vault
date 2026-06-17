@@ -44,7 +44,7 @@ private:
     void remove_selected();
     void handle_key(const SDL_KeyboardEvent& key);
     void handle_click(const SDL_MouseButtonEvent& b);
-    [[nodiscard]] int hit_test(float mx, float my) const;  // row under cursor, or -1
+    [[nodiscard]] int hit_test(float my) const;  // row under cursor, or -1
 
     gfx::Window&             win_;
     gfx::FontAtlas&          font_;
