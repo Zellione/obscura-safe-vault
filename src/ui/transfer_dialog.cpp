@@ -122,10 +122,8 @@ void TransferDialog::do_move(std::string_view dst_gallery)
 {
     using enum vault::VaultResult;
     int ok = 0;
-    int fail = 0;
     for (const auto& fname : filenames_) {
         if (vault::move_image(src_, src_gallery_, fname, dst_, dst_gallery) == Ok) ++ok;
-        else ++fail;
     }
     const std::string where = std::filesystem::path(dst_path_).stem().string();
     completed_status_ = std::format("Moved {} of {} to {}", ok,
