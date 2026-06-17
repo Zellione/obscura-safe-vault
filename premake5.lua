@@ -242,6 +242,7 @@ project "osv_tests"
         "src/gfx/text.cpp",
         "src/gfx/renderer.cpp",
         "src/platform/paths.cpp",
+        "src/platform/vault_registry.cpp",
         "src/ui/input.cpp",
         "src/ui/nav_model.cpp",
         "src/ui/passphrase.cpp",
