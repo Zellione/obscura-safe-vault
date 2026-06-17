@@ -46,6 +46,7 @@ TransferDialog::TransferDialog(vault::Vault& src, std::string src_path,
 void TransferDialog::open(std::string src_gallery, std::vector<std::string> filenames)
 {
     active_       = true;
+    source_       = Source::Images;
     stage_        = Stage::PickVault;
     src_gallery_  = std::move(src_gallery);
     filenames_    = std::move(filenames);
@@ -63,6 +64,13 @@ void TransferDialog::open(std::string src_gallery, std::vector<std::string> file
         if (p.string() != src_path_) candidates_.push_back(p);
     if (candidates_.empty())
         error_ = "No other vaults. Create or open one from the manager first.";
+}
+
+void TransferDialog::open_gallery(std::string src_gallery)
+{
+    open("", {});                  // reuse open() to reset all state + build candidates
+    source_      = Source::Gallery;
+    src_gallery_ = std::move(src_gallery);
 }
 
 void TransferDialog::close()
@@ -113,8 +121,9 @@ void TransferDialog::try_unlock()
 
 void TransferDialog::rebuild_targets()
 {
-    targets_ = vault::image_target_galleries(dest_.vault);
-    targets_.emplace_back(kNewGalleryRow);   // last row creates a new gallery
+    targets_ = (source_ == Source::Gallery) ? vault::gallery_target_parents(dest_.vault)
+                                            : vault::image_target_galleries(dest_.vault);
+    targets_.emplace_back(kNewGalleryRow);
 }
 
 void TransferDialog::choose_gallery()
@@ -125,16 +134,21 @@ void TransferDialog::choose_gallery()
     do_move(sel);
 }
 
-void TransferDialog::do_move(std::string_view dst_gallery)
+void TransferDialog::do_move(std::string_view dst_target)
 {
     using enum vault::VaultResult;
     int ok = 0;
-    for (const auto& fname : filenames_) {
-        if (vault::move_image(src_, src_gallery_, fname, dest_.vault, dst_gallery) == Ok) ++ok;
+    int total = 0;
+    if (source_ == Source::Gallery) {
+        total = 1;
+        if (vault::move_gallery(src_, src_gallery_, dest_.vault, dst_target) == Ok) ok = 1;
+    } else {
+        total = static_cast<int>(filenames_.size());
+        for (const auto& fname : filenames_)
+            if (vault::move_image(src_, src_gallery_, fname, dest_.vault, dst_target) == Ok) ++ok;
     }
     const std::string where = std::filesystem::path(dest_.path).stem().string();
-    completed_status_ = std::format("Moved {} of {} to {}", ok,
-                                    static_cast<int>(filenames_.size()), where);
+    completed_status_ = std::format("Moved {} of {} to {}", ok, total, where);
     completed_ = true;
     close();   // wipes the destination key
 }
@@ -257,7 +271,11 @@ void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, flo
     const float ix = mx + 20;
     const float iy = my + 20;
     r.draw_text(font, ix, iy,
-                std::format("Move {} image(s)", filenames_.size()), TEXT);
+                source_ == Source::Gallery
+                    ? std::format("Move gallery \"{}\"",
+                                  std::filesystem::path(src_gallery_).filename().string())
+                    : std::format("Move {} image(s)", filenames_.size()),
+                TEXT);
 
     auto row_list = [&](const std::vector<std::string>& items, int sel, float top) {
         for (size_t i = 0; i < items.size(); ++i) {
@@ -284,7 +302,10 @@ void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, flo
                                                : "keyfile set  •  [Enter] unlock",
                     TEXT_FAINT);
     } else {  // PickGallery
-        r.draw_text(font, ix, iy + 36, "Destination gallery:", TEXT_DIM);
+        r.draw_text(font, ix, iy + 36,
+                    source_ == Source::Gallery ? "Destination parent gallery:"
+                                               : "Destination gallery:",
+                    TEXT_DIM);
         row_list(targets_, gallery_sel_, iy + 72);
         if (naming_) {
             r.draw_text(font, ix, my + mh - 92, "New gallery name:", TEXT);

@@ -129,10 +129,27 @@ void GalleryGrid::start_export()
 void GalleryGrid::start_transfer()
 {
     if (transfer_.active()) return;
+
+    // Images selected (Space) → move them. Otherwise, the focused tile: a gallery
+    // moves the whole subtree; a lone image moves just that image.
     if (sel_.empty()) {
-        error_ = "Select images first (Space), then [M] to move to another vault.";
+        const int s = nav_.selected();
+        if (s < 0 || s >= static_cast<int>(children_.size())) {
+            error_ = "Nothing to move.";
+            return;
+        }
+        const vault::IndexNode* node = children_[s];
+        error_.clear();
+        if (node->is_gallery()) {
+            const std::string path = nav_.path().empty() ? node->name
+                                                          : nav_.path() + "/" + node->name;
+            transfer_.open_gallery(path);
+        } else {
+            transfer_.open(nav_.path(), {node->name});
+        }
         return;
     }
+
     std::vector<std::string> names;
     for (int idx : sel_.indices())
         if (idx >= 0 && idx < static_cast<int>(children_.size()) && children_[idx]->is_image())
