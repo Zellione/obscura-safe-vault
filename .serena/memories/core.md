@@ -27,6 +27,13 @@ src/
                secure_mem.h, crypto.h
   vault/       vault.*, header.*, index.*,     — .osv container format
                chunk_store.*, byte_io.h, file_util.h
+               transfer.*                      — move_image(src,src_gallery,file,dst,
+                                                 dst_gallery): read→add_image→remove_image
+                                                 (dst commits before src; crash = dup, not
+                                                 loss; plaintext in mlock'd SecureBytes) +
+                                                 image_target_galleries(v) (leaf paths that
+                                                 can hold images, incl. eligible root).
+                                                 Pure over public Vault API (Phase 14 PR2).
                                                — index.h: IndexNode carries
                                                  std::vector<std::string> tags +
                                                  bool favorite (gallery + image);
@@ -138,6 +145,15 @@ src/
                                                  open/create(save dialog)/remove/lock/
                                                  select. Emits NavKind::ToVaultManager /
                                                  LockActive / ToUnlock(path) / ToGallery.
+               transfer_dialog.*               — `M` modal in GalleryGrid (Phase 14 PR2):
+                                                 move selected images to another vault.
+                                                 Stages: pick dest vault (registry minus
+                                                 active) → unlock transiently (owns a
+                                                 vault::Vault dst_; pw in SecureTextField,
+                                                 optional keyfile) → pick leaf gallery / new
+                                                 → vault::move_image each → re-lock dst_ on
+                                                 every exit (~Vault backstop). Grid skips its
+                                                 import dlg_ poll while transfer_.active().
                input.*, nav_model.*, viewer_model.h
                passphrase.*, screen.h
                secure_text_field.*, unlock_logic.*
