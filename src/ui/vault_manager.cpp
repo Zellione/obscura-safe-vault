@@ -33,8 +33,11 @@ void VaultManager::reload()
 
 VaultManager::Layout VaultManager::layout() const
 {
-    const auto H = static_cast<float>(win_.height());
-    const float bw = 220.0f, bh = 44.0f, gap = 16.0f, row = H - 80.0f;
+    const auto  H   = static_cast<float>(win_.height());
+    const float bw  = 220.0f;
+    const float bh  = 44.0f;
+    const float gap = 16.0f;
+    const float row = H - 80.0f;
     return Layout{
         .new_btn  = {60.0f,             row, bw, bh},
         .open_btn = {60.0f + bw + gap,  row, bw, bh},
@@ -95,7 +98,7 @@ int VaultManager::hit_test(float my) const
 {
     const Layout L = layout();
     if (my < L.list_top) return -1;
-    const int idx = static_cast<int>((my - L.list_top) / L.row_h);
+    const auto idx = static_cast<int>((my - L.list_top) / L.row_h);
     return (idx >= 0 && idx < static_cast<int>(entries_.size())) ? idx : -1;
 }
 
@@ -169,7 +172,7 @@ void VaultManager::render(gfx::Renderer& r)
         const std::string label = entries_[i].filename().string();
         r.draw_text(font_, box.x + 18.0f, box.y + 8.0f, label, TEXT);
 
-        auto measure = [&](std::string_view s) { return font_.measure(s); };
+        auto measure = [this](std::string_view s) { return font_.measure(s); };
         const std::string shown = elide_middle(full, static_cast<int>(box.w - 220.0f), measure);
         r.draw_text(font_, box.x + 18.0f, box.y + 8.0f + font_.pixel_height(), shown, TEXT_DIM);
 
@@ -177,7 +180,7 @@ void VaultManager::render(gfx::Renderer& r)
             r.draw_text(font_, box.x + box.w - 130.0f, box.y + 14.0f, "unlocked", OK);
     }
 
-    auto btn = [&](const SDL_FRect& rect, std::string_view text) {
+    auto btn = [this, &r](const SDL_FRect& rect, std::string_view text) {
         const ButtonState s = button_state(rect, mouse_x_, mouse_y_, mouse_down_);
         draw_button(r, font_, {rect, std::string(text)}, s.hover, s.active);
     };

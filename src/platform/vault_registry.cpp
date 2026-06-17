@@ -38,24 +38,24 @@ std::vector<std::filesystem::path> VaultRegistry::list() const
     return out;
 }
 
-bool VaultRegistry::add(const std::filesystem::path& vault)
+bool VaultRegistry::add(const std::filesystem::path& vault) const
 {
     if (file_.empty() || vault.empty()) return false;
     auto entries = list();
-    std::erase_if(entries, [&](const std::filesystem::path& e) { return e == vault; });
+    std::erase_if(entries, [&vault](const std::filesystem::path& e) { return e == vault; });
     entries.insert(entries.begin(), vault);             // move-to-front
     return write(entries);
 }
 
-bool VaultRegistry::remove(const std::filesystem::path& vault)
+bool VaultRegistry::remove(const std::filesystem::path& vault) const
 {
     if (file_.empty()) return false;
     auto entries = list();
-    std::erase_if(entries, [&](const std::filesystem::path& e) { return e == vault; });
+    std::erase_if(entries, [&vault](const std::filesystem::path& e) { return e == vault; });
     return write(entries);
 }
 
-void VaultRegistry::seed_if_empty(const std::filesystem::path& candidate)
+void VaultRegistry::seed_if_empty(const std::filesystem::path& candidate) const
 {
     if (file_.empty()) return;
     std::error_code ec;
