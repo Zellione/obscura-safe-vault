@@ -23,6 +23,7 @@ public:
     void open_images(SDL_Window* parent);    // common image types (multi)
     void open_keyfile(SDL_Window* parent);   // any file (single)
     void save_keyfile(SDL_Window* parent);   // pick a location for a new keyfile
+    void save_vault(SDL_Window* parent);     // pick a location for a new *.osv vault
 
     [[nodiscard]] bool busy() const noexcept;
 
