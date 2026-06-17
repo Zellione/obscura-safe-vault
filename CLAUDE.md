@@ -129,7 +129,10 @@ src/
   crypto/    crypto.h, kdf.*, aead.*,     ← Monocypher wrappers (Phase 1)
              secure_mem.*, random.*
   vault/     vault.h, header.*, index.*,  ← container format (Phase 2)
-             chunk_store.*, vault.*
+             chunk_store.*, vault.*,
+             transfer.*                   ← move_image + image_target_galleries:
+                                            move an image between two unlocked vaults
+                                            (decrypt→re-encrypt in mlock'd mem) (Phase 14)
   image/     image.h, decode.*,           ← stb_image decode + thumbs (Phase 3)
              thumbnail.*,                 ← format detection + libwebp/libheif
              format_registry.*,           ← decoders (Phase 9)
@@ -160,6 +163,8 @@ src/
              favorites_galleries.*,       ← flat grid of favorited galleries (Phase 13)
              vault_manager.*,             ← multi-vault home screen: list/open/create/
                                             remove/lock known vaults (Phase 14)
+             transfer_dialog.*,           ← `M` modal: move selected images to another
+                                            vault (pick→unlock→pick gallery→move) (Phase 14)
              widgets.*
   platform/  paths.{h,cpp},              ← config dir + file dialogs (Phase 5)
              file_dialog.*,               ← + save_vault() for new-vault paths (Phase 14)
