@@ -16,10 +16,11 @@
 #include "ui/search_overlay.h"
 #include "ui/selection_model.h"
 #include "ui/tag_editor.h"
+#include "ui/transfer_dialog.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
 namespace vault { class Vault; struct IndexNode; }
-namespace platform { class FileDialog; class FolderDialog; }
+namespace platform { class FileDialog; class FolderDialog; class VaultRegistry; }
 
 namespace ui {
 
@@ -34,7 +35,8 @@ class GalleryGrid : public Screen {
 public:
     GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                 gfx::TextureCache& cache, platform::FileDialog& dlg,
-                platform::FolderDialog& folder_dlg, GridLocation at = {});
+                platform::FolderDialog& folder_dlg, platform::VaultRegistry& registry,
+                std::string active_vault_path, GridLocation at = {});
 
     void on_enter() override;
     void handle_event(const SDL_Event& e) override;
@@ -52,6 +54,7 @@ private:
     void go_up();
     void toggle_select();          // toggle the current item in the export selection
     void start_export();           // open the consent modal for the current selection
+    void start_transfer();         // open the move-to-another-vault dialog
     void do_export(const std::filesystem::path& dest);
     void start_import();
     void start_naming();
@@ -78,11 +81,13 @@ private:
     gfx::TextureCache&      cache_;
     platform::FileDialog&   dlg_;
     platform::FolderDialog& folder_dlg_;
+    platform::VaultRegistry& registry_;
     NavModel                nav_;
     SelectionModel          sel_;
     ConsentDialog           consent_;
     SearchOverlay           search_;
     TagEditor               tag_editor_;
+    TransferDialog          transfer_;
     GridLocation          initial_;   // where to (re)open: path + selected tile
     std::vector<const vault::IndexNode*> children_;
     int                   cols_ = 1;

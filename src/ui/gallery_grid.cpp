@@ -48,9 +48,12 @@ GridSpec grid_spec(float win_w, int cols) noexcept
 
 GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                          gfx::TextureCache& cache, platform::FileDialog& dlg,
-                         platform::FolderDialog& folder_dlg, GridLocation at)
+                         platform::FolderDialog& folder_dlg, platform::VaultRegistry& registry,
+                         std::string active_vault_path, GridLocation at)
     : win_(win), font_(font), vault_(vault), cache_(cache), dlg_(dlg),
-      folder_dlg_(folder_dlg), search_(vault, win), tag_editor_(vault, win),
+      folder_dlg_(folder_dlg), registry_(registry),
+      search_(vault, win), tag_editor_(vault, win),
+      transfer_(vault, std::move(active_vault_path), registry, dlg, win),
       initial_(std::move(at))
 {
 }
@@ -121,6 +124,22 @@ void GalleryGrid::start_export()
     status_.clear();
     const std::size_t n = sel_.count();
     consent_.open(std::format("Export {} {}", n, n == 1 ? "image?" : "images?"));
+}
+
+void GalleryGrid::start_transfer()
+{
+    if (transfer_.active()) return;
+    if (sel_.empty()) {
+        error_ = "Select images first (Space), then [M] to move to another vault.";
+        return;
+    }
+    std::vector<std::string> names;
+    for (int idx : sel_.indices())
+        if (idx >= 0 && idx < static_cast<int>(children_.size()) && children_[idx]->is_image())
+            names.push_back(children_[idx]->name);
+    if (names.empty()) { error_ = "Select images (not galleries) to move."; return; }
+    error_.clear();
+    transfer_.open(nav_.path(), std::move(names));
 }
 
 void GalleryGrid::do_export(const std::filesystem::path& dest)
@@ -285,6 +304,7 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
     using enum GalleryView;
     if (key.key == SDLK_L) { view_ = (view_ == Grid) ? List : Grid; return; }
     if (key.key == SDLK_X) { start_export(); return; }   // export selection
+    if (key.key == SDLK_M) { start_transfer(); return; }   // move to another vault
     if (key.key == SDLK_SPACE) { toggle_or_open(); return; }
     // `/` is a shifted key on many non-US layouts, so the base keycode (key.key)
     // is the unmodified symbol (e.g. '7') and never equals SDLK_SLASH. Resolve the
@@ -320,7 +340,7 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
 
 void GalleryGrid::handle_event(const SDL_Event& e)
 {
-    // Overlays take input in priority order: search > tag_editor > consent/naming
+    // Overlays take input in priority order: search > tag_editor > transfer > consent/naming
     if (search_.active()) {
         if (search_.handle_event(e)) {
             Nav nav = search_.take_nav();
@@ -333,6 +353,8 @@ void GalleryGrid::handle_event(const SDL_Event& e)
         (void)tag_editor_.handle_event(e);
         return;
     }
+
+    if (transfer_.active()) { (void)transfer_.handle_event(e); return; }
 
     // The export consent modal owns all input while it is up.
     if (consent_.active()) {
@@ -363,12 +385,25 @@ void GalleryGrid::update(double)
 {
     if (pump_thumbs()) mark_dirty();   // off-thread thumbnail decode(s) landed
 
-    if (auto res = dlg_.take_result()) {
-        if (!res->empty()) {
-            for (const auto& p : *res) do_import(p);
-            refresh();
+    if (transfer_.active()) {
+        transfer_.update();
+        mark_dirty();
+    }
+    if (std::string s; transfer_.consume_completed(s)) {
+        status_ = std::move(s);
+        sel_.clear();
+        refresh();              // moved images are gone from this listing
+        mark_dirty();
+    }
+
+    if (!transfer_.active()) {
+        if (auto res = dlg_.take_result()) {
+            if (!res->empty()) {
+                for (const auto& p : *res) do_import(p);
+                refresh();
+            }
+            mark_dirty();   // dialog closed (imported or cancelled) — repaint
         }
-        mark_dirty();   // dialog closed (imported or cancelled) — repaint
     }
     if (auto dest = folder_dlg_.take_result()) {
         if (!dest->empty()) do_export(*dest);   // empty => the picker was cancelled
@@ -388,7 +423,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     r.draw_text(font_, OX, 90,
                 "[I] Import  [N] New  [/] Search  [G] Tags  [B] Fav  [F] Fav Images  "
                 "[Shift+F] Fav Galleries  [Enter] Open  [Space] Select  [X] Export  "
-                "[Esc] Back  [L] List/Grid",
+                "[M] Move  [Esc] Back  [L] List/Grid",
                 TEXT_FAINT);
 
     if (!sel_.empty())
@@ -417,6 +452,7 @@ void GalleryGrid::render(gfx::Renderer& r)
 
     search_.render(r, font_, W, H);
     tag_editor_.render(r, font_, W, H);
+    transfer_.render(r, font_, W, H);
 }
 
 void GalleryGrid::render_grid(gfx::Renderer& r, float W, float /*H*/)
