@@ -150,7 +150,9 @@ TEST(transfer_image_target_galleries_lists_leaves_and_eligible_root)
     auto t = vault::image_target_galleries(v);
     // Root holds sub-galleries (A, B) -> NOT eligible. Eligible: A, B/Inner.
     auto has = [&](std::string_view s) {
-        for (auto& g : t) if (g == s) return true; return false;
+        for (auto& g : t)
+            if (g == s) return true;
+        return false;
     };
     CHECK(has("A"));
     CHECK(has("B/Inner"));
