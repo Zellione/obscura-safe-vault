@@ -385,12 +385,14 @@ std::optional<DecodedFrame> VideoDecoder::next_frame()
                         }
                     }
 
-                    // Set up the conversion frame for YUV420P
+                    // Release the previous frame's buffers before re-allocating. Without
+                    // this, av_frame_get_buffer overwrites conv_'s existing buffer refs and
+                    // leaks them — one whole frame buffer leaked per decoded frame.
+                    av_frame_unref(conv_);
                     conv_->format = AV_PIX_FMT_YUV420P;
-                    conv_->width = frame_->width;
+                    conv_->width  = frame_->width;
                     conv_->height = frame_->height;
 
-                    // Allocate or reallocate buffer if dimensions changed
                     int buf_ret = av_frame_get_buffer(conv_, 0);
                     if (buf_ret < 0) {
                         std::fprintf(stderr, "[VideoDecoder] av_frame_get_buffer failed: %d\n", buf_ret);
