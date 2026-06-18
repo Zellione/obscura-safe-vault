@@ -16,6 +16,8 @@
 #include "image/decode.h"
 #include "image/thumbnail.h"
 
+#include "vault/video_format.h"
+
 namespace vault {
 
 namespace {
@@ -60,9 +62,9 @@ IndexNode* child_named(IndexNode* node, std::string_view name)
     return nullptr;
 }
 
-bool holds_images(const IndexNode& g)
+bool holds_media(const IndexNode& g)
 {
-    return std::ranges::any_of(g.children, [](const auto& c) { return c.is_image(); });
+    return std::ranges::any_of(g.children, [](const auto& c) { return c.is_media(); });
 }
 
 bool holds_galleries(const IndexNode& g)
@@ -70,16 +72,40 @@ bool holds_galleries(const IndexNode& g)
     return std::ranges::any_of(g.children, [](const auto& c) { return c.is_gallery(); });
 }
 
-// Visit every image node in the tree rooted at `n` (templated so it serves
-// both const and non-const callers).
+// Visit every media node (image or video) in the tree rooted at `n`.
+// Templated so it serves both const and non-const callers.
 template <typename NodeT, typename Fn>
-void for_each_image(NodeT& n, Fn&& fn)
+void for_each_media(NodeT& n, Fn&& fn)
 {
-    if (n.is_image()) {
+    if (n.is_media()) {
         fn(n);
         return;
     }
-    for (auto& c : n.children) for_each_image(c, fn);
+    for (auto& c : n.children) for_each_media(c, fn);
+}
+
+// Copy a media node's live chunk(s) from `src` to `dst` verbatim (ciphertext —
+// no decrypt/re-encrypt, invariant #1), rewriting each offset to its new
+// location. Sets `err` to IoError on the first failed read/append.
+void relocate_node_chunks(const ChunkStore& src, ChunkStore& dst, IndexNode& node, VaultResult& err)
+{
+    auto copy_span = [&err, &src, &dst](uint64_t& off, uint64_t len) {
+        if (err != VaultResult::Ok || len == 0) return;
+        std::vector<uint8_t> blob;
+        uint64_t new_off = 0;
+        if (!src.read_raw(off, len, blob) || !dst.append_raw(blob, new_off)) {
+            err = VaultResult::IoError;
+            return;
+        }
+        off = new_off;
+    };
+    if (node.is_image()) {
+        copy_span(node.meta.data_offset, node.meta.data_length);
+        copy_span(node.meta.thumb_offset, node.meta.thumb_length);
+    } else if (node.is_video()) {
+        for (auto& chunk : node.vmeta.chunks) copy_span(chunk.offset, chunk.length);
+        copy_span(node.vmeta.poster_offset, node.vmeta.poster_length);
+    }
 }
 
 // Trim ASCII whitespace from start and end of a string_view.
@@ -225,7 +251,7 @@ void search_dfs(const IndexNode& node, std::string_view prefix,
 }
 
 // Walk the tree collecting every favorited node of the requested kind (galleries
-// when `want_galleries`, otherwise images) into `out`, flat, with full paths.
+// when `want_galleries`, otherwise media: images or videos) into `out`, flat, with full paths.
 // effective_tags is intentionally left empty — favorites lists don't cascade tags.
 void collect_favorites(const IndexNode& node, std::string_view prefix,
                        bool want_galleries, std::vector<SearchHit>& out)
@@ -233,7 +259,8 @@ void collect_favorites(const IndexNode& node, std::string_view prefix,
     for (const auto& child : node.children) {
         const std::string full_path = join_child_path(prefix, child.name);
 
-        if (child.favorite && child.is_gallery() == want_galleries) {
+        if (const bool matches = want_galleries ? child.is_gallery() : child.is_media();
+            child.favorite && matches) {
             out.push_back(SearchHit{
                 .path           = full_path,
                 .is_gallery     = child.is_gallery(),
@@ -518,8 +545,8 @@ VaultResult Vault::create_gallery(std::string_view gallery_path)
             if (!child->is_gallery()) return InvalidArg;  // name is an image
             cur = child;
         } else {
-            // A gallery holding images cannot also hold sub-galleries.
-            if (holds_images(*cur)) return InvalidArg;
+            // A gallery holding media cannot also hold sub-galleries.
+            if (holds_media(*cur)) return InvalidArg;
             cur->children.push_back(IndexNode::gallery(std::string(seg)));
             cur     = &cur->children.back();
             created = true;
@@ -600,13 +627,86 @@ VaultResult Vault::read_thumbnail(const IndexNode& node, crypto::SecureBytes& ou
 {
     using enum VaultResult;
     if (!unlocked_)              return Locked;
-    if (!node.is_image())        return InvalidArg;
-    if (node.meta.thumb_length == 0) return NotFound;
+    if (!node.is_media())        return InvalidArg;
+
+    // Determine thumbnail location: video uses poster, image uses meta.
+    const uint64_t thumb_len = node.is_video() ? node.vmeta.poster_length : node.meta.thumb_length;
+    const uint64_t thumb_off = node.is_video() ? node.vmeta.poster_offset : node.meta.thumb_offset;
+    if (thumb_len == 0) return NotFound;
 
     if (ChunkStore store(fp_, master_key_.as_span());
-        !store.read_chunk({node.meta.thumb_offset, node.meta.thumb_length}, out)) {
+        !store.read_chunk({thumb_off, thumb_len}, out)) {
         return AuthFailed;
     }
+    return Ok;
+}
+
+VaultResult Vault::add_video(std::string_view         gallery_path,
+                             std::span<const uint8_t> file_data,
+                             std::string_view         filename,
+                             uint32_t                 chunk_size)
+{
+    using enum VaultResult;
+    if (!unlocked_)             return Locked;
+    if (filename.empty())       return InvalidArg;
+    if (chunk_size == 0)        return InvalidArg;
+
+    const VideoContainer container = detect_video_container(file_data);
+    if (container == VideoContainer::Unknown) return InvalidArg;   // not a video we accept
+
+    IndexNode* g = find_gallery(gallery_path);
+    if (!g) return NotFound;
+    if (holds_galleries(*g))    return InvalidArg;   // not a leaf gallery
+    if (child_named(g, filename)) return AlreadyExists;
+
+    ChunkStore store(fp_, master_key_.as_span());
+    std::vector<VideoChunk> chunks;
+    for (size_t off = 0; off < file_data.size(); off += chunk_size) {
+        const size_t len = std::min<size_t>(chunk_size, file_data.size() - off);
+        ChunkSpan span;
+        if (!store.append_chunk(file_data.subspan(off, len), span)) return IoError;
+        chunks.push_back({span.offset, span.length});
+    }
+    // An empty file would store zero chunks; treat as invalid (no video stream).
+    if (chunks.empty()) return InvalidArg;
+    if (!store.sync())  return IoError;
+
+    IndexNode vid = IndexNode::video(std::string(filename));
+    vid.vmeta.container  = container;
+    vid.vmeta.codec      = VideoCodec::Unknown;   // PR4 fills these
+    vid.vmeta.width      = 0;
+    vid.vmeta.height     = 0;
+    vid.vmeta.duration_us= 0;
+    vid.vmeta.orig_size  = file_data.size();
+    vid.vmeta.created_ts = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+    vid.vmeta.chunk_size = chunk_size;
+    vid.vmeta.chunks     = std::move(chunks);
+    vid.vmeta.poster_offset = 0;
+    vid.vmeta.poster_length = 0;
+    g->children.push_back(std::move(vid));
+
+    return commit_index();
+}
+
+VaultResult Vault::read_video(const IndexNode& node, crypto::SecureBytes& out) const
+{
+    using enum VaultResult;
+    if (!unlocked_)       return Locked;
+    if (!node.is_video()) return InvalidArg;
+
+    if (!out.resize(node.vmeta.orig_size)) return IoError;
+    ChunkStore store(fp_, master_key_.as_span());
+    size_t pos = 0;
+    for (const VideoChunk& c : node.vmeta.chunks) {
+        crypto::SecureBytes piece;
+        if (!store.read_chunk({c.offset, c.length}, piece)) { (void)out.resize(0); return AuthFailed; }
+        if (pos + piece.size() > out.size())                { (void)out.resize(0); return AuthFailed; }
+        std::copy(piece.data(), piece.data() + piece.size(), out.data() + pos);
+        pos += piece.size();
+    }
+    if (pos != out.size()) { (void)out.resize(0); return AuthFailed; }
     return Ok;
 }
 
@@ -619,8 +719,8 @@ VaultResult Vault::remove_image(std::string_view gallery_path, std::string_view 
     if (!g) return NotFound;
 
     for (auto it = g->children.begin(); it != g->children.end(); ++it) {
-        if (it->is_image() && it->name == filename) {
-            g->children.erase(it);  // chunk is orphaned until compaction
+        if (it->is_media() && it->name == filename) {  // remove image or video
+            g->children.erase(it);  // chunk(s) are orphaned until compaction
             if (const VaultResult r = commit_index(); r != Ok) return r;
 
             // Best-effort space reclamation: the remove itself already
@@ -792,8 +892,16 @@ uint64_t Vault::wasted_bytes() const
     if (!fileutil::file_size(fp_, size)) return 0;
 
     uint64_t live = HEADER_SIZE + header_.slot[header_.active_slot].length;
-    for_each_image(root_, [&live](const IndexNode& img) {
-        live += img.meta.data_length + img.meta.thumb_length;
+    for_each_media(root_, [&live](const IndexNode& node) {
+        if (node.is_image()) {
+            live += node.meta.data_length + node.meta.thumb_length;
+        } else if (node.is_video()) {
+            // Sum all video chunks plus optional poster.
+            for (const auto& chunk : node.vmeta.chunks) {
+                live += chunk.length;
+            }
+            live += node.vmeta.poster_length;
+        }
     });
     return size > live ? size - live : 0;
 }
@@ -826,19 +934,8 @@ VaultResult Vault::compact()
     ChunkStore dst(tmp, master_key_.as_span());
 
     VaultResult copy_err = Ok;
-    for_each_image(new_root, [&copy_err, &src, &dst](IndexNode& img) {
-        auto copy_span = [&copy_err, &src, &dst](uint64_t& off, uint64_t len) {
-            if (copy_err != Ok || len == 0) return;
-            std::vector<uint8_t> blob;
-            uint64_t new_off = 0;
-            if (!src.read_raw(off, len, blob) || !dst.append_raw(blob, new_off)) {
-                copy_err = IoError;
-                return;
-            }
-            off = new_off;
-        };
-        copy_span(img.meta.data_offset, img.meta.data_length);
-        copy_span(img.meta.thumb_offset, img.meta.thumb_length);
+    for_each_media(new_root, [&src, &dst, &copy_err](IndexNode& node) {
+        relocate_node_chunks(src, dst, node, copy_err);
     });
     if (copy_err != Ok) return fail(copy_err);
 

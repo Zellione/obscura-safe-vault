@@ -24,11 +24,11 @@ bool holds_subgalleries(const Vault& v, std::string_view gallery)
                                [](const auto* c) { return c->is_gallery(); });
 }
 
-// Does this gallery directly hold any image? (If so it cannot accept a sub-gallery.)
+// Does this gallery directly hold any media (image or video)? (If so it cannot accept a sub-gallery.)
 bool holds_images(const Vault& v, std::string_view gallery)
 {
     return std::ranges::any_of(v.list(gallery),
-                               [](const auto* c) { return c->is_image(); });
+                               [](const auto* c) { return c->is_media(); });
 }
 
 void collect_parents(const Vault& v, std::string_view gallery,
@@ -41,14 +41,14 @@ void collect_parents(const Vault& v, std::string_view gallery,
 }
 
 // One snapshotted gallery: its path relative to the moved subtree root ("" = the
-// moved gallery itself) and the image filenames it directly holds.
+// moved gallery itself) and the media (image/video) filenames it directly holds.
 struct GallerySnap {
     std::string              rel;
-    std::vector<std::string> images;
+    std::vector<std::string> images;  // names of media children (images and videos)
 };
 
 // Walk `abs` (a gallery in `src`) parent-before-child, recording each gallery's
-// relative path + its image filenames. `rel` is the path relative to the subtree root.
+// relative path + its media filenames. `rel` is the path relative to the subtree root.
 void snapshot_subtree(const Vault& src, std::string_view abs, const std::string& rel,
                       std::vector<GallerySnap>& out)
 {
@@ -56,7 +56,7 @@ void snapshot_subtree(const Vault& src, std::string_view abs, const std::string&
     snap.rel = rel;
     std::vector<std::string> subgalleries;
     for (const auto* c : src.list(abs)) {
-        if (c->is_image())   snap.images.push_back(c->name);
+        if (c->is_media())   snap.images.push_back(c->name);
         else                 subgalleries.push_back(c->name);
     }
     out.push_back(std::move(snap));
@@ -93,17 +93,18 @@ void collect_targets(const Vault& v, std::string_view gallery,
             collect_targets(v, child_path(gallery, c->name), out);
 }
 
-// Locate an image node by name in `gallery` (nullptr if absent).
+// Locate a media node (image or video) by name in `gallery` (nullptr if absent).
 const IndexNode* find_image_node(const Vault& v, std::string_view gallery,
                                  std::string_view name)
 {
     for (const auto* c : v.list(gallery))
-        if (c->is_image() && c->name == name) return c;
+        if (c->is_media() && c->name == name) return c;
     return nullptr;
 }
 
-// Copy every image named in `images` from `src`/`src_gallery` into `dst`/`dst_gallery`,
-// decrypting through one reused mlock'd buffer. Copy only — the source is untouched.
+// Copy every media (image or video) named in `images` from `src`/`src_gallery` into
+// `dst`/`dst_gallery`, decrypting through one reused mlock'd buffer. Copy only — the
+// source is untouched.
 VaultResult copy_images(const Vault& src, std::string_view src_gallery,
                         Vault& dst, std::string_view dst_gallery,
                         const std::vector<std::string>& images, crypto::SecureBytes& plain)
@@ -112,9 +113,17 @@ VaultResult copy_images(const Vault& src, std::string_view src_gallery,
     for (const auto& fname : images) {
         const IndexNode* node = find_image_node(src, src_gallery, fname);
         if (!node) return NotFound;
-        if (VaultResult r = src.read_image(*node, plain); r != Ok) return r;
-        if (VaultResult r = dst.add_image(dst_gallery, plain.as_span(), fname); r != Ok)
-            return r;
+
+        // Branch on media type: image → read_image/add_image, video → read_video/add_video
+        if (node->is_image()) {
+            if (VaultResult r = src.read_image(*node, plain); r != Ok) return r;
+            if (VaultResult r = dst.add_image(dst_gallery, plain.as_span(), fname); r != Ok)
+                return r;
+        } else if (node->is_video()) {
+            if (VaultResult r = src.read_video(*node, plain); r != Ok) return r;
+            if (VaultResult r = dst.add_video(dst_gallery, plain.as_span(), fname); r != Ok)
+                return r;
+        }
     }
     return Ok;
 }
@@ -139,20 +148,31 @@ VaultResult transfer_image(Vault& src, std::string_view src_gallery,
 {
     using enum VaultResult;
 
-    // Locate the source image node (intermediate path segments must be galleries).
+    // Locate the source media (image or video) node.
     const IndexNode* node = find_image_node(src, src_gallery, filename);
     if (!node) return NotFound;
 
     // Decrypt into mlock'd memory, then re-encrypt into the destination.
     crypto::SecureBytes plain;
-    if (VaultResult r = src.read_image(*node, plain); r != Ok) return r;
+
+    // Branch on media type: image → read_image/add_image, video → read_video/add_video
+    if (node->is_image()) {
+        if (VaultResult r = src.read_image(*node, plain); r != Ok) return r;
+    } else if (node->is_video()) {
+        if (VaultResult r = src.read_video(*node, plain); r != Ok) return r;
+    }
 
     // dst commits first (crash-safe: a crash before the source remove leaves a
     // recoverable duplicate, never a loss). A failed add leaves the source intact.
     // `node` is not used past this point, so a same-vault add that reallocates the
     // index cannot dangle it.
-    if (VaultResult r = dst.add_image(dst_gallery, plain.as_span(), filename); r != Ok)
-        return r;
+    if (node->is_image()) {
+        if (VaultResult r = dst.add_image(dst_gallery, plain.as_span(), filename); r != Ok)
+            return r;
+    } else if (node->is_video()) {
+        if (VaultResult r = dst.add_video(dst_gallery, plain.as_span(), filename); r != Ok)
+            return r;
+    }
 
     if (mode == TransferMode::Move) return src.remove_image(src_gallery, filename);
     return Ok;

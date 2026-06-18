@@ -1,6 +1,7 @@
 #include "test_framework.h"
 
 #include <filesystem>
+#include <fstream>
 #include <span>
 #include <string>
 #include <vector>
@@ -228,4 +229,118 @@ TEST(compact_rename_failure_keeps_original_vault_usable)
     crypto::SecureBytes again;
     REQUIRE(v.read_image(*v.list("")[0], again) == vault::VaultResult::Ok);
     CHECK_BYTES_EQ(again.as_span(), std::span<const uint8_t>(keep));
+}
+
+// Phase 15 PR2: video chunks must survive compaction (regression test for
+// data-loss bug where compact() only copied image chunks, leaving video
+// chunks pointing into the discarded original file).
+TEST(compact_preserves_video_chunks)
+{
+    TempVault tv("video_compact");
+
+    // Read the tiny.mp4 fixture.
+    std::ifstream fixture(OSV_VAULT_FIXTURE_DIR "/tiny.mp4", std::ios::binary);
+    REQUIRE(fixture.is_open());
+    fixture.seekg(0, std::ios::end);
+    size_t size = fixture.tellg();
+    fixture.seekg(0, std::ios::beg);
+    std::vector<uint8_t> video_bytes(size);
+    fixture.read(reinterpret_cast<char*>(video_bytes.data()), size);
+    REQUIRE(!video_bytes.empty());
+
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+                == vault::VaultResult::Ok);
+
+        // Add a video to a gallery with small chunks to force multi-chunk storage.
+        REQUIRE(v.create_gallery("clips") == vault::VaultResult::Ok);
+        REQUIRE(v.add_video("clips", video_bytes, "v.mp4", /*chunk_size=*/4096)
+                == vault::VaultResult::Ok);
+
+        // Compact the vault.
+        REQUIRE(v.compact() == vault::VaultResult::Ok);
+
+        // Verify the video still exists and reads back correctly in-session.
+        auto kids = v.list("clips");
+        REQUIRE(kids.size() == 1);
+        REQUIRE(kids[0]->is_video());
+
+        crypto::SecureBytes out;
+        REQUIRE(v.read_video(*kids[0], out) == vault::VaultResult::Ok);
+        CHECK_EQ(out.size(), video_bytes.size());
+        CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(video_bytes));
+    }
+
+    // Verify the video survives a cold reopen after compaction.
+    vault::Vault v2;
+    REQUIRE(vault::Vault::open(tv.str(), v2) == vault::VaultResult::Ok);
+    REQUIRE(v2.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+
+    auto kids = v2.list("clips");
+    REQUIRE(kids.size() == 1);
+    REQUIRE(kids[0]->is_video());
+
+    crypto::SecureBytes out;
+    REQUIRE(v2.read_video(*kids[0], out) == vault::VaultResult::Ok);
+    CHECK_EQ(out.size(), video_bytes.size());
+    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(video_bytes));
+}
+
+// Bonus: verify images and videos both survive when an image is deleted and
+// compaction is triggered.
+TEST(compact_preserves_both_image_and_video_when_deleting_image)
+{
+    TempVault tv("video_image_compact");
+
+    // Read fixtures.
+    std::ifstream video_fixture(OSV_VAULT_FIXTURE_DIR "/tiny.mp4", std::ios::binary);
+    REQUIRE(video_fixture.is_open());
+    video_fixture.seekg(0, std::ios::end);
+    size_t video_size = video_fixture.tellg();
+    video_fixture.seekg(0, std::ios::beg);
+    std::vector<uint8_t> video_bytes(video_size);
+    video_fixture.read(reinterpret_cast<char*>(video_bytes.data()), video_size);
+    REQUIRE(!video_bytes.empty());
+
+    const auto image = pattern(vault::Vault::AUTO_COMPACT_MIN_WASTE * 2, 99);
+
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+                == vault::VaultResult::Ok);
+
+        REQUIRE(v.create_gallery("mixed") == vault::VaultResult::Ok);
+        // Add a large image, a video, then delete the image to trigger auto-compact.
+        REQUIRE(v.add_image("mixed", image, "big.bin") == vault::VaultResult::Ok);
+        REQUIRE(v.add_video("mixed", video_bytes, "v.mp4", /*chunk_size=*/4096)
+                == vault::VaultResult::Ok);
+
+        // This delete should trigger auto-compact (waste exceeds threshold).
+        REQUIRE(v.remove_image("mixed", "big.bin") == vault::VaultResult::Ok);
+        CHECK_EQ(v.wasted_bytes(), 0u);  // auto-compact ran
+
+        // Verify both remain: video should still be there.
+        auto kids = v.list("mixed");
+        REQUIRE(kids.size() == 1);
+        REQUIRE(kids[0]->is_video());
+        CHECK_EQ(kids[0]->name, std::string("v.mp4"));
+
+        crypto::SecureBytes out;
+        REQUIRE(v.read_video(*kids[0], out) == vault::VaultResult::Ok);
+        CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(video_bytes));
+    }
+
+    // Reopen and verify the video persists after auto-compaction.
+    vault::Vault v2;
+    REQUIRE(vault::Vault::open(tv.str(), v2) == vault::VaultResult::Ok);
+    REQUIRE(v2.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+
+    auto kids = v2.list("mixed");
+    REQUIRE(kids.size() == 1);
+    REQUIRE(kids[0]->is_video());
+
+    crypto::SecureBytes out;
+    REQUIRE(v2.read_video(*kids[0], out) == vault::VaultResult::Ok);
+    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(video_bytes));
 }
