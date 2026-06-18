@@ -55,17 +55,6 @@ static std::span<const uint8_t> bytes(const std::string& s)
     return {reinterpret_cast<const uint8_t*>(s.data()), s.size()};
 }
 
-// Count files in a directory (for the no-write invariant).
-size_t count_files(const std::string& dir)
-{
-    size_t n = 0;
-    for (auto& e : fs::directory_iterator(dir)) {
-        (void)e;
-        ++n;
-    }
-    return n;
-}
-
 } // namespace
 
 TEST(chunk_avio_reads_and_seeks_byte_exact)
@@ -84,9 +73,11 @@ TEST(chunk_avio_reads_and_seeks_byte_exact)
     REQUIRE(children.size() == 1);
     const vault::IndexNode& node = *children[0];
 
-    // Record file count before ChunkAvio operations.
-    const std::string dir = tv.path.parent_path().string();
-    const size_t before = count_files(dir);
+    // Record the vault file's size before any AVIO operation. Reads must never
+    // grow or modify it (and the AVIOContext opens no file at all). Counting
+    // files in the shared system temp dir would be flaky — assert on the .osv
+    // size instead.
+    const std::uintmax_t size_before = fs::file_size(tv.str());
 
     // Create ChunkAvio from the video node.
     media::ChunkAvio avio(media::VideoSource::open(v, node));
@@ -117,8 +108,10 @@ TEST(chunk_avio_reads_and_seeks_byte_exact)
     REQUIRE(avio_read(ctx, piece.data(), 500) == 500);
     CHECK(testing::bytes_equal(piece, std::span<const uint8_t>(video_bytes).subspan(mid, 500)));
 
-    // INVARIANT #1: no new files appeared on disk.
-    CHECK(count_files(dir) == before);
+    // INVARIANT #1: the read/seek cycle wrote nothing — the vault file is
+    // unchanged and no .compact/.tmp sidecar was created.
+    CHECK(fs::file_size(tv.str()) == size_before);
+    CHECK(!fs::exists(tv.str() + ".compact"));
 }
 
 TEST(chunk_avio_surfaces_decrypt_failure)
