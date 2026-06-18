@@ -209,6 +209,7 @@ scripts/gen.sh --gmake       # GNU Make fallback
 # Compile:
 scripts/build.sh             # Debug
 scripts/build.sh --release   # Release
+scripts/build.sh --clean     # wipe this config's outputs first, then build (combinable)
 
 # Run:
 build/bin/Debug/osv
