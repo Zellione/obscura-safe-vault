@@ -40,7 +40,7 @@ void write_node(ByteWriter& w, const IndexNode& node)
     if (node.type == IndexNode::Type::Gallery) {
         w.u32(static_cast<uint32_t>(node.children.size()));
         for (const auto& child : node.children) write_node(w, child);
-    } else {
+    } else if (node.type == IndexNode::Type::Image) {
         const ImageMeta& m = node.meta;
         w.u8(std::to_underlying(m.format));
         w.u32(m.width);
@@ -51,6 +51,23 @@ void write_node(ByteWriter& w, const IndexNode& node)
         w.u64(m.data_length);
         w.u64(m.thumb_offset);
         w.u64(m.thumb_length);
+    } else if (node.type == IndexNode::Type::Video) {
+        const VideoMeta& m = node.vmeta;
+        w.u8(std::to_underlying(m.container));
+        w.u8(std::to_underlying(m.codec));
+        w.u32(m.width);
+        w.u32(m.height);
+        w.u64(m.duration_us);
+        w.u64(m.orig_size);
+        w.u64(m.created_ts);
+        w.u32(m.chunk_size);
+        const uint32_t n = m.chunks.size() > INDEX_MAX_VIDEO_CHUNKS
+                               ? INDEX_MAX_VIDEO_CHUNKS
+                               : static_cast<uint32_t>(m.chunks.size());
+        w.u32(n);
+        for (uint32_t i = 0; i < n; ++i) { w.u64(m.chunks[i].offset); w.u64(m.chunks[i].length); }
+        w.u64(m.poster_offset);
+        w.u64(m.poster_length);
     }
 }
 
@@ -96,6 +113,35 @@ void read_image_meta(ByteReader& r, ImageMeta& m)
     m.thumb_length = r.u64();
 }
 
+// Read VideoMeta from the deserialisation stream (Phase 15 PR2). Returns false
+// on malformed input, particularly on a chunk_count that would cause OOM.
+// The bound check happens BEFORE any allocation to defend against hostile input.
+bool read_video_meta(ByteReader& r, VideoMeta& m)
+{
+    m.container   = static_cast<VideoContainer>(r.u8());
+    m.codec       = static_cast<VideoCodec>(r.u8());
+    m.width       = r.u32();
+    m.height      = r.u32();
+    m.duration_us = r.u64();
+    m.orig_size   = r.u64();
+    m.created_ts  = r.u64();
+    m.chunk_size  = r.u32();
+    const uint32_t n = r.u32();
+    if (!r.ok() || n > INDEX_MAX_VIDEO_CHUNKS) return false;  // bound BEFORE allocating
+    m.chunks.clear();
+    m.chunks.reserve(n);
+    for (uint32_t i = 0; i < n; ++i) {
+        VideoChunk c;
+        c.offset = r.u64();
+        c.length = r.u64();
+        if (!r.ok()) return false;
+        m.chunks.push_back(c);
+    }
+    m.poster_offset = r.u64();
+    m.poster_length = r.u64();
+    return r.ok();
+}
+
 // Returns false on malformed input. Depth-limited to guard against stack
 // overflow from a deeply nested blob. Version-aware: reads tags only if version >= 2.
 bool read_node(ByteReader& r, IndexNode& node, uint32_t depth, uint8_t version)
@@ -104,9 +150,11 @@ bool read_node(ByteReader& r, IndexNode& node, uint32_t depth, uint8_t version)
 
     const uint8_t type = r.u8();
     if (!r.ok()) return false;
+    const bool is_video_type = type == std::to_underlying(IndexNode::Type::Video);
     if (type != std::to_underlying(IndexNode::Type::Gallery) &&
-        type != std::to_underlying(IndexNode::Type::Image)) {
-        return false;  // unknown node type
+        type != std::to_underlying(IndexNode::Type::Image)  &&
+        !(is_video_type && version >= 4)) {
+        return false;  // unknown node type (or a Video node in a pre-v4 blob)
     }
     node.type = static_cast<IndexNode::Type>(type);
 
@@ -128,6 +176,10 @@ bool read_node(ByteReader& r, IndexNode& node, uint32_t depth, uint8_t version)
     if (node.type == IndexNode::Type::Image) {
         read_image_meta(r, node.meta);
         return r.ok();
+    }
+
+    if (node.type == IndexNode::Type::Video) {
+        return read_video_meta(r, node.vmeta);
     }
 
     const uint32_t child_count = r.u32();

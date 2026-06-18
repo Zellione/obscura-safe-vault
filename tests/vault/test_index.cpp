@@ -370,3 +370,65 @@ TEST(index_deserialize_v1_blob_has_no_favorite)
     REQUIRE(vault::deserialize_index(v1_blob, out));
     CHECK_FALSE(out.favorite);
 }
+
+// --- Phase 15 PR2: Video nodes (index v4) ----------------------------------
+
+TEST(index_v4_video_node_round_trip)
+{
+    using namespace vault;
+    IndexNode root = IndexNode::gallery("root");
+    IndexNode vid  = IndexNode::video("clip.mp4");
+    vid.vmeta.container   = VideoContainer::MP4;
+    vid.vmeta.codec       = VideoCodec::H264;
+    vid.vmeta.width       = 1920;
+    vid.vmeta.height      = 1080;
+    vid.vmeta.duration_us = 5'000'000;
+    vid.vmeta.orig_size   = 3'000'000;
+    vid.vmeta.created_ts  = 1718000000;
+    vid.vmeta.chunk_size  = 1u << 20;
+    vid.vmeta.chunks      = { {100, 1048616}, {1049000, 1048616}, {2098000, 902800} };
+    vid.vmeta.poster_offset = 0;
+    vid.vmeta.poster_length = 0;
+    vid.tags = {"beach"};
+    vid.favorite = true;
+    root.children.push_back(vid);
+
+    std::vector<uint8_t> blob;
+    serialize_index(root, blob);
+    CHECK(blob[0] == INDEX_VERSION);   // version byte is 4
+
+    IndexNode back;
+    CHECK(deserialize_index(blob, back));
+    REQUIRE(back.children.size() == 1);
+    const IndexNode& v = back.children[0];
+    CHECK(v.is_video());
+    CHECK(v.is_media());
+    CHECK_FALSE(v.is_image());
+    CHECK_EQ(static_cast<int>(v.vmeta.container), static_cast<int>(VideoContainer::MP4));
+    CHECK_EQ(static_cast<int>(v.vmeta.codec), static_cast<int>(VideoCodec::H264));
+    CHECK_EQ(v.vmeta.width, 1920u);
+    CHECK_EQ(v.vmeta.height, 1080u);
+    CHECK_EQ(v.vmeta.duration_us, 5'000'000ull);
+    CHECK_EQ(v.vmeta.orig_size, 3'000'000ull);
+    CHECK_EQ(v.vmeta.chunk_size, 1u << 20);
+    REQUIRE(v.vmeta.chunks.size() == 3);
+    CHECK_EQ(v.vmeta.chunks[2].offset, 2098000ull);
+    CHECK_EQ(v.vmeta.chunks[2].length, 902800ull);
+    CHECK(v.favorite);
+    REQUIRE(v.tags.size() == 1);
+    CHECK(v.tags[0] == "beach");
+}
+
+TEST(index_v4_rejects_excessive_chunk_count)
+{
+    using namespace vault;
+    // Hand-craft a v4 blob whose video node claims a huge chunk_count.
+    // version(4) | type(2=Video) | name_len(0) | tag_count(0) | favorite(0)
+    //   | container(0) | codec(0) | w(0) | h(0) | duration(0) | orig(0)
+    //   | created(0) | chunk_size(0) | chunk_count(0xFFFFFFFF)
+    std::vector<uint8_t> blob = {4, 2, 0,0, 0,0, 0, 0, 0};
+    blob.insert(blob.end(), 4+4+8+8+8+4, 0);        // w,h,duration,orig,created,chunk_size
+    blob.insert(blob.end(), {0xFF,0xFF,0xFF,0xFF}); // chunk_count = 4 billion
+    IndexNode out;
+    CHECK_FALSE(deserialize_index(blob, out));       // must reject, not allocate
+}
