@@ -130,11 +130,13 @@ src/
              secure_mem.*, random.*
   vault/     vault.h, header.*, index.*,  ← container format (Phase 2)
              chunk_store.*, vault.*,
-             transfer.*                   ← move_image + image_target_galleries (PR2);
-                                            move_gallery (recursive copy-then-delete) +
-                                            gallery_target_parents (PR3). Move images or a
-                                            whole gallery subtree between two unlocked
-                                            vaults (decrypt→re-encrypt in mlock'd mem).
+             transfer.*                   ← transfer_image + image_target_galleries (PR2);
+                                            transfer_gallery (recursive copy-then-delete) +
+                                            gallery_target_parents (PR3); TransferMode
+                                            {Move,Copy} + same-vault (&src==&dst, gallery
+                                            cycle-guarded) (PR4). Move OR copy images / a
+                                            whole gallery subtree between vaults — or within
+                                            one (decrypt→re-encrypt in mlock'd mem).
                                             Vault::remove_gallery drops a subtree (PR3).
   image/     image.h, decode.*,           ← stb_image decode + thumbs (Phase 3)
              thumbnail.*,                 ← format detection + libwebp/libheif
@@ -166,9 +168,12 @@ src/
              favorites_galleries.*,       ← flat grid of favorited galleries (Phase 13)
              vault_manager.*,             ← multi-vault home screen: list/open/create/
                                             remove/lock known vaults (Phase 14)
-             transfer_dialog.*,           ← `M` modal: move selected images OR a focused
-                                            gallery subtree to another vault
-                                            (pick→unlock→pick gallery→move) (Phase 14 PR2/3)
+             transfer_dialog.*,           ← `M` modal: move OR copy selected images / a
+                                            focused gallery subtree to another vault — or
+                                            within the active vault. Stages: Move/Copy →
+                                            pick vault ("This vault" or registry; the former
+                                            skips unlock) → pick gallery → transfer
+                                            (Phase 14 PR2/3/4)
              widgets.*
   platform/  paths.{h,cpp},              ← config dir + file dialogs (Phase 5)
              file_dialog.*,               ← + save_vault() for new-vault paths (Phase 14)
@@ -204,6 +209,7 @@ scripts/gen.sh --gmake       # GNU Make fallback
 # Compile:
 scripts/build.sh             # Debug
 scripts/build.sh --release   # Release
+scripts/build.sh --clean     # wipe this config's outputs first, then build (combinable)
 
 # Run:
 build/bin/Debug/osv

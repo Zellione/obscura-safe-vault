@@ -47,7 +47,9 @@ void TransferDialog::open(std::string src_gallery, std::vector<std::string> file
 {
     active_       = true;
     source_       = Source::Images;
-    stage_        = Stage::PickVault;
+    stage_        = Stage::Mode;
+    mode_         = vault::TransferMode::Move;
+    dest_.is_self = false;
     src_gallery_  = std::move(src_gallery);
     filenames_    = std::move(filenames);
     vault_sel_    = 0;
@@ -62,8 +64,7 @@ void TransferDialog::open(std::string src_gallery, std::vector<std::string> file
     candidates_.clear();
     for (const auto& p : registry_.list())
         if (p.string() != src_path_) candidates_.push_back(p);
-    if (candidates_.empty())
-        error_ = "No other vaults. Create or open one from the manager first.";
+    // "This vault" is always an available destination, so no empty-list error here.
 }
 
 void TransferDialog::open_gallery(std::string src_gallery)
@@ -80,16 +81,31 @@ void TransferDialog::close()
     active_ = false;
 }
 
+// The vault the transfer writes into: the active vault for a same-vault transfer,
+// otherwise the transiently-unlocked destination. Never lock src_ here — App owns it.
+vault::Vault& TransferDialog::dest_vault() noexcept
+{
+    return dest_.is_self ? src_ : dest_.vault;
+}
+
 // --- stage transitions ----------------------------------------------------
 
 void TransferDialog::choose_vault()
 {
-    if (candidates_.empty()) return;
-    if (vault_sel_ < 0 || vault_sel_ >= static_cast<int>(candidates_.size())) return;
-    dest_.path = candidates_[static_cast<size_t>(vault_sel_)].string();
+    error_.clear();
+    if (vault_sel_ == 0) {                 // "This vault" — same-vault transfer
+        dest_.is_self = true;
+        rebuild_targets();
+        gallery_sel_ = 0;
+        stage_ = Stage::PickGallery;       // no unlock needed
+        return;
+    }
+    const int ci = vault_sel_ - 1;         // rows after "This vault" are candidates_
+    if (ci < 0 || ci >= static_cast<int>(candidates_.size())) return;
+    dest_.is_self = false;
+    dest_.path = candidates_[static_cast<size_t>(ci)].string();
     dest_.pw.clear();
     dest_.keyfile_path.clear();
-    error_.clear();
     stage_ = Stage::Unlock;
 }
 
@@ -121,8 +137,9 @@ void TransferDialog::try_unlock()
 
 void TransferDialog::rebuild_targets()
 {
-    targets_ = (source_ == Source::Gallery) ? vault::gallery_target_parents(dest_.vault)
-                                            : vault::image_target_galleries(dest_.vault);
+    const vault::Vault& dv = dest_vault();
+    targets_ = (source_ == Source::Gallery) ? vault::gallery_target_parents(dv)
+                                            : vault::image_target_galleries(dv);
     targets_.emplace_back(kNewGalleryRow);
 }
 
@@ -137,23 +154,36 @@ void TransferDialog::choose_gallery()
 void TransferDialog::do_move(std::string_view dst_target)
 {
     using enum vault::VaultResult;
+    vault::Vault& dv = dest_vault();
     int ok = 0;
     int total = 0;
     if (source_ == Source::Gallery) {
         total = 1;
-        if (vault::move_gallery(src_, src_gallery_, dest_.vault, dst_target) == Ok) ok = 1;
+        if (vault::transfer_gallery(src_, src_gallery_, dv, dst_target, mode_) == Ok) ok = 1;
     } else {
         total = static_cast<int>(filenames_.size());
         for (const auto& fname : filenames_)
-            if (vault::move_image(src_, src_gallery_, fname, dest_.vault, dst_target) == Ok) ++ok;
+            if (vault::transfer_image(src_, src_gallery_, fname, dv, dst_target, mode_) == Ok) ++ok;
     }
-    const std::string where = std::filesystem::path(dest_.path).stem().string();
-    completed_status_ = std::format("Moved {} of {} to {}", ok, total, where);
-    completed_ = true;
-    close();   // wipes the destination key
+    const char* verb = (mode_ == vault::TransferMode::Copy) ? "Copied" : "Moved";
+    const std::string where = dest_.is_self
+        ? "this vault"
+        : std::filesystem::path(dest_.path).stem().string();
+    outcome_.status = std::format("{} {} of {} to {}", verb, ok, total, where);
+    outcome_.done = true;
+    close();   // wipes the destination key (no-op for a same-vault transfer)
 }
 
 // --- per-stage key handlers ------------------------------------------------
+
+bool TransferDialog::handle_mode_key(SDL_Keycode k)
+{
+    using enum vault::TransferMode;
+    if (k == SDLK_UP || k == SDLK_DOWN || k == SDLK_LEFT || k == SDLK_RIGHT)
+        mode_ = (mode_ == Move) ? Copy : Move;
+    if (k == SDLK_RETURN || k == SDLK_KP_ENTER) stage_ = Stage::PickVault;
+    return true;
+}
 
 bool TransferDialog::handle_pick_vault_key(SDL_Keycode k)
 {
@@ -195,7 +225,7 @@ bool TransferDialog::handle_naming_event(const SDL_Event& e)
         case SDLK_RETURN:
         case SDLK_KP_ENTER:
             if (!name_buf_.empty() &&
-                dest_.vault.create_gallery(name_buf_) == vault::VaultResult::Ok) {
+                dest_vault().create_gallery(name_buf_) == vault::VaultResult::Ok) {
                 rebuild_targets();
                 naming_ = false;
                 do_move(name_buf_);     // move straight into the new gallery
@@ -230,6 +260,7 @@ bool TransferDialog::handle_event(const SDL_Event& e)
 
     using enum Stage;
     switch (stage_) {
+        case Mode:        return handle_mode_key(k);
         case PickVault:   return handle_pick_vault_key(k);
         case Unlock:      return handle_unlock_key(k);
         case PickGallery: return handle_gallery_key(k);
@@ -248,9 +279,9 @@ void TransferDialog::update()
 
 bool TransferDialog::consume_completed(std::string& status_out)
 {
-    if (!completed_) return false;
-    status_out = std::move(completed_status_);
-    completed_ = false;
+    if (!outcome_.done) return false;
+    status_out = std::move(outcome_.status);
+    outcome_.done = false;
     return true;
 }
 
@@ -270,12 +301,23 @@ void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, flo
 
     const float ix = mx + 20;
     const float iy = my + 20;
+    const char* verb = (mode_ == vault::TransferMode::Copy) ? "Copy" : "Move";
     r.draw_text(font, ix, iy,
                 source_ == Source::Gallery
-                    ? std::format("Move gallery \"{}\"",
+                    ? std::format("{} gallery \"{}\"", verb,
                                   std::filesystem::path(src_gallery_).filename().string())
-                    : std::format("Move {} image(s)", filenames_.size()),
+                    : std::format("{} {} image(s)", verb, filenames_.size()),
                 TEXT);
+
+    render_body(r, font, ix, iy, mw, mh, my);
+
+    if (!error_.empty()) r.draw_text(font, ix, my + mh - 30, error_, DANGER);
+}
+
+void TransferDialog::render_body(gfx::Renderer& r, gfx::FontAtlas& font,
+                                 float ix, float iy, float mw, float mh, float my) const
+{
+    using namespace gfx::theme;
 
     auto row_list = [&](const std::vector<std::string>& items, int sel, float top) {
         for (size_t i = 0; i < items.size(); ++i) {
@@ -286,9 +328,15 @@ void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, flo
         }
     };
 
-    if (stage_ == Stage::PickVault) {
+    if (stage_ == Stage::Mode) {
+        r.draw_text(font, ix, iy + 36, "Action:", TEXT_DIM);
+        const std::vector<std::string> modes = {"Move", "Copy"};
+        const int msel = (mode_ == vault::TransferMode::Copy) ? 1 : 0;
+        row_list(modes, msel, iy + 72);
+        r.draw_text(font, ix, iy + 150, "[Up/Down] choose  [Enter] next", TEXT_FAINT);
+    } else if (stage_ == Stage::PickVault) {
         r.draw_text(font, ix, iy + 36, "Destination vault:", TEXT_DIM);
-        std::vector<std::string> labels;
+        std::vector<std::string> labels = {"This vault"};
         for (const auto& p : candidates_) labels.push_back(p.filename().string());
         row_list(labels, vault_sel_, iy + 72);
     } else if (stage_ == Stage::Unlock) {
@@ -312,8 +360,6 @@ void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, flo
             draw_text_field(r, font, {ix, my + mh - 60, mw - 40, 40}, name_buf_, true);
         }
     }
-
-    if (!error_.empty()) r.draw_text(font, ix, my + mh - 30, error_, DANGER);
 }
 
 } // namespace ui

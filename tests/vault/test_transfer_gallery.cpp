@@ -61,7 +61,7 @@ TEST(move_gallery_nested_roundtrip_across_reopen)
         REQUIRE(src.add_image("Trips/2024", img2, "b.jpg") == Ok);
 
         // Move "Trips" into dst root.
-        REQUIRE(vault::move_gallery(src, "Trips", dst, "") == Ok);
+        REQUIRE(vault::transfer_gallery(src, "Trips", dst, "", vault::TransferMode::Move) == Ok);
 
         // Source subtree gone; destination has it.
         CHECK(find_child(src, "", "Trips") == nullptr);
@@ -95,7 +95,7 @@ TEST(move_gallery_into_existing_parent)
     REQUIRE(src.add_image("Album", blob(1000, 4), "x.jpg") == Ok);
     REQUIRE(dst.create_gallery("Library/Music") == Ok);    // Library holds a sub-gallery
 
-    REQUIRE(vault::move_gallery(src, "Album", dst, "Library") == Ok);
+    REQUIRE(vault::transfer_gallery(src, "Album", dst, "Library", vault::TransferMode::Move) == Ok);
     CHECK(find_child(dst, "Library", "Album") != nullptr);
     CHECK(find_child(dst, "Library/Album", "x.jpg") != nullptr);
     CHECK(find_child(src, "", "Album") == nullptr);
@@ -112,7 +112,7 @@ TEST(move_gallery_name_collision_leaves_source_intact)
     REQUIRE(src.add_image("Dupe", blob(1000, 6), "i.jpg") == Ok);
     REQUIRE(dst.create_gallery("Dupe") == Ok);   // dst root already has "Dupe"
 
-    CHECK(vault::move_gallery(src, "Dupe", dst, "") == AlreadyExists);
+    CHECK(vault::transfer_gallery(src, "Dupe", dst, "", vault::TransferMode::Move) == AlreadyExists);
     CHECK(find_child(src, "", "Dupe") != nullptr);   // source untouched
 }
 
@@ -126,7 +126,7 @@ TEST(move_gallery_into_image_holding_parent_rejected)
     REQUIRE(src.create_gallery("G") == Ok);
     REQUIRE(dst.add_image("", blob(1000, 8), "root.jpg") == Ok);   // dst root holds an image
 
-    CHECK(vault::move_gallery(src, "G", dst, "") == InvalidArg);
+    CHECK(vault::transfer_gallery(src, "G", dst, "", vault::TransferMode::Move) == InvalidArg);
     CHECK(find_child(src, "", "G") != nullptr);
 }
 
@@ -152,4 +152,58 @@ TEST(gallery_target_parents_lists_image_free_galleries_and_root)
     CHECK(has("Holder"));
     CHECK(has("Holder/Inner"));
     CHECK_FALSE(has("Photos")); // holds images
+}
+
+TEST(transfer_gallery_copy_keeps_source_cross_vault)
+{
+    using enum vault::VaultResult;
+    TempVault sa("gc1"), da("gc2");
+    const auto img = blob(3000, 5);
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+    REQUIRE(src.create_gallery("Album") == Ok);
+    REQUIRE(src.add_image("Album", img, "x.jpg") == Ok);
+
+    REQUIRE(vault::transfer_gallery(src, "Album", dst, "", vault::TransferMode::Copy) == Ok);
+    CHECK(find_child(src, "", "Album") != nullptr);  // source subtree preserved
+    const auto* d = find_child(dst, "Album", "x.jpg");
+    REQUIRE(d != nullptr);
+    crypto::SecureBytes out;
+    REQUIRE(dst.read_image(*d, out) == Ok);
+    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(img));
+}
+
+TEST(transfer_gallery_same_vault_move_to_other_parent)
+{
+    using enum vault::VaultResult;
+    TempVault tv("gsv");
+    const auto img = blob(2500, 3);
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("p"), {}, kKdf, v) == Ok);
+    REQUIRE(v.create_gallery("Src/Inner") == Ok);
+    REQUIRE(v.add_image("Src/Inner", img, "p.jpg") == Ok);
+    REQUIRE(v.create_gallery("Dest") == Ok);          // empty → can hold a sub-gallery
+
+    REQUIRE(vault::transfer_gallery(v, "Src", v, "Dest", vault::TransferMode::Move) == Ok);
+    CHECK(find_child(v, "", "Src") == nullptr);        // moved out of root
+    CHECK(find_child(v, "Dest", "Src") != nullptr);    // now under Dest
+    const auto* m = find_child(v, "Dest/Src/Inner", "p.jpg");
+    REQUIRE(m != nullptr);
+    crypto::SecureBytes out;
+    REQUIRE(v.read_image(*m, out) == Ok);
+    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(img));
+}
+
+TEST(transfer_gallery_same_vault_into_self_or_descendant_rejected)
+{
+    using enum vault::VaultResult;
+    TempVault tv("gcycle");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("p"), {}, kKdf, v) == Ok);
+    REQUIRE(v.create_gallery("A/B") == Ok);
+
+    CHECK(vault::transfer_gallery(v, "A", v, "A", vault::TransferMode::Move) == InvalidArg);
+    CHECK(vault::transfer_gallery(v, "A", v, "A/B", vault::TransferMode::Move) == InvalidArg);
+    CHECK(find_child(v, "", "A") != nullptr);          // untouched after rejection
 }

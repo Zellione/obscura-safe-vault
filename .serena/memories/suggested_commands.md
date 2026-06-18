@@ -17,6 +17,7 @@ scripts/gen.sh --gmake    # GNU Make fallback
 ```bash
 scripts/build.sh          # Debug
 scripts/build.sh --release
+scripts/build.sh --clean  # wipe this config's outputs first, then build (combinable with --release/--gmake)
 ```
 
 ## Run

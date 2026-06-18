@@ -7,20 +7,24 @@
 #include <vector>
 
 #include "ui/secure_text_field.h"
-#include "vault/vault.h"   // owns a transient vault::Vault dst_
+#include "vault/transfer.h"   // vault::TransferMode
+#include "vault/vault.h"      // owns a transient vault::Vault dst_
 
 namespace gfx { class Renderer; class FontAtlas; class Window; }
 namespace platform { class VaultRegistry; class FileDialog; }
 
 namespace ui {
 
-// Modal that moves the grid's selected images into another vault (Phase 14 PR2).
-// Stages: pick a destination vault (from the registry, source excluded) -> unlock
-// it (password + optional keyfile) -> pick a destination leaf-gallery (or create
-// one) -> move each image via vault::move_image -> re-lock the destination.
+// Modal that moves OR copies the grid's selected images / a gallery subtree to
+// another vault — or within the active vault (Phase 14 PR2/3/4). Stages: choose
+// Move/Copy -> pick a destination vault ("This vault" or a registry entry) ->
+// unlock it (password + optional keyfile; skipped for "This vault") -> pick a
+// destination gallery (or create one) -> run vault::transfer_image /
+// transfer_gallery per item -> re-lock the destination.
 //
-// The destination vault is unlocked only for the transfer and its key is wiped on
-// every exit (close()/completion); ~Vault is the backstop.
+// A cross-vault destination is unlocked only for the transfer and its key is wiped
+// on every exit (close()/completion); ~Vault is the backstop. The active vault
+// (src_) is owned by App and is never locked here.
 class TransferDialog {
 public:
     // `src_path` is the active vault's file path — used to exclude it from the
@@ -44,14 +48,18 @@ public:
     void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H) const;
 
 private:
-    enum class Stage { PickVault, Unlock, PickGallery };
+    enum class Stage { Mode, PickVault, Unlock, PickGallery };
 
     void choose_vault();      // PickVault Enter: open dest_.vault for the selected path
     void try_unlock();        // Unlock Enter: open()+unlock() dest_.vault
     void choose_gallery();    // PickGallery Enter: move into the selected target (or "New")
     void do_move(std::string_view dst_gallery);   // run the transfer + re-lock
     void rebuild_targets();   // image_target_galleries(dest_.vault) + the "New gallery…" row
+    void render_body(gfx::Renderer& r, gfx::FontAtlas& font,
+                     float ix, float iy, float mw, float mh, float my) const;  // per-stage body
 
+    bool handle_mode_key(SDL_Keycode k);         // Mode stage: toggle Move/Copy
+    vault::Vault& dest_vault() noexcept;         // src_ when same-vault, else dest_.vault
     bool handle_pick_vault_key(SDL_Keycode k);   // per-stage key handler
     bool handle_unlock_key(SDL_Keycode k);
     bool handle_gallery_key(SDL_Keycode k);
@@ -64,7 +72,8 @@ private:
     gfx::Window&             win_;
 
     bool        active_ = false;
-    Stage       stage_  = Stage::PickVault;
+    Stage       stage_  = Stage::Mode;
+    vault::TransferMode mode_ = vault::TransferMode::Move;
     std::string src_gallery_;
     std::vector<std::string> filenames_;
 
@@ -81,6 +90,7 @@ private:
         SecureTextField  pw;
         std::string      keyfile_path;
         bool             awaiting_keyfile = false;
+        bool             is_self = false;  // destination == the active vault (src_)
     };
     Dest dest_;
 
@@ -90,8 +100,10 @@ private:
     std::string name_buf_;
 
     std::string error_;
-    std::string completed_status_;     // set on a finished move; drained by consume_completed
-    bool        completed_ = false;
+
+    // Finished-transfer outcome — bundled to keep the field count ≤20 (S1820).
+    struct Outcome { bool done = false; std::string status; };
+    Outcome     outcome_;     // set on completion; drained by consume_completed
 };
 
 } // namespace ui
