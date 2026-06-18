@@ -23,6 +23,11 @@ src/
                                                wipes the old key; shutdown wipes both.
                                                promote_pending() runs only on unlock
                                                success (ToGallery while state==Locked).
+                                               PR5: idle auto-lock (app/idle_timer.h,
+                                               IdleTimer; reset on user input in
+                                               dispatch_event; maybe_auto_lock(dt) wipes
+                                               active_ + to_manager() after IDLE_LOCK_SECS
+                                               = 5 min).
   crypto/      aead.*, kdf.*, random.*,        — Monocypher wrappers
                secure_mem.h, crypto.h
   vault/       vault.*, header.*, index.*,     — .osv container format
@@ -176,6 +181,15 @@ src/
                                                  never locked here). Grid skips its import dlg_
                                                  poll while transfer_.active(); M with no
                                                  selection acts on the focused tile.
+               quick_switch.*                  — global `` ` `` (grave) overlay (Phase 14 PR5):
+                                                 lists registry vaults; choosing one emits
+                                                 NavKind::ToUnlock(path) (App locks current +
+                                                 unlocks chosen); Esc or the active vault =
+                                                 no-op close. Hosted by GalleryGrid,
+                                                 ImageViewer, and the FavoritesScreen base —
+                                                 those now take a VaultRegistry& + active
+                                                 vault path. consume_choice() drains the pick
+                                                 (mirrors TransferDialog::consume_completed).
                input.*, nav_model.*, viewer_model.h
                passphrase.*, screen.h
                secure_text_field.*, unlock_logic.*

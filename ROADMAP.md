@@ -649,22 +649,31 @@ image in the viewer.
 
 ---
 
-## Phase 14 — Multiple vaults ⬜
+## Phase 14 — Multiple vaults ✅
 
 **Goal:** Manage and open several vaults; move images between them.
 
 ### Tasks
-- [ ] **Recent-vaults registry** — `src/platform/vault_registry.{h,cpp}`: a config-dir list of known vault **paths only** (add/list/remove). It stores **no secrets** — no passwords, no keys, no keyfile contents.
-- [ ] `src/ui/vault_manager.{h,cpp}` — becomes the app's first screen: lists known vaults, plus create / open-other (file dialog) / remove-from-list. Selecting a vault transitions to the unlock screen for that path.
-- [ ] **Multiple unlocked vaults** — `App` owns a collection of unlocked `Vault` instances with one *active* vault driving the gallery, plus a switcher (key or manager UI) to change the active vault. Each vault keeps its own mlock'd master key; locking one wipes only its keys.
-- [ ] **Move between vaults** — `move_image(src_vault, src_path, dst_vault, dst_path)`: `read_image` from the source into mlock'd `SecureBytes` → `add_image` into the destination → `remove_image` from the source; both indices committed via the crash-safe swap. Plaintext exists only in the locked buffer during transfer (invariant #1 holds). Thumbnail is carried over or regenerated.
-- [ ] Update `CLAUDE.md` (vault manager as first screen; new platform module) + `mem:core`.
-- [ ] `tests/` — registry add/list/remove and a "no secrets persisted" assertion; two vaults unlocked simultaneously; `move_image` yields a checksum-matching image in the destination and removes it from the source (verified across a reopen of both); both indices remain valid after the move.
+- [x] **Recent-vaults registry** — `src/platform/vault_registry.{h,cpp}`: a config-dir list of known vault **paths only** (add/list/remove). It stores **no secrets** — no passwords, no keys, no keyfile contents.
+- [x] `src/ui/vault_manager.{h,cpp}` — becomes the app's first screen: lists known vaults, plus create / open-other (file dialog) / remove-from-list. Selecting a vault transitions to the unlock screen for that path.
+- [x] **Multiple vaults, single-active** — `App` owns one *active* unlocked `Vault` at a time (`unique_ptr`) driving the gallery, plus a `` ` `` quick-switch overlay + the manager to change vaults. **Deliberate deviation from the original "collection of unlocked vaults":** single-active / lock-on-switch (a second vault is unlocked only transiently during a transfer) keeps the in-memory key blast-radius to one — see the design spec §2.1. Idle auto-lock wipes the active key after 5 min.
+- [x] **Move/copy between (and within) vaults** — `vault::transfer_image` / `transfer_gallery` with `TransferMode {Move, Copy}`: `read_image` into mlock'd `SecureBytes` → `add_image` into the destination → (Move only) `remove_image`/`remove_gallery` from the source; destination commits first (crash = recoverable duplicate). `&src == &dst` supported (same-vault), with a cycle guard for gallery moves. Plaintext exists only in the locked buffer (invariant #1).
+- [x] Update `CLAUDE.md` (vault manager as first screen; new platform/ui modules) + `mem:core`.
+- [x] `tests/` — registry add/list/remove + "no secrets persisted"; two vaults unlocked at once during a transfer; `transfer_image` checksum-matches in the destination and is gone from the source (verified across a reopen of both); both indices valid; `transfer_gallery` recursive round-trip; Copy keeps the source; same-vault move/copy + cycle rejection; `IdleTimer` unit tests.
 
 ### Acceptance criterion
-The manager lists multiple vaults; two can be unlocked at once; an image moved
-between them matches its checksum in the destination and is gone from the source
-after reopen; the registry never persists secrets.
+✅ The manager lists multiple vaults; a vault can be unlocked, browsed, and
+switched (manager or `` ` `` overlay); an image moved between vaults matches its
+checksum in the destination and is gone from the source after reopen; copy
+leaves the source intact; the registry never persists secrets; the active vault
+auto-locks when idle.
+
+### Delivered as 5 stacked PRs
+1. Registry + manager + single-active App (#23)
+2. Move images between vaults — `transfer_image` (#24)
+3. Move whole galleries — `transfer_gallery` + `Vault::remove_gallery` (#25)
+4. Copy mode + same-vault transfers — `TransferMode` (#26)
+5. Idle auto-lock + `` ` `` quick-switch overlay
 
 ---
 
