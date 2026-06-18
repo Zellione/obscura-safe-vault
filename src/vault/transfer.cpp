@@ -119,6 +119,17 @@ VaultResult copy_images(const Vault& src, std::string_view src_gallery,
     return Ok;
 }
 
+// A same-vault transfer forms a cycle when the destination parent is the moved
+// gallery itself or any descendant of it (moving a subtree into itself). Always
+// false across two different vaults.
+bool is_same_vault_cycle(const Vault& src, const Vault& dst,
+                         std::string_view src_gallery, std::string_view dst_parent)
+{
+    if (&src != &dst) return false;
+    if (dst_parent == src_gallery) return true;
+    return dst_parent.starts_with(std::string(src_gallery) + "/");
+}
+
 } // namespace
 
 VaultResult transfer_image(Vault& src, std::string_view src_gallery,
@@ -170,14 +181,9 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
     using enum VaultResult;
 
     if (src_gallery.empty()) return InvalidArg;       // can't transfer the root itself
+    // Refuse a same-vault move/copy of a gallery into itself or a descendant.
+    if (is_same_vault_cycle(src, dst, src_gallery, dst_parent)) return InvalidArg;
     const std::string name = last_segment(src_gallery);
-
-    // Same-vault cycle: refuse to move/copy a gallery into itself or a descendant.
-    if (&src == &dst) {
-        if (dst_parent == src_gallery) return InvalidArg;
-        const std::string prefix = std::string(src_gallery) + "/";
-        if (dst_parent.substr(0, prefix.size()) == prefix) return InvalidArg;
-    }
 
     // Source must be an existing gallery.
     bool src_is_gallery = false;

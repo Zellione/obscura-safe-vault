@@ -49,7 +49,7 @@ void TransferDialog::open(std::string src_gallery, std::vector<std::string> file
     source_       = Source::Images;
     stage_        = Stage::Mode;
     mode_         = vault::TransferMode::Move;
-    dest_is_self_ = false;
+    dest_.is_self = false;
     src_gallery_  = std::move(src_gallery);
     filenames_    = std::move(filenames);
     vault_sel_    = 0;
@@ -85,7 +85,7 @@ void TransferDialog::close()
 // otherwise the transiently-unlocked destination. Never lock src_ here — App owns it.
 vault::Vault& TransferDialog::dest_vault() noexcept
 {
-    return dest_is_self_ ? src_ : dest_.vault;
+    return dest_.is_self ? src_ : dest_.vault;
 }
 
 // --- stage transitions ----------------------------------------------------
@@ -94,7 +94,7 @@ void TransferDialog::choose_vault()
 {
     error_.clear();
     if (vault_sel_ == 0) {                 // "This vault" — same-vault transfer
-        dest_is_self_ = true;
+        dest_.is_self = true;
         rebuild_targets();
         gallery_sel_ = 0;
         stage_ = Stage::PickGallery;       // no unlock needed
@@ -102,7 +102,7 @@ void TransferDialog::choose_vault()
     }
     const int ci = vault_sel_ - 1;         // rows after "This vault" are candidates_
     if (ci < 0 || ci >= static_cast<int>(candidates_.size())) return;
-    dest_is_self_ = false;
+    dest_.is_self = false;
     dest_.path = candidates_[static_cast<size_t>(ci)].string();
     dest_.pw.clear();
     dest_.keyfile_path.clear();
@@ -137,7 +137,7 @@ void TransferDialog::try_unlock()
 
 void TransferDialog::rebuild_targets()
 {
-    vault::Vault& dv = dest_vault();
+    const vault::Vault& dv = dest_vault();
     targets_ = (source_ == Source::Gallery) ? vault::gallery_target_parents(dv)
                                             : vault::image_target_galleries(dv);
     targets_.emplace_back(kNewGalleryRow);
@@ -166,11 +166,11 @@ void TransferDialog::do_move(std::string_view dst_target)
             if (vault::transfer_image(src_, src_gallery_, fname, dv, dst_target, mode_) == Ok) ++ok;
     }
     const char* verb = (mode_ == vault::TransferMode::Copy) ? "Copied" : "Moved";
-    const std::string where = dest_is_self_
+    const std::string where = dest_.is_self
         ? "this vault"
         : std::filesystem::path(dest_.path).stem().string();
-    completed_status_ = std::format("{} {} of {} to {}", verb, ok, total, where);
-    completed_ = true;
+    outcome_.status = std::format("{} {} of {} to {}", verb, ok, total, where);
+    outcome_.done = true;
     close();   // wipes the destination key (no-op for a same-vault transfer)
 }
 
@@ -178,9 +178,9 @@ void TransferDialog::do_move(std::string_view dst_target)
 
 bool TransferDialog::handle_mode_key(SDL_Keycode k)
 {
+    using enum vault::TransferMode;
     if (k == SDLK_UP || k == SDLK_DOWN || k == SDLK_LEFT || k == SDLK_RIGHT)
-        mode_ = (mode_ == vault::TransferMode::Move) ? vault::TransferMode::Copy
-                                                     : vault::TransferMode::Move;
+        mode_ = (mode_ == Move) ? Copy : Move;
     if (k == SDLK_RETURN || k == SDLK_KP_ENTER) stage_ = Stage::PickVault;
     return true;
 }
@@ -279,9 +279,9 @@ void TransferDialog::update()
 
 bool TransferDialog::consume_completed(std::string& status_out)
 {
-    if (!completed_) return false;
-    status_out = std::move(completed_status_);
-    completed_ = false;
+    if (!outcome_.done) return false;
+    status_out = std::move(outcome_.status);
+    outcome_.done = false;
     return true;
 }
 
@@ -308,6 +308,16 @@ void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, flo
                                   std::filesystem::path(src_gallery_).filename().string())
                     : std::format("{} {} image(s)", verb, filenames_.size()),
                 TEXT);
+
+    render_body(r, font, ix, iy, mw, mh, my);
+
+    if (!error_.empty()) r.draw_text(font, ix, my + mh - 30, error_, DANGER);
+}
+
+void TransferDialog::render_body(gfx::Renderer& r, gfx::FontAtlas& font,
+                                 float ix, float iy, float mw, float mh, float my) const
+{
+    using namespace gfx::theme;
 
     auto row_list = [&](const std::vector<std::string>& items, int sel, float top) {
         for (size_t i = 0; i < items.size(); ++i) {
@@ -350,8 +360,6 @@ void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, flo
             draw_text_field(r, font, {ix, my + mh - 60, mw - 40, 40}, name_buf_, true);
         }
     }
-
-    if (!error_.empty()) r.draw_text(font, ix, my + mh - 30, error_, DANGER);
 }
 
 } // namespace ui

@@ -55,6 +55,8 @@ private:
     void choose_gallery();    // PickGallery Enter: move into the selected target (or "New")
     void do_move(std::string_view dst_gallery);   // run the transfer + re-lock
     void rebuild_targets();   // image_target_galleries(dest_.vault) + the "New gallery…" row
+    void render_body(gfx::Renderer& r, gfx::FontAtlas& font,
+                     float ix, float iy, float mw, float mh, float my) const;  // per-stage body
 
     bool handle_mode_key(SDL_Keycode k);         // Mode stage: toggle Move/Copy
     vault::Vault& dest_vault() noexcept;         // src_ when same-vault, else dest_.vault
@@ -72,7 +74,6 @@ private:
     bool        active_ = false;
     Stage       stage_  = Stage::Mode;
     vault::TransferMode mode_ = vault::TransferMode::Move;
-    bool        dest_is_self_ = false;   // destination == the active vault (src_)
     std::string src_gallery_;
     std::vector<std::string> filenames_;
 
@@ -89,6 +90,7 @@ private:
         SecureTextField  pw;
         std::string      keyfile_path;
         bool             awaiting_keyfile = false;
+        bool             is_self = false;  // destination == the active vault (src_)
     };
     Dest dest_;
 
@@ -98,8 +100,10 @@ private:
     std::string name_buf_;
 
     std::string error_;
-    std::string completed_status_;     // set on a finished move; drained by consume_completed
-    bool        completed_ = false;
+
+    // Finished-transfer outcome — bundled to keep the field count ≤20 (S1820).
+    struct Outcome { bool done = false; std::string status; };
+    Outcome     outcome_;     // set on completion; drained by consume_completed
 };
 
 } // namespace ui
