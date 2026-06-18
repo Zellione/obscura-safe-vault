@@ -54,12 +54,24 @@ jobs:
       # -----------------------------------------------------------------------
       # System packages
       # -----------------------------------------------------------------------
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /tmp/apt-cache
+          key: apt-matrix-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-matrix-
+
       - name: Install build dependencies
         run: |
           # CI's apt mirror occasionally hangs the connection indefinitely; bound
           # each fetch (30s) and retry so a stuck mirror fails fast instead of
           # hanging the whole job. Backed by the job-level timeout-minutes too.
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+          # Cache the downloaded .debs in /tmp/apt-cache (Dir::Cache::archives +
+          # Keep-Downloaded-Packages) so repeat runs skip the slow apt download.
+          # 1777 lets apt's _apt sandbox user write into the restored cache dir.
+          sudo mkdir -p /tmp/apt-cache/partial
+          sudo chmod -R 1777 /tmp/apt-cache
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDir::Cache::archives "/tmp/apt-cache";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' \
             | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
@@ -424,12 +436,24 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /tmp/apt-cache
+          key: apt-asan-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-asan-
+
       - name: Install build dependencies
         run: |
           # CI's apt mirror occasionally hangs the connection indefinitely; bound
           # each fetch (30s) and retry so a stuck mirror fails fast instead of
           # hanging the whole job. Backed by the job-level timeout-minutes too.
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+          # Cache the downloaded .debs in /tmp/apt-cache (Dir::Cache::archives +
+          # Keep-Downloaded-Packages) so repeat runs skip the slow apt download.
+          # 1777 lets apt's _apt sandbox user write into the restored cache dir.
+          sudo mkdir -p /tmp/apt-cache/partial
+          sudo chmod -R 1777 /tmp/apt-cache
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDir::Cache::archives "/tmp/apt-cache";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' \
             | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
@@ -558,13 +582,26 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Cache apt packages
+        if: env.SONAR_TOKEN != ''
+        uses: actions/cache@v4
+        with:
+          path: /tmp/apt-cache
+          key: apt-sonar-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-sonar-
+
       - name: Install build dependencies
         if: env.SONAR_TOKEN != ''
         run: |
           # CI's apt mirror occasionally hangs the connection indefinitely; bound
           # each fetch (30s) and retry so a stuck mirror fails fast instead of
           # hanging the whole job. Backed by the job-level timeout-minutes too.
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+          # Cache the downloaded .debs in /tmp/apt-cache (Dir::Cache::archives +
+          # Keep-Downloaded-Packages) so repeat runs skip the slow apt download.
+          # 1777 lets apt's _apt sandbox user write into the restored cache dir.
+          sudo mkdir -p /tmp/apt-cache/partial
+          sudo chmod -R 1777 /tmp/apt-cache
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDir::Cache::archives "/tmp/apt-cache";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' \
             | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
