@@ -36,14 +36,14 @@ enum class TransferMode { Move, Copy };
 
 // Transfer a whole gallery subtree from `src` (the gallery at `src_gallery`) into
 // `dst` under `dst_parent`, keeping the gallery's own name. Copy-then-(maybe-)delete:
-// the subtree is recreated + every descendant image copied into `dst` FIRST, then for
-// TransferMode::Move the source subtree is removed — so a crash mid-Move leaves a
-// recoverable duplicate, never a loss. `&src == &dst` is allowed; a same-vault move
-// into the source itself or any descendant is rejected (cycle). Image plaintext lives
-// only in mlock'd memory (invariant #1).
+// the subtree is recreated + every descendant media leaf (image/video) copied into
+// `dst` FIRST, then for TransferMode::Move the source subtree is removed — so a crash
+// mid-Move leaves a recoverable duplicate, never a loss. `&src == &dst` is allowed; a
+// same-vault move into the source itself or any descendant is rejected (cycle). Media
+// plaintext lives only in mlock'd memory (invariant #1).
 //   NotFound      - src gallery missing / not a gallery
 //   AlreadyExists - dst_parent already holds a child of the same name
-//   InvalidArg    - dst_parent cannot hold a sub-gallery (it holds images),
+//   InvalidArg    - dst_parent cannot hold a sub-gallery (it holds media),
 //                   src_gallery is the root (""), or a same-vault cycle
 //   AuthFailed / IoError / Locked - propagated; source left intact if any copy fails.
 [[nodiscard]] VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
