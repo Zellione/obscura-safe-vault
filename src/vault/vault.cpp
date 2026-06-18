@@ -87,9 +87,9 @@ void for_each_media(NodeT& n, Fn&& fn)
 // Copy a media node's live chunk(s) from `src` to `dst` verbatim (ciphertext —
 // no decrypt/re-encrypt, invariant #1), rewriting each offset to its new
 // location. Sets `err` to IoError on the first failed read/append.
-void relocate_node_chunks(ChunkStore& src, ChunkStore& dst, IndexNode& node, VaultResult& err)
+void relocate_node_chunks(const ChunkStore& src, ChunkStore& dst, IndexNode& node, VaultResult& err)
 {
-    auto copy_span = [&](uint64_t& off, uint64_t len) {
+    auto copy_span = [&err, &src, &dst](uint64_t& off, uint64_t len) {
         if (err != VaultResult::Ok || len == 0) return;
         std::vector<uint8_t> blob;
         uint64_t new_off = 0;
@@ -934,7 +934,7 @@ VaultResult Vault::compact()
     ChunkStore dst(tmp, master_key_.as_span());
 
     VaultResult copy_err = Ok;
-    for_each_media(new_root, [&](IndexNode& node) {
+    for_each_media(new_root, [&src, &dst, &copy_err](IndexNode& node) {
         relocate_node_chunks(src, dst, node, copy_err);
     });
     if (copy_err != Ok) return fail(copy_err);
