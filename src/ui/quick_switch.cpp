@@ -43,7 +43,7 @@ bool QuickSwitch::handle_event(const SDL_Event& e)
     if (!active_) return false;
     if (e.type != SDL_EVENT_KEY_DOWN) return true;   // modal swallows other events
 
-    const int n = static_cast<int>(vaults_.size());
+    const auto n = static_cast<int>(vaults_.size());
     switch (e.key.key) {
         case SDLK_ESCAPE:                     close();                         break;
         case SDLK_UP:                         sel_ = clamp_index(sel_ - 1, n); break;
