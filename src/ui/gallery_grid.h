@@ -12,6 +12,7 @@
 #include "image/decode_worker.h"
 #include "ui/consent_dialog.h"
 #include "ui/nav_model.h"
+#include "ui/quick_switch.h"
 #include "ui/screen.h"
 #include "ui/search_overlay.h"
 #include "ui/selection_model.h"
@@ -99,7 +100,8 @@ private:
     ConsentDialog           consent_;
     SearchOverlay           search_;
     TagEditor               tag_editor_;
-    TransferDialog          transfer_;
+    QuickSwitch             quick_switch_;   // declared before transfer_ so it copies
+    TransferDialog          transfer_;       // the active path before transfer_ moves it
     GridLocation          initial_;   // where to (re)open: path + selected tile
     std::vector<const vault::IndexNode*> children_;
     int                   cols_ = 1;

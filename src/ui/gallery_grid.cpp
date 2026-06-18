@@ -52,6 +52,7 @@ GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& v
     : win_(win), font_(font), vault_(vault), cache_(cache), dlg_(dialogs.file),
       folder_dlg_(dialogs.folder),
       search_(vault, win), tag_editor_(vault, win),
+      quick_switch_(win, vault_ctx.registry, vault_ctx.active_vault_path),
       transfer_(vault, std::move(vault_ctx.active_vault_path), vault_ctx.registry,
                 dialogs.file, win),
       initial_(std::move(at))
@@ -320,6 +321,7 @@ void GalleryGrid::toggle_or_open()
 void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
 {
     using enum GalleryView;
+    if (key.key == SDLK_GRAVE) { quick_switch_.open(); return; }   // switch vault (`)
     if (key.key == SDLK_L) { view_ = (view_ == Grid) ? List : Grid; return; }
     if (key.key == SDLK_X) { start_export(); return; }   // export selection
     if (key.key == SDLK_M) { start_transfer(); return; }   // move to another vault
@@ -373,6 +375,13 @@ void GalleryGrid::handle_event(const SDL_Event& e)
     }
 
     if (transfer_.active()) { (void)transfer_.handle_event(e); return; }
+
+    if (quick_switch_.active()) {
+        (void)quick_switch_.handle_event(e);
+        if (std::string p; quick_switch_.consume_choice(p))
+            request(NavKind::ToUnlock, std::move(p));   // locks current, unlocks chosen
+        return;
+    }
 
     // The export consent modal owns all input while it is up.
     if (consent_.active()) {
@@ -450,7 +459,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     r.draw_text(font_, OX, 90,
                 "[I] Import  [N] New  [/] Search  [G] Tags  [B] Fav  [F] Fav Images  "
                 "[Shift+F] Fav Galleries  [Enter] Open  [Space] Select  [X] Export  "
-                "[M] Move/Copy  [Esc] Back  [L] List/Grid",
+                "[M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid",
                 TEXT_FAINT);
 
     if (!sel_.empty())
@@ -480,6 +489,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     search_.render(r, font_, W, H);
     tag_editor_.render(r, font_, W, H);
     transfer_.render(r, font_, W, H);
+    quick_switch_.render(r, font_, W, H);
 }
 
 void GalleryGrid::render_grid(gfx::Renderer& r, float W, float /*H*/)
