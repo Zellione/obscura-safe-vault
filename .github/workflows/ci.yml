@@ -93,6 +93,10 @@ jobs:
             wayland-protocols \
             libasound2-dev \
             libpulse-dev
+          # apt re-creates partial/ and lock owned by the _apt user (mode 700/640)
+          # during install; make the cache dir readable so the (non-root) runner
+          # can tar it in the post-save step (otherwise the save fails silently).
+          sudo chmod -R a+rX /tmp/apt-cache
 
       # -----------------------------------------------------------------------
       # premake5 binary
@@ -473,6 +477,10 @@ jobs:
             wayland-protocols \
             libasound2-dev \
             libpulse-dev
+          # apt re-creates partial/ and lock owned by the _apt user (mode 700/640)
+          # during install; make the cache dir readable so the (non-root) runner
+          # can tar it in the post-save step (otherwise the save fails silently).
+          sudo chmod -R a+rX /tmp/apt-cache
 
       - name: Use gcc-14 as default gcc
         run: |
@@ -623,6 +631,10 @@ jobs:
             wayland-protocols \
             libasound2-dev \
             libpulse-dev
+          # apt re-creates partial/ and lock owned by the _apt user (mode 700/640)
+          # during install; make the cache dir readable so the (non-root) runner
+          # can tar it in the post-save step (otherwise the save fails silently).
+          sudo chmod -R a+rX /tmp/apt-cache
 
       - name: Cache premake5 binary
         if: env.SONAR_TOKEN != ''
