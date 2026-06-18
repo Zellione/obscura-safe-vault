@@ -31,6 +31,8 @@
 #include "header.h"
 #include "index.h"
 
+namespace media { class VideoSource; }
+
 namespace vault {
 
 enum class VaultResult {
@@ -108,6 +110,12 @@ public:
                                               std::span<const uint8_t> old_keyfile,
                                               std::span<const uint8_t> new_password,
                                               std::span<const uint8_t> new_keyfile);
+
+    // The media layer's VideoSource class borrows fp_ + master_key_ to stream a
+    // stored video's chunks on demand. friend keeps Vault's public surface flat
+    // (cpp:S1448 method cap). VideoSource's static factory open_video_source() is
+    // defined in src/media/video_source.cpp.
+    friend class ::media::VideoSource;
 
     [[nodiscard]] bool is_unlocked() const noexcept { return unlocked_; }
 
