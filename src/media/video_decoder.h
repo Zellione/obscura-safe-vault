@@ -7,6 +7,7 @@
 
 #include "media/decoded_frame.h"
 #include "vault/index.h"
+#include "image/image.h"
 
 extern "C" {
 #include <libavformat/avio.h>
@@ -46,6 +47,9 @@ public:
     // Seek to a timestamp (in seconds). Uses keyframe-anchored seeking and decodes forward
     // to land on the exact PTS. Returns false on failure.
     [[nodiscard]] bool seek(double ts_seconds);
+
+    // Decode the first frame as RGB24 and return it as ImageData. Returns nullopt on failure.
+    [[nodiscard]] std::optional<image::ImageData> decode_poster_rgb();
 
     // Accessors
     int width() const noexcept { return width_; }

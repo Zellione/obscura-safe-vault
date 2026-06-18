@@ -80,6 +80,19 @@ TEST(add_video_round_trips_container_checksum)
     const size_t expect_chunks = (video_bytes.size() + 4096 - 1) / 4096;
     CHECK_EQ(node.vmeta.chunks.size(), expect_chunks);
 
+#ifdef OSV_VENDORED_AV
+    // On FFmpeg-enabled builds, verify that add_video populated the metadata.
+    CHECK_EQ(node.vmeta.width, 160);
+    CHECK_EQ(node.vmeta.height, 120);
+    CHECK_EQ(static_cast<int>(node.vmeta.codec), static_cast<int>(vault::VideoCodec::H264));
+    CHECK(node.vmeta.duration_us > 0);
+
+    // Verify the poster was stored.
+    crypto::SecureBytes poster;
+    REQUIRE(v2.read_thumbnail(node, poster) == vault::VaultResult::Ok);
+    CHECK(!poster.empty());
+#endif
+
     // Read the video back and verify the checksum.
     crypto::SecureBytes out;
     REQUIRE(v2.read_video(node, out) == vault::VaultResult::Ok);
@@ -186,7 +199,7 @@ TEST(favorite_video_appears_in_favorites)
     CHECK(found);
 }
 
-TEST(read_thumbnail_video_without_poster_is_not_found)
+TEST(read_thumbnail_video_with_poster)
 {
     auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
     REQUIRE(!video_bytes.empty());
@@ -203,7 +216,14 @@ TEST(read_thumbnail_video_without_poster_is_not_found)
     REQUIRE(children.size() == 1);
     REQUIRE(children[0]->is_video());
     crypto::SecureBytes out;
+#ifdef OSV_VENDORED_AV
+    // On FFmpeg-enabled builds, we generate a poster from the first frame.
+    CHECK(v.read_thumbnail(*children[0], out) == vault::VaultResult::Ok);
+    CHECK(!out.empty());
+#else
+    // On non-FFmpeg builds, there's no poster.
     CHECK(v.read_thumbnail(*children[0], out) == vault::VaultResult::NotFound);
+#endif
 }
 
 TEST(leaf_gallery_accepts_mixed_image_and_video)

@@ -7,10 +7,12 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/avutil.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/opt.h>
 #include <libswscale/swscale.h>
 }
 
 #include <cstdio>
+#include <cstring>
 
 namespace media {
 
@@ -465,6 +467,112 @@ std::optional<DecodedFrame> VideoDecoder::next_frame()
             return std::nullopt;
         }
     }
+}
+
+std::optional<image::ImageData> VideoDecoder::decode_poster_rgb()
+{
+    if (!frame_ || !codec_ctx_) {
+        return std::nullopt;
+    }
+
+    // Seek to the start if not already there.
+    if (!seek(0.0)) {
+        // If seek fails, try to decode from current position anyway.
+    }
+
+    // Decode the first frame.
+    auto decoded = next_frame();
+    if (!decoded) {
+        return std::nullopt;
+    }
+
+    const int w = width_;
+    const int h = height_;
+    if (w <= 0 || h <= 0) {
+        return std::nullopt;
+    }
+
+    // Create a temporary swscale context for conversion to RGB24.
+    // We allocate a fresh context (not cached) so we can cleanly free it.
+    SwsContext* sws_rgb = sws_alloc_context();
+    if (!sws_rgb) {
+        return std::nullopt;
+    }
+
+    // Set conversion parameters.
+    av_opt_set_int(sws_rgb, "srcw", w, 0);
+    av_opt_set_int(sws_rgb, "srch", h, 0);
+    av_opt_set_int(sws_rgb, "src_format", static_cast<int>(frame_->format), 0);
+    av_opt_set_int(sws_rgb, "dstw", w, 0);
+    av_opt_set_int(sws_rgb, "dsth", h, 0);
+    av_opt_set_int(sws_rgb, "dst_format", static_cast<int>(AV_PIX_FMT_RGB24), 0);
+    av_opt_set_int(sws_rgb, "flags", SWS_BILINEAR, 0);
+
+    if (sws_init_context(sws_rgb, nullptr, nullptr) < 0) {
+        sws_freeContext(sws_rgb);
+        return std::nullopt;
+    }
+
+    // Allocate destination frame for RGB24.
+    AVFrame* rgb_frame = av_frame_alloc();
+    if (!rgb_frame) {
+        sws_freeContext(sws_rgb);
+        return std::nullopt;
+    }
+
+    rgb_frame->format = AV_PIX_FMT_RGB24;
+    rgb_frame->width  = w;
+    rgb_frame->height = h;
+
+    // Allocate buffer for RGB24 data (w * h * 3 bytes, no linesize padding for tightly packed).
+    const int buffer_size = av_image_get_buffer_size(AV_PIX_FMT_RGB24, w, h, 1);
+    if (buffer_size <= 0) {
+        av_frame_free(&rgb_frame);
+        sws_freeContext(sws_rgb);
+        return std::nullopt;
+    }
+
+    uint8_t* rgb_buffer = static_cast<uint8_t*>(av_malloc(buffer_size));
+    if (!rgb_buffer) {
+        av_frame_free(&rgb_frame);
+        sws_freeContext(sws_rgb);
+        return std::nullopt;
+    }
+
+    // Assign buffer to frame with tight packing.
+    if (av_image_fill_arrays(rgb_frame->data, rgb_frame->linesize, rgb_buffer,
+                             AV_PIX_FMT_RGB24, w, h, 1) < 0) {
+        av_free(rgb_buffer);
+        av_frame_free(&rgb_frame);
+        sws_freeContext(sws_rgb);
+        return std::nullopt;
+    }
+
+    // Convert (scale) the decoded frame to RGB24.
+    const int slices = sws_scale(sws_rgb, frame_->data, frame_->linesize, 0, h,
+                                rgb_frame->data, rgb_frame->linesize);
+    if (slices != h) {
+        av_free(rgb_buffer);
+        av_frame_free(&rgb_frame);
+        sws_freeContext(sws_rgb);
+        return std::nullopt;
+    }
+
+    // Copy RGB data to ImageData. Since we allocated with tight packing, we can
+    // memcpy the entire buffer.
+    image::ImageData result;
+    result.width  = w;
+    result.height = h;
+    result.format = image::ImageFormat::Unknown;
+    result.pixels.resize(w * h * 3);
+    std::memcpy(result.pixels.data(), rgb_buffer, result.pixels.size());
+
+    // Clean up.
+    av_free(rgb_buffer);
+    av_frame_free(&rgb_frame);
+    sws_freeContext(sws_rgb);
+
+    return result;
 }
 
 } // namespace media

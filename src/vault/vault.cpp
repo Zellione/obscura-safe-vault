@@ -17,6 +17,7 @@
 #include "image/thumbnail.h"
 
 #include "vault/video_format.h"
+#include "media/video_probe.h"
 
 namespace vault {
 
@@ -651,8 +652,10 @@ VaultResult Vault::add_video(std::string_view         gallery_path,
     if (filename.empty())       return InvalidArg;
     if (chunk_size == 0)        return InvalidArg;
 
-    const VideoContainer container = detect_video_container(file_data);
-    if (container == VideoContainer::Unknown) return InvalidArg;   // not a video we accept
+    // Probe the video file first (before storing chunks) to detect metadata and generate poster.
+    // This ensures we don't create orphan chunks if the video is invalid.
+    media::VideoProbeResult probe;
+    if (!media::probe_video(file_data, probe)) return InvalidArg;
 
     IndexNode* g = find_gallery(gallery_path);
     if (!g) return NotFound;
@@ -669,22 +672,33 @@ VaultResult Vault::add_video(std::string_view         gallery_path,
     }
     // An empty file would store zero chunks; treat as invalid (no video stream).
     if (chunks.empty()) return InvalidArg;
+
+    // Store the poster if it was generated.
+    uint64_t poster_offset = 0;
+    uint64_t poster_length = 0;
+    if (!probe.poster_jpeg.empty()) {
+        ChunkSpan poster_span;
+        if (!store.append_chunk(probe.poster_jpeg, poster_span)) return IoError;
+        poster_offset = poster_span.offset;
+        poster_length = poster_span.length;
+    }
+
     if (!store.sync())  return IoError;
 
     IndexNode vid = IndexNode::video(std::string(filename));
-    vid.vmeta.container  = container;
-    vid.vmeta.codec      = VideoCodec::Unknown;   // PR4 fills these
-    vid.vmeta.width      = 0;
-    vid.vmeta.height     = 0;
-    vid.vmeta.duration_us= 0;
+    vid.vmeta.container  = probe.container;
+    vid.vmeta.codec      = probe.codec;
+    vid.vmeta.width      = probe.width;
+    vid.vmeta.height     = probe.height;
+    vid.vmeta.duration_us= probe.duration_us;
     vid.vmeta.orig_size  = file_data.size();
     vid.vmeta.created_ts = static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()).count());
     vid.vmeta.chunk_size = chunk_size;
     vid.vmeta.chunks     = std::move(chunks);
-    vid.vmeta.poster_offset = 0;
-    vid.vmeta.poster_length = 0;
+    vid.vmeta.poster_offset = poster_offset;
+    vid.vmeta.poster_length = poster_length;
     g->children.push_back(std::move(vid));
 
     return commit_index();
