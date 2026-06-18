@@ -5,11 +5,13 @@
 #include <vector>
 
 #include "ui/nav_model.h"
+#include "ui/quick_switch.h"
 #include "ui/screen.h"
 #include "vault/vault.h"   // vault::SearchHit
 
 namespace gfx { class Window; class FontAtlas; class Renderer; }
 namespace vault { class Vault; }
+namespace platform { class VaultRegistry; }
 
 namespace ui {
 
@@ -20,7 +22,8 @@ namespace ui {
 // labels — this base owns only the common SDL plumbing + grid layout.
 class FavoritesScreen : public Screen {
 public:
-    FavoritesScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault);
+    FavoritesScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
+                    platform::VaultRegistry& registry, std::string active_path);
 
     void on_enter() override;
     void handle_event(const SDL_Event& e) override;
@@ -52,6 +55,7 @@ private:
     gfx::Window&    win_;
     gfx::FontAtlas& font_;
     vault::Vault&   vault_;
+    QuickSwitch     quick_switch_;   // ` overlay: jump to another vault
     NavModel        nav_;   // selection only (no path stack used here)
     std::vector<vault::SearchHit> favs_;
     int             cols_ = 1;

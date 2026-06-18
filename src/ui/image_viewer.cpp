@@ -27,9 +27,11 @@ constexpr float SCROLL_STEP = 96.0f;   // arrow-key / wheel scroll distance (px)
 
 ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                          gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
+                         platform::VaultRegistry& registry, std::string active_path,
                          Album album, int start_index)
     : win_(win), font_(font), vault_(vault), cache_(cache), export_(folder_dlg, win),
       tag_editor_(vault, win), search_(vault, win),
+      quick_switch_(win, registry, std::move(active_path)),
       album_(std::move(album)), index_(start_index),
       full_cache_(vault, win.sdl_renderer(), &decode_worker_)
 {
@@ -240,6 +242,7 @@ void ImageViewer::handle_key(SDL_Keycode key)
         case SDLK_B:      // toggle favorite (bookmark) on the current image
             toggle_favorite_current();
             return;
+        case SDLK_GRAVE:  quick_switch_.open(); return;   // switch vault (`)
         case SDLK_ESCAPE: go_back(); return;
         default: break;
     }
@@ -346,6 +349,13 @@ void ImageViewer::handle_event(const SDL_Event& e)
     // The export consent modal owns all input while it is up.
     if (export_.modal_active()) {
         if (e.type == SDL_EVENT_KEY_DOWN) export_.consume_key(e.key.key);
+        return;
+    }
+
+    if (quick_switch_.active()) {
+        (void)quick_switch_.handle_event(e);
+        if (std::string p; quick_switch_.consume_choice(p))
+            request(NavKind::ToUnlock, std::move(p));   // locks current, unlocks chosen
         return;
     }
 
@@ -508,6 +518,8 @@ void ImageViewer::render(gfx::Renderer& r)
                        static_cast<float>(win_.height()));
     search_.render(r, font_, static_cast<float>(win_.width()),
                    static_cast<float>(win_.height()));
+    quick_switch_.render(r, font_, static_cast<float>(win_.width()),
+                         static_cast<float>(win_.height()));
 }
 
 } // namespace ui

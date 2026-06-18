@@ -94,7 +94,7 @@ void App::to_viewer(const std::string& gallery_path, int index)
 {
     state_  = State::Viewing;
     screen_ = std::make_unique<ui::ImageViewer>(
-        window_, font_, *active_, *cache_, folder_dialog_,
+        window_, font_, *active_, *cache_, folder_dialog_, registry_, active_path_,
         ui::ImageViewer::Album::gallery(gallery_path), index);
     screen_->on_enter();
 }
@@ -102,14 +102,16 @@ void App::to_viewer(const std::string& gallery_path, int index)
 void App::to_favorite_images()
 {
     state_  = State::Browsing;
-    screen_ = std::make_unique<ui::FavoritesImages>(window_, font_, *active_, *cache_);
+    screen_ = std::make_unique<ui::FavoritesImages>(
+        window_, font_, *active_, *cache_, registry_, active_path_);
     screen_->on_enter();
 }
 
 void App::to_favorite_galleries()
 {
     state_  = State::Browsing;
-    screen_ = std::make_unique<ui::FavoritesGalleries>(window_, font_, *active_);
+    screen_ = std::make_unique<ui::FavoritesGalleries>(
+        window_, font_, *active_, registry_, active_path_);
     screen_->on_enter();
 }
 
@@ -131,7 +133,8 @@ void App::to_favorite_viewer(int index)
 
     state_  = State::Viewing;
     screen_ = std::make_unique<ui::ImageViewer>(
-        window_, font_, *active_, *cache_, folder_dialog_, std::move(album), index);
+        window_, font_, *active_, *cache_, folder_dialog_, registry_, active_path_,
+        std::move(album), index);
     screen_->on_enter();
 }
 

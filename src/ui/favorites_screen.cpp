@@ -3,11 +3,13 @@
 #include <algorithm>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "gfx/renderer.h"
 #include "gfx/text.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "platform/vault_registry.h"
 #include "ui/input.h"
 #include "ui/widgets.h"
 
@@ -28,8 +30,10 @@ GridSpec grid_spec(float win_w, int cols) noexcept
 }
 }
 
-FavoritesScreen::FavoritesScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault)
-    : win_(win), font_(font), vault_(vault)
+FavoritesScreen::FavoritesScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
+                                 platform::VaultRegistry& registry, std::string active_path)
+    : win_(win), font_(font), vault_(vault),
+      quick_switch_(win, registry, std::move(active_path))
 {
 }
 
@@ -55,9 +59,17 @@ void FavoritesScreen::open_selected()
 
 void FavoritesScreen::handle_event(const SDL_Event& e)
 {
+    if (quick_switch_.active()) {
+        (void)quick_switch_.handle_event(e);
+        if (std::string p; quick_switch_.consume_choice(p))
+            request(NavKind::ToUnlock, std::move(p));   // locks current, unlocks chosen
+        return;
+    }
+
     using enum InputAction;
     switch (e.type) {
         case SDL_EVENT_KEY_DOWN:
+            if (e.key.key == SDLK_GRAVE) { quick_switch_.open(); break; }   // switch vault (`)
             switch (map_key(e.key.key, e.key.mod)) {
                 case NavLeft:  nav_.move(-1);     break;
                 case NavRight: nav_.move(1);      break;
@@ -90,14 +102,13 @@ void FavoritesScreen::render(gfx::Renderer& r)
     const auto W = static_cast<float>(win_.width());
 
     r.draw_text(font_, OX, 40, title(), TEXT_DIM);
-    r.draw_text(font_, OX, 90, "[Enter] Open   [Esc] Back", TEXT_FAINT);
+    r.draw_text(font_, OX, 90, "[Enter] Open   [`] Switch   [Esc] Back", TEXT_FAINT);
 
-    if (favs_.empty()) {
+    const auto H = static_cast<float>(win_.height());
+    if (favs_.empty())
         r.draw_text(font_, OX, OY, empty_hint(), TEXT_DIM);
-        return;
-    }
 
-    cols_ = grid_columns(W - 2 * OX, CELL, GAP);
+    cols_ = grid_columns(W - 2 * OX, CELL, GAP);   // for-loop below is a no-op when empty
     for (size_t i = 0; i < favs_.size(); ++i) {
         const SDL_FRect cellr = grid_cell_rect(static_cast<int>(i), grid_spec(W, cols_));
         const bool sel = (static_cast<int>(i) == nav_.selected());
@@ -120,6 +131,8 @@ void FavoritesScreen::render(gfx::Renderer& r)
         r.draw_round_rect(badge, RADIUS_SMALL, FAVORITE);
         r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
     }
+
+    quick_switch_.render(r, font_, W, H);
 }
 
 } // namespace ui
