@@ -249,7 +249,11 @@ jobs:
         id: cache-sdl3
         with:
           path: vendor/SDL3/build
-          key: sdl3-windows-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          # Cache key includes the toolchain tag (win2022) so a runner-image /
+          # MSVC change rebuilds the static libs with the matching compiler.
+          # Without it, libs built by one MSVC get linked into an app built by
+          # another → ABI mismatch / static-init crash (Phase 15 PR1).
+          key: sdl3-win2022-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
 
       - name: Build vendored SDL3
         if: steps.cache-sdl3.outputs.cache-hit != 'true'
@@ -267,7 +271,8 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v3-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          # win2022 toolchain tag — see the SDL3 cache key note above.
+          key: codecs-v3-${{ runner.os }}-win2022-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
