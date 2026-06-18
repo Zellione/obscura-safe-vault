@@ -247,6 +247,7 @@ project "osv_tests"
     -- Absolute path to committed binary fixtures (WebP/HEIC/AVIF) so the test
     -- runner finds them regardless of the working directory it is launched from.
     defines { 'OSV_FIXTURE_DIR="' .. path.join(os.getcwd(), "tests/image/fixtures") .. '"' }
+    defines { 'OSV_VAULT_FIXTURE_DIR="' .. path.join(os.getcwd(), "tests/vault/fixtures") .. '"' }
 
     files {
         "tests/**.cpp",

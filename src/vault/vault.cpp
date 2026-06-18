@@ -16,6 +16,8 @@
 #include "image/decode.h"
 #include "image/thumbnail.h"
 
+#include "vault/video_format.h"
+
 namespace vault {
 
 namespace {
@@ -607,6 +609,75 @@ VaultResult Vault::read_thumbnail(const IndexNode& node, crypto::SecureBytes& ou
         !store.read_chunk({node.meta.thumb_offset, node.meta.thumb_length}, out)) {
         return AuthFailed;
     }
+    return Ok;
+}
+
+VaultResult Vault::add_video(std::string_view         gallery_path,
+                             std::span<const uint8_t> file_data,
+                             std::string_view         filename,
+                             uint32_t                 chunk_size)
+{
+    using enum VaultResult;
+    if (!unlocked_)             return Locked;
+    if (filename.empty())       return InvalidArg;
+    if (chunk_size == 0)        return InvalidArg;
+
+    const VideoContainer container = detect_video_container(file_data);
+    if (container == VideoContainer::Unknown) return InvalidArg;   // not a video we accept
+
+    IndexNode* g = find_gallery(gallery_path);
+    if (!g) return NotFound;
+    if (holds_galleries(*g))    return InvalidArg;   // not a leaf gallery
+    if (child_named(g, filename)) return AlreadyExists;
+
+    ChunkStore store(fp_, master_key_.as_span());
+    std::vector<VideoChunk> chunks;
+    for (size_t off = 0; off < file_data.size(); off += chunk_size) {
+        const size_t len = std::min<size_t>(chunk_size, file_data.size() - off);
+        ChunkSpan span;
+        if (!store.append_chunk(file_data.subspan(off, len), span)) return IoError;
+        chunks.push_back({span.offset, span.length});
+    }
+    // An empty file would store zero chunks; treat as invalid (no video stream).
+    if (chunks.empty()) return InvalidArg;
+    if (!store.sync())  return IoError;
+
+    IndexNode vid = IndexNode::video(std::string(filename));
+    vid.vmeta.container  = container;
+    vid.vmeta.codec      = VideoCodec::Unknown;   // PR4 fills these
+    vid.vmeta.width      = 0;
+    vid.vmeta.height     = 0;
+    vid.vmeta.duration_us= 0;
+    vid.vmeta.orig_size  = file_data.size();
+    vid.vmeta.created_ts = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+    vid.vmeta.chunk_size = chunk_size;
+    vid.vmeta.chunks     = std::move(chunks);
+    vid.vmeta.poster_offset = 0;
+    vid.vmeta.poster_length = 0;
+    g->children.push_back(std::move(vid));
+
+    return commit_index();
+}
+
+VaultResult Vault::read_video(const IndexNode& node, crypto::SecureBytes& out) const
+{
+    using enum VaultResult;
+    if (!unlocked_)       return Locked;
+    if (!node.is_video()) return InvalidArg;
+
+    if (!out.resize(node.vmeta.orig_size)) return IoError;
+    ChunkStore store(fp_, master_key_.as_span());
+    size_t pos = 0;
+    for (const VideoChunk& c : node.vmeta.chunks) {
+        crypto::SecureBytes piece;
+        if (!store.read_chunk({c.offset, c.length}, piece)) { (void)out.resize(0); return AuthFailed; }
+        if (pos + piece.size() > out.size())                { (void)out.resize(0); return AuthFailed; }
+        std::copy(piece.data(), piece.data() + piece.size(), out.data() + pos);
+        pos += piece.size();
+    }
+    if (pos != out.size()) { (void)out.resize(0); return AuthFailed; }
     return Ok;
 }
 

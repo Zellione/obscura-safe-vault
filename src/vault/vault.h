@@ -45,6 +45,10 @@ enum class VaultResult {
     CryptoError,    // RNG / KDF failure
 };
 
+// Video chunk size (1 MiB plaintext split). Used by add_video; tests may pass a
+// smaller value to force multi-chunk paths with tiny fixtures.
+inline constexpr uint32_t VIDEO_CHUNK_SIZE = 1u << 20;
+
 enum class SearchScope { Images, Galleries, Both };
 
 // A node matched by search. `path` is the full slash-path to the node (including
@@ -127,6 +131,19 @@ public:
     // Decrypt the thumbnail for `node` into mlock'd memory. NotFound if the node
     // has no stored thumbnail (thumb_length == 0). AuthFailed on tamper/corruption.
     [[nodiscard]] VaultResult read_thumbnail(const IndexNode& node, crypto::SecureBytes& out) const;
+
+    // Import a video container: detect its type by magic bytes, split the plaintext
+    // into `chunk_size` AEAD chunks, and store a Type::Video node. dims/duration/codec/
+    // poster stay empty until the decoder (PR4) fills them. `chunk_size` defaults to
+    // VIDEO_CHUNK_SIZE; a smaller value (tests) forces the multi-chunk path. Returns
+    // InvalidArg for a non-MP4/MKV container.
+    [[nodiscard]] VaultResult add_video(std::string_view         gallery_path,
+                                        std::span<const uint8_t> file_data,
+                                        std::string_view         filename,
+                                        uint32_t                 chunk_size = VIDEO_CHUNK_SIZE);
+
+    // Decrypt + concatenate all of a video node's chunks into mlock'd memory.
+    [[nodiscard]] VaultResult read_video(const IndexNode& node, crypto::SecureBytes& out) const;
 
     // Remove an image from the index (its chunk is orphaned, reclaimed by Phase 7
     // compaction). NotFound if the image does not exist.
