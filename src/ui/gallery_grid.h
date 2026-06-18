@@ -93,8 +93,7 @@ private:
     gfx::FontAtlas&         font_;
     vault::Vault&           vault_;
     gfx::TextureCache&      cache_;
-    platform::FileDialog&   dlg_;
-    platform::FolderDialog& folder_dlg_;
+    GridDialogs             dialogs_;   // file + folder dialogs (bundled, S1820)
     NavModel                nav_;
     SelectionModel          sel_;
     ConsentDialog           consent_;

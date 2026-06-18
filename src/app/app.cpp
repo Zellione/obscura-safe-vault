@@ -94,7 +94,8 @@ void App::to_viewer(const std::string& gallery_path, int index)
 {
     state_  = State::Viewing;
     screen_ = std::make_unique<ui::ImageViewer>(
-        window_, font_, *active_, *cache_, folder_dialog_, registry_, active_path_,
+        window_, font_, *active_, *cache_,
+        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_},
         ui::ImageViewer::Album::gallery(gallery_path), index);
     screen_->on_enter();
 }
@@ -133,7 +134,8 @@ void App::to_favorite_viewer(int index)
 
     state_  = State::Viewing;
     screen_ = std::make_unique<ui::ImageViewer>(
-        window_, font_, *active_, *cache_, folder_dialog_, registry_, active_path_,
+        window_, font_, *active_, *cache_,
+        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_},
         std::move(album), index);
     screen_->on_enter();
 }

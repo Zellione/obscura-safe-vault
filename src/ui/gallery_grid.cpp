@@ -49,10 +49,9 @@ GridSpec grid_spec(float win_w, int cols) noexcept
 GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                          gfx::TextureCache& cache, GridDialogs dialogs,
                          GridVaultCtx vault_ctx, GridLocation at)
-    : win_(win), font_(font), vault_(vault), cache_(cache), dlg_(dialogs.file),
-      folder_dlg_(dialogs.folder),
+    : win_(win), font_(font), vault_(vault), cache_(cache), dialogs_(dialogs),
       search_(vault, win), tag_editor_(vault, win),
-      quick_switch_(win, vault_ctx.registry, vault_ctx.active_vault_path),
+      quick_switch_(vault_ctx.registry, vault_ctx.active_vault_path),
       transfer_(vault, std::move(vault_ctx.active_vault_path), vault_ctx.registry,
                 dialogs.file, win),
       initial_(std::move(at))
@@ -116,7 +115,7 @@ void GalleryGrid::toggle_select()
 
 void GalleryGrid::start_export()
 {
-    if (folder_dlg_.busy() || consent_.active()) return;
+    if (dialogs_.folder.busy() || consent_.active()) return;
     if (sel_.empty()) {
         error_ = "Select images first (Space), then [X] to export.";
         return;
@@ -179,13 +178,13 @@ void GalleryGrid::do_export(const std::filesystem::path& dest)
 
 void GalleryGrid::start_import()
 {
-    if (dlg_.busy()) return;
+    if (dialogs_.file.busy()) return;
     if (!current_allows_images()) {
         error_ = "Can't import here: this gallery holds sub-galleries.";
         return;
     }
     error_.clear();
-    dlg_.open_images(win_.sdl_window());
+    dialogs_.file.open_images(win_.sdl_window());
 }
 
 void GalleryGrid::do_import(const std::filesystem::path& file_path)
@@ -387,7 +386,7 @@ void GalleryGrid::handle_event(const SDL_Event& e)
     if (consent_.active()) {
         if (e.type == SDL_EVENT_KEY_DOWN &&
             consent_.handle_key(e.key.key) == ConsentDialog::Result::Confirmed)
-            folder_dlg_.open(win_.sdl_window());
+            dialogs_.folder.open(win_.sdl_window());
         return;
     }
 
@@ -422,7 +421,7 @@ void GalleryGrid::pump_transfer()
 
 void GalleryGrid::pump_import()
 {
-    if (auto res = dlg_.take_result()) {
+    if (auto res = dialogs_.file.take_result()) {
         if (!res->empty()) {
             for (const auto& p : *res) do_import(p);
             refresh();
@@ -441,7 +440,7 @@ void GalleryGrid::update(double)
         pump_import();
     }
 
-    if (auto dest = folder_dlg_.take_result()) {
+    if (auto dest = dialogs_.folder.take_result()) {
         if (!dest->empty()) do_export(*dest);   // empty => the picker was cancelled
         mark_dirty();
     }

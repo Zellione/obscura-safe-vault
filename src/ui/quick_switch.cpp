@@ -5,7 +5,6 @@
 #include "gfx/renderer.h"
 #include "gfx/text.h"
 #include "gfx/theme.h"
-#include "gfx/window.h"
 #include "platform/vault_registry.h"
 
 namespace ui {
@@ -19,9 +18,8 @@ int clamp_index(int sel, int count) noexcept
 }
 } // namespace
 
-QuickSwitch::QuickSwitch(gfx::Window& win, platform::VaultRegistry& registry,
-                         std::string active_path)
-    : win_(win), registry_(registry), active_path_(std::move(active_path)) {}
+QuickSwitch::QuickSwitch(platform::VaultRegistry& registry, std::string active_path)
+    : registry_(registry), active_path_(std::move(active_path)) {}
 
 void QuickSwitch::open()
 {
@@ -33,7 +31,7 @@ void QuickSwitch::open()
 void QuickSwitch::choose()
 {
     if (sel_ < 0 || sel_ >= static_cast<int>(vaults_.size())) { close(); return; }
-    const std::string path = vaults_[static_cast<size_t>(sel_)].string();
+    const auto path = vaults_[static_cast<size_t>(sel_)].string();
     close();
     if (path == active_path_) return;   // already active — no-op
     chosen_     = path;

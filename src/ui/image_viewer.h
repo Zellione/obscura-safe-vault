@@ -67,10 +67,16 @@ public:
         }
     };
 
+    // Host-provided collaborators beyond the core render deps, bundled to keep the
+    // constructor within the parameter budget (S107).
+    struct Context {
+        platform::FolderDialog&  folder;
+        platform::VaultRegistry& registry;
+        std::string              active_path;
+    };
+
     ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
-                platform::VaultRegistry& registry, std::string active_path,
-                Album album, int start_index);
+                gfx::TextureCache& cache, Context ctx, Album album, int start_index);
 
     ~ImageViewer() override = default;
 

@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace gfx { class Renderer; class FontAtlas; class Window; }
+namespace gfx { class Renderer; class FontAtlas; }
 namespace platform { class VaultRegistry; }
 
 namespace ui {
@@ -19,7 +19,7 @@ namespace ui {
 // wiping happens in App's lock-on-switch.
 class QuickSwitch {
 public:
-    QuickSwitch(gfx::Window& win, platform::VaultRegistry& registry, std::string active_path);
+    QuickSwitch(platform::VaultRegistry& registry, std::string active_path);
 
     void open();                                       // rebuild list + activate
     void close() noexcept { active_ = false; }
@@ -32,7 +32,6 @@ public:
 private:
     void choose();
 
-    gfx::Window&             win_;
     platform::VaultRegistry& registry_;
     std::string              active_path_;
 

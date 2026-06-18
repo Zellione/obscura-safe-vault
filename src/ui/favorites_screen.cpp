@@ -33,7 +33,7 @@ GridSpec grid_spec(float win_w, int cols) noexcept
 FavoritesScreen::FavoritesScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                                  platform::VaultRegistry& registry, std::string active_path)
     : win_(win), font_(font), vault_(vault),
-      quick_switch_(win, registry, std::move(active_path))
+      quick_switch_(registry, std::move(active_path))
 {
 }
 

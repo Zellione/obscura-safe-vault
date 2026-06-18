@@ -26,12 +26,10 @@ constexpr float SCROLL_STEP = 96.0f;   // arrow-key / wheel scroll distance (px)
 } // namespace
 
 ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                         gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
-                         platform::VaultRegistry& registry, std::string active_path,
-                         Album album, int start_index)
-    : win_(win), font_(font), vault_(vault), cache_(cache), export_(folder_dlg, win),
+                         gfx::TextureCache& cache, Context ctx, Album album, int start_index)
+    : win_(win), font_(font), vault_(vault), cache_(cache), export_(ctx.folder, win),
       tag_editor_(vault, win), search_(vault, win),
-      quick_switch_(win, registry, std::move(active_path)),
+      quick_switch_(ctx.registry, std::move(ctx.active_path)),
       album_(std::move(album)), index_(start_index),
       full_cache_(vault, win.sdl_renderer(), &decode_worker_)
 {
