@@ -72,7 +72,6 @@ private:
     void start_naming();
     void finish_naming();
     void do_import(const std::filesystem::path& file_path);
-    void pump_transfer();          // poll the transfer dialog and handle completion
     void pump_import();            // poll the file dialog while transfer is not active
     void start_search();       // open the search overlay
     void start_tag_editor();   // open the tag editor for the focused tile

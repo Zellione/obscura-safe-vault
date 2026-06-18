@@ -407,18 +407,6 @@ void GalleryGrid::handle_event(const SDL_Event& e)
     }
 }
 
-void GalleryGrid::pump_transfer()
-{
-    transfer_.update();
-    mark_dirty();
-    if (std::string s; transfer_.consume_completed(s)) {
-        status_ = std::move(s);
-        sel_.clear();
-        refresh();              // moved images are gone from this listing
-        mark_dirty();
-    }
-}
-
 void GalleryGrid::pump_import()
 {
     if (auto res = dialogs_.file.take_result()) {
@@ -435,10 +423,23 @@ void GalleryGrid::update(double)
     if (pump_thumbs()) mark_dirty();   // off-thread thumbnail decode(s) landed
 
     if (transfer_.active()) {
-        pump_transfer();
-    } else {
-        pump_import();
+        transfer_.update();            // poll the keyfile picker while the dialog is open
+        mark_dirty();
     }
+
+    // A finished transfer closes the dialog synchronously (active_ -> false) during
+    // the keypress, so its result MUST be drained regardless of active state — else
+    // the listing only refreshes after leaving and re-entering the gallery.
+    if (std::string s; transfer_.consume_completed(s)) {
+        status_ = std::move(s);
+        sel_.clear();
+        refresh();                     // moved images are gone from this listing
+        mark_dirty();
+    }
+
+    // The import picker shares dialogs_.file with the transfer's keyfile picker, so
+    // only poll it when no transfer is active (don't steal the keyfile result).
+    if (!transfer_.active()) pump_import();
 
     if (auto dest = dialogs_.folder.take_result()) {
         if (!dest->empty()) do_export(*dest);   // empty => the picker was cancelled
