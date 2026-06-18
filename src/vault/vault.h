@@ -113,8 +113,8 @@ public:
 
     // The media layer's VideoSource class borrows fp_ + master_key_ to stream a
     // stored video's chunks on demand. friend keeps Vault's public surface flat
-    // (cpp:S1448 method cap). VideoSource's static factory open_video_source() is
-    // defined in src/media/video_source.cpp.
+    // (cpp:S1448 method cap). VideoSource's static factory open() is defined in
+    // src/media/video_source.cpp.
     friend class ::media::VideoSource;
 
     [[nodiscard]] bool is_unlocked() const noexcept { return unlocked_; }

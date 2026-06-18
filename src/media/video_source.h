@@ -14,7 +14,7 @@
 #include "vault/chunk_store.h"    // ChunkStore, ChunkSpan
 #include "vault/index.h"          // VideoMeta, VideoChunk
 
-namespace vault { class Vault; class IndexNode; }
+namespace vault { class Vault; }   // IndexNode/VideoMeta come from vault/index.h above
 
 namespace media {
 
