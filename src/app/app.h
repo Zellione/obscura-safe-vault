@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 
+#include "app/idle_timer.h"
 #include "gfx/text.h"
 #include "gfx/texture_cache.h"
 #include "gfx/window.h"
@@ -42,6 +43,7 @@ private:
     void dispatch_event(const SDL_Event& e);     // quit/close here, else to screen
     bool pump_events(bool animating);            // wait/poll + dispatch; had-event?
     bool apply_nav();                            // resolve a transition; transitioned?
+    bool maybe_auto_lock(double dt);             // idle -> wipe active_, return to manager
     void render_frame();                         // draw + present + frame-cap fallback
 
     gfx::Window                        window_;
@@ -58,6 +60,11 @@ private:
     std::unique_ptr<ui::Screen>        screen_;
     State                              state_   = State::Locked;
     bool                               running_ = false;   // main-loop run flag
+
+    // Idle auto-lock: wipe the active vault's key after this much inactivity and
+    // return to the manager (single-active; compile-time default, spec §2.2).
+    static constexpr double            IDLE_LOCK_SECS = 5 * 60.0;
+    IdleTimer                          idle_{IDLE_LOCK_SECS};
 };
 
 } // namespace app
