@@ -72,16 +72,16 @@ bool holds_galleries(const IndexNode& g)
     return std::ranges::any_of(g.children, [](const auto& c) { return c.is_gallery(); });
 }
 
-// Visit every image node in the tree rooted at `n` (templated so it serves
-// both const and non-const callers).
+// Visit every media node (image or video) in the tree rooted at `n`.
+// Templated so it serves both const and non-const callers.
 template <typename NodeT, typename Fn>
-void for_each_image(NodeT& n, Fn&& fn)
+void for_each_media(NodeT& n, Fn&& fn)
 {
-    if (n.is_image()) {
+    if (n.is_media()) {
         fn(n);
         return;
     }
-    for (auto& c : n.children) for_each_image(c, fn);
+    for (auto& c : n.children) for_each_media(c, fn);
 }
 
 // Trim ASCII whitespace from start and end of a string_view.
@@ -868,8 +868,16 @@ uint64_t Vault::wasted_bytes() const
     if (!fileutil::file_size(fp_, size)) return 0;
 
     uint64_t live = HEADER_SIZE + header_.slot[header_.active_slot].length;
-    for_each_image(root_, [&live](const IndexNode& img) {
-        live += img.meta.data_length + img.meta.thumb_length;
+    for_each_media(root_, [&live](const IndexNode& node) {
+        if (node.is_image()) {
+            live += node.meta.data_length + node.meta.thumb_length;
+        } else if (node.is_video()) {
+            // Sum all video chunks plus optional poster.
+            for (const auto& chunk : node.vmeta.chunks) {
+                live += chunk.length;
+            }
+            live += node.vmeta.poster_length;
+        }
     });
     return size > live ? size - live : 0;
 }
@@ -902,7 +910,7 @@ VaultResult Vault::compact()
     ChunkStore dst(tmp, master_key_.as_span());
 
     VaultResult copy_err = Ok;
-    for_each_image(new_root, [&copy_err, &src, &dst](IndexNode& img) {
+    for_each_media(new_root, [&copy_err, &src, &dst](IndexNode& node) {
         auto copy_span = [&copy_err, &src, &dst](uint64_t& off, uint64_t len) {
             if (copy_err != Ok || len == 0) return;
             std::vector<uint8_t> blob;
@@ -913,8 +921,18 @@ VaultResult Vault::compact()
             }
             off = new_off;
         };
-        copy_span(img.meta.data_offset, img.meta.data_length);
-        copy_span(img.meta.thumb_offset, img.meta.thumb_length);
+
+        if (node.is_image()) {
+            copy_span(node.meta.data_offset, node.meta.data_length);
+            copy_span(node.meta.thumb_offset, node.meta.thumb_length);
+        } else if (node.is_video()) {
+            // Copy each video chunk, updating its offset.
+            for (auto& chunk : node.vmeta.chunks) {
+                copy_span(chunk.offset, chunk.length);
+            }
+            // Copy the poster (if present).
+            copy_span(node.vmeta.poster_offset, node.vmeta.poster_length);
+        }
     });
     if (copy_err != Ok) return fail(copy_err);
 
