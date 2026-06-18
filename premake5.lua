@@ -258,6 +258,8 @@ project "osv_tests"
         "src/vault/*.h",
         "src/image/*.cpp",
         "src/image/*.h",
+        "src/media/*.cpp",
+        "src/media/*.h",
         -- gfx: only the headless-testable units (NOT window.cpp, which needs a
         -- real display). texture_cache + text + renderer run against an SDL
         -- software renderer in tests/gfx/.
