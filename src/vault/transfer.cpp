@@ -121,9 +121,10 @@ VaultResult copy_images(const Vault& src, std::string_view src_gallery,
 
 } // namespace
 
-VaultResult move_image(Vault& src, std::string_view src_gallery,
-                       std::string_view filename,
-                       Vault& dst, std::string_view dst_gallery)
+VaultResult transfer_image(Vault& src, std::string_view src_gallery,
+                           std::string_view filename,
+                           Vault& dst, std::string_view dst_gallery,
+                           TransferMode mode)
 {
     using enum VaultResult;
 
@@ -137,10 +138,13 @@ VaultResult move_image(Vault& src, std::string_view src_gallery,
 
     // dst commits first (crash-safe: a crash before the source remove leaves a
     // recoverable duplicate, never a loss). A failed add leaves the source intact.
+    // `node` is not used past this point, so a same-vault add that reallocates the
+    // index cannot dangle it.
     if (VaultResult r = dst.add_image(dst_gallery, plain.as_span(), filename); r != Ok)
         return r;
 
-    return src.remove_image(src_gallery, filename);
+    if (mode == TransferMode::Move) return src.remove_image(src_gallery, filename);
+    return Ok;
 }
 
 std::vector<std::string> image_target_galleries(const Vault& v)
@@ -159,13 +163,21 @@ std::vector<std::string> gallery_target_parents(const Vault& v)
     return out;
 }
 
-VaultResult move_gallery(Vault& src, std::string_view src_gallery,
-                         Vault& dst, std::string_view dst_parent)
+VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
+                             Vault& dst, std::string_view dst_parent,
+                             TransferMode mode)
 {
     using enum VaultResult;
 
-    if (src_gallery.empty()) return InvalidArg;       // can't move the root itself
+    if (src_gallery.empty()) return InvalidArg;       // can't transfer the root itself
     const std::string name = last_segment(src_gallery);
+
+    // Same-vault cycle: refuse to move/copy a gallery into itself or a descendant.
+    if (&src == &dst) {
+        if (dst_parent == src_gallery) return InvalidArg;
+        const std::string prefix = std::string(src_gallery) + "/";
+        if (dst_parent.substr(0, prefix.size()) == prefix) return InvalidArg;
+    }
 
     // Source must be an existing gallery.
     bool src_is_gallery = false;
@@ -199,8 +211,9 @@ VaultResult move_gallery(Vault& src, std::string_view src_gallery,
             return r;
     }
 
-    // Everything copied into dst — now drop the source subtree (copy-then-delete).
-    return src.remove_gallery(src_gallery);
+    // Everything copied into dst — for a Move, drop the source subtree (copy-then-delete).
+    if (mode == TransferMode::Move) return src.remove_gallery(src_gallery);
+    return Ok;
 }
 
 } // namespace vault

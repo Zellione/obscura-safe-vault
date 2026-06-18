@@ -59,7 +59,7 @@ TEST(transfer_move_roundtrip_across_reopen)
         REQUIRE(src.add_image("", img, "cat.jpg") == Ok);
 
         // Two vaults unlocked at once for the move.
-        REQUIRE(vault::move_image(src, "", "cat.jpg", dst, "") == Ok);
+        REQUIRE(vault::transfer_image(src, "", "cat.jpg", dst, "", vault::TransferMode::Move) == Ok);
 
         // Gone from source, present in destination (this session).
         CHECK(find_image(src, "", "cat.jpg") == nullptr);
@@ -93,7 +93,7 @@ TEST(transfer_move_into_subgallery)
     REQUIRE(src.add_image("", pattern(1000, 3), "a.png") == Ok);
     REQUIRE(dst.create_gallery("Trips") == Ok);
 
-    REQUIRE(vault::move_image(src, "", "a.png", dst, "Trips") == Ok);
+    REQUIRE(vault::transfer_image(src, "", "a.png", dst, "Trips", vault::TransferMode::Move) == Ok);
     CHECK(find_image(dst, "Trips", "a.png") != nullptr);
     CHECK(find_image(src, "", "a.png") == nullptr);
 }
@@ -105,7 +105,7 @@ TEST(transfer_move_missing_source_returns_not_found)
     vault::Vault src, dst;
     REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
     REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
-    CHECK(vault::move_image(src, "", "nope.jpg", dst, "") == NotFound);
+    CHECK(vault::transfer_image(src, "", "nope.jpg", dst, "", vault::TransferMode::Move) == NotFound);
 }
 
 TEST(transfer_move_name_collision_leaves_source_intact)
@@ -118,7 +118,7 @@ TEST(transfer_move_name_collision_leaves_source_intact)
     REQUIRE(src.add_image("", pattern(1000, 1), "dup.jpg") == Ok);
     REQUIRE(dst.add_image("", pattern(1000, 9), "dup.jpg") == Ok);
 
-    CHECK(vault::move_image(src, "", "dup.jpg", dst, "") == AlreadyExists);
+    CHECK(vault::transfer_image(src, "", "dup.jpg", dst, "", vault::TransferMode::Move) == AlreadyExists);
     // A failed add must not remove the source image.
     CHECK(find_image(src, "", "dup.jpg") != nullptr);
 }
@@ -134,7 +134,7 @@ TEST(transfer_move_into_non_leaf_returns_invalid_arg)
     REQUIRE(dst.create_gallery("Parent/Child") == Ok);   // root now holds a sub-gallery
 
     // Root of dst holds a sub-gallery, so it can't accept images.
-    CHECK(vault::move_image(src, "", "x.jpg", dst, "") == InvalidArg);
+    CHECK(vault::transfer_image(src, "", "x.jpg", dst, "", vault::TransferMode::Move) == InvalidArg);
     CHECK(find_image(src, "", "x.jpg") != nullptr);
 }
 
@@ -168,4 +168,64 @@ TEST(transfer_image_target_galleries_root_eligible_when_empty)
     bool has_root = false;
     for (auto& g : t) if (g.empty()) has_root = true;
     CHECK(has_root);   // empty root can accept images
+}
+
+TEST(transfer_image_copy_keeps_source_cross_vault)
+{
+    using enum vault::VaultResult;
+    TempVault sa("cpsrc"), da("cpdst");
+    const auto img = pattern(20000, 5);
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+    REQUIRE(src.add_image("", img, "c.jpg") == Ok);
+
+    REQUIRE(vault::transfer_image(src, "", "c.jpg", dst, "", vault::TransferMode::Copy) == Ok);
+
+    // Present in BOTH after a Copy; bytes match on each side.
+    const auto* s = find_image(src, "", "c.jpg");
+    const auto* d = find_image(dst, "", "c.jpg");
+    REQUIRE(s != nullptr);
+    REQUIRE(d != nullptr);
+    crypto::SecureBytes so, do_;
+    REQUIRE(src.read_image(*s, so) == Ok);
+    REQUIRE(dst.read_image(*d, do_) == Ok);
+    CHECK_BYTES_EQ(so.as_span(), std::span<const uint8_t>(img));
+    CHECK_BYTES_EQ(do_.as_span(), std::span<const uint8_t>(img));
+}
+
+TEST(transfer_image_same_vault_move_between_galleries)
+{
+    using enum vault::VaultResult;
+    TempVault tv("svmove");
+    const auto img = pattern(8000, 4);
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("p"), {}, kKdf, v) == Ok);
+    REQUIRE(v.create_gallery("A") == Ok);
+    REQUIRE(v.create_gallery("B") == Ok);
+    REQUIRE(v.add_image("A", img, "x.jpg") == Ok);
+
+    REQUIRE(vault::transfer_image(v, "A", "x.jpg", v, "B", vault::TransferMode::Move) == Ok);
+
+    CHECK(find_image(v, "A", "x.jpg") == nullptr);   // gone from A
+    const auto* m = find_image(v, "B", "x.jpg");
+    REQUIRE(m != nullptr);                            // present in B
+    crypto::SecureBytes out;
+    REQUIRE(v.read_image(*m, out) == Ok);
+    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(img));
+}
+
+TEST(transfer_image_same_vault_copy_between_galleries)
+{
+    using enum vault::VaultResult;
+    TempVault tv("svcopy");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("p"), {}, kKdf, v) == Ok);
+    REQUIRE(v.create_gallery("A") == Ok);
+    REQUIRE(v.create_gallery("B") == Ok);
+    REQUIRE(v.add_image("A", pattern(4000, 2), "y.png") == Ok);
+
+    REQUIRE(vault::transfer_image(v, "A", "y.png", v, "B", vault::TransferMode::Copy) == Ok);
+    CHECK(find_image(v, "A", "y.png") != nullptr);   // still in A
+    CHECK(find_image(v, "B", "y.png") != nullptr);   // and now in B
 }
