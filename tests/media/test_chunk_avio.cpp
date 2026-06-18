@@ -161,4 +161,27 @@ TEST(chunk_avio_surfaces_decrypt_failure)
     CHECK(avio_read(avio.ctx(), buf.data(), 64) < 0);  // negative AVERROR
 }
 
+TEST(chunk_avio_rejects_seek_before_start)
+{
+    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!video_bytes.empty());
+
+    TempVault tv("chunk_avio_negseek");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", video_bytes, "v.mp4", 4096) == vault::VaultResult::Ok);
+
+    auto children = v.list("c");
+    REQUIRE(children.size() == 1);
+
+    media::ChunkAvio avio(media::VideoSource::open(v, *children[0]));
+    REQUIRE(avio.valid());
+
+    // Seeking before the start of the stream must fail, not wrap to a huge
+    // unsigned offset (which would silently clamp later reads to EOF).
+    CHECK(avio_seek(avio.ctx(), -10, SEEK_SET) < 0);
+}
+
 #endif // OSV_VENDORED_AV

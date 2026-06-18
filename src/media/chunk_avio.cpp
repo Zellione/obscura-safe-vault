@@ -55,13 +55,16 @@ int64_t ChunkAvio::seek_cb(void* opaque, int64_t offset, int whence)
     // Handle standard SEEK_* constants (mask AVSEEK_FORCE which may be OR'd in).
     whence &= ~AVSEEK_FORCE;
 
+    int64_t new_pos;
     switch (whence) {
-        case SEEK_SET: self->pos_ = static_cast<uint64_t>(offset); break;
-        case SEEK_CUR: self->pos_ = static_cast<uint64_t>(static_cast<int64_t>(self->pos_) + offset); break;
-        case SEEK_END: self->pos_ = static_cast<uint64_t>(size + offset); break;
+        case SEEK_SET: new_pos = offset; break;
+        case SEEK_CUR: new_pos = static_cast<int64_t>(self->pos_) + offset; break;
+        case SEEK_END: new_pos = size + offset; break;
         default:       return AVERROR(EINVAL);
     }
-    return static_cast<int64_t>(self->pos_);
+    if (new_pos < 0) return AVERROR(EINVAL);   // can't seek before the start of the stream
+    self->pos_ = static_cast<uint64_t>(new_pos);
+    return new_pos;
 }
 
 } // namespace media

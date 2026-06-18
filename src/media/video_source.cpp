@@ -23,6 +23,7 @@ int64_t VideoSource::read(uint64_t offset, std::span<uint8_t> dst) noexcept
         if (idx >= chunks_.size()) break;                  // metadata/size mismatch
         if (cached_index_ != static_cast<int64_t>(idx)) {
             if (!store_.read_chunk({chunks_[idx].offset, chunks_[idx].length}, cache_)) {
+                (void)cache_.resize(0);                     // wipe any stale plaintext
                 cached_index_ = -1;
                 return -1;                                  // auth/decrypt failure
             }
