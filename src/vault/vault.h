@@ -74,8 +74,8 @@ public:
     Vault() = default;
     ~Vault();
 
-    Vault(const Vault&)            = delete;
-    Vault& operator=(const Vault&) = delete;
+    // Move-only: declaring the move operations implicitly deletes the copy ones,
+    // so no explicit `= delete` for the copy ctor/assignment is needed.
     Vault(Vault&& other) noexcept;
     Vault& operator=(Vault&& other) noexcept;
 

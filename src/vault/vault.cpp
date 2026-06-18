@@ -84,6 +84,30 @@ void for_each_media(NodeT& n, Fn&& fn)
     for (auto& c : n.children) for_each_media(c, fn);
 }
 
+// Copy a media node's live chunk(s) from `src` to `dst` verbatim (ciphertext —
+// no decrypt/re-encrypt, invariant #1), rewriting each offset to its new
+// location. Sets `err` to IoError on the first failed read/append.
+void relocate_node_chunks(ChunkStore& src, ChunkStore& dst, IndexNode& node, VaultResult& err)
+{
+    auto copy_span = [&](uint64_t& off, uint64_t len) {
+        if (err != VaultResult::Ok || len == 0) return;
+        std::vector<uint8_t> blob;
+        uint64_t new_off = 0;
+        if (!src.read_raw(off, len, blob) || !dst.append_raw(blob, new_off)) {
+            err = VaultResult::IoError;
+            return;
+        }
+        off = new_off;
+    };
+    if (node.is_image()) {
+        copy_span(node.meta.data_offset, node.meta.data_length);
+        copy_span(node.meta.thumb_offset, node.meta.thumb_length);
+    } else if (node.is_video()) {
+        for (auto& chunk : node.vmeta.chunks) copy_span(chunk.offset, chunk.length);
+        copy_span(node.vmeta.poster_offset, node.vmeta.poster_length);
+    }
+}
+
 // Trim ASCII whitespace from start and end of a string_view.
 std::string_view trim_ws(std::string_view s)
 {
@@ -235,8 +259,8 @@ void collect_favorites(const IndexNode& node, std::string_view prefix,
     for (const auto& child : node.children) {
         const std::string full_path = join_child_path(prefix, child.name);
 
-        bool matches = want_galleries ? child.is_gallery() : child.is_media();
-        if (child.favorite && matches) {
+        if (const bool matches = want_galleries ? child.is_gallery() : child.is_media();
+            child.favorite && matches) {
             out.push_back(SearchHit{
                 .path           = full_path,
                 .is_gallery     = child.is_gallery(),
@@ -910,29 +934,8 @@ VaultResult Vault::compact()
     ChunkStore dst(tmp, master_key_.as_span());
 
     VaultResult copy_err = Ok;
-    for_each_media(new_root, [&copy_err, &src, &dst](IndexNode& node) {
-        auto copy_span = [&copy_err, &src, &dst](uint64_t& off, uint64_t len) {
-            if (copy_err != Ok || len == 0) return;
-            std::vector<uint8_t> blob;
-            uint64_t new_off = 0;
-            if (!src.read_raw(off, len, blob) || !dst.append_raw(blob, new_off)) {
-                copy_err = IoError;
-                return;
-            }
-            off = new_off;
-        };
-
-        if (node.is_image()) {
-            copy_span(node.meta.data_offset, node.meta.data_length);
-            copy_span(node.meta.thumb_offset, node.meta.thumb_length);
-        } else if (node.is_video()) {
-            // Copy each video chunk, updating its offset.
-            for (auto& chunk : node.vmeta.chunks) {
-                copy_span(chunk.offset, chunk.length);
-            }
-            // Copy the poster (if present).
-            copy_span(node.vmeta.poster_offset, node.vmeta.poster_length);
-        }
+    for_each_media(new_root, [&](IndexNode& node) {
+        relocate_node_chunks(src, dst, node, copy_err);
     });
     if (copy_err != Ok) return fail(copy_err);
 

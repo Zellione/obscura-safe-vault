@@ -150,8 +150,8 @@ bool read_node(ByteReader& r, IndexNode& node, uint32_t depth, uint8_t version)
 
     const uint8_t type = r.u8();
     if (!r.ok()) return false;
-    const bool is_video_type = type == std::to_underlying(IndexNode::Type::Video);
-    if (type != std::to_underlying(IndexNode::Type::Gallery) &&
+    if (const bool is_video_type = type == std::to_underlying(IndexNode::Type::Video);
+        type != std::to_underlying(IndexNode::Type::Gallery) &&
         type != std::to_underlying(IndexNode::Type::Image)  &&
         !(is_video_type && version >= 4)) {
         return false;  // unknown node type (or a Video node in a pre-v4 blob)
