@@ -200,7 +200,13 @@ jobs:
   # ===========================================================================
   windows:
     name: MSVC / ${{ matrix.config }} / Windows
-    runs-on: windows-latest
+    # Pinned to windows-2022 (VS 2022 — the toolchain this project targets, see
+    # CLAUDE.md). The newer windows-latest image (VS 18 / MSVC 14.51) miscompiles
+    # a freshly-built vendored lib (SDL3/codecs) in Release, crashing osv_tests;
+    # main only masks it via a stale build cache. Phase 15 (PR1) surfaced it by
+    # busting the cache (adding vendor/ffmpeg changed .gitmodules, which is in the
+    # SDL3 + codec cache keys). Revisit when the newer image's MSVC is fixed.
+    runs-on: windows-2022
 
     strategy:
       fail-fast: false

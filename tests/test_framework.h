@@ -92,6 +92,11 @@ inline int run_all_tests()
     int total_failures = 0;
     int failed_tests   = 0;
     for (const auto& tc : registry()) {
+        // Progress marker on stderr (unbuffered by default): if a test crashes
+        // the process mid-suite (e.g. an MSVC Release miscompile in a vendored
+        // lib), the last RUN line still pinpoints the offending test, even when
+        // buffered stdout is lost. Kept off stdout so the PASS list stays clean.
+        std::println(stderr, "  RUN   {}", tc.name);
         int failures = 0;
         tc.fn(failures);
         if (failures == 0) {
