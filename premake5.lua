@@ -267,6 +267,7 @@ project "osv_tests"
         "src/gfx/texture_cache.cpp",
         "src/gfx/text.cpp",
         "src/gfx/renderer.cpp",
+        "src/gfx/yuv_texture.cpp",
         "src/platform/paths.cpp",
         "src/platform/vault_registry.cpp",
         "src/ui/input.cpp",
