@@ -94,7 +94,8 @@ void App::to_viewer(const std::string& gallery_path, int index)
 {
     state_  = State::Viewing;
     screen_ = std::make_unique<ui::ImageViewer>(
-        window_, font_, *active_, *cache_, folder_dialog_,
+        window_, font_, *active_, *cache_,
+        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_},
         ui::ImageViewer::Album::gallery(gallery_path), index);
     screen_->on_enter();
 }
@@ -102,14 +103,16 @@ void App::to_viewer(const std::string& gallery_path, int index)
 void App::to_favorite_images()
 {
     state_  = State::Browsing;
-    screen_ = std::make_unique<ui::FavoritesImages>(window_, font_, *active_, *cache_);
+    screen_ = std::make_unique<ui::FavoritesImages>(
+        window_, font_, *active_, *cache_, registry_, active_path_);
     screen_->on_enter();
 }
 
 void App::to_favorite_galleries()
 {
     state_  = State::Browsing;
-    screen_ = std::make_unique<ui::FavoritesGalleries>(window_, font_, *active_);
+    screen_ = std::make_unique<ui::FavoritesGalleries>(
+        window_, font_, *active_, registry_, active_path_);
     screen_->on_enter();
 }
 
@@ -131,7 +134,9 @@ void App::to_favorite_viewer(int index)
 
     state_  = State::Viewing;
     screen_ = std::make_unique<ui::ImageViewer>(
-        window_, font_, *active_, *cache_, folder_dialog_, std::move(album), index);
+        window_, font_, *active_, *cache_,
+        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_},
+        std::move(album), index);
     screen_->on_enter();
 }
 
@@ -142,10 +147,29 @@ constexpr uint64_t FRAME_CAP_NS = 1'000'000'000ULL / 60;
 // Upper bound on how long the loop blocks for input while idle, so async results
 // (file dialogs, the decode worker) surface promptly even without a wake event.
 constexpr int32_t IDLE_HEARTBEAT_MS = 250;
+
+// Whether an event is direct user input (resets the idle-lock timer). Window
+// events, the decode-worker wake, and async dialog results deliberately don't.
+bool is_user_input(const SDL_Event& e) noexcept
+{
+    switch (e.type) {
+        case SDL_EVENT_KEY_DOWN:
+        case SDL_EVENT_KEY_UP:
+        case SDL_EVENT_TEXT_INPUT:
+        case SDL_EVENT_MOUSE_MOTION:
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+        case SDL_EVENT_MOUSE_WHEEL:
+            return true;
+        default:
+            return false;
+    }
+}
 } // namespace
 
 void App::dispatch_event(const SDL_Event& e)
 {
+    if (is_user_input(e)) idle_.reset();   // any keypress/mouse activity stays the lock
     if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
         running_ = false;
     else if (screen_)
@@ -196,6 +220,19 @@ bool App::apply_nav()
     return false;
 }
 
+bool App::maybe_auto_lock(double dt)
+{
+    if (!active_) { idle_.reset(); return false; }   // nothing to lock
+    if (!idle_.tick(dt)) return false;
+    if (screen_) screen_->on_exit();
+    active_->lock();                                  // wipe the master key
+    active_.reset();
+    active_path_.clear();
+    to_manager();
+    std::println("[App] Auto-locked after {} s idle.", static_cast<int>(IDLE_LOCK_SECS));
+    return true;
+}
+
 void App::render_frame()
 {
     const uint64_t render_start = SDL_GetTicksNS();
@@ -227,11 +264,14 @@ void App::run()
 
         if (screen_) screen_->update(dt);
 
+        // Idle auto-lock runs before nav resolution so the manager paints this frame.
+        const bool auto_locked = maybe_auto_lock(dt);
+
         // Resolve a transition before rendering so the destination screen paints
         // this frame instead of after another idle heartbeat.
         const bool transitioned = apply_nav();
 
-        bool redraw = animating || had_event || transitioned;
+        bool redraw = animating || had_event || transitioned || auto_locked;
         if (screen_ && screen_->consume_dirty()) redraw = true;
         if (running_ && redraw) render_frame();
     }

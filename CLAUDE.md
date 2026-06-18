@@ -122,10 +122,13 @@ index valid; orphaned chunks are reclaimed by compaction.
 
 ```
 src/
-  app/       main.cpp, app.{h,cpp}        ← state machine + event loop;
-                                            VaultManager is the home screen and the
+  app/       main.cpp, app.{h,cpp},       ← state machine + event loop;
+             idle_timer.h                   VaultManager is the home screen and the
                                             App owns ONE unlocked vault at a time
-                                            (single-active / lock-on-switch, Phase 14)
+                                            (single-active / lock-on-switch, Phase 14).
+                                            Idle auto-lock (Phase 14 PR5): IdleTimer
+                                            wipes the active vault + returns to the
+                                            manager after 5 min with no user input.
   crypto/    crypto.h, kdf.*, aead.*,     ← Monocypher wrappers (Phase 1)
              secure_mem.*, random.*
   vault/     vault.h, header.*, index.*,  ← container format (Phase 2)
@@ -174,6 +177,10 @@ src/
                                             pick vault ("This vault" or registry; the former
                                             skips unlock) → pick gallery → transfer
                                             (Phase 14 PR2/3/4)
+             quick_switch.*,              ← global `` ` `` overlay (Phase 14 PR5): lists
+                                            registry vaults → ToUnlock(path) (locks
+                                            current, unlocks chosen); hosted by
+                                            GalleryGrid + ImageViewer + favorites
              widgets.*
   platform/  paths.{h,cpp},              ← config dir + file dialogs (Phase 5)
              file_dialog.*,               ← + save_vault() for new-vault paths (Phase 14)

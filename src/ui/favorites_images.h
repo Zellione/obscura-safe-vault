@@ -3,7 +3,9 @@
 #include <SDL3/SDL.h>
 
 #include <cstdint>
+#include <string>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "image/decode_worker.h"
@@ -12,6 +14,7 @@
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
 namespace vault { class Vault; struct IndexNode; }
+namespace platform { class VaultRegistry; }
 
 namespace ui {
 
@@ -23,8 +26,10 @@ namespace ui {
 class FavoritesImages : public FavoritesScreen {
 public:
     FavoritesImages(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                    gfx::TextureCache& cache)
-        : FavoritesScreen(win, font, vault), cache_(cache) {}
+                    gfx::TextureCache& cache, platform::VaultRegistry& registry,
+                    std::string active_path)
+        : FavoritesScreen(win, font, vault, registry, std::move(active_path)),
+          cache_(cache) {}
 
     void update(double dt) override;
 

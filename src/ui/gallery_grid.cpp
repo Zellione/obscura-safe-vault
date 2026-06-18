@@ -49,9 +49,9 @@ GridSpec grid_spec(float win_w, int cols) noexcept
 GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                          gfx::TextureCache& cache, GridDialogs dialogs,
                          GridVaultCtx vault_ctx, GridLocation at)
-    : win_(win), font_(font), vault_(vault), cache_(cache), dlg_(dialogs.file),
-      folder_dlg_(dialogs.folder),
+    : win_(win), font_(font), vault_(vault), cache_(cache), dialogs_(dialogs),
       search_(vault, win), tag_editor_(vault, win),
+      quick_switch_(vault_ctx.registry, vault_ctx.active_vault_path),
       transfer_(vault, std::move(vault_ctx.active_vault_path), vault_ctx.registry,
                 dialogs.file, win),
       initial_(std::move(at))
@@ -115,7 +115,7 @@ void GalleryGrid::toggle_select()
 
 void GalleryGrid::start_export()
 {
-    if (folder_dlg_.busy() || consent_.active()) return;
+    if (dialogs_.folder.busy() || consent_.active()) return;
     if (sel_.empty()) {
         error_ = "Select images first (Space), then [X] to export.";
         return;
@@ -178,13 +178,13 @@ void GalleryGrid::do_export(const std::filesystem::path& dest)
 
 void GalleryGrid::start_import()
 {
-    if (dlg_.busy()) return;
+    if (dialogs_.file.busy()) return;
     if (!current_allows_images()) {
         error_ = "Can't import here: this gallery holds sub-galleries.";
         return;
     }
     error_.clear();
-    dlg_.open_images(win_.sdl_window());
+    dialogs_.file.open_images(win_.sdl_window());
 }
 
 void GalleryGrid::do_import(const std::filesystem::path& file_path)
@@ -320,6 +320,7 @@ void GalleryGrid::toggle_or_open()
 void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
 {
     using enum GalleryView;
+    if (key.key == SDLK_GRAVE) { quick_switch_.open(); return; }   // switch vault (`)
     if (key.key == SDLK_L) { view_ = (view_ == Grid) ? List : Grid; return; }
     if (key.key == SDLK_X) { start_export(); return; }   // export selection
     if (key.key == SDLK_M) { start_transfer(); return; }   // move to another vault
@@ -374,11 +375,18 @@ void GalleryGrid::handle_event(const SDL_Event& e)
 
     if (transfer_.active()) { (void)transfer_.handle_event(e); return; }
 
+    if (quick_switch_.active()) {
+        (void)quick_switch_.handle_event(e);
+        if (std::string p; quick_switch_.consume_choice(p))
+            request(NavKind::ToUnlock, std::move(p));   // locks current, unlocks chosen
+        return;
+    }
+
     // The export consent modal owns all input while it is up.
     if (consent_.active()) {
         if (e.type == SDL_EVENT_KEY_DOWN &&
             consent_.handle_key(e.key.key) == ConsentDialog::Result::Confirmed)
-            folder_dlg_.open(win_.sdl_window());
+            dialogs_.folder.open(win_.sdl_window());
         return;
     }
 
@@ -399,21 +407,9 @@ void GalleryGrid::handle_event(const SDL_Event& e)
     }
 }
 
-void GalleryGrid::pump_transfer()
-{
-    transfer_.update();
-    mark_dirty();
-    if (std::string s; transfer_.consume_completed(s)) {
-        status_ = std::move(s);
-        sel_.clear();
-        refresh();              // moved images are gone from this listing
-        mark_dirty();
-    }
-}
-
 void GalleryGrid::pump_import()
 {
-    if (auto res = dlg_.take_result()) {
+    if (auto res = dialogs_.file.take_result()) {
         if (!res->empty()) {
             for (const auto& p : *res) do_import(p);
             refresh();
@@ -427,12 +423,25 @@ void GalleryGrid::update(double)
     if (pump_thumbs()) mark_dirty();   // off-thread thumbnail decode(s) landed
 
     if (transfer_.active()) {
-        pump_transfer();
-    } else {
-        pump_import();
+        transfer_.update();            // poll the keyfile picker while the dialog is open
+        mark_dirty();
     }
 
-    if (auto dest = folder_dlg_.take_result()) {
+    // A finished transfer closes the dialog synchronously (active_ -> false) during
+    // the keypress, so its result MUST be drained regardless of active state — else
+    // the listing only refreshes after leaving and re-entering the gallery.
+    if (std::string s; transfer_.consume_completed(s)) {
+        status_ = std::move(s);
+        sel_.clear();
+        refresh();                     // moved images are gone from this listing
+        mark_dirty();
+    }
+
+    // The import picker shares dialogs_.file with the transfer's keyfile picker, so
+    // only poll it when no transfer is active (don't steal the keyfile result).
+    if (!transfer_.active()) pump_import();
+
+    if (auto dest = dialogs_.folder.take_result()) {
         if (!dest->empty()) do_export(*dest);   // empty => the picker was cancelled
         mark_dirty();
     }
@@ -450,7 +459,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     r.draw_text(font_, OX, 90,
                 "[I] Import  [N] New  [/] Search  [G] Tags  [B] Fav  [F] Fav Images  "
                 "[Shift+F] Fav Galleries  [Enter] Open  [Space] Select  [X] Export  "
-                "[M] Move/Copy  [Esc] Back  [L] List/Grid",
+                "[M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid",
                 TEXT_FAINT);
 
     if (!sel_.empty())
@@ -480,6 +489,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     search_.render(r, font_, W, H);
     tag_editor_.render(r, font_, W, H);
     transfer_.render(r, font_, W, H);
+    quick_switch_.render(r, font_, W, H);
 }
 
 void GalleryGrid::render_grid(gfx::Renderer& r, float W, float /*H*/)

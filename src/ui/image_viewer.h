@@ -9,6 +9,7 @@
 #include "image/decode_worker.h"
 #include "ui/export_ui.h"
 #include "ui/full_tex_cache.h"
+#include "ui/quick_switch.h"
 #include "ui/screen.h"
 #include "ui/scroll_model.h"
 #include "ui/search_overlay.h"
@@ -19,7 +20,7 @@
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
 namespace vault { class Vault; struct IndexNode; }
-namespace platform { class FolderDialog; }
+namespace platform { class FolderDialog; class VaultRegistry; }
 
 namespace ui {
 
@@ -66,9 +67,16 @@ public:
         }
     };
 
+    // Host-provided collaborators beyond the core render deps, bundled to keep the
+    // constructor within the parameter budget (S107).
+    struct Context {
+        platform::FolderDialog&  folder;
+        platform::VaultRegistry& registry;
+        std::string              active_path;
+    };
+
     ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                gfx::TextureCache& cache, platform::FolderDialog& folder_dlg,
-                Album album, int start_index);
+                gfx::TextureCache& cache, Context ctx, Album album, int start_index);
 
     ~ImageViewer() override = default;
 
@@ -131,6 +139,7 @@ private:
     ExportUi                export_;
     TagEditor               tag_editor_;
     SearchOverlay           search_;
+    QuickSwitch             quick_switch_;   // ` overlay: jump to another vault
     Album album_;                            // the navigable image set (see Album)
     int   index_ = 0;
 

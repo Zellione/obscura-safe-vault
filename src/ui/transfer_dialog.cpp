@@ -65,6 +65,10 @@ void TransferDialog::open(std::string src_gallery, std::vector<std::string> file
     for (const auto& p : registry_.list())
         if (p.string() != src_path_) candidates_.push_back(p);
     // "This vault" is always an available destination, so no empty-list error here.
+
+    // The Unlock-stage password field and the new-gallery name overlay both consume
+    // SDL_EVENT_TEXT_INPUT, which SDL3 only delivers while text input is active.
+    SDL_StartTextInput(win_.sdl_window());
 }
 
 void TransferDialog::open_gallery(std::string src_gallery)
@@ -78,6 +82,7 @@ void TransferDialog::close()
 {
     if (dest_.vault.is_unlocked()) dest_.vault.lock();   // wipe the destination key
     dest_.pw.clear();
+    SDL_StopTextInput(win_.sdl_window());                // restore the host's input state
     active_ = false;
 }
 
@@ -187,7 +192,7 @@ bool TransferDialog::handle_mode_key(SDL_Keycode k)
 
 bool TransferDialog::handle_pick_vault_key(SDL_Keycode k)
 {
-    const auto n = static_cast<int>(candidates_.size());
+    const auto n = static_cast<int>(candidates_.size()) + 1;   // +1 for the "This vault" row
     if (k == SDLK_UP)   vault_sel_ = clamp_index(vault_sel_ - 1, n);
     if (k == SDLK_DOWN) vault_sel_ = clamp_index(vault_sel_ + 1, n);
     if (k == SDLK_RETURN || k == SDLK_KP_ENTER) choose_vault();

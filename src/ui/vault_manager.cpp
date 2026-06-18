@@ -42,7 +42,9 @@ VaultManager::Layout VaultManager::layout() const
         .new_btn  = {60.0f,             row, bw, bh},
         .open_btn = {60.0f + bw + gap,  row, bw, bh},
         .list_top = 120.0f,
-        .row_h    = 64.0f,
+        // Tall enough to contain both tile lines inside the selection box:
+        // 8 (top pad) + name + path (each ~font px) + 8 (bottom pad).
+        .row_h    = 84.0f,
     };
 }
 
