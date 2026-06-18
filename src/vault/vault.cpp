@@ -62,9 +62,9 @@ IndexNode* child_named(IndexNode* node, std::string_view name)
     return nullptr;
 }
 
-bool holds_images(const IndexNode& g)
+bool holds_media(const IndexNode& g)
 {
-    return std::ranges::any_of(g.children, [](const auto& c) { return c.is_image(); });
+    return std::ranges::any_of(g.children, [](const auto& c) { return c.is_media(); });
 }
 
 bool holds_galleries(const IndexNode& g)
@@ -227,7 +227,7 @@ void search_dfs(const IndexNode& node, std::string_view prefix,
 }
 
 // Walk the tree collecting every favorited node of the requested kind (galleries
-// when `want_galleries`, otherwise images) into `out`, flat, with full paths.
+// when `want_galleries`, otherwise media: images or videos) into `out`, flat, with full paths.
 // effective_tags is intentionally left empty — favorites lists don't cascade tags.
 void collect_favorites(const IndexNode& node, std::string_view prefix,
                        bool want_galleries, std::vector<SearchHit>& out)
@@ -235,7 +235,8 @@ void collect_favorites(const IndexNode& node, std::string_view prefix,
     for (const auto& child : node.children) {
         const std::string full_path = join_child_path(prefix, child.name);
 
-        if (child.favorite && child.is_gallery() == want_galleries) {
+        bool matches = want_galleries ? child.is_gallery() : child.is_media();
+        if (child.favorite && matches) {
             out.push_back(SearchHit{
                 .path           = full_path,
                 .is_gallery     = child.is_gallery(),
@@ -520,8 +521,8 @@ VaultResult Vault::create_gallery(std::string_view gallery_path)
             if (!child->is_gallery()) return InvalidArg;  // name is an image
             cur = child;
         } else {
-            // A gallery holding images cannot also hold sub-galleries.
-            if (holds_images(*cur)) return InvalidArg;
+            // A gallery holding media cannot also hold sub-galleries.
+            if (holds_media(*cur)) return InvalidArg;
             cur->children.push_back(IndexNode::gallery(std::string(seg)));
             cur     = &cur->children.back();
             created = true;
@@ -602,11 +603,15 @@ VaultResult Vault::read_thumbnail(const IndexNode& node, crypto::SecureBytes& ou
 {
     using enum VaultResult;
     if (!unlocked_)              return Locked;
-    if (!node.is_image())        return InvalidArg;
-    if (node.meta.thumb_length == 0) return NotFound;
+    if (!node.is_media())        return InvalidArg;
+
+    // Determine thumbnail location: video uses poster, image uses meta.
+    const uint64_t thumb_len = node.is_video() ? node.vmeta.poster_length : node.meta.thumb_length;
+    const uint64_t thumb_off = node.is_video() ? node.vmeta.poster_offset : node.meta.thumb_offset;
+    if (thumb_len == 0) return NotFound;
 
     if (ChunkStore store(fp_, master_key_.as_span());
-        !store.read_chunk({node.meta.thumb_offset, node.meta.thumb_length}, out)) {
+        !store.read_chunk({thumb_off, thumb_len}, out)) {
         return AuthFailed;
     }
     return Ok;

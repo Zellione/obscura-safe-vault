@@ -142,3 +142,83 @@ TEST(add_video_matroska)
     REQUIRE(v.read_video(node, out) == vault::VaultResult::Ok);
     CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(video_bytes));
 }
+
+TEST(search_includes_video_leaves)
+{
+    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!video_bytes.empty());
+
+    TempVault tv("search_video");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+
+    REQUIRE(v.create_gallery("clips") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("clips", video_bytes, "sunset.mp4", 4096) == vault::VaultResult::Ok);
+
+    auto hits = v.search("sunset", vault::SearchScope::Images);
+    bool found = false;
+    for (const auto& h : hits) {
+        if (h.name == "sunset.mp4") { found = true; break; }
+    }
+    CHECK(found);
+}
+
+TEST(favorite_video_appears_in_favorites)
+{
+    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!video_bytes.empty());
+
+    TempVault tv("favorite_video");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+
+    REQUIRE(v.create_gallery("clips") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("clips", video_bytes, "a.mp4", 4096) == vault::VaultResult::Ok);
+    REQUIRE(v.toggle_favorite("clips/a.mp4") == vault::VaultResult::Ok);
+
+    auto favs = v.list_favorite_images();
+    bool found = false;
+    for (const auto& h : favs) {
+        if (h.name == "a.mp4") { found = true; break; }
+    }
+    CHECK(found);
+}
+
+TEST(read_thumbnail_video_without_poster_is_not_found)
+{
+    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!video_bytes.empty());
+
+    TempVault tv("video_thumbnail");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+
+    REQUIRE(v.create_gallery("clips") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("clips", video_bytes, "a.mp4", 4096) == vault::VaultResult::Ok);
+
+    auto children = v.list("clips");
+    REQUIRE(children.size() == 1);
+    REQUIRE(children[0]->is_video());
+    crypto::SecureBytes out;
+    CHECK(v.read_thumbnail(*children[0], out) == vault::VaultResult::NotFound);
+}
+
+TEST(leaf_gallery_accepts_mixed_image_and_video)
+{
+    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    auto image_bytes = read_file(OSV_FIXTURE_DIR "/sample.webp");
+    REQUIRE(!video_bytes.empty());
+    REQUIRE(!image_bytes.empty());
+
+    TempVault tv("mixed_media");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+
+    REQUIRE(v.create_gallery("mix") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("mix", video_bytes, "v.mp4", 4096) == vault::VaultResult::Ok);
+    CHECK(v.add_image("mix", image_bytes, "i.webp") == vault::VaultResult::Ok);
+}
