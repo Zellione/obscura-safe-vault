@@ -450,7 +450,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     r.draw_text(font_, OX, 90,
                 "[I] Import  [N] New  [/] Search  [G] Tags  [B] Fav  [F] Fav Images  "
                 "[Shift+F] Fav Galleries  [Enter] Open  [Space] Select  [X] Export  "
-                "[M] Move  [Esc] Back  [L] List/Grid",
+                "[M] Move/Copy  [Esc] Back  [L] List/Grid",
                 TEXT_FAINT);
 
     if (!sel_.empty())
