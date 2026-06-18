@@ -1,6 +1,7 @@
 #include "test_framework.h"
 
 #include <filesystem>
+#include <fstream>
 #include <span>
 #include <string>
 #include <vector>
@@ -15,6 +16,13 @@ static const crypto::KdfParams kKdf{.t_cost = 1, .m_cost_kib = 8, .parallelism =
 static std::span<const uint8_t> bytes(const std::string& s)
 {
     return {reinterpret_cast<const uint8_t*>(s.data()), s.size()};
+}
+
+// Read a file into a vector.
+static std::vector<uint8_t> read_file(const char* path)
+{
+    std::ifstream f(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
 }
 
 struct TempVault {
@@ -37,12 +45,12 @@ static std::vector<uint8_t> pattern(size_t n, uint8_t seed)
     return v;
 }
 
-// Find an image node by name in a gallery; nullptr if absent.
+// Find a media (image or video) node by name in a gallery; nullptr if absent.
 static const vault::IndexNode* find_image(const vault::Vault& v, std::string_view gallery,
                                           std::string_view name)
 {
     for (const auto* c : v.list(gallery))
-        if (c->is_image() && c->name == name) return c;
+        if (c->is_media() && c->name == name) return c;
     return nullptr;
 }
 
@@ -230,4 +238,55 @@ TEST(transfer_image_same_vault_copy_between_galleries)
     REQUIRE(vault::transfer_image(v, "A", "y.png", v, "B", vault::TransferMode::Copy) == Ok);
     CHECK(find_image(v, "A", "y.png") != nullptr);   // still in A
     CHECK(find_image(v, "B", "y.png") != nullptr);   // and now in B
+}
+
+TEST(transfer_video_move_between_vaults)
+{
+    using enum vault::VaultResult;
+    TempVault sa("vsrc"), da("vdst");
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("pw-src"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("pw-dst"), {}, kKdf, dst) == Ok);
+    REQUIRE(src.create_gallery("clips") == Ok);
+    REQUIRE(dst.create_gallery("inbox") == Ok);
+    auto mp4 = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(src.add_video("clips", mp4, "v.mp4", 4096) == Ok);
+
+    REQUIRE(vault::transfer_image(src, "clips", "v.mp4", dst, "inbox",
+                                  vault::TransferMode::Move) == Ok);
+
+    // Reopen both; checksum matches in dest, gone from source.
+    vault::Vault src2, dst2;
+    REQUIRE(vault::Vault::open(sa.str(), src2) == Ok);
+    REQUIRE(src2.unlock(bytes("pw-src"), {}) == Ok);
+    REQUIRE(vault::Vault::open(da.str(), dst2) == Ok);
+    REQUIRE(dst2.unlock(bytes("pw-dst"), {}) == Ok);
+    const auto* sg = find_image(src2, "clips", "v.mp4");
+    const auto* dg = find_image(dst2, "inbox", "v.mp4");
+    CHECK(sg == nullptr);                           // moved out of source
+    REQUIRE(dg != nullptr);
+    CHECK(dg->is_video());
+
+    crypto::SecureBytes out;
+    REQUIRE(dst2.read_video(*dg, out) == Ok);
+    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(mp4));
+}
+
+TEST(transfer_video_copy_keeps_source)
+{
+    using enum vault::VaultResult;
+    TempVault sa("vcpsrc"), da("vcpdst");
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+    REQUIRE(src.create_gallery("clips") == Ok);
+    REQUIRE(dst.create_gallery("inbox") == Ok);
+    auto mp4 = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(src.add_video("clips", mp4, "v.mp4", 4096) == Ok);
+
+    REQUIRE(vault::transfer_image(src, "clips", "v.mp4", dst, "inbox",
+                                  vault::TransferMode::Copy) == Ok);
+    const auto* sg = find_image(src, "clips", "v.mp4");
+    CHECK(sg != nullptr);                           // copy left the source intact
+    CHECK(sg->is_video());
 }

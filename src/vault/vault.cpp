@@ -695,8 +695,8 @@ VaultResult Vault::remove_image(std::string_view gallery_path, std::string_view 
     if (!g) return NotFound;
 
     for (auto it = g->children.begin(); it != g->children.end(); ++it) {
-        if (it->is_image() && it->name == filename) {
-            g->children.erase(it);  // chunk is orphaned until compaction
+        if (it->is_media() && it->name == filename) {  // remove image or video
+            g->children.erase(it);  // chunk(s) are orphaned until compaction
             if (const VaultResult r = commit_index(); r != Ok) return r;
 
             // Best-effort space reclamation: the remove itself already

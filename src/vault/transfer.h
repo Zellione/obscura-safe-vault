@@ -12,16 +12,16 @@ namespace vault {
 // the destination commit. Same code path for cross-vault and same-vault transfers.
 enum class TransferMode { Move, Copy };
 
-// Transfer one image from `src` (gallery `src_gallery`, file `filename`) into `dst`'s
-// `dst_gallery`, keeping the filename. Reads the source plaintext into an mlock'd
-// SecureBytes, re-encrypts it into `dst` via add_image (which regenerates the
-// thumbnail + metadata); for TransferMode::Move it then removes the source. `dst`
-// is committed before `src` is mutated, so a crash mid-Move leaves the image in BOTH
-// vaults (a recoverable duplicate) rather than losing it. `&src == &dst` is allowed
-// (same-vault transfer). Plaintext lives only in the locked buffer (invariant #1).
-//   NotFound      - src image, src gallery, or dst gallery missing
+// Transfer one media (image or video) from `src` (gallery `src_gallery`, file `filename`)
+// into `dst`'s `dst_gallery`, keeping the filename. Reads the source plaintext into an
+// mlock'd SecureBytes, re-encrypts it into `dst` via add_image or add_video (which
+// regenerates the thumbnail/poster + metadata); for TransferMode::Move it then removes
+// the source. `dst` is committed before `src` is mutated, so a crash mid-Move leaves
+// the media in BOTH vaults (a recoverable duplicate) rather than losing it. `&src == &dst`
+// is allowed (same-vault transfer). Plaintext lives only in the locked buffer (invariant #1).
+//   NotFound      - src media, src gallery, or dst gallery missing
 //   AlreadyExists - dst_gallery already holds `filename`
-//   InvalidArg    - dst_gallery is not a leaf that can accept images
+//   InvalidArg    - dst_gallery is not a leaf that can accept media
 //   AuthFailed / IoError / Locked / CryptoError - propagated; source left intact if
 //                   the destination add fails.
 [[nodiscard]] VaultResult transfer_image(Vault& src, std::string_view src_gallery,
@@ -29,9 +29,9 @@ enum class TransferMode { Move, Copy };
                                          Vault& dst, std::string_view dst_gallery,
                                          TransferMode mode);
 
-// Slash-paths of every gallery in `v` that may legally accept images (holds no
-// sub-galleries), including "" (root) when root holds no sub-galleries. Used to
-// populate the transfer dialog's destination-gallery list. Empty while locked.
+// Slash-paths of every gallery in `v` that may legally accept media (images or videos)
+// — holds no sub-galleries, including "" (root) when root holds no sub-galleries. Used
+// to populate the transfer dialog's destination-gallery list. Empty while locked.
 [[nodiscard]] std::vector<std::string> image_target_galleries(const Vault& v);
 
 // Transfer a whole gallery subtree from `src` (the gallery at `src_gallery`) into
