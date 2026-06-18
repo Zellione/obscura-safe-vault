@@ -10,6 +10,7 @@
 
 extern "C" {
 #include <libavformat/avio.h>
+#include <libswscale/swscale.h>
 }
 
 // Forward declarations for opaque FFmpeg pointers
@@ -17,6 +18,7 @@ struct AVFormatContext;
 struct AVCodecContext;
 struct AVFrame;
 struct AVPacket;
+struct SwsContext;
 
 namespace media {
 
@@ -41,6 +43,10 @@ public:
     // Returned DecodedFrame's planes point into our owned frame (valid until next_frame/destruction).
     [[nodiscard]] std::optional<DecodedFrame> next_frame();
 
+    // Seek to a timestamp (in seconds). Uses keyframe-anchored seeking and decodes forward
+    // to land on the exact PTS. Returns false on failure.
+    [[nodiscard]] bool seek(double ts_seconds);
+
     // Accessors
     int width() const noexcept { return width_; }
     int height() const noexcept { return height_; }
@@ -48,17 +54,21 @@ public:
     vault::VideoCodec codec() const noexcept { return codec_; }
 
 private:
-    AVFormatContext* fmt_           = nullptr;
-    AVCodecContext*  codec_ctx_     = nullptr;
-    AVFrame*         frame_         = nullptr;
-    AVPacket*        pkt_           = nullptr;
-    int              stream_index_  = -1;
-    int              width_         = 0;
-    int              height_        = 0;
-    uint64_t         duration_us_   = 0;
-    vault::VideoCodec codec_        = vault::VideoCodec::Unknown;
-    double           time_base_     = 0.0;
-    bool             flushed_       = false;  // Track if we've sent the flush packet
+    AVFormatContext* fmt_                = nullptr;
+    AVCodecContext*  codec_ctx_          = nullptr;
+    AVFrame*         frame_              = nullptr;
+    AVPacket*        pkt_                = nullptr;
+    SwsContext*      sws_                = nullptr;  // swscale context for format conversion
+    AVFrame*         conv_               = nullptr;  // converted frame (for non-420p formats)
+    int              stream_index_       = -1;
+    int              width_              = 0;
+    int              height_             = 0;
+    uint64_t         duration_us_        = 0;
+    vault::VideoCodec codec_             = vault::VideoCodec::Unknown;
+    double           time_base_          = 0.0;
+    AVRational       stream_time_base_   = {0, 1};  // raw stream time base for seek
+    bool             flushed_            = false;   // Track if we've sent the flush packet
+    double           pending_seek_target_ = -1.0;   // Target PTS for seek decode-forward
 };
 
 } // namespace media

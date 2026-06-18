@@ -7,6 +7,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/avutil.h>
 #include <libavutil/imgutils.h>
+#include <libswscale/swscale.h>
 }
 
 #include <cstdio>
@@ -29,6 +30,12 @@ VideoDecoder::~VideoDecoder()
     if (pkt_) {
         av_packet_free(&pkt_);
     }
+    if (sws_) {
+        sws_freeContext(sws_);
+    }
+    if (conv_) {
+        av_frame_free(&conv_);
+    }
 }
 
 VideoDecoder::VideoDecoder(VideoDecoder&& other) noexcept
@@ -36,18 +43,24 @@ VideoDecoder::VideoDecoder(VideoDecoder&& other) noexcept
       codec_ctx_(other.codec_ctx_),
       frame_(other.frame_),
       pkt_(other.pkt_),
+      sws_(other.sws_),
+      conv_(other.conv_),
       stream_index_(other.stream_index_),
       width_(other.width_),
       height_(other.height_),
       duration_us_(other.duration_us_),
       codec_(other.codec_),
       time_base_(other.time_base_),
-      flushed_(other.flushed_)
+      stream_time_base_(other.stream_time_base_),
+      flushed_(other.flushed_),
+      pending_seek_target_(other.pending_seek_target_)
 {
     other.fmt_        = nullptr;
     other.codec_ctx_  = nullptr;
     other.frame_      = nullptr;
     other.pkt_        = nullptr;
+    other.sws_        = nullptr;
+    other.conv_       = nullptr;
 }
 
 VideoDecoder& VideoDecoder::operator=(VideoDecoder&& other) noexcept
@@ -66,24 +79,36 @@ VideoDecoder& VideoDecoder::operator=(VideoDecoder&& other) noexcept
         if (pkt_) {
             av_packet_free(&pkt_);
         }
+        if (sws_) {
+            sws_freeContext(sws_);
+        }
+        if (conv_) {
+            av_frame_free(&conv_);
+        }
 
         // Move from other
         fmt_        = other.fmt_;
         codec_ctx_  = other.codec_ctx_;
         frame_      = other.frame_;
         pkt_        = other.pkt_;
+        sws_        = other.sws_;
+        conv_       = other.conv_;
         stream_index_ = other.stream_index_;
         width_      = other.width_;
         height_     = other.height_;
         duration_us_ = other.duration_us_;
         codec_      = other.codec_;
         time_base_  = other.time_base_;
+        stream_time_base_ = other.stream_time_base_;
         flushed_    = other.flushed_;
+        pending_seek_target_ = other.pending_seek_target_;
 
         other.fmt_        = nullptr;
         other.codec_ctx_  = nullptr;
         other.frame_      = nullptr;
         other.pkt_        = nullptr;
+        other.sws_        = nullptr;
+        other.conv_       = nullptr;
     }
     return *this;
 }
@@ -199,6 +224,9 @@ bool VideoDecoder::open(AVIOContext* pb)
     // Cache time base for PTS calculation
     time_base_ = av_q2d(stream->time_base);
 
+    // Cache raw stream time base for seek calculations
+    stream_time_base_ = stream->time_base;
+
     // Cache duration in microseconds
     // Prefer fmt_->duration (in AV_TIME_BASE units = microseconds)
     if (fmt_->duration > 0 && fmt_->duration != AV_NOPTS_VALUE) {
@@ -233,6 +261,40 @@ bool VideoDecoder::open(AVIOContext* pb)
     return true;
 }
 
+bool VideoDecoder::seek(double ts_seconds)
+{
+    if (!fmt_ || stream_index_ < 0) {
+        std::fprintf(stderr, "[VideoDecoder] Cannot seek: not opened\n");
+        return false;
+    }
+
+    // Convert ts_seconds to stream time base units
+    // ts_seconds * (1 / time_base) = timestamp in stream units
+    int64_t ts = av_rescale_q(
+        static_cast<int64_t>(ts_seconds * AV_TIME_BASE),
+        AV_TIME_BASE_Q,
+        stream_time_base_
+    );
+
+    // Perform keyframe-anchored seek (backward to nearest keyframe)
+    int ret = av_seek_frame(fmt_, stream_index_, ts, AVSEEK_FLAG_BACKWARD);
+    if (ret < 0) {
+        std::fprintf(stderr, "[VideoDecoder] av_seek_frame failed: %d\n", ret);
+        return false;
+    }
+
+    // Flush the codec so it discards any buffered frames
+    avcodec_flush_buffers(codec_ctx_);
+
+    // Reset decode state
+    flushed_ = false;
+
+    // Set the pending seek target so next_frame() will decode forward until reaching it
+    pending_seek_target_ = ts_seconds;
+
+    return true;
+}
+
 std::optional<DecodedFrame> VideoDecoder::next_frame()
 {
     if (!codec_ctx_ || !frame_ || !pkt_) {
@@ -244,31 +306,121 @@ std::optional<DecodedFrame> VideoDecoder::next_frame()
         int ret = avcodec_receive_frame(codec_ctx_, frame_);
 
         if (ret == 0) {
-            // Got a frame; check if pixel format is supported
-            FramePixelFormat pix_fmt;
-            switch (frame_->format) {
-                case AV_PIX_FMT_YUV420P:
-                    pix_fmt = FramePixelFormat::I420;
-                    break;
-                case AV_PIX_FMT_NV12:
-                    pix_fmt = FramePixelFormat::NV12;
-                    break;
-                default:
-                    // Unsupported format in Task 1; Task 2 will add swscale conversion
-                    std::fprintf(stderr, "[VideoDecoder] Unsupported pixel format: %d\n",
-                                frame_->format);
-                    return std::nullopt;
-            }
-
-            // Calculate PTS
+            // Got a frame; check pixel format and convert if needed
             double pts_seconds = 0.0;
             if (frame_->best_effort_timestamp != AV_NOPTS_VALUE) {
                 pts_seconds = frame_->best_effort_timestamp * time_base_;
             }
 
+            // If we're seeking, skip frames until we reach the target
+            if (pending_seek_target_ >= 0.0 && pts_seconds < pending_seek_target_) {
+                // Keep decoding to reach the target
+                continue;
+            }
+
+            // Clear pending seek target once we've reached it
+            if (pending_seek_target_ >= 0.0) {
+                pending_seek_target_ = -1.0;
+            }
+
+            // Handle pixel format conversion
+            FramePixelFormat pix_fmt;
+            const uint8_t* out_planes[3];
+            int out_linesizes[3];
+
+            switch (frame_->format) {
+                case AV_PIX_FMT_YUV420P:
+                    // Direct pass-through: already I420
+                    pix_fmt = FramePixelFormat::I420;
+                    out_planes[0] = frame_->data[0];
+                    out_planes[1] = frame_->data[1];
+                    out_planes[2] = frame_->data[2];
+                    out_linesizes[0] = frame_->linesize[0];
+                    out_linesizes[1] = frame_->linesize[1];
+                    out_linesizes[2] = frame_->linesize[2];
+                    break;
+
+                case AV_PIX_FMT_NV12:
+                    // Direct pass-through: already NV12
+                    pix_fmt = FramePixelFormat::NV12;
+                    out_planes[0] = frame_->data[0];
+                    out_planes[1] = frame_->data[1];
+                    out_planes[2] = nullptr;
+                    out_linesizes[0] = frame_->linesize[0];
+                    out_linesizes[1] = frame_->linesize[1];
+                    out_linesizes[2] = 0;
+                    break;
+
+                default:
+                    // Unsupported format: use swscale to convert to YUV420P
+                    if (!sws_) {
+                        // Lazy initialization of swscale context
+                        sws_ = sws_getCachedContext(
+                            sws_,
+                            frame_->width,
+                            frame_->height,
+                            static_cast<AVPixelFormat>(frame_->format),
+                            frame_->width,
+                            frame_->height,
+                            AV_PIX_FMT_YUV420P,
+                            SWS_BILINEAR,
+                            nullptr,
+                            nullptr,
+                            nullptr
+                        );
+                        if (!sws_) {
+                            std::fprintf(stderr, "[VideoDecoder] Failed to create swscale context\n");
+                            return std::nullopt;
+                        }
+                    }
+
+                    // Ensure conv_ is allocated with proper dimensions
+                    if (!conv_) {
+                        conv_ = av_frame_alloc();
+                        if (!conv_) {
+                            std::fprintf(stderr, "[VideoDecoder] Failed to allocate conversion frame\n");
+                            return std::nullopt;
+                        }
+                    }
+
+                    // Set up the conversion frame for YUV420P
+                    conv_->format = AV_PIX_FMT_YUV420P;
+                    conv_->width = frame_->width;
+                    conv_->height = frame_->height;
+
+                    // Allocate or reallocate buffer if dimensions changed
+                    int buf_ret = av_frame_get_buffer(conv_, 0);
+                    if (buf_ret < 0) {
+                        std::fprintf(stderr, "[VideoDecoder] av_frame_get_buffer failed: %d\n", buf_ret);
+                        return std::nullopt;
+                    }
+
+                    // Perform the scale/convert
+                    ret = sws_scale(sws_,
+                                   frame_->data,
+                                   frame_->linesize,
+                                   0,
+                                   frame_->height,
+                                   conv_->data,
+                                   conv_->linesize);
+                    if (ret < 0) {
+                        std::fprintf(stderr, "[VideoDecoder] sws_scale failed: %d\n", ret);
+                        return std::nullopt;
+                    }
+
+                    pix_fmt = FramePixelFormat::I420;
+                    out_planes[0] = conv_->data[0];
+                    out_planes[1] = conv_->data[1];
+                    out_planes[2] = conv_->data[2];
+                    out_linesizes[0] = conv_->linesize[0];
+                    out_linesizes[1] = conv_->linesize[1];
+                    out_linesizes[2] = conv_->linesize[2];
+                    break;
+            }
+
             return DecodedFrame{
-                .planes    = {frame_->data[0], frame_->data[1], frame_->data[2]},
-                .linesizes = {frame_->linesize[0], frame_->linesize[1], frame_->linesize[2]},
+                .planes    = {out_planes[0], out_planes[1], out_planes[2]},
+                .linesizes = {out_linesizes[0], out_linesizes[1], out_linesizes[2]},
                 .width     = frame_->width,
                 .height    = frame_->height,
                 .pix_fmt   = pix_fmt,
@@ -289,8 +441,7 @@ std::optional<DecodedFrame> VideoDecoder::next_frame()
                 avcodec_send_packet(codec_ctx_, nullptr);  // nullptr = flush
                 continue;
             } else if (ret < 0) {
-                // Read error
-                std::fprintf(stderr, "[VideoDecoder] av_read_frame failed: %d\n", ret);
+                // Read error — terminate gracefully
                 return std::nullopt;
             }
 
@@ -298,7 +449,7 @@ std::optional<DecodedFrame> VideoDecoder::next_frame()
             if (pkt_->stream_index == stream_index_) {
                 ret = avcodec_send_packet(codec_ctx_, pkt_);
                 if (ret < 0) {
-                    std::fprintf(stderr, "[VideoDecoder] avcodec_send_packet failed: %d\n", ret);
+                    // Decode error — terminate gracefully
                     av_packet_unref(pkt_);
                     return std::nullopt;
                 }
@@ -310,8 +461,7 @@ std::optional<DecodedFrame> VideoDecoder::next_frame()
             // No more frames
             return std::nullopt;
         } else {
-            // Some other error
-            std::fprintf(stderr, "[VideoDecoder] avcodec_receive_frame failed: %d\n", ret);
+            // Some other error — terminate gracefully
             return std::nullopt;
         }
     }

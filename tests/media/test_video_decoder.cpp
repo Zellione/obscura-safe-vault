@@ -114,4 +114,102 @@ TEST(video_decoder_open_rejects_garbage)
     CHECK(dec.open(avio.ctx()) == false);
 }
 
+TEST(video_decoder_seek_lands_on_timestamp)
+{
+    auto v_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!v_bytes.empty());
+
+    TempVault tv("decoder_seek");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", v_bytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+    auto kids = v.list("c");
+    REQUIRE(kids.size() == 1);
+
+    media::ChunkAvio avio(media::VideoSource::open(v, *kids[0]));
+    REQUIRE(avio.valid());
+    media::VideoDecoder dec;
+    REQUIRE(dec.open(avio.ctx()));
+
+    // Seek to 0.5 seconds
+    REQUIRE(dec.seek(0.5));
+    auto f = dec.next_frame();
+    REQUIRE(f.has_value());
+    // Frame should land on or after 0.5s, but within ~2 frames (0.2s at 10fps)
+    CHECK(f->pts_seconds >= 0.5);
+    CHECK(f->pts_seconds < 0.7);
+
+    // Seek back to the beginning
+    REQUIRE(dec.seek(0.0));
+    auto f0 = dec.next_frame();
+    REQUIRE(f0.has_value());
+    CHECK(f0->pts_seconds < 0.15);
+}
+
+TEST(video_decoder_swscale_converts_yuv444)
+{
+    auto v_bytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny444.mp4");
+    REQUIRE(!v_bytes.empty());
+
+    TempVault tv("decoder_swscale");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", v_bytes, "tiny444.mp4", 4096) == vault::VaultResult::Ok);
+    auto kids = v.list("c");
+    REQUIRE(kids.size() == 1);
+
+    media::ChunkAvio avio(media::VideoSource::open(v, *kids[0]));
+    REQUIRE(avio.valid());
+    media::VideoDecoder dec;
+    REQUIRE(dec.open(avio.ctx()));
+    CHECK(dec.width() == 160);
+    CHECK(dec.height() == 120);
+
+    int frame_count = 0;
+    while (auto f = dec.next_frame()) {
+        // Should be converted to I420 by swscale fallback
+        CHECK(f->pix_fmt == media::FramePixelFormat::I420);
+        CHECK(f->width == 160);
+        CHECK(f->height == 120);
+        CHECK(f->planes[0] != nullptr);
+        CHECK(f->planes[1] != nullptr);
+        CHECK(f->planes[2] != nullptr);
+        ++frame_count;
+    }
+    CHECK(frame_count > 0);
+}
+
+TEST(video_decoder_handles_truncated_without_crash)
+{
+    auto v_bytes = read_file(OSV_MEDIA_FIXTURE_DIR "/truncated.mp4");
+    REQUIRE(!v_bytes.empty());
+
+    TempVault tv("decoder_truncated");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", v_bytes, "truncated.mp4", 4096) == vault::VaultResult::Ok);
+    auto kids = v.list("c");
+    REQUIRE(kids.size() == 1);
+
+    media::ChunkAvio avio(media::VideoSource::open(v, *kids[0]));
+    REQUIRE(avio.valid());
+    media::VideoDecoder dec;
+    // open() may succeed if the header is valid
+    if (!dec.open(avio.ctx())) {
+        // If open fails, that's okay — the stream was too truncated
+        return;
+    }
+
+    // Drain next_frame() to exhaustion — should terminate gracefully, no infinite loop
+    int frame_count = 0;
+    while (auto f = dec.next_frame()) {
+        ++frame_count;
+    }
+    // Should have decoded some frames or zero, but not crashed/looped infinitely
+    CHECK(frame_count >= 0);
+}
+
 #endif // OSV_VENDORED_AV
