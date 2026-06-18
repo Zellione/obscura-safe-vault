@@ -103,6 +103,27 @@ local function link_image_codecs()
     end
 end
 
+-- ---------------------------------------------------------------------------
+-- FFmpeg/libav (decode-only static; Phase 15). Same staging prefix as the image
+-- codecs. Linked only when present so non-FFmpeg builds (e.g. Windows until its
+-- FFmpeg leg lands) stay green; OSV_VENDORED_AV gates the dependent code/tests.
+-- Static-link order: dependents before dependencies (format → codec → swscale → util).
+-- ---------------------------------------------------------------------------
+local function link_av()
+    local prefix = path.join(os.getcwd(), "vendor/codecs-prefix")
+    if os.isfile(path.join(prefix, "lib/libavcodec.a")) then
+        includedirs { path.join(prefix, "include") }
+        libdirs     { path.join(prefix, "lib") }
+        defines     { "OSV_VENDORED_AV" }
+        links       { "avformat", "avcodec", "swscale", "avutil" }
+        -- libavutil needs libm/pthread/dl on Linux; bz2/lzma may be referenced
+        -- by demuxers. link_platform_extras() already covers pthread/dl/m.
+        filter "system:linux"
+            links { "z" }
+        filter {}
+    end
+end
+
 workspace "ObscuraSafeVault"
     configurations { "Debug", "Release" }
     platforms      { "x64" }
@@ -206,6 +227,7 @@ project "osv"
     link_sdl3()
     link_platform_extras()
     link_image_codecs()
+    link_av()
 
     -- GUI app on Windows (no console window) for Release; keep the console in
     -- Debug so stderr logging is visible.
@@ -271,3 +293,4 @@ project "osv_tests"
     link_sdl3()
     link_platform_extras()
     link_image_codecs()
+    link_av()

@@ -54,12 +54,24 @@ jobs:
       # -----------------------------------------------------------------------
       # System packages
       # -----------------------------------------------------------------------
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /tmp/apt-cache
+          key: apt-matrix-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-matrix-
+
       - name: Install build dependencies
         run: |
           # CI's apt mirror occasionally hangs the connection indefinitely; bound
           # each fetch (30s) and retry so a stuck mirror fails fast instead of
           # hanging the whole job. Backed by the job-level timeout-minutes too.
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+          # Cache the downloaded .debs in /tmp/apt-cache (Dir::Cache::archives +
+          # Keep-Downloaded-Packages) so repeat runs skip the slow apt download.
+          # 1777 lets apt's _apt sandbox user write into the restored cache dir.
+          sudo mkdir -p /tmp/apt-cache/partial
+          sudo chmod -R 1777 /tmp/apt-cache
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDir::Cache::archives "/tmp/apt-cache";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' \
             | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
@@ -81,6 +93,10 @@ jobs:
             wayland-protocols \
             libasound2-dev \
             libpulse-dev
+          # apt re-creates partial/ and lock owned by the _apt user (mode 700/640)
+          # during install; make the cache dir readable so the (non-root) runner
+          # can tar it in the post-save step (otherwise the save fails silently).
+          sudo chmod -R a+rX /tmp/apt-cache
 
       # -----------------------------------------------------------------------
       # premake5 binary
@@ -148,7 +164,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v2-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          key: codecs-v3-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
@@ -200,7 +216,13 @@ jobs:
   # ===========================================================================
   windows:
     name: MSVC / ${{ matrix.config }} / Windows
-    runs-on: windows-latest
+    # Pinned to windows-2022 (VS 2022 — the toolchain this project targets, see
+    # CLAUDE.md). The newer windows-latest image (VS 18 / MSVC 14.51) miscompiles
+    # a freshly-built vendored lib (SDL3/codecs) in Release, crashing osv_tests;
+    # main only masks it via a stale build cache. Phase 15 (PR1) surfaced it by
+    # busting the cache (adding vendor/ffmpeg changed .gitmodules, which is in the
+    # SDL3 + codec cache keys). Revisit when the newer image's MSVC is fixed.
+    runs-on: windows-2022
 
     strategy:
       fail-fast: false
@@ -243,7 +265,11 @@ jobs:
         id: cache-sdl3
         with:
           path: vendor/SDL3/build
-          key: sdl3-windows-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          # Cache key includes the toolchain tag (win2022) so a runner-image /
+          # MSVC change rebuilds the static libs with the matching compiler.
+          # Without it, libs built by one MSVC get linked into an app built by
+          # another → ABI mismatch / static-init crash (Phase 15 PR1).
+          key: sdl3-win2022-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
 
       - name: Build vendored SDL3
         if: steps.cache-sdl3.outputs.cache-hit != 'true'
@@ -261,7 +287,8 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v2-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          # win2022 toolchain tag — see the SDL3 cache key note above.
+          key: codecs-v3-${{ runner.os }}-win2022-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
@@ -361,7 +388,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v2-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          key: codecs-v3-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
@@ -413,12 +440,24 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /tmp/apt-cache
+          key: apt-asan-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-asan-
+
       - name: Install build dependencies
         run: |
           # CI's apt mirror occasionally hangs the connection indefinitely; bound
           # each fetch (30s) and retry so a stuck mirror fails fast instead of
           # hanging the whole job. Backed by the job-level timeout-minutes too.
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+          # Cache the downloaded .debs in /tmp/apt-cache (Dir::Cache::archives +
+          # Keep-Downloaded-Packages) so repeat runs skip the slow apt download.
+          # 1777 lets apt's _apt sandbox user write into the restored cache dir.
+          sudo mkdir -p /tmp/apt-cache/partial
+          sudo chmod -R 1777 /tmp/apt-cache
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDir::Cache::archives "/tmp/apt-cache";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' \
             | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
@@ -438,6 +477,10 @@ jobs:
             wayland-protocols \
             libasound2-dev \
             libpulse-dev
+          # apt re-creates partial/ and lock owned by the _apt user (mode 700/640)
+          # during install; make the cache dir readable so the (non-root) runner
+          # can tar it in the post-save step (otherwise the save fails silently).
+          sudo chmod -R a+rX /tmp/apt-cache
 
       - name: Use gcc-14 as default gcc
         run: |
@@ -493,7 +536,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v2-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          key: codecs-v3-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
@@ -547,13 +590,26 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Cache apt packages
+        if: env.SONAR_TOKEN != ''
+        uses: actions/cache@v4
+        with:
+          path: /tmp/apt-cache
+          key: apt-sonar-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-sonar-
+
       - name: Install build dependencies
         if: env.SONAR_TOKEN != ''
         run: |
           # CI's apt mirror occasionally hangs the connection indefinitely; bound
           # each fetch (30s) and retry so a stuck mirror fails fast instead of
           # hanging the whole job. Backed by the job-level timeout-minutes too.
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+          # Cache the downloaded .debs in /tmp/apt-cache (Dir::Cache::archives +
+          # Keep-Downloaded-Packages) so repeat runs skip the slow apt download.
+          # 1777 lets apt's _apt sandbox user write into the restored cache dir.
+          sudo mkdir -p /tmp/apt-cache/partial
+          sudo chmod -R 1777 /tmp/apt-cache
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDir::Cache::archives "/tmp/apt-cache";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' \
             | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
@@ -575,6 +631,10 @@ jobs:
             wayland-protocols \
             libasound2-dev \
             libpulse-dev
+          # apt re-creates partial/ and lock owned by the _apt user (mode 700/640)
+          # during install; make the cache dir readable so the (non-root) runner
+          # can tar it in the post-save step (otherwise the save fails silently).
+          sudo chmod -R a+rX /tmp/apt-cache
 
       - name: Cache premake5 binary
         if: env.SONAR_TOKEN != ''
@@ -641,7 +701,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v2-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          key: codecs-v3-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: env.SONAR_TOKEN != '' && steps.cache-codecs.outputs.cache-hit != 'true'

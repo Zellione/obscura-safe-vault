@@ -64,4 +64,33 @@ build_codec heif "$REPO_ROOT/vendor/libheif"                           \
     -DCMAKE_C_FLAGS=-DLIBDE265_STATIC_BUILD                            \
     -DCMAKE_CXX_FLAGS=-DLIBDE265_STATIC_BUILD
 
+# FFmpeg — decode-only static (video only this phase; audio enabled in Phase 16).
+# configure-built (not cmake), so it gets its own function. Idempotent: skip if
+# libavcodec is already installed. Needs nasm (already required by libaom).
+build_ffmpeg() {
+    if [[ -f "$CODEC_PREFIX/lib/libavcodec.a" ]]; then
+        echo "==> ffmpeg already installed — skipping."
+        return
+    fi
+    echo "==> Building vendored ffmpeg (decode-only, static)..."
+    local src="$REPO_ROOT/vendor/ffmpeg"
+    ( cd "$src" && ./configure \
+        --prefix="$CODEC_PREFIX"                                            \
+        --enable-static --disable-shared                                    \
+        --disable-everything --disable-programs --disable-doc               \
+        --disable-network --disable-encoders --disable-muxers               \
+        --disable-protocols --disable-devices --disable-filters             \
+        --disable-bsfs --disable-autodetect                                 \
+        --enable-decoder=h264,hevc                                          \
+        --enable-demuxer=mov,matroska,webm                                  \
+        --enable-parser=h264,hevc                                           \
+        --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb                      \
+        --enable-swscale                                                    \
+        --enable-pic )
+    make -C "$src" -j"$NPROC"
+    make -C "$src" install
+}
+
+build_ffmpeg
+
 echo "==> Codecs installed into vendor/codecs-prefix"
