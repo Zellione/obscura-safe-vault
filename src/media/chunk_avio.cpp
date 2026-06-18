@@ -45,7 +45,7 @@ int ChunkAvio::read_cb(void* opaque, uint8_t* buf, int buf_size)
 int64_t ChunkAvio::seek_cb(void* opaque, int64_t offset, int whence)
 {
     auto* self = static_cast<ChunkAvio*>(opaque);
-    const int64_t size = static_cast<int64_t>(self->source_.size());
+    const auto size = static_cast<int64_t>(self->source_.size());
 
     // Handle AVSEEK_SIZE first (special query, not a real seek).
     if ((whence & AVSEEK_SIZE) == AVSEEK_SIZE) {

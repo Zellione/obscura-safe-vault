@@ -38,6 +38,10 @@ private:
     VideoSource(std::FILE* fp, std::span<const uint8_t, crypto::KEY_SIZE> key,
                 const vault::VideoMeta& meta);
 
+    // Copy up to one chunk's worth covering `offset` into `dst`: bytes copied,
+    // 0 on a corrupt mapping, -1 on an auth/decrypt failure.
+    [[nodiscard]] int64_t fill_one(uint64_t offset, std::span<uint8_t> dst) noexcept;
+
     vault::ChunkStore              store_;
     std::vector<vault::VideoChunk> chunks_;
     uint32_t                       chunk_size_ = 0;
