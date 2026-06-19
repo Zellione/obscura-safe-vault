@@ -293,12 +293,16 @@ bool VideoDecoder::read_and_route()
         AVPacket* cloned = av_packet_clone(pkt_);
         if (cloned) {
             vq_.push_back(cloned);
+        } else {
+            std::println(stderr, "[VideoDecoder] packet clone failed (out of memory); dropping packet");
         }
     } else if (audio_index_ >= 0 && pkt_->stream_index == audio_index_) {
         // Audio packet: clone and queue
         AVPacket* cloned = av_packet_clone(pkt_);
         if (cloned) {
             aq_.push_back(cloned);
+        } else {
+            std::println(stderr, "[VideoDecoder] packet clone failed (out of memory); dropping packet");
         }
     }
     // Else: ignore packets from other streams
