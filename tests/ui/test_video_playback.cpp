@@ -189,6 +189,67 @@ TEST(video_playback_opens_audio_device_for_clip_with_sound)
     CHECK(SDL_WasInit(SDL_INIT_AUDIO) != 0);
 }
 
+TEST(video_playback_volume_bar_is_mouse_draggable_and_speaker_mutes)
+{
+    // The volume control must be usable with the mouse (drag the bar; click the
+    // speaker to mute) — keyboard-only [/]/M was undiscoverable. Dummy driver so
+    // the device opens headlessly.
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+
+    auto vbytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_av.mp4");
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("vol");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny_av.mp4", 4096) == vault::VaultResult::Ok);
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        ui::VideoPlayback vp(v, *node);
+        REQUIRE(vp.valid());
+        REQUIRE(vp.audio_active());          // device open (else there is no volume bar)
+
+        const SDL_FRect area{0, 0, 320, 240};
+        vp.render(r, font, area);            // computes the volume-bar geometry
+
+        const SDL_FRect bar = vp.debug_vol_bar();
+        REQUIRE(bar.w > 0.0f);               // a real, hittable bar exists
+        const float my = bar.y + bar.h * 0.5f;
+
+        // Drag to the far left -> ~0 gain; far right -> ~1.0; middle -> ~0.5.
+        vp.handle_mouse_down(bar.x, my);
+        CHECK(vp.audio_gain() < 0.1f);
+        vp.handle_mouse_down(bar.x + bar.w, my);
+        CHECK(vp.audio_gain() > 0.9f);
+        vp.handle_mouse_motion(bar.x + bar.w * 0.5f, my, true);   // drag to middle
+        CHECK(vp.audio_gain() > 0.4f);
+        CHECK(vp.audio_gain() < 0.6f);
+        vp.handle_mouse_up();
+
+        // Clicking the speaker icon toggles mute (gain drops to 0, then restores).
+        const float gain_before_mute = vp.audio_gain();
+        CHECK(gain_before_mute > 0.0f);
+        vp.handle_key(SDLK_M);
+        CHECK_EQ(vp.audio_gain(), 0.0f);
+        vp.handle_key(SDLK_M);
+        CHECK(vp.audio_gain() > 0.0f);
+    }
+
+    SDL_DestroyRenderer(sr);
+    SDL_DestroySurface(surf);
+}
+
 TEST(video_playback_opens_plays_seeks_and_writes_no_disk)
 {
     auto vbytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");

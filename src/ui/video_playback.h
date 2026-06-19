@@ -53,6 +53,12 @@ public:
     // "audio is flowing" signal under synthetic playback. (Phase 16, testing/debug.)
     [[nodiscard]] uint64_t audio_samples_fed() const noexcept;
 
+    // Effective output gain in [0,1] (0 when muted). (Phase 16, testing/debug.)
+    [[nodiscard]] float audio_gain() const noexcept;
+
+    // Last-rendered volume-bar rect (zero-size when no audio). (Phase 16, testing/debug.)
+    [[nodiscard]] SDL_FRect debug_vol_bar() const noexcept;
+
     void update(double dt);   // advance the clock (decode happens lazily in render)
     void render(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& area);
 

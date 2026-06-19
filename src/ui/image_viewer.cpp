@@ -521,7 +521,7 @@ void ImageViewer::render_hud(gfx::Renderer& r, const SDL_FRect& vp)
 
     const char* legend;
     if (item_is_video(album_.images, index_))
-        legend = "[Space] Play/Pause   [J/L] -/+5s   [,/.] Frame   [<-/->] Prev/Next   [T] Strip   [B] Fav   [Esc] Back";
+        legend = "[Space] Play/Pause   [J/L] -/+5s   [,/.] Frame   [ / ] Vol   [M] Mute   [<-/->] Prev/Next   [B] Fav   [Esc] Back";
     else if (mode_ == FillScroll)
         legend = "[Wheel] Scroll   [<-/->] Prev/Next   [F] Fit   [T] Strip   [P] Slideshow   [B] Fav   [G] Tags   [X] Export   [Esc] Back";
     else
