@@ -212,4 +212,143 @@ TEST(video_decoder_handles_truncated_without_crash)
     CHECK(frame_count >= 0);
 }
 
+TEST(video_decoder_seek_to_zero)
+{
+    auto v_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!v_bytes.empty());
+
+    TempVault tv("decoder_seek_zero");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", v_bytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+    auto kids = v.list("c");
+    REQUIRE(kids.size() == 1);
+
+    media::ChunkAvio avio(media::VideoSource::open(v, *kids[0]));
+    REQUIRE(avio.valid());
+    media::VideoDecoder dec;
+    REQUIRE(dec.open(avio.ctx()));
+
+    // Seek to 0.0 and confirm we land at the start
+    REQUIRE(dec.seek(0.0));
+    auto f = dec.next_frame();
+    REQUIRE(f.has_value());
+    CHECK(f->pts_seconds < 0.1);  // Should be close to 0
+}
+
+TEST(video_decoder_seek_past_eof)
+{
+    auto v_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!v_bytes.empty());
+
+    TempVault tv("decoder_seek_eof");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", v_bytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+    auto kids = v.list("c");
+    REQUIRE(kids.size() == 1);
+
+    media::ChunkAvio avio(media::VideoSource::open(v, *kids[0]));
+    REQUIRE(avio.valid());
+    media::VideoDecoder dec;
+    REQUIRE(dec.open(avio.ctx()));
+
+    // Seek past the end (e.g., 999 seconds)
+    REQUIRE(dec.seek(999.0));
+    // next_frame() should return nullopt (no frames to decode)
+    auto f = dec.next_frame();
+    CHECK(!f.has_value());
+}
+
+TEST(video_decoder_decode_poster_rgb)
+{
+    auto v_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!v_bytes.empty());
+
+    TempVault tv("decoder_poster");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", v_bytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+    auto kids = v.list("c");
+    REQUIRE(kids.size() == 1);
+
+    media::ChunkAvio avio(media::VideoSource::open(v, *kids[0]));
+    REQUIRE(avio.valid());
+    media::VideoDecoder dec;
+    REQUIRE(dec.open(avio.ctx()));
+
+    // Decode poster as RGB
+    auto img = dec.decode_poster_rgb();
+    REQUIRE(img.has_value());
+    CHECK(img->width == 160);
+    CHECK(img->height == 120);
+    CHECK(img->pixels.size() == 160 * 120 * 3);  // RGB24 = 3 bytes per pixel
+}
+
+TEST(video_decoder_matroska_probe)
+{
+    auto v_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mkv");
+    REQUIRE(!v_bytes.empty());
+
+    TempVault tv("decoder_mkv");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", v_bytes, "tiny.mkv", 4096) == vault::VaultResult::Ok);
+    auto kids = v.list("c");
+    REQUIRE(kids.size() == 1);
+
+    media::ChunkAvio avio(media::VideoSource::open(v, *kids[0]));
+    REQUIRE(avio.valid());
+    media::VideoDecoder dec;
+    REQUIRE(dec.open(avio.ctx()));
+    CHECK(dec.width() == 160);
+    CHECK(dec.height() == 120);
+    CHECK(dec.codec() == vault::VideoCodec::H264);
+}
+
+TEST(video_decoder_multiple_seeks)
+{
+    // Test multiple seeks in sequence to cover seek edge cases
+    auto v_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!v_bytes.empty());
+
+    TempVault tv("decoder_multi_seek");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", v_bytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+    auto kids = v.list("c");
+    REQUIRE(kids.size() == 1);
+
+    media::ChunkAvio avio(media::VideoSource::open(v, *kids[0]));
+    REQUIRE(avio.valid());
+    media::VideoDecoder dec;
+    REQUIRE(dec.open(avio.ctx()));
+
+    // Seek to 0.2s
+    REQUIRE(dec.seek(0.2));
+    auto f1 = dec.next_frame();
+    REQUIRE(f1.has_value());
+    double pts1 = f1->pts_seconds;
+
+    // Seek to 0.4s
+    REQUIRE(dec.seek(0.4));
+    auto f2 = dec.next_frame();
+    REQUIRE(f2.has_value());
+    double pts2 = f2->pts_seconds;
+
+    // pts2 should be greater than pts1
+    CHECK(pts2 >= pts1);
+
+    // Seek back to 0.1s
+    REQUIRE(dec.seek(0.1));
+    auto f3 = dec.next_frame();
+    REQUIRE(f3.has_value());
+    CHECK(f3->pts_seconds < pts1);
+}
+
 #endif // OSV_VENDORED_AV
