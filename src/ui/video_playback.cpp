@@ -361,6 +361,8 @@ struct VideoPlayback::Impl {
 
     [[nodiscard]] bool valid() const { return valid_; }
     [[nodiscard]] bool animating() const { return valid_ && model_.playing(); }
+    [[nodiscard]] bool has_audio() const { return decoder_.has_audio(); }
+    [[nodiscard]] double position() const { return clock(); }
     void update(double dt)
     {
         if (valid_) {
@@ -376,6 +378,8 @@ struct VideoPlayback::Impl {
     Impl(const vault::Vault&, const vault::IndexNode&) {}
     [[nodiscard]] bool valid() const { return false; }
     [[nodiscard]] bool animating() const { return false; }
+    [[nodiscard]] bool has_audio() const { return false; }
+    [[nodiscard]] double position() const { return 0.0; }
     void update(double) {}
     void render(gfx::Renderer&, gfx::FontAtlas&, const SDL_FRect&) {}
     void key(SDL_Keycode) {}
@@ -393,6 +397,8 @@ VideoPlayback::~VideoPlayback() = default;
 
 bool VideoPlayback::valid() const noexcept { return impl_->valid(); }
 bool VideoPlayback::animating() const noexcept { return impl_->animating(); }
+bool VideoPlayback::has_audio() const noexcept { return impl_->has_audio(); }
+double VideoPlayback::position() const noexcept { return impl_->position(); }
 void VideoPlayback::update(double dt) { impl_->update(dt); }
 
 void VideoPlayback::render(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& area)

@@ -37,6 +37,12 @@ public:
     // ticking. False when paused / at end / invalid.
     [[nodiscard]] bool animating() const noexcept;
 
+    // True if the video stream contains an audio track (Phase 16).
+    [[nodiscard]] bool has_audio() const noexcept;
+
+    // Current playback position in seconds (Phase 16, for testing/debug).
+    [[nodiscard]] double position() const noexcept;
+
     void update(double dt);   // advance the clock (decode happens lazily in render)
     void render(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& area);
 
