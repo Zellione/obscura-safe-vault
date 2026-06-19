@@ -115,7 +115,7 @@ local function link_av()
         includedirs { path.join(prefix, "include") }
         libdirs     { path.join(prefix, "lib") }
         defines     { "OSV_VENDORED_AV" }
-        links       { "avformat", "avcodec", "swscale", "avutil" }
+        links       { "avformat", "avcodec", "swscale", "swresample", "avutil" }
         -- libavutil needs libm/pthread/dl on Linux; bz2/lzma may be referenced
         -- by demuxers. link_platform_extras() already covers pthread/dl/m.
         filter "system:linux"
