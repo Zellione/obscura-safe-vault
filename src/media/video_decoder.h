@@ -85,6 +85,12 @@ private:
     // Helper: build a DecodedFrame from the just-received frame_ (swscale if needed).
     std::optional<DecodedFrame> build_from_current_frame(double pts_seconds);
 
+    // Helper: drain one video packet from vq_, send to decoder, return false on send error.
+    [[nodiscard]] bool drain_video_queue();
+
+    // Helper: decode one audio packet from aq_, accumulate frames to audio_out_.
+    void decode_audio_packet();
+
     // Free all owned FFmpeg resources (destructor + open() error paths).
     void reset();
     // Log msg, reset(), and return false — used at every open() failure site.

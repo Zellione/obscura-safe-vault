@@ -78,11 +78,11 @@ struct VideoPlayback::Impl {
 
         // Open audio device if available
         if (decoder_.has_audio()) {
-            SDL_AudioSpec src{};
-            src.format   = SDL_AUDIO_F32;
-            src.channels = decoder_.audio_info().channels;
-            src.freq     = decoder_.audio_info().sample_rate;
-            audio_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &src,
+            SDL_AudioSpec audio_spec{};
+            audio_spec.format   = SDL_AUDIO_F32;
+            audio_spec.channels = decoder_.audio_info().channels;
+            audio_spec.freq     = decoder_.audio_info().sample_rate;
+            audio_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &audio_spec,
                                                nullptr, nullptr);
             if (!audio_) {
                 std::println(stderr, "[VideoPlayback] audio open failed: {}", SDL_GetError());

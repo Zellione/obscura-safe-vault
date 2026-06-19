@@ -2,12 +2,14 @@
 
 namespace media {
 
+using enum FrameAction;
+
 FrameAction decide(double audio_clock, double frame_pts,
                    double ahead, double behind) noexcept
 {
-    if (frame_pts > audio_clock + ahead)  return FrameAction::Hold;
-    if (frame_pts < audio_clock - behind) return FrameAction::Drop;
-    return FrameAction::Present;
+    if (frame_pts > audio_clock + ahead)  return Hold;
+    if (frame_pts < audio_clock - behind) return Drop;
+    return Present;
 }
 
 double audio_clock(double base_seconds, uint64_t samples_consumed,

@@ -25,7 +25,7 @@ public:
 
     [[nodiscard]] bool open(const AVStream* stream);
     // Send `pkt` (nullptr to flush/drain) and append any produced frames.
-    void decode(AVPacket* pkt, std::vector<AudioFrame>& out);
+    void decode(const AVPacket* pkt, std::vector<AudioFrame>& out);
     // Flush decoder state (on seek)
     void flush();
 

@@ -1,6 +1,7 @@
 #ifdef OSV_VENDORED_AV
 
 #include "media/audio_decoder.h"
+#include "media/audio_interleave.h"
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -9,7 +10,6 @@ extern "C" {
 #include <libavutil/samplefmt.h>
 }
 
-#include <cstring>
 #include <print>
 
 namespace media {
@@ -83,7 +83,7 @@ bool AudioDecoder::open(const AVStream* stream)
     return true;
 }
 
-void AudioDecoder::decode(AVPacket* pkt, std::vector<AudioFrame>& out)
+void AudioDecoder::decode(const AVPacket* pkt, std::vector<AudioFrame>& out)
 {
     if (!ctx_ || !frame_) {
         return;
@@ -97,7 +97,7 @@ void AudioDecoder::decode(AVPacket* pkt, std::vector<AudioFrame>& out)
 
     // Receive all available frames
     while (true) {
-        int ret = avcodec_receive_frame(ctx_, frame_);
+        const int ret = avcodec_receive_frame(ctx_, frame_);
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
             // No more frames available
             break;
@@ -108,8 +108,8 @@ void AudioDecoder::decode(AVPacket* pkt, std::vector<AudioFrame>& out)
         }
 
         // Build AudioFrame from the decoded frame
-        int n = frame_->nb_samples;
-        int ch = channels_;
+        const int n = frame_->nb_samples;
+        const int ch = channels_;
 
         AudioFrame af;
         af.channels = ch;
@@ -117,96 +117,17 @@ void AudioDecoder::decode(AVPacket* pkt, std::vector<AudioFrame>& out)
 
         // Calculate PTS in seconds
         if (frame_->pts != AV_NOPTS_VALUE) {
-            af.pts_seconds = frame_->pts * av_q2d(time_base_);
+            af.pts_seconds = static_cast<double>(frame_->pts) * av_q2d(time_base_);
         } else {
             af.pts_seconds = 0.0;
         }
 
-        // Interleave samples to F32
-        af.samples.resize(n * ch);
-
-        // Handle different sample formats
-        AVSampleFormat fmt = static_cast<AVSampleFormat>(frame_->format);
-
-        switch (fmt) {
-            case AV_SAMPLE_FMT_FLTP: {
-                // Planar float32
-                for (int s = 0; s < n; ++s) {
-                    for (int c = 0; c < ch; ++c) {
-                        af.samples[s * ch + c] =
-                            reinterpret_cast<const float*>(frame_->data[c])[s];
-                    }
-                }
-                break;
-            }
-            case AV_SAMPLE_FMT_FLT: {
-                // Packed float32 - already interleaved
-                const float* src = reinterpret_cast<const float*>(frame_->data[0]);
-                std::memcpy(af.samples.data(), src, n * ch * sizeof(float));
-                break;
-            }
-            case AV_SAMPLE_FMT_S16P: {
-                // Planar int16 - convert to float
-                for (int s = 0; s < n; ++s) {
-                    for (int c = 0; c < ch; ++c) {
-                        int16_t sample =
-                            reinterpret_cast<const int16_t*>(frame_->data[c])[s];
-                        af.samples[s * ch + c] = sample / 32768.0f;
-                    }
-                }
-                break;
-            }
-            case AV_SAMPLE_FMT_S16: {
-                // Packed int16
-                const int16_t* src = reinterpret_cast<const int16_t*>(frame_->data[0]);
-                for (int i = 0; i < n * ch; ++i) {
-                    af.samples[i] = src[i] / 32768.0f;
-                }
-                break;
-            }
-            case AV_SAMPLE_FMT_S32P: {
-                // Planar int32
-                for (int s = 0; s < n; ++s) {
-                    for (int c = 0; c < ch; ++c) {
-                        int32_t sample =
-                            reinterpret_cast<const int32_t*>(frame_->data[c])[s];
-                        af.samples[s * ch + c] = sample / 2147483648.0f;
-                    }
-                }
-                break;
-            }
-            case AV_SAMPLE_FMT_S32: {
-                // Packed int32
-                const int32_t* src = reinterpret_cast<const int32_t*>(frame_->data[0]);
-                for (int i = 0; i < n * ch; ++i) {
-                    af.samples[i] = src[i] / 2147483648.0f;
-                }
-                break;
-            }
-            case AV_SAMPLE_FMT_U8P: {
-                // Planar uint8
-                for (int s = 0; s < n; ++s) {
-                    for (int c = 0; c < ch; ++c) {
-                        uint8_t sample =
-                            static_cast<const uint8_t*>(frame_->data[c])[s];
-                        af.samples[s * ch + c] = (sample - 128) / 128.0f;
-                    }
-                }
-                break;
-            }
-            case AV_SAMPLE_FMT_U8: {
-                // Packed uint8
-                const uint8_t* src = reinterpret_cast<const uint8_t*>(frame_->data[0]);
-                for (int i = 0; i < n * ch; ++i) {
-                    af.samples[i] = (src[i] - 128) / 128.0f;
-                }
-                break;
-            }
-            default: {
-                std::println(stderr, "[AudioDecoder] Unsupported sample format: {}",
-                            static_cast<int>(fmt));
-                break;
-            }
+        // Use pure interleave function to convert all sample formats to F32
+        const auto fmt = static_cast<int>(frame_->format);
+        if (!interleave_to_f32(frame_->data, frame_->ch_layout.nb_channels, n, ch, fmt,
+                               af.samples)) {
+            std::println(stderr, "[AudioDecoder] Unsupported sample format: {}", fmt);
+            continue;
         }
 
         out.push_back(std::move(af));
