@@ -3,6 +3,7 @@
 // Decoded video frame representation: libav-free for cross-compilation.
 // Planes point into the decoder's owned AVFrame (valid until next_frame/destruction).
 
+#include <array>
 #include <cstdint>
 
 namespace media {
@@ -15,12 +16,12 @@ enum class FramePixelFormat : uint8_t {
 
 // Decoded video frame: planes point into decoder's owned frame, valid until next call or destruction.
 struct DecodedFrame {
-    const uint8_t* planes[3];      // Y, U, V (or Y, UV for NV12)
-    int            linesizes[3];   // bytes per row (may include padding)
-    int            width;          // pixels
-    int            height;         // pixels
-    FramePixelFormat pix_fmt;      // I420 or NV12
-    double         pts_seconds;    // presentation timestamp in seconds
+    std::array<const uint8_t*, 3> planes;      // Y, U, V (or Y, UV for NV12)
+    std::array<int, 3>            linesizes;   // bytes per row (may include padding)
+    int                           width;       // pixels
+    int                           height;      // pixels
+    FramePixelFormat              pix_fmt;     // I420 or NV12
+    double                        pts_seconds; // presentation timestamp in seconds
 };
 
 } // namespace media

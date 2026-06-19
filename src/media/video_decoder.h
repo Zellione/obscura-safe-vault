@@ -28,13 +28,10 @@ public:
     VideoDecoder();
     ~VideoDecoder();
 
-    // Non-copyable (owns raw FFmpeg pointers)
+    // Non-copyable and non-movable (owns raw FFmpeg pointers)
+    // The destructor is user-declared, so move operations are implicitly deleted.
     VideoDecoder(const VideoDecoder&)            = delete;
     VideoDecoder& operator=(const VideoDecoder&) = delete;
-
-    // Movable
-    VideoDecoder(VideoDecoder&&)            noexcept;
-    VideoDecoder& operator=(VideoDecoder&&) noexcept;
 
     // Open a video stream from the given AVIO context (borrowed; not closed/freed by us).
     // Returns false on failure (e.g., unsupported codec, not a valid video).
@@ -58,6 +55,12 @@ public:
     vault::VideoCodec codec() const noexcept { return codec_; }
 
 private:
+    // Helper: convert an AVFrame with unsupported format to I420 via swscale.
+    std::optional<DecodedFrame> convert_to_i420(double pts_seconds);
+
+    // Helper: read one packet and send it to the decoder, handling EOF/flush.
+    bool pump_one_packet();
+
     AVFormatContext* fmt_                = nullptr;
     AVCodecContext*  codec_ctx_          = nullptr;
     AVFrame*         frame_              = nullptr;

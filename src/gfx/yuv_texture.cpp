@@ -1,6 +1,6 @@
 #include "gfx/yuv_texture.h"
 
-#include <cstdio>
+#include <print>
 
 namespace gfx {
 
@@ -34,7 +34,7 @@ bool YuvTexture::ensure(SDL_Renderer* r, int w, int h,
     // Create streaming texture.
     tex_ = SDL_CreateTexture(r, sdl_fmt, SDL_TEXTUREACCESS_STREAMING, w, h);
     if (!tex_) {
-        std::fprintf(stderr, "[YuvTexture] SDL_CreateTexture failed: %s\n",
+        std::println(stderr, "[YuvTexture] SDL_CreateTexture failed: {}",
                      SDL_GetError());
         return false;
     }
