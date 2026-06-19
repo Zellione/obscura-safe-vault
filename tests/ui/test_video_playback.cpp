@@ -68,6 +68,9 @@ TEST(video_playback_av_sync_seek_realign_and_writes_no_disk)
 {
     // Test that a video with audio (tiny_av.mp4) plays, seeks correctly,
     // re-aligns both tracks on seek, and writes zero bytes to disk.
+    // Use SDL's "dummy" audio driver so the audio device opens deterministically
+    // in a headless/CI environment (the master clock then becomes the audio clock).
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
     auto vbytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_av.mp4");
     REQUIRE(!vbytes.empty());
 
@@ -111,8 +114,11 @@ TEST(video_playback_av_sync_seek_realign_and_writes_no_disk)
             vp.update(0.05);
             vp.render(r, font, area);
         }
-        const double pos_before_seek = vp.position();
-        CHECK(pos_before_seek > 0.0);  // we've advanced
+        // With audio open, the master clock is the audio clock (wall-clock driven),
+        // so position() need not advance under synthetic update() calls. Instead
+        // assert the audio path is actively feeding the device — the real "is there
+        // sound?" signal, and a direct guard against the silent-playback regression.
+        CHECK(vp.audio_samples_fed() > 0);
 
         // Seek forward by 5s (or as much as available)
         vp.handle_key(SDLK_L);  // seek +5s (clamps to duration)
@@ -152,6 +158,35 @@ TEST(video_playback_av_sync_seek_realign_and_writes_no_disk)
 
     SDL_DestroyRenderer(sr);
     SDL_DestroySurface(surf);
+}
+
+TEST(video_playback_opens_audio_device_for_clip_with_sound)
+{
+    // Regression: the app inits only SDL_INIT_VIDEO, so VideoPlayback must bring
+    // up the audio subsystem itself before opening a device — otherwise a clip
+    // with sound plays silently. Use SDL's "dummy" audio driver so the device
+    // opens deterministically in a headless/CI environment (no real hardware).
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+
+    auto vbytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_av.mp4");
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("audio_dev");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny_av.mp4", 4096) == vault::VaultResult::Ok);
+
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    ui::VideoPlayback vp(v, *node);
+    REQUIRE(vp.valid());
+    REQUIRE(vp.has_audio());          // the clip carries an audio track (decoder-level)
+    // The actual regression: the audio output device must open. Before the fix,
+    // SDL_OpenAudioDeviceStream fails with "Audio subsystem is not initialized".
+    CHECK(vp.audio_active());
+    CHECK(SDL_WasInit(SDL_INIT_AUDIO) != 0);
 }
 
 TEST(video_playback_opens_plays_seeks_and_writes_no_disk)

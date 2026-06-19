@@ -60,6 +60,7 @@ struct VideoPlayback::Impl {
     double           seek_base_   = 0.0;
     float            volume_      = 1.0f;
     bool             muted_       = false;
+    bool             audio_subsystem_ = false;   // we brought up SDL_INIT_AUDIO; quit it in dtor
 
     Impl(const vault::Vault& vault, const vault::IndexNode& node)
     {
@@ -76,18 +77,29 @@ struct VideoPlayback::Impl {
         valid_ = true;
         model_ = PlaybackModel(static_cast<double>(decoder_.duration_us()) / 1'000'000.0);
 
-        // Open audio device if available
+        // Open audio device if available. The app only inits SDL_INIT_VIDEO, so
+        // the audio subsystem must be brought up here before any device can open
+        // (SDL_OpenAudioDeviceStream fails with "Audio subsystem is not
+        // initialized" otherwise). Audio is optional: tolerate init/open failure
+        // (no audio hardware) and keep playing video. SDL_InitSubSystem is
+        // ref-counted; the matching SDL_QuitSubSystem runs in the destructor.
         if (decoder_.has_audio()) {
-            SDL_AudioSpec audio_spec{};
-            audio_spec.format   = SDL_AUDIO_F32;
-            audio_spec.channels = decoder_.audio_info().channels;
-            audio_spec.freq     = decoder_.audio_info().sample_rate;
-            audio_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &audio_spec,
-                                               nullptr, nullptr);
-            if (!audio_) {
-                std::println(stderr, "[VideoPlayback] audio open failed: {}", SDL_GetError());
+            if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
+                std::println(stderr, "[VideoPlayback] audio subsystem init failed: {}",
+                             SDL_GetError());
             } else {
-                SDL_SetAudioStreamGain(audio_, media::effective_gain(volume_, muted_));
+                audio_subsystem_ = true;
+                SDL_AudioSpec audio_spec{};
+                audio_spec.format   = SDL_AUDIO_F32;
+                audio_spec.channels = decoder_.audio_info().channels;
+                audio_spec.freq     = decoder_.audio_info().sample_rate;
+                audio_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &audio_spec,
+                                                   nullptr, nullptr);
+                if (!audio_) {
+                    std::println(stderr, "[VideoPlayback] audio open failed: {}", SDL_GetError());
+                } else {
+                    SDL_SetAudioStreamGain(audio_, media::effective_gain(volume_, muted_));
+                }
             }
         }
 
@@ -97,7 +109,8 @@ struct VideoPlayback::Impl {
 
     ~Impl()
     {
-        if (audio_) SDL_DestroyAudioStream(audio_);
+        if (audio_) SDL_DestroyAudioStream(audio_);          // release the device first
+        if (audio_subsystem_) SDL_QuitSubSystem(SDL_INIT_AUDIO);
     }
 
     void decode_into_pending()
@@ -363,6 +376,8 @@ struct VideoPlayback::Impl {
     [[nodiscard]] bool animating() const { return valid_ && model_.playing(); }
     [[nodiscard]] bool has_audio() const { return decoder_.has_audio(); }
     [[nodiscard]] double position() const { return clock(); }
+    [[nodiscard]] bool audio_active() const { return audio_ != nullptr; }
+    [[nodiscard]] uint64_t audio_samples_fed() const { return samples_fed_; }
     void update(double dt)
     {
         if (valid_) {
@@ -380,6 +395,8 @@ struct VideoPlayback::Impl {
     [[nodiscard]] bool animating() const { return false; }
     [[nodiscard]] bool has_audio() const { return false; }
     [[nodiscard]] double position() const { return 0.0; }
+    [[nodiscard]] bool audio_active() const { return false; }
+    [[nodiscard]] uint64_t audio_samples_fed() const { return 0; }
     void update(double) {}
     void render(gfx::Renderer&, gfx::FontAtlas&, const SDL_FRect&) {}
     void key(SDL_Keycode) {}
@@ -399,6 +416,8 @@ bool VideoPlayback::valid() const noexcept { return impl_->valid(); }
 bool VideoPlayback::animating() const noexcept { return impl_->animating(); }
 bool VideoPlayback::has_audio() const noexcept { return impl_->has_audio(); }
 double VideoPlayback::position() const noexcept { return impl_->position(); }
+bool VideoPlayback::audio_active() const noexcept { return impl_->audio_active(); }
+uint64_t VideoPlayback::audio_samples_fed() const noexcept { return impl_->audio_samples_fed(); }
 void VideoPlayback::update(double dt) { impl_->update(dt); }
 
 void VideoPlayback::render(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& area)
