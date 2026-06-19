@@ -33,7 +33,7 @@ double bar_x_to_time(float x, double duration, float bar_x, float bar_w) noexcep
 std::string format_clock(double seconds)
 {
     if (!(seconds > 0.0)) return "0:00";   // also catches NaN
-    const long long total = static_cast<long long>(seconds);
+    const auto total = static_cast<long long>(seconds);
     const long long h = total / 3600;
     const long long m = (total % 3600) / 60;
     const long long s = total % 60;

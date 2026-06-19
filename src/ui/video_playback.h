@@ -23,7 +23,7 @@ namespace ui {
 
 class VideoPlayback {
 public:
-    VideoPlayback(vault::Vault& vault, const vault::IndexNode& node);
+    VideoPlayback(const vault::Vault& vault, const vault::IndexNode& node);
     ~VideoPlayback();
 
     VideoPlayback(const VideoPlayback&)            = delete;

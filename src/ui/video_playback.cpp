@@ -53,7 +53,7 @@ struct VideoPlayback::Impl {
     bool      scrubbing_    = false;
     SDL_FRect track_{};                                  // last-rendered seek-bar track rect
 
-    Impl(vault::Vault& vault, const vault::IndexNode& node)
+    Impl(const vault::Vault& vault, const vault::IndexNode& node)
     {
         auto src = media::VideoSource::open(vault, node);
         avio_ = std::make_unique<media::ChunkAvio>(std::move(src));
@@ -177,10 +177,12 @@ struct VideoPlayback::Impl {
 
         rr.draw_rect(vid, gfx::theme::IMG_BG);
         if (SDL_Texture* tex = yuv_.texture()) {
-            float tw = 0.0f, th = 0.0f;
+            float tw = 0.0f;
+            float th = 0.0f;
             SDL_GetTextureSize(tex, &tw, &th);
             const float s = fit_zoom(tw, th, vid.w, vid.h);
-            const float w = tw * s, h = th * s;
+            const float w = tw * s;
+            const float h = th * s;
             rr.draw_image(tex, {vid.x + (vid.w - w) * 0.5f, vid.y + (vid.h - h) * 0.5f, w, h});
         }
 
@@ -210,8 +212,8 @@ struct VideoPlayback::Impl {
         const float track_w = std::max(10.0f, text_x - 12.0f - track_x);
         track_ = {track_x, icon_cy - TRACK_H * 0.5f, track_w, TRACK_H};
         rr.draw_round_rect(track_, TRACK_H * 0.5f, gfx::theme::BORDER);
-        const float fill_w = time_to_bar_x(model_.position(), model_.duration(), 0.0f, track_w);
-        if (fill_w > 0.0f)
+        if (const float fill_w = time_to_bar_x(model_.position(), model_.duration(), 0.0f, track_w);
+            fill_w > 0.0f)
             rr.draw_round_rect({track_.x, track_.y, fill_w, TRACK_H}, TRACK_H * 0.5f,
                                gfx::theme::ACCENT);
         const float knob_x = time_to_bar_x(model_.position(), model_.duration(), track_.x, track_w);
@@ -227,7 +229,7 @@ struct VideoPlayback::Impl {
 #else  // !OSV_VENDORED_AV — playback unavailable; host falls back to the poster.
 
 struct VideoPlayback::Impl {
-    Impl(vault::Vault&, const vault::IndexNode&) {}
+    Impl(const vault::Vault&, const vault::IndexNode&) {}
     [[nodiscard]] bool valid() const { return false; }
     [[nodiscard]] bool animating() const { return false; }
     void update(double) {}
@@ -240,7 +242,7 @@ struct VideoPlayback::Impl {
 
 #endif  // OSV_VENDORED_AV
 
-VideoPlayback::VideoPlayback(vault::Vault& vault, const vault::IndexNode& node)
+VideoPlayback::VideoPlayback(const vault::Vault& vault, const vault::IndexNode& node)
     : impl_(std::make_unique<Impl>(vault, node)) {}
 
 VideoPlayback::~VideoPlayback() = default;

@@ -105,22 +105,20 @@ private:
     void handle_key(SDL_Keycode key);
     void handle_key_fit(SDL_Keycode key);
     void handle_key_scroll(SDL_Keycode key);
+    void handle_key_video(SDL_Keycode key);         // Space/,/./J/L + F/arrows for a video item
     void handle_mouse_down(const SDL_MouseButtonEvent& b);
     void handle_wheel(const SDL_MouseWheelEvent& w);
+    [[nodiscard]] bool handle_overlay_event(const SDL_Event& e);  // modal overlays; true if consumed
 
     [[nodiscard]] float     thumb_size() const;
     [[nodiscard]] SDL_FRect viewport_rect() const;
     [[nodiscard]] SDL_FRect strip_rect() const;
 
-    void toggle_favorite_current();                 // flip favorite on the current image
-    void show_image_at(int idx);                    // absolute, clamped, refit
-    [[nodiscard]] bool current_is_video() const;    // current album item is a video
-    void sync_video();                              // (re)build VideoPlayback (Fit-mode video only)
+    void show_image_at(int idx);                    // absolute, clamped, refit (rebuilds video_)
     void set_index(int delta);                      // wrap, reset view, rebuild
     void go_back();                                 // return to gallery / favorites
     void zoom_by(float factor, float cx, float cy); // centred on (cx, cy)
     void pan_by(float dx, float dy);
-    [[nodiscard]] bool is_zoomed() const noexcept;  // zoomed past fit-to-window
 
     // Fill-scroll helpers. The model is cached and rebuilt only when the
     // viewport size changes (the image list is fixed for the session), since
