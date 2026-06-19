@@ -7,6 +7,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/avutil.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/log.h>
 #include <libavutil/opt.h>
 #include <libswscale/swscale.h>
 }
@@ -46,6 +47,11 @@ bool VideoDecoder::fail_open(std::string_view msg)
 
 bool VideoDecoder::open(AVIOContext* pb)
 {
+    // Quiet FFmpeg's own chatty av_log: the "Protocol name not provided" notice on
+    // our custom AVIO, and per-frame decode errors on corrupt input. Actionable
+    // failures are surfaced via our own [VideoDecoder] logging. Global + idempotent.
+    av_log_set_level(AV_LOG_FATAL);
+
     if (!pb) return fail_open("AVIO context is null");
 
     fmt_ = avformat_alloc_context();
