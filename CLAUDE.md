@@ -71,7 +71,7 @@ navigable with arrow keys.
 | Authentication | **Password + optional keyfile** | "Something you know + something you have." Final key = Argon2id(password ‖ keyfile, salt). Changing the password re-wraps the master key only (no bulk re-encrypt). |
 | Image decode | **stb_image** (header-only) | JPEG/PNG/GIF/BMP/TGA/HDR decoded directly from decrypted in-memory buffers. Zero dependencies, no temp files. |
 | Extra image formats | **libwebp 1.4.0** (WebP), **libheif 1.18.2** + **libde265 1.0.15** (HEIC) + **libaom 3.14.1** (AVIF, decoder-only) — all Phase 9 | Decode-only. Vendored git submodules, cmake-built static into `vendor/codecs-prefix/` by `scripts/build_codecs.{sh,bat}`. One `decode_heif_from_memory` covers HEIC+AVIF (libheif dispatches by brand). libaom needs **nasm**. |
-| Video decode | **FFmpeg/libav 7.1.1** (decode-only static) — Phase 15 | Stream a video's frames directly from its encrypted chunks via a custom `AVIOContext` over `ChunkStore` (no temp file). H.264/H.265 video; mov/mp4/m4v + matroska/webm demuxers; libswscale for non-4:2:0; encoders/muxers/protocols/network disabled. Vendored git submodule, configure-built static into `vendor/codecs-prefix/` by `scripts/build_codecs.{sh,bat}`; linked by `link_av()` under `OSV_VENDORED_AV`. Needs **nasm** (like libaom). |
+| Video decode | **FFmpeg/libav 7.1.1** (decode-only static) — Phase 15; audio — Phase 16 | Stream video frames directly from encrypted chunks via a custom `AVIOContext` over `ChunkStore` (no temp file). H.264/H.265 video; mov/mp4/m4v + matroska/webm demuxers; libswscale for non-4:2:0; audio decoders aac/opus/mp3/vorbis/flac/ac3. Decoded audio (planar→interleaved F32) flows into an `SDL_AudioStream` (SDL handles rate/format/channel conversion — we do NOT use swresample for our resampling). A/V sync via pure `av_sync::decide()` (audio-clock tracking). Encoders/muxers/protocols/network disabled. Vendored git submodule, configure-built static into `vendor/codecs-prefix/` by `scripts/build_codecs.{sh,bat}`; linked by `link_av()` (which also links swresample, a transitive dep of audio decoders) under `OSV_VENDORED_AV`. Needs **nasm** (like libaom). |
 | Thumbnails | **Pre-generated, stored encrypted in vault** | Gallery scrolling decrypts only the small thumbnail blobs — no full-image decode needed while browsing. |
 | Gallery model | **Free-nesting galleries; images only in leaf galleries** | A folder shows either sub-folders *or* images, never a mix. Cleaner grid view and simpler tree logic. |
 | Dependency management | **Vendored git submodules** under `vendor/` | Hermetic, reproducible, offline. SDL3 is built from source by `scripts/setup.sh` (cmake once); monocypher/stb are compiled directly by premake. |
@@ -153,10 +153,13 @@ src/
   media/     video_source.*,             ← decrypt-on-demand byte stream over a video's
              chunk_avio.*,                  ChunkStore (mlock'd one-chunk cache); AVIOContext
              mem_avio.*,                    wrapper (read+seek, never a temp file); in-RAM
-             video_decoder.*,              AVIO for the import probe; FFmpeg demux + H.264/
-             video_probe.*,                HEVC decode → DecodedFrame (yuv420p/nv12, swscale
-             decoded_frame.h                fallback) + keyframe seek; container/codec probe.
-                                            All gated by OSV_VENDORED_AV (Phase 15).
+             video_decoder.*,              AVIO for the import probe; shared FFmpeg demux feeds
+             audio_decoder.*,              both video + audio via per-stream packet queues
+             av_sync.*,                    (Phase 15); VideoDecoder::has_audio/audio_info/
+             audio_frame.h,                next_audio_frame; AudioDecoder decodes planar→
+             video_probe.*,                interleaved F32; av_sync pure logic (audio-clock
+             decoded_frame.h                sync, frame Present/Hold/Drop). Container/codec
+                                            probe. All gated by OSV_VENDORED_AV (Phase 15–16).
   gfx/       window.{h,cpp},             ← SDL3 window + renderer (Phase 0)
              renderer.{h,cpp},            ← texture cache, text atlas (Phase 4)
              texture_cache.*, text.*,
@@ -171,8 +174,10 @@ src/
              playback_model.*,            ← pure video transport maths: clock/clamp/seek-bar
                                             map/mm:ss/frame-due (Phase 15, pure/tested)
              video_playback.*,            ← in-viewer video player: decoder + YUV texture +
-                                            draggable seek bar; pImpl gated on OSV_VENDORED_AV
-                                            (non-AV build → poster fallback) (Phase 15)
+                                            audio output (SDL_AudioStream, audio-clock master)
+                                            + seek bar (seeks both tracks) + mute/volume (M,
+                                            [/]); pImpl gated on OSV_VENDORED_AV (non-AV build
+                                            → poster fallback) (Phase 15–16)
              full_tex_cache.*,            ← shared decode→GPU texture cache (Phase 11 extract)
              slideshow_view.*,            ← full-screen slideshow SDL plumbing (Phase 11)
              strip_layout.*,              ← orientation-aware strip geometry (UI overhaul)

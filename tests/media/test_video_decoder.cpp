@@ -375,4 +375,71 @@ TEST(video_decoder_rejects_audio_only)
     CHECK(!dec.open(avio.ctx()));
 }
 
+TEST(video_decoder_exposes_and_decodes_audio_from_tiny_av)
+{
+    auto av_bytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_av.mp4");
+    REQUIRE(!av_bytes.empty());
+    
+    TempVault tv("decoder_audio");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", av_bytes, "tiny_av.mp4", 4096) == vault::VaultResult::Ok);
+    auto kids = v.list("c");
+    REQUIRE(kids.size() == 1);
+    
+    media::ChunkAvio avio(media::VideoSource::open(v, *kids[0]));
+    REQUIRE(avio.valid());
+    media::VideoDecoder dec;
+    REQUIRE(dec.open(avio.ctx()));
+    
+    // Check audio is present and has correct properties
+    REQUIRE(dec.has_audio());
+    CHECK(dec.audio_info().channels == 1);
+    CHECK(dec.audio_info().sample_rate == 44100);
+    
+    // Pull interleaved: a few video frames AND audio frames, neither starves
+    int vframes = 0;
+    size_t asamples = 0;
+    for (int i = 0; i < 5; ++i)
+        if (dec.next_frame())
+            ++vframes;
+    
+    for (int i = 0; i < 20; ++i)
+        if (auto a = dec.next_audio_frame())
+            asamples += a->samples.size();
+    
+    CHECK(vframes > 0);
+    CHECK(asamples > 0);
+}
+
+TEST(video_decoder_has_audio_false_for_video_only)
+{
+    auto v_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");  // video-only
+    REQUIRE(!v_bytes.empty());
+    
+    TempVault tv("decoder_no_audio");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", v_bytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+    auto kids = v.list("c");
+    REQUIRE(kids.size() == 1);
+    
+    media::ChunkAvio avio(media::VideoSource::open(v, *kids[0]));
+    REQUIRE(avio.valid());
+    media::VideoDecoder dec;
+    REQUIRE(dec.open(avio.ctx()));
+    
+    // No audio track present
+    CHECK(dec.has_audio() == false);
+    CHECK(!dec.next_audio_frame().has_value());
+    
+    // Video should still decode normally
+    int vframes = 0;
+    while (auto f = dec.next_frame())
+        ++vframes;
+    CHECK(vframes == 10);
+}
+
 #endif // OSV_VENDORED_AV

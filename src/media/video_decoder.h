@@ -5,8 +5,11 @@
 #include <optional>
 #include <cstdint>
 #include <string_view>
+#include <deque>
 
 #include "media/decoded_frame.h"
+#include "media/audio_decoder.h"
+#include "media/audio_frame.h"
 #include "vault/index.h"
 #include "image/image.h"
 
@@ -49,6 +52,19 @@ public:
     // Decode the first frame as RGB24 and return it as ImageData. Returns nullopt on failure.
     [[nodiscard]] std::optional<image::ImageData> decode_poster_rgb();
 
+    // Audio support: returns true if an audio stream exists and is valid
+    [[nodiscard]] bool has_audio() const noexcept { return audio_index_ >= 0 && audio_dec_.valid(); }
+
+    // Audio metadata
+    struct AudioInfo {
+        int channels = 0;
+        int sample_rate = 0;
+    };
+    [[nodiscard]] AudioInfo audio_info() const noexcept { return {audio_dec_.channels(), audio_dec_.sample_rate()}; }
+
+    // Decode and return the next audio frame, or std::nullopt at end/error.
+    [[nodiscard]] std::optional<AudioFrame> next_audio_frame();
+
     // Accessors
     int width() const noexcept { return width_; }
     int height() const noexcept { return height_; }
@@ -62,8 +78,22 @@ private:
     // Helper: read one packet and send it to the decoder, handling EOF/flush.
     bool pump_one_packet();
 
+    // Helper: read one packet and route it to the appropriate stream queue (video or audio).
+    // Returns false at EOF.
+    bool read_and_route();
+
     // Helper: build a DecodedFrame from the just-received frame_ (swscale if needed).
     std::optional<DecodedFrame> build_from_current_frame(double pts_seconds);
+
+    // Helper: drain one video packet from vq_, send to decoder, return false on send error.
+    [[nodiscard]] bool drain_video_queue();
+
+    // Helper: decode one audio packet from aq_, accumulate frames to audio_out_.
+    void decode_audio_packet();
+
+    // Helper: handle EAGAIN case in next_frame (feed more packets or return nullptr).
+    // Returns true to continue the main loop, false to return nullptr.
+    [[nodiscard]] bool handle_eagain_case();
 
     // Free all owned FFmpeg resources (destructor + open() error paths).
     void reset();
@@ -85,6 +115,13 @@ private:
     AVRational       stream_time_base_   = {0, 1};  // raw stream time base for seek
     bool             flushed_            = false;   // Track if we've sent the flush packet
     double           pending_seek_target_ = -1.0;   // Target PTS for seek decode-forward
+
+    // Audio support
+    AudioDecoder                audio_dec_;           // audio codec context
+    int                         audio_index_         = -1;  // audio stream index, or -1 if none
+    std::deque<AVPacket*>       vq_;                 // queued video packets
+    std::deque<AVPacket*>       aq_;                 // queued audio packets
+    std::deque<AudioFrame>      audio_out_;          // decoded audio frames waiting to be returned
 };
 
 } // namespace media

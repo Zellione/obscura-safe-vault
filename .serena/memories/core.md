@@ -89,13 +89,23 @@ src/
                                                  retain()/pending() (each screen owns
                                                  its own worker; FullTexCache +
                                                  GalleryGrid use it for async decode)
-  media/       video_source.*, chunk_avio.*,  — Phase 15 video (all gated OSV_VENDORED_AV):
+  media/       video_source.*, chunk_avio.*,  — Phase 15–16 video & audio (all gated OSV_VENDORED_AV):
                mem_avio.*, video_decoder.*,      VideoSource = decrypt-on-demand byte stream over
-               video_probe.*, decoded_frame.h    a video's ChunkStore (mlock'd 1-chunk cache);
-                                                 ChunkAvio/MemAvio = AVIOContext (read+seek, never
-                                                 a temp file); VideoDecoder = FFmpeg demux + H.264/
-                                                 HEVC decode -> DecodedFrame (yuv420p/nv12, swscale
-                                                 fallback) + keyframe seek; probe_video =
+               audio_decoder.*, av_sync.*,       a video's ChunkStore (mlock'd 1-chunk cache);
+               audio_frame.h,                    ChunkAvio/MemAvio = AVIOContext (read+seek, never
+               video_probe.*, decoded_frame.h    a temp file); VideoDecoder = FFmpeg shared demuxer
+                                                 feeding both video + audio via per-stream packet
+                                                 queues (vq_/aq_); H.264/HEVC decode → DecodedFrame
+                                                 (yuv420p/nv12, swscale fallback) + keyframe seek;
+                                                 has_audio() / audio_info() / next_audio_frame()
+                                                 API (Phase 16); AudioDecoder owns an AVStream*,
+                                                 decodes planar PCM → interleaved F32 in AudioFrame
+                                                 {samples, channels, sample_rate, pts_seconds};
+                                                 av_sync = PURE logic (no SDL/FFmpeg) for audio-
+                                                 clock tracking: decide(audio_clock, frame_pts, ...)
+                                                 → FrameAction{Present,Hold,Drop}; audio_clock(base,
+                                                 samples_consumed, rate) computes current; clamp_volume/
+                                                 effective_gain helpers; unit-tested. probe_video =
                                                  container/codec/dims/duration + first-frame poster.
   gfx/         window.*, renderer.*,           — SDL3 window/renderer, texture cache,
                texture_cache.*, text.*,        — stb_truetype text atlas
@@ -126,15 +136,20 @@ src/
                                                  button_state + elide_middle. ImageViewer hosts
                                                  a fit-only VideoPlayback when the current item
                                                  is_video() (Phase 15: Space play/pause, J/L
-                                                 +-5s, ,/. frame-step, drag seek bar). GalleryGrid
-                                                 routes video imports to add_video + draws a play
-                                                 badge (draw_tile_thumb) in grid & list.
+                                                 +-5s, ,/. frame-step, drag seek bar).
+                                                 Phase 16: M mute, [/] volume ∓5%; seek bar
+                                                 seeks both video + audio tracks in-sync.
+                                                 GalleryGrid routes video imports to add_video +
+                                                 draws a play badge (draw_tile_thumb) in grid & list.
                playback_model.*                — pure video transport maths: clock/clamp/
                                                  seek-bar map/mm:ss/frame-due (Phase 15,
                                                  pure/tested)
                video_playback.*                — in-viewer video player: VideoDecoder + YUV
-                                                 texture + seek bar; pImpl gated on
-                                                 OSV_VENDORED_AV (non-AV build -> poster) (Phase 15)
+                                                 texture + SDL_AudioStream (master audio clock)
+                                                 + seek bar (both tracks); mute/volume via
+                                                 SDL_SetAudioStreamGain; A/V sync via av_sync::decide;
+                                                 pause pauses both; pImpl gated on OSV_VENDORED_AV
+                                                 (non-AV build -> poster) (Phase 15–16)
                full_tex_cache.*                — shared decode→GPU full-res texture cache
                                                  (decrypt into mlock'd SecureBytes, wipe
                                                  after upload); used by viewer + slideshow
@@ -195,8 +210,8 @@ src/
                                                  within the active vault. Source enum
                                                  {Images,Gallery}; open()/open_gallery().
                                                  Stages: Mode(Move/Copy) → pick dest vault
-                                                 ("This vault" row + registry minus active;
-                                                 "This vault" skips unlock, dest_is_self_,
+                                                 (\"This vault\" row + registry minus active;
+                                                 \"This vault\" skips unlock, dest_is_self_,
                                                  dest_vault()=src_) → unlock transiently (owns
                                                  Dest{vault, pw in SecureTextField, optional
                                                  keyfile}) → pick leaf gallery (images) / parent
@@ -226,14 +241,15 @@ src/
                                                  secrets); list/add(move-to-front,dedup)/
                                                  remove/seed_if_empty; atomic temp+rename.
 tests/
-  crypto/ gfx/ image/ platform/ ui/ vault/
+  crypto/ gfx/ image/ platform/ ui/ vault/ media/
   test_framework.h  test_main.cpp
 vendor/
   SDL3/         git submodule, built by setup.sh (cmake)
   monocypher/   git submodule, single .c compiled by premake
   stb/          git submodule, header-only
   libwebp/ libde265/ libaom/ libheif/   image codecs (Phase 9), cmake-built static
-  codecs-prefix/   staging install prefix for the four codecs (gitignored)
+  ffmpeg/       git submodule, configure-built static (Phase 15–16, audio decoders + H.264/H.265)
+  codecs-prefix/   staging install prefix for the codecs + FFmpeg (gitignored)
 assets/fonts/   bundled OFL font for stb_truetype
 ```
 

@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstdint>
 #include <memory>
 
 // Self-contained video playback component (Phase 15 PR5). Owns the decoder,
@@ -36,6 +37,27 @@ public:
     // True while playing — the host reports animating() so the event loop keeps
     // ticking. False when paused / at end / invalid.
     [[nodiscard]] bool animating() const noexcept;
+
+    // True if the video stream contains an audio track (Phase 16).
+    [[nodiscard]] bool has_audio() const noexcept;
+
+    // Current playback position in seconds (Phase 16, for testing/debug).
+    [[nodiscard]] double position() const noexcept;
+
+    // True if the audio output device actually opened (audio subsystem up +
+    // device acquired). False on a non-FFmpeg build, a clip with no audio, or a
+    // device-open failure. (Phase 16, for testing/debug.)
+    [[nodiscard]] bool audio_active() const noexcept;
+
+    // Total audio sample-frames fed to the output device so far — a deterministic
+    // "audio is flowing" signal under synthetic playback. (Phase 16, testing/debug.)
+    [[nodiscard]] uint64_t audio_samples_fed() const noexcept;
+
+    // Effective output gain in [0,1] (0 when muted). (Phase 16, testing/debug.)
+    [[nodiscard]] float audio_gain() const noexcept;
+
+    // Last-rendered volume-bar rect (zero-size when no audio). (Phase 16, testing/debug.)
+    [[nodiscard]] SDL_FRect debug_vol_bar() const noexcept;
 
     void update(double dt);   // advance the clock (decode happens lazily in render)
     void render(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& area);

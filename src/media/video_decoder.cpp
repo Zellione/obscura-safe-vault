@@ -35,6 +35,14 @@ void VideoDecoder::reset()
     if (pkt_)       av_packet_free(&pkt_);
     if (sws_)     { sws_freeContext(sws_); sws_ = nullptr; }
     if (conv_)      av_frame_free(&conv_);
+    
+    // Free queued packets and clear output buffers
+    for (auto pkt : vq_) av_packet_free(&pkt);
+    vq_.clear();
+    for (auto pkt : aq_) av_packet_free(&pkt);
+    aq_.clear();
+    audio_out_.clear();
+    audio_index_ = -1;
 }
 
 // Log an open() failure, release any partially-acquired state, and return false.
@@ -110,6 +118,16 @@ bool VideoDecoder::open(AVIOContext* pb)
     pkt_ = av_packet_alloc();
     if (!pkt_) return fail_open("Failed to allocate packet");
 
+    // Attempt to open audio stream (non-fatal if missing)
+    audio_index_ = av_find_best_stream(fmt_, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+    if (audio_index_ >= 0) {
+        const AVStream* audio_stream = fmt_->streams[audio_index_];
+        if (audio_stream && !audio_dec_.open(audio_stream)) {
+            std::println(stderr, "[VideoDecoder] Audio stream found but failed to open decoder; continuing video-only");
+            audio_index_ = -1;
+        }
+    }
+
     return true;
 }
 
@@ -134,8 +152,16 @@ bool VideoDecoder::seek(double ts_seconds)
         return false;
     }
 
-    // Flush the codec so it discards any buffered frames
+    // Flush the codecs so they discard any buffered frames
     avcodec_flush_buffers(codec_ctx_);
+    audio_dec_.flush();
+
+    // Clear all packet and audio output queues (they belong to the old seek position)
+    for (auto pkt : vq_) av_packet_free(&pkt);
+    vq_.clear();
+    for (auto pkt : aq_) av_packet_free(&pkt);
+    aq_.clear();
+    audio_out_.clear();
 
     // Reset decode state
     flushed_ = false;
@@ -250,6 +276,38 @@ std::optional<DecodedFrame> VideoDecoder::convert_to_i420(double pts_seconds)
     return result;
 }
 
+// Helper: read one packet and route it to the appropriate stream queue.
+// Returns false at EOF.
+bool VideoDecoder::read_and_route()
+{
+    if (int ret = av_read_frame(fmt_, pkt_); ret == AVERROR_EOF || ret < 0) {
+        return false;
+    }
+
+    // Route packet to the appropriate stream queue
+    if (pkt_->stream_index == stream_index_) {
+        // Video packet: clone and queue
+        AVPacket* cloned = av_packet_clone(pkt_);
+        if (cloned) {
+            vq_.push_back(cloned);
+        } else {
+            std::println(stderr, "[VideoDecoder] packet clone failed (out of memory); dropping packet");
+        }
+    } else if (audio_index_ >= 0 && pkt_->stream_index == audio_index_) {
+        // Audio packet: clone and queue
+        AVPacket* cloned = av_packet_clone(pkt_);
+        if (cloned) {
+            aq_.push_back(cloned);
+        } else {
+            std::println(stderr, "[VideoDecoder] packet clone failed (out of memory); dropping packet");
+        }
+    }
+    // Else: ignore packets from other streams
+
+    av_packet_unref(pkt_);
+    return true;
+}
+
 // Helper: read one packet and send it to the decoder, handling EOF/flush.
 bool VideoDecoder::pump_one_packet()
 {
@@ -288,6 +346,60 @@ std::optional<DecodedFrame> VideoDecoder::build_from_current_frame(double pts_se
     return convert_to_i420(pts_seconds);                       // swscale fallback
 }
 
+// Helper: drain one video packet from vq_ and send to decoder.
+// Returns false if send fails; true otherwise (sent or queue empty).
+bool VideoDecoder::drain_video_queue()
+{
+    if (vq_.empty()) {
+        return true;
+    }
+
+    AVPacket* pkt = vq_.front();
+    vq_.pop_front();
+    const int send_ret = avcodec_send_packet(codec_ctx_, pkt);
+    av_packet_free(&pkt);
+    return send_ret >= 0;
+}
+
+// Helper: decode one audio packet from aq_, accumulate frames to audio_out_.
+void VideoDecoder::decode_audio_packet()
+{
+    if (aq_.empty()) {
+        return;
+    }
+
+    AVPacket* pkt = aq_.front();
+    aq_.pop_front();
+    std::vector<AudioFrame> frames;
+    audio_dec_.decode(pkt, frames);
+    av_packet_free(&pkt);
+    for (auto& f : frames) {
+        audio_out_.push_back(std::move(f));
+    }
+}
+
+// Helper: handle EAGAIN case (feed more packets or return nullptr).
+// Returns true to continue the main loop, false to return nullptr.
+bool VideoDecoder::handle_eagain_case()
+{
+    if (!drain_video_queue()) {
+        return false;  // send failed; caller returns nullptr
+    }
+    if (!vq_.empty()) {
+        return true;  // We just fed a queued packet; retry receive
+    }
+
+    // No queued packets: read and route from demuxer
+    if (!read_and_route()) {
+        // EOF: send flush packet
+        flushed_ = true;
+        avcodec_send_packet(codec_ctx_, nullptr);
+        return true;  // Continue to retry receive
+    }
+    // After routing, try to send any new video packet
+    return drain_video_queue();  // true if sent/queue empty, false if send failed
+}
+
 std::optional<DecodedFrame> VideoDecoder::next_frame()
 {
     if (!codec_ctx_ || !frame_ || !pkt_) {
@@ -308,13 +420,75 @@ std::optional<DecodedFrame> VideoDecoder::next_frame()
             pending_seek_target_ = -1.0;  // reached the target (or none pending)
             return build_from_current_frame(pts_seconds);
         }
-        // EAGAIN before flush: feed one more packet, then retry the receive.
-        if (ret == AVERROR(EAGAIN) && !flushed_ && pump_one_packet()) {
-            continue;
+
+        // EAGAIN before flush: feed one more packet
+        if (ret == AVERROR(EAGAIN) && !flushed_) {
+            if (handle_eagain_case()) {
+                continue;  // Continue the loop to retry receive
+            }
+            return std::nullopt;  // send failed
         }
+
         // EAGAIN after flush, EOF, a read/decode error, or a failed pump → done.
         return std::nullopt;
     }
+}
+
+std::optional<AudioFrame> VideoDecoder::next_audio_frame()
+{
+    // No audio stream
+    if (audio_index_ < 0) {
+        return std::nullopt;
+    }
+
+    // Return buffered decoded frame if available
+    if (!audio_out_.empty()) {
+        AudioFrame frame = std::move(audio_out_.front());
+        audio_out_.pop_front();
+        return frame;
+    }
+
+    // Drain queued audio packets
+    while (!aq_.empty()) {
+        decode_audio_packet();
+    }
+
+    // If we now have frames, return the first
+    if (!audio_out_.empty()) {
+        AudioFrame frame = std::move(audio_out_.front());
+        audio_out_.pop_front();
+        return frame;
+    }
+
+    // Read from demuxer until we get an audio packet or EOF
+    bool eof = false;
+    while (aq_.empty()) {
+        if (!read_and_route()) {
+            eof = true;
+            break;
+        }
+    }
+
+    // Process any audio packet we got
+    decode_audio_packet();
+
+    // On EOF, send a final flush to drain buffered frames
+    if (eof && audio_out_.empty()) {
+        std::vector<AudioFrame> frames;
+        audio_dec_.decode(nullptr, frames);
+        for (auto& f : frames) {
+            audio_out_.push_back(std::move(f));
+        }
+    }
+
+    // Return the first decoded frame if available
+    if (!audio_out_.empty()) {
+        AudioFrame frame = std::move(audio_out_.front());
+        audio_out_.pop_front();
+        return frame;
+    }
+
+    return std::nullopt;
 }
 
 std::optional<image::ImageData> VideoDecoder::decode_poster_rgb()
