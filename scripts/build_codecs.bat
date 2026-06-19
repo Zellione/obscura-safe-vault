@@ -22,9 +22,6 @@ call :build_codec aom vendor\libaom || goto :fail
 set "EXTRA=-DWITH_LIBDE265=ON -DWITH_AOM_DECODER=ON -DWITH_AOM_ENCODER=OFF -DWITH_X265=OFF -DWITH_EXAMPLES=OFF -DWITH_GDK_PIXBUF=OFF -DENABLE_PLUGIN_LOADING=OFF -DBUILD_TESTING=OFF -DCMAKE_DISABLE_FIND_PACKAGE_Doxygen=ON -DCMAKE_C_FLAGS=-DLIBDE265_STATIC_BUILD -DCMAKE_CXX_FLAGS=-DLIBDE265_STATIC_BUILD"
 call :build_codec heif vendor\libheif || goto :fail
 
-rem FFmpeg — decode-only static. Video (h264/hevc) + audio (aac/opus/mp3/vorbis/flac/ac3).
-call :build_ffmpeg || goto :fail
-
 echo ==^> Codecs installed into vendor\codecs-prefix
 popd
 exit /b 0
@@ -48,31 +45,6 @@ cmake -S "%CSRC%" -B "%CSRC%\build" -G "Ninja" ^
     !EXTRA! || exit /b 1
 cmake --build "%CSRC%\build" --parallel || exit /b 1
 cmake --install "%CSRC%\build" || exit /b 1
-exit /b 0
-
-:build_ffmpeg
-rem FFmpeg configure script. Decode-only, static build.
-if exist "%CODEC_PREFIX%\lib\libavcodec.a" (
-    echo ==^> ffmpeg already installed — skipping.
-    exit /b 0
-)
-echo ==^> Building vendored ffmpeg ^(decode-only, static^)...
-pushd "%REPO_ROOT%\vendor\ffmpeg"
-call configure --prefix="%CODEC_PREFIX%" ^
-    --enable-static --disable-shared ^
-    --disable-everything --disable-programs --disable-doc ^
-    --disable-network --disable-encoders --disable-muxers ^
-    --disable-protocols --disable-devices --disable-filters ^
-    --disable-bsfs --disable-autodetect ^
-    --enable-decoder=h264,hevc,aac,opus,mp3,vorbis,flac,ac3 ^
-    --enable-demuxer=mov,matroska,webm ^
-    --enable-parser=h264,hevc,aac,vorbis,opus,flac,ac3,mpegaudio ^
-    --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb ^
-    --enable-swscale ^
-    --enable-pic || exit /b 1
-make -j || exit /b 1
-make install || exit /b 1
-popd
 exit /b 0
 
 :fail

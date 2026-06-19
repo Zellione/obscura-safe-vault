@@ -290,7 +290,7 @@ jobs:
         with:
           path: vendor/codecs-prefix
           # win2022 toolchain tag — see the SDL3 cache key note above.
-          key: codecs-v4-${{ runner.os }}-win2022-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
+          key: codecs-v3-${{ runner.os }}-win2022-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
