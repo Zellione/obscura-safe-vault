@@ -54,16 +54,21 @@ struct VideoPlayback::Impl {
     bool      scrubbing_    = false;
     SDL_FRect track_{};                                  // last-rendered seek-bar track rect
 
-    // Audio state
-    SDL_AudioStream* audio_       = nullptr;
-    uint64_t         samples_fed_ = 0;
-    double           seek_base_   = 0.0;
-    float            volume_      = 1.0f;
-    bool             muted_       = false;
+    // Audio playback state
+    SDL_AudioStream* audio_           = nullptr;
+    uint64_t         samples_fed_     = 0;
+    double           seek_base_       = 0.0;
     bool             audio_subsystem_ = false;   // we brought up SDL_INIT_AUDIO; quit it in dtor
-    SDL_FRect        vol_track_{};                // last-rendered volume-bar rect (mouse target)
-    SDL_FRect        spk_icon_{};                 // last-rendered speaker/mute icon rect
-    bool             vol_scrubbing_ = false;      // dragging the volume bar
+
+    // Volume-control widget state (the draggable bar + speaker/mute icon).
+    struct VolumeUi {
+        float     level     = 1.0f;   // 0..1
+        bool      muted     = false;
+        SDL_FRect bar{};              // last-rendered volume-bar rect (mouse target)
+        SDL_FRect icon{};             // last-rendered speaker/mute icon rect
+        bool      scrubbing = false;  // dragging the bar
+    };
+    VolumeUi vol_;
 
     Impl(const vault::Vault& vault, const vault::IndexNode& node)
     {
@@ -101,7 +106,7 @@ struct VideoPlayback::Impl {
                 if (!audio_) {
                     std::println(stderr, "[VideoPlayback] audio open failed: {}", SDL_GetError());
                 } else {
-                    SDL_SetAudioStreamGain(audio_, media::effective_gain(volume_, muted_));
+                    SDL_SetAudioStreamGain(audio_, media::effective_gain(vol_.level, vol_.muted));
                 }
             }
         }
@@ -222,11 +227,11 @@ struct VideoPlayback::Impl {
     }
 
     // Helper for Task 6: apply volume/mute state to audio stream
-    // Task 6 will add key bindings for M, [, ] to change volume_/muted_ and call this
+    // Task 6 will add key bindings for M, [, ] to change vol_.level/vol_.muted and call this
     void apply_gain()
     {
         if (audio_) {
-            SDL_SetAudioStreamGain(audio_, media::effective_gain(volume_, muted_));
+            SDL_SetAudioStreamGain(audio_, media::effective_gain(vol_.level, vol_.muted));
         }
     }
 
@@ -258,15 +263,15 @@ struct VideoPlayback::Impl {
             case SDLK_J: do_seek(model_.position() - PLAYBACK_SEEK_STEP); break;
             case SDLK_L: do_seek(model_.position() + PLAYBACK_SEEK_STEP); break;
             case SDLK_M:
-                muted_ = !muted_;
+                vol_.muted = !vol_.muted;
                 apply_gain();
                 break;
             case SDLK_LEFTBRACKET:
-                volume_ = media::clamp_volume(volume_ - 0.05f);
+                vol_.level = media::clamp_volume(vol_.level - 0.05f);
                 apply_gain();
                 break;
             case SDLK_RIGHTBRACKET:
-                volume_ = media::clamp_volume(volume_ + 0.05f);
+                vol_.level = media::clamp_volume(vol_.level + 0.05f);
                 apply_gain();
                 break;
             default: break;
@@ -288,22 +293,22 @@ struct VideoPlayback::Impl {
 
     void set_volume_from_x(float mx)
     {
-        if (vol_track_.w <= 0.0f) return;
-        volume_ = media::clamp_volume((mx - vol_track_.x) / vol_track_.w);
-        muted_  = false;                       // grabbing the volume bar unmutes
+        if (vol_.bar.w <= 0.0f) return;
+        vol_.level = media::clamp_volume((mx - vol_.bar.x) / vol_.bar.w);
+        vol_.muted  = false;                       // grabbing the volume bar unmutes
         apply_gain();
     }
 
     void mouse_down(float mx, float my)
     {
         if (audio_) {
-            if (in_rect(spk_icon_, mx, my, 4.0f)) {     // click the speaker to (un)mute
-                muted_ = !muted_;
+            if (in_rect(vol_.icon, mx, my, 4.0f)) {     // click the speaker to (un)mute
+                vol_.muted = !vol_.muted;
                 apply_gain();
                 return;
             }
-            if (in_rect(vol_track_, mx, my, 8.0f)) {    // click/drag the volume bar
-                vol_scrubbing_ = true;
+            if (in_rect(vol_.bar, mx, my, 8.0f)) {    // click/drag the volume bar
+                vol_.scrubbing = true;
                 set_volume_from_x(mx);
                 return;
             }
@@ -316,13 +321,13 @@ struct VideoPlayback::Impl {
 
     void mouse_motion(float mx, float /*my*/, bool left_down)
     {
-        if (vol_scrubbing_ && left_down)
+        if (vol_.scrubbing && left_down)
             set_volume_from_x(mx);
         else if (scrubbing_ && left_down)
             do_seek(bar_x_to_time(mx, model_.duration(), track_.x, track_.w));
     }
 
-    void mouse_up() { scrubbing_ = false; vol_scrubbing_ = false; }
+    void mouse_up() { scrubbing_ = false; vol_.scrubbing = false; }
 
     void render(gfx::Renderer& rr, gfx::FontAtlas& font, const SDL_FRect& area)
     {
@@ -374,23 +379,23 @@ struct VideoPlayback::Impl {
             constexpr float SPK_W     = 13.0f;
             const float bar_x = text_x - PAD - VOL_BAR_W;
             const float bar_y = icon_cy - VOL_BAR_H * 0.5f;
-            vol_track_ = {bar_x, bar_y, VOL_BAR_W, VOL_BAR_H};
+            vol_.bar = {bar_x, bar_y, VOL_BAR_W, VOL_BAR_H};
 
             const float spk_x = bar_x - 10.0f - SPK_W;
-            spk_icon_ = {spk_x, icon_cy - 8.0f, SPK_W, 16.0f};
+            vol_.icon = {spk_x, icon_cy - 8.0f, SPK_W, 16.0f};
 
             // Speaker glyph (body rect + cone triangle); dimmed when muted.
-            const gfx::Color spk_c = muted_ ? gfx::theme::TEXT_FAINT : gfx::theme::TEXT;
+            const gfx::Color spk_c = vol_.muted ? gfx::theme::TEXT_FAINT : gfx::theme::TEXT;
             rr.draw_rect({spk_x, icon_cy - 4.0f, 5.0f, 8.0f}, spk_c);
             rr.draw_triangle({spk_x + 5.0f, icon_cy - 7.0f},
                              {spk_x + 5.0f, icon_cy + 7.0f},
                              {spk_x + SPK_W, icon_cy}, spk_c);
 
             // Volume bar: background, fill (empty when muted), draggable knob.
-            rr.draw_round_rect(vol_track_, VOL_BAR_H * 0.5f, gfx::theme::BORDER);
-            const float level  = muted_ ? 0.0f : volume_;
+            rr.draw_round_rect(vol_.bar, VOL_BAR_H * 0.5f, gfx::theme::BORDER);
+            const float level  = vol_.muted ? 0.0f : vol_.level;
             const float fill_w = VOL_BAR_W * level;
-            const gfx::Color accent = muted_ ? gfx::theme::TEXT_FAINT : gfx::theme::ACCENT;
+            const gfx::Color accent = vol_.muted ? gfx::theme::TEXT_FAINT : gfx::theme::ACCENT;
             if (fill_w > 0.0f)
                 rr.draw_round_rect({bar_x, bar_y, fill_w, VOL_BAR_H}, VOL_BAR_H * 0.5f, accent);
             const float vknob_x = bar_x + VOL_BAR_W * level;
@@ -399,8 +404,8 @@ struct VideoPlayback::Impl {
 
             controls_right = spk_x - 12.0f;        // seek track stops before the speaker
         } else {
-            vol_track_ = {0.0f, 0.0f, 0.0f, 0.0f};
-            spk_icon_  = {0.0f, 0.0f, 0.0f, 0.0f};
+            vol_.bar = {0.0f, 0.0f, 0.0f, 0.0f};
+            vol_.icon  = {0.0f, 0.0f, 0.0f, 0.0f};
         }
 
         // Seek track between the play icon and the volume/time region.
@@ -423,8 +428,8 @@ struct VideoPlayback::Impl {
     [[nodiscard]] double position() const { return clock(); }
     [[nodiscard]] bool audio_active() const { return audio_ != nullptr; }
     [[nodiscard]] uint64_t audio_samples_fed() const { return samples_fed_; }
-    [[nodiscard]] float audio_gain() const { return media::effective_gain(volume_, muted_); }
-    [[nodiscard]] SDL_FRect debug_vol_bar() const { return vol_track_; }
+    [[nodiscard]] float audio_gain() const { return media::effective_gain(vol_.level, vol_.muted); }
+    [[nodiscard]] SDL_FRect debug_vol_bar() const { return vol_.bar; }
     void update(double dt)
     {
         if (valid_) {
