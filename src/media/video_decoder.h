@@ -4,6 +4,7 @@
 
 #include <optional>
 #include <cstdint>
+#include <string_view>
 
 #include "media/decoded_frame.h"
 #include "vault/index.h"
@@ -60,6 +61,14 @@ private:
 
     // Helper: read one packet and send it to the decoder, handling EOF/flush.
     bool pump_one_packet();
+
+    // Helper: build a DecodedFrame from the just-received frame_ (swscale if needed).
+    std::optional<DecodedFrame> build_from_current_frame(double pts_seconds);
+
+    // Free all owned FFmpeg resources (destructor + open() error paths).
+    void reset();
+    // Log msg, reset(), and return false — used at every open() failure site.
+    bool fail_open(std::string_view msg);
 
     AVFormatContext* fmt_                = nullptr;
     AVCodecContext*  codec_ctx_          = nullptr;

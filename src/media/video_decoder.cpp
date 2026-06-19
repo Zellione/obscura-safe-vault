@@ -20,170 +20,89 @@ VideoDecoder::VideoDecoder() = default;
 
 VideoDecoder::~VideoDecoder()
 {
-    if (codec_ctx_) {
-        avcodec_free_context(&codec_ctx_);
-    }
-    if (fmt_) {
-        avformat_close_input(&fmt_);  // frees fmt_ itself
-    }
-    if (frame_) {
-        av_frame_free(&frame_);
-    }
-    if (pkt_) {
-        av_packet_free(&pkt_);
-    }
-    if (sws_) {
-        sws_freeContext(sws_);
-    }
-    if (conv_) {
-        av_frame_free(&conv_);
-    }
+    reset();
+}
+
+// Free every FFmpeg resource we own. Each free nulls its own pointer except
+// sws_, which we null explicitly. Shared by the destructor and open()'s error
+// paths so the per-failure cleanup isn't duplicated at every call site.
+void VideoDecoder::reset()
+{
+    if (codec_ctx_) avcodec_free_context(&codec_ctx_);
+    if (fmt_)       avformat_close_input(&fmt_);   // frees fmt_ itself
+    if (frame_)     av_frame_free(&frame_);
+    if (pkt_)       av_packet_free(&pkt_);
+    if (sws_)     { sws_freeContext(sws_); sws_ = nullptr; }
+    if (conv_)      av_frame_free(&conv_);
+}
+
+// Log an open() failure, release any partially-acquired state, and return false.
+bool VideoDecoder::fail_open(std::string_view msg)
+{
+    std::println(stderr, "[VideoDecoder] {}", msg);
+    reset();
+    return false;
 }
 
 bool VideoDecoder::open(AVIOContext* pb)
 {
-    if (!pb) {
-        std::println(stderr, "[VideoDecoder] AVIO context is null");
-        return false;
-    }
+    if (!pb) return fail_open("AVIO context is null");
 
-    // Allocate format context and assign the I/O context
     fmt_ = avformat_alloc_context();
-    if (!fmt_) {
-        std::println(stderr, "[VideoDecoder] Failed to allocate format context");
-        return false;
-    }
-
+    if (!fmt_) return fail_open("Failed to allocate format context");
     fmt_->pb = pb;
 
-    // Open input (NULL url since pb provides the data)
-    int ret = avformat_open_input(&fmt_, nullptr, nullptr, nullptr);
-    if (ret < 0) {
-        std::println(stderr, "[VideoDecoder] avformat_open_input failed: {}", ret);
-        // avformat_open_input frees fmt_ on failure; null it
+    // NULL url — pb supplies the data. On failure avformat_open_input frees fmt_
+    // itself, so null it before fail_open()/reset() to avoid a double-free.
+    if (avformat_open_input(&fmt_, nullptr, nullptr, nullptr) < 0) {
         fmt_ = nullptr;
-        return false;
+        return fail_open("avformat_open_input failed");
+    }
+    if (avformat_find_stream_info(fmt_, nullptr) < 0) {
+        return fail_open("avformat_find_stream_info failed");
     }
 
-    // Find stream info
-    ret = avformat_find_stream_info(fmt_, nullptr);
-    if (ret < 0) {
-        std::println(stderr, "[VideoDecoder] avformat_find_stream_info failed: {}", ret);
-        avformat_close_input(&fmt_);
-        fmt_ = nullptr;
-        return false;
-    }
-
-    // Find best video stream
     const AVCodec* decoder = nullptr;
-    stream_index_ = av_find_best_stream(fmt_, AVMEDIA_TYPE_VIDEO, -1, -1,
-                                        &decoder, 0);
-    if (stream_index_ < 0) {
-        std::println(stderr, "[VideoDecoder] No video stream found");
-        avformat_close_input(&fmt_);
-        fmt_ = nullptr;
-        return false;
-    }
-
-    if (!decoder) {
-        std::println(stderr, "[VideoDecoder] No decoder found");
-        avformat_close_input(&fmt_);
-        fmt_ = nullptr;
-        return false;
-    }
+    stream_index_ = av_find_best_stream(fmt_, AVMEDIA_TYPE_VIDEO, -1, -1, &decoder, 0);
+    if (stream_index_ < 0 || !decoder) return fail_open("No video stream/decoder found");
 
     const AVStream* stream = fmt_->streams[stream_index_];
-    if (!stream || !stream->codecpar) {
-        std::println(stderr, "[VideoDecoder] Invalid stream or codecpar");
-        avformat_close_input(&fmt_);
-        fmt_ = nullptr;
-        return false;
-    }
+    if (!stream || !stream->codecpar) return fail_open("Invalid stream or codecpar");
 
-    // Map codec ID to VideoCodec
     switch (stream->codecpar->codec_id) {
-        case AV_CODEC_ID_H264:
-            codec_ = vault::VideoCodec::H264;
-            break;
-        case AV_CODEC_ID_HEVC:
-            codec_ = vault::VideoCodec::HEVC;
-            break;
-        default:
-            std::println(stderr, "[VideoDecoder] Unsupported codec ID: {}",
-                        static_cast<int>(stream->codecpar->codec_id));
-            avformat_close_input(&fmt_);
-            fmt_ = nullptr;
-            return false;
+        case AV_CODEC_ID_H264: codec_ = vault::VideoCodec::H264; break;
+        case AV_CODEC_ID_HEVC: codec_ = vault::VideoCodec::HEVC; break;
+        default:               return fail_open("Unsupported codec");
     }
 
-    // Allocate and fill codec context
     codec_ctx_ = avcodec_alloc_context3(decoder);
-    if (!codec_ctx_) {
-        std::println(stderr, "[VideoDecoder] Failed to allocate codec context");
-        avformat_close_input(&fmt_);
-        fmt_ = nullptr;
-        return false;
+    if (!codec_ctx_) return fail_open("Failed to allocate codec context");
+    if (avcodec_parameters_to_context(codec_ctx_, stream->codecpar) < 0) {
+        return fail_open("avcodec_parameters_to_context failed");
+    }
+    if (avcodec_open2(codec_ctx_, decoder, nullptr) < 0) {
+        return fail_open("avcodec_open2 failed");
     }
 
-    ret = avcodec_parameters_to_context(codec_ctx_, stream->codecpar);
-    if (ret < 0) {
-        std::println(stderr, "[VideoDecoder] avcodec_parameters_to_context failed: {}", ret);
-        avcodec_free_context(&codec_ctx_);
-        avformat_close_input(&fmt_);
-        fmt_ = nullptr;
-        return false;
-    }
-
-    // Open the codec
-    ret = avcodec_open2(codec_ctx_, decoder, nullptr);
-    if (ret < 0) {
-        std::println(stderr, "[VideoDecoder] avcodec_open2 failed: {}", ret);
-        avcodec_free_context(&codec_ctx_);
-        avformat_close_input(&fmt_);
-        fmt_ = nullptr;
-        return false;
-    }
-
-    // Cache dimensions
-    width_  = codec_ctx_->width;
-    height_ = codec_ctx_->height;
-
-    // Cache time base for PTS calculation
-    time_base_ = av_q2d(stream->time_base);
-
-    // Cache raw stream time base for seek calculations
+    width_            = codec_ctx_->width;
+    height_           = codec_ctx_->height;
+    time_base_        = av_q2d(stream->time_base);
     stream_time_base_ = stream->time_base;
 
-    // Cache duration in microseconds
-    // Prefer fmt_->duration (in AV_TIME_BASE units = microseconds)
+    // Duration in microseconds: prefer fmt_->duration (AV_TIME_BASE units = µs).
     if (fmt_->duration > 0 && fmt_->duration != AV_NOPTS_VALUE) {
         duration_us_ = static_cast<uint64_t>(fmt_->duration);
     } else if (stream->duration > 0 && stream->duration != AV_NOPTS_VALUE) {
-        // Fall back to stream duration
-        duration_us_ = static_cast<uint64_t>(stream->duration * av_q2d(stream->time_base) * 1e6);
+        duration_us_ = static_cast<uint64_t>(static_cast<double>(stream->duration)
+                                             * av_q2d(stream->time_base) * 1e6);
     } else {
         duration_us_ = 0;
     }
 
-    // Allocate frame and packet
     frame_ = av_frame_alloc();
-    if (!frame_) {
-        std::println(stderr, "[VideoDecoder] Failed to allocate frame");
-        avcodec_free_context(&codec_ctx_);
-        avformat_close_input(&fmt_);
-        fmt_ = nullptr;
-        return false;
-    }
-
+    if (!frame_) return fail_open("Failed to allocate frame");
     pkt_ = av_packet_alloc();
-    if (!pkt_) {
-        std::println(stderr, "[VideoDecoder] Failed to allocate packet");
-        av_frame_free(&frame_);
-        avcodec_free_context(&codec_ctx_);
-        avformat_close_input(&fmt_);
-        fmt_ = nullptr;
-        return false;
-    }
+    if (!pkt_) return fail_open("Failed to allocate packet");
 
     return true;
 }
@@ -204,8 +123,7 @@ bool VideoDecoder::seek(double ts_seconds)
     );
 
     // Perform keyframe-anchored seek (backward to nearest keyframe)
-    int ret = av_seek_frame(fmt_, stream_index_, ts, AVSEEK_FLAG_BACKWARD);
-    if (ret < 0) {
+    if (const int ret = av_seek_frame(fmt_, stream_index_, ts, AVSEEK_FLAG_BACKWARD); ret < 0) {
         std::println(stderr, "[VideoDecoder] av_seek_frame failed: {}", ret);
         return false;
     }
@@ -223,7 +141,7 @@ bool VideoDecoder::seek(double ts_seconds)
 }
 
 // Helper: build a DecodedFrame from an AVFrame with I420 or NV12 pixel format (zero-copy).
-static DecodedFrame build_frame_i420_or_nv12(AVFrame* frame, double pts_seconds)
+static DecodedFrame build_frame_i420_or_nv12(const AVFrame* frame, double pts_seconds)
 {
     FramePixelFormat pix_fmt;
     int plane_count;
@@ -295,21 +213,20 @@ std::optional<DecodedFrame> VideoDecoder::convert_to_i420(double pts_seconds)
     conv_->width  = frame_->width;
     conv_->height = frame_->height;
 
-    int buf_ret = av_frame_get_buffer(conv_, 0);
-    if (buf_ret < 0) {
+    if (int buf_ret = av_frame_get_buffer(conv_, 0); buf_ret < 0) {
         std::println(stderr, "[VideoDecoder] av_frame_get_buffer failed: {}", buf_ret);
         return std::nullopt;
     }
 
     // Perform the scale/convert
-    int ret = sws_scale(sws_,
-                       frame_->data,
-                       frame_->linesize,
-                       0,
-                       frame_->height,
-                       conv_->data,
-                       conv_->linesize);
-    if (ret < 0) {
+    if (int ret = sws_scale(sws_,
+                            frame_->data,
+                            frame_->linesize,
+                            0,
+                            frame_->height,
+                            conv_->data,
+                            conv_->linesize);
+        ret < 0) {
         std::println(stderr, "[VideoDecoder] sws_scale failed: {}", ret);
         return std::nullopt;
     }
@@ -355,6 +272,16 @@ bool VideoDecoder::pump_one_packet()
     return true;
 }
 
+// Helper: turn the just-received frame_ into a DecodedFrame, converting via
+// swscale when the pixel format isn't directly uploadable.
+std::optional<DecodedFrame> VideoDecoder::build_from_current_frame(double pts_seconds)
+{
+    if (frame_->format == AV_PIX_FMT_YUV420P || frame_->format == AV_PIX_FMT_NV12) {
+        return build_frame_i420_or_nv12(frame_, pts_seconds);  // zero-copy
+    }
+    return convert_to_i420(pts_seconds);                       // swscale fallback
+}
+
 std::optional<DecodedFrame> VideoDecoder::next_frame()
 {
     if (!codec_ctx_ || !frame_ || !pkt_) {
@@ -362,57 +289,25 @@ std::optional<DecodedFrame> VideoDecoder::next_frame()
     }
 
     while (true) {
-        // Try to get a decoded frame
-        int ret = avcodec_receive_frame(codec_ctx_, frame_);
-
+        const int ret = avcodec_receive_frame(codec_ctx_, frame_);
         if (ret == 0) {
-            // Got a frame; calculate PTS
             double pts_seconds = 0.0;
             if (frame_->best_effort_timestamp != AV_NOPTS_VALUE) {
                 pts_seconds = static_cast<double>(frame_->best_effort_timestamp) * time_base_;
             }
-
-            // If we're seeking, skip frames until we reach the target
+            // Decode-forward past frames before a pending seek target.
             if (pending_seek_target_ >= 0.0 && pts_seconds < pending_seek_target_) {
-                // Keep decoding to reach the target
                 continue;
             }
-
-            // Clear pending seek target once we've reached it
-            if (pending_seek_target_ >= 0.0) {
-                pending_seek_target_ = -1.0;
-            }
-
-            // Handle pixel format conversion
-            switch (frame_->format) {
-                case AV_PIX_FMT_YUV420P:
-                case AV_PIX_FMT_NV12:
-                    // Direct pass-through: already compatible
-                    return build_frame_i420_or_nv12(frame_, pts_seconds);
-
-                default:
-                    // Unsupported format: convert via swscale
-                    return convert_to_i420(pts_seconds);
-            }
-        } else if (ret == AVERROR(EAGAIN)) {
-            // Decoder needs more input
-            if (flushed_) {
-                // Already sent flush packet and got EAGAIN again; end of stream
-                return std::nullopt;
-            }
-
-            // Try to read a packet and send it
-            if (!pump_one_packet()) {
-                return std::nullopt;
-            }
-            // Loop to try avcodec_receive_frame again
-        } else if (ret == AVERROR_EOF) {
-            // No more frames
-            return std::nullopt;
-        } else {
-            // Some other error — terminate gracefully
-            return std::nullopt;
+            pending_seek_target_ = -1.0;  // reached the target (or none pending)
+            return build_from_current_frame(pts_seconds);
         }
+        // EAGAIN before flush: feed one more packet, then retry the receive.
+        if (ret == AVERROR(EAGAIN) && !flushed_ && pump_one_packet()) {
+            continue;
+        }
+        // EAGAIN after flush, EOF, a read/decode error, or a failed pump → done.
+        return std::nullopt;
     }
 }
 
@@ -428,8 +323,7 @@ std::optional<image::ImageData> VideoDecoder::decode_poster_rgb()
     }
 
     // Decode the first frame.
-    auto decoded = next_frame();
-    if (!decoded) {
+    if (auto decoded = next_frame(); !decoded) {
         return std::nullopt;
     }
 
@@ -449,7 +343,7 @@ std::optional<image::ImageData> VideoDecoder::decode_poster_rgb()
     // Set conversion parameters.
     av_opt_set_int(sws_rgb, "srcw", w, 0);
     av_opt_set_int(sws_rgb, "srch", h, 0);
-    av_opt_set_int(sws_rgb, "src_format", static_cast<int>(frame_->format), 0);
+    av_opt_set_int(sws_rgb, "src_format", frame_->format, 0);
     av_opt_set_int(sws_rgb, "dstw", w, 0);
     av_opt_set_int(sws_rgb, "dsth", h, 0);
     av_opt_set_int(sws_rgb, "dst_format", static_cast<int>(AV_PIX_FMT_RGB24), 0);
@@ -479,7 +373,7 @@ std::optional<image::ImageData> VideoDecoder::decode_poster_rgb()
         return std::nullopt;
     }
 
-    uint8_t* rgb_buffer = static_cast<uint8_t*>(av_malloc(buffer_size));
+    auto* rgb_buffer = static_cast<uint8_t*>(av_malloc(buffer_size));
     if (!rgb_buffer) {
         av_frame_free(&rgb_frame);
         sws_freeContext(sws_rgb);
@@ -496,9 +390,9 @@ std::optional<image::ImageData> VideoDecoder::decode_poster_rgb()
     }
 
     // Convert (scale) the decoded frame to RGB24.
-    const int slices = sws_scale(sws_rgb, frame_->data, frame_->linesize, 0, h,
-                                rgb_frame->data, rgb_frame->linesize);
-    if (slices != h) {
+    if (const int slices = sws_scale(sws_rgb, frame_->data, frame_->linesize, 0, h,
+                                     rgb_frame->data, rgb_frame->linesize);
+        slices != h) {
         av_free(rgb_buffer);
         av_frame_free(&rgb_frame);
         sws_freeContext(sws_rgb);

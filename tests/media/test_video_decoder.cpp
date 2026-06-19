@@ -10,6 +10,7 @@
 
 #include "media/video_decoder.h"
 #include "media/chunk_avio.h"
+#include "media/mem_avio.h"
 #include "media/video_source.h"
 #include "vault/vault.h"
 #include "crypto/secure_mem.h"
@@ -349,6 +350,29 @@ TEST(video_decoder_multiple_seeks)
     auto f3 = dec.next_frame();
     REQUIRE(f3.has_value());
     CHECK(f3->pts_seconds < pts1);
+}
+
+// open() must reject a stream whose codec isn't H.264/HEVC (exercises the
+// unsupported-codec failure path), feeding the raw bytes via MemAvio.
+TEST(video_decoder_rejects_unsupported_codec)
+{
+    auto bytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_mpeg4.avi");  // mpeg4, not h264/hevc
+    REQUIRE(!bytes.empty());
+    media::MemAvio avio(bytes);
+    REQUIRE(avio.valid());
+    media::VideoDecoder dec;
+    CHECK(!dec.open(avio.ctx()));
+}
+
+// open() must reject a file with no video stream (audio only).
+TEST(video_decoder_rejects_audio_only)
+{
+    auto bytes = read_file(OSV_MEDIA_FIXTURE_DIR "/audio_only.m4a");  // aac, no video stream
+    REQUIRE(!bytes.empty());
+    media::MemAvio avio(bytes);
+    REQUIRE(avio.valid());
+    media::VideoDecoder dec;
+    CHECK(!dec.open(avio.ctx()));
 }
 
 #endif // OSV_VENDORED_AV

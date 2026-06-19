@@ -127,4 +127,33 @@ TEST(mem_avio_eof)
     CHECK(n <= 0);
 }
 
+// With data larger than the 64 KiB AVIO buffer, a seek can't be served from the
+// buffer, so FFmpeg actually calls our seek_cb (always as an absolute SEEK_SET) —
+// exercising the real seek path + the reject-before-start guard. The small-data
+// seeks above are absorbed by the buffer and never reach the callback.
+TEST(mem_avio_large_seek_invokes_callback)
+{
+    std::vector<uint8_t> big(128 * 1024);
+    for (size_t i = 0; i < big.size(); ++i) {
+        big[i] = static_cast<uint8_t>(i & 0xFF);
+    }
+    media::MemAvio avio(big);
+    REQUIRE(avio.valid());
+    AVIOContext* ctx = avio.ctx();
+
+    // Seek well beyond the 64 KiB buffer, then read — verifies the byte at the
+    // sought offset, proving seek_cb mapped the position correctly.
+    REQUIRE(avio_seek(ctx, 100000, SEEK_SET) == 100000);
+    uint8_t b = 0;
+    REQUIRE(avio_read(ctx, &b, 1) == 1);
+    CHECK(b == static_cast<uint8_t>(100000 & 0xFF));
+
+    REQUIRE(avio_seek(ctx, 70000, SEEK_SET) == 70000);
+    REQUIRE(avio_read(ctx, &b, 1) == 1);
+    CHECK(b == static_cast<uint8_t>(70000 & 0xFF));
+
+    // A seek to a negative absolute position must fail, not wrap.
+    CHECK(avio_seek(ctx, -5, SEEK_SET) < 0);
+}
+
 #endif  // OSV_VENDORED_AV

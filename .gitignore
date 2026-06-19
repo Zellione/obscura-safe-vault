@@ -43,3 +43,8 @@ Thumbs.db
 
 # Packaging output
 dist/
+
+# Local gcov coverage artifacts (CI generates these under build/)
+*.gcov
+*.gcda
+*.gcno
