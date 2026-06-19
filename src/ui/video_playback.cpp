@@ -241,6 +241,18 @@ struct VideoPlayback::Impl {
                 break;
             case SDLK_J: do_seek(model_.position() - PLAYBACK_SEEK_STEP); break;
             case SDLK_L: do_seek(model_.position() + PLAYBACK_SEEK_STEP); break;
+            case SDLK_M:
+                muted_ = !muted_;
+                apply_gain();
+                break;
+            case SDLK_LEFTBRACKET:
+                volume_ = media::clamp_volume(volume_ - 0.05f);
+                apply_gain();
+                break;
+            case SDLK_RIGHTBRACKET:
+                volume_ = media::clamp_volume(volume_ + 0.05f);
+                apply_gain();
+                break;
             default: break;
         }
     }
@@ -319,6 +331,32 @@ struct VideoPlayback::Impl {
         const float knob_x = time_to_bar_x(model_.position(), model_.duration(), track_.x, track_w);
         rr.draw_round_rect({knob_x - KNOB_R, icon_cy - KNOB_R, KNOB_R * 2.0f, KNOB_R * 2.0f},
                            KNOB_R, gfx::theme::ACCENT);
+
+        // Volume indicator (only when audio is available)
+        if (audio_) {
+            constexpr float VOL_BAR_W = 32.0f;
+            constexpr float VOL_BAR_H = 4.0f;
+            const float vol_x = text_x - VOL_BAR_W - 12.0f;
+            const float vol_y = icon_cy - VOL_BAR_H * 0.5f;
+
+            // Background track
+            rr.draw_round_rect({vol_x, vol_y, VOL_BAR_W, VOL_BAR_H}, VOL_BAR_H * 0.5f,
+                               gfx::theme::BORDER);
+
+            // Fill based on volume level
+            const float fill_w = VOL_BAR_W * volume_;
+            const gfx::Color fill_color = muted_ ? gfx::theme::TEXT_FAINT : gfx::theme::ACCENT;
+            if (fill_w > 0.0f)
+                rr.draw_round_rect({vol_x, vol_y, fill_w, VOL_BAR_H}, VOL_BAR_H * 0.5f,
+                                   fill_color);
+
+            // Draw mute indicator when muted
+            if (muted_) {
+                const float mute_text_x = vol_x - 20.0f;
+                rr.draw_text(font, mute_text_x, font.text_top_for_center(icon_cy), "M",
+                             gfx::theme::TEXT_DIM);
+            }
+        }
     }
 
     [[nodiscard]] bool valid() const { return valid_; }
