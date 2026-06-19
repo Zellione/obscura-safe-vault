@@ -15,6 +15,7 @@
 #include <print>
 
 #include "gfx/yuv_texture.h"
+#include "media/av_sync.h"
 #include "media/chunk_avio.h"
 #include "media/video_decoder.h"
 #include "media/video_source.h"
@@ -53,6 +54,13 @@ struct VideoPlayback::Impl {
     bool      scrubbing_    = false;
     SDL_FRect track_{};                                  // last-rendered seek-bar track rect
 
+    // Audio state
+    SDL_AudioStream* audio_       = nullptr;
+    uint64_t         samples_fed_ = 0;
+    double           seek_base_   = 0.0;
+    float            volume_      = 1.0f;
+    bool             muted_       = false;
+
     Impl(const vault::Vault& vault, const vault::IndexNode& node)
     {
         auto src = media::VideoSource::open(vault, node);
@@ -67,8 +75,29 @@ struct VideoPlayback::Impl {
         }
         valid_ = true;
         model_ = PlaybackModel(static_cast<double>(decoder_.duration_us()) / 1'000'000.0);
+
+        // Open audio device if available
+        if (decoder_.has_audio()) {
+            SDL_AudioSpec src{};
+            src.format   = SDL_AUDIO_F32;
+            src.channels = decoder_.audio_info().channels;
+            src.freq     = decoder_.audio_info().sample_rate;
+            audio_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &src,
+                                               nullptr, nullptr);
+            if (!audio_) {
+                std::println(stderr, "[VideoPlayback] audio open failed: {}", SDL_GetError());
+            } else {
+                SDL_SetAudioStreamGain(audio_, media::effective_gain(volume_, muted_));
+            }
+        }
+
         decode_into_pending();   // first frame ready; uploaded lazily on first render
         need_present_ = true;    // show frame 0 immediately, paused
+    }
+
+    ~Impl()
+    {
+        if (audio_) SDL_DestroyAudioStream(audio_);
     }
 
     void decode_into_pending()
@@ -84,6 +113,32 @@ struct VideoPlayback::Impl {
         }
     }
 
+    void pump_audio()
+    {
+        if (!audio_) return;
+        const int ch = decoder_.audio_info().channels;
+        const int sr = decoder_.audio_info().sample_rate;
+        const int target = sr * ch * (int)sizeof(float) / 5;   // ~200ms buffered
+        while (SDL_GetAudioStreamQueued(audio_) < target) {
+            auto a = decoder_.next_audio_frame();
+            if (!a) break;
+            SDL_PutAudioStreamData(audio_, a->samples.data(),
+                                   (int)(a->samples.size() * sizeof(float)));
+            samples_fed_ += a->samples.size() / (ch > 0 ? ch : 1);
+        }
+    }
+
+    double clock() const
+    {
+        if (!audio_) return model_.position();
+        const int ch = decoder_.audio_info().channels;
+        const int sr = decoder_.audio_info().sample_rate;
+        uint64_t queued_samples =
+            (uint64_t)SDL_GetAudioStreamQueued(audio_) / (sizeof(float) * (ch > 0 ? ch : 1));
+        uint64_t consumed = samples_fed_ > queued_samples ? samples_fed_ - queued_samples : 0;
+        return media::audio_clock(seek_base_, consumed, sr);
+    }
+
     // Upload pending_ to the GPU (durable copy) then decode the next frame into it.
     void present_pending(SDL_Renderer* r)
     {
@@ -95,12 +150,34 @@ struct VideoPlayback::Impl {
         decode_into_pending();
     }
 
-    // Decode + upload frames up to the model clock. Runs in render() (has a renderer).
+    // Decode + upload frames using audio clock (if available) or model clock fallback.
     void advance(SDL_Renderer* r)
     {
-        while (pending_ &&
-               (need_present_ || PlaybackModel::frame_due(model_.position(), pending_pts_)))
-            present_pending(r);
+        pump_audio();  // Ensure audio buffer is topped up
+
+        const double c = clock();
+        // Sync model position toward audio clock when audio is active
+        if (audio_ && model_.playing()) {
+            model_.seek_to(c);
+        }
+
+        // Drive video frames against the clock using av_sync
+        while (pending_) {
+            if (need_present_) {
+                present_pending(r);
+                need_present_ = false;
+            } else {
+                media::FrameAction act = media::decide(c, pending_pts_);
+                if (act == media::FrameAction::Hold) {
+                    break;
+                } else if (act == media::FrameAction::Drop) {
+                    decode_into_pending();
+                } else {  // Present
+                    present_pending(r);
+                }
+            }
+        }
+
         if (eof_ && !pending_ && model_.playing())
             model_.set_playing(false);   // pause at end of stream
     }
@@ -109,12 +186,32 @@ struct VideoPlayback::Impl {
     {
         const double tt = clamp_time(t, model_.duration());
         if (!decoder_.seek(tt)) return;
+        if (audio_) SDL_ClearAudioStream(audio_);
+        samples_fed_ = 0;
+        seek_base_   = tt;
         pending_.reset();
         eof_       = false;
         shown_pts_ = -1.0;
         decode_into_pending();
         model_.seek_to(pending_ ? pending_pts_ : tt);
         need_present_ = true;
+    }
+
+    void apply_pause_resume()
+    {
+        if (audio_) {
+            if (model_.playing()) SDL_ResumeAudioStreamDevice(audio_);
+            else                  SDL_PauseAudioStreamDevice(audio_);
+        }
+    }
+
+    // Helper for Task 6: apply volume/mute state to audio stream
+    // Task 6 will add key bindings for M, [, ] to change volume_/muted_ and call this
+    void apply_gain()
+    {
+        if (audio_) {
+            SDL_SetAudioStreamGain(audio_, media::effective_gain(volume_, muted_));
+        }
     }
 
     void key(SDL_Keycode k)
@@ -127,13 +224,16 @@ struct VideoPlayback::Impl {
                 } else {
                     model_.toggle();
                 }
+                apply_pause_resume();
                 break;
             case SDLK_COMMA:   // step back one frame (paused)
                 model_.set_playing(false);
+                apply_pause_resume();
                 do_seek(model_.position() - frame_dt_);
                 break;
             case SDLK_PERIOD:  // step forward one frame (paused)
                 model_.set_playing(false);
+                apply_pause_resume();
                 if (pending_) {
                     model_.seek_to(pending_pts_);
                     need_present_ = true;
@@ -223,7 +323,13 @@ struct VideoPlayback::Impl {
 
     [[nodiscard]] bool valid() const { return valid_; }
     [[nodiscard]] bool animating() const { return valid_ && model_.playing(); }
-    void update(double dt) { if (valid_) model_.tick(dt); }
+    void update(double dt)
+    {
+        if (valid_) {
+            model_.tick(dt);
+            apply_pause_resume();
+        }
+    }
 };
 
 #else  // !OSV_VENDORED_AV — playback unavailable; host falls back to the poster.
