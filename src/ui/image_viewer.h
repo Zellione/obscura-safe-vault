@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -16,6 +17,7 @@
 #include "ui/slideshow_view.h"
 #include "ui/strip_layout.h"
 #include "ui/tag_editor.h"
+#include "ui/video_playback.h"
 #include "ui/viewer_model.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
@@ -93,7 +95,8 @@ public:
     // static between inputs, so the app loop can idle in those modes.
     [[nodiscard]] bool animating() const override
     {
-        return mode_ == ViewMode::Slideshow && slideshow_.animating();
+        if (mode_ == ViewMode::Slideshow && slideshow_.animating()) return true;
+        return video_ && video_->animating();   // a playing video keeps the loop ticking
     }
 
 private:
@@ -111,6 +114,8 @@ private:
 
     void toggle_favorite_current();                 // flip favorite on the current image
     void show_image_at(int idx);                    // absolute, clamped, refit
+    [[nodiscard]] bool current_is_video() const;    // current album item is a video
+    void sync_video();                              // (re)build VideoPlayback (Fit-mode video only)
     void set_index(int delta);                      // wrap, reset view, rebuild
     void go_back();                                 // return to gallery / favorites
     void zoom_by(float factor, float cx, float cy); // centred on (cx, cy)
@@ -192,6 +197,12 @@ private:
 
     // Bounded set of decoded full-res textures (shared with the slideshow).
     FullTexCache full_cache_;
+
+    // Live playback for the current item when it is a video AND we are in Fit mode
+    // (null otherwise). pImpl, so this compiles without vendored FFmpeg (valid() is
+    // then false and the host shows the poster). Borrows the unlocked vault;
+    // destroyed on exit / item change before any lock (invariant: no UAF).
+    std::unique_ptr<VideoPlayback> video_;
 };
 
 } // namespace ui

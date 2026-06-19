@@ -56,7 +56,10 @@ src/
                                                — index.h: IndexNode carries
                                                  std::vector<std::string> tags +
                                                  bool favorite (gallery + image);
-                                                 INDEX_VERSION=3 (v1/v2 read back-
+                                                 INDEX_VERSION=4: Type::Video + VideoMeta
+                                                 (multi-chunk list + poster) + Vault::add_video/
+                                                 read_video/open_video_source (Phase 15);
+                                                 (v1–v3 read back-
                                                  compat: empty tags, favorite=false);
                                                  INDEX_MAX_TAGS=4096. Favorites
                                                  (Phase 13): Vault::toggle_favorite
@@ -86,6 +89,14 @@ src/
                                                  retain()/pending() (each screen owns
                                                  its own worker; FullTexCache +
                                                  GalleryGrid use it for async decode)
+  media/       video_source.*, chunk_avio.*,  — Phase 15 video (all gated OSV_VENDORED_AV):
+               mem_avio.*, video_decoder.*,      VideoSource = decrypt-on-demand byte stream over
+               video_probe.*, decoded_frame.h    a video's ChunkStore (mlock'd 1-chunk cache);
+                                                 ChunkAvio/MemAvio = AVIOContext (read+seek, never
+                                                 a temp file); VideoDecoder = FFmpeg demux + H.264/
+                                                 HEVC decode -> DecodedFrame (yuv420p/nv12, swscale
+                                                 fallback) + keyframe seek; probe_video =
+                                                 container/codec/dims/duration + first-frame poster.
   gfx/         window.*, renderer.*,           — SDL3 window/renderer, texture cache,
                texture_cache.*, text.*,        — stb_truetype text atlas
                theme.h                         — "Refined Slate" colour tokens +
@@ -103,13 +114,27 @@ src/
                                                  colour) via build_text_geometry
                                                  (pure/tested); draw_round_rect reuses
                                                  scratch buffers + a cached arc table.
+                                                 Phase 15: YuvTexture (streaming I420/NV12
+                                                 video texture) + Renderer::draw_triangle
+                                                 (play badge / play-pause icon).
   ui/          unlock_screen.*, gallery_grid.* — UI screens; gallery has Grid +
                                                  detailed List views (key L), live
                                                  width reflow, centred/elided labels
                image_viewer.*, widgets.*       — viewer has Fit + FillScroll + Slideshow
                                                  modes, bottom/left strip toggle (keys
                                                  F/T, P starts slideshow); widgets has
-                                                 button_state + elide_middle
+                                                 button_state + elide_middle. ImageViewer hosts
+                                                 a fit-only VideoPlayback when the current item
+                                                 is_video() (Phase 15: Space play/pause, J/L
+                                                 +-5s, ,/. frame-step, drag seek bar). GalleryGrid
+                                                 routes video imports to add_video + draws a play
+                                                 badge (draw_tile_thumb) in grid & list.
+               playback_model.*                — pure video transport maths: clock/clamp/
+                                                 seek-bar map/mm:ss/frame-due (Phase 15,
+                                                 pure/tested)
+               video_playback.*                — in-viewer video player: VideoDecoder + YUV
+                                                 texture + seek bar; pImpl gated on
+                                                 OSV_VENDORED_AV (non-AV build -> poster) (Phase 15)
                full_tex_cache.*                — shared decode→GPU full-res texture cache
                                                  (decrypt into mlock'd SecureBytes, wipe
                                                  after upload); used by viewer + slideshow

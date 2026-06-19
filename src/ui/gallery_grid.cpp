@@ -32,7 +32,7 @@ constexpr float LIST_HEADER = 30;  // column-header band above the list rows
 // Right-anchored metadata column widths (px) for the detailed list view.
 constexpr float COL_DIMS = 165;   // wide enough for the "DIMENSIONS" header
 constexpr float COL_SIZE = 100;
-constexpr float COL_TYPE = 70;
+constexpr float COL_TYPE = 90;    // fits image formats and "H.264"/"H.265"
 constexpr float COL_DATE = 120;
 
 // Centre the `cols` columns horizontally in a `win_w`-wide window so the left and
@@ -85,8 +85,9 @@ bool GalleryGrid::current_allows_images() const
 
 bool GalleryGrid::current_allows_galleries() const
 {
+    // A leaf that holds media (images OR videos) can't also hold sub-galleries.
     return std::ranges::none_of(children_,
-                                [](const vault::IndexNode* c) { return c->is_image(); });
+                                [](const vault::IndexNode* c) { return c->is_media(); });
 }
 
 void GalleryGrid::open_selected()
@@ -194,10 +195,14 @@ void GalleryGrid::do_import(const std::filesystem::path& file_path)
     if (!bytes) { error_ = "Could not read " + file_path.string(); return; }
 
     const std::string fname = file_path.filename().string();
-    switch (vault_.add_image(nav_.path(), *bytes, fname)) {
+    const bool video = is_video_filename(fname);
+    const vault::VaultResult res = video ? vault_.add_video(nav_.path(), *bytes, fname)
+                                         : vault_.add_image(nav_.path(), *bytes, fname);
+    switch (res) {
         case Ok:            break;
         case AlreadyExists: error_ = "Already exists: " + fname; break;
-        case InvalidArg:    error_ = "Cannot add an image here."; break;
+        case InvalidArg:    error_ = video ? "Unsupported or corrupt video: " + fname
+                                           : "Cannot add media here."; break;
         default:            error_ = "Import failed: " + fname; break;
     }
 }
@@ -581,6 +586,13 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float /*H*/)
             r.draw_text(font_, size_x, ty, "-", meta_c);
             r.draw_text(font_, type_x, ty, "DIR", meta_c);
             r.draw_text(font_, date_x, ty, "-", meta_c);
+        } else if (n->is_video()) {
+            const auto& vm = n->vmeta;
+            // DIMENSIONS column doubles as the video's length (its play duration).
+            r.draw_text(font_, dims_x, ty, format_duration(vm.duration_us), meta_c);
+            r.draw_text(font_, size_x, ty, format_size(vm.orig_size), meta_c);
+            r.draw_text(font_, type_x, ty, video_codec_name(vm.codec), meta_c);
+            r.draw_text(font_, date_x, ty, format_date(vm.created_ts), meta_c);
         } else {
             r.draw_text(font_, dims_x, ty, format_dimensions(m.width, m.height), meta_c);
             r.draw_text(font_, size_x, ty, format_size(m.orig_size), meta_c);
@@ -608,6 +620,19 @@ void GalleryGrid::draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
         r.draw_image(tex, fit_rect(tw, th, box));
     } else {
         r.draw_text(font_, box.x + 6, box.y + box.h * 0.5f - 14, "(no thumb)", TEXT_DIM);
+    }
+    // Video: a centred play-triangle badge over the poster (with a 1px dark
+    // drop-shadow for contrast — the renderer's default blend mode is opaque).
+    if (n.is_video()) {
+        const float cx = box.x + box.w * 0.5f;
+        const float cy = box.y + box.h * 0.5f;
+        const float s  = std::min(box.w, box.h) * 0.16f;
+        const SDL_FPoint a{cx - s * 0.5f, cy - s};
+        const SDL_FPoint b{cx - s * 0.5f, cy + s};
+        const SDL_FPoint c{cx + s, cy};
+        r.draw_triangle({a.x + 2, a.y + 2}, {b.x + 2, b.y + 2}, {c.x + 2, c.y + 2},
+                        gfx::Color{0, 0, 0, 255});
+        r.draw_triangle(a, b, c, gfx::Color{255, 255, 255, 255});
     }
 }
 

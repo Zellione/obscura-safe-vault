@@ -283,6 +283,8 @@ project "osv_tests"
         "src/ui/search_model.cpp",
         "src/ui/export.cpp",
         "src/ui/slideshow_model.cpp",
+        "src/ui/playback_model.cpp",
+        "src/ui/video_playback.cpp",
     }
 
     includedirs {

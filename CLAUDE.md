@@ -71,6 +71,7 @@ navigable with arrow keys.
 | Authentication | **Password + optional keyfile** | "Something you know + something you have." Final key = Argon2id(password ‖ keyfile, salt). Changing the password re-wraps the master key only (no bulk re-encrypt). |
 | Image decode | **stb_image** (header-only) | JPEG/PNG/GIF/BMP/TGA/HDR decoded directly from decrypted in-memory buffers. Zero dependencies, no temp files. |
 | Extra image formats | **libwebp 1.4.0** (WebP), **libheif 1.18.2** + **libde265 1.0.15** (HEIC) + **libaom 3.14.1** (AVIF, decoder-only) — all Phase 9 | Decode-only. Vendored git submodules, cmake-built static into `vendor/codecs-prefix/` by `scripts/build_codecs.{sh,bat}`. One `decode_heif_from_memory` covers HEIC+AVIF (libheif dispatches by brand). libaom needs **nasm**. |
+| Video decode | **FFmpeg/libav 7.1.1** (decode-only static) — Phase 15 | Stream a video's frames directly from its encrypted chunks via a custom `AVIOContext` over `ChunkStore` (no temp file). H.264/H.265 video; mov/mp4/m4v + matroska/webm demuxers; libswscale for non-4:2:0; encoders/muxers/protocols/network disabled. Vendored git submodule, configure-built static into `vendor/codecs-prefix/` by `scripts/build_codecs.{sh,bat}`; linked by `link_av()` under `OSV_VENDORED_AV`. Needs **nasm** (like libaom). |
 | Thumbnails | **Pre-generated, stored encrypted in vault** | Gallery scrolling decrypts only the small thumbnail blobs — no full-image decode needed while browsing. |
 | Gallery model | **Free-nesting galleries; images only in leaf galleries** | A folder shows either sub-folders *or* images, never a mix. Cleaner grid view and simpler tree logic. |
 | Dependency management | **Vendored git submodules** under `vendor/` | Hermetic, reproducible, offline. SDL3 is built from source by `scripts/setup.sh` (cmake once); monocypher/stb are compiled directly by premake. |
@@ -131,8 +132,11 @@ src/
                                             manager after 5 min with no user input.
   crypto/    crypto.h, kdf.*, aead.*,     ← Monocypher wrappers (Phase 1)
              secure_mem.*, random.*
-  vault/     vault.h, header.*, index.*,  ← container format (Phase 2)
-             chunk_store.*, vault.*,
+  vault/     vault.h, header.*, index.*,  ← container format (Phase 2). index.h adds
+             chunk_store.*, vault.*,         IndexNode::Type::Video + VideoMeta (multi-chunk
+                                            list + poster), INDEX_VERSION=4 (v1–v3 read back-
+                                            compat); Vault::add_video/read_video/open_video_source
+                                            + read_thumbnail returns the poster (Phase 15).
              transfer.*                   ← transfer_image + image_target_galleries (PR2);
                                             transfer_gallery (recursive copy-then-delete) +
                                             gallery_target_parents (PR3); TransferMode
@@ -146,14 +150,29 @@ src/
              format_registry.*,           ← decoders (Phase 9)
              decoder.*,                   ← Decoder interface + DecoderRegistry
              decode_webp.*, decode_heif.*    (polymorphic dispatch, Phase 9)
+  media/     video_source.*,             ← decrypt-on-demand byte stream over a video's
+             chunk_avio.*,                  ChunkStore (mlock'd one-chunk cache); AVIOContext
+             mem_avio.*,                    wrapper (read+seek, never a temp file); in-RAM
+             video_decoder.*,              AVIO for the import probe; FFmpeg demux + H.264/
+             video_probe.*,                HEVC decode → DecodedFrame (yuv420p/nv12, swscale
+             decoded_frame.h                fallback) + keyframe seek; container/codec probe.
+                                            All gated by OSV_VENDORED_AV (Phase 15).
   gfx/       window.{h,cpp},             ← SDL3 window + renderer (Phase 0)
              renderer.{h,cpp},            ← texture cache, text atlas (Phase 4)
              texture_cache.*, text.*,
-             theme.h                      ← "Refined Slate" colour tokens (UI overhaul)
+             yuv_texture.*,               ← streaming YUV(I420/NV12) texture for video (Phase 15)
+             theme.h                      ← "Refined Slate" colour tokens (UI overhaul);
+                                            Renderer also has draw_triangle (play badge/icon)
   ui/        input.h,                    ← input abstraction (Phase 5)
              unlock_screen.*,             ← unlock + create vault (Phase 5)
              gallery_grid.*,              ← breadcrumb grid (Phase 5)
-             image_viewer.*,              ← zoom/pan + thumb strip + fill-scroll + slideshow mode
+             image_viewer.*,              ← zoom/pan + thumb strip + fill-scroll + slideshow;
+                                            hosts a fit-only VideoPlayback for video items (Phase 15)
+             playback_model.*,            ← pure video transport maths: clock/clamp/seek-bar
+                                            map/mm:ss/frame-due (Phase 15, pure/tested)
+             video_playback.*,            ← in-viewer video player: decoder + YUV texture +
+                                            draggable seek bar; pImpl gated on OSV_VENDORED_AV
+                                            (non-AV build → poster fallback) (Phase 15)
              full_tex_cache.*,            ← shared decode→GPU texture cache (Phase 11 extract)
              slideshow_view.*,            ← full-screen slideshow SDL plumbing (Phase 11)
              strip_layout.*,              ← orientation-aware strip geometry (UI overhaul)
@@ -195,7 +214,8 @@ vendor/
   libde265/       ← git submodule, cmake → vendor/codecs-prefix (HEIC)
   libaom/         ← git submodule, cmake → vendor/codecs-prefix (AVIF, decoder-only)
   libheif/        ← git submodule, cmake → vendor/codecs-prefix (HEIC/AVIF)
-  codecs-prefix/  ← staging install prefix for the four codecs (gitignored)
+  ffmpeg/         ← git submodule, configure → vendor/codecs-prefix (Phase 15, decode-only)
+  codecs-prefix/  ← staging install prefix for the codecs + FFmpeg (gitignored)
 tests/
   crypto/         ← known-answer tests for KDF + AEAD (Phase 1)
   vault/          ← round-trip tests: create → add → read → checksum (Phase 2)
@@ -313,7 +333,7 @@ premake-core GitHub releases. It is **not** committed to the repo.
 
 | Topic | When | Notes |
 |---|---|---|
-| Video playback | Phase 10+ | ffmpeg; streaming decode from encrypted chunks. Much larger scope. |
+| Video playback | ✅ Phase 15 (video frames + seek); audio + A/V sync Phase 16 | FFmpeg/libav decode-only; streams from encrypted chunks via a custom AVIO (no temp file). |
 | Tags / search | Phase 10+ | Metadata index alongside the gallery tree. |
 | Multiple vaults | Phase 10+ | Separate vault files, possibly with a "vault manager" screen. |
 | HEIC / AVIF | Phase 9 | libheif + libavif; heavy codec deps. |

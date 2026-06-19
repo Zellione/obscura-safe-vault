@@ -37,3 +37,35 @@ TEST(image_format_name_maps_enum)
     CHECK_EQ(ui::image_format_name(AVIF), std::string_view("AVIF"));
     CHECK_EQ(ui::image_format_name(Unknown), std::string_view("-"));
 }
+
+TEST(format_duration_us_to_clock)
+{
+    CHECK_EQ(ui::format_duration(0), std::string("0:00"));
+    CHECK_EQ(ui::format_duration(1'500'000), std::string("0:01"));        // 1.5 s
+    CHECK_EQ(ui::format_duration(65'000'000), std::string("1:05"));       // 65 s
+    CHECK_EQ(ui::format_duration(3'661'000'000ULL), std::string("1:01:01"));
+}
+
+TEST(video_codec_and_type_labels)
+{
+    using enum vault::VideoCodec;
+    CHECK_EQ(ui::video_codec_name(H264), std::string_view("H.264"));
+    CHECK_EQ(ui::video_codec_name(HEVC), std::string_view("H.265"));
+    CHECK_EQ(ui::video_codec_name(Unknown), std::string_view("Video"));
+    CHECK_EQ(ui::video_type_label(H264), std::string("Video (H.264)"));
+    CHECK_EQ(ui::video_type_label(Unknown), std::string("Video"));
+}
+
+TEST(is_video_filename_by_extension)
+{
+    CHECK(ui::is_video_filename("clip.mp4"));
+    CHECK(ui::is_video_filename("CLIP.MP4"));        // case-insensitive
+    CHECK(ui::is_video_filename("movie.mkv"));
+    CHECK(ui::is_video_filename("a.b.webm"));        // last extension wins
+    CHECK(ui::is_video_filename("phone.mov"));
+    CHECK(ui::is_video_filename("old.m4v"));
+    CHECK_FALSE(ui::is_video_filename("photo.jpg"));
+    CHECK_FALSE(ui::is_video_filename("noext"));
+    CHECK_FALSE(ui::is_video_filename(""));
+    CHECK_FALSE(ui::is_video_filename("trailingdot."));
+}
