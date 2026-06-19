@@ -280,10 +280,7 @@ std::optional<DecodedFrame> VideoDecoder::convert_to_i420(double pts_seconds)
 // Returns false at EOF.
 bool VideoDecoder::read_and_route()
 {
-    int ret = av_read_frame(fmt_, pkt_);
-    if (ret == AVERROR_EOF) {
-        return false;
-    } else if (ret < 0) {
+    if (int ret = av_read_frame(fmt_, pkt_); ret == AVERROR_EOF || ret < 0) {
         return false;
     }
 
@@ -381,6 +378,28 @@ void VideoDecoder::decode_audio_packet()
     }
 }
 
+// Helper: handle EAGAIN case (feed more packets or return nullptr).
+// Returns true to continue the main loop, false to return nullptr.
+bool VideoDecoder::handle_eagain_case()
+{
+    if (!drain_video_queue()) {
+        return false;  // send failed; caller returns nullptr
+    }
+    if (!vq_.empty()) {
+        return true;  // We just fed a queued packet; retry receive
+    }
+
+    // No queued packets: read and route from demuxer
+    if (!read_and_route()) {
+        // EOF: send flush packet
+        flushed_ = true;
+        avcodec_send_packet(codec_ctx_, nullptr);
+        return true;  // Continue to retry receive
+    }
+    // After routing, try to send any new video packet
+    return drain_video_queue();  // true if sent/queue empty, false if send failed
+}
+
 std::optional<DecodedFrame> VideoDecoder::next_frame()
 {
     if (!codec_ctx_ || !frame_ || !pkt_) {
@@ -404,26 +423,10 @@ std::optional<DecodedFrame> VideoDecoder::next_frame()
 
         // EAGAIN before flush: feed one more packet
         if (ret == AVERROR(EAGAIN) && !flushed_) {
-            if (!drain_video_queue()) {
-                return std::nullopt;  // send failed
+            if (handle_eagain_case()) {
+                continue;  // Continue the loop to retry receive
             }
-            if (!vq_.empty()) {
-                continue;  // We just fed a queued packet; retry receive
-            }
-
-            // No queued packets: read and route from demuxer
-            if (!read_and_route()) {
-                // EOF: send flush packet
-                flushed_ = true;
-                avcodec_send_packet(codec_ctx_, nullptr);
-                continue;
-            }
-            // After routing, try to send any new video packet
-            if (drain_video_queue()) {
-                continue;  // sent or queue empty; retry receive
-            }
-            // send failed
-            return std::nullopt;
+            return std::nullopt;  // send failed
         }
 
         // EAGAIN after flush, EOF, a read/decode error, or a failed pump → done.
@@ -459,12 +462,9 @@ std::optional<AudioFrame> VideoDecoder::next_audio_frame()
 
     // Read from demuxer until we get an audio packet or EOF
     bool eof = false;
-    while (true) {
+    while (aq_.empty()) {
         if (!read_and_route()) {
             eof = true;
-            break;
-        }
-        if (!aq_.empty()) {
             break;
         }
     }

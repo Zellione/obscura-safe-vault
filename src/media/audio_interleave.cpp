@@ -41,7 +41,7 @@ inline float read_sample_as_float<int32_t>(const uint8_t* plane, int index)
     int32_t sample = 0;
     std::memcpy(&sample, plane + index * static_cast<int>(sizeof(int32_t)),
                 sizeof(int32_t));
-    return sample / 2147483648.0f;
+    return static_cast<float>(sample) / 2147483648.0f;
 }
 
 template <>

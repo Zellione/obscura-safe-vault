@@ -96,17 +96,8 @@ void AudioDecoder::decode(const AVPacket* pkt, std::vector<AudioFrame>& out)
     }
 
     // Receive all available frames
-    while (true) {
-        const int ret = avcodec_receive_frame(ctx_, frame_);
-        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
-            // No more frames available
-            break;
-        }
-        if (ret < 0) {
-            std::println(stderr, "[AudioDecoder] avcodec_receive_frame error: {}", ret);
-            break;
-        }
-
+    int ret;
+    while ((ret = avcodec_receive_frame(ctx_, frame_)) == 0) {
         // Build AudioFrame from the decoded frame
         const int n = frame_->nb_samples;
         const int ch = channels_;
@@ -123,16 +114,21 @@ void AudioDecoder::decode(const AVPacket* pkt, std::vector<AudioFrame>& out)
         }
 
         // Use pure interleave function to convert all sample formats to F32
-        const auto fmt = static_cast<int>(frame_->format);
-        if (!interleave_to_f32(frame_->data, frame_->ch_layout.nb_channels, n, ch, fmt,
-                               af.samples)) {
-            std::println(stderr, "[AudioDecoder] Unsupported sample format: {}", fmt);
+        if (!interleave_to_f32(frame_->data, frame_->ch_layout.nb_channels, n, ch,
+                               frame_->format, af.samples)) {
+            std::println(stderr, "[AudioDecoder] Unsupported sample format: {}",
+                        frame_->format);
             continue;
         }
 
         out.push_back(std::move(af));
     }
+
+    if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) {
+        std::println(stderr, "[AudioDecoder] avcodec_receive_frame error: {}", ret);
+    }
 }
+
 
 void AudioDecoder::flush()
 {

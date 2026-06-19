@@ -91,6 +91,10 @@ private:
     // Helper: decode one audio packet from aq_, accumulate frames to audio_out_.
     void decode_audio_packet();
 
+    // Helper: handle EAGAIN case in next_frame (feed more packets or return nullptr).
+    // Returns true to continue the main loop, false to return nullptr.
+    [[nodiscard]] bool handle_eagain_case();
+
     // Free all owned FFmpeg resources (destructor + open() error paths).
     void reset();
     // Log msg, reset(), and return false — used at every open() failure site.
