@@ -118,10 +118,11 @@ TEST(video_playback_av_sync_seek_realign_and_writes_no_disk)
         vp.handle_key(SDLK_L);  // seek +5s (clamps to duration)
         vp.render(r, font, area);
 
-        // Assertion (b): after seek, position should re-align to ~the seek target.
-        // Audio and video clocks should be synchronized.
+        // Assertion (b): after seek, position should re-align to the clamped target.
+        // Audio and video clocks should be synchronized. The fixture is ~1.0s, so
+        // seek +5s clamps to end; assert position is within ~0.1s of end.
         const double pos_after_seek = vp.position();
-        CHECK(pos_after_seek >= pos_before_seek);  // moved forward (or to end)
+        CHECK(pos_after_seek >= 0.9);  // clamped to near end (~1.0s - 0.1s tolerance)
 
         // Resume play to exercise audio feed path
         vp.handle_key(SDLK_SPACE);
@@ -134,8 +135,11 @@ TEST(video_playback_av_sync_seek_realign_and_writes_no_disk)
         // Seek backward
         vp.handle_key(SDLK_J);  // seek -5s (clamps to 0)
         vp.render(r, font, area);
+        // Assertion (d): after backward seek, position should re-align to the start.
+        // The fixture is ~1.0s, so seek -5s clamps to start; assert position is
+        // within ~0.1s of 0.0 (both audio and video at the beginning).
         const double pos_after_backward_seek = vp.position();
-        CHECK(pos_after_backward_seek <= pos_after_seek);
+        CHECK(pos_after_backward_seek <= 0.1);  // clamped to near start (~0.1s tolerance)
 
         // Final render to exercise any remaining decode path
         vp.render(r, font, area);
