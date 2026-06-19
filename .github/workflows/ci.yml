@@ -156,15 +156,17 @@ jobs:
             --slave /usr/bin/g++ g++ /usr/bin/g++-14
 
       # -----------------------------------------------------------------------
-      # Vendored image codecs (libwebp + HEIC/AVIF stack) -> vendor/codecs-prefix
-      # (cached by submodule commit hash, like SDL3).
+      # Vendored image codecs (libwebp + HEIC/AVIF stack) + FFmpeg -> vendor/codecs-prefix.
+      # Keyed on the submodule set (.gitmodules) AND scripts/build_codecs.{sh,bat}, so a
+      # change to the codec/FFmpeg configure flags (e.g. enabling audio decoders) busts the
+      # cache and forces a rebuild — build_codecs skips when the lib already exists.
       # -----------------------------------------------------------------------
       - name: Cache vendored codecs build
         uses: actions/cache@v4
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v3-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          key: codecs-v4-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
@@ -288,7 +290,7 @@ jobs:
         with:
           path: vendor/codecs-prefix
           # win2022 toolchain tag — see the SDL3 cache key note above.
-          key: codecs-v3-${{ runner.os }}-win2022-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          key: codecs-v4-${{ runner.os }}-win2022-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
@@ -388,7 +390,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v3-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          key: codecs-v4-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
@@ -536,7 +538,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v3-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          key: codecs-v4-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
@@ -701,7 +703,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v3-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          key: codecs-v4-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: env.SONAR_TOKEN != '' && steps.cache-codecs.outputs.cache-hit != 'true'

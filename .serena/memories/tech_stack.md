@@ -18,19 +18,22 @@
 | libde265 | 1.0.15 | HEIC (HEVC) decode; cmake → `vendor/codecs-prefix` |
 | libaom | 3.14.1 | AVIF (AV1) decode, decoder-only; needs **nasm**; cmake → `vendor/codecs-prefix` |
 | libheif | 1.18.2 | HEIC/AVIF container; one `decode_heif_from_memory` covers both |
-| FFmpeg/libav | 7.1.1 | Video decode-only (H.264/H.265; mov/mp4/m4v + matroska/webm demux; libswscale); configure-built static → `vendor/codecs-prefix`; needs **nasm**; linked by `link_av()` (avformat/avcodec/swscale/avutil) under `OSV_VENDORED_AV` (Phase 15) |
+| FFmpeg/libav | 7.1.1 | Video & audio decode-only (H.264/H.265; aac/opus/mp3/vorbis/flac/ac3 audio; mov/mp4/m4v + matroska/webm demux; libswscale for video, swresample linked as transitive dependency of audio decoders — we do NOT use swresample for audio conversion, SDL_AudioStream handles that); configure-built static → `vendor/codecs-prefix`; needs **nasm**; linked by `link_av()` (avformat/avcodec/swscale/swresample/avutil) under `OSV_VENDORED_AV` (Phase 15–16) |
 
 Image codecs are built by `scripts/build_codecs.{sh,bat}` (shared by `setup.{sh,bat}` and CI)
 and installed into `vendor/codecs-prefix/`; premake's `link_image_codecs()` links them in
 order `heif → de265 → aom → webp → sharpyuv`. The build passes
 `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` (libde265's pre-3.5 cmake_minimum under CMake 4.x).
 
-**FFmpeg (Phase 15)** is a sibling vendored submodule (`vendor/ffmpeg`) built via **configure**
+**FFmpeg (Phase 15–16)** is a sibling vendored submodule (`vendor/ffmpeg`) built via **configure**
 (not cmake) into the same `vendor/codecs-prefix` by `build_codecs.{sh,bat}`: decode-only
-(`--disable-everything` then opt-in h264/hevc decoders, mov/mp4/matroska demuxers, swscale; no
-encoders/muxers/protocols/network/programs). `link_av()` links avformat/avcodec/swscale/avutil and
-defines `OSV_VENDORED_AV` **only when `lib/libavcodec.a` is present**, so non-FFmpeg builds stay
-green. Index format is now `INDEX_VERSION = 4` (adds `Type::Video` + `VideoMeta`; v1–v3 read back-compat).
+(`--disable-everything` then opt-in h264/hevc decoders, aac/opus/mp3/vorbis/flac/ac3 audio decoders,
+mov/mp4/matroska demuxers, swscale + swresample; no encoders/muxers/protocols/network/programs).
+`link_av()` links avformat/avcodec/swscale/swresample/avutil and defines `OSV_VENDORED_AV` **only
+when `lib/libavcodec.a` is present**, so non-FFmpeg builds stay green. Index format is now
+`INDEX_VERSION = 4` (adds `Type::Video` + `VideoMeta`; v1–v3 read back-compat). Audio samples decoded
+by `AudioDecoder` (planar→interleaved F32) flow into `SDL_AudioStream` (SDL does rate/format/channel
+conversion using its own resampler — swresample is a transitive dependency but not used by our code).
 
 ## Crypto
 - AEAD: XChaCha20-Poly1305 (192-bit nonce, random per chunk)
