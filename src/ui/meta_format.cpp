@@ -1,8 +1,12 @@
 #include "ui/meta_format.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <format>
+#include <string_view>
+
+#include "ui/playback_model.h"   // format_clock (shared time formatting)
 
 namespace ui {
 
@@ -50,6 +54,39 @@ std::string_view image_format_name(vault::ImageFormat f) noexcept
         case Unknown: break;
     }
     return "-";
+}
+
+std::string format_duration(uint64_t microseconds)
+{
+    return format_clock(static_cast<double>(microseconds) / 1'000'000.0);
+}
+
+std::string_view video_codec_name(vault::VideoCodec c) noexcept
+{
+    using enum vault::VideoCodec;
+    switch (c) {
+        case H264: return "H.264";
+        case HEVC: return "H.265";
+        case Unknown: break;
+    }
+    return "Video";
+}
+
+std::string video_type_label(vault::VideoCodec c) noexcept
+{
+    if (c == vault::VideoCodec::Unknown) return "Video";
+    return std::format("Video ({})", video_codec_name(c));
+}
+
+bool is_video_filename(std::string_view filename) noexcept
+{
+    const auto dot = filename.find_last_of('.');
+    if (dot == std::string_view::npos || dot + 1 >= filename.size()) return false;
+    std::string ext;
+    for (const char c : filename.substr(dot + 1))
+        ext.push_back(static_cast<char>((c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c));
+    static constexpr std::array<std::string_view, 5> kVideoExts{"mp4", "mkv", "webm", "mov", "m4v"};
+    return std::ranges::find(kVideoExts, ext) != kVideoExts.end();
 }
 
 } // namespace ui

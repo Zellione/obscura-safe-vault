@@ -22,4 +22,17 @@ namespace ui {
 // Short uppercase format name ("JPEG", "PNG", ...); "-" for Unknown.
 [[nodiscard]] std::string_view image_format_name(vault::ImageFormat f) noexcept;
 
+// Video duration from microseconds, as "m:ss" / "h:mm:ss" (via format_clock).
+[[nodiscard]] std::string format_duration(uint64_t microseconds);
+
+// Codec display name ("H.264", "H.265"); "Video" for Unknown.
+[[nodiscard]] std::string_view video_codec_name(vault::VideoCodec c) noexcept;
+
+// List-view type label: "Video (H.264)" etc.; bare "Video" for Unknown.
+[[nodiscard]] std::string video_type_label(vault::VideoCodec c) noexcept;
+
+// True if `filename`'s extension names a supported video container (case-
+// insensitive): mp4, mkv, webm, mov, m4v. Used to route imports to add_video.
+[[nodiscard]] bool is_video_filename(std::string_view filename) noexcept;
+
 } // namespace ui

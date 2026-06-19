@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -16,6 +17,7 @@
 #include "ui/slideshow_view.h"
 #include "ui/strip_layout.h"
 #include "ui/tag_editor.h"
+#include "ui/video_playback.h"
 #include "ui/viewer_model.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
@@ -93,7 +95,8 @@ public:
     // static between inputs, so the app loop can idle in those modes.
     [[nodiscard]] bool animating() const override
     {
-        return mode_ == ViewMode::Slideshow && slideshow_.animating();
+        if (mode_ == ViewMode::Slideshow && slideshow_.animating()) return true;
+        return video_ && video_->animating();   // a playing video keeps the loop ticking
     }
 
 private:
@@ -102,20 +105,20 @@ private:
     void handle_key(SDL_Keycode key);
     void handle_key_fit(SDL_Keycode key);
     void handle_key_scroll(SDL_Keycode key);
+    void handle_key_video(SDL_Keycode key);         // Space/,/./J/L + F/arrows for a video item
     void handle_mouse_down(const SDL_MouseButtonEvent& b);
     void handle_wheel(const SDL_MouseWheelEvent& w);
+    [[nodiscard]] bool handle_overlay_event(const SDL_Event& e);  // modal overlays; true if consumed
 
     [[nodiscard]] float     thumb_size() const;
     [[nodiscard]] SDL_FRect viewport_rect() const;
     [[nodiscard]] SDL_FRect strip_rect() const;
 
-    void toggle_favorite_current();                 // flip favorite on the current image
-    void show_image_at(int idx);                    // absolute, clamped, refit
+    void show_image_at(int idx);                    // absolute, clamped, refit (rebuilds video_)
     void set_index(int delta);                      // wrap, reset view, rebuild
     void go_back();                                 // return to gallery / favorites
     void zoom_by(float factor, float cx, float cy); // centred on (cx, cy)
     void pan_by(float dx, float dy);
-    [[nodiscard]] bool is_zoomed() const noexcept;  // zoomed past fit-to-window
 
     // Fill-scroll helpers. The model is cached and rebuilt only when the
     // viewport size changes (the image list is fixed for the session), since
@@ -192,6 +195,12 @@ private:
 
     // Bounded set of decoded full-res textures (shared with the slideshow).
     FullTexCache full_cache_;
+
+    // Live playback for the current item when it is a video AND we are in Fit mode
+    // (null otherwise). pImpl, so this compiles without vendored FFmpeg (valid() is
+    // then false and the host shows the poster). Borrows the unlocked vault;
+    // destroyed on exit / item change before any lock (invariant: no UAF).
+    std::unique_ptr<VideoPlayback> video_;
 };
 
 } // namespace ui

@@ -58,6 +58,10 @@ public:
     /// just outside `dst`. No shaders / render targets.
     void draw_selection_glow(const SDL_FRect& dst, float radius, Color accent);
 
+    /// Fill the triangle (a, b, c) with colour `col`. Used for the play badge on
+    /// video tiles and the play/pause icon in the video transport.
+    void draw_triangle(SDL_FPoint a, SDL_FPoint b, SDL_FPoint c, Color col);
+
     /// Draw the whole texture into `dst`, modulated by `tint`.
     void draw_image(SDL_Texture* tex, const SDL_FRect& dst, Color tint = {});
 

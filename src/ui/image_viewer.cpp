@@ -12,6 +12,7 @@
 #include "gfx/window.h"
 #include "image/decode.h"
 #include "ui/export.h"
+#include "ui/meta_format.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
 #include "vault/vault.h"
@@ -23,6 +24,12 @@ constexpr float PAN_STEP    = 64.0f;   // arrow-key pan distance (px)
 constexpr float ZOOM_STEP   = 1.25f;   // keyboard +/- zoom factor
 constexpr float WHEEL_STEP  = 1.10f;   // per-notch wheel zoom factor (fit mode)
 constexpr float SCROLL_STEP = 96.0f;   // arrow-key / wheel scroll distance (px)
+
+// True when album item `idx` is a video — picks the video render/input path.
+bool item_is_video(const std::vector<const vault::IndexNode*>& imgs, int idx)
+{
+    return idx >= 0 && idx < static_cast<int>(imgs.size()) && imgs[idx]->is_video();
+}
 } // namespace
 
 ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
@@ -44,7 +51,7 @@ void ImageViewer::on_enter()
         album_.images.clear();
         album_.paths.clear();
         for (const vault::IndexNode* n : vault_.list(album_.gallery_path)) {
-            if (!n->is_image()) continue;
+            if (!n->is_media()) continue;   // images and videos (mixed leaf galleries)
             album_.images.push_back(n);
             album_.paths.push_back(album_.gallery_path.empty() ? n->name
                                                    : album_.gallery_path + "/" + n->name);
@@ -52,12 +59,12 @@ void ImageViewer::on_enter()
     }
 
     if (album_.images.empty()) { go_back(); return; }
-    index_  = std::clamp(index_, 0, static_cast<int>(album_.images.size()) - 1);
-    fit_.fitted = false;
+    show_image_at(index_);   // clamp + refit + (re)build video for the current item
 }
 
 void ImageViewer::on_exit()
 {
+    video_.reset();                 // stop decode + wipe the VideoSource cache first
     full_cache_.evict_except({});   // destroy all cached textures
 }
 
@@ -82,11 +89,6 @@ SDL_FRect ImageViewer::strip_rect() const
 
 // --- Fit-mode view state ---------------------------------------------------
 
-bool ImageViewer::is_zoomed() const noexcept
-{
-    return fit_.zoom > fit_.fit_zoom * 1.001f;
-}
-
 void ImageViewer::show_image_at(int idx)
 {
     if (album_.images.empty()) return;
@@ -94,6 +96,25 @@ void ImageViewer::show_image_at(int idx)
     fit_.fitted   = false;
     fit_.dragging = false;
     if (mode_ == ViewMode::FillScroll) scroll_to_image(index_);
+    // (Re)build live playback for the current item only when it is a video in Fit
+    // mode; tears down the previous decoder (RAII) before any vault lock. video_
+    // being non-null thus means exactly "Fit mode, current item is a video".
+    video_.reset();
+    if (mode_ == ViewMode::Fit && item_is_video(album_.images, index_))
+        video_ = std::make_unique<VideoPlayback>(vault_, *album_.images[index_]);
+}
+
+void ImageViewer::handle_key_video(SDL_Keycode key)
+{
+    switch (key) {
+        case SDLK_F:   // lift the video out of fill-scroll so it can play
+            if (mode_ == ViewMode::FillScroll) { mode_ = ViewMode::Fit; show_image_at(index_); }
+            return;
+        case SDLK_LEFT:  set_index(-1); return;
+        case SDLK_RIGHT: set_index(1);  return;
+        case SDLK_UP:    go_back();     return;
+        default:         if (video_) video_->handle_key(key); return;   // Space / , / . / J / L
+    }
 }
 
 void ImageViewer::set_index(int delta)
@@ -207,19 +228,33 @@ void ImageViewer::handle_key(SDL_Keycode key)
     using enum ViewMode;
     if (mode_ == Slideshow) {
         if (!slideshow_.handle_key(key)) {   // user exited the slideshow
-            index_  = slideshow_.index();
+            index_ = slideshow_.index();
             slideshow_.stop();
-            mode_   = Fit;
-            fit_.fitted = false;
+            mode_  = Fit;
+            show_image_at(index_);           // refit + (re)build video for the landed item
         }
         return;
     }
+    // Keys shared by images and videos.
     switch (key) {
         case SDLK_T:      // toggle the strip between bottom and left
             strip_side_ = (strip_side_ == Bottom) ? Left : Bottom;
             fit_.fitted = false;                      // viewport changed: refit
             if (mode_ == FillScroll) scroll_to_image(index_);
             return;
+        case SDLK_G:      // edit tags for the current item
+            if (!album_.images.empty()) tag_editor_.open(album_.paths[index_]);
+            return;
+        case SDLK_B:      // toggle favorite (bookmark) on the current item
+            if (!album_.images.empty()) (void)vault_.toggle_favorite(album_.paths[index_]);
+            return;
+        case SDLK_GRAVE:  quick_switch_.open(); return;   // switch vault (`)
+        case SDLK_ESCAPE: go_back(); return;
+        default: break;
+    }
+    if (item_is_video(album_.images, index_)) { handle_key_video(key); return; }
+    // Image-only keys.
+    switch (key) {
         case SDLK_F:      // toggle fit <-> fill-width scroll
             if (mode_ == Fit) { mode_ = FillScroll; scroll_to_image(index_); }
             else              { mode_ = Fit; fit_.fitted = false; }
@@ -234,36 +269,21 @@ void ImageViewer::handle_key(SDL_Keycode key)
             if (!album_.images.empty())
                 export_.begin(std::format("Export \"{}\"?", album_.images[index_]->name));
             return;
-        case SDLK_G:      // edit tags for the current image
-            if (!album_.images.empty()) tag_editor_.open(album_.paths[index_]);
-            return;
-        case SDLK_B:      // toggle favorite (bookmark) on the current image
-            toggle_favorite_current();
-            return;
-        case SDLK_GRAVE:  quick_switch_.open(); return;   // switch vault (`)
-        case SDLK_ESCAPE: go_back(); return;
         default: break;
     }
     if (mode_ == FillScroll) handle_key_scroll(key);
     else                     handle_key_fit(key);
 }
 
-void ImageViewer::toggle_favorite_current()
-{
-    if (album_.images.empty()) return;
-    // The in-memory tree node album_.images[index_] points at is the one toggled, so the
-    // HUD star reflects the new state immediately; commit_index() persists it.
-    (void)vault_.toggle_favorite(album_.paths[index_]);
-}
-
 void ImageViewer::handle_key_fit(SDL_Keycode key)
 {
     const SDL_FRect vp = viewport_rect();
+    const bool zoomed = fit_.zoom > fit_.fit_zoom * 1.001f;   // zoomed past fit-to-window
     switch (key) {
-        case SDLK_LEFT:  is_zoomed() ? pan_by(PAN_STEP, 0) : set_index(-1); break;
-        case SDLK_RIGHT: is_zoomed() ? pan_by(-PAN_STEP, 0) : set_index(1); break;
-        case SDLK_UP:    is_zoomed() ? pan_by(0, PAN_STEP) : go_back(); break;
-        case SDLK_DOWN:  if (is_zoomed()) pan_by(0, -PAN_STEP); break;
+        case SDLK_LEFT:  zoomed ? pan_by(PAN_STEP, 0) : set_index(-1); break;
+        case SDLK_RIGHT: zoomed ? pan_by(-PAN_STEP, 0) : set_index(1); break;
+        case SDLK_UP:    zoomed ? pan_by(0, PAN_STEP) : go_back(); break;
+        case SDLK_DOWN:  if (zoomed) pan_by(0, -PAN_STEP); break;
         case SDLK_0:     fit_.fitted = false; break;  // reset to fit-to-window
         case SDLK_PLUS:
         case SDLK_EQUALS:
@@ -289,9 +309,9 @@ void ImageViewer::handle_mouse_down(const SDL_MouseButtonEvent& b)
 {
     if (b.button != SDL_BUTTON_LEFT) return;
     if (mode_ == ViewMode::Slideshow) { slideshow_.toggle_play(); return; }  // click = pause/play
-    if (const int hit = strip_hit(b.x, b.y); hit >= 0) {
-        show_image_at(hit);
-    } else if (mode_ == ViewMode::Fit) {
+    if (const int hit = strip_hit(b.x, b.y); hit >= 0) { show_image_at(hit); return; }
+    if (video_) { video_->handle_mouse_down(b.x, b.y); return; }   // seek-bar scrub
+    if (mode_ == ViewMode::Fit) {
         const SDL_FRect vp = viewport_rect();
         if (point_in_rect(b.x, b.y, vp)) fit_.dragging = true;
     }
@@ -300,6 +320,7 @@ void ImageViewer::handle_mouse_down(const SDL_MouseButtonEvent& b)
 void ImageViewer::handle_wheel(const SDL_MouseWheelEvent& w)
 {
     if (mode_ == ViewMode::Slideshow) return;   // no zoom/scroll while playing
+    if (video_) return;                         // a playing video is fit-only (no zoom/scroll)
     if (mode_ == ViewMode::FillScroll)
         scroll_by(w.y > 0 ? -SCROLL_STEP : SCROLL_STEP);
     else
@@ -315,6 +336,8 @@ void ImageViewer::update(double dt)
         index_ = slideshow_.index();
     }
 
+    if (video_) video_->update(dt);
+
     if (auto dest = export_.take_destination(); dest && !album_.images.empty()) {
         const std::array<const vault::IndexNode*, 1> one{album_.images[index_]};
         const ExportSummary sum =
@@ -326,57 +349,64 @@ void ImageViewer::update(double dt)
     }
 }
 
-void ImageViewer::handle_event(const SDL_Event& e)
+// A modal overlay (search / tag editor / export consent / quick-switch) consumes
+// all input while open, in priority order. Returns true if it handled the event.
+bool ImageViewer::handle_overlay_event(const SDL_Event& e)
 {
-    // Search overlay takes priority while open; a selected result becomes a nav
-    // request the app consumes (jumping to another gallery/image or back to grid).
     if (search_.active()) {
         if (search_.handle_event(e)) {
             Nav nav = search_.take_nav();
             if (nav.kind != NavKind::None) request(nav.kind, std::move(nav.path), nav.index);
         }
-        return;
+        return true;
     }
-
-    // Tag editor takes priority
     if (tag_editor_.active()) {
         (void)tag_editor_.handle_event(e);
-        return;
+        return true;
     }
-
-    // The export consent modal owns all input while it is up.
     if (export_.modal_active()) {
         if (e.type == SDL_EVENT_KEY_DOWN) export_.consume_key(e.key.key);
-        return;
+        return true;
     }
-
     if (quick_switch_.active()) {
         (void)quick_switch_.handle_event(e);
         if (std::string p; quick_switch_.consume_choice(p))
             request(NavKind::ToUnlock, std::move(p));   // locks current, unlocks chosen
-        return;
+        return true;
     }
+    return false;
+}
+
+void ImageViewer::handle_event(const SDL_Event& e)
+{
+    using enum ViewMode;
+    if (handle_overlay_event(e)) return;
 
     switch (e.type) {
         case SDL_EVENT_KEY_DOWN:
             // `/` opens search. It is a shifted key on many non-US layouts, so
-            // resolve the produced character from scancode + modifiers (the base
-            // keycode in e.key.key would be the unshifted symbol). Not while the
-            // slideshow owns the keyboard.
-            if (mode_ != ViewMode::Slideshow &&
-                SDL_GetKeyFromScancode(e.key.scancode, e.key.mod, false) == SDLK_SLASH) {
+            // resolve the produced character from scancode + modifiers. Not while
+            // the slideshow owns the keyboard.
+            if (mode_ != Slideshow &&
+                SDL_GetKeyFromScancode(e.key.scancode, e.key.mod, false) == SDLK_SLASH)
                 search_.open();
-            } else {
+            else
                 handle_key(e.key.key);
-            }
             break;
         case SDL_EVENT_MOUSE_WHEEL:       handle_wheel(e.wheel);        break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN: handle_mouse_down(e.button);  break;
         case SDL_EVENT_MOUSE_BUTTON_UP:
-            if (e.button.button == SDL_BUTTON_LEFT) fit_.dragging = false;
+            if (e.button.button == SDL_BUTTON_LEFT) {
+                fit_.dragging = false;
+                if (video_) video_->handle_mouse_up();
+            }
             break;
         case SDL_EVENT_MOUSE_MOTION:
-            if (fit_.dragging && mode_ == ViewMode::Fit) pan_by(e.motion.xrel, e.motion.yrel);
+            if (video_)
+                video_->handle_mouse_motion(e.motion.x, e.motion.y,
+                                            (e.motion.state & SDL_BUTTON_LMASK) != 0);
+            else if (fit_.dragging && mode_ == Fit)
+                pan_by(e.motion.xrel, e.motion.yrel);
             break;
         default: break;
     }
@@ -470,22 +500,37 @@ void ImageViewer::render_hud(gfx::Renderer& r, const SDL_FRect& vp)
 {
     using enum ViewMode;
     if (!album_.images.empty()) {
-        // A leading "* " marks the current image as favorited (the baked font is
+        const vault::IndexNode& cur = *album_.images[index_];
+        // A leading "* " marks the current item as favorited (the baked font is
         // ASCII-only, so an asterisk stands in for a star glyph).
-        const char* star = album_.images[index_]->favorite ? "* " : "";
-        const char* mode = (mode_ == FillScroll) ? "fill" : "fit";
-        const std::string hud = (mode_ == FillScroll)
-            ? std::format("{}{}   {}/{}   {}", star, album_.images[index_]->name, index_ + 1,
-                          album_.images.size(), mode)
-            : std::format("{}{}   {}/{}   {}%", star, album_.images[index_]->name, index_ + 1,
-                          album_.images.size(), static_cast<int>(fit_.zoom * 100.0f + 0.5f));
+        const char* star = cur.favorite ? "* " : "";
+        std::string hud;
+        if (item_is_video(album_.images, index_))
+            hud = std::format("{}{}   {}/{}   {}   {}", star, cur.name, index_ + 1,
+                              album_.images.size(), video_type_label(cur.vmeta.codec),
+                              format_duration(cur.vmeta.duration_us));
+        else if (mode_ == FillScroll)
+            hud = std::format("{}{}   {}/{}   fill", star, cur.name, index_ + 1,
+                              album_.images.size());
+        else
+            hud = std::format("{}{}   {}/{}   {}%", star, cur.name, index_ + 1,
+                              album_.images.size(), static_cast<int>(fit_.zoom * 100.0f + 0.5f));
         r.draw_text(font_, vp.x + 16, vp.y + 12, hud,
-                    album_.images[index_]->favorite ? gfx::theme::FAVORITE : gfx::theme::TEXT);
+                    cur.favorite ? gfx::theme::FAVORITE : gfx::theme::TEXT);
     }
-    const char* legend = (mode_ == FillScroll)
-        ? "[Wheel] Scroll   [<-/->] Prev/Next   [F] Fit   [T] Strip   [P] Slideshow   [B] Fav   [G] Tags   [X] Export   [Esc] Back"
-        : "[<-/->] Prev/Next   [Wheel/+/-] Zoom   [F] Fill-scroll   [T] Strip   [P] Slideshow   [B] Fav   [G] Tags   [X] Export   [Esc] Back";
+
+    const char* legend;
+    if (item_is_video(album_.images, index_))
+        legend = "[Space] Play/Pause   [J/L] -/+5s   [,/.] Frame   [<-/->] Prev/Next   [T] Strip   [B] Fav   [Esc] Back";
+    else if (mode_ == FillScroll)
+        legend = "[Wheel] Scroll   [<-/->] Prev/Next   [F] Fit   [T] Strip   [P] Slideshow   [B] Fav   [G] Tags   [X] Export   [Esc] Back";
+    else
+        legend = "[<-/->] Prev/Next   [Wheel/+/-] Zoom   [F] Fill-scroll   [T] Strip   [P] Slideshow   [B] Fav   [G] Tags   [X] Export   [Esc] Back";
     r.draw_text(font_, vp.x + 16, vp.y + 44, legend, gfx::theme::TEXT_FAINT);
+
+    if (item_is_video(album_.images, index_) && !(video_ && video_->valid()))
+        r.draw_text(font_, vp.x + 16, vp.y + vp.h - 56,
+                    "Video playback unavailable in this build.", gfx::theme::TEXT_DIM);
 
     if (!export_.status().empty())
         r.draw_text(font_, vp.x + 16, vp.y + vp.h - 32, export_.status(), gfx::theme::OK);
@@ -504,8 +549,22 @@ void ImageViewer::render(gfx::Renderer& r)
     const SDL_FRect vp = viewport_rect();
     r.draw_rect(vp, gfx::theme::IMG_BG);
 
-    if (mode_ == ViewMode::FillScroll) render_scroll(r, vp);
-    else                               render_fit(r, vp);
+    if (video_) {   // Fit mode + current item is a video
+        if (video_->valid()) {
+            video_->render(r, font_, vp);
+        } else if (SDL_Texture* tex = thumb_texture(*album_.images[index_])) {
+            float tw = 0.0f;          // poster fallback (no decoder / non-AV build)
+            float th = 0.0f;
+            SDL_GetTextureSize(tex, &tw, &th);
+            const float s = fit_zoom(tw, th, vp.w, vp.h);
+            r.draw_image(tex, {vp.x + (vp.w - tw * s) * 0.5f,
+                               vp.y + (vp.h - th * s) * 0.5f, tw * s, th * s});
+        }
+    } else if (mode_ == ViewMode::FillScroll) {
+        render_scroll(r, vp);
+    } else {
+        render_fit(r, vp);
+    }
 
     render_hud(r, vp);
     render_strip(r);

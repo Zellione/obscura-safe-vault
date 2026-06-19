@@ -152,7 +152,7 @@ TEST(yuv_texture_destructor_safe)
     {
         {
             gfx::YuvTexture t;
-            t.ensure(sr.r, 16, 16, media::FramePixelFormat::I420);
+            CHECK(t.ensure(sr.r, 16, 16, media::FramePixelFormat::I420));
             // t goes out of scope, destructor runs (must not crash)
         }
         // If we get here, destructor was safe.

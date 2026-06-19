@@ -200,6 +200,14 @@ void Renderer::draw_round_rect(const SDL_FRect& dst, float radius, Color c, bool
                        idx.data(), static_cast<int>(idx.size()));
 }
 
+void Renderer::draw_triangle(SDL_FPoint a, SDL_FPoint b, SDL_FPoint c, Color col)
+{
+    const SDL_FColor fc{col.r / 255.0f, col.g / 255.0f, col.b / 255.0f, col.a / 255.0f};
+    const std::array<SDL_Vertex, 3> v{{{a, fc, {0, 0}}, {b, fc, {0, 0}}, {c, fc, {0, 0}}}};
+    static constexpr std::array<int, 3> idx{0, 1, 2};
+    SDL_RenderGeometry(r_, nullptr, v.data(), 3, idx.data(), static_cast<int>(idx.size()));
+}
+
 void Renderer::draw_selection_glow(const SDL_FRect& dst, float radius, Color accent)
 {
     // A few progressively larger, fainter rounded outlines just outside `dst`.

@@ -40,8 +40,10 @@ void FileDialog::open_vault(SDL_Window* parent)
 void FileDialog::open_images(SDL_Window* parent)
 {
     if (!begin_open()) return;
-    static constexpr std::array f{SDL_DialogFileFilter{"Images", "jpg;jpeg;png;gif;bmp;tga;hdr"},
-                                  SDL_DialogFileFilter{"All files", "*"}};
+    static constexpr std::array f{
+        SDL_DialogFileFilter{"Images & video",
+                             "jpg;jpeg;png;gif;bmp;tga;hdr;webp;heic;avif;mp4;mkv;webm;mov;m4v"},
+        SDL_DialogFileFilter{"All files", "*"}};
     SDL_ShowOpenFileDialog(on_files, this, parent, f.data(),
                            static_cast<int>(f.size()), nullptr, /*allow_many*/ true);
 }
