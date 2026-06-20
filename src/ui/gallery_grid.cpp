@@ -17,6 +17,7 @@
 #include "ui/export.h"
 #include "ui/input.h"
 #include "ui/widgets.h"
+#include "ui/zip_import.h"
 #include "vault/index.h"
 #include "vault/vault.h"
 
@@ -221,11 +222,23 @@ void GalleryGrid::start_naming()
 
 void GalleryGrid::finish_naming()
 {
-    using enum vault::VaultResult;
     naming_.active = false;
     SDL_StopTextInput(win_.sdl_window());
-    if (naming_.buf.empty()) return;
+    if (naming_.buf.empty()) {
+        pending_zip_.active = false;
+        return;
+    }
 
+    // If this is a zip import, trigger the import with the chosen name.
+    if (pending_zip_.active) {
+        pending_zip_.gallery_name = naming_.buf;
+        naming_.buf.clear();
+        do_zip_import(pending_zip_.path, ui::ZipConflictPolicy::AskUser);
+        return;
+    }
+
+    // Otherwise, create a new gallery.
+    using enum vault::VaultResult;
     const std::string base = nav_.path();
     switch (const std::string full = base.empty() ? naming_.buf : base + "/" + naming_.buf;
             vault_.create_gallery(full)) {
@@ -309,6 +322,7 @@ void GalleryGrid::handle_naming_key(const SDL_Event& e)
     else if (e.key.key == SDLK_ESCAPE) {
         naming_.active = false;
         naming_.buf.clear();
+        pending_zip_.active = false;   // clear zip import state if cancelled
         SDL_StopTextInput(win_.sdl_window());
     }
 }
@@ -329,6 +343,7 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
     if (key.key == SDLK_L) { view_ = (view_ == Grid) ? List : Grid; return; }
     if (key.key == SDLK_X) { start_export(); return; }   // export selection
     if (key.key == SDLK_M) { start_transfer(); return; }   // move to another vault
+    if (key.key == SDLK_Z) { start_zip_import(); return; }   // import zip archive
     if (key.key == SDLK_SPACE) { toggle_or_open(); return; }
     // `/` is a shifted key on many non-US layouts, so the base keycode (key.key)
     // is the unmodified symbol (e.g. '7') and never equals SDLK_SLASH. Resolve the
@@ -395,6 +410,28 @@ void GalleryGrid::handle_event(const SDL_Event& e)
         return;
     }
 
+    // The zip conflict modal owns all input while it is up (but only when naming is not active).
+    if (pending_zip_.active && !naming_.active && e.type == SDL_EVENT_KEY_DOWN) {
+        if (e.key.key == SDLK_F) {
+            // Flatten all mixed folders.
+            do_zip_import(pending_zip_.path, ui::ZipConflictPolicy::FlattenMixed);
+            mark_dirty();
+            return;
+        }
+        if (e.key.key == SDLK_S) {
+            // Skip directories with mixed content.
+            do_zip_import(pending_zip_.path, ui::ZipConflictPolicy::SkipMixed);
+            mark_dirty();
+            return;
+        }
+        if (e.key.key == SDLK_ESCAPE) {
+            // Cancel the import.
+            pending_zip_.active = false;
+            mark_dirty();
+            return;
+        }
+    }
+
     if (naming_.active) { handle_naming_key(e); return; }
 
     switch (e.type) {
@@ -423,6 +460,78 @@ void GalleryGrid::pump_import()
     }
 }
 
+void GalleryGrid::start_zip_import()
+{
+    if (dialogs_.file.busy() || transfer_.active()) return;
+    error_.clear();
+    dialogs_.file.open_zip(win_.sdl_window());
+}
+
+void GalleryGrid::pump_zip_import()
+{
+    if (auto res = dialogs_.file.take_result()) {
+        if (!res->empty()) {
+            const std::string zip_path = res->front();
+            const std::filesystem::path zp(zip_path);
+
+            // Decide between Append (if current holds media) or NewGallery (name prompt).
+            if (current_allows_images() && !current_allows_galleries()) {
+                // Current gallery holds only media (leaf): import with Append (no name prompt).
+                pending_zip_.path = zp;
+                pending_zip_.gallery_name.clear();
+                pending_zip_.dest = ui::ZipDest::Append;
+                pending_zip_.active = true;
+                do_zip_import(zp, ui::ZipConflictPolicy::AskUser);
+            } else {
+                // Current is empty or holds sub-galleries: prompt for new gallery name.
+                start_naming();   // reuse the naming flow
+                naming_.buf = zp.stem().string();   // e.g. "archive" from "archive.zip"
+                pending_zip_.path = zp;
+                pending_zip_.dest = ui::ZipDest::NewGallery;
+                pending_zip_.active = true;
+            }
+        }
+        mark_dirty();   // dialog closed (picked or cancelled) — repaint
+    }
+}
+
+void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipConflictPolicy policy)
+{
+    // The gallery name and destination come from pending_zip_.
+    const std::string gallery_name = pending_zip_.gallery_name;
+    const std::string base_gallery = nav_.path();
+    const ui::ZipDest dest = pending_zip_.dest;
+
+    // Call the import_zip executor.
+    const ui::ZipImportOutcome out = ui::import_zip(
+        vault_, zip_path,
+        /* dest */ dest,
+        /* base_gallery */ base_gallery,
+        /* new_gallery_name */ gallery_name,
+        /* policy */ policy
+    );
+
+    if (!out.ok) {
+        error_ = out.error.empty() ? "ZIP import failed." : out.error;
+        pending_zip_.active = false;
+        return;
+    }
+
+    // If there are mixed folders and we're in AskUser mode, show the conflict modal.
+    if (out.needs_resolution) {
+        // pending_zip is already stashed from pump_zip_import; the modal will be
+        // drawn in render() and the user will choose FlattenMixed or SkipMixed.
+        // We'll re-call do_zip_import with the chosen policy from the modal.
+        return;
+    }
+
+    // Success: set the summary and refresh.
+    status_ = std::format("Imported {} file{}, skipped {}", out.imported,
+                         out.imported == 1 ? "" : "s", out.skipped);
+    pending_zip_.active = false;
+    refresh();
+}
+
 void GalleryGrid::update(double)
 {
     if (pump_thumbs()) mark_dirty();   // off-thread thumbnail decode(s) landed
@@ -444,7 +553,10 @@ void GalleryGrid::update(double)
 
     // The import picker shares dialogs_.file with the transfer's keyfile picker, so
     // only poll it when no transfer is active (don't steal the keyfile result).
-    if (!transfer_.active()) pump_import();
+    if (!transfer_.active()) {
+        pump_import();
+        pump_zip_import();
+    }
 
     if (auto dest = dialogs_.folder.take_result()) {
         if (!dest->empty()) do_export(*dest);   // empty => the picker was cancelled
@@ -462,7 +574,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     for (const auto& s : nav_.segments()) { crumb += s; crumb += '/'; }
     r.draw_text(font_, OX, 40, crumb, TEXT_DIM);
     r.draw_text(font_, OX, 90,
-                "[I] Import  [N] New  [/] Search  [G] Tags  [B] Fav  [F] Fav Images  "
+                "[I] Import  [Z] ZIP  [N] New  [/] Search  [G] Tags  [B] Fav  [F] Fav Images  "
                 "[Shift+F] Fav Galleries  [Enter] Open  [Space] Select  [X] Export  "
                 "[M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid",
                 TEXT_FAINT);
@@ -495,6 +607,30 @@ void GalleryGrid::render(gfx::Renderer& r)
     tag_editor_.render(r, font_, W, H);
     transfer_.render(r, font_, W, H);
     quick_switch_.render(r, font_, W, H);
+
+    // Zip conflict modal: drawn when awaiting a choice between FlattenMixed and SkipMixed.
+    // Only shown after the naming dialog closes (so !naming_.active).
+    if (pending_zip_.active && !naming_.active) {
+        // Veil the whole window.
+        r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
+
+        const float pw = 600;
+        const float ph = 200;
+        const float px = (W - pw) / 2;
+        const float py = (H - ph) / 2;
+        r.draw_round_rect({px, py, pw, ph}, RADIUS, SURFACE);
+        r.draw_round_rect({px, py, pw, ph}, RADIUS, ACCENT, /*filled*/ false);
+
+        // Centre text helper.
+        auto centered = [&](const std::string& s, float y, gfx::Color c) {
+            const auto tw = static_cast<float>(font_.measure(s));
+            r.draw_text(font_, px + (pw - tw) / 2, y, s, c);
+        };
+
+        centered("Mixed folders detected in archive.", py + 28, TEXT);
+        centered("Cannot mix nested folders with flat gallery structure.", py + 60, TEXT_DIM);
+        centered("[F] Flatten all files  |  [S] Skip those directories", py + ph - 50, TEXT_DIM);
+    }
 }
 
 void GalleryGrid::render_grid(gfx::Renderer& r, float W, float /*H*/)

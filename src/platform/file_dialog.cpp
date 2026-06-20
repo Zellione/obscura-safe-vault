@@ -56,6 +56,16 @@ void FileDialog::open_keyfile(SDL_Window* parent)
                            static_cast<int>(f.size()), nullptr, /*allow_many*/ false);
 }
 
+void FileDialog::open_zip(SDL_Window* parent)
+{
+    if (!begin_open()) return;
+    static constexpr std::array f{
+        SDL_DialogFileFilter{"Zip archives", "zip"},
+        SDL_DialogFileFilter{"All files", "*"}};
+    SDL_ShowOpenFileDialog(on_files, this, parent, f.data(),
+                           static_cast<int>(f.size()), nullptr, /*allow_many*/ false);
+}
+
 void FileDialog::save_keyfile(SDL_Window* parent)
 {
     if (!begin_open()) return;

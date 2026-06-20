@@ -18,6 +18,7 @@
 #include "ui/selection_model.h"
 #include "ui/tag_editor.h"
 #include "ui/transfer_dialog.h"
+#include "ui/zip_plan.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
 namespace vault { class Vault; struct IndexNode; }
@@ -73,6 +74,9 @@ private:
     void finish_naming();
     void do_import(const std::filesystem::path& file_path);
     void pump_import();            // poll the file dialog while transfer is not active
+    void start_zip_import();
+    void do_zip_import(const std::filesystem::path& zip_path, ui::ZipConflictPolicy policy);
+    void pump_zip_import();        // poll the zip file dialog while transfer is not active
     void start_search();       // open the search overlay
     void start_tag_editor();   // open the tag editor for the focused tile
     void toggle_favorite_current();  // flip favorite on the focused tile (B)
@@ -113,6 +117,15 @@ private:
         std::string buf;
     };
     Naming naming_;
+
+    // Zip import state — stashed when awaiting conflict resolution (FlattenMixed vs SkipMixed).
+    struct PendingZip {
+        std::filesystem::path path;
+        std::string           gallery_name;
+        ui::ZipDest           dest = ui::ZipDest::NewGallery;
+        bool                  active = false;
+    };
+    PendingZip pending_zip_;
 
     // Off-thread thumbnail decoding, scoped to this grid (its own worker; see the
     // note in ImageViewer for why each screen keeps a separate one). Grouped to
