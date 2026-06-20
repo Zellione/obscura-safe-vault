@@ -74,7 +74,6 @@ private:
     void finish_naming();
     void do_import(const std::filesystem::path& file_path);
     void pump_import();            // poll the file dialog while transfer is not active
-    void start_zip_import();
     void do_zip_import(const std::filesystem::path& zip_path, ui::ZipConflictPolicy policy);
     void pump_zip_import();        // poll the zip file dialog while transfer is not active
     bool handle_zip_conflict_key(const SDL_Event& e);  // Flatten/Skip/Esc modal; true if consumed

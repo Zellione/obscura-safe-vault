@@ -343,7 +343,12 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
     if (key.key == SDLK_L) { view_ = (view_ == Grid) ? List : Grid; return; }
     if (key.key == SDLK_X) { start_export(); return; }   // export selection
     if (key.key == SDLK_M) { start_transfer(); return; }   // move to another vault
-    if (key.key == SDLK_Z) { start_zip_import(); return; }   // import zip archive
+    if (key.key == SDLK_Z) {   // import zip archive (inlined to keep GalleryGrid <= 35 methods)
+        if (dialogs_.file.busy() || transfer_.active()) return;
+        error_.clear();
+        dialogs_.file.open_zip(win_.sdl_window());
+        return;
+    }
     if (key.key == SDLK_SPACE) { toggle_or_open(); return; }
     // `/` is a shifted key on many non-US layouts, so the base keycode (key.key)
     // is the unmodified symbol (e.g. '7') and never equals SDLK_SLASH. Resolve the
@@ -460,13 +465,6 @@ void GalleryGrid::pump_import()
         }
         mark_dirty();   // dialog closed (imported or cancelled) — repaint
     }
-}
-
-void GalleryGrid::start_zip_import()
-{
-    if (dialogs_.file.busy() || transfer_.active()) return;
-    error_.clear();
-    dialogs_.file.open_zip(win_.sdl_window());
 }
 
 void GalleryGrid::pump_zip_import()

@@ -92,7 +92,7 @@ StringSet find_mixed_dirs(const StringSet& media_dirs, const StringSet& gallery_
     StringSet mixed;
     for (const auto& d : media_dirs) {
         const std::string prefix = d + "/";
-        const bool has_media_subdir = std::ranges::any_of(gallery_dirs, [&](const std::string& g) {
+        const bool has_media_subdir = std::ranges::any_of(gallery_dirs, [&](std::string_view g) {
             return g.size() > prefix.size() && g.compare(0, prefix.size(), prefix) == 0;
         });
         if (has_media_subdir) mixed.insert(d);
