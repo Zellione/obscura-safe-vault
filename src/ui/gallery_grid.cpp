@@ -225,15 +225,15 @@ void GalleryGrid::finish_naming()
     naming_.active = false;
     SDL_StopTextInput(win_.sdl_window());
     if (naming_.buf.empty()) {
-        pending_zip_.active = false;
+        naming_.zip.active = false;
         return;
     }
 
     // If this is a zip import, trigger the import with the chosen name.
-    if (pending_zip_.active) {
-        pending_zip_.gallery_name = naming_.buf;
+    if (naming_.zip.active) {
+        naming_.zip.gallery_name = naming_.buf;
         naming_.buf.clear();
-        do_zip_import(pending_zip_.path, ui::ZipConflictPolicy::AskUser);
+        do_zip_import(naming_.zip.path, ui::ZipConflictPolicy::AskUser);
         return;
     }
 
@@ -322,7 +322,7 @@ void GalleryGrid::handle_naming_key(const SDL_Event& e)
     else if (e.key.key == SDLK_ESCAPE) {
         naming_.active = false;
         naming_.buf.clear();
-        pending_zip_.active = false;   // clear zip import state if cancelled
+        naming_.zip.active = false;   // clear zip import state if cancelled
         SDL_StopTextInput(win_.sdl_window());
     }
 }
@@ -377,6 +377,27 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
     }
 }
 
+bool GalleryGrid::handle_zip_conflict_key(const SDL_Event& e)
+{
+    if (!naming_.zip.active || naming_.active || e.type != SDL_EVENT_KEY_DOWN) return false;
+    switch (e.key.key) {
+        case SDLK_F:  // flatten all mixed folders
+            do_zip_import(naming_.zip.path, ui::ZipConflictPolicy::FlattenMixed);
+            mark_dirty();
+            return true;
+        case SDLK_S:  // skip directories with mixed content
+            do_zip_import(naming_.zip.path, ui::ZipConflictPolicy::SkipMixed);
+            mark_dirty();
+            return true;
+        case SDLK_ESCAPE:  // cancel the import
+            naming_.zip.active = false;
+            mark_dirty();
+            return true;
+        default:
+            return false;
+    }
+}
+
 void GalleryGrid::handle_event(const SDL_Event& e)
 {
     // Overlays take input in priority order: search > tag_editor > transfer > consent/naming
@@ -410,27 +431,8 @@ void GalleryGrid::handle_event(const SDL_Event& e)
         return;
     }
 
-    // The zip conflict modal owns all input while it is up (but only when naming is not active).
-    if (pending_zip_.active && !naming_.active && e.type == SDL_EVENT_KEY_DOWN) {
-        if (e.key.key == SDLK_F) {
-            // Flatten all mixed folders.
-            do_zip_import(pending_zip_.path, ui::ZipConflictPolicy::FlattenMixed);
-            mark_dirty();
-            return;
-        }
-        if (e.key.key == SDLK_S) {
-            // Skip directories with mixed content.
-            do_zip_import(pending_zip_.path, ui::ZipConflictPolicy::SkipMixed);
-            mark_dirty();
-            return;
-        }
-        if (e.key.key == SDLK_ESCAPE) {
-            // Cancel the import.
-            pending_zip_.active = false;
-            mark_dirty();
-            return;
-        }
-    }
+    // The zip conflict modal owns all input while it is up (only when not naming).
+    if (handle_zip_conflict_key(e)) return;
 
     if (naming_.active) { handle_naming_key(e); return; }
 
@@ -477,18 +479,18 @@ void GalleryGrid::pump_zip_import()
             // Decide between Append (if current holds media) or NewGallery (name prompt).
             if (current_allows_images() && !current_allows_galleries()) {
                 // Current gallery holds only media (leaf): import with Append (no name prompt).
-                pending_zip_.path = zp;
-                pending_zip_.gallery_name.clear();
-                pending_zip_.dest = ui::ZipDest::Append;
-                pending_zip_.active = true;
+                naming_.zip.path = zp;
+                naming_.zip.gallery_name.clear();
+                naming_.zip.dest = ui::ZipDest::Append;
+                naming_.zip.active = true;
                 do_zip_import(zp, ui::ZipConflictPolicy::AskUser);
             } else {
                 // Current is empty or holds sub-galleries: prompt for new gallery name.
                 start_naming();   // reuse the naming flow
                 naming_.buf = zp.stem().string();   // e.g. "archive" from "archive.zip"
-                pending_zip_.path = zp;
-                pending_zip_.dest = ui::ZipDest::NewGallery;
-                pending_zip_.active = true;
+                naming_.zip.path = zp;
+                naming_.zip.dest = ui::ZipDest::NewGallery;
+                naming_.zip.active = true;
             }
         }
         mark_dirty();   // dialog closed (picked or cancelled) — repaint
@@ -497,10 +499,10 @@ void GalleryGrid::pump_zip_import()
 
 void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipConflictPolicy policy)
 {
-    // The gallery name and destination come from pending_zip_.
-    const std::string gallery_name = pending_zip_.gallery_name;
+    // The gallery name and destination come from naming_.zip.
+    const std::string gallery_name = naming_.zip.gallery_name;
     const std::string base_gallery = nav_.path();
-    const ui::ZipDest dest = pending_zip_.dest;
+    const ui::ZipDest dest = naming_.zip.dest;
 
     // Call the import_zip executor.
     const ui::ZipImportOutcome out = ui::import_zip(
@@ -513,7 +515,7 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipCo
 
     if (!out.ok) {
         error_ = out.error.empty() ? "ZIP import failed." : out.error;
-        pending_zip_.active = false;
+        naming_.zip.active = false;
         return;
     }
 
@@ -528,7 +530,7 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipCo
     // Success: set the summary and refresh.
     status_ = std::format("Imported {} file{}, skipped {}", out.imported,
                          out.imported == 1 ? "" : "s", out.skipped);
-    pending_zip_.active = false;
+    naming_.zip.active = false;
     refresh();
 }
 
@@ -610,7 +612,7 @@ void GalleryGrid::render(gfx::Renderer& r)
 
     // Zip conflict modal: drawn when awaiting a choice between FlattenMixed and SkipMixed.
     // Only shown after the naming dialog closes (so !naming_.active).
-    if (pending_zip_.active && !naming_.active) {
+    if (naming_.zip.active && !naming_.active) {
         // Veil the whole window.
         r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
 

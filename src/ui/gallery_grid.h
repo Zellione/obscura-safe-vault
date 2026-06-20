@@ -77,6 +77,7 @@ private:
     void start_zip_import();
     void do_zip_import(const std::filesystem::path& zip_path, ui::ZipConflictPolicy policy);
     void pump_zip_import();        // poll the zip file dialog while transfer is not active
+    bool handle_zip_conflict_key(const SDL_Event& e);  // Flatten/Skip/Esc modal; true if consumed
     void start_search();       // open the search overlay
     void start_tag_editor();   // open the tag editor for the focused tile
     void toggle_favorite_current();  // flip favorite on the focused tile (B)
@@ -111,21 +112,19 @@ private:
     std::string           error_;
     std::string           status_;   // transient export result message
 
-    // New-gallery naming state — bundled to fix S1820 (>20 data members).
-    struct Naming {
-        bool        active = false;
-        std::string buf;
-    };
-    Naming naming_;
-
-    // Zip import state — stashed when awaiting conflict resolution (FlattenMixed vs SkipMixed).
+    // New-gallery naming + zip-import flow state — bundled to fix S1820 (>20 data members).
     struct PendingZip {
         std::filesystem::path path;
         std::string           gallery_name;
         ui::ZipDest           dest = ui::ZipDest::NewGallery;
-        bool                  active = false;
+        bool                  active = false;  // awaiting conflict resolution (Flatten/Skip)
     };
-    PendingZip pending_zip_;
+    struct Naming {
+        bool        active = false;   // manual new-gallery text entry
+        std::string buf;
+        PendingZip  zip;              // zip import in flight
+    };
+    Naming naming_;
 
     // Off-thread thumbnail decoding, scoped to this grid (its own worker; see the
     // note in ImageViewer for why each screen keeps a separate one). Grouped to

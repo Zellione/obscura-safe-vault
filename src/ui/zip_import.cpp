@@ -6,12 +6,84 @@
 
 #include "miniz.h"
 
-#include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <print>
 #include <vector>
 
 namespace ui {
+namespace {
+
+// Read the whole archive file into memory. The archive is the user's own
+// on-disk file; only the *decompressed* entry bytes are sensitive (those go to
+// mlock'd SecureBytes). Returns false if the file is missing or empty.
+bool read_archive(const std::filesystem::path& path, std::vector<uint8_t>& out)
+{
+    std::ifstream f(path, std::ios::binary | std::ios::ate);
+    if (!f) return false;
+    const std::streamoff sz = f.tellg();
+    if (sz <= 0) return false;
+    out.resize(static_cast<size_t>(sz));
+    f.seekg(0);
+    f.read(reinterpret_cast<char*>(out.data()), sz);
+    return true;
+}
+
+// Snapshot the archive's central directory as a list of (path, is_dir) entries.
+std::vector<ZipEntry> read_entry_list(mz_zip_archive& zip)
+{
+    std::vector<ZipEntry> entries;
+    const mz_uint n = mz_zip_reader_get_num_files(&zip);
+    entries.reserve(n);
+    for (mz_uint i = 0; i < n; ++i) {
+        mz_zip_archive_file_stat st;
+        if (!mz_zip_reader_file_stat(&zip, i, &st)) continue;
+        entries.emplace_back(std::string(st.m_filename),
+                             mz_zip_reader_is_file_a_directory(&zip, i) != MZ_FALSE);
+    }
+    return entries;
+}
+
+// Extract one planned entry into mlock'd memory and store it in the vault.
+// Tallies the result into `out`. Decompressed bytes never touch disk.
+void import_one(vault::Vault& v, mz_zip_archive& zip, const ZipPlacement& pl, ZipImportOutcome& out)
+{
+    using enum vault::VaultResult;
+
+    mz_zip_archive_file_stat st;
+    if (!mz_zip_reader_file_stat(&zip, static_cast<mz_uint>(pl.entry_index), &st)) {
+        ++out.skipped;
+        return;
+    }
+
+    crypto::SecureBytes bytes(static_cast<size_t>(st.m_uncomp_size));  // mlock'd; wiped on scope exit
+    if (!mz_zip_reader_extract_to_mem(&zip, static_cast<mz_uint>(pl.entry_index),
+                                      bytes.data(), bytes.size(), 0)) {
+        ++out.skipped;
+        return;
+    }
+    const std::span<const uint8_t> span{bytes.data(), bytes.size()};
+
+    const vault::VaultResult r = image::detect_format(span) != image::ImageFormat::Unknown
+                                     ? v.add_image(pl.gallery_path, span, pl.filename)
+                                     : v.add_video(pl.gallery_path, span, pl.filename);
+    switch (r) {
+        case Ok:
+            ++out.imported;
+            break;
+        case AlreadyExists:
+        case InvalidArg:
+        case BadFormat:  // unsupported / duplicate content
+            ++out.skipped;
+            break;
+        default:
+            if (out.error.empty()) out.error = "Import error on " + pl.filename;
+            ++out.skipped;
+            break;
+    }
+}
+
+} // namespace
 
 ZipImportOutcome import_zip(vault::Vault&                v,
                             const std::filesystem::path& zip_path,
@@ -22,46 +94,20 @@ ZipImportOutcome import_zip(vault::Vault&                v,
 {
     ZipImportOutcome out;
 
-    // Read the whole archive into memory and drive miniz from the buffer
-    // (mz_zip_reader_init_mem) rather than mz_zip_reader_init_file: the in-memory
-    // reader is the portable, well-exercised path. The archive is the user's own
-    // on-disk file — only the *decompressed* entry bytes are sensitive, and those
-    // still go to SecureBytes. `archive` must outlive every read: init_mem borrows
-    // it, it does not copy.
+    // Drive miniz from an in-memory buffer (mz_zip_reader_init_mem), the portable
+    // path. `archive` must outlive every read: init_mem borrows it, never copies.
     std::vector<uint8_t> archive;
-    {
-        std::ifstream f(zip_path, std::ios::binary | std::ios::ate);
-        if (f) {
-            const std::streamoff sz = f.tellg();
-            if (sz > 0) {
-                archive.resize(static_cast<size_t>(sz));
-                f.seekg(0);
-                f.read(reinterpret_cast<char*>(archive.data()), sz);
-            }
-        }
-    }
-
     mz_zip_archive zip;
     std::memset(&zip, 0, sizeof(zip));
-    if (archive.empty() || !mz_zip_reader_init_mem(&zip, archive.data(), archive.size(), 0)) {
+    if (!read_archive(zip_path, archive) ||
+        !mz_zip_reader_init_mem(&zip, archive.data(), archive.size(), 0)) {
         // On a read/init failure there is nothing to mz_zip_reader_end().
         out.error = "Could not open archive";
-        std::fprintf(stderr, "[ZipImport] open failed: %s\n", zip_path.string().c_str());
+        std::println(stderr, "[ZipImport] open failed: {}", zip_path.string());
         return out;
     }
 
-    // Build the entry list from the central directory.
-    std::vector<ZipEntry> entries;
-    const mz_uint n = mz_zip_reader_get_num_files(&zip);
-    entries.reserve(n);
-    for (mz_uint i = 0; i < n; ++i) {
-        mz_zip_archive_file_stat st;
-        if (!mz_zip_reader_file_stat(&zip, i, &st)) continue;
-        entries.push_back({std::string(st.m_filename),
-                           mz_zip_reader_is_file_a_directory(&zip, i) != MZ_FALSE});
-    }
-
-    ZipPlan plan = build_zip_plan(entries, dest, base_gallery, new_gallery_name, policy);
+    ZipPlan plan = build_zip_plan(read_entry_list(zip), dest, base_gallery, new_gallery_name, policy);
     if (plan.needs_resolution) {
         out.ok = true;
         out.needs_resolution = true;
@@ -81,45 +127,8 @@ ZipImportOutcome import_zip(vault::Vault&                v,
         }
     }
 
-    using enum vault::VaultResult;
-    for (const auto& pl : plan.placements) {
-        mz_zip_archive_file_stat st;
-        if (!mz_zip_reader_file_stat(&zip, static_cast<mz_uint>(pl.entry_index), &st)) {
-            ++out.skipped;
-            continue;
-        }
-
-        crypto::SecureBytes bytes(static_cast<size_t>(st.m_uncomp_size));  // mlock'd; wiped on scope exit
-        if (!mz_zip_reader_extract_to_mem(&zip, static_cast<mz_uint>(pl.entry_index),
-                                          bytes.data(), bytes.size(), 0)) {
-            ++out.skipped;
-            continue;
-        }
-        std::span<const uint8_t> span{bytes.data(), bytes.size()};
-
-        vault::VaultResult r;
-        if (image::detect_format(span) != image::ImageFormat::Unknown)
-            r = v.add_image(pl.gallery_path, span, pl.filename);
-        else
-            r = v.add_video(pl.gallery_path, span, pl.filename);
-
-        switch (r) {
-            case Ok:
-                ++out.imported;
-                break;
-            case AlreadyExists:
-                ++out.skipped;
-                break;
-            case InvalidArg:
-            case BadFormat:
-                ++out.skipped;
-                break;  // unsupported content
-            default:
-                if (out.error.empty()) out.error = "Import error on " + pl.filename;
-                ++out.skipped;
-                break;
-        }
-    }
+    for (const auto& pl : plan.placements)
+        import_one(v, zip, pl, out);
 
     mz_zip_reader_end(&zip);
     out.ok = true;
