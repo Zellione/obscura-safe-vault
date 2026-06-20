@@ -12,10 +12,20 @@ namespace fs = std::filesystem;
 using ui::ZipDest;
 using ui::ZipConflictPolicy;
 
-static std::vector<uint8_t> read_fixture(const char* rel)
+// A synthetic "image" payload: a valid JPEG magic (SOI + APP0) so
+// image::detect_format routes it to Vault::add_image, followed by arbitrary
+// bytes. The thumbnail decode fails fast on the garbage tail and add_image
+// stores the original anyway (thumb_length == 0) — exactly how the existing
+// vault tests exercise add_image with synthetic bytes. Real codec decode/
+// thumbnailing is covered separately in tests/image; these tests verify the
+// import *plumbing* (planner routing, miniz extraction into mlock'd memory,
+// add_image storage, byte-identical readback) without coupling to a real codec.
+static std::vector<uint8_t> fake_jpeg(uint8_t seed)
 {
-    std::ifstream f(std::string(OSV_FIXTURE_DIR) + "/" + rel, std::ios::binary);
-    return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+    std::vector<uint8_t> v{0xFF, 0xD8, 0xFF, 0xE0};
+    for (int i = 0; i < 200; ++i)
+        v.push_back(static_cast<uint8_t>(seed + i));
+    return v;
 }
 
 // Build a zip with the given (archive_path -> bytes) entries, return its temp path.
@@ -53,11 +63,11 @@ static void make_vault(vault::Vault& v, const fs::path& p)
 
 TEST(zip_import_new_gallery_mirrors_tree)
 {
-    auto webp = read_fixture("sample.webp");
+    auto img = fake_jpeg(1);
     auto dir = fs::temp_directory_path() / "osv_zip_test_new";
     fs::remove_all(dir);
     fs::create_directories(dir);
-    auto zip = make_zip({{"2020/winter/a.webp", webp}, {"2020/sub/b.webp", webp}, {"notes.txt", {1, 2, 3}}},
+    auto zip = make_zip({{"2020/winter/a.jpg", img}, {"2020/sub/b.jpg", img}, {"notes.txt", {1, 2, 3}}},
                         dir / "in.zip");
 
     vault::Vault v;
@@ -67,30 +77,30 @@ TEST(zip_import_new_gallery_mirrors_tree)
     CHECK_FALSE(out.needs_resolution);
     CHECK_EQ(out.imported, 2);
     CHECK_EQ(out.skipped, 1);  // notes.txt
-    CHECK_EQ(v.list("Album/2020/winter").size(), static_cast<size_t>(1));  // a.webp
-    CHECK_EQ(v.list("Album/2020/sub").size(), static_cast<size_t>(1));  // b.webp
+    CHECK_EQ(v.list("Album/2020/winter").size(), static_cast<size_t>(1));  // a.jpg
+    CHECK_EQ(v.list("Album/2020/sub").size(), static_cast<size_t>(1));  // b.jpg
 
     // Byte-identical readback (spec: per-file checksum match). Find the imported
-    // a.webp node and compare its decrypted original bytes to the fixture.
-    const vault::IndexNode* img = nullptr;
+    // a.jpg node and compare its decrypted original bytes to the payload.
+    const vault::IndexNode* node = nullptr;
     for (const auto* c : v.list("Album/2020/winter"))
-        if (c->name == "a.webp") img = c;
-    REQUIRE(img != nullptr);
+        if (c->name == "a.jpg") node = c;
+    REQUIRE(node != nullptr);
     crypto::SecureBytes orig;
-    REQUIRE(v.read_image(*img, orig) == vault::VaultResult::Ok);
+    REQUIRE(v.read_image(*node, orig) == vault::VaultResult::Ok);
     CHECK_BYTES_EQ((std::span<const uint8_t>{orig.data(), orig.size()}),
-                   (std::span<const uint8_t>{webp.data(), webp.size()}));
+                   (std::span<const uint8_t>{img.data(), img.size()}));
 
     fs::remove_all(dir);
 }
 
 TEST(zip_import_append_flattens)
 {
-    auto webp = read_fixture("sample.webp");
+    auto img = fake_jpeg(2);
     auto dir = fs::temp_directory_path() / "osv_zip_test_app";
     fs::remove_all(dir);
     fs::create_directories(dir);
-    auto zip = make_zip({{"x/a.webp", webp}, {"x/y/b.webp", webp}}, dir / "in.zip");
+    auto zip = make_zip({{"x/a.jpg", img}, {"x/y/b.jpg", img}}, dir / "in.zip");
 
     vault::Vault v;
     make_vault(v, dir / "v.osv");
@@ -104,11 +114,11 @@ TEST(zip_import_append_flattens)
 
 TEST(zip_import_reports_mixed_folder_without_writing)
 {
-    auto webp = read_fixture("sample.webp");
+    auto img = fake_jpeg(3);
     auto dir = fs::temp_directory_path() / "osv_zip_test_mix";
     fs::remove_all(dir);
     fs::create_directories(dir);
-    auto zip = make_zip({{"a/x.webp", webp}, {"a/b/y.webp", webp}}, dir / "in.zip");
+    auto zip = make_zip({{"a/x.jpg", img}, {"a/b/y.jpg", img}}, dir / "in.zip");
 
     vault::Vault v;
     make_vault(v, dir / "v.osv");
@@ -137,11 +147,11 @@ TEST(zip_import_rejects_malformed_archive)
 
 TEST(zip_import_writes_no_extra_files)
 {
-    auto webp = read_fixture("sample.webp");
+    auto img = fake_jpeg(4);
     auto dir = fs::temp_directory_path() / "osv_zip_test_nofs";
     fs::remove_all(dir);
     fs::create_directories(dir);
-    auto zip = make_zip({{"a.webp", webp}}, dir / "in.zip");
+    auto zip = make_zip({{"a.jpg", img}}, dir / "in.zip");
     auto vpath = dir / "v.osv";
     vault::Vault v;
     make_vault(v, vpath);
