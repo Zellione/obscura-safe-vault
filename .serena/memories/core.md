@@ -230,6 +230,18 @@ src/
                                                  those now take a VaultRegistry& + active
                                                  vault path. consume_choice() drains the pick
                                                  (mirrors TransferDialog::consume_completed).
+               zip_plan.*                      — pure ZIP placement planner (Phase 17):
+                                                 archive entries -> galleries to create +
+                                                 file placements + mixed-folder conflicts +
+                                                 skip count. SDL-/miniz-/vault-free, unit-tested.
+                                                 ZipDest{NewGallery,Append}, ZipConflictPolicy
+                                                 {AskUser,FlattenMixed,SkipMixed}.
+               zip_import.*                    — ZIP import executor (Phase 17): miniz reader
+                                                 -> mlock'd SecureBytes (one entry at a time, no
+                                                 temp file) -> Vault::add_image/add_video chosen
+                                                 by image::detect_format. needs_resolution for
+                                                 mixed folders. Lives in ui/ like export.* (deps
+                                                 vault + image). Hosted by GalleryGrid (Z key).
                input.*, nav_model.*, viewer_model.h
                passphrase.*, screen.h
                secure_text_field.*, unlock_logic.*
@@ -249,6 +261,9 @@ vendor/
   stb/          git submodule, header-only
   libwebp/ libde265/ libaom/ libheif/   image codecs (Phase 9), cmake-built static
   ffmpeg/       git submodule, configure-built static (Phase 15–16, audio decoders + H.264/H.265)
+  miniz/        git submodule (pinned to master commit e78dfd2), plain-C ZIP reader compiled by
+                premake (Phase 17). vendor/miniz-shim/miniz_export.h supplies the CMake-generated
+                header so the submodule stays pristine; built with MINIZ_NO_ZLIB_COMPATIBLE_NAMES
   codecs-prefix/   staging install prefix for the codecs + FFmpeg (gitignored)
 assets/fonts/   bundled OFL font for stb_truetype
 ```
