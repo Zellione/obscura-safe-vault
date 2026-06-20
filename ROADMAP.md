@@ -746,25 +746,59 @@ assertion verifies zero disk writes across open→play→seek→play.
 
 ---
 
-## Phase 17 — Remote vaults (read-only streaming) ⬜
+## Phase 17 — Import ZIP archives ⬜
 
-**Goal:** Open an `.osv` file on a network share or cloud storage in
-**read-only** streaming mode. Read-only by design — it sidesteps the atomicity
-and concurrency problems of remote writes.
+**Goal:** Import a `.zip` of photos/videos into the vault in one action — either
+as a **new gallery subtree** or **appended** to an existing gallery —
+decompressing **into locked memory only**, never to a temp file (invariant #1
+holds).
 
 ### Tasks
-- [ ] **Source abstraction** — refactor chunk/header/index access behind a `RandomAccessSource` interface (`read(offset, len) -> bytes`, `size()`). A local-file implementation wraps today's code byte-for-byte (a targeted refactor that also tightens the I/O boundary).
-- [ ] `src/vault/http_source.{h,cpp}` — an HTTPS **range-request** source (libcurl): fetches the header + index once, then individual encrypted chunks on demand via `Range:` requests, backed by a small **mlock'd LRU chunk cache**. HTTPS only.
-- [ ] **Read-only vault path** — `Vault::open_readonly(source)`; import / delete / compact / tag-edit / favorite-toggle / move are disabled and visibly greyed in this mode. Decrypted bytes still live only in mlock'd memory; the crypto path is unchanged.
-- [ ] **Dependency** — vendor or system libcurl; `premake5.lua` link + CI provisioning across all three platforms.
-- [ ] Update `CLAUDE.md` tech table (libcurl, `RandomAccessSource`) + `mem:tech_stack`/`mem:core`, and document the **known limitation**: the remote host observes ciphertext **and chunk-access patterns** (which chunks are fetched, and when).
-- [ ] `tests/` — `RandomAccessSource` parity (local impl is byte-for-byte identical to direct file reads); a local HTTP test server serves an `.osv` and the vault opens read-only and reads images with matching checksums; every write operation is rejected in read-only mode; the LRU cache returns bytes identical to the origin; a network-share path works unchanged through the local-file source.
+- [ ] **Vendor miniz** — add `vendor/miniz` git submodule (single-file, public-domain/MIT); compiled directly by premake like monocypher/stb (no system zlib dependency). Update `setup.{sh,bat}` submodule init + `premake5.lua`.
+- [ ] `src/vault/zip_import.{h,cpp}` — walk the archive's central directory, build a planned gallery tree from entry paths, and import each entry. Decompress **one entry at a time** into an mlock'd `SecureBytes`; dispatch by `format_registry` / `video_probe` to `Vault::add_image` / `add_video`; `crypto_wipe` after. **No entry is ever extracted to disk.**
+- [ ] **Contents = all supported media** — import every entry whose format is a supported image (JPEG/PNG/GIF/BMP/TGA/HDR/WebP/HEIC/AVIF) or video (H.264/H.265 in mov/mp4/m4v/mkv/webm); skip everything else silently, reporting a skipped-count in a post-import summary.
+- [ ] **Folder mapping (mirror, with prompt)** — recreate the zip's directory hierarchy as nested galleries; media lands in leaf galleries (a flat zip → one gallery). If a single directory **mixes media files and subfolders** (would break the leaf invariant), a modal prompts the user to resolve it (flatten that directory's media into a sibling leaf, or skip it).
+- [ ] **Two destinations** — *Create new gallery* (preserves the mirrored subtree) or *Append to existing gallery*. **Append flattens:** it only adds the archive's media (ignoring subfolders) into the chosen leaf gallery. Filename collisions reuse `add_image`'s existing handling.
+- [ ] **UI** — a zip-import entry point from the gallery grid (file dialog over `SDL_ShowOpenFileDialog` with a `.zip` filter, reusing the `platform::file_dialog` async pattern), destination/mode choice, the mixed-folder resolution prompt, and a post-import summary (imported / skipped counts).
+- [ ] Update `CLAUDE.md` (miniz in the tech table, `src/vault/zip_import.*` in the module layout) + `mem:tech_stack`/`mem:core`.
+- [ ] `tests/` — a fixture `.zip` imports as a new gallery with the mirrored tree and matching per-file checksums; append-flatten adds only media into a leaf; unsupported entries are skipped + counted; a malformed/truncated zip is rejected without crashing (extend the fuzz mindset); a mixed-folder zip triggers the resolution path; a **no-fs-write assertion** proves nothing is extracted to disk during import.
+
+**Out of scope (YAGNI):** password-protected/encrypted zips, zip *export*, other
+archive formats (tar/7z).
 
 ### Acceptance criterion
-An `.osv` served over local HTTP(S) range requests opens read-only, browses, and
-reads images with matching checksums while performing **no writes**;
-import/delete/compaction are disabled; a network-share path works via the
-local-file source.
+Importing a fixture `.zip` as a new gallery reproduces its folder tree as nested
+galleries with every supported file's checksum matching the original; append
+mode adds only (flattened) media into the chosen leaf; unsupported entries are
+skipped and reported; a test asserts **no decrypted or archive bytes are written
+to disk** during import.
+
+---
+
+## Phase 18 — Advanced search (dedicated screen) ⬜
+
+**Goal:** A dedicated search screen for galleries and media with **weighted
+tags**, **include/exclude**, **AND/OR-grouped** clauses, **tag autocomplete**,
+and **saved, reusable searches** — coexisting with the Phase 12 `/`
+quick-overlay.
+
+### Tasks
+- [ ] **Query model (grouped clauses)** — `src/ui/advanced_search_model.{h,cpp}`: a serialisable query of **include tags** (each with an optional **weight**, default 1, contributing to a relevance **score**), **exclude tags** (hard filter — any match removes the hit), **named groups** of tags each combined **AND**/**OR**, the groups joined by a top-level **AND**/**OR**, plus **gallery-name** substring matching and a **scope** (Images / Galleries / Both). Pure, SDL-free, evaluates a candidate's name + effective tags → `{matched, score}`; headlessly unit-tested (mirrors `search_model`).
+- [ ] **Tag autocomplete** — `Vault::all_tags()` returns the vault's distinct tag vocabulary (deduplicated case-insensitively across the whole tree); a pure `tag_suggestions(prefix, vocabulary)` helper (case-insensitive, ranked, unit-tested) drives a typeahead dropdown in every include/exclude/group field (`Tab`/`Enter` accept, arrows select).
+- [ ] **Saved searches in the vault (encrypted)** — extend index serialisation with a **vault-global saved-searches block** (name + serialised query) alongside the tree root; bump **`INDEX_VERSION` 4 → 5** (v1–v4 read back-compat with an empty list); persisted via the crash-safe double-buffer index swap. `Vault` API: `save_search` / `list_saved_searches` / `delete_saved_search` / `run_search(query, scope)`. Enforce count/length bounds so the Phase 7 fuzz suite stays crash-free.
+- [ ] **UI** — a first-class `Screen` (`NavKind::ToAdvancedSearch`, opened with `Shift+/` from the grid) hosting the clause/group builder, a live result list (reusing grid tile/list rendering), and a saved-searches sidebar (save current / load / delete). Activating a result opens the collection-mode viewer (like favorites) or navigates to a gallery. The Phase 12 `/` overlay is unchanged.
+- [ ] Update `CLAUDE.md` (new ui module, `Vault::all_tags`/saved-search API, `INDEX_VERSION = 5`) + `mem:core`, and extend the index-format reference for the saved-searches block.
+- [ ] `tests/` — query evaluation: weighted ranking, exclude filtering, group AND/OR + top-level join, name match, scope; tag-suggestion prefix matching/ranking; `all_tags` dedup across the tree; saved-search round-trip across lock/reopen; a pre-v5 vault opens with no saved searches; the fuzz corpus is extended with a saved-searches block and stays crash-free.
+
+**Out of scope (YAGNI):** freeform query-language parser, regex, date/size-range
+filters (candidates for a later phase).
+
+### Acceptance criterion
+The advanced-search screen filters and ranks images/galleries by a grouped,
+weighted, include/exclude query with working tag autocomplete; searches can be
+saved, listed, re-run, and deleted, surviving a lock/reopen; a pre-v5 vault opens
+with no saved searches; the extended fuzz suite passes; the `/` quick-overlay
+still works.
 
 ---
 
@@ -849,3 +883,8 @@ Offset  Size  Description
 >   and new `format` codes appended after `8=AVIF` (e.g. `9=MP4/H.264`); video
 >   nodes reuse the same `data_*`/`thumb_*` layout (thumb = poster frame), with
 >   the container stored across multiple encrypted chunks.
+> - **Phase 18 (Advanced search):** a **vault-global saved-searches block**
+>   serialised alongside the tree root (`u16 count` + per-entry `{ name, serialised
+>   query }`), bumping `INDEX_VERSION` to **5**; pre-v5 blobs read with an empty
+>   saved-searches list. The block is not part of any node — it is vault-level
+>   metadata, persisted via the same crash-safe double-buffer index swap.
