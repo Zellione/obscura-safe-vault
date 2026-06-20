@@ -313,6 +313,7 @@ project "osv_tests"
         "src/ui/search_model.cpp",
         "src/ui/export.cpp",
         "src/ui/zip_plan.cpp",
+        "src/ui/zip_import.cpp",
         "src/ui/slideshow_model.cpp",
         "src/ui/playback_model.cpp",
         "src/ui/video_playback.cpp",
