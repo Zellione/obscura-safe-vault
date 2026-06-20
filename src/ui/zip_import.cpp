@@ -8,6 +8,8 @@
 
 #include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <vector>
 
 namespace ui {
 
@@ -20,11 +22,29 @@ ZipImportOutcome import_zip(vault::Vault&                v,
 {
     ZipImportOutcome out;
 
+    // Read the whole archive into memory and drive miniz from the buffer
+    // (mz_zip_reader_init_mem) rather than mz_zip_reader_init_file. The in-memory
+    // reader is the portable, well-exercised path; the file-based path crashed
+    // under MSVC. The archive is the user's own on-disk file — only the
+    // *decompressed* entry bytes are sensitive, and those still go to SecureBytes.
+    // `archive` must outlive every read: init_mem borrows it, it does not copy.
+    std::vector<uint8_t> archive;
+    {
+        std::ifstream f(zip_path, std::ios::binary | std::ios::ate);
+        if (f) {
+            const std::streamoff sz = f.tellg();
+            if (sz > 0) {
+                archive.resize(static_cast<size_t>(sz));
+                f.seekg(0);
+                f.read(reinterpret_cast<char*>(archive.data()), sz);
+            }
+        }
+    }
+
     mz_zip_archive zip;
     std::memset(&zip, 0, sizeof(zip));
-    if (!mz_zip_reader_init_file(&zip, zip_path.string().c_str(), 0)) {
-        // On init failure miniz has already released any partial state — there is
-        // nothing to mz_zip_reader_end() here.
+    if (archive.empty() || !mz_zip_reader_init_mem(&zip, archive.data(), archive.size(), 0)) {
+        // On a read/init failure there is nothing to mz_zip_reader_end().
         out.error = "Could not open archive";
         std::fprintf(stderr, "[ZipImport] open failed: %s\n", zip_path.string().c_str());
         return out;
