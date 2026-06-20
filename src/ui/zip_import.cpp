@@ -23,6 +23,8 @@ ZipImportOutcome import_zip(vault::Vault&                v,
     mz_zip_archive zip;
     std::memset(&zip, 0, sizeof(zip));
     if (!mz_zip_reader_init_file(&zip, zip_path.string().c_str(), 0)) {
+        // On init failure miniz has already released any partial state — there is
+        // nothing to mz_zip_reader_end() here.
         out.error = "Could not open archive";
         std::fprintf(stderr, "[ZipImport] open failed: %s\n", zip_path.string().c_str());
         return out;
