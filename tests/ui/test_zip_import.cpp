@@ -6,6 +6,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <system_error>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -61,109 +62,128 @@ static void make_vault(vault::Vault& v, const fs::path& p)
     (void)vault::Vault::create(p.string(), pw, {}, kTestKdf, v);  // kTestKdf is valid -> Ok
 }
 
+// Fresh empty temp dir. Non-throwing: on Windows a still-open vault file from a
+// crashed prior run cannot be deleted, and the throwing overload would abort.
+static fs::path fresh_dir(const char* name)
+{
+    fs::path dir = fs::temp_directory_path() / name;
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir, ec);
+    return dir;
+}
+
+// Remove the temp dir. Non-throwing (matches the TempVault convention in
+// tests/vault): the Vault must already be destroyed so its file handle is
+// closed — on Windows an open file cannot be deleted, and a throwing remove
+// would terminate the whole test process.
+static void cleanup_dir(const fs::path& dir)
+{
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
 TEST(zip_import_new_gallery_mirrors_tree)
 {
     auto img = fake_jpeg(1);
-    auto dir = fs::temp_directory_path() / "osv_zip_test_new";
-    fs::remove_all(dir);
-    fs::create_directories(dir);
+    auto dir = fresh_dir("osv_zip_test_new");
     auto zip = make_zip({{"2020/winter/a.jpg", img}, {"2020/sub/b.jpg", img}, {"notes.txt", {1, 2, 3}}},
                         dir / "in.zip");
 
-    vault::Vault v;
-    make_vault(v, dir / "v.osv");
-    auto out = ui::import_zip(v, zip, ZipDest::NewGallery, "", "Album", ZipConflictPolicy::AskUser);
-    CHECK(out.ok);
-    CHECK_FALSE(out.needs_resolution);
-    CHECK_EQ(out.imported, 2);
-    CHECK_EQ(out.skipped, 1);  // notes.txt
-    CHECK_EQ(v.list("Album/2020/winter").size(), static_cast<size_t>(1));  // a.jpg
-    CHECK_EQ(v.list("Album/2020/sub").size(), static_cast<size_t>(1));  // b.jpg
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        auto out = ui::import_zip(v, zip, ZipDest::NewGallery, "", "Album", ZipConflictPolicy::AskUser);
+        CHECK(out.ok);
+        CHECK_FALSE(out.needs_resolution);
+        CHECK_EQ(out.imported, 2);
+        CHECK_EQ(out.skipped, 1);  // notes.txt
+        CHECK_EQ(v.list("Album/2020/winter").size(), static_cast<size_t>(1));  // a.jpg
+        CHECK_EQ(v.list("Album/2020/sub").size(), static_cast<size_t>(1));  // b.jpg
 
-    // Byte-identical readback (spec: per-file checksum match). Find the imported
-    // a.jpg node and compare its decrypted original bytes to the payload.
-    const vault::IndexNode* node = nullptr;
-    for (const auto* c : v.list("Album/2020/winter"))
-        if (c->name == "a.jpg") node = c;
-    REQUIRE(node != nullptr);
-    crypto::SecureBytes orig;
-    REQUIRE(v.read_image(*node, orig) == vault::VaultResult::Ok);
-    CHECK_BYTES_EQ((std::span<const uint8_t>{orig.data(), orig.size()}),
-                   (std::span<const uint8_t>{img.data(), img.size()}));
-
-    fs::remove_all(dir);
+        // Byte-identical readback (spec: per-file checksum match). Find the imported
+        // a.jpg node and compare its decrypted original bytes to the payload.
+        const vault::IndexNode* node = nullptr;
+        for (const auto* c : v.list("Album/2020/winter"))
+            if (c->name == "a.jpg") node = c;
+        REQUIRE(node != nullptr);
+        crypto::SecureBytes orig;
+        REQUIRE(v.read_image(*node, orig) == vault::VaultResult::Ok);
+        CHECK_BYTES_EQ((std::span<const uint8_t>{orig.data(), orig.size()}),
+                       (std::span<const uint8_t>{img.data(), img.size()}));
+    }
+    cleanup_dir(dir);
 }
 
 TEST(zip_import_append_flattens)
 {
     auto img = fake_jpeg(2);
-    auto dir = fs::temp_directory_path() / "osv_zip_test_app";
-    fs::remove_all(dir);
-    fs::create_directories(dir);
+    auto dir = fresh_dir("osv_zip_test_app");
     auto zip = make_zip({{"x/a.jpg", img}, {"x/y/b.jpg", img}}, dir / "in.zip");
 
-    vault::Vault v;
-    make_vault(v, dir / "v.osv");
-    (void)v.create_gallery("Leaf");
-    auto out = ui::import_zip(v, zip, ZipDest::Append, "Leaf", "", ZipConflictPolicy::AskUser);
-    CHECK(out.ok);
-    CHECK_EQ(out.imported, 2);
-    CHECK_EQ(v.list("Leaf").size(), static_cast<size_t>(2));  // both flattened in
-    fs::remove_all(dir);
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        (void)v.create_gallery("Leaf");
+        auto out = ui::import_zip(v, zip, ZipDest::Append, "Leaf", "", ZipConflictPolicy::AskUser);
+        CHECK(out.ok);
+        CHECK_EQ(out.imported, 2);
+        CHECK_EQ(v.list("Leaf").size(), static_cast<size_t>(2));  // both flattened in
+    }
+    cleanup_dir(dir);
 }
 
 TEST(zip_import_reports_mixed_folder_without_writing)
 {
     auto img = fake_jpeg(3);
-    auto dir = fs::temp_directory_path() / "osv_zip_test_mix";
-    fs::remove_all(dir);
-    fs::create_directories(dir);
+    auto dir = fresh_dir("osv_zip_test_mix");
     auto zip = make_zip({{"a/x.jpg", img}, {"a/b/y.jpg", img}}, dir / "in.zip");
 
-    vault::Vault v;
-    make_vault(v, dir / "v.osv");
-    auto out = ui::import_zip(v, zip, ZipDest::NewGallery, "", "G", ZipConflictPolicy::AskUser);
-    CHECK(out.ok);
-    CHECK(out.needs_resolution);
-    CHECK_EQ(out.imported, 0);
-    CHECK(v.list("G").empty());  // nothing written while awaiting resolution
-    fs::remove_all(dir);
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        auto out = ui::import_zip(v, zip, ZipDest::NewGallery, "", "G", ZipConflictPolicy::AskUser);
+        CHECK(out.ok);
+        CHECK(out.needs_resolution);
+        CHECK_EQ(out.imported, 0);
+        CHECK(v.list("G").empty());  // nothing written while awaiting resolution
+    }
+    cleanup_dir(dir);
 }
 
 TEST(zip_import_rejects_malformed_archive)
 {
-    auto dir = fs::temp_directory_path() / "osv_zip_test_bad";
-    fs::remove_all(dir);
-    fs::create_directories(dir);
+    auto dir = fresh_dir("osv_zip_test_bad");
     std::ofstream(dir / "bad.zip", std::ios::binary) << "not a zip at all";
 
-    vault::Vault v;
-    make_vault(v, dir / "v.osv");
-    auto out = ui::import_zip(v, dir / "bad.zip", ZipDest::NewGallery, "", "G", ZipConflictPolicy::AskUser);
-    CHECK_FALSE(out.ok);
-    CHECK_FALSE(out.error.empty());
-    fs::remove_all(dir);
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        auto out = ui::import_zip(v, dir / "bad.zip", ZipDest::NewGallery, "", "G", ZipConflictPolicy::AskUser);
+        CHECK_FALSE(out.ok);
+        CHECK_FALSE(out.error.empty());
+    }
+    cleanup_dir(dir);
 }
 
 TEST(zip_import_writes_no_extra_files)
 {
     auto img = fake_jpeg(4);
-    auto dir = fs::temp_directory_path() / "osv_zip_test_nofs";
-    fs::remove_all(dir);
-    fs::create_directories(dir);
+    auto dir = fresh_dir("osv_zip_test_nofs");
     auto zip = make_zip({{"a.jpg", img}}, dir / "in.zip");
-    auto vpath = dir / "v.osv";
-    vault::Vault v;
-    make_vault(v, vpath);
 
-    auto out = ui::import_zip(v, zip, ZipDest::NewGallery, "", "G", ZipConflictPolicy::AskUser);
-    CHECK(out.ok);
-    // The only files in `dir` are the input zip and the vault — no decompressed temp.
-    int count = 0;
-    for (auto& e : fs::directory_iterator(dir)) {
-        (void)e;
-        ++count;
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        auto out = ui::import_zip(v, zip, ZipDest::NewGallery, "", "G", ZipConflictPolicy::AskUser);
+        CHECK(out.ok);
+        // The only files in `dir` are the input zip and the vault — no decompressed temp.
+        int count = 0;
+        for (auto& e : fs::directory_iterator(dir)) {
+            (void)e;
+            ++count;
+        }
+        CHECK_EQ(count, 2);
     }
-    CHECK_EQ(count, 2);
-    fs::remove_all(dir);
+    cleanup_dir(dir);
 }
