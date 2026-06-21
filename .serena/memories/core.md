@@ -242,11 +242,23 @@ src/
                                                  by image::detect_format. needs_resolution for
                                                  mixed folders. Lives in ui/ like export.* (deps
                                                  vault + image). Hosted by GalleryGrid (Z key).
+               delete_summary.*                — pure recursive tally of a gallery subtree
+                                                 (images/videos/sub-galleries) for the Del
+                                                 delete-confirm popup (Phase 17 follow-up).
+                                                 SDL-/vault-free count + plural-aware format,
+                                                 unit-tested. GalleryGrid's Del removes the
+                                                 focused image/video (Vault::remove_image) or
+                                                 gallery subtree (Vault::remove_gallery) behind
+                                                 a confirm modal showing the tally.
                input.*, nav_model.*, viewer_model.h
                passphrase.*, screen.h
                secure_text_field.*, unlock_logic.*
   platform/    paths.*, file_dialog.*,         — config dirs, SDL file dialogs
-                                                 (file_dialog has save_vault(), Phase 14)
+                                                 (file_dialog has save_vault(), Phase 14).
+                                                 Phase 17: each open tagged with a Purpose +
+                                                 take_result(Purpose) so one shared dialog
+                                                 polled by two handlers (GalleryGrid image vs
+                                                 zip import) can't steal each other's result.
                folder_dialog.*                 — export destination picker (Phase 10)
                vault_registry.*                — recent-vaults list (Phase 14): config-dir
                                                  file of known vault PATHS ONLY (no

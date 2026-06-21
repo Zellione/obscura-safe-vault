@@ -212,9 +212,19 @@ src/
              zip_import.*,                ← ZIP executor: miniz reader → mlock'd
                                             SecureBytes → Vault::add_image/add_video;
                                             triggered by `Z` key in gallery grid (Phase 17)
+             delete_summary.*,            ← pure recursive tally of a gallery subtree
+                                            (images/videos/sub-galleries) for the `Del`
+                                            delete-confirm popup (Phase 17 follow-up).
+                                            GalleryGrid's `Del` removes the focused
+                                            image/video (Vault::remove_image) or gallery
+                                            subtree (Vault::remove_gallery) behind a confirm.
              widgets.*
   platform/  paths.{h,cpp},              ← config dir + file dialogs (Phase 5)
-             file_dialog.*,               ← + save_vault() for new-vault paths (Phase 14)
+             file_dialog.*,               ← + save_vault() for new-vault paths (Phase 14);
+                                            each open tagged with a Purpose +
+                                            take_result(Purpose) so one shared dialog polled
+                                            by two handlers (GalleryGrid image vs zip import)
+                                            can't steal each other's result (Phase 17 fix)
              folder_dialog.*,             ← export destination picker (Phase 10)
              vault_registry.*             ← recent-vaults list, paths only, atomic
                                             write — stores NO secrets (Phase 14)
