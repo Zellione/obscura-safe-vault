@@ -202,18 +202,25 @@ TEST(fuzz_index_deserialize_survives_3000_malformed_blobs)
     root.children[0].children[0].favorite = true;
     root.children[0].children[0].meta.data_offset = 4096;
     root.children[0].children[0].meta.data_length = 1234;
+    // A v5 saved-searches block exercises the Phase 18 parsing path.
+    std::vector<vault::SavedSearch> searches = {
+        vault::SavedSearch{"cats", {0x01, 0x05, 0x00, 0x00, 0x00, 0x02}},
+        vault::SavedSearch{"trips", {0xAA, 0xBB, 0xCC}},
+    };
     std::vector<uint8_t> valid;
-    vault::serialize_index(root, valid);
+    vault::serialize_index(root, searches, valid);
 
     for (int i = 0; i < 1500; ++i) {
         const auto blob = random_bytes(rng, rng.below(2048));
         vault::IndexNode out;
-        (void)vault::deserialize_index(blob, out);
+        std::vector<vault::SavedSearch> out_searches;
+        (void)vault::deserialize_index(blob, out, out_searches);
     }
     for (int i = 0; i < 1500; ++i) {
         const auto blob = mutate(rng, valid);
         vault::IndexNode out;
-        (void)vault::deserialize_index(blob, out);
+        std::vector<vault::SavedSearch> out_searches;
+        (void)vault::deserialize_index(blob, out, out_searches);
     }
 }
 

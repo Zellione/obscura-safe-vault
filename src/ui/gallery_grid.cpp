@@ -370,6 +370,11 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         search_.open();  // search (/)
         return;
     }
+    // Shift+/ (i.e. '?') opens the dedicated advanced-search screen (Phase 18).
+    if (SDL_GetKeyFromScancode(key.scancode, key.mod, false) == SDLK_QUESTION) {
+        request(NavKind::ToAdvancedSearch);
+        return;
+    }
     if (key.key == SDLK_G) { start_tag_editor(); return; }  // tag editor (G)
     if (key.key == SDLK_B) { toggle_favorite_current(); return; }  // favorite (B)
     if (key.key == SDLK_F) {  // open a favorites screen (Shift+F = galleries)

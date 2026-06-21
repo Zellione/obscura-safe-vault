@@ -395,7 +395,7 @@ TEST(index_v4_video_node_round_trip)
 
     std::vector<uint8_t> blob;
     serialize_index(root, blob);
-    CHECK(blob[0] == INDEX_VERSION);   // version byte is 4
+    CHECK(blob[0] == INDEX_VERSION);   // current serialised version byte
 
     IndexNode back;
     CHECK(deserialize_index(blob, back));
@@ -431,4 +431,88 @@ TEST(index_v4_rejects_excessive_chunk_count)
     blob.insert(blob.end(), {0xFF,0xFF,0xFF,0xFF}); // chunk_count = 4 billion
     IndexNode out;
     CHECK_FALSE(deserialize_index(blob, out));       // must reject, not allocate
+}
+
+// --- Phase 18: vault-global saved-searches block (index v5) -----------------
+
+TEST(index_v5_saved_searches_round_trip)
+{
+    using namespace vault;
+    IndexNode root = IndexNode::gallery("");
+    root.children.push_back(make_image("a.png", 10, 20));
+
+    std::vector<SavedSearch> searches = {
+        SavedSearch{"cats", {0x01, 0x02, 0x03}},
+        SavedSearch{"vacation 2024", {0xAA, 0xBB}},
+    };
+
+    std::vector<uint8_t> blob;
+    serialize_index(root, searches, blob);
+    CHECK(blob[0] == INDEX_VERSION);   // version byte is 5
+
+    IndexNode out;
+    std::vector<SavedSearch> back;
+    REQUIRE(deserialize_index(blob, out, back));
+    REQUIRE(out.children.size() == 1);
+    REQUIRE(back.size() == 2);
+    CHECK_EQ(back[0].name, std::string("cats"));
+    CHECK_BYTES_EQ(std::span<const uint8_t>(back[0].query),
+                   std::span<const uint8_t>(searches[0].query));
+    CHECK_EQ(back[1].name, std::string("vacation 2024"));
+    CHECK_BYTES_EQ(std::span<const uint8_t>(back[1].query),
+                   std::span<const uint8_t>(searches[1].query));
+}
+
+TEST(index_two_arg_serialize_emits_v5_with_no_saved_searches)
+{
+    using namespace vault;
+    IndexNode root = IndexNode::gallery("");
+    std::vector<uint8_t> blob;
+    serialize_index(root, blob);            // legacy 2-arg path
+    CHECK(blob[0] == INDEX_VERSION);
+
+    IndexNode out;
+    std::vector<SavedSearch> back;
+    REQUIRE(deserialize_index(blob, out, back));
+    CHECK_TRUE(back.empty());
+}
+
+TEST(index_pre_v5_blob_reads_with_no_saved_searches)
+{
+    using namespace vault;
+    // A hand-crafted v4 blob (gallery, no children) carries no saved-searches
+    // block; the v5 reader must surface an empty list rather than failing.
+    std::vector<uint8_t> v4_blob = {
+        0x04,                          // INDEX_VERSION = 4
+        0x00,                          // type = Gallery
+        0x00, 0x00,                    // name_len = 0
+        0x00, 0x00,                    // tag_count = 0
+        0x00,                          // favorite = 0
+        0x00, 0x00, 0x00, 0x00,        // child_count = 0
+    };
+
+    IndexNode out;
+    std::vector<SavedSearch> back;
+    REQUIRE(deserialize_index(v4_blob, out, back));
+    CHECK_TRUE(back.empty());
+}
+
+TEST(index_deserialize_rejects_hostile_saved_search_count)
+{
+    using namespace vault;
+    // v5 gallery with zero children, then a saved-search count of 65535 but no
+    // entries following — must reject without a huge allocation.
+    std::vector<uint8_t> blob = {
+        0x05,                          // INDEX_VERSION = 5
+        0x00,                          // type = Gallery
+        0x00, 0x00,                    // name_len = 0
+        0x00, 0x00,                    // tag_count = 0
+        0x00,                          // favorite = 0
+        0x00, 0x00, 0x00, 0x00,        // child_count = 0
+        0xFF, 0xFF,                    // saved_search_count = 65535 (no data follows)
+    };
+
+    IndexNode out;
+    std::vector<SavedSearch> back;
+    CHECK_FALSE(deserialize_index(blob, out, back));
 }

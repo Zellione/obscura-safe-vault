@@ -131,10 +131,20 @@ struct IndexNode {
     }
 };
 
+// One named, reusable saved search (Phase 18). Stored as vault-global metadata
+// alongside the tree root, not as a node. `query` is the opaque serialised
+// ui::AdvancedQuery blob (see src/ui/advanced_search_model.h); the index treats
+// it as bytes so the vault layer stays decoupled from the UI query model.
+struct SavedSearch {
+    std::string          name;
+    std::vector<uint8_t> query;
+};
+
 // Current serialised-blob version (first byte of the blob).
 // v1: no tags. v2: per-node tags (Phase 12). v3: per-node favorite flag (Phase 13).
-// v4: video nodes + VideoMeta (Phase 15 PR2).
-inline constexpr uint8_t INDEX_VERSION = 4;
+// v4: video nodes + VideoMeta (Phase 15 PR2). v5: vault-global saved-searches
+// block after the tree root (Phase 18); pre-v5 blobs read with an empty list.
+inline constexpr uint8_t INDEX_VERSION = 5;
 
 // Maximum tree depth accepted on deserialisation — guards against stack overflow
 // from a deeply-nested hostile blob.
@@ -147,12 +157,25 @@ inline constexpr uint16_t INDEX_MAX_TAGS = 4096;
 // (Phase 15 PR2). 1 MiB chunks * 1M = 1 TiB max video.
 inline constexpr uint32_t INDEX_MAX_VIDEO_CHUNKS = 1u << 20;
 
-// Serialise the whole tree rooted at `root` into `out` (cleared first).
+// Maximum saved searches per vault, and max bytes per saved query blob —
+// bound a hostile saved-searches block (Phase 18).
+inline constexpr uint16_t INDEX_MAX_SAVED_SEARCHES   = 4096;
+inline constexpr uint32_t INDEX_MAX_SAVED_QUERY_BYTES = 1u << 20;
+
+// Serialise the whole tree rooted at `root` into `out` (cleared first). The
+// two-argument form writes an empty saved-searches block; the three-argument
+// form persists `searches` after the tree (Phase 18).
 void serialize_index(const IndexNode& root, std::vector<uint8_t>& out);
+void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& searches,
+                     std::vector<uint8_t>& out);
 
 // Parse a tree from `in` into `out`. Returns false on any malformed input (bad
 // version, unknown node type, truncation, excessive depth). On failure `out` is
-// left in an unspecified-but-valid state; callers must not use it.
+// left in an unspecified-but-valid state; callers must not use it. The
+// three-argument form also extracts the saved-searches block into `searches`
+// (empty for pre-v5 blobs).
 [[nodiscard]] bool deserialize_index(std::span<const uint8_t> in, IndexNode& out);
+[[nodiscard]] bool deserialize_index(std::span<const uint8_t> in, IndexNode& out,
+                                     std::vector<SavedSearch>& searches);
 
 } // namespace vault

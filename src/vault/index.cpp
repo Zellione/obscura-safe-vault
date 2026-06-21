@@ -194,25 +194,88 @@ bool read_node(ByteReader& r, IndexNode& node, uint32_t depth, uint8_t version)
     return true;
 }
 
+// Write the Phase 18 saved-searches block: u16 count + per-entry { name
+// (u16 len + bytes), query (u32 len + bytes) }. Counts/lengths are clamped to
+// their bounds so a pathological in-memory list can't emit an unreadable blob.
+void write_saved_searches(ByteWriter& w, const std::vector<SavedSearch>& searches)
+{
+    const uint16_t count = searches.size() > INDEX_MAX_SAVED_SEARCHES
+                               ? INDEX_MAX_SAVED_SEARCHES
+                               : static_cast<uint16_t>(searches.size());
+    w.u16(count);
+    for (uint16_t i = 0; i < count; ++i) {
+        const std::string& name = searches[i].name;
+        const uint16_t name_len = name.size() > 0xFFFF ? 0xFFFF : static_cast<uint16_t>(name.size());
+        w.u16(name_len);
+        w.bytes(std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(name.data()), name_len));
+
+        const auto& q = searches[i].query;
+        const uint32_t q_len = q.size() > INDEX_MAX_SAVED_QUERY_BYTES
+                                   ? INDEX_MAX_SAVED_QUERY_BYTES
+                                   : static_cast<uint32_t>(q.size());
+        w.u32(q_len);
+        w.bytes(std::span<const uint8_t>(q.data(), q_len));
+    }
+}
+
+// Read the saved-searches block (v5+). Bounds checked BEFORE any allocation so a
+// hostile count/length can't drive OOM. Returns false on truncation/over-large.
+bool read_saved_searches(ByteReader& r, std::vector<SavedSearch>& searches)
+{
+    searches.clear();
+    const uint16_t count = r.u16();
+    if (!r.ok() || count > INDEX_MAX_SAVED_SEARCHES) return false;
+    for (uint16_t i = 0; i < count; ++i) {
+        SavedSearch s;
+        if (!read_string(r, s.name)) return false;
+        const uint32_t q_len = r.u32();
+        if (!r.ok() || q_len > INDEX_MAX_SAVED_QUERY_BYTES) return false;  // bound before alloc
+        s.query.resize(q_len);
+        if (q_len > 0) {
+            r.bytes(std::span<uint8_t>(s.query.data(), q_len));
+            if (!r.ok()) return false;
+        }
+        searches.push_back(std::move(s));
+    }
+    return true;
+}
+
 } // namespace
 
 void serialize_index(const IndexNode& root, std::vector<uint8_t>& out)
+{
+    serialize_index(root, {}, out);
+}
+
+void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& searches,
+                     std::vector<uint8_t>& out)
 {
     out.clear();
     ByteWriter w(out);
     w.u8(INDEX_VERSION);
     write_node(w, root);
+    write_saved_searches(w, searches);
 }
 
 bool deserialize_index(std::span<const uint8_t> in, IndexNode& out)
 {
+    std::vector<SavedSearch> ignored;
+    return deserialize_index(in, out, ignored);
+}
+
+bool deserialize_index(std::span<const uint8_t> in, IndexNode& out,
+                       std::vector<SavedSearch>& searches)
+{
+    searches.clear();
     ByteReader r(in);
     const uint8_t version = r.u8();
     if (!r.ok()) return false;
-    // Accept version 1 (no tags) and version 2 (with tags). Reject unknown versions.
+    // Accept versions 1..INDEX_VERSION; older fields default to empty.
     if (version < 1 || version > INDEX_VERSION) return false;
     if (!read_node(r, out, 0, version)) return false;
-    // Trailing bytes after a well-formed tree indicate corruption.
+    // The saved-searches block exists only from v5 on; older blobs end here.
+    if (version >= 5 && !read_saved_searches(r, searches)) return false;
+    // Trailing bytes after a well-formed blob indicate corruption.
     return r.remaining() == 0;
 }
 
