@@ -14,6 +14,7 @@
 #include "platform/file_dialog.h"
 #include "platform/folder_dialog.h"
 #include "platform/paths.h"
+#include "ui/delete_summary.h"
 #include "ui/export.h"
 #include "ui/input.h"
 #include "ui/widgets.h"
@@ -349,6 +350,16 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         dialogs_.file.open_zip(win_.sdl_window());
         return;
     }
+    if (key.key == SDLK_DELETE) {   // delete the focused image/video/gallery (confirm first)
+        if (const int s = nav_.selected();
+            s >= 0 && s < static_cast<int>(children_.size())) {
+            error_.clear();
+            naming_.confirm_delete = true;
+        } else {
+            error_ = "Nothing selected to delete.";
+        }
+        return;
+    }
     if (key.key == SDLK_SPACE) { toggle_or_open(); return; }
     // `/` is a shifted key on many non-US layouts, so the base keycode (key.key)
     // is the unmodified symbol (e.g. '7') and never equals SDLK_SLASH. Resolve the
@@ -436,6 +447,37 @@ void GalleryGrid::handle_event(const SDL_Event& e)
         return;
     }
 
+    // The delete-confirmation modal owns all input while it is up. Y deletes the
+    // focused media tile; Esc / N cancel; every other key is swallowed.
+    if (naming_.confirm_delete) {
+        if (e.type == SDL_EVENT_KEY_DOWN) {
+            if (e.key.key == SDLK_Y) {
+                if (const int s = nav_.selected();
+                    s >= 0 && s < static_cast<int>(children_.size())) {
+                    const vault::IndexNode* n = children_[s];
+                    const std::string name = n->name;
+                    const std::string base = nav_.path();
+                    const vault::VaultResult r =
+                        n->is_gallery()
+                            ? vault_.remove_gallery(base.empty() ? name : base + "/" + name)
+                            : vault_.remove_image(base, name);
+                    if (r == vault::VaultResult::Ok) {
+                        status_ = "Deleted " + name;
+                        refresh();
+                    } else {
+                        error_ = "Could not delete " + name;
+                    }
+                }
+                naming_.confirm_delete = false;
+                mark_dirty();
+            } else if (e.key.key == SDLK_ESCAPE || e.key.key == SDLK_N) {
+                naming_.confirm_delete = false;
+                mark_dirty();
+            }
+        }
+        return;
+    }
+
     // The zip conflict modal owns all input while it is up (only when not naming).
     if (handle_zip_conflict_key(e)) return;
 
@@ -458,7 +500,7 @@ void GalleryGrid::handle_event(const SDL_Event& e)
 
 void GalleryGrid::pump_import()
 {
-    if (auto res = dialogs_.file.take_result()) {
+    if (auto res = dialogs_.file.take_result(platform::FileDialog::Purpose::Images)) {
         if (!res->empty()) {
             for (const auto& p : *res) do_import(p);
             refresh();
@@ -469,7 +511,7 @@ void GalleryGrid::pump_import()
 
 void GalleryGrid::pump_zip_import()
 {
-    if (auto res = dialogs_.file.take_result()) {
+    if (auto res = dialogs_.file.take_result(platform::FileDialog::Purpose::Zip)) {
         if (!res->empty()) {
             const std::string zip_path = res->front();
             const std::filesystem::path zp(zip_path);
@@ -574,9 +616,9 @@ void GalleryGrid::render(gfx::Renderer& r)
     for (const auto& s : nav_.segments()) { crumb += s; crumb += '/'; }
     r.draw_text(font_, OX, 40, crumb, TEXT_DIM);
     r.draw_text(font_, OX, 90,
-                "[I] Import  [Z] ZIP  [N] New  [/] Search  [G] Tags  [B] Fav  [F] Fav Images  "
-                "[Shift+F] Fav Galleries  [Enter] Open  [Space] Select  [X] Export  "
-                "[M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid",
+                "[I] Import  [Z] ZIP  [N] New  [Del] Delete  [/] Search  [G] Tags  [B] Fav  "
+                "[F] Fav Images  [Shift+F] Fav Galleries  [Enter] Open  [Space] Select  "
+                "[X] Export  [M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid",
                 TEXT_FAINT);
 
     if (!sel_.empty())
@@ -601,6 +643,38 @@ void GalleryGrid::render(gfx::Renderer& r)
         r.draw_round_rect({mx, my, mw, mh}, RADIUS, ACCENT, /*filled*/ false);
         r.draw_text(font_, mx + 16, my + 16, "New gallery name:", TEXT);
         draw_text_field(r, font_, {mx + 16, my + 56, mw - 32, 44}, naming_.buf, true);
+    }
+
+    // Delete-confirmation modal: names the target tile; deletion is irreversible.
+    if (naming_.confirm_delete) {
+        r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});   // veil
+
+        const float pw = 560;
+        const float ph = 200;
+        const float px = (W - pw) / 2;
+        const float py = (H - ph) / 2;
+        r.draw_round_rect({px, py, pw, ph}, RADIUS, SURFACE);
+        r.draw_round_rect({px, py, pw, ph}, RADIUS, DANGER, /*filled*/ false);
+
+        auto centered = [&](const std::string& s, float y, gfx::Color c) {
+            const auto tw = static_cast<float>(font_.measure(s));
+            r.draw_text(font_, px + (pw - tw) / 2, y, s, c);
+        };
+
+        const int s = nav_.selected();
+        const vault::IndexNode* node =
+            (s >= 0 && s < static_cast<int>(children_.size())) ? children_[s] : nullptr;
+        const std::string name = node ? node->name : std::string{};
+        centered("Delete \"" + fit_name(name, pw - 80) + "\"?", py + 28, TEXT);
+        if (node && node->is_gallery()) {
+            SubtreeCounts c;
+            count_subtree(*node, c);
+            centered("This permanently removes the gallery and everything in it.", py + 72, DANGER);
+            centered("Contains " + describe_subtree(c) + ".", py + 104, DANGER);
+        } else {
+            centered("This permanently removes it from the vault.", py + 84, DANGER);
+        }
+        centered("[Esc/N] Cancel        [Y] Delete", py + ph - 50, TEXT_DIM);
     }
 
     search_.render(r, font_, W, H);

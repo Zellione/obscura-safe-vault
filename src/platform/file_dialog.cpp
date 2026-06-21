@@ -19,18 +19,19 @@ void SDLCALL FileDialog::on_files(void* userdata, const char* const* filelist, i
     self->state_ = St::Done;
 }
 
-bool FileDialog::begin_open()
+bool FileDialog::begin_open(Purpose purpose)
 {
     std::lock_guard lk(mtx_);
     if (state_ == St::Open) return false;
     state_ = St::Open;
+    purpose_ = purpose;
     paths_.clear();
     return true;
 }
 
 void FileDialog::open_vault(SDL_Window* parent)
 {
-    if (!begin_open()) return;
+    if (!begin_open(Purpose::Vault)) return;
     static constexpr std::array f{SDL_DialogFileFilter{"OSV Vault", "osv"},
                                   SDL_DialogFileFilter{"All files", "*"}};
     SDL_ShowOpenFileDialog(on_files, this, parent, f.data(),
@@ -39,7 +40,7 @@ void FileDialog::open_vault(SDL_Window* parent)
 
 void FileDialog::open_images(SDL_Window* parent)
 {
-    if (!begin_open()) return;
+    if (!begin_open(Purpose::Images)) return;
     static constexpr std::array f{
         SDL_DialogFileFilter{"Images & video",
                              "jpg;jpeg;png;gif;bmp;tga;hdr;webp;heic;avif;mp4;mkv;webm;mov;m4v"},
@@ -50,7 +51,7 @@ void FileDialog::open_images(SDL_Window* parent)
 
 void FileDialog::open_keyfile(SDL_Window* parent)
 {
-    if (!begin_open()) return;
+    if (!begin_open(Purpose::Keyfile)) return;
     static constexpr std::array f{SDL_DialogFileFilter{"All files", "*"}};
     SDL_ShowOpenFileDialog(on_files, this, parent, f.data(),
                            static_cast<int>(f.size()), nullptr, /*allow_many*/ false);
@@ -58,7 +59,7 @@ void FileDialog::open_keyfile(SDL_Window* parent)
 
 void FileDialog::open_zip(SDL_Window* parent)
 {
-    if (!begin_open()) return;
+    if (!begin_open(Purpose::Zip)) return;
     static constexpr std::array f{
         SDL_DialogFileFilter{"Zip archives", "zip"},
         SDL_DialogFileFilter{"All files", "*"}};
@@ -68,7 +69,7 @@ void FileDialog::open_zip(SDL_Window* parent)
 
 void FileDialog::save_keyfile(SDL_Window* parent)
 {
-    if (!begin_open()) return;
+    if (!begin_open(Purpose::SaveKeyfile)) return;
     static constexpr std::array f{SDL_DialogFileFilter{"Keyfile", "key"},
                                   SDL_DialogFileFilter{"All files", "*"}};
     SDL_ShowSaveFileDialog(on_files, this, parent, f.data(),
@@ -77,7 +78,7 @@ void FileDialog::save_keyfile(SDL_Window* parent)
 
 void FileDialog::save_vault(SDL_Window* parent)
 {
-    if (!begin_open()) return;
+    if (!begin_open(Purpose::SaveVault)) return;
     static constexpr std::array f{SDL_DialogFileFilter{"OSV Vault", "osv"},
                                   SDL_DialogFileFilter{"All files", "*"}};
     SDL_ShowSaveFileDialog(on_files, this, parent, f.data(),
@@ -95,6 +96,19 @@ std::optional<std::vector<std::string>> FileDialog::take_result()
     std::lock_guard lk(mtx_);
     if (state_ != St::Done) return std::nullopt;
     state_ = St::Idle;
+    purpose_ = Purpose::None;
+    return std::move(paths_);
+}
+
+std::optional<std::vector<std::string>> FileDialog::take_result(Purpose want)
+{
+    std::lock_guard lk(mtx_);
+    // Leave a result tagged for a different purpose untouched so the handler that
+    // opened it can still claim it (regression: a [Z] zip pick must not be drained
+    // by GalleryGrid's [I] image-import poller).
+    if (state_ != St::Done || purpose_ != want) return std::nullopt;
+    state_ = St::Idle;
+    purpose_ = Purpose::None;
     return std::move(paths_);
 }
 

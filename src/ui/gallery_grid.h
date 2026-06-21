@@ -122,6 +122,7 @@ private:
         bool        active = false;   // manual new-gallery text entry
         std::string buf;
         PendingZip  zip;              // zip import in flight
+        bool        confirm_delete = false;  // Del on a media tile: awaiting Y/N confirm
     };
     Naming naming_;
 
