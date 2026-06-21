@@ -41,10 +41,10 @@ const char* scope_label(SearchScope s)
 
 const char* join_label(Combinator c) { return c == Combinator::And ? "AND" : "OR"; }
 
-// Draw the group rows (and, when focused, the group input line). Returns the new
-// baseline y. Free function so it stays out of the screen's method count.
+// Draw the group rows; returns the new baseline y. Free function so it stays out
+// of the screen's method count.
 float draw_groups(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<TagGroup>& groups,
-                  int cur_group, bool focused, std::string_view edit_group, float x, float y)
+                  int cur_group, bool focused, float x, float y)
 {
     using namespace gfx::theme;
     for (int i = 0; i < static_cast<int>(groups.size()); ++i) {
@@ -53,12 +53,6 @@ float draw_groups(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<TagG
         for (const auto& t : groups[i].tags) s += t + " ";
         r.draw_text(font, x + 8, y, s, hot ? TEXT : TEXT_FAINT);
         y += LINE * 0.9f;
-    }
-    if (focused) {
-        r.draw_text(font, x + 8, y,
-                    std::format("  [{}_]  Enter=add, empty Enter=new group, Del=AND/OR", edit_group),
-                    TEXT_FAINT);
-        y += LINE;
     }
     return y;
 }
@@ -199,8 +193,10 @@ void AdvancedSearchScreen::handle_save_key(const SDL_KeyboardEvent& key)
 void AdvancedSearchScreen::handle_axis_key(const SDL_KeyboardEvent& key)
 {
     using enum Combinator;
-    const int dir = key.key == SDLK_LEFT ? -1 : (key.key == SDLK_RIGHT ? 1 : 0);
-    if (dir == 0) return;
+    int dir = 0;
+    if (key.key == SDLK_LEFT)       dir = -1;
+    else if (key.key == SDLK_RIGHT) dir = 1;
+    else                            return;
     if (focus_ == Focus::Scope) {
         cycle_scope(dir);
     } else {  // Focus::GroupJoin — a two-way toggle
@@ -478,7 +474,13 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top)
     label(y, Focus::Exclude, exc); y += LINE;
 
     label(y, Focus::Group, "Groups:"); y += LINE;
-    y = draw_groups(r, font_, query_.groups, cur_.group, focused(Focus::Group), edit_.group, x, y);
+    y = draw_groups(r, font_, query_.groups, cur_.group, focused(Focus::Group), x, y);
+    if (focused(Focus::Group)) {
+        r.draw_text(font_, x + 8, y,
+                    std::format("  [{}_]  Enter=add, empty Enter=new group, Del=AND/OR", edit_.group),
+                    TEXT_FAINT);
+        y += LINE;
+    }
     label(y, Focus::GroupJoin, std::format("Join groups: {}", join_label(query_.group_join)));
     y += LINE;
 
