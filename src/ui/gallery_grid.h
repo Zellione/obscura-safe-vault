@@ -77,7 +77,7 @@ private:
     void do_zip_import(const std::filesystem::path& zip_path, ui::ZipConflictPolicy policy);
     void pump_zip_import();        // poll the zip file dialog while transfer is not active
     bool handle_zip_conflict_key(const SDL_Event& e);  // Flatten/Skip/Esc modal; true if consumed
-    void start_search();       // open the search overlay
+    bool handle_delete_confirm_key(const SDL_Event& e);  // Del-confirm modal; true if consumed
     void start_tag_editor();   // open the tag editor for the focused tile
     void toggle_favorite_current();  // flip favorite on the focused tile (B)
     [[nodiscard]] bool current_allows_images() const;

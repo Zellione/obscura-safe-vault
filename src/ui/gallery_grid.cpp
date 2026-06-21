@@ -37,6 +37,17 @@ constexpr float COL_SIZE = 100;
 constexpr float COL_TYPE = 90;    // fits image formats and "H.264"/"H.265"
 constexpr float COL_DATE = 120;
 
+// Delete the focused node: a gallery subtree (remove_gallery) or a single
+// image/video (remove_image). Kept free (not a member) so the gallery-vs-media
+// branch stays a flat statement at the call site.
+vault::VaultResult delete_focused_node(vault::Vault& v, const std::string& base,
+                                       const vault::IndexNode& n)
+{
+    if (!n.is_gallery()) return v.remove_image(base, n.name);
+    const std::string full = base.empty() ? n.name : base + "/" + n.name;
+    return v.remove_gallery(full);
+}
+
 // Centre the `cols` columns horizontally in a `win_w`-wide window so the left and
 // right margins match (never tighter than OX).
 GridSpec grid_spec(float win_w, int cols) noexcept
@@ -252,11 +263,6 @@ void GalleryGrid::finish_naming()
     refresh();
 }
 
-void GalleryGrid::start_search()
-{
-    search_.open();
-}
-
 void GalleryGrid::start_tag_editor()
 {
     const int s = nav_.selected();
@@ -350,14 +356,10 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         dialogs_.file.open_zip(win_.sdl_window());
         return;
     }
-    if (key.key == SDLK_DELETE) {   // delete the focused image/video/gallery (confirm first)
-        if (const int s = nav_.selected();
-            s >= 0 && s < static_cast<int>(children_.size())) {
-            error_.clear();
-            naming_.confirm_delete = true;
-        } else {
-            error_ = "Nothing selected to delete.";
-        }
+    if (key.key == SDLK_DELETE) {   // confirm-delete the focused image/video/gallery
+        const int s = nav_.selected();
+        naming_.confirm_delete = s >= 0 && s < static_cast<int>(children_.size());
+        error_ = naming_.confirm_delete ? std::string{} : "Nothing selected to delete.";
         return;
     }
     if (key.key == SDLK_SPACE) { toggle_or_open(); return; }
@@ -365,7 +367,7 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
     // is the unmodified symbol (e.g. '7') and never equals SDLK_SLASH. Resolve the
     // character the layout + held modifiers actually produce and match that.
     if (SDL_GetKeyFromScancode(key.scancode, key.mod, false) == SDLK_SLASH) {
-        start_search();  // search (/)
+        search_.open();  // search (/)
         return;
     }
     if (key.key == SDLK_G) { start_tag_editor(); return; }  // tag editor (G)
@@ -391,6 +393,35 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         case NewGallery: start_naming();    break;
         default: break;
     }
+}
+
+bool GalleryGrid::handle_delete_confirm_key(const SDL_Event& e)
+{
+    if (!naming_.confirm_delete) return false;
+    if (e.type != SDL_EVENT_KEY_DOWN) return true;   // modal swallows non-key events
+
+    const SDL_Keycode k = e.key.key;
+    if (k == SDLK_ESCAPE || k == SDLK_N) {
+        naming_.confirm_delete = false;
+        mark_dirty();
+        return true;
+    }
+    if (k != SDLK_Y) return true;                    // swallow every other key
+
+    if (const int s = nav_.selected();
+        s >= 0 && s < static_cast<int>(children_.size())) {
+        const vault::IndexNode& n = *children_[s];
+        const std::string name = n.name;
+        if (delete_focused_node(vault_, nav_.path(), n) == vault::VaultResult::Ok) {
+            status_ = "Deleted " + name;
+            refresh();
+        } else {
+            error_ = "Could not delete " + name;
+        }
+    }
+    naming_.confirm_delete = false;
+    mark_dirty();
+    return true;
 }
 
 bool GalleryGrid::handle_zip_conflict_key(const SDL_Event& e)
@@ -447,36 +478,8 @@ void GalleryGrid::handle_event(const SDL_Event& e)
         return;
     }
 
-    // The delete-confirmation modal owns all input while it is up. Y deletes the
-    // focused media tile; Esc / N cancel; every other key is swallowed.
-    if (naming_.confirm_delete) {
-        if (e.type == SDL_EVENT_KEY_DOWN) {
-            if (e.key.key == SDLK_Y) {
-                if (const int s = nav_.selected();
-                    s >= 0 && s < static_cast<int>(children_.size())) {
-                    const vault::IndexNode* n = children_[s];
-                    const std::string name = n->name;
-                    const std::string base = nav_.path();
-                    const vault::VaultResult r =
-                        n->is_gallery()
-                            ? vault_.remove_gallery(base.empty() ? name : base + "/" + name)
-                            : vault_.remove_image(base, name);
-                    if (r == vault::VaultResult::Ok) {
-                        status_ = "Deleted " + name;
-                        refresh();
-                    } else {
-                        error_ = "Could not delete " + name;
-                    }
-                }
-                naming_.confirm_delete = false;
-                mark_dirty();
-            } else if (e.key.key == SDLK_ESCAPE || e.key.key == SDLK_N) {
-                naming_.confirm_delete = false;
-                mark_dirty();
-            }
-        }
-        return;
-    }
+    // The delete-confirmation modal owns all input while it is up.
+    if (handle_delete_confirm_key(e)) return;
 
     // The zip conflict modal owns all input while it is up (only when not naming).
     if (handle_zip_conflict_key(e)) return;
