@@ -35,47 +35,80 @@ private:
     // Focusable fields, cycled with Tab / Shift+Tab.
     enum class Focus { Name, Scope, Include, Exclude, Group, GroupJoin, Results, Saved };
 
-    void rerun();                       // re-evaluate query_ → results_
-    void reload_saved();                // refresh saved_ + vocabulary_ from the vault
-    void cycle_focus(int dir);
-    void handle_key(const SDL_KeyboardEvent& key);
-    void handle_text(const char* text);
-    void commit_text();                 // Enter on the focused text field
-    void backspace();                   // Backspace on the focused text field
-    void open_result();                 // activate the focused result
-    void load_saved();                  // load the focused saved search into query_
-    void delete_saved();                // delete the focused saved search
-    void begin_save();                  // start naming a new saved search
-    void confirm_save();                // finish naming → Vault::save_search
-    [[nodiscard]] std::string* active_buffer();  // the text buffer for the current focus
+    // The in-progress text buffers + small builder state (grouped to keep the
+    // screen's field count modest).
+    struct Edit {
+        std::string name;
+        std::string include;
+        std::string exclude;
+        std::string group;
+        int         weight = 1;   // weight applied to the next include tag
+    };
+
+    // Selection cursors for the lists/dropdowns.
+    struct Cursor {
+        int result = 0;
+        int saved  = 0;
+        int sugg   = -1;   // highlighted suggestion (-1 = none)
+        int group  = 0;    // current group for the Group field
+    };
+
+    // --- data flow ---
+    void rerun();             // re-evaluate query_ → results_
+    void reload_saved();      // refresh saved_ + vocabulary_ from the vault
     void refresh_suggestions();
 
-    gfx::Window&        win_;
-    gfx::FontAtlas&     font_;
-    vault::Vault&       vault_;
+    // --- event handling (split into small per-focus handlers) ---
+    void handle_text(const char* text);
+    void handle_key(const SDL_KeyboardEvent& key);
+    void dispatch_focus_key(const SDL_KeyboardEvent& key);
+    void handle_save_key(const SDL_KeyboardEvent& key);
+    void handle_scope_key(const SDL_KeyboardEvent& key);
+    void handle_join_key(const SDL_KeyboardEvent& key);
+    void handle_tag_field_key(const SDL_KeyboardEvent& key);
+    void handle_group_nav_key(const SDL_KeyboardEvent& key);
+    void handle_weight_key(const SDL_KeyboardEvent& key);
+    void handle_results_key(const SDL_KeyboardEvent& key);
+    void handle_saved_key(const SDL_KeyboardEvent& key);
 
-    AdvancedQuery       query_;
-    std::vector<vault::SearchHit>  results_;
+    void cycle_focus(int dir);
+    void cycle_scope(int dir);
+    void move_suggestion(int dir);
+    void commit_text();       // Enter on the focused text field
+    void commit_group_text(std::string tag);
+    void backspace();         // Backspace on the focused text field
+    void open_result();       // activate the focused result
+    void load_saved();        // load the focused saved search into query_
+    void delete_saved();      // delete the focused saved search
+    void begin_save();        // start naming a new saved search
+    void confirm_save();      // finish naming → Vault::save_search
+
+    [[nodiscard]] std::string* active_buffer();
+    [[nodiscard]] std::string accepted(const std::string& buf) const;  // suggestion-or-typed
+
+    // --- rendering (split per column) ---
+    void render_builder(gfx::Renderer& r, float x, float top);
+    void render_results(gfx::Renderer& r, float x, float colw);
+    void render_saved(gfx::Renderer& r, float x);
+    void render_save_modal(gfx::Renderer& r, float w, float h);
+
+    gfx::Window&    win_;
+    gfx::FontAtlas& font_;
+    vault::Vault&   vault_;
+
+    AdvancedQuery                   query_;
+    std::vector<vault::SearchHit>   results_;
     std::vector<vault::SavedSearch> saved_;
-    std::vector<std::string>       vocabulary_;     // distinct vault tags (autocomplete)
-    std::vector<std::string>       suggestions_;    // current typeahead list
+    std::vector<std::string>        vocabulary_;   // distinct vault tags (autocomplete)
+    std::vector<std::string>        suggestions_;  // current typeahead list
 
-    Focus  focus_      = Focus::Include;
-    int    scope_idx_  = 2;     // 0=Images 1=Galleries 2=Both
-    int    group_sel_  = 0;     // current group index for the Group field
-    int    result_sel_ = 0;
-    int    saved_sel_  = 0;
-    int    sugg_sel_   = 0;     // highlighted suggestion (-1 = none)
+    Focus  focus_ = Focus::Include;
+    Edit   edit_;
+    Cursor cur_;
 
-    std::string name_buf_;      // text buffers per text field
-    std::string inc_buf_;
-    std::string exc_buf_;
-    std::string grp_buf_;
-    int         inc_weight_ = 1;  // weight applied to the next include tag
-
-    bool        saving_     = false;   // naming a search to save
+    bool        saving_ = false;   // naming a search to save
     std::string save_buf_;
-    std::string status_;               // transient feedback line
+    std::string status_;           // transient feedback line
 };
 
 } // namespace ui

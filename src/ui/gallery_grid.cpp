@@ -365,15 +365,12 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
     if (key.key == SDLK_SPACE) { toggle_or_open(); return; }
     // `/` is a shifted key on many non-US layouts, so the base keycode (key.key)
     // is the unmodified symbol (e.g. '7') and never equals SDLK_SLASH. Resolve the
-    // character the layout + held modifiers actually produce and match that.
-    if (SDL_GetKeyFromScancode(key.scancode, key.mod, false) == SDLK_SLASH) {
-        search_.open();  // search (/)
-        return;
-    }
-    // Shift+/ (i.e. '?') opens the dedicated advanced-search screen (Phase 18).
-    if (SDL_GetKeyFromScancode(key.scancode, key.mod, false) == SDLK_QUESTION) {
-        request(NavKind::ToAdvancedSearch);
-        return;
+    // character the layout + held modifiers actually produce and match that: `/`
+    // opens the search overlay, Shift+/ ('?') the advanced-search screen (Phase 18).
+    switch (SDL_GetKeyFromScancode(key.scancode, key.mod, false)) {
+        case SDLK_SLASH:    search_.open();                     return;
+        case SDLK_QUESTION: request(NavKind::ToAdvancedSearch); return;
+        default: break;
     }
     if (key.key == SDLK_G) { start_tag_editor(); return; }  // tag editor (G)
     if (key.key == SDLK_B) { toggle_favorite_current(); return; }  // favorite (B)

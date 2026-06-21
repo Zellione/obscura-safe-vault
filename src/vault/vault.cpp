@@ -301,9 +301,9 @@ void adv_search_dfs(const IndexNode& node, std::string_view prefix,
         auto              effective = compute_effective_tags(child.tags, inherited);
         const std::string full_path = join_child_path(prefix, child.name);
 
-        const bool in_scope = child.is_gallery() ? (scope == Galleries || scope == Both)
-                                                 : (scope == Images || scope == Both);
-        if (in_scope) {
+        if (const bool in_scope = child.is_gallery() ? (scope == Galleries || scope == Both)
+                                                     : (scope == Images || scope == Both);
+            in_scope) {
             if (const ui::EvalResult r = ui::evaluate(query, child.name, effective); r.matched) {
                 out.emplace_back(r.score, SearchHit{
                     .path           = full_path,
@@ -923,12 +923,11 @@ std::vector<std::string> Vault::all_tags() const
     if (!unlocked_) return out;
     collect_tags(root_, out);
     // Sort case-insensitively for a stable autocomplete vocabulary.
-    std::ranges::sort(out, [](const std::string& a, const std::string& b) {
-        return std::lexicographical_compare(
-            a.begin(), a.end(), b.begin(), b.end(), [](char x, char y) {
-                return std::tolower(static_cast<unsigned char>(x)) <
-                       std::tolower(static_cast<unsigned char>(y));
-            });
+    std::ranges::sort(out, [](std::string_view a, std::string_view b) {
+        return std::ranges::lexicographical_compare(a, b, [](char x, char y) {
+            return std::tolower(static_cast<unsigned char>(x)) <
+                   std::tolower(static_cast<unsigned char>(y));
+        });
     });
     return out;
 }
@@ -971,7 +970,7 @@ VaultResult Vault::save_search(std::string_view name, const ui::AdvancedQuery& q
         if (s.name == name) { s.query = std::move(blob); return commit_index(); }
     }
     if (saved_searches_.size() >= INDEX_MAX_SAVED_SEARCHES) return InvalidArg;
-    saved_searches_.push_back(SavedSearch{std::string(name), std::move(blob)});
+    saved_searches_.emplace_back(std::string(name), std::move(blob));
     return commit_index();
 }
 

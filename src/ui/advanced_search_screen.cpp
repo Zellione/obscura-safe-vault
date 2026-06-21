@@ -1,9 +1,11 @@
 #include "ui/advanced_search_screen.h"
 
 #include <algorithm>
+#include <format>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "gfx/renderer.h"
 #include "gfx/text.h"
@@ -16,9 +18,9 @@ namespace ui {
 
 namespace {
 
-constexpr float PAD      = 32.0f;
-constexpr float TOP      = 110.0f;
-constexpr float LINE     = 30.0f;
+constexpr float PAD  = 32.0f;
+constexpr float TOP  = 110.0f;
+constexpr float LINE = 30.0f;
 
 std::string trim(std::string_view s)
 {
@@ -27,21 +29,13 @@ std::string trim(std::string_view s)
     return std::string(s.substr(a, s.find_last_not_of(" \t\n\r") - a + 1));
 }
 
-SearchScope scope_of(int idx)
-{
-    switch (idx) {
-        case 0:  return SearchScope::Images;
-        case 1:  return SearchScope::Galleries;
-        default: return SearchScope::Both;
-    }
-}
-
 const char* scope_label(SearchScope s)
 {
+    using enum SearchScope;
     switch (s) {
-        case SearchScope::Images:    return "Images";
-        case SearchScope::Galleries: return "Galleries";
-        default:                     return "Both";
+        case Images:    return "Images";
+        case Galleries: return "Galleries";
+        default:        return "Both";
     }
 }
 
@@ -67,77 +61,246 @@ void AdvancedSearchScreen::on_exit()
     SDL_StopTextInput(win_.sdl_window());
 }
 
+// --- data flow --------------------------------------------------------------
+
 void AdvancedSearchScreen::reload_saved()
 {
     saved_      = vault_.list_saved_searches();
     vocabulary_ = vault_.all_tags();
-    if (saved_sel_ >= static_cast<int>(saved_.size())) saved_sel_ = 0;
+    if (cur_.saved >= static_cast<int>(saved_.size())) cur_.saved = 0;
 }
 
 void AdvancedSearchScreen::rerun()
 {
     results_ = vault_.run_search(query_);
-    if (result_sel_ >= static_cast<int>(results_.size())) result_sel_ = 0;
-    if (result_sel_ < 0) result_sel_ = 0;
+    cur_.result = std::clamp(cur_.result, 0, std::max(0, static_cast<int>(results_.size()) - 1));
 }
 
 std::string* AdvancedSearchScreen::active_buffer()
 {
     if (saving_) return &save_buf_;
+    using enum Focus;
     switch (focus_) {
-        case Focus::Name:    return &name_buf_;
-        case Focus::Include: return &inc_buf_;
-        case Focus::Exclude: return &exc_buf_;
-        case Focus::Group:   return &grp_buf_;
-        default:             return nullptr;
+        case Name:    return &edit_.name;
+        case Include: return &edit_.include;
+        case Exclude: return &edit_.exclude;
+        case Group:   return &edit_.group;
+        default:      return nullptr;
     }
 }
 
 void AdvancedSearchScreen::refresh_suggestions()
 {
-    std::string* buf = active_buffer();
-    const bool tag_field = !saving_ &&
-        (focus_ == Focus::Include || focus_ == Focus::Exclude || focus_ == Focus::Group);
+    using enum Focus;
+    const std::string* buf = active_buffer();
+    const bool tag_field = !saving_ && (focus_ == Include || focus_ == Exclude || focus_ == Group);
     if (tag_field && buf && !buf->empty()) {
         suggestions_ = tag_suggestions(*buf, vocabulary_);
-        sugg_sel_    = suggestions_.empty() ? -1 : 0;
+        cur_.sugg    = suggestions_.empty() ? -1 : 0;
     } else {
         suggestions_.clear();
-        sugg_sel_ = -1;
+        cur_.sugg = -1;
     }
 }
 
-void AdvancedSearchScreen::cycle_focus(int dir)
+std::string AdvancedSearchScreen::accepted(const std::string& buf) const
 {
-    constexpr int N = 8;
-    int idx = (static_cast<int>(focus_) + dir % N + N) % N;
-    focus_ = static_cast<Focus>(idx);
-    refresh_suggestions();
+    if (cur_.sugg >= 0 && cur_.sugg < static_cast<int>(suggestions_.size()))
+        return suggestions_[cur_.sugg];
+    return trim(buf);
 }
+
+// --- event handling ---------------------------------------------------------
 
 void AdvancedSearchScreen::handle_event(const SDL_Event& e)
 {
-    if (e.type == SDL_EVENT_TEXT_INPUT)      handle_text(e.text.text);
-    else if (e.type == SDL_EVENT_KEY_DOWN)   handle_key(e.key);
+    if (e.type == SDL_EVENT_TEXT_INPUT)    handle_text(e.text.text);
+    else if (e.type == SDL_EVENT_KEY_DOWN) handle_key(e.key);
 }
 
 void AdvancedSearchScreen::handle_text(const char* text)
 {
     if (std::string* buf = active_buffer()) {
         *buf += text;
-        if (!saving_ && focus_ == Focus::Name) { query_.name_query = name_buf_; rerun(); }
+        if (!saving_ && focus_ == Focus::Name) { query_.name_query = edit_.name; rerun(); }
         refresh_suggestions();
     }
 }
 
+void AdvancedSearchScreen::handle_key(const SDL_KeyboardEvent& key)
+{
+    if (saving_) { handle_save_key(key); return; }
+    if ((key.mod & SDL_KMOD_CTRL) != 0 && key.key == SDLK_S) { begin_save(); return; }
+
+    switch (key.key) {
+        case SDLK_ESCAPE:    request(NavKind::ToGallery, "", 0); return;
+        case SDLK_TAB:       cycle_focus((key.mod & SDL_KMOD_SHIFT) ? -1 : 1); return;
+        case SDLK_BACKSPACE: backspace(); return;
+        default:             dispatch_focus_key(key); return;
+    }
+}
+
+void AdvancedSearchScreen::dispatch_focus_key(const SDL_KeyboardEvent& key)
+{
+    using enum Focus;
+    switch (focus_) {
+        case Scope:     handle_scope_key(key); break;
+        case GroupJoin: handle_join_key(key); break;
+        case Include:
+        case Exclude:
+        case Group:     handle_tag_field_key(key); break;
+        case Results:   handle_results_key(key); break;
+        case Saved:     handle_saved_key(key); break;
+        case Name:      break;   // typing handled via text input
+    }
+}
+
+void AdvancedSearchScreen::handle_save_key(const SDL_KeyboardEvent& key)
+{
+    if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) confirm_save();
+    else if (key.key == SDLK_ESCAPE)    { saving_ = false; status_ = "Save cancelled."; }
+    else if (key.key == SDLK_BACKSPACE) backspace();
+}
+
+void AdvancedSearchScreen::handle_scope_key(const SDL_KeyboardEvent& key)
+{
+    if (key.key == SDLK_LEFT)       cycle_scope(-1);
+    else if (key.key == SDLK_RIGHT) cycle_scope(1);
+}
+
+void AdvancedSearchScreen::handle_join_key(const SDL_KeyboardEvent& key)
+{
+    if (key.key == SDLK_LEFT || key.key == SDLK_RIGHT) {
+        query_.group_join = query_.group_join == Combinator::And ? Combinator::Or : Combinator::And;
+        rerun();
+    }
+}
+
+void AdvancedSearchScreen::handle_tag_field_key(const SDL_KeyboardEvent& key)
+{
+    switch (key.key) {
+        case SDLK_DOWN:     move_suggestion(1);  break;
+        case SDLK_UP:       move_suggestion(-1); break;
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER: commit_text();       break;
+        default:
+            if (focus_ == Focus::Group)        handle_group_nav_key(key);
+            else if (focus_ == Focus::Include) handle_weight_key(key);
+            break;
+    }
+}
+
+void AdvancedSearchScreen::handle_group_nav_key(const SDL_KeyboardEvent& key)
+{
+    using enum Combinator;
+    if (query_.groups.empty()) return;
+    const int n = static_cast<int>(query_.groups.size());
+    cur_.group = std::clamp(cur_.group, 0, n - 1);
+    switch (key.key) {
+        case SDLK_LEFT:  cur_.group = (cur_.group - 1 + n) % n; break;
+        case SDLK_RIGHT: cur_.group = (cur_.group + 1) % n;     break;
+        case SDLK_DELETE: {
+            TagGroup& g  = query_.groups[cur_.group];
+            g.combinator = g.combinator == And ? Or : And;
+            rerun();
+            break;
+        }
+        default: break;
+    }
+}
+
+void AdvancedSearchScreen::handle_weight_key(const SDL_KeyboardEvent& key)
+{
+    if (key.key == SDLK_EQUALS)                          ++edit_.weight;
+    else if (key.key == SDLK_MINUS && edit_.weight > 1)  --edit_.weight;
+}
+
+void AdvancedSearchScreen::handle_results_key(const SDL_KeyboardEvent& key)
+{
+    const int last = static_cast<int>(results_.size()) - 1;
+    if (key.key == SDLK_DOWN)                                 cur_.result = std::min(cur_.result + 1, last);
+    else if (key.key == SDLK_UP)                             cur_.result = std::max(cur_.result - 1, 0);
+    else if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) open_result();
+}
+
+void AdvancedSearchScreen::handle_saved_key(const SDL_KeyboardEvent& key)
+{
+    const int last = static_cast<int>(saved_.size()) - 1;
+    if (key.key == SDLK_DOWN)                                 cur_.saved = std::min(cur_.saved + 1, last);
+    else if (key.key == SDLK_UP)                             cur_.saved = std::max(cur_.saved - 1, 0);
+    else if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) load_saved();
+    else if (key.key == SDLK_DELETE)                        delete_saved();
+}
+
+void AdvancedSearchScreen::cycle_focus(int dir)
+{
+    constexpr int N = 8;
+    const int idx = (static_cast<int>(std::to_underlying(focus_)) + dir % N + N) % N;
+    focus_ = static_cast<Focus>(idx);
+    refresh_suggestions();
+}
+
+void AdvancedSearchScreen::cycle_scope(int dir)
+{
+    const int next = (static_cast<int>(std::to_underlying(query_.scope)) + dir + 3) % 3;
+    query_.scope   = static_cast<SearchScope>(next);
+    rerun();
+}
+
+void AdvancedSearchScreen::move_suggestion(int dir)
+{
+    if (suggestions_.empty()) return;
+    const int n = static_cast<int>(suggestions_.size());
+    cur_.sugg   = (cur_.sugg + dir + n) % n;
+}
+
+void AdvancedSearchScreen::commit_text()
+{
+    using enum Focus;
+    switch (focus_) {
+        case Include:
+            if (std::string t = accepted(edit_.include); !t.empty())
+                query_.include.emplace_back(std::move(t), edit_.weight);
+            edit_.include.clear(); edit_.weight = 1; refresh_suggestions(); rerun();
+            break;
+        case Exclude:
+            if (std::string t = accepted(edit_.exclude); !t.empty())
+                query_.exclude.push_back(std::move(t));
+            edit_.exclude.clear(); refresh_suggestions(); rerun();
+            break;
+        case Group:
+            commit_group_text(accepted(edit_.group));
+            edit_.group.clear(); refresh_suggestions(); rerun();
+            break;
+        default: break;
+    }
+}
+
+void AdvancedSearchScreen::commit_group_text(std::string tag)
+{
+    if (tag.empty()) {   // Enter on an empty group field starts a new (OR) group.
+        query_.groups.emplace_back(std::format("group {}", query_.groups.size() + 1),
+                                   Combinator::Or, std::vector<std::string>{});
+        cur_.group = static_cast<int>(query_.groups.size()) - 1;
+        return;
+    }
+    if (query_.groups.empty()) {
+        query_.groups.emplace_back("group 1", Combinator::Or, std::vector<std::string>{});
+        cur_.group = 0;
+    }
+    cur_.group = std::clamp(cur_.group, 0, static_cast<int>(query_.groups.size()) - 1);
+    query_.groups[cur_.group].tags.push_back(std::move(tag));
+}
+
 void AdvancedSearchScreen::backspace()
 {
+    using enum Focus;
     std::string* buf = active_buffer();
     if (!buf) return;
 
     if (!buf->empty()) {
         buf->pop_back();
-        if (!saving_ && focus_ == Focus::Name) { query_.name_query = name_buf_; rerun(); }
+        if (!saving_ && focus_ == Name) { query_.name_query = edit_.name; rerun(); }
         refresh_suggestions();
         return;
     }
@@ -145,64 +308,20 @@ void AdvancedSearchScreen::backspace()
 
     // Empty buffer: a Backspace removes the last committed chip of the field.
     switch (focus_) {
-        case Focus::Include:
+        case Include:
             if (!query_.include.empty()) { query_.include.pop_back(); rerun(); }
             break;
-        case Focus::Exclude:
+        case Exclude:
             if (!query_.exclude.empty()) { query_.exclude.pop_back(); rerun(); }
             break;
-        case Focus::Group:
-            if (!query_.groups.empty() && group_sel_ < static_cast<int>(query_.groups.size())) {
-                auto& g = query_.groups[group_sel_];
-                if (!g.tags.empty())      g.tags.pop_back();
-                else { query_.groups.erase(query_.groups.begin() + group_sel_);
-                       group_sel_ = std::max(0, group_sel_ - 1); }
-                rerun();
-            }
-            break;
-        default: break;
-    }
-}
-
-void AdvancedSearchScreen::commit_text()
-{
-    if (saving_) { confirm_save(); return; }
-
-    // The accepted text is the highlighted suggestion, else the typed buffer.
-    auto accepted = [&](const std::string& buf) {
-        if (sugg_sel_ >= 0 && sugg_sel_ < static_cast<int>(suggestions_.size()))
-            return suggestions_[sugg_sel_];
-        return trim(buf);
-    };
-
-    switch (focus_) {
-        case Focus::Include: {
-            if (std::string t = accepted(inc_buf_); !t.empty())
-                query_.include.push_back(WeightedTag{std::move(t), inc_weight_});
-            inc_buf_.clear(); inc_weight_ = 1; refresh_suggestions(); rerun();
-            break;
-        }
-        case Focus::Exclude: {
-            if (std::string t = accepted(exc_buf_); !t.empty())
-                query_.exclude.push_back(std::move(t));
-            exc_buf_.clear(); refresh_suggestions(); rerun();
-            break;
-        }
-        case Focus::Group: {
-            std::string t = accepted(grp_buf_);
-            if (t.empty()) {
-                // Enter on an empty group field starts a new (OR) group.
-                query_.groups.push_back(TagGroup{"group " + std::to_string(query_.groups.size() + 1),
-                                                 Combinator::Or, {}});
-                group_sel_ = static_cast<int>(query_.groups.size()) - 1;
-            } else {
-                if (query_.groups.empty()) {
-                    query_.groups.push_back(TagGroup{"group 1", Combinator::Or, {}});
-                    group_sel_ = 0;
-                }
-                query_.groups[group_sel_].tags.push_back(std::move(t));
-            }
-            grp_buf_.clear(); refresh_suggestions(); rerun();
+        case Group: {
+            if (query_.groups.empty()) break;
+            cur_.group  = std::clamp(cur_.group, 0, static_cast<int>(query_.groups.size()) - 1);
+            TagGroup& g = query_.groups[cur_.group];
+            if (!g.tags.empty()) g.tags.pop_back();
+            else { query_.groups.erase(query_.groups.begin() + cur_.group);
+                   cur_.group = std::max(0, cur_.group - 1); }
+            rerun();
             break;
         }
         default: break;
@@ -211,8 +330,8 @@ void AdvancedSearchScreen::commit_text()
 
 void AdvancedSearchScreen::open_result()
 {
-    if (result_sel_ < 0 || result_sel_ >= static_cast<int>(results_.size())) return;
-    const vault::SearchHit& hit = results_[result_sel_];
+    if (cur_.result < 0 || cur_.result >= static_cast<int>(results_.size())) return;
+    const vault::SearchHit& hit = results_[cur_.result];
 
     if (hit.is_gallery) { request(NavKind::ToGallery, hit.path, 0); return; }
 
@@ -229,25 +348,24 @@ void AdvancedSearchScreen::open_result()
 
 void AdvancedSearchScreen::load_saved()
 {
-    if (saved_sel_ < 0 || saved_sel_ >= static_cast<int>(saved_.size())) return;
+    if (cur_.saved < 0 || cur_.saved >= static_cast<int>(saved_.size())) return;
     AdvancedQuery q;
-    if (!deserialize_query(saved_[saved_sel_].query, q)) { status_ = "Could not load search."; return; }
+    if (!deserialize_query(saved_[cur_.saved].query, q)) { status_ = "Could not load search."; return; }
     query_     = std::move(q);
-    name_buf_  = query_.name_query;
-    scope_idx_ = static_cast<int>(query_.scope);
-    group_sel_ = 0;
-    status_    = "Loaded '" + saved_[saved_sel_].name + "'.";
+    edit_.name = query_.name_query;
+    cur_.group = 0;
+    status_    = std::format("Loaded '{}'.", saved_[cur_.saved].name);
     rerun();
 }
 
 void AdvancedSearchScreen::delete_saved()
 {
-    if (saved_sel_ < 0 || saved_sel_ >= static_cast<int>(saved_.size())) return;
-    const std::string name = saved_[saved_sel_].name;
+    if (cur_.saved < 0 || cur_.saved >= static_cast<int>(saved_.size())) return;
+    const std::string name = saved_[cur_.saved].name;
     if (vault_.delete_saved_search(name) == vault::VaultResult::Ok) {
-        status_ = "Deleted '" + name + "'.";
+        status_ = std::format("Deleted '{}'.", name);
         reload_saved();
-        saved_sel_ = std::min(saved_sel_, std::max(0, static_cast<int>(saved_.size()) - 1));
+        cur_.saved = std::min(cur_.saved, std::max(0, static_cast<int>(saved_.size()) - 1));
     } else {
         status_ = "Delete failed.";
     }
@@ -258,7 +376,7 @@ void AdvancedSearchScreen::begin_save()
     saving_ = true;
     save_buf_.clear();
     suggestions_.clear();
-    sugg_sel_ = -1;
+    cur_.sugg = -1;
 }
 
 void AdvancedSearchScreen::confirm_save()
@@ -267,91 +385,14 @@ void AdvancedSearchScreen::confirm_save()
     saving_ = false;
     if (name.empty()) { status_ = "Save cancelled (empty name)."; return; }
     if (vault_.save_search(name, query_) == vault::VaultResult::Ok) {
-        status_ = "Saved '" + name + "'.";
+        status_ = std::format("Saved '{}'.", name);
         reload_saved();
     } else {
         status_ = "Save failed.";
     }
 }
 
-void AdvancedSearchScreen::handle_key(const SDL_KeyboardEvent& key)
-{
-    // Save-name entry is a small inline modal: Enter confirms, Esc cancels.
-    if (saving_) {
-        if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) confirm_save();
-        else if (key.key == SDLK_ESCAPE)                        { saving_ = false; status_ = "Save cancelled."; }
-        else if (key.key == SDLK_BACKSPACE)                     backspace();
-        return;
-    }
-
-    const bool ctrl = (key.mod & SDL_KMOD_CTRL) != 0;
-    if (ctrl && key.key == SDLK_S) { begin_save(); return; }   // Ctrl+S: save current query
-
-    switch (key.key) {
-        case SDLK_ESCAPE:    request(NavKind::ToGallery, "", 0); return;
-        case SDLK_TAB:       cycle_focus((key.mod & SDL_KMOD_SHIFT) ? -1 : 1); return;
-        case SDLK_BACKSPACE: backspace(); return;
-        case SDLK_RETURN:
-        case SDLK_KP_ENTER:  break;   // handled per-focus below
-        default: break;
-    }
-
-    using enum Focus;
-    switch (focus_) {
-        case Name:
-            break;  // typing handled via text input; arrows ignored
-        case Scope:
-            if (key.key == SDLK_LEFT)  { scope_idx_ = (scope_idx_ + 2) % 3; query_.scope = scope_of(scope_idx_); rerun(); }
-            if (key.key == SDLK_RIGHT) { scope_idx_ = (scope_idx_ + 1) % 3; query_.scope = scope_of(scope_idx_); rerun(); }
-            break;
-        case GroupJoin:
-            if (key.key == SDLK_LEFT || key.key == SDLK_RIGHT) {
-                query_.group_join = query_.group_join == Combinator::And ? Combinator::Or : Combinator::And;
-                rerun();
-            }
-            break;
-        case Include:
-        case Exclude:
-        case Group:
-            if (key.key == SDLK_DOWN && !suggestions_.empty())
-                sugg_sel_ = (sugg_sel_ + 1) % static_cast<int>(suggestions_.size());
-            else if (key.key == SDLK_UP && !suggestions_.empty())
-                sugg_sel_ = (sugg_sel_ - 1 + static_cast<int>(suggestions_.size())) % static_cast<int>(suggestions_.size());
-            else if ((key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER))
-                commit_text();
-            else if (focus_ == Group && key.key == SDLK_LEFT && !query_.groups.empty())
-                group_sel_ = (group_sel_ - 1 + static_cast<int>(query_.groups.size())) % static_cast<int>(query_.groups.size());
-            else if (focus_ == Group && key.key == SDLK_RIGHT && !query_.groups.empty())
-                group_sel_ = (group_sel_ + 1) % static_cast<int>(query_.groups.size());
-            else if (focus_ == Group && key.key == SDLK_DELETE && !query_.groups.empty()) {
-                auto& g = query_.groups[group_sel_];
-                g.combinator = g.combinator == Combinator::And ? Combinator::Or : Combinator::And;
-                rerun();
-            } else if (focus_ == Include && key.key == SDLK_EQUALS) { ++inc_weight_; }
-            else if (focus_ == Include && key.key == SDLK_MINUS && inc_weight_ > 1) { --inc_weight_; }
-            break;
-        case Results:
-            if (key.key == SDLK_DOWN && !results_.empty())
-                result_sel_ = std::min(result_sel_ + 1, static_cast<int>(results_.size()) - 1);
-            else if (key.key == SDLK_UP)
-                result_sel_ = std::max(result_sel_ - 1, 0);
-            else if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER)
-                open_result();
-            break;
-        case Saved:
-            if (key.key == SDLK_DOWN && !saved_.empty())
-                saved_sel_ = std::min(saved_sel_ + 1, static_cast<int>(saved_.size()) - 1);
-            else if (key.key == SDLK_UP)
-                saved_sel_ = std::max(saved_sel_ - 1, 0);
-            else if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER)
-                load_saved();
-            else if (key.key == SDLK_DELETE)
-                delete_saved();
-            break;
-    }
-}
-
-// --- rendering ------------------------------------------------------------
+// --- rendering --------------------------------------------------------------
 
 void AdvancedSearchScreen::render(gfx::Renderer& r)
 {
@@ -364,94 +405,114 @@ void AdvancedSearchScreen::render(gfx::Renderer& r)
                 "[Tab] Field  [Enter] Add/Open  [Bksp] Remove  [Ctrl+S] Save  [Esc] Back",
                 TEXT_FAINT);
 
+    const float colW = (W - 2 * PAD) / 3.0f - 16;
+    render_builder(r, PAD, TOP);
+    const float mx = PAD + colW + 24;
+    render_results(r, mx, colW);
+    render_saved(r, mx + colW + 24);
+
+    if (saving_) render_save_modal(r, W, H);
+    if (!status_.empty()) r.draw_text(font_, PAD, H - 24, status_, TEXT_FAINT);
+}
+
+void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top)
+{
+    using namespace gfx::theme;
     auto focused = [&](Focus f) { return focus_ == f && !saving_; };
-    auto label = [&](float x, float y, Focus f, const std::string& s, gfx::Color c) {
-        if (focused(f)) r.draw_text(font_, x - 16, y, ">", ACCENT);
-        r.draw_text(font_, x, y, s, c);
+    auto label   = [&](float ly, Focus f, std::string_view s) {
+        if (focused(f)) r.draw_text(font_, x - 16, ly, ">", ACCENT);
+        r.draw_text(font_, x, ly, s, focused(f) ? TEXT : TEXT_DIM);
     };
 
-    // --- left column: query builder ---
-    const float colW = (W - 2 * PAD) / 3.0f - 16;
-    float y = TOP;
+    float y = top;
+    label(y, Focus::Name, std::format("Name: {}", edit_.name.empty() ? "(any)" : edit_.name)); y += LINE;
+    label(y, Focus::Scope, std::format("Scope: {}", scope_label(query_.scope))); y += LINE;
 
-    label(PAD, y, Focus::Name, "Name: " + (name_buf_.empty() ? std::string("(any)") : name_buf_),
-          focused(Focus::Name) ? TEXT : TEXT_DIM); y += LINE;
-    label(PAD, y, Focus::Scope, std::string("Scope: ") + scope_label(query_.scope), TEXT_DIM); y += LINE;
+    std::string inc = "Include: ";
+    for (const auto& wt : query_.include) inc += std::format("{}({}) ", wt.tag, wt.weight);
+    if (focused(Focus::Include)) inc += std::format("[{}_ w{}]", edit_.include, edit_.weight);
+    label(y, Focus::Include, inc); y += LINE;
 
-    // Include chips.
-    {
-        std::string s = "Include: ";
-        for (const auto& wt : query_.include) s += wt.tag + "(" + std::to_string(wt.weight) + ") ";
-        if (focused(Focus::Include)) s += "[" + inc_buf_ + "_ w" + std::to_string(inc_weight_) + "]";
-        label(PAD, y, Focus::Include, s, TEXT_DIM); y += LINE;
-    }
-    // Exclude chips.
-    {
-        std::string s = "Exclude: ";
-        for (const auto& t : query_.exclude) s += t + " ";
-        if (focused(Focus::Exclude)) s += "[" + exc_buf_ + "_]";
-        label(PAD, y, Focus::Exclude, s, TEXT_DIM); y += LINE;
-    }
-    // Groups.
-    label(PAD, y, Focus::Group, "Groups:", TEXT_DIM); y += LINE;
+    std::string exc = "Exclude: ";
+    for (const auto& t : query_.exclude) exc += t + " ";
+    if (focused(Focus::Exclude)) exc += std::format("[{}_]", edit_.exclude);
+    label(y, Focus::Exclude, exc); y += LINE;
+
+    label(y, Focus::Group, "Groups:"); y += LINE;
     for (int i = 0; i < static_cast<int>(query_.groups.size()); ++i) {
-        const auto& g = query_.groups[i];
-        std::string s = std::string("  ") + (i == group_sel_ && focused(Focus::Group) ? "* " : "- ")
-                      + join_label(g.combinator) + ": ";
+        const TagGroup& g = query_.groups[i];
+        const bool      hot = (i == cur_.group && focused(Focus::Group));
+        std::string     s   = std::format("  {} {}: ", hot ? "*" : "-", join_label(g.combinator));
         for (const auto& t : g.tags) s += t + " ";
-        r.draw_text(font_, PAD + 8, y, s, i == group_sel_ ? TEXT : TEXT_FAINT); y += LINE * 0.9f;
+        r.draw_text(font_, x + 8, y, s, hot ? TEXT : TEXT_FAINT); y += LINE * 0.9f;
     }
-    if (focused(Focus::Group)) { r.draw_text(font_, PAD + 8, y, "  [" + grp_buf_ + "_]  Enter=add, empty Enter=new group, Del=AND/OR", TEXT_FAINT); y += LINE; }
-    label(PAD, y, Focus::GroupJoin, std::string("Join groups: ") + join_label(query_.group_join), TEXT_DIM);
+    if (focused(Focus::Group)) {
+        r.draw_text(font_, x + 8, y,
+                    std::format("  [{}_]  Enter=add, empty Enter=new group, Del=AND/OR", edit_.group),
+                    TEXT_FAINT);
+        y += LINE;
+    }
+    label(y, Focus::GroupJoin, std::format("Join groups: {}", join_label(query_.group_join)));
     y += LINE;
 
-    // Autocomplete dropdown beneath the builder.
     if (!suggestions_.empty()) {
         for (int i = 0; i < static_cast<int>(suggestions_.size()) && i < 6; ++i) {
-            const bool sel = (i == sugg_sel_);
-            r.draw_text(font_, PAD + 16, y, (sel ? "> " : "  ") + suggestions_[i], sel ? ACCENT : TEXT_FAINT);
+            const bool sel = (i == cur_.sugg);
+            r.draw_text(font_, x + 16, y, std::format("{} {}", sel ? ">" : " ", suggestions_[i]),
+                        sel ? ACCENT : TEXT_FAINT);
             y += LINE * 0.85f;
         }
     }
+}
 
-    // --- middle column: results ---
-    const float mx = PAD + colW + 24;
-    float ry = TOP;
-    label(mx, 74, Focus::Results, "Results (" + std::to_string(results_.size()) + ")", TEXT_DIM);
-    const int max_rows = static_cast<int>((H - TOP - 40) / (LINE * 0.9f));
-    const int first = std::max(0, result_sel_ - max_rows / 2);
+void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
+{
+    using namespace gfx::theme;
+    const bool hot = (focus_ == Focus::Results && !saving_);
+    if (hot) r.draw_text(font_, x - 16, 74, ">", ACCENT);
+    r.draw_text(font_, x, 74, std::format("Results ({})", results_.size()), TEXT_DIM);
+
+    const auto  H        = static_cast<float>(win_.height());
+    const int   max_rows = static_cast<int>((H - TOP - 40) / (LINE * 0.9f));
+    const int   first    = std::max(0, cur_.result - max_rows / 2);
+    float       y        = TOP;
     for (int i = first; i < static_cast<int>(results_.size()) && i < first + max_rows; ++i) {
-        const bool sel = (i == result_sel_ && focused(Focus::Results));
-        const auto& hit = results_[i];
-        const std::string s = (hit.is_gallery ? "[D] " : "    ") + hit.path;
-        if (sel) { const SDL_FRect row{mx - 6, ry - 4, colW + 12, LINE * 0.9f};
-                   r.draw_round_rect(row, RADIUS_SMALL, SURFACE_HI); }
-        r.draw_text(font_, mx, ry, s, sel ? TEXT : TEXT_DIM);
-        ry += LINE * 0.9f;
+        const bool              sel = (i == cur_.result && hot);
+        const vault::SearchHit& hit = results_[i];
+        if (sel) r.draw_round_rect({x - 6, y - 4, colw + 12, LINE * 0.9f}, RADIUS_SMALL, SURFACE_HI);
+        r.draw_text(font_, x, y, std::format("{}{}", hit.is_gallery ? "[D] " : "    ", hit.path),
+                    sel ? TEXT : TEXT_DIM);
+        y += LINE * 0.9f;
     }
-    if (results_.empty()) r.draw_text(font_, mx, ry, "(no matches)", TEXT_FAINT);
+    if (results_.empty()) r.draw_text(font_, x, y, "(no matches)", TEXT_FAINT);
+}
 
-    // --- right column: saved searches ---
-    const float sx = mx + colW + 24;
-    float sy = TOP;
-    label(sx, 74, Focus::Saved, "Saved searches", TEXT_DIM);
+void AdvancedSearchScreen::render_saved(gfx::Renderer& r, float x)
+{
+    using namespace gfx::theme;
+    const bool hot = (focus_ == Focus::Saved && !saving_);
+    if (hot) r.draw_text(font_, x - 16, 74, ">", ACCENT);
+    r.draw_text(font_, x, 74, "Saved searches", TEXT_DIM);
+
+    float y = TOP;
     for (int i = 0; i < static_cast<int>(saved_.size()); ++i) {
-        const bool sel = (i == saved_sel_ && focused(Focus::Saved));
-        r.draw_text(font_, sx, sy, (sel ? "> " : "  ") + saved_[i].name, sel ? TEXT : TEXT_DIM);
-        sy += LINE * 0.9f;
+        const bool sel = (i == cur_.saved && hot);
+        r.draw_text(font_, x, y, std::format("{} {}", sel ? ">" : " ", saved_[i].name),
+                    sel ? TEXT : TEXT_DIM);
+        y += LINE * 0.9f;
     }
-    if (saved_.empty()) r.draw_text(font_, sx, sy, "(none — Ctrl+S to save)", TEXT_FAINT);
+    if (saved_.empty()) r.draw_text(font_, x, y, "(none — Ctrl+S to save)", TEXT_FAINT);
+}
 
-    if (saving_) {
-        r.draw_rect({0, 0, W, H}, {0, 0, 0, 180}, /*filled*/ true);
-        const SDL_FRect box{W / 2 - 220, H / 2 - 40, 440, 80};
-        r.draw_round_rect(box, RADIUS, SURFACE);
-        r.draw_round_rect(box, RADIUS, ACCENT, /*filled*/ false);
-        r.draw_text(font_, box.x + 16, box.y + 14, "Save search as:", TEXT_DIM);
-        r.draw_text(font_, box.x + 16, box.y + 44, save_buf_ + "_", TEXT);
-    }
-
-    if (!status_.empty()) r.draw_text(font_, PAD, H - 24, status_, TEXT_FAINT);
+void AdvancedSearchScreen::render_save_modal(gfx::Renderer& r, float w, float h)
+{
+    using namespace gfx::theme;
+    r.draw_rect({0, 0, w, h}, {0, 0, 0, 180}, /*filled*/ true);
+    const SDL_FRect box{w / 2 - 220, h / 2 - 40, 440, 80};
+    r.draw_round_rect(box, RADIUS, SURFACE);
+    r.draw_round_rect(box, RADIUS, ACCENT, /*filled*/ false);
+    r.draw_text(font_, box.x + 16, box.y + 14, "Save search as:", TEXT_DIM);
+    r.draw_text(font_, box.x + 16, box.y + 44, save_buf_ + "_", TEXT);
 }
 
 } // namespace ui
