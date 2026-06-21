@@ -132,7 +132,8 @@ bool read_string_list(vault::ByteReader& r, std::vector<std::string>& out)
 
 Combinator read_combinator(vault::ByteReader& r)
 {
-    return r.u8() == std::to_underlying(Combinator::Or) ? Combinator::Or : Combinator::And;
+    using enum Combinator;
+    return r.u8() == std::to_underlying(Or) ? Or : And;
 }
 
 bool read_weighted_list(vault::ByteReader& r, std::vector<WeightedTag>& out)

@@ -41,6 +41,40 @@ const char* scope_label(SearchScope s)
 
 const char* join_label(Combinator c) { return c == Combinator::And ? "AND" : "OR"; }
 
+// Draw the group rows (and, when focused, the group input line). Returns the new
+// baseline y. Free function so it stays out of the screen's method count.
+float draw_groups(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<TagGroup>& groups,
+                  int cur_group, bool focused, std::string_view edit_group, float x, float y)
+{
+    using namespace gfx::theme;
+    for (int i = 0; i < static_cast<int>(groups.size()); ++i) {
+        const bool  hot = (i == cur_group && focused);
+        std::string s   = std::format("  {} {}: ", hot ? "*" : "-", join_label(groups[i].combinator));
+        for (const auto& t : groups[i].tags) s += t + " ";
+        r.draw_text(font, x + 8, y, s, hot ? TEXT : TEXT_FAINT);
+        y += LINE * 0.9f;
+    }
+    if (focused) {
+        r.draw_text(font, x + 8, y,
+                    std::format("  [{}_]  Enter=add, empty Enter=new group, Del=AND/OR", edit_group),
+                    TEXT_FAINT);
+        y += LINE;
+    }
+    return y;
+}
+
+// Draw the autocomplete dropdown (capped at 6 rows). Free function (see above).
+void draw_dropdown(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<std::string>& sugg,
+                   int sel, float x, float y)
+{
+    using namespace gfx::theme;
+    for (int i = 0; i < static_cast<int>(sugg.size()) && i < 6; ++i) {
+        const bool s = (i == sel);
+        r.draw_text(font, x + 16, y, std::format("{} {}", s ? ">" : " ", sugg[i]), s ? ACCENT : TEXT_FAINT);
+        y += LINE * 0.85f;
+    }
+}
+
 } // namespace
 
 AdvancedSearchScreen::AdvancedSearchScreen(gfx::Window& win, gfx::FontAtlas& font,
@@ -144,8 +178,8 @@ void AdvancedSearchScreen::dispatch_focus_key(const SDL_KeyboardEvent& key)
 {
     using enum Focus;
     switch (focus_) {
-        case Scope:     handle_scope_key(key); break;
-        case GroupJoin: handle_join_key(key); break;
+        case Scope:
+        case GroupJoin: handle_axis_key(key); break;
         case Include:
         case Exclude:
         case Group:     handle_tag_field_key(key); break;
@@ -162,16 +196,15 @@ void AdvancedSearchScreen::handle_save_key(const SDL_KeyboardEvent& key)
     else if (key.key == SDLK_BACKSPACE) backspace();
 }
 
-void AdvancedSearchScreen::handle_scope_key(const SDL_KeyboardEvent& key)
+void AdvancedSearchScreen::handle_axis_key(const SDL_KeyboardEvent& key)
 {
-    if (key.key == SDLK_LEFT)       cycle_scope(-1);
-    else if (key.key == SDLK_RIGHT) cycle_scope(1);
-}
-
-void AdvancedSearchScreen::handle_join_key(const SDL_KeyboardEvent& key)
-{
-    if (key.key == SDLK_LEFT || key.key == SDLK_RIGHT) {
-        query_.group_join = query_.group_join == Combinator::And ? Combinator::Or : Combinator::And;
+    using enum Combinator;
+    const int dir = key.key == SDLK_LEFT ? -1 : (key.key == SDLK_RIGHT ? 1 : 0);
+    if (dir == 0) return;
+    if (focus_ == Focus::Scope) {
+        cycle_scope(dir);
+    } else {  // Focus::GroupJoin — a two-way toggle
+        query_.group_join = query_.group_join == And ? Or : And;
         rerun();
     }
 }
@@ -194,7 +227,7 @@ void AdvancedSearchScreen::handle_group_nav_key(const SDL_KeyboardEvent& key)
 {
     using enum Combinator;
     if (query_.groups.empty()) return;
-    const int n = static_cast<int>(query_.groups.size());
+    const auto n = static_cast<int>(query_.groups.size());
     cur_.group = std::clamp(cur_.group, 0, n - 1);
     switch (key.key) {
         case SDLK_LEFT:  cur_.group = (cur_.group - 1 + n) % n; break;
@@ -250,8 +283,8 @@ void AdvancedSearchScreen::cycle_scope(int dir)
 void AdvancedSearchScreen::move_suggestion(int dir)
 {
     if (suggestions_.empty()) return;
-    const int n = static_cast<int>(suggestions_.size());
-    cur_.sugg   = (cur_.sugg + dir + n) % n;
+    const auto n = static_cast<int>(suggestions_.size());
+    cur_.sugg    = (cur_.sugg + dir + n) % n;
 }
 
 void AdvancedSearchScreen::commit_text()
@@ -316,9 +349,8 @@ void AdvancedSearchScreen::backspace()
             break;
         case Group: {
             if (query_.groups.empty()) break;
-            cur_.group  = std::clamp(cur_.group, 0, static_cast<int>(query_.groups.size()) - 1);
-            TagGroup& g = query_.groups[cur_.group];
-            if (!g.tags.empty()) g.tags.pop_back();
+            cur_.group = std::clamp(cur_.group, 0, static_cast<int>(query_.groups.size()) - 1);
+            if (TagGroup& g = query_.groups[cur_.group]; !g.tags.empty()) g.tags.pop_back();
             else { query_.groups.erase(query_.groups.begin() + cur_.group);
                    cur_.group = std::max(0, cur_.group - 1); }
             rerun();
@@ -411,7 +443,14 @@ void AdvancedSearchScreen::render(gfx::Renderer& r)
     render_results(r, mx, colW);
     render_saved(r, mx + colW + 24);
 
-    if (saving_) render_save_modal(r, W, H);
+    if (saving_) {
+        r.draw_rect({0, 0, W, H}, {0, 0, 0, 180}, /*filled*/ true);
+        const SDL_FRect box{W / 2 - 220, H / 2 - 40, 440, 80};
+        r.draw_round_rect(box, RADIUS, SURFACE);
+        r.draw_round_rect(box, RADIUS, ACCENT, /*filled*/ false);
+        r.draw_text(font_, box.x + 16, box.y + 14, "Save search as:", TEXT_DIM);
+        r.draw_text(font_, box.x + 16, box.y + 44, save_buf_ + "_", TEXT);
+    }
     if (!status_.empty()) r.draw_text(font_, PAD, H - 24, status_, TEXT_FAINT);
 }
 
@@ -439,30 +478,11 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top)
     label(y, Focus::Exclude, exc); y += LINE;
 
     label(y, Focus::Group, "Groups:"); y += LINE;
-    for (int i = 0; i < static_cast<int>(query_.groups.size()); ++i) {
-        const TagGroup& g = query_.groups[i];
-        const bool      hot = (i == cur_.group && focused(Focus::Group));
-        std::string     s   = std::format("  {} {}: ", hot ? "*" : "-", join_label(g.combinator));
-        for (const auto& t : g.tags) s += t + " ";
-        r.draw_text(font_, x + 8, y, s, hot ? TEXT : TEXT_FAINT); y += LINE * 0.9f;
-    }
-    if (focused(Focus::Group)) {
-        r.draw_text(font_, x + 8, y,
-                    std::format("  [{}_]  Enter=add, empty Enter=new group, Del=AND/OR", edit_.group),
-                    TEXT_FAINT);
-        y += LINE;
-    }
+    y = draw_groups(r, font_, query_.groups, cur_.group, focused(Focus::Group), edit_.group, x, y);
     label(y, Focus::GroupJoin, std::format("Join groups: {}", join_label(query_.group_join)));
     y += LINE;
 
-    if (!suggestions_.empty()) {
-        for (int i = 0; i < static_cast<int>(suggestions_.size()) && i < 6; ++i) {
-            const bool sel = (i == cur_.sugg);
-            r.draw_text(font_, x + 16, y, std::format("{} {}", sel ? ">" : " ", suggestions_[i]),
-                        sel ? ACCENT : TEXT_FAINT);
-            y += LINE * 0.85f;
-        }
-    }
+    if (!suggestions_.empty()) draw_dropdown(r, font_, suggestions_, cur_.sugg, x, y);
 }
 
 void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
@@ -473,7 +493,7 @@ void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
     r.draw_text(font_, x, 74, std::format("Results ({})", results_.size()), TEXT_DIM);
 
     const auto  H        = static_cast<float>(win_.height());
-    const int   max_rows = static_cast<int>((H - TOP - 40) / (LINE * 0.9f));
+    const auto  max_rows = static_cast<int>((H - TOP - 40) / (LINE * 0.9f));
     const int   first    = std::max(0, cur_.result - max_rows / 2);
     float       y        = TOP;
     for (int i = first; i < static_cast<int>(results_.size()) && i < first + max_rows; ++i) {
@@ -502,17 +522,6 @@ void AdvancedSearchScreen::render_saved(gfx::Renderer& r, float x)
         y += LINE * 0.9f;
     }
     if (saved_.empty()) r.draw_text(font_, x, y, "(none — Ctrl+S to save)", TEXT_FAINT);
-}
-
-void AdvancedSearchScreen::render_save_modal(gfx::Renderer& r, float w, float h)
-{
-    using namespace gfx::theme;
-    r.draw_rect({0, 0, w, h}, {0, 0, 0, 180}, /*filled*/ true);
-    const SDL_FRect box{w / 2 - 220, h / 2 - 40, 440, 80};
-    r.draw_round_rect(box, RADIUS, SURFACE);
-    r.draw_round_rect(box, RADIUS, ACCENT, /*filled*/ false);
-    r.draw_text(font_, box.x + 16, box.y + 14, "Save search as:", TEXT_DIM);
-    r.draw_text(font_, box.x + 16, box.y + 44, save_buf_ + "_", TEXT);
 }
 
 } // namespace ui

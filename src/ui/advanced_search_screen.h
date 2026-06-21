@@ -63,8 +63,7 @@ private:
     void handle_key(const SDL_KeyboardEvent& key);
     void dispatch_focus_key(const SDL_KeyboardEvent& key);
     void handle_save_key(const SDL_KeyboardEvent& key);
-    void handle_scope_key(const SDL_KeyboardEvent& key);
-    void handle_join_key(const SDL_KeyboardEvent& key);
+    void handle_axis_key(const SDL_KeyboardEvent& key);   // Left/Right on Scope or GroupJoin
     void handle_tag_field_key(const SDL_KeyboardEvent& key);
     void handle_group_nav_key(const SDL_KeyboardEvent& key);
     void handle_weight_key(const SDL_KeyboardEvent& key);
@@ -90,7 +89,6 @@ private:
     void render_builder(gfx::Renderer& r, float x, float top);
     void render_results(gfx::Renderer& r, float x, float colw);
     void render_saved(gfx::Renderer& r, float x);
-    void render_save_modal(gfx::Renderer& r, float w, float h);
 
     gfx::Window&    win_;
     gfx::FontAtlas& font_;
