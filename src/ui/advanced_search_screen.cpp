@@ -430,7 +430,8 @@ void AdvancedSearchScreen::render(gfx::Renderer& r)
 
     r.draw_text(font_, PAD, 36, "Advanced Search", TEXT);
     r.draw_text(font_, PAD, 74,
-                "[Tab] Field  [Enter] Add/Open  [Bksp] Remove  [Ctrl+S] Save  [Esc] Back",
+                "[Tab] Field  [↑↓/←→] Navigate  [Enter] Add/Open  [+/-] Weight  "
+                "[Del] Remove  [Bksp] Edit  [Ctrl+S] Save  [Esc] Back",
                 TEXT_FAINT);
 
     const float colW = (W - 2 * PAD) / 3.0f - 16;

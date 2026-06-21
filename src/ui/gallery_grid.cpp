@@ -621,9 +621,9 @@ void GalleryGrid::render(gfx::Renderer& r)
     for (const auto& s : nav_.segments()) { crumb += s; crumb += '/'; }
     r.draw_text(font_, OX, 40, crumb, TEXT_DIM);
     r.draw_text(font_, OX, 90,
-                "[I] Import  [Z] ZIP  [N] New  [Del] Delete  [/] Search  [G] Tags  [B] Fav  "
-                "[F] Fav Images  [Shift+F] Fav Galleries  [Enter] Open  [Space] Select  "
-                "[X] Export  [M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid",
+                "[I] Import  [Z] ZIP  [N] New  [Del] Delete  [/] Search  [?] Advanced  "
+                "[G] Tags  [B] Fav  [F] Fav Images  [Shift+F] Fav Galleries  [Enter] Open  "
+                "[Space] Select  [X] Export  [M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid",
                 TEXT_FAINT);
 
     if (!sel_.empty())
