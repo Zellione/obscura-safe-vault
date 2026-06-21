@@ -74,11 +74,14 @@ src/
                                                  set_tags/add_tag/remove_tag(node_path),
                                                  search(query, SearchScope{Images,
                                                  Galleries,Both})->vector<SearchHit>;
-                                                 Phase 18 advanced search: all_tags() (distinct
-                                                 case-insensitive vocab), run_search(ui::
-                                                 AdvancedQuery)->vector<SearchHit> ranked by
-                                                 score then path, save_search/list_saved_searches/
-                                                 delete_saved_search (upsert by name, persisted);
+                                                 Phase 18 advanced search lives on the
+                                                 vault_search.* VaultSearch facade (friend over a
+                                                 Vault&, keeps Vault under the cpp:S1448 method
+                                                 cap): all_tags() (distinct case-insensitive
+                                                 vocab), run_search(ui::AdvancedQuery)->vector
+                                                 <SearchHit> ranked by score then path,
+                                                 save_search/list_saved_searches/delete_saved_search
+                                                 (upsert by name, persisted via commit_index);
                                                  read-time cascade (effective tags =
                                                  own ∪ ancestor galleries; root tags
                                                  global); resolve_node resolves a path

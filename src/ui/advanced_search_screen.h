@@ -7,7 +7,8 @@
 
 #include "ui/advanced_search_model.h"
 #include "ui/screen.h"
-#include "vault/vault.h"   // vault::SearchHit, vault::SavedSearch
+#include "vault/vault.h"          // vault::SearchHit, vault::SavedSearch
+#include "vault/vault_search.h"   // vault::VaultSearch facade
 
 namespace gfx { class Window; class FontAtlas; class Renderer; }
 namespace vault { class Vault; }
@@ -19,9 +20,9 @@ namespace ui {
 // list, and a saved-searches sidebar. The Phase 12 `/` quick-overlay is separate
 // and unchanged.
 //
-// All matching/ranking lives in the pure `advanced_search_model` + `Vault`; this
-// screen is only SDL plumbing: it edits an AdvancedQuery, re-runs the search on
-// every change, and renders the three columns.
+// All matching/ranking lives in the pure `advanced_search_model` + the
+// `VaultSearch` facade; this screen is only SDL plumbing: it edits an
+// AdvancedQuery, re-runs the search on every change, and renders the columns.
 class AdvancedSearchScreen : public Screen {
 public:
     AdvancedSearchScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault);
@@ -90,9 +91,10 @@ private:
     void render_results(gfx::Renderer& r, float x, float colw);
     void render_saved(gfx::Renderer& r, float x);
 
-    gfx::Window&    win_;
-    gfx::FontAtlas& font_;
-    vault::Vault&   vault_;
+    gfx::Window&       win_;
+    gfx::FontAtlas&    font_;
+    vault::Vault&      vault_;
+    vault::VaultSearch search_;   // advanced-search facade over vault_
 
     AdvancedQuery                   query_;
     std::vector<vault::SearchHit>   results_;

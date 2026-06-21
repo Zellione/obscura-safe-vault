@@ -33,13 +33,6 @@
 
 namespace media { class VideoSource; }
 
-// Pure, SDL-free advanced-search query (src/ui/advanced_search_model.h). Only a
-// const reference is needed in this header, so a forward declaration keeps the
-// vault layer from pulling in the UI translation unit; vault.cpp includes the
-// full header to evaluate queries (the dependency is one-directional — the
-// model header includes nothing from the vault).
-namespace ui { struct AdvancedQuery; }
-
 namespace vault {
 
 enum class VaultResult {
@@ -193,27 +186,10 @@ public:
     // all in-scope nodes. Empty result if locked. Computes the cascade as it descends.
     [[nodiscard]] std::vector<SearchHit> search(std::string_view query, SearchScope scope) const;
 
-    // The vault's distinct tag vocabulary across the whole tree, de-duplicated
-    // case-insensitively (first-seen casing kept) and sorted case-insensitively.
-    // Drives tag autocomplete on the advanced-search screen. Empty while locked.
-    [[nodiscard]] std::vector<std::string> all_tags() const;
-
-    // Evaluate a weighted include/exclude/grouped advanced query against the tree
-    // (scope taken from `query.scope`), returning matches ranked by descending
-    // relevance score then ascending path. Computes the tag cascade as it
-    // descends. Empty while locked. (Phase 18.)
-    [[nodiscard]] std::vector<SearchHit> run_search(const ui::AdvancedQuery& query) const;
-
-    // Saved searches (Phase 18) — vault-global, persisted in the encrypted index.
-    // save_search upserts by exact name (replacing an existing query); InvalidArg
-    // for an empty name, or if adding would exceed INDEX_MAX_SAVED_SEARCHES.
-    // delete_saved_search removes by exact name (NotFound if absent). Both persist
-    // via the crash-safe index swap and need an unlocked vault (Locked otherwise).
-    [[nodiscard]] VaultResult save_search(std::string_view name, const ui::AdvancedQuery& query);
-    [[nodiscard]] VaultResult delete_saved_search(std::string_view name);
-    // A copy of the saved searches (name + opaque serialised query blob). Empty
-    // while locked. Decode a blob with ui::deserialize_query.
-    [[nodiscard]] std::vector<SavedSearch> list_saved_searches() const;
+    // The advanced-search API (tag vocabulary, weighted/grouped run_search, and
+    // saved searches — Phase 18) lives on the VaultSearch facade to keep this
+    // class within its method budget; it reaches in here as a friend.
+    friend class VaultSearch;
 
     // Flip a node's favorite flag (gallery OR image). Persisted via the crash-safe
     // index swap. Locked if not unlocked; NotFound if node_path doesn't resolve.

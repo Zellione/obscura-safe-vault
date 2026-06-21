@@ -18,6 +18,7 @@
 #include "image/thumbnail.h"
 
 #include "vault/video_format.h"
+#include "vault/vault_search.h"
 #include "media/video_probe.h"
 #include "ui/advanced_search_model.h"  // AdvancedQuery + evaluate (pure, SDL/vault-free)
 
@@ -917,11 +918,15 @@ std::vector<SearchHit> Vault::search(std::string_view query, SearchScope scope) 
     return out;
 }
 
-std::vector<std::string> Vault::all_tags() const
+// --- VaultSearch facade (Phase 18) -----------------------------------------
+// Defined here (rather than a separate TU) so it can reuse the file-local DFS /
+// tag-collection helpers; it reaches into the borrowed Vault as a friend.
+
+std::vector<std::string> VaultSearch::all_tags() const
 {
     std::vector<std::string> out;
-    if (!unlocked_) return out;
-    collect_tags(root_, out);
+    if (!v_.unlocked_) return out;
+    collect_tags(v_.root_, out);
     // Sort case-insensitively for a stable autocomplete vocabulary.
     std::ranges::sort(out, [](std::string_view a, std::string_view b) {
         return std::ranges::lexicographical_compare(a, b, [](char x, char y) {
@@ -932,13 +937,13 @@ std::vector<std::string> Vault::all_tags() const
     return out;
 }
 
-std::vector<SearchHit> Vault::run_search(const ui::AdvancedQuery& query) const
+std::vector<SearchHit> VaultSearch::run_search(const ui::AdvancedQuery& query) const
 {
     std::vector<SearchHit> out;
-    if (!unlocked_) return out;
+    if (!v_.unlocked_) return out;
 
     std::vector<std::pair<int, SearchHit>> scored;
-    adv_search_dfs(root_, "", root_.tags, query, query.scope, scored);
+    adv_search_dfs(v_.root_, "", v_.root_.tags, query, query.scope, scored);
 
     // Rank by descending score, breaking ties by ascending path for stability.
     std::ranges::sort(scored, [](const auto& a, const auto& b) {
@@ -951,39 +956,39 @@ std::vector<SearchHit> Vault::run_search(const ui::AdvancedQuery& query) const
     return out;
 }
 
-std::vector<SavedSearch> Vault::list_saved_searches() const
+std::vector<SavedSearch> VaultSearch::list_saved_searches() const
 {
-    if (!unlocked_) return {};
-    return saved_searches_;
+    if (!v_.unlocked_) return {};
+    return v_.saved_searches_;
 }
 
-VaultResult Vault::save_search(std::string_view name, const ui::AdvancedQuery& query)
+VaultResult VaultSearch::save_search(std::string_view name, const ui::AdvancedQuery& query)
 {
     using enum VaultResult;
-    if (!unlocked_)    return Locked;
-    if (name.empty())  return InvalidArg;
+    if (!v_.unlocked_)  return Locked;
+    if (name.empty())   return InvalidArg;
 
     std::vector<uint8_t> blob = ui::serialize_query(query);
 
     // Upsert: replace an existing same-name entry, else append (bounded).
-    for (auto& s : saved_searches_) {
-        if (s.name == name) { s.query = std::move(blob); return commit_index(); }
+    for (auto& s : v_.saved_searches_) {
+        if (s.name == name) { s.query = std::move(blob); return v_.commit_index(); }
     }
-    if (saved_searches_.size() >= INDEX_MAX_SAVED_SEARCHES) return InvalidArg;
-    saved_searches_.emplace_back(std::string(name), std::move(blob));
-    return commit_index();
+    if (v_.saved_searches_.size() >= INDEX_MAX_SAVED_SEARCHES) return InvalidArg;
+    v_.saved_searches_.emplace_back(std::string(name), std::move(blob));
+    return v_.commit_index();
 }
 
-VaultResult Vault::delete_saved_search(std::string_view name)
+VaultResult VaultSearch::delete_saved_search(std::string_view name)
 {
     using enum VaultResult;
-    if (!unlocked_) return Locked;
+    if (!v_.unlocked_) return Locked;
 
-    const auto it = std::ranges::find_if(saved_searches_,
+    const auto it = std::ranges::find_if(v_.saved_searches_,
                                          [&](const SavedSearch& s) { return s.name == name; });
-    if (it == saved_searches_.end()) return NotFound;
-    saved_searches_.erase(it);
-    return commit_index();
+    if (it == v_.saved_searches_.end()) return NotFound;
+    v_.saved_searches_.erase(it);
+    return v_.commit_index();
 }
 
 VaultResult Vault::toggle_favorite(std::string_view node_path)

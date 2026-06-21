@@ -73,7 +73,7 @@ void draw_dropdown(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<std
 
 AdvancedSearchScreen::AdvancedSearchScreen(gfx::Window& win, gfx::FontAtlas& font,
                                            vault::Vault& vault)
-    : win_(win), font_(font), vault_(vault)
+    : win_(win), font_(font), vault_(vault), search_(vault_)
 {
 }
 
@@ -93,14 +93,14 @@ void AdvancedSearchScreen::on_exit()
 
 void AdvancedSearchScreen::reload_saved()
 {
-    saved_      = vault_.list_saved_searches();
-    vocabulary_ = vault_.all_tags();
+    saved_      = search_.list_saved_searches();
+    vocabulary_ = search_.all_tags();
     if (cur_.saved >= static_cast<int>(saved_.size())) cur_.saved = 0;
 }
 
 void AdvancedSearchScreen::rerun()
 {
-    results_ = vault_.run_search(query_);
+    results_ = search_.run_search(query_);
     cur_.result = std::clamp(cur_.result, 0, std::max(0, static_cast<int>(results_.size()) - 1));
 }
 
@@ -390,7 +390,7 @@ void AdvancedSearchScreen::delete_saved()
 {
     if (cur_.saved < 0 || cur_.saved >= static_cast<int>(saved_.size())) return;
     const std::string name = saved_[cur_.saved].name;
-    if (vault_.delete_saved_search(name) == vault::VaultResult::Ok) {
+    if (search_.delete_saved_search(name) == vault::VaultResult::Ok) {
         status_ = std::format("Deleted '{}'.", name);
         reload_saved();
         cur_.saved = std::min(cur_.saved, std::max(0, static_cast<int>(saved_.size()) - 1));
@@ -412,7 +412,7 @@ void AdvancedSearchScreen::confirm_save()
     const std::string name = trim(save_buf_);
     saving_ = false;
     if (name.empty()) { status_ = "Save cancelled (empty name)."; return; }
-    if (vault_.save_search(name, query_) == vault::VaultResult::Ok) {
+    if (search_.save_search(name, query_) == vault::VaultResult::Ok) {
         status_ = std::format("Saved '{}'.", name);
         reload_saved();
     } else {

@@ -140,9 +140,12 @@ src/
                                             + read_thumbnail returns the poster (Phase 15).
                                             index.h adds SavedSearch + a vault-global saved-
                                             searches block, INDEX_VERSION=5 (v1–v4 read back-
-                                            compat → empty list); Vault gains all_tags +
-                                            run_search(ui::AdvancedQuery) + save_search/
-                                            list_saved_searches/delete_saved_search (Phase 18).
+                                            compat → empty list) (Phase 18).
+             vault_search.*               ← VaultSearch: an advanced-search facade (friend) over
+                                            a Vault — all_tags + run_search(ui::AdvancedQuery) +
+                                            save_search/list_saved_searches/delete_saved_search.
+                                            Keeps these off Vault so it stays within its method
+                                            budget (cpp:S1448) (Phase 18).
              transfer.*                   ← transfer_image + image_target_galleries (PR2);
                                             transfer_gallery (recursive copy-then-delete) +
                                             gallery_target_parents (PR3); TransferMode

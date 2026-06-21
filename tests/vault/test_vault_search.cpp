@@ -13,6 +13,7 @@
 
 #include "ui/advanced_search_model.h"
 #include "vault/vault.h"
+#include "vault/vault_search.h"
 
 namespace fs = std::filesystem;
 
@@ -66,7 +67,7 @@ TEST(search_all_tags_dedups_case_insensitively_across_tree)
     REQUIRE(v.set_tags("trip/a.jpg", {"beach", "SUNSET"}) == vault::VaultResult::Ok);
     REQUIRE(v.set_tags("trip/b.jpg", {"sunset", "Beach"}) == vault::VaultResult::Ok);
 
-    auto vocab = v.all_tags();
+    auto vocab = vault::VaultSearch(v).all_tags();
     // Distinct case-insensitively: vacation, beach, sunset → 3 entries.
     CHECK_EQ(vocab.size(), static_cast<size_t>(3));
     auto present = [&](std::string_view t) {
@@ -94,9 +95,9 @@ TEST(search_saved_searches_round_trip_across_reopen)
     {
         vault::Vault v;
         REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
-        CHECK(v.list_saved_searches().empty());
-        REQUIRE(v.save_search("my cats", q) == vault::VaultResult::Ok);
-        REQUIRE(v.list_saved_searches().size() == 1);
+        CHECK(vault::VaultSearch(v).list_saved_searches().empty());
+        REQUIRE(vault::VaultSearch(v).save_search("my cats", q) == vault::VaultResult::Ok);
+        REQUIRE(vault::VaultSearch(v).list_saved_searches().size() == 1);
     }
 
     // Reopen: the saved search survives lock + reopen.
@@ -105,7 +106,7 @@ TEST(search_saved_searches_round_trip_across_reopen)
         REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
         REQUIRE(v.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
 
-        auto saved = v.list_saved_searches();
+        auto saved = vault::VaultSearch(v).list_saved_searches();
         REQUIRE(saved.size() == 1);
         CHECK_EQ(saved[0].name, std::string("my cats"));
 
@@ -117,16 +118,16 @@ TEST(search_saved_searches_round_trip_across_reopen)
         CHECK(back.scope == ui::SearchScope::Images);
 
         // Delete it; deletion persists too.
-        REQUIRE(v.delete_saved_search("my cats") == vault::VaultResult::Ok);
-        CHECK(v.list_saved_searches().empty());
-        CHECK(v.delete_saved_search("nope") == vault::VaultResult::NotFound);
+        REQUIRE(vault::VaultSearch(v).delete_saved_search("my cats") == vault::VaultResult::Ok);
+        CHECK(vault::VaultSearch(v).list_saved_searches().empty());
+        CHECK(vault::VaultSearch(v).delete_saved_search("nope") == vault::VaultResult::NotFound);
     }
 
     {
         vault::Vault v;
         REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
         REQUIRE(v.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
-        CHECK(v.list_saved_searches().empty());
+        CHECK(vault::VaultSearch(v).list_saved_searches().empty());
     }
 }
 
@@ -138,16 +139,16 @@ TEST(search_save_search_upserts_by_name)
 
     ui::AdvancedQuery q1; q1.name_query = "first";
     ui::AdvancedQuery q2; q2.name_query = "second";
-    REQUIRE(v.save_search("s", q1) == vault::VaultResult::Ok);
-    REQUIRE(v.save_search("s", q2) == vault::VaultResult::Ok);  // replace, not duplicate
+    REQUIRE(vault::VaultSearch(v).save_search("s", q1) == vault::VaultResult::Ok);
+    REQUIRE(vault::VaultSearch(v).save_search("s", q2) == vault::VaultResult::Ok);  // replace, not duplicate
 
-    auto saved = v.list_saved_searches();
+    auto saved = vault::VaultSearch(v).list_saved_searches();
     REQUIRE(saved.size() == 1);
     ui::AdvancedQuery back;
     REQUIRE(ui::deserialize_query(saved[0].query, back));
     CHECK_EQ(back.name_query, std::string("second"));
 
-    CHECK(v.save_search("", q1) == vault::VaultResult::InvalidArg);  // empty name rejected
+    CHECK(vault::VaultSearch(v).save_search("", q1) == vault::VaultResult::InvalidArg);  // empty name rejected
 }
 
 TEST(search_run_search_filters_ranks_and_scopes)
@@ -171,7 +172,7 @@ TEST(search_run_search_filters_ranks_and_scopes)
     q.exclude = {"blurry"};
     q.scope   = ui::SearchScope::Images;
 
-    auto hits = v.run_search(q);
+    auto hits = vault::VaultSearch(v).run_search(q);
     // cat1, dog1, both match; bad.jpg excluded.
     CHECK_EQ(hits.size(), static_cast<size_t>(3));
     CHECK(has_path(hits, "pics/cat1.jpg"));
@@ -198,7 +199,7 @@ TEST(search_run_search_galleries_scope_uses_cascade)
     q.include = {ui::WeightedTag{"vacation", 1}};
     q.scope   = ui::SearchScope::Galleries;
 
-    auto hits = v.run_search(q);
+    auto hits = vault::VaultSearch(v).run_search(q);
     // "trip" (owns vacation) and "trip/day1" (inherits it) both match; no images.
     CHECK(has_path(hits, "trip"));
     CHECK(has_path(hits, "trip/day1"));
@@ -215,8 +216,8 @@ TEST(search_run_search_empty_when_locked)
     vault::Vault v;
     REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
     ui::AdvancedQuery q;
-    CHECK(v.run_search(q).empty());
-    CHECK(v.all_tags().empty());
-    CHECK(v.list_saved_searches().empty());
-    CHECK(v.save_search("x", q) == vault::VaultResult::Locked);
+    CHECK(vault::VaultSearch(v).run_search(q).empty());
+    CHECK(vault::VaultSearch(v).all_tags().empty());
+    CHECK(vault::VaultSearch(v).list_saved_searches().empty());
+    CHECK(vault::VaultSearch(v).save_search("x", q) == vault::VaultResult::Locked);
 }
