@@ -19,6 +19,7 @@
 | libaom | 3.14.1 | AVIF (AV1) decode, decoder-only; needs **nasm**; cmake → `vendor/codecs-prefix` |
 | libheif | 1.18.2 | HEIC/AVIF container; one `decode_heif_from_memory` covers both |
 | FFmpeg/libav | 7.1.1 | Video & audio decode-only (H.264/H.265; aac/opus/mp3/vorbis/flac/ac3 audio; mov/mp4/m4v + matroska/webm demux; libswscale for video, swresample linked as transitive dependency of audio decoders — we do NOT use swresample for audio conversion, SDL_AudioStream handles that); configure-built static → `vendor/codecs-prefix`; needs **nasm**; linked by `link_av()` (avformat/avcodec/swscale/swresample/avutil) under `OSV_VENDORED_AV` (Phase 15–16) |
+| miniz | master commit `e78dfd2` | ZIP reader (Phase 17). Plain-C static lib compiled by premake from the modern split sources (`miniz.c`/`miniz_tdef.c`/`miniz_tinfl.c`/`miniz_zip.c`); the only release tags v112–v114 are ancient SVN snapshots, so pinned to a master commit. Built + consumed with `MINIZ_NO_ZLIB_COMPATIBLE_NAMES` (else its `compress`/`crc32`/`inflate` clash with the libz avformat links). `vendor/miniz-shim/miniz_export.h` supplies the one CMake-generated header so the submodule stays pristine; consumers include the umbrella `"miniz.h"` (not `miniz_zip.h`, which lacks `mz_alloc_func`/`MZ_BEST_SPEED`) |
 
 Image codecs are built by `scripts/build_codecs.{sh,bat}` (shared by `setup.{sh,bat}` and CI)
 and installed into `vendor/codecs-prefix/`; premake's `link_image_codecs()` links them in

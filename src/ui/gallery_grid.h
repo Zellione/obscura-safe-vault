@@ -18,6 +18,7 @@
 #include "ui/selection_model.h"
 #include "ui/tag_editor.h"
 #include "ui/transfer_dialog.h"
+#include "ui/zip_plan.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
 namespace vault { class Vault; struct IndexNode; }
@@ -73,7 +74,10 @@ private:
     void finish_naming();
     void do_import(const std::filesystem::path& file_path);
     void pump_import();            // poll the file dialog while transfer is not active
-    void start_search();       // open the search overlay
+    void do_zip_import(const std::filesystem::path& zip_path, ui::ZipConflictPolicy policy);
+    void pump_zip_import();        // poll the zip file dialog while transfer is not active
+    bool handle_zip_conflict_key(const SDL_Event& e);  // Flatten/Skip/Esc modal; true if consumed
+    bool handle_delete_confirm_key(const SDL_Event& e);  // Del-confirm modal; true if consumed
     void start_tag_editor();   // open the tag editor for the focused tile
     void toggle_favorite_current();  // flip favorite on the focused tile (B)
     [[nodiscard]] bool current_allows_images() const;
@@ -107,10 +111,18 @@ private:
     std::string           error_;
     std::string           status_;   // transient export result message
 
-    // New-gallery naming state — bundled to fix S1820 (>20 data members).
+    // New-gallery naming + zip-import flow state — bundled to fix S1820 (>20 data members).
+    struct PendingZip {
+        std::filesystem::path path;
+        std::string           gallery_name;
+        ui::ZipDest           dest = ui::ZipDest::NewGallery;
+        bool                  active = false;  // awaiting conflict resolution (Flatten/Skip)
+    };
     struct Naming {
-        bool        active = false;
+        bool        active = false;   // manual new-gallery text entry
         std::string buf;
+        PendingZip  zip;              // zip import in flight
+        bool        confirm_delete = false;  // Del on a media tile: awaiting Y/N confirm
     };
     Naming naming_;
 

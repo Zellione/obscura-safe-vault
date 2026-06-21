@@ -72,6 +72,7 @@ navigable with arrow keys.
 | Image decode | **stb_image** (header-only) | JPEG/PNG/GIF/BMP/TGA/HDR decoded directly from decrypted in-memory buffers. Zero dependencies, no temp files. |
 | Extra image formats | **libwebp 1.4.0** (WebP), **libheif 1.18.2** + **libde265 1.0.15** (HEIC) + **libaom 3.14.1** (AVIF, decoder-only) — all Phase 9 | Decode-only. Vendored git submodules, cmake-built static into `vendor/codecs-prefix/` by `scripts/build_codecs.{sh,bat}`. One `decode_heif_from_memory` covers HEIC+AVIF (libheif dispatches by brand). libaom needs **nasm**. |
 | Video decode | **FFmpeg/libav 7.1.1** (decode-only static) — Phase 15; audio — Phase 16 | Stream video frames directly from encrypted chunks via a custom `AVIOContext` over `ChunkStore` (no temp file). H.264/H.265 video; mov/mp4/m4v + matroska/webm demuxers; libswscale for non-4:2:0; audio decoders aac/opus/mp3/vorbis/flac/ac3. Decoded audio (planar→interleaved F32) flows into an `SDL_AudioStream` (SDL handles rate/format/channel conversion — we do NOT use swresample for our resampling). A/V sync via pure `av_sync::decide()` (audio-clock tracking). Encoders/muxers/protocols/network disabled. Vendored git submodule, configure-built static into `vendor/codecs-prefix/` by `scripts/build_codecs.{sh,bat}`; linked by `link_av()` (which also links swresample, a transitive dep of audio decoders) under `OSV_VENDORED_AV`. Needs **nasm** (like libaom). |
+| ZIP import | **miniz** (public-domain/MIT) — Phase 17 | Single-file, header-only decompression + ZIP reader. Vendored git submodule (`vendor/miniz`, pinned to master commit `e78dfd2` — no stable release tags), compiled by premake like monocypher/stb (built with `MINIZ_NO_ZLIB_COMPATIBLE_NAMES` to avoid clashing with the libz that avformat links). Decompressed entries read into mlock'd `SecureBytes`, never to disk. One header-only shim `vendor/miniz-shim/miniz_export.h` supplies the CMake-generated header so the submodule stays pristine. |
 | Thumbnails | **Pre-generated, stored encrypted in vault** | Gallery scrolling decrypts only the small thumbnail blobs — no full-image decode needed while browsing. |
 | Gallery model | **Free-nesting galleries; images only in leaf galleries** | A folder shows either sub-folders *or* images, never a mix. Cleaner grid view and simpler tree logic. |
 | Dependency management | **Vendored git submodules** under `vendor/` | Hermetic, reproducible, offline. SDL3 is built from source by `scripts/setup.sh` (cmake once); monocypher/stb are compiled directly by premake. |
@@ -205,9 +206,25 @@ src/
                                             registry vaults → ToUnlock(path) (locks
                                             current, unlocks chosen); hosted by
                                             GalleryGrid + ImageViewer + favorites
+             zip_plan.*,                  ← pure, SDL-free ZIP archive planner (Phase 17):
+                                            entries → gallery tree + file placements +
+                                            mixed-folder conflict resolution (Flatten/Skip)
+             zip_import.*,                ← ZIP executor: miniz reader → mlock'd
+                                            SecureBytes → Vault::add_image/add_video;
+                                            triggered by `Z` key in gallery grid (Phase 17)
+             delete_summary.*,            ← pure recursive tally of a gallery subtree
+                                            (images/videos/sub-galleries) for the `Del`
+                                            delete-confirm popup (Phase 17 follow-up).
+                                            GalleryGrid's `Del` removes the focused
+                                            image/video (Vault::remove_image) or gallery
+                                            subtree (Vault::remove_gallery) behind a confirm.
              widgets.*
   platform/  paths.{h,cpp},              ← config dir + file dialogs (Phase 5)
-             file_dialog.*,               ← + save_vault() for new-vault paths (Phase 14)
+             file_dialog.*,               ← + save_vault() for new-vault paths (Phase 14);
+                                            each open tagged with a Purpose +
+                                            take_result(Purpose) so one shared dialog polled
+                                            by two handlers (GalleryGrid image vs zip import)
+                                            can't steal each other's result (Phase 17 fix)
              folder_dialog.*,             ← export destination picker (Phase 10)
              vault_registry.*             ← recent-vaults list, paths only, atomic
                                             write — stores NO secrets (Phase 14)
@@ -215,6 +232,8 @@ vendor/
   SDL3/           ← git submodule, built by scripts/setup.sh (cmake)
   monocypher/     ← git submodule, compiled by premake (single .c file)
   stb/            ← git submodule, header-only
+  miniz/          ← git submodule, compiled by premake (single .c + headers, Phase 17)
+  miniz-shim/     ← shim headers for miniz (vendor/miniz-shim/miniz_export.h)
   libwebp/        ← git submodule, cmake → vendor/codecs-prefix (Phase 9)
   libde265/       ← git submodule, cmake → vendor/codecs-prefix (HEIC)
   libaom/         ← git submodule, cmake → vendor/codecs-prefix (AVIF, decoder-only)

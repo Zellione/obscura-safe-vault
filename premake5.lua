@@ -204,6 +204,30 @@ project "monocypher"
     filter {}
 
 -- ---------------------------------------------------------------------------
+-- miniz — ZIP reader (Phase 17). Plain C static lib built from the vendored
+-- split sources (no CMake). vendor/miniz-shim supplies miniz_export.h — the one
+-- header CMake would generate — so the pristine vendor/miniz submodule is never
+-- mutated. MINIZ_NO_ZLIB_COMPATIBLE_NAMES is REQUIRED: without it miniz exports
+-- compress/uncompress/crc32/inflate which clash at link time with the real libz
+-- that avformat pulls in. _POSIX_C_SOURCE exposes fseeko/ftello for miniz_zip.c.
+-- Consumers include the umbrella "miniz.h" (miniz_zip.h alone lacks mz_alloc_func
+-- and MZ_BEST_SPEED). Linkage of the full ZIP API is proven by test_zip_linkage.
+-- ---------------------------------------------------------------------------
+project "miniz"
+    kind        "StaticLib"
+    language    "C"
+    cdialect    "C17"
+
+    files       { "vendor/miniz/miniz.c", "vendor/miniz/miniz_tdef.c",
+                  "vendor/miniz/miniz_tinfl.c", "vendor/miniz/miniz_zip.c" }
+    includedirs { "vendor/miniz", "vendor/miniz-shim" }
+    defines     { "MINIZ_NO_ZLIB_COMPATIBLE_NAMES", "_POSIX_C_SOURCE=200809L" }
+
+    filter "toolset:gcc or clang"
+        buildoptions { "-w" }   -- silence warnings in vendored code
+    filter {}
+
+-- ---------------------------------------------------------------------------
 -- osv — the main application
 -- ---------------------------------------------------------------------------
 project "osv"
@@ -218,10 +242,16 @@ project "osv"
     includedirs {
         "src",
         "vendor/monocypher/src",
+        "vendor/miniz",
+        "vendor/miniz-shim",
         "vendor/stb",
     }
 
-    links { "monocypher" }
+    -- Keep miniz's zlib-compatible names out of our TUs too (the lib is built
+    -- without them); we only use the mz_* ZIP API.
+    defines { "MINIZ_NO_ZLIB_COMPATIBLE_NAMES" }
+
+    links { "monocypher", "miniz" }
 
     -- SDL3: vendored cmake build if present, else system SDL3.
     link_sdl3()
@@ -270,6 +300,7 @@ project "osv_tests"
         "src/gfx/yuv_texture.cpp",
         "src/platform/paths.cpp",
         "src/platform/vault_registry.cpp",
+        "src/platform/file_dialog.cpp",
         "src/ui/input.cpp",
         "src/ui/nav_model.cpp",
         "src/ui/passphrase.cpp",
@@ -282,6 +313,9 @@ project "osv_tests"
         "src/ui/selection_model.cpp",
         "src/ui/search_model.cpp",
         "src/ui/export.cpp",
+        "src/ui/delete_summary.cpp",
+        "src/ui/zip_plan.cpp",
+        "src/ui/zip_import.cpp",
         "src/ui/slideshow_model.cpp",
         "src/ui/playback_model.cpp",
         "src/ui/video_playback.cpp",
@@ -291,10 +325,14 @@ project "osv_tests"
         "src",                      -- so tests can #include "crypto/aead.h"
         "tests",
         "vendor/monocypher/src",
+        "vendor/miniz",
+        "vendor/miniz-shim",
         "vendor/stb",
     }
 
-    links { "monocypher" }
+    defines { "MINIZ_NO_ZLIB_COMPATIBLE_NAMES" }
+
+    links { "monocypher", "miniz" }
 
     -- gfx units pull in SDL3 (software renderer is created headlessly in tests).
     link_sdl3()

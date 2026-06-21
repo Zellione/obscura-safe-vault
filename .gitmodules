@@ -25,3 +25,6 @@
 	path = vendor/ffmpeg
 	url = https://github.com/FFmpeg/FFmpeg.git
 	ignore = untracked
+[submodule "vendor/miniz"]
+	path = vendor/miniz
+	url = https://github.com/richgel999/miniz.git

@@ -14,9 +14,11 @@
 #include "platform/file_dialog.h"
 #include "platform/folder_dialog.h"
 #include "platform/paths.h"
+#include "ui/delete_summary.h"
 #include "ui/export.h"
 #include "ui/input.h"
 #include "ui/widgets.h"
+#include "ui/zip_import.h"
 #include "vault/index.h"
 #include "vault/vault.h"
 
@@ -34,6 +36,17 @@ constexpr float COL_DIMS = 165;   // wide enough for the "DIMENSIONS" header
 constexpr float COL_SIZE = 100;
 constexpr float COL_TYPE = 90;    // fits image formats and "H.264"/"H.265"
 constexpr float COL_DATE = 120;
+
+// Delete the focused node: a gallery subtree (remove_gallery) or a single
+// image/video (remove_image). Kept free (not a member) so the gallery-vs-media
+// branch stays a flat statement at the call site.
+vault::VaultResult delete_focused_node(vault::Vault& v, const std::string& base,
+                                       const vault::IndexNode& n)
+{
+    if (!n.is_gallery()) return v.remove_image(base, n.name);
+    const std::string full = base.empty() ? n.name : base + "/" + n.name;
+    return v.remove_gallery(full);
+}
 
 // Centre the `cols` columns horizontally in a `win_w`-wide window so the left and
 // right margins match (never tighter than OX).
@@ -221,11 +234,23 @@ void GalleryGrid::start_naming()
 
 void GalleryGrid::finish_naming()
 {
-    using enum vault::VaultResult;
     naming_.active = false;
     SDL_StopTextInput(win_.sdl_window());
-    if (naming_.buf.empty()) return;
+    if (naming_.buf.empty()) {
+        naming_.zip.active = false;
+        return;
+    }
 
+    // If this is a zip import, trigger the import with the chosen name.
+    if (naming_.zip.active) {
+        naming_.zip.gallery_name = naming_.buf;
+        naming_.buf.clear();
+        do_zip_import(naming_.zip.path, ui::ZipConflictPolicy::AskUser);
+        return;
+    }
+
+    // Otherwise, create a new gallery.
+    using enum vault::VaultResult;
     const std::string base = nav_.path();
     switch (const std::string full = base.empty() ? naming_.buf : base + "/" + naming_.buf;
             vault_.create_gallery(full)) {
@@ -236,11 +261,6 @@ void GalleryGrid::finish_naming()
     }
     naming_.buf.clear();
     refresh();
-}
-
-void GalleryGrid::start_search()
-{
-    search_.open();
 }
 
 void GalleryGrid::start_tag_editor()
@@ -309,6 +329,7 @@ void GalleryGrid::handle_naming_key(const SDL_Event& e)
     else if (e.key.key == SDLK_ESCAPE) {
         naming_.active = false;
         naming_.buf.clear();
+        naming_.zip.active = false;   // clear zip import state if cancelled
         SDL_StopTextInput(win_.sdl_window());
     }
 }
@@ -329,12 +350,24 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
     if (key.key == SDLK_L) { view_ = (view_ == Grid) ? List : Grid; return; }
     if (key.key == SDLK_X) { start_export(); return; }   // export selection
     if (key.key == SDLK_M) { start_transfer(); return; }   // move to another vault
+    if (key.key == SDLK_Z) {   // import zip archive (inlined to keep GalleryGrid <= 35 methods)
+        if (dialogs_.file.busy() || transfer_.active()) return;
+        error_.clear();
+        dialogs_.file.open_zip(win_.sdl_window());
+        return;
+    }
+    if (key.key == SDLK_DELETE) {   // confirm-delete the focused image/video/gallery
+        const int s = nav_.selected();
+        naming_.confirm_delete = s >= 0 && s < static_cast<int>(children_.size());
+        error_ = naming_.confirm_delete ? std::string{} : "Nothing selected to delete.";
+        return;
+    }
     if (key.key == SDLK_SPACE) { toggle_or_open(); return; }
     // `/` is a shifted key on many non-US layouts, so the base keycode (key.key)
     // is the unmodified symbol (e.g. '7') and never equals SDLK_SLASH. Resolve the
     // character the layout + held modifiers actually produce and match that.
     if (SDL_GetKeyFromScancode(key.scancode, key.mod, false) == SDLK_SLASH) {
-        start_search();  // search (/)
+        search_.open();  // search (/)
         return;
     }
     if (key.key == SDLK_G) { start_tag_editor(); return; }  // tag editor (G)
@@ -359,6 +392,56 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         case Import:     start_import();    break;
         case NewGallery: start_naming();    break;
         default: break;
+    }
+}
+
+bool GalleryGrid::handle_delete_confirm_key(const SDL_Event& e)
+{
+    if (!naming_.confirm_delete) return false;
+    if (e.type != SDL_EVENT_KEY_DOWN) return true;   // modal swallows non-key events
+
+    const SDL_Keycode k = e.key.key;
+    if (k == SDLK_ESCAPE || k == SDLK_N) {
+        naming_.confirm_delete = false;
+        mark_dirty();
+        return true;
+    }
+    if (k != SDLK_Y) return true;                    // swallow every other key
+
+    if (const int s = nav_.selected();
+        s >= 0 && s < static_cast<int>(children_.size())) {
+        const vault::IndexNode& n = *children_[s];
+        const std::string name = n.name;
+        if (delete_focused_node(vault_, nav_.path(), n) == vault::VaultResult::Ok) {
+            status_ = "Deleted " + name;
+            refresh();
+        } else {
+            error_ = "Could not delete " + name;
+        }
+    }
+    naming_.confirm_delete = false;
+    mark_dirty();
+    return true;
+}
+
+bool GalleryGrid::handle_zip_conflict_key(const SDL_Event& e)
+{
+    if (!naming_.zip.active || naming_.active || e.type != SDL_EVENT_KEY_DOWN) return false;
+    switch (e.key.key) {
+        case SDLK_F:  // flatten all mixed folders
+            do_zip_import(naming_.zip.path, ui::ZipConflictPolicy::FlattenMixed);
+            mark_dirty();
+            return true;
+        case SDLK_S:  // skip directories with mixed content
+            do_zip_import(naming_.zip.path, ui::ZipConflictPolicy::SkipMixed);
+            mark_dirty();
+            return true;
+        case SDLK_ESCAPE:  // cancel the import
+            naming_.zip.active = false;
+            mark_dirty();
+            return true;
+        default:
+            return false;
     }
 }
 
@@ -395,6 +478,12 @@ void GalleryGrid::handle_event(const SDL_Event& e)
         return;
     }
 
+    // The delete-confirmation modal owns all input while it is up.
+    if (handle_delete_confirm_key(e)) return;
+
+    // The zip conflict modal owns all input while it is up (only when not naming).
+    if (handle_zip_conflict_key(e)) return;
+
     if (naming_.active) { handle_naming_key(e); return; }
 
     switch (e.type) {
@@ -414,13 +503,78 @@ void GalleryGrid::handle_event(const SDL_Event& e)
 
 void GalleryGrid::pump_import()
 {
-    if (auto res = dialogs_.file.take_result()) {
+    if (auto res = dialogs_.file.take_result(platform::FileDialog::Purpose::Images)) {
         if (!res->empty()) {
             for (const auto& p : *res) do_import(p);
             refresh();
         }
         mark_dirty();   // dialog closed (imported or cancelled) — repaint
     }
+}
+
+void GalleryGrid::pump_zip_import()
+{
+    if (auto res = dialogs_.file.take_result(platform::FileDialog::Purpose::Zip)) {
+        if (!res->empty()) {
+            const std::string zip_path = res->front();
+            const std::filesystem::path zp(zip_path);
+
+            // Decide between Append (if current holds media) or NewGallery (name prompt).
+            if (current_allows_images() && !current_allows_galleries()) {
+                // Current gallery holds only media (leaf): import with Append (no name prompt).
+                naming_.zip.path = zp;
+                naming_.zip.gallery_name.clear();
+                naming_.zip.dest = ui::ZipDest::Append;
+                naming_.zip.active = true;
+                do_zip_import(zp, ui::ZipConflictPolicy::AskUser);
+            } else {
+                // Current is empty or holds sub-galleries: prompt for new gallery name.
+                start_naming();   // reuse the naming flow
+                naming_.buf = zp.stem().string();   // e.g. "archive" from "archive.zip"
+                naming_.zip.path = zp;
+                naming_.zip.dest = ui::ZipDest::NewGallery;
+                naming_.zip.active = true;
+            }
+        }
+        mark_dirty();   // dialog closed (picked or cancelled) — repaint
+    }
+}
+
+void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipConflictPolicy policy)
+{
+    // The gallery name and destination come from naming_.zip.
+    const std::string gallery_name = naming_.zip.gallery_name;
+    const std::string base_gallery = nav_.path();
+    const ui::ZipDest dest = naming_.zip.dest;
+
+    // Call the import_zip executor.
+    const ui::ZipImportOutcome out = ui::import_zip(
+        vault_, zip_path,
+        /* dest */ dest,
+        /* base_gallery */ base_gallery,
+        /* new_gallery_name */ gallery_name,
+        /* policy */ policy
+    );
+
+    if (!out.ok) {
+        error_ = out.error.empty() ? "ZIP import failed." : out.error;
+        naming_.zip.active = false;
+        return;
+    }
+
+    // If there are mixed folders and we're in AskUser mode, show the conflict modal.
+    if (out.needs_resolution) {
+        // pending_zip is already stashed from pump_zip_import; the modal will be
+        // drawn in render() and the user will choose FlattenMixed or SkipMixed.
+        // We'll re-call do_zip_import with the chosen policy from the modal.
+        return;
+    }
+
+    // Success: set the summary and refresh.
+    status_ = std::format("Imported {} file{}, skipped {}", out.imported,
+                         out.imported == 1 ? "" : "s", out.skipped);
+    naming_.zip.active = false;
+    refresh();
 }
 
 void GalleryGrid::update(double)
@@ -444,7 +598,10 @@ void GalleryGrid::update(double)
 
     // The import picker shares dialogs_.file with the transfer's keyfile picker, so
     // only poll it when no transfer is active (don't steal the keyfile result).
-    if (!transfer_.active()) pump_import();
+    if (!transfer_.active()) {
+        pump_import();
+        pump_zip_import();
+    }
 
     if (auto dest = dialogs_.folder.take_result()) {
         if (!dest->empty()) do_export(*dest);   // empty => the picker was cancelled
@@ -462,9 +619,9 @@ void GalleryGrid::render(gfx::Renderer& r)
     for (const auto& s : nav_.segments()) { crumb += s; crumb += '/'; }
     r.draw_text(font_, OX, 40, crumb, TEXT_DIM);
     r.draw_text(font_, OX, 90,
-                "[I] Import  [N] New  [/] Search  [G] Tags  [B] Fav  [F] Fav Images  "
-                "[Shift+F] Fav Galleries  [Enter] Open  [Space] Select  [X] Export  "
-                "[M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid",
+                "[I] Import  [Z] ZIP  [N] New  [Del] Delete  [/] Search  [G] Tags  [B] Fav  "
+                "[F] Fav Images  [Shift+F] Fav Galleries  [Enter] Open  [Space] Select  "
+                "[X] Export  [M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid",
                 TEXT_FAINT);
 
     if (!sel_.empty())
@@ -491,10 +648,66 @@ void GalleryGrid::render(gfx::Renderer& r)
         draw_text_field(r, font_, {mx + 16, my + 56, mw - 32, 44}, naming_.buf, true);
     }
 
+    // Delete-confirmation modal: names the target tile; deletion is irreversible.
+    if (naming_.confirm_delete) {
+        r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});   // veil
+
+        const float pw = 560;
+        const float ph = 200;
+        const float px = (W - pw) / 2;
+        const float py = (H - ph) / 2;
+        r.draw_round_rect({px, py, pw, ph}, RADIUS, SURFACE);
+        r.draw_round_rect({px, py, pw, ph}, RADIUS, DANGER, /*filled*/ false);
+
+        auto centered = [&](const std::string& s, float y, gfx::Color c) {
+            const auto tw = static_cast<float>(font_.measure(s));
+            r.draw_text(font_, px + (pw - tw) / 2, y, s, c);
+        };
+
+        const int s = nav_.selected();
+        const vault::IndexNode* node =
+            (s >= 0 && s < static_cast<int>(children_.size())) ? children_[s] : nullptr;
+        const std::string name = node ? node->name : std::string{};
+        centered("Delete \"" + fit_name(name, pw - 80) + "\"?", py + 28, TEXT);
+        if (node && node->is_gallery()) {
+            SubtreeCounts c;
+            count_subtree(*node, c);
+            centered("This permanently removes the gallery and everything in it.", py + 72, DANGER);
+            centered("Contains " + describe_subtree(c) + ".", py + 104, DANGER);
+        } else {
+            centered("This permanently removes it from the vault.", py + 84, DANGER);
+        }
+        centered("[Esc/N] Cancel        [Y] Delete", py + ph - 50, TEXT_DIM);
+    }
+
     search_.render(r, font_, W, H);
     tag_editor_.render(r, font_, W, H);
     transfer_.render(r, font_, W, H);
     quick_switch_.render(r, font_, W, H);
+
+    // Zip conflict modal: drawn when awaiting a choice between FlattenMixed and SkipMixed.
+    // Only shown after the naming dialog closes (so !naming_.active).
+    if (naming_.zip.active && !naming_.active) {
+        // Veil the whole window.
+        r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
+
+        const float pw = 600;
+        const float ph = 200;
+        const float px = (W - pw) / 2;
+        const float py = (H - ph) / 2;
+        r.draw_round_rect({px, py, pw, ph}, RADIUS, SURFACE);
+        r.draw_round_rect({px, py, pw, ph}, RADIUS, ACCENT, /*filled*/ false);
+
+        // Centre text helper.
+        auto centered = [&](const std::string& s, float y, gfx::Color c) {
+            const auto tw = static_cast<float>(font_.measure(s));
+            r.draw_text(font_, px + (pw - tw) / 2, y, s, c);
+        };
+
+        centered("Mixed folders detected in archive.", py + 28, TEXT);
+        centered("Cannot mix nested folders with flat gallery structure.", py + 60, TEXT_DIM);
+        centered("[F] Flatten all files  |  [S] Skip those directories", py + ph - 50, TEXT_DIM);
+    }
 }
 
 void GalleryGrid::render_grid(gfx::Renderer& r, float W, float /*H*/)
