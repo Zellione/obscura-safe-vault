@@ -131,6 +131,58 @@ scripts/       setup.sh · build_codecs.sh · gen.sh · build.sh · test.sh
 
 ---
 
+## Advanced search
+
+The advanced-search screen (`Shift+/`) builds a structured tag query. A candidate
+(image or gallery) is matched against its **effective tags** — its own tags plus
+any inherited from parent galleries. Tag comparisons are **case-insensitive and
+exact**; the name query is a **case-insensitive substring**.
+
+A query has four independent clauses, and a candidate matches only if **all of
+them** pass (they are AND-ed together):
+
+| Clause | Role | Boolean shape |
+|---|---|---|
+| **Include** | positive filter **and** relevance ranking | flat **OR** of weighted tags |
+| **Exclude** | hard negative filter (veto) | flat **NOR** |
+| **Groups** | structured boolean expression | (AND/OR) of (AND/OR) |
+| **Name** | display-name substring | substring match |
+
+Formally, a candidate matches **iff**:
+
+```
+NOT(any Exclude tag present)                 ← any single match rejects outright
+AND (Include empty OR ≥1 Include tag present)
+AND (Name empty OR Name is a substring)
+AND (Groups empty OR the top-level group join holds)
+```
+
+- **Include** is a flat **OR-gate**: `Include: cyberpunk(1) jinx(2)` means "has
+  *cyberpunk* **or** *jinx*". It also drives **ranking** — each present include
+  tag adds its weight to the candidate's score, so heavier tags float their
+  matches to the top of the result list. An empty include list matches everything.
+- **Exclude** is a hard veto: `Exclude: spoilers nsfw` rejects any candidate
+  carrying *spoilers* **or** *nsfw*, regardless of the other clauses. It never
+  contributes to the score — it only removes.
+- **Groups** are where nested boolean logic lives. Each group combines its own
+  tags with its own combinator (**AND** or **OR**), and the groups combine with
+  each other via the top-level **Join groups** (**AND** or **OR**) — one level of
+  nesting. For example, `Join groups: AND` over `Group A (OR): cyberpunk jinx`
+  and `Group B (AND): fanart hires` evaluates as
+  `(cyberpunk OR jinx) AND (fanart AND hires)`.
+
+Include and Exclude are intentionally kept **outside** the groups as flat,
+single-purpose controls for the common case ("show anything tagged X, but never
+Y"), with Include additionally carrying the weights that rank results — something
+groups have no concept of. Reach for **Groups** only when you need genuinely
+structured logic like `(a OR b) AND (c OR d)`.
+
+An all-empty query matches every candidate (mirroring a blank search box).
+Queries can be persisted as **saved searches** (`Ctrl+S`); the scope toggle
+restricts results to images, galleries, or both.
+
+---
+
 ## Security model
 
 - **Cipher:** XChaCha20-Poly1305 — 192-bit random nonce per chunk, no counter state
