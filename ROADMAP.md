@@ -822,6 +822,129 @@ viewer, gallery results navigate. The Phase 12 `/` overlay is untouched.
 
 ---
 
+## Phase 19 — Gallery cover thumbnails ⬜
+
+**Goal:** Replace the generic folder icon on gallery tiles with a representative
+**cover** derived from the gallery's contents, so the grid is browsable at a
+glance.
+
+### Tasks
+- [ ] `src/ui/gallery_cover.{h,cpp}` — pure, SDL-free cover resolution:
+  - [ ] **Leaf gallery** → the **first image's** thumbnail span (a leaf video's poster span if the first child is a video).
+  - [ ] **Non-leaf gallery** → an ordered list of **up to 4 sub-gallery covers** (one per sub-gallery, in child order), each resolved **recursively** (a sub-gallery's single cover = its own first-image/poster, or its first sub-gallery's cover). Depth-bounded (reuse the index depth limit) and cycle-free.
+  - [ ] Returns thumb chunk spans only — selects nothing requiring a full decode; an empty subtree yields no covers (→ folder-icon fallback).
+- [ ] `src/ui/cover_layout.{h,cpp}` — pure montage geometry: given a tile rect and 1–4 covers, return the sub-rects (single fill for 1; 2×2 arrangement for 2/3/4, graceful for 1–3). Unit-tested.
+- [ ] **Grid rendering** — `GalleryGrid` draws a gallery tile as either a single cover (leaf) or the montage (non-leaf), falling back to the existing folder icon when no cover resolves. Reuse the existing thumbnail texture cache (keyed by thumb offset; decrypt → GPU upload → wipe — **no new disk path**). Keep `GalleryGrid` within the SonarCloud field/method budget (extract a helper if needed).
+- [ ] `tests/ui/` — cover selection/order/recursion/fallback (leaf, folder-of-folders, mixed depths, empty); montage geometry for 1/2/3/4 covers; cover resolution touches no decode and no disk.
+
+### Acceptance criterion
+A leaf gallery tile shows its first image (or first video's poster); a
+folder-of-folders tile shows a 2×2 montage of up to four sub-gallery covers; an
+empty gallery shows the folder icon. Browsing decrypts only the small thumbnail
+blobs (no full-image decode) and writes nothing to disk.
+
+---
+
+## Phase 20 — Advanced-search list/grid result views ⬜
+
+**Goal:** Let the Phase 18 advanced-search screen toggle its result panel between
+the existing **list view** and a **thumbnail grid view**.
+
+### Tasks
+- [ ] **Result view mode** — extend `AdvancedSearchScreen` with a session-scoped result-view state (`List` | `Grid`), defaulting to `List` (current behaviour). Toggle on a non-text key (`Ctrl+L`) so it never collides with typing into the query/group fields.
+- [ ] **Grid rendering** — render results as thumbnail tiles reusing the gallery grid's `draw_tile_thumb` (including the Phase 19 covers for gallery results and the video play-badge); the list view is unchanged. Result activation (Enter / click → collection-mode viewer for media, navigate for galleries) behaves identically in both modes.
+- [ ] **No vault/format change** — purely a presentation toggle over the existing `run_search` result set.
+- [ ] `tests/ui/` — view-mode toggle state machine (default, cycle, persistence within the screen's lifetime); activation maps to the correct hit in both list and grid modes.
+
+### Acceptance criterion
+On the advanced-search screen, `Ctrl+L` switches the live results between a list
+and a thumbnail grid; selecting a result opens/navigates the same target in both
+modes; the Phase 12 `/` overlay and the rest of Phase 18 are unchanged.
+
+---
+
+## Phase 21 — Import a tag list onto a gallery ⬜
+
+**Goal:** Bulk-add tags to a gallery from a plain-text file (one tag per line),
+so large tag sets don't have to be typed one at a time in the tag editor.
+
+### Tasks
+- [ ] `src/ui/tag_list_parse.{h,cpp}` — pure parser: raw file bytes → normalised tag list. Splits on LF/CRLF, trims surrounding whitespace, drops blank lines, de-duplicates **case-insensitively**, caps the count at `INDEX_MAX_TAGS` and each tag at the u16 length bound. Unit-tested.
+- [ ] **UI entry point** — `Shift+G` in the gallery grid (with a focused gallery tile) opens a `.txt` file dialog. Reuse the `platform::file_dialog` async pattern **with a `Purpose` tag** (Phase 17 fix) so its result can't be stolen by another in-flight dialog (e.g. image import / zip import).
+- [ ] **Apply** — read the file via `platform::read_file`, parse, then `Vault::add_tag` each tag onto the focused gallery node (merging with its existing tags), persisted via the crash-safe double-buffer index swap; refresh and show a post-import summary (added / skipped counts). The text file carries tag **metadata** (like filenames) — not key material and not decrypted vault content — so reading it is consistent with the security invariants.
+- [ ] `tests/` — parser edge cases (CRLF, blank lines, duplicates, surrounding whitespace, count/length bounds, non-UTF-8 bytes handled without crash); a fixture list applied to a gallery survives a lock/reopen and merges (not replaces) existing tags; the `file_dialog` `Purpose` isolation holds.
+
+### Acceptance criterion
+Selecting a gallery, choosing a `.txt` file of one-tag-per-line, imports the
+de-duplicated tags onto that gallery; they merge with any existing tags, survive
+a lock/reopen, and a summary reports the added/skipped counts.
+
+---
+
+## Phase 22 — Tag overview screen ⬜
+
+**Goal:** A dedicated screen showing every distinct tag in the vault with how
+many galleries and images carry it; activating a tag opens a galleries-only view
+of the galleries with that tag.
+
+### Tasks
+- [ ] `Vault::tag_overview()` — walk the decrypted in-memory tree and return, per distinct tag (deduplicated case-insensitively, reusing the `all_tags` vocabulary), a `{tag, gallery_count, image_count}` tally. Counts use **direct tags on each node** (a gallery or image is counted only if it *directly* carries the tag — not the Phase 12 read-time cascade, which would inflate every descendant). No disk access.
+- [ ] `src/ui/tag_overview_model.{h,cpp}` — pure sort/filter of the overview list (by name or by count; optional typed prefix filter). Unit-tested.
+- [ ] **UI** — a first-class `Screen` (`NavKind::ToTagOverview`, opened with `Shift+T` from the gallery grid): a scrollable list of `tag — N galleries, M images`, keyboard-navigable, with `Enter` opening a **galleries-only** view of the galleries directly carrying that tag. That view reuses the `favorites_galleries` pattern (a flat list/grid whose activation navigates to the chosen gallery in the normal grid); `Esc` returns to the overview, then to the grid.
+- [ ] Update `CLAUDE.md` (new ui module + `Vault::tag_overview`) + `mem:core`.
+- [ ] `tests/` — `tag_overview` direct-tag counts are correct across a nested tree (a gallery tag does **not** inflate descendant image counts); sort/filter ordering; `Enter` yields exactly the galleries directly carrying the tag; an empty/untagged vault produces an empty overview; counts are stable across a lock/reopen.
+
+### Acceptance criterion
+The tag overview lists every distinct tag with its direct gallery and image
+counts; selecting a tag opens a view of exactly the galleries carrying it, and
+activating one navigates to that gallery; the screen is stable across a
+lock/reopen.
+
+---
+
+## Phase 23 — UI colour schemes ⬜
+
+**Goal:** Offer several selectable UI colour themes, switchable at runtime and
+remembered across launches in global config (no secrets).
+
+### Tasks
+- [ ] **Runtime theme** — refactor `src/gfx/theme.h` from compile-time constants into a runtime `Theme` value (a struct of the existing colour tokens) plus a table of **built-in presets**: Refined Slate (current, default), a light theme, a high-contrast theme, and one more (e.g. sepia/midnight). A `gfx::active_theme()` accessor + `gfx::set_theme(id)` back the active selection; every `theme::…` call site reads the active theme (broad but mechanical — the token set is defined once and each preset fills it).
+- [ ] `src/platform/theme_pref.{h,cpp}` — persist the chosen theme id in the config dir (atomic write, **stores no secrets**, mirroring `vault_registry`); loaded at startup, saved on change; an unknown/absent id falls back to the default.
+- [ ] **UI** — a theme picker reachable from the **vault manager** (proposed key `C`) listing the presets with live apply-on-select; the choice persists immediately.
+- [ ] Update `CLAUDE.md` (runtime theme + `platform/theme_pref.*`) + `mem:core`.
+- [ ] `tests/` — every preset defines every colour token (no missing/zeroed tokens); `theme_pref` round-trip (save id → reload id; unknown id → default); a pure "next/select theme" helper if one is added. The broad refactor is additionally validated by the existing test suite staying green and the app building on all platforms.
+
+### Acceptance criterion
+The user can pick from several built-in colour themes; the choice applies
+immediately, persists across restarts via global config (no secrets stored), and
+all existing screens render correctly under every preset.
+
+---
+
+## Phase 24 — Import CBZ archives ⬜
+
+**Goal:** Import a `.cbz` comic archive as a single gallery of pages, reusing the
+Phase 17 miniz/ZIP pipeline — decompressing **into locked memory only**, never to
+a temp file (invariant #1 holds).
+
+### Tasks
+- [ ] **Natural-order sort** — a pure filename comparator (`src/ui/natural_sort.{h,cpp}` or folded into `zip_plan`) so pages order `1 < 2 < 10` rather than lexicographically. Unit-tested.
+- [ ] **CBZ plan** — a fixed plan distinct from the Phase 17 mirrored-tree plan: **one leaf gallery** named after the archive (sans `.cbz`), containing every supported **image** entry (videos/other formats skipped + counted), **flattening** any internal subfolders, ordered by the natural-order sort over the full entry path.
+- [ ] **Executor reuse** — reuse the Phase 17 miniz central-directory reader and the per-entry **decompress-one-at-a-time into mlock'd `SecureBytes` → `Vault::add_image` → wipe on scope exit** path. **No entry is ever extracted to disk.**
+- [ ] **UI** — extend the existing `Z` zip-import file dialog filter to also accept `.cbz`; a picked `.cbz` routes to the CBZ plan (the `.zip` path is unchanged), with the same post-import summary (imported / skipped counts).
+- [ ] Update `CLAUDE.md` (CBZ handled by the miniz/zip path; new natural-sort unit) + `mem:core`.
+- [ ] `tests/` — a fixture `.cbz` imports as one gallery named after the file with pages in natural order and matching per-page checksums; non-image entries are skipped + counted; internal subfolders are flattened; a malformed/truncated `.cbz` is rejected without crashing; a **no-fs-write assertion** proves nothing is extracted to disk during import.
+
+**Out of scope (YAGNI):** CBR/CB7/CBT (RAR/7z/tar variants), nested archives, per-page reordering UI.
+
+### Acceptance criterion
+Importing a fixture `.cbz` produces a single gallery named after the file whose
+pages are in natural reading order with checksums matching the originals;
+unsupported entries are skipped and reported; a test asserts **no decrypted or
+archive bytes are written to disk** during import.
+
+---
+
 ## Container format spec (reference)
 
 Reproduced from `CLAUDE.md` for quick access during vault implementation work.
