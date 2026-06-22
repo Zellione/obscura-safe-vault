@@ -138,6 +138,14 @@ src/
                                             list + poster), INDEX_VERSION=4 (v1–v3 read back-
                                             compat); Vault::add_video/read_video/open_video_source
                                             + read_thumbnail returns the poster (Phase 15).
+                                            index.h adds SavedSearch + a vault-global saved-
+                                            searches block, INDEX_VERSION=5 (v1–v4 read back-
+                                            compat → empty list) (Phase 18).
+             vault_search.*               ← VaultSearch: an advanced-search facade (friend) over
+                                            a Vault — all_tags + run_search(ui::AdvancedQuery) +
+                                            save_search/list_saved_searches/delete_saved_search.
+                                            Keeps these off Vault so it stays within its method
+                                            budget (cpp:S1448) (Phase 18).
              transfer.*                   ← transfer_image + image_target_galleries (PR2);
                                             transfer_gallery (recursive copy-then-delete) +
                                             gallery_target_parents (PR3); TransferMode
@@ -191,6 +199,15 @@ src/
              export.*,                    ← decrypt→write-verbatim→wipe (Phase 10)
              search_model.*,              ← pure query tokenise/match/rank (Phase 12)
              search_overlay.*,            ← `/` live-filtered search modal (Phase 12)
+             advanced_search_model.*,     ← pure, SDL/vault-free advanced query (Phase 18):
+                                            weighted include + exclude + AND/OR tag groups +
+                                            top-level join + name substring + scope;
+                                            evaluate()→{matched,score}; serialize/deserialize
+                                            query blob; tag_suggestions() autocomplete
+             advanced_search_screen.*,    ← `Shift+/` dedicated screen (Phase 18): keyboard
+                                            query builder + live result list + saved-searches
+                                            sidebar (Ctrl+S save / Enter load / Del delete);
+                                            coexists with the Phase 12 `/` overlay
              tag_editor.*,                ← `G` add/remove tags modal (Phase 12)
              favorites_images.*,          ← flat grid of favorited images (Phase 13)
              favorites_galleries.*,       ← flat grid of favorited galleries (Phase 13)
@@ -358,7 +375,7 @@ premake-core GitHub releases. It is **not** committed to the repo.
 | Topic | When | Notes |
 |---|---|---|
 | Video playback | ✅ Phase 15 (video frames + seek); audio + A/V sync Phase 16 | FFmpeg/libav decode-only; streams from encrypted chunks via a custom AVIO (no temp file). |
-| Tags / search | Phase 10+ | Metadata index alongside the gallery tree. |
+| Tags / search | ✅ Tags Phase 12; search `/` overlay Phase 12; advanced search Phase 18 | Per-node tags in the index; advanced search = weighted include/exclude + AND/OR groups + saved searches (index v5). |
 | Multiple vaults | Phase 10+ | Separate vault files, possibly with a "vault manager" screen. |
 | HEIC / AVIF | Phase 9 | libheif + libavif; heavy codec deps. |
 | WebP | Phase 9 | libwebp; moderate dep. |

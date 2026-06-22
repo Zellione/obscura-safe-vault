@@ -37,6 +37,7 @@ private:
     void to_favorite_images();
     void to_favorite_galleries();
     void to_favorite_viewer(int index);   // viewer over the whole favorites set
+    void to_advanced_search();            // Phase 18 advanced-search screen
     void promote_pending();               // unlock success: pending_ -> active_ (locks old)
 
     // run() helpers (kept small so the loop stays readable).

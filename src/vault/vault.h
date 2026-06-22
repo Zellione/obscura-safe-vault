@@ -186,6 +186,11 @@ public:
     // all in-scope nodes. Empty result if locked. Computes the cascade as it descends.
     [[nodiscard]] std::vector<SearchHit> search(std::string_view query, SearchScope scope) const;
 
+    // The advanced-search API (tag vocabulary, weighted/grouped run_search, and
+    // saved searches — Phase 18) lives on the VaultSearch facade to keep this
+    // class within its method budget; it reaches in here as a friend.
+    friend class VaultSearch;
+
     // Flip a node's favorite flag (gallery OR image). Persisted via the crash-safe
     // index swap. Locked if not unlocked; NotFound if node_path doesn't resolve.
     [[nodiscard]] VaultResult toggle_favorite(std::string_view node_path);
@@ -232,6 +237,7 @@ private:
     bool                                   unlocked_ = false;
     crypto::SecureBuffer<crypto::KEY_SIZE> master_key_;
     IndexNode                              root_ = IndexNode::gallery("");
+    std::vector<SavedSearch>               saved_searches_;  // vault-global (Phase 18)
 };
 
 } // namespace vault

@@ -8,6 +8,7 @@
 #include "gfx/renderer.h"
 #include "gfx/theme.h"
 #include "platform/paths.h"
+#include "ui/advanced_search_screen.h"
 #include "ui/favorites_galleries.h"
 #include "ui/favorites_images.h"
 #include "ui/gallery_grid.h"
@@ -140,6 +141,13 @@ void App::to_favorite_viewer(int index)
     screen_->on_enter();
 }
 
+void App::to_advanced_search()
+{
+    state_  = State::Browsing;
+    screen_ = std::make_unique<ui::AdvancedSearchScreen>(window_, font_, *active_);
+    screen_->on_enter();
+}
+
 namespace {
 // Manual frame-rate floor, used only when the renderer can't VSync (software /
 // headless backends); otherwise SDL_RenderPresent paces presentation.
@@ -207,6 +215,7 @@ bool App::apply_nav()
         case ToFavoriteImages:    screen_->on_exit(); to_favorite_images();            return true;
         case ToFavoriteGalleries: screen_->on_exit(); to_favorite_galleries();         return true;
         case ToFavoriteViewer:    screen_->on_exit(); to_favorite_viewer(nav.index);   return true;
+        case ToAdvancedSearch:    screen_->on_exit(); to_advanced_search();            return true;
         case ToUnlock:            screen_->on_exit(); to_unlock(nav.path);             return true;
         case ToVaultManager:      screen_->on_exit(); pending_.reset(); to_manager();  return true;
         case LockActive:

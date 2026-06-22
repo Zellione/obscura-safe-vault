@@ -56,11 +56,14 @@ src/
                                                — index.h: IndexNode carries
                                                  std::vector<std::string> tags +
                                                  bool favorite (gallery + image);
-                                                 INDEX_VERSION=4: Type::Video + VideoMeta
-                                                 (multi-chunk list + poster) + Vault::add_video/
-                                                 read_video/open_video_source (Phase 15);
-                                                 (v1–v3 read back-
-                                                 compat: empty tags, favorite=false);
+                                                 INDEX_VERSION=5: Type::Video + VideoMeta
+                                                 (multi-chunk list + poster) (Phase 15) +
+                                                 vault-global SavedSearch block after the root
+                                                 (name + opaque ui::AdvancedQuery blob, Phase 18,
+                                                 INDEX_MAX_SAVED_SEARCHES=4096);
+                                                 (v1–v4 read back-
+                                                 compat: empty tags, favorite=false, no saved
+                                                 searches);
                                                  INDEX_MAX_TAGS=4096. Favorites
                                                  (Phase 13): Vault::toggle_favorite
                                                  (node_path) + flat whole-tree
@@ -71,6 +74,14 @@ src/
                                                  set_tags/add_tag/remove_tag(node_path),
                                                  search(query, SearchScope{Images,
                                                  Galleries,Both})->vector<SearchHit>;
+                                                 Phase 18 advanced search lives on the
+                                                 vault_search.* VaultSearch facade (friend over a
+                                                 Vault&, keeps Vault under the cpp:S1448 method
+                                                 cap): all_tags() (distinct case-insensitive
+                                                 vocab), run_search(ui::AdvancedQuery)->vector
+                                                 <SearchHit> ranked by score then path,
+                                                 save_search/list_saved_searches/delete_saved_search
+                                                 (upsert by name, persisted via commit_index);
                                                  read-time cascade (effective tags =
                                                  own ∪ ancestor galleries; root tags
                                                  global); resolve_node resolves a path
@@ -183,6 +194,21 @@ src/
                                                  (Both/Images/Galleries) (Phase 12)
                tag_editor.*                    — `G` add/remove-tags modal in both
                                                  GalleryGrid + ImageViewer (Phase 12)
+               advanced_search_model.*         — pure, SDL/vault-free advanced query (Phase 18,
+                                                 unit-tested): AdvancedQuery{weighted include (OR
+                                                 gate + scorers), exclude (hard filter), AND/OR
+                                                 TagGroups + top-level join, name substring,
+                                                 SearchScope}; evaluate()->{matched,score};
+                                                 serialize_query/deserialize_query (opaque blob);
+                                                 tag_suggestions(prefix,vocab) ranked autocomplete.
+                                                 vault.cpp includes it (one-way dep) for run_search.
+               advanced_search_screen.*        — `Shift+/` (NavKind::ToAdvancedSearch) dedicated
+                                                 screen (Phase 18): keyboard query builder (Tab
+                                                 cycles fields, autocomplete dropdown) + live
+                                                 result list + saved-searches sidebar (Ctrl+S save,
+                                                 Enter load/open result, Del delete). Image result
+                                                 -> gallery viewer; gallery result -> ToGallery.
+                                                 Coexists with the Phase 12 `/` overlay.
                favorites_images.*              — flat grid of favorited images across
                                                  the vault; opens a favorites-scoped
                                                  viewer (ToFavoriteViewer: prev/next

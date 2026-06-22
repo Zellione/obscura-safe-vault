@@ -365,10 +365,12 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
     if (key.key == SDLK_SPACE) { toggle_or_open(); return; }
     // `/` is a shifted key on many non-US layouts, so the base keycode (key.key)
     // is the unmodified symbol (e.g. '7') and never equals SDLK_SLASH. Resolve the
-    // character the layout + held modifiers actually produce and match that.
-    if (SDL_GetKeyFromScancode(key.scancode, key.mod, false) == SDLK_SLASH) {
-        search_.open();  // search (/)
-        return;
+    // character the layout + held modifiers actually produce and match that: `/`
+    // opens the search overlay, Shift+/ ('?') the advanced-search screen (Phase 18).
+    switch (SDL_GetKeyFromScancode(key.scancode, key.mod, false)) {
+        case SDLK_SLASH:    search_.open();                     return;
+        case SDLK_QUESTION: request(NavKind::ToAdvancedSearch); return;
+        default: break;
     }
     if (key.key == SDLK_G) { start_tag_editor(); return; }  // tag editor (G)
     if (key.key == SDLK_B) { toggle_favorite_current(); return; }  // favorite (B)
@@ -619,9 +621,9 @@ void GalleryGrid::render(gfx::Renderer& r)
     for (const auto& s : nav_.segments()) { crumb += s; crumb += '/'; }
     r.draw_text(font_, OX, 40, crumb, TEXT_DIM);
     r.draw_text(font_, OX, 90,
-                "[I] Import  [Z] ZIP  [N] New  [Del] Delete  [/] Search  [G] Tags  [B] Fav  "
-                "[F] Fav Images  [Shift+F] Fav Galleries  [Enter] Open  [Space] Select  "
-                "[X] Export  [M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid",
+                "[I] Import  [Z] ZIP  [N] New  [Del] Delete  [/] Search  [?] Advanced  "
+                "[G] Tags  [B] Fav  [F] Fav Images  [Shift+F] Fav Galleries  [Enter] Open  "
+                "[Space] Select  [X] Export  [M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid",
                 TEXT_FAINT);
 
     if (!sel_.empty())

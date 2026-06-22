@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cstring>
 #include <utility>
@@ -17,7 +18,9 @@
 #include "image/thumbnail.h"
 
 #include "vault/video_format.h"
+#include "vault/vault_search.h"
 #include "media/video_probe.h"
+#include "ui/advanced_search_model.h"  // AdvancedQuery + evaluate (pure, SDL/vault-free)
 
 namespace vault {
 
@@ -276,6 +279,48 @@ void collect_favorites(const IndexNode& node, std::string_view prefix,
     }
 }
 
+// Walk the whole tree, accumulating distinct tags (case-insensitive, first-seen
+// casing kept) into `out` (Phase 18 — feeds tag autocomplete).
+void collect_tags(const IndexNode& node, std::vector<std::string>& out)
+{
+    for (const auto& t : node.tags) {
+        if (!std::ranges::any_of(out, [&](const auto& x) { return ci_equal(x, t); }))
+            out.push_back(t);
+    }
+    for (const auto& c : node.children) collect_tags(c, out);
+}
+
+// Advanced-search DFS (Phase 18): evaluate `query` against every in-scope node,
+// cascading gallery tags, collecting each match with its relevance score.
+void adv_search_dfs(const IndexNode& node, std::string_view prefix,
+                    const std::vector<std::string>& inherited,
+                    const ui::AdvancedQuery& query, ui::SearchScope scope,
+                    std::vector<std::pair<int, SearchHit>>& out)
+{
+    using enum ui::SearchScope;
+    for (const auto& child : node.children) {
+        auto              effective = compute_effective_tags(child.tags, inherited);
+        const std::string full_path = join_child_path(prefix, child.name);
+
+        if (const bool in_scope = child.is_gallery() ? (scope == Galleries || scope == Both)
+                                                     : (scope == Images || scope == Both);
+            in_scope) {
+            if (const ui::EvalResult r = ui::evaluate(query, child.name, effective); r.matched) {
+                out.emplace_back(r.score, SearchHit{
+                    .path           = full_path,
+                    .is_gallery     = child.is_gallery(),
+                    .name           = child.name,
+                    .effective_tags = effective,
+                    .node           = &child,
+                });
+            }
+        }
+
+        if (child.is_gallery())
+            adv_search_dfs(child, full_path, effective, query, scope, out);
+    }
+}
+
 } // namespace
 
 // --- lifecycle ------------------------------------------------------------
@@ -288,7 +333,8 @@ Vault::Vault(Vault&& o) noexcept
       header_(o.header_),
       unlocked_(o.unlocked_),
       master_key_(std::move(o.master_key_)),
-      root_(std::move(o.root_))
+      root_(std::move(o.root_)),
+      saved_searches_(std::move(o.saved_searches_))
 {
     o.fp_       = nullptr;
     o.unlocked_ = false;
@@ -304,6 +350,7 @@ Vault& Vault::operator=(Vault&& o) noexcept
         unlocked_   = o.unlocked_;
         master_key_ = std::move(o.master_key_);
         root_       = std::move(o.root_);
+        saved_searches_ = std::move(o.saved_searches_);
         o.fp_       = nullptr;
         o.unlocked_ = false;
     }
@@ -315,6 +362,7 @@ void Vault::lock() noexcept
     master_key_.wipe();
     unlocked_ = false;
     root_     = IndexNode::gallery("");
+    saved_searches_.clear();
 }
 
 void Vault::reset() noexcept
@@ -436,8 +484,10 @@ VaultResult Vault::unlock(std::span<const uint8_t> password,
         std::vector<uint8_t> blob;
         if (!crypto::open(master_key_.as_span(), s.nonce, on_disk, blob)) return false;
         IndexNode tmp;
-        if (!deserialize_index(blob, tmp)) return false;
-        root_ = std::move(tmp);
+        std::vector<SavedSearch> tmp_searches;
+        if (!deserialize_index(blob, tmp, tmp_searches)) return false;
+        root_           = std::move(tmp);
+        saved_searches_ = std::move(tmp_searches);
         return true;
     };
 
@@ -868,6 +918,79 @@ std::vector<SearchHit> Vault::search(std::string_view query, SearchScope scope) 
     return out;
 }
 
+// --- VaultSearch facade (Phase 18) -----------------------------------------
+// Defined here (rather than a separate TU) so it can reuse the file-local DFS /
+// tag-collection helpers; it reaches into the borrowed Vault as a friend.
+
+std::vector<std::string> VaultSearch::all_tags() const
+{
+    std::vector<std::string> out;
+    if (!v_.unlocked_) return out;
+    collect_tags(v_.root_, out);
+    // Sort case-insensitively for a stable autocomplete vocabulary.
+    std::ranges::sort(out, [](std::string_view a, std::string_view b) {
+        return std::ranges::lexicographical_compare(a, b, [](char x, char y) {
+            return std::tolower(static_cast<unsigned char>(x)) <
+                   std::tolower(static_cast<unsigned char>(y));
+        });
+    });
+    return out;
+}
+
+std::vector<SearchHit> VaultSearch::run_search(const ui::AdvancedQuery& query) const
+{
+    std::vector<SearchHit> out;
+    if (!v_.unlocked_) return out;
+
+    std::vector<std::pair<int, SearchHit>> scored;
+    adv_search_dfs(v_.root_, "", v_.root_.tags, query, query.scope, scored);
+
+    // Rank by descending score, breaking ties by ascending path for stability.
+    std::ranges::sort(scored, [](const auto& a, const auto& b) {
+        if (a.first != b.first) return a.first > b.first;
+        return a.second.path < b.second.path;
+    });
+
+    out.reserve(scored.size());
+    for (auto& [score, hit] : scored) out.push_back(std::move(hit));
+    return out;
+}
+
+std::vector<SavedSearch> VaultSearch::list_saved_searches() const
+{
+    if (!v_.unlocked_) return {};
+    return v_.saved_searches_;
+}
+
+VaultResult VaultSearch::save_search(std::string_view name, const ui::AdvancedQuery& query)
+{
+    using enum VaultResult;
+    if (!v_.unlocked_)  return Locked;
+    if (name.empty())   return InvalidArg;
+
+    std::vector<uint8_t> blob = ui::serialize_query(query);
+
+    // Upsert: replace an existing same-name entry, else append (bounded).
+    for (auto& s : v_.saved_searches_) {
+        if (s.name == name) { s.query = std::move(blob); return v_.commit_index(); }
+    }
+    if (v_.saved_searches_.size() >= INDEX_MAX_SAVED_SEARCHES) return InvalidArg;
+    v_.saved_searches_.emplace_back(std::string(name), std::move(blob));
+    return v_.commit_index();
+}
+
+VaultResult VaultSearch::delete_saved_search(std::string_view name)
+{
+    using enum VaultResult;
+    if (!v_.unlocked_) return Locked;
+
+    const auto it = std::ranges::find_if(v_.saved_searches_,
+                                         [&](const SavedSearch& s) { return s.name == name; });
+    if (it == v_.saved_searches_.end()) return NotFound;
+    v_.saved_searches_.erase(it);
+    return v_.commit_index();
+}
+
 VaultResult Vault::toggle_favorite(std::string_view node_path)
 {
     using enum VaultResult;
@@ -954,8 +1077,9 @@ VaultResult Vault::compact()
     if (copy_err != Ok) return fail(copy_err);
 
     // Fresh sealed index into slot A; slot B starts empty in the new file.
+    // Saved searches carry over unchanged (vault-global metadata).
     std::vector<uint8_t> blob;
-    serialize_index(new_root, blob);
+    serialize_index(new_root, saved_searches_, blob);
     std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
     if (!crypto::fill_random(nonce)) return fail(CryptoError);
     std::vector<uint8_t> sealed;
@@ -1016,9 +1140,9 @@ bool Vault::write_header()
 VaultResult Vault::commit_index()
 {
     using enum VaultResult;
-    // Serialise + seal the index with a fresh random nonce.
+    // Serialise + seal the index (tree + saved searches) with a fresh random nonce.
     std::vector<uint8_t> blob;
-    serialize_index(root_, blob);
+    serialize_index(root_, saved_searches_, blob);
 
     std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
     if (!crypto::fill_random(nonce)) return CryptoError;
