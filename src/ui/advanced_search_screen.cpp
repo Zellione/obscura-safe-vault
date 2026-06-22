@@ -78,8 +78,11 @@ void draw_dropdown(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<std
     using namespace gfx::theme;
     const int n = std::min(static_cast<int>(sugg.size()), 6);
     if (n == 0) return;
-    r.draw_round_rect({x + 8, y - 6, colw, n * ROW + 10}, RADIUS_SMALL, SURFACE);
-    r.draw_round_rect({x + 8, y - 6, colw, n * ROW + 10}, RADIUS_SMALL, ACCENT, /*filled*/ false);
+    // Geometry mirrors the tag-row highlight bars (x-6, y-4, height n*ROW) so the
+    // rows sit with the same padding and the panel covers the labels beneath it.
+    const SDL_FRect panel{x - 6, y - 4, colw + 12, n * ROW};
+    r.draw_round_rect(panel, RADIUS_SMALL, SURFACE);
+    r.draw_round_rect(panel, RADIUS_SMALL, ACCENT, /*filled*/ false);
     for (int i = 0; i < n; ++i) {
         const bool s = (i == sel);
         r.draw_text(font, x + 16, y, std::format("{} {}", s ? ">" : " ", sugg[i]), s ? ACCENT : TEXT_FAINT);
