@@ -138,8 +138,9 @@ src/
                                             list + poster), INDEX_VERSION=4 (v1–v3 read back-
                                             compat); Vault::add_video/read_video/open_video_source
                                             + read_thumbnail returns the poster (Phase 15).
-                                            Vault::read_thumb_span reads a thumb/poster chunk by
-                                            raw (offset,length) for gallery cover montages (Phase 19).
+                                            vault::read_thumb_span (free friend, not a member, to
+                                            stay under the cpp:S1448 method cap) reads a thumb/poster
+                                            chunk by raw (offset,length) for gallery cover montages (Phase 19).
                                             index.h adds SavedSearch + a vault-global saved-
                                             searches block, INDEX_VERSION=5 (v1–v4 read back-
                                             compat → empty list) (Phase 18).
@@ -246,7 +247,7 @@ src/
              cover_layout.*,              ← pure montage geometry (Phase 19): tile rect + 1–4
                                             covers → sub-rects (single fill for 1; 2×2 grid for
                                             2–4). GalleryGrid draws the montage via a free
-                                            cover_tex() helper + Vault::read_thumb_span, reusing
+                                            cover_tex() helper + vault::read_thumb_span, reusing
                                             the thumbnail texture cache (folder-icon fallback).
              widgets.*
   platform/  paths.{h,cpp},              ← config dir + file dialogs (Phase 5)

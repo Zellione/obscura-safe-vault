@@ -32,10 +32,11 @@ src/
                secure_mem.h, crypto.h
   vault/       vault.*, header.*, index.*,     — .osv container format
                chunk_store.*, byte_io.h, file_util.h
-                                               — Vault::read_thumb_span(offset,length,out): decrypt a
-                                                 thumb/poster chunk by raw span (gallery cover
-                                                 montages, Phase 19); InvalidArg if len 0, Locked,
-                                                 AuthFailed on tamper.
+                                               — vault::read_thumb_span(v,offset,length,out): FREE
+                                                 friend (not a member, keeps Vault under the
+                                                 cpp:S1448 35-method cap) — decrypt a thumb/poster
+                                                 chunk by raw span (gallery cover montages, Phase 19);
+                                                 InvalidArg if len 0, Locked, AuthFailed on tamper.
                transfer.*                      — transfer_image(src,src_gallery,file,dst,
                                                  dst_gallery,mode): read→add_image→(Move?
                                                  remove_image) (dst commits before src; crash
@@ -293,7 +294,7 @@ src/
                                                  (tile rect + 1–4 covers -> sub-rects; single fill
                                                  for 1, row-major 2×2 grid for 2–4). GalleryGrid's
                                                  draw_tile_thumb draws a gallery as its cover montage
-                                                 via a free cover_tex() helper + Vault::read_thumb_span
+                                                 via a free cover_tex() helper + vault::read_thumb_span
                                                  (offset,length), reusing the thumbnail texture cache /
                                                  DecodeWorker; folder icon when no cover resolves.
                input.*, nav_model.*, viewer_model.h

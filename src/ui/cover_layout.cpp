@@ -1,6 +1,7 @@
 #include "ui/cover_layout.h"
 
 #include <algorithm>
+#include <array>
 
 namespace ui {
 
@@ -15,12 +16,12 @@ std::vector<SDL_FRect> cover_montage_rects(const SDL_FRect& box, int count,
     const float ch = (box.h - gap) * 0.5f;
 
     // Row-major 2×2 grid cells: TL, TR, BL, BR — take the first `count`.
-    const SDL_FRect cells[4] = {
+    const std::array<SDL_FRect, 4> cells{{
         {box.x,            box.y,            cw, ch},
         {box.x + cw + gap, box.y,            cw, ch},
         {box.x,            box.y + ch + gap, cw, ch},
         {box.x + cw + gap, box.y + ch + gap, cw, ch},
-    };
+    }};
 
     std::vector<SDL_FRect> out;
     out.reserve(static_cast<size_t>(count));

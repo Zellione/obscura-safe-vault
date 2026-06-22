@@ -55,15 +55,15 @@ vault::VaultResult delete_focused_node(vault::Vault& v, const std::string& base,
 // free so the grid keeps its method budget (cpp:S1448). Decrypt -> off-thread
 // decode -> GPU upload via the shared cache; no new disk path. Returns nullptr
 // while a decode is pending/failed; pump_thumbs() uploads it once ready.
-SDL_Texture* cover_tex(vault::Vault& vault, gfx::TextureCache& cache,
+SDL_Texture* cover_tex(const vault::Vault& v, gfx::TextureCache& cache,
                        image::DecodeWorker& worker,
-                       std::unordered_set<uint64_t>& failed, const CoverSpan& span)
+                       const std::unordered_set<uint64_t>& failed, const CoverSpan& span)
 {
     const uint64_t key = span.offset;
     if (SDL_Texture* t = cache.get(key)) return t;
     if (failed.contains(key) || worker.pending(key)) return nullptr;
     crypto::SecureBytes sb;
-    if (vault.read_thumb_span(span.offset, span.length, sb) != vault::VaultResult::Ok)
+    if (vault::read_thumb_span(v, span.offset, span.length, sb) != vault::VaultResult::Ok)
         return nullptr;
     worker.submit(key, std::move(sb));
     return nullptr;
