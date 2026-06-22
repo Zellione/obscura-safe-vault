@@ -52,6 +52,7 @@ private:
         int saved  = 0;
         int sugg   = -1;   // highlighted suggestion (-1 = none)
         int group  = 0;    // current group for the Group field
+        int tag    = -1;   // selected committed tag in the focused field (-1 = none/editing)
     };
 
     // --- data flow ---
@@ -70,6 +71,12 @@ private:
     void handle_weight_key(const SDL_KeyboardEvent& key);
     void handle_results_key(const SDL_KeyboardEvent& key);
     void handle_saved_key(const SDL_KeyboardEvent& key);
+
+    // Committed-tag selection within the focused tag field (Include/Exclude/Group).
+    void               select_tag(int dir);        // move cur_.tag (buffer-empty mode)
+    void               remove_selected_tag();      // erase the selected tag, rerun
+    void               edit_selected_tag();        // pull selected tag into the buffer
+    [[nodiscard]] int  current_tag_count() const;  // # committed tags in the focused field
 
     void cycle_focus(int dir);
     void cycle_scope(int dir);

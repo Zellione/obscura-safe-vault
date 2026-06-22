@@ -149,6 +149,7 @@ void AdvancedSearchScreen::handle_event(const SDL_Event& e)
 void AdvancedSearchScreen::handle_text(const char* text)
 {
     if (std::string* buf = active_buffer()) {
+        cur_.tag = -1;
         *buf += text;
         if (!saving_ && focus_ == Focus::Name) { query_.name_query = edit_.name; rerun(); }
         refresh_suggestions();
@@ -207,13 +208,38 @@ void AdvancedSearchScreen::handle_axis_key(const SDL_KeyboardEvent& key)
 
 void AdvancedSearchScreen::handle_tag_field_key(const SDL_KeyboardEvent& key)
 {
+    const std::string* buf = active_buffer();
+    const bool editing = buf && !buf->empty();
+
+    // While typing: Up/Down drive the suggestion dropdown; Enter commits.
+    if (editing) {
+        switch (key.key) {
+            case SDLK_DOWN:     move_suggestion(1);  break;
+            case SDLK_UP:       move_suggestion(-1); break;
+            case SDLK_RETURN:
+            case SDLK_KP_ENTER: commit_text();       break;
+            default:
+                if (focus_ == Focus::Include) handle_weight_key(key);
+                break;
+        }
+        return;
+    }
+
+    // Empty buffer: Up/Down select a committed tag; Enter/Del act on it.
     switch (key.key) {
-        case SDLK_DOWN:     move_suggestion(1);  break;
-        case SDLK_UP:       move_suggestion(-1); break;
+        case SDLK_DOWN: select_tag(1);  break;
+        case SDLK_UP:   select_tag(-1); break;
         case SDLK_RETURN:
-        case SDLK_KP_ENTER: commit_text();       break;
+        case SDLK_KP_ENTER:
+            if (cur_.tag >= 0) edit_selected_tag();
+            else               commit_text();   // empty Enter (Group: new group)
+            break;
+        case SDLK_DELETE:
+            if (cur_.tag >= 0)               remove_selected_tag();
+            else if (focus_ == Focus::Group) handle_group_nav_key(key);  // toggle AND/OR
+            break;
         default:
-            if (focus_ == Focus::Group)        handle_group_nav_key(key);
+            if (focus_ == Focus::Group)        handle_group_nav_key(key);  // Left/Right switch group
             else if (focus_ == Focus::Include) handle_weight_key(key);
             break;
     }
@@ -226,8 +252,8 @@ void AdvancedSearchScreen::handle_group_nav_key(const SDL_KeyboardEvent& key)
     const auto n = static_cast<int>(query_.groups.size());
     cur_.group = std::clamp(cur_.group, 0, n - 1);
     switch (key.key) {
-        case SDLK_LEFT:  cur_.group = (cur_.group - 1 + n) % n; break;
-        case SDLK_RIGHT: cur_.group = (cur_.group + 1) % n;     break;
+        case SDLK_LEFT:  cur_.group = (cur_.group - 1 + n) % n; cur_.tag = -1; break;
+        case SDLK_RIGHT: cur_.group = (cur_.group + 1) % n;     cur_.tag = -1; break;
         case SDLK_DELETE: {
             TagGroup& g  = query_.groups[cur_.group];
             g.combinator = g.combinator == And ? Or : And;
@@ -266,6 +292,7 @@ void AdvancedSearchScreen::cycle_focus(int dir)
     constexpr int N = 8;
     const int idx = (static_cast<int>(std::to_underlying(focus_)) + dir % N + N) % N;
     focus_ = static_cast<Focus>(idx);
+    cur_.tag = -1;
     refresh_suggestions();
 }
 
@@ -281,6 +308,73 @@ void AdvancedSearchScreen::move_suggestion(int dir)
     if (suggestions_.empty()) return;
     const auto n = static_cast<int>(suggestions_.size());
     cur_.sugg    = (cur_.sugg + dir + n) % n;
+}
+
+int AdvancedSearchScreen::current_tag_count() const
+{
+    using enum Focus;
+    switch (focus_) {
+        case Include: return static_cast<int>(query_.include.size());
+        case Exclude: return static_cast<int>(query_.exclude.size());
+        case Group:
+            if (query_.groups.empty()) return 0;
+            return static_cast<int>(
+                query_.groups[std::clamp(cur_.group, 0,
+                              static_cast<int>(query_.groups.size()) - 1)].tags.size());
+        default: return 0;
+    }
+}
+
+void AdvancedSearchScreen::select_tag(int dir)
+{
+    cur_.tag = move_tag_cursor(cur_.tag, dir, current_tag_count());
+}
+
+void AdvancedSearchScreen::remove_selected_tag()
+{
+    using enum Focus;
+    if (cur_.tag < 0 || cur_.tag >= current_tag_count()) return;
+    switch (focus_) {
+        case Include: query_.include.erase(query_.include.begin() + cur_.tag); break;
+        case Exclude: query_.exclude.erase(query_.exclude.begin() + cur_.tag); break;
+        case Group: {
+            auto& t = query_.groups[cur_.group].tags;
+            t.erase(t.begin() + cur_.tag);
+            break;
+        }
+        default: return;
+    }
+    cur_.tag = std::min(cur_.tag, current_tag_count() - 1);   // -1 if the list is now empty
+    rerun();
+}
+
+void AdvancedSearchScreen::edit_selected_tag()
+{
+    using enum Focus;
+    if (cur_.tag < 0 || cur_.tag >= current_tag_count()) return;
+    switch (focus_) {
+        case Include: {
+            const WeightedTag& wt = query_.include[cur_.tag];
+            edit_.include = wt.tag;
+            edit_.weight  = wt.weight;
+            query_.include.erase(query_.include.begin() + cur_.tag);
+            break;
+        }
+        case Exclude:
+            edit_.exclude = query_.exclude[cur_.tag];
+            query_.exclude.erase(query_.exclude.begin() + cur_.tag);
+            break;
+        case Group: {
+            auto& t = query_.groups[cur_.group].tags;
+            edit_.group = t[cur_.tag];
+            t.erase(t.begin() + cur_.tag);
+            break;
+        }
+        default: return;
+    }
+    cur_.tag = -1;
+    refresh_suggestions();
+    rerun();
 }
 
 void AdvancedSearchScreen::commit_text()
@@ -334,6 +428,12 @@ void AdvancedSearchScreen::backspace()
         return;
     }
     if (saving_) return;
+
+    // Empty buffer with a tag selected: remove exactly that tag.
+    if ((focus_ == Include || focus_ == Exclude || focus_ == Group) && cur_.tag >= 0) {
+        remove_selected_tag();
+        return;
+    }
 
     // Empty buffer: a Backspace removes the last committed chip of the field.
     switch (focus_) {
@@ -492,13 +592,15 @@ void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
 {
     using namespace gfx::theme;
     const bool hot = (focus_ == Focus::Results && !saving_);
-    if (hot) r.draw_text(font_, x - 16, 74, ">", ACCENT);
-    r.draw_text(font_, x, 74, std::format("Results ({})", results_.size()), TEXT_DIM);
+    // Column header sits on the content-area top row (aligned with the builder's
+    // first field), clear of the full-width legend at y=74 above it.
+    if (hot) r.draw_text(font_, x - 16, TOP, ">", ACCENT);
+    r.draw_text(font_, x, TOP, std::format("Results ({})", results_.size()), TEXT_DIM);
 
     const auto  H        = static_cast<float>(win_.height());
-    const auto  max_rows = static_cast<int>((H - TOP - 40) / (LINE * 0.9f));
+    float       y        = TOP + LINE;
+    const auto  max_rows = static_cast<int>((H - y - 40) / (LINE * 0.9f));
     const int   first    = std::max(0, cur_.result - max_rows / 2);
-    float       y        = TOP;
     for (int i = first; i < static_cast<int>(results_.size()) && i < first + max_rows; ++i) {
         const bool              sel = (i == cur_.result && hot);
         const vault::SearchHit& hit = results_[i];
@@ -514,10 +616,10 @@ void AdvancedSearchScreen::render_saved(gfx::Renderer& r, float x)
 {
     using namespace gfx::theme;
     const bool hot = (focus_ == Focus::Saved && !saving_);
-    if (hot) r.draw_text(font_, x - 16, 74, ">", ACCENT);
-    r.draw_text(font_, x, 74, "Saved searches", TEXT_DIM);
+    if (hot) r.draw_text(font_, x - 16, TOP, ">", ACCENT);
+    r.draw_text(font_, x, TOP, "Saved searches", TEXT_DIM);
 
-    float y = TOP;
+    float y = TOP + LINE;
     for (int i = 0; i < static_cast<int>(saved_.size()); ++i) {
         const bool sel = (i == cur_.saved && hot);
         r.draw_text(font_, x, y, std::format("{} {}", sel ? ">" : " ", saved_[i].name),
