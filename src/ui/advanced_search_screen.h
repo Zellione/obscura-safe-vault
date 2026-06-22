@@ -94,7 +94,7 @@ private:
     [[nodiscard]] std::string accepted(const std::string& buf) const;  // suggestion-or-typed
 
     // --- rendering (split per column) ---
-    void render_builder(gfx::Renderer& r, float x, float top);
+    void render_builder(gfx::Renderer& r, float x, float top, float colw);
     void render_results(gfx::Renderer& r, float x, float colw);
     void render_saved(gfx::Renderer& r, float x);
 

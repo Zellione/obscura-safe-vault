@@ -21,6 +21,7 @@ namespace {
 constexpr float PAD  = 32.0f;
 constexpr float TOP  = 110.0f;
 constexpr float LINE = 30.0f;
+constexpr float ROW  = LINE * 0.85f;   // compact row height for per-tag lists
 
 std::string trim(std::string_view s)
 {
@@ -41,18 +42,29 @@ const char* scope_label(SearchScope s)
 
 const char* join_label(Combinator c) { return c == Combinator::And ? "AND" : "OR"; }
 
-// Draw the group rows; returns the new baseline y. Free function so it stays out
-// of the screen's method count.
+// Draw the groups as a vertical list: each group a header row ("* AND name:" when
+// current, "- OR name:" otherwise) followed by its tags one per indented row. The
+// tag at `sel_tag` in the current group is highlighted. `colw` sizes the highlight
+// bar. Returns the new baseline y. Free function so it stays out of the method count.
 float draw_groups(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<TagGroup>& groups,
-                  int cur_group, bool focused, float x, float y)
+                  int cur_group, int sel_tag, bool focused, float x, float colw, float y)
 {
     using namespace gfx::theme;
     for (int i = 0; i < static_cast<int>(groups.size()); ++i) {
-        const bool  hot = (i == cur_group && focused);
-        std::string s   = std::format("  {} {}: ", hot ? "*" : "-", join_label(groups[i].combinator));
-        for (const auto& t : groups[i].tags) s += t + " ";
-        r.draw_text(font, x + 8, y, s, hot ? TEXT : TEXT_FAINT);
-        y += LINE * 0.9f;
+        const bool  hot  = (i == cur_group && focused);
+        std::string head = std::format("  {} {} {}:", hot ? "*" : "-",
+                                       join_label(groups[i].combinator), groups[i].name);
+        r.draw_text(font, x + 8, y, head, hot ? TEXT : TEXT_FAINT);
+        y += ROW;
+        for (int t = 0; t < static_cast<int>(groups[i].tags.size()); ++t) {
+            const bool sel = hot && sel_tag == t;
+            if (sel) {
+                r.draw_round_rect({x + 18, y - 4, colw - 12, ROW}, RADIUS_SMALL, SURFACE_HI);
+                r.draw_text(font, x + 28, y, ">", ACCENT);
+            }
+            r.draw_text(font, x + 48, y, groups[i].tags[t], sel ? TEXT : TEXT_DIM);
+            y += ROW;
+        }
     }
     return y;
 }
@@ -535,7 +547,7 @@ void AdvancedSearchScreen::render(gfx::Renderer& r)
                 TEXT_FAINT);
 
     const float colW = (W - 2 * PAD) / 3.0f - 16;
-    render_builder(r, PAD, TOP);
+    render_builder(r, PAD, TOP, colW);
     const float mx = PAD + colW + 24;
     render_results(r, mx, colW);
     render_saved(r, mx + colW + 24);
@@ -551,7 +563,7 @@ void AdvancedSearchScreen::render(gfx::Renderer& r)
     if (!status_.empty()) r.draw_text(font_, PAD, H - 24, status_, TEXT_FAINT);
 }
 
-void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top)
+void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, float colw)
 {
     using namespace gfx::theme;
     auto focused = [&](Focus f) { return focus_ == f && !saving_; };
@@ -559,33 +571,51 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top)
         if (focused(f)) r.draw_text(font_, x - 16, ly, ">", ACCENT);
         r.draw_text(font_, x, ly, s, focused(f) ? TEXT : TEXT_DIM);
     };
+    // One committed-tag row; highlighted when `sel`. Advances `ly` by ROW.
+    auto tag_row = [&](float& ly, bool sel, std::string_view s) {
+        if (sel) {
+            r.draw_round_rect({x - 6, ly - 4, colw + 12, ROW}, RADIUS_SMALL, SURFACE_HI);
+            r.draw_text(font_, x + 4, ly, ">", ACCENT);
+        }
+        r.draw_text(font_, x + 24, ly, s, sel ? TEXT : TEXT_DIM);
+        ly += ROW;
+    };
+    // The focused field's edit row + (optionally) the autocomplete dropdown below it.
+    auto edit_row = [&](float& ly, std::string text) {
+        r.draw_text(font_, x + 24, ly, text, TEXT_FAINT);
+        ly += ROW;
+        if (!suggestions_.empty()) draw_dropdown(r, font_, suggestions_, cur_.sugg, x, ly);
+    };
 
     float y = top;
-    label(y, Focus::Name, std::format("Name: {}", edit_.name.empty() ? "(any)" : edit_.name)); y += LINE;
-    label(y, Focus::Scope, std::format("Scope: {}", scope_label(query_.scope))); y += LINE;
+    label(y, Focus::Name,  std::format("Name: {}",  edit_.name.empty() ? "(any)" : edit_.name)); y += LINE;
+    label(y, Focus::Scope, std::format("Scope: {}", scope_label(query_.scope)));                 y += LINE;
 
-    std::string inc = "Include: ";
-    for (const auto& wt : query_.include) inc += std::format("{}({}) ", wt.tag, wt.weight);
-    if (focused(Focus::Include)) inc += std::format("[{}_ w{}]", edit_.include, edit_.weight);
-    label(y, Focus::Include, inc); y += LINE;
+    // --- Include (weighted) ---
+    label(y, Focus::Include, "Include:"); y += ROW;
+    for (int i = 0; i < static_cast<int>(query_.include.size()); ++i)
+        tag_row(y, focused(Focus::Include) && cur_.tag == i,
+                std::format("{} (w{})", query_.include[i].tag, query_.include[i].weight));
+    if (focused(Focus::Include)) edit_row(y, std::format("{}_  w{}", edit_.include, edit_.weight));
 
-    std::string exc = "Exclude: ";
-    for (const auto& t : query_.exclude) exc += t + " ";
-    if (focused(Focus::Exclude)) exc += std::format("[{}_]", edit_.exclude);
-    label(y, Focus::Exclude, exc); y += LINE;
+    // --- Exclude ---
+    label(y, Focus::Exclude, "Exclude:"); y += ROW;
+    for (int i = 0; i < static_cast<int>(query_.exclude.size()); ++i)
+        tag_row(y, focused(Focus::Exclude) && cur_.tag == i, query_.exclude[i]);
+    if (focused(Focus::Exclude)) edit_row(y, std::format("{}_", edit_.exclude));
 
-    label(y, Focus::Group, "Groups:"); y += LINE;
-    y = draw_groups(r, font_, query_.groups, cur_.group, focused(Focus::Group), x, y);
+    // --- Groups ---
+    label(y, Focus::Group, "Groups:"); y += ROW;
+    y = draw_groups(r, font_, query_.groups, cur_.group,
+                    focused(Focus::Group) ? cur_.tag : -1, focused(Focus::Group), x, colw, y);
     if (focused(Focus::Group)) {
-        r.draw_text(font_, x + 8, y,
-                    std::format("  [{}_]  Enter=add, empty Enter=new group, Del=AND/OR", edit_.group),
-                    TEXT_FAINT);
-        y += LINE;
+        edit_row(y, std::format("{}_", edit_.group));
+        r.draw_text(font_, x + 8, y, "Enter=add  empty Enter=new group  Del=AND/OR", TEXT_FAINT);
+        y += ROW;
     }
+
     label(y, Focus::GroupJoin, std::format("Join groups: {}", join_label(query_.group_join)));
     y += LINE;
-
-    if (!suggestions_.empty()) draw_dropdown(r, font_, suggestions_, cur_.sugg, x, y);
 }
 
 void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
