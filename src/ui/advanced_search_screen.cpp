@@ -50,6 +50,9 @@ float draw_groups(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<TagG
                   int cur_group, int sel_tag, bool focused, float x, float colw, float y)
 {
     using namespace gfx::theme;
+    // Offset from a draw-y to the text's ink centre (see render_builder), so the
+    // selected-tag highlight box can be centred on the tag text it wraps.
+    const float ink_dy = -font.text_top_for_center(0.0f);
     for (int i = 0; i < static_cast<int>(groups.size()); ++i) {
         const bool  hot  = (i == cur_group && focused);
         std::string head = std::format("  {} {} {}:", hot ? "*" : "-",
@@ -59,7 +62,8 @@ float draw_groups(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<TagG
         for (int t = 0; t < static_cast<int>(groups[i].tags.size()); ++t) {
             const bool sel = hot && sel_tag == t;
             if (sel) {
-                r.draw_round_rect({x + 18, y - 4, colw - 12, ROW}, RADIUS_SMALL, SURFACE_HI);
+                r.draw_round_rect({x + 18, y + ink_dy - ROW * 0.5f, colw - 12, ROW},
+                                  RADIUS_SMALL, SURFACE_HI);
                 r.draw_text(font, x + 28, y, ">", ACCENT);
             }
             r.draw_text(font, x + 48, y, groups[i].tags[t], sel ? TEXT : TEXT_DIM);
@@ -583,10 +587,15 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
         if (focused(f)) r.draw_text(font_, x - 16, ly, ">", ACCENT);
         r.draw_text(font_, x, ly, s, focused(f) ? TEXT : TEXT_DIM);
     };
+    // Offset from a draw-y (glyph-cell top) to the text's ink centre, so a highlight
+    // box can be centred on the text it wraps (the text itself stays aligned with the
+    // field labels above it).
+    const float ink_dy = -font_.text_top_for_center(0.0f);
     // One committed-tag row; highlighted when `sel`. Advances `ly` by ROW.
     auto tag_row = [&](float& ly, bool sel, std::string_view s) {
         if (sel) {
-            r.draw_round_rect({x - 6, ly - 4, colw + 12, ROW}, RADIUS_SMALL, SURFACE_HI);
+            r.draw_round_rect({x - 6, ly + ink_dy - ROW * 0.5f, colw + 12, ROW},
+                              RADIUS_SMALL, SURFACE_HI);
             r.draw_text(font_, x + 4, ly, ">", ACCENT);
         }
         r.draw_text(font_, x + 24, ly, s, sel ? TEXT : TEXT_DIM);
@@ -647,16 +656,18 @@ void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
     r.draw_text(font_, x, TOP, std::format("Results ({})", results_.size()), TEXT_DIM);
 
     const auto  H        = static_cast<float>(win_.height());
+    const float rh       = LINE * 0.9f;
+    const float ink_dy   = -font_.text_top_for_center(0.0f);  // draw-top -> ink centre
     float       y        = TOP + LINE;
-    const auto  max_rows = static_cast<int>((H - y - 40) / (LINE * 0.9f));
+    const auto  max_rows = static_cast<int>((H - y - 40) / rh);
     const int   first    = std::max(0, cur_.result - max_rows / 2);
     for (int i = first; i < static_cast<int>(results_.size()) && i < first + max_rows; ++i) {
         const bool              sel = (i == cur_.result && hot);
         const vault::SearchHit& hit = results_[i];
-        if (sel) r.draw_round_rect({x - 6, y - 4, colw + 12, LINE * 0.9f}, RADIUS_SMALL, SURFACE_HI);
+        if (sel) r.draw_round_rect({x - 6, y + ink_dy - rh * 0.5f, colw + 12, rh}, RADIUS_SMALL, SURFACE_HI);
         r.draw_text(font_, x, y, std::format("{}{}", hit.is_gallery ? "[D] " : "    ", hit.path),
                     sel ? TEXT : TEXT_DIM);
-        y += LINE * 0.9f;
+        y += rh;
     }
     if (results_.empty()) r.draw_text(font_, x, y, "(no matches)", TEXT_FAINT);
 }
