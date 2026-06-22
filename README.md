@@ -181,6 +181,13 @@ An all-empty query matches every candidate (mirroring a blank search box).
 Queries can be persisted as **saved searches** (`Ctrl+S`); the scope toggle
 restricts results to images, galleries, or both.
 
+**Editing tags:** within a focused `Include`, `Exclude`, or `Groups` field, type to
+add a tag (Up/Down pick an autocomplete suggestion, Enter adds it). With the edit
+box empty, Up/Down highlight an already-added tag; **Del**/**Backspace** removes the
+highlighted tag and **Enter** pulls it back into the box to edit (re-adding it
+appends it at the end). In `Groups`, Left/Right switch between groups and Del (with
+nothing highlighted) toggles the current group's AND/OR.
+
 ---
 
 ## Security model
