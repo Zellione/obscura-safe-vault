@@ -78,15 +78,18 @@ void draw_dropdown(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<std
     using namespace gfx::theme;
     const int n = std::min(static_cast<int>(sugg.size()), 6);
     if (n == 0) return;
-    // Geometry mirrors the tag-row highlight bars (x-6, y-4, height n*ROW) so the
-    // rows sit with the same padding and the panel covers the labels beneath it.
-    const SDL_FRect panel{x - 6, y - 4, colw + 12, n * ROW};
+    // Panel covers n ROW-tall slots starting at `y`; it spans the column width and
+    // overlaps the labels beneath. Each suggestion's ink is vertically centred in
+    // its slot via text_top_for_center (draw_text's y is the glyph-cell top, so the
+    // ink would otherwise sit low and poke out of the panel).
+    const SDL_FRect panel{x - 6, y, colw + 12, n * ROW};
     r.draw_round_rect(panel, RADIUS_SMALL, SURFACE);
     r.draw_round_rect(panel, RADIUS_SMALL, ACCENT, /*filled*/ false);
     for (int i = 0; i < n; ++i) {
-        const bool s = (i == sel);
-        r.draw_text(font, x + 16, y, std::format("{} {}", s ? ">" : " ", sugg[i]), s ? ACCENT : TEXT_FAINT);
-        y += ROW;
+        const bool  s  = (i == sel);
+        const float ty = font.text_top_for_center(y + (static_cast<float>(i) + 0.5f) * ROW);
+        r.draw_text(font, x + 16, ty, std::format("{} {}", s ? ">" : " ", sugg[i]),
+                    s ? ACCENT : TEXT_FAINT);
     }
 }
 
