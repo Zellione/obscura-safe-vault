@@ -188,6 +188,11 @@ highlighted tag and **Enter** pulls it back into the box to edit (re-adding it
 appends it at the end). In `Groups`, Left/Right switch between groups and Del (with
 nothing highlighted) toggles the current group's AND/OR.
 
+Tags are kept **unique** within each list (case-insensitively) — re-adding an
+existing `Include` tag just updates its weight, and a `Group` ignores a tag it
+already holds. `Include` and `Exclude` are **mutually exclusive**: adding a tag to
+one removes it from the other, so a tag is never both included and excluded.
+
 ---
 
 ## Security model

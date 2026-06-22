@@ -231,3 +231,21 @@ TEST(adv_move_tag_cursor_navigates)
     CHECK_EQ(ui::move_tag_cursor(99, 1, 3), 2);
     CHECK_EQ(ui::move_tag_cursor(99, -1, 3), 1);
 }
+
+TEST(adv_tag_index_ci_finds_case_insensitively)
+{
+    std::vector<std::string> v = {"Cat", "dog"};
+    CHECK_EQ(ui::tag_index_ci(v, "cat"), 0);
+    CHECK_EQ(ui::tag_index_ci(v, "DOG"), 1);
+    CHECK_EQ(ui::tag_index_ci(v, "bird"), -1);
+    CHECK_EQ(ui::tag_index_ci({}, "x"), -1);
+}
+
+TEST(adv_weighted_tag_index_ci_finds_case_insensitively)
+{
+    std::vector<WeightedTag> v = {WeightedTag{"Cat", 2}, WeightedTag{"dog", 1}};
+    CHECK_EQ(ui::weighted_tag_index_ci(v, "CAT"), 0);
+    CHECK_EQ(ui::weighted_tag_index_ci(v, "Dog"), 1);
+    CHECK_EQ(ui::weighted_tag_index_ci(v, "bird"), -1);
+    CHECK_EQ(ui::weighted_tag_index_ci({}, "x"), -1);
+}

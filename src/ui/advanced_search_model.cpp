@@ -282,4 +282,18 @@ int move_tag_cursor(int cur, int dir, int count)
     return cur;
 }
 
+int tag_index_ci(const std::vector<std::string>& tags, std::string_view tag)
+{
+    for (int i = 0; i < static_cast<int>(tags.size()); ++i)
+        if (equals_ci(tags[i], tag)) return i;
+    return -1;
+}
+
+int weighted_tag_index_ci(const std::vector<WeightedTag>& tags, std::string_view tag)
+{
+    for (int i = 0; i < static_cast<int>(tags.size()); ++i)
+        if (equals_ci(tags[i].tag, tag)) return i;
+    return -1;
+}
+
 } // namespace ui

@@ -92,4 +92,10 @@ struct EvalResult {
 // A count <= 0 always yields -1. An out-of-range `cur` is clamped first.
 [[nodiscard]] int move_tag_cursor(int cur, int dir, int count);
 
+// Case-insensitive index of `tag` within a plain / weighted tag list, or -1 if
+// absent. Used to keep a filter list's tags unique and to enforce that a tag is
+// not in Include and Exclude at the same time.
+[[nodiscard]] int tag_index_ci(const std::vector<std::string>& tags, std::string_view tag);
+[[nodiscard]] int weighted_tag_index_ci(const std::vector<WeightedTag>& tags, std::string_view tag);
+
 } // namespace ui

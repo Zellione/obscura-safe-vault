@@ -410,13 +410,27 @@ void AdvancedSearchScreen::commit_text()
     using enum Focus;
     switch (focus_) {
         case Include:
-            if (std::string t = accepted(edit_.include); !t.empty())
-                query_.include.emplace_back(std::move(t), edit_.weight);
+            if (std::string t = accepted(edit_.include); !t.empty()) {
+                // Include/Exclude are mutually exclusive: adding to Include drops any
+                // matching Exclude entry. Re-adding an existing Include tag just
+                // updates its weight (tags stay unique within the list).
+                if (int e = tag_index_ci(query_.exclude, t); e >= 0)
+                    query_.exclude.erase(query_.exclude.begin() + e);
+                if (int j = weighted_tag_index_ci(query_.include, t); j >= 0)
+                    query_.include[j].weight = edit_.weight;
+                else
+                    query_.include.push_back({t, edit_.weight});
+            }
             edit_.include.clear(); edit_.weight = 1; refresh_suggestions(); rerun();
             break;
         case Exclude:
-            if (std::string t = accepted(edit_.exclude); !t.empty())
-                query_.exclude.push_back(std::move(t));
+            if (std::string t = accepted(edit_.exclude); !t.empty()) {
+                // Mutually exclusive with Include; unique within Exclude.
+                if (int j = weighted_tag_index_ci(query_.include, t); j >= 0)
+                    query_.include.erase(query_.include.begin() + j);
+                if (tag_index_ci(query_.exclude, t) < 0)
+                    query_.exclude.push_back(std::move(t));
+            }
             edit_.exclude.clear(); refresh_suggestions(); rerun();
             break;
         case Group:
@@ -440,7 +454,9 @@ void AdvancedSearchScreen::commit_group_text(std::string tag)
         cur_.group = 0;
     }
     cur_.group = std::clamp(cur_.group, 0, static_cast<int>(query_.groups.size()) - 1);
-    query_.groups[cur_.group].tags.push_back(std::move(tag));
+    std::vector<std::string>& tags = query_.groups[cur_.group].tags;
+    if (tag_index_ci(tags, tag) < 0)   // keep a group's tags unique
+        tags.push_back(std::move(tag));
 }
 
 void AdvancedSearchScreen::backspace()
