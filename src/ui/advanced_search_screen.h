@@ -73,10 +73,13 @@ private:
     void handle_saved_key(const SDL_KeyboardEvent& key);
 
     // Committed-tag selection within the focused tag field (Include/Exclude/Group).
-    void               select_tag(int dir);        // move cur_.tag (buffer-empty mode)
-    void               remove_selected_tag();      // erase the selected tag, rerun
-    void               edit_selected_tag();        // pull selected tag into the buffer
-    [[nodiscard]] int  current_tag_count() const;  // # committed tags in the focused field
+    // Kept as free functions (friends) so they don't count against the class method
+    // budget (cpp:S1448), mirroring the VaultSearch facade pattern. They mutate the
+    // private query/cursor/edit state, hence the friendship.
+    friend int  current_tag_count(const AdvancedSearchScreen& s);  // # tags in focused field
+    friend void select_tag(AdvancedSearchScreen& s, int dir);      // move cur_.tag
+    friend void remove_selected_tag(AdvancedSearchScreen& s);      // erase selected tag, rerun
+    friend void edit_selected_tag(AdvancedSearchScreen& s);        // pull selected tag into buffer
 
     void cycle_focus(int dir);
     void cycle_scope(int dir);

@@ -42,31 +42,43 @@ const char* scope_label(SearchScope s)
 
 const char* join_label(Combinator c) { return c == Combinator::And ? "AND" : "OR"; }
 
+// Layout + selection state for draw_groups, bundled to keep its parameter list
+// small (cpp:S107).
+struct GroupLayout {
+    int   cur_group;   // index of the focused group
+    int   sel_tag;     // selected tag within the current group (-1 = none)
+    bool  focused;     // is the Groups field focused?
+    float x;           // left edge
+    float colw;        // column width (sizes the highlight bar)
+    float y;           // starting baseline
+};
+
 // Draw the groups as a vertical list: each group a header row ("* AND name:" when
 // current, "- OR name:" otherwise) followed by its tags one per indented row. The
-// tag at `sel_tag` in the current group is highlighted. `colw` sizes the highlight
-// bar. Returns the new baseline y. Free function so it stays out of the method count.
+// tag at `lay.sel_tag` in the current group is highlighted. Returns the new
+// baseline y. Free function so it stays out of the method count.
 float draw_groups(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<TagGroup>& groups,
-                  int cur_group, int sel_tag, bool focused, float x, float colw, float y)
+                  const GroupLayout& lay)
 {
     using namespace gfx::theme;
     // Offset from a draw-y to the text's ink centre (see render_builder), so the
     // selected-tag highlight box can be centred on the tag text it wraps.
     const float ink_dy = -font.text_top_for_center(0.0f);
+    float       y      = lay.y;
     for (int i = 0; i < static_cast<int>(groups.size()); ++i) {
-        const bool  hot  = (i == cur_group && focused);
+        const bool  hot  = (i == lay.cur_group && lay.focused);
         std::string head = std::format("  {} {} {}:", hot ? "*" : "-",
                                        join_label(groups[i].combinator), groups[i].name);
-        r.draw_text(font, x + 8, y, head, hot ? TEXT : TEXT_FAINT);
+        r.draw_text(font, lay.x + 8, y, head, hot ? TEXT : TEXT_FAINT);
         y += ROW;
         for (int t = 0; t < static_cast<int>(groups[i].tags.size()); ++t) {
-            const bool sel = hot && sel_tag == t;
+            const bool sel = hot && lay.sel_tag == t;
             if (sel) {
-                r.draw_round_rect({x + 18, y + ink_dy - ROW * 0.5f, colw - 12, ROW},
+                r.draw_round_rect({lay.x + 18, y + ink_dy - ROW * 0.5f, lay.colw - 12, ROW},
                                   RADIUS_SMALL, SURFACE_HI);
-                r.draw_text(font, x + 28, y, ">", ACCENT);
+                r.draw_text(font, lay.x + 28, y, ">", ACCENT);
             }
-            r.draw_text(font, x + 48, y, groups[i].tags[t], sel ? TEXT : TEXT_DIM);
+            r.draw_text(font, lay.x + 48, y, groups[i].tags[t], sel ? TEXT : TEXT_DIM);
             y += ROW;
         }
     }
@@ -236,18 +248,17 @@ void AdvancedSearchScreen::handle_axis_key(const SDL_KeyboardEvent& key)
 
 void AdvancedSearchScreen::handle_tag_field_key(const SDL_KeyboardEvent& key)
 {
-    const std::string* buf = active_buffer();
-    const bool editing = buf && !buf->empty();
+    using enum Focus;
 
     // While typing: Up/Down drive the suggestion dropdown; Enter commits.
-    if (editing) {
+    if (const std::string* buf = active_buffer(); buf && !buf->empty()) {
         switch (key.key) {
             case SDLK_DOWN:     move_suggestion(1);  break;
             case SDLK_UP:       move_suggestion(-1); break;
             case SDLK_RETURN:
             case SDLK_KP_ENTER: commit_text();       break;
             default:
-                if (focus_ == Focus::Include) handle_weight_key(key);
+                if (focus_ == Include) handle_weight_key(key);
                 break;
         }
         return;
@@ -255,20 +266,20 @@ void AdvancedSearchScreen::handle_tag_field_key(const SDL_KeyboardEvent& key)
 
     // Empty buffer: Up/Down select a committed tag; Enter/Del act on it.
     switch (key.key) {
-        case SDLK_DOWN: select_tag(1);  break;
-        case SDLK_UP:   select_tag(-1); break;
+        case SDLK_DOWN: select_tag(*this, 1);  break;
+        case SDLK_UP:   select_tag(*this, -1); break;
         case SDLK_RETURN:
         case SDLK_KP_ENTER:
-            if (cur_.tag >= 0) edit_selected_tag();
+            if (cur_.tag >= 0) edit_selected_tag(*this);
             else               commit_text();   // empty Enter (Group: new group)
             break;
         case SDLK_DELETE:
-            if (cur_.tag >= 0)               remove_selected_tag();
-            else if (focus_ == Focus::Group) handle_group_nav_key(key);  // toggle AND/OR
+            if (cur_.tag >= 0)        remove_selected_tag(*this);
+            else if (focus_ == Group) handle_group_nav_key(key);  // toggle AND/OR
             break;
         default:
-            if (focus_ == Focus::Group)        handle_group_nav_key(key);  // Left/Right switch group
-            else if (focus_ == Focus::Include) handle_weight_key(key);
+            if (focus_ == Group)        handle_group_nav_key(key);  // Left/Right switch group
+            else if (focus_ == Include) handle_weight_key(key);
             break;
     }
 }
@@ -338,71 +349,73 @@ void AdvancedSearchScreen::move_suggestion(int dir)
     cur_.sugg    = (cur_.sugg + dir + n) % n;
 }
 
-int AdvancedSearchScreen::current_tag_count() const
+// --- committed-tag selection (free friends; see header for the S1448 rationale) ---
+
+int current_tag_count(const AdvancedSearchScreen& s)
 {
-    using enum Focus;
-    switch (focus_) {
-        case Include: return static_cast<int>(query_.include.size());
-        case Exclude: return static_cast<int>(query_.exclude.size());
+    using enum AdvancedSearchScreen::Focus;
+    switch (s.focus_) {
+        case Include: return static_cast<int>(s.query_.include.size());
+        case Exclude: return static_cast<int>(s.query_.exclude.size());
         case Group:
-            if (query_.groups.empty()) return 0;
+            if (s.query_.groups.empty()) return 0;
             return static_cast<int>(
-                query_.groups[std::clamp(cur_.group, 0,
-                              static_cast<int>(query_.groups.size()) - 1)].tags.size());
+                s.query_.groups[std::clamp(s.cur_.group, 0,
+                                static_cast<int>(s.query_.groups.size()) - 1)].tags.size());
         default: return 0;
     }
 }
 
-void AdvancedSearchScreen::select_tag(int dir)
+void select_tag(AdvancedSearchScreen& s, int dir)
 {
-    cur_.tag = move_tag_cursor(cur_.tag, dir, current_tag_count());
+    s.cur_.tag = move_tag_cursor(s.cur_.tag, dir, current_tag_count(s));
 }
 
-void AdvancedSearchScreen::remove_selected_tag()
+void remove_selected_tag(AdvancedSearchScreen& s)
 {
-    using enum Focus;
-    if (cur_.tag < 0 || cur_.tag >= current_tag_count()) return;
-    switch (focus_) {
-        case Include: query_.include.erase(query_.include.begin() + cur_.tag); break;
-        case Exclude: query_.exclude.erase(query_.exclude.begin() + cur_.tag); break;
+    using enum AdvancedSearchScreen::Focus;
+    if (s.cur_.tag < 0 || s.cur_.tag >= current_tag_count(s)) return;
+    switch (s.focus_) {
+        case Include: s.query_.include.erase(s.query_.include.begin() + s.cur_.tag); break;
+        case Exclude: s.query_.exclude.erase(s.query_.exclude.begin() + s.cur_.tag); break;
         case Group: {
-            auto& t = query_.groups[cur_.group].tags;
-            t.erase(t.begin() + cur_.tag);
+            auto& t = s.query_.groups[s.cur_.group].tags;
+            t.erase(t.begin() + s.cur_.tag);
             break;
         }
         default: return;
     }
-    cur_.tag = std::min(cur_.tag, current_tag_count() - 1);   // -1 if the list is now empty
-    rerun();
+    s.cur_.tag = std::min(s.cur_.tag, current_tag_count(s) - 1);   // -1 if list now empty
+    s.rerun();
 }
 
-void AdvancedSearchScreen::edit_selected_tag()
+void edit_selected_tag(AdvancedSearchScreen& s)
 {
-    using enum Focus;
-    if (cur_.tag < 0 || cur_.tag >= current_tag_count()) return;
-    switch (focus_) {
+    using enum AdvancedSearchScreen::Focus;
+    if (s.cur_.tag < 0 || s.cur_.tag >= current_tag_count(s)) return;
+    switch (s.focus_) {
         case Include: {
-            const WeightedTag& wt = query_.include[cur_.tag];
-            edit_.include = wt.tag;
-            edit_.weight  = wt.weight;
-            query_.include.erase(query_.include.begin() + cur_.tag);
+            const WeightedTag& wt = s.query_.include[s.cur_.tag];
+            s.edit_.include = wt.tag;
+            s.edit_.weight  = wt.weight;
+            s.query_.include.erase(s.query_.include.begin() + s.cur_.tag);
             break;
         }
         case Exclude:
-            edit_.exclude = query_.exclude[cur_.tag];
-            query_.exclude.erase(query_.exclude.begin() + cur_.tag);
+            s.edit_.exclude = s.query_.exclude[s.cur_.tag];
+            s.query_.exclude.erase(s.query_.exclude.begin() + s.cur_.tag);
             break;
         case Group: {
-            auto& t = query_.groups[cur_.group].tags;
-            edit_.group = t[cur_.tag];
-            t.erase(t.begin() + cur_.tag);
+            auto& t = s.query_.groups[s.cur_.group].tags;
+            s.edit_.group = t[s.cur_.tag];
+            t.erase(t.begin() + s.cur_.tag);
             break;
         }
         default: return;
     }
-    cur_.tag = -1;
-    refresh_suggestions();
-    rerun();
+    s.cur_.tag = -1;
+    s.refresh_suggestions();
+    s.rerun();
 }
 
 void AdvancedSearchScreen::commit_text()
@@ -419,7 +432,7 @@ void AdvancedSearchScreen::commit_text()
                 if (int j = weighted_tag_index_ci(query_.include, t); j >= 0)
                     query_.include[j].weight = edit_.weight;
                 else
-                    query_.include.push_back({t, edit_.weight});
+                    query_.include.emplace_back(t, edit_.weight);
             }
             edit_.include.clear(); edit_.weight = 1; refresh_suggestions(); rerun();
             break;
@@ -475,7 +488,7 @@ void AdvancedSearchScreen::backspace()
 
     // Empty buffer with a tag selected: remove exactly that tag.
     if ((focus_ == Include || focus_ == Exclude || focus_ == Group) && cur_.tag >= 0) {
-        remove_selected_tag();
+        remove_selected_tag(*this);
         return;
     }
 
@@ -621,7 +634,7 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
     // float; the dropdown itself is painted last (after all fields) so it sits on
     // top of the fields below instead of being overdrawn by them.
     float drop_y = -1.0f;
-    auto edit_row = [&](float& ly, std::string text) {
+    auto edit_row = [&](float& ly, const std::string& text) {
         r.draw_text(font_, x + 24, ly, text, TEXT_FAINT);
         ly += ROW;
         if (!suggestions_.empty()) drop_y = ly;
@@ -646,8 +659,11 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
 
     // --- Groups ---
     label(y, Focus::Group, "Groups:"); y += ROW;
-    y = draw_groups(r, font_, query_.groups, cur_.group,
-                    focused(Focus::Group) ? cur_.tag : -1, focused(Focus::Group), x, colw, y);
+    y = draw_groups(r, font_, query_.groups,
+                    {.cur_group = cur_.group,
+                     .sel_tag   = focused(Focus::Group) ? cur_.tag : -1,
+                     .focused   = focused(Focus::Group),
+                     .x = x, .colw = colw, .y = y});
     if (focused(Focus::Group)) {
         edit_row(y, std::format("{}_", edit_.group));
         r.draw_text(font_, x + 8, y, "Enter=add  empty Enter=new group  Del=AND/OR", TEXT_FAINT);
@@ -655,7 +671,6 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
     }
 
     label(y, Focus::GroupJoin, std::format("Join groups: {}", join_label(query_.group_join)));
-    y += LINE;
 
     // Floating autocomplete dropdown, painted on top of everything above.
     if (drop_y >= 0.0f && !suggestions_.empty())
