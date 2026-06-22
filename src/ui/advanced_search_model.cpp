@@ -273,4 +273,13 @@ std::vector<std::string> tag_suggestions(std::string_view prefix,
     return out;
 }
 
+int move_tag_cursor(int cur, int dir, int count)
+{
+    if (count <= 0) return -1;
+    cur = std::clamp(cur, -1, count - 1);   // normalise out-of-range input
+    if (dir > 0) return std::min(cur + 1, count - 1);
+    if (dir < 0) return cur < 0 ? -1 : cur - 1;   // 0 -> -1, -1 stays -1
+    return cur;
+}
+
 } // namespace ui

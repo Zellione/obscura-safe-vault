@@ -83,4 +83,13 @@ struct EvalResult {
 [[nodiscard]] std::vector<std::string> tag_suggestions(
     std::string_view prefix, const std::vector<std::string>& vocabulary);
 
+// Move a tag-selection cursor within a field's committed-tag list. `cur` is the
+// current index (-1 = nothing selected / editing the buffer); `dir` is -1 (up) or
+// +1 (down); `count` is the number of committed tags. Returns the new index,
+// clamped to [-1, count-1]:
+//   down (+1): -1 -> 0 -> ... -> count-1 (stays at the last row)
+//   up   (-1): k  -> k-1, with 0 -> -1 (deselect); -1 stays -1
+// A count <= 0 always yields -1. An out-of-range `cur` is clamped first.
+[[nodiscard]] int move_tag_cursor(int cur, int dir, int count);
+
 } // namespace ui

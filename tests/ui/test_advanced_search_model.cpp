@@ -208,3 +208,26 @@ TEST(adv_tag_suggestions_empty_prefix_is_empty)
     std::vector<std::string> vocab = {"a", "b"};
     CHECK(ui::tag_suggestions("", vocab).empty());
 }
+
+TEST(adv_move_tag_cursor_navigates)
+{
+    // Empty list: always -1, regardless of direction or incoming cursor.
+    CHECK_EQ(ui::move_tag_cursor(-1, 1, 0), -1);
+    CHECK_EQ(ui::move_tag_cursor(0, -1, 0), -1);
+
+    // Down from "nothing selected" enters the list at row 0.
+    CHECK_EQ(ui::move_tag_cursor(-1, 1, 3), 0);
+    // Down advances and clamps at the last row.
+    CHECK_EQ(ui::move_tag_cursor(0, 1, 3), 1);
+    CHECK_EQ(ui::move_tag_cursor(2, 1, 3), 2);
+
+    // Up decrements; row 0 returns to -1 (deselect).
+    CHECK_EQ(ui::move_tag_cursor(2, -1, 3), 1);
+    CHECK_EQ(ui::move_tag_cursor(0, -1, 3), -1);
+    // Up from -1 stays -1.
+    CHECK_EQ(ui::move_tag_cursor(-1, -1, 3), -1);
+
+    // Out-of-range incoming cursor is clamped before moving.
+    CHECK_EQ(ui::move_tag_cursor(99, 1, 3), 2);
+    CHECK_EQ(ui::move_tag_cursor(99, -1, 3), 1);
+}
