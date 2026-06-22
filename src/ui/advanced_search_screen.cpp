@@ -69,15 +69,21 @@ float draw_groups(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<TagG
     return y;
 }
 
-// Draw the autocomplete dropdown (capped at 6 rows). Free function (see above).
+// Draw the autocomplete dropdown (capped at 6 rows) as a floating panel. Painted
+// with an opaque background so it cleanly occludes the builder fields beneath it
+// instead of bleeding into them. `colw` sizes the panel. Free function (see above).
 void draw_dropdown(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<std::string>& sugg,
-                   int sel, float x, float y)
+                   int sel, float x, float y, float colw)
 {
     using namespace gfx::theme;
-    for (int i = 0; i < static_cast<int>(sugg.size()) && i < 6; ++i) {
+    const int n = std::min(static_cast<int>(sugg.size()), 6);
+    if (n == 0) return;
+    r.draw_round_rect({x + 8, y - 6, colw, n * ROW + 10}, RADIUS_SMALL, SURFACE);
+    r.draw_round_rect({x + 8, y - 6, colw, n * ROW + 10}, RADIUS_SMALL, ACCENT, /*filled*/ false);
+    for (int i = 0; i < n; ++i) {
         const bool s = (i == sel);
         r.draw_text(font, x + 16, y, std::format("{} {}", s ? ">" : " ", sugg[i]), s ? ACCENT : TEXT_FAINT);
-        y += LINE * 0.85f;
+        y += ROW;
     }
 }
 
@@ -580,11 +586,14 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
         r.draw_text(font_, x + 24, ly, s, sel ? TEXT : TEXT_DIM);
         ly += ROW;
     };
-    // The focused field's edit row + (optionally) the autocomplete dropdown below it.
+    // The focused field's edit row. Records where the autocomplete dropdown should
+    // float; the dropdown itself is painted last (after all fields) so it sits on
+    // top of the fields below instead of being overdrawn by them.
+    float drop_y = -1.0f;
     auto edit_row = [&](float& ly, std::string text) {
         r.draw_text(font_, x + 24, ly, text, TEXT_FAINT);
         ly += ROW;
-        if (!suggestions_.empty()) draw_dropdown(r, font_, suggestions_, cur_.sugg, x, ly);
+        if (!suggestions_.empty()) drop_y = ly;
     };
 
     float y = top;
@@ -616,6 +625,10 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
 
     label(y, Focus::GroupJoin, std::format("Join groups: {}", join_label(query_.group_join)));
     y += LINE;
+
+    // Floating autocomplete dropdown, painted on top of everything above.
+    if (drop_y >= 0.0f && !suggestions_.empty())
+        draw_dropdown(r, font_, suggestions_, cur_.sugg, x, drop_y, colw);
 }
 
 void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
