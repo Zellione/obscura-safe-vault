@@ -32,6 +32,10 @@ src/
                secure_mem.h, crypto.h
   vault/       vault.*, header.*, index.*,     — .osv container format
                chunk_store.*, byte_io.h, file_util.h
+                                               — Vault::read_thumb_span(offset,length,out): decrypt a
+                                                 thumb/poster chunk by raw span (gallery cover
+                                                 montages, Phase 19); InvalidArg if len 0, Locked,
+                                                 AuthFailed on tamper.
                transfer.*                      — transfer_image(src,src_gallery,file,dst,
                                                  dst_gallery,mode): read→add_image→(Move?
                                                  remove_image) (dst commits before src; crash
@@ -276,6 +280,22 @@ src/
                                                  focused image/video (Vault::remove_image) or
                                                  gallery subtree (Vault::remove_gallery) behind
                                                  a confirm modal showing the tally.
+               gallery_cover.*                 — pure, SDL/vault-free cover resolution (Phase 19):
+                                                 walks the index tree -> thumb chunk spans only.
+                                                 resolve_single_cover (leaf: first image thumb /
+                                                 first video poster; non-leaf: recurse first
+                                                 sub-gallery) + resolve_covers (leaf: 0–1 cover;
+                                                 non-leaf: up to 4 sub-gallery covers in child
+                                                 order, skipping empties). Depth-bounded by
+                                                 INDEX_MAX_DEPTH, cycle-free, unit-tested. No
+                                                 decode, no disk.
+               cover_layout.*                  — pure montage geometry (Phase 19): cover_montage_rects
+                                                 (tile rect + 1–4 covers -> sub-rects; single fill
+                                                 for 1, row-major 2×2 grid for 2–4). GalleryGrid's
+                                                 draw_tile_thumb draws a gallery as its cover montage
+                                                 via a free cover_tex() helper + Vault::read_thumb_span
+                                                 (offset,length), reusing the thumbnail texture cache /
+                                                 DecodeWorker; folder icon when no cover resolves.
                input.*, nav_model.*, viewer_model.h
                passphrase.*, screen.h
                secure_text_field.*, unlock_logic.*

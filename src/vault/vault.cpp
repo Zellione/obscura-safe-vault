@@ -692,6 +692,20 @@ VaultResult Vault::read_thumbnail(const IndexNode& node, crypto::SecureBytes& ou
     return Ok;
 }
 
+VaultResult Vault::read_thumb_span(uint64_t offset, uint64_t length,
+                                   crypto::SecureBytes& out) const
+{
+    using enum VaultResult;
+    if (!unlocked_)   return Locked;
+    if (length == 0)  return InvalidArg;
+
+    if (ChunkStore store(fp_, master_key_.as_span());
+        !store.read_chunk({offset, length}, out)) {
+        return AuthFailed;
+    }
+    return Ok;
+}
+
 VaultResult Vault::add_video(std::string_view         gallery_path,
                              std::span<const uint8_t> file_data,
                              std::string_view         filename,

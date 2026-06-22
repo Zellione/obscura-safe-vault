@@ -140,6 +140,13 @@ public:
     // has no stored thumbnail (thumb_length == 0). AuthFailed on tamper/corruption.
     [[nodiscard]] VaultResult read_thumbnail(const IndexNode& node, crypto::SecureBytes& out) const;
 
+    // Decrypt a thumbnail/poster chunk by its raw (offset, length) span into
+    // mlock'd memory. Used by gallery cover montages (Phase 19), which reference
+    // descendant nodes' thumbnail spans without holding the nodes. InvalidArg if
+    // length is 0; Locked if the vault is locked; AuthFailed on tamper/corruption.
+    [[nodiscard]] VaultResult read_thumb_span(uint64_t offset, uint64_t length,
+                                              crypto::SecureBytes& out) const;
+
     // Import a video container: detect its type by magic bytes, split the plaintext
     // into `chunk_size` AEAD chunks, and store a Type::Video node. dims/duration/codec/
     // poster stay empty until the decoder (PR4) fills them. `chunk_size` defaults to

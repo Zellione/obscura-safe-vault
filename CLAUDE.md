@@ -138,6 +138,8 @@ src/
                                             list + poster), INDEX_VERSION=4 (v1–v3 read back-
                                             compat); Vault::add_video/read_video/open_video_source
                                             + read_thumbnail returns the poster (Phase 15).
+                                            Vault::read_thumb_span reads a thumb/poster chunk by
+                                            raw (offset,length) for gallery cover montages (Phase 19).
                                             index.h adds SavedSearch + a vault-global saved-
                                             searches block, INDEX_VERSION=5 (v1–v4 read back-
                                             compat → empty list) (Phase 18).
@@ -235,6 +237,17 @@ src/
                                             GalleryGrid's `Del` removes the focused
                                             image/video (Vault::remove_image) or gallery
                                             subtree (Vault::remove_gallery) behind a confirm.
+             gallery_cover.*,             ← pure, SDL/vault-free cover resolution (Phase 19):
+                                            walks the index tree → thumb chunk spans only
+                                            (resolve_single_cover / resolve_covers). Leaf →
+                                            first image thumb / first video poster; non-leaf →
+                                            up to 4 sub-gallery covers (recursive, depth-bounded
+                                            by INDEX_MAX_DEPTH). No decode, no disk.
+             cover_layout.*,              ← pure montage geometry (Phase 19): tile rect + 1–4
+                                            covers → sub-rects (single fill for 1; 2×2 grid for
+                                            2–4). GalleryGrid draws the montage via a free
+                                            cover_tex() helper + Vault::read_thumb_span, reusing
+                                            the thumbnail texture cache (folder-icon fallback).
              widgets.*
   platform/  paths.{h,cpp},              ← config dir + file dialogs (Phase 5)
              file_dialog.*,               ← + save_vault() for new-vault paths (Phase 14);
