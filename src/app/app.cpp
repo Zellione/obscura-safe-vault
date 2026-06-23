@@ -74,6 +74,7 @@ void App::promote_pending()
 {
     if (!pending_) return;
     if (active_) active_->lock();                 // lock-on-switch: wipe the old key
+    adv_session_ = {};                            // new vault session -> fresh advanced search
     active_      = std::move(pending_);
     active_path_ = std::move(pending_path_);
     pending_path_.clear();
@@ -144,7 +145,8 @@ void App::to_favorite_viewer(int index)
 void App::to_advanced_search()
 {
     state_  = State::Browsing;
-    screen_ = std::make_unique<ui::AdvancedSearchScreen>(window_, font_, *active_);
+    screen_ = std::make_unique<ui::AdvancedSearchScreen>(window_, font_, *active_, *cache_,
+                                                         adv_session_);
     screen_->on_enter();
 }
 

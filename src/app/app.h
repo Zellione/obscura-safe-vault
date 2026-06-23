@@ -10,6 +10,7 @@
 #include "platform/file_dialog.h"
 #include "platform/folder_dialog.h"
 #include "platform/vault_registry.h"
+#include "ui/advanced_search_state.h"
 #include "ui/screen.h"
 #include "vault/vault.h"
 
@@ -59,6 +60,9 @@ private:
     std::string                        pending_path_;
     platform::VaultRegistry            registry_;
     std::unique_ptr<ui::Screen>        screen_;
+    // Advanced-search state preserved across visits within one unlocked-vault
+    // session; reset in promote_pending() whenever the active vault changes.
+    ui::AdvancedSearchState            adv_session_;
     State                              state_   = State::Locked;
     bool                               running_ = false;   // main-loop run flag
 

@@ -210,7 +210,32 @@ src/
              advanced_search_screen.*,    ← `Shift+/` dedicated screen (Phase 18): keyboard
                                             query builder + live result list + saved-searches
                                             sidebar (Ctrl+S save / Enter load / Del delete);
-                                            coexists with the Phase 12 `/` overlay
+                                            coexists with the Phase 12 `/` overlay. `Ctrl+L`
+                                            toggles the result panel List ↔ thumbnail Grid
+                                            (Phase 20): a session-scoped ResultView drives a
+                                            render_result_grid free friend that reuses the
+                                            shared tile_thumb draw; takes a TextureCache + owns
+                                            an off-thread decode worker (update() pumps it).
+                                            Query/params/cursor/view persist across visits via
+                                            a session-scoped AdvancedSearchState (restored in
+                                            on_enter / saved in on_exit); `Ctrl+R` clears behind
+                                            a Y/N confirm.
+             advanced_search_state.h,     ← session-scoped advanced-search state (Phase 20
+                                            follow-up): query + builder buffers + cursor + view.
+                                            App owns one per unlocked-vault session, resets it
+                                            when the active vault changes (promote_pending).
+                                            Results are NOT stored (re-derived on entry).
+             result_grid.*,               ← pure, SDL-free result-view state (Phase 20):
+                                            ResultView{List,Grid} + toggle_result_view +
+                                            result_move_delta/result_move (List ±1 row; Grid
+                                            ±1 / ±cols, clamped into range)
+             tile_thumb.*,                ← shared tile-thumbnail draw (Phase 20 extract):
+                                            ThumbContext{vault,cache,worker,failed} +
+                                            draw_tile_thumb/tile_thumb_texture/tile_cover_tex.
+                                            Gallery covers + 2×2 montage + video play-badge;
+                                            reused by GalleryGrid (delegates) and the advanced-
+                                            search grid view. Decrypt → off-thread decode → GPU
+                                            upload via the shared cache; no new disk path.
              tag_editor.*,                ← `G` add/remove tags modal (Phase 12)
              favorites_images.*,          ← flat grid of favorited images (Phase 13)
              favorites_galleries.*,       ← flat grid of favorited galleries (Phase 13)
@@ -246,9 +271,10 @@ src/
                                             by INDEX_MAX_DEPTH). No decode, no disk.
              cover_layout.*,              ← pure montage geometry (Phase 19): tile rect + 1–4
                                             covers → sub-rects (single fill for 1; 2×2 grid for
-                                            2–4). GalleryGrid draws the montage via a free
-                                            cover_tex() helper + vault::read_thumb_span, reusing
-                                            the thumbnail texture cache (folder-icon fallback).
+                                            2–4). The montage is drawn by tile_thumb's
+                                            tile_cover_tex() + vault::read_thumb_span (Phase 20
+                                            extract), reusing the thumbnail texture cache
+                                            (folder-icon fallback).
              widgets.*
   platform/  paths.{h,cpp},              ← config dir + file dialogs (Phase 5)
              file_dialog.*,               ← + save_vault() for new-vault paths (Phase 14);

@@ -2,15 +2,20 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstdint>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
+#include "image/decode_worker.h"
 #include "ui/advanced_search_model.h"
+#include "ui/advanced_search_state.h"
+#include "ui/result_grid.h"
 #include "ui/screen.h"
 #include "vault/vault.h"          // vault::SearchHit, vault::SavedSearch
 #include "vault/vault_search.h"   // vault::VaultSearch facade
 
-namespace gfx { class Window; class FontAtlas; class Renderer; }
+namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
 namespace vault { class Vault; }
 
 namespace ui {
@@ -25,11 +30,13 @@ namespace ui {
 // AdvancedQuery, re-runs the search on every change, and renders the columns.
 class AdvancedSearchScreen : public Screen {
 public:
-    AdvancedSearchScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault);
+    AdvancedSearchScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
+                         gfx::TextureCache& cache, AdvancedSearchState& session);
 
     void on_enter() override;
     void on_exit() override;
     void handle_event(const SDL_Event& e) override;
+    void update(double dt) override;   // upload finished off-thread thumb decodes
     void render(gfx::Renderer& r) override;
 
 private:
@@ -81,6 +88,13 @@ private:
     friend void remove_selected_tag(AdvancedSearchScreen& s);      // erase selected tag, rerun
     friend void edit_selected_tag(AdvancedSearchScreen& s);        // pull selected tag into buffer
 
+    // Phase 20 grid result-view plumbing. Free friends (same S1448 rationale as
+    // the tag helpers above): the thumbnail-grid result renderer and its
+    // off-thread-decode pump, both needing the private results/cursor/cache/worker.
+    friend void pump_search_thumbs(AdvancedSearchScreen& s);
+    friend void render_result_grid(AdvancedSearchScreen& s, gfx::Renderer& r,
+                                   float x, float colw);
+
     void cycle_focus(int dir);
     void cycle_scope(int dir);
     void move_suggestion(int dir);
@@ -101,10 +115,12 @@ private:
     void render_results(gfx::Renderer& r, float x, float colw);
     void render_saved(gfx::Renderer& r, float x);
 
-    gfx::Window&       win_;
-    gfx::FontAtlas&    font_;
-    vault::Vault&      vault_;
-    vault::VaultSearch search_;   // advanced-search facade over vault_
+    gfx::Window&         win_;
+    gfx::FontAtlas&      font_;
+    vault::Vault&        vault_;
+    gfx::TextureCache&   cache_;     // shared GPU thumbnail cache (grid result view)
+    AdvancedSearchState& session_;   // session-scoped state, restored/saved on enter/exit
+    vault::VaultSearch   search_;    // advanced-search facade over vault_
 
     AdvancedQuery                   query_;
     std::vector<vault::SearchHit>   results_;
@@ -117,8 +133,22 @@ private:
     Cursor cur_;
 
     bool        saving_ = false;   // naming a search to save
+    bool        clearing_ = false; // confirming a clear-search (Ctrl+R -> Y/N)
     std::string save_buf_;
     std::string status_;           // transient feedback line
+
+    // Phase 20 grid result view, bundled into one member to keep the screen's
+    // field count under the cpp:S1820 limit. Ctrl+L toggles List <-> Grid; the
+    // grid reuses the gallery's tile-thumbnail draw, so it needs its own
+    // off-thread decode worker + failed-set + (session-scoped) view + the
+    // last-rendered column count that drives Up/Down navigation.
+    struct GridView {
+        ResultView                   view = ResultView::List;
+        int                          cols = 1;   // last-rendered column count (nav stride)
+        image::DecodeWorker          worker{image::decode_wake_event()};
+        std::unordered_set<uint64_t> failed;
+    };
+    GridView grid_;
 };
 
 } // namespace ui
