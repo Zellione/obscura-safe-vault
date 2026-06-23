@@ -137,7 +137,7 @@ void AdvancedSearchScreen::on_enter()
         cur_.result    = session_.cur_result;
         cur_.group     = session_.cur_group;
         cur_.saved     = session_.cur_saved;
-        result_view_   = session_.view;
+        grid_.view   = session_.view;
     }
     reload_saved();
     rerun();   // re-derive results_ from query_ (node pointers can't be persisted)
@@ -159,7 +159,7 @@ void AdvancedSearchScreen::on_exit()
     session_.cur_result = cur_.result;
     session_.cur_group  = cur_.group;
     session_.cur_saved  = cur_.saved;
-    session_.view       = result_view_;
+    session_.view       = grid_.view;
     SDL_StopTextInput(win_.sdl_window());
 }
 
@@ -260,7 +260,7 @@ void AdvancedSearchScreen::handle_key(const SDL_KeyboardEvent& key)
     if (saving_) { handle_save_key(key); return; }
     if ((key.mod & SDL_KMOD_CTRL) != 0 && key.key == SDLK_S) { begin_save(); return; }
     if ((key.mod & SDL_KMOD_CTRL) != 0 && key.key == SDLK_L) {
-        result_view_ = toggle_result_view(result_view_);   // List <-> thumbnail Grid
+        grid_.view = toggle_result_view(grid_.view);   // List <-> thumbnail Grid
         return;
     }
     if ((key.mod & SDL_KMOD_CTRL) != 0 && key.key == SDLK_R) {
@@ -380,9 +380,9 @@ void AdvancedSearchScreen::handle_results_key(const SDL_KeyboardEvent& key)
 {
     // Navigation respects the active view: List steps one row per Up/Down (the
     // Phase 18 behaviour); Grid additionally moves Left/Right by one and Up/Down
-    // by a whole row (result_cols_, the last-rendered column count).
-    const int count = static_cast<int>(results_.size());
-    auto move = [&](MoveDir d) { cur_.result = result_move(result_view_, cur_.result, d, count, result_cols_); };
+    // by a whole row (grid_.cols, the last-rendered column count).
+    const auto count = static_cast<int>(results_.size());
+    auto move = [&](MoveDir d) { cur_.result = result_move(grid_.view, cur_.result, d, count, grid_.cols); };
     switch (key.key) {
         case SDLK_DOWN:  move(MoveDir::Down);  break;
         case SDLK_UP:    move(MoveDir::Up);    break;
@@ -500,9 +500,9 @@ void edit_selected_tag(AdvancedSearchScreen& s)
 void pump_search_thumbs(AdvancedSearchScreen& s)
 {
     bool any = false;
-    while (auto res = s.thumbs_.worker.take_result()) {
+    while (auto res = s.grid_.worker.take_result()) {
         if (res->image) { s.cache_.get_or_upload(res->key, *res->image); any = true; }
-        else            { s.thumbs_.failed.insert(res->key); }
+        else            { s.grid_.failed.insert(res->key); }
     }
     if (any) s.mark_dirty();   // a freshly-uploaded thumb needs a repaint
 }
@@ -517,25 +517,24 @@ void render_result_grid(AdvancedSearchScreen& s, gfx::Renderer& r, float x, floa
     constexpr float TILE = 92.0f;
     constexpr float TGAP = 12.0f;
     const float top   = TOP + LINE;
-    const float H     = static_cast<float>(s.win_.height());
+    const auto  H     = static_cast<float>(s.win_.height());
     const float pitch = TILE + TGAP;
     const int   cols  = grid_columns(colw, TILE, TGAP);   // always >= 1
-    s.result_cols_    = cols;                              // feed Up/Down stride
+    s.grid_.cols    = cols;                              // feed Up/Down stride
 
-    const int total    = static_cast<int>(s.results_.size());
-    const int rows      = (total + cols - 1) / cols;
+    const auto  total   = static_cast<int>(s.results_.size());
+    const int   rows    = (total + cols - 1) / cols;
     const int vis_rows  = std::max(1, static_cast<int>((H - top - 40) / pitch));
     // Scroll so the selected tile's row stays on screen (centred when possible).
     const int cur_row   = (total > 0) ? s.cur_.result / cols : 0;
     const int first_row = std::clamp(cur_row - vis_rows / 2, 0, std::max(0, rows - vis_rows));
 
-    const ThumbContext ctx{s.vault_, s.cache_, s.thumbs_.worker, s.thumbs_.failed};
+    const ThumbContext ctx{s.vault_, s.cache_, s.grid_.worker, s.grid_.failed};
     const GridSpec spec{cols, TILE, TGAP, x, top - static_cast<float>(first_row) * pitch};
     for (int i = first_row * cols; i < total && i < (first_row + vis_rows) * cols; ++i) {
         const SDL_FRect         cell = grid_cell_rect(i, spec);
         const vault::SearchHit& hit  = s.results_[i];
-        const bool              sel  = (i == s.cur_.result && hot);
-        if (sel) {
+        if (const bool sel = (i == s.cur_.result && hot); sel) {
             r.draw_selection_glow(cell, RADIUS, ACCENT);
             r.draw_round_rect(cell, RADIUS, SURFACE_HI);
             r.draw_round_rect(cell, RADIUS, ACCENT, /*filled*/ false);
@@ -820,8 +819,8 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
 void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
 {
     using namespace gfx::theme;
-    if (result_view_ == ResultView::Grid) { render_result_grid(*this, r, x, colw); return; }
-    result_cols_ = 1;   // list view is one result per row (keeps Up/Down stride correct)
+    if (grid_.view == ResultView::Grid) { render_result_grid(*this, r, x, colw); return; }
+    grid_.cols = 1;   // list view is one result per row (keeps Up/Down stride correct)
     const bool hot = (focus_ == Focus::Results && !saving_ && !clearing_);
     // Column header sits on the content-area top row (aligned with the builder's
     // first field), clear of the full-width legend at y=74 above it.

@@ -6,17 +6,20 @@ namespace ui {
 
 ResultView toggle_result_view(ResultView v) noexcept
 {
-    return v == ResultView::List ? ResultView::Grid : ResultView::List;
+    using enum ResultView;
+    return v == List ? Grid : List;
 }
 
 int result_move_delta(ResultView v, MoveDir dir, int cols) noexcept
 {
-    const int row = std::max(1, cols);   // never let a bad layout zero the stride
+    using enum MoveDir;
+    const bool grid = (v == ResultView::Grid);
+    const int  row  = std::max(1, cols);   // never let a bad layout zero the stride
     switch (dir) {
-        case MoveDir::Left:  return v == ResultView::Grid ? -1 : 0;
-        case MoveDir::Right: return v == ResultView::Grid ? 1 : 0;
-        case MoveDir::Up:    return v == ResultView::Grid ? -row : -1;
-        case MoveDir::Down:  return v == ResultView::Grid ? row : 1;
+        case Left:  return grid ? -1 : 0;
+        case Right: return grid ? 1 : 0;
+        case Up:    return grid ? -row : -1;
+        case Down:  return grid ? row : 1;
     }
     return 0;
 }

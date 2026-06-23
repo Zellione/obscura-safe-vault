@@ -137,16 +137,18 @@ private:
     std::string save_buf_;
     std::string status_;           // transient feedback line
 
-    // Phase 20: result-panel presentation (session-scoped). Ctrl+L toggles
-    // List <-> Grid; the grid view reuses the gallery's tile-thumbnail draw, so
-    // it needs its own off-thread decode worker + failed-set + column count.
-    ResultView  result_view_ = ResultView::List;
-    int         result_cols_ = 1;   // last-rendered grid column count (for nav)
-    struct ThumbDecode {
+    // Phase 20 grid result view, bundled into one member to keep the screen's
+    // field count under the cpp:S1820 limit. Ctrl+L toggles List <-> Grid; the
+    // grid reuses the gallery's tile-thumbnail draw, so it needs its own
+    // off-thread decode worker + failed-set + (session-scoped) view + the
+    // last-rendered column count that drives Up/Down navigation.
+    struct GridView {
+        ResultView                   view = ResultView::List;
+        int                          cols = 1;   // last-rendered column count (nav stride)
         image::DecodeWorker          worker{image::decode_wake_event()};
         std::unordered_set<uint64_t> failed;
     };
-    ThumbDecode thumbs_;
+    GridView grid_;
 };
 
 } // namespace ui
