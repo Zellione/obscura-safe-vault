@@ -19,4 +19,18 @@ namespace ui {
                                                          int   count,
                                                          float gap = 4.0f) noexcept;
 
+// A folder backdrop for a gallery tile: a gold body plate with a small tab
+// peeking up at the top-left, and an inset `inner` area where the cover montage
+// is drawn so the folder colour frames the photo on all sides. This is what
+// makes a gallery (folder of items) unmistakable from a plain image tile.
+struct FolderFrame {
+    SDL_FRect tab;    // small tab above the body, top-left (drawn first, behind)
+    SDL_FRect body;   // folder body plate (full width, dropped by the tab height)
+    SDL_FRect inner;  // inset cover area = body minus `frame` on every side
+};
+
+// `frame` is both the cover inset and the tab/body overlap (so no seam shows).
+[[nodiscard]] FolderFrame folder_frame(const SDL_FRect& box,
+                                       float frame = 5.0f) noexcept;
+
 }  // namespace ui

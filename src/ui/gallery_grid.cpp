@@ -843,17 +843,19 @@ void GalleryGrid::draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
 {
     using namespace gfx::theme;
     if (n.is_gallery()) {
-        // Phase 19: draw a representative cover (leaf -> first image/poster) or a
-        // 2×2 montage of up to four sub-gallery covers. Fall back to the folder
-        // icon when nothing resolves (empty subtree).
+        // Draw a gold folder (body + tab) behind the cover so a gallery is
+        // unmistakable from a plain image, then inset a representative cover
+        // (leaf -> first image/poster) or a 2×2 montage of up to four sub-gallery
+        // covers inside it. An empty subtree just shows the bare folder.
+        const auto ff = folder_frame(box);
+        r.draw_round_rect(ff.tab, RADIUS_SMALL, FOLDER);
+        r.draw_round_rect(ff.body, RADIUS_SMALL, FOLDER);
+
         const auto covers = resolve_covers(n);
-        if (covers.empty()) {
-            const float ix = box.w * 0.18f;
-            r.draw_round_rect({box.x + ix, box.y + box.h * 0.28f,
-                               box.w - 2 * ix, box.h * 0.48f}, RADIUS_SMALL, FOLDER);
-            return;
-        }
-        const auto cells = cover_montage_rects(box, static_cast<int>(covers.size()));
+        if (covers.empty()) return;
+
+        const auto cells =
+            cover_montage_rects(ff.inner, static_cast<int>(covers.size()));
         for (size_t i = 0; i < cells.size(); ++i) {
             r.draw_rect(cells[i], gfx::Color{0, 0, 0, 255});   // backing, never stretched
             if (SDL_Texture* tex = cover_tex(vault_, cache_, thumbs_.worker,

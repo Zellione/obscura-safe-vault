@@ -29,4 +29,17 @@ std::vector<SDL_FRect> cover_montage_rects(const SDL_FRect& box, int count,
     return out;
 }
 
+FolderFrame folder_frame(const SDL_FRect& box, float frame) noexcept
+{
+    const float tab_h = box.h * 0.16f;
+    const float tab_w = box.w * 0.42f;
+    const SDL_FRect body{box.x, box.y + tab_h, box.w, box.h - tab_h};
+    return {
+        .tab   = {box.x, box.y, tab_w, tab_h + frame},
+        .body  = body,
+        .inner = {body.x + frame, body.y + frame,
+                  body.w - 2 * frame, body.h - 2 * frame},
+    };
+}
+
 }  // namespace ui
