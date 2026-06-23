@@ -191,6 +191,11 @@ public:
     // class within its method budget; it reaches in here as a friend.
     friend class VaultSearch;
 
+    // Gallery cover montages read a descendant's thumbnail by raw span. Kept a
+    // free friend (not a member) to keep Vault under the cpp:S1448 method cap.
+    friend VaultResult read_thumb_span(const Vault& v, uint64_t offset,
+                                       uint64_t length, crypto::SecureBytes& out);
+
     // Flip a node's favorite flag (gallery OR image). Persisted via the crash-safe
     // index swap. Locked if not unlocked; NotFound if node_path doesn't resolve.
     [[nodiscard]] VaultResult toggle_favorite(std::string_view node_path);
@@ -239,5 +244,12 @@ private:
     IndexNode                              root_ = IndexNode::gallery("");
     std::vector<SavedSearch>               saved_searches_;  // vault-global (Phase 18)
 };
+
+// Decrypt a thumbnail/poster chunk by its raw (offset, length) span into mlock'd
+// memory. Used by gallery cover montages (Phase 19), which reference descendant
+// nodes' thumbnail spans without holding the nodes. InvalidArg if length is 0;
+// Locked if the vault is locked; AuthFailed on tamper/corruption.
+[[nodiscard]] VaultResult read_thumb_span(const Vault& v, uint64_t offset,
+                                          uint64_t length, crypto::SecureBytes& out);
 
 } // namespace vault

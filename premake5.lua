@@ -308,6 +308,8 @@ project "osv_tests"
         "src/ui/unlock_logic.cpp",
         "src/ui/widgets.cpp",
         "src/ui/strip_layout.cpp",
+        "src/ui/cover_layout.cpp",
+        "src/ui/gallery_cover.cpp",
         "src/ui/scroll_model.cpp",
         "src/ui/meta_format.cpp",
         "src/ui/selection_model.cpp",

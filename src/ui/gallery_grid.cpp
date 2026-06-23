@@ -14,8 +14,10 @@
 #include "platform/file_dialog.h"
 #include "platform/folder_dialog.h"
 #include "platform/paths.h"
+#include "ui/cover_layout.h"
 #include "ui/delete_summary.h"
 #include "ui/export.h"
+#include "ui/gallery_cover.h"
 #include "ui/input.h"
 #include "ui/widgets.h"
 #include "ui/zip_import.h"
@@ -46,6 +48,25 @@ vault::VaultResult delete_focused_node(vault::Vault& v, const std::string& base,
     if (!n.is_gallery()) return v.remove_image(base, n.name);
     const std::string full = base.empty() ? n.name : base + "/" + n.name;
     return v.remove_gallery(full);
+}
+
+// Resolve one cover thumbnail to a GPU texture, mirroring thumb_texture() but
+// keyed/read by raw chunk span (a cover may belong to a descendant node). Kept
+// free so the grid keeps its method budget (cpp:S1448). Decrypt -> off-thread
+// decode -> GPU upload via the shared cache; no new disk path. Returns nullptr
+// while a decode is pending/failed; pump_thumbs() uploads it once ready.
+SDL_Texture* cover_tex(const vault::Vault& v, gfx::TextureCache& cache,
+                       image::DecodeWorker& worker,
+                       const std::unordered_set<uint64_t>& failed, const CoverSpan& span)
+{
+    const uint64_t key = span.offset;
+    if (SDL_Texture* t = cache.get(key)) return t;
+    if (failed.contains(key) || worker.pending(key)) return nullptr;
+    crypto::SecureBytes sb;
+    if (vault::read_thumb_span(v, span.offset, span.length, sb) != vault::VaultResult::Ok)
+        return nullptr;
+    worker.submit(key, std::move(sb));
+    return nullptr;
 }
 
 // Centre the `cols` columns horizontally in a `win_w`-wide window so the left and
@@ -822,9 +843,29 @@ void GalleryGrid::draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
 {
     using namespace gfx::theme;
     if (n.is_gallery()) {
-        const float ix = box.w * 0.18f;
-        r.draw_round_rect({box.x + ix, box.y + box.h * 0.28f,
-                           box.w - 2 * ix, box.h * 0.48f}, RADIUS_SMALL, FOLDER);
+        // Draw a gold folder (body + tab) behind the cover so a gallery is
+        // unmistakable from a plain image, then inset a representative cover
+        // (leaf -> first image/poster) or a 2×2 montage of up to four sub-gallery
+        // covers inside it. An empty subtree just shows the bare folder.
+        const auto ff = folder_frame(box);
+        r.draw_round_rect(ff.tab, RADIUS_SMALL, FOLDER);
+        r.draw_round_rect(ff.body, RADIUS_SMALL, FOLDER);
+
+        const auto covers = resolve_covers(n);
+        if (covers.empty()) return;
+
+        const auto cells =
+            cover_montage_rects(ff.inner, static_cast<int>(covers.size()));
+        for (size_t i = 0; i < cells.size(); ++i) {
+            r.draw_rect(cells[i], gfx::Color{0, 0, 0, 255});   // backing, never stretched
+            if (SDL_Texture* tex = cover_tex(vault_, cache_, thumbs_.worker,
+                                             thumbs_.failed, covers[i])) {
+                float tw = 0;
+                float th = 0;
+                SDL_GetTextureSize(tex, &tw, &th);
+                r.draw_image(tex, fit_rect(tw, th, cells[i]));
+            }
+        }
         return;
     }
     r.draw_rect(box, gfx::Color{0, 0, 0, 255});   // black backing, never stretched

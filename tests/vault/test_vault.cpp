@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "image/fixtures.h"
 #include "vault/vault.h"
 
 namespace fs = std::filesystem;
@@ -199,6 +200,49 @@ TEST(vault_remove_image)
     CHECK_EQ(remaining[0]->name, std::string("b.jpg"));
 
     CHECK_EQ(v.remove_image("", "ghost.jpg"), vault::VaultResult::NotFound);
+}
+
+// Gallery cover montages (Phase 19) read descendant thumbnails by raw span,
+// not by node, so the grid can draw a sub-gallery's cover without holding the
+// node. read_thumb_span must return the same bytes as read_thumbnail.
+TEST(vault_read_thumb_span_matches_read_thumbnail)
+{
+    TempVault tv("thumbspan");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+
+    const auto png = fixtures::solid_png(64, 48, 10, 200, 30);  // decodable -> thumbnail
+    REQUIRE(v.add_image("", png, "pic.png") == vault::VaultResult::Ok);
+
+    auto kids = v.list("");
+    REQUIRE(kids.size() == 1);
+    REQUIRE(kids[0]->meta.thumb_length > 0);
+
+    crypto::SecureBytes via_node;
+    REQUIRE(v.read_thumbnail(*kids[0], via_node) == vault::VaultResult::Ok);
+
+    crypto::SecureBytes via_span;
+    REQUIRE(vault::read_thumb_span(v, kids[0]->meta.thumb_offset,
+                                   kids[0]->meta.thumb_length, via_span)
+            == vault::VaultResult::Ok);
+    CHECK_BYTES_EQ(via_span.as_span(), via_node.as_span());
+}
+
+TEST(vault_read_thumb_span_rejects_empty_and_locked)
+{
+    TempVault tv("thumbspan_err");
+    crypto::SecureBytes out;
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+                == vault::VaultResult::Ok);
+        // A zero-length span is never a valid thumbnail.
+        CHECK_EQ(vault::read_thumb_span(v, 0, 0, out), vault::VaultResult::InvalidArg);
+    }
+    vault::Vault v2;
+    REQUIRE(vault::Vault::open(tv.str(), v2) == vault::VaultResult::Ok);
+    CHECK_EQ(vault::read_thumb_span(v2, 0, 16, out), vault::VaultResult::Locked);
 }
 
 TEST(vault_operations_require_unlock)
