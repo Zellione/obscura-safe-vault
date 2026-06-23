@@ -144,7 +144,7 @@ void App::to_favorite_viewer(int index)
 void App::to_advanced_search()
 {
     state_  = State::Browsing;
-    screen_ = std::make_unique<ui::AdvancedSearchScreen>(window_, font_, *active_);
+    screen_ = std::make_unique<ui::AdvancedSearchScreen>(window_, font_, *active_, *cache_);
     screen_->on_enter();
 }
 

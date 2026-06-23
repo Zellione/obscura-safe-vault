@@ -2,15 +2,19 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstdint>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
+#include "image/decode_worker.h"
 #include "ui/advanced_search_model.h"
+#include "ui/result_grid.h"
 #include "ui/screen.h"
 #include "vault/vault.h"          // vault::SearchHit, vault::SavedSearch
 #include "vault/vault_search.h"   // vault::VaultSearch facade
 
-namespace gfx { class Window; class FontAtlas; class Renderer; }
+namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
 namespace vault { class Vault; }
 
 namespace ui {
@@ -25,11 +29,13 @@ namespace ui {
 // AdvancedQuery, re-runs the search on every change, and renders the columns.
 class AdvancedSearchScreen : public Screen {
 public:
-    AdvancedSearchScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault);
+    AdvancedSearchScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
+                         gfx::TextureCache& cache);
 
     void on_enter() override;
     void on_exit() override;
     void handle_event(const SDL_Event& e) override;
+    void update(double dt) override;   // upload finished off-thread thumb decodes
     void render(gfx::Renderer& r) override;
 
 private:
@@ -81,6 +87,13 @@ private:
     friend void remove_selected_tag(AdvancedSearchScreen& s);      // erase selected tag, rerun
     friend void edit_selected_tag(AdvancedSearchScreen& s);        // pull selected tag into buffer
 
+    // Phase 20 grid result-view plumbing. Free friends (same S1448 rationale as
+    // the tag helpers above): the thumbnail-grid result renderer and its
+    // off-thread-decode pump, both needing the private results/cursor/cache/worker.
+    friend void pump_search_thumbs(AdvancedSearchScreen& s);
+    friend void render_result_grid(AdvancedSearchScreen& s, gfx::Renderer& r,
+                                   float x, float colw);
+
     void cycle_focus(int dir);
     void cycle_scope(int dir);
     void move_suggestion(int dir);
@@ -104,6 +117,7 @@ private:
     gfx::Window&       win_;
     gfx::FontAtlas&    font_;
     vault::Vault&      vault_;
+    gfx::TextureCache& cache_;    // shared GPU thumbnail cache (grid result view)
     vault::VaultSearch search_;   // advanced-search facade over vault_
 
     AdvancedQuery                   query_;
@@ -119,6 +133,17 @@ private:
     bool        saving_ = false;   // naming a search to save
     std::string save_buf_;
     std::string status_;           // transient feedback line
+
+    // Phase 20: result-panel presentation (session-scoped). Ctrl+L toggles
+    // List <-> Grid; the grid view reuses the gallery's tile-thumbnail draw, so
+    // it needs its own off-thread decode worker + failed-set + column count.
+    ResultView  result_view_ = ResultView::List;
+    int         result_cols_ = 1;   // last-rendered grid column count (for nav)
+    struct ThumbDecode {
+        image::DecodeWorker          worker{image::decode_wake_event()};
+        std::unordered_set<uint64_t> failed;
+    };
+    ThumbDecode thumbs_;
 };
 
 } // namespace ui

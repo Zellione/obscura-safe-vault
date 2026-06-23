@@ -315,6 +315,7 @@ project "osv_tests"
         "src/ui/selection_model.cpp",
         "src/ui/search_model.cpp",
         "src/ui/advanced_search_model.cpp",
+        "src/ui/result_grid.cpp",
         "src/ui/export.cpp",
         "src/ui/delete_summary.cpp",
         "src/ui/zip_plan.cpp",

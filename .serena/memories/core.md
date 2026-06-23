@@ -213,7 +213,13 @@ src/
                                                  result list + saved-searches sidebar (Ctrl+S save,
                                                  Enter load/open result, Del delete). Image result
                                                  -> gallery viewer; gallery result -> ToGallery.
-                                                 Coexists with the Phase 12 `/` overlay.
+                                                 Coexists with the Phase 12 `/` overlay. Phase 20:
+                                                 Ctrl+L toggles the result panel List <-> thumbnail
+                                                 Grid (session-scoped ui::ResultView); takes a
+                                                 TextureCache& + owns its own DecodeWorker (update()
+                                                 pumps it); render_result_grid free friend reuses
+                                                 the shared tile_thumb draw; handle_results_key uses
+                                                 result_move for grid nav (Left/Right + row stride).
                favorites_images.*              — flat grid of favorited images across
                                                  the vault; opens a favorites-scoped
                                                  viewer (ToFavoriteViewer: prev/next
@@ -293,10 +299,23 @@ src/
                cover_layout.*                  — pure montage geometry (Phase 19): cover_montage_rects
                                                  (tile rect + 1–4 covers -> sub-rects; single fill
                                                  for 1, row-major 2×2 grid for 2–4). GalleryGrid's
-                                                 draw_tile_thumb draws a gallery as its cover montage
-                                                 via a free cover_tex() helper + vault::read_thumb_span
-                                                 (offset,length), reusing the thumbnail texture cache /
+                                                 cover montage is drawn by tile_thumb's tile_cover_tex()
+                                                 + vault::read_thumb_span (offset,length) (Phase 20
+                                                 extract), reusing the thumbnail texture cache /
                                                  DecodeWorker; folder icon when no cover resolves.
+               result_grid.*                   — pure, SDL-free result-view state (Phase 20):
+                                                 ResultView{List,Grid} + toggle_result_view +
+                                                 result_move_delta/result_move (List ±1 row; Grid
+                                                 ±1 / ±cols, clamped into range; cols clamped >=1).
+                                                 Drives AdvancedSearchScreen's result panel.
+               tile_thumb.*                    — shared tile-thumbnail draw (Phase 20 extract from
+                                                 GalleryGrid): ThumbContext{vault,cache,worker,failed}
+                                                 + draw_tile_thumb / tile_thumb_texture / tile_cover_tex.
+                                                 Gallery -> folder + cover montage; image -> aspect-fit
+                                                 thumb; video -> poster + play-badge. Decrypt ->
+                                                 off-thread decode -> GPU upload via shared cache; no
+                                                 new disk path. Reused by GalleryGrid (delegates) +
+                                                 advanced-search grid view.
                input.*, nav_model.*, viewer_model.h
                passphrase.*, screen.h
                secure_text_field.*, unlock_logic.*
