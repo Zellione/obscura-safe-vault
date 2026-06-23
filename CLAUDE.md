@@ -216,6 +216,15 @@ src/
                                             render_result_grid free friend that reuses the
                                             shared tile_thumb draw; takes a TextureCache + owns
                                             an off-thread decode worker (update() pumps it).
+                                            Query/params/cursor/view persist across visits via
+                                            a session-scoped AdvancedSearchState (restored in
+                                            on_enter / saved in on_exit); `Ctrl+R` clears behind
+                                            a Y/N confirm.
+             advanced_search_state.h,     ← session-scoped advanced-search state (Phase 20
+                                            follow-up): query + builder buffers + cursor + view.
+                                            App owns one per unlocked-vault session, resets it
+                                            when the active vault changes (promote_pending).
+                                            Results are NOT stored (re-derived on entry).
              result_grid.*,               ← pure, SDL-free result-view state (Phase 20):
                                             ResultView{List,Grid} + toggle_result_view +
                                             result_move_delta/result_move (List ±1 row; Grid

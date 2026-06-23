@@ -9,6 +9,7 @@
 
 #include "image/decode_worker.h"
 #include "ui/advanced_search_model.h"
+#include "ui/advanced_search_state.h"
 #include "ui/result_grid.h"
 #include "ui/screen.h"
 #include "vault/vault.h"          // vault::SearchHit, vault::SavedSearch
@@ -30,7 +31,7 @@ namespace ui {
 class AdvancedSearchScreen : public Screen {
 public:
     AdvancedSearchScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                         gfx::TextureCache& cache);
+                         gfx::TextureCache& cache, AdvancedSearchState& session);
 
     void on_enter() override;
     void on_exit() override;
@@ -114,11 +115,12 @@ private:
     void render_results(gfx::Renderer& r, float x, float colw);
     void render_saved(gfx::Renderer& r, float x);
 
-    gfx::Window&       win_;
-    gfx::FontAtlas&    font_;
-    vault::Vault&      vault_;
-    gfx::TextureCache& cache_;    // shared GPU thumbnail cache (grid result view)
-    vault::VaultSearch search_;   // advanced-search facade over vault_
+    gfx::Window&         win_;
+    gfx::FontAtlas&      font_;
+    vault::Vault&        vault_;
+    gfx::TextureCache&   cache_;     // shared GPU thumbnail cache (grid result view)
+    AdvancedSearchState& session_;   // session-scoped state, restored/saved on enter/exit
+    vault::VaultSearch   search_;    // advanced-search facade over vault_
 
     AdvancedQuery                   query_;
     std::vector<vault::SearchHit>   results_;
@@ -131,6 +133,7 @@ private:
     Cursor cur_;
 
     bool        saving_ = false;   // naming a search to save
+    bool        clearing_ = false; // confirming a clear-search (Ctrl+R -> Y/N)
     std::string save_buf_;
     std::string status_;           // transient feedback line
 

@@ -220,6 +220,12 @@ src/
                                                  pumps it); render_result_grid free friend reuses
                                                  the shared tile_thumb draw; handle_results_key uses
                                                  result_move for grid nav (Left/Right + row stride).
+                                                 Query/params/cursor/view persist across visits via a
+                                                 session-scoped ui::AdvancedSearchState (advanced_search_
+                                                 state.h) App owns + resets on vault change
+                                                 (promote_pending); restored on_enter / saved on_exit;
+                                                 results re-derived (node ptrs not persisted). Ctrl+R
+                                                 clears the query behind a Y/N confirm modal.
                favorites_images.*              — flat grid of favorited images across
                                                  the vault; opens a favorites-scoped
                                                  viewer (ToFavoriteViewer: prev/next

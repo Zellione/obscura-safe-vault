@@ -877,6 +877,16 @@ screen gained a `TextureCache&` ctor arg + its own off-thread decode worker +
 decode → GPU upload through the existing pipeline — no vault/format change, no new
 disk path. The Phase 12 `/` overlay and the rest of Phase 18 are untouched.
 
+**Follow-up — session-preserved search + clear:** the advanced-search state
+(query, builder buffers, cursor, focus, view mode) now persists across visits
+within one unlocked-vault session via a session-scoped `ui::AdvancedSearchState`
+(`src/ui/advanced_search_state.h`) that `App` owns and the screen restores in
+`on_enter` / saves in `on_exit`; results are re-derived (not stored, so
+`SearchHit::node` pointers can't dangle). `App` resets it whenever the active
+vault changes (lock / switch / idle auto-lock, via `promote_pending`). `Ctrl+R`
+clears the search behind a `Y/N` confirmation modal (resets the query to its
+default and re-runs).
+
 ---
 
 ## Phase 21 — Import a tag list onto a gallery ⬜
