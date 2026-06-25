@@ -123,6 +123,7 @@ private:
         std::string buf;
         PendingZip  zip;              // zip import in flight
         bool        confirm_delete = false;  // Del on a media tile: awaiting Y/N confirm
+        std::string tag_target;       // gallery path awaiting a tag-list import (Shift+G, Phase 21)
     };
     Naming naming_;
 

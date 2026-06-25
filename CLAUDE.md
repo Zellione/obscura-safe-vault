@@ -257,6 +257,17 @@ src/
              zip_import.*,                ← ZIP executor: miniz reader → mlock'd
                                             SecureBytes → Vault::add_image/add_video;
                                             triggered by `Z` key in gallery grid (Phase 17)
+             tag_list_parse.*,            ← pure, SDL/vault-free tag-list parser (Phase 21):
+                                            raw .txt bytes → normalised tag list (split on LF,
+                                            trim CR+whitespace, drop blanks, case-insensitive
+                                            de-dupe, truncate to TAG_MAX_BYTES=0xFFFF, cap at
+                                            INDEX_MAX_TAGS; non-UTF-8 bytes opaque). `Shift+G`
+                                            on a focused gallery tile opens a `.txt` dialog
+                                            (FileDialog Purpose::TagList) → parse → add_tag each
+                                            (merge, not replace); GalleryGrid inlines the entry
+                                            + result pump (free apply_tag_list helper) to stay
+                                            under the S1448 method cap. Tag metadata only — no
+                                            plaintext-to-disk deviation.
              delete_summary.*,            ← pure recursive tally of a gallery subtree
                                             (images/videos/sub-galleries) for the `Del`
                                             delete-confirm popup (Phase 17 follow-up).
@@ -281,7 +292,9 @@ src/
                                             each open tagged with a Purpose +
                                             take_result(Purpose) so one shared dialog polled
                                             by two handlers (GalleryGrid image vs zip import)
-                                            can't steal each other's result (Phase 17 fix)
+                                            can't steal each other's result (Phase 17 fix);
+                                            Purpose::TagList + open_tag_list() (.txt) for the
+                                            Phase 21 tag-list import
              folder_dialog.*,             ← export destination picker (Phase 10)
              vault_registry.*             ← recent-vaults list, paths only, atomic
                                             write — stores NO secrets (Phase 14)

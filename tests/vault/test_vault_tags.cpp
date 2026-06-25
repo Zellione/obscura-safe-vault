@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "ui/tag_list_parse.h"
 #include "vault/vault.h"
 
 namespace fs = std::filesystem;
@@ -553,4 +554,49 @@ TEST(tags_add_tag_empty_or_whitespace_returns_invalid_arg)
     CHECK_EQ(v.add_tag("pic.jpg", ""), vault::VaultResult::InvalidArg);
     // Try to add a whitespace-only tag.
     CHECK_EQ(v.add_tag("pic.jpg", "   "), vault::VaultResult::InvalidArg);
+}
+
+// Phase 21: importing a tag list (parse → add_tag each) merges with the
+// gallery's existing tags (does not replace them), de-dupes case-insensitively,
+// and survives a lock/reopen.
+TEST(tags_import_tag_list_merges_and_survives_reopen)
+{
+    TempVault tv("import_list");
+
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+                == vault::VaultResult::Ok);
+        REQUIRE(v.create_gallery("trip") == vault::VaultResult::Ok);
+
+        // Pre-existing tags on the gallery.
+        REQUIRE(v.set_tags("trip", {"Keep", "existing"}) == vault::VaultResult::Ok);
+
+        // A raw tag-list file: CRLF, blank lines, surrounding whitespace, an
+        // in-file duplicate, and one case-insensitive clash with an existing tag.
+        const std::string blob = "beach\r\n\r\n  sunset \nbeach\nKEEP\nnew-tag\n";
+        auto parsed = ui::parse_tag_list(
+            std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(blob.data()), blob.size()));
+        // Parser de-dupes within the file: beach, sunset, KEEP, new-tag.
+        REQUIRE(parsed.size() == 4);
+
+        // Apply each (the import path): add_tag merges, skipping case-insensitive dupes.
+        for (const auto& t : parsed) REQUIRE(v.add_tag("trip", t) == vault::VaultResult::Ok);
+    }
+
+    // Reopen and verify the merged set.
+    vault::Vault v;
+    REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
+    REQUIRE(v.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+
+    auto children = v.list("");
+    REQUIRE(children.size() == 1);
+    const auto& tags = children[0]->tags;
+    // Existing kept (original casing), new ones appended, "KEEP" skipped as a dupe.
+    REQUIRE(tags.size() == 5);
+    CHECK_EQ(tags[0], "Keep");
+    CHECK_EQ(tags[1], "existing");
+    CHECK_EQ(tags[2], "beach");
+    CHECK_EQ(tags[3], "sunset");
+    CHECK_EQ(tags[4], "new-tag");
 }

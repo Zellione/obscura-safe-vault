@@ -320,6 +320,7 @@ project "osv_tests"
         "src/ui/delete_summary.cpp",
         "src/ui/zip_plan.cpp",
         "src/ui/zip_import.cpp",
+        "src/ui/tag_list_parse.cpp",
         "src/ui/slideshow_model.cpp",
         "src/ui/playback_model.cpp",
         "src/ui/video_playback.cpp",

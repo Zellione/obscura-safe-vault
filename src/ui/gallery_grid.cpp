@@ -16,6 +16,7 @@
 #include "ui/delete_summary.h"
 #include "ui/export.h"
 #include "ui/input.h"
+#include "ui/tag_list_parse.h"
 #include "ui/tile_thumb.h"
 #include "ui/widgets.h"
 #include "ui/zip_import.h"
@@ -46,6 +47,33 @@ vault::VaultResult delete_focused_node(vault::Vault& v, const std::string& base,
     if (!n.is_gallery()) return v.remove_image(base, n.name);
     const std::string full = base.empty() ? n.name : base + "/" + n.name;
     return v.remove_gallery(full);
+}
+
+// Apply a parsed tag list onto the node at `target` (slash-separated path),
+// merging via Vault::add_tag (case-insensitive de-dupe handled by the vault).
+// Returns {added, skipped} by comparing the node's tag count before/after, so
+// no UI-side case-folding is needed. Kept free (not a GalleryGrid member) to
+// keep the class under the S1448 method cap (Phase 21).
+struct TagImportCounts { int added = 0; int skipped = 0; };
+TagImportCounts apply_tag_list(vault::Vault& v, const std::string& target,
+                               const std::vector<std::string>& tags)
+{
+    const auto slash = target.find_last_of('/');
+    const std::string parent = slash == std::string::npos ? std::string{} : target.substr(0, slash);
+    const std::string name   = slash == std::string::npos ? target : target.substr(slash + 1);
+
+    auto tag_count = [&]() -> size_t {
+        for (const auto* c : v.list(parent))
+            if (c->name == name) return c->tags.size();
+        return 0;
+    };
+
+    const size_t before = tag_count();
+    for (const auto& t : tags) (void)v.add_tag(target, t);
+    const size_t after = tag_count();
+
+    const int added = static_cast<int>(after - before);
+    return {added, static_cast<int>(tags.size()) - added};
 }
 
 // Centre the `cols` columns horizontally in a `win_w`-wide window so the left and
@@ -361,7 +389,22 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         case SDLK_QUESTION: request(NavKind::ToAdvancedSearch); return;
         default: break;
     }
-    if (key.key == SDLK_G) { start_tag_editor(); return; }  // tag editor (G)
+    if (key.key == SDLK_G) {   // tag editor (G); Shift+G imports a tag list onto a gallery
+        if (!(key.mod & SDL_KMOD_SHIFT)) { start_tag_editor(); return; }
+        // Inlined (no new method) to keep GalleryGrid under the S1448 method cap.
+        if (dialogs_.file.busy() || transfer_.active()) return;
+        const int s = nav_.selected();
+        if (s >= 0 && s < static_cast<int>(children_.size()) && children_[s]->is_gallery()) {
+            const std::string base = nav_.path();
+            naming_.tag_target = base.empty() ? children_[s]->name
+                                              : base + "/" + children_[s]->name;
+            error_.clear();
+            dialogs_.file.open_tag_list(win_.sdl_window());
+        } else {
+            error_ = "Select a gallery to import a tag list onto.";
+        }
+        return;
+    }
     if (key.key == SDLK_B) { toggle_favorite_current(); return; }  // favorite (B)
     if (key.key == SDLK_F) {  // open a favorites screen (Shift+F = galleries)
         request((key.mod & SDL_KMOD_SHIFT) ? NavKind::ToFavoriteGalleries
@@ -592,6 +635,25 @@ void GalleryGrid::update(double)
     if (!transfer_.active()) {
         pump_import();
         pump_zip_import();
+
+        // Tag-list import (Shift+G, Phase 21): inlined to keep GalleryGrid under
+        // the S1448 method cap. The .txt file carries tag metadata only — not key
+        // material or decrypted vault content — so reading it is invariant-safe.
+        if (auto res = dialogs_.file.take_result(platform::FileDialog::Purpose::TagList)) {
+            if (!res->empty() && !naming_.tag_target.empty()) {
+                if (auto file_bytes = platform::read_file(res->front())) {
+                    const auto counts =
+                        apply_tag_list(vault_, naming_.tag_target, ui::parse_tag_list(*file_bytes));
+                    status_ = std::format("Tag import: {} added, {} skipped",
+                                          counts.added, counts.skipped);
+                    refresh();
+                } else {
+                    error_ = "Could not read tag list.";
+                }
+            }
+            naming_.tag_target.clear();
+            mark_dirty();
+        }
     }
 
     if (auto dest = dialogs_.folder.take_result()) {
