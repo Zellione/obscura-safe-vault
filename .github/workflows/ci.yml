@@ -73,6 +73,10 @@ jobs:
           sudo chmod -R 1777 /tmp/apt-cache
           printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDir::Cache::archives "/tmp/apt-cache";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' \
             | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
+          # The runner image ships Microsoft/Azure apt repos we don't use; they
+          # intermittently 403, which fails `apt-get update` (exit 100) and kills
+          # the whole step. Drop them first — none of our build deps come from them.
+          sudo rm -f /etc/apt/sources.list.d/*microsoft* /etc/apt/sources.list.d/*azure* 2>/dev/null || true
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             cmake \
@@ -461,6 +465,10 @@ jobs:
           sudo chmod -R 1777 /tmp/apt-cache
           printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDir::Cache::archives "/tmp/apt-cache";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' \
             | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
+          # The runner image ships Microsoft/Azure apt repos we don't use; they
+          # intermittently 403, which fails `apt-get update` (exit 100) and kills
+          # the whole step. Drop them first — none of our build deps come from them.
+          sudo rm -f /etc/apt/sources.list.d/*microsoft* /etc/apt/sources.list.d/*azure* 2>/dev/null || true
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             cmake \
@@ -613,6 +621,10 @@ jobs:
           sudo chmod -R 1777 /tmp/apt-cache
           printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDir::Cache::archives "/tmp/apt-cache";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' \
             | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
+          # The runner image ships Microsoft/Azure apt repos we don't use; they
+          # intermittently 403, which fails `apt-get update` (exit 100) and kills
+          # the whole step. Drop them first — none of our build deps come from them.
+          sudo rm -f /etc/apt/sources.list.d/*microsoft* /etc/apt/sources.list.d/*azure* 2>/dev/null || true
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             cmake \
