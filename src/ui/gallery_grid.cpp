@@ -72,8 +72,21 @@ TagImportCounts apply_tag_list(vault::Vault& v, const std::string& target,
     for (const auto& t : tags) (void)v.add_tag(target, t);
     const size_t after = tag_count();
 
-    const int added = static_cast<int>(after - before);
+    const auto added = static_cast<int>(after - before);
     return {added, static_cast<int>(tags.size()) - added};
+}
+
+// Read, parse, and apply a picked tag-list file onto `target`. Returns a status
+// summary (or sets `error` and returns ""). Free (not a member) so update()'s
+// pump stays a flat call site under the S134 nesting limit (Phase 21).
+std::string apply_tag_list_file(vault::Vault& v, const std::string& target,
+                                const std::vector<std::string>& picked, std::string& error)
+{
+    if (target.empty() || picked.empty()) return {};
+    auto bytes = platform::read_file(picked.front());
+    if (!bytes) { error = "Could not read tag list."; return {}; }
+    const auto counts = apply_tag_list(v, target, ui::parse_tag_list(*bytes));
+    return std::format("Tag import: {} added, {} skipped", counts.added, counts.skipped);
 }
 
 // Centre the `cols` columns horizontally in a `win_w`-wide window so the left and
@@ -291,7 +304,7 @@ void GalleryGrid::finish_naming()
     refresh();
 }
 
-void GalleryGrid::start_tag_editor()
+void GalleryGrid::start_tag_editor(bool import_list)
 {
     const int s = nav_.selected();
     if (s < 0 || s >= static_cast<int>(children_.size())) return;
@@ -299,7 +312,16 @@ void GalleryGrid::start_tag_editor()
     const vault::IndexNode* n = children_[s];
     const std::string base = nav_.path();
     const std::string full_path = base.empty() ? n->name : base + "/" + n->name;
-    tag_editor_.open(full_path);
+
+    if (!import_list) { tag_editor_.open(full_path); return; }
+
+    // Shift+G: import a tag list (.txt, one per line) onto the focused gallery.
+    // The result is drained by update()'s TagList poller.
+    if (dialogs_.file.busy() || transfer_.active()) return;
+    if (!n->is_gallery()) { error_ = "Select a gallery to import a tag list onto."; return; }
+    naming_.tag_target = full_path;
+    error_.clear();
+    dialogs_.file.open_tag_list(win_.sdl_window());
 }
 
 void GalleryGrid::toggle_favorite_current()
@@ -389,22 +411,8 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         case SDLK_QUESTION: request(NavKind::ToAdvancedSearch); return;
         default: break;
     }
-    if (key.key == SDLK_G) {   // tag editor (G); Shift+G imports a tag list onto a gallery
-        if (!(key.mod & SDL_KMOD_SHIFT)) { start_tag_editor(); return; }
-        // Inlined (no new method) to keep GalleryGrid under the S1448 method cap.
-        if (dialogs_.file.busy() || transfer_.active()) return;
-        const int s = nav_.selected();
-        if (s >= 0 && s < static_cast<int>(children_.size()) && children_[s]->is_gallery()) {
-            const std::string base = nav_.path();
-            naming_.tag_target = base.empty() ? children_[s]->name
-                                              : base + "/" + children_[s]->name;
-            error_.clear();
-            dialogs_.file.open_tag_list(win_.sdl_window());
-        } else {
-            error_ = "Select a gallery to import a tag list onto.";
-        }
-        return;
-    }
+    // G opens the tag editor; Shift+G imports a tag list onto the focused gallery.
+    if (key.key == SDLK_G) { start_tag_editor((key.mod & SDL_KMOD_SHIFT) != 0); return; }
     if (key.key == SDLK_B) { toggle_favorite_current(); return; }  // favorite (B)
     if (key.key == SDLK_F) {  // open a favorites screen (Shift+F = galleries)
         request((key.mod & SDL_KMOD_SHIFT) ? NavKind::ToFavoriteGalleries
@@ -636,20 +644,12 @@ void GalleryGrid::update(double)
         pump_import();
         pump_zip_import();
 
-        // Tag-list import (Shift+G, Phase 21): inlined to keep GalleryGrid under
-        // the S1448 method cap. The .txt file carries tag metadata only — not key
-        // material or decrypted vault content — so reading it is invariant-safe.
+        // Tag-list import (Shift+G, Phase 21). The .txt carries tag metadata only —
+        // not key material or decrypted vault content — so reading it is invariant-safe.
         if (auto res = dialogs_.file.take_result(platform::FileDialog::Purpose::TagList)) {
-            if (!res->empty() && !naming_.tag_target.empty()) {
-                if (auto file_bytes = platform::read_file(res->front())) {
-                    const auto counts =
-                        apply_tag_list(vault_, naming_.tag_target, ui::parse_tag_list(*file_bytes));
-                    status_ = std::format("Tag import: {} added, {} skipped",
-                                          counts.added, counts.skipped);
-                    refresh();
-                } else {
-                    error_ = "Could not read tag list.";
-                }
+            if (!res->empty()) {
+                status_ = apply_tag_list_file(vault_, naming_.tag_target, *res, error_);
+                refresh();
             }
             naming_.tag_target.clear();
             mark_dirty();

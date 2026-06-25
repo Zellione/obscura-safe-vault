@@ -264,10 +264,11 @@ src/
                                             INDEX_MAX_TAGS; non-UTF-8 bytes opaque). `Shift+G`
                                             on a focused gallery tile opens a `.txt` dialog
                                             (FileDialog Purpose::TagList) → parse → add_tag each
-                                            (merge, not replace); GalleryGrid inlines the entry
-                                            + result pump (free apply_tag_list helper) to stay
-                                            under the S1448 method cap. Tag metadata only — no
-                                            plaintext-to-disk deviation.
+                                            (merge, not replace). GalleryGrid::start_tag_editor
+                                            (bool import_list) dispatches G vs Shift+G; update()
+                                            drains the result via free apply_tag_list_file +
+                                            apply_tag_list helpers — no new method (S1448 cap).
+                                            Tag metadata only — no plaintext-to-disk deviation.
              delete_summary.*,            ← pure recursive tally of a gallery subtree
                                             (images/videos/sub-galleries) for the `Del`
                                             delete-confirm popup (Phase 17 follow-up).

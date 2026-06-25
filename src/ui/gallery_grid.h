@@ -78,7 +78,7 @@ private:
     void pump_zip_import();        // poll the zip file dialog while transfer is not active
     bool handle_zip_conflict_key(const SDL_Event& e);  // Flatten/Skip/Esc modal; true if consumed
     bool handle_delete_confirm_key(const SDL_Event& e);  // Del-confirm modal; true if consumed
-    void start_tag_editor();   // open the tag editor for the focused tile
+    void start_tag_editor(bool import_list);  // G: open tag editor; Shift+G: import a tag list (Phase 21)
     void toggle_favorite_current();  // flip favorite on the focused tile (B)
     [[nodiscard]] bool current_allows_images() const;
     [[nodiscard]] bool current_allows_galleries() const;
