@@ -13,6 +13,8 @@
 #include "ui/favorites_images.h"
 #include "ui/gallery_grid.h"
 #include "ui/image_viewer.h"
+#include "ui/tag_galleries.h"
+#include "ui/tag_overview.h"
 #include "ui/unlock_screen.h"
 #include "ui/vault_manager.h"
 
@@ -150,6 +152,22 @@ void App::to_advanced_search()
     screen_->on_enter();
 }
 
+void App::to_tag_overview()
+{
+    state_  = State::Browsing;
+    screen_ = std::make_unique<ui::TagOverviewScreen>(
+        window_, font_, *active_, registry_, active_path_);
+    screen_->on_enter();
+}
+
+void App::to_tag_galleries(const std::string& tag)
+{
+    state_  = State::Browsing;
+    screen_ = std::make_unique<ui::TagGalleries>(
+        window_, font_, *active_, registry_, active_path_, tag);
+    screen_->on_enter();
+}
+
 namespace {
 // Manual frame-rate floor, used only when the renderer can't VSync (software /
 // headless backends); otherwise SDL_RenderPresent paces presentation.
@@ -218,6 +236,8 @@ bool App::apply_nav()
         case ToFavoriteGalleries: screen_->on_exit(); to_favorite_galleries();         return true;
         case ToFavoriteViewer:    screen_->on_exit(); to_favorite_viewer(nav.index);   return true;
         case ToAdvancedSearch:    screen_->on_exit(); to_advanced_search();            return true;
+        case ToTagOverview:       screen_->on_exit(); to_tag_overview();               return true;
+        case ToTagGalleries:      screen_->on_exit(); to_tag_galleries(nav.path);      return true;
         case ToUnlock:            screen_->on_exit(); to_unlock(nav.path);             return true;
         case ToVaultManager:      screen_->on_exit(); pending_.reset(); to_manager();  return true;
         case LockActive:

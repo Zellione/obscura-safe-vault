@@ -39,6 +39,8 @@ private:
     void to_favorite_galleries();
     void to_favorite_viewer(int index);   // viewer over the whole favorites set
     void to_advanced_search();            // Phase 18 advanced-search screen
+    void to_tag_overview();               // Phase 22 tag-overview screen
+    void to_tag_galleries(const std::string& tag);   // galleries directly carrying `tag`
     void promote_pending();               // unlock success: pending_ -> active_ (locks old)
 
     // run() helpers (kept small so the loop stays readable).

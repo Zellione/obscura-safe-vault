@@ -419,6 +419,10 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
                                            : NavKind::ToFavoriteImages);
         return;
     }
+    if (key.key == SDLK_T && (key.mod & SDL_KMOD_SHIFT)) {  // tag overview (Shift+T)
+        request(NavKind::ToTagOverview);
+        return;
+    }
 
     using enum InputAction;
     switch (map_key(key.key, key.mod)) {

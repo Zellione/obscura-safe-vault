@@ -40,6 +40,11 @@ protected:
     [[nodiscard]] virtual const char* title() const = 0;
     [[nodiscard]] virtual const char* empty_hint() const = 0;
 
+    // Where Back (Esc/Backspace) navigates. Defaults to the root gallery (the
+    // favorites screens' behaviour); the Phase 22 tag-galleries view overrides it
+    // to return to the tag overview.
+    virtual void go_back() { request(NavKind::ToGallery, "", 0); }
+
     void reload();   // re-fetch favs_ + reset selection + seed cols_
 
     // Accessors for the two collaborators subclasses need (the data members stay

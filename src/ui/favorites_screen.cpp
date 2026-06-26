@@ -76,7 +76,7 @@ void FavoritesScreen::handle_event(const SDL_Event& e)
                 case NavUp:    nav_.move(-cols_); break;
                 case NavDown:  nav_.move(cols_);  break;
                 case Select:   open_selected();   break;
-                case Back:     request(NavKind::ToGallery, "", 0); break;
+                case Back:     go_back();          break;
                 default:       break;
             }
             break;
