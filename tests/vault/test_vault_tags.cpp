@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "ui/tag_list_parse.h"
 #include "vault/vault.h"
 
 namespace fs = std::filesystem;
@@ -183,6 +184,59 @@ TEST(tags_remove_tag_case_insensitive_idempotent)
     REQUIRE(v.remove_tag("pic.jpg", "sunset") == vault::VaultResult::Ok);
     children = v.list("");
     REQUIRE(children[0]->tags.size() == 0);
+}
+
+// Repro (Phase 21 bug report): add_tag onto a gallery whose NAME contains a
+// space, with a multi-word tag — mirrors the failing import target 'Test Gallery'.
+TEST(tags_add_multiword_to_spaced_gallery)
+{
+    TempVault tv("spaced_gallery");
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    // Two ambiguous siblings, mirroring the real vault (with/without space).
+    REQUIRE(v.create_gallery("Test Gallery") == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("TestGallery") == vault::VaultResult::Ok);
+    REQUIRE(v.set_tags("Test Gallery",
+            {"Test", "Wallpaper", "big", "small", "awesome"}) == vault::VaultResult::Ok);
+
+    // Replicate apply_tag_list's per-tag add (the import path).
+    for (const char* t : {"big", "small", "awesome", "multi word tag"})
+        CHECK_EQ(v.add_tag("Test Gallery", t), vault::VaultResult::Ok);
+
+    const vault::IndexNode* spaced = nullptr;
+    for (const auto* c : v.list(""))
+        if (c->name == "Test Gallery") spaced = c;
+    REQUIRE(spaced != nullptr);
+    REQUIRE(spaced->tags.size() == 6);   // 5 existing + multi word tag
+    CHECK_EQ(spaced->tags[5], "multi word tag");
+}
+
+// Repro (Phase 21 bug report): adding a multi-word tag must succeed and persist.
+TEST(tags_add_multiword_tag_persists)
+{
+    TempVault tv("multiword");
+    auto img = pattern(1000, 7);
+
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+                == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("", img, "pic.jpg") == vault::VaultResult::Ok);
+
+        CHECK_EQ(v.add_tag("pic.jpg", "new york"), vault::VaultResult::Ok);
+        auto children = v.list("");
+        REQUIRE(children[0]->tags.size() == 1);
+        CHECK_EQ(children[0]->tags[0], "new york");
+    }
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
+    REQUIRE(v.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+    auto children = v.list("");
+    REQUIRE(children[0]->tags.size() == 1);
+    CHECK_EQ(children[0]->tags[0], "new york");
 }
 
 TEST(tags_set_tags_normalisation)
@@ -553,4 +607,49 @@ TEST(tags_add_tag_empty_or_whitespace_returns_invalid_arg)
     CHECK_EQ(v.add_tag("pic.jpg", ""), vault::VaultResult::InvalidArg);
     // Try to add a whitespace-only tag.
     CHECK_EQ(v.add_tag("pic.jpg", "   "), vault::VaultResult::InvalidArg);
+}
+
+// Phase 21: importing a tag list (parse → add_tag each) merges with the
+// gallery's existing tags (does not replace them), de-dupes case-insensitively,
+// and survives a lock/reopen.
+TEST(tags_import_tag_list_merges_and_survives_reopen)
+{
+    TempVault tv("import_list");
+
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+                == vault::VaultResult::Ok);
+        REQUIRE(v.create_gallery("trip") == vault::VaultResult::Ok);
+
+        // Pre-existing tags on the gallery.
+        REQUIRE(v.set_tags("trip", {"Keep", "existing"}) == vault::VaultResult::Ok);
+
+        // A raw tag-list file: CRLF, blank lines, surrounding whitespace, an
+        // in-file duplicate, and one case-insensitive clash with an existing tag.
+        const std::string blob = "beach\r\n\r\n  sunset \nbeach\nKEEP\nnew-tag\n";
+        auto parsed = ui::parse_tag_list(
+            std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(blob.data()), blob.size()));
+        // Parser de-dupes within the file: beach, sunset, KEEP, new-tag.
+        REQUIRE(parsed.size() == 4);
+
+        // Apply each (the import path): add_tag merges, skipping case-insensitive dupes.
+        for (const auto& t : parsed) REQUIRE(v.add_tag("trip", t) == vault::VaultResult::Ok);
+    }
+
+    // Reopen and verify the merged set.
+    vault::Vault v;
+    REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
+    REQUIRE(v.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+
+    auto children = v.list("");
+    REQUIRE(children.size() == 1);
+    const auto& tags = children[0]->tags;
+    // Existing kept (original casing), new ones appended, "KEEP" skipped as a dupe.
+    REQUIRE(tags.size() == 5);
+    CHECK_EQ(tags[0], "Keep");
+    CHECK_EQ(tags[1], "existing");
+    CHECK_EQ(tags[2], "beach");
+    CHECK_EQ(tags[3], "sunset");
+    CHECK_EQ(tags[4], "new-tag");
 }

@@ -87,6 +87,34 @@ TEST(file_dialog_cancel_routes_to_matching_purpose)
     CHECK(zip->empty());     // present-but-empty == cancelled
 }
 
+// Regression (Phase 21): a tag-list (.txt) pick must NOT be consumable by the
+// image-import or zip-import pollers that share the same FileDialog, and the
+// tag-list poller must skip an image/zip result tagged for another purpose.
+TEST(file_dialog_taglist_result_isolated_from_images_and_zip)
+{
+    FileDialog d;
+    Peer::arm(d, Purpose::TagList);
+    Peer::complete(d, {"/tmp/tags.txt"});
+
+    CHECK_FALSE(d.take_result(Purpose::Images).has_value());
+    CHECK_FALSE(d.take_result(Purpose::Zip).has_value());
+
+    auto txt = d.take_result(Purpose::TagList);
+    REQUIRE(txt.has_value());
+    REQUIRE(txt->size() == 1);
+    CHECK(txt->front() == "/tmp/tags.txt");
+}
+
+TEST(file_dialog_images_result_not_taken_by_taglist_purpose)
+{
+    FileDialog d;
+    Peer::arm(d, Purpose::Images);
+    Peer::complete(d, {"/tmp/a.png"});
+
+    CHECK_FALSE(d.take_result(Purpose::TagList).has_value());
+    CHECK(d.take_result(Purpose::Images).has_value());
+}
+
 // The no-arg take_result() keeps its purpose-agnostic behaviour for the
 // single-consumer screens (unlock, vault manager, transfer keyfile).
 TEST(file_dialog_no_arg_take_is_purpose_agnostic)

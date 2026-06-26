@@ -236,7 +236,11 @@ src/
                                             reused by GalleryGrid (delegates) and the advanced-
                                             search grid view. Decrypt → off-thread decode → GPU
                                             upload via the shared cache; no new disk path.
-             tag_editor.*,                ← `G` add/remove tags modal (Phase 12)
+             tag_editor.*,                ← `G` add/remove tags modal (Phase 12); the
+                                            current-tags list scrolls (Up/Down) via the pure
+                                            tag_scroll.h (tag_scroll_first) and auto-scrolls to a
+                                            newly-added tag — without it, tags past the ~5 that
+                                            fit the modal were clipped (Phase 21 fix)
              favorites_images.*,          ← flat grid of favorited images (Phase 13)
              favorites_galleries.*,       ← flat grid of favorited galleries (Phase 13)
              vault_manager.*,             ← multi-vault home screen: list/open/create/
@@ -257,6 +261,18 @@ src/
              zip_import.*,                ← ZIP executor: miniz reader → mlock'd
                                             SecureBytes → Vault::add_image/add_video;
                                             triggered by `Z` key in gallery grid (Phase 17)
+             tag_list_parse.*,            ← pure, SDL/vault-free tag-list parser (Phase 21):
+                                            raw .txt bytes → normalised tag list (split on LF,
+                                            trim CR+whitespace, drop blanks, case-insensitive
+                                            de-dupe, truncate to TAG_MAX_BYTES=0xFFFF, cap at
+                                            INDEX_MAX_TAGS; non-UTF-8 bytes opaque). `Shift+G`
+                                            on a focused gallery tile opens a `.txt` dialog
+                                            (FileDialog Purpose::TagList) → parse → add_tag each
+                                            (merge, not replace). GalleryGrid::start_tag_editor
+                                            (bool import_list) dispatches G vs Shift+G; update()
+                                            drains the result via free apply_tag_list_file +
+                                            apply_tag_list helpers — no new method (S1448 cap).
+                                            Tag metadata only — no plaintext-to-disk deviation.
              delete_summary.*,            ← pure recursive tally of a gallery subtree
                                             (images/videos/sub-galleries) for the `Del`
                                             delete-confirm popup (Phase 17 follow-up).
@@ -281,7 +297,9 @@ src/
                                             each open tagged with a Purpose +
                                             take_result(Purpose) so one shared dialog polled
                                             by two handlers (GalleryGrid image vs zip import)
-                                            can't steal each other's result (Phase 17 fix)
+                                            can't steal each other's result (Phase 17 fix);
+                                            Purpose::TagList + open_tag_list() (.txt) for the
+                                            Phase 21 tag-list import
              folder_dialog.*,             ← export destination picker (Phase 10)
              vault_registry.*             ← recent-vaults list, paths only, atomic
                                             write — stores NO secrets (Phase 14)

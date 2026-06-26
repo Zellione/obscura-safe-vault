@@ -198,7 +198,11 @@ src/
                                                  GalleryGrid; Tab cycles scope
                                                  (Both/Images/Galleries) (Phase 12)
                tag_editor.*                    — `G` add/remove-tags modal in both
-                                                 GalleryGrid + ImageViewer (Phase 12)
+                                                 GalleryGrid + ImageViewer (Phase 12). Current-tags
+                                                 list scrolls (Up/Down) via pure tag_scroll.h
+                                                 (tag_scroll_first) + auto-scrolls to a just-added
+                                                 tag; previously clipped tags past the ~5 that fit
+                                                 the fixed modal (Phase 21 fix).
                advanced_search_model.*         — pure, SDL/vault-free advanced query (Phase 18,
                                                  unit-tested): AdvancedQuery{weighted include (OR
                                                  gate + scorers), exclude (hard filter), AND/OR
@@ -322,6 +326,18 @@ src/
                                                  off-thread decode -> GPU upload via shared cache; no
                                                  new disk path. Reused by GalleryGrid (delegates) +
                                                  advanced-search grid view.
+               tag_list_parse.*                — pure, SDL/vault-free tag-list parser (Phase 21):
+                                                 parse_tag_list(span<const uint8_t>) -> normalised
+                                                 tags (split on LF, trim CR+ws, drop blanks,
+                                                 case-insensitive de-dupe keeping first casing,
+                                                 truncate to TAG_MAX_BYTES=0xFFFF, cap at
+                                                 INDEX_MAX_TAGS; non-UTF-8 bytes opaque). Unit-tested.
+                                                 GalleryGrid Shift+G on a focused gallery tile opens a
+                                                 .txt dialog (FileDialog Purpose::TagList +
+                                                 open_tag_list) -> parse -> add_tag each (merge, not
+                                                 replace); entry + result pump INLINED (free
+                                                 apply_tag_list helper, counts added/skipped by tag-
+                                                 count delta) to keep GalleryGrid under the S1448 cap.
                input.*, nav_model.*, viewer_model.h
                passphrase.*, screen.h
                secure_text_field.*, unlock_logic.*
@@ -331,6 +347,8 @@ src/
                                                  take_result(Purpose) so one shared dialog
                                                  polled by two handlers (GalleryGrid image vs
                                                  zip import) can't steal each other's result.
+                                                 Phase 21: Purpose::TagList + open_tag_list() (.txt)
+                                                 for the tag-list import.
                folder_dialog.*                 — export destination picker (Phase 10)
                vault_registry.*                — recent-vaults list (Phase 14): config-dir
                                                  file of known vault PATHS ONLY (no

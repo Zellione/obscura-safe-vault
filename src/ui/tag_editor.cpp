@@ -1,6 +1,7 @@
 #include "ui/tag_editor.h"
 
 #include <algorithm>
+#include <format>
 #include <string>
 #include <string_view>
 
@@ -9,6 +10,7 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "ui/nav_model.h"
+#include "ui/tag_scroll.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
 #include "vault/vault.h"
@@ -88,6 +90,23 @@ void TagEditor::refresh_tags()
     error_ = "Node not found.";
 }
 
+void TagEditor::select_tag(std::string_view tag)
+{
+    // Case-insensitive find so the just-added/merged tag is highlighted and the
+    // render window scrolls to reveal it. Falls back to the last row.
+    auto lower = [](unsigned char c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; };
+    auto ci_equal = [&](std::string_view a, std::string_view b) {
+        if (a.size() != b.size()) return false;
+        for (size_t i = 0; i < a.size(); ++i)
+            if (lower(static_cast<unsigned char>(a[i])) != lower(static_cast<unsigned char>(b[i])))
+                return false;
+        return true;
+    };
+    for (int i = 0; i < static_cast<int>(tags_.size()); ++i)
+        if (ci_equal(tags_[i], tag)) { selected_ = i; return; }
+    selected_ = std::max(0, static_cast<int>(tags_.size()) - 1);
+}
+
 bool TagEditor::handle_event(const SDL_Event& e)
 {
     if (!active_) return false;
@@ -122,6 +141,7 @@ bool TagEditor::handle_event(const SDL_Event& e)
                         new_tag_buf_.clear();
                         error_.clear();
                         refresh_tags();
+                        select_tag(trimmed);   // scroll the list to reveal it
                         break;
                     case InvalidArg:
                         error_ = "Invalid tag.";
@@ -202,16 +222,30 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
                 font.text_top_for_center(input_box.y + input_box.h * 0.5f),
                 new_tag_buf_, TEXT);
 
-    // Current tags list
-    const float list_y = input_y + INPUT_BOX_H + 16;
-
-    r.draw_text(font, mx + PAD, list_y, "Current tags:", TEXT_DIM);
-
+    // Current tags list — scrolls to keep the selected (and newly-added) tag
+    // visible. A node can hold far more tags than fit the fixed-height modal, so
+    // we render a window that follows `selected_` (Phase 21 fix). Indicators use
+    // ASCII only (the baked font atlas covers printable ASCII).
+    const float list_y     = input_y + INPUT_BOX_H + 16;
     const float tags_start = list_y + LINE;
-    for (int i = 0; i < static_cast<int>(tags_.size()); ++i) {
-        const float row_y = tags_start + static_cast<float>(i) * (TAG_ROW_H + TAG_LIST_GAP);
-        if (row_y + TAG_ROW_H > my + MODAL_H - 50) break;
+    const float row_pitch  = TAG_ROW_H + TAG_LIST_GAP;
+    const auto  total      = static_cast<int>(tags_.size());
+    const int   max_visible =
+        std::max(1, static_cast<int>(((my + MODAL_H - 50) - tags_start) / row_pitch));
+    const int   first = tag_scroll_first(total, selected_, max_visible);
+    const int   last  = std::min(total, first + max_visible);
 
+    // Header shows the visible range / count so hidden tags are discoverable.
+    std::string header = "Current tags";
+    if (total > max_visible)
+        header += std::format(" ({}-{} of {})", first + 1, last, total);
+    else if (total > 0)
+        header += std::format(" ({})", total);
+    header += ":";
+    r.draw_text(font, mx + PAD, list_y, header, TEXT_DIM);
+
+    for (int i = first; i < last; ++i) {
+        const float row_y = tags_start + static_cast<float>(i - first) * row_pitch;
         const SDL_FRect tag_rect{mx + PAD, row_y, MODAL_W - 2 * PAD, TAG_ROW_H};
 
         if (i == selected_) {
@@ -238,7 +272,7 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
 
     // Footer hint
     r.draw_text(font, mx + PAD, my + MODAL_H - 12,
-                "[Enter] Add  [↑↓] Select  [Del] Remove  [Esc] Close",
+                "[Enter] Add  [Up/Down] Scroll  [Del] Remove  [Esc] Close",
                 TEXT_FAINT);
 }
 
