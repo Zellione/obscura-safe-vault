@@ -1,6 +1,7 @@
 #include "ui/tag_editor.h"
 
 #include <algorithm>
+#include <format>
 #include <string>
 #include <string_view>
 
@@ -228,7 +229,7 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     const float list_y     = input_y + INPUT_BOX_H + 16;
     const float tags_start = list_y + LINE;
     const float row_pitch  = TAG_ROW_H + TAG_LIST_GAP;
-    const int   total      = static_cast<int>(tags_.size());
+    const auto  total      = static_cast<int>(tags_.size());
     const int   max_visible =
         std::max(1, static_cast<int>(((my + MODAL_H - 50) - tags_start) / row_pitch));
     const int   first = tag_scroll_first(total, selected_, max_visible);
@@ -237,10 +238,9 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     // Header shows the visible range / count so hidden tags are discoverable.
     std::string header = "Current tags";
     if (total > max_visible)
-        header += " (" + std::to_string(first + 1) + "-" + std::to_string(last) +
-                  " of " + std::to_string(total) + ")";
+        header += std::format(" ({}-{} of {})", first + 1, last, total);
     else if (total > 0)
-        header += " (" + std::to_string(total) + ")";
+        header += std::format(" ({})", total);
     header += ":";
     r.draw_text(font, mx + PAD, list_y, header, TEXT_DIM);
 
