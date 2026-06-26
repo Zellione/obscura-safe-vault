@@ -198,7 +198,11 @@ src/
                                                  GalleryGrid; Tab cycles scope
                                                  (Both/Images/Galleries) (Phase 12)
                tag_editor.*                    — `G` add/remove-tags modal in both
-                                                 GalleryGrid + ImageViewer (Phase 12)
+                                                 GalleryGrid + ImageViewer (Phase 12). Current-tags
+                                                 list scrolls (Up/Down) via pure tag_scroll.h
+                                                 (tag_scroll_first) + auto-scrolls to a just-added
+                                                 tag; previously clipped tags past the ~5 that fit
+                                                 the fixed modal (Phase 21 fix).
                advanced_search_model.*         — pure, SDL/vault-free advanced query (Phase 18,
                                                  unit-tested): AdvancedQuery{weighted include (OR
                                                  gate + scorers), exclude (hard filter), AND/OR

@@ -236,7 +236,11 @@ src/
                                             reused by GalleryGrid (delegates) and the advanced-
                                             search grid view. Decrypt → off-thread decode → GPU
                                             upload via the shared cache; no new disk path.
-             tag_editor.*,                ← `G` add/remove tags modal (Phase 12)
+             tag_editor.*,                ← `G` add/remove tags modal (Phase 12); the
+                                            current-tags list scrolls (Up/Down) via the pure
+                                            tag_scroll.h (tag_scroll_first) and auto-scrolls to a
+                                            newly-added tag — without it, tags past the ~5 that
+                                            fit the modal were clipped (Phase 21 fix)
              favorites_images.*,          ← flat grid of favorited images (Phase 13)
              favorites_galleries.*,       ← flat grid of favorited galleries (Phase 13)
              vault_manager.*,             ← multi-vault home screen: list/open/create/
