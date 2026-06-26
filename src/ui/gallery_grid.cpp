@@ -673,8 +673,8 @@ void GalleryGrid::render(gfx::Renderer& r)
     r.draw_text(font_, OX, 40, crumb, TEXT_DIM);
     r.draw_text(font_, OX, 90,
                 "[I] Import  [Z] ZIP  [N] New  [Del] Delete  [/] Search  [?] Advanced  "
-                "[G] Tags  [B] Fav  [F] Fav Images  [Shift+F] Fav Galleries  [Enter] Open  "
-                "[Space] Select  [X] Export  [M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid",
+                "[G] Tags  [Shift+G] Tag list  [B] Fav  [F] Fav Images  [Shift+F] Fav Galleries  "
+                "[Enter] Open  [Space] Select  [X] Export  [M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid",
                 TEXT_FAINT);
 
     if (!sel_.empty())
