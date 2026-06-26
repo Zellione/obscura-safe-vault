@@ -1,6 +1,7 @@
 #include "ui/tag_overview.h"
 
 #include <algorithm>
+#include <format>
 #include <string>
 #include <utility>
 
@@ -38,11 +39,9 @@ ListGeom compute_geom(float ph, float win_h, int count, int sel)
 
 std::string count_label(int galleries, int images)
 {
-    auto plural = [](int n, const char* one, const char* many) {
-        return std::to_string(n) + (n == 1 ? one : many);
-    };
-    return plural(galleries, " gallery", " galleries") + "   " +
-           plural(images, " image", " images");
+    return std::format("{} {}   {} {}",
+                       galleries, galleries == 1 ? "gallery" : "galleries",
+                       images, images == 1 ? "image" : "images");
 }
 } // namespace
 

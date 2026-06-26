@@ -295,18 +295,24 @@ void collect_tags(const IndexNode& node, std::vector<std::string>& out)
 // `tallies` is pre-seeded with one zeroed entry per distinct tag (canonical
 // casing from collect_tags); this just bumps the matching entry for each node's
 // own tags. Non-gallery nodes (images + videos) count toward image_count.
+// Bump the tally for `tag` (matched case-insensitively against the pre-seeded
+// vocabulary) by one gallery or one image. Kept separate from the recursive walk
+// to keep that walk's nesting shallow (cpp:S134).
+void bump_tag_tally(std::vector<ui::TagTally>& tallies, std::string_view tag, bool is_gallery)
+{
+    auto it = std::ranges::find_if(tallies, [&](const ui::TagTally& tt) {
+        return ci_equal(tt.tag, tag);
+    });
+    if (it == tallies.end()) return;
+    if (is_gallery) ++it->gallery_count;
+    else            ++it->image_count;
+}
+
 void count_direct_tags(const IndexNode& node, std::vector<ui::TagTally>& tallies)
 {
     for (const auto& child : node.children) {
-        for (const auto& t : child.tags) {
-            auto it = std::ranges::find_if(tallies, [&](const ui::TagTally& tt) {
-                return ci_equal(tt.tag, t);
-            });
-            if (it != tallies.end()) {
-                if (child.is_gallery()) ++it->gallery_count;
-                else                    ++it->image_count;
-            }
-        }
+        for (const auto& t : child.tags)
+            bump_tag_tally(tallies, t, child.is_gallery());
         if (child.is_gallery()) count_direct_tags(child, tallies);
     }
 }
