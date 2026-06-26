@@ -186,6 +186,59 @@ TEST(tags_remove_tag_case_insensitive_idempotent)
     REQUIRE(children[0]->tags.size() == 0);
 }
 
+// Repro (Phase 21 bug report): add_tag onto a gallery whose NAME contains a
+// space, with a multi-word tag — mirrors the failing import target 'Test Gallery'.
+TEST(tags_add_multiword_to_spaced_gallery)
+{
+    TempVault tv("spaced_gallery");
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    // Two ambiguous siblings, mirroring the real vault (with/without space).
+    REQUIRE(v.create_gallery("Test Gallery") == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("TestGallery") == vault::VaultResult::Ok);
+    REQUIRE(v.set_tags("Test Gallery",
+            {"Test", "Wallpaper", "big", "small", "awesome"}) == vault::VaultResult::Ok);
+
+    // Replicate apply_tag_list's per-tag add (the import path).
+    for (const char* t : {"big", "small", "awesome", "multi word tag"})
+        CHECK_EQ(v.add_tag("Test Gallery", t), vault::VaultResult::Ok);
+
+    const vault::IndexNode* spaced = nullptr;
+    for (const auto* c : v.list(""))
+        if (c->name == "Test Gallery") spaced = c;
+    REQUIRE(spaced != nullptr);
+    REQUIRE(spaced->tags.size() == 6);   // 5 existing + multi word tag
+    CHECK_EQ(spaced->tags[5], "multi word tag");
+}
+
+// Repro (Phase 21 bug report): adding a multi-word tag must succeed and persist.
+TEST(tags_add_multiword_tag_persists)
+{
+    TempVault tv("multiword");
+    auto img = pattern(1000, 7);
+
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+                == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("", img, "pic.jpg") == vault::VaultResult::Ok);
+
+        CHECK_EQ(v.add_tag("pic.jpg", "new york"), vault::VaultResult::Ok);
+        auto children = v.list("");
+        REQUIRE(children[0]->tags.size() == 1);
+        CHECK_EQ(children[0]->tags[0], "new york");
+    }
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
+    REQUIRE(v.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+    auto children = v.list("");
+    REQUIRE(children[0]->tags.size() == 1);
+    CHECK_EQ(children[0]->tags[0], "new york");
+}
+
 TEST(tags_set_tags_normalisation)
 {
     TempVault tv("normalise");

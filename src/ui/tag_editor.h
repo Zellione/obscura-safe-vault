@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace gfx { class Renderer; class FontAtlas; class Window; }
@@ -34,7 +35,8 @@ public:
     void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
 
 private:
-    void refresh_tags();  // reload the node's current tags from the vault
+    void refresh_tags();              // reload the node's current tags from the vault
+    void select_tag(std::string_view tag);  // select `tag` (ci) so the list scrolls to it
 
     vault::Vault&        vault_;
     gfx::Window&         win_;
