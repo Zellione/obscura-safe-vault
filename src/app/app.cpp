@@ -14,9 +14,11 @@
 #include "ui/gallery_grid.h"
 #include "ui/image_viewer.h"
 #include "ui/tag_galleries.h"
+#include "ui/tag_images.h"
 #include "ui/tag_overview.h"
 #include "ui/unlock_screen.h"
 #include "ui/vault_manager.h"
+#include "vault/vault_search.h"
 
 #ifndef OSV_DEFAULT_FONT
 #define OSV_DEFAULT_FONT "assets/fonts/NotoSans-Regular.ttf"
@@ -168,6 +170,37 @@ void App::to_tag_galleries(const std::string& tag)
     screen_->on_enter();
 }
 
+void App::to_tag_images(const std::string& tag)
+{
+    state_  = State::Browsing;
+    screen_ = std::make_unique<ui::TagImages>(
+        window_, font_, *active_, *cache_, registry_, active_path_, tag);
+    screen_->on_enter();
+}
+
+void App::to_tag_viewer(const std::string& tag, int index)
+{
+    // Build a viewer collection from the tag's media set (same ordering the grid
+    // used), so prev/next iterate the set and Esc returns to the tag-images grid.
+    ui::ImageViewer::Album album;
+    album.from_collection = true;
+    album.back            = ui::Nav{ui::NavKind::ToTagImages, tag, 0};
+    auto hits = vault::VaultSearch(*active_).images_with_tag(tag);
+    album.images.reserve(hits.size());
+    album.paths.reserve(hits.size());
+    for (auto& h : hits) {
+        album.images.push_back(h.node);
+        album.paths.push_back(std::move(h.path));
+    }
+
+    state_  = State::Viewing;
+    screen_ = std::make_unique<ui::ImageViewer>(
+        window_, font_, *active_, *cache_,
+        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_},
+        std::move(album), index);
+    screen_->on_enter();
+}
+
 namespace {
 // Manual frame-rate floor, used only when the renderer can't VSync (software /
 // headless backends); otherwise SDL_RenderPresent paces presentation.
@@ -238,6 +271,8 @@ bool App::apply_nav()
         case ToAdvancedSearch:    screen_->on_exit(); to_advanced_search();            return true;
         case ToTagOverview:       screen_->on_exit(); to_tag_overview();               return true;
         case ToTagGalleries:      screen_->on_exit(); to_tag_galleries(nav.path);      return true;
+        case ToTagImages:         screen_->on_exit(); to_tag_images(nav.path);          return true;
+        case ToTagViewer:         screen_->on_exit(); to_tag_viewer(nav.path, nav.index); return true;
         case ToUnlock:            screen_->on_exit(); to_unlock(nav.path);             return true;
         case ToVaultManager:      screen_->on_exit(); pending_.reset(); to_manager();  return true;
         case LockActive:

@@ -41,6 +41,8 @@ private:
     void to_advanced_search();            // Phase 18 advanced-search screen
     void to_tag_overview();               // Phase 22 tag-overview screen
     void to_tag_galleries(const std::string& tag);   // galleries directly carrying `tag`
+    void to_tag_images(const std::string& tag);            // images directly carrying a tag
+    void to_tag_viewer(const std::string& tag, int index); // viewer over a tag's media set
     void promote_pending();               // unlock success: pending_ -> active_ (locks old)
 
     // run() helpers (kept small so the loop stays readable).
