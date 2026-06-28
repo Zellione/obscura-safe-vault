@@ -151,9 +151,9 @@ src/
                                             budget (cpp:S1448) (Phase 18). Phase 22 adds
                                             tag_overview() → per-distinct-tag {gallery,image}
                                             direct-tag tally (ui::TagTally; no cascade, reuses the
-                                            all_tags vocabulary) + galleries_with_tag() → galleries
-                                            directly carrying one tag — both kept off Vault for the
-                                            same S1448 reason.
+                                            all_tags vocabulary) + galleries_with_tag() + images_with_tag()
+                                            → galleries and images directly carrying one tag — both kept off
+                                            Vault for the same S1448 reason.
              transfer.*                   ← transfer_image + image_target_galleries (PR2);
                                             transfer_gallery (recursive copy-then-delete) +
                                             gallery_target_parents (PR3); TransferMode
@@ -250,7 +250,9 @@ src/
              favorites_galleries.*,       ← flat grid of favorited galleries (Phase 13).
                                             FavoritesScreen gained a virtual go_back() (default →
                                             root grid) so TagGalleries can return to the overview
-                                            (Phase 22).
+                                            (Phase 22); also gained handle_extra_key/extra_hint/
+                                            show_favorite_badge hooks used by TagImages and TagGalleries
+                                            (Phase 22 follow-up).
              tag_overview_model.*,        ← pure, SDL/vault-free tag-overview presentation
                                             (Phase 22): TagTally{tag,gallery_count,image_count} +
                                             sort_tags (Name / Count-desc) + filter_tags
@@ -264,7 +266,15 @@ src/
                                             one tag (NavKind::ToTagGalleries, tag in Nav::path); a
                                             thin FavoritesScreen subclass over
                                             VaultSearch::galleries_with_tag whose go_back() returns
-                                            to the tag overview (Phase 22).
+                                            to the tag overview (Phase 22). Tab toggles to the images
+                                            view (Phase 22 follow-up).
+             tag_images.*,                ← images/videos directly carrying one tag
+                                            (NavKind::ToTagImages; tag in Nav::path); a
+                                            FavoritesImages subclass over VaultSearch::
+                                            images_with_tag whose Tab returns to the galleries
+                                            view, Enter opens a collection viewer over the set
+                                            (NavKind::ToTagViewer), and go_back() returns to the
+                                            tag overview (Phase 22 follow-up).
              vault_manager.*,             ← multi-vault home screen: list/open/create/
                                             remove/lock known vaults (Phase 14)
              transfer_dialog.*,           ← `M` modal: move OR copy selected images / a
