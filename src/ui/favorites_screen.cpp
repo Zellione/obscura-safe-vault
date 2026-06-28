@@ -70,6 +70,7 @@ void FavoritesScreen::handle_event(const SDL_Event& e)
     switch (e.type) {
         case SDL_EVENT_KEY_DOWN:
             if (is_quick_switch_key(e.key)) { quick_switch_.open(); break; }   // switch vault (`)
+            if (handle_extra_key(e.key)) break;   // subclass consumed it (e.g. tag-view toggle)
             switch (map_key(e.key.key, e.key.mod)) {
                 case NavLeft:  nav_.move(-1);     break;
                 case NavRight: nav_.move(1);      break;
@@ -102,7 +103,8 @@ void FavoritesScreen::render(gfx::Renderer& r)
     const auto W = static_cast<float>(win_.width());
 
     r.draw_text(font_, OX, 40, title(), TEXT_DIM);
-    r.draw_text(font_, OX, 90, "[Enter] Open   [`] Switch   [Esc] Back", TEXT_FAINT);
+    const std::string hint = std::string("[Enter] Open   [`] Switch   [Esc] Back   ") + extra_hint();
+    r.draw_text(font_, OX, 90, hint, TEXT_FAINT);
 
     const auto H = static_cast<float>(win_.height());
     if (favs_.empty())
@@ -126,10 +128,12 @@ void FavoritesScreen::render(gfx::Renderer& r)
             [this](std::string_view s) { return font_.measure(s); });
         r.draw_text(font_, cellr.x + 8, label_y, label, TEXT);
 
-        // Gold favorite badge, top-right (every tile here is a favorite).
-        const SDL_FRect badge{cellr.x + CELL - 8 - 18, cellr.y + 8, 18, 18};
-        r.draw_round_rect(badge, RADIUS_SMALL, FAVORITE);
-        r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
+        // Gold favorite badge, top-right (favorites screens only — tag views opt out).
+        if (show_favorite_badge()) {
+            const SDL_FRect badge{cellr.x + CELL - 8 - 18, cellr.y + 8, 18, 18};
+            r.draw_round_rect(badge, RADIUS_SMALL, FAVORITE);
+            r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
+        }
     }
 
     quick_switch_.render(r, font_, W, H);

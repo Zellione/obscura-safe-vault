@@ -45,6 +45,14 @@ protected:
     // to return to the tag overview.
     virtual void go_back() { request(NavKind::ToGallery, "", 0); }
 
+    // Extra subclass input + chrome hooks (default no-ops; the favorites screens
+    // don't use them). The tag views use them for the Galleries⟷Images Tab
+    // toggle, an extra hint, and to suppress the favorite badge (their tiles are
+    // tag matches, not favorites).
+    virtual bool handle_extra_key(const SDL_KeyboardEvent& /*key*/) { return false; }
+    [[nodiscard]] virtual const char* extra_hint() const { return ""; }
+    [[nodiscard]] virtual bool        show_favorite_badge() const { return true; }
+
     void reload();   // re-fetch favs_ + reset selection + seed cols_
 
     // Accessors for the two collaborators subclasses need (the data members stay
