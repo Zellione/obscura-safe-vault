@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <span>
 #include <string>
 #include <vector>
@@ -30,6 +32,12 @@ std::vector<uint8_t> pattern(size_t n, uint8_t seed)
     std::vector<uint8_t> v(n);
     for (size_t i = 0; i < n; ++i) v[i] = static_cast<uint8_t>(i * 37 + seed);
     return v;
+}
+
+std::vector<uint8_t> read_file(const std::string& path)
+{
+    std::ifstream f(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
 }
 
 struct TempVault {
@@ -66,7 +74,7 @@ bool has_path(const std::vector<vault::SearchHit>& hits, std::string_view p)
 // Build the shared nested fixture used by several tests.
 //   trip       gallery, tag "vacation"
 //     day1     gallery, tag "beach"      → a.jpg {beach,sunset}, b.jpg {sunset}
-//     day2     gallery, (no tags)        → c.jpg {vacation}
+//     day2     gallery, (no tags)        → c.jpg {vacation}, clip.mp4 {vacation}
 //   misc       gallery, tag "beach"      (empty leaf)
 [[nodiscard]] bool build_tree(vault::Vault& v)
 {
@@ -82,7 +90,11 @@ bool has_path(const std::vector<vault::SearchHit>& hits, std::string_view p)
            v.set_tags("misc", {"beach"}) == R::Ok &&
            v.set_tags("trip/day1/a.jpg", {"beach", "sunset"}) == R::Ok &&
            v.set_tags("trip/day1/b.jpg", {"sunset"}) == R::Ok &&
-           v.set_tags("trip/day2/c.jpg", {"vacation"}) == R::Ok;
+           v.set_tags("trip/day2/c.jpg", {"vacation"}) == R::Ok &&
+           v.add_video("trip/day2",
+                       std::span<const uint8_t>(read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4")),
+                       "clip.mp4", /*chunk_size=*/4096) == R::Ok &&
+           v.set_tags("trip/day2/clip.mp4", {"vacation"}) == R::Ok;
 }
 
 } // namespace
@@ -103,7 +115,7 @@ TEST(tag_overview_counts_direct_tags_only_no_cascade)
     const auto* vac = find_tag(ov, "vacation");
     REQUIRE(vac != nullptr);
     CHECK_EQ(vac->gallery_count, 1);
-    CHECK_EQ(vac->image_count, 1);
+    CHECK_EQ(vac->image_count, 2);   // c.jpg + clip.mp4 (videos count as media)
 
     // beach: day1 + misc galleries directly; a.jpg image directly.
     const auto* beach = find_tag(ov, "beach");
@@ -190,4 +202,59 @@ TEST(tag_overview_stable_across_lock_reopen)
     auto vac = vault::VaultSearch(v).galleries_with_tag("vacation");
     CHECK_EQ(vac.size(), static_cast<size_t>(1));
     CHECK(has_path(vac, "trip"));
+}
+
+TEST(images_with_tag_direct_only_includes_video)
+{
+    TempVault tv("iwt");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(build_tree(v));
+    vault::VaultSearch s(v);
+
+    // vacation directly tags c.jpg (image) and clip.mp4 (video); a.jpg/b.jpg only
+    // inherit via the parent gallery and must NOT appear.
+    auto vac = s.images_with_tag("vacation");
+    CHECK_EQ(vac.size(), static_cast<size_t>(2));
+    CHECK(has_path(vac, "trip/day2/c.jpg"));
+    CHECK(has_path(vac, "trip/day2/clip.mp4"));
+    CHECK(std::ranges::none_of(vac, [](const auto& h) { return h.is_gallery; }));
+
+    // Case-insensitive: a.jpg carries beach directly; day1/misc galleries don't leak in.
+    auto beach = s.images_with_tag("BEACH");
+    CHECK_EQ(beach.size(), static_cast<size_t>(1));
+    CHECK(has_path(beach, "trip/day1/a.jpg"));
+
+    // sunset is on a.jpg + b.jpg only.
+    auto sun = s.images_with_tag("sunset");
+    CHECK_EQ(sun.size(), static_cast<size_t>(2));
+    CHECK(has_path(sun, "trip/day1/a.jpg"));
+    CHECK(has_path(sun, "trip/day1/b.jpg"));
+}
+
+TEST(images_with_tag_matches_overview_image_count)
+{
+    TempVault tv("iwt_consistency");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(build_tree(v));
+    vault::VaultSearch s(v);
+
+    for (const auto& tt : s.tag_overview())
+        CHECK_EQ(s.images_with_tag(tt.tag).size(), static_cast<size_t>(tt.image_count));
+}
+
+TEST(images_with_tag_empty_and_locked)
+{
+    TempVault tv("iwt_empty");
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+        REQUIRE(build_tree(v));
+        CHECK(vault::VaultSearch(v).images_with_tag("nope").empty());   // unknown tag
+        CHECK(vault::VaultSearch(v).images_with_tag("").empty());       // empty tag
+    }
+    vault::Vault v;
+    REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);   // stays locked
+    CHECK(vault::VaultSearch(v).images_with_tag("sunset").empty());
 }

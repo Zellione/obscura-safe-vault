@@ -44,6 +44,12 @@ public:
     // tag" action. Empty while locked.
     [[nodiscard]] std::vector<SearchHit> galleries_with_tag(std::string_view tag) const;
 
+    // The leaf media (images AND videos) that *directly* carry `tag` (case-
+    // insensitive exact match, not substring, not cascade), flat with full paths
+    // — backs the tag overview's images face. Equals the overview's image_count
+    // for the same tag. Empty while locked. (Phase 22 follow-up.)
+    [[nodiscard]] std::vector<SearchHit> images_with_tag(std::string_view tag) const;
+
     // Saved searches — vault-global, persisted in the encrypted index. save_search
     // upserts by exact name (InvalidArg for an empty name or when full);
     // delete_saved_search removes by name (NotFound if absent). Both persist via

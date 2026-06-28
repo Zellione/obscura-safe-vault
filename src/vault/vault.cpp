@@ -338,6 +338,30 @@ void collect_galleries_with_tag(const IndexNode& node, std::string_view prefix,
     }
 }
 
+// Collect every leaf media node (image or video) that DIRECTLY carries `tag`
+// (case-insensitive exact match — not substring, not cascade), flat with full
+// paths. effective_tags is left empty (this lookup never computes the cascade).
+// Mirrors collect_galleries_with_tag but for !is_gallery() nodes (Phase 22 f/u).
+void collect_images_with_tag(const IndexNode& node, std::string_view prefix,
+                             std::string_view tag, std::vector<SearchHit>& out)
+{
+    for (const auto& child : node.children) {
+        const std::string full_path = join_child_path(prefix, child.name);
+        if (child.is_gallery()) {
+            collect_images_with_tag(child, full_path, tag, out);
+            continue;
+        }
+        if (std::ranges::any_of(child.tags, [&](const auto& t) { return ci_equal(t, tag); }))
+            out.push_back(SearchHit{
+                .path           = full_path,
+                .is_gallery     = false,
+                .name           = child.name,
+                .effective_tags = {},
+                .node           = &child,
+            });
+    }
+}
+
 // Advanced-search DFS (Phase 18): evaluate `query` against every in-scope node,
 // cascading gallery tags, collecting each match with its relevance score.
 void adv_search_dfs(const IndexNode& node, std::string_view prefix,
@@ -1040,6 +1064,14 @@ std::vector<SearchHit> VaultSearch::galleries_with_tag(std::string_view tag) con
     std::vector<SearchHit> out;
     if (!v_.unlocked_ || tag.empty()) return out;
     collect_galleries_with_tag(v_.root_, "", tag, out);
+    return out;
+}
+
+std::vector<SearchHit> VaultSearch::images_with_tag(std::string_view tag) const
+{
+    std::vector<SearchHit> out;
+    if (!v_.unlocked_ || tag.empty()) return out;
+    collect_images_with_tag(v_.root_, "", tag, out);
     return out;
 }
 
