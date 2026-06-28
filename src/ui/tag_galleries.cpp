@@ -43,4 +43,10 @@ void TagGalleries::go_back()
     request(NavKind::ToTagOverview);
 }
 
+bool TagGalleries::handle_extra_key(const SDL_KeyboardEvent& key)
+{
+    if (key.key == SDLK_TAB) { request(NavKind::ToTagImages, tag_, 0); return true; }
+    return false;
+}
+
 } // namespace ui

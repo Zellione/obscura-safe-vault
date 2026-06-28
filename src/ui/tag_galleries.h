@@ -32,6 +32,9 @@ protected:
     void go_back() override;   // back to the tag overview, not the root grid
     [[nodiscard]] const char* title() const override { return title_.c_str(); }
     [[nodiscard]] const char* empty_hint() const override { return hint_.c_str(); }
+    bool handle_extra_key(const SDL_KeyboardEvent& key) override;
+    [[nodiscard]] const char* extra_hint() const override { return "[Tab] Images"; }
+    [[nodiscard]] bool show_favorite_badge() const override { return false; }
 
 private:
     std::string tag_;
