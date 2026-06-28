@@ -402,8 +402,8 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
     // cognitive complexity stays under the cpp:S3776 limit. Shift variants:
     // Shift+G imports a tag list, Shift+F opens favorite galleries, Shift+T the
     // tag overview. Plain T has no shortcut and falls through to navigation.
+    if (is_quick_switch_key(key)) { quick_switch_.open(); return; }   // switch vault (`)
     switch (key.key) {
-        case SDLK_GRAVE: quick_switch_.open();                              return;  // switch vault (`)
         case SDLK_L:     view_ = (view_ == Grid) ? List : Grid;             return;  // grid/list view
         case SDLK_X:     start_export();                                    return;  // export selection
         case SDLK_M:     start_transfer();                                  return;  // move to another vault
@@ -679,7 +679,8 @@ void GalleryGrid::render(gfx::Renderer& r)
     r.draw_text(font_, OX, 40, crumb, TEXT_DIM);
     r.draw_text(font_, OX, 90,
                 "[I] Import  [Z] ZIP  [N] New  [Del] Delete  [/] Search  [?] Advanced  "
-                "[G] Tags  [Shift+G] Tag list  [B] Fav  [F] Fav Images  [Shift+F] Fav Galleries  "
+                "[G] Tags  [Shift+G] Tag list  [Shift+T] Tags Overview  "
+                "[B] Fav  [F] Fav Images  [Shift+F] Fav Galleries  "
                 "[Enter] Open  [Space] Select  [X] Export  [M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid",
                 TEXT_FAINT);
 

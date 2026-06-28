@@ -69,7 +69,7 @@ void FavoritesScreen::handle_event(const SDL_Event& e)
     using enum InputAction;
     switch (e.type) {
         case SDL_EVENT_KEY_DOWN:
-            if (e.key.key == SDLK_GRAVE) { quick_switch_.open(); break; }   // switch vault (`)
+            if (is_quick_switch_key(e.key)) { quick_switch_.open(); break; }   // switch vault (`)
             switch (map_key(e.key.key, e.key.mod)) {
                 case NavLeft:  nav_.move(-1);     break;
                 case NavRight: nav_.move(1);      break;

@@ -104,8 +104,8 @@ void TagOverviewScreen::handle_event(const SDL_Event& e)
 
     switch (e.type) {
         case SDL_EVENT_KEY_DOWN:
+            if (is_quick_switch_key(e.key)) { quick_switch_.open(); break; }   // switch vault (`)
             switch (e.key.key) {
-                case SDLK_GRAVE:    quick_switch_.open();                       break;
                 case SDLK_UP:       nav_.move(-1);                              break;
                 case SDLK_DOWN:     nav_.move(1);                               break;
                 case SDLK_RETURN:
