@@ -1,6 +1,7 @@
 #include "gfx/theme.h"
 
 #include <array>
+#include <utility>
 
 namespace gfx {
 
@@ -99,7 +100,14 @@ constexpr std::array<const char*, THEME_COUNT> SLUGS = {
 
 [[nodiscard]] bool in_range(ThemeId id) noexcept
 {
-    return static_cast<int>(id) < THEME_COUNT;
+    return std::to_underlying(id) < THEME_COUNT;
+}
+
+// Array index for a known-in-range id (underlying value → size_t; the cast is
+// integral→integral, never enum→integral, so it stays clear of cpp:S7035).
+[[nodiscard]] std::size_t index_of(ThemeId id) noexcept
+{
+    return static_cast<std::size_t>(std::to_underlying(id));
 }
 
 // The single active theme. Held as a function-local static so set_theme() can
@@ -121,17 +129,17 @@ ThemeId& active_id_slot() noexcept
 
 const Theme& theme_preset(ThemeId id) noexcept
 {
-    return PRESETS[in_range(id) ? static_cast<std::size_t>(id) : 0];
+    return PRESETS[in_range(id) ? index_of(id) : 0];
 }
 
 const char* theme_name(ThemeId id) noexcept
 {
-    return NAMES[in_range(id) ? static_cast<std::size_t>(id) : 0];
+    return NAMES[in_range(id) ? index_of(id) : 0];
 }
 
 const char* theme_slug(ThemeId id) noexcept
 {
-    return SLUGS[in_range(id) ? static_cast<std::size_t>(id) : 0];
+    return SLUGS[in_range(id) ? index_of(id) : 0];
 }
 
 ThemeId theme_from_slug(std::string_view slug) noexcept

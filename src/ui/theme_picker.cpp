@@ -1,5 +1,7 @@
 #include "ui/theme_picker.h"
 
+#include <utility>
+
 #include "gfx/renderer.h"
 #include "gfx/text.h"
 #include "gfx/theme.h"
@@ -14,11 +16,9 @@ int clamp_index(int sel) noexcept
 }
 } // namespace
 
-ThemePicker::ThemePicker() : pref_(platform::ThemePref::default_location()) {}
-
 void ThemePicker::open()
 {
-    sel_    = static_cast<int>(gfx::active_theme_id());
+    sel_    = static_cast<int>(std::to_underlying(gfx::active_theme_id()));
     active_ = true;
 }
 

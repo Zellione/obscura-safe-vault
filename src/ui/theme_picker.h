@@ -17,8 +17,6 @@ namespace ui {
 // consuming handle_event() and a render(). Holds no secrets — only a theme id.
 class ThemePicker {
 public:
-    ThemePicker();
-
     void open();                                       // select the active theme, activate
     void close() noexcept { active_ = false; }
     [[nodiscard]] bool active() const noexcept { return active_; }
@@ -29,7 +27,7 @@ public:
 private:
     void select(int sel);                              // clamp, apply live, persist
 
-    platform::ThemePref pref_;
+    platform::ThemePref pref_ = platform::ThemePref::default_location();
     bool                active_ = false;
     int                 sel_    = 0;
 };

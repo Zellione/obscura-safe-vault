@@ -974,7 +974,7 @@ The user can pick from several built-in colour themes; the choice applies
 immediately, persists across restarts via global config (no secrets stored), and
 all existing screens render correctly under every preset.
 
-**Status:** ✅ 554/554 tests pass (`scripts/test.sh`); `scripts/test.sh --asan` clean.
+**Status:** ✅ 539/539 tests pass (`scripts/test.sh`); `scripts/test.sh --asan` clean.
 `gfx::theme.h` is now a runtime `Theme` value with four built-in presets (Refined
 Slate / Light / High Contrast / Midnight); `gfx::set_theme()` swaps the active one
 and the existing `gfx::theme::X` tokens are references into it, so every call site
