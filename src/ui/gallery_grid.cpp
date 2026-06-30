@@ -385,10 +385,7 @@ void GalleryGrid::toggle_or_open()
 void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
 {
     using enum GalleryView;
-    if (key.key == SDLK_GRAVE) { quick_switch_.open(); return; }   // switch vault (`)
-    if (key.key == SDLK_L) { view_ = (view_ == Grid) ? List : Grid; return; }
-    if (key.key == SDLK_X) { start_export(); return; }   // export selection
-    if (key.key == SDLK_M) { start_transfer(); return; }   // move to another vault
+    // Zip-import + delete keep their guards/early-outs as plain ifs.
     if (key.key == SDLK_Z) {   // import zip archive (inlined to keep GalleryGrid <= 35 methods)
         if (dialogs_.file.busy() || transfer_.active()) return;
         error_.clear();
@@ -401,7 +398,24 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         error_ = naming_.confirm_delete ? std::string{} : "Nothing selected to delete.";
         return;
     }
-    if (key.key == SDLK_SPACE) { toggle_or_open(); return; }
+    // Single-action shortcut keys, grouped into one switch so this function's
+    // cognitive complexity stays under the cpp:S3776 limit. Shift variants:
+    // Shift+G imports a tag list, Shift+F opens favorite galleries, Shift+T the
+    // tag overview. Plain T has no shortcut and falls through to navigation.
+    if (is_quick_switch_key(key)) { quick_switch_.open(); return; }   // switch vault (`)
+    switch (key.key) {
+        case SDLK_L:     view_ = (view_ == Grid) ? List : Grid;             return;  // grid/list view
+        case SDLK_X:     start_export();                                    return;  // export selection
+        case SDLK_M:     start_transfer();                                  return;  // move to another vault
+        case SDLK_SPACE: toggle_or_open();                                  return;
+        case SDLK_G:     start_tag_editor((key.mod & SDL_KMOD_SHIFT) != 0); return;  // G edit / Shift+G import
+        case SDLK_B:     toggle_favorite_current();                         return;  // favorite
+        case SDLK_F:     request((key.mod & SDL_KMOD_SHIFT) ? NavKind::ToFavoriteGalleries
+                                                            : NavKind::ToFavoriteImages); return;
+        case SDLK_T:     if (key.mod & SDL_KMOD_SHIFT) { request(NavKind::ToTagOverview); return; }
+                         break;
+        default:         break;
+    }
     // `/` is a shifted key on many non-US layouts, so the base keycode (key.key)
     // is the unmodified symbol (e.g. '7') and never equals SDLK_SLASH. Resolve the
     // character the layout + held modifiers actually produce and match that: `/`
@@ -410,14 +424,6 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         case SDLK_SLASH:    search_.open();                     return;
         case SDLK_QUESTION: request(NavKind::ToAdvancedSearch); return;
         default: break;
-    }
-    // G opens the tag editor; Shift+G imports a tag list onto the focused gallery.
-    if (key.key == SDLK_G) { start_tag_editor((key.mod & SDL_KMOD_SHIFT) != 0); return; }
-    if (key.key == SDLK_B) { toggle_favorite_current(); return; }  // favorite (B)
-    if (key.key == SDLK_F) {  // open a favorites screen (Shift+F = galleries)
-        request((key.mod & SDL_KMOD_SHIFT) ? NavKind::ToFavoriteGalleries
-                                           : NavKind::ToFavoriteImages);
-        return;
     }
 
     using enum InputAction;
@@ -673,7 +679,8 @@ void GalleryGrid::render(gfx::Renderer& r)
     r.draw_text(font_, OX, 40, crumb, TEXT_DIM);
     r.draw_text(font_, OX, 90,
                 "[I] Import  [Z] ZIP  [N] New  [Del] Delete  [/] Search  [?] Advanced  "
-                "[G] Tags  [Shift+G] Tag list  [B] Fav  [F] Fav Images  [Shift+F] Fav Galleries  "
+                "[G] Tags  [Shift+G] Tag list  [Shift+T] Tags Overview  "
+                "[B] Fav  [F] Fav Images  [Shift+F] Fav Galleries  "
                 "[Enter] Open  [Space] Select  [X] Export  [M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid",
                 TEXT_FAINT);
 

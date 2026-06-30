@@ -87,6 +87,11 @@ src/
                                                  <SearchHit> ranked by score then path,
                                                  save_search/list_saved_searches/delete_saved_search
                                                  (upsert by name, persisted via commit_index);
+                                                 Phase 22: tag_overview()->vector<ui::TagTally>
+                                                 (per-distinct-tag direct {gallery,image} counts,
+                                                 no cascade, reuses collect_tags vocab) +
+                                                 galleries_with_tag()->galleries directly carrying
+                                                 one tag (both on VaultSearch for the S1448 cap);
                                                  read-time cascade (effective tags =
                                                  own ∪ ancestor galleries; root tags
                                                  global); resolve_node resolves a path
@@ -338,6 +343,21 @@ src/
                                                  replace); entry + result pump INLINED (free
                                                  apply_tag_list helper, counts added/skipped by tag-
                                                  count delta) to keep GalleryGrid under the S1448 cap.
+               tag_overview_model.*            — pure, SDL/vault-free tag-overview presentation
+                                                 (Phase 22, unit-tested): TagTally{tag,gallery_count,
+                                                 image_count} + sort_tags(Name / Count-desc) +
+                                                 filter_tags(case-insensitive prefix).
+               tag_overview.*                  — `Shift+T` first-class Screen (NavKind::ToTagOverview):
+                                                 scrollable tag list (Up/Down, Enter, Tab=toggle sort,
+                                                 type=prefix filter, `=quick-switch); counts from
+                                                 VaultSearch::tag_overview, sort/filter from
+                                                 tag_overview_model; Enter -> TagGalleries (Phase 22).
+               tag_galleries.*                 — galleries-only view of the galleries directly
+                                                 carrying one tag (NavKind::ToTagGalleries, tag in
+                                                 Nav::path); thin FavoritesScreen subclass over
+                                                 VaultSearch::galleries_with_tag whose go_back()
+                                                 (new virtual on FavoritesScreen) returns to the
+                                                 overview, not the root grid (Phase 22).
                input.*, nav_model.*, viewer_model.h
                passphrase.*, screen.h
                secure_text_field.*, unlock_logic.*

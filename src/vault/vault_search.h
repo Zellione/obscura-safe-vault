@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "vault/vault.h"   // Vault, VaultResult, SearchHit, SavedSearch
+#include "ui/tag_overview_model.h"   // ui::TagTally (returned by tag_overview, by value)
 
 namespace ui { struct AdvancedQuery; }   // pure query model (src/ui/advanced_search_model.h)
 
@@ -31,6 +32,23 @@ public:
     // taken from query.scope), ranked by descending relevance score then
     // ascending path. Empty while locked.
     [[nodiscard]] std::vector<SearchHit> run_search(const ui::AdvancedQuery& query) const;
+
+    // Tag overview (Phase 22): one TagTally per distinct tag (same case-insensitive
+    // vocabulary as all_tags), counting galleries and leaf media that *directly*
+    // carry the tag — never the Phase 12 read-time cascade, which would inflate
+    // every descendant. Unordered (the UI sorts via tag_overview_model). Empty while locked.
+    [[nodiscard]] std::vector<ui::TagTally> tag_overview() const;
+
+    // The galleries that *directly* carry `tag` (case-insensitive exact match, not
+    // substring, not cascade), flat with full paths — backs the overview's "open a
+    // tag" action. Empty while locked.
+    [[nodiscard]] std::vector<SearchHit> galleries_with_tag(std::string_view tag) const;
+
+    // The leaf media (images AND videos) that *directly* carry `tag` (case-
+    // insensitive exact match, not substring, not cascade), flat with full paths
+    // — backs the tag overview's images face. Equals the overview's image_count
+    // for the same tag. Empty while locked. (Phase 22 follow-up.)
+    [[nodiscard]] std::vector<SearchHit> images_with_tag(std::string_view tag) const;
 
     // Saved searches — vault-global, persisted in the encrypted index. save_search
     // upserts by exact name (InvalidArg for an empty name or when full);

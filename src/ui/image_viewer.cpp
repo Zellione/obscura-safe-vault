@@ -248,7 +248,6 @@ void ImageViewer::handle_key(SDL_Keycode key)
         case SDLK_B:      // toggle favorite (bookmark) on the current item
             if (!album_.images.empty()) (void)vault_.toggle_favorite(album_.paths[index_]);
             return;
-        case SDLK_GRAVE:  quick_switch_.open(); return;   // switch vault (`)
         case SDLK_ESCAPE: go_back(); return;
         default: break;
     }
@@ -386,10 +385,13 @@ void ImageViewer::handle_event(const SDL_Event& e)
         case SDL_EVENT_KEY_DOWN:
             // `/` opens search. It is a shifted key on many non-US layouts, so
             // resolve the produced character from scancode + modifiers. Not while
-            // the slideshow owns the keyboard.
+            // the slideshow owns the keyboard. The `` ` `` quick-switch chord is
+            // layout-robust for the same reason (see is_quick_switch_key).
             if (mode_ != Slideshow &&
                 SDL_GetKeyFromScancode(e.key.scancode, e.key.mod, false) == SDLK_SLASH)
                 search_.open();
+            else if (mode_ != Slideshow && is_quick_switch_key(e.key))
+                quick_switch_.open();
             else
                 handle_key(e.key.key);
             break;

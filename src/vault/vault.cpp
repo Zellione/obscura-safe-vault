@@ -290,6 +290,78 @@ void collect_tags(const IndexNode& node, std::vector<std::string>& out)
     for (const auto& c : node.children) collect_tags(c, out);
 }
 
+// Count, per distinct tag, the galleries and leaf media that DIRECTLY carry it
+// (Phase 22 — no cascade, so a gallery tag never inflates its descendants).
+// `tallies` is pre-seeded with one zeroed entry per distinct tag (canonical
+// casing from collect_tags); this just bumps the matching entry for each node's
+// own tags. Non-gallery nodes (images + videos) count toward image_count.
+// Bump the tally for `tag` (matched case-insensitively against the pre-seeded
+// vocabulary) by one gallery or one image. Kept separate from the recursive walk
+// to keep that walk's nesting shallow (cpp:S134).
+void bump_tag_tally(std::vector<ui::TagTally>& tallies, std::string_view tag, bool is_gallery)
+{
+    auto it = std::ranges::find_if(tallies, [&](const ui::TagTally& tt) {
+        return ci_equal(tt.tag, tag);
+    });
+    if (it == tallies.end()) return;
+    if (is_gallery) ++it->gallery_count;
+    else            ++it->image_count;
+}
+
+void count_direct_tags(const IndexNode& node, std::vector<ui::TagTally>& tallies)
+{
+    for (const auto& child : node.children) {
+        for (const auto& t : child.tags)
+            bump_tag_tally(tallies, t, child.is_gallery());
+        if (child.is_gallery()) count_direct_tags(child, tallies);
+    }
+}
+
+// Collect every gallery that DIRECTLY carries `tag` (case-insensitive exact
+// match — not substring, not cascade), flat with full paths (Phase 22).
+// effective_tags is left empty (this lookup never computes the cascade).
+void collect_galleries_with_tag(const IndexNode& node, std::string_view prefix,
+                                std::string_view tag, std::vector<SearchHit>& out)
+{
+    for (const auto& child : node.children) {
+        if (!child.is_gallery()) continue;
+        const std::string full_path = join_child_path(prefix, child.name);
+        if (std::ranges::any_of(child.tags, [&](const auto& t) { return ci_equal(t, tag); }))
+            out.push_back(SearchHit{
+                .path           = full_path,
+                .is_gallery     = true,
+                .name           = child.name,
+                .effective_tags = {},
+                .node           = &child,
+            });
+        collect_galleries_with_tag(child, full_path, tag, out);
+    }
+}
+
+// Collect every leaf media node (image or video) that DIRECTLY carries `tag`
+// (case-insensitive exact match — not substring, not cascade), flat with full
+// paths. effective_tags is left empty (this lookup never computes the cascade).
+// Mirrors collect_galleries_with_tag but for !is_gallery() nodes (Phase 22 f/u).
+void collect_images_with_tag(const IndexNode& node, std::string_view prefix,
+                             std::string_view tag, std::vector<SearchHit>& out)
+{
+    for (const auto& child : node.children) {
+        const std::string full_path = join_child_path(prefix, child.name);
+        if (child.is_gallery()) {
+            collect_images_with_tag(child, full_path, tag, out);
+            continue;
+        }
+        if (std::ranges::any_of(child.tags, [&](const auto& t) { return ci_equal(t, tag); }))
+            out.push_back(SearchHit{
+                .path           = full_path,
+                .is_gallery     = false,
+                .name           = child.name,
+                .effective_tags = {},
+                .node           = &child,
+            });
+    }
+}
+
 // Advanced-search DFS (Phase 18): evaluate `query` against every in-scope node,
 // cascading gallery tags, collecting each match with its relevance score.
 void adv_search_dfs(const IndexNode& node, std::string_view prefix,
@@ -967,6 +1039,39 @@ std::vector<SearchHit> VaultSearch::run_search(const ui::AdvancedQuery& query) c
 
     out.reserve(scored.size());
     for (auto& [score, hit] : scored) out.push_back(std::move(hit));
+    return out;
+}
+
+std::vector<ui::TagTally> VaultSearch::tag_overview() const
+{
+    if (!v_.unlocked_) return {};
+
+    // Seed one zeroed tally per distinct tag, reusing all_tags' vocabulary +
+    // canonical first-seen casing, then count direct carriers in a single walk.
+    std::vector<std::string> vocab;
+    collect_tags(v_.root_, vocab);
+
+    std::vector<ui::TagTally> out;
+    out.reserve(vocab.size());
+    for (auto& t : vocab) out.push_back(ui::TagTally{.tag = std::move(t)});
+
+    count_direct_tags(v_.root_, out);
+    return out;
+}
+
+std::vector<SearchHit> VaultSearch::galleries_with_tag(std::string_view tag) const
+{
+    std::vector<SearchHit> out;
+    if (!v_.unlocked_ || tag.empty()) return out;
+    collect_galleries_with_tag(v_.root_, "", tag, out);
+    return out;
+}
+
+std::vector<SearchHit> VaultSearch::images_with_tag(std::string_view tag) const
+{
+    std::vector<SearchHit> out;
+    if (!v_.unlocked_ || tag.empty()) return out;
+    collect_images_with_tag(v_.root_, "", tag, out);
     return out;
 }
 

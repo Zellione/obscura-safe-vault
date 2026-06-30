@@ -11,13 +11,18 @@ namespace ui {
 
 enum class NavKind {
     None, ToUnlock, ToGallery, ToViewer, ToFavoriteImages, ToFavoriteGalleries,
-    ToFavoriteViewer, ToAdvancedSearch, ToVaultManager, LockActive, Quit
+    ToFavoriteViewer, ToAdvancedSearch, ToTagOverview, ToTagGalleries,
+    ToTagImages, ToTagViewer,
+    ToVaultManager, LockActive, Quit
 };
 
 // A transition request. `path`/`index` carry context for the destination:
 //   ToGallery — reopen the grid at `path` with `index` selected (used when the
 //               viewer returns to the leaf gallery it was launched from).
 //   ToViewer  — open the viewer for the leaf gallery `path`, image `index`.
+//   ToTagGalleries — `path` carries the tag whose galleries to list (Phase 22).
+//   ToTagImages    — `path` carries the tag whose images/videos to list.
+//   ToTagViewer    — viewer over a tag's media set; `path` = tag, `index` = pos.
 struct Nav {
     NavKind     kind = NavKind::None;
     std::string path;
