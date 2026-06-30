@@ -320,6 +320,7 @@ project "osv_tests"
         "src/ui/result_grid.cpp",
         "src/ui/export.cpp",
         "src/ui/delete_summary.cpp",
+        "src/ui/natural_sort.cpp",
         "src/ui/zip_plan.cpp",
         "src/ui/zip_import.cpp",
         "src/ui/tag_list_parse.cpp",

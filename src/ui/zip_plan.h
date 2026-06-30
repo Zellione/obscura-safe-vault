@@ -31,6 +31,18 @@ struct ZipPlan {
 // True if `name`'s extension is a supported image or video container.
 [[nodiscard]] bool is_supported_media_name(std::string_view name);
 
+// True if `name`'s extension is a supported *image* (not video). Used by the
+// CBZ path, which imports pages only.
+[[nodiscard]] bool is_supported_image_name(std::string_view name);
+
+// Build a fixed CBZ plan: one leaf gallery `base_gallery/gallery_name` holding
+// every supported image entry (videos/other skipped + counted), flattening any
+// internal subfolders, ordered in natural reading order over the full entry
+// path. No mixed-folder resolution. Pure: no miniz, no vault, no SDL.
+[[nodiscard]] ZipPlan build_cbz_plan(const std::vector<ZipEntry>& entries,
+                                     std::string_view             base_gallery,
+                                     std::string_view             gallery_name);
+
 // Build a placement plan from raw archive entries. See zip_plan.cpp for the
 // mirror/append/mixed-folder rules. Pure: no miniz, no vault, no SDL.
 [[nodiscard]] ZipPlan build_zip_plan(const std::vector<ZipEntry>& entries,

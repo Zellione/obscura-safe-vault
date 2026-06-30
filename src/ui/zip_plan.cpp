@@ -1,9 +1,12 @@
 #include "ui/zip_plan.h"
 
+#include "ui/natural_sort.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <set>
+#include <span>
 #include <utility>
 
 namespace ui {
@@ -102,15 +105,81 @@ StringSet find_mixed_dirs(const StringSet& media_dirs, const StringSet& gallery_
 
 } // namespace
 
-bool is_supported_media_name(std::string_view name)
+namespace {
+
+// Lower-cased filename extension is one of `exts`.
+bool ext_in(std::string_view name, std::span<const std::string_view> exts)
 {
-    static constexpr std::array<std::string_view, 15> exts{
-        "jpg", "jpeg", "png", "gif", "bmp", "tga", "hdr", "webp", "heic", "avif",
-        "mp4", "mkv", "webm", "mov", "m4v"};
     const auto dot = name.find_last_of('.');
     if (dot == std::string_view::npos || dot + 1 >= name.size()) return false;
     const std::string ext = to_lower(name.substr(dot + 1));
     return std::ranges::find(exts, ext) != exts.end();
+}
+
+constexpr std::array<std::string_view, 10> kImageExts{
+    "jpg", "jpeg", "png", "gif", "bmp", "tga", "hdr", "webp", "heic", "avif"};
+constexpr std::array<std::string_view, 5> kVideoExts{"mp4", "mkv", "webm", "mov", "m4v"};
+
+} // namespace
+
+bool is_supported_image_name(std::string_view name)
+{
+    return ext_in(name, kImageExts);
+}
+
+bool is_supported_media_name(std::string_view name)
+{
+    return ext_in(name, kImageExts) || ext_in(name, kVideoExts);
+}
+
+ZipPlan build_cbz_plan(const std::vector<ZipEntry>& entries,
+                       std::string_view             base_gallery,
+                       std::string_view             gallery_name)
+{
+    ZipPlan plan;
+    const std::string gallery = join_path(base_gallery, gallery_name);
+
+    // Collect supported image entries; non-image files (videos/other) are
+    // skipped + counted, directory entries are ignored silently.
+    struct Page { std::string path; std::string name; size_t index; };
+    std::vector<Page> pages;
+    for (size_t i = 0; i < entries.size(); ++i) {
+        const ZipEntry& e = entries[i];
+        if (entry_is_dir(e)) continue;
+        std::string name = basename_of(e.path);
+        if (!is_supported_image_name(name)) { ++plan.skipped_unsupported; continue; }
+        pages.emplace_back(e.path, std::move(name), i);
+    }
+
+    // Natural reading order over the FULL archive path so pages from sub-chapters
+    // interleave correctly (chapter1/… before chapter2/…). stable_sort keeps the
+    // archive order for entries that compare equal (case-only differences).
+    std::ranges::stable_sort(pages, [](const Page& a, const Page& b) {
+        return natural_less(a.path, b.path);
+    });
+
+    // Flattening collapses subfolders into one gallery, so two pages can share a
+    // basename (e.g. ch1/01.jpg and ch2/01.jpg). add_image would reject the second
+    // as a duplicate, silently losing a page; disambiguate by prefixing the source
+    // directory (slashes → '_'), falling back to a counter. Unique names are left
+    // untouched so the common flat/single-folder comic keeps clean page names.
+    StringSet used;
+    for (const Page& p : pages) {
+        std::string fname = p.name;
+        if (used.contains(fname)) {
+            std::string prefix = dirname_of(p.path);
+            std::ranges::replace(prefix, '/', '_');
+            std::string cand = prefix.empty() ? fname : prefix + "_" + fname;
+            for (int n = 1; used.contains(cand); ++n)
+                cand = prefix + "_" + std::to_string(n) + "_" + fname;
+            fname = std::move(cand);
+        }
+        used.insert(fname);
+        plan.placements.emplace_back(gallery, std::move(fname), p.index);
+    }
+    if (!gallery.empty() && !plan.placements.empty())
+        plan.galleries.push_back(gallery);
+    return plan;
 }
 
 ZipPlan build_zip_plan(const std::vector<ZipEntry>& entries,

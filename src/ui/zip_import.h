@@ -34,4 +34,14 @@ struct ZipImportOutcome {
                                           std::string_view             new_gallery_name,
                                           ZipConflictPolicy            policy);
 
+// Import a `.cbz` comic archive as a single leaf gallery `base_gallery/gallery_name`
+// of pages (build_cbz_plan). Reuses the import_zip miniz/SecureBytes path:
+// every image entry is decompressed into mlock'd memory only (invariant #1),
+// flattening internal subfolders, in natural reading order. Non-image entries
+// are skipped + counted. Never extracts to disk.
+[[nodiscard]] ZipImportOutcome import_cbz(vault::Vault&                v,
+                                          const std::filesystem::path& cbz_path,
+                                          std::string_view             base_gallery,
+                                          std::string_view             gallery_name);
+
 }  // namespace ui

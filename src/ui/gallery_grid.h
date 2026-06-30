@@ -117,6 +117,7 @@ private:
         std::string           gallery_name;
         ui::ZipDest           dest = ui::ZipDest::NewGallery;
         bool                  active = false;  // awaiting conflict resolution (Flatten/Skip)
+        bool                  cbz = false;     // .cbz comic import (Phase 24): fixed one-leaf plan
     };
     struct Naming {
         bool        active = false;   // manual new-gallery text entry

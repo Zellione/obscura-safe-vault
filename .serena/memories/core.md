@@ -300,18 +300,33 @@ src/
                                                  those now take a VaultRegistry& + active
                                                  vault path. consume_choice() drains the pick
                                                  (mirrors TransferDialog::consume_completed).
+               natural_sort.*                  — pure, SDL/vault-free natural-order name comparator
+                                                 (Phase 24, unit-tested): natural_compare (3-way:
+                                                 digit runs by value so "2"<"10", other chars
+                                                 case-insensitive, fewer leading zeros first) +
+                                                 natural_less. Orders CBZ pages by reading order.
                zip_plan.*                      — pure ZIP placement planner (Phase 17):
                                                  archive entries -> galleries to create +
                                                  file placements + mixed-folder conflicts +
                                                  skip count. SDL-/miniz-/vault-free, unit-tested.
                                                  ZipDest{NewGallery,Append}, ZipConflictPolicy
-                                                 {AskUser,FlattenMixed,SkipMixed}.
-               zip_import.*                    — ZIP import executor (Phase 17): miniz reader
-                                                 -> mlock'd SecureBytes (one entry at a time, no
-                                                 temp file) -> Vault::add_image/add_video chosen
-                                                 by image::detect_format. needs_resolution for
-                                                 mixed folders. Lives in ui/ like export.* (deps
-                                                 vault + image). Hosted by GalleryGrid (Z key).
+                                                 {AskUser,FlattenMixed,SkipMixed}. Phase 24:
+                                                 is_supported_image_name (image subset, not video)
+                                                 + build_cbz_plan -> a fixed one-leaf plan (gallery
+                                                 named after the archive) of every image entry,
+                                                 videos/other skipped+counted, subfolders flattened
+                                                 (basename collisions disambiguated by source dir),
+                                                 natural reading order.
+               zip_import.*                    — ZIP/CBZ import executor (Phase 17; CBZ Phase 24):
+                                                 miniz reader -> mlock'd SecureBytes (one entry at
+                                                 a time, no temp file) -> Vault::add_image/add_video
+                                                 chosen by image::detect_format. needs_resolution for
+                                                 mixed folders. import_cbz (Phase 24) reuses the same
+                                                 per-entry path over build_cbz_plan — `.cbz` imports
+                                                 as one page gallery, never extracted to disk. Lives
+                                                 in ui/ like export.* (deps vault + image). Hosted by
+                                                 GalleryGrid (Z key; dialog filter accepts zip;cbz,
+                                                 .cbz routes to a fixed one-leaf import).
                delete_summary.*                — pure recursive tally of a gallery subtree
                                                  (images/videos/sub-galleries) for the Del
                                                  delete-confirm popup (Phase 17 follow-up).
@@ -398,7 +413,8 @@ src/
                                                  polled by two handlers (GalleryGrid image vs
                                                  zip import) can't steal each other's result.
                                                  Phase 21: Purpose::TagList + open_tag_list() (.txt)
-                                                 for the tag-list import.
+                                                 for the tag-list import. Phase 24: open_zip()'s
+                                                 filter accepts zip;cbz.
                folder_dialog.*                 — export destination picker (Phase 10)
                vault_registry.*                — recent-vaults list (Phase 14): config-dir
                                                  file of known vault PATHS ONLY (no

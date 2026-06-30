@@ -1,6 +1,7 @@
 #include "ui/gallery_grid.h"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <format>
 
@@ -279,6 +280,7 @@ void GalleryGrid::finish_naming()
     SDL_StopTextInput(win_.sdl_window());
     if (naming_.buf.empty()) {
         naming_.zip.active = false;
+        naming_.zip.cbz = false;
         return;
     }
 
@@ -564,15 +566,29 @@ void GalleryGrid::pump_zip_import()
 {
     if (auto res = dialogs_.file.take_result(platform::FileDialog::Purpose::Zip)) {
         if (!res->empty()) {
-            const std::string zip_path = res->front();
-            const std::filesystem::path zp(zip_path);
+            const std::filesystem::path zp(res->front());
+            std::string ext = zp.extension().string();   // ".cbz" / ".zip" / ...
+            std::ranges::transform(ext, ext.begin(),
+                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
-            // Decide between Append (if current holds media) or NewGallery (name prompt).
-            if (current_allows_images() && !current_allows_galleries()) {
+            if (ext == ".cbz") {
+                // CBZ (Phase 24): always a dedicated leaf gallery named after the
+                // archive. start_naming() guards the leaf-invariant and prefills the
+                // stem; finish_naming() then routes to the fixed one-leaf plan.
+                start_naming();
+                if (naming_.active) {
+                    naming_.buf = zp.stem().string();   // e.g. "MyComic" from "MyComic.cbz"
+                    naming_.zip.path = zp;
+                    naming_.zip.dest = ui::ZipDest::NewGallery;
+                    naming_.zip.cbz = true;
+                    naming_.zip.active = true;
+                }
+            } else if (current_allows_images() && !current_allows_galleries()) {
                 // Current gallery holds only media (leaf): import with Append (no name prompt).
                 naming_.zip.path = zp;
                 naming_.zip.gallery_name.clear();
                 naming_.zip.dest = ui::ZipDest::Append;
+                naming_.zip.cbz = false;
                 naming_.zip.active = true;
                 do_zip_import(zp, ui::ZipConflictPolicy::AskUser);
             } else {
@@ -581,6 +597,7 @@ void GalleryGrid::pump_zip_import()
                 naming_.buf = zp.stem().string();   // e.g. "archive" from "archive.zip"
                 naming_.zip.path = zp;
                 naming_.zip.dest = ui::ZipDest::NewGallery;
+                naming_.zip.cbz = false;
                 naming_.zip.active = true;
             }
         }
@@ -594,6 +611,23 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipCo
     const std::string gallery_name = naming_.zip.gallery_name;
     const std::string base_gallery = nav_.path();
     const ui::ZipDest dest = naming_.zip.dest;
+
+    // CBZ comic import (Phase 24): a fixed one-leaf plan, no Append/mixed-folder
+    // path. Handled here (not a new method) to stay under the GalleryGrid S1448 cap.
+    if (naming_.zip.cbz) {
+        const ui::ZipImportOutcome cout =
+            ui::import_cbz(vault_, zip_path, base_gallery, gallery_name);
+        naming_.zip.active = false;
+        naming_.zip.cbz = false;
+        if (!cout.ok) {
+            error_ = cout.error.empty() ? "CBZ import failed." : cout.error;
+            return;
+        }
+        status_ = std::format("Imported {} page{}, skipped {}", cout.imported,
+                              cout.imported == 1 ? "" : "s", cout.skipped);
+        refresh();
+        return;
+    }
 
     // Call the import_zip executor.
     const ui::ZipImportOutcome out = ui::import_zip(
@@ -678,7 +712,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     for (const auto& s : nav_.segments()) { crumb += s; crumb += '/'; }
     r.draw_text(font_, OX, 40, crumb, TEXT_DIM);
     r.draw_text(font_, OX, 90,
-                "[I] Import  [Z] ZIP  [N] New  [Del] Delete  [/] Search  [?] Advanced  "
+                "[I] Import  [Z] ZIP/CBZ  [N] New  [Del] Delete  [/] Search  [?] Advanced  "
                 "[G] Tags  [Shift+G] Tag list  [Shift+T] Tags Overview  "
                 "[B] Fav  [F] Fav Images  [Shift+F] Fav Galleries  "
                 "[Enter] Open  [Space] Select  [X] Export  [M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid",

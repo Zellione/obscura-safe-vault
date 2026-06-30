@@ -135,4 +135,45 @@ ZipImportOutcome import_zip(vault::Vault&                v,
     return out;
 }
 
+ZipImportOutcome import_cbz(vault::Vault&                v,
+                            const std::filesystem::path& cbz_path,
+                            std::string_view             base_gallery,
+                            std::string_view             gallery_name)
+{
+    ZipImportOutcome out;
+
+    // A .cbz is a plain zip; drive miniz from the in-memory archive exactly as
+    // import_zip does. `archive` must outlive every read (init_mem borrows it).
+    std::vector<uint8_t> archive;
+    mz_zip_archive zip;
+    std::memset(&zip, 0, sizeof(zip));
+    if (!read_archive(cbz_path, archive) ||
+        !mz_zip_reader_init_mem(&zip, archive.data(), archive.size(), 0)) {
+        out.error = "Could not open archive";
+        std::println(stderr, "[CbzImport] open failed: {}", cbz_path.string());
+        return out;
+    }
+
+    const ZipPlan plan = build_cbz_plan(read_entry_list(zip), base_gallery, gallery_name);
+    out.skipped = plan.skipped_unsupported;
+
+    // One leaf gallery (build_cbz_plan emits at most one). import_one then
+    // decompresses each page into mlock'd memory and stores it — never to disk.
+    for (const auto& g : plan.galleries) {
+        const vault::VaultResult r = v.create_gallery(g);
+        if (r != vault::VaultResult::Ok && r != vault::VaultResult::AlreadyExists) {
+            out.error = "Could not create gallery: " + g;
+            mz_zip_reader_end(&zip);
+            return out;
+        }
+    }
+
+    for (const auto& pl : plan.placements)
+        import_one(v, zip, pl, out);
+
+    mz_zip_reader_end(&zip);
+    out.ok = true;
+    return out;
+}
+
 }  // namespace ui
