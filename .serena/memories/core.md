@@ -91,7 +91,9 @@ src/
                                                  (per-distinct-tag direct {gallery,image} counts,
                                                  no cascade, reuses collect_tags vocab) +
                                                  galleries_with_tag()->galleries directly carrying
-                                                 one tag (both on VaultSearch for the S1448 cap);
+                                                 one tag + images_with_tag()->leaf media (images
+                                                 AND videos) directly carrying one tag, no cascade
+                                                 (all on VaultSearch for the S1448 cap);
                                                  read-time cascade (effective tags =
                                                  own ∪ ancestor galleries; root tags
                                                  global); resolve_node resolves a path
@@ -242,7 +244,10 @@ src/
                                                  to the grid) (Phase 13; F from gallery
                                                  grid). favorites_screen.* is the shared
                                                  base (grid/selection/badge) for both
-                                                 favorites screens.
+                                                 favorites screens. Phase 22 f/u: it gained
+                                                 handle_extra_key/extra_hint/show_favorite_badge
+                                                 virtuals (default no-op/empty/true) used by the
+                                                 tag_galleries + tag_images views.
                                                  ImageViewer has a "collection mode"
                                                  (explicit image set + per-image path +
                                                  exit Nav) so it isn't tied to one gallery.
@@ -357,7 +362,19 @@ src/
                                                  Nav::path); thin FavoritesScreen subclass over
                                                  VaultSearch::galleries_with_tag whose go_back()
                                                  (new virtual on FavoritesScreen) returns to the
-                                                 overview, not the root grid (Phase 22).
+                                                 overview, not the root grid (Phase 22). Tab toggles
+                                                 to the images face (NavKind::ToTagImages) via the
+                                                 FavoritesScreen handle_extra_key hook (Phase 22 f/u).
+               tag_images.*                    — images/videos directly carrying one tag (Phase 22
+                                                 follow-up; NavKind::ToTagImages, tag in Nav::path).
+                                                 TagImages : public FavoritesImages — reuses its
+                                                 off-thread thumb decode + tile draw; fetch() ->
+                                                 VaultSearch::images_with_tag. Tab toggles back to
+                                                 the galleries face; Enter opens a collection viewer
+                                                 over the tagged set (NavKind::ToTagViewer; App::
+                                                 to_tag_viewer mirrors to_favorite_viewer, back ->
+                                                 ToTagImages); go_back() returns to the tag overview.
+                                                 No favorite badge (show_favorite_badge=false).
                input.*, nav_model.*, viewer_model.h
                passphrase.*, screen.h
                secure_text_field.*, unlock_logic.*
