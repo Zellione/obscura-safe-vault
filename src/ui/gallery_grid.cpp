@@ -564,45 +564,45 @@ void GalleryGrid::pump_import()
 
 void GalleryGrid::pump_zip_import()
 {
-    if (auto res = dialogs_.file.take_result(platform::FileDialog::Purpose::Zip)) {
-        if (!res->empty()) {
-            const std::filesystem::path zp(res->front());
-            std::string ext = zp.extension().string();   // ".cbz" / ".zip" / ...
-            std::ranges::transform(ext, ext.begin(),
-                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    auto res = dialogs_.file.take_result(platform::FileDialog::Purpose::Zip);
+    if (!res) return;
+    if (res->empty()) { mark_dirty(); return; }   // dialog cancelled — repaint
 
-            if (ext == ".cbz") {
-                // CBZ (Phase 24): always a dedicated leaf gallery named after the
-                // archive. start_naming() guards the leaf-invariant and prefills the
-                // stem; finish_naming() then routes to the fixed one-leaf plan.
-                start_naming();
-                if (naming_.active) {
-                    naming_.buf = zp.stem().string();   // e.g. "MyComic" from "MyComic.cbz"
-                    naming_.zip.path = zp;
-                    naming_.zip.dest = ui::ZipDest::NewGallery;
-                    naming_.zip.cbz = true;
-                    naming_.zip.active = true;
-                }
-            } else if (current_allows_images() && !current_allows_galleries()) {
-                // Current gallery holds only media (leaf): import with Append (no name prompt).
-                naming_.zip.path = zp;
-                naming_.zip.gallery_name.clear();
-                naming_.zip.dest = ui::ZipDest::Append;
-                naming_.zip.cbz = false;
-                naming_.zip.active = true;
-                do_zip_import(zp, ui::ZipConflictPolicy::AskUser);
-            } else {
-                // Current is empty or holds sub-galleries: prompt for new gallery name.
-                start_naming();   // reuse the naming flow
-                naming_.buf = zp.stem().string();   // e.g. "archive" from "archive.zip"
-                naming_.zip.path = zp;
-                naming_.zip.dest = ui::ZipDest::NewGallery;
-                naming_.zip.cbz = false;
-                naming_.zip.active = true;
-            }
+    const std::filesystem::path zp(res->front());
+    std::string ext = zp.extension().string();   // ".cbz" / ".zip" / ...
+    std::ranges::transform(ext, ext.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    if (ext == ".cbz") {
+        // CBZ (Phase 24): always a dedicated leaf gallery named after the archive.
+        // start_naming() guards the leaf-invariant and (on success) prefills the
+        // stem; finish_naming() then routes to the fixed one-leaf plan.
+        start_naming();
+        if (naming_.active) {
+            naming_.buf = zp.stem().string();   // e.g. "MyComic" from "MyComic.cbz"
+            naming_.zip.path = zp;
+            naming_.zip.dest = ui::ZipDest::NewGallery;
+            naming_.zip.cbz = true;
+            naming_.zip.active = true;
         }
-        mark_dirty();   // dialog closed (picked or cancelled) — repaint
+    } else if (current_allows_images() && !current_allows_galleries()) {
+        // Current gallery holds only media (leaf): import with Append (no name prompt).
+        naming_.zip.path = zp;
+        naming_.zip.gallery_name.clear();
+        naming_.zip.dest = ui::ZipDest::Append;
+        naming_.zip.cbz = false;
+        naming_.zip.active = true;
+        do_zip_import(zp, ui::ZipConflictPolicy::AskUser);
+    } else {
+        // Current is empty or holds sub-galleries: prompt for new gallery name.
+        start_naming();   // reuse the naming flow
+        naming_.buf = zp.stem().string();   // e.g. "archive" from "archive.zip"
+        naming_.zip.path = zp;
+        naming_.zip.dest = ui::ZipDest::NewGallery;
+        naming_.zip.cbz = false;
+        naming_.zip.active = true;
     }
+    mark_dirty();   // dialog closed (picked) — repaint
 }
 
 void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipConflictPolicy policy)

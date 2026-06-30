@@ -22,7 +22,8 @@ size_t digit_run(std::string_view s, size_t i)
 // first). Returns < 0, 0, or > 0.
 int compare_numeric(std::string_view ra, std::string_view rb)
 {
-    std::string_view sa = ra, sb = rb;   // significant digits (leading zeros stripped)
+    std::string_view sa = ra;   // significant digits (leading zeros stripped)
+    std::string_view sb = rb;
     while (sa.size() > 1 && sa.front() == '0') sa.remove_prefix(1);
     while (sb.size() > 1 && sb.front() == '0') sb.remove_prefix(1);
 
@@ -37,10 +38,11 @@ int compare_numeric(std::string_view ra, std::string_view rb)
 
 int natural_compare(std::string_view a, std::string_view b)
 {
-    size_t i = 0, j = 0;
+    size_t i = 0;
+    size_t j = 0;
     while (i < a.size() && j < b.size()) {
-        const unsigned char ca = static_cast<unsigned char>(a[i]);
-        const unsigned char cb = static_cast<unsigned char>(b[j]);
+        const auto ca = static_cast<unsigned char>(a[i]);
+        const auto cb = static_cast<unsigned char>(b[j]);
 
         if (is_digit(ca) && is_digit(cb)) {
             const size_t la = digit_run(a, i);
@@ -52,9 +54,9 @@ int natural_compare(std::string_view a, std::string_view b)
             continue;
         }
 
-        const unsigned char la = static_cast<unsigned char>(std::tolower(ca));
-        const unsigned char lb = static_cast<unsigned char>(std::tolower(cb));
-        if (la != lb) return la < lb ? -1 : 1;
+        const auto la = static_cast<unsigned char>(std::tolower(ca));
+        if (const auto lb = static_cast<unsigned char>(std::tolower(cb)); la != lb)
+            return la < lb ? -1 : 1;
         ++i;
         ++j;
     }

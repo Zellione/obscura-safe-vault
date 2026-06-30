@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <format>
 #include <set>
 #include <span>
 #include <utility>
@@ -169,9 +170,10 @@ ZipPlan build_cbz_plan(const std::vector<ZipEntry>& entries,
         if (used.contains(fname)) {
             std::string prefix = dirname_of(p.path);
             std::ranges::replace(prefix, '/', '_');
-            std::string cand = prefix.empty() ? fname : prefix + "_" + fname;
-            for (int n = 1; used.contains(cand); ++n)
-                cand = prefix + "_" + std::to_string(n) + "_" + fname;
+            std::string cand = prefix.empty() ? fname : std::format("{}_{}", prefix, fname);
+            int n = 1;
+            while (used.contains(cand))
+                cand = std::format("{}_{}_{}", prefix, n++, fname);
             fname = std::move(cand);
         }
         used.insert(fname);
