@@ -1,21 +1,10 @@
 #include "test_framework.h"
 #include "ui/zip_plan.h"
+#include "ui/zip_test_helpers.h"
 
-#include <initializer_list>
 #include <string>
-#include <vector>
 
-using ui::ZipEntry;
-
-static std::vector<ZipEntry> entries(std::initializer_list<const char*> names)
-{
-    std::vector<ZipEntry> v;
-    for (const char* n : names) {
-        std::string s = n;
-        v.push_back({s, !s.empty() && s.back() == '/'});
-    }
-    return v;
-}
+using ziptest::entries;
 
 TEST(cbz_plan_image_classifier)
 {
