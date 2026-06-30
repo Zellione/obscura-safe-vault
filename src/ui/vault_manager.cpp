@@ -90,11 +90,14 @@ void VaultManager::handle_key(const SDL_KeyboardEvent& key)
         case SDLK_R:
         case SDLK_DELETE: remove_selected(); break;
         case SDLK_L:      if (!active_path_.empty()) request(NavKind::LockActive); break;
+        case SDLK_C:      open_theme_picker(); break;
         case SDLK_ESCAPE:
         case SDLK_Q:      request(NavKind::Quit); break;
         default: break;
     }
 }
+
+void VaultManager::open_theme_picker() { themes_.open(); mark_dirty(); }
 
 int VaultManager::hit_test(float my) const
 {
@@ -125,6 +128,8 @@ void VaultManager::handle_click(const SDL_MouseButtonEvent& b)
 
 void VaultManager::handle_event(const SDL_Event& e)
 {
+    if (themes_.handle_event(e)) { mark_dirty(); return; }   // theme overlay swallows input
+
     switch (e.type) {
         case SDL_EVENT_KEY_DOWN:          handle_key(e.key); break;
         case SDL_EVENT_MOUSE_MOTION:      mouse_x_ = e.motion.x; mouse_y_ = e.motion.y; break;
@@ -156,6 +161,7 @@ void VaultManager::render(gfx::Renderer& r)
     const Layout L = layout();
 
     r.draw_text(font_, 60.0f, 44.0f, "Vaults", TEXT);
+    r.draw_text(font_, W - 200.0f, 50.0f, "C  Theme", TEXT_FAINT);
 
     if (entries_.empty()) {
         r.draw_text(font_, 60.0f, L.list_top, "No vaults yet — press N to create, O to open.",
@@ -188,6 +194,8 @@ void VaultManager::render(gfx::Renderer& r)
     };
     btn(L.new_btn, "New Vault (N)");
     btn(L.open_btn, "Open Other (O)");
+
+    themes_.render(r, font_, W, static_cast<float>(win_.height()));
 }
 
 } // namespace ui

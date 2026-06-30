@@ -132,8 +132,15 @@ src/
                                                  container/codec/dims/duration + first-frame poster.
   gfx/         window.*, renderer.*,           — SDL3 window/renderer, texture cache,
                texture_cache.*, text.*,        — stb_truetype text atlas
-               theme.h                         — "Refined Slate" colour tokens +
-                                                 RADIUS consts; renderer has
+               theme.{h,cpp}                   — UI colour tokens, runtime-selectable
+                                                 (Phase 23): a `Theme` value + 4 presets
+                                                 (Refined Slate default / Light / High
+                                                 Contrast / Midnight); gfx::set_theme(id)/
+                                                 active_theme() swap the active one, and the
+                                                 `theme::X` tokens are references into it so
+                                                 every call site tracks a switch. theme_slug/
+                                                 theme_from_slug/theme_name are pure helpers.
+                                                 RADIUS consts stay compile-time; renderer has
                                                  draw_round_rect / draw_selection_glow
                                                  (round_rect_outline is pure/tested).
                                                  Window::width()/height() are LIVE
@@ -261,6 +268,12 @@ src/
                                                  open/create(save dialog)/remove/lock/
                                                  select. Emits NavKind::ToVaultManager /
                                                  LockActive / ToUnlock(path) / ToGallery.
+                                                 `C` opens the ThemePicker overlay (Phase 23).
+               theme_picker.*                  — `C` overlay over the vault manager (Phase 23,
+                                                 QuickSwitch-style): Up/Down previews a built-in
+                                                 theme live (gfx::set_theme) + persists it
+                                                 (platform::ThemePref) — the preview IS the choice;
+                                                 Enter/Esc close. Each row shows an accent swatch.
                transfer_dialog.*               — `M` modal in GalleryGrid (Phase 14 PR2/3/4):
                                                  move OR copy selected images / (PR3) a focused
                                                  gallery subtree to another vault — or (PR4)
@@ -391,6 +404,12 @@ src/
                                                  file of known vault PATHS ONLY (no
                                                  secrets); list/add(move-to-front,dedup)/
                                                  remove/seed_if_empty; atomic temp+rename.
+               theme_pref.*                    — chosen UI theme persistence (Phase 23):
+                                                 config_dir()/theme.conf holds the theme's
+                                                 stable slug ONLY (no secrets); load()->ThemeId
+                                                 (missing/unknown -> default), save(id); atomic
+                                                 temp+rename, mirrors vault_registry. Loaded in
+                                                 App::init(), saved live by ThemePicker.
 tests/
   crypto/ gfx/ image/ platform/ ui/ vault/ media/
   test_framework.h  test_main.cpp

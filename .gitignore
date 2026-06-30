@@ -48,3 +48,4 @@ dist/
 *.gcov
 *.gcda
 *.gcno
+.ninja_lock

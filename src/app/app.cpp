@@ -8,6 +8,7 @@
 #include "gfx/renderer.h"
 #include "gfx/theme.h"
 #include "platform/paths.h"
+#include "platform/theme_pref.h"
 #include "ui/advanced_search_screen.h"
 #include "ui/favorites_galleries.h"
 #include "ui/favorites_images.h"
@@ -46,6 +47,9 @@ bool App::init()
         std::println(stderr, "[App] Font atlas unavailable ('{}').", OSV_DEFAULT_FONT);
 
     cache_ = std::make_unique<gfx::TextureCache>(window_.sdl_renderer());
+
+    // Apply the saved UI theme before drawing the first frame (Phase 23).
+    gfx::set_theme(platform::ThemePref::default_location().load());
 
     registry_ = platform::VaultRegistry::default_location();
     registry_.seed_if_empty(platform::default_vault_path());
