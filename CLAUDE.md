@@ -181,8 +181,13 @@ src/
              renderer.{h,cpp},            ← texture cache, text atlas (Phase 4)
              texture_cache.*, text.*,
              yuv_texture.*,               ← streaming YUV(I420/NV12) texture for video (Phase 15)
-             theme.h                      ← "Refined Slate" colour tokens (UI overhaul);
-                                            Renderer also has draw_triangle (play badge/icon)
+             theme.{h,cpp}                ← UI colour tokens. Runtime-selectable
+                                            (Phase 23): a `Theme` value + 4 built-in presets
+                                            (Refined Slate default / Light / High Contrast /
+                                            Midnight); gfx::set_theme()/active_theme() swap the
+                                            active one and the `theme::X` tokens are references
+                                            into it, so every call site tracks a switch with no
+                                            change. Renderer also has draw_triangle (play badge/icon)
   ui/        input.h,                    ← input abstraction (Phase 5)
              unlock_screen.*,             ← unlock + create vault (Phase 5)
              gallery_grid.*,              ← breadcrumb grid (Phase 5)
@@ -276,7 +281,12 @@ src/
                                             (NavKind::ToTagViewer), and go_back() returns to the
                                             tag overview (Phase 22 follow-up).
              vault_manager.*,             ← multi-vault home screen: list/open/create/
-                                            remove/lock known vaults (Phase 14)
+                                            remove/lock known vaults (Phase 14); `C` opens the
+                                            ThemePicker overlay (Phase 23)
+             theme_picker.*,              ← `C` overlay (QuickSwitch-style) over the vault
+                                            manager: Up/Down previews a built-in theme live via
+                                            gfx::set_theme + persists it (platform::ThemePref) —
+                                            the preview is the choice; Enter/Esc close (Phase 23)
              transfer_dialog.*,           ← `M` modal: move OR copy selected images / a
                                             focused gallery subtree to another vault — or
                                             within the active vault. Stages: Move/Copy →
@@ -335,6 +345,9 @@ src/
              folder_dialog.*,             ← export destination picker (Phase 10)
              vault_registry.*             ← recent-vaults list, paths only, atomic
                                             write — stores NO secrets (Phase 14)
+             theme_pref.*                 ← chosen UI theme slug in config_dir()/theme.conf;
+                                            atomic temp+rename, stores NO secrets, unknown/
+                                            absent → default; mirrors vault_registry (Phase 23)
 vendor/
   SDL3/           ← git submodule, built by scripts/setup.sh (cmake)
   monocypher/     ← git submodule, compiled by premake (single .c file)

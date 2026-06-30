@@ -1,36 +1,87 @@
 #pragma once
 
+#include <cstdint>
+#include <string_view>
+
 #include "gfx/color.h"
 
-// "Refined Slate" — the single source of truth for UI colours. Every screen and
-// widget pulls its colours from here so the look stays consistent and a palette
-// tweak is a one-file change. Deep slate base, hairline borders, one violet
-// accent used sparingly for selection/focus.
-namespace gfx::theme {
+// UI colour theming (Phase 23). Historically a single "Refined Slate" palette of
+// compile-time constants; now a runtime-selectable value so the user can pick a
+// theme that applies immediately and persists across launches.
+//
+// `Theme` is the full token set; the built-in presets fill every token. One
+// active theme is held globally — `active_theme()` reads it and `set_theme()`
+// swaps it. Existing `gfx::theme::X` call sites are unchanged: those tokens are
+// now references into the active theme, so a switch is picked up everywhere.
+namespace gfx {
 
-inline constexpr Color BG         {15, 17, 21, 255};    // window background
-inline constexpr Color SURFACE    {26, 29, 36, 255};    // tiles, fields, panels
-inline constexpr Color SURFACE_HI {35, 38, 46, 255};    // hover / selected fill
-inline constexpr Color BORDER     {38, 42, 51, 255};    // hairline borders
+// Every UI colour token. Presets fill all of them; geometry (corner radii) is
+// theme-independent and lives in `gfx::theme` below.
+struct Theme {
+    Color bg;            // window background
+    Color surface;       // tiles, fields, panels
+    Color surface_hi;    // hover / selected fill
+    Color border;        // hairline borders
+    Color accent;        // selection ring, focus, primary
+    Color accent_dim;    // pressed / active fill
+    Color text;          // primary text
+    Color text_dim;      // secondary text
+    Color text_faint;    // hints / key legends
+    Color folder;        // folder glyph
+    Color favorite;      // favorite (bookmark) badge
+    Color danger;        // error text
+    Color warn;          // medium strength
+    Color ok;            // strong strength
+    Color img_bg;        // viewer image backdrop
+    Color strip_bg;      // thumbnail strip backdrop
+};
 
-inline constexpr Color ACCENT     {139, 124, 246, 255}; // selection ring, focus, primary
-inline constexpr Color ACCENT_DIM {90, 60, 150, 255};   // pressed / active fill
+// Built-in presets. RefinedSlate is the default (the original palette).
+enum class ThemeId : std::uint8_t {
+    RefinedSlate = 0,
+    Light,
+    HighContrast,
+    Midnight,
+};
+inline constexpr int THEME_COUNT = 4;
 
-inline constexpr Color TEXT       {223, 227, 234, 255}; // primary text
-inline constexpr Color TEXT_DIM   {139, 147, 161, 255}; // secondary text
-inline constexpr Color TEXT_FAINT {91, 98, 112, 255};   // hints / key legends
+// Active selection. set_theme() takes effect immediately for every `theme::X`
+// call site; an out-of-range id is clamped to the default.
+[[nodiscard]] const Theme& active_theme() noexcept;
+[[nodiscard]] ThemeId      active_theme_id() noexcept;
+void                       set_theme(ThemeId id) noexcept;
 
-inline constexpr Color FOLDER     {200, 170, 90, 255};  // folder glyph
-inline constexpr Color FAVORITE   {245, 205, 70, 255};  // favorite (bookmark) badge
-inline constexpr Color DANGER     {230, 120, 120, 255}; // error text
-inline constexpr Color WARN       {230, 200, 110, 255}; // medium strength
-inline constexpr Color OK         {130, 220, 140, 255}; // strong strength
+// Preset table + presentation metadata (pure).
+[[nodiscard]] const Theme& theme_preset(ThemeId id) noexcept;   // out-of-range → default
+[[nodiscard]] const char*  theme_name(ThemeId id) noexcept;     // human label for the picker
+[[nodiscard]] const char*  theme_slug(ThemeId id) noexcept;     // stable persistence token
+[[nodiscard]] ThemeId      theme_from_slug(std::string_view slug) noexcept;  // unknown → default
 
-inline constexpr Color IMG_BG     {12, 12, 16, 255};    // viewer image backdrop
-inline constexpr Color STRIP_BG   {20, 22, 27, 255};    // thumbnail strip backdrop
+namespace theme {
 
-// Standard corner radius for surfaces/buttons/tiles (px).
+// Standard corner radius for surfaces/buttons/tiles (px). Theme-independent.
 inline constexpr float RADIUS       = 10.0f;
 inline constexpr float RADIUS_SMALL = 6.0f;
 
-} // namespace gfx::theme
+// Colour tokens — references into the active theme so a runtime switch is seen
+// by every existing `theme::X` use with no change at the call site (Phase 23).
+extern const Color& BG;
+extern const Color& SURFACE;
+extern const Color& SURFACE_HI;
+extern const Color& BORDER;
+extern const Color& ACCENT;
+extern const Color& ACCENT_DIM;
+extern const Color& TEXT;
+extern const Color& TEXT_DIM;
+extern const Color& TEXT_FAINT;
+extern const Color& FOLDER;
+extern const Color& FAVORITE;
+extern const Color& DANGER;
+extern const Color& WARN;
+extern const Color& OK;
+extern const Color& IMG_BG;
+extern const Color& STRIP_BG;
+
+} // namespace theme
+
+} // namespace gfx
