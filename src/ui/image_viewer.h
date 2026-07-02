@@ -9,6 +9,7 @@
 
 #include "image/decode_worker.h"
 #include "ui/export_ui.h"
+#include "ui/file_op_job.h"
 #include "ui/full_tex_cache.h"
 #include "ui/quick_switch.h"
 #include "ui/screen.h"
@@ -92,20 +93,29 @@ public:
     void render(gfx::Renderer& r) override;
 
     // Only the slideshow cross-fade/auto-advance animates; Fit and FillScroll are
-    // static between inputs, so the app loop can idle in those modes.
+    // static between inputs, so the app loop can idle in those modes. A running
+    // background export also keeps the loop ticking so its progress bar repaints.
     [[nodiscard]] bool animating() const override
     {
+        if (export_job_.active()) return true;
         if (mode_ == ViewMode::Slideshow && slideshow_.animating()) return true;
         return video_ && video_->animating();   // a playing video keeps the loop ticking
     }
 
+    // Hold off the idle auto-lock while the export worker owns the vault, or the
+    // key would be wiped mid-read (Phase 25).
+    [[nodiscard]] bool blocks_idle_lock() const override { return export_job_.active(); }
+
 private:
     enum class ViewMode { Fit, FillScroll, Slideshow };
 
-    void handle_key(SDL_Keycode key);
+    // `sc` carries the physical scancode alongside the layout-resolved keycode so
+    // the video/slideshow paths can bind layout-independent keys (volume/dwell,
+    // Phase 25).
+    void handle_key(SDL_Keycode key, SDL_Scancode sc);
     void handle_key_fit(SDL_Keycode key);
     void handle_key_scroll(SDL_Keycode key);
-    void handle_key_video(SDL_Keycode key);         // Space/,/./J/L + F/arrows for a video item
+    void handle_key_video(SDL_Keycode key, SDL_Scancode sc);  // Space/,/./J/L + F/arrows + [ ] volume
     void handle_mouse_down(const SDL_MouseButtonEvent& b);
     void handle_wheel(const SDL_MouseWheelEvent& w);
     [[nodiscard]] bool handle_overlay_event(const SDL_Event& e);  // modal overlays; true if consumed
@@ -140,6 +150,7 @@ private:
     vault::Vault&           vault_;
     gfx::TextureCache&      cache_;
     ExportUi                export_;
+    FileOpJob               export_job_;   // background single-image export (Phase 25)
     TagEditor               tag_editor_;
     SearchOverlay           search_;
     QuickSwitch             quick_switch_;   // ` overlay: jump to another vault

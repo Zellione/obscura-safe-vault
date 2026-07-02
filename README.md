@@ -1,5 +1,9 @@
 # Obscura-Safe-Vault
 
+> ⚠️ **This is an AI-driven project, vibe-coded for educational purposes.** Every
+> line was written with AI assistance and the design decisions live in
+> [`CLAUDE.md`](CLAUDE.md). Do not trust it with data you cannot afford to lose.
+
 A multi-platform native encrypted photo gallery. All photos live inside a single `.osv` vault file — images are decrypted **into locked memory only**, never written to a temporary file or disk. The gallery is browsable with a freely-nestable folder tree, a zoomable full-screen image viewer, and a thumbnail strip navigable with arrow keys.
 
 **Stack:** C++20 · SDL3 · SDL_Renderer · Monocypher (XChaCha20-Poly1305 + Argon2id) · stb_image · libwebp / libheif (WebP / HEIC / AVIF) · premake5 → Ninja

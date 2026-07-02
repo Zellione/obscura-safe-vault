@@ -104,13 +104,16 @@ const IndexNode* find_image_node(const Vault& v, std::string_view gallery,
 
 // Copy every media (image or video) named in `images` from `src`/`src_gallery` into
 // `dst`/`dst_gallery`, decrypting through one reused mlock'd buffer. Copy only — the
-// source is untouched.
+// source is untouched. `progress` (optional) is bumped per file; a set cancel flag
+// stops the copy between files and reports it via `*cancelled` (source left intact).
 VaultResult copy_images(const Vault& src, std::string_view src_gallery,
                         Vault& dst, std::string_view dst_gallery,
-                        const std::vector<std::string>& images, crypto::SecureBytes& plain)
+                        const std::vector<std::string>& images, crypto::SecureBytes& plain,
+                        OpProgress* progress, bool* cancelled)
 {
     using enum VaultResult;
     for (const auto& fname : images) {
+        if (progress && progress->cancel.load()) { if (cancelled) *cancelled = true; return Ok; }
         const IndexNode* node = find_image_node(src, src_gallery, fname);
         if (!node) return NotFound;
 
@@ -124,6 +127,7 @@ VaultResult copy_images(const Vault& src, std::string_view src_gallery,
             if (VaultResult r = dst.add_video(dst_gallery, plain.as_span(), fname); r != Ok)
                 return r;
         }
+        if (progress) progress->done.fetch_add(1);
     }
     return Ok;
 }
@@ -196,7 +200,7 @@ std::vector<std::string> gallery_target_parents(const Vault& v)
 
 VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
                              Vault& dst, std::string_view dst_parent,
-                             TransferMode mode)
+                             TransferMode mode, OpProgress* progress)
 {
     using enum VaultResult;
 
@@ -223,7 +227,15 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
     std::vector<GallerySnap> snaps;
     snapshot_subtree(src, src_gallery, "", snaps);
 
+    // Total media across the subtree drives the progress bar ("N / M files").
+    if (progress) {
+        int media = 0;
+        for (const auto& snap : snaps) media += static_cast<int>(snap.images.size());
+        progress->total.store(media);
+    }
+
     crypto::SecureBytes plain;
+    bool cancelled = false;
     for (const auto& snap : snaps) {
         const std::string dst_gallery = snap.rel.empty() ? dest_root
                                                          : dest_root + "/" + snap.rel;
@@ -232,14 +244,38 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
 
         if (VaultResult r = dst.create_gallery(dst_gallery); r != Ok && r != AlreadyExists)
             return r;
-        if (VaultResult r = copy_images(src, src_abs, dst, dst_gallery, snap.images, plain);
+        if (VaultResult r =
+                copy_images(src, src_abs, dst, dst_gallery, snap.images, plain, progress, &cancelled);
             r != Ok)
             return r;
+        if (cancelled) break;
     }
+
+    // A cancel leaves the source intact even for Move — the partial copy in dst is a
+    // recoverable duplicate, never a loss.
+    if (cancelled) return Ok;
 
     // Everything copied into dst — for a Move, drop the source subtree (copy-then-delete).
     if (mode == TransferMode::Move) return src.remove_gallery(src_gallery);
     return Ok;
+}
+
+TransferTally transfer_images(Vault& src, std::string_view src_gallery,
+                              const std::vector<std::string>& filenames,
+                              Vault& dst, std::string_view dst_gallery,
+                              TransferMode mode, OpProgress* progress)
+{
+    using enum VaultResult;
+    if (progress) progress->total.store(static_cast<int>(filenames.size()));
+
+    TransferTally tally;
+    for (const auto& fname : filenames) {
+        if (progress && progress->cancel.load()) break;   // clean partial: stop between files
+        if (transfer_image(src, src_gallery, fname, dst, dst_gallery, mode) == Ok) ++tally.done;
+        else                                                                       ++tally.failed;
+        if (progress) progress->done.fetch_add(1);
+    }
+    return tally;
 }
 
 } // namespace vault

@@ -6,6 +6,7 @@
 #include "gfx/renderer.h"
 #include "gfx/text.h"
 #include "gfx/theme.h"
+#include "ui/keybindings.h"    // bracket_key_for_scancode (layout-robust volume keys)
 #include "ui/playback_model.h"
 #include "ui/viewer_model.h"   // fit_zoom
 
@@ -235,8 +236,22 @@ struct VideoPlayback::Impl {
         }
     }
 
-    void key(SDL_Keycode k)
+    void key(SDL_Keycode k, SDL_Scancode sc)
     {
+        // Volume `[`/`]` bind to the physical scancode so they work regardless of
+        // keyboard layout (on German QWERTZ those glyphs are behind AltGr) — Phase 25.
+        switch (bracket_key_for_scancode(sc)) {
+            case BracketKey::Decrease:
+                vol_.level = media::clamp_volume(vol_.level - 0.05f);
+                apply_gain();
+                return;
+            case BracketKey::Increase:
+                vol_.level = media::clamp_volume(vol_.level + 0.05f);
+                apply_gain();
+                return;
+            case BracketKey::None:
+                break;
+        }
         switch (k) {
             case SDLK_SPACE:
                 if (model_.at_end() && !model_.playing()) {
@@ -264,14 +279,6 @@ struct VideoPlayback::Impl {
             case SDLK_L: do_seek(model_.position() + PLAYBACK_SEEK_STEP); break;
             case SDLK_M:
                 vol_.muted = !vol_.muted;
-                apply_gain();
-                break;
-            case SDLK_LEFTBRACKET:
-                vol_.level = media::clamp_volume(vol_.level - 0.05f);
-                apply_gain();
-                break;
-            case SDLK_RIGHTBRACKET:
-                vol_.level = media::clamp_volume(vol_.level + 0.05f);
                 apply_gain();
                 break;
             default: break;
@@ -453,7 +460,7 @@ struct VideoPlayback::Impl {
     [[nodiscard]] SDL_FRect debug_vol_bar() const { return {0.0f, 0.0f, 0.0f, 0.0f}; }
     void update(double) {}
     void render(gfx::Renderer&, gfx::FontAtlas&, const SDL_FRect&) {}
-    void key(SDL_Keycode) {}
+    void key(SDL_Keycode, SDL_Scancode) {}
     void mouse_down(float, float) {}
     void mouse_motion(float, float, bool) {}
     void mouse_up() {}
@@ -481,7 +488,7 @@ void VideoPlayback::render(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRe
     impl_->render(r, font, area);
 }
 
-void VideoPlayback::handle_key(SDL_Keycode key) { impl_->key(key); }
+void VideoPlayback::handle_key(SDL_Keycode key, SDL_Scancode sc) { impl_->key(key, sc); }
 void VideoPlayback::handle_mouse_down(float mx, float my) { impl_->mouse_down(mx, my); }
 void VideoPlayback::handle_mouse_motion(float mx, float my, bool left_down)
 {

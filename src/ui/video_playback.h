@@ -62,7 +62,7 @@ public:
     void update(double dt);   // advance the clock (decode happens lazily in render)
     void render(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& area);
 
-    void handle_key(SDL_Keycode key);                       // Space / , / . / J / L
+    void handle_key(SDL_Keycode key, SDL_Scancode sc);      // Space/,/./J/L/M + [ ] volume
     void handle_mouse_down(float mx, float my);             // seek-bar scrub start + jump
     void handle_mouse_motion(float mx, float my, bool left_down);
     void handle_mouse_up();

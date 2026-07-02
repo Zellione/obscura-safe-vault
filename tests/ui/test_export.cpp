@@ -159,6 +159,47 @@ TEST(export_images_are_byte_identical_and_skip_thumbnails)
                    std::span<const uint8_t>(b));
 }
 
+// export_images reports "N / M" progress: total set up front, done bumped per node.
+TEST(export_images_reports_progress)
+{
+    TempVault tv("prog");
+    TempDir   out("prog");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kExpKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", pattern(1000, 1), "a.png") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", pattern(1000, 2), "b.png") == vault::VaultResult::Ok);
+    auto kids = v.list("");
+
+    vault::OpProgress prog;
+    auto sum = ui::export_images(v, kids, out.path, ui::ExportConsent::Confirm, &prog);
+    CHECK_EQ(sum.written, 2);
+    CHECK_EQ(prog.total.load(), 2);
+    CHECK_EQ(prog.done.load(), 2);
+}
+
+// A cancel set before the loop stops it immediately: nothing is written.
+TEST(export_images_cancel_writes_nothing)
+{
+    TempVault tv("cancel");
+    TempDir   out("cancel");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kExpKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", pattern(1000, 1), "a.png") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", pattern(1000, 2), "b.png") == vault::VaultResult::Ok);
+    auto kids = v.list("");
+
+    vault::OpProgress prog;
+    prog.cancel.store(true);
+    auto sum = ui::export_images(v, kids, out.path, ui::ExportConsent::Confirm, &prog);
+    CHECK_EQ(sum.written, 0);
+
+    int file_count = 0;
+    for (auto& e : fs::directory_iterator(out.path)) { (void)e; ++file_count; }
+    CHECK_EQ(file_count, 0);
+}
+
 TEST(export_images_collision_suffixes_without_overwriting)
 {
     TempVault tv("coll");

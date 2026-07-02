@@ -106,7 +106,7 @@ TEST(video_playback_av_sync_seek_realign_and_writes_no_disk)
         vp.render(r, font, area);   // decode + upload the first frame
         CHECK_EQ(vp.position(), 0.0);  // initial position at 0
 
-        vp.handle_key(SDLK_SPACE);  // play
+        vp.handle_key(SDLK_SPACE, SDL_SCANCODE_SPACE);  // play
         CHECK(vp.animating());
 
         // Drive several ticks while playing
@@ -121,7 +121,7 @@ TEST(video_playback_av_sync_seek_realign_and_writes_no_disk)
         CHECK(vp.audio_samples_fed() > 0);
 
         // Seek forward by 5s (or as much as available)
-        vp.handle_key(SDLK_L);  // seek +5s (clamps to duration)
+        vp.handle_key(SDLK_L, SDL_SCANCODE_L);  // seek +5s (clamps to duration)
         vp.render(r, font, area);
 
         // Assertion (b): after seek, position should re-align to the clamped target.
@@ -131,7 +131,7 @@ TEST(video_playback_av_sync_seek_realign_and_writes_no_disk)
         CHECK(pos_after_seek >= 0.9);  // clamped to near end (~1.0s - 0.1s tolerance)
 
         // Resume play to exercise audio feed path
-        vp.handle_key(SDLK_SPACE);
+        vp.handle_key(SDLK_SPACE, SDL_SCANCODE_SPACE);
         CHECK(vp.animating());
         for (int i = 0; i < 5; ++i) {
             vp.update(0.05);
@@ -139,7 +139,7 @@ TEST(video_playback_av_sync_seek_realign_and_writes_no_disk)
         }
 
         // Seek backward
-        vp.handle_key(SDLK_J);  // seek -5s (clamps to 0)
+        vp.handle_key(SDLK_J, SDL_SCANCODE_J);  // seek -5s (clamps to 0)
         vp.render(r, font, area);
         // Assertion (d): after backward seek, position should re-align to the start.
         // The fixture is ~1.0s, so seek -5s clamps to start; assert position is
@@ -240,10 +240,20 @@ TEST(video_playback_volume_bar_is_mouse_draggable_and_speaker_mutes)
         // Clicking the speaker icon toggles mute (gain drops to 0, then restores).
         const float gain_before_mute = vp.audio_gain();
         CHECK(gain_before_mute > 0.0f);
-        vp.handle_key(SDLK_M);
+        vp.handle_key(SDLK_M, SDL_SCANCODE_M);
         CHECK_EQ(vp.audio_gain(), 0.0f);
-        vp.handle_key(SDLK_M);
+        vp.handle_key(SDLK_M, SDL_SCANCODE_M);
         CHECK(vp.audio_gain() > 0.0f);
+
+        // Volume `[`/`]` bind to the physical SCANCODE (Phase 25), so they work on a
+        // non-US layout where those glyphs differ. Simulate a German layout: the
+        // physical `[`/`]` keys produce non-bracket keycodes, yet volume still moves.
+        const float mid = vp.audio_gain();
+        vp.handle_key(SDLK_UNKNOWN, SDL_SCANCODE_LEFTBRACKET);   // volume down
+        CHECK(vp.audio_gain() < mid);
+        const float lowered = vp.audio_gain();
+        vp.handle_key(SDLK_UNKNOWN, SDL_SCANCODE_RIGHTBRACKET);  // volume up
+        CHECK(vp.audio_gain() > lowered);
     }
 
     SDL_DestroyRenderer(sr);
@@ -286,7 +296,7 @@ TEST(video_playback_opens_plays_seeks_and_writes_no_disk)
         const SDL_FRect area{0, 0, 320, 240};
         vp.render(r, font, area);      // decode + upload the first frame (no crash)
 
-        vp.handle_key(SDLK_SPACE);     // play
+        vp.handle_key(SDLK_SPACE, SDL_SCANCODE_SPACE);     // play
         CHECK(vp.animating());
 
         // Drive well past the (short) clip; it must auto-pause at the end.
@@ -297,8 +307,8 @@ TEST(video_playback_opens_plays_seeks_and_writes_no_disk)
         CHECK_FALSE(vp.animating());   // auto-paused at end of stream
 
         // Exercise the seek + frame-step paths (keyframe-anchored decode-forward).
-        vp.handle_key(SDLK_J);         // seek -5s (clamps to 0)
-        vp.handle_key(SDLK_PERIOD);    // step one frame forward
+        vp.handle_key(SDLK_J, SDL_SCANCODE_J);         // seek -5s (clamps to 0)
+        vp.handle_key(SDLK_PERIOD, SDL_SCANCODE_PERIOD);    // step one frame forward
         vp.render(r, font, area);
     }
 

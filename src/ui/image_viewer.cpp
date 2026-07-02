@@ -11,7 +11,7 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "image/decode.h"
-#include "ui/export.h"
+#include "ui/progress_modal.h"
 #include "ui/meta_format.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
@@ -104,7 +104,7 @@ void ImageViewer::show_image_at(int idx)
         video_ = std::make_unique<VideoPlayback>(vault_, *album_.images[index_]);
 }
 
-void ImageViewer::handle_key_video(SDL_Keycode key)
+void ImageViewer::handle_key_video(SDL_Keycode key, SDL_Scancode sc)
 {
     switch (key) {
         case SDLK_F:   // lift the video out of fill-scroll so it can play
@@ -113,7 +113,7 @@ void ImageViewer::handle_key_video(SDL_Keycode key)
         case SDLK_LEFT:  set_index(-1); return;
         case SDLK_RIGHT: set_index(1);  return;
         case SDLK_UP:    go_back();     return;
-        default:         if (video_) video_->handle_key(key); return;   // Space / , / . / J / L
+        default:         if (video_) video_->handle_key(key, sc); return;   // Space/,/./J/L + [ ] volume
     }
 }
 
@@ -222,12 +222,12 @@ int ImageViewer::strip_hit(float mx, float my) const
 
 // --- Input -----------------------------------------------------------------
 
-void ImageViewer::handle_key(SDL_Keycode key)
+void ImageViewer::handle_key(SDL_Keycode key, SDL_Scancode sc)
 {
     using enum StripSide;
     using enum ViewMode;
     if (mode_ == Slideshow) {
-        if (!slideshow_.handle_key(key)) {   // user exited the slideshow
+        if (!slideshow_.handle_key(key, sc)) {   // user exited the slideshow
             index_ = slideshow_.index();
             slideshow_.stop();
             mode_  = Fit;
@@ -251,7 +251,7 @@ void ImageViewer::handle_key(SDL_Keycode key)
         case SDLK_ESCAPE: go_back(); return;
         default: break;
     }
-    if (item_is_video(album_.images, index_)) { handle_key_video(key); return; }
+    if (item_is_video(album_.images, index_)) { handle_key_video(key, sc); return; }
     // Image-only keys.
     switch (key) {
         case SDLK_F:      // toggle fit <-> fill-width scroll
@@ -328,6 +328,16 @@ void ImageViewer::handle_wheel(const SDL_MouseWheelEvent& w)
 
 void ImageViewer::update(double dt)
 {
+    // While the export worker owns the vault, only poll it — don't decode/read the
+    // vault on this thread (single-thread file-handle invariant).
+    if (export_job_.active()) {
+        if (auto oc = export_job_.take_outcome()) {
+            export_.set_status(oc->status);
+            mark_dirty();
+        }
+        return;
+    }
+
     if (full_cache_.pump()) mark_dirty();   // an off-thread decode landed — repaint
 
     if (mode_ == ViewMode::Slideshow) {
@@ -338,13 +348,13 @@ void ImageViewer::update(double dt)
     if (video_) video_->update(dt);
 
     if (auto dest = export_.take_destination(); dest && !album_.images.empty()) {
-        const std::array<const vault::IndexNode*, 1> one{album_.images[index_]};
-        const ExportSummary sum =
-            export_images(vault_, one, *dest, ExportConsent::Confirm);
-        export_.set_status(sum.written == 1
-                               ? std::format("Exported to {}", dest->string())
-                               : "Export failed.");
-        mark_dirty();   // export folder picker resolved — repaint the status line
+        // Run the decrypt→write on a worker thread with a progress modal + cancel
+        // (Phase 25). The current node points into the live index, which the
+        // read-only export does not mutate; the UI does not navigate while the job
+        // runs (input is gated), so it stays valid on the worker.
+        std::vector<const vault::IndexNode*> one{album_.images[index_]};
+        export_job_.start_export(vault_, std::move(one), *dest, dest->string());
+        mark_dirty();
     }
 }
 
@@ -379,6 +389,11 @@ bool ImageViewer::handle_overlay_event(const SDL_Event& e)
 void ImageViewer::handle_event(const SDL_Event& e)
 {
     using enum ViewMode;
+    // The export worker owns the vault; swallow all input except Esc → cancel.
+    if (export_job_.active()) {
+        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) export_job_.cancel();
+        return;
+    }
     if (handle_overlay_event(e)) return;
 
     switch (e.type) {
@@ -387,13 +402,12 @@ void ImageViewer::handle_event(const SDL_Event& e)
             // resolve the produced character from scancode + modifiers. Not while
             // the slideshow owns the keyboard. The `` ` `` quick-switch chord is
             // layout-robust for the same reason (see is_quick_switch_key).
-            if (mode_ != Slideshow &&
-                SDL_GetKeyFromScancode(e.key.scancode, e.key.mod, false) == SDLK_SLASH)
+            if (mode_ != Slideshow && is_search_key(e.key))
                 search_.open();
             else if (mode_ != Slideshow && is_quick_switch_key(e.key))
                 quick_switch_.open();
             else
-                handle_key(e.key.key);
+                handle_key(e.key.key, e.key.scancode);
             break;
         case SDL_EVENT_MOUSE_WHEEL:       handle_wheel(e.wheel);        break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN: handle_mouse_down(e.button);  break;
@@ -540,6 +554,19 @@ void ImageViewer::render_hud(gfx::Renderer& r, const SDL_FRect& vp)
 
 void ImageViewer::render(gfx::Renderer& r)
 {
+    // While the export worker owns the vault, show only the progress modal — the
+    // still image is already on the GPU, but suppress the rest of the UI so nothing
+    // decrypts on this thread and races the worker.
+    if (export_job_.active()) {
+        const int total = export_job_.total();
+        const int done  = export_job_.done();
+        draw_op_progress(r, font_, static_cast<float>(win_.width()),
+                         static_cast<float>(win_.height()), "Exporting…",
+                         total > 0 ? std::format("{} / {} images", done, total) : "Preparing…",
+                         done, total, "Esc to cancel");
+        return;
+    }
+
     // Slideshow is full-screen (no thumbnail strip): it owns the whole window.
     if (mode_ == ViewMode::Slideshow) {
         slideshow_.render(r, font_, full_cache_, album_.images,

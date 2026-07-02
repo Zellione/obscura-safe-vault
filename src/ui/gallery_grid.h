@@ -11,6 +11,7 @@
 
 #include "image/decode_worker.h"
 #include "ui/consent_dialog.h"
+#include "ui/file_op_job.h"
 #include "ui/nav_model.h"
 #include "ui/quick_switch.h"
 #include "ui/screen.h"
@@ -56,10 +57,12 @@ public:
     void handle_event(const SDL_Event& e) override;
     void update(double dt) override;
     void render(gfx::Renderer& r) override;
-    // Keep repainting the progress bar and hold off the idle auto-lock while a
-    // background import runs (the worker thread owns the vault meanwhile).
-    [[nodiscard]] bool animating() const override { return naming_.import_job.active(); }
-    [[nodiscard]] bool blocks_idle_lock() const override { return naming_.import_job.active(); }
+    // Keep repainting the progress bar and hold off the idle auto-lock while ANY
+    // background job runs (import, export/delete, or an in-progress transfer) —
+    // a worker thread owns the vault(s) meanwhile, so locking would wipe the key
+    // mid-write.
+    [[nodiscard]] bool animating() const override { return vault_busy(); }
+    [[nodiscard]] bool blocks_idle_lock() const override { return vault_busy(); }
 
 private:
     enum class GalleryView { Grid, List };
@@ -74,6 +77,11 @@ private:
     void start_export();           // open the consent modal for the current selection
     void start_transfer();         // open the move-to-another-vault dialog
     void do_export(const std::filesystem::path& dest);
+    void poll_file_job();          // drain a finished background export/delete job
+    // True while any worker thread owns the vault(s): a ZIP/CBZ import, a background
+    // export/delete, or an in-progress transfer. The grid must not read the vault
+    // (thumbnails/listing) while this holds.
+    [[nodiscard]] bool vault_busy() const noexcept;
     void start_import();
     void start_naming();
     void finish_naming();
@@ -132,6 +140,7 @@ private:
         std::string  buf;
         PendingZip   zip;              // zip import descriptor in flight
         ZipImportJob import_job;       // background executor for the zip/cbz import (Phase 24)
+        FileOpJob    file_op;          // background executor for export/delete (Phase 25)
         bool         confirm_delete = false;  // Del on a media tile: awaiting Y/N confirm
         std::string  tag_target;       // gallery path awaiting a tag-list import (Shift+G, Phase 21)
     };

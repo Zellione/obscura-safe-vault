@@ -19,6 +19,7 @@
 #include <string>
 #include <string_view>
 
+#include "vault/op_progress.h"
 #include "vault/vault.h"
 
 namespace ui {
@@ -63,10 +64,13 @@ template <class Exists>
 
 // Export every image in `images` to `dest_dir`, collision-suffixing names. A
 // no-op returning {0,0} unless `consent == Confirm`. Non-image / failed nodes
-// increment `failed` and are skipped. Thumbnails are never written.
+// increment `failed` and are skipped. Thumbnails are never written. `progress`
+// (optional) is set to images.size() up front and bumped per node; a set cancel
+// flag stops between files, leaving the files written so far in place (Phase 25).
 [[nodiscard]] ExportSummary export_images(const vault::Vault&                          vault,
                                           std::span<const vault::IndexNode* const>     images,
                                           const std::filesystem::path&                 dest_dir,
-                                          ExportConsent                                consent);
+                                          ExportConsent                                consent,
+                                          vault::OpProgress*                           progress = nullptr);
 
 } // namespace ui
