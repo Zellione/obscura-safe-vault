@@ -15,9 +15,10 @@ Standard delivery flow for every phase or feature:
 3. **`scripts/test.sh --asan`** — no memory/UB errors (for crypto/vault/memory changes).
 4. **Open a PR** — one PR per phase; include ROADMAP and docs updates in the same PR.
 5. **CI green** — all checks must pass on all platforms.
-6. **SonarCloud** — use findings posted to the PR directly (do NOT install/authenticate sonarqube-cli — agents cannot complete the auth flow). Re-scan and confirm zero remaining issues before merging.
-7. **Post-merge verification** — after squash merge, `git fetch` and confirm ROADMAP.md and all doc changes are present on `origin/main`. Fix with a follow-up PR if anything is missing.
-8. **Update Serena memories** — if the phase added/removed source modules, changed deps, renamed symbols, or changed conventions, update the relevant `mem:*` memory (see ## Serena below).
+6. **SonarCloud** — use findings posted to the PR directly (do NOT install/authenticate sonarqube-cli — agents cannot complete the auth flow). Re-scan and confirm zero remaining issues.
+7. **⛔ THE OWNER MERGES — NEVER THE AGENT.** When CI is green and SonarCloud is clean, **STOP**: post the PR link, say it is ready, and hand off. Do **NOT** run `gh pr merge`, push to `main`, or otherwise integrate the branch yourself — not even when every gate is green and the flow "looks done". Merging is the owner's decision, always. Green gates are permission to *ask*, never to merge. Keep follow-up fixes for a phase on that phase's branch until the owner has merged it.
+8. **Post-merge verification (after the OWNER merges)** — once the owner reports the merge, `git fetch` and confirm ROADMAP.md and all doc changes are present on `origin/main`. Fix with a follow-up PR if anything is missing.
+9. **Update Serena memories** — if the phase added/removed source modules, changed deps, renamed symbols, or changed conventions, update the relevant `mem:*` memory (see ## Serena below).
 
 ---
 
