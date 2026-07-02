@@ -4,13 +4,22 @@
 #include <string_view>
 #include <vector>
 
-#include "vault/vault.h"   // Vault, VaultResult
+#include "vault/op_progress.h"   // OpProgress (background progress + cancel)
+#include "vault/vault.h"         // Vault, VaultResult
 
 namespace vault {
 
 // Move (default) or Copy. Copy leaves the source untouched; Move removes it after
 // the destination commit. Same code path for cross-vault and same-vault transfers.
 enum class TransferMode { Move, Copy };
+
+// Result of a bulk media transfer: how many files committed to the destination
+// and how many failed (skipped). done + failed == the number attempted, which is
+// <= the input size when a cancel stopped the loop early.
+struct TransferTally {
+    int done   = 0;
+    int failed = 0;
+};
 
 // Transfer one media (image or video) from `src` (gallery `src_gallery`, file `filename`)
 // into `dst`'s `dst_gallery`, keeping the filename. Reads the source plaintext into an
@@ -29,6 +38,18 @@ enum class TransferMode { Move, Copy };
                                          Vault& dst, std::string_view dst_gallery,
                                          TransferMode mode);
 
+// Transfer a list of media (`filenames`, all in src/src_gallery) into dst/dst_gallery,
+// one file at a time via transfer_image (each an atomic copy-then-remove unit). This is
+// the bulk driver behind the move/copy dialog, kept here (not in the UI) so it is
+// headlessly testable. With `progress != nullptr`: total is set to filenames.size()
+// up front, done is bumped after each file, and the loop stops early when
+// progress->cancel is set — files transferred so far remain committed (a clean
+// partial). Returns {committed, failed}; failed files are left in the source.
+[[nodiscard]] TransferTally transfer_images(Vault& src, std::string_view src_gallery,
+                                            const std::vector<std::string>& filenames,
+                                            Vault& dst, std::string_view dst_gallery,
+                                            TransferMode mode, OpProgress* progress = nullptr);
+
 // Slash-paths of every gallery in `v` that may legally accept media (images or videos)
 // — holds no sub-galleries, including "" (root) when root holds no sub-galleries. Used
 // to populate the transfer dialog's destination-gallery list. Empty while locked.
@@ -46,9 +67,13 @@ enum class TransferMode { Move, Copy };
 //   InvalidArg    - dst_parent cannot hold a sub-gallery (it holds media),
 //                   src_gallery is the root (""), or a same-vault cycle
 //   AuthFailed / IoError / Locked - propagated; source left intact if any copy fails.
+// `progress` (optional): total is set to the subtree's media count up front, done
+// bumped per copied file, and the copy stops early when progress->cancel is set —
+// in which case the SOURCE IS LEFT INTACT (no removal) even for Move, so a cancel
+// leaves the already-copied files as a recoverable duplicate, never a loss.
 [[nodiscard]] VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
                                            Vault& dst, std::string_view dst_parent,
-                                           TransferMode mode);
+                                           TransferMode mode, OpProgress* progress = nullptr);
 
 // Slash-paths of every gallery in `v` that may legally accept a SUB-gallery (i.e.
 // holds no images), including "" (root) when root holds no images. Empty while

@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "ui/file_op_job.h"   // background transfer executor (Phase 25)
 #include "ui/secure_text_field.h"
 #include "vault/transfer.h"   // vault::TransferMode
 #include "vault/vault.h"      // owns a transient vault::Vault dst_
@@ -42,13 +43,22 @@ public:
     void close();                                   // wipes dest_.vault key, deactivates
     [[nodiscard]] bool active() const noexcept { return active_; }
 
+    // True while the background move/copy worker owns the vault(s). The host grid
+    // uses this to draw only the progress modal (no thumbnail decrypt) and to hold
+    // off the idle auto-lock. Distinct from active(), which is also true during the
+    // dialog's pick-vault/unlock/pick-gallery stages (Phase 25).
+    [[nodiscard]] bool job_active() const noexcept { return run_.job.active(); }
+
     [[nodiscard]] bool handle_event(const SDL_Event& e);   // true if consumed
-    void update();                                          // poll the keyfile dialog
+    void update();                                          // poll the keyfile dialog + the transfer job
     [[nodiscard]] bool consume_completed(std::string& status_out);
     void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H) const;
 
 private:
-    enum class Stage { Mode, PickVault, Unlock, PickGallery };
+    // Running: the background move/copy worker owns the vault(s); the dialog stays
+    // active (keeping the unlocked destination alive) and shows a progress modal
+    // until the job completes, then closes (Phase 25).
+    enum class Stage { Mode, PickVault, Unlock, PickGallery, Running };
 
     void choose_vault();      // PickVault Enter: open dest_.vault for the selected path
     void try_unlock();        // Unlock Enter: open()+unlock() dest_.vault
@@ -101,9 +111,15 @@ private:
 
     std::string error_;
 
-    // Finished-transfer outcome — bundled to keep the field count ≤20 (S1820).
-    struct Outcome { bool done = false; std::string status; };
-    Outcome     outcome_;     // set on completion; drained by consume_completed
+    // Background transfer run — the worker-thread job plus its finished outcome,
+    // bundled to keep the field count ≤20 (S1820). `done`/`status` are set when the
+    // job completes and drained by consume_completed.
+    struct Run {
+        FileOpJob   job;
+        bool        done = false;
+        std::string status;
+    };
+    Run         run_;
 };
 
 } // namespace ui

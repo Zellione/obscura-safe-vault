@@ -7,6 +7,7 @@
 #include <span>
 #include <vector>
 
+#include "ui/keybindings.h"      // bracket_key_for_scancode (layout-robust dwell keys)
 #include "ui/slideshow_model.h"
 
 namespace gfx { class Renderer; class FontAtlas; }
@@ -37,9 +38,10 @@ public:
     void toggle_play() { if (show_) show_->toggle(); }
     void update(double dt) { if (show_) show_->tick(dt); }
 
-    // Handle one key. Returns false when the user asked to leave the slideshow
+    // Handle one key. `sc` is the physical scancode (for the layout-independent
+    // `[`/`]` dwell keys). Returns false when the user asked to leave the slideshow
     // (Esc/Up); the caller then exits to the still viewer at index().
-    bool handle_key(SDL_Keycode key);
+    bool handle_key(SDL_Keycode key, SDL_Scancode sc);
 
     // Draw the current frame (cross-faded with the outgoing one) full-screen,
     // plus the status/controls HUD. `images` is the leaf gallery's image list.
