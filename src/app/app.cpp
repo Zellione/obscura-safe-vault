@@ -8,7 +8,9 @@
 #include "gfx/renderer.h"
 #include "gfx/theme.h"
 #include "platform/paths.h"
+#include "media/volume_setting.h"
 #include "platform/theme_pref.h"
+#include "platform/volume_pref.h"
 #include "ui/advanced_search_screen.h"
 #include "ui/favorites_galleries.h"
 #include "ui/favorites_images.h"
@@ -50,6 +52,10 @@ bool App::init()
 
     // Apply the saved UI theme before drawing the first frame (Phase 23).
     gfx::set_theme(platform::ThemePref::default_location().load());
+
+    // Restore the remembered media playback volume (Phase 25 follow-up); persisted
+    // again on exit at the end of run().
+    media::set_saved_volume(platform::VolumePref::default_location().load());
 
     registry_ = platform::VaultRegistry::default_location();
     registry_.seed_if_empty(platform::default_vault_path());
@@ -348,6 +354,9 @@ void App::run()
         if (screen_ && screen_->consume_dirty()) redraw = true;
         if (running_ && redraw) render_frame();
     }
+
+    // Persist the remembered playback volume on a clean exit (Phase 25 follow-up).
+    platform::VolumePref::default_location().save(media::saved_volume());
 }
 
 void App::shutdown()

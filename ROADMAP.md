@@ -1043,11 +1043,14 @@ move/copy/delete/export shows live progress without freezing the UI and can be
 cancelled; `docs/` is gone from the tree and gitignored; the README carries the
 AI-driven note.
 
-**Status:** ✅ 574/574 tests pass (`scripts/test.sh`); `scripts/test.sh --asan` clean.
-New pure `ui::bracket_key_for_scancode` (ui/keybindings.h) maps the two physical
-keys right of `P` to a decrease/increase pair by **scancode**, so video volume
-(`[`/`]`) and slideshow dwell work on any keyboard layout (unit-tested; German
-QWERTZ simulated by pressing the bracket scancode with a non-bracket keycode). The
+**Status:** ✅ 581/581 tests pass (`scripts/test.sh`); `scripts/test.sh --asan` clean.
+Slideshow dwell binds `[`/`]` by **scancode** (`ui::bracket_key_for_scancode`, the
+keys right of `P`) plus `-`/`+`. Video **volume** uses `ui::volume_dir`, which
+accepts the `[`/`]` produced character (resolved via `SDL_GetModState` so German
+QWERTZ **AltGr+8/9 works** — the initial scancode-only fix missed this, as AltGr+8
+reports the physical `8` scancode), the `-`/`+`/`=` glyph keys (the intuitive pair,
+now advertised in the HUD as `[-/+] Vol`), and the physical bracket scancodes — all
+unit-tested. The
 `/`, `?`, `` ` `` character shortcuts were already layout-robust via
 `SDL_GetKeyFromScancode`; that logic is now centralised as `is_search_key` /
 `is_advanced_search_key` / `is_quick_switch_key` in the same header. Export, delete

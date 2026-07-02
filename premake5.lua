@@ -302,6 +302,7 @@ project "osv_tests"
         "src/platform/paths.cpp",
         "src/platform/vault_registry.cpp",
         "src/platform/theme_pref.cpp",
+        "src/platform/volume_pref.cpp",
         "src/platform/file_dialog.cpp",
         "src/ui/input.cpp",
         "src/ui/nav_model.cpp",

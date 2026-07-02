@@ -15,9 +15,10 @@ Standard delivery flow for every phase or feature:
 3. **`scripts/test.sh --asan`** — no memory/UB errors (for crypto/vault/memory changes).
 4. **Open a PR** — one PR per phase; include ROADMAP and docs updates in the same PR.
 5. **CI green** — all checks must pass on all platforms.
-6. **SonarCloud** — use findings posted to the PR directly (do NOT install/authenticate sonarqube-cli — agents cannot complete the auth flow). Re-scan and confirm zero remaining issues before merging.
-7. **Post-merge verification** — after squash merge, `git fetch` and confirm ROADMAP.md and all doc changes are present on `origin/main`. Fix with a follow-up PR if anything is missing.
-8. **Update Serena memories** — if the phase added/removed source modules, changed deps, renamed symbols, or changed conventions, update the relevant `mem:*` memory (see ## Serena below).
+6. **SonarCloud** — use findings posted to the PR directly (do NOT install/authenticate sonarqube-cli — agents cannot complete the auth flow). Re-scan and confirm zero remaining issues.
+7. **⛔ THE OWNER MERGES — NEVER THE AGENT.** When CI is green and SonarCloud is clean, **STOP**: post the PR link, say it is ready, and hand off. Do **NOT** run `gh pr merge`, push to `main`, or otherwise integrate the branch yourself — not even when every gate is green and the flow "looks done". Merging is the owner's decision, always. Green gates are permission to *ask*, never to merge. Keep follow-up fixes for a phase on that phase's branch until the owner has merged it.
+8. **Post-merge verification (after the OWNER merges)** — once the owner reports the merge, `git fetch` and confirm ROADMAP.md and all doc changes are present on `origin/main`. Fix with a follow-up PR if anything is missing.
+9. **Update Serena memories** — if the phase added/removed source modules, changed deps, renamed symbols, or changed conventions, update the relevant `mem:*` memory (see ## Serena below).
 
 ---
 
@@ -186,6 +187,9 @@ src/
              video_probe.*,                interleaved F32; av_sync pure logic (audio-clock
              decoded_frame.h                sync, frame Present/Hold/Drop). Container/codec
                                             probe. All gated by OSV_VENDORED_AV (Phase 15–16).
+             volume_setting.*             ← session-wide remembered playback volume global
+                                            (saved_volume/set_saved_volume, [0,1]); NOT AV-gated,
+                                            so App can seed/read it in any build (Phase 25).
   gfx/       window.{h,cpp},             ← SDL3 window + renderer (Phase 0)
              renderer.{h,cpp},            ← texture cache, text atlas (Phase 4)
              texture_cache.*, text.*,
@@ -199,12 +203,15 @@ src/
                                             change. Renderer also has draw_triangle (play badge/icon)
   ui/        input.h,                    ← input abstraction (Phase 5)
              keybindings.h,               ← pure layout-independent key resolution (Phase 25):
-                                            bracket_key_for_scancode maps the two physical keys
-                                            right of `P` → BracketKey{Decrease,Increase} by
-                                            SDL scancode (so video volume `[`/`]` + slideshow
-                                            dwell work on any layout, incl. German QWERTZ where
-                                            those glyphs are behind AltGr; unit-tested). Also
-                                            centralises the character-resolved is_search_key /
+                                            volume_dir(produced_char, scancode)→VolumeDir accepts
+                                            THREE ways to change video volume so it works however
+                                            it's pressed — the `[`/`]` produced CHARACTER (caller
+                                            resolves via SDL_GetKeyFromScancode so German QWERTZ
+                                            AltGr+8/9 matches), the `-`/`+`/`=` glyph keys (direct
+                                            on every layout — the primary/advertised pair), and the
+                                            physical `[`/`]` scancode (bracket_key_for_scancode, keys
+                                            right of `P`; also drives slideshow dwell). Unit-tested.
+                                            Also centralises the character-resolved is_search_key /
                                             is_advanced_search_key / is_quick_switch_key helpers
                                             (moved here from quick_switch.h).
              file_op_job.*,               ← FileOpJob: runs export / delete / move-copy on a
@@ -236,9 +243,12 @@ src/
                                             + seek bar (seeks both tracks) + mute/volume (M,
                                             [/]); pImpl gated on OSV_VENDORED_AV (non-AV build
                                             → poster fallback) (Phase 15–16). handle_key takes
-                                            the scancode too: `[`/`]` volume binds by physical
-                                            scancode (bracket_key_for_scancode) so it works on
-                                            any layout (Phase 25).
+                                            the scancode too; volume uses ui::volume_dir (resolves
+                                            the produced char via SDL_GetModState so German AltGr+8/9
+                                            `[`/`]` works) + the `-`/`+` glyph keys — the HUD legend
+                                            advertises `[-/+] Vol` (Phase 25 fix). The level is
+                                            seeded from media::saved_volume() on open + written back
+                                            on change, so it is remembered across clips + restarts.
              full_tex_cache.*,            ← shared decode→GPU texture cache (Phase 11 extract)
              slideshow_view.*,            ← full-screen slideshow SDL plumbing (Phase 11);
                                             handle_key takes the scancode so dwell `[`/`]` is
@@ -429,6 +439,11 @@ src/
              theme_pref.*                 ← chosen UI theme slug in config_dir()/theme.conf;
                                             atomic temp+rename, stores NO secrets, unknown/
                                             absent → default; mirrors vault_registry (Phase 23)
+             volume_pref.*                ← remembered media playback volume (one float [0,1])
+                                            in config_dir()/volume.conf; atomic temp+rename,
+                                            NO secrets, missing/invalid → 1.0; mirrors theme_pref
+                                            (Phase 25). App loads it at init → media::set_saved_volume
+                                            and saves media::saved_volume() on clean exit.
 vendor/
   SDL3/           ← git submodule, built by scripts/setup.sh (cmake)
   monocypher/     ← git submodule, compiled by premake (single .c file)

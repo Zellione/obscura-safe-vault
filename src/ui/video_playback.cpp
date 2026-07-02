@@ -6,7 +6,7 @@
 #include "gfx/renderer.h"
 #include "gfx/text.h"
 #include "gfx/theme.h"
-#include "ui/keybindings.h"    // bracket_key_for_scancode (layout-robust volume keys)
+#include "ui/keybindings.h"    // volume_dir (layout-robust volume keys)
 #include "ui/playback_model.h"
 #include "ui/viewer_model.h"   // fit_zoom
 
@@ -20,6 +20,7 @@
 #include "media/chunk_avio.h"
 #include "media/video_decoder.h"
 #include "media/video_source.h"
+#include "media/volume_setting.h"
 #include "vault/index.h"
 #include "vault/vault.h"
 #endif
@@ -73,6 +74,7 @@ struct VideoPlayback::Impl {
 
     Impl(const vault::Vault& vault, const vault::IndexNode& node)
     {
+        vol_.level = media::saved_volume();   // remembered across clips + restarts (Phase 25)
         auto src = media::VideoSource::open(vault, node);
         avio_ = std::make_unique<media::ChunkAvio>(std::move(src));
         if (!avio_->valid()) {
@@ -227,8 +229,8 @@ struct VideoPlayback::Impl {
         }
     }
 
-    // Helper for Task 6: apply volume/mute state to audio stream
-    // Task 6 will add key bindings for M, [, ] to change vol_.level/vol_.muted and call this
+    // Push the current volume/mute level to the audio stream (no-op when muted or
+    // when the clip has no audio track).
     void apply_gain()
     {
         if (audio_) {
@@ -236,22 +238,26 @@ struct VideoPlayback::Impl {
         }
     }
 
+    void adjust_volume(float delta)
+    {
+        vol_.level = media::clamp_volume(vol_.level + delta);
+        media::set_saved_volume(vol_.level);   // remember it (Phase 25)
+        apply_gain();
+    }
+
     void key(SDL_Keycode k, SDL_Scancode sc)
     {
-        // Volume `[`/`]` bind to the physical scancode so they work regardless of
-        // keyboard layout (on German QWERTZ those glyphs are behind AltGr) — Phase 25.
-        using enum BracketKey;
-        switch (bracket_key_for_scancode(sc)) {
-            case Decrease:
-                vol_.level = media::clamp_volume(vol_.level - 0.05f);
-                apply_gain();
-                return;
-            case Increase:
-                vol_.level = media::clamp_volume(vol_.level + 0.05f);
-                apply_gain();
-                return;
-            case None:
-                break;
+        // Volume: `[`/`]` (incl. German QWERTZ AltGr+8/9, resolved to the produced
+        // character), the `-`/`+`/`=` glyph keys, or the physical bracket positions
+        // — all layout-robust (Phase 25 fix). Resolve the character the layout +
+        // held modifiers produce, exactly like the `/` search shortcut.
+        constexpr float kVolStep = 0.05f;
+        using enum VolumeDir;
+        switch (const SDL_Keycode produced = SDL_GetKeyFromScancode(sc, SDL_GetModState(), false);
+                volume_dir(produced, sc)) {
+            case Down: adjust_volume(-kVolStep); return;
+            case Up:   adjust_volume(kVolStep);  return;
+            case None: break;
         }
         switch (k) {
             case SDLK_SPACE:
@@ -303,6 +309,7 @@ struct VideoPlayback::Impl {
     {
         if (vol_.bar.w <= 0.0f) return;
         vol_.level = media::clamp_volume((mx - vol_.bar.x) / vol_.bar.w);
+        media::set_saved_volume(vol_.level);       // remember it (Phase 25)
         vol_.muted  = false;                       // grabbing the volume bar unmutes
         apply_gain();
     }
