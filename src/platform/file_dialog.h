@@ -27,7 +27,7 @@ public:
     void open_vault(SDL_Window* parent);    // *.osv (single)
     void open_images(SDL_Window* parent);    // common image types (multi)
     void open_keyfile(SDL_Window* parent);   // any file (single)
-    void open_zip(SDL_Window* parent);       // *.zip (single)
+    void open_zip(SDL_Window* parent);       // *.zip / *.cbz (single)
     void open_tag_list(SDL_Window* parent);  // *.txt one-tag-per-line (single)
     void save_keyfile(SDL_Window* parent);   // pick a location for a new keyfile
     void save_vault(SDL_Window* parent);     // pick a location for a new *.osv vault

@@ -61,7 +61,7 @@ void FileDialog::open_zip(SDL_Window* parent)
 {
     if (!begin_open(Purpose::Zip)) return;
     static constexpr std::array f{
-        SDL_DialogFileFilter{"Zip archives", "zip"},
+        SDL_DialogFileFilter{"Zip & comic archives", "zip;cbz"},
         SDL_DialogFileFilter{"All files", "*"}};
     SDL_ShowOpenFileDialog(on_files, this, parent, f.data(),
                            static_cast<int>(f.size()), nullptr, /*allow_many*/ false);

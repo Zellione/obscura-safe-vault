@@ -83,6 +83,53 @@ void import_one(vault::Vault& v, mz_zip_archive& zip, const ZipPlacement& pl, Zi
     }
 }
 
+// Read `path` into memory and init a miniz reader over it (the portable
+// in-memory path; `archive` must outlive every read — init_mem borrows it). On
+// failure there is nothing to mz_zip_reader_end(); sets out.error and returns false.
+bool open_archive(const std::filesystem::path& path, const char* tag,
+                  std::vector<uint8_t>& archive, mz_zip_archive& zip, ZipImportOutcome& out)
+{
+    std::memset(&zip, 0, sizeof(zip));
+    if (read_archive(path, archive) &&
+        mz_zip_reader_init_mem(&zip, archive.data(), archive.size(), 0))
+        return true;
+    out.error = "Could not open archive";
+    std::println(stderr, "[{}] open failed: {}", tag, path.string());
+    return false;
+}
+
+// Create plan.galleries (parents already ordered first by the planner). On a
+// hard failure ends `zip`, sets out.error, and returns false.
+bool create_galleries(vault::Vault& v, const ZipPlan& plan, mz_zip_archive& zip, ZipImportOutcome& out)
+{
+    for (const auto& g : plan.galleries) {
+        const vault::VaultResult r = v.create_gallery(g);
+        if (r != vault::VaultResult::Ok && r != vault::VaultResult::AlreadyExists) {
+            out.error = "Could not create gallery: " + g;
+            mz_zip_reader_end(&zip);
+            return false;
+        }
+    }
+    return true;
+}
+
+// Store every planned placement, then end `zip` and mark the outcome ok. When
+// `progress` is set, publishes the page count up front and bumps `done` per page
+// so a background poller can draw a bar; `cancel` cooperatively stops between
+// pages (already-stored pages remain — the vault is append-only).
+void run_placements(vault::Vault& v, mz_zip_archive& zip, const ZipPlan& plan,
+                    ZipImportOutcome& out, ImportProgress* progress)
+{
+    if (progress) progress->total.store(static_cast<int>(plan.placements.size()));
+    for (const auto& pl : plan.placements) {
+        if (progress && progress->cancel.load()) break;
+        import_one(v, zip, pl, out);
+        if (progress) progress->done.fetch_add(1);
+    }
+    mz_zip_reader_end(&zip);
+    out.ok = true;
+}
+
 } // namespace
 
 ZipImportOutcome import_zip(vault::Vault&                v,
@@ -90,22 +137,13 @@ ZipImportOutcome import_zip(vault::Vault&                v,
                             ZipDest                      dest,
                             std::string_view             base_gallery,
                             std::string_view             new_gallery_name,
-                            ZipConflictPolicy            policy)
+                            ZipConflictPolicy            policy,
+                            ImportProgress*              progress)
 {
     ZipImportOutcome out;
-
-    // Drive miniz from an in-memory buffer (mz_zip_reader_init_mem), the portable
-    // path. `archive` must outlive every read: init_mem borrows it, never copies.
     std::vector<uint8_t> archive;
     mz_zip_archive zip;
-    std::memset(&zip, 0, sizeof(zip));
-    if (!read_archive(zip_path, archive) ||
-        !mz_zip_reader_init_mem(&zip, archive.data(), archive.size(), 0)) {
-        // On a read/init failure there is nothing to mz_zip_reader_end().
-        out.error = "Could not open archive";
-        std::println(stderr, "[ZipImport] open failed: {}", zip_path.string());
-        return out;
-    }
+    if (!open_archive(zip_path, "ZipImport", archive, zip, out)) return out;
 
     ZipPlan plan = build_zip_plan(read_entry_list(zip), dest, base_gallery, new_gallery_name, policy);
     if (plan.needs_resolution) {
@@ -117,21 +155,29 @@ ZipImportOutcome import_zip(vault::Vault&                v,
     }
     out.skipped = plan.skipped_unsupported;
 
-    // Create galleries first (parents already ordered first by the planner).
-    for (const auto& g : plan.galleries) {
-        const vault::VaultResult r = v.create_gallery(g);
-        if (r != vault::VaultResult::Ok && r != vault::VaultResult::AlreadyExists) {
-            out.error = "Could not create gallery: " + g;
-            mz_zip_reader_end(&zip);
-            return out;
-        }
-    }
+    if (!create_galleries(v, plan, zip, out)) return out;
+    run_placements(v, zip, plan, out, progress);
+    return out;
+}
 
-    for (const auto& pl : plan.placements)
-        import_one(v, zip, pl, out);
+ZipImportOutcome import_cbz(vault::Vault&                v,
+                            const std::filesystem::path& cbz_path,
+                            std::string_view             base_gallery,
+                            std::string_view             gallery_name,
+                            ImportProgress*              progress)
+{
+    // A .cbz is a plain zip; build_cbz_plan emits one leaf gallery of pages.
+    // import_one then decompresses each page into mlock'd memory — never to disk.
+    ZipImportOutcome out;
+    std::vector<uint8_t> archive;
+    mz_zip_archive zip;
+    if (!open_archive(cbz_path, "CbzImport", archive, zip, out)) return out;
 
-    mz_zip_reader_end(&zip);
-    out.ok = true;
+    const ZipPlan plan = build_cbz_plan(read_entry_list(zip), base_gallery, gallery_name);
+    out.skipped = plan.skipped_unsupported;
+
+    if (!create_galleries(v, plan, zip, out)) return out;
+    run_placements(v, zip, plan, out, progress);
     return out;
 }
 

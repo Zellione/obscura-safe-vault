@@ -49,6 +49,12 @@ public:
     // loop can block on events and idle without spinning the GPU.
     [[nodiscard]] virtual bool animating() const { return false; }
 
+    // True while the screen is doing work that must not be interrupted by the
+    // idle auto-lock — e.g. a background import writing the vault on a worker
+    // thread. Locking then would wipe the master key mid-write and corrupt the
+    // vault, so the app treats this as "not idle" and resets its lock timer.
+    [[nodiscard]] virtual bool blocks_idle_lock() const { return false; }
+
     // Redraw request. Screens call mark_dirty() when something changed outside
     // of input handling — typically an async result (file dialog, decode worker)
     // picked up in update(). The app loop consumes it to decide whether to

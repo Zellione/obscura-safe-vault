@@ -293,6 +293,9 @@ bool App::apply_nav()
 bool App::maybe_auto_lock(double dt)
 {
     if (!active_) { idle_.reset(); return false; }   // nothing to lock
+    // A screen with a background import owns the vault's file handle on a worker
+    // thread; auto-locking now would wipe the master key mid-write. Stay awake.
+    if (screen_ && screen_->blocks_idle_lock()) { idle_.reset(); return false; }
     if (!idle_.tick(dt)) return false;
     if (screen_) screen_->on_exit();
     active_->lock();                                  // wipe the master key

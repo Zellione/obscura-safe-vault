@@ -72,7 +72,7 @@ navigable with arrow keys.
 | Image decode | **stb_image** (header-only) | JPEG/PNG/GIF/BMP/TGA/HDR decoded directly from decrypted in-memory buffers. Zero dependencies, no temp files. |
 | Extra image formats | **libwebp 1.4.0** (WebP), **libheif 1.18.2** + **libde265 1.0.15** (HEIC) + **libaom 3.14.1** (AVIF, decoder-only) — all Phase 9 | Decode-only. Vendored git submodules, cmake-built static into `vendor/codecs-prefix/` by `scripts/build_codecs.{sh,bat}`. One `decode_heif_from_memory` covers HEIC+AVIF (libheif dispatches by brand). libaom needs **nasm**. |
 | Video decode | **FFmpeg/libav 7.1.1** (decode-only static) — Phase 15; audio — Phase 16 | Stream video frames directly from encrypted chunks via a custom `AVIOContext` over `ChunkStore` (no temp file). H.264/H.265 video; mov/mp4/m4v + matroska/webm demuxers; libswscale for non-4:2:0; audio decoders aac/opus/mp3/vorbis/flac/ac3. Decoded audio (planar→interleaved F32) flows into an `SDL_AudioStream` (SDL handles rate/format/channel conversion — we do NOT use swresample for our resampling). A/V sync via pure `av_sync::decide()` (audio-clock tracking). Encoders/muxers/protocols/network disabled. Vendored git submodule, configure-built static into `vendor/codecs-prefix/` by `scripts/build_codecs.{sh,bat}`; linked by `link_av()` (which also links swresample, a transitive dep of audio decoders) under `OSV_VENDORED_AV`. Needs **nasm** (like libaom). |
-| ZIP import | **miniz** (public-domain/MIT) — Phase 17 | Single-file, header-only decompression + ZIP reader. Vendored git submodule (`vendor/miniz`, pinned to master commit `e78dfd2` — no stable release tags), compiled by premake like monocypher/stb (built with `MINIZ_NO_ZLIB_COMPATIBLE_NAMES` to avoid clashing with the libz that avformat links). Decompressed entries read into mlock'd `SecureBytes`, never to disk. One header-only shim `vendor/miniz-shim/miniz_export.h` supplies the CMake-generated header so the submodule stays pristine. |
+| ZIP / CBZ import | **miniz** (public-domain/MIT) — Phase 17; CBZ Phase 24 | Single-file, header-only decompression + ZIP reader. Vendored git submodule (`vendor/miniz`, pinned to master commit `e78dfd2` — no stable release tags), compiled by premake like monocypher/stb (built with `MINIZ_NO_ZLIB_COMPATIBLE_NAMES` to avoid clashing with the libz that avformat links). Decompressed entries read into mlock'd `SecureBytes`, never to disk. One header-only shim `vendor/miniz-shim/miniz_export.h` supplies the CMake-generated header so the submodule stays pristine. **CBZ (Phase 24)** reuses this exact pipeline: a `.cbz` is a plain zip imported as one page gallery (`build_cbz_plan`/`import_cbz`) — no CBR/CB7/CBT (RAR/7z/tar). |
 | Thumbnails | **Pre-generated, stored encrypted in vault** | Gallery scrolling decrypts only the small thumbnail blobs — no full-image decode needed while browsing. |
 | Gallery model | **Free-nesting galleries; images only in leaf galleries** | A folder shows either sub-folders *or* images, never a mix. Cleaner grid view and simpler tree logic. |
 | Dependency management | **Vendored git submodules** under `vendor/` | Hermetic, reproducible, offline. SDL3 is built from source by `scripts/setup.sh` (cmake once); monocypher/stb are compiled directly by premake. |
@@ -297,12 +297,43 @@ src/
                                             registry vaults → ToUnlock(path) (locks
                                             current, unlocks chosen); hosted by
                                             GalleryGrid + ImageViewer + favorites
+             natural_sort.*,              ← pure, SDL/vault-free natural-order name comparator
+                                            (Phase 24): digit runs compare by value (so "2" <
+                                            "10"), other chars case-insensitively; natural_compare
+                                            (3-way) + natural_less. Orders CBZ pages by reading
+                                            order. Unit-tested.
              zip_plan.*,                  ← pure, SDL-free ZIP archive planner (Phase 17):
                                             entries → gallery tree + file placements +
-                                            mixed-folder conflict resolution (Flatten/Skip)
-             zip_import.*,                ← ZIP executor: miniz reader → mlock'd
-                                            SecureBytes → Vault::add_image/add_video;
-                                            triggered by `Z` key in gallery grid (Phase 17)
+                                            mixed-folder conflict resolution (Flatten/Skip).
+                                            Phase 24 adds is_supported_image_name + build_cbz_plan:
+                                            a fixed one-leaf plan (gallery named after the archive)
+                                            holding every image entry, videos/other skipped+counted,
+                                            internal subfolders flattened (basename collisions
+                                            disambiguated by source dir), natural reading order.
+             zip_import.*,                ← ZIP/CBZ executor: miniz reader → mlock'd
+                                            SecureBytes → Vault::add_image/add_video; triggered
+                                            by `Z` key in gallery grid (Phase 17). import_cbz
+                                            (Phase 24) reuses the same per-entry decompress-into-
+                                            mlock'd-memory path over build_cbz_plan — `.cbz`
+                                            imports as one page gallery, never extracted to disk.
+                                            import_zip/import_cbz take an optional ImportProgress*
+                                            (atomic total/done/cancel) so a caller can drive a
+                                            progress bar + cooperative cancel (Phase 24 fix).
+             zip_import_job.*,            ← ZipImportJob: runs import_cbz/import_zip (start_cbz/
+                                            start_zip, shared launch() helper) on a background
+                                            thread so a big archive (~10 s) never freezes the UI on
+                                            the name popup (Phase 24 fix). Threading contract: while
+                                            active() the worker owns the vault's single-thread file
+                                            handle, so GalleryGrid must NOT touch the vault (no
+                                            thumbnail reads/listing) — it polls total()/done() +
+                                            take_outcome() and draws a progress modal only;
+                                            Esc → cancel(). A ZIP with mixed folders comes back
+                                            needs_resolution (nothing written); poll_import_job()
+                                            keeps naming_.zip active for the Flatten/Skip modal and
+                                            F/S re-launch with the chosen policy. GalleryGrid::
+                                            blocks_idle_lock() (new Screen hook) pins the idle auto-
+                                            lock off during import so it can't wipe the master key
+                                            mid-write.
              tag_list_parse.*,            ← pure, SDL/vault-free tag-list parser (Phase 21):
                                             raw .txt bytes → normalised tag list (split on LF,
                                             trim CR+whitespace, drop blanks, case-insensitive
@@ -341,7 +372,9 @@ src/
                                             by two handlers (GalleryGrid image vs zip import)
                                             can't steal each other's result (Phase 17 fix);
                                             Purpose::TagList + open_tag_list() (.txt) for the
-                                            Phase 21 tag-list import
+                                            Phase 21 tag-list import; open_zip()'s filter also
+                                            accepts `.cbz` (Phase 24) — gallery_grid routes a
+                                            picked `.cbz` to import_cbz
              folder_dialog.*,             ← export destination picker (Phase 10)
              vault_registry.*             ← recent-vaults list, paths only, atomic
                                             write — stores NO secrets (Phase 14)

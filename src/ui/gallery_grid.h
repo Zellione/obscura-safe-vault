@@ -18,6 +18,7 @@
 #include "ui/selection_model.h"
 #include "ui/tag_editor.h"
 #include "ui/transfer_dialog.h"
+#include "ui/zip_import_job.h"
 #include "ui/zip_plan.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
@@ -55,6 +56,10 @@ public:
     void handle_event(const SDL_Event& e) override;
     void update(double dt) override;
     void render(gfx::Renderer& r) override;
+    // Keep repainting the progress bar and hold off the idle auto-lock while a
+    // background import runs (the worker thread owns the vault meanwhile).
+    [[nodiscard]] bool animating() const override { return naming_.import_job.active(); }
+    [[nodiscard]] bool blocks_idle_lock() const override { return naming_.import_job.active(); }
 
 private:
     enum class GalleryView { Grid, List };
@@ -80,13 +85,16 @@ private:
     bool handle_delete_confirm_key(const SDL_Event& e);  // Del-confirm modal; true if consumed
     void start_tag_editor(bool import_list);  // G: open tag editor; Shift+G: import a tag list (Phase 21)
     void toggle_favorite_current();  // flip favorite on the focused tile (B)
-    [[nodiscard]] bool current_allows_images() const;
-    [[nodiscard]] bool current_allows_galleries() const;
     SDL_Texture*       thumb_texture(const vault::IndexNode& node);
     bool               pump_thumbs();   // upload finished off-thread thumb decodes
 
     void render_grid(gfx::Renderer& r, float W, float H);
     void render_list(gfx::Renderer& r, float W, float H);
+
+    // Drain a finished background import (called from update()). Kept a free friend
+    // (not a member) to keep the class under the cpp:S1448 method cap and to keep
+    // update()'s cognitive complexity (S3776) down.
+    friend void poll_import_job(GalleryGrid& g);
     void draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
                          const SDL_FRect& box);
     [[nodiscard]] int  hit_test(float mx, float my) const;  // item under cursor, or -1
@@ -117,13 +125,15 @@ private:
         std::string           gallery_name;
         ui::ZipDest           dest = ui::ZipDest::NewGallery;
         bool                  active = false;  // awaiting conflict resolution (Flatten/Skip)
+        bool                  cbz = false;     // .cbz comic import (Phase 24): fixed one-leaf plan
     };
     struct Naming {
-        bool        active = false;   // manual new-gallery text entry
-        std::string buf;
-        PendingZip  zip;              // zip import in flight
-        bool        confirm_delete = false;  // Del on a media tile: awaiting Y/N confirm
-        std::string tag_target;       // gallery path awaiting a tag-list import (Shift+G, Phase 21)
+        bool         active = false;   // manual new-gallery text entry
+        std::string  buf;
+        PendingZip   zip;              // zip import descriptor in flight
+        ZipImportJob import_job;       // background executor for the zip/cbz import (Phase 24)
+        bool         confirm_delete = false;  // Del on a media tile: awaiting Y/N confirm
+        std::string  tag_target;       // gallery path awaiting a tag-list import (Shift+G, Phase 21)
     };
     Naming naming_;
 
@@ -136,5 +146,9 @@ private:
     };
     ThumbDecode thumbs_;
 };
+
+// Free friend of GalleryGrid (see the in-class declaration): drains a finished
+// background ZIP/CBZ import and updates the grid's status/error + listing.
+void poll_import_job(GalleryGrid& g);
 
 } // namespace ui
