@@ -12,6 +12,7 @@
 #include "platform/file_dialog.h"
 #include "platform/paths.h"
 #include "platform/vault_registry.h"
+#include "ui/progress_modal.h"
 #include "ui/widgets.h"
 #include "vault/transfer.h"
 
@@ -158,25 +159,23 @@ void TransferDialog::choose_gallery()
 
 void TransferDialog::do_move(std::string_view dst_target)
 {
-    using enum vault::VaultResult;
     vault::Vault& dv = dest_vault();
-    int ok = 0;
-    int total = 0;
-    if (source_ == Source::Gallery) {
-        total = 1;
-        if (vault::transfer_gallery(src_, src_gallery_, dv, dst_target, mode_) == Ok) ok = 1;
-    } else {
-        total = static_cast<int>(filenames_.size());
-        for (const auto& fname : filenames_)
-            if (vault::transfer_image(src_, src_gallery_, fname, dv, dst_target, mode_) == Ok) ++ok;
-    }
-    const char* verb = (mode_ == vault::TransferMode::Copy) ? "Copied" : "Moved";
     const std::string where = dest_.is_self
         ? "this vault"
         : std::filesystem::path(dest_.path).stem().string();
-    outcome_.status = std::format("{} {} of {} to {}", verb, ok, total, where);
-    outcome_.done = true;
-    close();   // wipes the destination key (no-op for a same-vault transfer)
+
+    // Launch the move/copy on a worker thread so a large gallery never freezes the
+    // UI (Phase 25). Do NOT close() yet — the transiently-unlocked destination
+    // (dest_.vault) must stay alive for the job's life; the dialog stays active in
+    // the Running stage showing a progress modal, and closes when update() drains
+    // the outcome. The host grid stops touching the vault while job_active().
+    if (source_ == Source::Gallery)
+        run_.job.start_transfer_gallery(src_, src_gallery_, dv, std::string(dst_target),
+                                        mode_, where);
+    else
+        run_.job.start_transfer_images(src_, src_gallery_, filenames_, dv, std::string(dst_target),
+                                       mode_, where);
+    stage_ = Stage::Running;
 }
 
 // --- per-stage key handlers ------------------------------------------------
@@ -251,6 +250,13 @@ bool TransferDialog::handle_event(const SDL_Event& e)
 {
     if (!active_) return false;
 
+    // While the transfer worker runs, swallow all input except Esc → cooperative
+    // cancel (files committed so far remain; see transfer_gallery/transfer_images).
+    if (stage_ == Stage::Running) {
+        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) run_.job.cancel();
+        return true;
+    }
+
     // New-gallery name entry (overlays the PickGallery stage).
     if (naming_) return handle_naming_event(e);
 
@@ -269,12 +275,24 @@ bool TransferDialog::handle_event(const SDL_Event& e)
         case PickVault:   return handle_pick_vault_key(k);
         case Unlock:      return handle_unlock_key(k);
         case PickGallery: return handle_gallery_key(k);
+        case Running:     return true;   // handled above (Esc→cancel); nothing else
     }
     return true;
 }
 
 void TransferDialog::update()
 {
+    // Drain the background transfer once the worker finishes: record the status,
+    // then close() (which wipes the destination key now that it is done with it).
+    if (stage_ == Stage::Running) {
+        if (auto oc = run_.job.take_outcome()) {
+            run_.status = std::move(oc->status);
+            run_.done   = true;
+            close();
+        }
+        return;
+    }
+
     if (!dest_.awaiting_keyfile) return;
     if (auto res = dlg_.take_result()) {
         dest_.awaiting_keyfile = false;
@@ -284,9 +302,9 @@ void TransferDialog::update()
 
 bool TransferDialog::consume_completed(std::string& status_out)
 {
-    if (!outcome_.done) return false;
-    status_out = std::move(outcome_.status);
-    outcome_.done = false;
+    if (!run_.done) return false;
+    status_out = std::move(run_.status);
+    run_.done = false;
     return true;
 }
 
@@ -295,6 +313,20 @@ bool TransferDialog::consume_completed(std::string& status_out)
 void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H) const
 {
     if (!active_) return;
+
+    // While the worker runs, show a veiling progress modal instead of the dialog —
+    // the host grid has already suppressed its own drawing (job_active()).
+    if (stage_ == Stage::Running) {
+        const char* verb = (mode_ == vault::TransferMode::Copy) ? "Copying…" : "Moving…";
+        const int total = run_.job.total();
+        const int done  = run_.job.done();
+        const std::string count =
+            total > 0 ? std::format("{} / {} files", done, total) : "Preparing…";
+        draw_op_progress(r, font, W, H,
+                         {.title = verb, .count_line = count, .done = done, .total = total});
+        return;
+    }
+
     using namespace gfx::theme;
 
     const float mw = W * 0.6f;

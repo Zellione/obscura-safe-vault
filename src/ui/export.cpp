@@ -43,7 +43,8 @@ vault::VaultResult export_one_image(const vault::Vault&          vault,
 ExportSummary export_images(const vault::Vault&                      vault,
                             std::span<const vault::IndexNode* const> images,
                             const fs::path&                          dest_dir,
-                            ExportConsent                            consent)
+                            ExportConsent                            consent,
+                            vault::OpProgress*                       progress)
 {
     ExportSummary sum;
     if (consent != ExportConsent::Confirm) return sum;  // decline writes nothing
@@ -53,17 +54,21 @@ ExportSummary export_images(const vault::Vault&                      vault,
         return fs::exists(p, ec);
     };
 
+    if (progress) progress->total.store(static_cast<int>(images.size()));
+
     crypto::SecureBytes scratch;
     for (const vault::IndexNode* node : images) {
+        if (progress && progress->cancel.load()) break;   // stop between files; written so far kept
         if (node == nullptr || !node->is_image()) {
             ++sum.failed;
-            continue;
+        } else {
+            const fs::path out = unique_export_path(dest_dir, node->name, exists);
+            if (export_one_image(vault, *node, out, scratch) == vault::VaultResult::Ok)
+                ++sum.written;
+            else
+                ++sum.failed;
         }
-        const fs::path out = unique_export_path(dest_dir, node->name, exists);
-        if (export_one_image(vault, *node, out, scratch) == vault::VaultResult::Ok)
-            ++sum.written;
-        else
-            ++sum.failed;
+        if (progress) progress->done.fetch_add(1);
     }
     return sum;
 }

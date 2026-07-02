@@ -102,10 +102,13 @@ public:
 private:
     enum class ViewMode { Fit, FillScroll, Slideshow };
 
-    void handle_key(SDL_Keycode key);
+    // `sc` carries the physical scancode alongside the layout-resolved keycode so
+    // the video/slideshow paths can bind layout-independent keys (volume/dwell,
+    // Phase 25).
+    void handle_key(SDL_Keycode key, SDL_Scancode sc);
     void handle_key_fit(SDL_Keycode key);
     void handle_key_scroll(SDL_Keycode key);
-    void handle_key_video(SDL_Keycode key);         // Space/,/./J/L + F/arrows for a video item
+    void handle_key_video(SDL_Keycode key, SDL_Scancode sc);  // Space/,/./J/L + F/arrows + [ ] volume
     void handle_mouse_down(const SDL_MouseButtonEvent& b);
     void handle_wheel(const SDL_MouseWheelEvent& w);
     [[nodiscard]] bool handle_overlay_event(const SDL_Event& e);  // modal overlays; true if consumed

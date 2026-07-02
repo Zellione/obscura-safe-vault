@@ -162,6 +162,15 @@ src/
                                             whole gallery subtree between vaults — or within
                                             one (decrypt→re-encrypt in mlock'd mem).
                                             Vault::remove_gallery drops a subtree (PR3).
+                                            Phase 25 adds transfer_images (bulk list driver,
+                                            TransferTally) + an optional OpProgress* on
+                                            transfer_images/transfer_gallery: total/done for an
+                                            "N/M" bar + cooperative cancel (a cancelled gallery
+                                            Move leaves the source intact — recoverable dup).
+             op_progress.h                ← vault::OpProgress {total,done,cancel} atomics: the
+                                            shared background-progress + cancel handle used by
+                                            every bulk vault op; ui::ImportProgress now aliases
+                                            it so ZipImportJob + FileOpJob share one type (Phase 25).
   image/     image.h, decode.*,           ← stb_image decode + thumbs (Phase 3)
              thumbnail.*,                 ← format detection + libwebp/libheif
              format_registry.*,           ← decoders (Phase 9)
@@ -189,19 +198,51 @@ src/
                                             into it, so every call site tracks a switch with no
                                             change. Renderer also has draw_triangle (play badge/icon)
   ui/        input.h,                    ← input abstraction (Phase 5)
+             keybindings.h,               ← pure layout-independent key resolution (Phase 25):
+                                            bracket_key_for_scancode maps the two physical keys
+                                            right of `P` → BracketKey{Decrease,Increase} by
+                                            SDL scancode (so video volume `[`/`]` + slideshow
+                                            dwell work on any layout, incl. German QWERTZ where
+                                            those glyphs are behind AltGr; unit-tested). Also
+                                            centralises the character-resolved is_search_key /
+                                            is_advanced_search_key / is_quick_switch_key helpers
+                                            (moved here from quick_switch.h).
+             file_op_job.*,               ← FileOpJob: runs export / delete / move-copy on a
+                                            background worker thread (mirrors ZipImportJob) so a
+                                            large gallery never freezes the UI (Phase 25). Same
+                                            single-thread vault-handle contract: while active()
+                                            the worker owns the vault(s) and the host screen only
+                                            polls total()/done() + take_outcome() and draws a
+                                            modal (no thumbnail/listing reads). Esc→cancel().
+             progress_modal.*,            ← draw_op_progress: the shared veil + "N/M" bar +
+                                            cancel-hint modal reused by every screen hosting a
+                                            background job (import/export/delete/move) (Phase 25).
              unlock_screen.*,             ← unlock + create vault (Phase 5)
-             gallery_grid.*,              ← breadcrumb grid (Phase 5)
+             gallery_grid.*,              ← breadcrumb grid (Phase 5). Phase 25: export (X) and
+                                            delete (Del) run on a background FileOpJob (naming_.file_op)
+                                            with a progress modal + Esc-cancel; vault_busy() (import
+                                            OR file_op OR transfer_.job_active) gates render/update/
+                                            input + the idle-lock so the UI never touches the vault
+                                            mid-job.
              image_viewer.*,              ← zoom/pan + thumb strip + fill-scroll + slideshow;
-                                            hosts a fit-only VideoPlayback for video items (Phase 15)
+                                            hosts a fit-only VideoPlayback for video items (Phase 15).
+                                            Single-image export (X) stays synchronous (one image is
+                                            fast; the large multi-image export lives in GalleryGrid,
+                                            which backgrounds it, Phase 25)
              playback_model.*,            ← pure video transport maths: clock/clamp/seek-bar
                                             map/mm:ss/frame-due (Phase 15, pure/tested)
              video_playback.*,            ← in-viewer video player: decoder + YUV texture +
                                             audio output (SDL_AudioStream, audio-clock master)
                                             + seek bar (seeks both tracks) + mute/volume (M,
                                             [/]); pImpl gated on OSV_VENDORED_AV (non-AV build
-                                            → poster fallback) (Phase 15–16)
+                                            → poster fallback) (Phase 15–16). handle_key takes
+                                            the scancode too: `[`/`]` volume binds by physical
+                                            scancode (bracket_key_for_scancode) so it works on
+                                            any layout (Phase 25).
              full_tex_cache.*,            ← shared decode→GPU texture cache (Phase 11 extract)
-             slideshow_view.*,            ← full-screen slideshow SDL plumbing (Phase 11)
+             slideshow_view.*,            ← full-screen slideshow SDL plumbing (Phase 11);
+                                            handle_key takes the scancode so dwell `[`/`]` is
+                                            layout-independent (Phase 25)
              strip_layout.*,              ← orientation-aware strip geometry (UI overhaul)
              scroll_model.*,              ← fill-width continuous scroll maths (UI overhaul)
              slideshow_model.*,           ← auto-advance/shuffle/cross-fade maths (Phase 11)
@@ -209,7 +250,9 @@ src/
              selection_model.*,           ← multi-select state for export (Phase 10)
              consent_dialog.*,            ← modal "export anyway?" confirm (Phase 10)
              export_ui.*,                 ← shared consent+folder-pick plumbing (Phase 10)
-             export.*,                    ← decrypt→write-verbatim→wipe (Phase 10)
+             export.*,                    ← decrypt→write-verbatim→wipe (Phase 10);
+                                            export_images takes an optional OpProgress* for the
+                                            background export bar + cancel (Phase 25)
              search_model.*,              ← pure query tokenise/match/rank (Phase 12)
              search_overlay.*,            ← `/` live-filtered search modal (Phase 12)
              advanced_search_model.*,     ← pure, SDL/vault-free advanced query (Phase 18):
@@ -292,7 +335,12 @@ src/
                                             within the active vault. Stages: Move/Copy →
                                             pick vault ("This vault" or registry; the former
                                             skips unlock) → pick gallery → transfer
-                                            (Phase 14 PR2/3/4)
+                                            (Phase 14 PR2/3/4). Phase 25: the transfer runs on
+                                            a background FileOpJob — a new Running stage keeps
+                                            the dialog active (destination stays unlocked) with
+                                            a progress modal + Esc-cancel until the job finishes,
+                                            then close() wipes the dest key. job_active() lets the
+                                            host grid suppress its drawing + idle-lock meanwhile.
              quick_switch.*,              ← global `` ` `` overlay (Phase 14 PR5): lists
                                             registry vaults → ToUnlock(path) (locks
                                             current, unlocks chosen); hosted by

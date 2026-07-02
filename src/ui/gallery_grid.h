@@ -11,6 +11,7 @@
 
 #include "image/decode_worker.h"
 #include "ui/consent_dialog.h"
+#include "ui/file_op_job.h"
 #include "ui/nav_model.h"
 #include "ui/quick_switch.h"
 #include "ui/screen.h"
@@ -56,10 +57,12 @@ public:
     void handle_event(const SDL_Event& e) override;
     void update(double dt) override;
     void render(gfx::Renderer& r) override;
-    // Keep repainting the progress bar and hold off the idle auto-lock while a
-    // background import runs (the worker thread owns the vault meanwhile).
-    [[nodiscard]] bool animating() const override { return naming_.import_job.active(); }
-    [[nodiscard]] bool blocks_idle_lock() const override { return naming_.import_job.active(); }
+    // Keep repainting the progress bar and hold off the idle auto-lock while ANY
+    // background job runs (import, export/delete, or an in-progress transfer) —
+    // a worker thread owns the vault(s) meanwhile, so locking would wipe the key
+    // mid-write.
+    [[nodiscard]] bool animating() const override { return vault_busy(*this); }
+    [[nodiscard]] bool blocks_idle_lock() const override { return vault_busy(*this); }
 
 private:
     enum class GalleryView { Grid, List };
@@ -93,8 +96,12 @@ private:
 
     // Drain a finished background import (called from update()). Kept a free friend
     // (not a member) to keep the class under the cpp:S1448 method cap and to keep
-    // update()'s cognitive complexity (S3776) down.
+    // update()'s cognitive complexity (S3776) down. poll_file_job / vault_busy /
+    // handle_job_input (Phase 25) are free friends for the same reasons.
     friend void poll_import_job(GalleryGrid& g);
+    friend void poll_file_job(GalleryGrid& g);          // drain a finished export/delete job
+    friend bool vault_busy(const GalleryGrid& g);       // any worker owns the vault(s)?
+    friend bool handle_job_input(GalleryGrid& g, const SDL_Event& e);  // job-active Esc→cancel gate
     void draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
                          const SDL_FRect& box);
     [[nodiscard]] int  hit_test(float mx, float my) const;  // item under cursor, or -1
@@ -132,6 +139,7 @@ private:
         std::string  buf;
         PendingZip   zip;              // zip import descriptor in flight
         ZipImportJob import_job;       // background executor for the zip/cbz import (Phase 24)
+        FileOpJob    file_op;          // background executor for export/delete (Phase 25)
         bool         confirm_delete = false;  // Del on a media tile: awaiting Y/N confirm
         std::string  tag_target;       // gallery path awaiting a tag-list import (Shift+G, Phase 21)
     };
@@ -147,8 +155,13 @@ private:
     ThumbDecode thumbs_;
 };
 
-// Free friend of GalleryGrid (see the in-class declaration): drains a finished
-// background ZIP/CBZ import and updates the grid's status/error + listing.
+// Free friends of GalleryGrid (see the in-class declarations): poll_import_job /
+// poll_file_job drain a finished background import / export-delete and update the
+// grid's status + listing; vault_busy reports whether any worker owns the vault(s);
+// handle_job_input swallows input (Esc→cancel) while a job runs.
 void poll_import_job(GalleryGrid& g);
+void poll_file_job(GalleryGrid& g);
+[[nodiscard]] bool vault_busy(const GalleryGrid& g);
+[[nodiscard]] bool handle_job_input(GalleryGrid& g, const SDL_Event& e);
 
 } // namespace ui

@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "ui/keybindings.h"   // is_quick_switch_key (centralised, Phase 25)
+
 namespace gfx { class Renderer; class FontAtlas; }
 namespace platform { class VaultRegistry; }
 
@@ -42,16 +44,8 @@ private:
     bool                               has_choice_ = false;
 };
 
-// True when a key-down event is the layout-robust "switch vault" chord. The
-// quick-switch shortcut is documented as `` ` ``, but matching SDLK_GRAVE on the
-// base keycode only works on US-style layouts: on e.g. a German layout no key's
-// unmodified symbol is `` ` `` (it is a dead accent key), so that case never fires.
-// Accept both the physical grave key (scancode, left of '1') and a layout-produced
-// backtick character — mirroring the `/`-key resolution elsewhere.
-[[nodiscard]] inline bool is_quick_switch_key(const SDL_KeyboardEvent& key) noexcept
-{
-    return key.scancode == SDL_SCANCODE_GRAVE ||
-           SDL_GetKeyFromScancode(key.scancode, key.mod, false) == SDLK_GRAVE;
-}
+// is_quick_switch_key() now lives in ui/keybindings.h (Phase 25) alongside the
+// other layout-robust shortcut helpers; included above so existing users of this
+// header keep resolving it unchanged.
 
 } // namespace ui

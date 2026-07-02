@@ -58,6 +58,13 @@ src/
                                                  Pure over public Vault API. Vault::
                                                  remove_gallery drops a subtree, orphaning its
                                                  chunks (reclaimed by compaction) (Phase 14).
+                                                 Phase 25: transfer_images (bulk list driver,
+                                                 TransferTally{done,failed}) + optional
+                                                 vault::OpProgress* (op_progress.h; total/done +
+                                                 cooperative cancel) on transfer_images/
+                                                 transfer_gallery/export_images — a cancelled
+                                                 gallery Move leaves the source intact.
+                                                 ui::ImportProgress now aliases OpProgress.
                                                — index.h: IndexNode carries
                                                  std::vector<std::string> tags +
                                                  bool favorite (gallery + image);
@@ -350,6 +357,33 @@ src/
                                                  can't wipe the master key mid-write. Compiled into
                                                  osv_tests (unit-tested via a poll-to-completion
                                                  harness, cbz + zip incl. needs_resolution).
+               keybindings.h                   — pure layout-independent key resolution (Phase 25,
+                                                 unit-tested): bracket_key_for_scancode maps the two
+                                                 physical keys right of `P` -> BracketKey{Decrease,
+                                                 Increase} by SDL SCANCODE, so video volume `[`/`]`
+                                                 + slideshow dwell work on any layout (German QWERTZ
+                                                 has those glyphs behind AltGr). Also centralises the
+                                                 character-resolved is_search_key/is_advanced_search_key/
+                                                 is_quick_switch_key helpers (moved from quick_switch.h).
+                                                 video_playback + slideshow_view handle_key now take
+                                                 the scancode; gallery_grid/image_viewer use the helpers.
+               file_op_job.*                   — FileOpJob (Phase 25): runs export / delete / move-copy
+                                                 on a background worker (mirrors ZipImportJob). Same
+                                                 single-thread vault-handle contract — while active()
+                                                 the worker owns the vault(s); host screen only polls
+                                                 total()/done() + take_outcome() (joins) + draws a modal,
+                                                 Esc->cancel(). start_export/start_delete/
+                                                 start_transfer_images/start_transfer_gallery ->
+                                                 FileOpOutcome{ok,cancelled,done,failed,status,...}.
+                                                 GalleryGrid owns one (naming_.file_op) for export+delete;
+                                                 TransferDialog owns one (Running stage). ImageViewer's
+                                                 single-image export stays synchronous (fast). The
+                                                 GalleryGrid gate (vault_busy/poll_file_job/handle_job_input)
+                                                 is free friends; blocks_idle_lock() holds off idle lock.
+                                                 Compiled into osv_tests (poll-to-completion harness).
+               progress_modal.*                — draw_op_progress: shared veil + "N/M" bar + cancel-hint
+                                                 modal reused by every screen hosting a background job
+                                                 (import/export/delete/move) (Phase 25).
                delete_summary.*                — pure recursive tally of a gallery subtree
                                                  (images/videos/sub-galleries) for the Del
                                                  delete-confirm popup (Phase 17 follow-up).

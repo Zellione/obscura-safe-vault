@@ -15,8 +15,8 @@
 #include "platform/folder_dialog.h"
 #include "platform/paths.h"
 #include "ui/delete_summary.h"
-#include "ui/export.h"
 #include "ui/input.h"
+#include "ui/progress_modal.h"
 #include "ui/tag_list_parse.h"
 #include "ui/tile_thumb.h"
 #include "ui/widgets.h"
@@ -38,17 +38,6 @@ constexpr float COL_DIMS = 165;   // wide enough for the "DIMENSIONS" header
 constexpr float COL_SIZE = 100;
 constexpr float COL_TYPE = 90;    // fits image formats and "H.264"/"H.265"
 constexpr float COL_DATE = 120;
-
-// Delete the focused node: a gallery subtree (remove_gallery) or a single
-// image/video (remove_image). Kept free (not a member) so the gallery-vs-media
-// branch stays a flat statement at the call site.
-vault::VaultResult delete_focused_node(vault::Vault& v, const std::string& base,
-                                       const vault::IndexNode& n)
-{
-    if (!n.is_gallery()) return v.remove_image(base, n.name);
-    const std::string full = base.empty() ? n.name : base + "/" + n.name;
-    return v.remove_gallery(full);
-}
 
 // Apply a parsed tag list onto the node at `target` (slash-separated path),
 // merging via Vault::add_tag (case-insensitive de-dupe handled by the vault).
@@ -121,36 +110,37 @@ bool leaf_allows_galleries(const ChildList& children)
 void draw_import_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
                           bool cbz, const ZipImportJob& job)
 {
-    using namespace gfx::theme;
-    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});   // full veil
-
-    const float mw = 520;
-    const float mh = 150;
-    const float mx = (W - mw) / 2;
-    const float my = (H - mh) / 2;
-    r.draw_round_rect({mx, my, mw, mh}, RADIUS, SURFACE);
-    r.draw_round_rect({mx, my, mw, mh}, RADIUS, ACCENT, /*filled*/ false);
-
-    r.draw_text(font, mx + 20, my + 20, cbz ? "Importing comic…" : "Importing archive…", TEXT);
-
     const int total = job.total();
     const int done  = job.done();
-
     // "done / total" (total is 0 for the brief window before the first page).
     const char* unit = cbz ? "pages" : "files";
     const std::string count =
         total > 0 ? std::format("{} / {} {}", done, total, unit) : "Reading archive…";
-    r.draw_text(font, mx + 20, my + 56, count, TEXT_DIM);
+    draw_op_progress(r, font, W, H,
+                     {.title = cbz ? "Importing comic…" : "Importing archive…",
+                      .count_line = count, .done = done, .total = total});
+}
 
-    // Progress bar: outline plus a fill proportional to done/total.
-    const SDL_FRect bar{mx + 20, my + 90, mw - 40, 14};
-    r.draw_round_rect(bar, 4, ACCENT, /*filled*/ false);
-    if (total > 0 && done > 0) {
-        const float frac = static_cast<float>(done) / static_cast<float>(total);
-        r.draw_round_rect({bar.x, bar.y, bar.w * frac, bar.h}, 4, ACCENT);
+// Background file-op (export/delete/move/copy) progress modal — same veil + bar as
+// the import one, wording chosen by the running job's kind (Phase 25).
+void draw_file_op_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
+                           const FileOpJob& job)
+{
+    std::string_view title = "Working…";
+    std::string_view unit  = "items";
+    using enum FileOpKind;
+    switch (job.kind()) {
+        case Export:   title = "Exporting…"; unit = "images"; break;
+        case Delete:   title = "Deleting…";  unit = "items";  break;
+        case Transfer: title = "Moving…";    unit = "files";  break;
+        case None:     break;
     }
-
-    r.draw_text(font, mx + 20, my + mh - 28, "Esc to cancel", TEXT_FAINT);
+    const int total = job.total();
+    const int done  = job.done();
+    const std::string count =
+        total > 0 ? std::format("{} / {} {}", done, total, unit) : "Preparing…";
+    draw_op_progress(r, font, W, H,
+                     {.title = title, .count_line = count, .done = done, .total = total});
 }
 }
 
@@ -261,15 +251,16 @@ void GalleryGrid::do_export(const std::filesystem::path& dest)
     for (int idx : sel_.indices())
         if (idx >= 0 && idx < static_cast<int>(children_.size()))
             picked.push_back(children_[idx]);
+    if (picked.empty()) return;
 
-    const ui::ExportSummary sum =
-        ui::export_images(vault_, picked, dest, ui::ExportConsent::Confirm);
-
-    if (sum.failed > 0)
-        error_ = std::format("Export: {} failed.", sum.failed);
-    status_ = std::format("Exported {} image{} to {}", sum.written,
-                          sum.written == 1 ? "" : "s", dest.string());
-    sel_.clear();
+    // Run the decrypt→write on a worker thread (a big selection is slow) so the UI
+    // stays responsive with a progress bar + cancel (Phase 25). The picked nodes
+    // point into the live index, which the read-only export does not mutate and the
+    // UI does not refresh while the job runs — so they stay valid on the worker.
+    error_.clear();
+    status_.clear();
+    naming_.file_op.start_export(vault_, std::move(picked), dest, dest.string());
+    mark_dirty();
 }
 
 void GalleryGrid::start_import()
@@ -459,14 +450,12 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         default:         break;
     }
     // `/` is a shifted key on many non-US layouts, so the base keycode (key.key)
-    // is the unmodified symbol (e.g. '7') and never equals SDLK_SLASH. Resolve the
-    // character the layout + held modifiers actually produce and match that: `/`
-    // opens the search overlay, Shift+/ ('?') the advanced-search screen (Phase 18).
-    switch (SDL_GetKeyFromScancode(key.scancode, key.mod, false)) {
-        case SDLK_SLASH:    search_.open();                     return;
-        case SDLK_QUESTION: request(NavKind::ToAdvancedSearch); return;
-        default: break;
-    }
+    // is the unmodified symbol (e.g. '7') and never equals SDLK_SLASH. The
+    // is_*_key helpers (ui/keybindings.h) resolve the character the layout + held
+    // modifiers actually produce: `/` opens the search overlay, Shift+/ ('?') the
+    // advanced-search screen (Phase 18).
+    if (is_search_key(key))          { search_.open();                     return; }
+    if (is_advanced_search_key(key)) { request(NavKind::ToAdvancedSearch); return; }
 
     using enum InputAction;
     switch (map_key(key.key, key.mod)) {
@@ -498,16 +487,19 @@ bool GalleryGrid::handle_delete_confirm_key(const SDL_Event& e)
     }
     if (k != SDLK_Y) return true;                    // swallow every other key
 
+    // Run the removal on a worker thread with a progress modal + cancel (Phase 25).
+    // A gallery subtree removal counts its descendants for the bar; a single media
+    // is one item. take_outcome() (in poll_file_job) refreshes the listing.
     if (const int s = nav_.selected();
         s >= 0 && s < static_cast<int>(children_.size())) {
         const vault::IndexNode& n = *children_[s];
-        const std::string name = n.name;
-        if (delete_focused_node(vault_, nav_.path(), n) == vault::VaultResult::Ok) {
-            status_ = "Deleted " + name;
-            refresh();
-        } else {
-            error_ = "Could not delete " + name;
+        int item_total = 1;
+        if (n.is_gallery()) {
+            SubtreeCounts c;
+            count_subtree(n, c);
+            item_total = c.images + c.videos + c.galleries + 1;   // +1 for the gallery itself
         }
+        naming_.file_op.start_delete(vault_, nav_.path(), n.name, n.is_gallery(), item_total);
     }
     naming_.confirm_delete = false;
     mark_dirty();
@@ -537,13 +529,10 @@ bool GalleryGrid::handle_zip_conflict_key(const SDL_Event& e)
 
 void GalleryGrid::handle_event(const SDL_Event& e)
 {
-    // A background import owns the vault; swallow all input except Esc (which
-    // requests a cooperative cancel) until the worker finishes.
-    if (naming_.import_job.active()) {
-        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE)
-            naming_.import_job.cancel();
-        return;
-    }
+    // A background import / export / delete owns the vault; its Esc→cancel gate
+    // swallows input until the worker finishes (a running transfer is owned by the
+    // dialog, which does its own Esc→cancel below).
+    if (handle_job_input(*this, e)) return;
 
     // Overlays take input in priority order: search > tag_editor > transfer > consent/naming
     if (search_.active()) {
@@ -701,11 +690,47 @@ void poll_import_job(GalleryGrid& g)
     g.mark_dirty();
 }
 
+bool vault_busy(const GalleryGrid& g)
+{
+    return g.naming_.import_job.active() || g.naming_.file_op.active() || g.transfer_.job_active();
+}
+
+void poll_file_job(GalleryGrid& g)
+{
+    // take_outcome() joins the worker before returning, so touching the vault
+    // (refresh) afterwards respects the single-thread file-handle invariant.
+    if (auto oc = g.naming_.file_op.take_outcome()) {
+        if (!oc->ok && !oc->error.empty()) g.error_ = oc->error;
+        else                               g.status_ = oc->status;
+        g.sel_.clear();
+        g.refresh();   // a delete changed the listing; harmless after an export
+    }
+    g.mark_dirty();
+}
+
+// While a background job owns the vault, swallow all input except Esc → cooperative
+// cancel. Free friend to keep GalleryGrid under the cpp:S1448 method cap and to keep
+// handle_event()'s cognitive complexity (S3776) down (Phase 25).
+bool handle_job_input(GalleryGrid& g, const SDL_Event& e)
+{
+    const bool esc = e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE;
+    if (g.naming_.import_job.active()) {
+        if (esc) g.naming_.import_job.cancel();
+        return true;
+    }
+    if (g.naming_.file_op.active()) {
+        if (esc) g.naming_.file_op.cancel();
+        return true;
+    }
+    return false;
+}
+
 void GalleryGrid::update(double)
 {
     // A background import owns the vault's file handle on its worker thread, so the
     // UI must not read the vault (thumbnails/listing) until it finishes — poll only.
     if (naming_.import_job.active()) { poll_import_job(*this); return; }
+    if (naming_.file_op.active())    { poll_file_job(*this);   return; }
 
     if (pump_thumbs()) mark_dirty();   // off-thread thumbnail decode(s) landed
 
@@ -753,11 +778,19 @@ void GalleryGrid::render(gfx::Renderer& r)
     const auto W = static_cast<float>(win_.width());
     const auto H = static_cast<float>(win_.height());
 
-    // While a background import runs, the worker thread owns the vault — drawing
-    // tiles would decrypt thumbnails on this thread and race it. Show only the
-    // progress modal over an empty backdrop.
+    // While a background job runs, the worker thread owns the vault — drawing tiles
+    // would decrypt thumbnails on this thread and race it. Show only the progress
+    // modal over an empty backdrop. The transfer dialog draws its own progress modal.
     if (naming_.import_job.active()) {
         draw_import_progress(r, font_, W, H, naming_.zip.cbz, naming_.import_job);
+        return;
+    }
+    if (naming_.file_op.active()) {
+        draw_file_op_progress(r, font_, W, H, naming_.file_op);
+        return;
+    }
+    if (transfer_.job_active()) {
+        transfer_.render(r, font_, W, H);   // draws the veiling transfer progress modal
         return;
     }
 

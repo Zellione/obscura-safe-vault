@@ -104,7 +104,7 @@ void ImageViewer::show_image_at(int idx)
         video_ = std::make_unique<VideoPlayback>(vault_, *album_.images[index_]);
 }
 
-void ImageViewer::handle_key_video(SDL_Keycode key)
+void ImageViewer::handle_key_video(SDL_Keycode key, SDL_Scancode sc)
 {
     switch (key) {
         case SDLK_F:   // lift the video out of fill-scroll so it can play
@@ -113,7 +113,7 @@ void ImageViewer::handle_key_video(SDL_Keycode key)
         case SDLK_LEFT:  set_index(-1); return;
         case SDLK_RIGHT: set_index(1);  return;
         case SDLK_UP:    go_back();     return;
-        default:         if (video_) video_->handle_key(key); return;   // Space / , / . / J / L
+        default:         if (video_) video_->handle_key(key, sc); return;   // Space/,/./J/L + [ ] volume
     }
 }
 
@@ -222,12 +222,12 @@ int ImageViewer::strip_hit(float mx, float my) const
 
 // --- Input -----------------------------------------------------------------
 
-void ImageViewer::handle_key(SDL_Keycode key)
+void ImageViewer::handle_key(SDL_Keycode key, SDL_Scancode sc)
 {
     using enum StripSide;
     using enum ViewMode;
     if (mode_ == Slideshow) {
-        if (!slideshow_.handle_key(key)) {   // user exited the slideshow
+        if (!slideshow_.handle_key(key, sc)) {   // user exited the slideshow
             index_ = slideshow_.index();
             slideshow_.stop();
             mode_  = Fit;
@@ -251,7 +251,7 @@ void ImageViewer::handle_key(SDL_Keycode key)
         case SDLK_ESCAPE: go_back(); return;
         default: break;
     }
-    if (item_is_video(album_.images, index_)) { handle_key_video(key); return; }
+    if (item_is_video(album_.images, index_)) { handle_key_video(key, sc); return; }
     // Image-only keys.
     switch (key) {
         case SDLK_F:      // toggle fit <-> fill-width scroll
@@ -337,6 +337,8 @@ void ImageViewer::update(double dt)
 
     if (video_) video_->update(dt);
 
+    // Single-image export runs synchronously — one image is fast (the large,
+    // multi-image export lives in GalleryGrid, which backgrounds it, Phase 25).
     if (auto dest = export_.take_destination(); dest && !album_.images.empty()) {
         const std::array<const vault::IndexNode*, 1> one{album_.images[index_]};
         const ExportSummary sum =
@@ -387,13 +389,12 @@ void ImageViewer::handle_event(const SDL_Event& e)
             // resolve the produced character from scancode + modifiers. Not while
             // the slideshow owns the keyboard. The `` ` `` quick-switch chord is
             // layout-robust for the same reason (see is_quick_switch_key).
-            if (mode_ != Slideshow &&
-                SDL_GetKeyFromScancode(e.key.scancode, e.key.mod, false) == SDLK_SLASH)
+            if (mode_ != Slideshow && is_search_key(e.key))
                 search_.open();
             else if (mode_ != Slideshow && is_quick_switch_key(e.key))
                 quick_switch_.open();
             else
-                handle_key(e.key.key);
+                handle_key(e.key.key, e.key.scancode);
             break;
         case SDL_EVENT_MOUSE_WHEEL:       handle_wheel(e.wheel);        break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN: handle_mouse_down(e.button);  break;
