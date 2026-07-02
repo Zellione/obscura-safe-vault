@@ -18,6 +18,7 @@
 #include "ui/selection_model.h"
 #include "ui/tag_editor.h"
 #include "ui/transfer_dialog.h"
+#include "ui/zip_import_job.h"
 #include "ui/zip_plan.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
@@ -55,6 +56,10 @@ public:
     void handle_event(const SDL_Event& e) override;
     void update(double dt) override;
     void render(gfx::Renderer& r) override;
+    // Keep repainting the progress bar and hold off the idle auto-lock while a
+    // background CBZ import runs (the worker thread owns the vault meanwhile).
+    [[nodiscard]] bool animating() const override { return import_job_.active(); }
+    [[nodiscard]] bool blocks_idle_lock() const override { return import_job_.active(); }
 
 private:
     enum class GalleryView { Grid, List };
@@ -87,6 +92,8 @@ private:
 
     void render_grid(gfx::Renderer& r, float W, float H);
     void render_list(gfx::Renderer& r, float W, float H);
+    void render_import_progress(gfx::Renderer& r, float W, float H);  // background-import modal
+    void poll_import_job();        // drain a finished background import (update())
     void draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
                          const SDL_FRect& box);
     [[nodiscard]] int  hit_test(float mx, float my) const;  // item under cursor, or -1
@@ -136,6 +143,12 @@ private:
         std::unordered_set<uint64_t> failed;   // thumbs that gave up decoding
     };
     ThumbDecode thumbs_;
+
+    // Background CBZ import (Phase 24 fix). While active() the worker thread owns
+    // the vault's single-thread file handle, so update()/render()/handle_event()
+    // deliberately avoid touching the vault (no thumbnail reads) and show only a
+    // progress modal until the import completes.
+    ZipImportJob import_job_;
 };
 
 } // namespace ui

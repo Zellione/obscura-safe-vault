@@ -76,6 +76,46 @@ TEST(cbz_import_flattens_internal_subfolders)
     cleanup_dir(dir);
 }
 
+TEST(cbz_import_reports_progress)
+{
+    auto dir = fresh_dir("osv_cbz_progress");
+    auto cbz = make_archive({{"1.jpg", fake_jpeg(1)},
+                             {"2.jpg", fake_jpeg(2)},
+                             {"3.jpg", fake_jpeg(3)}},
+                            dir / "P.cbz");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        ui::ImportProgress prog;
+        auto out = ui::import_cbz(v, cbz, "", "P", &prog);
+        CHECK(out.ok);
+        CHECK_EQ(out.imported, 3);
+        CHECK_EQ(prog.total.load(), 3);   // set to the page count up front
+        CHECK_EQ(prog.done.load(), 3);    // incremented once per stored page
+    }
+    cleanup_dir(dir);
+}
+
+TEST(cbz_import_stops_early_on_cancel)
+{
+    auto dir = fresh_dir("osv_cbz_cancel");
+    auto cbz = make_archive({{"1.jpg", fake_jpeg(1)},
+                             {"2.jpg", fake_jpeg(2)},
+                             {"3.jpg", fake_jpeg(3)}},
+                            dir / "C.cbz");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        ui::ImportProgress prog;
+        prog.cancel.store(true);   // pre-cancelled: no page should be imported
+        auto out = ui::import_cbz(v, cbz, "", "C", &prog);
+        CHECK(out.ok);                       // a cancelled import is still a clean stop
+        CHECK_EQ(out.imported, 0);           // cooperative cancel before the first page
+        CHECK_EQ(prog.done.load(), 0);
+    }
+    cleanup_dir(dir);
+}
+
 TEST(cbz_import_rejects_malformed_archive)
 {
     auto dir = fresh_dir("osv_cbz_bad");

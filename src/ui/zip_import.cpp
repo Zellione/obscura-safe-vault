@@ -113,11 +113,19 @@ bool create_galleries(vault::Vault& v, const ZipPlan& plan, mz_zip_archive& zip,
     return true;
 }
 
-// Store every planned placement, then end `zip` and mark the outcome ok.
-void run_placements(vault::Vault& v, mz_zip_archive& zip, const ZipPlan& plan, ZipImportOutcome& out)
+// Store every planned placement, then end `zip` and mark the outcome ok. When
+// `progress` is set, publishes the page count up front and bumps `done` per page
+// so a background poller can draw a bar; `cancel` cooperatively stops between
+// pages (already-stored pages remain — the vault is append-only).
+void run_placements(vault::Vault& v, mz_zip_archive& zip, const ZipPlan& plan,
+                    ZipImportOutcome& out, ImportProgress* progress)
 {
-    for (const auto& pl : plan.placements)
+    if (progress) progress->total.store(static_cast<int>(plan.placements.size()));
+    for (const auto& pl : plan.placements) {
+        if (progress && progress->cancel.load()) break;
         import_one(v, zip, pl, out);
+        if (progress) progress->done.fetch_add(1);
+    }
     mz_zip_reader_end(&zip);
     out.ok = true;
 }
@@ -129,7 +137,8 @@ ZipImportOutcome import_zip(vault::Vault&                v,
                             ZipDest                      dest,
                             std::string_view             base_gallery,
                             std::string_view             new_gallery_name,
-                            ZipConflictPolicy            policy)
+                            ZipConflictPolicy            policy,
+                            ImportProgress*              progress)
 {
     ZipImportOutcome out;
     std::vector<uint8_t> archive;
@@ -147,14 +156,15 @@ ZipImportOutcome import_zip(vault::Vault&                v,
     out.skipped = plan.skipped_unsupported;
 
     if (!create_galleries(v, plan, zip, out)) return out;
-    run_placements(v, zip, plan, out);
+    run_placements(v, zip, plan, out, progress);
     return out;
 }
 
 ZipImportOutcome import_cbz(vault::Vault&                v,
                             const std::filesystem::path& cbz_path,
                             std::string_view             base_gallery,
-                            std::string_view             gallery_name)
+                            std::string_view             gallery_name,
+                            ImportProgress*              progress)
 {
     // A .cbz is a plain zip; build_cbz_plan emits one leaf gallery of pages.
     // import_one then decompresses each page into mlock'd memory — never to disk.
@@ -167,7 +177,7 @@ ZipImportOutcome import_cbz(vault::Vault&                v,
     out.skipped = plan.skipped_unsupported;
 
     if (!create_galleries(v, plan, zip, out)) return out;
-    run_placements(v, zip, plan, out);
+    run_placements(v, zip, plan, out, progress);
     return out;
 }
 

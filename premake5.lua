@@ -323,6 +323,7 @@ project "osv_tests"
         "src/ui/natural_sort.cpp",
         "src/ui/zip_plan.cpp",
         "src/ui/zip_import.cpp",
+        "src/ui/zip_import_job.cpp",
         "src/ui/tag_list_parse.cpp",
         "src/ui/tag_overview_model.cpp",
         "src/ui/slideshow_model.cpp",

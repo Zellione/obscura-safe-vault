@@ -316,6 +316,19 @@ src/
                                             (Phase 24) reuses the same per-entry decompress-into-
                                             mlock'd-memory path over build_cbz_plan — `.cbz`
                                             imports as one page gallery, never extracted to disk.
+                                            import_zip/import_cbz take an optional ImportProgress*
+                                            (atomic total/done/cancel) so a caller can drive a
+                                            progress bar + cooperative cancel (Phase 24 fix).
+             zip_import_job.*,            ← ZipImportJob: runs import_cbz on a background thread so
+                                            a many-page comic (~10 s) never freezes the UI on the
+                                            name popup (Phase 24 fix). Threading contract: while
+                                            active() the worker owns the vault's single-thread file
+                                            handle, so GalleryGrid must NOT touch the vault (no
+                                            thumbnail reads/listing) — it polls total()/done() +
+                                            take_outcome() and draws render_import_progress() only;
+                                            Esc → cancel(). GalleryGrid::blocks_idle_lock() (new
+                                            Screen hook) pins the idle auto-lock off during import
+                                            so it can't wipe the master key mid-write.
              tag_list_parse.*,            ← pure, SDL/vault-free tag-list parser (Phase 21):
                                             raw .txt bytes → normalised tag list (split on LF,
                                             trim CR+whitespace, drop blanks, case-insensitive
