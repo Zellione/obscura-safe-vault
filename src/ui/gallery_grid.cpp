@@ -714,8 +714,14 @@ void poll_file_job(GalleryGrid& g)
 bool handle_job_input(GalleryGrid& g, const SDL_Event& e)
 {
     const bool esc = e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE;
-    if (g.naming_.import_job.active()) { if (esc) g.naming_.import_job.cancel(); return true; }
-    if (g.naming_.file_op.active())    { if (esc) g.naming_.file_op.cancel();    return true; }
+    if (g.naming_.import_job.active()) {
+        if (esc) g.naming_.import_job.cancel();
+        return true;
+    }
+    if (g.naming_.file_op.active()) {
+        if (esc) g.naming_.file_op.cancel();
+        return true;
+    }
     return false;
 }
 
