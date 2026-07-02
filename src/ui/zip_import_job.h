@@ -15,6 +15,15 @@ class Vault;
 
 namespace ui {
 
+// std::jthread (RAII auto-join, and the analyzer-preferred choice) is absent from
+// AppleClang's libc++, so fall back to std::thread on Apple — the destructor joins
+// explicitly either way, so behaviour is identical (mirrors image::WorkerThread).
+#if defined(__APPLE__)
+using WorkerThread = std::thread;
+#else
+using WorkerThread = std::jthread;
+#endif
+
 // Runs a ZIP/CBZ import on a background thread so the UI never freezes on a
 // many-page comic (Phase 24 fix — a 180-page volume is ~10 s of decode + encrypt).
 //
@@ -67,7 +76,7 @@ private:
     std::atomic<bool> active_{false};   // job in flight or finished-but-uncollected
     std::atomic<bool> done_{false};     // worker set this at the end
     ZipImportOutcome  outcome_;         // written by worker; read after join
-    std::thread       thread_;
+    WorkerThread      thread_;
 };
 
 }  // namespace ui

@@ -340,7 +340,7 @@ src/
                                                  the vault (update()/render()/handle_event() short-
                                                  circuit — no thumbnail reads/listing); it polls
                                                  total()/done() + take_outcome() (joins on completion)
-                                                 and draws render_import_progress() only, Esc ->
+                                                 and draws a progress modal only, Esc ->
                                                  cancel(). A ZIP with mixed folders comes back
                                                  needs_resolution (nothing written); poll_import_job
                                                  keeps naming_.zip active for the Flatten/Skip modal +

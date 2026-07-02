@@ -21,7 +21,7 @@ bool ZipImportJob::launch(std::function<ZipImportOutcome()> work)
     done_.store(false);
     active_.store(true);
 
-    thread_ = std::thread([this, work = std::move(work)]() mutable {
+    thread_ = WorkerThread([this, work = std::move(work)]() mutable {
         outcome_ = work();
         done_.store(true);   // release: happens-before the joining thread's read
     });

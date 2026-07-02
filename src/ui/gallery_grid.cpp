@@ -99,6 +99,59 @@ GridSpec grid_spec(float win_w, int cols) noexcept
     const float ox = std::max(OX, (win_w - used) * 0.5f);
     return {cols, CELL, GAP, ox, OY};
 }
+
+// Leaf-invariant checks over the current listing (free, not members, to keep the
+// class under the S1448 method cap). A gallery that holds sub-galleries can't take
+// images; one that holds media can't take sub-galleries.
+using ChildList = std::vector<const vault::IndexNode*>;
+bool leaf_allows_images(const ChildList& children)
+{
+    return std::ranges::none_of(children,
+                                [](const vault::IndexNode* c) { return c->is_gallery(); });
+}
+bool leaf_allows_galleries(const ChildList& children)
+{
+    return std::ranges::none_of(children,
+                                [](const vault::IndexNode* c) { return c->is_media(); });
+}
+
+// Background-import progress modal (free, not a member, for the S1448 cap). Veils
+// the grid — drawn instead of the tiles so no thumbnail is decrypted on the UI
+// thread while the worker owns the vault. `cbz` only picks the wording.
+void draw_import_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
+                          bool cbz, const ZipImportJob& job)
+{
+    using namespace gfx::theme;
+    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});   // full veil
+
+    const float mw = 520;
+    const float mh = 150;
+    const float mx = (W - mw) / 2;
+    const float my = (H - mh) / 2;
+    r.draw_round_rect({mx, my, mw, mh}, RADIUS, SURFACE);
+    r.draw_round_rect({mx, my, mw, mh}, RADIUS, ACCENT, /*filled*/ false);
+
+    r.draw_text(font, mx + 20, my + 20, cbz ? "Importing comic…" : "Importing archive…", TEXT);
+
+    const int total = job.total();
+    const int done  = job.done();
+
+    // "done / total" (total is 0 for the brief window before the first page).
+    const char* unit = cbz ? "pages" : "files";
+    const std::string count =
+        total > 0 ? std::format("{} / {} {}", done, total, unit) : "Reading archive…";
+    r.draw_text(font, mx + 20, my + 56, count, TEXT_DIM);
+
+    // Progress bar: outline plus a fill proportional to done/total.
+    const SDL_FRect bar{mx + 20, my + 90, mw - 40, 14};
+    r.draw_round_rect(bar, 4, ACCENT, /*filled*/ false);
+    if (total > 0 && done > 0) {
+        const float frac = static_cast<float>(done) / static_cast<float>(total);
+        r.draw_round_rect({bar.x, bar.y, bar.w * frac, bar.h}, 4, ACCENT);
+    }
+
+    r.draw_text(font, mx + 20, my + mh - 28, "Esc to cancel", TEXT_FAINT);
+}
 }
 
 GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
@@ -130,19 +183,6 @@ void GalleryGrid::refresh()
     children_ = vault_.list(nav_.path());
     nav_.set_count(static_cast<int>(children_.size()));
     sel_.clear();   // selection indices are only valid against the current listing
-}
-
-bool GalleryGrid::current_allows_images() const
-{
-    return std::ranges::none_of(children_,
-                                [](const vault::IndexNode* c) { return c->is_gallery(); });
-}
-
-bool GalleryGrid::current_allows_galleries() const
-{
-    // A leaf that holds media (images OR videos) can't also hold sub-galleries.
-    return std::ranges::none_of(children_,
-                                [](const vault::IndexNode* c) { return c->is_media(); });
 }
 
 void GalleryGrid::open_selected()
@@ -235,7 +275,7 @@ void GalleryGrid::do_export(const std::filesystem::path& dest)
 void GalleryGrid::start_import()
 {
     if (dialogs_.file.busy()) return;
-    if (!current_allows_images()) {
+    if (!leaf_allows_images(children_)) {
         error_ = "Can't import here: this gallery holds sub-galleries.";
         return;
     }
@@ -264,7 +304,7 @@ void GalleryGrid::do_import(const std::filesystem::path& file_path)
 
 void GalleryGrid::start_naming()
 {
-    if (!current_allows_galleries()) {
+    if (!leaf_allows_galleries(children_)) {
         error_ = "Can't create a sub-gallery in an image gallery.";
         return;
     }
@@ -499,9 +539,9 @@ void GalleryGrid::handle_event(const SDL_Event& e)
 {
     // A background import owns the vault; swallow all input except Esc (which
     // requests a cooperative cancel) until the worker finishes.
-    if (import_job_.active()) {
+    if (naming_.import_job.active()) {
         if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE)
-            import_job_.cancel();
+            naming_.import_job.cancel();
         return;
     }
 
@@ -593,7 +633,7 @@ void GalleryGrid::pump_zip_import()
             naming_.zip.cbz = true;
             naming_.zip.active = true;
         }
-    } else if (current_allows_images() && !current_allows_galleries()) {
+    } else if (leaf_allows_images(children_) && !leaf_allows_galleries(children_)) {
         // Current gallery holds only media (leaf): import with Append (no name prompt).
         naming_.zip.path = zp;
         naming_.zip.gallery_name.clear();
@@ -622,50 +662,50 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipCo
 
     // Both CBZ and ZIP imports run on a background thread so the UI never freezes
     // on a large archive (Phase 24 fix) — synchronously here would freeze it on the
-    // name popup ("locked in"). poll_import_job() drains the result; while the
-    // worker owns the vault the UI shows only render_import_progress(). CBZ is a
-    // fixed one-leaf plan; a ZIP with mixed folders comes back needs_resolution
-    // (nothing written) so poll shows the Flatten/Skip modal, and F/S re-enters
-    // here with the chosen policy. naming_.zip stays populated across that round-
-    // trip and is cleared by poll on a terminal outcome.
+    // name popup ("locked in"). update() drains the result; while the worker owns
+    // the vault the UI shows only the progress modal. CBZ is a fixed one-leaf plan;
+    // a ZIP with mixed folders comes back needs_resolution (nothing written) so
+    // update() shows the Flatten/Skip modal, and F/S re-enters here with the chosen
+    // policy. naming_.zip stays populated across that round-trip and is cleared on a
+    // terminal outcome.
     if (naming_.zip.cbz)
-        import_job_.start_cbz(vault_, zip_path, base_gallery, gallery_name);
+        naming_.import_job.start_cbz(vault_, zip_path, base_gallery, gallery_name);
     else
-        import_job_.start_zip(vault_, zip_path, dest, base_gallery, gallery_name, policy);
+        naming_.import_job.start_zip(vault_, zip_path, dest, base_gallery, gallery_name, policy);
     mark_dirty();
 }
 
-void GalleryGrid::poll_import_job()
+void poll_import_job(GalleryGrid& g)
 {
-    // Only touch the vault here once the worker has fully finished (take_outcome
-    // joins the thread), so the single-thread file-handle invariant holds.
-    if (auto oc = import_job_.take_outcome()) {
-        const bool cbz = naming_.zip.cbz;   // "page" (comic) vs "file" (zip) wording
+    // Only touch the vault once the worker has fully finished (take_outcome joins
+    // the thread), so the single-thread file-handle invariant holds.
+    if (auto oc = g.naming_.import_job.take_outcome()) {
+        const bool cbz = g.naming_.zip.cbz;   // "page" (comic) vs "file" (zip) wording
+        const char* fail = cbz ? "CBZ import failed." : "ZIP import failed.";
         if (!oc->ok) {
-            error_ = oc->error.empty() ? (cbz ? "CBZ import failed." : "ZIP import failed.")
-                                       : oc->error;
-            naming_.zip.active = false;
-            naming_.zip.cbz    = false;
+            g.error_ = oc->error.empty() ? fail : oc->error;
+            g.naming_.zip.active = false;
+            g.naming_.zip.cbz    = false;
         } else if (oc->needs_resolution) {
             // ZIP with mixed folders: keep naming_.zip active so the Flatten/Skip
             // modal shows; the worker wrote nothing. F/S re-launches with a policy.
         } else {
             const char* noun = cbz ? "page" : "file";
-            status_ = std::format("Imported {} {}{}, skipped {}", oc->imported, noun,
-                                  oc->imported == 1 ? "" : "s", oc->skipped);
-            naming_.zip.active = false;
-            naming_.zip.cbz    = false;
-            refresh();   // the import mutated the index tree — rebuild children_
+            g.status_ = std::format("Imported {} {}{}, skipped {}", oc->imported, noun,
+                                    oc->imported == 1 ? "" : "s", oc->skipped);
+            g.naming_.zip.active = false;
+            g.naming_.zip.cbz    = false;
+            g.refresh();   // the import mutated the index tree — rebuild children_
         }
     }
-    mark_dirty();
+    g.mark_dirty();
 }
 
 void GalleryGrid::update(double)
 {
-    // A background import owns the vault's file handle on its worker thread; the
-    // UI must not read the vault (thumbnails/listing) until it finishes. Poll only.
-    if (import_job_.active()) { poll_import_job(); return; }
+    // A background import owns the vault's file handle on its worker thread, so the
+    // UI must not read the vault (thumbnails/listing) until it finishes — poll only.
+    if (naming_.import_job.active()) { poll_import_job(*this); return; }
 
     if (pump_thumbs()) mark_dirty();   // off-thread thumbnail decode(s) landed
 
@@ -708,41 +748,6 @@ void GalleryGrid::update(double)
     }
 }
 
-void GalleryGrid::render_import_progress(gfx::Renderer& r, float W, float H)
-{
-    using namespace gfx::theme;
-    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});   // full veil
-
-    const float mw = 520;
-    const float mh = 150;
-    const float mx = (W - mw) / 2;
-    const float my = (H - mh) / 2;
-    r.draw_round_rect({mx, my, mw, mh}, RADIUS, SURFACE);
-    r.draw_round_rect({mx, my, mw, mh}, RADIUS, ACCENT, /*filled*/ false);
-
-    const bool cbz = naming_.zip.cbz;
-    r.draw_text(font_, mx + 20, my + 20,
-                cbz ? "Importing comic…" : "Importing archive…", TEXT);
-
-    // "done / total" (total is 0 for the brief window before the first page).
-    const int total = import_job_.total();
-    const int done  = import_job_.done();
-    const char* unit = cbz ? "pages" : "files";
-    const std::string count =
-        total > 0 ? std::format("{} / {} {}", done, total, unit) : "Reading archive…";
-    r.draw_text(font_, mx + 20, my + 56, count, TEXT_DIM);
-
-    // Progress bar: outline plus a fill proportional to done/total.
-    const SDL_FRect bar{mx + 20, my + 90, mw - 40, 14};
-    r.draw_round_rect(bar, 4, ACCENT, /*filled*/ false);
-    if (total > 0 && done > 0) {
-        const float frac = static_cast<float>(done) / static_cast<float>(total);
-        r.draw_round_rect({bar.x, bar.y, bar.w * frac, bar.h}, 4, ACCENT);
-    }
-
-    r.draw_text(font_, mx + 20, my + mh - 28, "Esc to cancel", TEXT_FAINT);
-}
-
 void GalleryGrid::render(gfx::Renderer& r)
 {
     const auto W = static_cast<float>(win_.width());
@@ -751,7 +756,10 @@ void GalleryGrid::render(gfx::Renderer& r)
     // While a background import runs, the worker thread owns the vault — drawing
     // tiles would decrypt thumbnails on this thread and race it. Show only the
     // progress modal over an empty backdrop.
-    if (import_job_.active()) { render_import_progress(r, W, H); return; }
+    if (naming_.import_job.active()) {
+        draw_import_progress(r, font_, W, H, naming_.zip.cbz, naming_.import_job);
+        return;
+    }
 
     using namespace gfx::theme;
     std::string crumb = "/";
