@@ -16,6 +16,76 @@ std::string count_noun(int n, const char* noun)
     return std::format("{} {}{}", n, noun, n == 1 ? "" : "s");
 }
 
+// The three worker bodies as free helpers (keeps the start_* lambdas one-liners,
+// under the cpp:S1188 lambda-length cap). Each takes the job's progress by ref.
+
+FileOpOutcome run_export(const vault::Vault& v, const std::vector<const vault::IndexNode*>& nodes,
+                         const std::filesystem::path& dest, const std::string& label,
+                         vault::OpProgress& progress)
+{
+    const ExportSummary sum = export_images(v, nodes, dest, ExportConsent::Confirm, &progress);
+
+    FileOpOutcome oc;
+    oc.ok        = true;   // export always "succeeds"; per-file failures are counted
+    oc.cancelled = progress.cancel.load();
+    oc.done      = sum.written;
+    oc.failed    = sum.failed;
+    oc.total     = progress.total.load();
+    oc.kind      = FileOpKind::Export;
+    if (oc.cancelled)
+        oc.status = std::format("Export cancelled — {} written to {}", oc.done, label);
+    else
+        oc.status = std::format("Exported {} to {}", count_noun(oc.done, "image"), label);
+    if (oc.failed > 0) oc.status += std::format(" ({} failed)", oc.failed);
+    return oc;
+}
+
+FileOpOutcome run_delete(vault::Vault& v, const std::string& base, const std::string& name,
+                         bool is_gallery, int item_total, vault::OpProgress& progress)
+{
+    progress.total.store(item_total);
+
+    FileOpOutcome oc;
+    oc.kind  = FileOpKind::Delete;
+    oc.total = item_total;
+    if (progress.cancel.load()) {   // cancelled before it ran — nothing removed
+        oc.ok = true; oc.cancelled = true; oc.status = "Delete cancelled";
+        return oc;
+    }
+
+    const std::string full = base.empty() ? name : base + "/" + name;
+    if (const vault::VaultResult r = is_gallery ? v.remove_gallery(full) : v.remove_image(base, name);
+        r == vault::VaultResult::Ok) {
+        progress.done.store(item_total);
+        oc.ok = true; oc.done = item_total;
+        oc.status = std::format("Deleted {}", name);
+    } else {
+        oc.error = std::format("Could not delete {}", name);
+    }
+    return oc;
+}
+
+// Format a transfer outcome from a tally (shared by the image-list + gallery paths).
+FileOpOutcome transfer_outcome(vault::TransferMode mode, int done, int failed, int total,
+                               bool cancelled, const std::string& label)
+{
+    const char* verb        = (mode == vault::TransferMode::Copy) ? "Copied" : "Moved";
+    const char* cancel_verb = (mode == vault::TransferMode::Copy) ? "Copy"   : "Move";
+    FileOpOutcome oc;
+    oc.ok        = true;
+    oc.cancelled = cancelled;
+    oc.done      = done;
+    oc.failed    = failed;
+    oc.total     = total;
+    oc.kind      = FileOpKind::Transfer;
+    if (cancelled)
+        oc.status = std::format("{} cancelled — {} of {} to {}", cancel_verb, done, total, label);
+    else
+        oc.status = std::format("{} {} of {} to {}", verb, done, total, label);
+    if (failed > 0) oc.status += std::format(" ({} failed)", failed);
+    return oc;
+}
+
 } // namespace
 
 FileOpJob::~FileOpJob()
@@ -49,21 +119,7 @@ bool FileOpJob::start_export(const vault::Vault& v, std::vector<const vault::Ind
     return launch(FileOpKind::Export,
                   [this, &v, nodes = std::move(nodes), dest_dir = std::move(dest_dir),
                    label = std::move(label)]() {
-        const ExportSummary sum =
-            export_images(v, nodes, dest_dir, ExportConsent::Confirm, &progress_);
-
-        FileOpOutcome oc;
-        oc.ok        = true;   // export always "succeeds"; per-file failures are counted
-        oc.cancelled = progress_.cancel.load();
-        oc.done      = sum.written;
-        oc.failed    = sum.failed;
-        oc.total     = progress_.total.load();
-        oc.kind      = FileOpKind::Export;
-        oc.status = oc.cancelled
-            ? std::format("Export cancelled — {} written to {}", oc.done, label)
-            : std::format("Exported {} to {}", count_noun(oc.done, "image"), label);
-        if (oc.failed > 0) oc.status += std::format(" ({} failed)", oc.failed);
-        return oc;
+        return run_export(v, nodes, dest_dir, label, progress_);
     });
 }
 
@@ -73,51 +129,9 @@ bool FileOpJob::start_delete(vault::Vault& v, std::string base, std::string name
     return launch(FileOpKind::Delete,
                   [this, &v, base = std::move(base), name = std::move(name),
                    is_gallery, item_total]() {
-        progress_.total.store(item_total);
-
-        FileOpOutcome oc;
-        oc.kind  = FileOpKind::Delete;
-        oc.total = item_total;
-        if (progress_.cancel.load()) {   // cancelled before it ran — nothing removed
-            oc.ok = true; oc.cancelled = true; oc.status = "Delete cancelled";
-            return oc;
-        }
-
-        const vault::VaultResult r =
-            is_gallery ? v.remove_gallery(base.empty() ? name : base + "/" + name)
-                       : v.remove_image(base, name);
-        if (r == vault::VaultResult::Ok) {
-            progress_.done.store(item_total);
-            oc.ok = true; oc.done = item_total;
-            oc.status = std::format("Deleted {}", name);
-        } else {
-            oc.error = std::format("Could not delete {}", name);
-        }
-        return oc;
+        return run_delete(v, base, name, is_gallery, item_total, progress_);
     });
 }
-
-// Shared tail of the two transfer starters: format the outcome from a tally.
-namespace {
-FileOpOutcome transfer_outcome(vault::TransferMode mode, int done, int failed, int total,
-                               bool cancelled, const std::string& label)
-{
-    const char* verb = (mode == vault::TransferMode::Copy) ? "Copied" : "Moved";
-    FileOpOutcome oc;
-    oc.ok        = true;
-    oc.cancelled = cancelled;
-    oc.done      = done;
-    oc.failed    = failed;
-    oc.total     = total;
-    oc.kind      = FileOpKind::Transfer;
-    oc.status = cancelled
-        ? std::format("{} cancelled — {} of {} to {}",
-                      (mode == vault::TransferMode::Copy) ? "Copy" : "Move", done, total, label)
-        : std::format("{} {} of {} to {}", verb, done, total, label);
-    if (failed > 0) oc.status += std::format(" ({} failed)", failed);
-    return oc;
-}
-} // namespace
 
 bool FileOpJob::start_transfer_images(vault::Vault& src, std::string src_gallery,
                                       std::vector<std::string> filenames,

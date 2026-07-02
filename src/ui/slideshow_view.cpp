@@ -47,12 +47,13 @@ bool SlideshowView::handle_key(SDL_Keycode key, SDL_Scancode sc)
     // `[` / `]` adjust the dwell. Match by physical scancode (ui/keybindings.h) so
     // they work on layouts where those glyphs sit behind AltGr (Phase 25); the
     // `-` / `+` glyph keys below remain as layout-friendly alternatives.
+    using enum BracketKey;
     switch (bracket_key_for_scancode(sc)) {
-        case BracketKey::Decrease: show_->adjust_dwell(-SLIDESHOW_DWELL_STEP);
-                                   dwell_ = show_->dwell(); return true;
-        case BracketKey::Increase: show_->adjust_dwell(SLIDESHOW_DWELL_STEP);
-                                   dwell_ = show_->dwell(); return true;
-        case BracketKey::None:     break;
+        case Decrease: show_->adjust_dwell(-SLIDESHOW_DWELL_STEP);
+                       dwell_ = show_->dwell(); return true;
+        case Increase: show_->adjust_dwell(SLIDESHOW_DWELL_STEP);
+                       dwell_ = show_->dwell(); return true;
+        case None:     break;
     }
 
     switch (key) {

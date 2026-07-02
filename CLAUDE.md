@@ -225,9 +225,10 @@ src/
                                             input + the idle-lock so the UI never touches the vault
                                             mid-job.
              image_viewer.*,              ← zoom/pan + thumb strip + fill-scroll + slideshow;
-                                            hosts a fit-only VideoPlayback for video items (Phase 15);
-                                            single-image export (X) runs on a background FileOpJob
-                                            with a progress modal + Esc-cancel (Phase 25)
+                                            hosts a fit-only VideoPlayback for video items (Phase 15).
+                                            Single-image export (X) stays synchronous (one image is
+                                            fast; the large multi-image export lives in GalleryGrid,
+                                            which backgrounds it, Phase 25)
              playback_model.*,            ← pure video transport maths: clock/clamp/seek-bar
                                             map/mm:ss/frame-due (Phase 15, pure/tested)
              video_playback.*,            ← in-viewer video player: decoder + YUV texture +

@@ -240,16 +240,17 @@ struct VideoPlayback::Impl {
     {
         // Volume `[`/`]` bind to the physical scancode so they work regardless of
         // keyboard layout (on German QWERTZ those glyphs are behind AltGr) — Phase 25.
+        using enum BracketKey;
         switch (bracket_key_for_scancode(sc)) {
-            case BracketKey::Decrease:
+            case Decrease:
                 vol_.level = media::clamp_volume(vol_.level - 0.05f);
                 apply_gain();
                 return;
-            case BracketKey::Increase:
+            case Increase:
                 vol_.level = media::clamp_volume(vol_.level + 0.05f);
                 apply_gain();
                 return;
-            case BracketKey::None:
+            case None:
                 break;
         }
         switch (k) {

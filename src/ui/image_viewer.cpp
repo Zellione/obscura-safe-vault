@@ -11,7 +11,7 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "image/decode.h"
-#include "ui/progress_modal.h"
+#include "ui/export.h"
 #include "ui/meta_format.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
@@ -328,16 +328,6 @@ void ImageViewer::handle_wheel(const SDL_MouseWheelEvent& w)
 
 void ImageViewer::update(double dt)
 {
-    // While the export worker owns the vault, only poll it — don't decode/read the
-    // vault on this thread (single-thread file-handle invariant).
-    if (export_job_.active()) {
-        if (auto oc = export_job_.take_outcome()) {
-            export_.set_status(oc->status);
-            mark_dirty();
-        }
-        return;
-    }
-
     if (full_cache_.pump()) mark_dirty();   // an off-thread decode landed — repaint
 
     if (mode_ == ViewMode::Slideshow) {
@@ -347,14 +337,16 @@ void ImageViewer::update(double dt)
 
     if (video_) video_->update(dt);
 
+    // Single-image export runs synchronously — one image is fast (the large,
+    // multi-image export lives in GalleryGrid, which backgrounds it, Phase 25).
     if (auto dest = export_.take_destination(); dest && !album_.images.empty()) {
-        // Run the decrypt→write on a worker thread with a progress modal + cancel
-        // (Phase 25). The current node points into the live index, which the
-        // read-only export does not mutate; the UI does not navigate while the job
-        // runs (input is gated), so it stays valid on the worker.
-        std::vector<const vault::IndexNode*> one{album_.images[index_]};
-        export_job_.start_export(vault_, std::move(one), *dest, dest->string());
-        mark_dirty();
+        const std::array<const vault::IndexNode*, 1> one{album_.images[index_]};
+        const ExportSummary sum =
+            export_images(vault_, one, *dest, ExportConsent::Confirm);
+        export_.set_status(sum.written == 1
+                               ? std::format("Exported to {}", dest->string())
+                               : "Export failed.");
+        mark_dirty();   // export folder picker resolved — repaint the status line
     }
 }
 
@@ -389,11 +381,6 @@ bool ImageViewer::handle_overlay_event(const SDL_Event& e)
 void ImageViewer::handle_event(const SDL_Event& e)
 {
     using enum ViewMode;
-    // The export worker owns the vault; swallow all input except Esc → cancel.
-    if (export_job_.active()) {
-        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) export_job_.cancel();
-        return;
-    }
     if (handle_overlay_event(e)) return;
 
     switch (e.type) {
@@ -554,19 +541,6 @@ void ImageViewer::render_hud(gfx::Renderer& r, const SDL_FRect& vp)
 
 void ImageViewer::render(gfx::Renderer& r)
 {
-    // While the export worker owns the vault, show only the progress modal — the
-    // still image is already on the GPU, but suppress the rest of the UI so nothing
-    // decrypts on this thread and races the worker.
-    if (export_job_.active()) {
-        const int total = export_job_.total();
-        const int done  = export_job_.done();
-        draw_op_progress(r, font_, static_cast<float>(win_.width()),
-                         static_cast<float>(win_.height()), "Exporting…",
-                         total > 0 ? std::format("{} / {} images", done, total) : "Preparing…",
-                         done, total, "Esc to cancel");
-        return;
-    }
-
     // Slideshow is full-screen (no thumbnail strip): it owns the whole window.
     if (mode_ == ViewMode::Slideshow) {
         slideshow_.render(r, font_, full_cache_, album_.images,

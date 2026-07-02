@@ -376,9 +376,10 @@ src/
                                                  start_transfer_images/start_transfer_gallery ->
                                                  FileOpOutcome{ok,cancelled,done,failed,status,...}.
                                                  GalleryGrid owns one (naming_.file_op) for export+delete;
-                                                 ImageViewer owns one for single-image export;
-                                                 TransferDialog owns one (Running stage). vault_busy() /
-                                                 blocks_idle_lock() gate the UI + idle auto-lock.
+                                                 TransferDialog owns one (Running stage). ImageViewer's
+                                                 single-image export stays synchronous (fast). The
+                                                 GalleryGrid gate (vault_busy/poll_file_job/handle_job_input)
+                                                 is free friends; blocks_idle_lock() holds off idle lock.
                                                  Compiled into osv_tests (poll-to-completion harness).
                progress_modal.*                — draw_op_progress: shared veil + "N/M" bar + cancel-hint
                                                  modal reused by every screen hosting a background job

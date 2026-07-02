@@ -33,10 +33,11 @@ enum class BracketKey { None, Decrease, Increase };
 // directly unit-testable without an initialised keyboard.
 [[nodiscard]] constexpr BracketKey bracket_key_for_scancode(SDL_Scancode sc) noexcept
 {
+    using enum BracketKey;
     switch (sc) {
-        case SDL_SCANCODE_LEFTBRACKET:  return BracketKey::Decrease;
-        case SDL_SCANCODE_RIGHTBRACKET: return BracketKey::Increase;
-        default:                        return BracketKey::None;
+        case SDL_SCANCODE_LEFTBRACKET:  return Decrease;
+        case SDL_SCANCODE_RIGHTBRACKET: return Increase;
+        default:                        return None;
     }
 }
 

@@ -322,7 +322,8 @@ void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, flo
         const int done  = run_.job.done();
         const std::string count =
             total > 0 ? std::format("{} / {} files", done, total) : "Preparing…";
-        draw_op_progress(r, font, W, H, verb, count, done, total, "Esc to cancel");
+        draw_op_progress(r, font, W, H,
+                         {.title = verb, .count_line = count, .done = done, .total = total});
         return;
     }
 

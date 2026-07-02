@@ -102,32 +102,69 @@ const IndexNode* find_image_node(const Vault& v, std::string_view gallery,
     return nullptr;
 }
 
-// Copy every media (image or video) named in `images` from `src`/`src_gallery` into
-// `dst`/`dst_gallery`, decrypting through one reused mlock'd buffer. Copy only — the
-// source is untouched. `progress` (optional) is bumped per file; a set cancel flag
-// stops the copy between files and reports it via `*cancelled` (source left intact).
+// Copy one media (image or video) `fname` from src/src_gallery into dst/dst_gallery,
+// decrypting through the reused mlock'd `plain`. Copy only — source untouched.
+VaultResult copy_one_media(const Vault& src, std::string_view src_gallery,
+                           Vault& dst, std::string_view dst_gallery,
+                           std::string_view fname, crypto::SecureBytes& plain)
+{
+    using enum VaultResult;
+    const IndexNode* node = find_image_node(src, src_gallery, fname);
+    if (!node) return NotFound;
+
+    // Branch on media type: image → read_image/add_image, video → read_video/add_video.
+    if (node->is_image()) {
+        if (VaultResult r = src.read_image(*node, plain); r != Ok) return r;
+        return dst.add_image(dst_gallery, plain.as_span(), fname);
+    }
+    if (node->is_video()) {
+        if (VaultResult r = src.read_video(*node, plain); r != Ok) return r;
+        return dst.add_video(dst_gallery, plain.as_span(), fname);
+    }
+    return Ok;
+}
+
+// Copy every media named in `images` from `src`/`src_gallery` into `dst`/`dst_gallery`.
+// `progress` (optional) is bumped per file; a set cancel flag stops the copy between
+// files (returning Ok) — the caller detects the cancel via progress->cancel and leaves
+// the source intact.
 VaultResult copy_images(const Vault& src, std::string_view src_gallery,
                         Vault& dst, std::string_view dst_gallery,
                         const std::vector<std::string>& images, crypto::SecureBytes& plain,
-                        OpProgress* progress, bool* cancelled)
+                        OpProgress* progress)
 {
     using enum VaultResult;
     for (const auto& fname : images) {
-        if (progress && progress->cancel.load()) { if (cancelled) *cancelled = true; return Ok; }
-        const IndexNode* node = find_image_node(src, src_gallery, fname);
-        if (!node) return NotFound;
-
-        // Branch on media type: image → read_image/add_image, video → read_video/add_video
-        if (node->is_image()) {
-            if (VaultResult r = src.read_image(*node, plain); r != Ok) return r;
-            if (VaultResult r = dst.add_image(dst_gallery, plain.as_span(), fname); r != Ok)
-                return r;
-        } else if (node->is_video()) {
-            if (VaultResult r = src.read_video(*node, plain); r != Ok) return r;
-            if (VaultResult r = dst.add_video(dst_gallery, plain.as_span(), fname); r != Ok)
-                return r;
-        }
+        if (progress && progress->cancel.load()) return Ok;   // clean partial: stop between files
+        if (VaultResult r = copy_one_media(src, src_gallery, dst, dst_gallery, fname, plain);
+            r != Ok)
+            return r;
         if (progress) progress->done.fetch_add(1);
+    }
+    return Ok;
+}
+
+// Recreate the snapshotted subtree under `dest_root` in `dst` and copy each gallery's
+// media (parent-before-child order). Stops early (returning Ok) on cancel; the caller
+// checks progress->cancel to decide whether to remove the source. Returns the first error.
+VaultResult copy_subtree(const Vault& src, std::string_view src_gallery, Vault& dst,
+                         const std::string& dest_root, const std::vector<GallerySnap>& snaps,
+                         OpProgress* progress)
+{
+    using enum VaultResult;
+    crypto::SecureBytes plain;
+    for (const auto& snap : snaps) {
+        const std::string dst_gallery = snap.rel.empty() ? dest_root
+                                                         : dest_root + "/" + snap.rel;
+        const std::string src_abs = snap.rel.empty() ? std::string(src_gallery)
+                                                      : std::string(src_gallery) + "/" + snap.rel;
+
+        if (VaultResult r = dst.create_gallery(dst_gallery); r != Ok && r != AlreadyExists)
+            return r;
+        if (VaultResult r = copy_images(src, src_abs, dst, dst_gallery, snap.images, plain, progress);
+            r != Ok)
+            return r;
+        if (progress && progress->cancel.load()) return Ok;   // cancelled between galleries
     }
     return Ok;
 }
@@ -234,26 +271,12 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
         progress->total.store(media);
     }
 
-    crypto::SecureBytes plain;
-    bool cancelled = false;
-    for (const auto& snap : snaps) {
-        const std::string dst_gallery = snap.rel.empty() ? dest_root
-                                                         : dest_root + "/" + snap.rel;
-        const std::string src_abs = snap.rel.empty() ? std::string(src_gallery)
-                                                      : std::string(src_gallery) + "/" + snap.rel;
-
-        if (VaultResult r = dst.create_gallery(dst_gallery); r != Ok && r != AlreadyExists)
-            return r;
-        if (VaultResult r =
-                copy_images(src, src_abs, dst, dst_gallery, snap.images, plain, progress, &cancelled);
-            r != Ok)
-            return r;
-        if (cancelled) break;
-    }
+    if (VaultResult r = copy_subtree(src, src_gallery, dst, dest_root, snaps, progress); r != Ok)
+        return r;
 
     // A cancel leaves the source intact even for Move — the partial copy in dst is a
     // recoverable duplicate, never a loss.
-    if (cancelled) return Ok;
+    if (progress && progress->cancel.load()) return Ok;
 
     // Everything copied into dst — for a Move, drop the source subtree (copy-then-delete).
     if (mode == TransferMode::Move) return src.remove_gallery(src_gallery);
