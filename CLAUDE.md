@@ -187,6 +187,9 @@ src/
              video_probe.*,                interleaved F32; av_sync pure logic (audio-clock
              decoded_frame.h                sync, frame Present/Hold/Drop). Container/codec
                                             probe. All gated by OSV_VENDORED_AV (Phase 15–16).
+             volume_setting.*             ← session-wide remembered playback volume global
+                                            (saved_volume/set_saved_volume, [0,1]); NOT AV-gated,
+                                            so App can seed/read it in any build (Phase 25).
   gfx/       window.{h,cpp},             ← SDL3 window + renderer (Phase 0)
              renderer.{h,cpp},            ← texture cache, text atlas (Phase 4)
              texture_cache.*, text.*,
@@ -243,7 +246,9 @@ src/
                                             the scancode too; volume uses ui::volume_dir (resolves
                                             the produced char via SDL_GetModState so German AltGr+8/9
                                             `[`/`]` works) + the `-`/`+` glyph keys — the HUD legend
-                                            advertises `[-/+] Vol` (Phase 25 fix).
+                                            advertises `[-/+] Vol` (Phase 25 fix). The level is
+                                            seeded from media::saved_volume() on open + written back
+                                            on change, so it is remembered across clips + restarts.
              full_tex_cache.*,            ← shared decode→GPU texture cache (Phase 11 extract)
              slideshow_view.*,            ← full-screen slideshow SDL plumbing (Phase 11);
                                             handle_key takes the scancode so dwell `[`/`]` is
@@ -434,6 +439,11 @@ src/
              theme_pref.*                 ← chosen UI theme slug in config_dir()/theme.conf;
                                             atomic temp+rename, stores NO secrets, unknown/
                                             absent → default; mirrors vault_registry (Phase 23)
+             volume_pref.*                ← remembered media playback volume (one float [0,1])
+                                            in config_dir()/volume.conf; atomic temp+rename,
+                                            NO secrets, missing/invalid → 1.0; mirrors theme_pref
+                                            (Phase 25). App loads it at init → media::set_saved_volume
+                                            and saves media::saved_volume() on clean exit.
 vendor/
   SDL3/           ← git submodule, built by scripts/setup.sh (cmake)
   monocypher/     ← git submodule, compiled by premake (single .c file)

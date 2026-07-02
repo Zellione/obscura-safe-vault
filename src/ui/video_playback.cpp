@@ -20,6 +20,7 @@
 #include "media/chunk_avio.h"
 #include "media/video_decoder.h"
 #include "media/video_source.h"
+#include "media/volume_setting.h"
 #include "vault/index.h"
 #include "vault/vault.h"
 #endif
@@ -73,6 +74,7 @@ struct VideoPlayback::Impl {
 
     Impl(const vault::Vault& vault, const vault::IndexNode& node)
     {
+        vol_.level = media::saved_volume();   // remembered across clips + restarts (Phase 25)
         auto src = media::VideoSource::open(vault, node);
         avio_ = std::make_unique<media::ChunkAvio>(std::move(src));
         if (!avio_->valid()) {
@@ -239,6 +241,7 @@ struct VideoPlayback::Impl {
     void adjust_volume(float delta)
     {
         vol_.level = media::clamp_volume(vol_.level + delta);
+        media::set_saved_volume(vol_.level);   // remember it (Phase 25)
         apply_gain();
     }
 
@@ -306,6 +309,7 @@ struct VideoPlayback::Impl {
     {
         if (vol_.bar.w <= 0.0f) return;
         vol_.level = media::clamp_volume((mx - vol_.bar.x) / vol_.bar.w);
+        media::set_saved_volume(vol_.level);       // remember it (Phase 25)
         vol_.muted  = false;                       // grabbing the volume bar unmutes
         apply_gain();
     }

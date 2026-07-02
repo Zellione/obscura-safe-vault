@@ -179,7 +179,13 @@ src/
                                                  volume via ui::volume_dir — `-`/`+` glyph keys (HUD
                                                  shows [-/+] Vol) + the `[`/`]` produced char resolved
                                                  through SDL_GetModState (so German AltGr+8/9 works) +
-                                                 the physical bracket scancodes.
+                                                 the physical bracket scancodes. The level is seeded
+                                                 from media::saved_volume() on open + written back on
+                                                 change, so it is remembered across clips + restarts
+                                                 (platform::VolumePref config_dir()/volume.conf, one
+                                                 float [0,1], atomic write, missing/invalid->1.0;
+                                                 App loads at init + saves on clean exit; the in-memory
+                                                 global lives in media/volume_setting.*, not AV-gated).
                                                  GalleryGrid routes video imports to add_video +
                                                  draws a play badge (draw_tile_thumb) in grid & list.
                playback_model.*                — pure video transport maths: clock/clamp/
