@@ -199,12 +199,15 @@ src/
                                             change. Renderer also has draw_triangle (play badge/icon)
   ui/        input.h,                    ← input abstraction (Phase 5)
              keybindings.h,               ← pure layout-independent key resolution (Phase 25):
-                                            bracket_key_for_scancode maps the two physical keys
-                                            right of `P` → BracketKey{Decrease,Increase} by
-                                            SDL scancode (so video volume `[`/`]` + slideshow
-                                            dwell work on any layout, incl. German QWERTZ where
-                                            those glyphs are behind AltGr; unit-tested). Also
-                                            centralises the character-resolved is_search_key /
+                                            volume_dir(produced_char, scancode)→VolumeDir accepts
+                                            THREE ways to change video volume so it works however
+                                            it's pressed — the `[`/`]` produced CHARACTER (caller
+                                            resolves via SDL_GetKeyFromScancode so German QWERTZ
+                                            AltGr+8/9 matches), the `-`/`+`/`=` glyph keys (direct
+                                            on every layout — the primary/advertised pair), and the
+                                            physical `[`/`]` scancode (bracket_key_for_scancode, keys
+                                            right of `P`; also drives slideshow dwell). Unit-tested.
+                                            Also centralises the character-resolved is_search_key /
                                             is_advanced_search_key / is_quick_switch_key helpers
                                             (moved here from quick_switch.h).
              file_op_job.*,               ← FileOpJob: runs export / delete / move-copy on a
@@ -236,9 +239,10 @@ src/
                                             + seek bar (seeks both tracks) + mute/volume (M,
                                             [/]); pImpl gated on OSV_VENDORED_AV (non-AV build
                                             → poster fallback) (Phase 15–16). handle_key takes
-                                            the scancode too: `[`/`]` volume binds by physical
-                                            scancode (bracket_key_for_scancode) so it works on
-                                            any layout (Phase 25).
+                                            the scancode too; volume uses ui::volume_dir (resolves
+                                            the produced char via SDL_GetModState so German AltGr+8/9
+                                            `[`/`]` works) + the `-`/`+` glyph keys — the HUD legend
+                                            advertises `[-/+] Vol` (Phase 25 fix).
              full_tex_cache.*,            ← shared decode→GPU texture cache (Phase 11 extract)
              slideshow_view.*,            ← full-screen slideshow SDL plumbing (Phase 11);
                                             handle_key takes the scancode so dwell `[`/`]` is

@@ -36,3 +36,31 @@ TEST(keybindings_bracket_is_constexpr)
     static_assert(ui::bracket_key_for_scancode(SDL_SCANCODE_A)            == ui::BracketKey::None);
     CHECK(true);
 }
+
+// Volume is reachable three ways so it works however the user presses it.
+TEST(keybindings_volume_accepts_bracket_glyph_dash_and_scancode)
+{
+    using ui::VolumeDir;
+
+    // (1) The `[` / `]` produced character — this is the German-QWERTZ case that
+    // regressed: AltGr+8 produces the `[` glyph on the physical `8` key. The caller
+    // resolves the character; the physical scancode there is SDL_SCANCODE_8.
+    CHECK(ui::volume_dir(SDLK_LEFTBRACKET,  SDL_SCANCODE_8) == VolumeDir::Down);
+    CHECK(ui::volume_dir(SDLK_RIGHTBRACKET, SDL_SCANCODE_9) == VolumeDir::Up);
+
+    // (2) The `-` / `+` / `=` glyph keys — direct keys on every layout.
+    CHECK(ui::volume_dir(SDLK_MINUS,    SDL_SCANCODE_MINUS)  == VolumeDir::Down);
+    CHECK(ui::volume_dir(SDLK_KP_MINUS, SDL_SCANCODE_KP_MINUS) == VolumeDir::Down);
+    CHECK(ui::volume_dir(SDLK_PLUS,     SDL_SCANCODE_EQUALS) == VolumeDir::Up);
+    CHECK(ui::volume_dir(SDLK_EQUALS,   SDL_SCANCODE_EQUALS) == VolumeDir::Up);
+    CHECK(ui::volume_dir(SDLK_KP_PLUS,  SDL_SCANCODE_KP_PLUS) == VolumeDir::Up);
+
+    // (3) The physical `[` / `]` key positions (US bracket keys; German `ü`/`+`),
+    // regardless of the produced character.
+    CHECK(ui::volume_dir(SDLK_UNKNOWN, SDL_SCANCODE_LEFTBRACKET)  == VolumeDir::Down);
+    CHECK(ui::volume_dir(SDLK_UNKNOWN, SDL_SCANCODE_RIGHTBRACKET) == VolumeDir::Up);
+
+    // Unrelated keys do nothing.
+    CHECK(ui::volume_dir(SDLK_M, SDL_SCANCODE_M) == VolumeDir::None);
+    CHECK(ui::volume_dir(SDLK_8, SDL_SCANCODE_8) == VolumeDir::None);  // plain 8, no AltGr
+}

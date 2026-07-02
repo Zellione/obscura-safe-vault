@@ -6,7 +6,7 @@
 #include "gfx/renderer.h"
 #include "gfx/text.h"
 #include "gfx/theme.h"
-#include "ui/keybindings.h"    // bracket_key_for_scancode (layout-robust volume keys)
+#include "ui/keybindings.h"    // volume_dir (layout-robust volume keys)
 #include "ui/playback_model.h"
 #include "ui/viewer_model.h"   // fit_zoom
 
@@ -227,8 +227,8 @@ struct VideoPlayback::Impl {
         }
     }
 
-    // Helper for Task 6: apply volume/mute state to audio stream
-    // Task 6 will add key bindings for M, [, ] to change vol_.level/vol_.muted and call this
+    // Push the current volume/mute level to the audio stream (no-op when muted or
+    // when the clip has no audio track).
     void apply_gain()
     {
         if (audio_) {
@@ -236,22 +236,24 @@ struct VideoPlayback::Impl {
         }
     }
 
+    void adjust_volume(float delta)
+    {
+        vol_.level = media::clamp_volume(vol_.level + delta);
+        apply_gain();
+    }
+
     void key(SDL_Keycode k, SDL_Scancode sc)
     {
-        // Volume `[`/`]` bind to the physical scancode so they work regardless of
-        // keyboard layout (on German QWERTZ those glyphs are behind AltGr) — Phase 25.
-        using enum BracketKey;
-        switch (bracket_key_for_scancode(sc)) {
-            case Decrease:
-                vol_.level = media::clamp_volume(vol_.level - 0.05f);
-                apply_gain();
-                return;
-            case Increase:
-                vol_.level = media::clamp_volume(vol_.level + 0.05f);
-                apply_gain();
-                return;
-            case None:
-                break;
+        // Volume: `[`/`]` (incl. German QWERTZ AltGr+8/9, resolved to the produced
+        // character), the `-`/`+`/`=` glyph keys, or the physical bracket positions
+        // — all layout-robust (Phase 25 fix). Resolve the character the layout +
+        // held modifiers produce, exactly like the `/` search shortcut.
+        constexpr float kVolStep = 0.05f;
+        const SDL_Keycode produced = SDL_GetKeyFromScancode(sc, SDL_GetModState(), false);
+        switch (volume_dir(produced, sc)) {
+            case VolumeDir::Down: adjust_volume(-kVolStep); return;
+            case VolumeDir::Up:   adjust_volume(kVolStep);  return;
+            case VolumeDir::None: break;
         }
         switch (k) {
             case SDLK_SPACE:

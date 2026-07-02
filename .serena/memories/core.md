@@ -174,8 +174,12 @@ src/
                                                  a fit-only VideoPlayback when the current item
                                                  is_video() (Phase 15: Space play/pause, J/L
                                                  +-5s, ,/. frame-step, drag seek bar).
-                                                 Phase 16: M mute, [/] volume ∓5%; seek bar
-                                                 seeks both video + audio tracks in-sync.
+                                                 Phase 16: M mute, volume ∓5%; seek bar
+                                                 seeks both video + audio tracks in-sync. Phase 25:
+                                                 volume via ui::volume_dir — `-`/`+` glyph keys (HUD
+                                                 shows [-/+] Vol) + the `[`/`]` produced char resolved
+                                                 through SDL_GetModState (so German AltGr+8/9 works) +
+                                                 the physical bracket scancodes.
                                                  GalleryGrid routes video imports to add_video +
                                                  draws a play badge (draw_tile_thumb) in grid & list.
                playback_model.*                — pure video transport maths: clock/clamp/

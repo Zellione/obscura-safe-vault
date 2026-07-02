@@ -41,6 +41,39 @@ enum class BracketKey { None, Decrease, Increase };
     }
 }
 
+enum class VolumeDir { None, Down, Up };
+
+// Resolve a key press to a video-volume adjustment, robustly across layouts. It
+// accepts THREE ways to ask for a volume change so it works however the user
+// reaches for it:
+//   1. the produced CHARACTER `[` / `]` (`produced_char`, resolved by the caller
+//      via SDL_GetKeyFromScancode(scancode, mods) so German QWERTZ AltGr+8/AltGr+9
+//      is matched — the same trick the `/` search key uses);
+//   2. the `-` / `+` / `=` glyph keycodes — direct (non-AltGr) keys on essentially
+//      every layout, and the intuitive volume pair;
+//   3. the physical `[` / `]` SCANCODE (the two keys right of `P` — US bracket keys,
+//      German `ü`/`+`), independent of the printed glyph.
+// Pure + constexpr so it is unit-testable without an initialised keyboard; the
+// caller supplies the already-resolved character.
+[[nodiscard]] constexpr VolumeDir volume_dir(SDL_Keycode produced_char, SDL_Scancode sc) noexcept
+{
+    switch (bracket_key_for_scancode(sc)) {   // (3) physical position
+        case BracketKey::Decrease: return VolumeDir::Down;
+        case BracketKey::Increase: return VolumeDir::Up;
+        case BracketKey::None:     break;
+    }
+    switch (produced_char) {                  // (1) `[`/`]` glyph + (2) `-`/`+`/`=`
+        case SDLK_LEFTBRACKET:
+        case SDLK_MINUS:
+        case SDLK_KP_MINUS: return VolumeDir::Down;
+        case SDLK_RIGHTBRACKET:
+        case SDLK_PLUS:
+        case SDLK_EQUALS:
+        case SDLK_KP_PLUS:  return VolumeDir::Up;
+        default:            return VolumeDir::None;
+    }
+}
+
 // True when a key-down event resolves to the `/` search glyph on the active
 // layout (US: unshifted `/`; German QWERTZ: Shift+7). Matching the produced
 // character rather than SDLK_SLASH on the base keycode makes it layout-robust.
