@@ -94,6 +94,66 @@ TEST(file_op_job_deletes_gallery_on_worker_thread)
     cleanup_dir(dir);
 }
 
+TEST(file_op_job_deletes_single_media)
+{
+    auto dir = fresh_dir("osv_fj_del1");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        REQUIRE(seed_images(v, "g", 2));
+
+        ui::FileOpJob job;
+        CHECK(job.start_delete(v, "g", "1.jpg", /*is_gallery=*/false, /*item_total=*/1));
+        auto oc = await_outcome(job);
+        REQUIRE(oc.has_value());
+        CHECK(oc->ok);
+        CHECK_EQ(oc->done, 1);
+        CHECK_EQ(v.list("g").size(), static_cast<size_t>(1));   // one image left
+    }
+    cleanup_dir(dir);
+}
+
+TEST(file_op_job_delete_of_missing_item_reports_error)
+{
+    auto dir = fresh_dir("osv_fj_delmiss");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        REQUIRE(seed_images(v, "g", 1));
+
+        ui::FileOpJob job;
+        CHECK(job.start_delete(v, "g", "nope.jpg", /*is_gallery=*/false, /*item_total=*/1));
+        auto oc = await_outcome(job);
+        REQUIRE(oc.has_value());
+        CHECK_FALSE(oc->ok);
+        CHECK_FALSE(oc->error.empty());
+    }
+    cleanup_dir(dir);
+}
+
+TEST(file_op_job_copies_images_leaving_source)
+{
+    auto dir = fresh_dir("osv_fj_copy");
+    {
+        vault::Vault src, dst;
+        make_vault(src, dir / "s.osv");
+        make_vault(dst, dir / "d.osv");
+        REQUIRE(seed_images(src, "a", 2));
+        REQUIRE(dst.create_gallery("b") == vault::VaultResult::Ok);
+
+        ui::FileOpJob job;
+        CHECK(job.start_transfer_images(src, "a", {"1.jpg", "2.jpg"}, dst, "b",
+                                        vault::TransferMode::Copy, "dst"));
+        auto oc = await_outcome(job);
+        REQUIRE(oc.has_value());
+        CHECK(oc->ok);
+        CHECK_EQ(oc->done, 2);
+        CHECK_EQ(dst.list("b").size(), static_cast<size_t>(2));
+        CHECK_EQ(src.list("a").size(), static_cast<size_t>(2));   // Copy leaves source
+    }
+    cleanup_dir(dir);
+}
+
 TEST(file_op_job_transfers_images_between_vaults)
 {
     auto dir = fresh_dir("osv_fj_xfer");
