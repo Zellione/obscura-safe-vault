@@ -57,10 +57,11 @@ enum class VolumeDir { None, Down, Up };
 // caller supplies the already-resolved character.
 [[nodiscard]] constexpr VolumeDir volume_dir(SDL_Keycode produced_char, SDL_Scancode sc) noexcept
 {
+    using enum BracketKey;
     switch (bracket_key_for_scancode(sc)) {   // (3) physical position
-        case BracketKey::Decrease: return VolumeDir::Down;
-        case BracketKey::Increase: return VolumeDir::Up;
-        case BracketKey::None:     break;
+        case Decrease: return VolumeDir::Down;
+        case Increase: return VolumeDir::Up;
+        case None:     break;
     }
     switch (produced_char) {                  // (1) `[`/`]` glyph + (2) `-`/`+`/`=`
         case SDLK_LEFTBRACKET:

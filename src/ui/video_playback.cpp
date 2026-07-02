@@ -249,11 +249,12 @@ struct VideoPlayback::Impl {
         // — all layout-robust (Phase 25 fix). Resolve the character the layout +
         // held modifiers produce, exactly like the `/` search shortcut.
         constexpr float kVolStep = 0.05f;
-        const SDL_Keycode produced = SDL_GetKeyFromScancode(sc, SDL_GetModState(), false);
-        switch (volume_dir(produced, sc)) {
-            case VolumeDir::Down: adjust_volume(-kVolStep); return;
-            case VolumeDir::Up:   adjust_volume(kVolStep);  return;
-            case VolumeDir::None: break;
+        using enum VolumeDir;
+        switch (const SDL_Keycode produced = SDL_GetKeyFromScancode(sc, SDL_GetModState(), false);
+                volume_dir(produced, sc)) {
+            case Down: adjust_volume(-kVolStep); return;
+            case Up:   adjust_volume(kVolStep);  return;
+            case None: break;
         }
         switch (k) {
             case SDLK_SPACE:
