@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <thread>
@@ -36,6 +37,13 @@ public:
     bool start_cbz(vault::Vault& v, std::filesystem::path cbz,
                    std::string base_gallery, std::string gallery_name);
 
+    // Launch a ZIP import (mirrors ui::import_zip). A ZIP with mixed folders under
+    // AskUser comes back needs_resolution having written nothing (planning only) —
+    // the caller shows a Flatten/Skip modal and re-starts with the chosen policy.
+    bool start_zip(vault::Vault& v, std::filesystem::path zip, ZipDest dest,
+                   std::string base_gallery, std::string new_gallery_name,
+                   ZipConflictPolicy policy);
+
     // True from start_cbz() until take_outcome() has collected the result.
     [[nodiscard]] bool active() const noexcept { return active_.load(); }
 
@@ -51,6 +59,10 @@ public:
     [[nodiscard]] std::optional<ZipImportOutcome> take_outcome();
 
 private:
+    // Reset counters and spawn `work` (which returns the outcome) on the worker
+    // thread. Shared by start_cbz/start_zip. Returns false if a job is running.
+    bool launch(std::function<ZipImportOutcome()> work);
+
     ImportProgress    progress_;
     std::atomic<bool> active_{false};   // job in flight or finished-but-uncollected
     std::atomic<bool> done_{false};     // worker set this at the end

@@ -10,8 +10,7 @@ ZipImportJob::~ZipImportJob()
     if (thread_.joinable()) thread_.join();
 }
 
-bool ZipImportJob::start_cbz(vault::Vault& v, std::filesystem::path cbz,
-                             std::string base_gallery, std::string gallery_name)
+bool ZipImportJob::launch(std::function<ZipImportOutcome()> work)
 {
     if (active_.load()) return false;   // one import at a time
 
@@ -22,15 +21,32 @@ bool ZipImportJob::start_cbz(vault::Vault& v, std::filesystem::path cbz,
     done_.store(false);
     active_.store(true);
 
-    // `v` is a reference the caller keeps alive for the job's lifetime; the path
-    // and names are moved into the worker so it owns them independently.
-    thread_ = std::thread(
-        [this, &v, cbz = std::move(cbz), base = std::move(base_gallery),
-         name = std::move(gallery_name)]() mutable {
-            outcome_ = import_cbz(v, cbz, base, name, &progress_);
-            done_.store(true);   // release: happens-before the joining thread's read
-        });
+    thread_ = std::thread([this, work = std::move(work)]() mutable {
+        outcome_ = work();
+        done_.store(true);   // release: happens-before the joining thread's read
+    });
     return true;
+}
+
+bool ZipImportJob::start_cbz(vault::Vault& v, std::filesystem::path cbz,
+                             std::string base_gallery, std::string gallery_name)
+{
+    // `v` is a reference the caller keeps alive for the job's lifetime; the path
+    // and names are moved into the work closure so it owns them independently.
+    return launch([this, &v, cbz = std::move(cbz), base = std::move(base_gallery),
+                   name = std::move(gallery_name)]() {
+        return import_cbz(v, cbz, base, name, &progress_);
+    });
+}
+
+bool ZipImportJob::start_zip(vault::Vault& v, std::filesystem::path zip, ZipDest dest,
+                             std::string base_gallery, std::string new_gallery_name,
+                             ZipConflictPolicy policy)
+{
+    return launch([this, &v, zip = std::move(zip), dest, base = std::move(base_gallery),
+                   name = std::move(new_gallery_name), policy]() {
+        return import_zip(v, zip, dest, base, name, policy, &progress_);
+    });
 }
 
 std::optional<ZipImportOutcome> ZipImportJob::take_outcome()

@@ -75,3 +75,49 @@ TEST(zip_import_job_take_outcome_is_null_until_done)
     CHECK_FALSE(job.active());
     CHECK_FALSE(job.take_outcome().has_value());
 }
+
+TEST(zip_import_job_runs_zip_new_gallery_to_completion)
+{
+    auto img = fake_jpeg(1);
+    auto dir = fresh_dir("osv_job_zip");
+    auto zip = make_archive({{"2020/a.jpg", img}, {"2020/b.jpg", img}}, dir / "in.zip");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+
+        ui::ZipImportJob job;
+        CHECK(job.start_zip(v, zip, ui::ZipDest::NewGallery, "", "Album",
+                            ui::ZipConflictPolicy::AskUser));
+        auto oc = await_outcome(job);
+        REQUIRE(oc.has_value());
+        CHECK(oc->ok);
+        CHECK_FALSE(oc->needs_resolution);
+        CHECK_EQ(oc->imported, 2);
+        CHECK_EQ(v.list("Album/2020").size(), static_cast<size_t>(2));
+    }
+    cleanup_dir(dir);
+}
+
+TEST(zip_import_job_surfaces_needs_resolution_without_writing)
+{
+    // "a" holds an image AND a subfolder with media -> mixed; AskUser must come
+    // back needs_resolution with nothing written (the worker only planned).
+    auto img = fake_jpeg(3);
+    auto dir = fresh_dir("osv_job_zip_mix");
+    auto zip = make_archive({{"a/x.jpg", img}, {"a/b/y.jpg", img}}, dir / "in.zip");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+
+        ui::ZipImportJob job;
+        CHECK(job.start_zip(v, zip, ui::ZipDest::NewGallery, "", "G",
+                            ui::ZipConflictPolicy::AskUser));
+        auto oc = await_outcome(job);
+        REQUIRE(oc.has_value());
+        CHECK(oc->ok);
+        CHECK(oc->needs_resolution);
+        CHECK_EQ(oc->imported, 0);
+        CHECK(v.list("G").empty());
+    }
+    cleanup_dir(dir);
+}

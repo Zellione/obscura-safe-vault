@@ -620,47 +620,19 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipCo
     const std::string base_gallery = nav_.path();
     const ui::ZipDest dest = naming_.zip.dest;
 
-    // CBZ comic import (Phase 24): a fixed one-leaf plan, no Append/mixed-folder
-    // path. A real volume is 100s of pages (~10 s of decode + encrypt), so it runs
-    // on a background thread — synchronously here would freeze the UI on the name
-    // popup ("locked in"). update()/poll_import_job() drains the result; while the
-    // worker owns the vault the UI shows only render_import_progress().
-    if (naming_.zip.cbz) {
+    // Both CBZ and ZIP imports run on a background thread so the UI never freezes
+    // on a large archive (Phase 24 fix) — synchronously here would freeze it on the
+    // name popup ("locked in"). poll_import_job() drains the result; while the
+    // worker owns the vault the UI shows only render_import_progress(). CBZ is a
+    // fixed one-leaf plan; a ZIP with mixed folders comes back needs_resolution
+    // (nothing written) so poll shows the Flatten/Skip modal, and F/S re-enters
+    // here with the chosen policy. naming_.zip stays populated across that round-
+    // trip and is cleared by poll on a terminal outcome.
+    if (naming_.zip.cbz)
         import_job_.start_cbz(vault_, zip_path, base_gallery, gallery_name);
-        naming_.zip.active = false;   // the job owns the import now
-        naming_.zip.cbz = false;
-        mark_dirty();
-        return;
-    }
-
-    // Call the import_zip executor.
-    const ui::ZipImportOutcome out = ui::import_zip(
-        vault_, zip_path,
-        /* dest */ dest,
-        /* base_gallery */ base_gallery,
-        /* new_gallery_name */ gallery_name,
-        /* policy */ policy
-    );
-
-    if (!out.ok) {
-        error_ = out.error.empty() ? "ZIP import failed." : out.error;
-        naming_.zip.active = false;
-        return;
-    }
-
-    // If there are mixed folders and we're in AskUser mode, show the conflict modal.
-    if (out.needs_resolution) {
-        // pending_zip is already stashed from pump_zip_import; the modal will be
-        // drawn in render() and the user will choose FlattenMixed or SkipMixed.
-        // We'll re-call do_zip_import with the chosen policy from the modal.
-        return;
-    }
-
-    // Success: set the summary and refresh.
-    status_ = std::format("Imported {} file{}, skipped {}", out.imported,
-                         out.imported == 1 ? "" : "s", out.skipped);
-    naming_.zip.active = false;
-    refresh();
+    else
+        import_job_.start_zip(vault_, zip_path, dest, base_gallery, gallery_name, policy);
+    mark_dirty();
 }
 
 void GalleryGrid::poll_import_job()
@@ -668,12 +640,23 @@ void GalleryGrid::poll_import_job()
     // Only touch the vault here once the worker has fully finished (take_outcome
     // joins the thread), so the single-thread file-handle invariant holds.
     if (auto oc = import_job_.take_outcome()) {
-        if (!oc->ok)
-            error_ = oc->error.empty() ? "CBZ import failed." : oc->error;
-        else
-            status_ = std::format("Imported {} page{}, skipped {}", oc->imported,
+        const bool cbz = naming_.zip.cbz;   // "page" (comic) vs "file" (zip) wording
+        if (!oc->ok) {
+            error_ = oc->error.empty() ? (cbz ? "CBZ import failed." : "ZIP import failed.")
+                                       : oc->error;
+            naming_.zip.active = false;
+            naming_.zip.cbz    = false;
+        } else if (oc->needs_resolution) {
+            // ZIP with mixed folders: keep naming_.zip active so the Flatten/Skip
+            // modal shows; the worker wrote nothing. F/S re-launches with a policy.
+        } else {
+            const char* noun = cbz ? "page" : "file";
+            status_ = std::format("Imported {} {}{}, skipped {}", oc->imported, noun,
                                   oc->imported == 1 ? "" : "s", oc->skipped);
-        refresh();   // the import mutated the index tree — rebuild children_
+            naming_.zip.active = false;
+            naming_.zip.cbz    = false;
+            refresh();   // the import mutated the index tree — rebuild children_
+        }
     }
     mark_dirty();
 }
@@ -737,13 +720,16 @@ void GalleryGrid::render_import_progress(gfx::Renderer& r, float W, float H)
     r.draw_round_rect({mx, my, mw, mh}, RADIUS, SURFACE);
     r.draw_round_rect({mx, my, mw, mh}, RADIUS, ACCENT, /*filled*/ false);
 
-    r.draw_text(font_, mx + 20, my + 20, "Importing comic…", TEXT);
+    const bool cbz = naming_.zip.cbz;
+    r.draw_text(font_, mx + 20, my + 20,
+                cbz ? "Importing comic…" : "Importing archive…", TEXT);
 
-    // "done / total pages" (total is 0 for the brief window before the first page).
+    // "done / total" (total is 0 for the brief window before the first page).
     const int total = import_job_.total();
     const int done  = import_job_.done();
+    const char* unit = cbz ? "pages" : "files";
     const std::string count =
-        total > 0 ? std::format("{} / {} pages", done, total) : "Reading archive…";
+        total > 0 ? std::format("{} / {} {}", done, total, unit) : "Reading archive…";
     r.draw_text(font_, mx + 20, my + 56, count, TEXT_DIM);
 
     // Progress bar: outline plus a fill proportional to done/total.

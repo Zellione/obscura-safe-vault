@@ -330,21 +330,26 @@ src/
                                                  import_zip/import_cbz take an optional
                                                  ImportProgress* (atomic total/done/cancel) so a
                                                  caller can drive a progress bar + cooperative cancel.
-               zip_import_job.*                — ZipImportJob: runs import_cbz on a background
-                                                 std::thread so a many-page comic (~10 s of decode+
-                                                 encrypt) never freezes the UI on the name popup
-                                                 ("locked in" bug, Phase 24 fix). Contract: while
-                                                 active() the worker owns the vault's single-thread
-                                                 file handle, so GalleryGrid must NOT touch the vault
-                                                 (update()/render()/handle_event() short-circuit — no
-                                                 thumbnail reads/listing); it polls total()/done() +
-                                                 take_outcome() (joins on completion) and draws
-                                                 render_import_progress() only, Esc -> cancel().
-                                                 Screen gained a blocks_idle_lock() hook (default
-                                                 false; GalleryGrid returns import_job_.active()) so
-                                                 App::maybe_auto_lock can't wipe the master key mid-
-                                                 write. Compiled into osv_tests (unit-tested via a
-                                                 poll-to-completion harness).
+               zip_import_job.*                — ZipImportJob: runs import_cbz/import_zip
+                                                 (start_cbz/start_zip, shared launch() helper) on a
+                                                 background std::thread so a big archive (~10 s of
+                                                 decode+encrypt) never freezes the UI on the name
+                                                 popup ("locked in" bug, Phase 24 fix). Contract:
+                                                 while active() the worker owns the vault's single-
+                                                 thread file handle, so GalleryGrid must NOT touch
+                                                 the vault (update()/render()/handle_event() short-
+                                                 circuit — no thumbnail reads/listing); it polls
+                                                 total()/done() + take_outcome() (joins on completion)
+                                                 and draws render_import_progress() only, Esc ->
+                                                 cancel(). A ZIP with mixed folders comes back
+                                                 needs_resolution (nothing written); poll_import_job
+                                                 keeps naming_.zip active for the Flatten/Skip modal +
+                                                 F/S re-launch with the chosen policy. Screen gained a
+                                                 blocks_idle_lock() hook (default false; GalleryGrid
+                                                 returns import_job_.active()) so App::maybe_auto_lock
+                                                 can't wipe the master key mid-write. Compiled into
+                                                 osv_tests (unit-tested via a poll-to-completion
+                                                 harness, cbz + zip incl. needs_resolution).
                delete_summary.*                — pure recursive tally of a gallery subtree
                                                  (images/videos/sub-galleries) for the Del
                                                  delete-confirm popup (Phase 17 follow-up).
