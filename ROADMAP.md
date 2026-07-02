@@ -1021,6 +1021,114 @@ unchanged.
 
 ---
 
+## Phase 25 — Bugfixes & housekeeping 🔜
+
+**Goal:** Fix layout-dependent keybindings, give every file operation the same
+background-progress UX the Phase 24 import got, and tidy the repo (drop committed
+planning docs, flag the project as AI-driven).
+
+### Tasks
+- [ ] **Layout-independent keybindings** — the in-viewer video **volume** keys `[` / `]` don't fire on non-US layouts (e.g. German QWERTZ, where those glyphs live behind AltGr), so volume can't be changed at all. Rebind volume to **layout-independent** keys — SDL **scancodes** (physical key position) or non-punctuation keys — and audit the other punctuation shortcuts (`/` search, `?` advanced search, `` ` `` quick-switch, `[` / `]`) for the same defect. (Letter/digit and named keys like `M` mute, arrows, Enter, Esc are unaffected.)
+- [ ] **Background file operations with progress** — move/copy (transfer within/between vaults), delete (a gallery subtree or a single item), and export currently block the UI and only surface a final one-line message. Run each on a worker thread with a live **“N / M items” progress modal + cancel**, reusing the Phase 24 `ZipImportJob` / `ImportProgress` pattern — preserving the single-thread vault-handle invariant and suppressing the idle auto-lock during the op (`Screen::blocks_idle_lock()`). Export keeps its consent modal; its background write is still the one gated plaintext-to-disk deviation.
+- [ ] **Remove committed docs dir** — delete the only committed doc (`docs/superpowers/plans/2026-06-12-phase8-cross-platform.md`) and add `docs/` to `.gitignore` so AI planning artifacts stay out of the tree.
+- [ ] **README note** — add a note at the very top of `README.md` stating this is an **AI-driven project, vibe-coded for educational purposes**.
+- [ ] Update `CLAUDE.md` / `mem:*` if the keybindings or the transfer/delete/export flow change.
+- [ ] `tests/` — unit-test the layout-independent key mapping (scancode → action, independent of layout); test the background-op progress/cancel reporting the way `ZipImportJob` is tested.
+
+**Out of scope (YAGNI):** fully user-remappable keybindings; UI text localisation; reworking the export consent/scope model (threading only).
+
+### Acceptance criterion
+Volume can be changed on a non-US (German) keyboard layout; a large gallery
+move/copy/delete/export shows live progress without freezing the UI and can be
+cancelled; `docs/` is gone from the tree and gitignored; the README carries the
+AI-driven note.
+
+**Status:** 🔜 Planned.
+
+---
+
+## Phase 26 — Broaden `.mov` / video codec support 🔜
+
+**Goal:** Decode the codecs commonly found in `.mov` containers beyond H.264/H.265.
+The `.mov` container, `mov` demuxer, and `ftyp` detection already work — the gap is
+files whose video stream uses a codec the vendored FFmpeg doesn't currently decode.
+
+### Tasks
+- [ ] **Add FFmpeg decoders** — extend the `--enable-decoder` set in `scripts/build_codecs.{sh,bat}` with the codecs common in `.mov`: **ProRes** (`prores`), **DNxHD/DNxHR** (`dnxhd`), **MJPEG** (`mjpeg`), adding any required parsers/bitstream filters. The build stays **decode-only** (no encoders/muxers).
+- [ ] Confirm no format-detection change is needed — `vault::detect_video_container` already maps any `ftyp` box to the ISO-BMFF/MP4 path, and `.mov` is already in the import dialog filter.
+- [ ] Assess the static-binary size impact of the added decoders and note it.
+- [ ] Update `CLAUDE.md` (FFmpeg decoder list) + the README stack line.
+- [ ] `tests/` — small `.mov` fixtures (ProRes, MJPEG) that probe + decode a frame and produce a poster; gated behind `OSV_VENDORED_AV`.
+
+**Out of scope (YAGNI):** encoding/transcoding; professional codecs beyond the above (CineForm, DNxHR HQX variants) unless a real fixture proves the need; new audio codecs.
+
+### Acceptance criterion
+A ProRes (and an MJPEG) `.mov` imports, probes, shows a poster, and plays; existing
+H.264/H.265 playback and A/V sync are unchanged.
+
+**Status:** 🔜 Planned.
+
+---
+
+## Phase 27 — Import PDF as a gallery of pages 🔜
+
+**Goal:** Import a `.pdf` as a gallery of page images (like CBZ), rendering each
+page **into locked memory only** — never a temp file (invariant #1 holds).
+
+### Tasks
+- [ ] **Vendor PDFium** — add **PDFium** (BSD-3-Clause, permissive — fits the vendored-static model) as a git submodule built into `vendor/codecs-prefix/` by `scripts/build_codecs.{sh,bat}` (render-only). Gate the dependent code behind a build define (`OSV_VENDORED_PDFIUM`), mirroring `OSV_VENDORED_AV`, so a non-PDF build still links.
+- [ ] **Render pipeline** — read the picked file into an mlock'd buffer, load the document from memory, render each page to an RGBA bitmap at a sensible target resolution, and feed the bitmap into the existing `add_image` / thumbnail path. **No page bytes touch disk.**
+- [ ] **Plan/executor** — a PDF import plan mirroring `build_cbz_plan`: one leaf gallery named after the file, one image per page in page order, reusing the import-summary UX and the Phase 25 background-progress modal.
+- [ ] **UI** — the file dialog accepts `.pdf` (its own `Purpose`), routed to the PDF importer (distinct from the `Z` zip/cbz path).
+- [ ] Update `CLAUDE.md` / README (new vendored lib + any build prerequisite) + `mem:tech_stack`.
+- [ ] `tests/` — a small fixture `.pdf` imports as a gallery with the correct page count and a **no-fs-write** assertion; a malformed / password-protected PDF is rejected without crashing.
+
+**Out of scope (YAGNI):** extracting embedded images verbatim; text/searchable-PDF handling; per-page DPI/quality UI; PDF export; non-PDF “more formats” (revisit per-format as needed).
+
+### Acceptance criterion
+A fixture `.pdf` imports as one gallery of page images in page order, asserted to
+write nothing to disk; a corrupt or encrypted PDF fails gracefully with a message.
+
+**Status:** 🔜 Planned.
+
+---
+
+## Phase 28 — `meta.json` metadata on archive import 🔜
+
+**Goal:** When a zip/cbz archive contains a top-level `meta.json`, use it to **title**
+and **tag** the imported gallery instead of falling back to the filename.
+
+Expected shape (all fields optional; unknown keys ignored):
+
+```json
+{
+  "title": { "english": "English Title", "japanese": "日本語タイトル" },
+  "tags":  [ { "type": "tag", "name": "awesome tag" },
+             { "type": "artist", "name": "someone" } ]
+}
+```
+
+### Tasks
+- [ ] **Parser** — a pure, SDL/vault-free `meta.json` parser (`src/ui/meta_json.{h,cpp}`) → `{ title_english, title_japanese, tags[] }`. Needs a JSON reader (the project has none today): **vendor a single-header MIT JSON lib** (e.g. `nlohmann/json`) rather than hand-rolling UTF-8/escape handling — decision noted here, confirm at implementation. Tolerant of missing/partial fields; ignores unknown keys.
+- [ ] **Mapping** (agreed decisions):
+  - Gallery **name** = `title.english`, falling back to `title.japanese`, then the archive filename.
+  - `title.japanese`, when present, is added as a **tag** (so it stays searchable).
+  - Each `tags[]` entry becomes a **type-prefixed** tag `"<type>:<name>"` (e.g. `artist:someone`, `tag:awesome tag`), applied through the existing `Vault::add_tag` merge (case-insensitive de-dupe).
+- [ ] **Wire into import** — `build_zip_plan` / `build_cbz_plan` + `import_zip` / `import_cbz` detect a top-level `meta.json`; if present it overrides the default gallery name (the top gallery for zip, the single leaf for cbz) and seeds that gallery's tags. `meta.json` itself is **not** imported as a page. No `meta.json` → today's behaviour is byte-for-byte unchanged.
+- [ ] Update `CLAUDE.md` / `mem:core`.
+- [ ] `tests/` — a fixture archive with `meta.json` imports under the english title, tagged with the japanese title and each `type:name`; a missing / partial / malformed `meta.json` degrades gracefully to a filename-named, untagged import.
+
+**Out of scope (YAGNI):** PDF metadata (PDFs carry no archive `meta.json` — a later phase could read the PDF info dict); writing `meta.json` back out; nested/per-folder `meta.json`; acting on fields beyond title + tags (the parser ignores extras without error).
+
+### Acceptance criterion
+Importing a fixture zip/cbz containing `meta.json` yields a gallery named after the
+english title, tagged with the japanese title and each `type:name` tag; a malformed
+`meta.json` never blocks the import.
+
+**Status:** 🔜 Planned.
+
+---
+
 ## Container format spec (reference)
 
 Reproduced from `CLAUDE.md` for quick access during vault implementation work.
