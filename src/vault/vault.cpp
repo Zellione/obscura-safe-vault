@@ -1060,7 +1060,7 @@ void count_compact_chunks(const IndexNode& root, int& total_chunks)
 }
 
 // Copy all chunks with progress tracking and cancellation support.
-VaultResult copy_compact_chunks(IndexNode& root, ChunkStore& src, ChunkStore& dst,
+VaultResult copy_compact_chunks(IndexNode& root, const ChunkStore& src, ChunkStore& dst,
                                  OpProgress* progress)
 {
     using enum VaultResult;

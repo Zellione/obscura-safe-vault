@@ -68,6 +68,10 @@ inline bool mem_lock(uint8_t* p, size_t n) noexcept
 inline void mem_unlock(uint8_t* p, size_t n) noexcept
 {
 #if defined(_WIN32)
+    // NOTE: S995 (const param): VirtualUnlock takes LPVOID (void*, not const void*),
+    // so the param cannot be const without a const_cast. POSIX munlock accepts const void*,
+    // but Windows does not. We keep the param non-const to avoid const_cast. This is
+    // acceptable as S859 (API compatibility) outranks S995 (const-correctness).
     VirtualUnlock(p, n);
 #else
     ::munlock(p, n);

@@ -334,8 +334,7 @@ void AdvancedSearchScreen::dispatch_focus_key(const SDL_KeyboardEvent& key)
             using enum SavedSearchPanel::Action;
             switch (action) {
                 case Loaded: {
-                    AdvancedQuery loaded_query;
-                    if (saved_panel_.load_focused(loaded_query)) {
+                    if (AdvancedQuery loaded_query; saved_panel_.load_focused(loaded_query)) {
                         query_ = std::move(loaded_query);
                         edit_.name = query_.name_query;
                         cur_.group = 0;

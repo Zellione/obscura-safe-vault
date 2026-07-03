@@ -806,6 +806,30 @@ bool handle_job_input(GalleryGrid& g, const SDL_Event& e)
     return false;
 }
 
+// Extract footer + waste/selection rendering to reduce render's cognitive complexity (S3776).
+void draw_footer_status(gfx::Renderer& r, gfx::FontAtlas& font, float x_offset, float bottom,
+                        bool show_waste, bool show_selection, uint64_t waste_sz,
+                        int selection_count, const std::string& error, const std::string& status)
+{
+    using namespace gfx::theme;
+    if (show_waste || show_selection) {
+        std::string footer;
+        if (show_selection)
+            footer = std::format("{} selected", selection_count);
+        if (show_waste) {
+            if (!footer.empty()) footer += " · ";
+            footer += "Waste: " + format_size(waste_sz) + " [Shift+C]";
+        }
+        const gfx::Color color = show_selection ? ACCENT : TEXT_DIM;
+        r.draw_text(font, x_offset, 120, footer, color);
+    }
+
+    if (!error.empty())
+        r.draw_text(font, x_offset, bottom - 36, error, DANGER);
+    else if (!status.empty())
+        r.draw_text(font, x_offset, bottom - 36, status, OK);
+}
+
 void GalleryGrid::update(double)
 {
     // A background import owns the vault's file handle on its worker thread, so the
@@ -922,25 +946,11 @@ void GalleryGrid::render(gfx::Renderer& r)
     const bool show_waste = should_display_waste(waste_sz, file_sz);
     const bool show_selection = !sel_.empty();
 
-    if (show_waste || show_selection) {
-        std::string footer;
-        if (show_selection)
-            footer = std::format("{} selected", sel_.count());
-        if (show_waste) {
-            if (!footer.empty()) footer += " · ";
-            footer += "Waste: " + format_size(waste_sz) + " [Shift+C]";
-        }
-        const auto color = show_selection ? ACCENT : TEXT_DIM;
-        r.draw_text(font_, OX, 120, footer, color);
-    }
+    draw_footer_status(r, font_, OX, H, show_waste, show_selection, waste_sz,
+                       static_cast<int>(sel_.count()), error_, status_);
 
     if (view_ == GalleryView::List) render_list(r, W, H);
     else                            render_grid(r, W, H);
-
-    if (!error_.empty())
-        r.draw_text(font_, OX, H - 36, error_, DANGER);
-    else if (!status_.empty())
-        r.draw_text(font_, OX, H - 36, status_, OK);
 
     consent_.render(r, font_, W, H);
 
@@ -1067,7 +1077,7 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float H)
         r.draw_text(font_, cellr.x + 8, label_y, fit_name(n->name, CELL - 16), TEXT);
 
         // Export-selection badge: a small accent square in the top-left corner.
-        if (sel_.contains(static_cast<int>(i))) {
+        if (sel_.contains(i)) {
             const SDL_FRect badge{cellr.x + 8, cellr.y + 8, 18, 18};
             r.draw_round_rect(badge, RADIUS_SMALL, ACCENT);
             r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
@@ -1082,29 +1092,39 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float H)
     }
 }
 
+// Context struct for list-row metadata rendering (bundled params, reduce S107).
+struct ListRowMetaContext {
+    gfx::Renderer& r;
+    gfx::FontAtlas& font;
+    float dims_x;
+    float size_x;
+    float type_x;
+    float date_x;
+    float ty;
+};
+
 // Extract per-row metadata drawing to reduce render_list's cognitive complexity (S3776).
-void draw_list_row_metadata(gfx::Renderer& r, gfx::FontAtlas& font, const vault::IndexNode* n,
-                            float dims_x, float size_x, float type_x, float date_x, float ty, bool sel)
+void draw_list_row_metadata(const ListRowMetaContext& ctx, const vault::IndexNode* n, bool sel)
 {
     using namespace gfx::theme;
     const gfx::Color meta_c = sel ? TEXT : TEXT_DIM;
     if (n->is_gallery()) {
-        r.draw_text(font, dims_x, ty, "-", meta_c);
-        r.draw_text(font, size_x, ty, "-", meta_c);
-        r.draw_text(font, type_x, ty, "DIR", meta_c);
-        r.draw_text(font, date_x, ty, "-", meta_c);
+        ctx.r.draw_text(ctx.font, ctx.dims_x, ctx.ty, "-", meta_c);
+        ctx.r.draw_text(ctx.font, ctx.size_x, ctx.ty, "-", meta_c);
+        ctx.r.draw_text(ctx.font, ctx.type_x, ctx.ty, "DIR", meta_c);
+        ctx.r.draw_text(ctx.font, ctx.date_x, ctx.ty, "-", meta_c);
     } else if (n->is_video()) {
         const auto& vm = n->vmeta;
-        r.draw_text(font, dims_x, ty, format_duration(vm.duration_us), meta_c);
-        r.draw_text(font, size_x, ty, format_size(vm.orig_size), meta_c);
-        r.draw_text(font, type_x, ty, video_codec_name(vm.codec), meta_c);
-        r.draw_text(font, date_x, ty, format_date(vm.created_ts), meta_c);
+        ctx.r.draw_text(ctx.font, ctx.dims_x, ctx.ty, format_duration(vm.duration_us), meta_c);
+        ctx.r.draw_text(ctx.font, ctx.size_x, ctx.ty, format_size(vm.orig_size), meta_c);
+        ctx.r.draw_text(ctx.font, ctx.type_x, ctx.ty, video_codec_name(vm.codec), meta_c);
+        ctx.r.draw_text(ctx.font, ctx.date_x, ctx.ty, format_date(vm.created_ts), meta_c);
     } else {
         const auto& m = n->meta;
-        r.draw_text(font, dims_x, ty, format_dimensions(m.width, m.height), meta_c);
-        r.draw_text(font, size_x, ty, format_size(m.orig_size), meta_c);
-        r.draw_text(font, type_x, ty, image_format_name(m.format), meta_c);
-        r.draw_text(font, date_x, ty, format_date(m.created_ts), meta_c);
+        ctx.r.draw_text(ctx.font, ctx.dims_x, ctx.ty, format_dimensions(m.width, m.height), meta_c);
+        ctx.r.draw_text(ctx.font, ctx.size_x, ctx.ty, format_size(m.orig_size), meta_c);
+        ctx.r.draw_text(ctx.font, ctx.type_x, ctx.ty, image_format_name(m.format), meta_c);
+        ctx.r.draw_text(ctx.font, ctx.date_x, ctx.ty, format_date(m.created_ts), meta_c);
     }
 }
 
@@ -1145,7 +1165,7 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float H)
             r.draw_round_rect(row, RADIUS_SMALL, ACCENT, /*filled*/ false);
         }
         // Export-selection marker: an accent bar down the row's left edge.
-        if (sel_.contains(static_cast<int>(i)))
+        if (sel_.contains(i))
             r.draw_rect({row.x, row.y, 4, row.h}, ACCENT);
         // Favorite marker: a gold bar down the row's right edge.
         if (n->favorite)
@@ -1160,7 +1180,8 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float H)
                     sel ? TEXT : TEXT_DIM);
 
         // Draw metadata columns for this row (galleries/videos/images have different displays).
-        draw_list_row_metadata(r, font_, n, dims_x, size_x, type_x, date_x, ty, sel);
+        const ListRowMetaContext meta_ctx{r, font_, dims_x, size_x, type_x, date_x, ty};
+        draw_list_row_metadata(meta_ctx, n, sel);
     }
 }
 
