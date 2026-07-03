@@ -91,7 +91,7 @@ void for_each_media(NodeT& n, Fn&& fn)
 // Copy a media node's live chunk(s) from `src` to `dst` verbatim (ciphertext —
 // no decrypt/re-encrypt, invariant #1), rewriting each offset to its new
 // location. Sets `err` to IoError on the first failed read/append.
-void relocate_node_chunks(const ChunkStore& src, ChunkStore& dst, IndexNode& node, VaultResult& err)
+[[maybe_unused]] void relocate_node_chunks(const ChunkStore& src, ChunkStore& dst, IndexNode& node, VaultResult& err)
 {
     auto copy_span = [&err, &src, &dst](uint64_t& off, uint64_t len) {
         if (err != VaultResult::Ok || len == 0) return;
@@ -1162,7 +1162,7 @@ uint64_t Vault::wasted_bytes() const
     return size > live ? size - live : 0;
 }
 
-VaultResult Vault::compact()
+VaultResult Vault::compact(OpProgress* progress)
 {
     using enum VaultResult;
     if (!unlocked_) return Locked;
@@ -1189,10 +1189,40 @@ VaultResult Vault::compact()
     ChunkStore src(fp_, master_key_.as_span());
     ChunkStore dst(tmp, master_key_.as_span());
 
+    // Count total chunks to copy for progress reporting.
+    int total_chunks = 0;
+    if (progress) {
+        for_each_media(new_root, [&](const IndexNode& node) {
+            if (node.is_image()) {
+                ++total_chunks;  // data + thumb each are separate for counting
+            } else if (node.is_video()) {
+                total_chunks += static_cast<int>(node.vmeta.chunks.size()) + 1;  // +1 for poster
+            }
+        });
+        progress->total.store(total_chunks);
+        progress->done.store(0);
+    }
+
     VaultResult copy_err = Ok;
-    for_each_media(new_root, [&src, &dst, &copy_err](IndexNode& node) {
+    int chunks_done = 0;
+    for_each_media(new_root, [&](IndexNode& node) {
+        // Check for cancellation before processing each node.
+        if (progress && progress->cancel.load()) {
+            copy_err = Ok;  // signal to abort, but it's not an error
+            return;         // Early return from lambda
+        }
         relocate_node_chunks(src, dst, node, copy_err);
+        if (progress) {
+            if (node.is_image()) {
+                ++chunks_done;
+            } else if (node.is_video()) {
+                chunks_done += static_cast<int>(node.vmeta.chunks.size()) + 1;
+            }
+            progress->done.store(chunks_done);
+        }
     });
+    // If cancelled, abort before the atomic rename (original is untouched).
+    if (progress && progress->cancel.load()) return fail(Ok);
     if (copy_err != Ok) return fail(copy_err);
 
     // Fresh sealed index into slot A; slot B starts empty in the new file.

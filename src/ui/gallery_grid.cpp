@@ -20,8 +20,10 @@
 #include "ui/progress_modal.h"
 #include "ui/tag_list_parse.h"
 #include "ui/tile_thumb.h"
+#include "ui/waste_threshold.h"
 #include "ui/widgets.h"
 #include "ui/zip_import.h"
+#include "vault/file_util.h"
 #include "vault/index.h"
 #include "vault/vault.h"
 
@@ -122,8 +124,8 @@ void draw_import_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, float
                       .count_line = count, .done = done, .total = total});
 }
 
-// Background file-op (export/delete/move/copy) progress modal — same veil + bar as
-// the import one, wording chosen by the running job's kind (Phase 25).
+// Background file-op (export/delete/move/copy/compact) progress modal — same veil + bar as
+// the import one, wording chosen by the running job's kind (Phase 25–26).
 void draw_file_op_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
                            const FileOpJob& job)
 {
@@ -134,6 +136,7 @@ void draw_file_op_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
         case Export:   title = "Exporting…"; unit = "images"; break;
         case Delete:   title = "Deleting…";  unit = "items";  break;
         case Transfer: title = "Moving…";    unit = "files";  break;
+        case Compact:  title = "Compacting…"; unit = "chunks"; break;
         case None:     break;
     }
     const int total = job.total();
@@ -432,6 +435,19 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         error_ = naming_.confirm_delete ? std::string{} : "Nothing selected to delete.";
         return;
     }
+    if ((key.key == SDLK_C) && (key.mod & SDL_KMOD_SHIFT)) {   // Shift+C: confirm-compact the vault (Phase 26)
+        uint64_t vault_file_size = 0;
+        if (!vault::fileutil::file_size(vault_.fp(), vault_file_size)) vault_file_size = 0;
+        const uint64_t waste = vault_.wasted_bytes();
+        // Only show the compact option if there's significant waste to reclaim.
+        if (should_display_waste(waste, vault_file_size)) {
+            naming_.confirm_compact = true;
+            error_.clear();
+        } else {
+            error_ = "No significant waste to reclaim.";
+        }
+        return;
+    }
     // Single-action shortcut keys, grouped into one switch so this function's
     // cognitive complexity stays under the cpp:S3776 limit. Shift variants:
     // Shift+G imports a tag list, Shift+F opens favorite galleries, Shift+T the
@@ -507,6 +523,27 @@ bool GalleryGrid::handle_delete_confirm_key(const SDL_Event& e)
     return true;
 }
 
+bool GalleryGrid::handle_compact_confirm_key(const SDL_Event& e)
+{
+    if (!naming_.confirm_compact) return false;
+    if (e.type != SDL_EVENT_KEY_DOWN) return true;   // modal swallows non-key events
+
+    const SDL_Keycode k = e.key.key;
+    if (k == SDLK_ESCAPE || k == SDLK_N) {
+        naming_.confirm_compact = false;
+        mark_dirty();
+        return true;
+    }
+    if (k != SDLK_Y) return true;                    // swallow every other key
+
+    // Run compaction on a worker thread with a progress modal + cancel (Phase 26).
+    // take_outcome() (in poll_file_job) shows the result.
+    naming_.file_op.start_compact(vault_);
+    naming_.confirm_compact = false;
+    mark_dirty();
+    return true;
+}
+
 bool GalleryGrid::handle_zip_conflict_key(const SDL_Event& e)
 {
     if (!naming_.zip.active || naming_.active || e.type != SDL_EVENT_KEY_DOWN) return false;
@@ -568,6 +605,9 @@ void GalleryGrid::handle_event(const SDL_Event& e)
 
     // The delete-confirmation modal owns all input while it is up.
     if (handle_delete_confirm_key(e)) return;
+
+    // The compact-confirmation modal owns all input while it is up (Phase 26).
+    if (handle_compact_confirm_key(e)) return;
 
     // The zip conflict modal owns all input while it is up (only when not naming).
     if (handle_zip_conflict_key(e)) return;
@@ -690,8 +730,19 @@ void poll_import_job(GalleryGrid& g)
             // modal shows; the worker wrote nothing. F/S re-launches with a policy.
         } else {
             const char* noun = cbz ? "page" : "file";
-            g.status_ = std::format("Imported {} {}{}, skipped {}", oc->imported, noun,
-                                    oc->imported == 1 ? "" : "s", oc->skipped);
+            if (oc->cancelled) {
+                // User pressed Esc during import — check if waste hints are needed (Phase 26).
+                const uint64_t waste = g.vault_.wasted_bytes();
+                if (should_hint_cancelled_import_waste(waste)) {
+                    g.status_ = std::format("Import cancelled — {} reclaimable, press [Shift+C]",
+                                           format_size(waste));
+                } else {
+                    g.status_ = std::format("Import cancelled — {} {} imported", oc->imported, noun);
+                }
+            } else {
+                g.status_ = std::format("Imported {} {}{}, skipped {}", oc->imported, noun,
+                                        oc->imported == 1 ? "" : "s", oc->skipped);
+            }
             g.naming_.zip.active = false;
             g.naming_.zip.cbz    = false;
             g.refresh();   // the import mutated the index tree — rebuild children_
@@ -844,6 +895,15 @@ void GalleryGrid::render(gfx::Renderer& r)
                 "[Enter] Open  [Space] Select  [X] Export  [M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid",
                 TEXT_FAINT);
 
+    // Show waste hint if it exceeds display threshold (Phase 26).
+    uint64_t vault_file_size = 0;
+    vault::fileutil::file_size(vault_.fp(), vault_file_size);
+    const uint64_t waste = vault_.wasted_bytes();
+    if (should_display_waste(waste, vault_file_size)) {
+        const std::string waste_hint = "· Waste: " + format_size(waste) + " [Shift+C]";
+        r.draw_text(font_, OX, 120, waste_hint, TEXT_DIM);
+    }
+
     if (!sel_.empty())
         r.draw_text(font_, OX, 120, std::format("{} selected", sel_.count()), ACCENT);
 
@@ -898,6 +958,32 @@ void GalleryGrid::render(gfx::Renderer& r)
             centered("This permanently removes it from the vault.", py + 84, DANGER);
         }
         centered("[Esc/N] Cancel        [Y] Delete", py + ph - 50, TEXT_DIM);
+    }
+
+    // Compact-confirmation modal: shows the waste to reclaim (Phase 26).
+    if (naming_.confirm_compact) {
+        r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});   // veil
+
+        const float pw = 560;
+        const float ph = 200;
+        const float px = (W - pw) / 2;
+        const float py = (H - ph) / 2;
+        r.draw_round_rect({px, py, pw, ph}, RADIUS, SURFACE);
+        r.draw_round_rect({px, py, pw, ph}, RADIUS, ACCENT, /*filled*/ false);
+
+        auto centered = [&](const std::string& s, float y, gfx::Color c) {
+            const auto tw = static_cast<float>(font_.measure(s));
+            r.draw_text(font_, px + (pw - tw) / 2, y, s, c);
+        };
+
+        uint64_t vault_file_size = 0;
+        vault::fileutil::file_size(vault_.fp(), vault_file_size);
+        const uint64_t waste = vault_.wasted_bytes();
+        const std::string waste_str = format_size(waste);
+
+        centered("Compact vault?", py + 28, TEXT);
+        centered("Reclaim " + waste_str + " of wasted space.", py + 72, TEXT);
+        centered("[Esc/N] Cancel        [Y] Compact", py + ph - 50, TEXT_DIM);
     }
 
     search_.render(r, font_, W, H);

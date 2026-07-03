@@ -84,8 +84,9 @@ private:
     void pump_import();            // poll the file dialog while transfer is not active
     void do_zip_import(const std::filesystem::path& zip_path, ui::ZipConflictPolicy policy);
     void pump_zip_import();        // poll the zip file dialog while transfer is not active
-    bool handle_zip_conflict_key(const SDL_Event& e);  // Flatten/Skip/Esc modal; true if consumed
-    bool handle_delete_confirm_key(const SDL_Event& e);  // Del-confirm modal; true if consumed
+    bool handle_zip_conflict_key(const SDL_Event& e);     // Flatten/Skip/Esc modal; true if consumed
+    bool handle_delete_confirm_key(const SDL_Event& e);   // Del-confirm modal; true if consumed
+    bool handle_compact_confirm_key(const SDL_Event& e);  // Shift+C compact modal; true if consumed (Phase 26)
     void start_tag_editor(bool import_list);  // G: open tag editor; Shift+G: import a tag list (Phase 21)
     void toggle_favorite_current();  // flip favorite on the focused tile (B)
     SDL_Texture*       thumb_texture(const vault::IndexNode& node);
@@ -140,8 +141,9 @@ private:
         std::string  buf;
         PendingZip   zip;              // zip import descriptor in flight
         ZipImportJob import_job;       // background executor for the zip/cbz import (Phase 24)
-        FileOpJob    file_op;          // background executor for export/delete (Phase 25)
+        FileOpJob    file_op;          // background executor for export/delete/compact (Phase 25/26)
         bool         confirm_delete = false;  // Del on a media tile: awaiting Y/N confirm
+        bool         confirm_compact = false; // Shift+C on the gallery: awaiting Y/N compact confirm (Phase 26)
         std::string  tag_target;       // gallery path awaiting a tag-list import (Shift+G, Phase 21)
     };
     Naming naming_;

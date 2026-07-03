@@ -27,7 +27,7 @@ using OpWorkerThread = std::jthread;
 #endif
 
 // Which bulk operation ran (drives the outcome wording).
-enum class FileOpKind { None, Export, Delete, Transfer };
+enum class FileOpKind { None, Export, Delete, Transfer, Compact };
 
 struct FileOpOutcome {
     bool        ok        = false;   // the op ran to completion (or a clean cancel)
@@ -83,6 +83,10 @@ public:
     bool start_transfer_gallery(vault::Vault& src, std::string src_gallery,
                                 vault::Vault& dst, std::string dst_parent,
                                 vault::TransferMode mode, std::string label);
+
+    // Compact the vault in-place, reclaiming wasted_bytes(). Runs on background thread
+    // with progress tracking and cooperative cancel.
+    bool start_compact(vault::Vault& v);
 
     // True from a start_*() call until take_outcome() has collected the result.
     [[nodiscard]] bool active() const noexcept { return active_.load(); }

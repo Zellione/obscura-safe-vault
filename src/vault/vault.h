@@ -30,6 +30,7 @@
 
 #include "header.h"
 #include "index.h"
+#include "op_progress.h"
 
 namespace media { class VideoSource; }
 
@@ -217,7 +218,9 @@ public:
     // a new file, write a fresh index + header, fsync, then atomically rename
     // over the original. Reclaims wasted_bytes(). Invalidates all IndexNode
     // pointers previously returned by list().
-    [[nodiscard]] VaultResult compact();
+    // If progress is provided, tracks total/done in chunks copied and honors cancel
+    // between chunks, aborting before the atomic rename (original always intact).
+    [[nodiscard]] VaultResult compact(OpProgress* progress = nullptr);
 
 private:
     // Persist the in-memory index with the crash-safe double-buffer swap.

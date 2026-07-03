@@ -214,23 +214,28 @@ src/
                                             Also centralises the character-resolved is_search_key /
                                             is_advanced_search_key / is_quick_switch_key helpers
                                             (moved here from quick_switch.h).
-             file_op_job.*,               ← FileOpJob: runs export / delete / move-copy on a
-                                            background worker thread (mirrors ZipImportJob) so a
-                                            large gallery never freezes the UI (Phase 25). Same
-                                            single-thread vault-handle contract: while active()
+             file_op_job.*,               ← FileOpJob: runs export / delete / move-copy / compact
+                                            on a background worker thread (mirrors ZipImportJob)
+                                            so large operations never freeze the UI (Phase 25–26).
+                                            Same single-thread vault-handle contract: while active()
                                             the worker owns the vault(s) and the host screen only
                                             polls total()/done() + take_outcome() and draws a
                                             modal (no thumbnail/listing reads). Esc→cancel().
              progress_modal.*,            ← draw_op_progress: the shared veil + "N/M" bar +
                                             cancel-hint modal reused by every screen hosting a
-                                            background job (import/export/delete/move) (Phase 25).
+                                            background job (import/export/delete/move/compact) (Phase 25–26).
+             waste_threshold.h,           ← pure vault-bloat thresholds (Phase 26):
+                                            should_display_waste(wasted, file_size) — true if waste
+                                            exceeds max(50 MiB, 10% of file size); should_hint_
+                                            cancelled_import_waste(wasted) — true if > 1 MiB.
              unlock_screen.*,             ← unlock + create vault (Phase 5)
              gallery_grid.*,              ← breadcrumb grid (Phase 5). Phase 25: export (X) and
                                             delete (Del) run on a background FileOpJob (naming_.file_op)
                                             with a progress modal + Esc-cancel; vault_busy() (import
                                             OR file_op OR transfer_.job_active) gates render/update/
                                             input + the idle-lock so the UI never touches the vault
-                                            mid-job.
+                                            mid-job. Phase 26: Shift+C confirms compact (waste hint in
+                                            footer); cancelled-import shows reclaimable waste hint.
              image_viewer.*,              ← zoom/pan + thumb strip + fill-scroll + slideshow;
                                             hosts a fit-only VideoPlayback for video items (Phase 15).
                                             Single-image export (X) stays synchronous (one image is
