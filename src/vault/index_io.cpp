@@ -5,6 +5,7 @@
 
 #include "crypto/aead.h"
 #include "crypto/random.h"
+#include "chunk_codec.h"
 #include "chunk_store.h"
 #include "file_util.h"
 
@@ -26,6 +27,13 @@ VaultResult commit_index(IndexIoContext& ctx)
     // Serialise + seal the index (tree + saved searches) with a fresh random nonce.
     std::vector<uint8_t> blob;
     serialize_index(ctx.root_, ctx.saved_searches_, blob);
+
+    // Phase 26: framed vaults compress the index blob with the same codec.
+    std::vector<uint8_t> framed;
+    if (framed_chunks(ctx.header_)) {
+        if (!chunk_codec::encode_frame(blob, framed)) return CryptoError;
+        blob = std::move(framed);
+    }
 
     std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
     if (!crypto::fill_random(nonce)) return CryptoError;

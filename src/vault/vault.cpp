@@ -11,6 +11,7 @@
 #include "crypto/kdf.h"
 #include "crypto/random.h"
 
+#include "chunk_codec.h"
 #include "chunk_store.h"
 #include "file_util.h"
 
@@ -386,6 +387,7 @@ VaultResult Vault::create(const std::string&       path,
     h.kdf              = params;
     h.kdf_algo         = 0;  // Argon2id
     h.keyfile_required = keyfile.empty() ? 0 : 1;
+    h.flags |= FLAG_FRAMED_CHUNKS;  // Phase 26: new vaults frame chunk + index plaintext
 
     crypto::SecureBuffer<crypto::KEY_SIZE> master;
     crypto::SecureBuffer<crypto::KEY_SIZE> kek;
@@ -481,6 +483,11 @@ VaultResult Vault::unlock(std::span<const uint8_t> password,
         if (ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_)); !store.read_raw(s.offset, s.length, on_disk)) return false;
         std::vector<uint8_t> blob;
         if (!crypto::open(master_key_.as_span(), s.nonce, on_disk, blob)) return false;
+        if (framed_chunks(header_)) {
+            std::vector<uint8_t> plain;
+            if (!chunk_codec::decode_frame(blob, plain)) return false;
+            blob = std::move(plain);
+        }
         IndexNode tmp;
         std::vector<SavedSearch> tmp_searches;
         if (!deserialize_index(blob, tmp, tmp_searches)) return false;
