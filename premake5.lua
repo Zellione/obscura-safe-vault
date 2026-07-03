@@ -259,6 +259,18 @@ project "osv"
     link_image_codecs()
     link_av()
 
+    -- Strict warnings for project code (not vendored)
+    fatalwarnings { "All" }
+    filter "toolset:gcc or clang"
+        buildoptions { "-Wshadow", "-Wconversion" }
+    filter {}
+
+    -- Release hardening (Linux/macOS)
+    filter { "configurations:Release", "toolset:gcc or clang" }
+        buildoptions { "-fstack-protector-strong" }
+        defines { "_FORTIFY_SOURCE=3" }
+    filter {}
+
     -- GUI app on Windows (no console window) for Release; keep the console in
     -- Debug so stderr logging is visible.
     filter { "system:windows", "configurations:Release" }
@@ -353,3 +365,15 @@ project "osv_tests"
     link_platform_extras()
     link_image_codecs()
     link_av()
+
+    -- Strict warnings for project code (not vendored)
+    fatalwarnings { "All" }
+    filter "toolset:gcc or clang"
+        buildoptions { "-Wshadow", "-Wconversion" }
+    filter {}
+
+    -- Release hardening (Linux/macOS)
+    filter { "configurations:Release", "toolset:gcc or clang" }
+        buildoptions { "-fstack-protector-strong" }
+        defines { "_FORTIFY_SOURCE=3" }
+    filter {}
