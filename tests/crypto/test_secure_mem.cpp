@@ -19,7 +19,7 @@ TEST(secure_buffer_wipes_on_destruction)
 
     // Raw storage we own; placement-new a SecureBuffer into it, then destroy it
     // explicitly and inspect the bytes.
-    alignas(Buf) auto storage = std::array<unsigned char, sizeof(Buf)>();
+    alignas(Buf) auto storage = std::array<unsigned char, sizeof(Buf)>{};  // value-init: keeps gcc -O3 -Werror=uninitialized quiet; ctor overwrites, dtor wipes
 
     auto* buf = new (storage.data()) Buf();
     std::memset(buf->data(), 0xAB, N);
@@ -30,9 +30,11 @@ TEST(secure_buffer_wipes_on_destruction)
 
     std::destroy_at(buf);  // destructor must crypto_wipe the bytes
 
+    // Use launder to inform gcc that the storage pointer is valid post-destruction.
     bool all_zero = true;
+    auto* storage_ptr = std::launder(storage.data());
     for (size_t i = 0; i < N; ++i) {
-        if (storage[i] != 0x00) all_zero = false;
+        if (storage_ptr[i] != 0x00) all_zero = false;
     }
     CHECK_TRUE(all_zero);
 }
