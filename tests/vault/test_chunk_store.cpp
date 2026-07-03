@@ -29,7 +29,7 @@ TEST(chunk_store_append_read_roundtrip)
     auto key = random_key();
     std::FILE* fp = std::tmpfile();
     REQUIRE(fp != nullptr);
-    ChunkStore store(fp, key.as_span());
+    ChunkStore store(fp, key.as_span(), false);
 
     auto plain = pattern(5000, 3);
     ChunkSpan span;
@@ -47,7 +47,7 @@ TEST(chunk_store_appends_are_contiguous)
     auto key = random_key();
     std::FILE* fp = std::tmpfile();
     REQUIRE(fp != nullptr);
-    ChunkStore store(fp, key.as_span());
+    ChunkStore store(fp, key.as_span(), false);
 
     auto p1 = pattern(100, 1);
     auto p2 = pattern(200, 2);
@@ -72,7 +72,7 @@ TEST(chunk_store_reads_into_secure_bytes)
     auto key = random_key();
     std::FILE* fp = std::tmpfile();
     REQUIRE(fp != nullptr);
-    ChunkStore store(fp, key.as_span());
+    ChunkStore store(fp, key.as_span(), false);
 
     auto plain = pattern(4096, 9);
     ChunkSpan span;
@@ -90,7 +90,7 @@ TEST(chunk_store_read_detects_tamper)
     auto key = random_key();
     std::FILE* fp = std::tmpfile();
     REQUIRE(fp != nullptr);
-    ChunkStore store(fp, key.as_span());
+    ChunkStore store(fp, key.as_span(), false);
 
     auto plain = pattern(64, 5);
     ChunkSpan span;
@@ -116,7 +116,7 @@ TEST(chunk_store_raw_append_read_roundtrip)
     auto key = random_key();
     std::FILE* fp = std::tmpfile();
     REQUIRE(fp != nullptr);
-    ChunkStore store(fp, key.as_span());
+    ChunkStore store(fp, key.as_span(), false);
 
     // Raw bytes are stored verbatim (used by the vault for the sealed index blob).
     auto raw = pattern(321, 7);
@@ -135,7 +135,7 @@ TEST(chunk_store_read_rejects_out_of_range_span)
     auto key = random_key();
     std::FILE* fp = std::tmpfile();
     REQUIRE(fp != nullptr);
-    ChunkStore store(fp, key.as_span());
+    ChunkStore store(fp, key.as_span(), false);
 
     auto plain = pattern(32, 1);
     ChunkSpan span;
@@ -145,5 +145,92 @@ TEST(chunk_store_read_rejects_out_of_range_span)
     ChunkSpan bogus{.offset = span.offset, .length = span.length + 100000};
     std::vector<uint8_t> out;
     CHECK_FALSE(store.read_chunk(bogus, out));
+    std::fclose(fp);
+}
+
+TEST(chunk_store_framed_roundtrip_both_overloads)
+{
+    auto key = random_key();
+    std::FILE* fp = std::tmpfile();
+    REQUIRE(fp != nullptr);
+    ChunkStore store(fp, key.as_span(), true);
+
+    const std::vector<uint8_t> compressible(200 * 1024, 0x42);
+    ChunkSpan span{};
+    REQUIRE(store.append_chunk(compressible, span));
+    // Framed + deflated: ciphertext is much smaller than the payload.
+    CHECK(span.length < compressible.size() / 4);
+
+    std::vector<uint8_t> out_vec;
+    REQUIRE(store.read_chunk(span, out_vec));
+    CHECK(out_vec == compressible);
+
+    crypto::SecureBytes out_sec;
+    REQUIRE(store.read_chunk(span, out_sec));
+    REQUIRE(out_sec.size() == compressible.size());
+    CHECK(std::memcmp(out_sec.data(), compressible.data(), compressible.size()) == 0);
+    std::fclose(fp);
+}
+
+TEST(chunk_store_framed_incompressible_overhead_is_one_byte)
+{
+    auto key = random_key();
+    std::FILE* fp = std::tmpfile();
+    REQUIRE(fp != nullptr);
+    ChunkStore store(fp, key.as_span(), true);
+    std::vector<uint8_t> noise(4096);
+    (void)crypto::fill_random(noise);
+    ChunkSpan span{};
+    REQUIRE(store.append_chunk(noise, span));
+    // raw frame: 1 method byte + AEAD overhead (nonce 24 + tag 16).
+    CHECK(span.length == noise.size() + 1 + 40);
+    std::vector<uint8_t> out;
+    REQUIRE(store.read_chunk(span, out));
+    CHECK(out == noise);
+    std::fclose(fp);
+}
+
+TEST(chunk_store_unframed_layout_unchanged)
+{
+    auto key = random_key();
+    std::FILE* fp = std::tmpfile();
+    REQUIRE(fp != nullptr);
+    ChunkStore store(fp, key.as_span(), false);
+    const auto payload = pattern(1000, 3);
+    ChunkSpan span{};
+    REQUIRE(store.append_chunk(payload, span));
+    CHECK(span.length == payload.size() + 40);    // exactly as before Phase 26
+    std::vector<uint8_t> out;
+    REQUIRE(store.read_chunk(span, out));
+    CHECK(out == payload);
+    std::fclose(fp);
+}
+
+TEST(chunk_store_framed_failed_read_leaves_out_empty)
+{
+    auto key = random_key();
+    std::FILE* fp = std::tmpfile();
+    REQUIRE(fp != nullptr);
+    ChunkStore store(fp, key.as_span(), true);
+
+    const std::vector<uint8_t> compressible(200 * 1024, 0x42);
+    ChunkSpan span{};
+    REQUIRE(store.append_chunk(compressible, span));
+
+    // Flip a byte inside the ciphertext region to trigger decrypt failure.
+    const long cipher_pos = static_cast<long>(span.offset + crypto::NONCE_SIZE + 30);
+    REQUIRE(std::fseek(fp, cipher_pos, SEEK_SET) == 0);
+    int c = std::fgetc(fp);
+    REQUIRE(c != EOF);
+    REQUIRE(std::fseek(fp, cipher_pos, SEEK_SET) == 0);
+    REQUIRE(std::fputc(c ^ 0xFF, fp) != EOF);
+    std::fflush(fp);
+
+    // Pre-load out with sentinel content (as if from a previous operation).
+    crypto::SecureBytes out;
+    REQUIRE(out.resize(16));
+    // read_chunk must fail AND leave out empty (not with stale caller content).
+    CHECK_FALSE(store.read_chunk(span, out));
+    CHECK_EQ(out.size(), size_t(0));
     std::fclose(fp);
 }

@@ -25,6 +25,12 @@ inline constexpr uint16_t FORMAT_VERSION = 1;
 // the documented fields plus future expansion within the reserved padding.
 inline constexpr size_t HEADER_SIZE = 4096;
 
+// Header flags (u32 at offset 12; reserved bits are zero).
+// Bit 0 (Phase 26): chunk plaintexts and the sealed index blob are framed by
+// vault::chunk_codec (method byte + optional deflate). Clear = legacy raw
+// vault; such vaults are read AND appended raw forever (no migration).
+inline constexpr uint32_t FLAG_FRAMED_CHUNKS = 1u << 0;
+
 // One half of the crash-safe double-buffered index pointer. `offset`/`length`
 // locate the encrypted index blob (ciphertext|tag) in the data region; `nonce`
 // is the XChaCha20 nonce it was sealed with. Storing the nonce here means
@@ -64,5 +70,12 @@ struct Header {
     // Returns false on a short buffer, bad magic, or unsupported version.
     [[nodiscard]] static bool parse(std::span<const uint8_t> raw, Header& out) noexcept;
 };
+
+// Check if the vault uses framed chunks (Phase 26). This flag gates chunk
+// and index encoding via vault::chunk_codec (method byte + optional deflate).
+[[nodiscard]] constexpr bool framed_chunks(const Header& h) noexcept
+{
+    return (h.flags & FLAG_FRAMED_CHUNKS) != 0;
+}
 
 } // namespace vault

@@ -36,7 +36,7 @@ public:
 
 private:
     VideoSource(std::FILE* fp, std::span<const uint8_t, crypto::KEY_SIZE> key,
-                const vault::VideoMeta& meta);
+                const vault::VideoMeta& meta, bool framed);
 
     // Copy up to one chunk's worth covering `offset` into `dst`: bytes copied,
     // 0 on a corrupt mapping, -1 on an auth/decrypt failure.

@@ -5,6 +5,7 @@
 
 #include "crypto/aead.h"
 #include "crypto/random.h"
+#include "chunk_codec.h"
 #include "chunk_store.h"
 #include "file_util.h"
 
@@ -27,6 +28,13 @@ VaultResult commit_index(IndexIoContext& ctx)
     std::vector<uint8_t> blob;
     serialize_index(ctx.root_, ctx.saved_searches_, blob);
 
+    // Phase 26: framed vaults compress the index blob with the same codec.
+    std::vector<uint8_t> framed;
+    if (framed_chunks(ctx.header_)) {
+        if (!chunk_codec::encode_frame(blob, framed)) return CryptoError;
+        blob = std::move(framed);
+    }
+
     std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
     if (!crypto::fill_random(nonce)) return CryptoError;
 
@@ -34,7 +42,7 @@ VaultResult commit_index(IndexIoContext& ctx)
     crypto::seal(ctx.master_key_.as_span(), nonce, blob, sealed);
 
     // Step A: append the new index blob and make it durable.
-    ChunkStore store(ctx.fp_, ctx.master_key_.as_span());
+    ChunkStore store(ctx.fp_, ctx.master_key_.as_span(), framed_chunks(ctx.header_));
     uint64_t offset = 0;
     if (!store.append_raw(sealed, offset)) return IoError;
     if (!store.sync())                     return IoError;

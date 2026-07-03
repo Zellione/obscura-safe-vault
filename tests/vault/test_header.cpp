@@ -105,3 +105,20 @@ TEST(header_parse_rejects_short_buffer)
     vault::Header out;
     CHECK_FALSE(vault::Header::parse(tiny, out));
 }
+
+TEST(header_flags_roundtrip_framed_bit)
+{
+    vault::Header h = sample_header();  // mirror the existing round-trip test setup
+    h.flags = vault::FLAG_FRAMED_CHUNKS;
+    CHECK(vault::framed_chunks(h));
+
+    std::array<uint8_t, vault::HEADER_SIZE> raw{};
+    h.serialize(raw);
+    vault::Header back;
+    REQUIRE(vault::Header::parse(raw, back));
+    CHECK_EQ(back.flags, vault::FLAG_FRAMED_CHUNKS);
+    CHECK(vault::framed_chunks(back));
+
+    back.flags = 0;
+    CHECK_FALSE(vault::framed_chunks(back));
+}
