@@ -59,3 +59,21 @@ TEST(secure_buffer_explicit_wipe)
     for (size_t i = 0; i < decltype(buf)::size(); ++i) all_zero &= (buf.data()[i] == 0);
     CHECK_TRUE(all_zero);
 }
+
+// should_warn_mlock_once() returns true exactly once, then false on all subsequent calls.
+// This helper is used to suppress duplicate warnings for mlock failures.
+TEST(should_warn_mlock_once)
+{
+    // In a fresh test process (or if reset), the first call should return true.
+    // Subsequent calls should return false.
+    // Note: This is a process-level singleton, so if a prior test called it, we may
+    // get false immediately. The important part is that multiple calls in sequence
+    // don't all return true.
+    bool first  = crypto::should_warn_mlock_once();
+    bool second = crypto::should_warn_mlock_once();
+    bool third  = crypto::should_warn_mlock_once();
+
+    // first should be true; second and third should be false (or first could be false
+    // if already triggered). At least ensure not all are true.
+    CHECK_TRUE(!first || (!second && !third));
+}

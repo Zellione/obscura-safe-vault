@@ -315,7 +315,9 @@ src/
                                             root grid) so TagGalleries can return to the overview
                                             (Phase 22); also gained handle_extra_key/extra_hint/
                                             show_favorite_badge hooks used by TagImages and TagGalleries
-                                            (Phase 22 follow-up).
+                                            (Phase 22 follow-up). New browse-by-X screens (e.g.,
+                                            tag galleries / images) should subclass FavoritesScreen
+                                            and use its hooks, not add NavKind variants.
              tag_overview_model.*,        ← pure, SDL/vault-free tag-overview presentation
                                             (Phase 22): TagTally{tag,gallery_count,image_count} +
                                             sort_tags (Name / Count-desc) + filter_tags
@@ -449,6 +451,9 @@ src/
                                             NO secrets, missing/invalid → 1.0; mirrors theme_pref
                                             (Phase 25). App loads it at init → media::set_saved_volume
                                             and saves media::saved_volume() on clean exit.
+             harden.{h,cpp}               ← disable_core_dumps() (Task 6): Linux prctl + setrlimit,
+                                            macOS setrlimit, Windows no-op; called at app init
+                                            (Release only) before any vault unlock.
 vendor/
   SDL3/           ← git submodule, built by scripts/setup.sh (cmake)
   monocypher/     ← git submodule, compiled by premake (single .c file)
@@ -539,6 +544,11 @@ premake-core GitHub releases. It is **not** committed to the repo.
 3. **Random nonces.** Every XChaCha20-Poly1305 encrypt call uses a fresh 24-byte nonce from the CSPRNG. Never reuse nonces.
 4. **Authenticate before decrypt.** Always verify the Poly1305 tag before using any plaintext bytes.
 5. **No logging of key material.** Keys, passwords, and decrypted content must never appear in log output.
+
+### Hardening notes
+- **Pixel data is best-effort mlock'd.** The first mlock failure per process is logged once; subsequent failures stay silent (uses `should_warn_mlock_once()`). On Linux, successful mlock is followed by `madvise(MADV_DONTDUMP)` for defense-in-depth (silently ignored if it fails).
+- **Core dumps are disabled in Release builds.** At app startup (Release only), `prctl(PR_SET_DUMPABLE, 0)` (Linux) / `setrlimit(RLIMIT_CORE, 0)` (macOS) prevent core dumps from capturing decrypted data. Debug builds keep dumps + ptrace attach enabled.
+- **Password change is not crash-safe.** Avoid force-killing the app during password re-wrap (a KEK change without bulk re-encrypt); recovery would require manual recovery steps.
 
 ### Testing policy
 - **Always write unit and integration tests** alongside any new feature or module.

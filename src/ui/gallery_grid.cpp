@@ -372,6 +372,7 @@ void GalleryGrid::toggle_favorite_current()
     // The flag flips on the same in-memory node children_[s] points at, so the
     // star badge re-renders next frame; the key event already triggers a repaint.
     // No refresh() — that would needlessly clear the export selection.
+    // best-effort: favorite toggle failure is benign, UI re-reads state
     (void)vault_.toggle_favorite(full_path);
 }
 

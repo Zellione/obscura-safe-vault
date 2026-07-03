@@ -25,19 +25,45 @@
 #  include <windows.h>
 #else
 #  include <sys/mman.h>
+#  ifdef __linux__
+#    include <cerrno>
+#  endif
 #endif
 
 namespace crypto {
 
+// Thread-safe helper: should we warn about the first mlock failure?
+// Returns true exactly once per process; all subsequent calls return false.
+// Used by both SecureBuffer and SecureBytes to log a prominent warning on the
+// first mlock failure, then stay silent on subsequent failures.
+inline bool should_warn_mlock_once() noexcept
+{
+    // Use a static atomic_flag (initialized to false by default).
+    // The test_and_set() returns the old value; the first call gets false and we
+    // set it to true. Subsequent calls get true and do nothing.
+    static std::atomic_flag warned;
+    return !warned.test_and_set();
+}
+
 namespace detail {
 
 // Best-effort page-lock. Returns true on success. Never throws.
+// On Linux, after a successful mlock, also attempts madvise(MADV_DONTDUMP)
+// for defense-in-depth (harmless if it fails).
 inline bool mem_lock(const uint8_t* p, size_t n) noexcept
 {
 #if defined(_WIN32)
     return VirtualLock(const_cast<uint8_t*>(p), n) != 0;
 #else
-    return ::mlock(p, n) == 0;
+    if (::mlock(p, n) != 0) return false;
+
+    // Defense-in-depth: mark the page as not dumpable (Linux only).
+    // This prevents the page from being included in core dumps even if the
+    // process is still dumpable. Ignore failures silently.
+#  ifdef __linux__
+    (void)::madvise(const_cast<uint8_t*>(p), n, MADV_DONTDUMP);
+#  endif
+    return true;
 #endif
 }
 
@@ -60,11 +86,11 @@ public:
     SecureBuffer() noexcept
         : locked_(detail::mem_lock(bytes_.data(), bytes_.size()))
     {
-        if (!locked_) {
-            // Non-fatal: we still wipe on destruction. Warn once per buffer.
+        if (!locked_ && should_warn_mlock_once()) {
+            // Non-fatal: we still wipe on destruction. Warn once process-wide.
             std::println(stderr,
-                "[crypto] mlock failed for {}-byte secure buffer; "
-                "key material may be swappable (raise RLIMIT_MEMLOCK)", N);
+                "[SecureMem] WARNING: mlock failed (RLIMIT_MEMLOCK too low?) — "
+                "decoded data may be swappable. Raise with: ulimit -l / systemd LimitMEMLOCK.");
         }
     }
 
@@ -168,10 +194,10 @@ public:
         }
         size_   = n;
         locked_ = detail::mem_lock(data_.get(), size_);
-        if (!locked_) {
+        if (!locked_ && should_warn_mlock_once()) {
             std::println(stderr,
-                "[crypto] mlock failed for {}-byte secure buffer; "
-                "key material may be swappable (raise RLIMIT_MEMLOCK)", n);
+                "[SecureMem] WARNING: mlock failed (RLIMIT_MEMLOCK too low?) — "
+                "decoded data may be swappable. Raise with: ulimit -l / systemd LimitMEMLOCK.");
         }
         return true;
     }

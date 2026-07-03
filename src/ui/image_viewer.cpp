@@ -262,6 +262,7 @@ void ImageViewer::handle_key(SDL_Keycode key, SDL_Scancode sc)
             if (!album_.images.empty()) tag_editor_.open(album_.paths[index_]);
             return;
         case SDLK_B:      // toggle favorite (bookmark) on the current item
+            // best-effort: favorite toggle failure is benign, UI re-reads state
             if (!album_.images.empty()) (void)vault_.toggle_favorite(album_.paths[index_]);
             return;
         case SDLK_ESCAPE: go_back(); return;
