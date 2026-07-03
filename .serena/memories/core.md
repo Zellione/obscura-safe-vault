@@ -509,7 +509,30 @@ vendor/
 assets/fonts/   bundled OFL font for stb_truetype
 ```
 
-## Branch `audit-improvements` (2026-07-03, NOT yet merged — owner gate)
+## Branch `feat/phase-26-vault-compression` (2026-07-03, NOT yet merged — owner gate; stacked on docs PR #49)
+
+Phase 26 — transparent vault compression (adaptive store-if-smaller). New/changed modules:
+
+- `src/vault/chunk_codec.{h,cpp}` — pure framing codec (miniz mz_compress2/mz_uncompress2, no
+  new dep): frame = `method u8 (0=raw,1=deflate) | [orig_len u64 LE | zlib stream]`, deflate kept
+  only when framed ≤ 95% of framed raw; hostile orig_len bounded by comp_len×1032+64 BEFORE
+  allocation (bomb guard); encode/decode overloads for both std::vector and mlock'd SecureBytes
+  (SecureBytes decode wipes out-buffer on EVERY failure path).
+- `ChunkStore(fp, key, bool framed)` — third ctor param, NO default (compiler enumerates sites);
+  framed mode applies the codec around the AEAD in append_chunk + both read_chunk overloads.
+  Every construction passes `framed_chunks(header)`; `media::VideoSource` ctor threads the flag.
+- `vault::FLAG_FRAMED_CHUNKS` (header flags bit 0) + constexpr `framed_chunks(const Header&)`
+  in header.h. `Vault::create` sets it on NEW vaults only. Legacy vaults read AND append raw
+  forever (no migration) — proven by committed pre-change fixture
+  `tests/vault/fixtures/legacy_noflags.osv` (password `legacy-password`) + back-compat test.
+- Index blob (crypto::seal + append_raw, NOT append_chunk) framed at ALL THREE sites:
+  `index_io::commit_index`, `Vault::unlock` load_slot, `Vault::compact` (the compact site was a
+  real bug found in review — an unframed blob made a compacted framed vault unopenable).
+- Side channel (documented/accepted): ciphertext length reveals plaintext compressibility.
+- Tests 640→660 (`test_chunk_codec`, `test_vault_compress`, fuzz hostile frames + framed reads);
+  --asan clean. Compaction tests switched to incompressible random payloads (on-disk size math).
+
+## Branch `audit-improvements` (2026-07-03, MERGED as PR #48 → main commit 22ae9d0)
 
 13-task audit-improvement branch (eca6984..c26e59b). New/changed modules:
 
