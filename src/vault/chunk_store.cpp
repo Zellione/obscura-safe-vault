@@ -92,9 +92,19 @@ bool ChunkStore::read_chunk(ChunkSpan span, crypto::SecureBytes& out) const noex
     }
 
     crypto::SecureBytes framed;                        // frame = decrypted content: mlock'd
-    if (!framed.resize(plain_len)) return false;
-    if (!crypto::decrypt_chunk_to(key_, disk, framed.span())) return false;  // dtor wipes
-    return chunk_codec::decode_frame(framed.as_span(), out);
+    if (!framed.resize(plain_len)) {
+        (void)out.resize(0);  // allocation failure must wipe out
+        return false;
+    }
+    if (!crypto::decrypt_chunk_to(key_, disk, framed.span())) {
+        (void)out.resize(0);  // decryption failure must wipe out (critical)
+        return false;
+    }
+    if (!chunk_codec::decode_frame(framed.as_span(), out)) {
+        (void)out.resize(0);  // parse rejects may leave out with stale caller content
+        return false;
+    }
+    return true;
 }
 
 bool ChunkStore::append_raw(std::span<const uint8_t> bytes, uint64_t& out_offset) noexcept
