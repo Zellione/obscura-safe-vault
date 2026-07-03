@@ -21,6 +21,22 @@ static std::span<const uint8_t> bytes(const std::string& s)
     return {reinterpret_cast<const uint8_t*>(s.data()), s.size()};
 }
 
+// Pattern for new vaults (matches test_vault.cpp).
+static std::vector<uint8_t> pattern(size_t n, uint8_t seed)
+{
+    std::vector<uint8_t> v(n);
+    for (size_t i = 0; i < n; ++i) v[i] = static_cast<uint8_t>(i * 37 + seed);
+    return v;
+}
+
+// Pattern for legacy fixture (created by Task 1 with i * 31 + seed formula).
+static std::vector<uint8_t> legacy_pattern(size_t n, uint8_t seed)
+{
+    std::vector<uint8_t> v(n);
+    for (size_t i = 0; i < n; ++i) v[i] = static_cast<uint8_t>(seed + i * 31);
+    return v;
+}
+
 // RAII temp path: a unique .osv file removed when the helper goes out of scope.
 struct TempVault {
     fs::path path;
@@ -128,4 +144,110 @@ TEST(index_blob_is_framed_and_roundtrips)
     vault::Vault v;
     REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
     REQUIRE(v.unlock(bytes("hunter2"), {}) == vault::VaultResult::Ok);  // proves framed index decodes
+}
+
+TEST(legacy_vault_reads_and_appends_raw)
+{
+    // Regression test: legacy (FLAG_FRAMED_CHUNKS clear) vaults must remain unframed
+    // when appended to. Fixture: password "legacy-password", gallery "pics",
+    // images a.bin = pattern(4096, 0xA5), b.bin = pattern(100000, 0x5A).
+    const std::string src  = std::string(OSV_VAULT_FIXTURE_DIR) + "/legacy_noflags.osv";
+    TempVault tv("legacy_copy");
+    const std::string path = tv.str();
+    std::filesystem::copy_file(src, path, std::filesystem::copy_options::overwrite_existing);
+
+    const std::string kPw = "legacy-password";
+    const auto lpw = bytes(kPw);
+
+    // Flag must be clear (no framing).
+    CHECK((read_flags(path) & vault::FLAG_FRAMED_CHUNKS) == 0);
+
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::open(path, v) == vault::VaultResult::Ok);
+        REQUIRE(v.unlock(lpw, {}) == vault::VaultResult::Ok);
+
+        // Read and verify both images.
+        auto pics = v.list("pics");
+        REQUIRE(pics.size() == 2);
+
+        // Find a.bin and b.bin by name.
+        const vault::IndexNode* a_node = nullptr;
+        const vault::IndexNode* b_node = nullptr;
+        for (auto node : pics) {
+            if (node->name == "a.bin") {
+                a_node = node;
+            } else if (node->name == "b.bin") {
+                b_node = node;
+            }
+        }
+        REQUIRE(a_node != nullptr);
+        REQUIRE(b_node != nullptr);
+
+        // Read a.bin and verify against legacy_pattern(4096, 0xA5).
+        crypto::SecureBytes a_out;
+        REQUIRE(v.read_image(*a_node, a_out) == vault::VaultResult::Ok);
+        auto expected_a = legacy_pattern(4096, 0xA5);
+        CHECK_EQ(a_out.size(), expected_a.size());
+        CHECK_BYTES_EQ(a_out.as_span(), std::span<const uint8_t>(expected_a));
+
+        // Read b.bin and verify against legacy_pattern(100000, 0x5A).
+        crypto::SecureBytes b_out;
+        REQUIRE(v.read_image(*b_node, b_out) == vault::VaultResult::Ok);
+        auto expected_b = legacy_pattern(100000, 0x5A);
+        CHECK_EQ(b_out.size(), expected_b.size());
+        CHECK_BYTES_EQ(b_out.as_span(), std::span<const uint8_t>(expected_b));
+
+        // Append c.bin = pattern(2048, 0x3C); vault must stay raw.
+        auto c_data = pattern(2048, 0x3C);
+        REQUIRE(v.add_image("pics", c_data, "c.bin") == vault::VaultResult::Ok);
+    }
+
+    // Flag must still be clear after append.
+    CHECK((read_flags(path) & vault::FLAG_FRAMED_CHUNKS) == 0);
+
+    // Reopen and verify all three images.
+    {
+        vault::Vault v2;
+        REQUIRE(vault::Vault::open(path, v2) == vault::VaultResult::Ok);
+        REQUIRE(v2.unlock(lpw, {}) == vault::VaultResult::Ok);
+
+        auto pics = v2.list("pics");
+        REQUIRE(pics.size() == 3);
+
+        const vault::IndexNode* a_node = nullptr;
+        const vault::IndexNode* b_node = nullptr;
+        const vault::IndexNode* c_node = nullptr;
+        for (auto node : pics) {
+            if (node->name == "a.bin") {
+                a_node = node;
+            } else if (node->name == "b.bin") {
+                b_node = node;
+            } else if (node->name == "c.bin") {
+                c_node = node;
+            }
+        }
+        REQUIRE(a_node != nullptr);
+        REQUIRE(b_node != nullptr);
+        REQUIRE(c_node != nullptr);
+
+        // Read all three and verify.
+        crypto::SecureBytes a_out;
+        REQUIRE(v2.read_image(*a_node, a_out) == vault::VaultResult::Ok);
+        auto expected_a = legacy_pattern(4096, 0xA5);
+        CHECK_EQ(a_out.size(), expected_a.size());
+        CHECK_BYTES_EQ(a_out.as_span(), std::span<const uint8_t>(expected_a));
+
+        crypto::SecureBytes b_out;
+        REQUIRE(v2.read_image(*b_node, b_out) == vault::VaultResult::Ok);
+        auto expected_b = legacy_pattern(100000, 0x5A);
+        CHECK_EQ(b_out.size(), expected_b.size());
+        CHECK_BYTES_EQ(b_out.as_span(), std::span<const uint8_t>(expected_b));
+
+        crypto::SecureBytes c_out;
+        REQUIRE(v2.read_image(*c_node, c_out) == vault::VaultResult::Ok);
+        auto expected_c = pattern(2048, 0x3C);
+        CHECK_EQ(c_out.size(), expected_c.size());
+        CHECK_BYTES_EQ(c_out.as_span(), std::span<const uint8_t>(expected_c));
+    }
 }
