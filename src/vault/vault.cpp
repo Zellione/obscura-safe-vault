@@ -1284,7 +1284,9 @@ VaultResult Vault::compact(OpProgress* progress)
         // vault.osv.old has the original; vault.osv.compact is abandoned.
         std::remove(tmp_path.c_str());
         // Restore the original from .old (reverse step 1, best-effort).
-        (void)fileutil::rename_file(old_path, path_);
+        if (!fileutil::rename_file(old_path, path_))
+            std::fprintf(stderr, "[Vault] compact recovery: could not restore %s from %s — vault remains at the .old path\n",
+                         path_.c_str(), old_path.c_str());
         fp_ = std::fopen(path_.c_str(), "r+b");
         if (!fp_) reset();  // intact on disk; force a clean re-open
         return IoError;
