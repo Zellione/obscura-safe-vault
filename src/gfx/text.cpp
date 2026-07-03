@@ -36,7 +36,8 @@ bool FontAtlas::bake(std::span<const uint8_t> ttf, float pixel_height)
 {
     // Reset any previous bake.
     baked_ = false;
-    aw_ = ah_ = 0;
+    aw_ = 0;
+    ah_ = 0;
     px_ = 0.0f;
     bitmap_.clear();
     glyphs_.clear();

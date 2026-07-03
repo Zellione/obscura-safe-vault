@@ -249,9 +249,9 @@ void UnlockScreen::render(gfx::Renderer& r)
         // user is committing to.
         if (!pw_.empty()) {
             const Strength s = classify_strength(pw_.bytes());
-            r.draw_text(font_, fx + 110, 126,
-                        std::string("strength: ") += strength_label(s),
-                        strength_color(s));
+            std::string label = "strength: ";
+            label += strength_label(s);
+            r.draw_text(font_, fx + 110, 126, label, strength_color(s));
         }
 
         const Layout L0 = layout();
