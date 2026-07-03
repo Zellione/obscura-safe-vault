@@ -729,7 +729,7 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipCo
 }
 
 // Extract cancelled-import waste-hint logic to reduce poll_import_job's nesting (S134).
-void set_cancelled_import_status(GalleryGrid& g, const ZipImportJob::Outcome& oc, const char* noun)
+void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun)
 {
     // User pressed Esc during import — check if waste hints are needed (Phase 26).
     const uint64_t waste = g.vault_.wasted_bytes();
@@ -737,7 +737,7 @@ void set_cancelled_import_status(GalleryGrid& g, const ZipImportJob::Outcome& oc
         g.status_ = std::format("Import cancelled — {} reclaimable, press [Shift+C]",
                                format_size(waste));
     } else {
-        g.status_ = std::format("Import cancelled — {} {} imported", oc.imported, noun);
+        g.status_ = std::format("Import cancelled — {} {} imported", imported, noun);
     }
 }
 
@@ -758,7 +758,7 @@ void poll_import_job(GalleryGrid& g)
         } else {
             const char* noun = cbz ? "page" : "file";
             if (oc->cancelled) {
-                set_cancelled_import_status(g, *oc, noun);
+                set_cancelled_import_status(g, oc->imported, noun);
             } else {
                 g.status_ = std::format("Imported {} {}{}, skipped {}", oc->imported, noun,
                                         oc->imported == 1 ? "" : "s", oc->skipped);
@@ -1135,7 +1135,6 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float H)
     for (int i = first_idx; i <= last_idx; ++i) {
         if (i < 0 || i >= static_cast<int>(children_.size())) continue;
         const vault::IndexNode* n = children_[i];
-        const auto& m  = n->meta;
         const bool sel = (i == nav_.selected());
         SDL_FRect row{OX, OY + LIST_HEADER + static_cast<float>(i) * ROW_H,
                       rw, ROW_H - 6};
