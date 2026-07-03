@@ -508,7 +508,8 @@ TEST(wipe_and_remove_zeroes_and_deletes_file)
 
     // Create a test file with known content.
     {
-        std::FILE* fp = std::fopen(temp_path.c_str(), "w+b");
+        const std::string p = temp_path.string();
+        std::FILE* fp = std::fopen(p.c_str(), "w+b");
         REQUIRE(fp != nullptr);
         const std::vector<uint8_t> content = pattern(8192, 42);
         REQUIRE(std::fwrite(content.data(), 1, content.size(), fp) == content.size());
@@ -520,7 +521,8 @@ TEST(wipe_and_remove_zeroes_and_deletes_file)
 
     // Peek at the file to verify it has content.
     {
-        std::FILE* fp = std::fopen(temp_path.c_str(), "rb");
+        const std::string p = temp_path.string();
+        std::FILE* fp = std::fopen(p.c_str(), "rb");
         REQUIRE(fp != nullptr);
         uint8_t first_byte = 0;
         REQUIRE(std::fread(&first_byte, 1, 1, fp) == 1);
