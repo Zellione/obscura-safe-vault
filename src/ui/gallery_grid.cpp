@@ -806,28 +806,37 @@ bool handle_job_input(GalleryGrid& g, const SDL_Event& e)
     return false;
 }
 
+// Bundle the 6 data parameters for draw_footer_status to reduce cognitive complexity (S107).
+struct FooterStatus {
+    bool show_waste;
+    bool show_selection;
+    uint64_t waste_sz;
+    int selection_count;
+    const std::string& error;
+    const std::string& status;
+};
+
 // Extract footer + waste/selection rendering to reduce render's cognitive complexity (S3776).
 void draw_footer_status(gfx::Renderer& r, gfx::FontAtlas& font, float x_offset, float bottom,
-                        bool show_waste, bool show_selection, uint64_t waste_sz,
-                        int selection_count, const std::string& error, const std::string& status)
+                        const FooterStatus& data)
 {
     using namespace gfx::theme;
-    if (show_waste || show_selection) {
+    if (data.show_waste || data.show_selection) {
         std::string footer;
-        if (show_selection)
-            footer = std::format("{} selected", selection_count);
-        if (show_waste) {
+        if (data.show_selection)
+            footer = std::format("{} selected", data.selection_count);
+        if (data.show_waste) {
             if (!footer.empty()) footer += " · ";
-            footer += "Waste: " + format_size(waste_sz) + " [Shift+C]";
+            footer += "Waste: " + format_size(data.waste_sz) + " [Shift+C]";
         }
-        const gfx::Color color = show_selection ? ACCENT : TEXT_DIM;
+        const gfx::Color color = data.show_selection ? ACCENT : TEXT_DIM;
         r.draw_text(font, x_offset, 120, footer, color);
     }
 
-    if (!error.empty())
-        r.draw_text(font, x_offset, bottom - 36, error, DANGER);
-    else if (!status.empty())
-        r.draw_text(font, x_offset, bottom - 36, status, OK);
+    if (!data.error.empty())
+        r.draw_text(font, x_offset, bottom - 36, data.error, DANGER);
+    else if (!data.status.empty())
+        r.draw_text(font, x_offset, bottom - 36, data.status, OK);
 }
 
 void GalleryGrid::update(double)
@@ -946,8 +955,14 @@ void GalleryGrid::render(gfx::Renderer& r)
     const bool show_waste = should_display_waste(waste_sz, file_sz);
     const bool show_selection = !sel_.empty();
 
-    draw_footer_status(r, font_, OX, H, show_waste, show_selection, waste_sz,
-                       static_cast<int>(sel_.count()), error_, status_);
+    draw_footer_status(r, font_, OX, H, FooterStatus{
+        .show_waste = show_waste,
+        .show_selection = show_selection,
+        .waste_sz = waste_sz,
+        .selection_count = static_cast<int>(sel_.count()),
+        .error = error_,
+        .status = status_
+    });
 
     if (view_ == GalleryView::List) render_list(r, W, H);
     else                            render_grid(r, W, H);

@@ -90,10 +90,9 @@ float ensure_visible(float scroll, float item_top, float item_bottom,
                      float view_top, float view_bottom) noexcept
 {
     const float item_height = item_bottom - item_top;
-    const float view_height = view_bottom - view_top;
 
     // If the item is taller than the view, align its top with the view top.
-    if (item_height > view_height) {
+    if (const float view_height = view_bottom - view_top; item_height > view_height) {
         return item_top - view_top;
     }
 
