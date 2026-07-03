@@ -264,6 +264,10 @@ project "osv"
     filter "toolset:gcc or clang"
         buildoptions { "-Wshadow", "-Wconversion" }
     filter {}
+    -- clang's -Wconversion implies -Wsign-conversion (gcc's does not); disable for uniform semantics across CI compilers. 134 sites — candidate for a future dedicated cleanup.
+    filter "toolset:clang"
+        buildoptions { "-Wno-sign-conversion" }
+    filter {}
 
     -- Release hardening (Linux/macOS)
     filter { "configurations:Release", "toolset:gcc or clang" }
@@ -370,6 +374,10 @@ project "osv_tests"
     fatalwarnings { "All" }
     filter "toolset:gcc or clang"
         buildoptions { "-Wshadow", "-Wconversion" }
+    filter {}
+    -- clang's -Wconversion implies -Wsign-conversion (gcc's does not); disable for uniform semantics across CI compilers. 134 sites — candidate for a future dedicated cleanup.
+    filter "toolset:clang"
+        buildoptions { "-Wno-sign-conversion" }
     filter {}
 
     -- Release hardening (Linux/macOS)
