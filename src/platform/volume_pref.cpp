@@ -1,7 +1,8 @@
 #include "platform/volume_pref.h"
 
 #include <algorithm>
-#include <charconv>
+#include <cerrno>
+#include <cstdlib>
 #include <fstream>
 #include <print>
 #include <string>
@@ -36,10 +37,11 @@ float VolumePref::load() const
     if (!line.empty() && line.back() == '\r') line.pop_back();   // tolerate CRLF
 
     float v = kDefaultVolume;
-    const char* begin = line.data();
-    const char* end   = line.data() + line.size();
-    if (auto [ptr, ec] = std::from_chars(begin, end, v); ec != std::errc{})
-        return kDefaultVolume;                          // unparseable → default
+    char* endp = nullptr;
+    errno = 0;
+    const float parsed = std::strtof(line.c_str(), &endp);
+    if (endp == line.c_str() || errno == ERANGE) return kDefaultVolume;
+    v = parsed;
     return clamp01(v);
 }
 

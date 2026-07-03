@@ -122,7 +122,10 @@ void run_placements(vault::Vault& v, mz_zip_archive& zip, const ZipPlan& plan,
 {
     if (progress) progress->total.store(static_cast<int>(plan.placements.size()));
     for (const auto& pl : plan.placements) {
-        if (progress && progress->cancel.load()) break;
+        if (progress && progress->cancel.load()) {
+            out.cancelled = true;  // user pressed Esc during import (Phase 26)
+            break;
+        }
         import_one(v, zip, pl, out);
         if (progress) progress->done.fetch_add(1);
     }

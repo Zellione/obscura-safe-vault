@@ -81,9 +81,22 @@ end
 -- scripts/setup.sh cmake-builds each static and installs into one staging
 -- prefix (vendor/codecs-prefix); we link the whole set from there. Shared by
 -- the app and the test runner (osv_tests compiles src/image/*.cpp).
+-- When --asan is passed, prefer vendor/codecs-prefix-asan/ (built by
+-- scripts/build_codecs.sh --asan) with a fallback + warning to the normal prefix.
 -- ---------------------------------------------------------------------------
 local function link_image_codecs()
     local prefix = path.join(os.getcwd(), "vendor/codecs-prefix")
+    -- Try ASAN prefix first if --asan was passed.
+    if _OPTIONS["asan"] then
+        local asan_prefix = path.join(os.getcwd(), "vendor/codecs-prefix-asan")
+        if os.isdir(path.join(asan_prefix, "include")) then
+            prefix = asan_prefix
+        else
+            -- Fallback with a warning.
+            premake.warn("--asan requested but ASAN codec prefix not found at " .. asan_prefix .. "; falling back to " .. prefix .. " (not instrumented)")
+        end
+    end
+
     if os.isdir(path.join(prefix, "include")) then
         includedirs { path.join(prefix, "include") }
         libdirs     { path.join(prefix, "lib") }
@@ -108,9 +121,24 @@ end
 -- codecs. Linked only when present so non-FFmpeg builds (e.g. Windows until its
 -- FFmpeg leg lands) stay green; OSV_VENDORED_AV gates the dependent code/tests.
 -- Static-link order: dependents before dependencies (format → codec → swscale → util).
+-- When --asan is passed, prefer vendor/codecs-prefix-asan/ (built by
+-- scripts/build_codecs.sh --asan) with a fallback + warning to the normal prefix.
 -- ---------------------------------------------------------------------------
 local function link_av()
     local prefix = path.join(os.getcwd(), "vendor/codecs-prefix")
+    -- Try ASAN prefix first if --asan was passed.
+    if _OPTIONS["asan"] then
+        local asan_prefix = path.join(os.getcwd(), "vendor/codecs-prefix-asan")
+        if os.isfile(path.join(asan_prefix, "lib/libavcodec.a")) then
+            prefix = asan_prefix
+        else
+            -- Fallback with a warning (only if we'd link AV at all).
+            if os.isfile(path.join(path.join(os.getcwd(), "vendor/codecs-prefix"), "lib/libavcodec.a")) then
+                premake.warn("--asan requested but ASAN FFmpeg prefix not found at " .. asan_prefix .. "; falling back to " .. path.join(os.getcwd(), "vendor/codecs-prefix") .. " (not instrumented)")
+            end
+        end
+    end
+
     if os.isfile(path.join(prefix, "lib/libavcodec.a")) then
         includedirs { path.join(prefix, "include") }
         libdirs     { path.join(prefix, "lib") }
@@ -259,6 +287,22 @@ project "osv"
     link_image_codecs()
     link_av()
 
+    -- Strict warnings for project code (not vendored)
+    fatalwarnings { "All" }
+    filter "toolset:gcc or clang"
+        buildoptions { "-Wshadow", "-Wconversion" }
+    filter {}
+    -- clang's -Wconversion implies -Wsign-conversion (gcc's does not); disable for uniform semantics across CI compilers. 134 sites — candidate for a future dedicated cleanup.
+    filter "toolset:clang"
+        buildoptions { "-Wno-sign-conversion" }
+    filter {}
+
+    -- Release hardening (Linux/macOS)
+    filter { "configurations:Release", "toolset:gcc or clang" }
+        buildoptions { "-fstack-protector-strong" }
+        defines { "_FORTIFY_SOURCE=3" }
+    filter {}
+
     -- GUI app on Windows (no console window) for Release; keep the console in
     -- Debug so stderr logging is visible.
     filter { "system:windows", "configurations:Release" }
@@ -299,6 +343,7 @@ project "osv_tests"
         "src/gfx/renderer.cpp",
         "src/gfx/yuv_texture.cpp",
         "src/gfx/theme.cpp",
+        "src/platform/harden.cpp",
         "src/platform/paths.cpp",
         "src/platform/vault_registry.cpp",
         "src/platform/theme_pref.cpp",
@@ -314,6 +359,7 @@ project "osv_tests"
         "src/ui/cover_layout.cpp",
         "src/ui/gallery_cover.cpp",
         "src/ui/scroll_model.cpp",
+        "src/ui/grid_layout.cpp",
         "src/ui/meta_format.cpp",
         "src/ui/selection_model.cpp",
         "src/ui/search_model.cpp",
@@ -352,3 +398,19 @@ project "osv_tests"
     link_platform_extras()
     link_image_codecs()
     link_av()
+
+    -- Strict warnings for project code (not vendored)
+    fatalwarnings { "All" }
+    filter "toolset:gcc or clang"
+        buildoptions { "-Wshadow", "-Wconversion" }
+    filter {}
+    -- clang's -Wconversion implies -Wsign-conversion (gcc's does not); disable for uniform semantics across CI compilers. 134 sites — candidate for a future dedicated cleanup.
+    filter "toolset:clang"
+        buildoptions { "-Wno-sign-conversion" }
+    filter {}
+
+    -- Release hardening (Linux/macOS)
+    filter { "configurations:Release", "toolset:gcc or clang" }
+        buildoptions { "-fstack-protector-strong" }
+        defines { "_FORTIFY_SOURCE=3" }
+    filter {}

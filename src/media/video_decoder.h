@@ -13,10 +13,18 @@
 #include "vault/index.h"
 #include "image/image.h"
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 extern "C" {
 #include <libavformat/avio.h>
 #include <libswscale/swscale.h>
 }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 // Forward declarations for opaque FFmpeg pointers
 struct AVFormatContext;

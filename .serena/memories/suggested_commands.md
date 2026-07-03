@@ -32,6 +32,22 @@ scripts/test.sh           # build + run all tests (Debug)
 scripts/test.sh --asan    # AddressSanitizer + UBSan + LSan
 scripts/test.sh --release
 ```
+⚠ `scripts/test.sh` builds ONLY the test binary — for app-side changes,
+`scripts/build.sh` must also pass (`-Werror` branch-wide since audit-improvements).
+Clang parity check (matches CI's clang leg): `bin/premake5 ninja --cc=clang && ninja -k0 -f build.ninja`,
+then restore with `scripts/gen.sh`.
+
+## ASAN-instrumented codecs (audit-improvements)
+```bash
+scripts/build_codecs.sh --asan   # → vendor/codecs-prefix-asan/ (separate prefix, gitignored)
+scripts/test.sh --asan           # premake prefers the asan prefix when it exists
+```
+
+## Import benchmark (audit-improvements)
+```bash
+OSV_BENCH=1 scripts/test.sh                      # N=100 bench (tmpfs)
+OSV_BENCH=1 OSV_BENCH_DIR=$HOME/.cache scripts/test.sh   # real-disk numbers
+```
 
 ## Windows equivalents
 ```bat

@@ -1,10 +1,16 @@
 #include "gfx/text.h"
 
+#if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 #define STB_TRUETYPE_IMPLEMENTATION
 #include <stb_truetype.h>
+#if defined(__GNUC__)
 #pragma GCC diagnostic pop
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -30,7 +36,8 @@ bool FontAtlas::bake(std::span<const uint8_t> ttf, float pixel_height)
 {
     // Reset any previous bake.
     baked_ = false;
-    aw_ = ah_ = 0;
+    aw_ = 0;
+    ah_ = 0;
     px_ = 0.0f;
     bitmap_.clear();
     glyphs_.clear();

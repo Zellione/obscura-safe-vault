@@ -15,12 +15,15 @@
 #include "platform/folder_dialog.h"
 #include "platform/paths.h"
 #include "ui/delete_summary.h"
+#include "ui/grid_layout.h"
 #include "ui/input.h"
 #include "ui/progress_modal.h"
 #include "ui/tag_list_parse.h"
 #include "ui/tile_thumb.h"
+#include "ui/waste_threshold.h"
 #include "ui/widgets.h"
 #include "ui/zip_import.h"
+#include "vault/file_util.h"
 #include "vault/index.h"
 #include "vault/vault.h"
 
@@ -121,8 +124,8 @@ void draw_import_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, float
                       .count_line = count, .done = done, .total = total});
 }
 
-// Background file-op (export/delete/move/copy) progress modal — same veil + bar as
-// the import one, wording chosen by the running job's kind (Phase 25).
+// Background file-op (export/delete/move/copy/compact) progress modal — same veil + bar as
+// the import one, wording chosen by the running job's kind (Phase 25–26).
 void draw_file_op_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
                            const FileOpJob& job)
 {
@@ -133,6 +136,7 @@ void draw_file_op_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
         case Export:   title = "Exporting…"; unit = "images"; break;
         case Delete:   title = "Deleting…";  unit = "items";  break;
         case Transfer: title = "Moving…";    unit = "files";  break;
+        case Compact:  title = "Compacting…"; unit = "chunks"; break;
         case None:     break;
     }
     const int total = job.total();
@@ -368,6 +372,7 @@ void GalleryGrid::toggle_favorite_current()
     // The flag flips on the same in-memory node children_[s] points at, so the
     // star badge re-renders next frame; the key event already triggers a repaint.
     // No refresh() — that would needlessly clear the export selection.
+    // best-effort: favorite toggle failure is benign, UI re-reads state
     (void)vault_.toggle_favorite(full_path);
 }
 
@@ -415,6 +420,30 @@ void GalleryGrid::toggle_or_open()
         open_selected();
 }
 
+// Extract Shift+C compact handler to reduce handle_key_down's cognitive complexity (S3776).
+void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
+{
+    if (!((key.key == SDLK_C) && (key.mod & SDL_KMOD_SHIFT))) return;
+
+    const uint64_t file_sz = vault::vault_file_bytes(g.vault_);
+    const uint64_t waste_sz = g.vault_.wasted_bytes();
+    // Only show the compact option if there's significant waste to reclaim.
+    if (should_display_waste(waste_sz, file_sz)) {
+        g.naming_.confirm_compact = true;
+        g.error_.clear();
+    } else {
+        g.error_ = "No significant waste to reclaim.";
+    }
+}
+
+// Extract Delete handler to reduce handle_key_down's cognitive complexity (S3776).
+void handle_delete_key(GalleryGrid& g)
+{
+    const int s = g.nav_.selected();
+    g.naming_.confirm_delete = s >= 0 && s < static_cast<int>(g.children_.size());
+    g.error_ = g.naming_.confirm_delete ? std::string{} : "Nothing selected to delete.";
+}
+
 void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
 {
     using enum GalleryView;
@@ -426,9 +455,11 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         return;
     }
     if (key.key == SDLK_DELETE) {   // confirm-delete the focused image/video/gallery
-        const int s = nav_.selected();
-        naming_.confirm_delete = s >= 0 && s < static_cast<int>(children_.size());
-        error_ = naming_.confirm_delete ? std::string{} : "Nothing selected to delete.";
+        handle_delete_key(*this);
+        return;
+    }
+    if ((key.key == SDLK_C) && (key.mod & SDL_KMOD_SHIFT)) {   // Shift+C: confirm-compact the vault (Phase 26)
+        handle_shift_c_key(*this, key);
         return;
     }
     // Single-action shortcut keys, grouped into one switch so this function's
@@ -506,6 +537,27 @@ bool GalleryGrid::handle_delete_confirm_key(const SDL_Event& e)
     return true;
 }
 
+bool GalleryGrid::handle_compact_confirm_key(const SDL_Event& e)
+{
+    if (!naming_.confirm_compact) return false;
+    if (e.type != SDL_EVENT_KEY_DOWN) return true;   // modal swallows non-key events
+
+    const SDL_Keycode k = e.key.key;
+    if (k == SDLK_ESCAPE || k == SDLK_N) {
+        naming_.confirm_compact = false;
+        mark_dirty();
+        return true;
+    }
+    if (k != SDLK_Y) return true;                    // swallow every other key
+
+    // Run compaction on a worker thread with a progress modal + cancel (Phase 26).
+    // take_outcome() (in poll_file_job) shows the result.
+    naming_.file_op.start_compact(vault_);
+    naming_.confirm_compact = false;
+    mark_dirty();
+    return true;
+}
+
 bool GalleryGrid::handle_zip_conflict_key(const SDL_Event& e)
 {
     if (!naming_.zip.active || naming_.active || e.type != SDL_EVENT_KEY_DOWN) return false;
@@ -568,6 +620,9 @@ void GalleryGrid::handle_event(const SDL_Event& e)
     // The delete-confirmation modal owns all input while it is up.
     if (handle_delete_confirm_key(e)) return;
 
+    // The compact-confirmation modal owns all input while it is up (Phase 26).
+    if (handle_compact_confirm_key(e)) return;
+
     // The zip conflict modal owns all input while it is up (only when not naming).
     if (handle_zip_conflict_key(e)) return;
 
@@ -582,6 +637,15 @@ void GalleryGrid::handle_event(const SDL_Event& e)
                 nav_.select(idx);
                 open_selected();   // gallery → descend; image → open viewer
             }
+            break;
+        }
+        case SDL_EVENT_MOUSE_WHEEL: {
+            // Scroll without moving selection.
+            const float scroll_step = (view_ == GalleryView::List)
+                ? ROW_H * 2
+                : (CELL + GAP) * 0.5f;
+            scroll_ -= e.wheel.y * scroll_step;
+            mark_dirty();
             break;
         }
         default: break;
@@ -664,6 +728,19 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipCo
     mark_dirty();
 }
 
+// Extract cancelled-import waste-hint logic to reduce poll_import_job's nesting (S134).
+void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun)
+{
+    // User pressed Esc during import — check if waste hints are needed (Phase 26).
+    const uint64_t waste = g.vault_.wasted_bytes();
+    if (should_hint_cancelled_import_waste(waste)) {
+        g.status_ = std::format("Import cancelled — {} reclaimable, press [Shift+C]",
+                               format_size(waste));
+    } else {
+        g.status_ = std::format("Import cancelled — {} {} imported", imported, noun);
+    }
+}
+
 void poll_import_job(GalleryGrid& g)
 {
     // Only touch the vault once the worker has fully finished (take_outcome joins
@@ -680,8 +757,12 @@ void poll_import_job(GalleryGrid& g)
             // modal shows; the worker wrote nothing. F/S re-launches with a policy.
         } else {
             const char* noun = cbz ? "page" : "file";
-            g.status_ = std::format("Imported {} {}{}, skipped {}", oc->imported, noun,
-                                    oc->imported == 1 ? "" : "s", oc->skipped);
+            if (oc->cancelled) {
+                set_cancelled_import_status(g, oc->imported, noun);
+            } else {
+                g.status_ = std::format("Imported {} {}{}, skipped {}", oc->imported, noun,
+                                        oc->imported == 1 ? "" : "s", oc->skipped);
+            }
             g.naming_.zip.active = false;
             g.naming_.zip.cbz    = false;
             g.refresh();   // the import mutated the index tree — rebuild children_
@@ -723,6 +804,39 @@ bool handle_job_input(GalleryGrid& g, const SDL_Event& e)
         return true;
     }
     return false;
+}
+
+// Bundle the 6 data parameters for draw_footer_status to reduce cognitive complexity (S107).
+struct FooterStatus {
+    bool show_waste;
+    bool show_selection;
+    uint64_t waste_sz;
+    int selection_count;
+    const std::string& error;
+    const std::string& status;
+};
+
+// Extract footer + waste/selection rendering to reduce render's cognitive complexity (S3776).
+void draw_footer_status(gfx::Renderer& r, gfx::FontAtlas& font, float x_offset, float bottom,
+                        const FooterStatus& data)
+{
+    using namespace gfx::theme;
+    if (data.show_waste || data.show_selection) {
+        std::string footer;
+        if (data.show_selection)
+            footer = std::format("{} selected", data.selection_count);
+        if (data.show_waste) {
+            if (!footer.empty()) footer += " · ";
+            footer += "Waste: " + format_size(data.waste_sz) + " [Shift+C]";
+        }
+        const gfx::Color color = data.show_selection ? ACCENT : TEXT_DIM;
+        r.draw_text(font, x_offset, 120, footer, color);
+    }
+
+    if (!data.error.empty())
+        r.draw_text(font, x_offset, bottom - 36, data.error, DANGER);
+    else if (!data.status.empty())
+        r.draw_text(font, x_offset, bottom - 36, data.status, OK);
 }
 
 void GalleryGrid::update(double)
@@ -771,6 +885,35 @@ void GalleryGrid::update(double)
         if (!dest->empty()) do_export(*dest);   // empty => the picker was cancelled
         mark_dirty();
     }
+
+    // Update scroll to keep the selected item visible.
+    const int sel_idx = nav_.selected();
+    const auto H = static_cast<float>(win_.height());
+    if (sel_idx >= 0 && sel_idx < static_cast<int>(children_.size())) {
+        if (view_ == GalleryView::List) {
+            // For list view: item at row sel_idx
+            const float item_top = OY + LIST_HEADER + static_cast<float>(sel_idx) * ROW_H;
+            const float item_bottom = item_top + ROW_H;
+            // Content height = header + (num_items * row_height)
+            const float content_height = OY + LIST_HEADER + static_cast<float>(children_.size()) * ROW_H;
+            // Apply selection-following scroll
+            scroll_ = ui::ensure_visible(scroll_, item_top, item_bottom, OY + LIST_HEADER, H);
+            scroll_ = ui::clamp_scroll(scroll_, content_height, H);
+        } else {
+            // For grid view: item at position computed from grid_cell_rect
+            const auto W = static_cast<float>(win_.width());
+            const SDL_FRect cellr = grid_cell_rect(sel_idx, grid_spec(W, cols_));
+            const float item_top = cellr.y;
+            const float item_bottom = cellr.y + CELL;
+            // Content height = number of rows * (cell_height + gap) - gap + top offset
+            const int cols = grid_columns(W - 2 * OX, CELL, GAP);
+            const int total_rows = (static_cast<int>(children_.size()) + cols - 1) / cols;
+            const float content_height = OY + static_cast<float>(total_rows) * (CELL + GAP);
+            // Apply selection-following scroll
+            scroll_ = ui::ensure_visible(scroll_, item_top, item_bottom, OY, H);
+            scroll_ = ui::clamp_scroll(scroll_, content_height, H);
+        }
+    }
 }
 
 void GalleryGrid::render(gfx::Renderer& r)
@@ -805,16 +948,24 @@ void GalleryGrid::render(gfx::Renderer& r)
                 "[Enter] Open  [Space] Select  [X] Export  [M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid",
                 TEXT_FAINT);
 
-    if (!sel_.empty())
-        r.draw_text(font_, OX, 120, std::format("{} selected", sel_.count()), ACCENT);
+    // Show waste hint if it exceeds display threshold (Phase 26).
+    // Combine with selection count on the same line to avoid collision.
+    const uint64_t file_sz = vault::vault_file_bytes(vault_);
+    const uint64_t waste_sz = vault_.wasted_bytes();
+    const bool show_waste = should_display_waste(waste_sz, file_sz);
+    const bool show_selection = !sel_.empty();
+
+    draw_footer_status(r, font_, OX, H, FooterStatus{
+        .show_waste = show_waste,
+        .show_selection = show_selection,
+        .waste_sz = waste_sz,
+        .selection_count = static_cast<int>(sel_.count()),
+        .error = error_,
+        .status = status_
+    });
 
     if (view_ == GalleryView::List) render_list(r, W, H);
     else                            render_grid(r, W, H);
-
-    if (!error_.empty())
-        r.draw_text(font_, OX, H - 36, error_, DANGER);
-    else if (!status_.empty())
-        r.draw_text(font_, OX, H - 36, status_, OK);
 
     consent_.render(r, font_, W, H);
 
@@ -861,6 +1012,30 @@ void GalleryGrid::render(gfx::Renderer& r)
         centered("[Esc/N] Cancel        [Y] Delete", py + ph - 50, TEXT_DIM);
     }
 
+    // Compact-confirmation modal: shows the waste to reclaim (Phase 26).
+    if (naming_.confirm_compact) {
+        r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});   // veil
+
+        const float pw = 560;
+        const float ph = 200;
+        const float px = (W - pw) / 2;
+        const float py = (H - ph) / 2;
+        r.draw_round_rect({px, py, pw, ph}, RADIUS, SURFACE);
+        r.draw_round_rect({px, py, pw, ph}, RADIUS, ACCENT, /*filled*/ false);
+
+        auto centered = [&](const std::string& s, float y, gfx::Color c) {
+            const auto tw = static_cast<float>(font_.measure(s));
+            r.draw_text(font_, px + (pw - tw) / 2, y, s, c);
+        };
+
+        const uint64_t compact_waste = vault_.wasted_bytes();
+        const std::string waste_str = format_size(compact_waste);
+
+        centered("Compact vault?", py + 28, TEXT);
+        centered("Reclaim " + waste_str + " of wasted space.", py + 72, TEXT);
+        centered("[Esc/N] Cancel        [Y] Compact", py + ph - 50, TEXT_DIM);
+    }
+
     search_.render(r, font_, W, H);
     tag_editor_.render(r, font_, W, H);
     transfer_.render(r, font_, W, H);
@@ -891,14 +1066,20 @@ void GalleryGrid::render(gfx::Renderer& r)
     }
 }
 
-void GalleryGrid::render_grid(gfx::Renderer& r, float W, float /*H*/)
+void GalleryGrid::render_grid(gfx::Renderer& r, float W, float H)
 {
     using namespace gfx::theme;
     cols_ = grid_columns(W - 2 * OX, CELL, GAP);
-    for (size_t i = 0; i < children_.size(); ++i) {
-        const SDL_FRect cellr = grid_cell_rect(static_cast<int>(i), grid_spec(W, cols_));
+    const auto [first_idx, last_idx] = grid_visible_range(
+        scroll_, CELL, GAP, OY, H, cols_, static_cast<int>(children_.size()));
+    // If the grid is empty, the range will be {0, -1}; the loop handles this correctly.
+    for (int i = first_idx; i <= last_idx; ++i) {
+        if (i < 0 || i >= static_cast<int>(children_.size())) continue;
+        SDL_FRect cellr = grid_cell_rect(i, grid_spec(W, cols_));
+        // Apply scroll offset to cell Y position.
+        cellr.y -= scroll_;
         const vault::IndexNode* n = children_[i];
-        const bool sel = (static_cast<int>(i) == nav_.selected());
+        const bool sel = (i == nav_.selected());
         if (sel) r.draw_selection_glow(cellr, RADIUS, ACCENT);
         r.draw_round_rect(cellr, RADIUS, sel ? SURFACE_HI : SURFACE);
         r.draw_round_rect(cellr, RADIUS, sel ? ACCENT : BORDER, /*filled*/ false);
@@ -911,7 +1092,7 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float /*H*/)
         r.draw_text(font_, cellr.x + 8, label_y, fit_name(n->name, CELL - 16), TEXT);
 
         // Export-selection badge: a small accent square in the top-left corner.
-        if (sel_.contains(static_cast<int>(i))) {
+        if (sel_.contains(i)) {
             const SDL_FRect badge{cellr.x + 8, cellr.y + 8, 18, 18};
             r.draw_round_rect(badge, RADIUS_SMALL, ACCENT);
             r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
@@ -926,7 +1107,43 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float /*H*/)
     }
 }
 
-void GalleryGrid::render_list(gfx::Renderer& r, float W, float /*H*/)
+// Context struct for list-row metadata rendering (bundled params, reduce S107).
+struct ListRowMetaContext {
+    gfx::Renderer& r;
+    gfx::FontAtlas& font;
+    float dims_x;
+    float size_x;
+    float type_x;
+    float date_x;
+    float ty;
+};
+
+// Extract per-row metadata drawing to reduce render_list's cognitive complexity (S3776).
+void draw_list_row_metadata(const ListRowMetaContext& ctx, const vault::IndexNode* n, bool sel)
+{
+    using namespace gfx::theme;
+    const gfx::Color meta_c = sel ? TEXT : TEXT_DIM;
+    if (n->is_gallery()) {
+        ctx.r.draw_text(ctx.font, ctx.dims_x, ctx.ty, "-", meta_c);
+        ctx.r.draw_text(ctx.font, ctx.size_x, ctx.ty, "-", meta_c);
+        ctx.r.draw_text(ctx.font, ctx.type_x, ctx.ty, "DIR", meta_c);
+        ctx.r.draw_text(ctx.font, ctx.date_x, ctx.ty, "-", meta_c);
+    } else if (n->is_video()) {
+        const auto& vm = n->vmeta;
+        ctx.r.draw_text(ctx.font, ctx.dims_x, ctx.ty, format_duration(vm.duration_us), meta_c);
+        ctx.r.draw_text(ctx.font, ctx.size_x, ctx.ty, format_size(vm.orig_size), meta_c);
+        ctx.r.draw_text(ctx.font, ctx.type_x, ctx.ty, video_codec_name(vm.codec), meta_c);
+        ctx.r.draw_text(ctx.font, ctx.date_x, ctx.ty, format_date(vm.created_ts), meta_c);
+    } else {
+        const auto& m = n->meta;
+        ctx.r.draw_text(ctx.font, ctx.dims_x, ctx.ty, format_dimensions(m.width, m.height), meta_c);
+        ctx.r.draw_text(ctx.font, ctx.size_x, ctx.ty, format_size(m.orig_size), meta_c);
+        ctx.r.draw_text(ctx.font, ctx.type_x, ctx.ty, image_format_name(m.format), meta_c);
+        ctx.r.draw_text(ctx.font, ctx.date_x, ctx.ty, format_date(m.created_ts), meta_c);
+    }
+}
+
+void GalleryGrid::render_list(gfx::Renderer& r, float W, float H)
 {
     using namespace gfx::theme;
     cols_ = 1;   // up/down move one row at a time
@@ -939,7 +1156,7 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float /*H*/)
     const float type_x = size_x + COL_SIZE;
     const float date_x = type_x + COL_TYPE;
 
-    // Column header + separator.
+    // Column header + separator (fixed, not scrolled).
     const float hy = font_.text_top_for_center(OY + (LIST_HEADER - 6) * 0.5f);
     r.draw_text(font_, OX, hy, "NAME", TEXT_FAINT);
     r.draw_text(font_, dims_x, hy, "DIMENSIONS", TEXT_FAINT);
@@ -948,18 +1165,22 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float /*H*/)
     r.draw_text(font_, date_x, hy, "DATE", TEXT_FAINT);
     r.draw_rect({OX, OY + LIST_HEADER - 6, rw, 1.0f}, BORDER);
 
-    for (size_t i = 0; i < children_.size(); ++i) {
+    const auto [first_idx, last_idx] = list_visible_range(
+        scroll_, ROW_H, OY + LIST_HEADER, H, static_cast<int>(children_.size()));
+    for (int i = first_idx; i <= last_idx; ++i) {
+        if (i < 0 || i >= static_cast<int>(children_.size())) continue;
         const vault::IndexNode* n = children_[i];
-        const auto& m  = n->meta;
-        const bool sel = (static_cast<int>(i) == nav_.selected());
-        const SDL_FRect row{OX, OY + LIST_HEADER + static_cast<float>(i) * ROW_H,
-                            rw, ROW_H - 6};
+        const bool sel = (i == nav_.selected());
+        SDL_FRect row{OX, OY + LIST_HEADER + static_cast<float>(i) * ROW_H,
+                      rw, ROW_H - 6};
+        // Apply scroll offset to row Y position.
+        row.y -= scroll_;
         if (sel) {
             r.draw_round_rect(row, RADIUS_SMALL, SURFACE_HI);
             r.draw_round_rect(row, RADIUS_SMALL, ACCENT, /*filled*/ false);
         }
         // Export-selection marker: an accent bar down the row's left edge.
-        if (sel_.contains(static_cast<int>(i)))
+        if (sel_.contains(i))
             r.draw_rect({row.x, row.y, 4, row.h}, ACCENT);
         // Favorite marker: a gold bar down the row's right edge.
         if (n->favorite)
@@ -973,26 +1194,9 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float /*H*/)
         r.draw_text(font_, nx, ty, fit_name(n->name, dims_x - nx - 10),
                     sel ? TEXT : TEXT_DIM);
 
-        // Galleries have no image metadata; show a folder marker instead.
-        const gfx::Color meta_c = sel ? TEXT : TEXT_DIM;
-        if (n->is_gallery()) {
-            r.draw_text(font_, dims_x, ty, "-", meta_c);
-            r.draw_text(font_, size_x, ty, "-", meta_c);
-            r.draw_text(font_, type_x, ty, "DIR", meta_c);
-            r.draw_text(font_, date_x, ty, "-", meta_c);
-        } else if (n->is_video()) {
-            const auto& vm = n->vmeta;
-            // DIMENSIONS column doubles as the video's length (its play duration).
-            r.draw_text(font_, dims_x, ty, format_duration(vm.duration_us), meta_c);
-            r.draw_text(font_, size_x, ty, format_size(vm.orig_size), meta_c);
-            r.draw_text(font_, type_x, ty, video_codec_name(vm.codec), meta_c);
-            r.draw_text(font_, date_x, ty, format_date(vm.created_ts), meta_c);
-        } else {
-            r.draw_text(font_, dims_x, ty, format_dimensions(m.width, m.height), meta_c);
-            r.draw_text(font_, size_x, ty, format_size(m.orig_size), meta_c);
-            r.draw_text(font_, type_x, ty, image_format_name(m.format), meta_c);
-            r.draw_text(font_, date_x, ty, format_date(m.created_ts), meta_c);
-        }
+        // Draw metadata columns for this row (galleries/videos/images have different displays).
+        const ListRowMetaContext meta_ctx{r, font_, dims_x, size_x, type_x, date_x, ty};
+        draw_list_row_metadata(meta_ctx, n, sel);
     }
 }
 
@@ -1005,13 +1209,15 @@ void GalleryGrid::draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
 int GalleryGrid::hit_test(float mx, float my) const
 {
     const auto count = static_cast<int>(children_.size());
+    // Add scroll offset to mouse Y to convert from viewport to document coordinates.
+    const float my_doc = my + scroll_;
     if (view_ == GalleryView::List) {
         const float top = OY + LIST_HEADER;
-        if (mx < OX || mx > static_cast<float>(win_.width()) - OX || my < top) return -1;
-        const auto idx = static_cast<int>((my - top) / ROW_H);
+        if (mx < OX || mx > static_cast<float>(win_.width()) - OX || my_doc < top) return -1;
+        const auto idx = static_cast<int>((my_doc - top) / ROW_H);
         return (idx >= 0 && idx < count) ? idx : -1;
     }
-    return grid_hit(mx, my, count, grid_spec(static_cast<float>(win_.width()), cols_));
+    return grid_hit(mx, my_doc, count, grid_spec(static_cast<float>(win_.width()), cols_));
 }
 
 std::string GalleryGrid::fit_name(std::string_view name, float max_w) const

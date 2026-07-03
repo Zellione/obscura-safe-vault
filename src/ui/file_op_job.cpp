@@ -86,6 +86,33 @@ FileOpOutcome transfer_outcome(vault::TransferMode mode, int done, int failed, i
     return oc;
 }
 
+FileOpOutcome run_compact(vault::Vault& v, vault::OpProgress& progress)
+{
+    if (progress.cancel.load()) {
+        FileOpOutcome oc;
+        oc.ok = true; oc.cancelled = true;
+        oc.kind = FileOpKind::Compact;
+        oc.status = "Compaction cancelled.";
+        return oc;
+    }
+
+    // compact() owns progress.total and progress.done; it scans all chunks and
+    // writes them to a temp file with progress updates before atomically
+    // replacing the original.
+    const vault::VaultResult r = v.compact(&progress);
+    FileOpOutcome oc;
+    oc.kind = FileOpKind::Compact;
+    if (r == vault::VaultResult::Ok) {
+        oc.ok = true;
+        oc.done = progress.done.load();
+        oc.total = progress.total.load();
+        oc.status = "Vault compacted successfully.";
+    } else {
+        oc.error = std::format("Compaction failed: {:d}.", std::to_underlying(r));
+    }
+    return oc;
+}
+
 } // namespace
 
 FileOpJob::~FileOpJob()
@@ -171,6 +198,11 @@ bool FileOpJob::start_transfer_gallery(vault::Vault& src, std::string src_galler
         const int done  = progress_.done.load();
         return transfer_outcome(mode, done, 0, total, cancelled, label);
     });
+}
+
+bool FileOpJob::start_compact(vault::Vault& v)
+{
+    return launch(FileOpKind::Compact, [this, &v]() { return run_compact(v, progress_); });
 }
 
 std::optional<FileOpOutcome> FileOpJob::take_outcome()

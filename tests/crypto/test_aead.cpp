@@ -18,8 +18,8 @@ TEST(xchacha20poly1305_draft_kat)
     constexpr std::string_view plaintext_str =
         "Ladies and Gentlemen of the class of '99: If I could offer you "
         "only one tip for the future, sunscreen would be it.";
+    static_assert(plaintext_str.size() == 114);
     const size_t plen = plaintext_str.size();  // 114 bytes
-    REQUIRE(plen == 114);
 
     std::array<uint8_t, 12> ad = {
         0x50, 0x51, 0x52, 0x53, 0xc0, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7};

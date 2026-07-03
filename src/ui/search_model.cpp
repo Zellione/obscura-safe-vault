@@ -8,7 +8,7 @@ namespace ui {
 // Helper: convert a character to lowercase (ASCII only).
 static char ascii_lower(char c)
 {
-    return (c >= 'A' && c <= 'Z') ? (c - 'A' + 'a') : c;
+    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
 }
 
 // Helper: case-insensitive substring search.

@@ -1,0 +1,77 @@
+---
+# Aspirational: governs new/changed code; the existing tree is not fully
+# reformatted — enforcement is changed-lines-only (via git-clang-format in CI).
+#
+# The codebase uses hand-crafted vertical alignment (struct members, function
+# parameters) that clang-format cannot reproduce exactly; clang-format enforces
+# uniform reformatting across declaration blocks, which conflicts with the manual
+# alignment style. This .clang-format targets the closest automatable match;
+# whole-tree reformatting would alter 282+ files without value.
+
+BasedOnStyle: LLVM
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+
+ColumnLimit: 100
+
+# Allman style for function definitions; attach for classes/control structures.
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterNamespace: false
+  AfterStruct: false
+  AfterClass: false
+  AfterControlStatement: Never
+  AfterEnum: false
+  AfterUnion: false
+  BeforeElse: false
+  BeforeCatch: false
+  BeforeLambdaBody: false
+  SplitEmptyFunction: false
+
+# Pointer and reference alignment (Left = attached to type, matches code style)
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+# Consecutive declarations and assignments (disabled to avoid reformatting
+# hand-aligned struct members; existing alignment will be left as-is)
+AlignConsecutiveAssignments:
+  Enabled: false
+
+AlignConsecutiveDeclarations:
+  Enabled: false
+
+# Other formatting
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortEnumsOnASingleLine: true
+AllowShortBlocksOnASingleLine: false
+
+ConstructorInitializerIndentWidth: 4
+ContinuationIndentWidth: 4
+
+NamespaceIndentation: None
+
+# Include sorting (preserve existing blank lines between groups)
+IncludeBlocks: Preserve
+IncludeCategories:
+  - Regex: '^<[^>]+>'
+    Priority: 1  # System headers
+  - Regex: '^"[^"]+"'
+    Priority: 2  # Project headers
+
+AlignTrailingComments: true
+SpaceAfterCStyleCast: false
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeParens: ControlStatements
+SpacesBeforeTrailingComments: 2
+SpacesInAngles: Never
+
+# Standard template stuff
+FixNamespaceComments: true
+RemoveBracesLLVM: false

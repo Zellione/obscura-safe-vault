@@ -259,3 +259,25 @@ TEST(vault_operations_require_unlock)
     CHECK_EQ(v2.add_image("", pattern(10, 1), "a.jpg"), vault::VaultResult::Locked);
     CHECK_EQ(v2.create_gallery("g"), vault::VaultResult::Locked);
 }
+
+TEST(vault_file_bytes_tracks_size_growth)
+{
+    TempVault tv("file_bytes");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+
+    // Newly created vault should have some file size.
+    const uint64_t initial_size = vault::vault_file_bytes(v);
+    CHECK_TRUE(initial_size > 0);
+
+    // Add an image and verify the file grows.
+    auto img = pattern(50000, 99);
+    REQUIRE(v.add_image("", img, "test.jpg") == vault::VaultResult::Ok);
+    const uint64_t after_add_size = vault::vault_file_bytes(v);
+    CHECK_TRUE(after_add_size > initial_size);
+
+    // Locked vault returns 0 (no file handle).
+    v.lock();
+    CHECK_EQ(vault::vault_file_bytes(v), 0);
+}

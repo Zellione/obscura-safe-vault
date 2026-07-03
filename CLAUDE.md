@@ -76,7 +76,7 @@ navigable with arrow keys.
 | ZIP / CBZ import | **miniz** (public-domain/MIT) — Phase 17; CBZ Phase 24 | Single-file, header-only decompression + ZIP reader. Vendored git submodule (`vendor/miniz`, pinned to master commit `e78dfd2` — no stable release tags), compiled by premake like monocypher/stb (built with `MINIZ_NO_ZLIB_COMPATIBLE_NAMES` to avoid clashing with the libz that avformat links). Decompressed entries read into mlock'd `SecureBytes`, never to disk. One header-only shim `vendor/miniz-shim/miniz_export.h` supplies the CMake-generated header so the submodule stays pristine. **CBZ (Phase 24)** reuses this exact pipeline: a `.cbz` is a plain zip imported as one page gallery (`build_cbz_plan`/`import_cbz`) — no CBR/CB7/CBT (RAR/7z/tar). |
 | Thumbnails | **Pre-generated, stored encrypted in vault** | Gallery scrolling decrypts only the small thumbnail blobs — no full-image decode needed while browsing. |
 | Gallery model | **Free-nesting galleries; images only in leaf galleries** | A folder shows either sub-folders *or* images, never a mix. Cleaner grid view and simpler tree logic. |
-| Dependency management | **Vendored git submodules** under `vendor/` | Hermetic, reproducible, offline. SDL3 is built from source by `scripts/setup.sh` (cmake once); monocypher/stb are compiled directly by premake. |
+| Dependency management | **Vendored git submodules** under `vendor/` | Hermetic, reproducible, offline. SDL3 is built from source by `scripts/setup.sh` (cmake once); monocypher/stb are compiled directly by premake. See [docs/VENDORED_DEPS.md](docs/VENDORED_DEPS.md) for pinned versions, CVE review cadence, and bump procedures. |
 | Primary platform | **Linux (Arch) → Windows → macOS** | Owner's dev machine is Arch Linux. Keep code portable from day one; add Windows/macOS premake configs and CI in Phase 8. |
 
 ---
@@ -172,6 +172,18 @@ src/
                                             shared background-progress + cancel handle used by
                                             every bulk vault op; ui::ImportProgress now aliases
                                             it so ZipImportJob + FileOpJob share one type (Phase 25).
+             index_io.*                   ← Internal component (Phase 25): index serialization +
+                                            crash-safe double-buffer slot swapping (3-phase atomic
+                                            commit: append → write inactive slot → flip active_slot).
+                                            IndexIoContext bundles mutable state; index_io::commit_index
+                                            owns the persistence logic extracted from Vault::commit_index.
+                                            Keeps Vault method count bounded (cpp:S1448).
+             vault_ops.*                  ← Internal component (Phase 25): tree navigation + path
+                                            resolution + structural validation. Exports split_path,
+                                            resolve_gallery, resolve_node_impl, child_named, holds_media,
+                                            holds_galleries, for_each_media, relocate_node_chunks.
+                                            Pure tree traversal; no I/O or persistence. Keeps Vault
+                                            method count bounded (cpp:S1448).
   image/     image.h, decode.*,           ← stb_image decode + thumbs (Phase 3)
              thumbnail.*,                 ← format detection + libwebp/libheif
              format_registry.*,           ← decoders (Phase 9)
@@ -214,23 +226,28 @@ src/
                                             Also centralises the character-resolved is_search_key /
                                             is_advanced_search_key / is_quick_switch_key helpers
                                             (moved here from quick_switch.h).
-             file_op_job.*,               ← FileOpJob: runs export / delete / move-copy on a
-                                            background worker thread (mirrors ZipImportJob) so a
-                                            large gallery never freezes the UI (Phase 25). Same
-                                            single-thread vault-handle contract: while active()
+             file_op_job.*,               ← FileOpJob: runs export / delete / move-copy / compact
+                                            on a background worker thread (mirrors ZipImportJob)
+                                            so large operations never freeze the UI (Phase 25–26).
+                                            Same single-thread vault-handle contract: while active()
                                             the worker owns the vault(s) and the host screen only
                                             polls total()/done() + take_outcome() and draws a
                                             modal (no thumbnail/listing reads). Esc→cancel().
              progress_modal.*,            ← draw_op_progress: the shared veil + "N/M" bar +
                                             cancel-hint modal reused by every screen hosting a
-                                            background job (import/export/delete/move) (Phase 25).
+                                            background job (import/export/delete/move/compact) (Phase 25–26).
+             waste_threshold.h,           ← pure vault-bloat thresholds (Phase 26):
+                                            should_display_waste(wasted, file_size) — true if waste
+                                            exceeds max(50 MiB, 10% of file size); should_hint_
+                                            cancelled_import_waste(wasted) — true if > 1 MiB.
              unlock_screen.*,             ← unlock + create vault (Phase 5)
              gallery_grid.*,              ← breadcrumb grid (Phase 5). Phase 25: export (X) and
                                             delete (Del) run on a background FileOpJob (naming_.file_op)
                                             with a progress modal + Esc-cancel; vault_busy() (import
                                             OR file_op OR transfer_.job_active) gates render/update/
                                             input + the idle-lock so the UI never touches the vault
-                                            mid-job.
+                                            mid-job. Phase 26: Shift+C confirms compact (waste hint in
+                                            footer); cancelled-import shows reclaimable waste hint.
              image_viewer.*,              ← zoom/pan + thumb strip + fill-scroll + slideshow;
                                             hosts a fit-only VideoPlayback for video items (Phase 15).
                                             Single-image export (X) stays synchronous (one image is
@@ -270,19 +287,25 @@ src/
                                             top-level join + name substring + scope;
                                             evaluate()→{matched,score}; serialize/deserialize
                                             query blob; tag_suggestions() autocomplete
-             advanced_search_screen.*,    ← `Shift+/` dedicated screen (Phase 18): keyboard
-                                            query builder + live result list + saved-searches
-                                            sidebar (Ctrl+S save / Enter load / Del delete);
-                                            coexists with the Phase 12 `/` overlay. `Ctrl+L`
-                                            toggles the result panel List ↔ thumbnail Grid
-                                            (Phase 20): a session-scoped ResultView drives a
-                                            render_result_grid free friend that reuses the
-                                            shared tile_thumb draw; takes a TextureCache + owns
-                                            an off-thread decode worker (update() pumps it).
-                                            Query/params/cursor/view persist across visits via
-                                            a session-scoped AdvancedSearchState (restored in
+             advanced_search_screen.*,    ← `Shift+/` dedicated screen coordinator (Phase 18):
+                                            keyboard query builder + result view + saved-search
+                                            panel. Coexists with the Phase 12 `/` overlay.
+                                            Query/params/cursor persist across visits via a
+                                            session-scoped AdvancedSearchState (restored in
                                             on_enter / saved in on_exit); `Ctrl+R` clears behind
-                                            a Y/N confirm.
+                                            a Y/N confirm. Phase 20 decomposition: extracted
+                                            SearchResultView (result grid navigation state) and
+                                            SavedSearchPanel (saved CRUD ops + sidebar rendering)
+                                            from monolithic screen → cleaner separation of concerns.
+             search_result_view.*         ← Phase 20 result grid+list view state: ResultView
+                                            {List,Grid} + toggle + navigation (move_delta/move).
+                                            Owns off-thread decode worker + feeds thumbnail
+                                            cache. Pure SDL-free state machine; driven by
+                                            advanced_search_screen's on_update/handle_key.
+             saved_search_panel.*         ← Phase 20 saved-search sidebar: list rendering + CRUD
+                                            (Ctrl+S save / Enter load / Del delete). Pure
+                                            vault/SDL-free; fed by AdvancedSearchScreen's query
+                                            builder for serialization/suggestions.
              advanced_search_state.h,     ← session-scoped advanced-search state (Phase 20
                                             follow-up): query + builder buffers + cursor + view.
                                             App owns one per unlocked-vault session, resets it
@@ -310,7 +333,9 @@ src/
                                             root grid) so TagGalleries can return to the overview
                                             (Phase 22); also gained handle_extra_key/extra_hint/
                                             show_favorite_badge hooks used by TagImages and TagGalleries
-                                            (Phase 22 follow-up).
+                                            (Phase 22 follow-up). New browse-by-X screens (e.g.,
+                                            tag galleries / images) should subclass FavoritesScreen
+                                            and use its hooks, not add NavKind variants.
              tag_overview_model.*,        ← pure, SDL/vault-free tag-overview presentation
                                             (Phase 22): TagTally{tag,gallery_count,image_count} +
                                             sort_tags (Name / Count-desc) + filter_tags
@@ -444,6 +469,9 @@ src/
                                             NO secrets, missing/invalid → 1.0; mirrors theme_pref
                                             (Phase 25). App loads it at init → media::set_saved_volume
                                             and saves media::saved_volume() on clean exit.
+             harden.{h,cpp}               ← disable_core_dumps() (Task 6): Linux prctl + setrlimit,
+                                            macOS setrlimit, Windows no-op; called at app init
+                                            (Release only) before any vault unlock.
 vendor/
   SDL3/           ← git submodule, built by scripts/setup.sh (cmake)
   monocypher/     ← git submodule, compiled by premake (single .c file)
@@ -535,6 +563,11 @@ premake-core GitHub releases. It is **not** committed to the repo.
 4. **Authenticate before decrypt.** Always verify the Poly1305 tag before using any plaintext bytes.
 5. **No logging of key material.** Keys, passwords, and decrypted content must never appear in log output.
 
+### Hardening notes
+- **Pixel data is best-effort mlock'd.** The first mlock failure per process is logged once; subsequent failures stay silent (uses `should_warn_mlock_once()`). On Linux, successful mlock is followed by `madvise(MADV_DONTDUMP)` for defense-in-depth (silently ignored if it fails).
+- **Core dumps are disabled in Release builds.** At app startup (Release only), `prctl(PR_SET_DUMPABLE, 0)` (Linux) / `setrlimit(RLIMIT_CORE, 0)` (macOS) prevent core dumps from capturing decrypted data. Debug builds keep dumps + ptrace attach enabled.
+- **Password change is not crash-safe.** Avoid force-killing the app during password re-wrap (a KEK change without bulk re-encrypt); recovery would require manual recovery steps.
+
 ### Testing policy
 - **Always write unit and integration tests** alongside any new feature or module.
 - Unit tests live in `tests/<module>/` and cover edge cases, error paths, and known-answer vectors.
@@ -579,5 +612,5 @@ premake-core GitHub releases. It is **not** committed to the repo.
 | HEIC / AVIF | Phase 9 | libheif + libavif; heavy codec deps. |
 | WebP | Phase 9 | libwebp; moderate dep. |
 | Windows / macOS builds | Phase 8 | premake configs + CI; macOS code-signing. |
-| Compaction | Phase 7 | Reclaim orphaned chunk space after deletes. |
+| Compaction | ✅ Phase 7 (Task 7: secure wipe added) | Reclaim orphaned chunk space after deletes. Compact() now overwrites the original file with zeros before removal (best-effort; CoW filesystems, SSD wear-leveling, and snapshots may retain old blocks). |
 | Password strength meter | Phase 7 | On vault creation; encourage strong passphrases. |

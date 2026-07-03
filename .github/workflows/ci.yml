@@ -29,12 +29,15 @@ on:
       - 'docs/**'
       - 'LICENSE'
       - '.gitignore'
+  schedule:
+    - cron: '0 2 * * 0'
 
 jobs:
   build-and-test:
     name: ${{ matrix.compiler }} / ${{ matrix.config }} / Linux
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    if: github.event_name != 'schedule'
 
     strategy:
       fail-fast: false
@@ -229,6 +232,7 @@ jobs:
     # busting the cache (adding vendor/ffmpeg changed .gitmodules, which is in the
     # SDL3 + codec cache keys). Revisit when the newer image's MSVC is fixed.
     runs-on: windows-2022
+    if: github.event_name != 'schedule'
 
     strategy:
       fail-fast: false
@@ -339,6 +343,7 @@ jobs:
   macos:
     name: AppleClang / ${{ matrix.config }} / macOS
     runs-on: macos-latest
+    if: github.event_name != 'schedule'
 
     strategy:
       fail-fast: false
@@ -439,6 +444,7 @@ jobs:
     name: ASAN+UBSan / tests / Linux
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    if: github.event_name != 'schedule'
 
     steps:
       - name: Checkout (with submodules)
@@ -568,6 +574,147 @@ jobs:
         run: ./build/bin/Debug/osv_tests
 
   # ===========================================================================
+  # ASAN+UBSan codecs — fuzz test + ASAN-instrumented codec builds.
+  # Triggered only on workflow_dispatch (manual) or weekly schedule, not per-PR.
+  # Tests the deterministic codec fuzz suite (test_fuzz_codecs.cpp) with
+  # ASAN-instrumented WebP/HEIC/AVIF/video decoders to catch memory errors in
+  # vendored codec parsers on malformed input.
+  # ===========================================================================
+  tests-asan-codecs:
+    name: ASAN+UBSan / tests-asan-codecs / Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    # Only run on manual workflow_dispatch or weekly schedule, not per-PR.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /tmp/apt-cache
+          key: apt-asan-codecs-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-asan-codecs-
+
+      - name: Install build dependencies
+        run: |
+          # CI's apt mirror occasionally hangs the connection indefinitely; bound
+          # each fetch (30s) and retry so a stuck mirror fails fast instead of
+          # hanging the whole job. Backed by the job-level timeout-minutes too.
+          # Cache the downloaded .debs in /tmp/apt-cache (Dir::Cache::archives +
+          # Keep-Downloaded-Packages) so repeat runs skip the slow apt download.
+          # 1777 lets apt's _apt sandbox user write into the restored cache dir.
+          sudo mkdir -p /tmp/apt-cache/partial
+          sudo chmod -R 1777 /tmp/apt-cache
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDir::Cache::archives "/tmp/apt-cache";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' \
+            | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
+          # The runner image ships Microsoft/Azure apt repos we don't use; they
+          # intermittently 403, which fails `apt-get update` (exit 100) and kills
+          # the whole step. Drop them first — none of our build deps come from them.
+          sudo rm -f /etc/apt/sources.list.d/*microsoft* /etc/apt/sources.list.d/*azure* 2>/dev/null || true
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build \
+            nasm \
+            g++-14 \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxss-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libasound2-dev \
+            libpulse-dev
+          # apt re-creates partial/ and lock owned by the _apt user (mode 700/640)
+          # during install; make the cache dir readable so the (non-root) runner
+          # can tar it in the post-save step (otherwise the save fails silently).
+          sudo chmod -R a+rX /tmp/apt-cache
+
+      - name: Use gcc-14 as default gcc
+        run: |
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
+            --slave /usr/bin/g++ g++ /usr/bin/g++-14
+
+      - name: Cache premake5 binary
+        uses: actions/cache@v4
+        id: cache-premake5
+        with:
+          path: bin/premake5
+          key: premake5-5.0.0-beta8-linux
+
+      - name: Download premake5
+        if: steps.cache-premake5.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p bin
+          curl -fsSL \
+            "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-linux.tar.gz" \
+            -o /tmp/premake5.tar.gz
+          tar -xzf /tmp/premake5.tar.gz -C bin/
+          chmod +x bin/premake5
+
+      - name: Cache vendored SDL3 build
+        uses: actions/cache@v4
+        id: cache-sdl3
+        with:
+          path: vendor/SDL3/build
+          key: sdl3-linux-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored SDL3
+        if: steps.cache-sdl3.outputs.cache-hit != 'true'
+        run: |
+          cmake -S vendor/SDL3 -B vendor/SDL3/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSDL_STATIC=ON            \
+            -DSDL_SHARED=OFF           \
+            -DSDL_TESTS=OFF            \
+            -DSDL_EXAMPLES=OFF         \
+            -DSDL_INSTALL_TESTS=OFF    \
+            -DSDL_X11_XTEST=OFF        \
+            -DSDL_JOYSTICK=OFF         \
+            -DSDL_HAPTIC=OFF           \
+            -DSDL_SENSOR=OFF           \
+            -DSDL_CAMERA=OFF           \
+            -G "Ninja"
+          cmake --build vendor/SDL3/build --parallel "$(nproc)"
+
+      # Build ASAN-instrumented codecs with a separate cache key (-asan suffix).
+      - name: Cache ASAN vendored codecs build
+        uses: actions/cache@v4
+        id: cache-codecs-asan
+        with:
+          path: vendor/codecs-prefix-asan
+          key: codecs-asan-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
+
+      - name: Build ASAN-instrumented vendored codecs
+        if: steps.cache-codecs-asan.outputs.cache-hit != 'true'
+        run: scripts/build_codecs.sh --asan
+
+      - name: Generate Ninja build files (--asan)
+        run: bin/premake5 --asan ninja --cc=gcc
+
+      - name: Build osv_tests (ASAN + instrumented codecs)
+        run: ninja osv_tests_Debug_x64
+
+      - name: Run codec fuzz tests under ASAN + UBSan + LSan
+        env:
+          # gfx tests use SDL's software renderer; force a headless video driver
+          # so SDL never tries to open a display on the CI runner.
+          SDL_VIDEODRIVER: dummy
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: ./build/bin/Debug/osv_tests
+
+  # ===========================================================================
   # SonarQube analysis — static analysis of src/ via the SonarSource C/C++
   # build-wrapper, which captures the real compilation of the osv target.
   #
@@ -580,6 +727,7 @@ jobs:
     name: SonarQube analysis / Linux
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    if: github.event_name != 'schedule'
 
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -753,3 +901,128 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ===========================================================================
+  # Linting — clang-format (dry-run) + clang-tidy (non-blocking).
+  # Runs on PRs only, reuses setup from build-and-test (minimal cost).
+  # continue-on-error: true so lint findings don't block the workflow.
+  # ===========================================================================
+  lint:
+    name: Lint / clang-format + clang-tidy / Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name != 'schedule'
+    continue-on-error: true
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /tmp/apt-cache
+          key: apt-lint-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-lint-
+
+      - name: Install build dependencies (clang + ninja for compile_commands.json)
+        run: |
+          sudo mkdir -p /tmp/apt-cache/partial
+          sudo chmod -R 1777 /tmp/apt-cache
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDir::Cache::archives "/tmp/apt-cache";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' \
+            | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
+          sudo rm -f /etc/apt/sources.list.d/*microsoft* /etc/apt/sources.list.d/*azure* 2>/dev/null || true
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build \
+            clang-format \
+            clang-tidy \
+            gcc-14 \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxss-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libasound2-dev \
+            libpulse-dev
+          sudo chmod -R a+rX /tmp/apt-cache
+
+      - name: Cache premake5 binary
+        uses: actions/cache@v4
+        id: cache-premake5
+        with:
+          path: bin/premake5
+          key: premake5-5.0.0-beta8-linux
+
+      - name: Download premake5
+        if: steps.cache-premake5.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p bin
+          curl -fsSL \
+            "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-linux.tar.gz" \
+            -o /tmp/premake5.tar.gz
+          tar -xzf /tmp/premake5.tar.gz -C bin/
+          chmod +x bin/premake5
+
+      - name: Cache vendored SDL3 build
+        uses: actions/cache@v4
+        id: cache-sdl3
+        with:
+          path: vendor/SDL3/build
+          key: sdl3-linux-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored SDL3
+        if: steps.cache-sdl3.outputs.cache-hit != 'true'
+        run: |
+          cmake -S vendor/SDL3 -B vendor/SDL3/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSDL_STATIC=ON            \
+            -DSDL_SHARED=OFF           \
+            -DSDL_TESTS=OFF            \
+            -DSDL_EXAMPLES=OFF         \
+            -DSDL_INSTALL_TESTS=OFF    \
+            -DSDL_X11_XTEST=OFF        \
+            -DSDL_JOYSTICK=OFF         \
+            -DSDL_HAPTIC=OFF           \
+            -DSDL_SENSOR=OFF           \
+            -DSDL_CAMERA=OFF           \
+            -G "Ninja"
+          cmake --build vendor/SDL3/build --parallel "$(nproc)"
+
+      - name: Use gcc-14 as default gcc
+        run: |
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
+            --slave /usr/bin/g++ g++ /usr/bin/g++-14
+
+      - name: Generate Ninja build files (for compile_commands.json)
+        run: bin/premake5 ninja --cc=gcc
+
+      - name: clang-format --diff (changed lines only)
+        run: |
+          # For PR events, check against the merge base. For push events (main),
+          # fall back to HEAD~1. This ensures we only enforce style on new/changed
+          # code, not the entire tree (which has hand-aligned struct members
+          # incompatible with automated reformatting).
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="HEAD~1"
+          fi
+          git clang-format --diff "$BASE" -- src/ tests/ || true
+
+      - name: clang-tidy (src/)
+        run: |
+          find src -type f -name "*.cpp" \
+            -exec clang-tidy -p . {} + 2>&1 | tee /tmp/clang-tidy-output.txt
+          # Extract summary line
+          grep -E "warning:|error:" /tmp/clang-tidy-output.txt | head -20 || true
+          echo "---"
+          echo "Total issues found: $(grep -c -E "warning:|error:" /tmp/clang-tidy-output.txt || echo 0)"

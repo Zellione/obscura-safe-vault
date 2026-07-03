@@ -14,7 +14,10 @@ namespace {
 // RAII for the libheif context — freed on every return path.
 struct CtxGuard {
     heif_context* ctx;
+    explicit CtxGuard(heif_context* c) noexcept : ctx(c) {}
     ~CtxGuard() { if (ctx) heif_context_free(ctx); }
+    CtxGuard(const CtxGuard&) = delete;
+    CtxGuard& operator=(const CtxGuard&) = delete;
 };
 
 } // namespace
@@ -27,7 +30,7 @@ std::optional<ImageData> decode_heif_from_memory(std::span<const uint8_t> data)
 {
     heif_context* ctx = heif_context_alloc();
     if (!ctx) return std::nullopt;
-    CtxGuard guard{ctx};
+    CtxGuard guard(ctx);
 
     // Buffer must outlive the context (no copy); `data` does, for this call.
     if (heif_context_read_from_memory_without_copy(
@@ -39,9 +42,9 @@ std::optional<ImageData> decode_heif_from_memory(std::span<const uint8_t> data)
         return std::nullopt;
 
     heif_image* img = nullptr;
-    const heif_error err = heif_decode_image(
-        handle, &img, heif_colorspace_RGB, heif_chroma_interleaved_RGB, nullptr);
-    if (err.code != heif_error_Ok || !img) {
+    if (const heif_error err = heif_decode_image(
+            handle, &img, heif_colorspace_RGB, heif_chroma_interleaved_RGB, nullptr);
+        err.code != heif_error_Ok || !img) {
         heif_image_handle_release(handle);
         return std::nullopt;
     }
@@ -54,12 +57,12 @@ std::optional<ImageData> decode_heif_from_memory(std::span<const uint8_t> data)
 
     std::optional<ImageData> out;
     if (plane && w > 0 && h > 0 && stride >= w * 3) {
+        using enum ImageFormat;
         ImageData d;
         d.width  = w;
         d.height = h;
         // The container brand decides the tag; libheif handles either decoder.
-        d.format = (detect_format(data) == ImageFormat::AVIF) ? ImageFormat::AVIF
-                                                              : ImageFormat::HEIC;
+        d.format = (detect_format(data) == AVIF) ? AVIF : HEIC;
         d.pixels.resize(static_cast<size_t>(w) * h * 3);
         // Copy row by row: the plane is padded to `stride`, our buffer is tight.
         for (int y = 0; y < h; ++y)

@@ -509,6 +509,47 @@ vendor/
 assets/fonts/   bundled OFL font for stb_truetype
 ```
 
+## Branch `audit-improvements` (2026-07-03, NOT yet merged — owner gate)
+
+13-task audit-improvement branch (eca6984..c26e59b). New/changed modules:
+
+- `src/ui/grid_layout.{h,cpp}` — pure viewport maths (grid_visible_range/list_visible_range/
+  ensure_visible/clamp_scroll); GalleryGrid + FavoritesScreen now CULL to the visible range and
+  SCROLL (selection-following + mouse wheel; grids previously could not scroll at all).
+- ImageViewer thumb strip: decode now off-thread (own DecodeWorker, mirrors tile_thumb;
+  failed-set keyed on data_offset).
+- Build: fatalwarnings{All} + -Wshadow -Wconversion (project code, gcc+clang; clang adds
+  -Wno-sign-conversion for gcc parity — 134 sites deferred), Release adds
+  -fstack-protector-strong + _FORTIFY_SOURCE=3.
+- `tests/image/test_fuzz_codecs.cpp` — deterministic malformed-media corpus (~3500 iters);
+  `scripts/build_codecs.sh --asan` → `vendor/codecs-prefix-asan/` (gitignored); premake --asan
+  prefers it; ci.yml weekly cron `0 2 * * 0` runs tests-asan-codecs ONLY (all other jobs gated
+  `github.event_name != 'schedule'`); new non-blocking `lint` job (clang-tidy src/ +
+  changed-lines-only git clang-format). `.clang-format` (aspirational — tree not reformatted)
+  + `.clang-tidy` at root.
+- Vault waste UX: `vault::vault_file_bytes` free friend; `Vault::compact(vault::OpProgress*)`
+  (cancel aborts before rename, 3-layer check); `src/ui/waste_threshold.h` pure helpers
+  (max(50MiB,10%) footer hint / 1MiB post-cancel hint); GalleryGrid Shift+C = confirm-compact on
+  FileOpJob (FileOpKind::Compact).
+- Compact commit sequence is now rename-aside: osv→.old (dir fsync) → temp→osv (dir fsync) →
+  zero-wipe .old (`fileutil::wipe_and_remove`, 1MiB chunks, best-effort/CoW-honest) → remove.
+- `src/platform/harden.{h,cpp}` — disable_core_dumps() (prctl+setrlimit Linux / setrlimit macOS /
+  no-op Win), called NDEBUG-only in App::init; secure_mem.h adds MADV_DONTDUMP post-mlock +
+  once-only mlock WARNING (atomic_flag).
+- `src/vault/index_io.{h,cpp}` (commit_index/write_header, IndexIoContext — crash-safe 3-phase
+  swap moved here) + `src/vault/vault_ops.{h,cpp}` (split_path/resolve/traversal/
+  relocate_node_chunks); vault.cpp delegates via TU-local using-directives; vault.h unchanged.
+- `src/ui/search_result_view.{h,cpp}` + `src/ui/saved_search_panel.{h,cpp}` — AdvancedSearchScreen
+  decomposed (34→19 methods); panel handle_key returns an Action enum (screen owns load;
+  panel owns delete); hot/focus state passed as render parameter.
+- `docs/VENDORED_DEPS.md` — pin table + quarterly CVE cadence; monocypher moved to the exact
+  `4.0.2` release tag (0d85f98; tags are UNprefixed). Owner flags: monocypher 4.0.3 has
+  constant-time hardening; libde265 v1.1.1 exists (pin == v1.0.15 exactly).
+- `tests/ui/test_import_bench.cpp` — OSV_BENCH=1 / OSV_BENCH_DIR knobs; verdict: no index-commit
+  batching needed (16.8ms/image real disk, fsync-dominated).
+- 640 tests green (Debug/ASan/Release, gcc+clang). scripts/test.sh does NOT build the app —
+  scripts/build.sh is required evidence for app-side changes.
+
 ## Project-wide invariants (NEVER violate)
 
 1. No decrypted bytes to disk — only `mlock`'d heap buffers.

@@ -22,8 +22,8 @@ std::optional<ImageData> decode_webp_from_memory(std::span<const uint8_t> data)
     img.format = ImageFormat::WebP;
     img.pixels.resize(static_cast<size_t>(w) * h * 3);
 
-    const int stride = w * 3;
-    if (!WebPDecodeRGBInto(data.data(), data.size(),
+    if (const int stride = w * 3;
+        !WebPDecodeRGBInto(data.data(), data.size(),
                            img.pixels.data(), img.pixels.size(), stride))
         return std::nullopt;
 

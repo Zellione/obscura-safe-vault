@@ -2,6 +2,10 @@
 # build_codecs.sh — build the vendored image codecs (WebP, HEIC/AVIF) as static
 # libraries and install them into one staging prefix (vendor/codecs-prefix).
 #
+# Usage:
+#   scripts/build_codecs.sh         # Default Release build
+#   scripts/build_codecs.sh --asan  # ASAN-instrumented build into vendor/codecs-prefix-asan/
+#
 # Each codec is cmake-built static and `cmake --install`ed into the shared prefix
 # so that dependents (libheif) discover their dependencies (libde265/libaom) via
 # CMAKE_PREFIX_PATH, and premake5.lua links the whole set from a single dir.
@@ -14,7 +18,23 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 NPROC="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
-CODEC_PREFIX="$REPO_ROOT/vendor/codecs-prefix"
+ASAN=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --asan) ASAN=true ;;
+        *)
+            echo "Unknown option: $arg"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ "$ASAN" == true ]]; then
+    CODEC_PREFIX="$REPO_ROOT/vendor/codecs-prefix-asan"
+else
+    CODEC_PREFIX="$REPO_ROOT/vendor/codecs-prefix"
+fi
 
 build_codec() {  # name  src_dir  extra_cmake_args...
     local name="$1"; local src="$2"; shift 2
@@ -24,6 +44,15 @@ build_codec() {  # name  src_dir  extra_cmake_args...
         return
     fi
     echo "==> Building vendored $name (static)..."
+
+    # ASAN+UBSan instrumentation flags if --asan was passed.
+    local cmake_c_flags=""
+    local cmake_cxx_flags=""
+    if [[ "$ASAN" == true ]]; then
+        cmake_c_flags="-fsanitize=address,undefined -fno-omit-frame-pointer"
+        cmake_cxx_flags="-fsanitize=address,undefined -fno-omit-frame-pointer"
+    fi
+
     cmake -S "$src" -B "$src/build"                 \
         -DCMAKE_BUILD_TYPE=Release                  \
         -DBUILD_SHARED_LIBS=OFF                     \
@@ -32,6 +61,8 @@ build_codec() {  # name  src_dir  extra_cmake_args...
         -DCMAKE_INSTALL_LIBDIR=lib                  \
         -DCMAKE_PREFIX_PATH="$CODEC_PREFIX"         \
         -DCMAKE_POLICY_VERSION_MINIMUM=3.5          \
+        -DCMAKE_C_FLAGS="$cmake_c_flags"            \
+        -DCMAKE_CXX_FLAGS="$cmake_cxx_flags"        \
         "$@" -G "Ninja"
     cmake --build "$src/build" --parallel "$NPROC"
     cmake --install "$src/build"
@@ -74,6 +105,15 @@ build_ffmpeg() {
     fi
     echo "==> Building vendored ffmpeg (decode-only, static)..."
     local src="$REPO_ROOT/vendor/ffmpeg"
+
+    # ASAN+UBSan instrumentation flags if --asan was passed.
+    local extra_cflags=""
+    local extra_ldflags=""
+    if [[ "$ASAN" == true ]]; then
+        extra_cflags="-fsanitize=address,undefined -fno-omit-frame-pointer"
+        extra_ldflags="-fsanitize=address,undefined"
+    fi
+
     ( cd "$src" && ./configure \
         --prefix="$CODEC_PREFIX"                                            \
         --enable-static --disable-shared                                    \
@@ -86,11 +126,13 @@ build_ffmpeg() {
         --enable-parser=h264,hevc,aac,vorbis,opus,flac,ac3,mpegaudio        \
         --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb                      \
         --enable-swscale                                                    \
-        --enable-pic )
+        --enable-pic                                                        \
+        --extra-cflags="$extra_cflags"                                      \
+        --extra-ldflags="$extra_ldflags" )
     make -C "$src" -j"$NPROC"
     make -C "$src" install
 }
 
 build_ffmpeg
 
-echo "==> Codecs installed into vendor/codecs-prefix"
+echo "==> Codecs installed into $CODEC_PREFIX"

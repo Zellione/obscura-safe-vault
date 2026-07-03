@@ -17,6 +17,7 @@ namespace ui {
 struct ZipImportOutcome {
     bool                     ok = false;
     bool                     needs_resolution = false;
+    bool                     cancelled = false;     // user pressed Esc during import (Phase 26)
     int                      imported = 0;
     int                      skipped = 0;
     std::vector<std::string> mixed_dirs;

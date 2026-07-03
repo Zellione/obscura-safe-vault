@@ -5,10 +5,18 @@
 
 #ifdef OSV_VENDORED_AV
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 namespace media {
 

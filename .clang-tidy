@@ -1,0 +1,38 @@
+---
+# Checks: bugprone-*, performance-*, concurrency-*, modernize-* (minus trailing-return-type),
+# readability-* (minus the noisy ones listed below).
+#
+# Exclusions and justifications:
+#   - modernize-use-trailing-return-type: C++20 with traditional signatures reads better
+#     in a codebase already written that way. Enforcing consistency would require a mass
+#     rewrite that doesn't improve clarity.
+#   - readability-identifier-length: Project uses single-letter loop indices (i, j)
+#     which are idiomatic and clear in context. Short names for temporary vars are fine.
+#   - readability-magic-numbers: Crypto nonces, chunk sizes, buffer lengths are by
+#     definition "magic" constants — they come from specs/standards. Named constants
+#     exist where appropriate (VIDEO_CHUNK_SIZE, KEY_SIZE, etc.); flagging all of them
+#     would create noise.
+#   - readability-function-cognitive-complexity: Classes like Vault, GalleryGrid have
+#     legitimate complexity from state machines and UI event dispatch. Artificial
+#     refactoring to pass this check would reduce readability.
+
+Checks: >
+  bugprone-*,
+  performance-*,
+  concurrency-*,
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  readability-*,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -readability-function-cognitive-complexity
+
+WarningsAsErrors: ''
+
+# HeaderFilterRegex: Only check src/ headers, not vendor or tests.
+# Vendor headers (third-party code) and test fixtures are out of scope for
+# style/modernization linting — we enforce practices only on our own code.
+HeaderFilterRegex: '^.*/src/.*'
+
+# Common config
+UseColor: true

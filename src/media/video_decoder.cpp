@@ -2,6 +2,11 @@
 
 #include "media/video_decoder.h"
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
@@ -11,6 +16,9 @@ extern "C" {
 #include <libavutil/opt.h>
 #include <libswscale/swscale.h>
 }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 #include <cstring>
 #include <print>

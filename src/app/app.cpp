@@ -7,6 +7,7 @@
 
 #include "gfx/renderer.h"
 #include "gfx/theme.h"
+#include "platform/harden.h"
 #include "platform/paths.h"
 #include "media/volume_setting.h"
 #include "platform/theme_pref.h"
@@ -31,6 +32,13 @@ namespace app {
 
 bool App::init()
 {
+    // Disable core dumps in Release builds to prevent decrypted data / key material
+    // from being dumped to disk. In Debug, core dumps and ptrace attach are kept
+    // enabled for developers to use debuggers and analyze crashes.
+#ifdef NDEBUG
+    platform::disable_core_dumps();
+#endif
+
     if (!window_.init()) {
         std::println(stderr, "[App] Window initialisation failed.");
         return false;

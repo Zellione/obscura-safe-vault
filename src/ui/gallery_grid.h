@@ -84,8 +84,9 @@ private:
     void pump_import();            // poll the file dialog while transfer is not active
     void do_zip_import(const std::filesystem::path& zip_path, ui::ZipConflictPolicy policy);
     void pump_zip_import();        // poll the zip file dialog while transfer is not active
-    bool handle_zip_conflict_key(const SDL_Event& e);  // Flatten/Skip/Esc modal; true if consumed
-    bool handle_delete_confirm_key(const SDL_Event& e);  // Del-confirm modal; true if consumed
+    bool handle_zip_conflict_key(const SDL_Event& e);     // Flatten/Skip/Esc modal; true if consumed
+    bool handle_delete_confirm_key(const SDL_Event& e);   // Del-confirm modal; true if consumed
+    bool handle_compact_confirm_key(const SDL_Event& e);  // Shift+C compact modal; true if consumed (Phase 26)
     void start_tag_editor(bool import_list);  // G: open tag editor; Shift+G: import a tag list (Phase 21)
     void toggle_favorite_current();  // flip favorite on the focused tile (B)
     SDL_Texture*       thumb_texture(const vault::IndexNode& node);
@@ -102,6 +103,9 @@ private:
     friend void poll_file_job(GalleryGrid& g);          // drain a finished export/delete job
     friend bool vault_busy(const GalleryGrid& g);       // any worker owns the vault(s)?
     friend bool handle_job_input(GalleryGrid& g, const SDL_Event& e);  // job-active Esc→cancel gate
+    friend void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key);  // Shift+C compact confirm
+    friend void handle_delete_key(GalleryGrid& g);                                   // Del confirm
+    friend void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);  // cancelled import waste hint
     void draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
                          const SDL_FRect& box);
     [[nodiscard]] int  hit_test(float mx, float my) const;  // item under cursor, or -1
@@ -123,6 +127,7 @@ private:
     std::vector<const vault::IndexNode*> children_;
     int                   cols_ = 1;
     GalleryView           view_ = GalleryView::Grid;
+    float                 scroll_ = 0.0f;  // vertical scroll offset (pixels scrolled down)
     std::string           error_;
     std::string           status_;   // transient export result message
 
@@ -139,8 +144,9 @@ private:
         std::string  buf;
         PendingZip   zip;              // zip import descriptor in flight
         ZipImportJob import_job;       // background executor for the zip/cbz import (Phase 24)
-        FileOpJob    file_op;          // background executor for export/delete (Phase 25)
+        FileOpJob    file_op;          // background executor for export/delete/compact (Phase 25/26)
         bool         confirm_delete = false;  // Del on a media tile: awaiting Y/N confirm
+        bool         confirm_compact = false; // Shift+C on the gallery: awaiting Y/N compact confirm (Phase 26)
         std::string  tag_target;       // gallery path awaiting a tag-list import (Shift+G, Phase 21)
     };
     Naming naming_;
@@ -158,10 +164,15 @@ private:
 // Free friends of GalleryGrid (see the in-class declarations): poll_import_job /
 // poll_file_job drain a finished background import / export-delete and update the
 // grid's status + listing; vault_busy reports whether any worker owns the vault(s);
-// handle_job_input swallows input (Esc→cancel) while a job runs.
+// handle_job_input swallows input (Esc→cancel) while a job runs; handle_shift_c_key /
+// handle_delete_key extract key handlers to reduce handle_key_down's cognitive complexity;
+// set_cancelled_import_status handles cancelled import waste hints.
 void poll_import_job(GalleryGrid& g);
 void poll_file_job(GalleryGrid& g);
 [[nodiscard]] bool vault_busy(const GalleryGrid& g);
 [[nodiscard]] bool handle_job_input(GalleryGrid& g, const SDL_Event& e);
+void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
+void handle_delete_key(GalleryGrid& g);
+void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);
 
 } // namespace ui

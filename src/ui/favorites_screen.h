@@ -27,6 +27,7 @@ public:
 
     void on_enter() override;
     void handle_event(const SDL_Event& e) override;
+    void update(double dt) override;
     void render(gfx::Renderer& r) override;
 
 protected:
@@ -72,6 +73,7 @@ private:
     NavModel        nav_;   // selection only (no path stack used here)
     std::vector<vault::SearchHit> favs_;
     int             cols_ = 1;
+    float           scroll_ = 0.0f;  // vertical scroll offset (pixels scrolled down)
 };
 
 } // namespace ui
