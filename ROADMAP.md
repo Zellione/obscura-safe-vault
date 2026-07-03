@@ -1065,53 +1065,42 @@ gallery Move leaves the source intact (recoverable duplicate, never a loss). The
 
 ---
 
-## Phase 26 — Broaden `.mov` / video codec support 🔜
+## Phase 26 — Transparent vault compression (adaptive, store-if-smaller) 🔜
 
-**Goal:** Decode the codecs commonly found in `.mov` containers beyond H.264/H.265.
-The `.mov` container, `mov` demuxer, and `ftyp` detection already work — the gap is
-files whose video stream uses a codec the vendored FFmpeg doesn't currently decode.
+**Goal:** Compress each chunk's plaintext **before encryption**, adaptively —
+keep the compressed form only when it is meaningfully smaller, otherwise store
+raw — so compressible payloads (BMP/TGA/HDR images, index blobs) shrink the
+vault while already-compressed media (JPEG/PNG/WebP/HEIC/AVIF, video) stores raw
+with **zero size regression**. Fully transparent to every caller; invariant #1
+(no plaintext to disk) holds throughout.
+
+> **Evaluated 2026-07-03:** the vault does not compress today —
+> `ChunkStore::append_chunk` encrypts the raw plaintext verbatim; the only
+> compression code in the tree is miniz *decompression* for ZIP/CBZ import.
 
 ### Tasks
-- [ ] **Add FFmpeg decoders** — extend the `--enable-decoder` set in `scripts/build_codecs.{sh,bat}` with the codecs common in `.mov`: **ProRes** (`prores`), **DNxHD/DNxHR** (`dnxhd`), **MJPEG** (`mjpeg`), adding any required parsers/bitstream filters. The build stays **decode-only** (no encoders/muxers).
-- [ ] Confirm no format-detection change is needed — `vault::detect_video_container` already maps any `ftyp` box to the ISO-BMFF/MP4 path, and `.mov` is already in the import dialog filter.
-- [ ] Assess the static-binary size impact of the added decoders and note it.
-- [ ] Update `CLAUDE.md` (FFmpeg decoder list) + the README stack line.
-- [ ] `tests/` — small `.mov` fixtures (ProRes, MJPEG) that probe + decode a frame and produce a poster; gated behind `OSV_VENDORED_AV`.
+- [ ] **Chunk plaintext framing** — prefix the chunk *plaintext* (inside the AEAD, so the method flag is authenticated) with `method u8` (0 = raw, 1 = deflate) and, for compressed chunks, an `orig_len` field. Bound `orig_len` against the max chunk plaintext size **before allocating** (decompression-bomb guard — the Phase 7 OOM lesson).
+- [ ] **Vault flag / back-compat** — a bit in the header's reserved `flags` u32 marks "chunks are method-prefixed". Existing vaults keep the bit clear and are read **and appended** in legacy raw mode forever (no migration, no mixed chunk interpretation within one vault). New vaults set the bit.
+- [ ] **Compressor** — miniz `tdefl`/`tinfl` (already vendored + premake-compiled with `MINIZ_NO_ZLIB_COMPATIBLE_NAMES`); **no new dependency**. Compress in `append_chunk`; keep the compressed form only when ≤ ~95% of the original, else store raw.
+- [ ] **Decompress path** — decrypt into an mlock'd `SecureBytes` → inflate into a second mlock'd buffer sized by the validated `orig_len` → wipe the intermediate. No disk, ever.
+- [ ] **Index blobs compress for free** — they are chunks in the data region, so gallery names/tags on large vaults benefit without extra code; verify with a test.
+- [ ] **Document the side channel** — ciphertext length now reveals plaintext *compressibility*; record it as accepted for the local-attacker threat model (CLAUDE.md hardening notes).
+- [ ] Update `CLAUDE.md` (chunk layout, deferred-decisions table) + the container-format reference section below + `mem:core`.
+- [ ] `tests/` — round-trips (compressed + raw) with checksums; a BMP/TGA vault is measurably smaller while a JPEG vault stores raw (no growth); a legacy (flag-clear) vault fixture opens, reads, and appends unchanged; hostile `method`/`orig_len` fuzz corpus; export/transfer/compact still checksum-match on compressed vaults; ASAN clean.
 
-**Out of scope (YAGNI):** encoding/transcoding; professional codecs beyond the above (CineForm, DNxHR HQX variants) unless a real fixture proves the need; new audio codecs.
+**Out of scope (YAGNI):** migrating/recompressing legacy vaults (even via compaction); zstd/LZ4; per-file or user-facing compression settings; compressing the plaintext header.
 
 ### Acceptance criterion
-A ProRes (and an MJPEG) `.mov` imports, probes, shows a poster, and plays; existing
-H.264/H.265 playback and A/V sync are unchanged.
+A vault of BMP/TGA fixtures is measurably smaller than the summed plaintext; a
+vault of JPEGs is no larger than today (raw fallback); a legacy vault opens,
+reads, and appends unchanged; export/transfer checksums match on compressed
+vaults; the extended fuzz suite and ASAN pass.
 
 **Status:** 🔜 Planned.
 
 ---
 
-## Phase 27 — Import PDF as a gallery of pages 🔜
-
-**Goal:** Import a `.pdf` as a gallery of page images (like CBZ), rendering each
-page **into locked memory only** — never a temp file (invariant #1 holds).
-
-### Tasks
-- [ ] **Vendor PDFium** — add **PDFium** (BSD-3-Clause, permissive — fits the vendored-static model) as a git submodule built into `vendor/codecs-prefix/` by `scripts/build_codecs.{sh,bat}` (render-only). Gate the dependent code behind a build define (`OSV_VENDORED_PDFIUM`), mirroring `OSV_VENDORED_AV`, so a non-PDF build still links.
-- [ ] **Render pipeline** — read the picked file into an mlock'd buffer, load the document from memory, render each page to an RGBA bitmap at a sensible target resolution, and feed the bitmap into the existing `add_image` / thumbnail path. **No page bytes touch disk.**
-- [ ] **Plan/executor** — a PDF import plan mirroring `build_cbz_plan`: one leaf gallery named after the file, one image per page in page order, reusing the import-summary UX and the Phase 25 background-progress modal.
-- [ ] **UI** — the file dialog accepts `.pdf` (its own `Purpose`), routed to the PDF importer (distinct from the `Z` zip/cbz path).
-- [ ] Update `CLAUDE.md` / README (new vendored lib + any build prerequisite) + `mem:tech_stack`.
-- [ ] `tests/` — a small fixture `.pdf` imports as a gallery with the correct page count and a **no-fs-write** assertion; a malformed / password-protected PDF is rejected without crashing.
-
-**Out of scope (YAGNI):** extracting embedded images verbatim; text/searchable-PDF handling; per-page DPI/quality UI; PDF export; non-PDF “more formats” (revisit per-format as needed).
-
-### Acceptance criterion
-A fixture `.pdf` imports as one gallery of page images in page order, asserted to
-write nothing to disk; a corrupt or encrypted PDF fails gracefully with a message.
-
-**Status:** 🔜 Planned.
-
----
-
-## Phase 28 — `meta.json` metadata on archive import 🔜
+## Phase 27 — `meta.json` metadata on archive import 🔜
 
 **Goal:** When a zip/cbz archive contains a top-level `meta.json`, use it to **title**
 and **tag** the imported gallery instead of falling back to the filename.
@@ -1142,6 +1131,52 @@ Expected shape (all fields optional; unknown keys ignored):
 Importing a fixture zip/cbz containing `meta.json` yields a gallery named after the
 english title, tagged with the japanese title and each `type:name` tag; a malformed
 `meta.json` never blocks the import.
+
+**Status:** 🔜 Planned.
+
+---
+
+## Phase 28 — Broaden `.mov` / video codec support 🔜
+
+**Goal:** Decode the codecs commonly found in `.mov` containers beyond H.264/H.265.
+The `.mov` container, `mov` demuxer, and `ftyp` detection already work — the gap is
+files whose video stream uses a codec the vendored FFmpeg doesn't currently decode.
+
+### Tasks
+- [ ] **Add FFmpeg decoders** — extend the `--enable-decoder` set in `scripts/build_codecs.{sh,bat}` with the codecs common in `.mov`: **ProRes** (`prores`), **DNxHD/DNxHR** (`dnxhd`), **MJPEG** (`mjpeg`), adding any required parsers/bitstream filters. The build stays **decode-only** (no encoders/muxers).
+- [ ] Confirm no format-detection change is needed — `vault::detect_video_container` already maps any `ftyp` box to the ISO-BMFF/MP4 path, and `.mov` is already in the import dialog filter.
+- [ ] Assess the static-binary size impact of the added decoders and note it.
+- [ ] Update `CLAUDE.md` (FFmpeg decoder list) + the README stack line.
+- [ ] `tests/` — small `.mov` fixtures (ProRes, MJPEG) that probe + decode a frame and produce a poster; gated behind `OSV_VENDORED_AV`.
+
+**Out of scope (YAGNI):** encoding/transcoding; professional codecs beyond the above (CineForm, DNxHR HQX variants) unless a real fixture proves the need; new audio codecs.
+
+### Acceptance criterion
+A ProRes (and an MJPEG) `.mov` imports, probes, shows a poster, and plays; existing
+H.264/H.265 playback and A/V sync are unchanged.
+
+**Status:** 🔜 Planned.
+
+---
+
+## Phase 29 — Import PDF as a gallery of pages 🔜
+
+**Goal:** Import a `.pdf` as a gallery of page images (like CBZ), rendering each
+page **into locked memory only** — never a temp file (invariant #1 holds).
+
+### Tasks
+- [ ] **Vendor PDFium** — add **PDFium** (BSD-3-Clause, permissive — fits the vendored-static model) as a git submodule built into `vendor/codecs-prefix/` by `scripts/build_codecs.{sh,bat}` (render-only). Gate the dependent code behind a build define (`OSV_VENDORED_PDFIUM`), mirroring `OSV_VENDORED_AV`, so a non-PDF build still links.
+- [ ] **Render pipeline** — read the picked file into an mlock'd buffer, load the document from memory, render each page to an RGBA bitmap at a sensible target resolution, and feed the bitmap into the existing `add_image` / thumbnail path. **No page bytes touch disk.**
+- [ ] **Plan/executor** — a PDF import plan mirroring `build_cbz_plan`: one leaf gallery named after the file, one image per page in page order, reusing the import-summary UX and the Phase 25 background-progress modal.
+- [ ] **UI** — the file dialog accepts `.pdf` (its own `Purpose`), routed to the PDF importer (distinct from the `Z` zip/cbz path).
+- [ ] Update `CLAUDE.md` / README (new vendored lib + any build prerequisite) + `mem:tech_stack`.
+- [ ] `tests/` — a small fixture `.pdf` imports as a gallery with the correct page count and a **no-fs-write** assertion; a malformed / password-protected PDF is rejected without crashing.
+
+**Out of scope (YAGNI):** extracting embedded images verbatim; text/searchable-PDF handling; per-page DPI/quality UI; PDF export; non-PDF “more formats” (revisit per-format as needed).
+
+### Acceptance criterion
+A fixture `.pdf` imports as one gallery of page images in page order, asserted to
+write nothing to disk; a corrupt or encrypted PDF fails gracefully with a message.
 
 **Status:** 🔜 Planned.
 
