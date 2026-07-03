@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "image/decode_worker.h"
@@ -132,6 +133,7 @@ private:
     void scroll_by(float dy);
 
     SDL_Texture* thumb_texture(const vault::IndexNode& node);  // shared cache
+    [[nodiscard]] bool pump_thumbs();                          // drain worker results into cache
     [[nodiscard]] int strip_hit(float mx, float my) const;     // thumb under cursor, or -1
     void render_fit(gfx::Renderer& r, const SDL_FRect& vp);
     void render_scroll(gfx::Renderer& r, const SDL_FRect& vp);
@@ -189,11 +191,16 @@ private:
     // Full-screen slideshow (active while mode_ == Slideshow).
     SlideshowView slideshow_;
 
-    // Off-thread decoder for full-res images, scoped to this viewer so its
-    // pending decodes are dropped when the viewer closes. Declared before
-    // full_cache_ so the cache can hold a pointer to it. (Each screen owns its
-    // own worker: thumbnail and full-image decodes key on the same data_offset,
-    // so a shared worker would risk cross-contaminating the two caches.)
+    // Off-thread decoders, scoped to this viewer so their pending decodes are
+    // dropped when the viewer closes. Each screen owns separate workers for
+    // thumbnail and full-image decodes: they key on the same data_offset, so a
+    // shared worker would risk cross-contaminating the two caches.
+    struct ThumbDecode {
+        image::DecodeWorker          worker{image::decode_wake_event()};
+        std::unordered_set<uint64_t> failed;   // thumbs that gave up decoding
+    };
+    ThumbDecode thumbs_;
+
     image::DecodeWorker decode_worker_{image::decode_wake_event()};
 
     // Bounded set of decoded full-res textures (shared with the slideshow).

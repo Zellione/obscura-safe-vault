@@ -193,11 +193,28 @@ SDL_Texture* ImageViewer::thumb_texture(const vault::IndexNode& node)
     const uint64_t key = node.meta.data_offset;
     if (SDL_Texture* t = cache_.get(key)) return t;
 
+    // A thumbnail that already failed to decode is not retried; an in-flight
+    // decode lands when update() pumps the worker. Otherwise read+decrypt
+    // here (fast) and enqueue the slow decode off-thread.
+    if (thumbs_.failed.contains(key) || thumbs_.worker.pending(key)) return nullptr;
     crypto::SecureBytes sb;
     if (vault_.read_thumbnail(node, sb) != vault::VaultResult::Ok) return nullptr;
-    auto img = image::decode_from_memory(sb.as_span());
-    if (!img) return nullptr;
-    return cache_.get_or_upload(key, *img);
+    thumbs_.worker.submit(key, std::move(sb));
+    return nullptr;
+}
+
+bool ImageViewer::pump_thumbs()
+{
+    bool any = false;
+    while (auto res = thumbs_.worker.take_result()) {
+        if (res->image) {
+            cache_.get_or_upload(res->key, *res->image);
+            any = true;
+        } else {
+            thumbs_.failed.insert(res->key);
+        }
+    }
+    return any;
 }
 
 int ImageViewer::strip_hit(float mx, float my) const
@@ -328,6 +345,7 @@ void ImageViewer::handle_wheel(const SDL_MouseWheelEvent& w)
 
 void ImageViewer::update(double dt)
 {
+    if (pump_thumbs()) mark_dirty();        // thumbnail decode(s) landed — repaint
     if (full_cache_.pump()) mark_dirty();   // an off-thread decode landed — repaint
 
     if (mode_ == ViewMode::Slideshow) {
