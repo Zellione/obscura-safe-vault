@@ -103,6 +103,8 @@ private:
     friend void poll_file_job(GalleryGrid& g);          // drain a finished export/delete job
     friend bool vault_busy(const GalleryGrid& g);       // any worker owns the vault(s)?
     friend bool handle_job_input(GalleryGrid& g, const SDL_Event& e);  // job-active Esc→cancel gate
+    friend void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key);  // Shift+C compact confirm
+    friend void handle_delete_key(GalleryGrid& g);                                   // Del confirm
     void draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
                          const SDL_FRect& box);
     [[nodiscard]] int  hit_test(float mx, float my) const;  // item under cursor, or -1
@@ -161,10 +163,13 @@ private:
 // Free friends of GalleryGrid (see the in-class declarations): poll_import_job /
 // poll_file_job drain a finished background import / export-delete and update the
 // grid's status + listing; vault_busy reports whether any worker owns the vault(s);
-// handle_job_input swallows input (Esc→cancel) while a job runs.
+// handle_job_input swallows input (Esc→cancel) while a job runs; handle_shift_c_key /
+// handle_delete_key extract key handlers to reduce handle_key_down's cognitive complexity.
 void poll_import_job(GalleryGrid& g);
 void poll_file_job(GalleryGrid& g);
 [[nodiscard]] bool vault_busy(const GalleryGrid& g);
 [[nodiscard]] bool handle_job_input(GalleryGrid& g, const SDL_Event& e);
+void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
+void handle_delete_key(GalleryGrid& g);
 
 } // namespace ui

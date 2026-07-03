@@ -48,10 +48,10 @@ namespace detail {
 // Best-effort page-lock. Returns true on success. Never throws.
 // On Linux, after a successful mlock, also attempts madvise(MADV_DONTDUMP)
 // for defense-in-depth (harmless if it fails).
-inline bool mem_lock(const uint8_t* p, size_t n) noexcept
+inline bool mem_lock(uint8_t* p, size_t n) noexcept
 {
 #if defined(_WIN32)
-    return VirtualLock(const_cast<uint8_t*>(p), n) != 0;
+    return VirtualLock(p, n) != 0;
 #else
     if (::mlock(p, n) != 0) return false;
 
@@ -59,16 +59,16 @@ inline bool mem_lock(const uint8_t* p, size_t n) noexcept
     // This prevents the page from being included in core dumps even if the
     // process is still dumpable. Ignore failures silently.
 #  ifdef __linux__
-    (void)::madvise(const_cast<uint8_t*>(p), n, MADV_DONTDUMP);
+    (void)::madvise(p, n, MADV_DONTDUMP);
 #  endif
     return true;
 #endif
 }
 
-inline void mem_unlock(const uint8_t* p, size_t n) noexcept
+inline void mem_unlock(uint8_t* p, size_t n) noexcept
 {
 #if defined(_WIN32)
-    VirtualUnlock(const_cast<uint8_t*>(p), n);
+    VirtualUnlock(p, n);
 #else
     ::munlock(p, n);
 #endif

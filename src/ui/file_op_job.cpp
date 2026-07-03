@@ -108,7 +108,7 @@ FileOpOutcome run_compact(vault::Vault& v, vault::OpProgress& progress)
         oc.total = progress.total.load();
         oc.status = "Vault compacted successfully.";
     } else {
-        oc.error = std::format("Compaction failed: {:d}.", static_cast<int>(r));
+        oc.error = std::format("Compaction failed: {:d}.", std::to_underlying(r));
     }
     return oc;
 }

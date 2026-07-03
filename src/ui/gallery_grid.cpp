@@ -420,6 +420,30 @@ void GalleryGrid::toggle_or_open()
         open_selected();
 }
 
+// Extract Shift+C compact handler to reduce handle_key_down's cognitive complexity (S3776).
+void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
+{
+    if (!((key.key == SDLK_C) && (key.mod & SDL_KMOD_SHIFT))) return;
+
+    const uint64_t file_sz = vault::vault_file_bytes(g.vault_);
+    const uint64_t waste_sz = g.vault_.wasted_bytes();
+    // Only show the compact option if there's significant waste to reclaim.
+    if (should_display_waste(waste_sz, file_sz)) {
+        g.naming_.confirm_compact = true;
+        g.error_.clear();
+    } else {
+        g.error_ = "No significant waste to reclaim.";
+    }
+}
+
+// Extract Delete handler to reduce handle_key_down's cognitive complexity (S3776).
+void handle_delete_key(GalleryGrid& g)
+{
+    const int s = g.nav_.selected();
+    g.naming_.confirm_delete = s >= 0 && s < static_cast<int>(g.children_.size());
+    g.error_ = g.naming_.confirm_delete ? std::string{} : "Nothing selected to delete.";
+}
+
 void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
 {
     using enum GalleryView;
@@ -431,21 +455,11 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         return;
     }
     if (key.key == SDLK_DELETE) {   // confirm-delete the focused image/video/gallery
-        const int s = nav_.selected();
-        naming_.confirm_delete = s >= 0 && s < static_cast<int>(children_.size());
-        error_ = naming_.confirm_delete ? std::string{} : "Nothing selected to delete.";
+        handle_delete_key(*this);
         return;
     }
     if ((key.key == SDLK_C) && (key.mod & SDL_KMOD_SHIFT)) {   // Shift+C: confirm-compact the vault (Phase 26)
-        const uint64_t file_sz = vault::vault_file_bytes(vault_);
-        const uint64_t waste_sz = vault_.wasted_bytes();
-        // Only show the compact option if there's significant waste to reclaim.
-        if (should_display_waste(waste_sz, file_sz)) {
-            naming_.confirm_compact = true;
-            error_.clear();
-        } else {
-            error_ = "No significant waste to reclaim.";
-        }
+        handle_shift_c_key(*this, key);
         return;
     }
     // Single-action shortcut keys, grouped into one switch so this function's
@@ -714,6 +728,19 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipCo
     mark_dirty();
 }
 
+// Extract cancelled-import waste-hint logic to reduce poll_import_job's nesting (S134).
+void set_cancelled_import_status(GalleryGrid& g, const ZipImportJob::Outcome& oc, const char* noun)
+{
+    // User pressed Esc during import — check if waste hints are needed (Phase 26).
+    const uint64_t waste = g.vault_.wasted_bytes();
+    if (should_hint_cancelled_import_waste(waste)) {
+        g.status_ = std::format("Import cancelled — {} reclaimable, press [Shift+C]",
+                               format_size(waste));
+    } else {
+        g.status_ = std::format("Import cancelled — {} {} imported", oc.imported, noun);
+    }
+}
+
 void poll_import_job(GalleryGrid& g)
 {
     // Only touch the vault once the worker has fully finished (take_outcome joins
@@ -731,14 +758,7 @@ void poll_import_job(GalleryGrid& g)
         } else {
             const char* noun = cbz ? "page" : "file";
             if (oc->cancelled) {
-                // User pressed Esc during import — check if waste hints are needed (Phase 26).
-                const uint64_t waste = g.vault_.wasted_bytes();
-                if (should_hint_cancelled_import_waste(waste)) {
-                    g.status_ = std::format("Import cancelled — {} reclaimable, press [Shift+C]",
-                                           format_size(waste));
-                } else {
-                    g.status_ = std::format("Import cancelled — {} {} imported", oc->imported, noun);
-                }
+                set_cancelled_import_status(g, *oc, noun);
             } else {
                 g.status_ = std::format("Imported {} {}{}, skipped {}", oc->imported, noun,
                                         oc->imported == 1 ? "" : "s", oc->skipped);
@@ -1062,6 +1082,32 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float H)
     }
 }
 
+// Extract per-row metadata drawing to reduce render_list's cognitive complexity (S3776).
+void draw_list_row_metadata(gfx::Renderer& r, gfx::FontAtlas& font, const vault::IndexNode* n,
+                            float dims_x, float size_x, float type_x, float date_x, float ty, bool sel)
+{
+    using namespace gfx::theme;
+    const gfx::Color meta_c = sel ? TEXT : TEXT_DIM;
+    if (n->is_gallery()) {
+        r.draw_text(font, dims_x, ty, "-", meta_c);
+        r.draw_text(font, size_x, ty, "-", meta_c);
+        r.draw_text(font, type_x, ty, "DIR", meta_c);
+        r.draw_text(font, date_x, ty, "-", meta_c);
+    } else if (n->is_video()) {
+        const auto& vm = n->vmeta;
+        r.draw_text(font, dims_x, ty, format_duration(vm.duration_us), meta_c);
+        r.draw_text(font, size_x, ty, format_size(vm.orig_size), meta_c);
+        r.draw_text(font, type_x, ty, video_codec_name(vm.codec), meta_c);
+        r.draw_text(font, date_x, ty, format_date(vm.created_ts), meta_c);
+    } else {
+        const auto& m = n->meta;
+        r.draw_text(font, dims_x, ty, format_dimensions(m.width, m.height), meta_c);
+        r.draw_text(font, size_x, ty, format_size(m.orig_size), meta_c);
+        r.draw_text(font, type_x, ty, image_format_name(m.format), meta_c);
+        r.draw_text(font, date_x, ty, format_date(m.created_ts), meta_c);
+    }
+}
+
 void GalleryGrid::render_list(gfx::Renderer& r, float W, float H)
 {
     using namespace gfx::theme;
@@ -1114,26 +1160,8 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float H)
         r.draw_text(font_, nx, ty, fit_name(n->name, dims_x - nx - 10),
                     sel ? TEXT : TEXT_DIM);
 
-        // Galleries have no image metadata; show a folder marker instead.
-        const gfx::Color meta_c = sel ? TEXT : TEXT_DIM;
-        if (n->is_gallery()) {
-            r.draw_text(font_, dims_x, ty, "-", meta_c);
-            r.draw_text(font_, size_x, ty, "-", meta_c);
-            r.draw_text(font_, type_x, ty, "DIR", meta_c);
-            r.draw_text(font_, date_x, ty, "-", meta_c);
-        } else if (n->is_video()) {
-            const auto& vm = n->vmeta;
-            // DIMENSIONS column doubles as the video's length (its play duration).
-            r.draw_text(font_, dims_x, ty, format_duration(vm.duration_us), meta_c);
-            r.draw_text(font_, size_x, ty, format_size(vm.orig_size), meta_c);
-            r.draw_text(font_, type_x, ty, video_codec_name(vm.codec), meta_c);
-            r.draw_text(font_, date_x, ty, format_date(vm.created_ts), meta_c);
-        } else {
-            r.draw_text(font_, dims_x, ty, format_dimensions(m.width, m.height), meta_c);
-            r.draw_text(font_, size_x, ty, format_size(m.orig_size), meta_c);
-            r.draw_text(font_, type_x, ty, image_format_name(m.format), meta_c);
-            r.draw_text(font_, date_x, ty, format_date(m.created_ts), meta_c);
-        }
+        // Draw metadata columns for this row (galleries/videos/images have different displays).
+        draw_list_row_metadata(r, font_, n, dims_x, size_x, type_x, date_x, ty, sel);
     }
 }
 

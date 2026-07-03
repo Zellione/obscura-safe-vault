@@ -10,11 +10,9 @@
 #include "index.h"
 #include "vault.h"  // VaultResult
 
-namespace vault {
-
 // VaultOps: owns the logic for tree traversal, path resolution, and structural
 // validation of the in-memory index tree.
-namespace vault_ops {
+namespace vault::vault_ops {
 
 // Split a slash-separated path into non-empty segments. Leading/trailing/
 // repeated slashes are ignored, so "", "/", "a/", "/a/b" all normalise cleanly.
@@ -50,12 +48,7 @@ void for_each_media(NodeT& n, Fn&& fn);
 // Sets `err` to IoError on the first failed read/append. Used by compaction.
 void relocate_node_chunks(const ChunkStore& src, ChunkStore& dst, IndexNode& node, VaultResult& err);
 
-} // namespace vault_ops
-
-} // namespace vault
-
 // Template implementations (must be in header for link-time visibility).
-namespace vault::vault_ops {
 
 template <typename NodeT>
 NodeT* resolve_node_impl(NodeT* root, std::string_view path)

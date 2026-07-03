@@ -35,15 +35,16 @@ public:
     SavedSearchPanel(vault::VaultSearch& search, gfx::FontAtlas& font, std::string& status_ref,
                      std::vector<vault::SavedSearch>& saved_ref);
 
-    // Public reference to the saved searches list (owned by AdvancedSearchScreen, updated via reload_saved).
-    std::vector<vault::SavedSearch>& saved;
-
     // Action signals returned by handle_key to avoid duplicate processing by the parent screen.
     enum class Action {
         None,     // no action (navigation, delete)
         Loaded,   // Enter: successfully loaded a saved search (caller should update query_)
         Deleted   // Del: deleted a saved search (caller should reload_saved())
     };
+
+    // Accessor to the saved searches list (owned by AdvancedSearchScreen, updated via reload_saved).
+    [[nodiscard]] std::vector<vault::SavedSearch>& get_saved() { return saved_; }
+    [[nodiscard]] const std::vector<vault::SavedSearch>& get_saved() const { return saved_; }
 
     // Key navigation: Up/Down/Enter (load)/Del (delete).
     // Returns an action signal to avoid duplicate processing in the parent screen.
@@ -82,9 +83,10 @@ public:
     std::string* active_buffer();
 
 private:
-    vault::VaultSearch& search_;  // vault facade for save/delete operations
-    gfx::FontAtlas&     font_;
-    std::string&        status_;  // reference to parent screen's transient status line
+    vault::VaultSearch&               search_;  // vault facade for save/delete operations
+    gfx::FontAtlas&                   font_;
+    std::string&                      status_;  // reference to parent screen's transient status line
+    std::vector<vault::SavedSearch>&  saved_;   // the saved searches list (owned by AdvancedSearchScreen)
 
     int         cur_saved_ = 0;    // selected saved search index
     bool        saving_    = false; // naming a search to save

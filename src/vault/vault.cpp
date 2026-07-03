@@ -1043,7 +1043,50 @@ std::vector<SearchHit> Vault::list_favorite_galleries() const
     return out;
 }
 
-// --- compaction -------------------------------------------------------------
+// --- compaction helpers ---
+
+namespace {
+
+// Count total chunks to copy for progress reporting.
+void count_compact_chunks(const IndexNode& root, int& total_chunks)
+{
+    for_each_media(root, [&total_chunks](const IndexNode& node) {
+        if (node.is_image()) {
+            ++total_chunks;  // data + thumb each are separate for counting
+        } else if (node.is_video()) {
+            total_chunks += static_cast<int>(node.vmeta.chunks.size()) + 1;  // +1 for poster
+        }
+    });
+}
+
+// Copy all chunks with progress tracking and cancellation support.
+VaultResult copy_compact_chunks(IndexNode& root, ChunkStore& src, ChunkStore& dst,
+                                 OpProgress* progress)
+{
+    VaultResult copy_err = Ok;
+    int chunks_done = 0;
+    for_each_media(root, [progress, &copy_err, &src, &dst, &chunks_done](IndexNode& node) {
+        // Check for cancellation before processing each node.
+        if (progress && progress->cancel.load()) {
+            copy_err = Ok;  // signal to abort, but it's not an error
+            return;         // Early return from lambda
+        }
+        relocate_node_chunks(src, dst, node, copy_err);
+        if (progress) {
+            if (node.is_image()) {
+                ++chunks_done;
+            } else if (node.is_video()) {
+                chunks_done += static_cast<int>(node.vmeta.chunks.size()) + 1;
+            }
+            progress->done.store(chunks_done);
+        }
+    });
+    return copy_err;
+}
+
+}  // namespace
+
+// --- compaction --------- --------------------------------------------------
 
 uint64_t Vault::wasted_bytes() const
 {
@@ -1097,35 +1140,12 @@ VaultResult Vault::compact(OpProgress* progress)
     // Count total chunks to copy for progress reporting.
     int total_chunks = 0;
     if (progress) {
-        for_each_media(new_root, [&](const IndexNode& node) {
-            if (node.is_image()) {
-                ++total_chunks;  // data + thumb each are separate for counting
-            } else if (node.is_video()) {
-                total_chunks += static_cast<int>(node.vmeta.chunks.size()) + 1;  // +1 for poster
-            }
-        });
+        count_compact_chunks(new_root, total_chunks);
         progress->total.store(total_chunks);
         progress->done.store(0);
     }
 
-    VaultResult copy_err = Ok;
-    int chunks_done = 0;
-    for_each_media(new_root, [&](IndexNode& node) {
-        // Check for cancellation before processing each node.
-        if (progress && progress->cancel.load()) {
-            copy_err = Ok;  // signal to abort, but it's not an error
-            return;         // Early return from lambda
-        }
-        relocate_node_chunks(src, dst, node, copy_err);
-        if (progress) {
-            if (node.is_image()) {
-                ++chunks_done;
-            } else if (node.is_video()) {
-                chunks_done += static_cast<int>(node.vmeta.chunks.size()) + 1;
-            }
-            progress->done.store(chunks_done);
-        }
-    });
+    VaultResult copy_err = copy_compact_chunks(new_root, src, dst, progress);
     // If cancelled, abort before the atomic rename (original is untouched).
     if (progress && progress->cancel.load()) return fail(Ok);
     if (copy_err != Ok) return fail(copy_err);

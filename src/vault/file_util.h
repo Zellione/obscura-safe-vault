@@ -134,24 +134,24 @@ inline void sync_dir_of(const std::string& path) noexcept
 inline void wipe_and_remove(const std::string& path) noexcept
 {
     // Attempt to open and overwrite the file with zeros in chunks.
-    const std::string p = path;
-    std::FILE* fp = std::fopen(p.c_str(), "r+b");
-    if (fp) {
+    if (std::FILE* fp = std::fopen(path.c_str(), "r+b"); !fp) {
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
+        return;
+    } else {
         constexpr size_t WIPE_CHUNK = 1024 * 1024;  // 1 MiB chunks
         std::array<uint8_t, WIPE_CHUNK> zeros{};
         uint64_t remaining = 0;
-        if (seek_end(fp, remaining)) {
-            if (seek_to(fp, 0)) {
-                while (remaining > 0) {
-                    const size_t to_write = std::min(static_cast<size_t>(remaining), WIPE_CHUNK);
-                    if (std::fwrite(zeros.data(), 1, to_write, fp) != to_write) {
-                        break;  // write failed; remove what we have
-                    }
-                    remaining -= to_write;
+        if (seek_end(fp, remaining) && seek_to(fp, 0)) {
+            while (remaining > 0) {
+                const size_t to_write = std::min(static_cast<size_t>(remaining), WIPE_CHUNK);
+                if (std::fwrite(zeros.data(), 1, to_write, fp) != to_write) {
+                    break;  // write failed; remove what we have
                 }
-                // Best-effort fsync the wipe.
-                (void)sync(fp);
+                remaining -= to_write;
             }
+            // Best-effort fsync the wipe.
+            (void)sync(fp);
         }
         std::fclose(fp);
     }

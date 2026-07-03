@@ -68,11 +68,10 @@ public:
     // Grid mode). Written by render(), read by handle_key().
     [[nodiscard]] int get_cols() const { return grid_cols_; }
 
-    // Public data owned by this view: the results list. Mutated externally by
-    // AdvancedSearchScreen::rerun() (the search is owned there), but navigated and
-    // rendered by this view. Must be updated via update_results() to clamp the
-    // cursor to the new list bounds.
-    std::vector<vault::SearchHit> results;
+    // Accessor to the results list. Owned by this view, updated via update_results()
+    // to clamp the cursor to the new list bounds.
+    [[nodiscard]] std::vector<vault::SearchHit>& get_results() { return results_; }
+    [[nodiscard]] const std::vector<vault::SearchHit>& get_results() const { return results_; }
 
     // Update the results list and clamp the cursor to the new size.
     // Called by AdvancedSearchScreen::rerun() after search evaluation.
@@ -89,6 +88,7 @@ private:
     gfx::FontAtlas&     font_;
     gfx::TextureCache&  cache_;
 
+    std::vector<vault::SearchHit> results_;  // results list (updated via update_results)
     int cur_result_ = 0;      // selected result index
     ResultView grid_view_ = ResultView::List;  // List or Grid toggle (Ctrl+L)
     int grid_cols_ = 1;      // last-rendered column count (drives Up/Down stride)

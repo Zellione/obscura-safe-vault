@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <format>
 #include <span>
+#include <utility>
 
 #include "gfx/renderer.h"
 #include "gfx/text.h"
@@ -29,8 +30,8 @@ SearchResultView::SearchResultView(vault::Vault& vault, gfx::Window& win, gfx::F
 
 void SearchResultView::update_results(const std::vector<vault::SearchHit>& new_results)
 {
-    results = new_results;
-    cur_result_ = std::clamp(cur_result_, 0, std::max(0, static_cast<int>(results.size()) - 1));
+    results_ = new_results;
+    cur_result_ = std::clamp(cur_result_, 0, std::max(0, static_cast<int>(results_.size()) - 1));
 }
 
 void SearchResultView::pump_thumbnails()
@@ -48,7 +49,7 @@ void SearchResultView::handle_key(const SDL_KeyboardEvent& key)
     // Navigation respects the active view: List steps one row per Up/Down (the
     // Phase 18 behaviour); Grid additionally moves Left/Right by one and Up/Down
     // by a whole row (grid_cols_, the last-rendered column count).
-    const auto count = static_cast<int>(results.size());
+    const auto count = static_cast<int>(results_.size());
     auto move = [&](MoveDir d) { cur_result_ = result_move(grid_view_, cur_result_, d, count, grid_cols_); };
     switch (key.key) {
         case SDLK_DOWN:  move(MoveDir::Down);  break;
@@ -63,11 +64,11 @@ void SearchResultView::handle_key(const SDL_KeyboardEvent& key)
 
 void SearchResultView::activate_focused()
 {
-    if (cur_result_ < 0 || cur_result_ >= static_cast<int>(results.size())) return;
-    const vault::SearchHit& hit = results[cur_result_];
+    if (cur_result_ < 0 || cur_result_ >= static_cast<int>(results_.size())) return;
+    const vault::SearchHit& hit = results_[cur_result_];
 
     if (hit.is_gallery) {
-        if (request_cb_) request_cb_(static_cast<int>(NavKind::ToGallery), hit.path, 0);
+        if (request_cb_) request_cb_(std::to_underlying(NavKind::ToGallery), hit.path, 0);
         return;
     }
 
@@ -79,7 +80,7 @@ void SearchResultView::activate_focused()
     const auto siblings = vault_.list(parent);
     for (int i = 0; i < static_cast<int>(siblings.size()); ++i) {
         if (siblings[i]->name == segs.back()) {
-            if (request_cb_) request_cb_(static_cast<int>(NavKind::ToViewer), parent, i);
+            if (request_cb_) request_cb_(std::to_underlying(NavKind::ToViewer), parent, i);
             return;
         }
     }
@@ -97,7 +98,7 @@ void SearchResultView::render(gfx::Renderer& r, float x, float colw, bool hot)
 
     // Grid view rendering
     if (hot) r.draw_text(font_, x - 16, TOP, ">", ACCENT);
-    r.draw_text(font_, x, TOP, std::format("Results ({})", results.size()), TEXT_DIM);
+    r.draw_text(font_, x, TOP, std::format("Results ({})", results_.size()), TEXT_DIM);
 
     constexpr float TILE = 92.0f;
     constexpr float TGAP = 12.0f;
@@ -107,7 +108,7 @@ void SearchResultView::render(gfx::Renderer& r, float x, float colw, bool hot)
     const int   cols  = grid_columns(colw, TILE, TGAP);   // always >= 1
     grid_cols_ = cols;                              // feed Up/Down stride
 
-    const auto  total   = static_cast<int>(results.size());
+    const auto  total   = static_cast<int>(results_.size());
     const int   rows    = (total + cols - 1) / cols;
     const int vis_rows  = std::max(1, static_cast<int>((H - top - 40) / pitch));
     // Scroll so the selected tile's row stays on screen (centred when possible).
@@ -118,7 +119,7 @@ void SearchResultView::render(gfx::Renderer& r, float x, float colw, bool hot)
     const GridSpec spec{cols, TILE, TGAP, x, top - static_cast<float>(first_row) * pitch};
     for (int i = first_row * cols; i < total && i < (first_row + vis_rows) * cols; ++i) {
         const SDL_FRect         cell = grid_cell_rect(i, spec);
-        const vault::SearchHit& hit  = results[i];
+        const vault::SearchHit& hit  = results_[i];
         if (const bool sel = (i == cur_result_ && hot); sel) {
             r.draw_selection_glow(cell, RADIUS, ACCENT);
             r.draw_round_rect(cell, RADIUS, SURFACE_HI);
@@ -131,7 +132,7 @@ void SearchResultView::render(gfx::Renderer& r, float x, float colw, bool hot)
             draw_tile_thumb(r, font_, ctx, *hit.node,
                             {cell.x + 6, cell.y + 6, cell.w - 12, cell.h - 12});
     }
-    if (results.empty()) r.draw_text(font_, x, top, "(no matches)", TEXT_FAINT);
+    if (results_.empty()) r.draw_text(font_, x, top, "(no matches)", TEXT_FAINT);
 }
 
 } // namespace ui

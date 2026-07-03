@@ -331,8 +331,9 @@ void AdvancedSearchScreen::dispatch_focus_key(const SDL_KeyboardEvent& key)
         case Results:   result_view_.handle_key(key); break;
         case Saved: {
             const auto action = saved_panel_.handle_key(key);
+            using enum SavedSearchPanel::Action;
             switch (action) {
-                case SavedSearchPanel::Action::Loaded: {
+                case Loaded: {
                     AdvancedQuery loaded_query;
                     if (saved_panel_.load_focused(loaded_query)) {
                         query_ = std::move(loaded_query);
@@ -342,10 +343,10 @@ void AdvancedSearchScreen::dispatch_focus_key(const SDL_KeyboardEvent& key)
                     }
                     break;
                 }
-                case SavedSearchPanel::Action::Deleted:
+                case Deleted:
                     reload_saved();
                     break;
-                case SavedSearchPanel::Action::None:
+                case None:
                     break;
             }
             break;
@@ -736,7 +737,7 @@ void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
 
     // List view rendering (when not in grid mode)
     if (hot) r.draw_text(font_, x - 16, TOP, ">", ACCENT);
-    r.draw_text(font_, x, TOP, std::format("Results ({})", result_view_.results.size()), TEXT_DIM);
+    r.draw_text(font_, x, TOP, std::format("Results ({})", result_view_.get_results().size()), TEXT_DIM);
 
     const auto  H        = static_cast<float>(win_.height());
     const float rh       = LINE * 0.9f;
@@ -745,15 +746,15 @@ void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
     const auto  max_rows = static_cast<int>((H - y - 40) / rh);
     const int   cur      = result_view_.get_cursor();
     const int   first    = std::max(0, cur - max_rows / 2);
-    for (int i = first; i < static_cast<int>(result_view_.results.size()) && i < first + max_rows; ++i) {
+    for (int i = first; i < static_cast<int>(result_view_.get_results().size()) && i < first + max_rows; ++i) {
         const bool              sel = (i == cur && hot);
-        const vault::SearchHit& hit = result_view_.results[i];
+        const vault::SearchHit& hit = result_view_.get_results()[i];
         if (sel) r.draw_round_rect({x - 6, y + ink_dy - rh * 0.5f, colw + 12, rh}, RADIUS_SMALL, SURFACE_HI);
         r.draw_text(font_, x, y, std::format("{}{}", hit.is_gallery ? "[D] " : "    ", hit.path),
                     sel ? TEXT : TEXT_DIM);
         y += rh;
     }
-    if (result_view_.results.empty()) r.draw_text(font_, x, y, "(no matches)", TEXT_FAINT);
+    if (result_view_.get_results().empty()) r.draw_text(font_, x, y, "(no matches)", TEXT_FAINT);
 }
 
 } // namespace ui
