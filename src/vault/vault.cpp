@@ -1162,6 +1162,16 @@ VaultResult Vault::compact(OpProgress* progress)
     // Saved searches carry over unchanged (vault-global metadata).
     std::vector<uint8_t> blob;
     serialize_index(new_root, saved_searches_, blob);
+
+    // Phase 26: framed vaults frame the index blob (mirrors commit_index —
+    // unlock de-frames unconditionally when the flag is set, and slot B is
+    // empty here, so an unframed blob would make the vault unopenable).
+    if (framed_chunks(header_)) {
+        std::vector<uint8_t> framed_blob;
+        if (!chunk_codec::encode_frame(blob, framed_blob)) return fail(CryptoError);
+        blob = std::move(framed_blob);
+    }
+
     std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
     if (!crypto::fill_random(nonce)) return fail(CryptoError);
     std::vector<uint8_t> sealed;

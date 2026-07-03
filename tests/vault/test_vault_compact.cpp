@@ -9,6 +9,7 @@
 #include <thread>
 #include <vector>
 
+#include "crypto/random.h"
 #include "image/fixtures.h"
 #include "vault/file_util.h"
 #include "vault/op_progress.h"
@@ -49,6 +50,16 @@ static std::vector<uint8_t> pattern(size_t n, uint8_t seed)
     return v;
 }
 
+// Generate random (incompressible) payload via CSPRNG.
+// Framed size = plaintext + 1 method byte + 40 AEAD bytes, so waste
+// calculations hold without deflate interference.
+static std::vector<uint8_t> random_payload(size_t n)
+{
+    std::vector<uint8_t> v(n);
+    (void)crypto::fill_random(v);  // fills v in-place, should not fail in tests
+    return v;
+}
+
 static uint64_t size_on_disk(const fs::path& p)
 {
     std::error_code ec;
@@ -65,8 +76,8 @@ TEST(wasted_bytes_tracks_orphaned_chunks)
     CHECK_EQ(v.wasted_bytes(), 0u);  // fresh vault: header + live index only
 
     const size_t img_size = 100 * 1024;
-    REQUIRE(v.add_image("", pattern(img_size, 1), "a.bin") == vault::VaultResult::Ok);
-    REQUIRE(v.add_image("", pattern(img_size, 2), "b.bin") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", random_payload(img_size), "a.bin") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", random_payload(img_size), "b.bin") == vault::VaultResult::Ok);
 
     const uint64_t before = v.wasted_bytes();  // superseded index blobs only
     REQUIRE(v.remove_image("", "a.bin") == vault::VaultResult::Ok);
@@ -77,16 +88,16 @@ TEST(wasted_bytes_tracks_orphaned_chunks)
 TEST(compact_reclaims_space_and_preserves_remaining_images)
 {
     TempVault tv("reclaim");
-    const auto keep = pattern(80 * 1024, 7);
+    const auto keep = random_payload(80 * 1024);
 
     vault::Vault v;
     REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
             == vault::VaultResult::Ok);
     // Dead chunks total ~200 KiB — below the auto-compact threshold, so the
     // waste is still there for the explicit compact() below to reclaim.
-    REQUIRE(v.add_image("", pattern(100 * 1024, 3), "gone1.bin") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", random_payload(100 * 1024), "gone1.bin") == vault::VaultResult::Ok);
     REQUIRE(v.add_image("", keep, "keep.bin")                    == vault::VaultResult::Ok);
-    REQUIRE(v.add_image("", pattern(100 * 1024, 4), "gone2.bin") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", random_payload(100 * 1024), "gone2.bin") == vault::VaultResult::Ok);
     REQUIRE(v.remove_image("", "gone1.bin") == vault::VaultResult::Ok);
     REQUIRE(v.remove_image("", "gone2.bin") == vault::VaultResult::Ok);
 
@@ -120,7 +131,7 @@ TEST(compact_preserves_structure_thumbnails_and_survives_reopen)
                 == vault::VaultResult::Ok);
         REQUIRE(v.create_gallery("trips/2026")                    == vault::VaultResult::Ok);
         REQUIRE(v.add_image("trips/2026", png, "pic.png")         == vault::VaultResult::Ok);
-        REQUIRE(v.add_image("trips/2026", pattern(5000, 8), "raw.bin")
+        REQUIRE(v.add_image("trips/2026", random_payload(5000), "raw.bin")
                 == vault::VaultResult::Ok);
         REQUIRE(v.remove_image("trips/2026", "raw.bin") == vault::VaultResult::Ok);
         REQUIRE(v.compact() == vault::VaultResult::Ok);
@@ -155,8 +166,8 @@ TEST(remove_image_auto_compacts_past_waste_threshold)
             == vault::VaultResult::Ok);
 
     const size_t big = vault::Vault::AUTO_COMPACT_MIN_WASTE * 4;  // safely past both gates
-    REQUIRE(v.add_image("", pattern(big, 1), "gone.bin") == vault::VaultResult::Ok);
-    REQUIRE(v.add_image("", pattern(2000, 2), "keep.bin") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", random_payload(big), "gone.bin") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", random_payload(2000), "keep.bin") == vault::VaultResult::Ok);
 
     const uint64_t size_before = size_on_disk(tv.path);
     REQUIRE(v.remove_image("", "gone.bin") == vault::VaultResult::Ok);
@@ -177,8 +188,8 @@ TEST(remove_image_below_threshold_keeps_orphan)
     REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
             == vault::VaultResult::Ok);
 
-    REQUIRE(v.add_image("", pattern(4096, 1), "gone.bin") == vault::VaultResult::Ok);
-    REQUIRE(v.add_image("", pattern(4096, 2), "keep.bin") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", random_payload(4096), "gone.bin") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", random_payload(4096), "keep.bin") == vault::VaultResult::Ok);
     REQUIRE(v.remove_image("", "gone.bin") == vault::VaultResult::Ok);
 
     // 4 KiB of waste is far below AUTO_COMPACT_MIN_WASTE: the orphan stays
@@ -307,7 +318,7 @@ TEST(compact_preserves_both_image_and_video_when_deleting_image)
     video_fixture.read(reinterpret_cast<char*>(video_bytes.data()), video_size);
     REQUIRE(!video_bytes.empty());
 
-    const auto image = pattern(vault::Vault::AUTO_COMPACT_MIN_WASTE * 2, 99);
+    const auto image = random_payload(vault::Vault::AUTO_COMPACT_MIN_WASTE * 2);
 
     {
         vault::Vault v;
