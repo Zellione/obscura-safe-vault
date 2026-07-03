@@ -10,7 +10,6 @@
 #include "gfx/texture_cache.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
-#include "image/decode.h"
 #include "ui/export.h"
 #include "ui/meta_format.h"
 #include "ui/widgets.h"
