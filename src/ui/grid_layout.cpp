@@ -86,4 +86,46 @@ std::pair<int, int> list_visible_range(float scroll_offset, float row_height,
     return {first_row, last_row};
 }
 
+float ensure_visible(float scroll, float item_top, float item_bottom,
+                     float view_top, float view_bottom) noexcept
+{
+    const float item_height = item_bottom - item_top;
+    const float view_height = view_bottom - view_top;
+
+    // If the item is taller than the view, align its top with the view top.
+    if (item_height > view_height) {
+        return item_top - view_top;
+    }
+
+    // Compute the item's position in viewport coordinates using the formula:
+    // viewport_y = document_y - scroll
+    const float item_view_top = item_top - scroll;
+    const float item_view_bottom = item_bottom - scroll;
+
+    // Check if item is already visible within [view_top, view_bottom].
+    if (item_view_top >= view_top && item_view_bottom <= view_bottom) {
+        return scroll;  // Item already visible
+    }
+
+    // If item is above the view (item_view_bottom < view_top),
+    // scroll up (reduce scroll) to align item_top with view_top.
+    if (item_view_bottom < view_top) {
+        return item_top - view_top;
+    }
+
+    // If item is below the view (item_view_top > view_bottom),
+    // scroll down (increase scroll) to align item_bottom with view_bottom.
+    if (item_view_top > view_bottom) {
+        return item_bottom - view_bottom;
+    }
+
+    return scroll;
+}
+
+float clamp_scroll(float scroll, float content_height, float view_height) noexcept
+{
+    const float max_scroll = std::max(0.0f, content_height - view_height);
+    return std::max(0.0f, std::min(scroll, max_scroll));
+}
+
 }  // namespace ui

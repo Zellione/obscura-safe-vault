@@ -236,3 +236,113 @@ TEST(list_visible_range_margin_clamping)
     CHECK_EQ(r.first, 0);
     CHECK_EQ(r.second, 2);
 }
+
+// --- ensure_visible tests ---
+
+TEST(ensure_visible_item_already_visible)
+{
+    // Item [200, 300] is already visible in viewport [0, 500].
+    // scroll=0, item_top=200, item_bottom=300, view_top=0, view_bottom=500
+    // No adjustment needed.
+    float result = ui::ensure_visible(0.0f, 200.0f, 300.0f, 0.0f, 500.0f);
+    CHECK_EQ(result, 0.0f);
+}
+
+TEST(ensure_visible_item_above_viewport)
+{
+    // Item [50, 150] is above viewport [200, 700].
+    // Need to scroll up (negative) so item_top aligns with view_top.
+    // Result: scroll = item_top - view_top = 50 - 200 = -150
+    float result = ui::ensure_visible(0.0f, 50.0f, 150.0f, 200.0f, 700.0f);
+    CHECK_EQ(result, -150.0f);
+}
+
+TEST(ensure_visible_item_below_viewport)
+{
+    // Item [800, 900] is below viewport [200, 700].
+    // Need to scroll down so item_bottom aligns with view_bottom.
+    // Result: scroll such that item_bottom maps to view_bottom.
+    // If we scroll by `s`, the item appears at [800-s, 900-s] in view coords.
+    // We want 900 - s = 700, so s = 200.
+    float result = ui::ensure_visible(0.0f, 800.0f, 900.0f, 200.0f, 700.0f);
+    CHECK_EQ(result, 200.0f);
+}
+
+TEST(ensure_visible_item_taller_than_view)
+{
+    // Item [500, 900] (height 400) is taller than viewport height (200).
+    // Align top: scroll so item_top is at view_top.
+    // view_height = 200 - 0 = 200, item_height = 400
+    // Result: 500 - s = 0, so s = 500.
+    float result = ui::ensure_visible(0.0f, 500.0f, 900.0f, 0.0f, 200.0f);
+    CHECK_EQ(result, 500.0f);
+}
+
+TEST(ensure_visible_already_scrolled)
+{
+    // Item [500, 600] is below viewport [0, 700] when scroll=0.
+    // But with scroll=300, viewport becomes [300, 1000], so item is visible.
+    // Result: scroll stays 300.
+    float result = ui::ensure_visible(300.0f, 500.0f, 600.0f, 300.0f, 1000.0f);
+    CHECK_EQ(result, 300.0f);
+}
+
+TEST(ensure_visible_edge_case_exact_fit)
+{
+    // Item [100, 200] exactly fits viewport [100, 200].
+    // No adjustment needed.
+    float result = ui::ensure_visible(0.0f, 100.0f, 200.0f, 100.0f, 200.0f);
+    CHECK_EQ(result, 0.0f);
+}
+
+// --- clamp_scroll tests ---
+
+TEST(clamp_scroll_zero_offset_within_bounds)
+{
+    // scroll=0 is valid when content_height=1000, view_height=500.
+    // Max scroll = 1000 - 500 = 500.
+    float result = ui::clamp_scroll(0.0f, 1000.0f, 500.0f);
+    CHECK_EQ(result, 0.0f);
+}
+
+TEST(clamp_scroll_within_range)
+{
+    // scroll=300 is valid when content_height=1000, view_height=500.
+    // Max scroll = 500.
+    float result = ui::clamp_scroll(300.0f, 1000.0f, 500.0f);
+    CHECK_EQ(result, 300.0f);
+}
+
+TEST(clamp_scroll_above_max)
+{
+    // scroll=700 exceeds max (1000 - 500 = 500).
+    // Result: clamp to 500.
+    float result = ui::clamp_scroll(700.0f, 1000.0f, 500.0f);
+    CHECK_EQ(result, 500.0f);
+}
+
+TEST(clamp_scroll_negative)
+{
+    // scroll=-50 is below min (0).
+    // Result: clamp to 0.
+    float result = ui::clamp_scroll(-50.0f, 1000.0f, 500.0f);
+    CHECK_EQ(result, 0.0f);
+}
+
+TEST(clamp_scroll_content_smaller_than_view)
+{
+    // content_height=300, view_height=500 (view is larger).
+    // Max scroll = 0 (can't scroll).
+    // scroll=100 should clamp to 0.
+    float result = ui::clamp_scroll(100.0f, 300.0f, 500.0f);
+    CHECK_EQ(result, 0.0f);
+}
+
+TEST(clamp_scroll_zero_view_height)
+{
+    // Edge case: view_height=0.
+    // Max scroll = content - 0 = content.
+    // scroll=500 with content=1000 is valid.
+    float result = ui::clamp_scroll(500.0f, 1000.0f, 0.0f);
+    CHECK_EQ(result, 500.0f);
+}

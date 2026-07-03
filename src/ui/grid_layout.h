@@ -36,4 +36,26 @@ namespace ui {
                                                       float header_offset, float viewport_height,
                                                       int item_count) noexcept;
 
+// Compute the minimum scroll adjustment needed to keep an item visible in the viewport.
+// Inputs:
+//   scroll: current scroll offset (pixels scrolled down)
+//   item_top: top Y of the item (in document coordinates)
+//   item_bottom: bottom Y of the item (in document coordinates)
+//   view_top: top of the viewport (in document coordinates, typically = scroll)
+//   view_bottom: bottom of the viewport (in document coordinates, typically = scroll + view_height)
+// Returns the adjusted scroll value that keeps the item visible.
+//   If item is taller than the view, aligns item_top with view_top.
+//   If item is already visible, returns the input scroll unchanged.
+[[nodiscard]] float ensure_visible(float scroll, float item_top, float item_bottom,
+                                   float view_top, float view_bottom) noexcept;
+
+// Clamp a scroll offset to the valid range [0, max(0, content_height - view_height)].
+// Inputs:
+//   scroll: the scroll offset to clamp
+//   content_height: total height of scrollable content
+//   view_height: height of the visible viewport
+// Returns the clamped scroll value.
+[[nodiscard]] float clamp_scroll(float scroll, float content_height,
+                                 float view_height) noexcept;
+
 }  // namespace ui
