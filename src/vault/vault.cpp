@@ -778,6 +778,14 @@ VaultResult read_thumb_span(const Vault& v, uint64_t offset, uint64_t length,
     return Ok;
 }
 
+uint64_t vault_file_bytes(const Vault& v) noexcept
+{
+    if (!v.unlocked_ || !v.fp_) return 0;
+    uint64_t size = 0;
+    if (!fileutil::file_size(v.fp_, size)) return 0;
+    return size;
+}
+
 VaultResult Vault::add_video(std::string_view         gallery_path,
                              std::span<const uint8_t> file_data,
                              std::string_view         filename,

@@ -197,6 +197,10 @@ public:
     friend VaultResult read_thumb_span(const Vault& v, uint64_t offset,
                                        uint64_t length, crypto::SecureBytes& out);
 
+    // UI needs the vault file size for waste display (Phase 26). Kept a free friend
+    // to keep Vault under the cpp:S1448 method cap.
+    friend uint64_t vault_file_bytes(const Vault& v) noexcept;
+
     // Flip a node's favorite flag (gallery OR image). Persisted via the crash-safe
     // index swap. Locked if not unlocked; NotFound if node_path doesn't resolve.
     [[nodiscard]] VaultResult toggle_favorite(std::string_view node_path);
@@ -254,5 +258,9 @@ private:
 // Locked if the vault is locked; AuthFailed on tamper/corruption.
 [[nodiscard]] VaultResult read_thumb_span(const Vault& v, uint64_t offset,
                                           uint64_t length, crypto::SecureBytes& out);
+
+// Get the vault file's current size in bytes. Returns 0 if locked or on I/O error.
+// Used by the UI to display waste/compaction information (Phase 26).
+[[nodiscard]] uint64_t vault_file_bytes(const Vault& v) noexcept;
 
 } // namespace vault

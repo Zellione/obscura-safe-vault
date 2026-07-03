@@ -436,11 +436,10 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         return;
     }
     if ((key.key == SDLK_C) && (key.mod & SDL_KMOD_SHIFT)) {   // Shift+C: confirm-compact the vault (Phase 26)
-        uint64_t vault_file_size = 0;
-        if (!vault::fileutil::file_size(vault_.fp(), vault_file_size)) vault_file_size = 0;
-        const uint64_t waste = vault_.wasted_bytes();
+        const uint64_t file_sz = vault::vault_file_bytes(vault_);
+        const uint64_t waste_sz = vault_.wasted_bytes();
         // Only show the compact option if there's significant waste to reclaim.
-        if (should_display_waste(waste, vault_file_size)) {
+        if (should_display_waste(waste_sz, file_sz)) {
             naming_.confirm_compact = true;
             error_.clear();
         } else {
@@ -896,11 +895,10 @@ void GalleryGrid::render(gfx::Renderer& r)
                 TEXT_FAINT);
 
     // Show waste hint if it exceeds display threshold (Phase 26).
-    uint64_t vault_file_size = 0;
-    vault::fileutil::file_size(vault_.fp(), vault_file_size);
-    const uint64_t waste = vault_.wasted_bytes();
-    if (should_display_waste(waste, vault_file_size)) {
-        const std::string waste_hint = "· Waste: " + format_size(waste) + " [Shift+C]";
+    const uint64_t file_sz = vault::vault_file_bytes(vault_);
+    const uint64_t waste_sz = vault_.wasted_bytes();
+    if (should_display_waste(waste_sz, file_sz)) {
+        const std::string waste_hint = "· Waste: " + format_size(waste_sz) + " [Shift+C]";
         r.draw_text(font_, OX, 120, waste_hint, TEXT_DIM);
     }
 
@@ -976,10 +974,8 @@ void GalleryGrid::render(gfx::Renderer& r)
             r.draw_text(font_, px + (pw - tw) / 2, y, s, c);
         };
 
-        uint64_t vault_file_size = 0;
-        vault::fileutil::file_size(vault_.fp(), vault_file_size);
-        const uint64_t waste = vault_.wasted_bytes();
-        const std::string waste_str = format_size(waste);
+        const uint64_t compact_waste = vault_.wasted_bytes();
+        const std::string waste_str = format_size(compact_waste);
 
         centered("Compact vault?", py + 28, TEXT);
         centered("Reclaim " + waste_str + " of wasted space.", py + 72, TEXT);
