@@ -13,10 +13,13 @@
 #include "vault/index.h"
 #include "image/image.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
 extern "C" {
 #include <libavformat/avio.h>
 #include <libswscale/swscale.h>
 }
+#pragma GCC diagnostic pop
 
 // Forward declarations for opaque FFmpeg pointers
 struct AVFormatContext;

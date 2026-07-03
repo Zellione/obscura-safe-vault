@@ -1,6 +1,9 @@
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_NO_STDIO
 #include <stb_image.h>
+#pragma GCC diagnostic pop
 
 #include "image/decode.h"
 #include "image/decoder.h"

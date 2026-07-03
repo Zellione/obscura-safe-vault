@@ -2,6 +2,7 @@
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#pragma GCC diagnostic ignored "-Wconversion"
 #define STB_TRUETYPE_IMPLEMENTATION
 #include <stb_truetype.h>
 #pragma GCC diagnostic pop

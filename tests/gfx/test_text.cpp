@@ -147,7 +147,7 @@ TEST(build_text_geometry_offsets_indices_when_batching)
     font.build_text_geometry(50.0f, 0.0f, "B", gfx::Color{255, 255, 255, 255}, verts, idx);
     CHECK_EQ(verts.size(), size_t{8});
     CHECK_EQ(idx.size(),   size_t{12});
-    int min_second = verts.size();
+    int min_second = static_cast<int>(verts.size());
     for (size_t i = after_first; i < idx.size(); ++i) min_second = std::min(min_second, idx[i]);
     CHECK(min_second >= 4);   // second run indices point past the first run's 4 verts
 }

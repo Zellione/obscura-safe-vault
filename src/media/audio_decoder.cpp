@@ -3,12 +3,15 @@
 #include "media/audio_decoder.h"
 #include "media/audio_interleave.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/avutil.h>
 #include <libavutil/samplefmt.h>
 }
+#pragma GCC diagnostic pop
 
 #include <print>
 

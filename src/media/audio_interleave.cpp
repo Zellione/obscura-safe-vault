@@ -4,9 +4,12 @@
 
 #include <cstring>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
 extern "C" {
 #include <libavutil/samplefmt.h>
 }
+#pragma GCC diagnostic pop
 
 namespace media {
 

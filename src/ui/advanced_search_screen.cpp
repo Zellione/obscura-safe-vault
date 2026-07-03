@@ -101,7 +101,7 @@ void draw_dropdown(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<std
     // overlaps the labels beneath. Each suggestion's ink is vertically centred in
     // its slot via text_top_for_center (draw_text's y is the glyph-cell top, so the
     // ink would otherwise sit low and poke out of the panel).
-    const SDL_FRect panel{x - 6, y, colw + 12, n * ROW};
+    const SDL_FRect panel{x - 6.0f, y, colw + 12.0f, static_cast<float>(n) * ROW};
     r.draw_round_rect(panel, RADIUS_SMALL, SURFACE);
     r.draw_round_rect(panel, RADIUS_SMALL, ACCENT, /*filled*/ false);
     for (int i = 0; i < n; ++i) {

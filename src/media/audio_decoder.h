@@ -5,10 +5,13 @@
 
 #ifdef OSV_VENDORED_AV
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 }
+#pragma GCC diagnostic pop
 
 namespace media {
 

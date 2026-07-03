@@ -4,10 +4,13 @@
 
 #include <cstdio>   // SEEK_SET/CUR/END
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
 extern "C" {
 #include <libavutil/error.h>
 #include <libavutil/mem.h>
 }
+#pragma GCC diagnostic pop
 
 namespace media {
 

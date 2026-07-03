@@ -5,11 +5,14 @@
 // build lands) so the test binary still builds everywhere.
 #ifdef OSV_VENDORED_AV
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
 }
+#pragma GCC diagnostic pop
 
 TEST(av_libraries_link_and_report_version)
 {

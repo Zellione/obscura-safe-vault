@@ -10,9 +10,12 @@
 #include <cstdint>
 #include <span>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
 extern "C" {
 #include <libavformat/avio.h>
 }
+#pragma GCC diagnostic pop
 
 namespace media {
 

@@ -120,7 +120,10 @@ private:
     {
         if (!need(n)) return 0;
         T v = 0;
-        for (size_t i = 0; i < n; ++i) v |= static_cast<T>(in_[pos_ + i]) << (8 * i);
+        for (size_t i = 0; i < n; ++i) {
+            const T byte_val = static_cast<T>(in_[pos_ + i]);
+            v |= static_cast<T>(byte_val << static_cast<int>(8 * i));
+        }
         pos_ += n;
         return v;
     }

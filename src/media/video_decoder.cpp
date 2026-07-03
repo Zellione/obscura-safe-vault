@@ -2,6 +2,8 @@
 
 #include "media/video_decoder.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
@@ -11,6 +13,7 @@ extern "C" {
 #include <libavutil/opt.h>
 #include <libswscale/swscale.h>
 }
+#pragma GCC diagnostic pop
 
 #include <cstring>
 #include <print>
