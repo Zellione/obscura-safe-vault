@@ -4,11 +4,11 @@
 // Shared by chunk_store (append/read) and vault (header writes). premake builds
 // 64-bit only, so off_t / _ftelli64 are wide enough for any vault.
 
-#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 #if defined(_WIN32)
 #  include <io.h>
@@ -140,7 +140,7 @@ inline void wipe_and_remove(const std::string& path) noexcept
         return;
     } else {
         constexpr size_t WIPE_CHUNK = 1024 * 1024;  // 1 MiB chunks
-        std::array<uint8_t, WIPE_CHUNK> zeros{};
+        std::vector<uint8_t> zeros(WIPE_CHUNK, 0);  // heap: 1 MiB on the stack overflows Windows (1 MiB) / macOS worker-thread (512 KiB) stacks
         uint64_t remaining = 0;
         if (seek_end(fp, remaining) && seek_to(fp, 0)) {
             while (remaining > 0) {
