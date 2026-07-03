@@ -400,17 +400,21 @@ TEST(fuzz_framed_chunk_read)
                 std::vector<uint8_t> out_vec;
                 crypto::SecureBytes out_sec;
 
+                // Pre-load out_sec with sentinel content to verify failed reads clear it.
+                REQUIRE(out_sec.resize(8));
+
                 // read_chunk should reject the hostile frame (or succeed only if the
                 // random plaintext happened to be valid, which is negligible).
                 (void)framed.read_chunk(span, out_vec);  // may fail or succeed
-                (void)framed.read_chunk(span, out_sec);  // may fail or succeed
+                const bool res_sec = framed.read_chunk(span, out_sec);
 
                 // Contract: SecureBytes overload leaves out_sec empty on failure.
                 // (When it fails, it clears the buffer; when it succeeds, it holds the
                 // decoded plaintext.) For hostile frames, we expect failure, so check
                 // that on failure the buffer is truly empty.
-                // We can't easily distinguish success from failure for random data, but
-                // we can at least verify no crash occurred.
+                if (!res_sec) {
+                    CHECK_EQ(out_sec.size(), size_t(0));
+                }
             }
         }
         // Rewind for the next iteration.
