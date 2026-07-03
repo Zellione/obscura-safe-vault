@@ -25,9 +25,6 @@
 #  include <windows.h>
 #else
 #  include <sys/mman.h>
-#  ifdef __linux__
-#    include <cerrno>
-#  endif
 #endif
 
 namespace crypto {
