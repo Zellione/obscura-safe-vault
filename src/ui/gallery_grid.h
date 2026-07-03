@@ -123,6 +123,7 @@ private:
     std::vector<const vault::IndexNode*> children_;
     int                   cols_ = 1;
     GalleryView           view_ = GalleryView::Grid;
+    float                 scroll_ = 0.0f;  // vertical scroll offset (pixels scrolled down)
     std::string           error_;
     std::string           status_;   // transient export result message
 

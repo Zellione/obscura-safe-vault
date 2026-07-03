@@ -585,6 +585,15 @@ void GalleryGrid::handle_event(const SDL_Event& e)
             }
             break;
         }
+        case SDL_EVENT_MOUSE_WHEEL: {
+            // Scroll without moving selection.
+            const float scroll_step = (view_ == GalleryView::List)
+                ? ROW_H * 2
+                : (CELL + GAP) * 0.5f;
+            scroll_ -= e.wheel.y * scroll_step;
+            mark_dirty();
+            break;
+        }
         default: break;
     }
 }
@@ -772,6 +781,35 @@ void GalleryGrid::update(double)
         if (!dest->empty()) do_export(*dest);   // empty => the picker was cancelled
         mark_dirty();
     }
+
+    // Update scroll to keep the selected item visible.
+    const int sel_idx = nav_.selected();
+    const auto H = static_cast<float>(win_.height());
+    if (sel_idx >= 0 && sel_idx < static_cast<int>(children_.size())) {
+        if (view_ == GalleryView::List) {
+            // For list view: item at row sel_idx
+            const float item_top = OY + LIST_HEADER + static_cast<float>(sel_idx) * ROW_H;
+            const float item_bottom = item_top + ROW_H;
+            // Content height = header + (num_items * row_height)
+            const float content_height = OY + LIST_HEADER + static_cast<float>(children_.size()) * ROW_H;
+            // Apply selection-following scroll
+            scroll_ = ui::ensure_visible(scroll_, item_top, item_bottom, OY + LIST_HEADER, H);
+            scroll_ = ui::clamp_scroll(scroll_, content_height, H);
+        } else {
+            // For grid view: item at position computed from grid_cell_rect
+            const auto W = static_cast<float>(win_.width());
+            const SDL_FRect cellr = grid_cell_rect(sel_idx, grid_spec(W, cols_));
+            const float item_top = cellr.y;
+            const float item_bottom = cellr.y + CELL;
+            // Content height = number of rows * (cell_height + gap) - gap + top offset
+            const int cols = grid_columns(W - 2 * OX, CELL, GAP);
+            const int total_rows = (static_cast<int>(children_.size()) + cols - 1) / cols;
+            const float content_height = OY + static_cast<float>(total_rows) * (CELL + GAP);
+            // Apply selection-following scroll
+            scroll_ = ui::ensure_visible(scroll_, item_top, item_bottom, OY, H);
+            scroll_ = ui::clamp_scroll(scroll_, content_height, H);
+        }
+    }
 }
 
 void GalleryGrid::render(gfx::Renderer& r)
@@ -897,11 +935,13 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float H)
     using namespace gfx::theme;
     cols_ = grid_columns(W - 2 * OX, CELL, GAP);
     const auto [first_idx, last_idx] = grid_visible_range(
-        0.0f, CELL, GAP, OY, H, cols_, static_cast<int>(children_.size()));
+        scroll_, CELL, GAP, OY, H, cols_, static_cast<int>(children_.size()));
     // If the grid is empty, the range will be {0, -1}; the loop handles this correctly.
     for (int i = first_idx; i <= last_idx; ++i) {
         if (i < 0 || i >= static_cast<int>(children_.size())) continue;
-        const SDL_FRect cellr = grid_cell_rect(i, grid_spec(W, cols_));
+        SDL_FRect cellr = grid_cell_rect(i, grid_spec(W, cols_));
+        // Apply scroll offset to cell Y position.
+        cellr.y -= scroll_;
         const vault::IndexNode* n = children_[i];
         const bool sel = (i == nav_.selected());
         if (sel) r.draw_selection_glow(cellr, RADIUS, ACCENT);
@@ -944,7 +984,7 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float H)
     const float type_x = size_x + COL_SIZE;
     const float date_x = type_x + COL_TYPE;
 
-    // Column header + separator.
+    // Column header + separator (fixed, not scrolled).
     const float hy = font_.text_top_for_center(OY + (LIST_HEADER - 6) * 0.5f);
     r.draw_text(font_, OX, hy, "NAME", TEXT_FAINT);
     r.draw_text(font_, dims_x, hy, "DIMENSIONS", TEXT_FAINT);
@@ -954,14 +994,16 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float H)
     r.draw_rect({OX, OY + LIST_HEADER - 6, rw, 1.0f}, BORDER);
 
     const auto [first_idx, last_idx] = list_visible_range(
-        0.0f, ROW_H, OY + LIST_HEADER, H, static_cast<int>(children_.size()));
+        scroll_, ROW_H, OY + LIST_HEADER, H, static_cast<int>(children_.size()));
     for (int i = first_idx; i <= last_idx; ++i) {
         if (i < 0 || i >= static_cast<int>(children_.size())) continue;
         const vault::IndexNode* n = children_[i];
         const auto& m  = n->meta;
         const bool sel = (i == nav_.selected());
-        const SDL_FRect row{OX, OY + LIST_HEADER + static_cast<float>(i) * ROW_H,
-                            rw, ROW_H - 6};
+        SDL_FRect row{OX, OY + LIST_HEADER + static_cast<float>(i) * ROW_H,
+                      rw, ROW_H - 6};
+        // Apply scroll offset to row Y position.
+        row.y -= scroll_;
         if (sel) {
             r.draw_round_rect(row, RADIUS_SMALL, SURFACE_HI);
             r.draw_round_rect(row, RADIUS_SMALL, ACCENT, /*filled*/ false);
@@ -1013,13 +1055,15 @@ void GalleryGrid::draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
 int GalleryGrid::hit_test(float mx, float my) const
 {
     const auto count = static_cast<int>(children_.size());
+    // Add scroll offset to mouse Y to convert from viewport to document coordinates.
+    const float my_doc = my + scroll_;
     if (view_ == GalleryView::List) {
         const float top = OY + LIST_HEADER;
-        if (mx < OX || mx > static_cast<float>(win_.width()) - OX || my < top) return -1;
-        const auto idx = static_cast<int>((my - top) / ROW_H);
+        if (mx < OX || mx > static_cast<float>(win_.width()) - OX || my_doc < top) return -1;
+        const auto idx = static_cast<int>((my_doc - top) / ROW_H);
         return (idx >= 0 && idx < count) ? idx : -1;
     }
-    return grid_hit(mx, my, count, grid_spec(static_cast<float>(win_.width()), cols_));
+    return grid_hit(mx, my_doc, count, grid_spec(static_cast<float>(win_.width()), cols_));
 }
 
 std::string GalleryGrid::fit_name(std::string_view name, float max_w) const
