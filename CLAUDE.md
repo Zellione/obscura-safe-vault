@@ -172,6 +172,18 @@ src/
                                             shared background-progress + cancel handle used by
                                             every bulk vault op; ui::ImportProgress now aliases
                                             it so ZipImportJob + FileOpJob share one type (Phase 25).
+             index_io.*                   ← Internal component (Phase 25): index serialization +
+                                            crash-safe double-buffer slot swapping (3-phase atomic
+                                            commit: append → write inactive slot → flip active_slot).
+                                            IndexIoContext bundles mutable state; index_io::commit_index
+                                            owns the persistence logic extracted from Vault::commit_index.
+                                            Keeps Vault method count bounded (cpp:S1448).
+             vault_ops.*                  ← Internal component (Phase 25): tree navigation + path
+                                            resolution + structural validation. Exports split_path,
+                                            resolve_gallery, resolve_node_impl, child_named, holds_media,
+                                            holds_galleries, for_each_media, relocate_node_chunks.
+                                            Pure tree traversal; no I/O or persistence. Keeps Vault
+                                            method count bounded (cpp:S1448).
   image/     image.h, decode.*,           ← stb_image decode + thumbs (Phase 3)
              thumbnail.*,                 ← format detection + libwebp/libheif
              format_registry.*,           ← decoders (Phase 9)

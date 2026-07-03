@@ -19,6 +19,8 @@
 
 #include "vault/video_format.h"
 #include "vault/vault_search.h"
+#include "vault/index_io.h"
+#include "vault/vault_ops.h"
 #include "media/video_probe.h"
 #include "ui/advanced_search_model.h"  // AdvancedQuery + evaluate (pure, SDL/vault-free)
 
@@ -26,91 +28,15 @@ namespace vault {
 
 namespace {
 
-// Split a slash-separated path into non-empty segments. Leading/trailing/
-// repeated slashes are ignored, so "", "/", "a/", "/a/b" all normalise cleanly.
-std::vector<std::string_view> split_path(std::string_view p)
-{
-    std::vector<std::string_view> out;
-    size_t i = 0;
-    while (i < p.size()) {
-        while (i < p.size() && p[i] == '/') ++i;
-        const size_t start = i;
-        while (i < p.size() && p[i] != '/') ++i;
-        if (i > start) out.push_back(p.substr(start, i - start));
-    }
-    return out;
-}
-
-// Walk the gallery tree to the node named by `path` (templated so it serves both
-// const and non-const callers). Returns nullptr if any segment is missing or is
-// an image rather than a gallery.
-template <typename NodeT>
-NodeT* resolve_gallery(NodeT* root, std::string_view path)
-{
-    NodeT* cur = root;
-    for (std::string_view seg : split_path(path)) {
-        NodeT* next = nullptr;
-        for (auto& child : cur->children) {
-            if (child.is_gallery() && child.name == seg) { next = &child; break; }
-        }
-        if (!next) return nullptr;
-        cur = next;
-    }
-    return cur;
-}
-
-IndexNode* child_named(IndexNode* node, std::string_view name)
-{
-    for (auto& c : node->children)
-        if (c.name == name) return &c;
-    return nullptr;
-}
-
-bool holds_media(const IndexNode& g)
-{
-    return std::ranges::any_of(g.children, [](const auto& c) { return c.is_media(); });
-}
-
-bool holds_galleries(const IndexNode& g)
-{
-    return std::ranges::any_of(g.children, [](const auto& c) { return c.is_gallery(); });
-}
-
-// Visit every media node (image or video) in the tree rooted at `n`.
-// Templated so it serves both const and non-const callers.
-template <typename NodeT, typename Fn>
-void for_each_media(NodeT& n, Fn&& fn)
-{
-    if (n.is_media()) {
-        fn(n);
-        return;
-    }
-    for (auto& c : n.children) for_each_media(c, fn);
-}
-
-// Copy a media node's live chunk(s) from `src` to `dst` verbatim (ciphertext —
-// no decrypt/re-encrypt, invariant #1), rewriting each offset to its new
-// location. Sets `err` to IoError on the first failed read/append.
-[[maybe_unused]] void relocate_node_chunks(const ChunkStore& src, ChunkStore& dst, IndexNode& node, VaultResult& err)
-{
-    auto copy_span = [&err, &src, &dst](uint64_t& off, uint64_t len) {
-        if (err != VaultResult::Ok || len == 0) return;
-        std::vector<uint8_t> blob;
-        uint64_t new_off = 0;
-        if (!src.read_raw(off, len, blob) || !dst.append_raw(blob, new_off)) {
-            err = VaultResult::IoError;
-            return;
-        }
-        off = new_off;
-    };
-    if (node.is_image()) {
-        copy_span(node.meta.data_offset, node.meta.data_length);
-        copy_span(node.meta.thumb_offset, node.meta.thumb_length);
-    } else if (node.is_video()) {
-        for (auto& chunk : node.vmeta.chunks) copy_span(chunk.offset, chunk.length);
-        copy_span(node.vmeta.poster_offset, node.vmeta.poster_length);
-    }
-}
+// Wrappers around vault_ops functions for backward compatibility in this TU,
+// avoiding the need to update every call site.
+using vault_ops::split_path;
+using vault_ops::resolve_gallery;
+using vault_ops::child_named;
+using vault_ops::holds_media;
+using vault_ops::holds_galleries;
+using vault_ops::for_each_media;
+using vault_ops::relocate_node_chunks;
 
 // Trim ASCII whitespace from start and end of a string_view.
 std::string_view trim_ws(std::string_view s)
@@ -617,40 +543,11 @@ VaultResult Vault::change_password(std::span<const uint8_t> old_password,
 
 // --- structure ------------------------------------------------------------
 
-IndexNode*       Vault::find_gallery(std::string_view p)       { return resolve_gallery(&root_, p); }
-const IndexNode* Vault::find_gallery(std::string_view p) const { return resolve_gallery(&root_, p); }
+IndexNode*       Vault::find_gallery(std::string_view p)       { return vault_ops::resolve_gallery(&root_, p); }
+const IndexNode* Vault::find_gallery(std::string_view p) const { return vault_ops::resolve_gallery(&root_, p); }
 
-// Resolve a path to any node (gallery or image). The final segment may be either.
-// Intermediate segments must be galleries.
-template <typename NodeT>
-NodeT* resolve_node_impl(NodeT* root, std::string_view path)
-{
-    auto segments = split_path(path);
-    if (segments.empty()) return root;  // Empty path -> root.
-
-    NodeT* cur = root;
-    // All but the last segment must be galleries.
-    for (size_t i = 0; i < segments.size() - 1; ++i) {
-        NodeT* next = nullptr;
-        for (auto& child : cur->children) {
-            if (child.is_gallery() && child.name == segments[i]) {
-                next = &child;
-                break;
-            }
-        }
-        if (!next) return nullptr;
-        cur = next;
-    }
-
-    // The last segment can be any node.
-    for (auto& child : cur->children) {
-        if (child.name == segments.back()) return &child;
-    }
-    return nullptr;
-}
-
-IndexNode*       Vault::resolve_node(std::string_view path)       { return resolve_node_impl(&root_, path); }
-const IndexNode* Vault::resolve_node(std::string_view path) const { return resolve_node_impl(&root_, path); }
+IndexNode*       Vault::resolve_node(std::string_view path)       { return vault_ops::resolve_node_impl(&root_, path); }
+const IndexNode* Vault::resolve_node(std::string_view path) const { return vault_ops::resolve_node_impl(&root_, path); }
 
 VaultResult Vault::create_gallery(std::string_view gallery_path)
 {
@@ -1316,47 +1213,19 @@ VaultResult Vault::compact(OpProgress* progress)
 
 bool Vault::write_header()
 {
-    std::array<uint8_t, HEADER_SIZE> raw{};
-    header_.serialize(raw);
-    if (!fileutil::seek_to(fp_, 0)) return false;
-    if (std::fwrite(raw.data(), 1, raw.size(), fp_) != raw.size()) return false;
-    return fileutil::sync(fp_);
+    return index_io::write_header(fp_, header_);
 }
 
 VaultResult Vault::commit_index()
 {
-    using enum VaultResult;
-    // Serialise + seal the index (tree + saved searches) with a fresh random nonce.
-    std::vector<uint8_t> blob;
-    serialize_index(root_, saved_searches_, blob);
-
-    std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
-    if (!crypto::fill_random(nonce)) return CryptoError;
-
-    std::vector<uint8_t> sealed;
-    crypto::seal(master_key_.as_span(), nonce, blob, sealed);
-
-    // Step A: append the new index blob and make it durable.
-    ChunkStore store(fp_, master_key_.as_span());
-    uint64_t offset = 0;
-    if (!store.append_raw(sealed, offset)) return IoError;
-    if (!store.sync())                     return IoError;
-
-    const uint8_t inactive = header_.active_slot == 0 ? 1 : 0;
-    header_.slot[inactive] = IndexSlot{.offset = offset,
-                                       .length = sealed.size(),
-                                       .nonce  = nonce};
-
-    // Step B: persist the new slot pointer with active_slot still pointing at the
-    // old index — both slots are now valid on disk.
-    if (!write_header()) return IoError;
-
-    // Step C: flip active_slot. This is the atomic commit point; a crash before
-    // it leaves the previous index in force, after it the new one.
-    header_.active_slot = inactive;
-    if (!write_header()) return IoError;
-
-    return Ok;
+    IndexIoContext ctx{
+        .fp_           = fp_,
+        .header_       = header_,
+        .master_key_   = master_key_,
+        .root_         = root_,
+        .saved_searches_ = saved_searches_,
+    };
+    return index_io::commit_index(ctx);
 }
 
 } // namespace vault
