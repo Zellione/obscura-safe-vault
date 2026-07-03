@@ -3,6 +3,7 @@
 #include "media/audio_decoder.h"
 #include "media/audio_interleave.h"
 
+#if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
 extern "C" {
@@ -12,6 +13,7 @@ extern "C" {
 #include <libavutil/samplefmt.h>
 }
 #pragma GCC diagnostic pop
+#endif
 
 #include <print>
 

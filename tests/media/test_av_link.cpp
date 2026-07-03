@@ -5,6 +5,7 @@
 // build lands) so the test binary still builds everywhere.
 #ifdef OSV_VENDORED_AV
 
+#if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
 extern "C" {
@@ -13,6 +14,7 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 #pragma GCC diagnostic pop
+#endif
 
 TEST(av_libraries_link_and_report_version)
 {

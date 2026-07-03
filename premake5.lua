@@ -93,8 +93,7 @@ local function link_image_codecs()
             prefix = asan_prefix
         else
             -- Fallback with a warning.
-            fprintf(io.stderr, "WARNING: --asan requested but ASAN codec prefix not found at %s\n", asan_prefix)
-            fprintf(io.stderr, "         falling back to %s (not instrumented)\n", prefix)
+            premake.warn("--asan requested but ASAN codec prefix not found at " .. asan_prefix .. "; falling back to " .. prefix .. " (not instrumented)")
         end
     end
 
@@ -135,8 +134,7 @@ local function link_av()
         else
             -- Fallback with a warning (only if we'd link AV at all).
             if os.isfile(path.join(path.join(os.getcwd(), "vendor/codecs-prefix"), "lib/libavcodec.a")) then
-                fprintf(io.stderr, "WARNING: --asan requested but ASAN FFmpeg prefix not found at %s\n", asan_prefix)
-                fprintf(io.stderr, "         falling back to %s (not instrumented)\n", path.join(os.getcwd(), "vendor/codecs-prefix"))
+                premake.warn("--asan requested but ASAN FFmpeg prefix not found at " .. asan_prefix .. "; falling back to " .. path.join(os.getcwd(), "vendor/codecs-prefix") .. " (not instrumented)")
             end
         end
     end

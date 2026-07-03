@@ -4,6 +4,7 @@
 // Shared by chunk_store (append/read) and vault (header writes). premake builds
 // 64-bit only, so off_t / _ftelli64 are wide enough for any vault.
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -133,7 +134,8 @@ inline void sync_dir_of(const std::string& path) noexcept
 inline void wipe_and_remove(const std::string& path) noexcept
 {
     // Attempt to open and overwrite the file with zeros in chunks.
-    std::FILE* fp = std::fopen(path.c_str(), "r+b");
+    const std::string p = path;
+    std::FILE* fp = std::fopen(p.c_str(), "r+b");
     if (fp) {
         constexpr size_t WIPE_CHUNK = 1024 * 1024;  // 1 MiB chunks
         std::array<uint8_t, WIPE_CHUNK> zeros{};

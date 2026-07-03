@@ -2,6 +2,7 @@
 
 #include "media/video_decoder.h"
 
+#if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
 extern "C" {
@@ -14,6 +15,7 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 #pragma GCC diagnostic pop
+#endif
 
 #include <cstring>
 #include <print>

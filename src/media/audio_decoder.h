@@ -5,6 +5,7 @@
 
 #ifdef OSV_VENDORED_AV
 
+#if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
 extern "C" {
@@ -12,6 +13,7 @@ extern "C" {
 #include <libavformat/avformat.h>
 }
 #pragma GCC diagnostic pop
+#endif
 
 namespace media {
 

@@ -4,6 +4,7 @@
 
 #include <cstdio>   // SEEK_SET/CUR/END
 
+#if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
 extern "C" {
@@ -11,6 +12,7 @@ extern "C" {
 #include <libavutil/mem.h>
 }
 #pragma GCC diagnostic pop
+#endif
 
 namespace media {
 

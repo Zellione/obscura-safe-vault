@@ -12,6 +12,7 @@
 // the wipe guarantee. is_locked() exposes the outcome for diagnostics/tests.
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>

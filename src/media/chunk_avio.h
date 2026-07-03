@@ -9,12 +9,14 @@
 #include <cstdint>
 #include "media/video_source.h"
 
+#if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
 extern "C" {
 #include <libavformat/avio.h>
 }
 #pragma GCC diagnostic pop
+#endif
 
 namespace media {
 
