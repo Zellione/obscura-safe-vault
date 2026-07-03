@@ -43,7 +43,7 @@ uint8_t* buf_data(crypto::SecureBytes& b) noexcept { return b.data(); }
 size_t try_deflate(std::span<const uint8_t> payload, std::span<uint8_t> dst) noexcept
 {
     if (payload.empty() || payload.size() > MZ_LEN_MAX) return 0;
-    mz_ulong comp_len = static_cast<mz_ulong>(dst.size());
+    auto comp_len = static_cast<mz_ulong>(dst.size());
     if (mz_compress2(dst.data(), &comp_len, payload.data(),
                      static_cast<mz_ulong>(payload.size()), MZ_DEFAULT_LEVEL) != MZ_OK) {
         return 0;
@@ -108,9 +108,9 @@ bool decode_impl(std::span<const uint8_t> framed, Buf& out) noexcept
     if (orig_len > MZ_LEN_MAX || orig_len == 0) return false;
 
     if (!resize_buf(out, static_cast<size_t>(orig_len))) return false;
-    mz_ulong dst_len = static_cast<mz_ulong>(orig_len);
-    mz_ulong src_len = static_cast<mz_ulong>(comp_len);
-    if (mz_uncompress2(buf_data(out), &dst_len, framed.data() + DEFLATE_HDR, &src_len) != MZ_OK ||
+    auto dst_len = static_cast<mz_ulong>(orig_len);
+    if (auto src_len = static_cast<mz_ulong>(comp_len);
+        mz_uncompress2(buf_data(out), &dst_len, framed.data() + DEFLATE_HDR, &src_len) != MZ_OK ||
         dst_len != static_cast<mz_ulong>(orig_len) || src_len != static_cast<mz_ulong>(comp_len)) {
         (void)resize_buf(out, 0);  // SecureBytes: wipes the partial plaintext
         return false;
