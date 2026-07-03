@@ -88,7 +88,6 @@ FileOpOutcome transfer_outcome(vault::TransferMode mode, int done, int failed, i
 
 FileOpOutcome run_compact(vault::Vault& v, vault::OpProgress& progress)
 {
-    progress.total.store(1);  // compact is one logical operation
     if (progress.cancel.load()) {
         FileOpOutcome oc;
         oc.ok = true; oc.cancelled = true;
@@ -97,14 +96,16 @@ FileOpOutcome run_compact(vault::Vault& v, vault::OpProgress& progress)
         return oc;
     }
 
+    // compact() owns progress.total and progress.done; it scans all chunks and
+    // writes them to a temp file with progress updates before atomically
+    // replacing the original.
     const vault::VaultResult r = v.compact(&progress);
     FileOpOutcome oc;
     oc.kind = FileOpKind::Compact;
     if (r == vault::VaultResult::Ok) {
-        progress.done.store(1);
         oc.ok = true;
-        oc.done = 1;
-        oc.total = 1;
+        oc.done = progress.done.load();
+        oc.total = progress.total.load();
         oc.status = "Vault compacted successfully.";
     } else {
         oc.error = std::format("Compaction failed: {:d}.", static_cast<int>(r));

@@ -895,15 +895,23 @@ void GalleryGrid::render(gfx::Renderer& r)
                 TEXT_FAINT);
 
     // Show waste hint if it exceeds display threshold (Phase 26).
+    // Combine with selection count on the same line to avoid collision.
     const uint64_t file_sz = vault::vault_file_bytes(vault_);
     const uint64_t waste_sz = vault_.wasted_bytes();
-    if (should_display_waste(waste_sz, file_sz)) {
-        const std::string waste_hint = "· Waste: " + format_size(waste_sz) + " [Shift+C]";
-        r.draw_text(font_, OX, 120, waste_hint, TEXT_DIM);
-    }
+    const bool show_waste = should_display_waste(waste_sz, file_sz);
+    const bool show_selection = !sel_.empty();
 
-    if (!sel_.empty())
-        r.draw_text(font_, OX, 120, std::format("{} selected", sel_.count()), ACCENT);
+    if (show_waste || show_selection) {
+        std::string footer;
+        if (show_selection)
+            footer = std::format("{} selected", sel_.count());
+        if (show_waste) {
+            if (!footer.empty()) footer += " · ";
+            footer += "Waste: " + format_size(waste_sz) + " [Shift+C]";
+        }
+        const auto color = show_selection ? ACCENT : TEXT_DIM;
+        r.draw_text(font_, OX, 120, footer, color);
+    }
 
     if (view_ == GalleryView::List) render_list(r, W, H);
     else                            render_grid(r, W, H);

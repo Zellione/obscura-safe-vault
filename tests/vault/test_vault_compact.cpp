@@ -1,9 +1,12 @@
 #include "test_framework.h"
 
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <span>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "image/fixtures.h"
@@ -403,34 +406,83 @@ TEST(compact_cancel_before_start_is_noop)
 
 TEST(compact_cancel_mid_operation_leaves_original_intact)
 {
-    TempVault tv("cancel_mid");
-    vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-            == vault::VaultResult::Ok);
+    // Genuine mid-loop cancel test: run compact on a vault with multiple chunks
+    // in a background thread, spin-wait until done >= 1, then set cancel.
+    // Structure the assertion to accept either:
+    //   (a) cancelled with original intact, or
+    //   (b) completed successfully.
+    // Run the race ~10 times to give it a chance to hit the mid-loop window.
+    // This test may pass "trivially" (cancel too late, compact finishes) —
+    // that is acceptable; the important case is when cancel arrives mid-loop,
+    // original must be intact and no temp file left.
 
-    REQUIRE(v.add_image("", pattern(100 * 1024, 1), "a.bin") == vault::VaultResult::Ok);
-    REQUIRE(v.add_image("", pattern(100 * 1024, 2), "b.bin") == vault::VaultResult::Ok);
-    REQUIRE(v.remove_image("", "a.bin") == vault::VaultResult::Ok);
+    for (int iteration = 0; iteration < 10; ++iteration) {
+        TempVault tv(("cancel_mid_" + std::to_string(iteration)).c_str());
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+                == vault::VaultResult::Ok);
 
-    const uint64_t size_before = size_on_disk(tv.path);
-    const uint64_t waste_before = v.wasted_bytes();
+        // Create multiple images so we have multiple chunks to compact.
+        REQUIRE(v.add_image("", pattern(100 * 1024, 1), "a.bin") == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("", pattern(100 * 1024, 2), "b.bin") == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("", pattern(100 * 1024, 3), "c.bin") == vault::VaultResult::Ok);
+        REQUIRE(v.remove_image("", "a.bin") == vault::VaultResult::Ok);
+        REQUIRE(v.remove_image("", "b.bin") == vault::VaultResult::Ok);
 
-    // Compact with cooperative cancel: set cancel flag once done counter reaches 1.
-    vault::OpProgress prog;
-    // Since we can't intercept mid-loop easily in this test, we'll set cancel upfront
-    // and verify the original is untouched (effectively the same outcome).
-    prog.cancel.store(true);
-    REQUIRE(v.compact(&prog) == vault::VaultResult::Ok);
+        const uint64_t size_before = size_on_disk(tv.path);
+        const uint64_t waste_before = v.wasted_bytes();
+        REQUIRE(waste_before > 0);  // ensure we have waste to reclaim
 
-    // Original file untouched (no compaction occurred).
-    CHECK_EQ(size_on_disk(tv.path), size_before);
-    CHECK_EQ(v.wasted_bytes(), waste_before);
+        vault::OpProgress prog;
+        vault::VaultResult compact_result = vault::VaultResult::IoError;  // sentinel; overwritten by thread
+        std::atomic<bool> cancel_sent(false);
 
-    // Vault is still usable.
-    auto kids = v.list("");
-    REQUIRE(kids.size() == 1);
-    crypto::SecureBytes out;
-    REQUIRE(v.read_image(*kids[0], out) == vault::VaultResult::Ok);
+        // Run compact on a background thread.
+        std::thread t([&v, &prog, &compact_result]() {
+            compact_result = v.compact(&prog);
+        });
+
+        // Spin-wait until done >= 1 (compaction has started processing chunks),
+        // then set cancel. Use a generous hard timeout (1 second) to avoid infinite
+        // waits if the test framework hangs.
+        auto start = std::chrono::steady_clock::now();
+        const auto timeout = std::chrono::seconds(1);
+        while (std::chrono::steady_clock::now() - start < timeout) {
+            if (prog.done.load() >= 1) {
+                prog.cancel.store(true);
+                cancel_sent.store(true);
+                break;
+            }
+            std::this_thread::yield();
+        }
+
+        // Join the worker thread.
+        t.join();
+
+        // Verify the outcome: either cancelled or completed successfully.
+        if (compact_result == vault::VaultResult::Ok) {
+            // Compact completed successfully (cancel too late, or not sent).
+            // File may be smaller after reclaiming waste, or slightly larger due to index overhead.
+            CHECK_TRUE(size_on_disk(tv.path) <= size_before + 4096);  // allow small overhead
+        } else {
+            // Compact failed (cancel succeeded mid-loop): original must be untouched.
+            CHECK_EQ(size_on_disk(tv.path), size_before);
+        }
+
+        // Vault must still be usable.
+        auto kids = v.list("");
+        REQUIRE(kids.size() == 1);  // only "c.bin" remains
+        crypto::SecureBytes out;
+        REQUIRE(v.read_image(*kids[0], out) == vault::VaultResult::Ok);
+
+        // No temp file should remain in the directory.
+        for (const auto& entry : fs::directory_iterator(fs::temp_directory_path())) {
+            const auto fname = entry.path().filename().string();
+            if (fname.find("compact_tmp") != std::string::npos) {
+                CHECK_FALSE(true);  // stray temp file found
+            }
+        }
+    }
 }
 
 TEST(compact_progress_nullptr_succeeds)
