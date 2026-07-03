@@ -81,9 +81,23 @@ end
 -- scripts/setup.sh cmake-builds each static and installs into one staging
 -- prefix (vendor/codecs-prefix); we link the whole set from there. Shared by
 -- the app and the test runner (osv_tests compiles src/image/*.cpp).
+-- When --asan is passed, prefer vendor/codecs-prefix-asan/ (built by
+-- scripts/build_codecs.sh --asan) with a fallback + warning to the normal prefix.
 -- ---------------------------------------------------------------------------
 local function link_image_codecs()
     local prefix = path.join(os.getcwd(), "vendor/codecs-prefix")
+    -- Try ASAN prefix first if --asan was passed.
+    if _OPTIONS["asan"] then
+        local asan_prefix = path.join(os.getcwd(), "vendor/codecs-prefix-asan")
+        if os.isdir(path.join(asan_prefix, "include")) then
+            prefix = asan_prefix
+        else
+            -- Fallback with a warning.
+            fprintf(io.stderr, "WARNING: --asan requested but ASAN codec prefix not found at %s\n", asan_prefix)
+            fprintf(io.stderr, "         falling back to %s (not instrumented)\n", prefix)
+        end
+    end
+
     if os.isdir(path.join(prefix, "include")) then
         includedirs { path.join(prefix, "include") }
         libdirs     { path.join(prefix, "lib") }
@@ -108,9 +122,25 @@ end
 -- codecs. Linked only when present so non-FFmpeg builds (e.g. Windows until its
 -- FFmpeg leg lands) stay green; OSV_VENDORED_AV gates the dependent code/tests.
 -- Static-link order: dependents before dependencies (format → codec → swscale → util).
+-- When --asan is passed, prefer vendor/codecs-prefix-asan/ (built by
+-- scripts/build_codecs.sh --asan) with a fallback + warning to the normal prefix.
 -- ---------------------------------------------------------------------------
 local function link_av()
     local prefix = path.join(os.getcwd(), "vendor/codecs-prefix")
+    -- Try ASAN prefix first if --asan was passed.
+    if _OPTIONS["asan"] then
+        local asan_prefix = path.join(os.getcwd(), "vendor/codecs-prefix-asan")
+        if os.isfile(path.join(asan_prefix, "lib/libavcodec.a")) then
+            prefix = asan_prefix
+        else
+            -- Fallback with a warning (only if we'd link AV at all).
+            if os.isfile(path.join(path.join(os.getcwd(), "vendor/codecs-prefix"), "lib/libavcodec.a")) then
+                fprintf(io.stderr, "WARNING: --asan requested but ASAN FFmpeg prefix not found at %s\n", asan_prefix)
+                fprintf(io.stderr, "         falling back to %s (not instrumented)\n", path.join(os.getcwd(), "vendor/codecs-prefix"))
+            end
+        end
+    end
+
     if os.isfile(path.join(prefix, "lib/libavcodec.a")) then
         includedirs { path.join(prefix, "include") }
         libdirs     { path.join(prefix, "lib") }
