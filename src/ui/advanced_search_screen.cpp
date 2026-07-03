@@ -286,8 +286,9 @@ void AdvancedSearchScreen::handle_key(const SDL_KeyboardEvent& key)
     // Handle save mode keys (Escape/Enter/Backspace)
     if (saved_panel_.active_buffer()) {
         if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) {
-            saved_panel_.finalize_save(query_);
-            reload_saved();
+            if (saved_panel_.finalize_save(query_)) {
+                reload_saved();
+            }
         } else if (key.key == SDLK_ESCAPE) {
             status_ = "Save cancelled.";
         } else if (key.key == SDLK_BACKSPACE) {
@@ -329,18 +330,23 @@ void AdvancedSearchScreen::dispatch_focus_key(const SDL_KeyboardEvent& key)
         case Group:     handle_tag_field_key(key); break;
         case Results:   result_view_.handle_key(key); break;
         case Saved: {
-            saved_panel_.handle_key(key);
-            // After loading or deleting, update query and reload
-            if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) {
-                AdvancedQuery loaded_query;
-                if (saved_panel_.load_focused(loaded_query)) {
-                    query_ = std::move(loaded_query);
-                    edit_.name = query_.name_query;
-                    cur_.group = 0;
-                    rerun();
+            const auto action = saved_panel_.handle_key(key);
+            switch (action) {
+                case SavedSearchPanel::Action::Loaded: {
+                    AdvancedQuery loaded_query;
+                    if (saved_panel_.load_focused(loaded_query)) {
+                        query_ = std::move(loaded_query);
+                        edit_.name = query_.name_query;
+                        cur_.group = 0;
+                        rerun();
+                    }
+                    break;
                 }
-            } else if (key.key == SDLK_DELETE) {
-                reload_saved();
+                case SavedSearchPanel::Action::Deleted:
+                    reload_saved();
+                    break;
+                case SavedSearchPanel::Action::None:
+                    break;
             }
             break;
         }
@@ -631,7 +637,8 @@ void AdvancedSearchScreen::render(gfx::Renderer& r)
     render_builder(r, PAD, TOP, colW);
     const float mx = PAD + colW + 24;
     render_results(r, mx, colW);
-    saved_panel_.render(r, mx + colW + 24);
+    const bool saved_hot = (focus_ == Focus::Saved && !saved_panel_.active_buffer() && !clearing_);
+    saved_panel_.render(r, mx + colW + 24, saved_hot);
 
     if (saved_panel_.active_buffer()) {
         r.draw_rect({0, 0, W, H}, {0, 0, 0, 180}, /*filled*/ true);
@@ -724,10 +731,10 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
 void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
 {
     using namespace gfx::theme;
-    if (result_view_.get_view() == ResultView::Grid) { result_view_.render(r, x, colw); return; }
+    const bool hot = (focus_ == Focus::Results && !saved_panel_.active_buffer() && !clearing_);
+    if (result_view_.get_view() == ResultView::Grid) { result_view_.render(r, x, colw, hot); return; }
 
     // List view rendering (when not in grid mode)
-    const bool hot = (focus_ == Focus::Results && !clearing_);
     if (hot) r.draw_text(font_, x - 16, TOP, ">", ACCENT);
     r.draw_text(font_, x, TOP, std::format("Results ({})", result_view_.results.size()), TEXT_DIM);
 

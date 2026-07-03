@@ -34,18 +34,29 @@ SavedSearchPanel::SavedSearchPanel(vault::VaultSearch& search, gfx::FontAtlas& f
 {
 }
 
-void SavedSearchPanel::handle_key(const SDL_KeyboardEvent& key)
+SavedSearchPanel::Action SavedSearchPanel::handle_key(const SDL_KeyboardEvent& key)
 {
     const int last = static_cast<int>(saved.size()) - 1;
-    if (key.key == SDLK_DOWN)                                 cur_saved_ = std::min(cur_saved_ + 1, last);
-    else if (key.key == SDLK_UP)                             cur_saved_ = std::max(cur_saved_ - 1, 0);
-    else if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) {
+    if (key.key == SDLK_DOWN) {
+        cur_saved_ = std::min(cur_saved_ + 1, last);
+        return Action::None;
+    }
+    if (key.key == SDLK_UP) {
+        cur_saved_ = std::max(cur_saved_ - 1, 0);
+        return Action::None;
+    }
+    if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) {
         AdvancedQuery q;
         if (load_focused(q)) {
-            // Caller (AdvancedSearchScreen) will update its query_ and rerun()
+            return Action::Loaded;  // Caller will update query_ and rerun()
         }
+        return Action::None;
     }
-    else if (key.key == SDLK_DELETE)                        delete_focused();
+    if (key.key == SDLK_DELETE) {
+        delete_focused();
+        return Action::Deleted;  // Caller will reload_saved()
+    }
+    return Action::None;
 }
 
 void SavedSearchPanel::handle_text_input(const char* text)
@@ -84,26 +95,25 @@ void SavedSearchPanel::begin_naming()
     save_buf_.clear();
 }
 
-void SavedSearchPanel::finalize_save(const AdvancedQuery& query)
+bool SavedSearchPanel::finalize_save(const AdvancedQuery& query)
 {
     const std::string name = trim(save_buf_);
     saving_ = false;
     if (name.empty()) {
         status_ = "Save cancelled (empty name).";
-        return;
+        return false;
     }
     if (search_.save_search(name, query) == vault::VaultResult::Ok) {
         status_ = std::format("Saved '{}'.", name);
-        // Caller (AdvancedSearchScreen) will call reload_saved() to refresh saved_
-    } else {
-        status_ = "Save failed.";
+        return true;  // Caller will call reload_saved() to refresh saved_
     }
+    status_ = "Save failed.";
+    return false;
 }
 
-void SavedSearchPanel::render(gfx::Renderer& r, float x)
+void SavedSearchPanel::render(gfx::Renderer& r, float x, bool hot)
 {
     using namespace gfx::theme;
-    const bool hot = !saving_;
     if (hot) r.draw_text(font_, x - 16, TOP, ">", ACCENT);
     r.draw_text(font_, x, TOP, "Saved searches", TEXT_DIM);
 

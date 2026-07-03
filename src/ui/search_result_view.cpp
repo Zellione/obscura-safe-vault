@@ -85,7 +85,7 @@ void SearchResultView::activate_focused()
     }
 }
 
-void SearchResultView::render(gfx::Renderer& r, float x, float colw)
+void SearchResultView::render(gfx::Renderer& r, float x, float colw, bool hot)
 {
     using namespace gfx::theme;
     // This render method can be called to draw the entire result grid or list view.
@@ -96,8 +96,6 @@ void SearchResultView::render(gfx::Renderer& r, float x, float colw)
     if (grid_view_ != ResultView::Grid) return;
 
     // Grid view rendering
-    const bool hot = false;  // Note: parent screen controls "hotness" (focus state);
-                             // we'll need to wire this up via another callback or parameter
     if (hot) r.draw_text(font_, x - 16, TOP, ">", ACCENT);
     r.draw_text(font_, x, TOP, std::format("Results ({})", results.size()), TEXT_DIM);
 

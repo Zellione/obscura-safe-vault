@@ -38,8 +38,16 @@ public:
     // Public reference to the saved searches list (owned by AdvancedSearchScreen, updated via reload_saved).
     std::vector<vault::SavedSearch>& saved;
 
-    // Key navigation: Up/Down/Enter (load)/Del (delete)
-    void handle_key(const SDL_KeyboardEvent& key);
+    // Action signals returned by handle_key to avoid duplicate processing by the parent screen.
+    enum class Action {
+        None,     // no action (navigation, delete)
+        Loaded,   // Enter: successfully loaded a saved search (caller should update query_)
+        Deleted   // Del: deleted a saved search (caller should reload_saved())
+    };
+
+    // Key navigation: Up/Down/Enter (load)/Del (delete).
+    // Returns an action signal to avoid duplicate processing in the parent screen.
+    Action handle_key(const SDL_KeyboardEvent& key);
 
     // Text input while saving_=true (called by AdvancedSearchScreen::handle_text when panel is in save mode)
     void handle_text_input(const char* text);
@@ -58,11 +66,12 @@ public:
     void begin_naming();
 
     // Finalize save (save the query with the typed name to vault, setting_=false).
-    // Caller (AdvancedSearchScreen) must reload_saved() afterward.
-    void finalize_save(const AdvancedQuery& query);
+    // Returns true on success; caller should only call reload_saved() on true.
+    bool finalize_save(const AdvancedQuery& query);
 
     // Render the saved-searches sidebar (list of saved searches, focused highlight, saving modal).
-    void render(gfx::Renderer& r, float x);
+    // hot = whether the Saved field is focused and not in save mode or clearing mode
+    void render(gfx::Renderer& r, float x, bool hot);
 
     // Session state accessors (called by AdvancedSearchScreen::on_enter/on_exit).
     int  get_cursor() const;

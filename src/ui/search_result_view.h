@@ -42,7 +42,8 @@ public:
 
     // Render the result view (list or grid, depending on grid_.view toggle).
     // Called by AdvancedSearchScreen::render_results().
-    void render(gfx::Renderer& r, float x, float colw);
+    // hot = whether the Results field is focused and not in save mode or clearing mode
+    void render(gfx::Renderer& r, float x, float colw, bool hot);
 
     // Navigate and activate results. Called by AdvancedSearchScreen::dispatch_focus_key()
     // when focus_ == Results.
