@@ -46,9 +46,8 @@ SavedSearchPanel::Action SavedSearchPanel::handle_key(const SDL_KeyboardEvent& k
         return Action::None;
     }
     if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) {
-        AdvancedQuery q;
-        if (load_focused(q)) {
-            return Action::Loaded;  // Caller will update query_ and rerun()
+        if (cur_saved_ >= 0 && cur_saved_ < static_cast<int>(saved.size())) {
+            return Action::Loaded;  // Caller will invoke load_focused() and rerun()
         }
         return Action::None;
     }
