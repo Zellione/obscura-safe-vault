@@ -5,7 +5,9 @@
 #include <string>
 #include <vector>
 
+#include "crypto/random.h"
 #include "vault/header.h"
+#include "vault/transfer.h"
 #include "vault/vault.h"
 
 namespace fs = std::filesystem;
@@ -71,6 +73,15 @@ uint32_t read_flags(const std::string& path)
     vault::Header h;
     if (!vault::Header::parse(raw, h)) return 0;
     return h.flags;
+}
+
+// Helper to find a media node by name in a gallery; nullptr if absent.
+static const vault::IndexNode* find_image(const vault::Vault& v, std::string_view gallery,
+                                          std::string_view name)
+{
+    for (const auto* c : v.list(gallery))
+        if (c->is_media() && c->name == name) return c;
+    return nullptr;
 }
 }  // namespace
 
@@ -250,4 +261,113 @@ TEST(legacy_vault_reads_and_appends_raw)
         CHECK_EQ(c_out.size(), expected_c.size());
         CHECK_BYTES_EQ(c_out.as_span(), std::span<const uint8_t>(expected_c));
     }
+}
+
+TEST(framed_vault_incompressible_no_growth)
+{
+    // Random payload in a framed vault: file <= legacy layout + 1 byte/chunk.
+    TempVault tv("framed_nogrow");
+    const std::string path = tv.str();
+    std::vector<uint8_t> noise(512 * 1024);
+    REQUIRE(crypto::fill_random(noise));
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(path, bytes("hunter2"), {}, kTestKdf, v)
+                == vault::VaultResult::Ok);
+        REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("g", noise, "noise.bin") == vault::VaultResult::Ok);
+    }
+    // Bound: payload + AEAD/chunk + header + index + frame overhead. Generous
+    // fixed slack; the point is "no compression blow-up".
+    CHECK(fs::file_size(path) < noise.size() + 64 * 1024);
+}
+
+TEST(compact_preserves_flag_and_content)
+{
+    TempVault tv("framed_compact");
+    const std::string path = tv.str();
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(path, bytes("hunter2"), {}, kTestKdf, v)
+                == vault::VaultResult::Ok);
+        REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("g", std::vector<uint8_t>(200 * 1024, 0x77), "keep.bin")
+                == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("g", std::vector<uint8_t>(200 * 1024, 0x88), "drop.bin")
+                == vault::VaultResult::Ok);
+        REQUIRE(v.remove_image("g", "drop.bin") == vault::VaultResult::Ok);
+        REQUIRE(v.compact() == vault::VaultResult::Ok);
+    }
+
+    CHECK((read_flags(path) & vault::FLAG_FRAMED_CHUNKS) != 0);
+
+    // Reopen and verify keep.bin content.
+    vault::Vault v2;
+    REQUIRE(vault::Vault::open(path, v2) == vault::VaultResult::Ok);
+    REQUIRE(v2.unlock(bytes("hunter2"), {}) == vault::VaultResult::Ok);
+
+    const auto* keep_node = find_image(v2, "g", "keep.bin");
+    REQUIRE(keep_node != nullptr);
+
+    crypto::SecureBytes out;
+    REQUIRE(v2.read_image(*keep_node, out) == vault::VaultResult::Ok);
+    auto expected = std::vector<uint8_t>(200 * 1024, 0x77);
+    CHECK_EQ(out.size(), expected.size());
+    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(expected));
+}
+
+TEST(transfer_framed_to_legacy_and_back)
+{
+    using enum vault::VaultResult;
+    // Payload-level transfer: each side applies its own framing.
+    const std::string legacy_src = std::string(OSV_VAULT_FIXTURE_DIR) + "/legacy_noflags.osv";
+    TempVault legacy_tv("xfer_legacy");
+    TempVault framed_tv("xfer_framed");
+    const std::string legacy_path = legacy_tv.str();
+    const std::string framed_path = framed_tv.str();
+
+    fs::copy_file(legacy_src, legacy_path, fs::copy_options::overwrite_existing);
+
+    const std::string kLegacyPw = "legacy-password";
+    const auto lpw = bytes(kLegacyPw);
+
+    // Open and unlock legacy vault.
+    vault::Vault legacy_v;
+    REQUIRE(vault::Vault::open(legacy_path, legacy_v) == Ok);
+    REQUIRE(legacy_v.unlock(lpw, {}) == Ok);
+
+    // Read the a.bin image from legacy vault to get expected bytes.
+    const auto* a_node_legacy = find_image(legacy_v, "pics", "a.bin");
+    REQUIRE(a_node_legacy != nullptr);
+    crypto::SecureBytes expected_a;
+    REQUIRE(legacy_v.read_image(*a_node_legacy, expected_a) == Ok);
+
+    // Create framed vault.
+    vault::Vault framed_v;
+    REQUIRE(vault::Vault::create(framed_path, bytes("framed-pw"), {}, kTestKdf, framed_v) == Ok);
+
+    // Transfer a.bin from legacy to framed using Copy mode.
+    REQUIRE(vault::transfer_image(legacy_v, "pics", "a.bin", framed_v, "", vault::TransferMode::Copy) == Ok);
+
+    // Verify the transferred image in framed vault matches.
+    const auto* a_node_framed = find_image(framed_v, "", "a.bin");
+    REQUIRE(a_node_framed != nullptr);
+    crypto::SecureBytes transferred;
+    REQUIRE(framed_v.read_image(*a_node_framed, transferred) == Ok);
+    CHECK_EQ(transferred.size(), expected_a.size());
+    CHECK_BYTES_EQ(transferred.as_span(), expected_a.as_span());
+
+    // Remove the original image from legacy to avoid collision when transferring back.
+    REQUIRE(legacy_v.remove_image("pics", "a.bin") == Ok);
+
+    // Transfer back from framed to legacy.
+    REQUIRE(vault::transfer_image(framed_v, "", "a.bin", legacy_v, "pics", vault::TransferMode::Copy) == Ok);
+
+    // Verify the transferred-back image matches the original.
+    const auto* a_node_legacy_back = find_image(legacy_v, "pics", "a.bin");
+    REQUIRE(a_node_legacy_back != nullptr);
+    crypto::SecureBytes transferred_back;
+    REQUIRE(legacy_v.read_image(*a_node_legacy_back, transferred_back) == Ok);
+    CHECK_EQ(transferred_back.size(), expected_a.size());
+    CHECK_BYTES_EQ(transferred_back.as_span(), expected_a.as_span());
 }
