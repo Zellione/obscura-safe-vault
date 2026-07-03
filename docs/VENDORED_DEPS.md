@@ -7,7 +7,7 @@ This document tracks the pinned versions of all vendored third-party libraries a
 | Submodule | Pinned Version | Role | Parses Untrusted Input |
 |---|---|---|---|
 | **SDL3** | 3.4.10 | Windowing, rendering, input, file dialogs | No |
-| **monocypher** | 4.0.2-RC1 (ffb41a7) | AEAD cipher (XChaCha20-Poly1305), KDF (Argon2id), cryptographic utilities | No |
+| **monocypher** | 4.0.2 (0d85f98) | AEAD cipher (XChaCha20-Poly1305), KDF (Argon2id), cryptographic utilities | No |
 | **stb** | master | Header-only image decode (JPEG/PNG/GIF/BMP), text rendering | **Yes** |
 | **miniz** | e78dfd2 (master) | ZIP archive decompression | **Yes** |
 | **libwebp** | 1.4.0 | WebP image decoding (decode-only) | **Yes** |
@@ -99,7 +99,7 @@ If new CVEs are discovered, follow the bump procedure (see below).
 
 ## Notes
 
-- **monocypher** is currently pinned to **4.0.2-RC1** (ffb41a7), one commit before the final 4.0.2 release. The delta to 4.0.2 consists of test infrastructure improvements ("Leaner TIS-CI tests"); core crypto code is identical. Decision: leave at RC1 pending owner review.
+- **monocypher** is pinned to **4.0.2** (0d85f98 release tag). Upstream tag 4.0.3 exists with constant-time hardening fixes (fe_ccopy volatile mask, fe_cswap fix, loop-unroll mitigation) — upgrade is an owner decision.
 - **miniz** and **stb** are pinned to `master` branches of their respective repositories, not stable release tags. Both are stable, widely-used libraries with infrequent breaking changes. Monitor for updates every 6 months.
 - **SDL3** is the only windowing/platform layer; it is NOT an untrusted-input parser.
 
