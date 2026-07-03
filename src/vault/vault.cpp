@@ -1063,12 +1063,13 @@ void count_compact_chunks(const IndexNode& root, int& total_chunks)
 VaultResult copy_compact_chunks(IndexNode& root, ChunkStore& src, ChunkStore& dst,
                                  OpProgress* progress)
 {
+    using enum VaultResult;
     VaultResult copy_err = Ok;
     int chunks_done = 0;
     for_each_media(root, [progress, &copy_err, &src, &dst, &chunks_done](IndexNode& node) {
         // Check for cancellation before processing each node.
         if (progress && progress->cancel.load()) {
-            copy_err = Ok;  // signal to abort, but it's not an error
+            copy_err = VaultResult::Ok;  // signal to abort, but it's not an error
             return;         // Early return from lambda
         }
         relocate_node_chunks(src, dst, node, copy_err);
