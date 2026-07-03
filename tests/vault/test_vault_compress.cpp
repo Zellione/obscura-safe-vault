@@ -357,6 +357,15 @@ TEST(transfer_framed_to_legacy_and_back)
     CHECK_EQ(transferred.size(), expected_a.size());
     CHECK_BYTES_EQ(transferred.as_span(), expected_a.as_span());
 
+    // Verify Copy left the source image intact in the legacy vault (Copy must not remove the original).
+    const auto* a_node_legacy_verify = find_image(legacy_v, "pics", "a.bin");
+    REQUIRE(a_node_legacy_verify != nullptr);
+    crypto::SecureBytes a_legacy_verify;
+    REQUIRE(legacy_v.read_image(*a_node_legacy_verify, a_legacy_verify) == Ok);
+    auto expected_a_legacy_verify = legacy_pattern(4096, 0xA5);
+    CHECK_EQ(a_legacy_verify.size(), expected_a_legacy_verify.size());
+    CHECK_BYTES_EQ(a_legacy_verify.as_span(), std::span<const uint8_t>(expected_a_legacy_verify));
+
     // Remove the original image from legacy to avoid collision when transferring back.
     REQUIRE(legacy_v.remove_image("pics", "a.bin") == Ok);
 
