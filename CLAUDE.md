@@ -88,7 +88,7 @@ navigable with arrow keys.
   magic     "OSVAULT\0"  (8 bytes)
   version   u16
   hdr_size  u16
-  flags     u32
+  flags     u32            (bit 0 = chunk/index plaintext framed, Phase 26)
   KDF block:
     algo        u8  (0 = Argon2id)
     t_cost      u32
@@ -184,6 +184,11 @@ src/
                                             holds_galleries, for_each_media, relocate_node_chunks.
                                             Pure tree traversal; no I/O or persistence. Keeps Vault
                                             method count bounded (cpp:S1448).
+             chunk_codec.*                 ← Pure adaptive store-if-smaller deflate framing (Phase 26):
+                                            method byte (0=raw, 1=deflate) + bounded orig_len inside
+                                            the AEAD; used by ChunkStore's framed ctor flag (← header
+                                            flags bit 0) + index-blob sites (commit_index/unlock/
+                                            compact). miniz tdefl/tinfl, no new dep.
   image/     image.h, decode.*,           ← stb_image decode + thumbs (Phase 3)
              thumbnail.*,                 ← format detection + libwebp/libheif
              format_registry.*,           ← decoders (Phase 9)
@@ -569,6 +574,7 @@ premake-core GitHub releases. It is **not** committed to the repo.
 - **Pixel data is best-effort mlock'd.** The first mlock failure per process is logged once; subsequent failures stay silent (uses `should_warn_mlock_once()`). On Linux, successful mlock is followed by `madvise(MADV_DONTDUMP)` for defense-in-depth (silently ignored if it fails).
 - **Core dumps are disabled in Release builds.** At app startup (Release only), `prctl(PR_SET_DUMPABLE, 0)` (Linux) / `setrlimit(RLIMIT_CORE, 0)` (macOS) prevent core dumps from capturing decrypted data. Debug builds keep dumps + ptrace attach enabled.
 - **Password change is not crash-safe.** Avoid force-killing the app during password re-wrap (a KEK change without bulk re-encrypt); recovery would require manual recovery steps.
+- **Framed vaults reveal plaintext *compressibility* through ciphertext length (Phase 26)** — accepted for the local-attacker threat model.
 
 ### Testing policy
 - **Always write unit and integration tests** alongside any new feature or module.
@@ -608,7 +614,7 @@ premake-core GitHub releases. It is **not** committed to the repo.
 
 | Topic | When | Notes |
 |---|---|---|
-| Vault chunk compression | Phase 26 | Evaluated 2026-07-03: the vault does not compress today. Plan: adaptive store-if-smaller — deflate (vendored miniz `tdefl`/`tinfl`, no new dep) the chunk plaintext *before* encryption, keep only if meaningfully smaller; method byte inside the AEAD; header `flags` bit gates it (legacy vaults stay raw, no migration). Accepted side channel: ciphertext length reveals compressibility. |
+| Vault chunk compression | ✅ Phase 26 | Adaptive store-if-smaller deflate framing (miniz `tdefl`/`tinfl`) wraps chunk plaintext before encryption. Method byte + bounded orig_len inside the AEAD; header `flags` bit 0 gates it (legacy vaults read and append raw forever, no migration). Ciphertext length reveals compressibility — accepted for the local-attacker threat model. |
 | Video playback | ✅ Phase 15 (video frames + seek); audio + A/V sync Phase 16 | FFmpeg/libav decode-only; streams from encrypted chunks via a custom AVIO (no temp file). |
 | Tags / search | ✅ Tags Phase 12; search `/` overlay Phase 12; advanced search Phase 18 | Per-node tags in the index; advanced search = weighted include/exclude + AND/OR groups + saved searches (index v5). |
 | Multiple vaults | Phase 10+ | Separate vault files, possibly with a "vault manager" screen. |
