@@ -287,19 +287,25 @@ src/
                                             top-level join + name substring + scope;
                                             evaluate()→{matched,score}; serialize/deserialize
                                             query blob; tag_suggestions() autocomplete
-             advanced_search_screen.*,    ← `Shift+/` dedicated screen (Phase 18): keyboard
-                                            query builder + live result list + saved-searches
-                                            sidebar (Ctrl+S save / Enter load / Del delete);
-                                            coexists with the Phase 12 `/` overlay. `Ctrl+L`
-                                            toggles the result panel List ↔ thumbnail Grid
-                                            (Phase 20): a session-scoped ResultView drives a
-                                            render_result_grid free friend that reuses the
-                                            shared tile_thumb draw; takes a TextureCache + owns
-                                            an off-thread decode worker (update() pumps it).
-                                            Query/params/cursor/view persist across visits via
-                                            a session-scoped AdvancedSearchState (restored in
+             advanced_search_screen.*,    ← `Shift+/` dedicated screen coordinator (Phase 18):
+                                            keyboard query builder + result view + saved-search
+                                            panel. Coexists with the Phase 12 `/` overlay.
+                                            Query/params/cursor persist across visits via a
+                                            session-scoped AdvancedSearchState (restored in
                                             on_enter / saved in on_exit); `Ctrl+R` clears behind
-                                            a Y/N confirm.
+                                            a Y/N confirm. Phase 20 decomposition: extracted
+                                            SearchResultView (result grid navigation state) and
+                                            SavedSearchPanel (saved CRUD ops + sidebar rendering)
+                                            from monolithic screen → cleaner separation of concerns.
+             search_result_view.*         ← Phase 20 result grid+list view state: ResultView
+                                            {List,Grid} + toggle + navigation (move_delta/move).
+                                            Owns off-thread decode worker + feeds thumbnail
+                                            cache. Pure SDL-free state machine; driven by
+                                            advanced_search_screen's on_update/handle_key.
+             saved_search_panel.*         ← Phase 20 saved-search sidebar: list rendering + CRUD
+                                            (Ctrl+S save / Enter load / Del delete). Pure
+                                            vault/SDL-free; fed by AdvancedSearchScreen's query
+                                            builder for serialization/suggestions.
              advanced_search_state.h,     ← session-scoped advanced-search state (Phase 20
                                             follow-up): query + builder buffers + cursor + view.
                                             App owns one per unlocked-vault session, resets it

@@ -4,15 +4,14 @@
 
 #include <cstdint>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
-#include "image/decode_worker.h"
 #include "ui/advanced_search_model.h"
 #include "ui/advanced_search_state.h"
-#include "ui/result_grid.h"
+#include "ui/saved_search_panel.h"
 #include "ui/screen.h"
-#include "vault/vault.h"          // vault::SearchHit, vault::SavedSearch
+#include "ui/search_result_view.h"
+#include "vault/vault.h"          // vault::SavedSearch
 #include "vault/vault_search.h"   // vault::VaultSearch facade
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
@@ -55,8 +54,6 @@ private:
 
     // Selection cursors for the lists/dropdowns.
     struct Cursor {
-        int result = 0;
-        int saved  = 0;
         int sugg   = -1;   // highlighted suggestion (-1 = none)
         int group  = 0;    // current group for the Group field
         int tag    = -1;   // selected committed tag in the focused field (-1 = none/editing)
@@ -71,13 +68,10 @@ private:
     void handle_text(const char* text);
     void handle_key(const SDL_KeyboardEvent& key);
     void dispatch_focus_key(const SDL_KeyboardEvent& key);
-    void handle_save_key(const SDL_KeyboardEvent& key);
     void handle_axis_key(const SDL_KeyboardEvent& key);   // Left/Right on Scope or GroupJoin
     void handle_tag_field_key(const SDL_KeyboardEvent& key);
     void handle_group_nav_key(const SDL_KeyboardEvent& key);
     void handle_weight_key(const SDL_KeyboardEvent& key);
-    void handle_results_key(const SDL_KeyboardEvent& key);
-    void handle_saved_key(const SDL_KeyboardEvent& key);
 
     // Committed-tag selection within the focused tag field (Include/Exclude/Group).
     // Kept as free functions (friends) so they don't count against the class method
@@ -88,24 +82,12 @@ private:
     friend void remove_selected_tag(AdvancedSearchScreen& s);      // erase selected tag, rerun
     friend void edit_selected_tag(AdvancedSearchScreen& s);        // pull selected tag into buffer
 
-    // Phase 20 grid result-view plumbing. Free friends (same S1448 rationale as
-    // the tag helpers above): the thumbnail-grid result renderer and its
-    // off-thread-decode pump, both needing the private results/cursor/cache/worker.
-    friend void pump_search_thumbs(AdvancedSearchScreen& s);
-    friend void render_result_grid(AdvancedSearchScreen& s, gfx::Renderer& r,
-                                   float x, float colw);
-
     void cycle_focus(int dir);
     void cycle_scope(int dir);
     void move_suggestion(int dir);
     void commit_text();       // Enter on the focused text field
     void commit_group_text(std::string tag);
     void backspace();         // Backspace on the focused text field
-    void open_result();       // activate the focused result
-    void load_saved();        // load the focused saved search into query_
-    void delete_saved();      // delete the focused saved search
-    void begin_save();        // start naming a new saved search
-    void confirm_save();      // finish naming → Vault::save_search
 
     [[nodiscard]] std::string* active_buffer();
     [[nodiscard]] std::string accepted(const std::string& buf) const;  // suggestion-or-typed
@@ -113,17 +95,15 @@ private:
     // --- rendering (split per column) ---
     void render_builder(gfx::Renderer& r, float x, float top, float colw);
     void render_results(gfx::Renderer& r, float x, float colw);
-    void render_saved(gfx::Renderer& r, float x);
 
     gfx::Window&         win_;
     gfx::FontAtlas&      font_;
     vault::Vault&        vault_;
-    gfx::TextureCache&   cache_;     // shared GPU thumbnail cache (grid result view)
+    gfx::TextureCache&   cache_;     // shared GPU thumbnail cache
     AdvancedSearchState& session_;   // session-scoped state, restored/saved on enter/exit
     vault::VaultSearch   search_;    // advanced-search facade over vault_
 
     AdvancedQuery                   query_;
-    std::vector<vault::SearchHit>   results_;
     std::vector<vault::SavedSearch> saved_;
     std::vector<std::string>        vocabulary_;   // distinct vault tags (autocomplete)
     std::vector<std::string>        suggestions_;  // current typeahead list
@@ -132,23 +112,12 @@ private:
     Edit   edit_;
     Cursor cur_;
 
-    bool        saving_ = false;   // naming a search to save
     bool        clearing_ = false; // confirming a clear-search (Ctrl+R -> Y/N)
-    std::string save_buf_;
     std::string status_;           // transient feedback line
 
-    // Phase 20 grid result view, bundled into one member to keep the screen's
-    // field count under the cpp:S1820 limit. Ctrl+L toggles List <-> Grid; the
-    // grid reuses the gallery's tile-thumbnail draw, so it needs its own
-    // off-thread decode worker + failed-set + (session-scoped) view + the
-    // last-rendered column count that drives Up/Down navigation.
-    struct GridView {
-        ResultView                   view = ResultView::List;
-        int                          cols = 1;   // last-rendered column count (nav stride)
-        image::DecodeWorker          worker{image::decode_wake_event()};
-        std::unordered_set<uint64_t> failed;
-    };
-    GridView grid_;
+    // Phase 20 sub-views encapsulating result grid and saved searches panels
+    SearchResultView    result_view_;
+    SavedSearchPanel    saved_panel_;
 };
 
 } // namespace ui
