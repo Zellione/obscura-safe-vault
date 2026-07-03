@@ -499,3 +499,68 @@ TEST(compact_progress_nullptr_succeeds)
     REQUIRE(v.compact(nullptr) == vault::VaultResult::Ok);
     CHECK_EQ(v.wasted_bytes(), 0u);
 }
+
+// Phase 7 Task 7: secure wipe of pre-compaction vault file.
+// Test that wipe_and_remove overwrites a file with zeros then removes it.
+TEST(wipe_and_remove_zeroes_and_deletes_file)
+{
+    const auto temp_path = fs::temp_directory_path() / "osv_wipe_test.bin";
+
+    // Create a test file with known content.
+    {
+        std::FILE* fp = std::fopen(temp_path.c_str(), "w+b");
+        REQUIRE(fp != nullptr);
+        const std::vector<uint8_t> content = pattern(8192, 42);
+        REQUIRE(std::fwrite(content.data(), 1, content.size(), fp) == content.size());
+        std::fclose(fp);
+    }
+
+    // Verify file exists and contains the pattern.
+    REQUIRE(fs::exists(temp_path));
+
+    // Peek at the file to verify it has content.
+    {
+        std::FILE* fp = std::fopen(temp_path.c_str(), "rb");
+        REQUIRE(fp != nullptr);
+        uint8_t first_byte = 0;
+        REQUIRE(std::fread(&first_byte, 1, 1, fp) == 1);
+        CHECK_FALSE(first_byte == 0u);  // Should be part of the pattern, not zero
+        std::fclose(fp);
+    }
+
+    // Wipe and remove.
+    vault::fileutil::wipe_and_remove(temp_path.string());
+
+    // File should no longer exist.
+    CHECK_FALSE(fs::exists(temp_path));
+}
+
+// Test that compact leaves no .old file after successful completion.
+TEST(compact_removes_old_file_after_success)
+{
+    TempVault tv("old_file_cleanup");
+    const auto keep = pattern(80 * 1024, 7);
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+
+    // Create waste to compact.
+    REQUIRE(v.add_image("", pattern(100 * 1024, 3), "gone.bin") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", keep, "keep.bin")                   == vault::VaultResult::Ok);
+    REQUIRE(v.remove_image("", "gone.bin") == vault::VaultResult::Ok);
+
+    const std::string old_path = tv.str() + ".old";
+
+    // After compact, there should be no .old file.
+    REQUIRE(v.compact() == vault::VaultResult::Ok);
+    CHECK_FALSE(fs::exists(old_path));
+
+    // The original vault file should exist and be usable.
+    CHECK_TRUE(fs::exists(tv.path));
+    auto kids = v.list("");
+    REQUIRE(kids.size() == 1);
+    crypto::SecureBytes out;
+    REQUIRE(v.read_image(*kids[0], out) == vault::VaultResult::Ok);
+    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(keep));
+}

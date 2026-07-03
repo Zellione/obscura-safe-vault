@@ -594,5 +594,5 @@ premake-core GitHub releases. It is **not** committed to the repo.
 | HEIC / AVIF | Phase 9 | libheif + libavif; heavy codec deps. |
 | WebP | Phase 9 | libwebp; moderate dep. |
 | Windows / macOS builds | Phase 8 | premake configs + CI; macOS code-signing. |
-| Compaction | Phase 7 | Reclaim orphaned chunk space after deletes. |
+| Compaction | ✅ Phase 7 (Task 7: secure wipe added) | Reclaim orphaned chunk space after deletes. Compact() now overwrites the original file with zeros before removal (best-effort; CoW filesystems, SSD wear-leveling, and snapshots may retain old blocks). |
 | Password strength meter | Phase 7 | On vault creation; encourage strong passphrases. |

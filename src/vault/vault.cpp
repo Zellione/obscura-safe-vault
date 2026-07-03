@@ -1257,19 +1257,46 @@ VaultResult Vault::compact(OpProgress* progress)
     }
     std::fclose(tmp);
 
-    // Atomic commit point: rename the fully-synced new vault over the original.
+    // Atomic commit point: crash-safe 3-step rename sequence to enable secure
+    // wipe of the original file (Task 7). At every instant, either the original
+    // or .old file exists complete under a discoverable name.
     // Close our handle first — Windows refuses to replace a file that is open
     // (POSIX would happily swap the inode under us).
     std::fclose(fp_);
     fp_ = nullptr;
-    if (!fileutil::rename_file(tmp_path, path_)) {
+    const std::string old_path = path_ + ".old";
+
+    // Step 1: Rename original aside (vault.osv -> vault.osv.old, fsync dir).
+    // If this fails, the temp file is abandoned and the original remains in place.
+    if (!fileutil::rename_file(path_, old_path)) {
         std::remove(tmp_path.c_str());
         // The original is untouched; reacquire our handle to it.
         fp_ = std::fopen(path_.c_str(), "r+b");
         if (!fp_) reset();  // intact on disk; force a clean re-open
         return IoError;
     }
+    fileutil::sync_dir_of(old_path);
+
+    // Step 2: Rename temp into place (vault.osv.compact -> vault.osv, fsync dir).
+    // If this fails, vault.osv.old still exists with the original intact;
+    // reacquire the original handle.
+    if (!fileutil::rename_file(tmp_path, path_)) {
+        // vault.osv.old has the original; vault.osv.compact is abandoned.
+        std::remove(tmp_path.c_str());
+        // Restore the original from .old (reverse step 1, best-effort).
+        (void)fileutil::rename_file(old_path, path_);
+        fp_ = std::fopen(path_.c_str(), "r+b");
+        if (!fp_) reset();  // intact on disk; force a clean re-open
+        return IoError;
+    }
     fileutil::sync_dir_of(path_);
+
+    // Step 3: Zero-overwrite and remove the old file (best-effort, non-fatal).
+    // If the wipe fails, the old file is still removed; if the remove fails,
+    // the old file stays on disk but is harmless (the vault has moved on).
+    // NOTE: best-effort wipe. CoW filesystems (btrfs, APFS), SSD wear-leveling,
+    // and snapshots may retain old blocks regardless.
+    fileutil::wipe_and_remove(old_path);
 
     fp_ = std::fopen(path_.c_str(), "r+b");
     if (!fp_) {

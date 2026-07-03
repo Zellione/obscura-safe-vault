@@ -123,4 +123,39 @@ inline void sync_dir_of(const std::string& path) noexcept
 #endif
 }
 
+// Best-effort secure wipe: overwrite a file's contents with zeros in chunks,
+// then remove it. Failures are logged but non-fatal; the file is removed
+// regardless. Works on both POSIX and Windows.
+// NOTE: This is a best-effort wipe. Copy-on-write filesystems (btrfs, APFS),
+// SSD wear-leveling, and snapshots may retain old blocks regardless of
+// overwriting. This helper mitigates forensic recovery for typical
+// filesystems only.
+inline void wipe_and_remove(const std::string& path) noexcept
+{
+    // Attempt to open and overwrite the file with zeros in chunks.
+    std::FILE* fp = std::fopen(path.c_str(), "r+b");
+    if (fp) {
+        constexpr size_t WIPE_CHUNK = 1024 * 1024;  // 1 MiB chunks
+        std::array<uint8_t, WIPE_CHUNK> zeros{};
+        uint64_t remaining = 0;
+        if (seek_end(fp, remaining)) {
+            if (seek_to(fp, 0)) {
+                while (remaining > 0) {
+                    const size_t to_write = std::min(static_cast<size_t>(remaining), WIPE_CHUNK);
+                    if (std::fwrite(zeros.data(), 1, to_write, fp) != to_write) {
+                        break;  // write failed; remove what we have
+                    }
+                    remaining -= to_write;
+                }
+                // Best-effort fsync the wipe.
+                (void)sync(fp);
+            }
+        }
+        std::fclose(fp);
+    }
+    // Remove the file regardless of wipe success (non-fatal).
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
 } // namespace vault::fileutil
