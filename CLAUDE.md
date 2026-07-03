@@ -228,15 +228,17 @@ src/
                                             (moved here from quick_switch.h).
              file_op_job.*,               ← FileOpJob: runs export / delete / move-copy / compact
                                             on a background worker thread (mirrors ZipImportJob)
-                                            so large operations never freeze the UI (Phase 25–26).
+                                            so large operations never freeze the UI (Phase 25;
+                                            compact backgrounded in the #48 audit).
                                             Same single-thread vault-handle contract: while active()
                                             the worker owns the vault(s) and the host screen only
                                             polls total()/done() + take_outcome() and draws a
                                             modal (no thumbnail/listing reads). Esc→cancel().
              progress_modal.*,            ← draw_op_progress: the shared veil + "N/M" bar +
                                             cancel-hint modal reused by every screen hosting a
-                                            background job (import/export/delete/move/compact) (Phase 25–26).
-             waste_threshold.h,           ← pure vault-bloat thresholds (Phase 26):
+                                            background job (import/export/delete/move/compact)
+                                            (Phase 25; compact in the #48 audit).
+             waste_threshold.h,           ← pure vault-bloat thresholds (#48 audit):
                                             should_display_waste(wasted, file_size) — true if waste
                                             exceeds max(50 MiB, 10% of file size); should_hint_
                                             cancelled_import_waste(wasted) — true if > 1 MiB.
@@ -246,8 +248,8 @@ src/
                                             with a progress modal + Esc-cancel; vault_busy() (import
                                             OR file_op OR transfer_.job_active) gates render/update/
                                             input + the idle-lock so the UI never touches the vault
-                                            mid-job. Phase 26: Shift+C confirms compact (waste hint in
-                                            footer); cancelled-import shows reclaimable waste hint.
+                                            mid-job. #48 audit: Shift+C confirms compact (waste hint
+                                            in footer); cancelled-import shows reclaimable waste hint.
              image_viewer.*,              ← zoom/pan + thumb strip + fill-scroll + slideshow;
                                             hosts a fit-only VideoPlayback for video items (Phase 15).
                                             Single-image export (X) stays synchronous (one image is
@@ -606,6 +608,7 @@ premake-core GitHub releases. It is **not** committed to the repo.
 
 | Topic | When | Notes |
 |---|---|---|
+| Vault chunk compression | Phase 26 | Evaluated 2026-07-03: the vault does not compress today. Plan: adaptive store-if-smaller — deflate (vendored miniz `tdefl`/`tinfl`, no new dep) the chunk plaintext *before* encryption, keep only if meaningfully smaller; method byte inside the AEAD; header `flags` bit gates it (legacy vaults stay raw, no migration). Accepted side channel: ciphertext length reveals compressibility. |
 | Video playback | ✅ Phase 15 (video frames + seek); audio + A/V sync Phase 16 | FFmpeg/libav decode-only; streams from encrypted chunks via a custom AVIO (no temp file). |
 | Tags / search | ✅ Tags Phase 12; search `/` overlay Phase 12; advanced search Phase 18 | Per-node tags in the index; advanced search = weighted include/exclude + AND/OR groups + saved searches (index v5). |
 | Multiple vaults | Phase 10+ | Separate vault files, possibly with a "vault manager" screen. |
