@@ -1,6 +1,5 @@
 #include "test_framework.h"
 
-#include <array>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -68,7 +67,7 @@ static std::vector<uint8_t> mutate_codec(Prng& rng, const std::vector<uint8_t>& 
     for (uint32_t i = 0; i < num_flips; ++i) {
         if (!v.empty()) {
             const size_t byte_idx = rng.below(static_cast<uint32_t>(v.size()));
-            const int bit_idx = rng.below(8);
+            const int bit_idx = static_cast<int>(rng.below(8));
             flip_bit(v, byte_idx, bit_idx);
         }
     }

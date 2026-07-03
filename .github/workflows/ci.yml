@@ -29,12 +29,15 @@ on:
       - 'docs/**'
       - 'LICENSE'
       - '.gitignore'
+  schedule:
+    - cron: '0 2 * * 0'
 
 jobs:
   build-and-test:
     name: ${{ matrix.compiler }} / ${{ matrix.config }} / Linux
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    if: github.event_name != 'schedule'
 
     strategy:
       fail-fast: false
@@ -229,6 +232,7 @@ jobs:
     # busting the cache (adding vendor/ffmpeg changed .gitmodules, which is in the
     # SDL3 + codec cache keys). Revisit when the newer image's MSVC is fixed.
     runs-on: windows-2022
+    if: github.event_name != 'schedule'
 
     strategy:
       fail-fast: false
@@ -339,6 +343,7 @@ jobs:
   macos:
     name: AppleClang / ${{ matrix.config }} / macOS
     runs-on: macos-latest
+    if: github.event_name != 'schedule'
 
     strategy:
       fail-fast: false
@@ -439,6 +444,7 @@ jobs:
     name: ASAN+UBSan / tests / Linux
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    if: github.event_name != 'schedule'
 
     steps:
       - name: Checkout (with submodules)
@@ -580,7 +586,7 @@ jobs:
     timeout-minutes: 45
 
     # Only run on manual workflow_dispatch or weekly schedule, not per-PR.
-    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 2 * * 0'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
 
     steps:
       - name: Checkout (with submodules)
@@ -721,6 +727,7 @@ jobs:
     name: SonarQube analysis / Linux
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    if: github.event_name != 'schedule'
 
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
