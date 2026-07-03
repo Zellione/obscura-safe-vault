@@ -15,6 +15,7 @@
 #include "platform/folder_dialog.h"
 #include "platform/paths.h"
 #include "ui/delete_summary.h"
+#include "ui/grid_layout.h"
 #include "ui/input.h"
 #include "ui/progress_modal.h"
 #include "ui/tag_list_parse.h"
@@ -891,14 +892,18 @@ void GalleryGrid::render(gfx::Renderer& r)
     }
 }
 
-void GalleryGrid::render_grid(gfx::Renderer& r, float W, float /*H*/)
+void GalleryGrid::render_grid(gfx::Renderer& r, float W, float H)
 {
     using namespace gfx::theme;
     cols_ = grid_columns(W - 2 * OX, CELL, GAP);
-    for (size_t i = 0; i < children_.size(); ++i) {
-        const SDL_FRect cellr = grid_cell_rect(static_cast<int>(i), grid_spec(W, cols_));
+    const auto [first_idx, last_idx] = grid_visible_range(
+        0.0f, CELL, GAP, OY, H, cols_, static_cast<int>(children_.size()));
+    // If the grid is empty, the range will be {0, -1}; the loop handles this correctly.
+    for (int i = first_idx; i <= last_idx; ++i) {
+        if (i < 0 || i >= static_cast<int>(children_.size())) continue;
+        const SDL_FRect cellr = grid_cell_rect(i, grid_spec(W, cols_));
         const vault::IndexNode* n = children_[i];
-        const bool sel = (static_cast<int>(i) == nav_.selected());
+        const bool sel = (i == nav_.selected());
         if (sel) r.draw_selection_glow(cellr, RADIUS, ACCENT);
         r.draw_round_rect(cellr, RADIUS, sel ? SURFACE_HI : SURFACE);
         r.draw_round_rect(cellr, RADIUS, sel ? ACCENT : BORDER, /*filled*/ false);
@@ -926,7 +931,7 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float /*H*/)
     }
 }
 
-void GalleryGrid::render_list(gfx::Renderer& r, float W, float /*H*/)
+void GalleryGrid::render_list(gfx::Renderer& r, float W, float H)
 {
     using namespace gfx::theme;
     cols_ = 1;   // up/down move one row at a time
@@ -948,10 +953,13 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float /*H*/)
     r.draw_text(font_, date_x, hy, "DATE", TEXT_FAINT);
     r.draw_rect({OX, OY + LIST_HEADER - 6, rw, 1.0f}, BORDER);
 
-    for (size_t i = 0; i < children_.size(); ++i) {
+    const auto [first_idx, last_idx] = list_visible_range(
+        0.0f, ROW_H, OY + LIST_HEADER, H, static_cast<int>(children_.size()));
+    for (int i = first_idx; i <= last_idx; ++i) {
+        if (i < 0 || i >= static_cast<int>(children_.size())) continue;
         const vault::IndexNode* n = children_[i];
         const auto& m  = n->meta;
-        const bool sel = (static_cast<int>(i) == nav_.selected());
+        const bool sel = (i == nav_.selected());
         const SDL_FRect row{OX, OY + LIST_HEADER + static_cast<float>(i) * ROW_H,
                             rw, ROW_H - 6};
         if (sel) {

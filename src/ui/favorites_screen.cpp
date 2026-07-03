@@ -10,6 +10,7 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "platform/vault_registry.h"
+#include "ui/grid_layout.h"
 #include "ui/input.h"
 #include "ui/widgets.h"
 
@@ -110,10 +111,13 @@ void FavoritesScreen::render(gfx::Renderer& r)
     if (favs_.empty())
         r.draw_text(font_, OX, OY, empty_hint(), TEXT_DIM);
 
-    cols_ = grid_columns(W - 2 * OX, CELL, GAP);   // for-loop below is a no-op when empty
-    for (size_t i = 0; i < favs_.size(); ++i) {
-        const SDL_FRect cellr = grid_cell_rect(static_cast<int>(i), grid_spec(W, cols_));
-        const bool sel = (static_cast<int>(i) == nav_.selected());
+    cols_ = grid_columns(W - 2 * OX, CELL, GAP);
+    const auto [first_idx, last_idx] = grid_visible_range(
+        0.0f, CELL, GAP, OY, H, cols_, static_cast<int>(favs_.size()));
+    for (int i = first_idx; i <= last_idx; ++i) {
+        if (i < 0 || i >= static_cast<int>(favs_.size())) continue;
+        const SDL_FRect cellr = grid_cell_rect(i, grid_spec(W, cols_));
+        const bool sel = (i == nav_.selected());
         if (sel) r.draw_selection_glow(cellr, RADIUS, ACCENT);
         r.draw_round_rect(cellr, RADIUS, sel ? SURFACE_HI : SURFACE);
         r.draw_round_rect(cellr, RADIUS, sel ? ACCENT : BORDER, /*filled*/ false);
