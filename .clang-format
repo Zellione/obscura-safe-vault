@@ -1,0 +1,75 @@
+---
+# clang-format style derived empirically from existing code:
+# - IndentWidth: 4 spaces (observed in vault.h, secure_mem.h, gallery_grid.cpp)
+# - ColumnLimit: 100 chars (most lines fit comfortably, some threshold for readability)
+# - BraceWrapping: Allman for function definitions (opening brace on new line);
+#   otherwise K&R (attach). Controlled via BreakBeforeBraces: Custom.
+# - PointerAlignment: Right (Type* var_name, observed in secure_mem.h:123, vault.h:88)
+# - AlignConsecutiveAssignments/Declarations: true (observed in vault.h:73-75, secure_mem.h:135-137)
+
+BasedOnStyle: LLVM
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+
+ColumnLimit: 100
+
+# Allman style for function definitions; attach for classes/control structures.
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterNamespace: false
+  AfterStruct: false
+  AfterClass: false
+  AfterControlStatement: Never
+  AfterEnum: false
+  AfterUnion: false
+  BeforeElse: false
+  BeforeCatch: false
+  BeforeLambdaBody: false
+  SplitEmptyFunction: false
+
+# Pointer and reference alignment
+PointerAlignment: Right
+ReferenceAlignment: Right
+
+# Consecutive declarations and assignments
+AlignConsecutiveAssignments:
+  Enabled: false
+
+AlignConsecutiveDeclarations:
+  Enabled: false
+
+# Other formatting
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortEnumsOnASingleLine: false
+AllowShortBlocksOnASingleLine: false
+
+ConstructorInitializerIndentWidth: 4
+ContinuationIndentWidth: 4
+
+NamespaceIndentation: None
+
+# Include sorting (mostly alphabetical, grouped)
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^<[^>]+>'
+    Priority: 1  # System headers
+  - Regex: '^"[^"]+"'
+    Priority: 2  # Project headers
+
+AlignTrailingComments: true
+SpaceAfterCStyleCast: false
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeParens: ControlStatements
+SpacesBeforeTrailingComments: 2
+SpacesInAngles: Never
+
+# Standard template stuff
+FixNamespaceComments: true
+RemoveBracesLLVM: false

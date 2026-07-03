@@ -901,3 +901,125 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ===========================================================================
+  # Linting — clang-format (dry-run) + clang-tidy (non-blocking).
+  # Runs on PRs only, reuses setup from build-and-test (minimal cost).
+  # continue-on-error: true so lint findings don't block the workflow.
+  # ===========================================================================
+  lint:
+    name: Lint / clang-format + clang-tidy / Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name != 'schedule'
+    continue-on-error: true
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /tmp/apt-cache
+          key: apt-lint-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-lint-
+
+      - name: Install build dependencies (clang + ninja for compile_commands.json)
+        run: |
+          sudo mkdir -p /tmp/apt-cache/partial
+          sudo chmod -R 1777 /tmp/apt-cache
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDir::Cache::archives "/tmp/apt-cache";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' \
+            | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
+          sudo rm -f /etc/apt/sources.list.d/*microsoft* /etc/apt/sources.list.d/*azure* 2>/dev/null || true
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build \
+            clang-format \
+            clang-tidy \
+            gcc-14 \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxss-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libasound2-dev \
+            libpulse-dev
+          sudo chmod -R a+rX /tmp/apt-cache
+
+      - name: Cache premake5 binary
+        uses: actions/cache@v4
+        id: cache-premake5
+        with:
+          path: bin/premake5
+          key: premake5-5.0.0-beta8-linux
+
+      - name: Download premake5
+        if: steps.cache-premake5.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p bin
+          curl -fsSL \
+            "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-linux.tar.gz" \
+            -o /tmp/premake5.tar.gz
+          tar -xzf /tmp/premake5.tar.gz -C bin/
+          chmod +x bin/premake5
+
+      - name: Cache vendored SDL3 build
+        uses: actions/cache@v4
+        id: cache-sdl3
+        with:
+          path: vendor/SDL3/build
+          key: sdl3-linux-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored SDL3
+        if: steps.cache-sdl3.outputs.cache-hit != 'true'
+        run: |
+          cmake -S vendor/SDL3 -B vendor/SDL3/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSDL_STATIC=ON            \
+            -DSDL_SHARED=OFF           \
+            -DSDL_TESTS=OFF            \
+            -DSDL_EXAMPLES=OFF         \
+            -DSDL_INSTALL_TESTS=OFF    \
+            -DSDL_X11_XTEST=OFF        \
+            -DSDL_JOYSTICK=OFF         \
+            -DSDL_HAPTIC=OFF           \
+            -DSDL_SENSOR=OFF           \
+            -DSDL_CAMERA=OFF           \
+            -G "Ninja"
+          cmake --build vendor/SDL3/build --parallel "$(nproc)"
+
+      - name: Use gcc-14 as default gcc
+        run: |
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
+            --slave /usr/bin/g++ g++ /usr/bin/g++-14
+
+      - name: Generate Ninja build files (for compile_commands.json)
+        run: bin/premake5 ninja --cc=gcc
+
+      - name: clang-format --dry-run (src/ + tests/)
+        run: |
+          find src tests -type f \( -name "*.h" -o -name "*.cpp" \) \
+            -exec clang-format --dry-run -Werror {} + \
+            2>&1 | tee /tmp/clang-format-output.txt
+          if grep -q "error:" /tmp/clang-format-output.txt; then
+            echo "clang-format would reformat $(grep -c "error:" /tmp/clang-format-output.txt) issues"
+            exit 1
+          fi
+
+      - name: clang-tidy (src/)
+        run: |
+          find src -type f -name "*.cpp" \
+            -exec clang-tidy -p . {} + 2>&1 | tee /tmp/clang-tidy-output.txt
+          # Extract summary line
+          grep -E "warning:|error:" /tmp/clang-tidy-output.txt | head -20 || true
+          echo "---"
+          echo "Total issues found: $(grep -c -E "warning:|error:" /tmp/clang-tidy-output.txt || echo 0)"
