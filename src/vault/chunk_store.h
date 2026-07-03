@@ -32,8 +32,10 @@ class ChunkStore {
 public:
     // `fp` must be opened read+write binary and outlive the store. `key` is
     // borrowed (must outlive the store) — typically the vault's master key.
-    ChunkStore(std::FILE* fp, std::span<const uint8_t, crypto::KEY_SIZE> key) noexcept
-        : fp_(fp), key_(key) {}
+    // `framed`: apply chunk_codec framing (Phase 26). Pass framed_chunks(header)
+    // — legacy vaults (bit clear) must stay raw on read AND append.
+    ChunkStore(std::FILE* fp, std::span<const uint8_t, crypto::KEY_SIZE> key, bool framed) noexcept
+        : fp_(fp), key_(key), framed_(framed) {}
 
     // Encrypt `plaintext` (random nonce) and append at end of file. On success
     // fills `out` with the written location. Returns false on RNG or I/O failure.
@@ -68,6 +70,7 @@ private:
 
     std::FILE*                                fp_;
     std::span<const uint8_t, crypto::KEY_SIZE> key_;
+    bool                                      framed_;
 };
 
 } // namespace vault

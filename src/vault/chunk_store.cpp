@@ -2,6 +2,7 @@
 
 #include <print>
 
+#include "chunk_codec.h"
 #include "crypto/aead.h"
 #include "file_util.h"
 
@@ -45,7 +46,14 @@ bool ChunkStore::read_at(uint64_t offset, std::span<uint8_t> dst) const noexcept
 bool ChunkStore::append_chunk(std::span<const uint8_t> plaintext, ChunkSpan& out) noexcept
 {
     std::vector<uint8_t> chunk;
-    if (!crypto::encrypt_chunk(key_, plaintext, chunk)) return false;  // RNG failure
+    if (framed_) {
+        // The frame holds (possibly compressed) decrypted content: mlock'd.
+        crypto::SecureBytes framed;
+        if (!chunk_codec::encode_frame(plaintext, framed)) return false;
+        if (!crypto::encrypt_chunk(key_, framed.as_span(), chunk)) return false;
+    } else {
+        if (!crypto::encrypt_chunk(key_, plaintext, chunk)) return false;  // RNG failure
+    }
 
     uint64_t offset = 0;
     if (!append_at_end(chunk, offset)) return false;
@@ -57,13 +65,14 @@ bool ChunkStore::append_chunk(std::span<const uint8_t> plaintext, ChunkSpan& out
 bool ChunkStore::read_chunk(ChunkSpan span, std::vector<uint8_t>& out) const noexcept
 {
     out.clear();
-    // The span comes from an (authenticated but possibly stale/hostile) index:
-    // bounds-check before sizing the buffer, or a corrupt length is an
-    // allocation-of-2^63-bytes DoS.
-    if (!span_in_file(span.offset, span.length)) return false;
+    if (!span_in_file(span.offset, span.length)) return false;   // OOM guard (unchanged)
     std::vector<uint8_t> disk(span.length);
     if (!read_at(span.offset, disk)) return false;
-    return crypto::decrypt_chunk(key_, disk, out);
+    if (!framed_) return crypto::decrypt_chunk(key_, disk, out);
+
+    std::vector<uint8_t> framed;
+    if (!crypto::decrypt_chunk(key_, disk, framed)) return false;
+    return chunk_codec::decode_frame(framed, out);
 }
 
 bool ChunkStore::read_chunk(ChunkSpan span, crypto::SecureBytes& out) const noexcept
@@ -72,12 +81,20 @@ bool ChunkStore::read_chunk(ChunkSpan span, crypto::SecureBytes& out) const noex
     std::vector<uint8_t> disk(span.length);  // ciphertext is not secret
     if (!read_at(span.offset, disk)) return false;
 
-    if (const size_t plain_len = crypto::chunk_plaintext_len(disk.size()); !out.resize(plain_len)) return false;
-    if (!crypto::decrypt_chunk_to(key_, disk, out.span())) {
-        (void)out.resize(0);  // wipes the partial plaintext and empties the buffer
-        return false;
+    const size_t plain_len = crypto::chunk_plaintext_len(disk.size());
+    if (!framed_) {
+        if (!out.resize(plain_len)) return false;
+        if (!crypto::decrypt_chunk_to(key_, disk, out.span())) {
+            (void)out.resize(0);
+            return false;
+        }
+        return true;
     }
-    return true;
+
+    crypto::SecureBytes framed;                        // frame = decrypted content: mlock'd
+    if (!framed.resize(plain_len)) return false;
+    if (!crypto::decrypt_chunk_to(key_, disk, framed.span())) return false;  // dtor wipes
+    return chunk_codec::decode_frame(framed.as_span(), out);
 }
 
 bool ChunkStore::append_raw(std::span<const uint8_t> bytes, uint64_t& out_offset) noexcept

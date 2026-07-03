@@ -478,7 +478,7 @@ VaultResult Vault::unlock(std::span<const uint8_t> password,
         const IndexSlot& s = header_.slot[idx];
         if (s.length == 0) return false;
         std::vector<uint8_t> on_disk;
-        if (ChunkStore store(fp_, master_key_.as_span()); !store.read_raw(s.offset, s.length, on_disk)) return false;
+        if (ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_)); !store.read_raw(s.offset, s.length, on_disk)) return false;
         std::vector<uint8_t> blob;
         if (!crypto::open(master_key_.as_span(), s.nonce, on_disk, blob)) return false;
         IndexNode tmp;
@@ -590,7 +590,7 @@ VaultResult Vault::add_image(std::string_view         gallery_path,
     if (holds_galleries(*g)) return InvalidArg;   // not a leaf gallery
     if (child_named(g, filename)) return AlreadyExists;
 
-    ChunkStore store(fp_, master_key_.as_span());
+    ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
     ChunkSpan  span;
     if (!store.append_chunk(file_data, span)) return IoError;
 
@@ -636,7 +636,7 @@ VaultResult Vault::read_image(const IndexNode& node, crypto::SecureBytes& out) c
     if (!unlocked_)       return Locked;
     if (!node.is_image()) return InvalidArg;
 
-    if (ChunkStore store(fp_, master_key_.as_span());
+    if (ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
         !store.read_chunk({node.meta.data_offset, node.meta.data_length}, out)) {
         return AuthFailed;  // corrupt / tampered / unreadable chunk
     }
@@ -654,7 +654,7 @@ VaultResult Vault::read_thumbnail(const IndexNode& node, crypto::SecureBytes& ou
     const uint64_t thumb_off = node.is_video() ? node.vmeta.poster_offset : node.meta.thumb_offset;
     if (thumb_len == 0) return NotFound;
 
-    if (ChunkStore store(fp_, master_key_.as_span());
+    if (ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
         !store.read_chunk({thumb_off, thumb_len}, out)) {
         return AuthFailed;
     }
@@ -668,7 +668,7 @@ VaultResult read_thumb_span(const Vault& v, uint64_t offset, uint64_t length,
     if (!v.unlocked_)  return Locked;
     if (length == 0)   return InvalidArg;
 
-    if (ChunkStore store(v.fp_, v.master_key_.as_span());
+    if (ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
         !store.read_chunk({offset, length}, out)) {
         return AuthFailed;
     }
@@ -703,7 +703,7 @@ VaultResult Vault::add_video(std::string_view         gallery_path,
     if (holds_galleries(*g))    return InvalidArg;   // not a leaf gallery
     if (child_named(g, filename)) return AlreadyExists;
 
-    ChunkStore store(fp_, master_key_.as_span());
+    ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
     std::vector<VideoChunk> chunks;
     for (size_t off = 0; off < file_data.size(); off += chunk_size) {
         const size_t len = std::min<size_t>(chunk_size, file_data.size() - off);
@@ -752,7 +752,7 @@ VaultResult Vault::read_video(const IndexNode& node, crypto::SecureBytes& out) c
     if (!node.is_video()) return InvalidArg;
 
     if (!out.resize(node.vmeta.orig_size)) return IoError;
-    ChunkStore store(fp_, master_key_.as_span());
+    ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
     size_t pos = 0;
     for (const VideoChunk& c : node.vmeta.chunks) {
         crypto::SecureBytes piece;
@@ -1135,8 +1135,8 @@ VaultResult Vault::compact(OpProgress* progress)
     // keeps invariant #1 (plaintext never touches an unlocked buffer here),
     // and skips a pointless decrypt/re-encrypt pass.
     IndexNode  new_root = root_;
-    ChunkStore src(fp_, master_key_.as_span());
-    ChunkStore dst(tmp, master_key_.as_span());
+    ChunkStore src(fp_, master_key_.as_span(), framed_chunks(header_));
+    ChunkStore dst(tmp, master_key_.as_span(), framed_chunks(header_));
 
     // Count total chunks to copy for progress reporting.
     int total_chunks = 0;

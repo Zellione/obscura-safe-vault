@@ -34,7 +34,7 @@ VaultResult commit_index(IndexIoContext& ctx)
     crypto::seal(ctx.master_key_.as_span(), nonce, blob, sealed);
 
     // Step A: append the new index blob and make it durable.
-    ChunkStore store(ctx.fp_, ctx.master_key_.as_span());
+    ChunkStore store(ctx.fp_, ctx.master_key_.as_span(), framed_chunks(ctx.header_));
     uint64_t offset = 0;
     if (!store.append_raw(sealed, offset)) return IoError;
     if (!store.sync())                     return IoError;

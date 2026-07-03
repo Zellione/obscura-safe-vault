@@ -3,13 +3,14 @@
 #include <algorithm>
 #include <cstring>
 
+#include "vault/header.h"   // for framed_chunks
 #include "vault/vault.h"   // for the friend factory's access to fp_ / master_key_
 
 namespace media {
 
 VideoSource::VideoSource(std::FILE* fp, std::span<const uint8_t, crypto::KEY_SIZE> key,
-                         const vault::VideoMeta& meta)
-    : store_(fp, key), chunks_(meta.chunks), chunk_size_(meta.chunk_size),
+                         const vault::VideoMeta& meta, bool framed)
+    : store_(fp, key, framed), chunks_(meta.chunks), chunk_size_(meta.chunk_size),
       total_size_(meta.orig_size) {}
 
 // Copy up to one chunk's worth of plaintext covering `offset` into `dst`,
@@ -50,7 +51,7 @@ int64_t VideoSource::read(uint64_t offset, std::span<uint8_t> dst) noexcept
 
 VideoSource VideoSource::open(const vault::Vault& v, const vault::IndexNode& node)
 {
-    return VideoSource(v.fp_, v.master_key_.as_span(), node.vmeta);
+    return VideoSource(v.fp_, v.master_key_.as_span(), node.vmeta, framed_chunks(v.header_));
 }
 
 } // namespace media
