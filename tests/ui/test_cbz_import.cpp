@@ -149,7 +149,7 @@ TEST(cbz_import_writes_nothing_to_disk)
     cleanup_dir(dir);
 }
 
-TEST(cbz_import_meta_json_names_and_tags_gallery)
+TEST(cbz_import_meta_json_tags_gallery_passed_name_wins)
 {
     auto dir = fresh_dir("osv_cbz_meta");
     const std::string meta = R"({
@@ -164,19 +164,22 @@ TEST(cbz_import_meta_json_names_and_tags_gallery)
     {
         vault::Vault v;
         make_vault(v, dir / "v.osv");
+        // The caller's name is authoritative: the UI prefills it from the
+        // meta.json title via peek_archive_meta, so the user's (possibly
+        // edited) popup text must never be silently overridden here.
         auto out = ui::import_cbz(v, cbz, "", "Comic");
         CHECK(out.ok);
         CHECK_EQ(out.imported, 2);
         CHECK_EQ(out.skipped, 0);          // meta.json is consumed, never "skipped"
-        CHECK(v.list("Comic").empty());    // default (filename) title overridden
+        CHECK(v.list("English Title").empty());   // meta title does NOT rename
 
-        auto pages = v.list("English Title");
+        auto pages = v.list("Comic");
         REQUIRE(pages.size() == static_cast<size_t>(2));
         CHECK_EQ(pages[0]->name, std::string("1.jpg"));  // meta never becomes a page
 
         const vault::IndexNode* g = nullptr;
         for (const auto* n : v.list(""))
-            if (n->name == "English Title") g = n;
+            if (n->name == "Comic") g = n;
         REQUIRE(g != nullptr);
         REQUIRE(g->tags.size() == static_cast<size_t>(3));
         CHECK_EQ(g->tags[0], std::string("JP Title"));   // japanese title stays searchable

@@ -680,7 +680,12 @@ void GalleryGrid::pump_zip_import()
         // stem; finish_naming() then routes to the fixed one-leaf plan.
         start_naming();
         if (naming_.active) {
-            naming_.buf = zp.stem().string();   // e.g. "MyComic" from "MyComic.cbz"
+            // Prefill from the archive's meta.json title when present (Phase 27),
+            // else the filename stem (e.g. "MyComic" from "MyComic.cbz"). The
+            // text the user confirms is authoritative — the import never
+            // overrides it.
+            naming_.buf = ui::meta_gallery_name(ui::peek_archive_meta(zp),
+                                                zp.stem().string());
             naming_.zip.path = zp;
             naming_.zip.dest = ui::ZipDest::NewGallery;
             naming_.zip.cbz = true;
@@ -697,7 +702,9 @@ void GalleryGrid::pump_zip_import()
     } else {
         // Current is empty or holds sub-galleries: prompt for new gallery name.
         start_naming();   // reuse the naming flow
-        naming_.buf = zp.stem().string();   // e.g. "archive" from "archive.zip"
+        // Prefill from meta.json title → filename stem, as in the CBZ branch.
+        naming_.buf = ui::meta_gallery_name(ui::peek_archive_meta(zp),
+                                            zp.stem().string());
         naming_.zip.path = zp;
         naming_.zip.dest = ui::ZipDest::NewGallery;
         naming_.zip.cbz = false;

@@ -360,11 +360,14 @@ src/
                                                  import_zip/import_cbz take an optional
                                                  ImportProgress* (atomic total/done/cancel) so a
                                                  caller can drive a progress bar + cooperative cancel.
-                                                 Phase 27: a top-level meta.json retitles the created
-                                                 gallery (zip NewGallery top gallery / cbz leaf; the
-                                                 passed name is only the fallback) and seeds its tags
-                                                 (japanese title + each "type:name") via
-                                                 Vault::add_tag; Append just excludes the file.
+                                                 Phase 27: a top-level meta.json seeds the created
+                                                 gallery's tags (japanese title + each "type:name")
+                                                 via Vault::add_tag (zip NewGallery top gallery /
+                                                 cbz leaf); Append just excludes the file. The title
+                                                 is NOT applied by the importer: peek_archive_meta
+                                                 reads the meta at file-pick time and GalleryGrid
+                                                 prefills the name popup with meta_gallery_name(meta,
+                                                 stem) — the confirmed popup text is authoritative.
                                                  Extracted into mlock'd memory, 1 MiB cap; malformed
                                                  meta.json never blocks the import.
                zip_import_job.*                — ZipImportJob: runs import_cbz/import_zip

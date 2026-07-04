@@ -186,14 +186,15 @@ ZipImportOutcome import_zip(vault::Vault&                v,
     mz_zip_archive zip;
     if (!open_archive(zip_path, "ZipImport", archive, zip, out)) return out;
 
-    // A top-level meta.json can retitle + tag the new top gallery (Phase 27).
-    // Append has no created gallery to retitle, so its meta is only excluded.
+    // A top-level meta.json tags the new top gallery (Phase 27). Its title is
+    // NOT applied here: the UI prefills the name popup from peek_archive_meta,
+    // so `new_gallery_name` (the user's confirmed text) is authoritative.
+    // Append has no created gallery to tag, so its meta is only excluded.
     const std::vector<ZipEntry> entries = read_entry_list(zip);
     const ArchiveMeta meta =
         dest == ZipDest::NewGallery ? load_archive_meta(zip, entries) : ArchiveMeta{};
-    const std::string gallery_name = meta_gallery_name(meta, new_gallery_name);
 
-    ZipPlan plan = build_zip_plan(entries, dest, base_gallery, gallery_name, policy);
+    ZipPlan plan = build_zip_plan(entries, dest, base_gallery, new_gallery_name, policy);
     if (plan.needs_resolution) {
         out.ok = true;
         out.needs_resolution = true;
@@ -205,7 +206,7 @@ ZipImportOutcome import_zip(vault::Vault&                v,
 
     if (!create_galleries(v, plan, zip, out)) return out;
     if (dest == ZipDest::NewGallery && !plan.placements.empty())
-        apply_meta_tags(v, joined_gallery(base_gallery, gallery_name), meta);
+        apply_meta_tags(v, joined_gallery(base_gallery, new_gallery_name), meta);
     run_placements(v, zip, plan, out, progress);
     return out;
 }
@@ -223,19 +224,36 @@ ZipImportOutcome import_cbz(vault::Vault&                v,
     mz_zip_archive zip;
     if (!open_archive(cbz_path, "CbzImport", archive, zip, out)) return out;
 
-    // A top-level meta.json retitles + tags the single leaf gallery (Phase 27).
+    // A top-level meta.json tags the single leaf gallery (Phase 27). Its title
+    // is NOT applied here: the UI prefills the name popup from
+    // peek_archive_meta, so `gallery_name` (the user's confirmed text) is
+    // authoritative.
     const std::vector<ZipEntry> entries = read_entry_list(zip);
     const ArchiveMeta meta = load_archive_meta(zip, entries);
-    const std::string name = meta_gallery_name(meta, gallery_name);
 
-    const ZipPlan plan = build_cbz_plan(entries, base_gallery, name);
+    const ZipPlan plan = build_cbz_plan(entries, base_gallery, gallery_name);
     out.skipped = plan.skipped_unsupported;
 
     if (!create_galleries(v, plan, zip, out)) return out;
     if (!plan.placements.empty())
-        apply_meta_tags(v, joined_gallery(base_gallery, name), meta);
+        apply_meta_tags(v, joined_gallery(base_gallery, gallery_name), meta);
     run_placements(v, zip, plan, out, progress);
     return out;
+}
+
+ArchiveMeta peek_archive_meta(const std::filesystem::path& archive_path)
+{
+    // Same portable whole-file read the importers use (std::ifstream handles
+    // non-ASCII paths on every platform). The pick that triggers this peek is
+    // followed by a full import read anyway, so the cost is paid once more at
+    // popup time, not a new order of work.
+    ZipImportOutcome ignored;
+    std::vector<uint8_t> archive;
+    mz_zip_archive zip;
+    if (!open_archive(archive_path, "MetaPeek", archive, zip, ignored)) return {};
+    const ArchiveMeta meta = load_archive_meta(zip, read_entry_list(zip));
+    mz_zip_reader_end(&zip);
+    return meta;
 }
 
 }  // namespace ui

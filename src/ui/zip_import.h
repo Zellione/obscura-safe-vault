@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ui/meta_json.h"
 #include "ui/zip_plan.h"
 #include "vault/op_progress.h"
 
@@ -58,5 +59,12 @@ using ImportProgress = vault::OpProgress;
                                           std::string_view             base_gallery,
                                           std::string_view             gallery_name,
                                           ImportProgress*              progress = nullptr);
+
+// Read an archive's optional top-level meta.json without importing anything
+// (Phase 27). The UI uses this when a zip/cbz is picked to prefill the
+// gallery-name popup via meta_gallery_name — the name the user confirms is then
+// authoritative for the import (never silently overridden by the title).
+// Missing/malformed meta.json or an unreadable archive → empty ArchiveMeta.
+[[nodiscard]] ArchiveMeta peek_archive_meta(const std::filesystem::path& archive_path);
 
 }  // namespace ui

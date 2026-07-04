@@ -1132,7 +1132,14 @@ Importing a fixture zip/cbz containing `meta.json` yields a gallery named after 
 english title, tagged with the japanese title and each `type:name` tag; a malformed
 `meta.json` never blocks the import.
 
-**Status:** ✅ 677/677 tests pass; `scripts/test.sh --asan` clean. `ui::parse_meta_json` (nlohmann/json v3.12.0, vendored `vendor/json`, exception-free parse) + `meta_gallery_name`/`meta_gallery_tags` mapping; `find_meta_entry` excludes the top-level `meta.json` from all three planner paths (never placed, never counted skipped); `import_zip` (NewGallery) and `import_cbz` retitle the created gallery and seed its tags via `Vault::add_tag`; Append only excludes the file. Extraction goes to mlock'd memory with a 1 MiB sanity cap; a malformed `meta.json` degrades to the filename-named, untagged import.
+**Status:** ✅ 677/677 tests pass; `scripts/test.sh --asan` clean. `ui::parse_meta_json` (nlohmann/json v3.12.0, vendored `vendor/json`, exception-free parse) + `meta_gallery_name`/`meta_gallery_tags` mapping; `find_meta_entry` excludes the top-level `meta.json` from all three planner paths (never placed, never counted skipped); `import_zip` (NewGallery) and `import_cbz` seed the created gallery's tags via `Vault::add_tag`; Append only excludes the file. Extraction goes to mlock'd memory with a 1 MiB sanity cap; a malformed `meta.json` degrades to the filename-named, untagged import.
+
+**Follow-up (owner feedback):** the meta title no longer silently overrides the
+name typed in the popup. Instead `ui::peek_archive_meta` reads the archive's
+`meta.json` when the file is picked and the gallery-name popup is **prefilled**
+with `meta_gallery_name(meta, filename-stem)` — the text the user confirms is
+authoritative for the import (zip NewGallery and cbz alike). Tag seeding is
+unchanged.
 
 ---
 
