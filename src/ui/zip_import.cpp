@@ -55,7 +55,7 @@ constexpr mz_uint64 kMaxMetaJsonBytes = 1u << 20;
 ArchiveMeta load_archive_meta(mz_zip_archive& zip, const std::vector<ZipEntry>& entries)
 {
     const std::optional<size_t> idx = find_meta_entry(entries);
-    if (!idx) return {};
+    if (!idx.has_value()) return {};
     mz_zip_archive_file_stat st;
     if (!mz_zip_reader_file_stat(&zip, static_cast<mz_uint>(*idx), &st)) return {};
     if (st.m_uncomp_size == 0 || st.m_uncomp_size > kMaxMetaJsonBytes) return {};
