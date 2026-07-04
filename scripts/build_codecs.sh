@@ -95,7 +95,8 @@ build_codec heif "$REPO_ROOT/vendor/libheif"                           \
     -DCMAKE_C_FLAGS=-DLIBDE265_STATIC_BUILD                            \
     -DCMAKE_CXX_FLAGS=-DLIBDE265_STATIC_BUILD
 
-# FFmpeg — decode-only static. Video (h264/hevc) + audio (aac/opus/mp3/vorbis/flac/ac3).
+# FFmpeg — decode-only static. Video (h264/hevc + prores/dnxhd/mjpeg for .mov,
+# Phase 28) + audio (aac/opus/mp3/vorbis/flac/ac3).
 # configure-built (not cmake), so it gets its own function. Idempotent: skip if
 # libavcodec is already installed. Needs nasm (already required by libaom).
 build_ffmpeg() {
@@ -121,9 +122,9 @@ build_ffmpeg() {
         --disable-network --disable-encoders --disable-muxers               \
         --disable-protocols --disable-devices --disable-filters             \
         --disable-bsfs --disable-autodetect                                 \
-        --enable-decoder=h264,hevc,aac,opus,mp3,vorbis,flac,ac3             \
+        --enable-decoder=h264,hevc,prores,dnxhd,mjpeg,aac,opus,mp3,vorbis,flac,ac3 \
         --enable-demuxer=mov,matroska,webm                                  \
-        --enable-parser=h264,hevc,aac,vorbis,opus,flac,ac3,mpegaudio        \
+        --enable-parser=h264,hevc,dnxhd,mjpeg,aac,vorbis,opus,flac,ac3,mpegaudio \
         --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb                      \
         --enable-swscale                                                    \
         --enable-pic                                                        \

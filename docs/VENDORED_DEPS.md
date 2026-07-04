@@ -14,7 +14,7 @@ This document tracks the pinned versions of all vendored third-party libraries a
 | **libde265** | v0.1-2267-g17bb8d9f | HEVC video codec (decode-only, internal to libheif) | **Yes** |
 | **libaom** | 3.14.1 | AV1 video codec (decode-only) | **Yes** |
 | **libheif** | 1.18.2 | HEIF container format parser (HEIC/AVIF) | **Yes** |
-| **FFmpeg** | 7.1.1 (n7.1.1) | Video and audio frame decoding (decode-only, static linked) | **Yes** |
+| **FFmpeg** | 7.1.1 (n7.1.1) | Video and audio frame decoding (decode-only, static linked; H.264/H.265 + ProRes/DNxHD/MJPEG since Phase 28) | **Yes** |
 | **nlohmann/json** | v3.12.0 | Header-only JSON parsing (archive `meta.json`, Phase 27) | **Yes** |
 
 ### Decode-Only Rationale

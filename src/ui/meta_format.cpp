@@ -65,8 +65,11 @@ std::string_view video_codec_name(vault::VideoCodec c) noexcept
 {
     using enum vault::VideoCodec;
     switch (c) {
-        case H264: return "H.264";
-        case HEVC: return "H.265";
+        case H264:   return "H.264";
+        case HEVC:   return "H.265";
+        case ProRes: return "ProRes";
+        case DNxHD:  return "DNxHD";
+        case MJPEG:  return "MJPEG";
         case Unknown: break;
     }
     return "Video";
