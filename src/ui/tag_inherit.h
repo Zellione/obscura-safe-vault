@@ -8,6 +8,11 @@ namespace vault { class Vault; }
 
 namespace ui {
 
+// Case-insensitive ASCII tag comparison — the same identity rule Vault applies
+// when de-duplicating tags. Shared by the tag editor and the inherited-tag
+// cascade so "tag equality" has one definition in the UI.
+[[nodiscard]] bool tag_ci_equal(std::string_view a, std::string_view b);
+
 // Ancestor-gallery tag union for the node at `node_path`: root→parent order,
 // case-insensitively de-duplicated, minus the tags the node carries itself
 // (own tags win). These are exactly the tags the search cascade matches the

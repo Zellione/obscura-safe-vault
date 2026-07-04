@@ -16,19 +16,9 @@ char lower_ascii(unsigned char c)
     return c >= 'A' && c <= 'Z' ? static_cast<char>(c + 32) : static_cast<char>(c);
 }
 
-bool ci_equal(std::string_view a, std::string_view b)
-{
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i)
-        if (lower_ascii(static_cast<unsigned char>(a[i])) !=
-            lower_ascii(static_cast<unsigned char>(b[i])))
-            return false;
-    return true;
-}
-
 bool ci_contains(const std::vector<std::string>& v, std::string_view s)
 {
-    return std::ranges::any_of(v, [&](const std::string& e) { return ci_equal(e, s); });
+    return std::ranges::any_of(v, [&](const std::string& e) { return tag_ci_equal(e, s); });
 }
 
 // The child of `parent_path` named `name`, or nullptr. Pointer is valid until
@@ -42,6 +32,16 @@ const vault::IndexNode* child_named(const vault::Vault& vault,
 }
 
 } // namespace
+
+bool tag_ci_equal(std::string_view a, std::string_view b)
+{
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i)
+        if (lower_ascii(static_cast<unsigned char>(a[i])) !=
+            lower_ascii(static_cast<unsigned char>(b[i])))
+            return false;
+    return true;
+}
 
 std::vector<std::string> inherited_tags(const vault::Vault& vault, std::string_view node_path)
 {

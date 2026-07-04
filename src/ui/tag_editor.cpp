@@ -38,21 +38,6 @@ std::string trim_surrounding(std::string_view s)
     return std::string(s.substr(first, s.find_last_not_of(" \t\n\r") - first + 1));
 }
 
-char lower_ascii(unsigned char c)
-{
-    return c >= 'A' && c <= 'Z' ? static_cast<char>(c + 32) : static_cast<char>(c);
-}
-
-bool ci_equal(std::string_view a, std::string_view b)
-{
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i)
-        if (lower_ascii(static_cast<unsigned char>(a[i])) !=
-            lower_ascii(static_cast<unsigned char>(b[i])))
-            return false;
-    return true;
-}
-
 // Greedy-pack tags into comma-separated display lines no wider than `max_w`
 // (a single overlong tag still gets its own line and clips). Returns at most
 // `max_lines` lines plus how many tags they show — the render header reports
@@ -150,7 +135,7 @@ void TagEditor::select_tag(std::string_view tag)
     // Case-insensitive find so the just-added/merged tag is highlighted and the
     // render window scrolls to reveal it. Falls back to the last row.
     for (int i = 0; i < static_cast<int>(tags_.size()); ++i)
-        if (ci_equal(tags_[i], tag)) { selected_ = i; return; }
+        if (tag_ci_equal(tags_[i], tag)) { selected_ = i; return; }
     selected_ = std::max(0, static_cast<int>(tags_.size()) - 1);
 }
 
