@@ -120,6 +120,48 @@ void TagEditor::refresh_suggestions()
     sugg_sel_    = -1;   // typing always returns focus to the buffer
 }
 
+void TagEditor::add_chosen_tag()
+{
+    // The typed text wins unless a suggestion is explicitly highlighted
+    // (Phase 29). Trim only SURROUNDING whitespace so multi-word tags
+    // ("new york") survive; the vault owns normalisation/dedup.
+    const bool from_sugg =
+        sugg_sel_ >= 0 && sugg_sel_ < static_cast<int>(suggestions_.size());
+    const std::string chosen =
+        from_sugg ? suggestions_[sugg_sel_] : trim_surrounding(new_tag_buf_);
+    if (chosen.empty()) return;
+
+    using enum vault::VaultResult;
+    switch (vault_.add_tag(node_path_, chosen)) {
+        case Ok:
+            new_tag_buf_.clear();
+            error_.clear();
+            refresh_tags();
+            refresh_vocabulary();
+            refresh_suggestions();   // buffer is empty → dropdown closes
+            select_tag(chosen);      // scroll the list to reveal it
+            break;
+        case InvalidArg: error_ = "Invalid tag.";       break;
+        case NotFound:   error_ = "Node not found.";    break;
+        default:         error_ = "Failed to add tag."; break;
+    }
+}
+
+void TagEditor::move_cursor(int dir)
+{
+    // While the dropdown is showing, Up/Down drive the suggestion highlight
+    // (-1 = back to the buffer); otherwise they scroll the node's own tag list.
+    if (!suggestions_.empty()) {
+        sugg_sel_ = move_tag_cursor(sugg_sel_, dir, static_cast<int>(suggestions_.size()));
+        return;
+    }
+    const int next = selected_ + dir;
+    if (next >= 0 && next < static_cast<int>(tags_.size())) {
+        selected_ = next;
+        error_.clear();
+    }
+}
+
 void TagEditor::refresh_tags()
 {
     // Look up the node and read its current tags, plus the read-only ancestor
@@ -194,60 +236,16 @@ bool TagEditor::handle_event(const SDL_Event& e)
             return true;
 
         case SDLK_RETURN:
-        case SDLK_KP_ENTER: {
-            // The typed text wins unless a suggestion is explicitly highlighted
-            // (Phase 29). Trim only SURROUNDING whitespace so multi-word tags
-            // ("new york") survive; the vault owns normalisation/dedup.
-            const bool from_sugg =
-                sugg_sel_ >= 0 && sugg_sel_ < static_cast<int>(suggestions_.size());
-            const std::string chosen =
-                from_sugg ? suggestions_[sugg_sel_] : trim_surrounding(new_tag_buf_);
-            if (!chosen.empty()) {
-                using enum vault::VaultResult;
-                switch (vault_.add_tag(node_path_, chosen)) {
-                    case Ok:
-                        new_tag_buf_.clear();
-                        error_.clear();
-                        refresh_tags();
-                        refresh_vocabulary();
-                        refresh_suggestions();   // buffer is empty → dropdown closes
-                        select_tag(chosen);      // scroll the list to reveal it
-                        break;
-                    case InvalidArg:
-                        error_ = "Invalid tag.";
-                        break;
-                    case NotFound:
-                        error_ = "Node not found.";
-                        break;
-                    default:
-                        error_ = "Failed to add tag.";
-                        break;
-                }
-            }
+        case SDLK_KP_ENTER:
+            add_chosen_tag();
             return true;
-        }
 
         case SDLK_UP:
-            // While the dropdown is showing, Up/Down drive the suggestion
-            // highlight (-1 = back to the buffer); otherwise they scroll the
-            // node's own tag list as before.
-            if (!suggestions_.empty()) {
-                sugg_sel_ = move_tag_cursor(sugg_sel_, -1,
-                                            static_cast<int>(suggestions_.size()));
-            } else if (selected_ > 0) {
-                selected_--;
-                error_.clear();
-            }
+            move_cursor(-1);
             return true;
 
         case SDLK_DOWN:
-            if (!suggestions_.empty()) {
-                sugg_sel_ = move_tag_cursor(sugg_sel_, 1,
-                                            static_cast<int>(suggestions_.size()));
-            } else if (selected_ < static_cast<int>(tags_.size()) - 1) {
-                selected_++;
-                error_.clear();
-            }
+            move_cursor(1);
             return true;
 
         case SDLK_DELETE: {

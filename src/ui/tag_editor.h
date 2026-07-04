@@ -38,6 +38,8 @@ private:
     void refresh_tags();              // reload the node's current tags from the vault
     void refresh_vocabulary();        // reload the vault-wide tag vocabulary (Phase 29)
     void refresh_suggestions();       // recompute the autosuggest dropdown for the buffer
+    void add_chosen_tag();            // Enter: add highlighted suggestion or typed text
+    void move_cursor(int dir);        // Up/Down: suggestion highlight or tag-list scroll
     void select_tag(std::string_view tag);  // select `tag` (ci) so the list scrolls to it
 
     vault::Vault&        vault_;
