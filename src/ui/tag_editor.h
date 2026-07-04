@@ -43,6 +43,7 @@ private:
     bool                 active_ = false;
     std::string          node_path_;
     std::vector<std::string> tags_;          // current node tags
+    std::vector<std::string> inherited_;     // read-only ancestor-gallery tags
     int                  selected_ = 0;      // index of the selected tag to delete
     std::string          new_tag_buf_;       // input buffer for adding a new tag
     std::string          error_;             // transient error message

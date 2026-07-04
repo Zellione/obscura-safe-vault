@@ -10,6 +10,7 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "ui/nav_model.h"
+#include "ui/tag_inherit.h"
 #include "ui/tag_scroll.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
@@ -36,6 +37,42 @@ std::string trim_surrounding(std::string_view s)
     if (first == std::string_view::npos) return {};
     return std::string(s.substr(first, s.find_last_not_of(" \t\n\r") - first + 1));
 }
+
+// Greedy-pack tags into comma-separated display lines no wider than `max_w`
+// (a single overlong tag still gets its own line and clips). Returns at most
+// `max_lines` lines plus how many tags they show — the render header reports
+// the rest as hidden, since the inherited section is informational, not a list
+// the user navigates.
+struct PackedLines {
+    std::vector<std::string> lines;
+    int                      shown = 0;
+};
+
+PackedLines pack_tag_lines(const std::vector<std::string>& tags,
+                           const gfx::FontAtlas& font, float max_w, int max_lines)
+{
+    PackedLines out;
+    std::string cur;
+    int cur_count = 0;
+    for (const std::string& tag : tags) {
+        if (const std::string cand = cur.empty() ? tag : cur + ", " + tag;
+            cur.empty() || static_cast<float>(font.measure(cand)) <= max_w) {
+            cur = cand;
+            ++cur_count;
+            continue;
+        }
+        out.lines.push_back(cur);
+        out.shown += cur_count;
+        if (static_cast<int>(out.lines.size()) == max_lines) return out;  // rest hidden
+        cur = tag;
+        cur_count = 1;
+    }
+    if (!cur.empty()) {
+        out.lines.push_back(cur);
+        out.shown += cur_count;
+    }
+    return out;
+}
 }
 
 void TagEditor::open(std::string node_path)
@@ -55,14 +92,17 @@ void TagEditor::close()
     SDL_StopTextInput(win_.sdl_window());
     node_path_.clear();
     tags_.clear();
+    inherited_.clear();
     new_tag_buf_.clear();
     error_.clear();
 }
 
 void TagEditor::refresh_tags()
 {
-    // Look up the node and read its current tags
+    // Look up the node and read its current tags, plus the read-only ancestor
+    // cascade (recomputed too: adding an own tag can shadow an inherited one).
     tags_.clear();
+    inherited_ = inherited_tags(vault_, node_path_);
     error_.clear();
 
     // Split the path and navigate to find the node
@@ -94,16 +134,8 @@ void TagEditor::select_tag(std::string_view tag)
 {
     // Case-insensitive find so the just-added/merged tag is highlighted and the
     // render window scrolls to reveal it. Falls back to the last row.
-    auto lower = [](unsigned char c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; };
-    auto ci_equal = [&](std::string_view a, std::string_view b) {
-        if (a.size() != b.size()) return false;
-        for (size_t i = 0; i < a.size(); ++i)
-            if (lower(static_cast<unsigned char>(a[i])) != lower(static_cast<unsigned char>(b[i])))
-                return false;
-        return true;
-    };
     for (int i = 0; i < static_cast<int>(tags_.size()); ++i)
-        if (ci_equal(tags_[i], tag)) { selected_ = i; return; }
+        if (tag_ci_equal(tags_[i], tag)) { selected_ = i; return; }
     selected_ = std::max(0, static_cast<int>(tags_.size()) - 1);
 }
 
@@ -230,8 +262,21 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     const float tags_start = list_y + LINE;
     const float row_pitch  = TAG_ROW_H + TAG_LIST_GAP;
     const auto  total      = static_cast<int>(tags_.size());
+
+    // The read-only inherited section (ancestor-gallery tags, Phase 27
+    // follow-up) reserves space at the bottom; the own-tags list shrinks to fit.
+    constexpr int   INHERIT_MAX_LINES = 3;
+    constexpr float INHERIT_LINE      = 30.0f;
+    const PackedLines inh = inherited_.empty()
+        ? PackedLines{}
+        : pack_tag_lines(inherited_, font, MODAL_W - 2 * PAD, INHERIT_MAX_LINES);
+    const float inherit_h = inherited_.empty()
+        ? 0.0f
+        : INHERIT_LINE * static_cast<float>(1 + inh.lines.size()) + 8.0f;
+    const float list_bottom = my + MODAL_H - 50 - inherit_h;
+
     const int   max_visible =
-        std::max(1, static_cast<int>(((my + MODAL_H - 50) - tags_start) / row_pitch));
+        std::max(1, static_cast<int>((list_bottom - tags_start) / row_pitch));
     const int   first = tag_scroll_first(total, selected_, max_visible);
     const int   last  = std::min(total, first + max_visible);
 
@@ -263,6 +308,21 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
 
     if (tags_.empty()) {
         r.draw_text(font, mx + PAD, tags_start, "(no tags)", TEXT_FAINT);
+    }
+
+    // Inherited section: informational only (Del/selection never touch it —
+    // removing one of these means editing the ancestor gallery it lives on).
+    if (!inherited_.empty()) {
+        float y = list_bottom + 8.0f;
+        std::string inh_header = "Inherited from gallery";
+        if (inh.shown < static_cast<int>(inherited_.size()))
+            inh_header += std::format(" ({} of {} shown)", inh.shown, inherited_.size());
+        inh_header += ":";
+        r.draw_text(font, mx + PAD, y, inh_header, TEXT_DIM);
+        for (const std::string& line : inh.lines) {
+            y += INHERIT_LINE;
+            r.draw_text(font, mx + PAD, y, line, TEXT_FAINT);
+        }
     }
 
     // Error message

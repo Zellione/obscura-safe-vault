@@ -148,3 +148,69 @@ TEST(cbz_import_writes_nothing_to_disk)
     }
     cleanup_dir(dir);
 }
+
+TEST(cbz_import_meta_json_tags_gallery_passed_name_wins)
+{
+    auto dir = fresh_dir("osv_cbz_meta");
+    const std::string meta = R"({
+        "title": { "english": "English Title", "japanese": "JP Title" },
+        "tags":  [ { "type": "tag", "name": "awesome tag" },
+                   { "type": "artist", "name": "someone" } ]
+    })";
+    auto cbz = make_archive({{"2.jpg", fake_jpeg(2)},
+                             {"1.jpg", fake_jpeg(1)},
+                             {"meta.json", {meta.begin(), meta.end()}}},
+                            dir / "Comic.cbz");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        // The caller's name is authoritative: the UI prefills it from the
+        // meta.json title via peek_archive_meta, so the user's (possibly
+        // edited) popup text must never be silently overridden here.
+        auto out = ui::import_cbz(v, cbz, "", "Comic");
+        CHECK(out.ok);
+        CHECK_EQ(out.imported, 2);
+        CHECK_EQ(out.skipped, 0);          // meta.json is consumed, never "skipped"
+        CHECK(v.list("English Title").empty());   // meta title does NOT rename
+
+        auto pages = v.list("Comic");
+        REQUIRE(pages.size() == static_cast<size_t>(2));
+        CHECK_EQ(pages[0]->name, std::string("1.jpg"));  // meta never becomes a page
+
+        const vault::IndexNode* g = nullptr;
+        for (const auto* n : v.list(""))
+            if (n->name == "Comic") g = n;
+        REQUIRE(g != nullptr);
+        REQUIRE(g->tags.size() == static_cast<size_t>(3));
+        CHECK_EQ(g->tags[0], std::string("JP Title"));   // japanese title stays searchable
+        CHECK_EQ(g->tags[1], std::string("awesome tag"));   // generic "tag" type: no prefix
+        CHECK_EQ(g->tags[2], std::string("artist:someone"));
+    }
+    cleanup_dir(dir);
+}
+
+TEST(cbz_import_malformed_meta_json_degrades_gracefully)
+{
+    auto dir = fresh_dir("osv_cbz_meta_bad");
+    const std::string meta = "{ this is not json";
+    auto cbz = make_archive({{"1.jpg", fake_jpeg(1)},
+                             {"meta.json", {meta.begin(), meta.end()}}},
+                            dir / "Comic.cbz");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        auto out = ui::import_cbz(v, cbz, "", "Comic");
+        CHECK(out.ok);                     // a bad meta.json never blocks the import
+        CHECK_EQ(out.imported, 1);
+        CHECK_EQ(out.skipped, 0);
+        auto pages = v.list("Comic");      // falls back to the given name, untagged
+        REQUIRE(pages.size() == static_cast<size_t>(1));
+
+        const vault::IndexNode* g = nullptr;
+        for (const auto* n : v.list(""))
+            if (n->name == "Comic") g = n;
+        REQUIRE(g != nullptr);
+        CHECK(g->tags.empty());
+    }
+    cleanup_dir(dir);
+}

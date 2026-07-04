@@ -71,14 +71,16 @@ struct MediaFile {
 
 // Scan entries for supported media files, recording the directories that
 // directly hold media (`media_dirs`) and every gallery directory that must be
-// created (`gallery_dirs`). Unsupported / directory entries bump `skipped`.
+// created (`gallery_dirs`). Unsupported / directory entries bump `skipped`;
+// a top-level meta.json (`meta_idx`) is excluded without counting (Phase 27).
 std::vector<MediaFile> collect_media(const std::vector<ZipEntry>& entries,
+                                     std::optional<size_t> meta_idx,
                                      StringSet& media_dirs, StringSet& gallery_dirs, int& skipped)
 {
     std::vector<MediaFile> media;
     for (size_t i = 0; i < entries.size(); ++i) {
         const ZipEntry& e = entries[i];
-        if (entry_is_dir(e)) continue;
+        if (entry_is_dir(e) || i == meta_idx) continue;
         std::string name = basename_of(e.path);
         if (!is_supported_media_name(name)) { ++skipped; continue; }
         std::string dir = dirname_of(e.path);
@@ -104,6 +106,23 @@ StringSet find_mixed_dirs(const StringSet& media_dirs, const StringSet& gallery_
     return mixed;
 }
 
+// ---- Append: flatten every media file into base_gallery, ignore structure. ----
+// (Split out of build_zip_plan to keep its cognitive complexity under cpp:S3776.)
+ZipPlan build_append_plan(const std::vector<ZipEntry>& entries,
+                          std::optional<size_t>        meta_idx,
+                          std::string_view             base_gallery)
+{
+    ZipPlan plan;
+    for (size_t i = 0; i < entries.size(); ++i) {
+        const ZipEntry& e = entries[i];
+        if (entry_is_dir(e) || i == meta_idx) continue;
+        std::string name = basename_of(e.path);
+        if (!is_supported_media_name(name)) { ++plan.skipped_unsupported; continue; }
+        plan.placements.emplace_back(std::string(base_gallery), std::move(name), i);
+    }
+    return plan;
+}
+
 } // namespace
 
 namespace {
@@ -123,6 +142,15 @@ constexpr std::array<std::string_view, 5> kVideoExts{"mp4", "mkv", "webm", "mov"
 
 } // namespace
 
+std::optional<size_t> find_meta_entry(const std::vector<ZipEntry>& entries)
+{
+    for (size_t i = 0; i < entries.size(); ++i) {
+        const ZipEntry& e = entries[i];
+        if (!entry_is_dir(e) && to_lower(e.path) == "meta.json") return i;
+    }
+    return std::nullopt;
+}
+
 bool is_supported_image_name(std::string_view name)
 {
     return ext_in(name, kImageExts);
@@ -141,12 +169,14 @@ ZipPlan build_cbz_plan(const std::vector<ZipEntry>& entries,
     const std::string gallery = join_path(base_gallery, gallery_name);
 
     // Collect supported image entries; non-image files (videos/other) are
-    // skipped + counted, directory entries are ignored silently.
+    // skipped + counted, directory entries and a top-level meta.json (consumed
+    // by the importer, Phase 27) are ignored silently.
+    const std::optional<size_t> meta_idx = find_meta_entry(entries);
     struct Page { std::string path; std::string name; size_t index; };
     std::vector<Page> pages;
     for (size_t i = 0; i < entries.size(); ++i) {
         const ZipEntry& e = entries[i];
-        if (entry_is_dir(e)) continue;
+        if (entry_is_dir(e) || i == meta_idx) continue;
         std::string name = basename_of(e.path);
         if (!is_supported_image_name(name)) { ++plan.skipped_unsupported; continue; }
         pages.emplace_back(e.path, std::move(name), i);
@@ -190,27 +220,17 @@ ZipPlan build_zip_plan(const std::vector<ZipEntry>& entries,
                        std::string_view             new_gallery_name,
                        ZipConflictPolicy            policy)
 {
-    ZipPlan plan;
-
-    // ---- Append: flatten every media file into base_gallery, ignore structure. ----
-    if (dest == ZipDest::Append) {
-        for (size_t i = 0; i < entries.size(); ++i) {
-            const ZipEntry& e = entries[i];
-            if (entry_is_dir(e)) continue;
-            std::string name = basename_of(e.path);
-            if (!is_supported_media_name(name)) { ++plan.skipped_unsupported; continue; }
-            plan.placements.emplace_back(std::string(base_gallery), std::move(name), i);
-        }
-        return plan;
-    }
+    const std::optional<size_t> meta_idx = find_meta_entry(entries);
+    if (dest == ZipDest::Append) return build_append_plan(entries, meta_idx, base_gallery);
 
     // ---- NewGallery: mirror the tree under base/new_gallery_name. ----
+    ZipPlan plan;
     const std::string root = join_path(base_gallery, new_gallery_name);
 
     StringSet media_dirs;     // dirs directly holding media
     StringSet gallery_dirs;   // dirs we must create (media subtree)
     const std::vector<MediaFile> media =
-        collect_media(entries, media_dirs, gallery_dirs, plan.skipped_unsupported);
+        collect_media(entries, meta_idx, media_dirs, gallery_dirs, plan.skipped_unsupported);
     const StringSet mixed = find_mixed_dirs(media_dirs, gallery_dirs);
 
     if (!mixed.empty() && policy == ZipConflictPolicy::AskUser) {

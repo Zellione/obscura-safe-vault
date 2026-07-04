@@ -28,3 +28,6 @@
 [submodule "vendor/miniz"]
 	path = vendor/miniz
 	url = https://github.com/richgel999/miniz.git
+[submodule "vendor/json"]
+	path = vendor/json
+	url = https://github.com/nlohmann/json.git

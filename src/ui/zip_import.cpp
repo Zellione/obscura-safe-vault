@@ -1,6 +1,7 @@
 #include "ui/zip_import.h"
 
 #include "crypto/secure_mem.h"
+#include "ui/meta_json.h"
 #include "image/format_registry.h"
 #include "vault/vault.h"
 
@@ -42,6 +43,43 @@ std::vector<ZipEntry> read_entry_list(mz_zip_archive& zip)
                              mz_zip_reader_is_file_a_directory(&zip, i) != MZ_FALSE);
     }
     return entries;
+}
+
+// Anything bigger than this is not plausible gallery metadata; refuse to
+// decompress it (zip headers can lie about m_uncomp_size).
+constexpr mz_uint64 kMaxMetaJsonBytes = 1u << 20;
+
+// Extract + parse the archive's top-level meta.json, if any (Phase 27).
+// Absent, oversized, or malformed metadata degrades to empty fields — it can
+// never fail the import.
+ArchiveMeta load_archive_meta(mz_zip_archive& zip, const std::vector<ZipEntry>& entries)
+{
+    const std::optional<size_t> idx = find_meta_entry(entries);
+    if (!idx.has_value()) return {};
+    mz_zip_archive_file_stat st;
+    if (!mz_zip_reader_file_stat(&zip, static_cast<mz_uint>(*idx), &st)) return {};
+    if (st.m_uncomp_size == 0 || st.m_uncomp_size > kMaxMetaJsonBytes) return {};
+    crypto::SecureBytes bytes(static_cast<size_t>(st.m_uncomp_size));
+    if (!mz_zip_reader_extract_to_mem(&zip, static_cast<mz_uint>(*idx),
+                                      bytes.data(), bytes.size(), 0))
+        return {};
+    return parse_meta_json({bytes.data(), bytes.size()});
+}
+
+// Seed `gallery` with the meta-derived tags (japanese title + each "type:name").
+// Best-effort: add_tag merges case-insensitively; a failed tag is not fatal.
+void apply_meta_tags(vault::Vault& v, std::string_view gallery, const ArchiveMeta& meta)
+{
+    for (const std::string& t : meta_gallery_tags(meta))
+        (void)v.add_tag(gallery, t);
+}
+
+// Mirror of zip_plan's join_path for locating the created top gallery.
+std::string joined_gallery(std::string_view base, std::string_view name)
+{
+    if (base.empty()) return std::string(name);
+    if (name.empty()) return std::string(base);
+    return std::string(base) + "/" + std::string(name);
 }
 
 // Extract one planned entry into mlock'd memory and store it in the vault.
@@ -148,7 +186,15 @@ ZipImportOutcome import_zip(vault::Vault&                v,
     mz_zip_archive zip;
     if (!open_archive(zip_path, "ZipImport", archive, zip, out)) return out;
 
-    ZipPlan plan = build_zip_plan(read_entry_list(zip), dest, base_gallery, new_gallery_name, policy);
+    // A top-level meta.json tags the new top gallery (Phase 27). Its title is
+    // NOT applied here: the UI prefills the name popup from peek_archive_meta,
+    // so `new_gallery_name` (the user's confirmed text) is authoritative.
+    // Append has no created gallery to tag, so its meta is only excluded.
+    const std::vector<ZipEntry> entries = read_entry_list(zip);
+    const ArchiveMeta meta =
+        dest == ZipDest::NewGallery ? load_archive_meta(zip, entries) : ArchiveMeta{};
+
+    ZipPlan plan = build_zip_plan(entries, dest, base_gallery, new_gallery_name, policy);
     if (plan.needs_resolution) {
         out.ok = true;
         out.needs_resolution = true;
@@ -159,6 +205,8 @@ ZipImportOutcome import_zip(vault::Vault&                v,
     out.skipped = plan.skipped_unsupported;
 
     if (!create_galleries(v, plan, zip, out)) return out;
+    if (dest == ZipDest::NewGallery && !plan.placements.empty())
+        apply_meta_tags(v, joined_gallery(base_gallery, new_gallery_name), meta);
     run_placements(v, zip, plan, out, progress);
     return out;
 }
@@ -176,12 +224,36 @@ ZipImportOutcome import_cbz(vault::Vault&                v,
     mz_zip_archive zip;
     if (!open_archive(cbz_path, "CbzImport", archive, zip, out)) return out;
 
-    const ZipPlan plan = build_cbz_plan(read_entry_list(zip), base_gallery, gallery_name);
+    // A top-level meta.json tags the single leaf gallery (Phase 27). Its title
+    // is NOT applied here: the UI prefills the name popup from
+    // peek_archive_meta, so `gallery_name` (the user's confirmed text) is
+    // authoritative.
+    const std::vector<ZipEntry> entries = read_entry_list(zip);
+    const ArchiveMeta meta = load_archive_meta(zip, entries);
+
+    const ZipPlan plan = build_cbz_plan(entries, base_gallery, gallery_name);
     out.skipped = plan.skipped_unsupported;
 
     if (!create_galleries(v, plan, zip, out)) return out;
+    if (!plan.placements.empty())
+        apply_meta_tags(v, joined_gallery(base_gallery, gallery_name), meta);
     run_placements(v, zip, plan, out, progress);
     return out;
+}
+
+ArchiveMeta peek_archive_meta(const std::filesystem::path& archive_path)
+{
+    // Same portable whole-file read the importers use (std::ifstream handles
+    // non-ASCII paths on every platform). The pick that triggers this peek is
+    // followed by a full import read anyway, so the cost is paid once more at
+    // popup time, not a new order of work.
+    ZipImportOutcome ignored;
+    std::vector<uint8_t> archive;
+    mz_zip_archive zip;
+    if (!open_archive(archive_path, "MetaPeek", archive, zip, ignored)) return {};
+    const ArchiveMeta meta = load_archive_meta(zip, read_entry_list(zip));
+    mz_zip_reader_end(&zip);
+    return meta;
 }
 
 }  // namespace ui

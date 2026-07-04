@@ -124,3 +124,101 @@ TEST(zip_import_writes_no_extra_files)
     }
     cleanup_dir(dir);
 }
+
+TEST(zip_import_meta_json_tags_top_gallery_passed_name_wins)
+{
+    auto img = fake_jpeg(5);
+    auto dir = fresh_dir("osv_zip_test_meta");
+    const std::string meta = R"({
+        "title": { "english": "Meta Title" },
+        "tags":  [ { "type": "artist", "name": "someone" } ]
+    })";
+    auto zip = make_archive({{"sub/a.jpg", img},
+                             {"meta.json", {meta.begin(), meta.end()}}},
+                            dir / "in.zip");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        // The caller's name is authoritative: the UI prefills it from the
+        // meta.json title via peek_archive_meta, so the user's (possibly
+        // edited) popup text must never be silently overridden here.
+        auto out = ui::import_zip(v, zip, ZipDest::NewGallery, "", "Album", ZipConflictPolicy::AskUser);
+        CHECK(out.ok);
+        CHECK_EQ(out.imported, 1);
+        CHECK_EQ(out.skipped, 0);            // meta.json consumed, not "skipped"
+        CHECK(v.list("Meta Title").empty()); // meta title does NOT rename
+        CHECK_EQ(v.list("Album/sub").size(), static_cast<size_t>(1));
+
+        const vault::IndexNode* g = nullptr;
+        for (const auto* n : v.list(""))
+            if (n->name == "Album") g = n;
+        REQUIRE(g != nullptr);
+        REQUIRE(g->tags.size() == static_cast<size_t>(1));
+        CHECK_EQ(g->tags[0], std::string("artist:someone"));
+    }
+    cleanup_dir(dir);
+}
+
+TEST(peek_archive_meta_reads_title_and_tags)
+{
+    auto dir = fresh_dir("osv_zip_test_peek");
+    const std::string meta = R"({
+        "title": { "english": "Peeked Title", "japanese": "JP" },
+        "tags":  [ { "type": "artist", "name": "someone" } ]
+    })";
+    auto zip = make_archive({{"a.jpg", fake_jpeg(7)},
+                             {"meta.json", {meta.begin(), meta.end()}}},
+                            dir / "in.zip");
+    const ui::ArchiveMeta m = ui::peek_archive_meta(zip);
+    CHECK_EQ(m.title_english, std::string("Peeked Title"));
+    CHECK_EQ(m.title_japanese, std::string("JP"));
+    REQUIRE(m.tags.size() == static_cast<size_t>(1));
+    CHECK_EQ(m.tags[0], std::string("artist:someone"));
+    cleanup_dir(dir);
+}
+
+TEST(peek_archive_meta_empty_without_meta_or_archive)
+{
+    auto dir = fresh_dir("osv_zip_test_peek_none");
+    auto zip = make_archive({{"a.jpg", fake_jpeg(8)}}, dir / "in.zip");
+    const ui::ArchiveMeta none = ui::peek_archive_meta(zip);
+    CHECK(none.title_english.empty());
+    CHECK(none.title_japanese.empty());
+    CHECK(none.tags.empty());
+
+    const ui::ArchiveMeta missing = ui::peek_archive_meta(dir / "absent.zip");
+    CHECK(missing.title_english.empty());
+    CHECK(missing.tags.empty());
+    cleanup_dir(dir);
+}
+
+TEST(zip_import_append_ignores_meta_json)
+{
+    // Append has no "top gallery" to retitle/tag: the meta.json is simply not
+    // imported as a file and the existing target gallery is left untouched.
+    auto img = fake_jpeg(6);
+    auto dir = fresh_dir("osv_zip_test_meta_app");
+    const std::string meta = R"({ "title": { "english": "Ignored" },
+                                  "tags": [ { "type": "tag", "name": "x" } ] })";
+    auto zip = make_archive({{"a.jpg", img},
+                             {"meta.json", {meta.begin(), meta.end()}}},
+                            dir / "in.zip");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        (void)v.create_gallery("Leaf");
+        auto out = ui::import_zip(v, zip, ZipDest::Append, "Leaf", "", ZipConflictPolicy::AskUser);
+        CHECK(out.ok);
+        CHECK_EQ(out.imported, 1);
+        CHECK_EQ(out.skipped, 0);
+        CHECK_EQ(v.list("Leaf").size(), static_cast<size_t>(1));
+        CHECK(v.list("Ignored").empty());
+
+        const vault::IndexNode* g = nullptr;
+        for (const auto* n : v.list(""))
+            if (n->name == "Leaf") g = n;
+        REQUIRE(g != nullptr);
+        CHECK(g->tags.empty());
+    }
+    cleanup_dir(dir);
+}

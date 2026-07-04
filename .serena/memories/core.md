@@ -233,7 +233,10 @@ src/
                                                  list scrolls (Up/Down) via pure tag_scroll.h
                                                  (tag_scroll_first) + auto-scrolls to a just-added
                                                  tag; previously clipped tags past the ~5 that fit
-                                                 the fixed modal (Phase 21 fix).
+                                                 the fixed modal (Phase 21 fix). Phase 27 follow-up:
+                                                 read-only "Inherited from gallery" section
+                                                 (ui::inherited_tags, tag_inherit.*) below the
+                                                 own-tags list; Del/selection never touch it.
                advanced_search_model.*         — pure, SDL/vault-free advanced query (Phase 18,
                                                  unit-tested): AdvancedQuery{weighted include (OR
                                                  gate + scorers), exclude (hard filter), AND/OR
@@ -322,6 +325,22 @@ src/
                                                  digit runs by value so "2"<"10", other chars
                                                  case-insensitive, fewer leading zeros first) +
                                                  natural_less. Orders CBZ pages by reading order.
+               tag_inherit.*                   — pure, SDL-free ancestor-gallery tag union (Phase 27
+                                                 follow-up): inherited_tags(vault, node_path) —
+                                                 root→parent order, ci de-dupe, minus own tags.
+                                                 Feeds the tag editor's read-only "Inherited from
+                                                 gallery" section. Unit-tested.
+               meta_json.*                     — pure, SDL/vault-free archive `meta.json` parser
+                                                 (Phase 27, nlohmann/json vendored header-only):
+                                                 parse_meta_json (tolerant, exception-free:
+                                                 malformed/wrong types/unknown keys -> empty
+                                                 fields) -> ArchiveMeta{title_english,
+                                                 title_japanese, tags["type:name"; bare name for
+                                                 the generic type "tag"/"tags"]};
+                                                 meta_gallery_name (english -> japanese ->
+                                                 fallback; '/'->'_') + meta_gallery_tags
+                                                 (japanese title first, kept searchable).
+                                                 Unit-tested.
                zip_plan.*                      — pure ZIP placement planner (Phase 17):
                                                  archive entries -> galleries to create +
                                                  file placements + mixed-folder conflicts +
@@ -333,7 +352,10 @@ src/
                                                  named after the archive) of every image entry,
                                                  videos/other skipped+counted, subfolders flattened
                                                  (basename collisions disambiguated by source dir),
-                                                 natural reading order.
+                                                 natural reading order. Phase 27: find_meta_entry —
+                                                 a top-level meta.json (case-insensitive, files
+                                                 only) is excluded by every planner path (never
+                                                 placed, never counted skipped).
                zip_import.*                    — ZIP/CBZ import executor (Phase 17; CBZ Phase 24):
                                                  miniz reader -> mlock'd SecureBytes (one entry at
                                                  a time, no temp file) -> Vault::add_image/add_video
@@ -347,6 +369,16 @@ src/
                                                  import_zip/import_cbz take an optional
                                                  ImportProgress* (atomic total/done/cancel) so a
                                                  caller can drive a progress bar + cooperative cancel.
+                                                 Phase 27: a top-level meta.json seeds the created
+                                                 gallery's tags (japanese title + each "type:name")
+                                                 via Vault::add_tag (zip NewGallery top gallery /
+                                                 cbz leaf); Append just excludes the file. The title
+                                                 is NOT applied by the importer: peek_archive_meta
+                                                 reads the meta at file-pick time and GalleryGrid
+                                                 prefills the name popup with meta_gallery_name(meta,
+                                                 stem) — the confirmed popup text is authoritative.
+                                                 Extracted into mlock'd memory, 1 MiB cap; malformed
+                                                 meta.json never blocks the import.
                zip_import_job.*                — ZipImportJob: runs import_cbz/import_zip
                                                  (start_cbz/start_zip, shared launch() helper) on a
                                                  background std::thread so a big archive (~10 s of
