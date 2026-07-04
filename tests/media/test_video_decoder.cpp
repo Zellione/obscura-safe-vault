@@ -442,4 +442,44 @@ TEST(video_decoder_has_audio_false_for_video_only)
     CHECK(vframes == 10);
 }
 
+TEST(video_decoder_decodes_mov_pro_codecs)
+{
+    // Phase 28: ProRes / DNxHR / MJPEG .mov streams decode end-to-end through
+    // the encrypted-chunk path. Their native pixel formats (yuv422p10le,
+    // yuv422p, yuvj422p) are not I420/NV12, so every frame must come out of
+    // the decoder's swscale conversion as I420.
+    struct Case { const char* file; vault::VideoCodec codec; int width; };
+    const Case cases[] = {
+        {OSV_MEDIA_FIXTURE_DIR "/tiny_prores.mov", vault::VideoCodec::ProRes, 160},
+        {OSV_MEDIA_FIXTURE_DIR "/tiny_dnxhr.mov",  vault::VideoCodec::DNxHD,  256},
+        {OSV_MEDIA_FIXTURE_DIR "/tiny_mjpeg.mov",  vault::VideoCodec::MJPEG,  160},
+    };
+    for (const auto& c : cases) {
+        auto v_bytes = read_file(c.file);
+        REQUIRE(!v_bytes.empty());
+        TempVault tv("decoder_mov_pro");
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+        REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+        REQUIRE(v.add_video("c", v_bytes, "clip.mov", 4096) == vault::VaultResult::Ok);
+        auto kids = v.list("c");
+        REQUIRE(kids.size() == 1);
+
+        media::ChunkAvio avio(media::VideoSource::open(v, *kids[0]));
+        REQUIRE(avio.valid());
+        media::VideoDecoder dec;
+        REQUIRE(dec.open(avio.ctx()));
+        CHECK(dec.codec()  == c.codec);
+        CHECK(dec.width()  == c.width);
+        CHECK(dec.height() == 120);
+
+        int n = 0;
+        while (auto f = dec.next_frame()) {
+            CHECK(f->pix_fmt == media::FramePixelFormat::I420);
+            ++n;
+        }
+        CHECK(n == 10);
+    }
+}
+
 #endif // OSV_VENDORED_AV

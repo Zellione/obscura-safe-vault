@@ -92,9 +92,12 @@ bool VideoDecoder::open(AVIOContext* pb)
     if (!stream || !stream->codecpar) return fail_open("Invalid stream or codecpar");
 
     switch (stream->codecpar->codec_id) {
-        case AV_CODEC_ID_H264: codec_ = vault::VideoCodec::H264; break;
-        case AV_CODEC_ID_HEVC: codec_ = vault::VideoCodec::HEVC; break;
-        default:               return fail_open("Unsupported codec");
+        case AV_CODEC_ID_H264:   codec_ = vault::VideoCodec::H264;   break;
+        case AV_CODEC_ID_HEVC:   codec_ = vault::VideoCodec::HEVC;   break;
+        case AV_CODEC_ID_PRORES: codec_ = vault::VideoCodec::ProRes; break;  // Phase 28
+        case AV_CODEC_ID_DNXHD:  codec_ = vault::VideoCodec::DNxHD;  break;  // Phase 28
+        case AV_CODEC_ID_MJPEG:  codec_ = vault::VideoCodec::MJPEG;  break;  // Phase 28
+        default:                 return fail_open("Unsupported codec");
     }
 
     codec_ctx_ = avcodec_alloc_context3(decoder);

@@ -51,6 +51,9 @@ TEST(video_codec_and_type_labels)
     using enum vault::VideoCodec;
     CHECK_EQ(ui::video_codec_name(H264), std::string_view("H.264"));
     CHECK_EQ(ui::video_codec_name(HEVC), std::string_view("H.265"));
+    CHECK_EQ(ui::video_codec_name(ProRes), std::string_view("ProRes"));   // Phase 28
+    CHECK_EQ(ui::video_codec_name(DNxHD), std::string_view("DNxHD"));
+    CHECK_EQ(ui::video_codec_name(MJPEG), std::string_view("MJPEG"));
     CHECK_EQ(ui::video_codec_name(Unknown), std::string_view("Video"));
     CHECK_EQ(ui::video_type_label(H264), std::string("Video (H.264)"));
     CHECK_EQ(ui::video_type_label(Unknown), std::string("Video"));
