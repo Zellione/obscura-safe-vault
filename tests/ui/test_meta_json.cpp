@@ -30,7 +30,7 @@ TEST(meta_json_parses_full_document)
     CHECK_EQ(m.title_english, std::string("English Title"));
     CHECK_EQ(m.title_japanese, std::string("\xE6\x97\xA5\xE6\x9C\xAC"));  // 日本
     REQUIRE(m.tags.size() == static_cast<size_t>(2));
-    CHECK_EQ(m.tags[0], std::string("tag:awesome tag"));
+    CHECK_EQ(m.tags[0], std::string("awesome tag"));   // generic "tag" type: no prefix
     CHECK_EQ(m.tags[1], std::string("artist:someone"));
 }
 
@@ -69,7 +69,7 @@ TEST(meta_json_ignores_unknown_keys_and_wrong_types)
     CHECK_EQ(m.title_english, std::string("T"));
     CHECK(m.title_japanese.empty());                 // wrong type ignored
     REQUIRE(m.tags.size() == static_cast<size_t>(2));  // entries without a name dropped
-    CHECK_EQ(m.tags[0], std::string("tag:ok"));
+    CHECK_EQ(m.tags[0], std::string("ok"));
     CHECK_EQ(m.tags[1], std::string("artist:a"));
 }
 
@@ -97,7 +97,25 @@ TEST(meta_json_trims_whitespace)
     })");
     CHECK_EQ(m.title_english, std::string("Padded"));
     REQUIRE(m.tags.size() == static_cast<size_t>(1));
-    CHECK_EQ(m.tags[0], std::string("tag:spaced name"));
+    CHECK_EQ(m.tags[0], std::string("spaced name"));   // " tag " trims to the generic type
+}
+
+TEST(meta_json_generic_tag_type_has_no_prefix)
+{
+    // nhentai-style metadata marks ordinary tags with the generic type "tag";
+    // prefixing those ("tag:ponytail") is pure noise, so the bare name is used.
+    // Real types (artist, character, parody, ...) keep their prefix.
+    const auto m = parse(R"({
+        "tags": [ { "type": "tag",    "name": "a" },
+                  { "type": "tags",   "name": "b" },
+                  { "type": "TAG",    "name": "c" },
+                  { "type": "artist", "name": "d" } ]
+    })");
+    REQUIRE(m.tags.size() == static_cast<size_t>(4));
+    CHECK_EQ(m.tags[0], std::string("a"));
+    CHECK_EQ(m.tags[1], std::string("b"));
+    CHECK_EQ(m.tags[2], std::string("c"));
+    CHECK_EQ(m.tags[3], std::string("artist:d"));
 }
 
 TEST(meta_gallery_name_fallback_chain)

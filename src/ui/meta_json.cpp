@@ -27,8 +27,22 @@ std::string str_or_empty(const json& obj, const char* key)
     return trimmed(it->get_ref<const std::string&>());
 }
 
-// One tags[] element → "type:name" ("name" alone when type is empty). Entries
-// without a usable name are dropped. A plain string entry is a bare tag.
+// The generic types nhentai-style metadata uses for ordinary tags; prefixing
+// those ("tag:ponytail") is pure noise, so the bare name is used instead.
+// Real types (artist, character, parody, ...) keep their "type:" prefix.
+bool is_generic_tag_type(std::string_view type)
+{
+    auto lower = [](unsigned char c) {
+        return c >= 'A' && c <= 'Z' ? static_cast<char>(c + 32) : static_cast<char>(c);
+    };
+    std::string t(type);
+    std::ranges::transform(t, t.begin(), [&](char c) { return lower(static_cast<unsigned char>(c)); });
+    return t == "tag" || t == "tags";
+}
+
+// One tags[] element → "type:name" ("name" alone when type is empty or the
+// generic "tag"/"tags"). Entries without a usable name are dropped. A plain
+// string entry is a bare tag.
 void append_tag(const json& e, std::vector<std::string>& out)
 {
     std::string name;
@@ -40,7 +54,8 @@ void append_tag(const json& e, std::vector<std::string>& out)
         type = str_or_empty(e, "type");
     }
     if (name.empty()) return;
-    out.push_back(type.empty() ? name : type + ":" + name);
+    const bool bare = type.empty() || is_generic_tag_type(type);
+    out.push_back(bare ? name : type + ":" + name);
 }
 
 } // namespace

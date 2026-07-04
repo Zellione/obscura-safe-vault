@@ -1141,6 +1141,16 @@ with `meta_gallery_name(meta, filename-stem)` — the text the user confirms is
 authoritative for the import (zip NewGallery and cbz alike). Tag seeding is
 unchanged.
 
+**Follow-up 2 (owner feedback):**
+- The generic tag type `tag`/`tags` (case-insensitive) no longer gets a prefix —
+  `{"type":"tag","name":"ponytail"}` imports as `ponytail`, not `tag:ponytail`.
+  Real types (`artist:`, `character:`, `parody:`, …) keep their prefix.
+- The tag editor now shows the ancestor-gallery tag cascade: a read-only
+  "Inherited from gallery" section (pure `ui::inherited_tags`, new
+  `src/ui/tag_inherit.{h,cpp}`) below the own-tags list, so meta.json tags on a
+  gallery are visible when a page's editor is opened. Del/selection only ever
+  touch the node's own tags.
+
 ---
 
 ## Phase 28 — Broaden `.mov` / video codec support 🔜

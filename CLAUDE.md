@@ -334,7 +334,17 @@ src/
                                             current-tags list scrolls (Up/Down) via the pure
                                             tag_scroll.h (tag_scroll_first) and auto-scrolls to a
                                             newly-added tag — without it, tags past the ~5 that
-                                            fit the modal were clipped (Phase 21 fix)
+                                            fit the modal were clipped (Phase 21 fix). Phase 27
+                                            follow-up: a read-only "Inherited from gallery"
+                                            section (ui::inherited_tags) below the own-tags list
+                                            makes the ancestor-gallery tag cascade visible on
+                                            images/sub-galleries; Del/selection never touch it
+             tag_inherit.*,               ← pure, SDL-free ancestor-gallery tag union (Phase 27
+                                            follow-up): inherited_tags(vault, node_path) walks the
+                                            public Vault::list tree — root→parent order, ci
+                                            de-dupe, minus the node's own tags (own wins). The
+                                            same tags the Phase 12 search cascade matches by.
+                                            Unit-tested.
              favorites_images.*,          ← flat grid of favorited images (Phase 13)
              favorites_galleries.*,       ← flat grid of favorited galleries (Phase 13).
                                             FavoritesScreen gained a virtual go_back() (default →
@@ -396,9 +406,10 @@ src/
              meta_json.*,                 ← pure, SDL/vault-free archive `meta.json` parser
                                             (Phase 27, nlohmann/json): tolerant parse →
                                             ArchiveMeta{title_english, title_japanese,
-                                            tags["type:name"]} — malformed input / wrong types /
-                                            unknown keys all degrade to empty fields, never an
-                                            error. meta_gallery_name (english → japanese →
+                                            tags["type:name"; bare name for the generic type
+                                            "tag"/"tags" — "tag:ponytail" is noise]} — malformed
+                                            input / wrong types / unknown keys all degrade to
+                                            empty fields, never an error. meta_gallery_name (english → japanese →
                                             filename fallback; '/'→'_' so a title can't split the
                                             gallery path) + meta_gallery_tags (japanese title
                                             first, kept searchable as a tag).

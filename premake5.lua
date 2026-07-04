@@ -376,6 +376,7 @@ project "osv_tests"
         "src/ui/file_op_job.cpp",
         "src/ui/progress_modal.cpp",
         "src/ui/tag_list_parse.cpp",
+        "src/ui/tag_inherit.cpp",
         "src/ui/tag_overview_model.cpp",
         "src/ui/slideshow_model.cpp",
         "src/ui/playback_model.cpp",

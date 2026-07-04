@@ -183,7 +183,7 @@ TEST(cbz_import_meta_json_tags_gallery_passed_name_wins)
         REQUIRE(g != nullptr);
         REQUIRE(g->tags.size() == static_cast<size_t>(3));
         CHECK_EQ(g->tags[0], std::string("JP Title"));   // japanese title stays searchable
-        CHECK_EQ(g->tags[1], std::string("tag:awesome tag"));
+        CHECK_EQ(g->tags[1], std::string("awesome tag"));   // generic "tag" type: no prefix
         CHECK_EQ(g->tags[2], std::string("artist:someone"));
     }
     cleanup_dir(dir);
