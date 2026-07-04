@@ -273,6 +273,7 @@ project "osv"
         "vendor/miniz",
         "vendor/miniz-shim",
         "vendor/stb",
+        "vendor/json/single_include",
     }
 
     -- Keep miniz's zlib-compatible names out of our TUs too (the lib is built
@@ -368,6 +369,7 @@ project "osv_tests"
         "src/ui/export.cpp",
         "src/ui/delete_summary.cpp",
         "src/ui/natural_sort.cpp",
+        "src/ui/meta_json.cpp",
         "src/ui/zip_plan.cpp",
         "src/ui/zip_import.cpp",
         "src/ui/zip_import_job.cpp",
@@ -387,6 +389,7 @@ project "osv_tests"
         "vendor/miniz",
         "vendor/miniz-shim",
         "vendor/stb",
+        "vendor/json/single_include",
     }
 
     defines { "MINIZ_NO_ZLIB_COMPATIBLE_NAMES" }

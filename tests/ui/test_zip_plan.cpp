@@ -77,3 +77,28 @@ TEST(zip_plan_append_flattens)
     CHECK_EQ(p.placements.size(), static_cast<size_t>(3));
     for (const auto& pl : p.placements) CHECK_EQ(pl.gallery_path, std::string("Holiday/Day1"));
 }
+
+TEST(zip_plan_find_meta_entry)
+{
+    // Only a top-level file named meta.json (case-insensitive) counts.
+    auto e = entries({"a.jpg", "META.JSON", "sub/meta.json", "meta.json/"});
+    auto idx = ui::find_meta_entry(e);
+    REQUIRE(idx.has_value());
+    CHECK_EQ(*idx, static_cast<size_t>(1));
+    CHECK_FALSE(ui::find_meta_entry(entries({"sub/meta.json", "x.jpg"})).has_value());
+    CHECK_FALSE(ui::find_meta_entry(entries({})).has_value());
+}
+
+TEST(zip_plan_excludes_meta_json_silently)
+{
+    // meta.json is consumed by the importer (Phase 27) — never placed and never
+    // counted as a skipped file, in both destinations.
+    auto e = entries({"a.jpg", "meta.json", "notes.txt"});
+    auto p = ui::build_zip_plan(e, ZipDest::NewGallery, "", "G", ZipConflictPolicy::AskUser);
+    CHECK_EQ(p.placements.size(), static_cast<size_t>(1));
+    CHECK_EQ(p.skipped_unsupported, 1);                          // notes.txt only
+
+    auto ap = ui::build_zip_plan(e, ZipDest::Append, "Leaf", "", ZipConflictPolicy::AskUser);
+    CHECK_EQ(ap.placements.size(), static_cast<size_t>(1));
+    CHECK_EQ(ap.skipped_unsupported, 1);
+}

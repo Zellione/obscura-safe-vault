@@ -65,3 +65,13 @@ TEST(cbz_plan_empty_archive_makes_no_gallery)
     CHECK(p.galleries.empty());                                  // nothing to import → no gallery
     CHECK_EQ(p.skipped_unsupported, 2);
 }
+
+TEST(cbz_plan_excludes_meta_json_silently)
+{
+    // meta.json is consumed by the importer (Phase 27) — neither a page nor
+    // counted as a skipped file.
+    auto e = entries({"1.jpg", "meta.json", "notes.txt"});
+    auto p = ui::build_cbz_plan(e, "", "C");
+    CHECK_EQ(p.placements.size(), static_cast<size_t>(1));
+    CHECK_EQ(p.skipped_unsupported, 1);                          // notes.txt only
+}

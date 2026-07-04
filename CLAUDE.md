@@ -74,6 +74,7 @@ navigable with arrow keys.
 | Extra image formats | **libwebp 1.4.0** (WebP), **libheif 1.18.2** + **libde265 1.0.15** (HEIC) + **libaom 3.14.1** (AVIF, decoder-only) — all Phase 9 | Decode-only. Vendored git submodules, cmake-built static into `vendor/codecs-prefix/` by `scripts/build_codecs.{sh,bat}`. One `decode_heif_from_memory` covers HEIC+AVIF (libheif dispatches by brand). libaom needs **nasm**. |
 | Video decode | **FFmpeg/libav 7.1.1** (decode-only static) — Phase 15; audio — Phase 16 | Stream video frames directly from encrypted chunks via a custom `AVIOContext` over `ChunkStore` (no temp file). H.264/H.265 video; mov/mp4/m4v + matroska/webm demuxers; libswscale for non-4:2:0; audio decoders aac/opus/mp3/vorbis/flac/ac3. Decoded audio (planar→interleaved F32) flows into an `SDL_AudioStream` (SDL handles rate/format/channel conversion — we do NOT use swresample for our resampling). A/V sync via pure `av_sync::decide()` (audio-clock tracking). Encoders/muxers/protocols/network disabled. Vendored git submodule, configure-built static into `vendor/codecs-prefix/` by `scripts/build_codecs.{sh,bat}`; linked by `link_av()` (which also links swresample, a transitive dep of audio decoders) under `OSV_VENDORED_AV`. Needs **nasm** (like libaom). |
 | ZIP / CBZ import | **miniz** (public-domain/MIT) — Phase 17; CBZ Phase 24 | Single-file, header-only decompression + ZIP reader. Vendored git submodule (`vendor/miniz`, pinned to master commit `e78dfd2` — no stable release tags), compiled by premake like monocypher/stb (built with `MINIZ_NO_ZLIB_COMPATIBLE_NAMES` to avoid clashing with the libz that avformat links). Decompressed entries read into mlock'd `SecureBytes`, never to disk. One header-only shim `vendor/miniz-shim/miniz_export.h` supplies the CMake-generated header so the submodule stays pristine. **CBZ (Phase 24)** reuses this exact pipeline: a `.cbz` is a plain zip imported as one page gallery (`build_cbz_plan`/`import_cbz`) — no CBR/CB7/CBT (RAR/7z/tar). |
+| JSON parsing | **nlohmann/json v3.12.0** — Phase 27 | Single-header MIT lib, vendored git submodule (`vendor/json`, include path `single_include/`), header-only — no build step. Used exception-free: `json::parse(..., allow_exceptions=false)` returns a discarded value on malformed input. Sole use: an archive's optional top-level `meta.json` (gallery title + tags) on ZIP/CBZ import. |
 | Thumbnails | **Pre-generated, stored encrypted in vault** | Gallery scrolling decrypts only the small thumbnail blobs — no full-image decode needed while browsing. |
 | Gallery model | **Free-nesting galleries; images only in leaf galleries** | A folder shows either sub-folders *or* images, never a mix. Cleaner grid view and simpler tree logic. |
 | Dependency management | **Vendored git submodules** under `vendor/` | Hermetic, reproducible, offline. SDL3 is built from source by `scripts/setup.sh` (cmake once); monocypher/stb are compiled directly by premake. See [docs/VENDORED_DEPS.md](docs/VENDORED_DEPS.md) for pinned versions, CVE review cadence, and bump procedures. |
@@ -392,6 +393,15 @@ src/
                                             "10"), other chars case-insensitively; natural_compare
                                             (3-way) + natural_less. Orders CBZ pages by reading
                                             order. Unit-tested.
+             meta_json.*,                 ← pure, SDL/vault-free archive `meta.json` parser
+                                            (Phase 27, nlohmann/json): tolerant parse →
+                                            ArchiveMeta{title_english, title_japanese,
+                                            tags["type:name"]} — malformed input / wrong types /
+                                            unknown keys all degrade to empty fields, never an
+                                            error. meta_gallery_name (english → japanese →
+                                            filename fallback; '/'→'_' so a title can't split the
+                                            gallery path) + meta_gallery_tags (japanese title
+                                            first, kept searchable as a tag).
              zip_plan.*,                  ← pure, SDL-free ZIP archive planner (Phase 17):
                                             entries → gallery tree + file placements +
                                             mixed-folder conflict resolution (Flatten/Skip).
@@ -400,6 +410,10 @@ src/
                                             holding every image entry, videos/other skipped+counted,
                                             internal subfolders flattened (basename collisions
                                             disambiguated by source dir), natural reading order.
+                                            Phase 27 adds find_meta_entry: a top-level `meta.json`
+                                            (case-insensitive, files only) is excluded by every
+                                            planner path — never placed, never counted as skipped
+                                            (the importer consumes it for the title/tags).
              zip_import.*,                ← ZIP/CBZ executor: miniz reader → mlock'd
                                             SecureBytes → Vault::add_image/add_video; triggered
                                             by `Z` key in gallery grid (Phase 17). import_cbz
@@ -409,6 +423,13 @@ src/
                                             import_zip/import_cbz take an optional ImportProgress*
                                             (atomic total/done/cancel) so a caller can drive a
                                             progress bar + cooperative cancel (Phase 24 fix).
+                                            Phase 27: a top-level `meta.json` retitles the created
+                                            gallery (zip NewGallery top gallery / cbz leaf; the
+                                            passed name is only the fallback) and seeds its tags
+                                            (japanese title + each "type:name") via Vault::add_tag;
+                                            Append just excludes the file. Extracted into mlock'd
+                                            memory, 1 MiB sanity cap; malformed → filename-named,
+                                            untagged import (never an error).
              zip_import_job.*,            ← ZipImportJob: runs import_cbz/import_zip (start_cbz/
                                             start_zip, shared launch() helper) on a background
                                             thread so a big archive (~10 s) never freezes the UI on
@@ -485,6 +506,7 @@ vendor/
   stb/            ← git submodule, header-only
   miniz/          ← git submodule, compiled by premake (single .c + headers, Phase 17)
   miniz-shim/     ← shim headers for miniz (vendor/miniz-shim/miniz_export.h)
+  json/           ← git submodule, header-only (nlohmann/json single_include, Phase 27)
   libwebp/        ← git submodule, cmake → vendor/codecs-prefix (Phase 9)
   libde265/       ← git submodule, cmake → vendor/codecs-prefix (HEIC)
   libaom/         ← git submodule, cmake → vendor/codecs-prefix (AVIF, decoder-only)

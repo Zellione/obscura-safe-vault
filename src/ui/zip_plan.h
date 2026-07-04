@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -27,6 +29,11 @@ struct ZipPlan {
     int                       skipped_unsupported = 0;
     bool                      needs_resolution = false;
 };
+
+// Index of the archive's top-level `meta.json` (case-insensitive, files only),
+// if any (Phase 27). The importer consumes it for the gallery title/tags; the
+// planners exclude it silently (neither placed nor counted as skipped).
+[[nodiscard]] std::optional<size_t> find_meta_entry(const std::vector<ZipEntry>& entries);
 
 // True if `name`'s extension is a supported image or video container.
 [[nodiscard]] bool is_supported_media_name(std::string_view name);

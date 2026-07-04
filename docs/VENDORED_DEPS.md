@@ -15,6 +15,7 @@ This document tracks the pinned versions of all vendored third-party libraries a
 | **libaom** | 3.14.1 | AV1 video codec (decode-only) | **Yes** |
 | **libheif** | 1.18.2 | HEIF container format parser (HEIC/AVIF) | **Yes** |
 | **FFmpeg** | 7.1.1 (n7.1.1) | Video and audio frame decoding (decode-only, static linked) | **Yes** |
+| **nlohmann/json** | v3.12.0 | Header-only JSON parsing (archive `meta.json`, Phase 27) | **Yes** |
 
 ### Decode-Only Rationale
 
@@ -31,7 +32,7 @@ This minimizes attack surface: **untrusted input enters only through image/video
 
 The libraries marked "**Yes**" in the "Parses Untrusted Input" column are reviewed quarterly for known CVEs:
 
-**Affected libraries:** stb, miniz, libwebp, libde265, libaom, libheif, FFmpeg
+**Affected libraries:** stb, miniz, libwebp, libde265, libaom, libheif, FFmpeg, nlohmann/json
 
 **Review schedule:** Every 3 months (or upon public disclosure of a critical issue)
 

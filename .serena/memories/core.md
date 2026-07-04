@@ -322,6 +322,16 @@ src/
                                                  digit runs by value so "2"<"10", other chars
                                                  case-insensitive, fewer leading zeros first) +
                                                  natural_less. Orders CBZ pages by reading order.
+               meta_json.*                     — pure, SDL/vault-free archive `meta.json` parser
+                                                 (Phase 27, nlohmann/json vendored header-only):
+                                                 parse_meta_json (tolerant, exception-free:
+                                                 malformed/wrong types/unknown keys -> empty
+                                                 fields) -> ArchiveMeta{title_english,
+                                                 title_japanese, tags["type:name"]};
+                                                 meta_gallery_name (english -> japanese ->
+                                                 fallback; '/'->'_') + meta_gallery_tags
+                                                 (japanese title first, kept searchable).
+                                                 Unit-tested.
                zip_plan.*                      — pure ZIP placement planner (Phase 17):
                                                  archive entries -> galleries to create +
                                                  file placements + mixed-folder conflicts +
@@ -333,7 +343,10 @@ src/
                                                  named after the archive) of every image entry,
                                                  videos/other skipped+counted, subfolders flattened
                                                  (basename collisions disambiguated by source dir),
-                                                 natural reading order.
+                                                 natural reading order. Phase 27: find_meta_entry —
+                                                 a top-level meta.json (case-insensitive, files
+                                                 only) is excluded by every planner path (never
+                                                 placed, never counted skipped).
                zip_import.*                    — ZIP/CBZ import executor (Phase 17; CBZ Phase 24):
                                                  miniz reader -> mlock'd SecureBytes (one entry at
                                                  a time, no temp file) -> Vault::add_image/add_video
@@ -347,6 +360,13 @@ src/
                                                  import_zip/import_cbz take an optional
                                                  ImportProgress* (atomic total/done/cancel) so a
                                                  caller can drive a progress bar + cooperative cancel.
+                                                 Phase 27: a top-level meta.json retitles the created
+                                                 gallery (zip NewGallery top gallery / cbz leaf; the
+                                                 passed name is only the fallback) and seeds its tags
+                                                 (japanese title + each "type:name") via
+                                                 Vault::add_tag; Append just excludes the file.
+                                                 Extracted into mlock'd memory, 1 MiB cap; malformed
+                                                 meta.json never blocks the import.
                zip_import_job.*                — ZipImportJob: runs import_cbz/import_zip
                                                  (start_cbz/start_zip, shared launch() helper) on a
                                                  background std::thread so a big archive (~10 s of
