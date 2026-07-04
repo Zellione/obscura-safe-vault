@@ -70,8 +70,8 @@ PackedLines pack_tag_lines(const std::vector<std::string>& tags,
     std::string cur;
     int cur_count = 0;
     for (const std::string& tag : tags) {
-        const std::string cand = cur.empty() ? tag : cur + ", " + tag;
-        if (cur.empty() || static_cast<float>(font.measure(cand)) <= max_w) {
+        if (const std::string cand = cur.empty() ? tag : cur + ", " + tag;
+            cur.empty() || static_cast<float>(font.measure(cand)) <= max_w) {
             cur = cand;
             ++cur_count;
             continue;
