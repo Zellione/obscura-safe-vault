@@ -9,12 +9,15 @@
 #include "gfx/text.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "ui/advanced_search_model.h"
 #include "ui/nav_model.h"
 #include "ui/tag_inherit.h"
 #include "ui/tag_scroll.h"
+#include "ui/tag_suggest.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
 #include "vault/vault.h"
+#include "vault/vault_search.h"
 
 namespace ui {
 
@@ -81,8 +84,11 @@ void TagEditor::open(std::string node_path)
     node_path_ = std::move(node_path);
     selected_ = 0;
     new_tag_buf_.clear();
+    suggestions_.clear();
+    sugg_sel_ = -1;
     error_.clear();
     refresh_tags();
+    refresh_vocabulary();
     SDL_StartTextInput(win_.sdl_window());
 }
 
@@ -93,8 +99,25 @@ void TagEditor::close()
     node_path_.clear();
     tags_.clear();
     inherited_.clear();
+    vocabulary_.clear();
+    suggestions_.clear();
+    sugg_sel_ = -1;
     new_tag_buf_.clear();
     error_.clear();
+}
+
+void TagEditor::refresh_vocabulary()
+{
+    // Vault-wide distinct tags (galleries + images) feeding the autosuggest
+    // dropdown (Phase 29). Re-fetched after every add/remove so a just-created
+    // tag is immediately suggestible on the next node.
+    vocabulary_ = vault::VaultSearch(vault_).all_tags();
+}
+
+void TagEditor::refresh_suggestions()
+{
+    suggestions_ = editor_tag_suggestions(new_tag_buf_, vocabulary_, tags_);
+    sugg_sel_    = -1;   // typing always returns focus to the buffer
 }
 
 void TagEditor::refresh_tags()
@@ -145,6 +168,7 @@ bool TagEditor::handle_event(const SDL_Event& e)
 
     if (e.type == SDL_EVENT_TEXT_INPUT) {
         new_tag_buf_ += e.text.text;
+        refresh_suggestions();
         return true;
     }
 
@@ -152,28 +176,42 @@ bool TagEditor::handle_event(const SDL_Event& e)
 
     switch (e.key.key) {
         case SDLK_ESCAPE:
+            // First Esc deselects a highlighted suggestion (back to the typed
+            // buffer); only an Esc with nothing highlighted closes the modal.
+            if (sugg_sel_ >= 0) {
+                sugg_sel_ = -1;
+                return true;
+            }
             close();
             return true;
 
         case SDLK_BACKSPACE:
             if (!new_tag_buf_.empty()) {
                 new_tag_buf_.pop_back();
+                refresh_suggestions();
                 error_.clear();
             }
             return true;
 
         case SDLK_RETURN:
         case SDLK_KP_ENTER: {
-            // Trim only SURROUNDING whitespace so multi-word tags ("new york")
-            // survive; the vault owns the canonical normalisation/dedup.
-            if (const std::string trimmed = trim_surrounding(new_tag_buf_); !trimmed.empty()) {
+            // The typed text wins unless a suggestion is explicitly highlighted
+            // (Phase 29). Trim only SURROUNDING whitespace so multi-word tags
+            // ("new york") survive; the vault owns normalisation/dedup.
+            const bool from_sugg =
+                sugg_sel_ >= 0 && sugg_sel_ < static_cast<int>(suggestions_.size());
+            const std::string chosen =
+                from_sugg ? suggestions_[sugg_sel_] : trim_surrounding(new_tag_buf_);
+            if (!chosen.empty()) {
                 using enum vault::VaultResult;
-                switch (vault_.add_tag(node_path_, trimmed)) {
+                switch (vault_.add_tag(node_path_, chosen)) {
                     case Ok:
                         new_tag_buf_.clear();
                         error_.clear();
                         refresh_tags();
-                        select_tag(trimmed);   // scroll the list to reveal it
+                        refresh_vocabulary();
+                        refresh_suggestions();   // buffer is empty → dropdown closes
+                        select_tag(chosen);      // scroll the list to reveal it
                         break;
                     case InvalidArg:
                         error_ = "Invalid tag.";
@@ -190,14 +228,23 @@ bool TagEditor::handle_event(const SDL_Event& e)
         }
 
         case SDLK_UP:
-            if (selected_ > 0) {
+            // While the dropdown is showing, Up/Down drive the suggestion
+            // highlight (-1 = back to the buffer); otherwise they scroll the
+            // node's own tag list as before.
+            if (!suggestions_.empty()) {
+                sugg_sel_ = move_tag_cursor(sugg_sel_, -1,
+                                            static_cast<int>(suggestions_.size()));
+            } else if (selected_ > 0) {
                 selected_--;
                 error_.clear();
             }
             return true;
 
         case SDLK_DOWN:
-            if (selected_ < static_cast<int>(tags_.size()) - 1) {
+            if (!suggestions_.empty()) {
+                sugg_sel_ = move_tag_cursor(sugg_sel_, 1,
+                                            static_cast<int>(suggestions_.size()));
+            } else if (selected_ < static_cast<int>(tags_.size()) - 1) {
                 selected_++;
                 error_.clear();
             }
@@ -209,6 +256,8 @@ bool TagEditor::handle_event(const SDL_Event& e)
                 const std::string tag_to_remove = tags_[selected_];
                 if (vault_.remove_tag(node_path_, tag_to_remove) == vault::VaultResult::Ok) {
                     refresh_tags();
+                    refresh_vocabulary();
+                    refresh_suggestions();   // the removed tag is suggestible again
                     selected_ = std::min(selected_, static_cast<int>(tags_.size()) - 1);
                     error_.clear();
                 } else {
@@ -334,6 +383,26 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     r.draw_text(font, mx + PAD, my + MODAL_H - 12,
                 "[Enter] Add  [Up/Down] Scroll  [Del] Remove  [Esc] Close",
                 TEXT_FAINT);
+
+    // Autosuggest dropdown (Phase 29) — drawn last so it overlays the tag list
+    // like a combobox. Up/Down move the highlight; Enter adds the highlighted
+    // suggestion (or, with none highlighted, exactly the typed text).
+    if (!suggestions_.empty()) {
+        constexpr float SUGG_ROW = 30.0f;
+        const SDL_FRect drop{mx + PAD, input_y + INPUT_BOX_H + 4,
+                             MODAL_W - 2 * PAD,
+                             SUGG_ROW * static_cast<float>(suggestions_.size()) + 8};
+        r.draw_round_rect(drop, RADIUS_SMALL, SURFACE_HI);
+        r.draw_round_rect(drop, RADIUS_SMALL, ACCENT, /*filled*/ false);
+        for (int i = 0; i < static_cast<int>(suggestions_.size()); ++i) {
+            const bool  sel   = i == sugg_sel_;
+            const float row_y = drop.y + 4 + SUGG_ROW * static_cast<float>(i);
+            const float ty    = font.text_top_for_center(row_y + SUGG_ROW * 0.5f);
+            r.draw_text(font, drop.x + 10, ty,
+                        std::format("{} {}", sel ? ">" : " ", suggestions_[i]),
+                        sel ? TEXT : TEXT_DIM);
+        }
+    }
 }
 
 } // namespace ui

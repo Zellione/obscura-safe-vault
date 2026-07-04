@@ -36,6 +36,8 @@ public:
 
 private:
     void refresh_tags();              // reload the node's current tags from the vault
+    void refresh_vocabulary();        // reload the vault-wide tag vocabulary (Phase 29)
+    void refresh_suggestions();       // recompute the autosuggest dropdown for the buffer
     void select_tag(std::string_view tag);  // select `tag` (ci) so the list scrolls to it
 
     vault::Vault&        vault_;
@@ -44,6 +46,9 @@ private:
     std::string          node_path_;
     std::vector<std::string> tags_;          // current node tags
     std::vector<std::string> inherited_;     // read-only ancestor-gallery tags
+    std::vector<std::string> vocabulary_;    // vault-wide tags for autosuggest (Phase 29)
+    std::vector<std::string> suggestions_;   // ranked matches for the typed buffer
+    int                  sugg_sel_ = -1;     // -1 = editing buffer; ≥0 highlights a suggestion
     int                  selected_ = 0;      // index of the selected tag to delete
     std::string          new_tag_buf_;       // input buffer for adding a new tag
     std::string          error_;             // transient error message
