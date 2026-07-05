@@ -50,6 +50,9 @@ conversion using its own resampler — swresample is a transitive dependency but
 App tries `assets/…` relative to cwd first, then `SDL_GetBasePath()` (packaged installs).
 
 ## CI
-`.github/workflows/` — matrix covers Linux, Windows, macOS. The ASAN job (Linux-only) builds
+`.github/workflows/` — ci.yml matrix covers Linux, Windows, macOS. release.yml runs on
+tag pushes (`v*`): rebuilds the three Release packages with OSV_VERSION from the tag
+(mirrors ci.yml's Release legs + cache keys — keep in sync), runs tests, then attaches
+packages + SHA256SUMS.txt to the tag's GitHub release (draft-created if absent). The ASAN job (Linux-only) builds
 vendored SDL3 (since Phase 4) and the image codecs (since Phase 9): running the C decoders
 under ASAN/UBSan on untrusted input is high value. nasm is installed on every leg for libaom.

@@ -1,0 +1,373 @@
+# =============================================================================
+# Release — tag-triggered packaging. Pushing a tag `v*` (e.g. v1.2.0) builds
+# the three platform packages with OSV_VERSION derived from the tag (so the
+# filenames AND embedded versions are correct — unlike the CI artefacts, which
+# are built before any tag exists) and attaches them, plus SHA256SUMS.txt, to
+# the GitHub release for that tag. If no release exists yet, a DRAFT release
+# with generated notes is created for the owner to edit and publish; assets on
+# an existing release are replaced (--clobber).
+#
+# The build/package steps mirror the Release legs in ci.yml — including the
+# exact cache keys, so a release build normally restores the SDL3/codec caches
+# already warmed by CI instead of rebuilding FFmpeg from scratch. Keep the two
+# workflows in sync when touching either.
+# =============================================================================
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  # ===========================================================================
+  # Linux — gcc Release tarball (mirrors ci.yml build-and-test, gcc/Release)
+  # ===========================================================================
+  linux:
+    name: Package / Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /tmp/apt-cache
+          key: apt-matrix-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-matrix-
+
+      - name: Install build dependencies
+        run: |
+          # Same apt hardening as ci.yml: bounded fetches + retries, cached
+          # .debs, and the flaky Microsoft/Azure repos dropped.
+          sudo mkdir -p /tmp/apt-cache/partial
+          sudo chmod -R 1777 /tmp/apt-cache
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDir::Cache::archives "/tmp/apt-cache";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' \
+            | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
+          sudo rm -f /etc/apt/sources.list.d/*microsoft* /etc/apt/sources.list.d/*azure* 2>/dev/null || true
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build \
+            nasm \
+            gcc-14 \
+            g++-14 \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxss-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libasound2-dev \
+            libpulse-dev
+          sudo chmod -R a+rX /tmp/apt-cache
+
+      - name: Cache premake5 binary
+        uses: actions/cache@v4
+        id: cache-premake5
+        with:
+          path: bin/premake5
+          key: premake5-5.0.0-beta8-linux
+
+      - name: Download premake5
+        if: steps.cache-premake5.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p bin
+          curl -fsSL \
+            "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-linux.tar.gz" \
+            -o /tmp/premake5.tar.gz
+          tar -xzf /tmp/premake5.tar.gz -C bin/
+          chmod +x bin/premake5
+
+      - name: Cache vendored SDL3 build
+        uses: actions/cache@v4
+        id: cache-sdl3
+        with:
+          path: vendor/SDL3/build
+          key: sdl3-linux-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored SDL3
+        if: steps.cache-sdl3.outputs.cache-hit != 'true'
+        run: |
+          cmake -S vendor/SDL3 -B vendor/SDL3/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSDL_STATIC=ON            \
+            -DSDL_SHARED=OFF           \
+            -DSDL_TESTS=OFF            \
+            -DSDL_EXAMPLES=OFF         \
+            -DSDL_INSTALL_TESTS=OFF    \
+            -DSDL_X11_XTEST=OFF        \
+            -DSDL_JOYSTICK=OFF         \
+            -DSDL_HAPTIC=OFF           \
+            -DSDL_SENSOR=OFF           \
+            -DSDL_CAMERA=OFF           \
+            -G "Ninja"
+          cmake --build vendor/SDL3/build --parallel "$(nproc)"
+
+      - name: Use gcc-14 as default gcc
+        run: |
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
+            --slave /usr/bin/g++ g++ /usr/bin/g++-14
+
+      - name: Cache vendored codecs build
+        uses: actions/cache@v4
+        id: cache-codecs
+        with:
+          path: vendor/codecs-prefix
+          key: codecs-v4-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
+
+      - name: Build vendored codecs
+        if: steps.cache-codecs.outputs.cache-hit != 'true'
+        run: scripts/build_codecs.sh
+
+      - name: Generate Ninja build files (gcc)
+        run: bin/premake5 ninja --cc=gcc
+
+      - name: Build (Release)
+        run: ninja Release_x64
+
+      # A release build that fails its tests must not publish.
+      - name: Run tests (Release)
+        run: ./build/bin/Release/osv_tests
+
+      - name: Package (tar.gz)
+        env:
+          OSV_VERSION: ${{ github.ref_name }}
+        run: OSV_VERSION="${OSV_VERSION#v}" scripts/package.sh
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: osv-linux-tarball
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  # ===========================================================================
+  # Windows — MSVC Release NSIS installer (mirrors ci.yml windows, Release)
+  # ===========================================================================
+  windows:
+    name: Package / Windows
+    # windows-2022 pin: see the note in ci.yml (newer image's MSVC miscompiles
+    # freshly-built vendored libs in Release).
+    runs-on: windows-2022
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install nasm
+        shell: pwsh
+        run: |
+          choco install nasm --no-progress -y
+          echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Cache premake5 binary
+        uses: actions/cache@v4
+        id: cache-premake5
+        with:
+          path: bin/premake5.exe
+          key: premake5-5.0.0-beta8-windows
+
+      - name: Download premake5
+        if: steps.cache-premake5.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+          curl.exe -fsSL "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-windows.zip" -o "$env:TEMP\premake5.zip"
+          tar -xf "$env:TEMP\premake5.zip" -C bin
+
+      - name: Cache vendored SDL3 build
+        uses: actions/cache@v4
+        id: cache-sdl3
+        with:
+          path: vendor/SDL3/build
+          key: sdl3-win2022-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored SDL3
+        if: steps.cache-sdl3.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          cmake -S vendor/SDL3 -B vendor/SDL3/build `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DSDL_STATIC=ON -DSDL_SHARED=OFF `
+            -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_INSTALL_TESTS=OFF `
+            -G "Ninja"
+          cmake --build vendor/SDL3/build --parallel
+
+      - name: Cache vendored codecs build
+        uses: actions/cache@v4
+        id: cache-codecs
+        with:
+          path: vendor/codecs-prefix
+          key: codecs-v3-${{ runner.os }}-win2022-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored codecs
+        if: steps.cache-codecs.outputs.cache-hit != 'true'
+        shell: cmd
+        run: scripts\build_codecs.bat
+
+      - name: Generate VS2022 solution
+        run: bin\premake5.exe vs2022
+
+      - name: Build (Release)
+        run: msbuild ObscuraSafeVault.sln /m /p:Configuration=Release /p:Platform=x64
+
+      - name: Run tests (Release)
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: ./build/bin/Release/osv_tests.exe
+
+      - name: Package (NSIS installer)
+        shell: pwsh
+        run: |
+          choco install nsis --no-progress -y
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" /DVERSION=$version packaging\windows\osv.nsi
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: osv-windows-installer
+          path: dist/*.exe
+          retention-days: 7
+
+  # ===========================================================================
+  # macOS — AppleClang Release .app bundle (mirrors ci.yml macos, Release)
+  # ===========================================================================
+  macos:
+    name: Package / macOS
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install codec build tools
+        run: brew install ninja nasm
+
+      - name: Cache premake5 binary
+        uses: actions/cache@v4
+        id: cache-premake5
+        with:
+          path: bin/premake5
+          key: premake5-5.0.0-beta8-macosx
+
+      - name: Download premake5
+        if: steps.cache-premake5.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p bin
+          curl -fsSL \
+            "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-macosx.tar.gz" \
+            -o /tmp/premake5.tar.gz
+          tar -xzf /tmp/premake5.tar.gz -C bin/
+          chmod +x bin/premake5
+
+      - name: Cache vendored SDL3 build
+        uses: actions/cache@v4
+        id: cache-sdl3
+        with:
+          path: vendor/SDL3/build
+          key: sdl3-macos-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored SDL3
+        if: steps.cache-sdl3.outputs.cache-hit != 'true'
+        run: |
+          cmake -S vendor/SDL3 -B vendor/SDL3/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSDL_STATIC=ON -DSDL_SHARED=OFF \
+            -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_INSTALL_TESTS=OFF
+          cmake --build vendor/SDL3/build --parallel 3
+
+      - name: Cache vendored codecs build
+        uses: actions/cache@v4
+        id: cache-codecs
+        with:
+          path: vendor/codecs-prefix
+          key: codecs-v4-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
+
+      - name: Build vendored codecs
+        if: steps.cache-codecs.outputs.cache-hit != 'true'
+        run: scripts/build_codecs.sh
+
+      - name: Generate Makefiles
+        run: bin/premake5 gmake2
+
+      - name: Build (Release)
+        run: make config=release_x64 -j3
+
+      - name: Run tests (Release)
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: ./build/bin/Release/osv_tests
+
+      - name: Package (.app bundle)
+        env:
+          OSV_VERSION: ${{ github.ref_name }}
+        run: OSV_VERSION="${OSV_VERSION#v}" scripts/package_macos.sh
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: osv-macos-app
+          path: dist/*.zip
+          retention-days: 7
+
+  # ===========================================================================
+  # Publish — gather the three packages, checksum them, and attach everything
+  # to the tag's GitHub release (created as a draft if it doesn't exist yet).
+  # ===========================================================================
+  publish:
+    name: Publish release assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [linux, windows, macos]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS.txt
+        run: |
+          cd assets
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # Draft so the owner reviews the notes and publishes deliberately.
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Obscura Safe Vault ${GITHUB_REF_NAME#v}" \
+              --draft --generate-notes
+          fi
+          gh release upload "$GITHUB_REF_NAME" assets/* \
+            --repo "$GITHUB_REPOSITORY" --clobber
