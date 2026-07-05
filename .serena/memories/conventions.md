@@ -19,6 +19,7 @@
 - Pull every colour from `gfx::theme` (theme.h) — do NOT hardcode inline `gfx::Color{...}` literals in screens/widgets.
 - Use `draw_round_rect` / `draw_selection_glow` for surfaces and selection; `theme::RADIUS` / `RADIUS_SMALL` for corner radii.
 - Keep pixel/layout maths in pure, headless, unit-tested helpers (e.g. `strip_layout`, `scroll_model`, `viewer_model.h`); screens own only SDL plumbing.
+- Any unbounded vault-derived string (paths, names, tags) drawn into a fixed-width box must be middle-elided first via `ui::fit_text(font, s, max_w)` (widgets.h) — never `draw_text` it raw (PR #54 swept the whole UI for this).
 
 ## Module boundaries
 - `src/crypto/` wraps Monocypher — no SDL or UI deps.
