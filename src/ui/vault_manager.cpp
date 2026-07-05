@@ -178,7 +178,9 @@ void VaultManager::render(gfx::Renderer& r)
 
         const std::string full = entries_[i].string();
         const std::string label = entries_[i].filename().string();
-        r.draw_text(font_, box.x + 18.0f, box.y + 8.0f, label, TEXT);
+        // Reserve room for the "unlocked" badge drawn at box.w - 130.
+        r.draw_text(font_, box.x + 18.0f, box.y + 8.0f,
+                    fit_text(font_, label, box.w - 160.0f), TEXT);
 
         auto measure = [this](std::string_view s) { return font_.measure(s); };
         const std::string shown = elide_middle(full, static_cast<int>(box.w - 220.0f), measure);

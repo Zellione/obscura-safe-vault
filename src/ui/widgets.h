@@ -77,4 +77,8 @@ template <class Measure>
     return std::string(ell);
 }
 
+// elide_middle bound to a real font: fit `s` into `max_w` px measured by `font`.
+[[nodiscard]] std::string fit_text(const gfx::FontAtlas& font, std::string_view s,
+                                   float max_w);
+
 } // namespace ui

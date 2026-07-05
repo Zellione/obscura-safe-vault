@@ -73,6 +73,12 @@ void draw_text_field(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& bo
                 shown, TEXT);
 }
 
+std::string fit_text(const gfx::FontAtlas& font, std::string_view s, float max_w)
+{
+    return elide_middle(s, static_cast<int>(max_w),
+                        [&font](std::string_view t) { return font.measure(t); });
+}
+
 ButtonState button_state(const SDL_FRect& rect, float mx, float my,
                          bool mouse_down) noexcept
 {

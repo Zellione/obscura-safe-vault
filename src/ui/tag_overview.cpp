@@ -9,6 +9,7 @@
 #include "gfx/text.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "ui/widgets.h"
 #include "vault/vault_search.h"
 
 namespace ui {
@@ -151,7 +152,8 @@ void TagOverviewScreen::render(gfx::Renderer& r)
                 "[Up/Down] Move   [Enter] Open   [Type] filter   [Esc] Back", TEXT_FAINT);
     r.draw_text(font_, OX, 112, sort_label, TEXT_FAINT);
     if (!filter_.empty())
-        r.draw_text(font_, OX + 280, 112, "Filter: " + filter_, TEXT);
+        r.draw_text(font_, OX + 280, 112,
+                    fit_text(font_, "Filter: " + filter_, W - (OX + 280) - OX), TEXT);
 
     if (shown_.empty()) {
         r.draw_text(font_, OX, OY,
@@ -174,10 +176,10 @@ void TagOverviewScreen::render(gfx::Renderer& r)
         r.draw_round_rect(row, RADIUS, sel ? ACCENT : BORDER, /*filled*/ false);
 
         const float ty = y + (g.row_h - 4 - ph) * 0.5f;
-        r.draw_text(font_, OX + 14, ty, shown_[i].tag, TEXT);
-
         const std::string counts = count_label(shown_[i].gallery_count, shown_[i].image_count);
         const float       cx     = W - OX - 14 - static_cast<float>(font_.measure(counts));
+        r.draw_text(font_, OX + 14, ty, fit_text(font_, shown_[i].tag, cx - (OX + 14) - 12),
+                    TEXT);
         r.draw_text(font_, cx, ty, counts, TEXT_DIM);
     }
 

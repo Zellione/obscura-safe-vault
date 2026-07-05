@@ -361,7 +361,8 @@ void TransferDialog::render_body(gfx::Renderer& r, gfx::FontAtlas& font,
             const float ry = top + static_cast<float>(i) * 34.0f;
             const bool on = (static_cast<int>(i) == sel);
             if (on) r.draw_round_rect({ix, ry, mw - 40, 30}, RADIUS_SMALL, SURFACE_HI);
-            r.draw_text(font, ix + 8, ry + 4, items[i], on ? TEXT : TEXT_DIM);
+            r.draw_text(font, ix + 8, ry + 4, fit_text(font, items[i], mw - 56),
+                        on ? TEXT : TEXT_DIM);
         }
     };
 
@@ -378,7 +379,9 @@ void TransferDialog::render_body(gfx::Renderer& r, gfx::FontAtlas& font,
         row_list(labels, vault_sel_, iy + 72);
     } else if (stage_ == Stage::Unlock) {
         r.draw_text(font, ix, iy + 36,
-                    "Unlock " + std::filesystem::path(dest_.path).filename().string(),
+                    fit_text(font,
+                             "Unlock " + std::filesystem::path(dest_.path).filename().string(),
+                             mw - 40),
                     TEXT_DIM);
         std::string masked(dest_.pw.length(), '*');
         draw_text_field(r, font, {ix, iy + 72, mw - 40, 40}, masked, true);

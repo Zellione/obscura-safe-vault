@@ -289,7 +289,8 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     r.draw_text(font, mx + PAD, my + PAD, "Edit Tags", TEXT);
 
     // Node path display (secondary text)
-    r.draw_text(font, mx + PAD, my + PAD + LINE, node_path_, TEXT_FAINT);
+    r.draw_text(font, mx + PAD, my + PAD + LINE,
+                fit_text(font, node_path_, MODAL_W - 2 * PAD), TEXT_FAINT);
 
     // Input box for new tag
     const float input_y = my + PAD + 2 * LINE + 8;
@@ -347,7 +348,8 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
             r.draw_round_rect(tag_rect, RADIUS_SMALL, BORDER, /*filled*/ false);
         }
 
-        const std::string display = tags_[i] + " [Delete]";
+        const std::string display =
+            fit_text(font, tags_[i] + " [Delete]", tag_rect.w - 16);
         const float text_y =
             font.text_top_for_center(tag_rect.y + tag_rect.h * 0.5f);
         r.draw_text(font, tag_rect.x + 8, text_y, display, TEXT);
@@ -368,7 +370,8 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
         r.draw_text(font, mx + PAD, y, inh_header, TEXT_DIM);
         for (const std::string& line : inh.lines) {
             y += INHERIT_LINE;
-            r.draw_text(font, mx + PAD, y, line, TEXT_FAINT);
+            r.draw_text(font, mx + PAD, y, fit_text(font, line, MODAL_W - 2 * PAD),
+                        TEXT_FAINT);
         }
     }
 
@@ -397,7 +400,9 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
             const float row_y = drop.y + 4 + SUGG_ROW * static_cast<float>(i);
             const float ty    = font.text_top_for_center(row_y + SUGG_ROW * 0.5f);
             r.draw_text(font, drop.x + 10, ty,
-                        std::format("{} {}", sel ? ">" : " ", suggestions_[i]),
+                        fit_text(font,
+                                 std::format("{} {}", sel ? ">" : " ", suggestions_[i]),
+                                 drop.w - 20),
                         sel ? TEXT : TEXT_DIM);
         }
     }

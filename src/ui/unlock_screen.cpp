@@ -232,7 +232,8 @@ void UnlockScreen::render(gfx::Renderer& r)
     };
 
     r.draw_text(font_, 60, 44, create_mode_ ? "Create Vault" : "Unlock Vault", TEXT);
-    r.draw_text(font_, 60, 92, "Vault: " + vault_path_.string(), TEXT_DIM);
+    r.draw_text(font_, 60, 92,
+                fit_text(font_, "Vault: " + vault_path_.string(), W - 120), TEXT_DIM);
 
     const float fx = 60;
     const float fw = W - 120;

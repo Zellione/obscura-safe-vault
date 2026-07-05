@@ -11,6 +11,7 @@
 #include "gfx/theme.h"
 #include "ui/full_tex_cache.h"
 #include "ui/viewer_model.h"   // wrap_index, fit_zoom, clamp_zoom
+#include "ui/widgets.h"
 #include "vault/index.h"
 
 namespace ui {
@@ -120,9 +121,13 @@ void SlideshowView::render(gfx::Renderer& r, gfx::FontAtlas& font, FullTexCache&
 
     // Status + controls HUD.
     const char* state = show_->running() ? "Playing" : "Paused";
-    const std::string hud =
-        std::format("{}   {} of {}   {}   {:.0f}s per slide{}", images[cur]->name,
+    // Elide the (unbounded) image name so the fixed trailing status always fits.
+    const std::string tail =
+        std::format("   {} of {}   {}   {:.0f}s per slide{}",
                     cur + 1, n, state, show_->dwell(), shuffle_ ? "   Shuffle on" : "");
+    const std::string hud =
+        fit_text(font, images[cur]->name,
+                 vp.w - 32 - static_cast<float>(font.measure(tail))) + tail;
     r.draw_text(font, vp.x + 16, vp.y + 12, hud, gfx::theme::TEXT);
     r.draw_text(font, vp.x + 16, vp.y + 44,
                 "[Space] Play/Pause   [<-/->] Prev/Next   [+/-] Slower/Faster   "

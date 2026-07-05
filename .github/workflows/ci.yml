@@ -715,8 +715,8 @@ jobs:
         run: ./build/bin/Debug/osv_tests
 
   # ===========================================================================
-  # SonarQube analysis — static analysis of src/ via the SonarSource C/C++
-  # build-wrapper, which captures the real compilation of the osv target.
+  # SonarQube analysis — static analysis of src/ via the compilation database
+  # (compile_commands.json) emitted by the real Ninja build of the osv target.
   #
   # Requires one repository secret; without SONAR_TOKEN every step is skipped
   # so the job stays green until analysis is configured:
@@ -731,7 +731,6 @@ jobs:
 
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-      BUILD_WRAPPER_OUT_DIR: bw-output
 
     steps:
       - name: Skip notice (no SONAR_TOKEN configured)
@@ -842,21 +841,13 @@ jobs:
             -G "Ninja"
           cmake --build vendor/SDL3/build --parallel "$(nproc)"
 
-      - name: Download SonarQube build-wrapper
-        if: env.SONAR_TOKEN != ''
-        run: |
-          curl -fsSLo /tmp/build-wrapper.zip \
-            "https://sonarcloud.io/static/cpp/build-wrapper-linux-x86.zip"
-          unzip -o /tmp/build-wrapper.zip -d /tmp/build-wrapper
-          echo "/tmp/build-wrapper/build-wrapper-linux-x86" >> "$GITHUB_PATH"
-
       - name: Use gcc-14 as default gcc
         if: env.SONAR_TOKEN != ''
         run: |
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
             --slave /usr/bin/g++ g++ /usr/bin/g++-14
 
-      # osv links the image codecs, so the build-wrapper compile below needs them.
+      # osv links the image codecs, so the analysed compile below needs them.
       - name: Cache vendored codecs build
         if: env.SONAR_TOKEN != ''
         uses: actions/cache@v4
@@ -873,13 +864,16 @@ jobs:
         if: env.SONAR_TOKEN != ''
         run: bin/premake5 --coverage ninja --cc=gcc
 
-      # Build the full osv target under the wrapper so all of src/ is analysed.
+      # Build the full osv target and emit the compilation database consumed by
+      # Sonar's CFamily analyzer (sonar.cfamily.compile-commands) — same command
+      # scripts/gen.sh uses for clangd. Replaces the deprecated build-wrapper,
+      # whose downloaded binary drifted out of sync with the analyzer version.
       # Coverage flags are baked into the build, so .gcno files are emitted.
-      - name: Build under build-wrapper
+      - name: Build + write compile_commands.json
         if: env.SONAR_TOKEN != ''
         run: |
-          build-wrapper-linux-x86-64 --out-dir "$BUILD_WRAPPER_OUT_DIR" \
-            ninja Debug_x64
+          ninja Debug_x64
+          ninja -t compdb > compile_commands.json
 
       # Running the tests produces .gcda files alongside the .gcno files.
       - name: Run tests (generates .gcda coverage data)
