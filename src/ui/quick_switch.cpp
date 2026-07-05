@@ -6,6 +6,7 @@
 #include "gfx/text.h"
 #include "gfx/theme.h"
 #include "platform/vault_registry.h"
+#include "ui/widgets.h"
 
 namespace ui {
 
@@ -85,7 +86,8 @@ void QuickSwitch::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float 
         if (on) r.draw_round_rect({ix, ry, mw - 40, 30}, RADIUS_SMALL, SURFACE_HI);
         std::string label = vaults_[i].filename().string();
         if (vaults_[i].string() == active_path_) label += "  (current)";
-        r.draw_text(font, ix + 8, ry + 4, label, on ? TEXT : TEXT_DIM);
+        r.draw_text(font, ix + 8, ry + 4, fit_text(font, label, mw - 56),
+                    on ? TEXT : TEXT_DIM);
     }
 }
 

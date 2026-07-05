@@ -17,8 +17,9 @@
 namespace ui {
 
 namespace {
-constexpr float MODAL_W = 600.0f;
-constexpr float MODAL_H = 500.0f;
+// Preferred size; render() clamps to the window so the modal never overflows it.
+constexpr float MODAL_W = 900.0f;
+constexpr float MODAL_H = 600.0f;
 constexpr float PAD = 16.0f;
 constexpr float SEARCH_BOX_H = 44.0f;
 constexpr float SCOPE_TOGGLE_H = 36.0f;
@@ -178,17 +179,19 @@ void SearchOverlay::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
     r.draw_rect({0, 0, W, H}, {0, 0, 0, 180}, /*filled*/ true);
 
     // Modal panel background
-    const float mx = (W - MODAL_W) / 2;
-    const float my = (H - MODAL_H) / 2;
-    r.draw_round_rect({mx, my, MODAL_W, MODAL_H}, RADIUS, SURFACE);
-    r.draw_round_rect({mx, my, MODAL_W, MODAL_H}, RADIUS, ACCENT, /*filled*/ false);
+    const float mw = std::min(MODAL_W, W - 2 * PAD);
+    const float mh = std::min(MODAL_H, H - 2 * PAD);
+    const float mx = (W - mw) / 2;
+    const float my = (H - mh) / 2;
+    r.draw_round_rect({mx, my, mw, mh}, RADIUS, SURFACE);
+    r.draw_round_rect({mx, my, mw, mh}, RADIUS, ACCENT, /*filled*/ false);
 
     // Title
     r.draw_text(font, mx + PAD, my + PAD, "Search", TEXT);
 
     // Search input box
     const float search_y = my + PAD + LINE;
-    const SDL_FRect search_box{mx + PAD, search_y, MODAL_W - 2 * PAD, SEARCH_BOX_H};
+    const SDL_FRect search_box{mx + PAD, search_y, mw - 2 * PAD, SEARCH_BOX_H};
     draw_text_field(r, font, search_box, query_, true);
 
     // Scope toggle label and cycle instruction
@@ -206,17 +209,17 @@ void SearchOverlay::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
 
     // Result list
     const float list_y = scope_y + SCOPE_TOGGLE_H;
-    const float list_h = MODAL_H - (list_y - my) - PAD;
+    const float list_h = mh - (list_y - my) - PAD;
 
     // Draw results
     int visible = 0;
     for (int i = 0; i < static_cast<int>(filtered_.size()); ++i) {
         const float row_y =
             list_y + static_cast<float>(visible) * (RESULT_ROW_H + RESULT_LIST_GAP);
-        if (row_y + RESULT_ROW_H > my + MODAL_H - PAD) break;
+        if (row_y + RESULT_ROW_H > my + mh - PAD) break;
 
         const auto& hit = *filtered_[i];
-        const SDL_FRect row_rect{mx + PAD, row_y, MODAL_W - 2 * PAD, RESULT_ROW_H};
+        const SDL_FRect row_rect{mx + PAD, row_y, mw - 2 * PAD, RESULT_ROW_H};
 
         // Highlight the selected row
         if (i == selected_) {
@@ -226,7 +229,8 @@ void SearchOverlay::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
             r.draw_round_rect(row_rect, RADIUS_SMALL, BORDER, /*filled*/ false);
         }
 
-        const std::string display = format_hit_label(hit);
+        const std::string display =
+            fit_text(font, format_hit_label(hit), row_rect.w - 16);
         const float text_y =
             font.text_top_for_center(row_rect.y + row_rect.h * 0.5f);
         r.draw_text(font, row_rect.x + 8, text_y, display, TEXT);
@@ -241,7 +245,7 @@ void SearchOverlay::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
     }
 
     // Footer hint
-    r.draw_text(font, mx + PAD, my + MODAL_H - PAD - 16,
+    r.draw_text(font, mx + PAD, my + mh - PAD - 16,
                 "[Enter] Select  [Esc] Close  [↑↓] Navigate",
                 TEXT_FAINT);
 }

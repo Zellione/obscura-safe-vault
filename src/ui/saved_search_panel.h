@@ -71,8 +71,9 @@ public:
     bool finalize_save(const AdvancedQuery& query);
 
     // Render the saved-searches sidebar (list of saved searches, focused highlight, saving modal).
-    // hot = whether the Saved field is focused and not in save mode or clearing mode
-    void render(gfx::Renderer& r, float x, bool hot);
+    // hot = whether the Saved field is focused and not in save mode or clearing mode;
+    // max_w = available width in px (long names are middle-elided to fit it)
+    void render(gfx::Renderer& r, float x, float max_w, bool hot);
 
     // Session state accessors (called by AdvancedSearchScreen::on_enter/on_exit).
     int  get_cursor() const;

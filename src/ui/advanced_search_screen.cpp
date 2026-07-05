@@ -72,7 +72,8 @@ float draw_groups(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<TagG
         const bool  hot  = (i == lay.cur_group && lay.focused);
         std::string head = std::format("  {} {} {}:", hot ? "*" : "-",
                                        join_label(groups[i].combinator), groups[i].name);
-        r.draw_text(font, lay.x + 8, y, head, hot ? TEXT : TEXT_FAINT);
+        r.draw_text(font, lay.x + 8, y, fit_text(font, head, lay.colw - 16),
+                    hot ? TEXT : TEXT_FAINT);
         y += ROW;
         for (int t = 0; t < static_cast<int>(groups[i].tags.size()); ++t) {
             const bool sel = hot && lay.sel_tag == t;
@@ -81,7 +82,8 @@ float draw_groups(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<TagG
                                   RADIUS_SMALL, SURFACE_HI);
                 r.draw_text(font, lay.x + 28, y, ">", ACCENT);
             }
-            r.draw_text(font, lay.x + 48, y, groups[i].tags[t], sel ? TEXT : TEXT_DIM);
+            r.draw_text(font, lay.x + 48, y, fit_text(font, groups[i].tags[t], lay.colw - 60),
+                        sel ? TEXT : TEXT_DIM);
             y += ROW;
         }
     }
@@ -107,7 +109,8 @@ void draw_dropdown(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<std
     for (int i = 0; i < n; ++i) {
         const bool  s  = (i == sel);
         const float ty = font.text_top_for_center(y + (static_cast<float>(i) + 0.5f) * ROW);
-        r.draw_text(font, x + 16, ty, std::format("{} {}", s ? ">" : " ", sugg[i]),
+        r.draw_text(font, x + 16, ty,
+                    fit_text(font, std::format("{} {}", s ? ">" : " ", sugg[i]), colw - 16),
                     s ? ACCENT : TEXT_FAINT);
     }
 }
@@ -638,7 +641,8 @@ void AdvancedSearchScreen::render(gfx::Renderer& r)
     const float mx = PAD + colW + 24;
     render_results(r, mx, colW);
     const bool saved_hot = (focus_ == Focus::Saved && !saved_panel_.active_buffer() && !clearing_);
-    saved_panel_.render(r, mx + colW + 24, saved_hot);
+    const float saved_x = mx + colW + 24;
+    saved_panel_.render(r, saved_x, W - saved_x - PAD, saved_hot);
 
     if (saved_panel_.active_buffer()) {
         r.draw_rect({0, 0, W, H}, {0, 0, 0, 180}, /*filled*/ true);
@@ -646,7 +650,8 @@ void AdvancedSearchScreen::render(gfx::Renderer& r)
         r.draw_round_rect(box, RADIUS, SURFACE);
         r.draw_round_rect(box, RADIUS, ACCENT, /*filled*/ false);
         r.draw_text(font_, box.x + 16, box.y + 14, "Save search as:", TEXT_DIM);
-        r.draw_text(font_, box.x + 16, box.y + 44, *saved_panel_.active_buffer() + "_", TEXT);
+        r.draw_text(font_, box.x + 16, box.y + 44,
+                    fit_text(font_, *saved_panel_.active_buffer() + "_", box.w - 32), TEXT);
     }
     if (clearing_) {
         r.draw_rect({0, 0, W, H}, {0, 0, 0, 180}, /*filled*/ true);
@@ -678,7 +683,7 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
                               RADIUS_SMALL, SURFACE_HI);
             r.draw_text(font_, x + 4, ly, ">", ACCENT);
         }
-        r.draw_text(font_, x + 24, ly, s, sel ? TEXT : TEXT_DIM);
+        r.draw_text(font_, x + 24, ly, fit_text(font_, s, colw - 24), sel ? TEXT : TEXT_DIM);
         ly += ROW;
     };
     // The focused field's edit row. Records where the autocomplete dropdown should
@@ -686,13 +691,13 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
     // top of the fields below instead of being overdrawn by them.
     float drop_y = -1.0f;
     auto edit_row = [&](float& ly, const std::string& text) {
-        r.draw_text(font_, x + 24, ly, text, TEXT_FAINT);
+        r.draw_text(font_, x + 24, ly, fit_text(font_, text, colw - 24), TEXT_FAINT);
         ly += ROW;
         if (!suggestions_.empty()) drop_y = ly;
     };
 
     float y = top;
-    label(y, Focus::Name,  std::format("Name: {}",  edit_.name.empty() ? "(any)" : edit_.name)); y += LINE;
+    label(y, Focus::Name,  fit_text(font_, std::format("Name: {}",  edit_.name.empty() ? "(any)" : edit_.name), colw)); y += LINE;
     label(y, Focus::Scope, std::format("Scope: {}", scope_label(query_.scope)));                 y += LINE;
 
     // --- Include (weighted) ---
@@ -749,7 +754,9 @@ void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
         const bool              sel = (i == cur && hot);
         const vault::SearchHit& hit = result_view_.get_results()[i];
         if (sel) r.draw_round_rect({x - 6, y + ink_dy - rh * 0.5f, colw + 12, rh}, RADIUS_SMALL, SURFACE_HI);
-        r.draw_text(font_, x, y, std::format("{}{}", hit.is_gallery ? "[D] " : "    ", hit.path),
+        r.draw_text(font_, x, y,
+                    fit_text(font_, std::format("{}{}", hit.is_gallery ? "[D] " : "    ", hit.path),
+                             colw),
                     sel ? TEXT : TEXT_DIM);
         y += rh;
     }

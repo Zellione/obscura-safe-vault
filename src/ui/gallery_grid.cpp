@@ -947,7 +947,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     using namespace gfx::theme;
     std::string crumb = "/";
     for (const auto& s : nav_.segments()) { crumb += s; crumb += '/'; }
-    r.draw_text(font_, OX, 40, crumb, TEXT_DIM);
+    r.draw_text(font_, OX, 40, fit_name(crumb, W - 2 * OX), TEXT_DIM);
     r.draw_text(font_, OX, 90,
                 "[I] Import  [Z] ZIP/CBZ  [N] New  [Del] Delete  [/] Search  [?] Advanced  "
                 "[G] Tags  [Shift+G] Tag list  [Shift+T] Tags Overview  "

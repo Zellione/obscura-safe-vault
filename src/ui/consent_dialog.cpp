@@ -3,6 +3,7 @@
 #include "gfx/renderer.h"
 #include "gfx/text.h"
 #include "gfx/theme.h"
+#include "ui/widgets.h"
 
 namespace ui {
 
@@ -54,7 +55,7 @@ void ConsentDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
         r.draw_text(font, px + (pw - tw) / 2, y, s, c);
     };
 
-    centered(detail_, py + 28, TEXT);
+    centered(fit_text(font, detail_, pw - 32), py + 28, TEXT);
     centered("Exported files are written DECRYPTED to disk,", py + 84, DANGER);
     centered("outside the vault's protection.", py + 114, DANGER);
 

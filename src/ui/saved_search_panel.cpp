@@ -7,6 +7,7 @@
 #include "gfx/renderer.h"
 #include "gfx/theme.h"
 #include "gfx/text.h"
+#include "ui/widgets.h"
 
 namespace ui {
 
@@ -111,7 +112,7 @@ bool SavedSearchPanel::finalize_save(const AdvancedQuery& query)
     return false;
 }
 
-void SavedSearchPanel::render(gfx::Renderer& r, float x, bool hot)
+void SavedSearchPanel::render(gfx::Renderer& r, float x, float max_w, bool hot)
 {
     using namespace gfx::theme;
     if (hot) r.draw_text(font_, x - 16, TOP, ">", ACCENT);
@@ -120,7 +121,9 @@ void SavedSearchPanel::render(gfx::Renderer& r, float x, bool hot)
     float y = TOP + LINE;
     for (int i = 0; i < static_cast<int>(saved_.size()); ++i) {
         const bool sel = (i == cur_saved_ && hot);
-        r.draw_text(font_, x, y, std::format("{} {}", sel ? ">" : " ", saved_[i].name),
+        r.draw_text(font_, x, y,
+                    fit_text(font_, std::format("{} {}", sel ? ">" : " ", saved_[i].name),
+                             max_w),
                     sel ? TEXT : TEXT_DIM);
         y += LINE * 0.9f;
     }
