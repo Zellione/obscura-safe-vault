@@ -598,6 +598,12 @@ premake-core GitHub releases. It is **not** committed to the repo.
   exist first), `scripts/package_macos.sh` (.app bundle, ad-hoc signed — Developer-ID
   signing/notarisation deferred until Apple credentials exist). CI uploads all three
   as artifacts from the Release legs.
+- **Releases:** pushing a tag `v*` triggers `.github/workflows/release.yml`, which
+  rebuilds the three packages with `OSV_VERSION` derived from the tag (correct file
+  names AND embedded versions), gates on the tests, and attaches them plus
+  `SHA256SUMS.txt` to the tag's GitHub release (created as a **draft** with generated
+  notes if it doesn't exist — the owner publishes). Its build steps and cache keys
+  mirror ci.yml's Release legs; keep the two in sync.
 
 ---
 
