@@ -170,7 +170,8 @@ src/
                image_viewer.*, widgets.*       — viewer has Fit + FillScroll + Slideshow
                                                  modes, bottom/left strip toggle (keys
                                                  F/T, P starts slideshow); widgets has
-                                                 button_state + elide_middle. ImageViewer hosts
+                                                 button_state + elide_middle + fit_text
+                                                 (elide_middle bound to a FontAtlas). ImageViewer hosts
                                                  a fit-only VideoPlayback when the current item
                                                  is_video() (Phase 15: Space play/pause, J/L
                                                  +-5s, ,/. frame-step, drag seek bar).
