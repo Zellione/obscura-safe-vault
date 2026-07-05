@@ -237,6 +237,17 @@ src/
                                                  read-only "Inherited from gallery" section
                                                  (ui::inherited_tags, tag_inherit.*) below the
                                                  own-tags list; Del/selection never touch it.
+                                                 Phase 29: autosuggest dropdown while typing
+                                                 (VaultSearch::all_tags vocabulary refreshed on
+                                                 open/add/remove; ui::editor_tag_suggestions;
+                                                 Up/Down highlight via move_tag_cursor, -1 =
+                                                 buffer; Enter adds the TYPED text unless a
+                                                 suggestion is highlighted; Esc deselects first).
+               tag_suggest.*                   — pure, SDL/vault-free autosuggest source (Phase
+                                                 29): editor_tag_suggestions(buffer, vocab,
+                                                 own_tags) — trim, rank via Phase 18
+                                                 tag_suggestions, hide own tags (tag_ci_equal),
+                                                 cap TAG_SUGGEST_MAX=5. Unit-tested.
                advanced_search_model.*         — pure, SDL/vault-free advanced query (Phase 18,
                                                  unit-tested): AdvancedQuery{weighted include (OR
                                                  gate + scorers), exclude (hard filter), AND/OR

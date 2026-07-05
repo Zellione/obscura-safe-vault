@@ -338,7 +338,19 @@ src/
                                             follow-up: a read-only "Inherited from gallery"
                                             section (ui::inherited_tags) below the own-tags list
                                             makes the ancestor-gallery tag cascade visible on
-                                            images/sub-galleries; Del/selection never touch it
+                                            images/sub-galleries; Del/selection never touch it.
+                                            Phase 29: autosuggest while typing — a dropdown of
+                                            ≤5 existing vault tags (VaultSearch::all_tags vocab,
+                                            ui::editor_tag_suggestions) overlays the tag list;
+                                            Up/Down highlight (move_tag_cursor, -1 = buffer),
+                                            Enter adds the TYPED text unless a suggestion is
+                                            highlighted, Esc first deselects then closes
+             tag_suggest.*,               ← pure, SDL/vault-free autosuggest source (Phase 29):
+                                            editor_tag_suggestions(buffer, vocabulary, own_tags)
+                                            → trims, ranks via the Phase 18 tag_suggestions
+                                            (prefix before substring, ci de-dupe), hides tags the
+                                            node already carries (tag_ci_equal), caps at
+                                            TAG_SUGGEST_MAX=5. Unit-tested.
              tag_inherit.*,               ← pure, SDL-free ancestor-gallery tag union (Phase 27
                                             follow-up): inherited_tags(vault, node_path) walks the
                                             public Vault::list tree — root→parent order, ci
