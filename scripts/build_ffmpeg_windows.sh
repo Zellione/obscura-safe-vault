@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# build_ffmpeg_windows.sh — build vendor/ffmpeg for Windows using FFmpeg's
+# --toolchain=msvc (native MSVC-ABI objects/libs, directly linkable into osv's
+# MSVC-built exe — unlike a MinGW build, which is a different runtime/ABI and
+# would need a compatibility shim).
+#
+# FFmpeg's own build system always names static libs `lib<name>.a` regardless
+# of toolchain (unlike cmake, which switches to `<name>.lib` under MSVC) — see
+# link_av() in premake5.lua, which checks lib/libavcodec.a on every platform to
+# detect the FFmpeg leg (that check needs no change here). But premake's
+# `links {"avformat","avcodec",...}` — identical on every platform — has MSVC
+# look for bare `<name>.lib`, so this script additionally copies each
+# lib<name>.a to <name>.lib after the build.
+#
+# Must run inside an MSYS2 bash shell with cl.exe/link.exe/lib.exe AND nasm on
+# PATH (msvc-dev-cmd run first; MSYS2 path-type: inherit) — see the Windows
+# legs in .github/workflows/ci.yml. MSYS2 ships its own coreutils `link.exe`
+# (a symlink tool) that shadows MSVC's `link.exe` if found first on PATH; the
+# CI step renames it out of the way before invoking this script.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+CODEC_PREFIX="$(pwd)/vendor/codecs-prefix"
+
+if [[ -f "$CODEC_PREFIX/lib/libavcodec.a" ]]; then
+    echo "==> ffmpeg already installed — skipping."
+    exit 0
+fi
+
+echo "==> Building vendored ffmpeg for Windows (MSVC toolchain, decode-only, static)..."
+(
+    cd vendor/ffmpeg
+    ./configure \
+        --toolchain=msvc \
+        --target-os=win64 \
+        --arch=x86_64 \
+        --prefix="$CODEC_PREFIX" \
+        --enable-static --disable-shared \
+        --disable-everything --disable-programs --disable-doc \
+        --disable-network --disable-encoders --disable-muxers \
+        --disable-protocols --disable-devices --disable-filters \
+        --disable-bsfs --disable-autodetect \
+        --enable-decoder=h264,hevc,prores,dnxhd,mjpeg,aac,opus,mp3,vorbis,flac,ac3 \
+        --enable-demuxer=mov,matroska,webm \
+        --enable-parser=h264,hevc,dnxhd,mjpeg,aac,vorbis,opus,flac,ac3,mpegaudio \
+        --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb \
+        --enable-swscale \
+        --enable-pic
+    make -j"$(nproc)"
+    make install
+)
+
+# See the file header: premake expects bare <name>.lib on Windows/MSVC, FFmpeg
+# always produces lib<name>.a — keep both so detection and linking each resolve.
+for name in avformat avcodec swscale swresample avutil; do
+    cp "$CODEC_PREFIX/lib/lib$name.a" "$CODEC_PREFIX/lib/$name.lib"
+done
+
+echo "==> ffmpeg installed into $CODEC_PREFIX"

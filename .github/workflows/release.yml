@@ -178,6 +178,23 @@ jobs:
           choco install nasm --no-progress -y
           echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+      # See ci.yml's Windows leg for the full rationale (FFmpeg needs a POSIX
+      # shell + configure/make; MSVC itself still does the compiling via
+      # --toolchain=msvc).
+      - name: Set up MSYS2 (for FFmpeg build)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          path-type: inherit
+          install: make diffutils
+
+      - name: Hide MSYS2's link.exe (avoid MSVC link.exe collision)
+        shell: msys2 {0}
+        run: |
+          if [ -f /usr/bin/link.exe ]; then
+            mv /usr/bin/link.exe /usr/bin/link.exe.msys2-bak
+          fi
+
       - name: Cache premake5 binary
         uses: actions/cache@v4
         id: cache-premake5
@@ -216,12 +233,18 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v3-${{ runner.os }}-win2022-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          # Bumped to v4 (from v3) to invalidate caches predating the FFmpeg leg below.
+          key: codecs-v4-${{ runner.os }}-win2022-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
         shell: cmd
         run: scripts\build_codecs.bat
+
+      - name: Build vendored FFmpeg (Windows, MSVC toolchain)
+        if: steps.cache-codecs.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: scripts/build_ffmpeg_windows.sh
 
       - name: Generate VS2022 solution
         run: bin\premake5.exe vs2022

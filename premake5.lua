@@ -117,9 +117,10 @@ local function link_image_codecs()
 end
 
 -- ---------------------------------------------------------------------------
--- FFmpeg/libav (decode-only static; Phase 15). Same staging prefix as the image
--- codecs. Linked only when present so non-FFmpeg builds (e.g. Windows until its
--- FFmpeg leg lands) stay green; OSV_VENDORED_AV gates the dependent code/tests.
+-- FFmpeg/libav (decode-only static; Phase 15; Windows leg via MSYS2 +
+-- --toolchain=msvc, see scripts/build_ffmpeg_windows.sh). Same staging prefix
+-- as the image codecs. Linked only when present so a build missing it stays
+-- green; OSV_VENDORED_AV gates the dependent code/tests.
 -- Static-link order: dependents before dependencies (format → codec → swscale → util).
 -- When --asan is passed, prefer vendor/codecs-prefix-asan/ (built by
 -- scripts/build_codecs.sh --asan) with a fallback + warning to the normal prefix.
