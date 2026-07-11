@@ -141,7 +141,15 @@ local function link_av()
     end
 
     if os.isfile(path.join(prefix, "lib/libavcodec.a")) then
-        includedirs { path.join(prefix, "include") }
+        -- externalincludedirs (not includedirs): libavutil/common.h's inline
+        -- clip helpers (av_clip_uint8 etc.) trip MSVC's C4244 (int -> uint8_t/
+        -- int16_t narrowing in a return), which our own fatalwarnings{"All"}
+        -- promotes to a hard error. Marking this path external (MSVC:
+        -- /external:I, defaults to /external:W3 with warnings not promoted to
+        -- errors) keeps our own code at full W4/WX while FFmpeg's headers
+        -- just compile. GCC/Clang ignore externalincludedirs here (no
+        -- externalwarnings set), so behaviour there is unchanged.
+        externalincludedirs { path.join(prefix, "include") }
         libdirs     { path.join(prefix, "lib") }
         defines     { "OSV_VENDORED_AV" }
         links       { "avformat", "avcodec", "swscale", "swresample", "avutil" }
