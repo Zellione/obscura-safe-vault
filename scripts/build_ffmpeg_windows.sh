@@ -27,6 +27,12 @@ if [[ -f "$CODEC_PREFIX/lib/libavcodec.a" ]]; then
 fi
 
 echo "==> Building vendored ffmpeg for Windows (MSVC toolchain, decode-only, static)..."
+# eac3 alongside ac3: ac3dec_float.c gates its E-AC-3 code paths with a runtime
+# `if (CONFIG_EAC3_DECODER)` (not a preprocessor #if), which GCC/Clang dead-
+# code-eliminate but this MSVC build does not — with eac3 disabled,
+# ac3dec_float.o still references eac3_data.o's tables (ff_eac3_*), which then
+# never gets compiled/archived: an unresolved-external link error that only
+# surfaces on the MSVC leg.
 (
     cd vendor/ffmpeg
     ./configure \
@@ -39,7 +45,7 @@ echo "==> Building vendored ffmpeg for Windows (MSVC toolchain, decode-only, sta
         --disable-network --disable-encoders --disable-muxers \
         --disable-protocols --disable-devices --disable-filters \
         --disable-bsfs --disable-autodetect \
-        --enable-decoder=h264,hevc,prores,dnxhd,mjpeg,aac,opus,mp3,vorbis,flac,ac3 \
+        --enable-decoder=h264,hevc,prores,dnxhd,mjpeg,aac,opus,mp3,vorbis,flac,ac3,eac3 \
         --enable-demuxer=mov,matroska,webm \
         --enable-parser=h264,hevc,dnxhd,mjpeg,aac,vorbis,opus,flac,ac3,mpegaudio \
         --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb \
