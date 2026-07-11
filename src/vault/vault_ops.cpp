@@ -1,6 +1,7 @@
 #include "vault_ops.h"
 
 #include <algorithm>
+#include <new>
 #include <ranges>
 #include <vector>
 
@@ -83,6 +84,23 @@ void relocate_node_chunks(const ChunkStore& src, ChunkStore& dst, IndexNode& nod
         for (auto& chunk : node.vmeta.chunks) copy_span(chunk.offset, chunk.length);
         copy_span(node.vmeta.poster_offset, node.vmeta.poster_length);
     }
+}
+
+bool push_child(std::vector<IndexNode>& children, IndexNode node) noexcept
+{
+    try {
+        if (int& c = push_child_fail_after(); c >= 0) {
+            if (c == 0) {
+                c = -1;
+                throw std::bad_alloc();   // deterministic injected failure
+            }
+            --c;
+        }
+        children.push_back(std::move(node));
+    } catch (...) {
+        return false;
+    }
+    return true;
 }
 
 } // namespace vault::vault_ops

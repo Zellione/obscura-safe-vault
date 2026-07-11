@@ -7,6 +7,7 @@
 
 #include "gfx/renderer.h"
 #include "gfx/theme.h"
+#include "platform/error_log.h"
 #include "platform/harden.h"
 #include "platform/paths.h"
 #include "media/volume_setting.h"
@@ -32,6 +33,12 @@ namespace app {
 
 bool App::init()
 {
+    // Log-before-die: an uncaught exception anywhere (e.g. std::bad_alloc from
+    // an STL container) would otherwise call std::terminate() and vanish with
+    // zero trace, since Release is a windowless app with no console. Install
+    // this first, before anything else can throw.
+    platform::install_terminate_logger();
+
     // Disable core dumps in Release builds to prevent decrypted data / key material
     // from being dumped to disk. In Debug, core dumps and ptrace attach are kept
     // enabled for developers to use debuggers and analyze crashes.

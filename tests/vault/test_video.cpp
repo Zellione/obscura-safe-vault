@@ -8,6 +8,7 @@
 #include "crypto/secure_mem.h"
 #include "vault/vault.h"
 #include "vault/index.h"
+#include "vault/vault_ops.h"
 
 namespace {
 
@@ -111,6 +112,30 @@ TEST(add_video_rejects_non_container)
     REQUIRE(v.create_gallery("clips") == vault::VaultResult::Ok);
 
     CHECK(v.add_video("clips", junk, "bad.bin") == vault::VaultResult::InvalidArg);
+}
+
+// Regression test for a real crash: appending the new IndexNode to a
+// gallery's children (std::vector::push_back) can throw bad_alloc on
+// allocation failure. Uncaught, that calls std::terminate() and kills the
+// whole process instead of returning an error — the same bug class fixed for
+// chunk_codec::resize_buf (PR #57), but at add_video's tree-mutation step.
+TEST(add_video_vector_push_failure_returns_io_error_not_terminate)
+{
+    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!video_bytes.empty());
+
+    TempVault tv("video_push_fail");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("clips") == vault::VaultResult::Ok);
+
+    vault::vault_ops::inject_push_child_failure(0);   // fail the very next push_child
+    CHECK_EQ(v.add_video("clips", video_bytes, "a.mp4", 4096), vault::VaultResult::IoError);
+    vault::vault_ops::clear_push_child_failure();
+
+    // The vault must still work normally afterward (fault disarms after firing).
+    REQUIRE(v.add_video("clips", video_bytes, "b.mp4", 4096) == vault::VaultResult::Ok);
 }
 
 TEST(add_video_on_locked_vault_returns_locked)

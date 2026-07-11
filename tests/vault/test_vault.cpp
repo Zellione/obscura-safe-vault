@@ -7,6 +7,7 @@
 
 #include "image/fixtures.h"
 #include "vault/vault.h"
+#include "vault/vault_ops.h"
 
 namespace fs = std::filesystem;
 
@@ -280,4 +281,25 @@ TEST(vault_file_bytes_tracks_size_growth)
     // Locked vault returns 0 (no file handle).
     v.lock();
     CHECK_EQ(vault::vault_file_bytes(v), 0);
+}
+
+// Regression test for a real crash: appending the new IndexNode to a
+// gallery's children (std::vector::push_back) can throw bad_alloc on
+// allocation failure. Uncaught, that calls std::terminate() and kills the
+// whole process instead of returning an error — the same bug class fixed for
+// chunk_codec::resize_buf (PR #57), but at add_image's tree-mutation step.
+TEST(add_image_vector_push_failure_returns_io_error_not_terminate)
+{
+    TempVault tv("add_image_push_fail");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+
+    auto img = pattern(1000, 3);
+    vault::vault_ops::inject_push_child_failure(0);   // fail the very next push_child
+    CHECK_EQ(v.add_image("", img, "a.jpg"), vault::VaultResult::IoError);
+    vault::vault_ops::clear_push_child_failure();
+
+    // The vault must still work normally afterward (fault disarms after firing).
+    REQUIRE(v.add_image("", img, "b.jpg") == vault::VaultResult::Ok);
 }
