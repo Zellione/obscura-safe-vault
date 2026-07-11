@@ -189,7 +189,15 @@ src/
                                             method byte (0=raw, 1=deflate) + bounded orig_len inside
                                             the AEAD; used by ChunkStore's framed ctor flag (← header
                                             flags bit 0) + index-blob sites (commit_index/unlock/
-                                            compact). miniz tdefl/tinfl, no new dep.
+                                            compact). miniz tdefl/tinfl, no new dep. The
+                                            std::vector<uint8_t> resize_buf overload wraps
+                                            resize() in try/catch — it's noexcept, and an uncaught
+                                            allocation-failure exception there would terminate() the
+                                            whole process (hit in production via commit_index's
+                                            index-blob framing) instead of returning false like every
+                                            other fallible call in this codebase. resize_fail_after
+                                            fault injection (mirrors file_util's sync/rename hooks)
+                                            makes the failure path deterministically testable.
   image/     image.h, decode.*,           ← stb_image decode + thumbs (Phase 3)
              thumbnail.*,                 ← format detection + libwebp/libheif
              format_registry.*,           ← decoders (Phase 9)

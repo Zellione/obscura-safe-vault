@@ -53,3 +53,4 @@ dist/
 *.gcda
 *.gcno
 .ninja_lock
+*.dmp

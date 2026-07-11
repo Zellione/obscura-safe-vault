@@ -33,4 +33,20 @@ inline constexpr uint64_t INFLATE_SLACK     = 64;
 [[nodiscard]] bool decode_frame(std::span<const uint8_t> framed, crypto::SecureBytes& out) noexcept;
 [[nodiscard]] bool decode_frame(std::span<const uint8_t> framed, std::vector<uint8_t>& out) noexcept;
 
+// --- fault injection (allocation-failure tests) -----------------------------
+// std::vector<uint8_t>::resize() can throw (bad_alloc / length_error) on a
+// real allocation failure. There is no portable way to make a real allocation
+// fail on demand, so tests arm this counter to make the Nth upcoming
+// vector-buffer resize inside encode_frame/decode_frame throw (0 = the very
+// next resize). Disarmed by default and after firing. Mirrors
+// vault::fileutil's sync_fail_after/rename_fail_after pattern.
+inline int& resize_fail_after() noexcept
+{
+    static int n = -1;
+    return n;
+}
+
+inline void inject_resize_failure(int after_calls) noexcept { resize_fail_after() = after_calls; }
+inline void clear_resize_failure() noexcept                 { resize_fail_after() = -1; }
+
 }  // namespace vault::chunk_codec
