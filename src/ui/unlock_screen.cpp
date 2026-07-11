@@ -2,6 +2,7 @@
 
 #include <monocypher.h>
 
+#include <system_error>
 #include <vector>
 
 #include "crypto/kdf.h"
@@ -31,13 +32,24 @@ gfx::Color strength_color(Strength s)
     return gfx::theme::DANGER;
 }
 
+// std::filesystem::exists(path) (no error_code) throws on a query failure
+// (e.g. a network-mapped drive hiccup) instead of just reporting false; an
+// uncaught throw here would terminate() the whole app. Use the non-throwing
+// overload, treating any query failure as "doesn't exist" (falls into create
+// mode, same as a real absence).
+bool exists_no_throw(const std::filesystem::path& path) noexcept
+{
+    std::error_code ec;
+    return std::filesystem::exists(path, ec);
+}
+
 } // namespace
 
 UnlockScreen::UnlockScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                            platform::FileDialog& dlg, std::filesystem::path vault_path)
     : win_(win), font_(font), vault_(vault), dlg_(dlg),
       vault_path_(std::move(vault_path)),
-      create_mode_(!std::filesystem::exists(vault_path_))
+      create_mode_(!exists_no_throw(vault_path_))
 {
 }
 
@@ -151,7 +163,7 @@ void UnlockScreen::apply_dialog_result(const std::string& path)
     switch (pending_) {
         case Vault:
             vault_path_  = path;
-            create_mode_ = !std::filesystem::exists(vault_path_);
+            create_mode_ = !exists_no_throw(vault_path_);
             break;
         case Keyfile:
             keyfile_path_ = path;
