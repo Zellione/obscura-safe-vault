@@ -61,6 +61,28 @@ TEST(codec_secure_bytes_roundtrip)
     CHECK(std::memcmp(back.data(), payload.data(), payload.size()) == 0);
 }
 
+// Regression test for a real crash: std::vector<uint8_t>::resize() can throw
+// (bad_alloc / length_error) on allocation failure. Both resize_buf overloads
+// are noexcept, so an uncaught throw there calls std::terminate() and kills
+// the whole process instead of returning false — this hit production via
+// index_io::commit_index's std::vector<uint8_t> framing of the index blob
+// (every commit, once compression is enabled).
+TEST(codec_vector_resize_failure_returns_false_not_terminate)
+{
+    const std::vector<uint8_t> payload = zeros(4096);
+
+    chunk_codec::inject_resize_failure(0);  // fail the very next vector resize
+    std::vector<uint8_t> framed;
+    CHECK(!chunk_codec::encode_frame(payload, framed));
+    chunk_codec::clear_resize_failure();
+
+    // The codec must still work normally afterward (fault disarms after firing).
+    REQUIRE(chunk_codec::encode_frame(payload, framed));
+    std::vector<uint8_t> back;
+    REQUIRE(chunk_codec::decode_frame(framed, back));
+    CHECK(back == payload);
+}
+
 TEST(codec_rejects_hostile_frames)
 {
     std::vector<uint8_t> out;

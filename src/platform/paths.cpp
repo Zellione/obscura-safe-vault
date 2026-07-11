@@ -8,9 +8,44 @@
 #include <cstdio>
 #include <print>
 
+#if defined(_WIN32)
+#  include <io.h>
+#endif
+
 #include "crypto/random.h"
 
 namespace platform {
+
+// 64-bit-safe seek-to-end + tell, mirroring vault::fileutil (src/vault/file_util.h):
+// plain fseek/ftell use `long`, which is 32-bit on Windows (LLP64) even in
+// 64-bit builds, silently capping readable files at ~2 GiB there. platform/
+// doesn't depend on vault/, so the same fix is duplicated locally.
+namespace {
+
+[[nodiscard]] bool file_size64(std::FILE* fp, long long& out_size) noexcept
+{
+#if defined(_WIN32)
+    if (_fseeki64(fp, 0, SEEK_END) != 0) return false;
+    const long long pos = _ftelli64(fp);
+#else
+    if (fseeko(fp, 0, SEEK_END) != 0) return false;
+    const off_t pos = ftello(fp);
+#endif
+    if (pos < 0) return false;
+    out_size = pos;
+    return true;
+}
+
+[[nodiscard]] bool seek_to64(std::FILE* fp, long long off) noexcept
+{
+#if defined(_WIN32)
+    return _fseeki64(fp, off, SEEK_SET) == 0;
+#else
+    return fseeko(fp, static_cast<off_t>(off), SEEK_SET) == 0;
+#endif
+}
+
+} // namespace
 
 std::filesystem::path config_dir()
 {
@@ -38,9 +73,8 @@ std::optional<std::vector<uint8_t>> read_file(const std::filesystem::path& path)
     // Size first, then one allocation and one read. Keyfiles pass through
     // here: a chunk-growing vector would strew stale copies of key material
     // across freed heap blocks on every reallocation.
-    bool ok = std::fseek(f, 0, SEEK_END) == 0;
-    const long size = ok ? std::ftell(f) : -1;
-    ok = ok && size >= 0 && std::fseek(f, 0, SEEK_SET) == 0;
+    long long size = -1;
+    bool ok = file_size64(f, size) && seek_to64(f, 0);
 
     std::vector<uint8_t> buf;
     if (ok && size > 0) {

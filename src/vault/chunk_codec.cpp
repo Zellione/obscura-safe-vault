@@ -24,11 +24,25 @@ uint64_t get_u64le(const uint8_t* p) noexcept
 // (or beyond deflate's own 4 GiB-ish limits) simply store raw.
 constexpr uint64_t MZ_LEN_MAX = std::numeric_limits<mz_ulong>::max();
 
-// Uniform resize/data over vector (never fails) and SecureBytes (may fail).
+// Uniform resize/data over vector and SecureBytes — both report failure via a
+// bool return rather than letting an exception escape a noexcept function
+// (which would call std::terminate() and take the whole process down).
 // Declared BEFORE the templates/functions that call them (C++ two-phase lookup).
 bool resize_buf(std::vector<uint8_t>& b, size_t n) noexcept
 {
-    b.resize(n);
+    try {
+        if (int& c = resize_fail_after(); c >= 0) {
+            if (c == 0) {
+                c = -1;
+                n = b.max_size() + 1;  // deterministically throws length_error
+            } else {
+                --c;
+            }
+        }
+        b.resize(n);
+    } catch (...) {
+        return false;
+    }
     return true;
 }
 
