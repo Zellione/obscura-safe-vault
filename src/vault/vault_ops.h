@@ -48,6 +48,27 @@ void for_each_media(NodeT& n, Fn&& fn);
 // Sets `err` to IoError on the first failed read/append. Used by compaction.
 void relocate_node_chunks(const ChunkStore& src, ChunkStore& dst, IndexNode& node, VaultResult& err);
 
+// Append `node` to `children`, catching an allocation-failure exception
+// (bad_alloc/length_error) from vector growth instead of letting it escape
+// uncaught — an uncaught exception here would call std::terminate() and kill
+// the whole process (the same bug class as chunk_codec::resize_buf; see its
+// comment). Returns false on failure (real or injected); `node` is left
+// unspecified-but-valid in that case and should be discarded by the caller.
+[[nodiscard]] bool push_child(std::vector<IndexNode>& children, IndexNode node) noexcept;
+
+// --- fault injection (allocation-failure tests) -----------------------------
+// Mirrors chunk_codec::resize_fail_after: arms the Nth upcoming push_child
+// call (0 = the very next one) to fail deterministically, since there is no
+// portable way to make a real allocation fail on demand.
+inline int& push_child_fail_after() noexcept
+{
+    static int n = -1;
+    return n;
+}
+
+inline void inject_push_child_failure(int after_calls) noexcept { push_child_fail_after() = after_calls; }
+inline void clear_push_child_failure() noexcept                 { push_child_fail_after() = -1; }
+
 // Template implementations (must be in header for link-time visibility).
 
 template <typename NodeT>

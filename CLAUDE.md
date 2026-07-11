@@ -184,7 +184,15 @@ src/
                                             resolve_gallery, resolve_node_impl, child_named, holds_media,
                                             holds_galleries, for_each_media, relocate_node_chunks.
                                             Pure tree traversal; no I/O or persistence. Keeps Vault
-                                            method count bounded (cpp:S1448).
+                                            method count bounded (cpp:S1448). push_child(children, node)
+                                            (video-import crash fix) wraps the vector::push_back that
+                                            add_image/add_video use to append the new IndexNode in
+                                            try/catch — a growth allocation failure there is the same
+                                            uncaught-exception → std::terminate() bug class as
+                                            chunk_codec::resize_buf (PR #57), just at the tree-mutation
+                                            step; returns false (→ IoError) instead of crashing.
+                                            push_child_fail_after mirrors resize_fail_after's
+                                            deterministic fault-injection pattern for tests.
              chunk_codec.*                 ← Pure adaptive store-if-smaller deflate framing (Phase 26):
                                             method byte (0=raw, 1=deflate) + bounded orig_len inside
                                             the AEAD; used by ChunkStore's framed ctor flag (← header
@@ -534,6 +542,17 @@ src/
              harden.{h,cpp}               ← disable_core_dumps() (Task 6): Linux prctl + setrlimit,
                                             macOS setrlimit, Windows no-op; called at app init
                                             (Release only) before any vault unlock.
+             error_log.*                  ← persistent, best-effort error log (video-import
+                                            crash fix): log_error(tag, msg) appends "[tag] msg"
+                                            to both stderr (Debug's console) and config_dir()/
+                                            error.log (Release is a windowless app — without
+                                            this, every existing std::println(stderr, "[Module]
+                                            ...") call site had nowhere visible to go).
+                                            install_terminate_logger() installs std::set_terminate
+                                            so an uncaught exception logs what() before the
+                                            process dies, instead of vanishing with zero trace;
+                                            called first thing in App::init(). Never log
+                                            decrypted plaintext or key material (invariant #5).
 vendor/
   SDL3/           ← git submodule, built by scripts/setup.sh (cmake)
   monocypher/     ← git submodule, compiled by premake (single .c file)

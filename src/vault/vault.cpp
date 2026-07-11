@@ -23,6 +23,7 @@
 #include "vault/index_io.h"
 #include "vault/vault_ops.h"
 #include "media/video_probe.h"
+#include "platform/error_log.h"
 #include "ui/advanced_search_model.h"  // AdvancedQuery + evaluate (pure, SDL/vault-free)
 
 namespace vault {
@@ -632,7 +633,10 @@ VaultResult Vault::add_image(std::string_view         gallery_path,
     img.meta.data_length  = span.length;
     img.meta.thumb_offset = thumb_span.offset;
     img.meta.thumb_length = thumb_span.length;
-    g->children.push_back(std::move(img));
+    if (!vault_ops::push_child(g->children, std::move(img))) {
+        platform::log_error("Vault", "add_image: allocation failure appending index node");
+        return IoError;
+    }
 
     return commit_index();
 }
@@ -747,7 +751,10 @@ VaultResult Vault::add_video(std::string_view         gallery_path,
     vid.vmeta.chunks     = std::move(chunks);
     vid.vmeta.poster_offset = poster_offset;
     vid.vmeta.poster_length = poster_length;
-    g->children.push_back(std::move(vid));
+    if (!vault_ops::push_child(g->children, std::move(vid))) {
+        platform::log_error("Vault", "add_video: allocation failure appending index node");
+        return IoError;
+    }
 
     return commit_index();
 }

@@ -344,6 +344,7 @@ project "osv_tests"
         "src/gfx/renderer.cpp",
         "src/gfx/yuv_texture.cpp",
         "src/gfx/theme.cpp",
+        "src/platform/error_log.cpp",
         "src/platform/harden.cpp",
         "src/platform/paths.cpp",
         "src/platform/vault_registry.cpp",
