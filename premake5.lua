@@ -117,9 +117,10 @@ local function link_image_codecs()
 end
 
 -- ---------------------------------------------------------------------------
--- FFmpeg/libav (decode-only static; Phase 15). Same staging prefix as the image
--- codecs. Linked only when present so non-FFmpeg builds (e.g. Windows until its
--- FFmpeg leg lands) stay green; OSV_VENDORED_AV gates the dependent code/tests.
+-- FFmpeg/libav (decode-only static; Phase 15; Windows leg via MSYS2 +
+-- --toolchain=msvc, see scripts/build_ffmpeg_windows.sh). Same staging prefix
+-- as the image codecs. Linked only when present so a build missing it stays
+-- green; OSV_VENDORED_AV gates the dependent code/tests.
 -- Static-link order: dependents before dependencies (format → codec → swscale → util).
 -- When --asan is passed, prefer vendor/codecs-prefix-asan/ (built by
 -- scripts/build_codecs.sh --asan) with a fallback + warning to the normal prefix.
@@ -140,7 +141,15 @@ local function link_av()
     end
 
     if os.isfile(path.join(prefix, "lib/libavcodec.a")) then
-        includedirs { path.join(prefix, "include") }
+        -- externalincludedirs (not includedirs): libavutil/common.h's inline
+        -- clip helpers (av_clip_uint8 etc.) trip MSVC's C4244 (int -> uint8_t/
+        -- int16_t narrowing in a return), which our own fatalwarnings{"All"}
+        -- promotes to a hard error. Marking this path external (MSVC:
+        -- /external:I, defaults to /external:W3 with warnings not promoted to
+        -- errors) keeps our own code at full W4/WX while FFmpeg's headers
+        -- just compile. GCC/Clang ignore externalincludedirs here (no
+        -- externalwarnings set), so behaviour there is unchanged.
+        externalincludedirs { path.join(prefix, "include") }
         libdirs     { path.join(prefix, "lib") }
         defines     { "OSV_VENDORED_AV" }
         links       { "avformat", "avcodec", "swscale", "swresample", "avutil" }

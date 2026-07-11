@@ -255,6 +255,27 @@ jobs:
           choco install nasm --no-progress -y
           echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+      # FFmpeg's ./configure needs a POSIX shell + standard unix tools; MSVC
+      # itself (cl/link/lib) still does the actual compiling via
+      # --toolchain=msvc. path-type: inherit carries the MSVC env (from
+      # msvc-dev-cmd above) and nasm's PATH entry into the MSYS2 shell.
+      - name: Set up MSYS2 (for FFmpeg build)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          path-type: inherit
+          install: make diffutils
+
+      # MSYS2 ships its own coreutils link.exe (a symlink tool) in /usr/bin,
+      # which shadows MSVC's link.exe on PATH — rename it out of the way so
+      # FFmpeg's --toolchain=msvc build finds the real linker.
+      - name: Hide MSYS2's link.exe (avoid MSVC link.exe collision)
+        shell: msys2 {0}
+        run: |
+          if [ -f /usr/bin/link.exe ]; then
+            mv /usr/bin/link.exe /usr/bin/link.exe.msys2-bak
+          fi
+
       - name: Cache premake5 binary
         uses: actions/cache@v4
         id: cache-premake5
@@ -297,13 +318,22 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          # win2022 toolchain tag — see the SDL3 cache key note above.
-          key: codecs-v3-${{ runner.os }}-win2022-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          # win2022 toolchain tag — see the SDL3 cache key note above. Bumped
+          # to v4 (from v3) to invalidate caches predating the FFmpeg leg below.
+          key: codecs-v4-${{ runner.os }}-win2022-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
         shell: cmd
         run: scripts\build_codecs.bat
+
+      # Decode-only static FFmpeg, built separately from build_codecs.bat since
+      # it needs FFmpeg's own configure/make (not cmake) — see
+      # scripts/build_ffmpeg_windows.sh for the --toolchain=msvc details.
+      - name: Build vendored FFmpeg (Windows, MSVC toolchain)
+        if: steps.cache-codecs.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: scripts/build_ffmpeg_windows.sh
 
       - name: Generate VS2022 solution
         run: bin\premake5.exe vs2022
