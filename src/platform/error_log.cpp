@@ -27,7 +27,9 @@ void ErrorLog::append(std::string_view tag, std::string_view message) const
     if (file_.empty()) {
         return;
     }
-    std::ofstream out(file_, std::ios::app);
+    // Binary mode: text mode on Windows translates '\n' to "\r\n", which would
+    // make the on-disk line endings platform-dependent (mirrors theme_pref.cpp).
+    std::ofstream out(file_, std::ios::app | std::ios::binary);
     if (!out) {
         return;
     }
