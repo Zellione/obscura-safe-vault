@@ -1,9 +1,12 @@
 #include "ui/file_op_job.h"
 
+#include <algorithm>
 #include <format>
 #include <utility>
 
+#include "platform/paths.h"
 #include "ui/export.h"
+#include "ui/meta_format.h"
 #include "vault/vault.h"
 
 namespace ui {
@@ -83,6 +86,68 @@ FileOpOutcome transfer_outcome(vault::TransferMode mode, int done, int failed, i
     else
         oc.status = std::format("{} {} of {} to {}", verb, done, total, label);
     if (failed > 0) oc.status += std::format(" ({} failed)", failed);
+    return oc;
+}
+
+// Import one file into `base_gallery`, dispatching by extension. Returns
+// true on success; on failure writes the bare filename (no path, no
+// secrets) into `*fail_name` for the capped failed-name list.
+bool import_one(vault::Vault& v, const std::string& base_gallery,
+                const std::filesystem::path& path, std::string* fail_name)
+{
+    using enum vault::VaultResult;
+    const std::string fname = path.filename().string();
+    const auto bytes = platform::read_file(path);
+    if (!bytes) { *fail_name = fname; return false; }
+
+    const bool video = is_video_filename(fname);
+    const vault::VaultResult r = video ? v.add_video(base_gallery, *bytes, fname)
+                                       : v.add_image(base_gallery, *bytes, fname);
+    if (r == Ok) return true;
+    *fail_name = fname;
+    return false;
+}
+
+FileOpOutcome run_import(vault::Vault& v, const std::string& base_gallery,
+                         const std::vector<std::filesystem::path>& files,
+                         vault::OpProgress& progress)
+{
+    progress.total.store(static_cast<int>(files.size()));
+
+    int imported = 0;
+    std::vector<std::string> failed_names;
+    for (const auto& path : files) {
+        if (progress.cancel.load()) break;
+        std::string fail_name;
+        if (import_one(v, base_gallery, path, &fail_name)) ++imported;
+        else                                              failed_names.push_back(fail_name);
+        progress.done.fetch_add(1);
+    }
+
+    FileOpOutcome oc;
+    oc.ok        = true;   // per-file failures are counted, not a hard failure
+    oc.cancelled = progress.cancel.load();
+    oc.done      = imported;
+    oc.failed    = static_cast<int>(failed_names.size());
+    oc.total     = static_cast<int>(files.size());
+    oc.kind      = FileOpKind::Import;
+
+    if (oc.cancelled) {
+        oc.status = std::format("Import cancelled — {} imported", imported);
+    } else {
+        oc.status = std::format("Imported {}", count_noun(imported, "file"));
+        if (!failed_names.empty()) {
+            constexpr size_t MAX_SHOWN = 3;
+            std::string names;
+            for (size_t i = 0; i < std::min(failed_names.size(), MAX_SHOWN); ++i) {
+                if (i > 0) names += ", ";
+                names += failed_names[i];
+            }
+            if (failed_names.size() > MAX_SHOWN)
+                names += std::format(", +{} more", failed_names.size() - MAX_SHOWN);
+            oc.status += std::format(" ({} failed: {})", oc.failed, names);
+        }
+    }
     return oc;
 }
 
@@ -203,6 +268,16 @@ bool FileOpJob::start_transfer_gallery(vault::Vault& src, std::string src_galler
 bool FileOpJob::start_compact(vault::Vault& v)
 {
     return launch(FileOpKind::Compact, [this, &v]() { return run_compact(v, progress_); });
+}
+
+bool FileOpJob::start_import(vault::Vault& v, std::string base_gallery,
+                             std::vector<std::filesystem::path> files)
+{
+    return launch(FileOpKind::Import,
+                  [this, &v, base_gallery = std::move(base_gallery),
+                   files = std::move(files)]() {
+        return run_import(v, base_gallery, files, progress_);
+    });
 }
 
 std::optional<FileOpOutcome> FileOpJob::take_outcome()
