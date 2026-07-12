@@ -5,6 +5,16 @@
 
 namespace gfx {
 
+// Pure: whether a window with these SDL_WindowFlags is actually visible on
+// screen (not minimized, not hidden, not fully occluded by another window).
+// Used to skip idle-heartbeat redraws when nothing would be seen anyway.
+// Header-only (no SDL display needed) so it's linkable from tests, unlike the
+// rest of Window, which needs a real windowing system to construct.
+[[nodiscard]] inline bool window_flags_visible(SDL_WindowFlags flags) noexcept
+{
+    return (flags & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN | SDL_WINDOW_OCCLUDED)) == 0;
+}
+
 struct WindowConfig {
     std::string title    = "Obscura-Safe-Vault";
     int         width    = 1280;
@@ -56,6 +66,13 @@ public:
     // false (some software/headless backends), the app loop must cap its own
     // frame rate to avoid spinning the GPU at 100%.
     bool          vsync()        const noexcept { return vsync_; }
+
+    // True unless the window is minimized/hidden/fully occluded — used to skip
+    // the idle-heartbeat redraw when nothing would be visible anyway.
+    bool is_visible() const noexcept
+    {
+        return window_ != nullptr && window_flags_visible(SDL_GetWindowFlags(window_));
+    }
 
 private:
     SDL_Window*   window_   = nullptr;
