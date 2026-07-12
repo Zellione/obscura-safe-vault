@@ -45,7 +45,10 @@ void disable_core_dumps() noexcept
 
 bool redirect_stream_to_file(std::FILE* stream, const std::filesystem::path& path) noexcept
 {
-    return std::freopen(path.string().c_str(), "a", stream) != nullptr;
+    // Binary mode: text mode on Windows translates '\n' to "\r\n", which
+    // would make the on-disk line endings platform-dependent (mirrors
+    // error_log.cpp / theme_pref.cpp's own file writes).
+    return std::freopen(path.string().c_str(), "ab", stream) != nullptr;
 }
 
 void redirect_diagnostics_to_log_file() noexcept
