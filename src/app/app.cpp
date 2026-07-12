@@ -33,6 +33,19 @@ namespace app {
 
 bool App::init()
 {
+    // A Windows Release build runs as a windowless (WindowedApp) subsystem
+    // process, so stdout/stderr start with no valid OS handle at all — every
+    // write to them fails, and C++23's std::print/std::println throw
+    // std::system_error on such a failure (unlike old fprintf), which would
+    // crash the whole process the first time any of the many existing
+    // std::println(stderr, "[Module] ...") diagnostics ran. Redirect both to
+    // a log file before anything else can print, so every diagnostic in the
+    // app — previously invisible in a windowless build — becomes visible
+    // instead of throwing (no-op on Linux/macOS/Debug, which keep a console).
+#ifdef NDEBUG
+    platform::redirect_diagnostics_to_log_file();
+#endif
+
     // Log-before-die: an uncaught exception anywhere (e.g. std::bad_alloc from
     // an STL container) would otherwise call std::terminate() and vanish with
     // zero trace, since Release is a windowless app with no console. Install

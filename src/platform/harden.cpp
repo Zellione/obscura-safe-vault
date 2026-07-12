@@ -1,6 +1,10 @@
 #include "harden.h"
 
+#include <cstdio>
+#include <filesystem>
 #include <print>
+
+#include "platform/paths.h"
 
 #if defined(_WIN32)
 // Windows: core dumps work differently; no action needed.
@@ -36,6 +40,25 @@ void disable_core_dumps() noexcept
     if (setrlimit(RLIMIT_CORE, &zero_core) != 0) {
         std::println(stderr, "[Platform] setrlimit(RLIMIT_CORE, 0) failed");
     }
+#endif
+}
+
+bool redirect_stream_to_file(std::FILE* stream, const std::filesystem::path& path) noexcept
+{
+    // Binary mode: text mode on Windows translates '\n' to "\r\n", which
+    // would make the on-disk line endings platform-dependent (mirrors
+    // error_log.cpp / theme_pref.cpp's own file writes).
+    return std::freopen(path.string().c_str(), "ab", stream) != nullptr;
+}
+
+void redirect_diagnostics_to_log_file() noexcept
+{
+#if defined(_WIN32)
+    const std::filesystem::path dir = config_dir();
+    if (dir.empty()) return;
+    const std::filesystem::path log_path = dir / "console.log";
+    redirect_stream_to_file(stdout, log_path);
+    redirect_stream_to_file(stderr, log_path);
 #endif
 }
 
