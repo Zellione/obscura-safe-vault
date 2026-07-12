@@ -74,10 +74,25 @@ public:
         return window_ != nullptr && window_flags_visible(SDL_GetWindowFlags(window_));
     }
 
+    // True while the window is in the borderless-maximized fullscreen state
+    // entered via set_fullscreen(true).
+    bool is_fullscreen() const noexcept { return fullscreen_; }
+
+    // Toggle borderless-maximized fullscreen. Entering saves the current
+    // windowed position/size so leaving can restore it exactly. A display
+    // bounds lookup failure leaves the window state unchanged (logged, not
+    // fatal) — same log-and-degrade pattern as the VSync fallback in init().
+    void set_fullscreen(bool on);
+
 private:
     SDL_Window*   window_   = nullptr;
     SDL_Renderer* renderer_ = nullptr;
     bool          vsync_    = false;
+    bool fullscreen_  = false;
+    int  windowed_x_  = 0;
+    int  windowed_y_  = 0;
+    int  windowed_w_  = 0;
+    int  windowed_h_  = 0;
 };
 
 } // namespace gfx

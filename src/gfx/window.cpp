@@ -73,6 +73,33 @@ void Window::shutdown()
     SDL_Quit();
 }
 
+void Window::set_fullscreen(bool on)
+{
+    if (!window_ || on == fullscreen_) return;
+
+    if (on) {
+        SDL_GetWindowPosition(window_, &windowed_x_, &windowed_y_);
+        SDL_GetWindowSize(window_, &windowed_w_, &windowed_h_);
+
+        const SDL_DisplayID display = SDL_GetDisplayForWindow(window_);
+        SDL_Rect bounds{};
+        if (!SDL_GetDisplayUsableBounds(display, &bounds)) {
+            std::println(stderr, "[gfx::Window] SDL_GetDisplayUsableBounds failed: {}",
+                         SDL_GetError());
+            return;   // stay windowed rather than resize to a garbage rect
+        }
+
+        SDL_SetWindowBordered(window_, false);
+        SDL_SetWindowPosition(window_, bounds.x, bounds.y);
+        SDL_SetWindowSize(window_, bounds.w, bounds.h);
+    } else {
+        SDL_SetWindowBordered(window_, true);
+        SDL_SetWindowSize(window_, windowed_w_, windowed_h_);
+        SDL_SetWindowPosition(window_, windowed_x_, windowed_y_);
+    }
+    fullscreen_ = on;
+}
+
 bool Window::poll_event(SDL_Event& out) const
 {
     return SDL_PollEvent(&out);
