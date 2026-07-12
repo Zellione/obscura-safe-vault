@@ -1,9 +1,8 @@
 #include "aead.h"
 
-#include <print>
-
 #include <monocypher.h>
 
+#include "platform/safe_print.h"
 #include "random.h"
 
 namespace crypto {
@@ -20,7 +19,7 @@ bool encrypt_chunk(std::span<const uint8_t, KEY_SIZE> key,
     uint8_t* tag    = out.data() + NONCE_SIZE + plaintext.size();
 
     if (!fill_random(std::span<uint8_t>(nonce, NONCE_SIZE))) {
-        std::println(stderr, "[crypto::aead] nonce generation failed");
+        platform::safe_println(stderr, "[crypto::aead] nonce generation failed");
         out.clear();
         return false;
     }

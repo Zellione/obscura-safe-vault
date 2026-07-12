@@ -6,13 +6,13 @@
 
 #include <array>
 #include <cstdio>
-#include <print>
 
 #if defined(_WIN32)
 #  include <io.h>
 #endif
 
 #include "crypto/random.h"
+#include "platform/safe_print.h"
 
 namespace platform {
 
@@ -89,7 +89,7 @@ std::optional<std::vector<uint8_t>> read_file(const std::filesystem::path& path)
 bool write_new_keyfile(const std::filesystem::path& path)
 {
     if (std::error_code ec; std::filesystem::exists(path, ec)) {
-        std::println(stderr, "[Platform] refusing to overwrite existing keyfile {}",
+        platform::safe_println(stderr, "[Platform] refusing to overwrite existing keyfile {}",
                      path.string());
         return false;
     }

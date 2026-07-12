@@ -13,7 +13,6 @@
 #ifdef OSV_VENDORED_AV
 #include <memory>
 #include <optional>
-#include <print>
 
 #include "gfx/yuv_texture.h"
 #include "media/av_sync.h"
@@ -21,6 +20,7 @@
 #include "media/video_decoder.h"
 #include "media/video_source.h"
 #include "media/volume_setting.h"
+#include "platform/safe_print.h"
 #include "vault/index.h"
 #include "vault/vault.h"
 #endif
@@ -78,11 +78,11 @@ struct VideoPlayback::Impl {
         auto src = media::VideoSource::open(vault, node);
         avio_ = std::make_unique<media::ChunkAvio>(std::move(src));
         if (!avio_->valid()) {
-            std::println(stderr, "[VideoPlayback] AVIO init failed");
+            platform::safe_println(stderr, "[VideoPlayback] AVIO init failed");
             return;
         }
         if (!decoder_.open(avio_->ctx())) {
-            std::println(stderr, "[VideoPlayback] decoder open failed");
+            platform::safe_println(stderr, "[VideoPlayback] decoder open failed");
             return;
         }
         valid_ = true;
@@ -96,7 +96,7 @@ struct VideoPlayback::Impl {
         // ref-counted; the matching SDL_QuitSubSystem runs in the destructor.
         if (decoder_.has_audio()) {
             if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
-                std::println(stderr, "[VideoPlayback] audio subsystem init failed: {}",
+                platform::safe_println(stderr, "[VideoPlayback] audio subsystem init failed: {}",
                              SDL_GetError());
             } else {
                 audio_subsystem_ = true;
@@ -107,7 +107,7 @@ struct VideoPlayback::Impl {
                 audio_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &audio_spec,
                                                    nullptr, nullptr);
                 if (!audio_) {
-                    std::println(stderr, "[VideoPlayback] audio open failed: {}", SDL_GetError());
+                    platform::safe_println(stderr, "[VideoPlayback] audio open failed: {}", SDL_GetError());
                 } else {
                     SDL_SetAudioStreamGain(audio_, media::effective_gain(vol_.level, vol_.muted));
                 }

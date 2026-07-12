@@ -21,7 +21,8 @@ extern "C" {
 #endif
 
 #include <cstring>
-#include <print>
+
+#include "platform/safe_print.h"
 
 namespace media {
 
@@ -56,7 +57,7 @@ void VideoDecoder::reset()
 // Log an open() failure, release any partially-acquired state, and return false.
 bool VideoDecoder::fail_open(std::string_view msg)
 {
-    std::println(stderr, "[VideoDecoder] {}", msg);
+    platform::safe_println(stderr, "[VideoDecoder] {}", msg);
     reset();
     return false;
 }
@@ -135,7 +136,7 @@ bool VideoDecoder::open(AVIOContext* pb)
     if (audio_index_ >= 0) {
         const AVStream* audio_stream = fmt_->streams[audio_index_];
         if (audio_stream && !audio_dec_.open(audio_stream)) {
-            std::println(stderr, "[VideoDecoder] Audio stream found but failed to open decoder; continuing video-only");
+            platform::safe_println(stderr, "[VideoDecoder] Audio stream found but failed to open decoder; continuing video-only");
             audio_index_ = -1;
         }
     }
@@ -146,7 +147,7 @@ bool VideoDecoder::open(AVIOContext* pb)
 bool VideoDecoder::seek(double ts_seconds)
 {
     if (!fmt_ || stream_index_ < 0) {
-        std::println(stderr, "[VideoDecoder] Cannot seek: not opened");
+        platform::safe_println(stderr, "[VideoDecoder] Cannot seek: not opened");
         return false;
     }
 
@@ -160,7 +161,7 @@ bool VideoDecoder::seek(double ts_seconds)
 
     // Perform keyframe-anchored seek (backward to nearest keyframe)
     if (const int ret = av_seek_frame(fmt_, stream_index_, ts, AVSEEK_FLAG_BACKWARD); ret < 0) {
-        std::println(stderr, "[VideoDecoder] av_seek_frame failed: {}", ret);
+        platform::safe_println(stderr, "[VideoDecoder] av_seek_frame failed: {}", ret);
         return false;
     }
 
@@ -235,7 +236,7 @@ std::optional<DecodedFrame> VideoDecoder::convert_to_i420(double pts_seconds)
             nullptr
         );
         if (!sws_) {
-            std::println(stderr, "[VideoDecoder] Failed to create swscale context");
+            platform::safe_println(stderr, "[VideoDecoder] Failed to create swscale context");
             return std::nullopt;
         }
     }
@@ -244,7 +245,7 @@ std::optional<DecodedFrame> VideoDecoder::convert_to_i420(double pts_seconds)
     if (!conv_) {
         conv_ = av_frame_alloc();
         if (!conv_) {
-            std::println(stderr, "[VideoDecoder] Failed to allocate conversion frame");
+            platform::safe_println(stderr, "[VideoDecoder] Failed to allocate conversion frame");
             return std::nullopt;
         }
     }
@@ -258,7 +259,7 @@ std::optional<DecodedFrame> VideoDecoder::convert_to_i420(double pts_seconds)
     conv_->height = frame_->height;
 
     if (int buf_ret = av_frame_get_buffer(conv_, 0); buf_ret < 0) {
-        std::println(stderr, "[VideoDecoder] av_frame_get_buffer failed: {}", buf_ret);
+        platform::safe_println(stderr, "[VideoDecoder] av_frame_get_buffer failed: {}", buf_ret);
         return std::nullopt;
     }
 
@@ -271,7 +272,7 @@ std::optional<DecodedFrame> VideoDecoder::convert_to_i420(double pts_seconds)
                             conv_->data,
                             conv_->linesize);
         ret < 0) {
-        std::println(stderr, "[VideoDecoder] sws_scale failed: {}", ret);
+        platform::safe_println(stderr, "[VideoDecoder] sws_scale failed: {}", ret);
         return std::nullopt;
     }
 
@@ -303,7 +304,7 @@ bool VideoDecoder::read_and_route()
         if (cloned) {
             vq_.push_back(cloned);
         } else {
-            std::println(stderr, "[VideoDecoder] packet clone failed (out of memory); dropping packet");
+            platform::safe_println(stderr, "[VideoDecoder] packet clone failed (out of memory); dropping packet");
         }
     } else if (audio_index_ >= 0 && pkt_->stream_index == audio_index_) {
         // Audio packet: clone and queue
@@ -311,7 +312,7 @@ bool VideoDecoder::read_and_route()
         if (cloned) {
             aq_.push_back(cloned);
         } else {
-            std::println(stderr, "[VideoDecoder] packet clone failed (out of memory); dropping packet");
+            platform::safe_println(stderr, "[VideoDecoder] packet clone failed (out of memory); dropping packet");
         }
     }
     // Else: ignore packets from other streams

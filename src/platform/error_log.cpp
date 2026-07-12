@@ -4,10 +4,10 @@
 #include <exception>
 #include <fstream>
 #include <mutex>
-#include <print>
 #include <string>
 
 #include "platform/paths.h"
+#include "platform/safe_print.h"
 
 namespace platform {
 
@@ -46,7 +46,7 @@ std::mutex& log_mutex()
 
 void log_error(std::string_view tag, std::string_view message)
 {
-    std::println(stderr, "[{}] {}", tag, message);
+    safe_println(stderr, "[{}] {}", tag, message);
 
     std::lock_guard lock(log_mutex());
     static const ErrorLog log = ErrorLog::default_location();

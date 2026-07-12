@@ -2,7 +2,6 @@
 
 #include <SDL3/SDL.h>
 
-#include <print>
 #include <string>
 
 #include "gfx/renderer.h"
@@ -10,6 +9,7 @@
 #include "platform/error_log.h"
 #include "platform/harden.h"
 #include "platform/paths.h"
+#include "platform/safe_print.h"
 #include "media/volume_setting.h"
 #include "platform/theme_pref.h"
 #include "platform/volume_pref.h"
@@ -47,7 +47,7 @@ bool App::init()
 #endif
 
     if (!window_.init()) {
-        std::println(stderr, "[App] Window initialisation failed.");
+        platform::safe_println(stderr, "[App] Window initialisation failed.");
         return false;
     }
 
@@ -61,7 +61,7 @@ bool App::init()
         }
     }
     if (!font_ready_)
-        std::println(stderr, "[App] Font atlas unavailable ('{}').", OSV_DEFAULT_FONT);
+        platform::safe_println(stderr, "[App] Font atlas unavailable ('{}').", OSV_DEFAULT_FONT);
 
     cache_ = std::make_unique<gfx::TextureCache>(window_.sdl_renderer());
 
@@ -76,7 +76,7 @@ bool App::init()
     registry_.seed_if_empty(platform::default_vault_path());
     to_manager();
 
-    std::println("[App] Initialised (Phase 14 — multiple vaults).");
+    platform::safe_println(stdout, "[App] Initialised (Phase 14 — multiple vaults).");
     return true;
 }
 
@@ -323,7 +323,7 @@ bool App::maybe_auto_lock(double dt)
     active_.reset();
     active_path_.clear();
     to_manager();
-    std::println("[App] Auto-locked after {} s idle.", static_cast<int>(IDLE_LOCK_SECS));
+    platform::safe_println(stdout, "[App] Auto-locked after {} s idle.", static_cast<int>(IDLE_LOCK_SECS));
     return true;
 }
 
@@ -384,7 +384,7 @@ void App::shutdown()
     if (cache_) cache_->clear();        // destroy thumbnail textures before the renderer
     font_.release_texture();
     window_.shutdown();
-    std::println("[App] Clean shutdown.");
+    platform::safe_println(stdout, "[App] Clean shutdown.");
 }
 
 } // namespace app
