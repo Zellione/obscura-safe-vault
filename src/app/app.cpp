@@ -278,17 +278,28 @@ void App::dispatch_event(const SDL_Event& e)
 bool App::pump_events(bool animating)
 {
     SDL_Event e;
-    bool      had_event = false;
+    bool      should_redraw = false;
     if (animating) {
         // Keep ticking the animation: never block, just drain the queue.
-        while (window_.poll_event(e)) { dispatch_event(e); had_event = true; }
+        while (window_.poll_event(e)) { dispatch_event(e); should_redraw = true; }
     } else if (SDL_WaitEventTimeout(&e, IDLE_HEARTBEAT_MS)) {
         // Idle: block until an event (or the heartbeat) rather than spinning.
         dispatch_event(e);
-        had_event = true;
+        should_redraw = true;
         while (window_.poll_event(e)) dispatch_event(e);
+    } else if (window_.is_visible()) {
+        // Heartbeat woke with no event: redraw anyway (a static frame; nothing
+        // changed). On Windows with G-SYNC + Auto HDR, letting the swapchain go
+        // fully idle (zero presents) lets the display renegotiate refresh rate /
+        // tone-mapping for a static scene; the burst of frames the next
+        // mouse-move triggers then reads as a visible brightness pulse when that
+        // negotiation snaps back. Presenting on every ~250ms heartbeat keeps
+        // cadence bounded instead of falling to zero. Skipped when the window
+        // isn't actually on screen (minimized/hidden/occluded) — nothing to fix
+        // there, so don't burn GPU on it.
+        should_redraw = true;
     }
-    return had_event;
+    return should_redraw;
 }
 
 bool App::apply_nav()
@@ -362,8 +373,8 @@ void App::run()
     uint64_t prev  = SDL_GetTicksNS();
 
     while (running_) {
-        const bool animating = screen_ && screen_->animating();
-        const bool had_event = pump_events(animating);
+        const bool animating     = screen_ && screen_->animating();
+        const bool should_redraw = pump_events(animating);
 
         const uint64_t now = SDL_GetTicksNS();
         const double   dt  = static_cast<double>(now - prev) / 1'000'000'000.0;
@@ -378,7 +389,7 @@ void App::run()
         // this frame instead of after another idle heartbeat.
         const bool transitioned = apply_nav();
 
-        bool redraw = animating || had_event || transitioned || auto_locked;
+        bool redraw = animating || should_redraw || transitioned || auto_locked;
         if (screen_ && screen_->consume_dirty()) redraw = true;
         if (running_ && redraw) render_frame();
     }

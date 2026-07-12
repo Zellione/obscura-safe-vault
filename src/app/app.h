@@ -47,7 +47,7 @@ private:
 
     // run() helpers (kept small so the loop stays readable).
     void dispatch_event(const SDL_Event& e);     // quit/close here, else to screen
-    bool pump_events(bool animating);            // wait/poll + dispatch; had-event?
+    bool pump_events(bool animating);            // wait/poll + dispatch; should redraw?
     bool apply_nav();                            // resolve a transition; transitioned?
     bool maybe_auto_lock(double dt);             // idle -> wipe active_, return to manager
     void render_frame();                         // draw + present + frame-cap fallback
