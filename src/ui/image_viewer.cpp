@@ -332,11 +332,15 @@ void ImageViewer::handle_mouse_down(const SDL_MouseButtonEvent& b)
     if (b.button != SDL_BUTTON_LEFT) return;
     if (mode_ == ViewMode::Slideshow) { slideshow_.toggle_play(); return; }  // click = pause/play
     if (const int hit = strip_hit(b.x, b.y); hit >= 0) { show_image_at(hit); return; }
+    // Double-click toggles fullscreen for images and video alike; checked before
+    // the video branch so it takes precedence over seek-bar scrubbing.
     if (b.clicks >= 2) { win_.set_fullscreen(!win_.is_fullscreen()); return; }
     if (video_) { video_->handle_mouse_down(b.x, b.y); return; }   // seek-bar scrub
     if (mode_ == ViewMode::Fit) {
         const SDL_FRect vp = viewport_rect();
         if (point_in_rect(b.x, b.y, vp)) {
+            // 1.001f absorbs float rounding at the fit boundary. Edge-click only
+            // navigates when not zoomed in — a zoomed click drags/pans instead.
             const bool zoomed = fit_.zoom > fit_.fit_zoom * 1.001f;
             if (!zoomed) {
                 if (const int nav = ui::edge_nav_hit(b.x, vp.x, vp.w); nav != 0) {
