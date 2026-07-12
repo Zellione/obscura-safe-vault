@@ -639,7 +639,7 @@ void GalleryGrid::pump_import()
     if (auto res = dialogs_.file.take_result(platform::FileDialog::Purpose::Images)) {
         if (!res->empty()) {
             std::vector<std::filesystem::path> paths;
-            for (const auto& s : *res) paths.push_back(s);
+            for (const auto& s : *res) paths.emplace_back(s);
             naming_.file_op.start_import(vault_, nav_.path(), std::move(paths));
         }
         mark_dirty();   // dialog closed (import launched or cancelled) — repaint

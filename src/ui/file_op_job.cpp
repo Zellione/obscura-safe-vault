@@ -101,11 +101,30 @@ bool import_one(vault::Vault& v, const std::string& base_gallery,
     if (!bytes) { *fail_name = fname; return false; }
 
     const bool video = is_video_filename(fname);
-    const vault::VaultResult r = video ? v.add_video(base_gallery, *bytes, fname)
-                                       : v.add_image(base_gallery, *bytes, fname);
-    if (r == Ok) return true;
+    if (const vault::VaultResult r = video ? v.add_video(base_gallery, *bytes, fname)
+                                           : v.add_image(base_gallery, *bytes, fname);
+        r == Ok)
+        return true;
     *fail_name = fname;
     return false;
+}
+
+// Format the "(K failed: name1, name2, name3, +N more)" suffix for a finished
+// import's status line. Capped at 3 names — the footer renders as one
+// unwrapped text line (src/ui/gallery_grid.cpp's draw_footer_status), so an
+// uncapped list would run off the window. Extracted from run_import to keep
+// its nesting within the cpp:S134 depth cap.
+std::string format_failed_suffix(const std::vector<std::string>& failed_names)
+{
+    constexpr size_t MAX_SHOWN = 3;
+    std::string names;
+    for (size_t i = 0; i < std::min(failed_names.size(), MAX_SHOWN); ++i) {
+        if (i > 0) names += ", ";
+        names += failed_names[i];
+    }
+    if (failed_names.size() > MAX_SHOWN)
+        names += std::format(", +{} more", failed_names.size() - MAX_SHOWN);
+    return std::format(" ({} failed: {})", failed_names.size(), names);
 }
 
 FileOpOutcome run_import(vault::Vault& v, const std::string& base_gallery,
@@ -118,9 +137,8 @@ FileOpOutcome run_import(vault::Vault& v, const std::string& base_gallery,
     std::vector<std::string> failed_names;
     for (const auto& path : files) {
         if (progress.cancel.load()) break;
-        std::string fail_name;
-        if (import_one(v, base_gallery, path, &fail_name)) ++imported;
-        else                                              failed_names.push_back(fail_name);
+        if (std::string fail_name; import_one(v, base_gallery, path, &fail_name)) ++imported;
+        else                                                                     failed_names.push_back(fail_name);
         progress.done.fetch_add(1);
     }
 
@@ -136,17 +154,7 @@ FileOpOutcome run_import(vault::Vault& v, const std::string& base_gallery,
         oc.status = std::format("Import cancelled — {} imported", imported);
     } else {
         oc.status = std::format("Imported {}", count_noun(imported, "file"));
-        if (!failed_names.empty()) {
-            constexpr size_t MAX_SHOWN = 3;
-            std::string names;
-            for (size_t i = 0; i < std::min(failed_names.size(), MAX_SHOWN); ++i) {
-                if (i > 0) names += ", ";
-                names += failed_names[i];
-            }
-            if (failed_names.size() > MAX_SHOWN)
-                names += std::format(", +{} more", failed_names.size() - MAX_SHOWN);
-            oc.status += std::format(" ({} failed: {})", oc.failed, names);
-        }
+        if (!failed_names.empty()) oc.status += format_failed_suffix(failed_names);
     }
     return oc;
 }
