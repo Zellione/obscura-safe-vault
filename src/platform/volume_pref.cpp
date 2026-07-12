@@ -4,10 +4,10 @@
 #include <cerrno>
 #include <cstdlib>
 #include <fstream>
+#include <print>
 #include <string>
 
 #include "platform/paths.h"
-#include "platform/safe_print.h"
 
 namespace platform {
 
@@ -56,20 +56,20 @@ bool VolumePref::save(float volume) const
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         if (!out) {
-            platform::safe_println(stderr, "[VolumePref] cannot write {}", tmp.string());
+            std::println(stderr, "[VolumePref] cannot write {}", tmp.string());
             return false;
         }
         out << clamp01(volume) << '\n';
         out.flush();
         if (!out) {
-            platform::safe_println(stderr, "[VolumePref] write error on {}", tmp.string());
+            std::println(stderr, "[VolumePref] write error on {}", tmp.string());
             return false;
         }
     }
     std::error_code ec;
     std::filesystem::rename(tmp, file_, ec);
     if (ec) {
-        platform::safe_println(stderr, "[VolumePref] rename failed: {}", ec.message());
+        std::println(stderr, "[VolumePref] rename failed: {}", ec.message());
         std::filesystem::remove(tmp, ec);
         return false;
     }

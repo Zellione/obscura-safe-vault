@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <print>
 #include <string>
 
 #include "gfx/renderer.h"
@@ -9,7 +10,6 @@
 #include "platform/error_log.h"
 #include "platform/harden.h"
 #include "platform/paths.h"
-#include "platform/safe_print.h"
 #include "media/volume_setting.h"
 #include "platform/theme_pref.h"
 #include "platform/volume_pref.h"
@@ -33,6 +33,19 @@ namespace app {
 
 bool App::init()
 {
+    // A Windows Release build runs as a windowless (WindowedApp) subsystem
+    // process, so stdout/stderr start with no valid OS handle at all — every
+    // write to them fails, and C++23's std::print/std::println throw
+    // std::system_error on such a failure (unlike old fprintf), which would
+    // crash the whole process the first time any of the many existing
+    // std::println(stderr, "[Module] ...") diagnostics ran. Redirect both to
+    // a log file before anything else can print, so every diagnostic in the
+    // app — previously invisible in a windowless build — becomes visible
+    // instead of throwing (no-op on Linux/macOS/Debug, which keep a console).
+#ifdef NDEBUG
+    platform::redirect_diagnostics_to_log_file();
+#endif
+
     // Log-before-die: an uncaught exception anywhere (e.g. std::bad_alloc from
     // an STL container) would otherwise call std::terminate() and vanish with
     // zero trace, since Release is a windowless app with no console. Install
@@ -47,7 +60,7 @@ bool App::init()
 #endif
 
     if (!window_.init()) {
-        platform::safe_println(stderr, "[App] Window initialisation failed.");
+        std::println(stderr, "[App] Window initialisation failed.");
         return false;
     }
 
@@ -61,7 +74,7 @@ bool App::init()
         }
     }
     if (!font_ready_)
-        platform::safe_println(stderr, "[App] Font atlas unavailable ('{}').", OSV_DEFAULT_FONT);
+        std::println(stderr, "[App] Font atlas unavailable ('{}').", OSV_DEFAULT_FONT);
 
     cache_ = std::make_unique<gfx::TextureCache>(window_.sdl_renderer());
 
@@ -76,7 +89,7 @@ bool App::init()
     registry_.seed_if_empty(platform::default_vault_path());
     to_manager();
 
-    platform::safe_println(stdout, "[App] Initialised (Phase 14 — multiple vaults).");
+    std::println("[App] Initialised (Phase 14 — multiple vaults).");
     return true;
 }
 
@@ -323,7 +336,7 @@ bool App::maybe_auto_lock(double dt)
     active_.reset();
     active_path_.clear();
     to_manager();
-    platform::safe_println(stdout, "[App] Auto-locked after {} s idle.", static_cast<int>(IDLE_LOCK_SECS));
+    std::println("[App] Auto-locked after {} s idle.", static_cast<int>(IDLE_LOCK_SECS));
     return true;
 }
 
@@ -384,7 +397,7 @@ void App::shutdown()
     if (cache_) cache_->clear();        // destroy thumbnail textures before the renderer
     font_.release_texture();
     window_.shutdown();
-    platform::safe_println(stdout, "[App] Clean shutdown.");
+    std::println("[App] Clean shutdown.");
 }
 
 } // namespace app

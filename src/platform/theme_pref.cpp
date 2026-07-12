@@ -1,10 +1,10 @@
 #include "platform/theme_pref.h"
 
 #include <fstream>
+#include <print>
 #include <string>
 
 #include "platform/paths.h"
-#include "platform/safe_print.h"
 
 namespace platform {
 
@@ -41,20 +41,20 @@ bool ThemePref::save(gfx::ThemeId id) const
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         if (!out) {
-            platform::safe_println(stderr, "[ThemePref] cannot write {}", tmp.string());
+            std::println(stderr, "[ThemePref] cannot write {}", tmp.string());
             return false;
         }
         out << gfx::theme_slug(id) << '\n';
         out.flush();
         if (!out) {
-            platform::safe_println(stderr, "[ThemePref] write error on {}", tmp.string());
+            std::println(stderr, "[ThemePref] write error on {}", tmp.string());
             return false;
         }
     }
     std::error_code ec;
     std::filesystem::rename(tmp, file_, ec);
     if (ec) {
-        platform::safe_println(stderr, "[ThemePref] rename failed: {}", ec.message());
+        std::println(stderr, "[ThemePref] rename failed: {}", ec.message());
         std::filesystem::remove(tmp, ec);
         return false;
     }

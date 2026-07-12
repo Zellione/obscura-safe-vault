@@ -1,8 +1,7 @@
 #include "ui/export.h"
 
 #include <cstdio>
-
-#include "platform/safe_print.h"
+#include <print>
 
 namespace ui {
 
@@ -35,7 +34,7 @@ vault::VaultResult export_one_image(const vault::Vault&          vault,
     scratch.wipe();
 
     if (!ok) {
-        platform::safe_println(stderr, "[Export] failed to write {}", out_path.string());
+        std::println(stderr, "[Export] failed to write {}", out_path.string());
         return vault::VaultResult::IoError;
     }
     return vault::VaultResult::Ok;

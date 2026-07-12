@@ -1,8 +1,7 @@
 #include "platform/file_dialog.h"
 
 #include <array>
-
-#include "platform/safe_print.h"
+#include <print>
 
 namespace platform {
 
@@ -15,7 +14,7 @@ void SDLCALL FileDialog::on_files(void* userdata, const char* const* filelist, i
         for (const char* const* p = filelist; *p != nullptr; ++p)
             self->paths_.emplace_back(*p);
     } else {
-        platform::safe_println(stderr, "[Platform] File dialog error: {}", SDL_GetError());
+        std::println(stderr, "[Platform] File dialog error: {}", SDL_GetError());
     }
     self->state_ = St::Done;
 }

@@ -1,9 +1,10 @@
 #include "chunk_store.h"
 
+#include <print>
+
 #include "chunk_codec.h"
 #include "crypto/aead.h"
 #include "file_util.h"
-#include "platform/safe_print.h"
 
 namespace vault {
 
@@ -15,12 +16,12 @@ bool ChunkStore::append_at_end(std::span<const uint8_t> bytes, uint64_t& out_off
 {
     uint64_t end = 0;
     if (!seek_end(fp_, end)) {
-        platform::safe_println(stderr, "[vault::chunk_store] seek to end failed");
+        std::println(stderr, "[vault::chunk_store] seek to end failed");
         return false;
     }
     if (!bytes.empty() &&
         std::fwrite(bytes.data(), 1, bytes.size(), fp_) != bytes.size()) {
-        platform::safe_println(stderr, "[vault::chunk_store] write of {} bytes failed", bytes.size());
+        std::println(stderr, "[vault::chunk_store] write of {} bytes failed", bytes.size());
         return false;
     }
     out_offset = end;

@@ -3,13 +3,13 @@
 #include "crypto/secure_mem.h"
 #include "ui/meta_json.h"
 #include "image/format_registry.h"
-#include "platform/safe_print.h"
 #include "vault/vault.h"
 
 #include "miniz.h"
 
 #include <cstring>
 #include <fstream>
+#include <print>
 #include <vector>
 
 namespace ui {
@@ -132,7 +132,7 @@ bool open_archive(const std::filesystem::path& path, const char* tag,
         mz_zip_reader_init_mem(&zip, archive.data(), archive.size(), 0))
         return true;
     out.error = "Could not open archive";
-    platform::safe_println(stderr, "[{}] open failed: {}", tag, path.string());
+    std::println(stderr, "[{}] open failed: {}", tag, path.string());
     return false;
 }
 

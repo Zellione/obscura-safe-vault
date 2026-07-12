@@ -16,12 +16,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <print>
 #include <span>
 #include <utility>
 
 #include <monocypher.h>
-
-#include "platform/safe_print.h"
 
 #if defined(_WIN32)
 #  include <windows.h>
@@ -91,7 +90,7 @@ public:
     {
         if (!locked_ && should_warn_mlock_once()) {
             // Non-fatal: we still wipe on destruction. Warn once process-wide.
-            platform::safe_println(stderr,
+            std::println(stderr,
                 "[SecureMem] WARNING: mlock failed (RLIMIT_MEMLOCK too low?) — "
                 "decoded data may be swappable. Raise with: ulimit -l / systemd LimitMEMLOCK.");
         }
@@ -192,13 +191,13 @@ public:
         try {
             data_ = std::make_unique<uint8_t[]>(n);
         } catch (const std::bad_alloc&) {
-            platform::safe_println(stderr, "[crypto] SecureBytes alloc of {} bytes failed", n);
+            std::println(stderr, "[crypto] SecureBytes alloc of {} bytes failed", n);
             return false;
         }
         size_   = n;
         locked_ = detail::mem_lock(data_.get(), size_);
         if (!locked_ && should_warn_mlock_once()) {
-            platform::safe_println(stderr,
+            std::println(stderr,
                 "[SecureMem] WARNING: mlock failed (RLIMIT_MEMLOCK too low?) — "
                 "decoded data may be swappable. Raise with: ulimit -l / systemd LimitMEMLOCK.");
         }

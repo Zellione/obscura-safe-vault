@@ -15,8 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-
-#include "platform/safe_print.h"
+#include <print>
 
 namespace gfx {
 
@@ -83,7 +82,7 @@ bool FontAtlas::bake_from_file(const char* path, float pixel_height)
     if (!path) return false;
     std::FILE* f = std::fopen(path, "rb");
     if (!f) {
-        platform::safe_println(stderr, "[gfx::FontAtlas] cannot open font '{}'", path);
+        std::println(stderr, "[gfx::FontAtlas] cannot open font '{}'", path);
         return false;
     }
     std::fseek(f, 0, SEEK_END);

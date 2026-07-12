@@ -1,11 +1,10 @@
 #include "kdf.h"
 
 #include <cstring>
+#include <print>
 #include <vector>
 
 #include <monocypher.h>
-
-#include "platform/safe_print.h"
 
 namespace crypto {
 
@@ -20,7 +19,7 @@ bool derive_key(std::span<const uint8_t>            password,
     // the same policy on untrusted vaults, this guards direct callers.
     if (params.t_cost == 0 || params.parallelism == 0 ||
         params.m_cost_kib < 8 * params.parallelism) {
-        platform::safe_println(stderr, "[crypto] rejected invalid Argon2 parameters");
+        std::println(stderr, "[crypto] rejected invalid Argon2 parameters");
         return false;
     }
 
@@ -38,7 +37,7 @@ bool derive_key(std::span<const uint8_t>            password,
     try {
         work_area.resize(work_size);
     } catch (const std::bad_alloc&) {
-        platform::safe_println(stderr, "[crypto] Argon2 work area of {} KiB unavailable",
+        std::println(stderr, "[crypto] Argon2 work area of {} KiB unavailable",
                      params.m_cost_kib);
         return false;
     }

@@ -23,7 +23,9 @@ TEST(safe_println_writes_formatted_text_to_a_writable_stream)
     std::error_code ec;
     fs::remove(p, ec);
 
-    std::FILE* f = std::fopen(p.string().c_str(), "w");
+    // Binary mode: text mode on Windows translates '\n' to "\r\n", which
+    // would make the expected bytes platform-dependent (mirrors error_log.cpp).
+    std::FILE* f = std::fopen(p.string().c_str(), "wb");
     REQUIRE(f != nullptr);
     platform::safe_println(f, "[Tag] value={}", 42);
     std::fclose(f);

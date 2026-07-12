@@ -18,7 +18,7 @@ extern "C" {
 #pragma GCC diagnostic pop
 #endif
 
-#include "platform/safe_print.h"
+#include <print>
 
 namespace media {
 
@@ -40,37 +40,37 @@ void AudioDecoder::reset()
 bool AudioDecoder::open(const AVStream* stream)
 {
     if (!stream) {
-        platform::safe_println(stderr, "[AudioDecoder] stream is null");
+        std::println(stderr, "[AudioDecoder] stream is null");
         return false;
     }
 
     if (!stream->codecpar) {
-        platform::safe_println(stderr, "[AudioDecoder] codecpar is null");
+        std::println(stderr, "[AudioDecoder] codecpar is null");
         return false;
     }
 
     // Find and open the audio decoder
     const AVCodec* codec = avcodec_find_decoder(stream->codecpar->codec_id);
     if (!codec) {
-        platform::safe_println(stderr, "[AudioDecoder] No decoder found for codec id {}",
+        std::println(stderr, "[AudioDecoder] No decoder found for codec id {}",
                     static_cast<int>(stream->codecpar->codec_id));
         return false;
     }
 
     ctx_ = avcodec_alloc_context3(codec);
     if (!ctx_) {
-        platform::safe_println(stderr, "[AudioDecoder] Failed to allocate codec context");
+        std::println(stderr, "[AudioDecoder] Failed to allocate codec context");
         return false;
     }
 
     if (avcodec_parameters_to_context(ctx_, stream->codecpar) < 0) {
-        platform::safe_println(stderr, "[AudioDecoder] avcodec_parameters_to_context failed");
+        std::println(stderr, "[AudioDecoder] avcodec_parameters_to_context failed");
         reset();
         return false;
     }
 
     if (avcodec_open2(ctx_, codec, nullptr) < 0) {
-        platform::safe_println(stderr, "[AudioDecoder] avcodec_open2 failed");
+        std::println(stderr, "[AudioDecoder] avcodec_open2 failed");
         reset();
         return false;
     }
@@ -83,7 +83,7 @@ bool AudioDecoder::open(const AVStream* stream)
     // Allocate frame buffer
     frame_ = av_frame_alloc();
     if (!frame_) {
-        platform::safe_println(stderr, "[AudioDecoder] Failed to allocate frame");
+        std::println(stderr, "[AudioDecoder] Failed to allocate frame");
         reset();
         return false;
     }
@@ -99,7 +99,7 @@ void AudioDecoder::decode(const AVPacket* pkt, std::vector<AudioFrame>& out)
 
     // Send packet (may be nullptr to flush/drain)
     if (avcodec_send_packet(ctx_, pkt) < 0) {
-        platform::safe_println(stderr, "[AudioDecoder] avcodec_send_packet failed");
+        std::println(stderr, "[AudioDecoder] avcodec_send_packet failed");
         return;
     }
 
@@ -124,7 +124,7 @@ void AudioDecoder::decode(const AVPacket* pkt, std::vector<AudioFrame>& out)
         // Use pure interleave function to convert all sample formats to F32
         if (!interleave_to_f32(frame_->data, frame_->ch_layout.nb_channels, n, ch,
                                frame_->format, af.samples)) {
-            platform::safe_println(stderr, "[AudioDecoder] Unsupported sample format: {}",
+            std::println(stderr, "[AudioDecoder] Unsupported sample format: {}",
                         frame_->format);
             continue;
         }
@@ -133,7 +133,7 @@ void AudioDecoder::decode(const AVPacket* pkt, std::vector<AudioFrame>& out)
     }
 
     if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) {
-        platform::safe_println(stderr, "[AudioDecoder] avcodec_receive_frame error: {}", ret);
+        std::println(stderr, "[AudioDecoder] avcodec_receive_frame error: {}", ret);
     }
 }
 

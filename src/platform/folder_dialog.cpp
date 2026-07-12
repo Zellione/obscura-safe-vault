@@ -1,6 +1,6 @@
 #include "platform/folder_dialog.h"
 
-#include "platform/safe_print.h"
+#include <print>
 
 namespace platform {
 
@@ -12,7 +12,7 @@ void SDLCALL FolderDialog::on_folder(void* userdata, const char* const* filelist
     if (filelist) {
         if (*filelist != nullptr) self->path_ = *filelist;   // first (only) folder
     } else {
-        platform::safe_println(stderr, "[Platform] Folder dialog error: {}", SDL_GetError());
+        std::println(stderr, "[Platform] Folder dialog error: {}", SDL_GetError());
     }
     self->state_ = St::Done;
 }

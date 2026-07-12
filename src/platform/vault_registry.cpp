@@ -1,10 +1,10 @@
 #include "platform/vault_registry.h"
 
 #include <fstream>
+#include <print>
 #include <string>
 
 #include "platform/paths.h"
-#include "platform/safe_print.h"
 
 namespace platform {
 
@@ -74,20 +74,20 @@ bool VaultRegistry::write(const std::vector<std::filesystem::path>& entries) con
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         if (!out) {
-            platform::safe_println(stderr, "[VaultRegistry] cannot write {}", tmp.string());
+            std::println(stderr, "[VaultRegistry] cannot write {}", tmp.string());
             return false;
         }
         for (const auto& e : entries) out << e.string() << '\n';
         out.flush();
         if (!out) {
-            platform::safe_println(stderr, "[VaultRegistry] write error on {}", tmp.string());
+            std::println(stderr, "[VaultRegistry] write error on {}", tmp.string());
             return false;
         }
     }
     std::error_code ec;
     std::filesystem::rename(tmp, file_, ec);
     if (ec) {
-        platform::safe_println(stderr, "[VaultRegistry] rename failed: {}", ec.message());
+        std::println(stderr, "[VaultRegistry] rename failed: {}", ec.message());
         std::filesystem::remove(tmp, ec);
         return false;
     }
