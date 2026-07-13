@@ -430,6 +430,7 @@ project "osv_tests"
         "src/ui/slideshow_model.cpp",
         "src/ui/playback_model.cpp",
         "src/ui/video_playback.cpp",
+        "src/ui/archive_reader.cpp",
     }
 
     includedirs {
