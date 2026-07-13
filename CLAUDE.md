@@ -280,7 +280,11 @@ src/
                                             hosts a fit-only VideoPlayback for video items (Phase 15).
                                             Single-image export (X) stays synchronous (one image is
                                             fast; the large multi-image export lives in GalleryGrid,
-                                            which backgrounds it, Phase 25)
+                                            which backgrounds it, Phase 25); F11/double-click toggles
+                                            a borderless fullscreen (gfx::Window::set_fullscreen) with
+                                            Esc exiting fullscreen before back-navigation, and clicking a
+                                            non-zoomed image's left/right 12% edge steps to the prev/next
+                                            image (Phase 31)
              playback_model.*,            ← pure video transport maths: clock/clamp/seek-bar
                                             map/mm:ss/frame-due (Phase 15, pure/tested)
              video_playback.*,            ← in-viewer video player: decoder + YUV texture +

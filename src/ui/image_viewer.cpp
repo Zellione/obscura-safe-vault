@@ -265,7 +265,13 @@ void ImageViewer::handle_key(SDL_Keycode key, SDL_Scancode sc)
             // best-effort: favorite toggle failure is benign, UI re-reads state
             if (!album_.images.empty()) (void)vault_.toggle_favorite(album_.paths[index_]);
             return;
-        case SDLK_ESCAPE: go_back(); return;
+        case SDLK_ESCAPE:
+            if (win_.is_fullscreen()) { win_.set_fullscreen(false); return; }
+            go_back();
+            return;
+        case SDLK_F11:
+            win_.set_fullscreen(!win_.is_fullscreen());
+            return;
         default: break;
     }
     if (item_is_video(album_.images, index_)) { handle_key_video(key, sc); return; }
@@ -326,11 +332,24 @@ void ImageViewer::handle_mouse_down(const SDL_MouseButtonEvent& b)
     if (b.button != SDL_BUTTON_LEFT) return;
     if (mode_ == ViewMode::Slideshow) { slideshow_.toggle_play(); return; }  // click = pause/play
     if (const int hit = strip_hit(b.x, b.y); hit >= 0) { show_image_at(hit); return; }
+    // Double-click toggles fullscreen for images and video alike; checked before
+    // the video branch so it takes precedence over seek-bar scrubbing.
+    if (b.clicks >= 2) { win_.set_fullscreen(!win_.is_fullscreen()); return; }
     if (video_) { video_->handle_mouse_down(b.x, b.y); return; }   // seek-bar scrub
-    if (mode_ == ViewMode::Fit) {
-        const SDL_FRect vp = viewport_rect();
-        if (point_in_rect(b.x, b.y, vp)) fit_.dragging = true;
+    if (mode_ != ViewMode::Fit) return;
+
+    const SDL_FRect vp = viewport_rect();
+    if (!point_in_rect(b.x, b.y, vp)) return;
+
+    // 1.001f absorbs float rounding at the fit boundary. Edge-click only
+    // navigates when not zoomed in — a zoomed click drags/pans instead.
+    if (const bool zoomed = fit_.zoom > fit_.fit_zoom * 1.001f; !zoomed) {
+        if (const int nav = ui::edge_nav_hit(b.x, vp.x, vp.w); nav != 0) {
+            set_index(nav);
+            return;
+        }
     }
+    fit_.dragging = true;
 }
 
 void ImageViewer::handle_wheel(const SDL_MouseWheelEvent& w)

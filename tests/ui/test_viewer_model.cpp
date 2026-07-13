@@ -90,3 +90,30 @@ TEST(viewer_zoom_at_keeps_cursor_point_fixed)
     auto clamped = ui::zoom_at({100, 100}, 1.0f, {0, 0}, 9999.0f, {100, 100}, {200, 200});
     CHECK(approx(clamped.zoom, ui::ZOOM_MAX));
 }
+
+TEST(viewer_edge_nav_hit_left_and_right_zones)
+{
+    // Viewport [0, 1000): edge = 1000 * 0.12 = 120.
+    CHECK_EQ(ui::edge_nav_hit(0.0f, 0.0f, 1000.0f), -1);     // far left edge
+    CHECK_EQ(ui::edge_nav_hit(119.0f, 0.0f, 1000.0f), -1);   // just inside left zone
+    CHECK_EQ(ui::edge_nav_hit(881.0f, 0.0f, 1000.0f), 1);    // just inside right zone
+    CHECK_EQ(ui::edge_nav_hit(999.0f, 0.0f, 1000.0f), 1);    // far right edge
+}
+
+TEST(viewer_edge_nav_hit_dead_zone_and_boundaries)
+{
+    CHECK_EQ(ui::edge_nav_hit(500.0f, 0.0f, 1000.0f), 0);    // dead center
+    CHECK_EQ(ui::edge_nav_hit(120.0f, 0.0f, 1000.0f), 0);    // exactly at left boundary: not < edge
+    CHECK_EQ(ui::edge_nav_hit(880.0f, 0.0f, 1000.0f), 0);    // exactly at right boundary: not > vp_w - edge
+}
+
+TEST(viewer_edge_nav_hit_offset_viewport_and_degenerate_width)
+{
+    // Viewport offset to start at x=200, width 500: edge = 60.
+    CHECK_EQ(ui::edge_nav_hit(210.0f, 200.0f, 500.0f), -1);  // left zone, offset viewport
+    CHECK_EQ(ui::edge_nav_hit(690.0f, 200.0f, 500.0f), 1);   // right zone, offset viewport
+    CHECK_EQ(ui::edge_nav_hit(450.0f, 200.0f, 500.0f), 0);   // center of offset viewport
+
+    CHECK_EQ(ui::edge_nav_hit(5.0f, 0.0f, 0.0f), 0);         // zero-width viewport: no hit
+    CHECK_EQ(ui::edge_nav_hit(5.0f, 0.0f, -10.0f), 0);       // negative width: no hit
+}

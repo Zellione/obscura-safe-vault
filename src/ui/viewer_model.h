@@ -118,4 +118,21 @@ struct ZoomResult {
     return std::clamp(cell_ctr - strip_w * 0.5f, 0.0f, max_scroll);
 }
 
+// Fraction of the viewport width treated as a click-to-navigate edge zone
+// (image viewer edge-click navigation, Phase 31).
+inline constexpr float EDGE_NAV_FRAC = 0.12f;
+
+// -1 = previous-image hit (left edge), +1 = next-image hit (right edge), 0 = no
+// hit. `x` and `vp_x`/`vp_w` are in the same coordinate space as
+// ImageViewer::viewport_rect() (screen pixels, viewport may be offset by the
+// thumbnail strip). A non-positive `vp_w` never hits (degenerate viewport).
+[[nodiscard]] constexpr int edge_nav_hit(float x, float vp_x, float vp_w) noexcept
+{
+    if (vp_w <= 0.0f) return 0;
+    const float edge = vp_w * EDGE_NAV_FRAC;
+    if (x < vp_x + edge) return -1;
+    if (x > vp_x + vp_w - edge) return 1;
+    return 0;
+}
+
 } // namespace ui
