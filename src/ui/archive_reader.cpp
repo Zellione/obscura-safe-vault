@@ -68,18 +68,20 @@ bool ArchiveReader::extract(size_t index, crypto::SecureBytes& out) const
     struct archive* a = open_stream(data_);
     if (!a) return false;
 
+    // A while loop (not a for loop) so the loop header stays concerned only
+    // with `i`/`found` control, and a single break covers the one early-exit
+    // case (a fatal/EOF read mid-stream) — `found` naturally ends the loop
+    // via the condition once the target header has been read.
     struct archive_entry* entry = nullptr;
     bool found = false;
-    bool error = false;
-    for (size_t i = 0; i <= index && !found && !error; ++i) {
+    size_t i = 0;
+    while (!found && i <= index) {
         if (const int r = archive_read_next_header(a, &entry);
-            r == ARCHIVE_EOF || (r != ARCHIVE_OK && r < ARCHIVE_WARN)) {
-            error = true;
-        } else if (i == index) {
-            found = true;
-        } else {
-            archive_read_data_skip(a);
-        }
+            r == ARCHIVE_EOF || (r != ARCHIVE_OK && r < ARCHIVE_WARN))
+            break;
+        found = (i == index);
+        if (!found) archive_read_data_skip(a);
+        ++i;
     }
     if (!found) {
         archive_read_free(a);

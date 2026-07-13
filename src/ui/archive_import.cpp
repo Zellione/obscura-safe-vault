@@ -79,7 +79,7 @@ void run_placements(vault::Vault& v, const ArchiveReader& reader, const ZipPlan&
 // Shared tail of both import_archive and import_archive_cbz once a plan is
 // ready: create the galleries it needs, then store every placement. Factored
 // out because the two callers would otherwise duplicate this sequence.
-ZipImportOutcome finish_import(vault::Vault& v, ArchiveReader& reader, const ZipPlan& plan,
+ZipImportOutcome finish_import(vault::Vault& v, const ArchiveReader& reader, const ZipPlan& plan,
                                ImportProgress* progress)
 {
     ZipImportOutcome out;
