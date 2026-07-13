@@ -137,6 +137,7 @@ void draw_file_op_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
         case Delete:   title = "Deleting…";  unit = "items";  break;
         case Transfer: title = "Moving…";    unit = "files";  break;
         case Compact:  title = "Compacting…"; unit = "chunks"; break;
+        case Import:   title = "Importing…"; unit = "files";  break;
         case None:     break;
     }
     const int total = job.total();
@@ -276,25 +277,6 @@ void GalleryGrid::start_import()
     }
     error_.clear();
     dialogs_.file.open_images(win_.sdl_window());
-}
-
-void GalleryGrid::do_import(const std::filesystem::path& file_path)
-{
-    using enum vault::VaultResult;
-    auto bytes = platform::read_file(file_path);
-    if (!bytes) { error_ = "Could not read " + file_path.string(); return; }
-
-    const std::string fname = file_path.filename().string();
-    const bool video = is_video_filename(fname);
-    const vault::VaultResult res = video ? vault_.add_video(nav_.path(), *bytes, fname)
-                                         : vault_.add_image(nav_.path(), *bytes, fname);
-    switch (res) {
-        case Ok:            break;
-        case AlreadyExists: error_ = "Already exists: " + fname; break;
-        case InvalidArg:    error_ = video ? "Unsupported or corrupt video: " + fname
-                                           : "Cannot add media here."; break;
-        default:            error_ = "Import failed: " + fname; break;
-    }
 }
 
 void GalleryGrid::start_naming()
@@ -656,10 +638,11 @@ void GalleryGrid::pump_import()
 {
     if (auto res = dialogs_.file.take_result(platform::FileDialog::Purpose::Images)) {
         if (!res->empty()) {
-            for (const auto& p : *res) do_import(p);
-            refresh();
+            std::vector<std::filesystem::path> paths;
+            for (const auto& s : *res) paths.emplace_back(s);
+            naming_.file_op.start_import(vault_, nav_.path(), std::move(paths));
         }
-        mark_dirty();   // dialog closed (imported or cancelled) — repaint
+        mark_dirty();   // dialog closed (import launched or cancelled) — repaint
     }
 }
 

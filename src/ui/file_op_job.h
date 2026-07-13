@@ -27,7 +27,7 @@ using OpWorkerThread = std::jthread;
 #endif
 
 // Which bulk operation ran (drives the outcome wording).
-enum class FileOpKind { None, Export, Delete, Transfer, Compact };
+enum class FileOpKind { None, Export, Delete, Transfer, Compact, Import };
 
 struct FileOpOutcome {
     bool        ok        = false;   // the op ran to completion (or a clean cancel)
@@ -87,6 +87,15 @@ public:
     // Compact the vault in-place, reclaiming wasted_bytes(). Runs on background thread
     // with progress tracking and cooperative cancel.
     bool start_compact(vault::Vault& v);
+
+    // Import `files` (paths already picked via the multi-select file dialog)
+    // into gallery `base_gallery` of `v`. Each file is read and dispatched to
+    // add_video/add_image by extension; per-file failures are tallied, not
+    // fatal — the loop continues past them (mirrors start_export's
+    // "always succeeds, per-item failures counted" convention). `v` is kept
+    // alive by the caller for the job's life.
+    bool start_import(vault::Vault& v, std::string base_gallery,
+                      std::vector<std::filesystem::path> files);
 
     // True from a start_*() call until take_outcome() has collected the result.
     [[nodiscard]] bool active() const noexcept { return active_.load(); }

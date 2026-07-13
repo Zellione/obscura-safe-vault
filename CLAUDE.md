@@ -271,7 +271,11 @@ src/
                                             OR file_op OR transfer_.job_active) gates render/update/
                                             input + the idle-lock so the UI never touches the vault
                                             mid-job. #48 audit: Shift+C confirms compact (waste hint
-                                            in footer); cancelled-import shows reclaimable waste hint.
+                                            in footer); cancelled-import shows reclaimable waste hint;
+                                            the multi-select file-picker import now backgrounds via
+                                            FileOpKind::Import/FileOpJob::start_import instead of a
+                                            synchronous per-file loop, reusing the same progress modal
+                                            + Esc-cancel as export/delete/compact (Phase 32).
              image_viewer.*,              ← zoom/pan + thumb strip + fill-scroll + slideshow;
                                             hosts a fit-only VideoPlayback for video items (Phase 15).
                                             Single-image export (X) stays synchronous (one image is
