@@ -73,7 +73,8 @@ navigable with arrow keys.
 | Image decode | **stb_image** (header-only) | JPEG/PNG/GIF/BMP/TGA/HDR decoded directly from decrypted in-memory buffers. Zero dependencies, no temp files. |
 | Extra image formats | **libwebp 1.4.0** (WebP), **libheif 1.18.2** + **libde265 1.0.15** (HEIC) + **libaom 3.14.1** (AVIF, decoder-only) — all Phase 9 | Decode-only. Vendored git submodules, cmake-built static into `vendor/codecs-prefix/` by `scripts/build_codecs.{sh,bat}`. One `decode_heif_from_memory` covers HEIC+AVIF (libheif dispatches by brand). libaom needs **nasm**. |
 | Video decode | **FFmpeg/libav 7.1.1** (decode-only static) — Phase 15; audio — Phase 16 | Stream video frames directly from encrypted chunks via a custom `AVIOContext` over `ChunkStore` (no temp file). H.264/H.265 + ProRes/DNxHD-DNxHR/MJPEG (Phase 28, `.mov` pro codecs) video; mov/mp4/m4v + matroska/webm demuxers; libswscale for non-4:2:0; audio decoders aac/opus/mp3/vorbis/flac/ac3. Decoded audio (planar→interleaved F32) flows into an `SDL_AudioStream` (SDL handles rate/format/channel conversion — we do NOT use swresample for our resampling). A/V sync via pure `av_sync::decide()` (audio-clock tracking). Encoders/muxers/protocols/network disabled. Vendored git submodule, configure-built static into `vendor/codecs-prefix/`: Linux/macOS via `scripts/build_codecs.sh`'s `build_ffmpeg()`; Windows via the separate `scripts/build_ffmpeg_windows.sh`, run from an MSYS2 shell with `--toolchain=msvc` so FFmpeg's own `configure`/`make` produce MSVC-ABI static libs (`build_codecs.bat` only builds the cmake-based image codecs — FFmpeg needs its own configure/make, not cmake). Linked by `link_av()` (which also links swresample, a transitive dep of audio decoders) under `OSV_VENDORED_AV`. Needs **nasm** (like libaom); Windows also needs **MSYS2** (`msys2/setup-msys2` in CI) for a POSIX shell to drive FFmpeg's build system. |
-| ZIP / CBZ import | **miniz** (public-domain/MIT) — Phase 17; CBZ Phase 24 | Single-file, header-only decompression + ZIP reader. Vendored git submodule (`vendor/miniz`, pinned to master commit `e78dfd2` — no stable release tags), compiled by premake like monocypher/stb (built with `MINIZ_NO_ZLIB_COMPATIBLE_NAMES` to avoid clashing with the libz that avformat links). Decompressed entries read into mlock'd `SecureBytes`, never to disk. One header-only shim `vendor/miniz-shim/miniz_export.h` supplies the CMake-generated header so the submodule stays pristine. **CBZ (Phase 24)** reuses this exact pipeline: a `.cbz` is a plain zip imported as one page gallery (`build_cbz_plan`/`import_cbz`) — no CBR/CB7/CBT (RAR/7z/tar). |
+| ZIP / CBZ import | **miniz** (public-domain/MIT) — Phase 17; CBZ Phase 24 | Single-file, header-only decompression + ZIP reader. Vendored git submodule (`vendor/miniz`, pinned to master commit `e78dfd2` — no stable release tags), compiled by premake like monocypher/stb (built with `MINIZ_NO_ZLIB_COMPATIBLE_NAMES` to avoid clashing with the libz that avformat links). Decompressed entries read into mlock'd `SecureBytes`, never to disk. One header-only shim `vendor/miniz-shim/miniz_export.h` supplies the CMake-generated header so the submodule stays pristine. **CBZ (Phase 24)** reuses this exact pipeline: a `.cbz` is a plain zip imported as one page gallery (`build_cbz_plan`/`import_cbz`). |
+| 7z / RAR / TAR import | **libarchive 3.8.8** (BSD-2-Clause) + **zlib 1.3.2** + **xz/liblzma 5.8.3** — Phase 34 | Read-only streaming archive support layered *alongside* miniz, not replacing it: `.zip`/`.cbz` still go through the proven miniz path unchanged; `.7z`/`.rar`/`.tar`(`.gz`/`.xz`)/`.cbr`/`.cb7`/`.cbt` route through `ArchiveReader` (`src/ui/archive_reader.*`), which wraps `archive_read_open_memory` over an mlock'd buffer → `archive_read_next_header`/`archive_read_data`. Gated by `OSV_VENDORED_ARCHIVE`; `archive_import.{h,cpp}` is always declared/linked and returns a graceful "not supported" outcome without the define (mirrors `ui::VideoPlayback`'s non-AV fallback), so `gallery_grid.cpp` needs zero `#ifdef`s. libarchive has no random-access read API, so `extract()` re-opens and re-scans the stream from the start each call rather than holding every decompressed entry in memory at once. zlib/liblzma are the gzip/LZMA2 filter deps, vendored as separate submodules and discovered via `CMAKE_PREFIX_PATH` into the same `codecs-prefix/`; **bzip2 (`.tbz2`) is out of scope** — upstream ships no CMake build. Vendored git submodules, cmake-built static into `vendor/codecs-prefix/` by `scripts/build_codecs.{sh,bat}`. Writing/creating these formats, nested archives, and multi-volume/split RAR are all out of scope (read-only import of a single-volume archive only). |
 | JSON parsing | **nlohmann/json v3.12.0** — Phase 27 | Single-header MIT lib, vendored git submodule (`vendor/json`, include path `single_include/`), header-only — no build step. Used exception-free: `json::parse(..., allow_exceptions=false)` returns a discarded value on malformed input. Sole use: an archive's optional top-level `meta.json` (gallery title + tags) on ZIP/CBZ import. |
 | Thumbnails | **Pre-generated, stored encrypted in vault** | Gallery scrolling decrypts only the small thumbnail blobs — no full-image decode needed while browsing. |
 | Gallery model | **Free-nesting galleries; images only in leaf galleries** | A folder shows either sub-folders *or* images, never a mix. Cleaner grid view and simpler tree logic. |
@@ -474,6 +475,29 @@ src/
                                             (case-insensitive, files only) is excluded by every
                                             planner path — never placed, never counted as skipped
                                             (the importer consumes it for the title/tags).
+             archive_reader.*,            ← ArchiveReader (Phase 34): thin wrapper over
+                                            libarchive's streaming read API
+                                            (archive_read_open_memory over an mlock'd buffer →
+                                            archive_read_next_header/archive_read_data), gated
+                                            OSV_VENDORED_ARCHIVE (whole-file #ifdef, mirrors
+                                            media/video_decoder.h). open() does one forward pass
+                                            building entries() (ZipEntry — reused verbatim from
+                                            zip_plan.h, already format-agnostic); extract(index,
+                                            out) re-opens a fresh stream and walks forward to
+                                            index each call (no random-access API in libarchive)
+                                            — O(n) per extract, fine for gallery-sized archives.
+                                            MAX_ENTRY_BYTES=4 GiB decompression-bomb guard checked
+                                            against the entry's declared size before allocating
+                                            (mirrors chunk_codec's orig_len check).
+             archive_import.*,            ← import_archive/import_archive_cbz (Phase 34): mirrors
+                                            zip_import.*'s import_zip/import_cbz structure but
+                                            backed by ArchiveReader instead of miniz, covering
+                                            .7z/.rar/.tar(+.gz/.xz)/.cbr/.cb7/.cbt. Declared
+                                            unconditionally (no #ifdef at call sites); the .cpp
+                                            internally branches on OSV_VENDORED_ARCHIVE, returning
+                                            a graceful "not supported" ZipImportOutcome on a build
+                                            without it (mirrors ui::VideoPlayback's non-AV poster-
+                                            only fallback) — gallery_grid.cpp needs zero #ifdefs.
              zip_import.*,                ← ZIP/CBZ executor: miniz reader → mlock'd
                                             SecureBytes → Vault::add_image/add_video; triggered
                                             by `Z` key in gallery grid (Phase 17). import_cbz
@@ -496,7 +520,10 @@ src/
              zip_import_job.*,            ← ZipImportJob: runs import_cbz/import_zip (start_cbz/
                                             start_zip, shared launch() helper) on a background
                                             thread so a big archive (~10 s) never freezes the UI on
-                                            the name popup (Phase 24 fix). Threading contract: while
+                                            the name popup (Phase 24 fix). Phase 34 adds
+                                            start_archive/start_archive_cbz, thin wrappers over the
+                                            same launch() calling import_archive/import_archive_cbz
+                                            instead — no separate job class needed. Threading contract: while
                                             active() the worker owns the vault's single-thread file
                                             handle, so GalleryGrid must NOT touch the vault (no
                                             thumbnail reads/listing) — it polls total()/done() +
@@ -586,6 +613,12 @@ vendor/
   libaom/         ← git submodule, cmake → vendor/codecs-prefix (AVIF, decoder-only)
   libheif/        ← git submodule, cmake → vendor/codecs-prefix (HEIC/AVIF)
   ffmpeg/         ← git submodule, configure → vendor/codecs-prefix (Phase 15, decode-only)
+  zlib/           ← git submodule, cmake → vendor/codecs-prefix (gzip filter for libarchive, Phase 34)
+  xz/             ← git submodule, cmake → vendor/codecs-prefix (liblzma, LZMA2 filter for libarchive, Phase 34)
+  libarchive/     ← git submodule, cmake → vendor/codecs-prefix (7z/RAR/TAR read, decode-only, Phase 34);
+                    out-of-tree build dir is vendor/.libarchive-build (gitignored) — NOT
+                    vendor/libarchive/build, which the submodule's own source tree already
+                    tracks (cmake helper modules) and an in-tree out-of-tree build would clobber
   codecs-prefix/  ← staging install prefix for the codecs + FFmpeg (gitignored)
 tests/
   crypto/         ← known-answer tests for KDF + AEAD (Phase 1)

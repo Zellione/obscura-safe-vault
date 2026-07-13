@@ -371,6 +371,7 @@ project "osv_tests"
     defines { 'OSV_FIXTURE_DIR="' .. path.join(os.getcwd(), "tests/image/fixtures") .. '"' }
     defines { 'OSV_VAULT_FIXTURE_DIR="' .. path.join(os.getcwd(), "tests/vault/fixtures") .. '"' }
     defines { 'OSV_MEDIA_FIXTURE_DIR="' .. path.join(os.getcwd(), "tests/media/fixtures") .. '"' }
+    defines { 'OSV_UI_FIXTURE_DIR="' .. path.join(os.getcwd(), "tests/ui/fixtures") .. '"' }
 
     files {
         "tests/**.cpp",

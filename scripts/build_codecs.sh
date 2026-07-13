@@ -46,8 +46,13 @@ build_codec() {  # name  src_dir  [--builddir=path]  extra_cmake_args...
         builddir="${1#--builddir=}"
         shift
     fi
-    if [[ -d "$CODEC_PREFIX/lib" ]] && \
-       find "$CODEC_PREFIX/lib" -name "*${name}*" 2>/dev/null | grep -q .; then
+    # Check for the actual static lib, not a name-glob: a glob like "*z*" or
+    # "*lzma*" also matches leftover pkgconfig/cmake-config files from a prior
+    # partial/failed install (they're written before the .a, so a build that
+    # fails mid-compile can still leave them behind), which falsely skipped a
+    # real rebuild and left libarchive linked against whatever the system
+    # happened to provide instead of the vendored static lib.
+    if [[ -f "$CODEC_PREFIX/lib/lib${name}.a" ]]; then
         echo "==> codec $name already installed — skipping."
         return
     fi
@@ -110,9 +115,12 @@ build_codec z "$REPO_ROOT/vendor/zlib"                                 \
 
 # xz / liblzma — LZMA2 filter for libarchive (most real-world .7z entries use
 # LZMA2, and it also covers .txz). Skip the xz/xzdec/lzmadec/lzmainfo CLI tools
-# and docs; only the static liblzma + headers are needed.
+# and docs; only the static liblzma + headers are needed. XZ_SANDBOX=no: xz's
+# own Landlock-sandboxing configure check hard-errors when it sees
+# '-fsanitize=' in CFLAGS (introduced for --asan builds), unrelated to
+# anything we actually need from its optional seccomp/Landlock hardening.
 build_codec lzma "$REPO_ROOT/vendor/xz"                                \
-    -DBUILD_SHARED_LIBS=OFF -DXZ_NLS=OFF -DXZ_DOC=OFF                  \
+    -DBUILD_SHARED_LIBS=OFF -DXZ_NLS=OFF -DXZ_DOC=OFF -DXZ_SANDBOX=no  \
     -DXZ_TOOL_XZ=OFF -DXZ_TOOL_XZDEC=OFF -DXZ_TOOL_LZMADEC=OFF         \
     -DXZ_TOOL_LZMAINFO=OFF
 

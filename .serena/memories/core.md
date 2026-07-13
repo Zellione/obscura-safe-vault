@@ -412,11 +412,41 @@ src/
                                                  stem) — the confirmed popup text is authoritative.
                                                  Extracted into mlock'd memory, 1 MiB cap; malformed
                                                  meta.json never blocks the import.
+               archive_reader.*                — ArchiveReader (Phase 34): thin wrapper over
+                                                 libarchive's streaming read API
+                                                 (archive_read_open_memory over an mlock'd buffer ->
+                                                 archive_read_next_header/archive_read_data), whole-
+                                                 file gated OSV_VENDORED_ARCHIVE (mirrors
+                                                 media/video_decoder.h). open() does one forward pass
+                                                 building entries() (reuses ZipEntry from zip_plan.h
+                                                 verbatim — already format-agnostic); extract(index,
+                                                 out) re-opens a fresh stream + walks forward to index
+                                                 EACH call (libarchive has no random-access read API)
+                                                 — O(n) per extract, fine for gallery-sized archives.
+                                                 MAX_ENTRY_BYTES=4 GiB bomb guard checked against the
+                                                 entry's declared size before allocating (mirrors
+                                                 chunk_codec's orig_len check).
+               archive_import.*                — import_archive/import_archive_cbz (Phase 34): mirrors
+                                                 zip_import.*'s import_zip/import_cbz structure but
+                                                 backed by ArchiveReader, covering .7z/.rar/
+                                                 .tar(+.gz/.xz)/.cbr/.cb7/.cbt. Declared unconditionally
+                                                 (no #ifdef at call sites); the .cpp internally branches
+                                                 on OSV_VENDORED_ARCHIVE, returning a graceful "not
+                                                 supported" ZipImportOutcome without it (mirrors
+                                                 ui::VideoPlayback's non-AV poster-only fallback) so
+                                                 gallery_grid.cpp needs zero #ifdefs. GalleryGrid's
+                                                 classify_archive_ext() picks the miniz vs libarchive
+                                                 backend + the CBZ-style vs mirror/append plan purely
+                                                 from the file extension.
                zip_import_job.*                — ZipImportJob: runs import_cbz/import_zip
                                                  (start_cbz/start_zip, shared launch() helper) on a
                                                  background std::thread so a big archive (~10 s of
                                                  decode+encrypt) never freezes the UI on the name
-                                                 popup ("locked in" bug, Phase 24 fix). Contract:
+                                                 popup ("locked in" bug, Phase 24 fix). Phase 34 adds
+                                                 start_archive/start_archive_cbz — thin wrappers over
+                                                 the same launch() calling import_archive/
+                                                 import_archive_cbz instead; no separate job class.
+                                                 Contract:
                                                  while active() the worker owns the vault's single-
                                                  thread file handle, so GalleryGrid must NOT touch
                                                  the vault (update()/render()/handle_event() short-
@@ -570,6 +600,13 @@ vendor/
   miniz/        git submodule (pinned to master commit e78dfd2), plain-C ZIP reader compiled by
                 premake (Phase 17). vendor/miniz-shim/miniz_export.h supplies the CMake-generated
                 header so the submodule stays pristine; built with MINIZ_NO_ZLIB_COMPATIBLE_NAMES
+  zlib/ xz/ libarchive/   7z/RAR/TAR read support (Phase 34), cmake-built static -> codecs-prefix.
+                zlib (gzip filter) + xz/liblzma (LZMA2 filter) are libarchive's own filter deps,
+                found via CMAKE_PREFIX_PATH like libheif finds libde265/libaom. libarchive's
+                out-of-tree build dir is vendor/.libarchive-build (gitignored), NOT
+                vendor/libarchive/build — that path is already tracked by the submodule itself
+                (cmake helper modules) and an out-of-tree build there would clobber it. bzip2
+                dropped from scope: upstream ships no CMake build.
   codecs-prefix/   staging install prefix for the codecs + FFmpeg (gitignored)
 assets/fonts/   bundled OFL font for stb_truetype
 ```

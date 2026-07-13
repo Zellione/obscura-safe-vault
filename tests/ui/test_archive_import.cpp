@@ -75,6 +75,60 @@ TEST(archive_import_7z_round_trip_checksums)
     cleanup_dir(dir);
 }
 
+TEST(archive_import_targz_round_trip_checksums)
+{
+    auto dir = fresh_dir_local("archive_import_targz_checksum");
+    vault::Vault v;
+    make_vault(v, dir / "v.osv");
+
+    const auto data1 = fake_bytes(3, 250);
+    const auto data2 = fake_bytes(4, 250);
+    auto archive = make_archive({{"vol/01.jpg", data1}, {"vol/02.jpg", data2}},
+                                "gnutar_gz", dir / "book.tar.gz");
+
+    auto out = ui::import_archive(v, archive, ui::ZipDest::NewGallery, "", "Vol",
+                                  ui::ZipConflictPolicy::FlattenMixed);
+    REQUIRE(out.ok);
+    REQUIRE(out.imported == 2);
+
+    auto children = v.list("Vol/vol");
+    REQUIRE(children.size() == size_t{2});
+    crypto::SecureBytes read;
+    REQUIRE(v.read_image(*children[0], read) == vault::VaultResult::Ok);
+    REQUIRE(read.size() == data1.size());
+    CHECK(std::memcmp(read.data(), data1.data(), data1.size()) == 0);
+    REQUIRE(v.read_image(*children[1], read) == vault::VaultResult::Ok);
+    REQUIRE(read.size() == data2.size());
+    CHECK(std::memcmp(read.data(), data2.data(), data2.size()) == 0);
+
+    v.lock();
+    cleanup_dir(dir);
+}
+
+TEST(archive_import_cb7_style_7z_imports_as_one_gallery)
+{
+    auto dir = fresh_dir_local("archive_import_cb7");
+    vault::Vault v;
+    make_vault(v, dir / "v.osv");
+
+    auto archive = make_archive({{"2.jpg", fake_bytes(2)}, {"10.jpg", fake_bytes(10)},
+                                 {"1.jpg", fake_bytes(1)}},
+                                "7zip", dir / "comic.7z");
+
+    auto out = ui::import_archive_cbz(v, archive, "", "Comic7z");
+    REQUIRE(out.ok);
+    CHECK_EQ(out.imported, 3);
+
+    auto children = v.list("Comic7z");
+    REQUIRE(children.size() == size_t{3});
+    CHECK_EQ(children[0]->name, "1.jpg");
+    CHECK_EQ(children[1]->name, "2.jpg");
+    CHECK_EQ(children[2]->name, "10.jpg");
+
+    v.lock();
+    cleanup_dir(dir);
+}
+
 TEST(archive_import_rejects_malformed_archive)
 {
     auto dir = fresh_dir_local("archive_import_malformed");

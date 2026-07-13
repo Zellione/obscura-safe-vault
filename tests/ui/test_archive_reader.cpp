@@ -6,6 +6,7 @@
 #include "archive_test_helpers.h"
 
 #include <cstring>
+#include <string>
 #include <vector>
 
 using archivetest::fake_bytes;
@@ -106,6 +107,42 @@ TEST(archive_reader_opens_xz_compressed_tar)
     REQUIRE(r.extract(0, out));
     REQUIRE(out.size() == data.size());
     CHECK(std::memcmp(out.data(), data.data(), data.size()) == 0);
+}
+
+// Real RAR fixture: libarchive has no RAR *writer* (format is proprietary;
+// only decode is implemented), so unlike every other format above this can't
+// be synthesized via make_archive(). Reused verbatim from libarchive's own
+// test corpus (BSD-2-Clause, same license as the vendored library itself):
+// vendor/libarchive/libarchive/test/test_read_format_rar.rar.uu, decoded from
+// uuencoding. Ground truth for the exact entries/content below is
+// test_read_format_rar_basic() in vendor/libarchive/libarchive/test/test_read_format_rar.c.
+TEST(archive_reader_opens_rar_and_lists_entries)
+{
+    auto bytes = read_file(OSV_UI_FIXTURE_DIR "/test_read_format_rar.rar");
+    ui::ArchiveReader r;
+    REQUIRE(r.open(bytes));
+    REQUIRE(r.entries().size() == size_t{5});
+    CHECK_EQ(r.entries()[0].path, "test.txt");
+    CHECK_FALSE(r.entries()[0].is_dir);
+    CHECK_EQ(r.entries()[1].path, "testlink");
+    CHECK_EQ(r.entries()[2].path, "testdir/test.txt");
+    CHECK(r.entries()[3].is_dir);
+    CHECK_EQ(r.entries()[3].path, "testdir");
+    CHECK(r.entries()[4].is_dir);
+    CHECK_EQ(r.entries()[4].path, "testemptydir");
+}
+
+TEST(archive_reader_extracts_rar_entry_bytes)
+{
+    auto bytes = read_file(OSV_UI_FIXTURE_DIR "/test_read_format_rar.rar");
+    ui::ArchiveReader r;
+    REQUIRE(r.open(bytes));
+
+    crypto::SecureBytes out;
+    REQUIRE(r.extract(0, out));
+    const std::string expected = "test text document\r\n";
+    REQUIRE(out.size() == expected.size());
+    CHECK(std::memcmp(out.data(), expected.data(), expected.size()) == 0);
 }
 
 #endif // OSV_VENDORED_ARCHIVE
