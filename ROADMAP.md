@@ -1308,6 +1308,200 @@ clean.
 
 ---
 
+## Phase 33 — Option to keep a vault unlocked for the session 🔜
+
+**Goal:** Let the user opt out of the Phase 14 PR5 5-minute idle auto-lock for
+the currently unlocked vault, entirely **in-memory and session-scoped** — the
+choice is never persisted to disk and never survives a lock, vault switch, or
+app restart, so it cannot weaken the vault's at-rest security.
+
+### Tasks
+- [ ] **Session-only toggle** — a keybinding/UI toggle (host TBD during
+  implementation — gallery grid header or vault manager) that flips an
+  in-memory `App`-level flag. No new field on `VaultRegistry` or any
+  on-disk preference file (`VaultRegistry` stores no secrets today and this
+  must not become the first exception).
+- [ ] **Wire into the idle timer** — `App::maybe_auto_lock` skips ticking /
+  firing while the flag is set for the active vault, reusing the existing
+  `IdleTimer` (`src/app/idle_timer.h`) unchanged; the manual `Lock`
+  action, vault-switch (quick-switch), and app exit are completely
+  unaffected — those always wipe the master key as they do today.
+- [ ] **Always resets** — the flag is cleared on `LockActive`, on switching
+  to a different vault, and on app start; re-unlocking (even the same
+  vault) starts with auto-lock **on** by default. It cannot be pre-set
+  before unlock.
+- [ ] **Visible indicator** — a persistent, unmistakable UI cue (e.g. footer
+  icon/text) whenever auto-lock is suppressed, since this is a deliberate
+  reduction of a safety net.
+- [ ] Update `CLAUDE.md` (idle-lock behaviour) + `mem:core`.
+- [ ] `tests/` — a pure unit test for the suppression logic (mirrors the
+  existing `IdleTimer` tests): toggled on, elapsed time past
+  `IDLE_LOCK_SECS` never fires; toggled off, behaviour is byte-for-byte
+  today's; the flag resets on the lock/switch/restart paths.
+
+**Out of scope (YAGNI):** persisting the preference (per-vault or globally)
+across restarts; changing the 5-minute default; disabling the manual `Lock`
+action; keeping more than one vault unlocked at once (still single-active,
+Phase 14).
+
+### Acceptance criterion
+With the toggle on, an unlocked vault survives more than 5 minutes of
+inactivity without locking; with it off (the default on every unlock), the
+existing auto-lock timing is unchanged; explicit lock, vault switch, and app
+restart always require the password again regardless of the toggle.
+
+**Status:** 🔜 Planned.
+
+---
+
+## Phase 34 — Import 7z, RAR, and TAR archives 🔜
+
+**Goal:** Extend the ZIP/CBZ import pipeline (Phases 17 + 24) to also accept
+`.7z`, `.rar`, and `.tar` (+ compressed TAR variants: `.tar.gz`, `.tbz2`,
+`.txz`) — and lift the Phase 24 "no CBR/CB7/CBT" exclusion, so those comic
+variants import exactly like `.cbz` does today. Same discipline throughout:
+extraction into **locked memory only**, never a temp file.
+
+### Tasks
+- [ ] **Vendor libarchive** (BSD-2-Clause) as a git submodule, cmake-built
+  static into `vendor/codecs-prefix/` by `scripts/build_codecs.{sh,bat}`,
+  mirroring the libwebp/libheif pattern. Gate the dependent code behind a
+  build define (e.g. `OSV_VENDORED_ARCHIVE`) so a build without it still
+  links and keeps plain ZIP/CBZ working via miniz.
+- [ ] **`ArchiveReader` abstraction** (`src/ui/archive_reader.{h,cpp}`)
+  wrapping libarchive's streaming read API
+  (`archive_read_open_memory` over an mlock'd buffer →
+  `archive_read_next_header`/`archive_read_data`) so the existing
+  `build_zip_plan`/`build_cbz_plan` entry list and the per-entry
+  decompress-into-`SecureBytes` executor loop become format-agnostic.
+  **The miniz path is untouched** for `.zip`/`.cbz` (no behaviour change,
+  no regression risk to the proven fast path); the new backend only
+  engages for `.7z`/`.rar`/`.tar`(+variants)/`.cbr`/`.cb7`/`.cbt`.
+- [ ] **UI wiring** — extend the `Z` import file-dialog filter to the new
+  extensions; `.cbr`/`.cb7`/`.cbt` route through the existing one-leaf CBZ
+  plan, `.7z`/`.rar`/`.tar` route through the existing mirror/append ZIP
+  plan — identical UX (name popup, Flatten/Skip mixed-folder resolution,
+  Phase 25 background-progress modal) to today's ZIP/CBZ import.
+- [ ] Update `CLAUDE.md` (new vendored lib + module) / README / stack line
+  / `docs/VENDORED_DEPS.md` + `mem:tech_stack`.
+- [ ] `tests/` — fixture `.7z`/`.rar`/`.tar`(`.gz`) archives import with
+  matching per-entry checksums via the shared planner tests; `.cbr`/`.cb7`/
+  `.cbt` fixtures import as one gallery like today's CBZ tests; a
+  malformed/truncated archive of each new format is rejected without
+  crashing; a **no-fs-write assertion** covers the new formats too.
+
+**Out of scope (YAGNI):** writing/creating any of these archive formats;
+nested archives; multi-volume/split RAR (`.r00`, `.partN.rar`); password-
+protected archives (Phase 35).
+
+### Acceptance criterion
+Fixture `.7z`, `.rar`, `.tar`(`.gz`), `.cbr`, `.cb7`, and `.cbt` archives each
+import correctly (matching checksums, correct gallery structure) through the
+same import UX as ZIP/CBZ today; malformed archives fail gracefully; a test
+asserts nothing is written to disk during import for any of the new formats.
+
+**Status:** 🔜 Planned.
+
+---
+
+## Phase 35 — Password-protected archive import 🔜
+
+**Goal:** Let the user import an archive — any format from Phase 17/24/34
+(zip, cbz, 7z, rar, tar, cbr, cb7, cbt) — that is itself password-protected,
+prompting for the **archive's** password at import time. Distinct from, and
+never stored alongside, the vault's own password.
+
+### Tasks
+- [ ] **Unified detection** — the miniz path already sees per-entry
+  encryption via the zip local-file-header flag bit; the libarchive path
+  (Phase 34) reports a passphrase-required failure on the first read
+  without one. Both surface a single `NeedsPassword` outcome, distinct
+  from the existing `needs_resolution` (mixed-folder) case.
+- [ ] **Password-prompt modal** — masked input mirroring the vault-unlock
+  field, wired into the import job: on `NeedsPassword`, pause and prompt;
+  retry with the supplied passphrase
+  (`archive_read_add_passphrase` for the libarchive backend). An
+  **encrypted `.zip`/`.cbz` is routed through the libarchive backend**
+  instead of miniz for that one archive — miniz has no ZipCrypto/AES
+  decryption and this avoids vendoring a second crypto implementation for
+  the same job.
+- [ ] **Wrong-password handling** — a clear inline error, re-prompt or
+  cancel; never a silent partial/unencrypted import.
+- [ ] **Secret hygiene** — the typed archive password lives only in a
+  short-lived mlock'd buffer for the import job's duration and is
+  `crypto_wipe`'d on completion or cancel (invariant #2 applies to this
+  secret too, even though it isn't the vault password).
+- [ ] Update `CLAUDE.md` / `mem:core`.
+- [ ] `tests/` — an AES-256-encrypted zip/cbz and an encrypted 7z/rar
+  fixture each require the password prompt and import correctly with the
+  right passphrase; a wrong passphrase is rejected with no partial write;
+  cancelling the prompt leaves the vault untouched.
+
+**Out of scope (YAGNI):** saving/remembering archive passwords anywhere
+(`VaultRegistry` stores no secrets — unchanged); brute-forcing/recovering a
+lost archive password; encrypted-filename ("header encryption") variants
+beyond what libarchive supports out of the box.
+
+### Acceptance criterion
+Importing a password-protected archive of any supported format prompts for
+its password, imports correctly once given, rejects a wrong password with no
+partial write, and never persists the archive password anywhere.
+
+**Status:** 🔜 Planned.
+
+---
+
+## Phase 36 — Robust special-character filename & archive-name handling 🔜
+
+**Goal:** Archive entries and archive filenames containing non-ASCII text,
+legacy (non-UTF-8) encodings, filesystem-illegal characters, or path-
+traversal sequences import (and later export) correctly instead of mojibake,
+a crash, or a rejected import — across every archive backend (Phase 17/24/34).
+
+### Tasks
+- [ ] **Legacy zip encoding fallback** — a zip/cbz entry without the UTF-8
+  language-encoding flag (bit 11) is commonly CP437, or Shift_JIS for
+  East-Asian archives; detect the missing flag and decode via a small
+  fallback table (or defer to libarchive's own encoding detection, vendored
+  in Phase 34, for the ambiguous case) instead of today's presumed-UTF-8
+  read.
+- [ ] **Filesystem-illegal / control characters** — sanitize gallery and
+  image/video **names** derived from archive entries and the archive's own
+  filename before they reach the index tree: strip/replace control
+  characters, the Windows-reserved character set (`< > : " / \ | ? *`), and
+  reserved device names (`CON`, `NUL`, …), so a later Export (Phase 10)
+  never produces an unwritable path on any target OS. Vault-internal tags
+  stay free-form UTF-8 (they are not filesystem paths) — this is about
+  names only.
+- [ ] **Path-traversal guard** — an entry path containing `..` segments or
+  an absolute path (leading `/` or a drive letter) is rejected/flattened
+  rather than escaping the planned gallery tree; audit
+  `build_zip_plan`/`build_cbz_plan` for gaps here today.
+- [ ] **Long-name handling** — truncate (with a stable, collision-safe
+  suffix, reusing the existing basename-collision disambiguation) names
+  beyond a sane cap instead of failing the import.
+- [ ] Update `CLAUDE.md` / `mem:core`.
+- [ ] `tests/` — fixture zips with CP437 and Shift_JIS-encoded entries (no
+  UTF-8 flag) import with correctly decoded names; entries with `../`,
+  control characters, Windows-reserved characters/names, and very long
+  (>255-byte) names each import safely (sanitized, no traversal, no crash);
+  existing UTF-8 fixtures stay byte-for-byte unchanged (no regression).
+
+**Out of scope (YAGNI):** a user-facing encoding picker (auto-detect only);
+renaming already-imported vault content; changing how tags are stored
+(free-form UTF-8 tags are unaffected).
+
+### Acceptance criterion
+Zip/cbz/7z/rar/tar fixtures with CP437/Shift_JIS names, path-traversal
+attempts, filesystem-illegal characters, and very long names all import
+safely with correctly readable (or safely sanitized) names; no crash, no
+escape outside the planned gallery tree, and existing plain-UTF-8 imports
+are unchanged.
+
+**Status:** 🔜 Planned.
+
+---
+
 ## Container format spec (reference)
 
 Reproduced from `CLAUDE.md` for quick access during vault implementation work.
