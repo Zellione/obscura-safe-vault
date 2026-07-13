@@ -372,8 +372,8 @@ bool App::maybe_auto_lock(double dt)
     // should_auto_lock also covers "a screen with a background import owns the
     // vault's file handle on a worker thread" (blocks_idle_lock) and the
     // session's "keep unlocked" toggle (Phase 33) — see app/auto_lock.h.
-    const bool blocks = screen_ && screen_->blocks_idle_lock();
-    if (!should_auto_lock(active_ != nullptr, blocks, keep_unlocked_, idle_, dt))
+    if (const bool blocks = screen_ && screen_->blocks_idle_lock();
+        !should_auto_lock(active_ != nullptr, blocks, keep_unlocked_, idle_, dt))
         return false;
     if (screen_) screen_->on_exit();
     active_->lock();                                  // wipe the master key
