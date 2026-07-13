@@ -655,7 +655,7 @@ namespace {
 // {cbz, miniz}, .cbr/.cb7/.cbt are {cbz, archive}, .zip is {mirror, miniz},
 // .7z/.rar/.tar(+.gz/.xz) are {mirror, archive}.
 struct ArchiveExtKind { bool cbz; bool archive_backend; };
-ArchiveExtKind classify_archive_ext(const std::string& ext)
+ArchiveExtKind classify_archive_ext(std::string_view ext)
 {
     if (ext == ".cbz") return {true, false};
     if (ext == ".cbr" || ext == ".cb7" || ext == ".cbt") return {true, true};

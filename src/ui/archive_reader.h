@@ -45,7 +45,7 @@ public:
     // Sanity cap on a single entry's decompressed size: large enough for any
     // real photo/video, small enough that a corrupt or hostile archive
     // claiming an absurd size can't drive an oversized allocation attempt.
-    static constexpr uint64_t MAX_ENTRY_BYTES = 4ull * 1024 * 1024 * 1024;  // 4 GiB
+    static constexpr uint64_t MAX_ENTRY_BYTES = 4ULL * 1024 * 1024 * 1024;  // 4 GiB
 
 private:
     std::vector<uint8_t>  data_;

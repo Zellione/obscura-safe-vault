@@ -53,8 +53,8 @@ bool ArchiveReader::open(std::span<const uint8_t> data)
             return false;
         }
         const char* path = archive_entry_pathname(entry);
-        entries_.push_back(ZipEntry{path ? std::string(path) : std::string{},
-                                    archive_entry_filetype(entry) == AE_IFDIR});
+        entries_.emplace_back(path ? std::string(path) : std::string{},
+                              archive_entry_filetype(entry) == AE_IFDIR);
         archive_read_data_skip(a);
     }
     archive_read_free(a);
@@ -70,11 +70,16 @@ bool ArchiveReader::extract(size_t index, crypto::SecureBytes& out) const
 
     struct archive_entry* entry = nullptr;
     bool found = false;
-    for (size_t i = 0; i <= index; ++i) {
-        const int r = archive_read_next_header(a, &entry);
-        if (r == ARCHIVE_EOF || (r != ARCHIVE_OK && r < ARCHIVE_WARN)) break;
-        if (i == index) { found = true; break; }
-        archive_read_data_skip(a);
+    bool error = false;
+    for (size_t i = 0; i <= index && !found && !error; ++i) {
+        if (const int r = archive_read_next_header(a, &entry);
+            r == ARCHIVE_EOF || (r != ARCHIVE_OK && r < ARCHIVE_WARN)) {
+            error = true;
+        } else if (i == index) {
+            found = true;
+        } else {
+            archive_read_data_skip(a);
+        }
     }
     if (!found) {
         archive_read_free(a);
