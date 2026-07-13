@@ -460,6 +460,7 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
                                                             : NavKind::ToFavoriteImages); return;
         case SDLK_T:     if (key.mod & SDL_KMOD_SHIFT) { request(NavKind::ToTagOverview); return; }
                          break;
+        case SDLK_U:     request(NavKind::ToggleKeepUnlocked);                      return;  // Phase 33
         default:         break;
     }
     // `/` is a shifted key on many non-US layouts, so the base keycode (key.key)
@@ -935,7 +936,8 @@ void GalleryGrid::render(gfx::Renderer& r)
                 "[I] Import  [Z] ZIP/CBZ  [N] New  [Del] Delete  [/] Search  [?] Advanced  "
                 "[G] Tags  [Shift+G] Tag list  [Shift+T] Tags Overview  "
                 "[B] Fav  [F] Fav Images  [Shift+F] Fav Galleries  "
-                "[Enter] Open  [Space] Select  [X] Export  [M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid",
+                "[Enter] Open  [Space] Select  [X] Export  [M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid  "
+                "[U] Keep unlocked",
                 TEXT_FAINT);
 
     // Show waste hint if it exceeds display threshold (Phase 26).

@@ -74,6 +74,12 @@ private:
     // return to the manager (single-active; compile-time default, spec §2.2).
     static constexpr double            IDLE_LOCK_SECS = 5 * 60.0;
     IdleTimer                          idle_{IDLE_LOCK_SECS};
+
+    // Session-only opt-out of the idle auto-lock (Phase 33), toggled from
+    // GalleryGrid (`U`). Never persisted; always resets to false whenever the
+    // active vault changes (promote_pending) or is explicitly locked
+    // (LockActive) — re-unlocking always starts with auto-lock on.
+    bool                               keep_unlocked_ = false;
 };
 
 } // namespace app

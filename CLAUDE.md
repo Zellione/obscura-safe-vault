@@ -127,12 +127,25 @@ index valid; orphaned chunks are reclaimed by compaction.
 ```
 src/
   app/       main.cpp, app.{h,cpp},       ← state machine + event loop;
-             idle_timer.h                   VaultManager is the home screen and the
+             idle_timer.h, auto_lock.h       VaultManager is the home screen and the
                                             App owns ONE unlocked vault at a time
                                             (single-active / lock-on-switch, Phase 14).
                                             Idle auto-lock (Phase 14 PR5): IdleTimer
                                             wipes the active vault + returns to the
                                             manager after 5 min with no user input.
+                                            Phase 33: auto_lock.h's should_auto_lock
+                                            (pure, unit-tested) adds a session-only
+                                            "keep unlocked" opt-out — GalleryGrid's `U`
+                                            key flips App's keep_unlocked_ bool via
+                                            NavKind::ToggleKeepUnlocked (no screen
+                                            swap); it suppresses + resets the idle
+                                            timer exactly like blocks_idle_lock does,
+                                            is never persisted, and always resets to
+                                            false on vault switch (promote_pending) or
+                                            explicit lock (LockActive). App::render_frame
+                                            draws a corner badge ("Auto-lock off [U]")
+                                            on every screen while active — an App-level
+                                            overlay so no screen needs to know about it.
   crypto/    crypto.h, kdf.*, aead.*,     ← Monocypher wrappers (Phase 1)
              secure_mem.*, random.*
   vault/     vault.h, header.*, index.*,  ← container format (Phase 2). index.h adds
