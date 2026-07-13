@@ -34,8 +34,13 @@ rem libarchive — read-only 7z/RAR/TAR support (Phase 34). Finds the vendored
 rem zlib/liblzma above via CMAKE_PREFIX_PATH. Builds out-of-tree into a sibling
 rem dir (not vendor\libarchive\build) because libarchive's OWN source tree
 rem ships a tracked build\ directory (cmake helper modules) that an in-tree
-rem out-of-tree build would collide with.
-set "EXTRA=-DENABLE_ZLIB=ON -DENABLE_LZMA=ON -DENABLE_BZip2=OFF -DENABLE_LZ4=OFF -DENABLE_LZO=OFF -DENABLE_ZSTD=OFF -DENABLE_LIBB2=OFF -DENABLE_OPENSSL=OFF -DENABLE_MBEDTLS=OFF -DENABLE_NETTLE=OFF -DENABLE_CNG=OFF -DENABLE_LIBGCC=OFF -DENABLE_LIBXML2=OFF -DENABLE_EXPAT=OFF -DENABLE_WIN32_XMLLITE=OFF -DENABLE_PCREPOSIX=OFF -DENABLE_PCRE2POSIX=OFF -DENABLE_ACL=OFF -DENABLE_XATTR=OFF -DENABLE_ICONV=OFF -DENABLE_TAR=OFF -DENABLE_CPIO=OFF -DENABLE_CAT=OFF -DENABLE_UNZIP=OFF -DENABLE_TEST=OFF -DENABLE_WERROR=OFF"
+rem out-of-tree build would collide with. POSIX_REGEX_LIB=NONE: we only need
+rem read/extract (archive_read_*), never the pattern-matching archive_match_*
+rem API that needs POSIX regex — on Windows the default AUTO setting falls
+rem through libc/libregex (absent) to a LIBPCREPOSIX branch that hard-errors
+rem ("libgcc not found") unless ENABLE_LIBGCC=ON, even though we disabled
+rem PCREPOSIX outright; NONE skips that whole optional cascade.
+set "EXTRA=-DENABLE_ZLIB=ON -DENABLE_LZMA=ON -DENABLE_BZip2=OFF -DENABLE_LZ4=OFF -DENABLE_LZO=OFF -DENABLE_ZSTD=OFF -DENABLE_LIBB2=OFF -DENABLE_OPENSSL=OFF -DENABLE_MBEDTLS=OFF -DENABLE_NETTLE=OFF -DENABLE_CNG=OFF -DENABLE_LIBGCC=OFF -DENABLE_LIBXML2=OFF -DENABLE_EXPAT=OFF -DENABLE_WIN32_XMLLITE=OFF -DENABLE_PCREPOSIX=OFF -DENABLE_PCRE2POSIX=OFF -DPOSIX_REGEX_LIB=NONE -DENABLE_ACL=OFF -DENABLE_XATTR=OFF -DENABLE_ICONV=OFF -DENABLE_TAR=OFF -DENABLE_CPIO=OFF -DENABLE_CAT=OFF -DENABLE_UNZIP=OFF -DENABLE_TEST=OFF -DENABLE_WERROR=OFF"
 call :build_codec archive vendor\libarchive vendor\.libarchive-build || goto :fail
 
 echo ==^> Codecs installed into vendor\codecs-prefix
