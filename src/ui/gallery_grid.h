@@ -136,7 +136,12 @@ private:
         std::string           gallery_name;
         ui::ZipDest           dest = ui::ZipDest::NewGallery;
         bool                  active = false;  // awaiting conflict resolution (Flatten/Skip)
-        bool                  cbz = false;     // .cbz comic import (Phase 24): fixed one-leaf plan
+        bool                  cbz = false;     // .cbz/.cbr/.cb7/.cbt comic import: fixed one-leaf plan
+        // .7z/.rar/.tar(+.gz/.xz)/.cbr/.cb7/.cbt (Phase 34) route through
+        // ZipImportJob::start_archive/start_archive_cbz (libarchive) instead of
+        // start_zip/start_cbz (miniz); orthogonal to `cbz` above, which only
+        // selects the one-leaf-gallery plan vs the mirror/append plan.
+        bool                  archive_backend = false;
     };
     struct Naming {
         bool         active = false;   // manual new-gallery text entry

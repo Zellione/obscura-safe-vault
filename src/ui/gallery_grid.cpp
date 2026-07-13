@@ -298,6 +298,7 @@ void GalleryGrid::finish_naming()
     if (naming_.buf.empty()) {
         naming_.zip.active = false;
         naming_.zip.cbz = false;
+        naming_.zip.archive_backend = false;
         return;
     }
 
@@ -647,6 +648,23 @@ void GalleryGrid::pump_import()
     }
 }
 
+namespace {
+// Classify a picked archive's extension (Phase 34): whether it's a one-leaf
+// comic-style import (cbz==true) and whether it routes through the libarchive
+// backend (archive_backend==true) instead of miniz. Orthogonal axes: .cbz is
+// {cbz, miniz}, .cbr/.cb7/.cbt are {cbz, archive}, .zip is {mirror, miniz},
+// .7z/.rar/.tar(+.gz/.xz) are {mirror, archive}.
+struct ArchiveExtKind { bool cbz; bool archive_backend; };
+ArchiveExtKind classify_archive_ext(const std::string& ext)
+{
+    if (ext == ".cbz") return {true, false};
+    if (ext == ".cbr" || ext == ".cb7" || ext == ".cbt") return {true, true};
+    if (ext == ".7z" || ext == ".rar" || ext == ".tar" || ext == ".gz" || ext == ".xz")
+        return {false, true};
+    return {false, false};   // .zip and anything else: the existing miniz mirror/append path
+}
+} // namespace
+
 void GalleryGrid::pump_zip_import()
 {
     auto res = dialogs_.file.take_result(platform::FileDialog::Purpose::Zip);
@@ -654,25 +672,29 @@ void GalleryGrid::pump_zip_import()
     if (res->empty()) { mark_dirty(); return; }   // dialog cancelled — repaint
 
     const std::filesystem::path zp(res->front());
-    std::string ext = zp.extension().string();   // ".cbz" / ".zip" / ...
+    std::string ext = zp.extension().string();   // ".cbz" / ".zip" / ".7z" / ...
     std::ranges::transform(ext, ext.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    const auto [cbz, archive_backend] = classify_archive_ext(ext);
 
-    if (ext == ".cbz") {
-        // CBZ (Phase 24): always a dedicated leaf gallery named after the archive.
+    if (cbz) {
+        // CBZ/CBR/CB7/CBT: always a dedicated leaf gallery named after the archive.
         // start_naming() guards the leaf-invariant and (on success) prefills the
         // stem; finish_naming() then routes to the fixed one-leaf plan.
         start_naming();
         if (naming_.active) {
-            // Prefill from the archive's meta.json title when present (Phase 27),
-            // else the filename stem (e.g. "MyComic" from "MyComic.cbz"). The
-            // text the user confirms is authoritative — the import never
+            // Prefill from the archive's meta.json title when present (Phase 27,
+            // miniz .cbz only — the libarchive backend has no meta.json support
+            // yet), else the filename stem (e.g. "MyComic" from "MyComic.cbz").
+            // The text the user confirms is authoritative — the import never
             // overrides it.
-            naming_.buf = ui::meta_gallery_name(ui::peek_archive_meta(zp),
-                                                zp.stem().string());
+            naming_.buf = archive_backend
+                ? zp.stem().string()
+                : ui::meta_gallery_name(ui::peek_archive_meta(zp), zp.stem().string());
             naming_.zip.path = zp;
             naming_.zip.dest = ui::ZipDest::NewGallery;
             naming_.zip.cbz = true;
+            naming_.zip.archive_backend = archive_backend;
             naming_.zip.active = true;
         }
     } else if (leaf_allows_images(children_) && !leaf_allows_galleries(children_)) {
@@ -681,17 +703,20 @@ void GalleryGrid::pump_zip_import()
         naming_.zip.gallery_name.clear();
         naming_.zip.dest = ui::ZipDest::Append;
         naming_.zip.cbz = false;
+        naming_.zip.archive_backend = archive_backend;
         naming_.zip.active = true;
         do_zip_import(zp, ui::ZipConflictPolicy::AskUser);
     } else {
         // Current is empty or holds sub-galleries: prompt for new gallery name.
         start_naming();   // reuse the naming flow
         // Prefill from meta.json title → filename stem, as in the CBZ branch.
-        naming_.buf = ui::meta_gallery_name(ui::peek_archive_meta(zp),
-                                            zp.stem().string());
+        naming_.buf = archive_backend
+            ? zp.stem().string()
+            : ui::meta_gallery_name(ui::peek_archive_meta(zp), zp.stem().string());
         naming_.zip.path = zp;
         naming_.zip.dest = ui::ZipDest::NewGallery;
         naming_.zip.cbz = false;
+        naming_.zip.archive_backend = archive_backend;
         naming_.zip.active = true;
     }
     mark_dirty();   // dialog closed (picked) — repaint
@@ -711,11 +736,20 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipCo
     // a ZIP with mixed folders comes back needs_resolution (nothing written) so
     // update() shows the Flatten/Skip modal, and F/S re-enters here with the chosen
     // policy. naming_.zip stays populated across that round-trip and is cleared on a
-    // terminal outcome.
-    if (naming_.zip.cbz)
-        naming_.import_job.start_cbz(vault_, zip_path, base_gallery, gallery_name);
-    else
-        naming_.import_job.start_zip(vault_, zip_path, dest, base_gallery, gallery_name, policy);
+    // terminal outcome. archive_backend (Phase 34) picks the libarchive-backed job
+    // methods for .7z/.rar/.tar(+variants)/.cbr/.cb7/.cbt — same threading/progress
+    // contract, only the decompression backend differs.
+    if (naming_.zip.cbz) {
+        if (naming_.zip.archive_backend)
+            naming_.import_job.start_archive_cbz(vault_, zip_path, base_gallery, gallery_name);
+        else
+            naming_.import_job.start_cbz(vault_, zip_path, base_gallery, gallery_name);
+    } else {
+        if (naming_.zip.archive_backend)
+            naming_.import_job.start_archive(vault_, zip_path, dest, base_gallery, gallery_name, policy);
+        else
+            naming_.import_job.start_zip(vault_, zip_path, dest, base_gallery, gallery_name, policy);
+    }
     mark_dirty();
 }
 
@@ -741,8 +775,9 @@ void poll_import_job(GalleryGrid& g)
         const char* fail = cbz ? "CBZ import failed." : "ZIP import failed.";
         if (!oc->ok) {
             g.error_ = oc->error.empty() ? fail : oc->error;
-            g.naming_.zip.active = false;
-            g.naming_.zip.cbz    = false;
+            g.naming_.zip.active          = false;
+            g.naming_.zip.cbz             = false;
+            g.naming_.zip.archive_backend = false;
         } else if (oc->needs_resolution) {
             // ZIP with mixed folders: keep naming_.zip active so the Flatten/Skip
             // modal shows; the worker wrote nothing. F/S re-launches with a policy.
@@ -754,8 +789,9 @@ void poll_import_job(GalleryGrid& g)
                 g.status_ = std::format("Imported {} {}{}, skipped {}", oc->imported, noun,
                                         oc->imported == 1 ? "" : "s", oc->skipped);
             }
-            g.naming_.zip.active = false;
-            g.naming_.zip.cbz    = false;
+            g.naming_.zip.active          = false;
+            g.naming_.zip.cbz             = false;
+            g.naming_.zip.archive_backend = false;
             g.refresh();   // the import mutated the index tree — rebuild children_
         }
     }
