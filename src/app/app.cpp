@@ -5,6 +5,7 @@
 #include <print>
 #include <string>
 
+#include "app/auto_lock.h"
 #include "gfx/renderer.h"
 #include "gfx/theme.h"
 #include "platform/error_log.h"
@@ -116,9 +117,10 @@ void App::promote_pending()
 {
     if (!pending_) return;
     if (active_) active_->lock();                 // lock-on-switch: wipe the old key
-    adv_session_ = {};                            // new vault session -> fresh advanced search
-    active_      = std::move(pending_);
-    active_path_ = std::move(pending_path_);
+    adv_session_   = {};                          // new vault session -> fresh advanced search
+    keep_unlocked_ = false;                       // new session always starts with auto-lock on
+    active_        = std::move(pending_);
+    active_path_   = std::move(pending_path_);
     pending_path_.clear();
     registry_.add(active_path_);                  // move-to-front in the recent list
 }
@@ -264,6 +266,28 @@ bool is_user_input(const SDL_Event& e) noexcept
             return false;
     }
 }
+
+// A small, unmissable corner badge shown on every screen while the Phase 33
+// "keep unlocked" toggle suppresses the idle auto-lock — drawn by App (not a
+// Screen) so it stays visible across navigation without threading session
+// state through every screen's constructor.
+void draw_keep_unlocked_badge(gfx::Renderer& r, gfx::FontAtlas& font, int win_w, int win_h)
+{
+    using namespace gfx::theme;
+    static constexpr const char* LABEL  = "Auto-lock off [U]";
+    static constexpr float       PAD    = 10.0f;
+    static constexpr float       MARGIN = 16.0f;
+
+    const auto  tw = static_cast<float>(font.measure(LABEL));
+    const float th = font.pixel_height();
+    const float bw = tw + (PAD * 2);
+    const float bh = th + (PAD * 2);
+    const SDL_FRect box{static_cast<float>(win_w) - bw - MARGIN,
+                        static_cast<float>(win_h) - bh - MARGIN, bw, bh};
+    r.draw_round_rect(box, RADIUS_SMALL, SURFACE);
+    r.draw_round_rect(box, RADIUS_SMALL, WARN, /*filled*/ false);
+    r.draw_text(font, box.x + PAD, box.y + PAD, LABEL, WARN);
+}
 } // namespace
 
 void App::dispatch_event(const SDL_Event& e)
@@ -326,8 +350,16 @@ bool App::apply_nav()
         case ToVaultManager:      screen_->on_exit(); pending_.reset(); to_manager();  return true;
         case LockActive:
             screen_->on_exit();
+            keep_unlocked_ = false;
             if (active_) { active_->lock(); active_.reset(); active_path_.clear(); }
             to_manager();
+            return true;
+        case ToggleKeepUnlocked:
+            // Stays on the current screen: no on_exit()/screen swap, just flip the
+            // session flag and reset the idle timer (see should_auto_lock) so
+            // re-disabling doesn't inherit a stale elapsed value.
+            keep_unlocked_ = !keep_unlocked_;
+            idle_.reset();
             return true;
         case Quit:                running_ = false;                                    return false;
         case None:                return false;
@@ -337,11 +369,12 @@ bool App::apply_nav()
 
 bool App::maybe_auto_lock(double dt)
 {
-    if (!active_) { idle_.reset(); return false; }   // nothing to lock
-    // A screen with a background import owns the vault's file handle on a worker
-    // thread; auto-locking now would wipe the master key mid-write. Stay awake.
-    if (screen_ && screen_->blocks_idle_lock()) { idle_.reset(); return false; }
-    if (!idle_.tick(dt)) return false;
+    // should_auto_lock also covers "a screen with a background import owns the
+    // vault's file handle on a worker thread" (blocks_idle_lock) and the
+    // session's "keep unlocked" toggle (Phase 33) — see app/auto_lock.h.
+    const bool blocks = screen_ && screen_->blocks_idle_lock();
+    if (!should_auto_lock(active_ != nullptr, blocks, keep_unlocked_, idle_, dt))
+        return false;
     if (screen_) screen_->on_exit();
     active_->lock();                                  // wipe the master key
     active_.reset();
@@ -358,6 +391,8 @@ void App::render_frame()
     if (screen_) {
         gfx::Renderer r(window_.sdl_renderer());
         screen_->render(r);
+        if (active_ && keep_unlocked_)
+            draw_keep_unlocked_badge(r, font_, window_.width(), window_.height());
     }
     window_.end_frame();
 

@@ -27,7 +27,28 @@ src/
                                                IdleTimer; reset on user input in
                                                dispatch_event; maybe_auto_lock(dt) wipes
                                                active_ + to_manager() after IDLE_LOCK_SECS
-                                               = 5 min).
+                                               = 5 min). Phase 33 adds app/auto_lock.h:
+                                               should_auto_lock(has_active, blocks_idle_lock,
+                                               keep_unlocked, timer, dt) — pure, unit-tested
+                                               extraction of maybe_auto_lock's 3 suppression
+                                               guards (no active vault / a screen's
+                                               blocks_idle_lock / the new session-only
+                                               keep_unlocked_ toggle), all of which reset the
+                                               IdleTimer instead of ticking it. keep_unlocked_
+                                               is a plain App bool, flipped by GalleryGrid's
+                                               `U` key via a new NavKind::ToggleKeepUnlocked
+                                               (App::apply_nav flips it in place — no screen
+                                               swap); always reset to false in
+                                               promote_pending() and the LockActive nav case,
+                                               so re-unlocking (even the same vault) always
+                                               starts with auto-lock on. App::render_frame
+                                               draws a small corner badge ("Auto-lock off
+                                               [U]", free fn draw_keep_unlocked_badge) over
+                                               whatever screen is active whenever
+                                               active_ && keep_unlocked_ — an App-level
+                                               overlay, not per-screen, so it stays visible
+                                               across navigation without threading the flag
+                                               through every screen's constructor.
   crypto/      aead.*, kdf.*, random.*,        — Monocypher wrappers
                secure_mem.h, crypto.h
   vault/       vault.*, header.*, index.*,     — .osv container format
@@ -312,8 +333,8 @@ src/
                                                  within the active vault. Source enum
                                                  {Images,Gallery}; open()/open_gallery().
                                                  Stages: Mode(Move/Copy) → pick dest vault
-                                                 (\"This vault\" row + registry minus active;
-                                                 \"This vault\" skips unlock, dest_is_self_,
+                                                 ("This vault" row + registry minus active;
+                                                 "This vault" skips unlock, dest_is_self_,
                                                  dest_vault()=src_) → unlock transiently (owns
                                                  Dest{vault, pw in SecureTextField, optional
                                                  keyfile}) → pick leaf gallery (images) / parent
