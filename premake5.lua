@@ -161,6 +161,43 @@ local function link_av()
     end
 end
 
+-- ---------------------------------------------------------------------------
+-- libarchive (read-only 7z/RAR/TAR; Phase 34), + its vendored zlib/liblzma
+-- filters. Same staging prefix as the image codecs / FFmpeg. Linked only when
+-- present so a build missing it stays green; OSV_VENDORED_ARCHIVE gates the
+-- dependent code/tests. Static-link order: dependents before dependencies
+-- (archive → lzma → z).
+-- When --asan is passed, prefer vendor/codecs-prefix-asan/ (built by
+-- scripts/build_codecs.sh --asan) with a fallback + warning to the normal prefix.
+-- ---------------------------------------------------------------------------
+local function link_archive()
+    local prefix = path.join(os.getcwd(), "vendor/codecs-prefix")
+    if _OPTIONS["asan"] then
+        local asan_prefix = path.join(os.getcwd(), "vendor/codecs-prefix-asan")
+        if os.isfile(path.join(asan_prefix, "lib/libarchive.a")) then
+            prefix = asan_prefix
+        else
+            if os.isfile(path.join(path.join(os.getcwd(), "vendor/codecs-prefix"), "lib/libarchive.a")) then
+                premake.warn("--asan requested but ASAN libarchive prefix not found at " .. asan_prefix .. "; falling back to " .. path.join(os.getcwd(), "vendor/codecs-prefix") .. " (not instrumented)")
+            end
+        end
+    end
+
+    if os.isfile(path.join(prefix, "lib/libarchive.a")) then
+        includedirs { path.join(prefix, "include") }
+        libdirs     { path.join(prefix, "lib") }
+        defines     { "OSV_VENDORED_ARCHIVE" }
+        -- zlib's static target is named "zs" on Windows (its CMakeLists appends
+        -- a static-only suffix there) but plain "z" everywhere else; liblzma and
+        -- libarchive itself keep the same OUTPUT_NAME on every platform.
+        filter "system:windows"
+            links { "archive", "lzma", "zs" }
+        filter "system:not windows"
+            links { "archive", "lzma", "z" }
+        filter {}
+    end
+end
+
 workspace "ObscuraSafeVault"
     configurations { "Debug", "Release" }
     platforms      { "x64" }
@@ -296,6 +333,7 @@ project "osv"
     link_platform_extras()
     link_image_codecs()
     link_av()
+    link_archive()
 
     -- Strict warnings for project code (not vendored)
     fatalwarnings { "All" }
@@ -333,6 +371,7 @@ project "osv_tests"
     defines { 'OSV_FIXTURE_DIR="' .. path.join(os.getcwd(), "tests/image/fixtures") .. '"' }
     defines { 'OSV_VAULT_FIXTURE_DIR="' .. path.join(os.getcwd(), "tests/vault/fixtures") .. '"' }
     defines { 'OSV_MEDIA_FIXTURE_DIR="' .. path.join(os.getcwd(), "tests/media/fixtures") .. '"' }
+    defines { 'OSV_UI_FIXTURE_DIR="' .. path.join(os.getcwd(), "tests/ui/fixtures") .. '"' }
 
     files {
         "tests/**.cpp",
@@ -381,6 +420,7 @@ project "osv_tests"
         "src/ui/natural_sort.cpp",
         "src/ui/meta_json.cpp",
         "src/ui/zip_plan.cpp",
+        "src/ui/import_common.cpp",
         "src/ui/zip_import.cpp",
         "src/ui/zip_import_job.cpp",
         "src/ui/file_op_job.cpp",
@@ -392,6 +432,8 @@ project "osv_tests"
         "src/ui/slideshow_model.cpp",
         "src/ui/playback_model.cpp",
         "src/ui/video_playback.cpp",
+        "src/ui/archive_reader.cpp",
+        "src/ui/archive_import.cpp",
     }
 
     includedirs {
@@ -413,6 +455,7 @@ project "osv_tests"
     link_platform_extras()
     link_image_codecs()
     link_av()
+    link_archive()
 
     -- Strict warnings for project code (not vendored)
     fatalwarnings { "All" }

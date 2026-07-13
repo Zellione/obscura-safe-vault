@@ -7,6 +7,10 @@ obj/
 vendor/codecs-prefix/
 vendor/codecs-prefix-asan/
 
+# libarchive's own source tree ships a tracked build/ directory (cmake helper
+# modules), so its out-of-tree build output goes to a sibling dir instead.
+vendor/.libarchive-build/
+
 # premake5 binary (downloaded by setup.sh, not committed)
 bin/premake5
 

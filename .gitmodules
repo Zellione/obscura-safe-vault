@@ -31,3 +31,12 @@
 [submodule "vendor/json"]
 	path = vendor/json
 	url = https://github.com/nlohmann/json.git
+[submodule "vendor/zlib"]
+	path = vendor/zlib
+	url = https://github.com/madler/zlib.git
+[submodule "vendor/xz"]
+	path = vendor/xz
+	url = https://github.com/tukaani-project/xz.git
+[submodule "vendor/libarchive"]
+	path = vendor/libarchive
+	url = https://github.com/libarchive/libarchive.git

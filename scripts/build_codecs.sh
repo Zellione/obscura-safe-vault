@@ -36,10 +36,23 @@ else
     CODEC_PREFIX="$REPO_ROOT/vendor/codecs-prefix"
 fi
 
-build_codec() {  # name  src_dir  extra_cmake_args...
+build_codec() {  # name  src_dir  [--builddir=path]  extra_cmake_args...
     local name="$1"; local src="$2"; shift 2
-    if [[ -d "$CODEC_PREFIX/lib" ]] && \
-       find "$CODEC_PREFIX/lib" -name "*${name}*" 2>/dev/null | grep -q .; then
+    local builddir="$src/build"
+    if [[ "${1:-}" == --builddir=* ]]; then
+        # libarchive ships its OWN tracked build/ directory (custom cmake
+        # helper modules, autoconf leftovers) — an out-of-tree build at
+        # $src/build would collide with and clobber those source files.
+        builddir="${1#--builddir=}"
+        shift
+    fi
+    # Check for the actual static lib, not a name-glob: a glob like "*z*" or
+    # "*lzma*" also matches leftover pkgconfig/cmake-config files from a prior
+    # partial/failed install (they're written before the .a, so a build that
+    # fails mid-compile can still leave them behind), which falsely skipped a
+    # real rebuild and left libarchive linked against whatever the system
+    # happened to provide instead of the vendored static lib.
+    if [[ -f "$CODEC_PREFIX/lib/lib${name}.a" ]]; then
         echo "==> codec $name already installed — skipping."
         return
     fi
@@ -53,7 +66,7 @@ build_codec() {  # name  src_dir  extra_cmake_args...
         cmake_cxx_flags="-fsanitize=address,undefined -fno-omit-frame-pointer"
     fi
 
-    cmake -S "$src" -B "$src/build"                 \
+    cmake -S "$src" -B "$builddir"                  \
         -DCMAKE_BUILD_TYPE=Release                  \
         -DBUILD_SHARED_LIBS=OFF                     \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON        \
@@ -64,8 +77,8 @@ build_codec() {  # name  src_dir  extra_cmake_args...
         -DCMAKE_C_FLAGS="$cmake_c_flags"            \
         -DCMAKE_CXX_FLAGS="$cmake_cxx_flags"        \
         "$@" -G "Ninja"
-    cmake --build "$src/build" --parallel "$NPROC"
-    cmake --install "$src/build"
+    cmake --build "$builddir" --parallel "$NPROC"
+    cmake --install "$builddir"
 }
 
 build_codec webp "$REPO_ROOT/vendor/libwebp"                            \
@@ -94,6 +107,42 @@ build_codec heif "$REPO_ROOT/vendor/libheif"                           \
     -DCMAKE_DISABLE_FIND_PACKAGE_Doxygen=ON                            \
     -DCMAKE_C_FLAGS=-DLIBDE265_STATIC_BUILD                            \
     -DCMAKE_CXX_FLAGS=-DLIBDE265_STATIC_BUILD
+
+# zlib — gzip filter for libarchive (.tar.gz). Skip its bundled example/test
+# binaries; only the static lib + headers are needed.
+build_codec z "$REPO_ROOT/vendor/zlib"                                 \
+    -DZLIB_BUILD_SHARED=OFF -DZLIB_BUILD_TESTING=OFF
+
+# xz / liblzma — LZMA2 filter for libarchive (most real-world .7z entries use
+# LZMA2, and it also covers .txz). Skip the xz/xzdec/lzmadec/lzmainfo CLI tools
+# and docs; only the static liblzma + headers are needed. XZ_SANDBOX=no: xz's
+# own Landlock-sandboxing configure check hard-errors when it sees
+# '-fsanitize=' in CFLAGS (introduced for --asan builds), unrelated to
+# anything we actually need from its optional seccomp/Landlock hardening.
+build_codec lzma "$REPO_ROOT/vendor/xz"                                \
+    -DBUILD_SHARED_LIBS=OFF -DXZ_NLS=OFF -DXZ_DOC=OFF -DXZ_SANDBOX=no  \
+    -DXZ_TOOL_XZ=OFF -DXZ_TOOL_XZDEC=OFF -DXZ_TOOL_LZMADEC=OFF         \
+    -DXZ_TOOL_LZMAINFO=OFF
+
+# libarchive — read-only 7z/RAR/TAR support (Phase 34). Finds the vendored
+# zlib/liblzma above via CMAKE_PREFIX_PATH (same pattern libheif uses for
+# libde265/libaom). Every other optional codec/library is disabled: no
+# bzip2/lz4/lzo/zstd (not vendored — .tbz2 is out of scope, see ROADMAP),
+# no crypto backend (OpenSSL/mbedTLS/Nettle/CNG — not needed for read-only,
+# unencrypted archives yet), no libxml2/expat (xar format, unused), no
+# ACL/xattr/iconv, and no bsdtar/bsdcpio/bsdcat/test binaries — we only need
+# libarchive.a itself, linked in-process via archive_read_open_memory.
+build_codec archive "$REPO_ROOT/vendor/libarchive"                     \
+    --builddir="$REPO_ROOT/vendor/.libarchive-build"                   \
+    -DENABLE_ZLIB=ON -DENABLE_LZMA=ON                                  \
+    -DENABLE_BZip2=OFF -DENABLE_LZ4=OFF -DENABLE_LZO=OFF -DENABLE_ZSTD=OFF \
+    -DENABLE_LIBB2=OFF -DENABLE_OPENSSL=OFF -DENABLE_MBEDTLS=OFF       \
+    -DENABLE_NETTLE=OFF -DENABLE_CNG=OFF -DENABLE_LIBGCC=OFF           \
+    -DENABLE_LIBXML2=OFF -DENABLE_EXPAT=OFF -DENABLE_WIN32_XMLLITE=OFF \
+    -DENABLE_PCREPOSIX=OFF -DENABLE_PCRE2POSIX=OFF                     \
+    -DENABLE_ACL=OFF -DENABLE_XATTR=OFF -DENABLE_ICONV=OFF             \
+    -DENABLE_TAR=OFF -DENABLE_CPIO=OFF -DENABLE_CAT=OFF -DENABLE_UNZIP=OFF \
+    -DENABLE_TEST=OFF -DENABLE_WERROR=OFF
 
 # FFmpeg — decode-only static. Video (h264/hevc + prores/dnxhd/mjpeg for .mov,
 # Phase 28) + audio (aac/opus/mp3/vorbis/flac/ac3).

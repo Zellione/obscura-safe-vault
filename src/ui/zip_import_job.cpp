@@ -1,5 +1,7 @@
 #include "ui/zip_import_job.h"
 
+#include "ui/archive_import.h"
+
 #include <utility>
 
 namespace ui {
@@ -46,6 +48,25 @@ bool ZipImportJob::start_zip(vault::Vault& v, std::filesystem::path zip, ZipDest
     return launch([this, &v, zip = std::move(zip), dest, base = std::move(base_gallery),
                    name = std::move(new_gallery_name), policy]() {
         return import_zip(v, zip, dest, base, name, policy, &progress_);
+    });
+}
+
+bool ZipImportJob::start_archive(vault::Vault& v, std::filesystem::path archive, ZipDest dest,
+                                 std::string base_gallery, std::string new_gallery_name,
+                                 ZipConflictPolicy policy)
+{
+    return launch([this, &v, archive = std::move(archive), dest, base = std::move(base_gallery),
+                   name = std::move(new_gallery_name), policy]() {
+        return import_archive(v, archive, dest, base, name, policy, &progress_);
+    });
+}
+
+bool ZipImportJob::start_archive_cbz(vault::Vault& v, std::filesystem::path archive,
+                                     std::string base_gallery, std::string gallery_name)
+{
+    return launch([this, &v, archive = std::move(archive), base = std::move(base_gallery),
+                   name = std::move(gallery_name)]() {
+        return import_archive_cbz(v, archive, base, name, &progress_);
     });
 }
 

@@ -60,8 +60,13 @@ void FileDialog::open_keyfile(SDL_Window* parent)
 void FileDialog::open_zip(SDL_Window* parent)
 {
     if (!begin_open(Purpose::Zip)) return;
+    // 7z/rar/tar(+gz/xz)/cbr/cb7/cbt (Phase 34) route through
+    // ui::import_archive/import_archive_cbz instead of the miniz zip/cbz path;
+    // see GalleryGrid's do_zip_import. Offered regardless of
+    // OSV_VENDORED_ARCHIVE — a build without it reports a graceful "not
+    // supported" error on pick instead of hiding the option.
     static constexpr std::array f{
-        SDL_DialogFileFilter{"Zip & comic archives", "zip;cbz"},
+        SDL_DialogFileFilter{"Zip & comic archives", "zip;cbz;7z;rar;tar;gz;xz;cbr;cb7;cbt"},
         SDL_DialogFileFilter{"All files", "*"}};
     SDL_ShowOpenFileDialog(on_files, this, parent, f.data(),
                            static_cast<int>(f.size()), nullptr, /*allow_many*/ false);

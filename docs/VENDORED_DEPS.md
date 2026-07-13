@@ -16,6 +16,9 @@ This document tracks the pinned versions of all vendored third-party libraries a
 | **libheif** | 1.18.2 | HEIF container format parser (HEIC/AVIF) | **Yes** |
 | **FFmpeg** | 7.1.1 (n7.1.1) | Video and audio frame decoding (decode-only, static linked; H.264/H.265 + ProRes/DNxHD/MJPEG since Phase 28) | **Yes** |
 | **nlohmann/json** | v3.12.0 | Header-only JSON parsing (archive `meta.json`, Phase 27) | **Yes** |
+| **zlib** | 1.3.2 | gzip filter for libarchive (`.tar.gz`) | **Yes** |
+| **xz / liblzma** | 5.8.3 | LZMA2 filter for libarchive (`.7z`, `.txz`) | **Yes** |
+| **libarchive** | 3.8.8 | 7z/RAR/TAR archive read (decode-only; Phase 34) | **Yes** |
 
 ### Decode-Only Rationale
 
@@ -32,7 +35,7 @@ This minimizes attack surface: **untrusted input enters only through image/video
 
 The libraries marked "**Yes**" in the "Parses Untrusted Input" column are reviewed quarterly for known CVEs:
 
-**Affected libraries:** stb, miniz, libwebp, libde265, libaom, libheif, FFmpeg, nlohmann/json
+**Affected libraries:** stb, miniz, libwebp, libde265, libaom, libheif, FFmpeg, nlohmann/json, zlib, xz/liblzma, libarchive
 
 **Review schedule:** Every 3 months (or upon public disclosure of a critical issue)
 
@@ -52,6 +55,9 @@ Then cross-reference against:
   - libwebp: https://github.com/webmproject/libwebp/security/advisories
   - libaom: https://github.com/aomedia/av1-codec/security/advisories
   - stb: https://github.com/nothings/stb/issues (no formal advisory system; check closed security reports)
+  - libarchive: https://github.com/libarchive/libarchive/security/advisories
+  - zlib: https://github.com/madler/zlib/security/advisories
+  - xz/liblzma: https://github.com/tukaani-project/xz/security/advisories (note: unrelated to the 2024 XZ Utils backdoor, CVE-2024-3094, which targeted the `liblzma` build's injected `.so` — we build a static lib from source with no such injected artifact)
 
 If new CVEs are discovered, follow the bump procedure (see below).
 

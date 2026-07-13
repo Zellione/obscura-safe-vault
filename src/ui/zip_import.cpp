@@ -1,6 +1,7 @@
 #include "ui/zip_import.h"
 
 #include "crypto/secure_mem.h"
+#include "ui/import_common.h"
 #include "ui/meta_json.h"
 #include "image/format_registry.h"
 #include "vault/vault.h"
@@ -8,27 +9,11 @@
 #include "miniz.h"
 
 #include <cstring>
-#include <fstream>
 #include <print>
 #include <vector>
 
 namespace ui {
 namespace {
-
-// Read the whole archive file into memory. The archive is the user's own
-// on-disk file; only the *decompressed* entry bytes are sensitive (those go to
-// mlock'd SecureBytes). Returns false if the file is missing or empty.
-bool read_archive(const std::filesystem::path& path, std::vector<uint8_t>& out)
-{
-    std::ifstream f(path, std::ios::binary | std::ios::ate);
-    if (!f) return false;
-    const std::streamoff sz = f.tellg();
-    if (sz <= 0) return false;
-    out.resize(static_cast<size_t>(sz));
-    f.seekg(0);
-    f.read(reinterpret_cast<char*>(out.data()), sz);
-    return true;
-}
 
 // Snapshot the archive's central directory as a list of (path, is_dir) entries.
 std::vector<ZipEntry> read_entry_list(mz_zip_archive& zip)
@@ -86,8 +71,6 @@ std::string joined_gallery(std::string_view base, std::string_view name)
 // Tallies the result into `out`. Decompressed bytes never touch disk.
 void import_one(vault::Vault& v, mz_zip_archive& zip, const ZipPlacement& pl, ZipImportOutcome& out)
 {
-    using enum vault::VaultResult;
-
     mz_zip_archive_file_stat st;
     if (!mz_zip_reader_file_stat(&zip, static_cast<mz_uint>(pl.entry_index), &st)) {
         ++out.skipped;
@@ -105,20 +88,7 @@ void import_one(vault::Vault& v, mz_zip_archive& zip, const ZipPlacement& pl, Zi
     const vault::VaultResult r = image::detect_format(span) != image::ImageFormat::Unknown
                                      ? v.add_image(pl.gallery_path, span, pl.filename)
                                      : v.add_video(pl.gallery_path, span, pl.filename);
-    switch (r) {
-        case Ok:
-            ++out.imported;
-            break;
-        case AlreadyExists:
-        case InvalidArg:
-        case BadFormat:  // unsupported / duplicate content
-            ++out.skipped;
-            break;
-        default:
-            if (out.error.empty()) out.error = "Import error on " + pl.filename;
-            ++out.skipped;
-            break;
-    }
+    tally_import_result(r, pl.filename, out);
 }
 
 // Read `path` into memory and init a miniz reader over it (the portable
@@ -128,7 +98,7 @@ bool open_archive(const std::filesystem::path& path, const char* tag,
                   std::vector<uint8_t>& archive, mz_zip_archive& zip, ZipImportOutcome& out)
 {
     std::memset(&zip, 0, sizeof(zip));
-    if (read_archive(path, archive) &&
+    if (read_whole_file(path, archive) &&
         mz_zip_reader_init_mem(&zip, archive.data(), archive.size(), 0))
         return true;
     out.error = "Could not open archive";
