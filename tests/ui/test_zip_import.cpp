@@ -222,3 +222,16 @@ TEST(zip_import_append_ignores_meta_json)
     }
     cleanup_dir(dir);
 }
+
+TEST(zip_is_encrypted_false_for_plain_zip)
+{
+    auto dir = fresh_dir("osv_zip_test_enc_plain");
+    auto zip = make_archive({{"a.jpg", fake_jpeg(1)}}, dir / "plain.zip");
+    CHECK_FALSE(ui::zip_is_encrypted(zip));
+    cleanup_dir(dir);
+}
+
+TEST(zip_is_encrypted_false_for_missing_file)
+{
+    CHECK_FALSE(ui::zip_is_encrypted("/nonexistent/path/does_not_exist.zip"));
+}

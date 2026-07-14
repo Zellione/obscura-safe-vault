@@ -226,4 +226,21 @@ ArchiveMeta peek_archive_meta(const std::filesystem::path& archive_path)
     return meta;
 }
 
+bool zip_is_encrypted(const std::filesystem::path& zip_path)
+{
+    ZipImportOutcome ignored;
+    std::vector<uint8_t> archive;
+    mz_zip_archive zip;
+    if (!open_archive(zip_path, "ZipEncryptedPeek", archive, zip, ignored)) return false;
+
+    const mz_uint n = mz_zip_reader_get_num_files(&zip);
+    bool encrypted = false;
+    for (mz_uint i = 0; i < n && !encrypted; ++i) {
+        mz_zip_archive_file_stat st;
+        if (mz_zip_reader_file_stat(&zip, i, &st) && st.m_is_encrypted) encrypted = true;
+    }
+    mz_zip_reader_end(&zip);
+    return encrypted;
+}
+
 }  // namespace ui
