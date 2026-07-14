@@ -1,6 +1,7 @@
 #include "ui/zip_encoding.h"
 
 #include <array>
+#include <cstddef>
 
 namespace ui {
 namespace {
@@ -62,24 +63,29 @@ bool is_valid_utf8(std::string_view s)
     size_t i = 0;
     const size_t n = s.size();
     while (i < n) {
-        const auto b0 = static_cast<unsigned char>(s[i]);
+        const auto b0 = static_cast<std::byte>(s[i]);
         size_t extra;
         char32_t cp;
         char32_t min_cp;
-        if (b0 <= 0x7F) {
+        if (b0 <= std::byte{0x7F}) {
             ++i;
             continue;
         }
-        if ((b0 & 0xE0) == 0xC0)      { extra = 1; cp = b0 & 0x1FU; min_cp = 0x80; }
-        else if ((b0 & 0xF0) == 0xE0) { extra = 2; cp = b0 & 0x0FU; min_cp = 0x800; }
-        else if ((b0 & 0xF8) == 0xF0) { extra = 3; cp = b0 & 0x07U; min_cp = 0x10000; }
-        else return false;
+        if ((b0 & std::byte{0xE0}) == std::byte{0xC0}) {
+            extra = 1; cp = std::to_integer<char32_t>(b0 & std::byte{0x1F}); min_cp = 0x80;
+        } else if ((b0 & std::byte{0xF0}) == std::byte{0xE0}) {
+            extra = 2; cp = std::to_integer<char32_t>(b0 & std::byte{0x0F}); min_cp = 0x800;
+        } else if ((b0 & std::byte{0xF8}) == std::byte{0xF0}) {
+            extra = 3; cp = std::to_integer<char32_t>(b0 & std::byte{0x07}); min_cp = 0x10000;
+        } else {
+            return false;
+        }
 
         if (i + extra >= n) return false;
         for (size_t k = 1; k <= extra; ++k) {
-            const auto bk = static_cast<unsigned char>(s[i + k]);
-            if ((bk & 0xC0) != 0x80) return false;
-            cp = (cp << 6) | (bk & 0x3FU);
+            const auto bk = static_cast<std::byte>(s[i + k]);
+            if ((bk & std::byte{0xC0}) != std::byte{0x80}) return false;
+            cp = (cp << 6) | std::to_integer<char32_t>(bk & std::byte{0x3F});
         }
         if (cp < min_cp) return false;                  // overlong encoding
         if (cp >= 0xD800 && cp <= 0xDFFF) return false;  // surrogate half
