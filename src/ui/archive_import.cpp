@@ -17,11 +17,49 @@ namespace {
 // Read `path` into memory and open an ArchiveReader over it. On failure sets
 // out.error and returns false — mirrors zip_import.cpp's open_archive.
 bool open_archive(const std::filesystem::path& path, const char* tag,
-                  ArchiveReader& reader, ZipImportOutcome& out)
+                  ArchiveReader& reader, ZipImportOutcome& out,
+                  bool password_protected, std::string_view password)
 {
-    if (std::vector<uint8_t> bytes; read_whole_file(path, bytes) && reader.open(bytes)) return true;
-    out.error = "Could not open archive";
-    std::println(stderr, "[{}] open failed: {}", tag, path.string());
+    if (std::vector<uint8_t> bytes;
+        !read_whole_file(path, bytes) || !reader.open(bytes, password)) {
+        out.error = "Could not open archive";
+        std::println(stderr, "[{}] open failed: {}", tag, path.string());
+        return false;
+    }
+    if (!password_protected) return true;
+
+    // Verify the password against the first real entry before touching the
+    // vault at all — never a silent partial/unencrypted import (Phase 35).
+    const auto& entries = reader.entries();
+    size_t first = entries.size();
+    for (size_t i = 0; i < entries.size(); ++i) {
+        if (!entries[i].is_dir) { first = i; break; }
+    }
+    // A degenerate all-directories encrypted archive has nothing to verify
+    // against — reader.open() with this password already succeeded (headers
+    // aren't encrypted for ZipCrypto), so don't ask for a password again;
+    // there's no way this could ever come back as "correct" via a probe that
+    // doesn't exist (code-review fix — this would otherwise be an infinite
+    // re-prompt loop for a password that's already known to be right).
+    if (first >= entries.size()) return true;
+
+    if (crypto::SecureBytes probe; reader.extract(first, probe)) return true;
+
+    // Only ask for a (re)try when the failure was actually a password
+    // problem (ArchiveReader::extract_failed_needs_password, backed by
+    // archive_error_is_passphrase_issue in Task 3). Anything else — most
+    // notably a WinZip-AES-encrypted entry, which this build's libarchive
+    // can never decrypt regardless of passphrase since no crypto backend is
+    // compiled in — must fall through to the ordinary generic-error path
+    // instead, or the UI would loop forever re-prompting for a password that
+    // could never work (code-review fix).
+    if (!reader.extract_failed_needs_password()) {
+        out.error = "Could not import archive";
+        return false;
+    }
+
+    out.ok            = true;
+    out.needs_password = true;
     return false;
 }
 
@@ -93,17 +131,17 @@ ZipImportOutcome finish_import(vault::Vault& v, const ArchiveReader& reader, con
 
 ZipImportOutcome import_archive(vault::Vault&                v,
                                 const std::filesystem::path& archive_path,
-                                ZipDest                      dest,
-                                std::string_view             base_gallery,
-                                std::string_view             new_gallery_name,
-                                ZipConflictPolicy            policy,
-                                ImportProgress*              progress)
+                                const ZipDestination&        dest,
+                                ImportProgress*              progress,
+                                ArchivePassword              pw)
 {
     ZipImportOutcome out;
     ArchiveReader reader;
-    if (!open_archive(archive_path, "ArchiveImport", reader, out)) return out;
+    if (!open_archive(archive_path, "ArchiveImport", reader, out, pw.password_protected, pw.password))
+        return out;
 
-    ZipPlan plan = build_zip_plan(reader.entries(), dest, base_gallery, new_gallery_name, policy);
+    ZipPlan plan = build_zip_plan(reader.entries(), dest.dest, dest.base_gallery,
+                                  dest.new_gallery_name, dest.policy);
     if (plan.needs_resolution) {
         out.ok = true;
         out.needs_resolution = true;
@@ -117,11 +155,13 @@ ZipImportOutcome import_archive_cbz(vault::Vault&                v,
                                     const std::filesystem::path& archive_path,
                                     std::string_view             base_gallery,
                                     std::string_view             gallery_name,
-                                    ImportProgress*              progress)
+                                    ImportProgress*              progress,
+                                    ArchivePassword              pw)
 {
     ZipImportOutcome out;
     ArchiveReader reader;
-    if (!open_archive(archive_path, "ArchiveCbzImport", reader, out)) return out;
+    if (!open_archive(archive_path, "ArchiveCbzImport", reader, out, pw.password_protected, pw.password))
+        return out;
 
     const ZipPlan plan = build_cbz_plan(reader.entries(), base_gallery, gallery_name);
     return finish_import(v, reader, plan, progress);
@@ -142,15 +182,14 @@ ZipImportOutcome unsupported()
 }
 } // namespace
 
-ZipImportOutcome import_archive(vault::Vault&, const std::filesystem::path&, ZipDest,
-                                std::string_view, std::string_view, ZipConflictPolicy,
-                                ImportProgress*)
+ZipImportOutcome import_archive(vault::Vault&, const std::filesystem::path&, const ZipDestination&,
+                                ImportProgress*, ArchivePassword)
 {
     return unsupported();
 }
 
 ZipImportOutcome import_archive_cbz(vault::Vault&, const std::filesystem::path&, std::string_view,
-                                    std::string_view, ImportProgress*)
+                                    std::string_view, ImportProgress*, ArchivePassword)
 {
     return unsupported();
 }

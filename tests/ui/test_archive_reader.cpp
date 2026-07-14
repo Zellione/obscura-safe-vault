@@ -13,6 +13,7 @@ using archivetest::fake_bytes;
 using archivetest::fresh_path;
 using archivetest::make_archive;
 using archivetest::read_file;
+using archivetest::make_encrypted_zip;
 
 TEST(archive_reader_opens_tar_and_lists_entries)
 {
@@ -143,6 +144,74 @@ TEST(archive_reader_extracts_rar_entry_bytes)
     const std::string expected = "test text document\r\n";
     REQUIRE(out.size() == expected.size());
     CHECK(std::memcmp(out.data(), expected.data(), expected.size()) == 0);
+}
+
+TEST(archive_reader_opens_encrypted_zip_with_correct_password)
+{
+    const auto data = fake_bytes(11, 80);
+    auto bytes = read_file(make_encrypted_zip(
+        {{"secret.jpg", data}}, "hunter2", fresh_path("reader_enc_ok.zip")));
+    ui::ArchiveReader r;
+    REQUIRE(r.open(bytes, "hunter2"));
+    REQUIRE(r.entries().size() == size_t{1});
+    crypto::SecureBytes out;
+    REQUIRE(r.extract(0, out));
+    REQUIRE(out.size() == data.size());
+    CHECK(std::memcmp(out.data(), data.data(), data.size()) == 0);
+}
+
+TEST(archive_reader_extract_fails_with_wrong_password)
+{
+    const auto data = fake_bytes(12, 80);
+    auto bytes = read_file(make_encrypted_zip(
+        {{"secret.jpg", data}}, "hunter2", fresh_path("reader_enc_wrong.zip")));
+    ui::ArchiveReader r;
+    REQUIRE(r.open(bytes, "wrong-password"));
+    REQUIRE(r.entries().size() == size_t{1});
+    crypto::SecureBytes out;
+    CHECK_FALSE(r.extract(0, out));
+}
+
+TEST(archive_reader_extract_fails_with_no_password)
+{
+    const auto data = fake_bytes(13, 80);
+    auto bytes = read_file(make_encrypted_zip(
+        {{"secret.jpg", data}}, "hunter2", fresh_path("reader_enc_none.zip")));
+    ui::ArchiveReader r;
+    REQUIRE(r.open(bytes));   // no passphrase argument
+    REQUIRE(r.entries().size() == size_t{1});
+    crypto::SecureBytes out;
+    CHECK_FALSE(r.extract(0, out));
+}
+
+TEST(archive_reader_extract_failed_needs_password_true_for_wrong_password)
+{
+    const auto data = fake_bytes(14, 80);
+    auto bytes = read_file(make_encrypted_zip(
+        {{"secret.jpg", data}}, "hunter2", fresh_path("reader_enc_flag.zip")));
+    ui::ArchiveReader r;
+    REQUIRE(r.open(bytes, "wrong-password"));
+    crypto::SecureBytes out;
+    REQUIRE(!r.extract(0, out));   // no REQUIRE_FALSE macro in this test framework
+    CHECK(r.extract_failed_needs_password());
+}
+
+TEST(archive_error_is_passphrase_issue_matches_libarchive_wording)
+{
+    // Exact literal strings from vendor/libarchive/libarchive/
+    // archive_read_support_format_zip.c's init_traditional_PKWARE_decryption
+    // and init_WinZip_AES_decryption.
+    CHECK(ui::archive_error_is_passphrase_issue("Passphrase required for this entry"));
+    CHECK(ui::archive_error_is_passphrase_issue("Incorrect passphrase"));
+    // A WinZip AES entry fails differently when no crypto backend is
+    // compiled in (this project's build: -DENABLE_OPENSSL=OFF etc., see
+    // scripts/build_codecs.sh) — no password could ever satisfy this, so it
+    // must NOT be classified as a passphrase issue, or the UI would loop
+    // forever re-prompting for a password that can never work.
+    CHECK_FALSE(ui::archive_error_is_passphrase_issue(
+        "Decryption is unsupported due to lack of crypto library"));
+    CHECK_FALSE(ui::archive_error_is_passphrase_issue("Truncated ZIP file data"));
+    CHECK_FALSE(ui::archive_error_is_passphrase_issue(""));
 }
 
 #endif // OSV_VENDORED_ARCHIVE

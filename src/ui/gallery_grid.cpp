@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <filesystem>
 #include <format>
 
+#include "crypto/secure_mem.h"
 #include "gfx/renderer.h"
 #include "gfx/text.h"
 #include "gfx/texture_cache.h"
@@ -394,6 +396,27 @@ void GalleryGrid::handle_naming_key(const SDL_Event& e)
     }
 }
 
+void GalleryGrid::handle_password_key(const SDL_Event& e)
+{
+    if (e.type == SDL_EVENT_TEXT_INPUT) { naming_.password.buf.push_utf8(e.text.text); return; }
+    if (e.type != SDL_EVENT_KEY_DOWN) return;
+    if (e.key.key == SDLK_BACKSPACE) {
+        naming_.password.buf.backspace();
+    } else if (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER) {
+        naming_.password.active = false;
+        SDL_StopTextInput(win_.sdl_window());
+        do_zip_import(naming_.zip.path, ui::ZipConflictPolicy::AskUser);
+    } else if (e.key.key == SDLK_ESCAPE) {
+        naming_.password.active = false;
+        naming_.password.buf.clear();
+        naming_.zip.active         = false;   // cancel the whole import
+        naming_.zip.cbz            = false;
+        naming_.zip.archive_backend = false;
+        naming_.zip.needs_password  = false;
+        SDL_StopTextInput(win_.sdl_window());
+    }
+}
+
 void GalleryGrid::toggle_or_open()
 {
     if (const int s = nav_.selected();
@@ -544,7 +567,8 @@ bool GalleryGrid::handle_compact_confirm_key(const SDL_Event& e)
 
 bool GalleryGrid::handle_zip_conflict_key(const SDL_Event& e)
 {
-    if (!naming_.zip.active || naming_.active || e.type != SDL_EVENT_KEY_DOWN) return false;
+    if (!naming_.zip.active || naming_.active || naming_.password.active
+        || e.type != SDL_EVENT_KEY_DOWN) return false;
     switch (e.key.key) {
         case SDLK_F:  // flatten all mixed folders
             do_zip_import(naming_.zip.path, ui::ZipConflictPolicy::FlattenMixed);
@@ -556,11 +580,52 @@ bool GalleryGrid::handle_zip_conflict_key(const SDL_Event& e)
             return true;
         case SDLK_ESCAPE:  // cancel the import
             naming_.zip.active = false;
+            naming_.password.active = false;
+            naming_.password.buf.clear();
             mark_dirty();
             return true;
         default:
             return false;
     }
+}
+
+// Overlays take input in priority order: search > tag_editor > transfer >
+// quick_switch > export consent. Extracted from handle_event (cpp:S3776 —
+// each of these blocks was a nested branch there; here they're flat top-level
+// ifs, so the same logic costs far less cognitive complexity).
+bool GalleryGrid::handle_overlay_event(const SDL_Event& e)
+{
+    if (search_.active()) {
+        if (search_.handle_event(e)) {
+            Nav nav = search_.take_nav();
+            if (nav.kind != NavKind::None) request(nav.kind, std::move(nav.path), nav.index);
+        }
+        return true;
+    }
+
+    if (tag_editor_.active()) {
+        (void)tag_editor_.handle_event(e);
+        return true;
+    }
+
+    if (transfer_.active()) { (void)transfer_.handle_event(e); return true; }
+
+    if (quick_switch_.active()) {
+        (void)quick_switch_.handle_event(e);
+        if (std::string p; quick_switch_.consume_choice(p))
+            request(NavKind::ToUnlock, std::move(p));   // locks current, unlocks chosen
+        return true;
+    }
+
+    // The export consent modal owns all input while it is up.
+    if (consent_.active()) {
+        if (e.type == SDL_EVENT_KEY_DOWN &&
+            consent_.handle_key(e.key.key) == ConsentDialog::Result::Confirmed)
+            dialogs_.folder.open(win_.sdl_window());
+        return true;
+    }
+
+    return false;
 }
 
 void GalleryGrid::handle_event(const SDL_Event& e)
@@ -570,42 +635,16 @@ void GalleryGrid::handle_event(const SDL_Event& e)
     // dialog, which does its own Esc→cancel below).
     if (handle_job_input(*this, e)) return;
 
-    // Overlays take input in priority order: search > tag_editor > transfer > consent/naming
-    if (search_.active()) {
-        if (search_.handle_event(e)) {
-            Nav nav = search_.take_nav();
-            if (nav.kind != NavKind::None) request(nav.kind, std::move(nav.path), nav.index);
-        }
-        return;
-    }
-
-    if (tag_editor_.active()) {
-        (void)tag_editor_.handle_event(e);
-        return;
-    }
-
-    if (transfer_.active()) { (void)transfer_.handle_event(e); return; }
-
-    if (quick_switch_.active()) {
-        (void)quick_switch_.handle_event(e);
-        if (std::string p; quick_switch_.consume_choice(p))
-            request(NavKind::ToUnlock, std::move(p));   // locks current, unlocks chosen
-        return;
-    }
-
-    // The export consent modal owns all input while it is up.
-    if (consent_.active()) {
-        if (e.type == SDL_EVENT_KEY_DOWN &&
-            consent_.handle_key(e.key.key) == ConsentDialog::Result::Confirmed)
-            dialogs_.folder.open(win_.sdl_window());
-        return;
-    }
+    if (handle_overlay_event(e)) return;
 
     // The delete-confirmation modal owns all input while it is up.
     if (handle_delete_confirm_key(e)) return;
 
     // The compact-confirmation modal owns all input while it is up (Phase 26).
     if (handle_compact_confirm_key(e)) return;
+
+    // The password-prompt modal owns all input while it is up (Phase 35).
+    if (naming_.password.active) { handle_password_key(e); return; }
 
     // The zip conflict modal owns all input while it is up (only when not naming).
     if (handle_zip_conflict_key(e)) return;
@@ -663,6 +702,22 @@ ArchiveExtKind classify_archive_ext(std::string_view ext)
         return {false, true};
     return {false, false};   // .zip and anything else: the existing miniz mirror/append path
 }
+
+// Copy a SecureTextField's typed bytes into an owned SecureBytes (moved into
+// the background job's worker lambda). Empty when the field is empty, or if
+// the allocation itself fails — the job/import layer already treats an empty
+// password as "not yet supplied" (Phase 35), so a rare alloc failure here
+// just degrades to that same, safe "ask again" behavior instead of copying
+// into a too-small buffer (code-review fix: the resize() result must be
+// checked before memcpy, or a failed resize leaves `pw` at size 0 while the
+// memcpy below still writes f.length() bytes into it — a buffer overflow).
+crypto::SecureBytes password_bytes(const SecureTextField& f)
+{
+    crypto::SecureBytes pw;
+    if (!f.empty() && pw.resize(f.length()))
+        std::memcpy(pw.data(), f.bytes().data(), f.length());
+    return pw;
+}
 } // namespace
 
 void GalleryGrid::pump_zip_import()
@@ -675,7 +730,18 @@ void GalleryGrid::pump_zip_import()
     std::string ext = zp.extension().string();   // ".cbz" / ".zip" / ".7z" / ...
     std::ranges::transform(ext, ext.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    const auto [cbz, archive_backend] = classify_archive_ext(ext);
+    auto [cbz, archive_backend] = classify_archive_ext(ext);
+
+    // Phase 35: a password-protected zip/cbz (ZipCrypto "traditional"
+    // encryption) always routes through the libarchive backend instead of
+    // miniz — miniz has no decrypt path for any encryption flavor — and
+    // needs a password prompt before it can import. WinZip-AES zips are
+    // NOT detected here (m_is_encrypted covers both, but only traditional
+    // encryption can actually be decrypted downstream — an AES zip will
+    // fail the verification probe in import_archive with a generic error,
+    // same as today, never an unsatisfiable retry loop).
+    const bool needs_password = (ext == ".zip" || ext == ".cbz") && ui::zip_is_encrypted(zp);
+    if (needs_password) archive_backend = true;
 
     if (cbz) {
         // CBZ/CBR/CB7/CBT: always a dedicated leaf gallery named after the archive.
@@ -695,6 +761,7 @@ void GalleryGrid::pump_zip_import()
             naming_.zip.dest = ui::ZipDest::NewGallery;
             naming_.zip.cbz = true;
             naming_.zip.archive_backend = archive_backend;
+            naming_.zip.needs_password  = needs_password;
             naming_.zip.active = true;
         }
     } else if (leaf_allows_images(children_) && !leaf_allows_galleries(children_)) {
@@ -704,6 +771,7 @@ void GalleryGrid::pump_zip_import()
         naming_.zip.dest = ui::ZipDest::Append;
         naming_.zip.cbz = false;
         naming_.zip.archive_backend = archive_backend;
+        naming_.zip.needs_password  = needs_password;
         naming_.zip.active = true;
         do_zip_import(zp, ui::ZipConflictPolicy::AskUser);
     } else {
@@ -717,6 +785,7 @@ void GalleryGrid::pump_zip_import()
         naming_.zip.dest = ui::ZipDest::NewGallery;
         naming_.zip.cbz = false;
         naming_.zip.archive_backend = archive_backend;
+        naming_.zip.needs_password  = needs_password;
         naming_.zip.active = true;
     }
     mark_dirty();   // dialog closed (picked) — repaint
@@ -738,15 +807,22 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipCo
     // policy. naming_.zip stays populated across that round-trip and is cleared on a
     // terminal outcome. archive_backend (Phase 34) picks the libarchive-backed job
     // methods for .7z/.rar/.tar(+variants)/.cbr/.cb7/.cbt — same threading/progress
-    // contract, only the decompression backend differs.
+    // contract, only the decompression backend differs. Phase 35: needs_password
+    // additionally threads naming_.password.buf through on every (re)launch —
+    // empty on the very first attempt (before the user has typed anything), which
+    // correctly comes back needs_password=true and opens the prompt.
     if (naming_.zip.cbz) {
         if (naming_.zip.archive_backend)
-            naming_.import_job.start_archive_cbz(vault_, zip_path, base_gallery, gallery_name);
+            naming_.import_job.start_archive_cbz(vault_, zip_path, base_gallery, gallery_name,
+                                                 naming_.zip.needs_password,
+                                                 password_bytes(naming_.password.buf));
         else
             naming_.import_job.start_cbz(vault_, zip_path, base_gallery, gallery_name);
     } else {
         if (naming_.zip.archive_backend)
-            naming_.import_job.start_archive(vault_, zip_path, dest, base_gallery, gallery_name, policy);
+            naming_.import_job.start_archive(vault_, zip_path, ui::ZipImportTarget{dest, policy},
+                                             base_gallery, gallery_name, naming_.zip.needs_password,
+                                             password_bytes(naming_.password.buf));
         else
             naming_.import_job.start_zip(vault_, zip_path, dest, base_gallery, gallery_name, policy);
     }
@@ -778,9 +854,22 @@ void poll_import_job(GalleryGrid& g)
             g.naming_.zip.active          = false;
             g.naming_.zip.cbz             = false;
             g.naming_.zip.archive_backend = false;
+            g.naming_.zip.needs_password  = false;
+            g.naming_.password.active     = false;
+            g.naming_.password.buf.clear();
         } else if (oc->needs_resolution) {
             // ZIP with mixed folders: keep naming_.zip active so the Flatten/Skip
             // modal shows; the worker wrote nothing. F/S re-launches with a policy.
+        } else if (oc->needs_password) {
+            // Encrypted zip/cbz: keep naming_.zip active (mirrors needs_resolution)
+            // and open the password modal. `retry` distinguishes "nothing typed
+            // yet" from "that password was wrong" for the modal's message; the
+            // just-tried (wrong) password is cleared so the field starts empty for
+            // the next attempt (Phase 35).
+            g.naming_.password.retry = !g.naming_.password.buf.empty();
+            g.naming_.password.buf.clear();
+            g.naming_.password.active = true;
+            SDL_StartTextInput(g.win_.sdl_window());
         } else {
             const char* noun = cbz ? "page" : "file";
             if (oc->cancelled) {
@@ -792,6 +881,9 @@ void poll_import_job(GalleryGrid& g)
             g.naming_.zip.active          = false;
             g.naming_.zip.cbz             = false;
             g.naming_.zip.archive_backend = false;
+            g.naming_.zip.needs_password  = false;
+            g.naming_.password.active     = false;
+            g.naming_.password.buf.clear();
             g.refresh();   // the import mutated the index tree — rebuild children_
         }
     }
@@ -1071,7 +1163,7 @@ void GalleryGrid::render(gfx::Renderer& r)
 
     // Zip conflict modal: drawn when awaiting a choice between FlattenMixed and SkipMixed.
     // Only shown after the naming dialog closes (so !naming_.active).
-    if (naming_.zip.active && !naming_.active) {
+    if (naming_.zip.active && !naming_.active && !naming_.password.active) {
         // Veil the whole window.
         r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
 
@@ -1091,6 +1183,31 @@ void GalleryGrid::render(gfx::Renderer& r)
         centered("Mixed folders detected in archive.", py + 28, TEXT);
         centered("Cannot mix nested folders with flat gallery structure.", py + 60, TEXT_DIM);
         centered("[F] Flatten all files  |  [S] Skip those directories", py + ph - 50, TEXT_DIM);
+    }
+
+    // Password-prompt modal: shown when the import outcome reported
+    // needs_password (encrypted zip/cbz) — masked text entry, mirrors the
+    // UnlockScreen password field's styling (Phase 35).
+    if (naming_.password.active) {
+        r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});   // veil
+
+        const float pw = 480;
+        const float ph = 160;
+        const float px = (W - pw) / 2;
+        const float py = (H - ph) / 2;
+        r.draw_round_rect({px, py, pw, ph}, RADIUS, SURFACE);
+        r.draw_round_rect({px, py, pw, ph}, RADIUS, ACCENT, /*filled*/ false);
+
+        auto centered = [&](const std::string& s, float y, gfx::Color c) {
+            const auto tw = static_cast<float>(font_.measure(s));
+            r.draw_text(font_, px + (pw - tw) / 2, y, s, c);
+        };
+
+        centered(naming_.password.retry ? "Incorrect passphrase." : "Archive password required.",
+                 py + 20, naming_.password.retry ? DANGER : TEXT);
+        draw_text_field(r, font_, {px + 20, py + 52, pw - 40, 44},
+                        std::string(naming_.password.buf.length(), '*'), true);
+        centered("[Enter] Unlock        [Esc] Cancel", py + ph - 26, TEXT_DIM);
     }
 }
 

@@ -290,6 +290,17 @@ src/
                                             FileOpKind::Import/FileOpJob::start_import instead of a
                                             synchronous per-file loop, reusing the same progress modal
                                             + Esc-cancel as export/delete/compact (Phase 32).
+                                            Phase 35: pump_zip_import forces
+                                            archive_backend + sets
+                                            PendingZip::needs_password when
+                                            ui::zip_is_encrypted(zp) is true;
+                                            a needs_password outcome opens a
+                                            masked-password modal
+                                            (Naming::PasswordPrompt, mirrors
+                                            the Flatten/Skip mixed-folder
+                                            modal's deferred-outcome pattern)
+                                            before do_zip_import relaunches
+                                            with the typed password.
              image_viewer.*,              ← zoom/pan + thumb strip + fill-scroll + slideshow;
                                             hosts a fit-only VideoPlayback for video items (Phase 15).
                                             Single-image export (X) stays synchronous (one image is
@@ -489,6 +500,11 @@ src/
                                             MAX_ENTRY_BYTES=4 GiB decompression-bomb guard checked
                                             against the entry's declared size before allocating
                                             (mirrors chunk_codec's orig_len check).
+                                            Phase 35: open() takes an optional
+                                            passphrase (archive_read_add_
+                                            passphrase), remembered for the
+                                            reader's lifetime and reused by
+                                            every subsequent extract() re-open.
              archive_import.*,            ← import_archive/import_archive_cbz (Phase 34): mirrors
                                             zip_import.*'s import_zip/import_cbz structure but
                                             backed by ArchiveReader instead of miniz, covering
@@ -498,6 +514,21 @@ src/
                                             a graceful "not supported" ZipImportOutcome on a build
                                             without it (mirrors ui::VideoPlayback's non-AV poster-
                                             only fallback) — gallery_grid.cpp needs zero #ifdefs.
+                                            Phase 35: import_archive/
+                                            import_archive_cbz gain
+                                            password_protected/password
+                                            params — when set, a one-entry
+                                            verification probe runs before
+                                            any vault write and can return
+                                            ZipImportOutcome::needs_password
+                                            with nothing written. Scope is
+                                            ZIP/CBZ traditional (ZipCrypto)
+                                            encryption only — libarchive's 7z/
+                                            RAR readers refuse encrypted
+                                            content unconditionally, and
+                                            WinZip-AES zip needs a crypto
+                                            backend this project doesn't
+                                            vendor (see ROADMAP Phase 35).
              zip_import.*,                ← ZIP/CBZ executor: miniz reader → mlock'd
                                             SecureBytes → Vault::add_image/add_video; triggered
                                             by `Z` key in gallery grid (Phase 17). import_cbz
@@ -517,6 +548,13 @@ src/
                                             is authoritative. Extracted into mlock'd memory, 1 MiB
                                             sanity cap; malformed → filename-named, untagged import
                                             (never an error).
+                                            Phase 35: zip_is_encrypted (miniz
+                                            m_is_encrypted peek) detects a
+                                            password-protected zip/cbz at
+                                            pick time so GalleryGrid can force
+                                            it through the archive_import.*
+                                            (libarchive) backend instead —
+                                            miniz has no decrypt path at all.
              zip_import_job.*,            ← ZipImportJob: runs import_cbz/import_zip (start_cbz/
                                             start_zip, shared launch() helper) on a background
                                             thread so a big archive (~10 s) never freezes the UI on
@@ -535,6 +573,14 @@ src/
                                             blocks_idle_lock() (new Screen hook) pins the idle auto-
                                             lock off during import so it can't wipe the master key
                                             mid-write.
+                                            Phase 35: start_archive/
+                                            start_archive_cbz gain optional
+                                            password_protected/password
+                                            (crypto::SecureBytes, moved into
+                                            the worker via a shared_ptr since
+                                            std::function requires a copyable
+                                            target, wiped right after the
+                                            import call) params.
              tag_list_parse.*,            ← pure, SDL/vault-free tag-list parser (Phase 21):
                                             raw .txt bytes → normalised tag list (split on LF,
                                             trim CR+whitespace, drop blanks, case-insensitive

@@ -5,19 +5,28 @@
 #include <archive.h>
 #include <archive_entry.h>
 
+#include <cstring>
 #include <print>
 
 namespace ui {
 namespace {
 
+// The const char* open_stream() needs, or nullptr when no passphrase was
+// given — a single place to avoid every call site re-deriving this.
+const char* passphrase_cstr(const crypto::SecureBytes& passphrase)
+{
+    return passphrase.empty() ? nullptr : reinterpret_cast<const char*>(passphrase.data());
+}
+
 // Configure a fresh read handle over `data`: auto-detect the archive format
 // (7z/RAR/TAR) and any compression filter (gzip/xz). Caller owns the result
 // and must archive_read_free() it. Returns nullptr on open failure.
-struct archive* open_stream(std::span<const uint8_t> data)
+struct archive* open_stream(std::span<const uint8_t> data, const char* passphrase)
 {
     struct archive* a = archive_read_new();
     archive_read_support_format_all(a);
     archive_read_support_filter_all(a);
+    if (passphrase) archive_read_add_passphrase(a, passphrase);
     if (archive_read_open_memory(a, data.data(), data.size()) != ARCHIVE_OK) {
         std::println(stderr, "[ArchiveReader] open failed: {}", archive_error_string(a));
         archive_read_free(a);
@@ -28,14 +37,25 @@ struct archive* open_stream(std::span<const uint8_t> data)
 
 } // namespace
 
-bool ArchiveReader::open(std::span<const uint8_t> data)
+bool ArchiveReader::open(std::span<const uint8_t> data, std::string_view passphrase)
 {
     data_.assign(data.begin(), data.end());
     entries_.clear();
+    passphrase_.wipe();
+    (void)passphrase_.resize(0);
+    if (!passphrase.empty()) {
+        if (!passphrase_.resize(passphrase.size() + 1)) {  // +1: trailing NUL for the C API
+            data_.clear();
+            return false;
+        }
+        std::memcpy(passphrase_.data(), passphrase.data(), passphrase.size());
+    }
 
-    struct archive* a = open_stream(data_);
+    struct archive* a = open_stream(data_, passphrase_cstr(passphrase_));
     if (!a) {
         data_.clear();
+        passphrase_.wipe();
+        (void)passphrase_.resize(0);
         return false;
     }
 
@@ -63,9 +83,10 @@ bool ArchiveReader::open(std::span<const uint8_t> data)
 
 bool ArchiveReader::extract(size_t index, crypto::SecureBytes& out) const
 {
+    needs_password_ = false;
     if (index >= entries_.size() || entries_[index].is_dir) return false;
 
-    struct archive* a = open_stream(data_);
+    struct archive* a = open_stream(data_, passphrase_cstr(passphrase_));
     if (!a) return false;
 
     // A while loop (not a for loop) so the loop header stays concerned only
@@ -107,7 +128,9 @@ bool ArchiveReader::extract(size_t index, crypto::SecureBytes& out) const
     while (total < out.size()) {
         const la_ssize_t n = archive_read_data(a, out.data() + total, out.size() - total);
         if (n < 0) {
-            std::println(stderr, "[ArchiveReader] data read failed: {}", archive_error_string(a));
+            const std::string_view msg = archive_error_string(a);
+            std::println(stderr, "[ArchiveReader] data read failed: {}", msg);
+            needs_password_ = archive_error_is_passphrase_issue(msg);
             out.wipe();
             (void)out.resize(0);
             archive_read_free(a);

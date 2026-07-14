@@ -18,6 +18,8 @@ namespace ui {
 struct ZipImportOutcome {
     bool                     ok = false;
     bool                     needs_resolution = false;
+    bool                     needs_password   = false;  // encrypted zip/cbz: wrong/missing password,
+                                                         // nothing written (Phase 35)
     bool                     cancelled = false;     // user pressed Esc during import (Phase 26)
     int                      imported = 0;
     int                      skipped = 0;
@@ -66,5 +68,13 @@ using ImportProgress = vault::OpProgress;
 // authoritative for the import (never silently overridden by the title).
 // Missing/malformed meta.json or an unreadable archive → empty ArchiveMeta.
 [[nodiscard]] ArchiveMeta peek_archive_meta(const std::filesystem::path& archive_path);
+
+// True if `zip_path` has at least one entry using ZIP encryption (any
+// flavor — this only detects the flag, not which kind). miniz can still list
+// an encrypted zip's central directory (only content extraction fails), so
+// this is a cheap peek, mirroring peek_archive_meta's cost/timing. False on
+// any open failure (never blocks a normal import attempt) or a fully
+// unencrypted archive.
+[[nodiscard]] bool zip_is_encrypted(const std::filesystem::path& zip_path);
 
 }  // namespace ui

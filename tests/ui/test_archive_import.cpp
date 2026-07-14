@@ -35,8 +35,8 @@ TEST(archive_import_tar_new_gallery_mirrors_tree)
                                  {"ch2/01.jpg", fake_bytes(3)}},
                                 "ustar", dir / "book.tar");
 
-    auto out = ui::import_archive(v, archive, ui::ZipDest::NewGallery, "", "Book",
-                                  ui::ZipConflictPolicy::FlattenMixed);
+    auto out = ui::import_archive(v, archive,
+                                  {ui::ZipDest::NewGallery, "", "Book", ui::ZipConflictPolicy::FlattenMixed});
     REQUIRE(out.ok);
     CHECK_FALSE(out.needs_resolution);
     CHECK_EQ(out.imported, 3);
@@ -59,8 +59,8 @@ TEST(archive_import_7z_round_trip_checksums)
     const auto data = fake_bytes(9, 400);
     auto archive = make_archive({{"only.jpg", data}}, "7zip", dir / "one.7z");
 
-    auto out = ui::import_archive(v, archive, ui::ZipDest::NewGallery, "", "Gal",
-                                  ui::ZipConflictPolicy::FlattenMixed);
+    auto out = ui::import_archive(v, archive,
+                                  {ui::ZipDest::NewGallery, "", "Gal", ui::ZipConflictPolicy::FlattenMixed});
     REQUIRE(out.ok);
     REQUIRE(out.imported == 1);
 
@@ -86,8 +86,8 @@ TEST(archive_import_targz_round_trip_checksums)
     auto archive = make_archive({{"vol/01.jpg", data1}, {"vol/02.jpg", data2}},
                                 "gnutar_gz", dir / "book.tar.gz");
 
-    auto out = ui::import_archive(v, archive, ui::ZipDest::NewGallery, "", "Vol",
-                                  ui::ZipConflictPolicy::FlattenMixed);
+    auto out = ui::import_archive(v, archive,
+                                  {ui::ZipDest::NewGallery, "", "Vol", ui::ZipConflictPolicy::FlattenMixed});
     REQUIRE(out.ok);
     REQUIRE(out.imported == 2);
 
@@ -138,8 +138,8 @@ TEST(archive_import_rejects_malformed_archive)
     auto bad = dir / "bad.tar";
     std::ofstream(bad, std::ios::binary) << "not a tar file at all, just junk bytes";
 
-    auto out = ui::import_archive(v, bad, ui::ZipDest::NewGallery, "", "Gal",
-                                  ui::ZipConflictPolicy::FlattenMixed);
+    auto out = ui::import_archive(v, bad,
+                                  {ui::ZipDest::NewGallery, "", "Gal", ui::ZipConflictPolicy::FlattenMixed});
     CHECK_FALSE(out.ok);
     CHECK_FALSE(out.error.empty());
 
@@ -158,8 +158,8 @@ TEST(archive_import_writes_no_extra_files)
     size_t before = 0;
     for (auto& _ : std::filesystem::directory_iterator(dir)) (void)_, ++before;
 
-    auto out = ui::import_archive(v, archive, ui::ZipDest::NewGallery, "", "Gal",
-                                  ui::ZipConflictPolicy::FlattenMixed);
+    auto out = ui::import_archive(v, archive,
+                                  {ui::ZipDest::NewGallery, "", "Gal", ui::ZipConflictPolicy::FlattenMixed});
     REQUIRE(out.ok);
 
     size_t after = 0;
@@ -189,6 +189,100 @@ TEST(archive_import_cbr_style_tar_imports_as_one_gallery_natural_order)
     CHECK_EQ(children[0]->name, "1.jpg");
     CHECK_EQ(children[1]->name, "2.jpg");
     CHECK_EQ(children[2]->name, "10.jpg");
+
+    v.lock();
+    cleanup_dir(dir);
+}
+
+TEST(archive_import_encrypted_zip_correct_password_imports)
+{
+    auto dir = fresh_dir_local("archive_import_enc_ok");
+    vault::Vault v;
+    make_vault(v, dir / "v.osv");
+
+    const auto data = fake_bytes(21, 300);
+    auto archive = archivetest::make_encrypted_zip({{"one.jpg", data}}, "swordfish",
+                                                    dir / "secret.zip");
+
+    auto out = ui::import_archive(v, archive,
+                                  {ui::ZipDest::NewGallery, "", "Secret", ui::ZipConflictPolicy::FlattenMixed},
+                                  nullptr, {/*password_protected=*/true, "swordfish"});
+    REQUIRE(out.ok);
+    CHECK_FALSE(out.needs_password);
+    CHECK_EQ(out.imported, 1);
+
+    auto children = v.list("Secret");
+    REQUIRE(children.size() == size_t{1});
+    crypto::SecureBytes read;
+    REQUIRE(v.read_image(*children[0], read) == vault::VaultResult::Ok);
+    REQUIRE(read.size() == data.size());
+    CHECK(std::memcmp(read.data(), data.data(), data.size()) == 0);
+
+    v.lock();
+    cleanup_dir(dir);
+}
+
+TEST(archive_import_encrypted_zip_wrong_password_writes_nothing)
+{
+    auto dir = fresh_dir_local("archive_import_enc_wrong");
+    vault::Vault v;
+    make_vault(v, dir / "v.osv");
+
+    auto archive = archivetest::make_encrypted_zip({{"one.jpg", fake_bytes(22)}}, "swordfish",
+                                                    dir / "secret.zip");
+
+    auto out = ui::import_archive(v, archive,
+                                  {ui::ZipDest::NewGallery, "", "Secret", ui::ZipConflictPolicy::FlattenMixed},
+                                  nullptr, {/*password_protected=*/true, "wrong-guess"});
+    REQUIRE(out.ok);
+    CHECK(out.needs_password);
+    CHECK_EQ(out.imported, 0);
+    CHECK(v.list("").empty());   // nothing written — no "Secret" gallery exists
+
+    v.lock();
+    cleanup_dir(dir);
+}
+
+TEST(archive_import_encrypted_zip_no_password_writes_nothing)
+{
+    auto dir = fresh_dir_local("archive_import_enc_none");
+    vault::Vault v;
+    make_vault(v, dir / "v.osv");
+
+    auto archive = archivetest::make_encrypted_zip({{"one.jpg", fake_bytes(23)}}, "swordfish",
+                                                    dir / "secret.zip");
+
+    // Simulates the very first attempt, before the user has typed anything.
+    auto out = ui::import_archive(v, archive,
+                                  {ui::ZipDest::NewGallery, "", "Secret", ui::ZipConflictPolicy::FlattenMixed},
+                                  nullptr, {/*password_protected=*/true, ""});
+    REQUIRE(out.ok);
+    CHECK(out.needs_password);
+    CHECK(v.list("").empty());
+
+    v.lock();
+    cleanup_dir(dir);
+}
+
+TEST(archive_import_cbz_encrypted_zip_correct_password_imports)
+{
+    auto dir = fresh_dir_local("archive_import_cbz_enc_ok");
+    vault::Vault v;
+    make_vault(v, dir / "v.osv");
+
+    auto archive = archivetest::make_encrypted_zip(
+        {{"2.jpg", fake_bytes(2)}, {"1.jpg", fake_bytes(1)}}, "pw123", dir / "comic.zip");
+
+    auto out = ui::import_archive_cbz(v, archive, "", "Comic", nullptr,
+                                      {/*password_protected=*/true, "pw123"});
+    REQUIRE(out.ok);
+    CHECK_FALSE(out.needs_password);
+    CHECK_EQ(out.imported, 2);
+
+    auto children = v.list("Comic");
+    REQUIRE(children.size() == size_t{2});
+    CHECK_EQ(children[0]->name, "1.jpg");
+    CHECK_EQ(children[1]->name, "2.jpg");
 
     v.lock();
     cleanup_dir(dir);

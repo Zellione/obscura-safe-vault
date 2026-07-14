@@ -82,6 +82,35 @@ inline fs::path make_archive(const std::vector<std::pair<std::string, std::vecto
     return out;
 }
 
+// Like make_archive, but for a ZIP archive using traditional (ZipCrypto)
+// encryption — libarchive's own writer supports this natively (no external
+// crypto lib needed, unlike WinZip AES), so the same library that reads it
+// back in ArchiveReader can produce a real encrypted fixture at test time.
+inline fs::path make_encrypted_zip(const std::vector<std::pair<std::string, std::vector<uint8_t>>>& items,
+                                   const char* password, const fs::path& out)
+{
+    struct archive* a = archive_write_new();
+    archive_write_set_format_zip(a);
+    archive_write_set_options(a, "zip:encryption=traditional");
+    archive_write_set_passphrase(a, password);
+    archive_write_open_filename(a, out.string().c_str());
+
+    for (const auto& [path, bytes] : items) {
+        struct archive_entry* entry = archive_entry_new();
+        archive_entry_set_pathname(entry, path.c_str());
+        archive_entry_set_size(entry, static_cast<int64_t>(bytes.size()));
+        archive_entry_set_filetype(entry, AE_IFREG);
+        archive_entry_set_perm(entry, 0644);
+        archive_write_header(a, entry);
+        archive_write_data(a, bytes.data(), bytes.size());
+        archive_entry_free(entry);
+    }
+    archive_write_close(a);
+    archive_write_free(a);
+    return out;
+}
+
+
 // Read a whole file back into memory (used by the ArchiveReader-level tests,
 // which operate on in-memory buffers rather than paths).
 inline std::vector<uint8_t> read_file(const fs::path& p)

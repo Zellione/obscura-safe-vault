@@ -16,6 +16,7 @@
 #include "ui/quick_switch.h"
 #include "ui/screen.h"
 #include "ui/search_overlay.h"
+#include "ui/secure_text_field.h"
 #include "ui/selection_model.h"
 #include "ui/tag_editor.h"
 #include "ui/transfer_dialog.h"
@@ -69,6 +70,7 @@ private:
 
     void handle_key_down(const SDL_KeyboardEvent& key);  // browse-mode keys
     void handle_naming_key(const SDL_Event& e);          // new-gallery text entry
+    void handle_password_key(const SDL_Event& e);         // Phase 35: archive-password text entry
     void toggle_or_open();                               // Space: select image / open
     void refresh();
     void open_selected();
@@ -86,6 +88,10 @@ private:
     bool handle_zip_conflict_key(const SDL_Event& e);     // Flatten/Skip/Esc modal; true if consumed
     bool handle_delete_confirm_key(const SDL_Event& e);   // Del-confirm modal; true if consumed
     bool handle_compact_confirm_key(const SDL_Event& e);  // Shift+C compact modal; true if consumed (Phase 26)
+    // Dispatches to whichever full-screen overlay (search/tag editor/transfer/
+    // quick switch/export consent) is active; true if one consumed the event.
+    // Extracted from handle_event to keep its cognitive complexity bounded (cpp:S3776).
+    bool handle_overlay_event(const SDL_Event& e);
     void start_tag_editor(bool import_list);  // G: open tag editor; Shift+G: import a tag list (Phase 21)
     void toggle_favorite_current();  // flip favorite on the focused tile (B)
     SDL_Texture*       thumb_texture(const vault::IndexNode& node);
@@ -142,11 +148,27 @@ private:
         // start_zip/start_cbz (miniz); orthogonal to `cbz` above, which only
         // selects the one-leaf-gallery plan vs the mirror/append plan.
         bool                  archive_backend = false;
+        // Phase 35: a ZIP/CBZ detected as password-protected at pick time
+        // (ui::zip_is_encrypted) — forces archive_backend above, and gates
+        // whether do_zip_import threads naming_.password.buf through to the job.
+        bool                  needs_password = false;
     };
     struct Naming {
         bool         active = false;   // manual new-gallery text entry
         std::string  buf;
         PendingZip   zip;              // zip import descriptor in flight
+        // Phase 35: masked password entry for an encrypted zip/cbz. Mirrors
+        // naming_.active's text-entry lifecycle (handle_password_key /
+        // rendered as its own veiled modal), kept separate from `buf` since
+        // both a gallery name and a password can be needed for the same
+        // import (name first, then — if the archive turns out encrypted —
+        // the password) without clobbering each other.
+        struct PasswordPrompt {
+            bool            active = false;
+            bool            retry  = false;   // true after a wrong password (changes the modal's message)
+            SecureTextField buf{256};
+        };
+        PasswordPrompt password;
         ZipImportJob import_job;       // background executor for the zip/cbz import (Phase 24)
         FileOpJob    file_op;          // background executor for export/delete/compact (Phase 25/26)
         bool         confirm_delete = false;  // Del on a media tile: awaiting Y/N confirm
