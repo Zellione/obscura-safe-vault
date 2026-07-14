@@ -52,7 +52,7 @@ std::optional<std::filesystem::path> normalize_user_path(std::string_view raw)
     if (raw.empty() || raw.size() > MAX_USER_PATH_BYTES) return std::nullopt;
     // An embedded NUL would truncate the string fopen() actually sees, so the
     // path that gets opened would differ from the one we validated.
-    if (raw.find('\0') != std::string_view::npos) return std::nullopt;
+    if (raw.contains('\0')) return std::nullopt;
 
     std::filesystem::path p{raw};
     p = p.lexically_normal();

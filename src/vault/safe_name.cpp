@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstddef>
 
 namespace vault {
 
@@ -46,11 +47,19 @@ constexpr std::string_view FALLBACK_NAME = "unnamed";
     return false;
 }
 
+// A UTF-8 continuation byte is 10xxxxxx — i.e. not the first byte of a codepoint.
+[[nodiscard]] bool is_utf8_continuation(char c) noexcept
+{
+    constexpr std::byte TOP_TWO_BITS{0xC0};
+    constexpr std::byte CONTINUATION{0x80};
+    return (static_cast<std::byte>(c) & TOP_TWO_BITS) == CONTINUATION;
+}
+
 // Back off `len` to the start of the UTF-8 codepoint it lands in the middle of,
 // so truncation never tears a multi-byte sequence in half.
 [[nodiscard]] size_t utf8_floor(std::string_view s, size_t len) noexcept
 {
-    while (len > 0 && (static_cast<unsigned char>(s[len]) & 0xC0) == 0x80) --len;
+    while (len > 0 && is_utf8_continuation(s[len])) --len;
     return len;
 }
 

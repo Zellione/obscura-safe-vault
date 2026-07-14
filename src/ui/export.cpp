@@ -1,5 +1,6 @@
 #include "ui/export.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <print>
 
@@ -19,9 +20,7 @@ bool export_path_within(const fs::path& dest_dir, const fs::path& candidate)
 
     const fs::path rel = target.lexically_relative(base);
     if (rel.empty() || rel == ".") return false;
-    for (const auto& part : rel)
-        if (part == "..") return false;
-    return true;
+    return !std::ranges::contains(rel, "..");
 }
 
 vault::VaultResult export_one_image(const vault::Vault&          vault,
