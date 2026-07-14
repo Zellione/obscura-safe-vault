@@ -416,6 +416,18 @@ src/
                                                  a top-level meta.json (case-insensitive, files
                                                  only) is excluded by every planner path (never
                                                  placed, never counted skipped).
+               zip_encoding.*                  — decode_zip_entry_name (Phase 36 part 2): legacy
+                                                 (non-UTF-8) zip/cbz entry-name decoding. When a
+                                                 name lacks the general-purpose UTF-8 bit (bit 11),
+                                                 decodes via a fixed 128-entry CP437->Unicode table
+                                                 (bytes 0x80-0xFF; 0x00-0x7F are ASCII-identical),
+                                                 unless the raw bytes already parse as valid UTF-8
+                                                 (passed through unchanged rather than re-decoded
+                                                 into mojibake). Shift_JIS/other double-byte legacy
+                                                 encodings are out of scope — such a name still
+                                                 imports safely, just mis-decoded as CP437. Pure,
+                                                 SDL/vault-free, unit-tested; used by
+                                                 zip_import.cpp's read_entry_list.
                zip_import.*                    — ZIP/CBZ import executor (Phase 17; CBZ Phase 24):
                                                  miniz reader -> mlock'd SecureBytes (one entry at
                                                  a time, no temp file) -> Vault::add_image/add_video

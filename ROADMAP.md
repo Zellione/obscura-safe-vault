@@ -1545,7 +1545,7 @@ resolves to a plain generic import error.
 
 ---
 
-## Phase 36 — Robust special-character filename & archive-name handling 🚧
+## Phase 36 — Robust special-character filename & archive-name handling ✅
 
 **Goal:** Archive entries and archive filenames containing non-ASCII text,
 legacy (non-UTF-8) encodings, filesystem-illegal characters, or path-
@@ -1564,12 +1564,17 @@ manager, cross-vault transfer), a hostile vault was an arbitrary-file-write
 primitive on export. Fixed at three layers — see the tasks below.
 
 ### Tasks
-- [ ] **Legacy zip encoding fallback** — a zip/cbz entry without the UTF-8
-  language-encoding flag (bit 11) is commonly CP437, or Shift_JIS for
-  East-Asian archives; detect the missing flag and decode via a small
-  fallback table (or defer to libarchive's own encoding detection, vendored
-  in Phase 34, for the ambiguous case) instead of today's presumed-UTF-8
-  read. *(Still outstanding — orthogonal to Part 1.)*
+- [x] **Legacy zip encoding fallback** — a zip/cbz entry without the UTF-8
+  language-encoding flag (bit 11, `mz_zip_archive_file_stat::m_bit_flag`) is
+  decoded through `ui::decode_zip_entry_name` (`src/ui/zip_encoding.*`, pure +
+  unit-tested): a fixed 128-entry CP437->Unicode table for bytes 0x80-0xFF
+  (bytes 0x00-0x7F are ASCII-identical), the overwhelmingly common legacy
+  encoding for zip tools that predate the flag. A name that happens to already
+  be valid UTF-8 without the flag (some tools write UTF-8 but never set it) is
+  detected and passed through unchanged rather than mis-decoded as CP437
+  mojibake. **Shift_JIS is explicitly out of scope** (see below) — such a name
+  still imports safely, just decoded (incorrectly) as CP437 rather than
+  crashing or blocking the import.
 - [x] **Filesystem-illegal / control characters** — `vault::is_safe_node_name` /
   `vault::sanitize_node_name` (`src/vault/safe_name.*`, pure + unit-tested) are
   the one shared rule: control bytes/NUL/DEL, the Windows-reserved set
@@ -1603,23 +1608,34 @@ primitive on export. Fixed at three layers — see the tasks below.
   `is_safe_node_name`; forged hostile index nodes (relative **and** absolute) are
   proven unable to write outside the export folder; existing UTF-8 fixtures and
   the CBZ disambiguation are unchanged.
-- [ ] `tests/` — fixture zips with CP437 and Shift_JIS-encoded entries (no
-  UTF-8 flag) import with correctly decoded names. *(With the encoding task.)*
+- [x] `tests/` — `tests/ui/test_zip_encoding.cpp` covers the UTF-8-flag
+  pass-through, already-valid-UTF-8-without-the-flag detection, and known
+  CP437 byte->codepoint mappings (accented Latin letters, box-drawing/symbol
+  bytes); `tests/ui/test_zip_import.cpp` adds an end-to-end fixture (a zip
+  entry written with `MZ_ZIP_FLAG_ASCII_FILENAME` so the UTF-8 bit is unset,
+  holding a raw CP437 byte in its name) proving `import_zip` stores the
+  correctly-decoded UTF-8 name, not the raw byte or a mis-decode.
 
-**Out of scope (YAGNI):** a user-facing encoding picker (auto-detect only);
-renaming already-imported vault content; changing how tags are stored
-(free-form UTF-8 tags are unaffected).
+**Out of scope (YAGNI):** Shift_JIS / other double-byte legacy encodings — a
+correct decoder needs a JIS X 0208-sized table (or a new dependency on
+libarchive's own string-conversion routines just for this one path); a
+Shift_JIS-named entry without the UTF-8 flag still imports safely today, just
+mis-decoded as CP437 rather than crashing or blocking the import. A
+user-facing encoding picker (auto-detect only); renaming already-imported
+vault content; changing how tags are stored (free-form UTF-8 tags are
+unaffected).
 
 ### Acceptance criterion
-Zip/cbz/7z/rar/tar fixtures with CP437/Shift_JIS names, path-traversal
-attempts, filesystem-illegal characters, and very long names all import
-safely with correctly readable (or safely sanitized) names; no crash, no
-escape outside the planned gallery tree, and existing plain-UTF-8 imports
-are unchanged.
+Zip/cbz/7z/rar/tar fixtures with CP437 names, path-traversal attempts,
+filesystem-illegal characters, and very long names all import safely with
+correctly readable (or safely sanitized) names; no crash, no escape outside
+the planned gallery tree, and existing plain-UTF-8 imports are unchanged.
+(Shift_JIS names still import safely but are not correctly decoded — see
+Out of scope.)
 
-**Status:** 🚧 In progress — Part 1 (sanitization, three-layer traversal guard,
-long-name truncation, platform path normalization) shipped. The legacy
-CP437/Shift_JIS encoding fallback remains.
+**Status:** ✅ Shipped — Part 1 (sanitization, three-layer traversal guard,
+long-name truncation, platform path normalization) and Part 2 (CP437 legacy
+zip-encoding fallback) both complete.
 
 ---
 

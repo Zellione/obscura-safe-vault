@@ -235,3 +235,34 @@ TEST(zip_is_encrypted_false_for_missing_file)
 {
     CHECK_FALSE(ui::zip_is_encrypted("/nonexistent/path/does_not_exist.zip"));
 }
+
+TEST(zip_import_decodes_legacy_cp437_entry_name)
+{
+    // Entry written WITHOUT the UTF-8 general-purpose bit (MZ_ZIP_FLAG_ASCII_FILENAME
+    // suppresses miniz's default of always setting it) and with a raw CP437 byte
+    // (0x82 == U+00E9 'é') in the name — the archetypal legacy-zip case (Phase 36
+    // part 2). Import must decode it to "café.jpg", not store the raw CP437 byte
+    // or reject/garble the name.
+    auto img = fake_jpeg(7);
+    auto dir = fresh_dir("osv_zip_test_cp437");
+    const std::string cp437_name = std::string("caf") + '\x82' + ".jpg";
+    auto zip = make_archive({{cp437_name, img}}, dir / "in.zip",
+                            static_cast<mz_uint>(MZ_BEST_SPEED) |
+                                static_cast<mz_uint>(MZ_ZIP_FLAG_ASCII_FILENAME));
+
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        auto out = ui::import_zip(v, zip, ZipDest::NewGallery, "", "Album", ZipConflictPolicy::AskUser);
+        CHECK(out.ok);
+        CHECK_FALSE(out.needs_resolution);
+        CHECK_EQ(out.imported, 1);
+
+        const vault::IndexNode* node = nullptr;
+        for (const auto* n : v.list("Album"))
+            node = n;
+        REQUIRE(node != nullptr);
+        CHECK_EQ(node->name, "caf\xC3\xA9.jpg");
+    }
+    cleanup_dir(dir);
+}

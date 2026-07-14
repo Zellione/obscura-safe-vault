@@ -552,6 +552,23 @@ src/
                                             WinZip-AES zip needs a crypto
                                             backend this project doesn't
                                             vendor (see ROADMAP Phase 35).
+             zip_encoding.*,               ← decode_zip_entry_name (Phase 36 part 2): a zip/cbz
+                                            entry name written without the UTF-8 general-purpose
+                                            bit (bit 11) is legacy-encoded — the overwhelming
+                                            majority of such archives are CP437 (MS-DOS/Windows'
+                                            classic OEM code page). Decodes via a fixed 128-entry
+                                            CP437->Unicode table for bytes 0x80-0xFF (0x00-0x7F are
+                                            ASCII-identical), unless the raw bytes already parse as
+                                            valid UTF-8 (some tools write UTF-8 without ever setting
+                                            the flag) — that case is detected and passed through
+                                            unchanged rather than re-decoded into mojibake.
+                                            Shift_JIS/other double-byte legacy encodings are out of
+                                            scope (ROADMAP Phase 36): such a name still imports
+                                            safely, just mis-decoded as CP437. Pure, SDL/vault-free,
+                                            unit-tested; used by zip_import.cpp's read_entry_list
+                                            (miniz's own MZ_ZIP_GENERAL_PURPOSE_BIT_FLAG_UTF8 isn't
+                                            exposed in its public headers, so the bit is named
+                                            locally in zip_import.cpp).
              zip_import.*,                ← ZIP/CBZ executor: miniz reader → mlock'd
                                             SecureBytes → Vault::add_image/add_video; triggered
                                             by `Z` key in gallery grid (Phase 17). import_cbz
