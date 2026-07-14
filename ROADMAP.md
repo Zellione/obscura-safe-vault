@@ -1467,7 +1467,7 @@ via CI on any platform-specific breakage.
 
 ---
 
-## Phase 35 — Password-protected archive import (ZIP/CBZ) 🔜
+## Phase 35 — Password-protected archive import (ZIP/CBZ) ✅
 
 **Goal:** Let the user import a password-protected `.zip`/`.cbz` archive by
 prompting for the **archive's** password at import time. Distinct from, and
@@ -1489,22 +1489,22 @@ still gets today's plain "could not open/import" error, never an
 unsatisfiable password prompt.
 
 ### Tasks
-- [ ] **Detection** — `ui::zip_is_encrypted(path)` (miniz-based, mirrors
+- [x] **Detection** — `ui::zip_is_encrypted(path)` (miniz-based, mirrors
   `peek_archive_meta`) checks `mz_zip_archive_file_stat::m_is_encrypted`
   across a zip's entries at file-pick time. An encrypted `.zip`/`.cbz` is
   forced through the libarchive backend (`ArchiveReader`) instead of miniz —
   miniz has no decrypt path for any encryption flavor.
-- [ ] **Password-prompt modal** — masked input (`ui::SecureTextField`,
+- [x] **Password-prompt modal** — masked input (`ui::SecureTextField`,
   mirroring the vault-unlock field) wired into `ZipImportJob`/`GalleryGrid`:
   a `ZipImportOutcome::needs_password` outcome (returned by a verification
   probe in `import_archive`/`import_archive_cbz` before any vault write)
   pauses the import and prompts, reusing the exact same deferred-outcome
   modal pattern as the existing Flatten/Skip mixed-folder case.
-- [ ] **Wrong-password handling** — a clear inline error ("Incorrect
+- [x] **Wrong-password handling** — a clear inline error ("Incorrect
   passphrase"), re-prompt or cancel; the verification probe runs before any
   gallery is created or any chunk is written, so a wrong password leaves the
   vault completely untouched.
-- [ ] **Secret hygiene** — the typed archive password lives only in a
+- [x] **Secret hygiene** — the typed archive password lives only in a
   short-lived mlock'd buffer for the import job's duration and is
   `crypto_wipe`'d on completion or cancel (invariant #2 applies to this
   secret too, even though it isn't the vault password). Disclosed exception:
@@ -1512,8 +1512,8 @@ unsatisfiable password prompt.
   unmanaged buffer for the life of the `archive*` handle — a limitation of
   treating libarchive as a black box, not something this codebase controls;
   that handle's lifetime is already bounded to a single import attempt.
-- [ ] Update `CLAUDE.md` / `mem:core`.
-- [ ] `tests/` — a ZipCrypto-encrypted zip/cbz fixture (built via libarchive's
+- [x] Update `CLAUDE.md` / `mem:core`.
+- [x] `tests/` — a ZipCrypto-encrypted zip/cbz fixture (built via libarchive's
   own writer, `zip:encryption=traditional`) requires the password prompt and
   imports correctly with the right passphrase; a wrong passphrase is
   rejected with no partial write; cancelling the prompt leaves the vault
@@ -1541,7 +1541,7 @@ WinZip-AES-encrypted zip shows one password prompt (indistinguishable from
 traditional encryption at pick time) but never loops — any password attempt
 resolves to a plain generic import error.
 
-**Status:** 🔜 Planned.
+**Status:** ✅ Done. Built and tested on Linux (Debug + `--asan`, 0 leaks/UB).
 
 ---
 
