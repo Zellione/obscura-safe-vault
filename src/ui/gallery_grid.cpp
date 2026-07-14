@@ -813,18 +813,16 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipCo
     // correctly comes back needs_password=true and opens the prompt.
     if (naming_.zip.cbz) {
         if (naming_.zip.archive_backend)
-            naming_.import_job.start_archive_cbz(
-                vault_, zip_path, base_gallery, gallery_name,
-                ui::ArchivePasswordInput{.password_protected = naming_.zip.needs_password,
-                                         .password = password_bytes(naming_.password.buf)});
+            naming_.import_job.start_archive_cbz(vault_, zip_path, base_gallery, gallery_name,
+                                                 naming_.zip.needs_password,
+                                                 password_bytes(naming_.password.buf));
         else
             naming_.import_job.start_cbz(vault_, zip_path, base_gallery, gallery_name);
     } else {
         if (naming_.zip.archive_backend)
-            naming_.import_job.start_archive(
-                vault_, zip_path, dest, base_gallery, gallery_name, policy,
-                ui::ArchivePasswordInput{.password_protected = naming_.zip.needs_password,
-                                         .password = password_bytes(naming_.password.buf)});
+            naming_.import_job.start_archive(vault_, zip_path, ui::ZipImportTarget{dest, policy},
+                                             base_gallery, gallery_name, naming_.zip.needs_password,
+                                             password_bytes(naming_.password.buf));
         else
             naming_.import_job.start_zip(vault_, zip_path, dest, base_gallery, gallery_name, policy);
     }

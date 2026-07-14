@@ -65,8 +65,8 @@ TEST(archive_import_job_runs_7z_new_gallery_to_completion)
         make_vault(v, dir / "v.osv");
 
         ui::ZipImportJob job;
-        CHECK(job.start_archive(v, archive, ui::ZipDest::NewGallery, "", "Album",
-                                ui::ZipConflictPolicy::AskUser));
+        CHECK(job.start_archive(v, archive,
+                                {ui::ZipDest::NewGallery, ui::ZipConflictPolicy::AskUser}, "", "Album"));
         auto oc = await_outcome(job);
         REQUIRE(oc.has_value());
         CHECK(oc->ok);
@@ -111,9 +111,9 @@ TEST(archive_import_job_runs_encrypted_zip_with_password_to_completion)
         std::memcpy(pw.data(), "correcthorse", pw.size());
 
         ui::ZipImportJob job;
-        CHECK(job.start_archive(v, archive, ui::ZipDest::NewGallery, "", "Secret",
-                                ui::ZipConflictPolicy::AskUser,
-                                ui::ArchivePasswordInput{/*password_protected=*/true, std::move(pw)}));
+        CHECK(job.start_archive(v, archive,
+                                {ui::ZipDest::NewGallery, ui::ZipConflictPolicy::AskUser}, "", "Secret",
+                                /*password_protected=*/true, std::move(pw)));
         auto oc = await_outcome(job);
         REQUIRE(oc.has_value());
         CHECK(oc->ok);
@@ -137,9 +137,9 @@ TEST(archive_import_job_reports_needs_password_for_wrong_password)
         std::memcpy(pw.data(), "nope", pw.size());
 
         ui::ZipImportJob job;
-        CHECK(job.start_archive(v, archive, ui::ZipDest::NewGallery, "", "Secret",
-                                ui::ZipConflictPolicy::AskUser,
-                                ui::ArchivePasswordInput{/*password_protected=*/true, std::move(pw)}));
+        CHECK(job.start_archive(v, archive,
+                                {ui::ZipDest::NewGallery, ui::ZipConflictPolicy::AskUser}, "", "Secret",
+                                /*password_protected=*/true, std::move(pw)));
         auto oc = await_outcome(job);
         REQUIRE(oc.has_value());
         CHECK(oc->ok);
