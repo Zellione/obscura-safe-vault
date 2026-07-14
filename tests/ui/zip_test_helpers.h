@@ -48,15 +48,19 @@ inline std::vector<uint8_t> fake_jpeg(uint8_t seed)
 }
 
 // Write a zip archive (the comic-vs-zip distinction is purely the output path's
-// extension) from (archive_path -> bytes) entries; return its path.
+// extension) from (archive_path -> bytes) entries; return its path. `level_and_flags`
+// defaults to always setting the UTF-8 general-purpose bit (miniz's own default);
+// pass MZ_BEST_SPEED | MZ_ZIP_FLAG_ASCII_FILENAME to write raw non-UTF-8 bytes
+// (e.g. CP437) without that flag, for legacy-encoding tests (Phase 36 part 2).
 inline fs::path make_archive(const std::vector<std::pair<std::string, std::vector<uint8_t>>>& items,
-                             const fs::path& out)
+                             const fs::path& out,
+                             mz_uint level_and_flags = MZ_BEST_SPEED)
 {
     mz_zip_archive z;
     std::memset(&z, 0, sizeof(z));
     mz_zip_writer_init_heap(&z, 0, 0);
     for (const auto& [name, b] : items)
-        mz_zip_writer_add_mem(&z, name.c_str(), b.data(), b.size(), MZ_BEST_SPEED);
+        mz_zip_writer_add_mem(&z, name.c_str(), b.data(), b.size(), level_and_flags);
     void* buf = nullptr;
     size_t sz = 0;
     mz_zip_writer_finalize_heap_archive(&z, &buf, &sz);

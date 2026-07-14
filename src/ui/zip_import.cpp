@@ -3,6 +3,7 @@
 #include "crypto/secure_mem.h"
 #include "ui/import_common.h"
 #include "ui/meta_json.h"
+#include "ui/zip_encoding.h"
 #include "image/format_registry.h"
 #include "vault/vault.h"
 
@@ -15,7 +16,16 @@
 namespace ui {
 namespace {
 
+// The zip general-purpose bit-flag field's bit 11 (APPNOTE.TXT's "language
+// encoding flag", EFS): set => the entry's name/comment bytes are UTF-8.
+// miniz's public headers don't expose this constant (it's a private enum
+// inside miniz_zip.c), so it's named here instead of used as a bare literal.
+constexpr mz_uint16 kZipUtf8BitFlag = 1U << 11;
+
 // Snapshot the archive's central directory as a list of (path, is_dir) entries.
+// A name written without the UTF-8 flag is legacy-encoded (Phase 36 part 2):
+// decode_zip_entry_name falls back to CP437, the overwhelmingly common case
+// for such archives, unless the raw bytes already parse as valid UTF-8.
 std::vector<ZipEntry> read_entry_list(mz_zip_archive& zip)
 {
     std::vector<ZipEntry> entries;
@@ -24,7 +34,8 @@ std::vector<ZipEntry> read_entry_list(mz_zip_archive& zip)
     for (mz_uint i = 0; i < n; ++i) {
         mz_zip_archive_file_stat st;
         if (!mz_zip_reader_file_stat(&zip, i, &st)) continue;
-        entries.emplace_back(std::string(st.m_filename),
+        const bool utf8_flag = (st.m_bit_flag & kZipUtf8BitFlag) != 0;
+        entries.emplace_back(decode_zip_entry_name(st.m_filename, utf8_flag),
                              mz_zip_reader_is_file_a_directory(&zip, i) != MZ_FALSE);
     }
     return entries;

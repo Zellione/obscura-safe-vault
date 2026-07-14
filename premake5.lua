@@ -421,6 +421,7 @@ project "osv_tests"
         "src/ui/meta_json.cpp",
         "src/ui/zip_plan.cpp",
         "src/ui/import_common.cpp",
+        "src/ui/zip_encoding.cpp",
         "src/ui/zip_import.cpp",
         "src/ui/zip_import_job.cpp",
         "src/ui/file_op_job.cpp",
