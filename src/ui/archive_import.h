@@ -51,7 +51,7 @@ struct ZipDestination {
 // verification step is offered for them.
 [[nodiscard]] ZipImportOutcome import_archive(vault::Vault&                v,
                                               const std::filesystem::path& archive_path,
-                                              ZipDestination               dest,
+                                              const ZipDestination&        dest,
                                               ImportProgress*              progress = nullptr,
                                               ArchivePassword              pw = {});
 

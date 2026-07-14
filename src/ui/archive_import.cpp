@@ -131,7 +131,7 @@ ZipImportOutcome finish_import(vault::Vault& v, const ArchiveReader& reader, con
 
 ZipImportOutcome import_archive(vault::Vault&                v,
                                 const std::filesystem::path& archive_path,
-                                ZipDestination                dest,
+                                const ZipDestination&        dest,
                                 ImportProgress*              progress,
                                 ArchivePassword              pw)
 {
@@ -182,7 +182,7 @@ ZipImportOutcome unsupported()
 }
 } // namespace
 
-ZipImportOutcome import_archive(vault::Vault&, const std::filesystem::path&, ZipDestination,
+ZipImportOutcome import_archive(vault::Vault&, const std::filesystem::path&, const ZipDestination&,
                                 ImportProgress*, ArchivePassword)
 {
     return unsupported();
