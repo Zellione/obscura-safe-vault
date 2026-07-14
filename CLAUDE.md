@@ -207,6 +207,23 @@ src/
                                             step; returns false (→ IoError) instead of crashing.
                                             push_child_fail_after mirrors resize_fail_after's
                                             deterministic fault-injection pattern for tests.
+             safe_name.*                  ← Pure, SDL/vault-free node-name rules (Phase 36): a node
+                                            name is a single path COMPONENT, never a path.
+                                            is_safe_node_name (REJECT — used at the vault ingress:
+                                            add_image/add_video/create_gallery, which is the trust
+                                            boundary) + sanitize_node_name (REPAIR — used by the
+                                            importers, so an awkward archive name never fails a whole
+                                            import; its output always satisfies is_safe_node_name).
+                                            Rejects '/' and '\' (both, on every platform — a vault
+                                            authored on Linux is exported on Windows), "." / "..",
+                                            NUL/control/DEL, the Windows-reserved chars and device
+                                            names, trailing dot/space, and >255 bytes (truncating on
+                                            a UTF-8 codepoint boundary). Bytes >= 0x80 stay opaque —
+                                            CJK names are normal here. This exists because a .osv is
+                                            UNTRUSTED INPUT: index.cpp deserialises `name` as opaque
+                                            bytes and ui::export_* turns it back into a real path, and
+                                            `dest_dir / name` does NOT contain (an absolute name
+                                            discards dest_dir outright). Unit-tested.
              chunk_codec.*                 ← Pure adaptive store-if-smaller deflate framing (Phase 26):
                                             method byte (0=raw, 1=deflate) + bounded orig_len inside
                                             the AEAD; used by ChunkStore's framed ctor flag (← header
@@ -336,7 +353,13 @@ src/
              export_ui.*,                 ← shared consent+folder-pick plumbing (Phase 10)
              export.*,                    ← decrypt→write-verbatim→wipe (Phase 10);
                                             export_images takes an optional OpProgress* for the
-                                            background export bar + cancel (Phase 25)
+                                            background export bar + cancel (Phase 25). Phase 36: the
+                                            ONE sink that turns vault bytes back into real files, so
+                                            it is where a hostile vault aims. Every node name is run
+                                            through vault::sanitize_node_name and the resulting path
+                                            is containment-checked by export_path_within
+                                            (weakly_canonical + lexically_relative, fails closed) —
+                                            an escaping node is counted failed, never written.
              search_model.*,              ← pure query tokenise/match/rank (Phase 12)
              search_overlay.*,            ← `/` live-filtered search modal (Phase 12)
              advanced_search_model.*,     ← pure, SDL/vault-free advanced query (Phase 18):
@@ -750,6 +773,7 @@ premake-core GitHub releases. It is **not** committed to the repo.
 3. **Random nonces.** Every XChaCha20-Poly1305 encrypt call uses a fresh 24-byte nonce from the CSPRNG. Never reuse nonces.
 4. **Authenticate before decrypt.** Always verify the Poly1305 tag before using any plaintext bytes.
 5. **No logging of key material.** Keys, passwords, and decrypted content must never appear in log output.
+6. **A vault file is untrusted input; node names are path components (Phase 36).** A `.osv` is portable and shareable (vault manager, cross-vault transfer), and `index.cpp` deserialises `IndexNode::name` as opaque bytes. A name entering the vault is **validated** (`vault::is_safe_node_name` — `add_image`/`add_video`/`create_gallery` reject); a name arriving from an archive or a picked file is **repaired** (`vault::sanitize_node_name`); and a name *leaving* the vault to the filesystem is sanitized **and** the resulting path is containment-checked against the destination folder (`ui::export_path_within`). Never build an output path as `dest_dir / node.name` — `std::filesystem::path::operator/` does not contain, and an absolute name discards `dest_dir` entirely (CWE-22). Externally-supplied *paths* (file-dialog results, `vaults.list` lines) go through `platform::normalize_user_path` before they reach `fopen`.
 
 ### Hardening notes
 - **Pixel data is best-effort mlock'd.** The first mlock failure per process is logged once; subsequent failures stay silent (uses `should_warn_mlock_once()`). On Linux, successful mlock is followed by `madvise(MADV_DONTDUMP)` for defense-in-depth (silently ignored if it fails).

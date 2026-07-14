@@ -1545,12 +1545,23 @@ resolves to a plain generic import error.
 
 ---
 
-## Phase 36 — Robust special-character filename & archive-name handling 🔜
+## Phase 36 — Robust special-character filename & archive-name handling 🚧
 
 **Goal:** Archive entries and archive filenames containing non-ASCII text,
 legacy (non-UTF-8) encodings, filesystem-illegal characters, or path-
 traversal sequences import (and later export) correctly instead of mojibake,
 a crash, or a rejected import — across every archive backend (Phase 17/24/34).
+
+**Part 1 (shipped) — the security half.** Investigating two SonarCloud `cpp:S2083`
+BLOCKERs found a *reachable* path traversal that this phase had only anticipated
+for archives: a node name is deserialised from the vault index with no validation
+at all (`index.cpp`'s `read_string`), `Vault::add_image` only checked it was
+non-empty, and Export built its output path as `dest_dir / name` — and
+`std::filesystem::path::operator/` does **not** contain. An absolute name
+(`"/etc/cron.d/x"`) discards `dest_dir` outright; a relative one (`"../../.bashrc"`)
+walks out of it. Since a `.osv` vault is a portable, shareable artifact (vault
+manager, cross-vault transfer), a hostile vault was an arbitrary-file-write
+primitive on export. Fixed at three layers — see the tasks below.
 
 ### Tasks
 - [ ] **Legacy zip encoding fallback** — a zip/cbz entry without the UTF-8
@@ -1558,28 +1569,42 @@ a crash, or a rejected import — across every archive backend (Phase 17/24/34).
   East-Asian archives; detect the missing flag and decode via a small
   fallback table (or defer to libarchive's own encoding detection, vendored
   in Phase 34, for the ambiguous case) instead of today's presumed-UTF-8
-  read.
-- [ ] **Filesystem-illegal / control characters** — sanitize gallery and
-  image/video **names** derived from archive entries and the archive's own
-  filename before they reach the index tree: strip/replace control
-  characters, the Windows-reserved character set (`< > : " / \ | ? *`), and
-  reserved device names (`CON`, `NUL`, …), so a later Export (Phase 10)
-  never produces an unwritable path on any target OS. Vault-internal tags
-  stay free-form UTF-8 (they are not filesystem paths) — this is about
-  names only.
-- [ ] **Path-traversal guard** — an entry path containing `..` segments or
-  an absolute path (leading `/` or a drive letter) is rejected/flattened
-  rather than escaping the planned gallery tree; audit
-  `build_zip_plan`/`build_cbz_plan` for gaps here today.
-- [ ] **Long-name handling** — truncate (with a stable, collision-safe
-  suffix, reusing the existing basename-collision disambiguation) names
-  beyond a sane cap instead of failing the import.
-- [ ] Update `CLAUDE.md` / `mem:core`.
+  read. *(Still outstanding — orthogonal to Part 1.)*
+- [x] **Filesystem-illegal / control characters** — `vault::is_safe_node_name` /
+  `vault::sanitize_node_name` (`src/vault/safe_name.*`, pure + unit-tested) are
+  the one shared rule: control bytes/NUL/DEL, the Windows-reserved set
+  (`< > : " / \ | ? *`), reserved device names (`CON`, `NUL`, `COM1`–`COM9`, …),
+  and trailing dots/spaces. Applied to names from archive entries, `meta.json`
+  titles (replacing the old one-off `'/' → '_'`), and picked files. Tags stay
+  free-form UTF-8 — they are not filesystem paths.
+- [x] **Path-traversal guard** — enforced at three layers, not one:
+  *ingress* (`Vault::add_image` / `add_video` / `create_gallery` **reject** an
+  unsafe name — the vault API is the trust boundary); *importers* (**repair** via
+  `sanitize_node_name`, so an awkward archive name never fails a whole import);
+  and the *export sink* (`ui::export_path_within` normalizes with
+  `weakly_canonical` and confirms containment with `lexically_relative`, so even a
+  vault already on disk with a hostile name cannot write outside the chosen
+  folder). Fails closed.
+- [x] **Long-name handling** — names are capped at `MAX_NODE_NAME_BYTES` (255) and
+  truncated on a **UTF-8 codepoint boundary** so a multi-byte character is never
+  torn in half. The CBZ basename-collision disambiguation is preserved (and its
+  counter moved ahead of the prefix, so truncation can never eat it and the
+  dedupe loop is guaranteed to terminate).
+- [x] **Platform path boundary** — `platform::normalize_user_path` normalizes every
+  externally-supplied path (native file-dialog results, lines read back from
+  `vaults.list`) before it can reach `fopen`: rejects empty / embedded-NUL /
+  over-long, and collapses `..` and `.` components. It deliberately does *not*
+  confine paths to a base directory — users legitimately keep vaults on arbitrary
+  drives and removable media.
+- [x] Update `CLAUDE.md` / `mem:core`.
+- [x] `tests/` — entries with `../`, `..\`, absolute paths, control characters,
+  Windows-reserved characters/names, embedded NULs and >255-byte names all import
+  safely; `sanitize_node_name`'s output is asserted to always satisfy
+  `is_safe_node_name`; forged hostile index nodes (relative **and** absolute) are
+  proven unable to write outside the export folder; existing UTF-8 fixtures and
+  the CBZ disambiguation are unchanged.
 - [ ] `tests/` — fixture zips with CP437 and Shift_JIS-encoded entries (no
-  UTF-8 flag) import with correctly decoded names; entries with `../`,
-  control characters, Windows-reserved characters/names, and very long
-  (>255-byte) names each import safely (sanitized, no traversal, no crash);
-  existing UTF-8 fixtures stay byte-for-byte unchanged (no regression).
+  UTF-8 flag) import with correctly decoded names. *(With the encoding task.)*
 
 **Out of scope (YAGNI):** a user-facing encoding picker (auto-detect only);
 renaming already-imported vault content; changing how tags are stored
@@ -1592,7 +1617,9 @@ safely with correctly readable (or safely sanitized) names; no crash, no
 escape outside the planned gallery tree, and existing plain-UTF-8 imports
 are unchanged.
 
-**Status:** 🔜 Planned.
+**Status:** 🚧 In progress — Part 1 (sanitization, three-layer traversal guard,
+long-name truncation, platform path normalization) shipped. The legacy
+CP437/Shift_JIS encoding fallback remains.
 
 ---
 

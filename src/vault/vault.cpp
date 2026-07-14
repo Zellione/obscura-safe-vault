@@ -14,6 +14,7 @@
 #include "chunk_codec.h"
 #include "chunk_store.h"
 #include "file_util.h"
+#include "safe_name.h"
 
 #include "image/decode.h"
 #include "image/thumbnail.h"
@@ -565,6 +566,11 @@ VaultResult Vault::create_gallery(std::string_view gallery_path)
     const auto segments = split_path(gallery_path);
     if (segments.empty()) return AlreadyExists;  // root always exists
 
+    // '/' legitimately separates segments here, but each SEGMENT is still a node
+    // name and must be safe on its own — "a/../b" or "a/..\\b" must not resolve.
+    for (std::string_view seg : segments)
+        if (!is_safe_node_name(seg)) return InvalidArg;
+
     IndexNode* cur     = &root_;
     bool       created = false;
     for (std::string_view seg : segments) {
@@ -590,8 +596,8 @@ VaultResult Vault::add_image(std::string_view         gallery_path,
                              std::string_view         filename)
 {
     using enum VaultResult;
-    if (!unlocked_)        return Locked;
-    if (filename.empty())  return InvalidArg;
+    if (!unlocked_)                     return Locked;
+    if (!is_safe_node_name(filename))   return InvalidArg;  // no traversal into the index
 
     IndexNode* g = find_gallery(gallery_path);
     if (!g) return NotFound;
@@ -700,9 +706,9 @@ VaultResult Vault::add_video(std::string_view         gallery_path,
                              uint32_t                 chunk_size)
 {
     using enum VaultResult;
-    if (!unlocked_)             return Locked;
-    if (filename.empty())       return InvalidArg;
-    if (chunk_size == 0)        return InvalidArg;
+    if (!unlocked_)                     return Locked;
+    if (!is_safe_node_name(filename))   return InvalidArg;  // no traversal into the index
+    if (chunk_size == 0)                return InvalidArg;
 
     // Probe the video file first (before storing chunks) to detect metadata and generate poster.
     // This ensures we don't create orphan chunks if the video is invalid.

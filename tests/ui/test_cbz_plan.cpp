@@ -1,6 +1,7 @@
 #include "test_framework.h"
 #include "ui/zip_plan.h"
 #include "ui/zip_test_helpers.h"
+#include "vault/safe_name.h"
 
 #include <string>
 
@@ -74,4 +75,48 @@ TEST(cbz_plan_excludes_meta_json_silently)
     auto p = ui::build_cbz_plan(e, "", "C");
     CHECK_EQ(p.placements.size(), static_cast<size_t>(1));
     CHECK_EQ(p.skipped_unsupported, 1);                          // notes.txt only
+}
+
+// --- Archive entry names are attacker-controlled ---------------------------
+//
+// A crafted archive can name an entry "../../.bashrc" or "/etc/cron.d/x". The
+// planner must defang it, so the name that reaches Vault::add_image (and, later,
+// export) can only ever be a single inert filename. Vault::add_image rejects
+// anything else outright, so an un-defanged name would also silently lose pages.
+
+TEST(cbz_plan_defangs_traversal_entry_names)
+{
+    auto e = entries({"../../evil.jpg", "sub/../../../etc/passwd.png", "ok.jpg"});
+    auto p = ui::build_cbz_plan(e, "", "Comic");
+
+    REQUIRE(p.placements.size() == 3);
+    for (const auto& pl : p.placements) {
+        CHECK_TRUE(vault::is_safe_node_name(pl.filename));
+        CHECK_TRUE(pl.filename.find('/') == std::string::npos);
+        CHECK_TRUE(pl.filename.find('\\') == std::string::npos);
+    }
+}
+
+TEST(zip_plan_defangs_traversal_entry_and_directory_names)
+{
+    auto e = entries({"../evil.jpg", "..\\sneaky\\x.png", "good/a.jpg"});
+    auto p = ui::build_zip_plan(e, ui::ZipDest::NewGallery, "", "Imported",
+                                ui::ZipConflictPolicy::FlattenMixed);
+
+    for (const auto& pl : p.placements) {
+        CHECK_TRUE(vault::is_safe_node_name(pl.filename));
+        // Every gallery path segment must be a safe node name too: a ".." segment
+        // would be rejected by Vault::create_gallery and lose the whole subtree.
+        for (const auto& g : p.galleries) {
+            size_t start = 0;
+            while (start <= g.size()) {
+                const size_t slash = g.find('/', start);
+                const std::string seg =
+                    g.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
+                if (!seg.empty()) CHECK_TRUE(vault::is_safe_node_name(seg));
+                if (slash == std::string::npos) break;
+                start = slash + 1;
+            }
+        }
+    }
 }

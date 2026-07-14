@@ -53,6 +53,33 @@ src/
                secure_mem.h, crypto.h
   vault/       vault.*, header.*, index.*,     — .osv container format
                chunk_store.*, byte_io.h, file_util.h
+               safe_name.*                     — Phase 36. Pure node-name rules. A node name is a
+                                                 single path COMPONENT, never a path.
+                                                 is_safe_node_name = REJECT (vault ingress:
+                                                 add_image/add_video/create_gallery — the API is the
+                                                 trust boundary); sanitize_node_name = REPAIR
+                                                 (importers: zip_plan basename_of/dir components,
+                                                 meta_json titles, file_op_job picked files — an
+                                                 awkward archive name must not fail a whole import).
+                                                 sanitize's output ALWAYS satisfies is_safe_node_name
+                                                 (property-tested). Rejects '/' AND '\' on every
+                                                 platform, "."/"..", NUL/control/DEL, Windows-reserved
+                                                 chars + device names (CON/NUL/COM1-9/LPT1-9),
+                                                 trailing dot/space, >255 bytes (truncated on a UTF-8
+                                                 codepoint boundary). Bytes >=0x80 stay opaque (CJK).
+                                                 WHY: a .osv is UNTRUSTED INPUT (portable/shareable
+                                                 via vault manager + transfer); index.cpp reads `name`
+                                                 as opaque bytes, and ui::export_* turns it back into
+                                                 a real path. `dest_dir / name` does NOT contain — an
+                                                 ABSOLUTE name discards dest_dir outright. That was a
+                                                 live arbitrary-file-write on export (CWE-22), found
+                                                 while investigating two SonarCloud cpp:S2083 BLOCKERs
+                                                 and proven by test (the unguarded build really did
+                                                 write /tmp/pwned.png). Sink-side guard:
+                                                 ui::export_path_within (weakly_canonical +
+                                                 lexically_relative, fails closed) — needed because
+                                                 vaults ALREADY on disk can carry hostile names, so
+                                                 ingress validation alone is not enough.
                                                — vault::read_thumb_span(v,offset,length,out): FREE
                                                  friend (not a member, keeps Vault under the
                                                  cpp:S1448 35-method cap) — decrypt a thumb/poster

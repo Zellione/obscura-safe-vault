@@ -7,6 +7,7 @@
 #include "platform/paths.h"
 #include "ui/export.h"
 #include "ui/meta_format.h"
+#include "vault/safe_name.h"
 #include "vault/vault.h"
 
 namespace ui {
@@ -96,7 +97,10 @@ bool import_one(vault::Vault& v, const std::string& base_gallery,
                 const std::filesystem::path& path, std::string* fail_name)
 {
     using enum vault::VaultResult;
-    const std::string fname = path.filename().string();
+    // filename() already strips the directory, but the leaf itself can still be
+    // a name the vault refuses (reserved device name, trailing dot, ...), and a
+    // rejected name would fail the import for no good reason. Repair, don't reject.
+    const std::string fname = vault::sanitize_node_name(path.filename().string());
     const auto bytes = platform::read_file(path);
     if (!bytes) { *fail_name = fname; return false; }
 

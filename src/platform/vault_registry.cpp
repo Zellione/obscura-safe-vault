@@ -29,7 +29,11 @@ std::vector<std::filesystem::path> VaultRegistry::list() const
     while (std::getline(in, line)) {
         if (!line.empty() && line.back() == '\r') line.pop_back();  // tolerate CRLF
         if (line.empty()) continue;
-        std::filesystem::path p{line};
+        // vaults.list is a file on disk, so its contents are untrusted input like
+        // any other: normalize before the path can reach Vault::open -> fopen.
+        auto norm = normalize_user_path(line);
+        if (!norm) continue;                                        // skip a junk line
+        std::filesystem::path p{std::move(*norm)};
         // De-duplicate, keeping the first (most-recent) occurrence.
         bool dup = false;
         for (const auto& e : out) if (e == p) { dup = true; break; }

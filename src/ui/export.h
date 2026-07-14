@@ -10,6 +10,14 @@
 // mlock'd SecureBytes right up to the write() call and are crypto_wipe'd
 // immediately afterwards. Thumbnails are never exported.
 //
+// Because it is the one path that turns vault bytes back into real files, it is
+// also the one place a hostile vault could aim at: IndexNode::name is opaque
+// deserialised data (src/vault/index.cpp), and a name like "../../.bashrc" or
+// "/etc/cron.d/x" would steer the write out of the folder the user picked. Two
+// layers stop that, in the order Sonar's cpp:S2083 prescribes (normalize, then
+// validate, then use): the name is run through vault::sanitize_node_name, and
+// the resulting path is containment-checked with export_path_within below.
+//
 // SDL-free by design so the write/collision logic stays headlessly testable;
 // the consent dialog and folder picker live in the UI/platform layers.
 
@@ -32,10 +40,26 @@ struct ExportSummary {
     int failed  = 0;
 };
 
+// True iff `candidate` resolves to a location strictly inside `dest_dir`.
+//
+// The second half of the traversal defence (the first is sanitizing the node
+// name — see vault::sanitize_node_name). Normalizes both operands with
+// weakly_canonical, which resolves ".." and symlinks and, unlike canonical,
+// tolerates an output file that does not exist yet; then confirms containment
+// with lexically_relative. A relative path that is empty, is ".", or contains
+// any ".." component means the candidate escaped. Fails closed: a filesystem
+// error resolving either operand returns false.
+[[nodiscard]] bool export_path_within(const std::filesystem::path& dest_dir,
+                                      const std::filesystem::path& candidate);
+
 // Resolve a non-colliding output path. Returns `dir/filename` if `exists`
 // reports it free; otherwise appends " (1)", " (2)", ... before the extension
 // until a free name is found. Pure — `exists(path) -> bool` injects the
 // filesystem probe (templated on the callable to avoid a std::function alloc).
+//
+// `filename` must already be a safe single component (vault::sanitize_node_name):
+// `dir / filename` does NOT contain, and an absolute `filename` would discard
+// `dir` outright.
 template <class Exists>
 [[nodiscard]] std::filesystem::path unique_export_path(
     const std::filesystem::path& dir, std::string_view filename, Exists&& exists)

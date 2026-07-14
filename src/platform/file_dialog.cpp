@@ -1,5 +1,7 @@
 #include "platform/file_dialog.h"
 
+#include "platform/paths.h"
+
 #include <array>
 #include <print>
 
@@ -11,8 +13,15 @@ void SDLCALL FileDialog::on_files(void* userdata, const char* const* filelist, i
     std::lock_guard lk(self->mtx_);
     self->paths_.clear();
     if (filelist) {
-        for (const char* const* p = filelist; *p != nullptr; ++p)
-            self->paths_.emplace_back(*p);
+        // The single choke point through which every externally-chosen path
+        // enters the program. Normalize here, before any of it can reach fopen();
+        // a path we cannot make sense of is dropped rather than passed on.
+        for (const char* const* p = filelist; *p != nullptr; ++p) {
+            if (auto norm = normalize_user_path(*p))
+                self->paths_.push_back(norm->string());
+            else
+                std::println(stderr, "[Platform] ignoring unusable path from file dialog");
+        }
     } else {
         std::println(stderr, "[Platform] File dialog error: {}", SDL_GetError());
     }

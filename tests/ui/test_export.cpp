@@ -228,6 +228,102 @@ TEST(export_images_collision_suffixes_without_overwriting)
                    std::span<const uint8_t>(img));
 }
 
+// --- Path traversal: a vault is UNTRUSTED INPUT ----------------------------
+//
+// Vaults are portable and shareable (vault manager, cross-vault transfer), and
+// index.cpp deserialises IndexNode::name as opaque bytes with no validation. So
+// a hostile .osv can carry a node named "../../.bashrc" or "/etc/cron.d/x", and
+// `dest_dir / name` does NOT contain it — for an absolute name, operator/ throws
+// the dest_dir away entirely. Export must never write outside the picked folder.
+//
+// These tests forge exactly that: import a legitimate image, then copy its node
+// and rewrite only the *name*, leaving the chunk span intact — which is byte for
+// byte the state a hostile vault would deserialise into.
+
+TEST(export_path_within_accepts_a_file_in_the_destination)
+{
+    TempDir out("within");
+    CHECK_TRUE(ui::export_path_within(out.path, out.path / "a.png"));
+    CHECK_TRUE(ui::export_path_within(out.path, out.path / "sub" / "a.png"));
+}
+
+TEST(export_path_within_rejects_escapes)
+{
+    TempDir out("escape");
+    CHECK_FALSE(ui::export_path_within(out.path, out.path / ".." / "a.png"));
+    CHECK_FALSE(ui::export_path_within(out.path, out.path / ".." / ".." / "etc" / "passwd"));
+    CHECK_FALSE(ui::export_path_within(out.path, fs::path("/etc/passwd")));
+    CHECK_FALSE(ui::export_path_within(out.path, out.path));   // the dir itself is not a file in it
+}
+
+TEST(export_images_cannot_escape_dest_dir_via_relative_traversal)
+{
+    TempVault tv("trav");
+    TempDir   out("trav");
+    auto img = pattern(1500, 3);
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kExpKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", img, "ok.png") == vault::VaultResult::Ok);
+    auto kids = v.list("");
+    REQUIRE(kids.size() == 1);
+
+    // Forge the hostile node: same chunk, traversal name.
+    vault::IndexNode evil = *kids[0];
+    evil.name = "../pwned.png";
+    const vault::IndexNode* nodes[] = {&evil};
+
+    auto sum = ui::export_images(v, nodes, out.path, ui::ExportConsent::Confirm);
+
+    // Nothing lands in the parent directory.
+    CHECK_FALSE(fs::exists(out.path.parent_path() / "pwned.png"));
+
+    // The name was defanged and the file stayed inside the chosen folder.
+    CHECK_EQ(sum.written, 1);
+    CHECK_EQ(sum.failed, 0);
+    int inside = 0;
+    for (const auto& e : fs::directory_iterator(out.path)) {
+        ++inside;
+        CHECK_TRUE(ui::export_path_within(out.path, e.path()));
+    }
+    CHECK_EQ(inside, 1);
+    CHECK_BYTES_EQ(std::span<const uint8_t>(read_file(out.path / ".._pwned.png")),
+                   std::span<const uint8_t>(img));
+}
+
+TEST(export_images_cannot_escape_dest_dir_via_absolute_name)
+{
+    TempVault tv("abs");
+    TempDir   out("abs");
+    TempDir   elsewhere("abs_victim");   // stands in for /etc, ~/.ssh, ...
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kExpKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", pattern(900, 5), "ok.png") == vault::VaultResult::Ok);
+    auto kids = v.list("");
+    REQUIRE(kids.size() == 1);
+
+    // An ABSOLUTE name: `dest_dir / name` would discard dest_dir completely.
+    vault::IndexNode evil = *kids[0];
+    evil.name = (elsewhere.path / "pwned.png").string();
+    const vault::IndexNode* nodes[] = {&evil};
+
+    auto sum = ui::export_images(v, nodes, out.path, ui::ExportConsent::Confirm);
+    (void)sum;
+
+    // The victim directory is untouched.
+    CHECK_FALSE(fs::exists(elsewhere.path / "pwned.png"));
+    int victim_files = 0;
+    for (const auto& e : fs::directory_iterator(elsewhere.path)) { (void)e; ++victim_files; }
+    CHECK_EQ(victim_files, 0);
+
+    // Whatever was written stayed inside the destination.
+    for (const auto& e : fs::directory_iterator(out.path))
+        CHECK_TRUE(ui::export_path_within(out.path, e.path()));
+}
+
 TEST(export_images_declining_writes_nothing)
 {
     TempVault tv("decline");

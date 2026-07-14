@@ -1,5 +1,7 @@
 #include "ui/meta_json.h"
 
+#include "vault/safe_name.h"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -80,12 +82,13 @@ ArchiveMeta parse_meta_json(std::span<const uint8_t> bytes)
 std::string meta_gallery_name(const ArchiveMeta& m, std::string_view fallback)
 {
     for (const std::string* title : {&m.title_english, &m.title_japanese}) {
-        std::string name = trimmed(*title);
+        const std::string name = trimmed(*title);
         if (name.empty()) continue;
-        std::ranges::replace(name, '/', '_');   // '/' would split the gallery path
-        return name;
+        // A title out of an archive's meta.json is attacker-controlled and becomes
+        // a gallery name: one shared rule (not just '/' → '_') defangs it.
+        return vault::sanitize_node_name(name);
     }
-    return std::string(fallback);
+    return vault::sanitize_node_name(fallback);
 }
 
 std::vector<std::string> meta_gallery_tags(const ArchiveMeta& m)
