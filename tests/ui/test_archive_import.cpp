@@ -224,23 +224,41 @@ TEST(archive_import_encrypted_zip_correct_password_imports)
 
 TEST(archive_import_encrypted_zip_wrong_password_writes_nothing)
 {
-    auto dir = fresh_dir_local("archive_import_enc_wrong");
-    vault::Vault v;
-    make_vault(v, dir / "v.osv");
+    // Retried over fresh fixtures for the same reason as
+    // archive_reader_extract_failed_needs_password_true_for_wrong_password:
+    // traditional ZipCrypto verifies the password against a SINGLE check byte, so
+    // a wrong password clears it about 1 run in 256. The verification probe then
+    // fails as a decompression error rather than a passphrase one, and the import
+    // reports a generic failure (ok = false) instead of needs_password. Measured
+    // at 12/3000 = 0.40% against the vendored libarchive — often enough to flake
+    // CI, which it did on main (gcc/Release).
+    //
+    // Nothing is EVER written either way — the probe runs before any vault write,
+    // so that invariant is asserted on every attempt. Only the *reason* is
+    // probabilistic, so it is asserted across a few independent fixtures: the odds
+    // of all five hitting the false-accept are ~1e-12.
+    bool saw_needs_password = false;
+    for (int attempt = 0; attempt < 5 && !saw_needs_password; ++attempt) {
+        auto dir = fresh_dir_local("archive_import_enc_wrong");
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
 
-    auto archive = archivetest::make_encrypted_zip({{"one.jpg", fake_bytes(22)}}, "swordfish",
-                                                    dir / "secret.zip");
+        auto archive = archivetest::make_encrypted_zip(
+            {{"one.jpg", fake_bytes(static_cast<uint8_t>(22 + attempt))}}, "swordfish",
+            dir / "secret.zip");
 
-    auto out = ui::import_archive(v, archive,
-                                  {ui::ZipDest::NewGallery, "", "Secret", ui::ZipConflictPolicy::FlattenMixed},
-                                  nullptr, {/*password_protected=*/true, "wrong-guess"});
-    REQUIRE(out.ok);
-    CHECK(out.needs_password);
-    CHECK_EQ(out.imported, 0);
-    CHECK(v.list("").empty());   // nothing written — no "Secret" gallery exists
+        auto out = ui::import_archive(v, archive,
+                                      {ui::ZipDest::NewGallery, "", "Secret", ui::ZipConflictPolicy::FlattenMixed},
+                                      nullptr, {/*password_protected=*/true, "wrong-guess"});
+        CHECK_EQ(out.imported, 0);
+        CHECK(v.list("").empty());   // nothing written — no "Secret" gallery exists
 
-    v.lock();
-    cleanup_dir(dir);
+        saw_needs_password = out.ok && out.needs_password;
+
+        v.lock();
+        cleanup_dir(dir);
+    }
+    CHECK(saw_needs_password);
 }
 
 TEST(archive_import_encrypted_zip_no_password_writes_nothing)
