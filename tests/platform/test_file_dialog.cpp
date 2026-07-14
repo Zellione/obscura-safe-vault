@@ -2,6 +2,7 @@
 
 #include "platform/file_dialog.h"
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -45,7 +46,12 @@ TEST(file_dialog_zip_result_not_taken_by_images_purpose)
     auto zip = d.take_result(Purpose::Zip);
     REQUIRE(zip.has_value());
     REQUIRE(zip->size() == 1);
-    CHECK(zip->front() == "/tmp/archive.zip");
+    // Compared as a path, not a string: on_files now runs every dialog result
+    // through platform::normalize_user_path, whose lexically_normal() renders
+    // with the platform's preferred separator ("\tmp\archive.zip" on Windows).
+    // fs::path treats both separators as separators; the raw text does not.
+    CHECK(std::filesystem::path(zip->front()) ==
+          std::filesystem::path("/tmp/archive.zip"));
 }
 
 TEST(file_dialog_images_result_not_taken_by_zip_purpose)
@@ -102,7 +108,8 @@ TEST(file_dialog_taglist_result_isolated_from_images_and_zip)
     auto txt = d.take_result(Purpose::TagList);
     REQUIRE(txt.has_value());
     REQUIRE(txt->size() == 1);
-    CHECK(txt->front() == "/tmp/tags.txt");
+    CHECK(std::filesystem::path(txt->front()) ==
+          std::filesystem::path("/tmp/tags.txt"));
 }
 
 TEST(file_dialog_images_result_not_taken_by_taglist_purpose)

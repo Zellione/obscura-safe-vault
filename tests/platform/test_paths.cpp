@@ -116,15 +116,18 @@ TEST(normalize_user_path_rejects_empty_and_nul_and_overlong)
                     std::string(platform::MAX_USER_PATH_BYTES + 1, 'a')).has_value());
 }
 
+// generic_string() throughout: lexically_normal() renders with the platform's
+// preferred separator, so .string() is "\home\u\a.osv" on Windows. The separator
+// is not what these tests are about.
 TEST(normalize_user_path_collapses_traversal_components)
 {
     auto p = platform::normalize_user_path("/home/u/vaults/../vaults/a.osv");
     REQUIRE(p.has_value());
-    CHECK_EQ(p->string(), std::string("/home/u/vaults/a.osv"));
+    CHECK_EQ(p->generic_string(), std::string("/home/u/vaults/a.osv"));
 
     auto q = platform::normalize_user_path("/home/u/./a.osv");
     REQUIRE(q.has_value());
-    CHECK_EQ(q->string(), std::string("/home/u/a.osv"));
+    CHECK_EQ(q->generic_string(), std::string("/home/u/a.osv"));
 }
 
 // An ordinary absolute path — the overwhelmingly common case — must survive
@@ -134,5 +137,5 @@ TEST(normalize_user_path_leaves_an_ordinary_path_alone)
 {
     auto p = platform::normalize_user_path("/media/usb/photos.osv");
     REQUIRE(p.has_value());
-    CHECK_EQ(p->string(), std::string("/media/usb/photos.osv"));
+    CHECK_EQ(p->generic_string(), std::string("/media/usb/photos.osv"));
 }

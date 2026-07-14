@@ -186,14 +186,29 @@ TEST(archive_reader_extract_fails_with_no_password)
 
 TEST(archive_reader_extract_failed_needs_password_true_for_wrong_password)
 {
-    const auto data = fake_bytes(14, 80);
-    auto bytes = read_file(make_encrypted_zip(
-        {{"secret.jpg", data}}, "hunter2", fresh_path("reader_enc_flag.zip")));
-    ui::ArchiveReader r;
-    REQUIRE(r.open(bytes, "wrong-password"));
-    crypto::SecureBytes out;
-    REQUIRE(!r.extract(0, out));   // no REQUIRE_FALSE macro in this test framework
-    CHECK(r.extract_failed_needs_password());
+    // Retried over fresh fixtures, deliberately. Traditional ZipCrypto verifies
+    // the password against a SINGLE check byte, so a wrong password is falsely
+    // accepted about 1 time in 256 — and libarchive then fails further in with
+    // "ZIP decompression failed" rather than a passphrase error. Measured at
+    // 0.23% over 3000 trials against the vendored libarchive, which is exactly
+    // often enough to flake a one-shot assertion in CI (it did, on clang/Debug).
+    //
+    // The extract must ALWAYS fail; only the *reason* is probabilistic. So assert
+    // the reason across a few independent fixtures: the odds of every one of them
+    // hitting the 1/256 false-accept are ~1e-12.
+    bool saw_needs_password = false;
+    for (int attempt = 0; attempt < 5 && !saw_needs_password; ++attempt) {
+        const auto data = fake_bytes(static_cast<uint8_t>(14 + attempt), 80);
+        auto bytes = read_file(make_encrypted_zip(
+            {{"secret.jpg", data}}, "hunter2",
+            fresh_path("reader_enc_flag.zip")));
+        ui::ArchiveReader r;
+        REQUIRE(r.open(bytes, "wrong-password"));
+        crypto::SecureBytes out;
+        REQUIRE(!r.extract(0, out));   // never succeeds — no REQUIRE_FALSE in this framework
+        saw_needs_password = r.extract_failed_needs_password();
+    }
+    CHECK(saw_needs_password);
 }
 
 TEST(archive_error_is_passphrase_issue_matches_libarchive_wording)
