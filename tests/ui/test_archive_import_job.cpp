@@ -126,27 +126,37 @@ TEST(archive_import_job_runs_encrypted_zip_with_password_to_completion)
 
 TEST(archive_import_job_reports_needs_password_for_wrong_password)
 {
-    auto dir = fresh_dir("archive_job_enc_wrong");
-    auto archive = archivetest::make_encrypted_zip({{"a.jpg", fake_bytes(32)}}, "correcthorse",
-                                                    dir / "secret.zip");
-    {
-        vault::Vault v;
-        make_vault(v, dir / "v.osv");
+    // Retried over fresh fixtures for the same reason as
+    // archive_import_encrypted_zip_wrong_password_writes_nothing: the job runs
+    // that same verification probe on a worker thread, and traditional ZipCrypto
+    // falsely accepts a wrong password about 1 run in 256 (single check byte),
+    // which surfaces as a generic failure rather than needs_password. Nothing is
+    // ever written either way; only the reported *reason* is probabilistic.
+    bool saw_needs_password = false;
+    for (int attempt = 0; attempt < 5 && !saw_needs_password; ++attempt) {
+        auto dir = fresh_dir("archive_job_enc_wrong");
+        auto archive = archivetest::make_encrypted_zip(
+            {{"a.jpg", fake_bytes(static_cast<uint8_t>(32 + attempt))}}, "correcthorse",
+            dir / "secret.zip");
+        {
+            vault::Vault v;
+            make_vault(v, dir / "v.osv");
 
-        crypto::SecureBytes pw(std::string_view("nope").size());
-        std::memcpy(pw.data(), "nope", pw.size());
+            crypto::SecureBytes pw(std::string_view("nope").size());
+            std::memcpy(pw.data(), "nope", pw.size());
 
-        ui::ZipImportJob job;
-        CHECK(job.start_archive(v, archive,
-                                {ui::ZipDest::NewGallery, ui::ZipConflictPolicy::AskUser}, "", "Secret",
-                                /*password_protected=*/true, std::move(pw)));
-        auto oc = await_outcome(job);
-        REQUIRE(oc.has_value());
-        CHECK(oc->ok);
-        CHECK(oc->needs_password);
-        CHECK(v.list("").empty());
+            ui::ZipImportJob job;
+            CHECK(job.start_archive(v, archive,
+                                    {ui::ZipDest::NewGallery, ui::ZipConflictPolicy::AskUser}, "", "Secret",
+                                    /*password_protected=*/true, std::move(pw)));
+            auto oc = await_outcome(job);
+            REQUIRE(oc.has_value());
+            CHECK(v.list("").empty());
+            saw_needs_password = oc->ok && oc->needs_password;
+        }
+        cleanup_dir(dir);
     }
-    cleanup_dir(dir);
+    CHECK(saw_needs_password);
 }
 
 #endif // OSV_VENDORED_ARCHIVE
