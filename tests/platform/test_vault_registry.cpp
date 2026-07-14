@@ -93,6 +93,33 @@ TEST(registry_stores_no_secrets_only_paths)
     CHECK_EQ(raw, std::string("/vaults/b.osv\n/vaults/a.osv\n"));
 }
 
+// vaults.list is written '/'-separated on every platform.
+//
+// list() normalizes each line it reads (untrusted input), and lexically_normal()
+// renders with the platform's preferred separator — so on Windows a line written
+// as "/vaults/a.osv" reads back as "\vaults\a.osv". add()/remove() rewrite the
+// whole file from list(), which would otherwise leave the file holding a mix of
+// both separators: the just-added entry as the caller spelled it, and every
+// older entry in backslash form. Pin the one stable format.
+TEST(registry_file_is_written_generic_separated)
+{
+    TempFile tf("generic");
+    platform::VaultRegistry reg(tf.path);
+
+    // A NATIVE path, spelled the way the platform's file dialog hands it over.
+    const fs::path native = fs::path("vaults") / "sub" / "a.osv";
+    REQUIRE(reg.add(native));
+    REQUIRE(reg.add("/vaults/b.osv"));   // forces the first entry through list()
+
+    const std::string raw = read_text(tf.path);
+    CHECK_TRUE(raw.find('\\') == std::string::npos);
+
+    // And it still reads back as the same path it went in as.
+    auto v = reg.list();
+    REQUIRE(v.size() == 2);
+    CHECK_TRUE(v[1] == native);
+}
+
 TEST(registry_seed_if_empty_adds_existing_candidate)
 {
     TempFile tf("seed");

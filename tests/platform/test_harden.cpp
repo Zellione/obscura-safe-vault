@@ -12,6 +12,9 @@
 #  include <sys/resource.h>
 #elif defined(__APPLE__)
 #  include <sys/resource.h>
+#elif defined(_WIN32)
+// _dup / _dup2 / _close / _fileno
+#  include <io.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -81,5 +84,36 @@ TEST(redirect_diagnostics_to_log_file_call)
 {
     // No-op outside Windows Release; must be callable without crashing
     // everywhere (it's called unconditionally from App::init() in Release).
+    //
+    // On Windows it is NOT a no-op: it freopen()s this process's real stdout and
+    // stderr onto config_dir()/console.log. Left that way it would swallow every
+    // remaining line of the test run — including the FAIL line of any later test,
+    // leaving CI with a bare "exit code 1" and no idea which test broke (that is
+    // exactly what happened here). So duplicate both fds first and restore them
+    // afterwards, keeping the redirect scoped to this test.
+#if defined(_WIN32)
+    const int saved_out = _dup(_fileno(stdout));
+    const int saved_err = _dup(_fileno(stderr));
+#endif
+
     platform::redirect_diagnostics_to_log_file();
+
+#if defined(_WIN32)
+    std::fflush(stdout);
+    std::fflush(stderr);
+    if (saved_out >= 0) {
+        _dup2(saved_out, _fileno(stdout));
+        _close(saved_out);
+    }
+    if (saved_err >= 0) {
+        _dup2(saved_err, _fileno(stderr));
+        _close(saved_err);
+    }
+    std::clearerr(stdout);
+    std::clearerr(stderr);
+
+    // If the restore silently failed, every later test's output is lost, so say
+    // so now while this line can still be seen.
+    CHECK_TRUE(saved_out >= 0 && saved_err >= 0);
+#endif
 }

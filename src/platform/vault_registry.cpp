@@ -81,7 +81,14 @@ bool VaultRegistry::write(const std::vector<std::filesystem::path>& entries) con
             std::println(stderr, "[VaultRegistry] cannot write {}", tmp.string());
             return false;
         }
-        for (const auto& e : entries) out << e.string() << '\n';
+        // generic_string(), not string(): list() normalizes every line it reads,
+        // and lexically_normal() renders with the platform's preferred separator.
+        // add()/remove() rewrite the whole file from list(), so a native-format
+        // write would leave vaults.list holding a mix of "C:/x.osv" (just-added,
+        // as the caller spelled it) and "C:\y.osv" (round-tripped through list()).
+        // Writing the generic form keeps the file in one stable, portable shape;
+        // fs::path accepts '/' on Windows, so it reads back identically.
+        for (const auto& e : entries) out << e.generic_string() << '\n';
         out.flush();
         if (!out) {
             std::println(stderr, "[VaultRegistry] write error on {}", tmp.string());
