@@ -1,6 +1,7 @@
 #include "test_framework.h"
 
 #include <filesystem>
+#include <string>
 
 #include "platform/paths.h"
 
@@ -94,4 +95,47 @@ TEST(paths_write_new_keyfile_refuses_to_overwrite)
 TEST(paths_write_new_keyfile_fails_on_bad_path)
 {
     CHECK_FALSE(platform::write_new_keyfile("/no/such/dir/osv.key"));
+}
+
+// --- normalize_user_path ---------------------------------------------------
+//
+// The boundary every externally-chosen path crosses before it can reach fopen():
+// the native file dialog's raw C strings, and the lines read back out of
+// vaults.list. See src/platform/paths.h for why this does NOT confine the result
+// to a base directory.
+
+TEST(normalize_user_path_rejects_empty_and_nul_and_overlong)
+{
+    CHECK_FALSE(platform::normalize_user_path("").has_value());
+
+    // An embedded NUL would truncate the string fopen() actually receives, so the
+    // opened path would differ from the validated one.
+    CHECK_FALSE(platform::normalize_user_path(std::string("/tmp/a\0/etc/passwd", 18)).has_value());
+
+    CHECK_FALSE(platform::normalize_user_path(
+                    std::string(platform::MAX_USER_PATH_BYTES + 1, 'a')).has_value());
+}
+
+// generic_string() throughout: lexically_normal() renders with the platform's
+// preferred separator, so .string() is "\home\u\a.osv" on Windows. The separator
+// is not what these tests are about.
+TEST(normalize_user_path_collapses_traversal_components)
+{
+    auto p = platform::normalize_user_path("/home/u/vaults/../vaults/a.osv");
+    REQUIRE(p.has_value());
+    CHECK_EQ(p->generic_string(), std::string("/home/u/vaults/a.osv"));
+
+    auto q = platform::normalize_user_path("/home/u/./a.osv");
+    REQUIRE(q.has_value());
+    CHECK_EQ(q->generic_string(), std::string("/home/u/a.osv"));
+}
+
+// An ordinary absolute path — the overwhelmingly common case — must survive
+// completely untouched. Vaults legitimately live anywhere, including on
+// removable media, so normalization must not become confinement.
+TEST(normalize_user_path_leaves_an_ordinary_path_alone)
+{
+    auto p = platform::normalize_user_path("/media/usb/photos.osv");
+    REQUIRE(p.has_value());
+    CHECK_EQ(p->generic_string(), std::string("/media/usb/photos.osv"));
 }

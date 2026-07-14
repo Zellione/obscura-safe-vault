@@ -303,3 +303,68 @@ TEST(add_image_vector_push_failure_returns_io_error_not_terminate)
     // The vault must still work normally afterward (fault disarms after firing).
     REQUIRE(v.add_image("", img, "b.jpg") == vault::VaultResult::Ok);
 }
+
+// --- Node-name validation at the vault ingress (path-traversal defence) -----
+//
+// The vault API is the trust boundary: a name that could steer an export write
+// out of the destination folder must never reach the index in the first place.
+// The repair-instead-of-reject counterpart lives in the importers, which call
+// vault::sanitize_node_name (see src/vault/safe_name.h).
+
+TEST(add_image_rejects_unsafe_filenames)
+{
+    TempVault tv("unsafe_img");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+
+    auto img = pattern(500, 1);
+    using enum vault::VaultResult;
+    CHECK_EQ(v.add_image("", img, "../escape.jpg"), InvalidArg);
+    CHECK_EQ(v.add_image("", img, "/etc/passwd"), InvalidArg);
+    CHECK_EQ(v.add_image("", img, ".."), InvalidArg);
+    CHECK_EQ(v.add_image("", img, "sub/dir.jpg"), InvalidArg);
+    CHECK_EQ(v.add_image("", img, "back\\slash.jpg"), InvalidArg);
+    CHECK_EQ(v.add_image("", img, std::string("nul\0byte.jpg", 12)), InvalidArg);
+    CHECK_EQ(v.add_image("", img, ""), InvalidArg);   // pre-existing empty check still holds
+
+    // Nothing hostile made it into the index.
+    CHECK_EQ(v.list("").size(), 0u);
+
+    // A normal name still works.
+    CHECK_EQ(v.add_image("", img, "fine.jpg"), Ok);
+    CHECK_EQ(v.list("").size(), 1u);
+}
+
+TEST(add_video_rejects_unsafe_filenames)
+{
+    TempVault tv("unsafe_vid");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+
+    auto data = pattern(500, 2);
+    using enum vault::VaultResult;
+    CHECK_EQ(v.add_video("", data, "../escape.mp4"), InvalidArg);
+    CHECK_EQ(v.add_video("", data, "/tmp/escape.mp4"), InvalidArg);
+    CHECK_EQ(v.list("").size(), 0u);
+}
+
+TEST(create_gallery_rejects_unsafe_path_segments)
+{
+    TempVault tv("unsafe_gal");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+
+    using enum vault::VaultResult;
+    CHECK_EQ(v.create_gallery(".."), InvalidArg);
+    CHECK_EQ(v.create_gallery("ok/../escape"), InvalidArg);
+    CHECK_EQ(v.create_gallery("back\\slash"), InvalidArg);
+    CHECK_EQ(v.create_gallery("trailing."), InvalidArg);
+    CHECK_EQ(v.list("").size(), 0u);
+
+    // Legitimate nesting is unaffected — '/' still separates segments.
+    CHECK_EQ(v.create_gallery("a/b/c"), Ok);
+    CHECK_EQ(v.list("").size(), 1u);
+}

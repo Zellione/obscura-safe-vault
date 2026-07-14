@@ -1,11 +1,27 @@
 #include "ui/export.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <print>
+
+#include "vault/safe_name.h"
 
 namespace ui {
 
 namespace fs = std::filesystem;
+
+bool export_path_within(const fs::path& dest_dir, const fs::path& candidate)
+{
+    std::error_code ec;
+    const fs::path base = fs::weakly_canonical(dest_dir, ec);
+    if (ec) return false;
+    const fs::path target = fs::weakly_canonical(candidate, ec);
+    if (ec) return false;
+
+    const fs::path rel = target.lexically_relative(base);
+    if (rel.empty() || rel == ".") return false;
+    return !std::ranges::contains(rel, "..");
+}
 
 vault::VaultResult export_one_image(const vault::Vault&          vault,
                                     const vault::IndexNode&      node,
@@ -62,11 +78,20 @@ ExportSummary export_images(const vault::Vault&                      vault,
         if (node == nullptr || !node->is_image()) {
             ++sum.failed;
         } else {
-            const fs::path out = unique_export_path(dest_dir, node->name, exists);
-            if (export_one_image(vault, *node, out, scratch) == vault::VaultResult::Ok)
-                ++sum.written;
-            else
+            // The vault's index is untrusted input: defang the name, then verify
+            // the path it produced really is inside dest_dir before writing.
+            const fs::path out =
+                unique_export_path(dest_dir, vault::sanitize_node_name(node->name), exists);
+            if (!export_path_within(dest_dir, out)) {
+                std::println(stderr,
+                             "[Export] refusing to write outside the chosen folder: {}",
+                             out.string());
                 ++sum.failed;
+            } else if (export_one_image(vault, *node, out, scratch) == vault::VaultResult::Ok) {
+                ++sum.written;
+            } else {
+                ++sum.failed;
+            }
         }
         if (progress) progress->done.fetch_add(1);
     }

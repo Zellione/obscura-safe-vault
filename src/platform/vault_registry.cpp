@@ -29,7 +29,11 @@ std::vector<std::filesystem::path> VaultRegistry::list() const
     while (std::getline(in, line)) {
         if (!line.empty() && line.back() == '\r') line.pop_back();  // tolerate CRLF
         if (line.empty()) continue;
-        std::filesystem::path p{line};
+        // vaults.list is a file on disk, so its contents are untrusted input like
+        // any other: normalize before the path can reach Vault::open -> fopen.
+        auto norm = normalize_user_path(line);
+        if (!norm) continue;                                        // skip a junk line
+        std::filesystem::path p{std::move(*norm)};
         // De-duplicate, keeping the first (most-recent) occurrence.
         bool dup = false;
         for (const auto& e : out) if (e == p) { dup = true; break; }
@@ -77,7 +81,14 @@ bool VaultRegistry::write(const std::vector<std::filesystem::path>& entries) con
             std::println(stderr, "[VaultRegistry] cannot write {}", tmp.string());
             return false;
         }
-        for (const auto& e : entries) out << e.string() << '\n';
+        // generic_string(), not string(): list() normalizes every line it reads,
+        // and lexically_normal() renders with the platform's preferred separator.
+        // add()/remove() rewrite the whole file from list(), so a native-format
+        // write would leave vaults.list holding a mix of "C:/x.osv" (just-added,
+        // as the caller spelled it) and "C:\y.osv" (round-tripped through list()).
+        // Writing the generic form keeps the file in one stable, portable shape;
+        // fs::path accepts '/' on Windows, so it reads back identically.
+        for (const auto& e : entries) out << e.generic_string() << '\n';
         out.flush();
         if (!out) {
             std::println(stderr, "[VaultRegistry] write error on {}", tmp.string());

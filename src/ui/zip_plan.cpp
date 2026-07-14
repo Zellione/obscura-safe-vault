@@ -1,6 +1,7 @@
 #include "ui/zip_plan.h"
 
 #include "ui/natural_sort.h"
+#include "vault/safe_name.h"
 
 #include <algorithm>
 #include <array>
@@ -24,16 +25,40 @@ std::string to_lower(std::string_view s)
     return r;
 }
 
+// Archive entry names are attacker-controlled: an entry called "../../.bashrc",
+// "/etc/cron.d/x" or "..\\..\\evil.jpg" must import as an inert file, never as
+// something that can later steer an export write out of the user's chosen
+// folder. Defanging here — at the one place every media name is derived — means
+// the plan only ever carries names Vault::add_image will accept.
 std::string basename_of(std::string_view path)
 {
     const auto slash = path.find_last_of('/');
-    return std::string(slash == std::string_view::npos ? path : path.substr(slash + 1));
+    return vault::sanitize_node_name(
+        slash == std::string_view::npos ? path : path.substr(slash + 1));
 }
 
 std::string dirname_of(std::string_view path)
 {
     const auto slash = path.find_last_of('/');
     return slash == std::string_view::npos ? std::string() : std::string(path.substr(0, slash));
+}
+
+// An archive-relative directory becomes a chain of gallery names, so every
+// component of it needs the same treatment as a filename. '/' still separates.
+std::string sanitize_dir_path(std::string_view dir)
+{
+    std::string out;
+    size_t i = 0;
+    while (i < dir.size()) {
+        while (i < dir.size() && dir[i] == '/') ++i;
+        const size_t start = i;
+        while (i < dir.size() && dir[i] != '/') ++i;
+        if (i > start) {
+            if (!out.empty()) out += '/';
+            out += vault::sanitize_node_name(dir.substr(start, i - start));
+        }
+    }
+    return out;
 }
 
 std::string join_path(std::string_view a, std::string_view b)
@@ -83,7 +108,7 @@ std::vector<MediaFile> collect_media(const std::vector<ZipEntry>& entries,
         if (entry_is_dir(e) || i == meta_idx) continue;
         std::string name = basename_of(e.path);
         if (!is_supported_media_name(name)) { ++skipped; continue; }
-        std::string dir = dirname_of(e.path);
+        std::string dir = sanitize_dir_path(dirname_of(e.path));
         if (!dir.empty()) media_dirs.insert(dir);
         add_with_ancestors(dir, gallery_dirs);
         media.emplace_back(std::move(dir), std::move(name), i);
@@ -196,14 +221,20 @@ ZipPlan build_cbz_plan(const std::vector<ZipEntry>& entries,
     // untouched so the common flat/single-folder comic keeps clean page names.
     StringSet used;
     for (const Page& p : pages) {
-        std::string fname = p.name;
+        std::string fname = p.name;   // already safe: basename_of sanitized it
         if (used.contains(fname)) {
+            // The prefix comes from the archive's directory names, so it needs
+            // defanging too — and the join can overrun the 255-byte component
+            // limit, which sanitize_node_name truncates. The counter therefore
+            // goes FIRST: truncation only ever eats the tail, so distinct n keep
+            // producing distinct names and the loop is guaranteed to terminate.
             std::string prefix = dirname_of(p.path);
             std::ranges::replace(prefix, '/', '_');
-            std::string cand = prefix.empty() ? fname : std::format("{}_{}", prefix, fname);
+            std::string cand = vault::sanitize_node_name(
+                prefix.empty() ? fname : std::format("{}_{}", prefix, fname));
             int n = 1;
             while (used.contains(cand))
-                cand = std::format("{}_{}_{}", prefix, n++, fname);
+                cand = vault::sanitize_node_name(std::format("{}_{}_{}", n++, prefix, fname));
             fname = std::move(cand);
         }
         used.insert(fname);
