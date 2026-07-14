@@ -9,7 +9,9 @@
 #include "vault/vault.h"
 
 #include <chrono>
+#include <cstring>
 #include <optional>
+#include <string_view>
 #include <thread>
 
 using archivetest::fake_bytes;
@@ -91,6 +93,58 @@ TEST(archive_import_job_reports_final_progress)
         REQUIRE(oc.has_value());
         CHECK_EQ(job.total(), 3);
         CHECK_EQ(job.done(), 3);
+    }
+    cleanup_dir(dir);
+}
+
+TEST(archive_import_job_runs_encrypted_zip_with_password_to_completion)
+{
+    auto dir = fresh_dir("archive_job_enc_ok");
+    auto data = fake_bytes(31);
+    auto archive = archivetest::make_encrypted_zip({{"a.jpg", data}}, "correcthorse",
+                                                    dir / "secret.zip");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+
+        crypto::SecureBytes pw(std::string_view("correcthorse").size());
+        std::memcpy(pw.data(), "correcthorse", pw.size());
+
+        ui::ZipImportJob job;
+        CHECK(job.start_archive(v, archive, ui::ZipDest::NewGallery, "", "Secret",
+                                ui::ZipConflictPolicy::AskUser,
+                                /*password_protected=*/true, std::move(pw)));
+        auto oc = await_outcome(job);
+        REQUIRE(oc.has_value());
+        CHECK(oc->ok);
+        CHECK_FALSE(oc->needs_password);
+        CHECK_EQ(oc->imported, 1);
+        CHECK_EQ(v.list("Secret").size(), static_cast<size_t>(1));
+    }
+    cleanup_dir(dir);
+}
+
+TEST(archive_import_job_reports_needs_password_for_wrong_password)
+{
+    auto dir = fresh_dir("archive_job_enc_wrong");
+    auto archive = archivetest::make_encrypted_zip({{"a.jpg", fake_bytes(32)}}, "correcthorse",
+                                                    dir / "secret.zip");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+
+        crypto::SecureBytes pw(std::string_view("nope").size());
+        std::memcpy(pw.data(), "nope", pw.size());
+
+        ui::ZipImportJob job;
+        CHECK(job.start_archive(v, archive, ui::ZipDest::NewGallery, "", "Secret",
+                                ui::ZipConflictPolicy::AskUser,
+                                /*password_protected=*/true, std::move(pw)));
+        auto oc = await_outcome(job);
+        REQUIRE(oc.has_value());
+        CHECK(oc->ok);
+        CHECK(oc->needs_password);
+        CHECK(v.list("").empty());
     }
     cleanup_dir(dir);
 }
