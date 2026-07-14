@@ -37,6 +37,12 @@ void write_node(ByteWriter& w, const IndexNode& node)
     // node kinds, so the reader parses it version-gated without branching on type.
     w.u8(node.favorite ? 1 : 0);
 
+    // Sort key (Phase 37): one byte after the favorite flag, uniform for every
+    // node type (meaningful only for Gallery, ignored on read for Image/Video) —
+    // same "uniform, version-gated" shape as the favorite byte above, so the
+    // reader never branches on type for this field either.
+    w.u8(std::to_underlying(node.sort_key));
+
     if (node.type == IndexNode::Type::Gallery) {
         w.u32(static_cast<uint32_t>(node.children.size()));
         for (const auto& child : node.children) write_node(w, child);
@@ -171,6 +177,16 @@ bool read_node(ByteReader& r, IndexNode& node, uint32_t depth, uint8_t version)
         const uint8_t fav = r.u8();
         if (!r.ok()) return false;
         node.favorite = fav != 0;
+    }
+
+    // Sort key (Phase 37) exists only from version 6 on; older blobs default to
+    // Manual (today's insertion order — zero visible change for existing vaults).
+    // An out-of-range byte is rejected outright, like an unknown node `type` byte.
+    node.sort_key = SortKey::Manual;
+    if (version >= 6) {
+        const uint8_t sk = r.u8();
+        if (!r.ok() || sk > std::to_underlying(SortKey::SizeDesc)) return false;
+        node.sort_key = static_cast<SortKey>(sk);
     }
 
     if (node.type == IndexNode::Type::Image) {
