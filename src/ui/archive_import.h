@@ -12,6 +12,25 @@ class Vault;
 
 namespace ui {
 
+// Bundles the Phase 35 password-verification inputs shared by import_archive
+// and import_archive_cbz — they always travel together, and folding them into
+// one param keeps both functions under the S107 parameter-count cap.
+struct ArchivePassword {
+    bool             password_protected = false;
+    std::string_view password;
+};
+
+// Bundles where a ZIP-style import lands: mirror/append `dest` under
+// base_gallery/new_gallery_name per `policy` — the same four values
+// import_zip takes individually, grouped here because import_archive alone
+// needs the extra param-count relief (import_zip already fits the S107 cap).
+struct ZipDestination {
+    ZipDest           dest;
+    std::string_view  base_gallery;
+    std::string_view  new_gallery_name;
+    ZipConflictPolicy policy;
+};
+
 // Import the supported media from `archive_path` (.7z/.rar/.tar/.tar.gz/
 // .tar.xz) into `v`, reusing the exact same ZipPlan planner (build_zip_plan)
 // and mirror/append semantics as import_zip — only the decompression backend
@@ -23,22 +42,18 @@ namespace ui {
 // supported" outcome (ok=false, a user-facing error) instead of being
 // unavailable at the call site — mirrors ui::VideoPlayback's poster-only
 // fallback on non-AV builds, so GalleryGrid never needs its own #ifdef.
-// `password_protected` (Phase 35) is true only for a zip/cbz the caller
+// `pw.password_protected` (Phase 35) is true only for a zip/cbz the caller
 // already knows is encrypted (ui::zip_is_encrypted at pick time). When true,
 // a one-entry verification probe runs before any vault write; a wrong or
-// missing `password` returns needs_password=true with nothing written.
+// missing `pw.password` returns needs_password=true with nothing written.
 // Always false/empty for plain 7z/RAR/TAR imports — those readers fail
 // unconditionally on encrypted content regardless of any passphrase, so no
 // verification step is offered for them.
 [[nodiscard]] ZipImportOutcome import_archive(vault::Vault&                v,
                                               const std::filesystem::path& archive_path,
-                                              ZipDest                      dest,
-                                              std::string_view             base_gallery,
-                                              std::string_view             new_gallery_name,
-                                              ZipConflictPolicy            policy,
+                                              ZipDestination               dest,
                                               ImportProgress*              progress = nullptr,
-                                              bool                         password_protected = false,
-                                              std::string_view             password = {});
+                                              ArchivePassword              pw = {});
 
 // Import a `.cbr`/`.cb7`/`.cbt` comic archive as a single leaf gallery of
 // pages (build_cbz_plan), mirroring import_cbz's semantics over the
@@ -48,7 +63,6 @@ namespace ui {
                                                   std::string_view             base_gallery,
                                                   std::string_view             gallery_name,
                                                   ImportProgress*              progress = nullptr,
-                                                  bool                         password_protected = false,
-                                                  std::string_view             password = {});
+                                                  ArchivePassword              pw = {});
 
 }  // namespace ui

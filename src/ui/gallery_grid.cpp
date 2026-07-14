@@ -589,34 +589,32 @@ bool GalleryGrid::handle_zip_conflict_key(const SDL_Event& e)
     }
 }
 
-void GalleryGrid::handle_event(const SDL_Event& e)
+// Overlays take input in priority order: search > tag_editor > transfer >
+// quick_switch > export consent. Extracted from handle_event (cpp:S3776 —
+// each of these blocks was a nested branch there; here they're flat top-level
+// ifs, so the same logic costs far less cognitive complexity).
+bool GalleryGrid::handle_overlay_event(const SDL_Event& e)
 {
-    // A background import / export / delete owns the vault; its Esc→cancel gate
-    // swallows input until the worker finishes (a running transfer is owned by the
-    // dialog, which does its own Esc→cancel below).
-    if (handle_job_input(*this, e)) return;
-
-    // Overlays take input in priority order: search > tag_editor > transfer > consent/naming
     if (search_.active()) {
         if (search_.handle_event(e)) {
             Nav nav = search_.take_nav();
             if (nav.kind != NavKind::None) request(nav.kind, std::move(nav.path), nav.index);
         }
-        return;
+        return true;
     }
 
     if (tag_editor_.active()) {
         (void)tag_editor_.handle_event(e);
-        return;
+        return true;
     }
 
-    if (transfer_.active()) { (void)transfer_.handle_event(e); return; }
+    if (transfer_.active()) { (void)transfer_.handle_event(e); return true; }
 
     if (quick_switch_.active()) {
         (void)quick_switch_.handle_event(e);
         if (std::string p; quick_switch_.consume_choice(p))
             request(NavKind::ToUnlock, std::move(p));   // locks current, unlocks chosen
-        return;
+        return true;
     }
 
     // The export consent modal owns all input while it is up.
@@ -624,8 +622,20 @@ void GalleryGrid::handle_event(const SDL_Event& e)
         if (e.type == SDL_EVENT_KEY_DOWN &&
             consent_.handle_key(e.key.key) == ConsentDialog::Result::Confirmed)
             dialogs_.folder.open(win_.sdl_window());
-        return;
+        return true;
     }
+
+    return false;
+}
+
+void GalleryGrid::handle_event(const SDL_Event& e)
+{
+    // A background import / export / delete owns the vault; its Esc→cancel gate
+    // swallows input until the worker finishes (a running transfer is owned by the
+    // dialog, which does its own Esc→cancel below).
+    if (handle_job_input(*this, e)) return;
+
+    if (handle_overlay_event(e)) return;
 
     // The delete-confirmation modal owns all input while it is up.
     if (handle_delete_confirm_key(e)) return;
@@ -803,16 +813,18 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipCo
     // correctly comes back needs_password=true and opens the prompt.
     if (naming_.zip.cbz) {
         if (naming_.zip.archive_backend)
-            naming_.import_job.start_archive_cbz(vault_, zip_path, base_gallery, gallery_name,
-                                                 naming_.zip.needs_password,
-                                                 password_bytes(naming_.password.buf));
+            naming_.import_job.start_archive_cbz(
+                vault_, zip_path, base_gallery, gallery_name,
+                ui::ArchivePasswordInput{.password_protected = naming_.zip.needs_password,
+                                         .password = password_bytes(naming_.password.buf)});
         else
             naming_.import_job.start_cbz(vault_, zip_path, base_gallery, gallery_name);
     } else {
         if (naming_.zip.archive_backend)
-            naming_.import_job.start_archive(vault_, zip_path, dest, base_gallery, gallery_name, policy,
-                                             naming_.zip.needs_password,
-                                             password_bytes(naming_.password.buf));
+            naming_.import_job.start_archive(
+                vault_, zip_path, dest, base_gallery, gallery_name, policy,
+                ui::ArchivePasswordInput{.password_protected = naming_.zip.needs_password,
+                                         .password = password_bytes(naming_.password.buf)});
         else
             naming_.import_job.start_zip(vault_, zip_path, dest, base_gallery, gallery_name, policy);
     }

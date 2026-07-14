@@ -16,6 +16,16 @@ class Vault;
 
 namespace ui {
 
+// Owning counterpart of ui::ArchivePassword (Phase 35): start_archive/
+// start_archive_cbz run the import on a background thread, so the password
+// must be moved into the worker instead of borrowed via string_view.
+// Bundling it with password_protected keeps start_archive under the S107
+// parameter-count cap.
+struct ArchivePasswordInput {
+    bool                password_protected = false;
+    crypto::SecureBytes password;
+};
+
 // std::jthread (RAII auto-join, and the analyzer-preferred choice) is absent from
 // AppleClang's libc++, so fall back to std::thread on Apple — the destructor joins
 // explicitly either way, so behaviour is identical (mirrors image::WorkerThread).
@@ -58,19 +68,18 @@ public:
     // needs_resolution/mixed-folder contract as start_zip. launch() doesn't care
     // which backend the work closure uses, so this reuses the exact same job
     // machinery as start_zip/start_cbz rather than a parallel job type.
-    // `password_protected`/`password` (Phase 35): true/non-empty only for an
-    // encrypted zip/cbz the caller already detected via ui::zip_is_encrypted.
-    // `password` is moved into the worker and wiped immediately after the
+    // `pw` (Phase 35): password_protected/password set only for an encrypted
+    // zip/cbz the caller already detected via ui::zip_is_encrypted. The
+    // password is moved into the worker and wiped immediately after the
     // import_archive/import_archive_cbz call returns.
     bool start_archive(vault::Vault& v, std::filesystem::path archive, ZipDest dest,
                        std::string base_gallery, std::string new_gallery_name,
-                       ZipConflictPolicy policy,
-                       bool password_protected = false, crypto::SecureBytes password = {});
+                       ZipConflictPolicy policy, ArchivePasswordInput pw = {});
 
     // Launch a CBR/CB7/CBT import (mirrors ui::import_archive_cbz; Phase 34).
     bool start_archive_cbz(vault::Vault& v, std::filesystem::path archive,
                            std::string base_gallery, std::string gallery_name,
-                           bool password_protected = false, crypto::SecureBytes password = {});
+                           ArchivePasswordInput pw = {});
 
     // True from start_cbz() until take_outcome() has collected the result.
     [[nodiscard]] bool active() const noexcept { return active_.load(); }

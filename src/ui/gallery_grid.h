@@ -88,6 +88,10 @@ private:
     bool handle_zip_conflict_key(const SDL_Event& e);     // Flatten/Skip/Esc modal; true if consumed
     bool handle_delete_confirm_key(const SDL_Event& e);   // Del-confirm modal; true if consumed
     bool handle_compact_confirm_key(const SDL_Event& e);  // Shift+C compact modal; true if consumed (Phase 26)
+    // Dispatches to whichever full-screen overlay (search/tag editor/transfer/
+    // quick switch/export consent) is active; true if one consumed the event.
+    // Extracted from handle_event to keep its cognitive complexity bounded (cpp:S3776).
+    bool handle_overlay_event(const SDL_Event& e);
     void start_tag_editor(bool import_list);  // G: open tag editor; Shift+G: import a tag list (Phase 21)
     void toggle_favorite_current();  // flip favorite on the focused tile (B)
     SDL_Texture*       thumb_texture(const vault::IndexNode& node);

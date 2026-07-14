@@ -33,7 +33,7 @@ namespace ui {
 // the user to retry — see extract_failed_needs_password() below.
 [[nodiscard]] inline bool archive_error_is_passphrase_issue(std::string_view msg) noexcept
 {
-    return msg.find("assphrase") != std::string_view::npos;
+    return msg.contains("assphrase");
 }
 
 

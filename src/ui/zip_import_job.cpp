@@ -55,33 +55,38 @@ bool ZipImportJob::start_zip(vault::Vault& v, std::filesystem::path zip, ZipDest
 
 bool ZipImportJob::start_archive(vault::Vault& v, std::filesystem::path archive, ZipDest dest,
                                  std::string base_gallery, std::string new_gallery_name,
-                                 ZipConflictPolicy policy,
-                                 bool password_protected, crypto::SecureBytes password)
+                                 ZipConflictPolicy policy, ArchivePasswordInput pw)
 {
-    auto pw = std::make_shared<crypto::SecureBytes>(std::move(password));
+    const bool password_protected = pw.password_protected;
+    auto owned_pw = std::make_shared<crypto::SecureBytes>(std::move(pw.password));
     return launch([this, &v, archive = std::move(archive), dest, base = std::move(base_gallery),
-                   name = std::move(new_gallery_name), policy, password_protected, pw]() {
-        const std::string_view pw_view = pw->empty() ? std::string_view{}
-            : std::string_view(reinterpret_cast<const char*>(pw->data()), pw->size());
-        ZipImportOutcome oc = import_archive(v, archive, dest, base, name, policy, &progress_,
-                                             password_protected, pw_view);
-        pw->wipe();
+                   name = std::move(new_gallery_name), policy, password_protected, owned_pw]() {
+        const std::string_view pw_view = owned_pw->empty() ? std::string_view{}
+            : std::string_view(reinterpret_cast<const char*>(owned_pw->data()), owned_pw->size());
+        ZipImportOutcome oc = import_archive(
+            v, archive,
+            ZipDestination{.dest = dest, .base_gallery = base, .new_gallery_name = name, .policy = policy},
+            &progress_,
+            ArchivePassword{.password_protected = password_protected, .password = pw_view});
+        owned_pw->wipe();
         return oc;
     });
 }
 
 bool ZipImportJob::start_archive_cbz(vault::Vault& v, std::filesystem::path archive,
                                      std::string base_gallery, std::string gallery_name,
-                                     bool password_protected, crypto::SecureBytes password)
+                                     ArchivePasswordInput pw)
 {
-    auto pw = std::make_shared<crypto::SecureBytes>(std::move(password));
+    const bool password_protected = pw.password_protected;
+    auto owned_pw = std::make_shared<crypto::SecureBytes>(std::move(pw.password));
     return launch([this, &v, archive = std::move(archive), base = std::move(base_gallery),
-                   name = std::move(gallery_name), password_protected, pw]() {
-        const std::string_view pw_view = pw->empty() ? std::string_view{}
-            : std::string_view(reinterpret_cast<const char*>(pw->data()), pw->size());
-        ZipImportOutcome oc = import_archive_cbz(v, archive, base, name, &progress_,
-                                                 password_protected, pw_view);
-        pw->wipe();
+                   name = std::move(gallery_name), password_protected, owned_pw]() {
+        const std::string_view pw_view = owned_pw->empty() ? std::string_view{}
+            : std::string_view(reinterpret_cast<const char*>(owned_pw->data()), owned_pw->size());
+        ZipImportOutcome oc = import_archive_cbz(
+            v, archive, base, name, &progress_,
+            ArchivePassword{.password_protected = password_protected, .password = pw_view});
+        owned_pw->wipe();
         return oc;
     });
 }

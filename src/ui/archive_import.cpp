@@ -20,8 +20,8 @@ bool open_archive(const std::filesystem::path& path, const char* tag,
                   ArchiveReader& reader, ZipImportOutcome& out,
                   bool password_protected, std::string_view password)
 {
-    std::vector<uint8_t> bytes;
-    if (!read_whole_file(path, bytes) || !reader.open(bytes, password)) {
+    if (std::vector<uint8_t> bytes;
+        !read_whole_file(path, bytes) || !reader.open(bytes, password)) {
         out.error = "Could not open archive";
         std::println(stderr, "[{}] open failed: {}", tag, path.string());
         return false;
@@ -43,8 +43,7 @@ bool open_archive(const std::filesystem::path& path, const char* tag,
     // re-prompt loop for a password that's already known to be right).
     if (first >= entries.size()) return true;
 
-    crypto::SecureBytes probe;
-    if (reader.extract(first, probe)) return true;
+    if (crypto::SecureBytes probe; reader.extract(first, probe)) return true;
 
     // Only ask for a (re)try when the failure was actually a password
     // problem (ArchiveReader::extract_failed_needs_password, backed by
@@ -132,20 +131,17 @@ ZipImportOutcome finish_import(vault::Vault& v, const ArchiveReader& reader, con
 
 ZipImportOutcome import_archive(vault::Vault&                v,
                                 const std::filesystem::path& archive_path,
-                                ZipDest                      dest,
-                                std::string_view             base_gallery,
-                                std::string_view             new_gallery_name,
-                                ZipConflictPolicy            policy,
+                                ZipDestination                dest,
                                 ImportProgress*              progress,
-                                bool                         password_protected,
-                                std::string_view             password)
+                                ArchivePassword              pw)
 {
     ZipImportOutcome out;
     ArchiveReader reader;
-    if (!open_archive(archive_path, "ArchiveImport", reader, out, password_protected, password))
+    if (!open_archive(archive_path, "ArchiveImport", reader, out, pw.password_protected, pw.password))
         return out;
 
-    ZipPlan plan = build_zip_plan(reader.entries(), dest, base_gallery, new_gallery_name, policy);
+    ZipPlan plan = build_zip_plan(reader.entries(), dest.dest, dest.base_gallery,
+                                  dest.new_gallery_name, dest.policy);
     if (plan.needs_resolution) {
         out.ok = true;
         out.needs_resolution = true;
@@ -160,12 +156,11 @@ ZipImportOutcome import_archive_cbz(vault::Vault&                v,
                                     std::string_view             base_gallery,
                                     std::string_view             gallery_name,
                                     ImportProgress*              progress,
-                                    bool                         password_protected,
-                                    std::string_view             password)
+                                    ArchivePassword              pw)
 {
     ZipImportOutcome out;
     ArchiveReader reader;
-    if (!open_archive(archive_path, "ArchiveCbzImport", reader, out, password_protected, password))
+    if (!open_archive(archive_path, "ArchiveCbzImport", reader, out, pw.password_protected, pw.password))
         return out;
 
     const ZipPlan plan = build_cbz_plan(reader.entries(), base_gallery, gallery_name);
@@ -187,15 +182,14 @@ ZipImportOutcome unsupported()
 }
 } // namespace
 
-ZipImportOutcome import_archive(vault::Vault&, const std::filesystem::path&, ZipDest,
-                                std::string_view, std::string_view, ZipConflictPolicy,
-                                ImportProgress*, bool, std::string_view)
+ZipImportOutcome import_archive(vault::Vault&, const std::filesystem::path&, ZipDestination,
+                                ImportProgress*, ArchivePassword)
 {
     return unsupported();
 }
 
 ZipImportOutcome import_archive_cbz(vault::Vault&, const std::filesystem::path&, std::string_view,
-                                    std::string_view, ImportProgress*, bool, std::string_view)
+                                    std::string_view, ImportProgress*, ArchivePassword)
 {
     return unsupported();
 }

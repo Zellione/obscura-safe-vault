@@ -235,9 +235,12 @@ bool zip_is_encrypted(const std::filesystem::path& zip_path)
 
     const mz_uint n = mz_zip_reader_get_num_files(&zip);
     bool encrypted = false;
-    for (mz_uint i = 0; i < n && !encrypted; ++i) {
+    for (mz_uint i = 0; i < n; ++i) {
         mz_zip_archive_file_stat st;
-        if (mz_zip_reader_file_stat(&zip, i, &st) && st.m_is_encrypted) encrypted = true;
+        if (mz_zip_reader_file_stat(&zip, i, &st) && st.m_is_encrypted) {
+            encrypted = true;
+            break;
+        }
     }
     mz_zip_reader_end(&zip);
     return encrypted;
