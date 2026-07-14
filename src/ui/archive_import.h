@@ -23,7 +23,7 @@ namespace ui {
 // supported" outcome (ok=false, a user-facing error) instead of being
 // unavailable at the call site — mirrors ui::VideoPlayback's poster-only
 // fallback on non-AV builds, so GalleryGrid never needs its own #ifdef.
-[[nodiscard]] // `password_protected` (Phase 35) is true only for a zip/cbz the caller
+// `password_protected` (Phase 35) is true only for a zip/cbz the caller
 // already knows is encrypted (ui::zip_is_encrypted at pick time). When true,
 // a one-entry verification probe runs before any vault write; a wrong or
 // missing `password` returns needs_password=true with nothing written.
@@ -43,7 +43,7 @@ namespace ui {
 // Import a `.cbr`/`.cb7`/`.cbt` comic archive as a single leaf gallery of
 // pages (build_cbz_plan), mirroring import_cbz's semantics over the
 // libarchive backend. Same non-OSV_VENDORED_ARCHIVE fallback as import_archive.
-[[nodiscard]] [[nodiscard]] ZipImportOutcome import_archive_cbz(vault::Vault&                v,
+[[nodiscard]] ZipImportOutcome import_archive_cbz(vault::Vault&                v,
                                                   const std::filesystem::path& archive_path,
                                                   std::string_view             base_gallery,
                                                   std::string_view             gallery_name,
