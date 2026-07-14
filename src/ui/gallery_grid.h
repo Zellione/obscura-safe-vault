@@ -16,6 +16,7 @@
 #include "ui/quick_switch.h"
 #include "ui/screen.h"
 #include "ui/search_overlay.h"
+#include "ui/secure_text_field.h"
 #include "ui/selection_model.h"
 #include "ui/tag_editor.h"
 #include "ui/transfer_dialog.h"
@@ -34,8 +35,6 @@ struct GridLocation {
     std::string path;
     int         selected = 0;
 };
-
-#include "ui/secure_text_field.h"
 
 class GalleryGrid : public Screen {
 public:
