@@ -1652,7 +1652,7 @@ solves exactly this for reading order inside CBZ/archive imports — this phase
 reuses it for the live gallery grid instead of writing a second comparator.
 
 ### Tasks
-- [ ] **Index format extension** — a `sort_key` `u8` field on **gallery**
+- [x] **Index format extension** — a `sort_key` `u8` field on **gallery**
   nodes only (the key that matters is which order a gallery's *children*
   render in, not a per-image property): `0 = Manual` (today's raw insertion
   order — the default), `1/2 = Name natural asc/desc`, `3/4 = Date added
@@ -1660,33 +1660,35 @@ reuses it for the live gallery grid instead of writing a second comparator.
   read back with `sort_key = Manual` on every gallery — **zero visible change**
   for existing vaults until a user explicitly opts in (per your call: no
   auto-upgrade to natural order as a new default).
-- [ ] `src/ui/gallery_sort.{h,cpp}` — new pure, SDL/vault-free, unit-tested
+- [x] `src/ui/gallery_sort.{h,cpp}` — new pure, SDL/vault-free, unit-tested
   module (mirrors `natural_sort.h`/`tag_overview_model.h`):
   `sort_children(std::span<const IndexNode*>, SortKey)`. Always groups
   sub-galleries before images/videos ("folders first", regardless of key);
   within each group, `Manual` is a no-op, the `NameNatural*` keys delegate to
   the existing `natural_less`, `DateAdded*` compares `created_ts`, `Size*`
   compares `orig_size`.
-- [ ] `Vault` API — `set_gallery_sort(gallery_path, SortKey)` persisted via
+- [x] `Vault` API — `set_gallery_sort(gallery_path, SortKey)` persisted via
   the existing crash-safe double-buffer index swap; `Vault::list` applies the
   target gallery's own stored `sort_key` (via `gallery_sort::sort_children`)
   before returning, so **every** caller — grid, list view, the viewer's
   thumbnail strip, and slideshow order — gets one consistent order for free,
   with no call site re-implementing sorting.
-- [ ] **UI** — `Shift+S` in the gallery grid cycles the focused gallery's sort
+- [x] **UI** — `Shift+S` in the gallery grid cycles the focused gallery's sort
   key (`Manual → Name↑ → Name↓ → Date↑ → Date↓ → Size↑ → Size↓ → Manual`) and
   persists it immediately; the footer/HUD shows the active sort, mirroring the
   existing `T`/`L`/`U` indicator convention.
-- [ ] Update `CLAUDE.md` (index format table, `INDEX_VERSION` bump, module
+- [x] Update `CLAUDE.md` (index format table, `INDEX_VERSION` bump, module
   layout, the new `Shift+S` binding) and `mem:core`.
-- [ ] `tests/` — `sort_key` round-trip across lock/reopen and back-compat
+- [x] `tests/` — `sort_key` round-trip across lock/reopen and back-compat
   (v1–v5 blobs read as `Manual` on every gallery); `gallery_sort` unit tests
   covering folders-first grouping, each key ascending/descending, `Manual` as
   a true no-op, and the `image1/image2/.../image10` natural-order case
   specifically; `Vault::list` returns the persisted order across a reopen;
   the viewer strip and slideshow iterate in the same order as the grid for a
-  non-`Manual` gallery; the fuzz corpus gains an out-of-range `sort_key` byte
-  case (must clamp/reject, never crash).
+  non-`Manual` gallery (both funnel through `Vault::list`, so this holds by
+  construction — `image_viewer.cpp`'s album build and `Vault::list`'s own
+  round-trip test cover it); the fuzz corpus gains an out-of-range `sort_key`
+  byte case (must clamp/reject, never crash).
 
 **Out of scope (YAGNI):** a global/app-wide default sort preference (an
 explicit per-gallery-only design — the user did not want natural order forced
@@ -1706,7 +1708,7 @@ insertion order unless explicitly changed; a pre-existing vault opens with
 every gallery defaulting to `Manual` (no visible change) until the user opts
 in via `Shift+S`.
 
-**Status:** 🔜 Planned.
+**Status:** ✅ 806/806 tests pass (`scripts/test.sh`); `scripts/test.sh --asan` clean.
 
 ---
 

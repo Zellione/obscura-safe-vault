@@ -153,6 +153,27 @@ src/
                                                  own ∪ ancestor galleries; root tags
                                                  global); resolve_node resolves a path
                                                  to a gallery OR image.
+                                               — Phase 37: index.h adds a SortKey u8 on every
+                                                 IndexNode (meaningful only on Gallery nodes:
+                                                 Manual/NameAsc/NameDesc/DateAsc/DateDesc/
+                                                 SizeAsc/SizeDesc), INDEX_VERSION=6 (v1–v5 read
+                                                 back as Manual on every gallery — no visible
+                                                 change until opt-in; out-of-range byte rejected,
+                                                 not clamped). New ui/gallery_sort.{h,cpp} (pure,
+                                                 mirrors natural_sort.h): sort_children(nodes,
+                                                 SortKey) groups folders first, then Manual is a
+                                                 no-op / NameAsc,Desc delegate to natural_less /
+                                                 Date* compares created_ts / Size* compares
+                                                 orig_size (all stable); next_sort_key cycles the
+                                                 fixed Shift+S order; sort_key_label gives the
+                                                 footer string (empty for Manual). Vault gains
+                                                 gallery_sort_key(path) (getter) and
+                                                 set_gallery_sort(path, SortKey) (persisted via
+                                                 commit_index); Vault::list applies the target
+                                                 gallery's own sort_key before returning, so every
+                                                 caller (grid, list view, viewer thumbnail strip,
+                                                 slideshow) gets one consistent order for free —
+                                                 no call site re-implements sorting.
   image/       decode.*, thumbnail.*,          — stb_image decode, thumb gen
                format_registry.*,              — magic-byte format detection
                decoder.*,                      — Decoder interface + DecoderRegistry
@@ -214,7 +235,10 @@ src/
                                                  (play badge / play-pause icon).
   ui/          unlock_screen.*, gallery_grid.* — UI screens; gallery has Grid +
                                                  detailed List views (key L), live
-                                                 width reflow, centred/elided labels
+                                                 width reflow, centred/elided labels;
+                                                 Shift+S cycles a gallery's persisted
+                                                 sort_key (Phase 37), breadcrumb shows
+                                                 "Sort: <label>" once non-Manual
                image_viewer.*, widgets.*       — viewer has Fit + FillScroll + Slideshow
                                                  modes, bottom/left strip toggle (keys
                                                  F/T, P starts slideshow); widgets has
@@ -385,6 +409,21 @@ src/
                                                  digit runs by value so "2"<"10", other chars
                                                  case-insensitive, fewer leading zeros first) +
                                                  natural_less. Orders CBZ pages by reading order.
+               gallery_sort.*                  — pure, SDL/vault-free per-gallery sort presentation
+                                                 (Phase 37, mirrors natural_sort.h/tag_overview_
+                                                 model.h): sort_children(children, SortKey) —
+                                                 folders always precede images/videos, then within
+                                                 each group Manual is a no-op, NameAsc/NameDesc
+                                                 delegate to natural_less (image1/image2/.../
+                                                 image10 sorts numerically), Date* compares
+                                                 created_ts, Size* compares orig_size; stable
+                                                 throughout. next_sort_key cycles the fixed
+                                                 Shift+S order (Manual→NameAsc→NameDesc→DateAsc→
+                                                 DateDesc→SizeAsc→SizeDesc→Manual); sort_key_label
+                                                 gives the footer string (empty for Manual, so the
+                                                 indicator hides at the default). Used by both
+                                                 Vault::list (every listing call site) and
+                                                 GalleryGrid's footer/HUD.
                tag_inherit.*                   — pure, SDL-free ancestor-gallery tag union (Phase 27
                                                  follow-up): inherited_tags(vault, node_path) —
                                                  root→parent order, ci de-dupe, minus own tags.

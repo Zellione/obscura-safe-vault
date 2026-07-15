@@ -165,9 +165,22 @@ public:
     // missing or names an image rather than a gallery. Persisted via the index swap.
     [[nodiscard]] VaultResult remove_gallery(std::string_view gallery_path);
 
-    // Immediate children of `gallery_path`. Pointers are valid until the next
-    // mutating call. Empty if the path is missing or not a gallery.
+    // Immediate children of `gallery_path`, ordered per that gallery's own
+    // persisted sort_key (ui::gallery_sort::sort_children — folders first,
+    // then Manual/insertion order or the chosen Name/Date/Size key; Phase 37).
+    // Pointers are valid until the next mutating call. Empty if the path is
+    // missing or not a gallery.
     [[nodiscard]] std::vector<const IndexNode*> list(std::string_view gallery_path) const;
+
+    // The gallery's own stored sort_key (Manual if gallery_path doesn't resolve
+    // to a gallery). Phase 37.
+    [[nodiscard]] SortKey gallery_sort_key(std::string_view gallery_path) const;
+
+    // Set a gallery's sort_key and persist it via the crash-safe index swap;
+    // every subsequent list() of that gallery applies it. A no-op (no commit)
+    // if the key is unchanged. Locked if not unlocked; NotFound if
+    // gallery_path doesn't resolve to a gallery. Phase 37.
+    [[nodiscard]] VaultResult set_gallery_sort(std::string_view gallery_path, SortKey key);
 
     // Replace a node's tag list (gallery OR image). Tags are normalised: each trimmed
     // of surrounding whitespace, empties dropped, de-duplicated case-insensitively

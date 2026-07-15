@@ -94,6 +94,7 @@ private:
     bool handle_overlay_event(const SDL_Event& e);
     void start_tag_editor(bool import_list);  // G: open tag editor; Shift+G: import a tag list (Phase 21)
     void toggle_favorite_current();  // flip favorite on the focused tile (B)
+    void cycle_gallery_sort();       // Shift+S: cycle the open gallery's persisted sort key (Phase 37)
     SDL_Texture*       thumb_texture(const vault::IndexNode& node);
     bool               pump_thumbs();   // upload finished off-thread thumb decodes
 

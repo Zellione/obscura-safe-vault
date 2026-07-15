@@ -160,6 +160,22 @@ src/
                                             index.h adds SavedSearch + a vault-global saved-
                                             searches block, INDEX_VERSION=5 (v1–v4 read back-
                                             compat → empty list) (Phase 18).
+                                            Phase 37: index.h adds a SortKey u8 on every
+                                            IndexNode (meaningful only on Gallery nodes —
+                                            Manual/NameAsc/NameDesc/DateAsc/DateDesc/SizeAsc/
+                                            SizeDesc), INDEX_VERSION=6 (v1–v5 blobs read back
+                                            as Manual on every gallery — zero visible change
+                                            until a user opts in via Shift+S). An out-of-range
+                                            byte is rejected on deserialize, not clamped.
+                                            Vault::list applies the target gallery's own
+                                            sort_key (ui::gallery_sort::sort_children) before
+                                            returning, so every caller — grid, list view, the
+                                            viewer's thumbnail strip (image_viewer.cpp builds
+                                            its album straight off list()), and slideshow —
+                                            gets one consistent order for free. New
+                                            Vault::gallery_sort_key (getter) + set_gallery_sort
+                                            (persisted via commit_index, NotFound if the path
+                                            isn't a gallery) round out the API.
              vault_search.*               ← VaultSearch: an advanced-search facade (friend) over
                                             a Vault — all_tags + run_search(ui::AdvancedQuery) +
                                             save_search/list_saved_searches/delete_saved_search.
@@ -318,6 +334,14 @@ src/
                                             modal's deferred-outcome pattern)
                                             before do_zip_import relaunches
                                             with the typed password.
+                                            Phase 37: Shift+S cycles the open gallery's
+                                            persisted sort_key (cycle_gallery_sort — Vault::
+                                            gallery_sort_key + set_gallery_sort, then refresh()
+                                            since reordering changes children_, unlike a
+                                            favorite-flag flip); the breadcrumb line shows
+                                            "Sort: <label>" once a non-Manual key is active,
+                                            mirroring the [U] keep-unlocked badge's stay-
+                                            invisible-at-the-default convention.
              image_viewer.*,              ← zoom/pan + thumb strip + fill-scroll + slideshow;
                                             hosts a fit-only VideoPlayback for video items (Phase 15).
                                             Single-image export (X) stays synchronous (one image is
@@ -487,6 +511,19 @@ src/
                                             "10"), other chars case-insensitively; natural_compare
                                             (3-way) + natural_less. Orders CBZ pages by reading
                                             order. Unit-tested.
+             gallery_sort.*,               ← pure, SDL/vault-free per-gallery sort presentation
+                                            (Phase 37, mirrors natural_sort.h/tag_overview_model.h):
+                                            sort_children(children, SortKey) — folders always
+                                            precede images/videos, then within each group Manual
+                                            is a no-op, NameAsc/NameDesc delegate to natural_less
+                                            (so image1/image2/.../image10 sorts numerically), Date*
+                                            compares created_ts, Size* compares orig_size; stable
+                                            throughout. next_sort_key cycles the fixed Shift+S
+                                            order (Manual→NameAsc→NameDesc→DateAsc→DateDesc→
+                                            SizeAsc→SizeDesc→Manual); sort_key_label gives the
+                                            footer string (empty for Manual, so the indicator
+                                            hides at the default). Used by both Vault::list (every
+                                            listing call site) and GalleryGrid's footer/HUD.
              meta_json.*,                 ← pure, SDL/vault-free archive `meta.json` parser
                                             (Phase 27, nlohmann/json): tolerant parse →
                                             ArchiveMeta{title_english, title_japanese,
