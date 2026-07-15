@@ -16,10 +16,17 @@
 
 namespace ui {
 
+ThumbKey thumb_key_for(const vault::IndexNode& node)
+{
+    if (node.is_video())
+        return {node.vmeta.poster_offset, node.vmeta.poster_length > 0};
+    return {node.meta.data_offset, node.meta.thumb_length > 0};
+}
+
 SDL_Texture* tile_thumb_texture(const ThumbContext& ctx, const vault::IndexNode& node)
 {
-    if (node.meta.thumb_length == 0) return nullptr;
-    const uint64_t key = node.meta.data_offset;
+    const auto [key, present] = thumb_key_for(node);
+    if (!present) return nullptr;
     if (SDL_Texture* t = ctx.cache.get(key)) return t;
 
     // A thumbnail that already failed to decode is not retried; an in-flight

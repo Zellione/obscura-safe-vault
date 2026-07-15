@@ -12,6 +12,7 @@
 #include "gfx/window.h"
 #include "ui/export.h"
 #include "ui/meta_format.h"
+#include "ui/tile_thumb.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
 #include "vault/vault.h"
@@ -188,8 +189,8 @@ void ImageViewer::scroll_by(float dy)
 
 SDL_Texture* ImageViewer::thumb_texture(const vault::IndexNode& node)
 {
-    if (node.meta.thumb_length == 0) return nullptr;
-    const uint64_t key = node.meta.data_offset;
+    const auto [key, present] = ui::thumb_key_for(node);
+    if (!present) return nullptr;
     if (SDL_Texture* t = cache_.get(key)) return t;
 
     // A thumbnail that already failed to decode is not retried; an in-flight

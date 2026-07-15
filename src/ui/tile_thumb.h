@@ -32,6 +32,17 @@ struct ThumbContext {
     std::unordered_set<uint64_t>& failed;
 };
 
+// A stable per-node cache key for its thumbnail texture, and whether one
+// exists at all. A video's thumbnail is its poster frame (vmeta.poster_*) —
+// the image thumbnail fields (meta.thumb_*) are always zero on a video node,
+// so gating on those alone always reports "no thumbnail" for every video.
+struct ThumbKey {
+    uint64_t key;
+    bool     present;
+};
+
+[[nodiscard]] ThumbKey thumb_key_for(const vault::IndexNode& node);
+
 // The GPU texture for a media node's own thumbnail, or nullptr while it is
 // pending/failed (in which case a decode is submitted as a side effect).
 [[nodiscard]] SDL_Texture* tile_thumb_texture(const ThumbContext& ctx,
