@@ -44,6 +44,11 @@ public:
     // Current playback position in seconds (Phase 16, for testing/debug).
     [[nodiscard]] double position() const noexcept;
 
+    // Seeks to `seconds` (clamped to [0, duration]) without changing the
+    // playing/paused state — used to restore a Phase 39 Part 2 resume
+    // bookmark right after construction, when playback is still paused.
+    void seek(double seconds);
+
     // True if the audio output device actually opened (audio subsystem up +
     // device acquired). False on a non-FFmpeg build, a clip with no audio, or a
     // device-open failure. (Phase 16, for testing/debug.)

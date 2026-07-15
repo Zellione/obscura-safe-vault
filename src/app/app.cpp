@@ -118,6 +118,7 @@ void App::promote_pending()
     if (!pending_) return;
     if (active_) active_->lock();                 // lock-on-switch: wipe the old key
     adv_session_   = {};                          // new vault session -> fresh advanced search
+    session_.reset();                             // new vault session -> fresh gallery/viewer memory
     keep_unlocked_ = false;                       // new session always starts with auto-lock on
     active_        = std::move(pending_);
     active_path_   = std::move(pending_path_);
@@ -132,18 +133,24 @@ void App::to_gallery(const std::string& path, int selected)
         window_, font_, *active_, *cache_,
         ui::GalleryGrid::GridDialogs{dialog_, folder_dialog_},
         ui::GalleryGrid::GridVaultCtx{registry_, active_path_},
-        ui::GridLocation{path, selected});
+        ui::GridLocation{path, selected, session_.view});
     screen_->on_enter();
+}
+
+void App::enter_viewer(std::unique_ptr<ui::ImageViewer> viewer)
+{
+    viewer->on_enter();
+    ui::apply_video_resume(*viewer, session_);   // resume a matching video, paused
+    state_  = State::Viewing;
+    screen_ = std::move(viewer);
 }
 
 void App::to_viewer(const std::string& gallery_path, int index)
 {
-    state_  = State::Viewing;
-    screen_ = std::make_unique<ui::ImageViewer>(
+    enter_viewer(std::make_unique<ui::ImageViewer>(
         window_, font_, *active_, *cache_,
-        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_},
-        ui::ImageViewer::Album::gallery(gallery_path), index);
-    screen_->on_enter();
+        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_, session_.strip_side},
+        ui::ImageViewer::Album::gallery(gallery_path), index));
 }
 
 void App::to_favorite_images()
@@ -178,12 +185,10 @@ void App::to_favorite_viewer(int index)
         album.paths.push_back(std::move(h.path));
     }
 
-    state_  = State::Viewing;
-    screen_ = std::make_unique<ui::ImageViewer>(
+    enter_viewer(std::make_unique<ui::ImageViewer>(
         window_, font_, *active_, *cache_,
-        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_},
-        std::move(album), index);
-    screen_->on_enter();
+        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_, session_.strip_side},
+        std::move(album), index));
 }
 
 void App::to_advanced_search()
@@ -233,12 +238,10 @@ void App::to_tag_viewer(const std::string& tag, int index)
         album.paths.push_back(std::move(h.path));
     }
 
-    state_  = State::Viewing;
-    screen_ = std::make_unique<ui::ImageViewer>(
+    enter_viewer(std::make_unique<ui::ImageViewer>(
         window_, font_, *active_, *cache_,
-        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_},
-        std::move(album), index);
-    screen_->on_enter();
+        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_, session_.strip_side},
+        std::move(album), index));
 }
 
 namespace {
@@ -338,31 +341,50 @@ bool App::pump_events(bool animating)
     return should_redraw;
 }
 
+void App::capture_session_state()
+{
+    // Snapshot the outgoing screen's view/strip-side/video-position into
+    // session_ before it is destroyed (Phase 39 Part 2) — must run before
+    // on_exit(), which tears down ImageViewer's live video_.
+    if (const auto* grid = dynamic_cast<const ui::GalleryGrid*>(screen_.get())) {
+        session_.view = ui::current_gallery_view(*grid);
+    } else if (const auto* viewer = dynamic_cast<const ui::ImageViewer*>(screen_.get())) {
+        session_.strip_side = ui::current_strip_side(*viewer);
+        ui::capture_video_resume(*viewer, session_);
+    }
+}
+
 bool App::apply_nav()
 {
     if (!screen_) return false;
     using enum ui::NavKind;
-    switch (const ui::Nav nav = screen_->take_nav(); nav.kind) {
+    const ui::Nav nav = screen_->take_nav();
+    // Every transition below except ToggleKeepUnlocked/Quit/None destroys the
+    // current screen.
+    if (nav.kind != None && nav.kind != ToggleKeepUnlocked && nav.kind != Quit) {
+        capture_session_state();
+        screen_->on_exit();
+    }
+    switch (nav.kind) {
         case ToGallery:
-            screen_->on_exit();
             if (state_ == State::Locked) promote_pending();   // unlock-screen success
             if (active_) to_gallery(nav.path, nav.index);
             else         to_manager();                        // defensive: nothing unlocked
             return true;
-        case ToViewer:            screen_->on_exit(); to_viewer(nav.path, nav.index);  return true;
-        case ToFavoriteImages:    screen_->on_exit(); to_favorite_images();            return true;
-        case ToFavoriteGalleries: screen_->on_exit(); to_favorite_galleries();         return true;
-        case ToFavoriteViewer:    screen_->on_exit(); to_favorite_viewer(nav.index);   return true;
-        case ToAdvancedSearch:    screen_->on_exit(); to_advanced_search();            return true;
-        case ToTagOverview:       screen_->on_exit(); to_tag_overview();               return true;
-        case ToTagGalleries:      screen_->on_exit(); to_tag_galleries(nav.path);      return true;
-        case ToTagImages:         screen_->on_exit(); to_tag_images(nav.path);          return true;
-        case ToTagViewer:         screen_->on_exit(); to_tag_viewer(nav.path, nav.index); return true;
-        case ToUnlock:            screen_->on_exit(); to_unlock(nav.path);             return true;
-        case ToVaultManager:      screen_->on_exit(); pending_.reset(); to_manager();  return true;
+        case ToViewer:            to_viewer(nav.path, nav.index);      return true;
+        case ToFavoriteImages:    to_favorite_images();                return true;
+        case ToFavoriteGalleries: to_favorite_galleries();             return true;
+        case ToFavoriteViewer:    to_favorite_viewer(nav.index);       return true;
+        case ToAdvancedSearch:    to_advanced_search();                return true;
+        case ToTagOverview:       to_tag_overview();                   return true;
+        case ToTagGalleries:      to_tag_galleries(nav.path);          return true;
+        case ToTagImages:         to_tag_images(nav.path);             return true;
+        case ToTagViewer:         to_tag_viewer(nav.path, nav.index);  return true;
+        case ToUnlock:            to_unlock(nav.path);                 return true;
+        case ToVaultManager:      pending_.reset(); to_manager();      return true;
         case LockActive:
-            screen_->on_exit();
             keep_unlocked_ = false;
+            session_.reset();                     // Phase 39 Part 2: fresh session on lock
             if (active_) { active_->lock(); active_.reset(); active_path_.clear(); }
             to_manager();
             return true;
@@ -388,6 +410,7 @@ bool App::maybe_auto_lock(double dt)
         !should_auto_lock(active_ != nullptr, blocks, keep_unlocked_, idle_, dt))
         return false;
     if (screen_) screen_->on_exit();
+    session_.reset();                                  // Phase 39 Part 2: fresh session on idle lock
     active_->lock();                                  // wipe the master key
     active_.reset();
     active_path_.clear();

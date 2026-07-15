@@ -49,6 +49,25 @@ src/
                                                overlay, not per-screen, so it stays visible
                                                across navigation without threading the flag
                                                through every screen's constructor.
+                                               Phase 39 Part 2: App owns
+                                               `ui::GallerySessionState session_` (mirrors
+                                               adv_session_): last-used GalleryGrid List/Grid
+                                               view + ImageViewer strip side + a single "last
+                                               video watched" resume bookmark, carried across
+                                               App's screen reconstruction on every nav
+                                               transition. capture_session_state()
+                                               (dynamic_cast onto whichever concrete Screen is
+                                               active) snapshots it right before on_exit();
+                                               to_gallery/to_viewer/to_favorite_viewer/
+                                               to_tag_viewer feed session_.view/strip_side back
+                                               in as the new screen's initial constructor arg.
+                                               enter_viewer() is the shared tail of every
+                                               ImageViewer-construction site: on_enter() then
+                                               ui::apply_video_resume() to seek a reopened
+                                               matching video to its bookmark (paused). Reset
+                                               (session_.reset()) at LockActive, idle
+                                               auto-lock, and promote_pending, exactly like
+                                               adv_session_.
   crypto/      aead.*, kdf.*, random.*,        — Monocypher wrappers
                secure_mem.h, crypto.h
   vault/       vault.*, header.*, index.*,     — .osv container format
@@ -242,7 +261,12 @@ src/
                                                  width reflow, centred/elided labels;
                                                  Shift+S cycles a gallery's persisted
                                                  sort_key (Phase 37), breadcrumb shows
-                                                 "Sort: <label>" once non-Manual
+                                                 "Sort: <label>" once non-Manual. Phase 39
+                                                 Part 2: constructor gains an initial_view
+                                                 param (default Grid); free friend
+                                                 current_gallery_view(const GalleryGrid&)
+                                                 (S1448 method-count reasons, mirrors
+                                                 vault_busy) lets App read view_ on exit.
                image_viewer.*, widgets.*       — viewer has Fit + FillScroll + Slideshow
                                                  modes, bottom/left strip toggle (keys
                                                  F/T, P starts slideshow); widgets has
@@ -265,6 +289,17 @@ src/
                                                  global lives in media/volume_setting.*, not AV-gated).
                                                  GalleryGrid routes video imports to add_video +
                                                  draws a play badge (draw_tile_thumb) in grid & list.
+                                                 Phase 39 Part 2: constructor gains an
+                                                 initial_strip_side param (default Bottom); three
+                                                 free friends (S1448 reasons) — current_strip_side,
+                                                 capture_video_resume (snapshot outgoing viewer's
+                                                 video path+position into a GallerySessionState, or
+                                                 clear the bookmark when the current item isn't a
+                                                 live video), apply_video_resume (seek a freshly
+                                                 (re)opened matching video to a remembered position,
+                                                 called right after on_enter() builds video_) — let
+                                                 App carry strip-side + a video resume bookmark
+                                                 across the grid<->viewer round trip.
                playback_model.*                — pure video transport maths: clock/clamp/
                                                  seek-bar map/mm:ss/frame-due (Phase 15,
                                                  pure/tested)
@@ -273,7 +308,11 @@ src/
                                                  + seek bar (both tracks); mute/volume via
                                                  SDL_SetAudioStreamGain; A/V sync via av_sync::decide;
                                                  pause pauses both; pImpl gated on OSV_VENDORED_AV
-                                                 (non-AV build -> poster) (Phase 15–16)
+                                                 (non-AV build -> poster) (Phase 15–16). Phase 39
+                                                 Part 2: seek(seconds) — clamped seek, does NOT
+                                                 touch play/pause — restores a session resume
+                                                 bookmark right after construction (playback
+                                                 already opens paused by default).
                full_tex_cache.*                — shared decode→GPU full-res texture cache
                                                  (decrypt into mlock'd SecureBytes, wipe
                                                  after upload); used by viewer + slideshow
@@ -577,6 +616,13 @@ src/
                                                  supplies per-screen grouped content; App owns HelpPopupState,
                                                  intercepts F1 globally, renders overlay on top (mirroring
                                                  Phase 33 keep-unlocked corner-badge). Esc/Q close.
+               gallery_view.h                  — GalleryView{Grid,List} (Phase 39 Part 2 extract
+                                                 from GalleryGrid's private nested enum, now
+                                                 shared so App/GallerySessionState can name it).
+               gallery_session_state.h         — GallerySessionState{view,strip_side,
+                                                 last_media_path,video_resume_seconds} + reset()
+                                                 (Phase 39 Part 2, modeled on AdvancedSearchState,
+                                                 see mem note below); pure, unit-tested, App-owned.
                delete_summary.*                — pure recursive tally of a gallery subtree
                                                  (images/videos/sub-galleries) for the Del
                                                  delete-confirm popup (Phase 17 follow-up).

@@ -462,6 +462,7 @@ struct VideoPlayback::Impl {
     [[nodiscard]] bool animating() const { return false; }
     [[nodiscard]] bool has_audio() const { return false; }
     [[nodiscard]] double position() const { return 0.0; }
+    void do_seek(double) {}
     [[nodiscard]] bool audio_active() const { return false; }
     [[nodiscard]] uint64_t audio_samples_fed() const { return 0; }
     [[nodiscard]] float audio_gain() const { return 0.0f; }
@@ -485,6 +486,7 @@ bool VideoPlayback::valid() const noexcept { return impl_->valid(); }
 bool VideoPlayback::animating() const noexcept { return impl_->animating(); }
 bool VideoPlayback::has_audio() const noexcept { return impl_->has_audio(); }
 double VideoPlayback::position() const noexcept { return impl_->position(); }
+void VideoPlayback::seek(double seconds) { impl_->do_seek(seconds); }
 bool VideoPlayback::audio_active() const noexcept { return impl_->audio_active(); }
 uint64_t VideoPlayback::audio_samples_fed() const noexcept { return impl_->audio_samples_fed(); }
 float VideoPlayback::audio_gain() const noexcept { return impl_->audio_gain(); }

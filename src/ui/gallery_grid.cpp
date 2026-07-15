@@ -160,7 +160,7 @@ GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& v
       quick_switch_(vault_ctx.registry, vault_ctx.active_vault_path),
       transfer_(vault, std::move(vault_ctx.active_vault_path), vault_ctx.registry,
                 dialogs.file, win),
-      initial_(std::move(at))
+      initial_(std::move(at)), view_(initial_.view)
 {
 }
 
@@ -907,6 +907,8 @@ bool vault_busy(const GalleryGrid& g)
 {
     return g.naming_.import_job.active() || g.naming_.file_op.active() || g.transfer_.job_active();
 }
+
+GalleryView current_gallery_view(const GalleryGrid& g) { return g.view_; }
 
 void poll_file_job(GalleryGrid& g)
 {

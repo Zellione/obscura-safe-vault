@@ -320,4 +320,47 @@ TEST(video_playback_opens_plays_seeks_and_writes_no_disk)
     SDL_DestroySurface(surf);
 }
 
+TEST(video_playback_seek_moves_position_and_stays_paused)
+{
+    // Phase 39 Part 2: seek() restores a session resume bookmark right after
+    // construction, without starting playback (the resumed clip stays paused
+    // until the user presses play).
+    auto vbytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("seek_api");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        ui::VideoPlayback vp(v, *node);
+        REQUIRE(vp.valid());
+        CHECK_FALSE(vp.animating());   // opens paused
+
+        vp.render(r, font, {0, 0, 320, 240});   // decode + upload frame 0
+        CHECK_EQ(vp.position(), 0.0);
+
+        vp.seek(0.3);
+        vp.render(r, font, {0, 0, 320, 240});
+        CHECK(vp.position() >= 0.2);   // moved close to the requested target
+        CHECK_FALSE(vp.animating());   // still paused after the seek
+    }
+
+    SDL_DestroyRenderer(sr);
+    SDL_DestroySurface(surf);
+}
+
 #endif  // OSV_VENDORED_AV
