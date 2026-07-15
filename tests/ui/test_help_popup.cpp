@@ -2,6 +2,8 @@
 
 #include <SDL3/SDL.h>
 
+#include "gfx/renderer.h"
+#include "gfx/text.h"
 #include "ui/help_popup.h"
 
 using ui::HelpEntry;
@@ -101,4 +103,75 @@ TEST(help_popup_wheel_scrolls_while_open_only)
     const float scrolled = s.scroll;
     ui::handle_help_wheel(s, 1.0f);    // wheel up scrolls back
     CHECK(s.scroll < scrolled);
+}
+
+namespace {
+constexpr const char* kFontPath = OSV_DEFAULT_FONT;
+
+// Headless software renderer (mirrors test_progress_modal.cpp).
+struct SoftRenderer {
+    SDL_Surface*  surf = nullptr;
+    SDL_Renderer* r    = nullptr;
+    SoftRenderer()
+    {
+        surf = SDL_CreateSurface(640, 480, SDL_PIXELFORMAT_RGBA32);
+        if (surf) r = SDL_CreateSoftwareRenderer(surf);
+    }
+    ~SoftRenderer()
+    {
+        if (r)    SDL_DestroyRenderer(r);
+        if (surf) SDL_DestroySurface(surf);
+    }
+};
+} // namespace
+
+TEST(help_popup_draws_without_crashing_when_open)
+{
+    SoftRenderer sr;
+    REQUIRE(sr.r != nullptr);
+    gfx::Renderer r(sr.r);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(kFontPath, 18.0f));
+
+    const std::vector<HelpGroup> groups{
+        {"Navigate", {{"Enter", "Open"}, {"Esc", "Back"}}},
+        {"Organize", {{"G", "Edit tags"}, {"B", "Favorite"}, {"Del", "Delete"}}},
+    };
+    HelpPopupState s;
+    ui::open_help(s);
+    ui::draw_help_popup(r, font, 640, 480, groups, s);
+    SDL_RenderPresent(sr.r);
+    CHECK(true);   // reached here without a crash
+}
+
+TEST(help_popup_draws_nothing_when_closed)
+{
+    SoftRenderer sr;
+    REQUIRE(sr.r != nullptr);
+    gfx::Renderer r(sr.r);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(kFontPath, 18.0f));
+
+    HelpPopupState s;   // closed
+    ui::draw_help_popup(r, font, 640, 480, {{"X", {{"a", "b"}}}}, s);
+    CHECK_EQ(s.scroll, 0.0f);   // untouched — early-return path
+}
+
+TEST(help_popup_draws_long_content_without_crashing)
+{
+    SoftRenderer sr;
+    REQUIRE(sr.r != nullptr);
+    gfx::Renderer r(sr.r);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(kFontPath, 18.0f));
+
+    std::vector<HelpEntry> many;
+    for (int i = 0; i < 40; ++i) many.push_back({"K" + std::to_string(i), "desc"});
+    const std::vector<HelpGroup> groups{{"Long group", many}};
+    HelpPopupState s;
+    ui::open_help(s);
+    s.scroll = 10000.0f;   // way past the end — draw_help_popup must clamp it
+    ui::draw_help_popup(r, font, 640, 480, groups, s);
+    SDL_RenderPresent(sr.r);
+    CHECK(s.scroll < 10000.0f);   // clamped down to the real content height
 }

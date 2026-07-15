@@ -2,6 +2,10 @@
 
 #include <algorithm>
 
+#include "gfx/renderer.h"
+#include "gfx/text.h"
+#include "gfx/theme.h"
+
 namespace ui {
 
 void open_help(HelpPopupState& s)   { s.open = true; }
@@ -49,6 +53,49 @@ void handle_help_wheel(HelpPopupState& s, float wheel_y)
 {
     if (!s.open) return;
     s.scroll = std::max(0.0f, s.scroll - wheel_y * HELP_LINE_STEP);
+}
+
+void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
+                     const std::vector<HelpGroup>& groups, HelpPopupState& s)
+{
+    if (!s.open) return;
+    using namespace gfx::theme;
+
+    // Veil the whole window, matching consent_dialog's modal style.
+    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
+
+    constexpr float LINE_H = 24.0f;
+    constexpr float PAD    = 24.0f;
+    const float pw = std::min(680.0f, W - 80.0f);
+    const float ph = std::min(H - 80.0f, 520.0f);
+    const float px = (W - pw) / 2.0f;
+    const float py = (H - ph) / 2.0f;
+    r.draw_round_rect({px, py, pw, ph}, RADIUS, SURFACE);
+    r.draw_round_rect({px, py, pw, ph}, RADIUS, BORDER, /*filled*/ false);
+
+    r.draw_text(font, px + PAD, py + PAD, "Keyboard Shortcuts", TEXT);
+    r.draw_text(font, px + PAD, py + ph - PAD - LINE_H,
+               "[Esc/Q] Close   [Up/Down] Scroll", TEXT_FAINT);
+
+    const float content_top    = py + PAD + LINE_H + 8.0f;
+    const float content_bottom = py + ph - PAD - LINE_H - 8.0f;
+    const float content_h      = static_cast<float>(help_line_count(groups)) * LINE_H;
+    s.scroll = clamp_help_scroll(s.scroll, content_h, content_bottom - content_top);
+
+    float y = content_top - s.scroll;
+    for (size_t gi = 0; gi < groups.size(); ++gi) {
+        if (gi > 0) y += LINE_H;
+        if (y >= content_top - LINE_H && y <= content_bottom)
+            r.draw_text(font, px + PAD, y, groups[gi].title, ACCENT);
+        y += LINE_H;
+        for (const auto& e : groups[gi].entries) {
+            if (y >= content_top - LINE_H && y <= content_bottom) {
+                const std::string line = "  [" + e.key + "]  " + e.description;
+                r.draw_text(font, px + PAD, y, line, TEXT_DIM);
+            }
+            y += LINE_H;
+        }
+    }
 }
 
 } // namespace ui
