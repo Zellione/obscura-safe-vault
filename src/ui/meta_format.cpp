@@ -70,6 +70,8 @@ std::string_view video_codec_name(vault::VideoCodec c) noexcept
         case ProRes: return "ProRes";
         case DNxHD:  return "DNxHD";
         case MJPEG:  return "MJPEG";
+        case VP8:    return "VP8";
+        case VP9:    return "VP9";
         case Unknown: break;
     }
     return "Video";

@@ -482,4 +482,82 @@ TEST(video_decoder_decodes_mov_pro_codecs)
     }
 }
 
+TEST(video_decoder_decodes_webm_vp8_vp9)
+{
+    // Phase 38: VP8 / VP9 .webm streams decode end-to-end through the
+    // encrypted-chunk path, same shape as the Phase 28 .mov pro-codec test.
+    struct Case { const char* file; vault::VideoCodec codec; int width; };
+    const Case cases[] = {
+        {OSV_MEDIA_FIXTURE_DIR "/tiny_vp8.webm", vault::VideoCodec::VP8, 160},
+        {OSV_MEDIA_FIXTURE_DIR "/tiny_vp9.webm", vault::VideoCodec::VP9, 256},
+    };
+    for (const auto& c : cases) {
+        auto v_bytes = read_file(c.file);
+        REQUIRE(!v_bytes.empty());
+        TempVault tv("decoder_webm");
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+        REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+        REQUIRE(v.add_video("c", v_bytes, "clip.webm", 4096) == vault::VaultResult::Ok);
+        auto kids = v.list("c");
+        REQUIRE(kids.size() == 1);
+
+        media::ChunkAvio avio(media::VideoSource::open(v, *kids[0]));
+        REQUIRE(avio.valid());
+        media::VideoDecoder dec;
+        REQUIRE(dec.open(avio.ctx()));
+        CHECK(dec.codec()  == c.codec);
+        CHECK(dec.width()  == c.width);
+        CHECK(dec.height() == 120);
+
+        int n = 0;
+        while (auto f = dec.next_frame()) {
+            CHECK(f->pix_fmt == media::FramePixelFormat::I420);
+            ++n;
+        }
+        CHECK(n == 10);
+    }
+}
+
+TEST(video_decoder_webm_vp8_opus_and_vp9_vorbis_audio)
+{
+    // Phase 38: confirm the already-working Opus/Vorbis audio path (Phase 16)
+    // still A/V-syncs correctly once VP8/VP9 video decode is wired up.
+    struct Case { const char* file; vault::VideoCodec codec; };
+    const Case cases[] = {
+        {OSV_MEDIA_FIXTURE_DIR "/tiny_vp8_opus.webm",   vault::VideoCodec::VP8},
+        {OSV_MEDIA_FIXTURE_DIR "/tiny_vp9_vorbis.webm", vault::VideoCodec::VP9},
+    };
+    for (const auto& c : cases) {
+        auto v_bytes = read_file(c.file);
+        REQUIRE(!v_bytes.empty());
+        TempVault tv("decoder_webm_audio");
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+        REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+        REQUIRE(v.add_video("c", v_bytes, "clip.webm", 4096) == vault::VaultResult::Ok);
+        auto kids = v.list("c");
+        REQUIRE(kids.size() == 1);
+
+        media::ChunkAvio avio(media::VideoSource::open(v, *kids[0]));
+        REQUIRE(avio.valid());
+        media::VideoDecoder dec;
+        REQUIRE(dec.open(avio.ctx()));
+        CHECK(dec.codec() == c.codec);
+        REQUIRE(dec.has_audio());
+
+        int vframes = 0;
+        size_t asamples = 0;
+        for (int i = 0; i < 5; ++i)
+            if (dec.next_frame())
+                ++vframes;
+        for (int i = 0; i < 20; ++i)
+            if (auto a = dec.next_audio_frame())
+                asamples += a->samples.size();
+
+        CHECK(vframes > 0);
+        CHECK(asamples > 0);
+    }
+}
+
 #endif // OSV_VENDORED_AV
