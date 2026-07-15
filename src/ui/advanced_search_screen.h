@@ -37,6 +37,7 @@ public:
     void handle_event(const SDL_Event& e) override;
     void update(double dt) override;   // upload finished off-thread thumb decodes
     void render(gfx::Renderer& r) override;
+    [[nodiscard]] std::vector<ui::HelpGroup> help_groups() const override;
 
 private:
     // Focusable fields, cycled with Tab / Shift+Tab.

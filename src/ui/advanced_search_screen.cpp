@@ -631,10 +631,7 @@ void AdvancedSearchScreen::render(gfx::Renderer& r)
     const auto H = static_cast<float>(win_.height());
 
     r.draw_text(font_, PAD, 36, "Advanced Search", TEXT);
-    r.draw_text(font_, PAD, 74,
-                "[Tab] Field  [↑↓/←→] Navigate  [Enter] Add/Open  [+/-] Weight  [Del] Remove  "
-                "[Bksp] Edit  [Ctrl+S] Save  [Ctrl+L] List/Grid  [Ctrl+R] Clear  [Esc] Back",
-                TEXT_FAINT);
+    r.draw_text(font_, PAD, 74, "[F1] Help", TEXT_FAINT);
 
     const float colW = (W - 2 * PAD) / 3.0f - 16;
     render_builder(r, PAD, TOP, colW);
@@ -761,6 +758,22 @@ void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
         y += rh;
     }
     if (result_view_.get_results().empty()) r.draw_text(font_, x, y, "(no matches)", TEXT_FAINT);
+}
+
+std::vector<ui::HelpGroup> AdvancedSearchScreen::help_groups() const
+{
+    return {
+        {"Build query", {
+            {"Tab", "Next field"}, {"Up/Down/Left/Right", "Navigate"},
+            {"Enter", "Add term / open result"}, {"+ / -", "Adjust weight"},
+            {"Del", "Remove term"}, {"Backspace", "Edit term"},
+        }},
+        {"Results & saved searches", {
+            {"Ctrl+S", "Save search"}, {"Ctrl+L", "Toggle list/grid view"},
+            {"Ctrl+R", "Clear query"},
+        }},
+        {"Navigate", {{"Esc", "Back"}}},
+    };
 }
 
 } // namespace ui
