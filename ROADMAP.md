@@ -1771,44 +1771,105 @@ MP4/MOV/MKV(H.264/HEVC/ProRes/DNxHD/MJPEG) playback is unchanged.
 
 ---
 
-## Phase 39 — UI Discoverability: F1 Help popup + minor fixes 🚧
+## Phase 39 — Discoverable shortcuts & session-scoped gallery memory
 
-**Goal:** Replace the pattern of cramming every keyboard shortcut into an
-inline footer legend with a unified, scrollable `F1` help popup. Each screen
-supplies grouped shortcuts via `Screen::help_groups()`, reducing inline-text
-clutter and improving keyboard discoverability. Also fix a video-thumbnail bug
-found during review and wire the `U` keep-unlocked shortcut into the image
-viewer.
+**Goal:** Fix four related UX gaps reported from live use: (1) every screen's
+inline keyboard-shortcut legend is a single text line that visibly runs off
+the window edge at normal window sizes, hiding shortcuts past that point;
+(2) fullscreen (`F11`/double-click) and keep-unlocked (`U`) already work but
+are effectively undiscoverable, and `U` isn't reachable from the image
+viewer; (3) `App` constructs a brand-new screen instance on every navigation,
+so the gallery grid's List/Grid choice, the viewer's thumbnail-strip side,
+and any video playback position are lost on a routine "open an image, go
+back" round trip; (4) video tiles show a blank box instead of their stored
+poster frame in both the gallery grid and the image viewer's thumbnail strip,
+because the poster-existence check reads the wrong index field. See
+`docs/superpowers/specs/2026-07-15-phase39-ui-discoverability-session-memory-design.md`
+for the full design.
+
+**Part 1 — `F1` help popup, shortcut discoverability, video poster
+thumbnails.** Replaces every screen's overflow-prone inline legend with an
+`F1`-triggered scrollable, grouped popup (`Esc`/`Q` to close); documents the
+already-working fullscreen and keep-unlocked shortcuts and wires keep-unlocked
+into the image viewer too; fixes the video-poster thumbnail gate.
 
 ### Tasks (Part 1)
-- [x] **Fix video poster thumbnails** — add `thumb_key_for` helper to correctly
-  index the first video node's poster chunk (Phase 39 Task 1)
-- [x] **Help popup data types + pure logic** — `HelpGroup`/`HelpEntry`, pure
-  open/close/scroll helpers, no SDL/vault deps (Phase 39 Task 2)
-- [x] **Help popup rendering** — `draw_help_popup` with scrolling, close hints,
-  veiled background (Phase 39 Task 3)
-- [x] **Screen::help_groups() virtual + App wiring** — base virtual + F1 input
-  routing + global render overlay (Phase 39 Task 4)
-- [x] **GalleryGrid help_groups()** — breadcrumb-aware shortcuts; replace
-  inline legend with `[F1] Help` hint (Phase 39 Task 5)
-- [x] **ImageViewer help_groups() + U key** — image/video-aware groups;
-  wire `U` keep-unlocked shortcut (Phase 39 Task 6)
-- [x] **FavoritesScreen + TagGalleries/TagImages** — base + per-subclass
-  overrides with their own groups (Phase 39 Task 7)
-- [x] **TagOverviewScreen help_groups()** — navigate/sort shortcuts
-  (Phase 39 Task 9)
-- [x] **AdvancedSearchScreen help_groups()** — query/result/saved-search
-  shortcuts (Phase 39 Task 10)
-- [x] **VaultManager + UnlockScreen** — multi-vault and unlock screens with
-  full help coverage (Phase 39 Task 11)
+- [x] `src/ui/tile_thumb.h`/`.cpp` gain `ui::thumb_key_for(node)` (pure): a
+  video's thumbnail lives in `vmeta.poster_offset`/`poster_length`, not
+  `meta.thumb_length` (always 0 for a video node) — the bug this fixes.
+  `tile_thumb_texture` (grid tiles) and `ImageViewer::thumb_texture` (strip)
+  both switch to it.
+- [x] `src/ui/help_popup.{h,cpp}` (new): `HelpEntry`/`HelpGroup` data types,
+  `HelpPopupState`, pure scroll/open/close/key logic, and
+  `draw_help_popup` — a centred, scrollable, veiled panel matching the
+  existing `consent_dialog`/`progress_modal` visual style.
+- [x] `Screen` (`src/ui/screen.h`) gains a `help_groups()` virtual (default
+  empty). `App` owns one `HelpPopupState`, intercepts `F1` globally, and
+  renders/routes input to the popup — mirrors the Phase 33 keep-unlocked
+  corner-badge overlay pattern.
+- [x] Every concrete screen (`GalleryGrid`, `ImageViewer`, `FavoritesImages`,
+  `FavoritesGalleries`, `TagGalleries`, `TagImages`, `TagOverviewScreen`,
+  `AdvancedSearchScreen`, `VaultManager`, `UnlockScreen`) overrides
+  `help_groups()` with its own grouped shortcut content; every inline legend
+  string is deleted and replaced with a fixed `[F1] Help` footer fragment.
+- [x] `ImageViewer::handle_key` gains an `SDLK_U` case
+  (`request(NavKind::ToggleKeepUnlocked)`), matching the grid.
+- [x] Update `CLAUDE.md` (module table: `help_popup.*`, `tile_thumb.h`'s
+  `thumb_key_for`; UI/UX spec section: `F1` help convention) + `mem:core`.
+- [x] `tests/` — pure tests for `thumb_key_for` (image vs. video gating,
+  including a regression case for the always-zero `meta.thumb_length` on a
+  video node) and for `help_popup`'s scroll/open/close logic; a headless
+  render smoke test for `draw_help_popup` (mirrors `test_progress_modal.cpp`).
+
+**Part 2 — Session-scoped gallery/viewer memory.** A `GallerySessionState`
+(modeled on the existing `AdvancedSearchState`) carries the last-used
+List/Grid view and thumbnail-strip side, plus a single "last video watched"
+resume bookmark (paused, not autoplaying), through `App`'s screen
+reconstruction on every grid↔viewer round trip; reset on lock/vault-switch
+like `AdvancedSearchState` already is. Does **not** duplicate gallery
+path/focus-index tracking, since `Nav.path`/`Nav.index` already carries that.
 
 ### Tasks (Part 2)
-- [ ] **Session-scoped memory system** — remember the last-used gallery's sort
-  preference + scroll position, last-used tag search, last advanced-search
-  result viewport across vault lock/reopen within a session (not persisted
-  across app restart)
+- [ ] `src/ui/gallery_session_state.h` (new, pure): `GallerySessionState`
+  struct + `reset()`; unit-tested.
+- [ ] `App` gains a `GallerySessionState session_` member, populated from the
+  outgoing screen's view/strip-side/video-position just before
+  `on_exit()`/destruction on every `ToGallery`/`ToViewer` transition, and fed
+  into the new screen's constructor instead of always defaulting.
+  `GalleryGrid`/`ImageViewer` constructors gain an initial
+  view/strip-side parameter.
+- [ ] `session_` resets at the same points `adv_session_` already does:
+  `LockActive`, idle auto-lock, vault switch (`promote_pending`).
+- [ ] Leaving the viewer on a video captures its playback position into
+  `session_`; reopening the same video seeks there and stays paused; a
+  different video (or an image) clears/ignores the bookmark.
+- [ ] Update `CLAUDE.md` (`App`'s new `GallerySessionState` member,
+  `src/ui/gallery_session_state.h` module entry) + `mem:core`.
+- [ ] `tests/` — pure `GallerySessionState::reset()` test; integration-level
+  coverage for the grid↔viewer round trip preserving view/strip-side, video
+  resume-then-pause on reopen, no resume on a different video, and a full
+  lock/unlock returning to defaults.
 
-**Status:** 🚧 Part 1 shipped; Part 2 (session-scoped memory) planned as a follow-up PR.
+**Out of scope (YAGNI):** a keybinding-customization system; wiring the new
+small self-contained overlays (`quick_switch`, `theme_picker`, `tag_editor`,
+`transfer_dialog`, `consent_dialog`, `search_overlay`) into the `F1` help
+system — they don't have the overflow problem this phase fixes; per-gallery
+view-mode/strip-side memory (one global "last used" value only); per-video
+resume bookmarks (a single "last video watched" bookmark only); any change to
+the vault format, index schema, or persisted data.
+
+### Acceptance criterion
+Pressing `F1` on any screen shows a scrollable, grouped shortcut popup that
+never runs off the window edge, closable with `Esc` or `Q`; `F11`/
+double-click fullscreen and `U` keep-unlocked (now also from the viewer) both
+appear in the relevant popups; video tiles in the grid and viewer strip show
+their stored poster frame instead of a blank box; going grid → viewer → back
+preserves the List/Grid view and thumbnail-strip side within the session, and
+leaving a video mid-playback and reopening it resumes paused at the same
+position.
+
+**Status:** 🚧 Part 1 shipped; Part 2 (session-scoped memory) planned as a
+separate follow-up PR.
 
 ---
 

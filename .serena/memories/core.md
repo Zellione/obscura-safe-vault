@@ -571,6 +571,12 @@ src/
                progress_modal.*                — draw_op_progress: shared veil + "N/M" bar + cancel-hint
                                                  modal reused by every screen hosting a background job
                                                  (import/export/delete/move) (Phase 25).
+               help_popup.*                    — the shared `F1` help popup (Phase 39): HelpGroup/HelpEntry
+                                                 data types + pure open/close/scroll logic + draw_help_popup
+                                                 rendering. Screen::help_groups() virtual (default empty)
+                                                 supplies per-screen grouped content; App owns HelpPopupState,
+                                                 intercepts F1 globally, renders overlay on top (mirroring
+                                                 Phase 33 keep-unlocked corner-badge). Esc/Q close.
                delete_summary.*                — pure recursive tally of a gallery subtree
                                                  (images/videos/sub-galleries) for the Del
                                                  delete-confirm popup (Phase 17 follow-up).
@@ -604,7 +610,9 @@ src/
                                                  GalleryGrid): ThumbContext{vault,cache,worker,failed}
                                                  + draw_tile_thumb / tile_thumb_texture / tile_cover_tex.
                                                  Gallery -> folder + cover montage; image -> aspect-fit
-                                                 thumb; video -> poster + play-badge. Decrypt ->
+                                                 thumb; video -> poster + play-badge. Phase 39:
+                                                 thumb_key_for helper (pure index lookup) fixes video
+                                                 posters never showing as thumbnails. Decrypt ->
                                                  off-thread decode -> GPU upload via shared cache; no
                                                  new disk path. Reused by GalleryGrid (delegates) +
                                                  advanced-search grid view.
@@ -648,7 +656,11 @@ src/
                                                  ToTagImages); go_back() returns to the tag overview.
                                                  No favorite badge (show_favorite_badge=false).
                input.*, nav_model.*, viewer_model.h
-               passphrase.*, screen.h
+               passphrase.*, screen.h               — Phase 39: Screen::help_groups() virtual (default
+                                                 empty) — per-screen grouped shortcuts for the F1 help
+                                                 popup. GalleryGrid, ImageViewer, FavoritesScreen,
+                                                 TagOverviewScreen, AdvancedSearchScreen, VaultManager,
+                                                 UnlockScreen all override it.
                secure_text_field.*, unlock_logic.*
   platform/    paths.*, file_dialog.*,         — config dirs, SDL file dialogs
                                                  (file_dialog has save_vault(), Phase 14).
