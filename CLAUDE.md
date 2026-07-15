@@ -172,10 +172,13 @@ src/
                                             returning, so every caller — grid, list view, the
                                             viewer's thumbnail strip (image_viewer.cpp builds
                                             its album straight off list()), and slideshow —
-                                            gets one consistent order for free. New
-                                            Vault::gallery_sort_key (getter) + set_gallery_sort
-                                            (persisted via commit_index, NotFound if the path
-                                            isn't a gallery) round out the API.
+                                            gets one consistent order for free. New free friends
+                                            vault::gallery_sort_key(v, path) (getter) +
+                                            vault::set_gallery_sort(v, path, key) (persisted via
+                                            commit_index, NotFound if the path isn't a gallery)
+                                            round out the API — kept off the Vault class itself
+                                            (mirrors read_thumb_span/vault_file_bytes) to stay
+                                            under the cpp:S1448 35-method cap.
              vault_search.*               ← VaultSearch: an advanced-search facade (friend) over
                                             a Vault — all_tags + run_search(ui::AdvancedQuery) +
                                             save_search/list_saved_searches/delete_saved_search.
@@ -335,9 +338,9 @@ src/
                                             before do_zip_import relaunches
                                             with the typed password.
                                             Phase 37: Shift+S cycles the open gallery's
-                                            persisted sort_key (cycle_gallery_sort — Vault::
-                                            gallery_sort_key + set_gallery_sort, then refresh()
-                                            since reordering changes children_, unlike a
+                                            persisted sort_key (cycle_gallery_sort — vault::
+                                            gallery_sort_key + vault::set_gallery_sort, then
+                                            refresh() since reordering changes children_, unlike a
                                             favorite-flag flip); the breadcrumb line shows
                                             "Sort: <label>" once a non-Manual key is active,
                                             mirroring the [U] keep-unlocked badge's stay-

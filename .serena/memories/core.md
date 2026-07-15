@@ -166,14 +166,18 @@ src/
                                                  Date* compares created_ts / Size* compares
                                                  orig_size (all stable); next_sort_key cycles the
                                                  fixed Shift+S order; sort_key_label gives the
-                                                 footer string (empty for Manual). Vault gains
-                                                 gallery_sort_key(path) (getter) and
-                                                 set_gallery_sort(path, SortKey) (persisted via
-                                                 commit_index); Vault::list applies the target
+                                                 footer string (empty for Manual). vault::
+                                                 gallery_sort_key(v,path) (getter) and
+                                                 vault::set_gallery_sort(v,path,SortKey) (free
+                                                 friends, persisted via commit_index); Vault::list
+                                                 applies the target
                                                  gallery's own sort_key before returning, so every
                                                  caller (grid, list view, viewer thumbnail strip,
                                                  slideshow) gets one consistent order for free —
-                                                 no call site re-implements sorting.
+                                                 no call site re-implements sorting. gallery_sort_key/
+                                                 set_gallery_sort are FREE FRIENDS (not members,
+                                                 like read_thumb_span/vault_file_bytes) to stay
+                                                 under the cpp:S1448 35-method cap.
   image/       decode.*, thumbnail.*,          — stb_image decode, thumb gen
                format_registry.*,              — magic-byte format detection
                decoder.*,                      — Decoder interface + DecoderRegistry

@@ -172,15 +172,10 @@ public:
     // missing or not a gallery.
     [[nodiscard]] std::vector<const IndexNode*> list(std::string_view gallery_path) const;
 
-    // The gallery's own stored sort_key (Manual if gallery_path doesn't resolve
-    // to a gallery). Phase 37.
-    [[nodiscard]] SortKey gallery_sort_key(std::string_view gallery_path) const;
-
-    // Set a gallery's sort_key and persist it via the crash-safe index swap;
-    // every subsequent list() of that gallery applies it. A no-op (no commit)
-    // if the key is unchanged. Locked if not unlocked; NotFound if
-    // gallery_path doesn't resolve to a gallery. Phase 37.
-    [[nodiscard]] VaultResult set_gallery_sort(std::string_view gallery_path, SortKey key);
+    // gallery_sort_key/set_gallery_sort (Phase 37) are free friends, not members,
+    // to keep Vault under the cpp:S1448 method cap.
+    friend SortKey gallery_sort_key(const Vault& v, std::string_view gallery_path);
+    friend VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey key);
 
     // Replace a node's tag list (gallery OR image). Tags are normalised: each trimmed
     // of surrounding whitespace, empties dropped, de-duplicated case-insensitively
@@ -275,5 +270,15 @@ private:
 // Get the vault file's current size in bytes. Returns 0 if locked or on I/O error.
 // Used by the UI to display waste/compaction information (Phase 26).
 [[nodiscard]] uint64_t vault_file_bytes(const Vault& v) noexcept;
+
+// The gallery's own stored sort_key (Manual if gallery_path doesn't resolve to a
+// gallery). Phase 37.
+[[nodiscard]] SortKey gallery_sort_key(const Vault& v, std::string_view gallery_path);
+
+// Set a gallery's sort_key and persist it via the crash-safe index swap; every
+// subsequent list() of that gallery applies it. A no-op (no commit) if the key
+// is unchanged. Locked if not unlocked; NotFound if gallery_path doesn't
+// resolve to a gallery. Phase 37.
+[[nodiscard]] VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey key);
 
 } // namespace vault

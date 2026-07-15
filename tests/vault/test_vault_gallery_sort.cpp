@@ -70,8 +70,8 @@ TEST(gallery_sort_defaults_to_manual_on_a_fresh_gallery)
     REQUIRE(Vault::create(tv.str(), bytes("pw"), {}, kSortKdf, v) == VaultResult::Ok);
     REQUIRE(v.create_gallery("trip") == VaultResult::Ok);
 
-    CHECK_TRUE(v.gallery_sort_key("") == SortKey::Manual);
-    CHECK_TRUE(v.gallery_sort_key("trip") == SortKey::Manual);
+    CHECK_TRUE(vault::gallery_sort_key(v, "") == SortKey::Manual);
+    CHECK_TRUE(vault::gallery_sort_key(v, "trip") == SortKey::Manual);
 }
 
 TEST(gallery_sort_set_persists_across_lock_reopen)
@@ -86,8 +86,8 @@ TEST(gallery_sort_set_persists_across_lock_reopen)
         REQUIRE(v.add_image("", img, "image10.jpg") == VaultResult::Ok);
         REQUIRE(v.add_image("", img, "image2.jpg") == VaultResult::Ok);
 
-        REQUIRE(v.set_gallery_sort("", SortKey::NameAsc) == VaultResult::Ok);
-        CHECK_TRUE(v.gallery_sort_key("") == SortKey::NameAsc);
+        REQUIRE(vault::set_gallery_sort(v, "", SortKey::NameAsc) == VaultResult::Ok);
+        CHECK_TRUE(vault::gallery_sort_key(v, "") == SortKey::NameAsc);
         v.lock();
     }
 
@@ -95,7 +95,7 @@ TEST(gallery_sort_set_persists_across_lock_reopen)
     REQUIRE(Vault::open(tv.str(), v2) == VaultResult::Ok);
     REQUIRE(v2.unlock(bytes("pw"), {}) == VaultResult::Ok);
 
-    CHECK_TRUE(v2.gallery_sort_key("") == SortKey::NameAsc);
+    CHECK_TRUE(vault::gallery_sort_key(v2, "") == SortKey::NameAsc);
     // Natural order, not lexicographic: image1 < image2 < image10.
     CHECK(names(v2.list("")) ==
           std::vector<std::string>({"image1.jpg", "image2.jpg", "image10.jpg"}));
@@ -114,11 +114,11 @@ TEST(gallery_sort_list_applies_the_stored_key_to_sub_galleries)
     REQUIRE(v.create_gallery("a_gallery") == VaultResult::Ok);
     REQUIRE(v.create_gallery("m_gallery") == VaultResult::Ok);
 
-    REQUIRE(v.set_gallery_sort("", SortKey::NameAsc) == VaultResult::Ok);
+    REQUIRE(vault::set_gallery_sort(v, "", SortKey::NameAsc) == VaultResult::Ok);
     CHECK(names(v.list("")) ==
           std::vector<std::string>({"a_gallery", "m_gallery", "z_gallery"}));
 
-    REQUIRE(v.set_gallery_sort("", SortKey::NameDesc) == VaultResult::Ok);
+    REQUIRE(vault::set_gallery_sort(v, "", SortKey::NameDesc) == VaultResult::Ok);
     CHECK(names(v.list("")) ==
           std::vector<std::string>({"z_gallery", "m_gallery", "a_gallery"}));
 }
@@ -137,7 +137,7 @@ TEST(gallery_sort_other_galleries_are_unaffected)
     REQUIRE(v.add_image("untouched", img, "b.jpg") == VaultResult::Ok);
     REQUIRE(v.add_image("untouched", img, "a.jpg") == VaultResult::Ok);
 
-    REQUIRE(v.set_gallery_sort("sorted", SortKey::NameAsc) == VaultResult::Ok);
+    REQUIRE(vault::set_gallery_sort(v, "sorted", SortKey::NameAsc) == VaultResult::Ok);
 
     CHECK(names(v.list("sorted")) == std::vector<std::string>({"a.jpg", "b.jpg"}));
     // "untouched" keeps raw insertion order (Manual, the default).
@@ -152,7 +152,7 @@ TEST(gallery_sort_set_unchanged_key_is_a_noop_ok)
     REQUIRE(Vault::create(tv.str(), bytes("pw"), {}, kSortKdf, v) == VaultResult::Ok);
     REQUIRE(v.create_gallery("g") == VaultResult::Ok);
 
-    CHECK_TRUE(v.set_gallery_sort("g", SortKey::Manual) == VaultResult::Ok);  // already Manual
+    CHECK_TRUE(vault::set_gallery_sort(v, "g", SortKey::Manual) == VaultResult::Ok);  // already Manual
 }
 
 TEST(gallery_sort_set_on_missing_path_returns_not_found)
@@ -161,8 +161,8 @@ TEST(gallery_sort_set_on_missing_path_returns_not_found)
 
     Vault v;
     REQUIRE(Vault::create(tv.str(), bytes("pw"), {}, kSortKdf, v) == VaultResult::Ok);
-    CHECK_EQ(v.set_gallery_sort("nope", SortKey::NameAsc), VaultResult::NotFound);
-    CHECK_TRUE(v.gallery_sort_key("nope") == SortKey::Manual);  // missing path -> Manual, not a crash
+    CHECK_EQ(vault::set_gallery_sort(v, "nope", SortKey::NameAsc), VaultResult::NotFound);
+    CHECK_TRUE(vault::gallery_sort_key(v, "nope") == SortKey::Manual);  // missing path -> Manual, not a crash
 }
 
 TEST(gallery_sort_set_on_locked_vault_fails)
@@ -178,7 +178,7 @@ TEST(gallery_sort_set_on_locked_vault_fails)
 
     Vault v2;
     REQUIRE(Vault::open(tv.str(), v2) == VaultResult::Ok);  // opens LOCKED
-    CHECK_EQ(v2.set_gallery_sort("g", SortKey::NameAsc), VaultResult::Locked);
+    CHECK_EQ(vault::set_gallery_sort(v2, "g", SortKey::NameAsc), VaultResult::Locked);
 }
 
 TEST(gallery_sort_size_key_reflects_stored_orig_size)
@@ -194,11 +194,11 @@ TEST(gallery_sort_size_key_reflects_stored_orig_size)
     REQUIRE(v.add_image("", pattern(1000, 2), "small.jpg") == VaultResult::Ok);
     REQUIRE(v.add_image("", pattern(2000, 3), "mid.jpg") == VaultResult::Ok);
 
-    REQUIRE(v.set_gallery_sort("", SortKey::SizeAsc) == VaultResult::Ok);
+    REQUIRE(vault::set_gallery_sort(v, "", SortKey::SizeAsc) == VaultResult::Ok);
     CHECK(names(v.list("")) ==
           std::vector<std::string>({"small.jpg", "mid.jpg", "big.jpg"}));
 
-    REQUIRE(v.set_gallery_sort("", SortKey::SizeDesc) == VaultResult::Ok);
+    REQUIRE(vault::set_gallery_sort(v, "", SortKey::SizeDesc) == VaultResult::Ok);
     CHECK(names(v.list("")) ==
           std::vector<std::string>({"big.jpg", "mid.jpg", "small.jpg"}));
 }

@@ -365,11 +365,11 @@ void GalleryGrid::toggle_favorite_current()
 void GalleryGrid::cycle_gallery_sort()
 {
     const std::string path = nav_.path();
-    const auto next = ui::next_sort_key(vault_.gallery_sort_key(path));
+    const auto next = ui::next_sort_key(vault::gallery_sort_key(vault_, path));
     // Reordering changes children_ (unlike a favorite-flag flip), so refresh
     // the listing on success; a failed persist (e.g. a race with lock) just
     // leaves the displayed order as-is.
-    if (vault_.set_gallery_sort(path, next) == vault::VaultResult::Ok) refresh();
+    if (vault::set_gallery_sort(vault_, path, next) == vault::VaultResult::Ok) refresh();
 }
 
 SDL_Texture* GalleryGrid::thumb_texture(const vault::IndexNode& node)
@@ -948,6 +948,18 @@ struct FooterStatus {
     const std::string& status;
 };
 
+// Build the breadcrumb line, appending the active sort indicator once it's
+// non-Manual (Phase 37) — extracted (like draw_footer_status) to keep
+// render()'s cognitive complexity under the cpp:S3776 limit.
+std::string breadcrumb_text(const NavModel& nav, vault::SortKey sort_key)
+{
+    std::string crumb = "/";
+    for (const auto& s : nav.segments()) { crumb += s; crumb += '/'; }
+    if (const auto label = ui::sort_key_label(sort_key); !label.empty())
+        crumb += "   Sort: " + label;
+    return crumb;
+}
+
 // Extract footer + waste/selection rendering to reduce render's cognitive complexity (S3776).
 void draw_footer_status(gfx::Renderer& r, gfx::FontAtlas& font, float x_offset, float bottom,
                         const FooterStatus& data)
@@ -1070,13 +1082,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     }
 
     using namespace gfx::theme;
-    std::string crumb = "/";
-    for (const auto& s : nav_.segments()) { crumb += s; crumb += '/'; }
-    // Sort indicator (Phase 37): only shown once the gallery has an active
-    // (non-Manual) sort key, mirroring the [U] keep-unlocked badge convention
-    // of staying invisible at the default.
-    if (const auto label = ui::sort_key_label(vault_.gallery_sort_key(nav_.path())); !label.empty())
-        crumb += "   Sort: " + label;
+    const std::string crumb = breadcrumb_text(nav_, vault::gallery_sort_key(vault_, nav_.path()));
     r.draw_text(font_, OX, 40, fit_name(crumb, W - 2 * OX), TEXT_DIM);
     r.draw_text(font_, OX, 90,
                 "[I] Import  [Z] ZIP/CBZ  [N] New  [Del] Delete  [/] Search  [?] Advanced  "

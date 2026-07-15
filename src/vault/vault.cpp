@@ -859,24 +859,24 @@ std::vector<const IndexNode*> Vault::list(std::string_view gallery_path) const
     return ui::sort_children(out, g->sort_key);
 }
 
-SortKey Vault::gallery_sort_key(std::string_view gallery_path) const
+SortKey gallery_sort_key(const Vault& v, std::string_view gallery_path)
 {
-    const IndexNode* g = find_gallery(gallery_path);
+    const IndexNode* g = v.find_gallery(gallery_path);
     return g ? g->sort_key : SortKey::Manual;
 }
 
-VaultResult Vault::set_gallery_sort(std::string_view gallery_path, SortKey key)
+VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey key)
 {
     using enum VaultResult;
-    if (!unlocked_) return Locked;
+    if (!v.unlocked_) return Locked;
 
-    IndexNode* g = find_gallery(gallery_path);
+    IndexNode* g = v.find_gallery(gallery_path);
     if (!g) return NotFound;
 
     if (g->sort_key == key) return Ok;
 
     g->sort_key = key;
-    return commit_index();
+    return v.commit_index();
 }
 
 VaultResult Vault::set_tags(std::string_view node_path, const std::vector<std::string>& tags)
