@@ -148,8 +148,7 @@ void TagOverviewScreen::render(gfx::Renderer& r)
 
     r.draw_text(font_, OX, 40, "Tag Overview", TEXT_DIM);
     const char* sort_label = (sort_ == TagSort::Name) ? "Sort: name (Tab)" : "Sort: count (Tab)";
-    r.draw_text(font_, OX, 84,
-                "[Up/Down] Move   [Enter] Open   [Type] filter   [Esc] Back", TEXT_FAINT);
+    r.draw_text(font_, OX, 84, "[F1] Help", TEXT_FAINT);
     r.draw_text(font_, OX, 112, sort_label, TEXT_FAINT);
     if (!filter_.empty())
         r.draw_text(font_, OX + 280, 112,
@@ -184,6 +183,15 @@ void TagOverviewScreen::render(gfx::Renderer& r)
     }
 
     quick_switch_.render(r, font_, W, H);
+}
+
+std::vector<HelpGroup> TagOverviewScreen::help_groups() const
+{
+    return {{"Navigate", {
+        {"Up/Down", "Move selection"}, {"Enter", "Open tag"},
+        {"Type", "Filter by prefix"}, {"Tab", "Toggle sort (name/count)"},
+        {"Esc", "Back"},
+    }}};
 }
 
 } // namespace ui

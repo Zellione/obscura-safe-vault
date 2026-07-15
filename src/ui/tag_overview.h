@@ -35,6 +35,8 @@ public:
     void handle_event(const SDL_Event& e) override;
     void render(gfx::Renderer& r) override;
 
+    [[nodiscard]] std::vector<ui::HelpGroup> help_groups() const override;
+
 private:
     void reload();          // fetch the overview from the vault, then rebuild()
     void rebuild();         // shown_ = sort(filter(all_)); re-clamp selection
