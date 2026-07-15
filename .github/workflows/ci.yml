@@ -319,8 +319,11 @@ jobs:
         with:
           path: vendor/codecs-prefix
           # win2022 toolchain tag — see the SDL3 cache key note above. Bumped
-          # to v4 (from v3) to invalidate caches predating the FFmpeg leg below.
-          key: codecs-v4-${{ runner.os }}-win2022-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          # to v5 (from v4): the key previously hashed only .gitmodules, so a
+          # decoder-flag-only change to build_codecs.bat / build_ffmpeg_windows.sh
+          # (e.g. Phase 38's vp8/vp9 addition) silently reused a stale prefix —
+          # mirror the Linux leg's key, which already hashes its build scripts.
+          key: codecs-v5-${{ runner.os }}-win2022-${{ hashFiles('.gitmodules', 'scripts/build_codecs.bat', 'scripts/build_ffmpeg_windows.sh') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'

@@ -233,8 +233,11 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          # Bumped to v4 (from v3) to invalidate caches predating the FFmpeg leg below.
-          key: codecs-v4-${{ runner.os }}-win2022-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+          # Bumped to v5 (from v4): mirror ci.yml's Windows leg — the key
+          # previously hashed only .gitmodules, so a decoder-flag-only change
+          # to build_codecs.bat / build_ffmpeg_windows.sh silently reused a
+          # stale prefix instead of rebuilding.
+          key: codecs-v5-${{ runner.os }}-win2022-${{ hashFiles('.gitmodules', 'scripts/build_codecs.bat', 'scripts/build_ffmpeg_windows.sh') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
