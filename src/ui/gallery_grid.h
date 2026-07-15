@@ -64,6 +64,7 @@ public:
     // mid-write.
     [[nodiscard]] bool animating() const override { return vault_busy(*this); }
     [[nodiscard]] bool blocks_idle_lock() const override { return vault_busy(*this); }
+    [[nodiscard]] std::vector<ui::HelpGroup> help_groups() const override;
 
 private:
     enum class GalleryView { Grid, List };
