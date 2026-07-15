@@ -11,6 +11,7 @@
 #include "platform/folder_dialog.h"
 #include "platform/vault_registry.h"
 #include "ui/advanced_search_state.h"
+#include "ui/help_popup.h"
 #include "ui/screen.h"
 #include "vault/vault.h"
 
@@ -80,6 +81,8 @@ private:
     // active vault changes (promote_pending) or is explicitly locked
     // (LockActive) — re-unlocking always starts with auto-lock on.
     bool                               keep_unlocked_ = false;
+
+    ui::HelpPopupState                 help_;   // Phase 39: F1 help popup
 };
 
 } // namespace app

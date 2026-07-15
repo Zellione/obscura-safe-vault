@@ -293,10 +293,22 @@ void draw_keep_unlocked_badge(gfx::Renderer& r, gfx::FontAtlas& font, int win_w,
 void App::dispatch_event(const SDL_Event& e)
 {
     if (is_user_input(e)) idle_.reset();   // any keypress/mouse activity stays the lock
-    if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
+    if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
         running_ = false;
-    else if (screen_)
-        screen_->handle_event(e);
+        return;
+    }
+    if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F1) {
+        ui::toggle_help(help_);
+        return;
+    }
+    if (help_.open) {
+        if (e.type == SDL_EVENT_KEY_DOWN)
+            ui::handle_help_key(help_, e.key.key);
+        else if (e.type == SDL_EVENT_MOUSE_WHEEL)
+            ui::handle_help_wheel(help_, e.wheel.y);
+        return;   // swallow every event while the popup is open
+    }
+    if (screen_) screen_->handle_event(e);
 }
 
 bool App::pump_events(bool animating)
@@ -393,6 +405,9 @@ void App::render_frame()
         screen_->render(r);
         if (active_ && keep_unlocked_)
             draw_keep_unlocked_badge(r, font_, window_.width(), window_.height());
+        ui::draw_help_popup(r, font_, static_cast<float>(window_.width()),
+                            static_cast<float>(window_.height()),
+                            screen_->help_groups(), help_);
     }
     window_.end_frame();
 

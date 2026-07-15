@@ -4,6 +4,9 @@
 
 #include <string>
 #include <utility>
+#include <vector>
+
+#include "ui/help_popup.h"
 
 namespace gfx { class Renderer; }
 
@@ -54,6 +57,11 @@ public:
     // thread. Locking then would wipe the master key mid-write and corrupt the
     // vault, so the app treats this as "not idle" and resets its lock timer.
     [[nodiscard]] virtual bool blocks_idle_lock() const { return false; }
+
+    // Grouped keyboard shortcuts for the F1 help popup. Default empty (safe
+    // for any screen not yet updated). Screens may read their own current
+    // state here (e.g. ImageViewer varies its video/image group by mode).
+    [[nodiscard]] virtual std::vector<HelpGroup> help_groups() const { return {}; }
 
     // Redraw request. Screens call mark_dirty() when something changed outside
     // of input handling — typically an async result (file dialog, decode worker)
