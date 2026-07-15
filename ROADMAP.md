@@ -1830,25 +1830,34 @@ like `AdvancedSearchState` already is. Does **not** duplicate gallery
 path/focus-index tracking, since `Nav.path`/`Nav.index` already carries that.
 
 ### Tasks (Part 2)
-- [ ] `src/ui/gallery_session_state.h` (new, pure): `GallerySessionState`
+- [x] `src/ui/gallery_session_state.h` (new, pure): `GallerySessionState`
   struct + `reset()`; unit-tested.
-- [ ] `App` gains a `GallerySessionState session_` member, populated from the
+- [x] `App` gains a `GallerySessionState session_` member, populated from the
   outgoing screen's view/strip-side/video-position just before
   `on_exit()`/destruction on every `ToGallery`/`ToViewer` transition, and fed
   into the new screen's constructor instead of always defaulting.
   `GalleryGrid`/`ImageViewer` constructors gain an initial
   view/strip-side parameter.
-- [ ] `session_` resets at the same points `adv_session_` already does:
+- [x] `session_` resets at the same points `adv_session_` already does:
   `LockActive`, idle auto-lock, vault switch (`promote_pending`).
-- [ ] Leaving the viewer on a video captures its playback position into
+- [x] Leaving the viewer on a video captures its playback position into
   `session_`; reopening the same video seeks there and stays paused; a
   different video (or an image) clears/ignores the bookmark.
-- [ ] Update `CLAUDE.md` (`App`'s new `GallerySessionState` member,
+- [x] Update `CLAUDE.md` (`App`'s new `GallerySessionState` member,
   `src/ui/gallery_session_state.h` module entry) + `mem:core`.
-- [ ] `tests/` — pure `GallerySessionState::reset()` test; integration-level
-  coverage for the grid↔viewer round trip preserving view/strip-side, video
-  resume-then-pause on reopen, no resume on a different video, and a full
-  lock/unlock returning to defaults.
+- [x] `tests/` — pure `GallerySessionState::reset()` test; a real-fixture
+  `VideoPlayback::seek()` test (moves position, stays paused). No
+  `GalleryGrid`/`ImageViewer` integration test was added: neither class has
+  ever been unit-tested in this codebase (both require a real `gfx::Window`,
+  which no existing test constructs — `test_window_visibility.cpp` only
+  exercises the pure `window_flags_visible` helper), so there is no harness to
+  extend. The App-side capture/restore wiring (`capture_session_state`,
+  `enter_viewer`, the `current_gallery_view`/`current_strip_side`/
+  `capture_video_resume`/`apply_video_resume` free friends) is covered
+  indirectly by the full test suite + `--asan` staying green and a clean
+  launch/shutdown smoke run; interactive keyboard-driven verification of the
+  round trip itself was not possible in this environment (no GUI-automation
+  tool available) and is worth a manual pass before merge.
 
 **Out of scope (YAGNI):** a keybinding-customization system; wiring the new
 small self-contained overlays (`quick_switch`, `theme_picker`, `tag_editor`,
@@ -1868,8 +1877,9 @@ preserves the List/Grid view and thumbnail-strip side within the session, and
 leaving a video mid-playback and reopening it resumes paused at the same
 position.
 
-**Status:** 🚧 Part 1 shipped; Part 2 (session-scoped memory) planned as a
-separate follow-up PR.
+**Status:** ✅ Part 1 shipped. Part 2 (session-scoped memory) implemented,
+pending owner review/merge — see the acceptance criterion's caveat about
+manual interactive verification.
 
 ---
 

@@ -11,6 +11,7 @@
 #include "image/decode_worker.h"
 #include "ui/export_ui.h"
 #include "ui/full_tex_cache.h"
+#include "ui/gallery_session_state.h"
 #include "ui/quick_switch.h"
 #include "ui/screen.h"
 #include "ui/scroll_model.h"
@@ -79,7 +80,8 @@ public:
     };
 
     ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                gfx::TextureCache& cache, Context ctx, Album album, int start_index);
+                gfx::TextureCache& cache, Context ctx, Album album, int start_index,
+                StripSide initial_strip_side = StripSide::Bottom);
 
     ~ImageViewer() override = default;
 
@@ -141,6 +143,17 @@ private:
     void render_scroll(gfx::Renderer& r, const SDL_FRect& vp);
     void render_strip(gfx::Renderer& r);
     void render_hud(gfx::Renderer& r, const SDL_FRect& vp);
+
+    // Free friends (Phase 39 Part 2), not members, so App can snapshot/restore
+    // session-scoped state without growing this class's method count:
+    // current_strip_side reads the strip side for GallerySessionState;
+    // capture_video_resume snapshots the outgoing viewer's video-resume bookmark
+    // (or clears it when the current item isn't a live video); apply_video_resume
+    // seeks a freshly (re)opened matching video to a remembered position, leaving
+    // it paused, right after on_enter() has built video_ for the landed item.
+    friend StripSide current_strip_side(const ImageViewer& v);
+    friend void capture_video_resume(const ImageViewer& v, GallerySessionState& session);
+    friend void apply_video_resume(ImageViewer& v, const GallerySessionState& session);
 
     gfx::Window&            win_;
     gfx::FontAtlas&         font_;
@@ -214,5 +227,12 @@ private:
     // destroyed on exit / item change before any lock (invariant: no UAF).
     std::unique_ptr<VideoPlayback> video_;
 };
+
+// Free friends of ImageViewer (see the in-class declarations): current_strip_side /
+// capture_video_resume / apply_video_resume let App snapshot and restore
+// GallerySessionState across a viewer round trip (Phase 39 Part 2).
+[[nodiscard]] StripSide current_strip_side(const ImageViewer& v);
+void capture_video_resume(const ImageViewer& v, GallerySessionState& session);
+void apply_video_resume(ImageViewer& v, const GallerySessionState& session);
 
 } // namespace ui

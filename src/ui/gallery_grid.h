@@ -12,6 +12,7 @@
 #include "image/decode_worker.h"
 #include "ui/consent_dialog.h"
 #include "ui/file_op_job.h"
+#include "ui/gallery_view.h"
 #include "ui/nav_model.h"
 #include "ui/quick_switch.h"
 #include "ui/screen.h"
@@ -52,7 +53,8 @@ public:
 
     GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                 gfx::TextureCache& cache, GridDialogs dialogs,
-                GridVaultCtx vault_ctx, GridLocation at = {});
+                GridVaultCtx vault_ctx, GridLocation at = {},
+                GalleryView initial_view = GalleryView::Grid);
 
     void on_enter() override;
     void handle_event(const SDL_Event& e) override;
@@ -67,8 +69,6 @@ public:
     [[nodiscard]] std::vector<ui::HelpGroup> help_groups() const override;
 
 private:
-    enum class GalleryView { Grid, List };
-
     void handle_key_down(const SDL_KeyboardEvent& key);  // browse-mode keys
     void handle_naming_key(const SDL_Event& e);          // new-gallery text entry
     void handle_password_key(const SDL_Event& e);         // Phase 35: archive-password text entry
@@ -113,6 +113,9 @@ private:
     friend void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key);  // Shift+C compact confirm
     friend void handle_delete_key(GalleryGrid& g);                                   // Del confirm
     friend void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);  // cancelled import waste hint
+    // current_gallery_view is a free friend for the same S1448 reason: App reads it
+    // (Phase 39 Part 2) to snapshot the outgoing grid's view mode into GallerySessionState.
+    friend GalleryView current_gallery_view(const GalleryGrid& g);
     void draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
                          const SDL_FRect& box);
     [[nodiscard]] int  hit_test(float mx, float my) const;  // item under cursor, or -1
@@ -202,5 +205,6 @@ void poll_file_job(GalleryGrid& g);
 void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
 void handle_delete_key(GalleryGrid& g);
 void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);
+[[nodiscard]] GalleryView current_gallery_view(const GalleryGrid& g);
 
 } // namespace ui

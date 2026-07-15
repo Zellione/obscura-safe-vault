@@ -147,6 +147,26 @@ src/
                                             draws a corner badge ("Auto-lock off [U]")
                                             on every screen while active — an App-level
                                             overlay so no screen needs to know about it.
+                                            Phase 39 Part 2: App owns a
+                                            `ui::GallerySessionState session_` (mirrors
+                                            adv_session_), carrying the last-used
+                                            GalleryGrid List/Grid view + ImageViewer
+                                            thumbnail-strip side + a single "last video
+                                            watched" resume bookmark across App's
+                                            screen-reconstruction on every nav transition.
+                                            capture_session_state() (dynamic_cast onto
+                                            whichever concrete Screen is active) snapshots
+                                            it just before on_exit(); GridLocation/
+                                            ImageViewer::Context construction then feeds
+                                            session_.view/session_.strip_side back in as
+                                            the new screen's initial state, and
+                                            enter_viewer() (shared tail of every
+                                            ImageViewer-construction site) calls
+                                            ui::apply_video_resume() to seek a reopened
+                                            matching video to its bookmark, paused. Reset
+                                            (session_.reset()) at LockActive, idle
+                                            auto-lock, and vault switch (promote_pending),
+                                            exactly like adv_session_.
   crypto/    crypto.h, kdf.*, aead.*,     ← Monocypher wrappers (Phase 1)
              secure_mem.*, random.*
   vault/     vault.h, header.*, index.*,  ← container format (Phase 2). index.h adds
@@ -350,7 +370,25 @@ src/
                                             favorite-flag flip); the breadcrumb line shows
                                             "Sort: <label>" once a non-Manual key is active,
                                             mirroring the [U] keep-unlocked badge's stay-
-                                            invisible-at-the-default convention.
+                                            invisible-at-the-default convention. Phase 39
+                                            Part 2: `view_`'s type (`GalleryView`) moved out
+                                            to the shared `gallery_view.h` (was a private
+                                            nested enum) so App can read it; the constructor
+                                            gains an `initial_view` param (default Grid) and
+                                            a `current_gallery_view(const GalleryGrid&)` free
+                                            friend (S1448 method-count reasons, mirrors
+                                            `vault_busy`) lets App snapshot it into
+                                            `GallerySessionState` on the way out.
+             gallery_view.h,               ← `GalleryView{Grid,List}` (Phase 39 Part 2 extract
+                                            from GalleryGrid's private nested enum): shared so
+                                            both GalleryGrid and GallerySessionState can name it.
+             gallery_session_state.h,      ← `GallerySessionState{view,strip_side,
+                                            last_media_path,video_resume_seconds}` + reset()
+                                            (Phase 39 Part 2, modeled on AdvancedSearchState):
+                                            pure, App-owned, carries the last-used List/Grid
+                                            view + thumbnail-strip side + a single video
+                                            resume bookmark across App's grid<->viewer screen
+                                            reconstruction. Unit-tested.
              image_viewer.*,              ← zoom/pan + thumb strip + fill-scroll + slideshow;
                                             hosts a fit-only VideoPlayback for video items (Phase 15).
                                             Single-image export (X) stays synchronous (one image is
@@ -359,7 +397,16 @@ src/
                                             a borderless fullscreen (gfx::Window::set_fullscreen) with
                                             Esc exiting fullscreen before back-navigation, and clicking a
                                             non-zoomed image's left/right 12% edge steps to the prev/next
-                                            image (Phase 31)
+                                            image (Phase 31). Phase 39 Part 2: the constructor gains an
+                                            `initial_strip_side` param (default Bottom); three free friends
+                                            (S1448 reasons) — `current_strip_side`, `capture_video_resume`
+                                            (snapshots the outgoing viewer's video path+position into a
+                                            `GallerySessionState`, or clears the bookmark when the current
+                                            item isn't a live video), and `apply_video_resume` (seeks a
+                                            freshly-opened matching video to a remembered position, called
+                                            by App right after on_enter() builds video_) — let App carry
+                                            strip-side + a "last video watched" resume bookmark across the
+                                            grid<->viewer round trip.
              playback_model.*,            ← pure video transport maths: clock/clamp/seek-bar
                                             map/mm:ss/frame-due (Phase 15, pure/tested)
              video_playback.*,            ← in-viewer video player: decoder + YUV texture +
@@ -373,6 +420,10 @@ src/
                                             advertises `[-/+] Vol` (Phase 25 fix). The level is
                                             seeded from media::saved_volume() on open + written back
                                             on change, so it is remembered across clips + restarts.
+                                            Phase 39 Part 2: `seek(seconds)` — clamped seek without
+                                            touching play/pause state — restores a session resume
+                                            bookmark right after construction (playback opens paused
+                                            by default, so this alone is enough to "resume paused").
              full_tex_cache.*,            ← shared decode→GPU texture cache (Phase 11 extract)
              slideshow_view.*,            ← full-screen slideshow SDL plumbing (Phase 11);
                                             handle_key takes the scancode so dwell `[`/`]` is

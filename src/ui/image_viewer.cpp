@@ -33,11 +33,13 @@ bool item_is_video(const std::vector<const vault::IndexNode*>& imgs, int idx)
 } // namespace
 
 ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                         gfx::TextureCache& cache, Context ctx, Album album, int start_index)
+                         gfx::TextureCache& cache, Context ctx, Album album, int start_index,
+                         StripSide initial_strip_side)
     : win_(win), font_(font), vault_(vault), cache_(cache), export_(ctx.folder, win),
       tag_editor_(vault, win), search_(vault, win),
       quick_switch_(ctx.registry, std::move(ctx.active_path)),
       album_(std::move(album)), index_(start_index),
+      strip_side_(initial_strip_side),
       full_cache_(vault, win.sdl_renderer(), &decode_worker_)
 {
 }
@@ -651,6 +653,28 @@ void ImageViewer::render(gfx::Renderer& r)
                    static_cast<float>(win_.height()));
     quick_switch_.render(r, font_, static_cast<float>(win_.width()),
                          static_cast<float>(win_.height()));
+}
+
+StripSide current_strip_side(const ImageViewer& v) { return v.strip_side_; }
+
+void capture_video_resume(const ImageViewer& v, GallerySessionState& session)
+{
+    if (v.video_ && v.video_->valid() && v.index_ >= 0 &&
+        v.index_ < static_cast<int>(v.album_.paths.size())) {
+        session.last_media_path      = v.album_.paths[static_cast<size_t>(v.index_)];
+        session.video_resume_seconds = v.video_->position();
+    } else {
+        session.last_media_path.clear();
+        session.video_resume_seconds = 0.0;
+    }
+}
+
+void apply_video_resume(ImageViewer& v, const GallerySessionState& session)
+{
+    if (session.video_resume_seconds <= 0.0 || !v.video_ || !v.video_->valid()) return;
+    if (v.index_ < 0 || v.index_ >= static_cast<int>(v.album_.paths.size())) return;
+    if (v.album_.paths[static_cast<size_t>(v.index_)] != session.last_media_path) return;
+    v.video_->seek(session.video_resume_seconds);
 }
 
 } // namespace ui

@@ -11,9 +11,12 @@
 #include "platform/folder_dialog.h"
 #include "platform/vault_registry.h"
 #include "ui/advanced_search_state.h"
+#include "ui/gallery_session_state.h"
 #include "ui/help_popup.h"
 #include "ui/screen.h"
 #include "vault/vault.h"
+
+namespace ui { class ImageViewer; }
 
 namespace app {
 
@@ -46,6 +49,14 @@ private:
     void to_tag_viewer(const std::string& tag, int index); // viewer over a tag's media set
     void promote_pending();               // unlock success: pending_ -> active_ (locks old)
 
+    // Shared tail of every viewer-construction site (Phase 39 Part 2): enters the
+    // viewer, applies a matching video-resume bookmark, then activates it.
+    void enter_viewer(std::unique_ptr<ui::ImageViewer> viewer);
+    // Snapshots the outgoing screen's view/strip-side/video-position into
+    // session_, if it is a GalleryGrid or ImageViewer (Phase 39 Part 2). Called
+    // right before a screen is torn down by a nav transition.
+    void capture_session_state();
+
     // run() helpers (kept small so the loop stays readable).
     void dispatch_event(const SDL_Event& e);     // quit/close here, else to screen
     bool pump_events(bool animating);            // wait/poll + dispatch; should redraw?
@@ -68,6 +79,12 @@ private:
     // Advanced-search state preserved across visits within one unlocked-vault
     // session; reset in promote_pending() whenever the active vault changes.
     ui::AdvancedSearchState            adv_session_;
+    // Gallery/viewer session state (Phase 39 Part 2): last-used List/Grid view +
+    // thumbnail-strip side, plus a single "last video watched" resume bookmark;
+    // carried through App's screen reconstruction on every grid<->viewer round
+    // trip. Reset at the same points adv_session_ is (LockActive, idle auto-lock,
+    // vault switch).
+    ui::GallerySessionState             session_;
     State                              state_   = State::Locked;
     bool                               running_ = false;   // main-loop run flag
 
