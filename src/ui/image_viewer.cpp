@@ -273,6 +273,9 @@ void ImageViewer::handle_key(SDL_Keycode key, SDL_Scancode sc)
         case SDLK_F11:
             win_.set_fullscreen(!win_.is_fullscreen());
             return;
+        case SDLK_U:      // keep the vault unlocked for the rest of the session
+            request(NavKind::ToggleKeepUnlocked);
+            return;
         default: break;
     }
     if (item_is_video(album_.images, index_)) { handle_key_video(key, sc); return; }
@@ -453,6 +456,43 @@ void ImageViewer::handle_event(const SDL_Event& e)
     }
 }
 
+std::vector<ui::HelpGroup> ImageViewer::help_groups() const
+{
+    std::vector<ui::HelpGroup> groups;
+    if (mode_ == ViewMode::Slideshow) {
+        groups.push_back({"Slideshow", {
+            {"Space / Click", "Play/Pause"},
+            {"[ / ]", "Dwell time -/+"},
+            {"Esc", "Exit slideshow"},
+        }});
+        return groups;
+    }
+    const bool is_video = !album_.images.empty() && item_is_video(album_.images, index_);
+    if (is_video) {
+        groups.push_back({"Video playback", {
+            {"Space", "Play/Pause"}, {"J / L", "Seek -/+5s"}, {", / .", "Step one frame"},
+            {"- / +", "Volume"}, {"M", "Mute"}, {"Left/Right", "Prev/Next item"},
+        }});
+    } else if (mode_ == ViewMode::FillScroll) {
+        groups.push_back({"Scroll view", {
+            {"Wheel", "Scroll"}, {"Left/Right", "Prev/Next item"},
+            {"F", "Switch to fit view"}, {"P", "Start slideshow"},
+        }});
+    } else {
+        groups.push_back({"Fit view", {
+            {"Left/Right", "Prev/Next item"}, {"Wheel / + / -", "Zoom"},
+            {"F", "Switch to fill-scroll view"}, {"P", "Start slideshow"},
+        }});
+    }
+    groups.push_back({"View & session", {
+        {"F11 / double-click", "Toggle fullscreen"},
+        {"T", "Toggle thumbnail strip side"},
+        {"B", "Favorite"}, {"G", "Edit tags"}, {"X", "Export"},
+        {"U", "Keep unlocked for session"}, {"Esc", "Back"},
+    }});
+    return groups;
+}
+
 // --- Rendering -------------------------------------------------------------
 
 void ImageViewer::render_fit(gfx::Renderer& r, const SDL_FRect& vp)
@@ -560,14 +600,7 @@ void ImageViewer::render_hud(gfx::Renderer& r, const SDL_FRect& vp)
                     cur.favorite ? gfx::theme::FAVORITE : gfx::theme::TEXT);
     }
 
-    const char* legend;
-    if (item_is_video(album_.images, index_))
-        legend = "[Space] Play/Pause   [J/L] -/+5s   [,/.] Frame   [-/+] Vol   [M] Mute   [<-/->] Prev/Next   [B] Fav   [Esc] Back";
-    else if (mode_ == FillScroll)
-        legend = "[Wheel] Scroll   [<-/->] Prev/Next   [F] Fit   [T] Strip   [P] Slideshow   [B] Fav   [G] Tags   [X] Export   [Esc] Back";
-    else
-        legend = "[<-/->] Prev/Next   [Wheel/+/-] Zoom   [F] Fill-scroll   [T] Strip   [P] Slideshow   [B] Fav   [G] Tags   [X] Export   [Esc] Back";
-    r.draw_text(font_, vp.x + 16, vp.y + 44, legend, gfx::theme::TEXT_FAINT);
+    r.draw_text(font_, vp.x + 16, vp.y + 44, "[F1] Help", gfx::theme::TEXT_FAINT);
 
     if (item_is_video(album_.images, index_) && !(video_ && video_->valid()))
         r.draw_text(font_, vp.x + 16, vp.y + vp.h - 56,
