@@ -133,8 +133,7 @@ void FavoritesScreen::render(gfx::Renderer& r)
     const auto W = static_cast<float>(win_.width());
 
     r.draw_text(font_, OX, 40, title(), TEXT_DIM);
-    const std::string hint = std::string("[Enter] Open   [`] Switch   [Esc] Back   ") + extra_hint();
-    r.draw_text(font_, OX, 90, hint, TEXT_FAINT);
+    r.draw_text(font_, OX, 90, "[F1] Help", TEXT_FAINT);
 
     const auto H = static_cast<float>(win_.height());
     if (favs_.empty())
@@ -172,6 +171,13 @@ void FavoritesScreen::render(gfx::Renderer& r)
     }
 
     quick_switch_.render(r, font_, W, H);
+}
+
+std::vector<ui::HelpGroup> FavoritesScreen::help_groups() const
+{
+    std::vector<ui::HelpEntry> nav{{"Enter", "Open"}, {"`", "Switch vault"}, {"Esc", "Back"}};
+    for (const auto& e : extra_help_entries()) nav.push_back(e);
+    return {{"Navigate", nav}};
 }
 
 } // namespace ui

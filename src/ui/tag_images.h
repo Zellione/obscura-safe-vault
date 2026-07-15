@@ -32,7 +32,10 @@ protected:
     [[nodiscard]] const char* title() const override { return title_.c_str(); }
     [[nodiscard]] const char* empty_hint() const override { return hint_.c_str(); }
     bool handle_extra_key(const SDL_KeyboardEvent& key) override;
-    [[nodiscard]] const char* extra_hint() const override { return "[Tab] Galleries"; }
+    [[nodiscard]] std::vector<ui::HelpEntry> extra_help_entries() const override
+    {
+        return {{"Tab", "Show galleries with this tag"}};
+    }
     [[nodiscard]] bool show_favorite_badge() const override { return false; }
 
 private:
