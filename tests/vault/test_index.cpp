@@ -28,6 +28,7 @@ static bool nodes_equal(const IndexNode& a, const IndexNode& b)
     if (a.type != b.type || a.name != b.name) return false;
     if (a.tags != b.tags) return false;
     if (a.favorite != b.favorite) return false;
+    if (a.sort_key != b.sort_key) return false;
     if (a.type == IndexNode::Type::Image) {
         const auto& x = a.meta;
         const auto& y = b.meta;
@@ -515,4 +516,66 @@ TEST(index_deserialize_rejects_hostile_saved_search_count)
     IndexNode out;
     std::vector<SavedSearch> back;
     CHECK_FALSE(deserialize_index(blob, out, back));
+}
+
+// --- Phase 37: per-gallery sort_key ----------------------------------------
+
+TEST(index_gallery_sort_key_roundtrips)
+{
+    using namespace vault;
+    IndexNode root = IndexNode::gallery("");
+    IndexNode gal = IndexNode::gallery("trip");
+    gal.sort_key = SortKey::NameDesc;
+    IndexNode plain = IndexNode::gallery("plain");  // sort_key stays Manual
+    root.children.push_back(std::move(gal));
+    root.children.push_back(std::move(plain));
+
+    std::vector<uint8_t> blob;
+    serialize_index(root, blob);
+
+    IndexNode out;
+    REQUIRE(deserialize_index(blob, out));
+    REQUIRE(out.children.size() == 2);
+    CHECK_EQ(out.children[0].sort_key, SortKey::NameDesc);
+    CHECK_EQ(out.children[1].sort_key, SortKey::Manual);
+}
+
+TEST(index_deserialize_v5_blob_has_manual_sort_key)
+{
+    using namespace vault;
+    // Hand-crafted v5 blob (favorite byte present, saved-searches block present,
+    // but no sort_key byte — v5 writers never wrote one). Must read back Manual.
+    std::vector<uint8_t> v5_blob = {
+        0x05,                          // INDEX_VERSION = 5
+        0x00,                          // type = Gallery
+        0x00, 0x00,                    // name_len = 0
+        0x00, 0x00,                    // tag_count = 0
+        0x00,                          // favorite = 0
+        0x00, 0x00, 0x00, 0x00,        // child_count = 0
+        0x00, 0x00,                    // saved_search_count = 0
+    };
+
+    IndexNode out;
+    std::vector<SavedSearch> back;
+    REQUIRE(deserialize_index(v5_blob, out, back));
+    CHECK_EQ(out.sort_key, SortKey::Manual);
+}
+
+TEST(index_deserialize_rejects_out_of_range_sort_key)
+{
+    using namespace vault;
+    // v6 blob with sort_key = 7 (only 0..6 are defined) — must be rejected, not
+    // clamped, mirroring how an unknown node `type` byte is already rejected.
+    std::vector<uint8_t> blob = {
+        0x06,                          // INDEX_VERSION = 6
+        0x00,                          // type = Gallery
+        0x00, 0x00,                    // name_len = 0
+        0x00, 0x00,                    // tag_count = 0
+        0x00,                          // favorite = 0
+        0x07,                          // sort_key = 7 (out of range)
+        0x00, 0x00, 0x00, 0x00,        // child_count = 0 (never reached)
+    };
+
+    IndexNode out;
+    CHECK_FALSE(deserialize_index(blob, out));
 }

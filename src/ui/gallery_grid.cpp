@@ -17,6 +17,7 @@
 #include "platform/folder_dialog.h"
 #include "platform/paths.h"
 #include "ui/delete_summary.h"
+#include "ui/gallery_sort.h"
 #include "ui/grid_layout.h"
 #include "ui/input.h"
 #include "ui/progress_modal.h"
@@ -361,6 +362,16 @@ void GalleryGrid::toggle_favorite_current()
     (void)vault_.toggle_favorite(full_path);
 }
 
+void GalleryGrid::cycle_gallery_sort()
+{
+    const std::string path = nav_.path();
+    const auto next = ui::next_sort_key(vault::gallery_sort_key(vault_, path));
+    // Reordering changes children_ (unlike a favorite-flag flip), so refresh
+    // the listing on success; a failed persist (e.g. a race with lock) just
+    // leaves the displayed order as-is.
+    if (vault::set_gallery_sort(vault_, path, next) == vault::VaultResult::Ok) refresh();
+}
+
 SDL_Texture* GalleryGrid::thumb_texture(const vault::IndexNode& node)
 {
     return tile_thumb_texture({vault_, cache_, thumbs_.worker, thumbs_.failed}, node);
@@ -483,6 +494,8 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         case SDLK_F:     request((key.mod & SDL_KMOD_SHIFT) ? NavKind::ToFavoriteGalleries
                                                             : NavKind::ToFavoriteImages); return;
         case SDLK_T:     if (key.mod & SDL_KMOD_SHIFT) { request(NavKind::ToTagOverview); return; }
+                         break;
+        case SDLK_S:     if (key.mod & SDL_KMOD_SHIFT) { cycle_gallery_sort(); return; }
                          break;
         case SDLK_U:     request(NavKind::ToggleKeepUnlocked);                      return;  // Phase 33
         default:         break;
@@ -935,6 +948,18 @@ struct FooterStatus {
     const std::string& status;
 };
 
+// Build the breadcrumb line, appending the active sort indicator once it's
+// non-Manual (Phase 37) — extracted (like draw_footer_status) to keep
+// render()'s cognitive complexity under the cpp:S3776 limit.
+std::string breadcrumb_text(const NavModel& nav, vault::SortKey sort_key)
+{
+    std::string crumb = "/";
+    for (const auto& s : nav.segments()) { crumb += s; crumb += '/'; }
+    if (const auto label = ui::sort_key_label(sort_key); !label.empty())
+        crumb += "   Sort: " + label;
+    return crumb;
+}
+
 // Extract footer + waste/selection rendering to reduce render's cognitive complexity (S3776).
 void draw_footer_status(gfx::Renderer& r, gfx::FontAtlas& font, float x_offset, float bottom,
                         const FooterStatus& data)
@@ -1057,15 +1082,14 @@ void GalleryGrid::render(gfx::Renderer& r)
     }
 
     using namespace gfx::theme;
-    std::string crumb = "/";
-    for (const auto& s : nav_.segments()) { crumb += s; crumb += '/'; }
+    const std::string crumb = breadcrumb_text(nav_, vault::gallery_sort_key(vault_, nav_.path()));
     r.draw_text(font_, OX, 40, fit_name(crumb, W - 2 * OX), TEXT_DIM);
     r.draw_text(font_, OX, 90,
                 "[I] Import  [Z] ZIP/CBZ  [N] New  [Del] Delete  [/] Search  [?] Advanced  "
                 "[G] Tags  [Shift+G] Tag list  [Shift+T] Tags Overview  "
                 "[B] Fav  [F] Fav Images  [Shift+F] Fav Galleries  "
                 "[Enter] Open  [Space] Select  [X] Export  [M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid  "
-                "[U] Keep unlocked",
+                "[Shift+S] Sort  [U] Keep unlocked",
                 TEXT_FAINT);
 
     // Show waste hint if it exceeds display threshold (Phase 26).

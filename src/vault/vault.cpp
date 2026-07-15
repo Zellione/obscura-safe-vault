@@ -26,6 +26,7 @@
 #include "media/video_probe.h"
 #include "platform/error_log.h"
 #include "ui/advanced_search_model.h"  // AdvancedQuery + evaluate (pure, SDL/vault-free)
+#include "ui/gallery_sort.h"           // sort_children (pure, SDL/vault-free, Phase 37)
 
 namespace vault {
 
@@ -855,7 +856,27 @@ std::vector<const IndexNode*> Vault::list(std::string_view gallery_path) const
     if (!g) return out;
     out.reserve(g->children.size());
     for (const auto& c : g->children) out.push_back(&c);
-    return out;
+    return ui::sort_children(out, g->sort_key);
+}
+
+SortKey gallery_sort_key(const Vault& v, std::string_view gallery_path)
+{
+    const IndexNode* g = v.find_gallery(gallery_path);
+    return g ? g->sort_key : SortKey::Manual;
+}
+
+VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey key)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+
+    IndexNode* g = v.find_gallery(gallery_path);
+    if (!g) return NotFound;
+
+    if (g->sort_key == key) return Ok;
+
+    g->sort_key = key;
+    return v.commit_index();
 }
 
 VaultResult Vault::set_tags(std::string_view node_path, const std::vector<std::string>& tags)

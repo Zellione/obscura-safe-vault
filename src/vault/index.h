@@ -89,6 +89,19 @@ struct VideoMeta {
     uint64_t               poster_length  = 0;
 };
 
+// Per-gallery children display order (Phase 37). Persisted on Gallery nodes
+// only — Image/Video nodes carry the field too (serialized uniformly, see
+// index.cpp) but never read it.
+enum class SortKey : uint8_t {
+    Manual   = 0,   // raw insertion order — today's behavior, the default
+    NameAsc  = 1,   // natural (number-aware) ascending, via ui::natural_less
+    NameDesc = 2,
+    DateAsc  = 3,   // by created_ts ascending
+    DateDesc = 4,
+    SizeAsc  = 5,   // by orig_size ascending
+    SizeDesc = 6,
+};
+
 struct IndexNode {
     enum class Type : uint8_t { Gallery = 0, Image = 1, Video = 2 };
 
@@ -96,6 +109,7 @@ struct IndexNode {
     std::string                name;
     std::vector<std::string>   tags;  // per-node tags (Phase 12)
     bool                       favorite = false;  // bookmark flag (Phase 13)
+    SortKey                    sort_key = SortKey::Manual;  // children order (Phase 37); meaningful only when is_gallery()
 
     // Gallery payload (meaningful when type == Gallery).
     std::vector<IndexNode> children;
@@ -149,7 +163,8 @@ struct SavedSearch {
 // v1: no tags. v2: per-node tags (Phase 12). v3: per-node favorite flag (Phase 13).
 // v4: video nodes + VideoMeta (Phase 15 PR2). v5: vault-global saved-searches
 // block after the tree root (Phase 18); pre-v5 blobs read with an empty list.
-inline constexpr uint8_t INDEX_VERSION = 5;
+// v6: per-gallery sort_key (Phase 37); pre-v6 blobs read every node as Manual.
+inline constexpr uint8_t INDEX_VERSION = 6;
 
 // Maximum tree depth accepted on deserialisation — guards against stack overflow
 // from a deeply-nested hostile blob.

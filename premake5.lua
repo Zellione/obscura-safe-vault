@@ -435,6 +435,7 @@ project "osv_tests"
         "src/ui/video_playback.cpp",
         "src/ui/archive_reader.cpp",
         "src/ui/archive_import.cpp",
+        "src/ui/gallery_sort.cpp",
     }
 
     includedirs {

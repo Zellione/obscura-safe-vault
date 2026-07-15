@@ -199,6 +199,7 @@ TEST(fuzz_index_deserialize_survives_3000_malformed_blobs)
     root.children[0].tags.push_back("gal_tag");
     root.children[0].tags.push_back("another");
     root.children[0].favorite = true;
+    root.children[0].sort_key = vault::SortKey::NameDesc;
     root.children[0].children.push_back(vault::IndexNode::image("i.jpg"));
     root.children[0].children[0].tags.push_back("img_tag");
     root.children[0].children[0].favorite = true;
