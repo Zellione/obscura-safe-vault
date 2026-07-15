@@ -1060,6 +1060,29 @@ void GalleryGrid::update(double)
     }
 }
 
+std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
+{
+    return {
+        {"Navigate", {
+            {"Enter", "Open"}, {"Space", "Select for export"},
+            {"Esc", "Back"}, {"`", "Switch vault"}, {"L", "Toggle list/grid view"},
+        }},
+        {"Search & tags", {
+            {"/", "Search"}, {"Shift+/ (?)", "Advanced search"},
+            {"G", "Edit tags"}, {"Shift+G", "Import a tag list"},
+            {"Shift+T", "Tags overview"},
+            {"B", "Favorite"}, {"F", "Favorite images"}, {"Shift+F", "Favorite galleries"},
+        }},
+        {"Import & export", {
+            {"I", "Import files"}, {"Z", "Import ZIP/CBZ"}, {"N", "New gallery"},
+            {"X", "Export selection"}, {"M", "Move/copy"}, {"Del", "Delete"},
+        }},
+        {"Session", {
+            {"Shift+S", "Cycle sort order"}, {"U", "Keep unlocked for session"},
+        }},
+    };
+}
+
 void GalleryGrid::render(gfx::Renderer& r)
 {
     const auto W = static_cast<float>(win_.width());
@@ -1084,13 +1107,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     using namespace gfx::theme;
     const std::string crumb = breadcrumb_text(nav_, vault::gallery_sort_key(vault_, nav_.path()));
     r.draw_text(font_, OX, 40, fit_name(crumb, W - 2 * OX), TEXT_DIM);
-    r.draw_text(font_, OX, 90,
-                "[I] Import  [Z] ZIP/CBZ  [N] New  [Del] Delete  [/] Search  [?] Advanced  "
-                "[G] Tags  [Shift+G] Tag list  [Shift+T] Tags Overview  "
-                "[B] Fav  [F] Fav Images  [Shift+F] Fav Galleries  "
-                "[Enter] Open  [Space] Select  [X] Export  [M] Move/Copy  [`] Switch  [Esc] Back  [L] List/Grid  "
-                "[Shift+S] Sort  [U] Keep unlocked",
-                TEXT_FAINT);
+    r.draw_text(font_, OX, 90, "[F1] Help", TEXT_FAINT);
 
     // Show waste hint if it exceeds display threshold (Phase 26).
     // Combine with selection count on the same line to avoid collision.

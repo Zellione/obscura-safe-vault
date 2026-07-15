@@ -51,8 +51,12 @@ protected:
     // toggle, an extra hint, and to suppress the favorite badge (their tiles are
     // tag matches, not favorites).
     virtual bool handle_extra_key(const SDL_KeyboardEvent& /*key*/) { return false; }
-    [[nodiscard]] virtual const char* extra_hint() const { return ""; }
-    [[nodiscard]] virtual bool        show_favorite_badge() const { return true; }
+    // Extra shortcut entries a subclass wants appended to the base "Navigate"
+    // group in help_groups() (e.g. TagGalleries/TagImages' Tab toggle).
+    [[nodiscard]] virtual std::vector<ui::HelpEntry> extra_help_entries() const { return {}; }
+    [[nodiscard]] virtual bool show_favorite_badge() const { return true; }
+
+    [[nodiscard]] std::vector<ui::HelpGroup> help_groups() const override;
 
     void reload();   // re-fetch favs_ + reset selection + seed cols_
 

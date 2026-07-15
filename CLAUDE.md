@@ -310,6 +310,12 @@ src/
                                             cancel-hint modal reused by every screen hosting a
                                             background job (import/export/delete/move/compact)
                                             (Phase 25; compact in the #48 audit).
+             help_popup.*,                ← the shared `F1` help popup — `HelpGroup`/`HelpEntry`
+                                            data types, pure open/close/scroll logic, `draw_help_popup`
+                                            (Phase 39). `Screen::help_groups()` is the per-screen
+                                            content hook; `App` owns the single `HelpPopupState` and
+                                            intercepts `F1` globally, mirroring the Phase 33 keep-unlocked
+                                            corner-badge overlay pattern.
              waste_threshold.h,           ← pure vault-bloat thresholds (#48 audit):
                                             should_display_waste(wasted, file_size) — true if waste
                                             exceeds max(50 MiB, 10% of file size); should_hint_
@@ -428,7 +434,9 @@ src/
                                             Gallery covers + 2×2 montage + video play-badge;
                                             reused by GalleryGrid (delegates) and the advanced-
                                             search grid view. Decrypt → off-thread decode → GPU
-                                            upload via the shared cache; no new disk path.
+                                            upload via the shared cache; no new disk path. Phase 39:
+                                            `thumb_key_for` helper (pure index lookup) fixes video
+                                            posters never showing as thumbnails in the grid/strip.
              tag_editor.*,                ← `G` add/remove tags modal (Phase 12); the
                                             current-tags list scrolls (Up/Down) via the pure
                                             tag_scroll.h (tag_scroll_first) and auto-scrolls to a
@@ -869,6 +877,13 @@ premake-core GitHub releases. It is **not** committed to the repo.
   current image.
   - `Left` / `Right` arrow: previous / next image in the leaf gallery.
   - `Up` / `Esc`: back to gallery grid.
+
+### Help popup convention (Phase 39)
+A single global `F1` help popup displays context-sensitive keyboard shortcuts
+grouped by task/area. Screens override `Screen::help_groups()` to supply their
+content; `App` renders the overlay on top. Close with `Esc` or `Q`. This replaces
+the prior approach of cramming every shortcut into an inline footer string,
+keeping layouts clean and discoverable.
 
 ---
 

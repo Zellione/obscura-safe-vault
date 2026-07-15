@@ -100,6 +100,8 @@ public:
         return video_ && video_->animating();   // a playing video keeps the loop ticking
     }
 
+    [[nodiscard]] std::vector<ui::HelpGroup> help_groups() const override;
+
 private:
     enum class ViewMode { Fit, FillScroll, Slideshow };
 
