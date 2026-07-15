@@ -161,7 +161,7 @@ void VaultManager::render(gfx::Renderer& r)
     const Layout L = layout();
 
     r.draw_text(font_, 60.0f, 44.0f, "Vaults", TEXT);
-    r.draw_text(font_, W - 200.0f, 50.0f, "C  Theme", TEXT_FAINT);
+    r.draw_text(font_, W - 260.0f, 50.0f, "C  Theme   F1  Help", TEXT_FAINT);
 
     if (entries_.empty()) {
         r.draw_text(font_, 60.0f, L.list_top, "No vaults yet — press N to create, O to open.",
@@ -198,6 +198,18 @@ void VaultManager::render(gfx::Renderer& r)
     btn(L.open_btn, "Open Other (O)");
 
     themes_.render(r, font_, W, static_cast<float>(win_.height()));
+}
+
+std::vector<ui::HelpGroup> VaultManager::help_groups() const
+{
+    return {
+        {"Vaults", {
+            {"Up/Down", "Move selection"}, {"Enter / Space", "Open selected vault"},
+            {"N", "Create new vault"}, {"O", "Open existing vault file"},
+            {"R / Del", "Remove from list"}, {"L", "Lock the active vault"},
+        }},
+        {"App", {{"C", "Change theme"}, {"Esc / Q", "Quit"}}},
+    };
 }
 
 } // namespace ui

@@ -290,4 +290,12 @@ void UnlockScreen::render(gfx::Renderer& r)
         r.draw_text(font_, 60, H - 70, error_, DANGER);
 }
 
+std::vector<ui::HelpGroup> UnlockScreen::help_groups() const
+{
+    return {{"Unlock", {
+        {"Tab", "Switch field (create mode)"}, {"Enter", "Submit"},
+        {"Esc", "Back to vault manager"},
+    }}};
+}
+
 } // namespace ui
