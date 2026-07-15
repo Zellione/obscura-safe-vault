@@ -1771,6 +1771,47 @@ MP4/MOV/MKV(H.264/HEVC/ProRes/DNxHD/MJPEG) playback is unchanged.
 
 ---
 
+## Phase 39 — UI Discoverability: F1 Help popup + minor fixes 🚧
+
+**Goal:** Replace the pattern of cramming every keyboard shortcut into an
+inline footer legend with a unified, scrollable `F1` help popup. Each screen
+supplies grouped shortcuts via `Screen::help_groups()`, reducing inline-text
+clutter and improving keyboard discoverability. Also fix a video-thumbnail bug
+found during review and wire the `U` keep-unlocked shortcut into the image
+viewer.
+
+### Tasks (Part 1)
+- [x] **Fix video poster thumbnails** — add `thumb_key_for` helper to correctly
+  index the first video node's poster chunk (Phase 39 Task 1)
+- [x] **Help popup data types + pure logic** — `HelpGroup`/`HelpEntry`, pure
+  open/close/scroll helpers, no SDL/vault deps (Phase 39 Task 2)
+- [x] **Help popup rendering** — `draw_help_popup` with scrolling, close hints,
+  veiled background (Phase 39 Task 3)
+- [x] **Screen::help_groups() virtual + App wiring** — base virtual + F1 input
+  routing + global render overlay (Phase 39 Task 4)
+- [x] **GalleryGrid help_groups()** — breadcrumb-aware shortcuts; replace
+  inline legend with `[F1] Help` hint (Phase 39 Task 5)
+- [x] **ImageViewer help_groups() + U key** — image/video-aware groups;
+  wire `U` keep-unlocked shortcut (Phase 39 Task 6)
+- [x] **FavoritesScreen + TagGalleries/TagImages** — base + per-subclass
+  overrides with their own groups (Phase 39 Task 7)
+- [x] **TagOverviewScreen help_groups()** — navigate/sort shortcuts
+  (Phase 39 Task 9)
+- [x] **AdvancedSearchScreen help_groups()** — query/result/saved-search
+  shortcuts (Phase 39 Task 10)
+- [x] **VaultManager + UnlockScreen** — multi-vault and unlock screens with
+  full help coverage (Phase 39 Task 11)
+
+### Tasks (Part 2)
+- [ ] **Session-scoped memory system** — remember the last-used gallery's sort
+  preference + scroll position, last-used tag search, last advanced-search
+  result viewport across vault lock/reopen within a session (not persisted
+  across app restart)
+
+**Status:** 🚧 Part 1 shipped; Part 2 (session-scoped memory) planned as a follow-up PR.
+
+---
+
 ## Container format spec (reference)
 
 Reproduced from `CLAUDE.md` for quick access during vault implementation work.
