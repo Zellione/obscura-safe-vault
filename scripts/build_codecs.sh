@@ -145,7 +145,7 @@ build_codec archive "$REPO_ROOT/vendor/libarchive"                     \
     -DENABLE_TEST=OFF -DENABLE_WERROR=OFF
 
 # FFmpeg — decode-only static. Video (h264/hevc + prores/dnxhd/mjpeg for .mov,
-# Phase 28) + audio (aac/opus/mp3/vorbis/flac/ac3).
+# Phase 28; vp8/vp9 for .webm, Phase 38) + audio (aac/opus/mp3/vorbis/flac/ac3).
 # configure-built (not cmake), so it gets its own function. Idempotent: skip if
 # libavcodec is already installed. Needs nasm (already required by libaom).
 build_ffmpeg() {
@@ -171,7 +171,7 @@ build_ffmpeg() {
         --disable-network --disable-encoders --disable-muxers               \
         --disable-protocols --disable-devices --disable-filters             \
         --disable-bsfs --disable-autodetect                                 \
-        --enable-decoder=h264,hevc,prores,dnxhd,mjpeg,aac,opus,mp3,vorbis,flac,ac3 \
+        --enable-decoder=h264,hevc,prores,dnxhd,mjpeg,vp8,vp9,aac,opus,mp3,vorbis,flac,ac3 \
         --enable-demuxer=mov,matroska,webm                                  \
         --enable-parser=h264,hevc,dnxhd,mjpeg,aac,vorbis,opus,flac,ac3,mpegaudio \
         --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb                      \

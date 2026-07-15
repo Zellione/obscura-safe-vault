@@ -74,6 +74,37 @@ TEST(probe_video_mov_pro_codecs_fill_metadata_and_poster)
     }
 }
 
+TEST(probe_video_webm_vp8_vp9_fill_metadata_and_poster)
+{
+    // Phase 38: WebM's own codec pair, VP8 and VP9, each with and without an
+    // Opus/Vorbis audio track.
+    struct Case { const char* file; vault::VideoCodec codec; uint32_t width; };
+    const Case cases[] = {
+        {OSV_MEDIA_FIXTURE_DIR "/tiny_vp8.webm",        vault::VideoCodec::VP8, 160u},
+        {OSV_MEDIA_FIXTURE_DIR "/tiny_vp8_opus.webm",   vault::VideoCodec::VP8, 160u},
+        {OSV_MEDIA_FIXTURE_DIR "/tiny_vp9.webm",        vault::VideoCodec::VP9, 256u},
+        {OSV_MEDIA_FIXTURE_DIR "/tiny_vp9_vorbis.webm", vault::VideoCodec::VP9, 256u},
+    };
+    for (const auto& c : cases) {
+        auto video_bytes = read_file(c.file);
+        REQUIRE(!video_bytes.empty());
+
+        media::VideoProbeResult result;
+        REQUIRE(media::probe_video(std::span(video_bytes), result));
+
+        // .webm is EBML/Matroska — the shared MKV container path.
+        CHECK_EQ(static_cast<int>(result.container), static_cast<int>(vault::VideoContainer::MKV));
+        CHECK_EQ(static_cast<int>(result.codec), static_cast<int>(c.codec));
+        CHECK_EQ(result.width, c.width);
+        CHECK_EQ(result.height, 120u);
+        CHECK(result.duration_us > 0);
+        CHECK(!result.poster_jpeg.empty());
+
+        auto poster_data = image::decode_from_memory(std::span(result.poster_jpeg));
+        REQUIRE(poster_data.has_value());
+    }
+}
+
 TEST(probe_video_rejects_garbage_data)
 {
     std::vector<uint8_t> junk(8192, 0);

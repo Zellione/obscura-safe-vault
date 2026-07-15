@@ -98,6 +98,8 @@ bool VideoDecoder::open(AVIOContext* pb)
         case AV_CODEC_ID_PRORES: codec_ = ProRes; break;  // Phase 28
         case AV_CODEC_ID_DNXHD:  codec_ = DNxHD;  break;  // Phase 28
         case AV_CODEC_ID_MJPEG:  codec_ = MJPEG;  break;  // Phase 28
+        case AV_CODEC_ID_VP8:    codec_ = VP8;    break;  // Phase 38
+        case AV_CODEC_ID_VP9:    codec_ = VP9;    break;  // Phase 38
         default:                 return fail_open("Unsupported codec");
     }
 

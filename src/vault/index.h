@@ -62,15 +62,18 @@ enum class VideoContainer : uint8_t {
     Unknown = 0xFF,
 };
 
-// Video codec types (Phase 15 PR2; ProRes/DNxHD/MJPEG Phase 28). Stored as a
-// raw u8 in the index, so new values are read back by older builds as an
-// unnamed enum value and displayed as plain "Video" — never a format break.
+// Video codec types (Phase 15 PR2; ProRes/DNxHD/MJPEG Phase 28; VP8/VP9
+// Phase 38). Stored as a raw u8 in the index, so new values are read back by
+// older builds as an unnamed enum value and displayed as plain "Video" —
+// never a format break.
 enum class VideoCodec : uint8_t {
     H264    = 0,
     HEVC    = 1,
     ProRes  = 2,   // Apple ProRes (all profiles)
     DNxHD   = 3,   // Avid DNxHD/DNxHR (one FFmpeg codec id)
     MJPEG   = 4,   // Motion JPEG
+    VP8     = 5,   // WebM (Phase 38)
+    VP9     = 6,   // WebM (Phase 38)
     Unknown = 0xFF,
 };
 

@@ -54,6 +54,8 @@ TEST(video_codec_and_type_labels)
     CHECK_EQ(ui::video_codec_name(ProRes), std::string_view("ProRes"));   // Phase 28
     CHECK_EQ(ui::video_codec_name(DNxHD), std::string_view("DNxHD"));
     CHECK_EQ(ui::video_codec_name(MJPEG), std::string_view("MJPEG"));
+    CHECK_EQ(ui::video_codec_name(VP8), std::string_view("VP8"));     // Phase 38
+    CHECK_EQ(ui::video_codec_name(VP9), std::string_view("VP9"));
     CHECK_EQ(ui::video_codec_name(Unknown), std::string_view("Video"));
     CHECK_EQ(ui::video_type_label(H264), std::string("Video (H.264)"));
     CHECK_EQ(ui::video_type_label(Unknown), std::string("Video"));

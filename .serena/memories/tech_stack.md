@@ -18,7 +18,7 @@
 | libde265 | 1.0.15 | HEIC (HEVC) decode; cmake → `vendor/codecs-prefix` |
 | libaom | 3.14.1 | AVIF (AV1) decode, decoder-only; needs **nasm**; cmake → `vendor/codecs-prefix` |
 | libheif | 1.18.2 | HEIC/AVIF container; one `decode_heif_from_memory` covers both |
-| FFmpeg/libav | 7.1.1 | Video & audio decode-only (H.264/H.265 + ProRes/DNxHD-DNxHR/MJPEG for `.mov` pro codecs, Phase 28; aac/opus/mp3/vorbis/flac/ac3 audio; mov/mp4/m4v + matroska/webm demux; libswscale for video, swresample linked as transitive dependency of audio decoders — we do NOT use swresample for audio conversion, SDL_AudioStream handles that); configure-built static → `vendor/codecs-prefix`; needs **nasm**; linked by `link_av()` (avformat/avcodec/swscale/swresample/avutil) under `OSV_VENDORED_AV` (Phase 15–16) |
+| FFmpeg/libav | 7.1.1 | Video & audio decode-only (H.264/H.265 + ProRes/DNxHD-DNxHR/MJPEG for `.mov` pro codecs, Phase 28; VP8/VP9 for `.webm`, Phase 38; aac/opus/mp3/vorbis/flac/ac3 audio; mov/mp4/m4v + matroska/webm demux; libswscale for video, swresample linked as transitive dependency of audio decoders — we do NOT use swresample for audio conversion, SDL_AudioStream handles that); configure-built static → `vendor/codecs-prefix`; needs **nasm**; linked by `link_av()` (avformat/avcodec/swscale/swresample/avutil) under `OSV_VENDORED_AV` (Phase 15–16) |
 | nlohmann/json | v3.12.0 | Archive `meta.json` parsing (Phase 27). Header-only single-header MIT lib; include path `vendor/json/single_include` (no build step, no premake project). Used exception-free: `json::parse(..., allow_exceptions=false)` → discarded value on malformed input. Only consumer: `src/ui/meta_json.cpp` |
 | miniz | master commit `e78dfd2` | ZIP reader (Phase 17). Plain-C static lib compiled by premake from the modern split sources (`miniz.c`/`miniz_tdef.c`/`miniz_tinfl.c`/`miniz_zip.c`); the only release tags v112–v114 are ancient SVN snapshots, so pinned to a master commit. Built + consumed with `MINIZ_NO_ZLIB_COMPATIBLE_NAMES` (else its `compress`/`crc32`/`inflate` clash with the libz avformat links). `vendor/miniz-shim/miniz_export.h` supplies the one CMake-generated header so the submodule stays pristine; consumers include the umbrella `"miniz.h"` (not `miniz_zip.h`, which lacks `mz_alloc_func`/`MZ_BEST_SPEED`) |
 | zlib | 1.3.2 | gzip filter dep for libarchive (Phase 34). cmake → `vendor/codecs-prefix`; `-DZLIB_BUILD_SHARED=OFF -DZLIB_BUILD_TESTING=OFF`. Windows static-lib output name is `zs.lib` (`zlib_static_suffix="s"` under `if(WIN32)` in its own CMakeLists.txt) — `link_archive()` in premake5.lua branches on `system:windows` for this |
@@ -32,7 +32,7 @@ order `heif → de265 → aom → webp → sharpyuv`. The build passes
 
 **FFmpeg (Phase 15–16)** is a sibling vendored submodule (`vendor/ffmpeg`) built via **configure**
 (not cmake) into the same `vendor/codecs-prefix` by `build_codecs.{sh,bat}`: decode-only
-(`--disable-everything` then opt-in h264/hevc/prores/dnxhd/mjpeg decoders (pro `.mov` codecs Phase 28), aac/opus/mp3/vorbis/flac/ac3 audio decoders,
+(`--disable-everything` then opt-in h264/hevc/prores/dnxhd/mjpeg/vp8/vp9 decoders (pro `.mov` codecs Phase 28; `.webm` VP8/VP9 Phase 38), aac/opus/mp3/vorbis/flac/ac3 audio decoders,
 mov/mp4/matroska demuxers, swscale + swresample; no encoders/muxers/protocols/network/programs).
 `link_av()` links avformat/avcodec/swscale/swresample/avutil and defines `OSV_VENDORED_AV` **only
 when `lib/libavcodec.a` is present**, so non-FFmpeg builds stay green. Index format is now
