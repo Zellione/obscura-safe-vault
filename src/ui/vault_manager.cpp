@@ -161,7 +161,10 @@ void VaultManager::render(gfx::Renderer& r)
     const Layout L = layout();
 
     r.draw_text(font_, 60.0f, 44.0f, "Vaults", TEXT);
-    r.draw_text(font_, W - 260.0f, 50.0f, "C  Theme   F1  Help", TEXT_FAINT);
+
+    const std::string hint = "C  Theme   F1  Help";
+    const auto hint_width = static_cast<float>(font_.measure(hint));
+    r.draw_text(font_, W - 60.0f - hint_width, 50.0f, hint, TEXT_FAINT);
 
     if (entries_.empty()) {
         r.draw_text(font_, 60.0f, L.list_top, "No vaults yet — press N to create, O to open.",
