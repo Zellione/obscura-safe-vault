@@ -133,7 +133,7 @@ void App::to_gallery(const std::string& path, int selected)
         window_, font_, *active_, *cache_,
         ui::GalleryGrid::GridDialogs{dialog_, folder_dialog_},
         ui::GalleryGrid::GridVaultCtx{registry_, active_path_},
-        ui::GridLocation{path, selected}, session_.view);
+        ui::GridLocation{path, selected, session_.view});
     screen_->on_enter();
 }
 
@@ -149,8 +149,8 @@ void App::to_viewer(const std::string& gallery_path, int index)
 {
     enter_viewer(std::make_unique<ui::ImageViewer>(
         window_, font_, *active_, *cache_,
-        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_},
-        ui::ImageViewer::Album::gallery(gallery_path), index, session_.strip_side));
+        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_, session_.strip_side},
+        ui::ImageViewer::Album::gallery(gallery_path), index));
 }
 
 void App::to_favorite_images()
@@ -187,8 +187,8 @@ void App::to_favorite_viewer(int index)
 
     enter_viewer(std::make_unique<ui::ImageViewer>(
         window_, font_, *active_, *cache_,
-        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_},
-        std::move(album), index, session_.strip_side));
+        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_, session_.strip_side},
+        std::move(album), index));
 }
 
 void App::to_advanced_search()
@@ -240,8 +240,8 @@ void App::to_tag_viewer(const std::string& tag, int index)
 
     enter_viewer(std::make_unique<ui::ImageViewer>(
         window_, font_, *active_, *cache_,
-        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_},
-        std::move(album), index, session_.strip_side));
+        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_, session_.strip_side},
+        std::move(album), index));
 }
 
 namespace {
@@ -346,9 +346,9 @@ void App::capture_session_state()
     // Snapshot the outgoing screen's view/strip-side/video-position into
     // session_ before it is destroyed (Phase 39 Part 2) — must run before
     // on_exit(), which tears down ImageViewer's live video_.
-    if (auto* grid = dynamic_cast<ui::GalleryGrid*>(screen_.get())) {
+    if (const auto* grid = dynamic_cast<const ui::GalleryGrid*>(screen_.get())) {
         session_.view = ui::current_gallery_view(*grid);
-    } else if (auto* viewer = dynamic_cast<ui::ImageViewer*>(screen_.get())) {
+    } else if (const auto* viewer = dynamic_cast<const ui::ImageViewer*>(screen_.get())) {
         session_.strip_side = ui::current_strip_side(*viewer);
         ui::capture_video_resume(*viewer, session_);
     }

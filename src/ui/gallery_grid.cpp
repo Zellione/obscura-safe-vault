@@ -154,13 +154,13 @@ void draw_file_op_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
 
 GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                          gfx::TextureCache& cache, GridDialogs dialogs,
-                         GridVaultCtx vault_ctx, GridLocation at, GalleryView initial_view)
+                         GridVaultCtx vault_ctx, GridLocation at)
     : win_(win), font_(font), vault_(vault), cache_(cache), dialogs_(dialogs),
       search_(vault, win), tag_editor_(vault, win),
       quick_switch_(vault_ctx.registry, vault_ctx.active_vault_path),
       transfer_(vault, std::move(vault_ctx.active_vault_path), vault_ctx.registry,
                 dialogs.file, win),
-      initial_(std::move(at)), view_(initial_view)
+      initial_(std::move(at)), view_(initial_.view)
 {
 }
 

@@ -30,11 +30,14 @@ namespace platform { class FileDialog; class FolderDialog; class VaultRegistry; 
 
 namespace ui {
 
-// Where to (re)open the grid: a gallery path (empty = root) and the selected
-// tile index. Used to restore position when returning from the image viewer.
+// Where to (re)open the grid: a gallery path (empty = root), the selected
+// tile index, and the initial List/Grid view (Phase 39 Part 2 session
+// memory). Used to restore position + view mode when returning from the
+// image viewer.
 struct GridLocation {
     std::string path;
     int         selected = 0;
+    GalleryView view     = GalleryView::Grid;
 };
 
 class GalleryGrid : public Screen {
@@ -53,8 +56,7 @@ public:
 
     GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                 gfx::TextureCache& cache, GridDialogs dialogs,
-                GridVaultCtx vault_ctx, GridLocation at = {},
-                GalleryView initial_view = GalleryView::Grid);
+                GridVaultCtx vault_ctx, GridLocation at = {});
 
     void on_enter() override;
     void handle_event(const SDL_Event& e) override;

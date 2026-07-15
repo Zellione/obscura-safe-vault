@@ -72,16 +72,17 @@ public:
     };
 
     // Host-provided collaborators beyond the core render deps, bundled to keep the
-    // constructor within the parameter budget (S107).
+    // constructor within the parameter budget (S107). initial_strip_side seeds the
+    // session-scoped thumbnail-strip side (Phase 39 Part 2).
     struct Context {
         platform::FolderDialog&  folder;
         platform::VaultRegistry& registry;
         std::string              active_path;
+        StripSide                initial_strip_side = StripSide::Bottom;
     };
 
     ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                gfx::TextureCache& cache, Context ctx, Album album, int start_index,
-                StripSide initial_strip_side = StripSide::Bottom);
+                gfx::TextureCache& cache, Context ctx, Album album, int start_index);
 
     ~ImageViewer() override = default;
 

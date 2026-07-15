@@ -33,13 +33,12 @@ bool item_is_video(const std::vector<const vault::IndexNode*>& imgs, int idx)
 } // namespace
 
 ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                         gfx::TextureCache& cache, Context ctx, Album album, int start_index,
-                         StripSide initial_strip_side)
+                         gfx::TextureCache& cache, Context ctx, Album album, int start_index)
     : win_(win), font_(font), vault_(vault), cache_(cache), export_(ctx.folder, win),
       tag_editor_(vault, win), search_(vault, win),
       quick_switch_(ctx.registry, std::move(ctx.active_path)),
       album_(std::move(album)), index_(start_index),
-      strip_side_(initial_strip_side),
+      strip_side_(ctx.initial_strip_side),
       full_cache_(vault, win.sdl_renderer(), &decode_worker_)
 {
 }
