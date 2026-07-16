@@ -10,6 +10,21 @@
 #include "vault/index.h"
 #include "vault/vault_ops.h"
 
+namespace vault {
+// Test-only seam — see the friend declaration + comment in vault.h.
+void test_only_force_video_codec_unknown(Vault& v, std::string_view node_path)
+{
+    IndexNode* n = v.resolve_node(node_path);
+    if (!n) return;
+    n->vmeta.codec         = VideoCodec::Unknown;
+    n->vmeta.width         = 0;
+    n->vmeta.height        = 0;
+    n->vmeta.duration_us   = 0;
+    n->vmeta.poster_offset = 0;
+    n->vmeta.poster_length = 0;
+}
+}  // namespace vault
+
 namespace {
 
 // Test KDF params: cheap Argon2 so the test suite stays fast.
@@ -267,3 +282,144 @@ TEST(leaf_gallery_accepts_mixed_image_and_video)
     REQUIRE(v.add_video("mix", video_bytes, "v.mp4", 4096) == vault::VaultResult::Ok);
     CHECK(v.add_image("mix", image_bytes, "i.webp") == vault::VaultResult::Ok);
 }
+
+// --- repair_video_metadata (Phase 40 bugfix) --------------------------------
+
+TEST(repair_video_metadata_returns_locked_when_vault_locked)
+{
+    TempVault tv("repair_locked");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    v.lock();
+    CHECK(v.repair_video_metadata("anything.mp4") == vault::VaultResult::Locked);
+}
+
+TEST(repair_video_metadata_returns_not_found_for_missing_path)
+{
+    TempVault tv("repair_missing");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    CHECK(v.repair_video_metadata("does/not/exist.mp4") == vault::VaultResult::NotFound);
+}
+
+TEST(repair_video_metadata_returns_not_found_for_non_video_node)
+{
+    auto image_bytes = read_file(OSV_FIXTURE_DIR "/sample.webp");
+    REQUIRE(!image_bytes.empty());
+
+    TempVault tv("repair_non_video");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", image_bytes, "i.webp") == vault::VaultResult::Ok);
+    CHECK(v.repair_video_metadata("i.webp") == vault::VaultResult::NotFound);
+}
+
+#ifdef OSV_VENDORED_AV
+
+TEST(repair_video_metadata_is_noop_when_codec_already_known)
+{
+    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!video_bytes.empty());
+
+    TempVault tv("repair_noop_known");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("", video_bytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+
+    auto before = v.list("");
+    REQUIRE(before.size() == 1);
+    REQUIRE(static_cast<int>(before[0]->vmeta.codec) !=
+            static_cast<int>(vault::VideoCodec::Unknown));
+    const auto codec_before    = before[0]->vmeta.codec;
+    const auto duration_before = before[0]->vmeta.duration_us;
+    const auto poster_off_before = before[0]->vmeta.poster_offset;
+    const auto poster_len_before = before[0]->vmeta.poster_length;
+
+    CHECK(v.repair_video_metadata("tiny.mp4") == vault::VaultResult::Ok);
+
+    auto after = v.list("");
+    REQUIRE(after.size() == 1);
+    CHECK(static_cast<int>(after[0]->vmeta.codec) == static_cast<int>(codec_before));
+    CHECK(after[0]->vmeta.duration_us == duration_before);
+    CHECK(after[0]->vmeta.poster_offset == poster_off_before);
+    CHECK(after[0]->vmeta.poster_length == poster_len_before);
+}
+
+TEST(repair_video_metadata_leaves_still_undecodable_video_unchanged)
+{
+    // A codec our build genuinely cannot decode (mpeg2video isn't in the
+    // vendored FFmpeg's --enable-decoder list) — add_video() still accepts
+    // it (container detected via EBML magic) but stores codec=Unknown,
+    // duration=0, no poster. repair_video_metadata() must leave it exactly
+    // as-is (Ok, no-op) rather than erroring, since re-probing genuinely
+    // still fails.
+    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/undecodable_mpeg2.mkv");
+    REQUIRE(!video_bytes.empty());
+
+    TempVault tv("repair_still_undecodable");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("", video_bytes, "undecodable_mpeg2.mkv", 4096) == vault::VaultResult::Ok);
+
+    auto before = v.list("");
+    REQUIRE(before.size() == 1);
+    REQUIRE(static_cast<int>(before[0]->vmeta.codec) ==
+            static_cast<int>(vault::VideoCodec::Unknown));
+    REQUIRE(before[0]->vmeta.duration_us == 0);
+    REQUIRE(before[0]->vmeta.poster_length == 0);
+
+    CHECK(v.repair_video_metadata("undecodable_mpeg2.mkv") == vault::VaultResult::Ok);
+
+    auto after = v.list("");
+    REQUIRE(after.size() == 1);
+    CHECK(static_cast<int>(after[0]->vmeta.codec) == static_cast<int>(vault::VideoCodec::Unknown));
+    CHECK(after[0]->vmeta.duration_us == 0);
+    CHECK(after[0]->vmeta.poster_length == 0);
+}
+
+TEST(repair_video_metadata_fills_in_codec_duration_and_poster_when_now_decodable)
+{
+    // Simulates the real Phase 40 bug: a video whose codec wasn't decodable
+    // at import time (here, forced via the test-only seam, standing in for
+    // "this build's FFmpeg didn't have AV1 support yet") gets its codec,
+    // duration, and poster filled in once repair_video_metadata() re-probes
+    // it against a build that CAN decode it — without touching the original
+    // stored bytes.
+    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!video_bytes.empty());
+
+    TempVault tv("repair_fills_in");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("", video_bytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+
+    vault::test_only_force_video_codec_unknown(v, "tiny.mp4");
+
+    auto before = v.list("");
+    REQUIRE(before.size() == 1);
+    REQUIRE(static_cast<int>(before[0]->vmeta.codec) ==
+            static_cast<int>(vault::VideoCodec::Unknown));
+    REQUIRE(before[0]->vmeta.duration_us == 0);
+    REQUIRE(before[0]->vmeta.poster_length == 0);
+
+    CHECK(v.repair_video_metadata("tiny.mp4") == vault::VaultResult::Ok);
+
+    auto after = v.list("");
+    REQUIRE(after.size() == 1);
+    CHECK(static_cast<int>(after[0]->vmeta.codec) == static_cast<int>(vault::VideoCodec::H264));
+    CHECK(after[0]->vmeta.duration_us > 0);
+    CHECK(after[0]->vmeta.poster_length > 0);
+
+    // The original bytes are untouched — chunks/orig_size weren't rewritten.
+    crypto::SecureBytes out;
+    REQUIRE(v.read_video(*after[0], out) == vault::VaultResult::Ok);
+    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(video_bytes));
+}
+
+#endif  // OSV_VENDORED_AV

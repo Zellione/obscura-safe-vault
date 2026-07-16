@@ -154,6 +154,27 @@ public:
     // Decrypt + concatenate all of a video node's chunks into mlock'd memory.
     [[nodiscard]] VaultResult read_video(const IndexNode& node, crypto::SecureBytes& out) const;
 
+    // Re-probe a video node whose metadata was never filled in — codec ==
+    // Unknown, stored when add_video() imported it before a decoder for its
+    // codec existed (e.g. an AV1 .webm imported before Phase 40). Best
+    // effort: decrypts the raw container, re-runs media::probe_video(), and
+    // if it now succeeds with a real codec, updates codec/width/height/
+    // duration_us and stores a poster (if one wasn't already stored),
+    // persisting via the normal crash-safe index swap. A no-op success (Ok,
+    // no write) if the node already has real metadata, isn't a video, or
+    // still can't be decoded. Locked if not unlocked; NotFound if node_path
+    // doesn't resolve.
+    [[nodiscard]] VaultResult repair_video_metadata(std::string_view node_path);
+
+    // Test-only seam (defined in tests/vault/test_video.cpp, not part of any
+    // production translation unit): resets a just-imported, fully-decodable
+    // video node's metadata back to the Unknown/0/empty state repair_video_metadata()
+    // above is meant to fix, simulating "imported before this build could
+    // decode its codec". Production code can never produce that state for a
+    // file the current build CAN decode — only a real FFmpeg capability
+    // change between import time and now can.
+    friend void test_only_force_video_codec_unknown(Vault& v, std::string_view node_path);
+
     // Remove an image from the index (its chunk is orphaned, reclaimed by Phase 7
     // compaction). NotFound if the image does not exist.
     [[nodiscard]] VaultResult remove_image(std::string_view gallery_path,
