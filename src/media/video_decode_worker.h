@@ -74,15 +74,22 @@ public:
     // Pop one finished result, or nullopt if none ready. Non-blocking.
     [[nodiscard]] std::optional<Result> take_result();
 
-    // Blocks (bounded by a timeout, so a stuck decode can never hang the
-    // caller forever) until a result is published or the worker stops.
+    // Blocks (bounded by a short timeout, so a stuck decode can never hang
+    // the caller forever) until a result is published or the worker stops.
     // Returns nullopt on timeout or if the worker has nothing pending and is
     // stopping. The render thread uses this — not take_result() — as its
     // main way to get the next frame: it prefetches a couple of packets
-    // ahead (see VideoPlayback::Impl::decode_into_pending(), Task 5) so that
-    // by the time it actually needs to block here, the worker already has a
-    // head start decoding them in parallel with whatever the render thread
-    // was just doing (GPU upload, present, event handling).
+    // ahead (see VideoPlayback::Impl::decode_into_pending(), Task 5) so
+    // that by the time it actually needs to block here, the worker already
+    // has a head start decoding them in parallel with whatever the render
+    // thread was just doing (GPU upload, present, event handling). The
+    // timeout is short (tens of ms), not a long poll interval: while a
+    // seek target is pending, the worker can silently skip packets whose
+    // decoded pts lands before the target — those never publish a Result
+    // — so the caller can't distinguish "still decoding" from "needs more
+    // input" except by retrying with fresh input on timeout, in a loop
+    // (this does not mean a slow real decode gets abandoned; the caller
+    // just loops back and waits again for the same in-flight work).
     [[nodiscard]] std::optional<Result> wait_result();
 
 private:

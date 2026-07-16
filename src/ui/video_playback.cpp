@@ -145,6 +145,18 @@ struct VideoPlayback::Impl {
     // pending_ being up to date when this returns — but the wait now
     // overlaps with the worker's own progress instead of being the decode
     // itself.
+    //
+    // While a seek target is pending, the worker's own decode-forward logic
+    // silently discards frames whose pts lands before the target — no
+    // Result is ever published for those, so in_flight_ never reflects
+    // them. A fixed PREFETCH_DEPTH alone can't get past this: once
+    // PREFETCH_DEPTH packets are in flight and all of them get silently
+    // discarded, the render thread would otherwise just wait forever for a
+    // Result that's never coming, having no way to know the worker needs
+    // more input rather than more time. So on every wait_result() timeout,
+    // feed one more packet before retrying — cheap I/O only, and the
+    // worker's own single-threaded queue ordering means an extra prefetch
+    // packet never skips ahead of one already in flight.
     void decode_into_pending()
     {
         while (in_flight_ < PREFETCH_DEPTH && !demux_eof_) {
@@ -157,8 +169,16 @@ struct VideoPlayback::Impl {
         for (;;) {
             auto r = video_worker_->wait_result();
             if (!r) {
-                // Timed out with nothing published (or the worker is
-                // stopping) — treat as "no frame ready yet"; the caller
+                if (!demux_eof_) {
+                    AVPacket* pkt = decoder_.demux_next_video_packet();
+                    video_worker_->submit(pkt, generation_);
+                    ++in_flight_;
+                    if (!pkt) demux_eof_ = true;
+                    continue;
+                }
+                // Demuxer exhausted and the worker still hasn't produced
+                // anything for this generation (or is stopping) — nothing
+                // more to feed it, so stop retrying; the caller
                 // (present_pending()/advance()) will simply retry on the
                 // next render pass rather than hang indefinitely.
                 return;

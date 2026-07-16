@@ -84,8 +84,16 @@ std::optional<VideoDecodeWorker::Result> VideoDecodeWorker::take_result()
 
 std::optional<VideoDecodeWorker::Result> VideoDecodeWorker::wait_result()
 {
+    // Short timeout, not a long poll interval: the caller (VideoPlayback::
+    // Impl::decode_into_pending()) retries in a loop, feeding one more
+    // packet on each timeout when the worker might be silently skipping
+    // packets toward a pending seek target (those never publish a Result,
+    // so the caller can't tell "still decoding" from "needs more input"
+    // apart except by trying). A short timeout keeps that retry cadence
+    // fast; it does not mean a slow real decode gets abandoned — the
+    // caller just loops back and waits again for the same in-flight work.
     std::unique_lock lock(mtx_);
-    cv_done_.wait_for(lock, std::chrono::milliseconds(500),
+    cv_done_.wait_for(lock, std::chrono::milliseconds(20),
                       [this] { return stop_ || !done_.empty(); });
     if (done_.empty()) return std::nullopt;
     Result r = std::move(done_.front());
@@ -110,6 +118,13 @@ void VideoDecodeWorker::run()
             continue;
         }
 
+        // Capture before av_packet_free() nulls job.pkt as a side effect —
+        // every later "is this the flush marker?" check must use is_flush,
+        // never job.pkt itself, or a real packet that happens to return
+        // EAGAIN on its first avcodec_receive_frame() (routine — many
+        // codecs need more than one packet before yielding a frame) would
+        // be indistinguishable from an actual end-of-stream flush.
+        const bool is_flush = (job.pkt == nullptr);
         if (job.pkt) {
             avcodec_send_packet(codec_ctx_, job.pkt);
             av_packet_free(&job.pkt);
@@ -152,14 +167,14 @@ void VideoDecodeWorker::run()
                     e.type = wake_event_;
                     SDL_PushEvent(&e);
                 }
-                if (job.pkt == nullptr) {
+                if (is_flush) {
                     // Keep draining after flush; don't break yet
                     continue;
                 }
                 break;   // one frame per submitted job, matching decode_from_current_frame() cadence
             }
             if (ret == AVERROR(EAGAIN)) {
-                if (job.pkt == nullptr) {
+                if (is_flush) {
                     // EOF drain complete: all buffered frames exhausted
                     Result r;
                     r.generation = job.generation;
@@ -178,7 +193,7 @@ void VideoDecodeWorker::run()
                 break;   // need another packet; back to outer loop
             }
             // Any other error; if flushing, publish EOF
-            if (job.pkt == nullptr) {
+            if (is_flush) {
                 Result r;
                 r.generation = job.generation;
                 r.eof = true;
