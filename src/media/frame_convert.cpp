@@ -2,6 +2,9 @@
 
 #include "media/frame_convert.h"
 
+#include <array>
+#include <cstring>
+
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
@@ -107,6 +110,43 @@ std::optional<DecodedFrame> FrameConverter::to_i420(const AVFrame* src, double p
         result.linesizes[i] = conv_->linesize[i];
     }
     return result;
+}
+
+DecodedFrame copy_owned_frame(const DecodedFrame& src, std::vector<uint8_t>& storage)
+{
+    const int chroma_h = (src.height + 1) / 2;
+    const int plane_count = src.pix_fmt == FramePixelFormat::I420 ? 3 : 2;
+
+    std::array<size_t, 3> plane_bytes{0, 0, 0};
+    plane_bytes[0] = static_cast<size_t>(src.linesizes[0]) * static_cast<size_t>(src.height);
+    if (plane_count >= 2)
+        plane_bytes[1] = static_cast<size_t>(src.linesizes[1]) * static_cast<size_t>(chroma_h);
+    if (plane_count == 3)
+        plane_bytes[2] = static_cast<size_t>(src.linesizes[2]) * static_cast<size_t>(chroma_h);
+
+    size_t total = plane_bytes[0] + plane_bytes[1] + plane_bytes[2];
+    storage.resize(total);
+
+    DecodedFrame out{};
+    out.width       = src.width;
+    out.height      = src.height;
+    out.pix_fmt      = src.pix_fmt;
+    out.pts_seconds = src.pts_seconds;
+    out.linesizes    = src.linesizes;
+
+    size_t offset = 0;
+    for (int i = 0; i < plane_count; ++i) {
+        if (plane_bytes[i] == 0 || !src.planes[i]) {
+            out.planes[i] = nullptr;
+            continue;
+        }
+        std::memcpy(storage.data() + offset, src.planes[i], plane_bytes[i]);
+        out.planes[i] = storage.data() + offset;
+        offset += plane_bytes[i];
+    }
+    if (plane_count < 3) out.planes[2] = nullptr;
+
+    return out;
 }
 
 } // namespace media

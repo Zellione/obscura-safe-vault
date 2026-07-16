@@ -2,7 +2,9 @@
 
 #ifdef OSV_VENDORED_AV
 
+#include <cstdint>
 #include <optional>
+#include <vector>
 
 #include "media/decoded_frame.h"
 
@@ -56,6 +58,13 @@ private:
     SwsContext* sws_  = nullptr;
     AVFrame*    conv_ = nullptr;
 };
+
+// Copies `src`'s plane data into `storage` (resized to fit) and returns a
+// DecodedFrame whose planes/linesizes point into `storage`. `storage` must
+// outlive the returned DecodedFrame. Chroma-plane row counts use
+// (height + 1) / 2 for I420/NV12, matching FFmpeg's own subsampling
+// rounding for odd dimensions.
+[[nodiscard]] DecodedFrame copy_owned_frame(const DecodedFrame& src, std::vector<uint8_t>& storage);
 
 } // namespace media
 
