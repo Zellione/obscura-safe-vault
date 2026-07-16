@@ -21,7 +21,7 @@ namespace ui {
 // defaults at the same points AdvancedSearchState resets at: explicit lock,
 // idle auto-lock, and vault switch.
 struct GallerySessionState {
-    GalleryView view                 = GalleryView::Grid;   // last-used, session-global
+    GalleryView view                 = GalleryView::GridM;   // last-used, session-global
     StripSide   strip_side           = StripSide::Bottom;    // last-used, session-global
 
     // Resume bookmark for the single most-recently-left video (paused, not

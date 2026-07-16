@@ -429,6 +429,7 @@ project "osv_tests"
         "src/ui/archive_reader.cpp",
         "src/ui/archive_import.cpp",
         "src/ui/gallery_sort.cpp",
+        "src/ui/gallery_view.cpp",
         "src/ui/help_popup.cpp",
         "src/ui/tile_thumb.cpp",
         "src/ui/video_repair.cpp",

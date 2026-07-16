@@ -38,7 +38,7 @@ namespace ui {
 struct GridLocation {
     std::string path;
     int         selected = 0;
-    GalleryView view     = GalleryView::Grid;
+    GalleryView view     = GalleryView::GridM;
 };
 
 class GalleryGrid : public Screen {
@@ -141,7 +141,7 @@ private:
     GridLocation          initial_;   // where to (re)open: path + selected tile
     std::vector<const vault::IndexNode*> children_;
     int                   cols_ = 1;
-    GalleryView           view_ = GalleryView::Grid;
+    GalleryView           view_ = GalleryView::GridM;
     float                 scroll_ = 0.0f;  // vertical scroll offset (pixels scrolled down)
     std::string           error_;
     std::string           status_;   // transient export result message

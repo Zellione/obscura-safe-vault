@@ -51,8 +51,9 @@ src/
                                                through every screen's constructor.
                                                Phase 39 Part 2: App owns
                                                `ui::GallerySessionState session_` (mirrors
-                                               adv_session_): last-used GalleryGrid List/Grid
-                                               view + ImageViewer strip side + a single "last
+                                               adv_session_): last-used GalleryGrid view density
+                                               (List/GridS/GridM/GridL/GridXL, Phase 40 Part 3) +
+                                               ImageViewer strip side + a single "last
                                                video watched" resume bookmark, carried across
                                                App's screen reconstruction on every nav
                                                transition. capture_session_state()
@@ -724,9 +725,21 @@ src/
                                                  supplies per-screen grouped content; App owns HelpPopupState,
                                                  intercepts F1 globally, renders overlay on top (mirroring
                                                  Phase 33 keep-unlocked corner-badge). Esc/Q close.
-               gallery_view.h                  — GalleryView{Grid,List} (Phase 39 Part 2 extract
-                                                 from GalleryGrid's private nested enum, now
-                                                 shared so App/GallerySessionState can name it).
+               gallery_view.h/.cpp             — GalleryView{List,GridS,GridM,GridL,GridXL}
+                                                 (Phase 39 Part 2 extract from GalleryGrid's
+                                                 private nested enum, now shared so App/
+                                                 GallerySessionState can name it; Phase 40 Part 3
+                                                 widened List/Grid to a 5-way density cycle).
+                                                 cell_size_for(view) (S=128/M=188/L=248/XL=320,
+                                                 List unused) and next_gallery_view(view) (the
+                                                 L-key cycle order) are pure free functions, unit-
+                                                 tested directly; GridM==188 matches the old fixed
+                                                 CELL constant exactly, so existing sessions render
+                                                 unchanged until a user opts into another density.
+                                                 gallery_view.cpp is listed explicitly (not
+                                                 globbed) in osv_tests' premake5.lua files{} block,
+                                                 like every other src/ui/*.cpp the test binary
+                                                 needs.
                gallery_session_state.h         — GallerySessionState{view,strip_side,
                                                  last_media_path,video_resume_seconds} + reset()
                                                  (Phase 39 Part 2, modeled on AdvancedSearchState,
