@@ -6,7 +6,7 @@
 
 A multi-platform native encrypted photo gallery. All photos live inside a single `.osv` vault file — images are decrypted **into locked memory only**, never written to a temporary file or disk. The gallery is browsable with a freely-nestable folder tree, a zoomable full-screen image viewer, and a thumbnail strip navigable with arrow keys.
 
-**Stack:** C++20 · SDL3 · SDL_Renderer · Monocypher (XChaCha20-Poly1305 + Argon2id) · stb_image · libwebp / libheif (WebP / HEIC / AVIF) · FFmpeg decode-only (H.264 / H.265 / ProRes / DNxHD / MJPEG / VP8 / VP9 video, AAC / Opus / MP3 / Vorbis / FLAC / AC-3 audio) · premake5 → Ninja
+**Stack:** C++23 · SDL3 · SDL_Renderer · Monocypher (XChaCha20-Poly1305 + Argon2id) · stb_image · libwebp / libheif (WebP / HEIC / AVIF) · FFmpeg decode-only (H.264 / H.265 / ProRes / DNxHD / MJPEG / VP8 / VP9 video, AAC / Opus / MP3 / Vorbis / FLAC / AC-3 audio) · miniz (ZIP/CBZ) · libarchive (7z/RAR/TAR) · nlohmann/json · premake5 → Ninja
 
 See [`CLAUDE.md`](CLAUDE.md) for all technology decisions and [`ROADMAP.md`](ROADMAP.md) for the full development plan.
 
@@ -20,16 +20,16 @@ See [`CLAUDE.md`](CLAUDE.md) for all technology decisions and [`ROADMAP.md`](ROA
 
 | Tool | Why | Install |
 |---|---|---|
-| C++20 compiler | building the app | gcc 14+ / clang 17+ / MSVC 2022 / AppleClang |
-| `cmake`, `ninja` | configure + build vendored libs | Arch: `sudo pacman -S cmake ninja` · Debian/Ubuntu: `sudo apt install cmake ninja-build` · macOS: `brew install cmake ninja` · Windows: VS 2022 + `choco install ninja` |
-| `nasm` | assembler for the vendored **libaom** (AVIF decode) | Arch: `sudo pacman -S nasm` · Debian/Ubuntu: `sudo apt install nasm` · macOS: `brew install nasm` · Windows: `choco install nasm` |
+| C++23 compiler | building the app | gcc 14+ / clang 17+ / MSVC 2022 |
+| `cmake`, `ninja` | configure + build vendored libs | Arch: `sudo pacman -S cmake ninja` · Debian/Ubuntu: `sudo apt install cmake ninja-build` · Windows: VS 2022 + `choco install ninja` |
+| `nasm` | assembler for the vendored **libaom** (AVIF decode) | Arch: `sudo pacman -S nasm` · Debian/Ubuntu: `sudo apt install nasm` · Windows: `choco install nasm` |
 
 ### First-time setup
 
 Initialises git submodules, downloads the `premake5` binary, and cmake-builds the vendored static libraries (SDL3, plus the image codecs libwebp / libde265 / libaom / libheif into `vendor/codecs-prefix/`).
 
 ```bash
-scripts/setup.sh         # Linux/macOS
+scripts/setup.sh         # Linux
 scripts\setup.bat        # Windows (VS 2022 Developer prompt)
 ```
 
@@ -118,19 +118,26 @@ src/
   crypto/    Monocypher wrappers: XChaCha20-Poly1305, Argon2id, secure memory
   vault/     .osv container: header, index tree, chunk store
   image/     stb_image decode from memory + thumbnail generation
+  media/     Video/audio decode (FFmpeg, decode-only) over encrypted chunks
   gfx/       SDL3 window, SDL_Renderer, texture cache, text atlas
   ui/        Unlock screen, gallery grid, image viewer, widgets
   platform/  Config paths, SDL3 file dialogs
 vendor/
-  SDL3/        git submodule (3.4.10)
-  monocypher/  git submodule (4.0.2-RC1)
-  stb/         git submodule
+  SDL3/        git submodule — window/renderer/input
+  monocypher/  git submodule — crypto primitives
+  stb/         git submodule — image decode
   libwebp/     git submodule — WebP decode
   libde265/    git submodule — HEIC (HEVC) decode
   libaom/      git submodule — AVIF (AV1) decode
   libheif/     git submodule — HEIC/AVIF container
+  ffmpeg/      git submodule — video/audio decode-only
+  miniz/       git submodule — ZIP/CBZ import
+  json/        git submodule — nlohmann/json (archive meta.json)
+  libarchive/  git submodule — 7z/RAR/TAR import (read-only)
+  zlib/ xz/    git submodules — libarchive's gzip/LZMA2 filter deps
 tests/         Unit and integration tests (Phase 1+)
-scripts/       setup.sh · build_codecs.sh · gen.sh · build.sh · test.sh
+scripts/       setup.sh · gen.sh · build.sh · test.sh · build_codecs.sh ·
+               build_ffmpeg_windows.sh · package.sh · fix_ninja_deps.sh
 ```
 
 ---

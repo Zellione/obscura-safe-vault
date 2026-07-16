@@ -10,8 +10,7 @@ namespace platform {
 // Disable core dumps on this process. Called once at app startup (Release builds only)
 // to prevent core dumps from containing decrypted data or key material.
 //
-// On Linux: uses prctl(PR_SET_DUMPABLE, 0) to prevent ptrace attach and core dumps.
-// On macOS: uses setrlimit(RLIMIT_CORE, {0,0}) to disable core dumps.
+// On Linux: uses prctl(PR_SET_DUMPABLE, 0) + setrlimit(RLIMIT_CORE, {0,0}).
 // On Windows: no-op (Windows doesn't support prctl and core dumps work differently).
 //
 // Logs a [Platform] error line if it fails; silent on success.

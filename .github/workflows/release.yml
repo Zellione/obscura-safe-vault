@@ -276,98 +276,14 @@ jobs:
           retention-days: 7
 
   # ===========================================================================
-  # macOS — AppleClang Release .app bundle (mirrors ci.yml macos, Release)
-  # ===========================================================================
-  macos:
-    name: Package / macOS
-    runs-on: macos-latest
-    timeout-minutes: 60
-
-    steps:
-      - name: Checkout (with submodules)
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install codec build tools
-        run: brew install ninja nasm
-
-      - name: Cache premake5 binary
-        uses: actions/cache@v4
-        id: cache-premake5
-        with:
-          path: bin/premake5
-          key: premake5-5.0.0-beta8-macosx
-
-      - name: Download premake5
-        if: steps.cache-premake5.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p bin
-          curl -fsSL \
-            "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-macosx.tar.gz" \
-            -o /tmp/premake5.tar.gz
-          tar -xzf /tmp/premake5.tar.gz -C bin/
-          chmod +x bin/premake5
-
-      - name: Cache vendored SDL3 build
-        uses: actions/cache@v4
-        id: cache-sdl3
-        with:
-          path: vendor/SDL3/build
-          key: sdl3-macos-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
-
-      - name: Build vendored SDL3
-        if: steps.cache-sdl3.outputs.cache-hit != 'true'
-        run: |
-          cmake -S vendor/SDL3 -B vendor/SDL3/build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DSDL_STATIC=ON -DSDL_SHARED=OFF \
-            -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_INSTALL_TESTS=OFF
-          cmake --build vendor/SDL3/build --parallel 3
-
-      - name: Cache vendored codecs build
-        uses: actions/cache@v4
-        id: cache-codecs
-        with:
-          path: vendor/codecs-prefix
-          key: codecs-v4-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
-
-      - name: Build vendored codecs
-        if: steps.cache-codecs.outputs.cache-hit != 'true'
-        run: scripts/build_codecs.sh
-
-      - name: Generate Makefiles
-        run: bin/premake5 gmake2
-
-      - name: Build (Release)
-        run: make config=release_x64 -j3
-
-      - name: Run tests (Release)
-        env:
-          SDL_VIDEODRIVER: dummy
-        run: ./build/bin/Release/osv_tests
-
-      - name: Package (.app bundle)
-        env:
-          OSV_VERSION: ${{ github.ref_name }}
-        run: OSV_VERSION="${OSV_VERSION#v}" scripts/package_macos.sh
-
-      - name: Upload package
-        uses: actions/upload-artifact@v4
-        with:
-          name: osv-macos-app
-          path: dist/*.zip
-          retention-days: 7
-
-  # ===========================================================================
-  # Publish — gather the three packages, checksum them, and attach everything
+  # Publish — gather the packages, checksum them, and attach everything
   # to the tag's GitHub release (created as a draft if it doesn't exist yet).
   # ===========================================================================
   publish:
     name: Publish release assets
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [linux, windows, macos]
+    needs: [linux, windows]
     permissions:
       contents: write
 

@@ -18,13 +18,7 @@ struct IndexNode;
 
 namespace ui {
 
-// std::jthread is absent from AppleClang's libc++ (see zip_import_job.h); the
-// destructor joins explicitly either way, so behaviour is identical.
-#if defined(__APPLE__)
-using OpWorkerThread = std::thread;
-#else
 using OpWorkerThread = std::jthread;
-#endif
 
 // Which bulk operation ran (drives the outcome wording).
 enum class FileOpKind { None, Export, Delete, Transfer, Compact, Import };

@@ -42,7 +42,7 @@ bool App::init()
     // std::println(stderr, "[Module] ...") diagnostics ran. Redirect both to
     // a log file before anything else can print, so every diagnostic in the
     // app — previously invisible in a windowless build — becomes visible
-    // instead of throwing (no-op on Linux/macOS/Debug, which keep a console).
+    // instead of throwing (no-op on Linux/Debug, which keep a console).
 #ifdef NDEBUG
     platform::redirect_diagnostics_to_log_file();
 #endif
