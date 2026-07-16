@@ -786,6 +786,39 @@ VaultResult Vault::read_video(const IndexNode& node, crypto::SecureBytes& out) c
     return Ok;
 }
 
+VaultResult Vault::repair_video_metadata(std::string_view node_path)
+{
+    using enum VaultResult;
+    if (!unlocked_) return Locked;
+
+    IndexNode* n = resolve_node(node_path);
+    if (!n || !n->is_video())                  return NotFound;
+    if (n->vmeta.codec != VideoCodec::Unknown)  return Ok;  // already has real metadata
+
+    crypto::SecureBytes raw;
+    if (const VaultResult r = read_video(*n, raw); r != Ok) return r;
+
+    media::VideoProbeResult probe;
+    if (!media::probe_video(raw.as_span(), probe))         return Ok;  // still not probeable
+    if (probe.codec == VideoCodec::Unknown)                 return Ok;  // still not decodable
+
+    n->vmeta.codec       = probe.codec;
+    n->vmeta.width       = probe.width;
+    n->vmeta.height      = probe.height;
+    n->vmeta.duration_us = probe.duration_us;
+
+    if (n->vmeta.poster_length == 0 && !probe.poster_jpeg.empty()) {
+        ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
+        ChunkSpan  poster_span;
+        if (!store.append_chunk(probe.poster_jpeg, poster_span)) return IoError;
+        if (!store.sync())                                       return IoError;
+        n->vmeta.poster_offset = poster_span.offset;
+        n->vmeta.poster_length = poster_span.length;
+    }
+
+    return commit_index();
+}
+
 VaultResult Vault::remove_image(std::string_view gallery_path, std::string_view filename)
 {
     using enum VaultResult;

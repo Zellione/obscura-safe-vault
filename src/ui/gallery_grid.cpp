@@ -23,6 +23,7 @@
 #include "ui/progress_modal.h"
 #include "ui/tag_list_parse.h"
 #include "ui/tile_thumb.h"
+#include "ui/video_repair.h"
 #include "ui/waste_threshold.h"
 #include "ui/widgets.h"
 #include "ui/zip_import.h"
@@ -179,6 +180,9 @@ void GalleryGrid::on_enter()
 void GalleryGrid::refresh()
 {
     children_ = vault_.list(nav_.path());
+    // Self-heal videos imported before this build could decode their codec
+    // (Phase 40 bugfix) — no separate migration step needed.
+    ui::repair_unknown_video_metadata(vault_, nav_.path(), children_);
     nav_.set_count(static_cast<int>(children_.size()));
     sel_.clear();   // selection indices are only valid against the current listing
 }

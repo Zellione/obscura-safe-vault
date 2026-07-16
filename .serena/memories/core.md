@@ -262,7 +262,17 @@ src/
                                                  → FrameAction{Present,Hold,Drop}; audio_clock(base,
                                                  samples_consumed, rate) computes current; clamp_volume/
                                                  effective_gain helpers; unit-tested. probe_video =
-                                                 container/codec/dims/duration + first-frame poster.
+                                                 container/codec/dims/duration + first-frame poster;
+                                                 best-effort — succeeds with placeholder Unknown/0/empty
+                                                 metadata if the container is detected but the codec
+                                                 isn't decodable yet. Vault::repair_video_metadata
+                                                 (vault.h/.cpp, Phase 40 Part 1 bugfix) re-probes a node
+                                                 stuck at that placeholder state and fills it in if the
+                                                 codec has since become decodable; no-op otherwise. Test-
+                                                 only friend vault::test_only_force_video_codec_unknown
+                                                 (defined in tests/vault/test_video.cpp) constructs that
+                                                 state for testing since add_video() can't produce it for
+                                                 a currently-decodable file.
   gfx/         window.*, renderer.*,           — SDL3 window/renderer, texture cache,
                texture_cache.*, text.*,        — stb_truetype text atlas
                theme.{h,cpp}                   — UI colour tokens, runtime-selectable
@@ -534,6 +544,15 @@ src/
                                                  root→parent order, ci de-dupe, minus own tags.
                                                  Feeds the tag editor's read-only "Inherited from
                                                  gallery" section. Unit-tested.
+               video_repair.*                  — Phase 40 Part 1 bugfix: repair_unknown_video_metadata
+                                                 (vault, gallery_path, children) sweeps a freshly-
+                                                 vault.list()'d gallery for video children still at
+                                                 VideoCodec::Unknown (imported before their codec was
+                                                 decodable) and calls Vault::repair_video_metadata per
+                                                 node. Called from GalleryGrid::refresh() so previously-
+                                                 imported videos self-heal (thumbnail + duration) the
+                                                 next time their gallery is opened — no separate
+                                                 migration step. Unit-tested (SDL-free, real Vault).
                meta_json.*                     — pure, SDL/vault-free archive `meta.json` parser
                                                  (Phase 27, nlohmann/json vendored header-only):
                                                  parse_meta_json (tolerant, exception-free:

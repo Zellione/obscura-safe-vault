@@ -96,6 +96,45 @@ decoder exists); a per-video loop-count limit (infinite loop only, toggle
 on/off); loop behavior for images/slideshow (out of scope — this is the
 video transport only).
 
+### Part 1 bugfix — video metadata repair for already-imported videos ✅
+
+**Problem reported after Part 1 shipped:** a video imported *before* its
+codec was decodable (e.g. an AV1 `.webm` imported before this phase added AV1
+support) was stored with placeholder metadata — `codec = Unknown`,
+`duration_us = 0`, no poster — because `media::probe_video()`'s best-effort
+fallback lets `add_video()` succeed on any container-detectable file even
+when the specific codec can't be decoded yet (`src/media/video_probe.cpp`).
+There was no migration/repair path, so those videos permanently showed no
+thumbnail and no duration in the gallery grid even after the app gained the
+ability to decode them. (Separately, AV1 playback itself feels laggy —
+libaom decode is measured ~2.6x slower per frame than VP9 in this build, on
+top of the pre-existing synchronous main-thread decode architecture; a
+dav1d swap was investigated as the fix but scoped out to its own future
+phase given the size of the change — new vendored submodule, new Meson
+build prerequisite, cross-platform CI updates.)
+
+**Fix:** `Vault::repair_video_metadata(node_path)` (`src/vault/vault.h`/
+`.cpp`) re-probes a video node whose `codec == VideoCodec::Unknown`,
+re-running `media::probe_video()` against the already-stored container
+bytes; on success it fills in codec/dimensions/duration and stores a poster
+chunk (if one wasn't already), persisted via the normal crash-safe
+`commit_index()` path. No-op (returns `Ok`, no write) if the node already
+has real metadata or is still undecodable. `ui::repair_unknown_video_metadata`
+(`src/ui/video_repair.h`/`.cpp`) is the free-function UI-layer sweep called
+from `GalleryGrid::refresh()` — every time a gallery's contents are
+(re)listed, any video child still showing `Unknown` gets a repair attempt.
+This makes the fix self-applying: no separate migration step or vault-wide
+rescan, previously-imported videos heal themselves the next time their
+gallery is opened. Tests: `tests/vault/test_video.cpp` (Vault-level
+`repair_video_metadata_*` cases, using a `tests/vault/fixtures/
+undecodable_mpeg2.mkv` fixture — MPEG-2 is container-detectable but outside
+this build's `--enable-decoder` list, reproducing "detected but
+undecodable" without needing a second FFmpeg build — plus a test-only
+`vault::test_only_force_video_codec_unknown` friend seam to construct the
+"legacy broken metadata" state a decodable file can never reach through the
+public API); `tests/ui/test_video_repair.cpp` (the `GalleryGrid::refresh()`
+sweep logic). `scripts/test.sh` and `scripts/test.sh --asan` both green.
+
 ---
 
 ## Part 2 — Session-scoped gallery position memory
@@ -227,7 +266,7 @@ repeatedly in the gallery grid cycles List → Grid S → Grid M → Grid L →
 Grid XL → List, each grid density rendering visibly larger/smaller
 thumbnails with a correspondingly adjusted column count.
 
-**Status:** 🔜 Part 1 ✅ shipped (this PR) — AV1 (`.webm`/`.mov`, via the
+**Status:** 🔜 Part 1 ✅ shipped — AV1 (`.webm`/`.mov`, via the
 already-vendored libaom as FFmpeg's `libaom-av1` decoder — FFmpeg's own native
 `av1` decoder turned out to be hwaccel-dispatch only, no software decode path,
 contradicting this doc's original "no libaom/dav1d link needed" assumption)
@@ -235,7 +274,11 @@ plus QTRLE/Cinepak for `.mov`; loop toggle (`R`, `media::loop_setting`,
 on-screen ring indicator); A/V sync hardening (presentation-order pts
 invariant, loop-boundary reseek re-alignment, long-duration drift regression
 test) — all verified with `scripts/test.sh` and `scripts/test.sh --asan`
-green. Parts 2 and 3 not started. Planned as their own PRs against this same
-phase, in that order (Part 2's session-memory extension and Part 3's
-`GalleryView` value-set change both touch `GallerySessionState` and
-`gallery_grid.cpp`, so land in that order to keep merge conflicts small).
+green. Part 1 bugfix ✅ shipped (this PR) — self-healing video metadata
+repair for already-imported videos whose codec wasn't decodable at import
+time; a dav1d swap for faster AV1 decode was investigated and scoped out to
+its own future phase. Parts 2 and 3 not started. Planned as their own PRs
+against this same phase, in that order (Part 2's session-memory extension
+and Part 3's `GalleryView` value-set change both touch `GallerySessionState`
+and `gallery_grid.cpp`, so land in that order to keep merge conflicts
+small).
