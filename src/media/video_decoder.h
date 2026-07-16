@@ -57,6 +57,24 @@ public:
     // to land on the exact PTS. Returns false on failure.
     [[nodiscard]] bool seek(double ts_seconds);
 
+    // Demux until the next video-stream packet is available, routing any
+    // audio packets encountered along the way into the existing audio queue
+    // (same routing read_and_route() always did). Returns an owned packet
+    // the caller must av_packet_free(), or nullptr at end of stream.
+    // Performs AVIOContext I/O (via ChunkAvio, which reads/decrypts vault
+    // chunks) — call only from the thread that owns the vault handle; never
+    // from a VideoDecodeWorker thread.
+    [[nodiscard]] AVPacket* demux_next_video_packet();
+
+    // I/O-only reseek: seeks the demuxer to the keyframe at-or-before
+    // ts_seconds and clears the video/audio packet queues + audio decoder
+    // state. Unlike seek(), does NOT touch this instance's codec_ctx_/frame_
+    // (no pending_seek_target_, no avcodec_flush_buffers) — the async
+    // playback path (VideoPlayback::Impl) decodes on a separate
+    // VideoDecodeWorker with its own codec context, reset independently via
+    // VideoDecodeWorker::begin_seek(). Call only from the vault-owning thread.
+    [[nodiscard]] bool seek_demux_only(double ts_seconds);
+
     // Decode the first frame as RGB24 and return it as ImageData. Returns nullopt on failure.
     [[nodiscard]] std::optional<image::ImageData> decode_poster_rgb();
 

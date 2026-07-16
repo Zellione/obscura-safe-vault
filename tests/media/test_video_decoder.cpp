@@ -2,6 +2,18 @@
 
 #ifdef OSV_VENDORED_AV
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+extern "C" {
+#include <libavcodec/packet.h>
+}
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -634,6 +646,63 @@ TEST(video_decoder_webm_vp8_opus_and_vp9_vorbis_audio)
         CHECK(vframes > 0);
         CHECK(asamples > 0);
     }
+}
+
+TEST(video_decoder_demux_next_video_packet_yields_all_then_null)
+{
+    auto v_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!v_bytes.empty());
+    TempVault tv("demux_packets");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", v_bytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+    auto kids = v.list("c");
+    REQUIRE(kids.size() == 1);
+
+    media::ChunkAvio avio(media::VideoSource::open(v, *kids[0]));
+    REQUIRE(avio.valid());
+    media::VideoDecoder dec;
+    REQUIRE(dec.open(avio.ctx()));
+
+    int n = 0;
+    while (AVPacket* pkt = dec.demux_next_video_packet()) {
+        ++n;
+        av_packet_free(&pkt);
+    }
+    CHECK(n == 10);   // tiny.mp4: 10 frames, 1 packet per frame (no B-frames)
+}
+
+TEST(video_decoder_seek_demux_only_resumes_demux_from_target)
+{
+    auto v_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!v_bytes.empty());
+    TempVault tv("demux_seek");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", v_bytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+    auto kids = v.list("c");
+    REQUIRE(kids.size() == 1);
+
+    media::ChunkAvio avio(media::VideoSource::open(v, *kids[0]));
+    REQUIRE(avio.valid());
+    media::VideoDecoder dec;
+    REQUIRE(dec.open(avio.ctx()));
+
+    // Drain a few packets from the start, then seek and confirm demux resumes
+    // (doesn't crash, still yields packets, doesn't hang).
+    if (AVPacket* pkt = dec.demux_next_video_packet()) av_packet_free(&pkt);
+    if (AVPacket* pkt = dec.demux_next_video_packet()) av_packet_free(&pkt);
+
+    REQUIRE(dec.seek_demux_only(0.5));
+
+    int n = 0;
+    while (AVPacket* pkt = dec.demux_next_video_packet()) {
+        ++n;
+        av_packet_free(&pkt);
+    }
+    CHECK(n > 0);   // some packets remain after the seek target
 }
 
 #endif // OSV_VENDORED_AV

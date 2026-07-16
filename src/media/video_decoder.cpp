@@ -188,6 +188,37 @@ bool VideoDecoder::seek(double ts_seconds)
     return true;
 }
 
+AVPacket* VideoDecoder::demux_next_video_packet()
+{
+    while (vq_.empty()) {
+        if (!read_and_route()) return nullptr;   // EOF
+    }
+    AVPacket* pkt = vq_.front();
+    vq_.pop_front();
+    return pkt;
+}
+
+bool VideoDecoder::seek_demux_only(double ts_seconds)
+{
+    if (!fmt_ || stream_index_ < 0) {
+        std::println(stderr, "[VideoDecoder] Cannot seek: not opened");
+        return false;
+    }
+    const int64_t ts = av_rescale_q(
+        static_cast<int64_t>(ts_seconds * AV_TIME_BASE), AV_TIME_BASE_Q, stream_time_base_);
+    if (const int ret = av_seek_frame(fmt_, stream_index_, ts, AVSEEK_FLAG_BACKWARD); ret < 0) {
+        std::println(stderr, "[VideoDecoder] av_seek_frame failed: {}", ret);
+        return false;
+    }
+    for (auto pkt : vq_) av_packet_free(&pkt);
+    vq_.clear();
+    for (auto pkt : aq_) av_packet_free(&pkt);
+    aq_.clear();
+    audio_out_.clear();
+    audio_dec_.flush();
+    return true;
+}
+
 // Helper: read one packet and route it to the appropriate stream queue.
 // Returns false at EOF.
 bool VideoDecoder::read_and_route()
