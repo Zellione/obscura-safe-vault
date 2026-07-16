@@ -132,9 +132,10 @@ void VideoDecodeWorker::run()
                         : conv_.to_i420(frame_, pts_seconds);
                 if (!decoded) continue;   // conversion failed; skip this frame
 
-                if (pending_seek_target_ >= 0.0 && decoded->pts_seconds < pending_seek_target_)
+                double seek_target = pending_seek_target_.load();
+                if (seek_target >= 0.0 && decoded->pts_seconds < seek_target)
                     continue;   // decode-forward past frames before a pending seek target
-                pending_seek_target_ = -1.0;
+                pending_seek_target_.store(-1.0);
 
                 Result r;
                 r.generation = job.generation;

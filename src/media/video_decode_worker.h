@@ -4,6 +4,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
@@ -92,12 +93,12 @@ private:
 
     void run();
 
-    AVCodecContext*  codec_ctx_ = nullptr;
-    AVFrame*         frame_     = nullptr;
-    FrameConverter   conv_;
-    double           time_base_ = 0.0;
-    double           pending_seek_target_ = -1.0;
-    bool             flushed_ = false;
+    AVCodecContext*        codec_ctx_ = nullptr;
+    AVFrame*               frame_     = nullptr;
+    FrameConverter         conv_;
+    double                 time_base_ = 0.0;
+    std::atomic<double>    pending_seek_target_{-1.0};
+    bool                   flushed_ = false;
 
     mutable std::mutex      mtx_;
     std::condition_variable cv_;         // signals run(): queue_ gained a Job, or stop_ was set
