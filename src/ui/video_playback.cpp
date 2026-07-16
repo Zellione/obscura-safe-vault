@@ -18,6 +18,7 @@
 #include "gfx/yuv_texture.h"
 #include "media/av_sync.h"
 #include "media/chunk_avio.h"
+#include "media/loop_setting.h"
 #include "media/video_decoder.h"
 #include "media/video_source.h"
 #include "media/volume_setting.h"
@@ -54,6 +55,8 @@ struct VideoPlayback::Impl {
     bool      need_present_ = false;                     // force-show pending_ (open / seek)
     bool      eof_          = false;
     bool      scrubbing_    = false;
+    bool      loop_         = false;                     // seeded from media::saved_loop_enabled()
+    SDL_FRect loop_icon_{};                               // last-rendered loop icon rect
     SDL_FRect track_{};                                  // last-rendered seek-bar track rect
 
     // Audio playback state
@@ -75,6 +78,7 @@ struct VideoPlayback::Impl {
     Impl(const vault::Vault& vault, const vault::IndexNode& node)
     {
         vol_.level = media::saved_volume();   // remembered across clips + restarts (Phase 25)
+        loop_      = media::saved_loop_enabled();   // remembered for the session (Phase 40)
         auto src = media::VideoSource::open(vault, node);
         avio_ = std::make_unique<media::ChunkAvio>(std::move(src));
         if (!avio_->valid()) {
@@ -202,8 +206,14 @@ struct VideoPlayback::Impl {
             }
         }
 
-        if (eof_ && !pending_ && model_.playing())
-            model_.set_playing(false);   // pause at end of stream
+        if (eof_ && !pending_ && model_.playing()) {
+            if (loop_) {
+                do_seek(0.0);   // loop: re-seek to start, keep playing (same path
+                                 // as the "press Space at the end" replay)
+            } else {
+                model_.set_playing(false);   // pause at end of stream
+            }
+        }
     }
 
     void do_seek(double t)
@@ -287,6 +297,10 @@ struct VideoPlayback::Impl {
             case SDLK_M:
                 vol_.muted = !vol_.muted;
                 apply_gain();
+                break;
+            case SDLK_R:
+                loop_ = !loop_;
+                media::set_saved_loop_enabled(loop_);
                 break;
             default: break;
         }
@@ -377,6 +391,15 @@ struct VideoPlayback::Impl {
                              {icon_cx + 8.0f, icon_cy}, gfx::theme::TEXT);
         }
 
+        // Loop icon (a ring), same visual treatment as the mute speaker icon:
+        // dim/faint when off, accent-coloured when the user has enabled
+        // looping (Phase 40). Placed right after the play/pause icon.
+        constexpr float LOOP_R  = 8.0f;
+        const float     loop_cx = icon_cx + 18.0f + LOOP_R;
+        loop_icon_ = {loop_cx - LOOP_R, icon_cy - LOOP_R, LOOP_R * 2.0f, LOOP_R * 2.0f};
+        rr.draw_round_rect(loop_icon_, LOOP_R, loop_ ? gfx::theme::ACCENT : gfx::theme::TEXT_FAINT,
+                           false);
+
         // "pos / dur" text on the right.
         const std::string label =
             format_clock(model_.position()) + " / " + format_clock(model_.duration());
@@ -423,8 +446,8 @@ struct VideoPlayback::Impl {
             vol_.icon  = {0.0f, 0.0f, 0.0f, 0.0f};
         }
 
-        // Seek track between the play icon and the volume/time region.
-        const float track_x = icon_cx + 18.0f;
+        // Seek track between the loop icon and the volume/time region.
+        const float track_x = loop_cx + LOOP_R + 10.0f;
         const float track_w = std::max(10.0f, controls_right - track_x);
         track_ = {track_x, icon_cy - TRACK_H * 0.5f, track_w, TRACK_H};
         rr.draw_round_rect(track_, TRACK_H * 0.5f, gfx::theme::BORDER);

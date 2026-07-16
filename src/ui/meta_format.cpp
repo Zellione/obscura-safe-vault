@@ -72,6 +72,9 @@ std::string_view video_codec_name(vault::VideoCodec c) noexcept
         case MJPEG:  return "MJPEG";
         case VP8:    return "VP8";
         case VP9:    return "VP9";
+        case AV1:    return "AV1";
+        case QTRLE:  return "QuickTime RLE";
+        case Cinepak: return "Cinepak";
         case Unknown: break;
     }
     return "Video";

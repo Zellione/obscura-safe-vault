@@ -99,8 +99,11 @@ bool VideoDecoder::open(AVIOContext* pb)
         case AV_CODEC_ID_DNXHD:  codec_ = DNxHD;  break;  // Phase 28
         case AV_CODEC_ID_MJPEG:  codec_ = MJPEG;  break;  // Phase 28
         case AV_CODEC_ID_VP8:    codec_ = VP8;    break;  // Phase 38
-        case AV_CODEC_ID_VP9:    codec_ = VP9;    break;  // Phase 38
-        default:                 return fail_open("Unsupported codec");
+        case AV_CODEC_ID_VP9:     codec_ = VP9;     break;  // Phase 38
+        case AV_CODEC_ID_AV1:     codec_ = AV1;     break;  // Phase 40
+        case AV_CODEC_ID_QTRLE:   codec_ = QTRLE;   break;  // Phase 40 (.mov)
+        case AV_CODEC_ID_CINEPAK: codec_ = Cinepak; break;  // Phase 40 (.mov)
+        default:                  return fail_open("Unsupported codec");
     }
 
     codec_ctx_ = avcodec_alloc_context3(decoder);

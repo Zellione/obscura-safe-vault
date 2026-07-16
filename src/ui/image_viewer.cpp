@@ -472,7 +472,8 @@ std::vector<ui::HelpGroup> ImageViewer::help_groups() const
     if (is_video) {
         groups.push_back({"Video playback", {
             {"Space", "Play/Pause"}, {"J / L", "Seek -/+5s"}, {", / .", "Step one frame"},
-            {"- / +", "Volume"}, {"M", "Mute"}, {"Left/Right", "Prev/Next item"},
+            {"- / +", "Volume"}, {"M", "Mute"}, {"R", "Toggle loop"},
+            {"Left/Right", "Prev/Next item"},
         }});
     } else if (mode_ == ViewMode::FillScroll) {
         groups.push_back({"Scroll view", {

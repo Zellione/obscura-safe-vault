@@ -144,6 +144,17 @@ local function link_av()
         filter "system:linux"
             links { "z" }
         filter {}
+        -- avcodec's libaom-av1 decoder (Phase 40, AV1 software decode) needs
+        -- libaom, already linked once by link_codecs() above for libheif's AVIF
+        -- decode — but that occurrence comes BEFORE avcodec on the command
+        -- line, so ld has already moved past it by the time avcodec's
+        -- unresolved aom_codec_* references show up (static-archive link order
+        -- is one-pass; a dependency listed only before its dependent is never
+        -- revisited). Re-listing "aom" here, after avcodec, resolves it without
+        -- disturbing the heif → aom order link_codecs() already relies on.
+        if os.isfile(path.join(prefix, "lib/libaom.a")) then
+            links { "aom" }
+        end
     end
 end
 

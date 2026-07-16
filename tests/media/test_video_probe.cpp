@@ -105,6 +105,55 @@ TEST(probe_video_webm_vp8_vp9_fill_metadata_and_poster)
     }
 }
 
+TEST(probe_video_mov_legacy_codecs_fill_metadata_and_poster)
+{
+    // Phase 40: legacy .mov codecs beyond the Phase 28 set — QuickTime
+    // Animation/RLE and Cinepak.
+    struct Case { const char* file; vault::VideoCodec codec; uint32_t width; };
+    const Case cases[] = {
+        {OSV_MEDIA_FIXTURE_DIR "/tiny_qtrle.mov",   vault::VideoCodec::QTRLE,   160u},
+        {OSV_MEDIA_FIXTURE_DIR "/tiny_cinepak.mov", vault::VideoCodec::Cinepak, 160u},
+    };
+    for (const auto& c : cases) {
+        auto video_bytes = read_file(c.file);
+        REQUIRE(!video_bytes.empty());
+
+        media::VideoProbeResult result;
+        REQUIRE(media::probe_video(std::span(video_bytes), result));
+
+        CHECK_EQ(static_cast<int>(result.container), static_cast<int>(vault::VideoContainer::MP4));
+        CHECK_EQ(static_cast<int>(result.codec), static_cast<int>(c.codec));
+        CHECK_EQ(result.width, c.width);
+        CHECK_EQ(result.height, 120u);
+        CHECK(result.duration_us > 0);
+        CHECK(!result.poster_jpeg.empty());
+
+        auto poster_data = image::decode_from_memory(std::span(result.poster_jpeg));
+        REQUIRE(poster_data.has_value());
+    }
+}
+
+TEST(probe_video_webm_av1_fills_metadata_and_poster)
+{
+    // Phase 40: AV1's own .webm entry (the codec pair's third member alongside
+    // VP8/VP9, Phase 38's WebM out-of-scope note explicitly deferred this).
+    auto video_bytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_av1.webm");
+    REQUIRE(!video_bytes.empty());
+
+    media::VideoProbeResult result;
+    REQUIRE(media::probe_video(std::span(video_bytes), result));
+
+    CHECK_EQ(static_cast<int>(result.container), static_cast<int>(vault::VideoContainer::MKV));
+    CHECK_EQ(static_cast<int>(result.codec), static_cast<int>(vault::VideoCodec::AV1));
+    CHECK_EQ(result.width, 256u);
+    CHECK_EQ(result.height, 120u);
+    CHECK(result.duration_us > 0);
+    CHECK(!result.poster_jpeg.empty());
+
+    auto poster_data = image::decode_from_memory(std::span(result.poster_jpeg));
+    REQUIRE(poster_data.has_value());
+}
+
 TEST(probe_video_rejects_garbage_data)
 {
     std::vector<uint8_t> junk(8192, 0);

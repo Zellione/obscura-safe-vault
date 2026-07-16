@@ -259,12 +259,15 @@ jobs:
       # itself (cl/link/lib) still does the actual compiling via
       # --toolchain=msvc. path-type: inherit carries the MSVC env (from
       # msvc-dev-cmd above) and nasm's PATH entry into the MSYS2 shell.
+      # pkgconf: configure's --enable-libaom (Phase 40, AV1 software decode)
+      # detects libaom via pkg-config against the aom.pc build_codecs.bat
+      # installs into vendor/codecs-prefix.
       - name: Set up MSYS2 (for FFmpeg build)
         uses: msys2/setup-msys2@v2
         with:
           msystem: MSYS
           path-type: inherit
-          install: make diffutils
+          install: make diffutils pkgconf
 
       # MSYS2 ships its own coreutils link.exe (a symlink tool) in /usr/bin,
       # which shadows MSVC's link.exe on PATH — rename it out of the way so
