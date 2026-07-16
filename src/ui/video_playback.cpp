@@ -163,8 +163,14 @@ struct VideoPlayback::Impl {
                 // next render pass rather than hang indefinitely.
                 return;
             }
+            if (r->generation != generation_) {
+                // Stale result from a superseded seek/generation; discard it without
+                // decrementing in_flight_ (stale results don't correspond to packets
+                // we submitted in the current generation).
+                continue;
+            }
+            // Result matches current generation; consume it.
             --in_flight_;
-            if (r->generation != generation_) continue;   // stale (superseded seek)
             if (r->eof) { eof_ = true; pending_.reset(); return; }
             pending_storage_ = std::move(r->storage);
             pending_         = r->frame;
@@ -266,8 +272,8 @@ struct VideoPlayback::Impl {
         samples_fed_ = 0;
         seek_base_   = tt;
         pending_.reset();
-        eof_       = false;
         shown_pts_ = -1.0;
+        eof_       = false;
         decode_into_pending();
         model_.seek_to(pending_ ? pending_pts_ : tt);
         need_present_ = true;
