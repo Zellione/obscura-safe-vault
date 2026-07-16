@@ -5,7 +5,7 @@
 scripts/setup.sh          # premake5 + SDL3 + image codecs (calls build_codecs.sh)
 scripts/build_codecs.sh   # (re)build just the vendored image codecs into vendor/codecs-prefix
 ```
-Prerequisites: `cmake`, `ninja`, a C++20 compiler, and **nasm** (for libaom / AVIF).
+Prerequisites: `cmake`, `ninja`, a C++23 compiler, and **nasm** (for libaom / AVIF).
 
 ## Generate build files
 ```bash
@@ -59,7 +59,6 @@ msbuild ObscuraSafeVault.sln /m /p:Configuration=Debug /p:Platform=x64
 ## Packaging
 ```bash
 scripts/package.sh           # Linux tar.gz
-scripts/package_macos.sh     # macOS .app bundle
 makensis /DVERSION=… packaging/windows/osv.nsi   # Windows installer
 ```
 
