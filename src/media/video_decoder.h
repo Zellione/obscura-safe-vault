@@ -10,6 +10,7 @@
 #include "media/decoded_frame.h"
 #include "media/audio_decoder.h"
 #include "media/audio_frame.h"
+#include "media/frame_convert.h"
 #include "vault/index.h"
 #include "image/image.h"
 
@@ -20,7 +21,6 @@
 #endif
 extern "C" {
 #include <libavformat/avio.h>
-#include <libswscale/swscale.h>
 }
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
@@ -80,9 +80,6 @@ public:
     vault::VideoCodec codec() const noexcept { return codec_; }
 
 private:
-    // Helper: convert an AVFrame with unsupported format to I420 via swscale.
-    std::optional<DecodedFrame> convert_to_i420(double pts_seconds);
-
     // Helper: read one packet and send it to the decoder, handling EOF/flush.
     bool pump_one_packet();
 
@@ -112,8 +109,7 @@ private:
     AVCodecContext*  codec_ctx_          = nullptr;
     AVFrame*         frame_              = nullptr;
     AVPacket*        pkt_                = nullptr;
-    SwsContext*      sws_                = nullptr;  // swscale context for format conversion
-    AVFrame*         conv_               = nullptr;  // converted frame (for non-420p formats)
+    FrameConverter   conv_;              // handles format conversion via swscale
     int              stream_index_       = -1;
     int              width_              = 0;
     int              height_             = 0;

@@ -32,18 +32,17 @@ VideoDecoder::~VideoDecoder()
     reset();
 }
 
-// Free every FFmpeg resource we own. Each free nulls its own pointer except
-// sws_, which we null explicitly. Shared by the destructor and open()'s error
-// paths so the per-failure cleanup isn't duplicated at every call site.
+// Free every FFmpeg resource we own. Each free nulls its own pointer.
+// Shared by the destructor and open()'s error paths so the per-failure cleanup
+// isn't duplicated at every call site.
 void VideoDecoder::reset()
 {
     if (codec_ctx_) avcodec_free_context(&codec_ctx_);
     if (fmt_)       avformat_close_input(&fmt_);   // frees fmt_ itself
     if (frame_)     av_frame_free(&frame_);
     if (pkt_)       av_packet_free(&pkt_);
-    if (sws_)     { sws_freeContext(sws_); sws_ = nullptr; }
-    if (conv_)      av_frame_free(&conv_);
-    
+    conv_.reset();
+
     // Free queued packets and clear output buffers
     for (auto pkt : vq_) av_packet_free(&pkt);
     vq_.clear();
@@ -189,110 +188,6 @@ bool VideoDecoder::seek(double ts_seconds)
     return true;
 }
 
-// Helper: build a DecodedFrame from an AVFrame with I420 or NV12 pixel format (zero-copy).
-static DecodedFrame build_frame_i420_or_nv12(const AVFrame* frame, double pts_seconds)
-{
-    FramePixelFormat pix_fmt;
-    int plane_count;
-
-    if (frame->format == AV_PIX_FMT_YUV420P) {
-        pix_fmt = FramePixelFormat::I420;
-        plane_count = 3;
-    } else {  // AV_PIX_FMT_NV12
-        pix_fmt = FramePixelFormat::NV12;
-        plane_count = 2;
-    }
-
-    DecodedFrame result{};
-    result.width = frame->width;
-    result.height = frame->height;
-    result.pix_fmt = pix_fmt;
-    result.pts_seconds = pts_seconds;
-
-    for (int i = 0; i < plane_count; ++i) {
-        result.planes[i] = frame->data[i];
-        result.linesizes[i] = frame->linesize[i];
-    }
-    if (plane_count < 3) {
-        result.planes[2] = nullptr;
-        result.linesizes[2] = 0;
-    }
-
-    return result;
-}
-
-// Helper: convert an AVFrame with unsupported pixel format to I420 via swscale.
-std::optional<DecodedFrame> VideoDecoder::convert_to_i420(double pts_seconds)
-{
-    // Lazy initialization of swscale context
-    if (!sws_) {
-        sws_ = sws_getCachedContext(
-            sws_,
-            frame_->width,
-            frame_->height,
-            static_cast<AVPixelFormat>(frame_->format),
-            frame_->width,
-            frame_->height,
-            AV_PIX_FMT_YUV420P,
-            SWS_BILINEAR,
-            nullptr,
-            nullptr,
-            nullptr
-        );
-        if (!sws_) {
-            std::println(stderr, "[VideoDecoder] Failed to create swscale context");
-            return std::nullopt;
-        }
-    }
-
-    // Ensure conv_ is allocated with proper dimensions
-    if (!conv_) {
-        conv_ = av_frame_alloc();
-        if (!conv_) {
-            std::println(stderr, "[VideoDecoder] Failed to allocate conversion frame");
-            return std::nullopt;
-        }
-    }
-
-    // Release the previous frame's buffers before re-allocating. Without
-    // this, av_frame_get_buffer overwrites conv_'s existing buffer refs and
-    // leaks them — one whole frame buffer leaked per decoded frame.
-    av_frame_unref(conv_);
-    conv_->format = AV_PIX_FMT_YUV420P;
-    conv_->width  = frame_->width;
-    conv_->height = frame_->height;
-
-    if (int buf_ret = av_frame_get_buffer(conv_, 0); buf_ret < 0) {
-        std::println(stderr, "[VideoDecoder] av_frame_get_buffer failed: {}", buf_ret);
-        return std::nullopt;
-    }
-
-    // Perform the scale/convert
-    if (int ret = sws_scale(sws_,
-                            frame_->data,
-                            frame_->linesize,
-                            0,
-                            frame_->height,
-                            conv_->data,
-                            conv_->linesize);
-        ret < 0) {
-        std::println(stderr, "[VideoDecoder] sws_scale failed: {}", ret);
-        return std::nullopt;
-    }
-
-    DecodedFrame result{};
-    result.width = frame_->width;
-    result.height = frame_->height;
-    result.pix_fmt = FramePixelFormat::I420;
-    result.pts_seconds = pts_seconds;
-    for (int i = 0; i < 3; ++i) {
-        result.planes[i] = conv_->data[i];
-        result.linesizes[i] = conv_->linesize[i];
-    }
-
-    return result;
-}
-
 // Helper: read one packet and route it to the appropriate stream queue.
 // Returns false at EOF.
 bool VideoDecoder::read_and_route()
@@ -358,9 +253,9 @@ bool VideoDecoder::pump_one_packet()
 std::optional<DecodedFrame> VideoDecoder::build_from_current_frame(double pts_seconds)
 {
     if (frame_->format == AV_PIX_FMT_YUV420P || frame_->format == AV_PIX_FMT_NV12) {
-        return build_frame_i420_or_nv12(frame_, pts_seconds);  // zero-copy
+        return FrameConverter::zero_copy(frame_, pts_seconds);  // zero-copy
     }
-    return convert_to_i420(pts_seconds);                       // swscale fallback
+    return conv_.to_i420(frame_, pts_seconds);                 // swscale fallback
 }
 
 // Helper: drain one video packet from vq_ and send to decoder.
