@@ -21,11 +21,11 @@ newoption {
 -- falls back to a system SDL3 install.
 -- ---------------------------------------------------------------------------
 local function link_sdl3()
-    -- CMake names the static lib libSDL3.a on Linux/macOS but SDL3-static.lib
+    -- CMake names the static lib libSDL3.a on Linux but SDL3-static.lib
     -- on Windows; the Visual Studio generator nests it in a per-config dir.
     local sdl3_build = path.join(os.getcwd(), "vendor/SDL3/build")
     local candidates = {
-        { lib = "SDL3",        file = "libSDL3.a",               dir = sdl3_build },                        -- Linux/macOS (Ninja/Make)
+        { lib = "SDL3",        file = "libSDL3.a",               dir = sdl3_build },                        -- Linux (Ninja/Make)
         { lib = "SDL3-static", file = "SDL3-static.lib",         dir = sdl3_build },                        -- Windows (Ninja)
         { lib = "SDL3-static", file = "Release/SDL3-static.lib", dir = path.join(sdl3_build, "Release") },  -- Windows (VS generator)
     }
@@ -46,9 +46,6 @@ local function link_sdl3()
         includedirs { "C:/SDL3/include" }
         libdirs     { "C:/SDL3/lib/x64" }
         links       { "SDL3" }
-    filter "system:macosx"
-        includedirs { "/usr/local/include/SDL3" }
-        links       { "SDL3" }
     filter {}
 end
 
@@ -62,17 +59,6 @@ local function link_platform_extras()
         links { "bcrypt", "winmm", "imm32", "version", "setupapi",
                 "ole32", "oleaut32", "advapi32", "shell32", "user32",
                 "gdi32", "uuid" }
-    filter "system:macosx"
-        links {
-            "iconv",
-            "Cocoa.framework", "Carbon.framework", "IOKit.framework",
-            "ForceFeedback.framework", "CoreAudio.framework",
-            "AudioToolbox.framework", "AVFoundation.framework",
-            "CoreMedia.framework", "CoreVideo.framework",
-            "CoreHaptics.framework", "GameController.framework",
-            "Metal.framework", "QuartzCore.framework",
-            "UniformTypeIdentifiers.framework",
-        }
     filter {}
 end
 
@@ -229,13 +215,9 @@ workspace "ObscuraSafeVault"
         optimize "Speed"
         symbols  "Off"
 
-    -- The "x64" platform name implicitly sets architecture x86_64, so macOS
-    -- must override it to the host arch: arm64 machines need to build natively
-    -- to link the natively-cmake-built vendored SDL3.
-    filter { "platforms:x64", "system:linux or windows" }
+    -- The "x64" platform name sets architecture x86_64 on Linux/Windows.
+    filter { "platforms:x64" }
         architecture "x86_64"
-    filter { "platforms:x64", "system:macosx" }
-        architecture (string.find(os.outputof("uname -m") or "", "arm64") and "ARM64" or "x86_64")
 
     -- Windows: stop windows.h defining min/max macros (they break std::min/max),
     -- trim its include surface, and silence MSVC's fopen_s nagging (portable
@@ -345,7 +327,7 @@ project "osv"
         buildoptions { "-Wno-sign-conversion" }
     filter {}
 
-    -- Release hardening (Linux/macOS)
+    -- Release hardening (Linux)
     filter { "configurations:Release", "toolset:gcc or clang" }
         buildoptions { "-fstack-protector-strong" }
         defines { "_FORTIFY_SOURCE=3" }
@@ -471,7 +453,7 @@ project "osv_tests"
         buildoptions { "-Wno-sign-conversion" }
     filter {}
 
-    -- Release hardening (Linux/macOS)
+    -- Release hardening (Linux)
     filter { "configurations:Release", "toolset:gcc or clang" }
         buildoptions { "-fstack-protector-strong" }
         defines { "_FORTIFY_SOURCE=3" }

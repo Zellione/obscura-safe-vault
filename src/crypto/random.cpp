@@ -7,7 +7,7 @@
 #  include <bcrypt.h>
 #  pragma comment(lib, "bcrypt.lib")
 #elif defined(__APPLE__)
-#  include <sys/random.h>   // getentropy
+#  error "macOS is no longer supported (Linux and Windows only)"
 #else
 #  include <cerrno>
 #  include <cstdio>
@@ -27,24 +27,6 @@ bool fill_random(std::span<uint8_t> out) noexcept
         std::println(stderr, "[crypto] BCryptGenRandom failed (0x{:08x})",
                      static_cast<uint32_t>(s));
         return false;
-    }
-    return true;
-}
-
-#elif defined(__APPLE__)
-
-bool fill_random(std::span<uint8_t> out) noexcept
-{
-    // getentropy is limited to 256 bytes per call.
-    size_t off = 0;
-    while (off < out.size()) {
-        size_t chunk = out.size() - off;
-        if (chunk > 256) chunk = 256;
-        if (getentropy(out.data() + off, chunk) != 0) {
-            std::println(stderr, "[crypto] getentropy failed");
-            return false;
-        }
-        off += chunk;
     }
     return true;
 }

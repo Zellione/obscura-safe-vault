@@ -1,7 +1,7 @@
 # Tech Stack
 
 ## Language / standard
-- C++20 — use `std::span`, designated initialisers, `[[nodiscard]]`, `constexpr` freely.
+- C++23 — use `std::span`, designated initialisers, `[[nodiscard]]`, `constexpr` freely.
 
 ## Build system
 - **premake5 beta8** → **Ninja** (gmake2 fallback). Binary at `bin/premake5` (downloaded by `scripts/setup.sh`, not committed).
@@ -11,7 +11,7 @@
 ## Runtime deps (vendored git submodules under `vendor/`)
 | Library | Version | How compiled |
 |---|---|---|
-| SDL3 | 3.4.10 | cmake once via `setup.sh`; static lib at `vendor/SDL3/build/libSDL3.a` (Linux/macOS) or `vendor/SDL3/build/SDL3-static.lib` / `Release/SDL3-static.lib` (Windows) |
+| SDL3 | 3.4.10 | cmake once via `setup.sh`; static lib at `vendor/SDL3/build/libSDL3.a` (Linux) or `vendor/SDL3/build/SDL3-static.lib` / `Release/SDL3-static.lib` (Windows) |
 | Monocypher | 4.0.2 | single `monocypher.c` compiled by premake |
 | stb | head | header-only (`stb_image.h`, `stb_truetype.h`) |
 | libwebp | 1.4.0 | WebP decode; cmake → `vendor/codecs-prefix` |
@@ -58,19 +58,21 @@ vendored static libs.
 ## Crypto
 - AEAD: XChaCha20-Poly1305 (192-bit nonce, random per chunk)
 - KDF: Argon2id (via Monocypher)
-- RNG shim: `src/crypto/random.*` — `getrandom` (Linux), `getentropy` (macOS), `BCryptGenRandom` (Windows)
+- RNG shim: `src/crypto/random.*` — `getrandom` (Linux), `BCryptGenRandom` (Windows)
 
 ## Platforms
-- Primary: Linux x86_64 (Arch). Also: Windows x86_64, macOS (native arch, arm64 on Apple Silicon).
+- Primary: Linux x86_64 (Arch). Also: Windows x86_64. macOS is not supported
+  (dropped from CI/build/source — see `#error` guard in `src/crypto/random.cpp`).
 - Windows Release builds as `WindowedApp` (no console); Debug keeps console.
 
 ## Asset loading
 App tries `assets/…` relative to cwd first, then `SDL_GetBasePath()` (packaged installs).
 
 ## CI
-`.github/workflows/` — ci.yml matrix covers Linux, Windows, macOS. release.yml runs on
-tag pushes (`v*`): rebuilds the three Release packages with OSV_VERSION from the tag
-(mirrors ci.yml's Release legs + cache keys — keep in sync), runs tests, then attaches
-packages + SHA256SUMS.txt to the tag's GitHub release (draft-created if absent). The ASAN job (Linux-only) builds
-vendored SDL3 (since Phase 4) and the image codecs (since Phase 9): running the C decoders
-under ASAN/UBSan on untrusted input is high value. nasm is installed on every leg for libaom.
+`.github/workflows/` — ci.yml matrix covers Linux and Windows (macOS support dropped).
+release.yml runs on tag pushes (`v*`): rebuilds the two Release packages with OSV_VERSION
+from the tag (mirrors ci.yml's Release legs + cache keys — keep in sync), runs tests, then
+attaches packages + SHA256SUMS.txt to the tag's GitHub release (draft-created if absent).
+The ASAN job (Linux-only) builds vendored SDL3 (since Phase 4) and the image codecs (since
+Phase 9): running the C decoders under ASAN/UBSan on untrusted input is high value. nasm is
+installed on every leg for libaom.

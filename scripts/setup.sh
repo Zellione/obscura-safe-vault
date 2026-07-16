@@ -15,7 +15,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-# Core count: nproc is Linux-only; macOS uses sysctl.
+# Core count fallback for systems without nproc.
 NPROC="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 
 echo "==> Initialising git submodules..."
@@ -33,8 +33,7 @@ if [[ ! -f "$PREMAKE_BIN" ]]; then
     OS="$(uname -s)"
     case "$OS" in
         Linux)  ARCHIVE="premake-${PREMAKE_VERSION}-linux.tar.gz" ;;
-        Darwin) ARCHIVE="premake-${PREMAKE_VERSION}-macosx.tar.gz" ;;
-        *)      echo "Unsupported OS: $OS (add Windows support to this script)"; exit 1 ;;
+        *)      echo "Unsupported OS: $OS (Windows support: use scripts/setup.bat)"; exit 1 ;;
     esac
     curl -L "https://github.com/premake/premake-core/releases/download/v${PREMAKE_VERSION}/${ARCHIVE}" \
          -o /tmp/premake5.tar.gz

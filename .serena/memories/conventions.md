@@ -38,4 +38,4 @@
 - Tests must pass before a phase is complete.
 
 ## Security invariants
-See `mem:core` — five hard invariants, never relax them.
+See `mem:core` — six hard invariants, never relax them.

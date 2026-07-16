@@ -197,6 +197,39 @@ src/
                                                  set_gallery_sort are FREE FRIENDS (not members,
                                                  like read_thumb_span/vault_file_bytes) to stay
                                                  under the cpp:S1448 35-method cap.
+               index_io.*                      — Internal component (Phase 25): index serialisation +
+                                                 crash-safe double-buffer slot swap (append → write
+                                                 inactive slot → flip active_slot, 3-phase atomic
+                                                 commit). IndexIoContext bundles mutable state;
+                                                 index_io::commit_index owns the persistence logic
+                                                 extracted from Vault::commit_index — keeps Vault's
+                                                 method count under the cpp:S1448 cap.
+               vault_ops.*                     — Internal component (Phase 25): tree navigation + path
+                                                 resolution + structural validation, extracted from
+                                                 Vault (split_path, resolve_gallery, resolve_node_impl,
+                                                 child_named, holds_media, holds_galleries,
+                                                 for_each_media, relocate_node_chunks). Pure traversal,
+                                                 no I/O. push_child(children, node) wraps the
+                                                 vector::push_back add_image/add_video use to append an
+                                                 IndexNode in try/catch (an allocation failure there is
+                                                 the same uncaught-exception → terminate() bug class as
+                                                 chunk_codec::resize_buf); returns false (→ IoError)
+                                                 instead of crashing. push_child_fail_after mirrors
+                                                 resize_fail_after's fault-injection pattern for tests.
+               chunk_codec.*                   — Pure adaptive store-if-smaller deflate framing
+                                                 (Phase 26): method byte (0=raw,1=deflate) + bounded
+                                                 orig_len inside the AEAD; used by ChunkStore's framed
+                                                 ctor flag (← header FLAG_FRAMED_CHUNKS bit) + the
+                                                 index-blob sites (commit_index/unlock/compact). miniz
+                                                 tdefl/tinfl, no new dep. The std::vector<uint8_t>
+                                                 resize_buf overload wraps resize() in try/catch — it's
+                                                 noexcept, and an uncaught allocation-failure exception
+                                                 there would terminate() the whole process instead of
+                                                 returning false like every other fallible call in this
+                                                 codebase. resize_fail_after fault injection makes the
+                                                 failure path deterministically testable. Legacy vaults
+                                                 (header flag unset) read AND append raw forever, no
+                                                 migration.
   image/       decode.*, thumbnail.*,          — stb_image decode, thumb gen
                format_registry.*,              — magic-byte format detection
                decoder.*,                      — Decoder interface + DecoderRegistry
@@ -391,6 +424,19 @@ src/
                                                  (promote_pending); restored on_enter / saved on_exit;
                                                  results re-derived (node ptrs not persisted). Ctrl+R
                                                  clears the query behind a Y/N confirm modal.
+               search_result_view.*            — Phase 20 decomposition extract: result grid+list view
+                                                 state (ResultView{List,Grid} + toggle_result_view,
+                                                 move_delta/move nav). Owns the off-thread decode
+                                                 worker + feeds the thumbnail cache. Pure SDL-free state
+                                                 machine, driven by advanced_search_screen's
+                                                 on_update/handle_key.
+               saved_search_panel.*            — Phase 20 decomposition extract: saved-search sidebar —
+                                                 list rendering + CRUD (Ctrl+S save / Enter load / Del
+                                                 delete). Pure vault/SDL-free; fed by
+                                                 advanced_search_screen's query builder for
+                                                 serialisation/suggestions. Together with
+                                                 search_result_view.* this took AdvancedSearchScreen from
+                                                 34 → 19 methods (cpp:S1448).
                favorites_images.*              — flat grid of favorited images across
                                                  the vault; opens a favorites-scoped
                                                  viewer (ToFavoriteViewer: prev/next
@@ -607,6 +653,11 @@ src/
                                                  GalleryGrid gate (vault_busy/poll_file_job/handle_job_input)
                                                  is free friends; blocks_idle_lock() holds off idle lock.
                                                  Compiled into osv_tests (poll-to-completion harness).
+               waste_threshold.h               — pure vault-bloat thresholds (#48 audit):
+                                                 should_display_waste(wasted, file_size) — true if waste
+                                                 exceeds max(50 MiB, 10% of file_size); should_hint_
+                                                 cancelled_import_waste(wasted) — true if > 1 MiB. Drives
+                                                 GalleryGrid's Shift+C compact-confirm footer hint.
                progress_modal.*                — draw_op_progress: shared veil + "N/M" bar + cancel-hint
                                                  modal reused by every screen hosting a background job
                                                  (import/export/delete/move) (Phase 25).
@@ -728,6 +779,35 @@ src/
                                                  (missing/unknown -> default), save(id); atomic
                                                  temp+rename, mirrors vault_registry. Loaded in
                                                  App::init(), saved live by ThemePicker.
+               harden.{h,cpp}                  — disable_core_dumps(): prctl(PR_SET_DUMPABLE,0) +
+                                                 setrlimit(RLIMIT_CORE,{0,0}) on Linux, no-op on
+                                                 Windows (macOS support removed — see the `#error`
+                                                 guard in src/crypto/random.cpp); called once at app
+                                                 init, Release (NDEBUG) builds only, before any vault
+                                                 unlock, to keep decrypted data/keys out of core dumps.
+                                                 Also: redirect_stream_to_file/
+                                                 redirect_diagnostics_to_log_file (Windows Release only —
+                                                 a windowless WindowedApp process has no valid stdout/
+                                                 stderr handle, so every std::println(stderr,...) would
+                                                 throw std::system_error and terminate(); redirects both
+                                                 to config_dir()/console.log instead).
+               error_log.*                     — persistent, best-effort error log (video-import crash
+                                                 fix): log_error(tag,msg) appends "[tag] msg" to both
+                                                 stderr (Debug's console) and config_dir()/error.log
+                                                 (Release has no visible console otherwise).
+                                                 install_terminate_logger() installs std::set_terminate
+                                                 so an uncaught exception logs what() before the process
+                                                 dies instead of vanishing with zero trace; called first
+                                                 in App::init(). Never logs decrypted plaintext or key
+                                                 material (invariant #5).
+               safe_print.h                    — platform::safe_println<Args...>(stream, fmt, args...):
+                                                 wraps std::println in try/catch, swallowing any
+                                                 std::system_error from a failed write. std::println
+                                                 throwing on a closed/invalid stream (Windows Release's
+                                                 windowless stdout/stderr) previously crashed the process
+                                                 via terminate() from INSIDE error_log.cpp's own
+                                                 terminate handler; every diagnostic print call site
+                                                 must go through this wrapper instead of raw std::println.
 tests/
   crypto/ gfx/ image/ platform/ ui/ vault/ media/
   test_framework.h  test_main.cpp
@@ -751,70 +831,6 @@ vendor/
 assets/fonts/   bundled OFL font for stb_truetype
 ```
 
-## Branch `feat/phase-26-vault-compression` (2026-07-03, NOT yet merged — owner gate; stacked on docs PR #49)
-
-Phase 26 — transparent vault compression (adaptive store-if-smaller). New/changed modules:
-
-- `src/vault/chunk_codec.{h,cpp}` — pure framing codec (miniz mz_compress2/mz_uncompress2, no
-  new dep): frame = `method u8 (0=raw,1=deflate) | [orig_len u64 LE | zlib stream]`, deflate kept
-  only when framed ≤ 95% of framed raw; hostile orig_len bounded by comp_len×1032+64 BEFORE
-  allocation (bomb guard); encode/decode overloads for both std::vector and mlock'd SecureBytes
-  (SecureBytes decode wipes out-buffer on EVERY failure path).
-- `ChunkStore(fp, key, bool framed)` — third ctor param, NO default (compiler enumerates sites);
-  framed mode applies the codec around the AEAD in append_chunk + both read_chunk overloads.
-  Every construction passes `framed_chunks(header)`; `media::VideoSource` ctor threads the flag.
-- `vault::FLAG_FRAMED_CHUNKS` (header flags bit 0) + constexpr `framed_chunks(const Header&)`
-  in header.h. `Vault::create` sets it on NEW vaults only. Legacy vaults read AND append raw
-  forever (no migration) — proven by committed pre-change fixture
-  `tests/vault/fixtures/legacy_noflags.osv` (password `legacy-password`) + back-compat test.
-- Index blob (crypto::seal + append_raw, NOT append_chunk) framed at ALL THREE sites:
-  `index_io::commit_index`, `Vault::unlock` load_slot, `Vault::compact` (the compact site was a
-  real bug found in review — an unframed blob made a compacted framed vault unopenable).
-- Side channel (documented/accepted): ciphertext length reveals plaintext compressibility.
-- Tests 640→660 (`test_chunk_codec`, `test_vault_compress`, fuzz hostile frames + framed reads);
-  --asan clean. Compaction tests switched to incompressible random payloads (on-disk size math).
-
-## Branch `audit-improvements` (2026-07-03, MERGED as PR #48 → main commit 22ae9d0)
-
-13-task audit-improvement branch (eca6984..c26e59b). New/changed modules:
-
-- `src/ui/grid_layout.{h,cpp}` — pure viewport maths (grid_visible_range/list_visible_range/
-  ensure_visible/clamp_scroll); GalleryGrid + FavoritesScreen now CULL to the visible range and
-  SCROLL (selection-following + mouse wheel; grids previously could not scroll at all).
-- ImageViewer thumb strip: decode now off-thread (own DecodeWorker, mirrors tile_thumb;
-  failed-set keyed on data_offset).
-- Build: fatalwarnings{All} + -Wshadow -Wconversion (project code, gcc+clang; clang adds
-  -Wno-sign-conversion for gcc parity — 134 sites deferred), Release adds
-  -fstack-protector-strong + _FORTIFY_SOURCE=3.
-- `tests/image/test_fuzz_codecs.cpp` — deterministic malformed-media corpus (~3500 iters);
-  `scripts/build_codecs.sh --asan` → `vendor/codecs-prefix-asan/` (gitignored); premake --asan
-  prefers it; ci.yml weekly cron `0 2 * * 0` runs tests-asan-codecs ONLY (all other jobs gated
-  `github.event_name != 'schedule'`); new non-blocking `lint` job (clang-tidy src/ +
-  changed-lines-only git clang-format). `.clang-format` (aspirational — tree not reformatted)
-  + `.clang-tidy` at root.
-- Vault waste UX: `vault::vault_file_bytes` free friend; `Vault::compact(vault::OpProgress*)`
-  (cancel aborts before rename, 3-layer check); `src/ui/waste_threshold.h` pure helpers
-  (max(50MiB,10%) footer hint / 1MiB post-cancel hint); GalleryGrid Shift+C = confirm-compact on
-  FileOpJob (FileOpKind::Compact).
-- Compact commit sequence is now rename-aside: osv→.old (dir fsync) → temp→osv (dir fsync) →
-  zero-wipe .old (`fileutil::wipe_and_remove`, 1MiB chunks, best-effort/CoW-honest) → remove.
-- `src/platform/harden.{h,cpp}` — disable_core_dumps() (prctl+setrlimit Linux / setrlimit macOS /
-  no-op Win), called NDEBUG-only in App::init; secure_mem.h adds MADV_DONTDUMP post-mlock +
-  once-only mlock WARNING (atomic_flag).
-- `src/vault/index_io.{h,cpp}` (commit_index/write_header, IndexIoContext — crash-safe 3-phase
-  swap moved here) + `src/vault/vault_ops.{h,cpp}` (split_path/resolve/traversal/
-  relocate_node_chunks); vault.cpp delegates via TU-local using-directives; vault.h unchanged.
-- `src/ui/search_result_view.{h,cpp}` + `src/ui/saved_search_panel.{h,cpp}` — AdvancedSearchScreen
-  decomposed (34→19 methods); panel handle_key returns an Action enum (screen owns load;
-  panel owns delete); hot/focus state passed as render parameter.
-- `docs/VENDORED_DEPS.md` — pin table + quarterly CVE cadence; monocypher moved to the exact
-  `4.0.2` release tag (0d85f98; tags are UNprefixed). Owner flags: monocypher 4.0.3 has
-  constant-time hardening; libde265 v1.1.1 exists (pin == v1.0.15 exactly).
-- `tests/ui/test_import_bench.cpp` — OSV_BENCH=1 / OSV_BENCH_DIR knobs; verdict: no index-commit
-  batching needed (16.8ms/image real disk, fsync-dominated).
-- 640 tests green (Debug/ASan/Release, gcc+clang). scripts/test.sh does NOT build the app —
-  scripts/build.sh is required evidence for app-side changes.
-
 ## Project-wide invariants (NEVER violate)
 
 1. No decrypted bytes to disk — only `mlock`'d heap buffers.
@@ -825,6 +841,11 @@ Phase 26 — transparent vault compression (adaptive store-if-smaller). New/chan
 3. Every XChaCha20-Poly1305 encrypt call uses a fresh 24-byte CSPRNG nonce.
 4. Tag verified before any plaintext bytes are consumed.
 5. Keys, passwords, decrypted content must never appear in log output.
+6. A vault file is untrusted input (portable/shareable); node names are path
+   components, never paths — validate on ingress (`vault::is_safe_node_name`),
+   repair on import (`vault::sanitize_node_name`), containment-check on export
+   (`ui::export_path_within`); never build `dest_dir / node.name` directly
+   (CWE-22, Phase 36).
 
 ## Key hierarchy
 
@@ -839,3 +860,5 @@ Append chunks → fsync → write index to inactive slot → fsync → flip `act
 ## Build/run/test commands: `mem:suggested_commands`
 ## Code conventions: `mem:conventions`
 ## Task-completion checklist: `mem:task_completion`
+## Full `.osv` binary layout (header/chunk/index byte fields): `mem:vault_format`
+## UI/UX specification (screen designs, help popup convention): `mem:ui_spec`
