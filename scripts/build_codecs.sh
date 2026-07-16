@@ -145,9 +145,24 @@ build_codec archive "$REPO_ROOT/vendor/libarchive"                     \
     -DENABLE_TEST=OFF -DENABLE_WERROR=OFF
 
 # FFmpeg — decode-only static. Video (h264/hevc + prores/dnxhd/mjpeg for .mov,
-# Phase 28; vp8/vp9 for .webm, Phase 38) + audio (aac/opus/mp3/vorbis/flac/ac3).
-# configure-built (not cmake), so it gets its own function. Idempotent: skip if
-# libavcodec is already installed. Needs nasm (already required by libaom).
+# Phase 28; vp8/vp9 for .webm, Phase 38; av1 for .webm/.mov + qtrle/cinepak for
+# .mov, Phase 40) + audio (aac/opus/mp3/vorbis/flac/ac3). configure-built (not
+# cmake), so it gets its own function. Idempotent: skip if libavcodec is
+# already installed. Needs nasm (already required by libaom).
+#
+# AV1: FFmpeg's own native "av1" decoder is a hwaccel-dispatch shim only (no
+# software decode path — it returns ENOSYS without a HW accelerator, confirmed
+# by direct testing during Phase 40 implementation, contradicting the "native
+# decoder, no new vendored dependency" pattern Phase 38 used for vp8/vp9).
+# Real software AV1 decode needs libaom or dav1d; this project already vendors
+# libaom (vendor/libaom, decoder-only, built by build_codec above for AVIF
+# stills via libheif) — reused here as libaom-av1 rather than adding a new
+# dependency. PKG_CONFIG_PATH points configure at the aom.pc this script just
+# installed into $CODEC_PREFIX. Note the configure component name is
+# `libaom_av1` (underscore — derived from the `ff_libaom_av1_decoder` extern
+# symbol), distinct from the runtime/display decoder name `libaom-av1`
+# (hyphen, VideoDecoder::open() matches on AV_CODEC_ID_AV1, not the name
+# string, so this distinction is configure-only).
 build_ffmpeg() {
     if [[ -f "$CODEC_PREFIX/lib/libavcodec.a" ]]; then
         echo "==> ffmpeg already installed — skipping."
@@ -164,14 +179,15 @@ build_ffmpeg() {
         extra_ldflags="-fsanitize=address,undefined"
     fi
 
-    ( cd "$src" && ./configure \
+    ( cd "$src" && PKG_CONFIG_PATH="$CODEC_PREFIX/lib/pkgconfig" ./configure \
         --prefix="$CODEC_PREFIX"                                            \
         --enable-static --disable-shared                                    \
         --disable-everything --disable-programs --disable-doc               \
         --disable-network --disable-encoders --disable-muxers               \
         --disable-protocols --disable-devices --disable-filters             \
         --disable-bsfs --disable-autodetect                                 \
-        --enable-decoder=h264,hevc,prores,dnxhd,mjpeg,vp8,vp9,aac,opus,mp3,vorbis,flac,ac3 \
+        --enable-libaom                                                     \
+        --enable-decoder=h264,hevc,prores,dnxhd,mjpeg,vp8,vp9,libaom_av1,qtrle,cinepak,aac,opus,mp3,vorbis,flac,ac3 \
         --enable-demuxer=mov,matroska,webm                                  \
         --enable-parser=h264,hevc,dnxhd,mjpeg,aac,vorbis,opus,flac,ac3,mpegaudio \
         --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb                      \

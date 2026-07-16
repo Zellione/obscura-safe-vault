@@ -247,8 +247,9 @@ src/
   media/       video_source.*, chunk_avio.*,  — Phase 15–16 video & audio (all gated OSV_VENDORED_AV):
                mem_avio.*, video_decoder.*,      VideoSource = decrypt-on-demand byte stream over
                audio_decoder.*, av_sync.*,       a video's ChunkStore (mlock'd 1-chunk cache);
-               audio_frame.h,                    ChunkAvio/MemAvio = AVIOContext (read+seek, never
-               video_probe.*, decoded_frame.h    a temp file); VideoDecoder = FFmpeg shared demuxer
+               audio_frame.h, volume_setting.*,  ChunkAvio/MemAvio = AVIOContext (read+seek, never
+               loop_setting.*,                   a temp file); VideoDecoder = FFmpeg shared demuxer
+               video_probe.*, decoded_frame.h
                                                  feeding both video + audio via per-stream packet
                                                  queues (vq_/aq_); H.264/HEVC decode → DecodedFrame
                                                  (yuv420p/nv12, swscale fallback) + keyframe seek;
@@ -320,6 +321,21 @@ src/
                                                  float [0,1], atomic write, missing/invalid->1.0;
                                                  App loads at init + saves on clean exit; the in-memory
                                                  global lives in media/volume_setting.*, not AV-gated).
+                                                 Phase 40 Part 1: R toggles loop (process-lifetime
+                                                 media::saved_loop_enabled()/set_saved_loop_enabled(),
+                                                 media/loop_setting.*, not persisted like volume);
+                                                 VideoPlayback::advance()'s EOF branch re-seeks to 0
+                                                 and keeps playing instead of pausing when loop_ is
+                                                 set (same do_seek(0.0) path as the Space-at-end
+                                                 replay); on-screen ring indicator next to the
+                                                 play/pause icon (accent when on, dim when off, same
+                                                 treatment as the mute speaker icon). AV1 decode
+                                                 (`.webm`/`.mov`) added via the already-vendored
+                                                 libaom as the `libaom-av1` FFmpeg decoder — FFmpeg's
+                                                 own native "av1" decoder is a hwaccel-dispatch shim
+                                                 only (ENOSYS without a HW accelerator, no software
+                                                 decode); QTRLE/Cinepak added as two more native `.mov`
+                                                 decoders (VideoCodec gains AV1/QTRLE/Cinepak).
                                                  GalleryGrid routes video imports to add_video +
                                                  draws a play badge (draw_tile_thumb) in grid & list.
                                                  Phase 39 Part 2: constructor gains an

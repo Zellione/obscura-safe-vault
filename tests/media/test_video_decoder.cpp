@@ -482,6 +482,44 @@ TEST(video_decoder_decodes_mov_pro_codecs)
     }
 }
 
+TEST(video_decoder_decodes_mov_qtrle_cinepak)
+{
+    // Phase 40: legacy .mov codecs (QuickTime Animation/RLE, Cinepak) decode
+    // end-to-end through the encrypted-chunk path, same shape as the Phase 28
+    // pro-codec test.
+    struct Case { const char* file; vault::VideoCodec codec; int width; };
+    const Case cases[] = {
+        {OSV_MEDIA_FIXTURE_DIR "/tiny_qtrle.mov",   vault::VideoCodec::QTRLE,   160},
+        {OSV_MEDIA_FIXTURE_DIR "/tiny_cinepak.mov", vault::VideoCodec::Cinepak, 160},
+    };
+    for (const auto& c : cases) {
+        auto v_bytes = read_file(c.file);
+        REQUIRE(!v_bytes.empty());
+        TempVault tv("decoder_mov_legacy");
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+        REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+        REQUIRE(v.add_video("c", v_bytes, "clip.mov", 4096) == vault::VaultResult::Ok);
+        auto kids = v.list("c");
+        REQUIRE(kids.size() == 1);
+
+        media::ChunkAvio avio(media::VideoSource::open(v, *kids[0]));
+        REQUIRE(avio.valid());
+        media::VideoDecoder dec;
+        REQUIRE(dec.open(avio.ctx()));
+        CHECK(dec.codec()  == c.codec);
+        CHECK(dec.width()  == c.width);
+        CHECK(dec.height() == 120);
+
+        int n = 0;
+        while (auto f = dec.next_frame()) {
+            CHECK(f->pix_fmt == media::FramePixelFormat::I420);
+            ++n;
+        }
+        CHECK(n == 10);
+    }
+}
+
 TEST(video_decoder_decodes_webm_vp8_vp9)
 {
     // Phase 38: VP8 / VP9 .webm streams decode end-to-end through the
@@ -517,6 +555,44 @@ TEST(video_decoder_decodes_webm_vp8_vp9)
         }
         CHECK(n == 10);
     }
+}
+
+TEST(video_decoder_decodes_webm_av1)
+{
+    // Phase 40: AV1 .webm decodes end-to-end through the encrypted-chunk path.
+    // AV1 encoders commonly reorder frames internally (alt-ref/hierarchical
+    // GOPs); libavcodec always hands decoded frames back in presentation
+    // order via best_effort_timestamp, so pts_seconds must come out strictly
+    // increasing regardless of encode-order — the same invariant av_sync::decide
+    // (media/av_sync.h) relies on to Present/Hold/Drop correctly.
+    auto v_bytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_av1.webm");
+    REQUIRE(!v_bytes.empty());
+    TempVault tv("decoder_webm_av1");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", v_bytes, "clip.webm", 4096) == vault::VaultResult::Ok);
+    auto kids = v.list("c");
+    REQUIRE(kids.size() == 1);
+
+    media::ChunkAvio avio(media::VideoSource::open(v, *kids[0]));
+    REQUIRE(avio.valid());
+    media::VideoDecoder dec;
+    REQUIRE(dec.open(avio.ctx()));
+    CHECK(dec.codec()  == vault::VideoCodec::AV1);
+    CHECK(dec.width()  == 256);
+    CHECK(dec.height() == 120);
+    CHECK(dec.has_audio());
+
+    int n = 0;
+    double last_pts = -1.0;
+    while (auto f = dec.next_frame()) {
+        CHECK(f->pix_fmt == media::FramePixelFormat::I420);
+        CHECK(f->pts_seconds > last_pts);   // strictly increasing presentation order
+        last_pts = f->pts_seconds;
+        ++n;
+    }
+    CHECK(n == 10);
 }
 
 TEST(video_decoder_webm_vp8_opus_and_vp9_vorbis_audio)

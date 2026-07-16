@@ -33,9 +33,18 @@ echo "==> Building vendored ffmpeg for Windows (MSVC toolchain, decode-only, sta
 # ac3dec_float.o still references eac3_data.o's tables (ff_eac3_*), which then
 # never gets compiled/archived: an unresolved-external link error that only
 # surfaces on the MSVC leg.
+#
+# AV1: FFmpeg's own native "av1" decoder is a hwaccel-dispatch shim only (no
+# software decode path). Real software AV1 decode reuses the already-vendored
+# libaom (built by build_codecs.bat) as libaom-av1 — see build_codecs.sh's
+# build_ffmpeg() for the full explanation, including the libaom_av1 (configure
+# component name) vs libaom-av1 (runtime decoder name) naming gotcha.
+# PKG_CONFIG_PATH points configure at the aom.pc build_codecs.bat installed
+# into $CODEC_PREFIX; requires the `pkgconf` MSYS2 package (see ci.yml's
+# MSYS2 setup step).
 (
     cd vendor/ffmpeg
-    ./configure \
+    PKG_CONFIG_PATH="$CODEC_PREFIX/lib/pkgconfig" ./configure \
         --toolchain=msvc \
         --target-os=win64 \
         --arch=x86_64 \
@@ -45,7 +54,8 @@ echo "==> Building vendored ffmpeg for Windows (MSVC toolchain, decode-only, sta
         --disable-network --disable-encoders --disable-muxers \
         --disable-protocols --disable-devices --disable-filters \
         --disable-bsfs --disable-autodetect \
-        --enable-decoder=h264,hevc,prores,dnxhd,mjpeg,vp8,vp9,aac,opus,mp3,vorbis,flac,ac3,eac3 \
+        --enable-libaom \
+        --enable-decoder=h264,hevc,prores,dnxhd,mjpeg,vp8,vp9,libaom_av1,qtrle,cinepak,aac,opus,mp3,vorbis,flac,ac3,eac3 \
         --enable-demuxer=mov,matroska,webm \
         --enable-parser=h264,hevc,dnxhd,mjpeg,aac,vorbis,opus,flac,ac3,mpegaudio \
         --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb \

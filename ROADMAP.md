@@ -51,7 +51,7 @@
 | 37 | Persisted per-gallery sort order | ✅ | Choose + persist a gallery's sort order, including natural name order. → [details](docs/roadmap/phase-37-persisted-sort-order.md) |
 | 38 | WebM video support (VP8/VP9) | ✅ | Import and play `.webm` video (Matroska + VP8/VP9). → [details](docs/roadmap/phase-38-webm-video-support.md) |
 | 39 | Discoverable shortcuts & session-scoped gallery memory | ✅ | `F1` help popup + session-scoped gallery/viewer state memory. → [details](docs/roadmap/phase-39-discoverable-shortcuts-session-memory.md) |
-| 40 | Video codec/loop/sync polish, gallery position memory & view density | 🔜 | AV1 + broader `.mov` codecs, video loop toggle, A/V sync hardening, session-scoped sub-gallery/selection memory, 5-way List/Grid S-XL view density. → [details](docs/roadmap/phase-40-video-gallery-browsing-polish.md) |
+| 40 | Video codec/loop/sync polish, gallery position memory & view density | 🔜 | Part 1 ✅: AV1 + broader `.mov` codecs, video loop toggle, A/V sync hardening. Parts 2/3 not started: session-scoped sub-gallery/selection memory, 5-way List/Grid S-XL view density. → [details](docs/roadmap/phase-40-video-gallery-browsing-polish.md) |
 
 ---
 

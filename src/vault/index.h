@@ -74,6 +74,9 @@ enum class VideoCodec : uint8_t {
     MJPEG   = 4,   // Motion JPEG
     VP8     = 5,   // WebM (Phase 38)
     VP9     = 6,   // WebM (Phase 38)
+    AV1     = 7,   // WebM/.mov (Phase 40)
+    QTRLE   = 8,   // .mov, QuickTime Animation/RLE (Phase 40)
+    Cinepak = 9,   // .mov, legacy (Phase 40)
     Unknown = 0xFF,
 };
 

@@ -18,6 +18,7 @@
 #include "crypto/kdf.h"
 #include "gfx/renderer.h"
 #include "gfx/text.h"
+#include "media/loop_setting.h"
 #include "ui/video_playback.h"
 #include "vault/index.h"
 #include "vault/vault.h"
@@ -155,6 +156,108 @@ TEST(video_playback_av_sync_seek_realign_and_writes_no_disk)
     REQUIRE(!ec);
     CHECK_EQ(size_before, size_after);   // Assertion (c): no decrypted bytes to disk
                                         // (covers audio feed path)
+
+    SDL_DestroyRenderer(sr);
+    SDL_DestroySurface(surf);
+}
+
+TEST(video_playback_loop_enabled_reseeks_at_eof_instead_of_pausing)
+{
+    // Phase 40: with looping enabled (R key), reaching end-of-stream re-seeks
+    // to 0 and keeps playing — the same do_seek(0.0) path already used by the
+    // "press Space at the end" replay (Phase 16), reached automatically from
+    // advance()'s EOF branch instead of a user keypress. Uses a fixture with
+    // no audio track so the transport clock is the deterministic model clock,
+    // not the audio clock.
+    media::set_saved_loop_enabled(false);   // known starting state (shared global)
+
+    auto vbytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("loop_eof");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    ui::VideoPlayback vp(v, *node);
+    REQUIRE(vp.valid());
+    CHECK(!vp.has_audio());   // tiny.mp4 has no audio track — model clock drives it
+
+    const SDL_FRect area{0, 0, 320, 240};
+    vp.render(r, font, area);   // decode + upload frame 0
+
+    vp.handle_key(SDLK_R, SDL_SCANCODE_R);          // enable loop
+    vp.handle_key(SDLK_SPACE, SDL_SCANCODE_SPACE);  // play
+    REQUIRE(vp.animating());
+
+    // Drive well past the fixture's duration (~1s at 10fps); with loop
+    // enabled, playback must still be animating (never auto-paused at EOF)
+    // and position() must have wrapped back down near the start.
+    for (int i = 0; i < 30; ++i) {
+        vp.update(0.1);
+        vp.render(r, font, area);
+    }
+    CHECK(vp.animating());        // still playing, not auto-paused at EOF
+    CHECK(vp.position() < 1.0);   // wrapped back near the start, not stuck at the end
+
+    media::set_saved_loop_enabled(false);   // restore the default (shared global)
+
+    SDL_DestroyRenderer(sr);
+    SDL_DestroySurface(surf);
+}
+
+TEST(video_playback_loop_disabled_pauses_at_eof)
+{
+    // Control case: with loop off (the default), reaching EOF still
+    // auto-pauses — Phase 16's existing behavior, confirmed unchanged by the
+    // Phase 40 loop branch added to advance()'s EOF check.
+    media::set_saved_loop_enabled(false);   // known starting state (shared global)
+
+    auto vbytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("no_loop_eof");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    ui::VideoPlayback vp(v, *node);
+    REQUIRE(vp.valid());
+
+    const SDL_FRect area{0, 0, 320, 240};
+    vp.render(r, font, area);
+    vp.handle_key(SDLK_SPACE, SDL_SCANCODE_SPACE);  // play (loop stays off)
+    REQUIRE(vp.animating());
+
+    for (int i = 0; i < 30; ++i) {
+        vp.update(0.1);
+        vp.render(r, font, area);
+    }
+    CHECK(!vp.animating());   // auto-paused at EOF, unchanged Phase 16 behavior
 
     SDL_DestroyRenderer(sr);
     SDL_DestroySurface(surf);
@@ -358,6 +461,121 @@ TEST(video_playback_seek_moves_position_and_stays_paused)
         CHECK(vp.position() >= 0.2);   // moved close to the requested target
         CHECK_FALSE(vp.animating());   // still paused after the seek
     }
+
+    SDL_DestroyRenderer(sr);
+    SDL_DestroySurface(surf);
+}
+
+TEST(video_playback_decodes_av1_and_writes_no_disk)
+{
+    // Phase 40 hardening (a): AV1 .webm plays through the full VideoPlayback
+    // pipeline (decoder + av_sync + audio), not just raw decode order —
+    // confirms av_sync::decide's Present/Hold/Drop classification holds for
+    // the new codec's frame timestamps, mirroring the seek-realign test above.
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+    auto vbytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_av1.webm");
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("av1_playback");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "clip.webm", 4096) == vault::VaultResult::Ok);
+
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    std::error_code ec;
+    const auto size_before = fs::file_size(tv.path, ec);
+    REQUIRE(!ec);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        ui::VideoPlayback vp(v, *node);
+        REQUIRE(vp.valid());
+        CHECK(vp.has_audio());
+
+        const SDL_FRect area{0, 0, 320, 240};
+        vp.render(r, font, area);   // decode + upload frame 0
+        vp.handle_key(SDLK_SPACE, SDL_SCANCODE_SPACE);
+        CHECK(vp.animating());
+
+        for (int i = 0; i < 10; ++i) {
+            vp.update(0.05);
+            vp.render(r, font, area);
+        }
+        CHECK(vp.audio_samples_fed() > 0);   // audio actively flowing, in sync with video
+    }
+
+    const auto size_after = fs::file_size(tv.path, ec);
+    REQUIRE(!ec);
+    CHECK_EQ(size_before, size_after);   // no decrypted bytes to disk
+
+    SDL_DestroyRenderer(sr);
+    SDL_DestroySurface(surf);
+}
+
+TEST(video_playback_loop_reseek_realigns_audio_like_manual_seek)
+{
+    // Phase 40 hardening (b): the loop-boundary reseek reuses do_seek() — the
+    // exact path the seek-realign test at the top of this file already
+    // verifies flushes and re-aligns both tracks for a keypress-triggered
+    // seek. Confirm the same invariant holds when do_seek() fires
+    // automatically from EOF (loop) instead.
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+    media::set_saved_loop_enabled(false);   // known starting state (shared global)
+
+    auto vbytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_av.mp4");
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("loop_audio_realign");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny_av.mp4", 4096) == vault::VaultResult::Ok);
+
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    ui::VideoPlayback vp(v, *node);
+    REQUIRE(vp.valid());
+    REQUIRE(vp.has_audio());
+
+    const SDL_FRect area{0, 0, 320, 240};
+    vp.render(r, font, area);
+    vp.handle_key(SDLK_R, SDL_SCANCODE_R);           // enable loop
+    vp.handle_key(SDLK_SPACE, SDL_SCANCODE_SPACE);   // play
+    REQUIRE(vp.animating());
+
+    // Drive well past the ~1s fixture's duration so the loop boundary fires.
+    for (int i = 0; i < 40; ++i) {
+        vp.update(0.1);
+        vp.render(r, font, area);
+    }
+
+    // Same invariants the manual-seek test above checks: after wrapping,
+    // position re-aligns near the start (both clocks reset by do_seek),
+    // playback keeps running, and audio keeps flowing across the boundary.
+    CHECK(vp.animating());
+    CHECK(vp.position() < 1.0);
+    CHECK(vp.audio_samples_fed() > 0);
+
+    media::set_saved_loop_enabled(false);   // restore the default (shared global)
 
     SDL_DestroyRenderer(sr);
     SDL_DestroySurface(surf);

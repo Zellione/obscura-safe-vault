@@ -6,7 +6,7 @@
 
 A multi-platform native encrypted photo gallery. All photos live inside a single `.osv` vault file — images are decrypted **into locked memory only**, never written to a temporary file or disk. The gallery is browsable with a freely-nestable folder tree, a zoomable full-screen image viewer, and a thumbnail strip navigable with arrow keys.
 
-**Stack:** C++23 · SDL3 · SDL_Renderer · Monocypher (XChaCha20-Poly1305 + Argon2id) · stb_image · libwebp / libheif (WebP / HEIC / AVIF) · FFmpeg decode-only (H.264 / H.265 / ProRes / DNxHD / MJPEG / VP8 / VP9 video, AAC / Opus / MP3 / Vorbis / FLAC / AC-3 audio) · miniz (ZIP/CBZ) · libarchive (7z/RAR/TAR) · nlohmann/json · premake5 → Ninja
+**Stack:** C++23 · SDL3 · SDL_Renderer · Monocypher (XChaCha20-Poly1305 + Argon2id) · stb_image · libwebp / libheif (WebP / HEIC / AVIF) · FFmpeg decode-only (H.264 / H.265 / ProRes / DNxHD / MJPEG / VP8 / VP9 / AV1 / QTRLE / Cinepak video, AAC / Opus / MP3 / Vorbis / FLAC / AC-3 audio) · miniz (ZIP/CBZ) · libarchive (7z/RAR/TAR) · nlohmann/json · premake5 → Ninja
 
 See [`CLAUDE.md`](CLAUDE.md) for all technology decisions and [`ROADMAP.md`](ROADMAP.md) for the full development plan.
 
@@ -23,6 +23,7 @@ See [`CLAUDE.md`](CLAUDE.md) for all technology decisions and [`ROADMAP.md`](ROA
 | C++23 compiler | building the app | gcc 14+ / clang 17+ / MSVC 2022 |
 | `cmake`, `ninja` | configure + build vendored libs | Arch: `sudo pacman -S cmake ninja` · Debian/Ubuntu: `sudo apt install cmake ninja-build` · Windows: VS 2022 + `choco install ninja` |
 | `nasm` | assembler for the vendored **libaom** (AVIF decode) | Arch: `sudo pacman -S nasm` · Debian/Ubuntu: `sudo apt install nasm` · Windows: `choco install nasm` |
+| `pkg-config` (or `pkgconf`) | FFmpeg's configure detects the vendored **libaom** through it, for AV1 video decode | Arch: `sudo pacman -S pkgconf` · Debian/Ubuntu: `sudo apt install pkg-config` · Windows (MSYS2): `pkgconf` package |
 
 ### First-time setup
 
@@ -128,7 +129,7 @@ vendor/
   stb/         git submodule — image decode
   libwebp/     git submodule — WebP decode
   libde265/    git submodule — HEIC (HEVC) decode
-  libaom/      git submodule — AVIF (AV1) decode
+  libaom/      git submodule — AVIF stills (via libheif) + FFmpeg AV1 video decode
   libheif/     git submodule — HEIC/AVIF container
   ffmpeg/      git submodule — video/audio decode-only
   miniz/       git submodule — ZIP/CBZ import

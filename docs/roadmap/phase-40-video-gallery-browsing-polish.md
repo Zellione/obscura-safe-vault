@@ -12,7 +12,7 @@ window sizes better. Each part ships as its own PR against this phase.
 
 ---
 
-## Part 1 — Broader video codec support, loop toggle, hardened A/V sync
+## Part 1 — Broader video codec support, loop toggle, hardened A/V sync ✅
 
 **Goal:** Extend the vendored FFmpeg decoder set to cover AV1 (`.webm`) and
 more of the codecs still commonly found in `.mov` containers beyond the
@@ -227,8 +227,15 @@ repeatedly in the gallery grid cycles List → Grid S → Grid M → Grid L →
 Grid XL → List, each grid density rendering visibly larger/smaller
 thumbnails with a correspondingly adjusted column count.
 
-**Status:** 🔜 Not started. Planned as three PRs (Part 1, Part 2, Part 3)
-against this one phase, in the order listed above (Part 1's codec/decoder
-work is independent of Parts 2/3, but Part 2's session-memory extension and
-Part 3's `GalleryView` value-set change both touch `GallerySessionState` and
+**Status:** 🔜 Part 1 ✅ shipped (this PR) — AV1 (`.webm`/`.mov`, via the
+already-vendored libaom as FFmpeg's `libaom-av1` decoder — FFmpeg's own native
+`av1` decoder turned out to be hwaccel-dispatch only, no software decode path,
+contradicting this doc's original "no libaom/dav1d link needed" assumption)
+plus QTRLE/Cinepak for `.mov`; loop toggle (`R`, `media::loop_setting`,
+on-screen ring indicator); A/V sync hardening (presentation-order pts
+invariant, loop-boundary reseek re-alignment, long-duration drift regression
+test) — all verified with `scripts/test.sh` and `scripts/test.sh --asan`
+green. Parts 2 and 3 not started. Planned as their own PRs against this same
+phase, in that order (Part 2's session-memory extension and Part 3's
+`GalleryView` value-set change both touch `GallerySessionState` and
 `gallery_grid.cpp`, so land in that order to keep merge conflicts small).
