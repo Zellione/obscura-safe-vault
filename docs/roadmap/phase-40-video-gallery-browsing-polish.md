@@ -137,7 +137,7 @@ sweep logic). `scripts/test.sh` and `scripts/test.sh --asan` both green.
 
 ---
 
-## Part 2 — Session-scoped gallery position memory
+## Part 2 — Session-scoped gallery position memory ✅
 
 **Goal:** Extend the session-scoped memory pattern Phase 39 Part 2 already
 established (`GallerySessionState`) so that navigating the gallery tree —
@@ -201,6 +201,42 @@ like the rest of `GallerySessionState`); remembering scroll position
 independently of selected index (the existing scroll-to-selection logic
 already re-derives scroll from the selected index on render); a position
 history/breadcrumb beyond the current path's own remembered index.
+
+### Implementation notes
+
+`GallerySessionState` gained `last_index_by_path` +
+`record(path, index)`/`recall(path)` exactly as specced, tested directly
+(pure, no SDL). `GalleryGrid` gained a `GallerySessionState&` constructor
+parameter — a new kind of dependency for this struct: every other field is
+written once by `App`, at screen exit, but `last_index_by_path` needs many
+small updates during a single `GalleryGrid` instance's lifetime (it can
+descend through several sub-galleries without ever being destroyed), so
+`GalleryGrid` itself calls `session_.record(...)` in `open_selected()` (just
+before `nav_.enter()`) and `go_up()` (just before `nav_.up()`), and
+`session_.recall(...)` right after each `refresh()` to restore that level's
+remembered tile — plus records once more in a new `on_exit()` override for
+the grid→viewer/grid→other-screen case.
+
+One resolved ambiguity: `Nav::index` has no "unspecified" sentinel — every
+`ToGallery` request that doesn't have a real position in mind (Favorites,
+Tags, Advanced Search, Vault Manager, "go back") passes `index = 0`
+identically to how the viewer would legitimately report "the user backed
+all the way down to tile 0." Disambiguating by value alone would silently
+let a stale `recall()` clobber the viewer's fresher `index_` in that
+specific case. Fixed at the one real decision point: `App::apply_nav()`
+already knows the outgoing screen's concrete type (via the same
+`dynamic_cast` `capture_session_state()` uses) before it's torn down, so it
+computes `from_viewer` there and threads it into `App::to_gallery(path,
+selected, explicit_index)` — `explicit_index` true only for the
+viewer-return path, false everywhere else, so `to_gallery()` always knows
+whether `selected` is real or should defer to `session_.recall(path)`.
+
+Manual interactive verification carries the same caveat Phase 39 Part 2
+documented: `App`/`GalleryGrid`/`ImageViewer` need a real SDL window and
+aren't part of the test binary, and this environment has no GUI-automation
+tool to drive a keyboard-driven round trip through them. `scripts/build.sh`
+confirms the wiring compiles and links; `scripts/test.sh`/`--asan` confirm
+the pure `record`/`recall` logic and the rest of the suite stay green.
 
 ---
 
@@ -274,11 +310,15 @@ plus QTRLE/Cinepak for `.mov`; loop toggle (`R`, `media::loop_setting`,
 on-screen ring indicator); A/V sync hardening (presentation-order pts
 invariant, loop-boundary reseek re-alignment, long-duration drift regression
 test) — all verified with `scripts/test.sh` and `scripts/test.sh --asan`
-green. Part 1 bugfix ✅ shipped (this PR) — self-healing video metadata
-repair for already-imported videos whose codec wasn't decodable at import
-time; a dav1d swap for faster AV1 decode was investigated and scoped out to
-its own future phase. Parts 2 and 3 not started. Planned as their own PRs
-against this same phase, in that order (Part 2's session-memory extension
-and Part 3's `GalleryView` value-set change both touch `GallerySessionState`
-and `gallery_grid.cpp`, so land in that order to keep merge conflicts
-small).
+green. Part 1 bugfix ✅ shipped — self-healing video metadata repair for
+already-imported videos whose codec wasn't decodable at import time; a
+dav1d swap for faster AV1 decode was investigated and scoped out to its own
+future phase. Part 2 ✅ shipped (this PR) — `GallerySessionState` gained a
+per-path `last_index_by_path` map; `GalleryGrid` records/recalls it on every
+descend/ascend/exit so returning to any previously-visited gallery level (by
+backing out, or by leaving to Favorites/Tags/Advanced Search/Vault Manager
+and coming back) restores the tile that was selected there, for the rest of
+the unlocked session — see Part 2's Implementation notes for how the
+viewer's freshly-known exact position is kept from being clobbered by a
+stale recall. Part 3 not started, planned as its own PR against this same
+phase.

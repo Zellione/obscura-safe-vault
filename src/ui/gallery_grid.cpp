@@ -155,8 +155,9 @@ void draw_file_op_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
 
 GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                          gfx::TextureCache& cache, GridDialogs dialogs,
-                         GridVaultCtx vault_ctx, GridLocation at)
+                         GridVaultCtx vault_ctx, GallerySessionState& session, GridLocation at)
     : win_(win), font_(font), vault_(vault), cache_(cache), dialogs_(dialogs),
+      session_(session),
       search_(vault, win), tag_editor_(vault, win),
       quick_switch_(vault_ctx.registry, vault_ctx.active_vault_path),
       transfer_(vault, std::move(vault_ctx.active_vault_path), vault_ctx.registry,
@@ -177,6 +178,13 @@ void GalleryGrid::on_enter()
     cols_ = grid_columns(static_cast<float>(win_.width()) - 2 * OX, CELL, GAP);
 }
 
+void GalleryGrid::on_exit()
+{
+    // The current path's selection is about to go stale (Phase 40 Part 2) —
+    // covers leaving to the viewer or to a different screen entirely.
+    session_.record(nav_.path(), nav_.selected());
+}
+
 void GalleryGrid::refresh()
 {
     children_ = vault_.list(nav_.path());
@@ -192,14 +200,22 @@ void GalleryGrid::open_selected()
     const int s = nav_.selected();
     if (s < 0 || s >= static_cast<int>(children_.size())) return;
     const vault::IndexNode* n = children_[s];
-    if (n->is_gallery()) { nav_.enter(n->name); refresh(); }
-    else                 request(NavKind::ToViewer, nav_.path(), s);
+    if (n->is_gallery()) {
+        session_.record(nav_.path(), s);   // this level's selection is about to go stale
+        nav_.enter(n->name);
+        refresh();
+        nav_.select(session_.recall(nav_.path()));   // restore this sub-gallery's remembered tile
+    } else {
+        request(NavKind::ToViewer, nav_.path(), s);
+    }
 }
 
 void GalleryGrid::go_up()
 {
+    session_.record(nav_.path(), nav_.selected());   // this level's selection is about to go stale
     if (!nav_.up()) { request(NavKind::ToVaultManager); return; }
     refresh();
+    nav_.select(session_.recall(nav_.path()));   // restore the parent's remembered tile
 }
 
 void GalleryGrid::toggle_select()

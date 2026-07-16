@@ -37,7 +37,11 @@ public:
 private:
     void to_manager();
     void to_unlock(const std::string& path);
-    void to_gallery(const std::string& path = {}, int selected = 0);
+    // `explicit_index` is true only when `selected` is a real, freshly-known
+    // position (currently: the viewer returning to its exact launch position)
+    // — otherwise `selected` is ignored in favor of session_.recall(path), the
+    // last-remembered tile at that path (Phase 40 Part 2).
+    void to_gallery(const std::string& path = {}, int selected = 0, bool explicit_index = false);
     void to_viewer(const std::string& gallery_path, int index);
     void to_favorite_images();
     void to_favorite_galleries();
