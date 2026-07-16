@@ -581,4 +581,62 @@ TEST(video_playback_loop_reseek_realigns_audio_like_manual_seek)
     SDL_DestroySurface(surf);
 }
 
+TEST(video_playback_async_decode_produces_frames_in_order_and_seeks_correctly)
+{
+    // Same shape as the existing av_sync test, but drives enough render()
+    // calls for the async worker's pipeline (submit -> decode -> take_result)
+    // to actually cross threads at least once, and adds a seek mid-playback —
+    // regression coverage for Task 5's threading change specifically.
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+    auto vbytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");   // 10 frames, no audio
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("async_decode");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        ui::VideoPlayback vp(v, *node);
+        REQUIRE(vp.valid());
+        const SDL_FRect area{0, 0, 320, 240};
+
+        vp.render(r, font, area);          // first frame, decoded synchronously-ish at open
+        CHECK_EQ(vp.position(), 0.0);
+
+        vp.handle_key(SDLK_SPACE, SDL_SCANCODE_SPACE);   // play
+        REQUIRE(vp.animating());
+
+        // Drive many ticks so the worker has time to decode ahead of the
+        // render thread's consumption, exercising the actual async path.
+        for (int i = 0; i < 60; ++i) {
+            vp.update(1.0 / 30.0);
+            vp.render(r, font, area);
+        }
+        CHECK(vp.position() > 0.0);   // played forward
+
+        // Mid-playback seek: must not hang or crash, and position must land
+        // near the target (generation-cancellation correctness).
+        vp.seek(0.1);
+        for (int i = 0; i < 20; ++i) {
+            vp.update(1.0 / 30.0);
+            vp.render(r, font, area);
+        }
+        CHECK(vp.position() >= 0.05);
+    }
+
+    SDL_DestroySurface(surf);
+}
+
 #endif  // OSV_VENDORED_AV

@@ -16,9 +16,11 @@
 #include <print>
 
 #include "gfx/yuv_texture.h"
+#include "image/decode_worker.h"
 #include "media/av_sync.h"
 #include "media/chunk_avio.h"
 #include "media/loop_setting.h"
+#include "media/video_decode_worker.h"
 #include "media/video_decoder.h"
 #include "media/video_source.h"
 #include "media/volume_setting.h"
@@ -34,6 +36,7 @@ constexpr float  PAD              = 16.0f;
 constexpr float  TRACK_H          = 6.0f;
 constexpr float  KNOB_R           = 8.0f;
 constexpr double DEFAULT_FRAME_DT = 1.0 / 30.0;  // backward frame-step fallback
+constexpr size_t PREFETCH_DEPTH   = 2;           // packets kept queued ahead of the video decode worker
 }  // namespace
 
 #ifdef OSV_VENDORED_AV
@@ -42,7 +45,12 @@ constexpr double DEFAULT_FRAME_DT = 1.0 / 30.0;  // backward frame-step fallback
 // VideoDecoder; decoded YUV frames upload to a streaming texture. The pure
 // PlaybackModel owns the transport clock. No bytes touch disk (invariant #1).
 struct VideoPlayback::Impl {
-    media::VideoDecoder               decoder_;
+    media::VideoDecoder                          decoder_;
+    std::unique_ptr<media::VideoDecodeWorker>    video_worker_;
+    uint64_t                                     generation_    = 0;
+    size_t                                       in_flight_     = 0;      // packets submitted, Result not yet consumed
+    bool                                          demux_eof_     = false;  // demuxer hit EOF for the current generation
+    std::vector<uint8_t>                          pending_storage_;       // backs pending_->planes (owned copy from the worker)
     std::unique_ptr<media::ChunkAvio> avio_;
     gfx::YuvTexture                   yuv_;
     PlaybackModel                     model_{0.0};
@@ -90,6 +98,8 @@ struct VideoPlayback::Impl {
             return;
         }
         valid_ = true;
+        video_worker_ = std::make_unique<media::VideoDecodeWorker>(
+            *decoder_.video_codecpar(), decoder_.video_time_base(), image::decode_wake_event());
         model_ = PlaybackModel(static_cast<double>(decoder_.duration_us()) / 1'000'000.0);
 
         // Open audio device if available. The app only inits SDL_INIT_VIDEO, so
@@ -128,16 +138,41 @@ struct VideoPlayback::Impl {
         if (audio_subsystem_) SDL_QuitSubSystem(SDL_INIT_AUDIO);
     }
 
+    // Tops up the worker's queue to PREFETCH_DEPTH packets ahead (so the
+    // worker has a head start decoding while the render thread does other
+    // work), then blocks for the next in-generation result. Mirrors
+    // decoder_.next_frame()'s old blocking contract — the caller can rely on
+    // pending_ being up to date when this returns — but the wait now
+    // overlaps with the worker's own progress instead of being the decode
+    // itself.
     void decode_into_pending()
     {
-        pending_ = decoder_.next_frame();
-        if (pending_) {
+        while (in_flight_ < PREFETCH_DEPTH && !demux_eof_) {
+            AVPacket* pkt = decoder_.demux_next_video_packet();
+            video_worker_->submit(pkt, generation_);
+            ++in_flight_;
+            if (!pkt) demux_eof_ = true;
+        }
+
+        for (;;) {
+            auto r = video_worker_->wait_result();
+            if (!r) {
+                // Timed out with nothing published (or the worker is
+                // stopping) — treat as "no frame ready yet"; the caller
+                // (present_pending()/advance()) will simply retry on the
+                // next render pass rather than hang indefinitely.
+                return;
+            }
+            --in_flight_;
+            if (r->generation != generation_) continue;   // stale (superseded seek)
+            if (r->eof) { eof_ = true; pending_.reset(); return; }
+            pending_storage_ = std::move(r->storage);
+            pending_         = r->frame;
             const double p = pending_->pts_seconds;
             if (shown_pts_ >= 0.0 && p > shown_pts_)
                 frame_dt_ = std::max(1e-3, p - shown_pts_);
             pending_pts_ = p;
-        } else {
-            eof_ = true;
+            return;
         }
     }
 
@@ -219,7 +254,14 @@ struct VideoPlayback::Impl {
     void do_seek(double t)
     {
         const double tt = clamp_time(t, model_.duration());
-        if (!decoder_.seek(tt)) return;
+        if (!decoder_.seek_demux_only(tt)) return;
+        ++generation_;
+        video_worker_->begin_seek(tt);
+        in_flight_  = 0;       // begin_seek() drops every queued job; none of them will ever
+                                // publish a Result, so the render thread's own count must
+                                // reset too, or decode_into_pending() would under-prefetch
+                                // forever after every seek.
+        demux_eof_  = false;   // the seek moves the demuxer away from end-of-stream
         if (audio_) SDL_ClearAudioStream(audio_);
         samples_fed_ = 0;
         seek_base_   = tt;
