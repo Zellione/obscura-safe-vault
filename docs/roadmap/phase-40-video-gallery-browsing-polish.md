@@ -1,4 +1,4 @@
-## Phase 40 — Video codec/loop/sync polish, gallery position memory & view density 🔜
+## Phase 40 — Video codec/loop/sync polish, gallery position memory & view density ✅
 
 **Goal:** Three independent UX/quality gaps reported from live use, bundled
 under one phase (like Phase 39's Part 1/Part 2) because they were requested
@@ -287,6 +287,36 @@ Advanced-search result grids — `GalleryView` is not used outside
 persisted (vault-level) density preference — stays session-scoped like the
 existing choice; user-configurable/arbitrary pixel sizes beyond the 4 presets.
 
+### Implementation notes
+
+Shipped exactly as specced: `GalleryView` gained `GridS`/`GridM`/`GridL`/
+`GridXL` alongside `List` (dropping the old bare `Grid`); `GridM = 188` so
+every pre-existing session (and `GallerySessionState`/`GridLocation`'s
+defaults, now `GalleryView::GridM`) renders identically to before this PR.
+`cell_size_for(GalleryView)` and `next_gallery_view(GalleryView)` are pure
+free functions in the new `gallery_view.cpp`, unit-tested directly; the file
+had to be added explicitly to `osv_tests`' `premake5.lua` `files{}` block
+(that project lists `src/ui/*.cpp` one-by-one rather than globbing, unlike
+the main `osv` target).
+
+`gallery_grid.cpp`'s file-local `constexpr float CELL` is gone — every one
+of its ~10 call sites (`grid_spec`, `on_enter`, the mouse-wheel scroll step,
+`update()`'s selection-follow-scroll math, `render_grid()`'s tile/label/
+badge geometry, `hit_test()`) now reads `cell_size_for(view_)` instead.
+`grid_spec()` gained a third `cell` parameter for the same reason. One bug
+caught in review before merge: `update()`'s grid branch computed the
+selected tile's rect from the member `cols_` (only refreshed by
+`render_grid()` later in the same frame) while separately recomputing a
+fresh local `cols` for the content-height math a few lines below — harmless
+before this PR since `cols_` only went stale on a window resize (which
+recomputes both consistently across a frame boundary anyway), but a real
+same-frame mismatch once `L` could change the cell size itself. Fixed by
+computing `cols` once, fresh, and using it for both the cell-rect lookup and
+the content-height math in that branch.
+
+`SDLK_L` now calls `next_gallery_view(view_)` instead of a two-way ternary;
+`help_groups()`'s entry re-worded to "Cycle view: list / grid size".
+
 ---
 
 ### Acceptance criterion
@@ -320,5 +350,9 @@ backing out, or by leaving to Favorites/Tags/Advanced Search/Vault Manager
 and coming back) restores the tile that was selected there, for the rest of
 the unlocked session — see Part 2's Implementation notes for how the
 viewer's freshly-known exact position is kept from being clobbered by a
-stale recall. Part 3 not started, planned as its own PR against this same
-phase.
+stale recall. Part 3 ✅ shipped (this PR) — `GalleryView` widened from a
+binary `Grid`/`List` toggle to `List`/`GridS`/`GridM`/`GridL`/`GridXL`;
+`cell_size_for`/`next_gallery_view` (`gallery_view.h`/`.cpp`) replace the old
+fixed `CELL` constant and two-way toggle; `L` now cycles all 5 states. All
+three parts of Phase 40 are now shipped — see the phase index in
+`ROADMAP.md`.

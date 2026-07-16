@@ -36,7 +36,6 @@ namespace ui {
 namespace {
 constexpr float OX = 40;
 constexpr float OY = 160;
-constexpr float CELL = 188;     // tile side (slightly larger thumbnails)
 constexpr float GAP = 16;
 constexpr float ROW_H = 44;     // detailed-list row pitch (very small thumbnails)
 constexpr float LIST_HEADER = 30;  // column-header band above the list rows
@@ -88,12 +87,12 @@ std::string apply_tag_list_file(vault::Vault& v, const std::string& target,
 
 // Centre the `cols` columns horizontally in a `win_w`-wide window so the left and
 // right margins match (never tighter than OX).
-GridSpec grid_spec(float win_w, int cols) noexcept
+GridSpec grid_spec(float win_w, int cols, float cell) noexcept
 {
-    const float used = static_cast<float>(cols) * CELL +
+    const float used = static_cast<float>(cols) * cell +
                        static_cast<float>(cols > 0 ? cols - 1 : 0) * GAP;
     const float ox = std::max(OX, (win_w - used) * 0.5f);
-    return {cols, CELL, GAP, ox, OY};
+    return {cols, cell, GAP, ox, OY};
 }
 
 // Leaf-invariant checks over the current listing (free, not members, to keep the
@@ -175,7 +174,7 @@ void GalleryGrid::on_enter()
     // Seed cols_ from the current window size so keyboard NavUp/Down and mouse
     // hit-testing work on the first frame's events (render() recomputes it each
     // frame to track window resizes).
-    cols_ = grid_columns(static_cast<float>(win_.width()) - 2 * OX, CELL, GAP);
+    cols_ = grid_columns(static_cast<float>(win_.width()) - 2 * OX, cell_size_for(view_), GAP);
 }
 
 void GalleryGrid::on_exit()
@@ -483,7 +482,6 @@ void handle_delete_key(GalleryGrid& g)
 
 void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
 {
-    using enum GalleryView;
     // Zip-import + delete keep their guards/early-outs as plain ifs.
     if (key.key == SDLK_Z) {   // import zip archive (inlined to keep GalleryGrid <= 35 methods)
         if (dialogs_.file.busy() || transfer_.active()) return;
@@ -505,7 +503,7 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
     // tag overview. Plain T has no shortcut and falls through to navigation.
     if (is_quick_switch_key(key)) { quick_switch_.open(); return; }   // switch vault (`)
     switch (key.key) {
-        case SDLK_L:     view_ = (view_ == Grid) ? List : Grid;             return;  // grid/list view
+        case SDLK_L:     view_ = next_gallery_view(view_);                 return;  // cycle view density
         case SDLK_X:     start_export();                                    return;  // export selection
         case SDLK_M:     start_transfer();                                  return;  // move to another vault
         case SDLK_SPACE: toggle_or_open();                                  return;
@@ -699,7 +697,7 @@ void GalleryGrid::handle_event(const SDL_Event& e)
             // Scroll without moving selection.
             const float scroll_step = (view_ == GalleryView::List)
                 ? ROW_H * 2
-                : (CELL + GAP) * 0.5f;
+                : (cell_size_for(view_) + GAP) * 0.5f;
             scroll_ -= e.wheel.y * scroll_step;
             mark_dirty();
             break;
@@ -1066,15 +1064,20 @@ void GalleryGrid::update(double)
             scroll_ = ui::ensure_visible(scroll_, item_top, item_bottom, OY + LIST_HEADER, H);
             scroll_ = ui::clamp_scroll(scroll_, content_height, H);
         } else {
-            // For grid view: item at position computed from grid_cell_rect
+            // For grid view: item at position computed from grid_cell_rect. Recompute
+            // cols from the current view/window rather than trusting cols_ (which
+            // render_grid() only refreshes later this frame) — a same-frame density
+            // change (L key) would otherwise use last frame's column count here while
+            // content_height below already reflects the new one.
             const auto W = static_cast<float>(win_.width());
-            const SDL_FRect cellr = grid_cell_rect(sel_idx, grid_spec(W, cols_));
+            const float cell = cell_size_for(view_);
+            const int cols = grid_columns(W - 2 * OX, cell, GAP);
+            const SDL_FRect cellr = grid_cell_rect(sel_idx, grid_spec(W, cols, cell));
             const float item_top = cellr.y;
-            const float item_bottom = cellr.y + CELL;
+            const float item_bottom = cellr.y + cell;
             // Content height = number of rows * (cell_height + gap) - gap + top offset
-            const int cols = grid_columns(W - 2 * OX, CELL, GAP);
             const int total_rows = (static_cast<int>(children_.size()) + cols - 1) / cols;
-            const float content_height = OY + static_cast<float>(total_rows) * (CELL + GAP);
+            const float content_height = OY + static_cast<float>(total_rows) * (cell + GAP);
             // Apply selection-following scroll
             scroll_ = ui::ensure_visible(scroll_, item_top, item_bottom, OY, H);
             scroll_ = ui::clamp_scroll(scroll_, content_height, H);
@@ -1087,7 +1090,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
     return {
         {"Navigate", {
             {"Enter", "Open"}, {"Space", "Select for export"},
-            {"Esc", "Back"}, {"`", "Switch vault"}, {"L", "Toggle list/grid view"},
+            {"Esc", "Back"}, {"`", "Switch vault"}, {"L", "Cycle view: list / grid size"},
         }},
         {"Search & tags", {
             {"/", "Search"}, {"Shift+/ (?)", "Advanced search"},
@@ -1277,13 +1280,14 @@ void GalleryGrid::render(gfx::Renderer& r)
 void GalleryGrid::render_grid(gfx::Renderer& r, float W, float H)
 {
     using namespace gfx::theme;
-    cols_ = grid_columns(W - 2 * OX, CELL, GAP);
+    const float cell = cell_size_for(view_);
+    cols_ = grid_columns(W - 2 * OX, cell, GAP);
     const auto [first_idx, last_idx] = grid_visible_range(
-        scroll_, CELL, GAP, OY, H, cols_, static_cast<int>(children_.size()));
+        scroll_, cell, GAP, OY, H, cols_, static_cast<int>(children_.size()));
     // If the grid is empty, the range will be {0, -1}; the loop handles this correctly.
     for (int i = first_idx; i <= last_idx; ++i) {
         if (i < 0 || i >= static_cast<int>(children_.size())) continue;
-        SDL_FRect cellr = grid_cell_rect(i, grid_spec(W, cols_));
+        SDL_FRect cellr = grid_cell_rect(i, grid_spec(W, cols_, cell));
         // Apply scroll offset to cell Y position.
         cellr.y -= scroll_;
         const vault::IndexNode* n = children_[i];
@@ -1294,10 +1298,10 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float H)
 
         // Leave a 12px gap below the label so it never touches the tile border.
         const float ph      = font_.pixel_height();
-        const float label_y = cellr.y + CELL - ph - 12.0f;
+        const float label_y = cellr.y + cell - ph - 12.0f;
         draw_tile_thumb(r, *n, {cellr.x + 6, cellr.y + 6,
-                                CELL - 12, label_y - cellr.y - 12.0f});
-        r.draw_text(font_, cellr.x + 8, label_y, fit_name(n->name, CELL - 16), TEXT);
+                                cell - 12, label_y - cellr.y - 12.0f});
+        r.draw_text(font_, cellr.x + 8, label_y, fit_name(n->name, cell - 16), TEXT);
 
         // Export-selection badge: a small accent square in the top-left corner.
         if (sel_.contains(i)) {
@@ -1308,7 +1312,7 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float H)
 
         // Favorite badge: a small gold square in the top-right corner.
         if (n->favorite) {
-            const SDL_FRect badge{cellr.x + CELL - 8 - 18, cellr.y + 8, 18, 18};
+            const SDL_FRect badge{cellr.x + cell - 8 - 18, cellr.y + 8, 18, 18};
             r.draw_round_rect(badge, RADIUS_SMALL, FAVORITE);
             r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
         }
@@ -1425,7 +1429,8 @@ int GalleryGrid::hit_test(float mx, float my) const
         const auto idx = static_cast<int>((my_doc - top) / ROW_H);
         return (idx >= 0 && idx < count) ? idx : -1;
     }
-    return grid_hit(mx, my_doc, count, grid_spec(static_cast<float>(win_.width()), cols_));
+    return grid_hit(mx, my_doc, count,
+                    grid_spec(static_cast<float>(win_.width()), cols_, cell_size_for(view_)));
 }
 
 std::string GalleryGrid::fit_name(std::string_view name, float max_w) const
