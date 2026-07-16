@@ -147,6 +147,12 @@ bool VideoDecoder::open(AVIOContext* pb)
     return true;
 }
 
+const AVCodecParameters* VideoDecoder::video_codecpar() const noexcept
+{
+    if (!fmt_ || stream_index_ < 0) return nullptr;
+    return fmt_->streams[stream_index_]->codecpar;
+}
+
 bool VideoDecoder::seek(double ts_seconds)
 {
     if (!fmt_ || stream_index_ < 0) {

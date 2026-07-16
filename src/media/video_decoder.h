@@ -29,6 +29,7 @@ extern "C" {
 // Forward declarations for opaque FFmpeg pointers
 struct AVFormatContext;
 struct AVCodecContext;
+struct AVCodecParameters;
 struct AVFrame;
 struct AVPacket;
 struct SwsContext;
@@ -96,6 +97,16 @@ public:
     int height() const noexcept { return height_; }
     uint64_t duration_us() const noexcept { return duration_us_; }
     vault::VideoCodec codec() const noexcept { return codec_; }
+
+    // The video stream's codec parameters, for opening an independent decode
+    // context elsewhere (VideoDecodeWorker's own AVCodecContext). Valid only
+    // while this VideoDecoder is open; nullptr if not opened.
+    [[nodiscard]] const AVCodecParameters* video_codecpar() const noexcept;
+
+    // Stream time base (seconds per tick) — same units next_frame()'s
+    // pts_seconds is computed in. Needed by VideoDecodeWorker to compute
+    // pts_seconds from its own decoded frames' best_effort_timestamp.
+    [[nodiscard]] double video_time_base() const noexcept { return time_base_; }
 
 private:
     // Helper: read one packet and send it to the decoder, handling EOF/flush.
