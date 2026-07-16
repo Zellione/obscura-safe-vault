@@ -274,6 +274,51 @@ src/
                                                  (defined in tests/vault/test_video.cpp) constructs that
                                                  state for testing since add_video() can't produce it for
                                                  a currently-decodable file.
+               frame_convert.{h,cpp}            — Phase 41: FrameConverter, the
+                                                 swscale-based YUV->I420 conversion
+                                                 extracted out of VideoDecoder so
+                                                 VideoDecodeWorker can share it without
+                                                 duplicating swscale logic (zero_copy()
+                                                 for already-I420/NV12 frames, to_i420()
+                                                 for everything else, cached SwsContext
+                                                 reused per stream). copy_owned_frame()
+                                                 lives here too: copies a DecodedFrame's
+                                                 planes into a caller-owned
+                                                 std::vector<uint8_t> for safe cross-
+                                                 thread handoff (FFmpeg's internal AVFrame
+                                                 buffers are unsafe to alias once the next
+                                                 decode call can run concurrently).
+               video_decode_worker.{h,cpp}     — Phase 41: VideoDecodeWorker, a
+                                                 background std::jthread doing only
+                                                 codec-level video decode
+                                                 (avcodec_send_packet/receive_frame +
+                                                 FrameConverter), fed demuxed packets by
+                                                 the render thread via submit(pkt,
+                                                 generation). Owns its own independent
+                                                 AVCodecContext — no state shared with
+                                                 VideoDecoder's AVFormatContext/vault
+                                                 handle; demuxing and the vault file
+                                                 handle stay render-thread-only always
+                                                 (this worker never touches
+                                                 AVFormatContext/ChunkAvio). Publishes
+                                                 generation-tagged Result{generation, eof,
+                                                 frame, storage} via take_result()
+                                                 (non-blocking) or wait_result() (short-
+                                                 timeout blocking, the render thread's
+                                                 main path, prefetching a couple of
+                                                 packets ahead via VideoDecoder::
+                                                 demux_next_video_packet()/
+                                                 seek_demux_only()). begin_seek(target_pts)
+                                                 drops queued undecoded packets and skips
+                                                 decoded frames below the target — a
+                                                 superseded seek's stale results are
+                                                 discarded by the caller comparing
+                                                 Result::generation (VideoPlayback::Impl,
+                                                 src/ui/video_playback.cpp), same
+                                                 discard-if-stale idea image::DecodeWorker
+                                                 already uses. Reuses image::
+                                                 decode_wake_event()'s SDL user-event
+                                                 rather than registering a second one.
   gfx/         window.*, renderer.*,           — SDL3 window/renderer, texture cache,
                texture_cache.*, text.*,        — stb_truetype text atlas
                theme.{h,cpp}                   — UI colour tokens, runtime-selectable
