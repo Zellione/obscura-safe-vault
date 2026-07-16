@@ -126,14 +126,16 @@ void App::promote_pending()
     registry_.add(active_path_);                  // move-to-front in the recent list
 }
 
-void App::to_gallery(const std::string& path, int selected)
+void App::to_gallery(const std::string& path, int selected, bool explicit_index)
 {
     state_  = State::Browsing;
+    const int seed = explicit_index ? selected : session_.recall(path);
     screen_ = std::make_unique<ui::GalleryGrid>(
         window_, font_, *active_, *cache_,
         ui::GalleryGrid::GridDialogs{dialog_, folder_dialog_},
         ui::GalleryGrid::GridVaultCtx{registry_, active_path_},
-        ui::GridLocation{path, selected, session_.view});
+        session_,
+        ui::GridLocation{path, seed, session_.view});
     screen_->on_enter();
 }
 
@@ -359,6 +361,11 @@ bool App::apply_nav()
     if (!screen_) return false;
     using enum ui::NavKind;
     const ui::Nav nav = screen_->take_nav();
+    // A ToGallery nav.index is only a real, freshly-known position when it
+    // comes from the viewer returning to its exact launch position (Phase 40
+    // Part 2) — every other ToGallery source passes 0 as "no opinion" and
+    // to_gallery() falls back to the remembered position for that path.
+    const bool from_viewer = dynamic_cast<const ui::ImageViewer*>(screen_.get()) != nullptr;
     // Every transition below except ToggleKeepUnlocked/Quit/None destroys the
     // current screen.
     if (nav.kind != None && nav.kind != ToggleKeepUnlocked && nav.kind != Quit) {
@@ -368,7 +375,7 @@ bool App::apply_nav()
     switch (nav.kind) {
         case ToGallery:
             if (state_ == State::Locked) promote_pending();   // unlock-screen success
-            if (active_) to_gallery(nav.path, nav.index);
+            if (active_) to_gallery(nav.path, nav.index, from_viewer);
             else         to_manager();                        // defensive: nothing unlocked
             return true;
         case ToViewer:            to_viewer(nav.path, nav.index);      return true;

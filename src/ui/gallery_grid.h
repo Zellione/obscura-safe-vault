@@ -12,6 +12,7 @@
 #include "image/decode_worker.h"
 #include "ui/consent_dialog.h"
 #include "ui/file_op_job.h"
+#include "ui/gallery_session_state.h"
 #include "ui/gallery_view.h"
 #include "ui/nav_model.h"
 #include "ui/quick_switch.h"
@@ -56,9 +57,10 @@ public:
 
     GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                 gfx::TextureCache& cache, GridDialogs dialogs,
-                GridVaultCtx vault_ctx, GridLocation at = {});
+                GridVaultCtx vault_ctx, GallerySessionState& session, GridLocation at = {});
 
     void on_enter() override;
+    void on_exit() override;
     void handle_event(const SDL_Event& e) override;
     void update(double dt) override;
     void render(gfx::Renderer& r) override;
@@ -128,6 +130,7 @@ private:
     vault::Vault&           vault_;
     gfx::TextureCache&      cache_;
     GridDialogs             dialogs_;   // file + folder dialogs (bundled, S1820)
+    GallerySessionState&    session_;   // Phase 40 Part 2: per-path last-focused-tile memory
     NavModel                nav_;
     SelectionModel          sel_;
     ConsentDialog           consent_;

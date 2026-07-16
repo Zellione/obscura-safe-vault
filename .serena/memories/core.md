@@ -311,6 +311,28 @@ src/
                                                  current_gallery_view(const GalleryGrid&)
                                                  (S1448 method-count reasons, mirrors
                                                  vault_busy) lets App read view_ on exit.
+                                                 Phase 40 Part 2: constructor also gains a
+                                                 GallerySessionState& session_ member (unlike
+                                                 view_/strip_side/video-resume above, this one
+                                                 is written DURING a single instance's lifetime,
+                                                 not just captured once at exit, since a grid can
+                                                 descend through many sub-galleries without being
+                                                 destroyed) — open_selected()/go_up() call
+                                                 session_.record(nav_.path(), index) just before
+                                                 nav_.enter()/nav_.up() (the level about to go
+                                                 stale), then nav_.select(session_.recall(new
+                                                 path)) just after refresh() (restores that
+                                                 level's remembered tile, 0 default for a
+                                                 never-visited path); on_exit() also records (grid
+                                                 -> viewer or grid -> another screen entirely).
+                                                 App::to_gallery resolves the seed for a freshly
+                                                 *constructed* grid: session_.recall(path) unless
+                                                 explicit_index is true, which App sets only when
+                                                 the outgoing screen was an ImageViewer (the one
+                                                 nav.index that is a real, freshly-known position,
+                                                 e.g. after prev/next moves) — every other
+                                                 ToGallery source passes index 0 meaning "no
+                                                 opinion", so recall() decides instead.
                image_viewer.*, widgets.*       — viewer has Fit + FillScroll + Slideshow
                                                  modes, bottom/left strip toggle (keys
                                                  F/T, P starts slideshow); widgets has
@@ -709,6 +731,16 @@ src/
                                                  last_media_path,video_resume_seconds} + reset()
                                                  (Phase 39 Part 2, modeled on AdvancedSearchState,
                                                  see mem note below); pure, unit-tested, App-owned.
+                                                 Phase 40 Part 2 adds
+                                                 last_index_by_path (unordered_map<string,int>,
+                                                 key = NavModel::path()) + record(path,index) /
+                                                 recall(path) (0 default) — reset() already wipes
+                                                 it via `*this = GallerySessionState{}`, no new
+                                                 reset call sites needed. Unlike the other fields
+                                                 (App writes those once, at screen exit),
+                                                 GalleryGrid writes into this one directly and
+                                                 repeatedly during its own lifetime — see the
+                                                 gallery_grid.* note above.
                delete_summary.*                — pure recursive tally of a gallery subtree
                                                  (images/videos/sub-galleries) for the Del
                                                  delete-confirm popup (Phase 17 follow-up).
