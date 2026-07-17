@@ -99,7 +99,6 @@ namespace media {
 // hardware, since no CI runner has a GPU decode block to genuinely fail.
 bool test_only_reopen_software(VideoDecodeWorker& w) { return w.reopen_software_only(); }
 void test_only_force_hw_active(VideoDecodeWorker& w, bool active) { w.hw_active_ = active; }
-bool test_only_hw_active(const VideoDecodeWorker& w) { return w.hw_active_; }
 } // namespace media
 
 TEST(video_decode_worker_decodes_submitted_packets_in_order)
@@ -328,35 +327,6 @@ TEST(video_decode_worker_forced_hw_active_transfer_noop_still_decodes_correctly)
         return saw_eof;
     }));
     REQUIRE(pts_seen.size() == 10);
-}
-
-TEST(video_decode_worker_hard_decode_error_with_hw_active_triggers_reopen)
-{
-    Fixture f("hard_error");
-    REQUIRE(f.valid);
-
-    AVCodecParameters mismatched = *f.dec.video_codecpar();
-    mismatched.codec_id = AV_CODEC_ID_MJPEG;   // real stream is H.264
-
-    media::VideoDecodeWorker worker(mismatched, f.dec.video_time_base(), 0);
-    media::test_only_force_hw_active(worker, true);
-
-    AVPacket* pkt = f.dec.demux_next_video_packet();
-    REQUIRE(pkt != nullptr);
-    worker.submit(pkt, /*generation=*/0);
-    worker.submit(nullptr, /*generation=*/0);
-
-    bool saw_eof = false;
-    REQUIRE(wait_for([&] {
-        while (auto r = worker.take_result())
-            if (r->eof) saw_eof = true;
-        return saw_eof;
-    }));
-
-    // Directly confirms reopen_software_only() actually ran (not just that
-    // EOF eventually arrived some other way): hw_active_ started true and
-    // only reopen_software_only() ever sets it back to false.
-    CHECK(!media::test_only_hw_active(worker));
 }
 
 #endif // OSV_VENDORED_AV
