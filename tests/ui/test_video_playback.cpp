@@ -11,6 +11,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <print>
 #include <span>
 #include <string>
 #include <vector>
@@ -715,6 +716,82 @@ TEST(video_playback_slow_decode_does_not_grow_backlog_unbounded)
         // keep climbing with every further timeout for as long as the clip
         // played.
         CHECK(max_in_flight <= 16);
+    }
+
+    SDL_DestroySurface(surf);
+}
+
+TEST(video_playback_render_does_not_block_render_thread_during_slow_decode)
+{
+    // Regression test for a second real bug reported by the project owner
+    // after playing an actual AV1 .webm clip: the app still felt
+    // unresponsive even after the backlog-bound fix. Root cause: steady
+    // (non-seek) playback's decode_into_pending() blocked the render
+    // thread until a fresh frame was ready — mirroring the old synchronous
+    // decoder_.next_frame() contract, exactly as documented, but that
+    // defeats the whole point of moving decode off-thread. App::run()'s
+    // main loop only pumps SDL events BEFORE calling render(); any call
+    // that blocks inside render() for as long as one frame's decode takes
+    // (100s of ms for a slow software codec like AV1) blocks input
+    // handling for that same duration, on every single frame.
+    //
+    // The fix: steady playback now polls the worker with a short bounded
+    // wait (try_advance_pending(), added alongside the existing blocking
+    // decode_into_pending() which do_seek() and the constructor's initial
+    // frame still use) — if the next frame isn't ready within that bound,
+    // render() just keeps showing the last-uploaded texture and returns,
+    // so the outer event loop keeps cycling. This test asserts no render()
+    // call takes anywhere near the artificial per-frame decode delay.
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+    auto vbytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");   // 10 frames, no audio
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("no_block_slow_decode");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        // 200ms artificial per-job decode delay: comfortably longer than
+        // any reasonable render-thread budget, so a single blocking call
+        // would be trivially detectable.
+        ui::VideoPlayback vp(v, *node, std::chrono::milliseconds(200));
+        REQUIRE(vp.valid());
+        const SDL_FRect area{0, 0, 320, 240};
+
+        vp.render(r, font, area);   // first frame (construction blocks briefly; not measured)
+        vp.handle_key(SDLK_SPACE, SDL_SCANCODE_SPACE);   // play
+        REQUIRE(vp.animating());
+
+        long max_ms = 0;
+        for (int i = 0; i < 20; ++i) {
+            auto t0 = std::chrono::steady_clock::now();
+            vp.update(1.0 / 30.0);
+            vp.render(r, font, area);
+            auto t1 = std::chrono::steady_clock::now();
+            max_ms = std::max(max_ms,
+                              std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count());
+        }
+
+        // A blocking implementation would show at least one call taking
+        // ~200ms (the artificial decode delay). The bounded-wait one caps
+        // every call at ~20ms (try_advance_pending()'s single
+        // wait_result() call) regardless of how slow decode is; 50ms
+        // leaves headroom for scheduling jitter without weakening the
+        // regression check (an unbounded-blocking reintroduction would
+        // still show ~200ms, nowhere close to this threshold).
+        CHECK(max_ms < 50);
     }
 
     SDL_DestroySurface(surf);

@@ -209,16 +209,31 @@ struct VideoPlayback::Impl {
                     if (!pkt) demux_eof_ = true;
                     continue;
                 }
-                if (!may_feed_more) {
-                    // At the steady-state ceiling with no seek pending:
-                    // keep waiting without submitting more — a timeout here
-                    // just means the worker is still working through what
-                    // it already has.
+                if (in_flight_ > 0) {
+                    // Nothing left to feed (at the ceiling, or the demuxer
+                    // is exhausted) but jobs already submitted are still
+                    // outstanding — every one of them is guaranteed to
+                    // eventually publish a Result (frame or eof), so keep
+                    // waiting rather than give up. Giving up here
+                    // unconditionally whenever demux_eof_ was true (as an
+                    // earlier version of this function did, inherited
+                    // unchanged from how Phase 41 originally shipped) could
+                    // abandon pending_ update entirely: a short clip's
+                    // remaining packets can all get demuxed and submitted
+                    // well before the worker finishes decoding even the
+                    // first one of them if decode is slow enough (e.g. real
+                    // software AV1) — reaching demux_eof_ with several jobs
+                    // still queued, at which point the old code returned
+                    // immediately without ever having consumed a single
+                    // Result, leaving pending_ stuck instead of eventually
+                    // populated. The existing tiny (near-instant-decode)
+                    // fixtures never hit this window in practice, which is
+                    // why it went unnoticed until a genuinely slow codec.
                     continue;
                 }
-                // Seek-skip window still open but the demuxer is exhausted
-                // with nothing left to feed — give up for this render pass;
-                // the caller (present_pending()/advance()) retries next tick.
+                // Truly nothing outstanding anywhere (in_flight_ == 0) and
+                // nothing left to feed — give up for this render pass; the
+                // caller (present_pending()/advance()) retries next tick.
                 return;
             }
             if (r->generation != generation_) {
@@ -233,6 +248,89 @@ struct VideoPlayback::Impl {
                                      // generation, so any seek-skip window has closed —
                                      // subsequent timeouts mean "still decoding", not
                                      // "silently discarded toward an old target".
+            if (r->eof) { eof_ = true; pending_.reset(); return; }
+            pending_storage_ = std::move(r->storage);
+            pending_         = r->frame;
+            const double p = pending_->pts_seconds;
+            if (shown_pts_ >= 0.0 && p > shown_pts_)
+                frame_dt_ = std::max(1e-3, p - shown_pts_);
+            pending_pts_ = p;
+            return;
+        }
+    }
+
+    // Bounded-wait counterpart to decode_into_pending(), used by steady
+    // (non-seek) playback instead of it. App::run()'s main loop only pumps
+    // SDL events BEFORE calling render() — any call inside render() that
+    // blocks for as long as one frame's decode takes (100s of ms for a
+    // slow software codec, e.g. real AV1) blocks input handling for that
+    // same duration, on every single frame. That defeated the entire
+    // point of moving decode off-thread: the render thread would still
+    // effectively stall per frame, just waiting on a condvar instead of
+    // doing the decode itself.
+    //
+    // Tries once (a single VideoDecodeWorker::wait_result() call, capped
+    // by its own short ~20ms internal timeout — no retry loop) to advance
+    // pending_ to the next frame. A zero-wait poll (take_result()) was
+    // tried first but doesn't work: it never yields the calling thread, so
+    // under back-to-back render() calls the OS scheduler can go a long
+    // time without ever handing the worker thread a timeslice to actually
+    // decode anything — playback would stall not because anything is
+    // stuck, but because the worker was simply never scheduled. A single
+    // bounded wait per call caps this call's own added cost at ~20ms
+    // (imperceptible for input responsiveness, and nowhere near the
+    // unbounded blocking decode_into_pending() used to cost) while
+    // guaranteeing the worker actually gets to run.
+    //
+    // If nothing is ready by the time the wait times out, pending_ ends up
+    // nullopt (NOT left holding its old value — advance()'s
+    // while(pending_) loop relies on nullopt to mean "nothing to do right
+    // now", and leaving a stale non-null value in place would spin that
+    // loop forever re-processing the same already-handled frame) and this
+    // returns — the render loop just tries again on the next tick, which
+    // happens right away while animating() is true. do_seek() and the
+    // constructor's initial frame keep using the original blocking
+    // decode_into_pending(): a seek is a one-time, bounded user action
+    // where resolving within a single call is the expected (and already
+    // tested) contract, not a per-frame recurring cost.
+    void try_advance_pending()
+    {
+        pending_.reset();
+
+        while (in_flight_ < PREFETCH_DEPTH && !demux_eof_) {
+            AVPacket* pkt = decoder_.demux_next_video_packet();
+            video_worker_->submit(pkt, generation_);
+            ++in_flight_;
+            if (!pkt) demux_eof_ = true;
+        }
+
+        auto r = video_worker_->wait_result();
+        for (;;) {
+            if (!r) {
+                // Nothing ready within the bounded wait. Some codecs need
+                // several packets queued before their very first frame is
+                // emitted at all (B-frame reordering/decoder lookahead,
+                // unrelated to seeking) — PREFETCH_DEPTH alone can
+                // permanently starve decode if that's not enough, since
+                // in_flight_ never rises above it without this. Feed at
+                // most ONE extra packet per call (not a retry loop) so
+                // this call's own cost stays capped at a single
+                // wait_result(); if still more is needed, later ticks keep
+                // feeding one at a time until decode catches up.
+                if (in_flight_ < MAX_STEADY_IN_FLIGHT && !demux_eof_) {
+                    AVPacket* pkt = decoder_.demux_next_video_packet();
+                    video_worker_->submit(pkt, generation_);
+                    ++in_flight_;
+                    if (!pkt) demux_eof_ = true;
+                }
+                return;   // caller retries next tick
+            }
+            if (r->generation != generation_) {
+                r = video_worker_->take_result();   // drain further stale results, non-blocking
+                continue;
+            }
+            --in_flight_;
+            skip_pending_ = false;
             if (r->eof) { eof_ = true; pending_.reset(); return; }
             pending_storage_ = std::move(r->storage);
             pending_         = r->frame;
@@ -270,7 +368,8 @@ struct VideoPlayback::Impl {
         return media::audio_clock(seek_base_, consumed, sr);
     }
 
-    // Upload pending_ to the GPU (durable copy) then decode the next frame into it.
+    // Upload pending_ to the GPU (durable copy) then try (bounded-wait,
+    // ~20ms max) to line up the next frame.
     void present_pending(SDL_Renderer* r)
     {
         if (!pending_) return;
@@ -278,7 +377,7 @@ struct VideoPlayback::Impl {
             (void)yuv_.update(*pending_);
         shown_pts_    = pending_pts_;
         need_present_ = false;
-        decode_into_pending();
+        try_advance_pending();
     }
 
     // Decode + upload frames using audio clock (if available) or model clock fallback.
@@ -292,6 +391,15 @@ struct VideoPlayback::Impl {
             model_.seek_to(c);
         }
 
+        // A prior tick's non-blocking try_advance_pending() may have found
+        // nothing ready yet, leaving pending_ null without eof_ having been
+        // reached — the while loop below only polls when pending_ is
+        // already truthy, so without this, that transient "not ready yet"
+        // would never get retried and playback would stall permanently.
+        if (!pending_ && !eof_) {
+            try_advance_pending();
+        }
+
         // Drive video frames against the clock using av_sync
         while (pending_) {
             if (need_present_) {
@@ -302,7 +410,7 @@ struct VideoPlayback::Impl {
                 if (act == media::FrameAction::Hold) {
                     break;
                 } else if (act == media::FrameAction::Drop) {
-                    decode_into_pending();
+                    try_advance_pending();
                 } else {  // Present
                     present_pending(r);
                 }
