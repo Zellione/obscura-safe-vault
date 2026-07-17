@@ -93,6 +93,14 @@ struct Fixture {
 
 } // namespace
 
+namespace media {
+// Test-only seams (see friend declarations in video_decode_worker.h):
+// deterministically exercise the hw-failure recovery path without real
+// hardware, since no CI runner has a GPU decode block to genuinely fail.
+bool test_only_reopen_software(VideoDecodeWorker& w) { return w.reopen_software_only(); }
+void test_only_force_hw_active(VideoDecodeWorker& w, bool active) { w.hw_active_ = active; }
+} // namespace media
+
 TEST(video_decode_worker_decodes_submitted_packets_in_order)
 {
     Fixture f("in_order");
@@ -251,6 +259,98 @@ TEST(video_decode_worker_forced_hwaccel_unavailable_decodes_correctly)
     REQUIRE(pts_seen.size() == 10);
     for (size_t i = 1; i < pts_seen.size(); ++i)
         CHECK(pts_seen[i] >= pts_seen[i - 1]);
+}
+
+TEST(video_decode_worker_reopen_software_only_recovers_and_continues_decoding)
+{
+    // Directly exercises reopen_software_only() — normally only reachable
+    // via a real hw decode failure, which no CI runner can produce (no GPU
+    // decode block) — to prove it leaves the worker able to keep decoding
+    // correctly afterward, matching what real hw-failure recovery must
+    // guarantee.
+    Fixture f("reopen_sw");
+    REQUIRE(f.valid);
+
+    media::VideoDecodeWorker worker(*f.dec.video_codecpar(), f.dec.video_time_base(), 0);
+    REQUIRE(media::test_only_reopen_software(worker));
+
+    int submitted = 0;
+    while (AVPacket* pkt = f.dec.demux_next_video_packet()) {
+        worker.submit(pkt, /*generation=*/0);
+        ++submitted;
+    }
+    worker.submit(nullptr, /*generation=*/0);
+    REQUIRE(submitted == 10);
+
+    std::vector<double> pts_seen;
+    bool saw_eof = false;
+    REQUIRE(wait_for([&] {
+        while (auto r = worker.take_result()) {
+            if (r->eof) { saw_eof = true; continue; }
+            if (!r->frame.has_value()) return false;
+            pts_seen.push_back(r->frame->pts_seconds);
+        }
+        return saw_eof;
+    }));
+    REQUIRE(pts_seen.size() == 10);
+}
+
+TEST(video_decode_worker_forced_hw_active_transfer_noop_still_decodes_correctly)
+{
+    // Forces hw_active_ = true on an otherwise normal (software-decoding)
+    // worker so publish_decoded_frame()'s hw-frame-transfer-attempt branch
+    // runs on every frame; transfer_hw_frame() itself is a no-op stub on
+    // this build (no OSV_HWACCEL_* macro compiled in), so decode must still
+    // succeed exactly as it does with hw_active_ false.
+    Fixture f("forced_active");
+    REQUIRE(f.valid);
+
+    media::VideoDecodeWorker worker(*f.dec.video_codecpar(), f.dec.video_time_base(), 0);
+    media::test_only_force_hw_active(worker, true);
+
+    int submitted = 0;
+    while (AVPacket* pkt = f.dec.demux_next_video_packet()) {
+        worker.submit(pkt, /*generation=*/0);
+        ++submitted;
+    }
+    worker.submit(nullptr, /*generation=*/0);
+    REQUIRE(submitted == 10);
+
+    std::vector<double> pts_seen;
+    bool saw_eof = false;
+    REQUIRE(wait_for([&] {
+        while (auto r = worker.take_result()) {
+            if (r->eof) { saw_eof = true; continue; }
+            if (!r->frame.has_value()) return false;
+            pts_seen.push_back(r->frame->pts_seconds);
+        }
+        return saw_eof;
+    }));
+    REQUIRE(pts_seen.size() == 10);
+}
+
+TEST(video_decode_worker_hard_decode_error_with_hw_active_triggers_reopen)
+{
+    Fixture f("hard_error");
+    REQUIRE(f.valid);
+
+    AVCodecParameters mismatched = *f.dec.video_codecpar();
+    mismatched.codec_id = AV_CODEC_ID_MJPEG;   // real stream is H.264
+
+    media::VideoDecodeWorker worker(mismatched, f.dec.video_time_base(), 0);
+    media::test_only_force_hw_active(worker, true);
+
+    AVPacket* pkt = f.dec.demux_next_video_packet();
+    REQUIRE(pkt != nullptr);
+    worker.submit(pkt, /*generation=*/0);
+    worker.submit(nullptr, /*generation=*/0);
+
+    bool saw_eof = false;
+    REQUIRE(wait_for([&] {
+        while (auto r = worker.take_result())
+            if (r->eof) saw_eof = true;
+        return saw_eof;
+    }));
 }
 
 #endif // OSV_VENDORED_AV

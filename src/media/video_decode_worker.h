@@ -116,6 +116,14 @@ private:
     void publish_eof(uint64_t generation);
     bool reopen_software_only();
 
+    // Test-only seams (defined in tests/media/test_video_decode_worker.cpp,
+    // not part of any production translation unit) — exercise the
+    // hw-failure recovery path deterministically without real hardware:
+    // production code can never observe a real hw decode failure on a CI
+    // runner with no GPU decode block.
+    friend bool test_only_reopen_software(VideoDecodeWorker& w);
+    friend void test_only_force_hw_active(VideoDecodeWorker& w, bool active);
+
     AVCodecContext*        codec_ctx_ = nullptr;
     AVFrame*               frame_     = nullptr;
     FrameConverter         conv_;

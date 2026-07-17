@@ -176,7 +176,7 @@ bool VideoDecodeWorker::publish_decoded_frame(const Job& job)
     // A hw-decoded frame's data[] planes are an opaque device handle, not
     // real pixel data — transfer to system memory first so the existing
     // zero-copy/swscale pipeline below has something it can actually read.
-    AVFrame* src = frame_;
+    const AVFrame* src = frame_;
     if (hw_active_) {
         if (!hw_transfer_frame_) hw_transfer_frame_ = av_frame_alloc();
         if (hw_transfer_frame_ && transfer_hw_frame(frame_, hw_transfer_frame_))

@@ -107,7 +107,7 @@ bool transfer_hw_frame(const AVFrame* frame, AVFrame* sw_frame)
 #else  // no OSV_HWACCEL_* compiled in this build (Linux, until Part 2)
 
 bool try_attach_hwaccel(AVCodecContext*, const AVCodec*) { return false; }
-void test_only_force_hwaccel_unavailable(bool) {}
+void test_only_force_hwaccel_unavailable(bool) { /* no OSV_HWACCEL_* macro compiled in; nothing to reset */ }
 bool transfer_hw_frame(const AVFrame*, AVFrame*) { return false; }
 
 #endif
