@@ -79,3 +79,19 @@ attaches packages + SHA256SUMS.txt to the tag's GitHub release (draft-created if
 The ASAN job (Linux-only) builds vendored SDL3 (since Phase 4) and the image codecs (since
 Phase 9): running the C decoders under ASAN/UBSan on untrusted input is high value. nasm is
 installed on every leg for libaom.
+
+The ThreadSanitizer job (`tests-tsan`, Phase 42) also runs on every PR:
+`--tsan` premake option, gcc-14, Debug-only, Linux-only. Unlike the ASAN
+job, it does NOT rebuild vendored SDL3/codecs under TSan — it reuses the
+same plain `vendor/codecs-prefix`/`vendor/SDL3/build` every other job
+builds, since TSan's target here (races in `media::VideoDecodeWorker`,
+`image::DecodeWorker`, and any future concurrent code) lives entirely in
+our own `src/`/`tests/`, not inside the vendored C libraries' internals.
+`--asan` and `--tsan` are mutually exclusive (premake hard-errors if both
+are passed) — they cannot instrument the same binary. Phase 42 also
+extracted the apt-install and premake5/SDL3-build steps shared by
+`build-and-test`/`tests-asan`/`tests-asan-codecs`/`tests-tsan` into two
+local composite actions, `.github/actions/setup-apt-deps/` and
+`.github/actions/setup-premake-sdl3/` (`sonarqube` was deliberately left
+out — its `if: env.SONAR_TOKEN != ''` guard on every step is a pre-existing
+special case).

@@ -31,6 +31,7 @@ build/bin/Release/osv
 scripts/test.sh           # build + run all tests (Debug)
 scripts/test.sh --asan    # AddressSanitizer + UBSan + LSan
 scripts/test.sh --release
+scripts/test.sh --tsan    # ThreadSanitizer (mutually exclusive with --asan)
 ```
 ⚠ `scripts/test.sh` builds ONLY the test binary — for app-side changes,
 `scripts/build.sh` must also pass (`-Werror` branch-wide since audit-improvements).
