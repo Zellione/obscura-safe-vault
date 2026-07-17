@@ -55,103 +55,16 @@ jobs:
           submodules: recursive
 
       # -----------------------------------------------------------------------
-      # System packages
+      # System packages + premake5 + vendored SDL3 (shared composite actions)
       # -----------------------------------------------------------------------
-      - name: Cache apt packages
-        uses: actions/cache@v4
-        with:
-          path: /tmp/apt-cache
-          key: apt-matrix-${{ hashFiles('.github/workflows/ci.yml') }}
-          restore-keys: apt-matrix-
-
       - name: Install build dependencies
-        run: |
-          # CI's apt mirror occasionally hangs the connection indefinitely; bound
-          # each fetch (30s) and retry so a stuck mirror fails fast instead of
-          # hanging the whole job. Backed by the job-level timeout-minutes too.
-          # Cache the downloaded .debs in /tmp/apt-cache (Dir::Cache::archives +
-          # Keep-Downloaded-Packages) so repeat runs skip the slow apt download.
-          # 1777 lets apt's _apt sandbox user write into the restored cache dir.
-          sudo mkdir -p /tmp/apt-cache/partial
-          sudo chmod -R 1777 /tmp/apt-cache
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDir::Cache::archives "/tmp/apt-cache";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' \
-            | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
-          # The runner image ships Microsoft/Azure apt repos we don't use; they
-          # intermittently 403, which fails `apt-get update` (exit 100) and kills
-          # the whole step. Drop them first — none of our build deps come from them.
-          sudo rm -f /etc/apt/sources.list.d/*microsoft* /etc/apt/sources.list.d/*azure* 2>/dev/null || true
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            cmake \
-            ninja-build \
-            nasm \
-            gcc-14 \
-            g++-14 \
-            clang \
-            libgl1-mesa-dev \
-            libx11-dev \
-            libxext-dev \
-            libxrandr-dev \
-            libxcursor-dev \
-            libxi-dev \
-            libxss-dev \
-            libxkbcommon-dev \
-            libwayland-dev \
-            wayland-protocols \
-            libasound2-dev \
-            libpulse-dev
-          # apt re-creates partial/ and lock owned by the _apt user (mode 700/640)
-          # during install; make the cache dir readable so the (non-root) runner
-          # can tar it in the post-save step (otherwise the save fails silently).
-          sudo chmod -R a+rX /tmp/apt-cache
-
-      # -----------------------------------------------------------------------
-      # premake5 binary
-      # -----------------------------------------------------------------------
-      - name: Cache premake5 binary
-        uses: actions/cache@v4
-        id: cache-premake5
+        uses: ./.github/actions/setup-apt-deps
         with:
-          path: bin/premake5
-          key: premake5-5.0.0-beta8-linux
+          cache-key-suffix: matrix
+          extra-packages: gcc-14 clang
 
-      - name: Download premake5
-        if: steps.cache-premake5.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p bin
-          curl -fsSL \
-            "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-linux.tar.gz" \
-            -o /tmp/premake5.tar.gz
-          tar -xzf /tmp/premake5.tar.gz -C bin/
-          chmod +x bin/premake5
-
-      # -----------------------------------------------------------------------
-      # Vendored SDL3 static build (cached by submodule commit hash)
-      # -----------------------------------------------------------------------
-      - name: Cache vendored SDL3 build
-        uses: actions/cache@v4
-        id: cache-sdl3
-        with:
-          path: vendor/SDL3/build
-          key: sdl3-linux-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
-
-      - name: Build vendored SDL3
-        if: steps.cache-sdl3.outputs.cache-hit != 'true'
-        run: |
-          cmake -S vendor/SDL3 -B vendor/SDL3/build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DSDL_STATIC=ON            \
-            -DSDL_SHARED=OFF           \
-            -DSDL_TESTS=OFF            \
-            -DSDL_EXAMPLES=OFF         \
-            -DSDL_INSTALL_TESTS=OFF    \
-            -DSDL_X11_XTEST=OFF        \
-            -DSDL_JOYSTICK=OFF         \
-            -DSDL_HAPTIC=OFF           \
-            -DSDL_SENSOR=OFF           \
-            -DSDL_CAMERA=OFF           \
-            -G "Ninja"
-          cmake --build vendor/SDL3/build --parallel "$(nproc)"
+      - name: Setup premake5 + vendored SDL3
+        uses: ./.github/actions/setup-premake-sdl3
 
       # -----------------------------------------------------------------------
       # Generate + compile
@@ -391,98 +304,18 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Cache apt packages
-        uses: actions/cache@v4
-        with:
-          path: /tmp/apt-cache
-          key: apt-asan-${{ hashFiles('.github/workflows/ci.yml') }}
-          restore-keys: apt-asan-
-
       - name: Install build dependencies
-        run: |
-          # CI's apt mirror occasionally hangs the connection indefinitely; bound
-          # each fetch (30s) and retry so a stuck mirror fails fast instead of
-          # hanging the whole job. Backed by the job-level timeout-minutes too.
-          # Cache the downloaded .debs in /tmp/apt-cache (Dir::Cache::archives +
-          # Keep-Downloaded-Packages) so repeat runs skip the slow apt download.
-          # 1777 lets apt's _apt sandbox user write into the restored cache dir.
-          sudo mkdir -p /tmp/apt-cache/partial
-          sudo chmod -R 1777 /tmp/apt-cache
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDir::Cache::archives "/tmp/apt-cache";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' \
-            | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
-          # The runner image ships Microsoft/Azure apt repos we don't use; they
-          # intermittently 403, which fails `apt-get update` (exit 100) and kills
-          # the whole step. Drop them first — none of our build deps come from them.
-          sudo rm -f /etc/apt/sources.list.d/*microsoft* /etc/apt/sources.list.d/*azure* 2>/dev/null || true
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            cmake \
-            ninja-build \
-            nasm \
-            g++-14 \
-            libgl1-mesa-dev \
-            libx11-dev \
-            libxext-dev \
-            libxrandr-dev \
-            libxcursor-dev \
-            libxi-dev \
-            libxss-dev \
-            libxkbcommon-dev \
-            libwayland-dev \
-            wayland-protocols \
-            libasound2-dev \
-            libpulse-dev
-          # apt re-creates partial/ and lock owned by the _apt user (mode 700/640)
-          # during install; make the cache dir readable so the (non-root) runner
-          # can tar it in the post-save step (otherwise the save fails silently).
-          sudo chmod -R a+rX /tmp/apt-cache
+        uses: ./.github/actions/setup-apt-deps
+        with:
+          cache-key-suffix: asan
 
       - name: Use gcc-14 as default gcc
         run: |
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
             --slave /usr/bin/g++ g++ /usr/bin/g++-14
 
-      - name: Cache premake5 binary
-        uses: actions/cache@v4
-        id: cache-premake5
-        with:
-          path: bin/premake5
-          key: premake5-5.0.0-beta8-linux
-
-      - name: Download premake5
-        if: steps.cache-premake5.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p bin
-          curl -fsSL \
-            "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-linux.tar.gz" \
-            -o /tmp/premake5.tar.gz
-          tar -xzf /tmp/premake5.tar.gz -C bin/
-          chmod +x bin/premake5
-
-      - name: Cache vendored SDL3 build
-        uses: actions/cache@v4
-        id: cache-sdl3
-        with:
-          path: vendor/SDL3/build
-          key: sdl3-linux-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
-
-      - name: Build vendored SDL3
-        if: steps.cache-sdl3.outputs.cache-hit != 'true'
-        run: |
-          cmake -S vendor/SDL3 -B vendor/SDL3/build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DSDL_STATIC=ON            \
-            -DSDL_SHARED=OFF           \
-            -DSDL_TESTS=OFF            \
-            -DSDL_EXAMPLES=OFF         \
-            -DSDL_INSTALL_TESTS=OFF    \
-            -DSDL_X11_XTEST=OFF        \
-            -DSDL_JOYSTICK=OFF         \
-            -DSDL_HAPTIC=OFF           \
-            -DSDL_SENSOR=OFF           \
-            -DSDL_CAMERA=OFF           \
-            -G "Ninja"
-          cmake --build vendor/SDL3/build --parallel "$(nproc)"
+      - name: Setup premake5 + vendored SDL3
+        uses: ./.github/actions/setup-premake-sdl3
 
       # Build the decoders too: running libwebp/libheif/libaom under ASAN+UBSan on
       # untrusted input is the highest-value place to have the sanitisers.
@@ -533,98 +366,18 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Cache apt packages
-        uses: actions/cache@v4
-        with:
-          path: /tmp/apt-cache
-          key: apt-asan-codecs-${{ hashFiles('.github/workflows/ci.yml') }}
-          restore-keys: apt-asan-codecs-
-
       - name: Install build dependencies
-        run: |
-          # CI's apt mirror occasionally hangs the connection indefinitely; bound
-          # each fetch (30s) and retry so a stuck mirror fails fast instead of
-          # hanging the whole job. Backed by the job-level timeout-minutes too.
-          # Cache the downloaded .debs in /tmp/apt-cache (Dir::Cache::archives +
-          # Keep-Downloaded-Packages) so repeat runs skip the slow apt download.
-          # 1777 lets apt's _apt sandbox user write into the restored cache dir.
-          sudo mkdir -p /tmp/apt-cache/partial
-          sudo chmod -R 1777 /tmp/apt-cache
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDir::Cache::archives "/tmp/apt-cache";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' \
-            | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
-          # The runner image ships Microsoft/Azure apt repos we don't use; they
-          # intermittently 403, which fails `apt-get update` (exit 100) and kills
-          # the whole step. Drop them first — none of our build deps come from them.
-          sudo rm -f /etc/apt/sources.list.d/*microsoft* /etc/apt/sources.list.d/*azure* 2>/dev/null || true
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            cmake \
-            ninja-build \
-            nasm \
-            g++-14 \
-            libgl1-mesa-dev \
-            libx11-dev \
-            libxext-dev \
-            libxrandr-dev \
-            libxcursor-dev \
-            libxi-dev \
-            libxss-dev \
-            libxkbcommon-dev \
-            libwayland-dev \
-            wayland-protocols \
-            libasound2-dev \
-            libpulse-dev
-          # apt re-creates partial/ and lock owned by the _apt user (mode 700/640)
-          # during install; make the cache dir readable so the (non-root) runner
-          # can tar it in the post-save step (otherwise the save fails silently).
-          sudo chmod -R a+rX /tmp/apt-cache
+        uses: ./.github/actions/setup-apt-deps
+        with:
+          cache-key-suffix: asan-codecs
 
       - name: Use gcc-14 as default gcc
         run: |
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
             --slave /usr/bin/g++ g++ /usr/bin/g++-14
 
-      - name: Cache premake5 binary
-        uses: actions/cache@v4
-        id: cache-premake5
-        with:
-          path: bin/premake5
-          key: premake5-5.0.0-beta8-linux
-
-      - name: Download premake5
-        if: steps.cache-premake5.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p bin
-          curl -fsSL \
-            "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-linux.tar.gz" \
-            -o /tmp/premake5.tar.gz
-          tar -xzf /tmp/premake5.tar.gz -C bin/
-          chmod +x bin/premake5
-
-      - name: Cache vendored SDL3 build
-        uses: actions/cache@v4
-        id: cache-sdl3
-        with:
-          path: vendor/SDL3/build
-          key: sdl3-linux-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
-
-      - name: Build vendored SDL3
-        if: steps.cache-sdl3.outputs.cache-hit != 'true'
-        run: |
-          cmake -S vendor/SDL3 -B vendor/SDL3/build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DSDL_STATIC=ON            \
-            -DSDL_SHARED=OFF           \
-            -DSDL_TESTS=OFF            \
-            -DSDL_EXAMPLES=OFF         \
-            -DSDL_INSTALL_TESTS=OFF    \
-            -DSDL_X11_XTEST=OFF        \
-            -DSDL_JOYSTICK=OFF         \
-            -DSDL_HAPTIC=OFF           \
-            -DSDL_SENSOR=OFF           \
-            -DSDL_CAMERA=OFF           \
-            -G "Ninja"
-          cmake --build vendor/SDL3/build --parallel "$(nproc)"
+      - name: Setup premake5 + vendored SDL3
+        uses: ./.github/actions/setup-premake-sdl3
 
       # Build ASAN-instrumented codecs with a separate cache key (-asan suffix).
       - name: Cache ASAN vendored codecs build
