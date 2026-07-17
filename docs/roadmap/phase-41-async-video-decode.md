@@ -71,6 +71,10 @@ lagging behind decode.
 
 ### Out of scope (deferred)
 - A dedicated ThreadSanitizer CI leg — Phase 42.
+- Platform-specific hardware-accelerated codec decode (VAAPI/D3D11VA) — this
+  phase only moves the existing software decode off the render thread;
+  running it on dedicated GPU decode hardware instead is Phase 43, with this
+  phase's `VideoDecodeWorker` staying in place as its fallback path.
 - Any change to audio decode threading, image decode, or draw-call/present
   threading (draw calls stay render-thread-only; `SDL_Renderer` is not
   documented as safe for concurrent use, and it isn't the bottleneck).
