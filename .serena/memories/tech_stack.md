@@ -37,6 +37,29 @@ decoders (pro `.mov` codecs Phase 28; `.webm` VP8/VP9 Phase 38; AV1 + legacy `.m
 aac/opus/mp3/vorbis/flac/ac3 audio decoders, mov/mp4/matroska demuxers, `--enable-libaom`,
 swscale + swresample; no encoders/muxers/protocols/network/programs). See the FFmpeg row above for
 the `libaom_av1` naming/link-order gotchas.
+
+**Phase 43 Part 1:** `--enable-d3d11va` added to the Windows FFmpeg configure
+invocation (`scripts/build_ffmpeg_windows.sh`) — a hwaccel dispatch-registration
+flag, not a new dependency (FFmpeg's `hwcontext_d3d11va.c` loads `d3d11.dll`/
+`dxgi.dll` via `LoadLibrary`/`GetProcAddress` at runtime). `premake5.lua`
+defines `OSV_HWACCEL_D3D11VA` only on Windows, gated on `OSV_VENDORED_AV`
+already being present. `media::HwAccelContext` (`src/media/hw_accel.{h,cpp}`)
+attempts real hw device creation once per process (cached outcome) and
+`VideoDecodeWorker` (`src/media/video_decode_worker.{h,cpp}`) attaches it via
+`try_attach_hwaccel()` when opening its codec context; any hard decode
+failure with a hw context active drops it and reopens a fresh software-only
+context for the rest of that clip (`reopen_software_only()`).
+`media::test_only_force_hwaccel_unavailable(bool)` makes this fallback path
+deterministic in tests, since no CI runner has a real GPU decode block.
+Codec coverage confirmed against `vendor/ffmpeg/configure`'s
+`*_d3d11va_hwaccel_deps`/`*_vaapi_hwaccel_deps` entries: h264/hevc/vp9 have
+both VAAPI and D3D11VA hwaccel paths, vp8/mjpeg have VAAPI only, and
+av1(`libaom_av1`, a software decoder)/prores/dnxhd/qtrle/cinepak have
+neither. Linux VAAPI (`OSV_HWACCEL_VAAPI`) is a separate follow-up phase — it
+needs a dlopen shim (not a direct system `libva` link) to keep hw decode
+optional at the binary level, not just the codec level; see
+`docs/superpowers/specs/2026-07-17-hardware-video-decode-design.md`.
+
 `link_av()` links avformat/avcodec/swscale/swresample/avutil and defines `OSV_VENDORED_AV` **only
 when `lib/libavcodec.a` is present**, so non-FFmpeg builds stay green. Index format is now
 `INDEX_VERSION = 4` (adds `Type::Video` + `VideoMeta`; v1–v3 read back-compat). Audio samples decoded

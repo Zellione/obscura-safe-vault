@@ -42,6 +42,16 @@ echo "==> Building vendored ffmpeg for Windows (MSVC toolchain, decode-only, sta
 # PKG_CONFIG_PATH points configure at the aom.pc build_codecs.bat installed
 # into $CODEC_PREFIX; requires the `pkgconf` MSYS2 package (see ci.yml's
 # MSYS2 setup step).
+#
+# D3D11VA (Phase 43 Part 1): a hwaccel *dispatch registration* flag, not a
+# new dependency — FFmpeg's hwcontext_d3d11va.c loads d3d11.dll/dxgi.dll via
+# LoadLibrary/GetProcAddress at runtime (confirmed in
+# vendor/ffmpeg/libavutil/hwcontext_d3d11va.c), so this needs no new
+# --extra-libs and no Windows SDK .lib linking beyond what MSVC already
+# provides. Covers h264/hevc/vp9 hwaccel (vp8/mjpeg/av1/prores/dnxhd/qtrle/
+# cinepak have no D3D11VA path in this FFmpeg version — see
+# docs/superpowers/specs/2026-07-17-hardware-video-decode-design.md's
+# codec-coverage table).
 (
     cd vendor/ffmpeg
     PKG_CONFIG_PATH="$CODEC_PREFIX/lib/pkgconfig" ./configure \
@@ -60,6 +70,7 @@ echo "==> Building vendored ffmpeg for Windows (MSVC toolchain, decode-only, sta
         --enable-parser=h264,hevc,dnxhd,mjpeg,aac,vorbis,opus,flac,ac3,mpegaudio \
         --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb \
         --enable-swscale \
+        --enable-d3d11va \
         --enable-pic
     make -j"$(nproc)"
     make install

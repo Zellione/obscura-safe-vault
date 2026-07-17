@@ -16,6 +16,7 @@
 
 #include "media/decoded_frame.h"
 #include "media/frame_convert.h"
+#include "media/hw_accel.h"
 
 struct AVCodecContext;
 struct AVCodecParameters;
@@ -113,6 +114,15 @@ private:
     bool publish_decoded_frame(const Job& job);
     void publish_result(Result&& r);
     void publish_eof(uint64_t generation);
+    bool reopen_software_only();
+
+    // Test-only seams (defined in tests/media/test_video_decode_worker.cpp,
+    // not part of any production translation unit) — exercise the
+    // hw-failure recovery path deterministically without real hardware:
+    // production code can never observe a real hw decode failure on a CI
+    // runner with no GPU decode block.
+    friend bool test_only_reopen_software(VideoDecodeWorker& w);
+    friend void test_only_force_hw_active(VideoDecodeWorker& w, bool active);
 
     AVCodecContext*        codec_ctx_ = nullptr;
     AVFrame*               frame_     = nullptr;
@@ -120,6 +130,9 @@ private:
     double                 time_base_ = 0.0;
     std::atomic<double>    pending_seek_target_{-1.0};
     bool                   flushed_ = false;
+    bool                       hw_active_        = false;
+    AVCodecParameters*         saved_params_     = nullptr;
+    AVFrame*                   hw_transfer_frame_ = nullptr;   // lazily allocated; reused across frames
     std::chrono::milliseconds test_only_decode_delay_{0};
 
     mutable std::mutex      mtx_;
