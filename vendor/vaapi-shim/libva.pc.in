@@ -1,0 +1,10 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libva
+Description: obscura-safe-vault VAAPI dlopen shim (not real libva) -- forwards to libva.so.2 at runtime via dlopen; see docs/superpowers/specs/2026-07-17-hardware-video-decode-design.md
+Version: 1.22.0
+Libs: -L${libdir} -losv_vaapi_shim -ldl
+Cflags: -I${includedir}

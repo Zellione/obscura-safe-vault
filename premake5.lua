@@ -169,16 +169,37 @@ local function link_av()
             links { "aom" }
         end
 
-        -- Hardware video decode dispatch (Phase 43 Part 1: Windows D3D11VA
-        -- only; Linux VAAPI is a later phase). Defined only on Windows,
-        -- since scripts/build_ffmpeg_windows.sh is the only configure
-        -- invocation passing --enable-d3d11va so far — same "define only
-        -- when the underlying capability is actually present" pattern as
+        -- Hardware video decode dispatch (Phase 43 Part 1: Windows D3D11VA;
+        -- Phase 43 Part 2: Linux VAAPI). Defined only on Windows, since
+        -- scripts/build_ffmpeg_windows.sh is the only configure invocation
+        -- passing --enable-d3d11va so far — same "define only when the
+        -- underlying capability is actually present" pattern as
         -- OSV_VENDORED_AV itself. No new link dependency: FFmpeg's
         -- hwcontext_d3d11va.c loads d3d11.dll/dxgi.dll via LoadLibrary/
         -- GetProcAddress at runtime, not a link-time .lib.
         filter "system:windows"
             defines { "OSV_HWACCEL_D3D11VA" }
+        filter {}
+
+        -- Linux VAAPI (Phase 43 Part 2). Unlike D3D11VA, hwcontext_vaapi.c's
+        -- va* symbol references DO need an actual link-time provider (no
+        -- LoadLibrary-style indirection in FFmpeg's own code for VAAPI) —
+        -- vendor/vaapi-shim (osv_vaapi_shim.a) supplies them via its own
+        -- internal dlopen("libva.so.2")/dlsym() forwarding, so this app
+        -- itself never gets a DT_NEEDED entry on libva (see the design
+        -- spec's "VAAPI linking: why dlopen, not a system link"). Must be
+        -- linked AFTER avcodec/avutil above — same static-archive
+        -- dependents-before-dependencies reasoning as the "aom" relisting
+        -- above.
+        filter "system:linux"
+            if os.isfile(path.join(prefix, "lib/libosv_vaapi_shim.a")) then
+                defines { "OSV_HWACCEL_VAAPI" }
+                links   { "osv_vaapi_shim" }
+                externalincludedirs {
+                    path.join(os.getcwd(), "vendor/vaapi-shim"),
+                    path.join(os.getcwd(), "vendor/libva"),
+                }
+            end
         filter {}
     end
 end

@@ -79,14 +79,14 @@ mechanism, not a separate flag). Two platform-specific backends apply here:
   `--enable-decoder=...` list (mirrors the `libaom_av1` naming gotcha
   `mem:tech_stack` already documents — verify the exact component names
   FFmpeg expects, don't assume). Windows (D3D11VA) done in Part 1 — Linux
-  (VAAPI) is Part 2.
+  (VAAPI) done in Part 2 ✅.
 - [x] **Build gating** (`premake5.lua`) — new defines
   (`OSV_HWACCEL_D3D11VA` / `OSV_HWACCEL_VAAPI`), each independently probed
   per-platform, following the existing "define only when the underlying
   capability is actually present" pattern `link_av()` uses for
   `OSV_VENDORED_AV`. A build without either must stay exactly Phase 41's
-  behavior. `OSV_HWACCEL_D3D11VA` done in Part 1 — `OSV_HWACCEL_VAAPI` is
-  Part 2.
+  behavior. `OSV_HWACCEL_D3D11VA` done in Part 1 — `OSV_HWACCEL_VAAPI` done
+  in Part 2 ✅.
 - [x] **`media::VideoDecodeWorker`** (`src/media/video_decode_worker.h/.cpp`)
   — in the constructor, attempt hw device context creation **once per
   process** (cache the outcome; don't retry per clip if the first attempt
@@ -145,4 +145,4 @@ actually running on the hardware block, with no playback regression
   driver/hardware support for a given codec must be indistinguishable from
   Phase 41's existing behavior to the user.
 
-**Status:** 🔜 Planned.
+**Status:** ✅ Done (Part 1 + Part 2).

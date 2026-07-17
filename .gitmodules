@@ -41,3 +41,6 @@
 [submodule "vendor/libarchive"]
 	path = vendor/libarchive
 	url = https://github.com/libarchive/libarchive.git
+[submodule "vendor/libva"]
+	path = vendor/libva
+	url = https://github.com/intel/libva.git
