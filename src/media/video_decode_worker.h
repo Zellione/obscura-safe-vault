@@ -123,6 +123,7 @@ private:
     // runner with no GPU decode block.
     friend bool test_only_reopen_software(VideoDecodeWorker& w);
     friend void test_only_force_hw_active(VideoDecodeWorker& w, bool active);
+    friend bool test_only_hw_active(const VideoDecodeWorker& w);
 
     AVCodecContext*        codec_ctx_ = nullptr;
     AVFrame*               frame_     = nullptr;

@@ -99,6 +99,7 @@ namespace media {
 // hardware, since no CI runner has a GPU decode block to genuinely fail.
 bool test_only_reopen_software(VideoDecodeWorker& w) { return w.reopen_software_only(); }
 void test_only_force_hw_active(VideoDecodeWorker& w, bool active) { w.hw_active_ = active; }
+bool test_only_hw_active(const VideoDecodeWorker& w) { return w.hw_active_; }
 } // namespace media
 
 TEST(video_decode_worker_decodes_submitted_packets_in_order)
@@ -351,6 +352,11 @@ TEST(video_decode_worker_hard_decode_error_with_hw_active_triggers_reopen)
             if (r->eof) saw_eof = true;
         return saw_eof;
     }));
+
+    // Directly confirms reopen_software_only() actually ran (not just that
+    // EOF eventually arrived some other way): hw_active_ started true and
+    // only reopen_software_only() ever sets it back to false.
+    CHECK(!media::test_only_hw_active(worker));
 }
 
 #endif // OSV_VENDORED_AV
