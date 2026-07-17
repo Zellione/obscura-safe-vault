@@ -11,6 +11,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <print>
 #include <span>
 #include <string>
@@ -792,6 +793,81 @@ TEST(video_playback_render_does_not_block_render_thread_during_slow_decode)
         // regression check (an unbounded-blocking reintroduction would
         // still show ~200ms, nowhere close to this threshold).
         CHECK(max_ms < 50);
+    }
+
+    SDL_DestroySurface(surf);
+}
+
+TEST(video_playback_destroys_quickly_despite_pending_decode_backlog)
+{
+    // Regression test for a third real bug reported by the project owner:
+    // "the end of the video makes the application freeze for some time"
+    // — reproducible whenever VideoPlayback is torn down (e.g. navigating
+    // away right as/after a clip finishes) shortly after a stretch of slow
+    // decode had queued up a backlog. Root cause: VideoDecodeWorker::run()
+    // only checked stop_ once queue_ was ALSO empty
+    // (`if (stop_ && queue_.empty()) return;`), so on shutdown it kept
+    // popping and fully decoding every already-queued (not-yet-started)
+    // job before ever honoring stop_ — work whose result nobody would ever
+    // consume, since the whole object was being destroyed. With a real
+    // slow codec, up to MAX_STEADY_IN_FLIGHT (16, video_playback.cpp)
+    // packets can be queued at once, so this could block destruction (and
+    // therefore whatever thread destroys VideoPlayback — the render
+    // thread) for seconds. Fixed by checking stop_ unconditionally each
+    // loop iteration; the destructor's own cleanup already frees whatever
+    // is left in queue_ once run() returns.
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+    auto vbytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");   // 10 frames, no audio
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("destroy_backlog");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        // 300ms artificial per-job decode delay: enough that 10 render
+        // ticks reliably build a multi-job backlog (each tick's
+        // try_advance_pending() can feed one more packet toward the
+        // MAX_STEADY_IN_FLIGHT ceiling whenever its own 20ms wait times
+        // out, which it will here since 300ms >> 20ms).
+        auto vp = std::make_unique<ui::VideoPlayback>(v, *node, std::chrono::milliseconds(300));
+        REQUIRE(vp->valid());
+        const SDL_FRect area{0, 0, 320, 240};
+
+        vp->render(r, font, area);
+        vp->handle_key(SDLK_SPACE, SDL_SCANCODE_SPACE);   // play
+        for (int i = 0; i < 10; ++i) {
+            vp->update(1.0 / 30.0);
+            vp->render(r, font, area);
+        }
+
+        auto t0 = std::chrono::steady_clock::now();
+        vp.reset();   // must not block draining the queued backlog
+        auto t1 = std::chrono::steady_clock::now();
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+
+        // With the fix, destruction only has to wait for at most the ONE
+        // job already mid-decode (a decode call in progress can't be
+        // interrupted — worst case ~300ms, the artificial per-job delay),
+        // not the whole queued backlog. Before the fix this took over 2
+        // seconds (measured empirically while diagnosing the bug) with the
+        // same setup; 500ms leaves headroom above that one-job worst case
+        // without weakening the check (an unbounded-drain regression would
+        // still show 1000ms+, given the ceiling of 16 queued jobs at
+        // 300ms each).
+        CHECK(ms < 500);
     }
 
     SDL_DestroySurface(surf);

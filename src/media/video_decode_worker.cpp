@@ -110,7 +110,19 @@ void VideoDecodeWorker::run()
         {
             std::unique_lock lock(mtx_);
             cv_.wait(lock, [this] { return stop_ || !queue_.empty(); });
-            if (stop_ && queue_.empty()) return;
+            // Bail out on stop_ regardless of queue_ — draining every
+            // still-queued (not-yet-started) job before honoring stop_
+            // would decode a whole backlog nobody will ever consume
+            // (the destructor is already discarding these results by
+            // tearing this object down). With a real slow codec, up to
+            // MAX_STEADY_IN_FLIGHT worth of packets can be queued at
+            // once, so this used to make destruction block for seconds —
+            // observed as the app freezing whenever playback was torn
+            // down (e.g. navigating away right as a clip ends) shortly
+            // after a stretch of slow decode. The destructor's own
+            // cleanup loop frees whatever's left in queue_ after this
+            // returns.
+            if (stop_) return;
             job = queue_.front();
             queue_.pop_front();
         }
