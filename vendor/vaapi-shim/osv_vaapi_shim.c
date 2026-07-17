@@ -12,50 +12,59 @@
 // supported GPU.
 //
 // Each function below dlopen()s the real shared library on first call
-// (cached thereafter, never retried) and forwards via dlsym(); if either
-// step fails, it returns the same "unimplemented" value a real libva driver
-// would return for an unsupported call -- media::HwAccelContext
+// (cached thereafter via pthread_once(), never retried) and forwards via
+// dlsym(); if either step fails, it returns the same "unimplemented" value a
+// real libva driver would return for an unsupported call -- media::HwAccelContext
 // (src/media/hw_accel.cpp, Part 1) already treats every hwaccel failure this
-// way, so callers need no VAAPI-specific handling.
+// way, so callers need no VAAPI-specific handling. Thread-safe initialization
+// is guaranteed by pthread_once().
 #include <va/va.h>
 #include <va/va_drm.h>
 
 #include <dlfcn.h>
+#include <pthread.h>
 #include <stddef.h>
+
+static void *g_core_handle;
+static pthread_once_t g_core_once = PTHREAD_ONCE_INIT;
+
+static void core_handle_init(void)
+{
+    g_core_handle = dlopen("libva.so.2", RTLD_NOW | RTLD_GLOBAL);
+}
 
 static void *core_handle(void)
 {
-    static void *handle;
-    static int   tried;
-    if (!tried) {
-        handle = dlopen("libva.so.2", RTLD_NOW | RTLD_GLOBAL);
-        tried  = 1;
-    }
-    return handle;
+    pthread_once(&g_core_once, core_handle_init);
+    return g_core_handle;
+}
+
+static void *g_drm_handle;
+static pthread_once_t g_drm_once = PTHREAD_ONCE_INIT;
+
+static void drm_handle_init(void)
+{
+    g_drm_handle = dlopen("libva-drm.so.2", RTLD_NOW | RTLD_GLOBAL);
 }
 
 static void *drm_handle(void)
 {
-    static void *handle;
-    static int   tried;
-    if (!tried) {
-        handle = dlopen("libva-drm.so.2", RTLD_NOW | RTLD_GLOBAL);
-        tried  = 1;
-    }
-    return handle;
+    pthread_once(&g_drm_once, drm_handle_init);
+    return g_drm_handle;
 }
 
 #define VA_SHIM_FORWARD(ret, name, params, args, fail)                \
+    static ret (*g_##name##_fn) params;                               \
+    static pthread_once_t g_##name##_once = PTHREAD_ONCE_INIT;         \
+    static void name##_resolve(void)                                  \
+    {                                                                 \
+        void *h = core_handle();                                      \
+        g_##name##_fn = h ? (ret (*) params)dlsym(h, #name) : NULL;    \
+    }                                                                 \
     ret name params                                                   \
     {                                                                 \
-        static ret (*real) params;                                    \
-        static int  tried;                                            \
-        if (!tried) {                                                 \
-            void *h = core_handle();                                  \
-            real = h ? (ret (*) params)dlsym(h, #name) : NULL;         \
-            tried = 1;                                                \
-        }                                                             \
-        return real ? real args : (fail);                             \
+        pthread_once(&g_##name##_once, name##_resolve);               \
+        return g_##name##_fn ? g_##name##_fn args : (fail);            \
     }
 
 VA_SHIM_FORWARD(VAStatus, vaAcquireBufferHandle,
@@ -251,14 +260,17 @@ VA_SHIM_FORWARD(VAStatus, vaUnmapBuffer,
 // vaGetDisplayDRM lives in libva-drm.so.2, a separate shared object from
 // libva.so.2 in real libva packaging -- hand-written rather than routed
 // through VA_SHIM_FORWARD since it needs drm_handle(), not core_handle().
+static VADisplay (*g_vaGetDisplayDRM_fn)(int);
+static pthread_once_t g_vaGetDisplayDRM_once = PTHREAD_ONCE_INIT;
+
+static void vaGetDisplayDRM_resolve(void)
+{
+    void *h = drm_handle();
+    g_vaGetDisplayDRM_fn = h ? (VADisplay (*)(int))dlsym(h, "vaGetDisplayDRM") : NULL;
+}
+
 VADisplay vaGetDisplayDRM(int fd)
 {
-    static VADisplay (*real)(int);
-    static int        tried;
-    if (!tried) {
-        void *h = drm_handle();
-        real = h ? (VADisplay (*)(int))dlsym(h, "vaGetDisplayDRM") : NULL;
-        tried = 1;
-    }
-    return real ? real(fd) : NULL;
+    pthread_once(&g_vaGetDisplayDRM_once, vaGetDisplayDRM_resolve);
+    return g_vaGetDisplayDRM_fn ? g_vaGetDisplayDRM_fn(fd) : NULL;
 }
