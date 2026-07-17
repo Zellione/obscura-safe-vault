@@ -144,6 +144,15 @@ build_codec archive "$REPO_ROOT/vendor/libarchive"                     \
     -DENABLE_TAR=OFF -DENABLE_CPIO=OFF -DENABLE_CAT=OFF -DENABLE_UNZIP=OFF \
     -DENABLE_TEST=OFF -DENABLE_WERROR=OFF
 
+# VAAPI dlopen shim (Phase 43 Part 2) -- must be built and its pkgconfig
+# files installed into $CODEC_PREFIX BEFORE FFmpeg's own ./configure runs
+# below, since that configure invocation's --enable-vaapi probes resolve
+# against this shim's synthesized libva.pc/libva-drm.pc (see
+# vendor/vaapi-shim/CMakeLists.txt and
+# docs/superpowers/specs/2026-07-17-hardware-video-decode-design.md).
+build_codec osv_vaapi_shim "$REPO_ROOT/vendor/vaapi-shim" \
+    -DLIBVA_SRC="$REPO_ROOT/vendor/libva"
+
 # FFmpeg — decode-only static. Video (h264/hevc + prores/dnxhd/mjpeg for .mov,
 # Phase 28; vp8/vp9 for .webm, Phase 38; av1 for .webm/.mov + qtrle/cinepak for
 # .mov, Phase 40) + audio (aac/opus/mp3/vorbis/flac/ac3). configure-built (not
@@ -163,6 +172,17 @@ build_codec archive "$REPO_ROOT/vendor/libarchive"                     \
 # symbol), distinct from the runtime/display decoder name `libaom-av1`
 # (hyphen, VideoDecoder::open() matches on AV_CODEC_ID_AV1, not the name
 # string, so this distinction is configure-only).
+#
+# VAAPI (Phase 43 Part 2): a hwaccel *dispatch registration* flag, just like
+# Windows' --enable-d3d11va (scripts/build_ffmpeg_windows.sh) -- not a new
+# system dependency. FFmpeg's hwcontext_vaapi.c and the vaapi_*.c decode glue
+# reference real libva/libva-drm symbols directly (unlike hwcontext_d3d11va.c,
+# which LoadLibrary/GetProcAddress's d3d11.dll/dxgi.dll itself), so those
+# symbols are provided by vendor/vaapi-shim's own internal
+# dlopen("libva.so.2")/dlsym() forwarding instead -- see
+# docs/superpowers/specs/2026-07-17-hardware-video-decode-design.md. The
+# build_codec osv_vaapi_shim call above installs the synthetic libva.pc/
+# libva-drm.pc this configure invocation's --enable-vaapi probes against.
 build_ffmpeg() {
     if [[ -f "$CODEC_PREFIX/lib/libavcodec.a" ]]; then
         echo "==> ffmpeg already installed — skipping."
@@ -187,6 +207,7 @@ build_ffmpeg() {
         --disable-protocols --disable-devices --disable-filters             \
         --disable-bsfs --disable-autodetect                                 \
         --enable-libaom                                                     \
+        --enable-vaapi                                                      \
         --enable-decoder=h264,hevc,prores,dnxhd,mjpeg,vp8,vp9,libaom_av1,qtrle,cinepak,aac,opus,mp3,vorbis,flac,ac3 \
         --enable-demuxer=mov,matroska,webm                                  \
         --enable-parser=h264,hevc,dnxhd,mjpeg,aac,vorbis,opus,flac,ac3,mpegaudio \
