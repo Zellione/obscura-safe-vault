@@ -346,6 +346,70 @@ jobs:
         run: ./build/bin/Debug/osv_tests
 
   # ===========================================================================
+  # ThreadSanitizer gate — builds and runs the full test suite under TSan.
+  # Phase 42: catches data races in media::VideoDecodeWorker (Phase 41) and
+  # any future concurrent code. Unlike the ASAN leg above, this job does NOT
+  # rebuild the vendored codecs/SDL3 under TSan instrumentation — it links
+  # the same plain vendor/codecs-prefix / vendor/SDL3/build every other job
+  # already builds and caches. TSan's job here is catching races in our own
+  # threading code (worker queues, mutexes, atomics), which lives entirely in
+  # src/ and tests/; it does not need the codec libraries' own internals
+  # instrumented, unlike ASAN's untrusted-input-parsing concern above.
+  # ===========================================================================
+  tests-tsan:
+    name: ThreadSanitizer / tests / Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name != 'schedule'
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        uses: ./.github/actions/setup-apt-deps
+        with:
+          cache-key-suffix: tsan
+
+      - name: Use gcc-14 as default gcc
+        run: |
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
+            --slave /usr/bin/g++ g++ /usr/bin/g++-14
+
+      - name: Setup premake5 + vendored SDL3
+        uses: ./.github/actions/setup-premake-sdl3
+
+      # Reuses the same plain (non-instrumented) codec build every other job
+      # builds and caches under this key — see the job-level comment above for
+      # why this job does not need its own TSan-instrumented codec prefix.
+      - name: Cache vendored codecs build
+        uses: actions/cache@v4
+        id: cache-codecs
+        with:
+          path: vendor/codecs-prefix
+          key: codecs-v4-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
+
+      - name: Build vendored codecs
+        if: steps.cache-codecs.outputs.cache-hit != 'true'
+        run: scripts/build_codecs.sh
+
+      - name: Generate Ninja build files (--tsan)
+        run: bin/premake5 --tsan ninja --cc=gcc
+
+      - name: Build osv_tests (TSan)
+        run: ninja osv_tests_Debug_x64
+
+      - name: Run tests under ThreadSanitizer
+        env:
+          # gfx tests use SDL's software renderer; force a headless video driver
+          # so SDL never tries to open a display on the CI runner.
+          SDL_VIDEODRIVER: dummy
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+        run: ./build/bin/Debug/osv_tests
+
+  # ===========================================================================
   # ASAN+UBSan codecs — fuzz test + ASAN-instrumented codec builds.
   # Triggered only on workflow_dispatch (manual) or weekly schedule, not per-PR.
   # Tests the deterministic codec fuzz suite (test_fuzz_codecs.cpp) with
