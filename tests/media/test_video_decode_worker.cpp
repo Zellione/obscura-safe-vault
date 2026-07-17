@@ -14,6 +14,7 @@
 #include "media/video_decoder.h"
 #include "media/video_source.h"
 #include "vault/vault.h"
+#include "media/hw_accel.h"
 
 namespace {
 namespace fs = std::filesystem;
@@ -169,6 +170,87 @@ TEST(video_decode_worker_stops_cleanly_mid_flight)
     worker.reset();   // destructor must join the thread cleanly
     f.reset();        // clean up fixture
     CHECK(true);       // reaching here without hanging/crashing is the assertion
+}
+
+TEST(video_decode_worker_hwaccel_forced_unavailable_matches_normal_decode)
+{
+    // Two independent decode runs of the same clip: one with hw device
+    // creation forced to fail, one with normal (real) probing. On this
+    // build/CI leg, real probing itself resolves to "unavailable" too (no
+    // OSV_HWACCEL_* compiled in on Linux; no real GPU decode block on any CI
+    // runner even where it is compiled in) — the assertion that matters is
+    // that both runs produce byte-identical decoded output, so a future leg
+    // where real hwaccel *does* activate is covered by this same test
+    // without any change.
+    auto decode_all = [](media::VideoDecoder& dec) {
+        media::VideoDecodeWorker worker(*dec.video_codecpar(), dec.video_time_base(), 0);
+        std::vector<double> pts_seen;
+        std::vector<std::vector<uint8_t>> storages;
+        while (AVPacket* pkt = dec.demux_next_video_packet()) worker.submit(pkt, 0);
+        worker.submit(nullptr, 0);
+        bool saw_eof = false;
+        wait_for([&] {
+            while (auto r = worker.take_result()) {
+                if (r->eof) { saw_eof = true; continue; }
+                if (!r->frame.has_value()) continue;
+                pts_seen.push_back(r->frame->pts_seconds);
+                storages.push_back(r->storage);
+            }
+            return saw_eof;
+        });
+        return std::pair{pts_seen, storages};
+    };
+
+    Fixture fa("hwaccel_bytes_a");
+    REQUIRE(fa.valid);
+    media::test_only_force_hwaccel_unavailable(true);
+    auto [pts_a, storage_a] = decode_all(fa.dec);
+
+    Fixture fb("hwaccel_bytes_b");
+    REQUIRE(fb.valid);
+    media::test_only_force_hwaccel_unavailable(false);
+    auto [pts_b, storage_b] = decode_all(fb.dec);
+    media::test_only_force_hwaccel_unavailable(false);   // leave clean for later tests
+
+    REQUIRE(pts_a.size() == 10);
+    REQUIRE(pts_a.size() == pts_b.size());
+    for (size_t i = 0; i < pts_a.size(); ++i) {
+        CHECK(pts_a[i] == pts_b[i]);
+        CHECK(storage_a[i] == storage_b[i]);
+    }
+}
+
+TEST(video_decode_worker_forced_hwaccel_unavailable_decodes_correctly)
+{
+    Fixture f("forced_unavailable");
+    REQUIRE(f.valid);
+    media::test_only_force_hwaccel_unavailable(true);
+
+    media::VideoDecodeWorker worker(*f.dec.video_codecpar(), f.dec.video_time_base(), 0);
+    int submitted = 0;
+    while (AVPacket* pkt = f.dec.demux_next_video_packet()) {
+        worker.submit(pkt, /*generation=*/0);
+        ++submitted;
+    }
+    worker.submit(nullptr, /*generation=*/0);
+    REQUIRE(submitted == 10);
+
+    std::vector<double> pts_seen;
+    bool saw_eof = false;
+    REQUIRE(wait_for([&] {
+        while (auto r = worker.take_result()) {
+            if (r->eof) { saw_eof = true; continue; }
+            if (!r->frame.has_value()) return false;
+            pts_seen.push_back(r->frame->pts_seconds);
+        }
+        return saw_eof;
+    }));
+
+    media::test_only_force_hwaccel_unavailable(false);   // leave clean for later tests
+
+    REQUIRE(pts_seen.size() == 10);
+    for (size_t i = 1; i < pts_seen.size(); ++i)
+        CHECK(pts_seen[i] >= pts_seen[i - 1]);
 }
 
 #endif // OSV_VENDORED_AV

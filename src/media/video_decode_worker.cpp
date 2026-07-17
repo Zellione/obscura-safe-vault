@@ -19,6 +19,7 @@ extern "C" {
 #include <utility>
 
 #include "media/frame_convert.h"
+#include "media/hw_accel.h"
 
 namespace media {
 
@@ -28,10 +29,19 @@ VideoDecodeWorker::VideoDecodeWorker(const AVCodecParameters& params, double tim
     : time_base_(time_base), test_only_decode_delay_(test_only_decode_delay),
       wake_event_(wake_event)
 {
+    // Own a copy of the caller's codec parameters: `params` is only valid
+    // for this call, but reopen_software_only() needs them again if a hw
+    // context fails mid-clip.
+    saved_params_ = avcodec_parameters_alloc();
+    if (saved_params_) avcodec_parameters_copy(saved_params_, &params);
+
     if (const AVCodec* decoder = avcodec_find_decoder(params.codec_id); decoder) {
         codec_ctx_ = avcodec_alloc_context3(decoder);
-        if (codec_ctx_ && (avcodec_parameters_to_context(codec_ctx_, &params) < 0 ||
-                           avcodec_open2(codec_ctx_, decoder, nullptr) < 0)) {
+        if (codec_ctx_ && avcodec_parameters_to_context(codec_ctx_, &params) >= 0) {
+            hw_active_ = try_attach_hwaccel(codec_ctx_, decoder);
+            if (avcodec_open2(codec_ctx_, decoder, nullptr) < 0)
+                avcodec_free_context(&codec_ctx_);
+        } else if (codec_ctx_) {
             avcodec_free_context(&codec_ctx_);
         }
     }
@@ -51,8 +61,10 @@ VideoDecodeWorker::~VideoDecodeWorker()
     if (thread_.joinable()) thread_.join();
 
     for (auto& job : queue_) if (job.pkt) av_packet_free(&job.pkt);
-    if (frame_)     av_frame_free(&frame_);
-    if (codec_ctx_) avcodec_free_context(&codec_ctx_);
+    if (frame_)             av_frame_free(&frame_);
+    if (hw_transfer_frame_) av_frame_free(&hw_transfer_frame_);
+    if (codec_ctx_)         avcodec_free_context(&codec_ctx_);
+    if (saved_params_)      avcodec_parameters_free(&saved_params_);
 }
 
 void VideoDecodeWorker::submit(AVPacket* pkt, uint64_t generation)
@@ -161,14 +173,24 @@ void VideoDecodeWorker::send_packet(Job& job)
 // pending seek target — rather than published.
 bool VideoDecodeWorker::publish_decoded_frame(const Job& job)
 {
+    // A hw-decoded frame's data[] planes are an opaque device handle, not
+    // real pixel data — transfer to system memory first so the existing
+    // zero-copy/swscale pipeline below has something it can actually read.
+    AVFrame* src = frame_;
+    if (hw_active_) {
+        if (!hw_transfer_frame_) hw_transfer_frame_ = av_frame_alloc();
+        if (hw_transfer_frame_ && transfer_hw_frame(frame_, hw_transfer_frame_))
+            src = hw_transfer_frame_;
+    }
+
     double pts_seconds = 0.0;
-    if (frame_->best_effort_timestamp != AV_NOPTS_VALUE)
-        pts_seconds = static_cast<double>(frame_->best_effort_timestamp) * time_base_;
+    if (src->best_effort_timestamp != AV_NOPTS_VALUE)
+        pts_seconds = static_cast<double>(src->best_effort_timestamp) * time_base_;
 
     std::optional<DecodedFrame> decoded =
-        (frame_->format == AV_PIX_FMT_YUV420P || frame_->format == AV_PIX_FMT_NV12)
-            ? std::optional<DecodedFrame>(FrameConverter::zero_copy(frame_, pts_seconds))
-            : conv_.to_i420(frame_, pts_seconds);
+        (src->format == AV_PIX_FMT_YUV420P || src->format == AV_PIX_FMT_NV12)
+            ? std::optional<DecodedFrame>(FrameConverter::zero_copy(src, pts_seconds))
+            : conv_.to_i420(src, pts_seconds);
     if (!decoded) return false;  // conversion failed; skip this frame
 
     if (double seek_target = pending_seek_target_.load();
@@ -188,10 +210,21 @@ bool VideoDecodeWorker::publish_decoded_frame(const Job& job)
 void VideoDecodeWorker::decode_available_frames(const Job& job, bool is_flush)
 {
     for (;;) {
-        if (const int ret = avcodec_receive_frame(codec_ctx_, frame_); ret != 0) {
-            // Whether this is EAGAIN (need another packet) or a real
-            // decode error, the drain is over: if flushing, that's the
-            // signal all buffered frames are exhausted, so publish EOF.
+        const int ret = avcodec_receive_frame(codec_ctx_, frame_);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+            if (is_flush) publish_eof(job.generation);
+            return;
+        }
+        if (ret < 0) {
+            // A hard decode error. If a hw context was active, this is
+            // exactly the "GPU driver/hardware couldn't handle this
+            // stream" case the opportunistic-hwaccel invariant requires
+            // recovering from: drop the failed context and resume the
+            // rest of this clip in software. This job's frame is lost
+            // (one dropped frame during a rare hw->sw transition, versus
+            // aborting playback) — reopen_software_only() leaves
+            // codec_ctx_ ready for the *next* job's packet.
+            if (hw_active_ && reopen_software_only()) return;
             if (is_flush) publish_eof(job.generation);
             return;
         }
@@ -199,6 +232,31 @@ void VideoDecodeWorker::decode_available_frames(const Job& job, bool is_flush)
         if (is_flush) continue;                     // keep draining after flush; don't return yet
         return;  // one frame per submitted job, matching decode_from_current_frame() cadence
     }
+}
+
+// Drops the current (hw-attached) codec context and opens a fresh
+// software-only one from the caller's original AVCodecParameters (saved at
+// construction, since `params` in the constructor is only a reference valid
+// for that call). Returns false if the codec can no longer be opened at all
+// (extremely unlikely — the same decoder just opened successfully moments
+// ago) — the caller treats codec_ctx_ == nullptr the same as construction
+// failure (run() drops jobs without decoding, per wait_for_job()'s existing
+// contract).
+bool VideoDecodeWorker::reopen_software_only()
+{
+    if (codec_ctx_) avcodec_free_context(&codec_ctx_);
+    const AVCodec* decoder = saved_params_ ? avcodec_find_decoder(saved_params_->codec_id) : nullptr;
+    if (!decoder) return false;
+    codec_ctx_ = avcodec_alloc_context3(decoder);
+    if (!codec_ctx_) return false;
+    if (avcodec_parameters_to_context(codec_ctx_, saved_params_) < 0 ||
+        avcodec_open2(codec_ctx_, decoder, nullptr) < 0) {
+        avcodec_free_context(&codec_ctx_);
+        return false;
+    }
+    hw_active_ = false;
+    flushed_   = false;
+    return true;
 }
 
 void VideoDecodeWorker::run()

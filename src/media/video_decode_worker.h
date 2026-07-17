@@ -16,6 +16,7 @@
 
 #include "media/decoded_frame.h"
 #include "media/frame_convert.h"
+#include "media/hw_accel.h"
 
 struct AVCodecContext;
 struct AVCodecParameters;
@@ -113,6 +114,7 @@ private:
     bool publish_decoded_frame(const Job& job);
     void publish_result(Result&& r);
     void publish_eof(uint64_t generation);
+    bool reopen_software_only();
 
     AVCodecContext*        codec_ctx_ = nullptr;
     AVFrame*               frame_     = nullptr;
@@ -120,6 +122,9 @@ private:
     double                 time_base_ = 0.0;
     std::atomic<double>    pending_seek_target_{-1.0};
     bool                   flushed_ = false;
+    bool                       hw_active_        = false;
+    AVCodecParameters*         saved_params_     = nullptr;
+    AVFrame*                   hw_transfer_frame_ = nullptr;   // lazily allocated; reused across frames
     std::chrono::milliseconds test_only_decode_delay_{0};
 
     mutable std::mutex      mtx_;
