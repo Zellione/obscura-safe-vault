@@ -107,6 +107,12 @@ private:
     };
 
     void run();
+    std::optional<Job> wait_for_job();
+    void send_packet(Job& job);
+    void decode_available_frames(const Job& job, bool is_flush);
+    bool publish_decoded_frame(const Job& job);
+    void publish_result(Result&& r);
+    void publish_eof(uint64_t generation);
 
     AVCodecContext*        codec_ctx_ = nullptr;
     AVFrame*               frame_     = nullptr;

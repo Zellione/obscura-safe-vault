@@ -53,29 +53,41 @@ struct VideoPlayback::Impl {
     uint64_t                                     generation_    = 0;
     size_t                                       in_flight_     = 0;      // packets submitted, Result not yet consumed
     bool                                          demux_eof_     = false;  // demuxer hit EOF for the current generation
-    bool                                          skip_pending_  = false;  // a seek's decode-forward-to-target skip may still be discarding frames without publishing a Result
-    std::vector<uint8_t>                          pending_storage_;       // backs pending_->planes (owned copy from the worker)
+    bool skip_pending_ = false;  // a seek's decode-forward-to-target skip may still be discarding
+                                 // frames without publishing a Result
     std::unique_ptr<media::ChunkAvio> avio_;
     gfx::YuvTexture                   yuv_;
     PlaybackModel                     model_{0.0};
     bool                              valid_ = false;
 
-    std::optional<media::DecodedFrame> pending_;        // next decoded frame (planes valid)
-    double    pending_pts_  = 0.0;
-    double    shown_pts_    = -1.0;                      // last presented frame's pts
-    double    frame_dt_     = DEFAULT_FRAME_DT;          // estimated, for backward step
-    bool      need_present_ = false;                     // force-show pending_ (open / seek)
-    bool      eof_          = false;
+    // State of the frame most recently decoded and awaiting presentation,
+    // and how it relates to what was last shown — produced by
+    // decode_into_pending()/try_advance_pending(), shown by
+    // present_pending(), driven by advance() against the playback clock.
+    struct FrameState {
+        std::optional<media::DecodedFrame> pending;  // next decoded frame (planes valid)
+        std::vector<uint8_t> pending_storage;  // backs pending->planes (owned copy from the worker)
+        double pending_pts = 0.0;
+        double shown_pts = -1.0;             // last presented frame's pts
+        double frame_dt = DEFAULT_FRAME_DT;  // estimated, for backward step
+        bool need_present = false;           // force-show pending (open / seek)
+        bool eof = false;
+    };
+    FrameState frame_;
+
     bool      scrubbing_    = false;
     bool      loop_         = false;                     // seeded from media::saved_loop_enabled()
     SDL_FRect loop_icon_{};                               // last-rendered loop icon rect
     SDL_FRect track_{};                                  // last-rendered seek-bar track rect
 
-    // Audio playback state
-    SDL_AudioStream* audio_           = nullptr;
-    uint64_t         samples_fed_     = 0;
-    double           seek_base_       = 0.0;
-    bool             audio_subsystem_ = false;   // we brought up SDL_INIT_AUDIO; quit it in dtor
+    // Audio playback state.
+    struct AudioState {
+        SDL_AudioStream* stream = nullptr;
+        uint64_t samples_fed = 0;
+        double seek_base = 0.0;
+        bool subsystem_owned = false;  // we brought up SDL_INIT_AUDIO; quit it in dtor
+    };
+    AudioState audio_;
 
     // Volume-control widget state (the draggable bar + speaker/mute icon).
     struct VolumeUi {
@@ -119,29 +131,70 @@ struct VideoPlayback::Impl {
                 std::println(stderr, "[VideoPlayback] audio subsystem init failed: {}",
                              SDL_GetError());
             } else {
-                audio_subsystem_ = true;
+                audio_.subsystem_owned = true;
                 SDL_AudioSpec audio_spec{};
                 audio_spec.format   = SDL_AUDIO_F32;
                 audio_spec.channels = decoder_.audio_info().channels;
                 audio_spec.freq     = decoder_.audio_info().sample_rate;
-                audio_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &audio_spec,
-                                                   nullptr, nullptr);
-                if (!audio_) {
+                audio_.stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+                                                          &audio_spec, nullptr, nullptr);
+                if (!audio_.stream) {
                     std::println(stderr, "[VideoPlayback] audio open failed: {}", SDL_GetError());
                 } else {
-                    SDL_SetAudioStreamGain(audio_, media::effective_gain(vol_.level, vol_.muted));
+                    SDL_SetAudioStreamGain(audio_.stream,
+                                           media::effective_gain(vol_.level, vol_.muted));
                 }
             }
         }
 
-        decode_into_pending();   // first frame ready; uploaded lazily on first render
-        need_present_ = true;    // show frame 0 immediately, paused
+        decode_into_pending();       // first frame ready; uploaded lazily on first render
+        frame_.need_present = true;  // show frame 0 immediately, paused
     }
 
     ~Impl()
     {
-        if (audio_) SDL_DestroyAudioStream(audio_);          // release the device first
-        if (audio_subsystem_) SDL_QuitSubSystem(SDL_INIT_AUDIO);
+        if (audio_.stream) SDL_DestroyAudioStream(audio_.stream);  // release the device first
+        if (audio_.subsystem_owned) SDL_QuitSubSystem(SDL_INIT_AUDIO);
+    }
+
+    // Demuxes and submits one packet to the worker under the current
+    // generation, bumping in_flight_ and marking demux_eof_ once the
+    // demuxer is exhausted (pkt == nullptr, the end-of-stream marker).
+    void feed_one_packet()
+    {
+        AVPacket* pkt = decoder_.demux_next_video_packet();
+        video_worker_->submit(pkt, generation_);
+        ++in_flight_;
+        if (!pkt) demux_eof_ = true;
+    }
+
+    void prefetch_upto(size_t depth)
+    {
+        while (in_flight_ < depth && !demux_eof_)
+            feed_one_packet();
+    }
+
+    // Consumes a Result already confirmed to match the current generation:
+    // updates in_flight_/skip_pending_ bookkeeping, then either marks eof_
+    // or publishes the new pending frame and its measured frame_dt.
+    void consume_result(media::VideoDecodeWorker::Result& r)
+    {
+        --in_flight_;
+        skip_pending_ = false;  // the worker has published a real result for this
+                                // generation, so any seek-skip window has closed —
+                                // subsequent timeouts mean "still decoding", not
+                                // "silently discarded toward an old target".
+        if (r.eof) {
+            frame_.eof = true;
+            frame_.pending.reset();
+            return;
+        }
+        frame_.pending_storage = std::move(r.storage);
+        frame_.pending = r.frame;
+        const double p = frame_.pending->pts_seconds;
+        if (frame_.shown_pts >= 0.0 && p > frame_.shown_pts)
+            frame_.frame_dt = std::max(1e-3, p - frame_.shown_pts);
+        frame_.pending_pts = p;
     }
 
     // Tops up the worker's queue to PREFETCH_DEPTH packets ahead (so the
@@ -191,22 +244,14 @@ struct VideoPlayback::Impl {
     // enough slack for legitimate startup/reordering delay.
     void decode_into_pending()
     {
-        while (in_flight_ < PREFETCH_DEPTH && !demux_eof_) {
-            AVPacket* pkt = decoder_.demux_next_video_packet();
-            video_worker_->submit(pkt, generation_);
-            ++in_flight_;
-            if (!pkt) demux_eof_ = true;
-        }
+        prefetch_upto(PREFETCH_DEPTH);
 
         for (;;) {
             auto r = video_worker_->wait_result();
             if (!r) {
-                const bool may_feed_more = skip_pending_ || in_flight_ < MAX_STEADY_IN_FLIGHT;
-                if (may_feed_more && !demux_eof_) {
-                    AVPacket* pkt = decoder_.demux_next_video_packet();
-                    video_worker_->submit(pkt, generation_);
-                    ++in_flight_;
-                    if (!pkt) demux_eof_ = true;
+                if (const bool may_feed_more = skip_pending_ || in_flight_ < MAX_STEADY_IN_FLIGHT;
+                    may_feed_more && !demux_eof_) {
+                    feed_one_packet();
                     continue;
                 }
                 if (in_flight_ > 0) {
@@ -242,19 +287,7 @@ struct VideoPlayback::Impl {
                 // we submitted in the current generation).
                 continue;
             }
-            // Result matches current generation; consume it.
-            --in_flight_;
-            skip_pending_ = false;   // the worker has published a real result for this
-                                     // generation, so any seek-skip window has closed —
-                                     // subsequent timeouts mean "still decoding", not
-                                     // "silently discarded toward an old target".
-            if (r->eof) { eof_ = true; pending_.reset(); return; }
-            pending_storage_ = std::move(r->storage);
-            pending_         = r->frame;
-            const double p = pending_->pts_seconds;
-            if (shown_pts_ >= 0.0 && p > shown_pts_)
-                frame_dt_ = std::max(1e-3, p - shown_pts_);
-            pending_pts_ = p;
+            consume_result(*r);
             return;
         }
     }
@@ -295,14 +328,8 @@ struct VideoPlayback::Impl {
     // tested) contract, not a per-frame recurring cost.
     void try_advance_pending()
     {
-        pending_.reset();
-
-        while (in_flight_ < PREFETCH_DEPTH && !demux_eof_) {
-            AVPacket* pkt = decoder_.demux_next_video_packet();
-            video_worker_->submit(pkt, generation_);
-            ++in_flight_;
-            if (!pkt) demux_eof_ = true;
-        }
+        frame_.pending.reset();
+        prefetch_upto(PREFETCH_DEPTH);
 
         auto r = video_worker_->wait_result();
         for (;;) {
@@ -317,66 +344,54 @@ struct VideoPlayback::Impl {
                 // this call's own cost stays capped at a single
                 // wait_result(); if still more is needed, later ticks keep
                 // feeding one at a time until decode catches up.
-                if (in_flight_ < MAX_STEADY_IN_FLIGHT && !demux_eof_) {
-                    AVPacket* pkt = decoder_.demux_next_video_packet();
-                    video_worker_->submit(pkt, generation_);
-                    ++in_flight_;
-                    if (!pkt) demux_eof_ = true;
-                }
+                if (in_flight_ < MAX_STEADY_IN_FLIGHT && !demux_eof_) feed_one_packet();
                 return;   // caller retries next tick
             }
             if (r->generation != generation_) {
                 r = video_worker_->take_result();   // drain further stale results, non-blocking
                 continue;
             }
-            --in_flight_;
-            skip_pending_ = false;
-            if (r->eof) { eof_ = true; pending_.reset(); return; }
-            pending_storage_ = std::move(r->storage);
-            pending_         = r->frame;
-            const double p = pending_->pts_seconds;
-            if (shown_pts_ >= 0.0 && p > shown_pts_)
-                frame_dt_ = std::max(1e-3, p - shown_pts_);
-            pending_pts_ = p;
+            consume_result(*r);
             return;
         }
     }
 
     void pump_audio()
     {
-        if (!audio_) return;
+        if (!audio_.stream) return;
         const int ch = decoder_.audio_info().channels;
         const int sr = decoder_.audio_info().sample_rate;
         const int target = sr * ch * (int)sizeof(float) / 5;   // ~200ms buffered
-        while (SDL_GetAudioStreamQueued(audio_) < target) {
+        while (SDL_GetAudioStreamQueued(audio_.stream) < target) {
             auto a = decoder_.next_audio_frame();
             if (!a) break;
-            SDL_PutAudioStreamData(audio_, a->samples.data(),
+            SDL_PutAudioStreamData(audio_.stream, a->samples.data(),
                                    (int)(a->samples.size() * sizeof(float)));
-            samples_fed_ += a->samples.size() / (ch > 0 ? ch : 1);
+            audio_.samples_fed += a->samples.size() / (ch > 0 ? ch : 1);
         }
     }
 
     double clock() const
     {
-        if (!audio_) return model_.position();
+        if (!audio_.stream) return model_.position();
         const int ch = decoder_.audio_info().channels;
         const int sr = decoder_.audio_info().sample_rate;
         uint64_t queued_samples =
-            (uint64_t)SDL_GetAudioStreamQueued(audio_) / (sizeof(float) * (ch > 0 ? ch : 1));
-        uint64_t consumed = samples_fed_ > queued_samples ? samples_fed_ - queued_samples : 0;
-        return media::audio_clock(seek_base_, consumed, sr);
+            (uint64_t)SDL_GetAudioStreamQueued(audio_.stream) / (sizeof(float) * (ch > 0 ? ch : 1));
+        uint64_t consumed =
+            audio_.samples_fed > queued_samples ? audio_.samples_fed - queued_samples : 0;
+        return media::audio_clock(audio_.seek_base, consumed, sr);
     }
 
     // Upload pending_ to the GPU (durable copy) then try (bounded-wait,
     // ~20ms max) to line up the next frame.
     void present_pending(SDL_Renderer* r)
     {
-        if (!pending_) return;
-        if (yuv_.ensure(r, pending_->width, pending_->height, pending_->pix_fmt))
-            (void)yuv_.update(*pending_);
-        shown_pts_    = pending_pts_;
-        need_present_ = false;
+        if (!frame_.pending) return;
+        if (yuv_.ensure(r, frame_.pending->width, frame_.pending->height, frame_.pending->pix_fmt))
+            (void)yuv_.update(*frame_.pending);
+        frame_.shown_pts = frame_.pending_pts;
+        frame_.need_present = false;
         try_advance_pending();
     }
 
@@ -387,26 +402,26 @@ struct VideoPlayback::Impl {
 
         const double c = clock();
         // Sync model position toward audio clock when audio is active
-        if (audio_ && model_.playing()) {
+        if (audio_.stream && model_.playing()) {
             model_.seek_to(c);
         }
 
         // A prior tick's non-blocking try_advance_pending() may have found
-        // nothing ready yet, leaving pending_ null without eof_ having been
-        // reached — the while loop below only polls when pending_ is
+        // nothing ready yet, leaving pending null without eof having been
+        // reached — the while loop below only polls when pending is
         // already truthy, so without this, that transient "not ready yet"
         // would never get retried and playback would stall permanently.
-        if (!pending_ && !eof_) {
+        if (!frame_.pending && !frame_.eof) {
             try_advance_pending();
         }
 
         // Drive video frames against the clock using av_sync
-        while (pending_) {
-            if (need_present_) {
+        while (frame_.pending) {
+            if (frame_.need_present) {
                 present_pending(r);
-                need_present_ = false;
+                frame_.need_present = false;
             } else {
-                media::FrameAction act = media::decide(c, pending_pts_);
+                media::FrameAction act = media::decide(c, frame_.pending_pts);
                 if (act == media::FrameAction::Hold) {
                     break;
                 } else if (act == media::FrameAction::Drop) {
@@ -417,7 +432,7 @@ struct VideoPlayback::Impl {
             }
         }
 
-        if (eof_ && !pending_ && model_.playing()) {
+        if (frame_.eof && !frame_.pending && model_.playing()) {
             if (loop_) {
                 do_seek(0.0);   // loop: re-seek to start, keep playing (same path
                                  // as the "press Space at the end" replay)
@@ -440,22 +455,24 @@ struct VideoPlayback::Impl {
         demux_eof_    = false;   // the seek moves the demuxer away from end-of-stream
         skip_pending_ = true;    // until the worker publishes its first post-seek Result,
                                   // frames below the target may be silently discarded
-        if (audio_) SDL_ClearAudioStream(audio_);
-        samples_fed_ = 0;
-        seek_base_   = tt;
-        pending_.reset();
-        shown_pts_ = -1.0;
-        eof_       = false;
+        if (audio_.stream) SDL_ClearAudioStream(audio_.stream);
+        audio_.samples_fed = 0;
+        audio_.seek_base = tt;
+        frame_.pending.reset();
+        frame_.shown_pts = -1.0;
+        frame_.eof = false;
         decode_into_pending();
-        model_.seek_to(pending_ ? pending_pts_ : tt);
-        need_present_ = true;
+        model_.seek_to(frame_.pending ? frame_.pending_pts : tt);
+        frame_.need_present = true;
     }
 
     void apply_pause_resume()
     {
-        if (audio_) {
-            if (model_.playing()) SDL_ResumeAudioStreamDevice(audio_);
-            else                  SDL_PauseAudioStreamDevice(audio_);
+        if (audio_.stream) {
+            if (model_.playing())
+                SDL_ResumeAudioStreamDevice(audio_.stream);
+            else
+                SDL_PauseAudioStreamDevice(audio_.stream);
         }
     }
 
@@ -463,8 +480,8 @@ struct VideoPlayback::Impl {
     // when the clip has no audio track).
     void apply_gain()
     {
-        if (audio_) {
-            SDL_SetAudioStreamGain(audio_, media::effective_gain(vol_.level, vol_.muted));
+        if (audio_.stream) {
+            SDL_SetAudioStreamGain(audio_.stream, media::effective_gain(vol_.level, vol_.muted));
         }
     }
 
@@ -502,14 +519,14 @@ struct VideoPlayback::Impl {
             case SDLK_COMMA:   // step back one frame (paused)
                 model_.set_playing(false);
                 apply_pause_resume();
-                do_seek(model_.position() - frame_dt_);
+                do_seek(model_.position() - frame_.frame_dt);
                 break;
             case SDLK_PERIOD:  // step forward one frame (paused)
                 model_.set_playing(false);
                 apply_pause_resume();
-                if (pending_) {
-                    model_.seek_to(pending_pts_);
-                    need_present_ = true;
+                if (frame_.pending) {
+                    model_.seek_to(frame_.pending_pts);
+                    frame_.need_present = true;
                 }
                 break;
             case SDLK_J: do_seek(model_.position() - PLAYBACK_SEEK_STEP); break;
@@ -550,7 +567,7 @@ struct VideoPlayback::Impl {
 
     void mouse_down(float mx, float my)
     {
-        if (audio_) {
+        if (audio_.stream) {
             if (in_rect(vol_.icon, mx, my, 4.0f)) {     // click the speaker to (un)mute
                 vol_.muted = !vol_.muted;
                 apply_gain();
@@ -631,7 +648,7 @@ struct VideoPlayback::Impl {
         // time text. Drawn first so the seek track can stop before it (no overlap).
         // Only shown when the clip actually has an open audio device.
         float controls_right = text_x - 12.0f;     // seek track stops before this x
-        if (audio_) {
+        if (audio_.stream) {
             constexpr float VOL_BAR_W = 56.0f;
             constexpr float VOL_BAR_H = 5.0f;
             constexpr float SPK_W     = 13.0f;
@@ -684,8 +701,14 @@ struct VideoPlayback::Impl {
     [[nodiscard]] bool animating() const { return valid_ && model_.playing(); }
     [[nodiscard]] bool has_audio() const { return decoder_.has_audio(); }
     [[nodiscard]] double position() const { return clock(); }
-    [[nodiscard]] bool audio_active() const { return audio_ != nullptr; }
-    [[nodiscard]] uint64_t audio_samples_fed() const { return samples_fed_; }
+    [[nodiscard]] bool audio_active() const
+    {
+        return audio_.stream != nullptr;
+    }
+    [[nodiscard]] uint64_t audio_samples_fed() const
+    {
+        return audio_.samples_fed;
+    }
     [[nodiscard]] float audio_gain() const { return media::effective_gain(vol_.level, vol_.muted); }
     [[nodiscard]] SDL_FRect debug_vol_bar() const { return vol_.bar; }
     [[nodiscard]] size_t debug_in_flight_packets() const { return in_flight_; }

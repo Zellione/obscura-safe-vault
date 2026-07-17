@@ -775,7 +775,7 @@ TEST(video_playback_render_does_not_block_render_thread_during_slow_decode)
         vp.handle_key(SDLK_SPACE, SDL_SCANCODE_SPACE);   // play
         REQUIRE(vp.animating());
 
-        long max_ms = 0;
+        std::chrono::milliseconds::rep max_ms = 0;
         for (int i = 0; i < 20; ++i) {
             auto t0 = std::chrono::steady_clock::now();
             vp.update(1.0 / 30.0);
