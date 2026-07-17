@@ -54,7 +54,7 @@
 | 40 | Video codec/loop/sync polish, gallery position memory & view density | ✅ | Part 1 ✅: AV1 + broader `.mov` codecs, video loop toggle, A/V sync hardening, + bugfix ✅: self-healing metadata repair for videos imported before their codec was decodable. Part 2 ✅: session-scoped gallery position memory (descend/ascend/leave-and-return restores the last-selected tile at every level). Part 3 ✅: 5-way List/Grid S-XL view density. → [details](docs/roadmap/phase-40-video-gallery-browsing-polish.md) |
 | 41 | Async video decode | 🔜 | Move CPU-heavy video codec decode off the render thread onto a background worker, so slow codecs (AV1/HEVC) don't stall playback/input/A-V sync. → [details](docs/roadmap/phase-41-async-video-decode.md) |
 | 42 | ThreadSanitizer CI leg | ✅ | New `--tsan` build option + `tests-tsan` CI job, running the full suite under ThreadSanitizer on every PR to directly validate Phase 41's concurrent code (and any future threading) — reuses the plain vendored codec/SDL3 build rather than a parallel sanitizer-instrumented prefix. → [details](docs/roadmap/phase-42-tsan-ci.md) |
-| 43 | Platform hardware-accelerated video decode | 🔜 | Part 1 ✅: shared `media::HwAccelContext` infra + Windows D3D11VA, software `VideoDecodeWorker` as the automatic fallback. Part 2 🔜: VAAPI dlopen shim (Linux). → [details](docs/roadmap/phase-43-hardware-video-decode.md) |
+| 43 | Platform hardware-accelerated video decode | ✅ | Part 1 ✅: shared `media::HwAccelContext` infra + Windows D3D11VA, software `VideoDecodeWorker` as the automatic fallback. Part 2 ✅: VAAPI dlopen shim (`vendor/vaapi-shim`) + Linux enablement (`vendor/libva`, headers-only). → [details](docs/roadmap/phase-43-hardware-video-decode.md) |
 
 ---
 
