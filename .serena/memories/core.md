@@ -319,6 +319,24 @@ src/
                                                  already uses. Reuses image::
                                                  decode_wake_event()'s SDL user-event
                                                  rather than registering a second one.
+                                                 run()'s wait checks stop_ regardless of
+                                                 whether queue_ is also empty (not
+                                                 `stop_ && queue_.empty()`) — draining a
+                                                 whole queued backlog before honoring
+                                                 stop_ made the destructor (and so
+                                                 VideoPlayback teardown, e.g. navigating
+                                                 away right as a clip ends) block for
+                                                 seconds after a stretch of slow decode;
+                                                 the destructor's own cleanup loop frees
+                                                 whatever's left in queue_ afterward.
+                                                 run() itself is decomposed into
+                                                 wait_for_job()/send_packet()/
+                                                 decode_available_frames()/
+                                                 publish_decoded_frame()/publish_result()/
+                                                 publish_eof() — pulled apart to bring
+                                                 cognitive complexity and nesting depth
+                                                 under SonarQube's limits (no behavior
+                                                 change).
   gfx/         window.*, renderer.*,           — SDL3 window/renderer, texture cache,
                texture_cache.*, text.*,        — stb_truetype text atlas
                theme.{h,cpp}                   — UI colour tokens, runtime-selectable
@@ -430,7 +448,9 @@ src/
                playback_model.*                — pure video transport maths: clock/clamp/
                                                  seek-bar map/mm:ss/frame-due (Phase 15,
                                                  pure/tested)
-               video_playback.*                — in-viewer video player: VideoDecoder + YUV
+               video_playback.*                — in-viewer video player: VideoDecoder (demux
+                                                 only, render-thread-side) + VideoDecodeWorker
+                                                 (codec-level decode, background thread) + YUV
                                                  texture + SDL_AudioStream (master audio clock)
                                                  + seek bar (both tracks); mute/volume via
                                                  SDL_SetAudioStreamGain; A/V sync via av_sync::decide;
@@ -439,7 +459,42 @@ src/
                                                  Part 2: seek(seconds) — clamped seek, does NOT
                                                  touch play/pause — restores a session resume
                                                  bookmark right after construction (playback
-                                                 already opens paused by default).
+                                                 already opens paused by default). Phase 41: decode
+                                                 moved off the render thread onto VideoDecodeWorker
+                                                 — Impl demuxes (VideoDecoder::
+                                                 demux_next_video_packet()) and submits packets by
+                                                 generation_, then reads back Results. Two paths
+                                                 share feed_one_packet()/prefetch_upto()/
+                                                 consume_result() helpers: decode_into_pending()
+                                                 blocks (bounded by wait_result()'s ~20ms internal
+                                                 timeout, retried) until pending_ resolves — used by
+                                                 the constructor's first frame and do_seek(), where
+                                                 resolving within one call is the expected contract;
+                                                 try_advance_pending() is the steady-playback path,
+                                                 a single wait_result() call (no retry loop) so
+                                                 render() never blocks longer than that ~20ms even
+                                                 under a slow codec (real software AV1/HEVC). Both
+                                                 keep in_flight_ prefetched up to PREFETCH_DEPTH
+                                                 packets ahead and, on a miss, feed one more up to
+                                                 the MAX_STEADY_IN_FLIGHT ceiling (uncapped instead
+                                                 while skip_pending_ is set, since a seek's decode-
+                                                 forward gap is one-time and GOP-bounded, not
+                                                 per-frame recurring) — the ceiling exists because
+                                                 unconditionally feeding more on every timeout let
+                                                 the backlog ratchet upward for the rest of a clip
+                                                 whenever one frame's decode legitimately took
+                                                 longer than the timeout. do_seek() bumps
+                                                 generation_ and calls VideoDecodeWorker::
+                                                 begin_seek(); Results tagged with a stale
+                                                 generation_ are discarded without decrementing
+                                                 in_flight_. Impl's audio (stream/samples_fed/
+                                                 seek_base/subsystem_owned) and pending-frame
+                                                 (pending/pending_storage/pending_pts/shown_pts/
+                                                 frame_dt/need_present/eof) state each live in a
+                                                 nested AudioState/FrameState struct — same
+                                                 grouping pattern as the pre-existing VolumeUi —
+                                                 keeping Impl's own field count down (SonarQube
+                                                 struct-size finding).
                full_tex_cache.*                — shared decode→GPU full-res texture cache
                                                  (decrypt into mlock'd SecureBytes, wipe
                                                  after upload); used by viewer + slideshow
