@@ -195,6 +195,10 @@ local function link_av()
             if os.isfile(path.join(prefix, "lib/libosv_vaapi_shim.a")) then
                 defines { "OSV_HWACCEL_VAAPI" }
                 links   { "osv_vaapi_shim" }
+                externalincludedirs {
+                    path.join(os.getcwd(), "vendor/vaapi-shim"),
+                    path.join(os.getcwd(), "vendor/libva"),
+                }
             end
         filter {}
     end
