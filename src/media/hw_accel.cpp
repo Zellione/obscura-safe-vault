@@ -16,6 +16,8 @@ extern "C" {
 #pragma GCC diagnostic pop
 #endif
 
+#include <mutex>
+
 namespace media {
 
 #if defined(OSV_HWACCEL_D3D11VA) || defined(OSV_HWACCEL_VAAPI)
@@ -32,13 +34,17 @@ namespace {
 bool         g_force_unavailable = false;
 bool         g_device_attempted  = false;
 AVBufferRef* g_device_ctx        = nullptr;
+std::mutex   g_device_mutex;
 
 // Attempts real hw device creation exactly once per process; every call
 // after the first returns the cached outcome — mirrors
 // should_warn_mlock_once()'s cache-the-outcome pattern (src/crypto/secure_mem.h)
-// for a best-effort platform capability.
+// for a best-effort platform capability. g_device_mutex guards all reads/
+// writes of the three globals above (not just this function) since
+// test_only_force_hwaccel_unavailable() also mutates them from test code.
 AVBufferRef* cached_device_ctx()
 {
+    std::lock_guard lock(g_device_mutex);
     if (g_device_attempted) return g_device_ctx;
     g_device_attempted = true;
     if (g_force_unavailable) return nullptr;
@@ -71,13 +77,16 @@ bool try_attach_hwaccel(AVCodecContext* ctx, const AVCodec* decoder)
     if (!decoder_supports_hw(decoder)) return false;
     AVBufferRef* dev = cached_device_ctx();
     if (!dev) return false;
-    ctx->hw_device_ctx = av_buffer_ref(dev);
+    AVBufferRef* ref = av_buffer_ref(dev);
+    if (!ref) return false;
+    ctx->hw_device_ctx = ref;
     ctx->get_format    = pick_hw_format;
     return true;
 }
 
 void test_only_force_hwaccel_unavailable(bool force)
 {
+    std::lock_guard lock(g_device_mutex);
     g_force_unavailable = force;
     g_device_attempted  = false;   // re-evaluate on the next try_attach_hwaccel() call
     if (g_device_ctx) av_buffer_unref(&g_device_ctx);
