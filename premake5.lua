@@ -168,6 +168,18 @@ local function link_av()
         if os.isfile(path.join(prefix, "lib/libaom.a")) then
             links { "aom" }
         end
+
+        -- Hardware video decode dispatch (Phase 43 Part 1: Windows D3D11VA
+        -- only; Linux VAAPI is a later phase). Defined only on Windows,
+        -- since scripts/build_ffmpeg_windows.sh is the only configure
+        -- invocation passing --enable-d3d11va so far — same "define only
+        -- when the underlying capability is actually present" pattern as
+        -- OSV_VENDORED_AV itself. No new link dependency: FFmpeg's
+        -- hwcontext_d3d11va.c loads d3d11.dll/dxgi.dll via LoadLibrary/
+        -- GetProcAddress at runtime, not a link-time .lib.
+        filter "system:windows"
+            defines { "OSV_HWACCEL_D3D11VA" }
+        filter {}
     end
 end
 
