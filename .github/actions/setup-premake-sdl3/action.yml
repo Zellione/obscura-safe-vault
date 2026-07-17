@@ -1,0 +1,50 @@
+name: Setup premake5 + vendored SDL3 (cached)
+description: >
+  Downloads/caches the premake5 binary and cmake-builds/caches the vendored
+  static SDL3 library. Shared by every Linux CI job that builds osv natively.
+runs:
+  using: composite
+  steps:
+    - name: Cache premake5 binary
+      uses: actions/cache@v4
+      id: cache-premake5
+      with:
+        path: bin/premake5
+        key: premake5-5.0.0-beta8-linux
+
+    - name: Download premake5
+      if: steps.cache-premake5.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        mkdir -p bin
+        curl -fsSL \
+          "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-linux.tar.gz" \
+          -o /tmp/premake5.tar.gz
+        tar -xzf /tmp/premake5.tar.gz -C bin/
+        chmod +x bin/premake5
+
+    - name: Cache vendored SDL3 build
+      uses: actions/cache@v4
+      id: cache-sdl3
+      with:
+        path: vendor/SDL3/build
+        key: sdl3-linux-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+    - name: Build vendored SDL3
+      if: steps.cache-sdl3.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        cmake -S vendor/SDL3 -B vendor/SDL3/build \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DSDL_STATIC=ON            \
+          -DSDL_SHARED=OFF           \
+          -DSDL_TESTS=OFF            \
+          -DSDL_EXAMPLES=OFF         \
+          -DSDL_INSTALL_TESTS=OFF    \
+          -DSDL_X11_XTEST=OFF        \
+          -DSDL_JOYSTICK=OFF         \
+          -DSDL_HAPTIC=OFF           \
+          -DSDL_SENSOR=OFF           \
+          -DSDL_CAMERA=OFF           \
+          -G "Ninja"
+        cmake --build vendor/SDL3/build --parallel "$(nproc)"

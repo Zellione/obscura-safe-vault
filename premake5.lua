@@ -4,6 +4,8 @@
 --
 -- Pass --asan to add AddressSanitizer + UBSan to all native projects, e.g.:
 --       ./bin/premake5 --asan ninja
+-- Pass --tsan to add ThreadSanitizer instead (mutually exclusive with --asan):
+--       ./bin/premake5 --tsan ninja
 
 newoption {
     trigger     = "asan",
@@ -14,6 +16,17 @@ newoption {
     trigger     = "coverage",
     description = "Build with gcov code-coverage instrumentation (GCC/Clang)",
 }
+
+newoption {
+    trigger     = "tsan",
+    description = "Build with ThreadSanitizer",
+}
+
+-- --asan and --tsan cannot be combined in one binary (conflicting runtime
+-- instrumentation) — fail fast rather than producing a broken build.
+if _OPTIONS["asan"] and _OPTIONS["tsan"] then
+    error("--asan and --tsan cannot be combined in one binary")
+end
 
 -- ---------------------------------------------------------------------------
 -- SDL3 linkage helper — shared by the app and the test runner.
@@ -246,6 +259,10 @@ workspace "ObscuraSafeVault"
     filter { "options:asan", "toolset:gcc or clang" }
         buildoptions { "-fsanitize=address,undefined", "-fno-omit-frame-pointer" }
         linkoptions  { "-fsanitize=address,undefined" }
+
+    filter { "options:tsan", "toolset:gcc or clang" }
+        buildoptions { "-fsanitize=thread", "-fno-omit-frame-pointer" }
+        linkoptions  { "-fsanitize=thread" }
 
     -- Opt-in gcov coverage instrumentation. Used by the SonarCloud CI job.
     filter { "options:coverage", "toolset:gcc or clang" }
