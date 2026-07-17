@@ -253,7 +253,14 @@ local function link_archive()
     if cmake_static_lib(prefix, "archive") then
         includedirs { path.join(prefix, "include") }
         libdirs     { path.join(prefix, "lib") }
-        defines     { "OSV_VENDORED_ARCHIVE" }
+        -- archive.h's __LA_DECL macro defaults every archive_*/archive_entry_*
+        -- declaration to __declspec(dllimport) on Windows unless the consuming
+        -- translation unit defines LIBARCHIVE_STATIC (a no-op on other
+        -- platforms) -- without it MSVC expects an import library for a
+        -- symbol that only exists in the static lib, failing with
+        -- unresolved __imp_archive_* at link time. Same pattern as
+        -- LIBHEIF_STATIC_BUILD above for libheif's own dllexport/dllimport guard.
+        defines     { "OSV_VENDORED_ARCHIVE", "LIBARCHIVE_STATIC" }
         -- zlib's static target is named "zs" on Windows (its CMakeLists appends
         -- a static-only suffix there) but plain "z" everywhere else; liblzma and
         -- libarchive itself keep the same OUTPUT_NAME on every platform.
