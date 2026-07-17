@@ -161,6 +161,7 @@ GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& v
       quick_switch_(vault_ctx.registry, vault_ctx.active_vault_path),
       transfer_(vault, std::move(vault_ctx.active_vault_path), vault_ctx.registry,
                 dialogs.file, win),
+      rename_(win),
       initial_(std::move(at)), view_(initial_.view)
 {
 }
@@ -270,6 +271,18 @@ void GalleryGrid::start_transfer()
     if (names.empty()) { error_ = "Select images (not galleries) to move."; return; }
     error_.clear();
     transfer_.open(nav_.path(), std::move(names));
+}
+
+void GalleryGrid::start_rename()
+{
+    if (transfer_.active() || rename_.active()) return;
+    const int s = nav_.selected();
+    if (s < 0 || s >= static_cast<int>(children_.size())) {
+        error_ = "Nothing to rename.";
+        return;
+    }
+    error_.clear();
+    rename_.open(nav_.path(), children_[s]->name);
 }
 
 void GalleryGrid::do_export(const std::filesystem::path& dest)
@@ -506,6 +519,7 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         case SDLK_L:     view_ = next_gallery_view(view_);                 return;  // cycle view density
         case SDLK_X:     start_export();                                    return;  // export selection
         case SDLK_M:     start_transfer();                                  return;  // move to another vault
+        case SDLK_R:     start_rename();                                    return;  // rename focused tile
         case SDLK_SPACE: toggle_or_open();                                  return;
         case SDLK_G:     start_tag_editor((key.mod & SDL_KMOD_SHIFT) != 0); return;  // G edit / Shift+G import
         case SDLK_B:     toggle_favorite_current();                         return;  // favorite
@@ -638,6 +652,8 @@ bool GalleryGrid::handle_overlay_event(const SDL_Event& e)
         (void)tag_editor_.handle_event(e);
         return true;
     }
+
+    if (rename_.active()) { (void)rename_.handle_event(vault_, e); return true; }
 
     if (transfer_.active()) { (void)transfer_.handle_event(e); return true; }
 
@@ -1027,6 +1043,12 @@ void GalleryGrid::update(double)
         mark_dirty();
     }
 
+    if (std::string s; rename_.consume_completed(s)) {
+        status_ = std::move(s);
+        refresh();                     // the renamed node's new name must show up
+        mark_dirty();
+    }
+
     // The import picker shares dialogs_.file with the transfer's keyfile picker, so
     // only poll it when no transfer is active (don't steal the keyfile result).
     if (!transfer_.active()) {
@@ -1100,7 +1122,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
         }},
         {"Import & export", {
             {"I", "Import files"}, {"Z", "Import ZIP/CBZ"}, {"N", "New gallery"},
-            {"X", "Export selection"}, {"M", "Move/copy"}, {"Del", "Delete"},
+            {"X", "Export selection"}, {"M", "Move/copy"}, {"R", "Rename"}, {"Del", "Delete"},
         }},
         {"Session", {
             {"Shift+S", "Cycle sort order"}, {"U", "Keep unlocked for session"},
@@ -1224,6 +1246,7 @@ void GalleryGrid::render(gfx::Renderer& r)
 
     search_.render(r, font_, W, H);
     tag_editor_.render(r, font_, W, H);
+    rename_.render(r, font_, W, H);
     transfer_.render(r, font_, W, H);
     quick_switch_.render(r, font_, W, H);
 

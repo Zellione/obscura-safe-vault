@@ -16,6 +16,7 @@
 #include "ui/gallery_view.h"
 #include "ui/nav_model.h"
 #include "ui/quick_switch.h"
+#include "ui/rename_dialog.h"
 #include "ui/screen.h"
 #include "ui/search_overlay.h"
 #include "ui/secure_text_field.h"
@@ -83,6 +84,7 @@ private:
     void toggle_select();          // toggle the current item in the export selection
     void start_export();           // open the consent modal for the current selection
     void start_transfer();         // open the move-to-another-vault dialog
+    void start_rename();           // R: rename the focused tile
     void do_export(const std::filesystem::path& dest);
     void start_import();
     void start_naming();
@@ -138,6 +140,7 @@ private:
     TagEditor               tag_editor_;
     QuickSwitch             quick_switch_;   // declared before transfer_ so it copies
     TransferDialog          transfer_;       // the active path before transfer_ moves it
+    RenameDialog            rename_;         // Phase 44 Part 2
     GridLocation          initial_;   // where to (re)open: path + selected tile
     std::vector<const vault::IndexNode*> children_;
     int                   cols_ = 1;
