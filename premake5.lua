@@ -205,6 +205,30 @@ local function link_av()
 end
 
 -- ---------------------------------------------------------------------------
+-- Locate a CMake-built static lib in a codec staging prefix. CMake's default
+-- static-lib naming differs by toolchain: GCC/Clang (Linux Ninja/gmake2)
+-- follow the Unix convention lib<name>.a; MSVC (Windows Ninja build) has no
+-- "lib" prefix and uses <name>.lib instead. None of the vendored codecs
+-- (archive, aom, ...) override CMAKE_STATIC_LIBRARY_PREFIX/SUFFIX — they only
+-- set OUTPUT_NAME (e.g. libarchive/libarchive/CMakeLists.txt's
+-- archive_static -> "archive") — so the platform-default naming applies and
+-- checking only for the Unix name silently no-ops the whole feature on
+-- Windows even though the lib built fine (unlike FFmpeg's own non-cmake build,
+-- which always emits lib<name>.a regardless of platform; see
+-- scripts/build_ffmpeg_windows.sh). Returns the found path, or nil.
+-- ---------------------------------------------------------------------------
+local function cmake_static_lib(prefix, name)
+    local candidates = {
+        path.join(prefix, "lib/lib" .. name .. ".a"),   -- Linux/GCC/Clang
+        path.join(prefix, "lib/" .. name .. ".lib"),    -- Windows/MSVC
+    }
+    for _, f in ipairs(candidates) do
+        if os.isfile(f) then return f end
+    end
+    return nil
+end
+
+-- ---------------------------------------------------------------------------
 -- libarchive (read-only 7z/RAR/TAR; Phase 34), + its vendored zlib/liblzma
 -- filters. Same staging prefix as the image codecs / FFmpeg. Linked only when
 -- present so a build missing it stays green; OSV_VENDORED_ARCHIVE gates the
@@ -217,19 +241,26 @@ local function link_archive()
     local prefix = path.join(os.getcwd(), "vendor/codecs-prefix")
     if _OPTIONS["asan"] then
         local asan_prefix = path.join(os.getcwd(), "vendor/codecs-prefix-asan")
-        if os.isfile(path.join(asan_prefix, "lib/libarchive.a")) then
+        if cmake_static_lib(asan_prefix, "archive") then
             prefix = asan_prefix
         else
-            if os.isfile(path.join(path.join(os.getcwd(), "vendor/codecs-prefix"), "lib/libarchive.a")) then
+            if cmake_static_lib(path.join(os.getcwd(), "vendor/codecs-prefix"), "archive") then
                 premake.warn("--asan requested but ASAN libarchive prefix not found at " .. asan_prefix .. "; falling back to " .. path.join(os.getcwd(), "vendor/codecs-prefix") .. " (not instrumented)")
             end
         end
     end
 
-    if os.isfile(path.join(prefix, "lib/libarchive.a")) then
+    if cmake_static_lib(prefix, "archive") then
         includedirs { path.join(prefix, "include") }
         libdirs     { path.join(prefix, "lib") }
-        defines     { "OSV_VENDORED_ARCHIVE" }
+        -- archive.h's __LA_DECL macro defaults every archive_*/archive_entry_*
+        -- declaration to __declspec(dllimport) on Windows unless the consuming
+        -- translation unit defines LIBARCHIVE_STATIC (a no-op on other
+        -- platforms) -- without it MSVC expects an import library for a
+        -- symbol that only exists in the static lib, failing with
+        -- unresolved __imp_archive_* at link time. Same pattern as
+        -- LIBHEIF_STATIC_BUILD above for libheif's own dllexport/dllimport guard.
+        defines     { "OSV_VENDORED_ARCHIVE", "LIBARCHIVE_STATIC" }
         -- zlib's static target is named "zs" on Windows (its CMakeLists appends
         -- a static-only suffix there) but plain "z" everywhere else; liblzma and
         -- libarchive itself keep the same OUTPUT_NAME on every platform.
