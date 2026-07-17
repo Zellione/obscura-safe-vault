@@ -52,6 +52,9 @@
 | 38 | WebM video support (VP8/VP9) | ✅ | Import and play `.webm` video (Matroska + VP8/VP9). → [details](docs/roadmap/phase-38-webm-video-support.md) |
 | 39 | Discoverable shortcuts & session-scoped gallery memory | ✅ | `F1` help popup + session-scoped gallery/viewer state memory. → [details](docs/roadmap/phase-39-discoverable-shortcuts-session-memory.md) |
 | 40 | Video codec/loop/sync polish, gallery position memory & view density | ✅ | Part 1 ✅: AV1 + broader `.mov` codecs, video loop toggle, A/V sync hardening, + bugfix ✅: self-healing metadata repair for videos imported before their codec was decodable. Part 2 ✅: session-scoped gallery position memory (descend/ascend/leave-and-return restores the last-selected tile at every level). Part 3 ✅: 5-way List/Grid S-XL view density. → [details](docs/roadmap/phase-40-video-gallery-browsing-polish.md) |
+| 41 | Async video decode | 🔜 | Move CPU-heavy video codec decode off the render thread onto a background worker, so slow codecs (AV1/HEVC) don't stall playback/input/A-V sync. → [details](docs/roadmap/phase-41-async-video-decode.md) |
+| 42 | ThreadSanitizer CI leg | ⬜ | Follow-up: sanitizer-built vendored-deps prefix + CI job to directly validate Phase 41's concurrent code (and any future threading). → [details](docs/roadmap/phase-42-tsan-ci.md) |
+| 43 | Platform hardware-accelerated video decode | 🔜 | Opportunistic VAAPI (Linux) / D3D11VA (Windows) codec decode via FFmpeg hwaccel, with Phase 41's software `VideoDecodeWorker` as the automatic fallback. → [details](docs/roadmap/phase-43-hardware-video-decode.md) |
 
 ---
 

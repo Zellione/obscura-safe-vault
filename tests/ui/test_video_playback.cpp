@@ -7,8 +7,12 @@
 // the vendored FFmpeg build (valid() is always false without it).
 #ifdef OSV_VENDORED_AV
 
+#include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <print>
 #include <span>
 #include <string>
 #include <vector>
@@ -578,6 +582,294 @@ TEST(video_playback_loop_reseek_realigns_audio_like_manual_seek)
     media::set_saved_loop_enabled(false);   // restore the default (shared global)
 
     SDL_DestroyRenderer(sr);
+    SDL_DestroySurface(surf);
+}
+
+TEST(video_playback_async_decode_produces_frames_in_order_and_seeks_correctly)
+{
+    // Same shape as the existing av_sync test, but drives enough render()
+    // calls for the async worker's pipeline (submit -> decode -> take_result)
+    // to actually cross threads at least once, and adds a seek mid-playback —
+    // regression coverage for Task 5's threading change specifically.
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+    auto vbytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");   // 10 frames, no audio
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("async_decode");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        ui::VideoPlayback vp(v, *node);
+        REQUIRE(vp.valid());
+        const SDL_FRect area{0, 0, 320, 240};
+
+        vp.render(r, font, area);          // first frame, decoded synchronously-ish at open
+        CHECK_EQ(vp.position(), 0.0);
+
+        vp.handle_key(SDLK_SPACE, SDL_SCANCODE_SPACE);   // play
+        REQUIRE(vp.animating());
+
+        // Drive many ticks so the worker has time to decode ahead of the
+        // render thread's consumption, exercising the actual async path.
+        for (int i = 0; i < 60; ++i) {
+            vp.update(1.0 / 30.0);
+            vp.render(r, font, area);
+        }
+        CHECK(vp.position() > 0.0);   // played forward
+
+        // Mid-playback seek: must not hang or crash, and position must land
+        // near the target (generation-cancellation correctness).
+        vp.seek(0.1);
+        for (int i = 0; i < 20; ++i) {
+            vp.update(1.0 / 30.0);
+            vp.render(r, font, area);
+        }
+        CHECK(vp.position() >= 0.05);
+    }
+
+    SDL_DestroySurface(surf);
+}
+
+TEST(video_playback_slow_decode_does_not_grow_backlog_unbounded)
+{
+    // Regression test for a real bug reported after Phase 41 shipped: when a
+    // single frame's decode legitimately takes longer than
+    // VideoDecodeWorker::wait_result()'s short internal timeout (routine for
+    // a slower codec, e.g. software AV1 — simulated here deterministically
+    // via test_only_decode_delay rather than depending on real-world decode
+    // timing), decode_into_pending() used to submit ANOTHER packet to the
+    // worker on every single timeout with no upper bound, regardless of
+    // whether a seek was pending, even though the original packet wasn't
+    // lost — just slow. Since each call only ever consumes exactly one
+    // Result no matter how many extra packets its own retries submitted,
+    // in_flight_ (and the worker's real backlog) ratcheted upward without
+    // bound call after call for the rest of playback: this is what made the
+    // app get progressively slower the longer a clip played, and
+    // non-responsive once the backlog was large enough.
+    //
+    // The fix caps how far outside an active seek the render thread can
+    // outrun the worker (MAX_STEADY_IN_FLIGHT in video_playback.cpp) rather
+    // than banning extra feeding outright: some codecs legitimately need
+    // several packets before their first frame is emitted at all (B-frame
+    // reordering/decoder lookahead — unrelated to seeking), so a timeout
+    // with no seek pending can still mean "needs more input", just not
+    // *unboundedly* more. This test only has a 10-frame fixture to work
+    // with, so it can't demonstrate literal unbounded growth over a long
+    // clip directly — instead it asserts the ceiling itself is respected on
+    // every call, which is what actually prevents the unbounded growth.
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+    auto vbytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");   // 10 frames, no audio
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("slow_decode_backlog");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        // 30ms artificial per-job decode delay comfortably exceeds
+        // VideoDecodeWorker::wait_result()'s internal timeout (20ms), so
+        // every decode_into_pending() call is guaranteed to see at least
+        // one timeout — the exact condition the bug needed to trigger.
+        ui::VideoPlayback vp(v, *node, std::chrono::milliseconds(30));
+        REQUIRE(vp.valid());
+        const SDL_FRect area{0, 0, 320, 240};
+
+        vp.render(r, font, area);
+        vp.handle_key(SDLK_SPACE, SDL_SCANCODE_SPACE);   // play, no seeking in this test
+        REQUIRE(vp.animating());
+
+        size_t max_in_flight = 0;
+        for (int i = 0; i < 30; ++i) {
+            vp.update(1.0 / 30.0);
+            vp.render(r, font, area);
+            max_in_flight = std::max(max_in_flight, vp.debug_in_flight_packets());
+        }
+
+        // With the fix, in_flight_ never exceeds MAX_STEADY_IN_FLIGHT (16 in
+        // video_playback.cpp) outside of a pending seek — bounded slack for
+        // codec startup/reordering delay, not unbounded growth. Before the
+        // fix (no ceiling at all), the backlog had no upper limit and would
+        // keep climbing with every further timeout for as long as the clip
+        // played.
+        CHECK(max_in_flight <= 16);
+    }
+
+    SDL_DestroySurface(surf);
+}
+
+TEST(video_playback_render_does_not_block_render_thread_during_slow_decode)
+{
+    // Regression test for a second real bug reported by the project owner
+    // after playing an actual AV1 .webm clip: the app still felt
+    // unresponsive even after the backlog-bound fix. Root cause: steady
+    // (non-seek) playback's decode_into_pending() blocked the render
+    // thread until a fresh frame was ready — mirroring the old synchronous
+    // decoder_.next_frame() contract, exactly as documented, but that
+    // defeats the whole point of moving decode off-thread. App::run()'s
+    // main loop only pumps SDL events BEFORE calling render(); any call
+    // that blocks inside render() for as long as one frame's decode takes
+    // (100s of ms for a slow software codec like AV1) blocks input
+    // handling for that same duration, on every single frame.
+    //
+    // The fix: steady playback now polls the worker with a short bounded
+    // wait (try_advance_pending(), added alongside the existing blocking
+    // decode_into_pending() which do_seek() and the constructor's initial
+    // frame still use) — if the next frame isn't ready within that bound,
+    // render() just keeps showing the last-uploaded texture and returns,
+    // so the outer event loop keeps cycling. This test asserts no render()
+    // call takes anywhere near the artificial per-frame decode delay.
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+    auto vbytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");   // 10 frames, no audio
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("no_block_slow_decode");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        // 200ms artificial per-job decode delay: comfortably longer than
+        // any reasonable render-thread budget, so a single blocking call
+        // would be trivially detectable.
+        ui::VideoPlayback vp(v, *node, std::chrono::milliseconds(200));
+        REQUIRE(vp.valid());
+        const SDL_FRect area{0, 0, 320, 240};
+
+        vp.render(r, font, area);   // first frame (construction blocks briefly; not measured)
+        vp.handle_key(SDLK_SPACE, SDL_SCANCODE_SPACE);   // play
+        REQUIRE(vp.animating());
+
+        std::chrono::milliseconds::rep max_ms = 0;
+        for (int i = 0; i < 20; ++i) {
+            auto t0 = std::chrono::steady_clock::now();
+            vp.update(1.0 / 30.0);
+            vp.render(r, font, area);
+            auto t1 = std::chrono::steady_clock::now();
+            max_ms = std::max(max_ms,
+                              std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count());
+        }
+
+        // A blocking implementation would show at least one call taking
+        // ~200ms (the artificial decode delay). The bounded-wait one caps
+        // every call at ~20ms (try_advance_pending()'s single
+        // wait_result() call) regardless of how slow decode is; 50ms
+        // leaves headroom for scheduling jitter without weakening the
+        // regression check (an unbounded-blocking reintroduction would
+        // still show ~200ms, nowhere close to this threshold).
+        CHECK(max_ms < 50);
+    }
+
+    SDL_DestroySurface(surf);
+}
+
+TEST(video_playback_destroys_quickly_despite_pending_decode_backlog)
+{
+    // Regression test for a third real bug reported by the project owner:
+    // "the end of the video makes the application freeze for some time"
+    // — reproducible whenever VideoPlayback is torn down (e.g. navigating
+    // away right as/after a clip finishes) shortly after a stretch of slow
+    // decode had queued up a backlog. Root cause: VideoDecodeWorker::run()
+    // only checked stop_ once queue_ was ALSO empty
+    // (`if (stop_ && queue_.empty()) return;`), so on shutdown it kept
+    // popping and fully decoding every already-queued (not-yet-started)
+    // job before ever honoring stop_ — work whose result nobody would ever
+    // consume, since the whole object was being destroyed. With a real
+    // slow codec, up to MAX_STEADY_IN_FLIGHT (16, video_playback.cpp)
+    // packets can be queued at once, so this could block destruction (and
+    // therefore whatever thread destroys VideoPlayback — the render
+    // thread) for seconds. Fixed by checking stop_ unconditionally each
+    // loop iteration; the destructor's own cleanup already frees whatever
+    // is left in queue_ once run() returns.
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+    auto vbytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");   // 10 frames, no audio
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("destroy_backlog");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        // 300ms artificial per-job decode delay: enough that 10 render
+        // ticks reliably build a multi-job backlog (each tick's
+        // try_advance_pending() can feed one more packet toward the
+        // MAX_STEADY_IN_FLIGHT ceiling whenever its own 20ms wait times
+        // out, which it will here since 300ms >> 20ms).
+        auto vp = std::make_unique<ui::VideoPlayback>(v, *node, std::chrono::milliseconds(300));
+        REQUIRE(vp->valid());
+        const SDL_FRect area{0, 0, 320, 240};
+
+        vp->render(r, font, area);
+        vp->handle_key(SDLK_SPACE, SDL_SCANCODE_SPACE);   // play
+        for (int i = 0; i < 10; ++i) {
+            vp->update(1.0 / 30.0);
+            vp->render(r, font, area);
+        }
+
+        auto t0 = std::chrono::steady_clock::now();
+        vp.reset();   // must not block draining the queued backlog
+        auto t1 = std::chrono::steady_clock::now();
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+
+        // With the fix, destruction only has to wait for at most the ONE
+        // job already mid-decode (a decode call in progress can't be
+        // interrupted — worst case ~300ms, the artificial per-job delay),
+        // not the whole queued backlog. Before the fix this took over 2
+        // seconds (measured empirically while diagnosing the bug) with the
+        // same setup; 500ms leaves headroom above that one-job worst case
+        // without weakening the check (an unbounded-drain regression would
+        // still show 1000ms+, given the ceiling of 16 queued jobs at
+        // 300ms each).
+        CHECK(ms < 500);
+    }
+
     SDL_DestroySurface(surf);
 }
 

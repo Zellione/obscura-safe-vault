@@ -10,6 +10,7 @@
 #include "media/decoded_frame.h"
 #include "media/audio_decoder.h"
 #include "media/audio_frame.h"
+#include "media/frame_convert.h"
 #include "vault/index.h"
 #include "image/image.h"
 
@@ -20,7 +21,6 @@
 #endif
 extern "C" {
 #include <libavformat/avio.h>
-#include <libswscale/swscale.h>
 }
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
@@ -29,6 +29,7 @@ extern "C" {
 // Forward declarations for opaque FFmpeg pointers
 struct AVFormatContext;
 struct AVCodecContext;
+struct AVCodecParameters;
 struct AVFrame;
 struct AVPacket;
 struct SwsContext;
@@ -57,6 +58,24 @@ public:
     // to land on the exact PTS. Returns false on failure.
     [[nodiscard]] bool seek(double ts_seconds);
 
+    // Demux until the next video-stream packet is available, routing any
+    // audio packets encountered along the way into the existing audio queue
+    // (same routing read_and_route() always did). Returns an owned packet
+    // the caller must av_packet_free(), or nullptr at end of stream.
+    // Performs AVIOContext I/O (via ChunkAvio, which reads/decrypts vault
+    // chunks) — call only from the thread that owns the vault handle; never
+    // from a VideoDecodeWorker thread.
+    [[nodiscard]] AVPacket* demux_next_video_packet();
+
+    // I/O-only reseek: seeks the demuxer to the keyframe at-or-before
+    // ts_seconds and clears the video/audio packet queues + audio decoder
+    // state. Unlike seek(), does NOT touch this instance's codec_ctx_/frame_
+    // (no pending_seek_target_, no avcodec_flush_buffers) — the async
+    // playback path (VideoPlayback::Impl) decodes on a separate
+    // VideoDecodeWorker with its own codec context, reset independently via
+    // VideoDecodeWorker::begin_seek(). Call only from the vault-owning thread.
+    [[nodiscard]] bool seek_demux_only(double ts_seconds);
+
     // Decode the first frame as RGB24 and return it as ImageData. Returns nullopt on failure.
     [[nodiscard]] std::optional<image::ImageData> decode_poster_rgb();
 
@@ -79,10 +98,17 @@ public:
     uint64_t duration_us() const noexcept { return duration_us_; }
     vault::VideoCodec codec() const noexcept { return codec_; }
 
-private:
-    // Helper: convert an AVFrame with unsupported format to I420 via swscale.
-    std::optional<DecodedFrame> convert_to_i420(double pts_seconds);
+    // The video stream's codec parameters, for opening an independent decode
+    // context elsewhere (VideoDecodeWorker's own AVCodecContext). Valid only
+    // while this VideoDecoder is open; nullptr if not opened.
+    [[nodiscard]] const AVCodecParameters* video_codecpar() const noexcept;
 
+    // Stream time base (seconds per tick) — same units next_frame()'s
+    // pts_seconds is computed in. Needed by VideoDecodeWorker to compute
+    // pts_seconds from its own decoded frames' best_effort_timestamp.
+    [[nodiscard]] double video_time_base() const noexcept { return time_base_; }
+
+private:
     // Helper: read one packet and send it to the decoder, handling EOF/flush.
     bool pump_one_packet();
 
@@ -112,8 +138,7 @@ private:
     AVCodecContext*  codec_ctx_          = nullptr;
     AVFrame*         frame_              = nullptr;
     AVPacket*        pkt_                = nullptr;
-    SwsContext*      sws_                = nullptr;  // swscale context for format conversion
-    AVFrame*         conv_               = nullptr;  // converted frame (for non-420p formats)
+    FrameConverter   conv_;              // handles format conversion via swscale
     int              stream_index_       = -1;
     int              width_              = 0;
     int              height_             = 0;
