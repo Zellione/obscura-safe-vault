@@ -337,6 +337,44 @@ src/
                                                  cognitive complexity and nesting depth
                                                  under SonarQube's limits (no behavior
                                                  change).
+               hw_accel.{h,cpp}                — Phase 43 Part 1: media::
+                                                 HwAccelContext. try_attach_hwaccel(ctx,
+                                                 decoder) attaches a process-wide,
+                                                 cached AVBufferRef hw device context +
+                                                 get_format callback to a codec context
+                                                 being opened, if a platform hwaccel
+                                                 macro (OSV_HWACCEL_D3D11VA today;
+                                                 OSV_HWACCEL_VAAPI is Part 2) is compiled
+                                                 in and the decoder advertises support.
+                                                 Device creation is attempted exactly
+                                                 once per process (should_warn_mlock_once()'s
+                                                 cache-the-outcome pattern). Compiles to
+                                                 an always-false stub when neither macro
+                                                 is defined, so VideoDecodeWorker never
+                                                 needs its own #ifdef.
+                                                 test_only_force_hwaccel_unavailable(bool)
+                                                 is the test-only deterministic-failure
+                                                 injection hook (CI has no real GPU decode
+                                                 block). transfer_hw_frame(frame, sw_frame)
+                                                 is the av_hwframe_transfer_data() wrapper:
+                                                 a hw-decoded AVFrame's data[] planes are
+                                                 an opaque device handle, not real pixel
+                                                 data, so VideoDecodeWorker::
+                                                 publish_decoded_frame() transfers into a
+                                                 lazily-allocated, reused hw_transfer_frame_
+                                                 member BEFORE the existing zero-copy/
+                                                 swscale FrameConverter pipeline runs — that
+                                                 pipeline is otherwise completely unmodified
+                                                 from Phase 41. VideoDecodeWorker calls
+                                                 try_attach_hwaccel() when opening its
+                                                 codec context (hw_active_ tracks the
+                                                 outcome) and, on any hard decode error
+                                                 while hw_active_, reopen_software_only()
+                                                 drops the hw context and opens a fresh
+                                                 software-only one from a saved copy of
+                                                 the original AVCodecParameters
+                                                 (saved_params_) for the rest of that
+                                                 clip — playback continues, never aborts.
   gfx/         window.*, renderer.*,           — SDL3 window/renderer, texture cache,
                texture_cache.*, text.*,        — stb_truetype text atlas
                theme.{h,cpp}                   — UI colour tokens, runtime-selectable
