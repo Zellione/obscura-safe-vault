@@ -188,8 +188,7 @@ bool VideoDecodeWorker::publish_decoded_frame(const Job& job)
 void VideoDecodeWorker::decode_available_frames(const Job& job, bool is_flush)
 {
     for (;;) {
-        const int ret = avcodec_receive_frame(codec_ctx_, frame_);
-        if (ret != 0) {
+        if (const int ret = avcodec_receive_frame(codec_ctx_, frame_); ret != 0) {
             // Whether this is EAGAIN (need another packet) or a real
             // decode error, the drain is over: if flushing, that's the
             // signal all buffered frames are exhausted, so publish EOF.
