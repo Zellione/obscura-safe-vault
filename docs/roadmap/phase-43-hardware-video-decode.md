@@ -73,18 +73,49 @@ mechanism, not a separate flag). Two platform-specific backends apply here:
   D3D11VA; vp8/mjpeg have VAAPI only; av1(`libaom_av1`)/prores/dnxhd/qtrle/
   cinepak have neither. See the design spec's codec-coverage table.
 - [x] **FFmpeg configure flags** (`scripts/build_codecs.sh`,
-  `scripts/build_ffmpeg_windows.sh`), Windows (D3D11VA) done in Part 1 — Linux (VAAPI) is Part 2.
-- [x] **Build gating** (`premake5.lua`), `OSV_HWACCEL_D3D11VA` done in Part 1 — `OSV_HWACCEL_VAAPI` is Part 2.
-- [x] **`media::VideoDecodeWorker`** (fully implemented, platform-agnostic — Part 2 only adds a second concrete backend, no further `VideoDecodeWorker` changes expected).
-- [x] **Test-only failure injection**
+  `scripts/build_ffmpeg_windows.sh`) — add `--enable-d3d11va` (Windows) /
+  `--enable-vaapi` (Linux) to the existing decode-only configure invocation.
+  These are hwaccel *dispatch* registration flags, additive to the existing
+  `--enable-decoder=...` list (mirrors the `libaom_av1` naming gotcha
+  `mem:tech_stack` already documents — verify the exact component names
+  FFmpeg expects, don't assume). Windows (D3D11VA) done in Part 1 — Linux
+  (VAAPI) is Part 2.
+- [x] **Build gating** (`premake5.lua`) — new defines
+  (`OSV_HWACCEL_D3D11VA` / `OSV_HWACCEL_VAAPI`), each independently probed
+  per-platform, following the existing "define only when the underlying
+  capability is actually present" pattern `link_av()` uses for
+  `OSV_VENDORED_AV`. A build without either must stay exactly Phase 41's
+  behavior. `OSV_HWACCEL_D3D11VA` done in Part 1 — `OSV_HWACCEL_VAAPI` is
+  Part 2.
+- [x] **`media::VideoDecodeWorker`** (`src/media/video_decode_worker.h/.cpp`)
+  — in the constructor, attempt hw device context creation **once per
+  process** (cache the outcome; don't retry per clip if the first attempt
+  failed — mirrors `should_warn_mlock_once()`'s log-once pattern for a
+  best-effort platform capability). If available, open the codec context
+  with `get_format` selecting the hw pixel format; on any hard failure
+  during `avcodec_send_packet`/`avcodec_receive_frame` with a hw context
+  active, drop it and reopen a fresh software-only codec context for the
+  rest of that clip — playback must continue, not abort. A successfully
+  hw-decoded frame is transferred to system memory
+  (`av_hwframe_transfer_data()`) before it reaches
+  `FrameConverter`/`copy_owned_frame()`, so everything downstream
+  (`decode_available_frames()`, `publish_decoded_frame()`, the
+  `VideoPlayback::Impl` consumer side) is unmodified. Fully implemented,
+  platform-agnostic — Part 2 only adds a second concrete backend, no
+  further `VideoDecodeWorker` changes expected.
+- [x] **Test-only failure injection** — a way to force hw device creation to
+  fail deterministically in tests (CI runners generally have no real GPU
+  decode hardware, or only a software rasterizer with no VAAPI/D3D11VA
+  device at all), so the fallback path is exercised on every CI run even
+  though real hardware decode can't be.
 - [ ] **Optional settings toggle** — force-software-decode switch for
   troubleshooting a bad driver, mirroring the existing persisted
   loop/volume settings (`media::saved_loop_enabled()`/`saved_volume()`
   pattern). Nice-to-have, not blocking.
-- [ ] Update `CLAUDE.md` tech table + `mem:tech_stack` + `mem:core` (new
+- [x] Update `CLAUDE.md` tech table + `mem:tech_stack` + `mem:core` (new
   build defines, the per-codec hwaccel-availability table, the fallback
   behavior).
-- [ ] `tests/` — `VideoDecodeWorker` gains a case asserting identical
+- [x] `tests/` — `VideoDecodeWorker` gains a case asserting identical
   decoded output (same `DecodedFrame` bytes) whether hw device creation
   succeeds or is forced to fail, plus the forced-failure fallback case
   itself; existing Phase 41 async-decode tests must pass unmodified.
