@@ -37,6 +37,9 @@ constexpr float  TRACK_H          = 6.0f;
 constexpr float  KNOB_R           = 8.0f;
 constexpr double DEFAULT_FRAME_DT = 1.0 / 30.0;  // backward frame-step fallback
 constexpr size_t PREFETCH_DEPTH   = 2;           // packets kept queued ahead of the video decode worker
+constexpr size_t MAX_STEADY_IN_FLIGHT = 16;      // ceiling on in-flight packets outside an active seek —
+                                                  // covers codec startup/B-frame reordering delay without
+                                                  // letting the backlog grow without bound over a whole clip
 }  // namespace
 
 #ifdef OSV_VENDORED_AV
@@ -50,6 +53,7 @@ struct VideoPlayback::Impl {
     uint64_t                                     generation_    = 0;
     size_t                                       in_flight_     = 0;      // packets submitted, Result not yet consumed
     bool                                          demux_eof_     = false;  // demuxer hit EOF for the current generation
+    bool                                          skip_pending_  = false;  // a seek's decode-forward-to-target skip may still be discarding frames without publishing a Result
     std::vector<uint8_t>                          pending_storage_;       // backs pending_->planes (owned copy from the worker)
     std::unique_ptr<media::ChunkAvio> avio_;
     gfx::YuvTexture                   yuv_;
@@ -83,7 +87,8 @@ struct VideoPlayback::Impl {
     };
     VolumeUi vol_;
 
-    Impl(const vault::Vault& vault, const vault::IndexNode& node)
+    Impl(const vault::Vault& vault, const vault::IndexNode& node,
+         std::chrono::milliseconds test_only_decode_delay)
     {
         vol_.level = media::saved_volume();   // remembered across clips + restarts (Phase 25)
         loop_      = media::saved_loop_enabled();   // remembered for the session (Phase 40)
@@ -99,7 +104,8 @@ struct VideoPlayback::Impl {
         }
         valid_ = true;
         video_worker_ = std::make_unique<media::VideoDecodeWorker>(
-            *decoder_.video_codecpar(), decoder_.video_time_base(), image::decode_wake_event());
+            *decoder_.video_codecpar(), decoder_.video_time_base(), image::decode_wake_event(),
+            test_only_decode_delay);
         model_ = PlaybackModel(static_cast<double>(decoder_.duration_us()) / 1'000'000.0);
 
         // Open audio device if available. The app only inits SDL_INIT_VIDEO, so
@@ -146,17 +152,43 @@ struct VideoPlayback::Impl {
     // overlaps with the worker's own progress instead of being the decode
     // itself.
     //
-    // While a seek target is pending, the worker's own decode-forward logic
-    // silently discards frames whose pts lands before the target — no
-    // Result is ever published for those, so in_flight_ never reflects
-    // them. A fixed PREFETCH_DEPTH alone can't get past this: once
-    // PREFETCH_DEPTH packets are in flight and all of them get silently
-    // discarded, the render thread would otherwise just wait forever for a
-    // Result that's never coming, having no way to know the worker needs
-    // more input rather than more time. So on every wait_result() timeout,
-    // feed one more packet before retrying — cheap I/O only, and the
-    // worker's own single-threaded queue ordering means an extra prefetch
-    // packet never skips ahead of one already in flight.
+    // While a seek target is pending (skip_pending_), the worker's own
+    // decode-forward logic silently discards frames whose pts lands before
+    // the target — no Result is ever published for those, so in_flight_
+    // never reflects them. A fixed PREFETCH_DEPTH alone can't get past
+    // this: once PREFETCH_DEPTH packets are in flight and all of them get
+    // silently discarded, the render thread would otherwise just wait
+    // forever for a Result that's never coming, having no way to know the
+    // worker needs more input rather than more time. So while skip_pending_
+    // is set, feed one more packet on every wait_result() timeout before
+    // retrying, uncapped — a seek's decode-forward gap is a one-time,
+    // GOP-bounded cost, not a per-frame recurring one, and the existing
+    // av_sync seek-realign test expects a seek to fully resolve within a
+    // single decode_into_pending() call.
+    //
+    // Outside a pending seek, every submitted packet is still guaranteed to
+    // eventually publish exactly one Result (frame or eof), so a timeout
+    // usually just means "still decoding", not "lost" — BUT some codecs
+    // need to see several packets before their first frame is emitted at
+    // all (B-frame reordering / decoder lookahead, routine and unrelated to
+    // seeking), so decode_into_pending() must still be willing to feed a
+    // little more input on a timeout even with no seek pending, or the
+    // very first frame(s) of a stream could stall forever on a fixed
+    // PREFETCH_DEPTH. The fix is a bounded ceiling
+    // (MAX_STEADY_IN_FLIGHT), not an outright ban: retry-feed while under
+    // it (covers startup/reordering delay), then just keep waiting once at
+    // it. Unconditionally feeding more on every timeout with no ceiling (an
+    // earlier version of this function did that) let the render thread
+    // out-submit the worker without bound whenever a single frame's decode
+    // legitimately took longer than wait_result()'s short timeout (routine
+    // for a slower codec, e.g. software AV1) — in_flight_ (and the
+    // worker's real backlog) would only ratchet upward, call after call,
+    // for the rest of playback, since each call only ever consumes one
+    // Result no matter how many extra packets its own retries had
+    // submitted. That is what made playback (and eventually the whole app,
+    // contending for the same CPU) get progressively slower the longer a
+    // clip played — this bounded ceiling fixes that while still leaving
+    // enough slack for legitimate startup/reordering delay.
     void decode_into_pending()
     {
         while (in_flight_ < PREFETCH_DEPTH && !demux_eof_) {
@@ -169,18 +201,24 @@ struct VideoPlayback::Impl {
         for (;;) {
             auto r = video_worker_->wait_result();
             if (!r) {
-                if (!demux_eof_) {
+                const bool may_feed_more = skip_pending_ || in_flight_ < MAX_STEADY_IN_FLIGHT;
+                if (may_feed_more && !demux_eof_) {
                     AVPacket* pkt = decoder_.demux_next_video_packet();
                     video_worker_->submit(pkt, generation_);
                     ++in_flight_;
                     if (!pkt) demux_eof_ = true;
                     continue;
                 }
-                // Demuxer exhausted and the worker still hasn't produced
-                // anything for this generation (or is stopping) — nothing
-                // more to feed it, so stop retrying; the caller
-                // (present_pending()/advance()) will simply retry on the
-                // next render pass rather than hang indefinitely.
+                if (!may_feed_more) {
+                    // At the steady-state ceiling with no seek pending:
+                    // keep waiting without submitting more — a timeout here
+                    // just means the worker is still working through what
+                    // it already has.
+                    continue;
+                }
+                // Seek-skip window still open but the demuxer is exhausted
+                // with nothing left to feed — give up for this render pass;
+                // the caller (present_pending()/advance()) retries next tick.
                 return;
             }
             if (r->generation != generation_) {
@@ -191,6 +229,10 @@ struct VideoPlayback::Impl {
             }
             // Result matches current generation; consume it.
             --in_flight_;
+            skip_pending_ = false;   // the worker has published a real result for this
+                                     // generation, so any seek-skip window has closed —
+                                     // subsequent timeouts mean "still decoding", not
+                                     // "silently discarded toward an old target".
             if (r->eof) { eof_ = true; pending_.reset(); return; }
             pending_storage_ = std::move(r->storage);
             pending_         = r->frame;
@@ -287,7 +329,9 @@ struct VideoPlayback::Impl {
                                 // publish a Result, so the render thread's own count must
                                 // reset too, or decode_into_pending() would under-prefetch
                                 // forever after every seek.
-        demux_eof_  = false;   // the seek moves the demuxer away from end-of-stream
+        demux_eof_    = false;   // the seek moves the demuxer away from end-of-stream
+        skip_pending_ = true;    // until the worker publishes its first post-seek Result,
+                                  // frames below the target may be silently discarded
         if (audio_) SDL_ClearAudioStream(audio_);
         samples_fed_ = 0;
         seek_base_   = tt;
@@ -536,6 +580,7 @@ struct VideoPlayback::Impl {
     [[nodiscard]] uint64_t audio_samples_fed() const { return samples_fed_; }
     [[nodiscard]] float audio_gain() const { return media::effective_gain(vol_.level, vol_.muted); }
     [[nodiscard]] SDL_FRect debug_vol_bar() const { return vol_.bar; }
+    [[nodiscard]] size_t debug_in_flight_packets() const { return in_flight_; }
     void update(double dt)
     {
         if (valid_) {
@@ -548,7 +593,7 @@ struct VideoPlayback::Impl {
 #else  // !OSV_VENDORED_AV — playback unavailable; host falls back to the poster.
 
 struct VideoPlayback::Impl {
-    Impl(const vault::Vault&, const vault::IndexNode&) {}
+    Impl(const vault::Vault&, const vault::IndexNode&, std::chrono::milliseconds) {}
     [[nodiscard]] bool valid() const { return false; }
     [[nodiscard]] bool animating() const { return false; }
     [[nodiscard]] bool has_audio() const { return false; }
@@ -558,6 +603,7 @@ struct VideoPlayback::Impl {
     [[nodiscard]] uint64_t audio_samples_fed() const { return 0; }
     [[nodiscard]] float audio_gain() const { return 0.0f; }
     [[nodiscard]] SDL_FRect debug_vol_bar() const { return {0.0f, 0.0f, 0.0f, 0.0f}; }
+    [[nodiscard]] size_t debug_in_flight_packets() const { return 0; }
     void update(double) {}
     void render(gfx::Renderer&, gfx::FontAtlas&, const SDL_FRect&) {}
     void key(SDL_Keycode, SDL_Scancode) {}
@@ -568,8 +614,9 @@ struct VideoPlayback::Impl {
 
 #endif  // OSV_VENDORED_AV
 
-VideoPlayback::VideoPlayback(const vault::Vault& vault, const vault::IndexNode& node)
-    : impl_(std::make_unique<Impl>(vault, node)) {}
+VideoPlayback::VideoPlayback(const vault::Vault& vault, const vault::IndexNode& node,
+                             std::chrono::milliseconds test_only_decode_delay)
+    : impl_(std::make_unique<Impl>(vault, node, test_only_decode_delay)) {}
 
 VideoPlayback::~VideoPlayback() = default;
 
@@ -582,6 +629,7 @@ bool VideoPlayback::audio_active() const noexcept { return impl_->audio_active()
 uint64_t VideoPlayback::audio_samples_fed() const noexcept { return impl_->audio_samples_fed(); }
 float VideoPlayback::audio_gain() const noexcept { return impl_->audio_gain(); }
 SDL_FRect VideoPlayback::debug_vol_bar() const noexcept { return impl_->debug_vol_bar(); }
+size_t VideoPlayback::debug_in_flight_packets() const noexcept { return impl_->debug_in_flight_packets(); }
 void VideoPlayback::update(double dt) { impl_->update(dt); }
 
 void VideoPlayback::render(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& area)

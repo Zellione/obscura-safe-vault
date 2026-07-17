@@ -7,6 +7,8 @@
 // the vendored FFmpeg build (valid() is always false without it).
 #ifdef OSV_VENDORED_AV
 
+#include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <span>
@@ -634,6 +636,85 @@ TEST(video_playback_async_decode_produces_frames_in_order_and_seeks_correctly)
             vp.render(r, font, area);
         }
         CHECK(vp.position() >= 0.05);
+    }
+
+    SDL_DestroySurface(surf);
+}
+
+TEST(video_playback_slow_decode_does_not_grow_backlog_unbounded)
+{
+    // Regression test for a real bug reported after Phase 41 shipped: when a
+    // single frame's decode legitimately takes longer than
+    // VideoDecodeWorker::wait_result()'s short internal timeout (routine for
+    // a slower codec, e.g. software AV1 — simulated here deterministically
+    // via test_only_decode_delay rather than depending on real-world decode
+    // timing), decode_into_pending() used to submit ANOTHER packet to the
+    // worker on every single timeout with no upper bound, regardless of
+    // whether a seek was pending, even though the original packet wasn't
+    // lost — just slow. Since each call only ever consumes exactly one
+    // Result no matter how many extra packets its own retries submitted,
+    // in_flight_ (and the worker's real backlog) ratcheted upward without
+    // bound call after call for the rest of playback: this is what made the
+    // app get progressively slower the longer a clip played, and
+    // non-responsive once the backlog was large enough.
+    //
+    // The fix caps how far outside an active seek the render thread can
+    // outrun the worker (MAX_STEADY_IN_FLIGHT in video_playback.cpp) rather
+    // than banning extra feeding outright: some codecs legitimately need
+    // several packets before their first frame is emitted at all (B-frame
+    // reordering/decoder lookahead — unrelated to seeking), so a timeout
+    // with no seek pending can still mean "needs more input", just not
+    // *unboundedly* more. This test only has a 10-frame fixture to work
+    // with, so it can't demonstrate literal unbounded growth over a long
+    // clip directly — instead it asserts the ceiling itself is respected on
+    // every call, which is what actually prevents the unbounded growth.
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+    auto vbytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");   // 10 frames, no audio
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("slow_decode_backlog");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        // 30ms artificial per-job decode delay comfortably exceeds
+        // VideoDecodeWorker::wait_result()'s internal timeout (20ms), so
+        // every decode_into_pending() call is guaranteed to see at least
+        // one timeout — the exact condition the bug needed to trigger.
+        ui::VideoPlayback vp(v, *node, std::chrono::milliseconds(30));
+        REQUIRE(vp.valid());
+        const SDL_FRect area{0, 0, 320, 240};
+
+        vp.render(r, font, area);
+        vp.handle_key(SDLK_SPACE, SDL_SCANCODE_SPACE);   // play, no seeking in this test
+        REQUIRE(vp.animating());
+
+        size_t max_in_flight = 0;
+        for (int i = 0; i < 30; ++i) {
+            vp.update(1.0 / 30.0);
+            vp.render(r, font, area);
+            max_in_flight = std::max(max_in_flight, vp.debug_in_flight_packets());
+        }
+
+        // With the fix, in_flight_ never exceeds MAX_STEADY_IN_FLIGHT (16 in
+        // video_playback.cpp) outside of a pending seek — bounded slack for
+        // codec startup/reordering delay, not unbounded growth. Before the
+        // fix (no ceiling at all), the backlog had no upper limit and would
+        // keep climbing with every further timeout for as long as the clip
+        // played.
+        CHECK(max_in_flight <= 16);
     }
 
     SDL_DestroySurface(surf);

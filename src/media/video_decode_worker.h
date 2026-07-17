@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
@@ -45,7 +46,14 @@ public:
     // `wake_event` is an SDL event type (e.g. image::decode_wake_event()) pushed
     // whenever a result is published, so an event-driven loop wakes up to drain
     // it. Pass 0 to disable the wake (e.g. in headless tests).
-    VideoDecodeWorker(const AVCodecParameters& params, double time_base, uint32_t wake_event);
+    //
+    // `test_only_decode_delay` sleeps this amount before each job's decode
+    // when nonzero; production callers always leave it at the default
+    // (zero — no behavior change). It exists only so tests can deterministically
+    // simulate a codec slower than VideoDecodeWorker::wait_result()'s timeout,
+    // without depending on real-world decode timing.
+    VideoDecodeWorker(const AVCodecParameters& params, double time_base, uint32_t wake_event,
+                       std::chrono::milliseconds test_only_decode_delay = std::chrono::milliseconds(0));
     ~VideoDecodeWorker();
 
     VideoDecodeWorker(const VideoDecodeWorker&)            = delete;
@@ -106,6 +114,7 @@ private:
     double                 time_base_ = 0.0;
     std::atomic<double>    pending_seek_target_{-1.0};
     bool                   flushed_ = false;
+    std::chrono::milliseconds test_only_decode_delay_{0};
 
     mutable std::mutex      mtx_;
     std::condition_variable cv_;         // signals run(): queue_ gained a Job, or stop_ was set

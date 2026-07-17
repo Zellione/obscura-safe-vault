@@ -23,8 +23,10 @@ extern "C" {
 namespace media {
 
 VideoDecodeWorker::VideoDecodeWorker(const AVCodecParameters& params, double time_base,
-                                     uint32_t wake_event)
-    : time_base_(time_base), wake_event_(wake_event)
+                                     uint32_t wake_event,
+                                     std::chrono::milliseconds test_only_decode_delay)
+    : time_base_(time_base), test_only_decode_delay_(test_only_decode_delay),
+      wake_event_(wake_event)
 {
     const AVCodec* decoder = avcodec_find_decoder(params.codec_id);
     if (decoder) {
@@ -117,6 +119,9 @@ void VideoDecodeWorker::run()
             if (job.pkt) av_packet_free(&job.pkt);
             continue;
         }
+
+        if (test_only_decode_delay_.count() > 0)
+            std::this_thread::sleep_for(test_only_decode_delay_);
 
         // Capture before av_packet_free() nulls job.pkt as a side effect —
         // every later "is this the flush marker?" check must use is_flush,

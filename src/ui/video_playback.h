@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 
@@ -24,7 +25,13 @@ namespace ui {
 
 class VideoPlayback {
 public:
-    VideoPlayback(const vault::Vault& vault, const vault::IndexNode& node);
+    // `test_only_decode_delay` is forwarded to the background video decode
+    // worker (media::VideoDecodeWorker); production callers always leave it
+    // at the default (zero — no behavior change). It exists only so tests
+    // can deterministically simulate a codec slower than the worker's
+    // internal wait timeout.
+    VideoPlayback(const vault::Vault& vault, const vault::IndexNode& node,
+                  std::chrono::milliseconds test_only_decode_delay = std::chrono::milliseconds(0));
     ~VideoPlayback();
 
     VideoPlayback(const VideoPlayback&)            = delete;
@@ -63,6 +70,14 @@ public:
 
     // Last-rendered volume-bar rect (zero-size when no audio). (Phase 16, testing/debug.)
     [[nodiscard]] SDL_FRect debug_vol_bar() const noexcept;
+
+    // Number of decode jobs submitted to the background video decode worker
+    // but not yet consumed as a presented/dropped frame. Should stay bounded
+    // by the small fixed prefetch depth during steady (non-seeking) playback
+    // — a regression here means the render thread is over-feeding the worker
+    // faster than it can keep up, the Phase 41 bugfix this guards against.
+    // (Phase 41, testing/debug.)
+    [[nodiscard]] size_t debug_in_flight_packets() const noexcept;
 
     void update(double dt);   // advance the clock (decode happens lazily in render)
     void render(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& area);
