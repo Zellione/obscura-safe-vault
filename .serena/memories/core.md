@@ -375,6 +375,26 @@ src/
                                                  the original AVCodecParameters
                                                  (saved_params_) for the rest of that
                                                  clip — playback continues, never aborts.
+
+                                                 Phase 43 Part 2: the
+                                                 OSV_HWACCEL_VAAPI branch
+                                                 above (AV_HWDEVICE_TYPE_VAAPI/
+                                                 AV_PIX_FMT_VAAPI) is now live
+                                                 on Linux — vendor/vaapi-shim
+                                                 (osv_vaapi_shim.a) provides
+                                                 the ~36 va* symbols FFmpeg's
+                                                 hwcontext_vaapi.c/vaapi_*.c
+                                                 glue reference via its own
+                                                 internal dlopen("libva.so.2"/
+                                                 "libva-drm.so.2") + dlsym()
+                                                 forwarding, so the app never
+                                                 gets a DT_NEEDED entry on
+                                                 real libva. vendor/libva is a
+                                                 headers-only submodule (never
+                                                 built). See
+                                                 docs/superpowers/specs/
+                                                 2026-07-17-hardware-video-
+                                                 decode-design.md.
   gfx/         window.*, renderer.*,           — SDL3 window/renderer, texture cache,
                texture_cache.*, text.*,        — stb_truetype text atlas
                theme.{h,cpp}                   — UI colour tokens, runtime-selectable
