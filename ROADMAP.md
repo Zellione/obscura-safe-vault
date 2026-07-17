@@ -55,6 +55,7 @@
 | 41 | Async video decode | 🔜 | Move CPU-heavy video codec decode off the render thread onto a background worker, so slow codecs (AV1/HEVC) don't stall playback/input/A-V sync. → [details](docs/roadmap/phase-41-async-video-decode.md) |
 | 42 | ThreadSanitizer CI leg | ✅ | New `--tsan` build option + `tests-tsan` CI job, running the full suite under ThreadSanitizer on every PR to directly validate Phase 41's concurrent code (and any future threading) — reuses the plain vendored codec/SDL3 build rather than a parallel sanitizer-instrumented prefix. → [details](docs/roadmap/phase-42-tsan-ci.md) |
 | 43 | Platform hardware-accelerated video decode | ✅ | Part 1 ✅: shared `media::HwAccelContext` infra + Windows D3D11VA, software `VideoDecodeWorker` as the automatic fallback. Part 2 ✅: VAAPI dlopen shim (`vendor/vaapi-shim`) + Linux enablement (`vendor/libva`, headers-only). → [details](docs/roadmap/phase-43-hardware-video-decode.md) |
+| 44 | Gallery organization tools | 🔜 | Part 1: scrollable + filterable Move-dialog gallery picker. Part 2: rename images/videos/galleries. Part 3: mass-move extended to galleries. Part 4: combine (recursive merge) two galleries, same- or cross-vault. → [details](docs/roadmap/phase-44-gallery-organization.md) |
 
 ---
 
