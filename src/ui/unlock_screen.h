@@ -3,10 +3,8 @@
 #include <SDL3/SDL.h>
 
 #include <filesystem>
-#include <optional>
 #include <string>
 
-#include "ui/clipboard_secret.h"
 #include "ui/screen.h"
 #include "ui/secure_text_field.h"
 
