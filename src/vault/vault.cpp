@@ -912,6 +912,28 @@ VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey ke
     return v.commit_index();
 }
 
+VaultResult rename_node(Vault& v, std::string_view gallery_path, std::string_view old_name,
+                        std::string_view new_name)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+    if (!is_safe_node_name(new_name)) return InvalidArg;
+
+    IndexNode* g = v.find_gallery(gallery_path);
+    if (!g) return NotFound;
+
+    IndexNode* node = child_named(g, old_name);
+    if (!node) return NotFound;
+
+    if (new_name == old_name) return Ok;   // no-op
+
+    for (const auto& c : g->children)
+        if (&c != node && c.name == new_name) return AlreadyExists;
+
+    node->name = std::string(new_name);
+    return v.commit_index();
+}
+
 VaultResult Vault::set_tags(std::string_view node_path, const std::vector<std::string>& tags)
 {
     using enum VaultResult;

@@ -198,6 +198,11 @@ public:
     friend SortKey gallery_sort_key(const Vault& v, std::string_view gallery_path);
     friend VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey key);
 
+    // rename_node (Phase 44) is a free friend for the same cpp:S1448 reason as
+    // gallery_sort_key/set_gallery_sort above.
+    friend VaultResult rename_node(Vault& v, std::string_view gallery_path,
+                                   std::string_view old_name, std::string_view new_name);
+
     // Replace a node's tag list (gallery OR image). Tags are normalised: each trimmed
     // of surrounding whitespace, empties dropped, de-duplicated case-insensitively
     // (first occurrence's casing kept). Persisted via the crash-safe index swap.
@@ -301,5 +306,15 @@ private:
 // is unchanged. Locked if not unlocked; NotFound if gallery_path doesn't
 // resolve to a gallery. Phase 37.
 [[nodiscard]] VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey key);
+
+// Rename an image, video, or gallery's own `name` field in place — a pure
+// leaf-field edit. Descendants, tags, favorite flag, sort key, and cover all
+// live on the node itself (paths are computed on the fly, never persisted),
+// so nothing else needs updating. Locked if not unlocked; InvalidArg if
+// `new_name` fails is_safe_node_name; AlreadyExists if a sibling already
+// holds `new_name`; NotFound if `old_name` doesn't resolve under
+// `gallery_path`. A no-op success if new_name == old_name. Phase 44.
+[[nodiscard]] VaultResult rename_node(Vault& v, std::string_view gallery_path,
+                                      std::string_view old_name, std::string_view new_name);
 
 } // namespace vault

@@ -10,12 +10,14 @@
 #include <vector>
 
 #include "image/decode_worker.h"
+#include "ui/combine_dialog.h"
 #include "ui/consent_dialog.h"
 #include "ui/file_op_job.h"
 #include "ui/gallery_session_state.h"
 #include "ui/gallery_view.h"
 #include "ui/nav_model.h"
 #include "ui/quick_switch.h"
+#include "ui/rename_dialog.h"
 #include "ui/screen.h"
 #include "ui/search_overlay.h"
 #include "ui/secure_text_field.h"
@@ -83,6 +85,9 @@ private:
     void toggle_select();          // toggle the current item in the export selection
     void start_export();           // open the consent modal for the current selection
     void start_transfer();         // open the move-to-another-vault dialog
+    void start_rename();           // R: rename the focused tile
+    void start_combine();          // Shift+M: combine nav_.path() into another gallery
+    void jump_to_gallery(const std::string& path);   // absolute nav: ascend to root, then descend
     void do_export(const std::filesystem::path& dest);
     void start_import();
     void start_naming();
@@ -120,6 +125,17 @@ private:
     // current_gallery_view is a free friend for the same S1448 reason: App reads it
     // (Phase 39 Part 2) to snapshot the outgoing grid's view mode into GallerySessionState.
     friend GalleryView current_gallery_view(const GalleryGrid& g);
+    // The following are free friends for the same S1448/S3776 reasons, extracted
+    // from start_transfer() and update() (Phase 44 SonarQube follow-up).
+    friend void start_transfer_focused(GalleryGrid& g);
+    friend void start_transfer_selection(GalleryGrid& g);
+    friend void start_transfer_galleries_selection(GalleryGrid& g);
+    friend void start_transfer_images_selection(GalleryGrid& g);
+    friend void poll_transfer_and_combine(GalleryGrid& g);
+    friend void poll_pending_pickers(GalleryGrid& g);
+    friend void update_scroll_to_selection(GalleryGrid& g);
+    friend void update_scroll_to_selection_list(GalleryGrid& g, int sel_idx, float H);
+    friend void update_scroll_to_selection_grid(GalleryGrid& g, int sel_idx, float H);
     void draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
                          const SDL_FRect& box);
     [[nodiscard]] int  hit_test(float mx, float my) const;  // item under cursor, or -1
@@ -138,6 +154,8 @@ private:
     TagEditor               tag_editor_;
     QuickSwitch             quick_switch_;   // declared before transfer_ so it copies
     TransferDialog          transfer_;       // the active path before transfer_ moves it
+    RenameDialog            rename_;         // Phase 44 Part 2
+    CombineDialog           combine_;        // Phase 44 Part 4
     GridLocation          initial_;   // where to (re)open: path + selected tile
     std::vector<const vault::IndexNode*> children_;
     int                   cols_ = 1;

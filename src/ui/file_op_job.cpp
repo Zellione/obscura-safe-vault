@@ -7,6 +7,7 @@
 #include "platform/paths.h"
 #include "ui/export.h"
 #include "ui/meta_format.h"
+#include "vault/combine.h"
 #include "vault/safe_name.h"
 #include "vault/vault.h"
 
@@ -87,6 +88,28 @@ FileOpOutcome transfer_outcome(vault::TransferMode mode, int done, int failed, i
     else
         oc.status = std::format("{} {} of {} to {}", verb, done, total, label);
     if (failed > 0) oc.status += std::format(" ({} failed)", failed);
+    return oc;
+}
+
+FileOpOutcome combine_outcome(vault::VaultResult r, const vault::CombineTally& tally,
+                              bool cancelled, const std::string& label)
+{
+    FileOpOutcome oc;
+    oc.kind = FileOpKind::Transfer;
+    if (r != vault::VaultResult::Ok) {
+        oc.error = "Combine failed.";
+        return oc;
+    }
+    oc.ok        = true;
+    oc.cancelled = cancelled;
+    oc.done      = tally.media_moved;
+    oc.failed    = tally.media_skipped;
+    oc.total     = tally.media_moved + tally.media_skipped;
+    oc.status    = cancelled
+        ? std::format("Combine cancelled — {} moved, {} skipped, into {}",
+                      tally.media_moved, tally.media_skipped, label)
+        : std::format("Combined into {} — {} moved, {} skipped", label, tally.media_moved,
+                      tally.media_skipped);
     return oc;
 }
 
@@ -274,6 +297,33 @@ bool FileOpJob::start_transfer_gallery(vault::Vault& src, std::string src_galler
         const int total = progress_.total.load();
         const int done  = progress_.done.load();
         return transfer_outcome(mode, done, 0, total, cancelled, label);
+    });
+}
+
+bool FileOpJob::start_transfer_galleries(vault::Vault& src, std::vector<std::string> src_paths,
+                                         vault::Vault& dst, std::string dst_parent,
+                                         vault::TransferMode mode, std::string label)
+{
+    return launch(FileOpKind::Transfer,
+                  [this, &src, src_paths = std::move(src_paths), &dst,
+                   dst_parent = std::move(dst_parent), mode, label = std::move(label)]() {
+        const vault::TransferTally t = vault::transfer_galleries(
+            src, src_paths, dst, dst_parent, mode, &progress_);
+        return transfer_outcome(mode, t.done, t.failed, static_cast<int>(src_paths.size()),
+                                progress_.cancel.load(), label);
+    });
+}
+
+bool FileOpJob::start_combine(vault::Vault& src, std::string src_gallery,
+                              vault::Vault& dst, std::string dst_gallery, std::string label)
+{
+    return launch(FileOpKind::Transfer,
+                  [this, &src, src_gallery = std::move(src_gallery), &dst,
+                   dst_gallery = std::move(dst_gallery), label = std::move(label)]() {
+        vault::CombineTally tally;
+        const vault::VaultResult r =
+            vault::combine_galleries(src, src_gallery, dst, dst_gallery, tally, &progress_);
+        return combine_outcome(r, tally, progress_.cancel.load(), label);
     });
 }
 

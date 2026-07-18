@@ -7,9 +7,10 @@
 #include <vector>
 
 #include "ui/file_op_job.h"   // background transfer executor (Phase 25)
-#include "ui/secure_text_field.h"
+#include "ui/gallery_picker.h"
+#include "ui/vault_unlock_picker.h"
 #include "vault/transfer.h"   // vault::TransferMode
-#include "vault/vault.h"      // owns a transient vault::Vault dst_
+#include "vault/vault.h"      // owns the source vault
 
 namespace gfx { class Renderer; class FontAtlas; class Window; }
 namespace platform { class VaultRegistry; class FileDialog; }
@@ -40,6 +41,9 @@ public:
     // Activate to move a whole GALLERY subtree (`src_gallery`, a gallery path).
     void open_gallery(std::string src_gallery);
 
+    // Activate to move a LIST of whole GALLERY subtrees at once (multi-select).
+    void open_galleries(std::vector<std::string> src_paths);
+
     void close();                                   // wipes dest_.vault key, deactivates
     [[nodiscard]] bool active() const noexcept { return active_; }
 
@@ -58,27 +62,30 @@ private:
     // Running: the background move/copy worker owns the vault(s); the dialog stays
     // active (keeping the unlocked destination alive) and shows a progress modal
     // until the job completes, then closes (Phase 25).
-    enum class Stage { Mode, PickVault, Unlock, PickGallery, Running };
+    enum class Stage { Mode, PickingDest, PickGallery, Running };
 
-    void choose_vault();      // PickVault Enter: open dest_.vault for the selected path
-    void try_unlock();        // Unlock Enter: open()+unlock() dest_.vault
     void choose_gallery();    // PickGallery Enter: move into the selected target (or "New")
     void do_move(std::string_view dst_gallery);   // run the transfer + re-lock
-    void rebuild_targets();   // image_target_galleries(dest_.vault) + the "New gallery…" row
+    void rebuild_targets();   // image_target_galleries(dest_vault()) + the "New gallery…" row
     void render_body(gfx::Renderer& r, gfx::FontAtlas& font,
                      float ix, float iy, float mw, float mh, float my) const;  // per-stage body
+    void render_mode_body(gfx::Renderer& r, gfx::FontAtlas& font,
+                          float ix, float iy, float mw) const;
+    void render_pick_gallery_body(gfx::Renderer& r, gfx::FontAtlas& font,
+                                  float ix, float iy, float mw, float mh, float my) const;
 
     bool handle_mode_key(SDL_Keycode k);         // Mode stage: toggle Move/Copy
-    vault::Vault& dest_vault() noexcept;         // src_ when same-vault, else dest_.vault
-    bool handle_pick_vault_key(SDL_Keycode k);   // per-stage key handler
-    bool handle_unlock_key(SDL_Keycode k);
+    vault::Vault& dest_vault() noexcept;         // src_ when same-vault, else picker_dest_'s vault
     bool handle_gallery_key(SDL_Keycode k);
     bool handle_naming_event(const SDL_Event& e);   // new-gallery name overlay
+    // handle_event() sub-handlers, extracted to keep its cognitive complexity
+    // (S3776) and nesting depth (S134) bounded.
+    bool handle_picking_dest_event(const SDL_Event& e);
+    bool handle_gallery_filter_event(const SDL_Event& e);
+    bool handle_stage_key(const SDL_KeyboardEvent& key);
 
     vault::Vault&            src_;
     std::string              src_path_;            // active vault's path (excluded as a dest)
-    platform::VaultRegistry& registry_;
-    platform::FileDialog&    dlg_;
     gfx::Window&             win_;
 
     bool        active_ = false;
@@ -86,26 +93,13 @@ private:
     vault::TransferMode mode_ = vault::TransferMode::Move;
     std::string src_gallery_;
     std::vector<std::string> filenames_;
+    std::vector<std::string> src_galleries_;   // Source::Galleries payload
 
-    enum class Source { Images, Gallery };
+    enum class Source { Images, Gallery, Galleries };   // Galleries: Phase 44 Part 3
     Source      source_ = Source::Images;
 
-    std::vector<std::filesystem::path> candidates_;   // PickVault: registry minus src
-    int         vault_sel_ = 0;
-
-    // Destination unlock state — bundled to fix S1820 (>20 data members).
-    struct Dest {
-        vault::Vault     vault;           // transient destination vault
-        std::string      path;
-        SecureTextField  pw;
-        std::string      keyfile_path;
-        bool             awaiting_keyfile = false;
-        bool             is_self = false;  // destination == the active vault (src_)
-    };
-    Dest dest_;
-
-    std::vector<std::string> targets_;                 // PickGallery: leaf paths + "<new>"
-    int         gallery_sel_ = 0;
+    VaultUnlockPicker picker_dest_;                     // PickingDest: destination vault selection/unlock
+    GalleryPickerModel picker_;                         // PickGallery: filterable/scrollable list
     bool        naming_ = false;
     std::string name_buf_;
 
