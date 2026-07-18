@@ -209,6 +209,7 @@ void UnlockScreen::copy_password_to_clipboard()
     if (pw_.empty()) return;
     std::string tmp(reinterpret_cast<const char*>(pw_.bytes().data()), pw_.length());
     SDL_SetClipboardText(tmp.c_str());
+    crypto_wipe(clipboard_last_set_.data(), clipboard_last_set_.size());
     clipboard_last_set_   = tmp;
     clipboard_clear_timer_ = 0.0;
     crypto_wipe(tmp.data(), tmp.size());
