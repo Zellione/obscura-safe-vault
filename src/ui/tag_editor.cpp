@@ -80,9 +80,14 @@ PackedLines pack_tag_lines(const std::vector<std::string>& tags,
 
 void TagEditor::open(std::string node_path)
 {
-    active_ = true;
-    node_path_ = std::move(node_path);
-    selected_ = 0;
+    open_multi({std::move(node_path)});
+}
+
+void TagEditor::open_multi(std::vector<std::string> node_paths)
+{
+    active_     = true;
+    node_paths_ = std::move(node_paths);
+    selected_   = 0;
     new_tag_buf_.clear();
     suggestions_.clear();
     sugg_sel_ = -1;
@@ -96,8 +101,8 @@ void TagEditor::close()
 {
     active_ = false;
     SDL_StopTextInput(win_.sdl_window());
-    node_path_.clear();
-    tags_.clear();
+    node_paths_.clear();
+    tally_.clear();
     inherited_.clear();
     vocabulary_.clear();
     suggestions_.clear();
@@ -116,7 +121,11 @@ void TagEditor::refresh_vocabulary()
 
 void TagEditor::refresh_suggestions()
 {
-    suggestions_ = editor_tag_suggestions(new_tag_buf_, vocabulary_, tags_);
+    std::vector<std::string> current_tags;
+    for (const auto& entry : tally_) {
+        current_tags.push_back(entry.tag);
+    }
+    suggestions_ = editor_tag_suggestions(new_tag_buf_, vocabulary_, current_tags);
     sugg_sel_    = -1;   // typing always returns focus to the buffer
 }
 
@@ -132,19 +141,20 @@ void TagEditor::add_chosen_tag()
     if (chosen.empty()) return;
 
     using enum vault::VaultResult;
-    switch (vault_.add_tag(node_path_, chosen)) {
-        case Ok:
-            new_tag_buf_.clear();
-            error_.clear();
-            refresh_tags();
-            refresh_vocabulary();
-            refresh_suggestions();   // buffer is empty → dropdown closes
-            select_tag(chosen);      // scroll the list to reveal it
-            break;
-        case InvalidArg: error_ = "Invalid tag.";       break;
-        case NotFound:   error_ = "Node not found.";    break;
-        default:         error_ = "Failed to add tag."; break;
+    int failures = 0;
+    for (const std::string& path : node_paths_)
+        if (vault_.add_tag(path, chosen) != Ok) ++failures;
+
+    if (failures == static_cast<int>(node_paths_.size())) {
+        error_ = "Failed to add tag.";
+        return;
     }
+    new_tag_buf_.clear();
+    error_.clear();
+    refresh_tags();
+    refresh_vocabulary();
+    refresh_suggestions();   // buffer is empty → dropdown closes
+    select_tag(chosen);      // scroll the list to reveal it
 }
 
 void TagEditor::move_cursor(int dir)
@@ -156,7 +166,7 @@ void TagEditor::move_cursor(int dir)
         return;
     }
     const int next = selected_ + dir;
-    if (next >= 0 && next < static_cast<int>(tags_.size())) {
+    if (next >= 0 && next < static_cast<int>(tally_.size())) {
         selected_ = next;
         error_.clear();
     }
@@ -164,44 +174,49 @@ void TagEditor::move_cursor(int dir)
 
 void TagEditor::refresh_tags()
 {
-    // Look up the node and read its current tags, plus the read-only ancestor
-    // cascade (recomputed too: adding an own tag can shadow an inherited one).
-    tags_.clear();
-    inherited_ = inherited_tags(vault_, node_path_);
+    tally_.clear();
+    inherited_.clear();
     error_.clear();
 
-    // Split the path and navigate to find the node
-    const auto segs = split_path(node_path_);
-    if (segs.empty()) {
+    if (node_paths_.empty()) {
         error_ = "Invalid node path.";
         return;
     }
 
-    // Get the parent gallery (all segments but the last)
-    std::string parent_path;
-    if (segs.size() > 1) {
-        parent_path = join_path(std::span(segs.data(), segs.size() - 1));
-    }
+    // The ancestor-tag cascade is only meaningful for a single node — a
+    // multi-selection can span unrelated branches of the tree, so it's
+    // suppressed there rather than showing a misleading merged cascade.
+    if (node_paths_.size() == 1) inherited_ = inherited_tags(vault_, node_paths_.front());
 
-    // Find the node by name in the parent's children
-    const auto& children = vault_.list(parent_path);
-    for (const auto* child : children) {
-        if (child->name == segs.back()) {
-            tags_ = child->tags;  // Copy the node's current tags
-            return;
+    std::vector<std::vector<std::string>> per_node_tags;
+    per_node_tags.reserve(node_paths_.size());
+    int resolved = 0;
+    for (const std::string& path : node_paths_) {
+        const auto segs = split_path(path);
+        if (segs.empty()) continue;
+        std::string parent_path;
+        if (segs.size() > 1) parent_path = join_path(std::span(segs.data(), segs.size() - 1));
+
+        const auto& children = vault_.list(parent_path);
+        for (const auto* child : children) {
+            if (child->name == segs.back()) {
+                per_node_tags.push_back(child->tags);
+                ++resolved;
+                break;
+            }
         }
     }
-
-    error_ = "Node not found.";
+    if (resolved == 0) { error_ = "Node not found."; return; }
+    tally_ = compute_tag_tally(per_node_tags);
 }
 
 void TagEditor::select_tag(std::string_view tag)
 {
     // Case-insensitive find so the just-added/merged tag is highlighted and the
     // render window scrolls to reveal it. Falls back to the last row.
-    for (int i = 0; i < static_cast<int>(tags_.size()); ++i)
-        if (tag_ci_equal(tags_[i], tag)) { selected_ = i; return; }
-    selected_ = std::max(0, static_cast<int>(tags_.size()) - 1);
+    for (int i = 0; i < static_cast<int>(tally_.size()); ++i)
+        if (tag_ci_equal(tally_[i].tag, tag)) { selected_ = i; return; }
+    selected_ = std::max(0, static_cast<int>(tally_.size()) - 1);
 }
 
 bool TagEditor::handle_event(const SDL_Event& e)
@@ -249,14 +264,19 @@ bool TagEditor::handle_event(const SDL_Event& e)
             return true;
 
         case SDLK_DELETE: {
-            // Delete the selected tag
-            if (selected_ >= 0 && selected_ < static_cast<int>(tags_.size())) {
-                const std::string tag_to_remove = tags_[selected_];
-                if (vault_.remove_tag(node_path_, tag_to_remove) == vault::VaultResult::Ok) {
+            // Delete the selected tag from every selected node that carries it.
+            // remove_tag is idempotent, so calling it on a node that doesn't
+            // have the tag is a harmless no-op — no per-node tally check needed.
+            if (selected_ >= 0 && selected_ < static_cast<int>(tally_.size())) {
+                const std::string tag_to_remove = tally_[selected_].tag;
+                bool any_ok = false;
+                for (const std::string& path : node_paths_)
+                    if (vault_.remove_tag(path, tag_to_remove) == vault::VaultResult::Ok) any_ok = true;
+                if (any_ok) {
                     refresh_tags();
                     refresh_vocabulary();
                     refresh_suggestions();   // the removed tag is suggestible again
-                    selected_ = std::min(selected_, static_cast<int>(tags_.size()) - 1);
+                    selected_ = std::min(selected_, static_cast<int>(tally_.size()) - 1);
                     error_.clear();
                 } else {
                     error_ = "Failed to remove tag.";
@@ -288,9 +308,13 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     // Title
     r.draw_text(font, mx + PAD, my + PAD, "Edit Tags", TEXT);
 
-    // Node path display (secondary text)
+    // Node path display (secondary text): the path in single-node mode, or a
+    // "3 items selected" summary in multi-node mode.
+    const std::string subtitle = node_paths_.size() == 1
+        ? node_paths_.front()
+        : std::format("{} items selected", node_paths_.size());
     r.draw_text(font, mx + PAD, my + PAD + LINE,
-                fit_text(font, node_path_, MODAL_W - 2 * PAD), TEXT_FAINT);
+                fit_text(font, subtitle, MODAL_W - 2 * PAD), TEXT_FAINT);
 
     // Input box for new tag
     const float input_y = my + PAD + 2 * LINE + 8;
@@ -309,7 +333,7 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     const float list_y     = input_y + INPUT_BOX_H + 16;
     const float tags_start = list_y + LINE;
     const float row_pitch  = TAG_ROW_H + TAG_LIST_GAP;
-    const auto  total      = static_cast<int>(tags_.size());
+    const auto  total      = static_cast<int>(tally_.size());
 
     // The read-only inherited section (ancestor-gallery tags, Phase 27
     // follow-up) reserves space at the bottom; the own-tags list shrinks to fit.
@@ -348,14 +372,18 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
             r.draw_round_rect(tag_rect, RADIUS_SMALL, BORDER, /*filled*/ false);
         }
 
-        const std::string display =
-            fit_text(font, tags_[i] + " [Delete]", tag_rect.w - 16);
+        // Multi-node mode annotates each tag with how many of the selected
+        // nodes carry it; single-node mode stays exactly as before.
+        const std::string label = node_paths_.size() == 1
+            ? tally_[i].tag
+            : std::format("{} ({}/{})", tally_[i].tag, tally_[i].count, node_paths_.size());
+        const std::string display = fit_text(font, label + " [Delete]", tag_rect.w - 16);
         const float text_y =
             font.text_top_for_center(tag_rect.y + tag_rect.h * 0.5f);
         r.draw_text(font, tag_rect.x + 8, text_y, display, TEXT);
     }
 
-    if (tags_.empty()) {
+    if (tally_.empty()) {
         r.draw_text(font, mx + PAD, tags_start, "(no tags)", TEXT_FAINT);
     }
 
