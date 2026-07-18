@@ -401,6 +401,7 @@ bool App::apply_nav()
             // re-disabling doesn't inherit a stale elapsed value.
             keep_unlocked_ = !keep_unlocked_;
             idle_.reset();
+            if (keep_unlocked_) badge_elapsed_ = 0.0;   // Phase 45 Part 6: fresh 10s window
             return true;
         case Quit:                running_ = false;                                    return false;
         case None:                return false;
@@ -433,7 +434,7 @@ void App::render_frame()
     if (screen_) {
         gfx::Renderer r(window_.sdl_renderer());
         screen_->render(r);
-        if (active_ && keep_unlocked_)
+        if (active_ && should_show_badge(keep_unlocked_, badge_elapsed_, BADGE_WINDOW_SECS))
             draw_keep_unlocked_badge(r, font_, window_.width(), window_.height());
         ui::draw_help_popup(r, font_, static_cast<float>(window_.width()),
                             static_cast<float>(window_.height()),
@@ -461,6 +462,7 @@ void App::run()
         prev = now;
 
         if (screen_) screen_->update(dt);
+        badge_elapsed_ += dt;   // Phase 45 Part 6
 
         // Idle auto-lock runs before nav resolution so the manager paints this frame.
         const bool auto_locked = maybe_auto_lock(dt);

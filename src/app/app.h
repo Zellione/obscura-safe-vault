@@ -4,6 +4,7 @@
 #include <string>
 
 #include "app/idle_timer.h"
+#include "app/keep_unlocked_badge.h"
 #include "gfx/text.h"
 #include "gfx/texture_cache.h"
 #include "gfx/window.h"
@@ -102,6 +103,12 @@ private:
     // active vault changes (promote_pending) or is explicitly locked
     // (LockActive) — re-unlocking always starts with auto-lock on.
     bool                               keep_unlocked_ = false;
+
+    // Phase 45 Part 6: seconds since the last `U` press that left
+    // keep_unlocked_ true; the badge is visible only while this is under
+    // BADGE_WINDOW_SECS. Starts large so no badge shows before any toggle.
+    static constexpr double            BADGE_WINDOW_SECS = 10.0;
+    double                             badge_elapsed_ = BADGE_WINDOW_SECS;
 
     ui::HelpPopupState                 help_;   // Phase 39: F1 help popup
 };
