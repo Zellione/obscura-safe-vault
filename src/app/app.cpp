@@ -252,7 +252,18 @@ namespace {
 constexpr uint64_t FRAME_CAP_NS = 1'000'000'000ULL / 60;
 // Upper bound on how long the loop blocks for input while idle, so async results
 // (file dialogs, the decode worker) surface promptly even without a wake event.
-constexpr int32_t IDLE_HEARTBEAT_MS = 250;
+//
+// DIAGNOSTIC (not a real fix -- see conversation): dropped from 250 to 16 to
+// test whether the Windows G-Sync + Auto HDR brightness pulse on mouse-move
+// (commit 53405eb's fix didn't resolve it) is caused by our own idle
+// presentation cadence jumping from ~4fps to full rate, or by something
+// outside this loop's control (e.g. DWM's own windowed-composition idle
+// state, since this reproduces in windowed mode where DWM -- not our
+// swapchain -- owns what actually reaches the display). If the pulse still
+// happens at this rate, revert this and look elsewhere; it isn't our
+// presentation cadence. Revert before merging either way -- this trades
+// away the idle heartbeat's whole point (bounding GPU/power use while idle).
+constexpr int32_t IDLE_HEARTBEAT_MS = 16;
 
 // Whether an event is direct user input (resets the idle-lock timer). Window
 // events, the decode-worker wake, and async dialog results deliberately don't.
