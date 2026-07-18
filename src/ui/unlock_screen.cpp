@@ -2,6 +2,7 @@
 
 #include <monocypher.h>
 
+#include <optional>
 #include <system_error>
 #include <vector>
 
@@ -12,6 +13,7 @@
 #include "gfx/window.h"
 #include "platform/file_dialog.h"
 #include "platform/paths.h"
+#include "ui/clipboard_secret.h"
 #include "ui/passphrase.h"
 #include "ui/unlock_logic.h"
 #include "ui/widgets.h"
@@ -20,6 +22,8 @@
 namespace ui {
 
 namespace {
+
+constexpr double CLIPBOARD_CLEAR_SECS = 25.0;
 
 gfx::Color strength_color(Strength s)
 {
@@ -78,6 +82,7 @@ UnlockScreen::Layout UnlockScreen::layout() const
         .submit_btn   = {W - 60.0f - bw,         row, bw, bh},
         .generate_btn    = {60.0f, 320.0f, bw + 40.0f, 36.0f},
         .new_keyfile_btn = {60.0f + (bw + 40.0f) + gap, 320.0f, bw - 40.0f, 36.0f},
+        .copy_btn        = {W - 60.0f - 70.0f, 118.0f, 70.0f, 26.0f},
     };
 }
 
@@ -136,6 +141,7 @@ void UnlockScreen::handle_click(const SDL_MouseButtonEvent& b)
                 reinterpret_cast<const char*>(pw_.bytes().data()), pw_.length()));
             reveal_pw_ = true;
             error_.clear();
+            copy_password_to_clipboard();   // Phase 45 Part 3: auto-copy the generated passphrase
         }
     } else if (create_mode_ && point_in_rect(p.x, p.y, L.new_keyfile_btn)) {
         pending_ = Pending::NewKeyfile; dlg_.save_keyfile(win_.sdl_window());
@@ -145,16 +151,32 @@ void UnlockScreen::handle_click(const SDL_MouseButtonEvent& b)
         pending_ = Pending::Vault;   dlg_.open_vault(win_.sdl_window());
     } else if (point_in_rect(p.x, p.y, L.submit_btn)) {
         submit();
+    } else if (point_in_rect(p.x, p.y, L.copy_btn)) {
+        copy_password_to_clipboard();
     }
 }
 
-void UnlockScreen::update(double)
+void UnlockScreen::update(double dt)
 {
     if (auto res = dlg_.take_result()) {
         if (!res->empty()) apply_dialog_result((*res)[0]);
         pending_ = Pending::None;
         mark_dirty();   // keyfile/vault picker closed — repaint
     }
+
+    if (clipboard_clear_timer_ < 0.0) return;
+    clipboard_clear_timer_ += dt;
+    if (clipboard_clear_timer_ < CLIPBOARD_CLEAR_SECS) return;
+
+    clipboard_clear_timer_ = -1.0;
+    std::optional<std::string> current;
+    if (char* cur = SDL_GetClipboardText()) {
+        current = cur;
+        SDL_free(cur);
+    }
+    if (should_clear_clipboard(current, clipboard_last_set_)) SDL_SetClipboardText("");
+    crypto_wipe(clipboard_last_set_.data(), clipboard_last_set_.size());
+    clipboard_last_set_.clear();
 }
 
 void UnlockScreen::apply_dialog_result(const std::string& path)
@@ -180,6 +202,16 @@ void UnlockScreen::apply_dialog_result(const std::string& path)
         case None:
             break;
     }
+}
+
+void UnlockScreen::copy_password_to_clipboard()
+{
+    if (pw_.empty()) return;
+    std::string tmp(reinterpret_cast<const char*>(pw_.bytes().data()), pw_.length());
+    SDL_SetClipboardText(tmp.c_str());
+    clipboard_last_set_   = tmp;
+    clipboard_clear_timer_ = 0.0;
+    crypto_wipe(tmp.data(), tmp.size());
 }
 
 void UnlockScreen::submit()
@@ -285,6 +317,7 @@ void UnlockScreen::render(gfx::Renderer& r)
     btn(L.other_btn, "Open other...");
     btn(L.mode_btn, create_mode_ ? "Have a vault?" : "New vault?");
     btn(L.submit_btn, create_mode_ ? "Create" : "Unlock");
+    btn(L.copy_btn, "Copy");
 
     if (!error_.empty())
         r.draw_text(font_, 60, H - 70, error_, DANGER);
