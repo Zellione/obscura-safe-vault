@@ -142,8 +142,9 @@ void TagEditor::add_chosen_tag()
 
     using enum vault::VaultResult;
     int failures = 0;
-    for (const std::string& path : node_paths_)
-        if (vault_.add_tag(path, chosen) != Ok) ++failures;
+    for (const std::string& path : node_paths_) {
+        if (vault_.add_tag(path, chosen) != Ok) { ++failures; }
+    }
 
     if (failures == static_cast<int>(node_paths_.size())) {
         error_ = "Failed to add tag.";
@@ -270,8 +271,9 @@ bool TagEditor::handle_event(const SDL_Event& e)
             if (selected_ >= 0 && selected_ < static_cast<int>(tally_.size())) {
                 const std::string tag_to_remove = tally_[selected_].tag;
                 bool any_ok = false;
-                for (const std::string& path : node_paths_)
-                    if (vault_.remove_tag(path, tag_to_remove) == vault::VaultResult::Ok) any_ok = true;
+                for (const std::string& path : node_paths_) {
+                    if (vault_.remove_tag(path, tag_to_remove) == vault::VaultResult::Ok) { any_ok = true; }
+                }
                 if (any_ok) {
                     refresh_tags();
                     refresh_vocabulary();
