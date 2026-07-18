@@ -125,6 +125,17 @@ private:
     // current_gallery_view is a free friend for the same S1448 reason: App reads it
     // (Phase 39 Part 2) to snapshot the outgoing grid's view mode into GallerySessionState.
     friend GalleryView current_gallery_view(const GalleryGrid& g);
+    // The following are free friends for the same S1448/S3776 reasons, extracted
+    // from start_transfer() and update() (Phase 44 SonarQube follow-up).
+    friend void start_transfer_focused(GalleryGrid& g);
+    friend void start_transfer_selection(GalleryGrid& g);
+    friend void start_transfer_galleries_selection(GalleryGrid& g);
+    friend void start_transfer_images_selection(GalleryGrid& g);
+    friend void poll_transfer_and_combine(GalleryGrid& g);
+    friend void poll_pending_pickers(GalleryGrid& g);
+    friend void update_scroll_to_selection(GalleryGrid& g);
+    friend void update_scroll_to_selection_list(GalleryGrid& g, int sel_idx, float H);
+    friend void update_scroll_to_selection_grid(GalleryGrid& g, int sel_idx, float H);
     void draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
                          const SDL_FRect& box);
     [[nodiscard]] int  hit_test(float mx, float my) const;  // item under cursor, or -1

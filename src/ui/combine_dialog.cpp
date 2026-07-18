@@ -56,48 +56,43 @@ void CombineDialog::do_combine(const std::string& dst_target)
     stage_ = Stage::Running;
 }
 
-bool CombineDialog::handle_event(const SDL_Event& e)
+void CombineDialog::advance_from_picking_dest()
 {
-    if (!active_) return false;
+    if (!picker_dest_.chosen()) { close(); return; }
+    const vault::Vault& dv = picker_dest_.is_self() ? src_ : picker_dest_.unlocked_vault();
+    picker_target_.set_items(vault::combine_target_galleries(dv, src_, src_gallery_));
+    stage_ = Stage::PickTarget;
+}
 
-    if (stage_ == Stage::Running) {
-        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) run_.job.cancel();
-        return true;
-    }
+bool CombineDialog::handle_event_picking_dest(const SDL_Event& e)
+{
+    const bool consumed = picker_dest_.handle_event(e);
+    if (!picker_dest_.active()) advance_from_picking_dest();
+    return consumed;
+}
 
-    if (stage_ == Stage::PickingDest) {
-        const bool consumed = picker_dest_.handle_event(e);
-        if (!picker_dest_.active()) {
-            if (picker_dest_.chosen()) {
-                vault::Vault& dv = picker_dest_.is_self() ? src_ : picker_dest_.unlocked_vault();
-                picker_target_.set_items(vault::combine_target_galleries(dv, src_, src_gallery_));
-                stage_ = Stage::PickTarget;
-            } else {
-                close();
-            }
-        }
-        return consumed;
+bool CombineDialog::handle_event_target_filter(const SDL_Event& e)
+{
+    if (e.type == SDL_EVENT_TEXT_INPUT) { picker_target_.filter_append(e.text.text); return true; }
+    if (e.type != SDL_EVENT_KEY_DOWN) return true;
+    switch (e.key.key) {
+        case SDLK_BACKSPACE: picker_target_.filter_backspace(); return true;
+        case SDLK_ESCAPE:
+            if (!picker_target_.filter().empty()) { picker_target_.filter_clear(); return true; }
+            picker_target_.close_filter();
+            return true;
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER: choose_target(); return true;
+        case SDLK_UP:       picker_target_.move(-1); return true;
+        case SDLK_DOWN:     picker_target_.move(1);  return true;
+        default: return true;
     }
+}
 
-    // PickTarget: same filter-typing convention as TransferDialog's PickGallery.
-    if (picker_target_.filter_open()) {
-        if (e.type == SDL_EVENT_TEXT_INPUT) { picker_target_.filter_append(e.text.text); return true; }
-        if (e.type == SDL_EVENT_KEY_DOWN) {
-            switch (e.key.key) {
-                case SDLK_BACKSPACE: picker_target_.filter_backspace(); return true;
-                case SDLK_ESCAPE:
-                    if (!picker_target_.filter().empty()) { picker_target_.filter_clear(); return true; }
-                    picker_target_.close_filter();
-                    return true;
-                case SDLK_RETURN:
-                case SDLK_KP_ENTER: choose_target(); return true;
-                case SDLK_UP:       picker_target_.move(-1); return true;
-                case SDLK_DOWN:     picker_target_.move(1);  return true;
-                default: return true;
-            }
-        }
-        return true;
-    }
+bool CombineDialog::handle_event_pick_target(const SDL_Event& e)
+{
+    // Same filter-typing convention as TransferDialog's PickGallery.
+    if (picker_target_.filter_open()) return handle_event_target_filter(e);
 
     if (e.type != SDL_EVENT_KEY_DOWN) return true;
     if (e.key.key == SDLK_ESCAPE) { close(); return true; }
@@ -108,25 +103,42 @@ bool CombineDialog::handle_event(const SDL_Event& e)
     return true;
 }
 
+bool CombineDialog::handle_event(const SDL_Event& e)
+{
+    if (!active_) return false;
+
+    if (stage_ == Stage::Running) {
+        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) run_.job.cancel();
+        return true;
+    }
+    if (stage_ == Stage::PickingDest) return handle_event_picking_dest(e);
+    return handle_event_pick_target(e);
+}
+
+std::string CombineDialog::selected_target_dest_path() const
+{
+    if (!(run_.outcome.same_vault && run_.outcome.source_gone)) return {};
+    const auto& shown = picker_target_.filtered();
+    const int sel = picker_target_.selected();
+    if (sel < 0 || sel >= static_cast<int>(shown.size())) return {};
+    return shown[static_cast<size_t>(sel)];
+}
+
+void CombineDialog::finish_running_stage()
+{
+    auto oc = run_.job.take_outcome();
+    if (!oc) return;
+    run_.outcome.status      = oc->ok ? oc->status : oc->error;
+    run_.outcome.same_vault  = picker_dest_.is_self();
+    run_.outcome.source_gone = src_.list(src_gallery_).empty();
+    run_.outcome.dest_path   = selected_target_dest_path();
+    run_.done = true;
+    close();
+}
+
 void CombineDialog::update()
 {
-    if (stage_ == Stage::Running) {
-        if (auto oc = run_.job.take_outcome()) {
-            run_.outcome.status      = oc->ok ? oc->status : oc->error;
-            run_.outcome.same_vault  = picker_dest_.is_self();
-            run_.outcome.source_gone = src_.list(src_gallery_).empty();
-            run_.outcome.dest_path.clear();
-            if (run_.outcome.same_vault && run_.outcome.source_gone) {
-                const auto& shown = picker_target_.filtered();
-                const int sel = picker_target_.selected();
-                if (sel >= 0 && sel < static_cast<int>(shown.size()))
-                    run_.outcome.dest_path = shown[static_cast<size_t>(sel)];
-            }
-            run_.done = true;
-            close();
-        }
-        return;
-    }
+    if (stage_ == Stage::Running) { finish_running_stage(); return; }
     if (stage_ == Stage::PickingDest) picker_dest_.update();
 }
 

@@ -241,58 +241,77 @@ void GalleryGrid::start_export()
     consent_.open(std::format("Export {} {}", n, n == 1 ? "image?" : "images?"));
 }
 
+// start_transfer() sub-handlers, kept as free friends (not members) to keep
+// GalleryGrid under the S1448 method cap and start_transfer()'s cognitive
+// complexity (S3776) down.
+void start_transfer_focused(GalleryGrid& g)
+{
+    const int s = g.nav_.selected();
+    if (s < 0 || s >= static_cast<int>(g.children_.size())) {
+        g.error_ = "Nothing to move.";
+        return;
+    }
+    const vault::IndexNode* node = g.children_[s];
+    g.error_.clear();
+    if (node->is_gallery()) {
+        const std::string path = g.nav_.path().empty() ? node->name
+                                                        : g.nav_.path() + "/" + node->name;
+        g.transfer_.open_gallery(path);
+    } else {
+        g.transfer_.open(g.nav_.path(), {node->name});
+    }
+}
+
+void start_transfer_galleries_selection(GalleryGrid& g)
+{
+    std::vector<std::string> paths;
+    for (int idx : g.sel_.indices()) {
+        if (idx < 0 || idx >= static_cast<int>(g.children_.size()) || !g.children_[idx]->is_gallery())
+            continue;
+        const auto& name = g.children_[idx]->name;
+        paths.push_back(g.nav_.path().empty() ? name : g.nav_.path() + "/" + name);
+    }
+    g.error_.clear();
+    g.transfer_.open_galleries(std::move(paths));
+}
+
+void start_transfer_images_selection(GalleryGrid& g)
+{
+    std::vector<std::string> names;
+    for (int idx : g.sel_.indices()) {
+        if (idx >= 0 && idx < static_cast<int>(g.children_.size()) && g.children_[idx]->is_image())
+            names.push_back(g.children_[idx]->name);
+    }
+    if (names.empty()) { g.error_ = "Nothing selected to move."; return; }
+    g.error_.clear();
+    g.transfer_.open(g.nav_.path(), std::move(names));
+}
+
+void start_transfer_selection(GalleryGrid& g)
+{
+    int image_count   = 0;
+    int gallery_count = 0;
+    for (int idx : g.sel_.indices()) {
+        if (idx < 0 || idx >= static_cast<int>(g.children_.size())) continue;
+        if (g.children_[idx]->is_image())        ++image_count;
+        else if (g.children_[idx]->is_gallery())  ++gallery_count;
+    }
+    if (image_count > 0 && gallery_count > 0) {
+        g.error_ = "Select only images or only galleries to move at once.";
+        return;
+    }
+    if (gallery_count > 0) { start_transfer_galleries_selection(g); return; }
+    start_transfer_images_selection(g);
+}
+
 void GalleryGrid::start_transfer()
 {
     if (transfer_.active()) return;
 
     // Images selected (Space) → move them. Otherwise, the focused tile: a gallery
     // moves the whole subtree; a lone image moves just that image.
-    if (sel_.empty()) {
-        const int s = nav_.selected();
-        if (s < 0 || s >= static_cast<int>(children_.size())) {
-            error_ = "Nothing to move.";
-            return;
-        }
-        const vault::IndexNode* node = children_[s];
-        error_.clear();
-        if (node->is_gallery()) {
-            const std::string path = nav_.path().empty() ? node->name
-                                                          : nav_.path() + "/" + node->name;
-            transfer_.open_gallery(path);
-        } else {
-            transfer_.open(nav_.path(), {node->name});
-        }
-        return;
-    }
-
-    int image_count = 0, gallery_count = 0;
-    for (int idx : sel_.indices()) {
-        if (idx < 0 || idx >= static_cast<int>(children_.size())) continue;
-        if (children_[idx]->is_image())        ++image_count;
-        else if (children_[idx]->is_gallery())  ++gallery_count;
-    }
-    if (image_count > 0 && gallery_count > 0) {
-        error_ = "Select only images or only galleries to move at once.";
-        return;
-    }
-    if (gallery_count > 0) {
-        std::vector<std::string> paths;
-        for (int idx : sel_.indices())
-            if (idx >= 0 && idx < static_cast<int>(children_.size()) && children_[idx]->is_gallery()) {
-                const auto& name = children_[idx]->name;
-                paths.push_back(nav_.path().empty() ? name : nav_.path() + "/" + name);
-            }
-        error_.clear();
-        transfer_.open_galleries(std::move(paths));
-        return;
-    }
-    std::vector<std::string> names;
-    for (int idx : sel_.indices())
-        if (idx >= 0 && idx < static_cast<int>(children_.size()) && children_[idx]->is_image())
-            names.push_back(children_[idx]->name);
-    if (names.empty()) { error_ = "Nothing selected to move."; return; }
-    error_.clear();
-    transfer_.open(nav_.path(), std::move(names));
+    if (sel_.empty()) { start_transfer_focused(*this); return; }
+    start_transfer_selection(*this);
 }
 
 void GalleryGrid::start_rename()
@@ -317,7 +336,7 @@ void GalleryGrid::start_combine()
 
 void GalleryGrid::jump_to_gallery(const std::string& path)
 {
-    while (nav_.up()) {}                          // ascend to root
+    while (nav_.up()) { /* ascend to root */ }
     for (const auto& seg : split_path(path)) nav_.enter(seg);
     refresh();
     nav_.select(0);
@@ -1063,6 +1082,116 @@ void draw_footer_status(gfx::Renderer& r, gfx::FontAtlas& font, float x_offset, 
         r.draw_text(font, x_offset, bottom - 36, data.status, OK);
 }
 
+// update() sub-handlers, kept as free friends (not members) to keep GalleryGrid
+// under the S1448 method cap and update()'s cognitive complexity (S3776) down.
+void poll_transfer_and_combine(GalleryGrid& g)
+{
+    if (g.transfer_.active()) {
+        g.transfer_.update();          // poll the keyfile picker while the dialog is open
+        g.mark_dirty();
+    }
+
+    // A finished transfer closes the dialog synchronously (active_ -> false) during
+    // the keypress, so its result MUST be drained regardless of active state — else
+    // the listing only refreshes after leaving and re-entering the gallery.
+    if (std::string s; g.transfer_.consume_completed(s)) {
+        g.status_ = std::move(s);
+        g.sel_.clear();
+        g.refresh();                   // moved images are gone from this listing
+        g.mark_dirty();
+    }
+
+    if (g.combine_.active()) {
+        g.combine_.update();
+        g.mark_dirty();
+    }
+    if (ui::CombineOutcome co; g.combine_.consume_completed(co)) {
+        g.status_ = std::move(co.status);
+        g.sel_.clear();
+        if (co.source_gone) {
+            if (co.same_vault) g.jump_to_gallery(co.dest_path);
+            else               g.go_up();
+        } else {
+            g.refresh();   // partial merge — still looking at the (shrunken) source gallery
+        }
+        g.mark_dirty();
+    }
+
+    if (std::string s; g.rename_.consume_completed(s)) {
+        g.status_ = std::move(s);
+        g.refresh();                   // the renamed node's new name must show up
+        g.mark_dirty();
+    }
+}
+
+void poll_pending_pickers(GalleryGrid& g)
+{
+    // The import picker shares dialogs_.file with the transfer's keyfile picker, so
+    // only poll it when no transfer is active (don't steal the keyfile result).
+    if (!g.transfer_.active()) {
+        g.pump_import();
+        g.pump_zip_import();
+
+        // Tag-list import (Shift+G, Phase 21). The .txt carries tag metadata only —
+        // not key material or decrypted vault content — so reading it is invariant-safe.
+        if (auto res = g.dialogs_.file.take_result(platform::FileDialog::Purpose::TagList)) {
+            if (!res->empty()) {
+                g.status_ = apply_tag_list_file(g.vault_, g.naming_.tag_target, *res, g.error_);
+                g.refresh();
+            }
+            g.naming_.tag_target.clear();
+            g.mark_dirty();
+        }
+    }
+
+    if (auto dest = g.dialogs_.folder.take_result()) {
+        if (!dest->empty()) g.do_export(*dest);   // empty => the picker was cancelled
+        g.mark_dirty();
+    }
+}
+
+void update_scroll_to_selection_list(GalleryGrid& g, int sel_idx, float H)
+{
+    // For list view: item at row sel_idx
+    const float item_top = OY + LIST_HEADER + static_cast<float>(sel_idx) * ROW_H;
+    const float item_bottom = item_top + ROW_H;
+    // Content height = header + (num_items * row_height)
+    const float content_height = OY + LIST_HEADER + static_cast<float>(g.children_.size()) * ROW_H;
+    // Apply selection-following scroll
+    g.scroll_ = ui::ensure_visible(g.scroll_, item_top, item_bottom, OY + LIST_HEADER, H);
+    g.scroll_ = ui::clamp_scroll(g.scroll_, content_height, H);
+}
+
+void update_scroll_to_selection_grid(GalleryGrid& g, int sel_idx, float H)
+{
+    // Item at position computed from grid_cell_rect. Recompute cols from the current
+    // view/window rather than trusting cols_ (which render_grid() only refreshes
+    // later this frame) — a same-frame density change (L key) would otherwise use
+    // last frame's column count here while content_height below already reflects
+    // the new one.
+    const auto W = static_cast<float>(g.win_.width());
+    const float cell = cell_size_for(g.view_);
+    const int cols = grid_columns(W - 2 * OX, cell, GAP);
+    const SDL_FRect cellr = grid_cell_rect(sel_idx, grid_spec(W, cols, cell));
+    const float item_top = cellr.y;
+    const float item_bottom = cellr.y + cell;
+    // Content height = number of rows * (cell_height + gap) - gap + top offset
+    const int total_rows = (static_cast<int>(g.children_.size()) + cols - 1) / cols;
+    const float content_height = OY + static_cast<float>(total_rows) * (cell + GAP);
+    // Apply selection-following scroll
+    g.scroll_ = ui::ensure_visible(g.scroll_, item_top, item_bottom, OY, H);
+    g.scroll_ = ui::clamp_scroll(g.scroll_, content_height, H);
+}
+
+void update_scroll_to_selection(GalleryGrid& g)
+{
+    const int sel_idx = g.nav_.selected();
+    if (sel_idx < 0 || sel_idx >= static_cast<int>(g.children_.size())) return;
+    const auto H = static_cast<float>(g.win_.height());
+    if (g.view_ == GalleryView::List) update_scroll_to_selection_list(g, sel_idx, H);
+    else                              update_scroll_to_selection_grid(g, sel_idx, H);
+}
+
 void GalleryGrid::update(double)
 {
     // A background import owns the vault's file handle on its worker thread, so the
@@ -1072,99 +1201,11 @@ void GalleryGrid::update(double)
 
     if (pump_thumbs()) mark_dirty();   // off-thread thumbnail decode(s) landed
 
-    if (transfer_.active()) {
-        transfer_.update();            // poll the keyfile picker while the dialog is open
-        mark_dirty();
-    }
-
-    // A finished transfer closes the dialog synchronously (active_ -> false) during
-    // the keypress, so its result MUST be drained regardless of active state — else
-    // the listing only refreshes after leaving and re-entering the gallery.
-    if (std::string s; transfer_.consume_completed(s)) {
-        status_ = std::move(s);
-        sel_.clear();
-        refresh();                     // moved images are gone from this listing
-        mark_dirty();
-    }
-
-    if (combine_.active()) {
-        combine_.update();
-        mark_dirty();
-    }
-    if (ui::CombineOutcome co; combine_.consume_completed(co)) {
-        status_ = std::move(co.status);
-        sel_.clear();
-        if (co.source_gone) {
-            if (co.same_vault) jump_to_gallery(co.dest_path);
-            else               go_up();
-        } else {
-            refresh();   // partial merge — still looking at the (shrunken) source gallery
-        }
-        mark_dirty();
-    }
-
-    if (std::string s; rename_.consume_completed(s)) {
-        status_ = std::move(s);
-        refresh();                     // the renamed node's new name must show up
-        mark_dirty();
-    }
-
-    // The import picker shares dialogs_.file with the transfer's keyfile picker, so
-    // only poll it when no transfer is active (don't steal the keyfile result).
-    if (!transfer_.active()) {
-        pump_import();
-        pump_zip_import();
-
-        // Tag-list import (Shift+G, Phase 21). The .txt carries tag metadata only —
-        // not key material or decrypted vault content — so reading it is invariant-safe.
-        if (auto res = dialogs_.file.take_result(platform::FileDialog::Purpose::TagList)) {
-            if (!res->empty()) {
-                status_ = apply_tag_list_file(vault_, naming_.tag_target, *res, error_);
-                refresh();
-            }
-            naming_.tag_target.clear();
-            mark_dirty();
-        }
-    }
-
-    if (auto dest = dialogs_.folder.take_result()) {
-        if (!dest->empty()) do_export(*dest);   // empty => the picker was cancelled
-        mark_dirty();
-    }
+    poll_transfer_and_combine(*this);
+    poll_pending_pickers(*this);
 
     // Update scroll to keep the selected item visible.
-    const int sel_idx = nav_.selected();
-    const auto H = static_cast<float>(win_.height());
-    if (sel_idx >= 0 && sel_idx < static_cast<int>(children_.size())) {
-        if (view_ == GalleryView::List) {
-            // For list view: item at row sel_idx
-            const float item_top = OY + LIST_HEADER + static_cast<float>(sel_idx) * ROW_H;
-            const float item_bottom = item_top + ROW_H;
-            // Content height = header + (num_items * row_height)
-            const float content_height = OY + LIST_HEADER + static_cast<float>(children_.size()) * ROW_H;
-            // Apply selection-following scroll
-            scroll_ = ui::ensure_visible(scroll_, item_top, item_bottom, OY + LIST_HEADER, H);
-            scroll_ = ui::clamp_scroll(scroll_, content_height, H);
-        } else {
-            // For grid view: item at position computed from grid_cell_rect. Recompute
-            // cols from the current view/window rather than trusting cols_ (which
-            // render_grid() only refreshes later this frame) — a same-frame density
-            // change (L key) would otherwise use last frame's column count here while
-            // content_height below already reflects the new one.
-            const auto W = static_cast<float>(win_.width());
-            const float cell = cell_size_for(view_);
-            const int cols = grid_columns(W - 2 * OX, cell, GAP);
-            const SDL_FRect cellr = grid_cell_rect(sel_idx, grid_spec(W, cols, cell));
-            const float item_top = cellr.y;
-            const float item_bottom = cellr.y + cell;
-            // Content height = number of rows * (cell_height + gap) - gap + top offset
-            const int total_rows = (static_cast<int>(children_.size()) + cols - 1) / cols;
-            const float content_height = OY + static_cast<float>(total_rows) * (cell + GAP);
-            // Apply selection-following scroll
-            scroll_ = ui::ensure_visible(scroll_, item_top, item_bottom, OY, H);
-            scroll_ = ui::clamp_scroll(scroll_, content_height, H);
-        }
-    }
+    update_scroll_to_selection(*this);
 }
 
 std::vector<ui::HelpGroup> GalleryGrid::help_groups() const

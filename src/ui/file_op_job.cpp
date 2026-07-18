@@ -91,6 +91,28 @@ FileOpOutcome transfer_outcome(vault::TransferMode mode, int done, int failed, i
     return oc;
 }
 
+FileOpOutcome combine_outcome(vault::VaultResult r, const vault::CombineTally& tally,
+                              bool cancelled, const std::string& label)
+{
+    FileOpOutcome oc;
+    oc.kind = FileOpKind::Transfer;
+    if (r != vault::VaultResult::Ok) {
+        oc.error = "Combine failed.";
+        return oc;
+    }
+    oc.ok        = true;
+    oc.cancelled = cancelled;
+    oc.done      = tally.media_moved;
+    oc.failed    = tally.media_skipped;
+    oc.total     = tally.media_moved + tally.media_skipped;
+    oc.status    = cancelled
+        ? std::format("Combine cancelled — {} moved, {} skipped, into {}",
+                      tally.media_moved, tally.media_skipped, label)
+        : std::format("Combined into {} — {} moved, {} skipped", label, tally.media_moved,
+                      tally.media_skipped);
+    return oc;
+}
+
 // Import one file into `base_gallery`, dispatching by extension. Returns
 // true on success; on failure writes the bare filename (no path, no
 // secrets) into `*fail_name` for the capped failed-name list.
@@ -301,24 +323,7 @@ bool FileOpJob::start_combine(vault::Vault& src, std::string src_gallery,
         vault::CombineTally tally;
         const vault::VaultResult r =
             vault::combine_galleries(src, src_gallery, dst, dst_gallery, tally, &progress_);
-
-        FileOpOutcome oc;
-        oc.kind = FileOpKind::Transfer;
-        if (r != vault::VaultResult::Ok) {
-            oc.error = "Combine failed.";
-            return oc;
-        }
-        oc.ok        = true;
-        oc.cancelled = progress_.cancel.load();
-        oc.done      = tally.media_moved;
-        oc.failed    = tally.media_skipped;
-        oc.total     = tally.media_moved + tally.media_skipped;
-        oc.status    = oc.cancelled
-            ? std::format("Combine cancelled — {} moved, {} skipped, into {}",
-                          tally.media_moved, tally.media_skipped, label)
-            : std::format("Combined into {} — {} moved, {} skipped", label, tally.media_moved,
-                          tally.media_skipped);
-        return oc;
+        return combine_outcome(r, tally, progress_.cancel.load(), label);
     });
 }
 

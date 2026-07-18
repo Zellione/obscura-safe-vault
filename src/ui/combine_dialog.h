@@ -48,6 +48,12 @@ private:
 
     void choose_target();
     void do_combine(const std::string& dst_target);
+    void advance_from_picking_dest();
+    [[nodiscard]] bool handle_event_picking_dest(const SDL_Event& e);
+    [[nodiscard]] bool handle_event_pick_target(const SDL_Event& e);
+    [[nodiscard]] bool handle_event_target_filter(const SDL_Event& e);
+    void finish_running_stage();
+    [[nodiscard]] std::string selected_target_dest_path() const;
 
     vault::Vault&            src_;
     std::string              src_path_;

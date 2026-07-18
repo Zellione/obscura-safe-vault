@@ -69,11 +69,20 @@ private:
     void rebuild_targets();   // image_target_galleries(dest_vault()) + the "New gallery…" row
     void render_body(gfx::Renderer& r, gfx::FontAtlas& font,
                      float ix, float iy, float mw, float mh, float my) const;  // per-stage body
+    void render_mode_body(gfx::Renderer& r, gfx::FontAtlas& font,
+                          float ix, float iy, float mw) const;
+    void render_pick_gallery_body(gfx::Renderer& r, gfx::FontAtlas& font,
+                                  float ix, float iy, float mw, float mh, float my) const;
 
     bool handle_mode_key(SDL_Keycode k);         // Mode stage: toggle Move/Copy
     vault::Vault& dest_vault() noexcept;         // src_ when same-vault, else picker_dest_'s vault
     bool handle_gallery_key(SDL_Keycode k);
     bool handle_naming_event(const SDL_Event& e);   // new-gallery name overlay
+    // handle_event() sub-handlers, extracted to keep its cognitive complexity
+    // (S3776) and nesting depth (S134) bounded.
+    bool handle_picking_dest_event(const SDL_Event& e);
+    bool handle_gallery_filter_event(const SDL_Event& e);
+    bool handle_stage_key(const SDL_KeyboardEvent& key);
 
     vault::Vault&            src_;
     std::string              src_path_;            // active vault's path (excluded as a dest)

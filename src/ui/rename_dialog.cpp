@@ -44,15 +44,15 @@ bool RenameDialog::handle_event(vault::Vault& v, const SDL_Event& e)
             return true;
         case SDLK_RETURN:
         case SDLK_KP_ENTER: {
+            using enum vault::VaultResult;
             if (buf_.empty()) { error_ = "Name cannot be empty."; return true; }
-            const vault::VaultResult r = vault::rename_node(v, gallery_path_, old_name_, buf_);
-            if (r == vault::VaultResult::Ok) {
-                status_ = std::format("Renamed \"{}\" to \"{}\".", old_name_, buf_);
+            if (const vault::VaultResult r = vault::rename_node(v, gallery_path_, old_name_, buf_); r == Ok) {
+                status_ = std::format(R"(Renamed "{}" to "{}".)", old_name_, buf_);
                 done_   = true;
                 close();
-            } else if (r == vault::VaultResult::AlreadyExists) {
+            } else if (r == AlreadyExists) {
                 error_ = "Something with that name already exists here.";
-            } else if (r == vault::VaultResult::InvalidArg) {
+            } else if (r == InvalidArg) {
                 error_ = "That name isn't allowed.";
             } else {
                 error_ = "Rename failed.";

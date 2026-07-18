@@ -65,7 +65,7 @@ void GalleryPickerModel::move(int delta) noexcept
 
 GalleryPickerModel::Geom GalleryPickerModel::geom(int visible_rows) const noexcept
 {
-    const int count   = static_cast<int>(filtered_.size());
+    const auto count   = static_cast<int>(filtered_.size());
     const int visible = std::max(1, std::min(visible_rows, count));
     int       first    = 0;
     if (count > visible) first = std::clamp(selected_ - visible / 2, 0, count - visible);
