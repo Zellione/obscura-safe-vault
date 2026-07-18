@@ -81,6 +81,13 @@ void TransferDialog::open_gallery(std::string src_gallery)
     src_gallery_ = std::move(src_gallery);
 }
 
+void TransferDialog::open_galleries(std::vector<std::string> src_paths)
+{
+    open("", {});                  // reuse open() to reset all state + build candidates
+    source_        = Source::Galleries;
+    src_galleries_ = std::move(src_paths);
+}
+
 void TransferDialog::close()
 {
     if (dest_.vault.is_unlocked()) dest_.vault.lock();   // wipe the destination key
@@ -144,7 +151,7 @@ void TransferDialog::try_unlock()
 void TransferDialog::rebuild_targets()
 {
     const vault::Vault& dv = dest_vault();
-    std::vector<std::string> targets = (source_ == Source::Gallery)
+    std::vector<std::string> targets = (source_ == Source::Gallery || source_ == Source::Galleries)
         ? vault::gallery_target_parents(dv)
         : vault::image_target_galleries(dv);
     picker_.set_items(std::move(targets));
@@ -176,6 +183,9 @@ void TransferDialog::do_move(std::string_view dst_target)
     if (source_ == Source::Gallery)
         run_.job.start_transfer_gallery(src_, src_gallery_, dv, std::string(dst_target),
                                         mode_, where);
+    else if (source_ == Source::Galleries)
+        run_.job.start_transfer_galleries(src_, src_galleries_, dv, std::string(dst_target),
+                                          mode_, where);
     else
         run_.job.start_transfer_images(src_, src_gallery_, filenames_, dv, std::string(dst_target),
                                        mode_, where);
@@ -369,7 +379,9 @@ void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, flo
                 source_ == Source::Gallery
                     ? std::format("{} gallery \"{}\"", verb,
                                   std::filesystem::path(src_gallery_).filename().string())
-                    : std::format("{} {} image(s)", verb, filenames_.size()),
+                    : source_ == Source::Galleries
+                        ? std::format("{} {} galleries", verb, src_galleries_.size())
+                        : std::format("{} {} image(s)", verb, filenames_.size()),
                 TEXT);
 
     render_body(r, font, ix, iy, mw, mh, my);

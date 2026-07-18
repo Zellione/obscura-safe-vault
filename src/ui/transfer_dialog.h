@@ -41,6 +41,9 @@ public:
     // Activate to move a whole GALLERY subtree (`src_gallery`, a gallery path).
     void open_gallery(std::string src_gallery);
 
+    // Activate to move a LIST of whole GALLERY subtrees at once (multi-select).
+    void open_galleries(std::vector<std::string> src_paths);
+
     void close();                                   // wipes dest_.vault key, deactivates
     [[nodiscard]] bool active() const noexcept { return active_; }
 
@@ -87,8 +90,9 @@ private:
     vault::TransferMode mode_ = vault::TransferMode::Move;
     std::string src_gallery_;
     std::vector<std::string> filenames_;
+    std::vector<std::string> src_galleries_;   // Source::Galleries payload
 
-    enum class Source { Images, Gallery };
+    enum class Source { Images, Gallery, Galleries };   // Galleries: Phase 44 Part 3
     Source      source_ = Source::Images;
 
     std::vector<std::filesystem::path> candidates_;   // PickVault: registry minus src

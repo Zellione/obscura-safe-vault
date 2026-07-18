@@ -277,6 +277,20 @@ bool FileOpJob::start_transfer_gallery(vault::Vault& src, std::string src_galler
     });
 }
 
+bool FileOpJob::start_transfer_galleries(vault::Vault& src, std::vector<std::string> src_paths,
+                                         vault::Vault& dst, std::string dst_parent,
+                                         vault::TransferMode mode, std::string label)
+{
+    return launch(FileOpKind::Transfer,
+                  [this, &src, src_paths = std::move(src_paths), &dst,
+                   dst_parent = std::move(dst_parent), mode, label = std::move(label)]() {
+        const vault::TransferTally t = vault::transfer_galleries(
+            src, src_paths, dst, dst_parent, mode, &progress_);
+        return transfer_outcome(mode, t.done, t.failed, static_cast<int>(src_paths.size()),
+                                progress_.cancel.load(), label);
+    });
+}
+
 bool FileOpJob::start_compact(vault::Vault& v)
 {
     return launch(FileOpKind::Compact, [this, &v]() { return run_compact(v, progress_); });

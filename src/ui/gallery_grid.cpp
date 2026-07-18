@@ -222,7 +222,7 @@ void GalleryGrid::toggle_select()
 {
     const int s = nav_.selected();
     if (s < 0 || s >= static_cast<int>(children_.size())) return;
-    if (!children_[s]->is_image()) return;   // only images are exportable
+    if (!children_[s]->is_image() && !children_[s]->is_gallery()) return;
     sel_.toggle(s);
     status_.clear();
 }
@@ -264,11 +264,32 @@ void GalleryGrid::start_transfer()
         return;
     }
 
+    int image_count = 0, gallery_count = 0;
+    for (int idx : sel_.indices()) {
+        if (idx < 0 || idx >= static_cast<int>(children_.size())) continue;
+        if (children_[idx]->is_image())        ++image_count;
+        else if (children_[idx]->is_gallery())  ++gallery_count;
+    }
+    if (image_count > 0 && gallery_count > 0) {
+        error_ = "Select only images or only galleries to move at once.";
+        return;
+    }
+    if (gallery_count > 0) {
+        std::vector<std::string> paths;
+        for (int idx : sel_.indices())
+            if (idx >= 0 && idx < static_cast<int>(children_.size()) && children_[idx]->is_gallery()) {
+                const auto& name = children_[idx]->name;
+                paths.push_back(nav_.path().empty() ? name : nav_.path() + "/" + name);
+            }
+        error_.clear();
+        transfer_.open_galleries(std::move(paths));
+        return;
+    }
     std::vector<std::string> names;
     for (int idx : sel_.indices())
         if (idx >= 0 && idx < static_cast<int>(children_.size()) && children_[idx]->is_image())
             names.push_back(children_[idx]->name);
-    if (names.empty()) { error_ = "Select images (not galleries) to move."; return; }
+    if (names.empty()) { error_ = "Nothing selected to move."; return; }
     error_.clear();
     transfer_.open(nav_.path(), std::move(names));
 }
@@ -463,7 +484,8 @@ void GalleryGrid::handle_password_key(const SDL_Event& e)
 void GalleryGrid::toggle_or_open()
 {
     if (const int s = nav_.selected();
-        s >= 0 && s < static_cast<int>(children_.size()) && children_[s]->is_image())
+        s >= 0 && s < static_cast<int>(children_.size()) &&
+        (children_[s]->is_image() || children_[s]->is_gallery()))
         toggle_select();
     else
         open_selected();
@@ -1111,7 +1133,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
 {
     return {
         {"Navigate", {
-            {"Enter", "Open"}, {"Space", "Select for export"},
+            {"Enter", "Open"}, {"Space", "Select (export/move)"},
             {"Esc", "Back"}, {"`", "Switch vault"}, {"L", "Cycle view: list / grid size"},
         }},
         {"Search & tags", {
