@@ -237,7 +237,7 @@ void TransferDialog::update()
     // then close() (which wipes the destination key now that it is done with it).
     if (stage_ == Stage::Running) {
         if (auto oc = run_.job.take_outcome()) {
-            run_.status = std::move(oc->status);
+            run_.status = oc->ok ? std::move(oc->status) : oc->error;
             run_.done   = true;
             close();
         }

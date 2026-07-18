@@ -112,7 +112,7 @@ void CombineDialog::update()
 {
     if (stage_ == Stage::Running) {
         if (auto oc = run_.job.take_outcome()) {
-            run_.outcome.status      = oc->status;
+            run_.outcome.status      = oc->ok ? oc->status : oc->error;
             run_.outcome.same_vault  = picker_dest_.is_self();
             run_.outcome.source_gone = src_.list(src_gallery_).empty();
             run_.outcome.dest_path.clear();
