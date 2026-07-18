@@ -1,7 +1,5 @@
 #include "ui/transfer_dialog.h"
 
-#include <monocypher.h>
-
 #include <algorithm>
 #include <format>
 #include <utility>
@@ -22,29 +20,13 @@ namespace ui {
 
 namespace {
 constexpr const char* kNewGalleryRow = "+ New gallery…";
-
-// Clamp a list selection to [0, count-1] (0 when the list is empty).
-int clamp_index(int sel, int count) noexcept
-{
-    if (count <= 0 || sel < 0) return 0;
-    return sel > count - 1 ? count - 1 : sel;
-}
-
-// Map vault::VaultResult to a user-facing error message.
-std::string unlock_error_message(vault::VaultResult r) noexcept
-{
-    using enum vault::VaultResult;
-    if (r == AuthFailed) return "Wrong password or keyfile.";
-    if (r == BadFormat)  return "Not a valid vault file.";
-    return "Could not open the destination vault.";
-}
 } // namespace
 
 TransferDialog::TransferDialog(vault::Vault& src, std::string src_path,
                                platform::VaultRegistry& registry,
                                platform::FileDialog& dlg, gfx::Window& win)
     : src_(src), src_path_(std::move(src_path)), registry_(registry),
-      dlg_(dlg), win_(win) {}
+      dlg_(dlg), win_(win), picker_dest_(registry, dlg, win) {}
 
 void TransferDialog::open(std::string src_gallery, std::vector<std::string> filenames)
 {
@@ -52,25 +34,14 @@ void TransferDialog::open(std::string src_gallery, std::vector<std::string> file
     source_       = Source::Images;
     stage_        = Stage::Mode;
     mode_         = vault::TransferMode::Move;
-    dest_.is_self = false;
     src_gallery_  = std::move(src_gallery);
     filenames_    = std::move(filenames);
-    vault_sel_    = 0;
     error_.clear();
-    dest_.pw.clear();
-    dest_.keyfile_path.clear();
-    dest_.awaiting_keyfile = false;
     naming_ = false;
     name_buf_.clear();
 
-    // Destination candidates: every known vault except the active one.
-    candidates_.clear();
-    for (const auto& p : registry_.list())
-        if (p.string() != src_path_) candidates_.push_back(p);
-    // "This vault" is always an available destination, so no empty-list error here.
-
-    // The Unlock-stage password field and the new-gallery name overlay both consume
-    // SDL_EVENT_TEXT_INPUT, which SDL3 only delivers while text input is active.
+    // The new-gallery name overlay consumes SDL_EVENT_TEXT_INPUT, which SDL3 only
+    // delivers while text input is active.
     SDL_StartTextInput(win_.sdl_window());
 }
 
@@ -90,9 +61,8 @@ void TransferDialog::open_galleries(std::vector<std::string> src_paths)
 
 void TransferDialog::close()
 {
-    if (dest_.vault.is_unlocked()) dest_.vault.lock();   // wipe the destination key
-    dest_.pw.clear();
-    SDL_StopTextInput(win_.sdl_window());                // restore the host's input state
+    picker_dest_.close();   // wipes/locks the transient destination vault, if any
+    SDL_StopTextInput(win_.sdl_window());
     active_ = false;
 }
 
@@ -100,53 +70,10 @@ void TransferDialog::close()
 // otherwise the transiently-unlocked destination. Never lock src_ here — App owns it.
 vault::Vault& TransferDialog::dest_vault() noexcept
 {
-    return dest_.is_self ? src_ : dest_.vault;
+    return picker_dest_.is_self() ? src_ : picker_dest_.unlocked_vault();
 }
 
 // --- stage transitions ----------------------------------------------------
-
-void TransferDialog::choose_vault()
-{
-    error_.clear();
-    if (vault_sel_ == 0) {                 // "This vault" — same-vault transfer
-        dest_.is_self = true;
-        rebuild_targets();
-        stage_ = Stage::PickGallery;       // no unlock needed
-        return;
-    }
-    const int ci = vault_sel_ - 1;         // rows after "This vault" are candidates_
-    if (ci < 0 || ci >= static_cast<int>(candidates_.size())) return;
-    dest_.is_self = false;
-    dest_.path = candidates_[static_cast<size_t>(ci)].string();
-    dest_.pw.clear();
-    dest_.keyfile_path.clear();
-    stage_ = Stage::Unlock;
-}
-
-void TransferDialog::try_unlock()
-{
-    using enum vault::VaultResult;
-
-    std::vector<uint8_t> keyfile;
-    if (!dest_.keyfile_path.empty()) {
-        auto kf = platform::read_file(dest_.keyfile_path);
-        if (!kf) { error_ = "Cannot read keyfile."; return; }
-        keyfile = std::move(*kf);
-    }
-
-    vault::VaultResult r = vault::Vault::open(dest_.path, dest_.vault);
-    if (r == Ok) r = dest_.vault.unlock(dest_.pw.bytes(), keyfile);
-    if (!keyfile.empty()) crypto_wipe(keyfile.data(), keyfile.size());
-
-    if (r != Ok) {
-        error_ = unlock_error_message(r);
-        return;
-    }
-    dest_.pw.clear();
-    error_.clear();
-    rebuild_targets();
-    stage_ = Stage::PickGallery;
-}
 
 void TransferDialog::rebuild_targets()
 {
@@ -171,9 +98,7 @@ void TransferDialog::choose_gallery()
 void TransferDialog::do_move(std::string_view dst_target)
 {
     vault::Vault& dv = dest_vault();
-    const std::string where = dest_.is_self
-        ? "this vault"
-        : std::filesystem::path(dest_.path).stem().string();
+    const std::string where = picker_dest_.dest_label();
 
     // Launch the move/copy on a worker thread so a large gallery never freezes the
     // UI (Phase 25). Do NOT close() yet — the transiently-unlocked destination
@@ -199,24 +124,10 @@ bool TransferDialog::handle_mode_key(SDL_Keycode k)
     using enum vault::TransferMode;
     if (k == SDLK_UP || k == SDLK_DOWN || k == SDLK_LEFT || k == SDLK_RIGHT)
         mode_ = (mode_ == Move) ? Copy : Move;
-    if (k == SDLK_RETURN || k == SDLK_KP_ENTER) stage_ = Stage::PickVault;
-    return true;
-}
-
-bool TransferDialog::handle_pick_vault_key(SDL_Keycode k)
-{
-    const auto n = static_cast<int>(candidates_.size()) + 1;   // +1 for the "This vault" row
-    if (k == SDLK_UP)   vault_sel_ = clamp_index(vault_sel_ - 1, n);
-    if (k == SDLK_DOWN) vault_sel_ = clamp_index(vault_sel_ + 1, n);
-    if (k == SDLK_RETURN || k == SDLK_KP_ENTER) choose_vault();
-    return true;
-}
-
-bool TransferDialog::handle_unlock_key(SDL_Keycode k)
-{
-    if (k == SDLK_BACKSPACE) dest_.pw.backspace();
-    else if (k == SDLK_TAB) { dlg_.open_keyfile(win_.sdl_window()); dest_.awaiting_keyfile = true; }
-    else if (k == SDLK_RETURN || k == SDLK_KP_ENTER) try_unlock();
+    if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
+        picker_dest_.open(src_path_);
+        stage_ = Stage::PickingDest;
+    }
     return true;
 }
 
@@ -270,6 +181,16 @@ bool TransferDialog::handle_event(const SDL_Event& e)
         return true;
     }
 
+    // PickingDest stage: delegate entirely to picker_dest_ (includes Esc handling).
+    if (stage_ == Stage::PickingDest) {
+        const bool consumed = picker_dest_.handle_event(e);
+        if (!picker_dest_.active()) {
+            if (picker_dest_.chosen()) { rebuild_targets(); stage_ = Stage::PickGallery; }
+            else                       close();   // Esc inside the picker cancelled the whole dialog
+        }
+        return consumed;
+    }
+
     // New-gallery name entry (overlays the PickGallery stage).
     if (naming_) return handle_naming_event(e);
 
@@ -294,10 +215,6 @@ bool TransferDialog::handle_event(const SDL_Event& e)
         return true;
     }
 
-    if (e.type == SDL_EVENT_TEXT_INPUT && stage_ == Stage::Unlock) {
-        dest_.pw.push_utf8(e.text.text);
-        return true;
-    }
     if (e.type != SDL_EVENT_KEY_DOWN) return true;   // modal swallows other events
 
     const SDL_Keycode k = e.key.key;
@@ -306,11 +223,10 @@ bool TransferDialog::handle_event(const SDL_Event& e)
     using enum Stage;
     switch (stage_) {
         case Mode:        return handle_mode_key(k);
-        case PickVault:   return handle_pick_vault_key(k);
-        case Unlock:      return handle_unlock_key(k);
         case PickGallery:
             if (is_search_key(e.key)) { picker_.open_filter(); return true; }
             return handle_gallery_key(k);
+        case PickingDest: return true;   // should not reach here (handled above)
         case Running:     return true;   // handled above (Esc→cancel); nothing else
     }
     return true;
@@ -329,11 +245,7 @@ void TransferDialog::update()
         return;
     }
 
-    if (!dest_.awaiting_keyfile) return;
-    if (auto res = dlg_.take_result()) {
-        dest_.awaiting_keyfile = false;
-        if (!res->empty()) dest_.keyfile_path = (*res)[0];
-    }
+    if (stage_ == Stage::PickingDest) picker_dest_.update();
 }
 
 bool TransferDialog::consume_completed(std::string& status_out)
@@ -386,7 +298,8 @@ void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, flo
 
     render_body(r, font, ix, iy, mw, mh, my);
 
-    if (!error_.empty()) r.draw_text(font, ix, my + mh - 30, error_, DANGER);
+    const std::string& err = !error_.empty() ? error_ : picker_dest_.error();
+    if (!err.empty()) r.draw_text(font, ix, my + mh - 30, err, DANGER);
 }
 
 void TransferDialog::render_body(gfx::Renderer& r, gfx::FontAtlas& font,
@@ -410,23 +323,8 @@ void TransferDialog::render_body(gfx::Renderer& r, gfx::FontAtlas& font,
         const int msel = (mode_ == vault::TransferMode::Copy) ? 1 : 0;
         row_list(modes, msel, iy + 72);
         r.draw_text(font, ix, iy + 150, "[Up/Down] choose  [Enter] next", TEXT_FAINT);
-    } else if (stage_ == Stage::PickVault) {
-        r.draw_text(font, ix, iy + 36, "Destination vault:", TEXT_DIM);
-        std::vector<std::string> labels = {"This vault"};
-        for (const auto& p : candidates_) labels.push_back(p.filename().string());
-        row_list(labels, vault_sel_, iy + 72);
-    } else if (stage_ == Stage::Unlock) {
-        r.draw_text(font, ix, iy + 36,
-                    fit_text(font,
-                             "Unlock " + std::filesystem::path(dest_.path).filename().string(),
-                             mw - 40),
-                    TEXT_DIM);
-        std::string masked(dest_.pw.length(), '*');
-        draw_text_field(r, font, {ix, iy + 72, mw - 40, 40}, masked, true);
-        r.draw_text(font, ix, iy + 122,
-                    dest_.keyfile_path.empty() ? "[Tab] add keyfile  [Enter] unlock"
-                                               : "keyfile set  •  [Enter] unlock",
-                    TEXT_FAINT);
+    } else if (stage_ == Stage::PickingDest) {
+        picker_dest_.render(r, font, ix, iy, mw);
     } else {  // PickGallery
         r.draw_text(font, ix, iy + 36,
                     source_ == Source::Gallery ? "Destination parent gallery:"
