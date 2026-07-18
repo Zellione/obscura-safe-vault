@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include "ui/tag_inherit.h"   // ui::tag_ci_equal
@@ -29,8 +28,11 @@ struct TagTallyEntry {
         for (const std::string& tag : node_tags) {
             auto it = std::ranges::find_if(
                 out, [&](const TagTallyEntry& e) { return tag_ci_equal(e.tag, tag); });
-            if (it != out.end()) ++it->count;
-            else                 out.push_back({tag, 1});
+            if (it != out.end()) {
+                ++it->count;
+            } else {
+                out.push_back({.tag = tag, .count = 1});
+            }
         }
     }
     return out;
