@@ -2,6 +2,7 @@
 
 #include <monocypher.h>
 
+#include <algorithm>
 #include <format>
 #include <utility>
 
@@ -12,6 +13,7 @@
 #include "platform/file_dialog.h"
 #include "platform/paths.h"
 #include "platform/vault_registry.h"
+#include "ui/keybindings.h"
 #include "ui/progress_modal.h"
 #include "ui/widgets.h"
 #include "vault/transfer.h"
@@ -102,7 +104,6 @@ void TransferDialog::choose_vault()
     if (vault_sel_ == 0) {                 // "This vault" — same-vault transfer
         dest_.is_self = true;
         rebuild_targets();
-        gallery_sel_ = 0;
         stage_ = Stage::PickGallery;       // no unlock needed
         return;
     }
@@ -137,24 +138,27 @@ void TransferDialog::try_unlock()
     dest_.pw.clear();
     error_.clear();
     rebuild_targets();
-    gallery_sel_ = 0;
     stage_ = Stage::PickGallery;
 }
 
 void TransferDialog::rebuild_targets()
 {
     const vault::Vault& dv = dest_vault();
-    targets_ = (source_ == Source::Gallery) ? vault::gallery_target_parents(dv)
-                                            : vault::image_target_galleries(dv);
-    targets_.emplace_back(kNewGalleryRow);
+    std::vector<std::string> targets = (source_ == Source::Gallery)
+        ? vault::gallery_target_parents(dv)
+        : vault::image_target_galleries(dv);
+    targets.emplace_back(kNewGalleryRow);
+    picker_.set_items(std::move(targets));
 }
 
 void TransferDialog::choose_gallery()
 {
-    if (gallery_sel_ < 0 || gallery_sel_ >= static_cast<int>(targets_.size())) return;
-    const std::string& sel = targets_[static_cast<size_t>(gallery_sel_)];
-    if (sel == kNewGalleryRow) { naming_ = true; name_buf_.clear(); return; }
-    do_move(sel);
+    const auto& shown = picker_.filtered();
+    const int sel = picker_.selected();
+    if (sel < 0 || sel >= static_cast<int>(shown.size())) return;
+    const std::string& picked = shown[static_cast<size_t>(sel)];
+    if (picked == kNewGalleryRow) { naming_ = true; name_buf_.clear(); return; }
+    do_move(picked);
 }
 
 void TransferDialog::do_move(std::string_view dst_target)
@@ -208,9 +212,8 @@ bool TransferDialog::handle_unlock_key(SDL_Keycode k)
 
 bool TransferDialog::handle_gallery_key(SDL_Keycode k)
 {
-    const auto n = static_cast<int>(targets_.size());
-    if (k == SDLK_UP)   gallery_sel_ = clamp_index(gallery_sel_ - 1, n);
-    if (k == SDLK_DOWN) gallery_sel_ = clamp_index(gallery_sel_ + 1, n);
+    if (k == SDLK_UP)   picker_.move(-1);
+    if (k == SDLK_DOWN) picker_.move(1);
     if (k == SDLK_RETURN || k == SDLK_KP_ENTER) choose_gallery();
     return true;
 }
@@ -260,6 +263,27 @@ bool TransferDialog::handle_event(const SDL_Event& e)
     // New-gallery name entry (overlays the PickGallery stage).
     if (naming_) return handle_naming_event(e);
 
+    // PickGallery filter typing (Phase 44 Part 1) — '/' opens it; Esc clears the
+    // filter before the outer Esc-closes-the-dialog handling below ever sees it.
+    if (stage_ == Stage::PickGallery && picker_.filter_open()) {
+        if (e.type == SDL_EVENT_TEXT_INPUT) { picker_.filter_append(e.text.text); return true; }
+        if (e.type == SDL_EVENT_KEY_DOWN) {
+            switch (e.key.key) {
+                case SDLK_BACKSPACE: picker_.filter_backspace(); return true;
+                case SDLK_ESCAPE:
+                    if (!picker_.filter().empty()) { picker_.filter_clear(); return true; }
+                    picker_.close_filter();
+                    return true;
+                case SDLK_RETURN:
+                case SDLK_KP_ENTER: choose_gallery(); return true;
+                case SDLK_UP:       picker_.move(-1);  return true;
+                case SDLK_DOWN:     picker_.move(1);   return true;
+                default: return true;   // swallow other keys while typing a filter
+            }
+        }
+        return true;
+    }
+
     if (e.type == SDL_EVENT_TEXT_INPUT && stage_ == Stage::Unlock) {
         dest_.pw.push_utf8(e.text.text);
         return true;
@@ -274,7 +298,9 @@ bool TransferDialog::handle_event(const SDL_Event& e)
         case Mode:        return handle_mode_key(k);
         case PickVault:   return handle_pick_vault_key(k);
         case Unlock:      return handle_unlock_key(k);
-        case PickGallery: return handle_gallery_key(k);
+        case PickGallery:
+            if (is_search_key(e.key)) { picker_.open_filter(); return true; }
+            return handle_gallery_key(k);
         case Running:     return true;   // handled above (Esc→cancel); nothing else
     }
     return true;
@@ -394,7 +420,24 @@ void TransferDialog::render_body(gfx::Renderer& r, gfx::FontAtlas& font,
                     source_ == Source::Gallery ? "Destination parent gallery:"
                                                : "Destination gallery:",
                     TEXT_DIM);
-        row_list(targets_, gallery_sel_, iy + 72);
+        const float list_top = iy + 72;
+        const float row_h    = 34.0f;
+        const float list_bottom = naming_ ? my + mh - 100 : my + mh - 20;
+        const int   visible_rows = std::max(1, static_cast<int>((list_bottom - list_top) / row_h));
+        const auto  g = picker_.geom(visible_rows);
+        const auto& shown = picker_.filtered();
+        for (int i = g.first; i < g.first + g.visible && i < static_cast<int>(shown.size()); ++i) {
+            const float ry = list_top + static_cast<float>(i - g.first) * row_h;
+            const bool  on = (i == picker_.selected());
+            if (on) r.draw_round_rect({ix, ry, mw - 40, 30}, RADIUS_SMALL, SURFACE_HI);
+            r.draw_text(font, ix + 8, ry + 4, fit_text(font, shown[static_cast<size_t>(i)], mw - 56),
+                        on ? TEXT : TEXT_DIM);
+        }
+        if (shown.empty())
+            r.draw_text(font, ix, list_top, "No matches.", TEXT_FAINT);
+        if (picker_.filter_open() || !picker_.filter().empty())
+            r.draw_text(font, ix, iy + 54,
+                        fit_text(font, "Filter: " + picker_.filter(), mw - 40), TEXT_FAINT);
         if (naming_) {
             r.draw_text(font, ix, my + mh - 92, "New gallery name:", TEXT);
             draw_text_field(r, font, {ix, my + mh - 60, mw - 40, 40}, name_buf_, true);

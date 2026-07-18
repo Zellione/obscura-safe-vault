@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "ui/file_op_job.h"   // background transfer executor (Phase 25)
+#include "ui/gallery_picker.h"
 #include "ui/secure_text_field.h"
 #include "vault/transfer.h"   // vault::TransferMode
 #include "vault/vault.h"      // owns a transient vault::Vault dst_
@@ -104,8 +105,7 @@ private:
     };
     Dest dest_;
 
-    std::vector<std::string> targets_;                 // PickGallery: leaf paths + "<new>"
-    int         gallery_sel_ = 0;
+    GalleryPickerModel picker_;                         // PickGallery: filterable/scrollable list
     bool        naming_ = false;
     std::string name_buf_;
 
