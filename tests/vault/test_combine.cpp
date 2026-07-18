@@ -153,7 +153,7 @@ TEST(combine_target_galleries_filters_type_mismatches_self_and_descendants)
     CHECK(has("OtherLeaf"));      // type-compatible (media-holding vs empty)
     CHECK_FALSE(has("Photos"));   // self excluded
     CHECK_FALSE(has("Docs"));     // holds a sub-gallery -> incompatible with a media-holding source
-    CHECK_FALSE(has("Docs/Inner"));
+    CHECK(has("Docs/Inner"));   // Inner is empty -> type-compatible despite living under a folder-only parent (Docs)
 }
 
 TEST(combine_unions_tags_case_insensitively)

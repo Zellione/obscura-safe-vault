@@ -82,18 +82,6 @@ void walk_all_galleries(const Vault& v, std::string_view gallery, std::vector<st
         if (c->is_gallery()) walk_all_galleries(v, child_path(gallery, c->name), out);
 }
 
-bool is_inside_folder(const Vault& v, std::string_view path)
-{
-    std::string parent = parent_path(path);
-    while (!parent.empty()) {
-        if (holds_subgalleries(v, parent)) {
-            return true;
-        }
-        parent = parent_path(parent);
-    }
-    return false;
-}
-
 // The recursive worker: does the actual merge. Never touches progress->total
 // (the public entry point below sets that once, up front) and never forwards
 // `progress` into transfer_gallery (which would overwrite total with ITS OWN
@@ -184,8 +172,6 @@ std::vector<std::string> combine_target_galleries(const Vault& dst, const Vault&
     std::vector<std::string> out;
     if (!dst.is_unlocked() || !src.is_unlocked()) return out;
 
-    const bool src_is_leaf = !holds_subgalleries(src, src_gallery);
-
     std::vector<std::string> all;
     walk_all_galleries(dst, "", all);
 
@@ -193,8 +179,6 @@ std::vector<std::string> combine_target_galleries(const Vault& dst, const Vault&
     for (auto& path : all) {
         if (&dst == &src && (path == src_gallery || path.starts_with(src_prefix))) continue;
         if (!types_compatible(src, src_gallery, dst, path)) continue;
-        // If source is a leaf (holds media), exclude any path that's inside a folder
-        if (src_is_leaf && is_inside_folder(dst, path)) continue;
         out.push_back(std::move(path));
     }
     return out;
