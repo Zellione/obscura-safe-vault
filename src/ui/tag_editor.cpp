@@ -222,7 +222,7 @@ void TagEditor::select_tag(std::string_view tag)
 
 bool TagEditor::handle_event(const SDL_Event& e)
 {
-    if (!active_) { return false; }
+    if (!active_) return false;
 
     if (e.type == SDL_EVENT_TEXT_INPUT) {
         new_tag_buf_ += e.text.text;
@@ -230,7 +230,7 @@ bool TagEditor::handle_event(const SDL_Event& e)
         return true;
     }
 
-    if (e.type != SDL_EVENT_KEY_DOWN) { return false; }
+    if (e.type != SDL_EVENT_KEY_DOWN) return false;
 
     switch (e.key.key) {
         case SDLK_ESCAPE:
@@ -294,7 +294,7 @@ bool TagEditor::handle_event(const SDL_Event& e)
 
 void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
 {
-    if (!active_) { return; }
+    if (!active_) return;
 
     using namespace gfx::theme;
 
