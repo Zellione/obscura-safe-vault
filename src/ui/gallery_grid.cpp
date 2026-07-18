@@ -162,6 +162,7 @@ GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& v
       transfer_(vault, std::move(vault_ctx.active_vault_path), vault_ctx.registry,
                 dialogs.file, win),
       rename_(win),
+      combine_(vault, vault_ctx.active_vault_path, vault_ctx.registry, dialogs.file, win),
       initial_(std::move(at)), view_(initial_.view)
 {
 }
@@ -304,6 +305,22 @@ void GalleryGrid::start_rename()
     }
     error_.clear();
     rename_.open(nav_.path(), children_[s]->name);
+}
+
+void GalleryGrid::start_combine()
+{
+    if (transfer_.active() || rename_.active() || combine_.active()) return;
+    if (nav_.path().empty()) { error_ = "Can't combine the top level."; return; }
+    error_.clear();
+    combine_.open(nav_.path());
+}
+
+void GalleryGrid::jump_to_gallery(const std::string& path)
+{
+    while (nav_.up()) {}                          // ascend to root
+    for (const auto& seg : split_path(path)) nav_.enter(seg);
+    refresh();
+    nav_.select(0);
 }
 
 void GalleryGrid::do_export(const std::filesystem::path& dest)
@@ -540,7 +557,10 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
     switch (key.key) {
         case SDLK_L:     view_ = next_gallery_view(view_);                 return;  // cycle view density
         case SDLK_X:     start_export();                                    return;  // export selection
-        case SDLK_M:     start_transfer();                                  return;  // move to another vault
+        case SDLK_M:
+            if (key.mod & SDL_KMOD_SHIFT) { start_combine(); return; }
+            start_transfer();
+            return;  // move to another vault
         case SDLK_R:     start_rename();                                    return;  // rename focused tile
         case SDLK_SPACE: toggle_or_open();                                  return;
         case SDLK_G:     start_tag_editor((key.mod & SDL_KMOD_SHIFT) != 0); return;  // G edit / Shift+G import
@@ -676,6 +696,8 @@ bool GalleryGrid::handle_overlay_event(const SDL_Event& e)
     }
 
     if (rename_.active()) { (void)rename_.handle_event(vault_, e); return true; }
+
+    if (combine_.active()) { (void)combine_.handle_event(e); return true; }
 
     if (transfer_.active()) { (void)transfer_.handle_event(e); return true; }
 
@@ -961,7 +983,7 @@ void poll_import_job(GalleryGrid& g)
 
 bool vault_busy(const GalleryGrid& g)
 {
-    return g.naming_.import_job.active() || g.naming_.file_op.active() || g.transfer_.job_active();
+    return g.naming_.import_job.active() || g.naming_.file_op.active() || g.transfer_.job_active() || g.combine_.job_active();
 }
 
 GalleryView current_gallery_view(const GalleryGrid& g) { return g.view_; }
@@ -1065,6 +1087,22 @@ void GalleryGrid::update(double)
         mark_dirty();
     }
 
+    if (combine_.active()) {
+        combine_.update();
+        mark_dirty();
+    }
+    if (ui::CombineOutcome co; combine_.consume_completed(co)) {
+        status_ = std::move(co.status);
+        sel_.clear();
+        if (co.source_gone) {
+            if (co.same_vault) jump_to_gallery(co.dest_path);
+            else               go_up();
+        } else {
+            refresh();   // partial merge — still looking at the (shrunken) source gallery
+        }
+        mark_dirty();
+    }
+
     if (std::string s; rename_.consume_completed(s)) {
         status_ = std::move(s);
         refresh();                     // the renamed node's new name must show up
@@ -1144,7 +1182,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
         }},
         {"Import & export", {
             {"I", "Import files"}, {"Z", "Import ZIP/CBZ"}, {"N", "New gallery"},
-            {"X", "Export selection"}, {"M", "Move/copy"}, {"R", "Rename"}, {"Del", "Delete"},
+            {"X", "Export selection"}, {"M", "Move/copy"}, {"Shift+M", "Combine gallery"}, {"R", "Rename"}, {"Del", "Delete"},
         }},
         {"Session", {
             {"Shift+S", "Cycle sort order"}, {"U", "Keep unlocked for session"},
@@ -1166,6 +1204,10 @@ void GalleryGrid::render(gfx::Renderer& r)
     }
     if (naming_.file_op.active()) {
         draw_file_op_progress(r, font_, W, H, naming_.file_op);
+        return;
+    }
+    if (combine_.job_active()) {
+        combine_.render(r, font_, W, H);
         return;
     }
     if (transfer_.job_active()) {
@@ -1269,6 +1311,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     search_.render(r, font_, W, H);
     tag_editor_.render(r, font_, W, H);
     rename_.render(r, font_, W, H);
+    combine_.render(r, font_, W, H);
     transfer_.render(r, font_, W, H);
     quick_switch_.render(r, font_, W, H);
 

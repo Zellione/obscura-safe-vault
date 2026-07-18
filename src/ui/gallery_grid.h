@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "image/decode_worker.h"
+#include "ui/combine_dialog.h"
 #include "ui/consent_dialog.h"
 #include "ui/file_op_job.h"
 #include "ui/gallery_session_state.h"
@@ -85,6 +86,8 @@ private:
     void start_export();           // open the consent modal for the current selection
     void start_transfer();         // open the move-to-another-vault dialog
     void start_rename();           // R: rename the focused tile
+    void start_combine();          // Shift+M: combine nav_.path() into another gallery
+    void jump_to_gallery(const std::string& path);   // absolute nav: ascend to root, then descend
     void do_export(const std::filesystem::path& dest);
     void start_import();
     void start_naming();
@@ -141,6 +144,7 @@ private:
     QuickSwitch             quick_switch_;   // declared before transfer_ so it copies
     TransferDialog          transfer_;       // the active path before transfer_ moves it
     RenameDialog            rename_;         // Phase 44 Part 2
+    CombineDialog           combine_;        // Phase 44 Part 4
     GridLocation          initial_;   // where to (re)open: path + selected tile
     std::vector<const vault::IndexNode*> children_;
     int                   cols_ = 1;
