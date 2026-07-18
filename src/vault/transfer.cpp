@@ -301,4 +301,20 @@ TransferTally transfer_images(Vault& src, std::string_view src_gallery,
     return tally;
 }
 
+TransferTally transfer_galleries(Vault& src, const std::vector<std::string>& src_paths,
+                                 Vault& dst, std::string_view dst_parent,
+                                 TransferMode mode, OpProgress* progress)
+{
+    if (progress) progress->total.store(static_cast<int>(src_paths.size()));
+
+    TransferTally tally;
+    for (const auto& path : src_paths) {
+        if (progress && progress->cancel.load()) break;
+        if (transfer_gallery(src, path, dst, dst_parent, mode) == VaultResult::Ok) ++tally.done;
+        else                                                                       ++tally.failed;
+        if (progress) progress->done.fetch_add(1);
+    }
+    return tally;
+}
+
 } // namespace vault

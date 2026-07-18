@@ -75,6 +75,19 @@ struct TransferTally {
                                            Vault& dst, std::string_view dst_parent,
                                            TransferMode mode, OpProgress* progress = nullptr);
 
+// Transfer a LIST of whole gallery subtrees (`src_paths`, all direct entries
+// anywhere in `src`) into dst/dst_parent, one at a time via transfer_gallery
+// (each an atomic copy-then-remove unit) — the bulk driver behind mass-moving
+// multiple selected galleries at once (Phase 44 Part 3), mirroring
+// transfer_images' loop over transfer_image. A failed subtree (NotFound/
+// AlreadyExists/InvalidArg/etc.) is tallied as failed and left in place;
+// others still proceed. `progress` (optional): total is set to
+// src_paths.size() up front, done bumped per subtree, and the loop stops
+// early on progress->cancel — subtrees moved so far remain committed.
+[[nodiscard]] TransferTally transfer_galleries(Vault& src, const std::vector<std::string>& src_paths,
+                                               Vault& dst, std::string_view dst_parent,
+                                               TransferMode mode, OpProgress* progress = nullptr);
+
 // Slash-paths of every gallery in `v` that may legally accept a SUB-gallery (i.e.
 // holds no images), including "" (root) when root holds no images. Empty while
 // locked. Used to populate the transfer dialog when the source is a gallery.
