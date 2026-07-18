@@ -174,7 +174,7 @@ void UnlockScreen::update(double dt)
         current = cur;
         SDL_free(cur);
     }
-    if (should_clear_clipboard(current, clipboard_last_set_)) SDL_SetClipboardText("");
+    if (should_clear_clipboard(current, clipboard_last_set_)) { SDL_SetClipboardText(""); }
     crypto_wipe(clipboard_last_set_.data(), clipboard_last_set_.size());
     clipboard_last_set_.clear();
 }
