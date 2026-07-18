@@ -138,7 +138,7 @@ void TagEditor::add_chosen_tag()
         sugg_sel_ >= 0 && sugg_sel_ < static_cast<int>(suggestions_.size());
     const std::string chosen =
         from_sugg ? suggestions_[sugg_sel_] : trim_surrounding(new_tag_buf_);
-    if (chosen.empty()) return;
+    if (chosen.empty()) { return; }
 
     using enum vault::VaultResult;
     int failures = 0;
@@ -187,16 +187,16 @@ void TagEditor::refresh_tags()
     // The ancestor-tag cascade is only meaningful for a single node — a
     // multi-selection can span unrelated branches of the tree, so it's
     // suppressed there rather than showing a misleading merged cascade.
-    if (node_paths_.size() == 1) inherited_ = inherited_tags(vault_, node_paths_.front());
+    if (node_paths_.size() == 1) { inherited_ = inherited_tags(vault_, node_paths_.front()); }
 
     std::vector<std::vector<std::string>> per_node_tags;
     per_node_tags.reserve(node_paths_.size());
     int resolved = 0;
     for (const std::string& path : node_paths_) {
         const auto segs = split_path(path);
-        if (segs.empty()) continue;
+        if (segs.empty()) { continue; }
         std::string parent_path;
-        if (segs.size() > 1) parent_path = join_path(std::span(segs.data(), segs.size() - 1));
+        if (segs.size() > 1) { parent_path = join_path(std::span(segs.data(), segs.size() - 1)); }
 
         const auto& children = vault_.list(parent_path);
         for (const auto* child : children) {
@@ -222,7 +222,7 @@ void TagEditor::select_tag(std::string_view tag)
 
 bool TagEditor::handle_event(const SDL_Event& e)
 {
-    if (!active_) return false;
+    if (!active_) { return false; }
 
     if (e.type == SDL_EVENT_TEXT_INPUT) {
         new_tag_buf_ += e.text.text;
@@ -230,7 +230,7 @@ bool TagEditor::handle_event(const SDL_Event& e)
         return true;
     }
 
-    if (e.type != SDL_EVENT_KEY_DOWN) return false;
+    if (e.type != SDL_EVENT_KEY_DOWN) { return false; }
 
     switch (e.key.key) {
         case SDLK_ESCAPE:
@@ -294,7 +294,7 @@ bool TagEditor::handle_event(const SDL_Event& e)
 
 void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
 {
-    if (!active_) return;
+    if (!active_) { return; }
 
     using namespace gfx::theme;
 
