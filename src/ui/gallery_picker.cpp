@@ -9,10 +9,17 @@ namespace ui {
 
 void GalleryPickerModel::set_items(std::vector<std::string> items)
 {
-    items_       = std::move(items);
+    items_         = std::move(items);
     filter_.clear();
-    filter_open_ = false;
-    selected_    = 0;
+    filter_open_   = false;
+    selected_      = 0;
+    pinned_suffix_.clear();
+    rebuild_filtered();
+}
+
+void GalleryPickerModel::set_pinned_suffix(std::string item)
+{
+    pinned_suffix_ = std::move(item);
     rebuild_filtered();
 }
 
@@ -38,9 +45,13 @@ void GalleryPickerModel::rebuild_filtered()
 {
     const auto tokens = tokenize(filter_);
     filtered_.clear();
-    filtered_.reserve(items_.size());
+    filtered_.reserve(items_.size() + 1);
     for (const auto& item : items_)
         if (matches(tokens, item, {})) filtered_.push_back(item);
+
+    if (!pinned_suffix_.empty() &&
+        std::ranges::find(filtered_, pinned_suffix_) == filtered_.end())
+        filtered_.push_back(pinned_suffix_);
 
     selected_ = filtered_.empty() ? 0
                                   : std::clamp(selected_, 0, static_cast<int>(filtered_.size()) - 1);

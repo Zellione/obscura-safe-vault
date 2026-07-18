@@ -19,6 +19,13 @@ public:
     // state, and selection back to 0.
     void set_items(std::vector<std::string> items);
 
+    // An item that is always appended to filtered()'s end, exempt from the
+    // filter query — e.g. a pinned "create new…" affordance that must stay
+    // reachable no matter what the user has typed. Cleared by set_items().
+    // If the pinned item also matches the current filter naturally, it is
+    // not duplicated.
+    void set_pinned_suffix(std::string item);
+
     // '/' toggles typing a filter query; closing does NOT clear the filter text
     // or its effect on filtered() — only set_items()/filter_clear() do that.
     void open_filter() noexcept { filter_open_ = true; }
@@ -53,6 +60,7 @@ private:
     bool                       filter_open_ = false;
     std::vector<std::string>  filtered_;
     int                        selected_ = 0;
+    std::string               pinned_suffix_;   // empty = none
 };
 
 } // namespace ui

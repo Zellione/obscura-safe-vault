@@ -118,3 +118,25 @@ TEST(gallery_picker_geom_at_start_does_not_scroll_negative)
     const auto g = m.geom(5);
     CHECK(g.first == 0);
 }
+
+TEST(gallery_picker_pinned_suffix_survives_non_matching_filter)
+{
+    ui::GalleryPickerModel m;
+    m.set_items({"Trips", "Family"});
+    m.set_pinned_suffix("+ New gallery…");
+    m.open_filter();
+    m.filter_append("zzz-nomatch");
+    REQUIRE(m.filtered().size() == 1);
+    CHECK(m.filtered()[0] == "+ New gallery…");
+}
+
+TEST(gallery_picker_pinned_suffix_not_duplicated_when_it_also_matches)
+{
+    ui::GalleryPickerModel m;
+    m.set_items({"Trips", "Family"});
+    m.set_pinned_suffix("+ New gallery…");
+    m.open_filter();
+    m.filter_append("new");   // "new" is a substring of "+ New gallery…" case-insensitively
+    REQUIRE(m.filtered().size() == 1);
+    CHECK(m.filtered()[0] == "+ New gallery…");
+}

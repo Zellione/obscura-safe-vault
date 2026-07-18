@@ -147,8 +147,8 @@ void TransferDialog::rebuild_targets()
     std::vector<std::string> targets = (source_ == Source::Gallery)
         ? vault::gallery_target_parents(dv)
         : vault::image_target_galleries(dv);
-    targets.emplace_back(kNewGalleryRow);
     picker_.set_items(std::move(targets));
+    picker_.set_pinned_suffix(kNewGalleryRow);
 }
 
 void TransferDialog::choose_gallery()
