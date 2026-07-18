@@ -69,6 +69,8 @@ private:
     // --- event handling (split into small per-focus handlers) ---
     void handle_text(const char* text);
     void handle_key(const SDL_KeyboardEvent& key);
+    void handle_clearing_key(const SDL_KeyboardEvent& key);    // Y/N confirm while clearing_
+    void handle_save_mode_key(const SDL_KeyboardEvent& key);   // Enter/Esc/Backspace while naming a saved search
     void dispatch_focus_key(const SDL_KeyboardEvent& key);
     void handle_axis_key(const SDL_KeyboardEvent& key);   // Left/Right on Scope or GroupJoin
     void handle_tag_field_key(const SDL_KeyboardEvent& key);

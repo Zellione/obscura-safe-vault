@@ -48,6 +48,15 @@ private:
     void add_chosen_tag();            // Enter: add highlighted suggestion or typed text
     void move_cursor(int dir);        // Up/Down: suggestion highlight or tag-list scroll
     void select_tag(std::string_view tag);  // select `tag` (ci) so the list scrolls to it
+    void delete_selected_tag();       // Delete: remove tally_[selected_] from every selected node
+
+    // render() helpers (split out to keep cognitive complexity down)
+    void draw_tag_rows(gfx::Renderer& r, gfx::FontAtlas& font, float mx, float list_y,
+                        float tags_start, float row_pitch, int max_visible) const;
+    void draw_inherited_tags(gfx::Renderer& r, gfx::FontAtlas& font, float mx, float list_bottom,
+                              int shown_count, const std::vector<std::string>& lines) const;
+    void draw_suggestions_dropdown(gfx::Renderer& r, gfx::FontAtlas& font, float mx,
+                                    float input_y) const;
 
     vault::Vault&        vault_;
     gfx::Window&         win_;

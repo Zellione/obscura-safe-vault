@@ -31,6 +31,7 @@ constexpr float TAG_LIST_GAP = 6.0f;
 // Baseline-to-baseline spacing for the 28px UI font; 24px was too tight and
 // caused the title/subtitle and the "Current tags:" label/first row to collide.
 constexpr float LINE = 34.0f;
+constexpr float INHERIT_LINE = 30.0f;   // line pitch within the inherited-tags section
 
 // Trim surrounding ASCII whitespace only; interior spaces are kept so multi-word
 // tags survive (the vault performs the canonical normalisation/dedup).
@@ -264,31 +265,35 @@ bool TagEditor::handle_event(const SDL_Event& e)
             move_cursor(1);
             return true;
 
-        case SDLK_DELETE: {
-            // Delete the selected tag from every selected node that carries it.
-            // remove_tag is idempotent, so calling it on a node that doesn't
-            // have the tag is a harmless no-op — no per-node tally check needed.
-            if (selected_ >= 0 && selected_ < static_cast<int>(tally_.size())) {
-                const std::string tag_to_remove = tally_[selected_].tag;
-                bool any_ok = false;
-                for (const std::string& path : node_paths_) {
-                    if (vault_.remove_tag(path, tag_to_remove) == vault::VaultResult::Ok) { any_ok = true; }
-                }
-                if (any_ok) {
-                    refresh_tags();
-                    refresh_vocabulary();
-                    refresh_suggestions();   // the removed tag is suggestible again
-                    selected_ = std::min(selected_, static_cast<int>(tally_.size()) - 1);
-                    error_.clear();
-                } else {
-                    error_ = "Failed to remove tag.";
-                }
-            }
+        case SDLK_DELETE:
+            delete_selected_tag();
             return true;
-        }
 
         default:
             return false;
+    }
+}
+
+void TagEditor::delete_selected_tag()
+{
+    // Delete the selected tag from every selected node that carries it.
+    // remove_tag is idempotent, so calling it on a node that doesn't
+    // have the tag is a harmless no-op — no per-node tally check needed.
+    if (selected_ < 0 || selected_ >= static_cast<int>(tally_.size())) return;
+
+    const std::string tag_to_remove = tally_[selected_].tag;
+    bool any_ok = false;
+    for (const std::string& path : node_paths_) {
+        if (vault_.remove_tag(path, tag_to_remove) == vault::VaultResult::Ok) { any_ok = true; }
+    }
+    if (any_ok) {
+        refresh_tags();
+        refresh_vocabulary();
+        refresh_suggestions();   // the removed tag is suggestible again
+        selected_ = std::min(selected_, static_cast<int>(tally_.size()) - 1);
+        error_.clear();
+    } else {
+        error_ = "Failed to remove tag.";
     }
 }
 
@@ -335,12 +340,10 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     const float list_y     = input_y + INPUT_BOX_H + 16;
     const float tags_start = list_y + LINE;
     const float row_pitch  = TAG_ROW_H + TAG_LIST_GAP;
-    const auto  total      = static_cast<int>(tally_.size());
 
     // The read-only inherited section (ancestor-gallery tags, Phase 27
     // follow-up) reserves space at the bottom; the own-tags list shrinks to fit.
     constexpr int   INHERIT_MAX_LINES = 3;
-    constexpr float INHERIT_LINE      = 30.0f;
     const PackedLines inh = inherited_.empty()
         ? PackedLines{}
         : pack_tag_lines(inherited_, font, MODAL_W - 2 * PAD, INHERIT_MAX_LINES);
@@ -349,17 +352,44 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
         : INHERIT_LINE * static_cast<float>(1 + inh.lines.size()) + 8.0f;
     const float list_bottom = my + MODAL_H - 50 - inherit_h;
 
-    const int   max_visible =
+    const int max_visible =
         std::max(1, static_cast<int>((list_bottom - tags_start) / row_pitch));
-    const int   first = tag_scroll_first(total, selected_, max_visible);
-    const int   last  = std::min(total, first + max_visible);
+
+    draw_tag_rows(r, font, mx, list_y, tags_start, row_pitch, max_visible);
+    draw_inherited_tags(r, font, mx, list_bottom, inh.shown, inh.lines);
+
+    // Error message
+    if (!error_.empty()) {
+        r.draw_text(font, mx + PAD, my + MODAL_H - 32, error_, DANGER);
+    }
+
+    // Footer hint
+    r.draw_text(font, mx + PAD, my + MODAL_H - 12,
+                "[Enter] Add  [Up/Down] Scroll  [Del] Remove  [Esc] Close",
+                TEXT_FAINT);
+
+    // Autosuggest dropdown (Phase 29) — drawn last so it overlays the tag list
+    // like a combobox. Up/Down move the highlight; Enter adds the highlighted
+    // suggestion (or, with none highlighted, exactly the typed text).
+    draw_suggestions_dropdown(r, font, mx, input_y);
+}
+
+void TagEditor::draw_tag_rows(gfx::Renderer& r, gfx::FontAtlas& font, float mx, float list_y,
+                               float tags_start, float row_pitch, int max_visible) const
+{
+    using namespace gfx::theme;
+
+    const auto total = static_cast<int>(tally_.size());
+    const int  first  = tag_scroll_first(total, selected_, max_visible);
+    const int  last   = std::min(total, first + max_visible);
 
     // Header shows the visible range / count so hidden tags are discoverable.
     std::string header = "Current tags";
-    if (total > max_visible)
+    if (total > max_visible) {
         header += std::format(" ({}-{} of {})", first + 1, last, total);
-    else if (total > 0)
+    } else if (total > 0) {
         header += std::format(" ({})", total);
+    }
     header += ":";
     r.draw_text(font, mx + PAD, list_y, header, TEXT_DIM);
 
@@ -388,53 +418,56 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     if (tally_.empty()) {
         r.draw_text(font, mx + PAD, tags_start, "(no tags)", TEXT_FAINT);
     }
+}
 
-    // Inherited section: informational only (Del/selection never touch it —
-    // removing one of these means editing the ancestor gallery it lives on).
-    if (!inherited_.empty()) {
-        float y = list_bottom + 8.0f;
-        std::string inh_header = "Inherited from gallery";
-        if (inh.shown < static_cast<int>(inherited_.size()))
-            inh_header += std::format(" ({} of {} shown)", inh.shown, inherited_.size());
-        inh_header += ":";
-        r.draw_text(font, mx + PAD, y, inh_header, TEXT_DIM);
-        for (const std::string& line : inh.lines) {
-            y += INHERIT_LINE;
-            r.draw_text(font, mx + PAD, y, fit_text(font, line, MODAL_W - 2 * PAD),
-                        TEXT_FAINT);
-        }
+void TagEditor::draw_inherited_tags(gfx::Renderer& r, gfx::FontAtlas& font, float mx,
+                                     float list_bottom, int shown_count,
+                                     const std::vector<std::string>& lines) const
+{
+    // Informational only (Del/selection never touch it — removing one of
+    // these means editing the ancestor gallery it lives on).
+    if (inherited_.empty()) return;
+
+    using namespace gfx::theme;
+
+    float y = list_bottom + 8.0f;
+    std::string inh_header = "Inherited from gallery";
+    if (shown_count < static_cast<int>(inherited_.size())) {
+        inh_header += std::format(" ({} of {} shown)", shown_count, inherited_.size());
     }
-
-    // Error message
-    if (!error_.empty()) {
-        r.draw_text(font, mx + PAD, my + MODAL_H - 32, error_, DANGER);
+    inh_header += ":";
+    r.draw_text(font, mx + PAD, y, inh_header, TEXT_DIM);
+    for (const std::string& line : lines) {
+        y += INHERIT_LINE;
+        r.draw_text(font, mx + PAD, y, fit_text(font, line, MODAL_W - 2 * PAD), TEXT_FAINT);
     }
+}
 
-    // Footer hint
-    r.draw_text(font, mx + PAD, my + MODAL_H - 12,
-                "[Enter] Add  [Up/Down] Scroll  [Del] Remove  [Esc] Close",
-                TEXT_FAINT);
+void TagEditor::draw_suggestions_dropdown(gfx::Renderer& r, gfx::FontAtlas& font, float mx,
+                                           float input_y) const
+{
+    // Drawn last so it overlays the tag list like a combobox. Up/Down move
+    // the highlight; Enter adds the highlighted suggestion (or, with none
+    // highlighted, exactly the typed text).
+    if (suggestions_.empty()) return;
 
-    // Autosuggest dropdown (Phase 29) — drawn last so it overlays the tag list
-    // like a combobox. Up/Down move the highlight; Enter adds the highlighted
-    // suggestion (or, with none highlighted, exactly the typed text).
-    if (!suggestions_.empty()) {
-        constexpr float SUGG_ROW = 30.0f;
-        const SDL_FRect drop{mx + PAD, input_y + INPUT_BOX_H + 4,
-                             MODAL_W - 2 * PAD,
-                             SUGG_ROW * static_cast<float>(suggestions_.size()) + 8};
-        r.draw_round_rect(drop, RADIUS_SMALL, SURFACE_HI);
-        r.draw_round_rect(drop, RADIUS_SMALL, ACCENT, /*filled*/ false);
-        for (int i = 0; i < static_cast<int>(suggestions_.size()); ++i) {
-            const bool  sel   = i == sugg_sel_;
-            const float row_y = drop.y + 4 + SUGG_ROW * static_cast<float>(i);
-            const float ty    = font.text_top_for_center(row_y + SUGG_ROW * 0.5f);
-            r.draw_text(font, drop.x + 10, ty,
-                        fit_text(font,
-                                 std::format("{} {}", sel ? ">" : " ", suggestions_[i]),
-                                 drop.w - 20),
-                        sel ? TEXT : TEXT_DIM);
-        }
+    using namespace gfx::theme;
+
+    constexpr float SUGG_ROW = 30.0f;
+    const SDL_FRect drop{mx + PAD, input_y + INPUT_BOX_H + 4,
+                         MODAL_W - 2 * PAD,
+                         SUGG_ROW * static_cast<float>(suggestions_.size()) + 8};
+    r.draw_round_rect(drop, RADIUS_SMALL, SURFACE_HI);
+    r.draw_round_rect(drop, RADIUS_SMALL, ACCENT, /*filled*/ false);
+    for (int i = 0; i < static_cast<int>(suggestions_.size()); ++i) {
+        const bool  sel   = i == sugg_sel_;
+        const float row_y = drop.y + 4 + SUGG_ROW * static_cast<float>(i);
+        const float ty    = font.text_top_for_center(row_y + SUGG_ROW * 0.5f);
+        r.draw_text(font, drop.x + 10, ty,
+                    fit_text(font,
+                             std::format("{} {}", sel ? ">" : " ", suggestions_[i]),
+                             drop.w - 20),
+                    sel ? TEXT : TEXT_DIM);
     }
 }
 

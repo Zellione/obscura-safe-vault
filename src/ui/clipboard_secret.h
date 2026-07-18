@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace ui {
 
@@ -13,7 +14,7 @@ namespace ui {
 // Pure — no SDL, no timing; the caller owns the timer and calls this only
 // once the auto-clear window has elapsed.
 [[nodiscard]] inline bool should_clear_clipboard(const std::optional<std::string>& current,
-                                                  const std::string& last_set) noexcept
+                                                  std::string_view last_set) noexcept
 {
     return !last_set.empty() && current.has_value() && *current == last_set;
 }

@@ -284,40 +284,44 @@ void AdvancedSearchScreen::handle_text(const char* text)
     }
 }
 
+void AdvancedSearchScreen::handle_clearing_key(const SDL_KeyboardEvent& key)
+{
+    if (key.key == SDLK_Y || key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) {
+        query_ = {};   // reset to a default (empty) query + builder + cursor
+        edit_  = {};
+        cur_   = {};
+        focus_ = Focus::Include;
+        clearing_ = false;
+        status_   = "Search cleared.";
+        refresh_suggestions();
+        rerun();
+    } else if (key.key == SDLK_N || key.key == SDLK_ESCAPE) {
+        clearing_ = false;
+        status_   = "Clear cancelled.";
+    }
+}
+
+void AdvancedSearchScreen::handle_save_mode_key(const SDL_KeyboardEvent& key)
+{
+    if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) {
+        if (saved_panel_.finalize_save(query_)) {
+            reload_saved();
+        }
+    } else if (key.key == SDLK_ESCAPE) {
+        status_ = "Save cancelled.";
+    } else if (key.key == SDLK_BACKSPACE) {
+        backspace();
+    }
+}
+
 void AdvancedSearchScreen::handle_key(const SDL_KeyboardEvent& key)
 {
     // The clear-search confirmation is modal: it swallows every key until the
     // user answers (Y/Enter = clear, N/Esc = cancel).
-    if (clearing_) {
-        if (key.key == SDLK_Y || key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) {
-            query_ = {};   // reset to a default (empty) query + builder + cursor
-            edit_  = {};
-            cur_   = {};
-            focus_ = Focus::Include;
-            clearing_ = false;
-            status_   = "Search cleared.";
-            refresh_suggestions();
-            rerun();
-        } else if (key.key == SDLK_N || key.key == SDLK_ESCAPE) {
-            clearing_ = false;
-            status_   = "Clear cancelled.";
-        }
-        return;
-    }
+    if (clearing_) { handle_clearing_key(key); return; }
 
     // Handle save mode keys (Escape/Enter/Backspace)
-    if (saved_panel_.active_buffer()) {
-        if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) {
-            if (saved_panel_.finalize_save(query_)) {
-                reload_saved();
-            }
-        } else if (key.key == SDLK_ESCAPE) {
-            status_ = "Save cancelled.";
-        } else if (key.key == SDLK_BACKSPACE) {
-            backspace();
-        }
-        return;
-    }
+    if (saved_panel_.active_buffer()) { handle_save_mode_key(key); return; }
 
     if ((key.mod & SDL_KMOD_CTRL) != 0 && key.key == SDLK_S) {
         saved_panel_.begin_naming();
