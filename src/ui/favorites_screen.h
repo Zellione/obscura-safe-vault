@@ -6,6 +6,7 @@
 
 #include "ui/nav_model.h"
 #include "ui/quick_switch.h"
+#include "ui/rename_dialog.h"
 #include "ui/screen.h"
 #include "vault/vault.h"   // vault::SearchHit
 
@@ -69,15 +70,18 @@ protected:
 private:
     void open_selected();
     [[nodiscard]] int hit_test(float mx, float my) const;
+    void start_rename();   // R: rename the focused item (Phase 45 Part 1)
 
     gfx::Window&    win_;
     gfx::FontAtlas& font_;
     vault::Vault&   vault_;
     QuickSwitch     quick_switch_;   // ` overlay: jump to another vault
+    RenameDialog    rename_;         // Phase 45 Part 1
     NavModel        nav_;   // selection only (no path stack used here)
     std::vector<vault::SearchHit> favs_;
     int             cols_ = 1;
     float           scroll_ = 0.0f;  // vertical scroll offset (pixels scrolled down)
+    std::string     status_;         // transient feedback line (e.g. rename result)
 };
 
 } // namespace ui

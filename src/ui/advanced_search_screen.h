@@ -8,6 +8,7 @@
 
 #include "ui/advanced_search_model.h"
 #include "ui/advanced_search_state.h"
+#include "ui/rename_dialog.h"
 #include "ui/saved_search_panel.h"
 #include "ui/screen.h"
 #include "ui/search_result_view.h"
@@ -73,6 +74,7 @@ private:
     void handle_tag_field_key(const SDL_KeyboardEvent& key);
     void handle_group_nav_key(const SDL_KeyboardEvent& key);
     void handle_weight_key(const SDL_KeyboardEvent& key);
+    void start_rename();   // R on a focused result (Phase 45 Part 1)
 
     // Committed-tag selection within the focused tag field (Include/Exclude/Group).
     // Kept as free functions (friends) so they don't count against the class method
@@ -119,6 +121,7 @@ private:
     // Phase 20 sub-views encapsulating result grid and saved searches panels
     SearchResultView    result_view_;
     SavedSearchPanel    saved_panel_;
+    RenameDialog        rename_{win_};   // Phase 45 Part 1
 };
 
 } // namespace ui

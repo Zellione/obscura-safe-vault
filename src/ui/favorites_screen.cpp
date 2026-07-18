@@ -34,7 +34,7 @@ GridSpec grid_spec(float win_w, int cols) noexcept
 FavoritesScreen::FavoritesScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                                  platform::VaultRegistry& registry, std::string active_path)
     : win_(win), font_(font), vault_(vault),
-      quick_switch_(registry, std::move(active_path))
+      quick_switch_(registry, std::move(active_path)), rename_(win_)
 {
 }
 
@@ -70,6 +70,11 @@ void FavoritesScreen::update(double)
         scroll_ = ui::ensure_visible(scroll_, item_top, item_bottom, OY, H);
         scroll_ = ui::clamp_scroll(scroll_, content_height, H);
     }
+
+    if (std::string s; rename_.consume_completed(s)) {
+        status_ = std::move(s);
+        reload();   // the renamed item's new name must show up
+    }
 }
 
 void FavoritesScreen::open_selected()
@@ -79,8 +84,22 @@ void FavoritesScreen::open_selected()
     activate(favs_[s], s);
 }
 
+void FavoritesScreen::start_rename()
+{
+    if (rename_.active()) return;
+    const int s = nav_.selected();
+    if (s < 0 || s >= static_cast<int>(favs_.size())) return;
+
+    const std::string& path  = favs_[s].path;
+    const auto          slash = path.rfind('/');
+    const std::string   gallery_path = slash == std::string::npos ? std::string{} : path.substr(0, slash);
+    const std::string   name         = slash == std::string::npos ? path : path.substr(slash + 1);
+    rename_.open(gallery_path, name);
+}
+
 void FavoritesScreen::handle_event(const SDL_Event& e)
 {
+    if (rename_.active()) { (void)rename_.handle_event(vault_, e); return; }
     if (quick_switch_.active()) {
         (void)quick_switch_.handle_event(e);
         if (std::string p; quick_switch_.consume_choice(p))
@@ -92,6 +111,7 @@ void FavoritesScreen::handle_event(const SDL_Event& e)
     switch (e.type) {
         case SDL_EVENT_KEY_DOWN:
             if (is_quick_switch_key(e.key)) { quick_switch_.open(); break; }   // switch vault (`)
+            if (e.key.key == SDLK_R) { start_rename(); break; }
             if (handle_extra_key(e.key)) break;   // subclass consumed it (e.g. tag-view toggle)
             switch (map_key(e.key.key, e.key.mod)) {
                 case NavLeft:  nav_.move(-1);     break;
@@ -170,12 +190,17 @@ void FavoritesScreen::render(gfx::Renderer& r)
         }
     }
 
+    if (!status_.empty()) r.draw_text(font_, OX, 118, status_, TEXT_FAINT);
+
     quick_switch_.render(r, font_, W, H);
+    rename_.render(r, font_, W, H);
 }
 
 std::vector<ui::HelpGroup> FavoritesScreen::help_groups() const
 {
-    std::vector<ui::HelpEntry> nav{{"Enter", "Open"}, {"`", "Switch vault"}, {"Esc", "Back"}};
+    std::vector<ui::HelpEntry> nav{
+        {"Enter", "Open"}, {"R", "Rename"}, {"`", "Switch vault"}, {"Esc", "Back"},
+    };
     for (const auto& e : extra_help_entries()) nav.push_back(e);
     return {{"Navigate", nav}};
 }
