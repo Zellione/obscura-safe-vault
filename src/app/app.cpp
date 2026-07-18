@@ -6,6 +6,7 @@
 #include <string>
 
 #include "app/auto_lock.h"
+#include "app/keep_unlocked_badge.h"
 #include "gfx/renderer.h"
 #include "gfx/theme.h"
 #include "platform/error_log.h"

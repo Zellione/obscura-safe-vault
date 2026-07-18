@@ -4,7 +4,6 @@
 #include <string>
 
 #include "app/idle_timer.h"
-#include "app/keep_unlocked_badge.h"
 #include "gfx/text.h"
 #include "gfx/texture_cache.h"
 #include "gfx/window.h"
