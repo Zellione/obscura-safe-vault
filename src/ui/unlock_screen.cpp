@@ -65,6 +65,8 @@ void UnlockScreen::on_exit()
     pw_.clear();
     confirm_.clear();
     reveal_pw_ = false;
+    crypto_wipe(clipboard_last_set_.data(), clipboard_last_set_.size());
+    clipboard_last_set_.clear();
 }
 
 UnlockScreen::Layout UnlockScreen::layout() const
