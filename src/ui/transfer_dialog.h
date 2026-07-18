@@ -77,8 +77,6 @@ private:
 
     vault::Vault&            src_;
     std::string              src_path_;            // active vault's path (excluded as a dest)
-    platform::VaultRegistry& registry_;
-    platform::FileDialog&    dlg_;
     gfx::Window&             win_;
 
     bool        active_ = false;

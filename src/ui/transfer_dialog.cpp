@@ -25,8 +25,7 @@ constexpr const char* kNewGalleryRow = "+ New gallery…";
 TransferDialog::TransferDialog(vault::Vault& src, std::string src_path,
                                platform::VaultRegistry& registry,
                                platform::FileDialog& dlg, gfx::Window& win)
-    : src_(src), src_path_(std::move(src_path)), registry_(registry),
-      dlg_(dlg), win_(win), picker_dest_(registry, dlg, win) {}
+    : src_(src), src_path_(std::move(src_path)), win_(win), picker_dest_(registry, dlg, win) {}
 
 void TransferDialog::open(std::string src_gallery, std::vector<std::string> filenames)
 {

@@ -51,9 +51,7 @@ private:
 
     vault::Vault&            src_;
     std::string              src_path_;
-    platform::VaultRegistry& registry_;
-    platform::FileDialog&    dlg_;
-    gfx::Window&              win_;
+    gfx::Window&             win_;
 
     bool        active_ = false;
     Stage       stage_  = Stage::PickingDest;
