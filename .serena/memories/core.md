@@ -133,6 +133,37 @@ src/
                                                  transfer_gallery/export_images — a cancelled
                                                  gallery Move leaves the source intact.
                                                  ui::ImportProgress now aliases OpProgress.
+                                                 Phase 44 Part 3: transfer_galleries(src,src_paths,
+                                                 dst,dst_parent,mode,progress) — bulk gallery move/
+                                                 copy driver (TransferTally return), loops
+                                                 transfer_gallery per path WITHOUT forwarding
+                                                 progress into it (avoids clobbering the bulk
+                                                 total), bumping progress->done per item instead.
+                                                 Feeds FileOpJob::start_transfer_galleries +
+                                                 GalleryGrid's mass-move (Space now multi-selects
+                                                 galleries too, not just images; homogeneous-
+                                                 selection dispatch — images-only / galleries-only /
+                                                 mixed selection is an error).
+               combine.*                       — Phase 44 Part 4: recursive gallery-merge engine.
+                                                 combine_galleries(src,src_gallery,dst,dst_gallery,
+                                                 tally,progress) merges src_gallery into dst_gallery
+                                                 (same- or cross-vault): media leaves -> transfer_
+                                                 image per file (collisions skipped + tallied);
+                                                 sub-gallery leaves -> recurse if a same-named dest
+                                                 child exists, else transfer_gallery the whole
+                                                 subtree wholesale (Move; progress bumped by its
+                                                 pre-counted media total in one step, not per-file);
+                                                 tags unioned case-insensitively via add_tag; source
+                                                 gallery is removed once fully empty. Rejects type
+                                                 mismatches (media vs sub-galleries) and same-vault
+                                                 cycles (dest == src or nested inside it — the
+                                                 reverse, src nested inside dest, is a legal
+                                                 "flatten upward"). combine_target_galleries(dst,
+                                                 src,src_gallery) lists eligible destinations (type-
+                                                 compatible, excluding src/its descendants when
+                                                 same-vault) for CombineDialog's picker.
+                                                 CombineTally{media_moved,media_skipped,
+                                                 galleries_merged,galleries_moved}.
                                                — index.h: IndexNode carries
                                                  std::vector<std::string> tags +
                                                  bool favorite (gallery + image);
@@ -198,6 +229,14 @@ src/
                                                  set_gallery_sort are FREE FRIENDS (not members,
                                                  like read_thumb_span/vault_file_bytes) to stay
                                                  under the cpp:S1448 35-method cap.
+                                                 vault::rename_node(v,gallery_path,old_name,
+                                                 new_name) (Phase 44 Part 2, same free-friend
+                                                 pattern): validates is_safe_node_name + no sibling
+                                                 collision, then a pure leaf-field edit — IndexNode
+                                                 never persists a path, only its local name, so
+                                                 renaming needs no cascading updates. Drives the new
+                                                 `R` key (RenameDialog) for both images/videos and
+                                                 galleries.
                index_io.*                      — Internal component (Phase 25): index serialisation +
                                                  crash-safe double-buffer slot swap (append → write
                                                  inactive slot → flip active_slot, 3-phase atomic
@@ -678,19 +717,77 @@ src/
                                                  move OR copy selected images / (PR3) a focused
                                                  gallery subtree to another vault — or (PR4)
                                                  within the active vault. Source enum
-                                                 {Images,Gallery}; open()/open_gallery().
-                                                 Stages: Mode(Move/Copy) → pick dest vault
-                                                 ("This vault" row + registry minus active;
-                                                 "This vault" skips unlock, dest_is_self_,
-                                                 dest_vault()=src_) → unlock transiently (owns
-                                                 Dest{vault, pw in SecureTextField, optional
-                                                 keyfile}) → pick leaf gallery (images) / parent
-                                                 gallery (gallery) / new → vault::transfer_image
-                                                 each or transfer_gallery once (mode_) → re-lock
-                                                 the dest on every exit (~Vault backstop; src_
-                                                 never locked here). Grid skips its import dlg_
-                                                 poll while transfer_.active(); M with no
-                                                 selection acts on the focused tile.
+                                                 {Images,Gallery,Galleries} (Galleries added
+                                                 Phase 44 Part 3 for multi-selected-gallery mass-
+                                                 move); open()/open_gallery()/open_galleries().
+                                                 Stages: Mode(Move/Copy) → PickingDest (delegated
+                                                 to VaultUnlockPicker, below) → PickGallery (a
+                                                 GalleryPickerModel, below — scrollable + `/`-
+                                                 filterable since Phase 44 Part 1, "+ New
+                                                 gallery…" pinned past the filter via
+                                                 set_pinned_suffix so it stays reachable) → run
+                                                 vault::transfer_image/transfer_gallery/
+                                                 transfer_galleries per mode_ → dest re-locked on
+                                                 every exit (src_ never locked here). Grid skips
+                                                 its import dlg_ poll while transfer_.active(); M
+                                                 with no selection acts on the focused tile.
+                                                 Phase 44 Part 4: the old inline PickVault/Unlock
+                                                 stages were extracted into VaultUnlockPicker
+                                                 (picker_dest_ member) — TransferDialog now only
+                                                 owns Mode/PickGallery/Running.
+               vault_unlock_picker.*           — Phase 44 Part 4: "pick a destination vault, then
+                                                 unlock it" flow, extracted out of TransferDialog
+                                                 so CombineDialog (below) can reuse it without
+                                                 duplication. Internal stages PickVault ("This
+                                                 vault" row 0, or a registry entry) -> Unlock
+                                                 (password + optional keyfile, skipped for "This
+                                                 vault"). Esc at either stage cancels the whole
+                                                 flow (no partial back-navigation). Owns a
+                                                 transient destination vault::Vault; close() is
+                                                 idempotent and unconditional — only locks/wipes
+                                                 if actually unlocked, so callers can call it on
+                                                 every exit path without checking active() first.
+                                                 is_self()/unlocked_vault() combine with the
+                                                 caller's own active vault to get "the vault to
+                                                 write into" (TransferDialog::dest_vault(),
+                                                 CombineDialog::do_combine() both do this).
+               gallery_picker.*                — Phase 44 Part 1: GalleryPickerModel, a pure SDL-
+                                                 free filterable/scrollable list model shared by
+                                                 TransferDialog's PickGallery stage and
+                                                 CombineDialog's PickTarget stage. set_items,
+                                                 open_filter/close_filter (`/` key, via
+                                                 keybindings.h's is_search_key)/filter_append/
+                                                 filter_backspace/filter_clear (reuses ui::
+                                                 tokenize/matches from search_model.h), move(delta),
+                                                 filtered(), selected(), geom(visible_rows) for
+                                                 windowed scrolling. set_pinned_suffix(item) keeps
+                                                 one extra row (e.g. "+ New gallery…") appended
+                                                 after filtering, exempt from the filter itself, so
+                                                 it stays reachable regardless of query text.
+               rename_dialog.*                 — Phase 44 Part 2: `R` modal in GalleryGrid, renames
+                                                 the focused image/video/gallery via vault::
+                                                 rename_node. open(gallery_path,old_name)/close()/
+                                                 handle_event/render/consume_completed(status_out).
+               combine_dialog.*                — Phase 44 Part 4: `Shift+M` modal in GalleryGrid,
+                                                 merges the CURRENTLY BROWSED gallery into another
+                                                 one via vault::combine_galleries — same- or cross-
+                                                 vault. Stages: PickingDest (VaultUnlockPicker) ->
+                                                 PickTarget (GalleryPickerModel over vault::
+                                                 combine_target_galleries) -> Running (progress
+                                                 modal, mirrors TransferDialog). CombineOutcome
+                                                 {status,source_gone,same_vault,dest_path} is
+                                                 drained by GalleryGrid::update() to decide post-
+                                                 combine navigation: source_gone && same_vault ->
+                                                 jump_to_gallery(dest_path) (ascend to root, re-
+                                                 descend via split_path); source_gone && !same_vault
+                                                 -> go_up() (destination vault isn't open here);
+                                                 !source_gone -> refresh() (partial merge from a
+                                                 collision — stay on the shrunken source).
+                                                 source_gone is read as src_.list(src_gallery_).
+                                                 empty() — Vault::list on a removed/nonexistent
+                                                 gallery path returns {} (find_gallery ->  nullptr),
+                                                 so this correctly distinguishes "fully merged and
+                                                 removed" from "still exists, still has children."
                quick_switch.*                  — global `` ` `` (grave) overlay (Phase 14 PR5):
                                                  lists registry vaults; choosing one emits
                                                  NavKind::ToUnlock(path) (App locks current +
@@ -861,7 +958,10 @@ src/
                                                  the worker owns the vault(s); host screen only polls
                                                  total()/done() + take_outcome() (joins) + draws a modal,
                                                  Esc->cancel(). start_export/start_delete/
-                                                 start_transfer_images/start_transfer_gallery ->
+                                                 start_transfer_images/start_transfer_gallery/
+                                                 start_transfer_galleries (Phase 44 Part 3)/
+                                                 start_combine (Phase 44 Part 4, thin wrapper over
+                                                 vault::combine_galleries) ->
                                                  FileOpOutcome{ok,cancelled,done,failed,status,...}.
                                                  GalleryGrid owns one (naming_.file_op) for export+delete;
                                                  TransferDialog owns one (Running stage). ImageViewer's

@@ -1,4 +1,4 @@
-## Phase 44 — Gallery organization tools 🔜
+## Phase 44 — Gallery organization tools ✅
 
 **Goal:** Four related gaps in gallery/image organization, grouped into one
 phase (same multi-part shape as Phase 40/43):
