@@ -347,7 +347,13 @@ src/
                                                  main path, prefetching a couple of
                                                  packets ahead via VideoDecoder::
                                                  demux_next_video_packet()/
-                                                 seek_demux_only()). begin_seek(target_pts)
+                                                 seek_demux_only()). outstanding() reports
+                                                 submitted-but-not-yet-finished jobs (the
+                                                 worker decrements it for EVERY job it
+                                                 finishes, including discard-only jobs that
+                                                 publish no Result) so the render thread can
+                                                 gate feeding on the real backlog rather than
+                                                 a Result-only tally. begin_seek(target_pts)
                                                  drops queued undecoded packets and skips
                                                  decoded frames below the target — a
                                                  superseded seek's stale results are
@@ -571,7 +577,7 @@ src/
                                                  a single wait_result() call (no retry loop) so
                                                  render() never blocks longer than that ~20ms even
                                                  under a slow codec (real software AV1/HEVC). Both
-                                                 keep in_flight_ prefetched up to PREFETCH_DEPTH
+                                                 keep the worker's outstanding() backlog to PREFETCH_DEPTH
                                                  packets ahead and, on a miss, feed one more up to
                                                  the MAX_STEADY_IN_FLIGHT ceiling (uncapped instead
                                                  while skip_pending_ is set, since a seek's decode-
@@ -583,8 +589,14 @@ src/
                                                  longer than the timeout. do_seek() bumps
                                                  generation_ and calls VideoDecodeWorker::
                                                  begin_seek(); Results tagged with a stale
-                                                 generation_ are discarded without decrementing
-                                                 in_flight_. Impl's audio (stream/samples_fed/
+                                                 generation_ are discarded (the worker itself
+                                                 un-counts every finished job — including a frame
+                                                 silently discarded during a seek's decode-forward,
+                                                 which publishes no Result — from outstanding(), so
+                                                 no phantom backlog survives to wedge feed after a
+                                                 seek; earlier a render-side tally left exactly that
+                                                 phantom and froze video with audio still playing).
+                                                 Impl's audio (stream/samples_fed/
                                                  seek_base/subsystem_owned) and pending-frame
                                                  (pending/pending_storage/pending_pts/shown_pts/
                                                  frame_dt/need_present/eof) state each live in a
