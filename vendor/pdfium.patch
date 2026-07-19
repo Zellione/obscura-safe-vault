@@ -1,0 +1,29 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1156,14 +1156,14 @@ install(FILES
+     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/pdfium/cpp
+ )
+
+-install(EXPORT ${PROJECT_NAME}
+-        FILE PdfiumTargets.cmake
+-        NAMESPACE Pdfium::
+-        DESTINATION  ${CMAKE_INSTALL_LIBDIR}/cmake/pdfium
+-)
++# Disabled: install(EXPORT) fails when building static lib due to dependency export issues
++# (agg, openjpeg targets not in export set). This project only needs the static library,
++# not CMake package config files, so disabling the export is safe (Phase 30).
++#install(EXPORT ${PROJECT_NAME}
++#        FILE PdfiumTargets.cmake
++#        NAMESPACE Pdfium::
++#        DESTINATION  ${CMAKE_INSTALL_LIBDIR}/cmake/pdfium
++#)
+
+-include(CMakePackageConfigHelpers)
++#include(CMakePackageConfigHelpers)
+
+-configure_package_config_file(${CMAKE_CURRENT_SOURCE_DIR}/Config.cmake.in
+-  "${CMAKE_CURRENT_BINARY_DIR}/PdfiumConfig.cmake"
+-  INSTALL_DESTINATION  ${CMAKE_INSTALL_LIBDIR}/cmake/pdfium
++#configure_package_config_file(${CMAKE_CURRENT_SOURCE_DIR}/Config.cmake.in
++#  "${CMAKE_CURRENT_BINARY_DIR}/PdfiumConfig.cmake"
++#  INSTALL_DESTINATION  ${CMAKE_INSTALL_LIBDIR}/cmake/pdfium

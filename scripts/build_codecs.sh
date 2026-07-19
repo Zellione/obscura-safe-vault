@@ -225,7 +225,48 @@ build_ffmpeg
 # PDFium — PDF rendering, decode-only (Phase 30). Vendored via
 # OlexiyKhokhlov/PDFium fork with CMake support. Generates static libpdfium.a.
 # USE_STATIC_LIBRARY=ON forces STATIC target (defaults to SHARED).
-build_codec pdfium "$REPO_ROOT/vendor/pdfium" \
-    -DUSE_STATIC_LIBRARY=ON
+# Note: PDFium's CMakeLists.txt has install(EXPORT...) that fails due to
+# dependency export issues when building STATIC. We build the library directly
+# then manually copy the .a file to avoid the export error.
+build_pdfium() {
+    local src="$REPO_ROOT/vendor/pdfium"
+    local builddir="$src/build"
+
+    if [[ -f "$CODEC_PREFIX/lib/libpdfium.a" ]]; then
+        echo "==> pdfium already installed — skipping."
+        return
+    fi
+
+    echo "==> Building vendored pdfium (static)..."
+
+    local cmake_c_flags=""
+    local cmake_cxx_flags=""
+    if [[ "$ASAN" == true ]]; then
+        cmake_c_flags="-fsanitize=address,undefined -fno-omit-frame-pointer"
+        cmake_cxx_flags="-fsanitize=address,undefined -fno-omit-frame-pointer"
+    fi
+
+    cmake -S "$src" -B "$builddir"                  \
+        -DCMAKE_BUILD_TYPE=Release                  \
+        -DUSE_STATIC_LIBRARY=ON                     \
+        -DBUILD_SHARED_LIBS=OFF                     \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON        \
+        -DCMAKE_INSTALL_PREFIX="$CODEC_PREFIX"      \
+        -DCMAKE_INSTALL_LIBDIR=lib                  \
+        -DCMAKE_PREFIX_PATH="$CODEC_PREFIX"         \
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.5          \
+        -DCMAKE_C_FLAGS="$cmake_c_flags"            \
+        -DCMAKE_CXX_FLAGS="$cmake_cxx_flags"        \
+        -G "Ninja"
+
+    cmake --build "$builddir" --parallel "$NPROC"
+
+    # Copy the built .a directly to avoid install(EXPORT) errors
+    mkdir -p "$CODEC_PREFIX/lib" "$CODEC_PREFIX/include"
+    find "$builddir" -name "libpdfium.a" -exec cp {} "$CODEC_PREFIX/lib/" \;
+    cp -r "$src/public" "$CODEC_PREFIX/include/pdfium" 2>/dev/null || true
+}
+
+build_pdfium
 
 echo "==> Codecs installed into $CODEC_PREFIX"
