@@ -131,22 +131,6 @@ StringSet find_mixed_dirs(const StringSet& media_dirs, const StringSet& gallery_
     return mixed;
 }
 
-// ---- Append: flatten every media file into base_gallery, ignore structure. ----
-// (Split out of build_zip_plan to keep its cognitive complexity under cpp:S3776.)
-ZipPlan build_append_plan(const std::vector<ZipEntry>& entries,
-                          std::optional<size_t>        meta_idx,
-                          std::string_view             base_gallery)
-{
-    ZipPlan plan;
-    for (size_t i = 0; i < entries.size(); ++i) {
-        const ZipEntry& e = entries[i];
-        if (entry_is_dir(e) || i == meta_idx) continue;
-        std::string name = basename_of(e.path);
-        if (!is_supported_media_name(name)) { ++plan.skipped_unsupported; continue; }
-        plan.placements.emplace_back(std::string(base_gallery), std::move(name), i);
-    }
-    return plan;
-}
 
 } // namespace
 
@@ -246,15 +230,13 @@ ZipPlan build_cbz_plan(const std::vector<ZipEntry>& entries,
 }
 
 ZipPlan build_zip_plan(const std::vector<ZipEntry>& entries,
-                       ZipDest                      dest,
                        std::string_view             base_gallery,
                        std::string_view             new_gallery_name,
                        ZipConflictPolicy            policy)
 {
     const std::optional<size_t> meta_idx = find_meta_entry(entries);
-    if (dest == ZipDest::Append) return build_append_plan(entries, meta_idx, base_gallery);
 
-    // ---- NewGallery: mirror the tree under base/new_gallery_name. ----
+    // ---- Mirror the tree under base_gallery/new_gallery_name. ----
     ZipPlan plan;
     const std::string root = join_path(base_gallery, new_gallery_name);
 

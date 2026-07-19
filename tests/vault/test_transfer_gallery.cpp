@@ -56,7 +56,7 @@ TEST(move_gallery_nested_roundtrip_across_reopen)
         REQUIRE(vault::Vault::create(sa.str(), bytes("ps"), {}, kKdf, src) == Ok);
         REQUIRE(vault::Vault::create(da.str(), bytes("pd"), {}, kKdf, dst) == Ok);
         REQUIRE(src.create_gallery("Trips/2024") == Ok);
-        REQUIRE(src.add_image("Trips", blob(10, 0), "cover.jpg") == InvalidArg); // Trips holds a sub-gallery
+        REQUIRE(src.add_image("Trips", blob(10, 0), "cover.jpg") == Ok); // Phase 46: mixed OK
         REQUIRE(src.add_image("Trips/2024", img1, "a.jpg") == Ok);
         REQUIRE(src.add_image("Trips/2024", img2, "b.jpg") == Ok);
 
@@ -116,7 +116,7 @@ TEST(move_gallery_name_collision_leaves_source_intact)
     CHECK(find_child(src, "", "Dupe") != nullptr);   // source untouched
 }
 
-TEST(move_gallery_into_image_holding_parent_rejected)
+TEST(move_gallery_into_image_holding_parent_succeeds)
 {
     using enum vault::VaultResult;
     TempVault sa("e1"), da("e2");
@@ -126,32 +126,39 @@ TEST(move_gallery_into_image_holding_parent_rejected)
     REQUIRE(src.create_gallery("G") == Ok);
     REQUIRE(dst.add_image("", blob(1000, 8), "root.jpg") == Ok);   // dst root holds an image
 
-    CHECK(vault::transfer_gallery(src, "G", dst, "", vault::TransferMode::Move) == InvalidArg);
-    CHECK(find_child(src, "", "G") != nullptr);
+    // Phase 46: a media-holding parent may also gain a sub-gallery.
+    CHECK(vault::transfer_gallery(src, "G", dst, "", vault::TransferMode::Move) == Ok);
+    CHECK(find_child(src, "", "G") == nullptr);
+    CHECK(find_child(dst, "", "G") != nullptr);
+    CHECK(find_child(dst, "", "root.jpg") != nullptr);   // original media still present
 }
 
-TEST(gallery_target_parents_lists_image_free_galleries_and_root)
+TEST(gallery_target_parents_lists_every_gallery)
 {
     using enum vault::VaultResult;
     TempVault tv("targets");
     vault::Vault v;
     REQUIRE(vault::Vault::create(tv.str(), bytes("p"), {}, kKdf, v) == Ok);
-    REQUIRE(v.create_gallery("Empty") == Ok);          // can accept a sub-gallery
-    REQUIRE(v.create_gallery("Holder/Inner") == Ok);   // Holder holds a sub-gallery → ok
+    REQUIRE(v.create_gallery("Empty") == Ok);
+    REQUIRE(v.create_gallery("Holder/Inner") == Ok);
     REQUIRE(v.create_gallery("Photos") == Ok);
-    REQUIRE(v.add_image("Photos", blob(500, 1), "p.jpg") == Ok);  // Photos holds images → NOT ok
+    REQUIRE(v.add_image("Photos", blob(500, 1), "p.jpg") == Ok);
 
     auto t = vault::gallery_target_parents(v);
     auto has = [&](std::string_view s) {
-        for (const auto& g : t)
-            if (g == s) return true;
+        for (const auto& g : t) {
+            if (g == s) {
+                return true;
+            }
+        }
         return false;
     };
-    CHECK(has(""));            // root holds only sub-galleries
+    // Phase 46: every gallery — including a media holder — is a valid sub-gallery parent.
+    CHECK(has(""));
     CHECK(has("Empty"));
     CHECK(has("Holder"));
     CHECK(has("Holder/Inner"));
-    CHECK_FALSE(has("Photos")); // holds images
+    CHECK(has("Photos"));   // holds media, now still a valid parent
 }
 
 TEST(transfer_gallery_copy_keeps_source_cross_vault)

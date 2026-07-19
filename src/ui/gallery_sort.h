@@ -14,14 +14,13 @@
 namespace ui {
 
 // Sort a gallery's children for display. Sub-galleries always precede
-// non-gallery children ("folders first"), regardless of `key` — in practice
-// this is a no-op safety net, since one real gallery's children are never
-// actually mixed (a gallery holds either sub-galleries or images/videos,
-// never both). Within each group: Manual preserves `nodes`' input order;
-// NameAsc/NameDesc delegates to ui::natural_less (Phase 24); DateAsc/DateDesc
-// compares created_ts (0 for Gallery children, so a sub-gallery listing sorts
-// stably under these keys — they only do meaningful work in a leaf gallery);
-// SizeAsc/SizeDesc compares orig_size likewise. Stable throughout, so ties
+// non-gallery children ("folders first"), regardless of `key` — since Phase 46,
+// galleries genuinely mix, and this is the live display ordering rule (all
+// sub-galleries come before any image/video children, regardless of sort key).
+// Within each group: Manual preserves `nodes`' input order; NameAsc/NameDesc
+// delegates to ui::natural_less (Phase 24); DateAsc/DateDesc compares created_ts
+// (0 for Gallery children, so a sub-gallery listing sorts stably under these
+// keys); SizeAsc/SizeDesc compares orig_size likewise. Stable throughout, so ties
 // preserve relative insertion order.
 [[nodiscard]] std::vector<const vault::IndexNode*>
 sort_children(std::span<const vault::IndexNode*> nodes, vault::SortKey key);

@@ -1169,6 +1169,10 @@ vendor/
 assets/fonts/   bundled OFL font for stb_truetype
 ```
 
+## Phase 46: Mixed galleries
+
+Relaxed the leaf-only invariant so galleries may hold any mix of images, videos, and sub-galleries. Removed three vault insertion guards (`add_image`, `add_video`, `create_gallery`); removed two grid action-gates (image/video importers no longer check `holds_galleries`); removed transfer/combine type-pruning that split destinations into leaf vs. non-leaf targets. Fixed `combine`'s mixed-source dispatch. Sort helper (`gallery_sort.h`, folders-first ordering) and image viewer (media-only album) were already mixed-ready. Plain-archive (`.zip` etc.) import now always creates a new named sub-gallery (no prompt for gallery selection). No `.osv` format change, no migration required — existing vaults already valid under the relaxed rule.
+
 ## Project-wide invariants (NEVER violate)
 
 1. No decrypted bytes to disk — only `mlock`'d heap buffers.

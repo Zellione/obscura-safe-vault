@@ -12,8 +12,8 @@ foundational spec.
   passphrase (password is the genuine security boundary).
 
 ## Gallery grid (Phase 5)
-- Tile grid: sub-galleries (folder icon) or image thumbnails (leaf gallery),
-  never mixed.
+- Tile grid: sub-galleries (folder icon) and image thumbnails, rendered
+  folders-first (Phase 46).
 - Breadcrumb bar at top shows current path.
 - Keyboard: `Enter`/`Space` open, `Backspace`/`Esc` up.
 - Import via SDL file dialog; thumbnails generated + stored on import.

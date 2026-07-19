@@ -16,8 +16,7 @@ class Vault;
 
 namespace ui {
 
-// Groups the mirror/append destination + conflict policy (Phase 34) — both
-// trivial enum values — to bring start_archive under the S107 parameter-count
+// Groups the conflict policy to bring start_archive under the S107 parameter-count
 // cap. Deliberately NOT used to bundle the Phase 35 password: SonarQube's
 // dataflow analysis lost track of ownership when crypto::SecureBytes (which
 // owns a std::unique_ptr internally) was nested inside an aggregate passed
@@ -26,7 +25,6 @@ namespace ui {
 // password stay flat parameters here, matching the pre-Phase-35 signature
 // shape that analyzed cleanly.
 struct ZipImportTarget {
-    ZipDest           dest;
     ZipConflictPolicy policy;
 };
 
@@ -57,7 +55,7 @@ public:
     // Launch a ZIP import (mirrors ui::import_zip). A ZIP with mixed folders under
     // AskUser comes back needs_resolution having written nothing (planning only) —
     // the caller shows a Flatten/Skip modal and re-starts with the chosen policy.
-    bool start_zip(vault::Vault& v, std::filesystem::path zip, ZipDest dest,
+    bool start_zip(vault::Vault& v, std::filesystem::path zip,
                    std::string base_gallery, std::string new_gallery_name,
                    ZipConflictPolicy policy);
 

@@ -30,7 +30,7 @@
 - `src/platform/` wraps OS-specific paths + SDL file dialogs.
 
 ## Gallery model
-- Galleries nest freely; images only in leaf galleries (never mixed sub-gallery + image).
+- Galleries nest freely; may hold any mix of images, videos, and sub-galleries as direct children (Phase 46). Grid displays sub-galleries first, then media.
 
 ## Testing
 - Unit tests in `tests/<module>/`, integration tests exercise full round-trips.

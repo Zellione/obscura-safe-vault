@@ -47,14 +47,6 @@ bool holds_subgalleries(const Vault& v, std::string_view gallery)
     return std::ranges::any_of(children, [](const IndexNode* c) { return c->is_gallery(); });
 }
 
-bool types_compatible(const Vault& src, std::string_view src_gallery,
-                      const Vault& dst, std::string_view dst_gallery)
-{
-    if (holds_media(src, src_gallery) && holds_subgalleries(dst, dst_gallery)) return false;
-    if (holds_subgalleries(src, src_gallery) && holds_media(dst, dst_gallery)) return false;
-    return true;
-}
-
 // True only when dst_gallery is src_gallery itself or lives inside it — the
 // one direction that would orphan the destination once the source is
 // deleted. The reverse (src nested inside dst) is a legitimate "flatten
@@ -84,7 +76,7 @@ void walk_all_galleries(const Vault& v, std::string_view gallery, std::vector<st
         if (c->is_gallery()) walk_all_galleries(v, child_path(gallery, c->name), out);
 }
 
-// Cycle check + endpoint existence + type compatibility. On success `src_node`
+// Cycle check + endpoint existence. On success `src_node`
 // receives the source gallery's own IndexNode (for its tags); on failure it is
 // left unset and the caller must not dereference it.
 VaultResult validate_combine(const Vault& src, std::string_view src_gallery,
@@ -102,7 +94,6 @@ VaultResult validate_combine(const Vault& src, std::string_view src_gallery,
         if (!dst_node || !dst_node->is_gallery()) return NotFound;
     }
 
-    if (!types_compatible(src, src_gallery, dst, dst_gallery)) return InvalidArg;
     return Ok;
 }
 
@@ -197,13 +188,16 @@ VaultResult combine_impl(Vault& src, std::string_view src_gallery,
 
     if (holds_media(src, src_gallery)) {
         if (const VaultResult r = move_media_children(src, src_gallery, dst, dst_gallery, tally, progress);
-            r != Ok)
+            r != Ok) {
             return r;
-    } else if (holds_subgalleries(src, src_gallery)) {
+        }
+    }
+    if (holds_subgalleries(src, src_gallery)) {
         if (const VaultResult r =
                 move_subgalleries_children(src, src_gallery, dst, dst_gallery, tally, progress);
-            r != Ok)
+            r != Ok) {
             return r;
+        }
     }
 
     if (src.list(src_gallery).empty()) {
@@ -238,7 +232,6 @@ std::vector<std::string> combine_target_galleries(const Vault& dst, const Vault&
     const std::string src_prefix = std::string(src_gallery) + "/";
     for (auto& path : all) {
         if (&dst == &src && (path == src_gallery || path.starts_with(src_prefix))) continue;
-        if (!types_compatible(src, src_gallery, dst, path)) continue;
         out.push_back(std::move(path));
     }
     return out;

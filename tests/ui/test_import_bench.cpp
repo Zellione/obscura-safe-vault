@@ -40,7 +40,6 @@
 //   OSV_BENCH=1 OSV_BENCH_DIR=/home/zellione/.cache build/bin/Debug/osv_tests
 
 namespace fs = std::filesystem;
-using ui::ZipDest;
 using ui::ZipConflictPolicy;
 using ziptest::cleanup_dir;
 using ziptest::fresh_dir;
@@ -97,7 +96,7 @@ TEST(import_bench_bulk_images)
 
     auto start = std::chrono::steady_clock::now();
 
-    auto out = ui::import_zip(v, zip, ZipDest::NewGallery, "", "BenchGallery", ZipConflictPolicy::AskUser);
+    auto out = ui::import_zip(v, zip, "", "BenchGallery", ZipConflictPolicy::AskUser);
 
     auto end = std::chrono::steady_clock::now();
 

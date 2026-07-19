@@ -156,7 +156,6 @@ void run_placements(vault::Vault& v, mz_zip_archive& zip, const ZipPlan& plan,
 
 ZipImportOutcome import_zip(vault::Vault&                v,
                             const std::filesystem::path& zip_path,
-                            ZipDest                      dest,
                             std::string_view             base_gallery,
                             std::string_view             new_gallery_name,
                             ZipConflictPolicy            policy,
@@ -170,12 +169,10 @@ ZipImportOutcome import_zip(vault::Vault&                v,
     // A top-level meta.json tags the new top gallery (Phase 27). Its title is
     // NOT applied here: the UI prefills the name popup from peek_archive_meta,
     // so `new_gallery_name` (the user's confirmed text) is authoritative.
-    // Append has no created gallery to tag, so its meta is only excluded.
     const std::vector<ZipEntry> entries = read_entry_list(zip);
-    const ArchiveMeta meta =
-        dest == ZipDest::NewGallery ? load_archive_meta(zip, entries) : ArchiveMeta{};
+    const ArchiveMeta meta = load_archive_meta(zip, entries);
 
-    ZipPlan plan = build_zip_plan(entries, dest, base_gallery, new_gallery_name, policy);
+    ZipPlan plan = build_zip_plan(entries, base_gallery, new_gallery_name, policy);
     if (plan.needs_resolution) {
         out.ok = true;
         out.needs_resolution = true;
@@ -186,8 +183,9 @@ ZipImportOutcome import_zip(vault::Vault&                v,
     out.skipped = plan.skipped_unsupported;
 
     if (!create_galleries(v, plan, zip, out)) return out;
-    if (dest == ZipDest::NewGallery && !plan.placements.empty())
+    if (!plan.placements.empty()) {
         apply_meta_tags(v, joined_gallery(base_gallery, new_gallery_name), meta);
+    }
     run_placements(v, zip, plan, out, progress);
     return out;
 }
@@ -216,8 +214,9 @@ ZipImportOutcome import_cbz(vault::Vault&                v,
     out.skipped = plan.skipped_unsupported;
 
     if (!create_galleries(v, plan, zip, out)) return out;
-    if (!plan.placements.empty())
+    if (!plan.placements.empty()) {
         apply_meta_tags(v, joined_gallery(base_gallery, gallery_name), meta);
+    }
     run_placements(v, zip, plan, out, progress);
     return out;
 }

@@ -168,7 +168,6 @@ private:
     struct PendingZip {
         std::filesystem::path path;
         std::string           gallery_name;
-        ui::ZipDest           dest = ui::ZipDest::NewGallery;
         bool                  active = false;  // awaiting conflict resolution (Flatten/Skip)
         bool                  cbz = false;     // .cbz/.cbr/.cb7/.cbt comic import: fixed one-leaf plan
         // .7z/.rar/.tar(+.gz/.xz)/.cbr/.cb7/.cbt (Phase 34) route through

@@ -20,12 +20,10 @@ struct ArchivePassword {
     std::string_view password;
 };
 
-// Bundles where a ZIP-style import lands: mirror/append `dest` under
-// base_gallery/new_gallery_name per `policy` — the same four values
-// import_zip takes individually, grouped here because import_archive alone
+// Bundles where a ZIP-style import lands: mirror under base_gallery/new_gallery_name
+// per `policy` — three values grouped here because import_archive alone
 // needs the extra param-count relief (import_zip already fits the S107 cap).
 struct ZipDestination {
-    ZipDest           dest;
     std::string_view  base_gallery;
     std::string_view  new_gallery_name;
     ZipConflictPolicy policy;

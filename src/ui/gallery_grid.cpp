@@ -95,20 +95,7 @@ GridSpec grid_spec(float win_w, int cols, float cell) noexcept
     return {cols, cell, GAP, ox, OY};
 }
 
-// Leaf-invariant checks over the current listing (free, not members, to keep the
-// class under the S1448 method cap). A gallery that holds sub-galleries can't take
-// images; one that holds media can't take sub-galleries.
 using ChildList = std::vector<const vault::IndexNode*>;
-bool leaf_allows_images(const ChildList& children)
-{
-    return std::ranges::none_of(children,
-                                [](const vault::IndexNode* c) { return c->is_gallery(); });
-}
-bool leaf_allows_galleries(const ChildList& children)
-{
-    return std::ranges::none_of(children,
-                                [](const vault::IndexNode* c) { return c->is_media(); });
-}
 
 // Background-import progress modal (free, not a member, for the S1448 cap). Veils
 // the grid — drawn instead of the tiles so no thumbnail is decrypted on the UI
@@ -363,20 +350,12 @@ void GalleryGrid::do_export(const std::filesystem::path& dest)
 void GalleryGrid::start_import()
 {
     if (dialogs_.file.busy()) return;
-    if (!leaf_allows_images(children_)) {
-        error_ = "Can't import here: this gallery holds sub-galleries.";
-        return;
-    }
     error_.clear();
     dialogs_.file.open_images(win_.sdl_window());
 }
 
 void GalleryGrid::start_naming()
 {
-    if (!leaf_allows_galleries(children_)) {
-        error_ = "Can't create a sub-gallery in an image gallery.";
-        return;
-    }
     naming_.active = true;
     naming_.buf.clear();
     error_.clear();
@@ -883,31 +862,20 @@ void GalleryGrid::pump_zip_import()
                 ? zp.stem().string()
                 : ui::meta_gallery_name(ui::peek_archive_meta(zp), zp.stem().string());
             naming_.zip.path = zp;
-            naming_.zip.dest = ui::ZipDest::NewGallery;
             naming_.zip.cbz = true;
             naming_.zip.archive_backend = archive_backend;
             naming_.zip.needs_password  = needs_password;
             naming_.zip.active = true;
         }
-    } else if (leaf_allows_images(children_) && !leaf_allows_galleries(children_)) {
-        // Current gallery holds only media (leaf): import with Append (no name prompt).
-        naming_.zip.path = zp;
-        naming_.zip.gallery_name.clear();
-        naming_.zip.dest = ui::ZipDest::Append;
-        naming_.zip.cbz = false;
-        naming_.zip.archive_backend = archive_backend;
-        naming_.zip.needs_password  = needs_password;
-        naming_.zip.active = true;
-        do_zip_import(zp, ui::ZipConflictPolicy::AskUser);
     } else {
-        // Current is empty or holds sub-galleries: prompt for new gallery name.
+        // Phase 46: a plain archive always imports as a new named sub-gallery
+        // (like CBZ), so mixed galleries have no ambiguous append-vs-folder choice.
         start_naming();   // reuse the naming flow
         // Prefill from meta.json title → filename stem, as in the CBZ branch.
         naming_.buf = archive_backend
             ? zp.stem().string()
             : ui::meta_gallery_name(ui::peek_archive_meta(zp), zp.stem().string());
         naming_.zip.path = zp;
-        naming_.zip.dest = ui::ZipDest::NewGallery;
         naming_.zip.cbz = false;
         naming_.zip.archive_backend = archive_backend;
         naming_.zip.needs_password  = needs_password;
@@ -918,10 +886,9 @@ void GalleryGrid::pump_zip_import()
 
 void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipConflictPolicy policy)
 {
-    // The gallery name and destination come from naming_.zip.
+    // The gallery name comes from naming_.zip.
     const std::string gallery_name = naming_.zip.gallery_name;
     const std::string base_gallery = nav_.path();
-    const ui::ZipDest dest = naming_.zip.dest;
 
     // Both CBZ and ZIP imports run on a background thread so the UI never freezes
     // on a large archive (Phase 24 fix) — synchronously here would freeze it on the
@@ -945,11 +912,11 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipCo
             naming_.import_job.start_cbz(vault_, zip_path, base_gallery, gallery_name);
     } else {
         if (naming_.zip.archive_backend)
-            naming_.import_job.start_archive(vault_, zip_path, ui::ZipImportTarget{dest, policy},
+            naming_.import_job.start_archive(vault_, zip_path, ui::ZipImportTarget{policy},
                                              base_gallery, gallery_name, naming_.zip.needs_password,
                                              password_bytes(naming_.password.buf));
         else
-            naming_.import_job.start_zip(vault_, zip_path, dest, base_gallery, gallery_name, policy);
+            naming_.import_job.start_zip(vault_, zip_path, base_gallery, gallery_name, policy);
     }
     mark_dirty();
 }

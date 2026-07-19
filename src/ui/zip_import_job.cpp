@@ -43,13 +43,13 @@ bool ZipImportJob::start_cbz(vault::Vault& v, std::filesystem::path cbz,
     });
 }
 
-bool ZipImportJob::start_zip(vault::Vault& v, std::filesystem::path zip, ZipDest dest,
+bool ZipImportJob::start_zip(vault::Vault& v, std::filesystem::path zip,
                              std::string base_gallery, std::string new_gallery_name,
                              ZipConflictPolicy policy)
 {
-    return launch([this, &v, zip = std::move(zip), dest, base = std::move(base_gallery),
+    return launch([this, &v, zip = std::move(zip), base = std::move(base_gallery),
                    name = std::move(new_gallery_name), policy]() {
-        return import_zip(v, zip, dest, base, name, policy, &progress_);
+        return import_zip(v, zip, base, name, policy, &progress_);
     });
 }
 
@@ -64,7 +64,7 @@ bool ZipImportJob::start_archive(vault::Vault& v, std::filesystem::path archive,
             : std::string_view(reinterpret_cast<const char*>(pw->data()), pw->size());
         ZipImportOutcome oc = import_archive(
             v, archive,
-            ZipDestination{.dest = target.dest, .base_gallery = base, .new_gallery_name = name,
+            ZipDestination{.base_gallery = base, .new_gallery_name = name,
                            .policy = target.policy},
             &progress_,
             ArchivePassword{.password_protected = password_protected, .password = pw_view});
