@@ -158,7 +158,11 @@ TEST(transfer_image_target_galleries_lists_every_gallery)
 
     auto t = vault::image_target_galleries(v);
     auto has = [&](std::string_view s) {
-        for (auto& g : t) if (g == s) return true;
+        for (auto& g : t) {
+            if (g == s) {
+                return true;
+            }
+        }
         return false;
     };
     // Phase 46: every gallery — including the root and a sub-gallery holder — is eligible.

@@ -146,7 +146,11 @@ TEST(gallery_target_parents_lists_every_gallery)
 
     auto t = vault::gallery_target_parents(v);
     auto has = [&](std::string_view s) {
-        for (const auto& g : t) if (g == s) return true;
+        for (const auto& g : t) {
+            if (g == s) {
+                return true;
+            }
+        }
         return false;
     };
     // Phase 46: every gallery — including a media holder — is a valid sub-gallery parent.

@@ -150,7 +150,11 @@ TEST(combine_target_galleries_lists_all_but_self_and_descendants)
 
     const auto t = vault::combine_target_galleries(v, v, "Photos");
     auto has = [&](std::string_view s) {
-        for (auto& g : t) if (g == s) return true;
+        for (auto& g : t) {
+            if (g == s) {
+                return true;
+            }
+        }
         return false;
     };
     CHECK(has("OtherLeaf"));
