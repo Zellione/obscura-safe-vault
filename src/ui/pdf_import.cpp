@@ -16,8 +16,8 @@
 
 namespace ui {
 
-// Read entire file into memory
-bool read_pdf_file(const std::filesystem::path& path, std::vector<uint8_t>& out)
+// Read entire file into secure memory (mlock'd, wiped on destruction)
+bool read_pdf_file(const std::filesystem::path& path, crypto::SecureBytes& out)
 {
     std::ifstream file(path, std::ios::binary);
     if (!file) {
@@ -27,7 +27,10 @@ bool read_pdf_file(const std::filesystem::path& path, std::vector<uint8_t>& out)
     file.seekg(0, std::ios::end);
     size_t size = file.tellg();
     file.seekg(0, std::ios::beg);
-    out.resize(size);
+    if (!out.resize(size)) {
+        std::println(stderr, "[PdfImport] Failed to allocate {} bytes for PDF file", size);
+        return false;
+    }
     file.read(reinterpret_cast<char*>(out.data()), size);
     return file.good();
 }
@@ -70,8 +73,8 @@ ZipImportOutcome import_pdf(vault::Vault& v,
 {
     ZipImportOutcome out;
 
-    // Read PDF file into memory
-    std::vector<uint8_t> pdf_bytes;
+    // Read PDF file into secure memory (mlock'd, auto-wiped on scope exit)
+    crypto::SecureBytes pdf_bytes;
     if (!read_pdf_file(pdf_path, pdf_bytes)) {
         out.error = "Could not open PDF file";
         return out;
