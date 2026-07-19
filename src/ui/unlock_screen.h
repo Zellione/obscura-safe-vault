@@ -34,11 +34,13 @@ private:
         SDL_FRect submit_btn;
         SDL_FRect generate_btn;     // create mode only
         SDL_FRect new_keyfile_btn;  // create mode only
+        SDL_FRect copy_btn;         // Phase 45 Part 3: copy password to clipboard
     };
     [[nodiscard]] Layout layout() const;
     void handle_click(const SDL_MouseButtonEvent& b);
     void submit();
     void apply_dialog_result(const std::string& path);
+    void copy_password_to_clipboard();   // Phase 45 Part 3
 
     enum class Pending { None, Vault, Keyfile, NewKeyfile };
 
@@ -55,6 +57,11 @@ private:
     std::string           error_;
     Pending               pending_   = Pending::None;
     bool                  reveal_pw_ = false;  // show a freshly generated passphrase
+
+    // Phase 45 Part 3: what we last copied (for the auto-clear equality
+    // check) and how long ago (-1 = no pending auto-clear).
+    std::string           clipboard_last_set_;
+    double                clipboard_clear_timer_ = -1.0;
 
     // Mouse tracking for button hover/active states.
     float                 mouse_x_    = -1.0f;

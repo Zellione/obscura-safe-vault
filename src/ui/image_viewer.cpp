@@ -78,6 +78,11 @@ float ImageViewer::thumb_size() const
 
 SDL_FRect ImageViewer::viewport_rect() const
 {
+    // Fullscreen reclaims the space the thumbnail strip would occupy —
+    // it's hidden outright (render()/strip_hit() both check is_fullscreen()
+    // too), so the viewport is simply the whole window (Phase 45 Part 4).
+    if (win_.is_fullscreen())
+        return {0.0f, 0.0f, static_cast<float>(win_.width()), static_cast<float>(win_.height())};
     return viewport_rect_for(strip_side_, static_cast<float>(win_.width()),
                              static_cast<float>(win_.height()), thumb_size());
 }
@@ -220,6 +225,7 @@ bool ImageViewer::pump_thumbs()
 
 int ImageViewer::strip_hit(float mx, float my) const
 {
+    if (win_.is_fullscreen()) return -1;   // strip is hidden — nothing to hit (Phase 45 Part 4)
     const SDL_FRect strip   = strip_rect();
     const float     thumb   = thumb_size();
     const bool      vertical = (strip_side_ == StripSide::Left);
@@ -643,7 +649,7 @@ void ImageViewer::render(gfx::Renderer& r)
     }
 
     render_hud(r, vp);
-    render_strip(r);
+    if (!win_.is_fullscreen()) render_strip(r);   // Phase 45 Part 4
 
     export_.render(r, font_, static_cast<float>(win_.width()),
                    static_cast<float>(win_.height()));

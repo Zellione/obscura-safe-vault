@@ -418,6 +418,21 @@ void GalleryGrid::finish_naming()
 
 void GalleryGrid::start_tag_editor(bool import_list)
 {
+    // 2+ Space-selected tiles (images and/or galleries): bulk add/remove
+    // (Phase 45 Part 2). Anything less falls through to the existing
+    // single-focused-tile editor below, unchanged.
+    if (!import_list && sel_.count() >= 2) {
+        std::vector<std::string> paths;
+        for (int idx : sel_.indices()) {
+            if (idx < 0 || idx >= static_cast<int>(children_.size())) continue;
+            const auto& name = children_[idx]->name;
+            paths.push_back(nav_.path().empty() ? name : nav_.path() + "/" + name);
+        }
+        if (paths.size() < 2) return;   // stale selection somehow shrank — bail quietly
+        tag_editor_.open_multi(std::move(paths));
+        return;
+    }
+
     const int s = nav_.selected();
     if (s < 0 || s >= static_cast<int>(children_.size())) return;
 
@@ -1217,7 +1232,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
         }},
         {"Search & tags", {
             {"/", "Search"}, {"Shift+/ (?)", "Advanced search"},
-            {"G", "Edit tags"}, {"Shift+G", "Import a tag list"},
+            {"G", "Edit tags (2+ selected: bulk add/remove)"}, {"Shift+G", "Import a tag list"},
             {"Shift+T", "Tags overview"},
             {"B", "Favorite"}, {"F", "Favorite images"}, {"Shift+F", "Favorite galleries"},
         }},

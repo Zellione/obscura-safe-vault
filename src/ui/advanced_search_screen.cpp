@@ -196,6 +196,20 @@ void AdvancedSearchScreen::rerun()
     result_view_.update_results(results);
 }
 
+void AdvancedSearchScreen::start_rename()
+{
+    if (rename_.active()) return;
+    const auto& results = result_view_.get_results();
+    const int   idx     = result_view_.get_cursor();
+    if (idx < 0 || idx >= static_cast<int>(results.size())) return;
+
+    const std::string& path  = results[idx].path;
+    const auto          slash = path.rfind('/');
+    const std::string   gallery_path = slash == std::string::npos ? std::string{} : path.substr(0, slash);
+    const std::string   name         = slash == std::string::npos ? path : path.substr(slash + 1);
+    rename_.open(gallery_path, name);
+}
+
 std::string* AdvancedSearchScreen::active_buffer()
 {
     // Check if saved_panel is in save mode (has an active buffer)
@@ -236,6 +250,7 @@ std::string AdvancedSearchScreen::accepted(const std::string& buf) const
 
 void AdvancedSearchScreen::handle_event(const SDL_Event& e)
 {
+    if (rename_.active()) { (void)rename_.handle_event(vault_, e); return; }
     if (e.type == SDL_EVENT_TEXT_INPUT)    handle_text(e.text.text);
     else if (e.type == SDL_EVENT_KEY_DOWN) handle_key(e.key);
 }
@@ -243,6 +258,10 @@ void AdvancedSearchScreen::handle_event(const SDL_Event& e)
 void AdvancedSearchScreen::update(double /*dt*/)
 {
     result_view_.pump_thumbnails();   // upload any off-thread thumb/cover decodes
+    if (std::string s; rename_.consume_completed(s)) {
+        status_ = std::move(s);
+        rerun();   // the renamed result's new name/path must show up
+    }
     mark_dirty();   // mark screen dirty since thumbnails changed
 }
 
@@ -265,40 +284,44 @@ void AdvancedSearchScreen::handle_text(const char* text)
     }
 }
 
+void AdvancedSearchScreen::handle_clearing_key(const SDL_KeyboardEvent& key)
+{
+    if (key.key == SDLK_Y || key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) {
+        query_ = {};   // reset to a default (empty) query + builder + cursor
+        edit_  = {};
+        cur_   = {};
+        focus_ = Focus::Include;
+        clearing_ = false;
+        status_   = "Search cleared.";
+        refresh_suggestions();
+        rerun();
+    } else if (key.key == SDLK_N || key.key == SDLK_ESCAPE) {
+        clearing_ = false;
+        status_   = "Clear cancelled.";
+    }
+}
+
+void AdvancedSearchScreen::handle_save_mode_key(const SDL_KeyboardEvent& key)
+{
+    if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) {
+        if (saved_panel_.finalize_save(query_)) {
+            reload_saved();
+        }
+    } else if (key.key == SDLK_ESCAPE) {
+        status_ = "Save cancelled.";
+    } else if (key.key == SDLK_BACKSPACE) {
+        backspace();
+    }
+}
+
 void AdvancedSearchScreen::handle_key(const SDL_KeyboardEvent& key)
 {
     // The clear-search confirmation is modal: it swallows every key until the
     // user answers (Y/Enter = clear, N/Esc = cancel).
-    if (clearing_) {
-        if (key.key == SDLK_Y || key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) {
-            query_ = {};   // reset to a default (empty) query + builder + cursor
-            edit_  = {};
-            cur_   = {};
-            focus_ = Focus::Include;
-            clearing_ = false;
-            status_   = "Search cleared.";
-            refresh_suggestions();
-            rerun();
-        } else if (key.key == SDLK_N || key.key == SDLK_ESCAPE) {
-            clearing_ = false;
-            status_   = "Clear cancelled.";
-        }
-        return;
-    }
+    if (clearing_) { handle_clearing_key(key); return; }
 
     // Handle save mode keys (Escape/Enter/Backspace)
-    if (saved_panel_.active_buffer()) {
-        if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) {
-            if (saved_panel_.finalize_save(query_)) {
-                reload_saved();
-            }
-        } else if (key.key == SDLK_ESCAPE) {
-            status_ = "Save cancelled.";
-        } else if (key.key == SDLK_BACKSPACE) {
-            backspace();
-        }
-        return;
-    }
+    if (saved_panel_.active_buffer()) { handle_save_mode_key(key); return; }
 
     if ((key.mod & SDL_KMOD_CTRL) != 0 && key.key == SDLK_S) {
         saved_panel_.begin_naming();
@@ -313,6 +336,7 @@ void AdvancedSearchScreen::handle_key(const SDL_KeyboardEvent& key)
         clearing_ = true;   // ask before wiping the query (confirmed in the block above)
         return;
     }
+    if (focus_ == Focus::Results && key.key == SDLK_R) { start_rename(); return; }
 
     switch (key.key) {
         case SDLK_ESCAPE:    request(NavKind::ToGallery, "", 0); return;
@@ -659,6 +683,8 @@ void AdvancedSearchScreen::render(gfx::Renderer& r)
         r.draw_text(font_, box.x + 16, box.y + 44, "[Y] Yes      [N] No", TEXT);
     }
     if (!status_.empty()) r.draw_text(font_, PAD, H - 24, status_, TEXT_FAINT);
+
+    rename_.render(r, font_, W, H);
 }
 
 void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, float colw)
@@ -770,7 +796,7 @@ std::vector<ui::HelpGroup> AdvancedSearchScreen::help_groups() const
         }},
         {"Results & saved searches", {
             {"Ctrl+S", "Save search"}, {"Ctrl+L", "Toggle list/grid view"},
-            {"Ctrl+R", "Clear query"},
+            {"Ctrl+R", "Clear query"}, {"R", "Rename focused result"},
         }},
         {"Navigate", {{"Esc", "Back"}}},
     };

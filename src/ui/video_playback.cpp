@@ -33,7 +33,7 @@ namespace ui {
 namespace {
 constexpr float  CONTROL_H        = 56.0f;       // transport strip height
 constexpr float  PAD              = 16.0f;
-constexpr float  TRACK_H          = 6.0f;
+constexpr float  TRACK_H          = 10.0f;
 constexpr float  KNOB_R           = 8.0f;
 constexpr double DEFAULT_FRAME_DT = 1.0 / 30.0;  // backward frame-step fallback
 constexpr size_t PREFETCH_DEPTH   = 2;           // packets kept queued ahead of the video decode worker
@@ -545,7 +545,9 @@ struct VideoPlayback::Impl {
 
     [[nodiscard]] bool on_track(float mx, float my) const
     {
-        constexpr float grab_y = 12.0f;   // generous vertical grab margin
+        // Bigger invisible grab zone than the visible bar (Phase 45 Part 5) —
+        // a thin, tasteful track with an easy-to-hit click/drag target.
+        constexpr float grab_y = 18.0f;
         return mx >= track_.x - KNOB_R && mx <= track_.x + track_.w + KNOB_R &&
                my >= track_.y - grab_y && my <= track_.y + track_.h + grab_y;
     }
