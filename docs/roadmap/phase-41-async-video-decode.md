@@ -1,4 +1,4 @@
-## Phase 41 — Async video decode 🔜
+## Phase 41 — Async video decode ✅
 
 **Goal:** Video is the one place expensive decode work still runs
 synchronously on the render thread (`VideoPlayback::Impl::advance()` calls
