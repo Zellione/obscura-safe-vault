@@ -3,7 +3,6 @@
 #ifdef OSV_VENDORED_PDFIUM
 
 #include <fpdfview.h>
-#include <fpdf_render.h>
 #include <print>
 #include <cstring>
 
@@ -61,7 +60,8 @@ int PdfDocument::page_count() const noexcept
     return FPDF_GetPageCount(static_cast<FPDF_DOCUMENT>(doc_));
 }
 
-bool PdfDocument::render_page(int page_num, int dpi, crypto::SecureBytes& out_rgba) noexcept
+bool PdfDocument::render_page(int page_num, int dpi, crypto::SecureBytes& out_rgba,
+                              int& out_width, int& out_height) noexcept
 {
     if (!doc_) {
         std::println(stderr, "[PdfRender] Cannot render: no document loaded");
@@ -98,7 +98,6 @@ bool PdfDocument::render_page(int page_num, int dpi, crypto::SecureBytes& out_rg
 
     // Allocate RGBA buffer (4 bytes per pixel)
     size_t buffer_size = static_cast<size_t>(width_pixels) * height_pixels * 4;
-    out_rgba.clear();
     if (!out_rgba.resize(buffer_size)) {
         std::println(stderr, "[PdfRender] Failed to allocate {} bytes for page bitmap", buffer_size);
         FPDF_ClosePage(page);
@@ -122,6 +121,10 @@ bool PdfDocument::render_page(int page_num, int dpi, crypto::SecureBytes& out_rg
     // Copy bitmap buffer to our RGBA output
     const uint8_t* bitmap_buffer = static_cast<const uint8_t*>(FPDFBitmap_GetBuffer(bitmap));
     std::memcpy(out_rgba.data(), bitmap_buffer, buffer_size);
+
+    // Set output dimensions
+    out_width = width_pixels;
+    out_height = height_pixels;
 
     // Cleanup
     FPDFBitmap_Destroy(bitmap);

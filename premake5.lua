@@ -286,10 +286,11 @@ local function link_pdfium()
     end
 
     if cmake_static_lib(prefix, "pdfium") then
-        includedirs { path.join(prefix, "include") }
-        libdirs     { path.join(prefix, "lib") }
+        includedirs { path.join(prefix, "include/pdfium") }
         defines     { "OSV_VENDORED_PDFIUM" }
-        links       { "pdfium" }
+        -- Link PDFium directly by full path to avoid linker "incompatible" issues
+        -- Add --allow-shlib-undefined to suppress eh_frame warnings from legacy PDFium builds
+        linkoptions { path.join(prefix, "lib/libpdfium.a"), "--allow-shlib-undefined" }
     end
 end
 
@@ -520,6 +521,7 @@ project "osv_tests"
         "src/ui/import_common.cpp",
         "src/ui/zip_encoding.cpp",
         "src/ui/zip_import.cpp",
+        "src/ui/pdf_import.cpp",
         "src/ui/zip_import_job.cpp",
         "src/ui/file_op_job.cpp",
         "src/ui/progress_modal.cpp",

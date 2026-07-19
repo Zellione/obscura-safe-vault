@@ -14,9 +14,10 @@ TEST(pdf_plan_creates_correct_structure)
     CHECK(plan.galleries[0].find("test") != std::string::npos);
     CHECK_EQ(plan.placements.size(), std::size_t{3});
 
-    // Pages should be in order with correct page numbers
+    // Pages should be in order with correct entry indices
     for (size_t i = 0; i < plan.placements.size(); ++i) {
-        CHECK_EQ(plan.placements[i].page_number, static_cast<int>(i));
+        CHECK_EQ(plan.placements[i].entry_index, i);
+        CHECK(plan.placements[i].filename.find("page_") != std::string::npos);
     }
 }
 
@@ -25,7 +26,7 @@ TEST(pdf_plan_single_page)
     auto plan = ui::build_pdf_plan(1, "/", "single.pdf");
     CHECK_EQ(plan.galleries.size(), std::size_t{1});
     CHECK_EQ(plan.placements.size(), std::size_t{1});
-    CHECK_EQ(plan.placements[0].page_number, 0);
+    CHECK_EQ(plan.placements[0].entry_index, 0);
 }
 
 TEST(pdf_plan_nested_gallery)

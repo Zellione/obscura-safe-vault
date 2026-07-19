@@ -8,11 +8,14 @@
 #include "vault/safe_name.h"
 #include "image/format_registry.h"
 #include "ui/import_common.h"
+#include "ui/zip_import.h"  // For ImportProgress = vault::OpProgress
 
+#include <stb_image_write.h>
 #include <print>
 #include <filesystem>
 #include <fstream>
 #include <vector>
+#include <cstring>
 
 namespace ui {
 
@@ -55,9 +58,8 @@ ImportPlan build_pdf_plan(int page_count,
     for (int i = 0; i < page_count; ++i) {
         ZipPlacement pl{
             .gallery_path = gallery_path,
+            .filename = "page_" + std::to_string(i + 1) + ".png",
             .entry_index = static_cast<size_t>(i),
-            .filename = "page_" + std::to_string(i + 1) + ".rgba",  // Temporary name for tracking
-            .page_number = i,
         };
         plan.placements.push_back(pl);
     }
@@ -87,7 +89,7 @@ ZipImportOutcome import_pdf(vault::Vault& v,
 
     // Load PDF document
     media::PdfDocument doc;
-    if (!doc.open(pdf_bytes)) {
+    if (!doc.open(pdf_bytes.as_span())) {
         out.error = "Could not parse PDF file";
         std::println(stderr, "[PdfImport] PDF parsing failed: {}", pdf_path.string());
         return out;
@@ -110,7 +112,7 @@ ZipImportOutcome import_pdf(vault::Vault& v,
 
     // Create gallery
     std::string gallery_path = plan.galleries[0];
-    vault::VaultResult r = v.create_gallery(gallery_path);
+    auto r = v.create_gallery(gallery_path);
     if (r != vault::VaultResult::Ok && r != vault::VaultResult::AlreadyExists) {
         out.error = "Could not create gallery: " + gallery_path;
         return out;
@@ -127,25 +129,51 @@ ZipImportOutcome import_pdf(vault::Vault& v,
 
         // Render page to RGBA
         crypto::SecureBytes rgba;
-        if (!doc.render_page(i, 150, rgba)) {
+        int width = 0, height = 0;
+        if (!doc.render_page(i, 150, rgba, width, height)) {
             std::println(stderr, "[PdfImport] Failed to render page {}", i);
             ++out.skipped;
             if (progress) progress->done.fetch_add(1);
             continue;
         }
 
-        // Add as image (RGBA format always detected as image)
-        std::string page_name = "page_" + std::to_string(i + 1);
-        vault::VaultResult add_r = v.add_image(gallery_path, std::span<const uint8_t>(rgba.data(), rgba.size()), page_name);
+        // Encode RGBA to PNG in memory using a callback
+        std::vector<uint8_t> png_data;
+        auto png_write_cb = [](void* context, void* data, int size) {
+            auto* vec = static_cast<std::vector<uint8_t>*>(context);
+            auto* bytes = static_cast<const uint8_t*>(data);
+            vec->insert(vec->end(), bytes, bytes + size);
+        };
+
+        if (!stbi_write_png_to_func(png_write_cb, &png_data, width, height, 4, rgba.data(), 0)) {
+            std::println(stderr, "[PdfImport] Failed to encode page {} to PNG", i);
+            ++out.skipped;
+            if (progress) progress->done.fetch_add(1);
+            continue;
+        }
+
+        if (png_data.empty()) {
+            std::println(stderr, "[PdfImport] Empty PNG for page {}", i);
+            ++out.skipped;
+            if (progress) progress->done.fetch_add(1);
+            continue;
+        }
+
+        // Add PNG as image
+        std::string page_name = "page_" + std::to_string(i + 1) + ".png";
+        auto add_r = v.add_image(gallery_path, std::span<const uint8_t>(png_data.data(), png_data.size()), page_name);
+
         if (add_r != vault::VaultResult::Ok) {
             std::println(stderr, "[PdfImport] Failed to add page {} to vault", i);
             ++out.skipped;
+        } else {
+            ++out.imported;
         }
 
         if (progress) progress->done.fetch_add(1);
     }
 
-    out.ok = true;
+    out.ok = (out.imported > 0);  // Set ok flag if at least one page was imported
     return out;
 }
 

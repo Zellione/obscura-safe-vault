@@ -3,18 +3,14 @@
 #ifdef OSV_VENDORED_PDFIUM
 
 #include "ui/zip_plan.h"  // Reuse ZipImportOutcome, ZipPlacement types
+#include "vault/vault.h"
+#include "ui/zip_import.h"  // For ImportProgress
 
 #include <filesystem>
 #include <string_view>
 #include <vector>
 
 namespace ui {
-
-// Forward declarations
-class ImportProgress;
-namespace vault {
-class Vault;
-}
 
 // Pure plan builder: generates a gallery structure and page placements
 // for a PDF with `page_count` pages. Gallery name is sanitized from `pdf_filename`.

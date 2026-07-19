@@ -33,8 +33,10 @@ public:
     // Render a single page to an RGBA bitmap at the given DPI.
     // Page numbers are 0-indexed.
     // Output buffer is replaced with mlock'd SecureBytes; auto-wiped on destruction.
+    // out_width and out_height receive the pixel dimensions of the rendered bitmap.
     // Returns false if page_num is out of range or rendering fails.
-    [[nodiscard]] bool render_page(int page_num, int dpi, crypto::SecureBytes& out_rgba) noexcept;
+    [[nodiscard]] bool render_page(int page_num, int dpi, crypto::SecureBytes& out_rgba,
+                                   int& out_width, int& out_height) noexcept;
 
 private:
     void* doc_ = nullptr;  // FPDF_DOCUMENT opaque handle

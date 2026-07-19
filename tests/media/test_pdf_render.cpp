@@ -49,11 +49,15 @@ TEST(pdf_renders_page_to_rgba)
     REQUIRE(doc.open(bytes));
 
     crypto::SecureBytes rgba;
-    REQUIRE(doc.render_page(0, 150, rgba));
+    int width = 0, height = 0;
+    REQUIRE(doc.render_page(0, 150, rgba, width, height));
 
     // Should have rendered to RGBA (4 bytes per pixel)
     CHECK(rgba.size() > 0);
     CHECK_EQ(rgba.size() % 4, static_cast<size_t>(0));
+    CHECK(width > 0);
+    CHECK(height > 0);
+    CHECK_EQ(static_cast<size_t>(width) * height * 4, rgba.size());
 }
 
 TEST(pdf_rejects_invalid_page_number)
@@ -64,7 +68,8 @@ TEST(pdf_rejects_invalid_page_number)
     REQUIRE(doc.open(bytes));
 
     crypto::SecureBytes rgba;
-    CHECK(!doc.render_page(999, 150, rgba));
+    int width = 0, height = 0;
+    CHECK(!doc.render_page(999, 150, rgba, width, height));
 }
 
 TEST(pdf_rejects_malformed_pdf)
@@ -84,7 +89,8 @@ TEST(pdf_rejects_encrypted_pdf)
     bool opened = doc.open(bytes);
     if (opened) {
         crypto::SecureBytes rgba;
-        CHECK(!doc.render_page(0, 150, rgba));
+        int width = 0, height = 0;
+        CHECK(!doc.render_page(0, 150, rgba, width, height));
     }
     // Pass: no crash
 }
@@ -107,7 +113,8 @@ TEST(pdf_sequential_page_renders)
     // Render all pages in sequence
     for (int i = 0; i < doc.page_count(); ++i) {
         crypto::SecureBytes rgba;
-        REQUIRE(doc.render_page(i, 150, rgba));
+        int width = 0, height = 0;
+        REQUIRE(doc.render_page(i, 150, rgba, width, height));
         CHECK(rgba.size() > 0);
     }
 }
