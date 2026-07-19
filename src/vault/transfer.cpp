@@ -23,9 +23,11 @@ void collect_all_galleries(const Vault& v, std::string_view gallery,
                            std::vector<std::string>& out)
 {
     out.emplace_back(gallery);
-    for (const auto* c : v.list(gallery))
-        if (c->is_gallery())
+    for (const auto* c : v.list(gallery)) {
+        if (c->is_gallery()) {
             collect_all_galleries(v, child_path(gallery, c->name), out);
+        }
+    }
 }
 
 // One snapshotted gallery: its path relative to the moved subtree root ("" = the
