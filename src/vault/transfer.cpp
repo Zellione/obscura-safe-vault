@@ -17,27 +17,15 @@ std::string child_path(std::string_view gallery, std::string_view name)
     return p;
 }
 
-// Does this gallery hold any sub-gallery? (If so it cannot accept images.)
-bool holds_subgalleries(const Vault& v, std::string_view gallery)
+// Every gallery in the subtree (self + all descendants) — since Phase 46,
+// any gallery can accept either media or a sub-gallery.
+void collect_all_galleries(const Vault& v, std::string_view gallery,
+                           std::vector<std::string>& out)
 {
-    return std::ranges::any_of(v.list(gallery),
-                               [](const auto* c) { return c->is_gallery(); });
-}
-
-// Does this gallery directly hold any media (image or video)? (If so it cannot accept a sub-gallery.)
-bool holds_images(const Vault& v, std::string_view gallery)
-{
-    return std::ranges::any_of(v.list(gallery),
-                               [](const auto* c) { return c->is_media(); });
-}
-
-void collect_parents(const Vault& v, std::string_view gallery,
-                     std::vector<std::string>& out)
-{
-    if (!holds_images(v, gallery)) out.emplace_back(gallery);  // can accept a sub-gallery
+    out.emplace_back(gallery);
     for (const auto* c : v.list(gallery))
         if (c->is_gallery())
-            collect_parents(v, child_path(gallery, c->name), out);
+            collect_all_galleries(v, child_path(gallery, c->name), out);
 }
 
 // One snapshotted gallery: its path relative to the moved subtree root ("" = the
@@ -81,17 +69,6 @@ std::string last_segment(std::string_view gallery)
                                            : std::string(gallery.substr(slash + 1));
 }
 
-void collect_targets(const Vault& v, std::string_view gallery,
-                     std::vector<std::string>& out)
-{
-    if (!holds_subgalleries(v, gallery)) {
-        out.emplace_back(gallery);          // a leaf (incl. empty) can accept images
-        return;
-    }
-    for (const auto* c : v.list(gallery))   // recurse into sub-galleries
-        if (c->is_gallery())
-            collect_targets(v, child_path(gallery, c->name), out);
-}
 
 // Locate a media node (image or video) by name in `gallery` (nullptr if absent).
 const IndexNode* find_image_node(const Vault& v, std::string_view gallery,
@@ -223,7 +200,7 @@ std::vector<std::string> image_target_galleries(const Vault& v)
 {
     std::vector<std::string> out;
     if (!v.is_unlocked()) return out;
-    collect_targets(v, "", out);
+    collect_all_galleries(v, "", out);
     return out;
 }
 
@@ -231,7 +208,7 @@ std::vector<std::string> gallery_target_parents(const Vault& v)
 {
     std::vector<std::string> out;
     if (!v.is_unlocked()) return out;
-    collect_parents(v, "", out);
+    collect_all_galleries(v, "", out);
     return out;
 }
 
@@ -256,7 +233,6 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
                                                       : std::string(dst_parent) + "/" + name;
 
     // Validate destination up front so collisions/ineligibility leave nothing partial.
-    if (holds_images(dst, dst_parent)) return InvalidArg;     // can't hold a sub-gallery
     for (const auto* c : dst.list(dst_parent))
         if (c->name == name) return AlreadyExists;
 

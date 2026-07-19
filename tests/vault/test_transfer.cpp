@@ -131,7 +131,7 @@ TEST(transfer_move_name_collision_leaves_source_intact)
     CHECK(find_image(src, "", "dup.jpg") != nullptr);
 }
 
-TEST(transfer_move_into_non_leaf_returns_invalid_arg)
+TEST(transfer_move_into_gallery_holding_subgallery_succeeds)
 {
     using enum vault::VaultResult;
     TempVault sa("src5"), da("dst5");
@@ -139,33 +139,33 @@ TEST(transfer_move_into_non_leaf_returns_invalid_arg)
     REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
     REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
     REQUIRE(src.add_image("", pattern(1000, 1), "x.jpg") == Ok);
-    REQUIRE(dst.create_gallery("Parent/Child") == Ok);   // root now holds a sub-gallery
+    REQUIRE(dst.create_gallery("Parent/Child") == Ok);   // root holds a sub-gallery
 
-    // Root of dst holds a sub-gallery, so it can't accept images.
-    CHECK(vault::transfer_image(src, "", "x.jpg", dst, "", vault::TransferMode::Move) == InvalidArg);
-    CHECK(find_image(src, "", "x.jpg") != nullptr);
+    // Phase 46: root holds a sub-gallery AND may now also accept an image.
+    CHECK(vault::transfer_image(src, "", "x.jpg", dst, "", vault::TransferMode::Move) == Ok);
+    CHECK(find_image(src, "", "x.jpg") == nullptr);      // moved out of source
+    CHECK(find_image(dst, "", "x.jpg") != nullptr);      // now alongside "Parent"
 }
 
-TEST(transfer_image_target_galleries_lists_leaves_and_eligible_root)
+TEST(transfer_image_target_galleries_lists_every_gallery)
 {
     using enum vault::VaultResult;
     TempVault da("targets");
     vault::Vault v;
     REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, v) == Ok);
-    REQUIRE(v.create_gallery("A") == Ok);          // empty leaf
-    REQUIRE(v.create_gallery("B/Inner") == Ok);    // B holds a sub-gallery; Inner is a leaf
+    REQUIRE(v.create_gallery("A") == Ok);
+    REQUIRE(v.create_gallery("B/Inner") == Ok);
 
     auto t = vault::image_target_galleries(v);
-    // Root holds sub-galleries (A, B) -> NOT eligible. Eligible: A, B/Inner.
     auto has = [&](std::string_view s) {
-        for (auto& g : t)
-            if (g == s) return true;
+        for (auto& g : t) if (g == s) return true;
         return false;
     };
+    // Phase 46: every gallery — including the root and a sub-gallery holder — is eligible.
+    CHECK(has(""));       // root
     CHECK(has("A"));
+    CHECK(has("B"));      // holds a sub-gallery, still a valid media destination now
     CHECK(has("B/Inner"));
-    CHECK_FALSE(has(""));     // root has sub-galleries
-    CHECK_FALSE(has("B"));    // B holds a sub-gallery
 }
 
 TEST(transfer_image_target_galleries_root_eligible_when_empty)

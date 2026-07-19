@@ -141,7 +141,7 @@ TEST(combine_target_galleries_filters_type_mismatches_self_and_descendants)
     REQUIRE(vault::Vault::create(tv.str(), bytes("p"), {}, kKdf, v) == Ok);
     REQUIRE(v.create_gallery("Photos") == Ok);
     REQUIRE(v.add_image("Photos", blob(300, 1), "p.jpg") == Ok);
-    REQUIRE(v.create_gallery("Photos/Sub") == InvalidArg);  // Photos holds media, can't also hold a sub-gallery
+    REQUIRE(v.create_gallery("Photos/Sub") == Ok);  // Phase 46: mixed galleries allowed
     REQUIRE(v.create_gallery("OtherLeaf") == Ok);
     REQUIRE(v.create_gallery("Docs/Inner") == Ok);          // Docs holds a sub-gallery
 
