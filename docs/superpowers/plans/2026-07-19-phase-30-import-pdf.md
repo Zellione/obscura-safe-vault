@@ -211,13 +211,57 @@ Target: **150 DPI** (sensible for gallery-sized PDFs)
 
 ---
 
-## Rollback
+---
 
-If OlexiyKhokhlov/PDFium fork has build issues on CI:
-1. Fall back to paulocoutinhox/pdfium-lib (Python make.py wrapper)
-2. Create `scripts/build_pdfium_python.sh` (model on FFmpeg's configure wrapper)
-3. Document in plan doc, commit, re-run CI
-4. Notify owner if neither works (requires relaxing vendoring philosophy)
+## PDFium Vendoring Decision — Research & Blocker Analysis
+
+### Evaluated Paths (July 2026)
+
+**ALL FAILED — NO VIABLE HERMETIC PDFium BUILD EXISTS**
+
+1. **OlexiyKhokhlov/PDFium (CMake fork)**
+   - Status: Incomplete CMakeLists.txt
+   - Issue: References `build/buildflag.h` as source file; file must be pre-generated
+   - Generator/build-setup step not included in CMakeLists.txt
+   - Result: CMake configure fails with "Cannot find source file: build/buildflag.h"
+   - Verdict: NOT VIABLE
+
+2. **madebr/pdfium-cmake**
+   - Status: Archived/abandoned (last update May 2024)
+   - Verdict: NOT VIABLE
+
+3. **paulocoutinhox/pdfium-lib (Python make.py build)**
+   - Status: VERIFIED NOT HERMETIC via source code inspection
+   - Network requirement: `run_task_build_depot_tools()` explicitly clones from `https://chromium.googlesource.com/chromium/tools/depot_tools.git`
+   - Build requirement: Uses `gclient config` and `gclient sync` (depot_tools commands requiring network access to `pdfium.googlesource.com`)
+   - Platform limitation: Only supports macOS, iOS, Android, WASM — NOT Linux
+   - Verdict: NOT VIABLE FOR HERMETIC BUILD
+
+4. **PDFium upstream**
+   - Status: Requires GN + depot_tools + network (Chromium build infrastructure)
+   - Verdict: NOT VIABLE
+
+### Architectural Constraint
+
+**All PDFium paths fundamentally require depot_tools and network access.** This is not a fork limitation but a core design of PDFium — it is built as part of Chromium's ecosystem using Chromium's build infrastructure (GN, depot_tools, gclient).
+
+### Decision Required
+
+Phase 30 cannot proceed with hermetic, offline, from-source PDFium. The project owner must choose:
+
+**Option A: Relax the "no network" constraint**
+- Allow depot_tools to be fetched during build
+- Follows FFmpeg's precedent (FFmpeg's configure also reaches out for certain dependencies)
+- Trade-off: Build is no longer fully offline after initial git clone
+
+**Option B: Use prebuilt PDFium binaries** (e.g., bblanchon/pdfium-binaries)
+- Violates the "build everything from source" philosophy
+- Pragmatic trade-off: Pre-built binaries are maintained by a trusted source (Benjamin Blanchon, widely-used)
+- Trade-off: Binary distribution model vs. source-audit capability
+
+**Option C: Defer Phase 30**
+- Postpone PDF import until a better solution emerges
+- No technical debt or workarounds
 
 ---
 
@@ -228,3 +272,5 @@ If OlexiyKhokhlov/PDFium fork has build issues on CI:
 - **Phase 25:** Background progress modal (ImportProgress, OpProgress)
 - **PDFium docs:** https://pdfium.googlesource.com/pdfium/
 - **OlexiyKhokhlov fork:** https://github.com/OlexiyKhokhlov/PDFium
+- **paulocoutinhox/pdfium-lib:** https://github.com/paulocoutinhox/pdfium-lib (verified network requirement in modules/common.py and modules/pdfium.py)
+- **bblanchon/pdfium-binaries:** https://github.com/bblanchon/pdfium-binaries (prebuilt alternative, if owner chooses Option B)
