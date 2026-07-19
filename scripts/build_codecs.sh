@@ -222,51 +222,20 @@ build_ffmpeg() {
 
 build_ffmpeg
 
-# PDFium — PDF rendering, decode-only (Phase 30). Vendored via
-# OlexiyKhokhlov/PDFium fork with CMake support. Generates static libpdfium.a.
-# USE_STATIC_LIBRARY=ON forces STATIC target (defaults to SHARED).
-# Note: PDFium's CMakeLists.txt has install(EXPORT...) that fails due to
-# dependency export issues when building STATIC. We build the library directly
-# then manually copy the .a file to avoid the export error.
-build_pdfium() {
-    local src="$REPO_ROOT/vendor/pdfium"
-    local builddir="$src/build"
+# PDFium — PDF rendering, decode-only (Phase 30). Upstream, native GN build.
+# PDFium is vendored at vendor/pdfium (git submodule) and built using its native
+# GN+Ninja build system. This build requires network access (depot_tools cloning
+# + gclient sync), making it the ONE exception to this project's standard
+# "offline after checkout" vendoring discipline — see docs/VENDORED_DEPS.md
+# for the detailed decision tree that led to using upstream PDFium with network.
+#
+# The build is delegated to dedicated scripts/build_pdfium.sh (which handles
+# depot_tools fetch, gclient, gn gen, ninja build, and library installation).
 
-    if [[ -f "$CODEC_PREFIX/lib/libpdfium.a" ]]; then
-        echo "==> pdfium already installed — skipping."
-        return
-    fi
-
-    echo "==> Building vendored pdfium (static)..."
-
-    local cmake_c_flags=""
-    local cmake_cxx_flags=""
-    if [[ "$ASAN" == true ]]; then
-        cmake_c_flags="-fsanitize=address,undefined -fno-omit-frame-pointer"
-        cmake_cxx_flags="-fsanitize=address,undefined -fno-omit-frame-pointer"
-    fi
-
-    cmake -S "$src" -B "$builddir"                  \
-        -DCMAKE_BUILD_TYPE=Release                  \
-        -DUSE_STATIC_LIBRARY=ON                     \
-        -DBUILD_SHARED_LIBS=OFF                     \
-        -DCMAKE_POSITION_INDEPENDENT_CODE=ON        \
-        -DCMAKE_INSTALL_PREFIX="$CODEC_PREFIX"      \
-        -DCMAKE_INSTALL_LIBDIR=lib                  \
-        -DCMAKE_PREFIX_PATH="$CODEC_PREFIX"         \
-        -DCMAKE_POLICY_VERSION_MINIMUM=3.5          \
-        -DCMAKE_C_FLAGS="$cmake_c_flags"            \
-        -DCMAKE_CXX_FLAGS="$cmake_cxx_flags"        \
-        -G "Ninja"
-
-    cmake --build "$builddir" --parallel "$NPROC"
-
-    # Copy the built .a directly to avoid install(EXPORT) errors
-    mkdir -p "$CODEC_PREFIX/lib" "$CODEC_PREFIX/include"
-    find "$builddir" -name "libpdfium.a" -exec cp {} "$CODEC_PREFIX/lib/" \;
-    cp -r "$src/public" "$CODEC_PREFIX/include/pdfium" 2>/dev/null || true
-}
-
-build_pdfium
+if [[ "$ASAN" == true ]]; then
+    "$REPO_ROOT/scripts/build_pdfium.sh" --asan
+else
+    "$REPO_ROOT/scripts/build_pdfium.sh"
+fi
 
 echo "==> Codecs installed into $CODEC_PREFIX"
