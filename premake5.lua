@@ -272,6 +272,27 @@ local function link_archive()
     end
 end
 
+local function link_pdfium()
+    local prefix = path.join(os.getcwd(), "vendor/codecs-prefix")
+    if _OPTIONS["asan"] then
+        local asan_prefix = path.join(os.getcwd(), "vendor/codecs-prefix-asan")
+        if cmake_static_lib(asan_prefix, "pdfium") then
+            prefix = asan_prefix
+        else
+            if cmake_static_lib(path.join(os.getcwd(), "vendor/codecs-prefix"), "pdfium") then
+                premake.warn("--asan requested but ASAN pdfium prefix not found at " .. asan_prefix .. "; falling back to " .. path.join(os.getcwd(), "vendor/codecs-prefix") .. " (not instrumented)")
+            end
+        end
+    end
+
+    if cmake_static_lib(prefix, "pdfium") then
+        includedirs { path.join(prefix, "include") }
+        libdirs     { path.join(prefix, "lib") }
+        defines     { "OSV_VENDORED_PDFIUM" }
+        links       { "pdfium" }
+    end
+end
+
 workspace "ObscuraSafeVault"
     configurations { "Debug", "Release" }
     platforms      { "x64" }
@@ -408,6 +429,7 @@ project "osv"
     link_image_codecs()
     link_av()
     link_archive()
+    link_pdfium()
 
     -- Strict warnings for project code (not vendored)
     fatalwarnings { "All" }
@@ -537,6 +559,7 @@ project "osv_tests"
     link_image_codecs()
     link_av()
     link_archive()
+    link_pdfium()
 
     -- Strict warnings for project code (not vendored)
     fatalwarnings { "All" }

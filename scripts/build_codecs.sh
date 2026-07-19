@@ -222,4 +222,8 @@ build_ffmpeg() {
 
 build_ffmpeg
 
+# PDFium — PDF rendering, decode-only (Phase 30). Vendored via
+# OlexiyKhokhlov/PDFium fork with CMake support. Generates static libpdfium.a.
+build_codec pdfium "$REPO_ROOT/vendor/pdfium"
+
 echo "==> Codecs installed into $CODEC_PREFIX"
