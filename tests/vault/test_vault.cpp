@@ -167,22 +167,34 @@ TEST(vault_nested_galleries_and_list)
     CHECK_TRUE(y2024[1]->is_image());
 }
 
-TEST(vault_enforces_leaf_invariant)
+TEST(vault_allows_mixed_galleries)
 {
-    TempVault tv("leaf");
+    TempVault tv("mixed");
     vault::Vault v;
     REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
             == vault::VaultResult::Ok);
 
-    // A gallery holding a sub-gallery cannot also hold images.
+    // A gallery holding a sub-gallery may ALSO hold media (Phase 46).
     REQUIRE(v.create_gallery("mixed/sub") == vault::VaultResult::Ok);
-    CHECK_EQ(v.add_image("mixed", pattern(10, 1), "nope.jpg"),
-             vault::VaultResult::InvalidArg);
+    CHECK_EQ(v.add_image("mixed", pattern(10, 1), "ok.jpg"),
+             vault::VaultResult::Ok);
 
-    // A gallery holding images cannot gain a sub-gallery.
+    // A gallery holding media may ALSO gain a sub-gallery (Phase 46).
     REQUIRE(v.create_gallery("photos") == vault::VaultResult::Ok);
     REQUIRE(v.add_image("photos", pattern(10, 1), "img.jpg") == vault::VaultResult::Ok);
-    CHECK_EQ(v.create_gallery("photos/sub"), vault::VaultResult::InvalidArg);
+    CHECK_EQ(v.create_gallery("photos/sub"), vault::VaultResult::Ok);
+
+    // The mix survives a lock/unlock round-trip with both child kinds present.
+    v.lock();
+    REQUIRE(v.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+    auto mixed_children = v.list("mixed");
+    bool has_sub = false, has_img = false;
+    for (const auto* c : mixed_children) {
+        if (c->is_gallery() && c->name == "sub")   has_sub = true;
+        if (c->is_image()   && c->name == "ok.jpg") has_img = true;
+    }
+    CHECK_TRUE(has_sub);
+    CHECK_TRUE(has_img);
 }
 
 TEST(vault_remove_image)

@@ -580,8 +580,6 @@ VaultResult Vault::create_gallery(std::string_view gallery_path)
             if (!child->is_gallery()) return InvalidArg;  // name is an image
             cur = child;
         } else {
-            // A gallery holding media cannot also hold sub-galleries.
-            if (holds_media(*cur)) return InvalidArg;
             cur->children.push_back(IndexNode::gallery(std::string(seg)));
             cur     = &cur->children.back();
             created = true;
@@ -602,7 +600,6 @@ VaultResult Vault::add_image(std::string_view         gallery_path,
 
     IndexNode* g = find_gallery(gallery_path);
     if (!g) return NotFound;
-    if (holds_galleries(*g)) return InvalidArg;   // not a leaf gallery
     if (child_named(g, filename)) return AlreadyExists;
 
     ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
@@ -718,7 +715,6 @@ VaultResult Vault::add_video(std::string_view         gallery_path,
 
     IndexNode* g = find_gallery(gallery_path);
     if (!g) return NotFound;
-    if (holds_galleries(*g))    return InvalidArg;   // not a leaf gallery
     if (child_named(g, filename)) return AlreadyExists;
 
     ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
