@@ -20,7 +20,8 @@ namespace {
 // Preferred size; render() clamps to the window so the modal never overflows it.
 constexpr float MODAL_W = 900.0f;
 constexpr float MODAL_H = 600.0f;
-constexpr float PAD = 16.0f;
+constexpr float PAD = 24.0f;         // panel inset: keeps rows/text off the border
+constexpr float ROW_TEXT_INSET = 14.0f;   // text inset within a result row
 constexpr float SEARCH_BOX_H = 44.0f;
 constexpr float SCOPE_TOGGLE_H = 36.0f;
 constexpr float RESULT_ROW_H = 40.0f;
@@ -230,10 +231,10 @@ void SearchOverlay::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
         }
 
         const std::string display =
-            fit_text(font, format_hit_label(hit), row_rect.w - 16);
+            fit_text(font, format_hit_label(hit), row_rect.w - 2 * ROW_TEXT_INSET);
         const float text_y =
             font.text_top_for_center(row_rect.y + row_rect.h * 0.5f);
-        r.draw_text(font, row_rect.x + 8, text_y, display, TEXT);
+        r.draw_text(font, row_rect.x + ROW_TEXT_INSET, text_y, display, TEXT);
 
         visible++;
     }

@@ -588,6 +588,17 @@ void ImageViewer::render_strip(gfx::Renderer& r)
 void ImageViewer::render_hud(gfx::Renderer& r, const SDL_FRect& vp)
 {
     using enum ViewMode;
+
+    // Scrim behind the top HUD text (filename/index/zoom + [F1] Help) so it
+    // stays legible over a bright image — without it, light image content
+    // washed the text out entirely. A translucent band reads as a fixed
+    // header the image sits under, rather than text painted directly on the
+    // picture. Needs alpha blending, which draw_rect only honours when the
+    // renderer's blend mode is BLEND.
+    const float header_h = vp.y + 44.0f + font_.pixel_height() + 8.0f - vp.y;
+    SDL_SetRenderDrawBlendMode(r.sdl(), SDL_BLENDMODE_BLEND);
+    r.draw_rect(SDL_FRect{vp.x, vp.y, vp.w, header_h}, gfx::Color{0, 0, 0, 140});
+
     if (!album_.images.empty()) {
         const vault::IndexNode& cur = *album_.images[index_];
         // A leading "* " marks the current item as favorited (the baked font is
