@@ -83,6 +83,17 @@ public:
     // Pop one finished result, or nullopt if none ready. Non-blocking.
     [[nodiscard]] std::optional<Result> take_result();
 
+    // Number of packets submitted but not yet fully processed by the worker
+    // — i.e. still queued or currently mid-decode. Unlike a caller-maintained
+    // "submitted minus results consumed" counter, this is decremented for
+    // EVERY job the worker finishes, including jobs whose decoded frame was
+    // silently discarded (pts before a pending seek target, hw-transfer /
+    // conversion failure) and therefore published no Result. The render
+    // thread uses it to gate prefetch/feed so those discard-only jobs can't
+    // leave a phantom backlog that wedges feeding after a seek. Cheap
+    // (one mutex lock).
+    [[nodiscard]] size_t outstanding() const;
+
     // Blocks (bounded by a short timeout, so a stuck decode can never hang
     // the caller forever) until a result is published or the worker stops.
     // Returns nullopt on timeout or if the worker has nothing pending and is
@@ -124,6 +135,11 @@ private:
     // directly and instead defers to here via this flag.
     bool consume_pending_flush();
 
+    // Decrements outstanding_ by one after run() finishes processing a job,
+    // on every completion path (decoded/published, silently discarded, EOF,
+    // or dropped because codec_ctx_ is null). Locks mtx_.
+    void job_finished();
+
     // Test-only seams (defined in tests/media/test_video_decode_worker.cpp,
     // not part of any production translation unit) — exercise the
     // hw-failure recovery path deterministically without real hardware:
@@ -151,6 +167,7 @@ private:
     std::condition_variable cv_done_;    // signals wait_result(): done_ gained a Result, or stop_ was set
     std::deque<Job>         queue_;
     std::vector<Result>     done_;
+    size_t                  outstanding_ = 0;   // submitted-but-not-yet-finished jobs; guarded by mtx_
     bool                    stop_ = false;
     uint32_t                wake_event_ = 0;
     std::jthread            thread_;

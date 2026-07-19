@@ -51,7 +51,6 @@ struct VideoPlayback::Impl {
     media::VideoDecoder                          decoder_;
     std::unique_ptr<media::VideoDecodeWorker>    video_worker_;
     uint64_t                                     generation_    = 0;
-    size_t                                       in_flight_     = 0;      // packets submitted, Result not yet consumed
     bool                                          demux_eof_     = false;  // demuxer hit EOF for the current generation
     bool skip_pending_ = false;  // a seek's decode-forward-to-target skip may still be discarding
                                  // frames without publishing a Result
@@ -158,28 +157,32 @@ struct VideoPlayback::Impl {
     }
 
     // Demuxes and submits one packet to the worker under the current
-    // generation, bumping in_flight_ and marking demux_eof_ once the
-    // demuxer is exhausted (pkt == nullptr, the end-of-stream marker).
+    // generation, marking demux_eof_ once the demuxer is exhausted
+    // (pkt == nullptr, the end-of-stream marker). The worker tracks the
+    // outstanding-packet count itself (video_worker_->outstanding()), so it
+    // stays accurate even for packets whose frame the worker silently
+    // discards during a post-seek decode-forward — unlike a render-side
+    // "submitted minus consumed" tally, which those non-publishing jobs
+    // would leave permanently inflated (wedging feed after a seek).
     void feed_one_packet()
     {
         AVPacket* pkt = decoder_.demux_next_video_packet();
         video_worker_->submit(pkt, generation_);
-        ++in_flight_;
         if (!pkt) demux_eof_ = true;
     }
 
     void prefetch_upto(size_t depth)
     {
-        while (in_flight_ < depth && !demux_eof_)
+        while (video_worker_->outstanding() < depth && !demux_eof_)
             feed_one_packet();
     }
 
     // Consumes a Result already confirmed to match the current generation:
-    // updates in_flight_/skip_pending_ bookkeeping, then either marks eof_
-    // or publishes the new pending frame and its measured frame_dt.
+    // updates skip_pending_ bookkeeping, then either marks eof_ or publishes
+    // the new pending frame and its measured frame_dt. (The outstanding-packet
+    // count is decremented by the worker itself as it finishes each job.)
     void consume_result(media::VideoDecodeWorker::Result& r)
     {
-        --in_flight_;
         skip_pending_ = false;  // the worker has published a real result for this
                                 // generation, so any seek-skip window has closed —
                                 // subsequent timeouts mean "still decoding", not
@@ -207,12 +210,13 @@ struct VideoPlayback::Impl {
     //
     // While a seek target is pending (skip_pending_), the worker's own
     // decode-forward logic silently discards frames whose pts lands before
-    // the target — no Result is ever published for those, so in_flight_
-    // never reflects them. A fixed PREFETCH_DEPTH alone can't get past
-    // this: once PREFETCH_DEPTH packets are in flight and all of them get
-    // silently discarded, the render thread would otherwise just wait
-    // forever for a Result that's never coming, having no way to know the
-    // worker needs more input rather than more time. So while skip_pending_
+    // the target — no Result is ever published for those, though the worker
+    // still counts and un-counts each such job in its outstanding() total.
+    // A fixed PREFETCH_DEPTH alone can't get past this: once PREFETCH_DEPTH
+    // packets are in flight and all of them get silently discarded, the
+    // render thread would otherwise just wait forever for a Result that's
+    // never coming, having no way to know the worker needs more input rather
+    // than more time. So while skip_pending_
     // is set, feed one more packet on every wait_result() timeout before
     // retrying, uncapped — a seek's decode-forward gap is a one-time,
     // GOP-bounded cost, not a per-frame recurring one, and the existing
@@ -234,9 +238,9 @@ struct VideoPlayback::Impl {
     // earlier version of this function did that) let the render thread
     // out-submit the worker without bound whenever a single frame's decode
     // legitimately took longer than wait_result()'s short timeout (routine
-    // for a slower codec, e.g. software AV1) — in_flight_ (and the
-    // worker's real backlog) would only ratchet upward, call after call,
-    // for the rest of playback, since each call only ever consumes one
+    // for a slower codec, e.g. software AV1) — the worker's real backlog
+    // (video_worker_->outstanding()) would only ratchet upward, call after
+    // call, for the rest of playback, since each call only ever consumes one
     // Result no matter how many extra packets its own retries had
     // submitted. That is what made playback (and eventually the whole app,
     // contending for the same CPU) get progressively slower the longer a
@@ -249,12 +253,13 @@ struct VideoPlayback::Impl {
         for (;;) {
             auto r = video_worker_->wait_result();
             if (!r) {
-                if (const bool may_feed_more = skip_pending_ || in_flight_ < MAX_STEADY_IN_FLIGHT;
+                if (const bool may_feed_more =
+                        skip_pending_ || video_worker_->outstanding() < MAX_STEADY_IN_FLIGHT;
                     may_feed_more && !demux_eof_) {
                     feed_one_packet();
                     continue;
                 }
-                if (in_flight_ > 0) {
+                if (video_worker_->outstanding() > 0) {
                     // Nothing left to feed (at the ceiling, or the demuxer
                     // is exhausted) but jobs already submitted are still
                     // outstanding — every one of them is guaranteed to
@@ -276,15 +281,15 @@ struct VideoPlayback::Impl {
                     // why it went unnoticed until a genuinely slow codec.
                     continue;
                 }
-                // Truly nothing outstanding anywhere (in_flight_ == 0) and
+                // Truly nothing outstanding anywhere (outstanding() == 0) and
                 // nothing left to feed — give up for this render pass; the
                 // caller (present_pending()/advance()) retries next tick.
                 return;
             }
             if (r->generation != generation_) {
-                // Stale result from a superseded seek/generation; discard it without
-                // decrementing in_flight_ (stale results don't correspond to packets
-                // we submitted in the current generation).
+                // Stale result from a superseded seek/generation; discard it.
+                // The worker already un-counted this job from outstanding()
+                // when it finished it, so there's nothing to reconcile here.
                 continue;
             }
             consume_result(*r);
@@ -338,13 +343,15 @@ struct VideoPlayback::Impl {
                 // several packets queued before their very first frame is
                 // emitted at all (B-frame reordering/decoder lookahead,
                 // unrelated to seeking) — PREFETCH_DEPTH alone can
-                // permanently starve decode if that's not enough, since
-                // in_flight_ never rises above it without this. Feed at
+                // permanently starve decode if that's not enough, since the
+                // worker's outstanding() never rises above it without this.
+                // Feed at
                 // most ONE extra packet per call (not a retry loop) so
                 // this call's own cost stays capped at a single
                 // wait_result(); if still more is needed, later ticks keep
                 // feeding one at a time until decode catches up.
-                if (in_flight_ < MAX_STEADY_IN_FLIGHT && !demux_eof_) feed_one_packet();
+                if (video_worker_->outstanding() < MAX_STEADY_IN_FLIGHT && !demux_eof_)
+                    feed_one_packet();
                 return;   // caller retries next tick
             }
             if (r->generation != generation_) {
@@ -447,11 +454,8 @@ struct VideoPlayback::Impl {
         const double tt = clamp_time(t, model_.duration());
         if (!decoder_.seek_demux_only(tt)) return;
         ++generation_;
-        video_worker_->begin_seek(tt);
-        in_flight_  = 0;       // begin_seek() drops every queued job; none of them will ever
-                                // publish a Result, so the render thread's own count must
-                                // reset too, or decode_into_pending() would under-prefetch
-                                // forever after every seek.
+        video_worker_->begin_seek(tt);   // drops queued jobs and adjusts the worker's
+                                          // own outstanding count; nothing to reset here.
         demux_eof_    = false;   // the seek moves the demuxer away from end-of-stream
         skip_pending_ = true;    // until the worker publishes its first post-seek Result,
                                   // frames below the target may be silently discarded
@@ -713,7 +717,7 @@ struct VideoPlayback::Impl {
     }
     [[nodiscard]] float audio_gain() const { return media::effective_gain(vol_.level, vol_.muted); }
     [[nodiscard]] SDL_FRect debug_vol_bar() const { return vol_.bar; }
-    [[nodiscard]] size_t debug_in_flight_packets() const { return in_flight_; }
+    [[nodiscard]] size_t debug_in_flight_packets() const { return video_worker_->outstanding(); }
     void update(double dt)
     {
         if (valid_) {
