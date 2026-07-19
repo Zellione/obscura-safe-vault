@@ -22,12 +22,20 @@ extern "C" {
 namespace media {
 
 namespace {
-std::optional<bool> g_force_is_hw_format;
+// Function-local static, not a namespace-scope global: avoids exposing
+// mutable global state directly (SonarQube cpp:S5421) while still giving
+// test_only_force_is_hw_format_frame() and is_hw_format_frame() a single
+// shared, process-wide override slot.
+std::optional<bool>& force_is_hw_format_state()
+{
+    static std::optional<bool> state;
+    return state;
+}
 }
 
 void test_only_force_is_hw_format_frame(std::optional<bool> force)
 {
-    g_force_is_hw_format = force;
+    force_is_hw_format_state() = force;
 }
 
 #if defined(OSV_HWACCEL_D3D11VA) || defined(OSV_HWACCEL_VAAPI)
@@ -116,8 +124,7 @@ bool transfer_hw_frame(const AVFrame* frame, AVFrame* sw_frame)
 
 bool is_hw_format_frame(const AVFrame* frame)
 {
-    if (g_force_is_hw_format) return *g_force_is_hw_format;
-    return frame->format == kHwPixFmt;
+    return force_is_hw_format_state().value_or(frame->format == kHwPixFmt);
 }
 
 #else  // no OSV_HWACCEL_* compiled in this build (Linux, until Part 2)
@@ -128,8 +135,7 @@ bool transfer_hw_frame(const AVFrame*, AVFrame*) { return false; }
 
 bool is_hw_format_frame(const AVFrame*)
 {
-    if (g_force_is_hw_format) return *g_force_is_hw_format;
-    return false;   // no OSV_HWACCEL_* macro compiled in; frames are always software format
+    return force_is_hw_format_state().value_or(false);   // no OSV_HWACCEL_* macro compiled in; frames are always software format
 }
 
 #endif
