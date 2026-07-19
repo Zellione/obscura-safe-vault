@@ -188,10 +188,15 @@ TEST(vault_allows_mixed_galleries)
     v.lock();
     REQUIRE(v.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
     auto mixed_children = v.list("mixed");
-    bool has_sub = false, has_img = false;
+    bool has_sub = false;
+    bool has_img = false;
     for (const auto* c : mixed_children) {
-        if (c->is_gallery() && c->name == "sub")   has_sub = true;
-        if (c->is_image()   && c->name == "ok.jpg") has_img = true;
+        if (c->is_gallery() && c->name == "sub") {
+            has_sub = true;
+        }
+        if (c->is_image() && c->name == "ok.jpg") {
+            has_img = true;
+        }
     }
     CHECK_TRUE(has_sub);
     CHECK_TRUE(has_img);
