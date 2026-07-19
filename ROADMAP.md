@@ -57,7 +57,7 @@
 | 43 | Platform hardware-accelerated video decode | ✅ | Part 1 ✅: shared `media::HwAccelContext` infra + Windows D3D11VA, software `VideoDecodeWorker` as the automatic fallback. Part 2 ✅: VAAPI dlopen shim (`vendor/vaapi-shim`) + Linux enablement (`vendor/libva`, headers-only). → [details](docs/roadmap/phase-43-hardware-video-decode.md) |
 | 44 | Gallery organization tools | ✅ | Part 1: scrollable + filterable Move-dialog gallery picker. Part 2: rename images/videos/galleries. Part 3: mass-move extended to galleries. Part 4: combine (recursive merge) two galleries, same- or cross-vault. → [details](docs/roadmap/phase-44-gallery-organization.md) |
 | 45 | Organization, security & fullscreen polish | ✅ | Rename extended to favorites/tag-overview/search-result screens, mass tag add/remove, clipboard copy for password/passphrase, fullscreen hides the thumbnail strip, bigger video seek-bar hit target, auto-lock-off badge fades after 10s. → [details](docs/roadmap/phase-45-organization-ux-polish.md) |
-| 46 | Mixed galleries (images + videos + sub-galleries together) | ⬜ | Relax the leaf-only invariant so a gallery can hold any combination of media and sub-galleries, like a real folder. → [details](docs/roadmap/phase-46-mixed-galleries.md) |
+| 46 | Mixed galleries (images + videos + sub-galleries together) | ✅ | Relax the leaf-only invariant so a gallery can hold any combination of media and sub-galleries, like a real folder. → [details](docs/roadmap/phase-46-mixed-galleries.md) |
 
 ---
 

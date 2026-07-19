@@ -81,7 +81,7 @@ navigable with arrow keys.
 | 7z / RAR / TAR import | **libarchive** + **zlib** + **xz/liblzma** | Read-only streaming archive support layered *alongside* miniz, not replacing it — `.zip`/`.cbz` keep using the proven miniz path. Read-only import of a single-volume archive only. |
 | JSON parsing | **nlohmann/json** | Single-header MIT lib, header-only, no build step. Used exception-free. Sole use: an archive's optional top-level `meta.json` (gallery title + tags). |
 | Thumbnails | **Pre-generated, stored encrypted in vault** | Gallery scrolling decrypts only the small thumbnail blobs — no full-image decode needed while browsing. |
-| Gallery model | **Free-nesting galleries; images only in leaf galleries** | A folder shows either sub-folders *or* images, never a mix. Cleaner grid view and simpler tree logic. |
+| Gallery model | **Free-nesting galleries; any mix of images, videos, and sub-galleries** | A gallery may hold any combination of images, videos, and sub-galleries as direct children (Phase 46). Sub-galleries display first, then media. |
 | Dependency management | **Vendored git submodules** under `vendor/` | Hermetic, reproducible, offline. See [docs/VENDORED_DEPS.md](docs/VENDORED_DEPS.md) for pinned versions, CVE review cadence, and bump procedures. |
 | Primary platform | **Linux → Windows** | Owner's dev machine is Arch Linux. macOS is not supported (dropped — see `mem:tech_stack`). |
 
