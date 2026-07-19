@@ -1395,6 +1395,12 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float H)
     cols_ = grid_columns(W - 2 * OX, cell, GAP);
     const auto [first_idx, last_idx] = grid_visible_range(
         scroll_, cell, GAP, OY, H, cols_, static_cast<int>(children_.size()));
+    // Clip tiles to the content area (below the fixed header at OY): a
+    // scrolled-up tile must not paint over the breadcrumb / [F1] / status
+    // lines drawn above OY.
+    const SDL_Rect content_clip{0, static_cast<int>(OY), static_cast<int>(W),
+                                static_cast<int>(H - OY)};
+    SDL_SetRenderClipRect(r.sdl(), &content_clip);
     // If the grid is empty, the range will be {0, -1}; the loop handles this correctly.
     for (int i = first_idx; i <= last_idx; ++i) {
         if (i < 0 || i >= static_cast<int>(children_.size())) continue;
@@ -1428,6 +1434,7 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float H)
             r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
         }
     }
+    SDL_SetRenderClipRect(r.sdl(), nullptr);
 }
 
 // Context struct for list-row metadata rendering (bundled params, reduce S107).
@@ -1490,6 +1497,13 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float H)
 
     const auto [first_idx, last_idx] = list_visible_range(
         scroll_, ROW_H, OY + LIST_HEADER, H, static_cast<int>(children_.size()));
+    // Clip scrolled rows to below the fixed column header: a scrolled-up row
+    // must not paint over the column header or the breadcrumb / [F1] / status
+    // lines above it.
+    const float rows_top = OY + LIST_HEADER;
+    const SDL_Rect rows_clip{0, static_cast<int>(rows_top), static_cast<int>(W),
+                             static_cast<int>(H - rows_top)};
+    SDL_SetRenderClipRect(r.sdl(), &rows_clip);
     for (int i = first_idx; i <= last_idx; ++i) {
         if (i < 0 || i >= static_cast<int>(children_.size())) continue;
         const vault::IndexNode* n = children_[i];
@@ -1521,6 +1535,7 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float H)
         const ListRowMetaContext meta_ctx{r, font_, dims_x, size_x, type_x, date_x, ty};
         draw_list_row_metadata(meta_ctx, n, sel);
     }
+    SDL_SetRenderClipRect(r.sdl(), nullptr);
 }
 
 void GalleryGrid::draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,

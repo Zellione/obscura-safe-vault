@@ -72,6 +72,7 @@ void VideoDecodeWorker::submit(AVPacket* pkt, uint64_t generation)
     {
         std::lock_guard lock(mtx_);
         queue_.push_back(Job{pkt, generation});
+        ++outstanding_;
     }
     cv_.notify_one();
 }
@@ -80,6 +81,11 @@ void VideoDecodeWorker::begin_seek(double target_pts)
 {
     std::lock_guard lock(mtx_);
     for (auto& job : queue_) if (job.pkt) av_packet_free(&job.pkt);
+    // These queued jobs will never be processed (and never publish a Result),
+    // so drop them from the outstanding count. Any job already popped and
+    // mid-decode is not in queue_ and stays counted — run() decrements it when
+    // it finishes.
+    outstanding_ -= queue_.size();
     queue_.clear();
     pending_seek_target_ = target_pts;
     pending_flush_ = true;
@@ -91,6 +97,18 @@ bool VideoDecodeWorker::consume_pending_flush()
     const bool was = pending_flush_;
     pending_flush_ = false;
     return was;
+}
+
+void VideoDecodeWorker::job_finished()
+{
+    std::lock_guard lock(mtx_);
+    if (outstanding_ > 0) --outstanding_;
+}
+
+size_t VideoDecodeWorker::outstanding() const
+{
+    std::lock_guard lock(mtx_);
+    return outstanding_;
 }
 
 std::optional<VideoDecodeWorker::Result> VideoDecodeWorker::take_result()
@@ -290,6 +308,7 @@ void VideoDecodeWorker::run()
 
         if (!codec_ctx_) {
             if (job->pkt) av_packet_free(&job->pkt);
+            job_finished();
             continue;
         }
 
@@ -321,6 +340,7 @@ void VideoDecodeWorker::run()
         const bool is_flush = (job->pkt == nullptr);
         send_packet(*job);
         decode_available_frames(*job, is_flush);
+        job_finished();
     }
 }
 

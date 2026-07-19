@@ -873,4 +873,81 @@ TEST(video_playback_destroys_quickly_despite_pending_decode_backlog)
     SDL_DestroySurface(surf);
 }
 
+TEST(video_playback_seek_far_from_keyframe_does_not_wedge_in_flight_counter)
+{
+    // Regression test for a real bug reported by the project owner: after
+    // video decode moved to a background thread (Phase 41), seeking during
+    // playback would stall for a moment and then leave video frozen on a
+    // single frame while audio kept playing.
+    //
+    // Root cause: the render thread's in-flight packet counter is
+    // incremented for every packet submitted to the worker, but only
+    // decremented when the worker publishes a Result. During a seek's
+    // decode-forward-to-target, every frame whose pts lands before the seek
+    // target is silently discarded by the worker (no Result published), so
+    // its increment is never matched — leaving the counter permanently
+    // inflated by the number of frames the seek skipped. Once that phantom
+    // count reaches MAX_STEADY_IN_FLIGHT (16, video_playback.cpp), steady
+    // playback's feed guard (`outstanding < MAX_STEADY_IN_FLIGHT`) stops
+    // feeding the worker forever; with the worker's queue already drained it
+    // never publishes another frame -> video wedged while the (independent)
+    // audio device keeps playing. Intermittent in the field because it only
+    // triggers when the seek lands >=16 frames past the preceding keyframe.
+    //
+    // longgop.mp4 is a 60-frame, single-keyframe H.264 clip: seeking to the
+    // middle decode-forwards past ~30 frames (>16), reproducing the wedge,
+    // while leaving ~30 frames of runway after the target (so the counter
+    // can't be drained by end-of-stream on its own before we sample it).
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+    auto vbytes = read_file(OSV_MEDIA_FIXTURE_DIR "/longgop.mp4");   // 60 frames, single GOP
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("seek_far_wedge");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "longgop.mp4", 4096) == vault::VaultResult::Ok);
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        ui::VideoPlayback vp(v, *node);
+        REQUIRE(vp.valid());
+        const SDL_FRect area{0, 0, 320, 240};
+
+        vp.render(r, font, area);                        // decode frame 0
+        vp.handle_key(SDLK_SPACE, SDL_SCANCODE_SPACE);   // play
+        REQUIRE(vp.animating());
+
+        // Seek to the middle: decode-forwards past ~30 frames (>16) — the
+        // exact condition that wedges the phantom counter.
+        vp.seek(1.0);
+
+        // Drive steady playback well past the seek. With the wedge the
+        // counter is pinned at/above the ceiling and never recovers; with
+        // correct accounting it drains back to the small prefetch bound.
+        for (int i = 0; i < 40; ++i) {
+            vp.update(1.0 / 30.0);
+            vp.render(r, font, area);
+        }
+
+        // The seek skipped ~30 frames; a correctly-accounted counter returns
+        // to the steady prefetch depth (2) plus a little slack, nowhere near
+        // the ~30 the phantom-count bug leaves wedged (and which, being
+        // >=16, would also have frozen the picture). Before the fix this
+        // stays pinned in the teens/thirties and never comes down.
+        CHECK(vp.debug_in_flight_packets() <= 5);
+    }
+
+    SDL_DestroySurface(surf);
+}
+
 #endif  // OSV_VENDORED_AV

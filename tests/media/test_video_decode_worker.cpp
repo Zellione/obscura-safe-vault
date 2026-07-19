@@ -171,6 +171,47 @@ TEST(video_decode_worker_begin_seek_drops_stale_queued_packets)
     }));
 }
 
+TEST(video_decode_worker_outstanding_returns_to_zero_even_when_seek_discards_frames)
+{
+    // The render thread gates prefetch/feed on VideoDecodeWorker::outstanding().
+    // For that to be safe across a seek, the worker must un-count EVERY job it
+    // finishes — including jobs whose decoded frame it silently discards
+    // because the frame's pts lands before a pending seek target (those publish
+    // no Result). If such jobs stayed counted, the total would be permanently
+    // inflated by the number of frames the seek skipped and eventually wedge
+    // feeding — the phantom-count freeze this guards against.
+    Fixture f("outstanding_seek");
+    REQUIRE(f.valid);
+
+    media::VideoDecodeWorker worker(*f.dec.video_codecpar(), f.dec.video_time_base(), 0);
+
+    // Arm a seek target partway through the clip, then feed the whole stream
+    // under the post-seek generation. The worker decode-forwards, discarding
+    // every frame before the target without publishing a Result for it.
+    worker.begin_seek(/*target_pts=*/0.5);
+    std::vector<AVPacket*> pkts;
+    while (AVPacket* pkt = f.dec.demux_next_video_packet()) pkts.push_back(pkt);
+    REQUIRE(pkts.size() == 10);
+    for (auto* pkt : pkts) worker.submit(pkt, /*generation=*/1);
+    worker.submit(nullptr, /*generation=*/1);   // EOF flush marker
+
+    // Drain until the generation-1 eof arrives — by then every submitted job
+    // (decoded, discarded, or the flush) has been processed.
+    bool saw_eof = false;
+    REQUIRE(wait_for([&] {
+        while (auto r = worker.take_result())
+            if (r->generation == 1 && r->eof) saw_eof = true;
+        return saw_eof;
+    }));
+
+    // Some frames (>= the target) published Results; the earlier ones (< the
+    // target) were silently discarded. Either way, once everything is
+    // processed the outstanding count must settle back to zero — no phantom
+    // left behind by the discarded jobs. (Polled: job_finished() for the flush
+    // job runs just after its eof Result is published.)
+    CHECK(wait_for([&] { return worker.outstanding() == 0; }));
+}
+
 TEST(video_decode_worker_begin_seek_schedules_codec_flush)
 {
     // begin_seek() must schedule a codec-buffer flush that the worker

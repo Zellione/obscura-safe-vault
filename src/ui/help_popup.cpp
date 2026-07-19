@@ -82,6 +82,15 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
     const float content_h      = static_cast<float>(help_line_count(groups)) * LINE_H;
     s.scroll = clamp_help_scroll(s.scroll, content_h, content_bottom - content_top);
 
+    // Clip to the content band so a line scrolled to the edge is cut cleanly
+    // instead of its glyphs bleeding down into the footer hint below (the
+    // per-line y checks alone gate on a line's *top*, so a partially-visible
+    // last line would otherwise spill past content_bottom).
+    const SDL_Rect content_clip{
+        static_cast<int>(px), static_cast<int>(content_top),
+        static_cast<int>(pw), static_cast<int>(content_bottom - content_top)};
+    SDL_SetRenderClipRect(r.sdl(), &content_clip);
+
     float y = content_top - s.scroll;
     for (size_t gi = 0; gi < groups.size(); ++gi) {
         if (gi > 0) y += LINE_H;
@@ -96,6 +105,7 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
             y += LINE_H;
         }
     }
+    SDL_SetRenderClipRect(r.sdl(), nullptr);
 }
 
 } // namespace ui
