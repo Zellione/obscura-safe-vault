@@ -86,7 +86,7 @@ TEST(zip_import_job_runs_zip_new_gallery_to_completion)
         make_vault(v, dir / "v.osv");
 
         ui::ZipImportJob job;
-        CHECK(job.start_zip(v, zip, ui::ZipDest::NewGallery, "", "Album",
+        CHECK(job.start_zip(v, zip, "", "Album",
                             ui::ZipConflictPolicy::AskUser));
         auto oc = await_outcome(job);
         REQUIRE(oc.has_value());
@@ -110,7 +110,7 @@ TEST(zip_import_job_surfaces_needs_resolution_without_writing)
         make_vault(v, dir / "v.osv");
 
         ui::ZipImportJob job;
-        CHECK(job.start_zip(v, zip, ui::ZipDest::NewGallery, "", "G",
+        CHECK(job.start_zip(v, zip, "", "G",
                             ui::ZipConflictPolicy::AskUser));
         auto oc = await_outcome(job);
         REQUIRE(oc.has_value());

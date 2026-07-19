@@ -862,7 +862,6 @@ void GalleryGrid::pump_zip_import()
                 ? zp.stem().string()
                 : ui::meta_gallery_name(ui::peek_archive_meta(zp), zp.stem().string());
             naming_.zip.path = zp;
-            naming_.zip.dest = ui::ZipDest::NewGallery;
             naming_.zip.cbz = true;
             naming_.zip.archive_backend = archive_backend;
             naming_.zip.needs_password  = needs_password;
@@ -877,7 +876,6 @@ void GalleryGrid::pump_zip_import()
             ? zp.stem().string()
             : ui::meta_gallery_name(ui::peek_archive_meta(zp), zp.stem().string());
         naming_.zip.path = zp;
-        naming_.zip.dest = ui::ZipDest::NewGallery;
         naming_.zip.cbz = false;
         naming_.zip.archive_backend = archive_backend;
         naming_.zip.needs_password  = needs_password;
@@ -888,10 +886,9 @@ void GalleryGrid::pump_zip_import()
 
 void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipConflictPolicy policy)
 {
-    // The gallery name and destination come from naming_.zip.
+    // The gallery name comes from naming_.zip.
     const std::string gallery_name = naming_.zip.gallery_name;
     const std::string base_gallery = nav_.path();
-    const ui::ZipDest dest = naming_.zip.dest;
 
     // Both CBZ and ZIP imports run on a background thread so the UI never freezes
     // on a large archive (Phase 24 fix) — synchronously here would freeze it on the
@@ -915,11 +912,11 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipCo
             naming_.import_job.start_cbz(vault_, zip_path, base_gallery, gallery_name);
     } else {
         if (naming_.zip.archive_backend)
-            naming_.import_job.start_archive(vault_, zip_path, ui::ZipImportTarget{dest, policy},
+            naming_.import_job.start_archive(vault_, zip_path, ui::ZipImportTarget{policy},
                                              base_gallery, gallery_name, naming_.zip.needs_password,
                                              password_bytes(naming_.password.buf));
         else
-            naming_.import_job.start_zip(vault_, zip_path, dest, base_gallery, gallery_name, policy);
+            naming_.import_job.start_zip(vault_, zip_path, base_gallery, gallery_name, policy);
     }
     mark_dirty();
 }

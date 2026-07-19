@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-using ui::ZipDest; using ui::ZipConflictPolicy;
+using ui::ZipConflictPolicy;
 using ziptest::entries;
 
 TEST(zip_plan_extension_classifier)
@@ -22,7 +22,7 @@ TEST(zip_plan_extension_classifier)
 TEST(zip_plan_flat_zip_one_gallery)
 {
     auto e = entries({"a.jpg", "b.png", "notes.txt"});
-    auto p = ui::build_zip_plan(e, ZipDest::NewGallery, "", "Trip", ZipConflictPolicy::AskUser);
+    auto p = ui::build_zip_plan(e, "", "Trip", ZipConflictPolicy::AskUser);
     CHECK_FALSE(p.needs_resolution);
     CHECK_EQ(p.skipped_unsupported, 1);              // notes.txt
     CHECK_EQ(p.placements.size(), static_cast<size_t>(2));
@@ -36,7 +36,7 @@ TEST(zip_plan_mirrors_nested_tree)
     // Clean hierarchy: every media file sits in a leaf dir; no intermediate dir
     // ("2020") directly holds media, so there is no leaf-invariant conflict.
     auto e = entries({"2020/winter/a.jpg", "2020/sub/b.jpg", "2021/c.png"});
-    auto p = ui::build_zip_plan(e, ZipDest::NewGallery, "", "Photos", ZipConflictPolicy::AskUser);
+    auto p = ui::build_zip_plan(e, "", "Photos", ZipConflictPolicy::AskUser);
     CHECK_FALSE(p.needs_resolution);
     // galleries: Photos/2020, Photos/2020/sub, Photos/2021 (+ ancestors Photos)
     CHECK(std::find(p.galleries.begin(), p.galleries.end(), std::string("Photos/2020/sub")) != p.galleries.end());
@@ -48,11 +48,11 @@ TEST(zip_plan_detects_mixed_folder)
 {
     // "a" holds a.jpg AND has subdir "a/b" with media -> mixed.
     auto e = entries({"a/x.jpg", "a/b/y.jpg"});
-    auto ask = ui::build_zip_plan(e, ZipDest::NewGallery, "", "G", ZipConflictPolicy::AskUser);
+    auto ask = ui::build_zip_plan(e, "", "G", ZipConflictPolicy::AskUser);
     CHECK(ask.needs_resolution);
     CHECK_EQ(ask.mixed_dirs.size(), static_cast<size_t>(1));
 
-    auto flat = ui::build_zip_plan(e, ZipDest::NewGallery, "", "G", ZipConflictPolicy::FlattenMixed);
+    auto flat = ui::build_zip_plan(e, "", "G", ZipConflictPolicy::FlattenMixed);
     CHECK_FALSE(flat.needs_resolution);
     // a/x.jpg redirected into a "Files" child leaf so "G/a" only parents subdirs.
     bool into_files = false;
@@ -60,22 +60,10 @@ TEST(zip_plan_detects_mixed_folder)
         if (pl.filename == "x.jpg") into_files = (pl.gallery_path == "G/a/Files");
     CHECK(into_files);
 
-    auto skip = ui::build_zip_plan(e, ZipDest::NewGallery, "", "G", ZipConflictPolicy::SkipMixed);
+    auto skip = ui::build_zip_plan(e, "", "G", ZipConflictPolicy::SkipMixed);
     CHECK_FALSE(skip.needs_resolution);
     CHECK_EQ(skip.placements.size(), static_cast<size_t>(1));   // only a/b/y.jpg
     CHECK_EQ(skip.skipped_unsupported, 1);                      // a/x.jpg dropped
-}
-
-TEST(zip_plan_append_flattens)
-{
-    auto e = entries({"a/x.jpg", "a/b/y.png", "z.gif", "doc.pdf"});
-    auto p = ui::build_zip_plan(e, ZipDest::Append, "Holiday/Day1", "", ZipConflictPolicy::AskUser);
-    CHECK_FALSE(p.needs_resolution);
-    CHECK(p.galleries.empty());
-    CHECK(p.mixed_dirs.empty());
-    CHECK_EQ(p.skipped_unsupported, 1);                         // doc.pdf
-    CHECK_EQ(p.placements.size(), static_cast<size_t>(3));
-    for (const auto& pl : p.placements) CHECK_EQ(pl.gallery_path, std::string("Holiday/Day1"));
 }
 
 TEST(zip_plan_find_meta_entry)
@@ -92,13 +80,9 @@ TEST(zip_plan_find_meta_entry)
 TEST(zip_plan_excludes_meta_json_silently)
 {
     // meta.json is consumed by the importer (Phase 27) — never placed and never
-    // counted as a skipped file, in both destinations.
+    // counted as a skipped file.
     auto e = entries({"a.jpg", "meta.json", "notes.txt"});
-    auto p = ui::build_zip_plan(e, ZipDest::NewGallery, "", "G", ZipConflictPolicy::AskUser);
+    auto p = ui::build_zip_plan(e, "", "G", ZipConflictPolicy::AskUser);
     CHECK_EQ(p.placements.size(), static_cast<size_t>(1));
     CHECK_EQ(p.skipped_unsupported, 1);                          // notes.txt only
-
-    auto ap = ui::build_zip_plan(e, ZipDest::Append, "Leaf", "", ZipConflictPolicy::AskUser);
-    CHECK_EQ(ap.placements.size(), static_cast<size_t>(1));
-    CHECK_EQ(ap.skipped_unsupported, 1);
 }

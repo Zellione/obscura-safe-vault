@@ -8,7 +8,6 @@
 
 namespace ui {
 
-enum class ZipDest { NewGallery, Append };
 enum class ZipConflictPolicy { AskUser, FlattenMixed, SkipMixed };
 
 struct ZipEntry {
@@ -50,10 +49,10 @@ struct ZipPlan {
                                      std::string_view             base_gallery,
                                      std::string_view             gallery_name);
 
-// Build a placement plan from raw archive entries. See zip_plan.cpp for the
-// mirror/append/mixed-folder rules. Pure: no miniz, no vault, no SDL.
+// Build a placement plan from raw archive entries, mirroring the tree under
+// base_gallery/new_gallery_name. See zip_plan.cpp for the mirror/mixed-folder
+// rules. Pure: no miniz, no vault, no SDL.
 [[nodiscard]] ZipPlan build_zip_plan(const std::vector<ZipEntry>& entries,
-                                     ZipDest                      dest,
                                      std::string_view             base_gallery,
                                      std::string_view             new_gallery_name,
                                      ZipConflictPolicy            policy);

@@ -36,7 +36,7 @@ TEST(archive_import_tar_new_gallery_mirrors_tree)
                                 "ustar", dir / "book.tar");
 
     auto out = ui::import_archive(v, archive,
-                                  {ui::ZipDest::NewGallery, "", "Book", ui::ZipConflictPolicy::FlattenMixed});
+                                  {"", "Book", ui::ZipConflictPolicy::FlattenMixed});
     REQUIRE(out.ok);
     CHECK_FALSE(out.needs_resolution);
     CHECK_EQ(out.imported, 3);
@@ -60,7 +60,7 @@ TEST(archive_import_7z_round_trip_checksums)
     auto archive = make_archive({{"only.jpg", data}}, "7zip", dir / "one.7z");
 
     auto out = ui::import_archive(v, archive,
-                                  {ui::ZipDest::NewGallery, "", "Gal", ui::ZipConflictPolicy::FlattenMixed});
+                                  {"", "Gal", ui::ZipConflictPolicy::FlattenMixed});
     REQUIRE(out.ok);
     REQUIRE(out.imported == 1);
 
@@ -87,7 +87,7 @@ TEST(archive_import_targz_round_trip_checksums)
                                 "gnutar_gz", dir / "book.tar.gz");
 
     auto out = ui::import_archive(v, archive,
-                                  {ui::ZipDest::NewGallery, "", "Vol", ui::ZipConflictPolicy::FlattenMixed});
+                                  {"", "Vol", ui::ZipConflictPolicy::FlattenMixed});
     REQUIRE(out.ok);
     REQUIRE(out.imported == 2);
 
@@ -139,7 +139,7 @@ TEST(archive_import_rejects_malformed_archive)
     std::ofstream(bad, std::ios::binary) << "not a tar file at all, just junk bytes";
 
     auto out = ui::import_archive(v, bad,
-                                  {ui::ZipDest::NewGallery, "", "Gal", ui::ZipConflictPolicy::FlattenMixed});
+                                  {"", "Gal", ui::ZipConflictPolicy::FlattenMixed});
     CHECK_FALSE(out.ok);
     CHECK_FALSE(out.error.empty());
 
@@ -159,7 +159,7 @@ TEST(archive_import_writes_no_extra_files)
     for (auto& _ : std::filesystem::directory_iterator(dir)) (void)_, ++before;
 
     auto out = ui::import_archive(v, archive,
-                                  {ui::ZipDest::NewGallery, "", "Gal", ui::ZipConflictPolicy::FlattenMixed});
+                                  {"", "Gal", ui::ZipConflictPolicy::FlattenMixed});
     REQUIRE(out.ok);
 
     size_t after = 0;
@@ -205,7 +205,7 @@ TEST(archive_import_encrypted_zip_correct_password_imports)
                                                     dir / "secret.zip");
 
     auto out = ui::import_archive(v, archive,
-                                  {ui::ZipDest::NewGallery, "", "Secret", ui::ZipConflictPolicy::FlattenMixed},
+                                  {"", "Secret", ui::ZipConflictPolicy::FlattenMixed},
                                   nullptr, {/*password_protected=*/true, "swordfish"});
     REQUIRE(out.ok);
     CHECK_FALSE(out.needs_password);
@@ -248,7 +248,7 @@ TEST(archive_import_encrypted_zip_wrong_password_writes_nothing)
             dir / "secret.zip");
 
         auto out = ui::import_archive(v, archive,
-                                      {ui::ZipDest::NewGallery, "", "Secret", ui::ZipConflictPolicy::FlattenMixed},
+                                      {"", "Secret", ui::ZipConflictPolicy::FlattenMixed},
                                       nullptr, {/*password_protected=*/true, "wrong-guess"});
         CHECK_EQ(out.imported, 0);
         CHECK(v.list("").empty());   // nothing written — no "Secret" gallery exists
@@ -272,7 +272,7 @@ TEST(archive_import_encrypted_zip_no_password_writes_nothing)
 
     // Simulates the very first attempt, before the user has typed anything.
     auto out = ui::import_archive(v, archive,
-                                  {ui::ZipDest::NewGallery, "", "Secret", ui::ZipConflictPolicy::FlattenMixed},
+                                  {"", "Secret", ui::ZipConflictPolicy::FlattenMixed},
                                   nullptr, {/*password_protected=*/true, ""});
     REQUIRE(out.ok);
     CHECK(out.needs_password);

@@ -12,7 +12,6 @@
 // coupling to a real codec. Shared fixtures (fake_jpeg, make_archive, vault +
 // temp-dir helpers) live in zip_test_helpers.h.
 namespace fs = std::filesystem;
-using ui::ZipDest;
 using ui::ZipConflictPolicy;
 using ziptest::cleanup_dir;
 using ziptest::fake_jpeg;
@@ -30,7 +29,7 @@ TEST(zip_import_new_gallery_mirrors_tree)
     {
         vault::Vault v;
         make_vault(v, dir / "v.osv");
-        auto out = ui::import_zip(v, zip, ZipDest::NewGallery, "", "Album", ZipConflictPolicy::AskUser);
+        auto out = ui::import_zip(v, zip, "", "Album", ZipConflictPolicy::AskUser);
         CHECK(out.ok);
         CHECK_FALSE(out.needs_resolution);
         CHECK_EQ(out.imported, 2);
@@ -52,24 +51,6 @@ TEST(zip_import_new_gallery_mirrors_tree)
     cleanup_dir(dir);
 }
 
-TEST(zip_import_append_flattens)
-{
-    auto img = fake_jpeg(2);
-    auto dir = fresh_dir("osv_zip_test_app");
-    auto zip = make_archive({{"x/a.jpg", img}, {"x/y/b.jpg", img}}, dir / "in.zip");
-
-    {
-        vault::Vault v;
-        make_vault(v, dir / "v.osv");
-        (void)v.create_gallery("Leaf");
-        auto out = ui::import_zip(v, zip, ZipDest::Append, "Leaf", "", ZipConflictPolicy::AskUser);
-        CHECK(out.ok);
-        CHECK_EQ(out.imported, 2);
-        CHECK_EQ(v.list("Leaf").size(), static_cast<size_t>(2));  // both flattened in
-    }
-    cleanup_dir(dir);
-}
-
 TEST(zip_import_reports_mixed_folder_without_writing)
 {
     auto img = fake_jpeg(3);
@@ -79,7 +60,7 @@ TEST(zip_import_reports_mixed_folder_without_writing)
     {
         vault::Vault v;
         make_vault(v, dir / "v.osv");
-        auto out = ui::import_zip(v, zip, ZipDest::NewGallery, "", "G", ZipConflictPolicy::AskUser);
+        auto out = ui::import_zip(v, zip, "", "G", ZipConflictPolicy::AskUser);
         CHECK(out.ok);
         CHECK(out.needs_resolution);
         CHECK_EQ(out.imported, 0);
@@ -96,7 +77,7 @@ TEST(zip_import_rejects_malformed_archive)
     {
         vault::Vault v;
         make_vault(v, dir / "v.osv");
-        auto out = ui::import_zip(v, dir / "bad.zip", ZipDest::NewGallery, "", "G", ZipConflictPolicy::AskUser);
+        auto out = ui::import_zip(v, dir / "bad.zip", "", "G", ZipConflictPolicy::AskUser);
         CHECK_FALSE(out.ok);
         CHECK_FALSE(out.error.empty());
     }
@@ -112,7 +93,7 @@ TEST(zip_import_writes_no_extra_files)
     {
         vault::Vault v;
         make_vault(v, dir / "v.osv");
-        auto out = ui::import_zip(v, zip, ZipDest::NewGallery, "", "G", ZipConflictPolicy::AskUser);
+        auto out = ui::import_zip(v, zip, "", "G", ZipConflictPolicy::AskUser);
         CHECK(out.ok);
         // The only files in `dir` are the input zip and the vault — no decompressed temp.
         int count = 0;
@@ -142,7 +123,7 @@ TEST(zip_import_meta_json_tags_top_gallery_passed_name_wins)
         // The caller's name is authoritative: the UI prefills it from the
         // meta.json title via peek_archive_meta, so the user's (possibly
         // edited) popup text must never be silently overridden here.
-        auto out = ui::import_zip(v, zip, ZipDest::NewGallery, "", "Album", ZipConflictPolicy::AskUser);
+        auto out = ui::import_zip(v, zip, "", "Album", ZipConflictPolicy::AskUser);
         CHECK(out.ok);
         CHECK_EQ(out.imported, 1);
         CHECK_EQ(out.skipped, 0);            // meta.json consumed, not "skipped"
@@ -192,37 +173,6 @@ TEST(peek_archive_meta_empty_without_meta_or_archive)
     cleanup_dir(dir);
 }
 
-TEST(zip_import_append_ignores_meta_json)
-{
-    // Append has no "top gallery" to retitle/tag: the meta.json is simply not
-    // imported as a file and the existing target gallery is left untouched.
-    auto img = fake_jpeg(6);
-    auto dir = fresh_dir("osv_zip_test_meta_app");
-    const std::string meta = R"({ "title": { "english": "Ignored" },
-                                  "tags": [ { "type": "tag", "name": "x" } ] })";
-    auto zip = make_archive({{"a.jpg", img},
-                             {"meta.json", {meta.begin(), meta.end()}}},
-                            dir / "in.zip");
-    {
-        vault::Vault v;
-        make_vault(v, dir / "v.osv");
-        (void)v.create_gallery("Leaf");
-        auto out = ui::import_zip(v, zip, ZipDest::Append, "Leaf", "", ZipConflictPolicy::AskUser);
-        CHECK(out.ok);
-        CHECK_EQ(out.imported, 1);
-        CHECK_EQ(out.skipped, 0);
-        CHECK_EQ(v.list("Leaf").size(), static_cast<size_t>(1));
-        CHECK(v.list("Ignored").empty());
-
-        const vault::IndexNode* g = nullptr;
-        for (const auto* n : v.list(""))
-            if (n->name == "Leaf") g = n;
-        REQUIRE(g != nullptr);
-        CHECK(g->tags.empty());
-    }
-    cleanup_dir(dir);
-}
-
 TEST(zip_is_encrypted_false_for_plain_zip)
 {
     auto dir = fresh_dir("osv_zip_test_enc_plain");
@@ -253,7 +203,7 @@ TEST(zip_import_decodes_legacy_cp437_entry_name)
     {
         vault::Vault v;
         make_vault(v, dir / "v.osv");
-        auto out = ui::import_zip(v, zip, ZipDest::NewGallery, "", "Album", ZipConflictPolicy::AskUser);
+        auto out = ui::import_zip(v, zip, "", "Album", ZipConflictPolicy::AskUser);
         CHECK(out.ok);
         CHECK_FALSE(out.needs_resolution);
         CHECK_EQ(out.imported, 1);

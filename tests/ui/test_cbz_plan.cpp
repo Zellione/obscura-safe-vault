@@ -100,7 +100,7 @@ TEST(cbz_plan_defangs_traversal_entry_names)
 TEST(zip_plan_defangs_traversal_entry_and_directory_names)
 {
     auto e = entries({"../evil.jpg", "..\\sneaky\\x.png", "good/a.jpg"});
-    auto p = ui::build_zip_plan(e, ui::ZipDest::NewGallery, "", "Imported",
+    auto p = ui::build_zip_plan(e, "", "Imported",
                                 ui::ZipConflictPolicy::FlattenMixed);
 
     for (const auto& pl : p.placements) {

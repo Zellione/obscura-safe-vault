@@ -66,7 +66,7 @@ TEST(archive_import_job_runs_7z_new_gallery_to_completion)
 
         ui::ZipImportJob job;
         CHECK(job.start_archive(v, archive,
-                                {ui::ZipDest::NewGallery, ui::ZipConflictPolicy::AskUser}, "", "Album"));
+                                {ui::ZipConflictPolicy::AskUser}, "", "Album"));
         auto oc = await_outcome(job);
         REQUIRE(oc.has_value());
         CHECK(oc->ok);
@@ -112,7 +112,7 @@ TEST(archive_import_job_runs_encrypted_zip_with_password_to_completion)
 
         ui::ZipImportJob job;
         CHECK(job.start_archive(v, archive,
-                                {ui::ZipDest::NewGallery, ui::ZipConflictPolicy::AskUser}, "", "Secret",
+                                {ui::ZipConflictPolicy::AskUser}, "", "Secret",
                                 /*password_protected=*/true, std::move(pw)));
         auto oc = await_outcome(job);
         REQUIRE(oc.has_value());
@@ -147,7 +147,7 @@ TEST(archive_import_job_reports_needs_password_for_wrong_password)
 
             ui::ZipImportJob job;
             CHECK(job.start_archive(v, archive,
-                                    {ui::ZipDest::NewGallery, ui::ZipConflictPolicy::AskUser}, "", "Secret",
+                                    {ui::ZipConflictPolicy::AskUser}, "", "Secret",
                                     /*password_protected=*/true, std::move(pw)));
             auto oc = await_outcome(job);
             REQUIRE(oc.has_value());

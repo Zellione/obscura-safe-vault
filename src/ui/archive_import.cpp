@@ -140,7 +140,7 @@ ZipImportOutcome import_archive(vault::Vault&                v,
     if (!open_archive(archive_path, "ArchiveImport", reader, out, pw.password_protected, pw.password))
         return out;
 
-    ZipPlan plan = build_zip_plan(reader.entries(), dest.dest, dest.base_gallery,
+    ZipPlan plan = build_zip_plan(reader.entries(), dest.base_gallery,
                                   dest.new_gallery_name, dest.policy);
     if (plan.needs_resolution) {
         out.ok = true;
