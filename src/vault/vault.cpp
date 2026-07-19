@@ -37,8 +37,6 @@ namespace {
 using vault_ops::split_path;
 using vault_ops::resolve_gallery;
 using vault_ops::child_named;
-using vault_ops::holds_media;
-using vault_ops::holds_galleries;
 using vault_ops::for_each_media;
 using vault_ops::relocate_node_chunks;
 

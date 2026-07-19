@@ -76,7 +76,7 @@ void walk_all_galleries(const Vault& v, std::string_view gallery, std::vector<st
         if (c->is_gallery()) walk_all_galleries(v, child_path(gallery, c->name), out);
 }
 
-// Cycle check + endpoint existence + type compatibility. On success `src_node`
+// Cycle check + endpoint existence. On success `src_node`
 // receives the source gallery's own IndexNode (for its tags); on failure it is
 // left unset and the caller must not dereference it.
 VaultResult validate_combine(const Vault& src, std::string_view src_gallery,
