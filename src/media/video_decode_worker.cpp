@@ -82,6 +82,15 @@ void VideoDecodeWorker::begin_seek(double target_pts)
     for (auto& job : queue_) if (job.pkt) av_packet_free(&job.pkt);
     queue_.clear();
     pending_seek_target_ = target_pts;
+    pending_flush_ = true;
+}
+
+bool VideoDecodeWorker::consume_pending_flush()
+{
+    std::lock_guard lock(mtx_);
+    const bool was = pending_flush_;
+    pending_flush_ = false;
+    return was;
 }
 
 std::optional<VideoDecodeWorker::Result> VideoDecodeWorker::take_result()
@@ -179,8 +188,17 @@ bool VideoDecodeWorker::publish_decoded_frame(const Job& job)
     const AVFrame* src = frame_;
     if (hw_active_) {
         if (!hw_transfer_frame_) hw_transfer_frame_ = av_frame_alloc();
-        if (hw_transfer_frame_ && transfer_hw_frame(frame_, hw_transfer_frame_))
+        if (hw_transfer_frame_ && transfer_hw_frame(frame_, hw_transfer_frame_)) {
             src = hw_transfer_frame_;
+        } else if (is_hw_format_frame(frame_)) {
+            // frame_ is still an opaque hw device handle — transfer_hw_frame()
+            // genuinely failed rather than having nothing to do (that case
+            // would mean frame_ is already a software format, safe to use
+            // as-is below). Feeding device-handle bytes to the swscale-based
+            // converter as if they were pixel planes is undefined behavior;
+            // skip this frame instead.
+            return false;
+        }
     }
 
     double pts_seconds = 0.0;
@@ -223,8 +241,13 @@ void VideoDecodeWorker::decode_available_frames(const Job& job, bool is_flush)
             // rest of this clip in software. This job's frame is lost
             // (one dropped frame during a rare hw->sw transition, versus
             // aborting playback) — reopen_software_only() leaves
-            // codec_ctx_ ready for the *next* job's packet.
-            if (hw_active_ && reopen_software_only()) return;
+            // codec_ctx_ ready for the *next* job's packet. Regardless of
+            // whether recovery succeeds, if this was the end-of-stream
+            // flush job, its eof must still be published — silently
+            // returning here would leave the caller's eof flag stuck
+            // false forever, since nothing else is left to feed or wait
+            // on for this generation.
+            if (hw_active_) reopen_software_only();
             if (is_flush) publish_eof(job.generation);
             return;
         }
@@ -268,6 +291,22 @@ void VideoDecodeWorker::run()
         if (!codec_ctx_) {
             if (job->pkt) av_packet_free(&job->pkt);
             continue;
+        }
+
+        if (consume_pending_flush()) {
+            // A seek superseded whatever this context was doing: discard
+            // buffered reference/reorder-queue state before decoding
+            // anything from the new position. Without this, packets
+            // demuxed from the new seek target get fed into a decoder
+            // still holding pre-seek B-frame reorder/reference state —
+            // software decoders are mostly forgiving of this, but a
+            // hardware decoder's fixed-size surface pool is not: stale
+            // surface references left over from before the seek can
+            // starve the pool and stall decode indefinitely. Mirrors
+            // VideoDecoder::seek()'s own avcodec_flush_buffers() call for
+            // the non-async path (video_decoder.cpp).
+            avcodec_flush_buffers(codec_ctx_);
+            flushed_ = false;
         }
 
         if (test_only_decode_delay_.count() > 0)

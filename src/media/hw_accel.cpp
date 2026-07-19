@@ -17,8 +17,18 @@ extern "C" {
 #endif
 
 #include <mutex>
+#include <optional>
 
 namespace media {
+
+namespace {
+std::optional<bool> g_force_is_hw_format;
+}
+
+void test_only_force_is_hw_format_frame(std::optional<bool> force)
+{
+    g_force_is_hw_format = force;
+}
 
 #if defined(OSV_HWACCEL_D3D11VA) || defined(OSV_HWACCEL_VAAPI)
 
@@ -104,11 +114,23 @@ bool transfer_hw_frame(const AVFrame* frame, AVFrame* sw_frame)
     return true;
 }
 
+bool is_hw_format_frame(const AVFrame* frame)
+{
+    if (g_force_is_hw_format) return *g_force_is_hw_format;
+    return frame->format == kHwPixFmt;
+}
+
 #else  // no OSV_HWACCEL_* compiled in this build (Linux, until Part 2)
 
 bool try_attach_hwaccel(AVCodecContext*, const AVCodec*) { return false; }
 void test_only_force_hwaccel_unavailable(bool) { /* no OSV_HWACCEL_* macro compiled in; nothing to reset */ }
 bool transfer_hw_frame(const AVFrame*, AVFrame*) { return false; }
+
+bool is_hw_format_frame(const AVFrame*)
+{
+    if (g_force_is_hw_format) return *g_force_is_hw_format;
+    return false;   // no OSV_HWACCEL_* macro compiled in; frames are always software format
+}
 
 #endif
 

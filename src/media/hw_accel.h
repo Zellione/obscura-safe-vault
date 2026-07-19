@@ -2,6 +2,8 @@
 
 #ifdef OSV_VENDORED_AV
 
+#include <optional>
+
 struct AVCodecContext;
 struct AVCodec;
 struct AVFrame;
@@ -42,6 +44,23 @@ void test_only_force_hwaccel_unavailable(bool force);
 // `sw_frame`, since av_hwframe_transfer_data() only copies pixel data, not
 // frame properties.
 [[nodiscard]] bool transfer_hw_frame(const AVFrame* frame, AVFrame* sw_frame);
+
+// Returns true if `frame` is still in this platform's hw pixel format —
+// i.e. its data[] planes are an opaque device handle, not real pixel data.
+// Only possible when an OSV_HWACCEL_* macro is compiled in and the codec
+// context that produced `frame` had a hw_device_ctx attached; always false
+// otherwise. Lets a caller distinguish transfer_hw_frame() returning false
+// because there was legitimately nothing to transfer (frame already a
+// software format) from it returning false because a genuine hw transfer
+// failed (frame is still device-handle bytes, unusable as pixel data).
+[[nodiscard]] bool is_hw_format_frame(const AVFrame* frame);
+
+// Test-only: overrides is_hw_format_frame()'s return value regardless of
+// build or the frame passed in, so tests can exercise the "hw transfer
+// genuinely failed" path deterministically without a real hw device
+// context. Pass std::nullopt to clear the override and restore real
+// (build-dependent) behavior.
+void test_only_force_is_hw_format_frame(std::optional<bool> force);
 
 } // namespace media
 

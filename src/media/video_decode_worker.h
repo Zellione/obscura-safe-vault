@@ -116,6 +116,14 @@ private:
     void publish_eof(uint64_t generation);
     bool reopen_software_only();
 
+    // Consumes (clears) a pending post-seek flush scheduled by begin_seek(),
+    // returning whether one was pending. Must only be called from run()
+    // (this worker's own thread) — avcodec_flush_buffers() is not safe to
+    // call concurrently with a decode in progress on the same context, which
+    // is why begin_seek() (called from the render thread) can't just call it
+    // directly and instead defers to here via this flag.
+    bool consume_pending_flush();
+
     // Test-only seams (defined in tests/media/test_video_decode_worker.cpp,
     // not part of any production translation unit) — exercise the
     // hw-failure recovery path deterministically without real hardware:
@@ -123,6 +131,7 @@ private:
     // runner with no GPU decode block.
     friend bool test_only_reopen_software(VideoDecodeWorker& w);
     friend void test_only_force_hw_active(VideoDecodeWorker& w, bool active);
+    friend bool test_only_pending_flush(VideoDecodeWorker& w);
 
     AVCodecContext*        codec_ctx_ = nullptr;
     AVFrame*               frame_     = nullptr;
@@ -130,6 +139,8 @@ private:
     double                 time_base_ = 0.0;
     std::atomic<double>    pending_seek_target_{-1.0};
     bool                   flushed_ = false;
+    bool                   pending_flush_ = false;   // guarded by mtx_; set by begin_seek(),
+                                                       // consumed by run() on the worker thread
     bool                       hw_active_        = false;
     AVCodecParameters*         saved_params_     = nullptr;
     AVFrame*                   hw_transfer_frame_ = nullptr;   // lazily allocated; reused across frames
