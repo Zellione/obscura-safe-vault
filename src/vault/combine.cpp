@@ -188,14 +188,16 @@ VaultResult combine_impl(Vault& src, std::string_view src_gallery,
 
     if (holds_media(src, src_gallery)) {
         if (const VaultResult r = move_media_children(src, src_gallery, dst, dst_gallery, tally, progress);
-            r != Ok)
+            r != Ok) {
             return r;
+        }
     }
     if (holds_subgalleries(src, src_gallery)) {
         if (const VaultResult r =
                 move_subgalleries_children(src, src_gallery, dst, dst_gallery, tally, progress);
-            r != Ok)
+            r != Ok) {
             return r;
+        }
     }
 
     if (src.list(src_gallery).empty()) {
