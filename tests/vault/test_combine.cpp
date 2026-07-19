@@ -118,22 +118,25 @@ TEST(combine_folder_recurses_into_same_named_child_and_moves_the_rest_wholesale)
     CHECK(find_child(v, "Dst/OnlyInSrc", "c.jpg") != nullptr);
 }
 
-TEST(combine_type_mismatch_rejected_media_vs_subgalleries)
+TEST(combine_media_into_subgallery_holder_merges)
 {
     using enum vault::VaultResult;
-    TempVault tv("mismatch");
+    TempVault tv("mixmerge");
     vault::Vault v;
     REQUIRE(vault::Vault::create(tv.str(), bytes("p"), {}, kKdf, v) == Ok);
     REQUIRE(v.create_gallery("Leaf") == Ok);
     REQUIRE(v.add_image("Leaf", blob(300, 1), "x.jpg") == Ok);
     REQUIRE(v.create_gallery("Folder/Inner") == Ok);   // Folder holds a sub-gallery
 
+    // Phase 46: media source merges into a sub-gallery-holding destination.
     vault::CombineTally tally;
-    CHECK(vault::combine_galleries(v, "Leaf", v, "Folder", tally) == InvalidArg);
-    CHECK(find_child(v, "", "Leaf") != nullptr);   // untouched on rejection
+    CHECK(vault::combine_galleries(v, "Leaf", v, "Folder", tally) == Ok);
+    CHECK(find_child(v, "Folder", "x.jpg") != nullptr);   // media landed alongside "Inner"
+    CHECK(find_child(v, "Folder", "Inner") != nullptr);   // pre-existing sub-gallery intact
+    CHECK(find_child(v, "", "Leaf") == nullptr);          // emptied source removed
 }
 
-TEST(combine_target_galleries_filters_type_mismatches_self_and_descendants)
+TEST(combine_target_galleries_lists_all_but_self_and_descendants)
 {
     using enum vault::VaultResult;
     TempVault tv("targets");
@@ -141,19 +144,39 @@ TEST(combine_target_galleries_filters_type_mismatches_self_and_descendants)
     REQUIRE(vault::Vault::create(tv.str(), bytes("p"), {}, kKdf, v) == Ok);
     REQUIRE(v.create_gallery("Photos") == Ok);
     REQUIRE(v.add_image("Photos", blob(300, 1), "p.jpg") == Ok);
-    REQUIRE(v.create_gallery("Photos/Sub") == Ok);  // Phase 46: mixed galleries allowed
+    REQUIRE(v.create_gallery("Photos/Sub") == Ok);   // Phase 46: Photos now holds media AND a sub-gallery
     REQUIRE(v.create_gallery("OtherLeaf") == Ok);
-    REQUIRE(v.create_gallery("Docs/Inner") == Ok);          // Docs holds a sub-gallery
+    REQUIRE(v.create_gallery("Docs/Inner") == Ok);
 
     const auto t = vault::combine_target_galleries(v, v, "Photos");
     auto has = [&](std::string_view s) {
         for (auto& g : t) if (g == s) return true;
         return false;
     };
-    CHECK(has("OtherLeaf"));      // type-compatible (media-holding vs empty)
-    CHECK_FALSE(has("Photos"));   // self excluded
-    CHECK_FALSE(has("Docs"));     // holds a sub-gallery -> incompatible with a media-holding source
-    CHECK(has("Docs/Inner"));   // Inner is empty -> type-compatible despite living under a folder-only parent (Docs)
+    CHECK(has("OtherLeaf"));
+    CHECK(has("Docs"));           // Phase 46: folder-holder is now a valid destination
+    CHECK(has("Docs/Inner"));
+    CHECK_FALSE(has("Photos"));       // self excluded
+    CHECK_FALSE(has("Photos/Sub"));   // descendant of source excluded
+}
+
+TEST(combine_mixed_source_moves_media_and_subgalleries)
+{
+    using enum vault::VaultResult;
+    TempVault tv("mixsrc");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("p"), {}, kKdf, v) == Ok);
+    // Source holds BOTH a media file and a sub-gallery.
+    REQUIRE(v.create_gallery("Src") == Ok);
+    REQUIRE(v.add_image("Src", blob(300, 2), "m.jpg") == Ok);
+    REQUIRE(v.create_gallery("Src/Child") == Ok);
+    REQUIRE(v.create_gallery("Dst") == Ok);
+
+    vault::CombineTally tally;
+    CHECK(vault::combine_galleries(v, "Src", v, "Dst", tally) == Ok);
+    CHECK(find_child(v, "Dst", "m.jpg") != nullptr);   // media moved
+    CHECK(find_child(v, "Dst", "Child") != nullptr);   // sub-gallery moved
+    CHECK(find_child(v, "", "Src") == nullptr);        // fully emptied → removed
 }
 
 TEST(combine_unions_tags_case_insensitively)
