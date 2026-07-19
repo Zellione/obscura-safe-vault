@@ -5,6 +5,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -99,6 +100,11 @@ namespace media {
 // hardware, since no CI runner has a GPU decode block to genuinely fail.
 bool test_only_reopen_software(VideoDecodeWorker& w) { return w.reopen_software_only(); }
 void test_only_force_hw_active(VideoDecodeWorker& w, bool active) { w.hw_active_ = active; }
+bool test_only_pending_flush(VideoDecodeWorker& w)
+{
+    std::lock_guard lock(w.mtx_);
+    return w.pending_flush_;
+}
 } // namespace media
 
 TEST(video_decode_worker_decodes_submitted_packets_in_order)
@@ -163,6 +169,38 @@ TEST(video_decode_worker_begin_seek_drops_stale_queued_packets)
             if (r->generation == 1 && r->eof) saw_gen1_eof = true;
         return saw_gen1_eof;
     }));
+}
+
+TEST(video_decode_worker_begin_seek_schedules_codec_flush)
+{
+    // begin_seek() must schedule a codec-buffer flush that the worker
+    // thread actually consumes before decoding the next job — without it,
+    // packets from the new seek target get decoded against stale pre-seek
+    // reorder/reference state (see the comment in VideoDecodeWorker::run()).
+    // This doesn't (and can't, without real hw) prove decode correctness
+    // improves; it proves the flush mechanism itself fires exactly once
+    // per seek, on the worker thread, before further decode proceeds.
+    Fixture f("seek_flush");
+    REQUIRE(f.valid);
+
+    media::VideoDecodeWorker worker(*f.dec.video_codecpar(), f.dec.video_time_base(), 0);
+    CHECK(!media::test_only_pending_flush(worker));
+
+    worker.begin_seek(0.0);
+    CHECK(media::test_only_pending_flush(worker));
+
+    AVPacket* pkt = f.dec.demux_next_video_packet();
+    REQUIRE(pkt);
+    worker.submit(pkt, /*generation=*/1);
+    worker.submit(nullptr, /*generation=*/1);
+
+    bool saw_gen1_result = false;
+    REQUIRE(wait_for([&] {
+        while (auto r = worker.take_result())
+            if (r->generation == 1) saw_gen1_result = true;
+        return saw_gen1_result;
+    }));
+    CHECK(!media::test_only_pending_flush(worker));   // consumed by the worker before decoding resumed
 }
 
 TEST(video_decode_worker_stops_cleanly_mid_flight)
@@ -327,6 +365,46 @@ TEST(video_decode_worker_forced_hw_active_transfer_noop_still_decodes_correctly)
         return saw_eof;
     }));
     REQUIRE(pts_seen.size() == 10);
+}
+
+TEST(video_decode_worker_hw_transfer_failure_skips_frame_instead_of_corrupting)
+{
+    // Forces hw_active_ = true AND is_hw_format_frame() = true, so
+    // publish_decoded_frame() believes every decoded frame is still an
+    // opaque hw device handle. transfer_hw_frame() is a no-op stub on this
+    // build (no OSV_HWACCEL_* compiled in) and always returns false, so
+    // every frame must be treated as a genuine hw-transfer failure and
+    // skipped entirely — never fed to the software pixel-conversion path,
+    // which would otherwise silently misinterpret device-handle bytes as
+    // real YUV planes (undefined behavior on real hardware).
+    Fixture f("hw_transfer_fail");
+    REQUIRE(f.valid);
+
+    media::VideoDecodeWorker worker(*f.dec.video_codecpar(), f.dec.video_time_base(), 0);
+    media::test_only_force_hw_active(worker, true);
+    media::test_only_force_is_hw_format_frame(true);
+
+    int submitted = 0;
+    while (AVPacket* pkt = f.dec.demux_next_video_packet()) {
+        worker.submit(pkt, /*generation=*/0);
+        ++submitted;
+    }
+    worker.submit(nullptr, /*generation=*/0);
+    REQUIRE(submitted == 10);
+
+    int  frames_seen = 0;
+    bool saw_eof      = false;
+    REQUIRE(wait_for([&] {
+        while (auto r = worker.take_result()) {
+            if (r->eof) { saw_eof = true; continue; }
+            if (r->frame.has_value()) ++frames_seen;
+        }
+        return saw_eof;
+    }));
+
+    media::test_only_force_is_hw_format_frame(std::nullopt);   // leave clean for later tests
+
+    CHECK(frames_seen == 0);   // every frame skipped, not passed through as fake pixel data
 }
 
 #endif // OSV_VENDORED_AV
