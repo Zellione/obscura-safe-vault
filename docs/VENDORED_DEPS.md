@@ -2,6 +2,24 @@
 
 This document tracks the pinned versions of all vendored third-party libraries and their security posture.
 
+## ⚠️ Network Exception: PDFium
+
+**PDFium (Phase 30)** is the ONE exception to this project's "hermetic, offline after git checkout" philosophy. 
+PDFium must be built using its native GN+Ninja infrastructure, which requires network access during the build step:
+- `scripts/build_pdfium.sh` fetches `depot_tools` from `chromium.googlesource.com`
+- `gclient sync` syncs PDFium and dependencies from `pdfium.googlesource.com`
+
+This project's research (documented in `docs/superpowers/plans/2026-07-19-phase-30-import-pdf.md`) evaluated all viable PDFium vendoring paths:
+- **OlexiyKhokhlov/PDFium CMake fork**: Incomplete CMakeLists.txt (missing pre-generated source files like `build/buildflag.h`)
+- **madebr/pdfium-cmake**: Archived/abandoned
+- **paulocoutinhox/pdfium-lib**: Python wrapper that explicitly fetches depot_tools from network (verified via source code inspection)
+- **PDFium upstream**: Same network requirement (all paths lead back to GN+depot_tools)
+
+**Conclusion**: No viable hermetic, offline, from-source PDFium build exists. Using upstream PDFium with explicit network access during build is the pragmatic trade-off that balances:
+- **Build from real source** (not prebuilt binaries)
+- **Use official upstream** (no fork maintenance burden)
+- **Network only at build time** (cached in CI; not a runtime dependency; GitHub Actions has outbound internet by default)
+
 ## Dependency Table
 
 | Submodule | Pinned Version | Role | Parses Untrusted Input |
@@ -20,6 +38,7 @@ This document tracks the pinned versions of all vendored third-party libraries a
 | **xz / liblzma** | 5.8.3 | LZMA2 filter for libarchive (`.7z`, `.txz`) | **Yes** |
 | **libarchive** | 3.8.8 | 7z/RAR/TAR archive read (decode-only; Phase 34) | **Yes** |
 | **libva** | 2.22.0 (217da1c) | VA-API public headers only (Linux hardware video decode, Phase 43 Part 2) — never built; `vendor/vaapi-shim` dlopens the real `libva.so.2`/`libva-drm.so.2` at runtime instead of linking them | No |
+| **pdfium** | (TBD — pinned in `.gitmodules`) | PDF page rendering to RGBA bitmaps (decode-only, Phase 30). Built via `scripts/build_pdfium.sh` using native GN+Ninja, requires network access (see exception note above). **This is the sole network-dependent build.** | **Yes** |
 
 ### Decode-Only Rationale
 
