@@ -183,8 +183,9 @@ ZipImportOutcome import_zip(vault::Vault&                v,
     out.skipped = plan.skipped_unsupported;
 
     if (!create_galleries(v, plan, zip, out)) return out;
-    if (!plan.placements.empty())
+    if (!plan.placements.empty()) {
         apply_meta_tags(v, joined_gallery(base_gallery, new_gallery_name), meta);
+    }
     run_placements(v, zip, plan, out, progress);
     return out;
 }
@@ -213,8 +214,9 @@ ZipImportOutcome import_cbz(vault::Vault&                v,
     out.skipped = plan.skipped_unsupported;
 
     if (!create_galleries(v, plan, zip, out)) return out;
-    if (!plan.placements.empty())
+    if (!plan.placements.empty()) {
         apply_meta_tags(v, joined_gallery(base_gallery, gallery_name), meta);
+    }
     run_placements(v, zip, plan, out, progress);
     return out;
 }
