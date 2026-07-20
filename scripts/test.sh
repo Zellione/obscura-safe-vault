@@ -54,16 +54,22 @@ $TSAN && PREMAKE_OPTS+=("--tsan")
 if [[ "$USE_GMAKE" = true ]]; then
     echo "==> Generating GNU Makefiles..."
     "$PREMAKE" "${PREMAKE_OPTS[@]}" gmake2
-    echo "==> Building osv_tests ($CONFIG)..."
+    # Build the whole config (osv + osv_tests), not just osv_tests: a compile
+    # error in an app-only file (e.g. a screen class not linked into the test
+    # binary) must fail this gate, not slip through to build.sh / CI.
+    echo "==> Building osv + osv_tests ($CONFIG)..."
     CONFIG_LC="$(printf '%s' "$CONFIG" | tr '[:upper:]' '[:lower:]')"
-    make config="${CONFIG_LC}_x64" osv_tests -j"$NPROC"
+    make config="${CONFIG_LC}_x64" -j"$NPROC"
 else
     echo "==> Generating Ninja build files..."
     "$PREMAKE" "${PREMAKE_OPTS[@]}" ninja
     # Repair header-dependency tracking the premake beta8 ninja exporter omits.
     "$REPO_ROOT/scripts/fix_ninja_deps.sh"
-    echo "==> Building osv_tests ($CONFIG)..."
-    ninja "osv_tests_${CONFIG}_x64"
+    # Build the whole config (osv + osv_tests), not just osv_tests: a compile
+    # error in an app-only file (e.g. a screen class not linked into the test
+    # binary) must fail this gate, not slip through to build.sh / CI.
+    echo "==> Building osv + osv_tests ($CONFIG)..."
+    ninja "${CONFIG}_x64"
 fi
 
 # --- Run --------------------------------------------------------------------
