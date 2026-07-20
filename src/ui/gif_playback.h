@@ -44,6 +44,12 @@ public:
     // Number of frames shown (for testing/debug).
     [[nodiscard]] size_t frames_shown() const noexcept;
 
+    // Number of frames decoded so far. Used to enforce the hover budget:
+    // the frame count is unknown until the GIF has been partially or fully
+    // decoded. This accessor allows GalleryGrid to monitor the count during
+    // playback and stop if it exceeds kGifHoverMaxFrames (300).
+    [[nodiscard]] size_t frame_count() const noexcept;
+
     // Space toggles pause/play.
     void toggle_pause() noexcept;
 

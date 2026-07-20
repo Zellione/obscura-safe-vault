@@ -84,6 +84,7 @@ struct GifPlayback::Impl {
     [[nodiscard]] bool animating() const { return valid_ && !paused_; }
     [[nodiscard]] bool paused() const { return paused_; }
     [[nodiscard]] size_t frames_shown() const { return shown_; }
+    [[nodiscard]] size_t frame_count() const { return dec_.frames_decoded(); }
 
     void toggle_pause() { paused_ = !paused_; }
 
@@ -190,6 +191,7 @@ bool GifPlayback::valid() const noexcept { return impl_->valid(); }
 bool GifPlayback::animating() const noexcept { return impl_->animating(); }
 bool GifPlayback::paused() const noexcept { return impl_->paused(); }
 size_t GifPlayback::frames_shown() const noexcept { return impl_->frames_shown(); }
+size_t GifPlayback::frame_count() const noexcept { return impl_->frame_count(); }
 void GifPlayback::toggle_pause() noexcept { impl_->toggle_pause(); }
 void GifPlayback::update(double dt) { impl_->update(dt); }
 void GifPlayback::render(gfx::Renderer& r, const SDL_FRect& dest)

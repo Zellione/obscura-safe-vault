@@ -1181,7 +1181,15 @@ void GalleryGrid::update(double dt)
         hover_gif_.reset();
         hover_gif_tile_ = -1;
     }
-    if (hover_gif_) hover_gif_->update(dt);
+    if (hover_gif_) {
+        hover_gif_->update(dt);
+        // Enforce the frame count budget: if the GIF has decoded more than 300 frames,
+        // tear down the playback immediately to cap resource cost.
+        if (hover_gif_->frame_count() > kGifHoverMaxFrames) {
+            hover_gif_.reset();
+            hover_gif_tile_ = -1;
+        }
+    }
 }
 
 std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
@@ -1553,11 +1561,6 @@ std::string GalleryGrid::fit_name(std::string_view name, float max_w) const
 {
     return elide_middle(name, static_cast<int>(max_w),
                         [this](std::string_view s) { return font_.measure(s); });
-}
-
-int GalleryGrid::debug_hover_animating_tile() const noexcept
-{
-    return (hover_gif_ && hover_gif_->valid()) ? hover_gif_tile_ : -1;
 }
 
 void GalleryGrid::start_hover_animation(int tile)

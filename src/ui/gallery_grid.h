@@ -141,7 +141,6 @@ private:
                          const SDL_FRect& box);
     [[nodiscard]] int  hit_test(float mx, float my) const;  // item under cursor, or -1
     [[nodiscard]] std::string fit_name(std::string_view name, float max_w) const;
-    [[nodiscard]] int debug_hover_animating_tile() const noexcept;  // -1 when nothing is animating
     void start_hover_animation(int tile);  // resolve node, check badge, construct playback, check budget
 
     gfx::Window&            win_;
