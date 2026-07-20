@@ -1,5 +1,7 @@
 #include "image/gif_info.h"
 
+#include <cstddef>
+
 namespace image {
 namespace {
 
@@ -50,10 +52,12 @@ void skip_sub_blocks(Cursor& c) noexcept
 // bits 0-2 = size exponent (2^(n+1) entries, 3 bytes each).
 void skip_colour_table(Cursor& c, uint8_t packed) noexcept
 {
-    if ((packed & 0x80) == 0) {
+    const auto flags = std::byte{packed};
+    if ((flags & std::byte{0x80}) == std::byte{0}) {
         return;
     }
-    const size_t entries = static_cast<size_t>(1) << ((packed & 0x07) + 1);
+    const auto size_exp = std::to_integer<size_t>(flags & std::byte{0x07});
+    const size_t entries = static_cast<size_t>(1) << (size_exp + 1);
     c.skip(entries * 3);
 }
 
@@ -66,8 +70,7 @@ bool gif_is_animated(std::span<const uint8_t> data) noexcept
     // Header: "GIF87a" or "GIF89a".
     const uint8_t g = c.u8();
     const uint8_t i = c.u8();
-    const uint8_t f = c.u8();
-    if (!c.ok() || g != 'G' || i != 'I' || f != 'F') {
+    if (const uint8_t f = c.u8(); !c.ok() || g != 'G' || i != 'I' || f != 'F') {
         return false;
     }
     c.skip(3);                      // version

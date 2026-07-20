@@ -1173,8 +1173,8 @@ void GalleryGrid::update(double dt)
 
     // Update hover animation. The gate tracks when to start; playback handles the animation.
     // Phase 47 Task 10: only one hover animation at a time.
-    const int tile = hit_test(win_.mouse_x(), win_.mouse_y());
-    if (hover_gate_.update(tile, dt)) {
+    if (const int tile = hit_test(win_.mouse_x(), win_.mouse_y());
+        hover_gate_.update(tile, dt)) {
         start_hover_animation(tile);
     } else if (hover_gate_.active_tile() != hover_gif_tile_) {
         // Cursor moved off the animated tile or to a different one

@@ -215,14 +215,42 @@ void ImageViewer::handle_key_video(SDL_Keycode key, SDL_Scancode sc)
     }
 }
 
+bool ImageViewer::handle_shared_key(SDL_Keycode key)
+{
+    using enum StripSide;
+    using enum ViewMode;
+    switch (key) {
+        case SDLK_T:      // toggle the strip between bottom and left
+            strip_side_ = (strip_side_ == Bottom) ? Left : Bottom;
+            fit_.fitted = false;                      // viewport changed: refit
+            if (mode_ == FillScroll) { scroll_to_image(index_); }
+            return true;
+        case SDLK_G:      // edit tags for the current item
+            if (!album_.images.empty()) { tag_editor_.open(album_.paths[index_]); }
+            return true;
+        case SDLK_B:      // toggle favorite (bookmark) on the current item
+            // best-effort: favorite toggle failure is benign, UI re-reads state
+            if (!album_.images.empty()) { (void)vault_.toggle_favorite(album_.paths[index_]); }
+            return true;
+        case SDLK_ESCAPE:
+            if (win_.is_fullscreen()) { win_.set_fullscreen(false); return true; }
+            go_back();
+            return true;
+        case SDLK_F11:
+            win_.set_fullscreen(!win_.is_fullscreen());
+            return true;
+        case SDLK_U:      // keep the vault unlocked for the rest of the session
+            request(NavKind::ToggleKeepUnlocked);
+            return true;
+        default:
+            return false;
+    }
+}
+
 void ImageViewer::handle_key_gif(SDL_Keycode key)
 {
-    switch (key) {
-        case SDLK_SPACE:
-            if (gif_ && gif_->valid()) gif_->toggle_pause();
-            return;
-        default:
-            return;
+    if (key == SDLK_SPACE && gif_ && gif_->valid()) {
+        gif_->toggle_pause();
     }
 }
 
@@ -363,31 +391,7 @@ void ImageViewer::handle_key(SDL_Keycode key, SDL_Scancode sc)
         return;
     }
     // Keys shared by images and videos.
-    switch (key) {
-        case SDLK_T:      // toggle the strip between bottom and left
-            strip_side_ = (strip_side_ == Bottom) ? Left : Bottom;
-            fit_.fitted = false;                      // viewport changed: refit
-            if (mode_ == FillScroll) scroll_to_image(index_);
-            return;
-        case SDLK_G:      // edit tags for the current item
-            if (!album_.images.empty()) tag_editor_.open(album_.paths[index_]);
-            return;
-        case SDLK_B:      // toggle favorite (bookmark) on the current item
-            // best-effort: favorite toggle failure is benign, UI re-reads state
-            if (!album_.images.empty()) (void)vault_.toggle_favorite(album_.paths[index_]);
-            return;
-        case SDLK_ESCAPE:
-            if (win_.is_fullscreen()) { win_.set_fullscreen(false); return; }
-            go_back();
-            return;
-        case SDLK_F11:
-            win_.set_fullscreen(!win_.is_fullscreen());
-            return;
-        case SDLK_U:      // keep the vault unlocked for the rest of the session
-            request(NavKind::ToggleKeepUnlocked);
-            return;
-        default: break;
-    }
+    if (handle_shared_key(key)) { return; }
     if (item_is_video(album_.images, index_)) { handle_key_video(key, sc); return; }
     if (item_is_animated_gif(album_.images, index_)) { handle_key_gif(key); return; }
     // Image-only keys.
@@ -497,8 +501,8 @@ void ImageViewer::update(double dt)
     // is determined during render. For now, always update to handle hover state
     // properly even if the strip is off-screen; render_strip will decide whether
     // to actually paint it.
-    const int strip_thumb = strip_hit(win_.mouse_x(), win_.mouse_y());
-    if (strip_hover_gate_.update(strip_thumb, dt)) {
+    if (const int strip_thumb = strip_hit(win_.mouse_x(), win_.mouse_y());
+        strip_hover_gate_.update(strip_thumb, dt)) {
         // Dwell completed; start animation if possible
         start_strip_hover_animation(strip_thumb);
     } else if (strip_hover_gate_.active_tile() != strip_hover_gif_index_) {

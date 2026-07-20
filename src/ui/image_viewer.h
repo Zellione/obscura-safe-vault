@@ -115,6 +115,7 @@ private:
     // the video/slideshow paths can bind layout-independent keys (volume/dwell,
     // Phase 25).
     void handle_key(SDL_Keycode key, SDL_Scancode sc);
+    bool handle_shared_key(SDL_Keycode key);   // keys common to images + videos; true if handled
     void handle_key_fit(SDL_Keycode key);
     void handle_key_scroll(SDL_Keycode key);
     void handle_key_video(SDL_Keycode key, SDL_Scancode sc);  // Space/,/./J/L + F/arrows + [ ] volume

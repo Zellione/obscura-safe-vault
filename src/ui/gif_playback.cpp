@@ -57,8 +57,7 @@ struct GifPlayback::Impl {
 
         // Check if there's a second frame to confirm it's animated (not static).
         // If there is, rewind so the decoder is back at the start.
-        auto f2 = dec_.next_frame();
-        if (!f2) {
+        if (auto f2 = dec_.next_frame(); !f2) {
             // Only one frame: static GIF, reject for animation playback
             std::println(stderr, "[GifPlayback] single-frame GIF, not animated");
             return;
@@ -138,28 +137,36 @@ struct GifPlayback::Impl {
 
         // Upload the current frame to the texture if it changed
         if (dirty_) {
-            int pitch = 0;
-            void* pixels = nullptr;
-            if (SDL_LockTexture(tex_, nullptr, &pixels, &pitch)) {
-                const size_t row_bytes = (static_cast<size_t>(current_.width) * 4);
-                const size_t byte_size = (row_bytes * static_cast<size_t>(current_.height));
-                if ((current_.rgba.size() == byte_size) && (pixels != nullptr) && (pitch > 0)) {
-                    const size_t pitch_size = static_cast<size_t>(pitch);
-                    // Copy row-by-row, honoring the pitch (byte stride per row).
-                    // The pitch may be larger than width*4 due to driver alignment.
-                    for (size_t y = 0; y < static_cast<size_t>(current_.height); ++y) {
-                        const uint8_t* src = current_.rgba.data() + (y * row_bytes);
-                        uint8_t* dst = static_cast<uint8_t*>(pixels) + (y * pitch_size);
-                        std::memcpy(dst, src, row_bytes);
-                    }
-                }
-                SDL_UnlockTexture(tex_);
-            }
+            upload_current_frame();
             dirty_ = false;
         }
 
         // Draw the texture at the destination rect
         r.draw_image(tex_, dest);
+    }
+
+    // Copy current_.rgba into the streaming texture, honoring SDL's row pitch.
+    // Split out of render() to keep nesting shallow (SonarQube S134).
+    void upload_current_frame()
+    {
+        int pitch = 0;
+        void* pixels = nullptr;
+        if (!SDL_LockTexture(tex_, nullptr, &pixels, &pitch)) {
+            return;
+        }
+        const size_t row_bytes = static_cast<size_t>(current_.width) * 4;
+        if (const size_t byte_size = row_bytes * static_cast<size_t>(current_.height);
+            current_.rgba.size() == byte_size && pixels != nullptr && pitch > 0) {
+            const auto pitch_size = static_cast<size_t>(pitch);
+            // The pitch (byte stride per row) may exceed width*4 due to driver
+            // alignment, so copy row-by-row rather than as one flat block.
+            for (size_t y = 0; y < static_cast<size_t>(current_.height); ++y) {
+                const uint8_t* src = current_.rgba.data() + (y * row_bytes);
+                uint8_t* dst = static_cast<uint8_t*>(pixels) + (y * pitch_size);
+                std::memcpy(dst, src, row_bytes);
+            }
+        }
+        SDL_UnlockTexture(tex_);
     }
 };
 

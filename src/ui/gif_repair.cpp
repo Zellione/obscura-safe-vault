@@ -23,7 +23,7 @@ bool maybe_repair_gif_animated(vault::Vault& v, std::string_view gallery_path,
     }
 
     // Build the node path from gallery_path + node.name
-    const std::string base = std::string(gallery_path);
+    const auto base = std::string(gallery_path);
     const std::string node_path =
         base.empty() ? node.name : base + "/" + node.name;
 

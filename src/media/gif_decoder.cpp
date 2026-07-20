@@ -61,6 +61,45 @@ struct GifDecoder::Impl {
         }
         avio.reset();
     }
+
+    // Pump demuxed packets into the decoder until a frame lands in `frame`.
+    // Returns false at end-of-stream (after flushing) or on a hard read/decode
+    // error. Every read packet is unref'd before the next iteration.
+    bool pump_next_frame()
+    {
+        while (true) {
+            const int recv_ret = avcodec_receive_frame(codec, frame);
+            if (recv_ret == 0) {
+                return true;
+            }
+            if (recv_ret != AVERROR(EAGAIN)) {
+                return false;  // hard error, or EOF after the flush drained
+            }
+
+            // EAGAIN: the decoder wants more input.
+            const int read_ret = av_read_frame(fmt, pkt);
+            if (read_ret == AVERROR_EOF) {
+                if (eof_sent) {
+                    return false;  // already flushed and drained
+                }
+                eof_sent = true;
+                avcodec_send_packet(codec, nullptr);  // nullptr = flush
+                continue;
+            }
+            if (read_ret < 0) {
+                return false;
+            }
+
+            if (pkt->stream_index == stream_idx) {
+                const int send_ret = avcodec_send_packet(codec, pkt);
+                if (send_ret < 0) {
+                    av_packet_unref(pkt);
+                    return false;
+                }
+            }
+            av_packet_unref(pkt);
+        }
+    }
 };
 
 GifDecoder::GifDecoder() : impl_(std::make_unique<Impl>()) {}
@@ -106,7 +145,7 @@ bool GifDecoder::open(std::span<const uint8_t> data)
         return false;
     }
 
-    AVStream* st = impl_->fmt->streams[impl_->stream_idx];
+    const AVStream* st = impl_->fmt->streams[impl_->stream_idx];
     impl_->time_base = st->time_base;
 
     impl_->codec = avcodec_alloc_context3(dec);
@@ -155,46 +194,9 @@ std::optional<GifFrame> GifDecoder::next_frame()
         return std::nullopt;
     }
 
-    // Main loop: read packets and try to receive frames
-    while (true) {
-        // Try to receive a frame from the decoder (non-blocking)
-        const int recv_ret = avcodec_receive_frame(impl_->codec, impl_->frame);
-        if (recv_ret == 0) {
-            // Successfully got a frame from the decoder
-            break;  // Exit loop with a valid frame in impl_->frame
-        }
-        if (recv_ret != AVERROR(EAGAIN)) {
-            // Any error other than EAGAIN means we're done (including EOF after flush)
-            return std::nullopt;
-        }
-
-        // EAGAIN: decoder wants more input. Read next packet from demuxer.
-        const int read_ret = av_read_frame(impl_->fmt, impl_->pkt);
-        if (read_ret == AVERROR_EOF) {
-            // Reached end of stream: send flush packet if we haven't already
-            if (!impl_->eof_sent) {
-                impl_->eof_sent = true;
-                avcodec_send_packet(impl_->codec, nullptr);  // nullptr = flush
-                continue;  // Loop to try receiving buffered frames
-            }
-            // Already flushed and got EAGAIN again: no more frames
-            return std::nullopt;
-        }
-        if (read_ret < 0) {
-            // Read error
-            return std::nullopt;
-        }
-
-        // Route the packet to the decoder if it's video
-        if (impl_->pkt->stream_index == impl_->stream_idx) {
-            const int send_ret = avcodec_send_packet(impl_->codec, impl_->pkt);
-            if (send_ret < 0) {
-                av_packet_unref(impl_->pkt);
-                return std::nullopt;
-            }
-        }
-        av_packet_unref(impl_->pkt);
-        // Loop back to try receiving a frame
+    // Pump packets until a frame is decoded (or the stream ends).
+    if (!impl_->pump_next_frame()) {
+        return std::nullopt;
     }
 
     // We have a valid frame in impl_->frame
