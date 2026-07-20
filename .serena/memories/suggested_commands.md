@@ -60,7 +60,7 @@ msbuild ObscuraSafeVault.sln /m /p:Configuration=Debug /p:Platform=x64
 ## Packaging
 ```bash
 scripts/package.sh           # Linux tar.gz
-makensis /DVERSION=… packaging/windows/osv.nsi   # Windows installer
+scripts\package.ps1          # Windows portable zip (OSV_VERSION=… to set version)
 ```
 
 ## Serena / LSP
