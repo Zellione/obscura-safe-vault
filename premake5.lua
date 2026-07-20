@@ -514,6 +514,7 @@ project "osv_tests"
         "src/ui/gallery_view.cpp",
         "src/ui/gif_model.cpp",
         "src/ui/gif_playback.cpp",
+        "src/ui/gif_repair.cpp",
         "src/ui/help_popup.cpp",
         "src/ui/tile_thumb.cpp",
         "src/ui/video_repair.cpp",

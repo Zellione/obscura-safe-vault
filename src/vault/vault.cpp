@@ -816,6 +816,35 @@ VaultResult Vault::repair_video_metadata(std::string_view node_path)
     return commit_index();
 }
 
+bool Vault::repair_image_animated(std::string_view node_path, bool animated)
+{
+    if (!unlocked_) {
+        return false;
+    }
+
+    IndexNode* n = resolve_node(node_path);
+    if (!n || !n->is_image()) {
+        return false;
+    }
+
+    if (n->meta.format != ImageFormat::GIF) {
+        return false;
+    }
+
+    // No-op if the flag is already correct
+    if (n->meta.animated == animated) {
+        return false;
+    }
+
+    // Update the flag and persist
+    n->meta.animated = animated;
+    if (commit_index() != VaultResult::Ok) {
+        return false;
+    }
+
+    return true;
+}
+
 VaultResult Vault::remove_image(std::string_view gallery_path, std::string_view filename)
 {
     using enum VaultResult;

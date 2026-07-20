@@ -11,6 +11,7 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "ui/export.h"
+#include "ui/gif_repair.h"
 #include "ui/meta_format.h"
 #include "ui/tile_thumb.h"
 #include "ui/widgets.h"
@@ -117,6 +118,20 @@ void ImageViewer::sync_gif_for_current_index()
     // is an animated GIF, otherwise tear down.
     gif_.reset();
     gif_index_ = -1;
+
+    if (index_ >= 0 && index_ < static_cast<int>(album_.images.size())) {
+        const vault::IndexNode* node = album_.images[index_];
+        if (node != nullptr && node->is_image() && node->meta.format == vault::ImageFormat::GIF) {
+            // Attempt to repair the animated flag for legacy GIFs stored before Phase 47
+            crypto::SecureBytes bytes;
+            if (vault_.read_image(*node, bytes) == vault::VaultResult::Ok) {
+                (void)maybe_repair_gif_animated(vault_, album_.gallery_path, *node, bytes.as_span());
+                // Refresh the node pointer after repair (in case the list changed)
+                // Actually, we keep using the same node pointer since we only modified
+                // in-memory metadata; the construct below will see the post-repair flag
+            }
+        }
+    }
 
     if (item_is_animated_gif(album_.images, index_)) {
         gif_ = std::make_unique<GifPlayback>(vault_, *album_.images[index_]);
