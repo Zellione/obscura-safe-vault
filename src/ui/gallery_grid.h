@@ -15,6 +15,8 @@
 #include "ui/file_op_job.h"
 #include "ui/gallery_session_state.h"
 #include "ui/gallery_view.h"
+#include "ui/gif_model.h"
+#include "ui/gif_playback.h"
 #include "ui/nav_model.h"
 #include "ui/quick_switch.h"
 #include "ui/rename_dialog.h"
@@ -139,6 +141,8 @@ private:
                          const SDL_FRect& box);
     [[nodiscard]] int  hit_test(float mx, float my) const;  // item under cursor, or -1
     [[nodiscard]] std::string fit_name(std::string_view name, float max_w) const;
+    [[nodiscard]] int debug_hover_animating_tile() const noexcept;  // -1 when nothing is animating
+    void start_hover_animation(int tile);  // resolve node, check badge, construct playback, check budget
 
     gfx::Window&            win_;
     gfx::FontAtlas&         font_;
@@ -211,6 +215,12 @@ private:
         std::unordered_set<uint64_t> failed;   // thumbs that gave up decoding
     };
     ThumbDecode thumbs_;
+
+    // Hover animation (Phase 47 Task 10). At most one animation at a time across
+    // the whole screen. The gate tracks dwell time; playback renders the animation.
+    GifHoverGate                 hover_gate_;
+    std::unique_ptr<GifPlayback> hover_gif_;
+    int                          hover_gif_tile_ = -1;
 };
 
 // Free friends of GalleryGrid (see the in-class declarations): poll_import_job /

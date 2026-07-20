@@ -11,6 +11,7 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "ui/export.h"
+#include "ui/gif_model.h"
 #include "ui/gif_repair.h"
 #include "ui/meta_format.h"
 #include "ui/strip_layout.h"
@@ -76,6 +77,9 @@ void ImageViewer::on_exit()
 {
     video_.reset();                 // stop decode + wipe the VideoSource cache first
     gif_.reset();                   // stop GIF playback
+    strip_hover_gif_.reset();       // stop strip hover animation (Phase 47 Task 10)
+    strip_hover_gif_index_ = -1;
+    strip_hover_gate_.reset();
     full_cache_.evict_except({});   // destroy all cached textures
 }
 
@@ -448,6 +452,42 @@ void ImageViewer::update(double dt)
     if (gif_) gif_->update(dt);
     sync_gif_for_current_index();  // reconcile gif_ when index_ changed via scroll
 
+    // Update strip hover animation (Phase 47 Task 10): independent of the main gif_
+    // playback (both may run at once). Only update when the strip is visible.
+    // Note: hovered index calculation requires the strip layout to be known, which
+    // is determined during render. For now, always update to handle hover state
+    // properly even if the strip is off-screen; render_strip will decide whether
+    // to actually paint it.
+    const int strip_thumb = strip_hit(static_cast<float>(win_.mouse_x()),
+                                      static_cast<float>(win_.mouse_y()));
+    if (strip_hover_gate_.update(strip_thumb, dt)) {
+        // Dwell completed; start animation if possible
+        if (strip_thumb >= 0 && strip_thumb < static_cast<int>(album_.images.size())) {
+            const vault::IndexNode* node = album_.images[strip_thumb];
+            if (node && tile_shows_animated_badge(*node)) {
+                auto playback = std::make_unique<GifPlayback>(vault_, *node);
+                if (playback->valid()) {
+                    strip_hover_gif_ = std::move(playback);
+                    strip_hover_gif_index_ = strip_thumb;
+                } else {
+                    strip_hover_gif_.reset();
+                    strip_hover_gif_index_ = -1;
+                }
+            } else {
+                strip_hover_gif_.reset();
+                strip_hover_gif_index_ = -1;
+            }
+        } else {
+            strip_hover_gif_.reset();
+            strip_hover_gif_index_ = -1;
+        }
+    } else if (strip_hover_gate_.active_tile() != strip_hover_gif_index_) {
+        // Cursor moved off the hovered thumbnail
+        strip_hover_gif_.reset();
+        strip_hover_gif_index_ = -1;
+    }
+    if (strip_hover_gif_) strip_hover_gif_->update(dt);
+
     // Single-image export runs synchronously — one image is fast (the large,
     // multi-image export lives in GalleryGrid, which backgrounds it, Phase 25).
     if (auto dest = export_.take_destination(); dest && !album_.images.empty()) {
@@ -663,17 +703,23 @@ void ImageViewer::render_strip(gfx::Renderer& r)
                                                .highlight = gfx::theme::ACCENT,
                                                .vertical = vertical});
 
-    // Draw animated badges on thumbnail strip tiles.
+    // Draw hover animation if active on a thumbnail, and draw animated badges on tiles.
     for (size_t i = 0; i < album_.images.size(); ++i) {
-        if (!tile_shows_animated_badge(*album_.images[i])) {
-            continue;
-        }
         // Get the thumbnail's rect from the single source of truth (strip_layout).
         const SDL_FRect thumb_rect = strip_cell_rect(static_cast<int>(i), strip, thumb,
                                                       STRIP_GAP, scroll, vertical);
-        // Draw animated badge in top-right corner of thumbnail.
-        // Use 12x12 badge size and y_offset of 6 to match the original positioning.
-        draw_animated_badge(r, font_, thumb_rect, 12.0f, 0.0f, 6.0f);
+
+        // Render hover animation if active on this thumbnail.
+        if (strip_hover_gif_ && strip_hover_gif_->valid() &&
+            static_cast<int>(i) == strip_hover_gif_index_) {
+            strip_hover_gif_->render(r, thumb_rect);
+        }
+
+        // Draw animated badge.
+        if (tile_shows_animated_badge(*album_.images[i])) {
+            // Use 12x12 badge size and y_offset of 6 to match the original positioning.
+            draw_animated_badge(r, font_, thumb_rect, 12.0f, 0.0f, 6.0f);
+        }
     }
 }
 

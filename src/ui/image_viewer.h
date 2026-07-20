@@ -12,12 +12,13 @@
 #include "ui/export_ui.h"
 #include "ui/full_tex_cache.h"
 #include "ui/gallery_session_state.h"
+#include "ui/gif_model.h"
+#include "ui/gif_playback.h"
 #include "ui/quick_switch.h"
 #include "ui/screen.h"
 #include "ui/scroll_model.h"
 #include "ui/search_overlay.h"
 #include "ui/slideshow_view.h"
-#include "ui/gif_playback.h"
 #include "ui/strip_layout.h"
 #include "ui/tag_editor.h"
 #include "ui/video_playback.h"
@@ -245,6 +246,12 @@ private:
     // show_image_at() and update() to keep gif_ in sync regardless of how
     // index_ changed.
     void sync_gif_for_current_index();
+
+    // Strip hover animation (Phase 47 Task 10). Independent of the main gif_
+    // playback (both may run at once). At most one strip hover animation at a time.
+    GifHoverGate                 strip_hover_gate_;
+    std::unique_ptr<GifPlayback> strip_hover_gif_;
+    int                          strip_hover_gif_index_ = -1;
 };
 
 // Free friends of ImageViewer (see the in-class declarations): current_strip_side /
