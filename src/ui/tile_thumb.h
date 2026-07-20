@@ -6,6 +6,7 @@
 #include <unordered_set>
 
 #include "ui/gallery_cover.h"   // ui::CoverSpan
+#include "ui/gif_model.h"        // gif_within_hover_dimension_budget
 
 namespace gfx { class Renderer; class FontAtlas; class TextureCache; }
 namespace image { class DecodeWorker; }
@@ -67,6 +68,10 @@ void draw_tile_thumb(gfx::Renderer& r, gfx::FontAtlas& font,
 
 // True when a tile should carry the Phase 47 "A" (animated) badge.
 [[nodiscard]] bool tile_shows_animated_badge(const vault::IndexNode& node) noexcept;
+
+// True when a tile can be animated on hover: it must show the animated badge
+// and have dimensions within the GIF hover budget.
+[[nodiscard]] bool tile_can_hover_animate(const vault::IndexNode& node) noexcept;
 
 // Draw an animated badge ("A") in the top-right corner of a tile.
 // `tile_rect` is the tile's bounding rectangle; `badge_size` determines both

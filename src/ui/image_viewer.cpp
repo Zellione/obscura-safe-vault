@@ -144,6 +144,45 @@ void ImageViewer::sync_gif_for_current_index()
     }
 }
 
+void ImageViewer::start_strip_hover_animation(int strip_thumb)
+{
+    // Resolve the node at this thumbnail index.
+    if (strip_thumb < 0 || strip_thumb >= static_cast<int>(album_.images.size())) {
+        strip_hover_gif_.reset();
+        strip_hover_gif_index_ = -1;
+        return;
+    }
+
+    const vault::IndexNode* node = album_.images[strip_thumb];
+    if (!node) {
+        strip_hover_gif_.reset();
+        strip_hover_gif_index_ = -1;
+        return;
+    }
+
+    // Check if this tile can be animated on hover: must have the animated badge
+    // and dimensions within the GIF hover budget.
+    if (!tile_can_hover_animate(*node)) {
+        strip_hover_gif_.reset();
+        strip_hover_gif_index_ = -1;
+        return;
+    }
+
+    // Construct the playback decoder.
+    auto playback = std::make_unique<GifPlayback>(vault_, *node);
+
+    // Verify it's valid.
+    if (!playback->valid()) {
+        strip_hover_gif_.reset();
+        strip_hover_gif_index_ = -1;
+        return;
+    }
+
+    // All checks passed; keep the playback alive.
+    strip_hover_gif_ = std::move(playback);
+    strip_hover_gif_index_ = strip_thumb;
+}
+
 void ImageViewer::show_image_at(int idx)
 {
     if (album_.images.empty()) return;
@@ -461,31 +500,21 @@ void ImageViewer::update(double dt)
     const int strip_thumb = strip_hit(win_.mouse_x(), win_.mouse_y());
     if (strip_hover_gate_.update(strip_thumb, dt)) {
         // Dwell completed; start animation if possible
-        if (strip_thumb >= 0 && strip_thumb < static_cast<int>(album_.images.size())) {
-            const vault::IndexNode* node = album_.images[strip_thumb];
-            if (node && tile_shows_animated_badge(*node)) {
-                auto playback = std::make_unique<GifPlayback>(vault_, *node);
-                if (playback->valid()) {
-                    strip_hover_gif_ = std::move(playback);
-                    strip_hover_gif_index_ = strip_thumb;
-                } else {
-                    strip_hover_gif_.reset();
-                    strip_hover_gif_index_ = -1;
-                }
-            } else {
-                strip_hover_gif_.reset();
-                strip_hover_gif_index_ = -1;
-            }
-        } else {
-            strip_hover_gif_.reset();
-            strip_hover_gif_index_ = -1;
-        }
+        start_strip_hover_animation(strip_thumb);
     } else if (strip_hover_gate_.active_tile() != strip_hover_gif_index_) {
         // Cursor moved off the hovered thumbnail
         strip_hover_gif_.reset();
         strip_hover_gif_index_ = -1;
     }
-    if (strip_hover_gif_) strip_hover_gif_->update(dt);
+    if (strip_hover_gif_) {
+        strip_hover_gif_->update(dt);
+        // Enforce the frame count budget: if the GIF has decoded more than 300 frames,
+        // tear down the playback immediately to cap resource cost.
+        if (gif_hover_frame_count_exceeded(strip_hover_gif_->frame_count())) {
+            strip_hover_gif_.reset();
+            strip_hover_gif_index_ = -1;
+        }
+    }
 
     // Single-image export runs synchronously — one image is fast (the large,
     // multi-image export lives in GalleryGrid, which backgrounds it, Phase 25).

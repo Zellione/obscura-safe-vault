@@ -29,6 +29,57 @@ TEST(gif_hover_budget_rejects_degenerate_dimensions)
     CHECK(!ui::gif_within_hover_budget(320, 0, 10));
 }
 
+TEST(gif_within_hover_dimension_budget_accepts_small_dimensions)
+{
+    CHECK(ui::gif_within_hover_dimension_budget(320, 240));
+}
+
+TEST(gif_within_hover_dimension_budget_accepts_exact_limits)
+{
+    CHECK(ui::gif_within_hover_dimension_budget(1920, 1080));
+}
+
+TEST(gif_within_hover_dimension_budget_rejects_oversized_width)
+{
+    CHECK(!ui::gif_within_hover_dimension_budget(1921, 1080));
+}
+
+TEST(gif_within_hover_dimension_budget_rejects_oversized_height)
+{
+    CHECK(!ui::gif_within_hover_dimension_budget(1920, 1081));
+}
+
+TEST(gif_within_hover_dimension_budget_rejects_zero_width)
+{
+    CHECK(!ui::gif_within_hover_dimension_budget(0, 240));
+}
+
+TEST(gif_within_hover_dimension_budget_rejects_zero_height)
+{
+    CHECK(!ui::gif_within_hover_dimension_budget(320, 0));
+}
+
+TEST(gif_within_hover_dimension_budget_rejects_negative_dimensions)
+{
+    CHECK(!ui::gif_within_hover_dimension_budget(-320, 240));
+    CHECK(!ui::gif_within_hover_dimension_budget(320, -240));
+}
+
+TEST(gif_hover_frame_count_exceeded_accepts_small_count)
+{
+    CHECK(!ui::gif_hover_frame_count_exceeded(12));
+}
+
+TEST(gif_hover_frame_count_exceeded_accepts_exact_limit)
+{
+    CHECK(!ui::gif_hover_frame_count_exceeded(300));
+}
+
+TEST(gif_hover_frame_count_exceeded_rejects_oversized_count)
+{
+    CHECK(ui::gif_hover_frame_count_exceeded(301));
+}
+
 TEST(gif_hover_gate_waits_for_the_dwell)
 {
     ui::GifHoverGate g;

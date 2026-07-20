@@ -18,6 +18,15 @@ inline constexpr double kGifMinDelay = 0.02;
 // slow decode) can never turn into an unbounded catch-up loop.
 inline constexpr int kGifMaxCatchUpFrames = 64;
 
+// Separate predicates for dimension and frame count budgets.
+// The dimension budget can be checked before decoding.
+[[nodiscard]] bool gif_within_hover_dimension_budget(int width, int height) noexcept;
+
+// The frame count budget is checked during playback after decoding.
+[[nodiscard]] bool gif_hover_frame_count_exceeded(size_t frames) noexcept;
+
+// Legacy predicate: checks both dimensions and frame count.
+// Kept for backward compatibility; prefer the split predicates above.
 [[nodiscard]] bool gif_within_hover_budget(int width, int height, size_t frames) noexcept;
 
 // Accumulates hover time on one tile and reports when animation should start.

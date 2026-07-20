@@ -112,6 +112,14 @@ bool tile_shows_animated_badge(const vault::IndexNode& node) noexcept
         && node.meta.animated;
 }
 
+bool tile_can_hover_animate(const vault::IndexNode& node) noexcept
+{
+    if (!tile_shows_animated_badge(node)) {
+        return false;
+    }
+    return gif_within_hover_dimension_budget(node.meta.width, node.meta.height);
+}
+
 void draw_animated_badge(gfx::Renderer& r, gfx::FontAtlas& font,
                         const SDL_FRect& tile_rect, float badge_size,
                         float x_offset, float y_offset) noexcept

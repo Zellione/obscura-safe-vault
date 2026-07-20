@@ -247,6 +247,10 @@ private:
     // index_ changed.
     void sync_gif_for_current_index();
 
+    // Start or stop strip hover animation on the given thumbnail index.
+    // Checks both the animated badge and the dimension budget before constructing.
+    void start_strip_hover_animation(int strip_thumb);
+
     // Strip hover animation (Phase 47 Task 10). Independent of the main gif_
     // playback (both may run at once). At most one strip hover animation at a time.
     GifHoverGate                 strip_hover_gate_;

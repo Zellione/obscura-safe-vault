@@ -2,7 +2,7 @@
 
 namespace ui {
 
-bool gif_within_hover_budget(int width, int height, size_t frames) noexcept
+bool gif_within_hover_dimension_budget(int width, int height) noexcept
 {
     if (width <= 0 || height <= 0) {
         return false;
@@ -10,7 +10,17 @@ bool gif_within_hover_budget(int width, int height, size_t frames) noexcept
     if (width > kGifHoverMaxWidth || height > kGifHoverMaxHeight) {
         return false;
     }
-    return frames <= kGifHoverMaxFrames;
+    return true;
+}
+
+bool gif_hover_frame_count_exceeded(size_t frames) noexcept
+{
+    return frames > kGifHoverMaxFrames;
+}
+
+bool gif_within_hover_budget(int width, int height, size_t frames) noexcept
+{
+    return gif_within_hover_dimension_budget(width, height) && !gif_hover_frame_count_exceeded(frames);
 }
 
 bool GifHoverGate::update(int tile, double dt) noexcept

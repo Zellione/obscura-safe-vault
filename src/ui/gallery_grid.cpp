@@ -1185,7 +1185,7 @@ void GalleryGrid::update(double dt)
         hover_gif_->update(dt);
         // Enforce the frame count budget: if the GIF has decoded more than 300 frames,
         // tear down the playback immediately to cap resource cost.
-        if (hover_gif_->frame_count() > kGifHoverMaxFrames) {
+        if (gif_hover_frame_count_exceeded(hover_gif_->frame_count())) {
             hover_gif_.reset();
             hover_gif_tile_ = -1;
         }
@@ -1579,16 +1579,9 @@ void GalleryGrid::start_hover_animation(int tile)
         return;
     }
 
-    // Only animate tiles marked as animated.
-    if (!tile_shows_animated_badge(*node)) {
-        hover_gif_.reset();
-        hover_gif_tile_ = -1;
-        return;
-    }
-
-    // Check the dimension part of the budget upfront (before constructing a decoder).
-    // Frame count will be checked after construction.
-    if (!gif_within_hover_budget(node->meta.width, node->meta.height, 1)) {
+    // Check if this tile can be animated on hover: must have the animated badge
+    // and dimensions within the GIF hover budget.
+    if (!tile_can_hover_animate(*node)) {
         hover_gif_.reset();
         hover_gif_tile_ = -1;
         return;
@@ -1597,22 +1590,12 @@ void GalleryGrid::start_hover_animation(int tile)
     // Construct the playback decoder.
     auto playback = std::make_unique<GifPlayback>(vault_, *node);
 
-    // Verify it's valid and check the frame count.
+    // Verify it's valid.
     if (!playback->valid()) {
         hover_gif_.reset();
         hover_gif_tile_ = -1;
         return;
     }
-
-    // The decoder is open; now check the full budget (dimensions + frame count).
-    // We already checked dimensions, so this mainly validates the frame count.
-    // Note: frame_count is only available after the decoder opens.
-    // For now, we trust the decoder's frame count is reasonable since it came
-    // from the file itself. The budget is applied based on the node's dimensions
-    // and the decoder's actual frame count (which GifPlayback doesn't expose).
-    // A simpler approach: since GifPlayback doesn't expose frame count, we check
-    // budget only on dimensions. The frame count check is inherent in the GIF
-    // itself (it either decodes or it doesn't).
 
     // All checks passed; keep the playback alive.
     hover_gif_ = std::move(playback);
