@@ -204,7 +204,7 @@ TEST(gif_repair_survives_a_reopen)
     // Reopen the vault and verify the flag persisted
     {
         vault::Vault v;
-        REQUIRE(vault::Vault::open(dir / "v.osv", v) == vault::VaultResult::Ok);
+        REQUIRE(vault::Vault::open((dir / "v.osv").string(), v) == vault::VaultResult::Ok);
         const std::vector<uint8_t> pw{'p', 'w'};
         REQUIRE(v.unlock(pw, {}) == vault::VaultResult::Ok);
 
