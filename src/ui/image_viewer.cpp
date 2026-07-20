@@ -458,8 +458,7 @@ void ImageViewer::update(double dt)
     // is determined during render. For now, always update to handle hover state
     // properly even if the strip is off-screen; render_strip will decide whether
     // to actually paint it.
-    const int strip_thumb = strip_hit(static_cast<float>(win_.mouse_x()),
-                                      static_cast<float>(win_.mouse_y()));
+    const int strip_thumb = strip_hit(win_.mouse_x(), win_.mouse_y());
     if (strip_hover_gate_.update(strip_thumb, dt)) {
         // Dwell completed; start animation if possible
         if (strip_thumb >= 0 && strip_thumb < static_cast<int>(album_.images.size())) {

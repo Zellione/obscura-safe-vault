@@ -60,6 +60,26 @@ int Window::height() const noexcept
     return h;
 }
 
+float Window::mouse_x() const noexcept
+{
+    float x = 0.0f;
+    float y = 0.0f;
+    if (window_ != nullptr) {
+        SDL_GetMouseState(&x, &y);
+    }
+    return x;
+}
+
+float Window::mouse_y() const noexcept
+{
+    float x = 0.0f;
+    float y = 0.0f;
+    if (window_ != nullptr) {
+        SDL_GetMouseState(&x, &y);
+    }
+    return y;
+}
+
 void Window::shutdown()
 {
     if (renderer_) {
