@@ -139,7 +139,7 @@ void ImageViewer::handle_key_video(SDL_Keycode key, SDL_Scancode sc)
     }
 }
 
-void ImageViewer::handle_key_gif(SDL_Keycode key, SDL_Scancode sc)
+void ImageViewer::handle_key_gif(SDL_Keycode key)
 {
     switch (key) {
         case SDLK_SPACE:
@@ -313,7 +313,7 @@ void ImageViewer::handle_key(SDL_Keycode key, SDL_Scancode sc)
         default: break;
     }
     if (item_is_video(album_.images, index_)) { handle_key_video(key, sc); return; }
-    if (item_is_animated_gif(album_.images, index_)) { handle_key_gif(key, sc); return; }
+    if (item_is_animated_gif(album_.images, index_)) { handle_key_gif(key); return; }
     // Image-only keys.
     switch (key) {
         case SDLK_F:      // toggle fit <-> fill-width scroll

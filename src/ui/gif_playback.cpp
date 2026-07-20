@@ -134,9 +134,16 @@ struct GifPlayback::Impl {
             int pitch = 0;
             void* pixels = nullptr;
             if (SDL_LockTexture(tex_, nullptr, &pixels, &pitch)) {
-                const int byte_size = current_.width * current_.height * 4;
-                if (static_cast<int>(current_.rgba.size()) == byte_size && pixels != nullptr) {
-                    std::memcpy(pixels, current_.rgba.data(), byte_size);
+                const size_t row_bytes = static_cast<size_t>(current_.width) * 4;
+                const size_t byte_size = row_bytes * current_.height;
+                if (current_.rgba.size() == byte_size && pixels != nullptr) {
+                    // Copy row-by-row, honoring the pitch (byte stride per row).
+                    // The pitch may be larger than width*4 due to driver alignment.
+                    for (int y = 0; y < current_.height; ++y) {
+                        const uint8_t* src = current_.rgba.data() + y * row_bytes;
+                        uint8_t* dst = static_cast<uint8_t*>(pixels) + y * pitch;
+                        std::memcpy(dst, src, row_bytes);
+                    }
                 }
                 SDL_UnlockTexture(tex_);
             }
