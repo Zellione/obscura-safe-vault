@@ -139,12 +139,32 @@ bool ArchiveReader::extract(size_t index, crypto::SecureBytes& out) const
         if (n == 0) break;  // short read: entry had less data than declared
         total += static_cast<size_t>(n);
     }
-    archive_read_free(a);
     if (total != out.size()) {
         out.wipe();
         (void)out.resize(0);
+        archive_read_free(a);
         return false;
     }
+
+    // Force libarchive to finalize the entry and validate its CRC. ZipCrypto
+    // verifies a wrong password against a single check byte, so ~1 wrong
+    // password in 256 false-accepts and decrypts to garbage of the right
+    // length; the CRC mismatch surfaces only here, on the read past the last
+    // declared byte. Without this probe extract() would return that garbage as
+    // success and the importer would write it — breaking the "nothing written
+    // on a wrong password" invariant (CWE-noise, but a real write of
+    // attacker-controlled bytes). A clean entry returns 0 (entry EOF) here.
+    uint8_t sentinel = 0;
+    if (const la_ssize_t n = archive_read_data(a, &sentinel, 1); n < 0) {
+        const std::string_view msg = archive_error_string(a);
+        std::println(stderr, "[ArchiveReader] entry finalize failed: {}", msg);
+        needs_password_ = archive_error_is_passphrase_issue(msg);
+        out.wipe();
+        (void)out.resize(0);
+        archive_read_free(a);
+        return false;
+    }
+    archive_read_free(a);
     return true;
 }
 
