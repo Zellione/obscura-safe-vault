@@ -64,6 +64,19 @@ TEST(gif_hover_gate_resets_when_the_cursor_leaves)
     CHECK_EQ(g.active_tile(), -1);
 }
 
+TEST(gif_hover_gate_refires_on_same_tile_after_leaving)
+{
+    ui::GifHoverGate g;
+    CHECK(g.update(7, 0.300));           // fire on tile 7
+    CHECK_EQ(g.active_tile(), 7);
+    CHECK(!g.update(-1, 0.016));         // leave (tile becomes -1)
+    CHECK_EQ(g.active_tile(), -1);
+    CHECK(!g.update(7, 0.100));          // return to tile 7, but dwell not complete yet
+    CHECK_EQ(g.active_tile(), -1);
+    CHECK(g.update(7, 0.150));           // dwell complete (0.100 + 0.150 = 0.250 > 0.200)
+    CHECK_EQ(g.active_tile(), 7);        // fires again
+}
+
 TEST(gif_advance_holds_within_one_frame_delay)
 {
     double acc = 0.0;
@@ -95,4 +108,14 @@ TEST(gif_advance_tolerates_a_zero_delay)
     const int n = ui::gif_frames_to_advance(acc, 0.100, 0.0, false);
     CHECK(n >= 1);
     CHECK(n <= 64);   // bounded, never an unbounded catch-up loop
+}
+
+TEST(gif_advance_catches_up_cap_drops_residual)
+{
+    double acc = 0.0;
+    const int frames = ui::gif_frames_to_advance(acc, 10.0, 0.02, false);
+    CHECK_EQ(frames, ui::kGifMaxCatchUpFrames);
+    CHECK_EQ(acc, 0.0);
+    const int next = ui::gif_frames_to_advance(acc, 0.005, 0.02, false);
+    CHECK_EQ(next, 0);
 }
