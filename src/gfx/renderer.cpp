@@ -48,6 +48,9 @@ float Renderer::draw_thumbnail_strip(std::span<SDL_Texture* const> thumbs,
     SDL_SetRenderClipRect(r_, &clip);
 
     // Lay cells out along the strip's long axis; centre them on the short axis.
+    // SYNC: this geometry must match ui::strip_cell_rect (src/ui/strip_layout.cpp).
+    // Both independently compute cell rects to avoid coupling gfx and ui modules;
+    // if layout changes, update both sites.
     const float cross  = opts.vertical ? strip.x + (strip.w - thumb_size) * 0.5f
                                         : strip.y + (strip.h - thumb_size) * 0.5f;
     const float origin = opts.vertical ? strip.y : strip.x;

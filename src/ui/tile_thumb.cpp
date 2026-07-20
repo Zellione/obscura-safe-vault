@@ -112,4 +112,22 @@ bool tile_shows_animated_badge(const vault::IndexNode& node) noexcept
         && node.meta.animated;
 }
 
+void draw_animated_badge(gfx::Renderer& r, gfx::FontAtlas& font,
+                        const SDL_FRect& tile_rect, float badge_size,
+                        float x_offset, float y_offset) noexcept
+{
+    // Position badge in top-right corner of the tile, shifted left/down by
+    // x_offset/y_offset if needed (e.g. to avoid overlapping a favorite marker).
+    const SDL_FRect badge{tile_rect.x + tile_rect.w - badge_size - 8 + x_offset,
+                         tile_rect.y + y_offset, badge_size, badge_size};
+
+    // Text offsets scale with badge size: roughly 1/4 of the badge width/height.
+    const float text_x_offset = badge_size * 0.22f;
+    const float text_y_offset = badge_size * 0.15f;
+
+    r.draw_round_rect(badge, gfx::theme::RADIUS_SMALL, gfx::theme::ACCENT);
+    r.draw_round_rect(badge, gfx::theme::RADIUS_SMALL, gfx::theme::BG, /*filled*/ false);
+    r.draw_text(font, badge.x + text_x_offset, badge.y + text_y_offset, "A", gfx::theme::TEXT);
+}
+
 } // namespace ui

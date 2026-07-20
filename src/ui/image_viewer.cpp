@@ -13,6 +13,7 @@
 #include "ui/export.h"
 #include "ui/gif_repair.h"
 #include "ui/meta_format.h"
+#include "ui/strip_layout.h"
 #include "ui/tile_thumb.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
@@ -663,26 +664,16 @@ void ImageViewer::render_strip(gfx::Renderer& r)
                                                .vertical = vertical});
 
     // Draw animated badges on thumbnail strip tiles.
-    const float origin_along = vertical ? strip.y : strip.x;
-    const float origin_cross = vertical ? strip.x : strip.y;
-    const float cross0       = origin_cross + (vertical ? (strip.w - thumb) * 0.5f
-                                                         : (strip.h - thumb) * 0.5f);
     for (size_t i = 0; i < album_.images.size(); ++i) {
         if (!tile_shows_animated_badge(*album_.images[i])) {
             continue;
         }
-        const float start_along = origin_along - scroll + static_cast<float>(i) * (thumb + STRIP_GAP);
-        SDL_FRect thumb_rect;
-        if (vertical) {
-            thumb_rect = SDL_FRect{cross0, start_along, thumb, thumb};
-        } else {
-            thumb_rect = SDL_FRect{start_along, cross0, thumb, thumb};
-        }
+        // Get the thumbnail's rect from the single source of truth (strip_layout).
+        const SDL_FRect thumb_rect = strip_cell_rect(static_cast<int>(i), strip, thumb,
+                                                      STRIP_GAP, scroll, vertical);
         // Draw animated badge in top-right corner of thumbnail.
-        const SDL_FRect badge{thumb_rect.x + thumb - 8.0f - 12.0f, thumb_rect.y + 6.0f, 12.0f, 12.0f};
-        r.draw_round_rect(badge, 4.0f, ACCENT);
-        r.draw_round_rect(badge, 4.0f, BG, /*filled*/ false);
-        r.draw_text(font_, badge.x + 2.0f, badge.y + 1.0f, "A", TEXT);
+        // Use 12x12 badge size and y_offset of 6 to match the original positioning.
+        draw_animated_badge(r, font_, thumb_rect, 12.0f, 0.0f, 6.0f);
     }
 }
 

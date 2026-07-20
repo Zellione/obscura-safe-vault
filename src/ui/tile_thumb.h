@@ -68,4 +68,12 @@ void draw_tile_thumb(gfx::Renderer& r, gfx::FontAtlas& font,
 // True when a tile should carry the Phase 47 "A" (animated) badge.
 [[nodiscard]] bool tile_shows_animated_badge(const vault::IndexNode& node) noexcept;
 
+// Draw an animated badge ("A") in the top-right corner of a tile.
+// `tile_rect` is the tile's bounding rectangle; `badge_size` determines both
+// the badge's dimensions and the text offsets. `x_offset` and `y_offset` allow
+// positioning adjustments (e.g., to avoid overlapping a favorite marker).
+void draw_animated_badge(gfx::Renderer& r, gfx::FontAtlas& font,
+                        const SDL_FRect& tile_rect, float badge_size,
+                        float x_offset = 0.0f, float y_offset = 8.0f) noexcept;
+
 } // namespace ui
