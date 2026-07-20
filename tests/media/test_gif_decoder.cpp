@@ -109,4 +109,25 @@ TEST(gif_decoder_rejects_truncated_gif)
     CHECK(true);
 }
 
+TEST(gif_decoder_reports_real_frame_delays)
+{
+    const auto bytes = read_fixture("tiny_anim.gif");
+    REQUIRE(!bytes.empty());
+
+    media::GifDecoder d;
+    REQUIRE(d.open(bytes));
+
+    const double expected_delay = 0.25;  // tiny_anim.gif: 25 ticks @ 1/100 time_base
+    const double tolerance = 0.01;       // Allow ±0.01s margin
+
+    size_t frame_count = 0;
+    while (auto f = d.next_frame()) {
+        CHECK(f->delay_s >= expected_delay - tolerance);
+        CHECK(f->delay_s <= expected_delay + tolerance);
+        ++frame_count;
+    }
+    // tiny_anim.gif has 4 frames
+    CHECK(frame_count == 4);
+}
+
 #endif // OSV_VENDORED_AV

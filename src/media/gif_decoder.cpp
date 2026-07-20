@@ -95,8 +95,9 @@ bool GifDecoder::open(std::span<const uint8_t> data)
         impl_->close();
         return false;
     }
-    // Note: Skip avformat_find_stream_info() as it may corrupt packet state for GIFs.
-    // We get enough info from av_find_best_stream() without it.
+    // Note: avformat_find_stream_info() is unnecessary here. The GIF demuxer's
+    // read_header already populates codecpar and time_base, so the decoder opens
+    // correctly without the additional probe.
 
     const AVCodec* dec = nullptr;
     impl_->stream_idx = av_find_best_stream(impl_->fmt, AVMEDIA_TYPE_VIDEO, -1, -1, &dec, 0);
