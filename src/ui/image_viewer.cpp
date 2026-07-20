@@ -30,6 +30,13 @@ bool item_is_video(const std::vector<const vault::IndexNode*>& imgs, int idx)
 {
     return idx >= 0 && idx < static_cast<int>(imgs.size()) && imgs[idx]->is_video();
 }
+
+bool item_is_animated_gif(const std::vector<const vault::IndexNode*>& imgs, int idx)
+{
+    if (idx < 0 || idx >= static_cast<int>(imgs.size())) return false;
+    const vault::IndexNode* node = imgs[idx];
+    return node != nullptr && node->is_image() && node->meta.animated;
+}
 } // namespace
 
 ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
@@ -66,6 +73,7 @@ void ImageViewer::on_enter()
 void ImageViewer::on_exit()
 {
     video_.reset();                 // stop decode + wipe the VideoSource cache first
+    gif_.reset();                   // stop GIF playback
     full_cache_.evict_except({});   // destroy all cached textures
 }
 
@@ -106,8 +114,16 @@ void ImageViewer::show_image_at(int idx)
     // mode; tears down the previous decoder (RAII) before any vault lock. video_
     // being non-null thus means exactly "Fit mode, current item is a video".
     video_.reset();
-    if (mode_ == ViewMode::Fit && item_is_video(album_.images, index_))
+    if (mode_ == ViewMode::Fit && item_is_video(album_.images, index_)) {
         video_ = std::make_unique<VideoPlayback>(vault_, *album_.images[index_]);
+    }
+    // (Re)build animated GIF playback for the current item when it is an animated
+    // GIF; tears down the previous decoder (RAII) before any vault lock. gif_
+    // being non-null thus means exactly "current item is an animated GIF".
+    gif_.reset();
+    if (item_is_animated_gif(album_.images, index_)) {
+        gif_ = std::make_unique<GifPlayback>(vault_, *album_.images[index_]);
+    }
 }
 
 void ImageViewer::handle_key_video(SDL_Keycode key, SDL_Scancode sc)
@@ -120,6 +136,17 @@ void ImageViewer::handle_key_video(SDL_Keycode key, SDL_Scancode sc)
         case SDLK_RIGHT: set_index(1);  return;
         case SDLK_UP:    go_back();     return;
         default:         if (video_) video_->handle_key(key, sc); return;   // Space/,/./J/L + [ ] volume
+    }
+}
+
+void ImageViewer::handle_key_gif(SDL_Keycode key, SDL_Scancode sc)
+{
+    switch (key) {
+        case SDLK_SPACE:
+            if (gif_ && gif_->valid()) gif_->toggle_pause();
+            return;
+        default:
+            return;
     }
 }
 
@@ -286,6 +313,7 @@ void ImageViewer::handle_key(SDL_Keycode key, SDL_Scancode sc)
         default: break;
     }
     if (item_is_video(album_.images, index_)) { handle_key_video(key, sc); return; }
+    if (item_is_animated_gif(album_.images, index_)) { handle_key_gif(key, sc); return; }
     // Image-only keys.
     switch (key) {
         case SDLK_F:      // toggle fit <-> fill-width scroll
@@ -384,6 +412,7 @@ void ImageViewer::update(double dt)
     }
 
     if (video_) video_->update(dt);
+    if (gif_) gif_->update(dt);
 
     // Single-image export runs synchronously — one image is fast (the large,
     // multi-image export lives in GalleryGrid, which backgrounds it, Phase 25).
@@ -475,10 +504,16 @@ std::vector<ui::HelpGroup> ImageViewer::help_groups() const
         return groups;
     }
     const bool is_video = !album_.images.empty() && item_is_video(album_.images, index_);
+    const bool is_animated_gif = !album_.images.empty() && item_is_animated_gif(album_.images, index_);
     if (is_video) {
         groups.push_back({"Video playback", {
             {"Space", "Play/Pause"}, {"J / L", "Seek -/+5s"}, {", / .", "Step one frame"},
             {"- / +", "Volume"}, {"M", "Mute"}, {"R", "Toggle loop"},
+            {"Left/Right", "Prev/Next item"},
+        }});
+    } else if (is_animated_gif) {
+        groups.push_back({"GIF playback", {
+            {"Space", "Play/Pause"},
             {"Left/Right", "Prev/Next item"},
         }});
     } else if (mode_ == ViewMode::FillScroll) {
@@ -529,7 +564,12 @@ void ImageViewer::render_fit(gfx::Renderer& r, const SDL_FRect& vp)
     const SDL_Rect clip{static_cast<int>(vp.x), static_cast<int>(vp.y),
                         static_cast<int>(vp.w), static_cast<int>(vp.h)};
     SDL_SetRenderClipRect(r.sdl(), &clip);
-    r.draw_image(ft->tex, SDL_FRect{dx, dy, sw, sh});
+    const SDL_FRect dest{dx, dy, sw, sh};
+    if (gif_ && gif_->valid()) {
+        gif_->render(r, dest);
+    } else {
+        r.draw_image(ft->tex, dest);
+    }
     SDL_SetRenderClipRect(r.sdl(), nullptr);
 }
 
@@ -556,10 +596,14 @@ void ImageViewer::render_scroll(gfx::Renderer& r, const SDL_FRect& vp)
     for (int i = first; i <= last; ++i) {
         const float top = vp.y + m.image_top(i) - scroll_y_;
         const float h   = scaled_height(*album_.images[i], vp.w);
-        if (FullTex* ft = full_cache_.acquire(*album_.images[i]))
-            r.draw_image(ft->tex, SDL_FRect{vp.x, top, vp.w, h});
-        else
-            r.draw_rect(SDL_FRect{vp.x, top, vp.w, h}, gfx::theme::SURFACE);
+        const SDL_FRect dest{vp.x, top, vp.w, h};
+        if (i == index_ && gif_ && gif_->valid()) {
+            gif_->render(r, dest);
+        } else if (FullTex* ft = full_cache_.acquire(*album_.images[i])) {
+            r.draw_image(ft->tex, dest);
+        } else {
+            r.draw_rect(dest, gfx::theme::SURFACE);
+        }
     }
     SDL_SetRenderClipRect(r.sdl(), nullptr);
 }

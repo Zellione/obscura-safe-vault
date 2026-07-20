@@ -17,6 +17,7 @@
 #include "ui/scroll_model.h"
 #include "ui/search_overlay.h"
 #include "ui/slideshow_view.h"
+#include "ui/gif_playback.h"
 #include "ui/strip_layout.h"
 #include "ui/tag_editor.h"
 #include "ui/video_playback.h"
@@ -100,7 +101,8 @@ public:
     [[nodiscard]] bool animating() const override
     {
         if (mode_ == ViewMode::Slideshow && slideshow_.animating()) return true;
-        return video_ && video_->animating();   // a playing video keeps the loop ticking
+        if (video_ && video_->animating()) return true;   // a playing video keeps the loop ticking
+        return gif_ && gif_->animating();                 // a playing GIF keeps the loop ticking
     }
 
     [[nodiscard]] std::vector<ui::HelpGroup> help_groups() const override;
@@ -115,6 +117,7 @@ private:
     void handle_key_fit(SDL_Keycode key);
     void handle_key_scroll(SDL_Keycode key);
     void handle_key_video(SDL_Keycode key, SDL_Scancode sc);  // Space/,/./J/L + F/arrows + [ ] volume
+    void handle_key_gif(SDL_Keycode key, SDL_Scancode sc);    // Space toggles pause
     void handle_mouse_down(const SDL_MouseButtonEvent& b);
     void handle_wheel(const SDL_MouseWheelEvent& w);
     [[nodiscard]] bool handle_overlay_event(const SDL_Event& e);  // modal overlays; true if consumed
@@ -227,6 +230,11 @@ private:
     // then false and the host shows the poster). Borrows the unlocked vault;
     // destroyed on exit / item change before any lock (invariant: no UAF).
     std::unique_ptr<VideoPlayback> video_;
+
+    // Animated-GIF playback for the current item (Phase 47). Null unless the
+    // current image is a GIF with meta.animated set. Same lifetime rules as
+    // video_: destroyed before any vault lock / idle / switch.
+    std::unique_ptr<GifPlayback> gif_;
 };
 
 // Free friends of ImageViewer (see the in-class declarations): current_strip_side /
