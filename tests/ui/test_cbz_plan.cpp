@@ -25,7 +25,6 @@ TEST(cbz_plan_one_leaf_gallery_natural_order)
     auto e = entries({"10.jpg", "2.jpg", "1.jpg", "cover.png", "notes.txt"});
     auto p = ui::build_cbz_plan(e, "", "MyComic");
 
-    CHECK_FALSE(p.needs_resolution);
     CHECK_EQ(p.skipped_unsupported, 1);                          // notes.txt
     CHECK_EQ(p.galleries.size(), static_cast<size_t>(1));
     CHECK_EQ(p.galleries[0], std::string("MyComic"));
@@ -100,8 +99,7 @@ TEST(cbz_plan_defangs_traversal_entry_names)
 TEST(zip_plan_defangs_traversal_entry_and_directory_names)
 {
     auto e = entries({"../evil.jpg", "..\\sneaky\\x.png", "good/a.jpg"});
-    auto p = ui::build_zip_plan(e, "", "Imported",
-                                ui::ZipConflictPolicy::FlattenMixed);
+    auto p = ui::build_zip_plan(e, "", "Imported");
 
     for (const auto& pl : p.placements) {
         CHECK_TRUE(vault::is_safe_node_name(pl.filename));

@@ -156,8 +156,8 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   the libarchive path. Contract: while active() the worker owns the vault handle, so GalleryGrid
   must NOT touch the vault (update()/render()/handle_event() short-circuit — no thumbnail
   reads/listing); it polls total()/done() + take_outcome() (joins) + draws a progress modal,
-  Esc -> cancel(). A ZIP with mixed folders returns needs_resolution (nothing written);
-  poll_import_job keeps the naming state active for the Flatten/Skip modal + F/S re-launch.
+  Esc -> cancel(). poll_import_job keeps the naming state active across a password round-trip
+  (encrypted zip/cbz) and clears it on a terminal outcome.
   `Screen::blocks_idle_lock()` (default false; GalleryGrid returns import_job_.active()) stops
   App::maybe_auto_lock wiping the key mid-write. Unit-tested (poll-to-completion harness).
 - `file_op_job.*` — FileOpJob runs export / delete / move-copy on a bg worker (same contract).
@@ -169,8 +169,9 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 
 ## Import planning & archive reading
 - `zip_plan.*` — pure ZIP placement planner: entries -> galleries to create + file placements +
-  mixed-folder conflicts + skip count. SDL-/miniz-/vault-free, unit-tested.
-  `ZipDest{NewGallery,Append}`, `ZipConflictPolicy{AskUser,FlattenMixed,SkipMixed}`.
+  skip count. SDL-/miniz-/vault-free, unit-tested. `build_zip_plan` mirrors the archive tree 1:1;
+  a dir holding both media and subdirs maps onto a mixed gallery (Phase 46), so there is no
+  conflict policy and no user prompt. `ZipDest{NewGallery,Append}`.
   `is_supported_image_name` + `build_cbz_plan` -> a fixed one-leaf plan (gallery named after the
   archive) of every image entry, videos/other skipped+counted, subfolders flattened (basename
   collisions disambiguated by source dir), natural reading order. `find_meta_entry` — a
@@ -181,8 +182,8 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   through). Shift_JIS/other double-byte out of scope (imports safely, mis-decoded as CP437).
   Pure, unit-tested; used by zip_import's read_entry_list.
 - `zip_import.*` — ZIP/CBZ import executor: miniz reader -> mlock'd SecureBytes (one entry at a
-  time, no temp file) -> Vault::add_image/add_video by `image::detect_format`. needs_resolution
-  for mixed folders. import_cbz reuses the per-entry path over build_cbz_plan (`.cbz` -> one
+  time, no temp file) -> Vault::add_image/add_video by `image::detect_format`.
+  import_cbz reuses the per-entry path over build_cbz_plan (`.cbz` -> one
   page gallery, never extracted to disk). Lives in ui/ like export.* (deps vault+image). Hosted
   by GalleryGrid (`Z` key). Optional `ImportProgress*` (atomic total/done/cancel). A top-level
   meta.json seeds the created gallery's tags via `Vault::add_tag`, but the name is NOT applied

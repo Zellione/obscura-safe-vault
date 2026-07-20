@@ -377,7 +377,7 @@ void GalleryGrid::finish_naming()
     if (naming_.zip.active) {
         naming_.zip.gallery_name = naming_.buf;
         naming_.buf.clear();
-        do_zip_import(naming_.zip.path, ui::ZipConflictPolicy::AskUser);
+        do_zip_import(naming_.zip.path);
         return;
     }
 
@@ -499,7 +499,7 @@ void GalleryGrid::handle_password_key(const SDL_Event& e)
     } else if (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER) {
         naming_.password.active = false;
         SDL_StopTextInput(win_.sdl_window());
-        do_zip_import(naming_.zip.path, ui::ZipConflictPolicy::AskUser);
+        do_zip_import(naming_.zip.path);
     } else if (e.key.key == SDLK_ESCAPE) {
         naming_.password.active = false;
         naming_.password.buf.clear();
@@ -665,30 +665,6 @@ bool GalleryGrid::handle_compact_confirm_key(const SDL_Event& e)
     return true;
 }
 
-bool GalleryGrid::handle_zip_conflict_key(const SDL_Event& e)
-{
-    if (!naming_.zip.active || naming_.active || naming_.password.active
-        || e.type != SDL_EVENT_KEY_DOWN) return false;
-    switch (e.key.key) {
-        case SDLK_F:  // flatten all mixed folders
-            do_zip_import(naming_.zip.path, ui::ZipConflictPolicy::FlattenMixed);
-            mark_dirty();
-            return true;
-        case SDLK_S:  // skip directories with mixed content
-            do_zip_import(naming_.zip.path, ui::ZipConflictPolicy::SkipMixed);
-            mark_dirty();
-            return true;
-        case SDLK_ESCAPE:  // cancel the import
-            naming_.zip.active = false;
-            naming_.password.active = false;
-            naming_.password.buf.clear();
-            mark_dirty();
-            return true;
-        default:
-            return false;
-    }
-}
-
 // Overlays take input in priority order: search > tag_editor > transfer >
 // quick_switch > export consent. Extracted from handle_event (cpp:S3776 —
 // each of these blocks was a nested branch there; here they're flat top-level
@@ -749,9 +725,6 @@ void GalleryGrid::handle_event(const SDL_Event& e)
 
     // The password-prompt modal owns all input while it is up (Phase 35).
     if (naming_.password.active) { handle_password_key(e); return; }
-
-    // The zip conflict modal owns all input while it is up (only when not naming).
-    if (handle_zip_conflict_key(e)) return;
 
     if (naming_.active) { handle_naming_key(e); return; }
 
@@ -884,7 +857,7 @@ void GalleryGrid::pump_zip_import()
     mark_dirty();   // dialog closed (picked) — repaint
 }
 
-void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipConflictPolicy policy)
+void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path)
 {
     // The gallery name comes from naming_.zip.
     const std::string gallery_name = naming_.zip.gallery_name;
@@ -894,9 +867,8 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipCo
     // on a large archive (Phase 24 fix) — synchronously here would freeze it on the
     // name popup ("locked in"). update() drains the result; while the worker owns
     // the vault the UI shows only the progress modal. CBZ is a fixed one-leaf plan;
-    // a ZIP with mixed folders comes back needs_resolution (nothing written) so
-    // update() shows the Flatten/Skip modal, and F/S re-enters here with the chosen
-    // policy. naming_.zip stays populated across that round-trip and is cleared on a
+    // a ZIP mirrors its tree 1:1, mixed folders included (Phase 46), so an import
+    // never needs a conflict round-trip. naming_.zip stays populated until a
     // terminal outcome. archive_backend (Phase 34) picks the libarchive-backed job
     // methods for .7z/.rar/.tar(+variants)/.cbr/.cb7/.cbt — same threading/progress
     // contract, only the decompression backend differs. Phase 35: needs_password
@@ -912,11 +884,11 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path, ui::ZipCo
             naming_.import_job.start_cbz(vault_, zip_path, base_gallery, gallery_name);
     } else {
         if (naming_.zip.archive_backend)
-            naming_.import_job.start_archive(vault_, zip_path, ui::ZipImportTarget{policy},
+            naming_.import_job.start_archive(vault_, zip_path,
                                              base_gallery, gallery_name, naming_.zip.needs_password,
                                              password_bytes(naming_.password.buf));
         else
-            naming_.import_job.start_zip(vault_, zip_path, base_gallery, gallery_name, policy);
+            naming_.import_job.start_zip(vault_, zip_path, base_gallery, gallery_name);
     }
     mark_dirty();
 }
@@ -949,12 +921,9 @@ void poll_import_job(GalleryGrid& g)
             g.naming_.zip.needs_password  = false;
             g.naming_.password.active     = false;
             g.naming_.password.buf.clear();
-        } else if (oc->needs_resolution) {
-            // ZIP with mixed folders: keep naming_.zip active so the Flatten/Skip
-            // modal shows; the worker wrote nothing. F/S re-launches with a policy.
         } else if (oc->needs_password) {
-            // Encrypted zip/cbz: keep naming_.zip active (mirrors needs_resolution)
-            // and open the password modal. `retry` distinguishes "nothing typed
+            // Encrypted zip/cbz: keep naming_.zip active and open the password
+            // modal. `retry` distinguishes "nothing typed
             // yet" from "that password was wrong" for the modal's message; the
             // just-tried (wrong) password is cleared so the field starts empty for
             // the next attempt (Phase 35).
@@ -1337,30 +1306,6 @@ void GalleryGrid::render(gfx::Renderer& r)
     combine_.render(r, font_, W, H);
     transfer_.render(r, font_, W, H);
     quick_switch_.render(r, font_, W, H);
-
-    // Zip conflict modal: drawn when awaiting a choice between FlattenMixed and SkipMixed.
-    // Only shown after the naming dialog closes (so !naming_.active).
-    if (naming_.zip.active && !naming_.active && !naming_.password.active) {
-        // Veil the whole window.
-        r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
-
-        const float pw = 600;
-        const float ph = 200;
-        const float px = (W - pw) / 2;
-        const float py = (H - ph) / 2;
-        r.draw_round_rect({px, py, pw, ph}, RADIUS, SURFACE);
-        r.draw_round_rect({px, py, pw, ph}, RADIUS, ACCENT, /*filled*/ false);
-
-        // Centre text helper.
-        auto centered = [&](const std::string& s, float y, gfx::Color c) {
-            const auto tw = static_cast<float>(font_.measure(s));
-            r.draw_text(font_, px + (pw - tw) / 2, y, s, c);
-        };
-
-        centered("Mixed folders detected in archive.", py + 28, TEXT);
-        centered("Cannot mix nested folders with flat gallery structure.", py + 60, TEXT_DIM);
-        centered("[F] Flatten all files  |  [S] Skip those directories", py + ph - 50, TEXT_DIM);
-    }
 
     // Password-prompt modal: shown when the import outcome reported
     // needs_password (encrypted zip/cbz) — masked text entry, mirrors the

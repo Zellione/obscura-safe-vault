@@ -17,13 +17,11 @@ namespace ui {
 
 struct ZipImportOutcome {
     bool                     ok = false;
-    bool                     needs_resolution = false;
     bool                     needs_password   = false;  // encrypted zip/cbz: wrong/missing password,
                                                          // nothing written (Phase 35)
     bool                     cancelled = false;     // user pressed Esc during import (Phase 26)
     int                      imported = 0;
     int                      skipped = 0;
-    std::vector<std::string> mixed_dirs;
     std::string              error;
 };
 
@@ -37,16 +35,14 @@ struct ZipImportOutcome {
 using ImportProgress = vault::OpProgress;
 
 // Import the supported media from `zip_path` into `v`. Decompresses each entry
-// into mlock'd memory only (invariant #1). The tree is mirrored under
-// base_gallery/new_gallery_name. If policy==AskUser and the archive has mixed
-// folders, returns needs_resolution=true and writes nothing.
+// into mlock'd memory only (invariant #1). The archive tree is mirrored 1:1
+// under base_gallery/new_gallery_name (see build_zip_plan).
 // `progress` (optional) is updated as files are placed and polled for cancel;
 // pass nullptr for a plain synchronous import with no progress/cancel.
 [[nodiscard]] ZipImportOutcome import_zip(vault::Vault&                v,
                                           const std::filesystem::path& zip_path,
                                           std::string_view             base_gallery,
                                           std::string_view             new_gallery_name,
-                                          ZipConflictPolicy            policy,
                                           ImportProgress*              progress = nullptr);
 
 // Import a `.cbz` comic archive as a single leaf gallery `base_gallery/gallery_name`

@@ -94,13 +94,11 @@ struct MediaFile {
     size_t      index;  // index back into the caller's entry list
 };
 
-// Scan entries for supported media files, recording the directories that
-// directly hold media (`media_dirs`) and every gallery directory that must be
-// created (`gallery_dirs`). Unsupported / directory entries bump `skipped`;
-// a top-level meta.json (`meta_idx`) is excluded without counting (Phase 27).
+// Scan entries for supported media files. Unsupported / directory entries bump
+// `skipped`; a top-level meta.json (`meta_idx`) is excluded without counting
+// (Phase 27).
 std::vector<MediaFile> collect_media(const std::vector<ZipEntry>& entries,
-                                     std::optional<size_t> meta_idx,
-                                     StringSet& media_dirs, StringSet& gallery_dirs, int& skipped)
+                                     std::optional<size_t> meta_idx, int& skipped)
 {
     std::vector<MediaFile> media;
     for (size_t i = 0; i < entries.size(); ++i) {
@@ -109,28 +107,10 @@ std::vector<MediaFile> collect_media(const std::vector<ZipEntry>& entries,
         std::string name = basename_of(e.path);
         if (!is_supported_media_name(name)) { ++skipped; continue; }
         std::string dir = sanitize_dir_path(dirname_of(e.path));
-        if (!dir.empty()) media_dirs.insert(dir);
-        add_with_ancestors(dir, gallery_dirs);
         media.emplace_back(std::move(dir), std::move(name), i);
     }
     return media;
 }
-
-// A media-holding dir is "mixed" (would break the leaf invariant) when it is a
-// strict ancestor of another gallery dir, i.e. it has a media-bearing subdirectory.
-StringSet find_mixed_dirs(const StringSet& media_dirs, const StringSet& gallery_dirs)
-{
-    StringSet mixed;
-    for (const auto& d : media_dirs) {
-        const std::string prefix = d + "/";
-        const bool has_media_subdir = std::ranges::any_of(gallery_dirs, [&](std::string_view g) {
-            return g.size() > prefix.size() && g.compare(0, prefix.size(), prefix) == 0;
-        });
-        if (has_media_subdir) mixed.insert(d);
-    }
-    return mixed;
-}
-
 
 } // namespace
 
@@ -231,8 +211,7 @@ ZipPlan build_cbz_plan(const std::vector<ZipEntry>& entries,
 
 ZipPlan build_zip_plan(const std::vector<ZipEntry>& entries,
                        std::string_view             base_gallery,
-                       std::string_view             new_gallery_name,
-                       ZipConflictPolicy            policy)
+                       std::string_view             new_gallery_name)
 {
     const std::optional<size_t> meta_idx = find_meta_entry(entries);
 
@@ -240,27 +219,15 @@ ZipPlan build_zip_plan(const std::vector<ZipEntry>& entries,
     ZipPlan plan;
     const std::string root = join_path(base_gallery, new_gallery_name);
 
-    StringSet media_dirs;     // dirs directly holding media
-    StringSet gallery_dirs;   // dirs we must create (media subtree)
     const std::vector<MediaFile> media =
-        collect_media(entries, meta_idx, media_dirs, gallery_dirs, plan.skipped_unsupported);
-    const StringSet mixed = find_mixed_dirs(media_dirs, gallery_dirs);
+        collect_media(entries, meta_idx, plan.skipped_unsupported);
 
-    if (!mixed.empty() && policy == ZipConflictPolicy::AskUser) {
-        plan.needs_resolution = true;
-        for (const auto& d : mixed) plan.mixed_dirs.emplace_back(d);
-        return plan;
-    }
-
-    // Resolve each media file to a gallery, applying the conflict policy to a
-    // mixed dir: FlattenMixed routes its direct media into a "Files" child leaf;
-    // SkipMixed drops them (counted as skipped).
+    // Every media file lands in the gallery mirroring its archive directory.
+    // A directory that holds media *and* has media-bearing subdirectories needs
+    // no special handling: since Phase 46 a gallery may hold both.
     StringSet final_galleries;
     for (const MediaFile& m : media) {
-        const bool is_mixed = mixed.contains(m.dir);
-        if (is_mixed && policy == ZipConflictPolicy::SkipMixed) { ++plan.skipped_unsupported; continue; }
-        const std::string target_dir = is_mixed ? m.dir + "/Files" : m.dir;
-        const std::string gallery = target_dir.empty() ? root : join_path(root, target_dir);
+        const std::string gallery = m.dir.empty() ? root : join_path(root, m.dir);
         add_with_ancestors(gallery, final_galleries);
         plan.placements.emplace_back(gallery, m.name, m.index);
     }

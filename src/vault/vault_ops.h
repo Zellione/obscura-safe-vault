@@ -34,7 +34,8 @@ template <typename NodeT>
 [[nodiscard]] IndexNode* child_named(IndexNode* node, std::string_view name);
 
 // Predicates: does a gallery node hold any media children (images or videos)?
-// Does it hold any sub-galleries? Used to enforce the leaf invariant.
+// Does it hold any sub-galleries? Informational since Phase 46 (galleries may
+// hold media and sub-galleries at once) — no longer gates insertion.
 [[nodiscard]] bool holds_media(const IndexNode& g);
 [[nodiscard]] bool holds_galleries(const IndexNode& g);
 

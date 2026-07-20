@@ -20,13 +20,12 @@ struct ArchivePassword {
     std::string_view password;
 };
 
-// Bundles where a ZIP-style import lands: mirror under base_gallery/new_gallery_name
-// per `policy` — three values grouped here because import_archive alone
-// needs the extra param-count relief (import_zip already fits the S107 cap).
+// Bundles where a ZIP-style import lands: the archive tree is mirrored under
+// base_gallery/new_gallery_name. Grouped because import_archive alone needs the
+// extra param-count relief (import_zip already fits the S107 cap).
 struct ZipDestination {
-    std::string_view  base_gallery;
-    std::string_view  new_gallery_name;
-    ZipConflictPolicy policy;
+    std::string_view base_gallery;
+    std::string_view new_gallery_name;
 };
 
 // Import the supported media from `archive_path` (.7z/.rar/.tar/.tar.gz/

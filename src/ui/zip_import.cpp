@@ -158,7 +158,6 @@ ZipImportOutcome import_zip(vault::Vault&                v,
                             const std::filesystem::path& zip_path,
                             std::string_view             base_gallery,
                             std::string_view             new_gallery_name,
-                            ZipConflictPolicy            policy,
                             ImportProgress*              progress)
 {
     ZipImportOutcome out;
@@ -172,14 +171,7 @@ ZipImportOutcome import_zip(vault::Vault&                v,
     const std::vector<ZipEntry> entries = read_entry_list(zip);
     const ArchiveMeta meta = load_archive_meta(zip, entries);
 
-    ZipPlan plan = build_zip_plan(entries, base_gallery, new_gallery_name, policy);
-    if (plan.needs_resolution) {
-        out.ok = true;
-        out.needs_resolution = true;
-        out.mixed_dirs = std::move(plan.mixed_dirs);
-        mz_zip_reader_end(&zip);
-        return out;
-    }
+    ZipPlan plan = build_zip_plan(entries, base_gallery, new_gallery_name);
     out.skipped = plan.skipped_unsupported;
 
     if (!create_galleries(v, plan, zip, out)) return out;

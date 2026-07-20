@@ -44,28 +44,26 @@ bool ZipImportJob::start_cbz(vault::Vault& v, std::filesystem::path cbz,
 }
 
 bool ZipImportJob::start_zip(vault::Vault& v, std::filesystem::path zip,
-                             std::string base_gallery, std::string new_gallery_name,
-                             ZipConflictPolicy policy)
+                             std::string base_gallery, std::string new_gallery_name)
 {
     return launch([this, &v, zip = std::move(zip), base = std::move(base_gallery),
-                   name = std::move(new_gallery_name), policy]() {
-        return import_zip(v, zip, base, name, policy, &progress_);
+                   name = std::move(new_gallery_name)]() {
+        return import_zip(v, zip, base, name, &progress_);
     });
 }
 
-bool ZipImportJob::start_archive(vault::Vault& v, std::filesystem::path archive, ZipImportTarget target,
+bool ZipImportJob::start_archive(vault::Vault& v, std::filesystem::path archive,
                                  std::string base_gallery, std::string new_gallery_name,
                                  bool password_protected, crypto::SecureBytes password)
 {
     auto pw = std::make_shared<crypto::SecureBytes>(std::move(password));
-    return launch([this, &v, archive = std::move(archive), target, base = std::move(base_gallery),
+    return launch([this, &v, archive = std::move(archive), base = std::move(base_gallery),
                    name = std::move(new_gallery_name), password_protected, pw]() {
         const std::string_view pw_view = pw->empty() ? std::string_view{}
             : std::string_view(reinterpret_cast<const char*>(pw->data()), pw->size());
         ZipImportOutcome oc = import_archive(
             v, archive,
-            ZipDestination{.base_gallery = base, .new_gallery_name = name,
-                           .policy = target.policy},
+            ZipDestination{.base_gallery = base, .new_gallery_name = name},
             &progress_,
             ArchivePassword{.password_protected = password_protected, .password = pw_view});
         pw->wipe();
