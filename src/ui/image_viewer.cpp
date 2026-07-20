@@ -11,7 +11,11 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "ui/export.h"
+#include "ui/gif_model.h"
+#include "ui/gif_repair.h"
+#include "ui/input.h"
 #include "ui/meta_format.h"
+#include "ui/strip_layout.h"
 #include "ui/tile_thumb.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
@@ -29,6 +33,13 @@ constexpr float SCROLL_STEP = 96.0f;   // arrow-key / wheel scroll distance (px)
 bool item_is_video(const std::vector<const vault::IndexNode*>& imgs, int idx)
 {
     return idx >= 0 && idx < static_cast<int>(imgs.size()) && imgs[idx]->is_video();
+}
+
+bool item_is_animated_gif(const std::vector<const vault::IndexNode*>& imgs, int idx)
+{
+    if (idx < 0 || idx >= static_cast<int>(imgs.size())) return false;
+    const vault::IndexNode* node = imgs[idx];
+    return node != nullptr && node->is_image() && node->meta.animated;
 }
 } // namespace
 
@@ -66,6 +77,10 @@ void ImageViewer::on_enter()
 void ImageViewer::on_exit()
 {
     video_.reset();                 // stop decode + wipe the VideoSource cache first
+    gif_.reset();                   // stop GIF playback
+    strip_hover_gif_.reset();       // stop strip hover animation (Phase 47 Task 10)
+    strip_hover_gif_index_ = -1;
+    strip_hover_gate_.reset();
     full_cache_.evict_except({});   // destroy all cached textures
 }
 
@@ -95,6 +110,80 @@ SDL_FRect ImageViewer::strip_rect() const
 
 // --- Fit-mode view state ---------------------------------------------------
 
+void ImageViewer::sync_gif_for_current_index()
+{
+    // Rebuild gif_ when index_ has moved away from gif_index_, or tear it down
+    // when the current item is no longer an animated GIF. Never tear down and
+    // rebuild if index_ hasn't changed (that would restart the animation every
+    // frame).
+    if (gif_index_ == index_) {
+        return;   // GIF is still valid for the current index
+    }
+
+    // Index has changed or gif_ was never built — rebuild if the current item
+    // is an animated GIF, otherwise tear down.
+    gif_.reset();
+    gif_index_ = -1;
+
+    if (index_ >= 0 && index_ < static_cast<int>(album_.images.size())) {
+        const vault::IndexNode* node = album_.images[index_];
+        if (node != nullptr && node->is_image() && node->meta.format == vault::ImageFormat::GIF) {
+            // Attempt to repair the animated flag for legacy GIFs stored before Phase 47
+            crypto::SecureBytes bytes;
+            if (vault_.read_image(*node, bytes) == vault::VaultResult::Ok) {
+                (void)maybe_repair_gif_animated(vault_, album_.gallery_path, *node, bytes.as_span());
+                // Refresh the node pointer after repair (in case the list changed)
+                // Actually, we keep using the same node pointer since we only modified
+                // in-memory metadata; the construct below will see the post-repair flag
+            }
+        }
+    }
+
+    if (item_is_animated_gif(album_.images, index_)) {
+        gif_ = std::make_unique<GifPlayback>(vault_, *album_.images[index_]);
+        gif_index_ = index_;
+    }
+}
+
+void ImageViewer::start_strip_hover_animation(int strip_thumb)
+{
+    // Resolve the node at this thumbnail index.
+    if (strip_thumb < 0 || strip_thumb >= static_cast<int>(album_.images.size())) {
+        strip_hover_gif_.reset();
+        strip_hover_gif_index_ = -1;
+        return;
+    }
+
+    const vault::IndexNode* node = album_.images[strip_thumb];
+    if (!node) {
+        strip_hover_gif_.reset();
+        strip_hover_gif_index_ = -1;
+        return;
+    }
+
+    // Check if this tile can be animated on hover: must have the animated badge
+    // and dimensions within the GIF hover budget.
+    if (!tile_can_hover_animate(*node)) {
+        strip_hover_gif_.reset();
+        strip_hover_gif_index_ = -1;
+        return;
+    }
+
+    // Construct the playback decoder.
+    auto playback = std::make_unique<GifPlayback>(vault_, *node);
+
+    // Verify it's valid.
+    if (!playback->valid()) {
+        strip_hover_gif_.reset();
+        strip_hover_gif_index_ = -1;
+        return;
+    }
+
+    // All checks passed; keep the playback alive.
+    strip_hover_gif_ = std::move(playback);
+    strip_hover_gif_index_ = strip_thumb;
+}
+
 void ImageViewer::show_image_at(int idx)
 {
     if (album_.images.empty()) return;
@@ -106,8 +195,12 @@ void ImageViewer::show_image_at(int idx)
     // mode; tears down the previous decoder (RAII) before any vault lock. video_
     // being non-null thus means exactly "Fit mode, current item is a video".
     video_.reset();
-    if (mode_ == ViewMode::Fit && item_is_video(album_.images, index_))
+    if (mode_ == ViewMode::Fit && item_is_video(album_.images, index_)) {
         video_ = std::make_unique<VideoPlayback>(vault_, *album_.images[index_]);
+    }
+    // Sync animated GIF playback for the current item; tears down the previous
+    // decoder (RAII) before any vault lock if the index has changed.
+    sync_gif_for_current_index();
 }
 
 void ImageViewer::handle_key_video(SDL_Keycode key, SDL_Scancode sc)
@@ -121,6 +214,49 @@ void ImageViewer::handle_key_video(SDL_Keycode key, SDL_Scancode sc)
         case SDLK_UP:    go_back();     return;
         default:         if (video_) video_->handle_key(key, sc); return;   // Space/,/./J/L + [ ] volume
     }
+}
+
+bool ImageViewer::handle_shared_key(SDL_Keycode key)
+{
+    using enum StripSide;
+    using enum ViewMode;
+    switch (key) {
+        case SDLK_T:      // toggle the strip between bottom and left
+            strip_side_ = (strip_side_ == Bottom) ? Left : Bottom;
+            fit_.fitted = false;                      // viewport changed: refit
+            if (mode_ == FillScroll) { scroll_to_image(index_); }
+            return true;
+        case SDLK_G:      // edit tags for the current item
+            if (!album_.images.empty()) { tag_editor_.open(album_.paths[index_]); }
+            return true;
+        case SDLK_B:      // toggle favorite (bookmark) on the current item
+            // best-effort: favorite toggle failure is benign, UI re-reads state
+            if (!album_.images.empty()) { (void)vault_.toggle_favorite(album_.paths[index_]); }
+            return true;
+        case SDLK_ESCAPE:
+            if (win_.is_fullscreen()) { win_.set_fullscreen(false); return true; }
+            go_back();
+            return true;
+        case SDLK_F11:
+            win_.set_fullscreen(!win_.is_fullscreen());
+            return true;
+        case SDLK_U:      // keep the vault unlocked for the rest of the session
+            request(NavKind::ToggleKeepUnlocked);
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool ImageViewer::handle_key_gif(SDL_Keycode key)
+{
+    // Space toggles pause; every other key falls through to normal image
+    // handling (navigation, fit/scroll, ...), so a GIF still navigates.
+    if (gif_viewer_consumes_key(key) && gif_ && gif_->valid()) {
+        gif_->toggle_pause();
+        return true;
+    }
+    return false;
 }
 
 void ImageViewer::set_index(int delta)
@@ -260,32 +396,11 @@ void ImageViewer::handle_key(SDL_Keycode key, SDL_Scancode sc)
         return;
     }
     // Keys shared by images and videos.
-    switch (key) {
-        case SDLK_T:      // toggle the strip between bottom and left
-            strip_side_ = (strip_side_ == Bottom) ? Left : Bottom;
-            fit_.fitted = false;                      // viewport changed: refit
-            if (mode_ == FillScroll) scroll_to_image(index_);
-            return;
-        case SDLK_G:      // edit tags for the current item
-            if (!album_.images.empty()) tag_editor_.open(album_.paths[index_]);
-            return;
-        case SDLK_B:      // toggle favorite (bookmark) on the current item
-            // best-effort: favorite toggle failure is benign, UI re-reads state
-            if (!album_.images.empty()) (void)vault_.toggle_favorite(album_.paths[index_]);
-            return;
-        case SDLK_ESCAPE:
-            if (win_.is_fullscreen()) { win_.set_fullscreen(false); return; }
-            go_back();
-            return;
-        case SDLK_F11:
-            win_.set_fullscreen(!win_.is_fullscreen());
-            return;
-        case SDLK_U:      // keep the vault unlocked for the rest of the session
-            request(NavKind::ToggleKeepUnlocked);
-            return;
-        default: break;
-    }
+    if (handle_shared_key(key)) { return; }
     if (item_is_video(album_.images, index_)) { handle_key_video(key, sc); return; }
+    // A GIF only claims Space (pause); any other key falls through to the image
+    // keys below so arrows still navigate between items.
+    if (item_is_animated_gif(album_.images, index_) && handle_key_gif(key)) { return; }
     // Image-only keys.
     switch (key) {
         case SDLK_F:      // toggle fit <-> fill-width scroll
@@ -384,6 +499,33 @@ void ImageViewer::update(double dt)
     }
 
     if (video_) video_->update(dt);
+    if (gif_) gif_->update(dt);
+    sync_gif_for_current_index();  // reconcile gif_ when index_ changed via scroll
+
+    // Update strip hover animation (Phase 47 Task 10): independent of the main gif_
+    // playback (both may run at once). Only update when the strip is visible.
+    // Note: hovered index calculation requires the strip layout to be known, which
+    // is determined during render. For now, always update to handle hover state
+    // properly even if the strip is off-screen; render_strip will decide whether
+    // to actually paint it.
+    if (const int strip_thumb = strip_hit(win_.mouse_x(), win_.mouse_y());
+        strip_hover_gate_.update(strip_thumb, dt)) {
+        // Dwell completed; start animation if possible
+        start_strip_hover_animation(strip_thumb);
+    } else if (strip_hover_gate_.active_tile() != strip_hover_gif_index_) {
+        // Cursor moved off the hovered thumbnail
+        strip_hover_gif_.reset();
+        strip_hover_gif_index_ = -1;
+    }
+    if (strip_hover_gif_) {
+        strip_hover_gif_->update(dt);
+        // Enforce the frame count budget: if the GIF has decoded more than 300 frames,
+        // tear down the playback immediately to cap resource cost.
+        if (gif_hover_frame_count_exceeded(strip_hover_gif_->frame_count())) {
+            strip_hover_gif_.reset();
+            strip_hover_gif_index_ = -1;
+        }
+    }
 
     // Single-image export runs synchronously — one image is fast (the large,
     // multi-image export lives in GalleryGrid, which backgrounds it, Phase 25).
@@ -475,10 +617,16 @@ std::vector<ui::HelpGroup> ImageViewer::help_groups() const
         return groups;
     }
     const bool is_video = !album_.images.empty() && item_is_video(album_.images, index_);
+    const bool is_animated_gif = !album_.images.empty() && item_is_animated_gif(album_.images, index_);
     if (is_video) {
         groups.push_back({"Video playback", {
             {"Space", "Play/Pause"}, {"J / L", "Seek -/+5s"}, {", / .", "Step one frame"},
             {"- / +", "Volume"}, {"M", "Mute"}, {"R", "Toggle loop"},
+            {"Left/Right", "Prev/Next item"},
+        }});
+    } else if (is_animated_gif) {
+        groups.push_back({"GIF playback", {
+            {"Space", "Play/Pause"},
             {"Left/Right", "Prev/Next item"},
         }});
     } else if (mode_ == ViewMode::FillScroll) {
@@ -529,7 +677,12 @@ void ImageViewer::render_fit(gfx::Renderer& r, const SDL_FRect& vp)
     const SDL_Rect clip{static_cast<int>(vp.x), static_cast<int>(vp.y),
                         static_cast<int>(vp.w), static_cast<int>(vp.h)};
     SDL_SetRenderClipRect(r.sdl(), &clip);
-    r.draw_image(ft->tex, SDL_FRect{dx, dy, sw, sh});
+    const SDL_FRect dest{dx, dy, sw, sh};
+    if (gif_index_ == index_ && gif_ != nullptr && gif_->valid()) {
+        gif_->render(r, dest);
+    } else {
+        r.draw_image(ft->tex, dest);
+    }
     SDL_SetRenderClipRect(r.sdl(), nullptr);
 }
 
@@ -556,16 +709,21 @@ void ImageViewer::render_scroll(gfx::Renderer& r, const SDL_FRect& vp)
     for (int i = first; i <= last; ++i) {
         const float top = vp.y + m.image_top(i) - scroll_y_;
         const float h   = scaled_height(*album_.images[i], vp.w);
-        if (FullTex* ft = full_cache_.acquire(*album_.images[i]))
-            r.draw_image(ft->tex, SDL_FRect{vp.x, top, vp.w, h});
-        else
-            r.draw_rect(SDL_FRect{vp.x, top, vp.w, h}, gfx::theme::SURFACE);
+        const SDL_FRect dest{vp.x, top, vp.w, h};
+        if (i == index_ && gif_index_ == index_ && gif_ != nullptr && gif_->valid()) {
+            gif_->render(r, dest);
+        } else if (FullTex* ft = full_cache_.acquire(*album_.images[i])) {
+            r.draw_image(ft->tex, dest);
+        } else {
+            r.draw_rect(dest, gfx::theme::SURFACE);
+        }
     }
     SDL_SetRenderClipRect(r.sdl(), nullptr);
 }
 
 void ImageViewer::render_strip(gfx::Renderer& r)
 {
+    using namespace gfx::theme;
     const SDL_FRect strip = strip_rect();
     r.draw_rect(strip, gfx::theme::STRIP_BG);
 
@@ -583,6 +741,25 @@ void ImageViewer::render_strip(gfx::Renderer& r)
                                                .scroll = scroll, .selected = index_,
                                                .highlight = gfx::theme::ACCENT,
                                                .vertical = vertical});
+
+    // Draw hover animation if active on a thumbnail, and draw animated badges on tiles.
+    for (size_t i = 0; i < album_.images.size(); ++i) {
+        // Get the thumbnail's rect from the single source of truth (strip_layout).
+        const SDL_FRect thumb_rect = strip_cell_rect(static_cast<int>(i), strip, thumb,
+                                                      STRIP_GAP, scroll, vertical);
+
+        // Render hover animation if active on this thumbnail.
+        if (strip_hover_gif_ && strip_hover_gif_->valid() &&
+            static_cast<int>(i) == strip_hover_gif_index_) {
+            strip_hover_gif_->render(r, thumb_rect);
+        }
+
+        // Draw animated badge.
+        if (tile_shows_animated_badge(*album_.images[i])) {
+            // Use 12x12 badge size and y_offset of 6 to match the original positioning.
+            draw_animated_badge(r, font_, thumb_rect, 12.0f, 0.0f, 6.0f);
+        }
+    }
 }
 
 void ImageViewer::render_hud(gfx::Renderer& r, const SDL_FRect& vp)

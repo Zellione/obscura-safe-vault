@@ -38,6 +38,13 @@ aac/opus/mp3/vorbis/flac/ac3 audio decoders, mov/mp4/matroska demuxers, `--enabl
 swscale + swresample; no encoders/muxers/protocols/network/programs). See the FFmpeg row above for
 the `libaom_av1` naming/link-order gotchas.
 
+**Phase 47 addition:** the `gif` **decoder**, **demuxer**, AND **parser** are enabled.
+The parser is essential: FFmpeg n7.1.1's gif demuxer emits raw 1024-byte chunks and sets
+`need_parsing = AVSTREAM_PARSE_FULL_RAW` (libavformat/gifdec.c:224), delegating frame reassembly
+to libavcodec/gif_parser.c. Without the parser, `av_read_frame` returns unparsed chunks and
+decoding fails on the second chunk with `AVERROR_INVALIDDATA`. **Document this in the build scripts
+— a future FFmpeg bump must not silently regress it.**
+
 **Phase 43 Part 1:** `--enable-d3d11va` added to the Windows FFmpeg configure
 invocation (`scripts/build_ffmpeg_windows.sh`) — a hwaccel dispatch-registration
 flag, not a new dependency (FFmpeg's `hwcontext_d3d11va.c` loads `d3d11.dll`/

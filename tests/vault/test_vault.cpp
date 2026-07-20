@@ -1,6 +1,8 @@
 #include "test_framework.h"
 
+#include <fstream>
 #include <filesystem>
+#include <iterator>
 #include <span>
 #include <string>
 #include <vector>
@@ -46,6 +48,18 @@ static std::vector<uint8_t> pattern(size_t n, uint8_t seed)
     std::vector<uint8_t> v(n);
     for (size_t i = 0; i < n; ++i) v[i] = static_cast<uint8_t>(i * 37 + seed);
     return v;
+}
+
+// Load a GIF fixture from tests/vault/fixtures/ (Phase 47).
+// OSV_VAULT_FIXTURE_DIR is set by premake to the absolute path.
+static std::vector<uint8_t> load_vault_gif_fixture(const char* name)
+{
+    #ifndef OSV_VAULT_FIXTURE_DIR
+    #define OSV_VAULT_FIXTURE_DIR "tests/vault/fixtures"
+    #endif
+    const std::string path = std::string(OSV_VAULT_FIXTURE_DIR) + "/" + name;
+    std::ifstream f(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
 }
 
 // --- tests ----------------------------------------------------------------
@@ -384,4 +398,41 @@ TEST(create_gallery_rejects_unsafe_path_segments)
     // Legitimate nesting is unaffected — '/' still separates segments.
     CHECK_EQ(v.create_gallery("a/b/c"), Ok);
     CHECK_EQ(v.list("").size(), 1u);
+}
+
+TEST(vault_add_image_marks_animated_gif)
+{
+    TempVault tv("add_img_anim_gif");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("hunter2"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+
+    // Fixtures (32x32): anim.gif has 4 frames; still.gif has 1. Verified with
+    // `ffprobe -count_frames`; the animated flag under test derives from that difference.
+    const std::vector<uint8_t> anim = load_vault_gif_fixture("anim.gif");
+    const std::vector<uint8_t> still = load_vault_gif_fixture("still.gif");
+    REQUIRE(!anim.empty());  // fixture must be present
+    REQUIRE(!still.empty());
+
+    REQUIRE(v.add_image("", anim, "anim.gif") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", still, "still.gif") == vault::VaultResult::Ok);
+
+    auto children = v.list("");
+    REQUIRE(children.size() == 2);
+
+    // Find the animated and still images by name
+    const vault::IndexNode* anim_node = nullptr;
+    const vault::IndexNode* still_node = nullptr;
+    for (const auto* child : children) {
+        if (child->name == "anim.gif") {
+            anim_node = child;
+        } else if (child->name == "still.gif") {
+            still_node = child;
+        }
+    }
+    REQUIRE(anim_node != nullptr);
+    REQUIRE(still_node != nullptr);
+
+    CHECK(anim_node->meta.animated);
+    CHECK(!still_node->meta.animated);
 }

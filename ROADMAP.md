@@ -58,6 +58,7 @@
 | 44 | Gallery organization tools | ✅ | Part 1: scrollable + filterable Move-dialog gallery picker. Part 2: rename images/videos/galleries. Part 3: mass-move extended to galleries. Part 4: combine (recursive merge) two galleries, same- or cross-vault. → [details](docs/roadmap/phase-44-gallery-organization.md) |
 | 45 | Organization, security & fullscreen polish | ✅ | Rename extended to favorites/tag-overview/search-result screens, mass tag add/remove, clipboard copy for password/passphrase, fullscreen hides the thumbnail strip, bigger video seek-bar hit target, auto-lock-off badge fades after 10s. → [details](docs/roadmap/phase-45-organization-ux-polish.md) |
 | 46 | Mixed galleries (images + videos + sub-galleries together) | ✅ | Relax the leaf-only invariant so a gallery can hold any combination of media and sub-galleries, like a real folder. → [details](docs/roadmap/phase-46-mixed-galleries.md) |
+| 47 | Animated GIF support | ✅ | Animated GIFs animate in the viewer (Space pauses) and on the hovered grid/strip tile, and carry an "A" badge. FFmpeg gif decoder + a new `animated` index flag (`INDEX_VERSION` 7). → [details](docs/roadmap/phase-47-animated-gifs.md) |
 
 ---
 
@@ -177,3 +178,7 @@ way forever.
 >   Gallery node (`INDEX_VERSION = 6`; v1–v5 blobs read as `Manual` — no visible
 >   change until a user opts in via `Shift+S`). An out-of-range byte is
 >   rejected on deserialise, not clamped.
+> - **Phase 47 (Animated GIFs):** ✅ shipped — an `animated u8` flag on every
+>   Image node, written after `thumb_length` (`INDEX_VERSION = 7`; v1–v6 blobs
+>   read as not animated and are healed lazily on first view). A byte other
+>   than 0/1 is rejected on deserialise, not clamped.

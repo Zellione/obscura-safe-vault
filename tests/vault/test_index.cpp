@@ -35,7 +35,8 @@ static bool nodes_equal(const IndexNode& a, const IndexNode& b)
         return x.format == y.format && x.width == y.width && x.height == y.height &&
                x.orig_size == y.orig_size && x.created_ts == y.created_ts &&
                x.data_offset == y.data_offset && x.data_length == y.data_length &&
-               x.thumb_offset == y.thumb_offset && x.thumb_length == y.thumb_length;
+               x.thumb_offset == y.thumb_offset && x.thumb_length == y.thumb_length &&
+               x.animated == y.animated;
     }
     if (a.children.size() != b.children.size()) return false;
     for (size_t i = 0; i < a.children.size(); ++i)
@@ -578,4 +579,96 @@ TEST(index_deserialize_rejects_out_of_range_sort_key)
 
     IndexNode out;
     CHECK_FALSE(deserialize_index(blob, out));
+}
+
+// --- Phase 47: per-image animated flag (index v7) ----------------------------
+
+TEST(index_animated_flag_round_trips)
+{
+    IndexNode root = IndexNode::gallery("root");
+    IndexNode gif  = IndexNode::image("loop.gif");
+    gif.meta.format   = ImageFormat::GIF;
+    gif.meta.animated = true;
+    root.children.push_back(gif);
+
+    IndexNode still = IndexNode::image("photo.jpg");
+    still.meta.format = ImageFormat::JPEG;
+    root.children.push_back(still);
+
+    std::vector<uint8_t> blob;
+    vault::serialize_index(root, blob);
+
+    IndexNode out;
+    REQUIRE(vault::deserialize_index(blob, out));
+    REQUIRE(out.children.size() == size_t{2});
+    CHECK(out.children[0].meta.animated);
+    CHECK(!out.children[1].meta.animated);
+}
+
+TEST(index_version_is_seven)
+{
+    IndexNode root = IndexNode::gallery("root");
+    std::vector<uint8_t> blob;
+    vault::serialize_index(root, blob);
+    REQUIRE(!blob.empty());
+    CHECK_EQ(blob[0], uint8_t{7});
+}
+
+TEST(index_v6_blob_reads_animated_as_false)
+{
+    // Hand-crafted v6 blob: gallery with one image child.
+    // Structure: version(1) | root_type(1) | root_name_len(2) | root_tags(2) |
+    //   root_favorite(1) | root_sort_key(1) | child_count(4) | child_type(1) |
+    //   child_name_len(2) | child_name(9) | child_tags(2) | child_favorite(1) |
+    //   child_sort_key(1) | format(1) | width(4) | height(4) | orig_size(8) |
+    //   created_ts(8) | data_offset(8) | data_length(8) | thumb_offset(8) |
+    //   thumb_length(8) | saved_searches_count(2)
+    std::vector<uint8_t> v6_blob = {
+        0x06,                                    // version = 6
+        0x00,                                    // root type = Gallery
+        0x04, 0x00,                              // root name_len = 4
+        'r', 'o', 'o', 't',                      // root name = "root"
+        0x00, 0x00,                              // root tag_count = 0
+        0x00,                                    // root favorite = 0
+        0x00,                                    // root sort_key = 0
+        0x01, 0x00, 0x00, 0x00,                  // child_count = 1
+        // Child image node:
+        0x01,                                    // child type = Image
+        0x09, 0x00,                              // child name_len = 9
+        'l', 'o', 'o', 'p', '.', 'g', 'i', 'f', '.',  // child name
+        0x00, 0x00,                              // child tag_count = 0
+        0x00,                                    // child favorite = 0
+        0x00,                                    // child sort_key = 0
+        0x02,                                    // format = GIF (2)
+        0x00, 0x00, 0x00, 0x00,                  // width = 0
+        0x00, 0x00, 0x00, 0x00,                  // height = 0
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // orig_size = 0
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // created_ts = 0
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // data_offset = 0
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // data_length = 0
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // thumb_offset = 0
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // thumb_length = 0
+        0x00, 0x00,                              // saved_searches_count = 0
+    };
+
+    IndexNode out;
+    REQUIRE(vault::deserialize_index(v6_blob, out));
+    REQUIRE(out.children.size() == size_t{1});
+    CHECK(!out.children[0].meta.animated);
+}
+
+TEST(index_rejects_out_of_range_animated_byte)
+{
+    IndexNode root = IndexNode::gallery("root");
+    IndexNode gif  = IndexNode::image("loop.gif");
+    gif.meta.format   = ImageFormat::GIF;
+    gif.meta.animated = true;
+    root.children.push_back(gif);
+
+    std::vector<uint8_t> blob;
+    vault::serialize_index(root, blob);
+    blob.back() = 0x02;   // neither 0 nor 1
+
+    IndexNode out;
+    CHECK(!vault::deserialize_index(blob, out));
 }

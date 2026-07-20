@@ -166,6 +166,13 @@ public:
     // doesn't resolve.
     [[nodiscard]] VaultResult repair_video_metadata(std::string_view node_path);
 
+    // Phase 47: correct a stale ImageMeta::animated on an image imported before
+    // the flag existed. Sets the flag and persists the index; returns false if
+    // `node_path` is not an image, the write failed, or the flag was already
+    // correct (no-op). Locked if not unlocked; NotFound if node_path doesn't
+    // resolve.
+    [[nodiscard]] bool repair_image_animated(std::string_view node_path, bool animated);
+
     // Test-only seam (defined in tests/vault/test_video.cpp, not part of any
     // production translation unit): resets a just-imported, fully-decodable
     // video node's metadata back to the Unknown/0/empty state repair_video_metadata()

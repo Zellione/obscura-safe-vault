@@ -6,6 +6,7 @@
 #include <unordered_set>
 
 #include "ui/gallery_cover.h"   // ui::CoverSpan
+#include "ui/gif_model.h"        // gif_within_hover_dimension_budget
 
 namespace gfx { class Renderer; class FontAtlas; class TextureCache; }
 namespace image { class DecodeWorker; }
@@ -64,5 +65,20 @@ struct ThumbKey {
 void draw_tile_thumb(gfx::Renderer& r, gfx::FontAtlas& font,
                      const ThumbContext& ctx, const vault::IndexNode& n,
                      const SDL_FRect& box);
+
+// True when a tile should carry the Phase 47 "A" (animated) badge.
+[[nodiscard]] bool tile_shows_animated_badge(const vault::IndexNode& node) noexcept;
+
+// True when a tile can be animated on hover: it must show the animated badge
+// and have dimensions within the GIF hover budget.
+[[nodiscard]] bool tile_can_hover_animate(const vault::IndexNode& node) noexcept;
+
+// Draw an animated badge ("A") in the top-right corner of a tile.
+// `tile_rect` is the tile's bounding rectangle; `badge_size` determines both
+// the badge's dimensions and the text offsets. `x_offset` and `y_offset` allow
+// positioning adjustments (e.g., to avoid overlapping a favorite marker).
+void draw_animated_badge(gfx::Renderer& r, gfx::FontAtlas& font,
+                        const SDL_FRect& tile_rect, float badge_size,
+                        float x_offset = 0.0f, float y_offset = 8.0f) noexcept;
 
 } // namespace ui

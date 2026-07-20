@@ -51,4 +51,23 @@ int strip_hit_axis(float along, float origin_along, float scroll, float thumb,
     return -1;
 }
 
+SDL_FRect strip_cell_rect(int index, const SDL_FRect& strip, float thumb,
+                          float gap, float scroll, bool vertical) noexcept
+{
+    // Lay cells out along the strip's long axis; centre them on the short axis.
+    // SYNC: this geometry must match gfx::Renderer::draw_thumbnail_strip
+    // (src/gfx/renderer.cpp). Both independently compute cell rects to avoid
+    // coupling gfx and ui modules; if layout changes, update both sites.
+    const float cross  = vertical ? strip.x + (strip.w - thumb) * 0.5f
+                                  : strip.y + (strip.h - thumb) * 0.5f;
+    const float origin = vertical ? strip.y : strip.x;
+    const float along  = origin - scroll + static_cast<float>(index) * (thumb + gap);
+
+    if (vertical) {
+        return SDL_FRect{cross, along, thumb, thumb};
+    } else {
+        return SDL_FRect{along, cross, thumb, thumb};
+    }
+}
+
 } // namespace ui

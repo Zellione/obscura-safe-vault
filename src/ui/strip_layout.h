@@ -40,4 +40,10 @@ inline constexpr float STRIP_GAP      = 10.0f;  // gap between thumbnails
 [[nodiscard]] int strip_hit_axis(float along, float origin_along, float scroll,
                                  float thumb, float gap, int count) noexcept;
 
+// Rectangle for thumbnail at the given index within a strip. The strip's
+// orientation (horizontal/vertical) is determined by the `vertical` flag.
+// Used by both the renderer and badge drawing to ensure consistent layout.
+[[nodiscard]] SDL_FRect strip_cell_rect(int index, const SDL_FRect& strip, float thumb,
+                                        float gap, float scroll, bool vertical) noexcept;
+
 } // namespace ui

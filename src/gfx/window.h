@@ -62,6 +62,11 @@ public:
     int           width()        const noexcept;
     int           height()       const noexcept;
 
+    // Current mouse position in window-relative coordinates (pixels). Relative to
+    // the focused window; returns the last known position if the window is not focused.
+    [[nodiscard]] float mouse_x() const noexcept;
+    [[nodiscard]] float mouse_y() const noexcept;
+
     // True when the renderer presents in sync with the display refresh. When
     // false (some software/headless backends), the app loop must cap its own
     // frame rate to avoid spinning the GPU at 100%.

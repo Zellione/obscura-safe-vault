@@ -9,6 +9,8 @@ and `src/media/` (FFmpeg video/audio, whole subsystem gated `OSV_VENDORED_AV`).
 - `decoder.*` — `Decoder` interface + `DecoderRegistry` (polymorphic dispatch;
   `default_registry()` wires WebP/HEIF/stb decoders).
 - `decode_webp.*`, `decode_heif.*` — libwebp (WebP), libheif (HEIC/AVIF).
+- `gif_info.*` — Phase 47: `gif_is_animated()`, pure bounds-checked GIF block
+  walker. Not gated on `OSV_VENDORED_AV`, so the badge works everywhere.
 - `decode_worker.*` — off-thread image decoder: caller reads+decrypts on its thread, worker
   runs `decode_from_memory()` on one bg thread, caller uploads result to GPU. Coalesces by
   key, SDL wake event, `retain()`/`pending()`. Each screen owns its own worker; FullTexCache
@@ -27,6 +29,11 @@ Files: `video_source.*`, `chunk_avio.*`, `mem_avio.*`, `video_decoder.*`, `audio
   + keyframe seek; `has_audio()`/`audio_info()`/`next_audio_frame()`.
 - `AudioDecoder` owns an `AVStream*`, decodes planar PCM → interleaved F32 in
   `AudioFrame{samples,channels,sample_rate,pts_seconds}`.
+- `gif_decoder.*` (Phase 47, gated `OSV_VENDORED_AV`) — `GifDecoder`: `MemAvio`
+  over decrypted bytes → gif demuxer → gif decoder → swscale to RGBA. Streaming,
+  one frame at a time, constant memory. No audio, no packet queues, no seeking,
+  no hwaccel. `rewind()` for looping. Per-frame delay clamped to 20 ms floor.
+  `open()` borrows caller's buffer.
 - `av_sync` = PURE logic (no SDL/FFmpeg) for audio-clock tracking: `decide(audio_clock,
   frame_pts,...)` → `FrameAction{Present,Hold,Drop}`; `audio_clock(base,samples_consumed,
   rate)`; `clamp_volume`/`effective_gain` helpers; unit-tested.

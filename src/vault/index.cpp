@@ -57,6 +57,7 @@ void write_node(ByteWriter& w, const IndexNode& node)
         w.u64(m.data_length);
         w.u64(m.thumb_offset);
         w.u64(m.thumb_length);
+        w.u8(m.animated ? 1 : 0);
     } else if (node.type == IndexNode::Type::Video) {
         const VideoMeta& m = node.vmeta;
         w.u8(std::to_underlying(m.container));
@@ -106,7 +107,7 @@ bool read_tags(ByteReader& r, std::vector<std::string>& tags)
     return true;
 }
 
-void read_image_meta(ByteReader& r, ImageMeta& m)
+bool read_image_meta(ByteReader& r, ImageMeta& m, uint8_t version)
 {
     m.format       = static_cast<ImageFormat>(r.u8());
     m.width        = r.u32();
@@ -117,6 +118,21 @@ void read_image_meta(ByteReader& r, ImageMeta& m)
     m.data_length  = r.u64();
     m.thumb_offset = r.u64();
     m.thumb_length = r.u64();
+    if (!r.ok()) {
+        return false;
+    }
+
+    // Phase 47: animated flag defaults to false for pre-v7 blobs. Rejected (not
+    // clamped) if out of range, matching the Phase 37 sort_key rule.
+    m.animated = false;  // default for v1..v6
+    if (version >= 7) {
+        const uint8_t a = r.u8();
+        if (!r.ok() || a > 1) {
+            return false;
+        }
+        m.animated = (a == 1);
+    }
+    return r.ok();
 }
 
 // Read VideoMeta from the deserialisation stream (Phase 15 PR2). Returns false
@@ -190,8 +206,7 @@ bool read_node(ByteReader& r, IndexNode& node, uint32_t depth, uint8_t version)
     }
 
     if (node.type == IndexNode::Type::Image) {
-        read_image_meta(r, node.meta);
-        return r.ok();
+        return read_image_meta(r, node.meta, version);
     }
 
     if (node.type == IndexNode::Type::Video) {
