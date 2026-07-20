@@ -2,33 +2,6 @@
 
 #include "ui/gif_model.h"
 
-TEST(gif_hover_budget_accepts_a_small_gif)
-{
-    CHECK(ui::gif_within_hover_budget(320, 240, 12));
-}
-
-TEST(gif_hover_budget_accepts_the_exact_limits)
-{
-    CHECK(ui::gif_within_hover_budget(1920, 1080, 300));
-}
-
-TEST(gif_hover_budget_rejects_oversized_dimensions)
-{
-    CHECK(!ui::gif_within_hover_budget(1921, 1080, 10));
-    CHECK(!ui::gif_within_hover_budget(1920, 1081, 10));
-}
-
-TEST(gif_hover_budget_rejects_too_many_frames)
-{
-    CHECK(!ui::gif_within_hover_budget(320, 240, 301));
-}
-
-TEST(gif_hover_budget_rejects_degenerate_dimensions)
-{
-    CHECK(!ui::gif_within_hover_budget(0, 240, 10));
-    CHECK(!ui::gif_within_hover_budget(320, 0, 10));
-}
-
 TEST(gif_within_hover_dimension_budget_accepts_small_dimensions)
 {
     CHECK(ui::gif_within_hover_dimension_budget(320, 240));

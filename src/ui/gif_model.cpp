@@ -18,11 +18,6 @@ bool gif_hover_frame_count_exceeded(size_t frames) noexcept
     return frames > kGifHoverMaxFrames;
 }
 
-bool gif_within_hover_budget(int width, int height, size_t frames) noexcept
-{
-    return gif_within_hover_dimension_budget(width, height) && !gif_hover_frame_count_exceeded(frames);
-}
-
 bool GifHoverGate::update(int tile, double dt) noexcept
 {
     if (tile != tile_) {            // cursor moved to another tile, or off the grid

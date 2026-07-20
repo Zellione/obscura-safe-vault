@@ -25,10 +25,6 @@ inline constexpr int kGifMaxCatchUpFrames = 64;
 // The frame count budget is checked during playback after decoding.
 [[nodiscard]] bool gif_hover_frame_count_exceeded(size_t frames) noexcept;
 
-// Legacy predicate: checks both dimensions and frame count.
-// Kept for backward compatibility; prefer the split predicates above.
-[[nodiscard]] bool gif_within_hover_budget(int width, int height, size_t frames) noexcept;
-
 // Accumulates hover time on one tile and reports when animation should start.
 class GifHoverGate {
 public:
