@@ -89,7 +89,9 @@ struct GifPlayback::Impl {
 
     void update(double dt)
     {
-        if (!valid_) return;
+        if (!valid_) {
+            return;
+        }
 
         const int steps = gif_frames_to_advance(acc_, dt, current_.delay_s, paused_);
         for (int i = 0; i < steps; ++i) {
@@ -112,10 +114,14 @@ struct GifPlayback::Impl {
 
     void render(gfx::Renderer& r, const SDL_FRect& dest)
     {
-        if (!valid_) return;
+        if (!valid_) {
+            return;
+        }
 
         SDL_Renderer* sdl_r = r.sdl();
-        if (sdl_r == nullptr) return;
+        if (sdl_r == nullptr) {
+            return;
+        }
 
         // Lazy texture creation on first render
         if (tex_ == nullptr) {
@@ -134,14 +140,15 @@ struct GifPlayback::Impl {
             int pitch = 0;
             void* pixels = nullptr;
             if (SDL_LockTexture(tex_, nullptr, &pixels, &pitch)) {
-                const size_t row_bytes = static_cast<size_t>(current_.width) * 4;
-                const size_t byte_size = row_bytes * current_.height;
-                if (current_.rgba.size() == byte_size && pixels != nullptr) {
+                const size_t row_bytes = (static_cast<size_t>(current_.width) * 4);
+                const size_t byte_size = (row_bytes * static_cast<size_t>(current_.height));
+                if ((current_.rgba.size() == byte_size) && (pixels != nullptr) && (pitch > 0)) {
+                    const size_t pitch_size = static_cast<size_t>(pitch);
                     // Copy row-by-row, honoring the pitch (byte stride per row).
                     // The pitch may be larger than width*4 due to driver alignment.
-                    for (int y = 0; y < current_.height; ++y) {
-                        const uint8_t* src = current_.rgba.data() + y * row_bytes;
-                        uint8_t* dst = static_cast<uint8_t*>(pixels) + y * pitch;
+                    for (size_t y = 0; y < static_cast<size_t>(current_.height); ++y) {
+                        const uint8_t* src = current_.rgba.data() + (y * row_bytes);
+                        uint8_t* dst = static_cast<uint8_t*>(pixels) + (y * pitch_size);
                         std::memcpy(dst, src, row_bytes);
                     }
                 }
