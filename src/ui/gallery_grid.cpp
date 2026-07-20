@@ -1378,6 +1378,16 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float H)
             r.draw_round_rect(badge, RADIUS_SMALL, FAVORITE);
             r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
         }
+
+        // Animated badge: a small square for animated GIFs, positioned to the left
+        // of the favorite badge (or in its place if no favorite).
+        if (tile_shows_animated_badge(*n)) {
+            const float x_offset = n->favorite ? (cell - 8 - 18 - 18 - 6) : (cell - 8 - 18);
+            const SDL_FRect badge{cellr.x + x_offset, cellr.y + 8, 18, 18};
+            r.draw_round_rect(badge, RADIUS_SMALL, ACCENT);
+            r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
+            r.draw_text(font_, badge.x + 4, badge.y + 2, "A", TEXT);
+        }
     }
     SDL_SetRenderClipRect(r.sdl(), nullptr);
 }

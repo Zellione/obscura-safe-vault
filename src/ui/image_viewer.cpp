@@ -643,6 +643,7 @@ void ImageViewer::render_scroll(gfx::Renderer& r, const SDL_FRect& vp)
 
 void ImageViewer::render_strip(gfx::Renderer& r)
 {
+    using namespace gfx::theme;
     const SDL_FRect strip = strip_rect();
     r.draw_rect(strip, gfx::theme::STRIP_BG);
 
@@ -660,6 +661,29 @@ void ImageViewer::render_strip(gfx::Renderer& r)
                                                .scroll = scroll, .selected = index_,
                                                .highlight = gfx::theme::ACCENT,
                                                .vertical = vertical});
+
+    // Draw animated badges on thumbnail strip tiles.
+    const float origin_along = vertical ? strip.y : strip.x;
+    const float origin_cross = vertical ? strip.x : strip.y;
+    const float cross0       = origin_cross + (vertical ? (strip.w - thumb) * 0.5f
+                                                         : (strip.h - thumb) * 0.5f);
+    for (size_t i = 0; i < album_.images.size(); ++i) {
+        if (!tile_shows_animated_badge(*album_.images[i])) {
+            continue;
+        }
+        const float start_along = origin_along - scroll + static_cast<float>(i) * (thumb + STRIP_GAP);
+        SDL_FRect thumb_rect;
+        if (vertical) {
+            thumb_rect = SDL_FRect{cross0, start_along, thumb, thumb};
+        } else {
+            thumb_rect = SDL_FRect{start_along, cross0, thumb, thumb};
+        }
+        // Draw animated badge in top-right corner of thumbnail.
+        const SDL_FRect badge{thumb_rect.x + thumb - 8.0f - 12.0f, thumb_rect.y + 6.0f, 12.0f, 12.0f};
+        r.draw_round_rect(badge, 4.0f, ACCENT);
+        r.draw_round_rect(badge, 4.0f, BG, /*filled*/ false);
+        r.draw_text(font_, badge.x + 2.0f, badge.y + 1.0f, "A", TEXT);
+    }
 }
 
 void ImageViewer::render_hud(gfx::Renderer& r, const SDL_FRect& vp)

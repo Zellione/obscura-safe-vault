@@ -54,3 +54,38 @@ TEST(thumb_key_video_without_poster_is_absent)
     n.vmeta.poster_length = 0;
     CHECK_FALSE(thumb_key_for(n).present);
 }
+
+TEST(tile_badge_shown_for_an_animated_gif)
+{
+    vault::IndexNode n = vault::IndexNode::image("loop.gif");
+    n.meta.format   = vault::ImageFormat::GIF;
+    n.meta.animated = true;
+    CHECK(ui::tile_shows_animated_badge(n));
+}
+
+TEST(tile_badge_hidden_for_a_still_gif)
+{
+    vault::IndexNode n = vault::IndexNode::image("still.gif");
+    n.meta.format   = vault::ImageFormat::GIF;
+    n.meta.animated = false;
+    CHECK(!ui::tile_shows_animated_badge(n));
+}
+
+TEST(tile_badge_hidden_for_a_jpeg)
+{
+    vault::IndexNode n = vault::IndexNode::image("photo.jpg");
+    n.meta.format = vault::ImageFormat::JPEG;
+    CHECK(!ui::tile_shows_animated_badge(n));
+}
+
+TEST(tile_badge_hidden_for_a_gallery)
+{
+    const vault::IndexNode n = vault::IndexNode::gallery("album");
+    CHECK(!ui::tile_shows_animated_badge(n));
+}
+
+TEST(tile_badge_hidden_for_a_video)
+{
+    const vault::IndexNode n = vault::IndexNode::video("clip.mp4");
+    CHECK(!ui::tile_shows_animated_badge(n));
+}

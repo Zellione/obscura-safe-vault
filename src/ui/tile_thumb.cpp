@@ -104,4 +104,12 @@ void draw_tile_thumb(gfx::Renderer& r, gfx::FontAtlas& font, const ThumbContext&
     }
 }
 
+
+bool tile_shows_animated_badge(const vault::IndexNode& node) noexcept
+{
+    return node.type == vault::IndexNode::Type::Image
+        && node.meta.format == vault::ImageFormat::GIF
+        && node.meta.animated;
+}
+
 } // namespace ui

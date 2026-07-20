@@ -65,4 +65,7 @@ void draw_tile_thumb(gfx::Renderer& r, gfx::FontAtlas& font,
                      const ThumbContext& ctx, const vault::IndexNode& n,
                      const SDL_FRect& box);
 
+// True when a tile should carry the Phase 47 "A" (animated) badge.
+[[nodiscard]] bool tile_shows_animated_badge(const vault::IndexNode& node) noexcept;
+
 } // namespace ui
