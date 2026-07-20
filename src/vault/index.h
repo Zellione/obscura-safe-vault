@@ -47,6 +47,7 @@ struct ImageMeta {
     uint64_t    data_length  = 0;  // on-disk chunk length (nonce|cipher|tag)
     uint64_t    thumb_offset = 0;
     uint64_t    thumb_length = 0;
+    bool        animated     = false; // multi-frame GIF (Phase 47)
 };
 
 // Metadata for one encrypted video chunk (Phase 15 PR2).
@@ -170,7 +171,9 @@ struct SavedSearch {
 // v4: video nodes + VideoMeta (Phase 15 PR2). v5: vault-global saved-searches
 // block after the tree root (Phase 18); pre-v5 blobs read with an empty list.
 // v6: per-gallery sort_key (Phase 37); pre-v6 blobs read every node as Manual.
-inline constexpr uint8_t INDEX_VERSION = 6;
+// v7: per-image `animated` flag (Phase 47); pre-v7 blobs read every image as
+// not animated, and are healed lazily on first view (see ui/gif_repair.*).
+inline constexpr uint8_t INDEX_VERSION = 7;
 
 // Maximum tree depth accepted on deserialisation — guards against stack overflow
 // from a deeply-nested hostile blob.
