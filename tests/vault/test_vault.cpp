@@ -407,6 +407,8 @@ TEST(vault_add_image_marks_animated_gif)
     REQUIRE(vault::Vault::create(tv.str(), bytes("hunter2"), {}, kTestKdf, v)
             == vault::VaultResult::Ok);
 
+    // Fixtures (32x32): anim.gif has 4 frames; still.gif has 1. Verified with
+    // `ffprobe -count_frames`; the animated flag under test derives from that difference.
     const std::vector<uint8_t> anim = load_vault_gif_fixture("anim.gif");
     const std::vector<uint8_t> still = load_vault_gif_fixture("still.gif");
     REQUIRE(!anim.empty());  // fixture must be present
