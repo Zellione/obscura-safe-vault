@@ -13,6 +13,7 @@
 #include "ui/export.h"
 #include "ui/gif_model.h"
 #include "ui/gif_repair.h"
+#include "ui/input.h"
 #include "ui/meta_format.h"
 #include "ui/strip_layout.h"
 #include "ui/tile_thumb.h"
@@ -247,11 +248,15 @@ bool ImageViewer::handle_shared_key(SDL_Keycode key)
     }
 }
 
-void ImageViewer::handle_key_gif(SDL_Keycode key)
+bool ImageViewer::handle_key_gif(SDL_Keycode key)
 {
-    if (key == SDLK_SPACE && gif_ && gif_->valid()) {
+    // Space toggles pause; every other key falls through to normal image
+    // handling (navigation, fit/scroll, ...), so a GIF still navigates.
+    if (gif_viewer_consumes_key(key) && gif_ && gif_->valid()) {
         gif_->toggle_pause();
+        return true;
     }
+    return false;
 }
 
 void ImageViewer::set_index(int delta)
@@ -393,7 +398,9 @@ void ImageViewer::handle_key(SDL_Keycode key, SDL_Scancode sc)
     // Keys shared by images and videos.
     if (handle_shared_key(key)) { return; }
     if (item_is_video(album_.images, index_)) { handle_key_video(key, sc); return; }
-    if (item_is_animated_gif(album_.images, index_)) { handle_key_gif(key); return; }
+    // A GIF only claims Space (pause); any other key falls through to the image
+    // keys below so arrows still navigate between items.
+    if (item_is_animated_gif(album_.images, index_) && handle_key_gif(key)) { return; }
     // Image-only keys.
     switch (key) {
         case SDLK_F:      // toggle fit <-> fill-width scroll

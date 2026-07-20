@@ -119,7 +119,7 @@ private:
     void handle_key_fit(SDL_Keycode key);
     void handle_key_scroll(SDL_Keycode key);
     void handle_key_video(SDL_Keycode key, SDL_Scancode sc);  // Space/,/./J/L + F/arrows + [ ] volume
-    void handle_key_gif(SDL_Keycode key);                      // Space toggles pause
+    bool handle_key_gif(SDL_Keycode key);                      // Space toggles pause; true if consumed
     void handle_mouse_down(const SDL_MouseButtonEvent& b);
     void handle_wheel(const SDL_MouseWheelEvent& w);
     [[nodiscard]] bool handle_overlay_event(const SDL_Event& e);  // modal overlays; true if consumed
