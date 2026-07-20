@@ -107,9 +107,6 @@ public:
 
     [[nodiscard]] std::vector<ui::HelpGroup> help_groups() const override;
 
-    // Debug accessor for testing the GIF-index tracking (regression test).
-    [[nodiscard]] int debug_gif_index() const noexcept { return gif_index_; }
-
 private:
     enum class ViewMode { Fit, FillScroll, Slideshow };
 

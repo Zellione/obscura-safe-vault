@@ -1,6 +1,5 @@
 #include "test_framework.h"
 
-#include "crypto/kdf.h"
 #include "ui/gif_repair.h"
 #include "ui/zip_test_helpers.h"
 #include "vault/vault.h"
@@ -12,8 +11,6 @@
 // stored before Phase 47 with the wrong animated flag.
 
 namespace {
-
-const crypto::KdfParams kTestKdf{.t_cost = 1, .m_cost_kib = 8, .parallelism = 1};
 
 std::vector<uint8_t> load_vault_gif_fixture(const char* name)
 {
