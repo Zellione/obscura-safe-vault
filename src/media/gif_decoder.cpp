@@ -2,6 +2,7 @@
 
 #ifdef OSV_VENDORED_AV
 
+#include <array>
 #include <memory>
 
 #include "media/mem_avio.h"
@@ -33,7 +34,7 @@ struct GifDecoder::Impl {
     int              stream_idx = -1;
     int              width      = 0;
     int              height     = 0;
-    AVRational       time_base  {1, 100};
+    AVRational       time_base  {.num = 1, .den = 100};
     size_t           decoded    = 0;
     bool             eof_sent   = false;
 
@@ -149,7 +150,7 @@ bool GifDecoder::open(std::span<const uint8_t> data)
 
 std::optional<GifFrame> GifDecoder::next_frame()
 {
-    if (!impl_->fmt || !impl_->codec || !impl_->frame || !impl_->pkt) {
+    if (impl_->fmt == nullptr || impl_->codec == nullptr || impl_->frame == nullptr || impl_->pkt == nullptr) {
         return std::nullopt;
     }
 
@@ -220,8 +221,8 @@ std::optional<GifFrame> GifDecoder::next_frame()
     std::vector<uint8_t> rgba(rgba_size);
 
     // Set up destination frame pointers
-    uint8_t* dst_data[4] = {rgba.data(), nullptr, nullptr, nullptr};
-    int dst_linesize[4] = {static_cast<int>(impl_->frame->width) * 4, 0, 0, 0};
+    std::array<uint8_t*, 4> dst_data = {rgba.data(), nullptr, nullptr, nullptr};
+    std::array<int, 4> dst_linesize = {impl_->frame->width * 4, 0, 0, 0};
 
     // Scale to RGBA
     const int scale_ret = sws_scale(impl_->sws,
@@ -229,8 +230,8 @@ std::optional<GifFrame> GifDecoder::next_frame()
                                     impl_->frame->linesize,
                                     0,
                                     impl_->frame->height,
-                                    dst_data,
-                                    dst_linesize);
+                                    dst_data.data(),
+                                    dst_linesize.data());
 
     // Extract duration from the frame
     const int64_t frame_duration = impl_->frame->duration;
@@ -264,7 +265,7 @@ std::optional<GifFrame> GifDecoder::next_frame()
 
 void GifDecoder::rewind()
 {
-    if (!impl_->fmt || !impl_->avio || !impl_->codec) {
+    if (impl_->fmt == nullptr || !impl_->avio || impl_->codec == nullptr) {
         return;
     }
 
