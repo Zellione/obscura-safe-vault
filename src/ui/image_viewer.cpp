@@ -103,6 +103,27 @@ SDL_FRect ImageViewer::strip_rect() const
 
 // --- Fit-mode view state ---------------------------------------------------
 
+void ImageViewer::sync_gif_for_current_index()
+{
+    // Rebuild gif_ when index_ has moved away from gif_index_, or tear it down
+    // when the current item is no longer an animated GIF. Never tear down and
+    // rebuild if index_ hasn't changed (that would restart the animation every
+    // frame).
+    if (gif_index_ == index_) {
+        return;   // GIF is still valid for the current index
+    }
+
+    // Index has changed or gif_ was never built — rebuild if the current item
+    // is an animated GIF, otherwise tear down.
+    gif_.reset();
+    gif_index_ = -1;
+
+    if (item_is_animated_gif(album_.images, index_)) {
+        gif_ = std::make_unique<GifPlayback>(vault_, *album_.images[index_]);
+        gif_index_ = index_;
+    }
+}
+
 void ImageViewer::show_image_at(int idx)
 {
     if (album_.images.empty()) return;
@@ -117,13 +138,9 @@ void ImageViewer::show_image_at(int idx)
     if (mode_ == ViewMode::Fit && item_is_video(album_.images, index_)) {
         video_ = std::make_unique<VideoPlayback>(vault_, *album_.images[index_]);
     }
-    // (Re)build animated GIF playback for the current item when it is an animated
-    // GIF; tears down the previous decoder (RAII) before any vault lock. gif_
-    // being non-null thus means exactly "current item is an animated GIF".
-    gif_.reset();
-    if (item_is_animated_gif(album_.images, index_)) {
-        gif_ = std::make_unique<GifPlayback>(vault_, *album_.images[index_]);
-    }
+    // Sync animated GIF playback for the current item; tears down the previous
+    // decoder (RAII) before any vault lock if the index has changed.
+    sync_gif_for_current_index();
 }
 
 void ImageViewer::handle_key_video(SDL_Keycode key, SDL_Scancode sc)
@@ -413,6 +430,7 @@ void ImageViewer::update(double dt)
 
     if (video_) video_->update(dt);
     if (gif_) gif_->update(dt);
+    sync_gif_for_current_index();  // reconcile gif_ when index_ changed via scroll
 
     // Single-image export runs synchronously — one image is fast (the large,
     // multi-image export lives in GalleryGrid, which backgrounds it, Phase 25).
@@ -565,7 +583,7 @@ void ImageViewer::render_fit(gfx::Renderer& r, const SDL_FRect& vp)
                         static_cast<int>(vp.w), static_cast<int>(vp.h)};
     SDL_SetRenderClipRect(r.sdl(), &clip);
     const SDL_FRect dest{dx, dy, sw, sh};
-    if (gif_ && gif_->valid()) {
+    if (gif_index_ == index_ && gif_ != nullptr && gif_->valid()) {
         gif_->render(r, dest);
     } else {
         r.draw_image(ft->tex, dest);
@@ -597,7 +615,7 @@ void ImageViewer::render_scroll(gfx::Renderer& r, const SDL_FRect& vp)
         const float top = vp.y + m.image_top(i) - scroll_y_;
         const float h   = scaled_height(*album_.images[i], vp.w);
         const SDL_FRect dest{vp.x, top, vp.w, h};
-        if (i == index_ && gif_ && gif_->valid()) {
+        if (i == index_ && gif_index_ == index_ && gif_ != nullptr && gif_->valid()) {
             gif_->render(r, dest);
         } else if (FullTex* ft = full_cache_.acquire(*album_.images[i])) {
             r.draw_image(ft->tex, dest);

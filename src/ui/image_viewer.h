@@ -107,6 +107,9 @@ public:
 
     [[nodiscard]] std::vector<ui::HelpGroup> help_groups() const override;
 
+    // Debug accessor for testing the GIF-index tracking (regression test).
+    [[nodiscard]] int debug_gif_index() const noexcept { return gif_index_; }
+
 private:
     enum class ViewMode { Fit, FillScroll, Slideshow };
 
@@ -235,6 +238,16 @@ private:
     // current image is a GIF with meta.animated set. Same lifetime rules as
     // video_: destroyed before any vault lock / idle / switch.
     std::unique_ptr<GifPlayback> gif_;
+
+    // Tracks which album index the current gif_ was constructed for, so that
+    // on scroll the GIF can be torn down and rebuilt before rendering. -1 when
+    // gif_ is null. Used to detect and reconcile index changes (Phase 47 fix).
+    int gif_index_ = -1;
+
+    // Rebuild gif_ for the current index if it has moved. Called from both
+    // show_image_at() and update() to keep gif_ in sync regardless of how
+    // index_ changed.
+    void sync_gif_for_current_index();
 };
 
 // Free friends of ImageViewer (see the in-class declarations): current_strip_side /
