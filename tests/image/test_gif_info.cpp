@@ -40,7 +40,9 @@ const std::vector<uint8_t> kFrame = {
 std::vector<uint8_t> frames(int n)
 {
     std::vector<uint8_t> out;
-    for (int i = 0; i < n; ++i) out.insert(out.end(), kFrame.begin(), kFrame.end());
+    for (int i = 0; i < n; ++i) {
+        out.insert(out.end(), kFrame.begin(), kFrame.end());
+    }
     return out;
 }
 
