@@ -1,6 +1,6 @@
 # =============================================================================
 # Release — tag-triggered packaging. Pushing a tag `v*` (e.g. v1.2.0) builds
-# the three platform packages with OSV_VERSION derived from the tag (so the
+# the platform packages with OSV_VERSION derived from the tag (so the
 # filenames AND embedded versions are correct — unlike the CI artefacts, which
 # are built before any tag exists) and attaches them, plus SHA256SUMS.txt, to
 # the GitHub release for that tag. If no release exists yet, a DRAFT release
@@ -154,7 +154,7 @@ jobs:
           retention-days: 7
 
   # ===========================================================================
-  # Windows — MSVC Release NSIS installer (mirrors ci.yml windows, Release)
+  # Windows — MSVC Release portable zip (mirrors ci.yml windows, Release)
   # ===========================================================================
   windows:
     name: Package / Windows
@@ -260,19 +260,19 @@ jobs:
           SDL_VIDEODRIVER: dummy
         run: ./build/bin/Release/osv_tests.exe
 
-      - name: Package (NSIS installer)
+      - name: Package (portable zip)
         shell: pwsh
+        env:
+          OSV_VERSION: ${{ github.ref_name }}
         run: |
-          choco install nsis --no-progress -y
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          $version = $env:GITHUB_REF_NAME -replace '^v', ''
-          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" /DVERSION=$version packaging\windows\osv.nsi
+          $env:OSV_VERSION = $env:OSV_VERSION -replace '^v', ''
+          scripts\package.ps1
 
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: osv-windows-installer
-          path: dist/*.exe
+          name: osv-windows-zip
+          path: dist/*.zip
           retention-days: 7
 
   # ===========================================================================

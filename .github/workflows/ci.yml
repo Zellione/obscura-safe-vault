@@ -266,23 +266,22 @@ jobs:
         run: ./build/bin/${{ matrix.config }}/osv_tests.exe
 
       # -----------------------------------------------------------------------
-      # Packaging (Release leg only) — NSIS installer (installed via choco;
-      # PATH doesn't refresh mid-job, so call makensis by its install path)
+      # Packaging (Release leg only) — portable zip, same script the Release
+      # workflow runs (there with the tag's version instead of "dev").
       # -----------------------------------------------------------------------
-      - name: Package (NSIS installer)
+      - name: Package (portable zip)
         if: matrix.config == 'Release'
         shell: pwsh
-        run: |
-          choco install nsis --no-progress -y
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" /DVERSION=dev packaging\windows\osv.nsi
+        env:
+          OSV_VERSION: dev
+        run: scripts\package.ps1
 
       - name: Upload package
         if: matrix.config == 'Release'
         uses: actions/upload-artifact@v4
         with:
-          name: osv-windows-installer
-          path: dist/*.exe
+          name: osv-windows-zip
+          path: dist/*.zip
           retention-days: 7
 
   # ===========================================================================

@@ -2,8 +2,11 @@
 
 > **Note:** macOS support described in this phase was later removed entirely
 > (CI, build pipeline, and source-level `#ifdef __APPLE__` branches) — see
-> `mem:tech_stack` for current platform support. This historical record is
-> preserved as-shipped and not rewritten.
+> `mem:tech_stack` for current platform support. The Windows NSIS installer
+> described below was also later replaced by a portable `.zip` (`scripts/package.ps1`)
+> — the installer did nothing a folder copy didn't, and left Start Menu/uninstaller
+> traces on the system for what is deliberately a leave-no-trace tool. This
+> historical record is preserved as-shipped and not rewritten.
 
 **Goal:** Windows and macOS build configs and CI pipeline.
 
