@@ -208,8 +208,8 @@ build_ffmpeg() {
         --disable-bsfs --disable-autodetect                                 \
         --enable-libaom                                                     \
         --enable-vaapi                                                      \
-        --enable-decoder=h264,hevc,prores,dnxhd,mjpeg,vp8,vp9,libaom_av1,qtrle,cinepak,aac,opus,mp3,vorbis,flac,ac3 \
-        --enable-demuxer=mov,matroska,webm                                  \
+        --enable-decoder=h264,hevc,prores,dnxhd,mjpeg,vp8,vp9,libaom_av1,qtrle,cinepak,gif,aac,opus,mp3,vorbis,flac,ac3 \
+        --enable-demuxer=mov,matroska,webm,gif                              \
         --enable-parser=h264,hevc,dnxhd,mjpeg,aac,vorbis,opus,flac,ac3,mpegaudio \
         --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb                      \
         --enable-swscale                                                    \
