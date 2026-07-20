@@ -17,10 +17,14 @@ std::vector<uint8_t> read_fixture(const char* name)
     const std::string path = std::string(OSV_MEDIA_FIXTURE_DIR) + "/" + name;
     std::vector<uint8_t> out;
     FILE* f = std::fopen(path.c_str(), "rb");
-    if (!f) return out;
+    if (f == nullptr) {
+        return out;
+    }
     uint8_t buf[4096];
     size_t n = 0;
-    while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) out.insert(out.end(), buf, buf + n);
+    while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
+        out.insert(out.end(), buf, buf + n);
+    }
     std::fclose(f);
     return out;
 }
@@ -67,13 +71,17 @@ TEST(gif_decoder_rewind_replays_the_same_frame_count)
     REQUIRE(d.open(bytes));
 
     size_t first = 0;
-    while (d.next_frame()) ++first;
+    while (d.next_frame()) {
+        ++first;
+    }
     CHECK(first >= 2);
 
     d.rewind();
 
     size_t second = 0;
-    while (d.next_frame()) ++second;
+    while (d.next_frame()) {
+        ++second;
+    }
     CHECK_EQ(second, first);
 }
 
@@ -92,7 +100,10 @@ TEST(gif_decoder_rejects_truncated_gif)
 
     media::GifDecoder d;
     // Opening may succeed or fail; decoding must not crash or hang.
-    if (d.open(bytes)) { while (d.next_frame()) {} }
+    if (d.open(bytes)) {
+        while (d.next_frame()) {
+        }
+    }
     CHECK(true);
 }
 
