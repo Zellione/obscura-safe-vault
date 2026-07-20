@@ -6,7 +6,6 @@
 #include <string>
 #include <vector>
 
-using ui::ZipConflictPolicy;
 using ziptest::entries;
 
 TEST(zip_plan_extension_classifier)
@@ -22,8 +21,7 @@ TEST(zip_plan_extension_classifier)
 TEST(zip_plan_flat_zip_one_gallery)
 {
     auto e = entries({"a.jpg", "b.png", "notes.txt"});
-    auto p = ui::build_zip_plan(e, "", "Trip", ZipConflictPolicy::AskUser);
-    CHECK_FALSE(p.needs_resolution);
+    auto p = ui::build_zip_plan(e, "", "Trip");
     CHECK_EQ(p.skipped_unsupported, 1);              // notes.txt
     CHECK_EQ(p.placements.size(), static_cast<size_t>(2));
     CHECK_EQ(p.galleries.size(), static_cast<size_t>(1));   // "Trip"
@@ -33,37 +31,37 @@ TEST(zip_plan_flat_zip_one_gallery)
 
 TEST(zip_plan_mirrors_nested_tree)
 {
-    // Clean hierarchy: every media file sits in a leaf dir; no intermediate dir
-    // ("2020") directly holds media, so there is no leaf-invariant conflict.
+    // Every media file sits in a leaf dir; no intermediate dir ("2020") directly
+    // holds media. The archive tree maps 1:1 onto nested galleries.
     auto e = entries({"2020/winter/a.jpg", "2020/sub/b.jpg", "2021/c.png"});
-    auto p = ui::build_zip_plan(e, "", "Photos", ZipConflictPolicy::AskUser);
-    CHECK_FALSE(p.needs_resolution);
+    auto p = ui::build_zip_plan(e, "", "Photos");
     // galleries: Photos/2020, Photos/2020/sub, Photos/2021 (+ ancestors Photos)
     CHECK(std::find(p.galleries.begin(), p.galleries.end(), std::string("Photos/2020/sub")) != p.galleries.end());
     CHECK(std::find(p.galleries.begin(), p.galleries.end(), std::string("Photos/2021")) != p.galleries.end());
     CHECK_EQ(p.placements.size(), static_cast<size_t>(3));
 }
 
-TEST(zip_plan_detects_mixed_folder)
+TEST(zip_plan_mirrors_mixed_folder_verbatim)
 {
-    // "a" holds a.jpg AND has subdir "a/b" with media -> mixed.
+    // "a" holds x.jpg AND has subdir "a/b" holding media. Before Phase 46 the
+    // leaf invariant made this unrepresentable, so the planner reported it for
+    // user resolution; galleries may now hold media and sub-galleries at once,
+    // so the tree mirrors 1:1 with no prompt and no synthetic "Files" leaf.
     auto e = entries({"a/x.jpg", "a/b/y.jpg"});
-    auto ask = ui::build_zip_plan(e, "", "G", ZipConflictPolicy::AskUser);
-    CHECK(ask.needs_resolution);
-    CHECK_EQ(ask.mixed_dirs.size(), static_cast<size_t>(1));
+    auto p = ui::build_zip_plan(e, "", "G");
 
-    auto flat = ui::build_zip_plan(e, "", "G", ZipConflictPolicy::FlattenMixed);
-    CHECK_FALSE(flat.needs_resolution);
-    // a/x.jpg redirected into a "Files" child leaf so "G/a" only parents subdirs.
-    bool into_files = false;
-    for (const auto& pl : flat.placements)
-        if (pl.filename == "x.jpg") into_files = (pl.gallery_path == "G/a/Files");
-    CHECK(into_files);
+    CHECK_EQ(p.placements.size(), static_cast<size_t>(2));
+    CHECK_EQ(p.skipped_unsupported, 0);          // nothing dropped
 
-    auto skip = ui::build_zip_plan(e, "", "G", ZipConflictPolicy::SkipMixed);
-    CHECK_FALSE(skip.needs_resolution);
-    CHECK_EQ(skip.placements.size(), static_cast<size_t>(1));   // only a/b/y.jpg
-    CHECK_EQ(skip.skipped_unsupported, 1);                      // a/x.jpg dropped
+    for (const auto& pl : p.placements) {
+        if (pl.filename == "x.jpg") CHECK_EQ(pl.gallery_path, std::string("G/a"));
+        if (pl.filename == "y.jpg") CHECK_EQ(pl.gallery_path, std::string("G/a/b"));
+    }
+
+    // Both the mixed dir and its child are created; no "G/a/Files".
+    CHECK(std::find(p.galleries.begin(), p.galleries.end(), std::string("G/a")) != p.galleries.end());
+    CHECK(std::find(p.galleries.begin(), p.galleries.end(), std::string("G/a/b")) != p.galleries.end());
+    CHECK(std::find(p.galleries.begin(), p.galleries.end(), std::string("G/a/Files")) == p.galleries.end());
 }
 
 TEST(zip_plan_find_meta_entry)
@@ -82,7 +80,7 @@ TEST(zip_plan_excludes_meta_json_silently)
     // meta.json is consumed by the importer (Phase 27) — never placed and never
     // counted as a skipped file.
     auto e = entries({"a.jpg", "meta.json", "notes.txt"});
-    auto p = ui::build_zip_plan(e, "", "G", ZipConflictPolicy::AskUser);
+    auto p = ui::build_zip_plan(e, "", "G");
     CHECK_EQ(p.placements.size(), static_cast<size_t>(1));
     CHECK_EQ(p.skipped_unsupported, 1);                          // notes.txt only
 }

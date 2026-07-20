@@ -65,12 +65,10 @@ TEST(archive_import_job_runs_7z_new_gallery_to_completion)
         make_vault(v, dir / "v.osv");
 
         ui::ZipImportJob job;
-        CHECK(job.start_archive(v, archive,
-                                {ui::ZipConflictPolicy::AskUser}, "", "Album"));
+        CHECK(job.start_archive(v, archive, "", "Album"));
         auto oc = await_outcome(job);
         REQUIRE(oc.has_value());
         CHECK(oc->ok);
-        CHECK_FALSE(oc->needs_resolution);
         CHECK_EQ(oc->imported, 2);
         CHECK_EQ(v.list("Album/2020").size(), static_cast<size_t>(2));
     }
@@ -111,8 +109,7 @@ TEST(archive_import_job_runs_encrypted_zip_with_password_to_completion)
         std::memcpy(pw.data(), "correcthorse", pw.size());
 
         ui::ZipImportJob job;
-        CHECK(job.start_archive(v, archive,
-                                {ui::ZipConflictPolicy::AskUser}, "", "Secret",
+        CHECK(job.start_archive(v, archive, "", "Secret",
                                 /*password_protected=*/true, std::move(pw)));
         auto oc = await_outcome(job);
         REQUIRE(oc.has_value());
@@ -146,8 +143,7 @@ TEST(archive_import_job_reports_needs_password_for_wrong_password)
             std::memcpy(pw.data(), "nope", pw.size());
 
             ui::ZipImportJob job;
-            CHECK(job.start_archive(v, archive,
-                                    {ui::ZipConflictPolicy::AskUser}, "", "Secret",
+            CHECK(job.start_archive(v, archive, "", "Secret",
                                     /*password_protected=*/true, std::move(pw)));
             auto oc = await_outcome(job);
             REQUIRE(oc.has_value());

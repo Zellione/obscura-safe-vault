@@ -93,9 +93,8 @@ private:
     void start_naming();
     void finish_naming();
     void pump_import();            // poll the file dialog while transfer is not active
-    void do_zip_import(const std::filesystem::path& zip_path, ui::ZipConflictPolicy policy);
+    void do_zip_import(const std::filesystem::path& zip_path);
     void pump_zip_import();        // poll the zip file dialog while transfer is not active
-    bool handle_zip_conflict_key(const SDL_Event& e);     // Flatten/Skip/Esc modal; true if consumed
     bool handle_delete_confirm_key(const SDL_Event& e);   // Del-confirm modal; true if consumed
     bool handle_compact_confirm_key(const SDL_Event& e);  // Shift+C compact modal; true if consumed (Phase 26)
     // Dispatches to whichever full-screen overlay (search/tag editor/transfer/
@@ -168,7 +167,7 @@ private:
     struct PendingZip {
         std::filesystem::path path;
         std::string           gallery_name;
-        bool                  active = false;  // awaiting conflict resolution (Flatten/Skip)
+        bool                  active = false;  // import in flight (survives a password round-trip)
         bool                  cbz = false;     // .cbz/.cbr/.cb7/.cbt comic import: fixed one-leaf plan
         // .7z/.rar/.tar(+.gz/.xz)/.cbr/.cb7/.cbt (Phase 34) route through
         // ZipImportJob::start_archive/start_archive_cbz (libarchive) instead of

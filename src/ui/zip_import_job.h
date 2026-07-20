@@ -16,18 +16,6 @@ class Vault;
 
 namespace ui {
 
-// Groups the conflict policy to bring start_archive under the S107 parameter-count
-// cap. Deliberately NOT used to bundle the Phase 35 password: SonarQube's
-// dataflow analysis lost track of ownership when crypto::SecureBytes (which
-// owns a std::unique_ptr internally) was nested inside an aggregate passed
-// by value into start_archive/start_archive_cbz and reported a false-positive
-// leak (cpp:S3584) at the gallery_grid.cpp call site, so password_protected/
-// password stay flat parameters here, matching the pre-Phase-35 signature
-// shape that analyzed cleanly.
-struct ZipImportTarget {
-    ZipConflictPolicy policy;
-};
-
 using WorkerThread = std::jthread;
 
 // Runs a ZIP/CBZ import on a background thread so the UI never freezes on a
@@ -52,22 +40,25 @@ public:
     bool start_cbz(vault::Vault& v, std::filesystem::path cbz,
                    std::string base_gallery, std::string gallery_name);
 
-    // Launch a ZIP import (mirrors ui::import_zip). A ZIP with mixed folders under
-    // AskUser comes back needs_resolution having written nothing (planning only) —
-    // the caller shows a Flatten/Skip modal and re-starts with the chosen policy.
+    // Launch a ZIP import (mirrors ui::import_zip), mirroring the archive tree
+    // 1:1 under base_gallery/new_gallery_name.
     bool start_zip(vault::Vault& v, std::filesystem::path zip,
-                   std::string base_gallery, std::string new_gallery_name,
-                   ZipConflictPolicy policy);
+                   std::string base_gallery, std::string new_gallery_name);
 
-    // Launch a 7z/RAR/TAR import (mirrors ui::import_archive; Phase 34). Same
-    // needs_resolution/mixed-folder contract as start_zip. launch() doesn't care
-    // which backend the work closure uses, so this reuses the exact same job
-    // machinery as start_zip/start_cbz rather than a parallel job type.
+    // Launch a 7z/RAR/TAR import (mirrors ui::import_archive; Phase 34).
+    // launch() doesn't care which backend the work closure uses, so this reuses
+    // the exact same job machinery as start_zip/start_cbz rather than a parallel
+    // job type.
     // `password_protected`/`password` (Phase 35): true/non-empty only for an
     // encrypted zip/cbz the caller already detected via ui::zip_is_encrypted.
     // `password` is moved into the worker and wiped immediately after the
-    // import_archive/import_archive_cbz call returns.
-    bool start_archive(vault::Vault& v, std::filesystem::path archive, ZipImportTarget target,
+    // import_archive/import_archive_cbz call returns. These two stay FLAT
+    // parameters rather than being bundled into an aggregate: SonarQube's
+    // dataflow analysis lost track of ownership when crypto::SecureBytes (which
+    // owns a std::unique_ptr internally) was nested inside a by-value aggregate
+    // and reported a false-positive leak (cpp:S3584) at the gallery_grid.cpp
+    // call site.
+    bool start_archive(vault::Vault& v, std::filesystem::path archive,
                        std::string base_gallery, std::string new_gallery_name,
                        bool password_protected = false, crypto::SecureBytes password = {});
 

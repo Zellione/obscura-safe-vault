@@ -8,8 +8,6 @@
 
 namespace ui {
 
-enum class ZipConflictPolicy { AskUser, FlattenMixed, SkipMixed };
-
 struct ZipEntry {
     std::string path;     // '/'-separated; trailing '/' or is_dir => directory
     bool        is_dir = false;
@@ -24,9 +22,7 @@ struct ZipPlacement {
 struct ZipPlan {
     std::vector<std::string>  galleries;            // create in this order (parents first)
     std::vector<ZipPlacement> placements;
-    std::vector<std::string>  mixed_dirs;           // archive dirs that violate the leaf invariant
     int                       skipped_unsupported = 0;
-    bool                      needs_resolution = false;
 };
 
 // Index of the archive's top-level `meta.json` (case-insensitive, files only),
@@ -49,12 +45,12 @@ struct ZipPlan {
                                      std::string_view             base_gallery,
                                      std::string_view             gallery_name);
 
-// Build a placement plan from raw archive entries, mirroring the tree under
-// base_gallery/new_gallery_name. See zip_plan.cpp for the mirror/mixed-folder
-// rules. Pure: no miniz, no vault, no SDL.
+// Build a placement plan from raw archive entries, mirroring the archive tree
+// 1:1 under base_gallery/new_gallery_name. A directory holding both media and
+// subdirectories maps directly onto a mixed gallery (Phase 46), so no conflict
+// resolution is ever required. Pure: no miniz, no vault, no SDL.
 [[nodiscard]] ZipPlan build_zip_plan(const std::vector<ZipEntry>& entries,
                                      std::string_view             base_gallery,
-                                     std::string_view             new_gallery_name,
-                                     ZipConflictPolicy            policy);
+                                     std::string_view             new_gallery_name);
 
 } // namespace ui

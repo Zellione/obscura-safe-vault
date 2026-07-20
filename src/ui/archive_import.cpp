@@ -141,13 +141,7 @@ ZipImportOutcome import_archive(vault::Vault&                v,
         return out;
 
     ZipPlan plan = build_zip_plan(reader.entries(), dest.base_gallery,
-                                  dest.new_gallery_name, dest.policy);
-    if (plan.needs_resolution) {
-        out.ok = true;
-        out.needs_resolution = true;
-        out.mixed_dirs = std::move(plan.mixed_dirs);
-        return out;
-    }
+                                  dest.new_gallery_name);
     return finish_import(v, reader, plan, progress);
 }
 

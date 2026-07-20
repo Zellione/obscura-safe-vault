@@ -12,7 +12,6 @@
 // coupling to a real codec. Shared fixtures (fake_jpeg, make_archive, vault +
 // temp-dir helpers) live in zip_test_helpers.h.
 namespace fs = std::filesystem;
-using ui::ZipConflictPolicy;
 using ziptest::cleanup_dir;
 using ziptest::fake_jpeg;
 using ziptest::fresh_dir;
@@ -29,9 +28,8 @@ TEST(zip_import_new_gallery_mirrors_tree)
     {
         vault::Vault v;
         make_vault(v, dir / "v.osv");
-        auto out = ui::import_zip(v, zip, "", "Album", ZipConflictPolicy::AskUser);
+        auto out = ui::import_zip(v, zip, "", "Album");
         CHECK(out.ok);
-        CHECK_FALSE(out.needs_resolution);
         CHECK_EQ(out.imported, 2);
         CHECK_EQ(out.skipped, 1);  // notes.txt
         CHECK_EQ(v.list("Album/2020/winter").size(), static_cast<size_t>(1));  // a.jpg
@@ -51,8 +49,11 @@ TEST(zip_import_new_gallery_mirrors_tree)
     cleanup_dir(dir);
 }
 
-TEST(zip_import_reports_mixed_folder_without_writing)
+TEST(zip_import_stores_mixed_folder_as_mixed_gallery)
 {
+    // "a" holds an image AND a subfolder with media. Since Phase 46 a gallery may
+    // hold media and sub-galleries at once, so this imports straight through
+    // without prompting: "G/a" ends up with x.jpg *and* the sub-gallery "b".
     auto img = fake_jpeg(3);
     auto dir = fresh_dir("osv_zip_test_mix");
     auto zip = make_archive({{"a/x.jpg", img}, {"a/b/y.jpg", img}}, dir / "in.zip");
@@ -60,11 +61,12 @@ TEST(zip_import_reports_mixed_folder_without_writing)
     {
         vault::Vault v;
         make_vault(v, dir / "v.osv");
-        auto out = ui::import_zip(v, zip, "", "G", ZipConflictPolicy::AskUser);
+        auto out = ui::import_zip(v, zip, "", "G");
         CHECK(out.ok);
-        CHECK(out.needs_resolution);
-        CHECK_EQ(out.imported, 0);
-        CHECK(v.list("G").empty());  // nothing written while awaiting resolution
+        CHECK_EQ(out.imported, 2);
+        CHECK_EQ(out.skipped, 0);
+        CHECK_EQ(v.list("G/a").size(), static_cast<size_t>(2));   // x.jpg + gallery "b"
+        CHECK_EQ(v.list("G/a/b").size(), static_cast<size_t>(1)); // y.jpg
     }
     cleanup_dir(dir);
 }
@@ -77,7 +79,7 @@ TEST(zip_import_rejects_malformed_archive)
     {
         vault::Vault v;
         make_vault(v, dir / "v.osv");
-        auto out = ui::import_zip(v, dir / "bad.zip", "", "G", ZipConflictPolicy::AskUser);
+        auto out = ui::import_zip(v, dir / "bad.zip", "", "G");
         CHECK_FALSE(out.ok);
         CHECK_FALSE(out.error.empty());
     }
@@ -93,7 +95,7 @@ TEST(zip_import_writes_no_extra_files)
     {
         vault::Vault v;
         make_vault(v, dir / "v.osv");
-        auto out = ui::import_zip(v, zip, "", "G", ZipConflictPolicy::AskUser);
+        auto out = ui::import_zip(v, zip, "", "G");
         CHECK(out.ok);
         // The only files in `dir` are the input zip and the vault — no decompressed temp.
         int count = 0;
@@ -123,7 +125,7 @@ TEST(zip_import_meta_json_tags_top_gallery_passed_name_wins)
         // The caller's name is authoritative: the UI prefills it from the
         // meta.json title via peek_archive_meta, so the user's (possibly
         // edited) popup text must never be silently overridden here.
-        auto out = ui::import_zip(v, zip, "", "Album", ZipConflictPolicy::AskUser);
+        auto out = ui::import_zip(v, zip, "", "Album");
         CHECK(out.ok);
         CHECK_EQ(out.imported, 1);
         CHECK_EQ(out.skipped, 0);            // meta.json consumed, not "skipped"
@@ -203,9 +205,8 @@ TEST(zip_import_decodes_legacy_cp437_entry_name)
     {
         vault::Vault v;
         make_vault(v, dir / "v.osv");
-        auto out = ui::import_zip(v, zip, "", "Album", ZipConflictPolicy::AskUser);
+        auto out = ui::import_zip(v, zip, "", "Album");
         CHECK(out.ok);
-        CHECK_FALSE(out.needs_resolution);
         CHECK_EQ(out.imported, 1);
 
         const vault::IndexNode* node = nullptr;

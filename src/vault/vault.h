@@ -121,14 +121,14 @@ public:
     [[nodiscard]] bool is_unlocked() const noexcept { return unlocked_; }
 
     // Create a gallery at `gallery_path` (slash-separated), creating intermediate
-    // galleries as needed. Fails with InvalidArg if any path segment is an image
-    // or would violate the leaf invariant (a gallery holding images can't gain a
-    // sub-gallery). AlreadyExists if the gallery already exists.
+    // galleries as needed. Fails with InvalidArg if any path segment is an image.
+    // A gallery already holding media may gain a sub-gallery (Phase 46).
+    // AlreadyExists if the gallery already exists.
     [[nodiscard]] VaultResult create_gallery(std::string_view gallery_path);
 
-    // Encrypt and store `file_data` as an image named `filename` in the leaf
-    // gallery `gallery_path` (root is ""). InvalidArg if the target holds
-    // sub-galleries. AlreadyExists if the name is taken.
+    // Encrypt and store `file_data` as an image named `filename` in the gallery
+    // `gallery_path` (root is ""). The target may also hold sub-galleries
+    // (Phase 46). AlreadyExists if the name is taken.
     [[nodiscard]] VaultResult add_image(std::string_view         gallery_path,
                                         std::span<const uint8_t> file_data,
                                         std::string_view         filename);
