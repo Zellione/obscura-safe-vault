@@ -21,8 +21,6 @@ extern "C" {
 #pragma GCC diagnostic pop
 #endif
 
-#include <print>
-
 namespace media {
 
 struct GifDecoder::Impl {
@@ -38,7 +36,6 @@ struct GifDecoder::Impl {
     AVRational       time_base  {1, 100};
     size_t           decoded    = 0;
     bool             eof_sent   = false;
-    bool             demux_eof  = false;  // Track if demuxer has reached EOF
 
     ~Impl() { close(); }
 
@@ -141,7 +138,6 @@ bool GifDecoder::open(std::span<const uint8_t> data)
 
     impl_->decoded = 0;
     impl_->eof_sent = false;
-    impl_->demux_eof = false;
 
     // Note: Do NOT pre-read packets! The GIF demuxer's internal state
     // gets corrupted if we read until EOF and then try to use cloned packets.
@@ -153,132 +149,93 @@ bool GifDecoder::open(std::span<const uint8_t> data)
 
 std::optional<GifFrame> GifDecoder::next_frame()
 {
-    if (!impl_->fmt) {
+    if (!impl_->fmt || !impl_->codec || !impl_->frame || !impl_->pkt) {
         return std::nullopt;
     }
 
-    // Read next packet from demuxer (skip non-video packets)
+    // Main loop: read packets and try to receive frames
     while (true) {
-        if (impl_->demux_eof) {
-            return std::nullopt;  // No more packets
+        // Try to receive a frame from the decoder (non-blocking)
+        const int recv_ret = avcodec_receive_frame(impl_->codec, impl_->frame);
+        if (recv_ret == 0) {
+            // Successfully got a frame from the decoder
+            break;  // Exit loop with a valid frame in impl_->frame
         }
-
-        int ret = av_read_frame(impl_->fmt, impl_->pkt);
-        if (ret < 0) {
-            impl_->demux_eof = true;
+        if (recv_ret != AVERROR(EAGAIN)) {
+            // Any error other than EAGAIN means we're done (including EOF after flush)
             return std::nullopt;
         }
 
-        if (impl_->pkt->stream_index == impl_->stream_idx) {
-            break;  // Got a video packet
+        // EAGAIN: decoder wants more input. Read next packet from demuxer.
+        const int read_ret = av_read_frame(impl_->fmt, impl_->pkt);
+        if (read_ret == AVERROR_EOF) {
+            // Reached end of stream: send flush packet if we haven't already
+            if (!impl_->eof_sent) {
+                impl_->eof_sent = true;
+                avcodec_send_packet(impl_->codec, nullptr);  // nullptr = flush
+                continue;  // Loop to try receiving buffered frames
+            }
+            // Already flushed and got EAGAIN again: no more frames
+            return std::nullopt;
+        }
+        if (read_ret < 0) {
+            // Read error
+            return std::nullopt;
         }
 
+        // Route the packet to the decoder if it's video
+        if (impl_->pkt->stream_index == impl_->stream_idx) {
+            const int send_ret = avcodec_send_packet(impl_->codec, impl_->pkt);
+            if (send_ret < 0) {
+                av_packet_unref(impl_->pkt);
+                return std::nullopt;
+            }
+        }
         av_packet_unref(impl_->pkt);
+        // Loop back to try receiving a frame
     }
 
-    // We have a video packet - create a fresh codec context for this packet
-    // (GIF packets seem to be independent and need separate decoder instances)
-    const AVCodec* dec = nullptr;
-    int stream_idx = av_find_best_stream(impl_->fmt, AVMEDIA_TYPE_VIDEO, -1, -1, &dec, 0);
-    if (stream_idx < 0 || dec == nullptr) {
-        av_packet_unref(impl_->pkt);
+    // We have a valid frame in impl_->frame
+    if (impl_->frame->data[0] == nullptr) {
         return std::nullopt;
     }
 
-    AVCodecContext* temp_ctx = avcodec_alloc_context3(dec);
-    if (temp_ctx == nullptr) {
-        av_packet_unref(impl_->pkt);
-        return std::nullopt;
-    }
-
-    AVStream* st = impl_->fmt->streams[stream_idx];
-    if (avcodec_parameters_to_context(temp_ctx, st->codecpar) < 0) {
-        avcodec_free_context(&temp_ctx);
-        av_packet_unref(impl_->pkt);
-        return std::nullopt;
-    }
-
-    if (avcodec_open2(temp_ctx, dec, nullptr) < 0) {
-        avcodec_free_context(&temp_ctx);
-        av_packet_unref(impl_->pkt);
-        return std::nullopt;
-    }
-
-    // Allocate a frame for this packet's decoding
-    AVFrame* temp_frame = av_frame_alloc();
-    if (temp_frame == nullptr) {
-        avcodec_free_context(&temp_ctx);
-        av_packet_unref(impl_->pkt);
-        return std::nullopt;
-    }
-
-    // Send packet and receive frame
-    int ret = avcodec_send_packet(temp_ctx, impl_->pkt);
-    av_packet_unref(impl_->pkt);
-
-    if (ret < 0) {
-        av_frame_free(&temp_frame);
-        avcodec_free_context(&temp_ctx);
-        return std::nullopt;
-    }
-
-    ret = avcodec_receive_frame(temp_ctx, temp_frame);
-    if (ret != 0) {
-        av_frame_free(&temp_frame);
-        avcodec_free_context(&temp_ctx);
-        return std::nullopt;
-    }
-
-    // Successfully got a frame from the packet
-    // Copy frame data before freeing the context
-    if (!temp_frame->data[0]) {
-        av_frame_free(&temp_frame);
-        avcodec_free_context(&temp_ctx);
-        return std::nullopt;
-    }
-
-    // Lazy create swscale context (using persistent sws_)
+    // Lazy create swscale context
     if (impl_->sws == nullptr) {
         impl_->sws = sws_getCachedContext(
             impl_->sws,
-            temp_frame->width, temp_frame->height,
-            static_cast<AVPixelFormat>(temp_frame->format),
-            temp_frame->width, temp_frame->height,
+            impl_->frame->width, impl_->frame->height,
+            static_cast<AVPixelFormat>(impl_->frame->format),
+            impl_->frame->width, impl_->frame->height,
             AV_PIX_FMT_RGBA,
             SWS_BILINEAR, nullptr, nullptr, nullptr);
         if (impl_->sws == nullptr) {
-            av_frame_free(&temp_frame);
-            avcodec_free_context(&temp_ctx);
             return std::nullopt;
         }
     }
 
     // Allocate RGBA buffer
-    const size_t rgba_size = static_cast<size_t>(temp_frame->width)
-                           * static_cast<size_t>(temp_frame->height) * 4;
+    const size_t rgba_size = static_cast<size_t>(impl_->frame->width)
+                           * static_cast<size_t>(impl_->frame->height) * 4;
     std::vector<uint8_t> rgba(rgba_size);
 
     // Set up destination frame pointers
     uint8_t* dst_data[4] = {rgba.data(), nullptr, nullptr, nullptr};
-    int dst_linesize[4] = {static_cast<int>(temp_frame->width) * 4, 0, 0, 0};
+    int dst_linesize[4] = {static_cast<int>(impl_->frame->width) * 4, 0, 0, 0};
 
     // Scale to RGBA
-    int scale_ret = sws_scale(impl_->sws,
-                              temp_frame->data,
-                              temp_frame->linesize,
-                              0,
-                              temp_frame->height,
-                              dst_data,
-                              dst_linesize);
+    const int scale_ret = sws_scale(impl_->sws,
+                                    impl_->frame->data,
+                                    impl_->frame->linesize,
+                                    0,
+                                    impl_->frame->height,
+                                    dst_data,
+                                    dst_linesize);
 
-    // Extract duration from the temporary frame before cleanup
-    int64_t frame_duration = temp_frame->duration;
-    int frame_width = temp_frame->width;
-    int frame_height = temp_frame->height;
-
-    // Cleanup temporary resources
-    av_frame_free(&temp_frame);
-    avcodec_free_context(&temp_ctx);
+    // Extract duration from the frame
+    const int64_t frame_duration = impl_->frame->duration;
+    const int frame_width = impl_->frame->width;
+    const int frame_height = impl_->frame->height;
 
     if (scale_ret < 0) {
         return std::nullopt;
@@ -307,13 +264,16 @@ std::optional<GifFrame> GifDecoder::next_frame()
 
 void GifDecoder::rewind()
 {
-    if (!impl_->fmt || !impl_->avio) {
+    if (!impl_->fmt || !impl_->avio || !impl_->codec) {
         return;
     }
 
     // Reset state for re-reading packets
-    impl_->demux_eof = false;
+    impl_->eof_sent = false;
     impl_->decoded = 0;
+
+    // Flush the codec to discard any buffered frames
+    avcodec_flush_buffers(impl_->codec);
 
     // Seek the format context back to the beginning
     avformat_seek_file(impl_->fmt, impl_->stream_idx, 0, 0, INT64_MAX,

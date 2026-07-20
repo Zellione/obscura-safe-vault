@@ -2,6 +2,7 @@
 
 #ifdef OSV_VENDORED_AV
 
+#include <array>
 #include <cstdio>
 #include <optional>
 #include <span>
@@ -20,10 +21,10 @@ std::vector<uint8_t> read_fixture(const char* name)
     if (f == nullptr) {
         return out;
     }
-    uint8_t buf[4096];
+    std::array<uint8_t, 4096> buf;
     size_t n = 0;
-    while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
-        out.insert(out.end(), buf, buf + n);
+    while ((n = std::fread(buf.data(), 1, buf.size(), f)) > 0) {
+        out.insert(out.end(), buf.begin(), buf.begin() + n);
     }
     std::fclose(f);
     return out;
@@ -102,6 +103,7 @@ TEST(gif_decoder_rejects_truncated_gif)
     // Opening may succeed or fail; decoding must not crash or hang.
     if (d.open(bytes)) {
         while (d.next_frame()) {
+            // Drain frames without crashing
         }
     }
     CHECK(true);
