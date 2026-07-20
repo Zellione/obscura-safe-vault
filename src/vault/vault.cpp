@@ -17,6 +17,7 @@
 #include "safe_name.h"
 
 #include "image/decode.h"
+#include "image/gif_info.h"
 #include "image/thumbnail.h"
 
 #include "vault/video_format.h"
@@ -635,6 +636,8 @@ VaultResult Vault::add_image(std::string_view         gallery_path,
     img.meta.data_length  = span.length;
     img.meta.thumb_offset = thumb_span.offset;
     img.meta.thumb_length = thumb_span.length;
+    // Phase 47: a multi-frame GIF animates in the viewer and gets an "A" badge.
+    img.meta.animated = (img.meta.format == ImageFormat::GIF) && image::gif_is_animated(file_data);
     if (!vault_ops::push_child(g->children, std::move(img))) {
         platform::log_error("Vault", "add_image: allocation failure appending index node");
         return IoError;
