@@ -67,6 +67,13 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `apply_video_resume` (seek a freshly (re)opened matching video to the remembered position,
   called right after `on_enter()` builds video_). "Collection mode" (explicit image set +
   per-image path + exit Nav) lets the viewer serve favorites/tag sets, not just one gallery.
+- `gif_playback.*` (Phase 47, gated `OSV_VENDORED_AV`) — `GifPlayback`: pImpl, FFmpeg
+  confined to `.cpp` so `image_viewer.h` compiles everywhere. Auto-loop, Space toggles pause,
+  zoom/pan unchanged. Decrypted bytes held in mlock'd `crypto::SecureBytes` outliving the
+  decoder. Frames uploaded row-by-row honoring `SDL_LockTexture` pitch.
+- `gif_model.*` (Phase 47) — pure logic: `GifHoverGate` (200 ms dwell, one start-edge per
+  hover), `gif_within_hover_dimension_budget(w,h)`, `gif_hover_frame_count_exceeded(frames)`,
+  `gif_frames_to_advance(...)` with 64-frame catch-up cap.
 - `video_playback.*` — in-viewer player: `VideoDecoder` (demux only, render-thread-side) +
   `VideoDecodeWorker` (codec-level decode, bg thread, see `mem:module/media`) + YUV texture +
   `SDL_AudioStream` (master audio clock) + seek bar (both tracks); mute/volume via
@@ -249,11 +256,17 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   opaque). GalleryGrid `Shift+G` on a gallery tile opens a .txt dialog -> add_tag each (merge).
 - `tag_overview_model.*` — `TagTally{tag,gallery_count,image_count}` + sort_tags(Name/Count) +
   filter_tags(ci prefix).
+- `gif_repair.*` (Phase 47) — `maybe_repair_gif_animated(...)` + `Vault::repair_image_animated(path,bool)`:
+  lazy bidirectional healing for GIFs stored before Phase 47, persisted via the same crash-safe
+  `commit_index()` path as video repair. No-op when the animated flag is already correct.
 - `video_repair.*` — `repair_unknown_video_metadata(vault,gallery_path,children)` sweeps a
   freshly listed gallery for videos still at `VideoCodec::Unknown` + calls
   `Vault::repair_video_metadata` per node. Called from GalleryGrid::refresh() so previously-
   imported videos self-heal (thumbnail+duration) on next open — no migration.
 - `strip_layout.*` — orientation-aware viewer-strip geometry + half-size thumbnails.
+  Phase 47: `strip_cell_rect(...)` added for forward index→rect mapping (inverse `strip_hit_axis`
+  pre-existed). NOTE: `gfx::Renderer::draw_thumbnail_strip` duplicates this layout internally
+  (gfx must not depend on ui) — both sites carry SYNC comments; keep in sync on geometry changes.
 - `scroll_model.*` — fill-width continuous-scroll maths.
 - `meta_format.*` — list-view metadata formatting: size/dimensions/date/type.
 - `delete_summary.*` — recursive tally of a gallery subtree (images/videos/sub-galleries) +
@@ -268,7 +281,9 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   for 1, row-major 2×2 for 2–4).
 - `tile_thumb.*` — shared tile-thumbnail draw: `ThumbContext{vault,cache,worker,failed}` +
   draw_tile_thumb / tile_thumb_texture / tile_cover_tex. Gallery -> folder + cover montage;
-  image -> aspect-fit thumb; video -> poster + play-badge. `thumb_key_for` pure index lookup.
+  image -> aspect-fit thumb; video -> poster + play-badge. Phase 47: `tile_shows_animated_badge(node)`,
+  `draw_animated_badge(...)` draw an "A" badge top-right for animated GIFs; `tile_can_hover_animate(node)`
+  gates hover animation by badge + dimension budget. `thumb_key_for` pure index lookup.
   Decrypt -> off-thread decode -> GPU upload via shared cache. Reused by GalleryGrid + the
   advanced-search grid view.
 - `waste_threshold.h` — vault-bloat thresholds: `should_display_waste(wasted,file_size)` (true

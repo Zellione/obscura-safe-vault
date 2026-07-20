@@ -28,6 +28,14 @@
 [ Index blobs (in data region) — encrypted, binary-serialised tree ]
 ```
 
+## Index versions
+
+**INDEX_VERSION = 7** (Phase 47): Image nodes carry an `animated u8` flag
+(0=static, 1=animated GIF) after `thumb_length`. v1–v6 blobs read as false.
+Bytes other than 0/1 are rejected on deserialise (not clamped), matching the
+Phase 37 `sort_key` rule. Lazy repair via `Vault::repair_image_animated` heals
+pre-v7 GIFs on first view.
+
 ## Key hierarchy
 
 `KEK = Argon2id(password [‖ keyfile_bytes], salt)` → unwraps a random 32-byte
