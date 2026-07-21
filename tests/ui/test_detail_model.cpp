@@ -14,9 +14,11 @@ namespace {
 // Find a row's value by label across every section; "" when absent.
 std::string row_value(const ui::DetailContent& c, std::string_view label)
 {
-    for (const auto& s : c.sections)
-        for (const auto& r : s.rows)
-            if (r.label == label) return r.value;
+    for (const auto& s : c.sections) {
+        for (const auto& r : s.rows) {
+            if (r.label == label) { return r.value; }
+        }
+    }
     return "";
 }
 
@@ -99,8 +101,8 @@ TEST(detail_favorite_and_animated_markers)
     n.favorite       = true;
     n.meta.animated  = true;
     const auto c = ui::build_node_details(n, {});
-    CHECK(c.subheading.find("favorite") != std::string::npos);
-    CHECK(c.subheading.find("animated") != std::string::npos);
+    CHECK(c.subheading.contains("favorite"));
+    CHECK(c.subheading.contains("animated"));
 }
 
 TEST(detail_no_markers_leaves_subheading_empty)
@@ -114,7 +116,7 @@ TEST(detail_animated_marker_is_image_only)
     IndexNode n = make_video();
     n.favorite = true;
     const auto c = ui::build_node_details(n, {});
-    CHECK(c.subheading.find("animated") == std::string::npos);
+    CHECK(!c.subheading.contains("animated"));
 }
 
 TEST(detail_own_and_inherited_tags_are_separate_sections)
