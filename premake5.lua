@@ -506,6 +506,7 @@ project "osv_tests"
         "src/ui/progress_modal.cpp",
         "src/ui/tag_list_parse.cpp",
         "src/ui/tag_inherit.cpp",
+        "src/ui/tag_category.cpp",
         "src/ui/tag_suggest.cpp",
         "src/ui/tag_overview_model.cpp",
         "src/ui/slideshow_model.cpp",
