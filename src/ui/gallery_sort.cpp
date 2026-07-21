@@ -70,34 +70,44 @@ std::vector<const vault::IndexNode*> sort_children(std::span<const vault::IndexN
     return out;
 }
 
+vault::SortKey effective_sort_key(vault::SortKey gallery_key,
+                                  vault::SortKey vault_default) noexcept
+{
+    using enum vault::SortKey;
+    if (gallery_key != Default) return gallery_key;
+    return vault_default == Default ? Insertion : vault_default;
+}
+
 vault::SortKey next_sort_key(vault::SortKey current) noexcept
 {
     using enum vault::SortKey;
     switch (current) {
-    case Default:    return NameAsc;
+    case Default:   return NameAsc;
     case NameAsc:   return NameDesc;
     case NameDesc:  return DateAsc;
     case DateAsc:   return DateDesc;
     case DateDesc:  return SizeAsc;
     case SizeAsc:   return SizeDesc;
-    case SizeDesc:  return Default;
-    case Insertion: return Default;   // shouldn't appear in UI; treat as Default
+    case SizeDesc:  return Insertion;
+    case Insertion: return Default;
     }
     return Default;   // unreachable for a valid enum value; safe fallback
 }
 
-std::string sort_key_label(vault::SortKey key)
+std::string sort_key_label(vault::SortKey key, vault::SortKey vault_default)
 {
     using enum vault::SortKey;
-    switch (key) {
-    case Default:    return {};
+    if (key == Default && vault_default == Insertion) return {};
+
+    switch (effective_sort_key(key, vault_default)) {
     case NameAsc:   return "Name ↑";
     case NameDesc:  return "Name ↓";
     case DateAsc:   return "Date ↑";
     case DateDesc:  return "Date ↓";
     case SizeAsc:   return "Size ↑";
     case SizeDesc:  return "Size ↓";
-    case Insertion: return {};   // shouldn't appear in UI; treat as Default
+    case Insertion: return "Insertion";
+    case Default:   return {};   // unreachable: effective_sort_key never returns Default
     }
     return {};
 }

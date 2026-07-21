@@ -121,3 +121,41 @@ TEST(vault_settings_survive_compaction)
     REQUIRE(!got.categories.empty());
     CHECK(got.categories.back().name == "studio");
 }
+
+TEST(vault_settings_default_sort_orders_untouched_galleries)
+{
+    TempVault tv;
+    REQUIRE(tv.create_and_unlock() == VaultResult::Ok);
+    REQUIRE(tv.v.create_gallery("b") == VaultResult::Ok);
+    REQUIRE(tv.v.create_gallery("a") == VaultResult::Ok);
+
+    // Insertion default: creation order.
+    auto kids = tv.v.list("");
+    REQUIRE(kids.size() == 2);
+    CHECK(kids[0]->name == "b");
+
+    VaultSettings s = vault::vault_settings(tv.v);
+    s.default_sort = SortKey::NameAsc;
+    REQUIRE(vault::set_vault_settings(tv.v, s) == VaultResult::Ok);
+
+    kids = tv.v.list("");
+    REQUIRE(kids.size() == 2);
+    CHECK(kids[0]->name == "a");        // the vault default now applies
+}
+
+TEST(vault_settings_gallery_override_beats_default)
+{
+    TempVault tv;
+    REQUIRE(tv.create_and_unlock() == VaultResult::Ok);
+    REQUIRE(tv.v.create_gallery("b") == VaultResult::Ok);
+    REQUIRE(tv.v.create_gallery("a") == VaultResult::Ok);
+
+    VaultSettings s = vault::vault_settings(tv.v);
+    s.default_sort = SortKey::NameAsc;
+    REQUIRE(vault::set_vault_settings(tv.v, s) == VaultResult::Ok);
+    REQUIRE(vault::set_gallery_sort(tv.v, "", SortKey::Insertion) == VaultResult::Ok);
+
+    const auto kids = tv.v.list("");
+    REQUIRE(kids.size() == 2);
+    CHECK(kids[0]->name == "b");        // pinned back to import order
+}

@@ -202,7 +202,7 @@ void rebuild_detail(GalleryGrid& g)
     const vault::IndexNode& node = *g.children_[static_cast<size_t>(sel_idx)];
     const std::string node_path =
         g.nav_.path().empty() ? node.name : g.nav_.path() + "/" + node.name;
-    g.detail_.content = build_node_details(node, inherited_tags(g.vault_, node_path));
+    g.detail_.content = build_node_details(node, inherited_tags(g.vault_, node_path), vault::vault_settings(g.vault_).default_sort);
 }
 
 GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
@@ -1103,11 +1103,11 @@ struct FooterStatus {
 // Build the breadcrumb line, appending the active sort indicator once it's
 // non-Manual (Phase 37) — extracted (like draw_footer_status) to keep
 // render()'s cognitive complexity under the cpp:S3776 limit.
-std::string breadcrumb_text(const NavModel& nav, vault::SortKey sort_key)
+std::string breadcrumb_text(const NavModel& nav, vault::SortKey sort_key, vault::SortKey vault_default)
 {
     std::string crumb = "/";
     for (const auto& s : nav.segments()) { crumb += s; crumb += '/'; }
-    if (const auto label = ui::sort_key_label(sort_key); !label.empty())
+    if (const auto label = ui::sort_key_label(sort_key, vault_default); !label.empty())
         crumb += "   Sort: " + label;
     return crumb;
 }
@@ -1348,7 +1348,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     // but the hairline rule marks where the fixed chrome ends and scrolling begins.
     draw_chrome_band(r, bands.header, BG, /*rule_at_bottom*/ true);
 
-    const std::string crumb = breadcrumb_text(nav_, vault::gallery_sort_key(vault_, nav_.path()));
+    const std::string crumb = breadcrumb_text(nav_, vault::gallery_sort_key(vault_, nav_.path()), vault::vault_settings(vault_).default_sort);
     r.draw_text(font_, OX, 40, fit_name(crumb, cW - 2 * OX), TEXT_DIM);
     r.draw_text(font_, OX, 90, "[F1] Help", TEXT_FAINT);
 

@@ -112,7 +112,7 @@ TEST(gallery_sort_ties_are_stable)
     CHECK(names(out) == std::vector<std::string>({"first.jpg", "second.jpg"}));
 }
 
-TEST(gallery_sort_next_sort_key_cycles_through_all_seven_and_wraps)
+TEST(gallery_sort_next_sort_key_cycles_through_all_eight_and_wraps)
 {
     using enum SortKey;
     CHECK(ui::next_sort_key(Default) == NameAsc);
@@ -121,16 +121,52 @@ TEST(gallery_sort_next_sort_key_cycles_through_all_seven_and_wraps)
     CHECK(ui::next_sort_key(DateAsc) == DateDesc);
     CHECK(ui::next_sort_key(DateDesc) == SizeAsc);
     CHECK(ui::next_sort_key(SizeAsc) == SizeDesc);
-    CHECK(ui::next_sort_key(SizeDesc) == Default);   // wraps
+    CHECK(ui::next_sort_key(SizeDesc) == Insertion);
+    CHECK(ui::next_sort_key(Insertion) == Default);   // wraps
 }
 
 TEST(gallery_sort_key_label_empty_for_default_nonempty_otherwise)
 {
-    CHECK_TRUE(ui::sort_key_label(SortKey::Default).empty());
-    CHECK_FALSE(ui::sort_key_label(SortKey::NameAsc).empty());
-    CHECK_FALSE(ui::sort_key_label(SortKey::NameDesc).empty());
-    CHECK_FALSE(ui::sort_key_label(SortKey::DateAsc).empty());
-    CHECK_FALSE(ui::sort_key_label(SortKey::DateDesc).empty());
-    CHECK_FALSE(ui::sort_key_label(SortKey::SizeAsc).empty());
-    CHECK_FALSE(ui::sort_key_label(SortKey::SizeDesc).empty());
+    CHECK_TRUE(ui::sort_key_label(SortKey::Default, SortKey::Insertion).empty());
+    CHECK_FALSE(ui::sort_key_label(SortKey::NameAsc, SortKey::Insertion).empty());
+    CHECK_FALSE(ui::sort_key_label(SortKey::NameDesc, SortKey::Insertion).empty());
+    CHECK_FALSE(ui::sort_key_label(SortKey::DateAsc, SortKey::Insertion).empty());
+    CHECK_FALSE(ui::sort_key_label(SortKey::DateDesc, SortKey::Insertion).empty());
+    CHECK_FALSE(ui::sort_key_label(SortKey::SizeAsc, SortKey::Insertion).empty());
+    CHECK_FALSE(ui::sort_key_label(SortKey::SizeDesc, SortKey::Insertion).empty());
+}
+
+TEST(gallery_sort_effective_key_resolves_default)
+{
+    using vault::SortKey;
+    CHECK(ui::effective_sort_key(SortKey::Default, SortKey::NameAsc) == SortKey::NameAsc);
+    CHECK(ui::effective_sort_key(SortKey::Default, SortKey::Insertion) == SortKey::Insertion);
+    // An explicit gallery key always wins.
+    CHECK(ui::effective_sort_key(SortKey::SizeDesc, SortKey::NameAsc) == SortKey::SizeDesc);
+    CHECK(ui::effective_sort_key(SortKey::Insertion, SortKey::NameAsc) == SortKey::Insertion);
+    // A vault default of Default is nonsense; it must degrade to Insertion, not recurse.
+    CHECK(ui::effective_sort_key(SortKey::Default, SortKey::Default) == SortKey::Insertion);
+}
+
+TEST(gallery_sort_cycle_covers_all_eight)
+{
+    using vault::SortKey;
+    SortKey k = SortKey::Default;
+    std::vector<SortKey> seen;
+    for (int i = 0; i < 8; ++i) { seen.push_back(k); k = ui::next_sort_key(k); }
+    CHECK(k == SortKey::Default);                 // wrapped exactly once
+    CHECK(seen == std::vector<SortKey>({SortKey::Default, SortKey::NameAsc, SortKey::NameDesc,
+                                        SortKey::DateAsc, SortKey::DateDesc, SortKey::SizeAsc,
+                                        SortKey::SizeDesc, SortKey::Insertion}));
+}
+
+TEST(gallery_sort_label_hides_default_only_when_vault_default_is_insertion)
+{
+    using vault::SortKey;
+    // Untouched vault: the breadcrumb looks exactly as it did before Phase 49.
+    CHECK(ui::sort_key_label(SortKey::Default, SortKey::Insertion).empty());
+    // A vault default IS in force — say so rather than looking unsorted.
+    CHECK(ui::sort_key_label(SortKey::Default, SortKey::NameAsc) == "Name ↑");
+    CHECK(ui::sort_key_label(SortKey::Insertion, SortKey::NameAsc) == "Insertion");
+    CHECK(ui::sort_key_label(SortKey::SizeDesc, SortKey::NameAsc) == "Size ↓");
 }

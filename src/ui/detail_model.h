@@ -5,6 +5,8 @@
 #include <string_view>
 #include <vector>
 
+#include "vault/index.h"
+
 namespace vault { struct IndexNode; }
 
 // Pure content model for the gallery detail panel (Phase 48). Turns an index
@@ -43,9 +45,11 @@ void append_tag_sections(DetailContent&               out,
 
 // Describe one node. `inherited` is the ancestor-gallery tag cascade for the
 // node (see ui::inherited_tags); pass an empty span when there is none. A
-// section with nothing to say is omitted rather than emitted empty.
+// section with nothing to say is omitted rather than emitted empty. `vault_default`
+// is the vault-wide default sort order (Phase 49).
 [[nodiscard]] DetailContent build_node_details(const vault::IndexNode&      node,
-                                               std::span<const std::string> inherited);
+                                               std::span<const std::string> inherited,
+                                               vault::SortKey               vault_default);
 
 // Describe a multi-item selection: per-kind counts, summed size, and the tags
 // every selected item carries. Selected items are always siblings, so they

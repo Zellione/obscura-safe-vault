@@ -70,7 +70,7 @@ void FavoritesScreen::rebuild_detail()
         return;
     }
     const auto& hit = favs_[static_cast<size_t>(idx)];
-    detail_.content = build_node_details(*hit.node, inherited_tags(vault_, hit.path));
+    detail_.content = build_node_details(*hit.node, inherited_tags(vault_, hit.path), vault::vault_settings(vault_).default_sort);
 }
 
 void FavoritesScreen::on_enter()

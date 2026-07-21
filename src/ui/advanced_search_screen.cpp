@@ -218,7 +218,7 @@ void AdvancedSearchScreen::rebuild_detail()
         return;
     }
     const auto& hit = result_view_.get_results()[static_cast<size_t>(idx)];
-    detail_.content = build_node_details(*hit.node, inherited_tags(vault_, hit.path));
+    detail_.content = build_node_details(*hit.node, inherited_tags(vault_, hit.path), vault::vault_settings(vault_).default_sort);
 }
 
 void AdvancedSearchScreen::start_rename()

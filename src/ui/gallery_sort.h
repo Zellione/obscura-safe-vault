@@ -26,11 +26,20 @@ namespace ui {
 sort_children(std::span<const vault::IndexNode*> nodes, vault::SortKey key);
 
 // Cycle to the next sort key in the fixed UI order:
-// Manual -> NameAsc -> NameDesc -> DateAsc -> DateDesc -> SizeAsc -> SizeDesc -> Manual.
+// Default -> NameAsc -> NameDesc -> DateAsc -> DateDesc -> SizeAsc -> SizeDesc -> Insertion -> Default.
 [[nodiscard]] vault::SortKey next_sort_key(vault::SortKey current) noexcept;
 
-// Short footer label for a sort key ("Name ↑", "Date ↓", ...). Empty for
-// Manual — callers use this to hide the footer sort indicator in that case.
-[[nodiscard]] std::string sort_key_label(vault::SortKey key);
+// Resolve a gallery's stored key against the vault-wide default (Phase 49).
+// `Default` means "follow the vault"; every other key wins over it. The result
+// is never `Default`, so it is always safe to hand to sort_children(). A vault
+// default that is itself `Default` (only reachable from a hand-edited blob)
+// degrades to `Insertion`.
+[[nodiscard]] vault::SortKey effective_sort_key(vault::SortKey gallery_key,
+                                                vault::SortKey vault_default) noexcept;
+
+// Breadcrumb/HUD label. Empty ONLY for a gallery at `Default` in a vault whose
+// default is `Insertion` — i.e. a vault nobody has configured, which must look
+// exactly as it did before Phase 49. Otherwise the EFFECTIVE key's label.
+[[nodiscard]] std::string sort_key_label(vault::SortKey key, vault::SortKey vault_default);
 
 } // namespace ui
