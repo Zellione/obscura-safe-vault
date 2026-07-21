@@ -8,9 +8,14 @@ void SelectionModel::toggle(int i)
         items_.erase(it);
     else
         items_.insert(i);
+    ++revision_;
 }
 
-void SelectionModel::clear() { items_.clear(); }
+void SelectionModel::clear()
+{
+    items_.clear();
+    ++revision_;
+}
 
 bool SelectionModel::contains(int i) const { return items_.contains(i); }
 

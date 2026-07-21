@@ -6,6 +6,7 @@
 // gallery's child list). The grid clears it whenever the navigated path
 // changes, so indices are only ever interpreted against the current listing.
 
+#include <cstdint>
 #include <set>
 #include <vector>
 
@@ -26,8 +27,14 @@ public:
     // Selected indices in ascending order.
     [[nodiscard]] std::vector<int> indices() const;
 
+    // Monotonic change counter, bumped by every mutation. Lets a consumer cache
+    // work derived from the selection without comparing the set itself — count()
+    // is not sufficient, since {1} and {2} are both size 1.
+    [[nodiscard]] uint64_t revision() const noexcept { return revision_; }
+
 private:
     std::set<int> items_;
+    uint64_t      revision_ = 0;
 };
 
 } // namespace ui
