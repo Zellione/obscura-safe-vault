@@ -44,7 +44,7 @@ struct TempVault {
         fs::remove(path, ec);
     }
 
-    std::string str() const { return path.string(); }
+    [[nodiscard]] std::string str() const { return path.string(); }
 
     // Create and unlock a vault for testing
     VaultResult create_and_unlock()
@@ -82,7 +82,7 @@ TEST(vault_settings_persist_across_lock_unlock)
 
     VaultSettings s = vault::vault_settings(tv.v);
     s.default_sort = SortKey::NameAsc;
-    s.categories.push_back({"studio", 11});
+    s.categories.push_back({.name = "studio", .swatch = 11});
     CHECK(vault::set_vault_settings(tv.v, s) == VaultResult::Ok);
 
     tv.relock_and_unlock();
@@ -107,7 +107,7 @@ TEST(vault_settings_survive_compaction)
 
     VaultSettings s = vault::vault_settings(tv.v);
     s.default_sort = SortKey::DateDesc;
-    s.categories.push_back({"studio", 11});
+    s.categories.push_back({.name = "studio", .swatch = 11});
     CHECK(vault::set_vault_settings(tv.v, s) == VaultResult::Ok);
 
     CHECK(tv.v.compact() == VaultResult::Ok);
