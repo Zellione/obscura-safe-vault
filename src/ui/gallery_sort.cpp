@@ -35,7 +35,9 @@ std::vector<const vault::IndexNode*> sort_children(std::span<const vault::IndexN
 
     // Default never reaches here (callers resolve it via effective_sort_key),
     // and Insertion is a genuine no-op: keep the folders-first partition only.
-    if (key == vault::SortKey::Default || key == vault::SortKey::Insertion) return out;
+    if (key == vault::SortKey::Default || key == vault::SortKey::Insertion) {
+        return out;
+    }
 
     using Node = const vault::IndexNode*;
     std::function<bool(Node, Node)> less;
@@ -74,7 +76,9 @@ vault::SortKey effective_sort_key(vault::SortKey gallery_key,
                                   vault::SortKey vault_default) noexcept
 {
     using enum vault::SortKey;
-    if (gallery_key != Default) return gallery_key;
+    if (gallery_key != Default) {
+        return gallery_key;
+    }
     return vault_default == Default ? Insertion : vault_default;
 }
 
@@ -97,7 +101,9 @@ vault::SortKey next_sort_key(vault::SortKey current) noexcept
 std::string sort_key_label(vault::SortKey key, vault::SortKey vault_default)
 {
     using enum vault::SortKey;
-    if (key == Default && vault_default == Insertion) return {};
+    if (key == Default && vault_default == Insertion) {
+        return {};
+    }
 
     switch (effective_sort_key(key, vault_default)) {
     case NameAsc:   return "Name ↑";
