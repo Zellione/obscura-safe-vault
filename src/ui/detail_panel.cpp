@@ -11,19 +11,19 @@
 namespace ui {
 namespace {
 
-constexpr float PAD          = 16.0F;   // inner left/right padding
-constexpr float ROW_H        = 24.0F;   // one label/value or bullet line
-constexpr float HEADING_H    = 34.0F;
-constexpr float SUBHEADING_H = 24.0F;
-constexpr float SECTION_GAP  = 18.0F;   // space above a section title
-constexpr float TITLE_H      = 22.0F;
+constexpr float PAD          = 16.0f;   // inner left/right padding
+constexpr float ROW_H        = 24.0f;   // one label/value or bullet line
+constexpr float HEADING_H    = 34.0f;
+constexpr float SUBHEADING_H = 24.0f;
+constexpr float SECTION_GAP  = 18.0f;   // space above a section title
+constexpr float TITLE_H      = 22.0f;
 
 // Draw one line if it falls inside `rect`; always returns the next y.
 float line(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& rect, float x, float y,
            float height, std::string_view text, gfx::Color c)
 {
     if (y + height > rect.y && y < rect.y + rect.h) {
-        r.draw_text(font, x, y, fit_text(font, text, rect.w - (2.0F * PAD)), c);
+        r.draw_text(font, x, y, fit_text(font, text, rect.w - (2.0f * PAD)), c);
     }
     return y + height;
 }
@@ -33,10 +33,10 @@ float line(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& rect, float 
 float detail_panel_width(bool open, float window_width) noexcept
 {
     if (!open) {
-        return 0.0F;
+        return 0.0f;
     }
     if (window_width < DETAIL_PANEL_MIN_WINDOW) {
-        return 0.0F;
+        return 0.0f;
     }
     return DETAIL_PANEL_WIDTH;
 }
@@ -47,7 +47,7 @@ float draw_detail_panel(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect&
     using namespace gfx::theme;
 
     r.draw_rect(rect, SURFACE);
-    r.draw_rect({.x = rect.x, .y = rect.y, .w = 1.0F, .h = rect.h}, BORDER);   // hairline against the grid
+    r.draw_rect({.x = rect.x, .y = rect.y, .w = 1.0f, .h = rect.h}, BORDER);   // hairline against the grid
 
     const float x = rect.x + PAD;
     float       y = rect.y + PAD - scroll;
@@ -83,7 +83,7 @@ bool handle_detail_panel_scroll(const SDL_KeyboardEvent& key, DetailPanelState& 
         return false;
     }
     if (key.key == SDLK_UP) {
-        st.scroll = std::max(0.0F, st.scroll - DETAIL_PANEL_SCROLL_STEP);
+        st.scroll = std::max(0.0f, st.scroll - DETAIL_PANEL_SCROLL_STEP);
         return true;
     }
     if (key.key == SDLK_DOWN) {
