@@ -54,11 +54,14 @@ struct TempVault {
     }
 
     // Lock and then unlock the vault (simulates a reopen cycle)
-    void relock_and_unlock()
+    VaultResult relock_and_unlock()
     {
         v.lock();
-        (void)Vault::open(str(), v);
-        (void)v.unlock(bytes("testpw"), {});
+        auto res = Vault::open(str(), v);
+        if (res != VaultResult::Ok) {
+            return res;
+        }
+        return v.unlock(bytes("testpw"), {});
     }
 };
 
@@ -85,7 +88,7 @@ TEST(vault_settings_persist_across_lock_unlock)
     s.categories.push_back({.name = "studio", .swatch = 11});
     CHECK(vault::set_vault_settings(tv.v, s) == VaultResult::Ok);
 
-    tv.relock_and_unlock();
+    REQUIRE(tv.relock_and_unlock() == VaultResult::Ok);
     const auto& got = vault::vault_settings(tv.v);
     CHECK(got.default_sort == SortKey::NameAsc);
     REQUIRE(got.categories.size() == 9);
@@ -112,7 +115,7 @@ TEST(vault_settings_survive_compaction)
 
     CHECK(tv.v.compact() == VaultResult::Ok);
 
-    tv.relock_and_unlock();
+    REQUIRE(tv.relock_and_unlock() == VaultResult::Ok);
     const auto& got = vault::vault_settings(tv.v);
     CHECK(got.default_sort == SortKey::DateDesc);
     REQUIRE(!got.categories.empty());

@@ -919,6 +919,7 @@ std::vector<const IndexNode*> Vault::list(std::string_view gallery_path) const
     if (!g) return out;
     out.reserve(g->children.size());
     for (const auto& c : g->children) out.push_back(&c);
+    // Phase 49 Task 7: resolve via ui::effective_sort_key
     return ui::sort_children(out, g->sort_key);
 }
 
