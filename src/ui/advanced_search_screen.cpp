@@ -12,6 +12,7 @@
 #include "gfx/texture_cache.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "ui/grid_layout.h"
 #include "ui/nav_model.h"
 #include "ui/tile_thumb.h"
 #include "ui/widgets.h"
@@ -117,13 +118,17 @@ void draw_dropdown(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<std
 
 } // namespace
 
+bool current_detail_open(const AdvancedSearchScreen& s) { return s.detail_.panel.open; }
+
 AdvancedSearchScreen::AdvancedSearchScreen(gfx::Window& win, gfx::FontAtlas& font,
                                            vault::Vault& vault, gfx::TextureCache& cache,
-                                           AdvancedSearchState& session)
+                                           AdvancedSearchState& session,
+                                           bool initial_detail_open)
     : win_(win), font_(font), vault_(vault), cache_(cache), session_(session), search_(vault_),
       result_view_(vault_, win_, font_, cache_),
       saved_panel_(search_, font_, status_, saved_)
 {
+    detail_.panel.open = initial_detail_open;
     // Wire up the result view's request callback to navigate to opened results
     result_view_.set_request_callback([this](int nav_kind, const std::string& path, int idx) {
         request(static_cast<NavKind>(nav_kind), path, idx);
@@ -194,6 +199,26 @@ void AdvancedSearchScreen::rerun()
 {
     auto results = search_.run_search(query_);
     result_view_.update_results(results);
+    detail_.key.clear();   // SearchHit::node pointers are now invalid
+}
+
+void AdvancedSearchScreen::rebuild_detail()
+{
+    if (!detail_.panel.open) { return; }
+    const int  idx   = result_view_.get_cursor();
+    const auto count = static_cast<int>(result_view_.get_results().size());
+
+    std::string key = std::format("{}|{}", idx, count);
+    if (key == detail_.key) { return; }
+    detail_.key = std::move(key);
+    detail_.panel.scroll = 0.0f;
+
+    if (idx < 0 || idx >= count || result_view_.get_results()[static_cast<size_t>(idx)].node == nullptr) {
+        detail_.content = DetailContent{};
+        return;
+    }
+    const auto& hit = result_view_.get_results()[static_cast<size_t>(idx)];
+    detail_.content = build_node_details(*hit.node, inherited_tags(vault_, hit.path));
 }
 
 void AdvancedSearchScreen::start_rename()
@@ -262,6 +287,7 @@ void AdvancedSearchScreen::update(double /*dt*/)
         status_ = std::move(s);
         rerun();   // the renamed result's new name/path must show up
     }
+    rebuild_detail();
     mark_dirty();   // mark screen dirty since thumbnails changed
 }
 
@@ -322,6 +348,13 @@ void AdvancedSearchScreen::handle_key(const SDL_KeyboardEvent& key)
 
     // Handle save mode keys (Escape/Enter/Backspace)
     if (saved_panel_.active_buffer()) { handle_save_mode_key(key); return; }
+
+    if (handle_detail_panel_scroll(key, detail_.panel)) { return; }
+    if (key.key == SDLK_D && (key.mod & SDL_KMOD_CTRL) != 0) {
+        detail_.panel.open = !detail_.panel.open;
+        detail_.key.clear();
+        return;
+    }
 
     if ((key.mod & SDL_KMOD_CTRL) != 0 && key.key == SDLK_S) {
         saved_panel_.begin_naming();
@@ -654,16 +687,19 @@ void AdvancedSearchScreen::render(gfx::Renderer& r)
     const auto W = static_cast<float>(win_.width());
     const auto H = static_cast<float>(win_.height());
 
+    // Reserve space for the detail panel; use the reduced width for all layout
+    const auto cW = W - detail_panel_width(detail_.panel.open, W);
+
     r.draw_text(font_, PAD, 36, "Advanced Search", TEXT);
     r.draw_text(font_, PAD, 74, "[F1] Help", TEXT_FAINT);
 
-    const float colW = (W - 2 * PAD) / 3.0f - 16;
+    const float colW = (cW - 2 * PAD) / 3.0f - 16;
     render_builder(r, PAD, TOP, colW);
     const float mx = PAD + colW + 24;
     render_results(r, mx, colW);
     const bool saved_hot = (focus_ == Focus::Saved && !saved_panel_.active_buffer() && !clearing_);
     const float saved_x = mx + colW + 24;
-    saved_panel_.render(r, saved_x, W - saved_x - PAD, saved_hot);
+    saved_panel_.render(r, saved_x, cW - saved_x - PAD, saved_hot);
 
     if (saved_panel_.active_buffer()) {
         r.draw_rect({0, 0, W, H}, {0, 0, 0, 180}, /*filled*/ true);
@@ -683,6 +719,13 @@ void AdvancedSearchScreen::render(gfx::Renderer& r)
         r.draw_text(font_, box.x + 16, box.y + 44, "[Y] Yes      [N] No", TEXT);
     }
     if (!status_.empty()) r.draw_text(font_, PAD, H - 24, status_, TEXT_FAINT);
+
+    if (const float pw = detail_panel_width(detail_.panel.open, W);
+        pw > 0.0f) {
+        const SDL_FRect panel{W - pw, 0.0f, pw, H};
+        detail_.content_h = draw_detail_panel(r, font_, panel, detail_.content, detail_.panel.scroll);
+        detail_.panel.scroll = ui::clamp_scroll(detail_.panel.scroll, detail_.content_h, H);
+    }
 
     rename_.render(r, font_, W, H);
 }
@@ -797,6 +840,7 @@ std::vector<ui::HelpGroup> AdvancedSearchScreen::help_groups() const
         {"Results & saved searches", {
             {"Ctrl+S", "Save search"}, {"Ctrl+L", "Toggle list/grid view"},
             {"Ctrl+R", "Clear query"}, {"R", "Rename focused result"},
+            {"Ctrl+D", "Toggle the detail panel"},
         }},
         {"Navigate", {{"Esc", "Back"}}},
     };

@@ -37,6 +37,7 @@ struct AdvancedSearchState {
     int           cur_saved  = 0;
 
     ResultView    view = ResultView::List;
+    bool          detail_open = false;   // Phase 48: detail panel state
 };
 
 } // namespace ui

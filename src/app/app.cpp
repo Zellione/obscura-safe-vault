@@ -198,7 +198,7 @@ void App::to_advanced_search()
 {
     state_  = State::Browsing;
     screen_ = std::make_unique<ui::AdvancedSearchScreen>(window_, font_, *active_, *cache_,
-                                                         adv_session_);
+                                                         adv_session_, adv_session_.detail_open);
     screen_->on_enter();
 }
 
@@ -356,6 +356,8 @@ void App::capture_session_state()
         ui::capture_video_resume(*viewer, session_);
     } else if (const auto* fav = dynamic_cast<const ui::FavoritesScreen*>(screen_.get())) {
         session_.detail_open = ui::current_detail_open(*fav);
+    } else if (const auto* adv = dynamic_cast<const ui::AdvancedSearchScreen*>(screen_.get())) {
+        adv_session_.detail_open = ui::current_detail_open(*adv);
     }
 }
 
