@@ -160,7 +160,7 @@ void App::to_favorite_images()
 {
     state_  = State::Browsing;
     screen_ = std::make_unique<ui::FavoritesImages>(
-        window_, font_, *active_, *cache_, registry_, active_path_);
+        window_, font_, *active_, *cache_, registry_, active_path_, session_.detail_open);
     screen_->on_enter();
 }
 
@@ -168,7 +168,7 @@ void App::to_favorite_galleries()
 {
     state_  = State::Browsing;
     screen_ = std::make_unique<ui::FavoritesGalleries>(
-        window_, font_, *active_, registry_, active_path_);
+        window_, font_, *active_, registry_, active_path_, session_.detail_open);
     screen_->on_enter();
 }
 
@@ -214,7 +214,7 @@ void App::to_tag_galleries(const std::string& tag)
 {
     state_  = State::Browsing;
     screen_ = std::make_unique<ui::TagGalleries>(
-        window_, font_, *active_, registry_, active_path_, tag);
+        window_, font_, *active_, registry_, active_path_, tag, session_.detail_open);
     screen_->on_enter();
 }
 
@@ -222,7 +222,7 @@ void App::to_tag_images(const std::string& tag)
 {
     state_  = State::Browsing;
     screen_ = std::make_unique<ui::TagImages>(
-        window_, font_, *active_, *cache_, registry_, active_path_, tag);
+        window_, font_, *active_, *cache_, registry_, active_path_, tag, session_.detail_open);
     screen_->on_enter();
 }
 
@@ -354,6 +354,8 @@ void App::capture_session_state()
     } else if (const auto* viewer = dynamic_cast<const ui::ImageViewer*>(screen_.get())) {
         session_.strip_side = ui::current_strip_side(*viewer);
         ui::capture_video_resume(*viewer, session_);
+    } else if (const auto* fav = dynamic_cast<const ui::FavoritesScreen*>(screen_.get())) {
+        session_.detail_open = ui::current_detail_open(*fav);
     }
 }
 
