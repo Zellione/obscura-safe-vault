@@ -205,6 +205,11 @@ void FavoritesScreen::render(gfx::Renderer& r)
     cols_ = grid_columns(cW - 2 * OX, CELL, GAP);
     const auto [first_idx, last_idx] = grid_visible_range(
         scroll_, CELL, GAP, OY, H, cols_, static_cast<int>(favs_.size()));
+    // Clip scrolled tiles to below the fixed header: without this a tile scrolled
+    // up past OY paints straight over the title / [F1] Help / status lines.
+    const SDL_Rect content_clip{0, static_cast<int>(OY), static_cast<int>(W),
+                                static_cast<int>(H - OY)};
+    SDL_SetRenderClipRect(r.sdl(), &content_clip);
     for (int i = first_idx; i <= last_idx; ++i) {
         if (i < 0 || i >= static_cast<int>(favs_.size())) continue;
         SDL_FRect cellr = grid_cell_rect(i, grid_spec(cW, cols_));
@@ -232,6 +237,10 @@ void FavoritesScreen::render(gfx::Renderer& r)
             r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
         }
     }
+    SDL_SetRenderClipRect(r.sdl(), nullptr);
+
+    // Hairline marking where the fixed header ends and the scrolling grid begins.
+    r.draw_rect({0.0f, OY - 1.0f, cW, 1.0f}, BORDER);
 
     if (!status_.empty()) r.draw_text(font_, OX, 118, status_, TEXT_FAINT);
 

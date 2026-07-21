@@ -485,6 +485,7 @@ project "osv_tests"
         "src/ui/scroll_model.cpp",
         "src/ui/gallery_picker.cpp",
         "src/ui/grid_layout.cpp",
+        "src/ui/chrome_layout.cpp",
         "src/ui/meta_format.cpp",
         "src/ui/selection_model.cpp",
         "src/ui/search_model.cpp",

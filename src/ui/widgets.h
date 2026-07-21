@@ -43,6 +43,15 @@ void draw_button(gfx::Renderer& r, gfx::FontAtlas& font, const Button& b,
 void draw_text_field(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& box,
                      std::string_view shown, bool focused);
 
+// Fill one of the reserved chrome bands from ui/chrome_layout.h with an OPAQUE
+// `fill`, plus a hairline rule along the edge facing the content area
+// (`rule_at_bottom` for a header band, false for a footer band). Opaque is the
+// point: a translucent band lets the image or tiles behind it wash the band's
+// text out. No-op for an empty band, so a caller can pass a collapsed rect
+// (e.g. the viewer's chrome-free fullscreen bands) unconditionally.
+void draw_chrome_band(gfx::Renderer& r, const SDL_FRect& band, gfx::Color fill,
+                      bool rule_at_bottom);
+
 // Hover/active state for a button under the mouse. `active` (pressed) requires
 // the cursor to be over the button while the mouse button is held down.
 struct ButtonState { bool hover = false; bool active = false; };
