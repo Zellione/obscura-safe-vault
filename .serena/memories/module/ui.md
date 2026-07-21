@@ -288,7 +288,7 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   (gfx must not depend on ui) — both sites carry SYNC comments; keep in sync on geometry changes.
 - `scroll_model.*` — fill-width continuous-scroll maths.
 - `meta_format.*` — list-view metadata formatting: size/dimensions/date/type. Phase 48: added
-  `video_container_name(VideoCodec)` returning container label ("MP4"/"MKV"/"-" for unknown).
+  `video_container_name(vault::VideoContainer)` -> "MP4"/"MKV"/"-" for unknown.
 - `delete_summary.*` — recursive tally of a gallery subtree (images/videos/sub-galleries) +
   plural-aware format for the Del confirm popup. Phase 48: `SubtreeCounts` gained `uint64_t bytes`,
   summing descendant `orig_size`. GalleryGrid Del removes the focused image/video

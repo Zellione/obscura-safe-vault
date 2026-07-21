@@ -35,7 +35,8 @@ whichever screen is active. Close with `Esc` or `Q`.
 ## Detail panel (Phase 48)
 Toggleable right-edge panel on the gallery grid, the favorites/tag screens, and
 advanced search. `D` toggles it (`Ctrl+D` on advanced search, where bare letters
-go to the query buffer); `Ctrl+Up`/`Ctrl+Down` and the wheel scroll it. Opening
+go to the query buffer); `Ctrl+Up`/`Ctrl+Down` scroll it (keyboard only — the
+mouse wheel still scrolls the grid, not the panel). Opening
 it reflows the grid into the reduced width rather than overlaying tiles; below a
 640 px window it stays hidden. Shows the focused node's name, type/codec,
 dimensions, size, date, own tags and the inherited cascade; a gallery shows a
