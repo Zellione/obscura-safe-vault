@@ -4,7 +4,7 @@
 showing metadata for the focused node: name, type/codec, dimensions, size, date,
 and own + inherited tags; a recursive tally and total size for galleries; and an
 aggregate summary for multi-selections. Opens/closes via `D` (`Ctrl+D` on advanced
-search); `Ctrl+Up`/`Ctrl+Down` scroll; and closes automatically below 640 px window
+search); `Ctrl+Up`/`Ctrl+Down` and the mouse wheel over the panel scroll; and closes automatically below 640 px window
 width to preserve browsing space.
 
 ### Completed work
@@ -21,7 +21,8 @@ width to preserve browsing space.
   returns panel width (0 when closed OR window width < 640 px; otherwise 280 px);
   `draw_detail_panel(...)` renders the panel, returns content height for scroll
   clamping, culls rows to the window rect, and elides every vault string via
-  `ui::fit_text`; `handle_detail_panel_scroll` handles `Ctrl+Up`/`Ctrl+Down`
+  `ui::fit_text`; `handle_detail_panel_scroll` handles `Ctrl+Up`/`Ctrl+Down`, and the pure
+   `detail_panel_hit` / `scroll_detail_panel` pair backs mouse-wheel scrolling
   scrolling. Hosted by GalleryGrid, FavoritesScreen (covers all four subclasses:
   FavoritesImages, FavoritesGalleries, TagImages, TagGalleries), and
   AdvancedSearchScreen. Unit-tested (5 tests).
@@ -56,12 +57,12 @@ width to preserve browsing space.
 - `premake5.lua` changed — `detail_model.cpp` and `detail_panel.cpp` added to
   the test-build file list (`osv_tests`).
 
-Test count: 998 → 1032.
+Test count: 998 → 1040.
 
 ### Acceptance criterion
 - The detail panel toggles on GalleryGrid and all four favorites/tag screens via `D`.
 - The detail panel toggles on AdvancedSearchScreen via `Ctrl+D` (bare `D` types into the query).
-- The detail panel scrolls within itself via `Ctrl+Up` and `Ctrl+Down`.
+- The detail panel scrolls within itself via `Ctrl+Up`/`Ctrl+Down`, and via the mouse wheel while the cursor is over the panel (the grid does not also scroll).
 - Opening the detail panel reflows the grid into the reduced width rather than
   overlaying tiles; closing it restores full width.
 - The detail panel stays hidden below a 640 px window width, preserving full grid
@@ -73,7 +74,7 @@ Test count: 998 → 1032.
   encrypted size, and the case-insensitive intersection of selected items' own
   tags (or "no shared tags" if the intersection is empty).
 - The open/closed state is session-global and persists across screen transitions.
-- `scripts/test.sh` green (1032 tests).
+- `scripts/test.sh` green (1040 tests).
 - `scripts/test.sh --asan` clean (no memory/UB errors).
 
 ### Follow-ups

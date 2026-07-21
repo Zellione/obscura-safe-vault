@@ -273,7 +273,9 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `detail_panel.*` (Phase 48) — right-edge panel: `DetailPanelState{open,scroll}`,
   pure `detail_panel_width(open,window_w)` (0 when closed OR window < 640 px),
   `draw_detail_panel(...)` (returns content height for scroll clamping; culls to rect,
-  fit_text-elides every vault string), `handle_detail_panel_scroll` (Ctrl+Up/Down).
+  fit_text-elides every vault string), `handle_detail_panel_scroll` (Ctrl+Up/Down) + pure `detail_panel_hit(open,window_w,mouse_x)`
+  (region derived from detail_panel_width, so it cannot disagree with the reserved strip) and
+  `scroll_detail_panel(st,wheel_y)` (clamps at 0 only; the host applies the upper clamp).
   Hosted by GalleryGrid, FavoritesScreen (covers all 4 subclasses), AdvancedSearchScreen.
 - `gif_repair.*` (Phase 47) — `maybe_repair_gif_animated(...)` + `Vault::repair_image_animated(path,bool)`:
   lazy bidirectional healing for GIFs stored before Phase 47, persisted via the same crash-safe
