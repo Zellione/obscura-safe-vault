@@ -1,5 +1,6 @@
 #include "index.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "byte_io.h"
@@ -275,41 +276,155 @@ bool read_saved_searches(ByteReader& r, std::vector<SavedSearch>& searches)
     return true;
 }
 
+// Case-insensitive ASCII equality for category names. Category names are opaque
+// UTF-8; only ASCII case is folded, which is all the built-in categories need.
+bool category_name_eq(std::string_view a, std::string_view b)
+{
+    if (a.size() != b.size()) return false;
+    auto lower = [](unsigned char c) {
+        return c >= 'A' && c <= 'Z' ? static_cast<char>(c + 32) : static_cast<char>(c);
+    };
+    for (size_t i = 0; i < a.size(); ++i)
+        if (lower(static_cast<unsigned char>(a[i])) != lower(static_cast<unsigned char>(b[i])))
+            return false;
+    return true;
+}
+
+// Write the Phase 49 settings block: default_sort u8, tiles_show_tags u8,
+// cat_count u16, then per-entry { name (u16 len + bytes), swatch u8 }. Counts,
+// lengths and the swatch are clamped so a pathological in-memory value can't
+// emit a blob its own reader would reject.
+void write_settings(ByteWriter& w, const VaultSettings& s)
+{
+    w.u8(std::to_underlying(s.default_sort));
+    w.u8(s.tiles_show_tags ? 1 : 0);
+
+    const uint16_t count = s.categories.size() > INDEX_MAX_TAG_CATEGORIES
+                               ? INDEX_MAX_TAG_CATEGORIES
+                               : static_cast<uint16_t>(s.categories.size());
+    w.u16(count);
+    for (uint16_t i = 0; i < count; ++i) {
+        const std::string& name = s.categories[i].name;
+        const uint16_t name_len = name.size() > INDEX_MAX_CATEGORY_BYTES
+                                      ? INDEX_MAX_CATEGORY_BYTES
+                                      : static_cast<uint16_t>(name.size());
+        w.u16(name_len);
+        w.bytes(std::span<const uint8_t>(
+            reinterpret_cast<const uint8_t*>(name.data()), name_len));
+        const uint8_t sw = s.categories[i].swatch;
+        w.u8(sw < TAG_SWATCH_COUNT ? sw : 0);
+    }
+}
+
+// Read the settings block (v8+). Every field is bounds-checked BEFORE any
+// allocation, and an out-of-range value is REJECTED, not clamped (the Phase 37 /
+// Phase 47 rule). Duplicate category names are dropped case-insensitively,
+// keeping the first occurrence's casing and swatch.
+bool read_settings(ByteReader& r, VaultSettings& s)
+{
+    s.categories.clear();
+
+    const uint8_t sort = r.u8();
+    if (!r.ok() || sort > std::to_underlying(SortKey::Insertion)) return false;
+    s.default_sort = static_cast<SortKey>(sort);
+
+    const uint8_t tiles = r.u8();
+    if (!r.ok() || tiles > 1) return false;
+    s.tiles_show_tags = (tiles == 1);
+
+    const uint16_t count = r.u16();
+    if (!r.ok() || count > INDEX_MAX_TAG_CATEGORIES) return false;  // bound before alloc
+    for (uint16_t i = 0; i < count; ++i) {
+        const uint16_t name_len = r.u16();
+        if (!r.ok() || name_len > INDEX_MAX_CATEGORY_BYTES) return false;
+        TagCategory c;
+        c.name.resize(name_len);
+        if (name_len > 0) {
+            r.bytes(std::span<uint8_t>(reinterpret_cast<uint8_t*>(c.name.data()), name_len));
+            if (!r.ok()) return false;
+        }
+        c.swatch = r.u8();
+        if (!r.ok() || c.swatch >= TAG_SWATCH_COUNT) return false;
+
+        const bool dupe = std::ranges::any_of(s.categories, [&c](const TagCategory& e) {
+            return category_name_eq(e.name, c.name);
+        });
+        if (!dupe) s.categories.push_back(std::move(c));
+    }
+    return true;
+}
+
 } // namespace
+
+VaultSettings VaultSettings::seeded()
+{
+    // The nhentai-style metadata categories, each on a distinct swatch. Users
+    // add, rename and remove rows freely from the settings overlay.
+    VaultSettings s;
+    s.categories = {
+        {"artist", 0}, {"character", 1}, {"parody", 2},   {"group", 3},
+        {"language", 4}, {"series", 5},  {"male", 6},     {"female", 7},
+    };
+    return s;
+}
 
 void serialize_index(const IndexNode& root, std::vector<uint8_t>& out)
 {
-    serialize_index(root, {}, out);
+    serialize_index(root, {}, VaultSettings{}, out);
 }
 
 void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& searches,
                      std::vector<uint8_t>& out)
+{
+    serialize_index(root, searches, VaultSettings{}, out);
+}
+
+void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& searches,
+                     const VaultSettings& settings, std::vector<uint8_t>& out)
 {
     out.clear();
     ByteWriter w(out);
     w.u8(INDEX_VERSION);
     write_node(w, root);
     write_saved_searches(w, searches);
+    write_settings(w, settings);
 }
 
 bool deserialize_index(std::span<const uint8_t> in, IndexNode& out)
 {
-    std::vector<SavedSearch> ignored;
-    return deserialize_index(in, out, ignored);
+    std::vector<SavedSearch> ignored_s;
+    VaultSettings            ignored_v;
+    return deserialize_index(in, out, ignored_s, ignored_v);
 }
 
 bool deserialize_index(std::span<const uint8_t> in, IndexNode& out,
                        std::vector<SavedSearch>& searches)
 {
+    VaultSettings ignored;
+    return deserialize_index(in, out, searches, ignored);
+}
+
+bool deserialize_index(std::span<const uint8_t> in, IndexNode& out,
+                       std::vector<SavedSearch>& searches, VaultSettings& settings)
+{
     searches.clear();
+    settings = VaultSettings{};
     ByteReader r(in);
     const uint8_t version = r.u8();
     if (!r.ok()) return false;
     // Accept versions 1..INDEX_VERSION; older fields default to empty.
     if (version < 1 || version > INDEX_VERSION) return false;
     if (!read_node(r, out, 0, version)) return false;
-    // The saved-searches block exists only from v5 on; older blobs end here.
+    // The saved-searches block exists only from v5 on; older blobs end there.
     if (version >= 5 && !read_saved_searches(r, searches)) return false;
+    // The settings block exists only from v8 on. A vault that has never stored
+    // one — pre-v8 — comes back seeded; a v8 blob's own list is authoritative,
+    // including an empty one.
+    if (version >= 8) {
+        if (!read_settings(r, settings)) return false;
+    } else {
+        settings = VaultSettings::seeded();
+    }
     // Trailing bytes after a well-formed blob indicate corruption.
     return r.remaining() == 0;
 }

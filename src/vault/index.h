@@ -172,6 +172,31 @@ struct SavedSearch {
     std::vector<uint8_t> query;
 };
 
+// One tag-category → colour-swatch mapping (Phase 49). `name` is the tag prefix
+// before the first ':' ("artist" for "artist:Kaguya"), matched case-insensitively;
+// `swatch` indexes gfx's fixed 16-colour table. Vault-global metadata, stored
+// inside the .osv because a vault's categories describe its contents.
+struct TagCategory {
+    std::string name;
+    uint8_t     swatch = 0;
+
+    friend bool operator==(const TagCategory&, const TagCategory&) = default;
+};
+
+// Vault-global user settings (Phase 49), serialised after the saved-searches
+// block. Defaults here are also the values a pre-v8 blob reads back with, except
+// `categories`, which pre-v8 blobs get from seeded() — see deserialize_index.
+struct VaultSettings {
+    SortKey                 default_sort    = SortKey::Insertion;
+    bool                    tiles_show_tags = true;
+    std::vector<TagCategory> categories;
+
+    // The starting category set for a vault that has never stored one: a freshly
+    // created vault and every pre-v8 vault. An empty SAVED list is a legitimate
+    // state and is never re-seeded.
+    [[nodiscard]] static VaultSettings seeded();
+};
+
 // Current serialised-blob version (first byte of the blob).
 // v1: no tags. v2: per-node tags (Phase 12). v3: per-node favorite flag (Phase 13).
 // v4: video nodes + VideoMeta (Phase 15 PR2). v5: vault-global saved-searches
@@ -200,20 +225,36 @@ inline constexpr uint32_t INDEX_MAX_VIDEO_CHUNKS = 1u << 20;
 inline constexpr uint16_t INDEX_MAX_SAVED_SEARCHES   = 4096;
 inline constexpr uint32_t INDEX_MAX_SAVED_QUERY_BYTES = 1u << 20;
 
+// Maximum tag categories per vault, and max bytes in one category name —
+// bound a hostile settings block (Phase 49).
+inline constexpr uint16_t INDEX_MAX_TAG_CATEGORIES = 256;
+inline constexpr uint16_t INDEX_MAX_CATEGORY_BYTES = 64;
+
+// Size of gfx's fixed tag-colour palette. Lives here (not in gfx) because it
+// bounds a persisted field: a swatch byte >= this is rejected on deserialise.
+inline constexpr uint8_t TAG_SWATCH_COUNT = 16;
+
 // Serialise the whole tree rooted at `root` into `out` (cleared first). The
 // two-argument form writes an empty saved-searches block; the three-argument
-// form persists `searches` after the tree (Phase 18).
+// form persists `searches` after the tree (Phase 18). The four-argument form
+// (Phase 49) also persists the vault-global settings block.
 void serialize_index(const IndexNode& root, std::vector<uint8_t>& out);
 void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& searches,
                      std::vector<uint8_t>& out);
+void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& searches,
+                     const VaultSettings& settings, std::vector<uint8_t>& out);
 
 // Parse a tree from `in` into `out`. Returns false on any malformed input (bad
 // version, unknown node type, truncation, excessive depth). On failure `out` is
 // left in an unspecified-but-valid state; callers must not use it. The
 // three-argument form also extracts the saved-searches block into `searches`
-// (empty for pre-v5 blobs).
+// (empty for pre-v5 blobs). The four-argument form (Phase 49) also extracts
+// the vault-global settings block.
 [[nodiscard]] bool deserialize_index(std::span<const uint8_t> in, IndexNode& out);
 [[nodiscard]] bool deserialize_index(std::span<const uint8_t> in, IndexNode& out,
                                      std::vector<SavedSearch>& searches);
+[[nodiscard]] bool deserialize_index(std::span<const uint8_t> in, IndexNode& out,
+                                     std::vector<SavedSearch>& searches,
+                                     VaultSettings& settings);
 
 } // namespace vault
