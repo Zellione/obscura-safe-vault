@@ -74,3 +74,15 @@ TEST(is_video_filename_by_extension)
     CHECK_FALSE(ui::is_video_filename(""));
     CHECK_FALSE(ui::is_video_filename("trailingdot."));
 }
+
+TEST(meta_format_video_container_names)
+{
+    CHECK(ui::video_container_name(vault::VideoContainer::MP4) == "MP4");
+    CHECK(ui::video_container_name(vault::VideoContainer::MKV) == "MKV");
+}
+
+TEST(meta_format_video_container_unknown_is_dash)
+{
+    // Matches image_format_name's convention for an unknown value.
+    CHECK(ui::video_container_name(vault::VideoContainer::Unknown) == "-");
+}

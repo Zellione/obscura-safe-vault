@@ -80,6 +80,17 @@ std::string_view video_codec_name(vault::VideoCodec c) noexcept
     return "Video";
 }
 
+std::string_view video_container_name(vault::VideoContainer c) noexcept
+{
+    using enum vault::VideoContainer;
+    switch (c) {
+        case MP4: return "MP4";
+        case MKV: return "MKV";
+        case Unknown: break;
+    }
+    return "-";
+}
+
 std::string video_type_label(vault::VideoCodec c) noexcept
 {
     if (c == vault::VideoCodec::Unknown) return "Video";
