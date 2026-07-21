@@ -493,6 +493,7 @@ project "osv_tests"
         "src/ui/export.cpp",
         "src/ui/delete_summary.cpp",
         "src/ui/detail_model.cpp",
+        "src/ui/detail_panel.cpp",
         "src/ui/natural_sort.cpp",
         "src/ui/meta_json.cpp",
         "src/ui/zip_plan.cpp",
