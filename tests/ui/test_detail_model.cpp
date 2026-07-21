@@ -174,7 +174,7 @@ TEST(detail_gallery_sort_row_shown_only_when_not_manual)
 {
     IndexNode g = IndexNode::gallery("Japan");
 
-    g.sort_key = vault::SortKey::Manual;
+    g.sort_key = vault::SortKey::Default;
     CHECK(row_value(ui::build_node_details(g, {}), "Sort").empty());
 
     g.sort_key = vault::SortKey::NameAsc;

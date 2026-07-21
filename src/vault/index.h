@@ -97,16 +97,22 @@ struct VideoMeta {
 };
 
 // Per-gallery children display order (Phase 37). Persisted on Gallery nodes
-// only — Image/Video nodes carry the field too (serialized uniformly, see
-// index.cpp) but never read it.
+// Per-gallery child ordering (Phase 37; Phase 49 reworked value 0).
+//
+// `Default` means "follow the vault-wide default_sort" (vault::VaultSettings) —
+// it is NOT an order in itself, and never reaches sort_children(); callers
+// resolve it first via ui::effective_sort_key(). `Insertion` is raw import
+// order, which is what value 0 used to mean before Phase 49. Existing vaults
+// are all byte 0, so they adopt the vault default with no migration.
 enum class SortKey : uint8_t {
-    Manual   = 0,   // raw insertion order — today's behavior, the default
-    NameAsc  = 1,   // natural (number-aware) ascending, via ui::natural_less
-    NameDesc = 2,
-    DateAsc  = 3,   // by created_ts ascending
-    DateDesc = 4,
-    SizeAsc  = 5,   // by orig_size ascending
-    SizeDesc = 6,
+    Default   = 0,   // follow the vault's default_sort (Phase 49)
+    NameAsc   = 1,   // natural (number-aware) ascending, via ui::natural_less
+    NameDesc  = 2,
+    DateAsc   = 3,   // by created_ts ascending
+    DateDesc  = 4,
+    SizeAsc   = 5,   // by orig_size ascending
+    SizeDesc  = 6,
+    Insertion = 7,   // raw insertion order (Phase 49; pre-49 meaning of 0)
 };
 
 struct IndexNode {
@@ -116,7 +122,7 @@ struct IndexNode {
     std::string                name;
     std::vector<std::string>   tags;  // per-node tags (Phase 12)
     bool                       favorite = false;  // bookmark flag (Phase 13)
-    SortKey                    sort_key = SortKey::Manual;  // children order (Phase 37); meaningful only when is_gallery()
+    SortKey                    sort_key = SortKey::Default;  // children order (Phase 37); meaningful only when is_gallery()
 
     // Gallery payload (meaningful when type == Gallery).
     std::vector<IndexNode> children;
@@ -173,7 +179,10 @@ struct SavedSearch {
 // v6: per-gallery sort_key (Phase 37); pre-v6 blobs read every node as Manual.
 // v7: per-image `animated` flag (Phase 47); pre-v7 blobs read every image as
 // not animated, and are healed lazily on first view (see ui/gif_repair.*).
-inline constexpr uint8_t INDEX_VERSION = 7;
+// v8: vault-global settings block after the saved-searches block, and sort_key
+// byte 0 re-read as `Default` with a new `Insertion = 7` (Phase 49); pre-v8
+// blobs read with the seeded default settings and every gallery at `Default`.
+inline constexpr uint8_t INDEX_VERSION = 8;
 
 // Maximum tree depth accepted on deserialisation — guards against stack overflow
 // from a deeply-nested hostile blob.

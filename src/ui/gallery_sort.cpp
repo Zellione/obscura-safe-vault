@@ -33,7 +33,9 @@ std::vector<const vault::IndexNode*> sort_children(std::span<const vault::IndexN
     // Folders-first grouping, regardless of key.
     std::ranges::stable_partition(out, [](const vault::IndexNode* n) { return n->is_gallery(); });
 
-    if (key == vault::SortKey::Manual) return out;
+    // Default never reaches here (callers resolve it via effective_sort_key),
+    // and Insertion is a genuine no-op: keep the folders-first partition only.
+    if (key == vault::SortKey::Default || key == vault::SortKey::Insertion) return out;
 
     using Node = const vault::IndexNode*;
     std::function<bool(Node, Node)> less;
@@ -56,7 +58,8 @@ std::vector<const vault::IndexNode*> sort_children(std::span<const vault::IndexN
     case vault::SortKey::SizeDesc:
         less = [](Node a, Node b) { return orig_size_of(*a) > orig_size_of(*b); };
         break;
-    case vault::SortKey::Manual:
+    case vault::SortKey::Default:
+    case vault::SortKey::Insertion:
         return out;   // unreachable (handled above); kept for an exhaustive switch
     }
 
@@ -71,28 +74,30 @@ vault::SortKey next_sort_key(vault::SortKey current) noexcept
 {
     using enum vault::SortKey;
     switch (current) {
-    case Manual:    return NameAsc;
+    case Default:    return NameAsc;
     case NameAsc:   return NameDesc;
     case NameDesc:  return DateAsc;
     case DateAsc:   return DateDesc;
     case DateDesc:  return SizeAsc;
     case SizeAsc:   return SizeDesc;
-    case SizeDesc:  return Manual;
+    case SizeDesc:  return Default;
+    case Insertion: return Default;   // shouldn't appear in UI; treat as Default
     }
-    return Manual;   // unreachable for a valid enum value; safe fallback
+    return Default;   // unreachable for a valid enum value; safe fallback
 }
 
 std::string sort_key_label(vault::SortKey key)
 {
     using enum vault::SortKey;
     switch (key) {
-    case Manual:    return {};
+    case Default:    return {};
     case NameAsc:   return "Name ↑";
     case NameDesc:  return "Name ↓";
     case DateAsc:   return "Date ↑";
     case DateDesc:  return "Date ↓";
     case SizeAsc:   return "Size ↑";
     case SizeDesc:  return "Size ↓";
+    case Insertion: return {};   // shouldn't appear in UI; treat as Default
     }
     return {};
 }

@@ -538,7 +538,7 @@ TEST(index_gallery_sort_key_roundtrips)
     REQUIRE(deserialize_index(blob, out));
     REQUIRE(out.children.size() == 2);
     CHECK_EQ(out.children[0].sort_key, SortKey::NameDesc);
-    CHECK_EQ(out.children[1].sort_key, SortKey::Manual);
+    CHECK_EQ(out.children[1].sort_key, SortKey::Default);
 }
 
 TEST(index_deserialize_v5_blob_has_manual_sort_key)
@@ -559,7 +559,7 @@ TEST(index_deserialize_v5_blob_has_manual_sort_key)
     IndexNode out;
     std::vector<SavedSearch> back;
     REQUIRE(deserialize_index(v5_blob, out, back));
-    CHECK_EQ(out.sort_key, SortKey::Manual);
+    CHECK_EQ(out.sort_key, SortKey::Default);
 }
 
 TEST(index_deserialize_rejects_out_of_range_sort_key)
@@ -605,13 +605,13 @@ TEST(index_animated_flag_round_trips)
     CHECK(!out.children[1].meta.animated);
 }
 
-TEST(index_version_is_seven)
+TEST(index_version_is_eight)
 {
     IndexNode root = IndexNode::gallery("root");
     std::vector<uint8_t> blob;
     vault::serialize_index(root, blob);
     REQUIRE(!blob.empty());
-    CHECK_EQ(blob[0], uint8_t{7});
+    CHECK_EQ(blob[0], uint8_t{8});
 }
 
 TEST(index_v6_blob_reads_animated_as_false)
@@ -671,4 +671,39 @@ TEST(index_rejects_out_of_range_animated_byte)
 
     IndexNode out;
     CHECK(!vault::deserialize_index(blob, out));
+}
+
+TEST(index_v8_accepts_insertion_sort_key)
+{
+    using namespace vault;
+    IndexNode root = IndexNode::gallery("");
+    IndexNode sub  = IndexNode::gallery("comics");
+    sub.sort_key = SortKey::Insertion;
+    root.children.push_back(std::move(sub));
+
+    std::vector<uint8_t> blob;
+    serialize_index(root, blob);
+    CHECK_EQ(blob[0], INDEX_VERSION);
+    CHECK_EQ(blob[0], 8);
+
+    IndexNode out;
+    CHECK(deserialize_index(blob, out));
+    REQUIRE(out.children.size() == 1);
+    CHECK(out.children[0].sort_key == SortKey::Insertion);
+}
+
+TEST(index_v8_rejects_out_of_range_sort_key)
+{
+    using namespace vault;
+    IndexNode root = IndexNode::gallery("");
+    std::vector<uint8_t> blob;
+    serialize_index(root, blob);
+
+    // Byte layout: [0]=version, [1]=type, [2..3]=name_len(0), [4..5]=tag_count(0),
+    // [6]=favorite, [7]=sort_key.
+    CHECK_EQ(blob[7], 0);
+    blob[7] = 8;   // one past Insertion
+
+    IndexNode out;
+    CHECK(!deserialize_index(blob, out));
 }
