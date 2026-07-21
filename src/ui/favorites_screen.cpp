@@ -51,13 +51,14 @@ void FavoritesScreen::reload()
     favs_ = fetch();
     nav_.set_count(static_cast<int>(favs_.size()));
     nav_.select(0);
-    cols_ = grid_columns(static_cast<float>(win_.width()) - 2 * OX, CELL, GAP);
+    const auto rw = static_cast<float>(win_.width());
+    cols_ = grid_columns(rw - detail_panel_width(detail_.panel.open, rw) - 2 * OX, CELL, GAP);
     detail_.key.clear();  // SearchHit::node pointers are now invalid
 }
 
 void FavoritesScreen::rebuild_detail()
 {
-    if (!detail_.panel.open) return;
+    if (!detail_.panel.open) { return; }
     const int  idx   = nav_.selected();
     const auto count = static_cast<int>(favs_.size());
 
