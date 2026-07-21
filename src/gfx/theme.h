@@ -57,6 +57,21 @@ void                       set_theme(ThemeId id) noexcept;
 [[nodiscard]] const char*  theme_slug(ThemeId id) noexcept;     // stable persistence token
 [[nodiscard]] ThemeId      theme_from_slug(std::string_view slug) noexcept;  // unknown → default
 
+
+// Tag-category colour palette (Phase 49). A category stores a swatch INDEX, not
+// an RGB, so the same vault reads correctly under every theme. Each swatch is
+// defined twice — one variant for a dark window background, one for a light one —
+// because the chip paints the tag TEXT in this colour, and a pastel that reads
+// well on slate is invisible on white. tag_swatch() picks the variant from the
+// active theme's background luminance.
+//
+// TAG_SWATCH_COUNT must stay in lockstep with vault::TAG_SWATCH_COUNT, which
+// bounds the persisted byte; ui/tag_chip.cpp static_asserts that they agree.
+inline constexpr int TAG_SWATCH_COUNT = 16;
+
+[[nodiscard]] Color       tag_swatch(int index) noexcept;       // out of range → TEXT_DIM
+[[nodiscard]] const char* tag_swatch_name(int index) noexcept;  // out of range → "Default"
+
 namespace theme {
 
 // Standard corner radius for surfaces/buttons/tiles (px). Theme-independent.
