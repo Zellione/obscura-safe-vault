@@ -21,7 +21,16 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   Phase 48: `content_width(const GalleryGrid&)` free friend is now the SINGLE layout-width
   source (window minus detail panel) — render(), scroll-to-selection, on_enter's cols_ seed,
   and hit_test all route through it; using win_.width() directly desyncs picking from drawing
-  whenever the panel is open.
+  whenever the panel is open. Its vertical twin `content_bottom(const GalleryGrid&)` (= window
+  height minus the reserved `FOOTER_H` status band, via `grid_bands`) is the SINGLE
+  content-bottom source: visible-range culling, the render clip rects, `ensure_visible` /
+  `clamp_scroll`, and hit_test all use it, so tiles/rows stop above the footer instead of
+  scrolling under its text. `render_grid`/`render_list` take `bottom`, NOT the window height.
+  hit_test rejects `my` outside `[OY, content_bottom)` — the chrome is not pickable.
+- `favorites_screen.*` render clips scrolled tiles to below OY (the fixed header) and draws a
+  BORDER hairline there — without the clip a scrolled tile paints over the title/[F1]/status.
+  Covers all four subclasses. `tag_overview.*` paginates (rows never scroll partially), so it
+  needs no clip.
 - `favorites_images.*` — flat grid of favorited images across the vault; opens a
   favorites-scoped viewer (ToFavoriteViewer: prev/next iterate the favorites set, Esc returns
   to the grid). `favorites_screen.*` is the shared base (grid/selection/badge) with
@@ -67,7 +76,20 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   AltGr) + physical bracket scancodes; level seeded from `media::saved_volume()` on open,
   written back on change. `R` toggles loop (process-lifetime `media::saved_loop_enabled()`;
   VideoPlayback re-seeks to 0 and keeps playing at EOF when set); on-screen ring indicator next
-  to play/pause. Ctor gains `initial_strip_side` (default Bottom); three free friends —
+  to play/pause.
+  Chrome: `viewer_chrome(const ImageViewer&)` free friend returns the `ChromeBands` for the
+  whole viewer area (window minus strip) — an OPAQUE STRIP_BG header band (name/index/zoom +
+  [F1] Help) and an opaque footer band, with the media fit into `.content` only, so a band
+  never covers picture/video. `viewport_rect()` IS `viewer_chrome(*this).content`, so zoom,
+  pan, the fill-scroll model, mouse hit-testing and drawing all agree. Windowed, both bands are
+  always reserved (the image never resizes when a status comes and goes); fullscreen drops the
+  header entirely — HUD text included — for an edge-to-edge picture, and forces the footer band
+  in only while `viewer_footer_text()` is non-empty. That one free friend is the single source
+  for both the reserved height and the drawn line, so they cannot disagree; it prefers the
+  export status over the "Video playback unavailable in this build." notice. VideoPlayback's
+  own CONTROL_H bar sits inside `.content`, directly above the footer band (same STRIP_BG, so
+  the two read as one bar). Ctor gains `initial_strip_side` (default Bottom); three free
+  friends —
   `current_strip_side`, `capture_video_resume` (snapshot outgoing viewer's video path+position
   into a GallerySessionState, or clear when the current item isn't a live video),
   `apply_video_resume` (seek a freshly (re)opened matching video to the remembered position,
@@ -289,6 +311,15 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   pre-existed). NOTE: `gfx::Renderer::draw_thumbnail_strip` duplicates this layout internally
   (gfx must not depend on ui) — both sites carry SYNC comments; keep in sync on geometry changes.
 - `scroll_model.*` — fill-width continuous-scroll maths.
+- `chrome_layout.*` — pure `ChromeBands{header,content,footer}` + `split_chrome(area,header_h,
+  footer_h)`: reserves OPAQUE fixed bands at the top/bottom of `area` and hands back the content
+  area between them. The three rects tile `area` exactly (unit-tested invariant); negative
+  heights clamp to 0 and oversized bands shrink proportionally so content never inverts. The
+  contract is *reserve, don't overlay* — a translucent band over scrolling/zooming content is
+  both unreadable and hides what it covers. Used by GalleryGrid (header to OY + `FOOTER_H`=48
+  status band) and ImageViewer (`viewer_chrome`). Draw side: `ui::draw_chrome_band` in
+  `widgets.*` (opaque fill + a BORDER hairline on the content-facing edge; no-ops on a
+  collapsed band).
 - `meta_format.*` — list-view metadata formatting: size/dimensions/date/type. Phase 48: added
   `video_container_name(vault::VideoContainer)` -> "MP4"/"MKV"/"-" for unknown.
 - `delete_summary.*` — recursive tally of a gallery subtree (images/videos/sub-galleries) +

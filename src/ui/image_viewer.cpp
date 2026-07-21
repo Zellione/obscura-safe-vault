@@ -41,6 +41,13 @@ bool item_is_animated_gif(const std::vector<const vault::IndexNode*>& imgs, int 
     const vault::IndexNode* node = imgs[idx];
     return node != nullptr && node->is_image() && node->meta.animated;
 }
+
+// Header band: two text lines — the HUD line (name / index / zoom) at +12 and
+// "[F1] Help" at +44 — plus a little breathing room under the second.
+float hud_header_h(float line_h) noexcept { return 44.0f + line_h + 8.0f; }
+
+// Footer band: one padded text line.
+float hud_footer_h(float line_h) noexcept { return line_h + 20.0f; }
 } // namespace
 
 ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
@@ -93,13 +100,37 @@ float ImageViewer::thumb_size() const
 
 SDL_FRect ImageViewer::viewport_rect() const
 {
-    // Fullscreen reclaims the space the thumbnail strip would occupy —
-    // it's hidden outright (render()/strip_hit() both check is_fullscreen()
-    // too), so the viewport is simply the whole window (Phase 45 Part 4).
-    if (win_.is_fullscreen())
-        return {0.0f, 0.0f, static_cast<float>(win_.width()), static_cast<float>(win_.height())};
-    return viewport_rect_for(strip_side_, static_cast<float>(win_.width()),
-                             static_cast<float>(win_.height()), thumb_size());
+    return viewer_chrome(*this).content;
+}
+
+std::string viewer_footer_text(const ImageViewer& v)
+{
+    // An export status wins over the no-decoder notice: it is transient and the
+    // user just asked for it, so it must not be swallowed by a standing message.
+    if (!v.export_.status().empty()) return v.export_.status();
+    if (item_is_video(v.album_.images, v.index_) && !(v.video_ && v.video_->valid()))
+        return "Video playback unavailable in this build.";
+    return {};
+}
+
+ChromeBands viewer_chrome(const ImageViewer& v)
+{
+    const auto w = static_cast<float>(v.win_.width());
+    const auto h = static_cast<float>(v.win_.height());
+    const bool fs = v.win_.is_fullscreen();
+
+    // Fullscreen reclaims the space the thumbnail strip would occupy — it's
+    // hidden outright (render()/strip_hit() both check is_fullscreen() too), so
+    // the area is simply the whole window (Phase 45 Part 4).
+    const SDL_FRect area = fs ? SDL_FRect{0.0f, 0.0f, w, h}
+                              : viewport_rect_for(v.strip_side_, w, h, v.thumb_size());
+
+    // Fullscreen is edge-to-edge: no header at all, and a footer band only while
+    // there is actually a message that would otherwise sit unreadable on the image.
+    const float line   = v.font_.pixel_height();
+    const float header = fs ? 0.0f : hud_header_h(line);
+    const float footer = (!fs || !viewer_footer_text(v).empty()) ? hud_footer_h(line) : 0.0f;
+    return split_chrome(area, header, footer);
 }
 
 SDL_FRect ImageViewer::strip_rect() const
@@ -762,48 +793,62 @@ void ImageViewer::render_strip(gfx::Renderer& r)
     }
 }
 
-void ImageViewer::render_hud(gfx::Renderer& r, const SDL_FRect& vp)
+void ImageViewer::render_hud(gfx::Renderer& r)
 {
     using enum ViewMode;
 
-    // Scrim behind the top HUD text (filename/index/zoom + [F1] Help) so it
-    // stays legible over a bright image — without it, light image content
-    // washed the text out entirely. A translucent band reads as a fixed
-    // header the image sits under, rather than text painted directly on the
-    // picture. Needs alpha blending, which draw_rect only honours when the
-    // renderer's blend mode is BLEND.
-    const float header_h = vp.y + 44.0f + font_.pixel_height() + 8.0f - vp.y;
-    SDL_SetRenderDrawBlendMode(r.sdl(), SDL_BLENDMODE_BLEND);
-    r.draw_rect(SDL_FRect{vp.x, vp.y, vp.w, header_h}, gfx::Color{0, 0, 0, 140});
+    // The header and footer are OPAQUE reserved bands, not scrims: the media is
+    // fit into chrome.content and never extends under them, so nothing shows
+    // through to wash the text out and no part of the picture is hidden. (This
+    // replaced a translucent black scrim painted straight over the image, which
+    // was both hard to read on bright content and covered the top of every
+    // photo, plus a bottom status line with no backing at all.)
+    const ChromeBands chrome = viewer_chrome(*this);
 
-    if (!album_.images.empty()) {
-        const vault::IndexNode& cur = *album_.images[index_];
-        // A leading "* " marks the current item as favorited (the baked font is
-        // ASCII-only, so an asterisk stands in for a star glyph).
-        const char* star = cur.favorite ? "* " : "";
-        std::string hud;
-        if (item_is_video(album_.images, index_))
-            hud = std::format("{}{}   {}/{}   {}   {}", star, cur.name, index_ + 1,
-                              album_.images.size(), video_type_label(cur.vmeta.codec),
-                              format_duration(cur.vmeta.duration_us));
-        else if (mode_ == FillScroll)
-            hud = std::format("{}{}   {}/{}   fill", star, cur.name, index_ + 1,
-                              album_.images.size());
-        else
-            hud = std::format("{}{}   {}/{}   {}%", star, cur.name, index_ + 1,
-                              album_.images.size(), static_cast<int>(fit_.zoom * 100.0f + 0.5f));
-        r.draw_text(font_, vp.x + 16, vp.y + 12, hud,
-                    cur.favorite ? gfx::theme::FAVORITE : gfx::theme::TEXT);
+    // Fullscreen collapses the header to nothing for an edge-to-edge picture;
+    // with no band to sit in, the HUD text is dropped rather than painted onto
+    // the image.
+    if (chrome.header.h > 0.0f) {
+        const SDL_FRect& hb = chrome.header;
+        draw_chrome_band(r, hb, gfx::theme::STRIP_BG, /*rule_at_bottom*/ true);
+
+        if (!album_.images.empty()) {
+            const vault::IndexNode& cur = *album_.images[index_];
+            // A leading "* " marks the current item as favorited (the baked font is
+            // ASCII-only, so an asterisk stands in for a star glyph).
+            const char* star = cur.favorite ? "* " : "";
+            std::string hud;
+            if (item_is_video(album_.images, index_))
+                hud = std::format("{}{}   {}/{}   {}   {}", star, cur.name, index_ + 1,
+                                  album_.images.size(), video_type_label(cur.vmeta.codec),
+                                  format_duration(cur.vmeta.duration_us));
+            else if (mode_ == FillScroll)
+                hud = std::format("{}{}   {}/{}   fill", star, cur.name, index_ + 1,
+                                  album_.images.size());
+            else
+                hud = std::format("{}{}   {}/{}   {}%", star, cur.name, index_ + 1,
+                                  album_.images.size(),
+                                  static_cast<int>(fit_.zoom * 100.0f + 0.5f));
+            r.draw_text(font_, hb.x + 16, hb.y + 12, fit_text(font_, hud, hb.w - 32),
+                        cur.favorite ? gfx::theme::FAVORITE : gfx::theme::TEXT);
+        }
+
+        r.draw_text(font_, hb.x + 16, hb.y + 44, "[F1] Help", gfx::theme::TEXT_FAINT);
     }
 
-    r.draw_text(font_, vp.x + 16, vp.y + 44, "[F1] Help", gfx::theme::TEXT_FAINT);
+    // Footer band. Windowed it is always reserved (so the image never resizes
+    // when a status comes and goes); fullscreen forces it in only while there is
+    // something to say — viewer_chrome() and this share viewer_footer_text(), so
+    // the reserved height and the drawn line can never disagree.
+    if (chrome.footer.h <= 0.0f) return;
+    const SDL_FRect& fb = chrome.footer;
+    draw_chrome_band(r, fb, gfx::theme::STRIP_BG, /*rule_at_bottom*/ false);
 
-    if (item_is_video(album_.images, index_) && !(video_ && video_->valid()))
-        r.draw_text(font_, vp.x + 16, vp.y + vp.h - 56,
-                    "Video playback unavailable in this build.", gfx::theme::TEXT_DIM);
-
-    if (!export_.status().empty())
-        r.draw_text(font_, vp.x + 16, vp.y + vp.h - 32, export_.status(), gfx::theme::OK);
+    if (const std::string msg = viewer_footer_text(*this); !msg.empty()) {
+        const gfx::Color c = export_.status().empty() ? gfx::theme::TEXT_DIM : gfx::theme::OK;
+        r.draw_text(font_, fb.x + 16, font_.text_top_for_center(fb.y + fb.h * 0.5f),
+                    fit_text(font_, msg, fb.w - 32), c);
+    }
 }
 
 void ImageViewer::render(gfx::Renderer& r)
@@ -816,8 +861,15 @@ void ImageViewer::render(gfx::Renderer& r)
         return;
     }
 
-    const SDL_FRect vp = viewport_rect();
-    r.draw_rect(vp, gfx::theme::IMG_BG);
+    // `vp` is the media area only — the reserved chrome bands are NOT part of it,
+    // so the image/video is fit strictly between them and no band ever covers
+    // picture content. The backdrop still fills the bands' rows so a resize can't
+    // leave a stale gap before render_hud() paints over them.
+    const ChromeBands chrome = viewer_chrome(*this);
+    const SDL_FRect   vp     = chrome.content;
+    r.draw_rect({chrome.header.x, chrome.header.y, chrome.header.w,
+                 chrome.header.h + chrome.content.h + chrome.footer.h},
+                gfx::theme::IMG_BG);
 
     if (video_) {   // Fit mode + current item is a video
         if (video_->valid()) {
@@ -836,7 +888,7 @@ void ImageViewer::render(gfx::Renderer& r)
         render_fit(r, vp);
     }
 
-    render_hud(r, vp);
+    render_hud(r);
     if (!win_.is_fullscreen()) render_strip(r);   // Phase 45 Part 4
 
     export_.render(r, font_, static_cast<float>(win_.width()),

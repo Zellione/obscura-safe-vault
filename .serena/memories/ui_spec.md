@@ -32,6 +32,31 @@ normal sizes). `Screen::help_groups()` virtual supplies per-screen content;
 `App` owns the one `HelpPopupState` and renders the overlay on top of
 whichever screen is active. Close with `Esc` or `Q`.
 
+## Fixed chrome bands — reserve, never overlay
+
+Screens with a fixed header and/or footer reserve that space as an **opaque**
+band and lay content out strictly between the bands. Two rules, both learned
+from the versions that broke them:
+
+1. **No alpha-keyed chrome.** A translucent band over scrolling or zooming
+   content leaves its own text washed out by whatever passes behind it. Bands
+   are drawn at full alpha (`BG` on the gallery grid, `STRIP_BG` in the viewer)
+   with a `BORDER` hairline on the content-facing edge.
+2. **A band never covers content.** The scrollable/zoomable area stops at the
+   band, rather than continuing underneath it. On the gallery grid that means
+   culling, clipping, scroll-clamping and hit-testing all key off
+   `content_bottom()`, not the window height. In the viewer it means the image
+   or video is fit into the band-inset rect, so no part of the picture is hidden.
+
+Geometry comes from the pure `ui::split_chrome` (`chrome_layout.*`); drawing
+from `ui::draw_chrome_band` (`widgets.*`).
+
+**Viewer specifics.** Windowed, header and footer are always reserved, so the
+image never resizes when a status message comes or goes. Fullscreen is the
+deliberate exception: it already hides the thumbnail strip, and it drops both
+bands (HUD text included) for an edge-to-edge picture — a footer message still
+forces its band back in so it stays legible.
+
 ## Detail panel (Phase 48)
 Toggleable right-edge panel on the gallery grid, the favorites/tag screens, and
 advanced search. `D` toggles it (`Ctrl+D` on advanced search, where bare letters

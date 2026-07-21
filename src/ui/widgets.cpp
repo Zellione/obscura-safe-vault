@@ -73,6 +73,17 @@ void draw_text_field(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& bo
                 shown, TEXT);
 }
 
+void draw_chrome_band(gfx::Renderer& r, const SDL_FRect& band, gfx::Color fill,
+                      bool rule_at_bottom)
+{
+    if (band.h <= 0.0f || band.w <= 0.0f) return;   // collapsed band (e.g. fullscreen)
+
+    // `fill` is drawn at full alpha on purpose — see draw_chrome_band's contract.
+    r.draw_rect(band, fill);
+    const float rule_y = rule_at_bottom ? band.y + band.h - 1.0f : band.y;
+    r.draw_rect({band.x, rule_y, band.w, 1.0f}, gfx::theme::BORDER);
+}
+
 std::string fit_text(const gfx::FontAtlas& font, std::string_view s, float max_w)
 {
     return elide_middle(s, static_cast<int>(max_w),

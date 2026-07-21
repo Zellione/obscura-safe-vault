@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "image/decode_worker.h"
+#include "ui/chrome_layout.h"
 #include "ui/export_ui.h"
 #include "ui/full_tex_cache.h"
 #include "ui/gallery_session_state.h"
@@ -148,7 +149,7 @@ private:
     void render_fit(gfx::Renderer& r, const SDL_FRect& vp);
     void render_scroll(gfx::Renderer& r, const SDL_FRect& vp);
     void render_strip(gfx::Renderer& r);
-    void render_hud(gfx::Renderer& r, const SDL_FRect& vp);
+    void render_hud(gfx::Renderer& r);   // opaque header/footer bands + their text
 
     // Free friends (Phase 39 Part 2), not members, so App can snapshot/restore
     // session-scoped state without growing this class's method count:
@@ -157,6 +158,17 @@ private:
     // (or clears it when the current item isn't a live video); apply_video_resume
     // seeks a freshly (re)opened matching video to a remembered position, leaving
     // it paused, right after on_enter() has built video_ for the landed item.
+    // The viewer's reserved chrome: an opaque header band (name / index / zoom +
+    // [F1] Help), the media area, and an opaque footer band for the status line.
+    // The media is fit into `content` ONLY, so a band never covers picture or
+    // video. Fullscreen drops both bands for an edge-to-edge image — except that
+    // a footer message still forces its band in, so it stays legible.
+    // viewer_footer_text is the single source for what that band shows (empty =
+    // nothing to report), so layout and drawing can never disagree about whether
+    // the band is there. Both are free friends for the same cpp:S1448 reason as
+    // current_strip_side.
+    friend ChromeBands  viewer_chrome(const ImageViewer& v);
+    friend std::string  viewer_footer_text(const ImageViewer& v);
     friend StripSide current_strip_side(const ImageViewer& v);
     friend void capture_video_resume(const ImageViewer& v, GallerySessionState& session);
     friend void apply_video_resume(ImageViewer& v, const GallerySessionState& session);
@@ -263,6 +275,11 @@ private:
 // capture_video_resume / apply_video_resume let App snapshot and restore
 // GallerySessionState across a viewer round trip (Phase 39 Part 2).
 [[nodiscard]] StripSide current_strip_side(const ImageViewer& v);
+// viewer_chrome / viewer_footer_text: see the in-class declarations. Every site
+// that needs the media rect goes through viewer_chrome(v).content — zoom, pan,
+// the fill-scroll model, and drawing all have to agree on it.
+[[nodiscard]] ChromeBands  viewer_chrome(const ImageViewer& v);
+[[nodiscard]] std::string  viewer_footer_text(const ImageViewer& v);
 void capture_video_resume(const ImageViewer& v, GallerySessionState& session);
 void apply_video_resume(ImageViewer& v, const GallerySessionState& session);
 

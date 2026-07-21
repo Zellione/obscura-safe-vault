@@ -42,6 +42,13 @@ namespace ui {
 // than win_.width(), or picking and drawing disagree once the panel is open.
 [[nodiscard]] float content_width(const class GalleryGrid& g);
 
+// Y at which the scrollable content area ends: the window height minus the
+// reserved, opaque footer band that carries the status/error line. Tiles and
+// list rows must be culled, clipped and scroll-clamped against THIS, not
+// win_.height(), or they scroll underneath the footer and render its text
+// illegible. Free friend for the same cpp:S1448 reason as content_width.
+[[nodiscard]] float content_bottom(const class GalleryGrid& g);
+
 // Rebuild the panel's cached content when the focused node or selection changes.
 // A free friend for the same cpp:S1448 reason as content_width.
 void rebuild_detail(class GalleryGrid& g);
@@ -125,8 +132,10 @@ private:
     SDL_Texture*       thumb_texture(const vault::IndexNode& node);
     bool               pump_thumbs();   // upload finished off-thread thumb decodes
 
-    void render_grid(gfx::Renderer& r, float W, float H);
-    void render_list(gfx::Renderer& r, float W, float H);
+    // `bottom` is content_bottom(): where the scrollable area ends and the
+    // reserved footer band begins — NOT the window height.
+    void render_grid(gfx::Renderer& r, float W, float bottom);
+    void render_list(gfx::Renderer& r, float W, float bottom);
 
     // Drain a finished background import (called from update()). Kept a free friend
     // (not a member) to keep the class under the cpp:S1448 method cap and to keep
@@ -152,9 +161,10 @@ private:
     friend void poll_transfer_and_combine(GalleryGrid& g);
     friend void poll_pending_pickers(GalleryGrid& g);
     friend void update_scroll_to_selection(GalleryGrid& g);
-    friend void update_scroll_to_selection_list(GalleryGrid& g, int sel_idx, float H);
-    friend void update_scroll_to_selection_grid(GalleryGrid& g, int sel_idx, float H);
+    friend void update_scroll_to_selection_list(GalleryGrid& g, int sel_idx, float bottom);
+    friend void update_scroll_to_selection_grid(GalleryGrid& g, int sel_idx, float bottom);
     friend float content_width(const GalleryGrid& g);
+    friend float content_bottom(const GalleryGrid& g);
     friend void  rebuild_detail(GalleryGrid& g);
     void draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
                          const SDL_FRect& box);

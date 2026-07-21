@@ -16,6 +16,7 @@
 #include "platform/file_dialog.h"
 #include "platform/folder_dialog.h"
 #include "platform/paths.h"
+#include "ui/chrome_layout.h"
 #include "ui/delete_summary.h"
 #include "ui/detail_model.h"
 #include "ui/detail_panel.h"
@@ -43,6 +44,9 @@ constexpr float OY = 160;
 constexpr float GAP = 16;
 constexpr float ROW_H = 44;     // detailed-list row pitch (very small thumbnails)
 constexpr float LIST_HEADER = 30;  // column-header band above the list rows
+// Reserved, opaque bottom band carrying the status/error line. Tiles stop above
+// it instead of scrolling under it — see content_bottom().
+constexpr float FOOTER_H = 48;
 // Right-anchored metadata column widths (px) for the detailed list view.
 constexpr float COL_DIMS = 165;   // wide enough for the "DIMENSIONS" header
 constexpr float COL_SIZE = 100;
@@ -87,6 +91,14 @@ std::string apply_tag_list_file(vault::Vault& v, const std::string& target,
     if (!bytes) { error = "Could not read tag list."; return {}; }
     const auto counts = apply_tag_list(v, target, ui::parse_tag_list(*bytes));
     return std::format("Tag import: {} added, {} skipped", counts.added, counts.skipped);
+}
+
+// The grid's fixed chrome: an opaque header band (breadcrumb, [F1] Help, and the
+// waste/selection line) reaching down to OY, and an opaque footer band carrying
+// the status/error line. Tiles and list rows live strictly between the two.
+ChromeBands grid_bands(float content_w, float win_h) noexcept
+{
+    return split_chrome({0.0f, 0.0f, content_w, win_h}, OY, FOOTER_H);
 }
 
 // Centre the `cols` columns horizontally in a `win_w`-wide window so the left and
@@ -147,6 +159,12 @@ float content_width(const GalleryGrid& g)
 {
     const auto w = static_cast<float>(g.win_.width());
     return w - detail_panel_width(g.detail_.panel.open, w);
+}
+
+float content_bottom(const GalleryGrid& g)
+{
+    const ChromeBands b = grid_bands(content_width(g), static_cast<float>(g.win_.height()));
+    return b.content.y + b.content.h;
 }
 
 // Rebuild detail_.content when — and only when — what it describes has changed.
@@ -1095,8 +1113,10 @@ std::string breadcrumb_text(const NavModel& nav, vault::SortKey sort_key)
 }
 
 // Extract footer + waste/selection rendering to reduce render's cognitive complexity (S3776).
-void draw_footer_status(gfx::Renderer& r, gfx::FontAtlas& font, float x_offset, float bottom,
-                        const FooterStatus& data)
+// `footer_band` is the reserved opaque strip along the bottom (see grid_bands); the
+// status/error line is drawn inside it, never over the tiles.
+void draw_footer_status(gfx::Renderer& r, gfx::FontAtlas& font, float x_offset,
+                        const SDL_FRect& footer_band, const FooterStatus& data)
 {
     using namespace gfx::theme;
     if (data.show_waste || data.show_selection) {
@@ -1111,10 +1131,13 @@ void draw_footer_status(gfx::Renderer& r, gfx::FontAtlas& font, float x_offset, 
         r.draw_text(font, x_offset, 120, footer, color);
     }
 
+    draw_chrome_band(r, footer_band, gfx::theme::BG, /*rule_at_bottom*/ false);
+
+    const float ty = font.text_top_for_center(footer_band.y + footer_band.h * 0.5f);
     if (!data.error.empty())
-        r.draw_text(font, x_offset, bottom - 36, data.error, DANGER);
+        r.draw_text(font, x_offset, ty, data.error, DANGER);
     else if (!data.status.empty())
-        r.draw_text(font, x_offset, bottom - 36, data.status, OK);
+        r.draw_text(font, x_offset, ty, data.status, OK);
 }
 
 // update() sub-handlers, kept as free friends (not members) to keep GalleryGrid
@@ -1185,7 +1208,7 @@ void poll_pending_pickers(GalleryGrid& g)
     }
 }
 
-void update_scroll_to_selection_list(GalleryGrid& g, int sel_idx, float H)
+void update_scroll_to_selection_list(GalleryGrid& g, int sel_idx, float bottom)
 {
     // For list view: item at row sel_idx
     const float item_top = OY + LIST_HEADER + static_cast<float>(sel_idx) * ROW_H;
@@ -1193,11 +1216,11 @@ void update_scroll_to_selection_list(GalleryGrid& g, int sel_idx, float H)
     // Content height = header + (num_items * row_height)
     const float content_height = OY + LIST_HEADER + static_cast<float>(g.children_.size()) * ROW_H;
     // Apply selection-following scroll
-    g.scroll_ = ui::ensure_visible(g.scroll_, item_top, item_bottom, OY + LIST_HEADER, H);
-    g.scroll_ = ui::clamp_scroll(g.scroll_, content_height, H);
+    g.scroll_ = ui::ensure_visible(g.scroll_, item_top, item_bottom, OY + LIST_HEADER, bottom);
+    g.scroll_ = ui::clamp_scroll(g.scroll_, content_height, bottom);
 }
 
-void update_scroll_to_selection_grid(GalleryGrid& g, int sel_idx, float H)
+void update_scroll_to_selection_grid(GalleryGrid& g, int sel_idx, float bottom)
 {
     // Item at position computed from grid_cell_rect. Recompute cols from the current
     // view/window rather than trusting cols_ (which render_grid() only refreshes
@@ -1214,17 +1237,20 @@ void update_scroll_to_selection_grid(GalleryGrid& g, int sel_idx, float H)
     const int total_rows = (static_cast<int>(g.children_.size()) + cols - 1) / cols;
     const float content_height = OY + static_cast<float>(total_rows) * (cell + GAP);
     // Apply selection-following scroll
-    g.scroll_ = ui::ensure_visible(g.scroll_, item_top, item_bottom, OY, H);
-    g.scroll_ = ui::clamp_scroll(g.scroll_, content_height, H);
+    g.scroll_ = ui::ensure_visible(g.scroll_, item_top, item_bottom, OY, bottom);
+    g.scroll_ = ui::clamp_scroll(g.scroll_, content_height, bottom);
 }
 
 void update_scroll_to_selection(GalleryGrid& g)
 {
     const int sel_idx = g.nav_.selected();
     if (sel_idx < 0 || sel_idx >= static_cast<int>(g.children_.size())) return;
-    const auto H = static_cast<float>(g.win_.height());
-    if (g.view_ == GalleryView::List) update_scroll_to_selection_list(g, sel_idx, H);
-    else                              update_scroll_to_selection_grid(g, sel_idx, H);
+    // content_bottom, not the window height: the selected tile has to end up above
+    // the reserved footer band, and the scroll clamp has to stop there too — else
+    // the last row parks underneath the status line.
+    const float cb = content_bottom(g);
+    if (g.view_ == GalleryView::List) update_scroll_to_selection_list(g, sel_idx, cb);
+    else                              update_scroll_to_selection_grid(g, sel_idx, cb);
 }
 
 void GalleryGrid::update(double dt)
@@ -1316,6 +1342,12 @@ void GalleryGrid::render(gfx::Renderer& r)
 
     const auto cW = content_width(*this);   // layout width available after detail panel reserves space
     using namespace gfx::theme;
+    const ChromeBands bands = grid_bands(cW, H);
+
+    // Tiles are clipped to bands.content, so the header needs no fill of its own —
+    // but the hairline rule marks where the fixed chrome ends and scrolling begins.
+    draw_chrome_band(r, bands.header, BG, /*rule_at_bottom*/ true);
+
     const std::string crumb = breadcrumb_text(nav_, vault::gallery_sort_key(vault_, nav_.path()));
     r.draw_text(font_, OX, 40, fit_name(crumb, cW - 2 * OX), TEXT_DIM);
     r.draw_text(font_, OX, 90, "[F1] Help", TEXT_FAINT);
@@ -1327,7 +1359,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     const bool show_waste = should_display_waste(waste_sz, file_sz);
     const bool show_selection = !sel_.empty();
 
-    draw_footer_status(r, font_, OX, H, FooterStatus{
+    draw_footer_status(r, font_, OX, bands.footer, FooterStatus{
         .show_waste = show_waste,
         .show_selection = show_selection,
         .waste_sz = waste_sz,
@@ -1336,8 +1368,11 @@ void GalleryGrid::render(gfx::Renderer& r)
         .status = status_
     });
 
-    if (view_ == GalleryView::List) render_list(r, cW, H);
-    else                            render_grid(r, cW, H);
+    // Both take the content area's bottom, not H: rows and tiles must stop above
+    // the reserved footer band rather than scroll under its text.
+    const float cB = bands.content.y + bands.content.h;
+    if (view_ == GalleryView::List) render_list(r, cW, cB);
+    else                            render_grid(r, cW, cB);
 
     if (const float pw = detail_panel_width(detail_.panel.open, W);
         pw > 0.0f) {
@@ -1448,18 +1483,18 @@ void GalleryGrid::render(gfx::Renderer& r)
     }
 }
 
-void GalleryGrid::render_grid(gfx::Renderer& r, float W, float H)
+void GalleryGrid::render_grid(gfx::Renderer& r, float W, float bottom)
 {
     using namespace gfx::theme;
     const float cell = cell_size_for(view_);
     cols_ = grid_columns(W - 2 * OX, cell, GAP);
     const auto [first_idx, last_idx] = grid_visible_range(
-        scroll_, cell, GAP, OY, H, cols_, static_cast<int>(children_.size()));
-    // Clip tiles to the content area (below the fixed header at OY): a
-    // scrolled-up tile must not paint over the breadcrumb / [F1] / status
-    // lines drawn above OY.
+        scroll_, cell, GAP, OY, bottom, cols_, static_cast<int>(children_.size()));
+    // Clip tiles to the content area — below the fixed header at OY and above the
+    // reserved footer band at `bottom`. A scrolled tile must paint over neither the
+    // breadcrumb / [F1] above nor the status/error line below.
     const SDL_Rect content_clip{0, static_cast<int>(OY), static_cast<int>(W),
-                                static_cast<int>(H - OY)};
+                                static_cast<int>(bottom - OY)};
     SDL_SetRenderClipRect(r.sdl(), &content_clip);
     // If the grid is empty, the range will be {0, -1}; the loop handles this correctly.
     for (int i = first_idx; i <= last_idx; ++i) {
@@ -1548,7 +1583,7 @@ void draw_list_row_metadata(const ListRowMetaContext& ctx, const vault::IndexNod
     }
 }
 
-void GalleryGrid::render_list(gfx::Renderer& r, float W, float H)
+void GalleryGrid::render_list(gfx::Renderer& r, float W, float bottom)
 {
     using namespace gfx::theme;
     cols_ = 1;   // up/down move one row at a time
@@ -1571,13 +1606,13 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float H)
     r.draw_rect({OX, OY + LIST_HEADER - 6, rw, 1.0f}, BORDER);
 
     const auto [first_idx, last_idx] = list_visible_range(
-        scroll_, ROW_H, OY + LIST_HEADER, H, static_cast<int>(children_.size()));
-    // Clip scrolled rows to below the fixed column header: a scrolled-up row
-    // must not paint over the column header or the breadcrumb / [F1] / status
-    // lines above it.
+        scroll_, ROW_H, OY + LIST_HEADER, bottom, static_cast<int>(children_.size()));
+    // Clip scrolled rows to the band between the fixed column header and the
+    // reserved footer: a scrolled row must paint over neither the column header /
+    // breadcrumb / [F1] above it nor the status/error line below it.
     const float rows_top = OY + LIST_HEADER;
     const SDL_Rect rows_clip{0, static_cast<int>(rows_top), static_cast<int>(W),
-                             static_cast<int>(H - rows_top)};
+                             static_cast<int>(bottom - rows_top)};
     SDL_SetRenderClipRect(r.sdl(), &rows_clip);
     for (int i = first_idx; i <= last_idx; ++i) {
         if (i < 0 || i >= static_cast<int>(children_.size())) continue;
@@ -1627,6 +1662,10 @@ void GalleryGrid::draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
 int GalleryGrid::hit_test(float mx, float my) const
 {
     const auto count = static_cast<int>(children_.size());
+    // The chrome bands are not part of the scrollable area, so nothing is pickable
+    // there — without this a click on the footer's status line would hit whatever
+    // row happens to sit behind it in document space.
+    if (my < OY || my >= content_bottom(*this)) return -1;
     // Add scroll offset to mouse Y to convert from viewport to document coordinates.
     const float my_doc = my + scroll_;
     if (view_ == GalleryView::List) {
