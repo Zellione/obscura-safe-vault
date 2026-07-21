@@ -221,7 +221,8 @@ TEST(detail_selection_shared_tags_are_the_intersection)
     b.tags = {"travel", "osaka", "2024"};
 
     const std::vector<const IndexNode*> sel{&a, &b};
-    const auto* shared = section(ui::build_selection_details(sel, {}), "Tags (shared)");
+    const auto c = ui::build_selection_details(sel, {});
+    const auto* shared = section(c, "Tags (shared)");
     REQUIRE(shared != nullptr);
     CHECK_EQ(shared->bullets.size(), static_cast<std::size_t>(2));
     CHECK(shared->bullets.at(0) == "travel");
@@ -236,7 +237,8 @@ TEST(detail_selection_shared_tags_are_case_insensitive)
     b.tags = {"travel"};
 
     const std::vector<const IndexNode*> sel{&a, &b};
-    const auto* shared = section(ui::build_selection_details(sel, {}), "Tags (shared)");
+    const auto c = ui::build_selection_details(sel, {});
+    const auto* shared = section(c, "Tags (shared)");
     REQUIRE(shared != nullptr);
     CHECK_EQ(shared->bullets.size(), static_cast<std::size_t>(1));
     CHECK(shared->bullets.at(0) == "Travel");   // first node's casing wins
@@ -250,7 +252,8 @@ TEST(detail_selection_no_overlap_says_so)
     b.tags = {"osaka"};
 
     const std::vector<const IndexNode*> sel{&a, &b};
-    const auto* shared = section(ui::build_selection_details(sel, {}), "Tags (shared)");
+    const auto c = ui::build_selection_details(sel, {});
+    const auto* shared = section(c, "Tags (shared)");
     REQUIRE(shared != nullptr);
     CHECK_EQ(shared->bullets.size(), static_cast<std::size_t>(1));
     CHECK(shared->bullets.at(0) == "no shared tags");
@@ -261,7 +264,8 @@ TEST(detail_selection_untagged_items_say_no_shared_tags)
     IndexNode a = make_image();
     IndexNode b = make_image();
     const std::vector<const IndexNode*> sel{&a, &b};
-    const auto* shared = section(ui::build_selection_details(sel, {}), "Tags (shared)");
+    const auto c = ui::build_selection_details(sel, {});
+    const auto* shared = section(c, "Tags (shared)");
     REQUIRE(shared != nullptr);
     CHECK(shared->bullets.at(0) == "no shared tags");
 }
@@ -272,7 +276,8 @@ TEST(detail_selection_shows_inherited_once)
     IndexNode b = make_image();
     const std::vector<const IndexNode*> sel{&a, &b};
     const std::vector<std::string> inherited{"japan"};
-    const auto* inh = section(ui::build_selection_details(sel, inherited), "Inherited");
+    const auto c = ui::build_selection_details(sel, inherited);
+    const auto* inh = section(c, "Inherited");
     REQUIRE(inh != nullptr);
     CHECK_EQ(inh->bullets.size(), static_cast<std::size_t>(1));
 }
