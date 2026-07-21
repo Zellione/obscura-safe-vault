@@ -39,14 +39,7 @@ ChipFit fit_chips(std::span<const int> chip_widths, float avail_w, float overflo
     }
 
     // Room must also be found for the "+N" counter; drop shown chips until it
-    // fits. Exception: if exactly one chip is hidden and it is no wider than the
-    // counter, showing it costs no more and says more.
-    if (shown == n - 1) {
-        auto last = static_cast<float>(chip_widths[n - 1]);
-        if (last <= overflow_w && used + CHIP_SPACING + last <= avail_w) {
-            return {.shown = n, .hidden = 0};
-        }
-    }
+    // fits.
     while (shown > 0 && used + CHIP_SPACING + overflow_w > avail_w) {
         --shown;
         used -= static_cast<float>(chip_widths[shown]) + (shown == 0 ? 0.0f : CHIP_SPACING);

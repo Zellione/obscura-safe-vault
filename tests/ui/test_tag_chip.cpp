@@ -40,10 +40,9 @@ TEST(fit_chips_empty_input_is_safe)
     CHECK_EQ(f.hidden, 0);
 }
 
-TEST(fit_chips_never_hides_exactly_one_behind_a_wider_counter)
+TEST(fit_chips_a_run_that_exactly_fills_the_width_shows_every_chip)
 {
-    // If the last chip is narrower than the "+1" counter, showing it is both
-    // cheaper and more useful than counting it.
+    // A run that exactly consumes the available width should show all chips.
     const std::vector<int> w{40, 10};
     const auto f = ui::fit_chips(w, 40.0f + ui::CHIP_SPACING + 10.0f, 30.0f);
     CHECK_EQ(f.shown, 2);
