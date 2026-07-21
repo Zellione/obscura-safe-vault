@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 namespace vault { struct IndexNode; }
@@ -9,9 +10,10 @@ namespace ui {
 // Recursive tally of a gallery subtree's contents, used by the delete-confirm
 // popup to tell the user exactly what a gallery deletion will remove.
 struct SubtreeCounts {
-    int images = 0;
-    int videos = 0;
-    int galleries = 0;   // every nested gallery, at any depth
+    int      images = 0;
+    int      videos = 0;
+    int      galleries = 0;   // every nested gallery, at any depth
+    uint64_t bytes = 0;       // summed plaintext bytes of every descendant image/video
 };
 
 // Walk `node`'s descendants, adding their images/videos/sub-galleries into `c`.
