@@ -372,6 +372,7 @@ void Vault::reset() noexcept
     if (fp_) { std::fclose(fp_); fp_ = nullptr; }
     path_.clear();
     header_ = Header{};
+    settings_ = VaultSettings{};
 }
 
 VaultResult Vault::create(const std::string&       path,
@@ -423,6 +424,7 @@ VaultResult Vault::create(const std::string&       path,
     out.master_key_  = std::move(master);
     out.root_        = IndexNode::gallery("");
     out.unlocked_    = true;
+    out.settings_    = VaultSettings::seeded();
 
     // Write the initial (empty) index + a valid header via the crash-safe path.
     if (const VaultResult r = out.commit_index(); r != VaultResult::Ok) { out.reset(); return r; }
@@ -492,9 +494,11 @@ VaultResult Vault::unlock(std::span<const uint8_t> password,
         }
         IndexNode tmp;
         std::vector<SavedSearch> tmp_searches;
-        if (!deserialize_index(blob, tmp, tmp_searches)) return false;
+        VaultSettings tmp_settings;
+        if (!deserialize_index(blob, tmp, tmp_searches, tmp_settings)) return false;
         root_           = std::move(tmp);
         saved_searches_ = std::move(tmp_searches);
+        settings_       = std::move(tmp_settings);
         return true;
     };
 
@@ -938,6 +942,19 @@ VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey ke
     return v.commit_index();
 }
 
+const VaultSettings& vault_settings(const Vault& v) noexcept
+{
+    return v.settings_;
+}
+
+VaultResult set_vault_settings(Vault& v, VaultSettings s)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+    v.settings_ = std::move(s);
+    return v.commit_index();
+}
+
 VaultResult rename_node(Vault& v, std::string_view gallery_path, std::string_view old_name,
                         std::string_view new_name)
 {
@@ -1274,9 +1291,9 @@ VaultResult Vault::compact(OpProgress* progress)
     if (copy_err != Ok) return fail(copy_err);
 
     // Fresh sealed index into slot A; slot B starts empty in the new file.
-    // Saved searches carry over unchanged (vault-global metadata).
+    // Saved searches and settings carry over unchanged (vault-global metadata).
     std::vector<uint8_t> blob;
-    serialize_index(new_root, saved_searches_, blob);
+    serialize_index(new_root, saved_searches_, settings_, blob);
 
     // Phase 26: framed vaults frame the index blob (mirrors commit_index —
     // unlock de-frames unconditionally when the flag is set, and slot B is
@@ -1377,6 +1394,7 @@ VaultResult Vault::commit_index()
         .master_key_   = master_key_,
         .root_         = root_,
         .saved_searches_ = saved_searches_,
+        .settings_     = settings_,
     };
     return index_io::commit_index(ctx);
 }

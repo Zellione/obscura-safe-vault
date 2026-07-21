@@ -24,9 +24,9 @@ VaultResult commit_index(IndexIoContext& ctx)
 {
     using enum VaultResult;
 
-    // Serialise + seal the index (tree + saved searches) with a fresh random nonce.
+    // Serialise + seal the index (tree + saved searches + settings) with a fresh random nonce.
     std::vector<uint8_t> blob;
-    serialize_index(ctx.root_, ctx.saved_searches_, blob);
+    serialize_index(ctx.root_, ctx.saved_searches_, ctx.settings_, blob);
 
     // Phase 26: framed vaults compress the index blob with the same codec.
     std::vector<uint8_t> framed;

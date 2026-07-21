@@ -205,6 +205,11 @@ public:
     friend SortKey gallery_sort_key(const Vault& v, std::string_view gallery_path);
     friend VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey key);
 
+    // vault_settings/set_vault_settings (Phase 49) are free friends, not members,
+    // for the same cpp:S1448 method-cap reason as gallery_sort_key/set_gallery_sort.
+    friend const VaultSettings& vault_settings(const Vault& v) noexcept;
+    friend VaultResult set_vault_settings(Vault& v, VaultSettings s);
+
     // rename_node (Phase 44) is a free friend for the same cpp:S1448 reason as
     // gallery_sort_key/set_gallery_sort above.
     friend VaultResult rename_node(Vault& v, std::string_view gallery_path,
@@ -291,6 +296,7 @@ private:
     crypto::SecureBuffer<crypto::KEY_SIZE> master_key_;
     IndexNode                              root_ = IndexNode::gallery("");
     std::vector<SavedSearch>               saved_searches_;  // vault-global (Phase 18)
+    VaultSettings                          settings_;        // vault-global (Phase 49)
 };
 
 // Decrypt a thumbnail/poster chunk by its raw (offset, length) span into mlock'd
@@ -313,6 +319,15 @@ private:
 // is unchanged. Locked if not unlocked; NotFound if gallery_path doesn't
 // resolve to a gallery. Phase 37.
 [[nodiscard]] VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey key);
+
+// The vault's global settings — tag categories, default sort, tile-tag flag
+// (Phase 49). Returns the seeded set for a vault that has never stored any.
+// Safe to call while locked (returns the last-loaded value).
+[[nodiscard]] const VaultSettings& vault_settings(const Vault& v) noexcept;
+
+// Replace the vault's global settings and persist them via the crash-safe index
+// swap. Locked if not unlocked. Phase 49.
+[[nodiscard]] VaultResult set_vault_settings(Vault& v, VaultSettings s);
 
 // Rename an image, video, or gallery's own `name` field in place — a pure
 // leaf-field edit. Descendants, tags, favorite flag, sort key, and cover all
