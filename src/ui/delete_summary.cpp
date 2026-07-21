@@ -11,8 +11,8 @@ void count_subtree(const vault::IndexNode& node, SubtreeCounts& c)
 {
     for (const auto& ch : node.children) {
         if (ch.is_gallery())    { ++c.galleries; count_subtree(ch, c); }
-        else if (ch.is_video()) { ++c.videos; }
-        else if (ch.is_image()) { ++c.images; }
+        else if (ch.is_video()) { ++c.videos; c.bytes += ch.vmeta.orig_size; }
+        else if (ch.is_image()) { ++c.images; c.bytes += ch.meta.orig_size; }
     }
 }
 

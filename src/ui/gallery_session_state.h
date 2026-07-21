@@ -23,6 +23,7 @@ namespace ui {
 struct GallerySessionState {
     GalleryView view                 = GalleryView::GridM;   // last-used, session-global
     StripSide   strip_side           = StripSide::Bottom;    // last-used, session-global
+    bool        detail_open          = false;                // detail panel toggle, session-global
 
     // Resume bookmark for the single most-recently-left video (paused, not
     // autoplaying); empty/zero means "nothing to resume". Overwritten each

@@ -4,6 +4,8 @@
 
 #include <vector>
 
+#include "ui/detail_model.h"
+#include "ui/detail_panel.h"
 #include "ui/nav_model.h"
 #include "ui/quick_switch.h"
 #include "ui/rename_dialog.h"
@@ -30,6 +32,11 @@ public:
     void handle_event(const SDL_Event& e) override;
     void update(double dt) override;
     void render(gfx::Renderer& r) override;
+
+    // Seed the panel's open state from the session. Set right after construction
+    // rather than through the constructor, which would push the tag-screen
+    // subclasses past the cpp:S107 parameter limit.
+    void set_detail_open(bool open) { detail_.panel.open = open; }
 
 protected:
     // Subclass hooks.
@@ -71,6 +78,7 @@ private:
     void open_selected();
     [[nodiscard]] int hit_test(float mx, float my) const;
     void start_rename();   // R: rename the focused item (Phase 45 Part 1)
+    void rebuild_detail();
 
     gfx::Window&    win_;
     gfx::FontAtlas& font_;
@@ -82,6 +90,22 @@ private:
     int             cols_ = 1;
     float           scroll_ = 0.0f;  // vertical scroll offset (pixels scrolled down)
     std::string     status_;         // transient feedback line (e.g. rename result)
+
+    // Phase 48 detail panel. Bundled into a single member to stay under the
+    // cpp:S1820 data-member cap. `key` is the cache key: rebuilding walks a
+    // gallery subtree, so it happens only when the focused node actually changes.
+    struct DetailState {
+        DetailPanelState panel;
+        DetailContent    content;
+        std::string      key;
+        float            content_h = 0.0f;
+    };
+    DetailState detail_;
+
+    friend bool current_detail_open(const FavoritesScreen& s);
 };
+
+// App reads this to carry the panel's open state across screen transitions.
+[[nodiscard]] bool current_detail_open(const FavoritesScreen& s);
 
 } // namespace ui

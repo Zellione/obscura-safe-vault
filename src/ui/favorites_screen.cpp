@@ -1,6 +1,7 @@
 #include "ui/favorites_screen.h"
 
 #include <algorithm>
+#include <format>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -10,8 +11,11 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "platform/vault_registry.h"
+#include "ui/detail_model.h"
+#include "ui/detail_panel.h"
 #include "ui/grid_layout.h"
 #include "ui/input.h"
+#include "ui/tag_inherit.h"
 #include "ui/widgets.h"
 
 namespace ui {
@@ -38,12 +42,35 @@ FavoritesScreen::FavoritesScreen(gfx::Window& win, gfx::FontAtlas& font, vault::
 {
 }
 
+bool current_detail_open(const FavoritesScreen& s) { return s.detail_.panel.open; }
+
 void FavoritesScreen::reload()
 {
     favs_ = fetch();
     nav_.set_count(static_cast<int>(favs_.size()));
     nav_.select(0);
-    cols_ = grid_columns(static_cast<float>(win_.width()) - 2 * OX, CELL, GAP);
+    const auto rw = static_cast<float>(win_.width());
+    cols_ = grid_columns(rw - detail_panel_width(detail_.panel.open, rw) - 2 * OX, CELL, GAP);
+    detail_.key.clear();  // SearchHit::node pointers are now invalid
+}
+
+void FavoritesScreen::rebuild_detail()
+{
+    if (!detail_.panel.open) { return; }
+    const int  idx   = nav_.selected();
+    const auto count = static_cast<int>(favs_.size());
+
+    std::string key = std::format("{}|{}", idx, count);
+    if (key == detail_.key) { return; }
+    detail_.key = std::move(key);
+    detail_.panel.scroll = 0.0f;
+
+    if (idx < 0 || idx >= count || favs_[static_cast<size_t>(idx)].node == nullptr) {
+        detail_.content = DetailContent{};
+        return;
+    }
+    const auto& hit = favs_[static_cast<size_t>(idx)];
+    detail_.content = build_node_details(*hit.node, inherited_tags(vault_, hit.path));
 }
 
 void FavoritesScreen::on_enter()
@@ -58,12 +85,13 @@ void FavoritesScreen::update(double)
     const int sel_idx = nav_.selected();
     const auto W = static_cast<float>(win_.width());
     const auto H = static_cast<float>(win_.height());
+    const auto cW = W - detail_panel_width(detail_.panel.open, W);
     if (sel_idx >= 0 && sel_idx < static_cast<int>(favs_.size())) {
-        const SDL_FRect cellr = grid_cell_rect(sel_idx, grid_spec(W, cols_));
+        const SDL_FRect cellr = grid_cell_rect(sel_idx, grid_spec(cW, cols_));
         const float item_top = cellr.y;
         const float item_bottom = cellr.y + CELL;
         // Content height = number of rows * (cell_height + gap) - gap + top offset
-        const int cols = grid_columns(W - 2 * OX, CELL, GAP);
+        const int cols = grid_columns(cW - 2 * OX, CELL, GAP);
         const int total_rows = (static_cast<int>(favs_.size()) + cols - 1) / cols;
         const float content_height = OY + static_cast<float>(total_rows) * (CELL + GAP);
         // Apply selection-following scroll
@@ -75,6 +103,8 @@ void FavoritesScreen::update(double)
         status_ = std::move(s);
         reload();   // the renamed item's new name must show up
     }
+
+    rebuild_detail();
 }
 
 void FavoritesScreen::open_selected()
@@ -112,6 +142,12 @@ void FavoritesScreen::handle_event(const SDL_Event& e)
         case SDL_EVENT_KEY_DOWN:
             if (is_quick_switch_key(e.key)) { quick_switch_.open(); break; }   // switch vault (`)
             if (e.key.key == SDLK_R) { start_rename(); break; }
+            if (handle_detail_panel_scroll(e.key, detail_.panel)) { break; }
+            if (e.key.key == SDLK_D && (e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT)) == 0) {
+                detail_.panel.open = !detail_.panel.open;
+                detail_.key.clear();
+                break;
+            }
             if (handle_extra_key(e.key)) break;   // subclass consumed it (e.g. tag-view toggle)
             switch (map_key(e.key.key, e.key.mod)) {
                 case NavLeft:  nav_.move(-1);     break;
@@ -130,6 +166,10 @@ void FavoritesScreen::handle_event(const SDL_Event& e)
             }
             break;
         case SDL_EVENT_MOUSE_WHEEL: {
+            if (detail_panel_hit(detail_.panel.open, static_cast<float>(win_.width()), e.wheel.mouse_x)) {
+                scroll_detail_panel(detail_.panel, e.wheel.y);
+                break;
+            }
             // Scroll without moving selection.
             const float scroll_step = (CELL + GAP) * 0.5f;
             scroll_ -= e.wheel.y * scroll_step;
@@ -143,14 +183,17 @@ int FavoritesScreen::hit_test(float mx, float my) const
 {
     // Add scroll offset to mouse Y to convert from viewport to document coordinates.
     const float my_doc = my + scroll_;
+    const auto W = static_cast<float>(win_.width());
+    const auto cW = W - detail_panel_width(detail_.panel.open, W);
     return grid_hit(mx, my_doc, static_cast<int>(favs_.size()),
-                    grid_spec(static_cast<float>(win_.width()), cols_));
+                    grid_spec(cW, cols_));
 }
 
 void FavoritesScreen::render(gfx::Renderer& r)
 {
     using namespace gfx::theme;
     const auto W = static_cast<float>(win_.width());
+    const auto cW = W - detail_panel_width(detail_.panel.open, W);
 
     r.draw_text(font_, OX, 40, title(), TEXT_DIM);
     r.draw_text(font_, OX, 90, "[F1] Help", TEXT_FAINT);
@@ -159,12 +202,12 @@ void FavoritesScreen::render(gfx::Renderer& r)
     if (favs_.empty())
         r.draw_text(font_, OX, OY, empty_hint(), TEXT_DIM);
 
-    cols_ = grid_columns(W - 2 * OX, CELL, GAP);
+    cols_ = grid_columns(cW - 2 * OX, CELL, GAP);
     const auto [first_idx, last_idx] = grid_visible_range(
         scroll_, CELL, GAP, OY, H, cols_, static_cast<int>(favs_.size()));
     for (int i = first_idx; i <= last_idx; ++i) {
         if (i < 0 || i >= static_cast<int>(favs_.size())) continue;
-        SDL_FRect cellr = grid_cell_rect(i, grid_spec(W, cols_));
+        SDL_FRect cellr = grid_cell_rect(i, grid_spec(cW, cols_));
         // Apply scroll offset to cell Y position.
         cellr.y -= scroll_;
         const bool sel = (i == nav_.selected());
@@ -194,12 +237,19 @@ void FavoritesScreen::render(gfx::Renderer& r)
 
     quick_switch_.render(r, font_, W, H);
     rename_.render(r, font_, W, H);
+
+    if (const float pw = detail_panel_width(detail_.panel.open, W);
+        pw > 0.0f) {
+        const SDL_FRect panel{W - pw, 0.0f, pw, H};
+        detail_.content_h = draw_detail_panel(r, font_, panel, detail_.content, detail_.panel.scroll);
+        detail_.panel.scroll = ui::clamp_scroll(detail_.panel.scroll, detail_.content_h, H);
+    }
 }
 
 std::vector<ui::HelpGroup> FavoritesScreen::help_groups() const
 {
     std::vector<ui::HelpEntry> nav{
-        {"Enter", "Open"}, {"R", "Rename"}, {"`", "Switch vault"}, {"Esc", "Back"},
+        {"Enter", "Open"}, {"R", "Rename"}, {"D", "Toggle the detail panel"}, {"`", "Switch vault"}, {"Esc", "Back"},
     };
     for (const auto& e : extra_help_entries()) nav.push_back(e);
     return {{"Navigate", nav}};

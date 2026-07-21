@@ -8,10 +8,13 @@
 
 #include "ui/advanced_search_model.h"
 #include "ui/advanced_search_state.h"
+#include "ui/detail_model.h"
+#include "ui/detail_panel.h"
 #include "ui/rename_dialog.h"
 #include "ui/saved_search_panel.h"
 #include "ui/screen.h"
 #include "ui/search_result_view.h"
+#include "ui/tag_inherit.h"
 #include "vault/vault.h"          // vault::SavedSearch
 #include "vault/vault_search.h"   // vault::VaultSearch facade
 
@@ -31,7 +34,8 @@ namespace ui {
 class AdvancedSearchScreen : public Screen {
 public:
     AdvancedSearchScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                         gfx::TextureCache& cache, AdvancedSearchState& session);
+                         gfx::TextureCache& cache, AdvancedSearchState& session,
+                         bool initial_detail_open = false);
 
     void on_enter() override;
     void on_exit() override;
@@ -65,6 +69,7 @@ private:
     void rerun();             // re-evaluate query_ → results_
     void reload_saved();      // refresh saved_ + vocabulary_ from the vault
     void refresh_suggestions();
+    void rebuild_detail();    // cache detail content when focused result changes
 
     // --- event handling (split into small per-focus handlers) ---
     void handle_text(const char* text);
@@ -124,6 +129,23 @@ private:
     SearchResultView    result_view_;
     SavedSearchPanel    saved_panel_;
     RenameDialog        rename_{win_};   // Phase 45 Part 1
+
+    // Phase 48 detail panel. Bundled into a single member to stay under the
+    // cpp:S1448 method cap. `key` is the cache key: rebuilding walks the
+    // result to build content, so it happens only when the focused result
+    // or result count actually changes.
+    struct DetailState {
+        DetailPanelState panel;
+        DetailContent    content;
+        std::string      key;
+        float            content_h = 0.0f;   // last drawn height, for scroll clamping
+    };
+    DetailState detail_;
+
+    friend bool current_detail_open(const AdvancedSearchScreen& s);
 };
+
+// Accessor for App to snapshot the detail panel state on screen exit (Phase 48).
+[[nodiscard]] bool current_detail_open(const AdvancedSearchScreen& s);
 
 } // namespace ui

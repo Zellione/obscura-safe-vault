@@ -28,6 +28,9 @@ namespace ui {
 // Codec display name ("H.264", "H.265"); "Video" for Unknown.
 [[nodiscard]] std::string_view video_codec_name(vault::VideoCodec c) noexcept;
 
+// Container display name ("MP4", "MKV"); "-" for Unknown.
+[[nodiscard]] std::string_view video_container_name(vault::VideoContainer c) noexcept;
+
 // List-view type label: "Video (H.264)" etc.; bare "Video" for Unknown.
 [[nodiscard]] std::string video_type_label(vault::VideoCodec c) noexcept;
 

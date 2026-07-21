@@ -17,11 +17,14 @@
 #include "platform/folder_dialog.h"
 #include "platform/paths.h"
 #include "ui/delete_summary.h"
+#include "ui/detail_model.h"
+#include "ui/detail_panel.h"
 #include "ui/gallery_sort.h"
 #include "ui/gif_model.h"
 #include "ui/grid_layout.h"
 #include "ui/input.h"
 #include "ui/progress_modal.h"
+#include "ui/tag_inherit.h"
 #include "ui/tag_list_parse.h"
 #include "ui/tile_thumb.h"
 #include "ui/video_repair.h"
@@ -140,6 +143,50 @@ void draw_file_op_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
 }
 }
 
+float content_width(const GalleryGrid& g)
+{
+    const auto w = static_cast<float>(g.win_.width());
+    return w - detail_panel_width(g.detail_.panel.open, w);
+}
+
+// Rebuild detail_.content when — and only when — what it describes has changed.
+// Building walks a gallery subtree, so the key guards against redoing that every
+// frame. Selection revision is part of the key because two different selections
+// can have the same size.
+void rebuild_detail(GalleryGrid& g)
+{
+    if (!g.detail_.panel.open) return;
+
+    const int  sel_idx = g.nav_.selected();
+    const bool multi   = g.sel_.count() > 1;
+    const auto count   = static_cast<int>(g.children_.size());
+
+    std::string key = std::format("{}|{}|{}|{}", multi ? "multi" : "single", g.nav_.path(),
+                                  sel_idx, g.sel_.revision());
+    if (key == g.detail_.key) return;
+    g.detail_.key = std::move(key);
+    g.detail_.panel.scroll = 0.0f;   // a new subject starts at the top of the panel
+
+    if (multi) {
+        std::vector<const vault::IndexNode*> picked;
+        for (const int i : g.sel_.indices())
+            if (i >= 0 && i < count) picked.push_back(g.children_[static_cast<size_t>(i)]);
+        // Siblings share one cascade — resolve it from the gallery they live in.
+        const auto inherited = inherited_tags(g.vault_, g.nav_.path());
+        g.detail_.content = build_selection_details(picked, inherited);
+        return;
+    }
+
+    if (sel_idx < 0 || sel_idx >= count || g.children_[static_cast<size_t>(sel_idx)] == nullptr) {
+        g.detail_.content = DetailContent{};
+        return;
+    }
+    const vault::IndexNode& node = *g.children_[static_cast<size_t>(sel_idx)];
+    const std::string node_path =
+        g.nav_.path().empty() ? node.name : g.nav_.path() + "/" + node.name;
+    g.detail_.content = build_node_details(node, inherited_tags(g.vault_, node_path));
+}
+
 GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                          gfx::TextureCache& cache, GridDialogs dialogs,
                          GridVaultCtx vault_ctx, GallerySessionState& session, GridLocation at)
@@ -153,6 +200,7 @@ GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& v
       combine_(vault, vault_ctx.active_vault_path, vault_ctx.registry, dialogs.file, win),
       initial_(std::move(at)), view_(initial_.view)
 {
+    detail_.panel.open = session_.detail_open;
 }
 
 void GalleryGrid::on_enter()
@@ -164,7 +212,7 @@ void GalleryGrid::on_enter()
     // Seed cols_ from the current window size so keyboard NavUp/Down and mouse
     // hit-testing work on the first frame's events (render() recomputes it each
     // frame to track window resizes).
-    cols_ = grid_columns(static_cast<float>(win_.width()) - 2 * OX, cell_size_for(view_), GAP);
+    cols_ = grid_columns(content_width(*this) - 2 * OX, cell_size_for(view_), GAP);
 }
 
 void GalleryGrid::on_exit()
@@ -558,9 +606,28 @@ void handle_delete_key(GalleryGrid& g)
     g.error_ = g.naming_.confirm_delete ? std::string{} : "Nothing selected to delete.";
 }
 
+// Detail-panel key handling (Ctrl+Up/Down scroll, D toggle), extracted from
+// handle_key_down to keep its cognitive complexity under cpp:S3776. Returns
+// true when the key was consumed.
+bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
+{
+    if (handle_detail_panel_scroll(key, g.detail_.panel)) {
+        return true;
+    }
+    if (key.key == SDLK_D && (key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT)) == 0) {
+        g.detail_.panel.open = !g.detail_.panel.open;
+        g.session_.detail_open = g.detail_.panel.open;
+        g.detail_.key.clear();
+        return true;
+    }
+    return false;
+}
+
 void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
 {
-    // Zip-import + delete keep their guards/early-outs as plain ifs.
+    // Detail-panel handling (Ctrl+Up/Down scroll, D toggle). Extracted to reduce
+    // cognitive complexity; must run first, before every other key.
+    if (handle_detail_key(*this, key)) { return; }
     if (key.key == SDLK_Z) {   // import zip archive (inlined to keep GalleryGrid <= 35 methods)
         if (dialogs_.file.busy() || transfer_.active()) return;
         error_.clear();
@@ -753,6 +820,10 @@ void GalleryGrid::handle_event(const SDL_Event& e)
             break;
         }
         case SDL_EVENT_MOUSE_WHEEL: {
+            if (detail_panel_hit(detail_.panel.open, static_cast<float>(win_.width()), e.wheel.mouse_x)) {
+                scroll_detail_panel(detail_.panel, e.wheel.y);
+                break;
+            }
             // Scroll without moving selection.
             const float scroll_step = (view_ == GalleryView::List)
                 ? ROW_H * 2
@@ -1133,7 +1204,7 @@ void update_scroll_to_selection_grid(GalleryGrid& g, int sel_idx, float H)
     // later this frame) — a same-frame density change (L key) would otherwise use
     // last frame's column count here while content_height below already reflects
     // the new one.
-    const auto W = static_cast<float>(g.win_.width());
+    const auto W = content_width(g);
     const float cell = cell_size_for(g.view_);
     const int cols = grid_columns(W - 2 * OX, cell, GAP);
     const SDL_FRect cellr = grid_cell_rect(sel_idx, grid_spec(W, cols, cell));
@@ -1190,6 +1261,8 @@ void GalleryGrid::update(double dt)
             hover_gif_tile_ = -1;
         }
     }
+
+    rebuild_detail(*this);
 }
 
 std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
@@ -1211,6 +1284,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
         }},
         {"Session", {
             {"Shift+S", "Cycle sort order"}, {"U", "Keep unlocked for session"},
+            {"D", "Toggle the detail panel"},
         }},
     };
 }
@@ -1240,9 +1314,10 @@ void GalleryGrid::render(gfx::Renderer& r)
         return;
     }
 
+    const auto cW = content_width(*this);   // layout width available after detail panel reserves space
     using namespace gfx::theme;
     const std::string crumb = breadcrumb_text(nav_, vault::gallery_sort_key(vault_, nav_.path()));
-    r.draw_text(font_, OX, 40, fit_name(crumb, W - 2 * OX), TEXT_DIM);
+    r.draw_text(font_, OX, 40, fit_name(crumb, cW - 2 * OX), TEXT_DIM);
     r.draw_text(font_, OX, 90, "[F1] Help", TEXT_FAINT);
 
     // Show waste hint if it exceeds display threshold (Phase 26).
@@ -1261,8 +1336,15 @@ void GalleryGrid::render(gfx::Renderer& r)
         .status = status_
     });
 
-    if (view_ == GalleryView::List) render_list(r, W, H);
-    else                            render_grid(r, W, H);
+    if (view_ == GalleryView::List) render_list(r, cW, H);
+    else                            render_grid(r, cW, H);
+
+    if (const float pw = detail_panel_width(detail_.panel.open, W);
+        pw > 0.0f) {
+        const SDL_FRect panel{W - pw, 0.0f, pw, H};
+        detail_.content_h = draw_detail_panel(r, font_, panel, detail_.content, detail_.panel.scroll);
+        detail_.panel.scroll = ui::clamp_scroll(detail_.panel.scroll, detail_.content_h, H);
+    }
 
     consent_.render(r, font_, W, H);
 
@@ -1549,12 +1631,12 @@ int GalleryGrid::hit_test(float mx, float my) const
     const float my_doc = my + scroll_;
     if (view_ == GalleryView::List) {
         const float top = OY + LIST_HEADER;
-        if (mx < OX || mx > static_cast<float>(win_.width()) - OX || my_doc < top) return -1;
+        if (mx < OX || mx > content_width(*this) - OX || my_doc < top) return -1;
         const auto idx = static_cast<int>((my_doc - top) / ROW_H);
         return (idx >= 0 && idx < count) ? idx : -1;
     }
     return grid_hit(mx, my_doc, count,
-                    grid_spec(static_cast<float>(win_.width()), cols_, cell_size_for(view_)));
+                    grid_spec(content_width(*this), cols_, cell_size_for(view_)));
 }
 
 std::string GalleryGrid::fit_name(std::string_view name, float max_w) const

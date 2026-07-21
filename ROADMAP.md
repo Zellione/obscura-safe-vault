@@ -59,6 +59,7 @@
 | 45 | Organization, security & fullscreen polish | ✅ | Rename extended to favorites/tag-overview/search-result screens, mass tag add/remove, clipboard copy for password/passphrase, fullscreen hides the thumbnail strip, bigger video seek-bar hit target, auto-lock-off badge fades after 10s. → [details](docs/roadmap/phase-45-organization-ux-polish.md) |
 | 46 | Mixed galleries (images + videos + sub-galleries together) | ✅ | Relax the leaf-only invariant so a gallery can hold any combination of media and sub-galleries, like a real folder. → [details](docs/roadmap/phase-46-mixed-galleries.md) |
 | 47 | Animated GIF support | ✅ | Animated GIFs animate in the viewer (Space pauses) and on the hovered grid/strip tile, and carry an "A" badge. FFmpeg gif decoder + a new `animated` index flag (`INDEX_VERSION` 7). → [details](docs/roadmap/phase-47-animated-gifs.md) |
+| 48 | Gallery detail panel | ✅ | Toggleable right-side panel (`D`; `Ctrl+D` in advanced search) showing name, type/codec, dimensions, size, date, own + inherited tags; recursive tally for galleries; aggregate summary for a multi-selection. No format change. → [details](docs/roadmap/phase-48-detail-panel.md) |
 
 ---
 
