@@ -40,4 +40,15 @@ float draw_detail_panel(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect&
 // scroll bound is applied by the caller (draw_detail_panel returns the height).
 bool handle_detail_panel_scroll(const SDL_KeyboardEvent& key, DetailPanelState& st);
 
+// True when the cursor x falls inside the open panel's reserved strip. The panel
+// spans the full window height, so only x matters. False whenever the panel
+// reserves no width (closed, or window below DETAIL_PANEL_MIN_WINDOW).
+[[nodiscard]] bool detail_panel_hit(bool open, float window_width, float mouse_x) noexcept;
+
+// Scroll the panel by one wheel notch. SDL's wheel y is positive when scrolling
+// away from the user, which should move the content UP (toward the start), so the
+// scroll offset DECREASES. Clamped at 0; the upper bound is applied by the caller
+// via clamp_scroll against the height draw_detail_panel returns.
+void scroll_detail_panel(DetailPanelState& st, float wheel_y) noexcept;
+
 } // namespace ui

@@ -93,4 +93,18 @@ bool handle_detail_panel_scroll(const SDL_KeyboardEvent& key, DetailPanelState& 
     return false;
 }
 
+bool detail_panel_hit(bool open, float window_width, float mouse_x) noexcept
+{
+    const float w = detail_panel_width(open, window_width);
+    if (w <= 0.0f) {
+        return false;
+    }
+    return mouse_x >= window_width - w;
+}
+
+void scroll_detail_panel(DetailPanelState& st, float wheel_y) noexcept
+{
+    st.scroll = std::max(0.0f, st.scroll - wheel_y * DETAIL_PANEL_SCROLL_STEP);
+}
+
 }  // namespace ui

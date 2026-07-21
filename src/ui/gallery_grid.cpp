@@ -808,6 +808,10 @@ void GalleryGrid::handle_event(const SDL_Event& e)
             break;
         }
         case SDL_EVENT_MOUSE_WHEEL: {
+            if (detail_panel_hit(detail_.panel.open, static_cast<float>(win_.width()), e.wheel.mouse_x)) {
+                scroll_detail_panel(detail_.panel, e.wheel.y);
+                break;
+            }
             // Scroll without moving selection.
             const float scroll_step = (view_ == GalleryView::List)
                 ? ROW_H * 2
