@@ -12,6 +12,7 @@
 #include "image/decode_worker.h"
 #include "ui/combine_dialog.h"
 #include "ui/consent_dialog.h"
+#include "ui/detail_panel.h"
 #include "ui/file_op_job.h"
 #include "ui/gallery_session_state.h"
 #include "ui/gallery_view.h"
@@ -34,6 +35,16 @@ namespace vault { class Vault; struct IndexNode; }
 namespace platform { class FileDialog; class FolderDialog; class VaultRegistry; }
 
 namespace ui {
+
+// Layout width available to the grid: the window minus whatever the detail panel
+// reserves. A free friend for the same cpp:S1448 reason as current_gallery_view.
+// Every layout site (render, scroll-to-selection, hit-test) MUST use this rather
+// than win_.width(), or picking and drawing disagree once the panel is open.
+[[nodiscard]] float content_width(const class GalleryGrid& g);
+
+// Rebuild the panel's cached content when the focused node or selection changes.
+// A free friend for the same cpp:S1448 reason as content_width.
+void rebuild_detail(class GalleryGrid& g);
 
 // Where to (re)open the grid: a gallery path (empty = root), the selected
 // tile index, and the initial List/Grid view (Phase 39 Part 2 session
@@ -137,6 +148,8 @@ private:
     friend void update_scroll_to_selection(GalleryGrid& g);
     friend void update_scroll_to_selection_list(GalleryGrid& g, int sel_idx, float H);
     friend void update_scroll_to_selection_grid(GalleryGrid& g, int sel_idx, float H);
+    friend float content_width(const GalleryGrid& g);
+    friend void  rebuild_detail(GalleryGrid& g);
     void draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
                          const SDL_FRect& box);
     [[nodiscard]] int  hit_test(float mx, float my) const;  // item under cursor, or -1
@@ -215,6 +228,18 @@ private:
     };
     ThumbDecode thumbs_;
 
+    // Phase 48 detail panel. Bundled into a single member to stay under the
+    // cpp:S1820 data-member cap. `key` is the cache key described in
+    // rebuild_detail(): rebuilding walks a gallery subtree, so it happens only
+    // when the focused node or the selection actually changes.
+    struct DetailState {
+        DetailPanelState panel;
+        DetailContent    content;
+        std::string      key;
+        float            content_h = 0.0f;   // last drawn height, for scroll clamping
+    };
+    DetailState detail_;
+
     // Hover animation (Phase 47 Task 10). At most one animation at a time across
     // the whole screen. The gate tracks dwell time; playback renders the animation.
     GifHoverGate                 hover_gate_;
@@ -227,7 +252,8 @@ private:
 // grid's status + listing; vault_busy reports whether any worker owns the vault(s);
 // handle_job_input swallows input (Esc→cancel) while a job runs; handle_shift_c_key /
 // handle_delete_key extract key handlers to reduce handle_key_down's cognitive complexity;
-// set_cancelled_import_status handles cancelled import waste hints.
+// set_cancelled_import_status handles cancelled import waste hints; content_width and
+// rebuild_detail manage detail panel lifecycle and layout (Phase 48).
 void poll_import_job(GalleryGrid& g);
 void poll_file_job(GalleryGrid& g);
 [[nodiscard]] bool vault_busy(const GalleryGrid& g);
