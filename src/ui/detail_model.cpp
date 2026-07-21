@@ -1,10 +1,13 @@
 #include "ui/detail_model.h"
 
+#include <algorithm>
+#include <format>
 #include <string_view>
 
 #include "ui/delete_summary.h"   // SubtreeCounts, count_subtree, describe_subtree
 #include "ui/gallery_sort.h"     // sort_key_label
 #include "ui/meta_format.h"
+#include "ui/tag_inherit.h"      // tag_ci_equal
 #include "vault/index.h"
 
 namespace ui {
@@ -63,6 +66,31 @@ DetailSection gallery_rows(const vault::IndexNode& n)
     return s;
 }
 
+// Case-insensitive intersection of every node's own tags, in the first node's
+// order and casing. Empty when any node lacks one of the first node's tags.
+std::vector<std::string> shared_tags(std::span<const vault::IndexNode* const> nodes)
+{
+    const vault::IndexNode* first = nullptr;
+    for (const auto* n : nodes) {
+        if (n != nullptr) { first = n; break; }
+    }
+    if (first == nullptr) {
+        return {};
+    }
+
+    std::vector<std::string> out;
+    for (const auto& tag : first->tags) {
+        const bool in_all = std::ranges::all_of(nodes, [&tag](const vault::IndexNode* n) {
+            return n == nullptr || std::ranges::any_of(
+                       n->tags, [&tag](const std::string& t) { return tag_ci_equal(tag, t); });
+        });
+        if (in_all) {
+            out.push_back(tag);
+        }
+    }
+    return out;
+}
+
 }  // namespace
 
 void append_tag_sections(DetailContent&               out,
@@ -73,12 +101,12 @@ void append_tag_sections(DetailContent&               out,
     if (!own.empty()) {
         out.sections.push_back({.title   = std::string(own_title),
                                 .rows    = {},
-                                .bullets = {own.begin(), own.end()}});
+                                .bullets = std::vector<std::string>(own.begin(), own.end())});
     }
     if (!inherited.empty()) {
         out.sections.push_back({.title   = "Inherited",
                                 .rows    = {},
-                                .bullets = {inherited.begin(), inherited.end()}});
+                                .bullets = std::vector<std::string>(inherited.begin(), inherited.end())});
     }
 }
 
@@ -94,6 +122,39 @@ DetailContent build_node_details(const vault::IndexNode&      node,
         out.sections.push_back(gallery_rows(node));
     }
     append_tag_sections(out, node.tags, inherited, "Tags");
+    return out;
+}
+
+DetailContent build_selection_details(std::span<const vault::IndexNode* const> nodes,
+                                      std::span<const std::string>            inherited)
+{
+    DetailContent out;
+    out.heading = std::format("{} item{} selected", nodes.size(), nodes.size() == 1 ? "" : "s");
+    if (nodes.empty()) {
+        return out;
+    }
+
+    // A selected gallery counts itself and contributes its whole subtree, so the
+    // totals answer "what would an export/delete of this selection touch?".
+    SubtreeCounts tally;
+    for (const auto* n : nodes) {
+        if (n == nullptr) {
+            continue;
+        }
+        if (n->is_gallery())    { ++tally.galleries; count_subtree(*n, tally); }
+        else if (n->is_video()) { ++tally.videos; tally.bytes += n->vmeta.orig_size; }
+        else                    { ++tally.images; tally.bytes += n->meta.orig_size; }
+    }
+    out.sections.push_back({.title   = "",
+                            .rows    = {{.label = "Contains",   .value = describe_subtree(tally)},
+                                        {.label = "Total size", .value = format_size(tally.bytes)}},
+                            .bullets = {}});
+
+    auto shared = shared_tags(nodes);
+    if (shared.empty()) {
+        shared.emplace_back("no shared tags");
+    }
+    append_tag_sections(out, shared, inherited, "Tags (shared)");
     return out;
 }
 

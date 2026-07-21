@@ -180,3 +180,99 @@ TEST(detail_gallery_sort_row_shown_only_when_not_manual)
     g.sort_key = vault::SortKey::NameAsc;
     CHECK(!row_value(ui::build_node_details(g, {}), "Sort").empty());
 }
+
+TEST(detail_selection_counts_and_total_size)
+{
+    IndexNode a = make_image();          // 3'250'586 bytes
+    IndexNode v = make_video();          // 92'485'386 bytes
+    IndexNode inner = IndexNode::image("inner.jpg");
+    inner.meta.orig_size = 1024;
+    IndexNode g = IndexNode::gallery("sub");
+    g.children.push_back(std::move(inner));
+
+    const std::vector<const IndexNode*> sel{&a, &v, &g};
+    const auto c = ui::build_selection_details(sel, {});
+
+    CHECK(c.heading == "3 items selected");
+    // The selected gallery counts itself AND contributes its subtree.
+    CHECK(row_value(c, "Contains") == "2 images, 1 video, 1 sub-gallery");
+    CHECK(row_value(c, "Total size") == "91.3 MB");   // 3250586 + 92485386 + 1024
+}
+
+TEST(detail_selection_single_item_is_singular)
+{
+    IndexNode a = make_image();
+    const std::vector<const IndexNode*> sel{&a};
+    CHECK(ui::build_selection_details(sel, {}).heading == "1 item selected");
+}
+
+TEST(detail_selection_empty)
+{
+    const auto c = ui::build_selection_details({}, {});
+    CHECK(c.heading == "0 items selected");
+    CHECK(c.sections.empty());
+}
+
+TEST(detail_selection_shared_tags_are_the_intersection)
+{
+    IndexNode a = make_image();
+    a.tags = {"travel", "kyoto", "2024"};
+    IndexNode b = make_image();
+    b.tags = {"travel", "osaka", "2024"};
+
+    const std::vector<const IndexNode*> sel{&a, &b};
+    const auto* shared = section(ui::build_selection_details(sel, {}), "Tags (shared)");
+    REQUIRE(shared != nullptr);
+    CHECK_EQ(shared->bullets.size(), static_cast<std::size_t>(2));
+    CHECK(shared->bullets.at(0) == "travel");
+    CHECK(shared->bullets.at(1) == "2024");
+}
+
+TEST(detail_selection_shared_tags_are_case_insensitive)
+{
+    IndexNode a = make_image();
+    a.tags = {"Travel"};
+    IndexNode b = make_image();
+    b.tags = {"travel"};
+
+    const std::vector<const IndexNode*> sel{&a, &b};
+    const auto* shared = section(ui::build_selection_details(sel, {}), "Tags (shared)");
+    REQUIRE(shared != nullptr);
+    CHECK_EQ(shared->bullets.size(), static_cast<std::size_t>(1));
+    CHECK(shared->bullets.at(0) == "Travel");   // first node's casing wins
+}
+
+TEST(detail_selection_no_overlap_says_so)
+{
+    IndexNode a = make_image();
+    a.tags = {"kyoto"};
+    IndexNode b = make_image();
+    b.tags = {"osaka"};
+
+    const std::vector<const IndexNode*> sel{&a, &b};
+    const auto* shared = section(ui::build_selection_details(sel, {}), "Tags (shared)");
+    REQUIRE(shared != nullptr);
+    CHECK_EQ(shared->bullets.size(), static_cast<std::size_t>(1));
+    CHECK(shared->bullets.at(0) == "no shared tags");
+}
+
+TEST(detail_selection_untagged_items_say_no_shared_tags)
+{
+    IndexNode a = make_image();
+    IndexNode b = make_image();
+    const std::vector<const IndexNode*> sel{&a, &b};
+    const auto* shared = section(ui::build_selection_details(sel, {}), "Tags (shared)");
+    REQUIRE(shared != nullptr);
+    CHECK(shared->bullets.at(0) == "no shared tags");
+}
+
+TEST(detail_selection_shows_inherited_once)
+{
+    IndexNode a = make_image();
+    IndexNode b = make_image();
+    const std::vector<const IndexNode*> sel{&a, &b};
+    const std::vector<std::string> inherited{"japan"};
+    const auto* inh = section(ui::build_selection_details(sel, inherited), "Inherited");
+    REQUIRE(inh != nullptr);
+    CHECK_EQ(inh->bullets.size(), static_cast<std::size_t>(1));
+}

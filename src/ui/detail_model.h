@@ -47,4 +47,11 @@ void append_tag_sections(DetailContent&               out,
 [[nodiscard]] DetailContent build_node_details(const vault::IndexNode&      node,
                                                std::span<const std::string> inherited);
 
+// Describe a multi-item selection: per-kind counts, summed size, and the tags
+// every selected item carries. Selected items are always siblings, so they
+// share one `inherited` cascade. Null pointers in `nodes` are skipped.
+[[nodiscard]] DetailContent build_selection_details(
+        std::span<const vault::IndexNode* const> nodes,
+        std::span<const std::string>            inherited);
+
 } // namespace ui
