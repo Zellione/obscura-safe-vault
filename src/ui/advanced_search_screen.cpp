@@ -278,10 +278,9 @@ void AdvancedSearchScreen::handle_event(const SDL_Event& e)
     if (rename_.active()) { (void)rename_.handle_event(vault_, e); return; }
     if (e.type == SDL_EVENT_TEXT_INPUT)    handle_text(e.text.text);
     else if (e.type == SDL_EVENT_KEY_DOWN) handle_key(e.key);
-    else if (e.type == SDL_EVENT_MOUSE_WHEEL) {
-        if (detail_panel_hit(detail_.panel.open, static_cast<float>(win_.width()), e.wheel.mouse_x)) {
-            scroll_detail_panel(detail_.panel, e.wheel.y);
-        }
+    else if (e.type == SDL_EVENT_MOUSE_WHEEL &&
+             detail_panel_hit(detail_.panel.open, static_cast<float>(win_.width()), e.wheel.mouse_x)) {
+        scroll_detail_panel(detail_.panel, e.wheel.y);
     }
 }
 

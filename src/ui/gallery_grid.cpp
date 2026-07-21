@@ -606,16 +606,28 @@ void handle_delete_key(GalleryGrid& g)
     g.error_ = g.naming_.confirm_delete ? std::string{} : "Nothing selected to delete.";
 }
 
+// Detail-panel key handling (Ctrl+Up/Down scroll, D toggle), extracted from
+// handle_key_down to keep its cognitive complexity under cpp:S3776. Returns
+// true when the key was consumed.
+bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
+{
+    if (handle_detail_panel_scroll(key, g.detail_.panel)) {
+        return true;
+    }
+    if (key.key == SDLK_D && (key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT)) == 0) {
+        g.detail_.panel.open = !g.detail_.panel.open;
+        g.session_.detail_open = g.detail_.panel.open;
+        g.detail_.key.clear();
+        return true;
+    }
+    return false;
+}
+
 void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
 {
-    // Zip-import + delete keep their guards/early-outs as plain ifs.
-    if (handle_detail_panel_scroll(key, detail_.panel)) return;
-    if (key.key == SDLK_D && (key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT)) == 0) {
-        detail_.panel.open = !detail_.panel.open;
-        session_.detail_open = detail_.panel.open;
-        detail_.key.clear();          // force a rebuild on the next update()
-        return;
-    }
+    // Detail-panel handling (Ctrl+Up/Down scroll, D toggle). Extracted to reduce
+    // cognitive complexity; must run first, before every other key.
+    if (handle_detail_key(*this, key)) { return; }
     if (key.key == SDLK_Z) {   // import zip archive (inlined to keep GalleryGrid <= 35 methods)
         if (dialogs_.file.busy() || transfer_.active()) return;
         error_.clear();

@@ -18,12 +18,19 @@ constexpr float SUBHEADING_H = 24.0f;
 constexpr float SECTION_GAP  = 18.0f;   // space above a section title
 constexpr float TITLE_H      = 22.0f;
 
-// Draw one line if it falls inside `rect`; always returns the next y.
-float line(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& rect, float x, float y,
-           float height, std::string_view text, gfx::Color c)
+// Per-draw invariants shared by every line in one draw_detail_panel call.
+struct LineCtx {
+    gfx::Renderer&   r;
+    gfx::FontAtlas&  font;
+    const SDL_FRect& rect;
+    float            x;
+};
+
+// Draw one line if it falls inside `ctx.rect`; always returns the next y.
+float line(const LineCtx& ctx, float y, float height, std::string_view text, gfx::Color c)
 {
-    if (y + height > rect.y && y < rect.y + rect.h) {
-        r.draw_text(font, x, y, fit_text(font, text, rect.w - (2.0f * PAD)), c);
+    if (y + height > ctx.rect.y && y < ctx.rect.y + ctx.rect.h) {
+        ctx.r.draw_text(ctx.font, ctx.x, y, fit_text(ctx.font, text, ctx.rect.w - (2.0f * PAD)), c);
     }
     return y + height;
 }
@@ -53,22 +60,24 @@ float draw_detail_panel(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect&
     float       y = rect.y + PAD - scroll;
     const float start_y = y;
 
-    y = line(r, font, rect, x, y, HEADING_H, content.heading, TEXT);
+    LineCtx ctx{r, font, rect, x};
+
+    y = line(ctx, y, HEADING_H, content.heading, TEXT);
     if (!content.subheading.empty()) {
-        y = line(r, font, rect, x, y, SUBHEADING_H, content.subheading, FAVORITE);
+        y = line(ctx, y, SUBHEADING_H, content.subheading, FAVORITE);
     }
 
     for (const auto& s : content.sections) {
         y += SECTION_GAP;
         if (!s.title.empty()) {
-            y = line(r, font, rect, x, y, TITLE_H, s.title, TEXT_FAINT);
+            y = line(ctx, y, TITLE_H, s.title, TEXT_FAINT);
         }
         for (const auto& row : s.rows) {
-            y = line(r, font, rect, x, y, ROW_H,
+            y = line(ctx, y, ROW_H,
                      std::format("{}  {}", row.label, row.value), TEXT_DIM);
         }
         for (const auto& b : s.bullets) {
-            y = line(r, font, rect, x, y, ROW_H, std::format("• {}", b), TEXT_DIM);
+            y = line(ctx, y, ROW_H, std::format("• {}", b), TEXT_DIM);
         }
     }
     return (y - start_y) + PAD;

@@ -46,6 +46,11 @@ namespace ui {
 // A free friend for the same cpp:S1448 reason as content_width.
 void rebuild_detail(class GalleryGrid& g);
 
+// Detail-panel key handling (Ctrl+Up/Down scroll, D toggle), extracted from
+// handle_key_down to keep its cognitive complexity under cpp:S3776. Returns
+// true when the key was consumed.
+bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
+
 // Where to (re)open the grid: a gallery path (empty = root), the selected
 // tile index, and the initial List/Grid view (Phase 39 Part 2 session
 // memory). Used to restore position + view mode when returning from the
@@ -133,6 +138,7 @@ private:
     friend bool handle_job_input(GalleryGrid& g, const SDL_Event& e);  // job-active Esc→cancel gate
     friend void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key);  // Shift+C compact confirm
     friend void handle_delete_key(GalleryGrid& g);                                   // Del confirm
+    friend bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key);     // detail panel scroll/toggle
     friend void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);  // cancelled import waste hint
     // current_gallery_view is a free friend for the same S1448 reason: App reads it
     // (Phase 39 Part 2) to snapshot the outgoing grid's view mode into GallerySessionState.

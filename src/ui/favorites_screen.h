@@ -26,13 +26,17 @@ namespace ui {
 class FavoritesScreen : public Screen {
 public:
     FavoritesScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                    platform::VaultRegistry& registry, std::string active_path,
-                    bool initial_detail_open = false);
+                    platform::VaultRegistry& registry, std::string active_path);
 
     void on_enter() override;
     void handle_event(const SDL_Event& e) override;
     void update(double dt) override;
     void render(gfx::Renderer& r) override;
+
+    // Seed the panel's open state from the session. Set right after construction
+    // rather than through the constructor, which would push the tag-screen
+    // subclasses past the cpp:S107 parameter limit.
+    void set_detail_open(bool open) { detail_.panel.open = open; }
 
 protected:
     // Subclass hooks.
