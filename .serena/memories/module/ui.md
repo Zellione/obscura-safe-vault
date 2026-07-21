@@ -18,6 +18,10 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   seeds a freshly constructed grid via `session_.recall(path)` unless `explicit_index` (App
   sets that only when the outgoing screen was an ImageViewer — the one nav.index that is a
   real freshly-known position); every other ToGallery source passes 0 ("no opinion").
+  Phase 48: `content_width(const GalleryGrid&)` free friend is now the SINGLE layout-width
+  source (window minus detail panel) — render(), scroll-to-selection, on_enter's cols_ seed,
+  and hit_test all route through it; using win_.width() directly desyncs picking from drawing
+  whenever the panel is open.
 - `favorites_images.*` — flat grid of favorited images across the vault; opens a
   favorites-scoped viewer (ToFavoriteViewer: prev/next iterate the favorites set, Esc returns
   to the grid). `favorites_screen.*` is the shared base (grid/selection/badge) with
@@ -37,7 +41,9 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `render_result_grid` free friend reuses the shared tile_thumb draw. Query/params/cursor/view
   persist across visits via session-scoped `ui::AdvancedSearchState` App owns + resets on vault
   change; restored on_enter / saved on_exit (results re-derived, node ptrs not persisted).
-  Ctrl+R clears the query behind a Y/N modal.
+  Ctrl+R clears the query behind a Y/N modal. Phase 48: detail panel + `Ctrl+D` toggle (bare
+  `D` types into query buffer); all result repopulation funnels through `rerun()`, which clears
+  the cache key.
 - `tag_overview.*` — `Shift+T` first-class Screen (`NavKind::ToTagOverview`): scrollable tag
   list (Up/Down, Enter, Tab=toggle sort, type=prefix filter, `` ` ``=quick-switch); counts
   from `VaultSearch::tag_overview`; Enter -> TagGalleries.
@@ -151,7 +157,9 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   per-screen grouped content; App owns HelpPopupState + intercepts F1 globally. Esc/Q close.
 
 ## Export (the one gated invariant-#1 deviation)
-- `selection_model.*` — multi-select state for export (pure/tested).
+- `selection_model.*` — multi-select state for export (pure/tested). Phase 48: gained
+  `revision()`, a monotonic counter incremented on `toggle()` and `clear()`, used as a cache
+  key by the detail panel.
 - `export_ui.*` — shared consent + folder-pick plumbing used by gallery + viewer.
 - `export.*` — decrypt→write-verbatim→wipe export (SDL-free/tested). The ONE deliberate
   deviation from invariant #1: writes decrypted originals to disk on explicit user consent
@@ -219,9 +227,10 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `cell_size_for(view)` (S=128/M=188/L=248/XL=320, List unused) + `next_gallery_view(view)`
   (the `L`-key cycle). GridM==188 matches the old fixed CELL. `gallery_view.cpp` is listed
   explicitly (not globbed) in osv_tests' premake5.lua files{}.
-- `gallery_session_state.h` — `GallerySessionState{view,strip_side,last_media_path,
+- `gallery_session_state.h` — `GallerySessionState{view,strip_side,detail_open,last_media_path,
   video_resume_seconds}` + `last_index_by_path` (unordered_map, key=NavModel::path()) +
-  record(path,index)/recall(path) (0 default) + reset(). App-owned; App writes most fields once
+  record(path,index)/recall(path) (0 default) + reset(). Phase 48: added `bool detail_open`,
+  persisted across screen transitions within a session. App-owned; App writes most fields once
   at screen exit, but GalleryGrid writes `last_index_by_path` repeatedly during its lifetime.
 - `nav_model.*`, `input.*`, `viewer_model.h`, `screen.h` — navigation model, input handling,
   viewer model, Screen base (with `help_groups()` virtual overridden by GalleryGrid,
@@ -256,6 +265,16 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   opaque). GalleryGrid `Shift+G` on a gallery tile opens a .txt dialog -> add_tag each (merge).
 - `tag_overview_model.*` — `TagTally{tag,gallery_count,image_count}` + sort_tags(Name/Count) +
   filter_tags(ci prefix).
+- `detail_model.*` (Phase 48) — pure detail-panel content: `DetailRow`/`DetailSection`/
+  `DetailContent` + `build_node_details(node, inherited)` (image/video/gallery field sets,
+  own+inherited tag sections) + `build_selection_details(nodes, inherited)` (aggregate counts,
+  summed size, ci tag intersection, "no shared tags"). Delegates every string to meta_format;
+  gallery totals via `count_subtree`. SDL-/gfx-free, unit-tested.
+- `detail_panel.*` (Phase 48) — right-edge panel: `DetailPanelState{open,scroll}`,
+  pure `detail_panel_width(open,window_w)` (0 when closed OR window < 640 px),
+  `draw_detail_panel(...)` (returns content height for scroll clamping; culls to rect,
+  fit_text-elides every vault string), `handle_detail_panel_scroll` (Ctrl+Up/Down).
+  Hosted by GalleryGrid, FavoritesScreen (covers all 4 subclasses), AdvancedSearchScreen.
 - `gif_repair.*` (Phase 47) — `maybe_repair_gif_animated(...)` + `Vault::repair_image_animated(path,bool)`:
   lazy bidirectional healing for GIFs stored before Phase 47, persisted via the same crash-safe
   `commit_index()` path as video repair. No-op when the animated flag is already correct.
@@ -268,11 +287,12 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   pre-existed). NOTE: `gfx::Renderer::draw_thumbnail_strip` duplicates this layout internally
   (gfx must not depend on ui) — both sites carry SYNC comments; keep in sync on geometry changes.
 - `scroll_model.*` — fill-width continuous-scroll maths.
-- `meta_format.*` — list-view metadata formatting: size/dimensions/date/type.
+- `meta_format.*` — list-view metadata formatting: size/dimensions/date/type. Phase 48: added
+  `video_container_name(VideoCodec)` returning container label ("MP4"/"MKV"/"-" for unknown).
 - `delete_summary.*` — recursive tally of a gallery subtree (images/videos/sub-galleries) +
-  plural-aware format for the Del confirm popup. GalleryGrid Del removes the focused
-  image/video (`Vault::remove_image`) or gallery subtree (`Vault::remove_gallery`) behind the
-  modal.
+  plural-aware format for the Del confirm popup. Phase 48: `SubtreeCounts` gained `uint64_t bytes`,
+  summing descendant `orig_size`. GalleryGrid Del removes the focused image/video
+  (`Vault::remove_image`) or gallery subtree (`Vault::remove_gallery`) behind the modal.
 - `gallery_cover.*` — cover resolution (walks index tree -> thumb chunk spans only):
   `resolve_single_cover` (leaf: first image thumb / first video poster; non-leaf: recurse first
   sub-gallery) + `resolve_covers` (non-leaf: up to 4 sub-gallery covers in child order).
