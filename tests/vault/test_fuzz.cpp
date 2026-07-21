@@ -210,20 +210,34 @@ TEST(fuzz_index_deserialize_survives_3000_malformed_blobs)
         vault::SavedSearch{"cats", {0x01, 0x05, 0x00, 0x00, 0x00, 0x02}},
         vault::SavedSearch{"trips", {0xAA, 0xBB, 0xCC}},
     };
+    // A v8 settings block exercises the Phase 49 parsing path: a non-default
+    // sort key, the tiles flag cleared, and categories spanning an ordinary
+    // name, a maximum-length name, and the highest valid swatch.
+    vault::VaultSettings settings;
+    settings.default_sort    = vault::SortKey::DateDesc;
+    settings.tiles_show_tags = false;
+    settings.categories = {
+        {.name = "artist", .swatch = 0},
+        {.name = std::string(vault::INDEX_MAX_CATEGORY_BYTES, 'x'),
+         .swatch = vault::TAG_SWATCH_COUNT - 1},
+        {.name = "parody", .swatch = 7},
+    };
     std::vector<uint8_t> valid;
-    vault::serialize_index(root, searches, valid);
+    vault::serialize_index(root, searches, settings, valid);
 
     for (int i = 0; i < 1500; ++i) {
         const auto blob = random_bytes(rng, rng.below(2048));
         vault::IndexNode out;
         std::vector<vault::SavedSearch> out_searches;
-        (void)vault::deserialize_index(blob, out, out_searches);
+        vault::VaultSettings out_settings;
+        (void)vault::deserialize_index(blob, out, out_searches, out_settings);
     }
     for (int i = 0; i < 1500; ++i) {
         const auto blob = mutate(rng, valid);
         vault::IndexNode out;
         std::vector<vault::SavedSearch> out_searches;
-        (void)vault::deserialize_index(blob, out, out_searches);
+        vault::VaultSettings out_settings;
+        (void)vault::deserialize_index(blob, out, out_searches, out_settings);
     }
 }
 
