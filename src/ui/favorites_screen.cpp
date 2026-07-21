@@ -63,7 +63,7 @@ void FavoritesScreen::rebuild_detail()
     const auto count = static_cast<int>(favs_.size());
 
     std::string key = std::format("{}|{}", idx, count);
-    if (key == detail_.key) return;
+    if (key == detail_.key) { return; }
     detail_.key = std::move(key);
     detail_.panel.scroll = 0.0f;
 
@@ -144,7 +144,7 @@ void FavoritesScreen::handle_event(const SDL_Event& e)
         case SDL_EVENT_KEY_DOWN:
             if (is_quick_switch_key(e.key)) { quick_switch_.open(); break; }   // switch vault (`)
             if (e.key.key == SDLK_R) { start_rename(); break; }
-            if (handle_detail_panel_scroll(e.key, detail_.panel)) break;
+            if (handle_detail_panel_scroll(e.key, detail_.panel)) { break; }
             if (e.key.key == SDLK_D && (e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT)) == 0) {
                 detail_.panel.open = !detail_.panel.open;
                 detail_.key.clear();
