@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <format>
 #include <utility>
 #include <vector>
@@ -195,6 +196,13 @@ void draw_tag_chips(gfx::Renderer& r, gfx::FontAtlas& font, float x, float y, fl
     if (fit.hidden > 0) {
         r.draw_text(font, cx, text_y, std::format("+{}", fit.hidden), gfx::theme::TEXT_FAINT);
     }
+}
+
+bool any_chips_to_show(std::span<const vault::IndexNode* const> children) noexcept
+{
+    return std::ranges::any_of(children, [](const vault::IndexNode* n) {
+        return n != nullptr && !n->tags.empty();
+    });
 }
 
 } // namespace ui

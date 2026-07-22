@@ -57,4 +57,12 @@ void draw_tag_chips(gfx::Renderer& r, gfx::FontAtlas& font, float x, float y, fl
 // ellipsis will fit. Pure; unit-tested.
 [[nodiscard]] float lone_chip_text_w(float max_w, float overflow_w, int hidden_after) noexcept;
 
+// True if any child in the current listing carries at least one own tag — i.e.
+// this gallery needs a chip line reserved. Deciding it PER GALLERY (not per tile)
+// is what keeps rows from going ragged: within one listing either every cell
+// reserves CHIP_ROW_H or none does, so an untagged vault looks exactly as it did
+// before Phase 49. The configured categories are deliberately NOT consulted — an
+// uncategorised tag still draws (verbatim, dimmed), so it still needs a line.
+[[nodiscard]] bool any_chips_to_show(std::span<const vault::IndexNode* const> children) noexcept;
+
 } // namespace ui

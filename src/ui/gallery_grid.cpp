@@ -25,6 +25,7 @@
 #include "ui/grid_layout.h"
 #include "ui/input.h"
 #include "ui/progress_modal.h"
+#include "ui/tag_chip.h"
 #include "ui/tag_inherit.h"
 #include "ui/tag_list_parse.h"
 #include "ui/tile_thumb.h"
@@ -1488,6 +1489,14 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float bottom)
 {
     using namespace gfx::theme;
     const float cell = cell_size_for(view_);
+    // Per-gallery, not per-tile: a uniform reservation is what stops rows going
+    // ragged. Recomputed each frame rather than cached, so toggling the setting
+    // or re-tagging a child can never leave a stale reservation behind.
+    const auto& settings = vault::vault_settings(vault_);
+    const float chip_h   = (settings.tiles_show_tags && any_chips_to_show(children_))
+                               ? CHIP_ROW_H
+                               : 0.0f;
+    const auto& cats     = settings.categories;
     cols_ = grid_columns(W - 2 * OX, cell, GAP);
     const auto [first_idx, last_idx] = grid_visible_range(
         scroll_, cell, GAP, OY, bottom, cols_, static_cast<int>(children_.size()));
@@ -1511,7 +1520,7 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float bottom)
 
         // Leave a 12px gap below the label so it never touches the tile border.
         const float ph      = font_.pixel_height();
-        const float label_y = cellr.y + cell - ph - 12.0f;
+        const float label_y = cellr.y + cell - ph - 12.0f - chip_h;
         const SDL_FRect thumb_rect{cellr.x + 6, cellr.y + 6,
                                    cell - 12, label_y - cellr.y - 12.0f};
 
@@ -1523,6 +1532,12 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float bottom)
         }
 
         r.draw_text(font_, cellr.x + 8, label_y, fit_name(n->name, cell - 16), TEXT);
+
+        if (chip_h > 0.0f) {
+            // Own tags only: inherited tags are identical across every tile in
+            // this gallery, so they would be pure noise here.
+            draw_tag_chips(r, font_, cellr.x + 8, label_y + ph, cell - 16, n->tags, cats);
+        }
 
         // Export-selection badge: a small accent square in the top-left corner.
         if (sel_.contains(i)) {
@@ -1597,6 +1612,12 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float bottom)
     const float type_x = size_x + COL_SIZE;
     const float date_x = type_x + COL_TYPE;
 
+    const auto& settings = vault::vault_settings(vault_);
+    const float chip_h   = (settings.tiles_show_tags && any_chips_to_show(children_))
+                               ? CHIP_ROW_H
+                               : 0.0f;
+    const auto& cats     = settings.categories;
+
     // Column header + separator (fixed, not scrolled).
     const float hy = font_.text_top_for_center(OY + (LIST_HEADER - 6) * 0.5f);
     r.draw_text(font_, OX, hy, "NAME", TEXT_FAINT);
@@ -1644,8 +1665,13 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float bottom)
 
         const float ty = font_.text_top_for_center(row.y + row.h * 0.5f);  // vertically centred
         const float nx = thumb.x + thumb.w + 12;
-        r.draw_text(font_, nx, ty, fit_name(n->name, dims_x - nx - 10),
-                    sel ? TEXT : TEXT_DIM);
+        const std::string name = fit_name(n->name, dims_x - nx - 10);
+        r.draw_text(font_, nx, ty, name, sel ? TEXT : TEXT_DIM);
+        if (chip_h > 0.0f) {
+            const float chips_x = nx + static_cast<float>(font_.measure(name)) + CHIP_SPACING;
+            draw_tag_chips(r, font_, chips_x, row.y + (row.h - CHIP_ROW_H) * 0.5f,
+                           dims_x - 10 - chips_x, n->tags, cats);
+        }
 
         // Draw metadata columns for this row (galleries/videos/images have different displays).
         const ListRowMetaContext meta_ctx{r, font_, dims_x, size_x, type_x, date_x, ty};
