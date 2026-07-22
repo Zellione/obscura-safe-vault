@@ -335,7 +335,8 @@ Vault::Vault(Vault&& o) noexcept
       unlocked_(o.unlocked_),
       master_key_(std::move(o.master_key_)),
       root_(std::move(o.root_)),
-      saved_searches_(std::move(o.saved_searches_))
+      saved_searches_(std::move(o.saved_searches_)),
+      settings_(std::move(o.settings_))
 {
     o.fp_       = nullptr;
     o.unlocked_ = false;
@@ -352,6 +353,7 @@ Vault& Vault::operator=(Vault&& o) noexcept
         master_key_ = std::move(o.master_key_);
         root_       = std::move(o.root_);
         saved_searches_ = std::move(o.saved_searches_);
+        settings_   = std::move(o.settings_);
         o.fp_       = nullptr;
         o.unlocked_ = false;
     }

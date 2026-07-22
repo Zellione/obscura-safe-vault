@@ -38,6 +38,7 @@ struct TempVault {
         std::error_code ec;
         fs::remove(path, ec);
     }
+
     ~TempVault()
     {
         std::error_code ec;
@@ -158,4 +159,28 @@ TEST(vault_settings_gallery_override_beats_default)
     const auto kids = tv.v.list("");
     REQUIRE(kids.size() == 2);
     CHECK(kids[0]->name == "b");        // pinned back to import order
+}
+
+TEST(vault_settings_survive_move)
+{
+    // Regression test: Vault's move constructor/assignment must properly
+    // move settings_ with its categories vector and all allocations.
+    TempVault tv;
+    REQUIRE(tv.create_and_unlock() == VaultResult::Ok);
+
+    VaultSettings original = vault::vault_settings(tv.v);
+    REQUIRE(original.categories.size() == 8);  // seeded default
+    original.default_sort = SortKey::DateAsc;
+    REQUIRE(vault::set_vault_settings(tv.v, original) == VaultResult::Ok);
+
+    // Move the vault to a new variable
+    Vault moved = std::move(tv.v);
+    REQUIRE(moved.is_unlocked());
+
+    // Verify settings_ were properly moved
+    const auto& moved_settings = vault::vault_settings(moved);
+    CHECK(moved_settings.default_sort == SortKey::DateAsc);
+    REQUIRE(moved_settings.categories.size() == 8);
+    // Check that the categories are actual allocations (not dangling)
+    CHECK(!moved_settings.categories.empty());
 }
