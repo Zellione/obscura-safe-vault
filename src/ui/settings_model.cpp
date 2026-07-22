@@ -4,7 +4,6 @@
 #include "ui/settings_model.h"
 
 #include <algorithm>
-#include <cctype>
 #include <cstdint>
 #include <string>
 
@@ -15,16 +14,17 @@
 
 namespace ui {
 
-// Trim ASCII whitespace from both ends.
+// Trim ASCII whitespace from both ends. Spelled as an explicit character set
+// rather than std::isspace: isspace is locale-sensitive and is UB on a negative
+// char, and a category name is arbitrary user text.
 [[nodiscard]] static std::string trim_whitespace(std::string_view s) noexcept
 {
-    auto is_space = [](unsigned char c) { return std::isspace(c) != 0; };
-    auto first    = std::find_if_not(s.begin(), s.end(), is_space);
-    if (first == s.end()) {
+    constexpr std::string_view WS = " \t\n\v\f\r";
+    const size_t               first = s.find_first_not_of(WS);
+    if (first == std::string_view::npos) {
         return {};
     }
-    auto last = std::find_if_not(s.rbegin(), s.rend(), is_space);
-    return std::string(first, last.base());
+    return std::string(s.substr(first, s.find_last_not_of(WS) - first + 1));
 }
 
 void settings_move_section(SettingsState& state, int delta) noexcept
