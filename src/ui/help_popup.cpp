@@ -61,6 +61,12 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
     if (!s.open) return;
     using namespace gfx::theme;
 
+    // Prepend the global help group
+    std::vector<HelpGroup> all_groups = {
+        {.title = "Global", .entries = {{"F1", "Help"}, {"F2", "Settings"}}}
+    };
+    all_groups.insert(all_groups.end(), groups.begin(), groups.end());
+
     // Veil the whole window, matching consent_dialog's modal style.
     r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
 
@@ -79,7 +85,7 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
 
     const float content_top    = py + PAD + LINE_H + 8.0f;
     const float content_bottom = py + ph - PAD - LINE_H - 8.0f;
-    const float content_h      = static_cast<float>(help_line_count(groups)) * LINE_H;
+    const float content_h      = static_cast<float>(help_line_count(all_groups)) * LINE_H;
     s.scroll = clamp_help_scroll(s.scroll, content_h, content_bottom - content_top);
 
     // Clip to the content band so a line scrolled to the edge is cut cleanly
@@ -92,12 +98,12 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
     SDL_SetRenderClipRect(r.sdl(), &content_clip);
 
     float y = content_top - s.scroll;
-    for (size_t gi = 0; gi < groups.size(); ++gi) {
+    for (size_t gi = 0; gi < all_groups.size(); ++gi) {
         if (gi > 0) y += LINE_H;
         if (y >= content_top - LINE_H && y <= content_bottom)
-            r.draw_text(font, px + PAD, y, groups[gi].title, ACCENT);
+            r.draw_text(font, px + PAD, y, all_groups[gi].title, ACCENT);
         y += LINE_H;
-        for (const auto& e : groups[gi].entries) {
+        for (const auto& e : all_groups[gi].entries) {
             if (y >= content_top - LINE_H && y <= content_bottom) {
                 const std::string line = "  [" + e.key + "]  " + e.description;
                 r.draw_text(font, px + PAD, y, line, TEXT_DIM);

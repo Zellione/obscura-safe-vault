@@ -14,6 +14,7 @@
 #include "ui/gallery_session_state.h"
 #include "ui/help_popup.h"
 #include "ui/screen.h"
+#include "ui/settings_model.h"
 #include "vault/vault.h"
 
 namespace ui { class ImageViewer; }
@@ -109,7 +110,8 @@ private:
     static constexpr double            BADGE_WINDOW_SECS = 10.0;
     double                             badge_elapsed_ = BADGE_WINDOW_SECS;
 
-    ui::HelpPopupState                 help_;   // Phase 39: F1 help popup
+    ui::HelpPopupState                 help_;      // Phase 39: F1 help popup
+    ui::SettingsState                  settings_;  // Phase 49: F2 settings overlay
 };
 
 } // namespace app

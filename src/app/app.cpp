@@ -20,6 +20,7 @@
 #include "ui/favorites_images.h"
 #include "ui/gallery_grid.h"
 #include "ui/image_viewer.h"
+#include "ui/settings_overlay.h"
 #include "ui/tag_galleries.h"
 #include "ui/tag_images.h"
 #include "ui/tag_overview.h"
@@ -315,6 +316,28 @@ void App::dispatch_event(const SDL_Event& e)
         ui::toggle_help(help_);
         return;
     }
+    if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F2) {
+        if (settings_.open) {
+            ui::close_settings(settings_, window_);
+        } else {
+            settings_.vault_unlocked = active_ && active_->is_unlocked();
+            settings_.draft = settings_.vault_unlocked ? vault::vault_settings(*active_)
+                                                       : vault::VaultSettings{};
+            settings_.theme = gfx::active_theme_id();
+            ui::open_settings(settings_, ui::SettingsSection::Appearance);
+        }
+        return;
+    }
+    if (settings_.open) {
+        bool commit = false;
+        if (ui::handle_settings_event(settings_, window_, e, commit) && commit &&
+            settings_.vault_unlocked && active_) {
+            if (vault::set_vault_settings(*active_, settings_.draft) != vault::VaultResult::Ok) {
+                settings_.error = "Could not save settings";
+            }
+        }
+        return;   // the overlay swallows every event while open, like the help popup
+    }
     if (help_.open) {
         if (e.type == SDL_EVENT_KEY_DOWN)
             ui::handle_help_key(help_, e.key.key);
@@ -449,6 +472,10 @@ void App::render_frame()
         screen_->render(r);
         if (active_ && should_show_badge(keep_unlocked_, badge_elapsed_, BADGE_WINDOW_SECS))
             draw_keep_unlocked_badge(r, font_, window_.width(), window_.height());
+        if (settings_.open) {
+            ui::draw_settings_overlay(r, font_, static_cast<float>(window_.width()),
+                                      static_cast<float>(window_.height()), settings_);
+        }
         ui::draw_help_popup(r, font_, static_cast<float>(window_.width()),
                             static_cast<float>(window_.height()),
                             screen_->help_groups(), help_);
