@@ -299,8 +299,11 @@ implicitly inline, so those are weak symbols — the linker keeps exactly one
 `TempVault::~TempVault()` and silently discards the rest, then calls the survivor for
 every file's objects. This phase added the first `TempVault` to hold a `vault::Vault`
 member, so the winning destructor had no such member and that Vault was never destroyed.
-Fixed by giving every `TempVault` internal linkage (`test_tag_overview.cpp` already had
-it); the other four were violating the ODR against each other regardless.
+Fixed by giving every `TempVault` internal linkage. An audit then found 15 more such
+definitions across `tests/vault`, `tests/ui` and `tests/image` that were not leaking only
+because the surviving destructor happened to suit their layouts; those were swept too
+(owner decision), so `grep -rl "struct TempVault" tests/` now reports internal linkage
+everywhere and the hazard class is gone rather than just this instance of it.
 
 Also fixed while investigating: `Vault`'s **move constructor and move assignment both
 omitted `settings_`**, so moving a `Vault` silently dropped its vault-global settings —
