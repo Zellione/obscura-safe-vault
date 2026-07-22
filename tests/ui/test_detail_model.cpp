@@ -281,3 +281,32 @@ TEST(detail_selection_shows_inherited_once)
     REQUIRE(inh != nullptr);
     CHECK_EQ(inh->bullets.size(), static_cast<std::size_t>(1));
 }
+
+TEST(detail_model_marks_tag_sections)
+{
+    vault::IndexNode n = vault::IndexNode::image("a.jpg");
+    n.tags = {"artist:Kaguya", "ponytail"};
+    const std::vector<std::string> inherited{"parody:F/GO"};
+    const auto c = ui::build_node_details(n, inherited, vault::SortKey::Insertion);
+
+    int tag_sections = 0;
+    for (const auto& s : c.sections) {
+        if (s.is_tags) { ++tag_sections; }
+    }
+    CHECK_EQ(tag_sections, 2);   // own tags + inherited
+
+    // Tag sections carry their tags as bullets, and each bullet is still the RAW
+    // stored tag — resolution against the categories happens at draw time.
+    bool found_raw = false;
+    for (const auto& s : c.sections) {
+        for (const auto& b : s.bullets) {
+            if (b == "artist:Kaguya") { found_raw = true; }
+        }
+    }
+    CHECK(found_raw);
+
+    // Non-tag sections must NOT be marked, or the panel would chip-render metadata.
+    for (const auto& s : c.sections) {
+        if (!s.is_tags) { CHECK(s.bullets.empty()); }
+    }
+}

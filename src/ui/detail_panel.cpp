@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <format>
+#include <span>
 
 #include "gfx/renderer.h"
 #include "gfx/text.h"
 #include "gfx/theme.h"
+#include "ui/tag_chip.h"
 #include "ui/widgets.h"   // fit_text
 
 namespace ui {
@@ -49,7 +51,8 @@ float detail_panel_width(bool open, float window_width) noexcept
 }
 
 float draw_detail_panel(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& rect,
-                        const DetailContent& content, float scroll)
+                        const DetailContent& content, float scroll,
+                        std::span<const vault::TagCategory> categories)
 {
     using namespace gfx::theme;
 
@@ -60,7 +63,7 @@ float draw_detail_panel(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect&
     float       y = rect.y + PAD - scroll;
     const float start_y = y;
 
-    LineCtx ctx{r, font, rect, x};
+    LineCtx ctx{.r = r, .font = font, .rect = rect, .x = x};
 
     y = line(ctx, y, HEADING_H, content.heading, TEXT);
     if (!content.subheading.empty()) {
@@ -77,7 +80,15 @@ float draw_detail_panel(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect&
                      std::format("{}  {}", row.label, row.value), TEXT_DIM);
         }
         for (const auto& b : s.bullets) {
-            y = line(ctx, y, ROW_H, std::format("• {}", b), TEXT_DIM);
+            if (s.is_tags) {
+                if (y + CHIP_ROW_H > rect.y && y < rect.y + rect.h) {
+                    draw_tag_chips(r, font, x, y, rect.w - (2.0f * PAD),
+                                   std::span(&b, 1), categories);
+                }
+                y += CHIP_ROW_H;
+            } else {
+                y = line(ctx, y, ROW_H, std::format("• {}", b), TEXT_DIM);
+            }
         }
     }
     return (y - start_y) + PAD;

@@ -1377,7 +1377,8 @@ void GalleryGrid::render(gfx::Renderer& r)
     if (const float pw = detail_panel_width(detail_.panel.open, W);
         pw > 0.0f) {
         const SDL_FRect panel{W - pw, 0.0f, pw, H};
-        detail_.content_h = draw_detail_panel(r, font_, panel, detail_.content, detail_.panel.scroll);
+        detail_.content_h = draw_detail_panel(r, font_, panel, detail_.content, detail_.panel.scroll,
+                                              vault::vault_settings(vault_).categories);
         detail_.panel.scroll = ui::clamp_scroll(detail_.panel.scroll, detail_.content_h, H);
     }
 

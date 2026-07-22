@@ -2,9 +2,13 @@
 
 #include <SDL3/SDL.h>
 
+#include <span>
+
 #include "ui/detail_model.h"
+#include "vault/index.h"
 
 namespace gfx { class FontAtlas; class Renderer; }
+namespace vault { struct TagCategory; }
 
 // SDL drawing + open/scroll state for the gallery detail panel (Phase 48).
 // The content itself is built by the pure `detail_model.*`.
@@ -30,10 +34,12 @@ struct DetailPanelState {
 [[nodiscard]] float detail_panel_width(bool open, float window_width) noexcept;
 
 // Draw `content` into `rect`, scrolled down by `scroll`. Rows outside `rect` are
-// culled; every vault-derived string is middle-elided to the panel width.
+// culled; tag sections render as chips (which elide via `draw_tag_chips`), everything
+// else as elided text — every vault-derived string is middle-elided to the panel width.
 // Returns the total content height so the caller can clamp its scroll.
 float draw_detail_panel(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& rect,
-                        const DetailContent& content, float scroll);
+                        const DetailContent& content, float scroll,
+                        std::span<const vault::TagCategory> categories);
 
 // Ctrl+Up / Ctrl+Down scroll the open panel. Returns true when the key was
 // consumed, so a host can fall through to grid navigation otherwise. The upper

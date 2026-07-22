@@ -27,6 +27,9 @@ struct DetailSection {
     std::string              title;
     std::vector<DetailRow>   rows;
     std::vector<std::string> bullets;   // tag lists
+    // True for the own-tags and inherited-tags sections: their bullets hold RAW
+    // stored tags and are drawn as colour-coded chips, not plain text (Phase 49).
+    bool is_tags = false;
 };
 
 struct DetailContent {

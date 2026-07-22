@@ -101,12 +101,14 @@ void append_tag_sections(DetailContent&               out,
     if (!own.empty()) {
         out.sections.push_back({.title   = std::string(own_title),
                                 .rows    = {},
-                                .bullets = std::vector<std::string>(own.begin(), own.end())});
+                                .bullets = std::vector<std::string>(own.begin(), own.end()),
+                                .is_tags = true});
     }
     if (!inherited.empty()) {
         out.sections.push_back({.title   = "Inherited",
                                 .rows    = {},
-                                .bullets = std::vector<std::string>(inherited.begin(), inherited.end())});
+                                .bullets = std::vector<std::string>(inherited.begin(), inherited.end()),
+                                .is_tags = true});
     }
 }
 
