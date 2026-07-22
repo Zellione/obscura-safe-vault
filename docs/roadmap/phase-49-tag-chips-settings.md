@@ -285,39 +285,23 @@ Test count: **1048 → 1116**.
 - `theme_picker.*` **deleted**; `C` on the vault manager now emits
   `NavKind::ToSettings`.
 
-**Status:** 🔜 Feature-complete, **blocked on one gate**.
+**Status:** ✅ Shipped.
 
-All 16 tasks are implemented and reviewed; `scripts/test.sh` is green at **1117 tests,
-0 failed**. The phase is **not** shipped yet because `scripts/test.sh --asan` fails its
-LeakSanitizer check:
+`scripts/test.sh` 1117 tests / 0 failed; `scripts/test.sh --asan` 0 failed with no
+LeakSanitizer report.
 
-```
-SUMMARY: AddressSanitizer: 3770 byte(s) leaked in 14 allocation(s).
-```
+**Post-delivery fix — a latent ODR violation this phase's tests exposed.** The `--asan`
+gate failed with "3770 byte(s) leaked in 14 allocation(s)", all of it `vault::Vault`
+members, all attributed to `tests/vault/test_vault_settings.cpp`. Root cause was not in
+this phase's code at all: **six vault test files each declared their own `TempVault` at
+namespace scope with six different layouts.** Member functions defined inside a class are
+implicitly inline, so those are weak symbols — the linker keeps exactly one
+`TempVault::~TempVault()` and silently discards the rest, then calls the survivor for
+every file's objects. This phase added the first `TempVault` to hold a `vault::Vault`
+member, so the winning destructor had no such member and that Vault was never destroyed.
+Fixed by giving every `TempVault` internal linkage (`test_tag_overview.cpp` already had
+it); the other four were violating the ODR against each other regardless.
 
-Established so far:
-- **It is new.** The pre-phase merge-base (`b57733f`) was built and run under ASan in a
-  scratch worktree: 1048 tests, 0 failed, **no LeakSanitizer summary at all**.
-- Every leaked allocation is a member of a `vault::Vault` — `path_` (6 × 31 B),
-  `settings_.categories` (2 × 640 B + 2 × 320 B) and `root_`'s children (2 × 512 B).
-- All of it is attributed to `tests/vault/test_vault_settings.cpp`. **Deleting that one
-  file makes ASan completely clean** (exit 0, no summary), which pins the fault to it.
-- Minimal reproducer: keeping only `vault_settings_start_seeded` leaks **351 B in 2
-  allocations** (= `path_` 31 + `categories` 320), i.e. the `Vault` inside that test's
-  `TempVault` is never destroyed.
-- **Not reproducible in isolation.** A verbatim clone of `TempVault` plus probes covering
-  every operation the leaking tests perform — `create`, `lock`, `set_vault_settings` while
-  locked, reading the seeded settings, `relock_and_unlock`/`Vault::open`, `create_gallery`
-  — is entirely leak-free. Instrumenting `~Vault` showed it running only once across the
-  file's eight `TempVault` instances.
-- No production code path is implicated: every individual `Vault` operation was shown
-  leak-free. The fault is in how this test file holds its `Vault`.
-
-Fixed along the way (a real, separate bug found while investigating): `Vault`'s **move
-constructor and move assignment both omitted `settings_`**, so moving a `Vault` silently
-dropped its vault-global settings. Fixed with a `vault_settings_survive_move` regression
-test.
-
-**Next step:** finish root-causing the leak, fix it (in the test helper if that is where
-the fault is — no LSan suppression, no papering over a production bug), then re-run both
-gates and flip this to ✅.
+Also fixed while investigating: `Vault`'s **move constructor and move assignment both
+omitted `settings_`**, so moving a `Vault` silently dropped its vault-global settings —
+a real Phase 49 bug from Task 3. Regression test `vault_settings_survive_move`.

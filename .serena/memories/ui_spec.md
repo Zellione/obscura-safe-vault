@@ -30,7 +30,57 @@ Single global `F1` popup, context-sensitive shortcuts grouped by task/area —
 replaces the prior inline-footer-string approach (which ran off-window at
 normal sizes). `Screen::help_groups()` virtual supplies per-screen content;
 `App` owns the one `HelpPopupState` and renders the overlay on top of
-whichever screen is active. Close with `Esc` or `Q`.
+whichever screen is active. Close with `Esc` or `Q`. Phase 49: `draw_help_popup`
+prepends a synthesised "Global" group listing `F1` Help and `F2` Settings, since
+`help_groups()` is per-screen and had no shared entry point.
+
+## Tag chips (Phase 49)
+
+Stored tags render as **chips** — a small filled dot in the category's colour
+plus the bare name — on every surface that shows tags: the detail panel, the tag
+editor (own tags, the read-only inherited section, and the autosuggest
+dropdown), the tag-overview rows, grid tiles and List rows. A tag whose prefix
+matches a **configured** category shows the suffix only; anything else renders
+verbatim in `TEXT_DIM`, so `12:30` and `Re:Zero` are never mangled. Storage,
+search, autosuggest and matching all still operate on the full
+`"artist:Kaguya"` string — this is a display transform only.
+
+Two consequences the design accepts: `female:glasses` and `male:glasses` both
+read "glasses", separated only by dot colour; and the tag-galleries /
+tag-images screen **headers stay plain text** (they are composed `title_`
+strings rendered by the shared `FavoritesScreen` base, and a header is not a
+scannable list).
+
+On grid tiles the chip line is reserved **per gallery**, never per tile — if no
+child in the listing carries a tag, no space is reserved at all, so an untagged
+vault looks exactly as it did before and rows never go ragged. The cell does not
+grow: the label moves up by `CHIP_ROW_H` and the thumbnail shrinks by the same
+amount, leaving every grid metric (and therefore hit-testing) untouched.
+`tiles_show_tags` turns the line off entirely.
+
+## Settings overlay (Phase 49)
+
+Global `F2`, mirroring the `F1` convention: `App` intercepts the key, owns one
+`SettingsState`, and draws the overlay over whichever screen is active. It is
+deliberately **not** a `Screen` — a screen would force `App` to reconstruct
+what the user came from on `Esc`, which loses a paused video or a scroll
+position.
+
+Sidebar rail + content pane. `Tab` moves between rail and pane, `↑↓` row, `←→`
+change value, `N` add category, `R` rename, `Del` remove, `Esc` close. Three
+sections:
+- **Appearance — this machine.** Theme; changes apply live and persist to
+  `theme.conf` immediately, exactly as the retired `C` theme picker did. The
+  preview IS the choice.
+- **Browsing — this vault.** Vault-wide default sort order, and "show tags on
+  tiles".
+- **Tag colours — this vault.** The category→swatch rows.
+
+With no vault unlocked the two vault-scoped sections render a single dim
+"Unlock a vault to configure" line, and value keys are not routed there. A
+failed save surfaces in the overlay's own error line — it is never reported as
+success. `C` on the vault manager opens this overlay focused on Appearance
+(`NavKind::ToSettings`); the standalone theme picker is gone.
 
 ## Fixed chrome bands — reserve, never overlay
 

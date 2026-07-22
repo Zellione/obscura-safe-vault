@@ -41,7 +41,8 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   badge on favorited tiles.
 - `vault_manager.*` — multi-vault home screen: lists known vaults from VaultRegistry;
   open/create(save dialog)/remove/lock/select. Emits `NavKind::ToVaultManager`/`LockActive`/
-  `ToUnlock(path)`/`ToGallery`. `C` opens the ThemePicker overlay.
+  `ToUnlock(path)`/`ToGallery`. `C` emits `NavKind::ToSettings` (Phase 49; it opened the
+  now-deleted ThemePicker before).
 - `advanced_search_screen.*` — `Shift+/` (`NavKind::ToAdvancedSearch`) dedicated screen:
   keyboard query builder (Tab cycles fields, autocomplete dropdown) + live result list +
   saved-searches sidebar (Ctrl+S save, Enter load/open, Del delete). Image result -> gallery
@@ -165,9 +166,9 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `search_overlay.*` — `/` live-filtered search modal in GalleryGrid; Tab cycles scope
   (Both/Images/Galleries).
 - `consent_dialog.*` — modal "export anyway?" confirm (SDL plumbing).
-- `theme_picker.*` — `C` overlay over vault manager (QuickSwitch-style): Up/Down previews a
-  built-in theme live (`gfx::set_theme`) + persists it (`platform::ThemePref`) — the preview IS
-  the choice; Enter/Esc close. Each row shows an accent swatch.
+- `theme_picker.*` — **DELETED in Phase 49.** Its behaviour moved into the `F2` settings
+  overlay's Appearance section (`settings_overlay.*`); the vault manager's `C` now emits
+  `NavKind::ToSettings`, which App translates into `open_settings(..., Appearance)`.
 - `quick_switch.*` — global `` ` `` (grave) overlay: lists registry vaults; choosing one emits
   `NavKind::ToUnlock(path)` (App locks current + unlocks chosen); Esc or the active vault =
   no-op. Hosted by GalleryGrid, ImageViewer, FavoritesScreen base (take a VaultRegistry& +
@@ -262,10 +263,58 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   value so "2"<"10", other chars ci, fewer leading zeros first; `natural_less`). Orders CBZ
   pages by reading order.
 - `gallery_sort.*` — per-gallery sort presentation: `sort_children(children,SortKey)` — folders
-  always precede media, then Manual is a no-op / NameAsc,Desc delegate to natural_less / Date*
-  compares created_ts / Size* compares orig_size (all stable). `next_sort_key` cycles the fixed
-  Shift+S order (Manual→NameAsc→NameDesc→DateAsc→DateDesc→SizeAsc→SizeDesc→Manual);
-  `sort_key_label` (empty for Manual). Used by both Vault::list and GalleryGrid's footer/HUD.
+  always precede media, then Default/Insertion are no-ops / NameAsc,Desc delegate to
+  natural_less / Date* compares created_ts / Size* compares orig_size (all stable).
+  Phase 49: `next_sort_key` cycles all EIGHT values
+  (Default→NameAsc→NameDesc→DateAsc→DateDesc→SizeAsc→SizeDesc→Insertion→Default) and
+  `prev_sort_key` is its exact inverse (round-trip unit-tested), so a settings row bound to
+  left/right arrows moves symmetrically. `effective_sort_key(gallery_key, vault_default)`
+  resolves a gallery's stored key against the vault-wide default and NEVER returns `Default`,
+  so its result is always safe for sort_children; a vault default that is itself `Default`
+  (only reachable from a hand-edited blob) degrades to `Insertion`. `sort_key_label(key,
+  vault_default)` takes TWO arguments and is empty ONLY for a gallery at `Default` in a vault
+  whose default is `Insertion` — i.e. a vault nobody configured, which must look exactly as it
+  did pre-Phase-49. Used by `Vault::list` (which resolves through effective_sort_key) and
+  GalleryGrid's footer/HUD.
+- `tag_category.*` (Phase 49, pure) — `resolve_tag(tag, categories) -> TagDisplay{string_view
+  text; int swatch}`. Splits a stored tag at the FIRST ':' and strips the prefix only when it
+  matches a configured category (case-insensitively, via `ui::tag_ci_equal`) AND the suffix is
+  non-empty — so `12:30`, `Re:Zero` and `artist:` survive verbatim. `swatch < 0` means
+  uncategorised (drawn verbatim in TEXT_DIM). **`TagDisplay::text` BORROWS from the caller's
+  `tag` argument** — never resolve a temporary.
+- `tag_chip.*` (Phase 49) — the single home of chip geometry: `CHIP_DOT` 9, `CHIP_GAP` 7,
+  `CHIP_SPACING` 12, `CHIP_ROW_H` 16, used by five surfaces and defined nowhere else. Pure,
+  unit-tested: `fit_chips` (how many fit + a "+N" overflow count), `chip_width`,
+  `lone_chip_text_w` (text room for a single chip that cannot fit, so it middle-elides instead
+  of collapsing to a bare "+1"), `pack_chip_lines` (+ `ChipLine`/`ChipWrap`; wraps a run across
+  at most `max_lines` — two passes: tight when everything fits, else every line repacked into
+  `max_w - CHIP_SPACING - overflow_w` so a RIGHT-ALIGNED "+N" can never collide; when nothing
+  fits `lines` is empty and callers must NOT assume `lines.back()` exists), and
+  `any_chips_to_show(children)` (per-GALLERY reservation predicate — deliberately ignores the
+  category list, since an uncategorised tag still draws). Drawing: `draw_tag_chips(r, font, x,
+  y, max_w, tags, categories)` where `y` is the row TOP and content is centred within
+  CHIP_ROW_H via `font.text_top_for_center`. A `static_assert` in the .cpp ties
+  `gfx::TAG_SWATCH_COUNT` to `vault::TAG_SWATCH_COUNT` — they are separate constants because
+  gfx must not depend on vault, and this is the one TU where both are visible.
+- `settings_model.*` (Phase 49, pure, SDL-free) — state behind the `F2` overlay:
+  `SettingsSection{Appearance,Browsing,TagColours}` + `SETTINGS_SECTION_COUNT`, and
+  `SettingsState{section,in_pane,row,open,vault_unlocked,draft,theme,prompting,prompt_row,
+  prompt_buf,error}`. `settings_move_section` (clamps, resets row), `settings_move_row`
+  (clamps), `settings_change_value` (theme wraps both ways; default sort steps via
+  next_/prev_sort_key SKIPPING `Default`, which is meaningless as a vault default; tile flag
+  toggles; a category row wraps its swatch mod 16), `settings_row_count` (Appearance always 1;
+  the two vault sections 0 unless `vault_unlocked`), and category CRUD
+  `settings_add_category`/`settings_rename_category`/`settings_remove_category` (trim, reject
+  blank/duplicate via `ui::tag_ci_equal`, honour `INDEX_MAX_CATEGORY_BYTES`/
+  `INDEX_MAX_TAG_CATEGORIES`). NOTE: the CRUD/value entry points do NOT themselves check
+  `vault_unlocked` — they are memory-safe either way, so the OVERLAY must not route value keys
+  into a locked vault's sections.
+- `settings_overlay.*` (Phase 49, SDL) — draws the overlay (veil + section rail + row pane +
+  footer) and handles its input: `open_settings`, `close_settings(state, window)`,
+  `handle_settings_event(state, window, event, commit_out)` (takes the full SDL_Event, not a
+  keycode, because the add/rename prompt needs SDL_EVENT_TEXT_INPUT and
+  SDL_StartTextInput/StopTextInput need a Window), and `draw_settings_overlay`. Theme rows
+  apply live and persist exactly as the retired ThemePicker did. Not in `osv_tests`.
 - `search_model.*` — pure query tokenise/match/rank; drives the `/` overlay's live filter+rank.
   tokenize/matches reused by GalleryPickerModel.
 - `advanced_search_model.*` — pure advanced query: `AdvancedQuery{weighted include (OR gate +
@@ -288,14 +337,22 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `tag_overview_model.*` — `TagTally{tag,gallery_count,image_count}` + sort_tags(Name/Count) +
   filter_tags(ci prefix).
 - `detail_model.*` (Phase 48) — pure detail-panel content: `DetailRow`/`DetailSection`/
-  `DetailContent` + `build_node_details(node, inherited)` (image/video/gallery field sets,
-  own+inherited tag sections) + `build_selection_details(nodes, inherited)` (aggregate counts,
+  `DetailContent` + `build_node_details(node, inherited, vault_default)` (image/video/gallery
+  field sets, own+inherited tag sections; the trailing `vault::SortKey` came in with Phase 49
+  because this builder is pure by design and cannot look the vault default up itself — there
+  is deliberately NO defaulted parameter or 1-arg overload, which is exactly how the breadcrumb
+  and the panel would silently drift apart). Phase 49 also added `DetailSection::is_tags`,
+  marking the own- and inherited-tag sections; their `bullets` stay the RAW stored tags, since
+  category resolution is a draw-time concern. Plus `build_selection_details(nodes, inherited)` (aggregate counts,
   summed size, ci tag intersection, "no shared tags"). Delegates every string to meta_format;
   gallery totals via `count_subtree`. SDL-/gfx-free, unit-tested.
 - `detail_panel.*` (Phase 48) — right-edge panel: `DetailPanelState{open,scroll}`,
   pure `detail_panel_width(open,window_w)` (0 when closed OR window < 640 px),
-  `draw_detail_panel(...)` (returns content height for scroll clamping; culls to rect,
-  fit_text-elides every vault string), `handle_detail_panel_scroll` (Ctrl+Up/Down) + pure `detail_panel_hit(open,window_w,mouse_x)`
+  `draw_detail_panel(..., categories)` (returns content height for scroll clamping; culls to
+  rect, fit_text-elides every vault string; Phase 49 added the trailing
+  `std::span<const vault::TagCategory>` and renders `is_tags` sections as one-tag chip runs at
+  CHIP_ROW_H instead of "• text" at ROW_H — the three hosts pass
+  `vault::vault_settings(vault_).categories`), `handle_detail_panel_scroll` (Ctrl+Up/Down) + pure `detail_panel_hit(open,window_w,mouse_x)`
   (region derived from detail_panel_width, so it cannot disagree with the reserved strip) and
   `scroll_detail_panel(st,wheel_y)` (clamps at 0 only; the host applies the upper clamp).
   Hosted by GalleryGrid, FavoritesScreen (covers all 4 subclasses), AdvancedSearchScreen.

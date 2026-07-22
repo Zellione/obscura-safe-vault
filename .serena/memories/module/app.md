@@ -39,6 +39,24 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   promote_pending.
 - App also owns `HelpPopupState` (intercepts F1 globally, renders the overlay on top) and
   `AdvancedSearchState adv_session_` (reset on vault change).
+- Phase 49: App owns `ui::SettingsState settings_` and intercepts **F2** globally, mirroring
+  the F1 convention — the overlay draws over whichever screen is active, so `Esc` returns to a
+  paused video / scroll position intact (it is deliberately NOT a `Screen`). Event order in
+  `dispatch_event` matters: the F1 toggle first, then the `help_.open` guard, THEN F2 and the
+  `settings_.open` guard — so F1 still opens help over an open settings panel, and while both
+  are open the help popup (which draws on top) keeps its arrow/wheel events instead of losing
+  them to the panel behind it. `App::open_settings_overlay()` is the SINGLE seeding point for
+  `vault_unlocked`/`draft`/`theme`, called from both the F2 handler and the `ToSettings` nav
+  case — two copies would drift and a stale `vault_unlocked` is exactly the bug that survives
+  review. `active_` is a nullable `unique_ptr<Vault>`, so every settings path guards it.
+- `NavKind::ToSettings` (Phase 49, emitted by VaultManager's `C`) is one of the few kinds
+  EXCLUDED from `apply_nav`'s screen teardown (alongside `ToggleKeepUnlocked`/`Quit`/`None`) —
+  the overlay draws over the screen, so tearing it down would rebuild the vault manager
+  underneath. The teardown lives in a guard clause ABOVE the switch, not in any case.
+- `ui::draw_help_popup` synthesises a global "Global" group (F1/F2) so both appear on every
+  screen: `Screen::help_groups()` is a per-screen virtual with eight overrides and had no
+  shared entry point. `help_line_count` and the scroll clamp must be fed the SAME list that is
+  drawn, or the popup's scroll bound silently breaks.
 
 ## platform/
 - `paths.*`, `file_dialog.*` — config dirs, SDL file dialogs (`save_vault()`). Each open is
@@ -52,8 +70,9 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   secrets); `list`/`add`(move-to-front,dedup)/`remove`/`seed_if_empty`; atomic temp+rename.
 - `theme_pref.*` — chosen UI theme persistence: `config_dir()/theme.conf` holds the theme's
   stable slug ONLY (no secrets); `load()`->ThemeId (missing/unknown -> default), `save(id)`;
-  atomic temp+rename (mirrors vault_registry). Loaded in `App::init()`, saved live by
-  ThemePicker.
+  atomic temp+rename (mirrors vault_registry). Loaded in `App::init()`, saved live by the
+  `F2` settings overlay's Appearance section (Phase 49; ThemePicker, which used to do this,
+  was deleted).
 - `VolumePref` — `config_dir()/volume.conf`, one float [0,1], atomic write, missing/invalid
   -> 1.0; App loads at init + saves on clean exit (the in-memory global lives in
   `media/volume_setting.*`, not AV-gated).
