@@ -36,7 +36,9 @@ bool handle_settings_event(SettingsState& state, gfx::Window& window,
                            const SDL_Event& e, bool& commit_out)
 {
     commit_out = false;
-    if (!state.open) return false;
+    if (!state.open) {
+        return false;
+    }
 
     // While prompting, handle text input and editing
     if (state.prompting) {
@@ -46,11 +48,12 @@ bool handle_settings_event(SettingsState& state, gfx::Window& window,
         }
         if (e.type == SDL_EVENT_KEY_DOWN) {
             switch (e.key.key) {
-            case SDLK_BACKSPACE:
+            case SDLK_BACKSPACE: {
                 if (!state.prompt_buf.empty()) {
                     state.prompt_buf.pop_back();
                 }
                 return true;
+            }
             case SDLK_RETURN:
             case SDLK_KP_ENTER: {
                 bool success;
@@ -94,29 +97,30 @@ bool handle_settings_event(SettingsState& state, gfx::Window& window,
     }
 
     switch (e.key.key) {
-    case SDLK_ESCAPE:
+    case SDLK_ESCAPE: {
         close_settings(state, window);
         return true;
-
-    case SDLK_TAB:
+    }
+    case SDLK_TAB: {
         state.in_pane = !state.in_pane;
         return true;
-
-    case SDLK_UP:
+    }
+    case SDLK_UP: {
         if (state.in_pane) {
             settings_move_row(state, -1);
         } else {
             settings_move_section(state, -1);
         }
         return true;
-
-    case SDLK_DOWN:
+    }
+    case SDLK_DOWN: {
         if (state.in_pane) {
             settings_move_row(state, 1);
         } else {
             settings_move_section(state, 1);
         }
         return true;
+    }
 
     case SDLK_LEFT:
         if (state.in_pane) {
@@ -205,11 +209,13 @@ constexpr float GAP          = 8.0f;
 void draw_settings_overlay(gfx::Renderer& r, gfx::FontAtlas& font,
                            float win_w, float win_h, const SettingsState& state)
 {
-    if (!state.open) return;
+    if (!state.open) {
+        return;
+    }
     using namespace gfx::theme;
 
     // Veil
-    r.draw_rect({0, 0, win_w, win_h}, gfx::Color{8, 9, 12, 255});
+    r.draw_rect({.x = 0, .y = 0, .w = win_w, .h = win_h}, gfx::Color{.r = 8, .g = 9, .b = 12, .a = 255});
 
     // Panel dimensions
     const float panel_w = std::min(800.0f, win_w - 80.0f);
@@ -218,8 +224,8 @@ void draw_settings_overlay(gfx::Renderer& r, gfx::FontAtlas& font,
     const float panel_y = (win_h - panel_h) / 2.0f;
 
     // Draw panel background and border
-    r.draw_round_rect({panel_x, panel_y, panel_w, panel_h}, RADIUS, SURFACE);
-    r.draw_round_rect({panel_x, panel_y, panel_w, panel_h}, RADIUS, BORDER, /*filled*/ false);
+    r.draw_round_rect({.x = panel_x, .y = panel_y, .w = panel_w, .h = panel_h}, RADIUS, SURFACE);
+    r.draw_round_rect({.x = panel_x, .y = panel_y, .w = panel_w, .h = panel_h}, RADIUS, BORDER, /*filled*/ false);
 
     // Title
     r.draw_text(font, panel_x + PAD, panel_y + PAD, "Settings", TEXT);
@@ -240,14 +246,18 @@ void draw_settings_overlay(gfx::Renderer& r, gfx::FontAtlas& font,
         // Highlight if focused and we're in rail mode
         const bool focused = (!state.in_pane && state.section == sec);
         if (focused) {
-            r.draw_round_rect({rail_x, item_y, rail_w, ITEM_H}, RADIUS_SMALL, SURFACE_HI);
+            r.draw_round_rect({.x = rail_x, .y = item_y, .w = rail_w, .h = ITEM_H}, RADIUS_SMALL, SURFACE_HI);
         }
 
         // Section title
         std::string sec_name;
-        if (sec == SettingsSection::Appearance) sec_name = "Appearance";
-        else if (sec == SettingsSection::Browsing) sec_name = "Browsing";
-        else if (sec == SettingsSection::TagColours) sec_name = "Tag Colours";
+        if (sec == SettingsSection::Appearance) {
+            sec_name = "Appearance";
+        } else if (sec == SettingsSection::Browsing) {
+            sec_name = "Browsing";
+        } else if (sec == SettingsSection::TagColours) {
+            sec_name = "Tag Colours";
+        }
 
         r.draw_text(font, rail_x + 8.0f, item_y + 8.0f, sec_name,
                    focused ? TEXT : TEXT_DIM);
@@ -267,11 +277,13 @@ void draw_settings_overlay(gfx::Renderer& r, gfx::FontAtlas& font,
     } else {
         for (int i = 0; i < row_count; ++i) {
             const float item_y = content_top + static_cast<float>(i) * (ITEM_H + GAP);
-            if (item_y >= panel_y + panel_h - footer_h - 12.0f) break;  // off-screen
+            if (item_y >= panel_y + panel_h - footer_h - 12.0f) {
+                break;  // off-screen
+            }
 
             const bool focused = (state.in_pane && state.row == i);
             if (focused) {
-                r.draw_round_rect({pane_x, item_y, pane_w, ITEM_H}, RADIUS_SMALL, SURFACE_HI);
+                r.draw_round_rect({.x = pane_x, .y = item_y, .w = pane_w, .h = ITEM_H}, RADIUS_SMALL, SURFACE_HI);
             }
 
             // Row label and value
@@ -293,11 +305,12 @@ void draw_settings_overlay(gfx::Renderer& r, gfx::FontAtlas& font,
                     value = state.draft.tiles_show_tags ? "On" : "Off";
                 }
             } else if (state.section == SettingsSection::TagColours) {
-                if (i >= 0 && i < static_cast<int>(state.draft.categories.size())) {
+                const auto category_count = static_cast<int>(state.draft.categories.size());
+                if (i < category_count) {
                     const auto& cat = state.draft.categories[i];
                     // Draw a swatch dot
                     const auto swatch_color = gfx::tag_swatch(cat.swatch);
-                    r.draw_round_rect({pane_x + 8.0f, item_y + 8.0f, 16.0f, 16.0f},
+                    r.draw_round_rect({.x = pane_x + 8.0f, .y = item_y + 8.0f, .w = 16.0f, .h = 16.0f},
                                      RADIUS_SMALL, swatch_color);
                     label = cat.name;
                     value = gfx::tag_swatch_name(cat.swatch);
@@ -335,8 +348,8 @@ void draw_settings_overlay(gfx::Renderer& r, gfx::FontAtlas& font,
         const float prompt_x = (win_w - prompt_w) / 2.0f;
         const float prompt_y = (win_h - prompt_h) / 2.0f;
 
-        r.draw_round_rect({prompt_x, prompt_y, prompt_w, prompt_h}, RADIUS, SURFACE);
-        r.draw_round_rect({prompt_x, prompt_y, prompt_w, prompt_h}, RADIUS, ACCENT,
+        r.draw_round_rect({.x = prompt_x, .y = prompt_y, .w = prompt_w, .h = prompt_h}, RADIUS, SURFACE);
+        r.draw_round_rect({.x = prompt_x, .y = prompt_y, .w = prompt_w, .h = prompt_h}, RADIUS, ACCENT,
                          /*filled*/ false);
 
         std::string prompt_title;
@@ -349,7 +362,7 @@ void draw_settings_overlay(gfx::Renderer& r, gfx::FontAtlas& font,
 
         // Input field
         const float input_y = prompt_y + 32.0f;
-        r.draw_rect({prompt_x + 12.0f, input_y, prompt_w - 24.0f, 28.0f},
+        r.draw_rect({.x = prompt_x + 12.0f, .y = input_y, .w = prompt_w - 24.0f, .h = 28.0f},
                    SURFACE_HI);
         r.draw_text(font, prompt_x + 16.0f, input_y + 4.0f,
                    state.prompt_buf.empty() ? "_" : state.prompt_buf, TEXT);

@@ -63,7 +63,7 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
 
     // Prepend the global help group
     std::vector<HelpGroup> all_groups = {
-        {.title = "Global", .entries = {{"F1", "Help"}, {"F2", "Settings"}}}
+        {.title = "Global", .entries = {{.key = "F1", .description = "Help"}, {.key = "F2", .description = "Settings"}}}
     };
     all_groups.insert(all_groups.end(), groups.begin(), groups.end());
 
