@@ -30,6 +30,31 @@
 
 ## Index versions
 
+**INDEX_VERSION = 8** (Phase 49): a **vault-global settings block**, serialised
+after the Phase 18 saved-searches block (vault-level metadata, not part of any
+node):
+
+```
+default_sort     u8    (SortKey; Insertion for pre-v8 blobs)
+tiles_show_tags  u8    (0/1;     1         for pre-v8 blobs)
+cat_count        u16   (<= INDEX_MAX_TAG_CATEGORIES = 256)
+categories       { name_len u16 (<= INDEX_MAX_CATEGORY_BYTES = 64);
+                   name u8[name_len];
+                   swatch u8 (< TAG_SWATCH_COUNT = 16) } [cat_count]
+```
+
+Pre-v8 blobs read with `Insertion`, tile tags on, and `VaultSettings::seeded()`
+(8 categories). An out-of-range swatch/sort/flag byte or an oversized count is
+**rejected on deserialise, not clamped** — the Phase 37 rule. The writer clamps;
+the reader rejects. Fuzzed by `test_fuzz.cpp`'s mutation harness, whose base blob
+is built with the 4-argument `serialize_index` so category fields are reachable
+by byte mutation.
+
+The same bump reworks `SortKey`: byte `0` is re-read as `Default` ("follow the
+vault default") and `7 = Insertion` is added for raw import order, so existing
+galleries adopt the vault default with **no migration**. `read_node` bounds
+`sort_key` per version (v6/v7 max 6, v8 max 7).
+
 **INDEX_VERSION = 7** (Phase 47): Image nodes carry an `animated u8` flag
 (0=static, 1=animated GIF) after `thumb_length`. v1–v6 blobs read as false.
 Bytes other than 0/1 are rejected on deserialise (not clamped), matching the
