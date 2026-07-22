@@ -433,9 +433,15 @@ void TagEditor::draw_inherited_tags(gfx::Renderer& r, gfx::FontAtlas& font, floa
         draw_tag_chips(r, font, mx + PAD, y, MODAL_W - 2 * PAD, tags_slice, cats);
     }
     if (wrap.hidden > 0) {
-        const float counter_w = static_cast<float>(font.measure(std::format("+{}", wrap.hidden)));
-        r.draw_text(font, mx + PAD + (MODAL_W - 2 * PAD) - counter_w, y,
-                    std::format("+{}", wrap.hidden), TEXT_FAINT);
+        const std::string counter   = std::format("+{}", wrap.hidden);
+        const auto        counter_w = static_cast<float>(font.measure(counter));
+        // Sit on the same centre line draw_tag_chips uses, so the counter aligns
+        // with the chips beside it instead of riding high on their row. With no
+        // line to sit beside it stays on the header's baseline.
+        const float counter_y =
+            wrap.lines.empty() ? y : font.text_top_for_center(y + CHIP_ROW_H * 0.5f);
+        r.draw_text(font, mx + PAD + (MODAL_W - 2 * PAD) - counter_w, counter_y, counter,
+                    TEXT_FAINT);
     }
 }
 
