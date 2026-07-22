@@ -332,11 +332,7 @@ void App::dispatch_event(const SDL_Event& e)
         if (settings_.open) {
             ui::close_settings(settings_, window_);
         } else {
-            settings_.vault_unlocked = active_ && active_->is_unlocked();
-            settings_.draft = settings_.vault_unlocked ? vault::vault_settings(*active_)
-                                                       : vault::VaultSettings{};
-            settings_.theme = gfx::active_theme_id();
-            ui::open_settings(settings_, ui::SettingsSection::Appearance);
+            open_settings_overlay();
         }
         return;
     }
@@ -397,6 +393,15 @@ void App::capture_session_state()
     }
 }
 
+void App::open_settings_overlay()
+{
+    settings_.vault_unlocked = active_ && active_->is_unlocked();
+    settings_.draft = settings_.vault_unlocked ? vault::vault_settings(*active_)
+                                               : vault::VaultSettings{};
+    settings_.theme = gfx::active_theme_id();
+    ui::open_settings(settings_, ui::SettingsSection::Appearance);
+}
+
 bool App::apply_nav()
 {
     if (!screen_) return false;
@@ -407,9 +412,10 @@ bool App::apply_nav()
     // Part 2) — every other ToGallery source passes 0 as "no opinion" and
     // to_gallery() falls back to the remembered position for that path.
     const bool from_viewer = dynamic_cast<const ui::ImageViewer*>(screen_.get()) != nullptr;
-    // Every transition below except ToggleKeepUnlocked/Quit/None destroys the
+    // Every transition below except ToggleKeepUnlocked/ToSettings/Quit/None destroys the
     // current screen.
-    if (nav.kind != None && nav.kind != ToggleKeepUnlocked && nav.kind != Quit) {
+    if (nav.kind != None && nav.kind != ToggleKeepUnlocked && nav.kind != ToSettings &&
+        nav.kind != Quit) {
         capture_session_state();
         screen_->on_exit();
     }
@@ -435,6 +441,11 @@ bool App::apply_nav()
             session_.reset();                     // Phase 39 Part 2: fresh session on lock
             if (active_) { active_->lock(); active_.reset(); active_path_.clear(); }
             to_manager();
+            return true;
+        case ToSettings:
+            // Stays on the current screen: the overlay draws over it, so no
+            // on_exit()/screen swap — same shape as ToggleKeepUnlocked.
+            open_settings_overlay();
             return true;
         case ToggleKeepUnlocked:
             // Stays on the current screen: no on_exit()/screen swap, just flip the

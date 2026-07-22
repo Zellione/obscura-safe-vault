@@ -90,14 +90,12 @@ void VaultManager::handle_key(const SDL_KeyboardEvent& key)
         case SDLK_R:
         case SDLK_DELETE: remove_selected(); break;
         case SDLK_L:      if (!active_path_.empty()) request(NavKind::LockActive); break;
-        case SDLK_C:      open_theme_picker(); break;
+        case SDLK_C:      request(NavKind::ToSettings); break;
         case SDLK_ESCAPE:
         case SDLK_Q:      request(NavKind::Quit); break;
         default: break;
     }
 }
-
-void VaultManager::open_theme_picker() { themes_.open(); mark_dirty(); }
 
 int VaultManager::hit_test(float my) const
 {
@@ -128,8 +126,6 @@ void VaultManager::handle_click(const SDL_MouseButtonEvent& b)
 
 void VaultManager::handle_event(const SDL_Event& e)
 {
-    if (themes_.handle_event(e)) { mark_dirty(); return; }   // theme overlay swallows input
-
     switch (e.type) {
         case SDL_EVENT_KEY_DOWN:          handle_key(e.key); break;
         case SDL_EVENT_MOUSE_MOTION:      mouse_x_ = e.motion.x; mouse_y_ = e.motion.y; break;
@@ -162,7 +158,7 @@ void VaultManager::render(gfx::Renderer& r)
 
     r.draw_text(font_, 60.0f, 44.0f, "Vaults", TEXT);
 
-    const std::string hint = "C  Theme   F1  Help";
+    const std::string hint = "C  Settings   F1  Help";
     const auto hint_width = static_cast<float>(font_.measure(hint));
     r.draw_text(font_, W - 60.0f - hint_width, 50.0f, hint, TEXT_FAINT);
 
@@ -199,8 +195,6 @@ void VaultManager::render(gfx::Renderer& r)
     };
     btn(L.new_btn, "New Vault (N)");
     btn(L.open_btn, "Open Other (O)");
-
-    themes_.render(r, font_, W, static_cast<float>(win_.height()));
 }
 
 std::vector<ui::HelpGroup> VaultManager::help_groups() const
@@ -211,7 +205,7 @@ std::vector<ui::HelpGroup> VaultManager::help_groups() const
             {"N", "Create new vault"}, {"O", "Open existing vault file"},
             {"R / Del", "Remove from list"}, {"L", "Lock the active vault"},
         }},
-        {"App", {{"C", "Change theme"}, {"Esc / Q", "Quit"}}},
+        {"App", {{"C", "Open settings"}, {"Esc / Q", "Quit"}}},
     };
 }
 

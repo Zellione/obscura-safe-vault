@@ -68,6 +68,7 @@ private:
     bool apply_nav();                            // resolve a transition; transitioned?
     bool maybe_auto_lock(double dt);             // idle -> wipe active_, return to manager
     void render_frame();                         // draw + present + frame-cap fallback
+    void open_settings_overlay();                // seed settings state and open the overlay
 
     gfx::Window                        window_;
     gfx::FontAtlas                     font_;
