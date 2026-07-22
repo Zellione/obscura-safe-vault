@@ -11,6 +11,8 @@
 #include "gfx/window.h"
 #include "ui/advanced_search_model.h"
 #include "ui/nav_model.h"
+#include "ui/tag_category.h"
+#include "ui/tag_chip.h"
 #include "ui/tag_inherit.h"
 #include "ui/tag_scroll.h"
 #include "ui/tag_suggest.h"
@@ -40,42 +42,6 @@ std::string trim_surrounding(std::string_view s)
     const auto first = s.find_first_not_of(" \t\n\r");
     if (first == std::string_view::npos) return {};
     return std::string(s.substr(first, s.find_last_not_of(" \t\n\r") - first + 1));
-}
-
-// Greedy-pack tags into comma-separated display lines no wider than `max_w`
-// (a single overlong tag still gets its own line and clips). Returns at most
-// `max_lines` lines plus how many tags they show — the render header reports
-// the rest as hidden, since the inherited section is informational, not a list
-// the user navigates.
-struct PackedLines {
-    std::vector<std::string> lines;
-    int                      shown = 0;
-};
-
-PackedLines pack_tag_lines(const std::vector<std::string>& tags,
-                           const gfx::FontAtlas& font, float max_w, int max_lines)
-{
-    PackedLines out;
-    std::string cur;
-    int cur_count = 0;
-    for (const std::string& tag : tags) {
-        if (const std::string cand = cur.empty() ? tag : cur + ", " + tag;
-            cur.empty() || static_cast<float>(font.measure(cand)) <= max_w) {
-            cur = cand;
-            ++cur_count;
-            continue;
-        }
-        out.lines.push_back(cur);
-        out.shown += cur_count;
-        if (static_cast<int>(out.lines.size()) == max_lines) return out;  // rest hidden
-        cur = tag;
-        cur_count = 1;
-    }
-    if (!cur.empty()) {
-        out.lines.push_back(cur);
-        out.shown += cur_count;
-    }
-    return out;
 }
 }
 
@@ -344,19 +310,31 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     // The read-only inherited section (ancestor-gallery tags, Phase 27
     // follow-up) reserves space at the bottom; the own-tags list shrinks to fit.
     constexpr int   INHERIT_MAX_LINES = 3;
-    const PackedLines inh = inherited_.empty()
-        ? PackedLines{}
-        : pack_tag_lines(inherited_, font, MODAL_W - 2 * PAD, INHERIT_MAX_LINES);
+    const auto cats = vault::vault_settings(vault_).categories;
+
+    // Compute chip wrapping for inherited tags to get height
+    const ChipWrap wrap_for_height = inherited_.empty()
+        ? ChipWrap{}
+        : [this, &font, &cats]() {
+            std::vector<int> widths;
+            widths.reserve(inherited_.size());
+            for (const std::string& t : inherited_) {
+                widths.push_back(chip_width(font, resolve_tag(t, cats).text));
+            }
+            return pack_chip_lines(widths, MODAL_W - 2 * PAD, INHERIT_MAX_LINES,
+                                   static_cast<float>(font.measure(std::format("+{}", inherited_.size()))));
+        }();
+    const int shown_count = static_cast<int>(inherited_.size()) - wrap_for_height.hidden;
     const float inherit_h = inherited_.empty()
         ? 0.0f
-        : INHERIT_LINE * static_cast<float>(1 + inh.lines.size()) + 8.0f;
+        : INHERIT_LINE * static_cast<float>(1 + wrap_for_height.lines.size()) + 8.0f;
     const float list_bottom = my + MODAL_H - 50 - inherit_h;
 
     const int max_visible =
         std::max(1, static_cast<int>((list_bottom - tags_start) / row_pitch));
 
     draw_tag_rows(r, font, mx, list_y, tags_start, row_pitch, max_visible);
-    draw_inherited_tags(r, font, mx, list_bottom, inh.shown, inh.lines);
+    draw_inherited_tags(r, font, mx, list_bottom, shown_count, {});
 
     // Error message
     if (!error_.empty()) {
@@ -382,6 +360,7 @@ void TagEditor::draw_tag_rows(gfx::Renderer& r, gfx::FontAtlas& font, float mx, 
     const auto total = static_cast<int>(tally_.size());
     const int  first  = tag_scroll_first(total, selected_, max_visible);
     const int  last   = std::min(total, first + max_visible);
+    const auto cats = vault::vault_settings(vault_).categories;
 
     // Header shows the visible range / count so hidden tags are discoverable.
     std::string header = "Current tags";
@@ -404,15 +383,24 @@ void TagEditor::draw_tag_rows(gfx::Renderer& r, gfx::FontAtlas& font, float mx, 
             r.draw_round_rect(tag_rect, RADIUS_SMALL, BORDER, /*filled*/ false);
         }
 
-        // Multi-node mode annotates each tag with how many of the selected
-        // nodes carry it; single-node mode stays exactly as before.
-        const std::string label = node_paths_.size() == 1
-            ? tally_[i].tag
-            : std::format("{} ({}/{})", tally_[i].tag, tally_[i].count, node_paths_.size());
-        const std::string display = fit_text(font, label + " [Delete]", tag_rect.w - 16);
-        const float text_y =
-            font.text_top_for_center(tag_rect.y + tag_rect.h * 0.5f);
-        r.draw_text(font, tag_rect.x + 8, text_y, display, TEXT);
+        // Multi-node mode: reserve space for the count suffix and draw it after the chip
+        auto avail = tag_rect.w - 16;
+        std::string count_str;
+        if (node_paths_.size() != 1) {
+            count_str = std::format("({}/{})", tally_[i].count, node_paths_.size());
+            avail -= CHIP_SPACING + static_cast<float>(font.measure(count_str));
+        }
+
+        // Draw the chip
+        const auto chip_y = tag_rect.y + (tag_rect.h - CHIP_ROW_H) * 0.5f;
+        draw_tag_chips(r, font, tag_rect.x + 8, chip_y, avail, std::span(&tally_[i].tag, 1), cats);
+
+        // Draw the count suffix in multi-node mode
+        if (!count_str.empty()) {
+            const auto count_x = tag_rect.x + 8 + static_cast<float>(chip_width(font, resolve_tag(tally_[i].tag, cats).text)) + CHIP_SPACING;
+            const auto text_y = font.text_top_for_center(tag_rect.y + tag_rect.h * 0.5f);
+            r.draw_text(font, count_x, text_y, count_str, TEXT_DIM);
+        }
     }
 
     if (tally_.empty()) {
@@ -422,13 +410,27 @@ void TagEditor::draw_tag_rows(gfx::Renderer& r, gfx::FontAtlas& font, float mx, 
 
 void TagEditor::draw_inherited_tags(gfx::Renderer& r, gfx::FontAtlas& font, float mx,
                                      float list_bottom, int shown_count,
-                                     const std::vector<std::string>& lines) const
+                                     const std::vector<std::string>& /*lines*/) const
 {
     // Informational only (Del/selection never touch it — removing one of
     // these means editing the ancestor gallery it lives on).
     if (inherited_.empty()) return;
 
     using namespace gfx::theme;
+
+    const auto cats = vault::vault_settings(vault_).categories;
+    constexpr int INHERIT_MAX_LINES = 3;
+
+    // Recompute the chip wrapping from inherited_
+    const ChipWrap wrap = [this, &font, &cats]() {
+        std::vector<int> widths;
+        widths.reserve(inherited_.size());
+        for (const std::string& t : inherited_) {
+            widths.push_back(chip_width(font, resolve_tag(t, cats).text));
+        }
+        return pack_chip_lines(widths, MODAL_W - 2 * PAD, INHERIT_MAX_LINES,
+                               static_cast<float>(font.measure(std::format("+{}", inherited_.size()))));
+    }();
 
     float y = list_bottom + 8.0f;
     std::string inh_header = "Inherited from gallery";
@@ -437,9 +439,16 @@ void TagEditor::draw_inherited_tags(gfx::Renderer& r, gfx::FontAtlas& font, floa
     }
     inh_header += ":";
     r.draw_text(font, mx + PAD, y, inh_header, TEXT_DIM);
-    for (const std::string& line : lines) {
+    for (const auto& line : wrap.lines) {
         y += INHERIT_LINE;
-        r.draw_text(font, mx + PAD, y, fit_text(font, line, MODAL_W - 2 * PAD), TEXT_FAINT);
+        const auto tags_slice = std::span(inherited_).subspan(static_cast<size_t>(line.first),
+                                                               static_cast<size_t>(line.count));
+        draw_tag_chips(r, font, mx + PAD, y, MODAL_W - 2 * PAD, tags_slice, cats);
+    }
+    if (wrap.hidden > 0) {
+        const auto& last = wrap.lines.back();
+        const float count_x = mx + PAD + last.width + CHIP_SPACING;
+        r.draw_text(font, count_x, y, std::format("+{}", wrap.hidden), TEXT_FAINT);
     }
 }
 
@@ -459,15 +468,23 @@ void TagEditor::draw_suggestions_dropdown(gfx::Renderer& r, gfx::FontAtlas& font
                          SUGG_ROW * static_cast<float>(suggestions_.size()) + 8};
     r.draw_round_rect(drop, RADIUS_SMALL, SURFACE_HI);
     r.draw_round_rect(drop, RADIUS_SMALL, ACCENT, /*filled*/ false);
+
+    const auto cats = vault::vault_settings(vault_).categories;
     for (int i = 0; i < static_cast<int>(suggestions_.size()); ++i) {
         const bool  sel   = i == sugg_sel_;
-        const float row_y = drop.y + 4 + SUGG_ROW * static_cast<float>(i);
-        const float ty    = font.text_top_for_center(row_y + SUGG_ROW * 0.5f);
-        r.draw_text(font, drop.x + 10, ty,
-                    fit_text(font,
-                             std::format("{} {}", sel ? ">" : " ", suggestions_[i]),
-                             drop.w - 20),
-                    sel ? TEXT : TEXT_DIM);
+        const auto row_y = drop.y + 4 + SUGG_ROW * static_cast<float>(i);
+        const auto ty    = font.text_top_for_center(row_y + SUGG_ROW * 0.5f);
+
+        // Draw the marker (> or space)
+        const std::string marker = sel ? ">" : " ";
+        const gfx::Color marker_color = sel ? TEXT : TEXT_DIM;
+        r.draw_text(font, drop.x + 10, ty, marker, marker_color);
+
+        // Draw the suggestion as a chip
+        const auto chip_x = drop.x + 10 + static_cast<float>(font.measure("> "));
+        const auto max_w = drop.w - (chip_x - drop.x) - 10;
+        const auto chip_row_y = row_y + (SUGG_ROW - CHIP_ROW_H) * 0.5f;
+        draw_tag_chips(r, font, chip_x, chip_row_y, max_w, std::span(&suggestions_[i], 1), cats);
     }
 }
 
