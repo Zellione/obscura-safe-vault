@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <format>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -9,7 +10,9 @@
 #include "gfx/text.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "ui/tag_chip.h"
 #include "ui/widgets.h"
+#include "vault/vault.h"
 #include "vault/vault_search.h"
 
 namespace ui {
@@ -166,6 +169,9 @@ void TagOverviewScreen::render(gfx::Renderer& r)
     const auto g = compute_geom(font_.pixel_height(), H, static_cast<int>(shown_.size()),
                                 nav_.selected());
     const float ph = font_.pixel_height();
+    // Hoisted: vault_settings returns a reference, but binding it by value here
+    // would deep-copy the category vector once per visible row, every frame.
+    const auto& cats = vault::vault_settings(vault_).categories;
     for (int i = g.first; i < g.first + g.visible && i < static_cast<int>(shown_.size()); ++i) {
         const float    y    = OY + static_cast<float>(i - g.first) * g.row_h;
         const SDL_FRect row{OX, y, W - 2 * OX, g.row_h - 4};
@@ -177,8 +183,11 @@ void TagOverviewScreen::render(gfx::Renderer& r)
         const float ty = y + (g.row_h - 4 - ph) * 0.5f;
         const std::string counts = count_label(shown_[i].gallery_count, shown_[i].image_count);
         const float       cx     = W - OX - 14 - static_cast<float>(font_.measure(counts));
-        r.draw_text(font_, OX + 14, ty, fit_text(font_, shown_[i].tag, cx - (OX + 14) - 12),
-                    TEXT);
+        // The tag renders as a chip; the count column keeps its exact x, so the
+        // two never shift relative to each other. draw_tag_chips centres its
+        // content within CHIP_ROW_H, so give it the row's top, not the text top.
+        draw_tag_chips(r, font_, OX + 14, y + (g.row_h - 4 - CHIP_ROW_H) * 0.5f,
+                       cx - (OX + 14) - 12, std::span(&shown_[i].tag, 1), cats);
         r.draw_text(font_, cx, ty, counts, TEXT_DIM);
     }
 
