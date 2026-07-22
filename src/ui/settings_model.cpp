@@ -69,12 +69,21 @@ void settings_change_value(SettingsState& state, int delta) noexcept
         state.theme = static_cast<gfx::ThemeId>(next);
     } else if (state.section == SettingsSection::Browsing) {
         if (state.row == 0) {
-            // Default sort: cycle with next_sort_key, skipping Default
+            // Default sort: cycle with next_sort_key or prev_sort_key, skipping Default
             vault::SortKey current = state.draft.default_sort;
-            vault::SortKey next     = next_sort_key(current);
-            // Skip if we landed on Default
-            if (next == vault::SortKey::Default) {
-                next = next_sort_key(next);
+            vault::SortKey next;
+            if (delta >= 0) {
+                next = next_sort_key(current);
+                // Skip if we landed on Default
+                if (next == vault::SortKey::Default) {
+                    next = next_sort_key(next);
+                }
+            } else {
+                next = prev_sort_key(current);
+                // Skip if we landed on Default
+                if (next == vault::SortKey::Default) {
+                    next = prev_sort_key(next);
+                }
             }
             state.draft.default_sort = next;
         } else if (state.row == 1) {

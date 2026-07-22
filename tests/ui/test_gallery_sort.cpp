@@ -170,3 +170,20 @@ TEST(gallery_sort_label_hides_default_only_when_vault_default_is_insertion)
     CHECK(ui::sort_key_label(SortKey::Insertion, SortKey::NameAsc) == "Insertion");
     CHECK(ui::sort_key_label(SortKey::SizeDesc, SortKey::NameAsc) == "Size ↓");
 }
+
+TEST(prev_sort_key_inverts_next_sort_key)
+{
+    using enum vault::SortKey;
+    for (const vault::SortKey k : {Default, NameAsc, NameDesc, DateAsc,
+                                   DateDesc, SizeAsc, SizeDesc, Insertion}) {
+        CHECK(ui::prev_sort_key(ui::next_sort_key(k)) == k);
+        CHECK(ui::next_sort_key(ui::prev_sort_key(k)) == k);
+    }
+}
+
+TEST(prev_sort_key_walks_the_cycle_backwards)
+{
+    using enum vault::SortKey;
+    CHECK(ui::prev_sort_key(NameAsc) == Default);
+    CHECK(ui::prev_sort_key(Default) == Insertion);
+}

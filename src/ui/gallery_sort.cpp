@@ -98,6 +98,22 @@ vault::SortKey next_sort_key(vault::SortKey current) noexcept
     return Default;   // unreachable for a valid enum value; safe fallback
 }
 
+vault::SortKey prev_sort_key(vault::SortKey current) noexcept
+{
+    using enum vault::SortKey;
+    switch (current) {
+    case NameAsc:   return Default;
+    case NameDesc:  return NameAsc;
+    case DateAsc:   return NameDesc;
+    case DateDesc:  return DateAsc;
+    case SizeAsc:   return DateDesc;
+    case SizeDesc:  return SizeAsc;
+    case Insertion: return SizeDesc;
+    case Default:   return Insertion;
+    }
+    return Default;   // unreachable for a valid enum value; safe fallback
+}
+
 std::string sort_key_label(vault::SortKey key, vault::SortKey vault_default)
 {
     using enum vault::SortKey;

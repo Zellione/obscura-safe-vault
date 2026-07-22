@@ -29,6 +29,11 @@ sort_children(std::span<const vault::IndexNode*> nodes, vault::SortKey key);
 // Default -> NameAsc -> NameDesc -> DateAsc -> DateDesc -> SizeAsc -> SizeDesc -> Insertion -> Default.
 [[nodiscard]] vault::SortKey next_sort_key(vault::SortKey current) noexcept;
 
+// The exact inverse of next_sort_key, so a settings row bound to left/right
+// arrows moves symmetrically. Kept beside its twin: if one cycle changes, both
+// must, and the round-trip test pins that.
+[[nodiscard]] vault::SortKey prev_sort_key(vault::SortKey current) noexcept;
+
 // Resolve a gallery's stored key against the vault-wide default (Phase 49).
 // `Default` means "follow the vault"; every other key wins over it. The result
 // is never `Default`, so it is always safe to hand to sort_children(). A vault

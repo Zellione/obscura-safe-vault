@@ -168,3 +168,13 @@ TEST(settings_rename_category_rejects_a_duplicate)
     CHECK(s.draft.categories[0].name == "illustrator");
     CHECK(!ui::settings_rename_category(s, 0, "illustrator")); // renaming to itself is a no-op fail
 }
+
+TEST(settings_default_sort_steps_backwards_and_skips_default)
+{
+    ui::SettingsState s = unlocked_state();
+    s.section = ui::SettingsSection::Browsing;
+    s.row     = 0;
+    s.draft.default_sort = vault::SortKey::NameAsc;
+    ui::settings_change_value(s, -1);
+    CHECK(s.draft.default_sort == vault::SortKey::Insertion);   // skipped Default
+}
