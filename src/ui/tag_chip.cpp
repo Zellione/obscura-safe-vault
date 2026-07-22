@@ -16,6 +16,28 @@
 static_assert(gfx::TAG_SWATCH_COUNT == static_cast<int>(vault::TAG_SWATCH_COUNT),
               "gfx tag palette size must match the persisted swatch bound");
 
+namespace {
+
+// Chips that fit back-to-back in `avail_w`, ignoring any counter, plus the
+// pixels they use. The shared core of fit_chips and pack_chip_lines.
+struct GreedyRun { int shown = 0; float used = 0.0f; };
+
+GreedyRun greedy_run(std::span<const int> widths, float avail_w) noexcept
+{
+    GreedyRun out;
+    for (size_t i = 0; i < widths.size(); ++i) {
+        const float advance = (i == 0 ? 0.0f : ui::CHIP_SPACING) + static_cast<float>(widths[i]);
+        if (out.used + advance > avail_w) {
+            break;
+        }
+        out.used += advance;
+        ++out.shown;
+    }
+    return out;
+}
+
+}  // namespace
+
 namespace ui {
 
 ChipFit fit_chips(std::span<const int> chip_widths, float avail_w, float overflow_w) noexcept
@@ -25,22 +47,15 @@ ChipFit fit_chips(std::span<const int> chip_widths, float avail_w, float overflo
         return {.shown = 0, .hidden = 0};
     }
 
-    float used = 0.0f;
-    int   shown = 0;
-    for (int i = 0; i < n; ++i) {
-        const float advance = (i == 0 ? 0.0f : CHIP_SPACING) + static_cast<float>(chip_widths[i]);
-        if (used + advance > avail_w) {
-            break;
-        }
-        used += advance;
-        ++shown;
-    }
-    if (shown == n) {
-        return {.shown = shown, .hidden = 0};
+    const GreedyRun g = greedy_run(chip_widths, avail_w);
+    if (g.shown == n) {
+        return {.shown = g.shown, .hidden = 0};
     }
 
     // Room must also be found for the "+N" counter; drop shown chips until it
     // fits.
+    int   shown = g.shown;
+    float used = g.used;
     while (shown > 0 && used + CHIP_SPACING + overflow_w > avail_w) {
         --shown;
         used -= static_cast<float>(chip_widths[shown]) + (shown == 0 ? 0.0f : CHIP_SPACING);
@@ -60,6 +75,38 @@ float lone_chip_text_w(float max_w, float overflow_w, int hidden_after) noexcept
         w -= CHIP_SPACING + overflow_w;
     }
     return w;
+}
+
+ChipWrap pack_chip_lines(std::span<const int> chip_widths, float max_w,
+                         int max_lines, float overflow_w)
+{
+    ChipWrap  out;
+    const int n = static_cast<int>(chip_widths.size());
+    int       i = 0;
+    while (i < n && static_cast<int>(out.lines.size()) < max_lines) {
+        const auto rest = chip_widths.subspan(static_cast<size_t>(i));
+        // Only the final permitted line can leave chips over, so only it has to
+        // find room for the counter — fit_chips already encodes that back-off.
+        const bool  final_line = static_cast<int>(out.lines.size()) == max_lines - 1;
+        const auto  g          = greedy_run(rest, max_w);
+        int         count;
+        if (final_line) {
+            const int fit_count = fit_chips(rest, max_w, overflow_w).shown;
+            count = (fit_count == 0 && g.shown > 0) ? g.shown : fit_count;
+        } else {
+            count = g.shown;
+        }
+        if (count == 0) {
+            break;
+        }
+        out.lines.push_back({.first = i,
+                             .count = count,
+                             .width = greedy_run(rest.subspan(0, static_cast<size_t>(count)),
+                                                 max_w).used});
+        i += count;
+    }
+    out.hidden = n - i;
+    return out;
 }
 
 void draw_tag_chips(gfx::Renderer& r, gfx::FontAtlas& font, float x, float y, float max_w,
