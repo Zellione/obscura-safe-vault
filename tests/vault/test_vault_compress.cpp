@@ -40,6 +40,12 @@ static std::vector<uint8_t> legacy_pattern(size_t n, uint8_t seed)
 }
 
 // RAII temp path: a unique .osv file removed when the helper goes out of scope.
+// Internal linkage: several test files each define their own `TempVault`
+// with a DIFFERENT layout. At namespace scope those are one-definition-rule
+// violations — the member functions are implicitly inline, so the linker keeps
+// a single copy and silently discards the rest.
+namespace {
+
 struct TempVault {
     fs::path path;
     explicit TempVault(const char* tag)
@@ -57,6 +63,8 @@ struct TempVault {
     }
     std::string str() const { return path.string(); }
 };
+
+}  // namespace
 
 // Helper to read flags from the vault file header (non-throwing).
 namespace {
