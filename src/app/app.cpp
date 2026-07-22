@@ -316,6 +316,18 @@ void App::dispatch_event(const SDL_Event& e)
         ui::toggle_help(help_);
         return;
     }
+    if (help_.open) {
+        if (e.type == SDL_EVENT_KEY_DOWN) {
+            ui::handle_help_key(help_, e.key.key);
+        } else if (e.type == SDL_EVENT_MOUSE_WHEEL) {
+            ui::handle_help_wheel(help_, e.wheel.y);
+        }
+        return;   // swallow every event while the popup is open
+    }
+    // Settings is checked AFTER the help guard, and both are checked after the
+    // F1 toggle above. So F1 still opens help over an open settings panel, and
+    // while both are open the help popup — which draws on top — keeps the arrow
+    // and wheel events rather than losing them to the panel behind it.
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F2) {
         if (settings_.open) {
             ui::close_settings(settings_, window_);
@@ -337,13 +349,6 @@ void App::dispatch_event(const SDL_Event& e)
             }
         }
         return;   // the overlay swallows every event while open, like the help popup
-    }
-    if (help_.open) {
-        if (e.type == SDL_EVENT_KEY_DOWN)
-            ui::handle_help_key(help_, e.key.key);
-        else if (e.type == SDL_EVENT_MOUSE_WHEEL)
-            ui::handle_help_wheel(help_, e.wheel.y);
-        return;   // swallow every event while the popup is open
     }
     if (screen_) screen_->handle_event(e);
 }
