@@ -8,6 +8,7 @@
 #include "gfx/renderer.h"
 #include "gfx/text.h"
 #include "gfx/theme.h"
+#include "ui/widgets.h"
 
 // The persisted swatch byte is bounded by vault::TAG_SWATCH_COUNT; the palette
 // it indexes lives in gfx. This is the one place both are visible, so it is the
@@ -52,6 +53,15 @@ int chip_width(const gfx::FontAtlas& font, std::string_view display_text)
     return static_cast<int>(CHIP_DOT + CHIP_GAP) + font.measure(display_text);
 }
 
+float lone_chip_text_w(float max_w, float overflow_w, int hidden_after) noexcept
+{
+    float w = max_w - (CHIP_DOT + CHIP_GAP);
+    if (hidden_after > 0) {
+        w -= CHIP_SPACING + overflow_w;
+    }
+    return w;
+}
+
 void draw_tag_chips(gfx::Renderer& r, gfx::FontAtlas& font, float x, float y, float max_w,
                     std::span<const std::string> tags,
                     std::span<const vault::TagCategory> categories)
@@ -71,13 +81,40 @@ void draw_tag_chips(gfx::Renderer& r, gfx::FontAtlas& font, float x, float y, fl
     }
 
     const std::string overflow_probe = std::format("+{}", tags.size());
-    const auto        fit = fit_chips(widths, max_w, static_cast<float>(font.measure(overflow_probe)));
+    const float       overflow_w = static_cast<float>(font.measure(overflow_probe));
+    const auto        fit = fit_chips(widths, max_w, overflow_w);
 
     // The dot and the text share one vertical centre line. text_top_for_center
     // uses the baked glyphs' real ink extents, so this stays aligned regardless
     // of the font's nominal pixel height — do not hand-compute a baseline.
     const float center_y = y + CHIP_ROW_H * 0.5f;
     const float text_y   = font.text_top_for_center(center_y);
+
+    if (fit.shown == 0) {
+        // Not one whole chip fits. A bare "+N" would drop the name entirely, so
+        // draw the first tag with its text middle-elided and count the rest.
+        const int         hidden_after = static_cast<int>(tags.size()) - 1;
+        const TagDisplay& d    = shown_tags.front();
+        const std::string text = fit_text(font, d.text,
+                                          lone_chip_text_w(max_w, overflow_w, hidden_after));
+        if (!text.empty()) {
+            const gfx::Color c = d.swatch < 0 ? gfx::theme::TEXT_DIM : gfx::tag_swatch(d.swatch);
+            const SDL_FRect  dot{.x = x,
+                                 .y = center_y - CHIP_DOT * 0.5f,
+                                 .w = CHIP_DOT,
+                                 .h = CHIP_DOT};
+            r.draw_round_rect(dot, CHIP_DOT * 0.5f, c);
+            r.draw_text(font, x + CHIP_DOT + CHIP_GAP, text_y, text, c);
+            if (hidden_after > 0) {
+                r.draw_text(font, x + max_w - overflow_w, text_y,
+                            std::format("+{}", hidden_after), gfx::theme::TEXT_FAINT);
+            }
+        } else if (!tags.empty()) {
+            // Not even an ellipsis fits: fall back to the pre-existing counter.
+            r.draw_text(font, x, text_y, std::format("+{}", tags.size()), gfx::theme::TEXT_FAINT);
+        }
+        return;
+    }
 
     float cx = x;
     for (int i = 0; i < fit.shown; ++i) {

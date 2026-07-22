@@ -34,4 +34,10 @@ void draw_tag_chips(gfx::Renderer& r, gfx::FontAtlas& font, float x, float y, fl
 // Pixel width one chip occupies, for callers that need to pre-measure a run.
 [[nodiscard]] int chip_width(const gfx::FontAtlas& font, std::string_view display_text);
 
+// Width left for a single chip's TEXT when not even one whole chip fits in
+// `max_w`. Subtracts the dot and the gap, plus the "+N" counter and its spacing
+// when `hidden_after` further tags follow. May be <= 0, meaning not even an
+// ellipsis will fit. Pure; unit-tested.
+[[nodiscard]] float lone_chip_text_w(float max_w, float overflow_w, int hidden_after) noexcept;
+
 } // namespace ui

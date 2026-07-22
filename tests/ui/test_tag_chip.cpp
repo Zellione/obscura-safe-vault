@@ -48,3 +48,21 @@ TEST(fit_chips_a_run_that_exactly_fills_the_width_shows_every_chip)
     CHECK_EQ(f.shown, 2);
     CHECK_EQ(f.hidden, 0);
 }
+
+TEST(lone_chip_text_w_reserves_the_dot_and_gap)
+{
+    // 100 - (CHIP_DOT 9 + CHIP_GAP 7) = 84, with nothing following.
+    CHECK_EQ(ui::lone_chip_text_w(100.0f, 20.0f, 0), 84.0f);
+}
+
+TEST(lone_chip_text_w_also_reserves_the_overflow_counter)
+{
+    // 100 - 16 - (CHIP_SPACING 12 + overflow 20) = 52 when 3 tags follow.
+    CHECK_EQ(ui::lone_chip_text_w(100.0f, 20.0f, 3), 52.0f);
+}
+
+TEST(lone_chip_text_w_can_leave_no_room_at_all)
+{
+    // A width this small leaves nothing for text; the caller must handle <= 0.
+    CHECK(ui::lone_chip_text_w(10.0f, 20.0f, 1) <= 0.0f);
+}
