@@ -109,8 +109,9 @@ void draw_tag_chips(gfx::Renderer& r, gfx::FontAtlas& font, float x, float y, fl
                 r.draw_text(font, x + max_w - overflow_w, text_y,
                             std::format("+{}", hidden_after), gfx::theme::TEXT_FAINT);
             }
-        } else if (!tags.empty()) {
-            // Not even an ellipsis fits: fall back to the pre-existing counter.
+        } else {
+            // Not even an ellipsis fits: fall back to a bare counter. `tags` is
+            // known non-empty here — the early return above excluded that case.
             r.draw_text(font, x, text_y, std::format("+{}", tags.size()), gfx::theme::TEXT_FAINT);
         }
         return;
