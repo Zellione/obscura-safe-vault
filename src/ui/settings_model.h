@@ -21,6 +21,12 @@ struct SettingsState {
     bool               vault_unlocked    = false;
     vault::VaultSettings draft;
     gfx::ThemeId       theme             = gfx::ThemeId::RefinedSlate;
+    // Inline "add category" / "rename category" prompt (Phase 49). `prompt_row`
+    // is the row being renamed, or -1 when adding.
+    bool        prompting  = false;
+    int         prompt_row = -1;
+    std::string prompt_buf;
+    std::string error;        // one-line failure shown in the overlay footer
 };
 
 // Navigate between sections; clamp to [0, SETTINGS_SECTION_COUNT). Reset row to 0.
