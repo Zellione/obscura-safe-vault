@@ -26,6 +26,15 @@ static std::span<const uint8_t> bytes(const std::string& s)
     return {reinterpret_cast<const uint8_t*>(s.data()), s.size()};
 }
 
+// Internal linkage: several vault test files each define their own `TempVault`
+// with a DIFFERENT layout. At namespace scope those are one-definition-rule
+// violations — the member functions are implicitly inline, so the linker keeps
+// a single `~TempVault` and silently discards the rest. Whichever one wins gets
+// called for every file's object, and this file's `Vault v` member then never
+// gets destroyed (that leaked the whole Vault under ASan). An anonymous
+// namespace makes the type distinct per translation unit.
+namespace {
+
 struct TempVault {
     fs::path path;
     Vault    v;
@@ -65,6 +74,8 @@ struct TempVault {
         return v.unlock(bytes("testpw"), {});
     }
 };
+
+}  // namespace
 
 // --- tests ----------------------------------------------------------------
 
