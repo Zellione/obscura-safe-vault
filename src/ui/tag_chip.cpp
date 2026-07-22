@@ -81,7 +81,7 @@ void draw_tag_chips(gfx::Renderer& r, gfx::FontAtlas& font, float x, float y, fl
     }
 
     const std::string overflow_probe = std::format("+{}", tags.size());
-    const float       overflow_w = static_cast<float>(font.measure(overflow_probe));
+    const auto        overflow_w = static_cast<float>(font.measure(overflow_probe));
     const auto        fit = fit_chips(widths, max_w, overflow_w);
 
     // The dot and the text share one vertical centre line. text_top_for_center
