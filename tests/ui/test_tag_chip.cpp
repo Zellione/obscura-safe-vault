@@ -82,22 +82,26 @@ TEST(pack_chip_lines_wraps_onto_a_second_line)
 
 TEST(pack_chip_lines_stops_at_max_lines_and_reports_the_rest_hidden)
 {
-    // One chip per line at this width; only two lines are allowed.
-    const std::vector<int> w{40, 40, 40, 40};
-    const auto p = ui::pack_chip_lines(w, 45.0f, 2, 30.0f);
+    // Pass 1 fills two lines of two and leaves one over; because something is
+    // hidden, pass 2 repacks into 100 - 12 - 20 = 68, which fits one chip a line.
+    const std::vector<int> w{40, 40, 40, 40, 40};
+    const auto p = ui::pack_chip_lines(w, 100.0f, 2, 20.0f);
     CHECK_EQ(static_cast<int>(p.lines.size()), 2);
-    CHECK_EQ(p.hidden, 2);
+    CHECK_EQ(p.lines[0].count, 1);
+    CHECK_EQ(p.lines[1].count, 1);
+    CHECK_EQ(p.hidden, 3);
 }
 
-TEST(pack_chip_lines_reserves_the_counter_only_on_the_last_line)
+TEST(pack_chip_lines_repacks_every_line_to_clear_the_right_aligned_counter)
 {
-    // 40 + 12 + 40 = 92 fits in 100 on a non-final line. On the FINAL line the
-    // "+N" counter (30) plus its spacing must also fit, so only one chip stays.
+    // The invariant the caller depends on: with anything hidden, no line's chips
+    // can reach the counter's reserved strip on the right.
     const std::vector<int> w{40, 40, 40, 40, 40};
-    const auto p = ui::pack_chip_lines(w, 100.0f, 2, 30.0f);
-    CHECK_EQ(p.lines[0].count, 2);   // no counter reserved here
-    CHECK_EQ(p.lines[1].count, 1);   // 40 + 12 + 30 = 82 <= 100, but 92 + 12 + 30 > 100
-    CHECK_EQ(p.hidden, 2);
+    const auto p = ui::pack_chip_lines(w, 100.0f, 2, 20.0f);
+    CHECK(p.hidden > 0);
+    for (const auto& ln : p.lines) {
+        CHECK(ln.width + ui::CHIP_SPACING + 20.0f <= 100.0f);
+    }
 }
 
 TEST(pack_chip_lines_records_each_lines_pixel_width)
@@ -118,6 +122,8 @@ TEST(pack_chip_lines_empty_input_is_safe)
 
 TEST(pack_chip_lines_gives_up_when_not_even_one_chip_fits)
 {
+    // Callers must not reach for lines.back() here: hidden is non-zero and there
+    // is no line to anchor a counter to.
     const std::vector<int> w{400, 400};
     const auto p = ui::pack_chip_lines(w, 50.0f, 3, 30.0f);
     CHECK(p.lines.empty());

@@ -29,11 +29,14 @@ struct ChipFit { int shown = 0; int hidden = 0; };
 // the width array that sits on it, and the pixels those chips occupy.
 struct ChipLine { int first = 0; int count = 0; float width = 0.0f; };
 
-// Greedy-wrap chips into at most `max_lines` lines of `max_w`, using the same
-// spacing rule as fit_chips. Only the LAST line reserves room for the "+N"
-// counter, because only there can chips be left over. Chips that do not fit are
-// reported in `hidden`; the caller draws the counter after the last line's
-// `width`. Pure; unit-tested.
+// Greedy-wrap chips into at most `max_lines` lines of `max_w`, using fit_chips'
+// spacing rule. Two passes: when every chip fits, they pack as tightly as
+// possible and `hidden` is 0. When any are left over, EVERY line is repacked
+// into `max_w - CHIP_SPACING - overflow_w`, so the "+N" counter — which the
+// caller draws RIGHT-ALIGNED at `x + max_w - overflow_w` — can never collide
+// with a chip, whichever line it ends up beside.
+// When not even one chip fits, `lines` is empty and `hidden` is the whole input:
+// callers must NOT assume `lines.back()` exists merely because `hidden > 0`.
 struct ChipWrap { std::vector<ChipLine> lines; int hidden = 0; };
 [[nodiscard]] ChipWrap pack_chip_lines(std::span<const int> chip_widths, float max_w,
                                        int max_lines, float overflow_w);

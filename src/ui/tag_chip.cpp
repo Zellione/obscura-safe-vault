@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <format>
+#include <utility>
 #include <vector>
 
 #include "gfx/renderer.h"
@@ -34,6 +35,31 @@ GreedyRun greedy_run(std::span<const int> widths, float avail_w) noexcept
         ++out.shown;
     }
     return out;
+}
+
+// Chips placed by a completed pass: the lines are contiguous from index 0, so
+// the end of the last one is the count.
+int placed(const std::vector<ui::ChipLine>& lines) noexcept
+{
+    return lines.empty() ? 0 : lines.back().first + lines.back().count;
+}
+
+// Greedy fill into `line_w`, at most `max_lines` lines. A non-positive `line_w`
+// simply places nothing.
+std::vector<ui::ChipLine> pack_pass(std::span<const int> widths, float line_w, int max_lines)
+{
+    std::vector<ui::ChipLine> lines;
+    const int                 n = static_cast<int>(widths.size());
+    int                       i = 0;
+    while (i < n && std::cmp_less(lines.size(), max_lines)) {
+        const auto g = greedy_run(widths.subspan(static_cast<size_t>(i)), line_w);
+        if (g.shown == 0) {
+            break;
+        }
+        lines.push_back({.first = i, .count = g.shown, .width = g.used});
+        i += g.shown;
+    }
+    return lines;
 }
 
 }  // namespace
@@ -80,33 +106,21 @@ float lone_chip_text_w(float max_w, float overflow_w, int hidden_after) noexcept
 ChipWrap pack_chip_lines(std::span<const int> chip_widths, float max_w,
                          int max_lines, float overflow_w)
 {
-    ChipWrap  out;
     const int n = static_cast<int>(chip_widths.size());
-    int       i = 0;
-    while (i < n && static_cast<int>(out.lines.size()) < max_lines) {
-        const auto rest = chip_widths.subspan(static_cast<size_t>(i));
-        // Only the final permitted line can leave chips over, so only it has to
-        // find room for the counter — fit_chips already encodes that back-off.
-        const bool  final_line = static_cast<int>(out.lines.size()) == max_lines - 1;
-        const auto  g          = greedy_run(rest, max_w);
-        int         count;
-        if (final_line) {
-            const int fit_count = fit_chips(rest, max_w, overflow_w).shown;
-            count = (fit_count == 0 && g.shown > 0) ? g.shown : fit_count;
-        } else {
-            count = g.shown;
-        }
-        if (count == 0) {
-            break;
-        }
-        out.lines.push_back({.first = i,
-                             .count = count,
-                             .width = greedy_run(rest.subspan(0, static_cast<size_t>(count)),
-                                                 max_w).used});
-        i += count;
+
+    ChipWrap out;
+    out.lines  = pack_pass(chip_widths, max_w, max_lines);
+    out.hidden = n - placed(out.lines);
+    if (out.hidden == 0) {
+        return out;
     }
-    out.hidden = n - i;
-    return out;
+
+    // Chips are left over, so a "+N" will be drawn right-aligned within `max_w`.
+    // Repack into the width that leaves room for it so no chip can collide.
+    ChipWrap tight;
+    tight.lines  = pack_pass(chip_widths, max_w - CHIP_SPACING - overflow_w, max_lines);
+    tight.hidden = n - placed(tight.lines);
+    return tight;
 }
 
 void draw_tag_chips(gfx::Renderer& r, gfx::FontAtlas& font, float x, float y, float max_w,
