@@ -313,14 +313,14 @@ void App::dispatch_event(const SDL_Event& e)
         return;
     }
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F1) {
-        ui::toggle_help(help_);
+        ui::toggle_help(overlays_.help);
         return;
     }
-    if (help_.open) {
+    if (overlays_.help.open) {
         if (e.type == SDL_EVENT_KEY_DOWN) {
-            ui::handle_help_key(help_, e.key.key);
+            ui::handle_help_key(overlays_.help, e.key.key);
         } else if (e.type == SDL_EVENT_MOUSE_WHEEL) {
-            ui::handle_help_wheel(help_, e.wheel.y);
+            ui::handle_help_wheel(overlays_.help, e.wheel.y);
         }
         return;   // swallow every event while the popup is open
     }
@@ -329,21 +329,22 @@ void App::dispatch_event(const SDL_Event& e)
     // while both are open the help popup — which draws on top — keeps the arrow
     // and wheel events rather than losing them to the panel behind it.
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F2) {
-        if (settings_.open) {
-            ui::close_settings(settings_, window_);
+        if (overlays_.settings.open) {
+            ui::close_settings(overlays_.settings, window_);
         } else {
             open_settings_overlay();
         }
         return;
     }
-    if (settings_.open) {
-        bool commit = false;
-        if (ui::handle_settings_event(settings_, window_, e, commit) && commit &&
-            settings_.vault_unlocked && active_) {
-            if (vault::set_vault_settings(*active_, settings_.draft) != vault::VaultResult::Ok) {
-                settings_.error = "Could not save settings";
-            }
+    if (bool commit = false;
+        overlays_.settings.open && ui::handle_settings_event(overlays_.settings, window_, e, commit) && commit &&
+        overlays_.settings.vault_unlocked && active_) {
+        if (vault::set_vault_settings(*active_, overlays_.settings.draft) != vault::VaultResult::Ok) {
+            overlays_.settings.error = "Could not save settings";
         }
+        return;   // the overlay swallows every event while open, like the help popup
+    }
+    if (overlays_.settings.open) {
         return;   // the overlay swallows every event while open, like the help popup
     }
     if (screen_) screen_->handle_event(e);
@@ -395,11 +396,11 @@ void App::capture_session_state()
 
 void App::open_settings_overlay()
 {
-    settings_.vault_unlocked = active_ && active_->is_unlocked();
-    settings_.draft = settings_.vault_unlocked ? vault::vault_settings(*active_)
-                                               : vault::VaultSettings{};
-    settings_.theme = gfx::active_theme_id();
-    ui::open_settings(settings_, ui::SettingsSection::Appearance);
+    overlays_.settings.vault_unlocked = active_ && active_->is_unlocked();
+    overlays_.settings.draft = overlays_.settings.vault_unlocked ? vault::vault_settings(*active_)
+                                                                  : vault::VaultSettings{};
+    overlays_.settings.theme = gfx::active_theme_id();
+    ui::open_settings(overlays_.settings, ui::SettingsSection::Appearance);
 }
 
 bool App::apply_nav()
@@ -488,13 +489,13 @@ void App::render_frame()
         screen_->render(r);
         if (active_ && should_show_badge(keep_unlocked_, badge_elapsed_, BADGE_WINDOW_SECS))
             draw_keep_unlocked_badge(r, font_, window_.width(), window_.height());
-        if (settings_.open) {
+        if (overlays_.settings.open) {
             ui::draw_settings_overlay(r, font_, static_cast<float>(window_.width()),
-                                      static_cast<float>(window_.height()), settings_);
+                                      static_cast<float>(window_.height()), overlays_.settings);
         }
         ui::draw_help_popup(r, font_, static_cast<float>(window_.width()),
                             static_cast<float>(window_.height()),
-                            screen_->help_groups(), help_);
+                            screen_->help_groups(), overlays_.help);
     }
     window_.end_frame();
 

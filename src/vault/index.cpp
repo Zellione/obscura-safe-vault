@@ -165,6 +165,22 @@ bool read_video_meta(ByteReader& r, VideoMeta& m)
     return r.ok();
 }
 
+// Read and validate sort key for a node (version-aware, Phase 37+).
+[[nodiscard]] bool read_sort_key(ByteReader& r, SortKey& sort_key, uint8_t version)
+{
+    sort_key = SortKey::Default;
+    if (version >= 6) {
+        const uint8_t max_sk = version >= 8 ? std::to_underlying(SortKey::Insertion)
+                                            : std::to_underlying(SortKey::SizeDesc);
+        const uint8_t sk = r.u8();
+        if (!r.ok() || sk > max_sk) {
+            return false;
+        }
+        sort_key = static_cast<SortKey>(sk);
+    }
+    return true;
+}
+
 // Returns false on malformed input. Depth-limited to guard against stack
 // overflow from a deeply nested blob. Version-aware: reads tags only if version >= 2.
 bool read_node(ByteReader& r, IndexNode& node, uint32_t depth, uint8_t version)
@@ -201,13 +217,8 @@ bool read_node(ByteReader& r, IndexNode& node, uint32_t depth, uint8_t version)
     // vault that is Insertion, i.e. exactly the old behaviour).
     // An out-of-range byte is rejected outright, like an unknown node `type` byte.
     // v6/v7 knew only up to SizeDesc; v8 added Insertion.
-    node.sort_key = SortKey::Default;
-    if (version >= 6) {
-        const uint8_t max_sk = version >= 8 ? std::to_underlying(SortKey::Insertion)
-                                            : std::to_underlying(SortKey::SizeDesc);
-        const uint8_t sk = r.u8();
-        if (!r.ok() || sk > max_sk) return false;
-        node.sort_key = static_cast<SortKey>(sk);
+    if (!read_sort_key(r, node.sort_key, version)) {
+        return false;
     }
 
     if (node.type == IndexNode::Type::Image) {

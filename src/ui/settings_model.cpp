@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <string>
+#include <utility>
 
 #include "gfx/theme.h"
 #include "ui/gallery_sort.h"
@@ -29,8 +30,8 @@ namespace ui {
 
 void settings_move_section(SettingsState& state, int delta) noexcept
 {
-    int current = static_cast<int>(state.section);
-    int next    = std::clamp(current + delta, 0, SETTINGS_SECTION_COUNT - 1);
+    auto current = static_cast<int>(std::to_underlying(state.section));
+    int next     = std::clamp(current + delta, 0, SETTINGS_SECTION_COUNT - 1);
     state.section = static_cast<SettingsSection>(next);
     state.row = 0;
 }
@@ -44,12 +45,13 @@ void settings_move_row(SettingsState& state, int delta) noexcept
 
 int settings_row_count(const SettingsState& state) noexcept
 {
+    using enum SettingsSection;
     switch (state.section) {
-    case SettingsSection::Appearance:
+    case Appearance:
         return 1; // theme
-    case SettingsSection::Browsing:
+    case Browsing:
         return state.vault_unlocked ? 2 : 0; // default sort + tiles show tags
-    case SettingsSection::TagColours: {
+    case TagColours: {
         auto size = static_cast<int>(state.draft.categories.size());
         return state.vault_unlocked ? size : 0;
     }
@@ -57,50 +59,71 @@ int settings_row_count(const SettingsState& state) noexcept
     return 0;
 }
 
+namespace {
+
+// Handle theme value change.
+void change_theme_value(SettingsState& state, int delta) noexcept
+{
+    auto current = static_cast<int>(std::to_underlying(state.theme));
+    int  next    = (current + delta) % gfx::THEME_COUNT;
+    if (next < 0) {
+        next += gfx::THEME_COUNT;
+    }
+    state.theme = static_cast<gfx::ThemeId>(next);
+}
+
+// Handle browsing settings value change.
+void change_browsing_value(SettingsState& state, int delta) noexcept
+{
+    if (state.row == 0) {
+        // Default sort: cycle with next_sort_key or prev_sort_key, skipping Default
+        vault::SortKey current = state.draft.default_sort;
+        vault::SortKey next;
+        if (delta >= 0) {
+            next = next_sort_key(current);
+            // Skip if we landed on Default
+            if (next == vault::SortKey::Default) {
+                next = next_sort_key(next);
+            }
+        } else {
+            next = prev_sort_key(current);
+            // Skip if we landed on Default
+            if (next == vault::SortKey::Default) {
+                next = prev_sort_key(next);
+            }
+        }
+        state.draft.default_sort = next;
+    } else if (state.row == 1) {
+        // Toggle tiles_show_tags
+        state.draft.tiles_show_tags = !state.draft.tiles_show_tags;
+    }
+}
+
+// Handle tag colour swatch value change.
+void change_swatch_value(SettingsState& state, int delta) noexcept
+{
+    auto size = static_cast<int>(state.draft.categories.size());
+    if (state.row >= 0 && state.row < size) {
+        auto& swatch = state.draft.categories[state.row].swatch;
+        int   current = swatch;
+        int   next    = (current + delta) % gfx::TAG_SWATCH_COUNT;
+        if (next < 0) {
+            next += gfx::TAG_SWATCH_COUNT;
+        }
+        swatch = static_cast<uint8_t>(next);
+    }
+}
+
+}  // namespace
+
 void settings_change_value(SettingsState& state, int delta) noexcept
 {
     if (state.section == SettingsSection::Appearance) {
-        // Theme: cycle through 0..THEME_COUNT-1
-        int current = static_cast<int>(state.theme);
-        int next    = (current + delta) % gfx::THEME_COUNT;
-        if (next < 0) {
-            next += gfx::THEME_COUNT;
-        }
-        state.theme = static_cast<gfx::ThemeId>(next);
+        change_theme_value(state, delta);
     } else if (state.section == SettingsSection::Browsing) {
-        if (state.row == 0) {
-            // Default sort: cycle with next_sort_key or prev_sort_key, skipping Default
-            vault::SortKey current = state.draft.default_sort;
-            vault::SortKey next;
-            if (delta >= 0) {
-                next = next_sort_key(current);
-                // Skip if we landed on Default
-                if (next == vault::SortKey::Default) {
-                    next = next_sort_key(next);
-                }
-            } else {
-                next = prev_sort_key(current);
-                // Skip if we landed on Default
-                if (next == vault::SortKey::Default) {
-                    next = prev_sort_key(next);
-                }
-            }
-            state.draft.default_sort = next;
-        } else if (state.row == 1) {
-            // Toggle tiles_show_tags
-            state.draft.tiles_show_tags = !state.draft.tiles_show_tags;
-        }
+        change_browsing_value(state, delta);
     } else if (state.section == SettingsSection::TagColours) {
-        auto size = static_cast<int>(state.draft.categories.size());
-        if (state.row >= 0 && state.row < size) {
-            auto& swatch = state.draft.categories[state.row].swatch;
-            int   current = swatch;
-            int   next    = (current + delta) % gfx::TAG_SWATCH_COUNT;
-            if (next < 0) {
-                next += gfx::TAG_SWATCH_COUNT;
-            }
-            swatch = static_cast<uint8_t>(next);
-        }
+        change_swatch_value(state, delta);
     }
 }
 
@@ -142,8 +165,7 @@ bool settings_add_category(SettingsState& state, std::string name)
 
 void settings_remove_category(SettingsState& state, int row) noexcept
 {
-    auto size = static_cast<int>(state.draft.categories.size());
-    if (row < 0 || row >= size) {
+    if (auto size = static_cast<int>(state.draft.categories.size()); row < 0 || row >= size) {
         return;
     }
 
@@ -179,10 +201,8 @@ bool settings_rename_category(SettingsState& state, int row, std::string name)
         return false;
     }
 
-    const auto& current_name = state.draft.categories[row].name;
-
     // Reject if renaming to itself (case-insensitive comparison)
-    if (tag_ci_equal(current_name, name)) {
+    if (const auto& current_name = state.draft.categories[row].name; tag_ci_equal(current_name, name)) {
         return false;
     }
 

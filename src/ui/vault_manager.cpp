@@ -79,6 +79,7 @@ void VaultManager::remove_selected()
 
 void VaultManager::handle_key(const SDL_KeyboardEvent& key)
 {
+    using enum NavKind;
     switch (key.key) {
         case SDLK_UP:     move(-1); mark_dirty(); break;
         case SDLK_DOWN:   move(+1); mark_dirty(); break;
@@ -89,10 +90,10 @@ void VaultManager::handle_key(const SDL_KeyboardEvent& key)
         case SDLK_O:      dlg_.open_vault(win_.sdl_window()); awaiting_dialog_ = true; break;
         case SDLK_R:
         case SDLK_DELETE: remove_selected(); break;
-        case SDLK_L:      if (!active_path_.empty()) request(NavKind::LockActive); break;
-        case SDLK_C:      request(NavKind::ToSettings); break;
+        case SDLK_L:      if (!active_path_.empty()) { request(LockActive); } break;
+        case SDLK_C:      request(ToSettings); break;
         case SDLK_ESCAPE:
-        case SDLK_Q:      request(NavKind::Quit); break;
+        case SDLK_Q:      request(Quit); break;
         default: break;
     }
 }

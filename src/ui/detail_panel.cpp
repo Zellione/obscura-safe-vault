@@ -37,6 +37,22 @@ float line(const LineCtx& ctx, float y, float height, std::string_view text, gfx
     return y + height;
 }
 
+// Draw a single bullet; return the new y position.
+float draw_bullet(const LineCtx& ctx, float y, bool is_tag, const std::string& bullet,
+                  std::span<const vault::TagCategory> categories)
+{
+    if (is_tag) {
+        // Draw tag as a chip if it falls within the visible area.
+        if (y + CHIP_ROW_H > ctx.rect.y && y < ctx.rect.y + ctx.rect.h) {
+            draw_tag_chips(ctx.r, ctx.font, ctx.x, y, ctx.rect.w - (2.0f * PAD),
+                          std::span(&bullet, 1), categories);
+        }
+        return y + CHIP_ROW_H;
+    }
+    // Draw regular text bullet.
+    return line(ctx, y, ROW_H, std::format("• {}", bullet), gfx::theme::TEXT_DIM);
+}
+
 }  // namespace
 
 float detail_panel_width(bool open, float window_width) noexcept
@@ -80,15 +96,7 @@ float draw_detail_panel(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect&
                      std::format("{}  {}", row.label, row.value), TEXT_DIM);
         }
         for (const auto& b : s.bullets) {
-            if (s.is_tags) {
-                if (y + CHIP_ROW_H > rect.y && y < rect.y + rect.h) {
-                    draw_tag_chips(r, font, x, y, rect.w - (2.0f * PAD),
-                                   std::span(&b, 1), categories);
-                }
-                y += CHIP_ROW_H;
-            } else {
-                y = line(ctx, y, ROW_H, std::format("• {}", b), TEXT_DIM);
-            }
+            y = draw_bullet(ctx, y, s.is_tags, b, categories);
         }
     }
     return (y - start_y) + PAD;

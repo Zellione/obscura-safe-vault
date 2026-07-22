@@ -50,7 +50,7 @@ int placed(const std::vector<ui::ChipLine>& lines) noexcept
 std::vector<ui::ChipLine> pack_pass(std::span<const int> widths, float line_w, int max_lines)
 {
     std::vector<ui::ChipLine> lines;
-    const int                 n = static_cast<int>(widths.size());
+    const auto                n = static_cast<int>(widths.size());
     int                       i = 0;
     while (i < n && std::cmp_less(lines.size(), max_lines)) {
         const auto g = greedy_run(widths.subspan(static_cast<size_t>(i)), line_w);
@@ -69,7 +69,7 @@ namespace ui {
 
 ChipFit fit_chips(std::span<const int> chip_widths, float avail_w, float overflow_w) noexcept
 {
-    const int n = static_cast<int>(chip_widths.size());
+    const auto n = static_cast<int>(chip_widths.size());
     if (n == 0) {
         return {.shown = 0, .hidden = 0};
     }
@@ -107,7 +107,7 @@ float lone_chip_text_w(float max_w, float overflow_w, int hidden_after) noexcept
 ChipWrap pack_chip_lines(std::span<const int> chip_widths, float max_w,
                          int max_lines, float overflow_w)
 {
-    const int n = static_cast<int>(chip_widths.size());
+    const auto n = static_cast<int>(chip_widths.size());
 
     ChipWrap out;
     out.lines  = pack_pass(chip_widths, max_w, max_lines);
@@ -157,9 +157,9 @@ void draw_tag_chips(gfx::Renderer& r, gfx::FontAtlas& font, float x, float y, fl
         // draw the first tag with its text middle-elided and count the rest.
         const int         hidden_after = static_cast<int>(tags.size()) - 1;
         const TagDisplay& d    = shown_tags.front();
-        const std::string text = fit_text(font, d.text,
-                                          lone_chip_text_w(max_w, overflow_w, hidden_after));
-        if (!text.empty()) {
+        if (const std::string text = fit_text(font, d.text,
+                                              lone_chip_text_w(max_w, overflow_w, hidden_after));
+            !text.empty()) {
             const gfx::Color c = d.swatch < 0 ? gfx::theme::TEXT_DIM : gfx::tag_swatch(d.swatch);
             const SDL_FRect  dot{.x = x,
                                  .y = center_y - CHIP_DOT * 0.5f,

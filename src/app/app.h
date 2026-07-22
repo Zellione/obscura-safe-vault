@@ -111,8 +111,12 @@ private:
     static constexpr double            BADGE_WINDOW_SECS = 10.0;
     double                             badge_elapsed_ = BADGE_WINDOW_SECS;
 
-    ui::HelpPopupState                 help_;      // Phase 39: F1 help popup
-    ui::SettingsState                  settings_;  // Phase 49: F2 settings overlay
+    // The two global overlays App owns and intercepts a function key for.
+    struct Overlays {
+        ui::HelpPopupState help;       // Phase 39: F1 help popup
+        ui::SettingsState  settings;   // Phase 49: F2 settings overlay
+    };
+    Overlays                           overlays_;
 };
 
 } // namespace app

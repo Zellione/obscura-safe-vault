@@ -1485,6 +1485,38 @@ void GalleryGrid::render(gfx::Renderer& r)
     }
 }
 
+namespace {
+
+// Draw badges (export-selection, favorite, animated) on a tile.
+void draw_tile_badges(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& cellr, float cell,
+                      bool selected, const vault::IndexNode* n)
+{
+    using namespace gfx::theme;
+
+    // Export-selection badge: a small accent square in the top-left corner.
+    if (selected) {
+        const SDL_FRect badge{.x = cellr.x + 8, .y = cellr.y + 8, .w = 18, .h = 18};
+        r.draw_round_rect(badge, RADIUS_SMALL, ACCENT);
+        r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
+    }
+
+    // Favorite badge: a small gold square in the top-right corner.
+    if (n->favorite) {
+        const SDL_FRect badge{.x = cellr.x + cell - 8 - 18, .y = cellr.y + 8, .w = 18, .h = 18};
+        r.draw_round_rect(badge, RADIUS_SMALL, FAVORITE);
+        r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
+    }
+
+    // Animated badge: a small square for animated GIFs, positioned to the left
+    // of the favorite badge (or in its place if no favorite).
+    if (tile_shows_animated_badge(*n)) {
+        const float x_shift = n->favorite ? -(18.0f + 6.0f) : 0.0f;
+        draw_animated_badge(r, font, cellr, 18.0f, x_shift);
+    }
+}
+
+}  // namespace
+
 void GalleryGrid::render_grid(gfx::Renderer& r, float W, float bottom)
 {
     using namespace gfx::theme;
@@ -1539,26 +1571,7 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float bottom)
             draw_tag_chips(r, font_, cellr.x + 8, label_y + ph, cell - 16, n->tags, cats);
         }
 
-        // Export-selection badge: a small accent square in the top-left corner.
-        if (sel_.contains(i)) {
-            const SDL_FRect badge{cellr.x + 8, cellr.y + 8, 18, 18};
-            r.draw_round_rect(badge, RADIUS_SMALL, ACCENT);
-            r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
-        }
-
-        // Favorite badge: a small gold square in the top-right corner.
-        if (n->favorite) {
-            const SDL_FRect badge{cellr.x + cell - 8 - 18, cellr.y + 8, 18, 18};
-            r.draw_round_rect(badge, RADIUS_SMALL, FAVORITE);
-            r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
-        }
-
-        // Animated badge: a small square for animated GIFs, positioned to the left
-        // of the favorite badge (or in its place if no favorite).
-        if (tile_shows_animated_badge(*n)) {
-            const float x_shift = n->favorite ? -(18.0f + 6.0f) : 0.0f;
-            draw_animated_badge(r, font_, cellr, 18.0f, x_shift);
-        }
+        draw_tile_badges(r, font_, cellr, cell, sel_.contains(i), n);
     }
     SDL_SetRenderClipRect(r.sdl(), nullptr);
 }
