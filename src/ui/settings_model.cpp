@@ -118,11 +118,12 @@ void change_swatch_value(SettingsState& state, int delta) noexcept
 
 void settings_change_value(SettingsState& state, int delta) noexcept
 {
-    if (state.section == SettingsSection::Appearance) {
+    using enum SettingsSection;
+    if (state.section == Appearance) {
         change_theme_value(state, delta);
-    } else if (state.section == SettingsSection::Browsing) {
+    } else if (state.section == Browsing) {
         change_browsing_value(state, delta);
-    } else if (state.section == SettingsSection::TagColours) {
+    } else if (state.section == TagColours) {
         change_swatch_value(state, delta);
     }
 }

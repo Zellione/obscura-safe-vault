@@ -216,22 +216,15 @@ bool handle_settings_event(SettingsState& state, const gfx::Window& window,
         return true;   // modal swallows other events while open
     }
 
-    // Try navigation handlers first
-    if (handle_navigation_event(state, window, e.key.key)) {
-        return true;
-    }
-
-    // Try value change handlers
-    if (handle_value_change(state, e.key.key, commit_out)) {
-        return true;
-    }
-
-    // Try category CRUD handlers
-    if (handle_category_crud(state, window, e.key.key, commit_out)) {
-        return true;
-    }
-
-    return true;   // modal swallows all keys while open
+    // Dispatch to the first handler that consumes the key. Short-circuits, so a
+    // key claimed by navigation never reaches value-change or CRUD. The consumed
+    // flag is deliberately discarded: an open modal swallows every key regardless
+    // of whether a handler acted on it.
+    const bool consumed = handle_navigation_event(state, window, e.key.key)
+                       || handle_value_change(state, e.key.key, commit_out)
+                       || handle_category_crud(state, window, e.key.key, commit_out);
+    (void)consumed;
+    return true;
 }
 
 namespace {
@@ -318,9 +311,10 @@ void draw_pane_row(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float p
                focused ? gfx::theme::ACCENT : gfx::theme::TEXT_FAINT);
 }
 
-// Draw the right pane showing rows for the current section.
-void draw_pane(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float pane_w, float content_top,
-               float panel_y, float panel_h, float footer_h, const SettingsState& state)
+// Draw the right pane showing rows for the current section. `pane_bottom` is the
+// y past which a row is off-screen and culled.
+void draw_pane(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float pane_w,
+               float content_top, float pane_bottom, const SettingsState& state)
 {
     const int row_count = settings_row_count(state);
 
@@ -329,14 +323,14 @@ void draw_pane(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float pane_
         // Show "Unlock a vault" message for locked vault sections
         r.draw_text(font, pane_x, content_top + 8.0f, "Unlock a vault to configure",
                    gfx::theme::TEXT_FAINT);
-    } else {
-        for (int i = 0; i < row_count; ++i) {
-            const float item_y = content_top + static_cast<float>(i) * (ITEM_H + GAP);
-            if (item_y >= panel_y + panel_h - footer_h - 12.0f) {
-                break;  // off-screen
-            }
-            draw_pane_row(r, font, pane_x, pane_w, item_y, i, state);
+        return;
+    }
+    for (int i = 0; i < row_count; ++i) {
+        const float item_y = content_top + static_cast<float>(i) * (ITEM_H + GAP);
+        if (item_y >= pane_bottom) {
+            break;  // off-screen
         }
+        draw_pane_row(r, font, pane_x, pane_w, item_y, i, state);
     }
 }
 
@@ -432,7 +426,7 @@ void draw_settings_overlay(gfx::Renderer& r, gfx::FontAtlas& font,
     const float pane_x = rail_x + rail_w + 20.0f;
     const float pane_w = panel_w - PAD - rail_w - 30.0f;
 
-    draw_pane(r, font, pane_x, pane_w, content_top, panel_y, panel_h, footer_h, state);
+    draw_pane(r, font, pane_x, pane_w, content_top, panel_y + panel_h - footer_h - 12.0f, state);
 
     // Footer hint line and error message
     const float footer_y = panel_y + panel_h - footer_h;

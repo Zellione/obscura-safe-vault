@@ -505,12 +505,13 @@ namespace {
 VaultResult Vault::unlock(std::span<const uint8_t> password,
                           std::span<const uint8_t> keyfile)
 {
-    if (fp_ == nullptr) return VaultResult::IoError;
-    if (unlocked_)      return VaultResult::Ok;
+    using enum VaultResult;
+    if (fp_ == nullptr) { return IoError; }
+    if (unlocked_)      { return Ok; }
 
     crypto::SecureBuffer<crypto::KEY_SIZE> kek;
     if (!crypto::derive_key(password, keyfile, header_.salt, header_.kdf, kek)) {
-        return VaultResult::CryptoError;
+        return CryptoError;
     }
 
     // Unwrap the master key straight into mlock'd memory.
@@ -519,22 +520,22 @@ VaultResult Vault::unlock(std::span<const uint8_t> password,
     std::memcpy(sealed.data() + crypto::KEY_SIZE, header_.mk_tag.data(), crypto::TAG_SIZE);
     if (!crypto::open_to(kek.as_span(), header_.mk_nonce, sealed, master_key_.span())) {
         master_key_.wipe();
-        return VaultResult::AuthFailed;  // wrong password / keyfile / tampered wrap
+        return AuthFailed;  // wrong password / keyfile / tampered wrap
     }
 
     // Load the index from the active slot, falling back to the other slot if the
     // active one is unreadable (crash during a swap left it truncated/corrupt).
-    const uint8_t active = header_.active_slot == 0 ? 0 : 1;
-    if (!try_load_slot(fp_, header_, master_key_.as_span(), active, root_,
+    if (const uint8_t active = header_.active_slot == 0 ? 0 : 1;
+        !try_load_slot(fp_, header_, master_key_.as_span(), active, root_,
                        saved_searches_, settings_) &&
         !try_load_slot(fp_, header_, master_key_.as_span(), active == 0 ? 1 : 0, root_,
                        saved_searches_, settings_)) {
         master_key_.wipe();
-        return VaultResult::BadFormat;
+        return BadFormat;
     }
 
     unlocked_ = true;
-    return VaultResult::Ok;
+    return Ok;
 }
 
 VaultResult Vault::change_password(std::span<const uint8_t> old_password,

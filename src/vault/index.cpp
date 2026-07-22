@@ -168,10 +168,11 @@ bool read_video_meta(ByteReader& r, VideoMeta& m)
 // Read and validate sort key for a node (version-aware, Phase 37+).
 [[nodiscard]] bool read_sort_key(ByteReader& r, SortKey& sort_key, uint8_t version)
 {
-    sort_key = SortKey::Default;
+    using enum SortKey;
+    sort_key = Default;
     if (version >= 6) {
-        const uint8_t max_sk = version >= 8 ? std::to_underlying(SortKey::Insertion)
-                                            : std::to_underlying(SortKey::SizeDesc);
+        const uint8_t max_sk = version >= 8 ? std::to_underlying(Insertion)
+                                            : std::to_underlying(SizeDesc);
         const uint8_t sk = r.u8();
         if (!r.ok() || sk > max_sk) {
             return false;
