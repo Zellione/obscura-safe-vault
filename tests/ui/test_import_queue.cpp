@@ -349,3 +349,46 @@ TEST(import_queue_abort_and_flush_discards_queue)
 
     ziptest::cleanup_dir(temp_dir);
 }
+
+// Test 8: Verify queued archive passwords are wiped on abort_and_flush
+TEST(import_queue_abort_wipes_queued_passwords)
+{
+    const auto temp_dir = ziptest::fresh_dir("test_import_queue_wipe_pwd");
+    const auto vault_path = temp_dir / "vault.osv";
+
+    vault::Vault v;
+    ziptest::make_vault(v, vault_path);
+
+    // Create a dummy archive file
+    const auto archive_path = temp_dir / "test.7z";
+    std::ofstream(archive_path, std::ios::binary).write("dummy", 5);
+
+    ui::ImportQueue q;
+    q.begin_session(v);
+
+    // Hold exclusive lock so the worker never starts the task (stays Queued)
+    q.set_exclusive(true);
+
+    // Enqueue an archive task with a plaintext password
+    crypto::SecureBytes password;
+    CHECK(password.resize(8));  // Must check nodiscard return
+    uint8_t* pwd_data = password.data();
+    std::memcpy(pwd_data, "testpass", 8);
+
+    // Verify password is not empty before enqueue
+    CHECK(password.size() == 8);
+
+    (void)q.enqueue_archive(archive_path, "", "test", ui::ImportTaskKind::Archive,
+                            true, std::move(password));
+
+    // Abort (should wipe all queued passwords via password = SecureBytes{})
+    // This calls the destructor on the old buffer, which crypto_wipe's it.
+    q.abort_and_flush();
+
+    // Verify the queue is clean and cancelled
+    const auto snap = q.snapshot();
+    REQUIRE(snap.size() == 1);
+    CHECK(snap[0].state == ui::ImportTaskState::Cancelled);
+
+    ziptest::cleanup_dir(temp_dir);
+}

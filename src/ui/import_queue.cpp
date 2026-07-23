@@ -273,6 +273,7 @@ void ImportQueue::abort_and_flush()
         std::lock_guard lock(mu_);
 
         // Mark all queued tasks as cancelled and set cancel on running task
+        // Also wipe any queued archive passwords (security invariant #2)
         for (auto& task : tasks_) {
             if (!task.finished()) {
                 task.state = ImportTaskState::Cancelled;
@@ -280,6 +281,8 @@ void ImportQueue::abort_and_flush()
             if (task.progress) {
                 task.progress->cancel.store(true);
             }
+            // Wipe password for any queued archive task (replacement triggers old buffer's destructor wipe)
+            task.password = crypto::SecureBytes{};
         }
 
         worker_stop_ = true;
