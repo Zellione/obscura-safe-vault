@@ -55,10 +55,6 @@ TEST(import_queue_mid_batch_crash_recovers)
     const auto temp_dir = ziptest::fresh_dir("test_import_queue_crash");
     const auto vault_path = temp_dir / "vault.osv";
 
-    // Phase 1: Create vault and enqueue 100 tiny jpegs
-    vault::Vault v;
-    ziptest::make_vault(v, vault_path);
-
     const auto files_dir = temp_dir / "files";
     fs::create_directories(files_dir);
     std::vector<fs::path> files;
@@ -71,28 +67,39 @@ TEST(import_queue_mid_batch_crash_recovers)
         files.push_back(path);
     }
 
-    ui::ImportQueue q;
-    q.begin_session(v);
-    (void)q.enqueue_files(files, "");
+    int done_at_crash = 0, total_enqueued = 0;
 
-    // Phase 2: Pump until done >= 50 (or until not busy if that's all we get)
-    pump_until_done(q, 50);
+    // Scope block: Phase 1-3 (Phase 1: Create vault and enqueue 100 tiny jpegs.
+    // Phase 2: Pump until progress. Phase 3: Simulate crash by dropping without flush.
+    // The block ends to close all handles before reopen — Windows cannot rename over
+    // open file handles (compact), and a real OS crash closes handles too.)
+    {
+        vault::Vault v;
+        ziptest::make_vault(v, vault_path);
 
-    auto snap = q.snapshot();
-    REQUIRE(snap.size() == 1);
-    const int done_at_crash = snap[0].done;
-    const int total_enqueued = snap[0].total;
-    // Expect at least some progress; may be less than 50 if testing on slow systems
-    CHECK(done_at_crash >= 1);
-    CHECK(total_enqueued == 100);
+        ui::ImportQueue q;
+        q.begin_session(v);
+        (void)q.enqueue_files(files, "");
 
-    // Phase 3: Simulate crash by dropping without flush
-    ui::test_only_drop_without_flush(q);
+        // Pump until done >= 1 (or until not busy if that's all we get)
+        pump_until_done(q, 50);
 
-    // Phase 4: Close vault (worker is already stopped)
-    v.lock();
+        auto snap = q.snapshot();
+        REQUIRE(snap.size() == 1);
+        done_at_crash = snap[0].done;
+        total_enqueued = snap[0].total;
+        // Expect at least some progress; may be less than 50 if testing on slow systems
+        CHECK(done_at_crash >= 1);
+        CHECK(total_enqueued == 100);
 
-    // Phase 5: Reopen vault and verify consistency
+        // Simulate crash by dropping without flush
+        ui::test_only_drop_without_flush(q);
+
+        // Destructors close handles: ~ImportQueue (end_session idempotent-no-op after seam),
+        // ~Vault (lock() stops router already nullptr, wipes key, closes file)
+    }
+
+    // Phase 4-5: Reopen vault and verify consistency
     vault::Vault v2;
     CHECK(ziptest::open_vault(vault_path, v2));
 
@@ -100,9 +107,9 @@ TEST(import_queue_mid_batch_crash_recovers)
     const int committed_count = static_cast<int>(list.size());
 
     // Committed count should be 0 <= n <= 100 (coalescing means we have at least
-    // the last written snapshot, not necessarily 50)
+    // the last written snapshot, not necessarily the full enqueued count)
     CHECK(committed_count >= 0);
-    CHECK(committed_count <= 100);
+    CHECK(committed_count <= total_enqueued);
 
     // Every present image must read back correctly
     for (const auto& node : list) {
