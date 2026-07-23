@@ -252,6 +252,9 @@ ImportQueue::~ImportQueue()
 void ImportQueue::begin_session(vault::Vault& v)
 {
     std::lock_guard lock(mu_);
+    // Phase 50: reset exclusive gate — a stale true from a torn-down screen must never
+    // survive into a new session (would wedge imports forever).
+    exclusive_ = false;
     v_ = &v;
     lane_ = std::make_unique<vault::CommitLane>();
     lane_->start(v);

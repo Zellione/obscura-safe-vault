@@ -230,6 +230,19 @@ void GalleryGrid::on_exit()
     hover_gif_.reset();
     hover_gif_tile_ = -1;
     hover_gate_.reset();
+
+    // Phase 50: release exclusive gate if transfer/combine dialogs held it at teardown.
+    // The App-owned ImportQueue outlives this screen; if an exclusive flag is held when
+    // the grid tears down (e.g., user opened transfer dialog, left it in Mode/Pick stage,
+    // then idle auto-lock fired), the queue would stay locked forever in the next session.
+    // Safe to release here: a job-launching (Running) stage dialog blocks navigation via
+    // handle_job_input(), so on_exit can only occur pre-launch — the transfer/combine job
+    // has not started and the vault is not being mutated.
+    if (transfer_had_exclusive_ || combine_had_exclusive_) {
+        queue_.set_exclusive(false);
+        transfer_had_exclusive_ = false;
+        combine_had_exclusive_ = false;
+    }
 }
 
 void GalleryGrid::on_vault_changed()

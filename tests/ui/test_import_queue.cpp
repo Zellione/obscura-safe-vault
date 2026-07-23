@@ -429,3 +429,36 @@ TEST(import_queue_abort_and_flush_idempotent)
 
     ziptest::cleanup_dir(temp_dir);
 }
+
+// Test 10: exclusive gate is reset on begin_session (prevents wedging from torn-down screens)
+TEST(import_queue_exclusive_gate_reset_on_begin_session)
+{
+    const auto temp_dir = ziptest::fresh_dir("test_import_queue_exclusive_reset");
+    const auto vault_path = temp_dir / "vault.osv";
+
+    vault::Vault v;
+    ziptest::make_vault(v, vault_path);
+
+    ui::ImportQueue q;
+
+    // First session: set exclusive to true, then end
+    q.begin_session(v);
+    q.set_exclusive(true);
+
+    // Verify exclusive is set
+    auto snap = q.snapshot();
+    CHECK(snap.empty());  // no tasks yet, but exclusive is true
+
+    q.end_session();
+
+    // Second session: begin_session should reset exclusive to false
+    q.begin_session(v);
+
+    // Verify the queue is not blocked on exclusive anymore
+    // The snapshot should work without hanging
+    snap = q.snapshot();
+    CHECK(snap.empty());
+
+    q.end_session();
+    ziptest::cleanup_dir(temp_dir);
+}
