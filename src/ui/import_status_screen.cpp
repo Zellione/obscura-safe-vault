@@ -15,25 +15,9 @@ namespace ui {
 
 namespace {
 constexpr float OX  = 40;    // left margin
-constexpr float OY  = 150;   // list top
+constexpr float OY  = 150;   // list top (after optional lane-failure banner)
 constexpr float PAD = 9;     // vertical padding inside a row
-
-// List geometry shared by render() so layout is consistent.
-struct ListGeom {
-    float row_h;
-    int   visible;
-    int   first;
-};
-
-ListGeom compute_geom(float ph, float win_h, int count, int sel)
-{
-    const float row_h   = ph + 2 * PAD;
-    const float bottom  = win_h - 24.0f;
-    const int   visible = std::max(1, static_cast<int>((bottom - OY) / row_h));
-    int         first   = 0;
-    if (count > visible) first = std::clamp(sel - visible / 2, 0, count - visible);
-    return {row_h, visible, first};
-}
+constexpr float BANNER_H = 48.0f;  // lane-failure banner height
 
 // Format a single import task row's display text based on its state.
 std::string format_row_text(const ImportTaskInfo& task)
@@ -114,6 +98,7 @@ void ImportStatusScreen::handle_event(const SDL_Event& e)
             }
             break;
         case SDL_EVENT_MOUSE_WHEEL:
+            // Scroll via wheel: move selection and adjust scroll to keep selection visible
             if (e.wheel.y > 0) {
                 if (!rows_.empty()) sel_ = std::max(0, sel_ - 1);
             } else if (e.wheel.y < 0) {
@@ -128,6 +113,9 @@ void ImportStatusScreen::update(double dt)
 {
     (void)dt;
     const auto snapshot = queue_.snapshot();
+    const bool lane_failed = queue_.lane_failed();
+
+    // Mark dirty if snapshot changed or lane failure status flipped
     if (!(snapshot == rows_)) {
         rows_ = snapshot;
         // Clamp selection after refresh
@@ -136,6 +124,11 @@ void ImportStatusScreen::update(double dt)
         } else {
             sel_ = 0;
         }
+        mark_dirty();
+    }
+
+    if (lane_failed != last_lane_failed_) {
+        last_lane_failed_ = lane_failed;
         mark_dirty();
     }
 }
@@ -151,20 +144,43 @@ void ImportStatusScreen::render(gfx::Renderer& r)
     r.draw_text(font_, OX, 40, "Imports", TEXT_DIM);
     r.draw_text(font_, OX, 84, "[F1] Help", TEXT_FAINT);
 
+    // Lane-failure banner (Phase 50)
+    float list_top = OY;
+    if (queue_.lane_failed()) {
+        const SDL_FRect banner{0, 110, W, BANNER_H};
+        r.draw_rect(banner, DANGER);  // full-width error banner
+        const std::string error_msg = "Vault write failed — imports halted. Committed items are safe.";
+        r.draw_text(font_, OX, 110 + (BANNER_H - ph) * 0.5f,
+                   fit_text(font_, error_msg, W - 2 * OX), TEXT);
+        list_top = 110 + BANNER_H;
+    }
+
     // Empty state
     if (rows_.empty()) {
-        r.draw_text(font_, OX, OY, "No imports", TEXT_DIM);
+        r.draw_text(font_, OX, list_top, "No imports", TEXT_DIM);
         const std::string hint = "Use Shift+I from the gallery to enqueue imports";
-        r.draw_text(font_, OX, OY + ph + 24, fit_text(font_, hint, W - 2 * OX), TEXT_FAINT);
+        r.draw_text(font_, OX, list_top + ph + 24, fit_text(font_, hint, W - 2 * OX), TEXT_FAINT);
         return;
     }
 
-    // Render the scrollable list
-    const auto g = compute_geom(ph, H, static_cast<int>(rows_.size()), sel_);
+    // Render the scrollable list with adjusted geometry
+    const float bottom = H - 24.0f;  // reserve footer band
+    const float row_h = ph + 2 * PAD;
+    const int visible = std::max(1, static_cast<int>((bottom - list_top) / row_h));
+    int first = 0;
+    const int count = static_cast<int>(rows_.size());
+    if (count > visible) first = std::clamp(sel_ - visible / 2, 0, count - visible);
 
-    for (int i = g.first; i < g.first + g.visible && i < static_cast<int>(rows_.size()); ++i) {
-        const float    y    = OY + static_cast<float>(i - g.first) * g.row_h;
-        const SDL_FRect row{OX, y, W - 2 * OX, g.row_h - 4};
+    // Clamp scroll position
+    const float content_h = row_h * static_cast<float>(count);
+    const float max_scroll = std::max(0.0f, content_h - (bottom - list_top));
+    scroll_ = std::clamp(scroll_, 0.0f, max_scroll);
+
+    for (int i = first; i < first + visible && i < count; ++i) {
+        const float    y    = list_top + static_cast<float>(i - first) * row_h - scroll_;
+        if (y + row_h < list_top || y > bottom) continue;  // cull off-screen rows
+
+        const SDL_FRect row{OX, y, W - 2 * OX, row_h - 4};
         const bool     sel  = (i == sel_);
 
         // Draw selection glow and background
@@ -174,11 +190,11 @@ void ImportStatusScreen::render(gfx::Renderer& r)
 
         // Row content based on state
         const ImportTaskInfo& task = rows_[i];
-        const float ty = y + (g.row_h - 4 - ph) * 0.5f;
+        const float ty = y + (row_h - 4 - ph) * 0.5f;
 
         if (task.state == ImportTaskState::Running) {
             // Running: show progress bar
-            const float bar_y = y + (g.row_h - 4 - 12) * 0.5f;
+            const float bar_y = y + (row_h - 4 - 12) * 0.5f;
             const float bar_w = W - 2 * OX - 24;
             const float progress = task.total > 0 ? static_cast<float>(task.done) / static_cast<float>(task.total) : 0.0f;
 

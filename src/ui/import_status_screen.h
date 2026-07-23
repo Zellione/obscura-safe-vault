@@ -21,6 +21,7 @@ public:
     void update(double dt) override;          // poll snapshot; mark_dirty on change
     void render(gfx::Renderer& r) override;
     [[nodiscard]] std::vector<HelpGroup> help_groups() const override;
+    [[nodiscard]] bool blocks_idle_lock() const override { return false; }  // App-level import_busy suppression covers the queue; this screen itself never owns vault work
 
 private:
     gfx::Window&   win_;
@@ -29,7 +30,8 @@ private:
     Nav            back_;
     std::vector<ImportTaskInfo> rows_;    // last snapshot
     int            sel_ = 0;
-    float          scroll_ = 0.0f;
+    float          scroll_ = 0.0f;         // vertical scroll offset (pixels scrolled down)
+    bool           last_lane_failed_ = false;  // track lane failure for dirty marking
 };
 
 } // namespace ui
