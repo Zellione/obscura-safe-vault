@@ -394,6 +394,3 @@ private:
                                       std::string_view old_name, std::string_view new_name);
 
 }  // namespace vault
-
-// Phase 50: Include staging.h after Vault class is fully defined.
-#include "staging.h"

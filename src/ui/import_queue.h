@@ -136,7 +136,6 @@ private:
     // Task management
     std::deque<Task> tasks_;
     uint64_t next_task_id_ = 1;
-    size_t worker_task_index_ = 0;  // Index in tasks_ of the task being/to-be processed
     std::atomic<bool> exclusive_{false};
     std::atomic<bool> worker_stop_{false};
     bool aborted_ = false;  // Tracks abort_and_flush idempotence (checked under mu_)

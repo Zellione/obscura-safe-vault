@@ -49,7 +49,7 @@ bool CommitLane::enqueue_snapshot()
     {
         std::lock_guard lk(mu_);
         if (failed()) return false;
-        if (stopping_.load(std::memory_order_acquire)) return false;  // Stopped, no new work
+        if (stopping_.load()) return false;  // Stopped, no new work
         pending_ = Pending{.plain = std::move(blob), .generation = next_gen_++};
         cv_.notify_all();
     }
@@ -62,7 +62,7 @@ bool CommitLane::flush()
     std::unique_lock lk(mu_);
 
     // If the lane is not running, return immediately
-    if (stopping_.load(std::memory_order_acquire)) {
+    if (stopping_.load()) {
         // Lane is stopped. Check if there's stranded work (should never happen in normal flow)
         if (pending_ || in_flight_) {
             platform::log_error("Vault", "commit lane: stranded work when flushing stopped lane");
@@ -78,7 +78,7 @@ bool CommitLane::flush()
 
 bool CommitLane::failed() const noexcept
 {
-    return failed_.load(std::memory_order_acquire);
+    return failed_.load();
 }
 
 void CommitLane::stop() noexcept
@@ -88,7 +88,7 @@ void CommitLane::stop() noexcept
     // Signal the worker to stop.
     {
         std::lock_guard lk(mu_);
-        stopping_.store(true, std::memory_order_release);
+        stopping_.store(true);
         cv_.notify_all();
     }
 
@@ -150,7 +150,7 @@ void CommitLane::worker_loop()
             {
                 std::lock_guard wl(*v_->write_mutex_);
                 if (index_io::commit_plain_blob(ctx, work->plain) != VaultResult::Ok) {
-                    failed_.store(true, std::memory_order_release);
+                    failed_.store(true);
                     platform::log_error("Vault", "commit lane: index write failed");
                 }
             }

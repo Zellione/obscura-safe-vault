@@ -16,11 +16,9 @@
 #include <vector>
 
 #include "index.h"
+#include "vault.h"
 
 namespace vault {
-
-// Forward declarations.
-class Vault;
 
 // Pool-computed decode result for an image (Task 7 fills this from the decode
 // pool; nullptr => stage_image decodes inline, exactly like add_image today).

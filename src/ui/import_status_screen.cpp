@@ -41,6 +41,53 @@ std::string format_row_text(const ImportTaskInfo& task)
     return std::string();
 }
 
+// Helper to draw a running (progress bar) row
+void draw_running_row(gfx::Renderer& r, gfx::FontAtlas& font, const ImportTaskInfo& task,
+                      float y, float W, float row_h, float ph)
+{
+    using namespace gfx::theme;
+
+    const float bar_y = y + (row_h - 4 - 12) * 0.5f;
+    const float bar_w = W - 2 * OX - 24;
+    const float progress = task.total > 0 ? static_cast<float>(task.done) / static_cast<float>(task.total) : 0.0f;
+    const float ty = y + (row_h - 4 - ph) * 0.5f;
+
+    // Background bar
+    SDL_FRect bar_bg{OX + 14, bar_y, bar_w, 12};
+    r.draw_round_rect(bar_bg, 2, OK);
+
+    // Filled bar
+    SDL_FRect bar_fill{OX + 14, bar_y, bar_w * progress, 12};
+    r.draw_round_rect(bar_fill, 2, ACCENT);
+
+    // Text: name and "done/total"
+    const std::string prog_text = std::format("{}/{}", task.done, task.total);
+    const float name_width = W - OX - 14 - 100 - 20;
+    const std::string display = fit_text(font, task.display_name, name_width);
+    r.draw_text(font, OX + 14, ty, display, TEXT);
+    r.draw_text(font, W - OX - 14 - static_cast<float>(font.measure(prog_text)), ty, prog_text, TEXT_DIM);
+}
+
+// Helper to draw a queued or finished row
+void draw_queued_finished_row(gfx::Renderer& r, gfx::FontAtlas& font, const ImportTaskInfo& task,
+                              float y, float row_h, float ph, float W)
+{
+    using namespace gfx::theme;
+
+    const float ty = y + (row_h - 4 - ph) * 0.5f;
+    const std::string text = format_row_text(task);
+    const std::string display = fit_text(font, text, W - 2 * OX - 28);
+
+    gfx::Color text_color = TEXT;
+    if (task.state == ImportTaskState::Failed) {
+        text_color = DANGER;
+    } else if (task.state == ImportTaskState::Done) {
+        text_color = OK;
+    }
+
+    r.draw_text(font, OX + 14, ty, display, text_color);
+}
+
 } // namespace
 
 ImportStatusScreen::ImportStatusScreen(gfx::Window& win, gfx::FontAtlas& font,
@@ -190,41 +237,11 @@ void ImportStatusScreen::render(gfx::Renderer& r)
 
         // Row content based on state
         const ImportTaskInfo& task = rows_[i];
-        const float ty = y + (row_h - 4 - ph) * 0.5f;
 
         if (task.state == ImportTaskState::Running) {
-            // Running: show progress bar
-            const float bar_y = y + (row_h - 4 - 12) * 0.5f;
-            const float bar_w = W - 2 * OX - 24;
-            const float progress = task.total > 0 ? static_cast<float>(task.done) / static_cast<float>(task.total) : 0.0f;
-
-            // Background bar
-            SDL_FRect bar_bg{OX + 14, bar_y, bar_w, 12};
-            r.draw_round_rect(bar_bg, 2, OK);
-
-            // Filled bar
-            SDL_FRect bar_fill{OX + 14, bar_y, bar_w * progress, 12};
-            r.draw_round_rect(bar_fill, 2, ACCENT);
-
-            // Text: name and "done/total"
-            const std::string prog_text = std::format("{}/{}", task.done, task.total);
-            const float name_width = W - OX - 14 - 100 - 20;
-            const std::string display = fit_text(font_, task.display_name, name_width);
-            r.draw_text(font_, OX + 14, ty, display, TEXT);
-            r.draw_text(font_, W - OX - 14 - static_cast<float>(font_.measure(prog_text)), ty, prog_text, TEXT_DIM);
+            draw_running_row(r, font_, task, y, W, row_h, ph);
         } else {
-            // Queued/Finished: just text
-            const std::string text = format_row_text(task);
-            const std::string display = fit_text(font_, text, W - 2 * OX - 28);
-
-            gfx::Color text_color = TEXT;
-            if (task.state == ImportTaskState::Failed) {
-                text_color = DANGER;
-            } else if (task.state == ImportTaskState::Done) {
-                text_color = OK;
-            }
-
-            r.draw_text(font_, OX + 14, ty, display, text_color);
+            draw_queued_finished_row(r, font_, task, y, row_h, ph, W);
         }
     }
 }

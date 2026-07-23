@@ -92,18 +92,21 @@ private:
     void worker_loop()
     {
         while (true) {
-            std::unique_lock lock(mu_);
-            cv_.wait(lock, [this]() { return !queue_.empty() || stopping_; });
+            // Acquire job under lock, then release before decoding
+            std::shared_ptr<DecodeJob> job;
+            {
+                std::unique_lock lock(mu_);
+                cv_.wait(lock, [this]() { return !queue_.empty() || stopping_; });
 
-            if (stopping_ && queue_.empty())
-                break;
+                if (stopping_ && queue_.empty())
+                    break;
 
-            if (queue_.empty())
-                continue;
+                if (queue_.empty())
+                    continue;
 
-            auto job = queue_.front();
-            queue_.pop();
-            lock.unlock();
+                job = queue_.front();
+                queue_.pop();
+            }  // Lock released here
 
             // Decode outside the lock
             if (auto decoded = image::decode_from_memory(job->data)) {
@@ -652,8 +655,8 @@ void ImportQueue::worker_loop()
 
             // Wait for a queued/running task or until worker should stop
             worker_cv_.wait(lock, [this]() {
-                const bool stop = worker_stop_.load(std::memory_order_acquire);
-                const bool excl = exclusive_.load(std::memory_order_acquire);
+                const bool stop = worker_stop_.load();
+                const bool excl = exclusive_.load();
 
                 // Check for queued/running work
                 for (const auto& t : tasks_) {
@@ -841,7 +844,7 @@ void ImportQueue::process_files_task(Task& task)
                 thumb = &pf.decode_job->result;
             }
 
-            const auto staged = vault::stage_image(*v_, pf.data, filename, thumb);
+            auto staged = vault::stage_image(*v_, pf.data, filename, thumb);
             if (staged.status == vault::VaultResult::Ok) {
                 std::lock_guard lock(mu_);
                 records_.push_back(StagedRecord{task.dest_gallery, std::move(staged.node),

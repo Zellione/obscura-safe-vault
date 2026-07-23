@@ -120,20 +120,23 @@ private:
     };
     Overlays                           overlays_;
 
-    // Phase 50: a lock-ish action (LockActive / ToUnlock / Quit / manager
-    // switch) requested while imports are pending. The action is parked here
-    // behind a default-cancel confirm modal; Y aborts the queue then replays
-    // the Nav, N/Esc discards it.
-    struct PendingLockConfirm { bool open = false; ui::Nav action; };
-    PendingLockConfirm                 lock_confirm_;
+    // Phase 50: import queue and related UI state. Declared after active_/pending_
+    // so ~ImportQueue (which flushes into the vault) runs before the vault is destroyed.
+    struct ImportUi {
+        // A lock-ish action (LockActive / ToUnlock / Quit / manager switch) requested
+        // while imports are pending. The action is parked here behind a default-cancel
+        // confirm modal; Y aborts the queue then replays the Nav, N/Esc discards it.
+        struct PendingLockConfirm { bool open = false; ui::Nav action; };
+        PendingLockConfirm lock_confirm;
 
-    // Phase 50: nav to be processed on the next apply_nav() call (set by
-    // dispatch_event when the user confirms a parked lock action).
-    ui::Nav                            replay_nav_;
+        // Nav to be processed on the next apply_nav() call (set by dispatch_event
+        // when the user confirms a parked lock action).
+        ui::Nav replay_nav;
 
-    // Phase 50: background import queue. Declared after active_/pending_ so
-    // ~ImportQueue (which flushes into the vault) runs before the vault is destroyed.
-    ui::ImportQueue                    import_queue_;
+        // Background import queue.
+        ui::ImportQueue queue;
+    };
+    ImportUi                           import_ui_;
 };
 
 } // namespace app
