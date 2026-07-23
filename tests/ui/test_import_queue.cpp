@@ -15,7 +15,7 @@ namespace fs = std::filesystem;
 namespace {
 
 // Helper: pump drain() until the queue idles
-static void pump_until_idle(ui::ImportQueue& q, int max_ms = 30000)
+void pump_until_idle(ui::ImportQueue& q, int max_ms = 30000)
 {
     for (int i = 0; i < max_ms; ++i) {
         (void)q.drain(0.001);

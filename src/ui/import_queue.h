@@ -2,20 +2,15 @@
 
 #include "ui/import_model.h"
 #include "vault/commit_lane.h"
-#include "vault/op_progress.h"
 #include "vault/vault.h"
-#include "crypto/secure_mem.h"
 
-#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <vector>
 

@@ -93,7 +93,7 @@ public:
         std::atomic<bool> done{false};
     };
 
-    void submit(std::shared_ptr<DecodeJob> job)
+    void submit(const std::shared_ptr<DecodeJob>& job)
     {
         {
             std::lock_guard lock(mu_);
@@ -157,7 +157,7 @@ class ImportQueue::StagingSink final : public MediaSink {
 public:
     StagingSink(vault::Vault& v, std::string dest_gallery, uint64_t task_id,
                 std::deque<StagedRecord>& records, std::mutex& mu,
-                std::shared_ptr<vault::OpProgress> progress)
+                const std::shared_ptr<vault::OpProgress>& progress)
         : v_(v)
         , dest_gallery_(std::move(dest_gallery))
         , task_id_(task_id)
@@ -590,8 +590,14 @@ std::string ImportQueue::footer_summary() const
 void ImportQueue::worker_loop()
 {
     while (true) {
-        Task* task = nullptr;
+        // Store task data locally to avoid holding references across lock release
         uint64_t task_id = 0;
+        ImportTaskKind task_kind = ImportTaskKind::Files;
+        std::vector<std::filesystem::path> task_files;
+        std::filesystem::path task_archive_path;
+        std::string task_gallery_name, task_dest_gallery;
+        std::shared_ptr<vault::OpProgress> task_progress;
+        bool found_task = false;
 
         {
             std::unique_lock lock(mu_);
@@ -602,7 +608,7 @@ void ImportQueue::worker_loop()
                 if (exclusive_)
                     return worker_stop_;
 
-                for (auto& t : tasks_) {
+                for (const auto& t : tasks_) {
                     if (t.state == ImportTaskState::Queued ||
                         t.state == ImportTaskState::Running) {
                         return true;
@@ -618,44 +624,71 @@ void ImportQueue::worker_loop()
             if (exclusive_)
                 continue;
 
-            // Find the first queued or running task
+            // Find the first queued or running task and copy all its data
             for (auto& t : tasks_) {
                 if (t.state == ImportTaskState::Queued) {
-                    t.state = ImportTaskState::Running;
-                    task = &t;
+                    // Copy all task data before releasing lock
                     task_id = t.id;
+                    task_kind = t.kind;
+                    task_files = t.files;
+                    task_archive_path = t.archive_path;
+                    task_gallery_name = t.gallery_name;
+                    task_dest_gallery = t.dest_gallery;
+                    task_progress = t.progress;
+                    found_task = true;
+
+                    // Mark as running
+                    t.state = ImportTaskState::Running;
                     break;
                 } else if (t.state == ImportTaskState::Running) {
-                    // Continue processing this one
-                    task = &t;
+                    // Continue processing this one - copy all task data
                     task_id = t.id;
+                    task_kind = t.kind;
+                    task_files = t.files;
+                    task_archive_path = t.archive_path;
+                    task_gallery_name = t.gallery_name;
+                    task_dest_gallery = t.dest_gallery;
+                    task_progress = t.progress;
+                    found_task = true;
                     break;
                 }
             }
 
-            if (!task)
+            if (!found_task)
                 continue;
         }
 
-        if (!task)
-            continue;
+        // Process the task using copied data (no lock held, no task references)
+        Task work_task{
+            .id = task_id,
+            .kind = task_kind,
+            .display_name = {},
+            .dest_gallery = task_dest_gallery,
+            .files = std::move(task_files),
+            .archive_path = std::move(task_archive_path),
+            .gallery_name = std::move(task_gallery_name),
+            .password = {},
+            .state = ImportTaskState::Running,
+            .imported = 0,
+            .skipped = 0,
+            .error = {},
+            .progress = task_progress,
+        };
 
-        // Process the task (outside the lock)
-        if (task->kind == ImportTaskKind::Files) {
-            process_files_task(*task);
+        if (task_kind == ImportTaskKind::Files) {
+            process_files_task(work_task);
         } else {
-            process_archive_task(*task);
+            process_archive_task(work_task);
         }
 
-        // Mark as done or cancelled
+        // Update the original task with results, by ID lookup
         {
             std::lock_guard lock(mu_);
-            // Find the task by ID and update its state (in case it moved)
             for (auto& t : tasks_) {
                 if (t.id == task_id) {
                     if (t.state == ImportTaskState::Running) {
                         // Check if the task was cancelled
-                        if (t.progress && t.progress->cancel.load()) {
+                        if (task_progress && task_progress->cancel.load()) {
                             t.state = ImportTaskState::Cancelled;
                         } else {
                             t.state = ImportTaskState::Done;
@@ -664,7 +697,6 @@ void ImportQueue::worker_loop()
                     break;
                 }
             }
-            // Note: task stays in the deque until clear_finished() removes it
         }
     }
 }
