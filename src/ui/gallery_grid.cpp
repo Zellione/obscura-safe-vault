@@ -1554,9 +1554,13 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float bottom)
         r.draw_round_rect(cellr, RADIUS, sel ? SURFACE_HI : SURFACE);
         r.draw_round_rect(cellr, RADIUS, sel ? ACCENT : BORDER, /*filled*/ false);
 
-        // Leave a 12px gap below the label so it never touches the tile border.
-        const float ph      = font_.pixel_height();
-        const float label_y = cellr.y + cell - ph - 12.0f - chip_h;
+        // Leave a 12px gap below the label so it never touches the tile border,
+        // and a LABEL_CHIP_GAP of breathing room between the name and the chip
+        // line (only reserved when a chip line is actually drawn).
+        constexpr float LABEL_CHIP_GAP = 10.0f;
+        const float ph        = font_.pixel_height();
+        const float label_gap = chip_h > 0.0f ? LABEL_CHIP_GAP : 0.0f;
+        const float label_y   = cellr.y + cell - ph - 12.0f - chip_h - label_gap;
         const SDL_FRect thumb_rect{cellr.x + 6, cellr.y + 6,
                                    cell - 12, label_y - cellr.y - 12.0f};
 
@@ -1575,7 +1579,7 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float bottom)
             // CHIP_LINE_H box directly below the label, its content centred so the
             // ~28 px ink clears the label's baseline instead of overlapping it.
             draw_tag_chips(r, font_, cellr.x + 8,
-                           label_y + ph + (chip_h - CHIP_ROW_H) * 0.5f,
+                           label_y + ph + label_gap + (chip_h - CHIP_ROW_H) * 0.5f,
                            cell - 16, n->tags, cats);
         }
 
