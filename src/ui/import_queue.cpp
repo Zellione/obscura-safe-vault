@@ -272,6 +272,10 @@ void ImportQueue::abort_and_flush()
     {
         std::lock_guard lock(mu_);
 
+        // Make idempotent: if already aborted, this is a no-op
+        if (aborted_) return;
+        aborted_ = true;
+
         // Mark all queued tasks as cancelled and set cancel on running task
         // Also wipe any queued archive passwords (security invariant #2)
         for (auto& task : tasks_) {
@@ -285,7 +289,7 @@ void ImportQueue::abort_and_flush()
             task.password = crypto::SecureBytes{};
         }
 
-        // Release exclusive lock and clear tasks to ensure worker can exit
+        // Release exclusive lock and set stop flag to ensure worker can exit
         exclusive_ = false;
         worker_stop_ = true;
     }
@@ -320,7 +324,7 @@ void ImportQueue::abort_and_flush()
         }
     }
 
-    // Final commit
+    // Final commit (stop-aware: enqueue_snapshot and flush handle stopped lanes gracefully)
     if (lane_) {
         (void)lane_->enqueue_snapshot();
         (void)lane_->flush();

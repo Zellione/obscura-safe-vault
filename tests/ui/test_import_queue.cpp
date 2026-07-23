@@ -389,3 +389,43 @@ TEST(import_queue_abort_wipes_queued_passwords)
 
     ziptest::cleanup_dir(temp_dir);
 }
+
+// Test 9: abort_and_flush is idempotent (can be called multiple times safely)
+TEST(import_queue_abort_and_flush_idempotent)
+{
+    const auto temp_dir = ziptest::fresh_dir("test_import_queue_idempotent");
+    const auto vault_path = temp_dir / "vault.osv";
+
+    vault::Vault v;
+    ziptest::make_vault(v, vault_path);
+
+    ui::ImportQueue q;
+    q.begin_session(v);
+
+    // Enqueue a file task
+    const auto files_dir = temp_dir / "files";
+    fs::create_directories(files_dir);
+    const auto path = files_dir / "test.jpg";
+    const auto jpeg_data = ziptest::fake_jpeg(42);
+    std::ofstream(path, std::ios::binary)
+        .write(reinterpret_cast<const char*>(jpeg_data.data()),
+               static_cast<std::streamsize>(jpeg_data.size()));
+
+    std::vector<fs::path> files{path};
+    (void)q.enqueue_files(files, "");
+
+    // First abort_and_flush should succeed
+    q.abort_and_flush();
+
+    // Second abort_and_flush should be a no-op and NOT hang
+    // (This simulates what happens when ~ImportQueue calls end_session -> abort_and_flush
+    //  after an explicit abort_and_flush has already been called)
+    q.abort_and_flush();
+
+    // Verify the queue state is consistent
+    const auto snap = q.snapshot();
+    CHECK((snap[0].state == ui::ImportTaskState::Done ||
+           snap[0].state == ui::ImportTaskState::Cancelled));
+
+    ziptest::cleanup_dir(temp_dir);
+}

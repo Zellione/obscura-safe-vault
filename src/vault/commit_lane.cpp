@@ -23,6 +23,7 @@ void CommitLane::start(Vault& v)
 bool CommitLane::enqueue_snapshot()
 {
     if (!v_) return false;
+    if (!running()) return false;  // Lane thread is not running; reject work
     if (failed()) return false;
 
     // Serialize the index tree (main-thread-only, no lock needed for tree).
@@ -43,11 +44,12 @@ bool CommitLane::enqueue_snapshot()
     }
 
     // Take the lock and enqueue the blob, replacing any not-yet-written pending blob.
-    // Re-check failed() under mu_ — the worker may have failed during a previous
-    // commit, and we must not queue new work after a hard failure (data-loss race).
+    // Re-check failed() and running() under mu_ — the worker may have failed during a previous
+    // commit, the lane may have stopped, and we must not queue new work after a hard failure (data-loss race).
     {
         std::lock_guard lk(mu_);
         if (failed()) return false;
+        if (stopping_.load(std::memory_order_acquire)) return false;  // Stopped, no new work
         pending_ = Pending{.plain = std::move(blob), .generation = next_gen_++};
         cv_.notify_all();
     }
@@ -58,6 +60,18 @@ bool CommitLane::enqueue_snapshot()
 bool CommitLane::flush()
 {
     std::unique_lock lk(mu_);
+
+    // If the lane is not running, return immediately
+    if (stopping_.load(std::memory_order_acquire)) {
+        // Lane is stopped. Check if there's stranded work (should never happen in normal flow)
+        if (pending_ || in_flight_) {
+            platform::log_error("Vault", "commit lane: stranded work when flushing stopped lane");
+            return false;
+        }
+        return !failed();  // Return success if no pending work and not failed
+    }
+
+    // Lane is running: wait for pending work to complete
     cv_.wait(lk, [this] { return (!pending_ && !in_flight_) || failed(); });
     return !failed();
 }

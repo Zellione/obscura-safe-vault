@@ -101,6 +101,7 @@ private:
     size_t worker_task_index_ = 0;  // Index in tasks_ of the task being/to-be processed
     std::atomic<bool> exclusive_{false};
     std::atomic<bool> worker_stop_{false};
+    bool aborted_ = false;  // Tracks abort_and_flush idempotence (checked under mu_)
 
     // Record queue for main thread to drain
     std::deque<StagedRecord> records_;

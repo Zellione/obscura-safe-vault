@@ -154,3 +154,49 @@ TEST(commit_lane_header_mutex_tsan_coverage)
     CHECK_EQ(static_cast<int>(v2.list("g").size()), 30);
     cleanup_dir(dir);
 }
+
+// Sixth test: enqueue_snapshot rejects work after lane is stopped
+TEST(commit_lane_enqueue_snapshot_rejects_stopped_lane)
+{
+    const auto dir  = fresh_dir("lane6");
+    const auto path = dir / "a.osv";
+    {
+        vault::Vault v;
+        ziptest::make_vault(v, path);
+        vault::CommitLane lane;
+        lane.start(v);
+
+        // Enqueue and stop
+        REQUIRE(lane.enqueue_snapshot());
+        REQUIRE(lane.flush());
+        lane.stop();
+
+        // After stop, enqueue_snapshot should return false
+        CHECK(!lane.enqueue_snapshot());
+    }
+    cleanup_dir(dir);
+}
+
+// Seventh test: flush returns immediately on stopped lane (no hang)
+TEST(commit_lane_flush_stopped_lane_returns_immediately)
+{
+    const auto dir  = fresh_dir("lane7");
+    const auto path = dir / "a.osv";
+    {
+        vault::Vault v;
+        ziptest::make_vault(v, path);
+        vault::CommitLane lane;
+        lane.start(v);
+
+        // Enqueue work but don't flush
+        REQUIRE(lane.enqueue_snapshot());
+
+        // Stop the lane (work is drained by the lane thread before it exits)
+        lane.stop();
+
+        // flush() should return immediately without hanging
+        // (Previous bug: would wait forever on CV with no thread to signal it)
+        REQUIRE(lane.flush());
+    }
+    cleanup_dir(dir);
+}
