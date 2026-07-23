@@ -497,6 +497,28 @@ void ImportQueue::set_exclusive(bool held)
     }
 }
 
+void ImportQueue::mark_task_skipped(uint64_t task_id)
+{
+    std::lock_guard lock(mu_);
+    for (auto& t : tasks_) {
+        if (t.id == task_id) {
+            t.skipped++;
+            break;
+        }
+    }
+}
+
+void ImportQueue::mark_task_imported(uint64_t task_id)
+{
+    std::lock_guard lock(mu_);
+    for (auto& t : tasks_) {
+        if (t.id == task_id) {
+            t.imported++;
+            break;
+        }
+    }
+}
+
 int ImportQueue::drain(double dt)
 {
     // Collect records to process without holding the lock for vault operations
@@ -520,31 +542,11 @@ int ImportQueue::drain(double dt)
             }
             const auto result = vault::attach_staged(*v_, record.gallery_path, std::move(*record.node));
             if (result == vault::VaultResult::AlreadyExists) {
-                // Find the task and increment skipped (re-acquire lock for update)
-                {
-                    std::lock_guard lock(mu_);
-                    for (auto& t : tasks_) {
-                        if (t.id == record.task_id) {
-                            t.skipped++;
-                            break;
-                        }
-                    }
-                }
-            } else if (result == vault::VaultResult::Ok) {
-                if (!record.counted) {
-                    record.counted = true;
-                    policy_.note_attached(1);
-                    // Update task imported count (re-acquire lock)
-                    {
-                        std::lock_guard lock(mu_);
-                        for (auto& t : tasks_) {
-                            if (t.id == record.task_id) {
-                                t.imported++;
-                                break;
-                            }
-                        }
-                    }
-                }
+                mark_task_skipped(record.task_id);
+            } else if (result == vault::VaultResult::Ok && !record.counted) {
+                record.counted = true;
+                policy_.note_attached(1);
+                mark_task_imported(record.task_id);
             }
         } else {
             (void)vault::ensure_gallery_path(*v_, record.gallery_path);

@@ -122,6 +122,8 @@ private:
 
     // Internal state helpers
     void maybe_end_batch();
+    void mark_task_skipped(uint64_t task_id);
+    void mark_task_imported(uint64_t task_id);
 
     // Synchronization
     mutable std::mutex mu_;
