@@ -692,8 +692,8 @@ VaultResult Vault::add_image(std::string_view         gallery_path,
     if (staged.status != Ok) return staged.status;
 
     // Attach the staged node to the tree (no commit yet).
-    if (const VaultResult r = attach_staged(*this, gallery_path, std::move(staged.node));
-        r != Ok) return r;
+    const VaultResult r = attach_staged(*this, gallery_path, std::move(staged.node));
+    if (r != Ok) return r;
 
     // Synchronize the staged chunks to stable storage (fsync).
     ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
@@ -780,8 +780,8 @@ VaultResult Vault::add_video(std::string_view         gallery_path,
     if (staged.status != Ok) return staged.status;
 
     // Attach the staged node to the tree (no commit yet).
-    if (const VaultResult r = attach_staged(*this, gallery_path, std::move(staged.node));
-        r != Ok) return r;
+    const VaultResult r = attach_staged(*this, gallery_path, std::move(staged.node));
+    if (r != Ok) return r;
 
     // Synchronize the staged chunks to stable storage (fsync).
     ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
@@ -1319,6 +1319,7 @@ VaultResult Vault::compact(OpProgress* progress)
     if (progress && progress->cancel.load()) return fail(Ok);
     if (copy_err != Ok) return fail(copy_err);
 
+    // === STEP 1: Serialize and seal the index blob ===
     // Fresh sealed index into slot A; slot B starts empty in the new file.
     // Saved searches and settings carry over unchanged (vault-global metadata).
     std::vector<uint8_t> blob;
@@ -1338,6 +1339,7 @@ VaultResult Vault::compact(OpProgress* progress)
     std::vector<uint8_t> sealed;
     crypto::seal(master_key_.as_span(), nonce, blob, sealed);
 
+    // === STEP 2: Write sealed index to temp file (order is load-bearing) ===
     uint64_t idx_off = 0;
     if (!dst.append_raw(sealed, idx_off) || !dst.sync()) return fail(IoError);
 
@@ -1346,6 +1348,7 @@ VaultResult Vault::compact(OpProgress* progress)
     h.slot[1]     = IndexSlot{};
     h.active_slot = 0;
     h.serialize(raw);
+    // Write header then sync before rename (order is load-bearing: index must be durable first)
     if (!fileutil::seek_to(tmp, 0) ||
         std::fwrite(raw.data(), 1, raw.size(), tmp) != raw.size() ||
         !fileutil::sync(tmp)) {

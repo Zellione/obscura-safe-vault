@@ -15,6 +15,32 @@
 
 namespace vault {
 
+namespace {
+    // Decode image and generate thumbnail from decoded pixels (pure CPU, no lock)
+    struct DecodedThumb {
+        ImageFormat format;
+        uint32_t width;
+        uint32_t height;
+        bool animated;
+        std::vector<uint8_t> thumb_bytes;
+    };
+
+    DecodedThumb decode_and_thumbnail(std::span<const uint8_t> file_data)
+    {
+        DecodedThumb result{ImageFormat::Unknown, 0, 0, false, {}};
+        if (auto decoded = image::decode_from_memory(file_data)) {
+            result.format = static_cast<ImageFormat>(decoded->format);
+            result.width = static_cast<uint32_t>(decoded->width);
+            result.height = static_cast<uint32_t>(decoded->height);
+            result.animated = (result.format == ImageFormat::GIF) && image::gif_is_animated(file_data);
+            if (auto thumb_jpeg = image::make_thumbnail(*decoded, 256, 85)) {
+                result.thumb_bytes = *thumb_jpeg;
+            }
+        }
+        return result;
+    }
+}  // namespace
+
 StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
                        std::string_view filename, const StagedThumb* precomputed)
 {
@@ -65,21 +91,20 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
             std::fflush(v.fp_);
         }
     } else {
-        // Decode inline, exactly like add_image does.
-        if (auto decoded = image::decode_from_memory(file_data)) {
-            format = static_cast<ImageFormat>(decoded->format);
-            width = static_cast<uint32_t>(decoded->width);
-            height = static_cast<uint32_t>(decoded->height);
-            animated =
-                (format == ImageFormat::GIF) && image::gif_is_animated(file_data);
+        // Decode inline, exactly like add_image does (pure CPU part extracted to helper)
+        auto decoded_thumb = decode_and_thumbnail(file_data);
+        format = decoded_thumb.format;
+        width = decoded_thumb.width;
+        height = decoded_thumb.height;
+        animated = decoded_thumb.animated;
 
-            if (auto thumb_jpeg = image::make_thumbnail(*decoded, 256, 85)) {
-                std::lock_guard lk(*v.write_mutex_);
-                if (!store.append_chunk(*thumb_jpeg, thumb_span)) {
-                    return {IoError, {}};
-                }
-                std::fflush(v.fp_);
+        // Append thumbnail if generated (holding lock for chunk write)
+        if (!decoded_thumb.thumb_bytes.empty()) {
+            std::lock_guard lk(*v.write_mutex_);
+            if (!store.append_chunk(decoded_thumb.thumb_bytes, thumb_span)) {
+                return {IoError, {}};
             }
+            std::fflush(v.fp_);
         }
     }
 
