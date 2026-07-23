@@ -503,7 +503,6 @@ project "osv_tests"
         "src/ui/import_queue.cpp",
         "src/ui/zip_encoding.cpp",
         "src/ui/zip_import.cpp",
-        "src/ui/zip_import_job.cpp",
         "src/ui/file_op_job.cpp",
         "src/ui/progress_modal.cpp",
         "src/ui/tag_list_parse.cpp",

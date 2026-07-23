@@ -221,7 +221,7 @@ ZipImportOutcome import_archive_cbz(MediaSink&, const std::filesystem::path&, st
 namespace ui {
 
 // Thin wrappers: construct a DirectVaultSink and call the MediaSink versions.
-// Preserved for tests and ZipImportJob compatibility.
+// Used by tests and import executors.
 
 ZipImportOutcome import_archive(vault::Vault&                v,
                                 const std::filesystem::path& archive_path,

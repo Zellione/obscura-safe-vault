@@ -27,7 +27,6 @@
 #include "ui/selection_model.h"
 #include "ui/tag_editor.h"
 #include "ui/transfer_dialog.h"
-#include "ui/zip_import_job.h"
 #include "ui/zip_plan.h"
 #include "ui/import_queue.h"
 
@@ -117,7 +116,6 @@ private:
     void start_combine();          // Shift+M: combine nav_.path() into another gallery
     void jump_to_gallery(const std::string& path);   // absolute nav: ascend to root, then descend
     void do_export(const std::filesystem::path& dest);
-    void start_import();
     void start_naming();
     void finish_naming();
     void pump_import();            // poll the file dialog while transfer is not active
@@ -210,13 +208,13 @@ private:
         bool                  active = false;  // import in flight (survives a password round-trip)
         bool                  cbz = false;     // .cbz/.cbr/.cb7/.cbt comic import: fixed one-leaf plan
         // .7z/.rar/.tar(+.gz/.xz)/.cbr/.cb7/.cbt (Phase 34) route through
-        // ZipImportJob::start_archive/start_archive_cbz (libarchive) instead of
-        // start_zip/start_cbz (miniz); orthogonal to `cbz` above, which only
+        // import_archive/import_archive_cbz (libarchive) instead of
+        // import_zip/import_cbz (miniz); orthogonal to `cbz` above, which only
         // selects the one-leaf-gallery plan vs the mirror/append plan.
         bool                  archive_backend = false;
         // Phase 35: a ZIP/CBZ detected as password-protected at pick time
         // (ui::zip_is_encrypted) — forces archive_backend above, and gates
-        // whether do_zip_import threads naming_.password.buf through to the job.
+        // whether do_zip_import threads naming_.password.buf through to the queue.
         bool                  needs_password = false;
     };
     struct Naming {
@@ -235,7 +233,6 @@ private:
             SecureTextField buf{256};
         };
         PasswordPrompt password;
-        ZipImportJob import_job;       // background executor for the zip/cbz import (Phase 24)
         FileOpJob    file_op;          // background executor for export/delete/compact (Phase 25/26)
         bool         confirm_delete = false;  // Del on a media tile: awaiting Y/N confirm
         bool         confirm_compact = false; // Shift+C on the gallery: awaiting Y/N compact confirm (Phase 26)

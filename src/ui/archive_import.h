@@ -54,7 +54,7 @@ struct ZipDestination {
                                               ArchivePassword              pw = {});
 
 // Thin wrapper: construct a DirectVaultSink and call the MediaSink version.
-// Preserved for tests and ZipImportJob compatibility.
+// Used by tests and import executors.
 [[nodiscard]] ZipImportOutcome import_archive(vault::Vault&                v,
                                               const std::filesystem::path& archive_path,
                                               const ZipDestination&        dest,
@@ -71,7 +71,7 @@ struct ZipDestination {
                                                   ArchivePassword              pw = {});
 
 // Thin wrapper: construct a DirectVaultSink and call the MediaSink version.
-// Preserved for tests and ZipImportJob compatibility.
+// Used by tests and import executors.
 [[nodiscard]] ZipImportOutcome import_archive_cbz(vault::Vault&                v,
                                                   const std::filesystem::path& archive_path,
                                                   std::string_view             base_gallery,

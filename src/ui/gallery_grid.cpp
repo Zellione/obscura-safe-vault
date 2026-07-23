@@ -127,7 +127,6 @@ void draw_file_op_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
         case Delete:   title = "Deleting…";  unit = "items";  break;
         case Transfer: title = "Moving…";    unit = "files";  break;
         case Compact:  title = "Compacting…"; unit = "chunks"; break;
-        case Import:   title = "Importing…"; unit = "files";  break;
         case None:     break;
     }
     const int total = job.total();
@@ -458,13 +457,6 @@ void GalleryGrid::do_export(const std::filesystem::path& dest)
     mark_dirty();
 }
 
-void GalleryGrid::start_import()
-{
-    if (dialogs_.file.busy()) return;
-    error_.clear();
-    dialogs_.file.open_images(win_.sdl_window());
-}
-
 void GalleryGrid::start_naming()
 {
     naming_.active = true;
@@ -763,7 +755,12 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
             if (!sel_.empty()) { sel_.clear(); status_.clear(); }
             else               go_up();
             break;
-        case Import:     start_import();    break;
+        case Import:
+            if (!dialogs_.file.busy()) {
+                error_.clear();
+                dialogs_.file.open_images(win_.sdl_window());
+            }
+            break;
         case NewGallery: start_naming();    break;
         default: break;
     }

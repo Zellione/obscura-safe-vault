@@ -26,13 +26,13 @@ struct ZipImportOutcome {
     std::string              error;
 };
 
-// Shared, thread-safe progress for a running import (Phase 24). Now an alias of
-// the generic vault::OpProgress (Phase 25) so ZipImportJob and FileOpJob share
-// one progress/cancel type. The importer stores `total` (files to place) before
-// the first page and bumps `done` after each; a poller on another thread reads
-// them for a progress bar. Setting `cancel` cooperatively stops the placement
-// loop between pages — the pages stored so far remain (append-only vault), so a
-// cancel is a clean partial import, never a corrupt one.
+// Shared, thread-safe progress for a running import (Phase 24). An alias of
+// the generic vault::OpProgress (Phase 25) used by import executors and the queue.
+// The importer stores `total` (files to place) before the first page and bumps
+// `done` after each; a poller on another thread reads them for a progress bar.
+// Setting `cancel` cooperatively stops the placement loop between pages — the pages
+// stored so far remain (append-only vault), so a cancel is a clean partial import,
+// never a corrupt one.
 using ImportProgress = vault::OpProgress;
 
 // Import the supported media from `zip_path` through `sink`. Decompresses each entry
@@ -47,7 +47,7 @@ using ImportProgress = vault::OpProgress;
                                           ImportProgress*              progress = nullptr);
 
 // Thin wrapper: construct a DirectVaultSink and call the MediaSink version.
-// Preserved for tests and ZipImportJob compatibility.
+// Used by tests and import executors.
 [[nodiscard]] ZipImportOutcome import_zip(vault::Vault&                v,
                                           const std::filesystem::path& zip_path,
                                           std::string_view             base_gallery,
@@ -65,7 +65,7 @@ using ImportProgress = vault::OpProgress;
                                           ImportProgress*              progress = nullptr);
 
 // Thin wrapper: construct a DirectVaultSink and call the MediaSink version.
-// Preserved for tests and ZipImportJob compatibility.
+// Used by tests and import executors.
 [[nodiscard]] ZipImportOutcome import_cbz(vault::Vault&                v,
                                           const std::filesystem::path& cbz_path,
                                           std::string_view             base_gallery,
