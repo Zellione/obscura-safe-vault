@@ -58,6 +58,10 @@ void rebuild_detail(class GalleryGrid& g);
 // true when the key was consumed.
 bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
 
+// Shortcut-key dispatch (L/X/M/R/SPACE/G/B/F/T/S/U), extracted to reduce
+// handle_key_down's cognitive complexity. Returns true when consumed.
+bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& key);
+
 // Where to (re)open the grid: a gallery path (empty = root), the selected
 // tile index, and the initial List/Grid view (Phase 39 Part 2 session
 // memory). Used to restore position + view mode when returning from the
@@ -148,6 +152,7 @@ private:
     friend void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key);  // Shift+C compact confirm
     friend void handle_delete_key(GalleryGrid& g);                                   // Del confirm
     friend bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key);     // detail panel scroll/toggle
+    friend bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& key);  // L/X/M/R/SPACE/G/B/F/T/S/U shortcuts
     friend void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);  // cancelled import waste hint
     // current_gallery_view is a free friend for the same S1448 reason: App reads it
     // (Phase 39 Part 2) to snapshot the outgoing grid's view mode into GallerySessionState.

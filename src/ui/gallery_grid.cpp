@@ -688,60 +688,64 @@ bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
     return false;
 }
 
+// Dispatch shortcut keys (L/X/M/R/SPACE/G/B/F/T/S/U) for handle_key_down (S3776 extraction)
+// Declared as friend in gallery_grid.h to access private methods
+bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& key)
+{
+    switch (key.key) {
+        case SDLK_L: g.view_ = next_gallery_view(g.view_); return true;
+        case SDLK_X: g.start_export(); return true;
+        case SDLK_M:
+            if (key.mod & SDL_KMOD_SHIFT) { g.start_combine(); return true; }
+            g.start_transfer();
+            return true;
+        case SDLK_R: g.start_rename(); return true;
+        case SDLK_SPACE: g.toggle_or_open(); return true;
+        case SDLK_G: g.start_tag_editor((key.mod & SDL_KMOD_SHIFT) != 0); return true;
+        case SDLK_B: g.toggle_favorite_current(); return true;
+        case SDLK_F:
+            g.request((key.mod & SDL_KMOD_SHIFT) ? ui::NavKind::ToFavoriteGalleries
+                      : ui::NavKind::ToFavoriteImages);
+            return true;
+        case SDLK_T:
+            if (key.mod & SDL_KMOD_SHIFT) { g.request(ui::NavKind::ToTagOverview); return true; }
+            return false;
+        case SDLK_S:
+            if (key.mod & SDL_KMOD_SHIFT) { g.cycle_gallery_sort(); return true; }
+            return false;
+        case SDLK_U: g.request(ui::NavKind::ToggleKeepUnlocked); return true;
+        default: return false;
+    }
+}
+
 void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
 {
     // Detail-panel handling (Ctrl+Up/Down scroll, D toggle). Extracted to reduce
     // cognitive complexity; must run first, before every other key.
     if (handle_detail_key(*this, key)) { return; }
-    if (key.key == SDLK_Z) {   // import zip archive (inlined to keep GalleryGrid <= 35 methods)
+    if (key.key == SDLK_Z) {
         if (dialogs_.file.busy() || transfer_.active()) return;
         error_.clear();
         dialogs_.file.open_zip(win_.sdl_window());
         return;
     }
-    if (key.key == SDLK_DELETE) {   // confirm-delete the focused image/video/gallery
+    if (key.key == SDLK_DELETE) {
         handle_delete_key(*this);
         return;
     }
-    if ((key.key == SDLK_C) && (key.mod & SDL_KMOD_SHIFT)) {   // Shift+C: confirm-compact the vault (Phase 26)
+    if ((key.key == SDLK_C) && (key.mod & SDL_KMOD_SHIFT)) {
         handle_shift_c_key(*this, key);
         return;
     }
-    if ((key.key == SDLK_I) && (key.mod & SDL_KMOD_SHIFT)) {   // Shift+I: open import status (Phase 50)
+    if ((key.key == SDLK_I) && (key.mod & SDL_KMOD_SHIFT)) {
         request(NavKind::ToImportStatus);
         return;
     }
-    // Single-action shortcut keys, grouped into one switch so this function's
-    // cognitive complexity stays under the cpp:S3776 limit. Shift variants:
-    // Shift+G imports a tag list, Shift+F opens favorite galleries, Shift+T the
-    // tag overview. Plain T has no shortcut and falls through to navigation.
-    if (is_quick_switch_key(key)) { quick_switch_.open(); return; }   // switch vault (`)
-    switch (key.key) {
-        case SDLK_L:     view_ = next_gallery_view(view_);                 return;  // cycle view density
-        case SDLK_X:     start_export();                                    return;  // export selection
-        case SDLK_M:
-            if (key.mod & SDL_KMOD_SHIFT) { start_combine(); return; }
-            start_transfer();
-            return;  // move to another vault
-        case SDLK_R:     start_rename();                                    return;  // rename focused tile
-        case SDLK_SPACE: toggle_or_open();                                  return;
-        case SDLK_G:     start_tag_editor((key.mod & SDL_KMOD_SHIFT) != 0); return;  // G edit / Shift+G import
-        case SDLK_B:     toggle_favorite_current();                         return;  // favorite
-        case SDLK_F:     request((key.mod & SDL_KMOD_SHIFT) ? NavKind::ToFavoriteGalleries
-                                                            : NavKind::ToFavoriteImages); return;
-        case SDLK_T:     if (key.mod & SDL_KMOD_SHIFT) { request(NavKind::ToTagOverview); return; }
-                         break;
-        case SDLK_S:     if (key.mod & SDL_KMOD_SHIFT) { cycle_gallery_sort(); return; }
-                         break;
-        case SDLK_U:     request(NavKind::ToggleKeepUnlocked);                      return;  // Phase 33
-        default:         break;
-    }
-    // `/` is a shifted key on many non-US layouts, so the base keycode (key.key)
-    // is the unmodified symbol (e.g. '7') and never equals SDLK_SLASH. The
-    // is_*_key helpers (ui/keybindings.h) resolve the character the layout + held
-    // modifiers actually produce: `/` opens the search overlay, Shift+/ ('?') the
-    // advanced-search screen (Phase 18).
-    if (is_search_key(key))          { search_.open();                     return; }
+    if (is_quick_switch_key(key)) { quick_switch_.open(); return; }
+    // Shortcut-key dispatch (L/X/M/R/SPACE/G/B/F/T/S/U); extracted to reduce complexity
+    if (gallery_grid_handle_shortcut_keys(*this, key)) { return; }
+
+    if (is_search_key(key)) { search_.open(); return; }
     if (is_advanced_search_key(key)) { request(NavKind::ToAdvancedSearch); return; }
 
     using enum InputAction;
