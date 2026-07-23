@@ -4,6 +4,7 @@
 #include "vault/commit_lane.h"
 #include "vault/vault.h"
 
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
@@ -98,8 +99,8 @@ private:
     std::deque<Task> tasks_;
     uint64_t next_task_id_ = 1;
     size_t worker_task_index_ = 0;  // Index in tasks_ of the task being/to-be processed
-    bool exclusive_ = false;
-    bool worker_stop_ = false;
+    std::atomic<bool> exclusive_{false};
+    std::atomic<bool> worker_stop_{false};
 
     // Record queue for main thread to drain
     std::deque<StagedRecord> records_;

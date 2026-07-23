@@ -328,13 +328,10 @@ TEST(import_queue_abort_and_flush_discards_queue)
     (void)q.enqueue_files(file_lists[0], "");
     (void)q.enqueue_files(file_lists[1], "");
 
-    // Pump briefly
-    for (int i = 0; i < 10; ++i) {
-        q.drain(0.001);
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+    // Sleep briefly to let worker process some tasks
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    // Abort
+    // Abort immediately (no drain)
     q.abort_and_flush();
 
     // Check that we can still read snapshot

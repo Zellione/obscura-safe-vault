@@ -285,27 +285,39 @@ void ImportQueue::abort_and_flush()
             task.password = crypto::SecureBytes{};
         }
 
+        // Release exclusive lock and clear tasks to ensure worker can exit
+        exclusive_ = false;
         worker_stop_ = true;
     }
 
-    worker_cv_.notify_one();
+    // Notify worker to wake from wait (either exclusive release or worker_stop)
+    worker_cv_.notify_all();
 
     // Wait for worker to finish
     if (worker_.joinable()) {
         worker_.join();
     }
 
-    // Drain remaining records on main thread
+    // Drain remaining records without holding lock during vault operations
     {
-        std::lock_guard lock(mu_);
-        for (auto& record : records_) {
+        std::deque<StagedRecord> remaining;
+        {
+            std::lock_guard lock(mu_);
+            remaining = std::move(records_);
+            records_.clear();
+        }
+
+        // Process remaining records without lock
+        for (auto& record : remaining) {
             if (record.node) {
+                if (!record.gallery_path.empty()) {
+                    (void)vault::ensure_gallery_path(*v_, record.gallery_path);
+                }
                 (void)vault::attach_staged(*v_, record.gallery_path, std::move(*record.node));
             } else {
                 (void)vault::ensure_gallery_path(*v_, record.gallery_path);
             }
         }
-        records_.clear();
     }
 
     // Final commit
@@ -468,13 +480,19 @@ void ImportQueue::set_exclusive(bool held)
 
 int ImportQueue::drain(double dt)
 {
-    std::lock_guard lock(mu_);
+    // Collect records to process without holding the lock for vault operations
+    std::deque<StagedRecord> to_process;
+    {
+        std::lock_guard lock(mu_);
+        to_process = std::move(records_);
+        records_.clear();
+    }
 
-    // Apply all pending records
+    // Apply records without holding the lock (vault operations can be slow)
     int applied = 0;
-    while (!records_.empty()) {
-        auto record = std::move(records_.front());
-        records_.pop_front();
+    while (!to_process.empty()) {
+        auto record = std::move(to_process.front());
+        to_process.pop_front();
 
         if (record.node) {
             // Ensure the destination gallery exists first
@@ -483,21 +501,28 @@ int ImportQueue::drain(double dt)
             }
             const auto result = vault::attach_staged(*v_, record.gallery_path, std::move(*record.node));
             if (result == vault::VaultResult::AlreadyExists) {
-                // Find the task and increment skipped
-                for (auto& t : tasks_) {
-                    if (t.id == record.task_id) {
-                        t.skipped++;
-                        break;
+                // Find the task and increment skipped (re-acquire lock for update)
+                {
+                    std::lock_guard lock(mu_);
+                    for (auto& t : tasks_) {
+                        if (t.id == record.task_id) {
+                            t.skipped++;
+                            break;
+                        }
                     }
                 }
             } else if (result == vault::VaultResult::Ok) {
                 if (!record.counted) {
                     record.counted = true;
                     policy_.note_attached(1);
-                    for (auto& t : tasks_) {
-                        if (t.id == record.task_id) {
-                            t.imported++;
-                            break;
+                    // Update task imported count (re-acquire lock)
+                    {
+                        std::lock_guard lock(mu_);
+                        for (auto& t : tasks_) {
+                            if (t.id == record.task_id) {
+                                t.imported++;
+                                break;
+                            }
                         }
                     }
                 }
@@ -508,17 +533,21 @@ int ImportQueue::drain(double dt)
         applied++;
     }
 
-    // Advance batch policy
-    policy_.tick(dt);
+    // Update policy and check conditions
+    {
+        std::lock_guard lock(mu_);
+        // Advance batch policy
+        policy_.tick(dt);
 
-    // Check if we should commit
-    if (policy_.due()) {
-        (void)lane_->enqueue_snapshot();
-        policy_.reset();
+        // Check if we should commit
+        if (policy_.due()) {
+            (void)lane_->enqueue_snapshot();
+            policy_.reset();
+        }
+
+        // Check if queue is idle
+        maybe_end_batch();
     }
-
-    // Check if queue is idle
-    maybe_end_batch();
 
     return applied;
 }
@@ -605,19 +634,23 @@ void ImportQueue::worker_loop()
         {
             std::unique_lock lock(mu_);
 
-            // Wait for a queued/running task to become available or for exclusive to be released
+            // Wait for a queued/running task or until worker should stop
             worker_cv_.wait(lock, [this]() {
-                // If exclusive is held, don't proceed
-                if (exclusive_)
-                    return worker_stop_;
+                const bool stop = worker_stop_.load(std::memory_order_acquire);
+                const bool excl = exclusive_.load(std::memory_order_acquire);
 
+                // Check for queued/running work
                 for (const auto& t : tasks_) {
                     if (t.state == ImportTaskState::Queued ||
                         t.state == ImportTaskState::Running) {
+                        // If exclusive is held, don't wake for work; only wake if stopping
+                        if (excl)
+                            return stop;
                         return true;
                     }
                 }
-                return worker_stop_;
+                // No work available; only wake if stopping
+                return stop;
             });
 
             if (worker_stop_)
