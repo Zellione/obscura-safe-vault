@@ -55,19 +55,40 @@ VaultResult commit_plain_blob(IndexIoContext& ctx,
     if (!store.append_raw(sealed, offset)) return IoError;
     if (!store.sync())                     return IoError;
 
-    const uint8_t inactive = ctx.header_.active_slot == 0 ? 1 : 0;
-    ctx.header_.slot[inactive] = IndexSlot{.offset = offset,
-                                           .length = sealed.size(),
-                                           .nonce  = nonce};
+    // Phase 50: guard header-slot mutations under header_mutex_ (if provided).
+    // The caller holds the vault write mutex; this additional header mutex
+    // protects against concurrent reads of slot fields on the main thread.
+    if (ctx.header_mutex_) {
+        std::lock_guard lk(*ctx.header_mutex_);
+        const uint8_t inactive = ctx.header_.active_slot == 0 ? 1 : 0;
+        ctx.header_.slot[inactive] = IndexSlot{.offset = offset,
+                                               .length = sealed.size(),
+                                               .nonce  = nonce};
 
-    // Phase B: persist the new slot pointer with active_slot still pointing at the
-    // old index — both slots are now valid on disk.
-    if (!write_header(ctx.fp_, ctx.header_)) return IoError;
+        // Phase B: persist the new slot pointer with active_slot still pointing at the
+        // old index — both slots are now valid on disk.
+        if (!write_header(ctx.fp_, ctx.header_)) return IoError;
 
-    // Phase C: flip active_slot. This is the atomic commit point; a crash before
-    // it leaves the previous index in force, after it the new one.
-    ctx.header_.active_slot = inactive;
-    if (!write_header(ctx.fp_, ctx.header_)) return IoError;
+        // Phase C: flip active_slot. This is the atomic commit point; a crash before
+        // it leaves the previous index in force, after it the new one.
+        ctx.header_.active_slot = inactive;
+        if (!write_header(ctx.fp_, ctx.header_)) return IoError;
+    } else {
+        // No header mutex provided (compatibility path for old code paths).
+        const uint8_t inactive = ctx.header_.active_slot == 0 ? 1 : 0;
+        ctx.header_.slot[inactive] = IndexSlot{.offset = offset,
+                                               .length = sealed.size(),
+                                               .nonce  = nonce};
+
+        // Phase B: persist the new slot pointer with active_slot still pointing at the
+        // old index — both slots are now valid on disk.
+        if (!write_header(ctx.fp_, ctx.header_)) return IoError;
+
+        // Phase C: flip active_slot. This is the atomic commit point; a crash before
+        // it leaves the previous index in force, after it the new one.
+        ctx.header_.active_slot = inactive;
+        if (!write_header(ctx.fp_, ctx.header_)) return IoError;
+    }
 
     return Ok;
 }

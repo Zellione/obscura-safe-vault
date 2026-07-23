@@ -23,6 +23,7 @@
 #include "vault/video_format.h"
 #include "vault/vault_search.h"
 #include "vault/index_io.h"
+#include "vault/commit_lane.h"
 #include "vault/vault_ops.h"
 #include "vault/staging.h"
 #include "media/video_probe.h"
@@ -334,6 +335,7 @@ Vault::Vault(Vault&& o) noexcept
       fp_(o.fp_),
       read_fp_(o.read_fp_),
       write_mutex_(std::move(o.write_mutex_)),
+      header_mutex_(std::move(o.header_mutex_)),
       header_(o.header_),
       unlocked_(o.unlocked_),
       master_key_(std::move(o.master_key_)),
@@ -354,6 +356,7 @@ Vault& Vault::operator=(Vault&& o) noexcept
         fp_           = o.fp_;
         read_fp_      = o.read_fp_;
         write_mutex_  = std::move(o.write_mutex_);
+        header_mutex_ = std::move(o.header_mutex_);
         header_       = o.header_;
         unlocked_     = o.unlocked_;
         master_key_   = std::move(o.master_key_);
@@ -437,6 +440,7 @@ VaultResult Vault::create(const std::string&       path,
     out.unlocked_     = true;
     out.settings_     = VaultSettings::seeded();
     out.write_mutex_  = std::make_unique<std::mutex>();
+    out.header_mutex_ = std::make_unique<std::mutex>();
 
     // Write the initial (empty) index + a valid header via the crash-safe path.
     if (const VaultResult r = out.commit_index(); r != VaultResult::Ok) { out.reset(); return r; }
@@ -486,6 +490,7 @@ VaultResult Vault::open(const std::string& path, Vault& out)
     out.header_       = h;
     out.unlocked_     = false;
     out.write_mutex_  = std::make_unique<std::mutex>();
+    out.header_mutex_ = std::make_unique<std::mutex>();
     return VaultResult::Ok;
 }
 
@@ -1234,7 +1239,13 @@ uint64_t Vault::wasted_bytes() const
     uint64_t size = 0;
     if (!fileutil::file_size(fp_, size)) return 0;
 
-    uint64_t live = HEADER_SIZE + header_.slot[header_.active_slot].length;
+    // Phase 50: guard access to header_.slot and header_.active_slot, which can
+    // race with the commit lane thread's index commits.
+    uint64_t live = 0;
+    {
+        std::lock_guard lk(*header_mutex_);
+        live = HEADER_SIZE + header_.slot[header_.active_slot].length;
+    }
     for_each_media(root_, [&live](const IndexNode& node) {
         if (node.is_image()) {
             live += node.meta.data_length + node.meta.thumb_length;
@@ -1399,6 +1410,14 @@ bool Vault::write_header()
 
 VaultResult Vault::commit_index()
 {
+    // Phase 50: if a commit router (CommitLane) is active and running, route through
+    // it instead of committing synchronously. The router runs serialize on this thread
+    // and enqueues the blob for asynchronous durability under the write mutex.
+    if (commit_router_ && commit_router_->running()) {
+        return commit_router_->enqueue_snapshot() ? VaultResult::Ok : VaultResult::IoError;
+    }
+
+    // Synchronous commit path (default, pre-Phase-50 behavior).
     std::lock_guard lk(*write_mutex_);
     IndexIoContext ctx{
         .fp_           = fp_,
@@ -1407,6 +1426,7 @@ VaultResult Vault::commit_index()
         .root_         = root_,
         .saved_searches_ = saved_searches_,
         .settings_     = settings_,
+        .header_mutex_ = header_mutex_.get(),
     };
     return index_io::commit_index(ctx);
 }

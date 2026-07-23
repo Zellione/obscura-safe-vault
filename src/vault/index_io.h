@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <vector>
 
 #include "crypto/secure_mem.h"
@@ -23,6 +24,7 @@ struct IndexIoContext {
     const IndexNode&                       root_;         // index tree to serialize
     const std::vector<SavedSearch>&        saved_searches_; // vault-global saved searches
     const VaultSettings&                   settings_;       // vault-global (Phase 49)
+    std::mutex*                            header_mutex_ = nullptr;  // Phase 50: guards header_.slot[*] and header_.active_slot
 };
 
 // IndexIo: owns the logic for persisting the in-memory vault index with
