@@ -4,11 +4,18 @@
 // Zero-initialise every stb_image allocation. On malformed JPEGs stb's colour
 // conversion can read plane regions the aborted decode never wrote; with plain
 // malloc those pixels would expose stale heap bytes (e.g. a previously decoded
-// image) in the output. calloc + a tail-zeroing realloc keep them at zero.
-static void* stbi_realloc_zeroed(void* p, size_t oldsz, size_t newsz)
+// image) in the output. Grow via a fresh calloc + copy so the tail stays zero.
+// Must keep realloc semantics: on failure the old block stays alive (stb's
+// error paths still free it). void* and the pre-#include placement are both
+// mandated by stb's C allocator macro contract (call sites pass char*/int*).
+static void* stbi_realloc_zeroed(void* p, size_t oldsz, size_t newsz) // NOSONAR cpp:S5008 cpp:S954
 {
-    void* q = std::realloc(p, newsz);
-    if (q && newsz > oldsz) std::memset(static_cast<char*>(q) + oldsz, 0, newsz - oldsz);
+    void* q = std::calloc(1, newsz);
+    if (!q) return nullptr;
+    if (p) {
+        std::memcpy(q, p, oldsz < newsz ? oldsz : newsz);
+        std::free(p);
+    }
     return q;
 }
 #define STBI_MALLOC(sz) std::calloc(1, (sz))
