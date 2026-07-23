@@ -43,8 +43,11 @@ bool CommitLane::enqueue_snapshot()
     }
 
     // Take the lock and enqueue the blob, replacing any not-yet-written pending blob.
+    // Re-check failed() under mu_ — the worker may have failed during a previous
+    // commit, and we must not queue new work after a hard failure (data-loss race).
     {
         std::lock_guard lk(mu_);
+        if (failed()) return false;
         pending_ = Pending{.plain = std::move(blob), .generation = next_gen_++};
         cv_.notify_all();
     }
@@ -64,7 +67,7 @@ bool CommitLane::failed() const noexcept
     return failed_.load(std::memory_order_acquire);
 }
 
-void CommitLane::stop()
+void CommitLane::stop() noexcept
 {
     if (!running()) return;
 

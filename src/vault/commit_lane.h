@@ -27,7 +27,9 @@ public:
     CommitLane& operator=(const CommitLane&) = delete;
 
     // Bind to an UNLOCKED vault and start the lane thread. `v` must outlive
-    // the lane's stop(). One lane per vault session.
+    // the lane's stop(). One lane per vault session. The Vault's address must remain
+    // stable (no moves) while the lane is active; App holds the vault behind a
+    // unique_ptr and never moves it while a CommitLane is bound.
     void start(Vault& v);
 
     // MAIN THREAD: serialize the tree NOW (cheap, memory-only) and hand the
@@ -42,8 +44,10 @@ public:
     // A disk write failed; the lane refuses further work (hard stop per spec).
     [[nodiscard]] bool failed() const noexcept;
 
-    // flush() then join the thread. Idempotent.
-    void stop();
+    // flush() then join the thread. Idempotent. Noexcept: swallows all failures
+    // into the failed() flag rather than throwing, safe to call from noexcept contexts
+    // like Vault::lock().
+    void stop() noexcept;
 
     [[nodiscard]] bool running() const noexcept;
     [[nodiscard]] bool idle() const;     // nothing pending or in flight

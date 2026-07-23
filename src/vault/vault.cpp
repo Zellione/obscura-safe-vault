@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cctype>
 #include <chrono>
 #include <cstring>
@@ -343,6 +344,11 @@ Vault::Vault(Vault&& o) noexcept
       saved_searches_(std::move(o.saved_searches_)),
       settings_(std::move(o.settings_))
 {
+    // Phase 50: A bound CommitLane holds a raw Vault* to &o. App holds the active
+    // vault behind unique_ptr and never moves it while a session is live — this
+    // assert turns a violation into a loud debug failure instead of a dangling pointer.
+    assert(!o.commit_router_ && "cannot move a Vault with an active CommitLane bound");
+
     o.fp_       = nullptr;
     o.read_fp_  = nullptr;
     o.unlocked_ = false;
@@ -352,6 +358,11 @@ Vault& Vault::operator=(Vault&& o) noexcept
 {
     if (this != &o) {
         reset();
+        // Phase 50: A bound CommitLane holds a raw Vault* to &o. App holds the active
+        // vault behind unique_ptr and never moves it while a session is live — this
+        // assert turns a violation into a loud debug failure instead of a dangling pointer.
+        assert(!o.commit_router_ && "cannot move a Vault with an active CommitLane bound");
+
         path_         = std::move(o.path_);
         fp_           = o.fp_;
         read_fp_      = o.read_fp_;
@@ -372,6 +383,14 @@ Vault& Vault::operator=(Vault&& o) noexcept
 
 void Vault::lock() noexcept
 {
+    // Phase 50: If a CommitLane is bound, stop it (flush + join) before wiping the
+    // master key. The lane seals with master_key_; stopping it here makes a
+    // wipe-after-seal race impossible regardless of caller discipline.
+    if (commit_router_) {
+        commit_router_->stop();
+        commit_router_ = nullptr;
+    }
+
     master_key_.wipe();
     unlocked_ = false;
     root_     = IndexNode::gallery("");
