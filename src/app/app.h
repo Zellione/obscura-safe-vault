@@ -72,6 +72,9 @@ private:
     void render_frame();                         // draw + present + frame-cap fallback
     void open_settings_overlay();                // seed settings state and open the overlay
 
+    // Dispatch event to overlays (help > settings > lock_confirm); true if handled
+    static bool dispatch_overlay_event(App& app, const SDL_Event& e);
+
     gfx::Window                        window_;
     gfx::FontAtlas                     font_;
     bool                               font_ready_ = false;

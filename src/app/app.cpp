@@ -335,72 +335,74 @@ void draw_keep_unlocked_badge(gfx::Renderer& r, gfx::FontAtlas& font, int win_w,
 }
 } // namespace
 
-void App::dispatch_event(const SDL_Event& e)
+bool App::dispatch_overlay_event(App& app, const SDL_Event& e)
 {
-    if (is_user_input(e)) idle_.reset();   // any keypress/mouse activity stays the lock
-    // Phase 50: park SDL_EVENT_QUIT if imports are pending; it will be replayed
-    // after the user confirms the import abort.
-    if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
-        if (import_ui_.queue.busy() && !import_ui_.lock_confirm.open) {
-            import_ui_.lock_confirm = {true, ui::Nav{ui::NavKind::Quit, {}, 0}};
-            return;   // park the event; it will be replayed after confirm
-        }
-        running_ = false;
-        return;
-    }
+    // F1 toggles help (checked before help.open guard so it opens/closes over settings)
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F1) {
-        ui::toggle_help(overlays_.help);
-        return;
+        ui::toggle_help(app.overlays_.help);
+        return true;
     }
-    if (overlays_.help.open) {
+    // Help popup (highest priority: swallows arrow/wheel; over settings)
+    if (app.overlays_.help.open) {
         if (e.type == SDL_EVENT_KEY_DOWN) {
-            ui::handle_help_key(overlays_.help, e.key.key);
+            ui::handle_help_key(app.overlays_.help, e.key.key);
         } else if (e.type == SDL_EVENT_MOUSE_WHEEL) {
-            ui::handle_help_wheel(overlays_.help, e.wheel.y);
+            ui::handle_help_wheel(app.overlays_.help, e.wheel.y);
         }
-        return;   // swallow every event while the popup is open
+        return true;
     }
-    // Settings is checked AFTER the help guard, and both are checked after the
-    // F1 toggle above. So F1 still opens help over an open settings panel, and
-    // while both are open the help popup — which draws on top — keeps the arrow
-    // and wheel events rather than losing them to the panel behind it.
+    // F2 toggles settings
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F2) {
-        if (overlays_.settings.open) {
-            ui::close_settings(overlays_.settings, window_);
+        if (app.overlays_.settings.open) {
+            ui::close_settings(app.overlays_.settings, app.window_);
         } else {
-            open_settings_overlay();
+            app.open_settings_overlay();
         }
-        return;
+        return true;
     }
-    // Check `open` ONCE, up front: handle_settings_event may close the overlay
-    // (Esc), and the event must still be swallowed on that same frame — otherwise
-    // the Esc leaks through to the screen below, which reads it as "go up a level".
-    if (overlays_.settings.open) {
+    // Settings panel (second priority: swallows all events)
+    if (app.overlays_.settings.open) {
         if (bool commit = false;
-            ui::handle_settings_event(overlays_.settings, window_, e, commit) && commit &&
-            overlays_.settings.vault_unlocked && active_ &&
-            vault::set_vault_settings(*active_, overlays_.settings.draft) != vault::VaultResult::Ok) {
-            overlays_.settings.error = "Could not save settings";
+            ui::handle_settings_event(app.overlays_.settings, app.window_, e, commit) && commit &&
+            app.overlays_.settings.vault_unlocked && app.active_ &&
+            vault::set_vault_settings(*app.active_, app.overlays_.settings.draft) != vault::VaultResult::Ok) {
+            app.overlays_.settings.error = "Could not save settings";
         }
-        return;   // the overlay swallows every event while open, like the help popup
+        return true;
     }
-    // Phase 50: lock_confirm modal is checked AFTER help/settings so it doesn't
-    // shadow help/settings which draw above it. While the confirm is open, only
-    // key events are processed (Y/N/Esc); all others are swallowed.
-    if (import_ui_.lock_confirm.open) {
+    // Lock-confirm modal (lowest priority: key events only; Phase 50)
+    if (app.import_ui_.lock_confirm.open) {
         if (e.type == SDL_EVENT_KEY_DOWN) {
             using enum ui::LockConfirmKey;
             const auto key = ui::classify_lock_confirm_key(e.key.key);
             if (key == Confirm) {
-                import_ui_.queue.abort_and_flush();
-                import_ui_.replay_nav = import_ui_.lock_confirm.action;
-                import_ui_.lock_confirm = {};
+                app.import_ui_.queue.abort_and_flush();
+                app.import_ui_.replay_nav = app.import_ui_.lock_confirm.action;
+                app.import_ui_.lock_confirm = {};
             } else if (key == Cancel) {
-                import_ui_.lock_confirm = {};
+                app.import_ui_.lock_confirm = {};
             }
         }
-        return;   // swallow every event while the confirm is open
+        return true;
     }
+    return false;
+}
+
+void App::dispatch_event(const SDL_Event& e)
+{
+    if (is_user_input(e)) idle_.reset();
+    // Phase 50: park SDL_EVENT_QUIT if imports are pending; replayed after confirm
+    if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+        if (import_ui_.queue.busy() && !import_ui_.lock_confirm.open) {
+            import_ui_.lock_confirm = {true, ui::Nav{ui::NavKind::Quit, {}, 0}};
+            return;
+        }
+        running_ = false;
+        return;
+    }
+    // Dispatch to overlays (guards QUIT, modals, etc.); returns true if handled
+    if (dispatch_overlay_event(*this, e))
+        return;
     if (screen_) screen_->handle_event(e);
 }
 
