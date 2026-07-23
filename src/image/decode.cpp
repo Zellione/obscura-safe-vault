@@ -10,11 +10,11 @@
 // mandated by stb's C allocator macro contract (call sites pass char*/int*).
 static void* stbi_realloc_zeroed(void* p, size_t oldsz, size_t newsz) // NOSONAR cpp:S5008 cpp:S954
 {
-    void* q = std::calloc(1, newsz);
+    void* q = std::calloc(1, newsz); // NOSONAR cpp:S1231 — stb frees via STBI_FREE, so the shim must stay malloc-family
     if (!q) return nullptr;
     if (p) {
         std::memcpy(q, p, oldsz < newsz ? oldsz : newsz);
-        std::free(p);
+        std::free(p); // NOSONAR cpp:S1231 — releasing a block stb allocated through this same C contract
     }
     return q;
 }
