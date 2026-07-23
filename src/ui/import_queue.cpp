@@ -841,7 +841,13 @@ void ImportQueue::process_files_task(Task& task)
     };
 
     const auto drain_lookahead = [&]() {
-        while (!lookahead.empty() && next_to_stage < lookahead.front().index + 1) {
+        // Process all lookahead items that are ready to stage (in-order by index)
+        // Stop only when we encounter a gap or reach end
+        while (!lookahead.empty()) {
+            // Process ONLY the front item if it's the next expected index
+            if (lookahead.front().index != next_to_stage)
+                break;  // Wait for out-of-order items to arrive
+
             auto pf = std::move(lookahead.front());
             lookahead.pop_front();
             lookahead_bytes -= pf.data.size();
