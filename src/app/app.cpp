@@ -21,6 +21,7 @@
 #include "ui/gallery_grid.h"
 #include "ui/image_viewer.h"
 #include "ui/import_model.h"
+#include "ui/import_status_screen.h"
 #include "ui/settings_overlay.h"
 #include "ui/tag_galleries.h"
 #include "ui/tag_images.h"
@@ -259,6 +260,32 @@ void App::to_tag_viewer(const std::string& tag, int index)
         std::move(album), index));
 }
 
+void App::to_import_status()
+{
+    // Phase 50: derive the back nav from the outgoing screen before teardown
+    if (!active_) return;  // guard: only if a vault is unlocked
+
+    ui::Nav back;
+
+    if (const auto* grid = dynamic_cast<const ui::GalleryGrid*>(screen_.get())) {
+        // GalleryGrid: return to the same path at index 0
+        back = ui::Nav{ui::NavKind::ToGallery, ui::current_gallery_path(*grid), 0};
+    } else if (dynamic_cast<const ui::ImageViewer*>(screen_.get())) {
+        // ImageViewer: return to the gallery root
+        back = ui::Nav{ui::NavKind::ToGallery, {}, 0};
+    } else if (dynamic_cast<const ui::VaultManager*>(screen_.get())) {
+        // VaultManager: return to the vault manager
+        back = ui::Nav{ui::NavKind::ToVaultManager, {}, 0};
+    } else {
+        // All other screens: return to gallery root
+        back = ui::Nav{ui::NavKind::ToGallery, {}, 0};
+    }
+
+    state_  = State::Browsing;
+    screen_ = std::make_unique<ui::ImportStatusScreen>(window_, font_, import_queue_, back);
+    screen_->on_enter();
+}
+
 namespace {
 // Manual frame-rate floor, used only when the renderer can't VSync (software /
 // headless backends); otherwise SDL_RenderPresent paces presentation.
@@ -473,7 +500,7 @@ bool App::apply_nav()
         case ToTagGalleries:      to_tag_galleries(nav.path);          return true;
         case ToTagImages:         to_tag_images(nav.path);             return true;
         case ToTagViewer:         to_tag_viewer(nav.path, nav.index);  return true;
-        case ToImportStatus:      /* Task 10 wires the screen */ return false;  // Phase 50
+        case ToImportStatus:      to_import_status(); return true;  // Phase 50
         case ToUnlock:
             import_queue_.end_session();          // Phase 50: flush before switch
             to_unlock(nav.path);

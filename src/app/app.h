@@ -53,6 +53,7 @@ private:
     void to_tag_galleries(const std::string& tag);   // galleries directly carrying `tag`
     void to_tag_images(const std::string& tag);            // images directly carrying a tag
     void to_tag_viewer(const std::string& tag, int index); // viewer over a tag's media set
+    void to_import_status();              // Phase 50: import status screen
     void promote_pending();               // unlock success: pending_ -> active_ (locks old)
 
     // Shared tail of every viewer-construction site (Phase 39 Part 2): enters the

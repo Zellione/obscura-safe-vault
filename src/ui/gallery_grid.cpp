@@ -1069,6 +1069,8 @@ bool vault_busy(const GalleryGrid& g)
 
 GalleryView current_gallery_view(const GalleryGrid& g) { return g.view_; }
 
+std::string current_gallery_path(const GalleryGrid& g) { return g.nav_.path(); }
+
 void poll_file_job(GalleryGrid& g)
 {
     // take_outcome() joins the worker before returning, so touching the vault

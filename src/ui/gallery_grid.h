@@ -154,6 +154,8 @@ private:
     // current_gallery_view is a free friend for the same S1448 reason: App reads it
     // (Phase 39 Part 2) to snapshot the outgoing grid's view mode into GallerySessionState.
     friend GalleryView current_gallery_view(const GalleryGrid& g);
+    // current_gallery_path (Phase 50): App uses it to derive back nav for import status screen
+    friend std::string current_gallery_path(const GalleryGrid& g);
     // The following are free friends for the same S1448/S3776 reasons, extracted
     // from start_transfer() and update() (Phase 44 SonarQube follow-up).
     friend void start_transfer_focused(GalleryGrid& g);
@@ -283,5 +285,6 @@ void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
 void handle_delete_key(GalleryGrid& g);
 void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);
 [[nodiscard]] GalleryView current_gallery_view(const GalleryGrid& g);
+[[nodiscard]] std::string current_gallery_path(const GalleryGrid& g);  // Phase 50: for import status back nav
 
 } // namespace ui
