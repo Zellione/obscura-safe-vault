@@ -33,37 +33,6 @@ namespace {
 // Internal structures
 // ============================================================================
 
-struct ImportQueue::StagedRecord {
-    std::string gallery_path;
-    std::optional<vault::IndexNode> node;  // nullopt => ensure gallery only
-    uint64_t task_id = 0;
-    bool counted = false;
-};
-
-struct ImportQueue::Task {
-    uint64_t id = 0;
-    ImportTaskKind kind = ImportTaskKind::Files;
-    std::string display_name;
-    std::string dest_gallery;
-    std::vector<std::filesystem::path> files;  // for Files task
-    std::filesystem::path archive_path;
-    std::string gallery_name;
-    crypto::SecureBytes password;
-
-    ImportTaskState state = ImportTaskState::Queued;
-    int imported = 0, skipped = 0;
-    std::string error;
-
-    // Progress tracking (shared_ptr to work around OpProgress's atomic members)
-    std::shared_ptr<vault::OpProgress> progress;
-
-    [[nodiscard]] bool finished() const noexcept
-    {
-        return state == ImportTaskState::Done || state == ImportTaskState::Failed ||
-               state == ImportTaskState::Cancelled;
-    }
-};
-
 // Async image decode pool
 class ImportQueue::DecodePool {
 public:

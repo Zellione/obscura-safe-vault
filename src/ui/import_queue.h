@@ -1,7 +1,10 @@
 #pragma once
 
+#include "crypto/secure_mem.h"
 #include "ui/import_model.h"
 #include "vault/commit_lane.h"
+#include "vault/index.h"
+#include "vault/op_progress.h"
 #include "vault/vault.h"
 
 #include <atomic>
@@ -11,6 +14,7 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -74,8 +78,38 @@ public:
     friend void test_only_drop_without_flush(ImportQueue& q);
 
 private:
-    struct Task;
-    struct StagedRecord;
+    // Nested types: defined in-header for MSVC's std::deque to require complete element types at member declaration
+    struct StagedRecord {
+        std::string gallery_path;
+        std::optional<vault::IndexNode> node;  // nullopt => ensure gallery only
+        uint64_t task_id = 0;
+        bool counted = false;
+    };
+
+    struct Task {
+        uint64_t id = 0;
+        ImportTaskKind kind = ImportTaskKind::Files;
+        std::string display_name;
+        std::string dest_gallery;
+        std::vector<std::filesystem::path> files;  // for Files task
+        std::filesystem::path archive_path;
+        std::string gallery_name;
+        crypto::SecureBytes password;
+
+        ImportTaskState state = ImportTaskState::Queued;
+        int imported = 0, skipped = 0;
+        std::string error;
+
+        // Progress tracking (shared_ptr to work around OpProgress's atomic members)
+        std::shared_ptr<vault::OpProgress> progress;
+
+        [[nodiscard]] bool finished() const noexcept
+        {
+            return state == ImportTaskState::Done || state == ImportTaskState::Failed ||
+                   state == ImportTaskState::Cancelled;
+        }
+    };
+
     class StagingSink;
     class DecodePool;
 
