@@ -14,8 +14,11 @@ namespace ui {
 // Chip geometry (Phase 49). A chip is a filled dot plus the tag's display text —
 // no pill: the densest form, closest to the plain-text list it replaces.
 inline constexpr float CHIP_DOT     = 9.0f;    // dot diameter
-inline constexpr float CHIP_GAP     = 7.0f;    // dot → text
-inline constexpr float CHIP_SPACING = 12.0f;   // chip → chip
+inline constexpr float CHIP_GAP     = 7.0f;    // dot → text (within one chip)
+// Gap between one chip's text and the next chip's dot. Must sit clearly above
+// CHIP_GAP so "● a ● b" reads as two groups, not one run — at 12 it was only
+// 5 px more than the in-chip gap and the tags looked crowded.
+inline constexpr float CHIP_SPACING = 18.0f;   // chip → chip
 // CHIP_ROW_H is the dot band used to CENTRE a chip's content (draw_tag_chips
 // centres at y + CHIP_ROW_H/2). It is NOT a safe line pitch: the UI font is
 // ~28 px, so packing chip rows CHIP_ROW_H apart makes the glyph ink of adjacent

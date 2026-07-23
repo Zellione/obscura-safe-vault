@@ -19,7 +19,7 @@ TEST(fit_chips_all_fit)
 
 TEST(fit_chips_drops_and_counts_overflow)
 {
-    // 40 + spacing + 50 = 102 with CHIP_SPACING 12; a 120 px budget fits two,
+    // 40 + spacing + 50 = 108 with CHIP_SPACING 18; a 120 px budget fits two,
     // but only if the "+N" counter also fits — it does not, so one is shown.
     const std::vector<int> w{40, 50, 30};
     const auto f = ui::fit_chips(w, 120.0f, 30.0f);
@@ -60,8 +60,9 @@ TEST(lone_chip_text_w_reserves_the_dot_and_gap)
 
 TEST(lone_chip_text_w_also_reserves_the_overflow_counter)
 {
-    // 100 - 16 - (CHIP_SPACING 12 + overflow 20) = 52 when 3 tags follow.
-    CHECK_EQ(ui::lone_chip_text_w(100.0f, 20.0f, 3), 52.0f);
+    // 100 - (CHIP_DOT + CHIP_GAP) - (CHIP_SPACING + overflow 20) when 3 follow.
+    CHECK_EQ(ui::lone_chip_text_w(100.0f, 20.0f, 3),
+             100.0f - (ui::CHIP_DOT + ui::CHIP_GAP) - (ui::CHIP_SPACING + 20.0f));
 }
 
 TEST(lone_chip_text_w_can_leave_no_room_at_all)
@@ -72,7 +73,7 @@ TEST(lone_chip_text_w_can_leave_no_room_at_all)
 
 TEST(pack_chip_lines_wraps_onto_a_second_line)
 {
-    // 40 + 12 + 50 = 102 fits in 110; the third chip would need 12 + 30 more.
+    // 40 + 18 + 50 = 108 fits in 110; the third chip would need 18 + 30 more.
     const std::vector<int> w{40, 50, 30};
     const auto p = ui::pack_chip_lines(w, 110.0f, 3, 30.0f);
     CHECK_EQ(static_cast<int>(p.lines.size()), 2);
@@ -86,7 +87,7 @@ TEST(pack_chip_lines_wraps_onto_a_second_line)
 TEST(pack_chip_lines_stops_at_max_lines_and_reports_the_rest_hidden)
 {
     // Pass 1 fills two lines of two and leaves one over; because something is
-    // hidden, pass 2 repacks into 100 - 12 - 20 = 68, which fits one chip a line.
+    // hidden, pass 2 repacks into 100 - CHIP_SPACING - 20, which fits one a line.
     const std::vector<int> w{40, 40, 40, 40, 40};
     const auto p = ui::pack_chip_lines(w, 100.0f, 2, 20.0f);
     CHECK_EQ(static_cast<int>(p.lines.size()), 2);
@@ -112,7 +113,7 @@ TEST(pack_chip_lines_records_each_lines_pixel_width)
     const std::vector<int> w{40, 50};
     const auto p = ui::pack_chip_lines(w, 200.0f, 3, 30.0f);
     CHECK_EQ(static_cast<int>(p.lines.size()), 1);
-    CHECK_EQ(p.lines[0].width, 102.0f);   // 40 + CHIP_SPACING 12 + 50
+    CHECK_EQ(p.lines[0].width, 40.0f + ui::CHIP_SPACING + 50.0f);
     CHECK_EQ(p.hidden, 0);
 }
 
