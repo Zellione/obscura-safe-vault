@@ -68,6 +68,56 @@ TEST(import_queue_files_end_to_end)
     ziptest::cleanup_dir(temp_dir);
 }
 
+// Test 1b: import_queue_cancel_queued_is_deterministic
+// Deterministic cancel test (doesn't race with fast pipeline).
+// Uses exclusive gate to park worker, ensuring task stays Queued until we release.
+TEST(import_queue_cancel_queued_is_deterministic)
+{
+    const auto temp_dir = ziptest::fresh_dir("test_import_queue_cancel_queued");
+    const auto vault_path = temp_dir / "vault.osv";
+
+    vault::Vault v;
+    ziptest::make_vault(v, vault_path);
+
+    // Create a file
+    const auto files_dir = temp_dir / "files";
+    fs::create_directories(files_dir);
+    const auto path = files_dir / "test.jpg";
+    const auto jpeg_data = ziptest::fake_jpeg(42);
+    std::ofstream(path, std::ios::binary).write(reinterpret_cast<const char*>(jpeg_data.data()),
+                                                 static_cast<std::streamsize>(jpeg_data.size()));
+
+    ui::ImportQueue q;
+    q.begin_session(v);
+
+    // Park the worker with exclusive gate BEFORE enqueuing
+    q.set_exclusive(true);
+
+    // Enqueue: task will stay Queued because worker is parked
+    const uint64_t task_id = q.enqueue_files({path}, "");
+
+    // Verify it's Queued (deterministic, not racing)
+    auto snap = q.snapshot();
+    REQUIRE(snap.size() == 1);
+    REQUIRE(snap[0].state == ui::ImportTaskState::Queued);
+
+    // Cancel while Queued
+    CHECK(q.cancel(task_id));
+
+    // Release worker and pump
+    q.set_exclusive(false);
+    pump_until_idle(q);
+
+    // Verify Cancelled with zero imports
+    snap = q.snapshot();
+    REQUIRE(snap.size() == 1);
+    CHECK(snap[0].state == ui::ImportTaskState::Cancelled);
+    CHECK_EQ(snap[0].imported, 0);
+
+    q.end_session();
+    ziptest::cleanup_dir(temp_dir);
+}
+
 // Test 2: import_queue_runs_tasks_fifo_and_reorders
 TEST(import_queue_runs_tasks_fifo_and_reorders)
 {
