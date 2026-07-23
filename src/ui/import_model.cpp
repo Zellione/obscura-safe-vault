@@ -1,6 +1,8 @@
 #include "ui/import_model.h"
 
 #include <algorithm>
+#include <format>
+#include <ranges>
 
 namespace ui {
 
@@ -8,8 +10,8 @@ bool reorder_import_task(std::vector<ImportTaskInfo>& tasks,
                         uint64_t id, int delta)
 {
     // Find the task with the given ID
-    auto it = std::find_if(tasks.begin(), tasks.end(),
-                          [id](const ImportTaskInfo& t) { return t.id == id; });
+    auto it = std::ranges::find_if(tasks,
+                                   [id](const ImportTaskInfo& t) { return t.id == id; });
 
     if (it == tasks.end() || it->state != ImportTaskState::Queued) {
         return false;  // Task not found or not queued
@@ -38,13 +40,10 @@ int clear_finished_imports(std::vector<ImportTaskInfo>& tasks)
     const auto initial_size = tasks.size();
 
     // Erase all finished tasks
-    tasks.erase(
-        std::remove_if(tasks.begin(), tasks.end(),
-                      [](const ImportTaskInfo& t) {
-                          return import_task_finished(t.state);
-                      }),
-        tasks.end()
-    );
+    std::erase_if(tasks,
+                 [](const ImportTaskInfo& t) {
+                     return import_task_finished(t.state);
+                 });
 
     return static_cast<int>(initial_size - tasks.size());
 }
@@ -86,12 +85,11 @@ std::string footer_import_summary(const std::vector<ImportTaskInfo>& tasks,
     // If we have running tasks, show the first one with progress
     if (running_count > 0) {
         const auto& running_task = tasks[running_idx];
-        std::string summary = "Importing " + running_task.display_name + " " +
-                             std::to_string(running_task.done) + "/" +
-                             std::to_string(running_task.total);
+        std::string summary = std::format("Importing {} {}/{}", running_task.display_name,
+                                         running_task.done, running_task.total);
 
         if (queued_count > 0) {
-            summary += " · " + std::to_string(queued_count) + " queued";
+            summary += std::format(" · {} queued", queued_count);
         }
 
         return summary;
@@ -101,8 +99,8 @@ std::string footer_import_summary(const std::vector<ImportTaskInfo>& tasks,
     if (queued_count == 1) {
         return "1 import queued";
     } else {
-        return "Importing " + tasks[0].display_name + " 0/0 · " +
-               std::to_string(queued_count - 1) + " queued";
+        return std::format("Importing {} 0/0 · {} queued", tasks[0].display_name,
+                          queued_count - 1);
     }
 }
 
@@ -111,7 +109,7 @@ std::string import_lock_confirm_text(int pending_tasks)
     if (pending_tasks == 1) {
         return "1 import pending — finish current file, discard the rest, and lock?";
     } else {
-        return std::to_string(pending_tasks) + " imports pending — finish current file, discard the rest, and lock?";
+        return std::format("{} imports pending — finish current file, discard the rest, and lock?", pending_tasks);
     }
 }
 

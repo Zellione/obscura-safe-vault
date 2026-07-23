@@ -6,6 +6,7 @@
 #include "image/gif_info.h"
 #include "image/thumbnail.h"
 #include "vault/staging.h"
+#include "platform/safe_print.h"
 
 #include <algorithm>
 #include <cassert>
@@ -262,7 +263,7 @@ void ImportQueue::begin_session(vault::Vault& v)
     // attaching them into a new vault would corrupt it. abort_and_flush should have drained
     // both, but clear them here to be safe; log once if non-empty (indicates a caller bug).
     if (!records_.empty()) {
-        fprintf(stderr, "[ImportQueue] WARNING: begin_session with non-empty records_ (caller skipped end_session?)\n");
+        platform::safe_println(stderr, "[ImportQueue] WARNING: begin_session with non-empty records_ (caller skipped end_session?)\n");
     }
     tasks_.clear();
     records_.clear();
@@ -360,7 +361,7 @@ uint64_t ImportQueue::enqueue_files(std::vector<std::filesystem::path> files,
     std::lock_guard lock(mu_);
 
     const uint64_t id = next_task_id_++;
-    const std::string display_name = std::to_string(files.size()) + " files";
+    const std::string display_name = std::format("{} files", files.size());
 
     Task task{
         .id = id,

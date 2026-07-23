@@ -19,16 +19,18 @@ struct ImportTaskInfo {
     std::string     display_name;
     std::string     dest_gallery;      // "" = root
     ImportTaskState state = ImportTaskState::Queued;
-    int             done = 0, total = 0;      // live progress while Running
-    int             imported = 0, skipped = 0;
+    int             done = 0;          // live progress while Running
+    int             total = 0;         // (split from done for S1659)
+    int             imported = 0;
+    int             skipped = 0;
     std::string     error;                    // set for Failed
 
     bool operator==(const ImportTaskInfo&) const = default;
 };
 
 [[nodiscard]] constexpr bool import_task_finished(ImportTaskState s) noexcept
-{ return s == ImportTaskState::Done || s == ImportTaskState::Failed ||
-         s == ImportTaskState::Cancelled; }
+{ using enum ImportTaskState;
+  return s == Done || s == Failed || s == Cancelled; }
 
 // Reorder a QUEUED task by delta within the queued span of `tasks` (Running
 // and finished rows never move). Returns true if anything moved.
