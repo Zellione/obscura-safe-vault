@@ -417,14 +417,15 @@ uint64_t ImportQueue::enqueue_archive(std::filesystem::path archive,
 
 bool ImportQueue::cancel(uint64_t id)
 {
+    using enum ImportTaskState;
     std::lock_guard lock(mu_);
 
     for (auto& task : tasks_) {
         if (task.id == id) {
-            if (task.state == ImportTaskState::Queued) {
-                task.state = ImportTaskState::Cancelled;
+            if (task.state == Queued) {
+                task.state = Cancelled;
                 return true;
-            } else if (task.state == ImportTaskState::Running) {
+            } else if (task.state == Running) {
                 if (task.progress) {
                     task.progress->cancel.store(true);
                 }
@@ -643,12 +644,13 @@ std::string ImportQueue::footer_summary() const
 // CALLED UNDER lock (mu_): wait for queued/running work or stop signal
 bool ImportQueue::has_available_work() const
 {
+    using enum ImportTaskState;
     const bool stop = worker_stop_.load();
     const bool excl = exclusive_.load();
 
     // Check for queued/running work
     for (const auto& t : tasks_) {
-        if (t.state == ImportTaskState::Queued || t.state == ImportTaskState::Running) {
+        if (t.state == Queued || t.state == Running) {
             // If exclusive is held, don't wake for work; only wake if stopping
             if (excl)
                 return stop;
@@ -667,8 +669,9 @@ bool ImportQueue::extract_task_data(uint64_t& out_task_id, ImportTaskKind& out_t
                                      std::string& out_gallery_name, std::string& out_dest_gallery,
                                      std::shared_ptr<vault::OpProgress>& out_progress)
 {
+    using enum ImportTaskState;
     for (auto& t : tasks_) {
-        if (t.state == ImportTaskState::Queued || t.state == ImportTaskState::Running) {
+        if (t.state == Queued || t.state == Running) {
             // Copy all task data before releasing lock
             out_task_id = t.id;
             out_task_kind = t.kind;
@@ -679,8 +682,8 @@ bool ImportQueue::extract_task_data(uint64_t& out_task_id, ImportTaskKind& out_t
             out_progress = t.progress;
 
             // Mark as running if it was queued
-            if (t.state == ImportTaskState::Queued) {
-                t.state = ImportTaskState::Running;
+            if (t.state == Queued) {
+                t.state = Running;
             }
             return true;
         }
@@ -691,14 +694,15 @@ bool ImportQueue::extract_task_data(uint64_t& out_task_id, ImportTaskKind& out_t
 // CALLED UNDER lock (mu_): update task state after processing
 void ImportQueue::mark_task_complete(uint64_t task_id, const std::shared_ptr<vault::OpProgress>& progress)
 {
+    using enum ImportTaskState;
     for (auto& t : tasks_) {
         if (t.id == task_id) {
-            if (t.state == ImportTaskState::Running) {
+            if (t.state == Running) {
                 // Check if the task was cancelled
                 if (progress && progress->cancel.load()) {
-                    t.state = ImportTaskState::Cancelled;
+                    t.state = Cancelled;
                 } else {
-                    t.state = ImportTaskState::Done;
+                    t.state = Done;
                 }
             }
             break;
