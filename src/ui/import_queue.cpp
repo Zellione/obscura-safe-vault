@@ -81,6 +81,7 @@ public:
             stopping_ = true;
         }
         cv_.notify_all();
+        completion_cv_.notify_all();
         // jthreads join automatically
     }
 
@@ -99,12 +100,23 @@ public:
             std::lock_guard lock(mu_);
             queue_.push(job);
         }
-        cv_.notify_one();
+        cv_.notify_all();  // Notify all workers to spread work
     }
 
     [[nodiscard]] bool is_done(const std::shared_ptr<DecodeJob>& job) const
     {
         return job->done.load();
+    }
+
+    // Wait for a specific job to complete (CV-based, not spin-polling)
+    void wait_for_completion(const std::shared_ptr<DecodeJob>& job, int timeout_ms = 5000)
+    {
+        std::unique_lock lock(mu_);
+        if (job->done.load())
+            return;
+
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+        completion_cv_.wait_until(lock, deadline, [&job]() { return job->done.load(); });
     }
 
 private:
@@ -142,11 +154,18 @@ private:
             }
             job->data.clear();  // Free the source pixels
             job->done.store(true);
+
+            // Notify all waiters that a job is done
+            {
+                std::lock_guard notify_lock(mu_);
+                completion_cv_.notify_all();
+            }
         }
     }
 
     mutable std::mutex mu_;
     std::condition_variable cv_;
+    std::condition_variable completion_cv_;
     std::queue<std::shared_ptr<DecodeJob>> queue_;
     std::vector<std::jthread> threads_;
     bool stopping_ = false;
@@ -835,14 +854,9 @@ void ImportQueue::process_files_task(Task& task)
 
             const auto& file_path = task.files[pf.index];
 
-            // Wait for decode if needed
+            // Wait for decode if needed (CV-based, not spin-polling)
             if (pf.decode_job) {
-                // Spin-wait for the decode job
-                int wait_count = 0;
-                while (!decode_pool_->is_done(pf.decode_job) && wait_count < 10000) {
-                    std::this_thread::sleep_for(std::chrono::microseconds(100));
-                    wait_count++;
-                }
+                decode_pool_->wait_for_completion(pf.decode_job, 5000);  // 5 second timeout
             }
 
             // Stage the file
@@ -874,7 +888,13 @@ void ImportQueue::process_files_task(Task& task)
 
         while (lookahead.size() >= LOOKAHEAD_MAX_ITEMS ||
                lookahead_bytes >= LOOKAHEAD_MAX_BYTES) {
+            const size_t size_before = lookahead.size();
+            const size_t bytes_before = lookahead_bytes;
             drain_lookahead();
+            // Stop if drain_lookahead made no progress (prevents infinite loop when condition blocks draining)
+            if (lookahead.size() == size_before && lookahead_bytes == bytes_before) {
+                break;
+            }
             if (task.progress && task.progress->cancel.load())
                 return;
         }
