@@ -139,7 +139,7 @@ void App::to_gallery(const std::string& path, int selected, bool explicit_index)
         window_, font_, *active_, *cache_,
         ui::GalleryGrid::GridDialogs{dialog_, folder_dialog_},
         ui::GalleryGrid::GridVaultCtx{registry_, active_path_},
-        session_,
+        session_, import_queue_,
         ui::GridLocation{path, seed, session_.view});
     screen_->on_enter();
 }
@@ -156,7 +156,7 @@ void App::to_viewer(const std::string& gallery_path, int index)
 {
     enter_viewer(std::make_unique<ui::ImageViewer>(
         window_, font_, *active_, *cache_,
-        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_, session_.strip_side},
+        ui::ImageViewer::Context{folder_dialog_, registry_, import_queue_, active_path_, session_.strip_side},
         ui::ImageViewer::Album::gallery(gallery_path), index));
 }
 
@@ -198,7 +198,7 @@ void App::to_favorite_viewer(int index)
 
     enter_viewer(std::make_unique<ui::ImageViewer>(
         window_, font_, *active_, *cache_,
-        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_, session_.strip_side},
+        ui::ImageViewer::Context{folder_dialog_, registry_, import_queue_, active_path_, session_.strip_side},
         std::move(album), index));
 }
 
@@ -255,7 +255,7 @@ void App::to_tag_viewer(const std::string& tag, int index)
 
     enter_viewer(std::make_unique<ui::ImageViewer>(
         window_, font_, *active_, *cache_,
-        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_, session_.strip_side},
+        ui::ImageViewer::Context{folder_dialog_, registry_, import_queue_, active_path_, session_.strip_side},
         std::move(album), index));
 }
 
@@ -473,6 +473,7 @@ bool App::apply_nav()
         case ToTagGalleries:      to_tag_galleries(nav.path);          return true;
         case ToTagImages:         to_tag_images(nav.path);             return true;
         case ToTagViewer:         to_tag_viewer(nav.path, nav.index);  return true;
+        case ToImportStatus:      /* Task 10 wires the screen */ return false;  // Phase 50
         case ToUnlock:
             import_queue_.end_session();          // Phase 50: flush before switch
             to_unlock(nav.path);

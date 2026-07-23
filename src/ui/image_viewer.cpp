@@ -52,7 +52,8 @@ float hud_footer_h(float line_h) noexcept { return line_h + 20.0f; }
 
 ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                          gfx::TextureCache& cache, Context ctx, Album album, int start_index)
-    : win_(win), font_(font), vault_(vault), cache_(cache), export_(ctx.folder, win),
+    : win_(win), font_(font), vault_(vault), cache_(cache), queue_(ctx.queue),
+      export_(ctx.folder, win),
       tag_editor_(vault, win), search_(vault, win),
       quick_switch_(ctx.registry, std::move(ctx.active_path)),
       album_(std::move(album)), index_(start_index),
@@ -124,9 +125,14 @@ SDL_FRect ImageViewer::viewport_rect() const
 
 std::string viewer_footer_text(const ImageViewer& v)
 {
-    // An export status wins over the no-decoder notice: it is transient and the
-    // user just asked for it, so it must not be swallowed by a standing message.
+    // Priority: export status > import summary > AV notice
+    // Export status wins: it is transient and the user just asked for it,
+    // so it must not be swallowed by a standing message (Phase 50).
     if (!v.export_.status().empty()) return v.export_.status();
+    // Phase 50: import summary shows queue progress
+    if (const std::string summary = v.queue_.footer_summary(); !summary.empty())
+        return summary;
+    // AV notice for video codec unavailability
     if (item_is_video(v.album_.images, v.index_) && !(v.video_ && v.video_->valid()))
         return "Video playback unavailable in this build.";
     return {};
@@ -625,6 +631,11 @@ void ImageViewer::handle_event(const SDL_Event& e)
 
     switch (e.type) {
         case SDL_EVENT_KEY_DOWN:
+            // Phase 50: Shift+I opens import status
+            if ((e.key.key == SDLK_I) && (e.key.mod & SDL_KMOD_SHIFT)) {
+                request(NavKind::ToImportStatus);
+                break;
+            }
             // `/` opens search. It is a shifted key on many non-US layouts, so
             // resolve the produced character from scancode + modifiers. Not while
             // the slideshow owns the keyboard. The `` ` `` quick-switch chord is
@@ -694,6 +705,7 @@ std::vector<ui::HelpGroup> ImageViewer::help_groups() const
         {"F11 / double-click", "Toggle fullscreen"},
         {"T", "Toggle thumbnail strip side"},
         {"B", "Favorite"}, {"G", "Edit tags"}, {"X", "Export"},
+        {"Shift+I", "Import status"},
         {"U", "Keep unlocked for session"}, {"Esc", "Back"},
     }});
     return groups;

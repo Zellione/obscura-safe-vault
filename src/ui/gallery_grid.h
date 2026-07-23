@@ -29,6 +29,7 @@
 #include "ui/transfer_dialog.h"
 #include "ui/zip_import_job.h"
 #include "ui/zip_plan.h"
+#include "ui/import_queue.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
 namespace vault { class Vault; struct IndexNode; }
@@ -84,7 +85,8 @@ public:
 
     GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                 gfx::TextureCache& cache, GridDialogs dialogs,
-                GridVaultCtx vault_ctx, GallerySessionState& session, GridLocation at = {});
+                GridVaultCtx vault_ctx, GallerySessionState& session, ImportQueue& queue,
+                GridLocation at = {});
 
     void on_enter() override;
     void on_exit() override;
@@ -138,11 +140,10 @@ private:
     void render_grid(gfx::Renderer& r, float W, float bottom);
     void render_list(gfx::Renderer& r, float W, float bottom);
 
-    // Drain a finished background import (called from update()). Kept a free friend
+    // Drain a finished background file op (export/delete/transfer/compact). Kept a free friend
     // (not a member) to keep the class under the cpp:S1448 method cap and to keep
-    // update()'s cognitive complexity (S3776) down. poll_file_job / vault_busy /
-    // handle_job_input (Phase 25) are free friends for the same reasons.
-    friend void poll_import_job(GalleryGrid& g);
+    // update()'s cognitive complexity (S3776) down. vault_busy / handle_job_input (Phase 25)
+    // are free friends for the same reasons (Phase 50: imports drain asynchronously).
     friend void poll_file_job(GalleryGrid& g);          // drain a finished export/delete job
     friend bool vault_busy(const GalleryGrid& g);       // any worker owns the vault(s)?
     friend bool handle_job_input(GalleryGrid& g, const SDL_Event& e);  // job-active Esc→cancel gate
@@ -179,6 +180,7 @@ private:
     gfx::TextureCache&      cache_;
     GridDialogs             dialogs_;   // file + folder dialogs (bundled, S1820)
     GallerySessionState&    session_;   // Phase 40 Part 2: per-path last-focused-tile memory
+    ImportQueue&            queue_;     // Phase 50: background import pipeline
     NavModel                nav_;
     SelectionModel          sel_;
     ConsentDialog           consent_;
@@ -195,6 +197,7 @@ private:
     float                 scroll_ = 0.0f;  // vertical scroll offset (pixels scrolled down)
     std::string           error_;
     std::string           status_;   // transient export result message
+    std::string           last_footer_;   // Phase 50: track footer summary changes for mark_dirty()
 
     // New-gallery naming + zip-import flow state — bundled to fix S1820 (>20 data members).
     struct PendingZip {
@@ -264,14 +267,13 @@ private:
     int                          hover_gif_tile_ = -1;
 };
 
-// Free friends of GalleryGrid (see the in-class declarations): poll_import_job /
-// poll_file_job drain a finished background import / export-delete and update the
-// grid's status + listing; vault_busy reports whether any worker owns the vault(s);
-// handle_job_input swallows input (Esc→cancel) while a job runs; handle_shift_c_key /
-// handle_delete_key extract key handlers to reduce handle_key_down's cognitive complexity;
-// set_cancelled_import_status handles cancelled import waste hints; content_width and
-// rebuild_detail manage detail panel lifecycle and layout (Phase 48).
-void poll_import_job(GalleryGrid& g);
+// Free friends of GalleryGrid (see the in-class declarations): poll_file_job drains
+// a finished background export-delete and updates the grid's status + listing; vault_busy
+// reports whether any worker owns the vault(s); handle_job_input swallows input (Esc→cancel)
+// while a job runs; handle_shift_c_key / handle_delete_key extract key handlers to reduce
+// handle_key_down's cognitive complexity; set_cancelled_import_status handles cancelled
+// import waste hints; content_width and rebuild_detail manage detail panel lifecycle and
+// layout (Phase 48); Phase 50: imports drain asynchronously.
 void poll_file_job(GalleryGrid& g);
 [[nodiscard]] bool vault_busy(const GalleryGrid& g);
 [[nodiscard]] bool handle_job_input(GalleryGrid& g, const SDL_Event& e);

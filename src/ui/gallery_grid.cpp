@@ -114,23 +114,6 @@ GridSpec grid_spec(float win_w, int cols, float cell) noexcept
 
 using ChildList = std::vector<const vault::IndexNode*>;
 
-// Background-import progress modal (free, not a member, for the S1448 cap). Veils
-// the grid — drawn instead of the tiles so no thumbnail is decrypted on the UI
-// thread while the worker owns the vault. `cbz` only picks the wording.
-void draw_import_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
-                          bool cbz, const ZipImportJob& job)
-{
-    const int total = job.total();
-    const int done  = job.done();
-    // "done / total" (total is 0 for the brief window before the first page).
-    const char* unit = cbz ? "pages" : "files";
-    const std::string count =
-        total > 0 ? std::format("{} / {} {}", done, total, unit) : "Reading archive…";
-    draw_op_progress(r, font, W, H,
-                     {.title = cbz ? "Importing comic…" : "Importing archive…",
-                      .count_line = count, .done = done, .total = total});
-}
-
 // Background file-op (export/delete/move/copy/compact) progress modal — same veil + bar as
 // the import one, wording chosen by the running job's kind (Phase 25–26).
 void draw_file_op_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
@@ -208,9 +191,10 @@ void rebuild_detail(GalleryGrid& g)
 
 GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                          gfx::TextureCache& cache, GridDialogs dialogs,
-                         GridVaultCtx vault_ctx, GallerySessionState& session, GridLocation at)
+                         GridVaultCtx vault_ctx, GallerySessionState& session, ImportQueue& queue,
+                         GridLocation at)
     : win_(win), font_(font), vault_(vault), cache_(cache), dialogs_(dialogs),
-      session_(session),
+      session_(session), queue_(queue),
       search_(vault, win), tag_editor_(vault, win),
       quick_switch_(vault_ctx.registry, vault_ctx.active_vault_path),
       transfer_(vault, vault_ctx.active_vault_path, vault_ctx.registry,
@@ -381,6 +365,13 @@ void start_transfer_selection(GalleryGrid& g)
 
 void GalleryGrid::start_transfer()
 {
+    // Phase 50: gate transfer behind a running import check
+    if (queue_.busy()) {
+        status_ = "Imports running — press Shift+I for status";
+        mark_dirty();
+        return;
+    }
+
     if (transfer_.active()) return;
 
     // Images selected (Space) → move them. Otherwise, the focused tile: a gallery
@@ -403,6 +394,13 @@ void GalleryGrid::start_rename()
 
 void GalleryGrid::start_combine()
 {
+    // Phase 50: gate combine behind a running import check
+    if (queue_.busy()) {
+        status_ = "Imports running — press Shift+I for status";
+        mark_dirty();
+        return;
+    }
+
     if (transfer_.active() || rename_.active() || combine_.active()) return;
     if (nav_.path().empty()) { error_ = "Can't combine the top level."; return; }
     error_.clear();
@@ -465,7 +463,16 @@ void GalleryGrid::finish_naming()
     if (naming_.zip.active) {
         naming_.zip.gallery_name = naming_.buf;
         naming_.buf.clear();
-        do_zip_import(naming_.zip.path);
+
+        // Phase 35: if the archive needs a password, open the password prompt first
+        if (naming_.zip.needs_password) {
+            naming_.password.active = true;
+            naming_.password.retry = false;
+            naming_.password.buf.clear();
+            SDL_StartTextInput(win_.sdl_window());
+        } else {
+            do_zip_import(naming_.zip.path);
+        }
         return;
     }
 
@@ -628,6 +635,13 @@ void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
 // Extract Delete handler to reduce handle_key_down's cognitive complexity (S3776).
 void handle_delete_key(GalleryGrid& g)
 {
+    // Phase 50: gate delete behind a running import check
+    if (g.queue_.busy()) {
+        g.status_ = "Imports running — press Shift+I for status";
+        g.mark_dirty();
+        return;
+    }
+
     const int s = g.nav_.selected();
     g.naming_.confirm_delete = s >= 0 && s < static_cast<int>(g.children_.size());
     g.error_ = g.naming_.confirm_delete ? std::string{} : "Nothing selected to delete.";
@@ -667,6 +681,10 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
     }
     if ((key.key == SDLK_C) && (key.mod & SDL_KMOD_SHIFT)) {   // Shift+C: confirm-compact the vault (Phase 26)
         handle_shift_c_key(*this, key);
+        return;
+    }
+    if ((key.key == SDLK_I) && (key.mod & SDL_KMOD_SHIFT)) {   // Shift+I: open import status (Phase 50)
+        request(NavKind::ToImportStatus);
         return;
     }
     // Single-action shortcut keys, grouped into one switch so this function's
@@ -744,6 +762,7 @@ bool GalleryGrid::handle_delete_confirm_key(const SDL_Event& e)
             count_subtree(n, c);
             item_total = c.images + c.videos + c.galleries + 1;   // +1 for the gallery itself
         }
+        queue_.set_exclusive(true);  // Phase 50: lock out new import tasks
         naming_.file_op.start_delete(vault_, nav_.path(), n.name, n.is_gallery(), item_total);
     }
     naming_.confirm_delete = false;
@@ -766,6 +785,7 @@ bool GalleryGrid::handle_compact_confirm_key(const SDL_Event& e)
 
     // Run compaction on a worker thread with a progress modal + cancel (Phase 26).
     // take_outcome() (in poll_file_job) shows the result.
+    queue_.set_exclusive(true);  // Phase 50: lock out new import tasks
     naming_.file_op.start_compact(vault_);
     naming_.confirm_compact = false;
     mark_dirty();
@@ -840,6 +860,12 @@ void GalleryGrid::handle_event(const SDL_Event& e)
             handle_key_down(e.key);
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+            // Phase 50: check if click is on footer band while import summary is active
+            if (e.button.y >= content_bottom(*this) && !queue_.footer_summary().empty()) {
+                request(NavKind::ToImportStatus);
+                break;
+            }
+
             if (const int idx = hit_test(e.button.x, e.button.y); idx >= 0) {
                 nav_.select(idx);
                 open_selected();   // gallery → descend; image → open viewer
@@ -869,7 +895,8 @@ void GalleryGrid::pump_import()
         if (!res->empty()) {
             std::vector<std::filesystem::path> paths;
             for (const auto& s : *res) paths.emplace_back(s);
-            naming_.file_op.start_import(vault_, nav_.path(), std::move(paths));
+            queue_.enqueue_files(std::move(paths), nav_.path());
+            status_ = "Import queued — Shift+I for status";
         }
         mark_dirty();   // dialog closed (import launched or cancelled) — repaint
     }
@@ -974,37 +1001,23 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path)
     const std::string gallery_name = naming_.zip.gallery_name;
     const std::string base_gallery = nav_.path();
 
-    // Both CBZ and ZIP imports run on a background thread so the UI never freezes
-    // on a large archive (Phase 24 fix) — synchronously here would freeze it on the
-    // name popup ("locked in"). update() drains the result; while the worker owns
-    // the vault the UI shows only the progress modal. CBZ is a fixed one-leaf plan;
-    // a ZIP mirrors its tree 1:1, mixed folders included (Phase 46), so an import
-    // never needs a conflict round-trip. naming_.zip stays populated until a
-    // terminal outcome. archive_backend (Phase 34) picks the libarchive-backed job
-    // methods for .7z/.rar/.tar(+variants)/.cbr/.cb7/.cbt — same threading/progress
-    // contract, only the decompression backend differs. Phase 35: needs_password
-    // additionally threads naming_.password.buf through on every (re)launch —
-    // empty on the very first attempt (before the user has typed anything), which
-    // correctly comes back needs_password=true and opens the prompt.
+    // Map {cbz, archive_backend} to ImportTaskKind
+    ImportTaskKind kind;
     if (naming_.zip.cbz) {
-        if (naming_.zip.archive_backend)
-            naming_.import_job.start_archive_cbz(vault_, zip_path, base_gallery, gallery_name,
-                                                 naming_.zip.needs_password,
-                                                 password_bytes(naming_.password.buf));
-        else
-            naming_.import_job.start_cbz(vault_, zip_path, base_gallery, gallery_name);
+        kind = naming_.zip.archive_backend ? ImportTaskKind::ArchiveCbz : ImportTaskKind::Cbz;
     } else {
-        if (naming_.zip.archive_backend)
-            naming_.import_job.start_archive(vault_, zip_path,
-                                             base_gallery, gallery_name, naming_.zip.needs_password,
-                                             password_bytes(naming_.password.buf));
-        else
-            naming_.import_job.start_zip(vault_, zip_path, base_gallery, gallery_name);
+        kind = naming_.zip.archive_backend ? ImportTaskKind::Archive : ImportTaskKind::Zip;
     }
+
+    // Enqueue the archive import through the queue (Phase 50)
+    queue_.enqueue_archive(zip_path, base_gallery, gallery_name, kind,
+                          naming_.zip.needs_password,
+                          password_bytes(naming_.password.buf));
     mark_dirty();
 }
 
-// Extract cancelled-import waste-hint logic to reduce poll_import_job's nesting (S134).
+// Extract cancelled-import waste-hint logic (no longer needed for poll_import_job).
+// Kept for reference to cancelled_import_status pattern (Phase 50: unused but retained).
 void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun)
 {
     // User pressed Esc during import — check if waste hints are needed (Phase 26).
@@ -1017,54 +1030,9 @@ void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun)
     }
 }
 
-void poll_import_job(GalleryGrid& g)
-{
-    // Only touch the vault once the worker has fully finished (take_outcome joins
-    // the thread), so the single-thread file-handle invariant holds.
-    if (auto oc = g.naming_.import_job.take_outcome()) {
-        const bool cbz = g.naming_.zip.cbz;   // "page" (comic) vs "file" (zip) wording
-        const char* fail = cbz ? "CBZ import failed." : "ZIP import failed.";
-        if (!oc->ok) {
-            g.error_ = oc->error.empty() ? fail : oc->error;
-            g.naming_.zip.active          = false;
-            g.naming_.zip.cbz             = false;
-            g.naming_.zip.archive_backend = false;
-            g.naming_.zip.needs_password  = false;
-            g.naming_.password.active     = false;
-            g.naming_.password.buf.clear();
-        } else if (oc->needs_password) {
-            // Encrypted zip/cbz: keep naming_.zip active and open the password
-            // modal. `retry` distinguishes "nothing typed
-            // yet" from "that password was wrong" for the modal's message; the
-            // just-tried (wrong) password is cleared so the field starts empty for
-            // the next attempt (Phase 35).
-            g.naming_.password.retry = !g.naming_.password.buf.empty();
-            g.naming_.password.buf.clear();
-            g.naming_.password.active = true;
-            SDL_StartTextInput(g.win_.sdl_window());
-        } else {
-            const char* noun = cbz ? "page" : "file";
-            if (oc->cancelled) {
-                set_cancelled_import_status(g, oc->imported, noun);
-            } else {
-                g.status_ = std::format("Imported {} {}{}, skipped {}", oc->imported, noun,
-                                        oc->imported == 1 ? "" : "s", oc->skipped);
-            }
-            g.naming_.zip.active          = false;
-            g.naming_.zip.cbz             = false;
-            g.naming_.zip.archive_backend = false;
-            g.naming_.zip.needs_password  = false;
-            g.naming_.password.active     = false;
-            g.naming_.password.buf.clear();
-            g.refresh();   // the import mutated the index tree — rebuild children_
-        }
-    }
-    g.mark_dirty();
-}
-
 bool vault_busy(const GalleryGrid& g)
 {
-    return g.naming_.import_job.active() || g.naming_.file_op.active() || g.transfer_.job_active() || g.combine_.job_active();
+    return g.naming_.file_op.active() || g.transfer_.job_active() || g.combine_.job_active();
 }
 
 GalleryView current_gallery_view(const GalleryGrid& g) { return g.view_; }
@@ -1078,20 +1046,18 @@ void poll_file_job(GalleryGrid& g)
         else                               g.status_ = oc->status;
         g.sel_.clear();
         g.refresh();   // a delete changed the listing; harmless after an export
+        g.queue_.set_exclusive(false);  // Phase 50: unlock import queue
     }
     g.mark_dirty();
 }
 
-// While a background job owns the vault, swallow all input except Esc → cooperative
+// While a background file op owns the vault, swallow all input except Esc → cooperative
 // cancel. Free friend to keep GalleryGrid under the cpp:S1448 method cap and to keep
-// handle_event()'s cognitive complexity (S3776) down (Phase 25).
+// handle_event()'s cognitive complexity (S3776) down (Phase 25; Phase 50: imports drain
+// asynchronously, no longer block input).
 bool handle_job_input(GalleryGrid& g, const SDL_Event& e)
 {
     const bool esc = e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE;
-    if (g.naming_.import_job.active()) {
-        if (esc) g.naming_.import_job.cancel();
-        return true;
-    }
     if (g.naming_.file_op.active()) {
         if (esc) g.naming_.file_op.cancel();
         return true;
@@ -1099,7 +1065,7 @@ bool handle_job_input(GalleryGrid& g, const SDL_Event& e)
     return false;
 }
 
-// Bundle the 6 data parameters for draw_footer_status to reduce cognitive complexity (S107).
+// Bundle the 7 data parameters for draw_footer_status to reduce cognitive complexity (S107).
 struct FooterStatus {
     bool show_waste;
     bool show_selection;
@@ -1107,6 +1073,7 @@ struct FooterStatus {
     int selection_count;
     const std::string& error;
     const std::string& status;
+    const std::string& import_summary;  // Phase 50: footer summary from the import queue
 };
 
 // Build the breadcrumb line, appending the active sort indicator once it's
@@ -1145,6 +1112,9 @@ void draw_footer_status(gfx::Renderer& r, gfx::FontAtlas& font, float x_offset,
     const float ty = font.text_top_for_center(footer_band.y + footer_band.h * 0.5f);
     if (!data.error.empty())
         r.draw_text(font, x_offset, ty, data.error, DANGER);
+    else if (!data.import_summary.empty())
+        // Phase 50: import summary takes priority over status
+        r.draw_text(font, x_offset, ty, data.import_summary, OK);
     else if (!data.status.empty())
         r.draw_text(font, x_offset, ty, data.status, OK);
 }
@@ -1264,12 +1234,19 @@ void update_scroll_to_selection(GalleryGrid& g)
 
 void GalleryGrid::update(double dt)
 {
-    // A background import owns the vault's file handle on its worker thread, so the
-    // UI must not read the vault (thumbnails/listing) until it finishes — poll only.
-    if (naming_.import_job.active()) { poll_import_job(*this); return; }
+    // A background file op (export/delete/transfer/compact) owns the vault's file handle
+    // on its worker thread, so the UI must not read the vault (thumbnails/listing) until
+    // it finishes — poll only (Phase 50: imports are now drained via App::on_vault_changed).
     if (naming_.file_op.active())    { poll_file_job(*this);   return; }
 
     if (pump_thumbs()) mark_dirty();   // off-thread thumbnail decode(s) landed
+
+    // Phase 50: track import footer summary changes for repainting
+    const std::string footer = queue_.footer_summary();
+    if (footer != last_footer_) {
+        last_footer_ = footer;
+        mark_dirty();
+    }
 
     poll_transfer_and_combine(*this);
     poll_pending_pickers(*this);
@@ -1314,7 +1291,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
             {"B", "Favorite"}, {"F", "Favorite images"}, {"Shift+F", "Favorite galleries"},
         }},
         {"Import & export", {
-            {"I", "Import files"}, {"Z", "Import ZIP/CBZ"}, {"N", "New gallery"},
+            {"I", "Import files"}, {"Shift+I", "Import status"}, {"Z", "Import ZIP/CBZ"}, {"N", "New gallery"},
             {"X", "Export selection"}, {"M", "Move/copy"}, {"Shift+M", "Combine gallery"}, {"R", "Rename"}, {"Del", "Delete"},
         }},
         {"Session", {
@@ -1329,13 +1306,10 @@ void GalleryGrid::render(gfx::Renderer& r)
     const auto W = static_cast<float>(win_.width());
     const auto H = static_cast<float>(win_.height());
 
-    // While a background job runs, the worker thread owns the vault — drawing tiles
+    // While a background file op runs, the worker thread owns the vault — drawing tiles
     // would decrypt thumbnails on this thread and race it. Show only the progress
-    // modal over an empty backdrop. The transfer dialog draws its own progress modal.
-    if (naming_.import_job.active()) {
-        draw_import_progress(r, font_, W, H, naming_.zip.cbz, naming_.import_job);
-        return;
-    }
+    // modal over an empty backdrop (Phase 50: imports drain asynchronously via the queue).
+    // The transfer dialog draws its own progress modal.
     if (naming_.file_op.active()) {
         draw_file_op_progress(r, font_, W, H, naming_.file_op);
         return;
@@ -1374,7 +1348,8 @@ void GalleryGrid::render(gfx::Renderer& r)
         .waste_sz = waste_sz,
         .selection_count = static_cast<int>(sel_.count()),
         .error = error_,
-        .status = status_
+        .status = status_,
+        .import_summary = queue_.footer_summary()  // Phase 50: display import queue status
     });
 
     // Both take the content area's bottom, not H: rows and tiles must stop above
