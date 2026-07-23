@@ -640,39 +640,88 @@ std::string ImportQueue::footer_summary() const
     return footer_import_summary(infos, lane_ && lane_->failed(), error_msg);
 }
 
+// CALLED UNDER lock (mu_): wait for queued/running work or stop signal
+bool ImportQueue::has_available_work() const
+{
+    const bool stop = worker_stop_.load();
+    const bool excl = exclusive_.load();
+
+    // Check for queued/running work
+    for (const auto& t : tasks_) {
+        if (t.state == ImportTaskState::Queued || t.state == ImportTaskState::Running) {
+            // If exclusive is held, don't wake for work; only wake if stopping
+            if (excl)
+                return stop;
+            return true;
+        }
+    }
+    // No work available; only wake if stopping
+    return stop;
+}
+
+// CALLED UNDER lock (mu_): find and extract a queued or running task
+// Returns false if none found (caller should continue), true if task extracted
+bool ImportQueue::extract_task_data(uint64_t& out_task_id, ImportTaskKind& out_task_kind,
+                                     std::vector<std::filesystem::path>& out_files,
+                                     std::filesystem::path& out_archive_path,
+                                     std::string& out_gallery_name, std::string& out_dest_gallery,
+                                     std::shared_ptr<vault::OpProgress>& out_progress)
+{
+    for (auto& t : tasks_) {
+        if (t.state == ImportTaskState::Queued || t.state == ImportTaskState::Running) {
+            // Copy all task data before releasing lock
+            out_task_id = t.id;
+            out_task_kind = t.kind;
+            out_files = t.files;
+            out_archive_path = t.archive_path;
+            out_gallery_name = t.gallery_name;
+            out_dest_gallery = t.dest_gallery;
+            out_progress = t.progress;
+
+            // Mark as running if it was queued
+            if (t.state == ImportTaskState::Queued) {
+                t.state = ImportTaskState::Running;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+// CALLED UNDER lock (mu_): update task state after processing
+void ImportQueue::mark_task_complete(uint64_t task_id, const std::shared_ptr<vault::OpProgress>& progress)
+{
+    for (auto& t : tasks_) {
+        if (t.id == task_id) {
+            if (t.state == ImportTaskState::Running) {
+                // Check if the task was cancelled
+                if (progress && progress->cancel.load()) {
+                    t.state = ImportTaskState::Cancelled;
+                } else {
+                    t.state = ImportTaskState::Done;
+                }
+            }
+            break;
+        }
+    }
+}
+
 void ImportQueue::worker_loop()
 {
     while (true) {
-        // Store task data locally to avoid holding references across lock release
+        // Fetch task under lock, then release
         uint64_t task_id = 0;
         ImportTaskKind task_kind = ImportTaskKind::Files;
         std::vector<std::filesystem::path> task_files;
         std::filesystem::path task_archive_path;
         std::string task_gallery_name, task_dest_gallery;
         std::shared_ptr<vault::OpProgress> task_progress;
-        bool found_task = false;
 
         {
             std::unique_lock lock(mu_);
 
             // Wait for a queued/running task or until worker should stop
-            worker_cv_.wait(lock, [this]() {
-                const bool stop = worker_stop_.load();
-                const bool excl = exclusive_.load();
-
-                // Check for queued/running work
-                for (const auto& t : tasks_) {
-                    if (t.state == ImportTaskState::Queued ||
-                        t.state == ImportTaskState::Running) {
-                        // If exclusive is held, don't wake for work; only wake if stopping
-                        if (excl)
-                            return stop;
-                        return true;
-                    }
-                }
-                // No work available; only wake if stopping
-                return stop;
-            });
+            worker_cv_.wait(lock, [this]() { return has_available_work(); });
 
             if (worker_stop_)
                 break;
@@ -681,41 +730,14 @@ void ImportQueue::worker_loop()
             if (exclusive_)
                 continue;
 
-            // Find the first queued or running task and copy all its data
-            for (auto& t : tasks_) {
-                if (t.state == ImportTaskState::Queued) {
-                    // Copy all task data before releasing lock
-                    task_id = t.id;
-                    task_kind = t.kind;
-                    task_files = t.files;
-                    task_archive_path = t.archive_path;
-                    task_gallery_name = t.gallery_name;
-                    task_dest_gallery = t.dest_gallery;
-                    task_progress = t.progress;
-                    found_task = true;
-
-                    // Mark as running
-                    t.state = ImportTaskState::Running;
-                    break;
-                } else if (t.state == ImportTaskState::Running) {
-                    // Continue processing this one - copy all task data
-                    task_id = t.id;
-                    task_kind = t.kind;
-                    task_files = t.files;
-                    task_archive_path = t.archive_path;
-                    task_gallery_name = t.gallery_name;
-                    task_dest_gallery = t.dest_gallery;
-                    task_progress = t.progress;
-                    found_task = true;
-                    break;
-                }
+            // Extract task data under lock
+            if (!extract_task_data(task_id, task_kind, task_files, task_archive_path,
+                                   task_gallery_name, task_dest_gallery, task_progress)) {
+                continue;  // No task found, loop again
             }
+        }  // Lock released here
 
-            if (!found_task)
-                continue;
-        }
-
-        // Process the task using copied data (no lock held, no task references)
+        // Process the task using copied data (no lock held)
         Task work_task{
             .id = task_id,
             .kind = task_kind,
@@ -738,22 +760,10 @@ void ImportQueue::worker_loop()
             process_archive_task(work_task);
         }
 
-        // Update the original task with results, by ID lookup
+        // Update the original task with results (re-acquire lock)
         {
             std::lock_guard lock(mu_);
-            for (auto& t : tasks_) {
-                if (t.id == task_id) {
-                    if (t.state == ImportTaskState::Running) {
-                        // Check if the task was cancelled
-                        if (task_progress && task_progress->cancel.load()) {
-                            t.state = ImportTaskState::Cancelled;
-                        } else {
-                            t.state = ImportTaskState::Done;
-                        }
-                    }
-                    break;
-                }
-            }
+            mark_task_complete(task_id, task_progress);
         }
     }
 }

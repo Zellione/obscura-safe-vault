@@ -124,6 +124,13 @@ private:
     void maybe_end_batch();
     void mark_task_skipped(uint64_t task_id);
     void mark_task_imported(uint64_t task_id);
+    bool has_available_work() const;  // Called under lock
+    bool extract_task_data(uint64_t& out_task_id, ImportTaskKind& out_task_kind,
+                          std::vector<std::filesystem::path>& out_files,
+                          std::filesystem::path& out_archive_path,
+                          std::string& out_gallery_name, std::string& out_dest_gallery,
+                          std::shared_ptr<vault::OpProgress>& out_progress);  // Called under lock
+    void mark_task_complete(uint64_t task_id, const std::shared_ptr<vault::OpProgress>& progress);  // Called under lock
 
     // Synchronization
     mutable std::mutex mu_;
