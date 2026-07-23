@@ -955,4 +955,71 @@ void ImportQueue::maybe_end_batch()
     }
 }
 
+// Test seam: joins the worker WITHOUT the final lane flush, simulating a crash
+// between batch commits. Never called by production code.
+void test_only_drop_without_flush(ImportQueue& q)
+{
+    {
+        std::lock_guard lock(q.mu_);
+
+        // Mark all queued tasks as cancelled (same as abort_and_flush)
+        for (auto& task : q.tasks_) {
+            if (!task.finished()) {
+                task.state = ImportTaskState::Cancelled;
+            }
+            if (task.progress) {
+                task.progress->cancel.store(true);
+            }
+            // Wipe password for any queued archive task
+            task.password = crypto::SecureBytes{};
+        }
+
+        // Release exclusive lock and set stop flag
+        q.exclusive_ = false;
+        q.worker_stop_ = true;
+    }
+
+    // Notify worker to wake
+    q.worker_cv_.notify_all();
+
+    // Wait for worker to finish
+    if (q.worker_.joinable()) {
+        q.worker_.join();
+    }
+
+    // Apply remaining records to the vault (same as abort_and_flush)
+    {
+        std::deque<ImportQueue::StagedRecord> remaining;
+        {
+            std::lock_guard lock(q.mu_);
+            remaining = std::move(q.records_);
+            q.records_.clear();
+        }
+
+        // Process remaining records
+        for (auto& record : remaining) {
+            if (record.node) {
+                if (!record.gallery_path.empty()) {
+                    (void)vault::ensure_gallery_path(*q.v_, record.gallery_path);
+                }
+                (void)vault::attach_staged(*q.v_, record.gallery_path, std::move(*record.node));
+            } else {
+                (void)vault::ensure_gallery_path(*q.v_, record.gallery_path);
+            }
+        }
+    }
+
+    // Uninstall router (but do NOT flush the lane — this simulates a crash)
+    if (q.v_) {
+        q.v_->set_commit_router(nullptr);
+    }
+
+    // Stop the lane without flushing (the lane worker may still be in flight
+    // or have pending writes, but we abandon them here to simulate the crash)
+    if (q.lane_) {
+        // Just stop; don't enqueue_snapshot or flush
+        q.lane_->stop();
+    }
+}
+
 }  // namespace ui

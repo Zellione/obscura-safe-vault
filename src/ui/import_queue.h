@@ -69,6 +69,10 @@ public:
     [[nodiscard]] std::vector<ImportTaskInfo> snapshot() const;
     [[nodiscard]] std::string footer_summary() const;   // footer_import_summary(...)
 
+    // Test seam: joins worker WITHOUT final lane flush, simulating a crash
+    // between batch commits. Never called by production code.
+    friend void test_only_drop_without_flush(ImportQueue& q);
+
 private:
     struct Task;
     struct StagedRecord;
