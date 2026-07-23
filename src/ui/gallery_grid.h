@@ -188,8 +188,10 @@ private:
     TagEditor               tag_editor_;
     QuickSwitch             quick_switch_;   // declared before transfer_ so it copies
     TransferDialog          transfer_;       // the active path before transfer_ moves it
+    bool                    transfer_had_exclusive_ = false;  // Phase 50: track exclusive
     RenameDialog            rename_;         // Phase 44 Part 2
     CombineDialog           combine_;        // Phase 44 Part 4
+    bool                    combine_had_exclusive_ = false;   // Phase 50: track exclusive
     GridLocation          initial_;   // where to (re)open: path + selected tile
     std::vector<const vault::IndexNode*> children_;
     int                   cols_ = 1;

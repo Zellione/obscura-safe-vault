@@ -312,6 +312,9 @@ void start_transfer_focused(GalleryGrid& g)
     }
     const vault::IndexNode* node = g.children_[s];
     g.error_.clear();
+    // Phase 50: acquire exclusive before opening transfer dialog
+    g.queue_.set_exclusive(true);
+    g.transfer_had_exclusive_ = true;
     if (node->is_gallery()) {
         const std::string path = g.nav_.path().empty() ? node->name
                                                         : g.nav_.path() + "/" + node->name;
@@ -331,6 +334,9 @@ void start_transfer_galleries_selection(GalleryGrid& g)
         paths.push_back(g.nav_.path().empty() ? name : g.nav_.path() + "/" + name);
     }
     g.error_.clear();
+    // Phase 50: acquire exclusive before opening transfer dialog
+    g.queue_.set_exclusive(true);
+    g.transfer_had_exclusive_ = true;
     g.transfer_.open_galleries(std::move(paths));
 }
 
@@ -343,6 +349,9 @@ void start_transfer_images_selection(GalleryGrid& g)
     }
     if (names.empty()) { g.error_ = "Nothing selected to move."; return; }
     g.error_.clear();
+    // Phase 50: acquire exclusive before opening transfer dialog
+    g.queue_.set_exclusive(true);
+    g.transfer_had_exclusive_ = true;
     g.transfer_.open(g.nav_.path(), std::move(names));
 }
 
@@ -404,6 +413,9 @@ void GalleryGrid::start_combine()
     if (transfer_.active() || rename_.active() || combine_.active()) return;
     if (nav_.path().empty()) { error_ = "Can't combine the top level."; return; }
     error_.clear();
+    // Phase 50: acquire exclusive before opening combine dialog
+    queue_.set_exclusive(true);
+    combine_had_exclusive_ = true;
     combine_.open(nav_.path());
 }
 
@@ -620,6 +632,13 @@ void GalleryGrid::toggle_or_open()
 void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
 {
     if (!((key.key == SDLK_C) && (key.mod & SDL_KMOD_SHIFT))) return;
+
+    // Phase 50: gate compact behind a running import check
+    if (g.queue_.busy()) {
+        g.status_ = "Imports running — press Shift+I for status";
+        g.mark_dirty();
+        return;
+    }
 
     const uint64_t file_sz = vault::vault_file_bytes(g.vault_);
     const uint64_t waste_sz = g.vault_.wasted_bytes();
@@ -1136,6 +1155,15 @@ void poll_transfer_and_combine(GalleryGrid& g)
         g.sel_.clear();
         g.refresh();                   // moved images are gone from this listing
         g.mark_dirty();
+        // Phase 50: release exclusive when transfer outcome is drained
+        if (g.transfer_had_exclusive_) {
+            g.queue_.set_exclusive(false);
+            g.transfer_had_exclusive_ = false;
+        }
+    } else if (g.transfer_had_exclusive_ && !g.transfer_.active()) {
+        // Phase 50: transfer dialog closed without launching a job; release exclusive
+        g.queue_.set_exclusive(false);
+        g.transfer_had_exclusive_ = false;
     }
 
     if (g.combine_.active()) {
@@ -1152,6 +1180,15 @@ void poll_transfer_and_combine(GalleryGrid& g)
             g.refresh();   // partial merge — still looking at the (shrunken) source gallery
         }
         g.mark_dirty();
+        // Phase 50: release exclusive when combine outcome is drained
+        if (g.combine_had_exclusive_) {
+            g.queue_.set_exclusive(false);
+            g.combine_had_exclusive_ = false;
+        }
+    } else if (g.combine_had_exclusive_ && !g.combine_.active()) {
+        // Phase 50: combine dialog closed without launching a job; release exclusive
+        g.queue_.set_exclusive(false);
+        g.combine_had_exclusive_ = false;
     }
 
     if (std::string s; g.rename_.consume_completed(s)) {
