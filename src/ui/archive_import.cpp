@@ -76,15 +76,15 @@ void import_one(MediaSink& sink, const ArchiveReader& reader, const ZipPlacement
     const std::span<const uint8_t> span{bytes.data(), bytes.size()};
 
     // Extract relative gallery path: strip root_gallery prefix from pl.gallery_path.
-    std::string_view rel_gallery = pl.gallery_path;
-    if (!root_gallery.empty() && pl.gallery_path.size() > root_gallery.size()) {
-        if (pl.gallery_path.substr(0, root_gallery.size()) == root_gallery) {
+    std::string_view rel_gallery{pl.gallery_path};
+    if (!root_gallery.empty()) {
+        if (rel_gallery.size() > root_gallery.size() && rel_gallery.starts_with(root_gallery)) {
             // Skip the root + separator
-            rel_gallery = pl.gallery_path.substr(root_gallery.size() + 1);
+            rel_gallery.remove_prefix(root_gallery.size() + 1);
+        } else if (rel_gallery == root_gallery) {
+            // pl.gallery_path is exactly root_gallery, so rel_gallery is empty
+            rel_gallery = {};
         }
-    } else if (!root_gallery.empty()) {
-        // pl.gallery_path is exactly root_gallery, so rel_gallery is empty
-        rel_gallery = "";
     }
 
     const vault::VaultResult r = image::detect_format(span) != image::ImageFormat::Unknown
@@ -100,15 +100,15 @@ bool create_galleries(MediaSink& sink, const ZipPlan& plan, std::string_view roo
 {
     for (const auto& g : plan.galleries) {
         // Extract relative gallery path: strip root_gallery prefix from g.
-        std::string_view rel_gallery = g;
-        if (!root_gallery.empty() && g.size() > root_gallery.size()) {
-            if (g.substr(0, root_gallery.size()) == root_gallery) {
+        std::string_view rel_gallery{g};
+        if (!root_gallery.empty()) {
+            if (rel_gallery.size() > root_gallery.size() && rel_gallery.starts_with(root_gallery)) {
                 // Skip the root + separator
-                rel_gallery = g.substr(root_gallery.size() + 1);
+                rel_gallery.remove_prefix(root_gallery.size() + 1);
+            } else if (rel_gallery == root_gallery) {
+                // g is exactly root_gallery, so rel_gallery is empty
+                rel_gallery = {};
             }
-        } else if (!root_gallery.empty()) {
-            // g is exactly root_gallery, so rel_gallery is empty
-            rel_gallery = "";
         }
 
         const vault::VaultResult r = sink.ensure_gallery(rel_gallery);
