@@ -165,7 +165,7 @@ public:
                                      : dest_gallery_ + "/" + std::string(rel_gallery);
         {
             std::lock_guard lock(mu_);
-            records_.push_back(StagedRecord{path, std::nullopt, task_id_, false});
+            records_.emplace_back(path, std::nullopt, task_id_, false);
         }
         return vault::VaultResult::Ok;
     }
@@ -185,7 +185,7 @@ public:
 
         {
             std::lock_guard lock(mu_);
-            records_.push_back(StagedRecord{gallery_path, std::move(staged.node), task_id_, false});
+            records_.emplace_back(gallery_path, std::move(staged.node), task_id_, false);
         }
         return vault::VaultResult::Ok;
     }
@@ -205,7 +205,7 @@ public:
 
         {
             std::lock_guard lock(mu_);
-            records_.push_back(StagedRecord{gallery_path, std::move(staged.node), task_id_, false});
+            records_.emplace_back(gallery_path, std::move(staged.node), task_id_, false);
         }
         return vault::VaultResult::Ok;
     }
