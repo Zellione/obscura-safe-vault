@@ -41,6 +41,25 @@ TEST(reorder_import_task_moves_within_queued_span)
     CHECK_EQ(tasks[3].id, static_cast<uint64_t>(4));  // Done unchanged
 }
 
+TEST(reorder_import_task_moves_upward_within_queued)
+{
+    // Build: Running(1) / Queued(2) / Queued(3) / Done(4)
+    std::vector<ui::ImportTaskInfo> tasks = {
+        make_task(1, ui::ImportTaskState::Running, "r"),
+        make_task(2, ui::ImportTaskState::Queued, "q1"),
+        make_task(3, ui::ImportTaskState::Queued, "q2"),
+        make_task(4, ui::ImportTaskState::Done, "d"),
+    };
+
+    // Reorder task 3 up by -1 → should swap with 2
+    const bool moved = ui::reorder_import_task(tasks, 3, -1);
+    REQUIRE(moved);
+    CHECK_EQ(tasks[1].id, static_cast<uint64_t>(3));
+    CHECK_EQ(tasks[2].id, static_cast<uint64_t>(2));
+    CHECK_EQ(tasks[0].id, static_cast<uint64_t>(1));  // Running unchanged
+    CHECK_EQ(tasks[3].id, static_cast<uint64_t>(4));  // Done unchanged
+}
+
 TEST(reorder_import_task_never_crosses_boundaries)
 {
     // Build: Queued(1) / Running(2) / Queued(3) / Done(4)
@@ -75,6 +94,24 @@ TEST(reorder_import_task_returns_false_when_id_not_found)
 
     const bool moved = ui::reorder_import_task(tasks, 999, 1);
     CHECK_FALSE(moved);
+}
+
+TEST(footer_import_summary_uses_first_running_task)
+{
+    // Build: Running(1) "first.zip" / Running(2) "second.zip" / Queued(3)
+    std::vector<ui::ImportTaskInfo> tasks = {
+        make_task(1, ui::ImportTaskState::Running, "first.zip"),
+        make_task(2, ui::ImportTaskState::Running, "second.zip"),
+        make_task(3, ui::ImportTaskState::Queued, "queued.zip"),
+    };
+    tasks[0].done = 50;
+    tasks[0].total = 100;
+    tasks[1].done = 25;
+    tasks[1].total = 75;
+
+    const std::string summary = ui::footer_import_summary(tasks, false);
+    // Should use the FIRST running task (id=1, name="first.zip")
+    CHECK_EQ(summary, std::string("Importing first.zip 50/100 · 1 queued"));
 }
 
 TEST(clear_finished_imports_removes_done_failed_cancelled)
@@ -152,7 +189,7 @@ TEST(footer_import_summary_queued_only)
     CHECK_EQ(summary, std::string("Importing first_import 0/0 · 2 queued"));
 }
 
-TEST(footer_import_summary_lane_failed_wins)
+TEST(footer_import_summary_lane_failed_empty_error)
 {
     std::vector<ui::ImportTaskInfo> tasks = {
         make_task(1, ui::ImportTaskState::Running, "archive.zip"),
@@ -160,8 +197,20 @@ TEST(footer_import_summary_lane_failed_wins)
     tasks[0].done = 10;
     tasks[0].total = 100;
 
-    const std::string summary = ui::footer_import_summary(tasks, true);
-    CHECK_EQ(summary, std::string("Import failed: (no details)"));
+    const std::string summary = ui::footer_import_summary(tasks, true, "");
+    CHECK_EQ(summary, std::string("Import failed"));
+}
+
+TEST(footer_import_summary_lane_failed_with_error_text)
+{
+    std::vector<ui::ImportTaskInfo> tasks = {
+        make_task(1, ui::ImportTaskState::Running, "archive.zip"),
+    };
+    tasks[0].done = 10;
+    tasks[0].total = 100;
+
+    const std::string summary = ui::footer_import_summary(tasks, true, "vault is locked");
+    CHECK_EQ(summary, std::string("Import failed: vault is locked"));
 }
 
 TEST(footer_import_summary_single_import_queued)

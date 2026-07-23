@@ -50,11 +50,16 @@ int clear_finished_imports(std::vector<ImportTaskInfo>& tasks)
 }
 
 std::string footer_import_summary(const std::vector<ImportTaskInfo>& tasks,
-                                 bool lane_failed)
+                                 bool lane_failed,
+                                 std::string_view lane_error)
 {
     // If lane has failed, show the error message (this wins over everything)
     if (lane_failed) {
-        return "Import failed: (no details)";
+        if (!lane_error.empty()) {
+            return std::string("Import failed: ") + std::string(lane_error);
+        } else {
+            return "Import failed";
+        }
     }
 
     // Find running and queued counts
@@ -64,8 +69,10 @@ std::string footer_import_summary(const std::vector<ImportTaskInfo>& tasks,
 
     for (size_t i = 0; i < tasks.size(); ++i) {
         if (tasks[i].state == ImportTaskState::Running) {
+            if (running_idx == -1) {
+                running_idx = static_cast<int>(i);  // Capture FIRST running task
+            }
             ++running_count;
-            running_idx = static_cast<int>(i);
         } else if (tasks[i].state == ImportTaskState::Queued) {
             ++queued_count;
         }

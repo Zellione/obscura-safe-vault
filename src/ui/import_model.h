@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace ui {
@@ -37,9 +38,11 @@ int clear_finished_imports(std::vector<ImportTaskInfo>& tasks);
 
 // One-line footer summary; empty when there is nothing running or queued:
 //   "Importing <name> 128/450 · 2 queued"   (queued suffix only when > 0)
-//   "Import failed: <error>"                (lane/task hard failure surface)
+//   "Import failed: <error>"                (when lane_failed and lane_error non-empty)
+//   "Import failed"                         (when lane_failed but lane_error empty)
 [[nodiscard]] std::string footer_import_summary(const std::vector<ImportTaskInfo>& tasks,
-                                                bool lane_failed);
+                                                bool lane_failed,
+                                                std::string_view lane_error = {});
 
 // Batched-commit policy (spec: every 32 attached files or 2 s, whichever
 // first, and only when at least one file is uncommitted).
