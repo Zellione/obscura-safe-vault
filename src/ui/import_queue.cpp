@@ -252,9 +252,30 @@ ImportQueue::~ImportQueue()
 void ImportQueue::begin_session(vault::Vault& v)
 {
     std::lock_guard lock(mu_);
+
+    // Safety: a live worker at begin means end_session was skipped (e.g., via early return).
+    // Loud in debug to catch caller errors.
+    assert(!worker_.joinable());
+
     // Phase 50: reset exclusive gate — a stale true from a torn-down screen must never
     // survive into a new session (would wedge imports forever).
     exclusive_ = false;
+
+    // Phase 50: abort idempotence is per-session; reset the flag so end_session can call
+    // abort_and_flush and actually stop the worker. A stale aborted_=true would make
+    // end_session a no-op, leaving the worker parked on the CV forever → jthread join hangs.
+    aborted_ = false;
+
+    // Phase 50: defense-in-depth: stale session state (tasks_ and records_) must not leak
+    // into the new session. records_ point to chunks from the PREVIOUS vault's staged data —
+    // attaching them into a new vault would corrupt it. abort_and_flush should have drained
+    // both, but clear them here to be safe; log once if non-empty (indicates a caller bug).
+    if (!records_.empty()) {
+        fprintf(stderr, "[ImportQueue] WARNING: begin_session with non-empty records_ (caller skipped end_session?)\n");
+    }
+    tasks_.clear();
+    records_.clear();
+
     v_ = &v;
     lane_ = std::make_unique<vault::CommitLane>();
     lane_->start(v);
