@@ -24,6 +24,7 @@
 #include "vault/vault_search.h"
 #include "vault/index_io.h"
 #include "vault/vault_ops.h"
+#include "vault/staging.h"
 #include "media/video_probe.h"
 #include "platform/error_log.h"
 #include "ui/advanced_search_model.h"  // AdvancedQuery + evaluate (pure, SDL/vault-free)
@@ -332,6 +333,7 @@ Vault::Vault(Vault&& o) noexcept
     : path_(std::move(o.path_)),
       fp_(o.fp_),
       read_fp_(o.read_fp_),
+      write_mutex_(std::move(o.write_mutex_)),
       header_(o.header_),
       unlocked_(o.unlocked_),
       master_key_(std::move(o.master_key_)),
@@ -348,18 +350,19 @@ Vault& Vault::operator=(Vault&& o) noexcept
 {
     if (this != &o) {
         reset();
-        path_       = std::move(o.path_);
-        fp_         = o.fp_;
-        read_fp_    = o.read_fp_;
-        header_     = o.header_;
-        unlocked_   = o.unlocked_;
-        master_key_ = std::move(o.master_key_);
-        root_       = std::move(o.root_);
+        path_         = std::move(o.path_);
+        fp_           = o.fp_;
+        read_fp_      = o.read_fp_;
+        write_mutex_  = std::move(o.write_mutex_);
+        header_       = o.header_;
+        unlocked_     = o.unlocked_;
+        master_key_   = std::move(o.master_key_);
+        root_         = std::move(o.root_);
         saved_searches_ = std::move(o.saved_searches_);
-        settings_   = std::move(o.settings_);
-        o.fp_       = nullptr;
-        o.read_fp_  = nullptr;
-        o.unlocked_ = false;
+        settings_     = std::move(o.settings_);
+        o.fp_         = nullptr;
+        o.read_fp_    = nullptr;
+        o.unlocked_   = false;
     }
     return *this;
 }
@@ -377,6 +380,7 @@ void Vault::reset() noexcept
     lock();
     if (fp_) { std::fclose(fp_); fp_ = nullptr; }
     if (read_fp_) { std::fclose(read_fp_); read_fp_ = nullptr; }
+    write_mutex_.reset();
     path_.clear();
     header_ = Header{};
     settings_ = VaultSettings{};
@@ -425,13 +429,14 @@ VaultResult Vault::create(const std::string&       path,
         return VaultResult::IoError;
     }
 
-    out.path_        = path;
-    out.fp_          = fp;
-    out.header_      = h;
-    out.master_key_  = std::move(master);
-    out.root_        = IndexNode::gallery("");
-    out.unlocked_    = true;
-    out.settings_    = VaultSettings::seeded();
+    out.path_         = path;
+    out.fp_           = fp;
+    out.header_       = h;
+    out.master_key_   = std::move(master);
+    out.root_         = IndexNode::gallery("");
+    out.unlocked_     = true;
+    out.settings_     = VaultSettings::seeded();
+    out.write_mutex_  = std::make_unique<std::mutex>();
 
     // Write the initial (empty) index + a valid header via the crash-safe path.
     if (const VaultResult r = out.commit_index(); r != VaultResult::Ok) { out.reset(); return r; }
@@ -468,9 +473,9 @@ VaultResult Vault::open(const std::string& path, Vault& out)
         return VaultResult::BadFormat;
     }
 
-    out.path_     = path;
-    out.fp_       = fp;
-    out.read_fp_  = std::fopen(path.c_str(), "rb");
+    out.path_         = path;
+    out.fp_           = fp;
+    out.read_fp_      = std::fopen(path.c_str(), "rb");
     if (!out.read_fp_) {
         std::fclose(fp);
         return VaultResult::IoError;
@@ -478,8 +483,9 @@ VaultResult Vault::open(const std::string& path, Vault& out)
     // Disable buffering on read_fp_ so it always reads fresh from disk,
     // avoiding buffering conflicts with fp_'s writes.
     std::setvbuf(out.read_fp_, nullptr, _IONBF, 0);
-    out.header_   = h;
-    out.unlocked_ = false;
+    out.header_       = h;
+    out.unlocked_     = false;
+    out.write_mutex_  = std::make_unique<std::mutex>();
     return VaultResult::Ok;
 }
 
@@ -651,51 +657,23 @@ VaultResult Vault::add_image(std::string_view         gallery_path,
     if (!unlocked_)                     return Locked;
     if (!is_safe_node_name(filename))   return InvalidArg;  // no traversal into the index
 
+    // Fail-fast pre-checks: do these before staging to avoid orphaning chunks
+    // on the synchronous path.
     IndexNode* g = find_gallery(gallery_path);
     if (!g) return NotFound;
     if (child_named(g, filename)) return AlreadyExists;
 
+    // Stage the image (encode, encrypt, append chunks).
+    StagedNode staged = stage_image(*this, file_data, filename);
+    if (staged.status != Ok) return staged.status;
+
+    // Attach the staged node to the tree (no commit yet).
+    if (const VaultResult r = attach_staged(*this, gallery_path, std::move(staged.node));
+        r != Ok) return r;
+
+    // Synchronize the staged chunks to stable storage (fsync).
     ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
-    ChunkSpan  span;
-    if (!store.append_chunk(file_data, span)) return IoError;
-
-    // Phase 3: detect format/dims and generate an encrypted thumbnail chunk.
-    // Soft failure: if decode or thumbnail generation fails, we still store the image
-    // with format=Unknown and thumb_length=0 (same as Phase 2 behaviour).
-    ImageFormat detected_fmt    = ImageFormat::Unknown;
-    uint32_t    detected_width  = 0;
-    uint32_t    detected_height = 0;
-    ChunkSpan   thumb_span{};
-
-    if (auto decoded = image::decode_from_memory(file_data)) {
-        detected_fmt    = static_cast<ImageFormat>(decoded->format);
-        detected_width  = static_cast<uint32_t>(decoded->width);
-        detected_height = static_cast<uint32_t>(decoded->height);
-
-        if (auto thumb_jpeg = image::make_thumbnail(*decoded, 256, 85))
-            (void)store.append_chunk(*thumb_jpeg, thumb_span);  // best-effort
-    }
-
     if (!store.sync()) return IoError;
-
-    IndexNode img = IndexNode::image(std::string(filename));
-    img.meta.format       = detected_fmt;
-    img.meta.width        = detected_width;
-    img.meta.height       = detected_height;
-    img.meta.orig_size    = file_data.size();
-    img.meta.created_ts   = static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count());
-    img.meta.data_offset  = span.offset;
-    img.meta.data_length  = span.length;
-    img.meta.thumb_offset = thumb_span.offset;
-    img.meta.thumb_length = thumb_span.length;
-    // Phase 47: a multi-frame GIF animates in the viewer and gets an "A" badge.
-    img.meta.animated = (img.meta.format == ImageFormat::GIF) && image::gif_is_animated(file_data);
-    if (!vault_ops::push_child(g->children, std::move(img))) {
-        platform::log_error("Vault", "add_image: allocation failure appending index node");
-        return IoError;
-    }
 
     return commit_index();
 }
@@ -763,8 +741,9 @@ VaultResult Vault::add_video(std::string_view         gallery_path,
     if (!is_safe_node_name(filename))   return InvalidArg;  // no traversal into the index
     if (chunk_size == 0)                return InvalidArg;
 
-    // Probe the video file first (before storing chunks) to detect metadata and generate poster.
-    // This ensures we don't create orphan chunks if the video is invalid.
+    // Fail-fast pre-checks: do these before staging to avoid orphaning chunks
+    // on the synchronous path. Probe the video file first to detect metadata and
+    // generate poster — ensures we don't create orphan chunks if the video is invalid.
     media::VideoProbeResult probe;
     if (!media::probe_video(file_data, probe)) return InvalidArg;
 
@@ -772,47 +751,17 @@ VaultResult Vault::add_video(std::string_view         gallery_path,
     if (!g) return NotFound;
     if (child_named(g, filename)) return AlreadyExists;
 
+    // Stage the video (split into chunks, encrypt, append).
+    StagedNode staged = stage_video(*this, file_data, filename, chunk_size);
+    if (staged.status != Ok) return staged.status;
+
+    // Attach the staged node to the tree (no commit yet).
+    if (const VaultResult r = attach_staged(*this, gallery_path, std::move(staged.node));
+        r != Ok) return r;
+
+    // Synchronize the staged chunks to stable storage (fsync).
     ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
-    std::vector<VideoChunk> chunks;
-    for (size_t off = 0; off < file_data.size(); off += chunk_size) {
-        const size_t len = std::min<size_t>(chunk_size, file_data.size() - off);
-        ChunkSpan span;
-        if (!store.append_chunk(file_data.subspan(off, len), span)) return IoError;
-        chunks.push_back({span.offset, span.length});
-    }
-    // An empty file would store zero chunks; treat as invalid (no video stream).
-    if (chunks.empty()) return InvalidArg;
-
-    // Store the poster if it was generated.
-    uint64_t poster_offset = 0;
-    uint64_t poster_length = 0;
-    if (!probe.poster_jpeg.empty()) {
-        ChunkSpan poster_span;
-        if (!store.append_chunk(probe.poster_jpeg, poster_span)) return IoError;
-        poster_offset = poster_span.offset;
-        poster_length = poster_span.length;
-    }
-
-    if (!store.sync())  return IoError;
-
-    IndexNode vid = IndexNode::video(std::string(filename));
-    vid.vmeta.container  = probe.container;
-    vid.vmeta.codec      = probe.codec;
-    vid.vmeta.width      = probe.width;
-    vid.vmeta.height     = probe.height;
-    vid.vmeta.duration_us= probe.duration_us;
-    vid.vmeta.orig_size  = file_data.size();
-    vid.vmeta.created_ts = static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count());
-    vid.vmeta.chunk_size = chunk_size;
-    vid.vmeta.chunks     = std::move(chunks);
-    vid.vmeta.poster_offset = poster_offset;
-    vid.vmeta.poster_length = poster_length;
-    if (!vault_ops::push_child(g->children, std::move(vid))) {
-        platform::log_error("Vault", "add_video: allocation failure appending index node");
-        return IoError;
-    }
+    if (!store.sync()) return IoError;
 
     return commit_index();
 }
@@ -1444,11 +1393,13 @@ VaultResult Vault::compact(OpProgress* progress)
 
 bool Vault::write_header()
 {
+    std::lock_guard lk(*write_mutex_);
     return index_io::write_header(fp_, header_);
 }
 
 VaultResult Vault::commit_index()
 {
+    std::lock_guard lk(*write_mutex_);
     IndexIoContext ctx{
         .fp_           = fp_,
         .header_       = header_,

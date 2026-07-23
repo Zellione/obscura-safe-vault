@@ -1,6 +1,7 @@
 #include "test_framework.h"
 #include "ui/zip_test_helpers.h"   // ziptest::make_vault, fake_jpeg, fresh_dir, cleanup_dir
 #include "vault/vault.h"
+#include "vault/staging.h"
 
 #include <thread>
 
@@ -31,10 +32,8 @@ TEST(read_handle_basic_read)
 // A read on the main thread must return correct plaintext even while another
 // thread is appending chunks (moving the write handle's file position). With a
 // single shared FILE* this interleaves fseek/fwrite vs fseek/fread and fails
-// (or trips TSAN); with the dedicated read handle it must always pass.
-// TODO(Task2): this test races the index tree via add_image from a second thread;
-// Task 2 will retarget the writer loop to stage_image (no tree mutation).
-// Do NOT run this test under --tsan until Task 2 lands.
+// (or trips TSAN); with the dedicated read handle it must always pass. Task 2
+// uses stage_image (thread-safe staging API) to avoid tree mutations.
 TEST(read_handle_survives_concurrent_appends)
 {
     const auto dir = fresh_dir("read_handle");
@@ -47,16 +46,12 @@ TEST(read_handle_survives_concurrent_appends)
 
     std::atomic<bool> stop{false};
     std::thread writer([&] {
-        // Appends via the write handle only (stage_image arrives in Task 2; at
-        // this point simulate the position churn with add_image on a scratch
-        // gallery — Task 2 will retarget this test to stage_image).
-        // Use a separate gallery ("scratch") to avoid tree mutations that would
-        // invalidate the node pointer.
-        (void)v.create_gallery("scratch");
+        // Use stage_image (thread-safe, no tree mutation) to append chunks while
+        // the main thread reads. Discard the staged nodes without attaching them.
         int i = 0;
         while (!stop.load()) {
-            (void)v.add_image("scratch", fake_jpeg(static_cast<uint8_t>(i % 250)),
-                              "w" + std::to_string(i) + ".jpg");
+            (void)vault::stage_image(v, fake_jpeg(static_cast<uint8_t>(i % 250)),
+                                     "s" + std::to_string(i) + ".jpg");
             ++i;
         }
     });

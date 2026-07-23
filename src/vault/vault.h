@@ -19,6 +19,8 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -48,9 +50,13 @@ enum class VaultResult {
     CryptoError,    // RNG / KDF failure
 };
 
-// Video chunk size (1 MiB plaintext split). Used by add_video; tests may pass a
-// smaller value to force multi-chunk paths with tiny fixtures.
+// Video chunk size (1 MiB plaintext split).
 inline constexpr uint32_t VIDEO_CHUNK_SIZE = 1u << 20;
+
+// Forward declare staging structures (full definitions in staging.h, which is included at EOF).
+// These are needed for friend declarations inside the Vault class.
+struct StagedThumb;
+struct StagedNode;
 
 enum class SearchScope { Images, Galleries, Both };
 
@@ -117,6 +123,19 @@ public:
     // (cpp:S1448 method cap). VideoSource's static factory open() is defined in
     // src/media/video_source.cpp.
     friend class ::media::VideoSource;
+
+    // Phase 50: thread-safe staging API (staging.h). Kept as friends to keep
+    // Vault under the cpp:S1448 method cap. StagedNode/StagedThumb are forward
+    // declared before the class definition.
+    friend StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
+                                  std::string_view filename,
+                                  const StagedThumb* precomputed);
+    friend StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
+                                  std::string_view filename,
+                                  uint32_t chunk_size);
+    friend VaultResult attach_staged(Vault& v, std::string_view gallery_path,
+                                     IndexNode&& node);
+    friend VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path);
 
     [[nodiscard]] bool is_unlocked() const noexcept { return unlocked_; }
 
@@ -297,6 +316,12 @@ private:
     // position with a main-thread read. Opened by create()/open(), closed by
     // reset(). Chunks are immutable once appended, so reads need no lock.
     std::FILE*                             read_fp_ = nullptr;
+    // Phase 50: serialises ALL writes to fp_ (chunk appends from stage_*,
+    // index slot writes from the commit lane / commit_index). unique_ptr keeps
+    // Vault movable. Held for one whole chunk per acquisition — never released
+    // mid-chunk (an index-blob append at EOF would interleave into the
+    // half-written chunk).
+    std::unique_ptr<std::mutex>            write_mutex_;
     Header                                 header_;
     bool                                   unlocked_ = false;
     crypto::SecureBuffer<crypto::KEY_SIZE> master_key_;
@@ -345,4 +370,7 @@ private:
 [[nodiscard]] VaultResult rename_node(Vault& v, std::string_view gallery_path,
                                       std::string_view old_name, std::string_view new_name);
 
-} // namespace vault
+}  // namespace vault
+
+// Phase 50: Include staging.h after Vault class is fully defined.
+#include "staging.h"
