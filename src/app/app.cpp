@@ -20,6 +20,7 @@
 #include "ui/favorites_images.h"
 #include "ui/gallery_grid.h"
 #include "ui/image_viewer.h"
+#include "ui/settings_overlay.h"
 #include "ui/tag_galleries.h"
 #include "ui/tag_images.h"
 #include "ui/tag_overview.h"
@@ -312,15 +313,40 @@ void App::dispatch_event(const SDL_Event& e)
         return;
     }
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F1) {
-        ui::toggle_help(help_);
+        ui::toggle_help(overlays_.help);
         return;
     }
-    if (help_.open) {
-        if (e.type == SDL_EVENT_KEY_DOWN)
-            ui::handle_help_key(help_, e.key.key);
-        else if (e.type == SDL_EVENT_MOUSE_WHEEL)
-            ui::handle_help_wheel(help_, e.wheel.y);
+    if (overlays_.help.open) {
+        if (e.type == SDL_EVENT_KEY_DOWN) {
+            ui::handle_help_key(overlays_.help, e.key.key);
+        } else if (e.type == SDL_EVENT_MOUSE_WHEEL) {
+            ui::handle_help_wheel(overlays_.help, e.wheel.y);
+        }
         return;   // swallow every event while the popup is open
+    }
+    // Settings is checked AFTER the help guard, and both are checked after the
+    // F1 toggle above. So F1 still opens help over an open settings panel, and
+    // while both are open the help popup — which draws on top — keeps the arrow
+    // and wheel events rather than losing them to the panel behind it.
+    if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F2) {
+        if (overlays_.settings.open) {
+            ui::close_settings(overlays_.settings, window_);
+        } else {
+            open_settings_overlay();
+        }
+        return;
+    }
+    // Check `open` ONCE, up front: handle_settings_event may close the overlay
+    // (Esc), and the event must still be swallowed on that same frame — otherwise
+    // the Esc leaks through to the screen below, which reads it as "go up a level".
+    if (overlays_.settings.open) {
+        if (bool commit = false;
+            ui::handle_settings_event(overlays_.settings, window_, e, commit) && commit &&
+            overlays_.settings.vault_unlocked && active_ &&
+            vault::set_vault_settings(*active_, overlays_.settings.draft) != vault::VaultResult::Ok) {
+            overlays_.settings.error = "Could not save settings";
+        }
+        return;   // the overlay swallows every event while open, like the help popup
     }
     if (screen_) screen_->handle_event(e);
 }
@@ -369,6 +395,15 @@ void App::capture_session_state()
     }
 }
 
+void App::open_settings_overlay()
+{
+    overlays_.settings.vault_unlocked = active_ && active_->is_unlocked();
+    overlays_.settings.draft = overlays_.settings.vault_unlocked ? vault::vault_settings(*active_)
+                                                                  : vault::VaultSettings{};
+    overlays_.settings.theme = gfx::active_theme_id();
+    ui::open_settings(overlays_.settings, ui::SettingsSection::Appearance);
+}
+
 bool App::apply_nav()
 {
     if (!screen_) return false;
@@ -379,9 +414,10 @@ bool App::apply_nav()
     // Part 2) — every other ToGallery source passes 0 as "no opinion" and
     // to_gallery() falls back to the remembered position for that path.
     const bool from_viewer = dynamic_cast<const ui::ImageViewer*>(screen_.get()) != nullptr;
-    // Every transition below except ToggleKeepUnlocked/Quit/None destroys the
+    // Every transition below except ToggleKeepUnlocked/ToSettings/Quit/None destroys the
     // current screen.
-    if (nav.kind != None && nav.kind != ToggleKeepUnlocked && nav.kind != Quit) {
+    if (nav.kind != None && nav.kind != ToggleKeepUnlocked && nav.kind != ToSettings &&
+        nav.kind != Quit) {
         capture_session_state();
         screen_->on_exit();
     }
@@ -407,6 +443,11 @@ bool App::apply_nav()
             session_.reset();                     // Phase 39 Part 2: fresh session on lock
             if (active_) { active_->lock(); active_.reset(); active_path_.clear(); }
             to_manager();
+            return true;
+        case ToSettings:
+            // Stays on the current screen: the overlay draws over it, so no
+            // on_exit()/screen swap — same shape as ToggleKeepUnlocked.
+            open_settings_overlay();
             return true;
         case ToggleKeepUnlocked:
             // Stays on the current screen: no on_exit()/screen swap, just flip the
@@ -449,9 +490,13 @@ void App::render_frame()
         screen_->render(r);
         if (active_ && should_show_badge(keep_unlocked_, badge_elapsed_, BADGE_WINDOW_SECS))
             draw_keep_unlocked_badge(r, font_, window_.width(), window_.height());
+        if (overlays_.settings.open) {
+            ui::draw_settings_overlay(r, font_, static_cast<float>(window_.width()),
+                                      static_cast<float>(window_.height()), overlays_.settings);
+        }
         ui::draw_help_popup(r, font_, static_cast<float>(window_.width()),
                             static_cast<float>(window_.height()),
-                            screen_->help_groups(), help_);
+                            screen_->help_groups(), overlays_.help);
     }
     window_.end_frame();
 

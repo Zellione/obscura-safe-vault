@@ -98,6 +98,31 @@ constexpr std::array<const char*, THEME_COUNT> SLUGS = {
     "refined-slate", "light", "high-contrast", "midnight",
 };
 
+
+// Tag swatches (Phase 49). Index → { on a dark background, on a light one }.
+// Hues are spread around the wheel and kept clear of FAVORITE gold and the
+// violet ACCENT so a chip never reads as a badge or a selection.
+struct TagSwatch { Color on_dark; Color on_light; const char* name; };
+
+constexpr std::array<TagSwatch, TAG_SWATCH_COUNT> TAG_SWATCHES = {
+    TagSwatch{{139, 124, 246, 255}, { 84,  62, 200, 255}, "Violet"},
+    TagSwatch{{ 79, 199, 192, 255}, { 20, 124, 118, 255}, "Teal"},
+    TagSwatch{{216, 165,  60, 255}, {150,  99,   6, 255}, "Amber"},
+    TagSwatch{{229, 123, 168, 255}, {176,  46, 106, 255}, "Pink"},
+    TagSwatch{{130, 200, 120, 255}, { 40, 124,  44, 255}, "Green"},
+    TagSwatch{{110, 168, 246, 255}, { 26,  92, 196, 255}, "Blue"},
+    TagSwatch{{232, 130, 106, 255}, {182,  56,  30, 255}, "Coral"},
+    TagSwatch{{178, 146, 232, 255}, {112,  70, 182, 255}, "Lilac"},
+    TagSwatch{{120, 206, 226, 255}, { 18, 118, 142, 255}, "Sky"},
+    TagSwatch{{212, 196, 108, 255}, {130, 114,  10, 255}, "Olive"},
+    TagSwatch{{240, 150,  90, 255}, {186,  84,  12, 255}, "Orange"},
+    TagSwatch{{150, 220, 180, 255}, { 26, 132,  90, 255}, "Mint"},
+    TagSwatch{{226, 140, 220, 255}, {158,  50, 152, 255}, "Magenta"},
+    TagSwatch{{164, 190, 118, 255}, { 94, 122,  26, 255}, "Moss"},
+    TagSwatch{{206, 160, 130, 255}, {140,  84,  50, 255}, "Clay"},
+    TagSwatch{{176, 186, 200, 255}, { 82,  92, 108, 255}, "Steel"},
+};
+
 [[nodiscard]] bool in_range(ThemeId id) noexcept
 {
     return std::to_underlying(id) < THEME_COUNT;
@@ -117,6 +142,14 @@ Theme& mutable_active() noexcept
 {
     static Theme active = PRESETS[0];
     return active;
+}
+
+
+// Relative luminance of the active window background, 0..1.
+[[nodiscard]] double bg_luma() noexcept
+{
+    const Color c = mutable_active().bg;
+    return (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) / 255.0;
 }
 
 ThemeId& active_id_slot() noexcept
@@ -158,6 +191,20 @@ void set_theme(ThemeId id) noexcept
     const ThemeId resolved = in_range(id) ? id : ThemeId::RefinedSlate;
     mutable_active()   = theme_preset(resolved);
     active_id_slot()   = resolved;
+}
+
+
+Color tag_swatch(int index) noexcept
+{
+    if (index < 0 || index >= TAG_SWATCH_COUNT) return theme::TEXT_DIM;
+    const TagSwatch& s = TAG_SWATCHES[static_cast<std::size_t>(index)];
+    return bg_luma() > 0.5 ? s.on_light : s.on_dark;
+}
+
+const char* tag_swatch_name(int index) noexcept
+{
+    if (index < 0 || index >= TAG_SWATCH_COUNT) return "Default";
+    return TAG_SWATCHES[static_cast<std::size_t>(index)].name;
 }
 
 namespace theme {

@@ -25,6 +25,12 @@ static std::vector<uint8_t> read_file(const char* path)
     return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
 }
 
+// Internal linkage: several test files each define their own `TempVault`
+// with a DIFFERENT layout. At namespace scope those are one-definition-rule
+// violations — the member functions are implicitly inline, so the linker keeps
+// a single copy and silently discards the rest.
+namespace {
+
 struct TempVault {
     fs::path path;
     explicit TempVault(const char* tag)
@@ -37,6 +43,8 @@ struct TempVault {
     ~TempVault() { std::error_code ec; fs::remove(path, ec); }
     std::string str() const { return path.string(); }
 };
+
+}  // namespace
 
 static std::vector<uint8_t> pattern(size_t n, uint8_t seed)
 {

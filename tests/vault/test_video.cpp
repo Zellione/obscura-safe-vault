@@ -31,6 +31,12 @@ namespace {
 static const crypto::KdfParams kTestKdf{.t_cost = 1, .m_cost_kib = 8, .parallelism = 1};
 
 // RAII temp path for a unique .osv file.
+// Internal linkage: several test files each define their own `TempVault`
+// with a DIFFERENT layout. At namespace scope those are one-definition-rule
+// violations — the member functions are implicitly inline, so the linker keeps
+// a single copy and silently discards the rest.
+namespace {
+
 struct TempVault {
     std::filesystem::path path;
     explicit TempVault(const char* tag)
@@ -48,6 +54,8 @@ struct TempVault {
     }
     std::string str() const { return path.string(); }
 };
+
+}  // namespace
 
 // Read a file into a vector.
 std::vector<uint8_t> read_file(const char* path)

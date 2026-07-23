@@ -59,7 +59,8 @@
 | 45 | Organization, security & fullscreen polish | ✅ | Rename extended to favorites/tag-overview/search-result screens, mass tag add/remove, clipboard copy for password/passphrase, fullscreen hides the thumbnail strip, bigger video seek-bar hit target, auto-lock-off badge fades after 10s. → [details](docs/roadmap/phase-45-organization-ux-polish.md) |
 | 46 | Mixed galleries (images + videos + sub-galleries together) | ✅ | Relax the leaf-only invariant so a gallery can hold any combination of media and sub-galleries, like a real folder. → [details](docs/roadmap/phase-46-mixed-galleries.md) |
 | 47 | Animated GIF support | ✅ | Animated GIFs animate in the viewer (Space pauses) and on the hovered grid/strip tile, and carry an "A" badge. FFmpeg gif decoder + a new `animated` index flag (`INDEX_VERSION` 7). → [details](docs/roadmap/phase-47-animated-gifs.md) |
-| 48 | Gallery detail panel | ✅ | Toggleable right-side panel (`D`; `Ctrl+D` in advanced search) showing name, type/codec, dimensions, size, date, own + inherited tags; recursive tally for galleries; aggregate summary for a multi-selection. No format change. → [details](docs/roadmap/phase-48-detail-panel.md) |
+| 48 | Gallery detail panel | ✅ | A toggleable right-edge panel (`D`, `Ctrl+D` on advanced search) showing the focused node's metadata — type/codec, dimensions, size, date, own + inherited tags — plus a recursive tally for galleries and an aggregate summary for multi-selections. → [details](docs/roadmap/phase-48-detail-panel.md) |
+| 49 | Colour-coded tag chips & per-vault settings | ✅ | Tags render as a coloured dot + bare name instead of `category:name`, on every tag surface. New global `F2` settings overlay (sidebar + pane) configures the per-vault category→colour mapping and a vault-wide default sort order; theme moves in from the deleted `C` picker. New vault-global settings block + explicit `Insertion` sort key (`INDEX_VERSION` 8). → [details](docs/roadmap/phase-49-tag-chips-settings.md) |
 
 ---
 
@@ -183,3 +184,12 @@ way forever.
 >   Image node, written after `thumb_length` (`INDEX_VERSION = 7`; v1–v6 blobs
 >   read as not animated and are healed lazily on first view). A byte other
 >   than 0/1 is rejected on deserialise, not clamped.
+> - **Phase 49 (Tag chips & per-vault settings):** ✅ shipped — a **vault-global
+>   settings block** serialised after the saved-searches block (`default_sort u8`,
+>   `tiles_show_tags u8`, then `u16 count` + per-entry `{ name, swatch u8 }` tag
+>   categories), bumping `INDEX_VERSION` to **8**; pre-v8 blobs read with the
+>   default sort `Insertion`, tile tags on, and the built-in category seed. The
+>   same bump re-reads a Gallery's `sort_key` byte 0 as `Default` ("follow the
+>   vault default") and adds `7 = Insertion` for raw import order, so existing
+>   galleries adopt the vault default with no migration. Out-of-range
+>   swatch/sort/flag bytes are rejected on deserialise, not clamped.

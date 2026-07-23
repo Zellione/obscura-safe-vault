@@ -32,9 +32,15 @@ Core files: `vault.*`, `header.*`, `index.*`, `chunk_store.*`, `byte_io.h`, `fil
 - `vault::read_thumb_span(v,offset,length,out)` — decrypt a thumb/poster chunk by raw span
   (gallery cover montages); InvalidArg if len 0, Locked, AuthFailed on tamper.
 - `vault::gallery_sort_key(v,path)` / `vault::set_gallery_sort(v,path,SortKey)` — persisted
-  via commit_index. `Vault::list` applies the target gallery's own sort_key before
-  returning, so every caller (grid, list view, viewer strip, slideshow) gets one order for
-  free. Pure ordering logic lives in `ui/gallery_sort.*` (see `mem:module/ui`).
+  via commit_index. `Vault::list` resolves the target gallery's stored sort_key against the
+  vault-wide default through `ui::effective_sort_key` before returning, so every caller (grid,
+  list view, viewer strip, slideshow) gets one order for free. Pure ordering logic lives in
+  `ui/gallery_sort.*` (see `mem:module/ui`).
+- `vault::vault_settings(v)` / `vault::set_vault_settings(v,VaultSettings)` (Phase 49) —
+  vault-global settings; the setter persists through the same crash-safe commit_index swap and
+  returns `Locked` on a locked vault. Held in `Vault::settings_`; `reset()` clears it and
+  `create()` seeds it. **Both move operations must carry `settings_`** — they originally
+  omitted it, silently dropping settings on a move (fixed, regression-tested).
 - `vault::rename_node(v,gallery_path,old_name,new_name)` — validates `is_safe_node_name` +
   no sibling collision, then a pure leaf-field edit (an IndexNode persists only its local
   name, never a path, so no cascade). Drives the `R` RenameDialog.
@@ -44,12 +50,22 @@ Core files: `vault.*`, `header.*`, `index.*`, `chunk_store.*`, `byte_io.h`, `fil
 
 ### index.* — the index tree
 - `IndexNode` carries `std::vector<std::string> tags` + `bool favorite` (gallery + image),
-  a `SortKey` u8 (meaningful only on Gallery nodes: Manual/NameAsc/NameDesc/DateAsc/DateDesc/
-  SizeAsc/SizeDesc; out-of-range byte rejected, not clamped), and Type::Video + VideoMeta
-  (multi-chunk list + poster).
-- `INDEX_VERSION=6`. Vault-global SavedSearch block after the root (name + opaque
-  `ui::AdvancedQuery` blob, `INDEX_MAX_SAVED_SEARCHES=4096`). `INDEX_MAX_TAGS=4096`.
-  Back-compat: v1–v5 read as empty tags / favorite=false / no saved searches / Manual sort.
+  a `SortKey` u8 (meaningful only on Gallery nodes: Default/NameAsc/NameDesc/DateAsc/DateDesc/
+  SizeAsc/SizeDesc/Insertion; out-of-range byte rejected, not clamped, bounded PER VERSION —
+  v6/v7 max 6, v8 max 7), and Type::Video + VideoMeta (multi-chunk list + poster).
+- `INDEX_VERSION=8`. Vault-global SavedSearch block after the root (name + opaque
+  `ui::AdvancedQuery` blob, `INDEX_MAX_SAVED_SEARCHES=4096`), then the Phase 49 vault-global
+  **settings block** — see `mem:vault_format` for its byte layout. `INDEX_MAX_TAGS=4096`.
+  Back-compat: v1–v5 read as empty tags / favorite=false / no saved searches; pre-v8 read with
+  `default_sort=Insertion`, tile tags on, and `VaultSettings::seeded()`.
+- Phase 49 types: `TagCategory{std::string name; uint8_t swatch;}` and
+  `VaultSettings{SortKey default_sort; bool tiles_show_tags; std::vector<TagCategory>
+  categories;}` with a static `seeded()` (8 nhentai-style categories on distinct swatches).
+  Caps `INDEX_MAX_TAG_CATEGORIES=256`, `INDEX_MAX_CATEGORY_BYTES=64`, `TAG_SWATCH_COUNT=16`.
+  `write_settings`/`read_settings` mirror the saved-searches pair — the writer CLAMPS, the
+  reader REJECTS. `serialize_index`/`deserialize_index` gained 4-arg forms; the 2- and 3-arg
+  ones delegate. **Any new call site must use the 4-arg form** — the fuzz harness's base blob
+  does, so category bytes are reachable by mutation.
 - Favorites: `Vault::toggle_favorite(node_path)` + flat whole-tree
   `list_favorite_images()`/`list_favorite_galleries()` -> `vector<SearchHit>`.
 - Tag API + scoped search: `set_tags`/`add_tag`/`remove_tag(node_path)`,

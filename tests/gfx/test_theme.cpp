@@ -100,3 +100,55 @@ TEST(set_theme_out_of_range_falls_back_to_default)
     gfx::set_theme(static_cast<gfx::ThemeId>(99));
     CHECK_TRUE(gfx::active_theme_id() == gfx::ThemeId::RefinedSlate);
 }
+
+
+TEST(tag_swatch_out_of_range_is_text_dim)
+{
+    const gfx::Color dim = gfx::theme::TEXT_DIM;
+    for (int bad : {-1, gfx::TAG_SWATCH_COUNT, 999}) {
+        const gfx::Color c = gfx::tag_swatch(bad);
+        CHECK_EQ(c.r, dim.r);
+        CHECK_EQ(c.g, dim.g);
+        CHECK_EQ(c.b, dim.b);
+    }
+}
+
+TEST(tag_swatch_every_index_is_named_and_opaque)
+{
+    for (int i = 0; i < gfx::TAG_SWATCH_COUNT; ++i) {
+        CHECK(gfx::tag_swatch_name(i) != nullptr);
+        CHECK(gfx::tag_swatch_name(i)[0] != '\0');
+        CHECK_EQ(gfx::tag_swatch(i).a, 255);
+    }
+}
+
+TEST(tag_swatch_follows_the_active_theme_background)
+{
+    gfx::set_theme(gfx::ThemeId::RefinedSlate);
+    const gfx::Color on_dark = gfx::tag_swatch(0);
+    gfx::set_theme(gfx::ThemeId::Light);
+    const gfx::Color on_light = gfx::tag_swatch(0);
+    gfx::set_theme(gfx::ThemeId::RefinedSlate);   // restore for other tests
+
+    // The same swatch index must not paint the same RGB on a dark and a light
+    // background — that is the whole point of the two-variant table.
+    CHECK(on_dark.r != on_light.r || on_dark.g != on_light.g || on_dark.b != on_light.b);
+}
+
+TEST(tag_swatch_is_legible_against_every_theme_background)
+{
+    // Crude relative-luminance separation check: a swatch that is nearly the
+    // same brightness as the background is unreadable as text.
+    auto luma = [](gfx::Color c) {
+        return (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) / 255.0;
+    };
+    for (int t = 0; t < gfx::THEME_COUNT; ++t) {
+        gfx::set_theme(static_cast<gfx::ThemeId>(t));
+        const double bg = luma(gfx::theme::BG);
+        for (int i = 0; i < gfx::TAG_SWATCH_COUNT; ++i) {
+            const double d = luma(gfx::tag_swatch(i)) - bg;
+            CHECK((d > 0.20 || d < -0.20));
+        }
+    }
+    gfx::set_theme(gfx::ThemeId::RefinedSlate);
+}

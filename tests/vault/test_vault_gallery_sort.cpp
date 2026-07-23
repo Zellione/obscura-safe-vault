@@ -27,6 +27,12 @@ static std::span<const uint8_t> bytes(const std::string& s)
     return {reinterpret_cast<const uint8_t*>(s.data()), s.size()};
 }
 
+// Internal linkage: several test files each define their own `TempVault`
+// with a DIFFERENT layout. At namespace scope those are one-definition-rule
+// violations — the member functions are implicitly inline, so the linker keeps
+// a single copy and silently discards the rest.
+namespace {
+
 struct TempVault {
     fs::path path;
     explicit TempVault(const char* tag)
@@ -45,6 +51,8 @@ struct TempVault {
     std::string str() const { return path.string(); }
 };
 
+}  // namespace
+
 static std::vector<uint8_t> pattern(size_t n, uint8_t seed)
 {
     std::vector<uint8_t> v(n);
@@ -62,7 +70,7 @@ static std::vector<std::string> names(const std::vector<const vault::IndexNode*>
 
 // --- tests ----------------------------------------------------------------
 
-TEST(gallery_sort_defaults_to_manual_on_a_fresh_gallery)
+TEST(gallery_sort_defaults_to_default_on_a_fresh_gallery)
 {
     TempVault tv("default");
 
@@ -70,8 +78,8 @@ TEST(gallery_sort_defaults_to_manual_on_a_fresh_gallery)
     REQUIRE(Vault::create(tv.str(), bytes("pw"), {}, kSortKdf, v) == VaultResult::Ok);
     REQUIRE(v.create_gallery("trip") == VaultResult::Ok);
 
-    CHECK_TRUE(vault::gallery_sort_key(v, "") == SortKey::Manual);
-    CHECK_TRUE(vault::gallery_sort_key(v, "trip") == SortKey::Manual);
+    CHECK_TRUE(vault::gallery_sort_key(v, "") == SortKey::Default);
+    CHECK_TRUE(vault::gallery_sort_key(v, "trip") == SortKey::Default);
 }
 
 TEST(gallery_sort_set_persists_across_lock_reopen)
@@ -140,7 +148,7 @@ TEST(gallery_sort_other_galleries_are_unaffected)
     REQUIRE(vault::set_gallery_sort(v, "sorted", SortKey::NameAsc) == VaultResult::Ok);
 
     CHECK(names(v.list("sorted")) == std::vector<std::string>({"a.jpg", "b.jpg"}));
-    // "untouched" keeps raw insertion order (Manual, the default).
+    // "untouched" keeps raw insertion order (Default, the default).
     CHECK(names(v.list("untouched")) == std::vector<std::string>({"b.jpg", "a.jpg"}));
 }
 
@@ -152,7 +160,7 @@ TEST(gallery_sort_set_unchanged_key_is_a_noop_ok)
     REQUIRE(Vault::create(tv.str(), bytes("pw"), {}, kSortKdf, v) == VaultResult::Ok);
     REQUIRE(v.create_gallery("g") == VaultResult::Ok);
 
-    CHECK_TRUE(vault::set_gallery_sort(v, "g", SortKey::Manual) == VaultResult::Ok);  // already Manual
+    CHECK_TRUE(vault::set_gallery_sort(v, "g", SortKey::Default) == VaultResult::Ok);  // already Default
 }
 
 TEST(gallery_sort_set_on_missing_path_returns_not_found)
@@ -162,7 +170,7 @@ TEST(gallery_sort_set_on_missing_path_returns_not_found)
     Vault v;
     REQUIRE(Vault::create(tv.str(), bytes("pw"), {}, kSortKdf, v) == VaultResult::Ok);
     CHECK_EQ(vault::set_gallery_sort(v, "nope", SortKey::NameAsc), VaultResult::NotFound);
-    CHECK_TRUE(vault::gallery_sort_key(v, "nope") == SortKey::Manual);  // missing path -> Manual, not a crash
+    CHECK_TRUE(vault::gallery_sort_key(v, "nope") == SortKey::Default);  // missing path -> Default, not a crash
 }
 
 TEST(gallery_sort_set_on_locked_vault_fails)

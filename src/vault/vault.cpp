@@ -335,7 +335,8 @@ Vault::Vault(Vault&& o) noexcept
       unlocked_(o.unlocked_),
       master_key_(std::move(o.master_key_)),
       root_(std::move(o.root_)),
-      saved_searches_(std::move(o.saved_searches_))
+      saved_searches_(std::move(o.saved_searches_)),
+      settings_(std::move(o.settings_))
 {
     o.fp_       = nullptr;
     o.unlocked_ = false;
@@ -352,6 +353,7 @@ Vault& Vault::operator=(Vault&& o) noexcept
         master_key_ = std::move(o.master_key_);
         root_       = std::move(o.root_);
         saved_searches_ = std::move(o.saved_searches_);
+        settings_   = std::move(o.settings_);
         o.fp_       = nullptr;
         o.unlocked_ = false;
     }
@@ -372,6 +374,7 @@ void Vault::reset() noexcept
     if (fp_) { std::fclose(fp_); fp_ = nullptr; }
     path_.clear();
     header_ = Header{};
+    settings_ = VaultSettings{};
 }
 
 VaultResult Vault::create(const std::string&       path,
@@ -423,6 +426,7 @@ VaultResult Vault::create(const std::string&       path,
     out.master_key_  = std::move(master);
     out.root_        = IndexNode::gallery("");
     out.unlocked_    = true;
+    out.settings_    = VaultSettings::seeded();
 
     // Write the initial (empty) index + a valid header via the crash-safe path.
     if (const VaultResult r = out.commit_index(); r != VaultResult::Ok) { out.reset(); return r; }
@@ -456,15 +460,58 @@ VaultResult Vault::open(const std::string& path, Vault& out)
     return VaultResult::Ok;
 }
 
+namespace {
+
+// Attempt to load and deserialize the index from a vault slot.
+[[nodiscard]] bool try_load_slot(std::FILE* fp, const Header& header,
+                                 std::span<const uint8_t, crypto::KEY_SIZE> master_key, uint8_t slot_idx,
+                                 IndexNode& root_out,
+                                 std::vector<SavedSearch>& searches_out,
+                                 VaultSettings& settings_out)
+{
+    const IndexSlot& s = header.slot[slot_idx];
+    if (s.length == 0) {
+        return false;
+    }
+    std::vector<uint8_t> on_disk;
+    if (ChunkStore store(fp, master_key, framed_chunks(header)); !store.read_raw(s.offset, s.length, on_disk)) {
+        return false;
+    }
+    std::vector<uint8_t> blob;
+    if (!crypto::open(master_key, s.nonce, on_disk, blob)) {
+        return false;
+    }
+    if (framed_chunks(header)) {
+        std::vector<uint8_t> plain;
+        if (!chunk_codec::decode_frame(blob, plain)) {
+            return false;
+        }
+        blob = std::move(plain);
+    }
+    IndexNode tmp;
+    std::vector<SavedSearch> tmp_searches;
+    VaultSettings tmp_settings;
+    if (!deserialize_index(blob, tmp, tmp_searches, tmp_settings)) {
+        return false;
+    }
+    root_out = std::move(tmp);
+    searches_out = std::move(tmp_searches);
+    settings_out = std::move(tmp_settings);
+    return true;
+}
+
+}  // namespace
+
 VaultResult Vault::unlock(std::span<const uint8_t> password,
                           std::span<const uint8_t> keyfile)
 {
-    if (fp_ == nullptr) return VaultResult::IoError;
-    if (unlocked_)      return VaultResult::Ok;
+    using enum VaultResult;
+    if (fp_ == nullptr) { return IoError; }
+    if (unlocked_)      { return Ok; }
 
     crypto::SecureBuffer<crypto::KEY_SIZE> kek;
     if (!crypto::derive_key(password, keyfile, header_.salt, header_.kdf, kek)) {
-        return VaultResult::CryptoError;
+        return CryptoError;
     }
 
     // Unwrap the master key straight into mlock'd memory.
@@ -473,38 +520,22 @@ VaultResult Vault::unlock(std::span<const uint8_t> password,
     std::memcpy(sealed.data() + crypto::KEY_SIZE, header_.mk_tag.data(), crypto::TAG_SIZE);
     if (!crypto::open_to(kek.as_span(), header_.mk_nonce, sealed, master_key_.span())) {
         master_key_.wipe();
-        return VaultResult::AuthFailed;  // wrong password / keyfile / tampered wrap
+        return AuthFailed;  // wrong password / keyfile / tampered wrap
     }
 
     // Load the index from the active slot, falling back to the other slot if the
     // active one is unreadable (crash during a swap left it truncated/corrupt).
-    auto load_slot = [&](uint8_t idx) {
-        const IndexSlot& s = header_.slot[idx];
-        if (s.length == 0) return false;
-        std::vector<uint8_t> on_disk;
-        if (ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_)); !store.read_raw(s.offset, s.length, on_disk)) return false;
-        std::vector<uint8_t> blob;
-        if (!crypto::open(master_key_.as_span(), s.nonce, on_disk, blob)) return false;
-        if (framed_chunks(header_)) {
-            std::vector<uint8_t> plain;
-            if (!chunk_codec::decode_frame(blob, plain)) return false;
-            blob = std::move(plain);
-        }
-        IndexNode tmp;
-        std::vector<SavedSearch> tmp_searches;
-        if (!deserialize_index(blob, tmp, tmp_searches)) return false;
-        root_           = std::move(tmp);
-        saved_searches_ = std::move(tmp_searches);
-        return true;
-    };
-
-    if (const uint8_t active = header_.active_slot == 0 ? 0 : 1; !load_slot(active) && !load_slot(active == 0 ? 1 : 0)) {
+    if (const uint8_t active = header_.active_slot == 0 ? 0 : 1;
+        !try_load_slot(fp_, header_, master_key_.as_span(), active, root_,
+                       saved_searches_, settings_) &&
+        !try_load_slot(fp_, header_, master_key_.as_span(), active == 0 ? 1 : 0, root_,
+                       saved_searches_, settings_)) {
         master_key_.wipe();
-        return VaultResult::BadFormat;
+        return BadFormat;
     }
 
     unlocked_ = true;
-    return VaultResult::Ok;
+    return Ok;
 }
 
 VaultResult Vault::change_password(std::span<const uint8_t> old_password,
@@ -915,13 +946,13 @@ std::vector<const IndexNode*> Vault::list(std::string_view gallery_path) const
     if (!g) return out;
     out.reserve(g->children.size());
     for (const auto& c : g->children) out.push_back(&c);
-    return ui::sort_children(out, g->sort_key);
+    return ui::sort_children(out, ui::effective_sort_key(g->sort_key, settings_.default_sort));
 }
 
 SortKey gallery_sort_key(const Vault& v, std::string_view gallery_path)
 {
     const IndexNode* g = v.find_gallery(gallery_path);
-    return g ? g->sort_key : SortKey::Manual;
+    return g ? g->sort_key : SortKey::Default;
 }
 
 VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey key)
@@ -935,6 +966,19 @@ VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey ke
     if (g->sort_key == key) return Ok;
 
     g->sort_key = key;
+    return v.commit_index();
+}
+
+const VaultSettings& vault_settings(const Vault& v) noexcept
+{
+    return v.settings_;
+}
+
+VaultResult set_vault_settings(Vault& v, VaultSettings s)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+    v.settings_ = std::move(s);
     return v.commit_index();
 }
 
@@ -1274,9 +1318,9 @@ VaultResult Vault::compact(OpProgress* progress)
     if (copy_err != Ok) return fail(copy_err);
 
     // Fresh sealed index into slot A; slot B starts empty in the new file.
-    // Saved searches carry over unchanged (vault-global metadata).
+    // Saved searches and settings carry over unchanged (vault-global metadata).
     std::vector<uint8_t> blob;
-    serialize_index(new_root, saved_searches_, blob);
+    serialize_index(new_root, saved_searches_, settings_, blob);
 
     // Phase 26: framed vaults frame the index blob (mirrors commit_index —
     // unlock de-frames unconditionally when the flag is set, and slot B is
@@ -1377,6 +1421,7 @@ VaultResult Vault::commit_index()
         .master_key_   = master_key_,
         .root_         = root_,
         .saved_searches_ = saved_searches_,
+        .settings_     = settings_,
     };
     return index_io::commit_index(ctx);
 }

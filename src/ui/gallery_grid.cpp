@@ -25,6 +25,7 @@
 #include "ui/grid_layout.h"
 #include "ui/input.h"
 #include "ui/progress_modal.h"
+#include "ui/tag_chip.h"
 #include "ui/tag_inherit.h"
 #include "ui/tag_list_parse.h"
 #include "ui/tile_thumb.h"
@@ -202,7 +203,7 @@ void rebuild_detail(GalleryGrid& g)
     const vault::IndexNode& node = *g.children_[static_cast<size_t>(sel_idx)];
     const std::string node_path =
         g.nav_.path().empty() ? node.name : g.nav_.path() + "/" + node.name;
-    g.detail_.content = build_node_details(node, inherited_tags(g.vault_, node_path));
+    g.detail_.content = build_node_details(node, inherited_tags(g.vault_, node_path), vault::vault_settings(g.vault_).default_sort);
 }
 
 GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
@@ -1103,11 +1104,11 @@ struct FooterStatus {
 // Build the breadcrumb line, appending the active sort indicator once it's
 // non-Manual (Phase 37) — extracted (like draw_footer_status) to keep
 // render()'s cognitive complexity under the cpp:S3776 limit.
-std::string breadcrumb_text(const NavModel& nav, vault::SortKey sort_key)
+std::string breadcrumb_text(const NavModel& nav, vault::SortKey sort_key, vault::SortKey vault_default)
 {
     std::string crumb = "/";
     for (const auto& s : nav.segments()) { crumb += s; crumb += '/'; }
-    if (const auto label = ui::sort_key_label(sort_key); !label.empty())
+    if (const auto label = ui::sort_key_label(sort_key, vault_default); !label.empty())
         crumb += "   Sort: " + label;
     return crumb;
 }
@@ -1348,7 +1349,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     // but the hairline rule marks where the fixed chrome ends and scrolling begins.
     draw_chrome_band(r, bands.header, BG, /*rule_at_bottom*/ true);
 
-    const std::string crumb = breadcrumb_text(nav_, vault::gallery_sort_key(vault_, nav_.path()));
+    const std::string crumb = breadcrumb_text(nav_, vault::gallery_sort_key(vault_, nav_.path()), vault::vault_settings(vault_).default_sort);
     r.draw_text(font_, OX, 40, fit_name(crumb, cW - 2 * OX), TEXT_DIM);
     r.draw_text(font_, OX, 90, "[F1] Help", TEXT_FAINT);
 
@@ -1377,7 +1378,8 @@ void GalleryGrid::render(gfx::Renderer& r)
     if (const float pw = detail_panel_width(detail_.panel.open, W);
         pw > 0.0f) {
         const SDL_FRect panel{W - pw, 0.0f, pw, H};
-        detail_.content_h = draw_detail_panel(r, font_, panel, detail_.content, detail_.panel.scroll);
+        detail_.content_h = draw_detail_panel(r, font_, panel, detail_.content, detail_.panel.scroll,
+                                              vault::vault_settings(vault_).categories);
         detail_.panel.scroll = ui::clamp_scroll(detail_.panel.scroll, detail_.content_h, H);
     }
 
@@ -1483,10 +1485,54 @@ void GalleryGrid::render(gfx::Renderer& r)
     }
 }
 
+namespace {
+
+// Draw badges (export-selection, favorite, animated) on a tile.
+void draw_tile_badges(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& cellr, float cell,
+                      bool selected, const vault::IndexNode* n)
+{
+    using namespace gfx::theme;
+
+    // Export-selection badge: a small accent square in the top-left corner.
+    if (selected) {
+        const SDL_FRect badge{.x = cellr.x + 8, .y = cellr.y + 8, .w = 18, .h = 18};
+        r.draw_round_rect(badge, RADIUS_SMALL, ACCENT);
+        r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
+    }
+
+    // Favorite badge: a small gold square in the top-right corner.
+    if (n->favorite) {
+        const SDL_FRect badge{.x = cellr.x + cell - 8 - 18, .y = cellr.y + 8, .w = 18, .h = 18};
+        r.draw_round_rect(badge, RADIUS_SMALL, FAVORITE);
+        r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
+    }
+
+    // Animated badge: a small square for animated GIFs, positioned to the left
+    // of the favorite badge (or in its place if no favorite).
+    if (tile_shows_animated_badge(*n)) {
+        const float x_shift = n->favorite ? -(18.0f + 6.0f) : 0.0f;
+        draw_animated_badge(r, font, cellr, 18.0f, x_shift);
+    }
+}
+
+}  // namespace
+
 void GalleryGrid::render_grid(gfx::Renderer& r, float W, float bottom)
 {
     using namespace gfx::theme;
     const float cell = cell_size_for(view_);
+    // Per-gallery, not per-tile: a uniform reservation is what stops rows going
+    // ragged. Recomputed each frame rather than cached, so toggling the setting
+    // or re-tagging a child can never leave a stale reservation behind. Only the
+    // two large densities carry a chip line — the ~28 px font needs a full
+    // CHIP_LINE_H of clear space below the label, which a GridS/GridM cell cannot
+    // spare without swallowing the thumbnail.
+    const bool  wide_tiles = view_ == GalleryView::GridL || view_ == GalleryView::GridXL;
+    const auto& settings   = vault::vault_settings(vault_);
+    const float chip_h     = (wide_tiles && settings.tiles_show_tags && any_chips_to_show(children_))
+                                 ? CHIP_LINE_H
+                                 : 0.0f;
+    const auto& cats       = settings.categories;
     cols_ = grid_columns(W - 2 * OX, cell, GAP);
     const auto [first_idx, last_idx] = grid_visible_range(
         scroll_, cell, GAP, OY, bottom, cols_, static_cast<int>(children_.size()));
@@ -1508,9 +1554,13 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float bottom)
         r.draw_round_rect(cellr, RADIUS, sel ? SURFACE_HI : SURFACE);
         r.draw_round_rect(cellr, RADIUS, sel ? ACCENT : BORDER, /*filled*/ false);
 
-        // Leave a 12px gap below the label so it never touches the tile border.
-        const float ph      = font_.pixel_height();
-        const float label_y = cellr.y + cell - ph - 12.0f;
+        // Leave a 12px gap below the label so it never touches the tile border,
+        // and a LABEL_CHIP_GAP of breathing room between the name and the chip
+        // line (only reserved when a chip line is actually drawn).
+        constexpr float LABEL_CHIP_GAP = 10.0f;
+        const float ph        = font_.pixel_height();
+        const float label_gap = chip_h > 0.0f ? LABEL_CHIP_GAP : 0.0f;
+        const float label_y   = cellr.y + cell - ph - 12.0f - chip_h - label_gap;
         const SDL_FRect thumb_rect{cellr.x + 6, cellr.y + 6,
                                    cell - 12, label_y - cellr.y - 12.0f};
 
@@ -1523,26 +1573,17 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float bottom)
 
         r.draw_text(font_, cellr.x + 8, label_y, fit_name(n->name, cell - 16), TEXT);
 
-        // Export-selection badge: a small accent square in the top-left corner.
-        if (sel_.contains(i)) {
-            const SDL_FRect badge{cellr.x + 8, cellr.y + 8, 18, 18};
-            r.draw_round_rect(badge, RADIUS_SMALL, ACCENT);
-            r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
+        if (chip_h > 0.0f) {
+            // Own tags only: inherited tags are identical across every tile in
+            // this gallery, so they would be pure noise here. The chip sits in a
+            // CHIP_LINE_H box directly below the label, its content centred so the
+            // ~28 px ink clears the label's baseline instead of overlapping it.
+            draw_tag_chips(r, font_, cellr.x + 8,
+                           label_y + ph + label_gap + (chip_h - CHIP_ROW_H) * 0.5f,
+                           cell - 16, n->tags, cats);
         }
 
-        // Favorite badge: a small gold square in the top-right corner.
-        if (n->favorite) {
-            const SDL_FRect badge{cellr.x + cell - 8 - 18, cellr.y + 8, 18, 18};
-            r.draw_round_rect(badge, RADIUS_SMALL, FAVORITE);
-            r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
-        }
-
-        // Animated badge: a small square for animated GIFs, positioned to the left
-        // of the favorite badge (or in its place if no favorite).
-        if (tile_shows_animated_badge(*n)) {
-            const float x_shift = n->favorite ? -(18.0f + 6.0f) : 0.0f;
-            draw_animated_badge(r, font_, cellr, 18.0f, x_shift);
-        }
+        draw_tile_badges(r, font_, cellr, cell, sel_.contains(i), n);
     }
     SDL_SetRenderClipRect(r.sdl(), nullptr);
 }
@@ -1596,6 +1637,12 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float bottom)
     const float type_x = size_x + COL_SIZE;
     const float date_x = type_x + COL_TYPE;
 
+    const auto& settings = vault::vault_settings(vault_);
+    const float chip_h   = (settings.tiles_show_tags && any_chips_to_show(children_))
+                               ? CHIP_ROW_H
+                               : 0.0f;
+    const auto& cats     = settings.categories;
+
     // Column header + separator (fixed, not scrolled).
     const float hy = font_.text_top_for_center(OY + (LIST_HEADER - 6) * 0.5f);
     r.draw_text(font_, OX, hy, "NAME", TEXT_FAINT);
@@ -1643,8 +1690,13 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float bottom)
 
         const float ty = font_.text_top_for_center(row.y + row.h * 0.5f);  // vertically centred
         const float nx = thumb.x + thumb.w + 12;
-        r.draw_text(font_, nx, ty, fit_name(n->name, dims_x - nx - 10),
-                    sel ? TEXT : TEXT_DIM);
+        const std::string name = fit_name(n->name, dims_x - nx - 10);
+        r.draw_text(font_, nx, ty, name, sel ? TEXT : TEXT_DIM);
+        if (chip_h > 0.0f) {
+            const float chips_x = nx + static_cast<float>(font_.measure(name)) + CHIP_SPACING;
+            draw_tag_chips(r, font_, chips_x, row.y + (row.h - CHIP_ROW_H) * 0.5f,
+                           dims_x - 10 - chips_x, n->tags, cats);
+        }
 
         // Draw metadata columns for this row (galleries/videos/images have different displays).
         const ListRowMetaContext meta_ctx{r, font_, dims_x, size_x, type_x, date_x, ty};

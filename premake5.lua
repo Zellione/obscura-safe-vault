@@ -506,7 +506,9 @@ project "osv_tests"
         "src/ui/progress_modal.cpp",
         "src/ui/tag_list_parse.cpp",
         "src/ui/tag_inherit.cpp",
+        "src/ui/tag_category.cpp",
         "src/ui/tag_suggest.cpp",
+        "src/ui/tag_chip.cpp",
         "src/ui/tag_overview_model.cpp",
         "src/ui/slideshow_model.cpp",
         "src/ui/playback_model.cpp",
@@ -519,6 +521,7 @@ project "osv_tests"
         "src/ui/gif_playback.cpp",
         "src/ui/gif_repair.cpp",
         "src/ui/help_popup.cpp",
+        "src/ui/settings_model.cpp",
         "src/ui/tile_thumb.cpp",
         "src/ui/video_repair.cpp",
     }

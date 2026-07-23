@@ -1,5 +1,6 @@
 #include "test_framework.h"
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -538,7 +539,7 @@ TEST(index_gallery_sort_key_roundtrips)
     REQUIRE(deserialize_index(blob, out));
     REQUIRE(out.children.size() == 2);
     CHECK_EQ(out.children[0].sort_key, SortKey::NameDesc);
-    CHECK_EQ(out.children[1].sort_key, SortKey::Manual);
+    CHECK_EQ(out.children[1].sort_key, SortKey::Default);
 }
 
 TEST(index_deserialize_v5_blob_has_manual_sort_key)
@@ -559,7 +560,7 @@ TEST(index_deserialize_v5_blob_has_manual_sort_key)
     IndexNode out;
     std::vector<SavedSearch> back;
     REQUIRE(deserialize_index(v5_blob, out, back));
-    CHECK_EQ(out.sort_key, SortKey::Manual);
+    CHECK_EQ(out.sort_key, SortKey::Default);
 }
 
 TEST(index_deserialize_rejects_out_of_range_sort_key)
@@ -605,13 +606,13 @@ TEST(index_animated_flag_round_trips)
     CHECK(!out.children[1].meta.animated);
 }
 
-TEST(index_version_is_seven)
+TEST(index_version_is_eight)
 {
     IndexNode root = IndexNode::gallery("root");
     std::vector<uint8_t> blob;
     vault::serialize_index(root, blob);
     REQUIRE(!blob.empty());
-    CHECK_EQ(blob[0], uint8_t{7});
+    CHECK_EQ(blob[0], uint8_t{8});
 }
 
 TEST(index_v6_blob_reads_animated_as_false)
@@ -671,4 +672,208 @@ TEST(index_rejects_out_of_range_animated_byte)
 
     IndexNode out;
     CHECK(!vault::deserialize_index(blob, out));
+}
+
+TEST(index_v8_accepts_insertion_sort_key)
+{
+    using namespace vault;
+    IndexNode root = IndexNode::gallery("");
+    IndexNode sub  = IndexNode::gallery("comics");
+    sub.sort_key = SortKey::Insertion;
+    root.children.push_back(std::move(sub));
+
+    std::vector<uint8_t> blob;
+    serialize_index(root, blob);
+    CHECK_EQ(blob[0], INDEX_VERSION);
+    CHECK_EQ(blob[0], 8);
+
+    IndexNode out;
+    CHECK(deserialize_index(blob, out));
+    REQUIRE(out.children.size() == 1);
+    CHECK(out.children[0].sort_key == SortKey::Insertion);
+}
+
+TEST(index_v8_rejects_out_of_range_sort_key)
+{
+    using namespace vault;
+    IndexNode root = IndexNode::gallery("");
+    std::vector<uint8_t> blob;
+    serialize_index(root, blob);
+
+    // Byte layout: [0]=version, [1]=type, [2..3]=name_len(0), [4..5]=tag_count(0),
+    // [6]=favorite, [7]=sort_key.
+    CHECK_EQ(blob[7], 0);
+    blob[7] = 8;   // one past Insertion
+
+    IndexNode out;
+    CHECK(!deserialize_index(blob, out));
+}
+
+TEST(index_settings_round_trip)
+{
+    IndexNode root = IndexNode::gallery("");
+    vault::VaultSettings s;
+    s.default_sort    = vault::SortKey::NameAsc;
+    s.tiles_show_tags = false;
+    s.categories = {{"artist", 3}, {"parody", 7}};
+
+    std::vector<uint8_t> blob;
+    vault::serialize_index(root, {}, s, blob);
+
+    IndexNode out;
+    std::vector<vault::SavedSearch> searches;
+    vault::VaultSettings got;
+    CHECK(vault::deserialize_index(blob, out, searches, got));
+    CHECK(got.default_sort == vault::SortKey::NameAsc);
+    CHECK(!got.tiles_show_tags);
+    REQUIRE(got.categories.size() == 2);
+    CHECK(got.categories[0].name == "artist");
+    CHECK_EQ(got.categories[0].swatch, 3);
+    CHECK(got.categories[1].name == "parody");
+    CHECK_EQ(got.categories[1].swatch, 7);
+}
+
+TEST(index_settings_empty_category_list_round_trips)
+{
+    // An empty list is a legitimate saved state and must NOT be re-seeded.
+    IndexNode root = IndexNode::gallery("");
+    vault::VaultSettings s;
+    s.categories.clear();
+
+    std::vector<uint8_t> blob;
+    vault::serialize_index(root, {}, s, blob);
+
+    IndexNode out;
+    std::vector<vault::SavedSearch> searches;
+    vault::VaultSettings got;
+    CHECK(vault::deserialize_index(blob, out, searches, got));
+    CHECK(got.categories.empty());
+}
+
+TEST(index_settings_dedupes_categories_case_insensitively)
+{
+    IndexNode root = IndexNode::gallery("");
+    vault::VaultSettings s;
+    s.categories = {{"Artist", 1}, {"artist", 9}, {"parody", 2}};
+
+    std::vector<uint8_t> blob;
+    vault::serialize_index(root, {}, s, blob);
+
+    IndexNode out;
+    std::vector<vault::SavedSearch> searches;
+    vault::VaultSettings got;
+    CHECK(vault::deserialize_index(blob, out, searches, got));
+    REQUIRE(got.categories.size() == 2);
+    CHECK(got.categories[0].name == "Artist");   // first casing wins
+    CHECK_EQ(got.categories[0].swatch, 1);
+    CHECK(got.categories[1].name == "parody");
+}
+
+TEST(index_settings_rejects_out_of_range_swatch)
+{
+    IndexNode root = IndexNode::gallery("");
+    vault::VaultSettings s;
+    s.categories = {{"artist", 3}};
+
+    std::vector<uint8_t> blob;
+    vault::serialize_index(root, {}, s, blob);
+    blob.back() = vault::TAG_SWATCH_COUNT;   // swatch is the last byte written
+
+    IndexNode out;
+    std::vector<vault::SavedSearch> searches;
+    vault::VaultSettings got;
+    CHECK(!vault::deserialize_index(blob, out, searches, got));
+}
+
+TEST(index_settings_rejects_bad_tiles_flag)
+{
+    IndexNode root = IndexNode::gallery("");
+    std::vector<uint8_t> blob;
+    vault::serialize_index(root, {}, vault::VaultSettings{}, blob);
+
+    // The settings block is the tail: default_sort, tiles_show_tags, cat_count(u16).
+    const size_t tiles_at = blob.size() - 3;
+    CHECK_EQ(blob[tiles_at], 1);
+    blob[tiles_at] = 2;
+
+    IndexNode out;
+    std::vector<vault::SavedSearch> searches;
+    vault::VaultSettings got;
+    CHECK(!vault::deserialize_index(blob, out, searches, got));
+}
+
+TEST(index_settings_rejects_bad_default_sort)
+{
+    IndexNode root = IndexNode::gallery("");
+    std::vector<uint8_t> blob;
+    vault::serialize_index(root, {}, vault::VaultSettings{}, blob);
+
+    blob[blob.size() - 4] = 9;   // default_sort byte, one past Insertion
+
+    IndexNode out;
+    std::vector<vault::SavedSearch> searches;
+    vault::VaultSettings got;
+    CHECK(!vault::deserialize_index(blob, out, searches, got));
+}
+
+TEST(index_settings_rejects_over_long_category_name)
+{
+    IndexNode root = IndexNode::gallery("");
+    vault::VaultSettings s;
+    s.categories = {{std::string(vault::INDEX_MAX_CATEGORY_BYTES + 1, 'a'), 0}};
+
+    std::vector<uint8_t> blob;
+    vault::serialize_index(root, {}, s, blob);   // writer clamps to the cap
+
+    IndexNode out;
+    std::vector<vault::SavedSearch> searches;
+    vault::VaultSettings got;
+    CHECK(vault::deserialize_index(blob, out, searches, got));
+    REQUIRE(got.categories.size() == 1);
+    CHECK_EQ(got.categories[0].name.size(), vault::INDEX_MAX_CATEGORY_BYTES);
+
+    // A hand-forged blob declaring a longer name is rejected outright.
+    std::vector<uint8_t> forged = blob;
+    const size_t name_len_at = forged.size() - 1 - vault::INDEX_MAX_CATEGORY_BYTES - 2;
+    forged[name_len_at]     = 0xFF;
+    forged[name_len_at + 1] = 0x00;
+    IndexNode out2;
+    std::vector<vault::SavedSearch> s2;
+    vault::VaultSettings got2;
+    CHECK(!vault::deserialize_index(forged, out2, s2, got2));
+}
+
+TEST(index_pre_v8_blob_reads_seeded_settings)
+{
+    // A v7 blob: same tree, version byte forced back to 7 and the settings
+    // block stripped. Pre-v8 vaults must come back seeded, sorted Insertion.
+    IndexNode root = IndexNode::gallery("");
+    std::vector<uint8_t> v8;
+    vault::serialize_index(root, {}, vault::VaultSettings{}, v8);
+
+    std::vector<uint8_t> v7(v8.begin(), v8.end() - 4);   // drop the settings block
+    v7[0] = 7;
+
+    IndexNode out;
+    std::vector<vault::SavedSearch> searches;
+    vault::VaultSettings got;
+    CHECK(vault::deserialize_index(v7, out, searches, got));
+    CHECK(got.default_sort == vault::SortKey::Insertion);
+    CHECK(got.tiles_show_tags);
+    CHECK(got.categories == vault::VaultSettings::seeded().categories);
+}
+
+TEST(index_seeded_settings_are_eight_distinct_swatches)
+{
+    const auto s = vault::VaultSettings::seeded();
+    REQUIRE(s.categories.size() == 8);
+    CHECK(s.default_sort == vault::SortKey::Insertion);
+    CHECK(s.tiles_show_tags);
+    std::vector<uint8_t> swatches;
+    for (const auto& c : s.categories) {
+        CHECK(c.swatch < vault::TAG_SWATCH_COUNT);
+        swatches.push_back(c.swatch);
+    }
+    std::ranges::sort(swatches);
+    CHECK(std::ranges::adjacent_find(swatches) == swatches.end());   // all distinct
 }

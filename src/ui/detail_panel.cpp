@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <format>
+#include <span>
 
 #include "gfx/renderer.h"
 #include "gfx/text.h"
 #include "gfx/theme.h"
+#include "ui/tag_chip.h"
 #include "ui/widgets.h"   // fit_text
 
 namespace ui {
@@ -35,6 +37,24 @@ float line(const LineCtx& ctx, float y, float height, std::string_view text, gfx
     return y + height;
 }
 
+// Draw a single bullet; return the new y position.
+float draw_bullet(const LineCtx& ctx, float y, bool is_tag, const std::string& bullet,
+                  std::span<const vault::TagCategory> categories)
+{
+    if (is_tag) {
+        // A chip line reserves a FULL text line (CHIP_LINE_H): the ~28 px glyph
+        // ink would otherwise bleed into the row above and below. The content is
+        // centred within that box, matching the rhythm of the text rows around it.
+        if (y + CHIP_LINE_H > ctx.rect.y && y < ctx.rect.y + ctx.rect.h) {
+            draw_tag_chips(ctx.r, ctx.font, ctx.x, y + (CHIP_LINE_H - CHIP_ROW_H) * 0.5f,
+                          ctx.rect.w - (2.0f * PAD), std::span(&bullet, 1), categories);
+        }
+        return y + CHIP_LINE_H;
+    }
+    // Draw regular text bullet.
+    return line(ctx, y, ROW_H, std::format("• {}", bullet), gfx::theme::TEXT_DIM);
+}
+
 }  // namespace
 
 float detail_panel_width(bool open, float window_width) noexcept
@@ -49,7 +69,8 @@ float detail_panel_width(bool open, float window_width) noexcept
 }
 
 float draw_detail_panel(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& rect,
-                        const DetailContent& content, float scroll)
+                        const DetailContent& content, float scroll,
+                        std::span<const vault::TagCategory> categories)
 {
     using namespace gfx::theme;
 
@@ -60,7 +81,7 @@ float draw_detail_panel(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect&
     float       y = rect.y + PAD - scroll;
     const float start_y = y;
 
-    LineCtx ctx{r, font, rect, x};
+    LineCtx ctx{.r = r, .font = font, .rect = rect, .x = x};
 
     y = line(ctx, y, HEADING_H, content.heading, TEXT);
     if (!content.subheading.empty()) {
@@ -70,14 +91,17 @@ float draw_detail_panel(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect&
     for (const auto& s : content.sections) {
         y += SECTION_GAP;
         if (!s.title.empty()) {
-            y = line(ctx, y, TITLE_H, s.title, TEXT_FAINT);
+            // A tag section's title reserves a full line so the first chip's ink
+            // clears the title's descenders; metadata titles keep their tighter
+            // TITLE_H so existing sections look unchanged.
+            y = line(ctx, y, s.is_tags ? CHIP_LINE_H : TITLE_H, s.title, TEXT_FAINT);
         }
         for (const auto& row : s.rows) {
             y = line(ctx, y, ROW_H,
                      std::format("{}  {}", row.label, row.value), TEXT_DIM);
         }
         for (const auto& b : s.bullets) {
-            y = line(ctx, y, ROW_H, std::format("• {}", b), TEXT_DIM);
+            y = draw_bullet(ctx, y, s.is_tags, b, categories);
         }
     }
     return (y - start_y) + PAD;

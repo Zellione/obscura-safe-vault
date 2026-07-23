@@ -97,16 +97,22 @@ struct VideoMeta {
 };
 
 // Per-gallery children display order (Phase 37). Persisted on Gallery nodes
-// only — Image/Video nodes carry the field too (serialized uniformly, see
-// index.cpp) but never read it.
+// Per-gallery child ordering (Phase 37; Phase 49 reworked value 0).
+//
+// `Default` means "follow the vault-wide default_sort" (vault::VaultSettings) —
+// it is NOT an order in itself, and never reaches sort_children(); callers
+// resolve it first via ui::effective_sort_key(). `Insertion` is raw import
+// order, which is what value 0 used to mean before Phase 49. Existing vaults
+// are all byte 0, so they adopt the vault default with no migration.
 enum class SortKey : uint8_t {
-    Manual   = 0,   // raw insertion order — today's behavior, the default
-    NameAsc  = 1,   // natural (number-aware) ascending, via ui::natural_less
-    NameDesc = 2,
-    DateAsc  = 3,   // by created_ts ascending
-    DateDesc = 4,
-    SizeAsc  = 5,   // by orig_size ascending
-    SizeDesc = 6,
+    Default   = 0,   // follow the vault's default_sort (Phase 49)
+    NameAsc   = 1,   // natural (number-aware) ascending, via ui::natural_less
+    NameDesc  = 2,
+    DateAsc   = 3,   // by created_ts ascending
+    DateDesc  = 4,
+    SizeAsc   = 5,   // by orig_size ascending
+    SizeDesc  = 6,
+    Insertion = 7,   // raw insertion order (Phase 49; pre-49 meaning of 0)
 };
 
 struct IndexNode {
@@ -116,7 +122,7 @@ struct IndexNode {
     std::string                name;
     std::vector<std::string>   tags;  // per-node tags (Phase 12)
     bool                       favorite = false;  // bookmark flag (Phase 13)
-    SortKey                    sort_key = SortKey::Manual;  // children order (Phase 37); meaningful only when is_gallery()
+    SortKey                    sort_key = SortKey::Default;  // children order (Phase 37); meaningful only when is_gallery()
 
     // Gallery payload (meaningful when type == Gallery).
     std::vector<IndexNode> children;
@@ -166,6 +172,31 @@ struct SavedSearch {
     std::vector<uint8_t> query;
 };
 
+// One tag-category → colour-swatch mapping (Phase 49). `name` is the tag prefix
+// before the first ':' ("artist" for "artist:Kaguya"), matched case-insensitively;
+// `swatch` indexes gfx's fixed 16-colour table. Vault-global metadata, stored
+// inside the .osv because a vault's categories describe its contents.
+struct TagCategory {
+    std::string name;
+    uint8_t     swatch = 0;
+
+    friend bool operator==(const TagCategory&, const TagCategory&) = default;
+};
+
+// Vault-global user settings (Phase 49), serialised after the saved-searches
+// block. Defaults here are also the values a pre-v8 blob reads back with, except
+// `categories`, which pre-v8 blobs get from seeded() — see deserialize_index.
+struct VaultSettings {
+    SortKey                 default_sort    = SortKey::Insertion;
+    bool                    tiles_show_tags = true;
+    std::vector<TagCategory> categories;
+
+    // The starting category set for a vault that has never stored one: a freshly
+    // created vault and every pre-v8 vault. An empty SAVED list is a legitimate
+    // state and is never re-seeded.
+    [[nodiscard]] static VaultSettings seeded();
+};
+
 // Current serialised-blob version (first byte of the blob).
 // v1: no tags. v2: per-node tags (Phase 12). v3: per-node favorite flag (Phase 13).
 // v4: video nodes + VideoMeta (Phase 15 PR2). v5: vault-global saved-searches
@@ -173,7 +204,10 @@ struct SavedSearch {
 // v6: per-gallery sort_key (Phase 37); pre-v6 blobs read every node as Manual.
 // v7: per-image `animated` flag (Phase 47); pre-v7 blobs read every image as
 // not animated, and are healed lazily on first view (see ui/gif_repair.*).
-inline constexpr uint8_t INDEX_VERSION = 7;
+// v8: vault-global settings block after the saved-searches block, and sort_key
+// byte 0 re-read as `Default` with a new `Insertion = 7` (Phase 49); pre-v8
+// blobs read with the seeded default settings and every gallery at `Default`.
+inline constexpr uint8_t INDEX_VERSION = 8;
 
 // Maximum tree depth accepted on deserialisation — guards against stack overflow
 // from a deeply-nested hostile blob.
@@ -191,20 +225,36 @@ inline constexpr uint32_t INDEX_MAX_VIDEO_CHUNKS = 1u << 20;
 inline constexpr uint16_t INDEX_MAX_SAVED_SEARCHES   = 4096;
 inline constexpr uint32_t INDEX_MAX_SAVED_QUERY_BYTES = 1u << 20;
 
+// Maximum tag categories per vault, and max bytes in one category name —
+// bound a hostile settings block (Phase 49).
+inline constexpr uint16_t INDEX_MAX_TAG_CATEGORIES = 256;
+inline constexpr uint16_t INDEX_MAX_CATEGORY_BYTES = 64;
+
+// Size of gfx's fixed tag-colour palette. Lives here (not in gfx) because it
+// bounds a persisted field: a swatch byte >= this is rejected on deserialise.
+inline constexpr uint8_t TAG_SWATCH_COUNT = 16;
+
 // Serialise the whole tree rooted at `root` into `out` (cleared first). The
 // two-argument form writes an empty saved-searches block; the three-argument
-// form persists `searches` after the tree (Phase 18).
+// form persists `searches` after the tree (Phase 18). The four-argument form
+// (Phase 49) also persists the vault-global settings block.
 void serialize_index(const IndexNode& root, std::vector<uint8_t>& out);
 void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& searches,
                      std::vector<uint8_t>& out);
+void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& searches,
+                     const VaultSettings& settings, std::vector<uint8_t>& out);
 
 // Parse a tree from `in` into `out`. Returns false on any malformed input (bad
 // version, unknown node type, truncation, excessive depth). On failure `out` is
 // left in an unspecified-but-valid state; callers must not use it. The
 // three-argument form also extracts the saved-searches block into `searches`
-// (empty for pre-v5 blobs).
+// (empty for pre-v5 blobs). The four-argument form (Phase 49) also extracts
+// the vault-global settings block.
 [[nodiscard]] bool deserialize_index(std::span<const uint8_t> in, IndexNode& out);
 [[nodiscard]] bool deserialize_index(std::span<const uint8_t> in, IndexNode& out,
                                      std::vector<SavedSearch>& searches);
+[[nodiscard]] bool deserialize_index(std::span<const uint8_t> in, IndexNode& out,
+                                     std::vector<SavedSearch>& searches,
+                                     VaultSettings& settings);
 
 } // namespace vault

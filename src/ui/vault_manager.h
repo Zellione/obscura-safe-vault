@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "ui/screen.h"
-#include "ui/theme_picker.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; }
 namespace platform { class VaultRegistry; class FileDialog; }
@@ -46,10 +45,7 @@ private:
     void remove_selected();
     void handle_key(const SDL_KeyboardEvent& key);
     void handle_click(const SDL_MouseButtonEvent& b);
-    void open_theme_picker();      // `C`: open the theme overlay (Phase 23)
     [[nodiscard]] int hit_test(float my) const;  // row under cursor, or -1
-
-    ThemePicker themes_;            // `C` overlay: pick the UI colour theme (Phase 23)
 
     gfx::Window&             win_;
     gfx::FontAtlas&          font_;

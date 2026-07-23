@@ -17,6 +17,7 @@
 #include "ui/input.h"
 #include "ui/tag_inherit.h"
 #include "ui/widgets.h"
+#include "vault/vault.h"
 
 namespace ui {
 
@@ -70,7 +71,7 @@ void FavoritesScreen::rebuild_detail()
         return;
     }
     const auto& hit = favs_[static_cast<size_t>(idx)];
-    detail_.content = build_node_details(*hit.node, inherited_tags(vault_, hit.path));
+    detail_.content = build_node_details(*hit.node, inherited_tags(vault_, hit.path), vault::vault_settings(vault_).default_sort);
 }
 
 void FavoritesScreen::on_enter()
@@ -250,7 +251,8 @@ void FavoritesScreen::render(gfx::Renderer& r)
     if (const float pw = detail_panel_width(detail_.panel.open, W);
         pw > 0.0f) {
         const SDL_FRect panel{W - pw, 0.0f, pw, H};
-        detail_.content_h = draw_detail_panel(r, font_, panel, detail_.content, detail_.panel.scroll);
+        detail_.content_h = draw_detail_panel(r, font_, panel, detail_.content, detail_.panel.scroll,
+                                              vault::vault_settings(vault_).categories);
         detail_.panel.scroll = ui::clamp_scroll(detail_.panel.scroll, detail_.content_h, H);
     }
 }

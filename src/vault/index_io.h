@@ -22,6 +22,7 @@ struct IndexIoContext {
     const crypto::SecureBuffer<crypto::KEY_SIZE>& master_key_;  // never copied, only read
     const IndexNode&                       root_;         // index tree to serialize
     const std::vector<SavedSearch>&        saved_searches_; // vault-global saved searches
+    const VaultSettings&                   settings_;       // vault-global (Phase 49)
 };
 
 // IndexIo: owns the logic for persisting the in-memory vault index with

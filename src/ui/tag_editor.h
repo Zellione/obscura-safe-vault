@@ -6,7 +6,8 @@
 #include <string_view>
 #include <vector>
 
-#include "ui/tag_tally.h"   // ui::TagTallyEntry, compute_tag_tally
+#include "ui/tag_chip.h"     // ui::ChipWrap
+#include "ui/tag_tally.h"    // ui::TagTallyEntry, compute_tag_tally
 
 namespace gfx { class Renderer; class FontAtlas; class Window; }
 namespace vault { class Vault; }
@@ -54,7 +55,7 @@ private:
     void draw_tag_rows(gfx::Renderer& r, gfx::FontAtlas& font, float mx, float list_y,
                         float tags_start, float row_pitch, int max_visible) const;
     void draw_inherited_tags(gfx::Renderer& r, gfx::FontAtlas& font, float mx, float list_bottom,
-                              int shown_count, const std::vector<std::string>& lines) const;
+                              const ChipWrap& wrap) const;
     void draw_suggestions_dropdown(gfx::Renderer& r, gfx::FontAtlas& font, float mx,
                                     float input_y) const;
 

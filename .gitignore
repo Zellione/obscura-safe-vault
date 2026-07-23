@@ -58,3 +58,6 @@ dist/
 *.gcno
 .ninja_lock
 *.dmp
+
+# Superpowers brainstorming session scratch (mockups, server state)
+.superpowers/

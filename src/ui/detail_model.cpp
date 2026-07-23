@@ -50,7 +50,7 @@ DetailSection video_rows(const vault::IndexNode& n)
             .bullets = {}};
 }
 
-DetailSection gallery_rows(const vault::IndexNode& n)
+DetailSection gallery_rows(const vault::IndexNode& n, vault::SortKey vault_default)
 {
     SubtreeCounts c;
     count_subtree(n, c);
@@ -58,9 +58,9 @@ DetailSection gallery_rows(const vault::IndexNode& n)
                     .rows  = {{.label = "Contains",   .value = describe_subtree(c)},
                               {.label = "Total size", .value = format_size(c.bytes)}},
                     .bullets = {}};
-    // Manual is the default and renders as an empty label — the breadcrumb uses
-    // the same rule, so an unsorted gallery shows no Sort row at all.
-    if (auto label = sort_key_label(n.sort_key); !label.empty()) {
+    // A gallery following the vault-wide default renders no Sort row at all —
+    // the breadcrumb uses the same rule, so the two never disagree.
+    if (auto label = sort_key_label(n.sort_key, vault_default); !label.empty()) {
         s.rows.push_back({.label = "Sort", .value = std::move(label)});
     }
     return s;
@@ -101,17 +101,20 @@ void append_tag_sections(DetailContent&               out,
     if (!own.empty()) {
         out.sections.push_back({.title   = std::string(own_title),
                                 .rows    = {},
-                                .bullets = std::vector<std::string>(own.begin(), own.end())});
+                                .bullets = std::vector<std::string>(own.begin(), own.end()),
+                                .is_tags = true});
     }
     if (!inherited.empty()) {
         out.sections.push_back({.title   = "Inherited",
                                 .rows    = {},
-                                .bullets = std::vector<std::string>(inherited.begin(), inherited.end())});
+                                .bullets = std::vector<std::string>(inherited.begin(), inherited.end()),
+                                .is_tags = true});
     }
 }
 
 DetailContent build_node_details(const vault::IndexNode&      node,
-                                 std::span<const std::string> inherited)
+                                 std::span<const std::string> inherited,
+                                 vault::SortKey               vault_default)
 {
     DetailContent out{.heading = node.name, .subheading = node_markers(node), .sections = {}};
     if (node.is_image()) {
@@ -119,7 +122,7 @@ DetailContent build_node_details(const vault::IndexNode&      node,
     } else if (node.is_video()) {
         out.sections.push_back(video_rows(node));
     } else {
-        out.sections.push_back(gallery_rows(node));
+        out.sections.push_back(gallery_rows(node, vault_default));
     }
     append_tag_sections(out, node.tags, inherited, "Tags");
     return out;
