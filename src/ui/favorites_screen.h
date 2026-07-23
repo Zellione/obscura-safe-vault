@@ -29,6 +29,7 @@ public:
                     platform::VaultRegistry& registry, std::string active_path);
 
     void on_enter() override;
+    void on_vault_changed() override;  // Phase 50: re-fetch favorites after tree reallocation
     void handle_event(const SDL_Event& e) override;
     void update(double dt) override;
     void render(gfx::Renderer& r) override;

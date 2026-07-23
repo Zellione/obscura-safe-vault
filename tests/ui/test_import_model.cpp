@@ -295,3 +295,51 @@ TEST(import_task_info_equality)
     b.id = 2;
     CHECK_FALSE(a == b);
 }
+
+TEST(classify_lock_confirm_key_y_is_confirm)
+{
+    CHECK_EQ(ui::classify_lock_confirm_key(SDLK_Y), ui::LockConfirmKey::Confirm);
+}
+
+TEST(classify_lock_confirm_key_n_is_cancel)
+{
+    CHECK_EQ(ui::classify_lock_confirm_key(SDLK_N), ui::LockConfirmKey::Cancel);
+}
+
+TEST(classify_lock_confirm_key_esc_is_cancel)
+{
+    CHECK_EQ(ui::classify_lock_confirm_key(SDLK_ESCAPE), ui::LockConfirmKey::Cancel);
+}
+
+TEST(classify_lock_confirm_key_enter_is_cancel)
+{
+    CHECK_EQ(ui::classify_lock_confirm_key(SDLK_RETURN), ui::LockConfirmKey::Cancel);
+}
+
+TEST(classify_lock_confirm_key_kp_enter_is_cancel)
+{
+    CHECK_EQ(ui::classify_lock_confirm_key(SDLK_KP_ENTER), ui::LockConfirmKey::Cancel);
+}
+
+TEST(classify_lock_confirm_key_other_is_other)
+{
+    CHECK_EQ(ui::classify_lock_confirm_key(SDLK_A), ui::LockConfirmKey::Other);
+}
+
+TEST(import_lock_confirm_text_singular)
+{
+    const std::string text = ui::import_lock_confirm_text(1);
+    CHECK_EQ(text, std::string("1 import pending — finish current file, discard the rest, and lock?"));
+}
+
+TEST(import_lock_confirm_text_plural)
+{
+    const std::string text = ui::import_lock_confirm_text(3);
+    CHECK_EQ(text, std::string("3 imports pending — finish current file, discard the rest, and lock?"));
+}
+
+TEST(import_lock_confirm_text_many)
+{
+    const std::string text = ui::import_lock_confirm_text(15);
+    CHECK_EQ(text, std::string("15 imports pending — finish current file, discard the rest, and lock?"));
+}

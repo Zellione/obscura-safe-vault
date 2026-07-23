@@ -183,6 +183,14 @@ void AdvancedSearchScreen::on_exit()
     SDL_StopTextInput(win_.sdl_window());
 }
 
+void AdvancedSearchScreen::on_vault_changed()
+{
+    // Phase 50: vault's index tree changed (background import drain attached nodes).
+    // results_ are now stale; re-run the search.
+    rerun();
+    mark_dirty();
+}
+
 // --- data flow --------------------------------------------------------------
 
 void AdvancedSearchScreen::reload_saved()

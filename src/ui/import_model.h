@@ -1,5 +1,7 @@
 #pragma once
 
+#include <SDL3/SDL_keycode.h>
+
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -58,5 +60,26 @@ struct BatchCommitPolicy {
              (files_since_commit > 0 && secs_since_commit >= SECS_PER_COMMIT); }
     void   reset() noexcept { files_since_commit = 0; secs_since_commit = 0.0; }
 };
+
+// Confirm-dialog decision for a lock-ish action while imports are pending.
+enum class LockConfirmKey { Confirm, Cancel, Other };
+[[nodiscard]] constexpr LockConfirmKey classify_lock_confirm_key(SDL_Keycode k) noexcept
+{
+    using enum LockConfirmKey;
+    switch (k) {
+        case SDLK_Y:                 // confirming requires a deliberate, distinct key
+            return Confirm;
+        case SDLK_RETURN:            // Enter triggers the default action: Cancel
+        case SDLK_KP_ENTER:
+        case SDLK_ESCAPE:
+        case SDLK_N:
+            return Cancel;
+        default:
+            return Other;
+    }
+}
+// => "3 imports pending — finish current file, discard the rest, and lock?"
+//    (singular "1 import pending — …")
+[[nodiscard]] std::string import_lock_confirm_text(int pending_tasks);
 
 } // namespace ui

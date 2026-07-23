@@ -248,6 +248,14 @@ void GalleryGrid::on_exit()
     hover_gate_.reset();
 }
 
+void GalleryGrid::on_vault_changed()
+{
+    // Phase 50: vault's index tree changed (background import drain attached nodes).
+    // children_ pointers are now stale; re-list and refresh selection.
+    refresh();
+    mark_dirty();
+}
+
 void GalleryGrid::refresh()
 {
     children_ = vault_.list(nav_.path());

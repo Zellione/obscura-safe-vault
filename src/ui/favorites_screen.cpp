@@ -80,6 +80,14 @@ void FavoritesScreen::on_enter()
     scroll_ = 0.0f;  // reset scroll when entering
 }
 
+void FavoritesScreen::on_vault_changed()
+{
+    // Phase 50: vault's index tree changed (background import drain attached nodes).
+    // favs_ pointers are now stale; re-fetch.
+    reload();
+    mark_dirty();
+}
+
 void FavoritesScreen::update(double)
 {
     // Update scroll to keep the selected item visible.

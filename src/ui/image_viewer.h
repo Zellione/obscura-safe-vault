@@ -94,6 +94,7 @@ public:
 
     void on_enter() override;
     void on_exit() override;
+    void on_vault_changed() override;  // Phase 50: re-fetch gallery/collection images after tree reallocation
     void handle_event(const SDL_Event& e) override;
     void update(double dt) override;
     void render(gfx::Renderer& r) override;

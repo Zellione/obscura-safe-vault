@@ -106,4 +106,13 @@ std::string footer_import_summary(const std::vector<ImportTaskInfo>& tasks,
     }
 }
 
+std::string import_lock_confirm_text(int pending_tasks)
+{
+    if (pending_tasks == 1) {
+        return "1 import pending — finish current file, discard the rest, and lock?";
+    } else {
+        return std::to_string(pending_tasks) + " imports pending — finish current file, discard the rest, and lock?";
+    }
+}
+
 } // namespace ui

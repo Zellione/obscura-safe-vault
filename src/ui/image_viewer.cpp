@@ -91,6 +91,25 @@ void ImageViewer::on_exit()
     full_cache_.evict_except({});   // destroy all cached textures
 }
 
+void ImageViewer::on_vault_changed()
+{
+    // Phase 50: vault's index tree changed (background import drain attached nodes).
+    // album_.images pointers are now stale; re-list and clamp index.
+    if (!album_.from_collection) {
+        album_.images.clear();
+        album_.paths.clear();
+        for (const vault::IndexNode* n : vault_.list(album_.gallery_path)) {
+            if (!n->is_media()) continue;
+            album_.images.push_back(n);
+            album_.paths.push_back(album_.gallery_path.empty() ? n->name
+                                                   : album_.gallery_path + "/" + n->name);
+        }
+    }
+    // Clamp index to the new size and refresh view
+    show_image_at(index_);
+    mark_dirty();
+}
+
 // --- Geometry --------------------------------------------------------------
 
 float ImageViewer::thumb_size() const

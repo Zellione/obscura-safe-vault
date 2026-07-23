@@ -20,12 +20,14 @@
 #include "ui/favorites_images.h"
 #include "ui/gallery_grid.h"
 #include "ui/image_viewer.h"
+#include "ui/import_model.h"
 #include "ui/settings_overlay.h"
 #include "ui/tag_galleries.h"
 #include "ui/tag_images.h"
 #include "ui/tag_overview.h"
 #include "ui/unlock_screen.h"
 #include "ui/vault_manager.h"
+#include "ui/widgets.h"
 #include "vault/vault_search.h"
 
 #ifndef OSV_DEFAULT_FONT
@@ -126,6 +128,7 @@ void App::promote_pending()
     active_path_   = std::move(pending_path_);
     pending_path_.clear();
     registry_.add(active_path_);                  // move-to-front in the recent list
+    import_queue_.begin_session(*active_);        // Phase 50: start import queue for new vault
 }
 
 void App::to_gallery(const std::string& path, int selected, bool explicit_index)
@@ -308,7 +311,13 @@ void draw_keep_unlocked_badge(gfx::Renderer& r, gfx::FontAtlas& font, int win_w,
 void App::dispatch_event(const SDL_Event& e)
 {
     if (is_user_input(e)) idle_.reset();   // any keypress/mouse activity stays the lock
+    // Phase 50: park SDL_EVENT_QUIT if imports are pending; it will be replayed
+    // after the user confirms the import abort.
     if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+        if (import_queue_.busy() && !lock_confirm_.open) {
+            lock_confirm_ = {true, ui::Nav{ui::NavKind::Quit, {}, 0}};
+            return;   // park the event; it will be replayed after confirm
+        }
         running_ = false;
         return;
     }
@@ -347,6 +356,23 @@ void App::dispatch_event(const SDL_Event& e)
             overlays_.settings.error = "Could not save settings";
         }
         return;   // the overlay swallows every event while open, like the help popup
+    }
+    // Phase 50: lock_confirm modal is checked AFTER help/settings so it doesn't
+    // shadow help/settings which draw above it. While the confirm is open, only
+    // key events are processed (Y/N/Esc); all others are swallowed.
+    if (lock_confirm_.open) {
+        if (e.type == SDL_EVENT_KEY_DOWN) {
+            using enum ui::LockConfirmKey;
+            const auto key = ui::classify_lock_confirm_key(e.key.key);
+            if (key == Confirm) {
+                import_queue_.abort_and_flush();
+                replay_nav_ = lock_confirm_.action;
+                lock_confirm_ = {};
+            } else if (key == Cancel) {
+                lock_confirm_ = {};
+            }
+        }
+        return;   // swallow every event while the confirm is open
     }
     if (screen_) screen_->handle_event(e);
 }
@@ -408,12 +434,23 @@ bool App::apply_nav()
 {
     if (!screen_) return false;
     using enum ui::NavKind;
-    const ui::Nav nav = screen_->take_nav();
+    // Phase 50: check for a replayed nav (from lock_confirm confirm) first
+    ui::Nav nav = replay_nav_.kind != ui::NavKind::None ? replay_nav_ : screen_->take_nav();
+    if (nav.kind != ui::NavKind::None) replay_nav_ = {};   // consume replay_nav_ after taking it
     // A ToGallery nav.index is only a real, freshly-known position when it
     // comes from the viewer returning to its exact launch position (Phase 40
     // Part 2) — every other ToGallery source passes 0 as "no opinion" and
     // to_gallery() falls back to the remembered position for that path.
     const bool from_viewer = dynamic_cast<const ui::ImageViewer*>(screen_.get()) != nullptr;
+
+    // Phase 50: park lock-ish actions that occur while imports are pending.
+    // These actions will be replayed after the user confirms the import abort.
+    if ((nav.kind == LockActive || nav.kind == ToUnlock || nav.kind == Quit) &&
+        import_queue_.busy() && !lock_confirm_.open) {
+        lock_confirm_ = {true, nav};
+        return false;   // screen stays; event will be re-queued by dispatch_event
+    }
+
     // Every transition below except ToggleKeepUnlocked/ToSettings/Quit/None destroys the
     // current screen.
     if (nav.kind != None && nav.kind != ToggleKeepUnlocked && nav.kind != ToSettings &&
@@ -436,11 +473,15 @@ bool App::apply_nav()
         case ToTagGalleries:      to_tag_galleries(nav.path);          return true;
         case ToTagImages:         to_tag_images(nav.path);             return true;
         case ToTagViewer:         to_tag_viewer(nav.path, nav.index);  return true;
-        case ToUnlock:            to_unlock(nav.path);                 return true;
+        case ToUnlock:
+            import_queue_.end_session();          // Phase 50: flush before switch
+            to_unlock(nav.path);
+            return true;
         case ToVaultManager:      pending_.reset(); to_manager();      return true;
         case LockActive:
             keep_unlocked_ = false;
             session_.reset();                     // Phase 39 Part 2: fresh session on lock
+            import_queue_.end_session();          // Phase 50: flush before lock
             if (active_) { active_->lock(); active_.reset(); active_path_.clear(); }
             to_manager();
             return true;
@@ -466,13 +507,16 @@ bool App::apply_nav()
 bool App::maybe_auto_lock(double dt)
 {
     // should_auto_lock also covers "a screen with a background import owns the
-    // vault's file handle on a worker thread" (blocks_idle_lock) and the
-    // session's "keep unlocked" toggle (Phase 33) — see app/auto_lock.h.
+    // vault's file handle on a worker thread" (blocks_idle_lock), the session's
+    // "keep unlocked" toggle (Phase 33), and a busy import queue (Phase 50) —
+    // see app/auto_lock.h.
     if (const bool blocks = screen_ && screen_->blocks_idle_lock();
-        !should_auto_lock(active_ != nullptr, blocks, keep_unlocked_, idle_, dt))
+        !should_auto_lock(active_ != nullptr, blocks, keep_unlocked_, import_queue_.busy(),
+                          idle_, dt))
         return false;
     if (screen_) screen_->on_exit();
     session_.reset();                                  // Phase 39 Part 2: fresh session on idle lock
+    import_queue_.end_session();                       // Phase 50: flush before lock
     active_->lock();                                  // wipe the master key
     active_.reset();
     active_path_.clear();
@@ -493,6 +537,32 @@ void App::render_frame()
         if (overlays_.settings.open) {
             ui::draw_settings_overlay(r, font_, static_cast<float>(window_.width()),
                                       static_cast<float>(window_.height()), overlays_.settings);
+        }
+        // Phase 50: render lock_confirm modal after settings overlay so it stays on top
+        if (lock_confirm_.open) {
+            const auto w = static_cast<float>(window_.width());
+            const auto h = static_cast<float>(window_.height());
+            using namespace gfx::theme;
+
+            // Veil the whole window so the modal clearly owns input focus
+            r.draw_rect({0, 0, w, h}, gfx::Color{8, 9, 12, 255});
+
+            const float pw = 560;
+            const float ph = 230;
+            const float px = (w - pw) / 2;
+            const float py = (h - ph) / 2;
+            r.draw_round_rect({px, py, pw, ph}, RADIUS, SURFACE);
+            r.draw_round_rect({px, py, pw, ph}, RADIUS, DANGER, /*filled*/ false);
+
+            auto centered = [&](const std::string& s, float y, gfx::Color c) {
+                const auto tw = static_cast<float>(font_.measure(s));
+                r.draw_text(font_, px + (pw - tw) / 2, y, s, c);
+            };
+
+            const std::string confirm_text = ui::import_lock_confirm_text(
+                static_cast<int>(import_queue_.snapshot().size()));
+            centered(ui::fit_text(font_, confirm_text, pw - 32), py + 28, TEXT);
+            centered("[Y] Discard & lock        [N] Keep importing", py + ph - 50, TEXT_DIM);
         }
         ui::draw_help_popup(r, font_, static_cast<float>(window_.width()),
                             static_cast<float>(window_.height()),
@@ -522,6 +592,14 @@ void App::run()
         if (screen_) screen_->update(dt);
         badge_elapsed_ += dt;   // Phase 45 Part 6
 
+        // Phase 50: drain the import queue and refresh screens when records are applied
+        if (active_) {
+            if (import_queue_.drain(dt) > 0 && screen_) {
+                screen_->on_vault_changed();
+                screen_->mark_dirty();
+            }
+        }
+
         // Idle auto-lock runs before nav resolution so the manager paints this frame.
         const bool auto_locked = maybe_auto_lock(dt);
 
@@ -541,6 +619,7 @@ void App::run()
 void App::shutdown()
 {
     if (screen_) { screen_->on_exit(); screen_.reset(); }
+    import_queue_.end_session();        // Phase 50: flush before lock (blocking, acceptable at shutdown)
     if (active_)  active_->lock();      // wipe master key
     if (pending_) pending_->lock();
     active_.reset();
