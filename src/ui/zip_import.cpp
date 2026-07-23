@@ -201,7 +201,7 @@ ZipImportOutcome import_zip(MediaSink&                   sink,
         // Apply tags to the vault for the root gallery (sink stores it, so we pass root).
         // This requires getting the vault from sink, which DirectVaultSink provides.
         // For now, we skip tags through the sink API; they're best-effort anyway.
-        // TODO(Future): add tag support to MediaSink if archive metadata tagging becomes
+        // TODO(Phase51): add tag support to MediaSink if archive metadata tagging becomes
         // a priority feature.
     }
     run_placements(sink, zip, plan, root_gallery, out, progress);
@@ -238,7 +238,7 @@ ZipImportOutcome import_cbz(MediaSink&                   sink,
     if (!plan.placements.empty()) {
         // Apply tags to the vault for the root gallery (sink stores it, so we pass root).
         // For now, we skip tags through the sink API; they're best-effort anyway.
-        // TODO(Future): add tag support to MediaSink if archive metadata tagging becomes
+        // TODO(Phase51): add tag support to MediaSink if archive metadata tagging becomes
         // a priority feature.
     }
     run_placements(sink, zip, plan, root_gallery, out, progress);

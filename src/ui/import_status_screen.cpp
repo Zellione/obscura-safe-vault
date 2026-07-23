@@ -88,6 +88,34 @@ void draw_queued_finished_row(gfx::Renderer& r, gfx::FontAtlas& font, const Impo
     r.draw_text(font, OX + 14, ty, display, text_color);
 }
 
+// Draw a single row of the import list
+void draw_row(gfx::Renderer& r, gfx::FontAtlas& font, float list_top, float bottom,
+              float row_h, float W, int i, int first, int sel, float scroll_,
+              const std::vector<ImportTaskInfo>& rows_)
+{
+    using namespace gfx::theme;
+    const float    y    = list_top + static_cast<float>(i - first) * row_h - scroll_;
+    if (y + row_h < list_top || y > bottom) return;  // cull off-screen rows
+
+    const SDL_FRect row{OX, y, W - 2 * OX, row_h - 4};
+    const bool     sel_row  = (i == sel);
+    const float ph = font.pixel_height();
+
+    // Draw selection glow and background
+    if (sel_row) r.draw_selection_glow(row, RADIUS, ACCENT);
+    r.draw_round_rect(row, RADIUS, sel_row ? SURFACE_HI : SURFACE);
+    r.draw_round_rect(row, RADIUS, sel_row ? ACCENT : BORDER, /*filled*/ false);
+
+    // Row content based on state
+    const ImportTaskInfo& task = rows_[i];
+
+    if (task.state == ImportTaskState::Running) {
+        draw_running_row(r, font, task, y, W, row_h, ph);
+    } else {
+        draw_queued_finished_row(r, font, task, y, row_h, ph, W);
+    }
+}
+
 } // namespace
 
 ImportStatusScreen::ImportStatusScreen(gfx::Window& win, gfx::FontAtlas& font,
@@ -183,8 +211,8 @@ void ImportStatusScreen::update(double dt)
 void ImportStatusScreen::render(gfx::Renderer& r)
 {
     using namespace gfx::theme;
-    const auto W = static_cast<float>(win_.width());
-    const auto H = static_cast<float>(win_.height());
+    const float W = static_cast<float>(win_.width());
+    const float H = static_cast<float>(win_.height());
     const float ph = font_.pixel_height();
 
     // Header band: "Imports" + "[F1] Help"
@@ -210,7 +238,7 @@ void ImportStatusScreen::render(gfx::Renderer& r)
         return;
     }
 
-    // Render the scrollable list with adjusted geometry
+    // Compute scroll geometry
     const float bottom = H - 24.0f;  // reserve footer band
     const float row_h = ph + 2 * PAD;
     const int visible = std::max(1, static_cast<int>((bottom - list_top) / row_h));
@@ -223,26 +251,9 @@ void ImportStatusScreen::render(gfx::Renderer& r)
     const float max_scroll = std::max(0.0f, content_h - (bottom - list_top));
     scroll_ = std::clamp(scroll_, 0.0f, max_scroll);
 
+    // Render rows
     for (int i = first; i < first + visible && i < count; ++i) {
-        const float    y    = list_top + static_cast<float>(i - first) * row_h - scroll_;
-        if (y + row_h < list_top || y > bottom) continue;  // cull off-screen rows
-
-        const SDL_FRect row{OX, y, W - 2 * OX, row_h - 4};
-        const bool     sel  = (i == sel_);
-
-        // Draw selection glow and background
-        if (sel) r.draw_selection_glow(row, RADIUS, ACCENT);
-        r.draw_round_rect(row, RADIUS, sel ? SURFACE_HI : SURFACE);
-        r.draw_round_rect(row, RADIUS, sel ? ACCENT : BORDER, /*filled*/ false);
-
-        // Row content based on state
-        const ImportTaskInfo& task = rows_[i];
-
-        if (task.state == ImportTaskState::Running) {
-            draw_running_row(r, font_, task, y, W, row_h, ph);
-        } else {
-            draw_queued_finished_row(r, font_, task, y, row_h, ph, W);
-        }
+        draw_row(r, font_, list_top, bottom, row_h, W, i, first, sel_, scroll_, rows_);
     }
 }
 

@@ -81,12 +81,16 @@ private:
     std::unique_ptr<gfx::TextureCache> cache_;
     platform::FileDialog               dialog_;
     platform::FolderDialog             folder_dialog_;
-    std::unique_ptr<vault::Vault>      active_;          // the single unlocked vault
-    std::string                        active_path_;
-    std::unique_ptr<vault::Vault>      pending_;         // vault being unlocked right now
-    std::string                        pending_path_;
     platform::VaultRegistry            registry_;
     std::unique_ptr<ui::Screen>        screen_;
+
+    struct VaultState {
+        std::unique_ptr<vault::Vault> active;         // the single unlocked vault
+        std::string                   active_path;
+        std::unique_ptr<vault::Vault> pending;        // vault being unlocked right now
+        std::string                   pending_path;
+    };
+    VaultState                         vault_state_;
     // Advanced-search state preserved across visits within one unlocked-vault
     // session; reset in promote_pending() whenever the active vault changes.
     ui::AdvancedSearchState            adv_session_;

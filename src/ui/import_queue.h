@@ -97,7 +97,8 @@ private:
         crypto::SecureBytes password;
 
         ImportTaskState state = ImportTaskState::Queued;
-        int imported = 0, skipped = 0;
+        int imported = 0;
+        int skipped = 0;
         std::string error;
 
         // Progress tracking (shared_ptr to work around OpProgress's atomic members)
@@ -105,8 +106,9 @@ private:
 
         [[nodiscard]] bool finished() const noexcept
         {
-            return state == ImportTaskState::Done || state == ImportTaskState::Failed ||
-                   state == ImportTaskState::Cancelled;
+            using enum ImportTaskState;
+            return state == Done || state == Failed ||
+                   state == Cancelled;
         }
     };
 

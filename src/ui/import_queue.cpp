@@ -430,9 +430,8 @@ bool ImportQueue::cancel(uint64_t id)
                 task.state = Cancelled;
                 return true;
             } else if (task.state == Running) {
-                if (task.progress) {
+                if (task.progress)
                     task.progress->cancel.store(true);
-                }
                 return true;
             }
             return false;
@@ -462,19 +461,19 @@ bool ImportQueue::reorder(uint64_t id, int delta)
 
     const bool result = reorder_import_task(infos, id, delta);
 
-    if (result) {
-        // Rebuild task queue in new order
-        std::deque<Task> new_tasks;
-        for (const auto& info : infos) {
-            for (auto& t : tasks_) {
-                if (t.id == info.id) {
-                    new_tasks.push_back(std::move(t));
-                    break;
-                }
+    if (!result) return result;
+
+    // Rebuild task queue in new order
+    std::deque<Task> new_tasks;
+    for (const auto& info : infos) {
+        for (auto& t : tasks_) {
+            if (t.id == info.id) {
+                new_tasks.push_back(std::move(t));
+                break;
             }
         }
-        tasks_ = std::move(new_tasks);
     }
+    tasks_ = std::move(new_tasks);
 
     return result;
 }
@@ -703,11 +702,7 @@ void ImportQueue::mark_task_complete(uint64_t task_id, const std::shared_ptr<vau
         if (t.id == task_id) {
             if (t.state == Running) {
                 // Check if the task was cancelled
-                if (progress && progress->cancel.load()) {
-                    t.state = Cancelled;
-                } else {
-                    t.state = Done;
-                }
+                t.state = (progress && progress->cancel.load()) ? Cancelled : Done;
             }
             break;
         }
@@ -722,7 +717,8 @@ void ImportQueue::worker_loop()
         ImportTaskKind task_kind = ImportTaskKind::Files;
         std::vector<std::filesystem::path> task_files;
         std::filesystem::path task_archive_path;
-        std::string task_gallery_name, task_dest_gallery;
+        std::string task_gallery_name;
+        std::string task_dest_gallery;
         std::shared_ptr<vault::OpProgress> task_progress;
 
         {

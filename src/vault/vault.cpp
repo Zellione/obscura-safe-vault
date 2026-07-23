@@ -195,8 +195,8 @@ void collect_favorites(const IndexNode& node, std::string_view prefix,
     for (const auto& child : node.children) {
         const std::string full_path = join_child_path(prefix, child.name);
 
-        if (const bool matches = want_galleries ? child.is_gallery() : child.is_media();
-            child.favorite && matches) {
+        const bool matches = want_galleries ? child.is_gallery() : child.is_media();
+        if (child.favorite && matches) {
             out.push_back(SearchHit{
                 .path           = full_path,
                 .is_gallery     = child.is_gallery(),
@@ -306,10 +306,11 @@ void adv_search_dfs(const IndexNode& node, std::string_view prefix,
         auto              effective = compute_effective_tags(child.tags, inherited);
         const std::string full_path = join_child_path(prefix, child.name);
 
-        if (const bool in_scope = child.is_gallery() ? (scope == Galleries || scope == Both)
-                                                     : (scope == Images || scope == Both);
-            in_scope) {
-            if (const ui::EvalResult r = ui::evaluate(query, child.name, effective); r.matched) {
+        const bool in_scope = child.is_gallery() ? (scope == Galleries || scope == Both)
+                                                 : (scope == Images || scope == Both);
+        if (in_scope) {
+            const ui::EvalResult r = ui::evaluate(query, child.name, effective);
+            if (r.matched) {
                 out.emplace_back(r.score, SearchHit{
                     .path           = full_path,
                     .is_gallery     = child.is_gallery(),
@@ -462,7 +463,8 @@ VaultResult Vault::create(const std::string&       path,
     out.header_mutex_ = std::make_unique<std::mutex>();
 
     // Write the initial (empty) index + a valid header via the crash-safe path.
-    if (const VaultResult r = out.commit_index(); r != VaultResult::Ok) { out.reset(); return r; }
+    const VaultResult r = out.commit_index();
+    if (r != VaultResult::Ok) { out.reset(); return r; }
 
     // Open read_fp_ after the initial commit so it sees the complete file.
     out.read_fp_     = std::fopen(path.c_str(), "rb");
@@ -578,8 +580,8 @@ VaultResult Vault::unlock(std::span<const uint8_t> password,
 
     // Load the index from the active slot, falling back to the other slot if the
     // active one is unreadable (crash during a swap left it truncated/corrupt).
-    if (const uint8_t active = header_.active_slot == 0 ? 0 : 1;
-        !try_load_slot(fp_, header_, master_key_.as_span(), active, root_,
+    const uint8_t active = header_.active_slot == 0 ? 0 : 1;
+    if (!try_load_slot(fp_, header_, master_key_.as_span(), active, root_,
                        saved_searches_, settings_) &&
         !try_load_slot(fp_, header_, master_key_.as_span(), active == 0 ? 1 : 0, root_,
                        saved_searches_, settings_)) {
@@ -1319,34 +1321,39 @@ VaultResult Vault::compact(OpProgress* progress)
     if (progress && progress->cancel.load()) return fail(Ok);
     if (copy_err != Ok) return fail(copy_err);
 
-    // === STEP 1: Serialize and seal the index blob ===
-    // Fresh sealed index into slot A; slot B starts empty in the new file.
-    // Saved searches and settings carry over unchanged (vault-global metadata).
+    // Seal and write the index blob to temp file
     std::vector<uint8_t> blob;
-    serialize_index(new_root, saved_searches_, settings_, blob);
+    Header h{};
+    std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
+    {
+        // === STEP 1: Serialize and seal the index blob ===
+        // Fresh sealed index into slot A; slot B starts empty in the new file.
+        // Saved searches and settings carry over unchanged (vault-global metadata).
+        serialize_index(new_root, saved_searches_, settings_, blob);
 
-    // Phase 26: framed vaults frame the index blob (mirrors commit_index —
-    // unlock de-frames unconditionally when the flag is set, and slot B is
-    // empty here, so an unframed blob would make the vault unopenable).
-    if (framed_chunks(header_)) {
-        std::vector<uint8_t> framed_blob;
-        if (!chunk_codec::encode_frame(blob, framed_blob)) return fail(CryptoError);
-        blob = std::move(framed_blob);
+        // Phase 26: framed vaults frame the index blob (mirrors commit_index —
+        // unlock de-frames unconditionally when the flag is set, and slot B is
+        // empty here, so an unframed blob would make the vault unopenable).
+        if (framed_chunks(header_)) {
+            std::vector<uint8_t> framed_blob;
+            if (!chunk_codec::encode_frame(blob, framed_blob)) return fail(CryptoError);
+            blob = std::move(framed_blob);
+        }
+
+        if (!crypto::fill_random(nonce)) return fail(CryptoError);
+        std::vector<uint8_t> sealed;
+        crypto::seal(master_key_.as_span(), nonce, blob, sealed);
+
+        // === STEP 2: Write sealed index to temp file (order is load-bearing) ===
+        uint64_t idx_off = 0;
+        if (!dst.append_raw(sealed, idx_off) || !dst.sync()) return fail(IoError);
+
+        h = header_;  // KDF params, salt, and master-key wrap carry over
+        h.slot[0] = IndexSlot{.offset = idx_off, .length = sealed.size(), .nonce = nonce};
+        h.slot[1] = IndexSlot{};
+        h.active_slot = 0;
     }
 
-    std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
-    if (!crypto::fill_random(nonce)) return fail(CryptoError);
-    std::vector<uint8_t> sealed;
-    crypto::seal(master_key_.as_span(), nonce, blob, sealed);
-
-    // === STEP 2: Write sealed index to temp file (order is load-bearing) ===
-    uint64_t idx_off = 0;
-    if (!dst.append_raw(sealed, idx_off) || !dst.sync()) return fail(IoError);
-
-    Header h      = header_;  // KDF params, salt, and master-key wrap carry over
-    h.slot[0]     = IndexSlot{.offset = idx_off, .length = sealed.size(), .nonce = nonce};
-    h.slot[1]     = IndexSlot{};
-    h.active_slot = 0;
     h.serialize(raw);
     // Write header then sync before rename (order is load-bearing: index must be durable first)
     if (!fileutil::seek_to(tmp, 0) ||

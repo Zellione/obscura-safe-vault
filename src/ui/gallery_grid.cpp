@@ -692,6 +692,7 @@ bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
 // Declared as friend in gallery_grid.h to access private methods
 bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& key)
 {
+    using enum ui::NavKind;
     switch (key.key) {
         case SDLK_L: g.view_ = next_gallery_view(g.view_); return true;
         case SDLK_X: g.start_export(); return true;
@@ -704,16 +705,16 @@ bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& 
         case SDLK_G: g.start_tag_editor((key.mod & SDL_KMOD_SHIFT) != 0); return true;
         case SDLK_B: g.toggle_favorite_current(); return true;
         case SDLK_F:
-            g.request((key.mod & SDL_KMOD_SHIFT) ? ui::NavKind::ToFavoriteGalleries
-                      : ui::NavKind::ToFavoriteImages);
+            g.request((key.mod & SDL_KMOD_SHIFT) ? ToFavoriteGalleries
+                      : ToFavoriteImages);
             return true;
         case SDLK_T:
-            if (key.mod & SDL_KMOD_SHIFT) { g.request(ui::NavKind::ToTagOverview); return true; }
+            if (key.mod & SDL_KMOD_SHIFT) { g.request(ToTagOverview); return true; }
             return false;
         case SDLK_S:
             if (key.mod & SDL_KMOD_SHIFT) { g.cycle_gallery_sort(); return true; }
             return false;
-        case SDLK_U: g.request(ui::NavKind::ToggleKeepUnlocked); return true;
+        case SDLK_U: g.request(ToggleKeepUnlocked); return true;
         default: return false;
     }
 }
@@ -1030,6 +1031,7 @@ void GalleryGrid::pump_zip_import()
 
 void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path)
 {
+    using enum ImportTaskKind;
     // The gallery name comes from naming_.zip.
     const std::string gallery_name = naming_.zip.gallery_name;
     const std::string base_gallery = nav_.path();
@@ -1037,9 +1039,9 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path)
     // Map {cbz, archive_backend} to ImportTaskKind
     ImportTaskKind kind;
     if (naming_.zip.cbz) {
-        kind = naming_.zip.archive_backend ? ImportTaskKind::ArchiveCbz : ImportTaskKind::Cbz;
+        kind = naming_.zip.archive_backend ? ArchiveCbz : Cbz;
     } else {
-        kind = naming_.zip.archive_backend ? ImportTaskKind::Archive : ImportTaskKind::Zip;
+        kind = naming_.zip.archive_backend ? Archive : Zip;
     }
 
     // Enqueue the archive import through the queue (Phase 50)
@@ -1296,7 +1298,8 @@ void GalleryGrid::update(double dt)
 
     // Phase 50: track import footer summary changes for repainting
     const std::string footer = queue_.footer_summary();
-    if (footer != last_footer_) {
+    const bool footer_changed = footer != last_footer_;
+    if (footer_changed) {
         last_footer_ = footer;
         mark_dirty();
     }

@@ -118,10 +118,10 @@ void CommitLane::worker_loop()
         // Wait for work or shutdown signal.
         {
             std::unique_lock lk(mu_);
-            cv_.wait(lk, [this] { return pending_ || stopping_.load(std::memory_order_acquire); });
+            cv_.wait(lk, [this] { return pending_ || stopping_.load(); });
 
             // Check if we should exit: stopping && no pending work.
-            if (stopping_.load(std::memory_order_acquire) && !pending_) {
+            if (stopping_.load() && !pending_) {
                 break;
             }
 
