@@ -22,6 +22,7 @@ on:
       - 'docs/**'
       - 'LICENSE'
       - '.gitignore'
+      - '.serena/**'
   pull_request:
     branches: [main]
     paths-ignore:
@@ -29,6 +30,7 @@ on:
       - 'docs/**'
       - 'LICENSE'
       - '.gitignore'
+      - '.serena/**'
   schedule:
     - cron: '0 2 * * 0'
 
