@@ -188,3 +188,27 @@ status takes priority over other transient status text.
 - ROADMAP Phase 50 entry; Serena memory updates (`mem:module/ui`,
   `mem:module/vault`, `mem:module/app`, `mem:core` commit-lane invariant note).
 - One PR; owner merges.
+
+## As built (deltas)
+
+Deviations from the design spec, all approved during implementation:
+
+- **Whole-chunk write-mutex holds (no bounded slices).** The spec proposed ~8 MiB bounded slices to keep main-thread commits snappy; implemented as full chunks under mutex (simpler and interleaving hazards ruled out). Main-thread commit waits are acceptable because chunks average <10 MiB and worker is I/O-bound (disk read slower than encrypt/write).
+
+- **CommitLane owns its own thread and is stop-aware.** Lane runs on a jthread owned by ImportQueue, refuses enqueue/flush when stopped (prevents enqueueing into a dead thread), halts gracefully on Vault::lock()/reset() auto-stop before key wipe.
+
+- **Coalescing single-slot pending, generation-ordered.** Lane buffers exactly one pending blob (not N); each generation replaces the prior, ensuring newest commits always win even if the worker thread lags behind burst enqueues.
+
+- **Vault: read_fp_ (second read-only unbuffered handle), write_mutex_ + header_mutex_ (for slot-field contention).** All read paths (thumbnail decrypt, full-image fetch, VideoSource) moved to read_fp_, eliminating contention with worker appends on the main write FILE*.
+
+- **Staging.h: stage_image/stage_video/attach_staged/ensure_gallery_path.** stage_* run on any thread, fflush (no fsync); attach_* main-thread only, no commit issued (commit scheduled separately by batching policy). Index I/O split into serialize_plain_index (memory, fast) and commit_plain_blob (write + fsync).
+
+- **ImportQueue: lookahead cap 8 items/256MiB, per-session state reset.** Strict in-order resequencing; lookahead bounded to prevent unbounded decode heap growth. Per-session reset clears stale tasks/records to prevent old-vault orphan attachments.
+
+- **ImportStatusScreen, footer, Shift+I flow.** UI shows per-item cancel/reorder, lane-failure banner for hard stops, scrolling queue list. Footer priority: error > import summary > status. Exclusive-op guards ("Imports running — press Shift+I for status") block delete/transfer/combine/compact.
+
+- **App: drain() each frame, Screen::on_vault_changed() broadcast (4 overrides).** Grid, viewer, favorites, advanced-search all override on_vault_changed to refetch cached IndexNode* refs after tree mutations.
+
+- **Password-at-enqueue for encrypted archives.** Wrong password discovered mid-import fails the task; no re-prompt.
+
+- **Batched commit durability trade-off.** Crash mid-batch loses at most the last uncommitted batch's index entries; orphaned chunks are dead ciphertext reclaimed by Shift+C compact. 3-phase slot swap unchanged; integrity guaranteed.

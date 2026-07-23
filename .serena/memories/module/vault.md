@@ -13,6 +13,18 @@ sub-galleries — no leaf-only restriction (the old insertion guards were remove
 ## vault/ — `.osv` container
 Core files: `vault.*`, `header.*`, `index.*`, `chunk_store.*`, `byte_io.h`, `file_util.h`.
 
+### Phase 50 concurrency: "main-thread tree" architecture
+The index tree is **main-thread-only**; no tree locks exist. The vault file opens two handles + one write-path mutex for thread-safe import background queue:
+- **`read_fp_`** — second read-only unbuffered FILE* (opened at unlock, closed+wiped at lock). All read paths move to it: thumbnail decrypt, full-image fetch, `VideoSource` (chunks are immutable once appended, so reads never race worker appends). No contention with worker writes.
+- **`write_fp_` + `write_mutex_`** — original write handle guarded by a std::mutex. Worker appends chunks under lock (whole chunks, no bounded slices to avoid interleaving hazards).
+- **`header_mutex_`** — separate guard for slot-field mutations during commit (active_slot flip + generation update), to reduce lock hold time contention.
+- **`Vault::lock()` auto-stops the CommitLane** before key wipe, preventing mid-flight commits after the key is gone.
+
+### staging.* (Phase 50) — worker-to-tree hand-off
+- `stage_image(Vault, data, ...)` / `stage_video(data, ...)` — any thread, stream encrypted chunks to disk with fflush (no fsync), return a ready IndexNode with chunk spans. Plaintext stays mlock'd; nodes are ready but **not attached**.
+- `attach_staged(Vault, node, gallery_path)` — main-thread only, performs tree insertion, **no commit issued**. Commit is scheduled separately by batching policy (see CommitLane below).
+- `ensure_gallery_path(Vault, path)` — creates missing ancestor galleries as needed on attach.
+
 ### safe_name.* — node-name rules (a node name is a single path COMPONENT, never a path)
 - `is_safe_node_name` = REJECT. Vault ingress trust boundary: `add_image`/`add_video`/
   `create_gallery`.
@@ -112,14 +124,24 @@ Core files: `vault.*`, `header.*`, `index.*`, `chunk_store.*`, `byte_io.h`, `fil
   `CombineTally{media_moved,media_skipped,galleries_merged,galleries_moved}`.
 
 ### Internal components (extracted from Vault to keep it under the S1448 cap)
-- `index_io.*` — index serialisation + crash-safe double-buffer slot swap (append → write
+- `index_io.*` (Phase 50 split) — index serialisation + crash-safe double-buffer slot swap (append → write
   inactive slot → flip active_slot; 3-phase atomic commit). `IndexIoContext` bundles mutable
-  state; `index_io::commit_index` owns the persistence logic.
+  state. **Split into**:
+  - `serialize_plain_index(vault, context)` — memory-only, fast, produces a serialized index blob.
+  - `commit_plain_blob(vault, blob, generation)` — enqueues the blob to CommitLane with a generation tag for ordered, coalesced writes.
 - `vault_ops.*` — tree navigation + path resolution + structural validation (split_path,
   resolve_gallery, resolve_node_impl, child_named, holds_media, holds_galleries,
   for_each_media, relocate_node_chunks). Pure traversal, no I/O. `push_child(children,node)`
   wraps the `vector::push_back` in try/catch (alloc failure → IoError, not terminate());
   `push_child_fail_after` mirrors `resize_fail_after` fault-injection for tests.
+### commit_lane.* (Phase 50) — batched, ordered index commits
+- `CommitLane` owns a jthread + a CV-based work queue. Runs independently, stops gracefully on Vault::lock().
+- `enqueue(generation, blob)` → appends if not stopped; dequeues stale blobs (coalescing).
+- Main thread serializes index every N=32 files or 2s, tags it with generation, hands to lane.
+- Lane writes the inactive slot, fsyncs, flips active_slot in generation order — newest blob always wins.
+- Write failure is a hard stop: queue halts, error surfaces on status page; already-committed work safe.
+- Commit-lane flush runs on queue drain, cancel, lock, and shutdown (ordered final write before key wipe).
+
 - `chunk_codec.*` — pure adaptive store-if-smaller deflate framing: method byte (0=raw,
   1=deflate) + bounded `orig_len` inside the AEAD; used by ChunkStore's framed ctor flag
   (← header `FLAG_FRAMED_CHUNKS` bit) + the index-blob sites. miniz tdefl/tinfl, no new dep.

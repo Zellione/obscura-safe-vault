@@ -27,6 +27,10 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `clamp_scroll`, and hit_test all use it, so tiles/rows stop above the footer instead of
   scrolling under its text. `render_grid`/`render_list` take `bottom`, NOT the window height.
   hit_test rejects `my` outside `[OY, content_bottom)` — the chrome is not pickable.
+  **Phase 50:** Gain `on_vault_changed()` virtual (overridden by GalleryGrid/ImageViewer/FavoritesScreen/AdvancedSearchScreen);
+  called by App when the index tree changes (import drain, add/delete, etc.) to refetch stale IndexNode* refs. Password-at-enqueue
+  for encrypted archives (wrong password → task Failed, no re-prompt). Footer priority: error > import summary > status.
+  Exclusive-op guards: delete/transfer/combine/compact blocked when import queue non-empty ("Imports running — press Shift+I").
 - `favorites_screen.*` render clips scrolled tiles to below OY (the fixed header) and draws a
   BORDER hairline there — without the clip a scrolled tile paints over the title/[F1]/status.
   Covers all four subclasses. `tag_overview.*` paginates (rows never scroll partially), so it
@@ -244,6 +248,26 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   (tolerant, exception-free) -> `ArchiveMeta{title_english,title_japanese,tags}`;
   `meta_gallery_name` (english->japanese->fallback; '/'->'_') + `meta_gallery_tags` (japanese
   title first, searchable). Unit-tested.
+
+## Background import queue (Phase 50)
+- `import_queue.*` — `ImportQueue`: lifecycle managed by App (owns one, destroyed on app shutdown).
+  One worker jthread + decode pool (min(hw,4) threads). Per-file pipeline: read source → decode → encrypt → append chunks → stage IndexNode.
+  Ordering: decode parallel, append+attach strictly in sequence via a resequencer (lookahead cap 8 items/256MiB).
+  Methods: `enqueue` (any thread, refuse if stopped), `abort_and_flush` (idempotent), `begin_session` (clears stale state/flags),
+  `set_exclusive` (inhibit until released). Worker stops gracefully on Vault::lock().
+- `import_model.*` — pure, SDL-free queue model: `ImportTask` (id, kind, source, dest, gallery_name, optional archive password);
+  `ImportRecord{task, state, progress, error}`; `ImportQueueModel` (FIFO/reorder/cancel/drain).
+  `footer_import_summary(records,lane_error)` — formats "Importing X 128/450 · 2 queued" for the footer.
+  Unit-tested, no vault dep.
+- `import_status_screen.*` — `NavKind::ToImportStatus`, opened via **`Shift+I`** or footer click. Shows:
+  current item (name, progress bar, source kind), queued items (Ctrl+Up/Down reorder, Del cancel), finished/failed with outcomes.
+  `C` clears finished entries. Lane-failure banner surfaces hard stops. Esc returns to previous screen.
+  Free friend gate (exclusive-op guards): blocks delete/transfer/combine/compact when queue is non-empty.
+- `MediaSink` (Phase 50) — executor seam for add_image/add_video, unifying legacy `FileOpJob` path (now retired)
+  and new queue path. Abstract `struct MediaSink` with `add_image(Vault,...)` and `add_video(Vault,...)` virtuals;
+  `DirectVaultSink` calls vault directly (synchronous); `test_only_*` seam for testing.
+- **Retired:** `ZipImportJob` (entire class), `FileOpJob::start_import` (method); executors (zip_import, archive_import, etc.)
+  reused by queue unchanged. GalleryGrid `Z` key now enqueues instead of launching a legacy job.
 
 ## Pure view / sort / model helpers (SDL-free unless noted, all unit-tested)
 - `gallery_view.h/.cpp` — `GalleryView{List,GridS,GridM,GridL,GridXL}` shared enum;
