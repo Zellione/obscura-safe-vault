@@ -336,15 +336,16 @@ void App::dispatch_event(const SDL_Event& e)
         }
         return;
     }
-    if (bool commit = false;
-        overlays_.settings.open && ui::handle_settings_event(overlays_.settings, window_, e, commit) && commit &&
-        overlays_.settings.vault_unlocked && active_) {
-        if (vault::set_vault_settings(*active_, overlays_.settings.draft) != vault::VaultResult::Ok) {
+    // Check `open` ONCE, up front: handle_settings_event may close the overlay
+    // (Esc), and the event must still be swallowed on that same frame — otherwise
+    // the Esc leaks through to the screen below, which reads it as "go up a level".
+    if (overlays_.settings.open) {
+        if (bool commit = false;
+            ui::handle_settings_event(overlays_.settings, window_, e, commit) && commit &&
+            overlays_.settings.vault_unlocked && active_ &&
+            vault::set_vault_settings(*active_, overlays_.settings.draft) != vault::VaultResult::Ok) {
             overlays_.settings.error = "Could not save settings";
         }
-        return;   // the overlay swallows every event while open, like the help popup
-    }
-    if (overlays_.settings.open) {
         return;   // the overlay swallows every event while open, like the help popup
     }
     if (screen_) screen_->handle_event(e);

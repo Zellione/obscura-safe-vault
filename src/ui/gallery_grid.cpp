@@ -1523,12 +1523,16 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float bottom)
     const float cell = cell_size_for(view_);
     // Per-gallery, not per-tile: a uniform reservation is what stops rows going
     // ragged. Recomputed each frame rather than cached, so toggling the setting
-    // or re-tagging a child can never leave a stale reservation behind.
-    const auto& settings = vault::vault_settings(vault_);
-    const float chip_h   = (settings.tiles_show_tags && any_chips_to_show(children_))
-                               ? CHIP_ROW_H
-                               : 0.0f;
-    const auto& cats     = settings.categories;
+    // or re-tagging a child can never leave a stale reservation behind. Only the
+    // two large densities carry a chip line — the ~28 px font needs a full
+    // CHIP_LINE_H of clear space below the label, which a GridS/GridM cell cannot
+    // spare without swallowing the thumbnail.
+    const bool  wide_tiles = view_ == GalleryView::GridL || view_ == GalleryView::GridXL;
+    const auto& settings   = vault::vault_settings(vault_);
+    const float chip_h     = (wide_tiles && settings.tiles_show_tags && any_chips_to_show(children_))
+                                 ? CHIP_LINE_H
+                                 : 0.0f;
+    const auto& cats       = settings.categories;
     cols_ = grid_columns(W - 2 * OX, cell, GAP);
     const auto [first_idx, last_idx] = grid_visible_range(
         scroll_, cell, GAP, OY, bottom, cols_, static_cast<int>(children_.size()));
@@ -1567,8 +1571,12 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float bottom)
 
         if (chip_h > 0.0f) {
             // Own tags only: inherited tags are identical across every tile in
-            // this gallery, so they would be pure noise here.
-            draw_tag_chips(r, font_, cellr.x + 8, label_y + ph, cell - 16, n->tags, cats);
+            // this gallery, so they would be pure noise here. The chip sits in a
+            // CHIP_LINE_H box directly below the label, its content centred so the
+            // ~28 px ink clears the label's baseline instead of overlapping it.
+            draw_tag_chips(r, font_, cellr.x + 8,
+                           label_y + ph + (chip_h - CHIP_ROW_H) * 0.5f,
+                           cell - 16, n->tags, cats);
         }
 
         draw_tile_badges(r, font_, cellr, cell, sel_.contains(i), n);

@@ -16,7 +16,14 @@ namespace ui {
 inline constexpr float CHIP_DOT     = 9.0f;    // dot diameter
 inline constexpr float CHIP_GAP     = 7.0f;    // dot → text
 inline constexpr float CHIP_SPACING = 12.0f;   // chip → chip
-inline constexpr float CHIP_ROW_H   = 16.0f;   // height a chip line reserves
+// CHIP_ROW_H is the dot band used to CENTRE a chip's content (draw_tag_chips
+// centres at y + CHIP_ROW_H/2). It is NOT a safe line pitch: the UI font is
+// ~28 px, so packing chip rows CHIP_ROW_H apart makes the glyph ink of adjacent
+// rows overlap. When a surface stacks chip lines (the detail panel) or places a
+// chip line beneath 28 px text (grid tiles), it must advance by CHIP_LINE_H, a
+// full text line, and centre the content within that taller box.
+inline constexpr float CHIP_ROW_H   = 16.0f;   // dot band (for centring), NOT a line pitch
+inline constexpr float CHIP_LINE_H  = 30.0f;   // full line a stacked chip row must reserve
 
 // How many chips of the given pixel widths fit in `avail_w`, and how many are
 // folded into a "+N" counter of width `overflow_w`. A chip width is the whole
