@@ -425,17 +425,14 @@ bool ImportQueue::cancel(uint64_t id)
     std::lock_guard lock(mu_);
 
     for (auto& task : tasks_) {
-        if (task.id == id) {
-            if (task.state == Queued) {
-                task.state = Cancelled;
-                return true;
-            } else if (task.state == Running) {
-                if (task.progress)
-                    task.progress->cancel.store(true);
-                return true;
-            }
-            return false;
+        if (task.id != id) continue;
+        if (task.state == Queued) {
+            task.state = Cancelled;
+            return true;
         }
+        if (task.state != Running) return false;   // finished rows can't be cancelled
+        if (task.progress) task.progress->cancel.store(true);
+        return true;
     }
     return false;
 }

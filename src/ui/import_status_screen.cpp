@@ -88,31 +88,39 @@ void draw_queued_finished_row(gfx::Renderer& r, gfx::FontAtlas& font, const Impo
     r.draw_text(font, OX + 14, ty, display, text_color);
 }
 
+// Geometry shared by every row of one frame's list rendering; bundled so the
+// per-row drawer needs the whole layout, not eleven loose scalars.
+struct RowLayout {
+    float list_top = 0;
+    float bottom   = 0;
+    float row_h    = 0;
+    float w        = 0;
+    int   first    = 0;
+    int   sel      = 0;
+    float scroll   = 0;
+};
+
 // Draw a single row of the import list
-void draw_row(gfx::Renderer& r, gfx::FontAtlas& font, float list_top, float bottom,
-              float row_h, float W, int i, int first, int sel, float scroll_,
-              const std::vector<ImportTaskInfo>& rows_)
+void draw_row(gfx::Renderer& r, gfx::FontAtlas& font, const RowLayout& lay, int i,
+              const ImportTaskInfo& task)
 {
     using namespace gfx::theme;
-    const float    y    = list_top + static_cast<float>(i - first) * row_h - scroll_;
-    if (y + row_h < list_top || y > bottom) return;  // cull off-screen rows
+    const float y = lay.list_top + static_cast<float>(i - lay.first) * lay.row_h - lay.scroll;
+    if (y + lay.row_h < lay.list_top || y > lay.bottom) return;  // cull off-screen rows
 
-    const SDL_FRect row{OX, y, W - 2 * OX, row_h - 4};
-    const bool     sel_row  = (i == sel);
-    const float ph = font.pixel_height();
+    const SDL_FRect row{OX, y, lay.w - 2 * OX, lay.row_h - 4};
+    const bool      sel_row = (i == lay.sel);
+    const float     ph      = font.pixel_height();
 
     // Draw selection glow and background
     if (sel_row) r.draw_selection_glow(row, RADIUS, ACCENT);
     r.draw_round_rect(row, RADIUS, sel_row ? SURFACE_HI : SURFACE);
     r.draw_round_rect(row, RADIUS, sel_row ? ACCENT : BORDER, /*filled*/ false);
 
-    // Row content based on state
-    const ImportTaskInfo& task = rows_[i];
-
     if (task.state == ImportTaskState::Running) {
-        draw_running_row(r, font, task, y, W, row_h, ph);
+        draw_running_row(r, font, task, y, lay.w, lay.row_h, ph);
     } else {
-        draw_queued_finished_row(r, font, task, y, row_h, ph, W);
+        draw_queued_finished_row(r, font, task, y, lay.row_h, ph, lay.w);
     }
 }
 
@@ -124,63 +132,57 @@ ImportStatusScreen::ImportStatusScreen(gfx::Window& win, gfx::FontAtlas& font,
 {
 }
 
-void ImportStatusScreen::handle_event(const SDL_Event& e)
+void ImportStatusScreen::move_selection(int delta)
 {
-    switch (e.type) {
-        case SDL_EVENT_KEY_DOWN:
-            switch (e.key.key) {
-                case SDLK_UP:
-                    if ((e.key.mod & SDL_KMOD_CTRL) != 0) {
-                        // Ctrl+Up to reorder upward
-                        if (!rows_.empty() && sel_ >= 0 && sel_ < static_cast<int>(rows_.size())) {
-                            (void)queue_.reorder(rows_[sel_].id, -1);
-                        }
-                    } else {
-                        // Regular Up to move selection
-                        if (!rows_.empty()) sel_ = std::max(0, sel_ - 1);
-                    }
-                    break;
-                case SDLK_DOWN:
-                    if ((e.key.mod & SDL_KMOD_CTRL) != 0) {
-                        // Ctrl+Down to reorder downward
-                        if (!rows_.empty() && sel_ >= 0 && sel_ < static_cast<int>(rows_.size())) {
-                            (void)queue_.reorder(rows_[sel_].id, 1);
-                        }
-                    } else {
-                        // Regular Down to move selection
-                        if (!rows_.empty()) sel_ = std::min(static_cast<int>(rows_.size()) - 1, sel_ + 1);
-                    }
-                    break;
-                case SDLK_DELETE:
-                    if (!rows_.empty() && sel_ >= 0 && sel_ < static_cast<int>(rows_.size())) {
-                        (void)queue_.cancel(rows_[sel_].id);
-                    }
-                    break;
-                case SDLK_C:
-                    queue_.clear_finished();
-                    break;
-                case SDLK_ESCAPE:
-                case SDLK_Q:
-                    request(back_.kind, back_.path, back_.index);
-                    break;
-                case SDLK_I:
-                    // Shift+I to close the import status screen (toggle feel)
-                    if ((e.key.mod & SDL_KMOD_SHIFT) != 0) {
-                        request(back_.kind, back_.path, back_.index);
-                    }
-                    break;
-                default: break;
-            }
+    if (rows_.empty()) return;
+    sel_ = std::clamp(sel_ + delta, 0, static_cast<int>(rows_.size()) - 1);
+}
+
+// Ctrl+Up/Down: reorder the selected QUEUED row (the queue rejects other states).
+void ImportStatusScreen::reorder_selected(int delta)
+{
+    if (rows_.empty() || sel_ < 0 || sel_ >= static_cast<int>(rows_.size())) return;
+    (void)queue_.reorder(rows_[sel_].id, delta);
+}
+
+void ImportStatusScreen::handle_key(const SDL_KeyboardEvent& key)
+{
+    const bool ctrl = (key.mod & SDL_KMOD_CTRL) != 0;
+    switch (key.key) {
+        case SDLK_UP:
+            if (ctrl) reorder_selected(-1);
+            else      move_selection(-1);
             break;
-        case SDL_EVENT_MOUSE_WHEEL:
-            // Scroll via wheel: move selection and adjust scroll to keep selection visible
-            if (e.wheel.y > 0) {
-                if (!rows_.empty()) sel_ = std::max(0, sel_ - 1);
-            } else if (e.wheel.y < 0) {
-                if (!rows_.empty()) sel_ = std::min(static_cast<int>(rows_.size()) - 1, sel_ + 1);
-            }
+        case SDLK_DOWN:
+            if (ctrl) reorder_selected(1);
+            else      move_selection(1);
+            break;
+        case SDLK_DELETE:
+            if (!rows_.empty() && sel_ >= 0 && sel_ < static_cast<int>(rows_.size()))
+                (void)queue_.cancel(rows_[sel_].id);
+            break;
+        case SDLK_C:
+            queue_.clear_finished();
+            break;
+        case SDLK_ESCAPE:
+        case SDLK_Q:
+            request(back_.kind, back_.path, back_.index);
+            break;
+        case SDLK_I:
+            // Shift+I closes the screen again (toggle feel).
+            if ((key.mod & SDL_KMOD_SHIFT) != 0) request(back_.kind, back_.path, back_.index);
             break;
         default: break;
+    }
+}
+
+void ImportStatusScreen::handle_event(const SDL_Event& e)
+{
+    if (e.type == SDL_EVENT_KEY_DOWN) {
+        handle_key(e.key);
+    } else if (e.type == SDL_EVENT_MOUSE_WHEEL && e.wheel.y != 0) {
+        // Wheel moves the selection; render() keeps it visible.
+        move_selection(e.wheel.y > 0 ? -1 : 1);
     }
 }
 
@@ -211,8 +213,8 @@ void ImportStatusScreen::update(double dt)
 void ImportStatusScreen::render(gfx::Renderer& r)
 {
     using namespace gfx::theme;
-    const float W = static_cast<float>(win_.width());
-    const float H = static_cast<float>(win_.height());
+    const auto  W  = static_cast<float>(win_.width());
+    const auto  H  = static_cast<float>(win_.height());
     const float ph = font_.pixel_height();
 
     // Header band: "Imports" + "[F1] Help"
@@ -241,19 +243,21 @@ void ImportStatusScreen::render(gfx::Renderer& r)
     // Compute scroll geometry
     const float bottom = H - 24.0f;  // reserve footer band
     const float row_h = ph + 2 * PAD;
-    const int visible = std::max(1, static_cast<int>((bottom - list_top) / row_h));
-    int first = 0;
-    const int count = static_cast<int>(rows_.size());
+    const int  visible = std::max(1, static_cast<int>((bottom - list_top) / row_h));
+    int        first   = 0;
+    const auto count   = static_cast<int>(rows_.size());
     if (count > visible) first = std::clamp(sel_ - visible / 2, 0, count - visible);
 
     // Clamp scroll position
-    const float content_h = row_h * static_cast<float>(count);
+    const float content_h  = row_h * static_cast<float>(count);
     const float max_scroll = std::max(0.0f, content_h - (bottom - list_top));
     scroll_ = std::clamp(scroll_, 0.0f, max_scroll);
 
     // Render rows
+    const RowLayout lay{.list_top = list_top, .bottom = bottom, .row_h = row_h,
+                        .w = W, .first = first, .sel = sel_, .scroll = scroll_};
     for (int i = first; i < first + visible && i < count; ++i) {
-        draw_row(r, font_, list_top, bottom, row_h, W, i, first, sel_, scroll_, rows_);
+        draw_row(r, font_, lay, i, rows_[static_cast<size_t>(i)]);
     }
 }
 

@@ -24,6 +24,10 @@ public:
     [[nodiscard]] bool blocks_idle_lock() const override { return false; }  // App-level import_busy suppression covers the queue; this screen itself never owns vault work
 
 private:
+    void move_selection(int delta);
+    void reorder_selected(int delta);          // Ctrl+Up/Down on the selected queued row
+    void handle_key(const SDL_KeyboardEvent& key);
+
     gfx::Window&   win_;
     gfx::FontAtlas& font_;
     ImportQueue&   queue_;

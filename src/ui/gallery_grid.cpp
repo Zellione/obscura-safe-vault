@@ -1298,8 +1298,7 @@ void GalleryGrid::update(double dt)
 
     // Phase 50: track import footer summary changes for repainting
     const std::string footer = queue_.footer_summary();
-    const bool footer_changed = footer != last_footer_;
-    if (footer_changed) {
+    if (const bool footer_changed = footer != last_footer_; footer_changed) {
         last_footer_ = footer;
         mark_dirty();
     }

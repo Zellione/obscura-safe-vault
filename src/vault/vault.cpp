@@ -195,8 +195,8 @@ void collect_favorites(const IndexNode& node, std::string_view prefix,
     for (const auto& child : node.children) {
         const std::string full_path = join_child_path(prefix, child.name);
 
-        const bool matches = want_galleries ? child.is_gallery() : child.is_media();
-        if (child.favorite && matches) {
+        if (const bool matches = want_galleries ? child.is_gallery() : child.is_media();
+            child.favorite && matches) {
             out.push_back(SearchHit{
                 .path           = full_path,
                 .is_gallery     = child.is_gallery(),
@@ -306,9 +306,9 @@ void adv_search_dfs(const IndexNode& node, std::string_view prefix,
         auto              effective = compute_effective_tags(child.tags, inherited);
         const std::string full_path = join_child_path(prefix, child.name);
 
-        const bool in_scope = child.is_gallery() ? (scope == Galleries || scope == Both)
-                                                 : (scope == Images || scope == Both);
-        if (in_scope) {
+        if (const bool in_scope = child.is_gallery() ? (scope == Galleries || scope == Both)
+                                                     : (scope == Images || scope == Both);
+            in_scope) {
             const ui::EvalResult r = ui::evaluate(query, child.name, effective);
             if (r.matched) {
                 out.emplace_back(r.score, SearchHit{
@@ -463,8 +463,7 @@ VaultResult Vault::create(const std::string&       path,
     out.header_mutex_ = std::make_unique<std::mutex>();
 
     // Write the initial (empty) index + a valid header via the crash-safe path.
-    const VaultResult r = out.commit_index();
-    if (r != VaultResult::Ok) { out.reset(); return r; }
+    if (const VaultResult r = out.commit_index(); r != VaultResult::Ok) { out.reset(); return r; }
 
     // Open read_fp_ after the initial commit so it sees the complete file.
     out.read_fp_     = std::fopen(path.c_str(), "rb");
@@ -580,8 +579,8 @@ VaultResult Vault::unlock(std::span<const uint8_t> password,
 
     // Load the index from the active slot, falling back to the other slot if the
     // active one is unreadable (crash during a swap left it truncated/corrupt).
-    const uint8_t active = header_.active_slot == 0 ? 0 : 1;
-    if (!try_load_slot(fp_, header_, master_key_.as_span(), active, root_,
+    if (const uint8_t active = header_.active_slot == 0 ? 0 : 1;
+        !try_load_slot(fp_, header_, master_key_.as_span(), active, root_,
                        saved_searches_, settings_) &&
         !try_load_slot(fp_, header_, master_key_.as_span(), active == 0 ? 1 : 0, root_,
                        saved_searches_, settings_)) {
@@ -694,12 +693,12 @@ VaultResult Vault::add_image(std::string_view         gallery_path,
     if (staged.status != Ok) return staged.status;
 
     // Attach the staged node to the tree (no commit yet).
-    const VaultResult r = attach_staged(*this, gallery_path, std::move(staged.node));
-    if (r != Ok) return r;
+    if (const VaultResult r = attach_staged(*this, gallery_path, std::move(staged.node));
+        r != Ok) return r;
 
     // Synchronize the staged chunks to stable storage (fsync).
-    ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
-    if (!store.sync()) return IoError;
+    if (ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
+        !store.sync()) return IoError;
 
     return commit_index();
 }
@@ -770,8 +769,7 @@ VaultResult Vault::add_video(std::string_view         gallery_path,
     // Fail-fast pre-checks: do these before staging to avoid orphaning chunks
     // on the synchronous path. Probe the video file first to detect metadata and
     // generate poster — ensures we don't create orphan chunks if the video is invalid.
-    media::VideoProbeResult probe;
-    if (!media::probe_video(file_data, probe)) return InvalidArg;
+    if (media::VideoProbeResult probe; !media::probe_video(file_data, probe)) return InvalidArg;
 
     IndexNode* g = find_gallery(gallery_path);
     if (!g) return NotFound;
@@ -782,12 +780,12 @@ VaultResult Vault::add_video(std::string_view         gallery_path,
     if (staged.status != Ok) return staged.status;
 
     // Attach the staged node to the tree (no commit yet).
-    const VaultResult r = attach_staged(*this, gallery_path, std::move(staged.node));
-    if (r != Ok) return r;
+    if (const VaultResult r = attach_staged(*this, gallery_path, std::move(staged.node));
+        r != Ok) return r;
 
     // Synchronize the staged chunks to stable storage (fsync).
-    ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
-    if (!store.sync()) return IoError;
+    if (ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
+        !store.sync()) return IoError;
 
     return commit_index();
 }
