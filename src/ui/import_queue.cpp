@@ -284,6 +284,7 @@ void ImportQueue::end_session()
 
 void ImportQueue::abort_and_flush()
 {
+    using enum ImportTaskState;
     {
         std::lock_guard lock(mu_);
 
@@ -295,7 +296,7 @@ void ImportQueue::abort_and_flush()
         // Also wipe any queued archive passwords (security invariant #2)
         for (auto& task : tasks_) {
             if (!task.finished()) {
-                task.state = ImportTaskState::Cancelled;
+                task.state = Cancelled;
             }
             if (task.progress) {
                 task.progress->cancel.store(true);
@@ -355,6 +356,7 @@ void ImportQueue::abort_and_flush()
 uint64_t ImportQueue::enqueue_files(std::vector<std::filesystem::path> files,
                                     std::string dest_gallery)
 {
+    using enum ImportTaskState;
     std::lock_guard lock(mu_);
 
     const uint64_t id = next_task_id_++;
@@ -369,7 +371,7 @@ uint64_t ImportQueue::enqueue_files(std::vector<std::filesystem::path> files,
         .archive_path = {},
         .gallery_name = {},
         .password = {},
-        .state = ImportTaskState::Queued,
+        .state = Queued,
         .imported = 0,
         .skipped = 0,
         .error = {},
@@ -388,6 +390,7 @@ uint64_t ImportQueue::enqueue_archive(std::filesystem::path archive,
                                       ImportTaskKind kind, bool password_protected,
                                       crypto::SecureBytes password)
 {
+    using enum ImportTaskState;
     std::lock_guard lock(mu_);
 
     const uint64_t id = next_task_id_++;
@@ -401,7 +404,7 @@ uint64_t ImportQueue::enqueue_archive(std::filesystem::path archive,
         .archive_path = std::move(archive),
         .gallery_name = std::move(gallery_name),
         .password = std::move(password),
-        .state = ImportTaskState::Queued,
+        .state = Queued,
         .imported = 0,
         .skipped = 0,
         .error = {},
@@ -909,6 +912,7 @@ void ImportQueue::process_files_task(Task& task)
 
 void ImportQueue::process_archive_task(Task& task)
 {
+    using enum ImportTaskState;
     StagingSink sink(*v_, task.dest_gallery, task.id, records_, mu_, task.progress);
 
     // Prepare password
@@ -938,13 +942,13 @@ void ImportQueue::process_archive_task(Task& task)
     task.password.wipe();
 
     if (outcome.needs_password) {
-        task.state = ImportTaskState::Failed;
+        task.state = Failed;
         task.error = "Wrong or missing archive password";
     } else if (!outcome.ok && !outcome.cancelled) {
-        task.state = ImportTaskState::Failed;
+        task.state = Failed;
         task.error = outcome.error;
     } else if (outcome.cancelled) {
-        task.state = ImportTaskState::Cancelled;
+        task.state = Cancelled;
     }
 
     task.imported = outcome.imported;
