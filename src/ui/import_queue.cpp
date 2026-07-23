@@ -590,14 +590,8 @@ std::string ImportQueue::footer_summary() const
 void ImportQueue::worker_loop()
 {
     while (true) {
+        Task* task = nullptr;
         uint64_t task_id = 0;
-        ImportTaskKind task_kind = ImportTaskKind::Files;
-        std::vector<std::filesystem::path> files;
-        std::filesystem::path archive_path;
-        std::string gallery_name, dest_gallery;
-        crypto::SecureBytes password;
-        std::shared_ptr<vault::OpProgress> progress;
-        bool is_running = false;
 
         {
             std::unique_lock lock(mu_);
@@ -624,80 +618,49 @@ void ImportQueue::worker_loop()
             if (exclusive_)
                 continue;
 
-            // Find the first queued or running task and copy its data
+            // Find the first queued or running task
             for (auto& t : tasks_) {
                 if (t.state == ImportTaskState::Queued) {
-                    // Copy task data
-                    task_id = t.id;
-                    task_kind = t.kind;
-                    files = t.files;
-                    archive_path = t.archive_path;
-                    gallery_name = t.gallery_name;
-                    dest_gallery = t.dest_gallery;
-                    progress = t.progress;
-                    is_running = true;
-
-                    // Mark as running
                     t.state = ImportTaskState::Running;
+                    task = &t;
+                    task_id = t.id;
                     break;
                 } else if (t.state == ImportTaskState::Running) {
                     // Continue processing this one
+                    task = &t;
                     task_id = t.id;
-                    task_kind = t.kind;
-                    files = t.files;
-                    archive_path = t.archive_path;
-                    gallery_name = t.gallery_name;
-                    dest_gallery = t.dest_gallery;
-                    progress = t.progress;
-                    is_running = true;
                     break;
                 }
             }
 
-            if (!is_running)
+            if (!task)
                 continue;
         }
 
-        // Process the task (outside the lock, using copied data)
-        Task temp_task{
-            .id = task_id,
-            .kind = task_kind,
-            .display_name = {},
-            .dest_gallery = dest_gallery,
-            .files = files,
-            .archive_path = archive_path,
-            .gallery_name = gallery_name,
-            .password = {},  // Don't copy password here (it's secure)
-            .state = ImportTaskState::Running,
-            .imported = 0,
-            .skipped = 0,
-            .error = {},
-            .progress = progress,
-        };
+        if (!task)
+            continue;
 
-        if (task_kind == ImportTaskKind::Files) {
-            process_files_task(temp_task);
+        // Process the task (outside the lock)
+        if (task->kind == ImportTaskKind::Files) {
+            process_files_task(*task);
         } else {
-            process_archive_task(temp_task);
+            process_archive_task(*task);
         }
 
         // Mark as done or cancelled
         {
             std::lock_guard lock(mu_);
-            // Find the task by ID and update its state
+            // Find the task by ID and update its state (in case it moved)
             for (auto& t : tasks_) {
                 if (t.id == task_id) {
                     if (t.state == ImportTaskState::Running) {
                         // Check if the task was cancelled
-                        if (progress && progress->cancel.load()) {
+                        if (t.progress && t.progress->cancel.load()) {
                             t.state = ImportTaskState::Cancelled;
                         } else {
                             t.state = ImportTaskState::Done;
                         }
                     }
-                    // Copy back the stats
-                    t.imported = temp_task.imported;
-                    t.skipped = temp_task.skipped;
                     break;
                 }
             }
