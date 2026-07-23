@@ -291,6 +291,12 @@ private:
 
     std::string                            path_;
     std::FILE*                             fp_ = nullptr;
+    // Phase 50: dedicated read-only handle. All const read paths (read_image /
+    // read_thumbnail / read_video / read_thumb_span / VideoSource streaming) use
+    // this so a background stage/commit append on fp_ can never share a file
+    // position with a main-thread read. Opened by create()/open(), closed by
+    // reset(). Chunks are immutable once appended, so reads need no lock.
+    std::FILE*                             read_fp_ = nullptr;
     Header                                 header_;
     bool                                   unlocked_ = false;
     crypto::SecureBuffer<crypto::KEY_SIZE> master_key_;

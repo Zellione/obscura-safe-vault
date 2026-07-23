@@ -5,6 +5,7 @@
 #include <cctype>
 #include <chrono>
 #include <cstring>
+#include <unistd.h>
 #include <utility>
 
 #include "crypto/aead.h"
@@ -331,6 +332,7 @@ Vault::~Vault() { reset(); }
 Vault::Vault(Vault&& o) noexcept
     : path_(std::move(o.path_)),
       fp_(o.fp_),
+      read_fp_(o.read_fp_),
       header_(o.header_),
       unlocked_(o.unlocked_),
       master_key_(std::move(o.master_key_)),
@@ -339,6 +341,7 @@ Vault::Vault(Vault&& o) noexcept
       settings_(std::move(o.settings_))
 {
     o.fp_       = nullptr;
+    o.read_fp_  = nullptr;
     o.unlocked_ = false;
 }
 
@@ -348,6 +351,7 @@ Vault& Vault::operator=(Vault&& o) noexcept
         reset();
         path_       = std::move(o.path_);
         fp_         = o.fp_;
+        read_fp_    = o.read_fp_;
         header_     = o.header_;
         unlocked_   = o.unlocked_;
         master_key_ = std::move(o.master_key_);
@@ -355,6 +359,7 @@ Vault& Vault::operator=(Vault&& o) noexcept
         saved_searches_ = std::move(o.saved_searches_);
         settings_   = std::move(o.settings_);
         o.fp_       = nullptr;
+        o.read_fp_  = nullptr;
         o.unlocked_ = false;
     }
     return *this;
@@ -372,6 +377,7 @@ void Vault::reset() noexcept
 {
     lock();
     if (fp_) { std::fclose(fp_); fp_ = nullptr; }
+    if (read_fp_) { std::fclose(read_fp_); read_fp_ = nullptr; }
     path_.clear();
     header_ = Header{};
     settings_ = VaultSettings{};
@@ -430,6 +436,16 @@ VaultResult Vault::create(const std::string&       path,
 
     // Write the initial (empty) index + a valid header via the crash-safe path.
     if (const VaultResult r = out.commit_index(); r != VaultResult::Ok) { out.reset(); return r; }
+
+    // Open read_fp_ after the initial commit so it sees the complete file.
+    out.read_fp_     = std::fopen(path.c_str(), "rb");
+    if (!out.read_fp_) {
+        out.reset();
+        return VaultResult::IoError;
+    }
+    // Disable buffering on read_fp_ so it always reads fresh from disk,
+    // avoiding buffering conflicts with fp_'s writes.
+    std::setvbuf(out.read_fp_, nullptr, _IONBF, 0);
     return VaultResult::Ok;
 }
 
@@ -455,6 +471,14 @@ VaultResult Vault::open(const std::string& path, Vault& out)
 
     out.path_     = path;
     out.fp_       = fp;
+    out.read_fp_  = std::fopen(path.c_str(), "rb");
+    if (!out.read_fp_) {
+        std::fclose(fp);
+        return VaultResult::IoError;
+    }
+    // Disable buffering on read_fp_ so it always reads fresh from disk,
+    // avoiding buffering conflicts with fp_'s writes.
+    std::setvbuf(out.read_fp_, nullptr, _IONBF, 0);
     out.header_   = h;
     out.unlocked_ = false;
     return VaultResult::Ok;
@@ -683,7 +707,11 @@ VaultResult Vault::read_image(const IndexNode& node, crypto::SecureBytes& out) c
     if (!unlocked_)       return Locked;
     if (!node.is_image()) return InvalidArg;
 
-    if (ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
+    // Ensure writes via fp_ are visible to read_fp_
+    std::fflush(fp_);
+    int fd = fileno(fp_);
+    if (fd >= 0) fsync(fd);
+    if (ChunkStore store(read_fp_, master_key_.as_span(), framed_chunks(header_));
         !store.read_chunk({node.meta.data_offset, node.meta.data_length}, out)) {
         return AuthFailed;  // corrupt / tampered / unreadable chunk
     }
@@ -701,7 +729,9 @@ VaultResult Vault::read_thumbnail(const IndexNode& node, crypto::SecureBytes& ou
     const uint64_t thumb_off = node.is_video() ? node.vmeta.poster_offset : node.meta.thumb_offset;
     if (thumb_len == 0) return NotFound;
 
-    if (ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
+    // Ensure writes via fp_ are visible to read_fp_
+    std::fflush(fp_);
+    if (ChunkStore store(read_fp_, master_key_.as_span(), framed_chunks(header_));
         !store.read_chunk({thumb_off, thumb_len}, out)) {
         return AuthFailed;
     }
@@ -715,7 +745,9 @@ VaultResult read_thumb_span(const Vault& v, uint64_t offset, uint64_t length,
     if (!v.unlocked_)  return Locked;
     if (length == 0)   return InvalidArg;
 
-    if (ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+    // Ensure writes via fp_ are visible to read_fp_
+    std::fflush(v.fp_);
+    if (ChunkStore store(v.read_fp_, v.master_key_.as_span(), framed_chunks(v.header_));
         !store.read_chunk({offset, length}, out)) {
         return AuthFailed;
     }
@@ -801,7 +833,9 @@ VaultResult Vault::read_video(const IndexNode& node, crypto::SecureBytes& out) c
     if (!node.is_video()) return InvalidArg;
 
     if (!out.resize(node.vmeta.orig_size)) return IoError;
-    ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
+    // Ensure writes via fp_ are visible to read_fp_
+    std::fflush(fp_);
+    ChunkStore store(read_fp_, master_key_.as_span(), framed_chunks(header_));
     size_t pos = 0;
     for (const VideoChunk& c : node.vmeta.chunks) {
         crypto::SecureBytes piece;
@@ -1354,26 +1388,31 @@ VaultResult Vault::compact(OpProgress* progress)
     // Atomic commit point: crash-safe 3-step rename sequence to enable secure
     // wipe of the original file (Task 7). At every instant, either the original
     // or .old file exists complete under a discoverable name.
-    // Close our handle first — Windows refuses to replace a file that is open
+    // Close our handles first — Windows refuses to replace a file that is open
     // (POSIX would happily swap the inode under us).
     std::fclose(fp_);
     fp_ = nullptr;
+    if (read_fp_) {
+        std::fclose(read_fp_);
+        read_fp_ = nullptr;
+    }
     const std::string old_path = path_ + ".old";
 
     // Step 1: Rename original aside (vault.osv -> vault.osv.old, fsync dir).
     // If this fails, the temp file is abandoned and the original remains in place.
     if (!fileutil::rename_file(path_, old_path)) {
         std::remove(tmp_path.c_str());
-        // The original is untouched; reacquire our handle to it.
+        // The original is untouched; reacquire our handles to it.
         fp_ = std::fopen(path_.c_str(), "r+b");
-        if (!fp_) reset();  // intact on disk; force a clean re-open
+        read_fp_ = std::fopen(path_.c_str(), "rb");
+        if (!fp_ || !read_fp_) reset();  // intact on disk; force a clean re-open
         return IoError;
     }
     fileutil::sync_dir_of(old_path);
 
     // Step 2: Rename temp into place (vault.osv.compact -> vault.osv, fsync dir).
     // If this fails, vault.osv.old still exists with the original intact;
-    // reacquire the original handle.
+    // reacquire the original handles.
     if (!fileutil::rename_file(tmp_path, path_)) {
         // vault.osv.old has the original; vault.osv.compact is abandoned.
         std::remove(tmp_path.c_str());
@@ -1382,7 +1421,8 @@ VaultResult Vault::compact(OpProgress* progress)
             std::fprintf(stderr, "[Vault] compact recovery: could not restore %s from %s — vault remains at the .old path\n",
                          path_.c_str(), old_path.c_str());
         fp_ = std::fopen(path_.c_str(), "r+b");
-        if (!fp_) reset();  // intact on disk; force a clean re-open
+        read_fp_ = std::fopen(path_.c_str(), "rb");
+        if (!fp_ || !read_fp_) reset();  // intact on disk; force a clean re-open
         return IoError;
     }
     fileutil::sync_dir_of(path_);
@@ -1395,12 +1435,15 @@ VaultResult Vault::compact(OpProgress* progress)
     fileutil::wipe_and_remove(old_path);
 
     fp_ = std::fopen(path_.c_str(), "r+b");
-    if (!fp_) {
+    read_fp_ = std::fopen(path_.c_str(), "rb");
+    if (!fp_ || !read_fp_) {
         // The compacted vault is intact on disk but we lost our handle to it;
         // wipe keys and force a clean re-open rather than limp along.
         reset();
         return IoError;
     }
+    // Disable buffering on read_fp_ (same as in create/open).
+    std::setvbuf(read_fp_, nullptr, _IONBF, 0);
     header_ = h;
     root_   = std::move(new_root);
     return Ok;
