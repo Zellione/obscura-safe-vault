@@ -5,7 +5,6 @@
 #include <cctype>
 #include <chrono>
 #include <cstring>
-#include <unistd.h>
 #include <utility>
 
 #include "crypto/aead.h"
@@ -707,10 +706,6 @@ VaultResult Vault::read_image(const IndexNode& node, crypto::SecureBytes& out) c
     if (!unlocked_)       return Locked;
     if (!node.is_image()) return InvalidArg;
 
-    // Ensure writes via fp_ are visible to read_fp_
-    std::fflush(fp_);
-    int fd = fileno(fp_);
-    if (fd >= 0) fsync(fd);
     if (ChunkStore store(read_fp_, master_key_.as_span(), framed_chunks(header_));
         !store.read_chunk({node.meta.data_offset, node.meta.data_length}, out)) {
         return AuthFailed;  // corrupt / tampered / unreadable chunk
@@ -729,8 +724,6 @@ VaultResult Vault::read_thumbnail(const IndexNode& node, crypto::SecureBytes& ou
     const uint64_t thumb_off = node.is_video() ? node.vmeta.poster_offset : node.meta.thumb_offset;
     if (thumb_len == 0) return NotFound;
 
-    // Ensure writes via fp_ are visible to read_fp_
-    std::fflush(fp_);
     if (ChunkStore store(read_fp_, master_key_.as_span(), framed_chunks(header_));
         !store.read_chunk({thumb_off, thumb_len}, out)) {
         return AuthFailed;
@@ -745,8 +738,6 @@ VaultResult read_thumb_span(const Vault& v, uint64_t offset, uint64_t length,
     if (!v.unlocked_)  return Locked;
     if (length == 0)   return InvalidArg;
 
-    // Ensure writes via fp_ are visible to read_fp_
-    std::fflush(v.fp_);
     if (ChunkStore store(v.read_fp_, v.master_key_.as_span(), framed_chunks(v.header_));
         !store.read_chunk({offset, length}, out)) {
         return AuthFailed;
@@ -833,8 +824,6 @@ VaultResult Vault::read_video(const IndexNode& node, crypto::SecureBytes& out) c
     if (!node.is_video()) return InvalidArg;
 
     if (!out.resize(node.vmeta.orig_size)) return IoError;
-    // Ensure writes via fp_ are visible to read_fp_
-    std::fflush(fp_);
     ChunkStore store(read_fp_, master_key_.as_span(), framed_chunks(header_));
     size_t pos = 0;
     for (const VideoChunk& c : node.vmeta.chunks) {
@@ -1405,6 +1394,7 @@ VaultResult Vault::compact(OpProgress* progress)
         // The original is untouched; reacquire our handles to it.
         fp_ = std::fopen(path_.c_str(), "r+b");
         read_fp_ = std::fopen(path_.c_str(), "rb");
+        if (read_fp_) std::setvbuf(read_fp_, nullptr, _IONBF, 0);
         if (!fp_ || !read_fp_) reset();  // intact on disk; force a clean re-open
         return IoError;
     }
@@ -1422,6 +1412,7 @@ VaultResult Vault::compact(OpProgress* progress)
                          path_.c_str(), old_path.c_str());
         fp_ = std::fopen(path_.c_str(), "r+b");
         read_fp_ = std::fopen(path_.c_str(), "rb");
+        if (read_fp_) std::setvbuf(read_fp_, nullptr, _IONBF, 0);
         if (!fp_ || !read_fp_) reset();  // intact on disk; force a clean re-open
         return IoError;
     }
