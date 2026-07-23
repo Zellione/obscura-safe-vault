@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ui/media_sink.h"
 #include "ui/zip_import.h"
 #include "ui/zip_plan.h"
 
@@ -29,7 +30,7 @@ struct ZipDestination {
 };
 
 // Import the supported media from `archive_path` (.7z/.rar/.tar/.tar.gz/
-// .tar.xz) into `v`, reusing the exact same ZipPlan planner (build_zip_plan)
+// .tar.xz) through `sink`, reusing the exact same ZipPlan planner (build_zip_plan)
 // and mirror/append semantics as import_zip — only the decompression backend
 // differs (ui::ArchiveReader/libarchive instead of miniz). Decompresses each
 // entry into mlock'd memory only (invariant #1), never to disk.
@@ -46,6 +47,14 @@ struct ZipDestination {
 // Always false/empty for plain 7z/RAR/TAR imports — those readers fail
 // unconditionally on encrypted content regardless of any passphrase, so no
 // verification step is offered for them.
+[[nodiscard]] ZipImportOutcome import_archive(MediaSink&                   sink,
+                                              const std::filesystem::path& archive_path,
+                                              std::string_view             new_gallery_name,
+                                              ImportProgress*              progress = nullptr,
+                                              ArchivePassword              pw = {});
+
+// Thin wrapper: construct a DirectVaultSink and call the MediaSink version.
+// Preserved for tests and ZipImportJob compatibility.
 [[nodiscard]] ZipImportOutcome import_archive(vault::Vault&                v,
                                               const std::filesystem::path& archive_path,
                                               const ZipDestination&        dest,
@@ -53,8 +62,16 @@ struct ZipDestination {
                                               ArchivePassword              pw = {});
 
 // Import a `.cbr`/`.cb7`/`.cbt` comic archive as a single leaf gallery of
-// pages (build_cbz_plan), mirroring import_cbz's semantics over the
+// pages (build_cbz_plan) through `sink`, mirroring import_cbz's semantics over the
 // libarchive backend. Same non-OSV_VENDORED_ARCHIVE fallback as import_archive.
+[[nodiscard]] ZipImportOutcome import_archive_cbz(MediaSink&                   sink,
+                                                  const std::filesystem::path& archive_path,
+                                                  std::string_view             gallery_name,
+                                                  ImportProgress*              progress = nullptr,
+                                                  ArchivePassword              pw = {});
+
+// Thin wrapper: construct a DirectVaultSink and call the MediaSink version.
+// Preserved for tests and ZipImportJob compatibility.
 [[nodiscard]] ZipImportOutcome import_archive_cbz(vault::Vault&                v,
                                                   const std::filesystem::path& archive_path,
                                                   std::string_view             base_gallery,

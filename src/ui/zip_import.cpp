@@ -1,10 +1,10 @@
 #include "ui/zip_import.h"
 
 #include "crypto/secure_mem.h"
+#include "image/format_registry.h"
 #include "ui/import_common.h"
 #include "ui/meta_json.h"
 #include "ui/zip_encoding.h"
-#include "image/format_registry.h"
 #include "vault/vault.h"
 
 #include "miniz.h"
@@ -70,17 +70,11 @@ void apply_meta_tags(vault::Vault& v, std::string_view gallery, const ArchiveMet
         (void)v.add_tag(gallery, t);
 }
 
-// Mirror of zip_plan's join_path for locating the created top gallery.
-std::string joined_gallery(std::string_view base, std::string_view name)
-{
-    if (base.empty()) return std::string(name);
-    if (name.empty()) return std::string(base);
-    return std::string(base) + "/" + std::string(name);
-}
-
-// Extract one planned entry into mlock'd memory and store it in the vault.
+// Extract one planned entry into mlock'd memory and store it through the sink.
 // Tallies the result into `out`. Decompressed bytes never touch disk.
-void import_one(vault::Vault& v, mz_zip_archive& zip, const ZipPlacement& pl, ZipImportOutcome& out)
+// `rel_gallery` is relative to the sink's import root.
+void import_one(MediaSink& sink, mz_zip_archive& zip, const ZipPlacement& pl,
+                std::string_view root_gallery, ZipImportOutcome& out)
 {
     mz_zip_archive_file_stat st;
     if (!mz_zip_reader_file_stat(&zip, static_cast<mz_uint>(pl.entry_index), &st)) {
@@ -96,9 +90,21 @@ void import_one(vault::Vault& v, mz_zip_archive& zip, const ZipPlacement& pl, Zi
     }
     const std::span<const uint8_t> span{bytes.data(), bytes.size()};
 
+    // Extract relative gallery path: strip root_gallery prefix from pl.gallery_path.
+    std::string_view rel_gallery = pl.gallery_path;
+    if (!root_gallery.empty() && rel_gallery.size() > root_gallery.size()) {
+        if (rel_gallery.substr(0, root_gallery.size()) == root_gallery) {
+            // Skip the root + separator
+            rel_gallery = rel_gallery.substr(root_gallery.size() + 1);
+        }
+    } else if (!root_gallery.empty()) {
+        // pl.gallery_path is exactly root_gallery, so rel_gallery is empty
+        rel_gallery = "";
+    }
+
     const vault::VaultResult r = image::detect_format(span) != image::ImageFormat::Unknown
-                                     ? v.add_image(pl.gallery_path, span, pl.filename)
-                                     : v.add_video(pl.gallery_path, span, pl.filename);
+                                     ? sink.place_image(rel_gallery, span, pl.filename)
+                                     : sink.place_video(rel_gallery, span, pl.filename);
     tally_import_result(r, pl.filename, out);
 }
 
@@ -117,12 +123,25 @@ bool open_archive(const std::filesystem::path& path, const char* tag,
     return false;
 }
 
-// Create plan.galleries (parents already ordered first by the planner). On a
-// hard failure ends `zip`, sets out.error, and returns false.
-bool create_galleries(vault::Vault& v, const ZipPlan& plan, mz_zip_archive& zip, ZipImportOutcome& out)
+// Create plan.galleries through the sink. On a hard failure ends `zip`, sets
+// out.error, and returns false. Galleries are passed relative to sink root.
+bool create_galleries(MediaSink& sink, const ZipPlan& plan, mz_zip_archive& zip,
+                      std::string_view root_gallery, ZipImportOutcome& out)
 {
     for (const auto& g : plan.galleries) {
-        const vault::VaultResult r = v.create_gallery(g);
+        // Extract relative gallery path: strip root_gallery prefix from g.
+        std::string_view rel_gallery = g;
+        if (!root_gallery.empty() && g.size() > root_gallery.size()) {
+            if (g.substr(0, root_gallery.size()) == root_gallery) {
+                // Skip the root + separator
+                rel_gallery = g.substr(root_gallery.size() + 1);
+            }
+        } else if (!root_gallery.empty()) {
+            // g is exactly root_gallery, so rel_gallery is empty
+            rel_gallery = "";
+        }
+
+        const vault::VaultResult r = sink.ensure_gallery(rel_gallery);
         if (r != vault::VaultResult::Ok && r != vault::VaultResult::AlreadyExists) {
             out.error = "Could not create gallery: " + g;
             mz_zip_reader_end(&zip);
@@ -136,27 +155,26 @@ bool create_galleries(vault::Vault& v, const ZipPlan& plan, mz_zip_archive& zip,
 // `progress` is set, publishes the page count up front and bumps `done` per page
 // so a background poller can draw a bar; `cancel` cooperatively stops between
 // pages (already-stored pages remain — the vault is append-only).
-void run_placements(vault::Vault& v, mz_zip_archive& zip, const ZipPlan& plan,
-                    ZipImportOutcome& out, ImportProgress* progress)
+void run_placements(MediaSink& sink, mz_zip_archive& zip, const ZipPlan& plan,
+                    std::string_view root_gallery, ZipImportOutcome& out, ImportProgress* progress)
 {
     if (progress) progress->total.store(static_cast<int>(plan.placements.size()));
     for (const auto& pl : plan.placements) {
-        if (progress && progress->cancel.load()) {
+        if (sink.cancelled()) {
             out.cancelled = true;  // user pressed Esc during import (Phase 26)
             break;
         }
-        import_one(v, zip, pl, out);
+        import_one(sink, zip, pl, root_gallery, out);
         if (progress) progress->done.fetch_add(1);
     }
     mz_zip_reader_end(&zip);
     out.ok = true;
 }
 
-} // namespace
+}  // namespace
 
-ZipImportOutcome import_zip(vault::Vault&                v,
+ZipImportOutcome import_zip(MediaSink&                   sink,
                             const std::filesystem::path& zip_path,
-                            std::string_view             base_gallery,
                             std::string_view             new_gallery_name,
                             ImportProgress*              progress)
 {
@@ -171,20 +189,26 @@ ZipImportOutcome import_zip(vault::Vault&                v,
     const std::vector<ZipEntry> entries = read_entry_list(zip);
     const ArchiveMeta meta = load_archive_meta(zip, entries);
 
-    ZipPlan plan = build_zip_plan(entries, base_gallery, new_gallery_name);
+    // Build plan with empty base (sink handles absolute placement).
+    ZipPlan plan = build_zip_plan(entries, "", new_gallery_name);
     out.skipped = plan.skipped_unsupported;
 
-    if (!create_galleries(v, plan, zip, out)) return out;
+    // Root is just new_gallery_name when base is empty.
+    const std::string root_gallery(new_gallery_name);
+
+    if (!create_galleries(sink, plan, zip, root_gallery, out)) return out;
     if (!plan.placements.empty()) {
-        apply_meta_tags(v, joined_gallery(base_gallery, new_gallery_name), meta);
+        // Apply tags to the vault for the root gallery (sink stores it, so we pass root).
+        // This requires getting the vault from sink, which DirectVaultSink provides.
+        // For now, we skip tags through the sink API; they're best-effort anyway.
+        // TODO: consider adding tag support to MediaSink if needed.
     }
-    run_placements(v, zip, plan, out, progress);
+    run_placements(sink, zip, plan, root_gallery, out, progress);
     return out;
 }
 
-ZipImportOutcome import_cbz(vault::Vault&                v,
+ZipImportOutcome import_cbz(MediaSink&                   sink,
                             const std::filesystem::path& cbz_path,
-                            std::string_view             base_gallery,
                             std::string_view             gallery_name,
                             ImportProgress*              progress)
 {
@@ -202,14 +226,88 @@ ZipImportOutcome import_cbz(vault::Vault&                v,
     const std::vector<ZipEntry> entries = read_entry_list(zip);
     const ArchiveMeta meta = load_archive_meta(zip, entries);
 
-    const ZipPlan plan = build_cbz_plan(entries, base_gallery, gallery_name);
+    // Build plan with empty base (sink handles absolute placement).
+    const ZipPlan plan = build_cbz_plan(entries, "", gallery_name);
     out.skipped = plan.skipped_unsupported;
 
-    if (!create_galleries(v, plan, zip, out)) return out;
+    // Root is just gallery_name when base is empty.
+    const std::string root_gallery(gallery_name);
+
+    if (!create_galleries(sink, plan, zip, root_gallery, out)) return out;
     if (!plan.placements.empty()) {
-        apply_meta_tags(v, joined_gallery(base_gallery, gallery_name), meta);
+        // Apply tags to the vault for the root gallery (sink stores it, so we pass root).
+        // For now, we skip tags through the sink API; they're best-effort anyway.
+        // TODO: consider adding tag support to MediaSink if needed.
     }
-    run_placements(v, zip, plan, out, progress);
+    run_placements(sink, zip, plan, root_gallery, out, progress);
+    return out;
+}
+
+// Wrapper: construct a DirectVaultSink and call the MediaSink version.
+// Applies meta tags using the vault directly (best-effort).
+ZipImportOutcome import_zip(vault::Vault&                v,
+                            const std::filesystem::path& zip_path,
+                            std::string_view             base_gallery,
+                            std::string_view             new_gallery_name,
+                            ImportProgress*              progress)
+{
+    ZipImportOutcome out;
+    std::vector<uint8_t> archive;
+    mz_zip_archive zip;
+    if (!open_archive(zip_path, "ZipImport", archive, zip, out)) return out;
+
+    // Load meta.json for tags (Phase 27).
+    const std::vector<ZipEntry> entries = read_entry_list(zip);
+    const ArchiveMeta meta = load_archive_meta(zip, entries);
+    mz_zip_reader_end(&zip);
+
+    // Create sink and call the MediaSink version.
+    DirectVaultSink sink(v, base_gallery, new_gallery_name, progress);
+    out = import_zip(sink, zip_path, new_gallery_name, progress);
+
+    // Apply meta tags to the top-level imported gallery (best-effort).
+    if (out.ok && !out.imported && !out.skipped) {
+        // No placements, skip tags
+    } else if (out.ok) {
+        // Compute absolute path to the top-level gallery.
+        const std::string root_gallery = base_gallery.empty() ? std::string(new_gallery_name)
+                                                              : std::string(base_gallery) + "/" + std::string(new_gallery_name);
+        apply_meta_tags(v, root_gallery, meta);
+    }
+    return out;
+}
+
+// Wrapper: construct a DirectVaultSink and call the MediaSink version.
+// Applies meta tags using the vault directly (best-effort).
+ZipImportOutcome import_cbz(vault::Vault&                v,
+                            const std::filesystem::path& cbz_path,
+                            std::string_view             base_gallery,
+                            std::string_view             gallery_name,
+                            ImportProgress*              progress)
+{
+    ZipImportOutcome out;
+    std::vector<uint8_t> archive;
+    mz_zip_archive zip;
+    if (!open_archive(cbz_path, "CbzImport", archive, zip, out)) return out;
+
+    // Load meta.json for tags (Phase 27).
+    const std::vector<ZipEntry> entries = read_entry_list(zip);
+    const ArchiveMeta meta = load_archive_meta(zip, entries);
+    mz_zip_reader_end(&zip);
+
+    // Create sink and call the MediaSink version.
+    DirectVaultSink sink(v, base_gallery, gallery_name, progress);
+    out = import_cbz(sink, cbz_path, gallery_name, progress);
+
+    // Apply meta tags to the top-level imported gallery (best-effort).
+    if (out.ok && !out.imported && !out.skipped) {
+        // No placements, skip tags
+    } else if (out.ok) {
+        // Compute absolute path to the top-level gallery.
+        const std::string root_gallery = base_gallery.empty() ? std::string(gallery_name)
+                                                              : std::string(base_gallery) + "/" + std::string(gallery_name);
+        apply_meta_tags(v, root_gallery, meta);
+    }
     return out;
 }
 
