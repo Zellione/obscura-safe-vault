@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cctype>
 #include <chrono>
 #include <cstring>
@@ -23,7 +24,9 @@
 #include "vault/video_format.h"
 #include "vault/vault_search.h"
 #include "vault/index_io.h"
+#include "vault/commit_lane.h"
 #include "vault/vault_ops.h"
+#include "vault/staging.h"
 #include "media/video_probe.h"
 #include "platform/error_log.h"
 #include "ui/advanced_search_model.h"  // AdvancedQuery + evaluate (pure, SDL/vault-free)
@@ -306,7 +309,8 @@ void adv_search_dfs(const IndexNode& node, std::string_view prefix,
         if (const bool in_scope = child.is_gallery() ? (scope == Galleries || scope == Both)
                                                      : (scope == Images || scope == Both);
             in_scope) {
-            if (const ui::EvalResult r = ui::evaluate(query, child.name, effective); r.matched) {
+            const ui::EvalResult r = ui::evaluate(query, child.name, effective);
+            if (r.matched) {
                 out.emplace_back(r.score, SearchHit{
                     .path           = full_path,
                     .is_gallery     = child.is_gallery(),
@@ -331,6 +335,9 @@ Vault::~Vault() { reset(); }
 Vault::Vault(Vault&& o) noexcept
     : path_(std::move(o.path_)),
       fp_(o.fp_),
+      read_fp_(o.read_fp_),
+      write_mutex_(std::move(o.write_mutex_)),
+      header_mutex_(std::move(o.header_mutex_)),
       header_(o.header_),
       unlocked_(o.unlocked_),
       master_key_(std::move(o.master_key_)),
@@ -338,7 +345,13 @@ Vault::Vault(Vault&& o) noexcept
       saved_searches_(std::move(o.saved_searches_)),
       settings_(std::move(o.settings_))
 {
+    // Phase 50: A bound CommitLane holds a raw Vault* to &o. App holds the active
+    // vault behind unique_ptr and never moves it while a session is live — this
+    // assert turns a violation into a loud debug failure instead of a dangling pointer.
+    assert(!o.commit_router_ && "cannot move a Vault with an active CommitLane bound");
+
     o.fp_       = nullptr;
+    o.read_fp_  = nullptr;
     o.unlocked_ = false;
 }
 
@@ -346,22 +359,39 @@ Vault& Vault::operator=(Vault&& o) noexcept
 {
     if (this != &o) {
         reset();
-        path_       = std::move(o.path_);
-        fp_         = o.fp_;
-        header_     = o.header_;
-        unlocked_   = o.unlocked_;
-        master_key_ = std::move(o.master_key_);
-        root_       = std::move(o.root_);
+        // Phase 50: A bound CommitLane holds a raw Vault* to &o. App holds the active
+        // vault behind unique_ptr and never moves it while a session is live — this
+        // assert turns a violation into a loud debug failure instead of a dangling pointer.
+        assert(!o.commit_router_ && "cannot move a Vault with an active CommitLane bound");
+
+        path_         = std::move(o.path_);
+        fp_           = o.fp_;
+        read_fp_      = o.read_fp_;
+        write_mutex_  = std::move(o.write_mutex_);
+        header_mutex_ = std::move(o.header_mutex_);
+        header_       = o.header_;
+        unlocked_     = o.unlocked_;
+        master_key_   = std::move(o.master_key_);
+        root_         = std::move(o.root_);
         saved_searches_ = std::move(o.saved_searches_);
-        settings_   = std::move(o.settings_);
-        o.fp_       = nullptr;
-        o.unlocked_ = false;
+        settings_     = std::move(o.settings_);
+        o.fp_         = nullptr;
+        o.read_fp_    = nullptr;
+        o.unlocked_   = false;
     }
     return *this;
 }
 
 void Vault::lock() noexcept
 {
+    // Phase 50: If a CommitLane is bound, stop it (flush + join) before wiping the
+    // master key. The lane seals with master_key_; stopping it here makes a
+    // wipe-after-seal race impossible regardless of caller discipline.
+    if (commit_router_) {
+        commit_router_->stop();
+        commit_router_ = nullptr;
+    }
+
     master_key_.wipe();
     unlocked_ = false;
     root_     = IndexNode::gallery("");
@@ -372,6 +402,8 @@ void Vault::reset() noexcept
 {
     lock();
     if (fp_) { std::fclose(fp_); fp_ = nullptr; }
+    if (read_fp_) { std::fclose(read_fp_); read_fp_ = nullptr; }
+    write_mutex_.reset();
     path_.clear();
     header_ = Header{};
     settings_ = VaultSettings{};
@@ -420,16 +452,28 @@ VaultResult Vault::create(const std::string&       path,
         return VaultResult::IoError;
     }
 
-    out.path_        = path;
-    out.fp_          = fp;
-    out.header_      = h;
-    out.master_key_  = std::move(master);
-    out.root_        = IndexNode::gallery("");
-    out.unlocked_    = true;
-    out.settings_    = VaultSettings::seeded();
+    out.path_         = path;
+    out.fp_           = fp;
+    out.header_       = h;
+    out.master_key_   = std::move(master);
+    out.root_         = IndexNode::gallery("");
+    out.unlocked_     = true;
+    out.settings_     = VaultSettings::seeded();
+    out.write_mutex_  = std::make_unique<std::mutex>();
+    out.header_mutex_ = std::make_unique<std::mutex>();
 
     // Write the initial (empty) index + a valid header via the crash-safe path.
     if (const VaultResult r = out.commit_index(); r != VaultResult::Ok) { out.reset(); return r; }
+
+    // Open read_fp_ after the initial commit so it sees the complete file.
+    out.read_fp_     = std::fopen(path.c_str(), "rb");
+    if (!out.read_fp_) {
+        out.reset();
+        return VaultResult::IoError;
+    }
+    // Disable buffering on read_fp_ so it always reads fresh from disk,
+    // avoiding buffering conflicts with fp_'s writes.
+    std::setvbuf(out.read_fp_, nullptr, _IONBF, 0);
     return VaultResult::Ok;
 }
 
@@ -453,10 +497,20 @@ VaultResult Vault::open(const std::string& path, Vault& out)
         return VaultResult::BadFormat;
     }
 
-    out.path_     = path;
-    out.fp_       = fp;
-    out.header_   = h;
-    out.unlocked_ = false;
+    out.path_         = path;
+    out.fp_           = fp;
+    out.read_fp_      = std::fopen(path.c_str(), "rb");
+    if (!out.read_fp_) {
+        std::fclose(fp);
+        return VaultResult::IoError;
+    }
+    // Disable buffering on read_fp_ so it always reads fresh from disk,
+    // avoiding buffering conflicts with fp_'s writes.
+    std::setvbuf(out.read_fp_, nullptr, _IONBF, 0);
+    out.header_       = h;
+    out.unlocked_     = false;
+    out.write_mutex_  = std::make_unique<std::mutex>();
+    out.header_mutex_ = std::make_unique<std::mutex>();
     return VaultResult::Ok;
 }
 
@@ -628,51 +682,23 @@ VaultResult Vault::add_image(std::string_view         gallery_path,
     if (!unlocked_)                     return Locked;
     if (!is_safe_node_name(filename))   return InvalidArg;  // no traversal into the index
 
+    // Fail-fast pre-checks: do these before staging to avoid orphaning chunks
+    // on the synchronous path.
     IndexNode* g = find_gallery(gallery_path);
     if (!g) return NotFound;
     if (child_named(g, filename)) return AlreadyExists;
 
-    ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
-    ChunkSpan  span;
-    if (!store.append_chunk(file_data, span)) return IoError;
+    // Stage the image (encode, encrypt, append chunks).
+    StagedNode staged = stage_image(*this, file_data, filename);
+    if (staged.status != Ok) return staged.status;
 
-    // Phase 3: detect format/dims and generate an encrypted thumbnail chunk.
-    // Soft failure: if decode or thumbnail generation fails, we still store the image
-    // with format=Unknown and thumb_length=0 (same as Phase 2 behaviour).
-    ImageFormat detected_fmt    = ImageFormat::Unknown;
-    uint32_t    detected_width  = 0;
-    uint32_t    detected_height = 0;
-    ChunkSpan   thumb_span{};
+    // Attach the staged node to the tree (no commit yet).
+    if (const VaultResult r = attach_staged(*this, gallery_path, std::move(staged.node));
+        r != Ok) return r;
 
-    if (auto decoded = image::decode_from_memory(file_data)) {
-        detected_fmt    = static_cast<ImageFormat>(decoded->format);
-        detected_width  = static_cast<uint32_t>(decoded->width);
-        detected_height = static_cast<uint32_t>(decoded->height);
-
-        if (auto thumb_jpeg = image::make_thumbnail(*decoded, 256, 85))
-            (void)store.append_chunk(*thumb_jpeg, thumb_span);  // best-effort
-    }
-
-    if (!store.sync()) return IoError;
-
-    IndexNode img = IndexNode::image(std::string(filename));
-    img.meta.format       = detected_fmt;
-    img.meta.width        = detected_width;
-    img.meta.height       = detected_height;
-    img.meta.orig_size    = file_data.size();
-    img.meta.created_ts   = static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count());
-    img.meta.data_offset  = span.offset;
-    img.meta.data_length  = span.length;
-    img.meta.thumb_offset = thumb_span.offset;
-    img.meta.thumb_length = thumb_span.length;
-    // Phase 47: a multi-frame GIF animates in the viewer and gets an "A" badge.
-    img.meta.animated = (img.meta.format == ImageFormat::GIF) && image::gif_is_animated(file_data);
-    if (!vault_ops::push_child(g->children, std::move(img))) {
-        platform::log_error("Vault", "add_image: allocation failure appending index node");
-        return IoError;
-    }
+    // Synchronize the staged chunks to stable storage (fsync).
+    if (ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
+        !store.sync()) return IoError;
 
     return commit_index();
 }
@@ -683,7 +709,7 @@ VaultResult Vault::read_image(const IndexNode& node, crypto::SecureBytes& out) c
     if (!unlocked_)       return Locked;
     if (!node.is_image()) return InvalidArg;
 
-    if (ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
+    if (ChunkStore store(read_fp_, master_key_.as_span(), framed_chunks(header_));
         !store.read_chunk({node.meta.data_offset, node.meta.data_length}, out)) {
         return AuthFailed;  // corrupt / tampered / unreadable chunk
     }
@@ -701,7 +727,7 @@ VaultResult Vault::read_thumbnail(const IndexNode& node, crypto::SecureBytes& ou
     const uint64_t thumb_off = node.is_video() ? node.vmeta.poster_offset : node.meta.thumb_offset;
     if (thumb_len == 0) return NotFound;
 
-    if (ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
+    if (ChunkStore store(read_fp_, master_key_.as_span(), framed_chunks(header_));
         !store.read_chunk({thumb_off, thumb_len}, out)) {
         return AuthFailed;
     }
@@ -715,7 +741,7 @@ VaultResult read_thumb_span(const Vault& v, uint64_t offset, uint64_t length,
     if (!v.unlocked_)  return Locked;
     if (length == 0)   return InvalidArg;
 
-    if (ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+    if (ChunkStore store(v.read_fp_, v.master_key_.as_span(), framed_chunks(v.header_));
         !store.read_chunk({offset, length}, out)) {
         return AuthFailed;
     }
@@ -740,56 +766,26 @@ VaultResult Vault::add_video(std::string_view         gallery_path,
     if (!is_safe_node_name(filename))   return InvalidArg;  // no traversal into the index
     if (chunk_size == 0)                return InvalidArg;
 
-    // Probe the video file first (before storing chunks) to detect metadata and generate poster.
-    // This ensures we don't create orphan chunks if the video is invalid.
-    media::VideoProbeResult probe;
-    if (!media::probe_video(file_data, probe)) return InvalidArg;
+    // Fail-fast pre-checks: do these before staging to avoid orphaning chunks
+    // on the synchronous path. Probe the video file first to detect metadata and
+    // generate poster — ensures we don't create orphan chunks if the video is invalid.
+    if (media::VideoProbeResult probe; !media::probe_video(file_data, probe)) return InvalidArg;
 
     IndexNode* g = find_gallery(gallery_path);
     if (!g) return NotFound;
     if (child_named(g, filename)) return AlreadyExists;
 
-    ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
-    std::vector<VideoChunk> chunks;
-    for (size_t off = 0; off < file_data.size(); off += chunk_size) {
-        const size_t len = std::min<size_t>(chunk_size, file_data.size() - off);
-        ChunkSpan span;
-        if (!store.append_chunk(file_data.subspan(off, len), span)) return IoError;
-        chunks.push_back({span.offset, span.length});
-    }
-    // An empty file would store zero chunks; treat as invalid (no video stream).
-    if (chunks.empty()) return InvalidArg;
+    // Stage the video (split into chunks, encrypt, append).
+    StagedNode staged = stage_video(*this, file_data, filename, chunk_size);
+    if (staged.status != Ok) return staged.status;
 
-    // Store the poster if it was generated.
-    uint64_t poster_offset = 0;
-    uint64_t poster_length = 0;
-    if (!probe.poster_jpeg.empty()) {
-        ChunkSpan poster_span;
-        if (!store.append_chunk(probe.poster_jpeg, poster_span)) return IoError;
-        poster_offset = poster_span.offset;
-        poster_length = poster_span.length;
-    }
+    // Attach the staged node to the tree (no commit yet).
+    if (const VaultResult r = attach_staged(*this, gallery_path, std::move(staged.node));
+        r != Ok) return r;
 
-    if (!store.sync())  return IoError;
-
-    IndexNode vid = IndexNode::video(std::string(filename));
-    vid.vmeta.container  = probe.container;
-    vid.vmeta.codec      = probe.codec;
-    vid.vmeta.width      = probe.width;
-    vid.vmeta.height     = probe.height;
-    vid.vmeta.duration_us= probe.duration_us;
-    vid.vmeta.orig_size  = file_data.size();
-    vid.vmeta.created_ts = static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count());
-    vid.vmeta.chunk_size = chunk_size;
-    vid.vmeta.chunks     = std::move(chunks);
-    vid.vmeta.poster_offset = poster_offset;
-    vid.vmeta.poster_length = poster_length;
-    if (!vault_ops::push_child(g->children, std::move(vid))) {
-        platform::log_error("Vault", "add_video: allocation failure appending index node");
-        return IoError;
-    }
+    // Synchronize the staged chunks to stable storage (fsync).
+    if (ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
+        !store.sync()) return IoError;
 
     return commit_index();
 }
@@ -801,7 +797,7 @@ VaultResult Vault::read_video(const IndexNode& node, crypto::SecureBytes& out) c
     if (!node.is_video()) return InvalidArg;
 
     if (!out.resize(node.vmeta.orig_size)) return IoError;
-    ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
+    ChunkStore store(read_fp_, master_key_.as_span(), framed_chunks(header_));
     size_t pos = 0;
     for (const VideoChunk& c : node.vmeta.chunks) {
         crypto::SecureBytes piece;
@@ -1262,7 +1258,13 @@ uint64_t Vault::wasted_bytes() const
     uint64_t size = 0;
     if (!fileutil::file_size(fp_, size)) return 0;
 
-    uint64_t live = HEADER_SIZE + header_.slot[header_.active_slot].length;
+    // Phase 50: guard access to header_.slot and header_.active_slot, which can
+    // race with the commit lane thread's index commits.
+    uint64_t live = 0;
+    {
+        std::lock_guard lk(*header_mutex_);
+        live = HEADER_SIZE + header_.slot[header_.active_slot].length;
+    }
     for_each_media(root_, [&live](const IndexNode& node) {
         if (node.is_image()) {
             live += node.meta.data_length + node.meta.thumb_length;
@@ -1317,33 +1319,41 @@ VaultResult Vault::compact(OpProgress* progress)
     if (progress && progress->cancel.load()) return fail(Ok);
     if (copy_err != Ok) return fail(copy_err);
 
-    // Fresh sealed index into slot A; slot B starts empty in the new file.
-    // Saved searches and settings carry over unchanged (vault-global metadata).
+    // Seal and write the index blob to temp file
     std::vector<uint8_t> blob;
-    serialize_index(new_root, saved_searches_, settings_, blob);
+    Header h{};
+    std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
+    {
+        // === STEP 1: Serialize and seal the index blob ===
+        // Fresh sealed index into slot A; slot B starts empty in the new file.
+        // Saved searches and settings carry over unchanged (vault-global metadata).
+        serialize_index(new_root, saved_searches_, settings_, blob);
 
-    // Phase 26: framed vaults frame the index blob (mirrors commit_index —
-    // unlock de-frames unconditionally when the flag is set, and slot B is
-    // empty here, so an unframed blob would make the vault unopenable).
-    if (framed_chunks(header_)) {
-        std::vector<uint8_t> framed_blob;
-        if (!chunk_codec::encode_frame(blob, framed_blob)) return fail(CryptoError);
-        blob = std::move(framed_blob);
+        // Phase 26: framed vaults frame the index blob (mirrors commit_index —
+        // unlock de-frames unconditionally when the flag is set, and slot B is
+        // empty here, so an unframed blob would make the vault unopenable).
+        if (framed_chunks(header_)) {
+            std::vector<uint8_t> framed_blob;
+            if (!chunk_codec::encode_frame(blob, framed_blob)) return fail(CryptoError);
+            blob = std::move(framed_blob);
+        }
+
+        if (!crypto::fill_random(nonce)) return fail(CryptoError);
+        std::vector<uint8_t> sealed;
+        crypto::seal(master_key_.as_span(), nonce, blob, sealed);
+
+        // === STEP 2: Write sealed index to temp file (order is load-bearing) ===
+        uint64_t idx_off = 0;
+        if (!dst.append_raw(sealed, idx_off) || !dst.sync()) return fail(IoError);
+
+        h = header_;  // KDF params, salt, and master-key wrap carry over
+        h.slot[0] = IndexSlot{.offset = idx_off, .length = sealed.size(), .nonce = nonce};
+        h.slot[1] = IndexSlot{};
+        h.active_slot = 0;
     }
 
-    std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
-    if (!crypto::fill_random(nonce)) return fail(CryptoError);
-    std::vector<uint8_t> sealed;
-    crypto::seal(master_key_.as_span(), nonce, blob, sealed);
-
-    uint64_t idx_off = 0;
-    if (!dst.append_raw(sealed, idx_off) || !dst.sync()) return fail(IoError);
-
-    Header h      = header_;  // KDF params, salt, and master-key wrap carry over
-    h.slot[0]     = IndexSlot{.offset = idx_off, .length = sealed.size(), .nonce = nonce};
-    h.slot[1]     = IndexSlot{};
-    h.active_slot = 0;
     h.serialize(raw);
+    // Write header then sync before rename (order is load-bearing: index must be durable first)
     if (!fileutil::seek_to(tmp, 0) ||
         std::fwrite(raw.data(), 1, raw.size(), tmp) != raw.size() ||
         !fileutil::sync(tmp)) {
@@ -1354,26 +1364,32 @@ VaultResult Vault::compact(OpProgress* progress)
     // Atomic commit point: crash-safe 3-step rename sequence to enable secure
     // wipe of the original file (Task 7). At every instant, either the original
     // or .old file exists complete under a discoverable name.
-    // Close our handle first — Windows refuses to replace a file that is open
+    // Close our handles first — Windows refuses to replace a file that is open
     // (POSIX would happily swap the inode under us).
     std::fclose(fp_);
     fp_ = nullptr;
+    if (read_fp_) {
+        std::fclose(read_fp_);
+        read_fp_ = nullptr;
+    }
     const std::string old_path = path_ + ".old";
 
     // Step 1: Rename original aside (vault.osv -> vault.osv.old, fsync dir).
     // If this fails, the temp file is abandoned and the original remains in place.
     if (!fileutil::rename_file(path_, old_path)) {
         std::remove(tmp_path.c_str());
-        // The original is untouched; reacquire our handle to it.
+        // The original is untouched; reacquire our handles to it.
         fp_ = std::fopen(path_.c_str(), "r+b");
-        if (!fp_) reset();  // intact on disk; force a clean re-open
+        read_fp_ = std::fopen(path_.c_str(), "rb");
+        if (read_fp_) std::setvbuf(read_fp_, nullptr, _IONBF, 0);
+        if (!fp_ || !read_fp_) reset();  // intact on disk; force a clean re-open
         return IoError;
     }
     fileutil::sync_dir_of(old_path);
 
     // Step 2: Rename temp into place (vault.osv.compact -> vault.osv, fsync dir).
     // If this fails, vault.osv.old still exists with the original intact;
-    // reacquire the original handle.
+    // reacquire the original handles.
     if (!fileutil::rename_file(tmp_path, path_)) {
         // vault.osv.old has the original; vault.osv.compact is abandoned.
         std::remove(tmp_path.c_str());
@@ -1382,7 +1398,9 @@ VaultResult Vault::compact(OpProgress* progress)
             std::fprintf(stderr, "[Vault] compact recovery: could not restore %s from %s — vault remains at the .old path\n",
                          path_.c_str(), old_path.c_str());
         fp_ = std::fopen(path_.c_str(), "r+b");
-        if (!fp_) reset();  // intact on disk; force a clean re-open
+        read_fp_ = std::fopen(path_.c_str(), "rb");
+        if (read_fp_) std::setvbuf(read_fp_, nullptr, _IONBF, 0);
+        if (!fp_ || !read_fp_) reset();  // intact on disk; force a clean re-open
         return IoError;
     }
     fileutil::sync_dir_of(path_);
@@ -1395,12 +1413,15 @@ VaultResult Vault::compact(OpProgress* progress)
     fileutil::wipe_and_remove(old_path);
 
     fp_ = std::fopen(path_.c_str(), "r+b");
-    if (!fp_) {
+    read_fp_ = std::fopen(path_.c_str(), "rb");
+    if (!fp_ || !read_fp_) {
         // The compacted vault is intact on disk but we lost our handle to it;
         // wipe keys and force a clean re-open rather than limp along.
         reset();
         return IoError;
     }
+    // Disable buffering on read_fp_ (same as in create/open).
+    std::setvbuf(read_fp_, nullptr, _IONBF, 0);
     header_ = h;
     root_   = std::move(new_root);
     return Ok;
@@ -1410,11 +1431,21 @@ VaultResult Vault::compact(OpProgress* progress)
 
 bool Vault::write_header()
 {
+    std::lock_guard lk(*write_mutex_);
     return index_io::write_header(fp_, header_);
 }
 
 VaultResult Vault::commit_index()
 {
+    // Phase 50: if a commit router (CommitLane) is active and running, route through
+    // it instead of committing synchronously. The router runs serialize on this thread
+    // and enqueues the blob for asynchronous durability under the write mutex.
+    if (commit_router_ && commit_router_->running()) {
+        return commit_router_->enqueue_snapshot() ? VaultResult::Ok : VaultResult::IoError;
+    }
+
+    // Synchronous commit path (default, pre-Phase-50 behavior).
+    std::lock_guard lk(*write_mutex_);
     IndexIoContext ctx{
         .fp_           = fp_,
         .header_       = header_,
@@ -1422,6 +1453,7 @@ VaultResult Vault::commit_index()
         .root_         = root_,
         .saved_searches_ = saved_searches_,
         .settings_     = settings_,
+        .header_mutex_ = header_mutex_.get(),
     };
     return index_io::commit_index(ctx);
 }

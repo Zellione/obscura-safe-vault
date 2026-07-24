@@ -19,6 +19,8 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -36,6 +38,8 @@ namespace media { class VideoSource; }
 
 namespace vault {
 
+class CommitLane;
+
 enum class VaultResult {
     Ok,
     IoError,        // open/read/write/fsync failure
@@ -48,9 +52,13 @@ enum class VaultResult {
     CryptoError,    // RNG / KDF failure
 };
 
-// Video chunk size (1 MiB plaintext split). Used by add_video; tests may pass a
-// smaller value to force multi-chunk paths with tiny fixtures.
+// Video chunk size (1 MiB plaintext split).
 inline constexpr uint32_t VIDEO_CHUNK_SIZE = 1u << 20;
+
+// Forward declare staging structures (full definitions in staging.h, which is included at EOF).
+// These are needed for friend declarations inside the Vault class.
+struct StagedThumb;
+struct StagedNode;
 
 enum class SearchScope { Images, Galleries, Both };
 
@@ -117,6 +125,24 @@ public:
     // (cpp:S1448 method cap). VideoSource's static factory open() is defined in
     // src/media/video_source.cpp.
     friend class ::media::VideoSource;
+
+    // Phase 50: CommitLane thread accesses fp_, header_, master_key_, root_,
+    // saved_searches_, settings_, and header_mutex_ for asynchronous index
+    // commits via the worker loop.
+    friend class CommitLane;
+
+    // Phase 50: thread-safe staging API (staging.h). Kept as friends to keep
+    // Vault under the cpp:S1448 method cap. StagedNode/StagedThumb are forward
+    // declared before the class definition.
+    friend StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
+                                  std::string_view filename,
+                                  const StagedThumb* precomputed);
+    friend StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
+                                  std::string_view filename,
+                                  uint32_t chunk_size);
+    friend VaultResult attach_staged(Vault& v, std::string_view gallery_path,
+                                     IndexNode&& node);
+    friend VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path);
 
     [[nodiscard]] bool is_unlocked() const noexcept { return unlocked_; }
 
@@ -247,6 +273,13 @@ public:
     // to keep Vault under the cpp:S1448 method cap.
     friend uint64_t vault_file_bytes(const Vault& v) noexcept;
 
+    // Phase 50: while the import queue is active, App points this at the
+    // CommitLane; Vault::commit_index() then routes through the lane
+    // (serialize + enqueue, async durability) instead of committing
+    // synchronously. Null (the default) = synchronous commit, exactly the
+    // pre-Phase-50 behavior. Main-thread only.
+    void set_commit_router(CommitLane* lane) noexcept { commit_router_ = lane; }
+
     // Flip a node's favorite flag (gallery OR image). Persisted via the crash-safe
     // index swap. Locked if not unlocked; NotFound if node_path doesn't resolve.
     [[nodiscard]] VaultResult toggle_favorite(std::string_view node_path);
@@ -291,12 +324,33 @@ private:
 
     std::string                            path_;
     std::FILE*                             fp_ = nullptr;
+    // Phase 50: dedicated read-only handle. All const read paths (read_image /
+    // read_thumbnail / read_video / read_thumb_span / VideoSource streaming) use
+    // this so a background stage/commit append on fp_ can never share a file
+    // position with a main-thread read. Opened by create()/open(), closed by
+    // reset(). Chunks are immutable once appended, so reads need no lock.
+    std::FILE*                             read_fp_ = nullptr;
+    // Phase 50: serialises ALL writes to fp_ (chunk appends from stage_*,
+    // index slot writes from the commit lane / commit_index). unique_ptr keeps
+    // Vault movable. Held for one whole chunk per acquisition — never released
+    // mid-chunk (an index-blob append at EOF would interleave into the
+    // half-written chunk).
+    std::unique_ptr<std::mutex>            write_mutex_;
+    // Phase 50: guards index-slot fields (header_.slot[*] and header_.active_slot)
+    // which can race between the main thread reading/writing and the commit lane
+    // thread reading in commit_plain_blob. Immutable-after-unlock fields (salt, kdf,
+    // wrapped key, flags) need no guard and are never modified after create/unlock.
+    std::unique_ptr<std::mutex>            header_mutex_;
     Header                                 header_;
     bool                                   unlocked_ = false;
     crypto::SecureBuffer<crypto::KEY_SIZE> master_key_;
     IndexNode                              root_ = IndexNode::gallery("");
     std::vector<SavedSearch>               saved_searches_;  // vault-global (Phase 18)
     VaultSettings                          settings_;        // vault-global (Phase 49)
+    // Phase 50: commit router hook. While the import queue is active, this points
+    // to a CommitLane for asynchronous index commits. Null = synchronous commits.
+    // Main-thread only.
+    CommitLane*                            commit_router_ = nullptr;
 };
 
 // Decrypt a thumbnail/poster chunk by its raw (offset, length) span into mlock'd
@@ -339,4 +393,4 @@ private:
 [[nodiscard]] VaultResult rename_node(Vault& v, std::string_view gallery_path,
                                       std::string_view old_name, std::string_view new_name);
 
-} // namespace vault
+}  // namespace vault

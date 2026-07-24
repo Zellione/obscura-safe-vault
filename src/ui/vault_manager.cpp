@@ -80,6 +80,11 @@ void VaultManager::remove_selected()
 void VaultManager::handle_key(const SDL_KeyboardEvent& key)
 {
     using enum NavKind;
+    // Phase 50: Shift+I opens import status
+    if ((key.key == SDLK_I) && (key.mod & SDL_KMOD_SHIFT)) {
+        request(ToImportStatus);
+        return;
+    }
     switch (key.key) {
         case SDLK_UP:     move(-1); mark_dirty(); break;
         case SDLK_DOWN:   move(+1); mark_dirty(); break;
@@ -205,6 +210,7 @@ std::vector<ui::HelpGroup> VaultManager::help_groups() const
             {"Up/Down", "Move selection"}, {"Enter / Space", "Open selected vault"},
             {"N", "Create new vault"}, {"O", "Open existing vault file"},
             {"R / Del", "Remove from list"}, {"L", "Lock the active vault"},
+            {"Shift+I", "Import status"},
         }},
         {"App", {{"C", "Open settings"}, {"Esc / Q", "Quit"}}},
     };

@@ -4,7 +4,7 @@
 #include <cstring>
 
 #include "vault/header.h"   // for framed_chunks
-#include "vault/vault.h"   // for the friend factory's access to fp_ / master_key_
+#include "vault/vault.h"   // for the friend factory's access to read_fp_ / master_key_
 
 namespace media {
 
@@ -51,7 +51,7 @@ int64_t VideoSource::read(uint64_t offset, std::span<uint8_t> dst) noexcept
 
 VideoSource VideoSource::open(const vault::Vault& v, const vault::IndexNode& node)
 {
-    return VideoSource(v.fp_, v.master_key_.as_span(), node.vmeta, framed_chunks(v.header_));
+    return VideoSource(v.read_fp_, v.master_key_.as_span(), node.vmeta, framed_chunks(v.header_));
 }
 
 } // namespace media

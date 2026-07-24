@@ -80,6 +80,17 @@ inline void make_vault(vault::Vault& v, const fs::path& p)
     (void)vault::Vault::create(p.string(), pw, {}, kTestKdf, v);
 }
 
+// Open an existing vault at `p` and unlock it with the test password.
+// Returns true on success, false on any error (open or unlock).
+inline bool open_vault(const fs::path& p, vault::Vault& v)
+{
+    if (vault::Vault::open(p.string(), v) != vault::VaultResult::Ok) {
+        return false;
+    }
+    const std::vector<uint8_t> pw{'p', 'w'};
+    return v.unlock(pw, {}) == vault::VaultResult::Ok;
+}
+
 // Fresh empty temp dir. Non-throwing: a still-open vault file from a crashed
 // prior run can't be deleted on Windows, and the throwing overload would abort.
 inline fs::path fresh_dir(const char* name)

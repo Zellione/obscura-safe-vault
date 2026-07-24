@@ -27,8 +27,8 @@
 #include "ui/selection_model.h"
 #include "ui/tag_editor.h"
 #include "ui/transfer_dialog.h"
-#include "ui/zip_import_job.h"
 #include "ui/zip_plan.h"
+#include "ui/import_queue.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
 namespace vault { class Vault; struct IndexNode; }
@@ -58,6 +58,10 @@ void rebuild_detail(class GalleryGrid& g);
 // true when the key was consumed.
 bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
 
+// Shortcut-key dispatch (L/X/M/R/SPACE/G/B/F/T/S/U), extracted to reduce
+// handle_key_down's cognitive complexity. Returns true when consumed.
+bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& key);
+
 // Where to (re)open the grid: a gallery path (empty = root), the selected
 // tile index, and the initial List/Grid view (Phase 39 Part 2 session
 // memory). Used to restore position + view mode when returning from the
@@ -84,10 +88,12 @@ public:
 
     GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                 gfx::TextureCache& cache, GridDialogs dialogs,
-                GridVaultCtx vault_ctx, GallerySessionState& session, GridLocation at = {});
+                GridVaultCtx vault_ctx, GallerySessionState& session, ImportQueue& queue,
+                GridLocation at = {});
 
     void on_enter() override;
     void on_exit() override;
+    void on_vault_changed() override;  // Phase 50: re-fetch children_ after tree reallocation
     void handle_event(const SDL_Event& e) override;
     void update(double dt) override;
     void render(gfx::Renderer& r) override;
@@ -114,7 +120,6 @@ private:
     void start_combine();          // Shift+M: combine nav_.path() into another gallery
     void jump_to_gallery(const std::string& path);   // absolute nav: ascend to root, then descend
     void do_export(const std::filesystem::path& dest);
-    void start_import();
     void start_naming();
     void finish_naming();
     void pump_import();            // poll the file dialog while transfer is not active
@@ -137,21 +142,23 @@ private:
     void render_grid(gfx::Renderer& r, float W, float bottom);
     void render_list(gfx::Renderer& r, float W, float bottom);
 
-    // Drain a finished background import (called from update()). Kept a free friend
+    // Drain a finished background file op (export/delete/transfer/compact). Kept a free friend
     // (not a member) to keep the class under the cpp:S1448 method cap and to keep
-    // update()'s cognitive complexity (S3776) down. poll_file_job / vault_busy /
-    // handle_job_input (Phase 25) are free friends for the same reasons.
-    friend void poll_import_job(GalleryGrid& g);
+    // update()'s cognitive complexity (S3776) down. vault_busy / handle_job_input (Phase 25)
+    // are free friends for the same reasons (Phase 50: imports drain asynchronously).
     friend void poll_file_job(GalleryGrid& g);          // drain a finished export/delete job
     friend bool vault_busy(const GalleryGrid& g);       // any worker owns the vault(s)?
     friend bool handle_job_input(GalleryGrid& g, const SDL_Event& e);  // job-active Esc→cancel gate
     friend void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key);  // Shift+C compact confirm
     friend void handle_delete_key(GalleryGrid& g);                                   // Del confirm
     friend bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key);     // detail panel scroll/toggle
+    friend bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& key);  // L/X/M/R/SPACE/G/B/F/T/S/U shortcuts
     friend void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);  // cancelled import waste hint
     // current_gallery_view is a free friend for the same S1448 reason: App reads it
     // (Phase 39 Part 2) to snapshot the outgoing grid's view mode into GallerySessionState.
     friend GalleryView current_gallery_view(const GalleryGrid& g);
+    // current_gallery_path (Phase 50): App uses it to derive back nav for import status screen
+    friend std::string current_gallery_path(const GalleryGrid& g);
     // The following are free friends for the same S1448/S3776 reasons, extracted
     // from start_transfer() and update() (Phase 44 SonarQube follow-up).
     friend void start_transfer_focused(GalleryGrid& g);
@@ -178,6 +185,7 @@ private:
     gfx::TextureCache&      cache_;
     GridDialogs             dialogs_;   // file + folder dialogs (bundled, S1820)
     GallerySessionState&    session_;   // Phase 40 Part 2: per-path last-focused-tile memory
+    ImportQueue&            queue_;     // Phase 50: background import pipeline
     NavModel                nav_;
     SelectionModel          sel_;
     ConsentDialog           consent_;
@@ -185,8 +193,10 @@ private:
     TagEditor               tag_editor_;
     QuickSwitch             quick_switch_;   // declared before transfer_ so it copies
     TransferDialog          transfer_;       // the active path before transfer_ moves it
+    bool                    transfer_had_exclusive_ = false;  // Phase 50: track exclusive
     RenameDialog            rename_;         // Phase 44 Part 2
     CombineDialog           combine_;        // Phase 44 Part 4
+    bool                    combine_had_exclusive_ = false;   // Phase 50: track exclusive
     GridLocation          initial_;   // where to (re)open: path + selected tile
     std::vector<const vault::IndexNode*> children_;
     int                   cols_ = 1;
@@ -194,6 +204,7 @@ private:
     float                 scroll_ = 0.0f;  // vertical scroll offset (pixels scrolled down)
     std::string           error_;
     std::string           status_;   // transient export result message
+    std::string           last_footer_;   // Phase 50: track footer summary changes for mark_dirty()
 
     // New-gallery naming + zip-import flow state — bundled to fix S1820 (>20 data members).
     struct PendingZip {
@@ -202,13 +213,13 @@ private:
         bool                  active = false;  // import in flight (survives a password round-trip)
         bool                  cbz = false;     // .cbz/.cbr/.cb7/.cbt comic import: fixed one-leaf plan
         // .7z/.rar/.tar(+.gz/.xz)/.cbr/.cb7/.cbt (Phase 34) route through
-        // ZipImportJob::start_archive/start_archive_cbz (libarchive) instead of
-        // start_zip/start_cbz (miniz); orthogonal to `cbz` above, which only
+        // import_archive/import_archive_cbz (libarchive) instead of
+        // import_zip/import_cbz (miniz); orthogonal to `cbz` above, which only
         // selects the one-leaf-gallery plan vs the mirror/append plan.
         bool                  archive_backend = false;
         // Phase 35: a ZIP/CBZ detected as password-protected at pick time
         // (ui::zip_is_encrypted) — forces archive_backend above, and gates
-        // whether do_zip_import threads naming_.password.buf through to the job.
+        // whether do_zip_import threads naming_.password.buf through to the queue.
         bool                  needs_password = false;
     };
     struct Naming {
@@ -227,7 +238,6 @@ private:
             SecureTextField buf{256};
         };
         PasswordPrompt password;
-        ZipImportJob import_job;       // background executor for the zip/cbz import (Phase 24)
         FileOpJob    file_op;          // background executor for export/delete/compact (Phase 25/26)
         bool         confirm_delete = false;  // Del on a media tile: awaiting Y/N confirm
         bool         confirm_compact = false; // Shift+C on the gallery: awaiting Y/N compact confirm (Phase 26)
@@ -263,14 +273,13 @@ private:
     int                          hover_gif_tile_ = -1;
 };
 
-// Free friends of GalleryGrid (see the in-class declarations): poll_import_job /
-// poll_file_job drain a finished background import / export-delete and update the
-// grid's status + listing; vault_busy reports whether any worker owns the vault(s);
-// handle_job_input swallows input (Esc→cancel) while a job runs; handle_shift_c_key /
-// handle_delete_key extract key handlers to reduce handle_key_down's cognitive complexity;
-// set_cancelled_import_status handles cancelled import waste hints; content_width and
-// rebuild_detail manage detail panel lifecycle and layout (Phase 48).
-void poll_import_job(GalleryGrid& g);
+// Free friends of GalleryGrid (see the in-class declarations): poll_file_job drains
+// a finished background export-delete and updates the grid's status + listing; vault_busy
+// reports whether any worker owns the vault(s); handle_job_input swallows input (Esc→cancel)
+// while a job runs; handle_shift_c_key / handle_delete_key extract key handlers to reduce
+// handle_key_down's cognitive complexity; set_cancelled_import_status handles cancelled
+// import waste hints; content_width and rebuild_detail manage detail panel lifecycle and
+// layout (Phase 48); Phase 50: imports drain asynchronously.
 void poll_file_job(GalleryGrid& g);
 [[nodiscard]] bool vault_busy(const GalleryGrid& g);
 [[nodiscard]] bool handle_job_input(GalleryGrid& g, const SDL_Event& e);
@@ -278,5 +287,6 @@ void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
 void handle_delete_key(GalleryGrid& g);
 void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);
 [[nodiscard]] GalleryView current_gallery_view(const GalleryGrid& g);
+[[nodiscard]] std::string current_gallery_path(const GalleryGrid& g);  // Phase 50: for import status back nav
 
 } // namespace ui

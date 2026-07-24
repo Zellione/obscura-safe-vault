@@ -6,7 +6,6 @@
 #include "image/format_registry.h"
 #include "ui/archive_reader.h"
 #include "ui/import_common.h"
-#include "vault/vault.h"
 
 #include <print>
 #include <vector>
@@ -63,10 +62,11 @@ bool open_archive(const std::filesystem::path& path, const char* tag,
     return false;
 }
 
-// Extract one planned entry into mlock'd memory and store it in the vault.
+// Extract one planned entry into mlock'd memory and store it through the sink.
 // Tallies the result into `out`. Decompressed bytes never touch disk.
-void import_one(vault::Vault& v, const ArchiveReader& reader, const ZipPlacement& pl,
-                ZipImportOutcome& out)
+// `rel_gallery` is relative to the sink's import root.
+void import_one(MediaSink& sink, const ArchiveReader& reader, const ZipPlacement& pl,
+                std::string_view root_gallery, ZipImportOutcome& out)
 {
     crypto::SecureBytes bytes;  // mlock'd; wiped on scope exit
     if (!reader.extract(pl.entry_index, bytes)) {
@@ -75,18 +75,43 @@ void import_one(vault::Vault& v, const ArchiveReader& reader, const ZipPlacement
     }
     const std::span<const uint8_t> span{bytes.data(), bytes.size()};
 
+    // Extract relative gallery path: strip root_gallery prefix from pl.gallery_path.
+    std::string_view rel_gallery{pl.gallery_path};
+    if (!root_gallery.empty()) {
+        if (rel_gallery.size() > root_gallery.size() && rel_gallery.starts_with(root_gallery)) {
+            // Skip the root + separator
+            rel_gallery.remove_prefix(root_gallery.size() + 1);
+        } else if (rel_gallery == root_gallery) {
+            // pl.gallery_path is exactly root_gallery, so rel_gallery is empty
+            rel_gallery = {};
+        }
+    }
+
     const vault::VaultResult r = image::detect_format(span) != image::ImageFormat::Unknown
-                                     ? v.add_image(pl.gallery_path, span, pl.filename)
-                                     : v.add_video(pl.gallery_path, span, pl.filename);
+                                     ? sink.place_image(rel_gallery, span, pl.filename)
+                                     : sink.place_video(rel_gallery, span, pl.filename);
     tally_import_result(r, pl.filename, out);
 }
 
-// Create plan.galleries (parents already ordered first by the planner). On a
-// hard failure sets out.error and returns false.
-bool create_galleries(vault::Vault& v, const ZipPlan& plan, ZipImportOutcome& out)
+// Create plan.galleries through the sink. On a hard failure sets out.error
+// and returns false. Galleries are passed relative to sink root.
+bool create_galleries(MediaSink& sink, const ZipPlan& plan, std::string_view root_gallery,
+                      ZipImportOutcome& out)
 {
     for (const auto& g : plan.galleries) {
-        const vault::VaultResult r = v.create_gallery(g);
+        // Extract relative gallery path: strip root_gallery prefix from g.
+        std::string_view rel_gallery{g};
+        if (!root_gallery.empty()) {
+            if (rel_gallery.size() > root_gallery.size() && rel_gallery.starts_with(root_gallery)) {
+                // Skip the root + separator
+                rel_gallery.remove_prefix(root_gallery.size() + 1);
+            } else if (rel_gallery == root_gallery) {
+                // g is exactly root_gallery, so rel_gallery is empty
+                rel_gallery = {};
+            }
+        }
+
+        const vault::VaultResult r = sink.ensure_gallery(rel_gallery);
         if (r != vault::VaultResult::Ok && r != vault::VaultResult::AlreadyExists) {
             out.error = "Could not create gallery: " + g;
             return false;
@@ -99,39 +124,26 @@ bool create_galleries(vault::Vault& v, const ZipPlan& plan, ZipImportOutcome& ou
 // set, publishes the page count up front and bumps `done` per page so a
 // background poller can draw a bar; `cancel` cooperatively stops between
 // pages (already-stored pages remain — the vault is append-only).
-void run_placements(vault::Vault& v, const ArchiveReader& reader, const ZipPlan& plan,
-                    ZipImportOutcome& out, ImportProgress* progress)
+void run_placements(MediaSink& sink, const ArchiveReader& reader, const ZipPlan& plan,
+                    std::string_view root_gallery, ZipImportOutcome& out, ImportProgress* progress)
 {
     if (progress) progress->total.store(static_cast<int>(plan.placements.size()));
     for (const auto& pl : plan.placements) {
-        if (progress && progress->cancel.load()) {
+        if (sink.cancelled()) {
             out.cancelled = true;  // user pressed Esc during import
             break;
         }
-        import_one(v, reader, pl, out);
+        import_one(sink, reader, pl, root_gallery, out);
         if (progress) progress->done.fetch_add(1);
     }
     out.ok = true;
 }
 
-// Shared tail of both import_archive and import_archive_cbz once a plan is
-// ready: create the galleries it needs, then store every placement. Factored
-// out because the two callers would otherwise duplicate this sequence.
-ZipImportOutcome finish_import(vault::Vault& v, const ArchiveReader& reader, const ZipPlan& plan,
-                               ImportProgress* progress)
-{
-    ZipImportOutcome out;
-    out.skipped = plan.skipped_unsupported;
-    if (!create_galleries(v, plan, out)) return out;
-    run_placements(v, reader, plan, out, progress);
-    return out;
-}
+}  // namespace
 
-} // namespace
-
-ZipImportOutcome import_archive(vault::Vault&                v,
+ZipImportOutcome import_archive(MediaSink&                   sink,
                                 const std::filesystem::path& archive_path,
-                                const ZipDestination&        dest,
+                                std::string_view             new_gallery_name,
                                 ImportProgress*              progress,
                                 ArchivePassword              pw)
 {
@@ -140,14 +152,20 @@ ZipImportOutcome import_archive(vault::Vault&                v,
     if (!open_archive(archive_path, "ArchiveImport", reader, out, pw.password_protected, pw.password))
         return out;
 
-    ZipPlan plan = build_zip_plan(reader.entries(), dest.base_gallery,
-                                  dest.new_gallery_name);
-    return finish_import(v, reader, plan, progress);
+    // Build plan with empty base (sink handles absolute placement).
+    ZipPlan plan = build_zip_plan(reader.entries(), "", new_gallery_name);
+    out.skipped = plan.skipped_unsupported;
+
+    // Root is just new_gallery_name when base is empty.
+    const std::string root_gallery(new_gallery_name);
+
+    if (!create_galleries(sink, plan, root_gallery, out)) return out;
+    run_placements(sink, reader, plan, root_gallery, out, progress);
+    return out;
 }
 
-ZipImportOutcome import_archive_cbz(vault::Vault&                v,
+ZipImportOutcome import_archive_cbz(MediaSink&                   sink,
                                     const std::filesystem::path& archive_path,
-                                    std::string_view             base_gallery,
                                     std::string_view             gallery_name,
                                     ImportProgress*              progress,
                                     ArchivePassword              pw)
@@ -157,11 +175,19 @@ ZipImportOutcome import_archive_cbz(vault::Vault&                v,
     if (!open_archive(archive_path, "ArchiveCbzImport", reader, out, pw.password_protected, pw.password))
         return out;
 
-    const ZipPlan plan = build_cbz_plan(reader.entries(), base_gallery, gallery_name);
-    return finish_import(v, reader, plan, progress);
+    // Build plan with empty base (sink handles absolute placement).
+    const ZipPlan plan = build_cbz_plan(reader.entries(), "", gallery_name);
+    out.skipped = plan.skipped_unsupported;
+
+    // Root is just gallery_name when base is empty.
+    const std::string root_gallery(gallery_name);
+
+    if (!create_galleries(sink, plan, root_gallery, out)) return out;
+    run_placements(sink, reader, plan, root_gallery, out, progress);
+    return out;
 }
 
-} // namespace ui
+}  // namespace ui
 
 #else  // !OSV_VENDORED_ARCHIVE — 7z/RAR/TAR support unavailable in this build.
 
@@ -174,20 +200,48 @@ ZipImportOutcome unsupported()
     out.error = "Archive support (7z/RAR/TAR) is not available in this build.";
     return out;
 }
-} // namespace
+}  // namespace
 
-ZipImportOutcome import_archive(vault::Vault&, const std::filesystem::path&, const ZipDestination&,
+ZipImportOutcome import_archive(MediaSink&, const std::filesystem::path&, std::string_view,
                                 ImportProgress*, ArchivePassword)
 {
     return unsupported();
 }
 
-ZipImportOutcome import_archive_cbz(vault::Vault&, const std::filesystem::path&, std::string_view,
-                                    std::string_view, ImportProgress*, ArchivePassword)
+ZipImportOutcome import_archive_cbz(MediaSink&, const std::filesystem::path&, std::string_view,
+                                    ImportProgress*, ArchivePassword)
 {
     return unsupported();
 }
 
-} // namespace ui
+}  // namespace ui
 
-#endif // OSV_VENDORED_ARCHIVE
+#endif  // OSV_VENDORED_ARCHIVE
+
+namespace ui {
+
+// Thin wrappers: construct a DirectVaultSink and call the MediaSink versions.
+// Used by tests and import executors.
+
+ZipImportOutcome import_archive(vault::Vault&                v,
+                                const std::filesystem::path& archive_path,
+                                const ZipDestination&        dest,
+                                ImportProgress*              progress,
+                                ArchivePassword              pw)
+{
+    DirectVaultSink sink(v, dest.base_gallery, dest.new_gallery_name, progress);
+    return import_archive(sink, archive_path, dest.new_gallery_name, progress, pw);
+}
+
+ZipImportOutcome import_archive_cbz(vault::Vault&                v,
+                                    const std::filesystem::path& archive_path,
+                                    std::string_view             base_gallery,
+                                    std::string_view             gallery_name,
+                                    ImportProgress*              progress,
+                                    ArchivePassword              pw)
+{
+    DirectVaultSink sink(v, base_gallery, gallery_name, progress);
+    return import_archive_cbz(sink, archive_path, gallery_name, progress, pw);
+}
+
+}  // namespace ui

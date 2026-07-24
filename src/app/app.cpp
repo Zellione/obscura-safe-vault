@@ -20,12 +20,15 @@
 #include "ui/favorites_images.h"
 #include "ui/gallery_grid.h"
 #include "ui/image_viewer.h"
+#include "ui/import_model.h"
+#include "ui/import_status_screen.h"
 #include "ui/settings_overlay.h"
 #include "ui/tag_galleries.h"
 #include "ui/tag_images.h"
 #include "ui/tag_overview.h"
 #include "ui/unlock_screen.h"
 #include "ui/vault_manager.h"
+#include "ui/widgets.h"
 #include "vault/vault_search.h"
 
 #ifndef OSV_DEFAULT_FONT
@@ -100,32 +103,33 @@ void App::to_manager()
 {
     state_  = State::Managing;
     screen_ = std::make_unique<ui::VaultManager>(
-        window_, font_, registry_, dialog_, active_ ? active_path_ : std::string{});
+        window_, font_, registry_, dialog_, vault_state_.active ? vault_state_.active_path : std::string{});
     screen_->on_enter();
 }
 
 void App::to_unlock(const std::string& path)
 {
     // App owns the vault the unlock screen operates on; on success it is promoted
-    // to active_. Create-vs-open is auto-selected by the screen from file existence.
+    // to vault_state_.active. Create-vs-open is auto-selected by the screen from file existence.
     state_        = State::Locked;
-    pending_      = std::make_unique<vault::Vault>();
-    pending_path_ = path;
-    screen_ = std::make_unique<ui::UnlockScreen>(window_, font_, *pending_, dialog_, path);
+    vault_state_.pending      = std::make_unique<vault::Vault>();
+    vault_state_.pending_path = path;
+    screen_ = std::make_unique<ui::UnlockScreen>(window_, font_, *vault_state_.pending, dialog_, path);
     screen_->on_enter();
 }
 
 void App::promote_pending()
 {
-    if (!pending_) return;
-    if (active_) active_->lock();                 // lock-on-switch: wipe the old key
+    if (!vault_state_.pending) return;
+    if (vault_state_.active) vault_state_.active->lock();                 // lock-on-switch: wipe the old key
     adv_session_   = {};                          // new vault session -> fresh advanced search
     session_.reset();                             // new vault session -> fresh gallery/viewer memory
     keep_unlocked_ = false;                       // new session always starts with auto-lock on
-    active_        = std::move(pending_);
-    active_path_   = std::move(pending_path_);
-    pending_path_.clear();
-    registry_.add(active_path_);                  // move-to-front in the recent list
+    vault_state_.active        = std::move(vault_state_.pending);
+    vault_state_.active_path   = std::move(vault_state_.pending_path);
+    vault_state_.pending_path.clear();
+    registry_.add(vault_state_.active_path);                  // move-to-front in the recent list
+    import_ui_.queue.begin_session(*vault_state_.active);        // Phase 50: start import queue for new vault
 }
 
 void App::to_gallery(const std::string& path, int selected, bool explicit_index)
@@ -133,10 +137,10 @@ void App::to_gallery(const std::string& path, int selected, bool explicit_index)
     state_  = State::Browsing;
     const int seed = explicit_index ? selected : session_.recall(path);
     screen_ = std::make_unique<ui::GalleryGrid>(
-        window_, font_, *active_, *cache_,
+        window_, font_, *vault_state_.active, *cache_,
         ui::GalleryGrid::GridDialogs{dialog_, folder_dialog_},
-        ui::GalleryGrid::GridVaultCtx{registry_, active_path_},
-        session_,
+        ui::GalleryGrid::GridVaultCtx{registry_, vault_state_.active_path},
+        session_, import_ui_.queue,
         ui::GridLocation{path, seed, session_.view});
     screen_->on_enter();
 }
@@ -152,8 +156,8 @@ void App::enter_viewer(std::unique_ptr<ui::ImageViewer> viewer)
 void App::to_viewer(const std::string& gallery_path, int index)
 {
     enter_viewer(std::make_unique<ui::ImageViewer>(
-        window_, font_, *active_, *cache_,
-        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_, session_.strip_side},
+        window_, font_, *vault_state_.active, *cache_,
+        ui::ImageViewer::Context{folder_dialog_, registry_, import_ui_.queue, vault_state_.active_path, session_.strip_side},
         ui::ImageViewer::Album::gallery(gallery_path), index));
 }
 
@@ -161,7 +165,7 @@ void App::to_favorite_images()
 {
     state_  = State::Browsing;
     auto screen = std::make_unique<ui::FavoritesImages>(
-        window_, font_, *active_, *cache_, registry_, active_path_);
+        window_, font_, *vault_state_.active, *cache_, registry_, vault_state_.active_path);
     screen->set_detail_open(session_.detail_open);
     screen_ = std::move(screen);
     screen_->on_enter();
@@ -171,7 +175,7 @@ void App::to_favorite_galleries()
 {
     state_  = State::Browsing;
     auto screen = std::make_unique<ui::FavoritesGalleries>(
-        window_, font_, *active_, registry_, active_path_);
+        window_, font_, *vault_state_.active, registry_, vault_state_.active_path);
     screen->set_detail_open(session_.detail_open);
     screen_ = std::move(screen);
     screen_->on_enter();
@@ -185,7 +189,7 @@ void App::to_favorite_viewer(int index)
     ui::ImageViewer::Album album;
     album.from_collection = true;
     album.back            = ui::Nav{ui::NavKind::ToFavoriteImages, {}, 0};
-    auto favs = active_->list_favorite_images();
+    auto favs = vault_state_.active->list_favorite_images();
     album.images.reserve(favs.size());
     album.paths.reserve(favs.size());
     for (auto& h : favs) {
@@ -194,15 +198,15 @@ void App::to_favorite_viewer(int index)
     }
 
     enter_viewer(std::make_unique<ui::ImageViewer>(
-        window_, font_, *active_, *cache_,
-        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_, session_.strip_side},
+        window_, font_, *vault_state_.active, *cache_,
+        ui::ImageViewer::Context{folder_dialog_, registry_, import_ui_.queue, vault_state_.active_path, session_.strip_side},
         std::move(album), index));
 }
 
 void App::to_advanced_search()
 {
     state_  = State::Browsing;
-    screen_ = std::make_unique<ui::AdvancedSearchScreen>(window_, font_, *active_, *cache_,
+    screen_ = std::make_unique<ui::AdvancedSearchScreen>(window_, font_, *vault_state_.active, *cache_,
                                                          adv_session_, adv_session_.detail_open);
     screen_->on_enter();
 }
@@ -211,7 +215,7 @@ void App::to_tag_overview()
 {
     state_  = State::Browsing;
     screen_ = std::make_unique<ui::TagOverviewScreen>(
-        window_, font_, *active_, registry_, active_path_);
+        window_, font_, *vault_state_.active, registry_, vault_state_.active_path);
     screen_->on_enter();
 }
 
@@ -219,7 +223,7 @@ void App::to_tag_galleries(const std::string& tag)
 {
     state_  = State::Browsing;
     auto screen = std::make_unique<ui::TagGalleries>(
-        window_, font_, *active_, registry_, active_path_, tag);
+        window_, font_, *vault_state_.active, registry_, vault_state_.active_path, tag);
     screen->set_detail_open(session_.detail_open);
     screen_ = std::move(screen);
     screen_->on_enter();
@@ -229,7 +233,7 @@ void App::to_tag_images(const std::string& tag)
 {
     state_  = State::Browsing;
     auto screen = std::make_unique<ui::TagImages>(
-        window_, font_, *active_, *cache_, registry_, active_path_, tag);
+        window_, font_, *vault_state_.active, *cache_, registry_, vault_state_.active_path, tag);
     screen->set_detail_open(session_.detail_open);
     screen_ = std::move(screen);
     screen_->on_enter();
@@ -242,7 +246,7 @@ void App::to_tag_viewer(const std::string& tag, int index)
     ui::ImageViewer::Album album;
     album.from_collection = true;
     album.back            = ui::Nav{ui::NavKind::ToTagImages, tag, 0};
-    auto hits = vault::VaultSearch(*active_).images_with_tag(tag);
+    auto hits = vault::VaultSearch(*vault_state_.active).images_with_tag(tag);
     album.images.reserve(hits.size());
     album.paths.reserve(hits.size());
     for (auto& h : hits) {
@@ -251,9 +255,36 @@ void App::to_tag_viewer(const std::string& tag, int index)
     }
 
     enter_viewer(std::make_unique<ui::ImageViewer>(
-        window_, font_, *active_, *cache_,
-        ui::ImageViewer::Context{folder_dialog_, registry_, active_path_, session_.strip_side},
+        window_, font_, *vault_state_.active, *cache_,
+        ui::ImageViewer::Context{folder_dialog_, registry_, import_ui_.queue, vault_state_.active_path, session_.strip_side},
         std::move(album), index));
+}
+
+void App::to_import_status()
+{
+    using enum ui::NavKind;
+    // Phase 50: derive the back nav from the outgoing screen before teardown
+    if (!vault_state_.active) return;  // guard: only if a vault is unlocked
+
+    ui::Nav back;
+
+    if (const auto* grid = dynamic_cast<const ui::GalleryGrid*>(screen_.get())) {
+        // GalleryGrid: return to the same path at index 0
+        back = ui::Nav{ToGallery, ui::current_gallery_path(*grid), 0};
+    } else if (dynamic_cast<const ui::ImageViewer*>(screen_.get())) {
+        // ImageViewer: return to the gallery root
+        back = ui::Nav{ToGallery, {}, 0};
+    } else if (dynamic_cast<const ui::VaultManager*>(screen_.get())) {
+        // VaultManager: return to the vault manager
+        back = ui::Nav{ToVaultManager, {}, 0};
+    } else {
+        // All other screens: return to gallery root
+        back = ui::Nav{ToGallery, {}, 0};
+    }
+
+    state_  = State::Browsing;
+    screen_ = std::make_unique<ui::ImportStatusScreen>(window_, font_, import_ui_.queue, back);
+    screen_->on_enter();
 }
 
 namespace {
@@ -305,49 +336,74 @@ void draw_keep_unlocked_badge(gfx::Renderer& r, gfx::FontAtlas& font, int win_w,
 }
 } // namespace
 
+bool App::dispatch_overlay_event(App& app, const SDL_Event& e)
+{
+    // F1 toggles help (checked before help.open guard so it opens/closes over settings)
+    if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F1) {
+        ui::toggle_help(app.overlays_.help);
+        return true;
+    }
+    // Help popup (highest priority: swallows arrow/wheel; over settings)
+    if (app.overlays_.help.open) {
+        if (e.type == SDL_EVENT_KEY_DOWN) {
+            ui::handle_help_key(app.overlays_.help, e.key.key);
+        } else if (e.type == SDL_EVENT_MOUSE_WHEEL) {
+            ui::handle_help_wheel(app.overlays_.help, e.wheel.y);
+        }
+        return true;
+    }
+    // F2 toggles settings
+    if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F2) {
+        if (app.overlays_.settings.open) {
+            ui::close_settings(app.overlays_.settings, app.window_);
+        } else {
+            app.open_settings_overlay();
+        }
+        return true;
+    }
+    // Settings panel (second priority: swallows all events)
+    if (app.overlays_.settings.open) {
+        if (bool commit = false;
+            ui::handle_settings_event(app.overlays_.settings, app.window_, e, commit) && commit &&
+            app.overlays_.settings.vault_unlocked && app.vault_state_.active &&
+            vault::set_vault_settings(*app.vault_state_.active, app.overlays_.settings.draft) != vault::VaultResult::Ok) {
+            app.overlays_.settings.error = "Could not save settings";
+        }
+        return true;
+    }
+    // Lock-confirm modal (lowest priority: key events only; Phase 50)
+    if (app.import_ui_.lock_confirm.open) {
+        if (e.type == SDL_EVENT_KEY_DOWN) {
+            using enum ui::LockConfirmKey;
+            const auto key = ui::classify_lock_confirm_key(e.key.key);
+            if (key == Confirm) {
+                app.import_ui_.queue.abort_and_flush();
+                app.import_ui_.replay_nav = app.import_ui_.lock_confirm.action;
+                app.import_ui_.lock_confirm = {};
+            } else if (key == Cancel) {
+                app.import_ui_.lock_confirm = {};
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
 void App::dispatch_event(const SDL_Event& e)
 {
-    if (is_user_input(e)) idle_.reset();   // any keypress/mouse activity stays the lock
+    if (is_user_input(e)) idle_.reset();
+    // Phase 50: park SDL_EVENT_QUIT if imports are pending; replayed after confirm
     if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+        if (import_ui_.queue.busy() && !import_ui_.lock_confirm.open) {
+            import_ui_.lock_confirm = {true, ui::Nav{ui::NavKind::Quit, {}, 0}};
+            return;
+        }
         running_ = false;
         return;
     }
-    if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F1) {
-        ui::toggle_help(overlays_.help);
+    // Dispatch to overlays (guards QUIT, modals, etc.); returns true if handled
+    if (dispatch_overlay_event(*this, e))
         return;
-    }
-    if (overlays_.help.open) {
-        if (e.type == SDL_EVENT_KEY_DOWN) {
-            ui::handle_help_key(overlays_.help, e.key.key);
-        } else if (e.type == SDL_EVENT_MOUSE_WHEEL) {
-            ui::handle_help_wheel(overlays_.help, e.wheel.y);
-        }
-        return;   // swallow every event while the popup is open
-    }
-    // Settings is checked AFTER the help guard, and both are checked after the
-    // F1 toggle above. So F1 still opens help over an open settings panel, and
-    // while both are open the help popup — which draws on top — keeps the arrow
-    // and wheel events rather than losing them to the panel behind it.
-    if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F2) {
-        if (overlays_.settings.open) {
-            ui::close_settings(overlays_.settings, window_);
-        } else {
-            open_settings_overlay();
-        }
-        return;
-    }
-    // Check `open` ONCE, up front: handle_settings_event may close the overlay
-    // (Esc), and the event must still be swallowed on that same frame — otherwise
-    // the Esc leaks through to the screen below, which reads it as "go up a level".
-    if (overlays_.settings.open) {
-        if (bool commit = false;
-            ui::handle_settings_event(overlays_.settings, window_, e, commit) && commit &&
-            overlays_.settings.vault_unlocked && active_ &&
-            vault::set_vault_settings(*active_, overlays_.settings.draft) != vault::VaultResult::Ok) {
-            overlays_.settings.error = "Could not save settings";
-        }
-        return;   // the overlay swallows every event while open, like the help popup
-    }
     if (screen_) screen_->handle_event(e);
 }
 
@@ -397,8 +453,8 @@ void App::capture_session_state()
 
 void App::open_settings_overlay()
 {
-    overlays_.settings.vault_unlocked = active_ && active_->is_unlocked();
-    overlays_.settings.draft = overlays_.settings.vault_unlocked ? vault::vault_settings(*active_)
+    overlays_.settings.vault_unlocked = vault_state_.active && vault_state_.active->is_unlocked();
+    overlays_.settings.draft = overlays_.settings.vault_unlocked ? vault::vault_settings(*vault_state_.active)
                                                                   : vault::VaultSettings{};
     overlays_.settings.theme = gfx::active_theme_id();
     ui::open_settings(overlays_.settings, ui::SettingsSection::Appearance);
@@ -408,12 +464,23 @@ bool App::apply_nav()
 {
     if (!screen_) return false;
     using enum ui::NavKind;
-    const ui::Nav nav = screen_->take_nav();
+    // Phase 50: check for a replayed nav (from lock_confirm confirm) first
+    ui::Nav nav = import_ui_.replay_nav.kind != ui::NavKind::None ? import_ui_.replay_nav : screen_->take_nav();
+    if (nav.kind != ui::NavKind::None) import_ui_.replay_nav = {};   // consume import_ui_.replay_nav after taking it
     // A ToGallery nav.index is only a real, freshly-known position when it
     // comes from the viewer returning to its exact launch position (Phase 40
     // Part 2) — every other ToGallery source passes 0 as "no opinion" and
     // to_gallery() falls back to the remembered position for that path.
     const bool from_viewer = dynamic_cast<const ui::ImageViewer*>(screen_.get()) != nullptr;
+
+    // Phase 50: park lock-ish actions that occur while imports are pending.
+    // These actions will be replayed after the user confirms the import abort.
+    if ((nav.kind == LockActive || nav.kind == ToUnlock || nav.kind == Quit) &&
+        import_ui_.queue.busy() && !import_ui_.lock_confirm.open) {
+        import_ui_.lock_confirm = {true, nav};
+        return false;   // screen stays; event will be re-queued by dispatch_event
+    }
+
     // Every transition below except ToggleKeepUnlocked/ToSettings/Quit/None destroys the
     // current screen.
     if (nav.kind != None && nav.kind != ToggleKeepUnlocked && nav.kind != ToSettings &&
@@ -424,7 +491,7 @@ bool App::apply_nav()
     switch (nav.kind) {
         case ToGallery:
             if (state_ == State::Locked) promote_pending();   // unlock-screen success
-            if (active_) to_gallery(nav.path, nav.index, from_viewer);
+            if (vault_state_.active) to_gallery(nav.path, nav.index, from_viewer);
             else         to_manager();                        // defensive: nothing unlocked
             return true;
         case ToViewer:            to_viewer(nav.path, nav.index);      return true;
@@ -436,12 +503,17 @@ bool App::apply_nav()
         case ToTagGalleries:      to_tag_galleries(nav.path);          return true;
         case ToTagImages:         to_tag_images(nav.path);             return true;
         case ToTagViewer:         to_tag_viewer(nav.path, nav.index);  return true;
-        case ToUnlock:            to_unlock(nav.path);                 return true;
-        case ToVaultManager:      pending_.reset(); to_manager();      return true;
+        case ToImportStatus:      to_import_status(); return true;  // Phase 50
+        case ToUnlock:
+            import_ui_.queue.end_session();          // Phase 50: flush before switch
+            to_unlock(nav.path);
+            return true;
+        case ToVaultManager:      vault_state_.pending.reset(); to_manager();      return true;
         case LockActive:
             keep_unlocked_ = false;
             session_.reset();                     // Phase 39 Part 2: fresh session on lock
-            if (active_) { active_->lock(); active_.reset(); active_path_.clear(); }
+            import_ui_.queue.end_session();          // Phase 50: flush before lock
+            if (vault_state_.active) { vault_state_.active->lock(); vault_state_.active.reset(); vault_state_.active_path.clear(); }
             to_manager();
             return true;
         case ToSettings:
@@ -466,16 +538,19 @@ bool App::apply_nav()
 bool App::maybe_auto_lock(double dt)
 {
     // should_auto_lock also covers "a screen with a background import owns the
-    // vault's file handle on a worker thread" (blocks_idle_lock) and the
-    // session's "keep unlocked" toggle (Phase 33) — see app/auto_lock.h.
+    // vault's file handle on a worker thread" (blocks_idle_lock), the session's
+    // "keep unlocked" toggle (Phase 33), and a busy import queue (Phase 50) —
+    // see app/auto_lock.h.
     if (const bool blocks = screen_ && screen_->blocks_idle_lock();
-        !should_auto_lock(active_ != nullptr, blocks, keep_unlocked_, idle_, dt))
+        !should_auto_lock(vault_state_.active != nullptr, blocks, keep_unlocked_, import_ui_.queue.busy(),
+                          idle_, dt))
         return false;
     if (screen_) screen_->on_exit();
     session_.reset();                                  // Phase 39 Part 2: fresh session on idle lock
-    active_->lock();                                  // wipe the master key
-    active_.reset();
-    active_path_.clear();
+    import_ui_.queue.end_session();                       // Phase 50: flush before lock
+    vault_state_.active->lock();                                  // wipe the master key
+    vault_state_.active.reset();
+    vault_state_.active_path.clear();
     to_manager();
     std::println("[App] Auto-locked after {} s idle.", static_cast<int>(IDLE_LOCK_SECS));
     return true;
@@ -488,11 +563,37 @@ void App::render_frame()
     if (screen_) {
         gfx::Renderer r(window_.sdl_renderer());
         screen_->render(r);
-        if (active_ && should_show_badge(keep_unlocked_, badge_elapsed_, BADGE_WINDOW_SECS))
+        if (vault_state_.active && should_show_badge(keep_unlocked_, badge_elapsed_, BADGE_WINDOW_SECS))
             draw_keep_unlocked_badge(r, font_, window_.width(), window_.height());
         if (overlays_.settings.open) {
             ui::draw_settings_overlay(r, font_, static_cast<float>(window_.width()),
                                       static_cast<float>(window_.height()), overlays_.settings);
+        }
+        // Phase 50: render lock_confirm modal after settings overlay so it stays on top
+        if (import_ui_.lock_confirm.open) {
+            const auto w = static_cast<float>(window_.width());
+            const auto h = static_cast<float>(window_.height());
+            using namespace gfx::theme;
+
+            // Veil the whole window so the modal clearly owns input focus
+            r.draw_rect({0, 0, w, h}, gfx::Color{8, 9, 12, 255});
+
+            const float pw = 560;
+            const float ph = 230;
+            const float px = (w - pw) / 2;
+            const float py = (h - ph) / 2;
+            r.draw_round_rect({px, py, pw, ph}, RADIUS, SURFACE);
+            r.draw_round_rect({px, py, pw, ph}, RADIUS, DANGER, /*filled*/ false);
+
+            auto centered = [&](const std::string& s, float y, gfx::Color c) {
+                const auto tw = static_cast<float>(font_.measure(s));
+                r.draw_text(font_, px + (pw - tw) / 2, y, s, c);
+            };
+
+            const std::string confirm_text = ui::import_lock_confirm_text(
+                static_cast<int>(import_ui_.queue.snapshot().size()));
+            centered(ui::fit_text(font_, confirm_text, pw - 32), py + 28, TEXT);
+            centered("[Y] Discard & lock        [N] Keep importing", py + ph - 50, TEXT_DIM);
         }
         ui::draw_help_popup(r, font_, static_cast<float>(window_.width()),
                             static_cast<float>(window_.height()),
@@ -522,6 +623,12 @@ void App::run()
         if (screen_) screen_->update(dt);
         badge_elapsed_ += dt;   // Phase 45 Part 6
 
+        // Phase 50: drain the import queue and refresh screens when records are applied
+        if (vault_state_.active && import_ui_.queue.drain(dt) > 0 && screen_) {
+            screen_->on_vault_changed();
+            screen_->mark_dirty();
+        }
+
         // Idle auto-lock runs before nav resolution so the manager paints this frame.
         const bool auto_locked = maybe_auto_lock(dt);
 
@@ -541,10 +648,11 @@ void App::run()
 void App::shutdown()
 {
     if (screen_) { screen_->on_exit(); screen_.reset(); }
-    if (active_)  active_->lock();      // wipe master key
-    if (pending_) pending_->lock();
-    active_.reset();
-    pending_.reset();
+    import_ui_.queue.end_session();        // Phase 50: flush before lock (blocking, acceptable at shutdown)
+    if (vault_state_.active)  vault_state_.active->lock();      // wipe master key
+    if (vault_state_.pending) vault_state_.pending->lock();
+    vault_state_.active.reset();
+    vault_state_.pending.reset();
     if (cache_) cache_->clear();        // destroy thumbnail textures before the renderer
     font_.release_texture();
     window_.shutdown();

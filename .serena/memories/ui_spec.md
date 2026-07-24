@@ -119,3 +119,21 @@ it reflows the grid into the reduced width rather than overlaying tiles; below a
 dimensions, size, date, own tags and the inherited cascade; a gallery shows a
 recursive tally + total size; a multi-selection shows an aggregate summary.
 Open/closed state is session-global via `GallerySessionState::detail_open`.
+
+## Import Status screen (Phase 50)
+Global `Shift+I` opens `NavKind::ToImportStatus`, or click the footer import summary.
+Shows:
+- **Running item:** name, progress bar (done/total chunks), source kind (Files/Zip/Archive/etc.).
+- **Queued items:** list, `Ctrl+Up`/`Ctrl+Down` reorder, `Del` cancel per-item.
+- **Finished/failed items:** outcomes (imported/skipped counts, error text). `C` clears finished entries.
+- **Lane-failure banner:** surfaces hard-stop commit errors (hard stop, queue halted).
+- **Help group (F1):** standard. **Esc** returns to previous screen.
+
+### Footer bar (Phase 50)
+Live summary while queue is non-empty: `"Importing <name> 128/450 · 2 queued"` (done/total, remainder queued).
+**Priority:** error > import summary > status. Clickable to jump to ImportStatusScreen.
+
+### Lock confirm modal (Phase 50)
+Manual lock, vault switch, or quit with pending queue: default-cancel modal reads **"N imports pending — finish current file, discard the rest, and lock?"**
+On confirm (Y): current file completes, queue discarded, final commit-lane flush, passwords/keys wiped.
+SDL_EVENT_QUIT also flows through this gate.

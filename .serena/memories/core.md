@@ -56,10 +56,20 @@ vendor/      git submodules — pinned versions, build mechanics, CI matrix in m
 `KEK = Argon2id(password [‖ keyfile], salt)` → unwraps a random 32-byte master key.
 All data/thumbnail/index chunks are encrypted with the master key + a fresh nonce per chunk.
 
-## Vault write atomicity
+## Vault write atomicity & Phase 50 concurrency
 
 Append chunks → fsync → write index to inactive slot → fsync → flip `active_slot` → fsync.
 (Full 3-phase detail in `mem:module/vault` index_io.*.)
+
+**Phase 50 main-thread-tree architecture (Phase 50):**
+- **Index tree is main-thread-only** — no tree locks, no concurrent mutations. Worker stages chunks; main thread attaches via `Vault::attach_staged`.
+- **Vault has two FILE\* handles + write_mutex_:**
+  - `read_fp_` (read-only) — all read paths (thumbnail decrypt, image fetch, VideoSource) to avoid contention.
+  - `write_fp_` guarded by `write_mutex_` — worker appends chunks in whole-chunk holds.
+  - `header_mutex_` — separate guard for slot-field mutations during commit.
+- **CommitLane owns a jthread** — batches index writes (N=32 files or 2s), generation-ordered with coalescing (newest blob wins).
+  Flush on queue drain, cancel, lock (auto-stop before key wipe), shutdown. Write failure halts queue (hard stop, error on status page).
+  Crash mid-batch loses at most the last batch's index entries; orphans reclaimable by compact.
 
 ## Other memories
 - Tech stack, pinned deps, build mechanics, CI matrix: `mem:tech_stack`

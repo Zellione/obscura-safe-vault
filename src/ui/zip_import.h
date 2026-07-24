@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ui/media_sink.h"
 #include "ui/meta_json.h"
 #include "ui/zip_plan.h"
 #include "vault/op_progress.h"
@@ -25,31 +26,46 @@ struct ZipImportOutcome {
     std::string              error;
 };
 
-// Shared, thread-safe progress for a running import (Phase 24). Now an alias of
-// the generic vault::OpProgress (Phase 25) so ZipImportJob and FileOpJob share
-// one progress/cancel type. The importer stores `total` (files to place) before
-// the first page and bumps `done` after each; a poller on another thread reads
-// them for a progress bar. Setting `cancel` cooperatively stops the placement
-// loop between pages — the pages stored so far remain (append-only vault), so a
-// cancel is a clean partial import, never a corrupt one.
+// Shared, thread-safe progress for a running import (Phase 24). An alias of
+// the generic vault::OpProgress (Phase 25) used by import executors and the queue.
+// The importer stores `total` (files to place) before the first page and bumps
+// `done` after each; a poller on another thread reads them for a progress bar.
+// Setting `cancel` cooperatively stops the placement loop between pages — the pages
+// stored so far remain (append-only vault), so a cancel is a clean partial import,
+// never a corrupt one.
 using ImportProgress = vault::OpProgress;
 
-// Import the supported media from `zip_path` into `v`. Decompresses each entry
+// Import the supported media from `zip_path` through `sink`. Decompresses each entry
 // into mlock'd memory only (invariant #1). The archive tree is mirrored 1:1
-// under base_gallery/new_gallery_name (see build_zip_plan).
+// with `new_gallery_name` as the root (see build_zip_plan). The sink handles
+// absolute placement; executors pass relative gallery paths and data.
 // `progress` (optional) is updated as files are placed and polled for cancel;
 // pass nullptr for a plain synchronous import with no progress/cancel.
+[[nodiscard]] ZipImportOutcome import_zip(MediaSink&                   sink,
+                                          const std::filesystem::path& zip_path,
+                                          std::string_view             new_gallery_name,
+                                          ImportProgress*              progress = nullptr);
+
+// Thin wrapper: construct a DirectVaultSink and call the MediaSink version.
+// Used by tests and import executors.
 [[nodiscard]] ZipImportOutcome import_zip(vault::Vault&                v,
                                           const std::filesystem::path& zip_path,
                                           std::string_view             base_gallery,
                                           std::string_view             new_gallery_name,
                                           ImportProgress*              progress = nullptr);
 
-// Import a `.cbz` comic archive as a single leaf gallery `base_gallery/gallery_name`
-// of pages (build_cbz_plan). Reuses the import_zip miniz/SecureBytes path:
+// Import a `.cbz` comic archive as a single leaf gallery through `sink`
+// (build_cbz_plan). Reuses the import_zip miniz/SecureBytes path:
 // every image entry is decompressed into mlock'd memory only (invariant #1),
 // flattening internal subfolders, in natural reading order. Non-image entries
 // are skipped + counted. Never extracts to disk.
+[[nodiscard]] ZipImportOutcome import_cbz(MediaSink&                   sink,
+                                          const std::filesystem::path& cbz_path,
+                                          std::string_view             gallery_name,
+                                          ImportProgress*              progress = nullptr);
+
+// Thin wrapper: construct a DirectVaultSink and call the MediaSink version.
+// Used by tests and import executors.
 [[nodiscard]] ZipImportOutcome import_cbz(vault::Vault&                v,
                                           const std::filesystem::path& cbz_path,
                                           std::string_view             base_gallery,

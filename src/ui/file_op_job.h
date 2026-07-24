@@ -21,7 +21,7 @@ namespace ui {
 using OpWorkerThread = std::jthread;
 
 // Which bulk operation ran (drives the outcome wording).
-enum class FileOpKind { None, Export, Delete, Transfer, Compact, Import };
+enum class FileOpKind { None, Export, Delete, Transfer, Compact };
 
 struct FileOpOutcome {
     bool        ok        = false;   // the op ran to completion (or a clean cancel)
@@ -35,17 +35,16 @@ struct FileOpOutcome {
 };
 
 // Runs a bulk file operation — export, delete, or move/copy (transfer) — on a
-// background thread so a large gallery never freezes the UI (Phase 25). Generalises
-// the Phase 24 ZipImportJob pattern: an OpProgress drives an "N / M" bar and a
-// cooperative cancel.
+// background thread so a large gallery never freezes the UI (Phase 25).
+// An OpProgress drives an "N / M" bar and a cooperative cancel.
 //
-// Threading contract (identical to ZipImportJob): the vault's file handle is
-// single-threaded — while active(), the worker thread is the ONLY thread touching
-// the vault(s). The owning screen MUST NOT read any involved vault (no thumbnail
-// decrypt, no listing) until take_outcome() returns; it only polls progress and
-// draws a modal. A cross-vault transfer touches BOTH vaults, so both must be kept
-// alive and untouched by the UI for the job's life. cancel() stops between items;
-// each item is a committed, crash-safe unit, so a cancel is a clean partial.
+// Threading contract: the vault's file handle is single-threaded — while active(),
+// the worker thread is the ONLY thread touching the vault(s). The owning screen
+// MUST NOT read any involved vault (no thumbnail decrypt, no listing) until
+// take_outcome() returns; it only polls progress and draws a modal. A cross-vault
+// transfer touches BOTH vaults, so both must be kept alive and untouched by the UI
+// for the job's life. cancel() stops between items; each item is a committed,
+// crash-safe unit, so a cancel is a clean partial.
 class FileOpJob {
 public:
     FileOpJob() = default;
@@ -94,15 +93,6 @@ public:
     // Compact the vault in-place, reclaiming wasted_bytes(). Runs on background thread
     // with progress tracking and cooperative cancel.
     bool start_compact(vault::Vault& v);
-
-    // Import `files` (paths already picked via the multi-select file dialog)
-    // into gallery `base_gallery` of `v`. Each file is read and dispatched to
-    // add_video/add_image by extension; per-file failures are tallied, not
-    // fatal — the loop continues past them (mirrors start_export's
-    // "always succeeds, per-item failures counted" convention). `v` is kept
-    // alive by the caller for the job's life.
-    bool start_import(vault::Vault& v, std::string base_gallery,
-                      std::vector<std::filesystem::path> files);
 
     // True from a start_*() call until take_outcome() has collected the result.
     [[nodiscard]] bool active() const noexcept { return active_.load(); }

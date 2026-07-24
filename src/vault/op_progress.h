@@ -13,8 +13,8 @@ namespace vault {
 // always a clean partial result, never a corrupt one.
 //
 // Lives in vault/ (not ui/) so vault-level bulk ops (transfer, export helpers)
-// can report progress without a ui dependency. ui::ImportProgress is an alias of
-// this type, so ZipImportJob (Phase 24) and FileOpJob (Phase 25) share it.
+// can report progress without a ui dependency. FileOpJob (Phase 25) and the
+// queue import workers share this type.
 struct OpProgress {
     std::atomic<int>  total{0};
     std::atomic<int>  done{0};

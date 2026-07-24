@@ -15,7 +15,7 @@ namespace ui {
 enum class NavKind {
     None, ToUnlock, ToGallery, ToViewer, ToFavoriteImages, ToFavoriteGalleries,
     ToFavoriteViewer, ToAdvancedSearch, ToTagOverview, ToTagGalleries,
-    ToTagImages, ToTagViewer,
+    ToTagImages, ToTagViewer, ToImportStatus,
     ToVaultManager, LockActive, ToggleKeepUnlocked, ToSettings, Quit
 };
 
@@ -44,6 +44,13 @@ public:
     // resources (e.g. start text input, refresh listings) on activation.
     virtual void on_enter() { /* no-op by default */ }
     virtual void on_exit()  { /* no-op by default */ }
+
+    // Phase 50: the vault's index tree changed under this screen (background
+    // import drain attached nodes — push_child may have REALLOCATED children
+    // vectors, invalidating every IndexNode* the screen holds). Screens that
+    // cache node pointers across frames MUST override and re-fetch. Called on
+    // the main thread, after records are applied, BEFORE the next render.
+    virtual void on_vault_changed() { /* screens without cached pointers: no-op */ }
 
     virtual void handle_event(const SDL_Event& e) = 0;
     virtual void update(double dt) { (void)dt; }

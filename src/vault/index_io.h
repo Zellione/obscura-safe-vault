@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <vector>
 
 #include "crypto/secure_mem.h"
@@ -23,11 +24,29 @@ struct IndexIoContext {
     const IndexNode&                       root_;         // index tree to serialize
     const std::vector<SavedSearch>&        saved_searches_; // vault-global saved searches
     const VaultSettings&                   settings_;       // vault-global (Phase 49)
+    std::mutex*                            header_mutex_ = nullptr;  // Phase 50: guards header_.slot[*] and header_.active_slot
 };
 
 // IndexIo: owns the logic for persisting the in-memory vault index with
 // crash-safe double-buffer slot swapping and atomic commit.
 namespace index_io {
+
+// Serialize the index tree + saved searches + settings to the PLAINTEXT blob.
+// Main-thread only (walks the tree). Pure memory operation — no I/O, no locks.
+// Returns true on success, false on serialization failure.
+[[nodiscard]] bool serialize_plain_index(const IndexIoContext& ctx,
+                                         std::vector<uint8_t>& out);
+
+// Seal `plain` (fresh nonce) and run the crash-safe 3-phase slot swap:
+//   Phase A: append sealed blob + fsync   (this fsync also flushes every chunk
+//            staged since the previous commit — the batching win)
+//   Phase B: write inactive slot header pointer + fsync
+//   Phase C: flip active_slot + fsync    <- atomic commit point
+// Callable from ANY thread; caller must hold the vault write mutex. Header slot
+// mutations must happen under ctx-provided header mutex (Task 4 wires it).
+// Returns Ok on success, or IoError / CryptoError on failure.
+[[nodiscard]] VaultResult commit_plain_blob(IndexIoContext& ctx,
+                                            std::span<const uint8_t> plain);
 
 // Serialize + seal + append the current index to the vault file, then
 // atomically switch the active slot. Returns Ok on success, or IoError /

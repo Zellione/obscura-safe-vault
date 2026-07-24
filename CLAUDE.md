@@ -110,6 +110,7 @@ Current pinned versions, exact build commands, and the CI matrix: see `mem:tech_
 - **Core dumps are disabled in Release builds.** At app startup (Release only), `prctl(PR_SET_DUMPABLE, 0)` + `setrlimit(RLIMIT_CORE, 0)` (Linux) prevent core dumps from capturing decrypted data. Debug builds keep dumps + ptrace attach enabled. (Windows is a no-op here; macOS support has been removed.)
 - **Password change is not crash-safe.** Avoid force-killing the app during password re-wrap (a KEK change without bulk re-encrypt); recovery would require manual recovery steps.
 - **Framed vaults reveal plaintext *compressibility* through ciphertext length (Phase 26)** — accepted for the local-attacker threat model.
+- **Batched import commits (Phase 50):** a crash mid-import loses at most the last commit batch's index entries; the orphaned chunks are dead ciphertext reclaimed by `Shift+C` compact. Integrity and the 3-phase slot swap are unchanged.
 
 ### Testing policy
 Testing conventions (unit vs. integration, KAT vectors, pass-before-complete): see `mem:conventions`.

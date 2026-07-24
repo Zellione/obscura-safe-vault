@@ -12,6 +12,12 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   transient `pending_` during unlock. Single-active / lock-on-switch: opening another vault
   wipes the old key; shutdown wipes both. `promote_pending()` runs only on unlock success
   (ToGallery while state==Locked).
+- **Phase 50:** App owns `ui::ImportQueue queue_` (declared after vaults for destruction order, so queue drains before vault wipes key).
+  `App::update(dt)` drains queue each frame: `queue_.drain(dt)` attaches staged nodes + triggers `on_vault_changed()` broadcast
+  on all active screens (GalleryGrid, ImageViewer, FavoritesScreen, AdvancedSearchScreen refetch cached IndexNode* refs).
+  `should_auto_lock` gained `import_busy` parameter (suppresses idle lock while queue non-empty).
+  `PendingLockConfirm` modal parks LockActive/ToUnlock/Quit behind a Y/N confirm ("N imports pending — finish current file, discard the rest, and lock?")
+  when queue is non-empty; SDL_EVENT_QUIT also flows through this gate. `replay_nav_` mechanism re-enters `apply_nav` after SDL_EVENT_QUIT confirmation.
 
 ### Idle auto-lock
 - `app/idle_timer.h` `IdleTimer` (reset on user input in `dispatch_event`);

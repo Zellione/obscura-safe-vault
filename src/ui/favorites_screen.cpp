@@ -80,6 +80,14 @@ void FavoritesScreen::on_enter()
     scroll_ = 0.0f;  // reset scroll when entering
 }
 
+void FavoritesScreen::on_vault_changed()
+{
+    // Phase 50: vault's index tree changed (background import drain attached nodes).
+    // favs_ pointers are now stale; re-fetch.
+    reload();
+    mark_dirty();
+}
+
 void FavoritesScreen::update(double)
 {
     // Update scroll to keep the selected item visible.
@@ -141,6 +149,11 @@ void FavoritesScreen::handle_event(const SDL_Event& e)
     using enum InputAction;
     switch (e.type) {
         case SDL_EVENT_KEY_DOWN:
+            // Phase 50: Shift+I opens import status
+            if ((e.key.key == SDLK_I) && (e.key.mod & SDL_KMOD_SHIFT)) {
+                request(NavKind::ToImportStatus);
+                break;
+            }
             if (is_quick_switch_key(e.key)) { quick_switch_.open(); break; }   // switch vault (`)
             if (e.key.key == SDLK_R) { start_rename(); break; }
             if (handle_detail_panel_scroll(e.key, detail_.panel)) { break; }
@@ -260,7 +273,8 @@ void FavoritesScreen::render(gfx::Renderer& r)
 std::vector<ui::HelpGroup> FavoritesScreen::help_groups() const
 {
     std::vector<ui::HelpEntry> nav{
-        {"Enter", "Open"}, {"R", "Rename"}, {"D", "Toggle the detail panel"}, {"`", "Switch vault"}, {"Esc", "Back"},
+        {"Enter", "Open"}, {"R", "Rename"}, {"D", "Toggle the detail panel"},
+        {"Shift+I", "Import status"}, {"`", "Switch vault"}, {"Esc", "Back"},
     };
     for (const auto& e : extra_help_entries()) nav.push_back(e);
     return {{"Navigate", nav}};

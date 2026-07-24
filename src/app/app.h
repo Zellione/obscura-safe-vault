@@ -13,6 +13,7 @@
 #include "ui/advanced_search_state.h"
 #include "ui/gallery_session_state.h"
 #include "ui/help_popup.h"
+#include "ui/import_queue.h"
 #include "ui/screen.h"
 #include "ui/settings_model.h"
 #include "vault/vault.h"
@@ -52,6 +53,7 @@ private:
     void to_tag_galleries(const std::string& tag);   // galleries directly carrying `tag`
     void to_tag_images(const std::string& tag);            // images directly carrying a tag
     void to_tag_viewer(const std::string& tag, int index); // viewer over a tag's media set
+    void to_import_status();              // Phase 50: import status screen
     void promote_pending();               // unlock success: pending_ -> active_ (locks old)
 
     // Shared tail of every viewer-construction site (Phase 39 Part 2): enters the
@@ -70,18 +72,25 @@ private:
     void render_frame();                         // draw + present + frame-cap fallback
     void open_settings_overlay();                // seed settings state and open the overlay
 
+    // Dispatch event to overlays (help > settings > lock_confirm); true if handled
+    static bool dispatch_overlay_event(App& app, const SDL_Event& e);
+
     gfx::Window                        window_;
     gfx::FontAtlas                     font_;
     bool                               font_ready_ = false;
     std::unique_ptr<gfx::TextureCache> cache_;
     platform::FileDialog               dialog_;
     platform::FolderDialog             folder_dialog_;
-    std::unique_ptr<vault::Vault>      active_;          // the single unlocked vault
-    std::string                        active_path_;
-    std::unique_ptr<vault::Vault>      pending_;         // vault being unlocked right now
-    std::string                        pending_path_;
     platform::VaultRegistry            registry_;
     std::unique_ptr<ui::Screen>        screen_;
+
+    struct VaultState {
+        std::unique_ptr<vault::Vault> active;         // the single unlocked vault
+        std::string                   active_path;
+        std::unique_ptr<vault::Vault> pending;        // vault being unlocked right now
+        std::string                   pending_path;
+    };
+    VaultState                         vault_state_;
     // Advanced-search state preserved across visits within one unlocked-vault
     // session; reset in promote_pending() whenever the active vault changes.
     ui::AdvancedSearchState            adv_session_;
@@ -117,6 +126,24 @@ private:
         ui::SettingsState  settings;   // Phase 49: F2 settings overlay
     };
     Overlays                           overlays_;
+
+    // Phase 50: import queue and related UI state. Declared after active_/pending_
+    // so ~ImportQueue (which flushes into the vault) runs before the vault is destroyed.
+    struct ImportUi {
+        // A lock-ish action (LockActive / ToUnlock / Quit / manager switch) requested
+        // while imports are pending. The action is parked here behind a default-cancel
+        // confirm modal; Y aborts the queue then replays the Nav, N/Esc discards it.
+        struct PendingLockConfirm { bool open = false; ui::Nav action; };
+        PendingLockConfirm lock_confirm;
+
+        // Nav to be processed on the next apply_nav() call (set by dispatch_event
+        // when the user confirms a parked lock action).
+        ui::Nav replay_nav;
+
+        // Background import queue.
+        ui::ImportQueue queue;
+    };
+    ImportUi                           import_ui_;
 };
 
 } // namespace app

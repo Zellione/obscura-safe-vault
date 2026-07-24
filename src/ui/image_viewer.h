@@ -24,6 +24,7 @@
 #include "ui/tag_editor.h"
 #include "ui/video_playback.h"
 #include "ui/viewer_model.h"
+#include "ui/import_queue.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
 namespace vault { class Vault; struct IndexNode; }
@@ -76,10 +77,12 @@ public:
 
     // Host-provided collaborators beyond the core render deps, bundled to keep the
     // constructor within the parameter budget (S107). initial_strip_side seeds the
-    // session-scoped thumbnail-strip side (Phase 39 Part 2).
+    // session-scoped thumbnail-strip side (Phase 39 Part 2); queue is const for
+    // footer summary observation only (Phase 50).
     struct Context {
         platform::FolderDialog&  folder;
         platform::VaultRegistry& registry;
+        const ImportQueue&       queue;              // Phase 50: for footer summary only
         std::string              active_path;
         StripSide                initial_strip_side = StripSide::Bottom;
     };
@@ -94,6 +97,7 @@ public:
 
     void on_enter() override;
     void on_exit() override;
+    void on_vault_changed() override;  // Phase 50: re-fetch gallery/collection images after tree reallocation
     void handle_event(const SDL_Event& e) override;
     void update(double dt) override;
     void render(gfx::Renderer& r) override;
@@ -177,6 +181,7 @@ private:
     gfx::FontAtlas&         font_;
     vault::Vault&           vault_;
     gfx::TextureCache&      cache_;
+    const ImportQueue&      queue_;          // Phase 50: for footer summary only
     ExportUi                export_;
     TagEditor               tag_editor_;
     SearchOverlay           search_;
