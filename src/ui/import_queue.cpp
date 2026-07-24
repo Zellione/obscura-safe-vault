@@ -551,49 +551,40 @@ void ImportQueue::mark_task_imported(uint64_t task_id)
 
 int ImportQueue::drain(double dt)
 {
-    int applied = 0;
-
-    // Keep draining until no more records appear (handles records posted during processing)
-    while (true) {
-        // Collect records to process without holding the lock for vault operations
-        std::deque<StagedRecord> to_process;
-        {
-            std::lock_guard lock(mu_);
-            to_process = std::move(records_);
-            records_.clear();
-        }
-
-        // If no records to process, we're done
-        if (to_process.empty()) {
-            break;
-        }
-
-        // Apply records without holding the lock (vault operations can be slow)
-        while (!to_process.empty()) {
-            auto record = std::move(to_process.front());
-            to_process.pop_front();
-
-            if (record.node) {
-                // Ensure the destination gallery exists first
-                if (!record.gallery_path.empty()) {
-                    (void)vault::ensure_gallery_path(*v_, record.gallery_path);
-                }
-                const auto result = vault::attach_staged(*v_, record.gallery_path, std::move(*record.node));
-                if (result == vault::VaultResult::AlreadyExists) {
-                    mark_task_skipped(record.task_id);
-                } else if (result == vault::VaultResult::Ok && !record.counted) {
-                    record.counted = true;
-                    policy_.note_attached(1);
-                    mark_task_imported(record.task_id);
-                }
-            } else {
-                (void)vault::ensure_gallery_path(*v_, record.gallery_path);
-            }
-            applied++;
-        }
+    // Collect records to process without holding the lock for vault operations
+    std::deque<StagedRecord> to_process;
+    {
+        std::lock_guard lock(mu_);
+        to_process = std::move(records_);
+        records_.clear();
     }
 
-    // Update policy and check conditions (only after all records are drained)
+    // Apply records without holding the lock (vault operations can be slow)
+    int applied = 0;
+    while (!to_process.empty()) {
+        auto record = std::move(to_process.front());
+        to_process.pop_front();
+
+        if (record.node) {
+            // Ensure the destination gallery exists first
+            if (!record.gallery_path.empty()) {
+                (void)vault::ensure_gallery_path(*v_, record.gallery_path);
+            }
+            const auto result = vault::attach_staged(*v_, record.gallery_path, std::move(*record.node));
+            if (result == vault::VaultResult::AlreadyExists) {
+                mark_task_skipped(record.task_id);
+            } else if (result == vault::VaultResult::Ok && !record.counted) {
+                record.counted = true;
+                policy_.note_attached(1);
+                mark_task_imported(record.task_id);
+            }
+        } else {
+            (void)vault::ensure_gallery_path(*v_, record.gallery_path);
+        }
+        applied++;
+    }
+
+    // Update policy and check conditions
     {
         std::lock_guard lock(mu_);
         // Advance batch policy
