@@ -84,6 +84,68 @@ HelpPanelDims compute_help_panel_dims(float W, float H, int total_lines,
     return {px, py, pw, ph, static_cast<int>(cols.size()), longest, col_width};
 }
 
+// The vertical band a help column is drawn into, plus the scroll offset. Bundled
+// so the per-column drawer takes one context rather than a long, swappable
+// parameter list.
+struct HelpColumnBand {
+    float base_x = 0.0f;         // left edge of the first column's text
+    float col_width = 0.0f;      // horizontal step between columns
+    float content_top = 0.0f;    // first drawable y
+    float content_bottom = 0.0f; // last drawable y
+    int   scroll_line = 0;       // whole-line scroll offset
+};
+
+// Draw one packed column's titles + entries into the clipped band. Lifted out of
+// draw_help_popup verbatim (same visibility check, same spacer rule, same order)
+// so the caller stays under the cognitive-complexity cap.
+void draw_help_column(gfx::Renderer& r, gfx::FontAtlas& font,
+                      const std::vector<HelpGroup>& all_groups,
+                      const std::vector<HelpColumn>& cols, const HelpColumn& col,
+                      const HelpColumnBand& band)
+{
+    using namespace gfx::theme;
+    constexpr float LINE_H = 24.0f;
+
+    const float col_x =
+        band.base_x + static_cast<float>(std::distance(cols.data(), &col)) * band.col_width;
+    float y = band.content_top - static_cast<float>(band.scroll_line) * LINE_H;
+    for (size_t gidx : col.group_indices) {
+        const auto& grp = all_groups[gidx];
+        if (gidx > 0 && col.group_indices.front() != gidx) {
+            y += LINE_H;
+        }
+        if (y >= band.content_top - LINE_H && y <= band.content_bottom) {
+            r.draw_text(font, col_x, y, grp.title, ACCENT);
+        }
+        y += LINE_H;
+        for (const auto& e : grp.entries) {
+            if (y >= band.content_top - LINE_H && y <= band.content_bottom) {
+                const std::string line = "  [" + e.key + "]  " + e.description;
+                r.draw_text(font, col_x, y, line, TEXT_DIM);
+            }
+            y += LINE_H;
+        }
+    }
+}
+
+// The ▲/▼ markers shown when a column overflows the band, each drawn only in the
+// direction that still has content. Lifted out of draw_help_popup verbatim.
+void draw_help_scroll_affordance(gfx::Renderer& r, gfx::FontAtlas& font,
+                                 const HelpPanelDims& dims, float content_top,
+                                 float content_bottom, int visible_lines, int scroll_line)
+{
+    using namespace gfx::theme;
+    if (dims.longest <= visible_lines) return;
+
+    const float affordance_x = dims.x + dims.w - 12.0f;
+    if (scroll_line > 0) {
+        r.draw_text(font, affordance_x, content_top - 4.0f, "▲", TEXT_FAINT);
+    }
+    if (scroll_line < dims.longest - visible_lines) {
+        r.draw_text(font, affordance_x, content_bottom + 4.0f, "▼", TEXT_FAINT);
+    }
+}
+
 }  // namespace
 
 void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
@@ -130,43 +192,18 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
         static_cast<int>(std::lround(dims.x)), static_cast<int>(std::lround(content_top)),
         static_cast<int>(std::lround(dims.w)), static_cast<int>(std::lround(band_h))};
     SDL_SetRenderClipRect(r.sdl(), &content_clip);
-    const auto draw_column_content = [&](const HelpColumn& col) {
-        const float col_x = dims.x + PAD + static_cast<float>(std::distance(cols.data(), &col)) * dims.col_width;
-        float y = content_top - static_cast<float>(s.scroll_line) * LINE_H;
-        for (size_t gidx : col.group_indices) {
-            const auto& grp = all_groups[gidx];
-            if (gidx > 0 && col.group_indices.front() != gidx) {
-                y += LINE_H;
-            }
-            if (y >= content_top - LINE_H && y <= content_bottom)
-                r.draw_text(font, col_x, y, grp.title, ACCENT);
-            y += LINE_H;
-            for (const auto& e : grp.entries) {
-                if (y >= content_top - LINE_H && y <= content_bottom) {
-                    const std::string line = "  [" + e.key + "]  " + e.description;
-                    r.draw_text(font, col_x, y, line, TEXT_DIM);
-                }
-                y += LINE_H;
-            }
-        }
-    };
+    const HelpColumnBand band{.base_x = dims.x + PAD,
+                              .col_width = dims.col_width,
+                              .content_top = content_top,
+                              .content_bottom = content_bottom,
+                              .scroll_line = s.scroll_line};
     for (const auto& col : cols) {
-        draw_column_content(col);
+        draw_help_column(r, font, all_groups, cols, col, band);
     }
     SDL_SetRenderClipRect(r.sdl(), nullptr);
 
-    if (dims.longest > visible_lines) {
-        const float affordance_y_top    = content_top - 4.0f;
-        const float affordance_y_bottom = content_bottom + 4.0f;
-        const float affordance_x = dims.x + dims.w - 12.0f;
-
-        if (s.scroll_line > 0) {
-            r.draw_text(font, affordance_x, affordance_y_top, "▲", TEXT_FAINT);
-        }
-        if (s.scroll_line < dims.longest - visible_lines) {
-            r.draw_text(font, affordance_x, affordance_y_bottom, "▼", TEXT_FAINT);
-        }
-    }
+    draw_help_scroll_affordance(r, font, dims, content_top, content_bottom,
+                                visible_lines, s.scroll_line);
 }
 
 } // namespace ui

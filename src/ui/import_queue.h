@@ -21,6 +21,9 @@
 
 namespace ui {
 
+struct ZipEntry;      // ui/zip_plan.h
+struct ZipPlacement;  // ui/zip_plan.h
+
 // App-owned background import pipeline (Phase 50). One worker thread runs
 // tasks FIFO; per image file, decode+thumbnail runs on a small pool while
 // staging (encrypt+append) and record posting stay strictly in file order.
@@ -127,6 +130,11 @@ private:
     void process_files_task(Task& task);
     void process_archive_task(Task& task);
     void process_folder_task(Task& task);
+    // Read + stage one planned placement of a folder import. Extracted from
+    // process_folder_task so that loop stays under the cognitive-complexity cap;
+    // updates task.skipped and task.progress->done for `index`.
+    void place_folder_file(StagingSink& sink, const ZipPlacement& placement,
+                           const ZipEntry& entry, Task& task, size_t index);
 
     // Internal state helpers
     void maybe_end_batch();

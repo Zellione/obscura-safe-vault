@@ -1020,51 +1020,55 @@ void ImportQueue::process_folder_task(Task& task)
 
     // Process each placement
     for (size_t i = 0; i < plan.placements.size(); ++i) {
-        if (task.progress && task.progress->cancel.load())
+        if (task.progress && task.progress->cancel.load()) {
             return;
-
+        }
         const auto& placement = plan.placements[i];
         const auto& entry = entries[placement.entry_index];
-
-        if (entry.is_dir)
+        if (entry.is_dir) {
             continue;  // Skip directories (already handled by ensure_gallery)
-
-        const auto file_path = task.archive_path / entry.path;
-
-        // Read file into mlock'd buffer (security invariant: no swappable memory for decrypted data)
-        crypto::SecureBytes file_data;
-        if (!try_read_file(file_path, file_data)) {
-            task.skipped++;
-            if (task.progress) {
-                task.progress->done.store(static_cast<int>(i) + 1);
-            }
-            continue;
         }
-
-        // Place the file based on extension
-        vault::VaultResult result = vault::VaultResult::Ok;
-        if (is_supported_image_name(placement.filename)) {
-            result = sink.place_image(placement.gallery_path, file_data.as_span(), placement.filename);
-        } else if (is_supported_media_name(placement.filename)) {
-            result = sink.place_video(placement.gallery_path, file_data.as_span(), placement.filename);
-        } else {
-            task.skipped++;
-            if (task.progress) {
-                task.progress->done.store(static_cast<int>(i) + 1);
-            }
-            continue;
-        }
-
-        if (result != vault::VaultResult::Ok) {
-            task.skipped++;
-        }
-
-        if (task.progress) {
-            task.progress->done.store(static_cast<int>(i) + 1);
-        }
+        place_folder_file(sink, placement, entry, task, i);
     }
 
     task.skipped += plan.skipped_unsupported;
+}
+
+void ImportQueue::place_folder_file(StagingSink& sink, const ZipPlacement& placement,
+                                    const ZipEntry& entry, Task& task, size_t index)
+{
+    const auto mark_done = [&] {
+        if (task.progress) {
+            task.progress->done.store(static_cast<int>(index) + 1);
+        }
+    };
+
+    const auto file_path = task.archive_path / entry.path;
+
+    // Read file into mlock'd buffer (security invariant: no swappable memory for decrypted data)
+    crypto::SecureBytes file_data;
+    if (!try_read_file(file_path, file_data)) {
+        task.skipped++;
+        mark_done();
+        return;
+    }
+
+    // Place the file based on extension.
+    vault::VaultResult result = vault::VaultResult::Ok;
+    if (is_supported_image_name(placement.filename)) {
+        result = sink.place_image(placement.gallery_path, file_data.as_span(), placement.filename);
+    } else if (is_supported_media_name(placement.filename)) {
+        result = sink.place_video(placement.gallery_path, file_data.as_span(), placement.filename);
+    } else {
+        task.skipped++;
+        mark_done();
+        return;
+    }
+
+    if (result != vault::VaultResult::Ok) {
+        task.skipped++;
+    }
+    mark_done();
 }
 
 void ImportQueue::maybe_end_batch()
