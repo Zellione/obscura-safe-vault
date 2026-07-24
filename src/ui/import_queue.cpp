@@ -1,7 +1,9 @@
 #include "ui/import_queue.h"
 #include "ui/archive_import.h"
+#include "ui/folder_scan.h"
 #include "ui/media_sink.h"
 #include "ui/zip_import.h"
+#include "ui/zip_plan.h"
 #include "image/decode.h"
 #include "image/gif_info.h"
 #include "image/thumbnail.h"
@@ -27,6 +29,21 @@ namespace {
     {
         const size_t hw = std::thread::hardware_concurrency();
         return std::min(hw == 0 ? 2 : hw, size_t{4});
+    }
+
+    // Helper: try to read file into SecureBytes. Returns true on success, false on any error.
+    bool try_read_file(const std::filesystem::path& file_path, crypto::SecureBytes& out)
+    {
+        std::ifstream f(file_path, std::ios::binary | std::ios::ate);
+        if (!f.is_open()) return false;
+
+        const auto sz = f.tellg();
+        if (sz <= 0 || sz > 512 * 1024 * 1024) return false;  // 512 MiB max per file
+
+        out = crypto::SecureBytes(static_cast<size_t>(sz));
+        f.seekg(0);
+        f.read(reinterpret_cast<char*>(out.data()), sz);
+        return static_cast<bool>(f);
     }
 }
 
@@ -419,6 +436,33 @@ uint64_t ImportQueue::enqueue_archive(std::filesystem::path archive,
     return id;
 }
 
+uint64_t ImportQueue::enqueue_folder(std::filesystem::path root, std::string dest_gallery,
+                                     std::string gallery_name)
+{
+    using enum ImportTaskState;
+    std::lock_guard lock(mu_);
+
+    const uint64_t id = next_task_id_++;
+    Task task{
+        .id = id,
+        .kind = ImportTaskKind::Folder,
+        .display_name = gallery_name,
+        .dest_gallery = std::move(dest_gallery),
+        .files = {},
+        .archive_path = std::move(root),
+        .gallery_name = std::move(gallery_name),
+        .password = {},
+        .state = Queued,
+        .imported = 0,
+        .skipped = 0,
+        .error = {},
+        .progress = std::make_shared<vault::OpProgress>(),
+    };
+    tasks_.push_back(std::move(task));
+    worker_cv_.notify_one();
+    return id;
+}
+
 bool ImportQueue::cancel(uint64_t id)
 {
     using enum ImportTaskState;
@@ -757,6 +801,8 @@ void ImportQueue::worker_loop()
 
         if (task_kind == ImportTaskKind::Files) {
             process_files_task(work_task);
+        } else if (task_kind == ImportTaskKind::Folder) {
+            process_folder_task(work_task);
         } else {
             process_archive_task(work_task);
         }
@@ -947,6 +993,82 @@ void ImportQueue::process_archive_task(Task& task)
 
     task.imported = outcome.imported;
     task.skipped = outcome.skipped;
+}
+
+void ImportQueue::process_folder_task(Task& task)
+{
+    using enum ImportTaskState;
+    StagingSink sink(*v_, task.dest_gallery, task.id, records_, mu_, task.progress);
+
+    // Scan the folder
+    const auto entries = scan_folder(task.archive_path);
+
+    // Build the placement plan
+    const auto plan = build_zip_plan(entries, task.dest_gallery, task.gallery_name);
+
+    // Set total for progress tracking
+    if (task.progress) {
+        task.progress->total.store(static_cast<int>(plan.placements.size()));
+    }
+
+    // Create galleries in order (parents first)
+    for (const auto& gallery : plan.galleries) {
+        if (task.progress && task.progress->cancel.load())
+            return;
+        (void)sink.ensure_gallery(gallery);
+    }
+
+    // Process each placement
+    for (size_t i = 0; i < plan.placements.size(); ++i) {
+        if (task.progress && task.progress->cancel.load()) {
+            return;
+        }
+        const auto& placement = plan.placements[i];
+        const auto& entry = entries[placement.entry_index];
+        if (entry.is_dir) {
+            continue;  // Skip directories (already handled by ensure_gallery)
+        }
+        place_folder_file(sink, placement, entry, task, i);
+    }
+
+    task.skipped += plan.skipped_unsupported;
+}
+
+void ImportQueue::place_folder_file(StagingSink& sink, const ZipPlacement& placement,
+                                    const ZipEntry& entry, Task& task, size_t index) const
+{
+    const auto mark_done = [&] {
+        if (task.progress) {
+            task.progress->done.store(static_cast<int>(index) + 1);
+        }
+    };
+
+    const auto file_path = task.archive_path / entry.path;
+
+    // Read file into mlock'd buffer (security invariant: no swappable memory for decrypted data)
+    crypto::SecureBytes file_data;
+    if (!try_read_file(file_path, file_data)) {
+        task.skipped++;
+        mark_done();
+        return;
+    }
+
+    // Place the file based on extension.
+    vault::VaultResult result = vault::VaultResult::Ok;
+    if (is_supported_image_name(placement.filename)) {
+        result = sink.place_image(placement.gallery_path, file_data.as_span(), placement.filename);
+    } else if (is_supported_media_name(placement.filename)) {
+        result = sink.place_video(placement.gallery_path, file_data.as_span(), placement.filename);
+    } else {
+        task.skipped++;
+        mark_done();
+        return;
+    }
+
+    if (result != vault::VaultResult::Ok) {
+        task.skipped++;
+    }
+    mark_done();
 }
 
 void ImportQueue::maybe_end_batch()

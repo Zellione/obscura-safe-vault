@@ -9,7 +9,7 @@
 
 namespace ui {
 
-enum class ImportTaskKind  { Files, Zip, Cbz, Archive, ArchiveCbz };
+enum class ImportTaskKind  { Files, Zip, Cbz, Archive, ArchiveCbz, Folder };
 enum class ImportTaskState { Queued, Running, Done, Failed, Cancelled };
 
 // UI-facing snapshot row. `display_name`: the archive filename / "N files".

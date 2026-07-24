@@ -23,8 +23,8 @@ struct HelpGroup {
 // across every screen) — the content it renders (a screen's HelpGroup list)
 // comes from Screen::help_groups() each frame.
 struct HelpPopupState {
-    bool  open   = false;
-    float scroll = 0.0f;   // pixels scrolled down within the panel
+    bool  open       = false;
+    int   scroll_line = 0;   // whole lines scrolled down within the panel
 };
 
 void open_help(HelpPopupState& s);
@@ -36,9 +36,6 @@ void toggle_help(HelpPopupState& s);
 // Used to size scroll clamping without touching SDL/FontAtlas.
 [[nodiscard]] int help_line_count(const std::vector<HelpGroup>& groups);
 
-// Pure: clamps `scroll` into [0, max(0, content_h - viewport_h)].
-[[nodiscard]] float clamp_help_scroll(float scroll, float content_h, float viewport_h);
-
 // Up/Down/PageUp/PageDown scroll; Esc/Q close. Returns true if the popup was
 // open (i.e. the key was consumed) — a no-op returning false while closed.
 bool handle_help_key(HelpPopupState& s, SDL_Keycode key);
@@ -47,8 +44,9 @@ bool handle_help_key(HelpPopupState& s, SDL_Keycode key);
 void handle_help_wheel(HelpPopupState& s, float wheel_y);
 
 // Draws nothing while `s.open` is false. Veils the whole window, draws a
-// centred scrollable panel of `groups`, and clamps `s.scroll` against the
-// real content height computed from `groups` + the font.
+// centred panel of `groups` — reflowed into two columns when wide enough — and
+// clamps `s.scroll_line` against the LONGEST packed column, not the total line
+// count, since in a two-column layout the total overshoots what can be scrolled.
 void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
                      const std::vector<HelpGroup>& groups, HelpPopupState& s);
 

@@ -100,3 +100,46 @@ TEST(tag_overview_filter_preserves_input_order)
     auto f = ui::filter_tags(v, "b");
     CHECK_EQ(names(f), (std::vector<std::string>{"bravo", "banana", "bongo"}));
 }
+
+TEST(tag_overview_sort_preserves_descriptions)
+{
+    std::vector<ui::TagTally> t{
+        {.tag = "zebra", .gallery_count = 1, .image_count = 0, .description = "striped"},
+        {.tag = "apple", .gallery_count = 1, .image_count = 0, .description = "fruit"}};
+    ui::sort_tags(t, ui::TagSort::Name);
+    CHECK_EQ(t[0].tag, std::string("apple"));
+    CHECK_EQ(t[0].description, std::string("fruit"));
+    CHECK_EQ(t[1].description, std::string("striped"));
+}
+
+TEST(tag_overview_filter_preserves_descriptions)
+{
+    std::vector<ui::TagTally> t{
+        {.tag = "apple", .gallery_count = 1, .image_count = 0, .description = "fruit"}};
+    const auto out = ui::filter_tags(t, "ap");
+    CHECK_EQ(out.size(), 1u);
+    CHECK_EQ(out[0].description, std::string("fruit"));
+}
+
+TEST(tag_overview_filter_matches_names_not_descriptions)
+{
+    // Descriptions are displayed, never searched — the Phase 51 spec keeps the
+    // existing name-only filter semantics deliberately.
+    std::vector<ui::TagTally> t{
+        {.tag = "apple", .gallery_count = 1, .image_count = 0, .description = "zebra"}};
+    CHECK(ui::filter_tags(t, "zebra").empty());
+}
+
+TEST(tag_overview_page_size_floors_to_whole_rows)
+{
+    CHECK_EQ(ui::tag_overview_page_size(400.0f, 48.0f), 8);   // 8.33 -> 8
+    CHECK_EQ(ui::tag_overview_page_size(96.0f,  48.0f), 2);
+}
+
+TEST(tag_overview_page_size_is_at_least_one_row)
+{
+    // A viewport too short for even one row must still page by 1, or navigation
+    // divides by zero and the screen renders nothing forever.
+    CHECK_EQ(ui::tag_overview_page_size(10.0f, 48.0f), 1);
+    CHECK_EQ(ui::tag_overview_page_size(0.0f,  48.0f), 1);
+}

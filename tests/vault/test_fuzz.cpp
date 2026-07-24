@@ -218,9 +218,11 @@ TEST(fuzz_index_deserialize_survives_3000_malformed_blobs)
         vault::SavedSearch{"cats", {0x01, 0x05, 0x00, 0x00, 0x00, 0x02}},
         vault::SavedSearch{"trips", {0xAA, 0xBB, 0xCC}},
     };
-    // A v8 settings block exercises the Phase 49 parsing path: a non-default
-    // sort key, the tiles flag cleared, and categories spanning an ordinary
-    // name, a maximum-length name, and the highest valid swatch.
+    // A v9 settings block exercises the Phase 49 parsing path (categories) and
+    // Phase 51 parsing path (descriptions): a non-default sort key, the tiles
+    // flag cleared, categories spanning an ordinary name, a maximum-length name,
+    // and the highest valid swatch, plus tag descriptions with a short tag and
+    // a maximum-length description.
     vault::VaultSettings settings;
     settings.default_sort    = vault::SortKey::DateDesc;
     settings.tiles_show_tags = false;
@@ -229,6 +231,10 @@ TEST(fuzz_index_deserialize_survives_3000_malformed_blobs)
         {.name = std::string(vault::INDEX_MAX_CATEGORY_BYTES, 'x'),
          .swatch = vault::TAG_SWATCH_COUNT - 1},
         {.name = "parody", .swatch = 7},
+    };
+    settings.tag_descriptions = {
+        {.tag = "beach", .text = "Coastal shots"},
+        {.tag = "archive", .text = std::string(vault::INDEX_MAX_TAG_DESC_BYTES, 'y')},
     };
     std::vector<uint8_t> valid;
     vault::serialize_index(root, searches, settings, valid);

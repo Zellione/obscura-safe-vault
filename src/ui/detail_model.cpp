@@ -114,6 +114,7 @@ void append_tag_sections(DetailContent&               out,
 
 DetailContent build_node_details(const vault::IndexNode&      node,
                                  std::span<const std::string> inherited,
+                                 std::span<const std::string> from_contents,
                                  vault::SortKey               vault_default)
 {
     DetailContent out{.heading = node.name, .subheading = node_markers(node), .sections = {}};
@@ -125,6 +126,15 @@ DetailContent build_node_details(const vault::IndexNode&      node,
         out.sections.push_back(gallery_rows(node, vault_default));
     }
     append_tag_sections(out, node.tags, inherited, "Tags");
+
+    // Add "From contents" section only for galleries with non-empty from_contents
+    if (node.is_gallery() && !from_contents.empty()) {
+        out.sections.push_back({.title   = "From contents",
+                                .rows    = {},
+                                .bullets = std::vector<std::string>(from_contents.begin(), from_contents.end()),
+                                .is_tags = true});
+    }
+
     return out;
 }
 

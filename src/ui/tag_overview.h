@@ -42,6 +42,8 @@ private:
     void rebuild();         // shown_ = sort(filter(all_)); re-clamp selection
     void open_selected();   // Enter → TagGalleries for the focused tag
     [[nodiscard]] int row_at(float my) const;   // mouse y → row index (-1 = none)
+    void handle_prompt_key_event(const SDL_Event& e);  // handle SDL_EVENT_KEY_DOWN while prompting
+    void handle_key_down_in_browse_mode(const SDL_KeyboardEvent& key);
 
     gfx::Window&    win_;
     gfx::FontAtlas& font_;
@@ -53,6 +55,12 @@ private:
     std::vector<TagTally> shown_;    // filtered + sorted view that is navigated
     TagSort               sort_ = TagSort::Name;
     std::string           filter_;   // typed case-insensitive tag prefix
+
+    // Phase 51: tag description editing
+    bool            prompting_ = false;
+    bool            prompt_skip_text_input_ = false;  // Suppress the opening keypress's text event
+    std::string     prompt_buf_;
+    std::string     error_;
 };
 
 } // namespace ui

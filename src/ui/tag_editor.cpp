@@ -71,6 +71,7 @@ void TagEditor::close()
     node_paths_.clear();
     tally_.clear();
     inherited_.clear();
+    from_contents_.clear();
     vocabulary_.clear();
     suggestions_.clear();
     sugg_sel_ = -1;
@@ -140,28 +141,35 @@ void TagEditor::move_cursor(int dir)
     }
 }
 
-void TagEditor::refresh_tags()
+void TagEditor::refresh_single_node_tags(std::string_view node_path)
 {
-    tally_.clear();
-    inherited_.clear();
-    error_.clear();
+    inherited_ = inherited_tags(vault_, node_path);
 
-    if (node_paths_.empty()) {
-        error_ = "Invalid node path.";
-        return;
+    const auto segs = split_path(node_path);
+    if (segs.empty()) return;
+
+    std::string parent_path;
+    if (segs.size() > 1) { parent_path = join_path(std::span(segs.data(), segs.size() - 1)); }
+
+    const auto& children = vault_.list(parent_path);
+    for (const auto* child : children) {
+        if (child && child->name == segs.back() && child->is_gallery()) {
+            from_contents_ = contents_tags(vault_, node_path);
+            break;
+        }
     }
+}
 
-    // The ancestor-tag cascade is only meaningful for a single node — a
-    // multi-selection can span unrelated branches of the tree, so it's
-    // suppressed there rather than showing a misleading merged cascade.
-    if (node_paths_.size() == 1) { inherited_ = inherited_tags(vault_, node_paths_.front()); }
-
+void TagEditor::load_per_node_tags()
+{
     std::vector<std::vector<std::string>> per_node_tags;
     per_node_tags.reserve(node_paths_.size());
     int resolved = 0;
+
     for (const std::string& path : node_paths_) {
         const auto segs = split_path(path);
-        if (segs.empty()) { continue; }
+        if (segs.empty()) continue;
+
         std::string parent_path;
         if (segs.size() > 1) { parent_path = join_path(std::span(segs.data(), segs.size() - 1)); }
 
@@ -174,8 +182,31 @@ void TagEditor::refresh_tags()
             }
         }
     }
-    if (resolved == 0) { error_ = "Node not found."; return; }
+
+    if (resolved == 0) {
+        error_ = "Node not found.";
+        return;
+    }
     tally_ = compute_tag_tally(per_node_tags);
+}
+
+void TagEditor::refresh_tags()
+{
+    tally_.clear();
+    inherited_.clear();
+    from_contents_.clear();
+    error_.clear();
+
+    if (node_paths_.empty()) {
+        error_ = "Invalid node path.";
+        return;
+    }
+
+    if (node_paths_.size() == 1) {
+        refresh_single_node_tags(node_paths_.front());
+    }
+
+    load_per_node_tags();
 }
 
 void TagEditor::select_tag(std::string_view tag)
@@ -308,12 +339,13 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     const float row_pitch  = TAG_ROW_H + TAG_LIST_GAP;
 
     // The read-only inherited section (ancestor-gallery tags, Phase 27
-    // follow-up) reserves space at the bottom; the own-tags list shrinks to fit.
+    // follow-up) and from-contents section (Phase 51) reserve space at the bottom;
+    // the own-tags list shrinks to fit.
     constexpr int   INHERIT_MAX_LINES = 3;
     const auto& cats = vault::vault_settings(vault_).categories;
 
     // Compute chip wrapping for inherited tags to get height
-    const ChipWrap wrap_for_height = inherited_.empty()
+    const ChipWrap wrap_inherited = inherited_.empty()
         ? ChipWrap{}
         : [this, &font, &cats]() {
             std::vector<int> widths;
@@ -326,14 +358,32 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
         }();
     const float inherit_h = inherited_.empty()
         ? 0.0f
-        : INHERIT_LINE * static_cast<float>(1 + wrap_for_height.lines.size()) + 8.0f;
-    const float list_bottom = my + MODAL_H - 50 - inherit_h;
+        : INHERIT_LINE * static_cast<float>(1 + wrap_inherited.lines.size()) + 8.0f;
+
+    // Compute chip wrapping for from-contents tags to get height
+    const ChipWrap wrap_from_contents = from_contents_.empty()
+        ? ChipWrap{}
+        : [this, &font, &cats]() {
+            std::vector<int> widths;
+            widths.reserve(from_contents_.size());
+            for (const std::string& t : from_contents_) {
+                widths.push_back(chip_width(font, resolve_tag(t, cats).text));
+            }
+            return pack_chip_lines(widths, MODAL_W - 2 * PAD, INHERIT_MAX_LINES,
+                                   static_cast<float>(font.measure(std::format("+{}", from_contents_.size()))));
+        }();
+    const float from_contents_h = from_contents_.empty()
+        ? 0.0f
+        : INHERIT_LINE * static_cast<float>(1 + wrap_from_contents.lines.size()) + 8.0f;
+
+    const float list_bottom = my + MODAL_H - 50 - inherit_h - from_contents_h;
 
     const int max_visible =
         std::max(1, static_cast<int>((list_bottom - tags_start) / row_pitch));
 
     draw_tag_rows(r, font, mx, list_y, tags_start, row_pitch, max_visible);
-    draw_inherited_tags(r, font, mx, list_bottom, wrap_for_height);
+    draw_inherited_tags(r, font, mx, list_bottom, wrap_inherited);
+    draw_from_contents_tags(r, font, mx, list_bottom + inherit_h, wrap_from_contents);
 
     // Error message
     if (!error_.empty()) {
@@ -438,6 +488,41 @@ void TagEditor::draw_inherited_tags(gfx::Renderer& r, gfx::FontAtlas& font, floa
         // Sit on the same centre line draw_tag_chips uses, so the counter aligns
         // with the chips beside it instead of riding high on their row. With no
         // line to sit beside it stays on the header's baseline.
+        const float counter_y =
+            wrap.lines.empty() ? y : font.text_top_for_center(y + CHIP_ROW_H * 0.5f);
+        r.draw_text(font, mx + PAD + (MODAL_W - 2 * PAD) - counter_w, counter_y, counter,
+                    TEXT_FAINT);
+    }
+}
+
+void TagEditor::draw_from_contents_tags(gfx::Renderer& r, gfx::FontAtlas& font, float mx,
+                                         float list_bottom, const ChipWrap& wrap) const
+{
+    // Informational only (Del/selection never touch it — removing one of
+    // these means editing a descendant node it lives on).
+    if (from_contents_.empty()) return;
+
+    using namespace gfx::theme;
+
+    const auto& cats = vault::vault_settings(vault_).categories;
+    const int shown_count = static_cast<int>(from_contents_.size()) - wrap.hidden;
+
+    float y = list_bottom + 8.0f;
+    std::string hdr = "From contents";
+    if (shown_count < static_cast<int>(from_contents_.size())) {
+        hdr += std::format(" ({} of {} shown)", shown_count, from_contents_.size());
+    }
+    hdr += ":";
+    r.draw_text(font, mx + PAD, y, hdr, TEXT_DIM);
+    for (const auto& line : wrap.lines) {
+        y += INHERIT_LINE;
+        const auto tags_slice = std::span(from_contents_).subspan(static_cast<size_t>(line.first),
+                                                                   static_cast<size_t>(line.count));
+        draw_tag_chips(r, font, mx + PAD, y, MODAL_W - 2 * PAD, tags_slice, cats);
+    }
+    if (wrap.hidden > 0) {
+        const std::string counter   = std::format("+{}", wrap.hidden);
+        const auto        counter_w = static_cast<float>(font.measure(counter));
         const float counter_y =
             wrap.lines.empty() ? y : font.text_top_for_center(y + CHIP_ROW_H * 0.5f);
         r.draw_text(font, mx + PAD + (MODAL_W - 2 * PAD) - counter_w, counter_y, counter,

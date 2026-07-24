@@ -53,6 +53,11 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   returns `Locked` on a locked vault. Held in `Vault::settings_`; `reset()` clears it and
   `create()` seeds it. **Both move operations must carry `settings_`** — they originally
   omitted it, silently dropping settings on a move (fixed, regression-tested).
+- `vault::find_tag_description(settings, tag_name)` / `vault::set_tag_description(settings, tag_name, description)` (Phase 51) —
+  key-value store on a `VaultSettings` (NOT Vault methods — `Vault` is at its `cpp:S1448` 35-method cap). Keys matched
+  case-insensitively via `ui::tag_ci_equal` (first-seen casing kept, matching `add_tag`); an
+  empty description removes the entry. No default return value — these are bare operations on the
+  settings object. Persisted via the existing crash-safe commit via `set_vault_settings`.
 - `vault::rename_node(v,gallery_path,old_name,new_name)` — validates `is_safe_node_name` +
   no sibling collision, then a pure leaf-field edit (an IndexNode persists only its local
   name, never a path, so no cascade). Drives the `R` RenameDialog.
@@ -65,19 +70,23 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   a `SortKey` u8 (meaningful only on Gallery nodes: Default/NameAsc/NameDesc/DateAsc/DateDesc/
   SizeAsc/SizeDesc/Insertion; out-of-range byte rejected, not clamped, bounded PER VERSION —
   v6/v7 max 6, v8 max 7), and Type::Video + VideoMeta (multi-chunk list + poster).
-- `INDEX_VERSION=8`. Vault-global SavedSearch block after the root (name + opaque
+- `INDEX_VERSION=9`. Vault-global SavedSearch block after the root (name + opaque
   `ui::AdvancedQuery` blob, `INDEX_MAX_SAVED_SEARCHES=4096`), then the Phase 49 vault-global
-  **settings block** — see `mem:vault_format` for its byte layout. `INDEX_MAX_TAGS=4096`.
-  Back-compat: v1–v5 read as empty tags / favorite=false / no saved searches; pre-v8 read with
-  `default_sort=Insertion`, tile tags on, and `VaultSettings::seeded()`.
+  **settings block**, then the Phase 51 **tag-descriptions block** — see `mem:vault_format` for
+  their byte layouts. `INDEX_MAX_TAGS=4096`. Back-compat: v1–v5 read as empty tags / favorite=false /
+  no saved searches; pre-v8 read with `default_sort=Insertion`, tile tags on, and
+  `VaultSettings::seeded()`; pre-v9 read with empty descriptions.
 - Phase 49 types: `TagCategory{std::string name; uint8_t swatch;}` and
   `VaultSettings{SortKey default_sort; bool tiles_show_tags; std::vector<TagCategory>
   categories;}` with a static `seeded()` (8 nhentai-style categories on distinct swatches).
   Caps `INDEX_MAX_TAG_CATEGORIES=256`, `INDEX_MAX_CATEGORY_BYTES=64`, `TAG_SWATCH_COUNT=16`.
-  `write_settings`/`read_settings` mirror the saved-searches pair — the writer CLAMPS, the
-  reader REJECTS. `serialize_index`/`deserialize_index` gained 4-arg forms; the 2- and 3-arg
-  ones delegate. **Any new call site must use the 4-arg form** — the fuzz harness's base blob
-  does, so category bytes are reachable by mutation.
+  Phase 51 adds: `std::vector<TagDescription> tag_descriptions` where `TagDescription{std::string
+  name; std::string description;}`, caps `INDEX_MAX_TAG_DESCRIPTIONS=4096`,
+  `INDEX_MAX_TAG_DESC_BYTES=512`. `write_settings`/`read_settings` mirror the saved-searches pair
+  — the writer CLAMPS, the reader REJECTS. `serialize_index`/`deserialize_index` gained 4-arg forms;
+  the 2- and 3-arg ones delegate. **Any new call site must use the 4-arg form** — the fuzz harness's
+  base blob does, so description bytes are reachable by mutation. `read_settings` gained a `version`
+  parameter to govern which blocks are read (v8 stops after category block, v9 continues to descriptions).
 - Favorites: `Vault::toggle_favorite(node_path)` + flat whole-tree
   `list_favorite_images()`/`list_favorite_galleries()` -> `vector<SearchHit>`.
 - Tag API + scoped search: `set_tags`/`add_tag`/`remove_tag(node_path)`,
@@ -92,36 +101,17 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   commit_index).
 - `tag_overview()` -> `vector<ui::TagTally>` (per-distinct-tag direct {gallery,image} counts,
   no cascade), `galleries_with_tag()` / `images_with_tag()` (direct carriers only, no cascade).
+  **Deliberately unchanged Phase 51:** direct-only counts are preserved so the Phase 22 rule
+  (the cascade cannot inflate overview tallies) stays in force.
 
-### transfer.* — cross/same-vault move & copy
-- `transfer_image(src,src_gallery,file,dst,dst_gallery,mode)`: read→add_image→(Move?
-  remove_image). Dst commits before src, so a crash = duplicate, not loss; plaintext stays
-  in mlock'd SecureBytes. `image_target_galleries(v)` lists leaf paths that can hold images.
-- `transfer_gallery(src,src_gallery,dst,dst_parent,mode)`: recursive copy-then-(Move? delete);
-  `remove_gallery(src)` runs LAST for Move (crash = dup). `gallery_target_parents(v)`.
-- `enum TransferMode{Move,Copy}` (Copy leaves source). Same-vault (`&src==&dst`) supported;
-  `transfer_gallery` rejects a `dst_parent` == or inside the src subtree (cycle). Pure over
-  the public Vault API.
-- `transfer_images` (bulk list driver, `TransferTally{done,failed}`). Optional
-  `vault::OpProgress*` (`op_progress.h`; total/done + cooperative cancel) on
-  transfer_images/transfer_gallery/export_images — a cancelled gallery Move leaves the source
-  intact. `ui::ImportProgress` aliases OpProgress.
-- `transfer_galleries(src,src_paths,dst,dst_parent,mode,progress)` — bulk gallery move/copy,
-  loops `transfer_gallery` per path WITHOUT forwarding progress into it (avoids clobbering the
-  bulk total), bumping `progress->done` per item. Feeds `FileOpJob::start_transfer_galleries`
-  + GalleryGrid mass-move (homogeneous-selection dispatch — images-only / galleries-only /
-  mixed = error).
-
-### combine.* — recursive gallery-merge engine
-- `combine_galleries(src,src_gallery,dst,dst_gallery,tally,progress)` merges src into dst
-  (same- or cross-vault): media leaves -> `transfer_image` per file (collisions skipped +
-  tallied); sub-gallery leaves -> recurse if a same-named dest child exists, else
-  `transfer_gallery` the whole subtree wholesale (Move); tags unioned case-insensitively via
-  `add_tag`; source gallery removed once fully empty.
-- Rejects type mismatches and same-vault cycles (dest == src or nested inside it — the
-  reverse, src inside dest, is a legal "flatten upward").
-- `combine_target_galleries(dst,src,src_gallery)` lists eligible destinations.
-  `CombineTally{media_moved,media_skipped,galleries_merged,galleries_moved}`.
+### Transfer of search results + tag unions (Phase 51)
+- `search_dfs` / `adv_search_dfs` now RETURN the subtree tag union (all tags, own+inherited+descendants,
+  cased per first-seen) and thread it bottom-up in the existing single post-order pass. A gallery's
+  subtree union is assembled from direct children's unions (no re-descent). Leaves are simple
+  (just carry their own tags). The result is used by the search result node_tag(hit) to add
+  descendant tags to a gallery match, allowing search to find a gallery that holds a descendant's tags.
+  The roll-up is computed for EVERY node during search but only used when a gallery's direct/inherited/own
+  tags + subtree union collectively match the query.
 
 ### Internal components (extracted from Vault to keep it under the S1448 cap)
 - `index_io.*` (Phase 50 split) — index serialisation + crash-safe double-buffer slot swap (append → write

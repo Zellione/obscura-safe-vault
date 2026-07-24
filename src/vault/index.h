@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace vault {
@@ -183,13 +184,25 @@ struct TagCategory {
     friend bool operator==(const TagCategory&, const TagCategory&) = default;
 };
 
+// One tag → free-text description (Phase 51). Vault-global metadata: a
+// description belongs to the *tag*, not to any node carrying it, and tags are
+// plain per-node strings with no registry — so storing it here is the only
+// place it cannot go inconsistent between carriers.
+struct TagDescription {
+    std::string tag;    // matched case-insensitively, first-seen casing kept
+    std::string text;
+
+    friend bool operator==(const TagDescription&, const TagDescription&) = default;
+};
+
 // Vault-global user settings (Phase 49), serialised after the saved-searches
 // block. Defaults here are also the values a pre-v8 blob reads back with, except
 // `categories`, which pre-v8 blobs get from seeded() — see deserialize_index.
 struct VaultSettings {
-    SortKey                 default_sort    = SortKey::Insertion;
-    bool                    tiles_show_tags = true;
-    std::vector<TagCategory> categories;
+    SortKey                    default_sort    = SortKey::Insertion;
+    bool                       tiles_show_tags = true;
+    std::vector<TagCategory>   categories;
+    std::vector<TagDescription> tag_descriptions;
 
     // The starting category set for a vault that has never stored one: a freshly
     // created vault and every pre-v8 vault. An empty SAVED list is a legitimate
@@ -207,7 +220,9 @@ struct VaultSettings {
 // v8: vault-global settings block after the saved-searches block, and sort_key
 // byte 0 re-read as `Default` with a new `Insertion = 7` (Phase 49); pre-v8
 // blobs read with the seeded default settings and every gallery at `Default`.
-inline constexpr uint8_t INDEX_VERSION = 8;
+// v9: per-tag descriptions appended to the vault-global settings block
+// (Phase 51); pre-v9 blobs read with an empty list.
+inline constexpr uint8_t INDEX_VERSION = 9;
 
 // Maximum tree depth accepted on deserialisation — guards against stack overflow
 // from a deeply-nested hostile blob.
@@ -229,6 +244,12 @@ inline constexpr uint32_t INDEX_MAX_SAVED_QUERY_BYTES = 1u << 20;
 // bound a hostile settings block (Phase 49).
 inline constexpr uint16_t INDEX_MAX_TAG_CATEGORIES = 256;
 inline constexpr uint16_t INDEX_MAX_CATEGORY_BYTES = 64;
+
+// Maximum tag descriptions per vault, and max bytes in one description —
+// bound a hostile settings block (Phase 51). The tag KEY is deliberately
+// uncapped beyond its u16 length prefix, matching how node tags are bounded.
+inline constexpr uint16_t INDEX_MAX_TAG_DESCRIPTIONS = 4096;
+inline constexpr uint16_t INDEX_MAX_TAG_DESC_BYTES   = 512;
 
 // Size of gfx's fixed tag-colour palette. Lives here (not in gfx) because it
 // bounds a persisted field: a swatch byte >= this is rejected on deserialise.
@@ -256,5 +277,19 @@ void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& sear
 [[nodiscard]] bool deserialize_index(std::span<const uint8_t> in, IndexNode& out,
                                      std::vector<SavedSearch>& searches,
                                      VaultSettings& settings);
+
+// Look up a tag's description, matched case-insensitively (ASCII fold — the same
+// identity rule tag de-duplication uses). Returns an empty view when absent.
+// The returned view BORROWS from `s` — never call this on a temporary.
+[[nodiscard]] std::string_view find_tag_description(const VaultSettings& s,
+                                                    std::string_view     tag);
+
+// Upsert a tag's description, matched case-insensitively; the first-seen casing
+// of the key is kept, the text is replaced. An empty `text` REMOVES the entry
+// rather than storing a blank, so the map never accumulates dead keys. A new key
+// is dropped silently once INDEX_MAX_TAG_DESCRIPTIONS is reached (an existing
+// key is always still updatable). Pure struct mutation — the caller persists via
+// set_vault_settings().
+void set_tag_description(VaultSettings& s, std::string_view tag, std::string_view text);
 
 } // namespace vault

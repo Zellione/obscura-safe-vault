@@ -20,6 +20,7 @@ struct TagTally {
     std::string tag;
     int         gallery_count = 0;
     int         image_count   = 0;
+    std::string description = {};   // Phase 51: vault-global per-tag description ("" if none)
 
     [[nodiscard]] int total() const noexcept { return gallery_count + image_count; }
 };
@@ -37,5 +38,11 @@ void sort_tags(std::vector<TagTally>& tags, TagSort sort);
 // An empty prefix returns a copy of all of `tags`. Input order is preserved.
 [[nodiscard]] std::vector<TagTally> filter_tags(const std::vector<TagTally>& tags,
                                                 std::string_view prefix);
+
+// Pure: how many whole rows of height `row_h` fit in `viewport_h`. The overview
+// paginates rather than scrolls (a row is never split across a page boundary),
+// so this is both the page stride and the visible-row count. Never returns less
+// than 1 — a zero would divide by zero in page navigation and render nothing.
+[[nodiscard]] int tag_overview_page_size(float viewport_h, float row_h);
 
 } // namespace ui
