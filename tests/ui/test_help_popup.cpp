@@ -203,23 +203,26 @@ struct HelpGeom {
 }
 
 // True when EVERY line the popup would draw at `scroll` lies fully inside the band.
-// A line counts as "drawn" per the current predicate at help_popup.cpp:103,107.
+// A line is a defect only when it OVERLAPS the viewport band but is NOT fully inside.
+// A fully-clipped line (e.g., y == content_top - LINE_H, spanning the row entirely
+// above the band) is not drawn at all and therefore not a defect — the SDL clip rect
+// handles it. The distinction matters: the reported bug manifests as a *partial* draw,
+// not a missed row.
 [[maybe_unused]] bool all_drawn_lines_fully_inside(const HelpGeom& g, int total_lines, float scroll)
 {
     constexpr float LINE_H = 24.0f;
     for (int i = 0; i < total_lines; ++i) {
         const float y = g.content_top - scroll + static_cast<float>(i) * LINE_H;
-        const bool drawn = (y >= g.content_top - LINE_H) && (y <= g.content_bottom);
-        if (!drawn) continue;
-        if (y < g.content_top)             return false;   // clipped at the top edge
-        if (y + LINE_H > g.content_bottom) return false;   // clipped at the bottom edge
+        const bool overlaps = (y < g.content_bottom) && (y + LINE_H > g.content_top);
+        const bool inside   = (y >= g.content_top) && (y + LINE_H <= g.content_bottom);
+        if (overlaps && !inside) return false;   // a partially-drawn line: the reported defect
     }
     return true;
 }
 
 } // namespace
 
-// TODO(Phase51-Task8): re-enable — these three reproduce the pre-fix edge clipping and
+// TODO(Phase51-Task8): re-enable — these four reproduce the pre-fix edge clipping and
 // must go GREEN once the popup uses line-quantised scroll and a whole-line band.
 /*
 TEST(help_popup_no_partial_line_at_max_scroll_in_a_short_window)
@@ -238,6 +241,14 @@ TEST(help_popup_no_partial_line_at_rest_in_a_short_window)
     // Same window, scrolled to the top: the BOTTOM row is the partial one here.
     const HelpGeom g = current_help_geom(580.0f);
     CHECK(all_drawn_lines_fully_inside(g, 40, 0.0f));
+}
+
+TEST(help_popup_no_partial_line_at_mid_scroll_in_a_short_window)
+{
+    // Mid-scroll puts a partial line at BOTH edges — the state the owner's
+    // screenshot showed. H = 580 => viewport 388 px = 16.17 lines.
+    const HelpGeom g = current_help_geom(580.0f);
+    CHECK(all_drawn_lines_fully_inside(g, 40, 100.0f));
 }
 
 TEST(help_popup_no_partial_line_across_a_range_of_window_heights)
