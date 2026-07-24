@@ -24,6 +24,74 @@ constexpr float OX  = 40;    // left margin
 constexpr float OY  = 150;   // list top
 constexpr float PAD = 9;     // vertical padding inside a row
 
+// Prompt sizing: scales to window width with sensible bounds
+constexpr float PROMPT_WIDTH_RATIO = 0.75f;   // 75% of window width
+constexpr float PROMPT_MAX_W = 900.0f;        // absolute max width
+constexpr float PROMPT_MIN_W = 500.0f;        // absolute min width
+constexpr float PROMPT_PAD = 16.0f;           // internal padding in prompt box
+constexpr float PROMPT_TITLE_PAD = 12.0f;     // padding above title
+constexpr float PROMPT_INPUT_PAD = 12.0f;     // padding above input field
+constexpr float PROMPT_HINT_PAD = 8.0f;       // padding above hint line
+constexpr float PROMPT_INPUT_H = 32.0f;       // height of input field
+constexpr float PROMPT_HINT_H = 20.0f;        // height of hint line
+constexpr float PROMPT_LINE_H = 20.0f;        // height of title and hint lines
+
+// UTF-8 helpers: ensure we don't split multibyte sequences at the boundary.
+// A continuation byte has the high 2 bits set to 0b10.
+[[nodiscard]] constexpr bool is_utf8_continuation(uint8_t byte) noexcept
+{
+    return (byte & 0xC0) == 0x80;
+}
+
+// Truncate `text` to not exceed `max_bytes`, preserving complete UTF-8 characters.
+[[nodiscard]] std::string truncate_to_byte_limit(std::string_view text, size_t max_bytes)
+{
+    if (text.size() <= max_bytes) return std::string(text);
+
+    // Shrink backwards from the limit to find a safe UTF-8 boundary
+    size_t pos = max_bytes;
+    while (pos > 0 && is_utf8_continuation(static_cast<uint8_t>(text[pos - 1]))) {
+        --pos;
+    }
+    return std::string(text.substr(0, pos));
+}
+
+// Show tail of text when it overflows (show caret end, not middle). Returns the
+// visible portion and the pixel offset where the caret should sit (relative to
+// the field's left edge, after inset).
+struct TextFieldDisplay {
+    std::string shown;
+    float caret_offset;
+};
+
+[[nodiscard]] TextFieldDisplay tail_clipped_text(const gfx::FontAtlas& font,
+                                                 std::string_view text, float max_w)
+{
+    constexpr std::string_view ell = "…";
+    const int full_w = font.measure(text);
+    if (full_w <= static_cast<int>(max_w)) {
+        return TextFieldDisplay{.shown = std::string(text), .caret_offset = static_cast<float>(full_w)};
+    }
+
+    // Text overflows; show the tail (caret end). Shrink from the start until it fits.
+    const int ellipsis_w = font.measure(ell);
+    const float tail_max = max_w - static_cast<float>(ellipsis_w);
+
+    std::string shown;
+    size_t pos = text.size();
+    while (pos > 0) {
+        shown = text.substr(pos - 1);
+        if (font.measure(shown) <= static_cast<int>(tail_max)) {
+            shown.insert(shown.begin(), ell.begin(), ell.end());
+            return TextFieldDisplay{.shown = shown, .caret_offset = max_w - 1.0f};
+        }
+        --pos;
+    }
+
+    // Even "…" alone doesn't fit; just show "…"
+    return TextFieldDisplay{.shown = std::string(ell), .caret_offset = static_cast<float>(ellipsis_w)};
+}
+
 // List geometry shared by render() + row_at() so a click lands on the row it
 // looks like it lands on. `first` keeps the selection roughly centred when the
 // list is taller than the viewport.
@@ -112,7 +180,16 @@ void TagOverviewScreen::handle_event(const SDL_Event& e)
     // Handle prompt input (tag description editing)
     if (prompting_) {
         if (e.type == SDL_EVENT_TEXT_INPUT) {
-            prompt_buf_ += e.text.text;
+            // Suppress the opening keypress's text event (the E key that opened the prompt)
+            if (prompt_skip_text_input_) {
+                prompt_skip_text_input_ = false;
+                return;
+            }
+            // Add text only if it doesn't exceed the 512-byte limit
+            const auto new_buf = prompt_buf_ + e.text.text;
+            if (new_buf.size() <= vault::INDEX_MAX_TAG_DESC_BYTES) {
+                prompt_buf_ = truncate_to_byte_limit(new_buf, vault::INDEX_MAX_TAG_DESC_BYTES);
+            }
             return;
         }
         if (e.type == SDL_EVENT_KEY_DOWN) {
@@ -139,12 +216,14 @@ void TagOverviewScreen::handle_event(const SDL_Event& e)
                     }
                     prompting_ = false;
                     prompt_buf_.clear();
+                    prompt_skip_text_input_ = false;
                     SDL_StopTextInput(win_.sdl_window());
                     return;
                 }
                 case SDLK_ESCAPE:
                     prompting_ = false;
                     prompt_buf_.clear();
+                    prompt_skip_text_input_ = false;
                     error_.clear();
                     SDL_StopTextInput(win_.sdl_window());
                     return;
@@ -173,7 +252,16 @@ void TagOverviewScreen::handle_event(const SDL_Event& e)
                     if (nav_.selected() >= 0 && nav_.selected() < static_cast<int>(shown_.size())) {
                         prompting_ = true;
                         prompt_buf_ = shown_[nav_.selected()].description;
+                        prompt_skip_text_input_ = true;  // Skip the E keypress's text event
                         error_.clear();
+                        SDL_StartTextInput(win_.sdl_window());
+                    }
+                    break;
+                case SDLK_SLASH:
+                    // Start filtering (require explicit `/` prefix)
+                    if (filter_.empty()) {
+                        filter_ = "";
+                        rebuild();
                         SDL_StartTextInput(win_.sdl_window());
                     }
                     break;
@@ -182,15 +270,20 @@ void TagOverviewScreen::handle_event(const SDL_Event& e)
                     else                  request(NavKind::ToGallery, "", 0);
                     break;
                 case SDLK_ESCAPE:
-                    if (!filter_.empty()) { filter_.clear(); rebuild(); }
+                    if (!filter_.empty()) { filter_.clear(); SDL_StopTextInput(win_.sdl_window()); rebuild(); }
                     else                  request(NavKind::ToGallery, "", 0);
                     break;
                 default: break;
             }
             break;
         case SDL_EVENT_TEXT_INPUT:
-            filter_ += e.text.text;
-            rebuild();
+            // Only accept text input if filter is active (/ was pressed)
+            if (!filter_.empty() || e.text.text[0] == '/') {
+                if (e.text.text[0] != '/') {
+                    filter_ += e.text.text;
+                    rebuild();
+                }
+            }
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
             if (const int idx = row_at(e.button.y); idx >= 0) {
@@ -268,25 +361,48 @@ void TagOverviewScreen::render(gfx::Renderer& r)
 
     // Draw prompt overlay if active
     if (prompting_) {
-        const float prompt_w = 400.0f;
-        const float prompt_h = 80.0f;
+        // Size the prompt relative to the window, with bounds
+        const float prompt_w = std::clamp(W * PROMPT_WIDTH_RATIO, PROMPT_MIN_W, PROMPT_MAX_W);
         const float prompt_x = (W - prompt_w) / 2.0f;
+
+        // Prompt height: title + input field + hint line, all with padding
+        const float title_h = PROMPT_LINE_H;
+        const float input_h = PROMPT_INPUT_H;
+        const float hint_h = PROMPT_LINE_H;
+        const float prompt_h = PROMPT_TITLE_PAD + title_h + PROMPT_INPUT_PAD + input_h +
+                               PROMPT_HINT_PAD + hint_h + PROMPT_PAD;
         const float prompt_y = (H - prompt_h) / 2.0f;
 
+        // Draw prompt background and border
         r.draw_round_rect({.x = prompt_x, .y = prompt_y, .w = prompt_w, .h = prompt_h}, RADIUS,
                          SURFACE);
         r.draw_round_rect({.x = prompt_x, .y = prompt_y, .w = prompt_w, .h = prompt_h}, RADIUS,
                          ACCENT, /*filled*/ false);
 
-        r.draw_text(font_, prompt_x + 12.0f, prompt_y + 12.0f, "Edit tag description", TEXT);
+        // Title
+        const float title_y = prompt_y + PROMPT_TITLE_PAD;
+        r.draw_text(font_, prompt_x + PROMPT_PAD, title_y, "Edit tag description", TEXT);
 
         // Input field
-        const float input_y = prompt_y + 36.0f;
-        r.draw_rect({.x = prompt_x + 12.0f, .y = input_y, .w = prompt_w - 24.0f, .h = 28.0f},
-                   SURFACE_HI);
-        r.draw_text(font_, prompt_x + 16.0f, input_y + 4.0f,
-                   prompt_buf_.empty() ? "_" : fit_text(font_, prompt_buf_, prompt_w - 32.0f),
-                   TEXT);
+        const float input_y = title_y + title_h + PROMPT_INPUT_PAD;
+        const float input_field_w = prompt_w - 2 * PROMPT_PAD;
+        const float input_inner_w = input_field_w - 2 * 4;  // 4px inset on each side
+        r.draw_round_rect({.x = prompt_x + PROMPT_PAD, .y = input_y, .w = input_field_w, .h = input_h},
+                         RADIUS, SURFACE_HI);
+        r.draw_round_rect({.x = prompt_x + PROMPT_PAD, .y = input_y, .w = input_field_w, .h = input_h},
+                         RADIUS, BORDER, /*filled*/ false);
+
+        // Draw input text with tail clipping (show what you're typing at the caret end)
+        const auto text_display = tail_clipped_text(font_, prompt_buf_, input_inner_w);
+        const float text_y = input_y + (input_h - font_.pixel_height()) / 2.0f;
+        r.draw_text(font_, prompt_x + PROMPT_PAD + 4, text_y,
+                   prompt_buf_.empty() ? "_" : text_display.shown, TEXT);
+
+        // Hint line: remaining bytes
+        const float hint_y = input_y + input_h + PROMPT_HINT_PAD;
+        const auto bytes_left = vault::INDEX_MAX_TAG_DESC_BYTES - prompt_buf_.size();
+        const std::string hint = std::format("{} bytes left", bytes_left);
+        r.draw_text(font_, prompt_x + PROMPT_PAD, hint_y, hint, TEXT_FAINT);
     }
 }
 
@@ -294,8 +410,8 @@ std::vector<HelpGroup> TagOverviewScreen::help_groups() const
 {
     return {{"Navigate", {
         {"Up/Down", "Move selection"}, {"Enter", "Open tag"},
-        {"Type", "Filter by prefix"}, {"Tab", "Toggle sort (name/count)"},
-        {"E", "Edit tag description"},
+        {"/", "Filter tags"}, {"Tab", "Toggle sort (name/count)"},
+        {"E", "Edit description"},
         {"Esc", "Back"},
     }}};
 }

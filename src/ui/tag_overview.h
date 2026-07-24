@@ -56,6 +56,7 @@ private:
 
     // Phase 51: tag description editing
     bool            prompting_ = false;
+    bool            prompt_skip_text_input_ = false;  // Suppress the opening keypress's text event
     std::string     prompt_buf_;
     std::string     error_;
 };
