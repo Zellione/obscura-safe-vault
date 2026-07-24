@@ -326,15 +326,37 @@ void write_settings(ByteWriter& w, const VaultSettings& s)
         const uint8_t sw = s.categories[i].swatch;
         w.u8(sw < TAG_SWATCH_COUNT ? sw : 0);
     }
+
+    const uint16_t desc_count = s.tag_descriptions.size() > INDEX_MAX_TAG_DESCRIPTIONS
+                                    ? INDEX_MAX_TAG_DESCRIPTIONS
+                                    : static_cast<uint16_t>(s.tag_descriptions.size());
+    w.u16(desc_count);
+    for (uint16_t i = 0; i < desc_count; ++i) {
+        const std::string& tag = s.tag_descriptions[i].tag;
+        const uint16_t tag_len = tag.size() > 0xFFFFu ? 0xFFFFu
+                                                      : static_cast<uint16_t>(tag.size());
+        w.u16(tag_len);
+        w.bytes(std::span<const uint8_t>(
+            reinterpret_cast<const uint8_t*>(tag.data()), tag_len));
+
+        const std::string& text = s.tag_descriptions[i].text;
+        const uint16_t text_len = text.size() > INDEX_MAX_TAG_DESC_BYTES
+                                      ? INDEX_MAX_TAG_DESC_BYTES
+                                      : static_cast<uint16_t>(text.size());
+        w.u16(text_len);
+        w.bytes(std::span<const uint8_t>(
+            reinterpret_cast<const uint8_t*>(text.data()), text_len));
+    }
 }
 
 // Read the settings block (v8+). Every field is bounds-checked BEFORE any
 // allocation, and an out-of-range value is REJECTED, not clamped (the Phase 37 /
 // Phase 47 rule). Duplicate category names are dropped case-insensitively,
 // keeping the first occurrence's casing and swatch.
-bool read_settings(ByteReader& r, VaultSettings& s)
+bool read_settings(ByteReader& r, VaultSettings& s, uint8_t version)
 {
     s.categories.clear();
+    s.tag_descriptions.clear();
 
     const uint8_t sort = r.u8();
     if (!r.ok() || sort > std::to_underlying(SortKey::Insertion)) return false;
@@ -362,6 +384,35 @@ bool read_settings(ByteReader& r, VaultSettings& s)
             return category_name_eq(e.name, c.name);
         });
         if (!dupe) s.categories.push_back(std::move(c));
+    }
+
+    // The description sub-block exists only from v9 on; a v8 blob ends after
+    // the categories and must not be read past.
+    if (version < 9) return true;
+
+    const uint16_t desc_count = r.u16();
+    if (!r.ok() || desc_count > INDEX_MAX_TAG_DESCRIPTIONS) return false;  // bound before alloc
+    for (uint16_t i = 0; i < desc_count; ++i) {
+        const uint16_t tag_len = r.u16();
+        if (!r.ok()) return false;
+        TagDescription d;
+        d.tag.resize(tag_len);
+        if (tag_len > 0) {
+            r.bytes(std::span<uint8_t>(reinterpret_cast<uint8_t*>(d.tag.data()), tag_len));
+            if (!r.ok()) return false;
+        }
+        const uint16_t text_len = r.u16();
+        if (!r.ok() || text_len > INDEX_MAX_TAG_DESC_BYTES) return false;
+        d.text.resize(text_len);
+        if (text_len > 0) {
+            r.bytes(std::span<uint8_t>(reinterpret_cast<uint8_t*>(d.text.data()), text_len));
+            if (!r.ok()) return false;
+        }
+        // Drop a duplicate key case-insensitively, keeping the first occurrence
+        // — the same rule the category loop above applies.
+        const bool dupe = std::ranges::any_of(s.tag_descriptions,
+            [&d](const TagDescription& e) { return category_name_eq(e.tag, d.tag); });
+        if (!dupe) s.tag_descriptions.push_back(std::move(d));
     }
     return true;
 }
@@ -433,7 +484,7 @@ bool deserialize_index(std::span<const uint8_t> in, IndexNode& out,
     // one — pre-v8 — comes back seeded; a v8 blob's own list is authoritative,
     // including an empty one.
     if (version >= 8) {
-        if (!read_settings(r, settings)) return false;
+        if (!read_settings(r, settings, version)) return false;
     } else {
         settings = VaultSettings::seeded();
     }
