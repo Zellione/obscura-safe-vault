@@ -1,8 +1,10 @@
 #include "test_framework.h"
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <thread>
 
 #include "ui/import_queue.h"
 #include "ui/zip_test_helpers.h"
@@ -13,14 +15,25 @@ namespace fs = std::filesystem;
 namespace {
 
 // Helper: pump drain() until the queue idles
-void pump_until_idle(ui::ImportQueue& q, int max_iterations = 2000)
+// Pump drain() until the queue idles, bounded by REAL elapsed time.
+//
+// The budget must be spent in wall-clock milliseconds, not in loop iterations:
+// drain() returns immediately when there is nothing staged, so an unsleeping
+// loop burns its whole budget in microseconds while the worker thread still
+// needs real time to read, decode, encrypt and append each file. The caller
+// then proceeds to abort_and_flush(), which CANCELS the in-flight task by
+// design (Phase 50) — silently discarding whatever had not been imported yet.
+// That produced a ~10% flake in which the deepest file, and occasionally the
+// entire import, went missing. Mirrors test_import_queue.cpp's helper.
+void pump_until_idle(ui::ImportQueue& q, int max_ms = 30000)
 {
-    for (int i = 0; i < max_iterations; ++i) {
-        (void)q.drain(0.016);
+    for (int i = 0; i < max_ms; ++i) {
+        (void)q.drain(0.001);
         if (!q.busy()) {
-            (void)q.drain(0.016);
+            (void)q.drain(0.001);
             return;
         }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
 
