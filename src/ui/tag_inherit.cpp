@@ -1,6 +1,7 @@
 #include "ui/tag_inherit.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <span>
 
 #include "ui/nav_model.h"
@@ -63,6 +64,61 @@ std::vector<std::string> inherited_tags(const vault::Vault& vault, std::string_v
         for (const std::string& t : ancestor->tags)
             if (!ci_contains(out, t) && !ci_contains(own, t)) out.push_back(t);
     }
+    return out;
+}
+
+namespace {
+
+// Recursively collect tags from descendants, depth-bounded. Helper for contents_tags.
+void collect_descendant_tags(const vault::Vault& vault, const std::string& gallery_path,
+                             uint32_t depth, std::vector<std::string>& out)
+{
+    if (depth >= vault::INDEX_MAX_DEPTH) return;  // Depth guard against stack overflow
+
+    const auto children = vault.list(gallery_path);
+    for (const auto* child : children) {
+        if (!child) continue;
+
+        // Collect this child's tags
+        for (const std::string& t : child->tags)
+            if (!ci_contains(out, t)) out.push_back(t);
+
+        // If this child is a gallery, recurse into its descendants
+        if (child->is_gallery()) {
+            const std::string child_path = gallery_path.empty() ? child->name
+                                           : gallery_path + "/" + child->name;
+            collect_descendant_tags(vault, child_path, depth + 1, out);
+        }
+    }
+}
+
+}  // namespace
+
+std::vector<std::string> contents_tags(const vault::Vault& vault, std::string_view gallery_path)
+{
+    // Get the gallery's own tags (to exclude)
+    std::vector<std::string> own;
+    const auto segs = split_path(gallery_path);
+    if (!segs.empty()) {
+        const std::string parent = join_path(std::span(segs.data(), segs.size() - 1));
+        if (const auto* node = child_named(vault, parent, segs.back()))
+            if (node->is_gallery()) own = node->tags;
+    }
+    // If segs.empty(), gallery_path doesn't resolve to a real gallery, so own remains empty
+
+    // Get the gallery's inherited tags (to exclude)
+    const auto inherited = inherited_tags(vault, gallery_path);
+
+    // Collect all descendant tags
+    std::vector<std::string> out;
+    collect_descendant_tags(vault, std::string(gallery_path), 0, out);
+
+    // Remove own and inherited tags from the result
+    auto is_excluded = [&](const std::string& t) {
+        return ci_contains(own, t) || ci_contains(inherited, t);
+    };
+    out.erase(std::ranges::remove_if(out, is_excluded).begin(), out.end());
+
     return out;
 }
 

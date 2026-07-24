@@ -22,4 +22,14 @@ namespace ui {
 [[nodiscard]] std::vector<std::string> inherited_tags(const vault::Vault& vault,
                                                       std::string_view    node_path);
 
+// Descendant tag union for the gallery at `gallery_path`: every tag carried by
+// anything beneath it, case-insensitively de-duplicated, minus the gallery's own
+// tags AND minus its inherited (ancestor) tags — a tag belongs to exactly one of
+// the three read-only sections, never two. The mirror of inherited_tags: nothing
+// is stored, so the roll-up self-corrects when a descendant is retagged, moved
+// or deleted. Depth-bounded by vault::INDEX_MAX_DEPTH. Pure vault-tree walk over
+// the public Vault::list API — no SDL, no I/O. (Phase 51.)
+[[nodiscard]] std::vector<std::string> contents_tags(const vault::Vault& vault,
+                                                     std::string_view    gallery_path);
+
 } // namespace ui
