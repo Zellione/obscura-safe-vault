@@ -12,6 +12,7 @@
 #include "image/decode_worker.h"
 #include "ui/combine_dialog.h"
 #include "ui/consent_dialog.h"
+#include "ui/delete_summary.h"
 #include "ui/detail_panel.h"
 #include "ui/file_op_job.h"
 #include "ui/gallery_session_state.h"
@@ -201,6 +202,8 @@ private:
     bool                    combine_had_exclusive_ = false;   // Phase 50: track exclusive
     GridLocation          initial_;   // where to (re)open: path + selected tile
     std::vector<const vault::IndexNode*> children_;
+    std::vector<ui::SubtreeCounts> child_counts_;   // Phase 51: parallel to children_, gallery entries only
+    bool                  counts_row_ = false;      // Phase 51: per-listing reservation
     int                   cols_ = 1;
     GalleryView           view_ = GalleryView::GridM;
     float                 scroll_ = 0.0f;  // vertical scroll offset (pixels scrolled down)

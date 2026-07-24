@@ -33,6 +33,7 @@
 #include "ui/waste_threshold.h"
 #include "ui/widgets.h"
 #include "ui/zip_import.h"
+#include "ui/child_counts.h"
 #include "vault/file_util.h"
 #include "vault/index.h"
 #include "vault/vault.h"
@@ -265,6 +266,14 @@ void GalleryGrid::refresh()
     hover_gif_.reset();
     hover_gif_tile_ = -1;
     hover_gate_.reset();
+
+    // Phase 51: cache direct child counts for sub-gallery tiles
+    child_counts_.clear();
+    child_counts_.reserve(children_.size());
+    for (const auto* n : children_)
+        child_counts_.push_back(n && n->is_gallery() ? ui::direct_child_counts(*n)
+                                                     : ui::SubtreeCounts{});
+    counts_row_ = ui::any_tile_counts_to_show(children_);
 }
 
 void GalleryGrid::open_selected()
@@ -1685,6 +1694,7 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float bottom)
     const float chip_h     = (wide_tiles && settings.tiles_show_tags && any_chips_to_show(children_))
                                  ? CHIP_LINE_H
                                  : 0.0f;
+    const float counts_h   = (counts_row_) ? CHIP_LINE_H : 0.0f;
     const auto& cats       = settings.categories;
     cols_ = grid_columns(W - 2 * OX, cell, GAP);
     const auto [first_idx, last_idx] = grid_visible_range(
@@ -1708,12 +1718,12 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float bottom)
         r.draw_round_rect(cellr, RADIUS, sel ? ACCENT : BORDER, /*filled*/ false);
 
         // Leave a 12px gap below the label so it never touches the tile border,
-        // and a LABEL_CHIP_GAP of breathing room between the name and the chip
-        // line (only reserved when a chip line is actually drawn).
+        // and a LABEL_CHIP_GAP of breathing room between the name and any reserved
+        // rows (chips or counts; only applied when at least one row is reserved).
         constexpr float LABEL_CHIP_GAP = 10.0f;
         const float ph        = font_.pixel_height();
-        const float label_gap = chip_h > 0.0f ? LABEL_CHIP_GAP : 0.0f;
-        const float label_y   = cellr.y + cell - ph - 12.0f - chip_h - label_gap;
+        const float label_gap = (chip_h > 0.0f || counts_h > 0.0f) ? LABEL_CHIP_GAP : 0.0f;
+        const float label_y   = cellr.y + cell - ph - 12.0f - chip_h - counts_h - label_gap;
         const SDL_FRect thumb_rect{cellr.x + 6, cellr.y + 6,
                                    cell - 12, label_y - cellr.y - 12.0f};
 
@@ -1736,6 +1746,15 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float bottom)
                            cell - 16, n->tags, cats);
         }
 
+        if (counts_h > 0.0f && n->is_gallery()) {
+            // Direct-child count line (galleries only). Positioned below chips if present,
+            // or directly below label if no chips. The elided string respects the cell width.
+            const std::string txt = ui::fit_text(font_,
+                ui::format_tile_counts(child_counts_[i]), cell - 16.0f);
+            const float counts_y = label_y + ph + label_gap + chip_h;
+            r.draw_text(font_, cellr.x + 8, counts_y, txt, TEXT_DIM);
+        }
+
         draw_tile_badges(r, font_, cellr, cell, sel_.contains(i), n);
     }
     SDL_SetRenderClipRect(r.sdl(), nullptr);
@@ -1750,6 +1769,7 @@ struct ListRowMetaContext {
     float type_x;
     float date_x;
     float ty;
+    const ui::SubtreeCounts& counts;   // Phase 51: direct child counts for gallery rows
 };
 
 // Extract per-row metadata drawing to reduce render_list's cognitive complexity (S3776).
@@ -1760,7 +1780,10 @@ void draw_list_row_metadata(const ListRowMetaContext& ctx, const vault::IndexNod
     if (n->is_gallery()) {
         ctx.r.draw_text(ctx.font, ctx.dims_x, ctx.ty, "-", meta_c);
         ctx.r.draw_text(ctx.font, ctx.size_x, ctx.ty, "-", meta_c);
-        ctx.r.draw_text(ctx.font, ctx.type_x, ctx.ty, "DIR", meta_c);
+        // Phase 51: show direct-child counts in the type column for gallery rows
+        const std::string counts_txt = ui::fit_text(ctx.font,
+            ui::format_tile_counts(ctx.counts), 60.0f);  // COL_TYPE = 90, leave margin
+        ctx.r.draw_text(ctx.font, ctx.type_x, ctx.ty, counts_txt, meta_c);
         ctx.r.draw_text(ctx.font, ctx.date_x, ctx.ty, "-", meta_c);
     } else if (n->is_video()) {
         const auto& vm = n->vmeta;
@@ -1852,7 +1875,7 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float bottom)
         }
 
         // Draw metadata columns for this row (galleries/videos/images have different displays).
-        const ListRowMetaContext meta_ctx{r, font_, dims_x, size_x, type_x, date_x, ty};
+        const ListRowMetaContext meta_ctx{r, font_, dims_x, size_x, type_x, date_x, ty, child_counts_[i]};
         draw_list_row_metadata(meta_ctx, n, sel);
     }
     SDL_SetRenderClipRect(r.sdl(), nullptr);
