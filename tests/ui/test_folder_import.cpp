@@ -1,5 +1,6 @@
 #include "test_framework.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 
@@ -21,6 +22,22 @@ void pump_until_idle(ui::ImportQueue& q, int max_iterations = 2000)
             return;
         }
     }
+}
+
+// Helper: check if a node with given name is a gallery
+bool has_gallery_child(const std::vector<const vault::IndexNode*>& nodes, std::string_view name)
+{
+    return std::ranges::any_of(nodes, [name](const auto* node) {
+        return node->name == name && node->is_gallery();
+    });
+}
+
+// Helper: check if a node with given name is an image
+bool has_image_child(const std::vector<const vault::IndexNode*>& nodes, std::string_view name)
+{
+    return std::ranges::any_of(nodes, [name](const auto* node) {
+        return node->name == name && node->is_image();
+    });
 }
 
 }  // namespace
@@ -59,8 +76,17 @@ TEST(folder_import_mirrors_subfolders_into_sub_galleries)
     pump_until_idle(q);
     q.abort_and_flush();
 
-    CHECK(v.list("Photos").size() >= 2u);       // a.jpg + the "sub" gallery at least
-    CHECK(v.list("Photos/sub").size() >= 1u);   // b.jpg at least
+    // Fixture: root/a.jpg + root/sub/b.jpg
+    // Expected: Photos/ contains a.jpg (image) + sub (gallery) = 2 items
+    auto photos_children = v.list("Photos");
+    CHECK_EQ(photos_children.size(), 2u);
+    CHECK(has_image_child(photos_children, "a.jpg"));
+    CHECK(has_gallery_child(photos_children, "sub"));
+
+    // Expected: Photos/sub/ contains b.jpg (image) = 1 item
+    auto sub_children = v.list("Photos/sub");
+    CHECK_EQ(sub_children.size(), 1u);
+    CHECK(has_image_child(sub_children, "b.jpg"));
 
     ziptest::cleanup_dir(temp_dir);
 }
@@ -104,8 +130,17 @@ TEST(folder_import_survives_lock_and_reopen)
     CHECK_EQ(unlock_result, vault::VaultResult::Ok);
 
     // Check structure survived
-    CHECK(v.list("Photos").size() >= 2u);
-    CHECK(v.list("Photos/sub").size() >= 1u);
+    // Fixture: root/a.jpg + root/sub/b.jpg
+    // Expected: Photos/ contains a.jpg (image) + sub (gallery) = 2 items
+    auto photos_children = v.list("Photos");
+    CHECK_EQ(photos_children.size(), 2u);
+    CHECK(has_image_child(photos_children, "a.jpg"));
+    CHECK(has_gallery_child(photos_children, "sub"));
+
+    // Expected: Photos/sub/ contains b.jpg (image) = 1 item
+    auto sub_children = v.list("Photos/sub");
+    CHECK_EQ(sub_children.size(), 1u);
+    CHECK(has_image_child(sub_children, "b.jpg"));
 
     ziptest::cleanup_dir(temp_dir);
 }
@@ -148,9 +183,23 @@ TEST(folder_import_with_nested_galleries)
     q.end_session();
 
     // Check nested structure
-    CHECK(v.list("Photos").size() >= 2u);
-    CHECK(v.list("Photos/sub1").size() >= 2u);
-    CHECK(v.list("Photos/sub1/sub2").size() >= 1u);
+    // Fixture: root/a.jpg + root/sub1/b.jpg + root/sub1/sub2/c.jpg
+    // Expected: Photos/ contains a.jpg (image) + sub1 (gallery) = 2 items
+    auto photos_children = v.list("Photos");
+    CHECK_EQ(photos_children.size(), 2u);
+    CHECK(has_image_child(photos_children, "a.jpg"));
+    CHECK(has_gallery_child(photos_children, "sub1"));
+
+    // Expected: Photos/sub1/ contains b.jpg (image) + sub2 (gallery) = 2 items
+    auto sub1_children = v.list("Photos/sub1");
+    CHECK_EQ(sub1_children.size(), 2u);
+    CHECK(has_image_child(sub1_children, "b.jpg"));
+    CHECK(has_gallery_child(sub1_children, "sub2"));
+
+    // Expected: Photos/sub1/sub2/ contains c.jpg (image) = 1 item
+    auto sub2_children = v.list("Photos/sub1/sub2");
+    CHECK_EQ(sub2_children.size(), 1u);
+    CHECK(has_image_child(sub2_children, "c.jpg"));
 
     ziptest::cleanup_dir(temp_dir);
 }
