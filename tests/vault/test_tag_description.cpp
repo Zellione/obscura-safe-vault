@@ -120,7 +120,15 @@ TEST(tag_description_empty_text_removes_the_entry)
 TEST(tag_description_set_respects_the_entry_cap)
 {
     VaultSettings s;
-    for (int i = 0; i < INDEX_MAX_TAG_DESCRIPTIONS + 10; ++i)
+    for (int i = 0; i < INDEX_MAX_TAG_DESCRIPTIONS + 10; ++i) {
         set_tag_description(s, "tag" + std::to_string(i), "x");
+    }
     CHECK_EQ(s.tag_descriptions.size(), static_cast<size_t>(INDEX_MAX_TAG_DESCRIPTIONS));
+}
+
+TEST(tag_description_empty_text_on_missing_key_is_a_noop)
+{
+    VaultSettings s;
+    set_tag_description(s, "never_set", "");
+    CHECK(s.tag_descriptions.empty());
 }
