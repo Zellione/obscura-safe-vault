@@ -44,8 +44,9 @@ bool handle_help_key(HelpPopupState& s, SDL_Keycode key);
 void handle_help_wheel(HelpPopupState& s, float wheel_y);
 
 // Draws nothing while `s.open` is false. Veils the whole window, draws a
-// centred scrollable panel of `groups`, and clamps `s.scroll` against the
-// real content height computed from `groups` + the font.
+// centred panel of `groups` — reflowed into two columns when wide enough — and
+// clamps `s.scroll_line` against the LONGEST packed column, not the total line
+// count, since in a two-column layout the total overshoots what can be scrolled.
 void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
                      const std::vector<HelpGroup>& groups, HelpPopupState& s);
 
