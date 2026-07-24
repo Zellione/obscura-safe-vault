@@ -234,3 +234,24 @@ TEST(chunk_store_framed_failed_read_leaves_out_empty)
     CHECK_EQ(out.size(), size_t(0));
     std::fclose(fp);
 }
+
+// Covers ChunkStore::append_at_end's post-write flush-failure path. /dev/full
+// accepts a small buffered write but fails the fflush with ENOSPC — exactly the
+// case the flush guard exists for (a partial append must be reported, not
+// silently accepted). Linux-only device; skipped elsewhere.
+#ifndef _WIN32
+TEST(chunk_store_append_reports_flush_failure)
+{
+    auto key = random_key();
+    std::FILE* fp = std::fopen("/dev/full", "wb");
+    if (fp == nullptr) return;  // environment without /dev/full: nothing to assert
+    ChunkStore store(fp, key.as_span(), false);
+
+    // A small payload buffers cleanly on fwrite; the failure surfaces at fflush.
+    auto raw = pattern(64, 9);
+    uint64_t offset = 0;
+    CHECK_FALSE(store.append_raw(raw, offset));
+
+    std::fclose(fp);
+}
+#endif
