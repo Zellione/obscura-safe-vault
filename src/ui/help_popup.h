@@ -23,8 +23,8 @@ struct HelpGroup {
 // across every screen) — the content it renders (a screen's HelpGroup list)
 // comes from Screen::help_groups() each frame.
 struct HelpPopupState {
-    bool  open   = false;
-    float scroll = 0.0f;   // pixels scrolled down within the panel
+    bool  open       = false;
+    int   scroll_line = 0;   // whole lines scrolled down within the panel
 };
 
 void open_help(HelpPopupState& s);
@@ -35,9 +35,6 @@ void toggle_help(HelpPopupState& s);
 // per entry, plus one blank spacer line before every group after the first.
 // Used to size scroll clamping without touching SDL/FontAtlas.
 [[nodiscard]] int help_line_count(const std::vector<HelpGroup>& groups);
-
-// Pure: clamps `scroll` into [0, max(0, content_h - viewport_h)].
-[[nodiscard]] float clamp_help_scroll(float scroll, float content_h, float viewport_h);
 
 // Up/Down/PageUp/PageDown scroll; Esc/Q close. Returns true if the popup was
 // open (i.e. the key was consumed) — a no-op returning false while closed.
