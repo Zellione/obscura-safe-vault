@@ -53,6 +53,11 @@ private:
     std::vector<TagTally> shown_;    // filtered + sorted view that is navigated
     TagSort               sort_ = TagSort::Name;
     std::string           filter_;   // typed case-insensitive tag prefix
+
+    // Phase 51: tag description editing
+    bool            prompting_ = false;
+    std::string     prompt_buf_;
+    std::string     error_;
 };
 
 } // namespace ui
