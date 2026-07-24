@@ -125,6 +125,7 @@ private:
     void pump_import();            // poll the file dialog while transfer is not active
     void do_zip_import(const std::filesystem::path& zip_path);
     void pump_zip_import();        // poll the zip file dialog while transfer is not active
+    void process_next_queued_zip_import();  // Phase 51 Task 14: process next encrypted archive from bulk pick
     void pump_folder_import();     // poll the folder dialog while transfer is not active (Phase 51)
     bool handle_delete_confirm_key(const SDL_Event& e);   // Del-confirm modal; true if consumed
     bool handle_compact_confirm_key(const SDL_Event& e);  // Shift+C compact modal; true if consumed (Phase 26)
@@ -222,6 +223,10 @@ private:
         // (ui::zip_is_encrypted) — forces archive_backend above, and gates
         // whether do_zip_import threads naming_.password.buf through to the queue.
         bool                  needs_password = false;
+        // Phase 51 Task 14: bulk archive import — queue of remaining encrypted archives
+        struct QueuedArchive { std::filesystem::path path; std::string gallery_name;
+                               bool cbz; bool archive_backend; bool needs_password; };
+        std::vector<QueuedArchive> queued_archives;
     };
     struct PendingFolder {
         std::filesystem::path path;

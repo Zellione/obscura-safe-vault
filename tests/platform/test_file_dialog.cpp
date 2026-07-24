@@ -134,3 +134,19 @@ TEST(file_dialog_no_arg_take_is_purpose_agnostic)
     REQUIRE(res.has_value());
     CHECK(res->size() == 1);
 }
+
+// Phase 51 Task 14: Multi-select archives. The zip dialog now accepts
+// allow_many=true, so multiple archives can be picked at once.
+TEST(file_dialog_zip_multi_select)
+{
+    FileDialog d;
+    Peer::arm(d, Purpose::Zip);
+    Peer::complete(d, {"/tmp/a.zip", "/tmp/b.cbz", "/tmp/c.7z"});
+
+    auto zip = d.take_result(Purpose::Zip);
+    REQUIRE(zip.has_value());
+    CHECK(zip->size() == 3);
+    CHECK(std::filesystem::path(zip->at(0)) == std::filesystem::path("/tmp/a.zip"));
+    CHECK(std::filesystem::path(zip->at(1)) == std::filesystem::path("/tmp/b.cbz"));
+    CHECK(std::filesystem::path(zip->at(2)) == std::filesystem::path("/tmp/c.7z"));
+}

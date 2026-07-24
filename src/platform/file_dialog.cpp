@@ -78,7 +78,7 @@ void FileDialog::open_zip(SDL_Window* parent)
         SDL_DialogFileFilter{"Zip & comic archives", "zip;cbz;7z;rar;tar;gz;xz;cbr;cb7;cbt"},
         SDL_DialogFileFilter{"All files", "*"}};
     SDL_ShowOpenFileDialog(on_files, this, parent, f.data(),
-                           static_cast<int>(f.size()), nullptr, /*allow_many*/ false);
+                           static_cast<int>(f.size()), nullptr, /*allow_many*/ true);
 }
 
 void FileDialog::open_tag_list(SDL_Window* parent)

@@ -473,6 +473,7 @@ void GalleryGrid::finish_naming()
         naming_.zip.active = false;
         naming_.zip.cbz = false;
         naming_.zip.archive_backend = false;
+        naming_.zip.queued_archives.clear();  // Phase 51 Task 14: clear queued archives on abandon
         naming_.folder.active = false;   // clear folder import state if no name provided
         return;
     }
@@ -609,6 +610,7 @@ void GalleryGrid::handle_naming_key(const SDL_Event& e)
         naming_.active = false;
         naming_.buf.clear();
         naming_.zip.active = false;   // clear zip import state if cancelled
+        naming_.zip.queued_archives.clear();  // Phase 51 Task 14: clear queued archives on abandon
         naming_.folder.active = false;   // clear folder import state if cancelled
         SDL_StopTextInput(win_.sdl_window());
     }
@@ -631,6 +633,7 @@ void GalleryGrid::handle_password_key(const SDL_Event& e)
         naming_.zip.cbz            = false;
         naming_.zip.archive_backend = false;
         naming_.zip.needs_password  = false;
+        naming_.zip.queued_archives.clear();  // Phase 51 Task 14: clear queued archives on abandon
         SDL_StopTextInput(win_.sdl_window());
     }
 }
@@ -988,62 +991,113 @@ crypto::SecureBytes password_bytes(const SecureTextField& f)
 }
 } // namespace
 
+void GalleryGrid::process_next_queued_zip_import()
+{
+    // Phase 51 Task 14: process the next encrypted archive from a bulk pick.
+    // Called after the previous archive's password prompt was confirmed or cancelled.
+    if (naming_.zip.queued_archives.empty()) {
+        status_ = "Import queued — Shift+I for status";
+        mark_dirty();
+        return;
+    }
+
+    // Pop the first queued archive
+    const auto queued = naming_.zip.queued_archives.front();
+    naming_.zip.queued_archives.erase(naming_.zip.queued_archives.begin());
+
+    // Set up naming_.zip with the archive metadata (gallery_name already derived)
+    naming_.zip.path = queued.path;
+    naming_.zip.gallery_name = queued.gallery_name;
+    naming_.zip.cbz = queued.cbz;
+    naming_.zip.archive_backend = queued.archive_backend;
+    naming_.zip.needs_password = queued.needs_password;
+    naming_.zip.active = true;
+
+    // Show password prompt directly (no naming prompt for bulk import)
+    naming_.password.active = true;
+    naming_.password.retry = false;
+    naming_.password.buf.clear();
+    SDL_StartTextInput(win_.sdl_window());
+    mark_dirty();
+}
+
 void GalleryGrid::pump_zip_import()
 {
     auto res = dialogs_.file.take_result(platform::FileDialog::Purpose::Zip);
     if (!res) return;
     if (res->empty()) { mark_dirty(); return; }   // dialog cancelled — repaint
 
-    const std::filesystem::path zp(res->front());
-    std::string ext = zp.extension().string();   // ".cbz" / ".zip" / ".7z" / ...
-    std::ranges::transform(ext, ext.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    auto [cbz, archive_backend] = classify_archive_ext(ext);
+    // Phase 51 Task 14: handle single vs. multiple archives.
+    // Single: use existing naming prompt flow (unchanged).
+    // Multiple: auto-name from meta/stem, prompt only for encrypted archives.
+    if (res->size() == 1) {
+        // Single archive: existing behavior
+        const std::filesystem::path zp(res->front());
+        std::string ext = zp.extension().string();
+        std::ranges::transform(ext, ext.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        auto [cbz, archive_backend] = classify_archive_ext(ext);
 
-    // Phase 35: a password-protected zip/cbz (ZipCrypto "traditional"
-    // encryption) always routes through the libarchive backend instead of
-    // miniz — miniz has no decrypt path for any encryption flavor — and
-    // needs a password prompt before it can import. WinZip-AES zips are
-    // NOT detected here (m_is_encrypted covers both, but only traditional
-    // encryption can actually be decrypted downstream — an AES zip will
-    // fail the verification probe in import_archive with a generic error,
-    // same as today, never an unsatisfiable retry loop).
-    const bool needs_password = (ext == ".zip" || ext == ".cbz") && ui::zip_is_encrypted(zp);
-    if (needs_password) archive_backend = true;
+        const bool needs_password = (ext == ".zip" || ext == ".cbz") && ui::zip_is_encrypted(zp);
+        if (needs_password) archive_backend = true;
 
-    if (cbz) {
-        // CBZ/CBR/CB7/CBT: always a dedicated leaf gallery named after the archive.
-        // start_naming() guards the leaf-invariant and (on success) prefills the
-        // stem; finish_naming() then routes to the fixed one-leaf plan.
-        start_naming();
-        if (naming_.active) {
-            // Prefill from the archive's meta.json title when present (Phase 27,
-            // miniz .cbz only — the libarchive backend has no meta.json support
-            // yet), else the filename stem (e.g. "MyComic" from "MyComic.cbz").
-            // The text the user confirms is authoritative — the import never
-            // overrides it.
+        if (cbz) {
+            start_naming();
+            if (naming_.active) {
+                naming_.buf = archive_backend
+                    ? zp.stem().string()
+                    : ui::meta_gallery_name(ui::peek_archive_meta(zp), zp.stem().string());
+                naming_.zip.path = zp;
+                naming_.zip.cbz = true;
+                naming_.zip.archive_backend = archive_backend;
+                naming_.zip.needs_password  = needs_password;
+                naming_.zip.active = true;
+            }
+        } else {
+            start_naming();
             naming_.buf = archive_backend
                 ? zp.stem().string()
                 : ui::meta_gallery_name(ui::peek_archive_meta(zp), zp.stem().string());
             naming_.zip.path = zp;
-            naming_.zip.cbz = true;
+            naming_.zip.cbz = false;
             naming_.zip.archive_backend = archive_backend;
             naming_.zip.needs_password  = needs_password;
             naming_.zip.active = true;
         }
     } else {
-        // Phase 46: a plain archive always imports as a new named sub-gallery
-        // (like CBZ), so mixed galleries have no ambiguous append-vs-folder choice.
-        start_naming();   // reuse the naming flow
-        // Prefill from meta.json title → filename stem, as in the CBZ branch.
-        naming_.buf = archive_backend
-            ? zp.stem().string()
-            : ui::meta_gallery_name(ui::peek_archive_meta(zp), zp.stem().string());
-        naming_.zip.path = zp;
-        naming_.zip.cbz = false;
-        naming_.zip.archive_backend = archive_backend;
-        naming_.zip.needs_password  = needs_password;
-        naming_.zip.active = true;
+        // Multiple archives: enqueue unencrypted directly, queue encrypted for password prompts
+        for (const auto& path : *res) {
+            std::filesystem::path zp(path);
+            std::string ext = zp.extension().string();
+            std::ranges::transform(ext, ext.begin(),
+                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            auto [cbz, archive_backend] = classify_archive_ext(ext);
+
+            const bool needs_password = (ext == ".zip" || ext == ".cbz") && ui::zip_is_encrypted(zp);
+            if (needs_password) archive_backend = true;
+
+            const std::string gallery_name = archive_backend
+                ? zp.stem().string()
+                : ui::meta_gallery_name(ui::peek_archive_meta(zp), zp.stem().string());
+
+            if (!needs_password) {
+                // Unencrypted: enqueue directly
+                using enum ImportTaskKind;
+                const ImportTaskKind kind = cbz ? (archive_backend ? ArchiveCbz : Cbz)
+                                                 : (archive_backend ? Archive : Zip);
+                queue_.enqueue_archive(zp, nav_.path(), gallery_name, kind, false, {});
+            } else {
+                // Encrypted: queue for password prompt
+                naming_.zip.queued_archives.push_back({zp, gallery_name, cbz, archive_backend, needs_password});
+            }
+        }
+
+        // Process the first encrypted archive (if any)
+        if (!naming_.zip.queued_archives.empty()) {
+            process_next_queued_zip_import();
+        } else {
+            status_ = "Import queued — Shift+I for status";
+        }
     }
     mark_dirty();   // dialog closed (picked) — repaint
 }
@@ -1092,7 +1146,15 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path)
     queue_.enqueue_archive(zip_path, base_gallery, gallery_name, kind,
                           naming_.zip.needs_password,
                           password_bytes(naming_.password.buf));
-    mark_dirty();
+
+    // Phase 51 Task 14: process next encrypted archive from bulk pick (if any)
+    if (!naming_.zip.queued_archives.empty()) {
+        process_next_queued_zip_import();
+    } else {
+        // Clear naming_.zip state after import
+        naming_.zip.active = false;
+        mark_dirty();
+    }
 }
 
 // Extract cancelled-import waste-hint logic (no longer needed for poll_import_job).
