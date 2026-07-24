@@ -473,6 +473,7 @@ void GalleryGrid::finish_naming()
         naming_.zip.active = false;
         naming_.zip.cbz = false;
         naming_.zip.archive_backend = false;
+        naming_.folder.active = false;   // clear folder import state if no name provided
         return;
     }
 
@@ -608,6 +609,7 @@ void GalleryGrid::handle_naming_key(const SDL_Event& e)
         naming_.active = false;
         naming_.buf.clear();
         naming_.zip.active = false;   // clear zip import state if cancelled
+        naming_.folder.active = false;   // clear folder import state if cancelled
         SDL_StopTextInput(win_.sdl_window());
     }
 }
