@@ -30,6 +30,23 @@
 
 ## Index versions
 
+**INDEX_VERSION = 9** (Phase 51): a **tag-descriptions sub-block**, serialised
+after the Phase 49 vault-global settings block:
+
+```
+desc_count       u16   (<= INDEX_MAX_TAG_DESCRIPTIONS = 4096)
+descriptions     { name_len u16 (<= INDEX_MAX_TAG_DESC_BYTES = 512);
+                   name u8[name_len];
+                   desc_len u16 (<= INDEX_MAX_TAG_DESC_BYTES = 512);
+                   desc u8[desc_len] } [desc_count]
+```
+
+Pre-v9 blobs read with an empty descriptions list. An oversized count or an
+out-of-range name/desc length is **rejected on deserialise, not clamped** —
+the Phase 37 rule. The writer clamps; the reader rejects. Fuzzed by
+`test_fuzz.cpp`'s mutation harness, whose base blob is built with the
+4-argument `serialize_index` so description bytes are reachable by mutation.
+
 **INDEX_VERSION = 8** (Phase 49): a **vault-global settings block**, serialised
 after the Phase 18 saved-searches block (vault-level metadata, not part of any
 node):
@@ -76,5 +93,5 @@ valid; orphaned chunks are reclaimed by compaction.
 ## See also
 
 Index tree serialisation (`IndexNode`, tags, favorites, video metadata,
-saved searches, sort keys) and the framed-chunk compression codec: `mem:core`
+saved searches, sort keys, tag descriptions) and the framed-chunk compression codec: `mem:core`
 (vault/ section — `index.*`, `chunk_codec.*`, `index_io.*`).

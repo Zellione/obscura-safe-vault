@@ -606,13 +606,13 @@ TEST(index_animated_flag_round_trips)
     CHECK(!out.children[1].meta.animated);
 }
 
-TEST(index_version_is_eight)
+TEST(index_version_is_nine)
 {
     IndexNode root = IndexNode::gallery("root");
     std::vector<uint8_t> blob;
     vault::serialize_index(root, blob);
     REQUIRE(!blob.empty());
-    CHECK_EQ(blob[0], uint8_t{8});
+    CHECK_EQ(blob[0], uint8_t{9});
 }
 
 TEST(index_v6_blob_reads_animated_as_false)
@@ -685,7 +685,7 @@ TEST(index_v8_accepts_insertion_sort_key)
     std::vector<uint8_t> blob;
     serialize_index(root, blob);
     CHECK_EQ(blob[0], INDEX_VERSION);
-    CHECK_EQ(blob[0], 8);
+    CHECK_EQ(blob[0], 9);
 
     IndexNode out;
     CHECK(deserialize_index(blob, out));
@@ -791,8 +791,9 @@ TEST(index_settings_rejects_bad_tiles_flag)
     std::vector<uint8_t> blob;
     vault::serialize_index(root, {}, vault::VaultSettings{}, blob);
 
-    // The settings block is the tail: default_sort, tiles_show_tags, cat_count(u16).
-    const size_t tiles_at = blob.size() - 3;
+    // The settings block is the tail: default_sort, tiles_show_tags, cat_count(u16), desc_count(u16).
+    // tiles_show_tags is at position -5 (2 bytes for desc_count after cat_count).
+    const size_t tiles_at = blob.size() - 5;
     CHECK_EQ(blob[tiles_at], 1);
     blob[tiles_at] = 2;
 
@@ -808,7 +809,8 @@ TEST(index_settings_rejects_bad_default_sort)
     std::vector<uint8_t> blob;
     vault::serialize_index(root, {}, vault::VaultSettings{}, blob);
 
-    blob[blob.size() - 4] = 9;   // default_sort byte, one past Insertion
+    // With the desc_count field added (Phase 51), default_sort is now at blob.size() - 6.
+    blob[blob.size() - 6] = 9;   // default_sort byte, one past Insertion
 
     IndexNode out;
     std::vector<vault::SavedSearch> searches;
@@ -834,7 +836,8 @@ TEST(index_settings_rejects_over_long_category_name)
 
     // A hand-forged blob declaring a longer name is rejected outright.
     std::vector<uint8_t> forged = blob;
-    const size_t name_len_at = forged.size() - 1 - vault::INDEX_MAX_CATEGORY_BYTES - 2;
+    // With desc_count added at the end, the name_len is now 2 bytes earlier.
+    const size_t name_len_at = forged.size() - 1 - 2 - vault::INDEX_MAX_CATEGORY_BYTES - 2;
     forged[name_len_at]     = 0xFF;
     forged[name_len_at + 1] = 0x00;
     IndexNode out2;
@@ -851,7 +854,9 @@ TEST(index_pre_v8_blob_reads_seeded_settings)
     std::vector<uint8_t> v8;
     vault::serialize_index(root, {}, vault::VaultSettings{}, v8);
 
-    std::vector<uint8_t> v7(v8.begin(), v8.end() - 4);   // drop the settings block
+    // With desc_count added in v9, the settings block is now 6 bytes (was 4 in v8).
+    // We strip the entire v9 settings block to create a v7 blob.
+    std::vector<uint8_t> v7(v8.begin(), v8.end() - 6);   // drop the settings block
     v7[0] = 7;
 
     IndexNode out;

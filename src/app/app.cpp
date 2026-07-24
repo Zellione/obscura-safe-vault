@@ -95,7 +95,10 @@ bool App::init()
     registry_.seed_if_empty(platform::default_vault_path());
     to_manager();
 
-    std::println("[App] Initialised (Phase 14 — multiple vaults).");
+    // Deliberately carries no phase number: the previous form said "Phase 14"
+    // long after Phase 14 shipped, because nothing ever forces a startup string
+    // to be updated. A bare marker cannot go stale.
+    std::println("[App] Initialised.");
     return true;
 }
 

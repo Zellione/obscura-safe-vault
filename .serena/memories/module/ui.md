@@ -18,7 +18,7 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   seeds a freshly constructed grid via `session_.recall(path)` unless `explicit_index` (App
   sets that only when the outgoing screen was an ImageViewer — the one nav.index that is a
   real freshly-known position); every other ToGallery source passes 0 ("no opinion").
-  Phase 48: `content_width(const GalleryGrid&)` free friend is now the SINGLE layout-width
+  Phase 48: `content_width(const GalleryGrid&)` free friend returns the SINGLE layout-width
   source (window minus detail panel) — render(), scroll-to-selection, on_enter's cols_ seed,
   and hit_test all route through it; using win_.width() directly desyncs picking from drawing
   whenever the panel is open. Its vertical twin `content_bottom(const GalleryGrid&)` (= window
@@ -31,6 +31,8 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   called by App when the index tree changes (import drain, add/delete, etc.) to refetch stale IndexNode* refs. Password-at-enqueue
   for encrypted archives (wrong password → task Failed, no re-prompt). Footer priority: error > import summary > status.
   Exclusive-op guards: delete/transfer/combine/compact blocked when import queue non-empty ("Imports running — press Shift+I").
+  **Phase 51:** `[O]` key opens FolderDialog with Purpose ImportFolder and multi-select; naming popup prefilled with folder basename;
+  multiple folders enqueued with auto-naming from their own stems, no prompt. Tile counts cached parallel to children_.
 - `favorites_screen.*` render clips scrolled tiles to below OY (the fixed header) and draws a
   BORDER hairline there — without the clip a scrolled tile paints over the title/[F1]/status.
   Covers all four subclasses. `tag_overview.*` paginates (rows never scroll partially), so it
@@ -60,7 +62,9 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   the cache key.
 - `tag_overview.*` — `Shift+T` first-class Screen (`NavKind::ToTagOverview`): scrollable tag
   list (Up/Down, Enter, Tab=toggle sort, type=prefix filter, `` ` ``=quick-switch); counts
-  from `VaultSearch::tag_overview`; Enter -> TagGalleries.
+  from `VaultSearch::tag_overview`; Enter -> TagGalleries. **Phase 51:** two-line rows (chip
+  + counts, then dim description or `(no description — [E] to add)`); `[E]` inline edit prompt
+  reusing the settings-overlay pattern; description drawn via `ui::fit_text`.
 - `tag_galleries.*` — galleries-only view of galleries directly carrying one tag
   (`NavKind::ToTagGalleries`, tag in Nav::path); thin FavoritesScreen subclass over
   `VaultSearch::galleries_with_tag` whose `go_back()` returns to the overview. Tab toggles to
@@ -157,16 +161,26 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   shared by TransferDialog + CombineDialog. set_items, open/close_filter (`/`), filter_*,
   move(delta), filtered(), selected(), geom(visible_rows). `set_pinned_suffix(item)` keeps one
   extra row appended after filtering, exempt from the filter.
+- `folder_dialog.*` (Phase 51) — `FolderDialog`: native file-picker for folders. `Purpose` enum:
+  `{None, Export, ImportFolder}`. `open(purpose, allow_many)` → SDL_ShowOpenFileDialog with
+  SDL_DIALOG_FOLDER. `take_result(purpose)` returns `vector<std::string>` — phase-scoped
+  filtering so export and folder-import results don't cross. Single-select result is
+  `result[0]`, multi-select is the whole vector. Mirrored from FileDialog architecture.
+  Backed by `FolderDialogTestPeer` for headless tests. Both export call sites guard
+  `!result.empty()` before indexing.
 - `rename_dialog.*` — `R` modal, renames the focused image/video/gallery via
   `vault::rename_node`. open(gallery_path,old_name)/close()/handle_event/render/
   consume_completed(status_out).
 - `tag_editor.*` — `G` add/remove-tags modal in GalleryGrid + ImageViewer. Current-tags list
   scrolls (Up/Down) via pure `tag_scroll.h` + auto-scrolls to a just-added tag. Read-only
   "Inherited from gallery" section (`ui::inherited_tags`, `tag_inherit.*`) below own-tags;
-  Del/selection never touch it. Autosuggest dropdown while typing (`VaultSearch::all_tags`
-  vocab refreshed on open/add/remove; `ui::editor_tag_suggestions`; Up/Down highlight via
-  move_tag_cursor, -1=buffer; Enter adds the TYPED text unless a suggestion is highlighted; Esc
-  deselects first).
+  Del/selection never touch it. **Phase 51:** Read-only "From contents" section below inherited
+  (galleries only, non-empty only) — computed by `ui::contents_tags`, threaded by the tag
+  editor's `from_contents_` vector. Del/selection never touch it, move_cursor bounds selected_
+  to tally_ only (structurally impossible to delete a tag not in the node's own tags).
+  Autosuggest dropdown while typing (`VaultSearch::all_tags` vocab refreshed on open/add/remove;
+  `ui::editor_tag_suggestions`; Up/Down highlight via move_tag_cursor, -1=buffer; Enter adds the
+  TYPED text unless a suggestion is highlighted; Esc deselects first).
 - `search_overlay.*` — `/` live-filtered search modal in GalleryGrid; Tab cycles scope
   (Both/Images/Galleries).
 - `consent_dialog.*` — modal "export anyway?" confirm (SDL plumbing).
@@ -182,6 +196,14 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `help_popup.*` — shared `F1` help popup: HelpGroup/HelpEntry types + pure open/close/scroll
   logic + `draw_help_popup`. `Screen::help_groups()` virtual (default empty) supplies
   per-screen grouped content; App owns HelpPopupState + intercepts F1 globally. Esc/Q close.
+  **Phase 51:** `HelpPopupState::scroll_line` is an int line index (not pixels); `clamp_help_scroll`
+  retired, replaced by `clamp_help_line`. Clip band sized to `visible_lines * LINE_H`; clip rect
+  via `lround`, not truncation. `help_layout.*` new module: `help_visible_lines(popup_h, lines_per_column)`
+  returns the number of lines that fit in a viewport; `HelpColumn` / `help_column_count(groups, lines_per_column)` /
+  `pack_help_columns(groups, lines_per_column)` handle two-column packing above a width threshold,
+  never splitting a group across a column boundary. Single-column fallback below the threshold.
+  Scroll affordance from theme TEXT_FAINT when content overflows. Tests verify first/last line fully
+  inside the band, every line reachable, group boundaries never split, column budgets never exceeded.
 
 ## Export (the one gated invariant-#1 deviation)
 - `selection_model.*` — multi-select state for export (pure/tested). Phase 48: gained
@@ -210,6 +232,10 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   (vault_busy/poll_file_job/handle_job_input) is free friends. Unit-tested.
 
 ## Import planning & archive reading
+- `folder_scan.*` (Phase 51) — `scan_folder(root) -> vector<ZipEntry>` via
+  `std::filesystem::recursive_directory_iterator` with `skip_permission_denied` and symlinks
+  skipped (never followed, containment verified). Emits archive-style relative paths as `ZipEntry`,
+  bounded by an entry-count limit. Error recovery: permission denied non-fatal, continue scan.
 - `zip_plan.*` — pure ZIP placement planner: entries -> galleries to create + file placements +
   skip count. SDL-/miniz-/vault-free, unit-tested. `build_zip_plan` mirrors the archive tree 1:1;
   a dir holding both media and subdirs maps onto a mixed gallery (Phase 46), so there is no
@@ -255,7 +281,10 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   Ordering: decode parallel, append+attach strictly in sequence via a resequencer (lookahead cap 8 items/256MiB).
   Methods: `enqueue` (any thread, refuse if stopped), `abort_and_flush` (idempotent), `begin_session` (clears stale state/flags),
   `set_exclusive` (inhibit until released). Worker stops gracefully on Vault::lock().
+  **Phase 51:** `enqueue_folder(vault, folder_path, dest_gallery_path, progress)` enqueues an ImportTaskKind::Folder,
+  mirroring `enqueue_files`. Multiple folder picks create multiple tasks (one per folder).
 - `import_model.*` — pure, SDL-free queue model: `ImportTask` (id, kind, source, dest, gallery_name, optional archive password);
+  `ImportTaskKind{Files, Zip, ArchiveZip, Archive7z, ArchiveRar, ArchiveTar, Folder}` (Phase 51);
   `ImportRecord{task, state, progress, error}`; `ImportQueueModel` (FIFO/reorder/cancel/drain).
   `footer_import_summary(records,lane_error)` — formats "Importing X 128/450 · 2 queued" for the footer.
   Unit-tested, no vault dep.
@@ -269,7 +298,18 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - **Retired:** `ZipImportJob` (entire class), `FileOpJob::start_import` (method); executors (zip_import, archive_import, etc.)
   reused by queue unchanged. GalleryGrid `Z` key now enqueues instead of launching a legacy job.
 
+## Workers (Phase 51)
+- `process_folder_task(Vault, task, sink, progress)` — mirror of `process_archive_task`, executes an
+  ImportTaskKind::Folder: `scan_folder(task.source)` -> archive-style ZipEntry list -> `build_zip_plan` -> stage each
+  file (decrypt-to-memory, no temp file) -> attach gallery tree. Bytes read into mlock'd SecureBytes.
+  Main-thread-only invariant: tree untouched by worker (attach/commit only on queue drain).
+
 ## Pure view / sort / model helpers (SDL-free unless noted, all unit-tested)
+- `child_counts.*` (Phase 51) — `direct_child_counts(node) -> SubtreeCounts` (galleries, images, videos counted
+  separately, reusing the existing SubtreeCounts struct); `format_tile_counts(counts) -> string` — plural-aware
+  formatting ("3 galleries · 12 items" / "1 gallery · 1 item" / "12 items" / "empty"), collapsing images+videos
+  to "items". Counts reserved per gallery listing (never per tile); cell does not grow; label moves up,
+  thumbnail shrinks by row height, leaving grid metrics and hit-testing untouched.
 - `gallery_view.h/.cpp` — `GalleryView{List,GridS,GridM,GridL,GridXL}` shared enum;
   `cell_size_for(view)` (S=128/M=188/L=248/XL=320, List unused) + `next_gallery_view(view)`
   (the `L`-key cycle). GridM==188 matches the old fixed CELL. `gallery_view.cpp` is listed
@@ -355,19 +395,24 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   trim, rank, hide own tags, cap `TAG_SUGGEST_MAX=5`.
 - `tag_inherit.*` — ancestor-gallery tag union: `inherited_tags(vault,node_path)` — root→parent
   order, ci de-dupe, minus own tags. Feeds the tag editor's read-only section.
+- `tag_contents.*` (Phase 51) — descendant-gallery tag union: `contents_tags(vault, gallery_path) -> vector<string>`
+  read-time only, depth-bounded by INDEX_MAX_DEPTH, nothing stored. Mirrors `inherited_tags` structure: ci de-dupe,
+  minus own and inherited tags (return empty if the node is not a gallery or is a leaf). Feeds the tag editor's
+  read-only "From contents" section and the detail panel's "From contents" tag row.
 - `tag_list_parse.*` — `parse_tag_list(span)` -> normalised tags (split LF, trim, drop blanks,
   ci de-dupe keeping first casing, `TAG_MAX_BYTES=0xFFFF`, cap INDEX_MAX_TAGS; non-UTF-8
   opaque). GalleryGrid `Shift+G` on a gallery tile opens a .txt dialog -> add_tag each (merge).
-- `tag_overview_model.*` — `TagTally{tag,gallery_count,image_count}` + sort_tags(Name/Count) +
-  filter_tags(ci prefix).
+- `tag_overview_model.*` — `TagTally{tag,gallery_count,image_count,description}` (Phase 51) +
+  sort_tags(Name/Count) + filter_tags(ci prefix).
 - `detail_model.*` (Phase 48) — pure detail-panel content: `DetailRow`/`DetailSection`/
   `DetailContent` + `build_node_details(node, inherited, vault_default)` (image/video/gallery
   field sets, own+inherited tag sections; the trailing `vault::SortKey` came in with Phase 49
   because this builder is pure by design and cannot look the vault default up itself — there
   is deliberately NO defaulted parameter or 1-arg overload, which is exactly how the breadcrumb
-  and the panel would silently drift apart). Phase 49 also added `DetailSection::is_tags`,
-  marking the own- and inherited-tag sections; their `bullets` stay the RAW stored tags, since
-  category resolution is a draw-time concern. Plus `build_selection_details(nodes, inherited)` (aggregate counts,
+  and the panel would silently drift apart). **Phase 51:** gained `from_contents` parameter with
+  NO default and NO overload (deliberate — a default is how the panel and the editor would
+  silently drift); "From contents" emitted for galleries only, non-empty only, is_tags=true so
+  the existing chip renderer draws it. Plus `build_selection_details(nodes, inherited)` (aggregate counts,
   summed size, ci tag intersection, "no shared tags"). Delegates every string to meta_format;
   gallery totals via `count_subtree`. SDL-/gfx-free, unit-tested.
 - `detail_panel.*` (Phase 48) — right-edge panel: `DetailPanelState{open,scroll}`,

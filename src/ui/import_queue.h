@@ -21,6 +21,9 @@
 
 namespace ui {
 
+struct ZipEntry;      // ui/zip_plan.h
+struct ZipPlacement;  // ui/zip_plan.h
+
 // App-owned background import pipeline (Phase 50). One worker thread runs
 // tasks FIFO; per image file, decode+thumbnail runs on a small pool while
 // staging (encrypt+append) and record posting stay strictly in file order.
@@ -51,6 +54,11 @@ public:
                              std::string gallery_name, ImportTaskKind kind,
                              bool password_protected = false,
                              crypto::SecureBytes password = {});
+    // Import a picked directory as one gallery, mirroring its subfolders into
+    // sub-galleries (Phase 51). `root` has already been normalised by the
+    // folder dialog; `gallery_name` is the confirmed popup text.
+    uint64_t enqueue_folder(std::filesystem::path root, std::string dest_gallery,
+                            std::string gallery_name);
 
     // ---- queue control (main thread) ----
     [[nodiscard]] bool cancel(uint64_t id);          // queued: drop; running: coop-cancel
@@ -92,7 +100,7 @@ private:
         std::string display_name;
         std::string dest_gallery;
         std::vector<std::filesystem::path> files;  // for Files task
-        std::filesystem::path archive_path;
+        std::filesystem::path archive_path;        // archive file OR folder root
         std::string gallery_name;
         crypto::SecureBytes password;
 
@@ -121,6 +129,13 @@ private:
     // Task processing
     void process_files_task(Task& task);
     void process_archive_task(Task& task);
+    void process_folder_task(Task& task);
+    // Read + stage one planned placement of a folder import. Extracted from
+    // process_folder_task so that loop stays under the cognitive-complexity cap;
+    // updates task.skipped and task.progress->done for `index`.
+    // const: works entirely through `sink` and `task`, touches no ImportQueue member.
+    void place_folder_file(StagingSink& sink, const ZipPlacement& placement,
+                           const ZipEntry& entry, Task& task, size_t index) const;
 
     // Internal state helpers
     void maybe_end_batch();

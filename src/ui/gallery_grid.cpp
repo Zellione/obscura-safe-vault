@@ -33,6 +33,7 @@
 #include "ui/waste_threshold.h"
 #include "ui/widgets.h"
 #include "ui/zip_import.h"
+#include "ui/child_counts.h"
 #include "vault/file_util.h"
 #include "vault/index.h"
 #include "vault/vault.h"
@@ -185,7 +186,8 @@ void rebuild_detail(GalleryGrid& g)
     const vault::IndexNode& node = *g.children_[static_cast<size_t>(sel_idx)];
     const std::string node_path =
         g.nav_.path().empty() ? node.name : g.nav_.path() + "/" + node.name;
-    g.detail_.content = build_node_details(node, inherited_tags(g.vault_, node_path), vault::vault_settings(g.vault_).default_sort);
+    const auto from_contents = node.is_gallery() ? contents_tags(g.vault_, node_path) : std::vector<std::string>{};
+    g.detail_.content = build_node_details(node, inherited_tags(g.vault_, node_path), from_contents, vault::vault_settings(g.vault_).default_sort);
 }
 
 GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
@@ -265,6 +267,14 @@ void GalleryGrid::refresh()
     hover_gif_.reset();
     hover_gif_tile_ = -1;
     hover_gate_.reset();
+
+    // Phase 51: cache direct child counts for sub-gallery tiles
+    child_counts_.clear();
+    child_counts_.reserve(children_.size());
+    for (const auto* n : children_)
+        child_counts_.push_back(n && n->is_gallery() ? ui::direct_child_counts(*n)
+                                                     : ui::SubtreeCounts{});
+    counts_row_ = ui::any_tile_counts_to_show(children_);
 }
 
 void GalleryGrid::open_selected()
@@ -473,6 +483,8 @@ void GalleryGrid::finish_naming()
         naming_.zip.active = false;
         naming_.zip.cbz = false;
         naming_.zip.archive_backend = false;
+        naming_.zip.queued_archives.clear();  // Phase 51 Task 14: clear queued archives on abandon
+        naming_.folder.active = false;   // clear folder import state if no name provided
         return;
     }
 
@@ -490,6 +502,16 @@ void GalleryGrid::finish_naming()
         } else {
             do_zip_import(naming_.zip.path);
         }
+        return;
+    }
+
+    // If this is a folder import, enqueue it with the chosen name (Phase 51, Task 12).
+    if (naming_.folder.active) {
+        queue_.enqueue_folder(naming_.folder.path, nav_.path(), naming_.buf);
+        naming_.folder.active = false;
+        naming_.buf.clear();
+        status_ = "Import queued — Shift+I for status";
+        mark_dirty();
         return;
     }
 
@@ -598,6 +620,8 @@ void GalleryGrid::handle_naming_key(const SDL_Event& e)
         naming_.active = false;
         naming_.buf.clear();
         naming_.zip.active = false;   // clear zip import state if cancelled
+        naming_.zip.queued_archives.clear();  // Phase 51 Task 14: clear queued archives on abandon
+        naming_.folder.active = false;   // clear folder import state if cancelled
         SDL_StopTextInput(win_.sdl_window());
     }
 }
@@ -619,6 +643,16 @@ void GalleryGrid::handle_password_key(const SDL_Event& e)
         naming_.zip.cbz            = false;
         naming_.zip.archive_backend = false;
         naming_.zip.needs_password  = false;
+        // Phase 51 Task 14: cancelling one password abandons the whole bulk pick.
+        // Say so — silently dropping imports the user is still expecting is the
+        // difference between a cancel and a disappearance.
+        const size_t abandoned = naming_.zip.queued_archives.size();
+        naming_.zip.queued_archives.clear();
+        const std::string_view plural_suffix = abandoned == 1 ? "" : "s";
+        status_ = abandoned > 0
+                      ? std::format("Import cancelled — {} queued archive{} discarded",
+                                    abandoned, plural_suffix)
+                      : "Import cancelled";
         SDL_StopTextInput(win_.sdl_window());
     }
 }
@@ -728,6 +762,13 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         if (dialogs_.file.busy() || transfer_.active()) return;
         error_.clear();
         dialogs_.file.open_zip(win_.sdl_window());
+        return;
+    }
+    if (key.key == SDLK_O && !(key.mod & SDL_KMOD_SHIFT)) {
+        if (dialogs_.folder.busy() || transfer_.active()) return;
+        error_.clear();
+        dialogs_.folder.open(win_.sdl_window(), platform::FolderDialog::Purpose::ImportFolder,
+                             /*allow_many*/ true);
         return;
     }
     if (key.key == SDLK_DELETE) {
@@ -862,7 +903,7 @@ bool GalleryGrid::handle_overlay_event(const SDL_Event& e)
     if (consent_.active()) {
         if (e.type == SDL_EVENT_KEY_DOWN &&
             consent_.handle_key(e.key.key) == ConsentDialog::Result::Confirmed)
-            dialogs_.folder.open(win_.sdl_window());
+            dialogs_.folder.open(win_.sdl_window(), platform::FolderDialog::Purpose::Export, false);
         return true;
     }
 
@@ -969,62 +1010,134 @@ crypto::SecureBytes password_bytes(const SecureTextField& f)
 }
 } // namespace
 
+void GalleryGrid::process_next_queued_zip_import()
+{
+    // Phase 51 Task 14: process the next encrypted archive from a bulk pick.
+    // Called after the previous archive's password prompt was confirmed or cancelled.
+    if (naming_.zip.queued_archives.empty()) {
+        status_ = "Import queued — Shift+I for status";
+        mark_dirty();
+        return;
+    }
+
+    // Pop the first queued archive
+    const auto queued = naming_.zip.queued_archives.front();
+    naming_.zip.queued_archives.erase(naming_.zip.queued_archives.begin());
+
+    // Set up naming_.zip with the archive metadata (gallery_name already derived)
+    naming_.zip.path = queued.path;
+    naming_.zip.gallery_name = queued.gallery_name;
+    naming_.zip.cbz = queued.cbz;
+    naming_.zip.archive_backend = queued.archive_backend;
+    naming_.zip.needs_password = queued.needs_password;
+    naming_.zip.active = true;
+
+    // Show password prompt directly (no naming prompt for bulk import)
+    naming_.password.active = true;
+    naming_.password.retry = false;
+    naming_.password.buf.clear();
+    SDL_StartTextInput(win_.sdl_window());
+    mark_dirty();
+}
+
+void GalleryGrid::handle_single_archive_for_naming(const std::filesystem::path& zp)
+{
+    std::string ext = zp.extension().string();
+    std::ranges::transform(ext, ext.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    auto [cbz, archive_backend] = classify_archive_ext(ext);
+
+    const bool needs_password = (ext == ".zip" || ext == ".cbz") && ui::zip_is_encrypted(zp);
+    if (needs_password) archive_backend = true;
+
+    const std::string gallery_name = archive_backend
+        ? zp.stem().string()
+        : ui::meta_gallery_name(ui::peek_archive_meta(zp), zp.stem().string());
+
+    start_naming();
+    if (naming_.active) {
+        naming_.buf = gallery_name;
+        naming_.zip.path = zp;
+        naming_.zip.cbz = cbz;
+        naming_.zip.archive_backend = archive_backend;
+        naming_.zip.needs_password  = needs_password;
+        naming_.zip.active = true;
+    }
+}
+
+void GalleryGrid::handle_multiple_archives_enqueue(const std::vector<std::string>& paths)
+{
+    for (const auto& path : paths) {
+        std::filesystem::path zp(path);
+        std::string ext = zp.extension().string();
+        std::ranges::transform(ext, ext.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        auto [cbz, archive_backend] = classify_archive_ext(ext);
+
+        const bool needs_password = (ext == ".zip" || ext == ".cbz") && ui::zip_is_encrypted(zp);
+        if (needs_password) archive_backend = true;
+
+        const std::string gallery_name = archive_backend
+            ? zp.stem().string()
+            : ui::meta_gallery_name(ui::peek_archive_meta(zp), zp.stem().string());
+
+        if (!needs_password) {
+            // Unencrypted: enqueue directly
+            using enum ImportTaskKind;
+            const ImportTaskKind cbz_kind = archive_backend ? ArchiveCbz : Cbz;
+            const ImportTaskKind zip_kind = archive_backend ? Archive : Zip;
+            const ImportTaskKind kind = cbz ? cbz_kind : zip_kind;
+            queue_.enqueue_archive(zp, nav_.path(), gallery_name, kind, false, {});
+        } else {
+            // Encrypted: queue for password prompt
+            naming_.zip.queued_archives.emplace_back(zp, gallery_name, cbz, archive_backend, needs_password);
+        }
+    }
+
+    // Process the first encrypted archive (if any)
+    if (!naming_.zip.queued_archives.empty()) {
+        process_next_queued_zip_import();
+    } else {
+        status_ = "Import queued — Shift+I for status";
+    }
+}
+
 void GalleryGrid::pump_zip_import()
 {
     auto res = dialogs_.file.take_result(platform::FileDialog::Purpose::Zip);
     if (!res) return;
     if (res->empty()) { mark_dirty(); return; }   // dialog cancelled — repaint
 
-    const std::filesystem::path zp(res->front());
-    std::string ext = zp.extension().string();   // ".cbz" / ".zip" / ".7z" / ...
-    std::ranges::transform(ext, ext.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    auto [cbz, archive_backend] = classify_archive_ext(ext);
+    // Phase 51 Task 14: handle single vs. multiple archives.
+    if (res->size() == 1) {
+        handle_single_archive_for_naming(res->front());
+    } else {
+        handle_multiple_archives_enqueue(*res);
+    }
+    mark_dirty();   // dialog closed (picked) — repaint
+}
 
-    // Phase 35: a password-protected zip/cbz (ZipCrypto "traditional"
-    // encryption) always routes through the libarchive backend instead of
-    // miniz — miniz has no decrypt path for any encryption flavor — and
-    // needs a password prompt before it can import. WinZip-AES zips are
-    // NOT detected here (m_is_encrypted covers both, but only traditional
-    // encryption can actually be decrypted downstream — an AES zip will
-    // fail the verification probe in import_archive with a generic error,
-    // same as today, never an unsatisfiable retry loop).
-    const bool needs_password = (ext == ".zip" || ext == ".cbz") && ui::zip_is_encrypted(zp);
-    if (needs_password) archive_backend = true;
+void GalleryGrid::pump_folder_import()
+{
+    auto res = dialogs_.folder.take_result(platform::FolderDialog::Purpose::ImportFolder);
+    if (!res) return;
+    if (res->empty()) { mark_dirty(); return; }   // dialog cancelled — repaint
 
-    if (cbz) {
-        // CBZ/CBR/CB7/CBT: always a dedicated leaf gallery named after the archive.
-        // start_naming() guards the leaf-invariant and (on success) prefills the
-        // stem; finish_naming() then routes to the fixed one-leaf plan.
+    if (res->size() == 1) {
+        // Single folder: use naming popup (prefill with basename, matching zip import behavior)
         start_naming();
         if (naming_.active) {
-            // Prefill from the archive's meta.json title when present (Phase 27,
-            // miniz .cbz only — the libarchive backend has no meta.json support
-            // yet), else the filename stem (e.g. "MyComic" from "MyComic.cbz").
-            // The text the user confirms is authoritative — the import never
-            // overrides it.
-            naming_.buf = archive_backend
-                ? zp.stem().string()
-                : ui::meta_gallery_name(ui::peek_archive_meta(zp), zp.stem().string());
-            naming_.zip.path = zp;
-            naming_.zip.cbz = true;
-            naming_.zip.archive_backend = archive_backend;
-            naming_.zip.needs_password  = needs_password;
-            naming_.zip.active = true;
+            naming_.folder.path = res->front();
+            naming_.folder.active = true;
+            naming_.buf = std::filesystem::path(res->front()).filename().string();
         }
     } else {
-        // Phase 46: a plain archive always imports as a new named sub-gallery
-        // (like CBZ), so mixed galleries have no ambiguous append-vs-folder choice.
-        start_naming();   // reuse the naming flow
-        // Prefill from meta.json title → filename stem, as in the CBZ branch.
-        naming_.buf = archive_backend
-            ? zp.stem().string()
-            : ui::meta_gallery_name(ui::peek_archive_meta(zp), zp.stem().string());
-        naming_.zip.path = zp;
-        naming_.zip.cbz = false;
-        naming_.zip.archive_backend = archive_backend;
-        naming_.zip.needs_password  = needs_password;
-        naming_.zip.active = true;
+        // Multiple folders: auto-name each from basename without prompting
+        for (const auto& p : *res) {
+            const std::filesystem::path root(p);
+            queue_.enqueue_folder(root, nav_.path(), root.filename().string());
+        }
+        status_ = "Import queued — Shift+I for status";
     }
     mark_dirty();   // dialog closed (picked) — repaint
 }
@@ -1048,7 +1161,15 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path)
     queue_.enqueue_archive(zip_path, base_gallery, gallery_name, kind,
                           naming_.zip.needs_password,
                           password_bytes(naming_.password.buf));
-    mark_dirty();
+
+    // Phase 51 Task 14: process next encrypted archive from bulk pick (if any)
+    if (!naming_.zip.queued_archives.empty()) {
+        process_next_queued_zip_import();
+    } else {
+        // Clear naming_.zip state after import
+        naming_.zip.active = false;
+        mark_dirty();
+    }
 }
 
 // Extract cancelled-import waste-hint logic (no longer needed for poll_import_job).
@@ -1223,6 +1344,7 @@ void poll_pending_pickers(GalleryGrid& g)
     if (!g.transfer_.active()) {
         g.pump_import();
         g.pump_zip_import();
+        g.pump_folder_import();
 
         // Tag-list import (Shift+G, Phase 21). The .txt carries tag metadata only —
         // not key material or decrypted vault content — so reading it is invariant-safe.
@@ -1236,8 +1358,8 @@ void poll_pending_pickers(GalleryGrid& g)
         }
     }
 
-    if (auto dest = g.dialogs_.folder.take_result()) {
-        if (!dest->empty()) g.do_export(*dest);   // empty => the picker was cancelled
+    if (auto dest = g.dialogs_.folder.take_result(platform::FolderDialog::Purpose::Export)) {
+        if (!dest->empty()) g.do_export((*dest)[0]);   // empty => the picker was cancelled
         g.mark_dirty();
     }
 }
@@ -1346,7 +1468,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
             {"B", "Favorite"}, {"F", "Favorite images"}, {"Shift+F", "Favorite galleries"},
         }},
         {"Import & export", {
-            {"I", "Import files"}, {"Shift+I", "Import status"}, {"Z", "Import ZIP/CBZ"}, {"N", "New gallery"},
+            {"I", "Import files"}, {"Shift+I", "Import status"}, {"Z", "Import ZIP/CBZ"}, {"O", "Import folder"}, {"N", "New gallery"},
             {"X", "Export selection"}, {"M", "Move/copy"}, {"Shift+M", "Combine gallery"}, {"R", "Rename"}, {"Del", "Delete"},
         }},
         {"Session", {
@@ -1555,74 +1677,72 @@ void draw_tile_badges(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& c
 
 }  // namespace
 
+void GalleryGrid::render_grid_tile(gfx::Renderer& r, int i, float W)
+{
+    using namespace gfx::theme;
+    const float cell = cell_size_for(view_);
+    const bool wide_tiles = view_ == GalleryView::GridL || view_ == GalleryView::GridXL;
+    const auto& settings   = vault::vault_settings(vault_);
+    const float chip_h     = wide_tiles && settings.tiles_show_tags && any_chips_to_show(children_) ? CHIP_LINE_H : 0.0f;
+    const float counts_h   = counts_row_ ? CHIP_LINE_H : 0.0f;
+    const auto& cats       = settings.categories;
+
+    SDL_FRect cellr = grid_cell_rect(i, grid_spec(W, cols_, cell));
+    cellr.y -= scroll_;
+    const vault::IndexNode* n = children_[i];
+    const bool sel = (i == nav_.selected());
+    if (sel) r.draw_selection_glow(cellr, RADIUS, ACCENT);
+    r.draw_round_rect(cellr, RADIUS, sel ? SURFACE_HI : SURFACE);
+    r.draw_round_rect(cellr, RADIUS, sel ? ACCENT : BORDER, /*filled*/ false);
+
+    constexpr float LABEL_CHIP_GAP = 10.0f;
+    const float ph        = font_.pixel_height();
+    const float label_gap = (chip_h > 0.0f || counts_h > 0.0f) ? LABEL_CHIP_GAP : 0.0f;
+    const float label_y   = cellr.y + cell - ph - 12.0f - chip_h - counts_h - label_gap;
+    const SDL_FRect thumb_rect{cellr.x + 6, cellr.y + 6,
+                               cell - 12, label_y - cellr.y - 12.0f};
+
+    if (hover_gif_ && hover_gif_->valid() && i == hover_gif_tile_) {
+        hover_gif_->render(r, thumb_rect);
+    } else {
+        draw_tile_thumb(r, *n, thumb_rect);
+    }
+
+    r.draw_text(font_, cellr.x + 8, label_y, fit_name(n->name, cell - 16), TEXT);
+
+    if (chip_h > 0.0f) {
+        draw_tag_chips(r, font_, cellr.x + 8,
+                       label_y + ph + label_gap + (chip_h - CHIP_ROW_H) * 0.5f,
+                       cell - 16, n->tags, cats);
+    }
+
+    if (counts_h > 0.0f && n->is_gallery()) {
+        const std::string txt = ui::fit_text(font_,
+            ui::format_tile_counts(child_counts_[i]), cell - 16.0f);
+        const float counts_y = label_y + ph + label_gap + chip_h;
+        r.draw_text(font_, cellr.x + 8, counts_y, txt, TEXT_DIM);
+    }
+
+    draw_tile_badges(r, font_, cellr, cell, sel_.contains(i), n);
+}
+
 void GalleryGrid::render_grid(gfx::Renderer& r, float W, float bottom)
 {
     using namespace gfx::theme;
     const float cell = cell_size_for(view_);
-    // Per-gallery, not per-tile: a uniform reservation is what stops rows going
-    // ragged. Recomputed each frame rather than cached, so toggling the setting
-    // or re-tagging a child can never leave a stale reservation behind. Only the
-    // two large densities carry a chip line — the ~28 px font needs a full
-    // CHIP_LINE_H of clear space below the label, which a GridS/GridM cell cannot
-    // spare without swallowing the thumbnail.
-    const bool  wide_tiles = view_ == GalleryView::GridL || view_ == GalleryView::GridXL;
-    const auto& settings   = vault::vault_settings(vault_);
-    const float chip_h     = (wide_tiles && settings.tiles_show_tags && any_chips_to_show(children_))
-                                 ? CHIP_LINE_H
-                                 : 0.0f;
-    const auto& cats       = settings.categories;
     cols_ = grid_columns(W - 2 * OX, cell, GAP);
     const auto [first_idx, last_idx] = grid_visible_range(
         scroll_, cell, GAP, OY, bottom, cols_, static_cast<int>(children_.size()));
-    // Clip tiles to the content area — below the fixed header at OY and above the
-    // reserved footer band at `bottom`. A scrolled tile must paint over neither the
-    // breadcrumb / [F1] above nor the status/error line below.
+
     const SDL_Rect content_clip{0, static_cast<int>(OY), static_cast<int>(W),
                                 static_cast<int>(bottom - OY)};
     SDL_SetRenderClipRect(r.sdl(), &content_clip);
-    // If the grid is empty, the range will be {0, -1}; the loop handles this correctly.
+
     for (int i = first_idx; i <= last_idx; ++i) {
         if (i < 0 || i >= static_cast<int>(children_.size())) continue;
-        SDL_FRect cellr = grid_cell_rect(i, grid_spec(W, cols_, cell));
-        // Apply scroll offset to cell Y position.
-        cellr.y -= scroll_;
-        const vault::IndexNode* n = children_[i];
-        const bool sel = (i == nav_.selected());
-        if (sel) r.draw_selection_glow(cellr, RADIUS, ACCENT);
-        r.draw_round_rect(cellr, RADIUS, sel ? SURFACE_HI : SURFACE);
-        r.draw_round_rect(cellr, RADIUS, sel ? ACCENT : BORDER, /*filled*/ false);
-
-        // Leave a 12px gap below the label so it never touches the tile border,
-        // and a LABEL_CHIP_GAP of breathing room between the name and the chip
-        // line (only reserved when a chip line is actually drawn).
-        constexpr float LABEL_CHIP_GAP = 10.0f;
-        const float ph        = font_.pixel_height();
-        const float label_gap = chip_h > 0.0f ? LABEL_CHIP_GAP : 0.0f;
-        const float label_y   = cellr.y + cell - ph - 12.0f - chip_h - label_gap;
-        const SDL_FRect thumb_rect{cellr.x + 6, cellr.y + 6,
-                                   cell - 12, label_y - cellr.y - 12.0f};
-
-        // Render hover animation if active on this tile, otherwise render the static thumbnail.
-        if (hover_gif_ && hover_gif_->valid() && i == hover_gif_tile_) {
-            hover_gif_->render(r, thumb_rect);
-        } else {
-            draw_tile_thumb(r, *n, thumb_rect);
-        }
-
-        r.draw_text(font_, cellr.x + 8, label_y, fit_name(n->name, cell - 16), TEXT);
-
-        if (chip_h > 0.0f) {
-            // Own tags only: inherited tags are identical across every tile in
-            // this gallery, so they would be pure noise here. The chip sits in a
-            // CHIP_LINE_H box directly below the label, its content centred so the
-            // ~28 px ink clears the label's baseline instead of overlapping it.
-            draw_tag_chips(r, font_, cellr.x + 8,
-                           label_y + ph + label_gap + (chip_h - CHIP_ROW_H) * 0.5f,
-                           cell - 16, n->tags, cats);
-        }
-
-        draw_tile_badges(r, font_, cellr, cell, sel_.contains(i), n);
+        render_grid_tile(r, i, W);
     }
+
     SDL_SetRenderClipRect(r.sdl(), nullptr);
 }
 
@@ -1635,6 +1755,7 @@ struct ListRowMetaContext {
     float type_x;
     float date_x;
     float ty;
+    const ui::SubtreeCounts& counts;   // Phase 51: direct child counts for gallery rows
 };
 
 // Extract per-row metadata drawing to reduce render_list's cognitive complexity (S3776).
@@ -1645,7 +1766,10 @@ void draw_list_row_metadata(const ListRowMetaContext& ctx, const vault::IndexNod
     if (n->is_gallery()) {
         ctx.r.draw_text(ctx.font, ctx.dims_x, ctx.ty, "-", meta_c);
         ctx.r.draw_text(ctx.font, ctx.size_x, ctx.ty, "-", meta_c);
-        ctx.r.draw_text(ctx.font, ctx.type_x, ctx.ty, "DIR", meta_c);
+        // Phase 51: show direct-child counts in the type column for gallery rows
+        const std::string counts_txt = ui::fit_text(ctx.font,
+            ui::format_tile_counts(ctx.counts), 60.0f);  // COL_TYPE = 90, leave margin
+        ctx.r.draw_text(ctx.font, ctx.type_x, ctx.ty, counts_txt, meta_c);
         ctx.r.draw_text(ctx.font, ctx.date_x, ctx.ty, "-", meta_c);
     } else if (n->is_video()) {
         const auto& vm = n->vmeta;
@@ -1737,7 +1861,7 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float bottom)
         }
 
         // Draw metadata columns for this row (galleries/videos/images have different displays).
-        const ListRowMetaContext meta_ctx{r, font_, dims_x, size_x, type_x, date_x, ty};
+        const ListRowMetaContext meta_ctx{r, font_, dims_x, size_x, type_x, date_x, ty, child_counts_[i]};
         draw_list_row_metadata(meta_ctx, n, sel);
     }
     SDL_SetRenderClipRect(r.sdl(), nullptr);

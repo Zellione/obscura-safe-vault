@@ -58,7 +58,7 @@ IndexNode make_video()
 
 TEST(detail_image_field_set)
 {
-    const auto c = ui::build_node_details(make_image(), {}, vault::SortKey::Insertion);
+    const auto c = ui::build_node_details(make_image(), {}, {}, vault::SortKey::Insertion);
     CHECK(c.heading == "kyoto.jpg");
     CHECK(row_value(c, "Type") == "JPEG");
     CHECK(row_value(c, "Dimensions") == "4032x3024");
@@ -68,7 +68,7 @@ TEST(detail_image_field_set)
 
 TEST(detail_video_field_set)
 {
-    const auto c = ui::build_node_details(make_video(), {}, vault::SortKey::Insertion);
+    const auto c = ui::build_node_details(make_video(), {}, {}, vault::SortKey::Insertion);
     CHECK(c.heading == "clip.mp4");
     CHECK(row_value(c, "Codec") == "H.264");
     CHECK(row_value(c, "Container") == "MP4");
@@ -83,14 +83,14 @@ TEST(detail_video_unknown_codec_reads_video)
     // video_repair heals it on the next gallery open.
     IndexNode n = make_video();
     n.vmeta.codec = vault::VideoCodec::Unknown;
-    CHECK(ui::build_node_details(n, {}, vault::SortKey::Insertion).sections.at(0).rows.at(0).value == "Video");
+    CHECK(ui::build_node_details(n, {}, {}, vault::SortKey::Insertion).sections.at(0).rows.at(0).value == "Video");
 }
 
 TEST(detail_zero_dimensions_and_date_render_dash)
 {
     IndexNode n = IndexNode::image("bare.png");
     n.meta.format = vault::ImageFormat::PNG;
-    const auto c = ui::build_node_details(n, {}, vault::SortKey::Insertion);
+    const auto c = ui::build_node_details(n, {}, {}, vault::SortKey::Insertion);
     CHECK(row_value(c, "Dimensions") == "-");
     CHECK(row_value(c, "Added") == "-");
 }
@@ -100,14 +100,14 @@ TEST(detail_favorite_and_animated_markers)
     IndexNode n = make_image();
     n.favorite       = true;
     n.meta.animated  = true;
-    const auto c = ui::build_node_details(n, {}, vault::SortKey::Insertion);
+    const auto c = ui::build_node_details(n, {}, {}, vault::SortKey::Insertion);
     CHECK(c.subheading.contains("favorite"));
     CHECK(c.subheading.contains("animated"));
 }
 
 TEST(detail_no_markers_leaves_subheading_empty)
 {
-    CHECK(ui::build_node_details(make_image(), {}, vault::SortKey::Insertion).subheading.empty());
+    CHECK(ui::build_node_details(make_image(), {}, {}, vault::SortKey::Insertion).subheading.empty());
 }
 
 TEST(detail_animated_marker_is_image_only)
@@ -115,7 +115,7 @@ TEST(detail_animated_marker_is_image_only)
     // vmeta has no `animated`; a video must never claim one.
     IndexNode n = make_video();
     n.favorite = true;
-    const auto c = ui::build_node_details(n, {}, vault::SortKey::Insertion);
+    const auto c = ui::build_node_details(n, {}, {}, vault::SortKey::Insertion);
     CHECK(!c.subheading.contains("animated"));
 }
 
@@ -124,7 +124,7 @@ TEST(detail_own_and_inherited_tags_are_separate_sections)
     IndexNode n = make_image();
     n.tags = {"travel", "kyoto"};
     const std::vector<std::string> inherited{"japan", "holiday"};
-    const auto c = ui::build_node_details(n, inherited, vault::SortKey::Insertion);
+    const auto c = ui::build_node_details(n, inherited, {}, vault::SortKey::Insertion);
 
     const auto* own = section(c, "Tags");
     REQUIRE(own != nullptr);
@@ -139,7 +139,7 @@ TEST(detail_own_and_inherited_tags_are_separate_sections)
 
 TEST(detail_empty_tag_lists_omit_their_sections)
 {
-    const auto c = ui::build_node_details(make_image(), {}, vault::SortKey::Insertion);
+    const auto c = ui::build_node_details(make_image(), {}, {}, vault::SortKey::Insertion);
     CHECK(section(c, "Tags") == nullptr);
     CHECK(section(c, "Inherited") == nullptr);
 }
@@ -157,7 +157,7 @@ TEST(detail_gallery_tally_and_total_size)
     g.children.push_back(std::move(a));
     g.children.push_back(std::move(sub));
 
-    const auto c = ui::build_node_details(g, {}, vault::SortKey::Insertion);
+    const auto c = ui::build_node_details(g, {}, {}, vault::SortKey::Insertion);
     CHECK(c.heading == "Japan");
     CHECK(row_value(c, "Contains") == "1 image, 1 video, 1 sub-gallery");
     CHECK(row_value(c, "Total size") == "2.9 KB");   // 3000 bytes
@@ -165,7 +165,7 @@ TEST(detail_gallery_tally_and_total_size)
 
 TEST(detail_empty_gallery_reads_nothing)
 {
-    const auto c = ui::build_node_details(IndexNode::gallery("empty"), {}, vault::SortKey::Insertion);
+    const auto c = ui::build_node_details(IndexNode::gallery("empty"), {}, {}, vault::SortKey::Insertion);
     CHECK(row_value(c, "Contains") == "nothing");
     CHECK(row_value(c, "Total size") == "0 B");
 }
@@ -175,10 +175,10 @@ TEST(detail_gallery_sort_row_shown_only_when_not_manual)
     IndexNode g = IndexNode::gallery("Japan");
 
     g.sort_key = vault::SortKey::Default;
-    CHECK(row_value(ui::build_node_details(g, {}, vault::SortKey::Insertion), "Sort").empty());
+    CHECK(row_value(ui::build_node_details(g, {}, {}, vault::SortKey::Insertion), "Sort").empty());
 
     g.sort_key = vault::SortKey::NameAsc;
-    CHECK(!row_value(ui::build_node_details(g, {}, vault::SortKey::Insertion), "Sort").empty());
+    CHECK(!row_value(ui::build_node_details(g, {}, {}, vault::SortKey::Insertion), "Sort").empty());
 }
 
 TEST(detail_selection_counts_and_total_size)
@@ -287,7 +287,7 @@ TEST(detail_model_marks_tag_sections)
     vault::IndexNode n = vault::IndexNode::image("a.jpg");
     n.tags = {"artist:Kaguya", "ponytail"};
     const std::vector<std::string> inherited{"parody:F/GO"};
-    const auto c = ui::build_node_details(n, inherited, vault::SortKey::Insertion);
+    const auto c = ui::build_node_details(n, inherited, {}, vault::SortKey::Insertion);
 
     int tag_sections = 0;
     for (const auto& s : c.sections) {
@@ -309,4 +309,34 @@ TEST(detail_model_marks_tag_sections)
     for (const auto& s : c.sections) {
         if (!s.is_tags) { CHECK(s.bullets.empty()); }
     }
+}
+
+TEST(detail_gallery_shows_a_from_contents_tag_section)
+{
+    vault::IndexNode g;
+    g.type = vault::IndexNode::Type::Gallery;
+    g.name = "trip";
+    g.tags = {"vacation"};
+
+    const std::vector<std::string> inherited;
+    const std::vector<std::string> from_contents{"beach", "sunset"};
+    const auto d = ui::build_node_details(g, inherited, from_contents,
+                                          vault::SortKey::Insertion);
+
+    const auto it = std::ranges::find_if(d.sections,
+        [](const ui::DetailSection& s) { return s.title == "From contents"; });
+    CHECK(it != d.sections.end());
+    CHECK(it->is_tags);                       // renders as chips, not "• text"
+    CHECK_EQ(it->bullets.size(), 2u);
+    CHECK_EQ(it->bullets[0], std::string("beach"));
+}
+
+TEST(detail_from_contents_section_is_absent_when_empty)
+{
+    vault::IndexNode g;
+    g.type = vault::IndexNode::Type::Gallery;
+    g.name = "trip";
+    const auto d = ui::build_node_details(g, {}, {}, vault::SortKey::Insertion);
+    CHECK(std::ranges::none_of(d.sections,
+        [](const ui::DetailSection& s) { return s.title == "From contents"; }));
 }

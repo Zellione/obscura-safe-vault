@@ -30,9 +30,17 @@ Single global `F1` popup, context-sensitive shortcuts grouped by task/area —
 replaces the prior inline-footer-string approach (which ran off-window at
 normal sizes). `Screen::help_groups()` virtual supplies per-screen content;
 `App` owns the one `HelpPopupState` and renders the overlay on top of
-whichever screen is active. Close with `Esc` or `Q`. Phase 49: `draw_help_popup`
-prepends a synthesised "Global" group listing `F1` Help and `F2` Settings, since
-`help_groups()` is per-screen and had no shared entry point.
+whichever screen is active. Close with `Esc` or `Q`.
+
+**Phase 51 redesign:** The popup now renders at full window height (clamped by content
+or content_max), reflows into two columns above a width threshold, and scrolls by
+**line index** (not pixels) so content always aligns to LINE_H boundaries. Clip band
+sized to exactly the visible lines, computed via `help_visible_lines(popup_h, lines_per_column)`;
+scroll clamped to `max(0, total_lines - visible_lines)`. A scroll affordance (theme TEXT_FAINT)
+appears when content overflows. No partial lines clip at viewport edges at any window size.
+
+Phase 49 base: `draw_help_popup` prepends a synthesised "Global" group listing `F1` Help
+and `F2` Settings, since `help_groups()` is per-screen and had no shared entry point.
 
 ## Tag chips (Phase 49)
 
@@ -57,6 +65,39 @@ vault looks exactly as it did before and rows never go ragged. The cell does not
 grow: the label moves up by `CHIP_ROW_H` and the thumbnail shrinks by the same
 amount, leaving every grid metric (and therefore hit-testing) untouched.
 `tiles_show_tags` turns the line off entirely.
+
+## Tag overview screen (Phase 22, Phase 51 redesign)
+
+Scrollable list of distinct tags across the vault. Each row is now **two lines**:
+
+1. **Tag + counts** — chip (dot + name) on the left, gallery count / image count on the right,
+   dimmed. E.g., `● artist` on the left, `3 galleries · 5 images` on the right.
+2. **Description** — dim text, either the per-tag description or `(no description — [E] to add)`.
+
+**[E] inline edit:** pressing `[E]` on any row opens a prompt, mirroring the settings-overlay
+pattern — take the entered text, save to vault via `vault::set_tag_description`, refresh the
+list. Empty input removes an existing description. Failed saves surface on the error line, never
+as success. Description drawn via `ui::fit_text` (truncated to content width, elided).
+
+**Deliberately unchanged:** `VaultSearch::tag_overview()` counts are direct-tag only (Phase 22
+chose this so the cascade could not inflate counts). The two-line row layout reserves exactly
+one row per listing, never per tag, mirroring the Phase 49 chip-row reservation scheme so no
+grid metric changes.
+
+Navigation: Up/Down move rows, Enter opens TagGalleries for that tag, Tab toggles sort (Name/Count),
+type-ahead filters by name prefix, `` ` `` quick-switch vault.
+
+## Sub-gallery tile counts (Phase 51)
+
+Gallery tiles now show a small **counts row** beneath the label (dim text, `CHIP_ROW_H`
+reserve per listing, never per tile): "3 galleries · 12 items" / "1 gallery · 1 item" /
+"12 items" / "empty". Items = images + videos. The count is **direct children only** and
+deliberately disagrees with the `[D]` detail panel's recursive total tally — label wording
+("directly inside", "children only") makes the scope unambiguous.
+
+The cell does not grow: thumbnail shrinks by `CHIP_ROW_H`, label moves up, every grid metric
+(cols, cell size, hit-testing) untouched. Same reservation scheme as Phase 49 tags: space
+reserved per gallery listing only (no sub-galleries → nothing reserved).
 
 ## Settings overlay (Phase 49)
 
@@ -120,10 +161,15 @@ dimensions, size, date, own tags and the inherited cascade; a gallery shows a
 recursive tally + total size; a multi-selection shows an aggregate summary.
 Open/closed state is session-global via `GallerySessionState::detail_open`.
 
+**Phase 51:** A gallery's detail panel now includes a read-only **"From contents"**
+tag section (below "Inherited from gallery") showing the tags carried by its descendants.
+Rendered as chips via the existing `DetailSection::is_tags` path; marked non-editable so
+Del/selection never touch it.
+
 ## Import Status screen (Phase 50)
 Global `Shift+I` opens `NavKind::ToImportStatus`, or click the footer import summary.
 Shows:
-- **Running item:** name, progress bar (done/total chunks), source kind (Files/Zip/Archive/etc.).
+- **Running item:** name, progress bar (done/total chunks), source kind (Files/Zip/Archive/Folder).
 - **Queued items:** list, `Ctrl+Up`/`Ctrl+Down` reorder, `Del` cancel per-item.
 - **Finished/failed items:** outcomes (imported/skipped counts, error text). `C` clears finished entries.
 - **Lane-failure banner:** surfaces hard-stop commit errors (hard stop, queue halted).

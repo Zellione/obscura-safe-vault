@@ -11,7 +11,7 @@ bool ExportUi::consume_key(SDL_Keycode key)
 {
     if (!consent_.active()) return false;
     if (consent_.handle_key(key) == ConsentDialog::Result::Confirmed)
-        folder_.open(win_.sdl_window());
+        folder_.open(win_.sdl_window(), platform::FolderDialog::Purpose::Export, false);
     return true;
 }
 
@@ -19,8 +19,9 @@ bool ExportUi::modal_active() const noexcept { return consent_.active(); }
 
 std::optional<std::filesystem::path> ExportUi::take_destination()
 {
-    if (auto dest = folder_.take_result(); dest && !dest->empty())
-        return std::filesystem::path(*dest);
+    if (auto dest = folder_.take_result(platform::FolderDialog::Purpose::Export);
+        dest && !dest->empty())
+        return std::filesystem::path((*dest)[0]);
     return std::nullopt;   // empty => the picker was cancelled
 }
 

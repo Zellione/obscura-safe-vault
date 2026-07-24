@@ -47,11 +47,15 @@ void append_tag_sections(DetailContent&               out,
                          std::string_view             own_title);
 
 // Describe one node. `inherited` is the ancestor-gallery tag cascade for the
-// node (see ui::inherited_tags); pass an empty span when there is none. A
-// section with nothing to say is omitted rather than emitted empty. `vault_default`
-// is the vault-wide default sort order (Phase 49).
+// node (see ui::inherited_tags); pass an empty span when there is none.
+// `from_contents` is the descendant tag union for galleries (see ui::contents_tags);
+// pass an empty span for non-galleries. A section with nothing to say is omitted
+// rather than emitted empty. `vault_default` is the vault-wide default sort order (Phase 49).
+// Note: this parameter has no default and no overload — detail_model is pure by design
+// and cannot compute from_contents itself. Callers must pass the value explicitly.
 [[nodiscard]] DetailContent build_node_details(const vault::IndexNode&      node,
                                                std::span<const std::string> inherited,
+                                               std::span<const std::string> from_contents,
                                                vault::SortKey               vault_default);
 
 // Describe a multi-item selection: per-kind counts, summed size, and the tags

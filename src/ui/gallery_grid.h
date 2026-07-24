@@ -12,6 +12,7 @@
 #include "image/decode_worker.h"
 #include "ui/combine_dialog.h"
 #include "ui/consent_dialog.h"
+#include "ui/delete_summary.h"
 #include "ui/detail_panel.h"
 #include "ui/file_op_job.h"
 #include "ui/gallery_session_state.h"
@@ -125,6 +126,10 @@ private:
     void pump_import();            // poll the file dialog while transfer is not active
     void do_zip_import(const std::filesystem::path& zip_path);
     void pump_zip_import();        // poll the zip file dialog while transfer is not active
+    void process_next_queued_zip_import();  // Phase 51 Task 14: process next encrypted archive from bulk pick
+    void handle_single_archive_for_naming(const std::filesystem::path& zp);
+    void handle_multiple_archives_enqueue(const std::vector<std::string>& paths);
+    void pump_folder_import();     // poll the folder dialog while transfer is not active (Phase 51)
     bool handle_delete_confirm_key(const SDL_Event& e);   // Del-confirm modal; true if consumed
     bool handle_compact_confirm_key(const SDL_Event& e);  // Shift+C compact modal; true if consumed (Phase 26)
     // Dispatches to whichever full-screen overlay (search/tag editor/transfer/
@@ -178,6 +183,7 @@ private:
     [[nodiscard]] int  hit_test(float mx, float my) const;  // item under cursor, or -1
     [[nodiscard]] std::string fit_name(std::string_view name, float max_w) const;
     void start_hover_animation(int tile);  // resolve node, check badge, construct playback, check budget
+    void render_grid_tile(gfx::Renderer& r, int tile_idx, float W);
 
     gfx::Window&            win_;
     gfx::FontAtlas&         font_;
@@ -199,6 +205,8 @@ private:
     bool                    combine_had_exclusive_ = false;   // Phase 50: track exclusive
     GridLocation          initial_;   // where to (re)open: path + selected tile
     std::vector<const vault::IndexNode*> children_;
+    std::vector<ui::SubtreeCounts> child_counts_;   // Phase 51: parallel to children_, gallery entries only
+    bool                  counts_row_ = false;      // Phase 51: per-listing reservation
     int                   cols_ = 1;
     GalleryView           view_ = GalleryView::GridM;
     float                 scroll_ = 0.0f;  // vertical scroll offset (pixels scrolled down)
@@ -221,11 +229,20 @@ private:
         // (ui::zip_is_encrypted) — forces archive_backend above, and gates
         // whether do_zip_import threads naming_.password.buf through to the queue.
         bool                  needs_password = false;
+        // Phase 51 Task 14: bulk archive import — queue of remaining encrypted archives
+        struct QueuedArchive { std::filesystem::path path; std::string gallery_name;
+                               bool cbz; bool archive_backend; bool needs_password; };
+        std::vector<QueuedArchive> queued_archives;
+    };
+    struct PendingFolder {
+        std::filesystem::path path;
+        bool                  active = false;  // import in flight
     };
     struct Naming {
         bool         active = false;   // manual new-gallery text entry
         std::string  buf;
         PendingZip   zip;              // zip import descriptor in flight
+        PendingFolder folder;          // folder import descriptor in flight
         // Phase 35: masked password entry for an encrypted zip/cbz. Mirrors
         // naming_.active's text-entry lifecycle (handle_password_key /
         // rendered as its own veiled modal), kept separate from `buf` since

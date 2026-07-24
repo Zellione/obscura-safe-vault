@@ -71,7 +71,8 @@ void FavoritesScreen::rebuild_detail()
         return;
     }
     const auto& hit = favs_[static_cast<size_t>(idx)];
-    detail_.content = build_node_details(*hit.node, inherited_tags(vault_, hit.path), vault::vault_settings(vault_).default_sort);
+    const auto from_contents = hit.node->is_gallery() ? contents_tags(vault_, hit.path) : std::vector<std::string>{};
+    detail_.content = build_node_details(*hit.node, inherited_tags(vault_, hit.path), from_contents, vault::vault_settings(vault_).default_sort);
 }
 
 void FavoritesScreen::on_enter()
