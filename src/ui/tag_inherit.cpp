@@ -98,8 +98,7 @@ std::vector<std::string> contents_tags(const vault::Vault& vault, std::string_vi
 {
     // Get the gallery's own tags (to exclude)
     std::vector<std::string> own;
-    const auto segs = split_path(gallery_path);
-    if (!segs.empty()) {
+    if (const auto segs = split_path(gallery_path); !segs.empty()) {
         const std::string parent = join_path(std::span(segs.data(), segs.size() - 1));
         if (const auto* node = child_named(vault, parent, segs.back()))
             if (node->is_gallery()) own = node->tags;
@@ -117,7 +116,7 @@ std::vector<std::string> contents_tags(const vault::Vault& vault, std::string_vi
     auto is_excluded = [&](const std::string& t) {
         return ci_contains(own, t) || ci_contains(inherited, t);
     };
-    out.erase(std::ranges::remove_if(out, is_excluded).begin(), out.end());
+    std::erase_if(out, is_excluded);
 
     return out;
 }

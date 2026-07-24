@@ -167,7 +167,7 @@ void TagEditor::refresh_tags()
 
             const auto& children = vault_.list(parent_path);
             for (const auto* child : children) {
-                if (child->name == segs.back() && child->is_gallery()) {
+                if (child && child->name == segs.back() && child->is_gallery()) {
                     from_contents_ = contents_tags(vault_, node_paths_.front());
                     break;
                 }

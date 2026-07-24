@@ -349,23 +349,10 @@ void write_settings(ByteWriter& w, const VaultSettings& s)
     }
 }
 
-// Read the settings block (v8+). Every field is bounds-checked BEFORE any
-// allocation, and an out-of-range value is REJECTED, not clamped (the Phase 37 /
-// Phase 47 rule). Duplicate category names are dropped case-insensitively,
-// keeping the first occurrence's casing and swatch.
-bool read_settings(ByteReader& r, VaultSettings& s, uint8_t version)
+// Helper: read category block. Bounds-checked before allocation, duplicates
+// dropped case-insensitively, keeping first occurrence.
+bool read_categories(ByteReader& r, std::vector<TagCategory>& categories)
 {
-    s.categories.clear();
-    s.tag_descriptions.clear();
-
-    const uint8_t sort = r.u8();
-    if (!r.ok() || sort > std::to_underlying(SortKey::Insertion)) return false;
-    s.default_sort = static_cast<SortKey>(sort);
-
-    const uint8_t tiles = r.u8();
-    if (!r.ok() || tiles > 1) return false;
-    s.tiles_show_tags = (tiles == 1);
-
     const uint16_t count = r.u16();
     if (!r.ok() || count > INDEX_MAX_TAG_CATEGORIES) return false;  // bound before alloc
     for (uint16_t i = 0; i < count; ++i) {
@@ -380,16 +367,18 @@ bool read_settings(ByteReader& r, VaultSettings& s, uint8_t version)
         c.swatch = r.u8();
         if (!r.ok() || c.swatch >= TAG_SWATCH_COUNT) return false;
 
-        const bool dupe = std::ranges::any_of(s.categories, [&c](const TagCategory& e) {
+        const bool dupe = std::ranges::any_of(categories, [&c](const TagCategory& e) {
             return category_name_eq(e.name, c.name);
         });
-        if (!dupe) s.categories.push_back(std::move(c));
+        if (!dupe) categories.push_back(std::move(c));
     }
+    return true;
+}
 
-    // The description sub-block exists only from v9 on; a v8 blob ends after
-    // the categories and must not be read past.
-    if (version < 9) return true;
-
+// Helper: read tag description block. Bounds-checked before allocation, duplicates
+// dropped case-insensitively, keeping first occurrence.
+bool read_descriptions(ByteReader& r, std::vector<TagDescription>& descriptions)
+{
     const uint16_t desc_count = r.u16();
     if (!r.ok() || desc_count > INDEX_MAX_TAG_DESCRIPTIONS) return false;  // bound before alloc
     for (uint16_t i = 0; i < desc_count; ++i) {
@@ -408,12 +397,37 @@ bool read_settings(ByteReader& r, VaultSettings& s, uint8_t version)
             r.bytes(std::span<uint8_t>(reinterpret_cast<uint8_t*>(d.text.data()), text_len));
             if (!r.ok()) return false;
         }
-        // Drop a duplicate key case-insensitively, keeping the first occurrence
-        // — the same rule the category loop above applies.
-        const bool dupe = std::ranges::any_of(s.tag_descriptions,
+        const bool dupe = std::ranges::any_of(descriptions,
             [&d](const TagDescription& e) { return category_name_eq(e.tag, d.tag); });
-        if (!dupe) s.tag_descriptions.push_back(std::move(d));
+        if (!dupe) descriptions.push_back(std::move(d));
     }
+    return true;
+}
+
+// Read the settings block (v8+). Every field is bounds-checked BEFORE any
+// allocation, and an out-of-range value is REJECTED, not clamped (the Phase 37 /
+// Phase 47 rule). Duplicate category names are dropped case-insensitively,
+// keeping the first occurrence's casing and swatch.
+bool read_settings(ByteReader& r, VaultSettings& s, uint8_t version)
+{
+    s.categories.clear();
+    s.tag_descriptions.clear();
+
+    const uint8_t sort = r.u8();
+    if (!r.ok() || sort > std::to_underlying(SortKey::Insertion)) return false;
+    s.default_sort = static_cast<SortKey>(sort);
+
+    const uint8_t tiles = r.u8();
+    if (!r.ok() || tiles > 1) return false;
+    s.tiles_show_tags = (tiles == 1);
+
+    if (!read_categories(r, s.categories)) return false;
+
+    // The description sub-block exists only from v9 on; a v8 blob ends after
+    // the categories and must not be read past.
+    if (version < 9) return true;
+
+    if (!read_descriptions(r, s.tag_descriptions)) return false;
     return true;
 }
 
@@ -448,7 +462,7 @@ void set_tag_description(VaultSettings& s, std::string_view tag, std::string_vie
     }
     if (text.empty()) return;                                   // nothing to remove
     if (s.tag_descriptions.size() >= INDEX_MAX_TAG_DESCRIPTIONS) return;
-    s.tag_descriptions.push_back({std::string(tag), std::string(text)});
+    s.tag_descriptions.emplace_back(std::string(tag), std::string(text));
 }
 
 void serialize_index(const IndexNode& root, std::vector<uint8_t>& out)

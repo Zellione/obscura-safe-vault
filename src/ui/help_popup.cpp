@@ -130,10 +130,8 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
 
     // Draw each column
     const float col_width = (pw - 2.0f * PAD) / static_cast<float>(cols.size());
-    for (size_t col_idx = 0; col_idx < cols.size(); ++col_idx) {
-        const auto& col = cols[col_idx];
-        const float col_x = px + PAD + static_cast<float>(col_idx) * col_width;
-
+    const auto draw_column_content = [&](const HelpColumn& col) {
+        const float col_x = px + PAD + static_cast<float>(std::distance(cols.data(), &col)) * col_width;
         float y = content_top - static_cast<float>(s.scroll_line) * LINE_H;
         for (size_t gidx : col.group_indices) {
             const auto& grp = all_groups[gidx];
@@ -157,6 +155,9 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
                 y += LINE_H;
             }
         }
+    };
+    for (const auto& col : cols) {
+        draw_column_content(col);
     }
     SDL_SetRenderClipRect(r.sdl(), nullptr);
 

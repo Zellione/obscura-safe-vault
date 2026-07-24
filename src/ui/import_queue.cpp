@@ -30,6 +30,21 @@ namespace {
         const size_t hw = std::thread::hardware_concurrency();
         return std::min(hw == 0 ? 2 : hw, size_t{4});
     }
+
+    // Helper: try to read file into SecureBytes. Returns true on success, false on any error.
+    bool try_read_file(const std::filesystem::path& file_path, crypto::SecureBytes& out)
+    {
+        std::ifstream f(file_path, std::ios::binary | std::ios::ate);
+        if (!f.is_open()) return false;
+
+        const auto sz = f.tellg();
+        if (sz <= 0 || sz > 512 * 1024 * 1024) return false;  // 512 MiB max per file
+
+        out = crypto::SecureBytes(static_cast<size_t>(sz));
+        f.seekg(0);
+        f.read(reinterpret_cast<char*>(out.data()), sz);
+        return static_cast<bool>(f);
+    }
 }
 
 // ============================================================================
@@ -1018,35 +1033,12 @@ void ImportQueue::process_folder_task(Task& task)
 
         // Read file into mlock'd buffer (security invariant: no swappable memory for decrypted data)
         crypto::SecureBytes file_data;
-        {
-            std::ifstream f(file_path, std::ios::binary | std::ios::ate);
-            if (!f.is_open()) {
-                task.skipped++;
-                if (task.progress) {
-                    task.progress->done.store(static_cast<int>(i) + 1);
-                }
-                continue;
+        if (!try_read_file(file_path, file_data)) {
+            task.skipped++;
+            if (task.progress) {
+                task.progress->done.store(static_cast<int>(i) + 1);
             }
-
-            const auto sz = f.tellg();
-            if (sz <= 0 || sz > 512 * 1024 * 1024) {  // 512 MiB max per file
-                task.skipped++;
-                if (task.progress) {
-                    task.progress->done.store(static_cast<int>(i) + 1);
-                }
-                continue;
-            }
-
-            file_data = crypto::SecureBytes(static_cast<size_t>(sz));
-            f.seekg(0);
-            f.read(reinterpret_cast<char*>(file_data.data()), sz);
-            if (!f) {
-                task.skipped++;
-                if (task.progress) {
-                    task.progress->done.store(static_cast<int>(i) + 1);
-                }
-                continue;
-            }
+            continue;
         }
 
         // Place the file based on extension

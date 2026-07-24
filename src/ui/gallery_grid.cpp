@@ -648,9 +648,10 @@ void GalleryGrid::handle_password_key(const SDL_Event& e)
         // difference between a cancel and a disappearance.
         const size_t abandoned = naming_.zip.queued_archives.size();
         naming_.zip.queued_archives.clear();
+        const std::string_view plural_suffix = abandoned == 1 ? "" : "s";
         status_ = abandoned > 0
                       ? std::format("Import cancelled — {} queued archive{} discarded",
-                                    abandoned, abandoned == 1 ? "" : "s")
+                                    abandoned, plural_suffix)
                       : "Import cancelled";
         SDL_StopTextInput(win_.sdl_window());
     }
@@ -1101,12 +1102,13 @@ void GalleryGrid::pump_zip_import()
             if (!needs_password) {
                 // Unencrypted: enqueue directly
                 using enum ImportTaskKind;
-                const ImportTaskKind kind = cbz ? (archive_backend ? ArchiveCbz : Cbz)
-                                                 : (archive_backend ? Archive : Zip);
+                const ImportTaskKind cbz_kind = archive_backend ? ArchiveCbz : Cbz;
+                const ImportTaskKind zip_kind = archive_backend ? Archive : Zip;
+                const ImportTaskKind kind = cbz ? cbz_kind : zip_kind;
                 queue_.enqueue_archive(zp, nav_.path(), gallery_name, kind, false, {});
             } else {
                 // Encrypted: queue for password prompt
-                naming_.zip.queued_archives.push_back({zp, gallery_name, cbz, archive_backend, needs_password});
+                naming_.zip.queued_archives.emplace_back(zp, gallery_name, cbz, archive_backend, needs_password);
             }
         }
 
@@ -1692,10 +1694,8 @@ void GalleryGrid::render_grid(gfx::Renderer& r, float W, float bottom)
     // spare without swallowing the thumbnail.
     const bool  wide_tiles = view_ == GalleryView::GridL || view_ == GalleryView::GridXL;
     const auto& settings   = vault::vault_settings(vault_);
-    const float chip_h     = (wide_tiles && settings.tiles_show_tags && any_chips_to_show(children_))
-                                 ? CHIP_LINE_H
-                                 : 0.0f;
-    const float counts_h   = (counts_row_) ? CHIP_LINE_H : 0.0f;
+    const float chip_h     = wide_tiles && settings.tiles_show_tags && any_chips_to_show(children_) ? CHIP_LINE_H : 0.0f;
+    const float counts_h   = counts_row_ ? CHIP_LINE_H : 0.0f;
     const auto& cats       = settings.categories;
     cols_ = grid_columns(W - 2 * OX, cell, GAP);
     const auto [first_idx, last_idx] = grid_visible_range(

@@ -12,7 +12,7 @@ int help_visible_lines(float viewport_h, float line_h)
     if (line_h <= 0.0f || viewport_h <= 0.0f) {
         return 0;
     }
-    const int lines = static_cast<int>(std::floor(viewport_h / line_h));
+    const auto lines = static_cast<int>(std::floor(viewport_h / line_h));
     return lines < 0 ? 0 : lines;
 }
 
@@ -56,8 +56,7 @@ std::vector<HelpColumn> pack_help_columns(const std::vector<HelpGroup>& groups,
 
         const bool overflows   = !first_in_col &&
                                  cols.back().lines + cost > lines_per_column;
-        const bool can_advance = static_cast<int>(cols.size()) < columns; // NOLINT(modernize-use-integer-sign-comparison)
-        if (overflows && can_advance) {
+        if (const bool can_advance = static_cast<int>(cols.size()) < columns; overflows && can_advance) {
             cols.emplace_back();
             cols.back().group_indices.push_back(i);
             cols.back().lines = group_lines(groups[i]);

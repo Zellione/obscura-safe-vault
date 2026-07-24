@@ -57,7 +57,7 @@ std::vector<TagTally> filter_tags(const std::vector<TagTally>& tags, std::string
 int tag_overview_page_size(float viewport_h, float row_h)
 {
     if (row_h <= 0.0f) return 1;
-    const int rows = static_cast<int>(std::floor(viewport_h / row_h));
+    const auto rows = static_cast<int>(std::floor(viewport_h / row_h));
     return rows < 1 ? 1 : rows;
 }
 

@@ -37,9 +37,9 @@ constexpr float PROMPT_LINE_H = 20.0f;        // height of title and hint lines 
 
 // UTF-8 helpers: ensure we don't split multibyte sequences at the boundary.
 // A continuation byte has the high 2 bits set to 0b10.
-[[nodiscard]] constexpr bool is_utf8_continuation(uint8_t byte) noexcept
+[[nodiscard]] constexpr bool is_utf8_continuation(std::byte byte) noexcept
 {
-    return (byte & 0xC0) == 0x80;
+    return (static_cast<int>(byte) & 0xC0) == 0x80;
 }
 
 // Truncate `text` to not exceed `max_bytes`, preserving complete UTF-8 characters.
@@ -49,7 +49,7 @@ constexpr float PROMPT_LINE_H = 20.0f;        // height of title and hint lines 
 
     // Shrink backwards from the limit to find a safe UTF-8 boundary
     size_t pos = max_bytes;
-    while (pos > 0 && is_utf8_continuation(static_cast<uint8_t>(text[pos - 1]))) {
+    while (pos > 0 && is_utf8_continuation(std::byte(static_cast<unsigned char>(text[pos - 1])))) {
         --pos;
     }
     return std::string(text.substr(0, pos));
@@ -67,8 +67,7 @@ struct TextFieldDisplay {
                                                  std::string_view text, float max_w)
 {
     constexpr std::string_view ell = "…";
-    const int full_w = font.measure(text);
-    if (full_w <= static_cast<int>(max_w)) {
+    if (const int full_w = font.measure(text); full_w <= static_cast<int>(max_w)) {
         return TextFieldDisplay{.shown = std::string(text), .caret_offset = static_cast<float>(full_w)};
     }
 
@@ -185,51 +184,12 @@ void TagOverviewScreen::handle_event(const SDL_Event& e)
                 return;
             }
             // Add text only if it doesn't exceed the 512-byte limit
-            const auto new_buf = prompt_buf_ + e.text.text;
-            if (new_buf.size() <= vault::INDEX_MAX_TAG_DESC_BYTES) {
+            if (const auto new_buf = prompt_buf_ + e.text.text; new_buf.size() <= vault::INDEX_MAX_TAG_DESC_BYTES) {
                 prompt_buf_ = truncate_to_byte_limit(new_buf, vault::INDEX_MAX_TAG_DESC_BYTES);
             }
             return;
         }
-        if (e.type == SDL_EVENT_KEY_DOWN) {
-            switch (e.key.key) {
-                case SDLK_BACKSPACE: {
-                    if (!prompt_buf_.empty()) {
-                        prompt_buf_.pop_back();
-                    }
-                    return;
-                }
-                case SDLK_RETURN:
-                case SDLK_KP_ENTER: {
-                    // Save the description
-                    const int sel = nav_.selected();
-                    if (sel >= 0 && sel < static_cast<int>(shown_.size())) {
-                        auto s = vault::vault_settings(vault_);
-                        vault::set_tag_description(s, shown_[sel].tag, prompt_buf_);
-                        if (vault::set_vault_settings(vault_, std::move(s)) != vault::VaultResult::Ok) {
-                            error_ = "Could not save the tag description";
-                        } else {
-                            error_.clear();
-                            reload();
-                        }
-                    }
-                    prompting_ = false;
-                    prompt_buf_.clear();
-                    prompt_skip_text_input_ = false;
-                    SDL_StopTextInput(win_.sdl_window());
-                    return;
-                }
-                case SDLK_ESCAPE:
-                    prompting_ = false;
-                    prompt_buf_.clear();
-                    prompt_skip_text_input_ = false;
-                    error_.clear();
-                    SDL_StopTextInput(win_.sdl_window());
-                    return;
-                default:
-                    break;
-            }
-        }
+        handle_prompt_key_event(e);
         // While prompting, swallow all other events
         return;
     }
@@ -277,11 +237,9 @@ void TagOverviewScreen::handle_event(const SDL_Event& e)
             break;
         case SDL_EVENT_TEXT_INPUT:
             // Only accept text input if filter is active (/ was pressed)
-            if (!filter_.empty() || e.text.text[0] == '/') {
-                if (e.text.text[0] != '/') {
-                    filter_ += e.text.text;
-                    rebuild();
-                }
+            if ((!filter_.empty() || e.text.text[0] == '/') && e.text.text[0] != '/') {
+                filter_ += e.text.text;
+                rebuild();
             }
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -291,6 +249,46 @@ void TagOverviewScreen::handle_event(const SDL_Event& e)
             }
             break;
         default: break;
+    }
+}
+
+void TagOverviewScreen::handle_prompt_key_event(const SDL_Event& e)
+{
+    if (e.type != SDL_EVENT_KEY_DOWN) return;
+
+    switch (e.key.key) {
+        case SDLK_BACKSPACE:
+            if (!prompt_buf_.empty()) {
+                prompt_buf_.pop_back();
+            }
+            return;
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER:
+            // Save the description
+            if (const int sel = nav_.selected(); sel >= 0 && sel < static_cast<int>(shown_.size())) {
+                auto s = vault::vault_settings(vault_);
+                vault::set_tag_description(s, shown_[sel].tag, prompt_buf_);
+                if (vault::set_vault_settings(vault_, std::move(s)) != vault::VaultResult::Ok) {
+                    error_ = "Could not save the tag description";
+                } else {
+                    error_.clear();
+                    reload();
+                }
+            }
+            prompting_ = false;
+            prompt_buf_.clear();
+            prompt_skip_text_input_ = false;
+            SDL_StopTextInput(win_.sdl_window());
+            return;
+        case SDLK_ESCAPE:
+            prompting_ = false;
+            prompt_buf_.clear();
+            prompt_skip_text_input_ = false;
+            error_.clear();
+            SDL_StopTextInput(win_.sdl_window());
+            return;
+        default:
+            break;
     }
 }
 
