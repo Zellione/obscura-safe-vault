@@ -633,7 +633,15 @@ void GalleryGrid::handle_password_key(const SDL_Event& e)
         naming_.zip.cbz            = false;
         naming_.zip.archive_backend = false;
         naming_.zip.needs_password  = false;
-        naming_.zip.queued_archives.clear();  // Phase 51 Task 14: clear queued archives on abandon
+        // Phase 51 Task 14: cancelling one password abandons the whole bulk pick.
+        // Say so — silently dropping imports the user is still expecting is the
+        // difference between a cancel and a disappearance.
+        const size_t abandoned = naming_.zip.queued_archives.size();
+        naming_.zip.queued_archives.clear();
+        status_ = abandoned > 0
+                      ? std::format("Import cancelled — {} queued archive{} discarded",
+                                    abandoned, abandoned == 1 ? "" : "s")
+                      : "Import cancelled";
         SDL_StopTextInput(win_.sdl_window());
     }
 }
