@@ -33,8 +33,7 @@ constexpr float PROMPT_TITLE_PAD = 12.0f;     // padding above title
 constexpr float PROMPT_INPUT_PAD = 12.0f;     // padding above input field
 constexpr float PROMPT_HINT_PAD = 8.0f;       // padding above hint line
 constexpr float PROMPT_INPUT_H = 32.0f;       // height of input field
-constexpr float PROMPT_HINT_H = 20.0f;        // height of hint line
-constexpr float PROMPT_LINE_H = 20.0f;        // height of title and hint lines
+constexpr float PROMPT_LINE_H = 20.0f;        // height of title and hint lines (both use this)
 
 // UTF-8 helpers: ensure we don't split multibyte sequences at the boundary.
 // A continuation byte has the high 2 bits set to 0b10.
