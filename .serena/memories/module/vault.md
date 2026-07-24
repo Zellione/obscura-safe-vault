@@ -13,6 +13,20 @@ sub-galleries — no leaf-only restriction (the old insertion guards were remove
 ## vault/ — `.osv` container
 Core files: `vault.*`, `header.*`, `index.*`, `chunk_store.*`, `byte_io.h`, `file_util.h`.
 
+### file_util.h — position-independent size query (PR #109, durability)
+`fileutil::file_size` MUST be position-independent (`fstat`/`_fstat64` on the fd), NEVER
+`seek_end`. WHY: `write_header` does `seek_to(fp_,0)` then `fwrite` as two separately-locked
+stdio calls; `Vault::wasted_bytes` calls `file_size(fp_)` on the MAIN thread WITHOUT
+`write_mutex_`, concurrently with the commit lane. A seek-based size query landing between the
+header's seek-to-0 and its write moves the shared FILE*'s offset, so the header (active_slot +
+slot pointers) is written at end-of-file instead of offset 0 → reopen loads a stale index →
+silent data loss. TSan can't see it (the shared state is the FILE* offset, libc/OS state, not
+memory), and it is load-sensitive. Consequence: `seek_end` used to flush the stdio buffer as a
+side effect, so `ChunkStore::append_at_end` now `fflush`es after its write (every production
+caller already flushed, so zero prod impact) to keep read-after-append on the same handle
+working. Guarded by `tests/vault/test_file_util.cpp` (position-neutrality + a concurrent
+seek0-writer/size-reader race that misplaces writes on the old impl).
+
 ### Phase 50 concurrency: "main-thread tree" architecture
 The index tree is **main-thread-only**; no tree locks exist. The vault file opens two handles + one write-path mutex for thread-safe import background queue:
 - **`read_fp_`** — second read-only unbuffered FILE* (opened at unlock, closed+wiped at lock). All read paths move to it: thumbnail decrypt, full-image fetch, `VideoSource` (chunks are immutable once appended, so reads never race worker appends). No contention with worker writes.
