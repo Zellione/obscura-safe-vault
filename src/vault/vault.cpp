@@ -1123,6 +1123,12 @@ std::vector<ui::TagTally> VaultSearch::tag_overview() const
     for (auto& t : vocab) out.push_back(ui::TagTally{.tag = std::move(t)});
 
     count_direct_tags(v_.root_, out);
+
+    // Phase 51: attach each tag's vault-global description (empty when unset).
+    const VaultSettings& settings = vault_settings(v_);
+    for (auto& row : out)
+        row.description = std::string(find_tag_description(settings, row.tag));
+
     return out;
 }
 

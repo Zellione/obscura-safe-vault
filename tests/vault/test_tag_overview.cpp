@@ -258,3 +258,23 @@ TEST(images_with_tag_empty_and_locked)
     REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);   // stays locked
     CHECK(vault::VaultSearch(v).images_with_tag("sunset").empty());
 }
+
+TEST(tag_overview_rows_carry_the_stored_description)
+{
+    // Build a vault with one tagged gallery, store a description, and confirm
+    // the overview row carries it.
+    TempVault tv("desc");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(build_tree(v));
+
+    auto s = vault::vault_settings(v);
+    vault::set_tag_description(s, "vacation", "Summer trips only");
+    CHECK(vault::set_vault_settings(v, std::move(s)) == vault::VaultResult::Ok);
+
+    const auto rows = vault::VaultSearch(v).tag_overview();
+    const auto it = std::ranges::find_if(rows,
+        [](const ui::TagTally& r) { return r.tag == "vacation"; });
+    CHECK(it != rows.end());
+    CHECK_EQ(it->description, std::string("Summer trips only"));
+}

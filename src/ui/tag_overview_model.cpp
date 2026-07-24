@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 
 namespace ui {
 
@@ -51,6 +52,13 @@ std::vector<TagTally> filter_tags(const std::vector<TagTally>& tags, std::string
     for (const auto& t : tags)
         if (ci_starts_with(t.tag, prefix)) out.push_back(t);
     return out;
+}
+
+int tag_overview_page_size(float viewport_h, float row_h)
+{
+    if (row_h <= 0.0f) return 1;
+    const int rows = static_cast<int>(std::floor(viewport_h / row_h));
+    return rows < 1 ? 1 : rows;
 }
 
 } // namespace ui
