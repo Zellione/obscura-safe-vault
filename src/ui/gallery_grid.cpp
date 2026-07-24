@@ -493,6 +493,16 @@ void GalleryGrid::finish_naming()
         return;
     }
 
+    // If this is a folder import, enqueue it with the chosen name (Phase 51, Task 12).
+    if (naming_.folder.active) {
+        queue_.enqueue_folder(naming_.folder.path, nav_.path(), naming_.buf);
+        naming_.folder.active = false;
+        naming_.buf.clear();
+        status_ = "Import queued — Shift+I for status";
+        mark_dirty();
+        return;
+    }
+
     // Otherwise, create a new gallery.
     using enum vault::VaultResult;
     const std::string base = nav_.path();
@@ -728,6 +738,13 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         if (dialogs_.file.busy() || transfer_.active()) return;
         error_.clear();
         dialogs_.file.open_zip(win_.sdl_window());
+        return;
+    }
+    if (key.key == SDLK_O && !(key.mod & SDL_KMOD_SHIFT)) {
+        if (dialogs_.folder.busy() || transfer_.active()) return;
+        error_.clear();
+        dialogs_.folder.open(win_.sdl_window(), platform::FolderDialog::Purpose::ImportFolder,
+                             /*allow_many*/ true);
         return;
     }
     if (key.key == SDLK_DELETE) {
@@ -1029,6 +1046,31 @@ void GalleryGrid::pump_zip_import()
     mark_dirty();   // dialog closed (picked) — repaint
 }
 
+void GalleryGrid::pump_folder_import()
+{
+    auto res = dialogs_.folder.take_result(platform::FolderDialog::Purpose::ImportFolder);
+    if (!res) return;
+    if (res->empty()) { mark_dirty(); return; }   // dialog cancelled — repaint
+
+    if (res->size() == 1) {
+        // Single folder: use naming popup (prefill with basename, matching zip import behavior)
+        start_naming();
+        if (naming_.active) {
+            naming_.folder.path = res->front();
+            naming_.folder.active = true;
+            naming_.buf = std::filesystem::path(res->front()).filename().string();
+        }
+    } else {
+        // Multiple folders: auto-name each from basename without prompting
+        for (const auto& p : *res) {
+            const std::filesystem::path root(p);
+            queue_.enqueue_folder(root, nav_.path(), root.filename().string());
+        }
+        status_ = "Import queued — Shift+I for status";
+    }
+    mark_dirty();   // dialog closed (picked) — repaint
+}
+
 void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path)
 {
     using enum ImportTaskKind;
@@ -1223,6 +1265,7 @@ void poll_pending_pickers(GalleryGrid& g)
     if (!g.transfer_.active()) {
         g.pump_import();
         g.pump_zip_import();
+        g.pump_folder_import();
 
         // Tag-list import (Shift+G, Phase 21). The .txt carries tag metadata only —
         // not key material or decrypted vault content — so reading it is invariant-safe.
@@ -1346,7 +1389,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
             {"B", "Favorite"}, {"F", "Favorite images"}, {"Shift+F", "Favorite galleries"},
         }},
         {"Import & export", {
-            {"I", "Import files"}, {"Shift+I", "Import status"}, {"Z", "Import ZIP/CBZ"}, {"N", "New gallery"},
+            {"I", "Import files"}, {"Shift+I", "Import status"}, {"Z", "Import ZIP/CBZ"}, {"O", "Import folder"}, {"N", "New gallery"},
             {"X", "Export selection"}, {"M", "Move/copy"}, {"Shift+M", "Combine gallery"}, {"R", "Rename"}, {"Del", "Delete"},
         }},
         {"Session", {

@@ -125,6 +125,7 @@ private:
     void pump_import();            // poll the file dialog while transfer is not active
     void do_zip_import(const std::filesystem::path& zip_path);
     void pump_zip_import();        // poll the zip file dialog while transfer is not active
+    void pump_folder_import();     // poll the folder dialog while transfer is not active (Phase 51)
     bool handle_delete_confirm_key(const SDL_Event& e);   // Del-confirm modal; true if consumed
     bool handle_compact_confirm_key(const SDL_Event& e);  // Shift+C compact modal; true if consumed (Phase 26)
     // Dispatches to whichever full-screen overlay (search/tag editor/transfer/
@@ -222,10 +223,15 @@ private:
         // whether do_zip_import threads naming_.password.buf through to the queue.
         bool                  needs_password = false;
     };
+    struct PendingFolder {
+        std::filesystem::path path;
+        bool                  active = false;  // import in flight
+    };
     struct Naming {
         bool         active = false;   // manual new-gallery text entry
         std::string  buf;
         PendingZip   zip;              // zip import descriptor in flight
+        PendingFolder folder;          // folder import descriptor in flight
         // Phase 35: masked password entry for an encrypted zip/cbz. Mirrors
         // naming_.active's text-entry lifecycle (handle_password_key /
         // rendered as its own veiled modal), kept separate from `buf` since
