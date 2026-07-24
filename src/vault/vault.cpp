@@ -162,16 +162,32 @@ std::string join_child_path(std::string_view prefix, std::string_view name)
 
 // Walk the tree, accumulating ancestor-gallery tags as `inherited`, collecting
 // in-scope nodes that match `query`. Gallery tags cascade to descendants here.
-void search_dfs(const IndexNode& node, std::string_view prefix,
-                const std::vector<std::string>& inherited,
-                std::string_view query, SearchScope scope,
-                std::vector<SearchHit>& out)
+// Returns the union of tags from the subtree (including the node itself).
+// For galleries, the match decision includes tags from descendants (Phase 51 roll-up).
+std::vector<std::string> search_dfs(const IndexNode& node, std::string_view prefix,
+                                    const std::vector<std::string>& inherited,
+                                    std::string_view query, SearchScope scope,
+                                    std::vector<SearchHit>& out)
 {
+    std::vector<std::string> subtree_tags;
+
     for (const auto& child : node.children) {
         auto              effective = compute_effective_tags(child.tags, inherited);
         const std::string full_path = join_child_path(prefix, child.name);
 
-        if (node_in_scope(child, scope) && node_matches(child.name, query, effective)) {
+        // Recurse first to get the child's subtree tags.
+        std::vector<std::string> child_subtree;
+        if (child.is_gallery()) {
+            child_subtree = search_dfs(child, full_path, effective, query, scope, out);
+        }
+
+        // For galleries, include descendant tags in the match decision (Phase 51).
+        std::vector<std::string> match_tags = effective;
+        if (child.is_gallery()) {
+            match_tags = compute_effective_tags(child_subtree, effective);
+        }
+
+        if (node_in_scope(child, scope) && node_matches(child.name, query, match_tags)) {
             out.push_back(SearchHit{
                 .path           = full_path,
                 .is_gallery     = child.is_gallery(),
@@ -181,9 +197,22 @@ void search_dfs(const IndexNode& node, std::string_view prefix,
             });
         }
 
-        if (child.is_gallery())
-            search_dfs(child, full_path, effective, query, scope, out);
+        // Accumulate this child's tags into the subtree union.
+        // For galleries, include the subtree recursion result.
+        std::vector<std::string> to_union = child.tags;
+        if (child.is_gallery()) {
+            to_union = compute_effective_tags(child_subtree, child.tags);
+        }
+
+        // Union into subtree_tags (case-insensitive).
+        for (const auto& tag : to_union) {
+            if (!std::ranges::any_of(subtree_tags, [&](const auto& t) { return ci_equal(t, tag); })) {
+                subtree_tags.push_back(tag);
+            }
+        }
     }
+
+    return subtree_tags;
 }
 
 // Walk the tree collecting every favorited node of the requested kind (galleries
@@ -296,20 +325,36 @@ void collect_images_with_tag(const IndexNode& node, std::string_view prefix,
 
 // Advanced-search DFS (Phase 18): evaluate `query` against every in-scope node,
 // cascading gallery tags, collecting each match with its relevance score.
-void adv_search_dfs(const IndexNode& node, std::string_view prefix,
-                    const std::vector<std::string>& inherited,
-                    const ui::AdvancedQuery& query, ui::SearchScope scope,
-                    std::vector<std::pair<int, SearchHit>>& out)
+// Returns the union of tags from the subtree (including the node itself).
+// For galleries, the match decision includes tags from descendants (Phase 51 roll-up).
+std::vector<std::string> adv_search_dfs(const IndexNode& node, std::string_view prefix,
+                                        const std::vector<std::string>& inherited,
+                                        const ui::AdvancedQuery& query, ui::SearchScope scope,
+                                        std::vector<std::pair<int, SearchHit>>& out)
 {
     using enum ui::SearchScope;
+    std::vector<std::string> subtree_tags;
+
     for (const auto& child : node.children) {
         auto              effective = compute_effective_tags(child.tags, inherited);
         const std::string full_path = join_child_path(prefix, child.name);
 
+        // Recurse first to get the child's subtree tags.
+        std::vector<std::string> child_subtree;
+        if (child.is_gallery()) {
+            child_subtree = adv_search_dfs(child, full_path, effective, query, scope, out);
+        }
+
         if (const bool in_scope = child.is_gallery() ? (scope == Galleries || scope == Both)
                                                      : (scope == Images || scope == Both);
             in_scope) {
-            const ui::EvalResult r = ui::evaluate(query, child.name, effective);
+            // For galleries, include descendant tags in the match decision (Phase 51).
+            std::vector<std::string> match_tags = effective;
+            if (child.is_gallery()) {
+                match_tags = compute_effective_tags(child_subtree, effective);
+            }
+
+            const ui::EvalResult r = ui::evaluate(query, child.name, match_tags);
             if (r.matched) {
                 out.emplace_back(r.score, SearchHit{
                     .path           = full_path,
@@ -321,9 +366,22 @@ void adv_search_dfs(const IndexNode& node, std::string_view prefix,
             }
         }
 
-        if (child.is_gallery())
-            adv_search_dfs(child, full_path, effective, query, scope, out);
+        // Accumulate this child's tags into the subtree union.
+        // For galleries, include the subtree recursion result.
+        std::vector<std::string> to_union = child.tags;
+        if (child.is_gallery()) {
+            to_union = compute_effective_tags(child_subtree, child.tags);
+        }
+
+        // Union into subtree_tags (case-insensitive).
+        for (const auto& tag : to_union) {
+            if (!std::ranges::any_of(subtree_tags, [&](const auto& t) { return ci_equal(t, tag); })) {
+                subtree_tags.push_back(tag);
+            }
+        }
     }
+
+    return subtree_tags;
 }
 
 } // namespace
@@ -1066,8 +1124,9 @@ std::vector<SearchHit> Vault::search(std::string_view query, SearchScope scope) 
     if (!unlocked_) return out;
 
     // Seed inherited tags with the root's own tags so they cascade globally; the
-    // unnamed root itself is never a hit.
-    search_dfs(root_, "", root_.tags, query, scope, out);
+    // unnamed root itself is never a hit. The returned tag union bubbles up from
+    // the root's children but is unused here (Phase 51 roll-up).
+    [[maybe_unused]] auto _ = search_dfs(root_, "", root_.tags, query, scope, out);
     return out;
 }
 
@@ -1096,7 +1155,7 @@ std::vector<SearchHit> VaultSearch::run_search(const ui::AdvancedQuery& query) c
     if (!v_.unlocked_) return out;
 
     std::vector<std::pair<int, SearchHit>> scored;
-    adv_search_dfs(v_.root_, "", v_.root_.tags, query, query.scope, scored);
+    [[maybe_unused]] auto _ = adv_search_dfs(v_.root_, "", v_.root_.tags, query, query.scope, scored);
 
     // Rank by descending score, breaking ties by ascending path for stability.
     std::ranges::sort(scored, [](const auto& a, const auto& b) {

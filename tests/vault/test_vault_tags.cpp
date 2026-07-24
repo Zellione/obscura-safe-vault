@@ -8,6 +8,7 @@
 
 #include "ui/tag_list_parse.h"
 #include "vault/vault.h"
+#include "vault/vault_search.h"
 
 namespace fs = std::filesystem;
 
@@ -660,4 +661,104 @@ TEST(tags_import_tag_list_merges_and_survives_reopen)
     CHECK_EQ(tags[2], "beach");
     CHECK_EQ(tags[3], "sunset");
     CHECK_EQ(tags[4], "new-tag");
+}
+
+TEST(tags_gallery_matches_a_descendants_tag)
+{
+    // trip/day1/a.jpg tagged "sunset"; searching Galleries for "sunset" must
+    // return trip/ and trip/day1 — the Phase 51 upward roll-up.
+    TempVault tv("gallery_descendant_tag");
+    auto img = pattern(5000, 11);
+
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+                == vault::VaultResult::Ok);
+
+        // Create galleries.
+        REQUIRE(v.create_gallery("trip") == vault::VaultResult::Ok);
+        REQUIRE(v.create_gallery("trip/day1") == vault::VaultResult::Ok);
+
+        // Add an image with a tag.
+        REQUIRE(v.add_image("trip/day1", img, "a.jpg") == vault::VaultResult::Ok);
+        REQUIRE(v.set_tags("trip/day1/a.jpg", {"sunset"}) == vault::VaultResult::Ok);
+
+        v.lock();
+    }
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
+    REQUIRE(v.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+
+    // Searching galleries for "sunset" should return trip/ and trip/day1
+    // (galleries containing descendants with that tag).
+    const auto hits = v.search("sunset", vault::SearchScope::Galleries);
+    CHECK(std::ranges::any_of(hits,
+        [](const vault::SearchHit& h) { return h.path == "trip"; }));
+    CHECK(std::ranges::any_of(hits,
+        [](const vault::SearchHit& h) { return h.path == "trip/day1"; }));
+}
+
+TEST(tags_gallery_rollup_does_not_change_image_scope_results)
+{
+    // The gallery rollup must not affect image-scope searches.
+    TempVault tv("rollup_no_image_change");
+    auto img = pattern(5000, 11);
+
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+                == vault::VaultResult::Ok);
+
+        REQUIRE(v.create_gallery("trip") == vault::VaultResult::Ok);
+        REQUIRE(v.create_gallery("trip/day1") == vault::VaultResult::Ok);
+
+        REQUIRE(v.add_image("trip/day1", img, "a.jpg") == vault::VaultResult::Ok);
+        REQUIRE(v.set_tags("trip/day1/a.jpg", {"sunset"}) == vault::VaultResult::Ok);
+
+        v.lock();
+    }
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
+    REQUIRE(v.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+
+    // Image search should still find only the image, not galleries.
+    const auto hits = v.search("sunset", vault::SearchScope::Images);
+    CHECK_EQ(hits.size(), 1u);
+    CHECK_EQ(hits[0].path, std::string("trip/day1/a.jpg"));
+}
+
+TEST(tags_tag_overview_counts_are_unchanged_by_the_rollup)
+{
+    // Phase 22 regression guard: the overview counts nodes that DIRECTLY carry a
+    // tag. The roll-up must not inflate gallery counts the way the downward
+    // cascade would have inflated image counts.
+    TempVault tv("overview_counts");
+    auto img = pattern(5000, 11);
+
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+                == vault::VaultResult::Ok);
+
+        REQUIRE(v.create_gallery("trip") == vault::VaultResult::Ok);
+        REQUIRE(v.create_gallery("trip/day1") == vault::VaultResult::Ok);
+
+        REQUIRE(v.add_image("trip/day1", img, "a.jpg") == vault::VaultResult::Ok);
+        REQUIRE(v.set_tags("trip/day1/a.jpg", {"sunset"}) == vault::VaultResult::Ok);
+
+        v.lock();
+    }
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
+    REQUIRE(v.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+
+    const auto rows = vault::VaultSearch(v).tag_overview();
+    const auto it = std::ranges::find_if(rows,
+        [](const ui::TagTally& r) { return r.tag == "sunset"; });
+    CHECK(it != rows.end());
+    CHECK_EQ(it->gallery_count, 0);
+    CHECK_EQ(it->image_count, 1);
 }
