@@ -19,4 +19,26 @@ struct HelpGroup;   // ui/help_popup.h
 // Clamp a line-index scroll offset into [0, max(0, total_lines - visible_lines)].
 [[nodiscard]] int clamp_help_line(int scroll_line, int total_lines, int visible_lines);
 
+// One packed column: which groups it holds (indices into the caller's group
+// vector, in order) and how many rendered lines they occupy.
+struct HelpColumn {
+    std::vector<size_t> group_indices;
+    int                 lines = 0;
+};
+
+// How many columns a panel `panel_w` px wide should use. Two above the
+// threshold, one below — a two-column layout in a narrow panel elides every
+// description into uselessness.
+[[nodiscard]] int help_column_count(float panel_w);
+
+// Assign whole groups to at most `max_columns` columns of `lines_per_column`
+// lines each, in order. A group is NEVER split across a column boundary: if it
+// does not fit in the current column and another column is available, it starts
+// the next one. A group taller than a whole column is emitted anyway (it
+// scrolls) rather than dropped. With max_columns == 1 every group lands in the
+// single column and the caller scrolls it.
+[[nodiscard]] std::vector<HelpColumn> pack_help_columns(const std::vector<HelpGroup>& groups,
+                                                        int lines_per_column,
+                                                        int max_columns);
+
 } // namespace ui
