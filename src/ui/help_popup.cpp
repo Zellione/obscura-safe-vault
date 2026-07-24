@@ -63,13 +63,46 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
 
     constexpr float LINE_H = 24.0f;
     constexpr float PAD    = 24.0f;
-    const float pw = std::min(680.0f, W - 80.0f);
 
-    const int   total_lines = help_line_count(all_groups);
-    const float chrome_h    = 2.0f * (PAD + LINE_H + 8.0f);   // header + footer bands
-    const float max_ph      = H - 80.0f;
-    const float wanted_ph   = chrome_h + static_cast<float>(total_lines) * LINE_H;
-    const float ph          = std::min(max_ph, wanted_ph);
+    // Phase 51 fix: Decide whether to use two columns upfront, then size the popup
+    // accordingly. This avoids a circular dependency: column count depends on width,
+    // and width should depend on the column decision (not vice versa).
+    //
+    // Strategy:
+    // 1. Measure total content (lines).
+    // 2. Decide on column count based on window width and content height.
+    // 3. Set panel width based on that decision.
+    // 4. Pack columns with a BALANCED per-column budget, not the viewport height.
+    // 5. Size the popup from the longest column, not total lines.
+    const int total_lines = help_line_count(all_groups);
+    const float max_pw = W - 80.0f;
+
+    // Two columns are warranted when:
+    // - The window is wide enough to support two 340px columns comfortably.
+    // - The content is tall enough to benefit from the split.
+    const bool use_two_columns = (max_pw >= 720.0f) && (total_lines > 20);
+    const int target_columns = use_two_columns ? 2 : 1;
+    const float pw = use_two_columns ? std::min(720.0f, max_pw) : std::min(680.0f, max_pw);
+
+    // Calculate the per-column budget (balanced split). When two columns are used,
+    // each column should hold roughly half the content, so columns are equally tall
+    // rather than one overflow-laden and one mostly empty.
+    const int lines_per_column = (total_lines + target_columns - 1) / target_columns;
+
+    // Pack columns with the balanced budget, not the full viewport height.
+    const auto cols = pack_help_columns(all_groups, lines_per_column, target_columns);
+
+    // Find the longest column to determine popup height.
+    int longest = 0;
+    for (const auto& c : cols) longest = std::max(longest, c.lines);
+
+    // Size the popup from the longest column, not total lines. This allows the
+    // two-column layout to be approximately half as tall as a single-column layout
+    // with the same content.
+    const float chrome_h = 2.0f * (PAD + LINE_H + 8.0f);   // header + footer bands
+    const float max_ph = H - 80.0f;
+    const float wanted_ph = chrome_h + static_cast<float>(longest) * LINE_H;
+    const float ph = std::min(max_ph, wanted_ph);
 
     const float px = (W - pw) / 2.0f;
     const float py = (H - ph) / 2.0f;
@@ -80,18 +113,13 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
     r.draw_text(font, px + PAD, py + ph - PAD - LINE_H,
                "[Esc/Q] Close   [Up/Down] Scroll", TEXT_FAINT);
 
-    const float content_top   = py + PAD + LINE_H + 8.0f;
-    const float raw_viewport  = ph - chrome_h;
-    const int   visible_lines = help_visible_lines(raw_viewport, LINE_H);
-    const float band_h        = static_cast<float>(visible_lines) * LINE_H;
+    const float content_top = py + PAD + LINE_H + 8.0f;
+    const float raw_viewport = ph - chrome_h;
+    const int visible_lines = help_visible_lines(raw_viewport, LINE_H);
+    const float band_h = static_cast<float>(visible_lines) * LINE_H;
     const float content_bottom = content_top + band_h;
 
-    // Pack AFTER visible_lines is known — it is the per-column line budget.
-    const int  columns = help_column_count(pw);
-    const auto cols    = pack_help_columns(all_groups, visible_lines, columns);
-
-    int longest = 0;
-    for (const auto& c : cols) longest = std::max(longest, c.lines);
+    // Clamp scroll to the actual content height (longest column).
     s.scroll_line = clamp_help_line(s.scroll_line, longest, visible_lines);
 
     // Clip to the content band using lround for exact pixel alignment

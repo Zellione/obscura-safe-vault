@@ -116,3 +116,57 @@ TEST(help_pack_columns_empty_input_is_empty)
 {
     CHECK(ui::pack_help_columns({}, 10, 2).empty());
 }
+
+TEST(help_pack_columns_uses_balanced_budget_when_provided)
+{
+    // When a balanced per-column budget is provided (rather than the viewport
+    // height), packing should respect that budget while keeping groups atomic.
+    // With 26 base lines of content across 5 groups and a budget of 12 per column,
+    // columns should use the budget to decide when to move to the next column.
+    const std::vector<ui::HelpGroup> groups{
+        group_of("A", 2),   // 1 title + 2 entries = 3 lines
+        group_of("B", 3),   // 1 spacer + 1 title + 3 entries = 5 lines (in column)
+        group_of("C", 4),   // 1 spacer + 1 title + 4 entries = 6 lines (in column)
+        group_of("D", 3),   // 1 spacer + 1 title + 3 entries = 5 lines (in column)
+    };
+    // Base lines (no spacers): 3 + 4 + 5 + 4 = 16 lines
+    // With spacers (B, C, D are not first): 3 + (4+1) + (5+1) + (4+1) = 3 + 5 + 6 + 5 = 19 lines
+    // Per-column budget: ceil(19 / 2) = 10
+    const auto cols = ui::pack_help_columns(groups, 10, 2);
+    CHECK_EQ(cols.size(), 2u);
+    // Verify that groups are distributed across two columns
+    CHECK(!cols[0].group_indices.empty());
+    CHECK(!cols[1].group_indices.empty());
+    // Total lines across both columns must sum to the actual layout total
+    int total_lines = 0;
+    for (const auto& c : cols) {
+        total_lines += c.lines;
+    }
+    // With 4 groups distributed across 2 columns, at most 3 spacers are used
+    // (one before each non-first group in each column)
+    CHECK(total_lines >= 16 && total_lines <= 19);
+}
+
+TEST(help_pack_columns_groups_never_split_in_balanced_layout)
+{
+    // Ensure that groups remain atomic (never split) even with balanced split.
+    const std::vector<ui::HelpGroup> groups{
+        group_of("Navigate", 3),
+        group_of("Edit", 5),
+        group_of("View", 2),
+    };
+    const int per_col_budget = 8;
+    const auto cols = ui::pack_help_columns(groups, per_col_budget, 2);
+    // Check that all group indices appear in exactly one column
+    for (size_t i = 0; i < groups.size(); ++i) {
+        int count = 0;
+        for (const auto& c : cols) {
+            for (auto idx : c.group_indices) {
+                if (idx == i) {
+                    count++;
+                }
+            }
+        }
+        CHECK_EQ(count, 1);  // Each group in exactly one column
+    }
+}
