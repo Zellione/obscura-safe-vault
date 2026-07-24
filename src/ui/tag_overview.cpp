@@ -39,7 +39,10 @@ constexpr float PROMPT_LINE_H = 20.0f;        // height of title and hint lines 
 // A continuation byte has the high 2 bits set to 0b10.
 [[nodiscard]] constexpr bool is_utf8_continuation(std::byte byte) noexcept
 {
-    return (std::to_underlying(byte) & 0xC0) == 0x80;
+    // Stay in the std::byte domain — masking the underlying integer instead
+    // trips S6022 (byte-oriented data wants std::byte) and casting for it trips
+    // S7035; keeping the bitwise ops on std::byte avoids both.
+    return (byte & std::byte{0xC0}) == std::byte{0x80};
 }
 
 // Truncate `text` to not exceed `max_bytes`, preserving complete UTF-8 characters.

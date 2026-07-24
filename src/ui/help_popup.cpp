@@ -49,10 +49,13 @@ void handle_help_wheel(HelpPopupState& s, float wheel_y)
 namespace {
 
 struct HelpPanelDims {
-    float x, y, w, h;
-    int columns;
-    int longest;
-    float col_width;
+    float x = 0.0f;
+    float y = 0.0f;
+    float w = 0.0f;
+    float h = 0.0f;
+    int   columns = 0;
+    int   longest = 0;
+    float col_width = 0.0f;
 };
 
 HelpPanelDims compute_help_panel_dims(float W, float H, int total_lines,
