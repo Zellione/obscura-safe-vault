@@ -39,7 +39,7 @@ constexpr float PROMPT_LINE_H = 20.0f;        // height of title and hint lines 
 // A continuation byte has the high 2 bits set to 0b10.
 [[nodiscard]] constexpr bool is_utf8_continuation(std::byte byte) noexcept
 {
-    return (static_cast<int>(byte) & 0xC0) == 0x80;
+    return (std::to_underlying(byte) & 0xC0) == 0x80;
 }
 
 // Truncate `text` to not exceed `max_bytes`, preserving complete UTF-8 characters.
@@ -166,77 +166,75 @@ int TagOverviewScreen::row_at(float my) const
                ? row : -1;
 }
 
+void TagOverviewScreen::handle_key_down_in_browse_mode(const SDL_KeyboardEvent& key)
+{
+    if (is_quick_switch_key(key)) { quick_switch_.open(); return; }
+    switch (key.key) {
+        case SDLK_UP:       nav_.move(-1);                              break;
+        case SDLK_DOWN:     nav_.move(1);                               break;
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER: open_selected();                           break;
+        case SDLK_TAB:
+            sort_ = (sort_ == TagSort::Name) ? TagSort::Count : TagSort::Name;
+            rebuild();
+            break;
+        case SDLK_E:
+            if (nav_.selected() >= 0 && nav_.selected() < static_cast<int>(shown_.size())) {
+                prompting_ = true;
+                prompt_buf_ = shown_[nav_.selected()].description;
+                prompt_skip_text_input_ = true;
+                error_.clear();
+                SDL_StartTextInput(win_.sdl_window());
+            }
+            break;
+        case SDLK_SLASH:
+            if (filter_.empty()) {
+                filter_ = "";
+                rebuild();
+                SDL_StartTextInput(win_.sdl_window());
+            }
+            break;
+        case SDLK_BACKSPACE:
+            if (!filter_.empty()) { filter_.pop_back(); rebuild(); }
+            else                  request(NavKind::ToGallery, "", 0);
+            break;
+        case SDLK_ESCAPE:
+            if (!filter_.empty()) { filter_.clear(); SDL_StopTextInput(win_.sdl_window()); rebuild(); }
+            else                  request(NavKind::ToGallery, "", 0);
+            break;
+        default: break;
+    }
+}
+
 void TagOverviewScreen::handle_event(const SDL_Event& e)
 {
     if (quick_switch_.active()) {
         (void)quick_switch_.handle_event(e);
         if (std::string p; quick_switch_.consume_choice(p))
-            request(NavKind::ToUnlock, std::move(p));   // locks current, unlocks chosen
+            request(NavKind::ToUnlock, std::move(p));
         return;
     }
 
-    // Handle prompt input (tag description editing)
     if (prompting_) {
         if (e.type == SDL_EVENT_TEXT_INPUT) {
-            // Suppress the opening keypress's text event (the E key that opened the prompt)
             if (prompt_skip_text_input_) {
                 prompt_skip_text_input_ = false;
                 return;
             }
-            // Add text only if it doesn't exceed the 512-byte limit
             if (const auto new_buf = prompt_buf_ + e.text.text; new_buf.size() <= vault::INDEX_MAX_TAG_DESC_BYTES) {
                 prompt_buf_ = truncate_to_byte_limit(new_buf, vault::INDEX_MAX_TAG_DESC_BYTES);
             }
             return;
         }
         handle_prompt_key_event(e);
-        // While prompting, swallow all other events
         return;
     }
 
     switch (e.type) {
         case SDL_EVENT_KEY_DOWN:
-            if (is_quick_switch_key(e.key)) { quick_switch_.open(); break; }   // switch vault (`)
-            switch (e.key.key) {
-                case SDLK_UP:       nav_.move(-1);                              break;
-                case SDLK_DOWN:     nav_.move(1);                               break;
-                case SDLK_RETURN:
-                case SDLK_KP_ENTER: open_selected();                           break;
-                case SDLK_TAB:
-                    sort_ = (sort_ == TagSort::Name) ? TagSort::Count : TagSort::Name;
-                    rebuild();
-                    break;
-                case SDLK_E:
-                    // Open prompt to edit tag description
-                    if (nav_.selected() >= 0 && nav_.selected() < static_cast<int>(shown_.size())) {
-                        prompting_ = true;
-                        prompt_buf_ = shown_[nav_.selected()].description;
-                        prompt_skip_text_input_ = true;  // Skip the E keypress's text event
-                        error_.clear();
-                        SDL_StartTextInput(win_.sdl_window());
-                    }
-                    break;
-                case SDLK_SLASH:
-                    // Start filtering (require explicit `/` prefix)
-                    if (filter_.empty()) {
-                        filter_ = "";
-                        rebuild();
-                        SDL_StartTextInput(win_.sdl_window());
-                    }
-                    break;
-                case SDLK_BACKSPACE:
-                    if (!filter_.empty()) { filter_.pop_back(); rebuild(); }
-                    else                  request(NavKind::ToGallery, "", 0);
-                    break;
-                case SDLK_ESCAPE:
-                    if (!filter_.empty()) { filter_.clear(); SDL_StopTextInput(win_.sdl_window()); rebuild(); }
-                    else                  request(NavKind::ToGallery, "", 0);
-                    break;
-                default: break;
-            }
+            handle_key_down_in_browse_mode(e.key);
             break;
         case SDL_EVENT_TEXT_INPUT:
-            // Only accept text input if filter is active (/ was pressed)
             if ((!filter_.empty() || e.text.text[0] == '/') && e.text.text[0] != '/') {
                 filter_ += e.text.text;
                 rebuild();

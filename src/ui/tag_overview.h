@@ -43,6 +43,7 @@ private:
     void open_selected();   // Enter → TagGalleries for the focused tag
     [[nodiscard]] int row_at(float my) const;   // mouse y → row index (-1 = none)
     void handle_prompt_key_event(const SDL_Event& e);  // handle SDL_EVENT_KEY_DOWN while prompting
+    void handle_key_down_in_browse_mode(const SDL_KeyboardEvent& key);
 
     gfx::Window&    win_;
     gfx::FontAtlas& font_;

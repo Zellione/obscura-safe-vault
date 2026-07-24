@@ -51,6 +51,9 @@ private:
     void select_tag(std::string_view tag);  // select `tag` (ci) so the list scrolls to it
     void delete_selected_tag();       // Delete: remove tally_[selected_] from every selected node
 
+    void refresh_single_node_tags(std::string_view node_path);
+    void load_per_node_tags();
+
     // render() helpers (split out to keep cognitive complexity down)
     void draw_tag_rows(gfx::Renderer& r, gfx::FontAtlas& font, float mx, float list_y,
                         float tags_start, float row_pitch, int max_visible) const;

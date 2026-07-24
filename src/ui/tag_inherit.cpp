@@ -113,7 +113,7 @@ std::vector<std::string> contents_tags(const vault::Vault& vault, std::string_vi
     collect_descendant_tags(vault, std::string(gallery_path), 0, out);
 
     // Remove own and inherited tags from the result
-    auto is_excluded = [&](const std::string& t) {
+    auto is_excluded = [&own, &inherited](const std::string& t) {
         return ci_contains(own, t) || ci_contains(inherited, t);
     };
     std::erase_if(out, is_excluded);

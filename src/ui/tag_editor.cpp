@@ -141,46 +141,35 @@ void TagEditor::move_cursor(int dir)
     }
 }
 
-void TagEditor::refresh_tags()
+void TagEditor::refresh_single_node_tags(std::string_view node_path)
 {
-    tally_.clear();
-    inherited_.clear();
-    from_contents_.clear();
-    error_.clear();
+    inherited_ = inherited_tags(vault_, node_path);
 
-    if (node_paths_.empty()) {
-        error_ = "Invalid node path.";
-        return;
-    }
+    const auto segs = split_path(node_path);
+    if (segs.empty()) return;
 
-    // The ancestor-tag cascade is only meaningful for a single node — a
-    // multi-selection can span unrelated branches of the tree, so it's
-    // suppressed there rather than showing a misleading merged cascade.
-    if (node_paths_.size() == 1) {
-        inherited_ = inherited_tags(vault_, node_paths_.front());
+    std::string parent_path;
+    if (segs.size() > 1) { parent_path = join_path(std::span(segs.data(), segs.size() - 1)); }
 
-        // The descendant-tag union is also single-node only, and galleries only
-        const auto segs = split_path(node_paths_.front());
-        if (!segs.empty()) {
-            std::string parent_path;
-            if (segs.size() > 1) { parent_path = join_path(std::span(segs.data(), segs.size() - 1)); }
-
-            const auto& children = vault_.list(parent_path);
-            for (const auto* child : children) {
-                if (child && child->name == segs.back() && child->is_gallery()) {
-                    from_contents_ = contents_tags(vault_, node_paths_.front());
-                    break;
-                }
-            }
+    const auto& children = vault_.list(parent_path);
+    for (const auto* child : children) {
+        if (child && child->name == segs.back() && child->is_gallery()) {
+            from_contents_ = contents_tags(vault_, node_path);
+            break;
         }
     }
+}
 
+void TagEditor::load_per_node_tags()
+{
     std::vector<std::vector<std::string>> per_node_tags;
     per_node_tags.reserve(node_paths_.size());
     int resolved = 0;
+
     for (const std::string& path : node_paths_) {
         const auto segs = split_path(path);
-        if (segs.empty()) { continue; }
+        if (segs.empty()) continue;
+
         std::string parent_path;
         if (segs.size() > 1) { parent_path = join_path(std::span(segs.data(), segs.size() - 1)); }
 
@@ -193,8 +182,31 @@ void TagEditor::refresh_tags()
             }
         }
     }
-    if (resolved == 0) { error_ = "Node not found."; return; }
+
+    if (resolved == 0) {
+        error_ = "Node not found.";
+        return;
+    }
     tally_ = compute_tag_tally(per_node_tags);
+}
+
+void TagEditor::refresh_tags()
+{
+    tally_.clear();
+    inherited_.clear();
+    from_contents_.clear();
+    error_.clear();
+
+    if (node_paths_.empty()) {
+        error_ = "Invalid node path.";
+        return;
+    }
+
+    if (node_paths_.size() == 1) {
+        refresh_single_node_tags(node_paths_.front());
+    }
+
+    load_per_node_tags();
 }
 
 void TagEditor::select_tag(std::string_view tag)

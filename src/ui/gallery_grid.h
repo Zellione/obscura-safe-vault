@@ -127,6 +127,8 @@ private:
     void do_zip_import(const std::filesystem::path& zip_path);
     void pump_zip_import();        // poll the zip file dialog while transfer is not active
     void process_next_queued_zip_import();  // Phase 51 Task 14: process next encrypted archive from bulk pick
+    void handle_single_archive_for_naming(const std::filesystem::path& zp);
+    void handle_multiple_archives_enqueue(const std::vector<std::string>& paths);
     void pump_folder_import();     // poll the folder dialog while transfer is not active (Phase 51)
     bool handle_delete_confirm_key(const SDL_Event& e);   // Del-confirm modal; true if consumed
     bool handle_compact_confirm_key(const SDL_Event& e);  // Shift+C compact modal; true if consumed (Phase 26)
@@ -181,6 +183,7 @@ private:
     [[nodiscard]] int  hit_test(float mx, float my) const;  // item under cursor, or -1
     [[nodiscard]] std::string fit_name(std::string_view name, float max_w) const;
     void start_hover_animation(int tile);  // resolve node, check badge, construct playback, check budget
+    void render_grid_tile(gfx::Renderer& r, int tile_idx, float W);
 
     gfx::Window&            win_;
     gfx::FontAtlas&         font_;
