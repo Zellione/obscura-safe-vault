@@ -862,7 +862,7 @@ bool GalleryGrid::handle_overlay_event(const SDL_Event& e)
     if (consent_.active()) {
         if (e.type == SDL_EVENT_KEY_DOWN &&
             consent_.handle_key(e.key.key) == ConsentDialog::Result::Confirmed)
-            dialogs_.folder.open(win_.sdl_window());
+            dialogs_.folder.open(win_.sdl_window(), platform::FolderDialog::Purpose::Export, false);
         return true;
     }
 
@@ -1236,8 +1236,8 @@ void poll_pending_pickers(GalleryGrid& g)
         }
     }
 
-    if (auto dest = g.dialogs_.folder.take_result()) {
-        if (!dest->empty()) g.do_export(*dest);   // empty => the picker was cancelled
+    if (auto dest = g.dialogs_.folder.take_result(platform::FolderDialog::Purpose::Export)) {
+        if (!dest->empty()) g.do_export((*dest)[0]);   // empty => the picker was cancelled
         g.mark_dirty();
     }
 }
