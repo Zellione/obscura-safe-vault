@@ -51,6 +51,11 @@ public:
                              std::string gallery_name, ImportTaskKind kind,
                              bool password_protected = false,
                              crypto::SecureBytes password = {});
+    // Import a picked directory as one gallery, mirroring its subfolders into
+    // sub-galleries (Phase 51). `root` has already been normalised by the
+    // folder dialog; `gallery_name` is the confirmed popup text.
+    uint64_t enqueue_folder(std::filesystem::path root, std::string dest_gallery,
+                            std::string gallery_name);
 
     // ---- queue control (main thread) ----
     [[nodiscard]] bool cancel(uint64_t id);          // queued: drop; running: coop-cancel
@@ -92,7 +97,7 @@ private:
         std::string display_name;
         std::string dest_gallery;
         std::vector<std::filesystem::path> files;  // for Files task
-        std::filesystem::path archive_path;
+        std::filesystem::path archive_path;        // archive file OR folder root
         std::string gallery_name;
         crypto::SecureBytes password;
 
@@ -121,6 +126,7 @@ private:
     // Task processing
     void process_files_task(Task& task);
     void process_archive_task(Task& task);
+    void process_folder_task(Task& task);
 
     // Internal state helpers
     void maybe_end_batch();
