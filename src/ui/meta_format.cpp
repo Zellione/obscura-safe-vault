@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "ui/playback_model.h"   // format_clock (shared time formatting)
+#include "ui/video_exts.h"       // kVideoExts (shared video extension whitelist)
 
 namespace ui {
 
@@ -114,7 +115,6 @@ bool is_video_filename(std::string_view filename) noexcept
     for (const char c : filename.substr(dot + 1)) {
         ext.push_back(static_cast<char>((c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c));
     }
-    static constexpr std::array<std::string_view, 5> kVideoExts{"mp4", "mkv", "webm", "mov", "m4v"};
     return std::ranges::find(kVideoExts, ext) != kVideoExts.end();
 }
 
