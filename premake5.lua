@@ -499,6 +499,7 @@ project "osv_tests"
         "src/ui/natural_sort.cpp",
         "src/ui/meta_json.cpp",
         "src/ui/zip_plan.cpp",
+        "src/ui/folder_scan.cpp",
         "src/ui/import_common.cpp",
         "src/ui/import_model.cpp",
         "src/ui/import_queue.cpp",
