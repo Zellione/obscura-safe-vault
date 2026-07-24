@@ -1,5 +1,7 @@
 #include "test_framework.h"
 
+#include <algorithm>
+#include <cmath>
 #include <SDL3/SDL.h>
 
 #include "gfx/renderer.h"
@@ -175,3 +177,80 @@ TEST(help_popup_draws_long_content_without_crashing)
     SDL_RenderPresent(sr.r);
     CHECK(s.scroll < 10000.0f);   // clamped down to the real content height
 }
+
+namespace {
+
+// Replica of the geometry draw_help_popup computes today (src/ui/help_popup.cpp:73-89).
+// Phase 51 Task 5: this exists to REPRODUCE the reported edge clipping and
+// must go GREEN once the popup uses line-quantised scroll and a whole-line band.
+struct HelpGeom {
+    float content_top    = 0.0f;
+    float content_bottom = 0.0f;
+    float viewport_h     = 0.0f;
+};
+
+[[maybe_unused]] HelpGeom current_help_geom(float H)
+{
+    constexpr float LINE_H = 24.0f;
+    constexpr float PAD    = 24.0f;
+    const float ph = std::min(H - 80.0f, 520.0f);
+    const float py = (H - ph) / 2.0f;
+    HelpGeom g;
+    g.content_top    = py + PAD + LINE_H + 8.0f;
+    g.content_bottom = py + ph - PAD - LINE_H - 8.0f;
+    g.viewport_h     = g.content_bottom - g.content_top;
+    return g;
+}
+
+// True when EVERY line the popup would draw at `scroll` lies fully inside the band.
+// A line counts as "drawn" per the current predicate at help_popup.cpp:103,107.
+[[maybe_unused]] bool all_drawn_lines_fully_inside(const HelpGeom& g, int total_lines, float scroll)
+{
+    constexpr float LINE_H = 24.0f;
+    for (int i = 0; i < total_lines; ++i) {
+        const float y = g.content_top - scroll + static_cast<float>(i) * LINE_H;
+        const bool drawn = (y >= g.content_top - LINE_H) && (y <= g.content_bottom);
+        if (!drawn) continue;
+        if (y < g.content_top)             return false;   // clipped at the top edge
+        if (y + LINE_H > g.content_bottom) return false;   // clipped at the bottom edge
+    }
+    return true;
+}
+
+} // namespace
+
+// TODO(Phase51-Task8): re-enable — these three reproduce the pre-fix edge clipping and
+// must go GREEN once the popup uses line-quantised scroll and a whole-line band.
+/*
+TEST(help_popup_no_partial_line_at_max_scroll_in_a_short_window)
+{
+    // H = 580 => ph = 500 => viewport = 388 px = 16.17 lines. Not a whole number of
+    // lines, so max_scroll is not a multiple of LINE_H and a row lands mid-line.
+    const HelpGeom g = current_help_geom(580.0f);
+    const int   total_lines = 40;
+    const float content_h   = static_cast<float>(total_lines) * 24.0f;
+    const float max_scroll  = ui::clamp_help_scroll(1.0e6f, content_h, g.viewport_h);
+    CHECK(all_drawn_lines_fully_inside(g, total_lines, max_scroll));
+}
+
+TEST(help_popup_no_partial_line_at_rest_in_a_short_window)
+{
+    // Same window, scrolled to the top: the BOTTOM row is the partial one here.
+    const HelpGeom g = current_help_geom(580.0f);
+    CHECK(all_drawn_lines_fully_inside(g, 40, 0.0f));
+}
+
+TEST(help_popup_no_partial_line_across_a_range_of_window_heights)
+{
+    // The defect must not depend on one lucky window size. Sweep realistic heights
+    // and require every one of them to render whole lines only.
+    for (int h = 500; h <= 1100; h += 10) {
+        const HelpGeom g = current_help_geom(static_cast<float>(h));
+        const int   total_lines = 40;
+        const float content_h   = static_cast<float>(total_lines) * 24.0f;
+        const float max_scroll  = ui::clamp_help_scroll(1.0e6f, content_h, g.viewport_h);
+        CHECK(all_drawn_lines_fully_inside(g, total_lines, max_scroll));
+        CHECK(all_drawn_lines_fully_inside(g, total_lines, 0.0f));
+    }
+}
+*/

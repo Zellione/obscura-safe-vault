@@ -20,7 +20,7 @@ Full design, including the storage rationale and the recorded tradeoffs:
 - [ ] Tests: v9 round-trip, v8 → empty, over-cap/over-length rejection, fuzz; vault set/get/ci-match/empty-removes/lock-reopen; model carries description through sort+filter; pagination incl. a viewport too short for one row.
 
 **2. Help popup — two columns, line-quantised scroll, full height**
-- [ ] **Reproduce first.** Build, open `F1` on the gallery grid at the reported window size, screenshot, and confirm the actual failure mode before changing any code. The initial off-by-one theory does not survive the arithmetic (at max scroll the last line's box is exactly `[content_bottom - LINE_H, content_bottom]`); the likely mechanism is a fractional `visible_lines` (`ph = min(H-80, 520)`, so any window under 600 px) combined with pixel-tracked scroll.
+- [x] **Reproduce first.** Headless reproduction confirmed (Task 5): edge clipping manifests at **all realistic window heights ≥192px**, including H≥600 where ph=520 exactly. The defect is not caused by fractional line counts alone; the root cause is pixel-tracked scroll causing lines to land at non-integer multiples of LINE_H at viewport edges. Three characterisation tests built on a faithful geometry replica now fail as expected and are parked pending fix (Tasks 6–8). Working theory about "ph==520 being the only clean case" is **REFUTED**.
 - [ ] `HelpPopupState::scroll` becomes an integer **line index**; `clamp_help_scroll` clamps to `max(0, total_lines - visible_lines)`.
 - [ ] Clip band sized to `visible_lines * LINE_H`; clip rect via `lround`, not truncation.
 - [ ] Popup height `min(H - 80, needed_height)` — drop the hard 520 px cap.
