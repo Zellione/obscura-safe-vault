@@ -83,3 +83,44 @@ TEST(tag_description_over_length_text_is_rejected_not_clamped)
     VaultSettings            back;
     CHECK(!deserialize_index(blob, out, searches, back));
 }
+
+TEST(tag_description_lookup_is_case_insensitive)
+{
+    VaultSettings s;
+    set_tag_description(s, "Beach", "Coastal shots only");
+    CHECK_EQ(std::string(find_tag_description(s, "beach")), std::string("Coastal shots only"));
+    CHECK_EQ(std::string(find_tag_description(s, "BEACH")), std::string("Coastal shots only"));
+}
+
+TEST(tag_description_lookup_missing_is_empty)
+{
+    VaultSettings s;
+    CHECK(find_tag_description(s, "nope").empty());
+}
+
+TEST(tag_description_set_keeps_first_seen_casing)
+{
+    VaultSettings s;
+    set_tag_description(s, "Beach", "one");
+    set_tag_description(s, "beach", "two");
+    CHECK_EQ(s.tag_descriptions.size(), 1u);
+    CHECK_EQ(s.tag_descriptions[0].tag, std::string("Beach"));   // first casing wins
+    CHECK_EQ(s.tag_descriptions[0].text, std::string("two"));    // text is replaced
+}
+
+TEST(tag_description_empty_text_removes_the_entry)
+{
+    VaultSettings s;
+    set_tag_description(s, "beach", "something");
+    CHECK_EQ(s.tag_descriptions.size(), 1u);
+    set_tag_description(s, "beach", "");
+    CHECK(s.tag_descriptions.empty());
+}
+
+TEST(tag_description_set_respects_the_entry_cap)
+{
+    VaultSettings s;
+    for (int i = 0; i < INDEX_MAX_TAG_DESCRIPTIONS + 10; ++i)
+        set_tag_description(s, "tag" + std::to_string(i), "x");
+    CHECK_EQ(s.tag_descriptions.size(), static_cast<size_t>(INDEX_MAX_TAG_DESCRIPTIONS));
+}

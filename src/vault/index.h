@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace vault {
@@ -276,5 +277,19 @@ void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& sear
 [[nodiscard]] bool deserialize_index(std::span<const uint8_t> in, IndexNode& out,
                                      std::vector<SavedSearch>& searches,
                                      VaultSettings& settings);
+
+// Look up a tag's description, matched case-insensitively (ASCII fold — the same
+// identity rule tag de-duplication uses). Returns an empty view when absent.
+// The returned view BORROWS from `s` — never call this on a temporary.
+[[nodiscard]] std::string_view find_tag_description(const VaultSettings& s,
+                                                    std::string_view     tag);
+
+// Upsert a tag's description, matched case-insensitively; the first-seen casing
+// of the key is kept, the text is replaced. An empty `text` REMOVES the entry
+// rather than storing a blank, so the map never accumulates dead keys. A new key
+// is dropped silently once INDEX_MAX_TAG_DESCRIPTIONS is reached (an existing
+// key is always still updatable). Pure struct mutation — the caller persists via
+// set_vault_settings().
+void set_tag_description(VaultSettings& s, std::string_view tag, std::string_view text);
 
 } // namespace vault

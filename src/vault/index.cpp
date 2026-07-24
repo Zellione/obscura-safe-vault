@@ -431,6 +431,26 @@ VaultSettings VaultSettings::seeded()
     return s;
 }
 
+std::string_view find_tag_description(const VaultSettings& s, std::string_view tag)
+{
+    for (const auto& d : s.tag_descriptions)
+        if (category_name_eq(d.tag, tag)) return d.text;
+    return {};
+}
+
+void set_tag_description(VaultSettings& s, std::string_view tag, std::string_view text)
+{
+    for (auto it = s.tag_descriptions.begin(); it != s.tag_descriptions.end(); ++it) {
+        if (!category_name_eq(it->tag, tag)) continue;
+        if (text.empty()) s.tag_descriptions.erase(it);
+        else              it->text = std::string(text);
+        return;
+    }
+    if (text.empty()) return;                                   // nothing to remove
+    if (s.tag_descriptions.size() >= INDEX_MAX_TAG_DESCRIPTIONS) return;
+    s.tag_descriptions.push_back({std::string(tag), std::string(text)});
+}
+
 void serialize_index(const IndexNode& root, std::vector<uint8_t>& out)
 {
     serialize_index(root, {}, VaultSettings{}, out);
