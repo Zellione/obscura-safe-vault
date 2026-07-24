@@ -1035,7 +1035,7 @@ void ImportQueue::process_folder_task(Task& task)
 }
 
 void ImportQueue::place_folder_file(StagingSink& sink, const ZipPlacement& placement,
-                                    const ZipEntry& entry, Task& task, size_t index)
+                                    const ZipEntry& entry, Task& task, size_t index) const
 {
     const auto mark_done = [&] {
         if (task.progress) {

@@ -133,8 +133,9 @@ private:
     // Read + stage one planned placement of a folder import. Extracted from
     // process_folder_task so that loop stays under the cognitive-complexity cap;
     // updates task.skipped and task.progress->done for `index`.
+    // const: works entirely through `sink` and `task`, touches no ImportQueue member.
     void place_folder_file(StagingSink& sink, const ZipPlacement& placement,
-                           const ZipEntry& entry, Task& task, size_t index);
+                           const ZipEntry& entry, Task& task, size_t index) const;
 
     // Internal state helpers
     void maybe_end_batch();
