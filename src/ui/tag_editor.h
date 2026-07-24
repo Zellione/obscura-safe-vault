@@ -56,6 +56,8 @@ private:
                         float tags_start, float row_pitch, int max_visible) const;
     void draw_inherited_tags(gfx::Renderer& r, gfx::FontAtlas& font, float mx, float list_bottom,
                               const ChipWrap& wrap) const;
+    void draw_from_contents_tags(gfx::Renderer& r, gfx::FontAtlas& font, float mx,
+                                  float list_bottom, const ChipWrap& wrap) const;
     void draw_suggestions_dropdown(gfx::Renderer& r, gfx::FontAtlas& font, float mx,
                                     float input_y) const;
 
@@ -66,6 +68,8 @@ private:
     std::vector<TagTallyEntry> tally_;         // union of node_paths_' tags + counts
     std::vector<std::string>   inherited_;     // read-only ancestor-gallery tags
                                                 // (single-node mode only — see refresh_tags)
+    std::vector<std::string>   from_contents_; // read-only descendant-gallery tags
+                                                // (single-node mode only; galleries only)
     std::vector<std::string> vocabulary_;    // vault-wide tags for autosuggest (Phase 29)
     std::vector<std::string> suggestions_;   // ranked matches for the typed buffer
     int                  sugg_sel_ = -1;     // -1 = editing buffer; ≥0 highlights a suggestion

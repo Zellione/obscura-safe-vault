@@ -186,7 +186,8 @@ void rebuild_detail(GalleryGrid& g)
     const vault::IndexNode& node = *g.children_[static_cast<size_t>(sel_idx)];
     const std::string node_path =
         g.nav_.path().empty() ? node.name : g.nav_.path() + "/" + node.name;
-    g.detail_.content = build_node_details(node, inherited_tags(g.vault_, node_path), vault::vault_settings(g.vault_).default_sort);
+    const auto from_contents = node.is_gallery() ? contents_tags(g.vault_, node_path) : std::vector<std::string>{};
+    g.detail_.content = build_node_details(node, inherited_tags(g.vault_, node_path), from_contents, vault::vault_settings(g.vault_).default_sort);
 }
 
 GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
