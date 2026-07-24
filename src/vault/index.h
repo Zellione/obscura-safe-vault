@@ -57,10 +57,17 @@ struct VideoChunk {
     uint64_t length = 0;  // on-disk chunk length (nonce|cipher|tag)
 };
 
-// Video container formats (Phase 15 PR2).
+// Video container formats (Phase 15 PR2; legacy containers Phase 52).
 enum class VideoContainer : uint8_t {
     MP4     = 0,
     MKV     = 1,
+    AVI     = 2,   // Phase 52
+    MPEGPS  = 3,   // Phase 52 (.mpg/.mpeg)
+    MPEGTS  = 4,   // Phase 52 (.ts/.m2ts)
+    ASF     = 5,   // Phase 52 (.wmv/.asf)
+    FLV     = 6,   // Phase 52
+    OGG     = 7,   // Phase 52 (.ogv)
+    RM      = 8,   // Phase 52 (.rm/.rmvb)
     Unknown = 0xFF,
 };
 

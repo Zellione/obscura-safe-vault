@@ -84,8 +84,15 @@ std::string_view video_container_name(vault::VideoContainer c) noexcept
 {
     using enum vault::VideoContainer;
     switch (c) {
-        case MP4: return "MP4";
-        case MKV: return "MKV";
+        case MP4:    return "MP4";
+        case MKV:    return "MKV";
+        case AVI:    return "AVI";
+        case MPEGPS: return "MPEG-PS";
+        case MPEGTS: return "MPEG-TS";
+        case ASF:    return "ASF";
+        case FLV:    return "FLV";
+        case OGG:    return "Ogg";
+        case RM:     return "RealMedia";
         case Unknown: break;
     }
     return "-";
@@ -100,10 +107,13 @@ std::string video_type_label(vault::VideoCodec c) noexcept
 bool is_video_filename(std::string_view filename) noexcept
 {
     const auto dot = filename.find_last_of('.');
-    if (dot == std::string_view::npos || dot + 1 >= filename.size()) return false;
+    if (dot == std::string_view::npos || dot + 1 >= filename.size()) {
+        return false;
+    }
     std::string ext;
-    for (const char c : filename.substr(dot + 1))
+    for (const char c : filename.substr(dot + 1)) {
         ext.push_back(static_cast<char>((c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c));
+    }
     static constexpr std::array<std::string_view, 5> kVideoExts{"mp4", "mkv", "webm", "mov", "m4v"};
     return std::ranges::find(kVideoExts, ext) != kVideoExts.end();
 }
