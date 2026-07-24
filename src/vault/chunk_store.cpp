@@ -24,6 +24,15 @@ bool ChunkStore::append_at_end(std::span<const uint8_t> bytes, uint64_t& out_off
         std::println(stderr, "[vault::chunk_store] write of {} bytes failed", bytes.size());
         return false;
     }
+    // Push the append out of the stdio buffer to the fd. Every caller already
+    // flushes right after (staging, commit sync), so this is redundant in
+    // production; it exists so a read-back through the SAME handle sees the data
+    // now that file_size() is fstat-based (position-independent) and no longer
+    // flushes as a side effect of seeking to end.
+    if (std::fflush(fp_) != 0) {
+        std::println(stderr, "[vault::chunk_store] flush after append failed");
+        return false;
+    }
     out_offset = end;
     return true;
 }

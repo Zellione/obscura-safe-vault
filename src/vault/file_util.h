@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <sys/stat.h>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -42,9 +43,24 @@ namespace vault::fileutil {
     return true;
 }
 
+// Report the file size WITHOUT moving the stream position. This must never be
+// seek-based: seek_end mutates the shared FILE*'s position, and a concurrent
+// size query (e.g. Vault::wasted_bytes on the main thread) landing between a
+// writer's seek_to(0) and its fwrite in write_header would redirect that header
+// write to end-of-file, silently persisting a stale index. fstat reads the size
+// from the fd's metadata and is position-independent. (Flake fix: the commit
+// lane's header swap raced main-thread file_size calls on the same handle.)
 [[nodiscard]] inline bool file_size(std::FILE* fp, uint64_t& out_size) noexcept
 {
-    return seek_end(fp, out_size);
+#if defined(_WIN32)
+    struct _stat64 st{};
+    if (_fstat64(_fileno(fp), &st) != 0 || st.st_size < 0) return false;
+#else
+    struct stat st{};
+    if (::fstat(::fileno(fp), &st) != 0 || st.st_size < 0) return false;
+#endif
+    out_size = static_cast<uint64_t>(st.st_size);
+    return true;
 }
 
 // --- fault injection (crash-safety tests) ---------------------------------
