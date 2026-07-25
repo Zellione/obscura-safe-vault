@@ -1066,7 +1066,8 @@ namespace {
 // Assemble a detected multi-volume set and import it as ONE archive. Runs on
 // the worker thread: a split set can be many GB and Phase 50 exists so the
 // vault stays browsable during an import.
-void ImportQueue::process_volume_set_task(Task& task, StagingSink& sink, const ArchivePassword& pw)
+void ImportQueue::process_volume_set_task(Task& task, StagingSink& sink,
+                                         const ArchivePassword& pw) const
 {
     using enum ImportTaskState;
 
