@@ -1,6 +1,5 @@
 #include "ui/archive_kind.h"
 
-#include <algorithm>
 #include <array>
 #include <cctype>
 #include <string>
@@ -55,11 +54,20 @@ constexpr std::array<std::string_view, 7> kArchiveExts{
 
 } // namespace
 
-bool is_archive_name(std::string_view name)
+std::string_view archive_extension_of(std::string_view name)
 {
     const std::string lower = lowered(name);
-    return std::ranges::any_of(kArchiveExts,
-                               [&lower](std::string_view ext) { return extension_is(lower, ext); });
+    for (const std::string_view ext : kArchiveExts) {
+        if (extension_is(lower, ext)) {
+            return ext;
+        }
+    }
+    return {};
+}
+
+bool is_archive_name(std::string_view name)
+{
+    return !archive_extension_of(name).empty();
 }
 
 ArchiveKind detect_archive_kind(std::string_view filename, std::span<const uint8_t> bytes)

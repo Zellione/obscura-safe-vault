@@ -32,4 +32,9 @@ enum class ArchiveKind : uint8_t { None, Zip, Cbz, SevenZip, Rar, Tar, TarGz };
 // not here — which is why this predicate is deliberately permissive.
 [[nodiscard]] bool is_archive_name(std::string_view name);
 
+// The archive extension `name` ends with (lower-cased, leading dot included),
+// or "" if none. `is_archive_name` is defined in terms of this, so the two can
+// never disagree about what counts as an archive.
+[[nodiscard]] std::string_view archive_extension_of(std::string_view name);
+
 } // namespace ui
