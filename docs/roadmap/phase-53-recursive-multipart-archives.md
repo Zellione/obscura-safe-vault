@@ -10,8 +10,9 @@ Full design, including detailed tradeoffs and threat-model rationale:
 ### Tasks
 
 **1. Archive kind detection**
-- [ ] `src/ui/archive_kind.h/.cpp` — pure `enum ArchiveKind` + `detect_archive_kind(filename, bytes)`. Extension proposes, magic bytes confirm (`PK\x03\x04` for ZIP, `7z\xBC\xAF\x27\x1C`, RAR markers, `ustar` at 257, gzip `\x1F\x8B`). A non-matching magic is skipped silently, never an error. SDL-free, fully unit-testable.
-- [ ] Tests: magic-byte matching for each kind, extension/magic mismatch handling, edge cases (truncated headers, file too small).
+- [x] `src/ui/archive_kind.h/.cpp` — pure `enum ArchiveKind` + `detect_archive_kind(filename, bytes)`. Extension proposes, magic bytes confirm (`PK\x03\x04` for ZIP, `7z\xBC\xAF\x27\x1C`, RAR markers, `ustar` at 257, gzip `\x1F\x8B`). A non-matching magic is skipped silently, never an error. SDL-free, fully unit-testable.
+- [x] Tests: magic-byte matching for each kind, extension/magic mismatch handling, edge cases (truncated headers, file too small). 16 tests in `tests/ui/test_archive_kind.cpp`.
+- [x] **Note for later tasks:** `osv_tests` lists `src/ui/*.cpp` **individually** in `premake5.lua` (the `osv` app project globs `src/**.cpp`, so only the test project needs it). Every new `src/ui/` module in this phase must be added there or it fails at link, not compile.
 
 **2. Recursive archive planning**
 - [ ] `src/ui/recursive_import.h/.cpp` — depth-first orchestrator with work stack. Plans a top-level archive, discovers nested archives during planning, queues them depth-first. `ZipPlan::nested` holds discovered archives; `build_zip_plan` entry classification route non-media archives to `nested` instead of `skipped_unsupported`.
