@@ -626,3 +626,38 @@ TEST(import_queue_folder_into_a_subgallery_lands_in_one_place)
 
     ziptest::cleanup_dir(temp_dir);
 }
+
+// Phase 53: archive meta.json tags must be applied on the QUEUE path too.
+// apply_meta_tags was only ever called from the vault overloads, which use
+// DirectVaultSink — so every background import silently dropped its tags.
+TEST(import_queue_applies_archive_meta_tags)
+{
+    const auto temp_dir   = ziptest::fresh_dir("test_import_queue_meta_tags");
+    const auto vault_path = temp_dir / "vault.osv";
+
+    vault::Vault v;
+    ziptest::make_vault(v, vault_path);
+
+    const std::string meta = R"({
+        "title": { "english": "Some Book" },
+        "tags":  [ { "type": "artist", "name": "someone" } ]
+    })";
+    const auto zip = ziptest::make_archive(
+        {{"a.jpg", ziptest::fake_jpeg(51)}, {"meta.json", {meta.begin(), meta.end()}}},
+        temp_dir / "book.zip");
+
+    ui::ImportQueue q;
+    q.begin_session(v);
+    (void)q.enqueue_archive(zip, "", "Book", ui::ImportTaskKind::Zip);
+    pump_until_idle(q);
+    q.end_session();
+
+    const vault::IndexNode* gallery = nullptr;
+    for (const auto* n : v.list("")) {
+        if (n->name == "Book" && n->is_gallery()) gallery = n;
+    }
+    REQUIRE(gallery != nullptr);
+    CHECK(!gallery->tags.empty());
+
+    ziptest::cleanup_dir(temp_dir);
+}

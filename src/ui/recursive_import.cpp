@@ -1,6 +1,7 @@
 #include "ui/recursive_import.h"
 
 #include "ui/archive_kind.h"
+#include "ui/meta_json.h"
 #include "vault/safe_name.h"
 
 #include <algorithm>
@@ -125,6 +126,19 @@ void walk_one(Frame& f, const RecursiveHooks& hooks, RecursionBudget& budget,
         if (!hooks.create_gallery(g)) return;
     }
 
+    // Each archive's own meta.json tags the gallery it produced — including a
+    // nested one, so a sub-gallery carries the metadata of the archive it came
+    // from rather than inheriting its parent's. Best-effort: bad metadata never
+    // fails an import (Phase 27's rule).
+    if (const std::optional<size_t> meta_idx = find_meta_entry(entries); meta_idx.has_value()) {
+        crypto::SecureBytes meta_bytes;
+        if (hooks.extract_entry(f.bytes, f.kind, *meta_idx, meta_bytes)) {
+            for (const std::string& tag : meta_gallery_tags(parse_meta_json(meta_bytes.as_span()))) {
+                (void)hooks.tag_gallery(f.gallery, tag);
+            }
+        }
+    }
+
     tally.skipped_unsupported += plan.skipped_unsupported;
 
     for (const ZipPlacement& p : plan.placements) {
@@ -208,7 +222,7 @@ RecursiveTally walk_archive(std::span<const uint8_t> root_bytes,
     // is exception-free — an unset hook would terminate the process rather than
     // fail gracefully. Refuse the walk instead.
     if (!hooks.list_entries || !hooks.extract_entry || !hooks.create_gallery ||
-        !hooks.place_media || !hooks.cancelled) {
+        !hooks.place_media || !hooks.tag_gallery || !hooks.cancelled) {
         return tally;
     }
 

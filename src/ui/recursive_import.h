@@ -124,6 +124,10 @@ struct RecursiveHooks {
     std::function<bool(std::string_view)>                                              create_gallery;
     // Import one media file. False = tallied as skipped.
     std::function<bool(std::string_view, std::string_view, std::span<const uint8_t>)>  place_media;
+    // Apply one tag to a gallery. Used for each archive's own meta.json — the
+    // top-level one AND every nested archive's, so a sub-gallery carries the
+    // metadata of the archive it came from.
+    std::function<bool(std::string_view, std::string_view)>                            tag_gallery;
     // Polled between entries so a queued import stays cancellable.
     std::function<bool()>                                                              cancelled;
 };

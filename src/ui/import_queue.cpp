@@ -185,7 +185,22 @@ public:
                                      : dest_gallery_ + "/" + std::string(rel_gallery);
         {
             std::lock_guard lock(mu_);
-            records_.emplace_back(path, std::nullopt, task_id_, false);
+            records_.emplace_back(path, std::nullopt, task_id_, false, std::string{});
+        }
+        return vault::VaultResult::Ok;
+    }
+
+    [[nodiscard]] vault::VaultResult tag_gallery(std::string_view rel_gallery,
+                                                 std::string_view tag) override
+    {
+        // Deferred like every other mutation: the worker thread must not touch
+        // the index tree (Phase 50), so this is queued for the main thread.
+        const std::string path = dest_gallery_.empty()
+                                     ? std::string(rel_gallery)
+                                     : dest_gallery_ + "/" + std::string(rel_gallery);
+        {
+            std::lock_guard lock(mu_);
+            records_.emplace_back(path, std::nullopt, task_id_, false, std::string(tag));
         }
         return vault::VaultResult::Ok;
     }
@@ -205,7 +220,7 @@ public:
 
         {
             std::lock_guard lock(mu_);
-            records_.emplace_back(gallery_path, std::move(staged.node), task_id_, false);
+            records_.emplace_back(gallery_path, std::move(staged.node), task_id_, false, std::string{});
         }
         return vault::VaultResult::Ok;
     }
@@ -225,7 +240,7 @@ public:
 
         {
             std::lock_guard lock(mu_);
-            records_.emplace_back(gallery_path, std::move(staged.node), task_id_, false);
+            records_.emplace_back(gallery_path, std::move(staged.node), task_id_, false, std::string{});
         }
         return vault::VaultResult::Ok;
     }
@@ -349,7 +364,10 @@ void ImportQueue::abort_and_flush()
 
         // Process remaining records without lock
         for (auto& record : remaining) {
-            if (record.node) {
+            if (!record.tag.empty()) {
+                (void)vault::ensure_gallery_path(*v_, record.gallery_path);
+                (void)v_->add_tag(record.gallery_path, record.tag);
+            } else if (record.node) {
                 if (!record.gallery_path.empty()) {
                     (void)vault::ensure_gallery_path(*v_, record.gallery_path);
                 }
@@ -582,7 +600,12 @@ int ImportQueue::drain(double dt)
         auto record = std::move(to_process.front());
         to_process.pop_front();
 
-        if (record.node) {
+        if (!record.tag.empty()) {
+            // Tag record: the gallery's own record was queued before it, so by
+            // the time this drains the gallery exists.
+            (void)vault::ensure_gallery_path(*v_, record.gallery_path);
+            (void)v_->add_tag(record.gallery_path, record.tag);
+        } else if (record.node) {
             // Ensure the destination gallery exists first
             if (!record.gallery_path.empty()) {
                 (void)vault::ensure_gallery_path(*v_, record.gallery_path);
@@ -909,7 +932,7 @@ void ImportQueue::process_files_task(Task& task)
             if (staged.status == vault::VaultResult::Ok) {
                 std::lock_guard lock(mu_);
                 records_.push_back(StagedRecord{task.dest_gallery, std::move(staged.node),
-                                               task.id, false});
+                                               task.id, false, std::string{}});
                 if (task.progress) {
                     task.progress->done.store(static_cast<int>(pf.index) + 1);
                 }
@@ -1144,7 +1167,10 @@ void test_only_drop_without_flush(ImportQueue& q)
 
         // Process remaining records
         for (auto& record : remaining) {
-            if (record.node) {
+            if (!record.tag.empty()) {
+                (void)vault::ensure_gallery_path(*q.v_, record.gallery_path);
+                (void)q.v_->add_tag(record.gallery_path, record.tag);
+            } else if (record.node) {
                 if (!record.gallery_path.empty()) {
                     (void)vault::ensure_gallery_path(*q.v_, record.gallery_path);
                 }

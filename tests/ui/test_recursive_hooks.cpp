@@ -178,3 +178,47 @@ TEST(import_archive_recursive_rejects_a_file_that_is_not_an_archive)
 
     ziptest::cleanup_dir(dir);
 }
+
+TEST(recursive_hooks_tag_a_nested_gallery_from_its_own_meta_json)
+{
+    // A nested archive carries the metadata of the archive it came from, not
+    // its parent's — otherwise every sub-gallery would inherit the outer tags
+    // and lose its own.
+    const auto dir = ziptest::fresh_dir("rechooks_meta");
+
+    const std::string inner_meta = R"({"tags":[{"type":"artist","name":"inner_artist"}]})";
+    const auto        inner      = read_bytes(make_archive(
+        {{"one.jpg", fake_jpeg(61)},
+                {"meta.json", {inner_meta.begin(), inner_meta.end()}}},
+        dir / "inner.zip"));
+
+    const std::string outer_meta = R"({"tags":[{"type":"artist","name":"outer_artist"}]})";
+    const auto        outer      = read_bytes(make_archive(
+        {{"top.jpg", fake_jpeg(62)},
+                {"bonus.zip", inner},
+                {"meta.json", {outer_meta.begin(), outer_meta.end()}}},
+        dir / "outer.zip"));
+
+    vault::Vault v;
+    ziptest::make_vault(v, dir / "v.osv");
+    REQUIRE(v.create_gallery("D") == vault::VaultResult::Ok);
+
+    ui::DirectVaultSink sink(v, "D", "");
+    const auto hooks = ui::make_recursive_hooks(sink, "D");
+    const auto tally = ui::walk_archive(outer, ui::ArchiveKind::Zip, "D", hooks);
+    CHECK_EQ(tally.nested_archives, 1);
+
+    const vault::IndexNode* sub = nullptr;
+    for (const auto* n : v.list("D")) {
+        if (n->name == "bonus" && n->is_gallery()) sub = n;
+    }
+    REQUIRE(sub != nullptr);
+
+    bool has_inner = false;
+    for (const std::string& t : sub->tags) {
+        if (t.find("inner_artist") != std::string::npos) has_inner = true;
+    }
+    CHECK(has_inner);
+
+    ziptest::cleanup_dir(dir);
+}

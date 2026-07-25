@@ -31,6 +31,7 @@ struct FakeWorld {
     std::vector<std::string>                      created;    // galleries created
     std::vector<std::string>                      placed;     // "gallery|filename"
     std::vector<std::string>                      unreadable; // archive ids that fail to list
+    std::vector<std::string>                      tagged;     // "gallery|tag"
 };
 
 // A fake archive buffer is real ZIP magic followed by its id. The magic is not
@@ -82,6 +83,10 @@ RecursiveHooks hooks_for(FakeWorld& w)
     h.create_gallery = [&w](std::string_view g) { w.created.emplace_back(g); return true; };
     h.place_media    = [&w](std::string_view g, std::string_view f, std::span<const uint8_t>) {
         w.placed.push_back(std::string(g) + "|" + std::string(f));
+        return true;
+    };
+    h.tag_gallery = [&w](std::string_view g, std::string_view t) {
+        w.tagged.push_back(std::string(g) + "|" + std::string(t));
         return true;
     };
     h.cancelled = [] { return false; };

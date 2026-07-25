@@ -92,6 +92,10 @@ private:
         std::optional<vault::IndexNode> node;  // nullopt => ensure gallery only
         uint64_t task_id = 0;
         bool counted = false;
+        // Non-empty => apply this tag to gallery_path instead of attaching a
+        // node (Phase 53). Ordered after the gallery's own record, so the
+        // gallery exists by the time this is drained.
+        std::string tag;
     };
 
     struct Task {

@@ -150,6 +150,10 @@ RecursiveHooks make_recursive_hooks(MediaSink& sink, std::string_view root_galle
         return r == vault::VaultResult::Ok;
     };
 
+    h.tag_gallery = [&sink, root](std::string_view gallery, std::string_view tag) {
+        return sink.tag_gallery(relative_to(gallery, root), tag) == vault::VaultResult::Ok;
+    };
+
     h.cancelled = [&sink] { return sink.cancelled(); };
 
     return h;
