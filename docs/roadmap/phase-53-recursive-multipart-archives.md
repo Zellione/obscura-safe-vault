@@ -40,13 +40,13 @@ Full design, including detailed tradeoffs and threat-model rationale:
 
 **4. Multipart assembly — NumericSuffix and RarPart / RarOld**
 - [ ] **NumericSuffix:** concatenate volumes in order into one buffer, feed existing `archive_read_open_memory` path. Verified working for 7z, zip, tar experimentally.
-- [ ] **RarPart / RarOld:** `ArchiveReader::open_files(paths, passphrase)` — new overload using libarchive's `archive_read_open_filenames()` for file-oriented multi-volume RAR support (cite `vendor/libarchive/libarchive/archive_read_support_format_rar5.c` lines for `advance_multivolume`, `merge_block`).
-- [ ] Tests: open and extract from multi-volume RAR4 and RAR5 fixtures (uuencoded in vendored libarchive test corpus).
+- [x] **RarPart / RarOld:** `ArchiveReader::open_files(paths, passphrase)` — new overload using libarchive's `archive_read_open_filenames()` for file-oriented multi-volume RAR support (cite `vendor/libarchive/libarchive/archive_read_support_format_rar5.c` lines for `advance_multivolume`, `merge_block`).
+- [x] Tests: open and extract from multi-volume RAR4 and RAR5 fixtures (uuencoded in vendored libarchive test corpus) — both verified working. Paths are NOT normalised inside `open_files`; `normalize_user_path` stays at the file-dialog boundary per existing convention, so **task 6's volume picker must normalise**.
 
 **5. Spanned ZIP merger**
-- [ ] `src/ui/spanned_zip.h/.cpp` — pure `merge_spanned_zip(volumes_span, out_error)` over byte buffers. Concatenate volumes, strip spanning marker if present (`PK\x07\x08` or `PK00`), locate EOCD via bounded backward scan (64 KiB), walk central directory rewriting entry offsets, rewrite EOCD with merged metadata. Every read bounds-checked; malformed input rejected with specific error.
-- [ ] ZIP64 spanned archives explicitly rejected in v1 — documented limitation.
-- [ ] Tests: merge classic-ZIP spanning, correct offset rewriting, spanning marker strip, EOCD relocation, malformed input rejection (truncated headers, missing EOCD, invalid offsets), fixtures generated with `zip -s`.
+- [x] `src/ui/spanned_zip.h/.cpp` — pure `merge_spanned_zip(volumes_span, out_error)` over byte buffers. Concatenate volumes, strip spanning marker if present (`PK\x07\x08` or `PK00`), locate EOCD via bounded backward scan (64 KiB), walk central directory rewriting entry offsets, rewrite EOCD with merged metadata. Every read bounds-checked; malformed input rejected with specific error.
+- [x] ZIP64 spanned archives explicitly rejected in v1 — documented limitation.
+- [x] Tests: merge classic-ZIP spanning, correct offset rewriting, spanning marker strip, EOCD relocation, malformed input rejection. **Plus a mandatory end-to-end test** — a real `zip -s` set, merged, reopened through miniz, bytes compared. Synthetic-only tests passed while every extraction failed (disk-0 offsets ignored the stripped 4-byte marker); the fixture must use incompressible data or `zip -s` emits one volume and the test proves nothing.
 
 **6. Multipart confirm dialog & integration**
 - [ ] Gallery grid scan for volume sets on any file pick (`[Z]` archive or `[I]` file dialog). If a set detected, show confirm dialog listing volumes, total size, and gaps (flagged in error red). Gaps block import.
@@ -54,11 +54,13 @@ Full design, including detailed tradeoffs and threat-model rationale:
 - [ ] Route multi-volume archives to the appropriate assembly backend per `VolumeStyle`.
 - [ ] Tests: volume set discovery on file pick, confirm dialog rendering, gap blocking, wrong-volume rejection.
 
-**7. Gallery select-all toggle**
-- [ ] `SelectionModel::select_all(int count)` — select indices 0..count-1. Optional: `select_none()` (could reuse `clear()`).
-- [ ] `GalleryGrid::handle_key_down()` — catch `Ctrl+A`, call `toggle_select_all()`. Semantics: if all visible direct children already selected, clear them; otherwise, select all. Applies to direct children only (media and sub-gallery tiles).
-- [ ] Add `{ "Ctrl+A", "Select all / none" }` to `GalleryGrid::help_groups()`'s "Navigate" group.
-- [ ] Tests: toggle when empty, toggle when partial, toggle when full, verify direct-only (nested children not selected).
+**7. Gallery select-all toggle** ✅
+- [x] `SelectionModel::select_all(int count)` + `all_selected(int)`. `select_all(0)` leaves the selection alone (not a deselect request); `all_selected(0)` is false, or Ctrl+A on an empty gallery would clear forever.
+- [x] `Ctrl+A` in `gallery_grid_handle_shortcut_keys`, checked before the plain-letter switch. Toggling.
+- [x] `{"Ctrl+A", "Select all / none"}` in the help popup's Navigate group.
+- [x] **Videos made selectable end-to-end (owner-approved scope widening).** The design assumed mass paths already accepted videos; they did not — Space refused them and `export_one_image` rejected non-images. `export_one_media` now dispatches `read_image`/`read_video`; consent wording says "items". A gallery is still refused.
+- [x] Pure `ui::is_selectable` / `selectable_indices` — the rule was inline in three places, which is how Ctrl+A and Space drift apart.
+- [x] Tests: 9 model + 4 selectable + 3 export (video, mixed, gallery-refused).
 
 **Cross-cutting**
 - [ ] Update `ROADMAP.md` index row, adding Phase 53 in numeric sequence.
