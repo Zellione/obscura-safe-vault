@@ -19,9 +19,12 @@ Full design, including detailed tradeoffs and threat-model rationale:
 - [x] **Design correction (recorded).** The spec had the planner call `detect_archive_kind`, but `collect_media` sees `ZipEntry{path, is_dir}` — names, no bytes — so it cannot magic-check. Classification is split: `is_archive_name` (extension only) at plan time, `detect_archive_kind` (extension + magic) at extract time, where a liar is demoted to `skipped_unsupported`. Both share one `kArchiveExts` table.
 - [x] Naming: `nested_gallery_name` (extension stripped incl. `.tar.gz`, `sanitize_node_name` applied) + `unique_gallery_name` (`base_2`, `base_3`, …). 10 tests.
 - [x] CBZ does not recurse — `build_cbz_plan` has its own collection loop and never calls `collect_media`; guarded by a test rather than left to the call graph staying that way.
-- [ ] `src/ui/recursive_import.*` — the depth-first orchestrator itself: work stack, extract-and-confirm, attach sub-galleries.
+- [x] `src/ui/recursive_import.*` — `walk_archive`, depth-first, hooks-injected so the recursion is testable without miniz/libarchive. A recursive plan cannot be a flat placement list (each placement indexes a *different* archive buffer), so it emits as it goes.
+- [x] `RecursionBudget` — the five guards, each failing only its own branch. 8 tests.
+- [x] `src/ui/recursive_hooks.*` — real backends (miniz / ArchiveReader / MediaSink), proven on real nested zips.
+- [x] `src/ui/recursive_exec.*` + `ImportQueue` routing — nested import reachable from the actual UI path, with a queue-level test.
 - [ ] Meta.json applied per nested sub-gallery.
-- [ ] Guards (each soft-fails the offending branch, none abort the whole job, each unit-tested separately):
+- [x] Guards (each soft-fails the offending branch, none abort the whole job, each unit-tested separately):
   - `kMaxArchiveDepth = 16`
   - cumulative expanded-bytes cap (e.g. 10 GiB max across whole recursion)
   - live-bytes cap along current path
@@ -39,7 +42,7 @@ Full design, including detailed tradeoffs and threat-model rationale:
 - [x] Tests (19): ordering per style incl. the two traps — spanned zip's `.zip` is LAST though `.z01` sorts first (and `.z10` must not sort before `.z02`), and old-style RAR's `.rar` is volume ONE despite sorting after `.r00`. Gap detection, two-volume minimum (what stops a lone `photos.zip`/`scans.rar` reading as a broken set), unrelated sets in one directory, non-volume siblings ignored.
 
 **4. Multipart assembly — NumericSuffix and RarPart / RarOld**
-- [ ] **NumericSuffix:** concatenate volumes in order into one buffer, feed existing `archive_read_open_memory` path. Verified working for 7z, zip, tar experimentally.
+- [x] **NumericSuffix:** `assembly_for` + `concatenate_volumes`, proven end-to-end on a real `split -d` set (detected from a directory listing, joined, read back through miniz byte-for-byte). Fixture must use incompressible data or `split` produces one volume and the test proves nothing.
 - [x] **RarPart / RarOld:** `ArchiveReader::open_files(paths, passphrase)` — new overload using libarchive's `archive_read_open_filenames()` for file-oriented multi-volume RAR support (cite `vendor/libarchive/libarchive/archive_read_support_format_rar5.c` lines for `advance_multivolume`, `merge_block`).
 - [x] Tests: open and extract from multi-volume RAR4 and RAR5 fixtures (uuencoded in vendored libarchive test corpus) — both verified working. Paths are NOT normalised inside `open_files`; `normalize_user_path` stays at the file-dialog boundary per existing convention, so **task 6's volume picker must normalise**.
 
