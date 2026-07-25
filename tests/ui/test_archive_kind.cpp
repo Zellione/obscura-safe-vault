@@ -78,6 +78,13 @@ TEST(archive_kind_detects_tar_gz)
     CHECK(detect_archive_kind("stuff.tar.gz", GZIP_MAGIC) == ArchiveKind::TarGz);
 }
 
+TEST(archive_kind_detects_tgz_shorthand)
+{
+    // ".tgz" is the same thing as ".tar.gz" and shows up in the wild often
+    // enough that skipping it would silently drop a nested archive.
+    CHECK(detect_archive_kind("stuff.tgz", GZIP_MAGIC) == ArchiveKind::TarGz);
+}
+
 TEST(archive_kind_extension_is_case_insensitive)
 {
     CHECK(detect_archive_kind("PHOTOS.ZIP", ZIP_MAGIC) == ArchiveKind::Zip);
