@@ -114,7 +114,8 @@ private:
     void refresh();
     void open_selected();
     void go_up();
-    void toggle_select();          // toggle the current item in the export selection
+    void toggle_select_all();      // Ctrl+A: select every selectable child, or clear if already all
+void toggle_select();          // toggle the current item in the export selection
     void start_export();           // open the consent modal for the current selection
     void start_transfer();         // open the move-to-another-vault dialog
     void start_rename();           // R: rename the focused tile
