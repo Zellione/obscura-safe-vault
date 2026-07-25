@@ -2,6 +2,7 @@
 
 #include "crypto/secure_mem.h"
 #include "ui/import_model.h"
+#include "ui/volume_set.h"
 #include "vault/commit_lane.h"
 #include "vault/index.h"
 #include "vault/op_progress.h"
@@ -54,6 +55,20 @@ public:
                              std::string gallery_name, ImportTaskKind kind,
                              bool password_protected = false,
                              crypto::SecureBytes password = {});
+
+    // Import a detected multi-volume set as ONE archive (Phase 53). `volumes`
+    // is in set order; `style` decides how they are assembled. The assembly
+    // happens on the WORKER thread, not here — a split set can be many GB and
+    // Phase 50's whole point is that the vault stays browsable during an
+    // import.
+    // `stem` is the set's shared base name ("movie.tar" for movie.tar.001).
+    // It is REQUIRED because the archive's kind must be detected from the stem,
+    // not from a volume filename — "whole.zip.00" has the extension ".00" and
+    // would be rejected as not-an-archive.
+    uint64_t enqueue_volume_set(std::vector<std::filesystem::path> volumes, VolumeStyle style,
+                                std::string stem, std::string dest_gallery,
+                                std::string gallery_name, ImportTaskKind kind,
+                                crypto::SecureBytes password = {});
     // Import a picked directory as one gallery, mirroring its subfolders into
     // sub-galleries (Phase 51). `root` has already been normalised by the
     // folder dialog; `gallery_name` is the confirmed popup text.
@@ -105,6 +120,11 @@ private:
         std::string dest_gallery;
         std::vector<std::filesystem::path> files;  // for Files task
         std::filesystem::path archive_path;        // archive file OR folder root
+        // Phase 53: non-empty => a multi-volume set to assemble, in set order.
+        // archive_path is then the first volume, used only for display.
+        std::vector<std::filesystem::path> volumes;
+        VolumeStyle                        volume_style = VolumeStyle::None;
+        std::string                        volume_stem;   // names the KIND, not a volume
         std::string gallery_name;
         crypto::SecureBytes password;
 

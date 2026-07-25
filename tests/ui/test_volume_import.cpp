@@ -5,6 +5,8 @@
 #include "ui/volume_import.h"
 #include "ui/zip_test_helpers.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -141,6 +143,42 @@ TEST(volume_assemble_reports_a_missing_file_on_disk)
 
     CHECK_FALSE(got.ok());
     CHECK(!got.error.empty());
+
+    ziptest::cleanup_dir(dir);
+}
+
+TEST(volume_assemble_reproduces_the_original_archive_bytes)
+{
+    // assemble_volume_set is the path the queue uses; concatenate_volumes is
+    // tested separately. This pins that the wrapper — normalisation, ordering,
+    // reading — does not corrupt what concatenation produces.
+    const auto dir = ziptest::fresh_dir("volimport_roundtrip");
+    std::vector<uint8_t> original(1000);
+    for (size_t i = 0; i < original.size(); ++i) {
+        original[i] = static_cast<uint8_t>((i * 91) ^ 0x3C);
+    }
+    { std::ofstream f(dir / "blob.bin", std::ios::binary);
+      f.write(reinterpret_cast<const char*>(original.data()),
+              static_cast<std::streamsize>(original.size())); }
+
+    const auto cmd = "cd " + dir.string() + " && split -d -b 300 blob.bin blob.bin.";
+    REQUIRE(std::system(cmd.c_str()) == 0);
+
+    ui::VolumeSet set;
+    set.style = ui::VolumeStyle::NumericSuffix;
+    set.stem  = "blob.bin";
+    for (int i = 0; i < 20; ++i) {
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "blob.bin.%02d", i);
+        if (!std::filesystem::exists(dir / buf)) break;
+        set.volumes.emplace_back(buf);
+    }
+    REQUIRE(set.volumes.size() >= 2);
+
+    const auto got = assemble_volume_set(set, dir);
+    CHECK(got.ok());
+    CHECK_EQ(got.bytes.size(), original.size());
+    CHECK(got.bytes == original);
 
     ziptest::cleanup_dir(dir);
 }

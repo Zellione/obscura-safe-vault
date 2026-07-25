@@ -661,3 +661,55 @@ TEST(import_queue_applies_archive_meta_tags)
 
     ziptest::cleanup_dir(temp_dir);
 }
+
+// Phase 53: a real multi-volume set imports as ONE archive through the queue.
+// The volumes are assembled on the worker thread, so this also exercises that
+// the queue carries a volume list rather than a single path.
+TEST(import_queue_imports_a_split_archive_set)
+{
+    if (std::system("command -v split >/dev/null 2>&1") != 0) {
+        std::println("  SKIP  split-set queue import: `split` not installed");
+        return;
+    }
+
+    const auto temp_dir   = ziptest::fresh_dir("test_import_queue_split");
+    const auto vault_path = temp_dir / "vault.osv";
+
+    vault::Vault v;
+    ziptest::make_vault(v, vault_path);
+
+    // A zip of two images, then split into parts on a byte boundary.
+    const auto whole = ziptest::make_archive({{"a.jpg", ziptest::fake_jpeg(71)},
+                                              {"b.jpg", ziptest::fake_jpeg(72)}},
+                                             temp_dir / "whole.zip");
+    const auto cmd = "cd " + temp_dir.string() +
+                     // 200 bytes: fake_jpeg is ~204 bytes, so the whole archive is
+                     // small — the split size has to be smaller still or `split`
+                     // emits one part and the test proves nothing.
+                     " && split -d -b 200 whole.zip whole.zip. && rm whole.zip";
+    REQUIRE(std::system(cmd.c_str()) == 0);
+
+    // Collect the parts in order, exactly as the picker would after detection.
+    std::vector<fs::path> volumes;
+    for (int i = 0; i < 50; ++i) {
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "whole.zip.%02d", i);
+        const fs::path p = temp_dir / buf;
+        if (!fs::exists(p)) break;
+        volumes.push_back(p);
+    }
+    REQUIRE(volumes.size() >= 2);   // if 1, split did not split and this proves nothing
+
+    ui::ImportQueue q;
+    q.begin_session(v);
+    // Stem is "whole.zip" — the KIND comes from that, not from "whole.zip.00".
+    (void)q.enqueue_volume_set(volumes, ui::VolumeStyle::NumericSuffix, "whole.zip", "", "Split",
+                               ui::ImportTaskKind::Zip);
+    pump_until_idle(q);
+    q.end_session();
+
+    // Reassembled and imported as one archive: both images in one gallery.
+    CHECK_EQ(v.list("Split").size(), static_cast<size_t>(2));
+
+    ziptest::cleanup_dir(temp_dir);
+}

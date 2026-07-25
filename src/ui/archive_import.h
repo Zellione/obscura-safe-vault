@@ -5,6 +5,7 @@
 #include "ui/zip_plan.h"
 
 #include <filesystem>
+#include <span>
 #include <string_view>
 
 namespace vault {
@@ -81,6 +82,22 @@ struct ZipDestination {
                                                   std::string_view             sink_root,
                                                   ImportProgress*              progress = nullptr,
                                                   ArchivePassword              pw = {});
+
+// Import an ORDERED multi-volume RAR set as one archive (Phase 53). Each RAR
+// volume carries its own header, so libarchive must open the files itself
+// (archive_read_open_filenames) — there is no single buffer to hand the
+// recursive walker, which is why this path is FLAT: archives nested inside a
+// multi-volume RAR are not recursed into.
+//
+// `sink_root` follows the same rule as import_archive_cbz: it is what the
+// sink's base already covers.
+[[nodiscard]] ZipImportOutcome import_archive_volumes(
+    MediaSink&                                       sink,
+    std::span<const std::filesystem::path>           volumes,
+    std::string_view                                 new_gallery_name,
+    std::string_view                                 sink_root,
+    ImportProgress*                                  progress = nullptr,
+    ArchivePassword                                  pw = {});
 
 // Thin wrapper: construct a DirectVaultSink and call the MediaSink version.
 // Used by tests and import executors.

@@ -10,7 +10,9 @@
 
 #include "ui/zip_import.h"   // ZipImportOutcome, ImportProgress
 
+#include <cstdint>
 #include <filesystem>
+#include <span>
 #include <string_view>
 
 namespace ui {
@@ -28,6 +30,21 @@ class MediaSink;
 //
 // Getting this wrong silently drops or duplicates a whole gallery level, so it
 // is a required argument rather than something inferred.
+// Import an already-assembled archive buffer. Used for a multi-volume set,
+// whose bytes are the joined (or merged) volumes and therefore exist only in
+// memory — writing them to a temp file just to re-read them would be a
+// pointless full copy of the archive to disk.
+//
+// `display_name` is only used to confirm the kind by extension + magic.
+[[nodiscard]] ZipImportOutcome import_archive_bytes_recursive(
+    MediaSink&               sink,
+    std::span<const uint8_t> bytes,
+    std::string_view         display_name,
+    std::string_view         new_gallery_name,
+    std::string_view         sink_root,
+    ImportProgress*          progress = nullptr,
+    std::string_view         password = {});
+
 [[nodiscard]] ZipImportOutcome import_archive_recursive(
     MediaSink&                   sink,
     const std::filesystem::path& archive_path,
