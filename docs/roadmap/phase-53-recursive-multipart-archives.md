@@ -23,7 +23,7 @@ Full design, including detailed tradeoffs and threat-model rationale:
 - [x] `RecursionBudget` — the five guards, each failing only its own branch. 8 tests.
 - [x] `src/ui/recursive_hooks.*` — real backends (miniz / ArchiveReader / MediaSink), proven on real nested zips.
 - [x] `src/ui/recursive_exec.*` + `ImportQueue` routing — nested import reachable from the actual UI path, with a queue-level test.
-- [ ] Meta.json applied per nested sub-gallery.
+- [x] Meta.json applied per nested sub-gallery — each archive tags the gallery IT produced, via a `tag_gallery` hook. Required adding `MediaSink::tag_gallery`, which also fixed queued imports never applying archive tags at all.
 - [x] Guards (each soft-fails the offending branch, none abort the whole job, each unit-tested separately):
   - `kMaxArchiveDepth = 16`
   - cumulative expanded-bytes cap (e.g. 10 GiB max across whole recursion)
@@ -31,10 +31,11 @@ Full design, including detailed tradeoffs and threat-model rationale:
   - nested-archive-count cap (e.g. max 1000 discovered)
   - expansion-ratio zip-bomb guard (e.g. 100× threshold)
   - Existing per-entry 4 GiB cap and per-file 512 MiB queue cap still apply.
-- [ ] Encrypted nested archives: try parent's password; if it fails, skip and tally `encrypted_skipped_count`.
-- [ ] Progress: `OpProgress::expanding` bool flag. While discovering: `84 / 210+ (expanding…)`. Once done: `84 / 210` (drop `+`). Accepted tradeoff: percentage can move backwards on large nested archives.
-- [ ] Result tallies: `nested_archive_count`, `encrypted_skipped_count`, `depth_capped_count`, `size_exceeded_count`, `nested_archive_count_exceeded`. Surfaced on Import Status screen and footer summary.
-- [ ] Tests: depth-first planning order, guard activation per branch, total grows as discovery proceeds, naming collision-suffixing, meta.json per sub-gallery, CBZ leaf behavior, encrypted-archive skip path, progress-flag toggles.
+- [ ] **Partially done:** the parent's password IS passed to every nested archive. But a nested archive needing a *different* password currently tallies as `unreadable`, not `encrypted_skipped` — libarchive's passphrase-failure signal is not yet distinguished at this level.
+- [x] Progress: `OpProgress::expanding` + `note_planned` hook; `format_task_progress` is pure and tested (incl. total still 0, where "12/0" would read as a defect).
+- [x] Result tallies exist on `RecursiveTally` (nested, not-an-archive, unreadable, depth-capped, budget-stopped, encrypted-skipped).
+- [ ] **Not done:** tallies are currently COLLAPSED into `ZipImportOutcome::skipped`, so the Import Status screen shows one number rather than breaking out *why* something was skipped.
+- [x] Tests: recursion depth, per-branch guard trips, naming + collision suffixing, meta.json per sub-gallery, CBZ non-recursion, unreadable-nested, cancellation, unset hooks. Real nested zips end-to-end plus a queue-level test. Encrypted-nested skip path is NOT covered (see above).
 
 **3. Multipart archive detection** ✅
 - [x] `src/ui/volume_set.h/.cpp` — pure detection over supplied directory listing. `enum VolumeStyle { NumericSuffix, RarPart, RarOld, SpannedZip }`. `detect_volume_set(picked_path, siblings_span)` classifies and orders volumes, detects gaps. Pure function, no filesystem operations inside it.
@@ -66,9 +67,10 @@ Full design, including detailed tradeoffs and threat-model rationale:
 - [x] Tests: 9 model + 4 selectable + 3 export (video, mixed, gallery-refused).
 
 **Cross-cutting**
-- [ ] Update `ROADMAP.md` index row, adding Phase 53 in numeric sequence.
-- [ ] `scripts/gen.sh` after adding source files (archive_kind, recursive_import, volume_set, spanned_zip, and any others).
-- [ ] Update Serena memories: `mem:module/ui` (new modules + extended selection_model/gallery_grid), `mem:ui_spec` (select-all keybinding, multipart confirm dialog), `mem:tech_stack` if any build config changes.
+- [x] ROADMAP index row (landed with the planning PR #111).
+- [x] `scripts/gen.sh` run after each new module. **Note:** `osv_tests` enumerates `src/ui/*.cpp` individually in `premake5.lua`; a missing entry fails at LINK, not compile.
+- [x] `mem:module/ui` updated with the whole Phase 53 stack. `mem:vault_format` deliberately unchanged — **no `INDEX_VERSION` bump**, nothing about the container changed.
+- [ ] `mem:ui_spec` — pending the confirm dialog actually existing; `Ctrl+A` should be recorded when that lands.
 
 ### Acceptance criterion
 
@@ -81,4 +83,26 @@ correctly and imported as flat archives; ZIP64 spanned is rejected with a messag
 `Ctrl+A` shortcut toggles all-selected on the current gallery's direct children,
 displayed in the `F1` help. All tests pass under `scripts/test.sh` and `--asan`.
 
-**Status:** ⬜ Not started
+**Status:** 🔜 In progress — backend complete, UI outstanding.
+
+Everything below the UI is implemented and tested: kind detection, nested planning,
+the depth-first walker + its five guards, real backends, queue integration, meta.json
+at every level, volume-set detection, all three assembly routes, and the spanned-ZIP
+merger. 1304 → 1438 tests, green under `scripts/test.sh`, `--asan` and `--tsan`.
+
+**Outstanding:**
+- Task 6's confirm dialog: rendering `VolumeSetSummary` and wiring `detect_volume_set`
+  into the file pick. The model and assembly are done and tested; this is drawing and
+  event handling.
+- Per-reason skip tallies on the Import Status screen (currently collapsed into one number).
+- Distinguishing an encrypted nested archive from an unreadable one.
+
+**Not visually verified.** The GUI has not been driven through these paths — see
+`.claude/skills/running-the-app`: file dialogs come from the XDG portal, i.e. the real
+desktop session, so no import flow can be driven headlessly on this box. Needs a native run.
+
+**Bugs found and fixed here that predate this phase** (all in the background-import path,
+all invisible at the vault root, which is why they shipped):
+- CBZ imported via the queue never created its gallery (Phase 50).
+- A folder imported into a sub-gallery landed under `Parent/Parent/…` (Phase 51).
+- Queued imports never applied archive `meta.json` tags at all.
