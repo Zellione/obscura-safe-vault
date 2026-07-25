@@ -527,6 +527,7 @@ project "osv_tests"
         "src/ui/archive_import.cpp",
         "src/ui/archive_kind.cpp",
         "src/ui/recursive_import.cpp",
+        "src/ui/volume_set.cpp",
         "src/ui/gallery_sort.cpp",
         "src/ui/gallery_view.cpp",
         "src/ui/gif_model.cpp",
