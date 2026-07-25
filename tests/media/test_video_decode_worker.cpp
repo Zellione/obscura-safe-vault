@@ -261,18 +261,21 @@ TEST(video_decode_worker_stops_cleanly_mid_flight)
 
 TEST(video_decode_worker_hwaccel_forced_unavailable_matches_normal_decode)
 {
-    // Two independent decode runs of the same clip: one with hw device
-    // creation forced to fail, one with normal (real) probing. On this
-    // build/CI leg, real probing itself resolves to "unavailable" too (no
-    // OSV_HWACCEL_* compiled in on Linux; no real GPU decode block on any CI
-    // runner even where it is compiled in) — the assertion that matters is
-    // that both runs produce byte-identical decoded output, so a future leg
-    // where real hwaccel *does* activate is covered by this same test
-    // without any change.
+    // Two independent decode runs of the same clip: one with hw device creation
+    // forced to fail (software path), one with normal probing. The guarantee we
+    // assert is STRUCTURAL — both runs decode the same number of frames with the
+    // same presentation timestamps — NOT byte-identical pixels.
+    //
+    // Byte-identity was the original assertion, but it was only ever true because
+    // no hwaccel was compiled in, so "normal" was silently software too. Now that
+    // VAAPI/D3D11VA hwaccels are compiled (Phase 52), a machine with a real GPU
+    // decode block runs the normal path on HARDWARE, whose output legitimately
+    // differs at the byte level from the software IDCT + NV12→I420 transfer path.
+    // The real invariant a user relies on when hwaccel is unavailable is that the
+    // fallback yields the same FRAMES (count + timing), which is what we check.
     auto decode_all = [](media::VideoDecoder& dec) {
         media::VideoDecodeWorker worker(*dec.video_codecpar(), dec.video_time_base(), 0);
         std::vector<double> pts_seen;
-        std::vector<std::vector<uint8_t>> storages;
         while (AVPacket* pkt = dec.demux_next_video_packet()) worker.submit(pkt, 0);
         worker.submit(nullptr, 0);
         bool saw_eof = false;
@@ -281,29 +284,27 @@ TEST(video_decode_worker_hwaccel_forced_unavailable_matches_normal_decode)
                 if (r->eof) { saw_eof = true; continue; }
                 if (!r->frame.has_value()) continue;
                 pts_seen.push_back(r->frame->pts_seconds);
-                storages.push_back(r->storage);
             }
             return saw_eof;
         });
-        return std::pair{pts_seen, storages};
+        return pts_seen;
     };
 
     Fixture fa("hwaccel_bytes_a");
     REQUIRE(fa.valid);
     media::test_only_force_hwaccel_unavailable(true);
-    auto [pts_a, storage_a] = decode_all(fa.dec);
+    auto pts_a = decode_all(fa.dec);
 
     Fixture fb("hwaccel_bytes_b");
     REQUIRE(fb.valid);
     media::test_only_force_hwaccel_unavailable(false);
-    auto [pts_b, storage_b] = decode_all(fb.dec);
+    auto pts_b = decode_all(fb.dec);
     media::test_only_force_hwaccel_unavailable(false);   // leave clean for later tests
 
     REQUIRE(pts_a.size() == 10);
     REQUIRE(pts_a.size() == pts_b.size());
     for (size_t i = 0; i < pts_a.size(); ++i) {
         CHECK(pts_a[i] == pts_b[i]);
-        CHECK(storage_a[i] == storage_b[i]);
     }
 }
 
@@ -411,16 +412,21 @@ TEST(video_decode_worker_forced_hw_active_transfer_noop_still_decodes_correctly)
 TEST(video_decode_worker_hw_transfer_failure_skips_frame_instead_of_corrupting)
 {
     // Forces hw_active_ = true AND is_hw_format_frame() = true, so
-    // publish_decoded_frame() believes every decoded frame is still an
-    // opaque hw device handle. transfer_hw_frame() is a no-op stub on this
-    // build (no OSV_HWACCEL_* compiled in) and always returns false, so
-    // every frame must be treated as a genuine hw-transfer failure and
-    // skipped entirely — never fed to the software pixel-conversion path,
-    // which would otherwise silently misinterpret device-handle bytes as
-    // real YUV planes (undefined behavior on real hardware).
+    // publish_decoded_frame() believes every decoded frame is still an opaque hw
+    // device handle and routes it through transfer_hw_frame(). We also force
+    // hwaccel UNAVAILABLE so the actual decode stays in software — the frames are
+    // therefore real YUV frames with no hw_frames_ctx, so transfer_hw_frame()
+    // genuinely FAILS on every one. That is the exact failure we want to exercise:
+    // a frame publish believes is a device handle but cannot transfer must be
+    // SKIPPED, never fed to the software pixel-conversion path (which would
+    // otherwise misinterpret device-handle bytes as real YUV planes — UB on real
+    // hardware). Forcing software decode makes this deterministic on machines that
+    // DO have a working GPU decode block (where, without it, real hw frames would
+    // transfer successfully and defeat the test).
     Fixture f("hw_transfer_fail");
     REQUIRE(f.valid);
 
+    media::test_only_force_hwaccel_unavailable(true);
     media::VideoDecodeWorker worker(*f.dec.video_codecpar(), f.dec.video_time_base(), 0);
     media::test_only_force_hw_active(worker, true);
     media::test_only_force_is_hw_format_frame(true);
@@ -444,6 +450,7 @@ TEST(video_decode_worker_hw_transfer_failure_skips_frame_instead_of_corrupting)
     }));
 
     media::test_only_force_is_hw_format_frame(std::nullopt);   // leave clean for later tests
+    media::test_only_force_hwaccel_unavailable(false);
 
     CHECK(frames_seen == 0);   // every frame skipped, not passed through as fake pixel data
 }

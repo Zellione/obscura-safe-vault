@@ -72,6 +72,7 @@ echo "==> Building vendored ffmpeg for Windows (MSVC toolchain, decode-only, sta
         --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb \
         --enable-swscale \
         --enable-d3d11va \
+        --enable-hwaccel=h264_d3d11va,hevc_d3d11va,vp9_d3d11va,av1_d3d11va,mpeg2_d3d11va,vc1_d3d11va,wmv3_d3d11va \
         --enable-pic
     make -j"$(nproc)"
     make install
