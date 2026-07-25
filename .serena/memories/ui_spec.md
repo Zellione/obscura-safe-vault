@@ -16,6 +16,14 @@ foundational spec.
   folders-first (Phase 46).
 - Breadcrumb bar at top shows current path.
 - Keyboard: `Enter`/`Space` open, `Backspace`/`Esc` up.
+- `Ctrl+A` (Phase 53) toggles select-all over the current gallery's **direct
+  children only** — never recursive, so it matches what the user can see. It is
+  handled BEFORE the plain-letter switch, otherwise `A` swallows it. Selectable
+  means image, video **or** gallery (`ui::is_selectable`, the one rule shared
+  with `Space`; galleries used to be silently unselectable here). Toggle rule:
+  all-selected → clear, otherwise select all. On an EMPTY gallery it is inert —
+  `select_all(0)` does not clear and `all_selected(0)` is false, so Ctrl+A in an
+  empty gallery cannot wipe a selection made elsewhere.
 - Import via SDL file dialog; thumbnails generated + stored on import.
 
 ## Image viewer (Phase 6)
@@ -178,6 +186,25 @@ Shows:
 ### Footer bar (Phase 50)
 Live summary while queue is non-empty: `"Importing <name> 128/450 · 2 queued"` (done/total, remainder queued).
 **Priority:** error > import summary > status. Clickable to jump to ImportStatusScreen.
+
+## Multi-volume archive confirm (Phase 53)
+Picking any volume of a split set (`.7z.001`, `.z01`, `.partN.rar`, `.r00`, …)
+auto-discovers its siblings from the containing directory and opens
+`VolumeSetDialog` BEFORE anything is enqueued — importing a 40-part set is not
+something to do silently off one click.
+- **Body:** heading `"Import N volumes as one archive?"`, then the volume names
+  in VOLUME order (not sorted — a spanned zip's `.zip` is last, old-style RAR's
+  `.rar` is first). Long sets show the first 8 and elide the rest as
+  `"... and N more"`; 7z happily emits 100+ parts and the panel must not grow
+  past the window.
+- **Keys:** `Enter`/`Y` confirm, `Esc`/`N` cancel.
+- **A gap is a REFUSAL, not a warning to click past.** Unlike `ConsentDialog`,
+  this dialog has a state where confirming is simply not offered: a missing
+  volume yields a *corrupt* gallery, not a partial one. On an incomplete set the
+  border turns `DANGER`, the warning names which ordinals are missing, `Enter`
+  returns `Pending` (the dialog stays up so the user can read WHICH volume is
+  gone), and the key hint drops to `"Esc - cancel"` — only the key that actually
+  does something is offered.
 
 ### Lock confirm modal (Phase 50)
 Manual lock, vault switch, or quit with pending queue: default-cancel modal reads **"N imports pending — finish current file, discard the rest, and lock?"**

@@ -275,6 +275,12 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   - `selectable.*` — `is_selectable` / `selectable_indices`, the ONE rule for what may enter a
     selection (image, video, gallery). Was inline in three places, which is how Ctrl+A and Space
     drift apart.
+  - `volume_set_dialog.*` (SDL) — `VolumeSetDialog`: the confirm modal over a `VolumeSetSummary`.
+    `Result{Pending,Confirmed,Cancelled}`; Enter/Y confirm, Esc/N cancel. Unlike ConsentDialog it
+    has a state where confirming is NOT offered: `!can_import` makes Enter return `Pending`
+    WITHOUT closing, so the user can read which volume is missing. Border ACCENT vs DANGER and the
+    key hint both derive from `can_import`, so an unimportable set never advertises Enter. Long
+    sets elide after 8 rows.
 - `zip_plan.*` — pure ZIP placement planner: entries -> galleries to create + file placements +
   skip count. SDL-/miniz-/vault-free, unit-tested. `build_zip_plan` mirrors the archive tree 1:1;
   a dir holding both media and subdirs maps onto a mixed gallery (Phase 46), so there is no
@@ -329,6 +335,12 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `set_exclusive` (inhibit until released). Worker stops gracefully on Vault::lock().
   **Phase 51:** `enqueue_folder(vault, folder_path, dest_gallery_path, progress)` enqueues an ImportTaskKind::Folder,
   mirroring `enqueue_files`. Multiple folder picks create multiple tasks (one per folder).
+  **Phase 53:** `enqueue_volume_set(volumes, style, stem, dest, gallery_name, kind, password)` — Task gained
+  `volumes` / `volume_style` / `volume_stem`. The whole ordered volume list must ride ON the task: the worker
+  runs off a task SNAPSHOT, and a snapshot carrying only `source` silently imports the first fragment alone.
+  Kind is detected from the set's STEM, never a volume filename — `whole.zip.00` has extension `.00`.
+  `process_volume_set_task(task, sink, pw) const` is a separate method (extracted for cognitive complexity):
+  assemble → route by `VolumeAssembly` → `merge_spanned_in_place` for spanned zips → the normal recursive import.
 - `import_model.*` — pure, SDL-free queue model: `ImportTask` (id, kind, source, dest, gallery_name, optional archive password);
   `ImportTaskKind{Files, Zip, ArchiveZip, Archive7z, ArchiveRar, ArchiveTar, Folder}` (Phase 51);
   `ImportRecord{task, state, progress, error}`; `ImportQueueModel` (FIFO/reorder/cancel/drain).
@@ -341,6 +353,10 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `MediaSink` (Phase 50) — executor seam for add_image/add_video, unifying legacy `FileOpJob` path (now retired)
   and new queue path. Abstract `struct MediaSink` with `add_image(Vault,...)` and `add_video(Vault,...)` virtuals;
   `DirectVaultSink` calls vault directly (synchronous); `test_only_*` seam for testing.
+  **Phase 53:** gained a `tag_gallery(vault, gallery_path, tag)` PURE VIRTUAL — deliberately not a defaulted
+  no-op, because that is exactly how `StagingSink` silently dropped every meta.json tag on queued imports
+  while the synchronous path kept working. `StagingSink`'s `StagedRecord` gained a `tag` field so tags survive
+  until the main-thread drain applies them.
 - **Retired:** `ZipImportJob` (entire class), `FileOpJob::start_import` (method); executors (zip_import, archive_import, etc.)
   reused by queue unchanged. GalleryGrid `Z` key now enqueues instead of launching a legacy job.
 
