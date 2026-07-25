@@ -33,10 +33,10 @@ Full design, including detailed tradeoffs and threat-model rationale:
 - [ ] Result tallies: `nested_archive_count`, `encrypted_skipped_count`, `depth_capped_count`, `size_exceeded_count`, `nested_archive_count_exceeded`. Surfaced on Import Status screen and footer summary.
 - [ ] Tests: depth-first planning order, guard activation per branch, total grows as discovery proceeds, naming collision-suffixing, meta.json per sub-gallery, CBZ leaf behavior, encrypted-archive skip path, progress-flag toggles.
 
-**3. Multipart archive detection**
-- [ ] `src/ui/volume_set.h/.cpp` — pure detection over supplied directory listing. `enum VolumeStyle { NumericSuffix, RarPart, RarOld, SpannedZip }`. `detect_volume_set(picked_path, siblings_span)` classifies and orders volumes, detects gaps. Pure function, no filesystem operations inside it.
-- [ ] Styles: `.7z.001`/`.zip.001`/`.tar.001` (NumericSuffix), `.part1.rar`/`.part2.rar` (RarPart), `.rar`/`.r00`/`.r01` (RarOld), `.z01`/`.z02`/`.zip` (SpannedZip).
-- [ ] Tests: correct ordering per style, gap detection, mismatch-extension rejection, edge cases (single volume not a set, partial sets).
+**3. Multipart archive detection** ✅
+- [x] `src/ui/volume_set.h/.cpp` — pure detection over supplied directory listing. `enum VolumeStyle { NumericSuffix, RarPart, RarOld, SpannedZip }`. `detect_volume_set(picked_path, siblings_span)` classifies and orders volumes, detects gaps. Pure function, no filesystem operations inside it.
+- [x] Styles confirmed against real tool output, not convention: 7z emits `.7z.001`…`.103` (3-digit, starts at **001**), `split -d` emits `.tar.00`…`.54` (2-digit, starts at **00**), `zip -s` emits `.z01`…+`.zip`, RAR uses `.part1`/`.part01`/`.part0001` — all three padding widths appear in libarchive's own fixtures. Variable digit width folded into NumericSuffix; a set is contiguous from its **own** minimum, since normalising to 1 would invent a gap in every `split -d` set.
+- [x] Tests (19): ordering per style incl. the two traps — spanned zip's `.zip` is LAST though `.z01` sorts first (and `.z10` must not sort before `.z02`), and old-style RAR's `.rar` is volume ONE despite sorting after `.r00`. Gap detection, two-volume minimum (what stops a lone `photos.zip`/`scans.rar` reading as a broken set), unrelated sets in one directory, non-volume siblings ignored.
 
 **4. Multipart assembly — NumericSuffix and RarPart / RarOld**
 - [ ] **NumericSuffix:** concatenate volumes in order into one buffer, feed existing `archive_read_open_memory` path. Verified working for 7z, zip, tar experimentally.
