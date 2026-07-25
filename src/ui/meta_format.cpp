@@ -118,7 +118,9 @@ std::string_view video_codec_name(vault::VideoCodec c) noexcept
     static_assert(kNames.size() == std::to_underlying(RV40) + 1U,
                   "Add a display name whenever a VideoCodec enumerator is added");
 
-    const auto* it = std::ranges::find_if(kNames, [c](const CodecName& e) { return e.codec == c; });
+    // Plain `auto`, not `auto*`: std::array's const_iterator is a raw pointer in
+    // libstdc++ but a class type in MSVC's STL, where `auto*` fails to deduce.
+    const auto it = std::ranges::find_if(kNames, [c](const CodecName& e) { return e.codec == c; });
     return it != kNames.end() ? it->name : "Video";
 }
 

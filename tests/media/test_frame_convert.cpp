@@ -2,6 +2,8 @@
 
 #ifdef OSV_VENDORED_AV
 
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <vector>
 
@@ -55,13 +57,13 @@ FramePtr make_interlaced_frame(int w, int h, int64_t pts)
     if (av_frame_get_buffer(fp.get(), 0) != 0) return {};
 
     for (int y = 0; y < h; ++y) {
-        std::memset(fp->data[0] + static_cast<ptrdiff_t>(y) * fp->linesize[0],
+        std::memset(fp->data[0] + static_cast<std::ptrdiff_t>(y) * fp->linesize[0],
                     (y % 2 != 0) ? 0x20 : 0xE0, static_cast<size_t>(w));
     }
     for (int y = 0; y < h / 2; ++y) {
-        std::memset(fp->data[1] + static_cast<ptrdiff_t>(y) * fp->linesize[1], 0x80,
+        std::memset(fp->data[1] + static_cast<std::ptrdiff_t>(y) * fp->linesize[1], 0x80,
                     static_cast<size_t>(w / 2));
-        std::memset(fp->data[2] + static_cast<ptrdiff_t>(y) * fp->linesize[2], 0x80,
+        std::memset(fp->data[2] + static_cast<std::ptrdiff_t>(y) * fp->linesize[2], 0x80,
                     static_cast<size_t>(w / 2));
     }
 
@@ -151,7 +153,7 @@ TEST(deinterlace_emits_frame_once_yadif_has_lookahead)
     bool any_row_changed = false;
     for (int y = 0; y < 64 && !any_row_changed; ++y) {
         const uint8_t expected_in = (y % 2 != 0) ? 0x20 : 0xE0;
-        if (out->data[0][static_cast<ptrdiff_t>(y) * out->linesize[0]] != expected_in)
+        if (out->data[0][static_cast<std::ptrdiff_t>(y) * out->linesize[0]] != expected_in)
             any_row_changed = true;
     }
     CHECK(any_row_changed);

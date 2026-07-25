@@ -139,7 +139,9 @@ std::optional<vault::VideoCodec> map_codec_id(int av_codec_id)
     static_assert(kCodecs.size() == std::to_underlying(RV40) + 1U,
                   "Add an AVCodecID mapping whenever a VideoCodec enumerator is added");
 
-    const auto* it = std::ranges::find_if(
+    // Plain `auto`, not `auto*`: std::array's const_iterator is a raw pointer in
+    // libstdc++ but a class type in MSVC's STL, where `auto*` fails to deduce.
+    const auto it = std::ranges::find_if(
         kCodecs, [av_codec_id](const CodecEntry& e) { return e.av_id == av_codec_id; });
     if (it == kCodecs.end()) return std::nullopt;
     return it->codec;
