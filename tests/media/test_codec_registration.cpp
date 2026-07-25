@@ -8,6 +8,7 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavfilter/avfilter.h>
 }
 
 namespace {
@@ -58,6 +59,11 @@ TEST(codec_registration_demuxers)
         }
         CHECK(fmt != nullptr);
     }
+}
+
+TEST(codec_registration_has_yadif_filter)
+{
+    CHECK(avfilter_get_by_name("yadif") != nullptr);
 }
 
 #endif  // OSV_VENDORED_AV

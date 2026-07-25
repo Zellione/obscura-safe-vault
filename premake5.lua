@@ -151,6 +151,12 @@ local function link_av()
         externalincludedirs { path.join(prefix, "include") }
         libdirs     { path.join(prefix, "lib") }
         defines     { "OSV_VENDORED_AV" }
+        -- libavfilter (Phase 52: yadif deinterlace). Must precede avformat/
+        -- avcodec on the link line — it references their symbols and static
+        -- linking is one-pass (dependents before dependencies).
+        if os.isfile(path.join(prefix, "lib/libavfilter.a")) then
+            links { "avfilter" }
+        end
         links       { "avformat", "avcodec", "swscale", "swresample", "avutil" }
         -- libavutil needs libm/pthread/dl on Linux; bz2/lzma may be referenced
         -- by demuxers. link_platform_extras() already covers pthread/dl/m.

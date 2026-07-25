@@ -204,8 +204,9 @@ build_ffmpeg() {
         --enable-static --disable-shared                                    \
         --disable-everything --disable-programs --disable-doc               \
         --disable-network --disable-encoders --disable-muxers               \
-        --disable-protocols --disable-devices --disable-filters             \
+        --disable-protocols --disable-devices --disable-filters --enable-filter=yadif \
         --disable-bsfs --disable-autodetect                                 \
+        --enable-avfilter                                                   \
         --enable-libaom                                                     \
         --enable-vaapi                                                      \
         --enable-decoder=h264,hevc,prores,dnxhd,mjpeg,vp8,vp9,libaom_av1,qtrle,cinepak,gif,aac,opus,mp3,vorbis,flac,ac3,mpeg1video,mpeg2video,mpeg4,msmpeg4v1,msmpeg4v2,msmpeg4v3,wmv1,wmv2,wmv3,vc1,h263,flv,vp6,vp6a,vp6f,svq1,svq3,dvvideo,msvideo1,rpza,huffyuv,ffv1,theora,rv10,rv20,rv30,rv40,mp2,wmav1,wmav2,cook,ra_144,ra_288,pcm_s16le,pcm_u8,adpcm_ms,adpcm_ima_wav \
