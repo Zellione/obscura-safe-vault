@@ -211,6 +211,7 @@ ZipImportOutcome import_zip(MediaSink&                   sink,
 ZipImportOutcome import_cbz(MediaSink&                   sink,
                             const std::filesystem::path& cbz_path,
                             std::string_view             gallery_name,
+                            std::string_view             sink_root,
                             ImportProgress*              progress)
 {
     // A .cbz is a plain zip; build_cbz_plan emits one leaf gallery of pages.
@@ -231,8 +232,10 @@ ZipImportOutcome import_cbz(MediaSink&                   sink,
     const ZipPlan plan = build_cbz_plan(entries, "", gallery_name);
     out.skipped = plan.skipped_unsupported;
 
-    // Root is just gallery_name when base is empty.
-    const std::string root_gallery(gallery_name);
+    // What to strip before the sink — NOT necessarily gallery_name; see the
+    // header. StagingSink's base omits the name, so stripping it there loses a
+    // whole gallery level.
+    const std::string root_gallery(sink_root);
 
     if (!create_galleries(sink, plan, zip, root_gallery, out)) return out;
     if (!plan.placements.empty()) {
@@ -299,7 +302,7 @@ ZipImportOutcome import_cbz(vault::Vault&                v,
 
     // Create sink and call the MediaSink version.
     DirectVaultSink sink(v, base_gallery, gallery_name, progress);
-    out = import_cbz(sink, cbz_path, gallery_name, progress);
+    out = import_cbz(sink, cbz_path, gallery_name, gallery_name, progress);
 
     // Apply meta tags to the top-level imported gallery (best-effort).
     if (out.ok && !out.imported && !out.skipped) {

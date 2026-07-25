@@ -978,13 +978,13 @@ void ImportQueue::process_archive_task(Task& task)
         outcome = import_archive_recursive(sink, task.archive_path, task.gallery_name, "",
                                            task.progress.get(), pw.password);
     } else if (task.kind == ImportTaskKind::Cbz) {
-        outcome = import_cbz(sink, task.archive_path, task.gallery_name, task.progress.get());
+        outcome = import_cbz(sink, task.archive_path, task.gallery_name, "", task.progress.get());
     } else if (task.kind == ImportTaskKind::Archive) {
         outcome = import_archive_recursive(sink, task.archive_path, task.gallery_name, "",
                                            task.progress.get(), pw.password);
     } else if (task.kind == ImportTaskKind::ArchiveCbz) {
         outcome =
-            import_archive_cbz(sink, task.archive_path, task.gallery_name, task.progress.get(), pw);
+            import_archive_cbz(sink, task.archive_path, task.gallery_name, "", task.progress.get(), pw);
     }
 
     // Wipe password
@@ -1012,8 +1012,11 @@ void ImportQueue::process_folder_task(Task& task)
     // Scan the folder
     const auto entries = scan_folder(task.archive_path);
 
-    // Build the placement plan
-    const auto plan = build_zip_plan(entries, task.dest_gallery, task.gallery_name);
+    // Base "" — NOT dest_gallery. StagingSink already prefixes dest_gallery, so
+    // building absolute paths here applied it twice: a folder imported into
+    // "Parent" landed under "Parent/Parent/...". At the vault root the two
+    // cancelled out, which is why it went unnoticed.
+    const auto plan = build_zip_plan(entries, "", task.gallery_name);
 
     // Set total for progress tracking
     if (task.progress) {

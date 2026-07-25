@@ -561,7 +561,7 @@ TEST(import_queue_recurses_into_a_nested_archive)
 // queue land under its gallery name? The CBZ path still uses the flat importer,
 // and StagingSink's base is dest_gallery alone, so this pins down whether the
 // gallery-name level survives. Not asserting a fix — recording actual behaviour.
-TEST(import_queue_flat_cbz_gallery_placement_is_pinned)
+TEST(import_queue_flat_cbz_creates_its_gallery)
 {
     const auto temp_dir   = ziptest::fresh_dir("test_import_queue_flat_cbz");
     const auto vault_path = temp_dir / "vault.osv";
@@ -579,24 +579,50 @@ TEST(import_queue_flat_cbz_gallery_placement_is_pinned)
     pump_until_idle(q);
     q.end_session();
 
-    // DEFECT, recorded not fixed: the gallery name is LOST. import_cbz strips
-    // `gallery_name` from the plan's paths before calling the sink, but
-    // StagingSink's base is dest_gallery alone and does not re-add it — so the
-    // pages land wherever the import was started instead of in a new gallery.
-    // DirectVaultSink does not have this problem, which is why the synchronous
-    // path and its tests look correct.
-    //
-    // The existing queue test asserts only `imported >= 0` ("CBZ archives are
-    // complex"), which is precisely what let this hide.
-    //
-    // Phase 53's recursive path avoids it by passing sink_root="" so the name
-    // survives; the flat path is untouched pending an owner decision.
+    // A CBZ imported through the queue must land in a gallery named after the
+    // archive, exactly as the synchronous path already does. Previously the
+    // name was lost and the pages spilled into whatever gallery the import was
+    // started from.
     bool saw_gallery = false;
     for (const auto* n : v.list("")) {
         if (n->name == "MyBook" && n->is_gallery()) saw_gallery = true;
     }
-    CHECK_FALSE(saw_gallery);                                  // the bug
-    CHECK_EQ(v.list("").size(), static_cast<size_t>(2));       // pages at the root
+    CHECK(saw_gallery);
+    CHECK_EQ(v.list("MyBook").size(), static_cast<size_t>(2));
+    CHECK_EQ(v.list("").size(), static_cast<size_t>(1));   // only the gallery at root
+
+    ziptest::cleanup_dir(temp_dir);
+}
+
+// Sibling of the CBZ placement bug: process_folder_task builds its plan with
+// dest_gallery as the BASE (so paths are absolute) and then passes those paths
+// to StagingSink, which prefixes dest_gallery again. At the vault root the two
+// cancel out and nothing looks wrong; into a sub-gallery they should not.
+TEST(import_queue_folder_into_a_subgallery_lands_in_one_place)
+{
+    const auto temp_dir   = ziptest::fresh_dir("test_import_queue_folder_sub");
+    const auto vault_path = temp_dir / "vault.osv";
+
+    vault::Vault v;
+    ziptest::make_vault(v, vault_path);
+    REQUIRE(v.create_gallery("Parent") == vault::VaultResult::Ok);
+
+    const auto src = temp_dir / "src";
+    fs::create_directories(src);
+    const auto jpeg = ziptest::fake_jpeg(41);
+    std::ofstream(src / "a.jpg", std::ios::binary)
+        .write(reinterpret_cast<const char*>(jpeg.data()),
+               static_cast<std::streamsize>(jpeg.size()));
+
+    ui::ImportQueue q;
+    q.begin_session(v);
+    (void)q.enqueue_folder(src, "Parent", "MyFolder");
+    pump_until_idle(q);
+    q.end_session();
+
+    // The image belongs in Parent/MyFolder and nowhere else.
+    CHECK_EQ(v.list("Parent/MyFolder").size(), static_cast<size_t>(1));
+    CHECK_EQ(v.list("Parent/Parent").size(), static_cast<size_t>(0));
 
     ziptest::cleanup_dir(temp_dir);
 }

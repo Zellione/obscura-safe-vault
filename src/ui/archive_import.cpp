@@ -167,6 +167,7 @@ ZipImportOutcome import_archive(MediaSink&                   sink,
 ZipImportOutcome import_archive_cbz(MediaSink&                   sink,
                                     const std::filesystem::path& archive_path,
                                     std::string_view             gallery_name,
+                                    std::string_view             sink_root,
                                     ImportProgress*              progress,
                                     ArchivePassword              pw)
 {
@@ -179,8 +180,10 @@ ZipImportOutcome import_archive_cbz(MediaSink&                   sink,
     const ZipPlan plan = build_cbz_plan(reader.entries(), "", gallery_name);
     out.skipped = plan.skipped_unsupported;
 
-    // Root is just gallery_name when base is empty.
-    const std::string root_gallery(gallery_name);
+    // What to strip before the sink — NOT necessarily gallery_name; see the
+    // header. StagingSink's base omits the name, so stripping it there loses a
+    // whole gallery level.
+    const std::string root_gallery(sink_root);
 
     if (!create_galleries(sink, plan, root_gallery, out)) return out;
     run_placements(sink, reader, plan, root_gallery, out, progress);
@@ -209,6 +212,7 @@ ZipImportOutcome import_archive(MediaSink&, const std::filesystem::path&, std::s
 }
 
 ZipImportOutcome import_archive_cbz(MediaSink&, const std::filesystem::path&, std::string_view,
+                                    std::string_view,
                                     ImportProgress*, ArchivePassword)
 {
     return unsupported();
@@ -241,7 +245,7 @@ ZipImportOutcome import_archive_cbz(vault::Vault&                v,
                                     ArchivePassword              pw)
 {
     DirectVaultSink sink(v, base_gallery, gallery_name, progress);
-    return import_archive_cbz(sink, archive_path, gallery_name, progress, pw);
+    return import_archive_cbz(sink, archive_path, gallery_name, gallery_name, progress, pw);
 }
 
 }  // namespace ui
