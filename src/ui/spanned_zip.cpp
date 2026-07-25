@@ -9,8 +9,11 @@ namespace {
 
 // Helper: read little-endian uint16 at offset
 [[nodiscard]] uint16_t read_u16_le(const uint8_t* data, size_t offset) {
-    return static_cast<uint16_t>(data[offset]) |
-           (static_cast<uint16_t>(data[offset + 1]) << 8);
+    // The shift promotes uint16_t to int, so the `|` result is an int and
+    // narrowing it back on return is what clang's -Wconversion rejects. gcc
+    // does not warn here, which is why this only failed on the clang CI leg.
+    return static_cast<uint16_t>(static_cast<unsigned>(data[offset]) |
+                                 (static_cast<unsigned>(data[offset + 1]) << 8U));
 }
 
 // Helper: read little-endian uint32 at offset
@@ -37,11 +40,61 @@ void write_u32_le(uint8_t* data, size_t offset, uint32_t val) {
 
 // Marker signatures
 constexpr uint8_t PK_SPANNING_MARKER[] = {0x50, 0x4b, 0x07, 0x08};  // PK\x07\x08
-constexpr uint8_t PK_LOCAL_HEADER[]    = {0x50, 0x4b, 0x03, 0x04};  // PK\x03\x04
 constexpr uint8_t PK_CD_ENTRY[]        = {0x50, 0x4b, 0x01, 0x02};  // PK\x01\x02
 constexpr uint8_t PK_EOCD[]            = {0x50, 0x4b, 0x05, 0x06};  // PK\x05\x06
 constexpr uint8_t PK_ZIP64_LOCATOR[]   = {0x50, 0x4b, 0x06, 0x07};  // PK\x06\x07
 constexpr uint8_t PK_ZIP64_EOCD[]      = {0x50, 0x4b, 0x06, 0x06};  // PK\x06\x06
+
+// Rewrite every central-directory entry so the merged buffer is a single-disk
+// archive: disk_number_start to 0, and the local-header offset to an absolute
+// position. Split out of merge_spanned_zip because it carries most of that
+// function's branching.
+//
+// Disk 0 must have the stripped marker subtracted — its stored offsets were
+// measured from the ORIGINAL volume, which still had the 4 leading bytes.
+// Volumes >= 1 need no adjustment; volume_offsets already accounts for it.
+// Getting this wrong leaves a CD that enumerates perfectly while every
+// extraction fails.
+[[nodiscard]] bool rewrite_central_directory(std::vector<uint8_t>& merged, size_t cd_absolute,
+                                             uint32_t cd_size,
+                                             const std::vector<size_t>& volume_offsets,
+                                             size_t                     marker_size)
+{
+    size_t cd_pos = 0;
+    while (cd_pos + 46 <= cd_size) {
+        if (std::memcmp(&merged[cd_absolute + cd_pos], PK_CD_ENTRY, 4) != 0) {
+            break;   // end of the entries
+        }
+
+        const uint16_t filename_len = read_u16_le(merged.data(), cd_absolute + cd_pos + 28);
+        const uint16_t extra_len    = read_u16_le(merged.data(), cd_absolute + cd_pos + 30);
+        const uint16_t comment_len  = read_u16_le(merged.data(), cd_absolute + cd_pos + 32);
+        if (cd_pos + 46 + filename_len + extra_len + comment_len > cd_size) {
+            break;
+        }
+
+        const uint16_t disk_start   = read_u16_le(merged.data(), cd_absolute + cd_pos + 34);
+        const uint32_t local_offset = read_u32_le(merged.data(), cd_absolute + cd_pos + 42);
+        if (disk_start >= volume_offsets.size()) {
+            return false;
+        }
+        if (disk_start == 0 && static_cast<size_t>(local_offset) < marker_size) {
+            return false;
+        }
+
+        const size_t local_abs = volume_offsets[disk_start] + static_cast<size_t>(local_offset) -
+                                 (disk_start == 0 ? marker_size : 0);
+        if (local_abs + 4 > merged.size()) {
+            return false;
+        }
+
+        write_u16_le(merged.data(), cd_absolute + cd_pos + 34, 0);
+        write_u32_le(merged.data(), cd_absolute + cd_pos + 42, static_cast<uint32_t>(local_abs));
+
+        cd_pos += 46 + filename_len + extra_len + comment_len;
+    }
+    return true;
+}
 
 } // namespace
 
@@ -57,10 +110,8 @@ constexpr uint8_t PK_ZIP64_EOCD[]      = {0x50, 0x4b, 0x06, 0x06};  // PK\x06\x0
     size_t total_size = 0;
     size_t marker_size = 0;
 
-    if (volumes[0].size() >= 4) {
-        if (std::memcmp(volumes[0].data(), PK_SPANNING_MARKER, 4) == 0) {
-            marker_size = 4;
-        }
+    if (volumes[0].size() >= 4 && std::memcmp(volumes[0].data(), PK_SPANNING_MARKER, 4) == 0) {
+        marker_size = 4;
     }
 
     // Calculate merged size
@@ -123,7 +174,7 @@ constexpr uint8_t PK_ZIP64_EOCD[]      = {0x50, 0x4b, 0x06, 0x06};  // PK\x06\x0
         return SpannedZipResult{.merged = {}, .error = SpannedZipError::Malformed};
     }
 
-    size_t eocd_idx = static_cast<size_t>(eocd_pos);
+    const auto eocd_idx = static_cast<size_t>(eocd_pos);
 
     // Step 5: Bounds check EOCD
     if (eocd_idx + 22 > merged.size()) {
@@ -134,10 +185,9 @@ constexpr uint8_t PK_ZIP64_EOCD[]      = {0x50, 0x4b, 0x06, 0x06};  // PK\x06\x0
     uint16_t disk_with_cd       = read_u16_le(merged.data(), eocd_idx + 6);
     uint32_t cd_size            = read_u32_le(merged.data(), eocd_idx + 12);
     uint32_t cd_offset_on_disk  = read_u32_le(merged.data(), eocd_idx + 16);
-    uint16_t comment_length     = read_u16_le(merged.data(), eocd_idx + 20);
-
-    // Check EOCD comment doesn't extend past buffer
-    if (eocd_idx + 22 + comment_length > merged.size()) {
+    // Check the EOCD comment doesn't extend past the buffer.
+    if (const uint16_t comment_length = read_u16_le(merged.data(), eocd_idx + 20);
+        eocd_idx + 22 + comment_length > merged.size()) {
         return SpannedZipResult{.merged = {}, .error = SpannedZipError::Malformed};
     }
 
@@ -174,68 +224,8 @@ constexpr uint8_t PK_ZIP64_EOCD[]      = {0x50, 0x4b, 0x06, 0x06};  // PK\x06\x0
         return SpannedZipResult{.merged = {}, .error = SpannedZipError::Malformed};
     }
 
-    // Step 10: Walk and update CD entries
-    size_t cd_pos = 0;
-
-    while (cd_pos + 46 <= cd_size) {
-        // Check CD entry signature
-        if (std::memcmp(&merged[cd_absolute + cd_pos], PK_CD_ENTRY, 4) != 0) {
-            break;  // End of CD entries
-        }
-
-        // Parse variable-length fields
-        uint16_t filename_len =
-            read_u16_le(merged.data(), cd_absolute + cd_pos + 28);
-        uint16_t extra_len = read_u16_le(merged.data(), cd_absolute + cd_pos + 30);
-        uint16_t comment_len = read_u16_le(merged.data(), cd_absolute + cd_pos + 32);
-
-        // Check we don't overrun CD
-        if (cd_pos + 46 + filename_len + extra_len + comment_len > cd_size) {
-            break;
-        }
-
-        // Read disk_start and local_offset
-        uint16_t disk_start =
-            read_u16_le(merged.data(), cd_absolute + cd_pos + 34);
-        uint32_t local_offset =
-            read_u32_le(merged.data(), cd_absolute + cd_pos + 42);
-
-        // Bounds check: disk_start must be valid
-        if (disk_start >= volume_offsets.size()) {
-            return SpannedZipResult{
-                .merged = {}, .error = SpannedZipError::Malformed};
-        }
-
-        // Calculate absolute offset of local header.
-        //
-        // Disk 0 needs the marker subtracted: the stored offset is measured
-        // from the start of the ORIGINAL volume 0, which still had the 4-byte
-        // spanning marker, but the merged buffer has it stripped. Volumes >= 1
-        // need no adjustment — volume_offsets already began accumulating from
-        // (volumes[0].size() - marker_size), so the shift is baked in there.
-        // Getting this wrong leaves a merged archive whose central directory
-        // enumerates perfectly while every extraction fails.
-        if (disk_start == 0 && static_cast<size_t>(local_offset) < marker_size) {
-            return SpannedZipResult{.merged = {}, .error = SpannedZipError::Malformed};
-        }
-        size_t local_abs = volume_offsets[disk_start] + static_cast<size_t>(local_offset)
-                           - (disk_start == 0 ? marker_size : 0);
-
-        // Bounds check: local header must be in buffer and have minimum size
-        if (local_abs + 4 > merged.size()) {
-            return SpannedZipResult{
-                .merged = {}, .error = SpannedZipError::Malformed};
-        }
-
-        // Rewrite disk_start to 0
-        write_u16_le(merged.data(), cd_absolute + cd_pos + 34, 0);
-
-        // Rewrite local_offset to absolute offset
-        write_u32_le(merged.data(), cd_absolute + cd_pos + 42,
-                     static_cast<uint32_t>(local_abs));
-
-        // Move to next CD entry
-        cd_pos += 46 + filename_len + extra_len + comment_len;
+    if (!rewrite_central_directory(merged, cd_absolute, cd_size, volume_offsets, marker_size)) {
+        return SpannedZipResult{.merged = {}, .error = SpannedZipError::Malformed};
     }
 
     // Step 11: Rewrite EOCD fields

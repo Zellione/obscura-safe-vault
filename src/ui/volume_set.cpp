@@ -68,8 +68,8 @@ constexpr int SPANNED_ZIP_LAST = -1;
     if (dot == std::string_view::npos || dot == 0) {
         return std::nullopt;
     }
-    const std::string     stem = std::string(name.substr(0, dot));
-    const std::string_view ext = name.substr(dot + 1);
+    const auto             stem = std::string(name.substr(0, dot));
+    const std::string_view ext  = name.substr(dot + 1);
 
     if (ext == "zip") {
         return Parsed{stem, SPANNED_ZIP_LAST};
@@ -107,7 +107,7 @@ constexpr int SPANNED_ZIP_LAST = -1;
     if (dot == std::string_view::npos || dot == 0) {
         return std::nullopt;
     }
-    const std::string      stem = std::string(name.substr(0, dot));
+    const auto             stem = std::string(name.substr(0, dot));
     const std::string_view ext  = name.substr(dot + 1);
 
     if (ext == "rar") {
@@ -124,10 +124,10 @@ using Parser = std::optional<Parsed> (*)(std::string_view);
 [[nodiscard]] Parser parser_for(VolumeStyle style)
 {
     switch (style) {
-        case VolumeStyle::NumericSuffix: return parse_numeric;
-        case VolumeStyle::SpannedZip:    return parse_spanned_zip;
-        case VolumeStyle::RarPart:       return parse_rar_part;
-        case VolumeStyle::RarOld:        return parse_rar_old;
+        case VolumeStyle::NumericSuffix: return &parse_numeric;
+        case VolumeStyle::SpannedZip:    return &parse_spanned_zip;
+        case VolumeStyle::RarPart:       return &parse_rar_part;
+        case VolumeStyle::RarOld:        return &parse_rar_old;
         case VolumeStyle::None:          break;
     }
     return nullptr;
@@ -148,7 +148,7 @@ struct Member {
     for (const std::string& sib : siblings) {
         const auto p = parse(lowered(sib));
         if (p && p->stem == stem) {
-            found.push_back({sib, p->ordinal});
+            found.emplace_back(sib, p->ordinal);
         }
     }
     return found;
@@ -192,16 +192,17 @@ void finalise_order(std::vector<Member>& members)
 
 VolumeAssembly assembly_for(VolumeStyle style) noexcept
 {
+    using enum VolumeStyle;
     switch (style) {
-        case VolumeStyle::NumericSuffix: return VolumeAssembly::Concatenate;
+        case NumericSuffix: return VolumeAssembly::Concatenate;
         // Each RAR volume carries its own header, so the set cannot be glued
         // together — libarchive has to be handed the paths.
-        case VolumeStyle::RarPart:
-        case VolumeStyle::RarOld:        return VolumeAssembly::FileOriented;
+        case RarPart:
+        case RarOld:        return VolumeAssembly::FileOriented;
         // A spanned zip concatenates into something whose central directory
         // still points at per-disk offsets; it needs rewriting first.
-        case VolumeStyle::SpannedZip:    return VolumeAssembly::SpannedZipMerge;
-        case VolumeStyle::None:          break;
+        case SpannedZip:    return VolumeAssembly::SpannedZipMerge;
+        case None:          break;
     }
     return VolumeAssembly::None;
 }
@@ -233,10 +234,10 @@ VolumeSet detect_volume_set(std::string_view picked, std::span<const std::string
         Parser      parse;
     };
     const std::array<Candidate, 4> candidates{{
-        {VolumeStyle::RarPart, parse_rar_part},
-        {VolumeStyle::SpannedZip, parse_spanned_zip},
-        {VolumeStyle::NumericSuffix, parse_numeric},
-        {VolumeStyle::RarOld, parse_rar_old},
+        {.style = VolumeStyle::RarPart, .parse = &parse_rar_part},
+        {.style = VolumeStyle::SpannedZip, .parse = &parse_spanned_zip},
+        {.style = VolumeStyle::NumericSuffix, .parse = &parse_numeric},
+        {.style = VolumeStyle::RarOld, .parse = &parse_rar_old},
     }};
 
     for (const Candidate& c : candidates) {

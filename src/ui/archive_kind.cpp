@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cctype>
+#include <span>
 #include <string>
 
 namespace ui {
@@ -19,28 +20,40 @@ constexpr size_t TAR_MAGIC_OFFSET = 257;
     return out;
 }
 
-// True if `bytes` begins with `magic`. Safe on short/empty buffers.
-[[nodiscard]] bool has_magic_at(std::span<const uint8_t> bytes, size_t offset, std::string_view magic)
+// Magic signatures as BYTES, not string literals. `\x` escapes are greedy in
+// C++ — a magic byte followed by a hex-digit character silently absorbs it —
+// and these are binary anyway, so a byte array says what is meant.
+constexpr std::array<uint8_t, 2> MAGIC_GZIP{0x1F, 0x8B};
+constexpr std::array<uint8_t, 4> MAGIC_ZIP{'P', 'K', 0x03, 0x04};
+constexpr std::array<uint8_t, 6> MAGIC_7Z{'7', 'z', 0xBC, 0xAF, 0x27, 0x1C};
+// Common to RAR4 and RAR5; the byte after it distinguishes them and libarchive
+// dispatches on that for us.
+constexpr std::array<uint8_t, 6> MAGIC_RAR{'R', 'a', 'r', '!', 0x1A, 0x07};
+constexpr std::array<uint8_t, 5> MAGIC_TAR{'u', 's', 't', 'a', 'r'};
+
+// True if `bytes` carries `magic` at `offset`. Safe on short/empty buffers.
+[[nodiscard]] bool has_magic_at(std::span<const uint8_t> bytes, size_t offset,
+                                std::span<const uint8_t> magic)
 {
     if (bytes.size() < offset + magic.size()) {
         return false;
     }
     for (size_t i = 0; i < magic.size(); ++i) {
-        if (bytes[offset + i] != static_cast<uint8_t>(magic[i])) {
+        if (bytes[offset + i] != magic[i]) {
             return false;
         }
     }
     return true;
 }
 
-[[nodiscard]] bool has_magic(std::span<const uint8_t> bytes, std::string_view magic)
+[[nodiscard]] bool has_magic(std::span<const uint8_t> bytes, std::span<const uint8_t> magic)
 {
     return has_magic_at(bytes, 0, magic);
 }
 
 // The extension must be preceded by an actual stem: ".zip" is a dotfile, not a
 // ZIP named "".
-[[nodiscard]] bool extension_is(const std::string& lower_name, std::string_view suffix)
+[[nodiscard]] bool extension_is(std::string_view lower_name, std::string_view suffix)
 {
     return lower_name.size() > suffix.size() && lower_name.ends_with(suffix);
 }
@@ -72,31 +85,31 @@ bool is_archive_name(std::string_view name)
 
 ArchiveKind detect_archive_kind(std::string_view filename, std::span<const uint8_t> bytes)
 {
+    using enum ArchiveKind;
+
     const std::string name = lowered(filename);
 
     // Longest/most specific extensions first: ".tar.gz" must not match ".gz"
     // handling or be mistaken for a plain ".tar".
     if (extension_is(name, ".tar.gz") || extension_is(name, ".tgz")) {
-        return has_magic(bytes, "\x1F\x8B") ? ArchiveKind::TarGz : ArchiveKind::None;
+        return has_magic(bytes, MAGIC_GZIP) ? TarGz : None;
     }
     if (extension_is(name, ".zip")) {
-        return has_magic(bytes, "PK\x03\x04") ? ArchiveKind::Zip : ArchiveKind::None;
+        return has_magic(bytes, MAGIC_ZIP) ? Zip : None;
     }
     if (extension_is(name, ".cbz")) {
-        return has_magic(bytes, "PK\x03\x04") ? ArchiveKind::Cbz : ArchiveKind::None;
+        return has_magic(bytes, MAGIC_ZIP) ? Cbz : None;
     }
     if (extension_is(name, ".7z")) {
-        return has_magic(bytes, "7z\xBC\xAF\x27\x1C") ? ArchiveKind::SevenZip : ArchiveKind::None;
+        return has_magic(bytes, MAGIC_7Z) ? SevenZip : None;
     }
     if (extension_is(name, ".rar")) {
-        // "Rar!\x1A\x07" is common to RAR4 and RAR5; the byte that follows
-        // distinguishes them, and libarchive dispatches on it for us.
-        return has_magic(bytes, "Rar!\x1A\x07") ? ArchiveKind::Rar : ArchiveKind::None;
+        return has_magic(bytes, MAGIC_RAR) ? Rar : None;
     }
     if (extension_is(name, ".tar")) {
-        return has_magic_at(bytes, TAR_MAGIC_OFFSET, "ustar") ? ArchiveKind::Tar : ArchiveKind::None;
+        return has_magic_at(bytes, TAR_MAGIC_OFFSET, MAGIC_TAR) ? Tar : None;
     }
-    return ArchiveKind::None;
+    return None;
 }
 
 } // namespace ui

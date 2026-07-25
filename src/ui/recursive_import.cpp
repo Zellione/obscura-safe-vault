@@ -39,38 +39,42 @@ std::string unique_gallery_name(std::string_view base, const std::vector<std::st
     std::string candidate(base);
     // Starts at 2 so the first collision reads "bonus_2" — "bonus_1" would
     // imply a "bonus_0" somewhere.
-    for (int n = 2; is_taken(candidate); ++n) {
+    int n = 2;
+    while (is_taken(candidate)) {
         candidate = std::format("{}_{}", base, n);
+        ++n;
     }
     return candidate;
 }
 
-RecursionBudget::RecursionBudget(RecursionLimits limits, uint64_t root_archive_bytes)
+RecursionBudget::RecursionBudget(const RecursionLimits& limits, uint64_t root_archive_bytes)
     : limits_(limits), root_bytes_(root_archive_bytes)
 {
 }
 
 RecursionVerdict RecursionBudget::may_descend(int depth, uint64_t nested_bytes) const
 {
+    using enum RecursionVerdict;
+
     if (depth >= limits_.max_depth) {
-        return RecursionVerdict::DepthExceeded;
+        return DepthExceeded;
     }
     if (nested_seen_ >= limits_.max_nested_archives) {
-        return RecursionVerdict::CountExceeded;
+        return CountExceeded;
     }
     if (total_expanded_ > limits_.max_total_expanded) {
-        return RecursionVerdict::TotalBytesExceeded;
+        return TotalBytesExceeded;
     }
     if (live_bytes_ + nested_bytes > limits_.max_live_bytes) {
-        return RecursionVerdict::LiveBytesExceeded;
+        return LiveBytesExceeded;
     }
     // Ratio is meaningless for a zero-byte root, and dividing by it would be a
     // crash on a degenerate input. Compared by multiplication rather than
     // division so a huge expansion cannot overflow the quotient.
     if (root_bytes_ > 0 && total_expanded_ > limits_.max_expansion_ratio * root_bytes_) {
-        return RecursionVerdict::RatioExceeded;
+        return RatioExceeded;
     }
-    return RecursionVerdict::Allow;
+    return Allow;
 }
 
 void RecursionBudget::enter(uint64_t nested_bytes)
@@ -103,52 +107,37 @@ struct Frame {
     int                      depth;
 };
 
-void walk_one(Frame& f, const RecursiveHooks& hooks, RecursionBudget& budget,
+void walk_one(const Frame& f, const RecursiveHooks& hooks, RecursionBudget& budget,
               RecursiveTally& tally);
 
-// Import every media entry, then descend into each nested archive in turn.
-void walk_one(Frame& f, const RecursiveHooks& hooks, RecursionBudget& budget,
-              RecursiveTally& tally)
+// Each archive's own meta.json tags the gallery it produced — including a
+// nested one, so a sub-gallery carries the metadata of the archive it came from
+// rather than inheriting its parent's. Best-effort: bad metadata never fails an
+// import (Phase 27's rule).
+void apply_own_meta(const Frame& f, const RecursiveHooks& hooks,
+                    const std::vector<ZipEntry>& entries)
 {
-    std::vector<ZipEntry> entries;
-    if (!hooks.list_entries(f.bytes, f.kind, entries)) {
-        ++tally.unreadable;
+    const std::optional<size_t> meta_idx = find_meta_entry(entries);
+    if (!meta_idx.has_value()) {
         return;
     }
-
-    // A CBZ is a flat run of pages, so an archive inside one is not a chapter:
-    // plan it as pages and never descend.
-    const ZipPlan plan = (f.kind == ArchiveKind::Cbz)
-                             ? build_cbz_plan(entries, f.gallery, "")
-                             : build_zip_plan(entries, f.gallery, "");
-
-    for (const std::string& g : plan.galleries) {
-        if (!hooks.create_gallery(g)) return;
+    crypto::SecureBytes meta_bytes;
+    if (!hooks.extract_entry(f.bytes, f.kind, *meta_idx, meta_bytes)) {
+        return;
     }
-
-    // Each archive's own meta.json tags the gallery it produced — including a
-    // nested one, so a sub-gallery carries the metadata of the archive it came
-    // from rather than inheriting its parent's. Best-effort: bad metadata never
-    // fails an import (Phase 27's rule).
-    if (const std::optional<size_t> meta_idx = find_meta_entry(entries); meta_idx.has_value()) {
-        crypto::SecureBytes meta_bytes;
-        if (hooks.extract_entry(f.bytes, f.kind, *meta_idx, meta_bytes)) {
-            for (const std::string& tag : meta_gallery_tags(parse_meta_json(meta_bytes.as_span()))) {
-                (void)hooks.tag_gallery(f.gallery, tag);
-            }
-        }
+    for (const std::string& tag : meta_gallery_tags(parse_meta_json(meta_bytes.as_span()))) {
+        (void)hooks.tag_gallery(f.gallery, tag);
     }
+}
 
-    tally.skipped_unsupported += plan.skipped_unsupported;
-
-    // Grow the caller's running total as the tree is explored. Optional, so an
-    // unset hook is not the fatal-missing-hook case handled in walk_archive.
-    if (hooks.note_planned) {
-        hooks.note_planned(static_cast<int>(plan.placements.size()));
-    }
-
+// Returns false if the walk was cancelled partway.
+[[nodiscard]] bool place_media(const Frame& f, const ZipPlan& plan, const RecursiveHooks& hooks,
+                               RecursionBudget& budget, RecursiveTally& tally)
+{
     for (const ZipPlacement& p : plan.placements) {
-        if (hooks.cancelled()) return;
+        if (hooks.cancelled()) {
+            return false;
+        }
         crypto::SecureBytes payload;
         if (!hooks.extract_entry(f.bytes, f.kind, p.entry_index, payload)) {
             ++tally.skipped_unsupported;
@@ -161,44 +150,69 @@ void walk_one(Frame& f, const RecursiveHooks& hooks, RecursionBudget& budget,
             ++tally.skipped_unsupported;
         }
     }
+    return true;
+}
 
+// Extract a nested candidate and confirm it really is an archive the budget
+// allows entering. Returns None when it must be skipped; the tally records why.
+[[nodiscard]] ArchiveKind vet_nested(const Frame& f, const ZipPlacement& p,
+                                     const RecursiveHooks& hooks, RecursionBudget& budget,
+                                     RecursiveTally& tally, crypto::SecureBytes& child)
+{
+    if (!hooks.extract_entry(f.bytes, f.kind, p.entry_index, child)) {
+        ++tally.unreadable;
+        return ArchiveKind::None;
+    }
+    budget.note_expanded(child.size());
+
+    // The name claimed an archive; the magic bytes get the final say.
+    const ArchiveKind kind = detect_archive_kind(p.filename, child.as_span());
+    if (kind == ArchiveKind::None) {
+        ++tally.not_an_archive;
+        return ArchiveKind::None;
+    }
+
+    switch (budget.may_descend(f.depth, child.size())) {
+        case RecursionVerdict::Allow: return kind;
+        case RecursionVerdict::DepthExceeded:
+            ++tally.depth_capped;
+            return ArchiveKind::None;
+        default:
+            ++tally.budget_stopped;
+            return ArchiveKind::None;
+    }
+}
+
+// Descend into each nested archive in turn, depth-first.
+void descend(const Frame& f, const ZipPlan& plan, const RecursiveHooks& hooks,
+             RecursionBudget& budget, RecursiveTally& tally)
+{
     // Sub-gallery names are unique per parent gallery, so two sibling folders
     // each holding "bonus.zip" do not collapse onto one gallery.
     std::vector<std::string> taken;
+
     for (const ZipPlacement& p : plan.nested) {
-        if (hooks.cancelled()) return;
+        if (hooks.cancelled()) {
+            return;
+        }
 
         crypto::SecureBytes child;
-        if (!hooks.extract_entry(f.bytes, f.kind, p.entry_index, child)) {
-            ++tally.unreadable;
-            continue;
-        }
-        budget.note_expanded(child.size());
-
-        // The name claimed an archive; the magic bytes get the final say.
-        const ArchiveKind kind = detect_archive_kind(p.filename, child.as_span());
+        const ArchiveKind   kind = vet_nested(f, p, hooks, budget, tally, child);
         if (kind == ArchiveKind::None) {
-            ++tally.not_an_archive;
-            continue;
-        }
-
-        const RecursionVerdict verdict = budget.may_descend(f.depth, child.size());
-        if (verdict == RecursionVerdict::DepthExceeded) {
-            ++tally.depth_capped;
-            continue;
-        }
-        if (verdict != RecursionVerdict::Allow) {
-            ++tally.budget_stopped;
             continue;
         }
 
         std::string base = nested_gallery_name(p.filename);
-        if (base.empty()) base = "archive";
+        if (base.empty()) {
+            base = "archive";
+        }
         const std::string name = unique_gallery_name(base, taken);
         taken.push_back(name);
 
         const std::string sub = p.gallery_path.empty() ? name : p.gallery_path + "/" + name;
-        if (!hooks.create_gallery(sub)) continue;
+        if (!hooks.create_gallery(sub)) {
+            continue;
+        }
 
         Frame child_frame{.owned   = std::move(child),
                           .bytes   = {},
@@ -214,13 +228,51 @@ void walk_one(Frame& f, const RecursiveHooks& hooks, RecursionBudget& budget,
     }
 }
 
+// Import every media entry, then descend into each nested archive in turn.
+void walk_one(const Frame& f, const RecursiveHooks& hooks, RecursionBudget& budget,
+              RecursiveTally& tally)
+{
+    std::vector<ZipEntry> entries;
+    if (!hooks.list_entries(f.bytes, f.kind, entries)) {
+        ++tally.unreadable;
+        return;
+    }
+
+    // A CBZ is a flat run of pages, so an archive inside one is not a chapter:
+    // plan it as pages and never descend.
+    const ZipPlan plan = (f.kind == ArchiveKind::Cbz)
+                             ? build_cbz_plan(entries, f.gallery, "")
+                             : build_zip_plan(entries, f.gallery, "");
+
+    for (const std::string& g : plan.galleries) {
+        if (!hooks.create_gallery(g)) {
+            return;
+        }
+    }
+
+    apply_own_meta(f, hooks, entries);
+
+    tally.skipped_unsupported += plan.skipped_unsupported;
+
+    // Grow the caller's running total as the tree is explored. Optional, so an
+    // unset hook is not the fatal-missing-hook case handled in walk_archive.
+    if (hooks.note_planned) {
+        hooks.note_planned(static_cast<int>(plan.placements.size()));
+    }
+
+    if (!place_media(f, plan, hooks, budget, tally)) {
+        return;   // cancelled
+    }
+    descend(f, plan, hooks, budget, tally);
+}
+
 } // namespace
 
 RecursiveTally walk_archive(std::span<const uint8_t> root_bytes,
                             ArchiveKind              root_kind,
                             std::string_view         dest_gallery,
                             const RecursiveHooks&    hooks,
-                            RecursionLimits          limits)
+                            const RecursionLimits&   limits)
 {
     RecursiveTally tally;
 

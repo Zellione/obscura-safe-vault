@@ -66,7 +66,7 @@ enum class RecursionVerdict : uint8_t {
 // beyond its own counters, so every limit is unit-testable without an archive.
 class RecursionBudget {
 public:
-    RecursionBudget(RecursionLimits limits, uint64_t root_archive_bytes);
+    RecursionBudget(const RecursionLimits& limits, uint64_t root_archive_bytes);
 
     // May a nested archive of `nested_bytes` be entered at `depth`? Does not
     // mutate; call enter() only after an Allow.
@@ -145,6 +145,6 @@ RecursiveTally walk_archive(std::span<const uint8_t> root_bytes,
                             ArchiveKind              root_kind,
                             std::string_view         dest_gallery,
                             const RecursiveHooks&    hooks,
-                            RecursionLimits          limits = {});
+                            const RecursionLimits&   limits = {});
 
 } // namespace ui

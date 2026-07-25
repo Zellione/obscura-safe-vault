@@ -325,8 +325,9 @@ void GalleryGrid::toggle_select_all()
         return;
     }
 
-    const bool all = std::ranges::all_of(selectable, [this](int i) { return sel_.contains(i); });
-    if (all) {
+    if (const bool all =
+            std::ranges::all_of(selectable, [this](int i) { return sel_.contains(i); });
+        all) {
         sel_.clear();
     } else {
         for (const int i : selectable) {

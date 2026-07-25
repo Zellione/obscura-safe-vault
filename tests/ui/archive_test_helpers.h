@@ -157,12 +157,15 @@ inline std::vector<uint8_t> uudecode(const fs::path& uufile, const fs::path& out
             const uint8_t c2 = (line[pos++] - 32) & 0x3F;
             const uint8_t c3 = (line[pos++] - 32) & 0x3F;
 
-            decoded.push_back((c0 << 2) | (c1 >> 4));
+            // Each operand promotes to int through << / |, so the narrowing
+            // back to a byte must be explicit — gcc accepts it, clang's
+            // -Wconversion does not.
+            decoded.push_back(static_cast<uint8_t>((c0 << 2) | (c1 >> 4)));
             if (i + 1 < line_len) {
-                decoded.push_back((c1 << 4) | (c2 >> 2));
+                decoded.push_back(static_cast<uint8_t>((c1 << 4) | (c2 >> 2)));
             }
             if (i + 2 < line_len) {
-                decoded.push_back((c2 << 6) | c3);
+                decoded.push_back(static_cast<uint8_t>((c2 << 6) | c3));
             }
         }
     }

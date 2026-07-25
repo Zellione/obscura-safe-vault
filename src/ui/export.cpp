@@ -32,14 +32,15 @@ vault::VaultResult export_one_media(const vault::Vault&          vault,
                                     crypto::SecureBytes&         scratch)
 {
     const bool image = node.is_image();
-    const bool video = node.is_video();
-    if (!image && !video) return vault::VaultResult::InvalidArg;
+    if (const bool video = node.is_video(); !image && !video) {
+        return vault::VaultResult::InvalidArg;
+    }
 
     // Decrypt the original stored bytes into mlock'd memory (invariant #1 holds
     // right up to the write below). A video's bytes live across several chunks;
     // read_video concatenates them into the same mlock'd buffer.
-    const auto rc = image ? vault.read_image(node, scratch) : vault.read_video(node, scratch);
-    if (rc != vault::VaultResult::Ok) {
+    if (const auto rc = image ? vault.read_image(node, scratch) : vault.read_video(node, scratch);
+        rc != vault::VaultResult::Ok) {
         scratch.wipe();
         return rc;
     }

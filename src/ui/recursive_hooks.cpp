@@ -53,14 +53,12 @@ bool zip_extract(std::span<const uint8_t> bytes, std::size_t index, crypto::Secu
     if (mz_zip_reader_init_mem(&zip, bytes.data(), bytes.size(), 0) == MZ_FALSE) {
         return false;
     }
-    bool                     ok = false;
-    mz_zip_archive_file_stat st;
-    if (mz_zip_reader_file_stat(&zip, static_cast<mz_uint>(index), &st) != MZ_FALSE) {
-        if (out.resize(static_cast<size_t>(st.m_uncomp_size))) {
-            ok = out.size() == 0 ||
-                 mz_zip_reader_extract_to_mem(&zip, static_cast<mz_uint>(index), out.data(),
-                                              out.size(), 0) != MZ_FALSE;
-        }
+    bool ok = false;
+    if (mz_zip_archive_file_stat st;
+        mz_zip_reader_file_stat(&zip, static_cast<mz_uint>(index), &st) != MZ_FALSE &&
+        out.resize(static_cast<size_t>(st.m_uncomp_size))) {
+        ok = out.empty() || mz_zip_reader_extract_to_mem(&zip, static_cast<mz_uint>(index),
+                                                         out.data(), out.size(), 0) != MZ_FALSE;
     }
     mz_zip_reader_end(&zip);
     return ok;
