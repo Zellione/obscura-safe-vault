@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <print>
 #include <string>
 #include <vector>
 
@@ -149,6 +150,14 @@ TEST(volume_assemble_reports_a_missing_file_on_disk)
 
 TEST(volume_assemble_reproduces_the_original_archive_bytes)
 {
+    // Needs the Unix `split`; the Windows CI leg has no such tool. Skip with a
+    // notice rather than failing — and never pass silently, which would make
+    // the whole assertion meaningless on that platform.
+    if (std::system("command -v split >/dev/null 2>&1") != 0) {
+        std::println("  SKIP  assemble round-trip: `split` not installed");
+        return;
+    }
+
     // assemble_volume_set is the path the queue uses; concatenate_volumes is
     // tested separately. This pins that the wrapper — normalisation, ordering,
     // reading — does not corrupt what concatenation produces.
