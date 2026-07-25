@@ -190,6 +190,37 @@ void finalise_order(std::vector<Member>& members)
 
 } // namespace
 
+VolumeAssembly assembly_for(VolumeStyle style) noexcept
+{
+    switch (style) {
+        case VolumeStyle::NumericSuffix: return VolumeAssembly::Concatenate;
+        // Each RAR volume carries its own header, so the set cannot be glued
+        // together — libarchive has to be handed the paths.
+        case VolumeStyle::RarPart:
+        case VolumeStyle::RarOld:        return VolumeAssembly::FileOriented;
+        // A spanned zip concatenates into something whose central directory
+        // still points at per-disk offsets; it needs rewriting first.
+        case VolumeStyle::SpannedZip:    return VolumeAssembly::SpannedZipMerge;
+        case VolumeStyle::None:          break;
+    }
+    return VolumeAssembly::None;
+}
+
+std::vector<uint8_t> concatenate_volumes(std::span<const std::span<const uint8_t>> volumes)
+{
+    size_t total = 0;
+    for (const std::span<const uint8_t>& v : volumes) {
+        total += v.size();
+    }
+
+    std::vector<uint8_t> out;
+    out.reserve(total);
+    for (const std::span<const uint8_t>& v : volumes) {
+        out.insert(out.end(), v.begin(), v.end());
+    }
+    return out;
+}
+
 VolumeSet detect_volume_set(std::string_view picked, std::span<const std::string> siblings)
 {
     const std::string lower = lowered(picked);

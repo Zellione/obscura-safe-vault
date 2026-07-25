@@ -41,6 +41,24 @@ struct VolumeSet {
     std::vector<int>         missing;
 };
 
+// How a detected set has to be turned into something a reader can open. The
+// three routes are genuinely different mechanisms, not variations:
+enum class VolumeAssembly : uint8_t {
+    None,             // not a set
+    Concatenate,      // raw byte splits — join in order, open from memory
+    FileOriented,     // RAR — each volume has its own header; libarchive must
+                      // see the PATHS (archive_read_open_filenames)
+    SpannedZipMerge,  // PKWARE spanned zip — needs the offset-rewriting merger
+};
+
+[[nodiscard]] VolumeAssembly assembly_for(VolumeStyle style) noexcept;
+
+// Join volume buffers end to end. Correct ONLY for VolumeAssembly::Concatenate
+// — a RAR volume carries its own header and a spanned zip needs its central
+// directory rewritten, so neither survives being glued together.
+[[nodiscard]] std::vector<uint8_t> concatenate_volumes(
+    std::span<const std::span<const uint8_t>> volumes);
+
 // Identify the multi-volume set `picked` belongs to, given the filenames
 // alongside it (`siblings` may or may not include `picked` itself).
 //

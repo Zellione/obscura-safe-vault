@@ -228,3 +228,159 @@ TEST(volume_set_reports_a_gap_in_a_numeric_set)
     REQUIRE(s.missing.size() == 1);
     CHECK_EQ(s.missing[0], 3);
 }
+
+// --- assembly routing -------------------------------------------------------
+//
+// Each style needs a genuinely different mechanism. Getting this mapping wrong
+// produces a corrupt import rather than an error: gluing RAR volumes together
+// yields a buffer libarchive will read a little of and then give up on.
+
+TEST(volume_assembly_maps_each_style_to_its_mechanism)
+{
+    CHECK(ui::assembly_for(ui::VolumeStyle::NumericSuffix) == ui::VolumeAssembly::Concatenate);
+    CHECK(ui::assembly_for(ui::VolumeStyle::RarPart) == ui::VolumeAssembly::FileOriented);
+    CHECK(ui::assembly_for(ui::VolumeStyle::RarOld) == ui::VolumeAssembly::FileOriented);
+    CHECK(ui::assembly_for(ui::VolumeStyle::SpannedZip) == ui::VolumeAssembly::SpannedZipMerge);
+    CHECK(ui::assembly_for(ui::VolumeStyle::None) == ui::VolumeAssembly::None);
+}
+
+TEST(concatenate_volumes_joins_in_order)
+{
+    const std::vector<uint8_t> a{1, 2, 3};
+    const std::vector<uint8_t> b{4, 5};
+    const std::vector<uint8_t> c{6};
+    const std::vector<std::span<const uint8_t>> vols{a, b, c};
+
+    const auto joined = ui::concatenate_volumes(vols);
+    REQUIRE(joined.size() == 6);
+    for (size_t i = 0; i < joined.size(); ++i) {
+        CHECK_EQ(joined[i], static_cast<uint8_t>(i + 1));
+    }
+}
+
+TEST(concatenate_volumes_handles_empty_and_single_inputs)
+{
+    CHECK(ui::concatenate_volumes({}).empty());
+
+    const std::vector<uint8_t>                  only{9, 9, 9};
+    const std::vector<std::span<const uint8_t>> one{only};
+    CHECK_EQ(ui::concatenate_volumes(one).size(), static_cast<size_t>(3));
+}
+
+TEST(concatenate_volumes_tolerates_a_zero_length_volume)
+{
+    // A truncated download can leave a 0-byte part; joining must not lose the
+    // volumes on either side of it.
+    const std::vector<uint8_t>                  a{1, 2};
+    const std::vector<uint8_t>                  empty;
+    const std::vector<uint8_t>                  c{3};
+    const std::vector<std::span<const uint8_t>> vols{a, empty, c};
+
+    const auto joined = ui::concatenate_volumes(vols);
+    REQUIRE(joined.size() == 3);
+    CHECK_EQ(joined[2], static_cast<uint8_t>(3));
+}
+
+// --- end-to-end over a REAL split set ---------------------------------------
+//
+// Detection and concatenation are unit-tested above with synthetic names and
+// bytes. This runs the whole route on an archive actually split by `split -d`:
+// detect the set from a directory listing, join it, and confirm miniz opens the
+// result and returns the original bytes.
+
+#include "miniz.h"
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+
+namespace {
+
+namespace vfs = std::filesystem;
+
+[[nodiscard]] std::vector<uint8_t> slurp_file(const vfs::path& p)
+{
+    std::ifstream f(p, std::ios::binary);
+    return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+}
+
+} // namespace
+
+TEST(volume_set_real_numeric_split_concatenates_back_into_a_readable_zip)
+{
+    if (std::system("command -v zip >/dev/null 2>&1") != 0 ||
+        std::system("command -v split >/dev/null 2>&1") != 0) {
+        std::println("  SKIP  numeric-split end-to-end: zip/split not installed");
+        return;
+    }
+
+    const vfs::path dir = vfs::temp_directory_path() / "osv_volset_e2e";
+    std::error_code ec;
+    vfs::remove_all(dir, ec);
+    vfs::create_directories(dir / "payload", ec);
+
+    // Incompressible, or the archive is too small for `split` to produce parts.
+    std::vector<uint8_t> blob(120000);
+    uint32_t             x = 0xC0FFEEu;
+    for (uint8_t& b : blob) {
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        b = static_cast<uint8_t>(x);
+    }
+    {
+        std::ofstream f(dir / "payload" / "big.bin", std::ios::binary);
+        f.write(reinterpret_cast<const char*>(blob.data()),
+                static_cast<std::streamsize>(blob.size()));
+    }
+
+    const std::string mk = "cd " + dir.string() +
+                           " && zip -q -r whole.zip payload && split -d -b 40000 whole.zip whole.zip.";
+    REQUIRE(std::system(mk.c_str()) == 0);
+
+    // Feed the directory listing to detection, exactly as the picker will.
+    std::vector<std::string> siblings;
+    for (const auto& e : vfs::directory_iterator(dir)) {
+        siblings.push_back(e.path().filename().string());
+    }
+    const auto set = ui::detect_volume_set("whole.zip.00", siblings);
+    CHECK(set.style == ui::VolumeStyle::NumericSuffix);
+    CHECK(set.missing.empty());
+    REQUIRE(set.volumes.size() >= 2);   // if 1, `split` did not split and this proves nothing
+    CHECK(ui::assembly_for(set.style) == ui::VolumeAssembly::Concatenate);
+
+    std::vector<std::vector<uint8_t>> bufs;
+    bufs.reserve(set.volumes.size());
+    for (const std::string& name : set.volumes) {
+        bufs.push_back(slurp_file(dir / name));
+    }
+    std::vector<std::span<const uint8_t>> spans;
+    spans.reserve(bufs.size());
+    for (const auto& b : bufs) spans.emplace_back(b);
+
+    const auto joined = ui::concatenate_volumes(spans);
+    CHECK_EQ(joined.size(), slurp_file(dir / "whole.zip").size());
+
+    // The real assertion: it is a working zip again.
+    mz_zip_archive zip{};
+    REQUIRE(mz_zip_reader_init_mem(&zip, joined.data(), joined.size(), 0));
+    bool matched = false;
+    for (mz_uint i = 0; i < mz_zip_reader_get_num_files(&zip); ++i) {
+        mz_zip_archive_file_stat st{};
+        if (!mz_zip_reader_file_stat(&zip, i, &st)) continue;
+        if (!std::string_view(st.m_filename).ends_with("big.bin")) continue;
+        size_t      n   = 0;
+        void* const raw = mz_zip_reader_extract_to_heap(&zip, i, &n, 0);
+        REQUIRE(raw != nullptr);
+        CHECK_EQ(n, blob.size());
+        CHECK(std::memcmp(raw, blob.data(), std::min(n, blob.size())) == 0);
+        mz_free(raw);
+        matched = true;
+    }
+    mz_zip_reader_end(&zip);
+    CHECK(matched);
+
+    vfs::remove_all(dir, ec);
+}
