@@ -127,8 +127,29 @@ gen_audio() {
 }
 
 echo "Video fixtures (MPEG family)..."
-# NOTE: MPEG-1/2 in MPEG-PS (.mpg) excluded — incompatible with vault's chunked AVIO model.
-# These codecs are registered (Task 1) but moved to Task 9 registration-only.
+# MPEG-1 (mpeg1video) — MKV. mpeg1 rejects rate=10 ("MPEG-1/2 does not support 10/1 fps"); use 25.
+ffmpeg -y -f lavfi -i testsrc2=size=160x120:rate=25 -frames:v 8 -c:v mpeg1video -q:v 5 \
+    "$FIXTURE_DIR/tinylegacy_mpeg1.mkv" 2>/dev/null || {
+    echo "  [SKIP] tinylegacy_mpeg1.mkv - encoder or muxer not available"
+}
+# MPEG-2 (mpeg2video) — MKV
+ffmpeg -y -f lavfi -i testsrc2=size=160x120:rate=10 -frames:v 6 -c:v mpeg2video -q:v 5 \
+    "$FIXTURE_DIR/tinylegacy_mpeg2.mkv" 2>/dev/null || {
+    echo "  [SKIP] tinylegacy_mpeg2.mkv - encoder or muxer not available"
+}
+# MPEG-2 (mpeg2video) — MPEG-TS (also covers the MPEGTS container end-to-end; ~21 KB)
+ffmpeg -y -f lavfi -i testsrc2=size=160x120:rate=10 -frames:v 6 -c:v mpeg2video -q:v 5 -f mpegts \
+    "$FIXTURE_DIR/tinylegacy_mpeg2.ts" 2>/dev/null || {
+    echo "  [SKIP] tinylegacy_mpeg2.ts - encoder or muxer not available"
+}
+# Interlaced MPEG-2 — MKV (validates Task 7's yadif path exists for interlaced legacy content; ~55 KB)
+ffmpeg -y -f lavfi -i testsrc2=size=320x240:rate=10 -frames:v 6 -vf tinterlace=interleave_top \
+    -flags +ilme+ildct -c:v mpeg2video -q:v 5 "$FIXTURE_DIR/tinylegacy_mpeg2_interlaced.mkv" 2>/dev/null || {
+    echo "  [SKIP] tinylegacy_mpeg2_interlaced.mkv - encoder or muxer not available"
+}
+# NOTE: Raw MPEG-PS (.mpg) container is excluded — decode-only vendored FFmpeg cannot identify
+# the program-stream elementary codec (full system ffmpeg reads it fine; our stripped build can't).
+# MPEG-1/2 content is fully supported via MKV/TS/MP4/MOV containers.
 
 echo "Video fixtures (MPEG-4 & variants)..."
 gen_video "tinylegacy_mpeg4.avi" "mpeg4" "avi" 160 120 3
@@ -166,10 +187,10 @@ gen_video "tinylegacy_anamorphic.mkv" "libx264" "mkv" 704 576 3 \
     "-vf setsar=16/15 -crf 28 -preset ultrafast"
 
 echo "Special fixtures (interlaced)..."
-# NOTE: Interlaced MPEG2 test excluded — MPEG-PS incompatibility (see above).
+# Interlaced MPEG-2 is generated in the MPEG family section (see above).
 
 echo "Audio fixtures (video + audio tracks)..."
-# MPEG1 + MP2 audio excluded (see above). Start with WMV1.
+# Start with WMV1 (MPEG-1 + MP2 audio not required for Tier-1 coverage).
 gen_video_audio "tinylegacy_wmav1_audio.asf" "wmv1" "wmav1" 160 120 3
 gen_video_audio "tinylegacy_wmav2_audio.asf" "wmv2" "wmav2" 160 120 3
 gen_video_audio "tinylegacy_adpcm_ms_audio.avi" "mpeg4" "adpcm_ms" 160 120 3
