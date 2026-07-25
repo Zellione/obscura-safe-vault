@@ -66,17 +66,44 @@ std::string_view video_codec_name(vault::VideoCodec c) noexcept
 {
     using enum vault::VideoCodec;
     switch (c) {
-        case H264:   return "H.264";
-        case HEVC:   return "H.265";
-        case ProRes: return "ProRes";
-        case DNxHD:  return "DNxHD";
-        case MJPEG:  return "MJPEG";
-        case VP8:    return "VP8";
-        case VP9:    return "VP9";
-        case AV1:    return "AV1";
-        case QTRLE:  return "QuickTime RLE";
-        case Cinepak: return "Cinepak";
-        case Unknown: break;
+        case H264:      return "H.264";
+        case HEVC:      return "H.265";
+        case ProRes:    return "ProRes";
+        case DNxHD:     return "DNxHD";
+        case MJPEG:     return "MJPEG";
+        case VP8:       return "VP8";
+        case VP9:       return "VP9";
+        case AV1:       return "AV1";
+        case QTRLE:     return "QuickTime RLE";
+        case Cinepak:   return "Cinepak";
+        case MPEG1:     return "MPEG-1";
+        case MPEG2:     return "MPEG-2";
+        case MPEG4:     return "MPEG-4";
+        case MSMPEG4V1: return "MS MPEG-4 v1";
+        case MSMPEG4V2: return "MS MPEG-4 v2";
+        case MSMPEG4V3: return "DivX 3";
+        case WMV1:      return "WMV1";
+        case WMV2:      return "WMV2";
+        case WMV3:      return "WMV3";
+        case VC1:       return "VC-1";
+        case H263:      return "H.263";
+        case FLV1:      return "Sorenson Spark";
+        case VP6:       return "VP6";
+        case VP6A:      return "VP6A";
+        case VP6F:      return "VP6F";
+        case SVQ1:      return "SVQ1";
+        case SVQ3:      return "SVQ3";
+        case DV:        return "DV";
+        case MSVideo1:  return "MS Video 1";
+        case RPZA:      return "RPZA";
+        case HuffYUV:   return "HuffYUV";
+        case FFV1:      return "FFV1";
+        case Theora:    return "Theora";
+        case RV10:      return "RealVideo 1.0";
+        case RV20:      return "RealVideo 2.0";
+        case RV30:      return "RealVideo 3.0";
+        case RV40:      return "RealVideo 4.0";
+        case Unknown:   break;
     }
     return "Video";
 }

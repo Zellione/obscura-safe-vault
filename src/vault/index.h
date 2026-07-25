@@ -86,7 +86,35 @@ enum class VideoCodec : uint8_t {
     AV1     = 7,   // WebM/.mov (Phase 40)
     QTRLE   = 8,   // .mov, QuickTime Animation/RLE (Phase 40)
     Cinepak = 9,   // .mov, legacy (Phase 40)
-    Unknown = 0xFF,
+    // Phase 52 — legacy long tail
+    MPEG1     = 10,
+    MPEG2     = 11,
+    MPEG4     = 12,   // ASP: DivX/Xvid
+    MSMPEG4V1 = 13,
+    MSMPEG4V2 = 14,
+    MSMPEG4V3 = 15,   // DivX 3
+    WMV1      = 16,
+    WMV2      = 17,
+    WMV3      = 18,
+    VC1       = 19,
+    H263      = 20,
+    FLV1      = 21,   // Sorenson Spark
+    VP6       = 22,
+    VP6A      = 23,
+    VP6F      = 24,
+    SVQ1      = 25,
+    SVQ3      = 26,
+    DV        = 27,
+    MSVideo1  = 28,
+    RPZA      = 29,
+    HuffYUV   = 30,
+    FFV1      = 31,
+    Theora    = 32,
+    RV10      = 33,
+    RV20      = 34,
+    RV30      = 35,
+    RV40      = 36,
+    Unknown   = 0xFF,
 };
 
 // Metadata + chunk locations for one stored video (Phase 15 PR2).

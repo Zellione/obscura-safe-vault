@@ -52,6 +52,52 @@ void VideoDecoder::reset()
     audio_index_ = -1;
 }
 
+// Maps an FFmpeg AVCodecID to the stored VideoCodec, or nullopt if unsupported.
+std::optional<vault::VideoCodec> map_codec_id(int av_codec_id)
+{
+    using enum vault::VideoCodec;
+    switch (av_codec_id) {
+        case AV_CODEC_ID_H264:       return H264;
+        case AV_CODEC_ID_HEVC:       return HEVC;
+        case AV_CODEC_ID_PRORES:     return ProRes;
+        case AV_CODEC_ID_DNXHD:      return DNxHD;
+        case AV_CODEC_ID_MJPEG:      return MJPEG;
+        case AV_CODEC_ID_VP8:        return VP8;
+        case AV_CODEC_ID_VP9:        return VP9;
+        case AV_CODEC_ID_AV1:        return AV1;
+        case AV_CODEC_ID_QTRLE:      return QTRLE;
+        case AV_CODEC_ID_CINEPAK:    return Cinepak;
+        case AV_CODEC_ID_MPEG1VIDEO: return MPEG1;
+        case AV_CODEC_ID_MPEG2VIDEO: return MPEG2;
+        case AV_CODEC_ID_MPEG4:      return MPEG4;
+        case AV_CODEC_ID_MSMPEG4V1:  return MSMPEG4V1;
+        case AV_CODEC_ID_MSMPEG4V2:  return MSMPEG4V2;
+        case AV_CODEC_ID_MSMPEG4V3:  return MSMPEG4V3;
+        case AV_CODEC_ID_WMV1:       return WMV1;
+        case AV_CODEC_ID_WMV2:       return WMV2;
+        case AV_CODEC_ID_WMV3:       return WMV3;
+        case AV_CODEC_ID_VC1:        return VC1;
+        case AV_CODEC_ID_H263:       return H263;
+        case AV_CODEC_ID_FLV1:       return FLV1;
+        case AV_CODEC_ID_VP6:        return VP6;
+        case AV_CODEC_ID_VP6A:       return VP6A;
+        case AV_CODEC_ID_VP6F:       return VP6F;
+        case AV_CODEC_ID_SVQ1:       return SVQ1;
+        case AV_CODEC_ID_SVQ3:       return SVQ3;
+        case AV_CODEC_ID_DVVIDEO:    return DV;
+        case AV_CODEC_ID_MSVIDEO1:   return MSVideo1;
+        case AV_CODEC_ID_RPZA:       return RPZA;
+        case AV_CODEC_ID_HUFFYUV:    return HuffYUV;
+        case AV_CODEC_ID_FFV1:       return FFV1;
+        case AV_CODEC_ID_THEORA:     return Theora;
+        case AV_CODEC_ID_RV10:       return RV10;
+        case AV_CODEC_ID_RV20:       return RV20;
+        case AV_CODEC_ID_RV30:       return RV30;
+        case AV_CODEC_ID_RV40:       return RV40;
+        default:                     return std::nullopt;
+    }
+}
+
 // Log an open() failure, release any partially-acquired state, and return false.
 bool VideoDecoder::fail_open(std::string_view msg)
 {
@@ -90,20 +136,9 @@ bool VideoDecoder::open(AVIOContext* pb)
     const AVStream* stream = fmt_->streams[stream_index_];
     if (!stream || !stream->codecpar) return fail_open("Invalid stream or codecpar");
 
-    using enum vault::VideoCodec;
-    switch (stream->codecpar->codec_id) {
-        case AV_CODEC_ID_H264:   codec_ = H264;   break;
-        case AV_CODEC_ID_HEVC:   codec_ = HEVC;   break;
-        case AV_CODEC_ID_PRORES: codec_ = ProRes; break;  // Phase 28
-        case AV_CODEC_ID_DNXHD:  codec_ = DNxHD;  break;  // Phase 28
-        case AV_CODEC_ID_MJPEG:  codec_ = MJPEG;  break;  // Phase 28
-        case AV_CODEC_ID_VP8:    codec_ = VP8;    break;  // Phase 38
-        case AV_CODEC_ID_VP9:     codec_ = VP9;     break;  // Phase 38
-        case AV_CODEC_ID_AV1:     codec_ = AV1;     break;  // Phase 40
-        case AV_CODEC_ID_QTRLE:   codec_ = QTRLE;   break;  // Phase 40 (.mov)
-        case AV_CODEC_ID_CINEPAK: codec_ = Cinepak; break;  // Phase 40 (.mov)
-        default:                  return fail_open("Unsupported codec");
-    }
+    auto mapped = map_codec_id(stream->codecpar->codec_id);
+    if (!mapped) return fail_open("Unsupported codec");
+    codec_ = *mapped;
 
     codec_ctx_ = avcodec_alloc_context3(decoder);
     if (!codec_ctx_) return fail_open("Failed to allocate codec context");

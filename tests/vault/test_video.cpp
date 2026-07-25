@@ -357,38 +357,12 @@ TEST(repair_video_metadata_is_noop_when_codec_already_known)
     CHECK(after[0]->vmeta.poster_length == poster_len_before);
 }
 
-TEST(repair_video_metadata_leaves_still_undecodable_video_unchanged)
-{
-    // A codec our build genuinely cannot decode (mpeg2video isn't in the
-    // vendored FFmpeg's --enable-decoder list) — add_video() still accepts
-    // it (container detected via EBML magic) but stores codec=Unknown,
-    // duration=0, no poster. repair_video_metadata() must leave it exactly
-    // as-is (Ok, no-op) rather than erroring, since re-probing genuinely
-    // still fails.
-    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/undecodable_mpeg2.mkv");
-    REQUIRE(!video_bytes.empty());
-
-    TempVault tv("repair_still_undecodable");
-    vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-            == vault::VaultResult::Ok);
-    REQUIRE(v.add_video("", video_bytes, "undecodable_mpeg2.mkv", 4096) == vault::VaultResult::Ok);
-
-    auto before = v.list("");
-    REQUIRE(before.size() == 1);
-    REQUIRE(static_cast<int>(before[0]->vmeta.codec) ==
-            static_cast<int>(vault::VideoCodec::Unknown));
-    REQUIRE(before[0]->vmeta.duration_us == 0);
-    REQUIRE(before[0]->vmeta.poster_length == 0);
-
-    CHECK(v.repair_video_metadata("undecodable_mpeg2.mkv") == vault::VaultResult::Ok);
-
-    auto after = v.list("");
-    REQUIRE(after.size() == 1);
-    CHECK(static_cast<int>(after[0]->vmeta.codec) == static_cast<int>(vault::VideoCodec::Unknown));
-    CHECK(after[0]->vmeta.duration_us == 0);
-    CHECK(after[0]->vmeta.poster_length == 0);
-}
+// NOTE: the former `repair_video_metadata_leaves_still_undecodable_video_unchanged`
+// test was removed in Phase 52 — its fixture (undecodable_mpeg2.mkv) is now decodable
+// (MPEG-2 support was added), so it only re-tested the codec-already-known no-op path
+// already covered by repair_video_metadata_is_noop_when_codec_already_known. The
+// genuine "repair leaves a truly-undecodable video unchanged" path is re-covered in
+// Task 8 with an ffvhuff clip (a codec our build demuxes but has no decoder for).
 
 TEST(repair_video_metadata_fills_in_codec_duration_and_poster_when_now_decodable)
 {

@@ -36,6 +36,10 @@ struct SwsContext;
 
 namespace media {
 
+// Maps an FFmpeg AVCodecID (passed as int to keep the header FFmpeg-free) to the
+// stored VideoCodec, or nullopt if this app does not accept the codec.
+[[nodiscard]] std::optional<vault::VideoCodec> map_codec_id(int av_codec_id);
+
 class VideoDecoder {
 public:
     VideoDecoder();
