@@ -80,7 +80,10 @@ echo "==> Building vendored ffmpeg for Windows (MSVC toolchain, decode-only, sta
 
 # See the file header: premake expects bare <name>.lib on Windows/MSVC, FFmpeg
 # always produces lib<name>.a — keep both so detection and linking each resolve.
-for name in avformat avcodec swscale swresample avutil; do
+# avfilter is in this list because Phase 52 links it (yadif deinterlace); it is
+# the one library premake links conditionally, so a missing .lib here surfaces as
+# an LNK1181 at link time rather than as a detection miss.
+for name in avfilter avformat avcodec swscale swresample avutil; do
     cp "$CODEC_PREFIX/lib/lib$name.a" "$CODEC_PREFIX/lib/$name.lib"
 done
 
