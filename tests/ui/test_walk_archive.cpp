@@ -215,3 +215,15 @@ TEST(walk_archive_disambiguates_two_nested_archives_with_the_same_name)
     CHECK_EQ(t.nested_archives, 2);
     CHECK_EQ(t.media_placed, 2);
 }
+
+TEST(walk_archive_refuses_unset_hooks_instead_of_terminating)
+{
+    // A default-constructed std::function throws on call; the project is
+    // exception-free, so calling one would abort the process.
+    FakeWorld w;
+    w.archives["root"] = {{.name = "a.jpg", .is_dir = false, .child_archive_id = ""}};
+
+    const ui::RecursiveHooks empty;
+    const auto t = walk_archive(buf_for("root"), ArchiveKind::Zip, "D", empty);
+    CHECK_EQ(t.media_placed, 0);
+}

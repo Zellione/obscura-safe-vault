@@ -202,7 +202,16 @@ RecursiveTally walk_archive(std::span<const uint8_t> root_bytes,
                             const RecursiveHooks&    hooks,
                             RecursionLimits          limits)
 {
-    RecursiveTally  tally;
+    RecursiveTally tally;
+
+    // A default-constructed std::function THROWS when called, and this project
+    // is exception-free — an unset hook would terminate the process rather than
+    // fail gracefully. Refuse the walk instead.
+    if (!hooks.list_entries || !hooks.extract_entry || !hooks.create_gallery ||
+        !hooks.place_media || !hooks.cancelled) {
+        return tally;
+    }
+
     RecursionBudget budget(limits, root_bytes.size());
     Frame           root{.owned   = {},
                          .bytes   = root_bytes,
