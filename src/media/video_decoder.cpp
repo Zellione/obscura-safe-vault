@@ -1,6 +1,7 @@
 #include "media/video_decoder.h"
 
 #include <cstdint>
+#include <utility>
 
 #ifdef OSV_VENDORED_AV
 
@@ -135,7 +136,7 @@ std::optional<vault::VideoCodec> map_codec_id(int av_codec_id)
     }};
     // VideoCodec's enumerators are dense 0..RV40 (Unknown is 0xFF and is never a
     // mapping target), so one row per value means size == RV40 + 1.
-    static_assert(kCodecs.size() == static_cast<size_t>(RV40) + 1,
+    static_assert(kCodecs.size() == std::to_underlying(RV40) + 1U,
                   "Add an AVCodecID mapping whenever a VideoCodec enumerator is added");
 
     const auto* it = std::ranges::find_if(

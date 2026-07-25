@@ -5,6 +5,7 @@
 #include <chrono>
 #include <format>
 #include <string_view>
+#include <utility>
 
 #include "ui/playback_model.h"   // format_clock (shared time formatting)
 #include "ui/video_exts.h"       // kVideoExts (shared video extension whitelist)
@@ -114,7 +115,7 @@ std::string_view video_codec_name(vault::VideoCodec c) noexcept
     }};
     // VideoCodec's enumerators are dense 0..RV40 (Unknown is 0xFF and falls
     // through to "Video" below), so one row per value means size == RV40 + 1.
-    static_assert(kNames.size() == static_cast<size_t>(RV40) + 1,
+    static_assert(kNames.size() == std::to_underlying(RV40) + 1U,
                   "Add a display name whenever a VideoCodec enumerator is added");
 
     const auto* it = std::ranges::find_if(kNames, [c](const CodecName& e) { return e.codec == c; });
