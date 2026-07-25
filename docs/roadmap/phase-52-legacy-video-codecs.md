@@ -1,4 +1,4 @@
-## Phase 52 — Legacy container & codec support ⬜
+## Phase 52 — Legacy container & codec support ✅
 
 **Goal:** Play the video that dominated roughly 2000–2010. Add the AVI, MPEG-PS,
 MPEG-TS, ASF/WMV, FLV, Ogg and RealMedia containers, plus the era's codecs
@@ -63,4 +63,57 @@ comb artifacts. Every Tier-1 codec has a committed fixture and a passing decode
 test; every Tier-2 codec has a passing registration test and is documented as
 decode-unverified. All tests pass under `scripts/test.sh` and `--asan`.
 
-**Status:** ⬜ Not started
+**Status:** ✅ Complete
+
+#### Results & measurements
+
+**Build:**
+- libavcodec.a: 36.3M
+- libavfilter.a: 1.0M (new — avfilter was not built before Phase 52)
+- osv_tests binary (Debug): 135.7M
+- Build time: ~37 seconds
+
+**Tests:**
+- Baseline (Phase 51): 1168 tests
+- Phase 52 final: 1298 tests (+130)
+- Result: 1298/0 (all passing)
+- ASAN: 1298/0 (zero sanitizer errors; ASAN ran with live hardware VAAPI path active)
+
+**Deliverables:**
+- 7 legacy video containers detected via bounds-checked magic bytes: AVI, MPEG-PS, MPEG-TS, ASF/WMV, FLV, Ogg, RealMedia
+- ~34 legacy video + audio decoders enabled in vendored decode-only FFmpeg
+- 7 new demuxers (avi, mpegps, mpegts, asf, flv, ogg, rm)
+- 4 new parsers (mpegvideo, mpeg4video, h263, vc1)
+- `display_dims()` helper + SAR-aware storage in VideoMeta
+- Yadif deinterlacing (conditional on AV_FRAME_FLAG_INTERLACED)
+- Unified video-extension whitelist (video_exts.h)
+- `media::map_codec_id(int)` extracted + 27 new VideoCodec enum values (10..36)
+- VAAPI/D3D11VA hwaccels enabled (modern + legacy); hwaccel was a compiled no-op Phase 43–51, now fully functional
+- INDEX_VERSION remains 9 (no format bump)
+
+#### Known limitation
+
+**Raw MPEG-PS (`.mpg`/`.mpeg`) is not decodable in the decode-only build.** The
+vendored FFmpeg cannot identify the program-stream elementary-stream codec (full
+system FFmpeg reads it fine — it is a stripped decode-only build). A `.mpg` file
+still imports (container detected as MPEG-PS) but stores as an unplayable Unknown-codec
+video. **MPEG-1 and MPEG-2 are fully supported via MKV, MPEG-TS, MP4, and MOV**
+(all decode-tested end-to-end).
+
+#### Tier-2 (decode unverified)
+
+The following codecs have been registered and mapped but their decode paths are
+unverified (no FFmpeg encoder exists, so no fixture can be generated): wmv3/vc1,
+svq3, rv30/rv40, vp6/vp6a/vp6f, msmpeg4v1, cook, and DV (encoder exists but only for
+rare `.avi` import; registration only). These codecs' presence in the decode list is
+asserted by test but actual frame decoding is a manual release-check item against
+real-world files. This is the phase's honest weak point — headline `.wmv` and RealMedia
+decode rest partly here.
+
+#### Hardware decode note (Phase 43 gap fixed)
+
+Phase 43 declared `--enable-vaapi` / `--enable-d3d11va` in the build scripts but never
+passed `--enable-hwaccel=`, so `CONFIG_HWACCELS` remained 0 and no hwaccel symbols were
+compiled. Hardware decode was a silent no-op from Phase 43 through Phase 51. Phase 52 adds
+the complete `--enable-hwaccel=` lists (VAAPI: h264,hevc,vp8,vp9,av1,mpeg2,mpeg4,vc1,wmv3,h263;
+D3D11VA: h264,hevc,vp9,av1,mpeg2,vc1,wmv3), making hwaccels actually compile and function.

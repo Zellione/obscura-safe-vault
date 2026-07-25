@@ -33,10 +33,17 @@ order `heif → de265 → aom → webp → sharpyuv`. The build passes
 **FFmpeg (Phase 15–16)** is a sibling vendored submodule (`vendor/ffmpeg`) built via **configure**
 (not cmake) into the same `vendor/codecs-prefix` by `build_codecs.{sh,bat}`: decode-only
 (`--disable-everything` then opt-in h264/hevc/prores/dnxhd/mjpeg/vp8/vp9/libaom_av1/qtrle/cinepak
-decoders (pro `.mov` codecs Phase 28; `.webm` VP8/VP9 Phase 38; AV1 + legacy `.mov` codecs Phase 40),
-aac/opus/mp3/vorbis/flac/ac3 audio decoders, mov/mp4/matroska demuxers, `--enable-libaom`,
-swscale + swresample; no encoders/muxers/protocols/network/programs). See the FFmpeg row above for
-the `libaom_av1` naming/link-order gotchas.
+decoders (pro `.mov` codecs Phase 28; `.webm` VP8/VP9 Phase 38; AV1 + legacy `.mov` codecs Phase 40);
+Phase 52 additions: mpeg1video/mpeg2video/mpeg4/msmpeg4v1/msmpeg4v2/msmpeg4v3/wmv1/wmv2/wmv3/vc1/h263/flv1/vp6/vp6a/vp6f/svq1/svq3/dvvideo/msvideo1/rpza/huffyuv/ffv1/theora/rv10/rv20/rv30/rv40 video decoders,
+aac/opus/mp3/vorbis/flac/ac3/mp2/wmav1/wmav2/cook/ra_144/ra_288/eac3/pcm_s16le/pcm_u8/adpcm_ms/adpcm_ima_wav audio decoders,
+mov/mp4/matroska/avi/mpegps/mpegts/asf/flv/ogg/rm demuxers,
+parsers mpegvideo/mpeg4video/h263/vc1/mpegaudio,
+`--enable-libaom --enable-avfilter --enable-filter=yadif` (yadif deinterlacing),
+swscale + swresample; no encoders/muxers/protocols/network/programs).
+See the FFmpeg row above for the `libaom_av1` naming/link-order gotchas.
+**CRITICAL GOTCHA (Phase 52):** After changing the decoder list in `build_codecs.sh`, **`rm -rf build/` before `scripts/gen.sh`**.
+Ninja does not treat a rebuilt `libavcodec.a` as a build edge (it's a prebuilt external file), so the test binary
+silently keeps running against the stale archive. This cost a debugging session. Recorded in this memory.
 
 **Phase 47 addition:** the `gif` **decoder**, **demuxer**, AND **parser** are enabled.
 The parser is essential: FFmpeg n7.1.1's gif demuxer emits raw 1024-byte chunks and sets
@@ -58,14 +65,15 @@ failure with a hw context active drops it and reopens a fresh software-only
 context for the rest of that clip (`reopen_software_only()`).
 `media::test_only_force_hwaccel_unavailable(bool)` makes this fallback path
 deterministic in tests, since no CI runner has a real GPU decode block.
-Codec coverage confirmed against `vendor/ffmpeg/configure`'s
-`*_d3d11va_hwaccel_deps`/`*_vaapi_hwaccel_deps` entries: h264/hevc/vp9 have
-both VAAPI and D3D11VA hwaccel paths, vp8/mjpeg have VAAPI only, and
-av1(`libaom_av1`, a software decoder)/prores/dnxhd/qtrle/cinepak have
-neither. Linux VAAPI (`OSV_HWACCEL_VAAPI`) is a separate follow-up phase — it
-needs a dlopen shim (not a direct system `libva` link) to keep hw decode
-optional at the binary level, not just the codec level; see
-`docs/superpowers/specs/2026-07-17-hardware-video-decode-design.md`.
+
+**PHASE 43 GAP (FIXED IN PHASE 52):** Phase 43 declared `--enable-d3d11va` / `--enable-vaapi`
+but never passed `--enable-hwaccel=`, so `CONFIG_HWACCELS` remained 0 and NO hwaccel symbols
+were compiled. Hardware decode was a silent no-op from Phase 43 through Phase 51. Phase 52 adds
+the complete `--enable-hwaccel=` lists: VAAPI (Linux): h264,hevc,vp8,vp9,av1,mpeg2,mpeg4,vc1,wmv3,h263;
+D3D11VA (Windows): h264,hevc,vp9,av1,mpeg2,vc1,wmv3. Now hwaccels actually compile and function.
+Codec coverage confirmed against `vendor/ffmpeg/configure`'s `*_d3d11va_hwaccel_deps`/`*_vaapi_hwaccel_deps`
+entries. Linux VAAPI (`OSV_HWACCEL_VAAPI`) requires the dlopen shim (not a direct system `libva`
+link) to keep hw decode optional at the binary level; see `docs/superpowers/specs/2026-07-17-hardware-video-decode-design.md`.
 
 **Phase 43 Part 2:** `vendor/libva` (headers-only submodule, pinned to tag 2.22.0/commit 217da1c28336d6a7e9c0c4cb8f1c303968a675f1) supplies the `va.h`/`va_drm.h` headers needed for FFmpeg's `hwcontext_vaapi.c` configure-time link probe. `vendor/vaapi-shim` (static library, osv_vaapi_shim.a) provides the ~36 `va*` symbols FFmpeg's hwcontext_vaapi.c/vaapi_decode.c/vaapi_h264.c/vaapi_hevc.c/vaapi_vp8.c/vaapi_vp9.c/vaapi_mjpeg.c reference, implemented as dlopen("libva.so.2"/"libva-drm.so.2") + dlsym() forwarding — this keeps the real libva.so.2 dependency 100% optional at runtime (no DT_NEEDED entry, silently unavailable if absent, matching the "linked only when present" pattern link_av()/link_archive() use). `--enable-vaapi` added to FFmpeg's configure in `scripts/build_codecs.sh`; `premake5.lua` defines `OSV_HWACCEL_VAAPI` only on Linux, gated on `OSV_VENDORED_AV` already being present. `media::HwAccelContext` (same file as Part 1) gains the VAAPI backend (AV_HWDEVICE_TYPE_VAAPI, DRM render-node path — no X11 dependency). `vaGetDisplay` (X11 variant) and `vaGetDisplayWin32` are excluded from the shim; only `vaGetDisplayDRM` is forwarded.
 
@@ -127,3 +135,9 @@ local composite actions, `.github/actions/setup-apt-deps/` and
 `.github/actions/setup-premake-sdl3/` (`sonarqube` was deliberately left
 out — its `if: env.SONAR_TOKEN != ''` guard on every step is a pre-existing
 special case).
+
+**Codec cache auto-bust (Phase 52):** The CI cache key for the vendored codec build
+is generated from the hash of `.gitmodules` + `scripts/build_codecs.sh` + `scripts/build_ffmpeg_windows.sh`.
+When either build script changes (e.g., new decoder list, new demuxer, new hwaccel registration),
+the cache automatically misses and a full FFmpeg rebuild is triggered on both CI legs — no
+manual version bump needed.

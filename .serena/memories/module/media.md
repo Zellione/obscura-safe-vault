@@ -22,13 +22,24 @@ Files: `video_source.*`, `chunk_avio.*`, `mem_avio.*`, `video_decoder.*`, `audio
 `decoded_frame.h`, plus `frame_convert.*`, `video_decode_worker.*`, `hw_accel.*`.
 
 ### Demux + software decode
+- **Container detection** (`detect_video_container()` in `video_format.cpp`): bounds-checked
+  magic-byte detection for H.264/H.265 (raw), MP4 (ftyp), Matroska (EBML), WebM (EBML),
+  AVI (RIFF+AVI ), MPEG-PS (0x000001BA), MPEG-TS (0x47 sync at offsets 0, 188, 376),
+  ASF (GUID), FLV (FLV magic), Ogg (OggS), RealMedia (.RMF). TS checked last (single
+  0x47 is weak signature; require all three sync offsets).
 - `VideoSource` = decrypt-on-demand byte stream over a video's ChunkStore (mlock'd 1-chunk
   cache). `ChunkAvio`/`MemAvio` = `AVIOContext` (read+seek, never a temp file).
 - `VideoDecoder` = FFmpeg shared demuxer feeding both video + audio via per-stream packet
-  queues (`vq_`/`aq_`); H.264/HEVC decode → `DecodedFrame` (yuv420p/nv12, swscale fallback)
-  + keyframe seek; `has_audio()`/`audio_info()`/`next_audio_frame()`.
+  queues (`vq_`/`aq_`); H.264/HEVC + ~34 legacy codecs (Phase 52: MPEG-1/2, MPEG-4 ASP,
+  MS-MPEG4 v1–v3, WMV1/2/3, VC-1, H.263, FLV1, VP6/a/f, SVQ1/3, DV, MSVideo1, RPZA,
+  HuffYUV, FFV1, Theora, RealVideo 10/20/30/40) decode → `DecodedFrame` (yuv420p/nv12,
+  swscale fallback) + keyframe seek; `has_audio()`/`audio_info()`/`next_audio_frame()`.
+  `display_dims()` helper computes anamorphic-corrected width (round(coded_width * SAR_num / SAR_den))
+  for DVD/DV clips with non-square pixels (SAR read via `av_guess_sample_aspect_ratio()`).
+  VideoMeta stores display dims (not coded dims) for detail panel + thumbnail poster.
 - `AudioDecoder` owns an `AVStream*`, decodes planar PCM → interleaved F32 in
-  `AudioFrame{samples,channels,sample_rate,pts_seconds}`.
+  `AudioFrame{samples,channels,sample_rate,pts_seconds}`. Phase 52 added decoders for
+  legacy formats (MP2, WMA v1/v2, Cook, RealAudio 144/288, PCM s16le/u8, ADPCM ms/ima_wav).
 - `gif_decoder.*` (Phase 47, gated `OSV_VENDORED_AV`) — `GifDecoder`: `MemAvio`
   over decrypted bytes → gif demuxer → gif decoder → swscale to RGBA. Streaming,
   one frame at a time, constant memory. No audio, no packet queues, no seeking,
@@ -40,9 +51,20 @@ Files: `video_source.*`, `chunk_avio.*`, `mem_avio.*`, `video_decoder.*`, `audio
 - `probe_video` = container/codec/dims/duration + first-frame poster; best-effort (succeeds
   with placeholder Unknown/0/empty if the container is detected but the codec isn't decodable
   yet — `ui/video_repair.*` + `Vault::repair_video_metadata` heal such nodes later).
+  **Known limitation (Phase 52):** raw MPEG-PS (`.mpg`/`.mpeg`) files import (container
+  detected) but store as Unknown-codec video since the decode-only build cannot identify
+  the elementary-stream codec inside the PS wrapper (full system FFmpeg can — it is a
+  stripped build limitation). MPEG-1/2 are fully supported via MKV, MPEG-TS, MP4, MOV.
+- `media::map_codec_id(int)` (Phase 52) — testable mapping from FFmpeg's `AVCodecID` to the
+  app's `VideoCodec` enum. Extracts all 27 Phase 52 + pre-existing codec mappings into one place.
+  Registers modern codecs (H.264, HEVC, AV1) and Phase 52 legacy codecs (MPEG-1/2, MPEG-4 ASP,
+  MS-MPEG4 v1–v3, WMV1/2/3, VC-1, H.263, FLV1, VP6/a/f, SVQ1/3, DV, MSVideo1, RPZA, HuffYUV,
+  FFV1, Theora, RV10/20/30/40, QTRLE, Cinepak). VideoCodec enum now spans values 0–36.
 - Supported codecs (`VideoCodec`): H.264, HEVC (native); AV1 via the already-vendored libaom
   as FFmpeg's `libaom-av1` decoder (FFmpeg's own native "av1" decoder is a hwaccel-dispatch
-  shim only — no software decode); QTRLE, Cinepak (native `.mov`).
+  shim only — no software decode); QTRLE, Cinepak (native `.mov`); Phase 52 additions
+  (see map_codec_id above). Tier-2 (decode unverified — no system encoder, real-file test deferred
+  to release): wmv3/vc1, svq3, rv30/rv40, vp6/vp6a/vp6f, msmpeg4v1, cook, DV.
 - `volume_setting.*` / `loop_setting.*` — process-global in-memory volume + loop-toggle
   state (NOT AV-gated): `saved_volume()`, `saved_loop_enabled()`/`set_saved_loop_enabled()`.
   Volume persists via `platform::VolumePref`; loop is process-lifetime only.
@@ -53,6 +75,13 @@ for already-I420/NV12 frames, `to_i420()` otherwise, cached `SwsContext` reused 
 `copy_owned_frame()` copies a DecodedFrame's planes into a caller-owned
 `std::vector<uint8_t>` for safe cross-thread handoff (FFmpeg's internal AVFrame buffers are
 unsafe to alias once the next decode call can run concurrently).
+
+**Phase 52 addition:** deinterlacing via yadif (Yet Another Deinterlacing Filter). `should_deinterlace(int flags)`
+predicate (conditional on `AV_FRAME_FLAG_INTERLACED` in frame flags). Lazily-built cached avfilter
+graph (buffer → yadif mode=0 → buffersink) hooked in `publish_decoded_frame()` after hardware-transfer
+if present. Graph is per-thread-local, rebuilt on-demand, freed on FrameConverter destruction or stream
+change. On deinterlace error, returns nullptr (caller shows original frame once, error logged once via
+`deint_error_once_` guard). No per-frame graph rebuild (state set AFTER success only).
 
 ### video_decode_worker.{h,cpp} — VideoDecodeWorker
 Background `std::jthread` doing ONLY codec-level video decode (`avcodec_send_packet`/
@@ -71,6 +100,14 @@ before honoring stop_ made teardown block for seconds after slow decode); the de
 cleanup loop frees what's left. `run()` is decomposed into `wait_for_job()`/`send_packet()`/
 `decode_available_frames()`/`publish_decoded_frame()`/`publish_result()`/`publish_eof()`
 (SonarQube complexity limits).
+
+### Video extension whitelist
+`src/ui/video_exts.h` (Phase 52) — unified single-source `constexpr std::array<std::string_view, 16> kVideoExts`.
+Modern (5): mp4, m4v, mov, webm, mkv. Legacy (11, Phase 52): avi, mpg, mpeg, wmv, asf, flv, ts, m2ts, ogv, rm, rmvb.
+Consumed by `is_supported_media_name()` in `zip_plan.cpp` (archive import) and `meta_format.cpp` (vault import),
+and fed into the file-dialog filter in `file_dialog.cpp`. Lookup semantics: lowercase, no dot prefix.
+Before Phase 52, these lists were duplicated verbatim in two places (zip_plan.cpp:130 + meta_format.cpp:107);
+Phase 52 consolidated them to prevent divergence.
 
 ### hw_accel.{h,cpp} — HwAccelContext (opportunistic hardware decode)
 - `try_attach_hwaccel(ctx,decoder)` attaches a process-wide cached `AVBufferRef` hw device
