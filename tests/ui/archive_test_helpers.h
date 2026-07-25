@@ -123,6 +123,56 @@ inline std::vector<uint8_t> read_file(const fs::path& p)
     return buf;
 }
 
+// Decode a uuencoded file (used by the file-oriented API tests that need
+// multi-volume RAR fixtures from libarchive's test corpus). Uuencoding format:
+// - Line 1: "begin <mode> <filename>"
+// - Data lines: first char is length indicator (ASCII value - 32 = bytes in this line).
+//   Each subsequent 4 ASCII chars encode 3 bytes via: (c0<<2)|(c1>>4), (c1<<4)|(c2>>2), (c2<<6)|c3
+// - Last data line starts with backtick '`' (length 0)
+// - Final line: "end"
+inline std::vector<uint8_t> uudecode(const fs::path& uufile, const fs::path& outfile)
+{
+    std::ifstream in(uufile, std::ios::binary);
+    std::string line;
+    std::vector<uint8_t> decoded;
+
+    // Skip "begin" line
+    std::getline(in, line);
+
+    while (std::getline(in, line)) {
+        if (line == "end") break;
+        if (line.empty()) continue;
+
+        // First character encodes the number of bytes on this line
+        const int line_len = (line[0] - 32) & 0x3F;
+        if (line_len == 0) continue;  // Last line with backtick
+
+        // Each group of 4 characters encodes 3 bytes
+        size_t pos = 1;
+        for (int i = 0; i < line_len; i += 3) {
+            if (pos + 4 > line.length()) break;
+
+            const uint8_t c0 = (line[pos++] - 32) & 0x3F;
+            const uint8_t c1 = (line[pos++] - 32) & 0x3F;
+            const uint8_t c2 = (line[pos++] - 32) & 0x3F;
+            const uint8_t c3 = (line[pos++] - 32) & 0x3F;
+
+            decoded.push_back((c0 << 2) | (c1 >> 4));
+            if (i + 1 < line_len) {
+                decoded.push_back((c1 << 4) | (c2 >> 2));
+            }
+            if (i + 2 < line_len) {
+                decoded.push_back((c2 << 6) | c3);
+            }
+        }
+    }
+
+    // Write decoded file
+    std::ofstream out(outfile, std::ios::binary);
+    out.write(reinterpret_cast<const char*>(decoded.data()), static_cast<std::streamsize>(decoded.size()));
+    return decoded;
+}
+
 } // namespace archivetest
 
 #endif // OSV_VENDORED_ARCHIVE

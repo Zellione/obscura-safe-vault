@@ -6,6 +6,7 @@
 #include "archive_test_helpers.h"
 
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,7 @@ using archivetest::fresh_path;
 using archivetest::make_archive;
 using archivetest::read_file;
 using archivetest::make_encrypted_zip;
+using archivetest::uudecode;
 
 TEST(archive_reader_opens_tar_and_lists_entries)
 {
@@ -227,6 +229,136 @@ TEST(archive_error_is_passphrase_issue_matches_libarchive_wording)
         "Decryption is unsupported due to lack of crypto library"));
     CHECK_FALSE(ui::archive_error_is_passphrase_issue("Truncated ZIP file data"));
     CHECK_FALSE(ui::archive_error_is_passphrase_issue(""));
+}
+
+// Tests for the file-oriented open_files() API for multi-volume RAR support.
+
+TEST(archive_reader_open_files_rejects_empty_volume_list)
+{
+    ui::ArchiveReader r;
+    std::vector<std::filesystem::path> volumes{};
+    CHECK_FALSE(r.open_files(volumes));
+}
+
+TEST(archive_reader_open_files_rejects_nonexistent_path)
+{
+    ui::ArchiveReader r;
+    std::vector<std::filesystem::path> volumes{std::filesystem::path("/nonexistent/path/file.rar")};
+    CHECK_FALSE(r.open_files(volumes));
+}
+
+TEST(archive_reader_open_files_multivolume_rar4_multiple_files)
+{
+    namespace fs = std::filesystem;
+    // uuencoded fixtures are in vendor/libarchive, not tests/ui/fixtures
+    const fs::path fixture_dir = OSV_UI_FIXTURE_DIR;
+    const fs::path uuencoded_dir = fixture_dir / "../../../vendor/libarchive/libarchive/test";
+    const fs::path temp_base = fs::temp_directory_path();
+
+    // Decode RAR4 multivolume fixtures
+    std::vector<fs::path> volumes;
+    for (int i = 1; i <= 6; ++i) {
+        const std::string uufile = "test_rar_multivolume_multiple_files.part" + std::to_string(i) + ".rar.uu";
+        const std::string outfile = "test_rar_multivolume_multiple_files.part" + std::to_string(i) + ".rar";
+        const fs::path temp_path = temp_base / outfile;
+        uudecode(uuencoded_dir / uufile, temp_path);
+        volumes.push_back(temp_path);
+    }
+
+    ui::ArchiveReader r;
+    REQUIRE(r.open_files(volumes));
+
+    // Verify entries were parsed
+    const auto& entries = r.entries();
+    REQUIRE(entries.size() > 0);
+
+    // Extract the first entry to verify data integrity
+    crypto::SecureBytes out;
+    REQUIRE(r.extract(0, out));
+    REQUIRE(out.size() > 0);
+
+    // Cleanup
+    for (const auto& vol : volumes) {
+        std::error_code ec;
+        fs::remove(vol, ec);
+    }
+}
+
+TEST(archive_reader_open_files_multivolume_rar5)
+{
+    namespace fs = std::filesystem;
+    // uuencoded fixtures are in vendor/libarchive, not tests/ui/fixtures
+    const fs::path fixture_dir = OSV_UI_FIXTURE_DIR;
+    const fs::path uuencoded_dir = fixture_dir / "../../../vendor/libarchive/libarchive/test";
+    const fs::path temp_base = fs::temp_directory_path();
+
+    // Decode RAR5 multivolume fixtures
+    std::vector<fs::path> volumes;
+    for (int i = 1; i <= 8; ++i) {
+        const std::string num = (i < 10 ? "0" : "") + std::to_string(i);
+        const std::string uufile = "test_read_format_rar5_multiarchive.part" + num + ".rar.uu";
+        const std::string outfile = "test_read_format_rar5_multiarchive.part" + num + ".rar";
+        const fs::path temp_path = temp_base / outfile;
+        uudecode(uuencoded_dir / uufile, temp_path);
+        volumes.push_back(temp_path);
+    }
+
+    ui::ArchiveReader r;
+    REQUIRE(r.open_files(volumes));
+
+    // Verify entries were parsed
+    const auto& entries = r.entries();
+    REQUIRE(entries.size() > 0);
+
+    // Extract the first entry to verify data integrity
+    crypto::SecureBytes out;
+    REQUIRE(r.extract(0, out));
+    REQUIRE(out.size() > 0);
+
+    // Cleanup
+    for (const auto& vol : volumes) {
+        std::error_code ec;
+        fs::remove(vol, ec);
+    }
+}
+
+TEST(archive_reader_open_files_extraction_with_all_volumes)
+{
+    namespace fs = std::filesystem;
+    // uuencoded fixtures are in vendor/libarchive, not tests/ui/fixtures
+    const fs::path fixture_dir = OSV_UI_FIXTURE_DIR;
+    const fs::path uuencoded_dir = fixture_dir / "../../../vendor/libarchive/libarchive/test";
+    const fs::path temp_base = fs::temp_directory_path();
+
+    // Decode RAR4 multivolume fixtures in correct order
+    std::vector<fs::path> volumes;
+    for (int i = 1; i <= 6; ++i) {
+        const std::string uufile = "test_rar_multivolume_multiple_files.part" + std::to_string(i) + ".rar.uu";
+        const std::string outfile = "test_rar_multivolume_extract_" + std::to_string(i) + ".rar";
+        const fs::path temp_path = temp_base / outfile;
+        uudecode(uuencoded_dir / uufile, temp_path);
+        volumes.push_back(temp_path);
+    }
+
+    ui::ArchiveReader r;
+    REQUIRE(r.open_files(volumes));
+
+    // Extract both entries to verify they both succeed
+    const auto& entries = r.entries();
+    REQUIRE(entries.size() == size_t{2});
+
+    crypto::SecureBytes out;
+    REQUIRE(r.extract(0, out));
+    REQUIRE(out.size() > 0);
+
+    REQUIRE(r.extract(1, out));
+    REQUIRE(out.size() > 0);
+
+    // Cleanup
+    for (const auto& vol : volumes) {
+        std::error_code ec;
+        fs::remove(vol, ec);
+    }
 }
 
 #endif // OSV_VENDORED_ARCHIVE
