@@ -21,6 +21,15 @@
 - Keep pixel/layout maths in pure, headless, unit-tested helpers (e.g. `strip_layout`, `scroll_model`, `viewer_model.h`); screens own only SDL plumbing.
 - Any unbounded vault-derived string (paths, names, tags) drawn into a fixed-width box must be middle-elided first via `ui::fit_text(font, s, max_w)` (widgets.h) — never `draw_text` it raw (PR #54 swept the whole UI for this).
 
+## Cross-platform (MSVC vs libstdc++)
+- `std::array`/`std::vector` iterators are raw pointers in libstdc++ but class types in MSVC's STL.
+  Never declare one as `auto*`: `const auto* it = std::ranges::find_if(...)` compiles clean on Linux
+  and fails MSVC with C3535/C2440/C2679. Use plain `const auto`.
+- clang-tidy's `readability-qualified-auto` will keep suggesting `auto*` for these on Linux, where
+  they happen to be pointers. Do not take the fix — leave a comment saying why. Lint warnings are
+  non-fatal in CI, so the suggestion costs nothing to ignore; following it breaks the Windows legs.
+- Local runs are Linux-only and cannot catch this class of break. The MSVC CI legs are the gate.
+
 ## Module boundaries
 - `src/crypto/` wraps Monocypher — no SDL or UI deps.
 - `src/vault/` depends on crypto only.

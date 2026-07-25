@@ -448,6 +448,10 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   collapsed band).
 - `meta_format.*` — list-view metadata formatting: size/dimensions/date/type. Phase 48: added
   `video_container_name(vault::VideoContainer)` -> "MP4"/"MKV"/"-" for unknown.
+  `video_codec_name(vault::VideoCodec)` is a `static constexpr std::array` table + `static_assert`
+  pinning its size to the enum's last value, not a switch (same pattern and rationale as
+  `media::map_codec_id` — see `mem:module/media`): adding a `VideoCodec` enumerator without a
+  display name is a build error. Unmapped/`Unknown` falls back to "Video".
 - `delete_summary.*` — recursive tally of a gallery subtree (images/videos/sub-galleries) +
   plural-aware format for the Del confirm popup. Phase 48: `SubtreeCounts` gained `uint64_t bytes`,
   summing descendant `orig_size`. GalleryGrid Del removes the focused image/video

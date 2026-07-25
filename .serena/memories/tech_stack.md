@@ -45,6 +45,14 @@ See the FFmpeg row above for the `libaom_av1` naming/link-order gotchas.
 Ninja does not treat a rebuilt `libavcodec.a` as a build edge (it's a prebuilt external file), so the test binary
 silently keeps running against the stale archive. This cost a debugging session. Recorded in this memory.
 
+**Windows `.a` → `.lib` rename (`scripts/build_ffmpeg_windows.sh`):** premake emits bare
+`links{"<name>"}` on every platform, which MSVC resolves to `<name>.lib`, but FFmpeg always installs
+`lib<name>.a`. The script copies each one after `make install` — **every FFmpeg library premake links
+must appear in that loop's name list** (`avfilter avformat avcodec swscale swresample avutil`).
+avfilter was missed when Phase 52 enabled yadif: `libavfilter.a` existed, so premake's
+`os.isfile(lib/libavfilter.a)` guard fired and emitted the link, while `avfilter.lib` never did —
+both MSVC legs died at link with LNK1181/LNK1104 while every Linux leg stayed green.
+
 **Phase 47 addition:** the `gif` **decoder**, **demuxer**, AND **parser** are enabled.
 The parser is essential: FFmpeg n7.1.1's gif demuxer emits raw 1024-byte chunks and sets
 `need_parsing = AVSTREAM_PARSE_FULL_RAW` (libavformat/gifdec.c:224), delegating frame reassembly

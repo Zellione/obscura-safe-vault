@@ -34,6 +34,10 @@ Files: `video_source.*`, `chunk_avio.*`, `mem_avio.*`, `video_decoder.*`, `audio
   MS-MPEG4 v1–v3, WMV1/2/3, VC-1, H.263, FLV1, VP6/a/f, SVQ1/3, DV, MSVideo1, RPZA,
   HuffYUV, FFV1, Theora, RealVideo 10/20/30/40) decode → `DecodedFrame` (yuv420p/nv12,
   swscale fallback) + keyframe seek; `has_audio()`/`audio_info()`/`next_audio_frame()`.
+  `open()` delegates to `container_duration_us()` (fmt duration, else stream duration, else 0) and
+  `open_audio_stream()` (non-fatal throughout — leaves `audio_index_` at -1 for video-only) to stay
+  under SonarQube's complexity cap. SAR is stored as one `AVRational sar_`, exposed via
+  `sar_num()`/`sar_den()`.
   `display_dims()` helper computes anamorphic-corrected width (round(coded_width * SAR_num / SAR_den))
   for DVD/DV clips with non-square pixels (SAR read via `av_guess_sample_aspect_ratio()`).
   VideoMeta stores display dims (not coded dims) for detail panel + thumbnail poster.
@@ -60,6 +64,11 @@ Files: `video_source.*`, `chunk_avio.*`, `mem_avio.*`, `video_decoder.*`, `audio
   Registers modern codecs (H.264, HEVC, AV1) and Phase 52 legacy codecs (MPEG-1/2, MPEG-4 ASP,
   MS-MPEG4 v1–v3, WMV1/2/3, VC-1, H.263, FLV1, VP6/a/f, SVQ1/3, DV, MSVideo1, RPZA, HuffYUV,
   FFV1, Theora, RV10/20/30/40, QTRLE, Cinepak). VideoCodec enum now spans values 0–36.
+  Implemented as a `static constexpr std::array` of `{AVCodecID, VideoCodec}` rows searched with
+  `std::ranges::find_if`, NOT a switch (SonarQube caps switch cases at 30). A
+  `static_assert(size == std::to_underlying(RV40) + 1)` restores the exhaustiveness a
+  `switch`-without-`default` gave: adding a `VideoCodec` enumerator without a mapping is a build
+  error, not a silent `nullopt`. `ui::video_codec_name` mirrors this pattern for display names.
 - Supported codecs (`VideoCodec`): H.264, HEVC (native); AV1 via the already-vendored libaom
   as FFmpeg's `libaom-av1` decoder (FFmpeg's own native "av1" decoder is a hwaccel-dispatch
   shim only — no software decode); QTRLE, Cinepak (native `.mov`); Phase 52 additions
@@ -79,9 +88,24 @@ unsafe to alias once the next decode call can run concurrently).
 **Phase 52 addition:** deinterlacing via yadif (Yet Another Deinterlacing Filter). `should_deinterlace(int flags)`
 predicate (conditional on `AV_FRAME_FLAG_INTERLACED` in frame flags). Lazily-built cached avfilter
 graph (buffer → yadif mode=0 → buffersink) hooked in `publish_decoded_frame()` after hardware-transfer
-if present. Graph is per-thread-local, rebuilt on-demand, freed on FrameConverter destruction or stream
-change. On deinterlace error, returns nullptr (caller shows original frame once, error logged once via
-`deint_error_once_` guard). No per-frame graph rebuild (state set AFTER success only).
+if present. Graph is per-instance, rebuilt when source geometry (width/height/pix_fmt) changes, freed on
+`reset()`/destruction. Built by `build_deint_graph()`; every failure path routes through
+`fail_deint_graph()` (warn + `free_deint_graph()` + return false), and all warnings go through
+`deint_warn_once()`, so a persistently broken graph logs once rather than once per frame. Cached
+geometry is committed only AFTER the graph fully builds, so a half-built graph never looks valid.
+On error or EAGAIN returns nullptr and the caller shows the original frame once.
+
+**Two FFmpeg-API invariants — both were violated in the original Phase 52 implementation:**
+- Feed frames with `av_buffersrc_write_frame()` (takes `const AVFrame*`, keeps the caller's
+  reference). NEVER `av_buffersrc_add_frame()`: it takes ownership of the frame's references and
+  blanks the caller's frame, which silently breaks the EAGAIN fallback — the caller then displays
+  an emptied frame instead of the original. Its non-const signature is also what tempts a
+  `const_cast` here; `write_frame` needs none.
+- `av_frame_unref(deint_out_)` before EVERY `av_buffersink_get_frame()`: it move-refs into the
+  target without unreferencing first, so omitting the unref leaks one full frame buffer per
+  deinterlaced frame. Identical failure mode to `to_i420()`'s `conv_` unref.
+Both have dedicated regression tests in `tests/media/test_frame_convert.cpp` (the leak one is a
+12-frame loop that shows up under ASAN/valgrind, not as an assertion).
 
 ### video_decode_worker.{h,cpp} — VideoDecodeWorker
 Background `std::jthread` doing ONLY codec-level video decode (`avcodec_send_packet`/
