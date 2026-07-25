@@ -4,6 +4,8 @@
 
 #include <array>
 #include <cstring>
+#include <format>
+#include <string>
 
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -13,6 +15,9 @@
 extern "C" {
 #include <libavutil/frame.h>
 #include <libavutil/pixfmt.h>
+#include <libavfilter/avfilter.h>
+#include <libavfilter/buffersrc.h>
+#include <libavfilter/buffersink.h>
 }
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
@@ -21,6 +26,15 @@ extern "C" {
 #include <print>
 
 namespace media {
+
+bool should_deinterlace(int frame_flags) noexcept
+{
+    // frame_flags is an AVFrame::flags value; the interlaced bit is the one
+    // signal we act on. Takes an int (not the AVFrame) so callers/tests stay
+    // decoupled from FFmpeg types, but this .cpp is OSV_VENDORED_AV-only, so we
+    // reference the real macro rather than hardcoding its value.
+    return (frame_flags & AV_FRAME_FLAG_INTERLACED) != 0;
+}
 
 FrameConverter::~FrameConverter()
 {
@@ -31,6 +45,128 @@ void FrameConverter::reset()
 {
     if (sws_)  { sws_freeContext(sws_); sws_ = nullptr; }
     if (conv_) av_frame_free(&conv_);
+    free_deint_graph();
+}
+
+void FrameConverter::free_deint_graph()
+{
+    if (filter_graph_) avfilter_graph_free(&filter_graph_);  // nulls filter_graph_
+    if (deint_out_)    av_frame_free(&deint_out_);           // nulls deint_out_
+    buffersrc_        = nullptr;                             // owned by the graph
+    buffersink_       = nullptr;
+    deint_width_      = 0;
+    deint_height_     = 0;
+    deint_format_     = -1;
+    deint_error_once_ = false;
+}
+
+void FrameConverter::deint_warn_once(std::string_view msg)
+{
+    if (deint_error_once_) return;
+    std::println(stderr, "[FrameConverter] {}", msg);
+    deint_error_once_ = true;
+}
+
+bool FrameConverter::fail_deint_graph(std::string_view msg)
+{
+    deint_warn_once(msg);
+    free_deint_graph();
+    return false;
+}
+
+bool FrameConverter::build_deint_graph(const AVFrame* src)
+{
+    filter_graph_ = avfilter_graph_alloc();
+    if (!filter_graph_) return fail_deint_graph("Failed to allocate filter graph");
+
+    // buffer source args. time_base can be 1/1 since we carry pts separately.
+    const std::string args =
+        std::format("video_size={}x{}:pix_fmt={}:time_base=1/1:sar={}/{}",
+                    src->width, src->height, src->format,
+                    src->sample_aspect_ratio.num ? src->sample_aspect_ratio.num : 1,
+                    src->sample_aspect_ratio.den ? src->sample_aspect_ratio.den : 1);
+
+    AVFilterContext* buffersrc = nullptr;
+    if (avfilter_graph_create_filter(&buffersrc, avfilter_get_by_name("buffer"), "in",
+                                     args.c_str(), nullptr, filter_graph_) < 0) {
+        return fail_deint_graph("Failed to create buffer filter");
+    }
+
+    // yadif with mode=0 (send_frame: one output frame per input frame).
+    AVFilterContext* yadif = nullptr;
+    if (avfilter_graph_create_filter(&yadif, avfilter_get_by_name("yadif"), "yadif",
+                                     "mode=0", nullptr, filter_graph_) < 0) {
+        return fail_deint_graph("Failed to create yadif filter");
+    }
+
+    AVFilterContext* buffersink = nullptr;
+    if (avfilter_graph_create_filter(&buffersink, avfilter_get_by_name("buffersink"),
+                                     "out", nullptr, nullptr, filter_graph_) < 0) {
+        return fail_deint_graph("Failed to create buffersink filter");
+    }
+
+    // Link: buffersrc -> yadif -> buffersink
+    if (avfilter_link(buffersrc, 0, yadif, 0) < 0) {
+        return fail_deint_graph("Failed to link buffersrc to yadif");
+    }
+    if (avfilter_link(yadif, 0, buffersink, 0) < 0) {
+        return fail_deint_graph("Failed to link yadif to buffersink");
+    }
+    if (avfilter_graph_config(filter_graph_, nullptr) < 0) {
+        return fail_deint_graph("Failed to configure filter graph");
+    }
+
+    deint_out_ = av_frame_alloc();
+    if (!deint_out_) return fail_deint_graph("Failed to allocate deinterlace output frame");
+
+    // Only now commit the cached state — every path above tears the graph back
+    // down, so a half-built graph is never left looking valid.
+    buffersrc_    = buffersrc;
+    buffersink_   = buffersink;
+    deint_width_  = src->width;
+    deint_height_ = src->height;
+    deint_format_ = src->format;
+    return true;
+}
+
+const AVFrame* FrameConverter::deinterlace(const AVFrame* src)
+{
+    if (!src) return nullptr;
+
+    // Rebuild the graph on first use and whenever the source geometry changes.
+    if (!filter_graph_ || deint_width_ != src->width || deint_height_ != src->height ||
+        deint_format_ != src->format) {
+        free_deint_graph();
+        if (!build_deint_graph(src)) return nullptr;
+    }
+
+    // av_buffersrc_write_frame is the const, keep-a-reference form. The
+    // non-const av_buffersrc_add_frame would take ownership of src's references
+    // and blank the caller's frame — which the EAGAIN path below explicitly
+    // relies on NOT happening (the caller reuses src for that frame).
+    if (av_buffersrc_write_frame(buffersrc_, src) < 0) {
+        deint_warn_once("Failed to add frame to buffersrc");
+        return nullptr;
+    }
+
+    // Release the previous output's buffers first: av_buffersink_get_frame
+    // move-refs into deint_out_ without unreferencing it, so skipping this
+    // leaks one whole frame buffer per deinterlaced frame (same failure mode
+    // as to_i420()'s av_frame_unref below).
+    av_frame_unref(deint_out_);
+
+    const int ret = av_buffersink_get_frame(buffersink_, deint_out_);
+    if (ret == AVERROR(EAGAIN)) {
+        // yadif needs the next frame before it can emit; return nullptr.
+        // The caller will show the original src once instead of dropping.
+        return nullptr;
+    }
+    if (ret < 0) {
+        deint_warn_once(std::format("av_buffersink_get_frame failed: {}", ret));
+        return nullptr;
+    }
+
+    return deint_out_;
 }
 
 DecodedFrame FrameConverter::zero_copy(const AVFrame* src, double pts_seconds)

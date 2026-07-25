@@ -5,8 +5,10 @@
 #include <chrono>
 #include <format>
 #include <string_view>
+#include <utility>
 
 #include "ui/playback_model.h"   // format_clock (shared time formatting)
+#include "ui/video_exts.h"       // kVideoExts (shared video extension whitelist)
 
 namespace ui {
 
@@ -64,28 +66,77 @@ std::string format_duration(uint64_t microseconds)
 std::string_view video_codec_name(vault::VideoCodec c) noexcept
 {
     using enum vault::VideoCodec;
-    switch (c) {
-        case H264:   return "H.264";
-        case HEVC:   return "H.265";
-        case ProRes: return "ProRes";
-        case DNxHD:  return "DNxHD";
-        case MJPEG:  return "MJPEG";
-        case VP8:    return "VP8";
-        case VP9:    return "VP9";
-        case AV1:    return "AV1";
-        case QTRLE:  return "QuickTime RLE";
-        case Cinepak: return "Cinepak";
-        case Unknown: break;
-    }
-    return "Video";
+    struct CodecName {
+        vault::VideoCodec codec;
+        std::string_view  name;
+    };
+    // One row per codec. A table rather than a switch: the codec list is a long
+    // flat mapping that keeps growing, and the static_assert below preserves the
+    // exhaustiveness a switch-without-default gave — adding an enumerator without
+    // a display name here is a build error.
+    static constexpr std::array<CodecName, 37> kNames{{
+        {H264,      "H.264"},
+        {HEVC,      "H.265"},
+        {ProRes,    "ProRes"},
+        {DNxHD,     "DNxHD"},
+        {MJPEG,     "MJPEG"},
+        {VP8,       "VP8"},
+        {VP9,       "VP9"},
+        {AV1,       "AV1"},
+        {QTRLE,     "QuickTime RLE"},
+        {Cinepak,   "Cinepak"},
+        {MPEG1,     "MPEG-1"},
+        {MPEG2,     "MPEG-2"},
+        {MPEG4,     "MPEG-4"},
+        {MSMPEG4V1, "MS MPEG-4 v1"},
+        {MSMPEG4V2, "MS MPEG-4 v2"},
+        {MSMPEG4V3, "DivX 3"},
+        {WMV1,      "WMV1"},
+        {WMV2,      "WMV2"},
+        {WMV3,      "WMV3"},
+        {VC1,       "VC-1"},
+        {H263,      "H.263"},
+        {FLV1,      "Sorenson Spark"},
+        {VP6,       "VP6"},
+        {VP6A,      "VP6A"},
+        {VP6F,      "VP6F"},
+        {SVQ1,      "SVQ1"},
+        {SVQ3,      "SVQ3"},
+        {DV,        "DV"},
+        {MSVideo1,  "MS Video 1"},
+        {RPZA,      "RPZA"},
+        {HuffYUV,   "HuffYUV"},
+        {FFV1,      "FFV1"},
+        {Theora,    "Theora"},
+        {RV10,      "RealVideo 1.0"},
+        {RV20,      "RealVideo 2.0"},
+        {RV30,      "RealVideo 3.0"},
+        {RV40,      "RealVideo 4.0"},
+    }};
+    // VideoCodec's enumerators are dense 0..RV40 (Unknown is 0xFF and falls
+    // through to "Video" below), so one row per value means size == RV40 + 1.
+    static_assert(kNames.size() == std::to_underlying(RV40) + 1U,
+                  "Add a display name whenever a VideoCodec enumerator is added");
+
+    // Plain `auto`, not `auto*`: std::array's const_iterator is a raw pointer in
+    // libstdc++ but a class type in MSVC's STL, where `auto*` fails to deduce.
+    const auto it = std::ranges::find_if(kNames, [c](const CodecName& e) { return e.codec == c; });
+    return it != kNames.end() ? it->name : "Video";
 }
 
 std::string_view video_container_name(vault::VideoContainer c) noexcept
 {
     using enum vault::VideoContainer;
     switch (c) {
-        case MP4: return "MP4";
-        case MKV: return "MKV";
+        case MP4:    return "MP4";
+        case MKV:    return "MKV";
+        case AVI:    return "AVI";
+        case MPEGPS: return "MPEG-PS";
+        case MPEGTS: return "MPEG-TS";
+        case ASF:    return "ASF";
+        case FLV:    return "FLV";
+        case OGG:    return "Ogg";
+        case RM:     return "RealMedia";
         case Unknown: break;
     }
     return "-";
@@ -100,11 +151,13 @@ std::string video_type_label(vault::VideoCodec c) noexcept
 bool is_video_filename(std::string_view filename) noexcept
 {
     const auto dot = filename.find_last_of('.');
-    if (dot == std::string_view::npos || dot + 1 >= filename.size()) return false;
+    if (dot == std::string_view::npos || dot + 1 >= filename.size()) {
+        return false;
+    }
     std::string ext;
-    for (const char c : filename.substr(dot + 1))
+    for (const char c : filename.substr(dot + 1)) {
         ext.push_back(static_cast<char>((c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c));
-    static constexpr std::array<std::string_view, 5> kVideoExts{"mp4", "mkv", "webm", "mov", "m4v"};
+    }
     return std::ranges::find(kVideoExts, ext) != kVideoExts.end();
 }
 

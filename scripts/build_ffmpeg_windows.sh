@@ -62,15 +62,17 @@ echo "==> Building vendored ffmpeg for Windows (MSVC toolchain, decode-only, sta
         --enable-static --disable-shared \
         --disable-everything --disable-programs --disable-doc \
         --disable-network --disable-encoders --disable-muxers \
-        --disable-protocols --disable-devices --disable-filters \
+        --disable-protocols --disable-devices --disable-filters --enable-filter=yadif \
         --disable-bsfs --disable-autodetect \
+        --enable-avfilter \
         --enable-libaom \
-        --enable-decoder=h264,hevc,prores,dnxhd,mjpeg,vp8,vp9,libaom_av1,qtrle,cinepak,gif,aac,opus,mp3,vorbis,flac,ac3,eac3 \
-        --enable-demuxer=mov,matroska,webm,gif \
-        --enable-parser=h264,hevc,dnxhd,mjpeg,gif,aac,vorbis,opus,flac,ac3,mpegaudio \
+        --enable-decoder=h264,hevc,prores,dnxhd,mjpeg,vp8,vp9,libaom_av1,qtrle,cinepak,gif,aac,opus,mp3,vorbis,flac,ac3,eac3,mpeg1video,mpeg2video,mpeg4,msmpeg4v1,msmpeg4v2,msmpeg4v3,wmv1,wmv2,wmv3,vc1,h263,flv,vp6,vp6a,vp6f,svq1,svq3,dvvideo,msvideo1,rpza,huffyuv,ffv1,theora,rv10,rv20,rv30,rv40,mp2,wmav1,wmav2,cook,ra_144,ra_288,pcm_s16le,pcm_u8,adpcm_ms,adpcm_ima_wav \
+        --enable-demuxer=mov,matroska,webm,gif,avi,mpegps,mpegts,asf,flv,ogg,rm \
+        --enable-parser=h264,hevc,dnxhd,mjpeg,gif,aac,vorbis,opus,flac,ac3,mpegaudio,mpegvideo,mpeg4video,h263,vc1 \
         --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb \
         --enable-swscale \
         --enable-d3d11va \
+        --enable-hwaccel=h264_d3d11va,hevc_d3d11va,vp9_d3d11va,av1_d3d11va,mpeg2_d3d11va,vc1_d3d11va,wmv3_d3d11va \
         --enable-pic
     make -j"$(nproc)"
     make install
@@ -78,7 +80,10 @@ echo "==> Building vendored ffmpeg for Windows (MSVC toolchain, decode-only, sta
 
 # See the file header: premake expects bare <name>.lib on Windows/MSVC, FFmpeg
 # always produces lib<name>.a — keep both so detection and linking each resolve.
-for name in avformat avcodec swscale swresample avutil; do
+# avfilter is in this list because Phase 52 links it (yadif deinterlace); it is
+# the one library premake links conditionally, so a missing .lib here surfaces as
+# an LNK1181 at link time rather than as a detection miss.
+for name in avfilter avformat avcodec swscale swresample avutil; do
     cp "$CODEC_PREFIX/lib/lib$name.a" "$CODEC_PREFIX/lib/$name.lib"
 done
 

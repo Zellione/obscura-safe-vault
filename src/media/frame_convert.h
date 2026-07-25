@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 #include "media/decoded_frame.h"
@@ -21,8 +22,13 @@ extern "C" {
 #endif
 
 struct AVFrame;
+struct AVFilterGraph;
+struct AVFilterContext;
 
 namespace media {
+
+// True when a decoded frame carries interlaced content and should be deinterlaced.
+[[nodiscard]] bool should_deinterlace(int frame_flags) noexcept;
 
 // Converts a decoded AVFrame to a DecodedFrame, zero-copy for I420/NV12 and
 // via a cached swscale context for anything else (e.g. yuv422p10le ProRes,
@@ -54,9 +60,43 @@ public:
     // instead of reassigning from a temporary.
     void reset();
 
+    // Deinterlaces an interlaced frame using yadif filter (mode=0: send_frame).
+    // Returns a deinterlaced AVFrame (owned by this object, valid until the
+    // next call) or nullptr if yadif needs more frames (EAGAIN on first frame)
+    // or an error occurred. The caller should show the original src once in the
+    // EAGAIN case rather than dropping a frame.
+    [[nodiscard]] const AVFrame* deinterlace(const AVFrame* src);
+
 private:
+    // Builds the buffer -> yadif -> buffersink graph for `src`'s geometry and
+    // caches it. Returns false (having warned and torn the partial graph down)
+    // on any failure.
+    [[nodiscard]] bool build_deint_graph(const AVFrame* src);
+
+    // Frees the filter graph + output frame and clears the cached geometry, so
+    // the next deinterlace() rebuilds from scratch.
+    void free_deint_graph();
+
+    // Warn + free the partially-built graph + return false: the shared tail of
+    // every build_deint_graph() failure path.
+    bool fail_deint_graph(std::string_view msg);
+
+    // Logs `msg` only the first time deinterlacing fails; a persistently broken
+    // graph would otherwise print once per frame.
+    void deint_warn_once(std::string_view msg);
+
     SwsContext* sws_  = nullptr;
     AVFrame*    conv_ = nullptr;
+
+    // yadif filter graph state (lazy-built, cached, rebuilt on format change)
+    AVFilterGraph*  filter_graph_      = nullptr;
+    AVFilterContext* buffersrc_        = nullptr;
+    AVFilterContext* buffersink_       = nullptr;
+    AVFrame*        deint_out_         = nullptr;
+    int             deint_width_       = 0;
+    int             deint_height_      = 0;
+    int             deint_format_      = -1;
+    bool            deint_error_once_  = false;
 };
 
 // Copies `src`'s plane data into `storage` (resized to fit) and returns a

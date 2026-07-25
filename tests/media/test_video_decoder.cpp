@@ -8,7 +8,7 @@
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
 extern "C" {
-#include <libavcodec/packet.h>
+#include <libavcodec/avcodec.h>
 }
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
@@ -366,14 +366,22 @@ TEST(video_decoder_multiple_seeks)
 
 // open() must reject a stream whose codec isn't H.264/HEVC (exercises the
 // unsupported-codec failure path), feeding the raw bytes via MemAvio.
-TEST(video_decoder_rejects_unsupported_codec)
+TEST(video_decoder_opens_legacy_mpeg4_avi)
 {
-    auto bytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_mpeg4.avi");  // mpeg4, not h264/hevc
+    // Phase 52 enabled the AVI demuxer + MPEG-4 (DivX/Xvid) decoder. Exercise the
+    // full open() integration path: container probe -> codec detection ->
+    // map_codec_id -> successful open, reporting the mapped VideoCodec. This is the
+    // counterpart to test_codec_map.cpp, which unit-tests the mapper's rejection of an
+    // unsupported id (map_codec_id(AV_CODEC_ID_NONE) -> nullopt). A fixture whose codec
+    // is genuinely unmapped — to re-cover open()'s rejection branch as an integration
+    // test — is added in Task 8 (an ffvhuff clip our build has no decoder for).
+    auto bytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_mpeg4.avi");
     REQUIRE(!bytes.empty());
     media::MemAvio avio(bytes);
     REQUIRE(avio.valid());
     media::VideoDecoder dec;
-    CHECK(!dec.open(avio.ctx()));
+    CHECK(dec.open(avio.ctx()));
+    CHECK(dec.codec() == vault::VideoCodec::MPEG4);
 }
 
 // open() must reject a file with no video stream (audio only).
@@ -703,6 +711,30 @@ TEST(video_decoder_seek_demux_only_resumes_demux_from_target)
         av_packet_free(&pkt);
     }
     CHECK(n > 0);   // some packets remain after the seek target
+}
+
+TEST(video_decoder_ffvhuff_unsupported_codec_open_fails)
+{
+    // Phase 52: ffvhuff is demuxable (matroska container) but not decodable in our
+    // vendored FFmpeg build (we registered only Tier-1 legacy decoders; ffvhuff is not
+    // mapped in map_codec_id). Verify open() rejects it with the correct error.
+    auto v_bytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tinylegacy_ffvhuff.mkv");
+    REQUIRE(!v_bytes.empty());
+
+    TempVault tv("decoder_ffvhuff");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", v_bytes, "ffvhuff.mkv", 4096) == vault::VaultResult::Ok);
+    auto kids = v.list("c");
+    REQUIRE(kids.size() == 1);
+
+    media::ChunkAvio avio(media::VideoSource::open(v, *kids[0]));
+    REQUIRE(avio.valid());
+    media::VideoDecoder dec;
+    REQUIRE(!dec.open(avio.ctx()));  // open() must fail for unsupported codec
+    // Codec should remain Unknown
+    CHECK(dec.codec() == vault::VideoCodec::Unknown);
 }
 
 #endif // OSV_VENDORED_AV

@@ -1,6 +1,7 @@
 #include "ui/zip_plan.h"
 
 #include "ui/natural_sort.h"
+#include "ui/video_exts.h"       // kVideoExts (shared video extension whitelist)
 #include "vault/safe_name.h"
 
 #include <algorithm>
@@ -127,7 +128,6 @@ bool ext_in(std::string_view name, std::span<const std::string_view> exts)
 
 constexpr std::array<std::string_view, 10> kImageExts{
     "jpg", "jpeg", "png", "gif", "bmp", "tga", "hdr", "webp", "heic", "avif"};
-constexpr std::array<std::string_view, 5> kVideoExts{"mp4", "mkv", "webm", "mov", "m4v"};
 
 } // namespace
 
@@ -147,7 +147,7 @@ bool is_supported_image_name(std::string_view name)
 
 bool is_supported_media_name(std::string_view name)
 {
-    return ext_in(name, kImageExts) || ext_in(name, kVideoExts);
+    return ext_in(name, kImageExts) || ext_in(name, ui::kVideoExts);
 }
 
 ZipPlan build_cbz_plan(const std::vector<ZipEntry>& entries,

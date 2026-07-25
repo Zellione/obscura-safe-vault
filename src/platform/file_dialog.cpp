@@ -52,7 +52,7 @@ void FileDialog::open_images(SDL_Window* parent)
     if (!begin_open(Purpose::Images)) return;
     static constexpr std::array f{
         SDL_DialogFileFilter{"Images & video",
-                             "jpg;jpeg;png;gif;bmp;tga;hdr;webp;heic;avif;mp4;mkv;webm;mov;m4v"},
+                             "jpg;jpeg;png;gif;bmp;tga;hdr;webp;heic;avif;mp4;mkv;webm;mov;m4v;avi;mpg;mpeg;wmv;asf;flv;ts;m2ts;ogv;rm;rmvb"},
         SDL_DialogFileFilter{"All files", "*"}};
     SDL_ShowOpenFileDialog(on_files, this, parent, f.data(),
                            static_cast<int>(f.size()), nullptr, /*allow_many*/ true);
