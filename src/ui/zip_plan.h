@@ -22,6 +22,12 @@ struct ZipPlacement {
 struct ZipPlan {
     std::vector<std::string>  galleries;            // create in this order (parents first)
     std::vector<ZipPlacement> placements;
+    // Phase 53: entries whose NAME claims an archive, to be extracted and
+    // recursed into. Classified by extension only — the planner has no bytes —
+    // so the orchestrator magic-checks each one and demotes any liar to
+    // `skipped_unsupported`. Always empty for a CBZ plan: a comic archive is a
+    // flat run of pages, so an archive inside one is not a chapter.
+    std::vector<ZipPlacement> nested;
     int                       skipped_unsupported = 0;
 };
 
