@@ -1,5 +1,7 @@
 #include "ui/zip_plan.h"
 
+#include "ui/archive_kind.h"
+
 #include "ui/natural_sort.h"
 #include "ui/video_exts.h"       // kVideoExts (shared video extension whitelist)
 #include "vault/safe_name.h"
@@ -98,15 +100,28 @@ struct MediaFile {
 // Scan entries for supported media files. Unsupported / directory entries bump
 // `skipped`; a top-level meta.json (`meta_idx`) is excluded without counting
 // (Phase 27).
+// `nested_out` non-null (the ZIP path) diverts entries whose NAME claims an
+// archive; null (the CBZ path) leaves them counted as unsupported, because a
+// comic archive is a flat run of pages and an archive inside one is not a
+// chapter.
 std::vector<MediaFile> collect_media(const std::vector<ZipEntry>& entries,
-                                     std::optional<size_t> meta_idx, int& skipped)
+                                     std::optional<size_t> meta_idx, int& skipped,
+                                     std::vector<MediaFile>* nested_out)
 {
     std::vector<MediaFile> media;
     for (size_t i = 0; i < entries.size(); ++i) {
         const ZipEntry& e = entries[i];
         if (entry_is_dir(e) || i == meta_idx) continue;
         std::string name = basename_of(e.path);
-        if (!is_supported_media_name(name)) { ++skipped; continue; }
+        if (!is_supported_media_name(name)) {
+            if (nested_out != nullptr && is_archive_name(name)) {
+                std::string dir = sanitize_dir_path(dirname_of(e.path));
+                nested_out->emplace_back(std::move(dir), std::move(name), i);
+            } else {
+                ++skipped;
+            }
+            continue;
+        }
         std::string dir = sanitize_dir_path(dirname_of(e.path));
         media.emplace_back(std::move(dir), std::move(name), i);
     }
@@ -219,8 +234,9 @@ ZipPlan build_zip_plan(const std::vector<ZipEntry>& entries,
     ZipPlan plan;
     const std::string root = join_path(base_gallery, new_gallery_name);
 
+    std::vector<MediaFile>       nested_files;
     const std::vector<MediaFile> media =
-        collect_media(entries, meta_idx, plan.skipped_unsupported);
+        collect_media(entries, meta_idx, plan.skipped_unsupported, &nested_files);
 
     // Every media file lands in the gallery mirroring its archive directory.
     // A directory that holds media *and* has media-bearing subdirectories needs
@@ -231,7 +247,18 @@ ZipPlan build_zip_plan(const std::vector<ZipEntry>& entries,
         add_with_ancestors(gallery, final_galleries);
         plan.placements.emplace_back(gallery, m.name, m.index);
     }
-    if (!root.empty() && !plan.placements.empty()) final_galleries.insert(root);
+    // A nested archive's sub-gallery hangs off the gallery mirroring the
+    // directory the archive sits in, so that gallery must exist even when the
+    // directory holds nothing but the archive.
+    for (const MediaFile& n : nested_files) {
+        const std::string gallery = n.dir.empty() ? root : join_path(root, n.dir);
+        add_with_ancestors(gallery, final_galleries);
+        plan.nested.emplace_back(gallery, n.name, n.index);
+    }
+
+    if (!root.empty() && !(plan.placements.empty() && plan.nested.empty())) {
+        final_galleries.insert(root);
+    }
 
     plan.galleries.assign(final_galleries.begin(), final_galleries.end());
     std::ranges::sort(plan.galleries, [](std::string_view a, std::string_view b) {

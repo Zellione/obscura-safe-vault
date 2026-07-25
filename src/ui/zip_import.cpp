@@ -64,6 +64,32 @@ ArchiveMeta load_archive_meta(mz_zip_archive& zip, const std::vector<ZipEntry>& 
 
 // Seed `gallery` with the meta-derived tags (japanese title + each "type:name").
 // Best-effort: add_tag merges case-insensitively; a failed tag is not fatal.
+// The archive's top gallery as the SINK sees it. With DirectVaultSink the base
+// already ends at the gallery name, so this is ""; with StagingSink the base
+// stops at dest_gallery, so the name itself is the relative path.
+std::string_view strip_root(std::string_view absolute, std::string_view root)
+{
+    if (root.empty() || absolute == root) {
+        return absolute == root ? std::string_view{} : absolute;
+    }
+    if (absolute.size() > root.size() && absolute.starts_with(root) &&
+        absolute[root.size()] == '/') {
+        return absolute.substr(root.size() + 1);
+    }
+    return absolute;
+}
+
+// Apply meta.json's tags through the sink, so the background queue tags too.
+// Previously this only happened in the vault overloads, which meant every
+// queued import silently dropped its archive tags.
+void apply_meta_tags_via_sink(MediaSink& sink, std::string_view rel_gallery,
+                              const ArchiveMeta& meta)
+{
+    for (const std::string& t : meta_gallery_tags(meta)) {
+        (void)sink.tag_gallery(rel_gallery, t);   // best-effort, as before
+    }
+}
+
 void apply_meta_tags(vault::Vault& v, std::string_view gallery, const ArchiveMeta& meta)
 {
     for (const std::string& t : meta_gallery_tags(meta))
@@ -197,12 +223,10 @@ ZipImportOutcome import_zip(MediaSink&                   sink,
     const std::string root_gallery(new_gallery_name);
 
     if (!create_galleries(sink, plan, zip, root_gallery, out)) return out;
-    if (!plan.placements.empty()) {
-        // Apply tags to the vault for the root gallery (sink stores it, so we pass root).
-        // This requires getting the vault from sink, which DirectVaultSink provides.
-        // For now, we skip tags through the sink API; they're best-effort anyway.
-        // TODO(Phase51): add tag support to MediaSink if archive metadata tagging becomes
-        // a priority feature.
+    // The sink's own base plus what is left of the plan root after stripping
+    // addresses the archive's top gallery.
+    if (!plan.placements.empty() || !plan.nested.empty()) {
+        apply_meta_tags_via_sink(sink, strip_root(new_gallery_name, root_gallery), meta);
     }
     run_placements(sink, zip, plan, root_gallery, out, progress);
     return out;
@@ -211,6 +235,7 @@ ZipImportOutcome import_zip(MediaSink&                   sink,
 ZipImportOutcome import_cbz(MediaSink&                   sink,
                             const std::filesystem::path& cbz_path,
                             std::string_view             gallery_name,
+                            std::string_view             sink_root,
                             ImportProgress*              progress)
 {
     // A .cbz is a plain zip; build_cbz_plan emits one leaf gallery of pages.
@@ -231,13 +256,15 @@ ZipImportOutcome import_cbz(MediaSink&                   sink,
     const ZipPlan plan = build_cbz_plan(entries, "", gallery_name);
     out.skipped = plan.skipped_unsupported;
 
-    // Root is just gallery_name when base is empty.
-    const std::string root_gallery(gallery_name);
+    // What to strip before the sink — NOT necessarily gallery_name; see the
+    // header. StagingSink's base omits the name, so stripping it there loses a
+    // whole gallery level.
+    const std::string root_gallery(sink_root);
 
     if (!create_galleries(sink, plan, zip, root_gallery, out)) return out;
     if (!plan.placements.empty()) {
-        // Apply tags to the vault for the root gallery (sink stores it, so we pass root).
-        // For now, we skip tags through the sink API; they're best-effort anyway.
+        apply_meta_tags_via_sink(sink, strip_root(gallery_name, root_gallery), meta);
+        // (Historic note: tags used to be applied only in the vault overloads.
         // TODO(Phase51): add tag support to MediaSink if archive metadata tagging becomes
         // a priority feature.
     }
@@ -299,7 +326,7 @@ ZipImportOutcome import_cbz(vault::Vault&                v,
 
     // Create sink and call the MediaSink version.
     DirectVaultSink sink(v, base_gallery, gallery_name, progress);
-    out = import_cbz(sink, cbz_path, gallery_name, progress);
+    out = import_cbz(sink, cbz_path, gallery_name, gallery_name, progress);
 
     // Apply meta tags to the top-level imported gallery (best-effort).
     if (out.ok && !out.imported && !out.skipped) {

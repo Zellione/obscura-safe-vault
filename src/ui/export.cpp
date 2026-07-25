@@ -23,16 +23,24 @@ bool export_path_within(const fs::path& dest_dir, const fs::path& candidate)
     return !std::ranges::contains(rel, "..");
 }
 
-vault::VaultResult export_one_image(const vault::Vault&          vault,
+// Phase 53: videos became selectable, so a selection can legitimately contain
+// one. A gallery still has no stored bytes of its own and is rejected — calling
+// that an "export" would be a lie.
+vault::VaultResult export_one_media(const vault::Vault&          vault,
                                     const vault::IndexNode&      node,
                                     const fs::path&              out_path,
                                     crypto::SecureBytes&         scratch)
 {
-    if (!node.is_image()) return vault::VaultResult::InvalidArg;
+    const bool image = node.is_image();
+    if (const bool video = node.is_video(); !image && !video) {
+        return vault::VaultResult::InvalidArg;
+    }
 
     // Decrypt the original stored bytes into mlock'd memory (invariant #1 holds
-    // right up to the write below).
-    if (auto rc = vault.read_image(node, scratch); rc != vault::VaultResult::Ok) {
+    // right up to the write below). A video's bytes live across several chunks;
+    // read_video concatenates them into the same mlock'd buffer.
+    if (const auto rc = image ? vault.read_image(node, scratch) : vault.read_video(node, scratch);
+        rc != vault::VaultResult::Ok) {
         scratch.wipe();
         return rc;
     }
@@ -75,7 +83,7 @@ ExportSummary export_images(const vault::Vault&                      vault,
     crypto::SecureBytes scratch;
     for (const vault::IndexNode* node : images) {
         if (progress && progress->cancel.load()) break;   // stop between files; written so far kept
-        if (node == nullptr || !node->is_image()) {
+        if (node == nullptr || !(node->is_image() || node->is_video())) {
             ++sum.failed;
         } else {
             // The vault's index is untrusted input: defang the name, then verify
@@ -87,7 +95,7 @@ ExportSummary export_images(const vault::Vault&                      vault,
                              "[Export] refusing to write outside the chosen folder: {}",
                              out.string());
                 ++sum.failed;
-            } else if (export_one_image(vault, *node, out, scratch) == vault::VaultResult::Ok) {
+            } else if (export_one_media(vault, *node, out, scratch) == vault::VaultResult::Ok) {
                 ++sum.written;
             } else {
                 ++sum.failed;

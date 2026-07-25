@@ -1,4 +1,6 @@
 #include "ui/import_queue.h"
+
+#include "ui/recursive_exec.h"
 #include "ui/archive_import.h"
 #include "ui/folder_scan.h"
 #include "ui/media_sink.h"
@@ -183,7 +185,22 @@ public:
                                      : dest_gallery_ + "/" + std::string(rel_gallery);
         {
             std::lock_guard lock(mu_);
-            records_.emplace_back(path, std::nullopt, task_id_, false);
+            records_.emplace_back(path, std::nullopt, task_id_, false, std::string{});
+        }
+        return vault::VaultResult::Ok;
+    }
+
+    [[nodiscard]] vault::VaultResult tag_gallery(std::string_view rel_gallery,
+                                                 std::string_view tag) override
+    {
+        // Deferred like every other mutation: the worker thread must not touch
+        // the index tree (Phase 50), so this is queued for the main thread.
+        const std::string path = dest_gallery_.empty()
+                                     ? std::string(rel_gallery)
+                                     : dest_gallery_ + "/" + std::string(rel_gallery);
+        {
+            std::lock_guard lock(mu_);
+            records_.emplace_back(path, std::nullopt, task_id_, false, std::string(tag));
         }
         return vault::VaultResult::Ok;
     }
@@ -203,7 +220,7 @@ public:
 
         {
             std::lock_guard lock(mu_);
-            records_.emplace_back(gallery_path, std::move(staged.node), task_id_, false);
+            records_.emplace_back(gallery_path, std::move(staged.node), task_id_, false, std::string{});
         }
         return vault::VaultResult::Ok;
     }
@@ -223,7 +240,7 @@ public:
 
         {
             std::lock_guard lock(mu_);
-            records_.emplace_back(gallery_path, std::move(staged.node), task_id_, false);
+            records_.emplace_back(gallery_path, std::move(staged.node), task_id_, false, std::string{});
         }
         return vault::VaultResult::Ok;
     }
@@ -347,7 +364,10 @@ void ImportQueue::abort_and_flush()
 
         // Process remaining records without lock
         for (auto& record : remaining) {
-            if (record.node) {
+            if (!record.tag.empty()) {
+                (void)vault::ensure_gallery_path(*v_, record.gallery_path);
+                (void)v_->add_tag(record.gallery_path, record.tag);
+            } else if (record.node) {
                 if (!record.gallery_path.empty()) {
                     (void)vault::ensure_gallery_path(*v_, record.gallery_path);
                 }
@@ -494,6 +514,7 @@ bool ImportQueue::reorder(uint64_t id, int delta)
             .state = t.state,
             .done = t.progress ? t.progress->done.load() : 0,
             .total = t.progress ? t.progress->total.load() : 0,
+            .expanding = t.progress ? t.progress->expanding.load() : false,
             .imported = t.imported,
             .skipped = t.skipped,
             .error = t.error,
@@ -580,7 +601,12 @@ int ImportQueue::drain(double dt)
         auto record = std::move(to_process.front());
         to_process.pop_front();
 
-        if (record.node) {
+        if (!record.tag.empty()) {
+            // Tag record: the gallery's own record was queued before it, so by
+            // the time this drains the gallery exists.
+            (void)vault::ensure_gallery_path(*v_, record.gallery_path);
+            (void)v_->add_tag(record.gallery_path, record.tag);
+        } else if (record.node) {
             // Ensure the destination gallery exists first
             if (!record.gallery_path.empty()) {
                 (void)vault::ensure_gallery_path(*v_, record.gallery_path);
@@ -650,6 +676,7 @@ std::vector<ImportTaskInfo> ImportQueue::snapshot() const
             .state = t.state,
             .done = t.progress ? t.progress->done.load() : 0,
             .total = t.progress ? t.progress->total.load() : 0,
+            .expanding = t.progress ? t.progress->expanding.load() : false,
             .imported = t.imported,
             .skipped = t.skipped,
             .error = t.error,
@@ -907,7 +934,7 @@ void ImportQueue::process_files_task(Task& task)
             if (staged.status == vault::VaultResult::Ok) {
                 std::lock_guard lock(mu_);
                 records_.push_back(StagedRecord{task.dest_gallery, std::move(staged.node),
-                                               task.id, false});
+                                               task.id, false, std::string{}});
                 if (task.progress) {
                     task.progress->done.store(static_cast<int>(pf.index) + 1);
                 }
@@ -967,15 +994,22 @@ void ImportQueue::process_archive_task(Task& task)
     ZipImportOutcome outcome;
 
     // Route by kind
+    // Phase 53: zip/7z/rar/tar recurse into nested archives, each becoming its
+    // own sub-gallery. CBZ deliberately stays on the flat importer — a comic
+    // archive is a run of pages, so an archive inside one is not a chapter.
     if (task.kind == ImportTaskKind::Zip) {
-        outcome = import_zip(sink, task.archive_path, task.gallery_name, task.progress.get());
+        // sink_root "": StagingSink's base is dest_gallery alone, so the
+        // gallery name must survive into the path rather than being stripped.
+        outcome = import_archive_recursive(sink, task.archive_path, task.gallery_name, "",
+                                           task.progress.get(), pw.password);
     } else if (task.kind == ImportTaskKind::Cbz) {
-        outcome = import_cbz(sink, task.archive_path, task.gallery_name, task.progress.get());
+        outcome = import_cbz(sink, task.archive_path, task.gallery_name, "", task.progress.get());
     } else if (task.kind == ImportTaskKind::Archive) {
-        outcome = import_archive(sink, task.archive_path, task.gallery_name, task.progress.get(), pw);
+        outcome = import_archive_recursive(sink, task.archive_path, task.gallery_name, "",
+                                           task.progress.get(), pw.password);
     } else if (task.kind == ImportTaskKind::ArchiveCbz) {
         outcome =
-            import_archive_cbz(sink, task.archive_path, task.gallery_name, task.progress.get(), pw);
+            import_archive_cbz(sink, task.archive_path, task.gallery_name, "", task.progress.get(), pw);
     }
 
     // Wipe password
@@ -1003,8 +1037,11 @@ void ImportQueue::process_folder_task(Task& task)
     // Scan the folder
     const auto entries = scan_folder(task.archive_path);
 
-    // Build the placement plan
-    const auto plan = build_zip_plan(entries, task.dest_gallery, task.gallery_name);
+    // Base "" — NOT dest_gallery. StagingSink already prefixes dest_gallery, so
+    // building absolute paths here applied it twice: a folder imported into
+    // "Parent" landed under "Parent/Parent/...". At the vault root the two
+    // cancelled out, which is why it went unnoticed.
+    const auto plan = build_zip_plan(entries, "", task.gallery_name);
 
     // Set total for progress tracking
     if (task.progress) {
@@ -1132,7 +1169,10 @@ void test_only_drop_without_flush(ImportQueue& q)
 
         // Process remaining records
         for (auto& record : remaining) {
-            if (record.node) {
+            if (!record.tag.empty()) {
+                (void)vault::ensure_gallery_path(*q.v_, record.gallery_path);
+                (void)q.v_->add_tag(record.gallery_path, record.tag);
+            } else if (record.node) {
                 if (!record.gallery_path.empty()) {
                     (void)vault::ensure_gallery_path(*q.v_, record.gallery_path);
                 }

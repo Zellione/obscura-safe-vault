@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -44,6 +45,15 @@ public:
     // of `data`. Returns false if libarchive can't recognise/open it at all.
     [[nodiscard]] bool open(std::span<const uint8_t> data, std::string_view passphrase = {});
 
+    // Open a multi-volume archive using file paths (Phase 53: RAR multi-volume
+    // support). `volumes` is a span of ordered volume paths (part 1, part 2, ...
+    // in sequence). Uses libarchive's file-oriented API (archive_read_open_filenames)
+    // which supports RAR4/5 multivolume. Returns false if the volume list is empty,
+    // a path doesn't exist, isn't readable, isn't RAR, or the volumes are out of order.
+    // Paths must be properly normalized before calling (see platform::normalize_user_path).
+    [[nodiscard]] bool open_files(std::span<const std::filesystem::path> volumes,
+                                   std::string_view passphrase = {});
+
     [[nodiscard]] const std::vector<ZipEntry>& entries() const noexcept { return entries_; }
 
     // Decompress the entry at `index` into an mlock'd buffer, replacing
@@ -77,6 +87,10 @@ private:
 
     crypto::SecureBytes   passphrase_;
     mutable bool          needs_password_ = false;
+
+    // File paths for file-oriented archives (Phase 53: multi-volume RAR support).
+    // If non-empty, extract() uses these paths; otherwise uses data_.
+    std::vector<std::filesystem::path> file_paths_;
 
 };
 

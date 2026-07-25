@@ -64,9 +64,21 @@ struct ZipDestination {
 // Import a `.cbr`/`.cb7`/`.cbt` comic archive as a single leaf gallery of
 // pages (build_cbz_plan) through `sink`, mirroring import_cbz's semantics over the
 // libarchive backend. Same non-OSV_VENDORED_ARCHIVE fallback as import_archive.
+// `sink_root` is the prefix stripped from the plan's absolute gallery paths
+// before they reach `sink`. It must match where the sink's own base already
+// ends, and the two sinks differ:
+//
+//   DirectVaultSink(v, base, name)     base_ ALREADY includes `name`
+//                                      -> sink_root = name (strip it)
+//   ImportQueue::StagingSink(v, dest)  base_ is `dest` alone, no name
+//                                      -> sink_root = "" (strip nothing)
+//
+// Passing the wrong one silently drops or duplicates a whole gallery level, so
+// there is deliberately no default.
 [[nodiscard]] ZipImportOutcome import_archive_cbz(MediaSink&                   sink,
                                                   const std::filesystem::path& archive_path,
                                                   std::string_view             gallery_name,
+                                                  std::string_view             sink_root,
                                                   ImportProgress*              progress = nullptr,
                                                   ArchivePassword              pw = {});
 

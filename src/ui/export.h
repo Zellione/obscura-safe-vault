@@ -79,15 +79,18 @@ template <class Exists>
 
 // Decrypt `node`'s ORIGINAL stored bytes into `scratch` (mlock'd) and write them
 // verbatim to `out_path`, then crypto_wipe `scratch`. `scratch` is reused/resized
-// by the caller across a batch. Returns InvalidArg for a non-image node,
-// whatever read_image returns on failure, or IoError if the file write fails.
-[[nodiscard]] vault::VaultResult export_one_image(const vault::Vault&            vault,
+// by the caller across a batch. Handles images AND videos (Phase 53 made videos
+// selectable); a video's chunks are concatenated into the same mlock'd buffer.
+// Returns InvalidArg for anything else — notably a gallery, which has no stored
+// bytes of its own — whatever the read returns on failure, or IoError if the
+// file write fails.
+[[nodiscard]] vault::VaultResult export_one_media(const vault::Vault&            vault,
                                                   const vault::IndexNode&        node,
                                                   const std::filesystem::path&   out_path,
                                                   crypto::SecureBytes&           scratch);
 
-// Export every image in `images` to `dest_dir`, collision-suffixing names. A
-// no-op returning {0,0} unless `consent == Confirm`. Non-image / failed nodes
+// Export every image/video in `images` to `dest_dir`, collision-suffixing names.
+// A no-op returning {0,0} unless `consent == Confirm`. Gallery / failed nodes
 // increment `failed` and are skipped. Thumbnails are never written. `progress`
 // (optional) is set to images.size() up front and bumped per node; a set cancel
 // flag stops between files, leaving the files written so far in place (Phase 25).

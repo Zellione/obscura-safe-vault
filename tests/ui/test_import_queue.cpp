@@ -517,3 +517,147 @@ TEST(import_queue_exclusive_gate_reset_on_begin_session)
     q.end_session();
     ziptest::cleanup_dir(temp_dir);
 }
+
+// Phase 53: a nested archive imports through the QUEUE, not just through the
+// executor in isolation. This is what proves the feature is reachable from the
+// UI path rather than only from a unit test.
+TEST(import_queue_recurses_into_a_nested_archive)
+{
+    const auto temp_dir   = ziptest::fresh_dir("test_import_queue_nested");
+    const auto vault_path = temp_dir / "vault.osv";
+
+    vault::Vault v;
+    ziptest::make_vault(v, vault_path);
+
+    // inner.zip holds one image; outer.zip holds a loose image plus inner.zip.
+    const auto inner_path = ziptest::make_archive({{"one.jpg", ziptest::fake_jpeg(21)}},
+                                                  temp_dir / "inner.zip");
+    std::ifstream        in(inner_path, std::ios::binary);
+    std::vector<uint8_t> inner{std::istreambuf_iterator<char>(in),
+                               std::istreambuf_iterator<char>()};
+    REQUIRE(!inner.empty());
+
+    const auto outer_path = ziptest::make_archive(
+        {{"top.jpg", ziptest::fake_jpeg(22)}, {"bonus.zip", inner}}, temp_dir / "outer.zip");
+
+    ui::ImportQueue q;
+    q.begin_session(v);
+    (void)q.enqueue_archive(outer_path, "", "Album", ui::ImportTaskKind::Zip);
+    pump_until_idle(q);
+    q.end_session();
+
+    // The nested archive became a sub-gallery holding its own image.
+    bool saw_sub = false;
+    for (const auto* n : v.list("Album")) {
+        if (n->name == "bonus" && n->is_gallery()) saw_sub = true;
+    }
+    CHECK(saw_sub);
+    CHECK_EQ(v.list("Album/bonus").size(), static_cast<size_t>(1));
+
+    ziptest::cleanup_dir(temp_dir);
+}
+
+// Characterisation: does a FLAT (non-recursive) archive imported through the
+// queue land under its gallery name? The CBZ path still uses the flat importer,
+// and StagingSink's base is dest_gallery alone, so this pins down whether the
+// gallery-name level survives. Not asserting a fix — recording actual behaviour.
+TEST(import_queue_flat_cbz_creates_its_gallery)
+{
+    const auto temp_dir   = ziptest::fresh_dir("test_import_queue_flat_cbz");
+    const auto vault_path = temp_dir / "vault.osv";
+
+    vault::Vault v;
+    ziptest::make_vault(v, vault_path);
+
+    const auto cbz = ziptest::make_archive({{"001.jpg", ziptest::fake_jpeg(31)},
+                                            {"002.jpg", ziptest::fake_jpeg(32)}},
+                                           temp_dir / "book.cbz");
+
+    ui::ImportQueue q;
+    q.begin_session(v);
+    (void)q.enqueue_archive(cbz, "", "MyBook", ui::ImportTaskKind::Cbz);
+    pump_until_idle(q);
+    q.end_session();
+
+    // A CBZ imported through the queue must land in a gallery named after the
+    // archive, exactly as the synchronous path already does. Previously the
+    // name was lost and the pages spilled into whatever gallery the import was
+    // started from.
+    bool saw_gallery = false;
+    for (const auto* n : v.list("")) {
+        if (n->name == "MyBook" && n->is_gallery()) saw_gallery = true;
+    }
+    CHECK(saw_gallery);
+    CHECK_EQ(v.list("MyBook").size(), static_cast<size_t>(2));
+    CHECK_EQ(v.list("").size(), static_cast<size_t>(1));   // only the gallery at root
+
+    ziptest::cleanup_dir(temp_dir);
+}
+
+// Sibling of the CBZ placement bug: process_folder_task builds its plan with
+// dest_gallery as the BASE (so paths are absolute) and then passes those paths
+// to StagingSink, which prefixes dest_gallery again. At the vault root the two
+// cancel out and nothing looks wrong; into a sub-gallery they should not.
+TEST(import_queue_folder_into_a_subgallery_lands_in_one_place)
+{
+    const auto temp_dir   = ziptest::fresh_dir("test_import_queue_folder_sub");
+    const auto vault_path = temp_dir / "vault.osv";
+
+    vault::Vault v;
+    ziptest::make_vault(v, vault_path);
+    REQUIRE(v.create_gallery("Parent") == vault::VaultResult::Ok);
+
+    const auto src = temp_dir / "src";
+    fs::create_directories(src);
+    const auto jpeg = ziptest::fake_jpeg(41);
+    std::ofstream(src / "a.jpg", std::ios::binary)
+        .write(reinterpret_cast<const char*>(jpeg.data()),
+               static_cast<std::streamsize>(jpeg.size()));
+
+    ui::ImportQueue q;
+    q.begin_session(v);
+    (void)q.enqueue_folder(src, "Parent", "MyFolder");
+    pump_until_idle(q);
+    q.end_session();
+
+    // The image belongs in Parent/MyFolder and nowhere else.
+    CHECK_EQ(v.list("Parent/MyFolder").size(), static_cast<size_t>(1));
+    CHECK_EQ(v.list("Parent/Parent").size(), static_cast<size_t>(0));
+
+    ziptest::cleanup_dir(temp_dir);
+}
+
+// Phase 53: archive meta.json tags must be applied on the QUEUE path too.
+// apply_meta_tags was only ever called from the vault overloads, which use
+// DirectVaultSink — so every background import silently dropped its tags.
+TEST(import_queue_applies_archive_meta_tags)
+{
+    const auto temp_dir   = ziptest::fresh_dir("test_import_queue_meta_tags");
+    const auto vault_path = temp_dir / "vault.osv";
+
+    vault::Vault v;
+    ziptest::make_vault(v, vault_path);
+
+    const std::string meta = R"({
+        "title": { "english": "Some Book" },
+        "tags":  [ { "type": "artist", "name": "someone" } ]
+    })";
+    const auto zip = ziptest::make_archive(
+        {{"a.jpg", ziptest::fake_jpeg(51)}, {"meta.json", {meta.begin(), meta.end()}}},
+        temp_dir / "book.zip");
+
+    ui::ImportQueue q;
+    q.begin_session(v);
+    (void)q.enqueue_archive(zip, "", "Book", ui::ImportTaskKind::Zip);
+    pump_until_idle(q);
+    q.end_session();
+
+    const vault::IndexNode* gallery = nullptr;
+    for (const auto* n : v.list("")) {
+        if (n->name == "Book" && n->is_gallery()) gallery = n;
+    }
+    REQUIRE(gallery != nullptr);
+    CHECK(!gallery->tags.empty());
+
+    ziptest::cleanup_dir(temp_dir);
+}

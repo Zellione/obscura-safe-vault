@@ -35,6 +35,37 @@ struct archive* open_stream(std::span<const uint8_t> data, const char* passphras
     return a;
 }
 
+// Configure a fresh read handle over file paths: auto-detect the archive format
+// and any compression filter. Used for multi-volume archives. Caller owns the
+// result and must archive_read_free() it. Returns nullptr on open failure.
+// `file_paths` is a vector of filesystem::path; ownership remains with caller.
+struct archive* open_stream_files(const std::vector<std::filesystem::path>& file_paths,
+                                   const char* passphrase)
+{
+    // Convert to C strings in a vector that stays alive for archive_read_open_filenames
+    std::vector<std::string> vol_strings;
+    for (const auto& vol : file_paths) {
+        vol_strings.push_back(vol.string());
+    }
+
+    std::vector<const char*> vol_cstrs;
+    for (const auto& vol_str : vol_strings) {
+        vol_cstrs.push_back(vol_str.c_str());
+    }
+    vol_cstrs.push_back(nullptr);  // NULL-terminate
+
+    struct archive* a = archive_read_new();
+    archive_read_support_format_all(a);
+    archive_read_support_filter_all(a);
+    if (passphrase) archive_read_add_passphrase(a, passphrase);
+    if (archive_read_open_filenames(a, vol_cstrs.data(), 10240) != ARCHIVE_OK) {
+        std::println(stderr, "[ArchiveReader] open_files failed: {}", archive_error_string(a));
+        archive_read_free(a);
+        return nullptr;
+    }
+    return a;
+}
+
 } // namespace
 
 bool ArchiveReader::open(std::span<const uint8_t> data, std::string_view passphrase)
@@ -86,7 +117,11 @@ bool ArchiveReader::extract(size_t index, crypto::SecureBytes& out) const
     needs_password_ = false;
     if (index >= entries_.size() || entries_[index].is_dir) return false;
 
-    struct archive* a = open_stream(data_, passphrase_cstr(passphrase_));
+    // Use file-based extraction if file_paths_ is populated (multi-volume),
+    // otherwise use memory-based extraction
+    struct archive* a = file_paths_.empty()
+        ? open_stream(data_, passphrase_cstr(passphrase_))
+        : open_stream_files(file_paths_, passphrase_cstr(passphrase_));
     if (!a) return false;
 
     // A while loop (not a for loop) so the loop header stays concerned only
@@ -163,6 +198,62 @@ bool ArchiveReader::extract(size_t index, crypto::SecureBytes& out) const
         (void)out.resize(0);
         archive_read_free(a);
         return false;
+    }
+    archive_read_free(a);
+    return true;
+}
+
+bool ArchiveReader::open_files(std::span<const std::filesystem::path> volumes,
+                                std::string_view passphrase)
+{
+    entries_.clear();
+    file_paths_.clear();
+    passphrase_.wipe();
+    (void)passphrase_.resize(0);
+
+    // Empty volume list is invalid
+    if (volumes.empty()) return false;
+
+    // Store passphrase if provided (same as open())
+    if (!passphrase.empty()) {
+        if (!passphrase_.resize(passphrase.size() + 1)) {  // +1: trailing NUL for the C API
+            return false;
+        }
+        std::memcpy(passphrase_.data(), passphrase.data(), passphrase.size());
+    }
+
+    // Store file paths for extraction later
+    file_paths_.assign(volumes.begin(), volumes.end());
+
+    // Open via the file-oriented API
+    struct archive* a = open_stream_files(file_paths_, passphrase_cstr(passphrase_));
+    if (!a) {
+        file_paths_.clear();
+        passphrase_.wipe();
+        (void)passphrase_.resize(0);
+        return false;
+    }
+
+    // Parse the entry list in one forward pass (same logic as open())
+    struct archive_entry* entry = nullptr;
+    for (;;) {
+        const int r = archive_read_next_header(a, &entry);
+        if (r == ARCHIVE_EOF) break;
+        if (r == ARCHIVE_FATAL || r < ARCHIVE_WARN) {
+            // Hostile/corrupt archive mid-stream: fail closed rather than
+            // return a partial entry list.
+            std::println(stderr, "[ArchiveReader] header read failed: {}", archive_error_string(a));
+            archive_read_free(a);
+            entries_.clear();
+            file_paths_.clear();
+            passphrase_.wipe();
+            (void)passphrase_.resize(0);
+            return false;
+        }
+        const char* path = archive_entry_pathname(entry);
+        entries_.emplace_back(path ? std::string(path) : std::string{},
+                              archive_entry_filetype(entry) == AE_IFDIR);
+        archive_read_data_skip(a);
     }
     archive_read_free(a);
     return true;

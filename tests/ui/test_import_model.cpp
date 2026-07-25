@@ -343,3 +343,36 @@ TEST(import_lock_confirm_text_many)
     const std::string text = ui::import_lock_confirm_text(15);
     CHECK_EQ(text, std::string("15 imports pending — finish current file, discard the rest, and lock?"));
 }
+
+// Phase 53: a recursive import cannot know its total up front — a nested
+// archive's contents only exist once its parent is decompressed. The total is
+// therefore a lower bound that climbs, and the bar can appear to move
+// backwards; the label has to make that legible rather than look broken.
+
+TEST(format_task_progress_plain_when_total_is_final)
+{
+    CHECK_EQ(ui::format_task_progress(84, 210, false), std::string("84/210"));
+}
+
+TEST(format_task_progress_marks_a_growing_total)
+{
+    const auto s = ui::format_task_progress(84, 210, true);
+    CHECK(s.find("84/210") != std::string::npos);
+    CHECK(s.find('+') != std::string::npos);
+    CHECK(s.find("expanding") != std::string::npos);
+}
+
+TEST(format_task_progress_handles_an_unknown_total)
+{
+    // Before the first archive is listed the total is genuinely 0; showing
+    // "12/0" would look like a defect.
+    const auto s = ui::format_task_progress(12, 0, true);
+    CHECK(s.find("12") != std::string::npos);
+    CHECK(s.find("/0") == std::string::npos);
+}
+
+TEST(format_task_progress_zero_of_zero_is_not_nonsense)
+{
+    const auto s = ui::format_task_progress(0, 0, false);
+    CHECK(!s.empty());
+}

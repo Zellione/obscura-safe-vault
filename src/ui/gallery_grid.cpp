@@ -1,5 +1,7 @@
 #include "ui/gallery_grid.h"
 
+#include "ui/selectable.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -304,8 +306,36 @@ void GalleryGrid::toggle_select()
 {
     const int s = nav_.selected();
     if (s < 0 || s >= static_cast<int>(children_.size())) return;
-    if (!children_[s]->is_image() && !children_[s]->is_gallery()) return;
+    if (!is_selectable(*children_[s])) {
+        return;
+    }
     sel_.toggle(s);
+    status_.clear();
+}
+
+// Ctrl+A. Selects every child that Space would accept — images, videos and
+// sub-galleries — and clears instead when they are all already selected, so the
+// same key undoes itself. Videos are included because export_one_media handles
+// them; a type Space refuses must never end up here, or a mass operation would
+// receive a node it cannot process.
+void GalleryGrid::toggle_select_all()
+{
+    const std::vector<int> selectable = selectable_indices(children_);
+    if (selectable.empty()) {
+        return;
+    }
+
+    if (const bool all =
+            std::ranges::all_of(selectable, [this](int i) { return sel_.contains(i); });
+        all) {
+        sel_.clear();
+    } else {
+        for (const int i : selectable) {
+            if (!sel_.contains(i)) {
+                sel_.toggle(i);
+            }
+        }
+    }
     status_.clear();
 }
 
@@ -313,13 +343,13 @@ void GalleryGrid::start_export()
 {
     if (dialogs_.folder.busy() || consent_.active()) return;
     if (sel_.empty()) {
-        error_ = "Select images first (Space), then [X] to export.";
+        error_ = "Select items first (Space), then [X] to export.";
         return;
     }
     error_.clear();
     status_.clear();
     const std::size_t n = sel_.count();
-    consent_.open(std::format("Export {} {}", n, n == 1 ? "image?" : "images?"));
+    consent_.open(std::format("Export {} {}", n, n == 1 ? "item?" : "items?"));
 }
 
 // start_transfer() sub-handlers, kept as free friends (not members) to keep
@@ -661,7 +691,7 @@ void GalleryGrid::toggle_or_open()
 {
     if (const int s = nav_.selected();
         s >= 0 && s < static_cast<int>(children_.size()) &&
-        (children_[s]->is_image() || children_[s]->is_gallery()))
+        is_selectable(*children_[s]))
         toggle_select();
     else
         open_selected();
@@ -727,6 +757,12 @@ bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
 bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& key)
 {
     using enum ui::NavKind;
+    // Ctrl+A first: it must not fall through to a plain-letter case, and Phase
+    // 54 will have focused text fields consume it before this is ever reached.
+    if (key.key == SDLK_A && (key.mod & SDL_KMOD_CTRL) != 0) {
+        g.toggle_select_all();
+        return true;
+    }
     switch (key.key) {
         case SDLK_L: g.view_ = next_gallery_view(g.view_); return true;
         case SDLK_X: g.start_export(); return true;
@@ -1459,6 +1495,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
     return {
         {"Navigate", {
             {"Enter", "Open"}, {"Space", "Select (export/move)"},
+            {"Ctrl+A", "Select all / none"},
             {"Esc", "Back"}, {"`", "Switch vault"}, {"L", "Cycle view: list / grid size"},
         }},
         {"Search & tags", {

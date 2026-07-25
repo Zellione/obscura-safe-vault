@@ -59,9 +59,21 @@ using ImportProgress = vault::OpProgress;
 // every image entry is decompressed into mlock'd memory only (invariant #1),
 // flattening internal subfolders, in natural reading order. Non-image entries
 // are skipped + counted. Never extracts to disk.
+// `sink_root` is the prefix stripped from the plan's absolute gallery paths
+// before they reach `sink`. It must match where the sink's own base already
+// ends, and the two sinks differ:
+//
+//   DirectVaultSink(v, base, name)     base_ ALREADY includes `name`
+//                                      -> sink_root = name (strip it)
+//   ImportQueue::StagingSink(v, dest)  base_ is `dest` alone, no name
+//                                      -> sink_root = "" (strip nothing)
+//
+// Passing the wrong one silently drops or duplicates a whole gallery level, so
+// there is deliberately no default.
 [[nodiscard]] ZipImportOutcome import_cbz(MediaSink&                   sink,
                                           const std::filesystem::path& cbz_path,
                                           std::string_view             gallery_name,
+                                          std::string_view             sink_root,
                                           ImportProgress*              progress = nullptr);
 
 // Thin wrapper: construct a DirectVaultSink and call the MediaSink version.

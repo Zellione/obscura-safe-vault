@@ -20,6 +20,17 @@ public:
     // Drop all selected indices.
     void clear();
 
+    // Select every index in [0, count). Phase 53's Ctrl+A. A count <= 0 leaves
+    // the selection untouched rather than clearing it — "select all of nothing"
+    // is not a request to deselect.
+    void select_all(int count);
+
+    // True when [0, count) are all selected. Drives Ctrl+A's toggle: a second
+    // press on a fully-selected listing clears instead of re-selecting. False
+    // for count <= 0, so an empty gallery never reports itself as fully
+    // selected.
+    [[nodiscard]] bool all_selected(int count) const;
+
     [[nodiscard]] bool contains(int i) const;
     [[nodiscard]] bool empty() const;
     [[nodiscard]] std::size_t count() const;

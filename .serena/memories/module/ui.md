@@ -206,7 +206,10 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   inside the band, every line reachable, group boundaries never split, column budgets never exceeded.
 
 ## Export (the one gated invariant-#1 deviation)
-- `selection_model.*` — multi-select state for export (pure/tested). Phase 48: gained
+- `selection_model.*` — multi-select state for export (pure/tested). Phase 53 adds
+  `select_all(count)` / `all_selected(count)` behind Ctrl+A; `select_all(0)` does NOT clear
+  ("select all of nothing" is not a deselect) and `all_selected(0)` is false (else Ctrl+A on an
+  empty gallery clears forever). Phase 48: gained
   `revision()`, a monotonic counter incremented on `toggle()` and `clear()`, used as a cache
   key by the detail panel.
 - `export_ui.*` — shared consent + folder-pick plumbing used by gallery + viewer.
@@ -236,10 +239,49 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `std::filesystem::recursive_directory_iterator` with `skip_permission_denied` and symlinks
   skipped (never followed, containment verified). Emits archive-style relative paths as `ZipEntry`,
   bounded by an entry-count limit. Error recovery: permission denied non-fatal, continue scan.
+- **Phase 53 recursive + multipart archive stack** (each pure/SDL-free unless noted):
+  - `archive_kind.*` — `detect_archive_kind(name,bytes)` (extension proposes, magic confirms) and
+    `is_archive_name(name)` (extension only). The split is deliberate: the planner has entry NAMES
+    but no bytes, so it classifies permissively and the orchestrator magic-checks once bytes exist,
+    demoting a liar to `skipped_unsupported`. `archive_extension_of` is the shared table so the two
+    cannot drift.
+  - `recursive_import.*` — `walk_archive`, depth-first, backends INJECTED as hooks (so this module
+    links neither miniz nor libarchive and the recursion is testable with fakes). A recursive plan
+    cannot be a flat placement list — each placement indexes a *different* archive buffer — so it
+    emits through hooks as it goes. Depth-first is load-bearing: only the archives on the current
+    root->leaf path are live, which is what the live-bytes guard polices. Each archive's own
+    meta.json tags the gallery IT produced. `RecursionBudget` = five guards (depth, total expanded,
+    live bytes, nested count, expansion ratio), each failing only its BRANCH. Also
+    `nested_gallery_name` / `unique_gallery_name`. Refuses unset hooks (a default std::function
+    throws, and the project is exception-free).
+  - `recursive_hooks.*` — the real backends: miniz for zip/cbz, ArchiveReader for the rest,
+    MediaSink for galleries/placement/tags. `create_gallery` treats AlreadyExists as success
+    (every plan lists every ancestor, so it is the normal case).
+  - `recursive_exec.*` — `import_archive_recursive`, what ImportQueue's Zip/Archive tasks call.
+    `sink_root` is REQUIRED, not defaulted: DirectVaultSink's base already includes the gallery
+    name, StagingSink's does not, and guessing drops or duplicates a whole gallery level.
+  - `volume_set.*` — `detect_volume_set` (pure over a sibling listing) + `assembly_for` +
+    `concatenate_volumes`. Four styles; two ordering traps: a spanned zip's `.zip` is LAST though
+    `.z01` sorts first, and old-style RAR's `.rar` is volume ONE despite sorting after `.r00`. A set
+    is contiguous from its OWN minimum (7z starts 001, `split -d` starts 00). Two-volume minimum is
+    what stops a lone `photos.zip` reading as a broken set.
+  - `volume_import.*` — `summarize_volume_set` (pure; a gap is a REFUSAL, not a warning) +
+    `assemble_volume_set` (reads volumes, applies `platform::normalize_user_path`, returns bytes
+    for Concatenate/SpannedZipMerge or paths for FileOriented).
+  - `spanned_zip.*` — `merge_spanned_zip`: strips the 4-byte spanning marker, rewrites every CD
+    entry's disk number + local-header offset to absolute, fixes the EOCD. Disk-0 offsets must
+    subtract the stripped marker or the CD enumerates perfectly and every extraction fails. Zip64
+    spanned rejected (v1). Bounds-checked throughout.
+  - `selectable.*` — `is_selectable` / `selectable_indices`, the ONE rule for what may enter a
+    selection (image, video, gallery). Was inline in three places, which is how Ctrl+A and Space
+    drift apart.
 - `zip_plan.*` — pure ZIP placement planner: entries -> galleries to create + file placements +
   skip count. SDL-/miniz-/vault-free, unit-tested. `build_zip_plan` mirrors the archive tree 1:1;
   a dir holding both media and subdirs maps onto a mixed gallery (Phase 46), so there is no
-  conflict policy and no user prompt. `ZipDest{NewGallery,Append}`.
+  conflict policy and no user prompt. `ZipDest{NewGallery,Append}`. Phase 53: `ZipPlan::nested`
+  collects entries whose NAME claims an archive (routed away from `skipped_unsupported`), and the
+  parent gallery is created even for a directory holding only an archive. `build_cbz_plan` never
+  populates it — a comic archive is a flat run of pages.
   `is_supported_image_name` + `build_cbz_plan` -> a fixed one-leaf plan (gallery named after the
   archive) of every image entry, videos/other skipped+counted, subfolders flattened (basename
   collisions disambiguated by source dir), natural reading order. `find_meta_entry` — a
@@ -264,6 +306,10 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   format-agnostic); `extract(index,out)` re-opens a fresh stream + walks forward to index EACH
   call (libarchive has no random access) — O(n) per extract, fine for gallery-sized archives.
   `MAX_ENTRY_BYTES=4 GiB` bomb guard checked against the declared size before allocating.
+  `open_files(paths, passphrase)` (Phase 53) opens an ORDERED multi-volume set via
+  `archive_read_open_filenames` — libarchive's RAR multivolume support only works file-oriented,
+  because each volume carries its own header and concatenation truncates. Paths are NOT
+  normalised here; `normalize_user_path` stays at the boundary where paths enter (volume_import).
 - `archive_import.*` — import_archive/import_archive_cbz: mirrors zip_import's structure but
   backed by ArchiveReader, covering .7z/.rar/.tar(+.gz/.xz)/.cbr/.cb7/.cbt. Declared
   unconditionally; the .cpp branches internally on OSV_VENDORED_ARCHIVE, returning a graceful

@@ -105,9 +105,9 @@ TEST(export_unique_path_handles_name_without_extension)
     CHECK_EQ(p.filename().string(), std::string("README (1)"));
 }
 
-// --- export_one_image: decrypt -> write verbatim -> wipe scratch -----------
+// --- export_one_media: decrypt -> write verbatim -> wipe scratch -----------
 
-TEST(export_one_image_writes_verbatim_and_wipes_buffer)
+TEST(export_one_media_writes_verbatim_and_wipes_buffer)
 {
     TempVault tv("one");
     TempDir   out("one");
@@ -122,7 +122,7 @@ TEST(export_one_image_writes_verbatim_and_wipes_buffer)
 
     fs::path dest = out.path / "photo.png";
     crypto::SecureBytes scratch;
-    REQUIRE(ui::export_one_image(v, *kids[0], dest, scratch) == vault::VaultResult::Ok);
+    REQUIRE(ui::export_one_media(v, *kids[0], dest, scratch) == vault::VaultResult::Ok);
 
     // File on disk is byte-identical to the originally-imported bytes.
     auto written = read_file(dest);
@@ -349,4 +349,77 @@ TEST(export_images_declining_writes_nothing)
     int file_count = 0;
     for (auto& e : fs::directory_iterator(out.path)) { (void)e; ++file_count; }
     CHECK_EQ(file_count, 0);
+}
+
+// --- Phase 53: videos are selectable, so export must handle them -----------
+//
+// Until Phase 53 a video could not be selected at all (Space refused it) and
+// export_one_image rejected any non-image outright. Ctrl+A now selects videos,
+// so a selection can legitimately contain one.
+
+TEST(export_writes_a_video_original_byte_identical)
+{
+    TempVault tv("vid");
+    TempDir   out("vid");
+    // add_video probes the container (media::probe_video) and rejects anything
+    // that is not a real video, so this needs the actual fixture.
+    auto clip = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!clip.empty());
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kExpKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("", clip, "clip.mp4") == vault::VaultResult::Ok);
+    auto kids = v.list("");
+    REQUIRE(kids.size() == 1);
+
+    auto sum = ui::export_images(v, kids, out.path, ui::ExportConsent::Confirm);
+    CHECK_EQ(sum.written, 1);
+    CHECK_EQ(sum.failed, 0);
+    CHECK_BYTES_EQ(std::span<const uint8_t>(read_file(out.path / "clip.mp4")),
+                   std::span<const uint8_t>(clip));
+}
+
+TEST(export_handles_a_mixed_image_and_video_selection)
+{
+    TempVault tv("mixed");
+    TempDir   out("mixed");
+    auto img  = pattern(2048, 3);
+    auto clip = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!clip.empty());
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kExpKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", img, "a.png") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("", clip, "b.mp4") == vault::VaultResult::Ok);
+    auto kids = v.list("");
+    REQUIRE(kids.size() == 2);
+
+    auto sum = ui::export_images(v, kids, out.path, ui::ExportConsent::Confirm);
+    CHECK_EQ(sum.written, 2);
+    CHECK_EQ(sum.failed, 0);
+    CHECK_BYTES_EQ(std::span<const uint8_t>(read_file(out.path / "a.png")),
+                   std::span<const uint8_t>(img));
+    CHECK_BYTES_EQ(std::span<const uint8_t>(read_file(out.path / "b.mp4")),
+                   std::span<const uint8_t>(clip));
+}
+
+TEST(export_still_refuses_a_gallery_node)
+{
+    // Widening to videos must not accidentally let a gallery through: it has no
+    // stored bytes of its own, and silently "exporting" one would be a lie.
+    TempVault tv("gal");
+    TempDir   out("gal");
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kExpKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("sub") == vault::VaultResult::Ok);
+    auto kids = v.list("");
+    REQUIRE(kids.size() == 1);
+
+    auto sum = ui::export_images(v, kids, out.path, ui::ExportConsent::Confirm);
+    CHECK_EQ(sum.written, 0);
+    CHECK_EQ(sum.failed, 1);
 }

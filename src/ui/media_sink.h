@@ -29,6 +29,13 @@ public:
                                                          std::span<const uint8_t> data,
                                                          std::string_view name) = 0;
 
+    // Apply one tag to a gallery (Phase 53). Required rather than defaulted:
+    // archive meta.json tagging used to live only in the vault overloads, so
+    // every background import silently dropped its tags. A sink that cannot
+    // tag must say so explicitly rather than inherit a silent no-op.
+    [[nodiscard]] virtual vault::VaultResult tag_gallery(std::string_view rel_gallery,
+                                                         std::string_view tag) = 0;
+
     // Cooperative cancel poll (replaces direct progress->cancel reads where
     // the executor loops).
     [[nodiscard]] virtual bool cancelled() const { return false; }
@@ -50,6 +57,12 @@ public:
     {
         const std::string abs_path = joined_gallery(base_, rel_gallery);
         return v_.create_gallery(abs_path);
+    }
+
+    [[nodiscard]] vault::VaultResult tag_gallery(std::string_view rel_gallery,
+                                                 std::string_view tag) override
+    {
+        return v_.add_tag(joined_gallery(base_, rel_gallery), tag);
     }
 
     [[nodiscard]] vault::VaultResult place_image(std::string_view rel_gallery, std::span<const uint8_t> data,

@@ -19,6 +19,11 @@ struct OpProgress {
     std::atomic<int>  total{0};
     std::atomic<int>  done{0};
     std::atomic<bool> cancel{false};
+    // Phase 53: `total` is still climbing. A recursive archive import cannot
+    // know its total up front — a nested archive's contents only exist once its
+    // parent is decompressed — so the denominator is a lower bound until this
+    // clears.
+    std::atomic<bool> expanding{false};
 };
 
 } // namespace vault

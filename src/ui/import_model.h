@@ -21,6 +21,10 @@ struct ImportTaskInfo {
     ImportTaskState state = ImportTaskState::Queued;
     int             done = 0;          // live progress while Running
     int             total = 0;         // (split from done for S1659)
+    // Phase 53: a recursive import's total is not knowable up front — a nested
+    // archive's contents only exist once its parent is decompressed. While this
+    // is true the total is a lower bound and still climbing.
+    bool            expanding = false;
     int             imported = 0;
     int             skipped = 0;
     std::string     error;                    // set for Failed
@@ -44,6 +48,11 @@ int clear_finished_imports(std::vector<ImportTaskInfo>& tasks);
 //   "Importing <name> 128/450 · 2 queued"   (queued suffix only when > 0)
 //   "Import failed: <error>"                (when lane_failed and lane_error non-empty)
 //   "Import failed"                         (when lane_failed but lane_error empty)
+// "84/210" normally; "84/210+ (expanding)" while nested archives are still
+// being discovered, so a total that grows — and a bar that appears to go
+// backwards — reads as expected rather than broken.
+[[nodiscard]] std::string format_task_progress(int done, int total, bool expanding);
+
 [[nodiscard]] std::string footer_import_summary(const std::vector<ImportTaskInfo>& tasks,
                                                 bool lane_failed,
                                                 std::string_view lane_error = {});
