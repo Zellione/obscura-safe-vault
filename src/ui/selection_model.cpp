@@ -17,6 +17,30 @@ void SelectionModel::clear()
     ++revision_;
 }
 
+void SelectionModel::select_all(int count)
+{
+    if (count <= 0) {
+        return;
+    }
+    for (int i = 0; i < count; ++i) {
+        items_.insert(i);
+    }
+    ++revision_;
+}
+
+bool SelectionModel::all_selected(int count) const
+{
+    if (count <= 0) {
+        return false;
+    }
+    for (int i = 0; i < count; ++i) {
+        if (!items_.contains(i)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool SelectionModel::contains(int i) const { return items_.contains(i); }
 
 bool SelectionModel::empty() const { return items_.empty(); }
