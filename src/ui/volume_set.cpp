@@ -123,12 +123,13 @@ using Parser = std::optional<Parsed> (*)(std::string_view);
 
 [[nodiscard]] Parser parser_for(VolumeStyle style)
 {
+    using enum VolumeStyle;
     switch (style) {
-        case VolumeStyle::NumericSuffix: return &parse_numeric;
-        case VolumeStyle::SpannedZip:    return &parse_spanned_zip;
-        case VolumeStyle::RarPart:       return &parse_rar_part;
-        case VolumeStyle::RarOld:        return &parse_rar_old;
-        case VolumeStyle::None:          break;
+        case NumericSuffix: return &parse_numeric;
+        case SpannedZip:    return &parse_spanned_zip;
+        case RarPart:       return &parse_rar_part;
+        case RarOld:        return &parse_rar_old;
+        case None:          break;
     }
     return nullptr;
 }
