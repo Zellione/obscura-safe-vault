@@ -517,3 +517,86 @@ TEST(import_queue_exclusive_gate_reset_on_begin_session)
     q.end_session();
     ziptest::cleanup_dir(temp_dir);
 }
+
+// Phase 53: a nested archive imports through the QUEUE, not just through the
+// executor in isolation. This is what proves the feature is reachable from the
+// UI path rather than only from a unit test.
+TEST(import_queue_recurses_into_a_nested_archive)
+{
+    const auto temp_dir   = ziptest::fresh_dir("test_import_queue_nested");
+    const auto vault_path = temp_dir / "vault.osv";
+
+    vault::Vault v;
+    ziptest::make_vault(v, vault_path);
+
+    // inner.zip holds one image; outer.zip holds a loose image plus inner.zip.
+    const auto inner_path = ziptest::make_archive({{"one.jpg", ziptest::fake_jpeg(21)}},
+                                                  temp_dir / "inner.zip");
+    std::ifstream        in(inner_path, std::ios::binary);
+    std::vector<uint8_t> inner{std::istreambuf_iterator<char>(in),
+                               std::istreambuf_iterator<char>()};
+    REQUIRE(!inner.empty());
+
+    const auto outer_path = ziptest::make_archive(
+        {{"top.jpg", ziptest::fake_jpeg(22)}, {"bonus.zip", inner}}, temp_dir / "outer.zip");
+
+    ui::ImportQueue q;
+    q.begin_session(v);
+    (void)q.enqueue_archive(outer_path, "", "Album", ui::ImportTaskKind::Zip);
+    pump_until_idle(q);
+    q.end_session();
+
+    // The nested archive became a sub-gallery holding its own image.
+    bool saw_sub = false;
+    for (const auto* n : v.list("Album")) {
+        if (n->name == "bonus" && n->is_gallery()) saw_sub = true;
+    }
+    CHECK(saw_sub);
+    CHECK_EQ(v.list("Album/bonus").size(), static_cast<size_t>(1));
+
+    ziptest::cleanup_dir(temp_dir);
+}
+
+// Characterisation: does a FLAT (non-recursive) archive imported through the
+// queue land under its gallery name? The CBZ path still uses the flat importer,
+// and StagingSink's base is dest_gallery alone, so this pins down whether the
+// gallery-name level survives. Not asserting a fix — recording actual behaviour.
+TEST(import_queue_flat_cbz_gallery_placement_is_pinned)
+{
+    const auto temp_dir   = ziptest::fresh_dir("test_import_queue_flat_cbz");
+    const auto vault_path = temp_dir / "vault.osv";
+
+    vault::Vault v;
+    ziptest::make_vault(v, vault_path);
+
+    const auto cbz = ziptest::make_archive({{"001.jpg", ziptest::fake_jpeg(31)},
+                                            {"002.jpg", ziptest::fake_jpeg(32)}},
+                                           temp_dir / "book.cbz");
+
+    ui::ImportQueue q;
+    q.begin_session(v);
+    (void)q.enqueue_archive(cbz, "", "MyBook", ui::ImportTaskKind::Cbz);
+    pump_until_idle(q);
+    q.end_session();
+
+    // DEFECT, recorded not fixed: the gallery name is LOST. import_cbz strips
+    // `gallery_name` from the plan's paths before calling the sink, but
+    // StagingSink's base is dest_gallery alone and does not re-add it — so the
+    // pages land wherever the import was started instead of in a new gallery.
+    // DirectVaultSink does not have this problem, which is why the synchronous
+    // path and its tests look correct.
+    //
+    // The existing queue test asserts only `imported >= 0` ("CBZ archives are
+    // complex"), which is precisely what let this hide.
+    //
+    // Phase 53's recursive path avoids it by passing sink_root="" so the name
+    // survives; the flat path is untouched pending an owner decision.
+    bool saw_gallery = false;
+    for (const auto* n : v.list("")) {
+        if (n->name == "MyBook" && n->is_gallery()) saw_gallery = true;
+    }
+    CHECK_FALSE(saw_gallery);                                  // the bug
+    CHECK_EQ(v.list("").size(), static_cast<size_t>(2));       // pages at the root
+
+    ziptest::cleanup_dir(temp_dir);
+}

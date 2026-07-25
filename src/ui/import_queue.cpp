@@ -1,4 +1,6 @@
 #include "ui/import_queue.h"
+
+#include "ui/recursive_exec.h"
 #include "ui/archive_import.h"
 #include "ui/folder_scan.h"
 #include "ui/media_sink.h"
@@ -967,12 +969,19 @@ void ImportQueue::process_archive_task(Task& task)
     ZipImportOutcome outcome;
 
     // Route by kind
+    // Phase 53: zip/7z/rar/tar recurse into nested archives, each becoming its
+    // own sub-gallery. CBZ deliberately stays on the flat importer — a comic
+    // archive is a run of pages, so an archive inside one is not a chapter.
     if (task.kind == ImportTaskKind::Zip) {
-        outcome = import_zip(sink, task.archive_path, task.gallery_name, task.progress.get());
+        // sink_root "": StagingSink's base is dest_gallery alone, so the
+        // gallery name must survive into the path rather than being stripped.
+        outcome = import_archive_recursive(sink, task.archive_path, task.gallery_name, "",
+                                           task.progress.get(), pw.password);
     } else if (task.kind == ImportTaskKind::Cbz) {
         outcome = import_cbz(sink, task.archive_path, task.gallery_name, task.progress.get());
     } else if (task.kind == ImportTaskKind::Archive) {
-        outcome = import_archive(sink, task.archive_path, task.gallery_name, task.progress.get(), pw);
+        outcome = import_archive_recursive(sink, task.archive_path, task.gallery_name, "",
+                                           task.progress.get(), pw.password);
     } else if (task.kind == ImportTaskKind::ArchiveCbz) {
         outcome =
             import_archive_cbz(sink, task.archive_path, task.gallery_name, task.progress.get(), pw);

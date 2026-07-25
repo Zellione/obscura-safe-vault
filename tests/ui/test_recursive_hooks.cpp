@@ -7,6 +7,7 @@
 // lands in the right sub-gallery of a real vault.
 
 #include "test_framework.h"
+#include "ui/recursive_exec.h"
 #include "ui/recursive_hooks.h"
 #include "ui/recursive_import.h"
 #include "ui/media_sink.h"
@@ -125,6 +126,55 @@ TEST(recursive_hooks_import_three_levels_of_nesting)
     const auto deep = v.list("D/one/two");
     REQUIRE(deep.size() == 1);
     CHECK_EQ(deep[0]->name, std::string("deep.jpg"));
+
+    ziptest::cleanup_dir(dir);
+}
+
+// --- the executor: what the queue actually calls ----------------------------
+
+TEST(import_archive_recursive_creates_nested_sub_galleries_in_a_vault)
+{
+    const auto dir = ziptest::fresh_dir("recexec");
+
+    const auto inner = read_bytes(make_archive({{"one.jpg", fake_jpeg(11)}}, dir / "inner.zip"));
+    const auto outer_path =
+        make_archive({{"top.jpg", fake_jpeg(12)}, {"bonus.zip", inner}}, dir / "outer.zip");
+
+    vault::Vault v;
+    ziptest::make_vault(v, dir / "v.osv");
+
+    // Same shape as import_zip's own vault overload: the sink base is
+    // base_gallery + new_gallery_name.
+    ui::DirectVaultSink sink(v, "", "Album");
+    const auto out = ui::import_archive_recursive(sink, outer_path, "Album", "Album");
+
+    CHECK(out.ok);
+    CHECK_EQ(out.imported, 2);
+
+    const auto top = v.list("Album");
+    bool saw_sub = false;
+    for (const auto* n : top) {
+        if (n->name == "bonus" && n->is_gallery()) saw_sub = true;
+    }
+    CHECK(saw_sub);
+    CHECK_EQ(v.list("Album/bonus").size(), static_cast<size_t>(1));
+
+    ziptest::cleanup_dir(dir);
+}
+
+TEST(import_archive_recursive_rejects_a_file_that_is_not_an_archive)
+{
+    const auto dir = ziptest::fresh_dir("recexec_bad");
+    const auto bad = dir / "notreally.zip";
+    { std::ofstream f(bad, std::ios::binary); f << "plain text, not a zip"; }
+
+    vault::Vault v;
+    ziptest::make_vault(v, dir / "v.osv");
+    ui::DirectVaultSink sink(v, "", "X");
+
+    const auto out = ui::import_archive_recursive(sink, bad, "X", "X");
+    CHECK_FALSE(out.ok);
+    CHECK(!out.error.empty());
 
     ziptest::cleanup_dir(dir);
 }
