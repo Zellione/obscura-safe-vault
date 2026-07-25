@@ -108,8 +108,8 @@ public:
     int height() const noexcept { return height_; }
     uint64_t duration_us() const noexcept { return duration_us_; }
     vault::VideoCodec codec() const noexcept { return codec_; }
-    int sar_num() const noexcept { return sar_num_; }
-    int sar_den() const noexcept { return sar_den_; }
+    int sar_num() const noexcept { return sar_.num; }
+    int sar_den() const noexcept { return sar_.den; }
 
     // The video stream's codec parameters, for opening an independent decode
     // context elsewhere (VideoDecodeWorker's own AVCodecContext). Valid only
@@ -142,6 +142,10 @@ private:
     // Returns true to continue the main loop, false to return nullptr.
     [[nodiscard]] bool handle_eagain_case();
 
+    // Helper: open the best audio stream if present, leaving audio_index_ at -1
+    // when there is none or its decoder won't open (video-only playback).
+    void open_audio_stream();
+
     // Free all owned FFmpeg resources (destructor + open() error paths).
     void reset();
     // Log msg, reset(), and return false — used at every open() failure site.
@@ -161,8 +165,7 @@ private:
     AVRational       stream_time_base_   = {0, 1};  // raw stream time base for seek
     bool             flushed_            = false;   // Track if we've sent the flush packet
     double           pending_seek_target_ = -1.0;   // Target PTS for seek decode-forward
-    int              sar_num_            = 1;       // Sample aspect ratio numerator
-    int              sar_den_            = 1;       // Sample aspect ratio denominator
+    AVRational       sar_                = {1, 1};  // Sample aspect ratio (1:1 when unknown)
 
     // Audio support
     AudioDecoder                audio_dec_;           // audio codec context

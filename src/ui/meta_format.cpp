@@ -65,47 +65,60 @@ std::string format_duration(uint64_t microseconds)
 std::string_view video_codec_name(vault::VideoCodec c) noexcept
 {
     using enum vault::VideoCodec;
-    switch (c) {
-        case H264:      return "H.264";
-        case HEVC:      return "H.265";
-        case ProRes:    return "ProRes";
-        case DNxHD:     return "DNxHD";
-        case MJPEG:     return "MJPEG";
-        case VP8:       return "VP8";
-        case VP9:       return "VP9";
-        case AV1:       return "AV1";
-        case QTRLE:     return "QuickTime RLE";
-        case Cinepak:   return "Cinepak";
-        case MPEG1:     return "MPEG-1";
-        case MPEG2:     return "MPEG-2";
-        case MPEG4:     return "MPEG-4";
-        case MSMPEG4V1: return "MS MPEG-4 v1";
-        case MSMPEG4V2: return "MS MPEG-4 v2";
-        case MSMPEG4V3: return "DivX 3";
-        case WMV1:      return "WMV1";
-        case WMV2:      return "WMV2";
-        case WMV3:      return "WMV3";
-        case VC1:       return "VC-1";
-        case H263:      return "H.263";
-        case FLV1:      return "Sorenson Spark";
-        case VP6:       return "VP6";
-        case VP6A:      return "VP6A";
-        case VP6F:      return "VP6F";
-        case SVQ1:      return "SVQ1";
-        case SVQ3:      return "SVQ3";
-        case DV:        return "DV";
-        case MSVideo1:  return "MS Video 1";
-        case RPZA:      return "RPZA";
-        case HuffYUV:   return "HuffYUV";
-        case FFV1:      return "FFV1";
-        case Theora:    return "Theora";
-        case RV10:      return "RealVideo 1.0";
-        case RV20:      return "RealVideo 2.0";
-        case RV30:      return "RealVideo 3.0";
-        case RV40:      return "RealVideo 4.0";
-        case Unknown:   break;
-    }
-    return "Video";
+    struct CodecName {
+        vault::VideoCodec codec;
+        std::string_view  name;
+    };
+    // One row per codec. A table rather than a switch: the codec list is a long
+    // flat mapping that keeps growing, and the static_assert below preserves the
+    // exhaustiveness a switch-without-default gave — adding an enumerator without
+    // a display name here is a build error.
+    static constexpr std::array<CodecName, 37> kNames{{
+        {H264,      "H.264"},
+        {HEVC,      "H.265"},
+        {ProRes,    "ProRes"},
+        {DNxHD,     "DNxHD"},
+        {MJPEG,     "MJPEG"},
+        {VP8,       "VP8"},
+        {VP9,       "VP9"},
+        {AV1,       "AV1"},
+        {QTRLE,     "QuickTime RLE"},
+        {Cinepak,   "Cinepak"},
+        {MPEG1,     "MPEG-1"},
+        {MPEG2,     "MPEG-2"},
+        {MPEG4,     "MPEG-4"},
+        {MSMPEG4V1, "MS MPEG-4 v1"},
+        {MSMPEG4V2, "MS MPEG-4 v2"},
+        {MSMPEG4V3, "DivX 3"},
+        {WMV1,      "WMV1"},
+        {WMV2,      "WMV2"},
+        {WMV3,      "WMV3"},
+        {VC1,       "VC-1"},
+        {H263,      "H.263"},
+        {FLV1,      "Sorenson Spark"},
+        {VP6,       "VP6"},
+        {VP6A,      "VP6A"},
+        {VP6F,      "VP6F"},
+        {SVQ1,      "SVQ1"},
+        {SVQ3,      "SVQ3"},
+        {DV,        "DV"},
+        {MSVideo1,  "MS Video 1"},
+        {RPZA,      "RPZA"},
+        {HuffYUV,   "HuffYUV"},
+        {FFV1,      "FFV1"},
+        {Theora,    "Theora"},
+        {RV10,      "RealVideo 1.0"},
+        {RV20,      "RealVideo 2.0"},
+        {RV30,      "RealVideo 3.0"},
+        {RV40,      "RealVideo 4.0"},
+    }};
+    // VideoCodec's enumerators are dense 0..RV40 (Unknown is 0xFF and falls
+    // through to "Video" below), so one row per value means size == RV40 + 1.
+    static_assert(kNames.size() == static_cast<size_t>(RV40) + 1,
+                  "Add a display name whenever a VideoCodec enumerator is added");
+
+    const auto* it = std::ranges::find_if(kNames, [c](const CodecName& e) { return e.codec == c; });
+    return it != kNames.end() ? it->name : "Video";
 }
 
 std::string_view video_container_name(vault::VideoContainer c) noexcept

@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 #include "media/decoded_frame.h"
@@ -67,6 +68,23 @@ public:
     [[nodiscard]] const AVFrame* deinterlace(const AVFrame* src);
 
 private:
+    // Builds the buffer -> yadif -> buffersink graph for `src`'s geometry and
+    // caches it. Returns false (having warned and torn the partial graph down)
+    // on any failure.
+    [[nodiscard]] bool build_deint_graph(const AVFrame* src);
+
+    // Frees the filter graph + output frame and clears the cached geometry, so
+    // the next deinterlace() rebuilds from scratch.
+    void free_deint_graph();
+
+    // Warn + free the partially-built graph + return false: the shared tail of
+    // every build_deint_graph() failure path.
+    bool fail_deint_graph(std::string_view msg);
+
+    // Logs `msg` only the first time deinterlacing fails; a persistently broken
+    // graph would otherwise print once per frame.
+    void deint_warn_once(std::string_view msg);
+
     SwsContext* sws_  = nullptr;
     AVFrame*    conv_ = nullptr;
 

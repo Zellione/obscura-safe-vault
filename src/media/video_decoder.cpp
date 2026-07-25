@@ -2,28 +2,10 @@
 
 #include <cstdint>
 
-namespace media {
-
-// Apply a pixel sample-aspect-ratio to coded dimensions, giving display dimensions.
-// Uses 64-bit arithmetic to avoid overflow, rounds to nearest.
-std::pair<int, int> display_dims(int coded_w, int coded_h, int sar_num, int sar_den) noexcept
-{
-    // Unknown SAR (non-positive values) means identity
-    if (sar_num <= 0 || sar_den <= 0) {
-        return {coded_w, coded_h};
-    }
-
-    // Apply SAR to width: round(coded_w * sar_num / sar_den)
-    // Use 64-bit to avoid overflow, then round to nearest
-    const int64_t w64 = (static_cast<int64_t>(coded_w) * sar_num + sar_den / 2) / sar_den;
-    const int display_w = static_cast<int>(w64);
-
-    return {display_w, coded_h};
-}
-
-}  // namespace media
-
 #ifdef OSV_VENDORED_AV
+
+#include <algorithm>
+#include <array>
 
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -45,6 +27,31 @@ extern "C" {
 
 #include <cstring>
 #include <print>
+
+#endif  // OSV_VENDORED_AV
+
+namespace media {
+
+// Apply a pixel sample-aspect-ratio to coded dimensions, giving display dimensions.
+// Uses 64-bit arithmetic to avoid overflow, rounds to nearest.
+std::pair<int, int> display_dims(int coded_w, int coded_h, int sar_num, int sar_den) noexcept
+{
+    // Unknown SAR (non-positive values) means identity
+    if (sar_num <= 0 || sar_den <= 0) {
+        return {coded_w, coded_h};
+    }
+
+    // Apply SAR to width: round(coded_w * sar_num / sar_den)
+    // Use 64-bit to avoid overflow, then round to nearest
+    const int64_t w64 = (static_cast<int64_t>(coded_w) * sar_num + sar_den / 2) / sar_den;
+    const auto display_w = static_cast<int>(w64);
+
+    return {display_w, coded_h};
+}
+
+}  // namespace media
+
+#ifdef OSV_VENDORED_AV
 
 namespace media {
 
@@ -79,46 +86,62 @@ void VideoDecoder::reset()
 std::optional<vault::VideoCodec> map_codec_id(int av_codec_id)
 {
     using enum vault::VideoCodec;
-    switch (av_codec_id) {
-        case AV_CODEC_ID_H264:       return H264;
-        case AV_CODEC_ID_HEVC:       return HEVC;
-        case AV_CODEC_ID_PRORES:     return ProRes;
-        case AV_CODEC_ID_DNXHD:      return DNxHD;
-        case AV_CODEC_ID_MJPEG:      return MJPEG;
-        case AV_CODEC_ID_VP8:        return VP8;
-        case AV_CODEC_ID_VP9:        return VP9;
-        case AV_CODEC_ID_AV1:        return AV1;
-        case AV_CODEC_ID_QTRLE:      return QTRLE;
-        case AV_CODEC_ID_CINEPAK:    return Cinepak;
-        case AV_CODEC_ID_MPEG1VIDEO: return MPEG1;
-        case AV_CODEC_ID_MPEG2VIDEO: return MPEG2;
-        case AV_CODEC_ID_MPEG4:      return MPEG4;
-        case AV_CODEC_ID_MSMPEG4V1:  return MSMPEG4V1;
-        case AV_CODEC_ID_MSMPEG4V2:  return MSMPEG4V2;
-        case AV_CODEC_ID_MSMPEG4V3:  return MSMPEG4V3;
-        case AV_CODEC_ID_WMV1:       return WMV1;
-        case AV_CODEC_ID_WMV2:       return WMV2;
-        case AV_CODEC_ID_WMV3:       return WMV3;
-        case AV_CODEC_ID_VC1:        return VC1;
-        case AV_CODEC_ID_H263:       return H263;
-        case AV_CODEC_ID_FLV1:       return FLV1;
-        case AV_CODEC_ID_VP6:        return VP6;
-        case AV_CODEC_ID_VP6A:       return VP6A;
-        case AV_CODEC_ID_VP6F:       return VP6F;
-        case AV_CODEC_ID_SVQ1:       return SVQ1;
-        case AV_CODEC_ID_SVQ3:       return SVQ3;
-        case AV_CODEC_ID_DVVIDEO:    return DV;
-        case AV_CODEC_ID_MSVIDEO1:   return MSVideo1;
-        case AV_CODEC_ID_RPZA:       return RPZA;
-        case AV_CODEC_ID_HUFFYUV:    return HuffYUV;
-        case AV_CODEC_ID_FFV1:       return FFV1;
-        case AV_CODEC_ID_THEORA:     return Theora;
-        case AV_CODEC_ID_RV10:       return RV10;
-        case AV_CODEC_ID_RV20:       return RV20;
-        case AV_CODEC_ID_RV30:       return RV30;
-        case AV_CODEC_ID_RV40:       return RV40;
-        default:                     return std::nullopt;
-    }
+    struct CodecEntry {
+        int               av_id;
+        vault::VideoCodec codec;
+    };
+    // One row per accepted codec. A table rather than a switch: this is a long
+    // flat mapping that keeps growing, and the static_assert below preserves the
+    // exhaustiveness a switch-without-default gave — adding an enumerator without
+    // a corresponding AVCodecID here is a build error.
+    static constexpr std::array<CodecEntry, 37> kCodecs{{
+        {AV_CODEC_ID_H264,       H264},
+        {AV_CODEC_ID_HEVC,       HEVC},
+        {AV_CODEC_ID_PRORES,     ProRes},
+        {AV_CODEC_ID_DNXHD,      DNxHD},
+        {AV_CODEC_ID_MJPEG,      MJPEG},
+        {AV_CODEC_ID_VP8,        VP8},
+        {AV_CODEC_ID_VP9,        VP9},
+        {AV_CODEC_ID_AV1,        AV1},
+        {AV_CODEC_ID_QTRLE,      QTRLE},
+        {AV_CODEC_ID_CINEPAK,    Cinepak},
+        {AV_CODEC_ID_MPEG1VIDEO, MPEG1},
+        {AV_CODEC_ID_MPEG2VIDEO, MPEG2},
+        {AV_CODEC_ID_MPEG4,      MPEG4},
+        {AV_CODEC_ID_MSMPEG4V1,  MSMPEG4V1},
+        {AV_CODEC_ID_MSMPEG4V2,  MSMPEG4V2},
+        {AV_CODEC_ID_MSMPEG4V3,  MSMPEG4V3},
+        {AV_CODEC_ID_WMV1,       WMV1},
+        {AV_CODEC_ID_WMV2,       WMV2},
+        {AV_CODEC_ID_WMV3,       WMV3},
+        {AV_CODEC_ID_VC1,        VC1},
+        {AV_CODEC_ID_H263,       H263},
+        {AV_CODEC_ID_FLV1,       FLV1},
+        {AV_CODEC_ID_VP6,        VP6},
+        {AV_CODEC_ID_VP6A,       VP6A},
+        {AV_CODEC_ID_VP6F,       VP6F},
+        {AV_CODEC_ID_SVQ1,       SVQ1},
+        {AV_CODEC_ID_SVQ3,       SVQ3},
+        {AV_CODEC_ID_DVVIDEO,    DV},
+        {AV_CODEC_ID_MSVIDEO1,   MSVideo1},
+        {AV_CODEC_ID_RPZA,       RPZA},
+        {AV_CODEC_ID_HUFFYUV,    HuffYUV},
+        {AV_CODEC_ID_FFV1,       FFV1},
+        {AV_CODEC_ID_THEORA,     Theora},
+        {AV_CODEC_ID_RV10,       RV10},
+        {AV_CODEC_ID_RV20,       RV20},
+        {AV_CODEC_ID_RV30,       RV30},
+        {AV_CODEC_ID_RV40,       RV40},
+    }};
+    // VideoCodec's enumerators are dense 0..RV40 (Unknown is 0xFF and is never a
+    // mapping target), so one row per value means size == RV40 + 1.
+    static_assert(kCodecs.size() == static_cast<size_t>(RV40) + 1,
+                  "Add an AVCodecID mapping whenever a VideoCodec enumerator is added");
+
+    const auto* it = std::ranges::find_if(
+        kCodecs, [av_codec_id](const CodecEntry& e) { return e.av_id == av_codec_id; });
+    if (it == kCodecs.end()) return std::nullopt;
+    return it->codec;
 }
 
 // Log an open() failure, release any partially-acquired state, and return false.
@@ -127,6 +150,36 @@ bool VideoDecoder::fail_open(std::string_view msg)
     std::println(stderr, "[VideoDecoder] {}", msg);
     reset();
     return false;
+}
+
+// Total duration in microseconds: prefer the container's own value (already in
+// AV_TIME_BASE units = µs), fall back to the video stream's, 0 if neither knows.
+static uint64_t container_duration_us(const AVFormatContext* fmt, const AVStream* stream)
+{
+    if (fmt->duration > 0 && fmt->duration != AV_NOPTS_VALUE) {
+        return static_cast<uint64_t>(fmt->duration);
+    }
+    if (stream->duration > 0 && stream->duration != AV_NOPTS_VALUE) {
+        return static_cast<uint64_t>(static_cast<double>(stream->duration)
+                                     * av_q2d(stream->time_base) * 1e6);
+    }
+    return 0;
+}
+
+// Open the best audio stream, if there is one. Non-fatal throughout: a file with
+// no audio, or with audio we can't decode, still plays as video-only — so this
+// only ever leaves audio_index_ at -1, never fails open().
+void VideoDecoder::open_audio_stream()
+{
+    audio_index_ = av_find_best_stream(fmt_, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+    if (audio_index_ < 0) return;
+
+    const AVStream* audio_stream = fmt_->streams[audio_index_];
+    if (!audio_stream || !audio_dec_.open(audio_stream)) {
+        std::println(stderr,
+                     "[VideoDecoder] Audio stream found but failed to open decoder; continuing video-only");
+        audio_index_ = -1;
+    }
 }
 
 bool VideoDecoder::open(AVIOContext* pb)
@@ -156,7 +209,9 @@ bool VideoDecoder::open(AVIOContext* pb)
     stream_index_ = av_find_best_stream(fmt_, AVMEDIA_TYPE_VIDEO, -1, -1, &decoder, 0);
     if (stream_index_ < 0 || !decoder) return fail_open("No video stream/decoder found");
 
-    const AVStream* stream = fmt_->streams[stream_index_];
+    // Non-const: av_guess_sample_aspect_ratio() below takes AVStream* (it caches
+    // the guess on the stream). fmt_ is ours, so no const is being cast away.
+    AVStream* stream = fmt_->streams[stream_index_];
     if (!stream || !stream->codecpar) return fail_open("Invalid stream or codecpar");
 
     auto mapped = map_codec_id(stream->codecpar->codec_id);
@@ -178,34 +233,17 @@ bool VideoDecoder::open(AVIOContext* pb)
     stream_time_base_ = stream->time_base;
 
     // Read sample aspect ratio (SAR) for anamorphic video display correction
-    AVRational sar = av_guess_sample_aspect_ratio(fmt_, const_cast<AVStream*>(stream), nullptr);
-    sar_num_ = (sar.num > 0 && sar.den > 0) ? sar.num : 1;
-    sar_den_ = (sar.num > 0 && sar.den > 0) ? sar.den : 1;
+    const AVRational sar = av_guess_sample_aspect_ratio(fmt_, stream, nullptr);
+    sar_ = (sar.num > 0 && sar.den > 0) ? sar : AVRational{1, 1};
 
-    // Duration in microseconds: prefer fmt_->duration (AV_TIME_BASE units = µs).
-    if (fmt_->duration > 0 && fmt_->duration != AV_NOPTS_VALUE) {
-        duration_us_ = static_cast<uint64_t>(fmt_->duration);
-    } else if (stream->duration > 0 && stream->duration != AV_NOPTS_VALUE) {
-        duration_us_ = static_cast<uint64_t>(static_cast<double>(stream->duration)
-                                             * av_q2d(stream->time_base) * 1e6);
-    } else {
-        duration_us_ = 0;
-    }
+    duration_us_ = container_duration_us(fmt_, stream);
 
     frame_ = av_frame_alloc();
     if (!frame_) return fail_open("Failed to allocate frame");
     pkt_ = av_packet_alloc();
     if (!pkt_) return fail_open("Failed to allocate packet");
 
-    // Attempt to open audio stream (non-fatal if missing)
-    audio_index_ = av_find_best_stream(fmt_, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
-    if (audio_index_ >= 0) {
-        const AVStream* audio_stream = fmt_->streams[audio_index_];
-        if (audio_stream && !audio_dec_.open(audio_stream)) {
-            std::println(stderr, "[VideoDecoder] Audio stream found but failed to open decoder; continuing video-only");
-            audio_index_ = -1;
-        }
-    }
+    open_audio_stream();
 
     return true;
 }
