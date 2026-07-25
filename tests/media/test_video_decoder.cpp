@@ -713,4 +713,28 @@ TEST(video_decoder_seek_demux_only_resumes_demux_from_target)
     CHECK(n > 0);   // some packets remain after the seek target
 }
 
+TEST(video_decoder_ffvhuff_unsupported_codec_open_fails)
+{
+    // Phase 52: ffvhuff is demuxable (matroska container) but not decodable in our
+    // vendored FFmpeg build (we registered only Tier-1 legacy decoders; ffvhuff is not
+    // mapped in map_codec_id). Verify open() rejects it with the correct error.
+    auto v_bytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tinylegacy_ffvhuff.mkv");
+    REQUIRE(!v_bytes.empty());
+
+    TempVault tv("decoder_ffvhuff");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", v_bytes, "ffvhuff.mkv", 4096) == vault::VaultResult::Ok);
+    auto kids = v.list("c");
+    REQUIRE(kids.size() == 1);
+
+    media::ChunkAvio avio(media::VideoSource::open(v, *kids[0]));
+    REQUIRE(avio.valid());
+    media::VideoDecoder dec;
+    REQUIRE(!dec.open(avio.ctx()));  // open() must fail for unsupported codec
+    // Codec should remain Unknown
+    CHECK(dec.codec() == vault::VideoCodec::Unknown);
+}
+
 #endif // OSV_VENDORED_AV

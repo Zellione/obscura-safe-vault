@@ -404,4 +404,42 @@ TEST(repair_video_metadata_fills_in_codec_duration_and_poster_when_now_decodable
     CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(video_bytes));
 }
 
+TEST(repair_video_metadata_noop_on_genuinely_undecodable_codec)
+{
+    // Phase 52: ffvhuff is demuxable (matroska) but not decodable in our vendored FFmpeg.
+    // When repair_video_metadata is called on such a video, it should:
+    // 1. Detect it as Unknown codec (probing fails or map_codec_id returns nullopt)
+    // 2. Return Ok (repair is best-effort)
+    // 3. Leave the codec as Unknown, duration as 0, poster as empty (no-op)
+    // This re-covers the repair-noop path lost when Task 5 made MPEG-2/4 decodable.
+
+    auto v_bytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tinylegacy_ffvhuff.mkv");
+    REQUIRE(!v_bytes.empty());
+
+    TempVault tv("repair_noop_ffvhuff");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("", v_bytes, "ffvhuff.mkv", 4096) == vault::VaultResult::Ok);
+
+    auto before = v.list("");
+    REQUIRE(before.size() == 1);
+    // ffvhuff should be stored as Unknown since it's not decodable
+    REQUIRE(static_cast<int>(before[0]->vmeta.codec) ==
+            static_cast<int>(vault::VideoCodec::Unknown));
+    REQUIRE(before[0]->vmeta.duration_us == 0);
+    REQUIRE(before[0]->vmeta.poster_length == 0);
+
+    // repair_video_metadata should succeed (best-effort) but be a no-op
+    CHECK(v.repair_video_metadata("ffvhuff.mkv") == vault::VaultResult::Ok);
+
+    auto after = v.list("");
+    REQUIRE(after.size() == 1);
+    // Should still be Unknown (no repair possible)
+    CHECK(static_cast<int>(after[0]->vmeta.codec) ==
+          static_cast<int>(vault::VideoCodec::Unknown));
+    CHECK(after[0]->vmeta.duration_us == 0);
+    CHECK(after[0]->vmeta.poster_length == 0);
+}
+
 #endif  // OSV_VENDORED_AV
