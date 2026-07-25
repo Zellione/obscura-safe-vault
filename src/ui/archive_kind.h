@@ -23,4 +23,13 @@ enum class ArchiveKind : uint8_t { None, Zip, Cbz, SevenZip, Rar, Tar, TarGz };
 [[nodiscard]] ArchiveKind detect_archive_kind(std::string_view       filename,
                                               std::span<const uint8_t> bytes);
 
+// Extension-only test: does `name` CLAIM to be an archive?
+//
+// The planner (`build_zip_plan`) sees entry names but not entry bytes, so it
+// cannot magic-check. It uses this to route a candidate into `ZipPlan::nested`;
+// the orchestrator then extracts the bytes and calls `detect_archive_kind` to
+// confirm. A candidate whose magic disagrees is counted as unsupported there,
+// not here — which is why this predicate is deliberately permissive.
+[[nodiscard]] bool is_archive_name(std::string_view name);
+
 } // namespace ui

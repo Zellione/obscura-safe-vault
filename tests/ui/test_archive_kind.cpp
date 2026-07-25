@@ -110,6 +110,50 @@ TEST(archive_kind_rejects_media_file)
     CHECK(detect_archive_kind("holiday.jpg", bytes_of("\xFF\xD8\xFF\xE0jfif")) == ArchiveKind::None);
 }
 
+// --- is_archive_name: extension-only, used at plan time ---------------------
+//
+// build_zip_plan sees entry NAMES but not entry BYTES, so it cannot magic-check.
+// This predicate is deliberately permissive; detect_archive_kind rejects the
+// liars later, once the bytes have been extracted.
+
+TEST(is_archive_name_accepts_every_supported_extension)
+{
+    CHECK(ui::is_archive_name("photos.zip"));
+    CHECK(ui::is_archive_name("chapter1.cbz"));
+    CHECK(ui::is_archive_name("backup.7z"));
+    CHECK(ui::is_archive_name("scans.rar"));
+    CHECK(ui::is_archive_name("stuff.tar"));
+    CHECK(ui::is_archive_name("stuff.tar.gz"));
+    CHECK(ui::is_archive_name("stuff.tgz"));
+}
+
+TEST(is_archive_name_is_case_insensitive)
+{
+    CHECK(ui::is_archive_name("PHOTOS.ZIP"));
+}
+
+TEST(is_archive_name_rejects_media_and_documents)
+{
+    CHECK(!ui::is_archive_name("holiday.jpg"));
+    CHECK(!ui::is_archive_name("clip.mp4"));
+    CHECK(!ui::is_archive_name("report.docx"));
+    CHECK(!ui::is_archive_name("notes.txt"));
+}
+
+TEST(is_archive_name_rejects_bare_extension_and_empty)
+{
+    CHECK(!ui::is_archive_name(".zip"));
+    CHECK(!ui::is_archive_name(""));
+}
+
+TEST(is_archive_name_agrees_with_detect_on_a_valid_archive)
+{
+    // The two must not drift: anything detect_archive_kind can classify must
+    // first survive is_archive_name, or the planner would never offer it.
+    CHECK(ui::is_archive_name("photos.zip"));
+    CHECK(detect_archive_kind("photos.zip", ZIP_MAGIC) != ArchiveKind::None);
+}
+
 // --- bounds safety: archives are untrusted input ----------------------------
 
 TEST(archive_kind_handles_empty_bytes)

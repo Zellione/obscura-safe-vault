@@ -1,5 +1,7 @@
 #include "ui/archive_kind.h"
 
+#include <algorithm>
+#include <array>
 #include <cctype>
 #include <string>
 
@@ -38,13 +40,27 @@ constexpr size_t TAR_MAGIC_OFFSET = 257;
 }
 
 // The extension must be preceded by an actual stem: ".zip" is a dotfile, not a
-// ZIP named "". Returns true and sets `out` to the matched suffix.
+// ZIP named "".
 [[nodiscard]] bool extension_is(const std::string& lower_name, std::string_view suffix)
 {
     return lower_name.size() > suffix.size() && lower_name.ends_with(suffix);
 }
 
+// The single source of truth for "which extensions name an archive", shared by
+// is_archive_name (plan time, names only) and detect_archive_kind (extract
+// time, names + magic). Longest/most specific first: ".tar.gz" must be tried
+// before ".tar" would ever see it.
+constexpr std::array<std::string_view, 7> kArchiveExts{
+    ".tar.gz", ".tgz", ".zip", ".cbz", ".7z", ".rar", ".tar"};
+
 } // namespace
+
+bool is_archive_name(std::string_view name)
+{
+    const std::string lower = lowered(name);
+    return std::ranges::any_of(kArchiveExts,
+                               [&lower](std::string_view ext) { return extension_is(lower, ext); });
+}
 
 ArchiveKind detect_archive_kind(std::string_view filename, std::span<const uint8_t> bytes)
 {
