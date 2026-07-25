@@ -107,3 +107,36 @@ TEST(volume_dialog_y_and_n_mirror_enter_and_escape)
     d.open(complete_set());
     CHECK(d.handle_key(SDLK_N) == ui::VolumeSetDialog::Result::Cancelled);
 }
+
+// The end-to-end shape the gallery grid drives: detect from a real directory
+// listing, summarise, and confirm. Guards the seam between detection and the
+// dialog, which is where a wrong stem or ordering would surface.
+TEST(volume_dialog_accepts_a_really_detected_set)
+{
+    const std::vector<std::string> siblings{"movie.tar.001", "movie.tar.002", "movie.tar.003",
+                                            "unrelated.jpg"};
+    const auto set = ui::detect_volume_set("movie.tar.002", siblings);
+    REQUIRE(set.style == ui::VolumeStyle::NumericSuffix);
+    CHECK_EQ(set.stem, std::string("movie.tar"));
+
+    ui::VolumeSetDialog d;
+    d.open(ui::summarize_volume_set(set));
+    REQUIRE(d.summary().volume_lines.size() == 3);
+    CHECK(d.summary().can_import);
+    CHECK(d.handle_key(SDLK_RETURN) == ui::VolumeSetDialog::Result::Confirmed);
+}
+
+TEST(volume_dialog_blocks_a_really_detected_gapped_set)
+{
+    // .002 is missing: detection reports the gap and the dialog refuses.
+    const std::vector<std::string> siblings{"movie.tar.001", "movie.tar.003"};
+    const auto set = ui::detect_volume_set("movie.tar.001", siblings);
+    REQUIRE(set.style == ui::VolumeStyle::NumericSuffix);
+    REQUIRE(set.missing.size() == 1);
+
+    ui::VolumeSetDialog d;
+    d.open(ui::summarize_volume_set(set));
+    CHECK_FALSE(d.summary().can_import);
+    CHECK(d.handle_key(SDLK_RETURN) == ui::VolumeSetDialog::Result::Pending);
+    CHECK(d.active());
+}

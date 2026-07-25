@@ -935,6 +935,24 @@ bool GalleryGrid::handle_overlay_event(const SDL_Event& e)
         return true;
     }
 
+    // The multi-volume confirm modal owns all input while it is up.
+    if (volume_dialog_.active()) {
+        if (e.type == SDL_EVENT_KEY_DOWN) {
+            using enum VolumeSetDialog::Result;
+            switch (volume_dialog_.handle_key(e.key.key)) {
+                case Confirmed: continue_volume_set_naming(); break;
+                case Cancelled:
+                    naming_.zip.volume_set = {};
+                    naming_.zip.volume_paths.clear();
+                    status_ = "Multi-volume import cancelled";
+                    mark_dirty();
+                    break;
+                case Pending: break;
+            }
+        }
+        return true;
+    }
+
     // The export consent modal owns all input while it is up.
     if (consent_.active()) {
         if (e.type == SDL_EVENT_KEY_DOWN &&
@@ -1076,8 +1094,68 @@ void GalleryGrid::process_next_queued_zip_import()
     mark_dirty();
 }
 
+// List the picked file's siblings so detect_volume_set can work over names.
+// The function itself is pure; reading the directory is this layer's job.
+[[nodiscard]] std::vector<std::string> sibling_names(const std::filesystem::path& picked)
+{
+    std::vector<std::string> names;
+    std::error_code          ec;
+    for (const auto& e : std::filesystem::directory_iterator(picked.parent_path(), ec)) {
+        names.push_back(e.path().filename().string());
+    }
+    return names;   // empty on error: a set simply is not detected
+}
+
+// The set was confirmed: carry on into the normal gallery-name prompt. The
+// stashed volume_set is what makes do_zip_import enqueue the whole set.
+void GalleryGrid::continue_volume_set_naming()
+{
+    const auto& zp = naming_.zip.path;
+
+    std::string ext = zp.extension().string();
+    std::ranges::transform(ext, ext.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    // Classify from the SET's stem, not the volume: "movie.tar.001" is a tar.
+    std::string stem_ext = std::filesystem::path(naming_.zip.volume_set.stem).extension().string();
+    std::ranges::transform(stem_ext, stem_ext.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    const auto [cbz, archive_backend] = classify_archive_ext(stem_ext);
+
+    start_naming();
+    if (naming_.active) {
+        naming_.buf = std::filesystem::path(naming_.zip.volume_set.stem).stem().string();
+        naming_.zip.cbz             = cbz;
+        naming_.zip.archive_backend = archive_backend;
+        // A split set's encryption cannot be probed from one volume, so the
+        // password path is not offered here.
+        naming_.zip.needs_password  = false;
+        naming_.zip.active          = true;
+    }
+    mark_dirty();
+}
+
 void GalleryGrid::handle_single_archive_for_naming(const std::filesystem::path& zp)
 {
+    // Phase 53: is this one volume of a split set? Detection is by name only,
+    // so a lone "photos.zip" with no siblings stays an ordinary archive.
+    if (const VolumeSet set = detect_volume_set(zp.filename().string(), sibling_names(zp));
+        set.style != VolumeStyle::None) {
+        naming_.zip.volume_set = set;
+        naming_.zip.volume_paths.clear();
+        naming_.zip.volume_paths.reserve(set.volumes.size());
+        for (const std::string& name : set.volumes) {
+            naming_.zip.volume_paths.push_back(zp.parent_path() / name);
+        }
+        naming_.zip.path = zp;
+        // The dialog decides; nothing is enqueued until it is confirmed, and a
+        // set with a gap cannot be confirmed at all.
+        volume_dialog_.open(summarize_volume_set(set));
+        mark_dirty();
+        return;
+    }
+    naming_.zip.volume_set   = {};
+    naming_.zip.volume_paths.clear();
+
     std::string ext = zp.extension().string();
     std::ranges::transform(ext, ext.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -1193,10 +1271,18 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path)
         kind = naming_.zip.archive_backend ? Archive : Zip;
     }
 
-    // Enqueue the archive import through the queue (Phase 50)
-    queue_.enqueue_archive(zip_path, base_gallery, gallery_name, kind,
-                          naming_.zip.needs_password,
-                          password_bytes(naming_.password.buf));
+    if (!naming_.zip.volume_paths.empty()) {
+        // Phase 53: the whole set imports as one archive; the worker assembles.
+        queue_.enqueue_volume_set(naming_.zip.volume_paths, naming_.zip.volume_set.style,
+                                  naming_.zip.volume_set.stem, base_gallery, gallery_name, kind);
+        naming_.zip.volume_set = {};
+        naming_.zip.volume_paths.clear();
+    } else {
+        // Enqueue the archive import through the queue (Phase 50)
+        queue_.enqueue_archive(zip_path, base_gallery, gallery_name, kind,
+                               naming_.zip.needs_password,
+                               password_bytes(naming_.password.buf));
+    }
 
     // Phase 51 Task 14: process next encrypted archive from bulk pick (if any)
     if (!naming_.zip.queued_archives.empty()) {
@@ -1581,6 +1667,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     }
 
     consent_.render(r, font_, W, H);
+    volume_dialog_.render(r, font_, W, H);
 
     if (naming_.active) {
         const float mw = W * 0.6f;
