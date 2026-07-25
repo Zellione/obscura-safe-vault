@@ -15,9 +15,12 @@ Full design, including detailed tradeoffs and threat-model rationale:
 - [x] **Note for later tasks:** `osv_tests` lists `src/ui/*.cpp` **individually** in `premake5.lua` (the `osv` app project globs `src/**.cpp`, so only the test project needs it). Every new `src/ui/` module in this phase must be added there or it fails at link, not compile.
 
 **2. Recursive archive planning**
-- [ ] `src/ui/recursive_import.h/.cpp` — depth-first orchestrator with work stack. Plans a top-level archive, discovers nested archives during planning, queues them depth-first. `ZipPlan::nested` holds discovered archives; `build_zip_plan` entry classification route non-media archives to `nested` instead of `skipped_unsupported`.
-- [ ] Naming: nested archive `foo.cbz` → sub-gallery `foo` (extension stripped, `vault::sanitize_node_name` applied, collision-suffixed). Meta.json applies per sub-gallery.
-- [ ] CBZ does not recurse — confirmed in the implementation by explicit guard.
+- [x] `ZipPlan::nested` + `build_zip_plan` routing — archive entries divert to `nested` instead of `skipped_unsupported`; the parent gallery is created even for a directory holding only an archive. 7 tests.
+- [x] **Design correction (recorded).** The spec had the planner call `detect_archive_kind`, but `collect_media` sees `ZipEntry{path, is_dir}` — names, no bytes — so it cannot magic-check. Classification is split: `is_archive_name` (extension only) at plan time, `detect_archive_kind` (extension + magic) at extract time, where a liar is demoted to `skipped_unsupported`. Both share one `kArchiveExts` table.
+- [x] Naming: `nested_gallery_name` (extension stripped incl. `.tar.gz`, `sanitize_node_name` applied) + `unique_gallery_name` (`base_2`, `base_3`, …). 10 tests.
+- [x] CBZ does not recurse — `build_cbz_plan` has its own collection loop and never calls `collect_media`; guarded by a test rather than left to the call graph staying that way.
+- [ ] `src/ui/recursive_import.*` — the depth-first orchestrator itself: work stack, extract-and-confirm, attach sub-galleries.
+- [ ] Meta.json applied per nested sub-gallery.
 - [ ] Guards (each soft-fails the offending branch, none abort the whole job, each unit-tested separately):
   - `kMaxArchiveDepth = 16`
   - cumulative expanded-bytes cap (e.g. 10 GiB max across whole recursion)
