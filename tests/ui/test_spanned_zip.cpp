@@ -233,13 +233,13 @@ TEST(eocd_disk_fields_rewritten_to_zero) {
     REQUIRE(eocd_pos + 22 <= result.merged.size());
 
     // Check disk_num field (offset +4 in EOCD)
-    uint16_t disk_num = result.merged[eocd_pos + 4] |
-                        (result.merged[eocd_pos + 5] << 8);
+    uint16_t disk_num = static_cast<uint16_t>(
+        result.merged[eocd_pos + 4] | (result.merged[eocd_pos + 5] << 8));
     CHECK_EQ(disk_num, 0);
 
     // Check disk_with_cd field (offset +6)
-    uint16_t disk_with_cd = result.merged[eocd_pos + 6] |
-                            (result.merged[eocd_pos + 7] << 8);
+    uint16_t disk_with_cd = static_cast<uint16_t>(
+        result.merged[eocd_pos + 6] | (result.merged[eocd_pos + 7] << 8));
     CHECK_EQ(disk_with_cd, 0);
 }
 
@@ -279,8 +279,8 @@ TEST(cd_entries_disk_start_set_to_zero) {
     REQUIRE(cd_pos + 46 <= result.merged.size());
 
     // Check disk_start field (offset +34 in CD entry)
-    uint16_t disk_start = result.merged[cd_pos + 34] |
-                          (result.merged[cd_pos + 35] << 8);
+    uint16_t disk_start = static_cast<uint16_t>(
+        result.merged[cd_pos + 34] | (result.merged[cd_pos + 35] << 8));
     CHECK_EQ(disk_start, 0);
 }
 

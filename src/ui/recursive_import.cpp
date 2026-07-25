@@ -89,4 +89,128 @@ void RecursionBudget::note_expanded(uint64_t bytes)
 {
     total_expanded_ += bytes;
 }
+namespace {
+
+// One frame of the depth-first walk. Depth-first is what bounds memory: only
+// the archives along the current root->leaf path are alive at once, which is
+// what RecursionBudget's live-bytes limit polices.
+struct Frame {
+    crypto::SecureBytes      owned;    // this archive's bytes (empty for the root)
+    std::span<const uint8_t> bytes;    // view of owned, or of the caller's root buffer
+    ArchiveKind              kind;
+    std::string              gallery;  // vault gallery receiving this archive's contents
+    int                      depth;
+};
+
+void walk_one(Frame& f, const RecursiveHooks& hooks, RecursionBudget& budget,
+              RecursiveTally& tally);
+
+// Import every media entry, then descend into each nested archive in turn.
+void walk_one(Frame& f, const RecursiveHooks& hooks, RecursionBudget& budget,
+              RecursiveTally& tally)
+{
+    std::vector<ZipEntry> entries;
+    if (!hooks.list_entries(f.bytes, f.kind, entries)) {
+        ++tally.unreadable;
+        return;
+    }
+
+    // A CBZ is a flat run of pages, so an archive inside one is not a chapter:
+    // plan it as pages and never descend.
+    const ZipPlan plan = (f.kind == ArchiveKind::Cbz)
+                             ? build_cbz_plan(entries, f.gallery, "")
+                             : build_zip_plan(entries, f.gallery, "");
+
+    for (const std::string& g : plan.galleries) {
+        if (!hooks.create_gallery(g)) return;
+    }
+
+    tally.skipped_unsupported += plan.skipped_unsupported;
+
+    for (const ZipPlacement& p : plan.placements) {
+        if (hooks.cancelled()) return;
+        crypto::SecureBytes payload;
+        if (!hooks.extract_entry(f.bytes, f.kind, p.entry_index, payload)) {
+            ++tally.skipped_unsupported;
+            continue;
+        }
+        budget.note_expanded(payload.size());
+        if (hooks.place_media(p.gallery_path, p.filename, payload.as_span())) {
+            ++tally.media_placed;
+        } else {
+            ++tally.skipped_unsupported;
+        }
+    }
+
+    // Sub-gallery names are unique per parent gallery, so two sibling folders
+    // each holding "bonus.zip" do not collapse onto one gallery.
+    std::vector<std::string> taken;
+    for (const ZipPlacement& p : plan.nested) {
+        if (hooks.cancelled()) return;
+
+        crypto::SecureBytes child;
+        if (!hooks.extract_entry(f.bytes, f.kind, p.entry_index, child)) {
+            ++tally.unreadable;
+            continue;
+        }
+        budget.note_expanded(child.size());
+
+        // The name claimed an archive; the magic bytes get the final say.
+        const ArchiveKind kind = detect_archive_kind(p.filename, child.as_span());
+        if (kind == ArchiveKind::None) {
+            ++tally.not_an_archive;
+            continue;
+        }
+
+        const RecursionVerdict verdict = budget.may_descend(f.depth, child.size());
+        if (verdict == RecursionVerdict::DepthExceeded) {
+            ++tally.depth_capped;
+            continue;
+        }
+        if (verdict != RecursionVerdict::Allow) {
+            ++tally.budget_stopped;
+            continue;
+        }
+
+        std::string base = nested_gallery_name(p.filename);
+        if (base.empty()) base = "archive";
+        const std::string name = unique_gallery_name(base, taken);
+        taken.push_back(name);
+
+        const std::string sub = p.gallery_path.empty() ? name : p.gallery_path + "/" + name;
+        if (!hooks.create_gallery(sub)) continue;
+
+        Frame child_frame{.owned   = std::move(child),
+                          .bytes   = {},
+                          .kind    = kind,
+                          .gallery = sub,
+                          .depth   = f.depth + 1};
+        child_frame.bytes = child_frame.owned.as_span();
+
+        budget.enter(child_frame.owned.size());
+        ++tally.nested_archives;
+        walk_one(child_frame, hooks, budget, tally);
+        budget.leave(child_frame.owned.size());
+    }
+}
+
+} // namespace
+
+RecursiveTally walk_archive(std::span<const uint8_t> root_bytes,
+                            ArchiveKind              root_kind,
+                            std::string_view         dest_gallery,
+                            const RecursiveHooks&    hooks,
+                            RecursionLimits          limits)
+{
+    RecursiveTally  tally;
+    RecursionBudget budget(limits, root_bytes.size());
+    Frame           root{.owned   = {},
+                         .bytes   = root_bytes,
+                         .kind    = root_kind,
+                         .gallery = std::string(dest_gallery),
+                         .depth   = 0};
+    walk_one(root, hooks, budget, tally);
+    return tally;
+}
+
 } // namespace ui

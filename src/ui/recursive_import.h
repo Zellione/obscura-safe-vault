@@ -5,9 +5,17 @@
 // This header currently carries the naming rules; the depth-first orchestrator
 // and its guards land in the same module.
 //
-// Pure: no miniz, no libarchive, no vault, no SDL.
+// SDL-free and vault-free; the archive backends are injected as hooks so this
+// module never links miniz or libarchive.
 
+#include "crypto/secure_mem.h"
+#include "ui/archive_kind.h"
+#include "ui/zip_plan.h"
+
+#include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -83,5 +91,53 @@ private:
     uint64_t        total_expanded_ = 0;
     int             nested_seen_    = 0;
 };
+
+// --- the depth-first walker -------------------------------------------------
+//
+// A recursive plan cannot be a flat placement list: each placement belongs to a
+// DIFFERENT archive buffer, so an index back into "the" entry list is
+// meaningless once nesting starts. The walker therefore emits as it goes,
+// through hooks, the way Phase 50's sinks already work.
+//
+// The archive backends are injected rather than linked, so the recursion is
+// testable with fakes and does not drag miniz/libarchive into this module.
+
+struct RecursiveTally {
+    int media_placed        = 0;
+    int nested_archives     = 0;   // entered successfully
+    int skipped_unsupported = 0;   // not media, not an archive
+    int not_an_archive      = 0;   // name claimed an archive, magic disagreed
+    int depth_capped        = 0;
+    int budget_stopped      = 0;   // any other guard tripped
+    int encrypted_skipped   = 0;   // needs a password the parent's did not fit
+    int unreadable          = 0;   // backend refused the buffer
+};
+
+// Backend hooks. `bytes` is the archive buffer being read.
+struct RecursiveHooks {
+    // List an archive's entries. False = unreadable (corrupt / wrong password).
+    std::function<bool(std::span<const uint8_t>, ArchiveKind, std::vector<ZipEntry>&)> list_entries;
+    // Extract one entry's bytes. False = failed; the entry is tallied and skipped.
+    std::function<bool(std::span<const uint8_t>, ArchiveKind, std::size_t,
+                       crypto::SecureBytes&)>                                          extract_entry;
+    // Create a gallery (idempotent). False = fatal for this branch.
+    std::function<bool(std::string_view)>                                              create_gallery;
+    // Import one media file. False = tallied as skipped.
+    std::function<bool(std::string_view, std::string_view, std::span<const uint8_t>)>  place_media;
+    // Polled between entries so a queued import stays cancellable.
+    std::function<bool()>                                                              cancelled;
+};
+
+// Walk `root_bytes` depth-first, importing media and descending into nested
+// archives, each of which becomes a sub-gallery under the gallery holding it.
+//
+// `dest_gallery` already exists; the walker creates everything below it. A CBZ
+// is never descended into — a comic archive is a flat run of pages, so an
+// archive inside one is not a chapter.
+RecursiveTally walk_archive(std::span<const uint8_t> root_bytes,
+                            ArchiveKind              root_kind,
+                            std::string_view         dest_gallery,
+                            const RecursiveHooks&    hooks,
+                            RecursionLimits          limits = {});
 
 } // namespace ui
