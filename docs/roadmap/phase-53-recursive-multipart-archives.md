@@ -53,10 +53,12 @@ Full design, including detailed tradeoffs and threat-model rationale:
 - [x] Tests: merge classic-ZIP spanning, correct offset rewriting, spanning marker strip, EOCD relocation, malformed input rejection. **Plus a mandatory end-to-end test** — a real `zip -s` set, merged, reopened through miniz, bytes compared. Synthetic-only tests passed while every extraction failed (disk-0 offsets ignored the stripped 4-byte marker); the fixture must use incompressible data or `zip -s` emits one volume and the test proves nothing.
 
 **6. Multipart confirm dialog & integration**
-- [ ] Gallery grid scan for volume sets on any file pick (`[Z]` archive or `[I]` file dialog). If a set detected, show confirm dialog listing volumes, total size, and gaps (flagged in error red). Gaps block import.
-- [ ] Picked paths through `platform::normalize_user_path` (invariant 6).
-- [ ] Route multi-volume archives to the appropriate assembly backend per `VolumeStyle`.
-- [ ] Tests: volume set discovery on file pick, confirm dialog rendering, gap blocking, wrong-volume rejection.
+- [x] `[Z]` pick scans siblings and runs `detect_volume_set`; a detected set opens `VolumeSetDialog` before anything is enqueued. A lone `photos.zip` with no siblings stays an ordinary archive. **Not wired to `[I]`** (plain file import) — a split archive is picked as an archive.
+- [x] Gaps block import: the dialog refuses to confirm and offers only Esc, with the missing volume named. Verified visually — complete set draws an accent border and offers Enter/Esc, gapped set draws a red border and offers Esc only.
+- [x] Picked paths through `platform::normalize_user_path` — applied inside `assemble_volume_set`, the boundary where listing-derived names enter (invariant 6).
+- [x] Routed per `VolumeStyle` by the WORKER (`enqueue_volume_set` + `process_archive_task`): Concatenate and SpannedZipMerge produce bytes for the recursive walker; FileOriented uses `import_archive_volumes` (libarchive `open_files`).
+- [x] **v1 limitation (owner-approved):** a multi-volume RAR imports FLAT — each volume carries its own header, so there is no single buffer for the bytes-based walker, and archives nested inside a split RAR are not recursed into.
+- [x] Tests (11): dialog decision logic incl. a stray Enter after close; the detection→summary→confirm seam over a real listing; and a queue-level import of a real `split -d` set arriving as one gallery. Dialog *rendering* checked by rendering both states offscreen through the real gfx primitives, not by unit test.
 
 **7. Gallery select-all toggle** ✅
 - [x] `SelectionModel::select_all(int count)` + `all_selected(int)`. `select_all(0)` leaves the selection alone (not a deselect request); `all_selected(0)` is false, or Ctrl+A on an empty gallery would clear forever.
@@ -70,7 +72,7 @@ Full design, including detailed tradeoffs and threat-model rationale:
 - [x] ROADMAP index row (landed with the planning PR #111).
 - [x] `scripts/gen.sh` run after each new module. **Note:** `osv_tests` enumerates `src/ui/*.cpp` individually in `premake5.lua`; a missing entry fails at LINK, not compile.
 - [x] `mem:module/ui` updated with the whole Phase 53 stack. `mem:vault_format` deliberately unchanged — **no `INDEX_VERSION` bump**, nothing about the container changed.
-- [ ] `mem:ui_spec` — pending the confirm dialog actually existing; `Ctrl+A` should be recorded when that lands.
+- [ ] `mem:ui_spec` — record `Ctrl+A` select-all and the multi-volume confirm dialog.
 
 ### Acceptance criterion
 
@@ -83,7 +85,7 @@ correctly and imported as flat archives; ZIP64 spanned is rejected with a messag
 `Ctrl+A` shortcut toggles all-selected on the current gallery's direct children,
 displayed in the `F1` help. All tests pass under `scripts/test.sh` and `--asan`.
 
-**Status:** 🔜 In progress — backend complete, UI outstanding.
+**Status:** 🔜 In progress — every planned task implemented; polish outstanding.
 
 Everything below the UI is implemented and tested: kind detection, nested planning,
 the depth-first walker + its five guards, real backends, queue integration, meta.json
@@ -91,13 +93,16 @@ at every level, volume-set detection, all three assembly routes, and the spanned
 merger. 1304 → 1438 tests, green under `scripts/test.sh`, `--asan` and `--tsan`.
 
 **Outstanding:**
-- Task 6's confirm dialog: rendering `VolumeSetSummary` and wiring `detect_volume_set`
-  into the file pick. The model and assembly are done and tested; this is drawing and
-  event handling.
 - Per-reason skip tallies on the Import Status screen (currently collapsed into one number).
 - Distinguishing an encrypted nested archive from an unreadable one.
+- An encrypted SPLIT set cannot be prompted for a password: encryption is not
+  probeable from a single volume, so that path fails rather than asking.
+- `ArchiveReader` re-scans from the start on every `extract()`; recursion multiplies
+  that per nesting level for 7z/rar. Unmeasured. Zip is unaffected (miniz seeks).
 
-**Not visually verified.** The GUI has not been driven through these paths — see
+**Partially visually verified.** The confirm dialog's two states were rendered offscreen
+through the real gfx primitives and inspected. The full pick→confirm→import flow has NOT
+been exercised in the running app — see
 `.claude/skills/running-the-app`: file dialogs come from the XDG portal, i.e. the real
 desktop session, so no import flow can be driven headlessly on this box. Needs a native run.
 
