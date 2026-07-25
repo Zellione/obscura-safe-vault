@@ -531,6 +531,7 @@ project "osv_tests"
         "src/ui/selectable.cpp",
         "src/ui/recursive_hooks.cpp",
         "src/ui/recursive_exec.cpp",
+        "src/ui/volume_import.cpp",
         "src/ui/spanned_zip.cpp",
         "src/ui/gallery_sort.cpp",
         "src/ui/gallery_view.cpp",
