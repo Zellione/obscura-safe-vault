@@ -223,6 +223,14 @@ bool VideoDecodeWorker::publish_decoded_frame(const Job& job)
     if (src->best_effort_timestamp != AV_NOPTS_VALUE)
         pts_seconds = static_cast<double>(src->best_effort_timestamp) * time_base_;
 
+    // Deinterlace if frame carries interlaced content.
+    if (should_deinterlace(src->flags)) {
+        if (const AVFrame* di = conv_.deinterlace(src)) {
+            src = di;  // deinterlaced; convert as normal below
+        }
+        // else: yadif not ready yet (EAGAIN) or failed -> fall through with original src
+    }
+
     std::optional<DecodedFrame> decoded =
         (src->format == AV_PIX_FMT_YUV420P || src->format == AV_PIX_FMT_NV12)
             ? std::optional<DecodedFrame>(FrameConverter::zero_copy(src, pts_seconds))

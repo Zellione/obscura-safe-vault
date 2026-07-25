@@ -7,6 +7,43 @@
 
 #include "media/frame_convert.h"
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+extern "C" {
+#include <libavutil/frame.h>
+}
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
+TEST(should_deinterlace_true_when_interlaced_flag_set)
+{
+    // AV_FRAME_FLAG_INTERLACED is (1 << 3) = 8
+    CHECK(media::should_deinterlace(AV_FRAME_FLAG_INTERLACED) == true);
+}
+
+TEST(should_deinterlace_false_when_no_flags)
+{
+    CHECK(media::should_deinterlace(0) == false);
+}
+
+TEST(should_deinterlace_false_when_other_flags_only)
+{
+    // Test with a different flag value (not the interlaced flag)
+    CHECK(media::should_deinterlace(4) == false);
+    CHECK(media::should_deinterlace(1) == false);
+}
+
+TEST(should_deinterlace_true_when_interlaced_with_other_flags)
+{
+    // Test interlaced flag set along with other flags
+    CHECK(media::should_deinterlace(AV_FRAME_FLAG_INTERLACED | 1) == true);
+    CHECK(media::should_deinterlace(AV_FRAME_FLAG_INTERLACED | 4) == true);
+}
+
 TEST(copy_owned_frame_i420_preserves_pixel_data_and_survives_source_mutation)
 {
     // Build a tiny synthetic I420 frame: 4x2 luma, 2x1 chroma planes.

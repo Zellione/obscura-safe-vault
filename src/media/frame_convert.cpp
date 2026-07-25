@@ -13,6 +13,9 @@
 extern "C" {
 #include <libavutil/frame.h>
 #include <libavutil/pixfmt.h>
+#include <libavfilter/avfilter.h>
+#include <libavfilter/buffersrc.h>
+#include <libavfilter/buffersink.h>
 }
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
@@ -21,6 +24,15 @@ extern "C" {
 #include <print>
 
 namespace media {
+
+bool should_deinterlace(int frame_flags) noexcept
+{
+    // frame_flags is an AVFrame::flags value; the interlaced bit is the one
+    // signal we act on. Takes an int (not the AVFrame) so callers/tests stay
+    // decoupled from FFmpeg types, but this .cpp is OSV_VENDORED_AV-only, so we
+    // reference the real macro rather than hardcoding its value.
+    return (frame_flags & AV_FRAME_FLAG_INTERLACED) != 0;
+}
 
 FrameConverter::~FrameConverter()
 {
@@ -31,6 +43,169 @@ void FrameConverter::reset()
 {
     if (sws_)  { sws_freeContext(sws_); sws_ = nullptr; }
     if (conv_) av_frame_free(&conv_);
+    if (filter_graph_) { avfilter_graph_free(&filter_graph_); }
+    if (deint_out_)    { av_frame_free(&deint_out_); }
+    buffersrc_       = nullptr;
+    buffersink_      = nullptr;
+    deint_width_     = 0;
+    deint_height_    = 0;
+    deint_format_    = -1;
+    deint_error_once_ = false;
+}
+
+const AVFrame* FrameConverter::deinterlace(const AVFrame* src)
+{
+    if (!src) return nullptr;
+
+    // Check if format/dimensions changed; rebuild graph if needed.
+    if (!filter_graph_ || deint_width_ != src->width || deint_height_ != src->height ||
+        deint_format_ != src->format) {
+        // Format change detected; free old graph and rebuild.
+        if (filter_graph_) { avfilter_graph_free(&filter_graph_); }
+        if (deint_out_)    { av_frame_free(&deint_out_); }
+        filter_graph_      = nullptr;
+        buffersrc_         = nullptr;
+        buffersink_        = nullptr;
+        deint_out_         = nullptr;
+        deint_width_       = 0;
+        deint_height_      = 0;
+        deint_format_      = -1;
+        deint_error_once_  = false;
+
+        // Build the filter graph: buffer -> yadif (mode=0) -> buffersink
+        filter_graph_ = avfilter_graph_alloc();
+        if (!filter_graph_) {
+            if (!deint_error_once_) {
+                std::println(stderr, "[FrameConverter] Failed to allocate filter graph");
+                deint_error_once_ = true;
+            }
+            return nullptr;
+        }
+
+        // Create buffer source.
+        AVFilterContext* buffersrc = nullptr;
+        std::array<char, 512> args_buf{};
+        // Format: width:height:format:time_base_num:time_base_den:sample_aspect_ratio.num:sample_aspect_ratio.den
+        // time_base can be 1/1 since we carry pts separately.
+        snprintf(args_buf.data(), args_buf.size(), "video_size=%dx%d:pix_fmt=%d:time_base=1/1:sar=%d/%d",
+                 src->width, src->height, src->format,
+                 src->sample_aspect_ratio.num ? src->sample_aspect_ratio.num : 1,
+                 src->sample_aspect_ratio.den ? src->sample_aspect_ratio.den : 1);
+        if (avfilter_graph_create_filter(&buffersrc, avfilter_get_by_name("buffer"), "in",
+                                         args_buf.data(), nullptr, filter_graph_) < 0) {
+            if (!deint_error_once_) {
+                std::println(stderr, "[FrameConverter] Failed to create buffer filter");
+                deint_error_once_ = true;
+            }
+            avfilter_graph_free(&filter_graph_);
+            filter_graph_ = nullptr;
+            return nullptr;
+        }
+
+        // Create yadif filter with mode=0 (send_frame: one output per input).
+        AVFilterContext* yadif = nullptr;
+        if (avfilter_graph_create_filter(&yadif, avfilter_get_by_name("yadif"), "yadif",
+                                         "mode=0", nullptr, filter_graph_) < 0) {
+            if (!deint_error_once_) {
+                std::println(stderr, "[FrameConverter] Failed to create yadif filter");
+                deint_error_once_ = true;
+            }
+            avfilter_graph_free(&filter_graph_);
+            filter_graph_ = nullptr;
+            return nullptr;
+        }
+
+        // Create buffersink.
+        AVFilterContext* buffersink = nullptr;
+        if (avfilter_graph_create_filter(&buffersink, avfilter_get_by_name("buffersink"),
+                                         "out", nullptr, nullptr, filter_graph_) < 0) {
+            if (!deint_error_once_) {
+                std::println(stderr, "[FrameConverter] Failed to create buffersink filter");
+                deint_error_once_ = true;
+            }
+            avfilter_graph_free(&filter_graph_);
+            filter_graph_ = nullptr;
+            return nullptr;
+        }
+
+        // Link: buffersrc -> yadif -> buffersink
+        if (avfilter_link(buffersrc, 0, yadif, 0) < 0) {
+            if (!deint_error_once_) {
+                std::println(stderr, "[FrameConverter] Failed to link buffersrc to yadif");
+                deint_error_once_ = true;
+            }
+            avfilter_graph_free(&filter_graph_);
+            filter_graph_ = nullptr;
+            return nullptr;
+        }
+        if (avfilter_link(yadif, 0, buffersink, 0) < 0) {
+            if (!deint_error_once_) {
+                std::println(stderr, "[FrameConverter] Failed to link yadif to buffersink");
+                deint_error_once_ = true;
+            }
+            avfilter_graph_free(&filter_graph_);
+            filter_graph_ = nullptr;
+            return nullptr;
+        }
+
+        // Configure graph.
+        if (avfilter_graph_config(filter_graph_, nullptr) < 0) {
+            if (!deint_error_once_) {
+                std::println(stderr, "[FrameConverter] Failed to configure filter graph");
+                deint_error_once_ = true;
+            }
+            avfilter_graph_free(&filter_graph_);
+            filter_graph_ = nullptr;
+            return nullptr;
+        }
+
+        buffersrc_   = buffersrc;
+        buffersink_  = buffersink;
+        deint_width_  = src->width;
+        deint_height_ = src->height;
+        deint_format_ = src->format;
+
+        // Allocate output frame.
+        deint_out_ = av_frame_alloc();
+        if (!deint_out_) {
+            if (!deint_error_once_) {
+                std::println(stderr, "[FrameConverter] Failed to allocate deinterlace output frame");
+                deint_error_once_ = true;
+            }
+            avfilter_graph_free(&filter_graph_);
+            filter_graph_ = nullptr;
+            buffersrc_    = nullptr;
+            buffersink_   = nullptr;
+            return nullptr;
+        }
+    }
+
+    // Send frame to buffer source.
+    // av_buffersrc_add_frame expects non-const AVFrame*, though it doesn't modify it.
+    if (av_buffersrc_add_frame(buffersrc_, const_cast<AVFrame*>(src)) < 0) {
+        if (!deint_error_once_) {
+            std::println(stderr, "[FrameConverter] Failed to add frame to buffersrc");
+            deint_error_once_ = true;
+        }
+        return nullptr;
+    }
+
+    // Get deinterlaced frame from buffersink.
+    int ret = av_buffersink_get_frame(buffersink_, deint_out_);
+    if (ret == AVERROR(EAGAIN)) {
+        // yadif needs the next frame before it can emit; return nullptr.
+        // The caller will show the original src once instead of dropping.
+        return nullptr;
+    }
+    if (ret < 0) {
+        if (!deint_error_once_) {
+            std::println(stderr, "[FrameConverter] av_buffersink_get_frame failed: {}", ret);
+            deint_error_once_ = true;
+        }
+        return nullptr;
+    }
+
+    return deint_out_;
 }
 
 DecodedFrame FrameConverter::zero_copy(const AVFrame* src, double pts_seconds)
