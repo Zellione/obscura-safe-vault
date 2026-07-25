@@ -141,6 +141,12 @@ void walk_one(Frame& f, const RecursiveHooks& hooks, RecursionBudget& budget,
 
     tally.skipped_unsupported += plan.skipped_unsupported;
 
+    // Grow the caller's running total as the tree is explored. Optional, so an
+    // unset hook is not the fatal-missing-hook case handled in walk_archive.
+    if (hooks.note_planned) {
+        hooks.note_planned(static_cast<int>(plan.placements.size()));
+    }
+
     for (const ZipPlacement& p : plan.placements) {
         if (hooks.cancelled()) return;
         crypto::SecureBytes payload;

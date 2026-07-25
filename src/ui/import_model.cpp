@@ -113,4 +113,17 @@ std::string import_lock_confirm_text(int pending_tasks)
     }
 }
 
+std::string format_task_progress(int done, int total, bool expanding)
+{
+    // Before the first archive has been listed the total is genuinely unknown;
+    // "12/0" reads as a defect, so show the count alone.
+    if (total <= 0) {
+        return expanding ? std::format("{} (expanding)", done) : std::to_string(done);
+    }
+    // The "+" says the denominator is a lower bound, which is why the bar can
+    // appear to move backwards as nested archives are discovered.
+    return expanding ? std::format("{}/{}+ (expanding)", done, total)
+                     : std::format("{}/{}", done, total);
+}
+
 } // namespace ui

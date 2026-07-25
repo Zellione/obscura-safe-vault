@@ -40,6 +40,10 @@ ZipImportOutcome import_archive_recursive(MediaSink&                   sink,
     // placed file so the existing bar moves; the growing-total + "expanding"
     // presentation is a separate piece of work.
     if (progress != nullptr) {
+        progress->expanding.store(true);
+        progress->total.store(0);
+        hooks.note_planned = [progress](int n) { progress->total.fetch_add(n); };
+
         auto place = hooks.place_media;
         hooks.place_media = [place, progress](std::string_view gallery, std::string_view filename,
                                               std::span<const uint8_t> data) {
@@ -50,6 +54,11 @@ ZipImportOutcome import_archive_recursive(MediaSink&                   sink,
     }
 
     const RecursiveTally tally = walk_archive(bytes, kind, new_gallery_name, hooks);
+    if (progress != nullptr) {
+        // The tree is fully explored: the total is final, so the bar stops
+        // being a lower bound.
+        progress->expanding.store(false);
+    }
 
     out.ok        = true;
     out.imported  = tally.media_placed;

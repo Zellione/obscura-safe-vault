@@ -128,6 +128,9 @@ struct RecursiveHooks {
     // top-level one AND every nested archive's, so a sub-gallery carries the
     // metadata of the archive it came from.
     std::function<bool(std::string_view, std::string_view)>                            tag_gallery;
+    // Called once per archive with how many media entries it plans, so a caller
+    // can grow a running total as the tree is discovered. Optional.
+    std::function<void(int)>                                                           note_planned;
     // Polled between entries so a queued import stays cancellable.
     std::function<bool()>                                                              cancelled;
 };

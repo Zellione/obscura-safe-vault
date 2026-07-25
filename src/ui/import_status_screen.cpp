@@ -25,7 +25,8 @@ std::string format_row_text(const ImportTaskInfo& task)
     using enum ImportTaskState;
     switch (task.state) {
         case Running:
-            return std::format("{} — {}/{}", task.display_name, task.done, task.total);
+            return std::format("{} — {}", task.display_name,
+                               format_task_progress(task.done, task.total, task.expanding));
         case Queued:
             return std::format("#{} {} → {}",
                              task.id & 0xFF, task.display_name,
@@ -61,7 +62,7 @@ void draw_running_row(gfx::Renderer& r, gfx::FontAtlas& font, const ImportTaskIn
     r.draw_round_rect(bar_fill, 2, ACCENT);
 
     // Text: name and "done/total"
-    const std::string prog_text = std::format("{}/{}", task.done, task.total);
+    const std::string prog_text = format_task_progress(task.done, task.total, task.expanding);
     const float name_width = W - OX - 14 - 100 - 20;
     const std::string display = fit_text(font, task.display_name, name_width);
     r.draw_text(font, OX + 14, ty, display, TEXT);
