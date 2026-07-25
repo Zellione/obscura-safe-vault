@@ -22,6 +22,9 @@
 
 namespace ui {
 
+// Defined in archive_import.h; only ever passed by const& from this header.
+struct ArchivePassword;
+
 struct ZipEntry;      // ui/zip_plan.h
 struct ZipPlacement;  // ui/zip_plan.h
 
@@ -153,6 +156,8 @@ private:
     // Task processing
     void process_files_task(Task& task);
     void process_archive_task(Task& task);
+    // Phase 53: assemble + import a multi-volume set (worker thread).
+    void process_volume_set_task(Task& task, StagingSink& sink, const ArchivePassword& pw);
     void process_folder_task(Task& task);
     // Read + stage one planned placement of a folder import. Extracted from
     // process_folder_task so that loop stays under the cognitive-complexity cap;
