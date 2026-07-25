@@ -44,4 +44,49 @@ std::string unique_gallery_name(std::string_view base, const std::vector<std::st
     return candidate;
 }
 
+RecursionBudget::RecursionBudget(RecursionLimits limits, uint64_t root_archive_bytes)
+    : limits_(limits), root_bytes_(root_archive_bytes)
+{
+}
+
+RecursionVerdict RecursionBudget::may_descend(int depth, uint64_t nested_bytes) const
+{
+    if (depth >= limits_.max_depth) {
+        return RecursionVerdict::DepthExceeded;
+    }
+    if (nested_seen_ >= limits_.max_nested_archives) {
+        return RecursionVerdict::CountExceeded;
+    }
+    if (total_expanded_ > limits_.max_total_expanded) {
+        return RecursionVerdict::TotalBytesExceeded;
+    }
+    if (live_bytes_ + nested_bytes > limits_.max_live_bytes) {
+        return RecursionVerdict::LiveBytesExceeded;
+    }
+    // Ratio is meaningless for a zero-byte root, and dividing by it would be a
+    // crash on a degenerate input. Compared by multiplication rather than
+    // division so a huge expansion cannot overflow the quotient.
+    if (root_bytes_ > 0 && total_expanded_ > limits_.max_expansion_ratio * root_bytes_) {
+        return RecursionVerdict::RatioExceeded;
+    }
+    return RecursionVerdict::Allow;
+}
+
+void RecursionBudget::enter(uint64_t nested_bytes)
+{
+    live_bytes_ += nested_bytes;
+    ++nested_seen_;
+}
+
+void RecursionBudget::leave(uint64_t nested_bytes)
+{
+    // Depth-first means this is symmetric with enter(); guard anyway so a
+    // mismatched pair cannot wrap the unsigned counter around to enormous.
+    live_bytes_ -= std::min(live_bytes_, nested_bytes);
+}
+
+void RecursionBudget::note_expanded(uint64_t bytes)
+{
+    total_expanded_ += bytes;
+}
 } // namespace ui
