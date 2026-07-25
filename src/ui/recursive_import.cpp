@@ -159,27 +159,29 @@ void apply_own_meta(const Frame& f, const RecursiveHooks& hooks,
                                      const RecursiveHooks& hooks, RecursionBudget& budget,
                                      RecursiveTally& tally, crypto::SecureBytes& child)
 {
+    using enum ArchiveKind;
+
     if (!hooks.extract_entry(f.bytes, f.kind, p.entry_index, child)) {
         ++tally.unreadable;
-        return ArchiveKind::None;
+        return None;
     }
     budget.note_expanded(child.size());
 
     // The name claimed an archive; the magic bytes get the final say.
     const ArchiveKind kind = detect_archive_kind(p.filename, child.as_span());
-    if (kind == ArchiveKind::None) {
+    if (kind == None) {
         ++tally.not_an_archive;
-        return ArchiveKind::None;
+        return None;
     }
 
     switch (budget.may_descend(f.depth, child.size())) {
         case RecursionVerdict::Allow: return kind;
         case RecursionVerdict::DepthExceeded:
             ++tally.depth_capped;
-            return ArchiveKind::None;
+            return None;
         default:
             ++tally.budget_stopped;
-            return ArchiveKind::None;
+            return None;
     }
 }
 

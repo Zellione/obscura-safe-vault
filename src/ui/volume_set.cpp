@@ -233,11 +233,12 @@ VolumeSet detect_volume_set(std::string_view picked, std::span<const std::string
         VolumeStyle style;
         Parser      parse;
     };
+    using enum VolumeStyle;
     const std::array<Candidate, 4> candidates{{
-        {.style = VolumeStyle::RarPart, .parse = &parse_rar_part},
-        {.style = VolumeStyle::SpannedZip, .parse = &parse_spanned_zip},
-        {.style = VolumeStyle::NumericSuffix, .parse = &parse_numeric},
-        {.style = VolumeStyle::RarOld, .parse = &parse_rar_old},
+        {.style = RarPart, .parse = &parse_rar_part},
+        {.style = SpannedZip, .parse = &parse_spanned_zip},
+        {.style = NumericSuffix, .parse = &parse_numeric},
+        {.style = RarOld, .parse = &parse_rar_old},
     }};
 
     for (const Candidate& c : candidates) {

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <optional>
 
 namespace ui {
 
@@ -55,6 +56,55 @@ constexpr uint8_t PK_ZIP64_EOCD[]      = {0x50, 0x4b, 0x06, 0x06};  // PK\x06\x0
 // Volumes >= 1 need no adjustment; volume_offsets already accounts for it.
 // Getting this wrong leaves a CD that enumerates perfectly while every
 // extraction fails.
+// One central-directory entry. Split out so the walk below has a single exit
+// rather than two nested breaks.
+enum class CdStep : uint8_t { Rewritten, EndOfEntries, Malformed };
+
+[[nodiscard]] CdStep rewrite_one_cd_entry(std::vector<uint8_t>& merged, size_t cd_absolute,
+                                          size_t cd_pos, uint32_t cd_size,
+                                          const std::vector<size_t>& volume_offsets,
+                                          size_t marker_size, size_t& consumed)
+{
+    if (std::memcmp(&merged[cd_absolute + cd_pos], PK_CD_ENTRY, 4) != 0) {
+        return CdStep::EndOfEntries;
+    }
+
+    const uint16_t filename_len = read_u16_le(merged.data(), cd_absolute + cd_pos + 28);
+    const uint16_t extra_len    = read_u16_le(merged.data(), cd_absolute + cd_pos + 30);
+    const uint16_t comment_len  = read_u16_le(merged.data(), cd_absolute + cd_pos + 32);
+    if (cd_pos + 46 + filename_len + extra_len + comment_len > cd_size) {
+        return CdStep::EndOfEntries;
+    }
+
+    const uint16_t disk_start   = read_u16_le(merged.data(), cd_absolute + cd_pos + 34);
+    const uint32_t local_offset = read_u32_le(merged.data(), cd_absolute + cd_pos + 42);
+    if (disk_start >= volume_offsets.size()) {
+        return CdStep::Malformed;
+    }
+    if (disk_start == 0 && static_cast<size_t>(local_offset) < marker_size) {
+        return CdStep::Malformed;
+    }
+
+    // Disk 0 must have the stripped marker subtracted — its stored offsets were
+    // measured from the ORIGINAL volume, which still had the 4 leading bytes.
+    // Volumes >= 1 need no adjustment; volume_offsets already accounts for it.
+    // Getting this wrong leaves a CD that enumerates perfectly while every
+    // extraction fails.
+    const size_t local_abs = volume_offsets[disk_start] + static_cast<size_t>(local_offset) -
+                             (disk_start == 0 ? marker_size : 0);
+    if (local_abs + 4 > merged.size()) {
+        return CdStep::Malformed;
+    }
+
+    write_u16_le(merged.data(), cd_absolute + cd_pos + 34, 0);
+    write_u32_le(merged.data(), cd_absolute + cd_pos + 42, static_cast<uint32_t>(local_abs));
+
+    consumed = 46 + filename_len + extra_len + comment_len;
+    return CdStep::Rewritten;
+}
+
+// Rewrite every central-directory entry so the merged buffer is a single-disk
+// archive: disk_number_start to 0, local-header offsets absolute.
 [[nodiscard]] bool rewrite_central_directory(std::vector<uint8_t>& merged, size_t cd_absolute,
                                              uint32_t cd_size,
                                              const std::vector<size_t>& volume_offsets,
@@ -62,38 +112,48 @@ constexpr uint8_t PK_ZIP64_EOCD[]      = {0x50, 0x4b, 0x06, 0x06};  // PK\x06\x0
 {
     size_t cd_pos = 0;
     while (cd_pos + 46 <= cd_size) {
-        if (std::memcmp(&merged[cd_absolute + cd_pos], PK_CD_ENTRY, 4) != 0) {
-            break;   // end of the entries
+        size_t       consumed = 0;
+        const CdStep step     = rewrite_one_cd_entry(merged, cd_absolute, cd_pos, cd_size,
+                                                     volume_offsets, marker_size, consumed);
+        if (step == CdStep::Malformed) {
+            return false;
         }
-
-        const uint16_t filename_len = read_u16_le(merged.data(), cd_absolute + cd_pos + 28);
-        const uint16_t extra_len    = read_u16_le(merged.data(), cd_absolute + cd_pos + 30);
-        const uint16_t comment_len  = read_u16_le(merged.data(), cd_absolute + cd_pos + 32);
-        if (cd_pos + 46 + filename_len + extra_len + comment_len > cd_size) {
+        if (step == CdStep::EndOfEntries) {
             break;
         }
-
-        const uint16_t disk_start   = read_u16_le(merged.data(), cd_absolute + cd_pos + 34);
-        const uint32_t local_offset = read_u32_le(merged.data(), cd_absolute + cd_pos + 42);
-        if (disk_start >= volume_offsets.size()) {
-            return false;
-        }
-        if (disk_start == 0 && static_cast<size_t>(local_offset) < marker_size) {
-            return false;
-        }
-
-        const size_t local_abs = volume_offsets[disk_start] + static_cast<size_t>(local_offset) -
-                                 (disk_start == 0 ? marker_size : 0);
-        if (local_abs + 4 > merged.size()) {
-            return false;
-        }
-
-        write_u16_le(merged.data(), cd_absolute + cd_pos + 34, 0);
-        write_u32_le(merged.data(), cd_absolute + cd_pos + 42, static_cast<uint32_t>(local_abs));
-
-        cd_pos += 46 + filename_len + extra_len + comment_len;
+        cd_pos += consumed;
     }
     return true;
+}
+
+// Zip64 is out of scope for v1; detect it so the merge refuses rather than
+// producing a subtly wrong archive.
+[[nodiscard]] bool has_zip64_markers(const std::vector<uint8_t>& merged)
+{
+    for (size_t i = 0; i + 4 <= merged.size(); ++i) {
+        if (std::memcmp(&merged[i], PK_ZIP64_LOCATOR, 4) == 0 ||
+            std::memcmp(&merged[i], PK_ZIP64_EOCD, 4) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// EOCD, searched backwards from the end within the 64 KiB a comment may span.
+[[nodiscard]] std::optional<size_t> find_eocd(const std::vector<uint8_t>& merged)
+{
+    if (merged.size() < 22) {
+        return std::nullopt;
+    }
+    const size_t search_start = merged.size() > 65557 ? merged.size() - 65557 : 0;
+    for (size_t i = merged.size() - 22; ; --i) {
+        if (std::memcmp(&merged[i], PK_EOCD, 4) == 0) {
+            return i;
+        }
+        if (i == search_start) {
+            return std::nullopt;
+        }
+    }
 }
 
 } // namespace
@@ -142,39 +202,17 @@ constexpr uint8_t PK_ZIP64_EOCD[]      = {0x50, 0x4b, 0x06, 0x06};  // PK\x06\x0
         merged.insert(merged.end(), vol_data, vol_data + volumes[i].size());
     }
 
-    // Step 3: Check for Zip64 signatures (reject if found)
-    for (size_t i = 0; i + 4 <= merged.size(); ++i) {
-        if (std::memcmp(&merged[i], PK_ZIP64_LOCATOR, 4) == 0 ||
-            std::memcmp(&merged[i], PK_ZIP64_EOCD, 4) == 0) {
-            return SpannedZipResult{
-                .merged = {}, .error = SpannedZipError::Zip64Unsupported};
-        }
+    // Step 3: Zip64 is unsupported in v1.
+    if (has_zip64_markers(merged)) {
+        return SpannedZipResult{.merged = {}, .error = SpannedZipError::Zip64Unsupported};
     }
 
-    // Step 4: Find EOCD signature from the end
-    if (merged.size() < 22) {
+    // Step 4: Locate the EOCD.
+    const std::optional<size_t> eocd = find_eocd(merged);
+    if (!eocd.has_value()) {
         return SpannedZipResult{.merged = {}, .error = SpannedZipError::Malformed};
     }
-
-    size_t search_start = 0;
-    if (merged.size() > 65557) {
-        search_start = merged.size() - 65557;
-    }
-
-    int eocd_pos = -1;
-    for (int i = static_cast<int>(merged.size()) - 22; i >= static_cast<int>(search_start);
-         --i) {
-        if (std::memcmp(&merged[i], PK_EOCD, 4) == 0) {
-            eocd_pos = i;
-            break;
-        }
-    }
-
-    if (eocd_pos < 0) {
-        return SpannedZipResult{.merged = {}, .error = SpannedZipError::Malformed};
-    }
-
-    const auto eocd_idx = static_cast<size_t>(eocd_pos);
+    const size_t eocd_idx = *eocd;
 
     // Step 5: Bounds check EOCD
     if (eocd_idx + 22 > merged.size()) {
