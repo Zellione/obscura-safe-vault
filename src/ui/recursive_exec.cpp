@@ -17,17 +17,28 @@ ZipImportOutcome import_archive_recursive(MediaSink&                   sink,
                                           ImportProgress*              progress,
                                           std::string_view             password)
 {
-    ZipImportOutcome out;
-
     std::vector<uint8_t> bytes;
     if (!read_whole_file(archive_path, bytes)) {
+        ZipImportOutcome out;
         out.error = "Could not read archive";
         return out;
     }
+    return import_archive_bytes_recursive(sink, bytes, archive_path.filename().string(),
+                                          new_gallery_name, sink_root, progress, password);
+}
+
+ZipImportOutcome import_archive_bytes_recursive(MediaSink& sink, std::span<const uint8_t> bytes,
+                                                std::string_view display_name,
+                                                std::string_view new_gallery_name,
+                                                std::string_view sink_root,
+                                                ImportProgress*  progress,
+                                                std::string_view password)
+{
+    ZipImportOutcome out;
 
     // The extension got us this far; the magic decides. A file whose name lies
     // must fail here rather than be handed to a backend that cannot read it.
-    const ArchiveKind kind = detect_archive_kind(archive_path.filename().string(), bytes);
+    const ArchiveKind kind = detect_archive_kind(display_name, bytes);
     if (kind == ArchiveKind::None) {
         out.error = "Not a recognised archive";
         return out;

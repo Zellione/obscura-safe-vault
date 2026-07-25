@@ -164,6 +164,36 @@ ZipImportOutcome import_archive(MediaSink&                   sink,
     return out;
 }
 
+ZipImportOutcome import_archive_volumes(MediaSink&                             sink,
+                                        std::span<const std::filesystem::path> volumes,
+                                        std::string_view                       new_gallery_name,
+                                        std::string_view                       sink_root,
+                                        ImportProgress*                        progress,
+                                        ArchivePassword                        pw)
+{
+    ZipImportOutcome out;
+    if (volumes.empty()) {
+        out.error = "No volumes to import";
+        return out;
+    }
+
+    ArchiveReader reader;
+    if (!reader.open_files(volumes, pw.password)) {
+        out.error = "Could not open the multi-volume archive";
+        return out;
+    }
+
+    ZipPlan plan = build_zip_plan(reader.entries(), "", new_gallery_name);
+    out.skipped  = plan.skipped_unsupported;
+
+    const std::string root_gallery(sink_root);
+    if (!create_galleries(sink, plan, root_gallery, out)) {
+        return out;
+    }
+    run_placements(sink, reader, plan, root_gallery, out, progress);
+    return out;
+}
+
 ZipImportOutcome import_archive_cbz(MediaSink&                   sink,
                                     const std::filesystem::path& archive_path,
                                     std::string_view             gallery_name,
@@ -214,6 +244,13 @@ ZipImportOutcome import_archive(MediaSink&, const std::filesystem::path&, std::s
 ZipImportOutcome import_archive_cbz(MediaSink&, const std::filesystem::path&, std::string_view,
                                     std::string_view,
                                     ImportProgress*, ArchivePassword)
+{
+    return unsupported();
+}
+
+ZipImportOutcome import_archive_volumes(MediaSink&, std::span<const std::filesystem::path>,
+                                        std::string_view, std::string_view, ImportProgress*,
+                                        ArchivePassword)
 {
     return unsupported();
 }

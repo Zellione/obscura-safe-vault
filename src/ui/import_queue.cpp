@@ -1,6 +1,10 @@
 #include "ui/import_queue.h"
 
 #include "ui/recursive_exec.h"
+#include "ui/spanned_zip.h"
+#include "ui/volume_import.h"
+
+#include <array>
 #include "ui/archive_import.h"
 #include "ui/folder_scan.h"
 #include "ui/media_sink.h"
@@ -407,6 +411,9 @@ uint64_t ImportQueue::enqueue_files(std::vector<std::filesystem::path> files,
         .dest_gallery = std::move(dest_gallery),
         .files = std::move(files),
         .archive_path = {},
+        .volumes = {},
+        .volume_style = VolumeStyle::None,
+        .volume_stem = {},
         .gallery_name = {},
         .password = {},
         .state = Queued,
@@ -440,6 +447,9 @@ uint64_t ImportQueue::enqueue_archive(std::filesystem::path archive,
         .dest_gallery = std::move(dest_gallery),
         .files = {},
         .archive_path = std::move(archive),
+        .volumes = {},
+        .volume_style = VolumeStyle::None,
+        .volume_stem = {},
         .gallery_name = std::move(gallery_name),
         .password = std::move(password),
         .state = Queued,
@@ -453,6 +463,44 @@ uint64_t ImportQueue::enqueue_archive(std::filesystem::path archive,
     tasks_.push_back(std::move(task));
     worker_cv_.notify_one();
 
+    return id;
+}
+
+uint64_t ImportQueue::enqueue_volume_set(std::vector<std::filesystem::path> volumes,
+                                        VolumeStyle style, std::string stem,
+                                        std::string dest_gallery, std::string gallery_name,
+                                        ImportTaskKind kind, crypto::SecureBytes password)
+{
+    using enum ImportTaskState;
+    std::lock_guard lock(mu_);
+
+    const uint64_t id = next_task_id_++;
+
+    // Display name is the set's first volume; the status row should read like
+    // the thing the user picked.
+    std::filesystem::path first = volumes.empty() ? std::filesystem::path{} : volumes.front();
+
+    Task task{
+        .id = id,
+        .kind = kind,
+        .display_name = first.filename().string(),
+        .dest_gallery = std::move(dest_gallery),
+        .files = {},
+        .archive_path = first,
+        .volumes = std::move(volumes),
+        .volume_style = style,
+        .volume_stem = std::move(stem),
+        .gallery_name = std::move(gallery_name),
+        .password = std::move(password),
+        .state = Queued,
+        .imported = 0,
+        .skipped = 0,
+        .error = {},
+        .progress = std::make_shared<vault::OpProgress>(),
+    };
+
+    tasks_.push_back(std::move(task));
+    worker_cv_.notify_one();
     return id;
 }
 
@@ -470,6 +518,9 @@ uint64_t ImportQueue::enqueue_folder(std::filesystem::path root, std::string des
         .dest_gallery = std::move(dest_gallery),
         .files = {},
         .archive_path = std::move(root),
+        .volumes = {},
+        .volume_style = VolumeStyle::None,
+        .volume_stem = {},
         .gallery_name = std::move(gallery_name),
         .password = {},
         .state = Queued,
@@ -788,6 +839,9 @@ void ImportQueue::worker_loop()
         std::string task_gallery_name;
         std::string task_dest_gallery;
         std::shared_ptr<vault::OpProgress> task_progress;
+        std::vector<std::filesystem::path> task_volumes;
+        VolumeStyle                        task_volume_style = VolumeStyle::None;
+        std::string                        task_volume_stem;
 
         {
             std::unique_lock lock(mu_);
@@ -807,6 +861,17 @@ void ImportQueue::worker_loop()
                                    task_gallery_name, task_dest_gallery, task_progress)) {
                 continue;  // No task found, loop again
             }
+            // Phase 53: the volume list must ride along, or a multi-volume task
+            // reaches the worker with nothing to assemble and silently imports
+            // its first volume as if it were a whole archive.
+            for (const Task& t : tasks_) {
+                if (t.id == task_id) {
+                    task_volumes      = t.volumes;
+                    task_volume_style = t.volume_style;
+                    task_volume_stem  = t.volume_stem;
+                    break;
+                }
+            }
         }  // Lock released here
 
         // Process the task using copied data (no lock held)
@@ -817,6 +882,9 @@ void ImportQueue::worker_loop()
             .dest_gallery = task_dest_gallery,
             .files = std::move(task_files),
             .archive_path = std::move(task_archive_path),
+            .volumes = std::move(task_volumes),
+            .volume_style = task_volume_style,
+            .volume_stem = std::move(task_volume_stem),
             .gallery_name = std::move(task_gallery_name),
             .password = {},
             .state = ImportTaskState::Running,
@@ -977,6 +1045,81 @@ void ImportQueue::process_files_task(Task& task)
     }
 }
 
+namespace {
+
+// Merge joined spanned-ZIP volumes; they still carry per-disk offsets after a
+// plain concatenation. Separated so process_volume_set_task does not nest.
+[[nodiscard]] bool merge_spanned_in_place(std::vector<uint8_t>& bytes)
+{
+    const std::span<const uint8_t>                whole{bytes};
+    const std::array<std::span<const uint8_t>, 1> one{whole};
+    const auto                                    merged = merge_spanned_zip(one);
+    if (merged.error != SpannedZipError::None) {
+        return false;
+    }
+    bytes = merged.merged;
+    return true;
+}
+
+} // namespace
+
+// Assemble a detected multi-volume set and import it as ONE archive. Runs on
+// the worker thread: a split set can be many GB and Phase 50 exists so the
+// vault stays browsable during an import.
+void ImportQueue::process_volume_set_task(Task& task, StagingSink& sink,
+                                         const ArchivePassword& pw) const
+{
+    using enum ImportTaskState;
+
+    VolumeSet set;
+    set.style = task.volume_style;
+    set.volumes.reserve(task.volumes.size());
+    for (const auto& v : task.volumes) {
+        set.volumes.push_back(v.filename().string());
+    }
+
+    const auto assembled = assemble_volume_set(set, task.volumes.front().parent_path());
+    if (!assembled.ok()) {
+        task.password.wipe();
+        task.state = Failed;
+        task.error = assembled.error;
+        return;
+    }
+
+    ZipImportOutcome outcome;
+    if (assembled.assembly == VolumeAssembly::FileOriented) {
+        // Each RAR volume carries its own header, so libarchive must open the
+        // files itself — there is no single buffer for the bytes-based walker.
+        // FLAT by design: archives nested inside a split RAR are not recursed
+        // into (v1 limitation).
+        outcome = import_archive_volumes(sink, assembled.paths, task.gallery_name, "",
+                                         task.progress.get(), pw);
+    } else {
+        std::vector<uint8_t> bytes = assembled.bytes;
+        if (assembled.assembly == VolumeAssembly::SpannedZipMerge &&
+            !merge_spanned_in_place(bytes)) {
+            task.password.wipe();
+            task.state = Failed;
+            task.error = "Could not merge the spanned ZIP volumes";
+            return;
+        }
+        // The KIND comes from the set's stem: a volume filename like
+        // "whole.zip.00" has the extension ".00" and is not an archive.
+        outcome = import_archive_bytes_recursive(sink, bytes, task.volume_stem, task.gallery_name,
+                                                 "", task.progress.get(), pw.password);
+    }
+
+    task.password.wipe();
+    if (!outcome.ok && !outcome.cancelled) {
+        task.state = Failed;
+        task.error = outcome.error;
+    } else if (outcome.cancelled) {
+        task.state = Cancelled;
+    }
+    task.imported = outcome.imported;
+    task.skipped  = outcome.skipped;
+}
+
 void ImportQueue::process_archive_task(Task& task)
 {
     using enum ImportTaskState;
@@ -992,6 +1135,11 @@ void ImportQueue::process_archive_task(Task& task)
     }
 
     ZipImportOutcome outcome;
+
+    if (!task.volumes.empty()) {
+        process_volume_set_task(task, sink, pw);
+        return;
+    }
 
     // Route by kind
     // Phase 53: zip/7z/rar/tar recurse into nested archives, each becoming its

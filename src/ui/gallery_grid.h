@@ -12,6 +12,7 @@
 #include "image/decode_worker.h"
 #include "ui/combine_dialog.h"
 #include "ui/consent_dialog.h"
+#include "ui/volume_set_dialog.h"
 #include "ui/delete_summary.h"
 #include "ui/detail_panel.h"
 #include "ui/file_op_job.h"
@@ -128,6 +129,7 @@ void toggle_select();          // toggle the current item in the export selectio
     void do_zip_import(const std::filesystem::path& zip_path);
     void pump_zip_import();        // poll the zip file dialog while transfer is not active
     void process_next_queued_zip_import();  // Phase 51 Task 14: process next encrypted archive from bulk pick
+    void continue_volume_set_naming();   // after the multi-volume confirm
     void handle_single_archive_for_naming(const std::filesystem::path& zp);
     void handle_multiple_archives_enqueue(const std::vector<std::string>& paths);
     void pump_folder_import();     // poll the folder dialog while transfer is not active (Phase 51)
@@ -196,6 +198,8 @@ void toggle_select();          // toggle the current item in the export selectio
     NavModel                nav_;
     SelectionModel          sel_;
     ConsentDialog           consent_;
+    // Phase 53: confirms importing a detected multi-volume set.
+    VolumeSetDialog         volume_dialog_;
     SearchOverlay           search_;
     TagEditor               tag_editor_;
     QuickSwitch             quick_switch_;   // declared before transfer_ so it copies
@@ -234,6 +238,11 @@ void toggle_select();          // toggle the current item in the export selectio
         struct QueuedArchive { std::filesystem::path path; std::string gallery_name;
                                bool cbz; bool archive_backend; bool needs_password; };
         std::vector<QueuedArchive> queued_archives;
+        // Phase 53: set when the picked file turned out to be one volume of a
+        // multi-volume archive. Non-None style => do_zip_import enqueues the
+        // whole set rather than the single picked file.
+        VolumeSet             volume_set;
+        std::vector<std::filesystem::path> volume_paths;   // in set order
     };
     struct PendingFolder {
         std::filesystem::path path;
