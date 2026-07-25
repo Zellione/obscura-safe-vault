@@ -1,6 +1,29 @@
-#ifdef OSV_VENDORED_AV
-
 #include "media/video_decoder.h"
+
+#include <cstdint>
+
+namespace media {
+
+// Apply a pixel sample-aspect-ratio to coded dimensions, giving display dimensions.
+// Uses 64-bit arithmetic to avoid overflow, rounds to nearest.
+std::pair<int, int> display_dims(int coded_w, int coded_h, int sar_num, int sar_den) noexcept
+{
+    // Unknown SAR (non-positive values) means identity
+    if (sar_num <= 0 || sar_den <= 0) {
+        return {coded_w, coded_h};
+    }
+
+    // Apply SAR to width: round(coded_w * sar_num / sar_den)
+    // Use 64-bit to avoid overflow, then round to nearest
+    const int64_t w64 = (static_cast<int64_t>(coded_w) * sar_num + sar_den / 2) / sar_den;
+    const int display_w = static_cast<int>(w64);
+
+    return {display_w, coded_h};
+}
+
+}  // namespace media
+
+#ifdef OSV_VENDORED_AV
 
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -153,6 +176,11 @@ bool VideoDecoder::open(AVIOContext* pb)
     height_           = codec_ctx_->height;
     time_base_        = av_q2d(stream->time_base);
     stream_time_base_ = stream->time_base;
+
+    // Read sample aspect ratio (SAR) for anamorphic video display correction
+    AVRational sar = av_guess_sample_aspect_ratio(fmt_, const_cast<AVStream*>(stream), nullptr);
+    sar_num_ = (sar.num > 0 && sar.den > 0) ? sar.num : 1;
+    sar_den_ = (sar.num > 0 && sar.den > 0) ? sar.den : 1;
 
     // Duration in microseconds: prefer fmt_->duration (AV_TIME_BASE units = µs).
     if (fmt_->duration > 0 && fmt_->duration != AV_NOPTS_VALUE) {

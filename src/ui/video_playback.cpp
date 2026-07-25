@@ -611,12 +611,11 @@ struct VideoPlayback::Impl {
 
         rr.draw_rect(vid, gfx::theme::IMG_BG);
         if (SDL_Texture* tex = yuv_.texture()) {
-            float tw = 0.0f;
-            float th = 0.0f;
-            SDL_GetTextureSize(tex, &tw, &th);
-            const float s = fit_zoom(tw, th, vid.w, vid.h);
-            const float w = tw * s;
-            const float h = th * s;
+            const auto [dw, dh] = media::display_dims(decoder_.width(), decoder_.height(),
+                                                      decoder_.sar_num(), decoder_.sar_den());
+            const float s = fit_zoom(static_cast<float>(dw), static_cast<float>(dh), vid.w, vid.h);
+            const float w = static_cast<float>(dw) * s;
+            const float h = static_cast<float>(dh) * s;
             rr.draw_image(tex, {vid.x + (vid.w - w) * 0.5f, vid.y + (vid.h - h) * 0.5f, w, h});
         }
 

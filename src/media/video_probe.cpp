@@ -35,8 +35,9 @@ bool probe_video(std::span<const uint8_t> data, VideoProbeResult& out)
 
     // FFmpeg opened successfully; fill in the metadata.
     out.codec       = decoder.codec();
-    out.width       = decoder.width();
-    out.height      = decoder.height();
+    const auto [dw, dh] = display_dims(decoder.width(), decoder.height(), decoder.sar_num(), decoder.sar_den());
+    out.width       = static_cast<uint32_t>(dw);
+    out.height      = static_cast<uint32_t>(dh);
     out.duration_us = decoder.duration_us();
 
     // Generate the poster (best effort).

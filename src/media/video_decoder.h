@@ -1,5 +1,7 @@
 #pragma once
 
+#include <utility>
+
 #ifdef OSV_VENDORED_AV
 
 #include <optional>
@@ -35,6 +37,11 @@ struct AVPacket;
 struct SwsContext;
 
 namespace media {
+
+// Apply a pixel sample-aspect-ratio to coded dimensions, giving display dimensions.
+// SAR is pixel width:height; it scales the LUMA WIDTH (height unchanged), rounded to
+// nearest. A non-positive or zero SAR (num<=0 || den<=0) means "unknown" -> identity.
+[[nodiscard]] std::pair<int, int> display_dims(int coded_w, int coded_h, int sar_num, int sar_den) noexcept;
 
 // Maps an FFmpeg AVCodecID (passed as int to keep the header FFmpeg-free) to the
 // stored VideoCodec, or nullopt if this app does not accept the codec.
@@ -101,6 +108,8 @@ public:
     int height() const noexcept { return height_; }
     uint64_t duration_us() const noexcept { return duration_us_; }
     vault::VideoCodec codec() const noexcept { return codec_; }
+    int sar_num() const noexcept { return sar_num_; }
+    int sar_den() const noexcept { return sar_den_; }
 
     // The video stream's codec parameters, for opening an independent decode
     // context elsewhere (VideoDecodeWorker's own AVCodecContext). Valid only
@@ -152,6 +161,8 @@ private:
     AVRational       stream_time_base_   = {0, 1};  // raw stream time base for seek
     bool             flushed_            = false;   // Track if we've sent the flush packet
     double           pending_seek_target_ = -1.0;   // Target PTS for seek decode-forward
+    int              sar_num_            = 1;       // Sample aspect ratio numerator
+    int              sar_den_            = 1;       // Sample aspect ratio denominator
 
     // Audio support
     AudioDecoder                audio_dec_;           // audio codec context
