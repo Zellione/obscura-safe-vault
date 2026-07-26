@@ -15,6 +15,7 @@
 
 #include <fstream>
 
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -221,4 +222,22 @@ TEST(recursive_hooks_tag_a_nested_gallery_from_its_own_meta_json)
     CHECK(has_inner);
 
     ziptest::cleanup_dir(dir);
+}
+
+// --- Finding #1: the import password must live in a wiping buffer, never a
+// plain std::string that leaks the plaintext into freed heap on destruction.
+
+TEST(make_secure_password_copies_the_password_bytes)
+{
+    const ui::SecurePassword pw = ui::make_secure_password("hunter2");
+    REQUIRE(pw != nullptr);
+    CHECK_EQ(pw->size(), 7u);
+    CHECK(std::memcmp(pw->data(), "hunter2", 7) == 0);
+}
+
+TEST(make_secure_password_of_empty_is_non_null_and_empty)
+{
+    const ui::SecurePassword pw = ui::make_secure_password("");
+    REQUIRE(pw != nullptr);
+    CHECK_EQ(pw->size(), 0u);
 }
