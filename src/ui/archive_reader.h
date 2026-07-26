@@ -12,6 +12,8 @@
 #include <string_view>
 #include <vector>
 
+struct archive;  // libarchive opaque handle (full type only in the .cpp)
+
 namespace ui {
 
 // Thin wrapper over libarchive's streaming read API (Phase 34): read-only
@@ -77,7 +79,20 @@ public:
     // claiming an absurd size can't drive an oversized allocation attempt.
     static constexpr uint64_t MAX_ENTRY_BYTES = 4ULL * 1024 * 1024 * 1024;  // 4 GiB
 
+    // Cap on the number of entries enumerated from one archive. libarchive
+    // streams entries with no up-front count, so a hostile archive can declare
+    // millions of (even empty) entries and drive `entries_` to exhaust memory.
+    // Far above any real gallery archive (tens to a few hundred entries); a
+    // count past it means the archive is hostile/corrupt, so open() fails closed.
+    static constexpr size_t MAX_ENTRIES = 100000;
+
 private:
+    // Forward-scan the opened stream `a` into entries_, enforcing MAX_ENTRIES.
+    // Returns false (having logged) on a fatal header error or once the cap is
+    // exceeded; the caller frees `a` and clears its own state. Shared by
+    // open() and open_files() so the cap can't drift between the two.
+    [[nodiscard]] bool scan_entries(struct archive* a);
+
     std::vector<uint8_t>  data_;
     std::vector<ZipEntry> entries_;
     // Non-empty (with a trailing NUL byte, since SecureBytes zero-initialises
