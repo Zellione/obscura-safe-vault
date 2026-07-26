@@ -16,6 +16,9 @@
 #else
 #  include <fcntl.h>
 #  include <unistd.h>
+#  if defined(__linux__)
+#    include <linux/falloc.h>  // FALLOC_FL_PUNCH_HOLE / FALLOC_FL_KEEP_SIZE
+#  endif
 #endif
 
 namespace vault::fileutil {
@@ -61,6 +64,52 @@ namespace vault::fileutil {
 #endif
     out_size = static_cast<uint64_t>(st.st_size);
     return true;
+}
+
+// Report the file's ALLOCATED size (physical blocks actually on disk), which
+// differs from file_size() once a file is sparse. Used to measure how much disk
+// in-place hole-punching actually reclaimed. POSIX: st_blocks is in 512-byte
+// units by definition. Windows has no cheap portable equivalent, so it falls
+// back to the logical size (hole-punching is a no-op there anyway).
+[[nodiscard]] inline bool file_allocated_bytes(std::FILE* fp, uint64_t& out_size) noexcept
+{
+#if defined(_WIN32)
+    return file_size(fp, out_size);
+#else
+    struct stat st{};
+    if (::fstat(::fileno(fp), &st) != 0 || st.st_blocks < 0) {
+        return false;
+    }
+    out_size = static_cast<uint64_t>(st.st_blocks) * 512U;
+    return true;
+#endif
+}
+
+// Deallocate the file blocks backing [offset, offset+len), leaving a hole: the
+// range reads back as zeros and the freed blocks return to the filesystem, but
+// the file's logical size is unchanged (FALLOC_FL_KEEP_SIZE), so every byte
+// offset outside the hole stays put. This is how the vault reclaims orphaned
+// chunk space IN PLACE — no temp copy, no offset rewrite, so no transient
+// doubling of disk use. Only whole filesystem blocks fully inside the range are
+// freed; partial blocks at the edges are merely zeroed, never the live data
+// outside the range. Returns false (a harmless no-op) on platforms or
+// filesystems without hole-punch support. Linux only for now.
+[[nodiscard]] inline bool punch_hole(std::FILE* fp, uint64_t offset, uint64_t len) noexcept
+{
+    if (len == 0) {
+        return false;
+    }
+#if defined(__linux__)
+    if (std::fflush(fp) != 0) {  // flush stdio so the fd sees the bytes
+        return false;
+    }
+    return ::fallocate(::fileno(fp), FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
+                       static_cast<off_t>(offset), static_cast<off_t>(len)) == 0;
+#else
+    (void)fp;
+    (void)offset;
+    return false;
+#endif
 }
 
 // --- fault injection (crash-safety tests) ---------------------------------

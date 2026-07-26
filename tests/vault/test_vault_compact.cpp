@@ -75,6 +75,40 @@ static uint64_t size_on_disk(const fs::path& p)
     return ec ? 0 : static_cast<uint64_t>(s);
 }
 
+// Physical (allocated) size of a file by path: st_blocks is in 512-byte units,
+// so a sparse file (post hole-punch) reports less here than size_on_disk.
+static uint64_t allocated_on_disk(const fs::path& p)
+{
+#if defined(_WIN32)
+    return size_on_disk(p);
+#else
+    struct stat st{};
+    if (::stat(p.string().c_str(), &st) != 0 || st.st_blocks < 0) {
+        return 0;
+    }
+    return static_cast<uint64_t>(st.st_blocks) * 512U;
+#endif
+}
+
+// Whether the temp filesystem actually supports hole punching, so physical
+// (block-accounting) assertions are only made where a hole can be punched.
+static bool punch_supported()
+{
+    const auto p = fs::temp_directory_path() / "osv_punch_probe.bin";
+    std::FILE* fp = std::fopen(p.string().c_str(), "w+b");
+    if (fp == nullptr) {
+        return false;
+    }
+    const std::vector<uint8_t> buf(256 * 1024, 0x5A);
+    (void)std::fwrite(buf.data(), 1, buf.size(), fp);
+    (void)std::fflush(fp);
+    const bool ok = vault::fileutil::punch_hole(fp, 64 * 1024, 128 * 1024);
+    std::fclose(fp);
+    std::error_code ec;
+    fs::remove(p, ec);
+    return ok;
+}
+
 TEST(wasted_bytes_tracks_orphaned_chunks)
 {
     TempVault tv("waste");
@@ -166,9 +200,9 @@ TEST(compact_preserves_structure_thumbnails_and_survives_reopen)
 
 // Deleting an image auto-compacts once the waste passes the threshold
 // (>= AUTO_COMPACT_MIN_WASTE and >= a quarter of the file).
-TEST(remove_image_auto_compacts_past_waste_threshold)
+TEST(remove_image_auto_reclaims_past_waste_threshold)
 {
-    TempVault tv("autocompact");
+    TempVault tv("autoreclaim");
     vault::Vault v;
     REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
             == vault::VaultResult::Ok);
@@ -177,12 +211,22 @@ TEST(remove_image_auto_compacts_past_waste_threshold)
     REQUIRE(v.add_image("", random_payload(big), "gone.bin") == vault::VaultResult::Ok);
     REQUIRE(v.add_image("", random_payload(2000), "keep.bin") == vault::VaultResult::Ok);
 
-    const uint64_t size_before = size_on_disk(tv.path);
+    const uint64_t alloc_before = allocated_on_disk(tv.path);
     REQUIRE(v.remove_image("", "gone.bin") == vault::VaultResult::Ok);
 
-    CHECK_EQ(v.wasted_bytes(), 0u);                        // compaction ran
-    CHECK_TRUE(size_on_disk(tv.path) + big <= size_before);  // chunk reclaimed
+    // Past the threshold the delete auto-reclaims the orphaned chunk's disk
+    // blocks — in place via hole punching on Linux, via a full compact()
+    // rewrite on platforms without hole-punch.
+#if defined(__linux__)
+    const bool reclaims = punch_supported();
+#else
+    const bool reclaims = true;
+#endif
+    if (reclaims) {
+        CHECK_TRUE(allocated_on_disk(tv.path) + big <= alloc_before);
+    }
 
+    // The surviving image is untouched and still decrypts.
     auto kids = v.list("");
     REQUIRE(kids.size() == 1);
     crypto::SecureBytes out;
@@ -339,9 +383,10 @@ TEST(compact_preserves_both_image_and_video_when_deleting_image)
         REQUIRE(v.add_video("mixed", video_bytes, "v.mp4", /*chunk_size=*/4096)
                 == vault::VaultResult::Ok);
 
-        // This delete should trigger auto-compact (waste exceeds threshold).
+        // This delete's waste exceeds the threshold, so it auto-reclaims. The
+        // point of this test is that the *video* chunks survive that reclamation
+        // untouched — reclaim must free only the deleted image's dead spans.
         REQUIRE(v.remove_image("mixed", "big.bin") == vault::VaultResult::Ok);
-        CHECK_EQ(v.wasted_bytes(), 0u);  // auto-compact ran
 
         // Verify both remain: video should still be there.
         auto kids = v.list("mixed");
@@ -584,4 +629,87 @@ TEST(compact_removes_old_file_after_success)
     crypto::SecureBytes out;
     REQUIRE(v.read_image(*kids[0], out) == vault::VaultResult::Ok);
     CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(keep));
+}
+
+// --- in-place hole-punch reclamation (Vault::reclaim) -------------------------
+// Unlike compact(), reclaim() punches holes in orphaned chunk spans in place:
+// no temp copy, offsets unchanged, index untouched. It reclaims physical disk
+// without the transient ~2x file-size spike compact() needs.
+
+TEST(reclaim_preserves_remaining_images_and_survives_reopen)
+{
+    TempVault tv("reclaim_preserve");
+    const std::vector<uint8_t> keep = random_payload(40 * 1024);
+
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+                == vault::VaultResult::Ok);
+        // keep is wedged BETWEEN two doomed images so reclaim must punch holes
+        // on both sides without disturbing the live chunk in the middle.
+        REQUIRE(v.add_image("", random_payload(100 * 1024), "gone1.bin") == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("", keep, "keep.bin")                        == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("", random_payload(100 * 1024), "gone2.bin") == vault::VaultResult::Ok);
+        REQUIRE(v.remove_image("", "gone1.bin") == vault::VaultResult::Ok);
+        REQUIRE(v.remove_image("", "gone2.bin") == vault::VaultResult::Ok);
+
+        REQUIRE(v.reclaim() == vault::VaultResult::Ok);
+
+        // The surviving image still decrypts correctly, offsets unchanged.
+        const auto kids = v.list("");
+        REQUIRE(kids.size() == 1);
+        CHECK_EQ(kids[0]->name, std::string("keep.bin"));
+        crypto::SecureBytes out;
+        REQUIRE(v.read_image(*kids[0], out) == vault::VaultResult::Ok);
+        CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(keep));
+    }
+
+    // Reopen from disk: reclaim must not have corrupted the header/index.
+    vault::Vault v2;
+    REQUIRE(vault::Vault::open(tv.str(), v2) == vault::VaultResult::Ok);
+    REQUIRE(v2.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+    const auto kids = v2.list("");
+    REQUIRE(kids.size() == 1);
+    crypto::SecureBytes img;
+    REQUIRE(v2.read_image(*kids[0], img) == vault::VaultResult::Ok);
+    CHECK_BYTES_EQ(img.as_span(), std::span<const uint8_t>(keep));
+
+    // The vault is still fully usable after in-place reclamation.
+    REQUIRE(v2.add_image("", pattern(1000, 9), "new.bin") == vault::VaultResult::Ok);
+    CHECK_EQ(v2.list("").size(), 2u);
+}
+
+TEST(reclaim_releases_disk_blocks_without_shrinking_the_file)
+{
+    if (!punch_supported()) return;  // no hole-punch on this fs: nothing to assert
+
+    TempVault tv("reclaim_blocks");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", random_payload(512 * 1024), "gone.bin") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", random_payload(32 * 1024),  "keep.bin") == vault::VaultResult::Ok);
+
+    // Physical baseline while both images are densely allocated.
+    const uint64_t alloc_dense = allocated_on_disk(tv.path);
+
+    REQUIRE(v.remove_image("", "gone.bin") == vault::VaultResult::Ok);
+    // The delete appends a fresh index blob (logical size may grow); capture the
+    // logical size AFTER it so we can prove reclaim() leaves that length alone.
+    const uint64_t logical_pre = size_on_disk(tv.path);
+
+    REQUIRE(v.reclaim() == vault::VaultResult::Ok);  // idempotent even if the delete auto-reclaimed
+
+    // Physical allocation has dropped by roughly the orphaned 512 KiB chunk...
+    CHECK_TRUE(allocated_on_disk(tv.path) + 256 * 1024 <= alloc_dense);
+    // ...while reclaim() left the file's LOGICAL length exactly where it was —
+    // offsets stay put (it punches holes, never truncates or copies). This is
+    // precisely what avoids compact()'s transient second copy.
+    CHECK_EQ(size_on_disk(tv.path), logical_pre);
+}
+
+TEST(reclaim_on_a_locked_vault_reports_locked)
+{
+    vault::Vault v;
+    CHECK_EQ(v.reclaim(), vault::VaultResult::Locked);
 }

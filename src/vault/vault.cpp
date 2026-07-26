@@ -940,18 +940,12 @@ VaultResult Vault::remove_image(std::string_view gallery_path, std::string_view 
 
     for (auto it = g->children.begin(); it != g->children.end(); ++it) {
         if (it->is_media() && it->name == filename) {  // remove image or video
-            g->children.erase(it);  // chunk(s) are orphaned until compaction
+            g->children.erase(it);  // chunk(s) are orphaned until reclamation
             if (const VaultResult r = commit_index(); r != Ok) return r;
 
             // Best-effort space reclamation: the remove itself already
-            // succeeded, so a failed compaction only leaves waste behind.
-            uint64_t size = 0;
-            if (const uint64_t waste = wasted_bytes();
-                waste >= AUTO_COMPACT_MIN_WASTE &&
-                fileutil::file_size(fp_, size) &&
-                waste * AUTO_COMPACT_WASTE_RATIO >= size) {
-                (void)compact();
-            }
+            // succeeded, so a failed reclaim only leaves waste behind.
+            auto_reclaim_space();
             return Ok;
         }
     }
@@ -976,17 +970,10 @@ VaultResult Vault::remove_gallery(std::string_view gallery_path)
     const std::string_view name = segments.back();
     for (auto it = parent->children.begin(); it != parent->children.end(); ++it) {
         if (it->is_gallery() && it->name == name) {
-            parent->children.erase(it);  // whole subtree's chunks orphaned until compaction
+            parent->children.erase(it);  // whole subtree's chunks orphaned until reclamation
             if (const VaultResult r = commit_index(); r != Ok) return r;
 
-            // Best-effort reclamation (same gate as remove_image).
-            uint64_t size = 0;
-            if (const uint64_t waste = wasted_bytes();
-                waste >= AUTO_COMPACT_MIN_WASTE &&
-                fileutil::file_size(fp_, size) &&
-                waste * AUTO_COMPACT_WASTE_RATIO >= size) {
-                (void)compact();
-            }
+            auto_reclaim_space();  // best-effort (same gate as remove_image)
             return Ok;
         }
     }
@@ -1490,6 +1477,93 @@ VaultResult Vault::compact(OpProgress* progress)
     header_ = h;
     root_   = std::move(new_root);
     return Ok;
+}
+
+VaultResult Vault::reclaim()
+{
+    using enum VaultResult;
+    if (!unlocked_ || !fp_) return Locked;
+
+    // Quiesce the commit lane first: it appends index blobs and flips
+    // active_slot from another thread, and punching a region it is about to make
+    // live would be catastrophic. flush() drains all pending + in-flight commits.
+    if (commit_router_ && commit_router_->running() && !commit_router_->flush()) {
+        return IoError;
+    }
+
+    // Hold write_mutex_ across the whole scan+punch so a worker append cannot
+    // interleave; the lane's append path takes the same mutex.
+    std::lock_guard wlk(*write_mutex_);
+
+    uint64_t fsize = 0;
+    if (!fileutil::file_size(fp_, fsize)) return IoError;
+
+    // Collect every LIVE span in the data region: the active index blob plus each
+    // media chunk. The header [0, HEADER_SIZE) is live by construction (the scan
+    // starts at HEADER_SIZE); the INACTIVE index slot is dead and thus reclaimed.
+    std::vector<std::pair<uint64_t, uint64_t>> live;  // (offset, on-disk length)
+    {
+        std::lock_guard hlk(*header_mutex_);
+        if (const IndexSlot& s = header_.slot[header_.active_slot]; s.length > 0) {
+            live.emplace_back(s.offset, s.length);
+        }
+    }
+    for_each_media(root_, [&live](const IndexNode& n) {
+        if (n.is_image()) {
+            if (n.meta.data_length > 0) {
+                live.emplace_back(n.meta.data_offset, n.meta.data_length);
+            }
+            if (n.meta.thumb_length > 0) {
+                live.emplace_back(n.meta.thumb_offset, n.meta.thumb_length);
+            }
+        } else if (n.is_video()) {
+            for (const VideoChunk& c : n.vmeta.chunks) {
+                if (c.length > 0) {
+                    live.emplace_back(c.offset, c.length);
+                }
+            }
+            if (n.vmeta.poster_length > 0) {
+                live.emplace_back(n.vmeta.poster_offset, n.vmeta.poster_length);
+            }
+        }
+    });
+    std::sort(live.begin(), live.end());
+
+    // Punch every gap between consecutive live spans. `cursor` is the first byte
+    // not yet known to be live; a span starting past it exposes a dead gap. Spans
+    // that overlap or nest are absorbed by the max() so no live byte is punched.
+    uint64_t cursor = HEADER_SIZE;
+    for (const auto& [off, len] : live) {
+        if (off > cursor) {
+            (void)fileutil::punch_hole(fp_, cursor, off - cursor);
+        }
+        cursor = std::max(cursor, off + len);
+    }
+    if (cursor < fsize) {
+        (void)fileutil::punch_hole(fp_, cursor, fsize - cursor);
+    }
+    return Ok;
+}
+
+void Vault::auto_reclaim_space()
+{
+    // Gate: only worth reclaiming when the waste is both absolutely large and a
+    // meaningful fraction of the file (rewriting to save a few KiB costs more I/O
+    // than it saves). Same thresholds the two delete paths shared before.
+    uint64_t size = 0;
+    const uint64_t waste = wasted_bytes();
+    if (waste < AUTO_COMPACT_MIN_WASTE || !fileutil::file_size(fp_, size) ||
+        waste * AUTO_COMPACT_WASTE_RATIO < size) {
+        return;
+    }
+#if defined(__linux__)
+    // In-place hole punching: reclaims the disk blocks without the transient
+    // second copy compact() writes, so a delete never briefly doubles disk use.
+    (void)reclaim();
+#else
+    // No portable hole-punch: fall back to the full copy-and-rename rewrite.
+    (void)compact();
+#endif
 }
 
 // --- persistence ----------------------------------------------------------

@@ -305,7 +305,23 @@ public:
     // between chunks, aborting before the atomic rename (original always intact).
     [[nodiscard]] VaultResult compact(OpProgress* progress = nullptr);
 
+    // Reclaim orphaned chunk space IN PLACE by punching holes in the dead spans
+    // (deleted chunks + the superseded index slot), instead of compact()'s copy-
+    // to-a-new-file rewrite. Offsets are unchanged and the index is untouched, so
+    // there is no transient ~2x disk-usage spike and no reopen. The freed blocks
+    // return to the filesystem; the file's logical length is unchanged (it stays
+    // sparse), so wasted_bytes() — a LOGICAL measure — still reports the holes.
+    // Crash-safe by construction: only dead bytes are touched, never live data or
+    // the header. Linux only; a no-op returning Ok where hole-punch is
+    // unsupported. Locked if the vault is locked.
+    [[nodiscard]] VaultResult reclaim();
+
 private:
+    // Best-effort space reclamation after a delete, gated on AUTO_COMPACT_*:
+    // in-place hole punching where supported (no disk spike), else a full
+    // compact(). Shared by remove_image / remove_gallery.
+    void auto_reclaim_space();
+
     // Persist the in-memory index with the crash-safe double-buffer swap.
     [[nodiscard]] VaultResult commit_index();
     // Write the current header_ to offset 0 and fsync.
