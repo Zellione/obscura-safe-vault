@@ -25,13 +25,13 @@ void GalleryPickerModel::set_pinned_suffix(std::string item)
 
 void GalleryPickerModel::filter_append(std::string_view utf8)
 {
-    filter_ += utf8;
+    filter_.insert(utf8);
     rebuild_filtered();
 }
 
 void GalleryPickerModel::filter_backspace()
 {
-    if (!filter_.empty()) filter_.pop_back();
+    filter_.backspace();
     rebuild_filtered();
 }
 
@@ -43,7 +43,7 @@ void GalleryPickerModel::filter_clear()
 
 void GalleryPickerModel::rebuild_filtered()
 {
-    const auto tokens = tokenize(filter_);
+    const auto tokens = tokenize(filter_.view());
     filtered_.clear();
     filtered_.reserve(items_.size() + 1);
     for (const auto& item : items_)

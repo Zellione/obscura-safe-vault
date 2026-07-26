@@ -14,6 +14,7 @@
 #include "gfx/window.h"
 #include "ui/grid_layout.h"
 #include "ui/nav_model.h"
+#include "ui/text_input_event.h"
 #include "ui/tile_thumb.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
@@ -142,10 +143,10 @@ void AdvancedSearchScreen::on_enter()
     // (active == false) just keeps the default-constructed members.
     if (session_.active) {
         query_         = session_.query;
-        edit_.name     = session_.name;
-        edit_.include  = session_.include;
-        edit_.exclude  = session_.exclude;
-        edit_.group    = session_.group;
+        edit_.name.set_text(session_.name);
+        edit_.include.set_text(session_.include);
+        edit_.exclude.set_text(session_.exclude);
+        edit_.group.set_text(session_.group);
         edit_.weight   = session_.weight;
         focus_         = static_cast<Focus>(session_.focus);
         cur_.group     = session_.cur_group;
@@ -167,10 +168,10 @@ void AdvancedSearchScreen::on_exit()
     // until App resets the session when the active vault changes).
     session_.active     = true;
     session_.query      = query_;
-    session_.name       = edit_.name;
-    session_.include    = edit_.include;
-    session_.exclude    = edit_.exclude;
-    session_.group      = edit_.group;
+    session_.name       = edit_.name.str();
+    session_.include    = edit_.include.str();
+    session_.exclude    = edit_.exclude.str();
+    session_.group      = edit_.group.str();
     session_.weight     = edit_.weight;
     session_.focus      = std::to_underlying(focus_);
     session_.cur_group  = cur_.group;
@@ -244,7 +245,7 @@ void AdvancedSearchScreen::start_rename()
     rename_.open(gallery_path, name);
 }
 
-std::string* AdvancedSearchScreen::active_buffer()
+ITextInput* AdvancedSearchScreen::active_buffer()
 {
     // Check if saved_panel is in save mode (has an active buffer)
     if (auto* buf = saved_panel_.active_buffer()) return buf;
@@ -262,10 +263,10 @@ std::string* AdvancedSearchScreen::active_buffer()
 void AdvancedSearchScreen::refresh_suggestions()
 {
     using enum Focus;
-    const std::string* buf = active_buffer();
+    const ITextInput* buf = active_buffer();
     const bool tag_field = !saved_panel_.active_buffer() && (focus_ == Include || focus_ == Exclude || focus_ == Group);
     if (tag_field && buf && !buf->empty()) {
-        suggestions_ = tag_suggestions(*buf, vocabulary_);
+        suggestions_ = tag_suggestions(buffer_text(*buf), vocabulary_);
         cur_.sugg    = suggestions_.empty() ? -1 : 0;
     } else {
         suggestions_.clear();
@@ -285,8 +286,22 @@ std::string AdvancedSearchScreen::accepted(const std::string& buf) const
 void AdvancedSearchScreen::handle_event(const SDL_Event& e)
 {
     if (rename_.active()) { (void)rename_.handle_event(vault_, e); return; }
-    if (e.type == SDL_EVENT_TEXT_INPUT)    handle_text(e.text.text);
-    else if (e.type == SDL_EVENT_KEY_DOWN) handle_key(e.key);
+
+    // Precedence rule (Phase 54): the focused builder field gets first refusal,
+    // so Ctrl+A selects the text being typed rather than reaching a screen
+    // shortcut. field_owns_event() is what keeps the empty-buffer chip
+    // semantics (Left/Right switch group, Del removes a tag, Backspace drops
+    // the last chip) working exactly as they did before.
+    if (ITextInput* buf = clearing_ ? nullptr : active_buffer();
+        buf != nullptr && field_owns_event(*buf, e)) {
+        const uint64_t rev = buf->revision();
+        if (handle_text_input_event(*buf, e)) {
+            if (buf->revision() != rev) after_buffer_edit();
+            return;
+        }
+    }
+
+    if (e.type == SDL_EVENT_KEY_DOWN) handle_key(e.key);
     else if (e.type == SDL_EVENT_MOUSE_WHEEL &&
              detail_panel_hit(detail_.panel.open, static_cast<float>(win_.width()), e.wheel.mouse_x)) {
         scroll_detail_panel(detail_.panel, e.wheel.y);
@@ -304,30 +319,21 @@ void AdvancedSearchScreen::update(double /*dt*/)
     mark_dirty();   // mark screen dirty since thumbnails changed
 }
 
-void AdvancedSearchScreen::handle_text(const char* text)
+void AdvancedSearchScreen::after_buffer_edit()
 {
-    if (clearing_) return;   // the clear-confirm modal swallows text input
-
-    // Route text input to saved_panel if in save mode
-    if (saved_panel_.active_buffer()) {
-        saved_panel_.handle_text_input(text);
-        return;
+    cur_.tag = -1;
+    if (!saved_panel_.active_buffer() && focus_ == Focus::Name) {
+        query_.name_query = edit_.name.str();
+        rerun();
     }
-
-    // Otherwise route to builder field
-    if (std::string* buf = active_buffer()) {
-        cur_.tag = -1;
-        *buf += text;
-        if (focus_ == Focus::Name) { query_.name_query = edit_.name; rerun(); }
-        refresh_suggestions();
-    }
+    refresh_suggestions();
 }
 
 void AdvancedSearchScreen::handle_clearing_key(const SDL_KeyboardEvent& key)
 {
     if (key.key == SDLK_Y || key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) {
         query_ = {};   // reset to a default (empty) query + builder + cursor
-        edit_  = {};
+        edit_.reset();
         cur_   = {};
         focus_ = Focus::Include;
         clearing_ = false;
@@ -348,8 +354,6 @@ void AdvancedSearchScreen::handle_save_mode_key(const SDL_KeyboardEvent& key)
         }
     } else if (key.key == SDLK_ESCAPE) {
         status_ = "Save cancelled.";
-    } else if (key.key == SDLK_BACKSPACE) {
-        backspace();
     }
 }
 
@@ -387,7 +391,7 @@ void AdvancedSearchScreen::handle_key(const SDL_KeyboardEvent& key)
     switch (key.key) {
         case SDLK_ESCAPE:    request(NavKind::ToGallery, "", 0); return;
         case SDLK_TAB:       cycle_focus((key.mod & SDL_KMOD_SHIFT) ? -1 : 1); return;
-        case SDLK_BACKSPACE: backspace(); return;
+        case SDLK_BACKSPACE: remove_last_chip(); return;
         default:             dispatch_focus_key(key); return;
     }
 }
@@ -409,7 +413,7 @@ void AdvancedSearchScreen::dispatch_focus_key(const SDL_KeyboardEvent& key)
                 case Loaded: {
                     if (AdvancedQuery loaded_query; saved_panel_.load_focused(loaded_query)) {
                         query_ = std::move(loaded_query);
-                        edit_.name = query_.name_query;
+                        edit_.name.set_text(query_.name_query);
                         cur_.group = 0;
                         rerun();
                     }
@@ -447,7 +451,7 @@ void AdvancedSearchScreen::handle_tag_field_key(const SDL_KeyboardEvent& key)
     using enum Focus;
 
     // While typing: Up/Down drive the suggestion dropdown; Enter commits.
-    if (const std::string* buf = active_buffer(); buf && !buf->empty()) {
+    if (const ITextInput* buf = active_buffer(); buf && !buf->empty()) {
         switch (key.key) {
             case SDLK_DOWN:     move_suggestion(1);  break;
             case SDLK_UP:       move_suggestion(-1); break;
@@ -575,18 +579,18 @@ void edit_selected_tag(AdvancedSearchScreen& s)
     switch (s.focus_) {
         case Include: {
             const WeightedTag& wt = s.query_.include[s.cur_.tag];
-            s.edit_.include = wt.tag;
+            s.edit_.include.set_text(wt.tag);
             s.edit_.weight  = wt.weight;
             s.query_.include.erase(s.query_.include.begin() + s.cur_.tag);
             break;
         }
         case Exclude:
-            s.edit_.exclude = s.query_.exclude[s.cur_.tag];
+            s.edit_.exclude.set_text(s.query_.exclude[s.cur_.tag]);
             s.query_.exclude.erase(s.query_.exclude.begin() + s.cur_.tag);
             break;
         case Group: {
             auto& t = s.query_.groups[s.cur_.group].tags;
-            s.edit_.group = t[s.cur_.tag];
+            s.edit_.group.set_text(t[s.cur_.tag]);
             t.erase(t.begin() + s.cur_.tag);
             break;
         }
@@ -602,7 +606,7 @@ void AdvancedSearchScreen::commit_text()
     using enum Focus;
     switch (focus_) {
         case Include:
-            if (std::string t = accepted(edit_.include); !t.empty()) {
+            if (std::string t = accepted(edit_.include.str()); !t.empty()) {
                 // Include/Exclude are mutually exclusive: adding to Include drops any
                 // matching Exclude entry. Re-adding an existing Include tag just
                 // updates its weight (tags stay unique within the list).
@@ -616,7 +620,7 @@ void AdvancedSearchScreen::commit_text()
             edit_.include.clear(); edit_.weight = 1; refresh_suggestions(); rerun();
             break;
         case Exclude:
-            if (std::string t = accepted(edit_.exclude); !t.empty()) {
+            if (std::string t = accepted(edit_.exclude.str()); !t.empty()) {
                 // Mutually exclusive with Include; unique within Exclude.
                 if (int j = weighted_tag_index_ci(query_.include, t); j >= 0)
                     query_.include.erase(query_.include.begin() + j);
@@ -626,7 +630,7 @@ void AdvancedSearchScreen::commit_text()
             edit_.exclude.clear(); refresh_suggestions(); rerun();
             break;
         case Group:
-            commit_group_text(accepted(edit_.group));
+            commit_group_text(accepted(edit_.group.str()));
             edit_.group.clear(); refresh_suggestions(); rerun();
             break;
         default: break;
@@ -651,27 +655,21 @@ void AdvancedSearchScreen::commit_group_text(std::string tag)
         tags.push_back(std::move(tag));
 }
 
-void AdvancedSearchScreen::backspace()
+// Backspace with an EMPTY builder buffer. A non-empty buffer never reaches
+// here: the shared text-input handler already consumed the key (see
+// field_owns_event).
+void AdvancedSearchScreen::remove_last_chip()
 {
     using enum Focus;
-    std::string* buf = active_buffer();
-    if (!buf) return;
+    if (active_buffer() == nullptr || saved_panel_.active_buffer()) return;
 
-    if (!buf->empty()) {
-        buf->pop_back();
-        if (!saved_panel_.active_buffer() && focus_ == Name) { query_.name_query = edit_.name; rerun(); }
-        refresh_suggestions();
-        return;
-    }
-    if (saved_panel_.active_buffer()) return;
-
-    // Empty buffer with a tag selected: remove exactly that tag.
+    // A tag is selected: remove exactly that tag.
     if ((focus_ == Include || focus_ == Exclude || focus_ == Group) && cur_.tag >= 0) {
         remove_selected_tag(*this);
         return;
     }
 
-    // Empty buffer: a Backspace removes the last committed chip of the field.
+    // Otherwise a Backspace removes the last committed chip of the field.
     switch (focus_) {
         case Include:
             if (!query_.include.empty()) { query_.include.pop_back(); rerun(); }
@@ -720,8 +718,8 @@ void AdvancedSearchScreen::render(gfx::Renderer& r)
         r.draw_round_rect(box, RADIUS, SURFACE);
         r.draw_round_rect(box, RADIUS, ACCENT, /*filled*/ false);
         r.draw_text(font_, box.x + 16, box.y + 14, "Save search as:", TEXT_DIM);
-        r.draw_text(font_, box.x + 16, box.y + 44,
-                    fit_text(font_, *saved_panel_.active_buffer() + "_", box.w - 32), TEXT);
+        draw_inline_edit_text(r, font_, box.x + 16, box.y + 44, box.w - 32,
+                              *saved_panel_.active_buffer(), saved_panel_.save_chrome());
     }
     if (clearing_) {
         r.draw_rect({0, 0, W, H}, {0, 0, 0, 180}, /*filled*/ true);
@@ -770,14 +768,24 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
     // float; the dropdown itself is painted last (after all fields) so it sits on
     // top of the fields below instead of being overdrawn by them.
     float drop_y = -1.0f;
-    auto edit_row = [&](float& ly, const std::string& text) {
-        r.draw_text(font_, x + 24, ly, fit_text(font_, text, colw - 24), TEXT_FAINT);
+    auto edit_row = [&](float& ly, const ITextInput& field, TextFieldChrome& chrome) {
+        draw_inline_edit_text(r, font_, x + 24, ly, colw - 24, field, chrome);
         ly += ROW;
         if (!suggestions_.empty()) drop_y = ly;
     };
 
     float y = top;
-    label(y, Focus::Name,  fit_text(font_, std::format("Name: {}",  edit_.name.empty() ? "(any)" : edit_.name), colw)); y += LINE;
+    // "Name:" stays a label; the value beside it becomes a real editable run
+    // (caret + selection) while the field is focused.
+    const auto name_w = static_cast<float>(font_.measure("Name: "));
+    label(y, Focus::Name, "Name:");
+    if (focused(Focus::Name))
+        draw_inline_edit_text(r, font_, x + name_w, y, colw - name_w, edit_.name, edit_chrome_.name);
+    else
+        r.draw_text(font_, x + name_w, y,
+                    fit_text(font_, edit_.name.empty() ? "(any)" : edit_.name.str(), colw - name_w),
+                    TEXT_DIM);
+    y += LINE;
     label(y, Focus::Scope, std::format("Scope: {}", scope_label(query_.scope)));                 y += LINE;
 
     // --- Include (weighted) ---
@@ -785,13 +793,20 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
     for (int i = 0; i < static_cast<int>(query_.include.size()); ++i)
         tag_row(y, focused(Focus::Include) && cur_.tag == i,
                 std::format("{} (w{})", query_.include[i].tag, query_.include[i].weight));
-    if (focused(Focus::Include)) edit_row(y, std::format("{}_  w{}", edit_.include, edit_.weight));
+    if (focused(Focus::Include)) {
+        // The weight is right-aligned so it cannot be pushed off-screen by a
+        // long tag, and so it never sits where the caret needs to be.
+        const std::string wlabel = std::format("w{}", edit_.weight);
+        const auto        wlab_w = static_cast<float>(font_.measure(wlabel));
+        r.draw_text(font_, x + colw - wlab_w, y, wlabel, TEXT_FAINT);
+        edit_row(y, edit_.include, edit_chrome_.include);
+    }
 
     // --- Exclude ---
     label(y, Focus::Exclude, "Exclude:"); y += ROW;
     for (int i = 0; i < static_cast<int>(query_.exclude.size()); ++i)
         tag_row(y, focused(Focus::Exclude) && cur_.tag == i, query_.exclude[i]);
-    if (focused(Focus::Exclude)) edit_row(y, std::format("{}_", edit_.exclude));
+    if (focused(Focus::Exclude)) edit_row(y, edit_.exclude, edit_chrome_.exclude);
 
     // --- Groups ---
     label(y, Focus::Group, "Groups:"); y += ROW;
@@ -801,7 +816,7 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
                      .focused   = focused(Focus::Group),
                      .x = x, .colw = colw, .y = y});
     if (focused(Focus::Group)) {
-        edit_row(y, std::format("{}_", edit_.group));
+        edit_row(y, edit_.group, edit_chrome_.group);
         r.draw_text(font_, x + 8, y, "Enter=add  empty Enter=new group  Del=AND/OR", TEXT_FAINT);
         y += ROW;
     }
@@ -857,6 +872,7 @@ std::vector<ui::HelpGroup> AdvancedSearchScreen::help_groups() const
             {"Ctrl+D", "Toggle the detail panel"},
         }},
         {"Navigate", {{"Esc", "Back"}}},
+        text_editing_help_group(),
     };
 }
 

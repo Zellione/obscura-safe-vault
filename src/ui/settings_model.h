@@ -8,6 +8,9 @@
 #include "gfx/theme.h"
 #include "vault/index.h"
 
+#include "ui/text_input_model.h"
+#include "ui/widgets.h"
+
 namespace ui {
 
 enum class SettingsSection : uint8_t { Appearance = 0, Browsing, TagColours };
@@ -25,7 +28,10 @@ struct SettingsState {
     // is the row being renamed, or -1 when adding.
     bool        prompting  = false;
     int         prompt_row = -1;
-    std::string prompt_buf;
+    TextInputModel prompt_buf{vault::INDEX_MAX_CATEGORY_BYTES};
+    // View-only caret/scroll state; draw_settings_overlay takes the state by
+    // const reference (see vault_unlock_picker.h for the same pattern).
+    mutable TextFieldChrome prompt_chrome;
     std::string error;        // one-line failure shown in the overlay footer
 };
 

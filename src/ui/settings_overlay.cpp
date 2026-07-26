@@ -7,6 +7,8 @@
 #include "platform/theme_pref.h"
 #include "ui/gallery_sort.h"
 #include "ui/settings_model.h"
+#include "ui/text_input_event.h"
+#include "ui/widgets.h"
 
 namespace ui {
 
@@ -16,27 +18,20 @@ namespace {
 [[nodiscard]] bool handle_prompt_event(SettingsState& state, const gfx::Window& window,
                                        const SDL_Event& e, bool& commit_out)
 {
-    if (e.type == SDL_EVENT_TEXT_INPUT) {
-        state.prompt_buf += e.text.text;
-        return true;
-    }
+    // Precedence rule (Phase 54): the prompt field consumes editing keys before
+    // the overlay's own Enter/Esc handling.
+    if (handle_text_input_event(state.prompt_buf, e)) return true;
     if (e.type == SDL_EVENT_KEY_DOWN) {
         switch (e.key.key) {
-        case SDLK_BACKSPACE: {
-            if (!state.prompt_buf.empty()) {
-                state.prompt_buf.pop_back();
-            }
-            return true;
-        }
         case SDLK_RETURN:
         case SDLK_KP_ENTER: {
             bool success;
             if (state.prompt_row == -1) {
                 // Adding a new category
-                success = settings_add_category(state, state.prompt_buf);
+                success = settings_add_category(state, state.prompt_buf.str());
             } else {
                 // Renaming an existing category
-                success = settings_rename_category(state, state.prompt_row, state.prompt_buf);
+                success = settings_rename_category(state, state.prompt_row, state.prompt_buf.str());
             }
             if (success) {
                 state.prompting = false;
@@ -156,7 +151,7 @@ namespace {
             if (state.row >= 0 && state.row < count) {
                 state.prompting = true;
                 state.prompt_row = state.row;
-                state.prompt_buf = state.draft.categories[state.row].name;
+                state.prompt_buf.set_text(state.draft.categories[state.row].name);
                 state.error.clear();
                 SDL_StartTextInput(window.sdl_window());
             }
@@ -380,8 +375,8 @@ void draw_prompt(gfx::Renderer& r, gfx::FontAtlas& font, float win_w, float win_
     const float input_y = prompt_y + 32.0f;
     r.draw_rect({.x = prompt_x + 12.0f, .y = input_y, .w = prompt_w - 24.0f, .h = 28.0f},
                gfx::theme::SURFACE_HI);
-    r.draw_text(font, prompt_x + 16.0f, input_y + 4.0f,
-               state.prompt_buf.empty() ? "_" : state.prompt_buf, gfx::theme::TEXT);
+    draw_inline_edit_text(r, font, prompt_x + 16.0f, input_y + 4.0f, prompt_w - 32.0f,
+                          state.prompt_buf, state.prompt_chrome);
 }
 
 }  // namespace

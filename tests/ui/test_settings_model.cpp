@@ -8,20 +8,21 @@
 
 namespace {
 
-ui::SettingsState unlocked_state()
+// SettingsState holds a TextInputModel (Phase 54), which is deliberately
+// non-copyable and non-movable, so the fixture initialises in place.
+void make_unlocked(ui::SettingsState& s)
 {
-    ui::SettingsState s;
     s.open           = true;
     s.vault_unlocked = true;
     s.draft          = vault::VaultSettings::seeded();
-    return s;
 }
 
 } // namespace
 
 TEST(settings_section_navigation_clamps)
 {
-    ui::SettingsState s = unlocked_state();
+    ui::SettingsState s;
+    make_unlocked(s);
     ui::settings_move_section(s, -1);
     CHECK(s.section == ui::SettingsSection::Appearance);   // already at the top
     ui::settings_move_section(s, 1);
@@ -32,7 +33,8 @@ TEST(settings_section_navigation_clamps)
 
 TEST(settings_section_change_resets_the_row)
 {
-    ui::SettingsState s = unlocked_state();
+    ui::SettingsState s;
+    make_unlocked(s);
     s.section = ui::SettingsSection::TagColours;
     s.row     = 5;
     ui::settings_move_section(s, -1);
@@ -41,7 +43,8 @@ TEST(settings_section_change_resets_the_row)
 
 TEST(settings_row_count_per_section)
 {
-    ui::SettingsState s = unlocked_state();
+    ui::SettingsState s;
+    make_unlocked(s);
     s.section = ui::SettingsSection::Appearance;
     CHECK_EQ(ui::settings_row_count(s), 1);                // theme
     s.section = ui::SettingsSection::Browsing;
@@ -52,7 +55,8 @@ TEST(settings_row_count_per_section)
 
 TEST(settings_locked_vault_has_no_rows_in_vault_sections)
 {
-    ui::SettingsState s = unlocked_state();
+    ui::SettingsState s;
+    make_unlocked(s);
     s.vault_unlocked = false;
     s.section = ui::SettingsSection::Browsing;
     CHECK_EQ(ui::settings_row_count(s), 0);
@@ -64,7 +68,8 @@ TEST(settings_locked_vault_has_no_rows_in_vault_sections)
 
 TEST(settings_row_navigation_clamps)
 {
-    ui::SettingsState s = unlocked_state();
+    ui::SettingsState s;
+    make_unlocked(s);
     s.section = ui::SettingsSection::TagColours;
     ui::settings_move_row(s, -1);
     CHECK_EQ(s.row, 0);
@@ -74,7 +79,8 @@ TEST(settings_row_navigation_clamps)
 
 TEST(settings_change_value_cycles_the_default_sort)
 {
-    ui::SettingsState s = unlocked_state();
+    ui::SettingsState s;
+    make_unlocked(s);
     s.section = ui::SettingsSection::Browsing;
     s.row     = 0;
     s.draft.default_sort = vault::SortKey::Insertion;
@@ -86,7 +92,8 @@ TEST(settings_default_sort_never_cycles_to_default)
 {
     // "Default" means "follow the vault default" — as the vault default itself
     // it is meaningless, so the setting skips it.
-    ui::SettingsState s = unlocked_state();
+    ui::SettingsState s;
+    make_unlocked(s);
     s.section = ui::SettingsSection::Browsing;
     s.row     = 0;
     s.draft.default_sort = vault::SortKey::SizeDesc;
@@ -98,7 +105,8 @@ TEST(settings_default_sort_never_cycles_to_default)
 
 TEST(settings_change_value_toggles_the_tile_flag)
 {
-    ui::SettingsState s = unlocked_state();
+    ui::SettingsState s;
+    make_unlocked(s);
     s.section = ui::SettingsSection::Browsing;
     s.row     = 1;
     CHECK(s.draft.tiles_show_tags);
@@ -108,7 +116,8 @@ TEST(settings_change_value_toggles_the_tile_flag)
 
 TEST(settings_change_value_wraps_the_swatch)
 {
-    ui::SettingsState s = unlocked_state();
+    ui::SettingsState s;
+    make_unlocked(s);
     s.section = ui::SettingsSection::TagColours;
     s.row     = 0;
     s.draft.categories[0].swatch = 0;
@@ -120,7 +129,8 @@ TEST(settings_change_value_wraps_the_swatch)
 
 TEST(settings_add_category_rejects_blank_and_duplicate)
 {
-    ui::SettingsState s = unlocked_state();
+    ui::SettingsState s;
+    make_unlocked(s);
     CHECK(!ui::settings_add_category(s, ""));
     CHECK(!ui::settings_add_category(s, "   "));
     CHECK(!ui::settings_add_category(s, "ARTIST"));          // ci duplicate
@@ -131,7 +141,8 @@ TEST(settings_add_category_rejects_blank_and_duplicate)
 
 TEST(settings_add_category_trims_and_respects_the_cap)
 {
-    ui::SettingsState s = unlocked_state();
+    ui::SettingsState s;
+    make_unlocked(s);
     CHECK(ui::settings_add_category(s, "  studio  "));
     CHECK(s.draft.categories.back().name == "studio");
     CHECK(!ui::settings_add_category(s,
@@ -140,7 +151,8 @@ TEST(settings_add_category_trims_and_respects_the_cap)
 
 TEST(settings_add_category_refuses_past_the_limit)
 {
-    ui::SettingsState s = unlocked_state();
+    ui::SettingsState s;
+    make_unlocked(s);
     s.draft.categories.clear();
     for (size_t i = 0; i < vault::INDEX_MAX_TAG_CATEGORIES; ++i) {
         CHECK(ui::settings_add_category(s, "c" + std::to_string(i)));
@@ -150,7 +162,8 @@ TEST(settings_add_category_refuses_past_the_limit)
 
 TEST(settings_remove_category_clamps_the_row)
 {
-    ui::SettingsState s = unlocked_state();
+    ui::SettingsState s;
+    make_unlocked(s);
     s.section = ui::SettingsSection::TagColours;
     s.row     = 7;
     ui::settings_remove_category(s, 7);
@@ -162,7 +175,8 @@ TEST(settings_remove_category_clamps_the_row)
 
 TEST(settings_rename_category_rejects_a_duplicate)
 {
-    ui::SettingsState s = unlocked_state();
+    ui::SettingsState s;
+    make_unlocked(s);
     CHECK(!ui::settings_rename_category(s, 0, "PARODY"));     // collides with row 2
     CHECK(ui::settings_rename_category(s, 0, "illustrator"));
     CHECK(s.draft.categories[0].name == "illustrator");
@@ -171,7 +185,8 @@ TEST(settings_rename_category_rejects_a_duplicate)
 
 TEST(settings_default_sort_steps_backwards_and_skips_default)
 {
-    ui::SettingsState s = unlocked_state();
+    ui::SettingsState s;
+    make_unlocked(s);
     s.section = ui::SettingsSection::Browsing;
     s.row     = 0;
     s.draft.default_sort = vault::SortKey::NameAsc;

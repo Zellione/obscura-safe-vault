@@ -4,6 +4,9 @@
 
 #include <string>
 
+#include "ui/text_input_model.h"
+#include "ui/widgets.h"
+
 namespace gfx { class Renderer; class FontAtlas; class Window; }
 namespace vault { class Vault; }
 
@@ -33,7 +36,9 @@ private:
     bool        active_ = false;
     std::string gallery_path_;
     std::string old_name_;
-    std::string buf_;
+    TextInputModel  buf_;
+    // View-only caret/scroll state; render() is const (see vault_unlock_picker.h).
+    mutable TextFieldChrome buf_chrome_;
     std::string error_;
 
     bool        done_ = false;

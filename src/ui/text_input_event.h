@@ -18,6 +18,10 @@
 
 #include <SDL3/SDL.h>
 
+#include <vector>
+
+#include "ui/help_popup.h"
+
 namespace ui {
 
 class ITextInput;
@@ -25,5 +29,21 @@ class ITextInput;
 // Apply `e` to `field`. Returns true if the event was consumed and the caller
 // must not process it further.
 [[nodiscard]] bool handle_text_input_event(ITextInput& field, const SDL_Event& e);
+
+// Routing predicate for the screens whose fields have EMPTY-buffer semantics of
+// their own: the advanced-search builder (Left/Right switch tag group, Del
+// removes a committed tag, Backspace drops the last chip) and the tag editor.
+//
+// With text in the buffer, the field owns every editing key. With the buffer
+// empty there is nothing to edit, so only the keys that can put text INTO it —
+// typing and pasting — are the field's; everything else falls through to the
+// host's own handling. Hosts without such semantics can call
+// handle_text_input_event() unconditionally instead.
+[[nodiscard]] bool field_owns_event(const ITextInput& field, const SDL_Event& e) noexcept;
+
+// The F1 help entries for the editing keys above. Shared so every screen that
+// hosts a text field documents them identically; append it to the screen's own
+// help_groups().
+[[nodiscard]] HelpGroup text_editing_help_group();
 
 } // namespace ui

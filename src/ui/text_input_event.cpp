@@ -53,6 +53,31 @@ bool handle_key(ITextInput& field, const SDL_KeyboardEvent& key)
 
 } // namespace
 
+HelpGroup text_editing_help_group()
+{
+    return {"Editing text", {
+        {"Left/Right",      "Move caret"},
+        {"Ctrl+Left/Right", "Move by word"},
+        {"Home/End",        "Start / end of field"},
+        {"Shift+move",      "Extend selection"},
+        {"Ctrl+A",          "Select all"},
+        {"Ctrl+C / Ctrl+X", "Copy / cut (not in password fields)"},
+        {"Ctrl+V",          "Paste"},
+        {"Backspace/Del",   "Delete character or selection"},
+    }};
+}
+
+bool field_owns_event(const ITextInput& field, const SDL_Event& e) noexcept
+{
+    if (e.type == SDL_EVENT_TEXT_INPUT) return true;
+    if (e.type != SDL_EVENT_KEY_DOWN)   return false;
+    if (!field.empty())                 return true;
+
+    const bool ctrl  = (e.key.mod & SDL_KMOD_CTRL) != 0;
+    const bool shift = (e.key.mod & SDL_KMOD_SHIFT) != 0;
+    return (ctrl && e.key.key == SDLK_V) || (shift && e.key.key == SDLK_INSERT);
+}
+
 bool handle_text_input_event(ITextInput& field, const SDL_Event& e)
 {
     if (e.type == SDL_EVENT_TEXT_INPUT) {

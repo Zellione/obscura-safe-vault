@@ -69,6 +69,13 @@ void draw_edit_field(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& bo
                      const ITextInput& field, TextFieldChrome& chrome,
                      bool focused, bool mask = false);
 
+// The same caret + selection + scrolling text, but drawn as a bare run with no
+// field box — for screens that lay their editable text out inline (the
+// advanced-search builder, the tag editor, the tag-overview prompt). `x`/`y` are
+// a draw_text top-left; the run is confined to `max_w` pixels.
+void draw_inline_edit_text(gfx::Renderer& r, gfx::FontAtlas& font, float x, float y,
+                           float max_w, const ITextInput& field, TextFieldChrome& chrome);
+
 // Fill one of the reserved chrome bands from ui/chrome_layout.h with an OPAQUE
 // `fill`, plus a hairline rule along the edge facing the content area
 // (`rule_at_bottom` for a header band, false for a footer band). Opaque is the

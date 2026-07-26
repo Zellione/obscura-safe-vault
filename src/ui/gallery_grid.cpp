@@ -1597,6 +1597,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
             {"Shift+S", "Cycle sort order"}, {"U", "Keep unlocked for session"},
             {"D", "Toggle the detail panel"},
         }},
+        text_editing_help_group(),
     };
 }
 

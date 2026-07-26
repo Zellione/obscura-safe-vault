@@ -11,6 +11,8 @@
 #include <string_view>
 #include <vector>
 
+#include "ui/text_input_model.h"
+
 namespace ui {
 
 class GalleryPickerModel {
@@ -32,10 +34,17 @@ public:
     void close_filter() noexcept { filter_open_ = false; }
     [[nodiscard]] bool filter_open() const noexcept { return filter_open_; }
 
+    // The filter query as a full editable field (Phase 54). Hosts route SDL
+    // events into it through handle_text_input_event(), then call refilter()
+    // when its revision() moved. The three convenience mutators below stay for
+    // non-SDL callers and remain the thing the unit tests drive.
+    [[nodiscard]] ITextInput& filter_input() noexcept { return filter_; }
+    void refilter() { rebuild_filtered(); }
+
     void filter_append(std::string_view utf8);
     void filter_backspace();
     void filter_clear();
-    [[nodiscard]] const std::string& filter() const noexcept { return filter_; }
+    [[nodiscard]] std::string_view filter() const noexcept { return filter_.view(); }
 
     // Move the selection by `delta` within the filtered list, clamped to
     // [0, filtered().size()-1] (0 when the filtered list is empty).
@@ -56,7 +65,7 @@ private:
     void rebuild_filtered();
 
     std::vector<std::string> items_;
-    std::string               filter_;
+    TextInputModel            filter_;
     bool                       filter_open_ = false;
     std::vector<std::string>  filtered_;
     int                        selected_ = 0;

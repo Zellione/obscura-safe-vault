@@ -88,6 +88,13 @@ public:
     // selection_text() returns empty so a mis-wired caller cannot leak either.
     [[nodiscard]] virtual bool secure() const noexcept = 0;
 
+    // Monotonic counter bumped on every CONTENT change (never on a bare caret
+    // or selection move). Hosts whose field drives a live filter or an
+    // autosuggest list compare it across handle_text_input_event() to decide
+    // whether to recompute — a size comparison would miss replacing a selection
+    // with same-length text.
+    [[nodiscard]] virtual uint64_t revision() const noexcept = 0;
+
     // The selected bytes as a string. Always empty for a secure field.
     [[nodiscard]] virtual std::string selection_text() const = 0;
 
@@ -117,6 +124,7 @@ public:
     [[nodiscard]] size_t caret() const noexcept override { return caret_; }
     [[nodiscard]] size_t sel_begin() const noexcept override;
     [[nodiscard]] size_t sel_end() const noexcept override;
+    [[nodiscard]] uint64_t revision() const noexcept override { return revision_; }
 
 protected:
     // Replace the bytes in [start, end) with the first `ins.size()` bytes of
@@ -124,15 +132,20 @@ protected:
     // within byte_cap(); a secure backend must wipe any bytes the shift vacates.
     virtual void splice(size_t start, size_t end, std::string_view ins) = 0;
 
-    // Caret and anchor after a storage reset (clear(), or a failed allocation).
-    void reset_caret() noexcept { caret_ = 0; anchor_ = 0; }
+    // Caret, anchor and revision after a storage reset (clear(), or a failed
+    // allocation). A clear IS a content change, so it bumps the revision.
+    void reset_caret() noexcept { caret_ = 0; anchor_ = 0; ++revision_; }
 
 private:
+    // The single call path to splice(), so no content change can forget to bump
+    // the revision.
+    void apply_splice(size_t start, size_t end, std::string_view ins);
     void place_caret(size_t pos, bool extend) noexcept;
     void insert_run(std::string_view run);
 
-    size_t caret_  = 0;
-    size_t anchor_ = 0;   // equal to caret_ means "no selection"
+    size_t   caret_    = 0;
+    size_t   anchor_   = 0;   // equal to caret_ means "no selection"
+    uint64_t revision_ = 0;
 };
 
 // --- Ordinary (non-secret) field ------------------------------------------
@@ -161,5 +174,13 @@ private:
     std::string buf_;
     size_t      cap_;
 };
+
+// A view over a field's bytes. Safe for an ordinary field; for a SECURE field
+// this aliases the mlock'd buffer, so never copy the result into a std::string.
+[[nodiscard]] inline std::string_view buffer_text(const ITextInput& f) noexcept
+{
+    const auto b = f.bytes();
+    return {reinterpret_cast<const char*>(b.data()), b.size()};
+}
 
 } // namespace ui

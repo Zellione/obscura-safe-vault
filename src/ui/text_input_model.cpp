@@ -145,6 +145,12 @@ size_t skip_unacceptable(std::string_view text, size_t from) noexcept
 size_t TextInputBase::sel_begin() const noexcept { return std::min(caret_, anchor_); }
 size_t TextInputBase::sel_end()   const noexcept { return std::max(caret_, anchor_); }
 
+void TextInputBase::apply_splice(size_t start, size_t end, std::string_view ins)
+{
+    splice(start, end, ins);
+    ++revision_;
+}
+
 void TextInputBase::place_caret(size_t pos, bool extend) noexcept
 {
     caret_ = std::min(pos, size());
@@ -180,7 +186,7 @@ void TextInputBase::insert_run(std::string_view run)
     }
     if (take == 0 && start == end) return;
 
-    splice(start, end, run.substr(0, take));
+    apply_splice(start, end, run.substr(0, take));
     caret_  = start + take;
     anchor_ = caret_;
 }
@@ -190,7 +196,7 @@ void TextInputBase::backspace()
     if (has_selection()) { delete_selection(); return; }
     if (caret_ == 0) return;
     const size_t from = utf8_prev_boundary(bytes(), caret_);
-    splice(from, caret_, {});
+    apply_splice(from, caret_, {});
     caret_  = from;
     anchor_ = from;
 }
@@ -199,7 +205,7 @@ void TextInputBase::del()
 {
     if (has_selection()) { delete_selection(); return; }
     if (caret_ >= size()) return;
-    splice(caret_, utf8_next_boundary(bytes(), caret_), {});
+    apply_splice(caret_, utf8_next_boundary(bytes(), caret_), {});
     anchor_ = caret_;
 }
 
@@ -207,7 +213,7 @@ void TextInputBase::delete_selection()
 {
     if (!has_selection()) return;
     const size_t start = sel_begin();
-    splice(start, sel_end(), {});
+    apply_splice(start, sel_end(), {});
     caret_  = start;
     anchor_ = start;
 }

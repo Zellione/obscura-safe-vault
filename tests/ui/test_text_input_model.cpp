@@ -88,6 +88,46 @@ TEST(tim_str_and_view_expose_the_buffer_for_vault_calls)
     CHECK(m.view() == HELLO);
 }
 
+// Hosts whose field drives a live filter recompute on a revision change, so it
+// must move on every content edit and stay put on a bare caret/selection move.
+TEST(tim_revision_tracks_content_changes_only)
+{
+    ui::TextInputModel m;
+    const uint64_t r0 = m.revision();
+
+    m.insert("abc");
+    const uint64_t r1 = m.revision();
+    CHECK(r1 != r0);
+
+    m.move_home(false);
+    m.move_right(true, true);
+    m.select_all();
+    CHECK_EQ(m.revision(), r1);          // navigation alone changes nothing
+
+    // Replacing a 3-byte selection with 3 other bytes: same size, new content.
+    m.insert("xyz");
+    CHECK(m.revision() != r1);
+    const uint64_t r2 = m.revision();
+
+    m.backspace();
+    CHECK(m.revision() != r2);
+    const uint64_t r3 = m.revision();
+    m.clear();
+    CHECK(m.revision() != r3);
+}
+
+TEST(tim_revision_does_not_move_when_an_edit_is_a_noop)
+{
+    ui::TextInputModel m;
+    m.move_home(false);
+    const uint64_t r0 = m.revision();
+    m.backspace();                       // empty buffer
+    m.del();
+    m.delete_selection();                // no selection
+    m.insert("");
+    CHECK_EQ(m.revision(), r0);
+}
+
 TEST(tim_an_ordinary_field_is_not_secure)
 {
     const ui::TextInputModel m;

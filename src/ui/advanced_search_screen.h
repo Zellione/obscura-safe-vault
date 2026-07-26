@@ -12,6 +12,8 @@
 #include "ui/detail_panel.h"
 #include "ui/rename_dialog.h"
 #include "ui/saved_search_panel.h"
+#include "ui/text_input_model.h"
+#include "ui/widgets.h"
 #include "ui/screen.h"
 #include "ui/search_result_view.h"
 #include "ui/tag_inherit.h"
@@ -52,11 +54,28 @@ private:
     // The in-progress text buffers + small builder state (grouped to keep the
     // screen's field count modest).
     struct Edit {
-        std::string name;
-        std::string include;
-        std::string exclude;
-        std::string group;
-        int         weight = 1;   // weight applied to the next include tag
+        TextInputModel name;
+        TextInputModel include;
+        TextInputModel exclude;
+        TextInputModel group;
+        int            weight = 1;   // weight applied to the next include tag
+
+        // ITextInput is deliberately non-copyable/non-movable, so `edit_ = {}`
+        // is not available; Ctrl+R's clear routes through here instead.
+        void reset()
+        {
+            name.clear(); include.clear(); exclude.clear(); group.clear();
+            weight = 1;
+        }
+    };
+
+    // Caret/scroll state for the four builder fields, indexed the same way
+    // active_buffer() picks one.
+    struct EditChrome {
+        TextFieldChrome name;
+        TextFieldChrome include;
+        TextFieldChrome exclude;
+        TextFieldChrome group;
     };
 
     // Selection cursors for the lists/dropdowns.
@@ -73,7 +92,6 @@ private:
     void rebuild_detail();    // cache detail content when focused result changes
 
     // --- event handling (split into small per-focus handlers) ---
-    void handle_text(const char* text);
     void handle_key(const SDL_KeyboardEvent& key);
     void handle_clearing_key(const SDL_KeyboardEvent& key);    // Y/N confirm while clearing_
     void handle_save_mode_key(const SDL_KeyboardEvent& key);   // Enter/Esc/Backspace while naming a saved search
@@ -98,9 +116,13 @@ private:
     void move_suggestion(int dir);
     void commit_text();       // Enter on the focused text field
     void commit_group_text(std::string tag);
-    void backspace();         // Backspace on the focused text field
+    void remove_last_chip();   // Backspace with an empty builder buffer         // Backspace on the focused text field
 
-    [[nodiscard]] std::string* active_buffer();
+    // The focused editable field, or nullptr when focus is not on one.
+    [[nodiscard]] ITextInput* active_buffer();
+
+    // Everything that must follow a change to the active buffer's CONTENT.
+    void after_buffer_edit();
     [[nodiscard]] std::string accepted(const std::string& buf) const;  // suggestion-or-typed
 
     // --- rendering (split per column) ---
@@ -120,7 +142,8 @@ private:
     std::vector<std::string>        suggestions_;  // current typeahead list
 
     Focus  focus_ = Focus::Include;
-    Edit   edit_;
+    Edit       edit_;
+    EditChrome edit_chrome_;
     Cursor cur_;
 
     bool        clearing_ = false; // confirming a clear-search (Ctrl+R -> Y/N)

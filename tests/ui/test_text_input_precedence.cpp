@@ -218,3 +218,72 @@ TEST(tip_secure_fields_accept_typed_text_and_backspace)
     CHECK(ui::handle_text_input_event(pw, key_event(SDLK_DELETE)));      // drop 'ä'
     CHECK(pw.text_view() == std::string_view("pss"));
 }
+
+// --- Regressions for defects the Phase 54 migration closes ------------------
+
+// The saved-search name prompt (Ctrl+S on the advanced-search screen) had NO
+// Backspace handler before this phase: a typo could only be undone by
+// cancelling the whole save. Routing it through the shared handler fixes that,
+// so assert the behaviour rather than just the port.
+TEST(tip_a_naming_prompt_can_correct_a_typo_with_backspace)
+{
+    ui::TextInputModel save_name;
+    MockScreen screen;
+
+    for (const char* c : {"m", "y", "y", " ", "q"}) dispatch(save_name, screen, text_event(c));
+    CHECK_EQ(save_name.str(), std::string("myy q"));
+
+    dispatch(save_name, screen, key_event(SDLK_BACKSPACE));
+    dispatch(save_name, screen, key_event(SDLK_BACKSPACE));
+    dispatch(save_name, screen, key_event(SDLK_BACKSPACE));
+    CHECK_EQ(save_name.str(), std::string("my"));
+    CHECK_EQ(screen.other_calls, 0);   // never fell through to a screen shortcut
+
+    dispatch(save_name, screen, text_event(" search"));
+    CHECK_EQ(save_name.str(), std::string("my search"));
+}
+
+// Backspace on an EMPTY field is where the two routing modes differ: a plain
+// field swallows it, while a host with chip/mode semantics (the advanced-search
+// builder, the tag editor, the tag-overview filter) must get it back.
+TEST(tip_field_owns_event_hands_an_empty_fields_backspace_back_to_the_host)
+{
+    ui::TextInputModel field;
+    const SDL_Event bs = key_event(SDLK_BACKSPACE);
+
+    CHECK(!ui::field_owns_event(field, bs));      // empty: the host's to handle
+    field.insert("x");
+    CHECK(ui::field_owns_event(field, bs));       // non-empty: the field's
+
+    // Typing and pasting always belong to the field, even when it is empty —
+    // they are what make it non-empty again.
+    field.clear();
+    CHECK(ui::field_owns_event(field, text_event("a")));
+    CHECK(ui::field_owns_event(field, key_event(SDLK_V, SDL_KMOD_LCTRL)));
+    CHECK(ui::field_owns_event(field, key_event(SDLK_INSERT, SDL_KMOD_LSHIFT)));
+
+    // Everything else falls through so the host keeps its empty-buffer keys:
+    // Left/Right switch tag group, Del removes a committed tag.
+    CHECK(!ui::field_owns_event(field, key_event(SDLK_LEFT)));
+    CHECK(!ui::field_owns_event(field, key_event(SDLK_RIGHT)));
+    CHECK(!ui::field_owns_event(field, key_event(SDLK_DELETE)));
+    CHECK(!ui::field_owns_event(field, key_event(SDLK_UP)));
+}
+
+// A pasted or typed multi-byte character must survive a Backspace, which is
+// exactly what the retired `pop_back()`/single-byte path could not do.
+TEST(tip_backspace_never_corrupts_a_multibyte_character)
+{
+    ui::TextInputModel field;
+    MockScreen screen;
+
+    dispatch(field, screen, text_event("caf\xC3\xA9"));      // "café"
+    CHECK_EQ(field.size(), size_t{5});
+    dispatch(field, screen, key_event(SDLK_BACKSPACE));
+    CHECK_EQ(field.str(), std::string("caf"));               // both bytes of 'é' gone
+
+    ui::SecureTextInput pw;
+    CHECK(ui::handle_text_input_event(pw, text_event("caf\xC3\xA9")));
+    CHECK(ui::handle_text_input_event(pw, key_event(SDLK_BACKSPACE)));
+    CHECK(pw.text_view() == std::string_view("caf"));
+}

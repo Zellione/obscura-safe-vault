@@ -8,6 +8,8 @@
 
 #include "ui/file_op_job.h"   // background transfer executor (Phase 25)
 #include "ui/gallery_picker.h"
+#include "ui/text_input_model.h"
+#include "ui/widgets.h"
 #include "ui/vault_unlock_picker.h"
 #include "vault/transfer.h"   // vault::TransferMode
 #include "vault/vault.h"      // owns the source vault
@@ -101,7 +103,9 @@ private:
     VaultUnlockPicker picker_dest_;                     // PickingDest: destination vault selection/unlock
     GalleryPickerModel picker_;                         // PickGallery: filterable/scrollable list
     bool        naming_ = false;
-    std::string name_buf_;
+    TextInputModel          name_buf_;
+    // View-only caret/scroll state; render() is const (see vault_unlock_picker.h).
+    mutable TextFieldChrome name_buf_chrome_;
 
     std::string error_;
 

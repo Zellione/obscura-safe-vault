@@ -16,6 +16,7 @@
 #include "ui/tag_inherit.h"
 #include "ui/tag_scroll.h"
 #include "ui/tag_suggest.h"
+#include "ui/text_input_event.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
 #include "vault/vault.h"
@@ -93,7 +94,7 @@ void TagEditor::refresh_suggestions()
     for (const auto& entry : tally_) {
         current_tags.push_back(entry.tag);
     }
-    suggestions_ = editor_tag_suggestions(new_tag_buf_, vocabulary_, current_tags);
+    suggestions_ = editor_tag_suggestions(new_tag_buf_.str(), vocabulary_, current_tags);
     sugg_sel_    = -1;   // typing always returns focus to the buffer
 }
 
@@ -105,7 +106,7 @@ void TagEditor::add_chosen_tag()
     const bool from_sugg =
         sugg_sel_ >= 0 && sugg_sel_ < static_cast<int>(suggestions_.size());
     const std::string chosen =
-        from_sugg ? suggestions_[sugg_sel_] : trim_surrounding(new_tag_buf_);
+        from_sugg ? suggestions_[sugg_sel_] : trim_surrounding(new_tag_buf_.str());
     if (chosen.empty()) { return; }
 
     using enum vault::VaultResult;
@@ -222,10 +223,16 @@ bool TagEditor::handle_event(const SDL_Event& e)
 {
     if (!active_) return false;
 
-    if (e.type == SDL_EVENT_TEXT_INPUT) {
-        new_tag_buf_ += e.text.text;
-        refresh_suggestions();
-        return true;
+    // Precedence rule (Phase 54): the tag field consumes editing keys first.
+    // field_owns_event keeps the empty-buffer behaviour intact — with nothing
+    // typed, Up/Down still walk the current-tags list and Del still removes the
+    // selected tag rather than being swallowed as a character delete.
+    if (field_owns_event(new_tag_buf_, e)) {
+        const uint64_t rev = new_tag_buf_.revision();
+        if (handle_text_input_event(new_tag_buf_, e)) {
+            if (new_tag_buf_.revision() != rev) { refresh_suggestions(); error_.clear(); }
+            return true;
+        }
     }
 
     if (e.type != SDL_EVENT_KEY_DOWN) return false;
@@ -239,14 +246,6 @@ bool TagEditor::handle_event(const SDL_Event& e)
                 return true;
             }
             close();
-            return true;
-
-        case SDLK_BACKSPACE:
-            if (!new_tag_buf_.empty()) {
-                new_tag_buf_.pop_back();
-                refresh_suggestions();
-                error_.clear();
-            }
             return true;
 
         case SDLK_RETURN:
@@ -326,9 +325,9 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     r.draw_round_rect(input_box, gfx::theme::RADIUS_SMALL, gfx::theme::SURFACE);
     r.draw_round_rect(input_box, gfx::theme::RADIUS_SMALL, gfx::theme::ACCENT,
                       /*filled*/ false);
-    r.draw_text(font, input_box.x + 8,
-                font.text_top_for_center(input_box.y + input_box.h * 0.5f),
-                new_tag_buf_, TEXT);
+    draw_inline_edit_text(r, font, input_box.x + 8,
+                          font.text_top_for_center(input_box.y + input_box.h * 0.5f),
+                          input_box.w - 16, new_tag_buf_, new_tag_chrome_);
 
     // Current tags list — scrolls to keep the selected (and newly-added) tag
     // visible. A node can hold far more tags than fit the fixed-height modal, so

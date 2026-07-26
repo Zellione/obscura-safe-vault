@@ -13,6 +13,7 @@
 #include "platform/vault_registry.h"
 #include "ui/keybindings.h"
 #include "ui/progress_modal.h"
+#include "ui/text_input_event.h"
 #include "ui/widgets.h"
 #include "vault/transfer.h"
 
@@ -140,22 +141,20 @@ bool TransferDialog::handle_gallery_key(SDL_Keycode k)
 
 bool TransferDialog::handle_naming_event(const SDL_Event& e)
 {
-    if (e.type == SDL_EVENT_TEXT_INPUT) { name_buf_ += e.text.text; return true; }
+    // Precedence rule (Phase 54): the name field consumes editing keys first.
+    if (handle_text_input_event(name_buf_, e)) return true;
     if (e.type != SDL_EVENT_KEY_DOWN) return true;
     switch (e.key.key) {
-        case SDLK_BACKSPACE:
-            if (!name_buf_.empty()) name_buf_.pop_back();
-            break;
         case SDLK_ESCAPE:
             naming_ = false;
             break;
         case SDLK_RETURN:
         case SDLK_KP_ENTER:
             if (!name_buf_.empty() &&
-                dest_vault().create_gallery(name_buf_) == vault::VaultResult::Ok) {
+                dest_vault().create_gallery(name_buf_.str()) == vault::VaultResult::Ok) {
                 rebuild_targets();
                 naming_ = false;
-                do_move(name_buf_);     // move straight into the new gallery
+                do_move(name_buf_.str());   // move straight into the new gallery
             } else {
                 error_ = "Could not create that gallery.";
                 naming_ = false;
@@ -184,10 +183,14 @@ bool TransferDialog::handle_picking_dest_event(const SDL_Event& e)
 // filter before the outer Esc-closes-the-dialog handling ever sees it.
 bool TransferDialog::handle_gallery_filter_event(const SDL_Event& e)
 {
-    if (e.type == SDL_EVENT_TEXT_INPUT) { picker_.filter_append(e.text.text); return true; }
+    // Precedence rule (Phase 54): the filter field consumes editing keys first.
+    if (const uint64_t rev = picker_.filter_input().revision();
+        handle_text_input_event(picker_.filter_input(), e)) {
+        if (picker_.filter_input().revision() != rev) picker_.refilter();
+        return true;
+    }
     if (e.type != SDL_EVENT_KEY_DOWN) return true;
     switch (e.key.key) {
-        case SDLK_BACKSPACE: picker_.filter_backspace(); return true;
         case SDLK_ESCAPE:
             if (!picker_.filter().empty()) { picker_.filter_clear(); return true; }
             picker_.close_filter();
@@ -351,10 +354,11 @@ void TransferDialog::render_pick_gallery_body(gfx::Renderer& r, gfx::FontAtlas& 
         r.draw_text(font, ix, list_top, "No matches.", TEXT_FAINT);
     if (picker_.filter_open() || !picker_.filter().empty())
         r.draw_text(font, ix, iy + 54,
-                    fit_text(font, "Filter: " + picker_.filter(), mw - 40), TEXT_FAINT);
+                    fit_text(font, "Filter: " + std::string(picker_.filter()), mw - 40), TEXT_FAINT);
     if (naming_) {
         r.draw_text(font, ix, my + mh - 92, "New gallery name:", TEXT);
-        draw_text_field(r, font, {ix, my + mh - 60, mw - 40, 40}, name_buf_, true);
+        draw_edit_field(r, font, {ix, my + mh - 60, mw - 40, 40}, name_buf_,
+                        name_buf_chrome_, true);
     }
 }
 

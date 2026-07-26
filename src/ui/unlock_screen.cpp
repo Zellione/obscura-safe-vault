@@ -330,12 +330,7 @@ std::vector<ui::HelpGroup> UnlockScreen::help_groups() const
         {"Tab", "Switch field (create mode)"}, {"Enter", "Submit"},
         {"Esc", "Back to vault manager"},
     }},
-    {"Editing", {
-        {"Left/Right", "Move caret"}, {"Ctrl+Left/Right", "Move by word"},
-        {"Home/End", "Start / end of field"}, {"Shift+move", "Select"},
-        {"Ctrl+A", "Select all"}, {"Ctrl+V", "Paste"},
-        {"Backspace/Del", "Delete"},
-    }}};
+    text_editing_help_group()};
 }
 
 } // namespace ui

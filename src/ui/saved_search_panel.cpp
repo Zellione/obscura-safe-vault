@@ -60,12 +60,6 @@ SavedSearchPanel::Action SavedSearchPanel::handle_key(const SDL_KeyboardEvent& k
     return None;
 }
 
-void SavedSearchPanel::handle_text_input(const char* text)
-{
-    if (!saving_) return;
-    save_buf_.append(text);
-}
-
 bool SavedSearchPanel::load_focused(AdvancedQuery& out_query)
 {
     if (cur_saved_ < 0 || cur_saved_ >= static_cast<int>(saved_.size())) return false;
@@ -98,7 +92,7 @@ void SavedSearchPanel::begin_naming()
 
 bool SavedSearchPanel::finalize_save(const AdvancedQuery& query)
 {
-    const std::string name = trim(save_buf_);
+    const std::string name = trim(save_buf_.str());
     saving_ = false;
     if (name.empty()) {
         status_ = "Save cancelled (empty name).";
@@ -140,7 +134,7 @@ void SavedSearchPanel::set_cursor(int cur)
     cur_saved_ = cur;
 }
 
-std::string* SavedSearchPanel::active_buffer()
+ITextInput* SavedSearchPanel::active_buffer()
 {
     if (saving_) return &save_buf_;
     return nullptr;

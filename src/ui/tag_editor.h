@@ -12,6 +12,9 @@
 namespace gfx { class Renderer; class FontAtlas; class Window; }
 namespace vault { class Vault; }
 
+#include "ui/text_input_model.h"
+#include "ui/widgets.h"
+
 namespace ui {
 
 // A modal tag editor panel for editing tags on a gallery or image (Phase 12).
@@ -77,7 +80,8 @@ private:
     std::vector<std::string> suggestions_;   // ranked matches for the typed buffer
     int                  sugg_sel_ = -1;     // -1 = editing buffer; ≥0 highlights a suggestion
     int                  selected_ = 0;      // index of the selected tag to delete
-    std::string          new_tag_buf_;       // input buffer for adding a new tag
+    TextInputModel       new_tag_buf_;       // input buffer for adding a new tag
+    TextFieldChrome      new_tag_chrome_;    // its caret/scroll view state
     std::string          error_;             // transient error message
 };
 
