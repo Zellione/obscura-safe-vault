@@ -40,13 +40,6 @@ std::string str_field(const json& obj, const char* key)
     return trimmed(it->get_ref<const std::string&>());
 }
 
-// uint8_t, not unsigned char: this file's byte type is the span element type the
-// UTF-8 helpers take, matching text_input_model.cpp's identical predicate.
-bool is_continuation(uint8_t b) noexcept
-{
-    return (b & 0xC0) == 0x80;
-}
-
 // Shorten `s` to at most `cap` bytes, cutting on a UTF-8 character boundary so a
 // multi-byte sequence is never left half-written into the vault. Returns whether
 // anything was actually cut.
@@ -54,13 +47,11 @@ bool truncate_utf8(std::string& s, size_t cap)
 {
     if (s.size() <= cap) return false;
     const std::span<const uint8_t> buf{reinterpret_cast<const uint8_t*>(s.data()), s.size()};
-    // A cut landing ON a continuation byte splits a character; step back to the
-    // start of the character that byte belongs to. A cut landing on a lead byte
-    // is already a boundary.
-    const size_t cut = is_continuation(buf[cap])
-                           ? utf8_prev_boundary(buf, cap)
-                           : cap;
-    s.resize(cut);
+    // Cut at the start of the character byte `cap` belongs to. That start IS `cap`
+    // when `cap` already sits on a boundary, and steps back off the continuation
+    // bytes otherwise — one call covers both cases, so this file needs no
+    // continuation-byte predicate of its own.
+    s.resize(utf8_prev_boundary(buf, cap + 1));
     return true;
 }
 
