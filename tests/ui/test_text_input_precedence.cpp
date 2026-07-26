@@ -125,7 +125,6 @@ TEST(tip_screen_level_keys_are_left_alone)
 {
     ui::TextInputModel field;
     field.set_text("abc");
-    MockScreen screen;
 
     // Enter / Esc / Tab / Up / Down commit, cancel, cycle focus and drive
     // autosuggest lists; a field must not swallow any of them.
