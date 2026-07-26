@@ -1,6 +1,6 @@
 #include "ui/clipboard.h"
 
-#include <cstring>
+#include <cstddef>
 #include <string>
 
 #include <SDL3/SDL.h>
@@ -12,6 +12,19 @@ namespace ui {
 
 namespace {
 
+// The clipboard is external input. The backend contract says the buffer is
+// NUL-terminated, but a bounded scan is what makes a missing terminator a
+// truncation instead of a read off the end of the allocation. The cap is far
+// above any field's byte cap, so it never truncates a legitimate paste.
+constexpr size_t CLIPBOARD_MAX_BYTES = 1U << 20;
+
+size_t bounded_length(const char* p, size_t cap) noexcept
+{
+    size_t n = 0;
+    while (n < cap && p[n] != '\0') ++n;
+    return n;
+}
+
 class SdlClipboard final : public ClipboardBackend {
 public:
     char* get_text() override { return SDL_GetClipboardText(); }
@@ -22,7 +35,7 @@ public:
         // SDL hands back a heap copy of the clipboard contents. If it held a
         // password, that copy is a second in-process exposure — wipe it before
         // freeing rather than leaving it in the allocator's free list.
-        crypto_wipe(p, std::strlen(p));
+        crypto_wipe(p, bounded_length(p, CLIPBOARD_MAX_BYTES));
         SDL_free(p);
     }
 
@@ -33,17 +46,24 @@ public:
     }
 };
 
-ClipboardBackend* g_override = nullptr;
+// A function-local static rather than a namespace-scope pointer: the test seam
+// needs a mutable slot, and a mutable global pointer is its own hazard.
+ClipboardBackend*& override_slot() noexcept
+{
+    static ClipboardBackend* slot = nullptr;
+    return slot;
+}
 
 } // namespace
 
 ClipboardBackend& clipboard_backend() noexcept
 {
     static SdlClipboard sdl;
-    return g_override != nullptr ? *g_override : static_cast<ClipboardBackend&>(sdl);
+    ClipboardBackend* over = override_slot();
+    return over != nullptr ? *over : static_cast<ClipboardBackend&>(sdl);
 }
 
-void set_clipboard_backend(ClipboardBackend* backend) noexcept { g_override = backend; }
+void set_clipboard_backend(ClipboardBackend* backend) noexcept { override_slot() = backend; }
 
 bool paste_from_clipboard(ITextInput& field)
 {
@@ -51,7 +71,7 @@ bool paste_from_clipboard(ITextInput& field)
     char* raw = cb.get_text();
     if (raw == nullptr) return false;
 
-    const size_t n = std::strlen(raw);
+    const size_t n = bounded_length(raw, CLIPBOARD_MAX_BYTES);
     if (n == 0) { cb.release_text(raw); return false; }
 
     // A string_view straight over the backend's buffer: for a secure field the

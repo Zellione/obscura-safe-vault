@@ -18,7 +18,9 @@ int stub_measure(std::string_view s)
     return chars * 10;
 }
 
-const ui::TextMeasureFn MEASURE = stub_measure;   // NOLINT(cert-err58-cpp)
+// layout_text_field is templated on the callable (no std::function), so the
+// stub goes in as a plain function pointer.
+constexpr auto MEASURE = &stub_measure;
 
 } // namespace
 

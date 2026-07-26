@@ -6,12 +6,11 @@
 #include <vector>
 
 #include "ui/advanced_search_model.h"
+#include "ui/text_input_model.h"
+#include "ui/widgets.h"
 #include "vault/vault_search.h"
 
 namespace gfx { class FontAtlas; class Renderer; }
-
-#include "ui/text_input_model.h"
-#include "ui/widgets.h"
 
 namespace ui {
 

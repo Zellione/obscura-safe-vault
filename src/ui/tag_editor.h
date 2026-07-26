@@ -8,12 +8,11 @@
 
 #include "ui/tag_chip.h"     // ui::ChipWrap
 #include "ui/tag_tally.h"    // ui::TagTallyEntry, compute_tag_tally
+#include "ui/text_input_model.h"
+#include "ui/widgets.h"
 
 namespace gfx { class Renderer; class FontAtlas; class Window; }
 namespace vault { class Vault; }
-
-#include "ui/text_input_model.h"
-#include "ui/widgets.h"
 
 namespace ui {
 

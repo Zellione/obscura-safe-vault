@@ -232,7 +232,7 @@ constexpr float GAP          = 8.0f;
 
 // Draw the left rail showing section titles.
 void draw_rail(gfx::Renderer& r, gfx::FontAtlas& font, float rail_x, float rail_y,
-               float rail_w, const SettingsState& state)
+               float rail_w, SettingsState& state)
 {
     for (int i = 0; i < SETTINGS_SECTION_COUNT; ++i) {
         const auto sec = static_cast<SettingsSection>(i);
@@ -262,7 +262,7 @@ void draw_rail(gfx::Renderer& r, gfx::FontAtlas& font, float rail_x, float rail_
 
 // Draw a single row in the pane for the current section.
 void draw_pane_row(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float pane_w, float item_y,
-                   int row_index, const SettingsState& state)
+                   int row_index, SettingsState& state)
 {
     const bool focused = (state.in_pane && state.row == row_index);
     if (focused) {
@@ -309,7 +309,7 @@ void draw_pane_row(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float p
 // Draw the right pane showing rows for the current section. `pane_bottom` is the
 // y past which a row is off-screen and culled.
 void draw_pane(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float pane_w,
-               float content_top, float pane_bottom, const SettingsState& state)
+               float content_top, float pane_bottom, SettingsState& state)
 {
     const int row_count = settings_row_count(state);
 
@@ -331,7 +331,7 @@ void draw_pane(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float pane_
 
 // Draw the footer with hint text and error messages.
 void draw_footer(gfx::Renderer& r, gfx::FontAtlas& font, float panel_x, float footer_y,
-                 const SettingsState& state)
+                 SettingsState& state)
 {
     std::string hint;
     if (state.prompting) {
@@ -351,7 +351,7 @@ void draw_footer(gfx::Renderer& r, gfx::FontAtlas& font, float panel_x, float fo
 
 // Draw the prompt overlay for category name input.
 void draw_prompt(gfx::Renderer& r, gfx::FontAtlas& font, float win_w, float win_h,
-                 float panel_w, const SettingsState& state)
+                 float panel_w, SettingsState& state)
 {
     const float prompt_w = panel_w * 0.6f;
     const float prompt_h = ITEM_H + 24.0f;
@@ -382,7 +382,7 @@ void draw_prompt(gfx::Renderer& r, gfx::FontAtlas& font, float win_w, float win_
 }  // namespace
 
 void draw_settings_overlay(gfx::Renderer& r, gfx::FontAtlas& font,
-                           float win_w, float win_h, const SettingsState& state)
+                           float win_w, float win_h, SettingsState& state)
 {
     if (!state.open) {
         return;

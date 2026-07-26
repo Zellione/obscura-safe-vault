@@ -71,7 +71,7 @@ bool RenameDialog::consume_completed(std::string& status_out)
     return true;
 }
 
-void RenameDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H) const
+void RenameDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
 {
     if (!active_) return;
     using namespace gfx::theme;

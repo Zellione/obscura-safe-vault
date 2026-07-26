@@ -9,14 +9,13 @@
 #include "ui/quick_switch.h"
 #include "ui/screen.h"
 #include "ui/tag_overview_model.h"   // ui::TagTally, TagSort
+#include "ui/text_input_model.h"
+#include "ui/widgets.h"
+#include "vault/index.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; }
 namespace vault { class Vault; }
 namespace platform { class VaultRegistry; }
-
-#include "ui/text_input_model.h"
-#include "ui/widgets.h"
-#include "vault/index.h"
 
 namespace ui {
 

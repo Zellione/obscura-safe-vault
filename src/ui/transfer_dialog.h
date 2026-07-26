@@ -58,7 +58,7 @@ public:
     [[nodiscard]] bool handle_event(const SDL_Event& e);   // true if consumed
     void update();                                          // poll the keyfile dialog + the transfer job
     [[nodiscard]] bool consume_completed(std::string& status_out);
-    void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H) const;
+    void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
 
 private:
     // Running: the background move/copy worker owns the vault(s); the dialog stays
@@ -70,11 +70,11 @@ private:
     void do_move(std::string_view dst_gallery);   // run the transfer + re-lock
     void rebuild_targets();   // image_target_galleries(dest_vault()) + the "New gallery…" row
     void render_body(gfx::Renderer& r, gfx::FontAtlas& font,
-                     float ix, float iy, float mw, float mh, float my) const;  // per-stage body
+                     float ix, float iy, float mw, float mh, float my);  // per-stage body
     void render_mode_body(gfx::Renderer& r, gfx::FontAtlas& font,
-                          float ix, float iy, float mw) const;
+                          float ix, float iy, float mw);
     void render_pick_gallery_body(gfx::Renderer& r, gfx::FontAtlas& font,
-                                  float ix, float iy, float mw, float mh, float my) const;
+                                  float ix, float iy, float mw, float mh, float my);
 
     bool handle_mode_key(SDL_Keycode k);         // Mode stage: toggle Move/Copy
     vault::Vault& dest_vault() noexcept;         // src_ when same-vault, else picker_dest_'s vault
@@ -103,9 +103,8 @@ private:
     VaultUnlockPicker picker_dest_;                     // PickingDest: destination vault selection/unlock
     GalleryPickerModel picker_;                         // PickGallery: filterable/scrollable list
     bool        naming_ = false;
-    TextInputModel          name_buf_;
-    // View-only caret/scroll state; render() is const (see vault_unlock_picker.h).
-    mutable TextFieldChrome name_buf_chrome_;
+    TextInputModel  name_buf_;
+    TextFieldChrome name_buf_chrome_;   // caret/scroll view state, advanced by render()
 
     std::string error_;
 

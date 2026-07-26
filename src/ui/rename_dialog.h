@@ -25,7 +25,8 @@ public:
     [[nodiscard]] bool active() const noexcept { return active_; }
 
     [[nodiscard]] bool handle_event(vault::Vault& v, const SDL_Event& e);   // true if consumed
-    void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H) const;
+    // Not const: drawing an editable field advances its caret/scroll view state.
+    void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
 
     // A rename committed successfully; drains the one-shot status message.
     [[nodiscard]] bool consume_completed(std::string& status_out);
@@ -37,8 +38,7 @@ private:
     std::string gallery_path_;
     std::string old_name_;
     TextInputModel  buf_;
-    // View-only caret/scroll state; render() is const (see vault_unlock_picker.h).
-    mutable TextFieldChrome buf_chrome_;
+    TextFieldChrome buf_chrome_;   // caret/scroll view state, advanced by render()
     std::string error_;
 
     bool        done_ = false;

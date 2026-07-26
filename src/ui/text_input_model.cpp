@@ -1,13 +1,19 @@
 #include "ui/text_input_model.h"
 
 #include <algorithm>
+#include <cstddef>
 
 namespace ui {
 
 namespace {
 
-// A UTF-8 continuation byte (10xxxxxx) never starts a character.
-bool is_continuation(uint8_t b) noexcept { return (b & 0xC0) == 0x80; }
+// A UTF-8 continuation byte (10xxxxxx) never starts a character. The mask runs
+// in the std::byte domain: masking the underlying integer trips S6022
+// (byte-oriented data wants std::byte) and casting back for it trips S7035.
+bool is_continuation(uint8_t b) noexcept
+{
+    return (std::byte{b} & std::byte{0xC0}) == std::byte{0x80};
+}
 
 // Expected total length of the sequence a lead byte opens, or 0 if `b` cannot
 // lead one (a continuation byte, or one of the never-valid 0xC0/0xC1/0xF5..0xFF).
@@ -27,12 +33,13 @@ enum class CharClass : uint8_t { Space, Word, Punct };
 // should run through accented letters rather than stop at each one.
 CharClass classify(uint8_t lead) noexcept
 {
-    if (lead >= 0x80) return CharClass::Word;
+    using enum CharClass;
+    if (lead >= 0x80) return Word;
     if (lead == ' ' || lead == '\t' || lead == '\n' || lead == '\r' || lead == '\v' || lead == '\f')
-        return CharClass::Space;
+        return Space;
     const bool alnum = (lead >= '0' && lead <= '9') || (lead >= 'A' && lead <= 'Z') ||
                        (lead >= 'a' && lead <= 'z') || lead == '_';
-    return alnum ? CharClass::Word : CharClass::Punct;
+    return alnum ? Word : Punct;
 }
 
 // Class of the character starting at `pos` / ending at `pos`.

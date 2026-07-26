@@ -46,7 +46,7 @@ public:
 
     [[nodiscard]] bool handle_event(const SDL_Event& e);   // true if consumed
     void update();                                          // poll the keyfile dialog
-    void render(gfx::Renderer& r, gfx::FontAtlas& font, float ix, float iy, float mw) const;
+    void render(gfx::Renderer& r, gfx::FontAtlas& font, float ix, float iy, float mw);
 
 private:
     enum class Stage { PickVault, Unlock };
@@ -72,9 +72,7 @@ private:
         vault::Vault    vault;
         std::string     path;
         SecureTextInput pw;
-        // View-only caret/scroll state. `mutable` because render() is const and
-        // this is a per-frame drawing cache, not part of the dialog's state.
-        mutable TextFieldChrome pw_chrome;
+        TextFieldChrome pw_chrome;   // caret/scroll view state, advanced by render()
         std::string     keyfile_path;
         bool            awaiting_keyfile = false;
         bool            is_self = false;

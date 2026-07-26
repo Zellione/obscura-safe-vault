@@ -157,7 +157,7 @@ bool CombineDialog::consume_completed(CombineOutcome& out)
     return true;
 }
 
-void CombineDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H) const
+void CombineDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
 {
     if (!active_) return;
 

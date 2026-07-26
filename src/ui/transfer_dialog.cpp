@@ -267,7 +267,7 @@ bool TransferDialog::consume_completed(std::string& status_out)
 
 // --- render ---------------------------------------------------------------
 
-void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H) const
+void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
 {
     if (!active_) return;
 
@@ -314,7 +314,7 @@ void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, flo
 }
 
 void TransferDialog::render_mode_body(gfx::Renderer& r, gfx::FontAtlas& font,
-                                      float ix, float iy, float mw) const
+                                      float ix, float iy, float mw)
 {
     using namespace gfx::theme;
     r.draw_text(font, ix, iy + 36, "Action:", TEXT_DIM);
@@ -330,7 +330,7 @@ void TransferDialog::render_mode_body(gfx::Renderer& r, gfx::FontAtlas& font,
 }
 
 void TransferDialog::render_pick_gallery_body(gfx::Renderer& r, gfx::FontAtlas& font,
-                                              float ix, float iy, float mw, float mh, float my) const
+                                              float ix, float iy, float mw, float mh, float my)
 {
     using namespace gfx::theme;
     r.draw_text(font, ix, iy + 36,
@@ -363,7 +363,7 @@ void TransferDialog::render_pick_gallery_body(gfx::Renderer& r, gfx::FontAtlas& 
 }
 
 void TransferDialog::render_body(gfx::Renderer& r, gfx::FontAtlas& font,
-                                 float ix, float iy, float mw, float mh, float my) const
+                                 float ix, float iy, float mw, float mh, float my)
 {
     if (stage_ == Stage::Mode) { render_mode_body(r, font, ix, iy, mw); return; }
     if (stage_ == Stage::PickingDest) { picker_dest_.render(r, font, ix, iy, mw); return; }

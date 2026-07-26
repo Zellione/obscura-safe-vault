@@ -151,7 +151,7 @@ void VaultUnlockPicker::update()
 }
 
 void VaultUnlockPicker::render(gfx::Renderer& r, gfx::FontAtlas& font, float ix, float iy,
-                               float mw) const
+                               float mw)
 {
     using namespace gfx::theme;
 

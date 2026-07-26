@@ -28,10 +28,8 @@ struct SettingsState {
     // is the row being renamed, or -1 when adding.
     bool        prompting  = false;
     int         prompt_row = -1;
-    TextInputModel prompt_buf{vault::INDEX_MAX_CATEGORY_BYTES};
-    // View-only caret/scroll state; draw_settings_overlay takes the state by
-    // const reference (see vault_unlock_picker.h for the same pattern).
-    mutable TextFieldChrome prompt_chrome;
+    TextInputModel  prompt_buf{vault::INDEX_MAX_CATEGORY_BYTES};
+    TextFieldChrome prompt_chrome;   // caret/scroll view state, advanced while drawing
     std::string error;        // one-line failure shown in the overlay footer
 };
 
