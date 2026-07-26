@@ -4,9 +4,65 @@ Referenced from `mem:core`. Covers `src/ui/`: every Screen, the image/video view
 modal dialogs, and the pure SDL-free view/search/sort/session models. Many free-friend
 helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 
+## Text input (Phase 54) — every field in the app routes through these
+- `text_input_model.*` — the shared editing model. `ITextInput` (storage-agnostic
+  interface) → `TextInputBase` (ALL caret/selection/word/UTF-8 logic, expressed over
+  two storage primitives `bytes()` + `splice()`) → `TextInputModel` (std::string).
+  The base is the point: the ordinary and secure backends cannot drift, because
+  neither implements any navigation of its own. Also the pure UTF-8/word helpers
+  (`utf8_prev_boundary`/`utf8_next_boundary`/`utf8_char_count`/`word_boundary_*`)
+  and input sanitising (`acceptable_input_run` — valid UTF-8, no C0 controls or
+  DEL, since fields are single-line and a pasted newline must not enter).
+  `revision()` is a monotonic counter bumped on CONTENT changes only; hosts whose
+  field drives a live filter/autosuggest compare it across the shared handler.
+  A size comparison would miss replacing a selection with same-length text.
+  `insert()` splices the caller's buffer run-by-run and never allocates an
+  intermediate — that is what lets the secure backend honour "no std::string".
+- `secure_text_input.*` — `SecureTextInput`, the same interface over a fixed-capacity
+  mlock'd `crypto::SecureBytes`. Every splice `crypto_wipe`s the bytes the shift
+  vacates; `clear()` wipes the whole buffer. `selection_text()` ALWAYS returns
+  empty — copy/cut out of a password field is refused by design (invariant #2 +
+  the Phase 45 threat model), and this is the second line of defence behind the
+  event handler. `text_view()` aliases the locked bytes for the KDF/strength
+  call sites; never copy it into a std::string. **Replaced `SecureTextField`,
+  which is deleted.**
+- `text_field_view.*` — pure layout: `layout_text_field(text, caret, sel, field_w,
+  prev_scroll, measure)` → visible run + caret x + selection rect + scroll,
+  following the caret at both edges. Partial glyphs are excluded at both ends so
+  the run draws without a clip rect. O(n) via a one-pass prefix-width table (the
+  atlas has no kerning, so per-character advances sum exactly). `caret_is_on(now_ms,
+  last_edit_ms)` is the blink — a pure function of a monotonic clock, NOT a
+  per-frame dt, so no dialog has to grow an `update()` just to blink a caret.
+- `clipboard.*` — `ClipboardBackend` seam (SDL-backed by default,
+  `set_clipboard_backend()` injects a mock) + `paste_from_clipboard` /
+  `copy_selection_to_clipboard` / `cut_selection_to_clipboard`. Paste views the
+  backend's buffer directly into mlock'd storage; the SDL backend `crypto_wipe`s
+  that buffer in `release_text()` before `SDL_free`. Copy/cut return false for a
+  secure field. Orthogonal to `clipboard_secret.h` (Phase 45 auto-clear timer).
+- `text_input_event.*` — `handle_text_input_event(ITextInput&, SDL_Event&)`, the ONE
+  handler. **Key precedence: a focused field consumes Ctrl+A/C/X/V before its host
+  screen** (else Phase 53's gallery Ctrl+A fires while the user selects typed text).
+  Does NOT consume Enter/Esc/Tab/Up/Down or Ctrl+Up/Ctrl+Down (detail-panel scroll).
+  `field_owns_event()` is the routing predicate for hosts whose EMPTY buffer has its
+  own key meanings (advanced-search builder chips, tag editor, tag-overview filter):
+  with text present the field owns every editing key, with it empty only typing and
+  pasting are the field's. `text_editing_help_group()` is the shared F1 entry the
+  four field-owning screens append.
+- Draw side lives in `widgets.*`: `TextFieldChrome` (per-field scroll + blink state,
+  one extra member per migrated field), `draw_edit_field` (boxed) and
+  `draw_inline_edit_text` (bare run, for the inline-laid-out fields). Both paint
+  through one private helper so they cannot disagree about caret placement. A
+  masked field lays out one `*` per CHARACTER, not per byte. The helper detects an
+  edit by comparing against what it drew last frame, so hosts never report edits.
+- Tests: `tests/ui/text_input_conformance.h` holds the storage-agnostic suite and
+  BOTH `test_text_input_model.cpp` and `test_secure_text_input.cpp` run it — a
+  per-backend copy is how the two would diverge. Plus `test_text_field_view.cpp`,
+  `test_clipboard.cpp` (mock backend), `test_text_input_precedence.cpp`.
+
 ## Screens
-- `unlock_screen.*` — password + optional keyfile unlock. `secure_text_field.*` /
-  `unlock_logic.*` back it (secure entry field + unlock logic). `passphrase.*` helpers.
+- `unlock_screen.*` — password + optional keyfile unlock. `secure_text_input.*` /
+  `unlock_logic.*` back it (secure entry field + unlock logic). `passphrase.*` helpers
+  (`generate_passphrase` fills a `SecureTextInput` directly, never a std::string).
 - `gallery_grid.*` — GalleryGrid: Grid + detailed List views (key `L`), live width reflow,
   centred/elided labels. `Shift+S` cycles a gallery's persisted sort_key; breadcrumb shows
   "Sort: <label>" once non-Manual. Ctor takes `initial_view` (default Grid) + a
@@ -61,7 +117,12 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `D` types into query buffer); all result repopulation funnels through `rerun()`, which clears
   the cache key.
 - `tag_overview.*` — `Shift+T` first-class Screen (`NavKind::ToTagOverview`): scrollable tag
-  list (Up/Down, Enter, Tab=toggle sort, type=prefix filter, `` ` ``=quick-switch); counts
+  list (Up/Down, Enter, Tab=toggle sort, `/`=enter filter mode then type, `` ` ``=quick-switch).
+  **Phase 54:** filtering needed an explicit `filtering_` flag — the old browse-mode gate
+  `(!filter_.empty() || c=='/') && c!='/'` is false for EVERY input, so type-to-filter never
+  worked; bare letters cannot be repurposed because `E` opens the description prompt. Its two
+  private helpers `truncate_to_byte_limit`/`tail_clipped_text` were deleted (TextInputModel's
+  byte cap and `layout_text_field` supersede them, for every field rather than one). Counts
   from `VaultSearch::tag_overview`; Enter -> TagGalleries. **Phase 51:** two-line rows (chip
   + counts, then dim description or `(no description — [E] to add)`); `[E]` inline edit prompt
   reusing the settings-overlay pattern; description drawn via `ui::fit_text`.
@@ -160,7 +221,11 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `gallery_picker.*` — `GalleryPickerModel`: pure SDL-free filterable/scrollable list model
   shared by TransferDialog + CombineDialog. set_items, open/close_filter (`/`), filter_*,
   move(delta), filtered(), selected(), geom(visible_rows). `set_pinned_suffix(item)` keeps one
-  extra row appended after filtering, exempt from the filter.
+  extra row appended after filtering, exempt from the filter. Phase 54: the filter is a
+  `TextInputModel` exposed as `filter_input()`; hosts route SDL events into it and call
+  `refilter()` when its `revision()` moved. ONE model, TWO drivers
+  (`transfer_dialog.cpp` + `combine_dialog.cpp`) — both routing blocks must stay in
+  step, and both entry points (`M` and `Shift+M`) need re-testing on any change.
 - `folder_dialog.*` (Phase 51) — `FolderDialog`: native file-picker for folders. `Purpose` enum:
   `{None, Export, ImportFolder}`. `open(purpose, allow_many)` → SDL_ShowOpenFileDialog with
   SDL_DIALOG_FOLDER. `take_result(purpose)` returns `vector<std::string>` — phase-scoped
@@ -422,7 +487,10 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   CHIP_ROW_H via `font.text_top_for_center`. A `static_assert` in the .cpp ties
   `gfx::TAG_SWATCH_COUNT` to `vault::TAG_SWATCH_COUNT` — they are separate constants because
   gfx must not depend on vault, and this is the one TU where both are visible.
-- `settings_model.*` (Phase 49, pure, SDL-free) — state behind the `F2` overlay:
+- `settings_model.*` (Phase 49, pure, SDL-free) — state behind the `F2` overlay. **Phase 54:
+  `SettingsState::prompt_buf` is a `TextInputModel`, so `SettingsState` is now non-copyable
+  and non-movable** (every use was already by reference; only the test fixture changed, and
+  `state = {}`-style resets are not available). Contents:
   `SettingsSection{Appearance,Browsing,TagColours}` + `SETTINGS_SECTION_COUNT`, and
   `SettingsState{section,in_pane,row,open,vault_unlocked,draft,theme,prompting,prompt_row,
   prompt_buf,error}`. `settings_move_section` (clamps, resets row), `settings_move_row`
@@ -452,7 +520,9 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   Grid}` + toggle + move nav; List ±1 row, Grid ±1/±cols clamped, cols>=1). search_result_view
   owns the off-thread decode worker + feeds the thumbnail cache.
 - `saved_search_panel.*` — saved-search sidebar: list rendering + CRUD (Ctrl+S/Enter/Del). Pure
-  vault/SDL-free.
+  vault/SDL-free. Phase 54: `save_buf_` is a `TextInputModel` and `active_buffer()` returns
+  `ITextInput*`; before that this field had NO Backspace handler at all, so a typo could only
+  be undone by cancelling the save (regression-tested now).
 - `tag_suggest.*` — pure autosuggest source: `editor_tag_suggestions(buffer,vocab,own_tags)` —
   trim, rank, hide own tags, cap `TAG_SUGGEST_MAX=5`.
 - `tag_inherit.*` — ancestor-gallery tag union: `inherited_tags(vault,node_path)` — root→parent

@@ -2,6 +2,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -10,6 +12,8 @@
 namespace gfx { class Renderer; class FontAtlas; }
 
 namespace ui {
+
+class ITextInput;
 
 // --- Pure layout / hit-testing -------------------------------------------
 [[nodiscard]] bool point_in_rect(float x, float y, const SDL_FRect& r) noexcept;
@@ -40,8 +44,37 @@ struct GridSpec {
 struct Button { SDL_FRect rect; std::string label; };
 void draw_button(gfx::Renderer& r, gfx::FontAtlas& font, const Button& b,
                  bool hover, bool active);
+// Read-only text field: draws `shown` verbatim, no caret and no selection. Used
+// for boxes the user cannot type into.
 void draw_text_field(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& box,
                      std::string_view shown, bool focused);
+
+// Per-field view state a host carries between frames (Phase 54). The horizontal
+// scroll makes the view follow the caret in a field wider than its box; the rest
+// drives the blink, which is solid for CARET_BLINK_MS after every change. The
+// change is detected here rather than signalled by the host, so migrating a
+// field costs exactly one extra member and no extra call.
+struct TextFieldChrome {
+    float    scroll       = 0.0f;
+    uint64_t last_edit_ms = 0;
+    size_t   seen_caret   = 0;
+    size_t   seen_size    = 0;
+};
+
+// Editable text field: the visible run of `field`'s text, the selection
+// highlight, and a blinking caret. `mask` draws one '*' per CHARACTER (not per
+// byte) for password fields, so the caret still lands between characters.
+// Mutates `chrome` — the scroll and blink state are per-field, per-frame.
+void draw_edit_field(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& box,
+                     const ITextInput& field, TextFieldChrome& chrome,
+                     bool focused, bool mask = false);
+
+// The same caret + selection + scrolling text, but drawn as a bare run with no
+// field box — for screens that lay their editable text out inline (the
+// advanced-search builder, the tag editor, the tag-overview prompt). `x`/`y` are
+// a draw_text top-left; the run is confined to `max_w` pixels.
+void draw_inline_edit_text(gfx::Renderer& r, gfx::FontAtlas& font, float x, float y,
+                           float max_w, const ITextInput& field, TextFieldChrome& chrome);
 
 // Fill one of the reserved chrome bands from ui/chrome_layout.h with an OPAQUE
 // `fill`, plus a hairline rule along the edge facing the content area

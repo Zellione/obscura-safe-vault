@@ -9,6 +9,9 @@
 #include "ui/quick_switch.h"
 #include "ui/screen.h"
 #include "ui/tag_overview_model.h"   // ui::TagTally, TagSort
+#include "ui/text_input_model.h"
+#include "ui/widgets.h"
+#include "vault/index.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; }
 namespace vault { class Vault; }
@@ -40,6 +43,8 @@ public:
 private:
     void reload();          // fetch the overview from the vault, then rebuild()
     void rebuild();         // shown_ = sort(filter(all_)); re-clamp selection
+    void handle_filter_event(const SDL_Event& e);   // while filtering_
+    void close_filter();
     void open_selected();   // Enter → TagGalleries for the focused tag
     [[nodiscard]] int row_at(float my) const;   // mouse y → row index (-1 = none)
     void handle_prompt_key_event(const SDL_Event& e);  // handle SDL_EVENT_KEY_DOWN while prompting
@@ -54,12 +59,19 @@ private:
     std::vector<TagTally> all_;      // full overview, as returned by the vault
     std::vector<TagTally> shown_;    // filtered + sorted view that is navigated
     TagSort               sort_ = TagSort::Name;
-    std::string           filter_;   // typed case-insensitive tag prefix
+    TextInputModel        filter_;   // typed case-insensitive tag prefix
+    TextFieldChrome       filter_chrome_;
+    // Phase 54: '/' opens filter mode. Before it, nothing ever routed text into
+    // filter_ — the browse-mode gate could not become true — so the documented
+    // type-to-filter never worked. An explicit mode is what makes it reachable
+    // without stealing the bare letter keys (E opens the description prompt).
+    bool                  filtering_ = false;
 
     // Phase 51: tag description editing
     bool            prompting_ = false;
     bool            prompt_skip_text_input_ = false;  // Suppress the opening keypress's text event
-    std::string     prompt_buf_;
+    TextInputModel  prompt_buf_{vault::INDEX_MAX_TAG_DESC_BYTES};
+    TextFieldChrome prompt_chrome_;
     std::string     error_;
 };
 

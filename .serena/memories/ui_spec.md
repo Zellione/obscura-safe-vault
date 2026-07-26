@@ -5,8 +5,49 @@ since (List view, video playback, slideshow, tags, advanced search, etc.) is
 tracked in `mem:core`'s `ui/` section, not here — this memory stays the
 foundational spec.
 
+## Text fields — editing model (Phase 54)
+
+**Every text field in the app is fully editable and behaves identically.** There
+is one model (`ui/text_input_model.h`), one event handler
+(`ui::handle_text_input_event`), and one pair of draw helpers
+(`ui::draw_edit_field` for boxed fields, `ui::draw_inline_edit_text` for the
+ones laid out inline). A screen adding a field wires those three; it does not
+invent its own key handling.
+
+- **Keys:** `Left`/`Right` by character, `Ctrl+Left`/`Ctrl+Right` by word,
+  `Home`/`End`, any of those with `Shift` to extend the selection, `Ctrl+A`
+  select all, `Ctrl+C`/`Ctrl+X` copy/cut, `Ctrl+V` and `Shift+Insert` paste,
+  `Backspace`/`Delete` by character or selection. `ui::text_editing_help_group()`
+  is the shared `F1` entry; screens hosting fields append it to `help_groups()`.
+- **Backspace deletes a CHARACTER, not a byte.** Before Phase 54 every field
+  used `std::string::pop_back()`, silently corrupting multi-byte UTF-8.
+- **Key precedence: a focused field consumes `Ctrl+A`/`C`/`X`/`V` BEFORE its
+  host screen.** Otherwise the gallery's Phase 53 `Ctrl+A` (select all tiles)
+  fires while the user is selecting the name they just typed. Hosts call
+  `handle_text_input_event()` first and return early when it consumes the event.
+  Deliberately NOT consumed, so screen logic keeps working: `Enter`, `Esc`,
+  `Tab`, `Up`/`Down`, and `Ctrl+Up`/`Ctrl+Down` (detail-panel scroll).
+- **`field_owns_event()` is for hosts whose EMPTY buffer has its own keys** —
+  the advanced-search builder (`Left`/`Right` switch tag group, `Del` removes a
+  committed tag, `Backspace` drops the last chip), the tag editor, the
+  tag-overview filter. With text present the field owns every editing key; with
+  the buffer empty only typing and pasting are the field's and the rest falls
+  through. Routing unconditionally would silently eat all of it.
+- **Password fields accept paste but refuse copy and cut.** `Ctrl+C`/`Ctrl+X`
+  are *consumed* (so they never reach a screen shortcut) but do nothing, and
+  `SecureTextInput::selection_text()` always returns empty as a second line of
+  defence. The Phase 45 copy-password action — which arms a visible auto-clear
+  timer — stays the only way plaintext leaves a password field. Paste in adds no
+  exposure the OS clipboard does not already have.
+- **Recorded limitation:** `gfx::FontAtlas` bakes printable ASCII 32–126 only.
+  Non-ASCII is stored, pasted and round-tripped correctly but renders as
+  nothing. Caret maths use the same `measure()` the renderer draws with, so
+  there is no phantom caret over an invisible glyph. Extending the atlas is out
+  of scope.
+
 ## Unlock screen (Phase 5)
-- Password field (text is masked).
+- Password field (text is masked, one `*` per CHARACTER — Phase 54; per-byte
+  masking would put the caret in the wrong place after a multi-byte character).
 - Optional keyfile picker button (`SDL_ShowOpenFileDialog`).
 - Create New Vault: passphrase-strength meter; offer to generate a random
   passphrase (password is the genuine security boundary).
@@ -93,7 +134,14 @@ one row per listing, never per tag, mirroring the Phase 49 chip-row reservation 
 grid metric changes.
 
 Navigation: Up/Down move rows, Enter opens TagGalleries for that tag, Tab toggles sort (Name/Count),
-type-ahead filters by name prefix, `` ` `` quick-switch vault.
+`` ` `` quick-switch vault.
+
+**Filtering (Phase 54 fix):** `/` enters an explicit filter mode; typing then
+filters by name prefix, `Esc`/`Backspace` on an empty filter leaves the mode.
+The mode flag is load-bearing — the bare letter keys cannot be repurposed for
+type-ahead because `E` already opens the description prompt. Before Phase 54 the
+filter was documented but **unreachable**: its gate read
+`(!filter_.empty() || c == '/') && c != '/'`, which is false for every input.
 
 ## Sub-gallery tile counts (Phase 51)
 

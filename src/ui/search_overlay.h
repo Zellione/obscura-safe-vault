@@ -6,6 +6,8 @@
 #include <vector>
 
 #include "ui/screen.h"
+#include "ui/text_input_model.h"
+#include "ui/widgets.h"
 #include "vault/vault.h"
 
 namespace gfx { class Renderer; class FontAtlas; class Window; }
@@ -51,7 +53,8 @@ private:
     vault::Vault&                  vault_;
     gfx::Window&                   win_;
     bool                           active_ = false;
-    std::string                    query_;
+    TextInputModel                 query_;
+    TextFieldChrome                query_chrome_;
     vault::SearchScope             scope_ = vault::SearchScope::Both;
     std::vector<vault::SearchHit>  all_results_;   // all matches in current scope
     std::vector<const vault::SearchHit*> filtered_;  // live-filtered + ranked

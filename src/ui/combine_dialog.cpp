@@ -9,6 +9,7 @@
 #include "gfx/window.h"
 #include "ui/keybindings.h"
 #include "ui/progress_modal.h"
+#include "ui/text_input_event.h"
 #include "ui/widgets.h"
 #include "vault/combine.h"
 
@@ -73,10 +74,16 @@ bool CombineDialog::handle_event_picking_dest(const SDL_Event& e)
 
 bool CombineDialog::handle_event_target_filter(const SDL_Event& e)
 {
-    if (e.type == SDL_EVENT_TEXT_INPUT) { picker_target_.filter_append(e.text.text); return true; }
+    // Precedence rule (Phase 54): the filter field consumes editing keys first.
+    // GalleryPickerModel is ONE model with two drivers; this must stay in step
+    // with TransferDialog::handle_gallery_filter_event.
+    if (const uint64_t rev = picker_target_.filter_input().revision();
+        handle_text_input_event(picker_target_.filter_input(), e)) {
+        if (picker_target_.filter_input().revision() != rev) picker_target_.refilter();
+        return true;
+    }
     if (e.type != SDL_EVENT_KEY_DOWN) return true;
     switch (e.key.key) {
-        case SDLK_BACKSPACE: picker_target_.filter_backspace(); return true;
         case SDLK_ESCAPE:
             if (!picker_target_.filter().empty()) { picker_target_.filter_clear(); return true; }
             picker_target_.close_filter();
@@ -150,7 +157,7 @@ bool CombineDialog::consume_completed(CombineOutcome& out)
     return true;
 }
 
-void CombineDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H) const
+void CombineDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
 {
     if (!active_) return;
 
@@ -201,7 +208,7 @@ void CombineDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
         r.draw_text(font, ix, list_top, "No compatible destination galleries.", TEXT_FAINT);
     if (picker_target_.filter_open() || !picker_target_.filter().empty())
         r.draw_text(font, ix, iy + 54,
-                    fit_text(font, "Filter: " + picker_target_.filter(), mw - 40), TEXT_FAINT);
+                    fit_text(font, "Filter: " + std::string(picker_target_.filter()), mw - 40), TEXT_FAINT);
     if (!error_.empty()) r.draw_text(font, ix, my + mh - 30, error_, DANGER);
 }
 

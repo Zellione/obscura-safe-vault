@@ -41,7 +41,7 @@ public:
     [[nodiscard]] bool handle_event(const SDL_Event& e);
     void update();
     [[nodiscard]] bool consume_completed(CombineOutcome& out);
-    void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H) const;
+    void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
 
 private:
     enum class Stage { PickingDest, PickTarget, Running };

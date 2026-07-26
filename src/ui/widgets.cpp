@@ -3,11 +3,24 @@
 #include <algorithm>
 #include <cmath>
 
+#include <string>
+
 #include "gfx/renderer.h"
 #include "gfx/text.h"
 #include "gfx/theme.h"
+#include "ui/text_field_view.h"
+#include "ui/text_input_model.h"
 
 namespace ui {
+
+namespace {
+
+// Inset of the text from the field box's left edge; also the caret's home when
+// the field is empty.
+constexpr float FIELD_PAD = 12.0f;
+constexpr float CARET_W   = 2.0f;
+
+} // namespace
 
 bool point_in_rect(float x, float y, const SDL_FRect& r) noexcept
 {
@@ -71,6 +84,99 @@ void draw_text_field(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& bo
     r.draw_round_rect(box, RADIUS_SMALL, focused ? ACCENT : BORDER, /*filled*/ false);
     r.draw_text(font, box.x + 12.0f, font.text_top_for_center(box.y + box.h * 0.5f),
                 shown, TEXT);
+}
+
+namespace {
+
+// Where a field's content goes: the text's draw origin, the run width, and the
+// band the caret/selection highlight fill. Grouped so paint_field_content stays
+// within the parameter budget (cpp:S107) and so the two entry points pass the
+// geometry as one thing rather than five loose floats.
+struct FieldGeometry {
+    float x      = 0;   // left edge of the text run
+    float text_y = 0;   // draw_text top for the run
+    float w      = 0;   // width available to the run
+    float band_y = 0;   // top of the caret / selection band
+    float band_h = 0;   // its height
+};
+
+// Shared body of draw_edit_field / draw_inline_edit_text: the selection band,
+// the visible run of text, and the caret, all laid out by layout_text_field so
+// the two entry points cannot disagree about where the caret goes.
+void paint_field_content(gfx::Renderer& r, gfx::FontAtlas& font, const FieldGeometry& g,
+                         const ITextInput& field, TextFieldChrome& chrome,
+                         bool focused, bool mask)
+{
+    using namespace gfx::theme;
+
+    const auto  raw   = field.bytes();
+    const auto* chars = reinterpret_cast<const char*>(raw.data());
+
+    // A masked field lays out one '*' per CHARACTER, and its caret/selection
+    // offsets are counted in characters too — byte offsets would put the caret
+    // in the wrong place the moment a multi-byte character is typed.
+    std::string      masked;
+    std::string_view shown(chars, raw.size());
+    size_t caret = field.caret();
+    size_t sel_b = field.sel_begin();
+    size_t sel_e = field.sel_end();
+    if (mask) {
+        masked.assign(utf8_char_count(raw), '*');
+        shown = masked;
+        caret = utf8_char_count(raw.first(caret));
+        sel_b = utf8_char_count(raw.first(sel_b));
+        sel_e = utf8_char_count(raw.first(sel_e));
+    }
+
+    const TextFieldLayout L = layout_text_field(
+        shown, caret, sel_b, sel_e, g.w, chrome.scroll,
+        [&font](std::string_view t) { return font.measure(t); });
+    chrome.scroll = L.scroll;
+
+    if (L.sel_w > 0.0f) r.draw_rect({g.x + L.sel_x, g.band_y, L.sel_w, g.band_h}, ACCENT_DIM);
+    r.draw_text(font, g.x + L.text_x, g.text_y,
+                shown.substr(L.vis_begin, L.vis_end - L.vis_begin), TEXT);
+
+    // Solid for CARET_BLINK_MS after anything changes, then blinking. The change
+    // is detected by comparing against what the last frame drew, so no host has
+    // to report its edits.
+    if (chrome.seen_caret != field.caret() || chrome.seen_size != raw.size()) {
+        chrome.seen_caret   = field.caret();
+        chrome.seen_size    = raw.size();
+        chrome.last_edit_ms = SDL_GetTicks();
+    }
+    if (focused && L.caret_visible && caret_is_on(SDL_GetTicks(), chrome.last_edit_ms))
+        r.draw_rect({g.x + L.caret_x, g.band_y, CARET_W, g.band_h}, ACCENT);
+}
+
+} // namespace
+
+void draw_edit_field(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& box,
+                     const ITextInput& field, TextFieldChrome& chrome,
+                     bool focused, bool mask)
+{
+    using namespace gfx::theme;
+    r.draw_round_rect(box, RADIUS_SMALL, SURFACE);
+    r.draw_round_rect(box, RADIUS_SMALL, focused ? ACCENT : BORDER, /*filled*/ false);
+
+    paint_field_content(r, font,
+                        {.x      = box.x + FIELD_PAD,
+                         .text_y = font.text_top_for_center(box.y + box.h * 0.5f),
+                         .w      = box.w - 2 * FIELD_PAD,
+                         .band_y = box.y + 4.0f,
+                         .band_h = box.h - 8.0f},
+                        field, chrome, focused, mask);
+}
+
+void draw_inline_edit_text(gfx::Renderer& r, gfx::FontAtlas& font, float x, float y,
+                           float max_w, const ITextInput& field, TextFieldChrome& chrome)
+{
+    // The band brackets the glyph cell the text is drawn into, so the caret and
+    // any selection line up with the run rather than floating above it.
+    paint_field_content(r, font,
+                        {.x = x, .text_y = y, .w = max_w,
+                         .band_y = y, .band_h = font.pixel_height()},
+                        field, chrome, /*focused*/ true, /*mask*/ false);
 }
 
 void draw_chrome_band(gfx::Renderer& r, const SDL_FRect& band, gfx::Color fill,

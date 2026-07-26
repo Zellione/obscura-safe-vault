@@ -10,6 +10,7 @@
 #include "gfx/window.h"
 #include "ui/nav_model.h"
 #include "ui/search_model.h"
+#include "ui/text_input_event.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
 #include "vault/vault.h"
@@ -73,7 +74,7 @@ void SearchOverlay::refresh_results()
     all_results_ = vault_.search("", scope_);
 
     // Tokenize the query and filter/rank the results
-    const auto tokens = tokenize(query_);
+    const auto tokens = tokenize(query_.view());
     filtered_.clear();
     filtered_.reserve(all_results_.size());
 
@@ -105,9 +106,10 @@ bool SearchOverlay::handle_event(const SDL_Event& e)
 {
     if (!active_) return false;
 
-    if (e.type == SDL_EVENT_TEXT_INPUT) {
-        query_ += e.text.text;
-        refresh_results();
+    // Precedence rule (Phase 54): the query field consumes editing keys before
+    // any of this overlay's own shortcuts.
+    if (const uint64_t rev = query_.revision(); handle_text_input_event(query_, e)) {
+        if (query_.revision() != rev) refresh_results();
         return true;
     }
 
@@ -120,9 +122,6 @@ bool SearchOverlay::handle_event(const SDL_Event& e)
         case SDLK_TAB:       cycle_scope();                                 return true;
         case SDLK_UP:        move_selection(-1);                            return true;
         case SDLK_DOWN:      move_selection(1);                             return true;
-        case SDLK_BACKSPACE:
-            if (!query_.empty()) { query_.pop_back(); refresh_results(); }
-            return true;
         default:             return false;
     }
 }
@@ -193,7 +192,7 @@ void SearchOverlay::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
     // Search input box
     const float search_y = my + PAD + LINE;
     const SDL_FRect search_box{mx + PAD, search_y, mw - 2 * PAD, SEARCH_BOX_H};
-    draw_text_field(r, font, search_box, query_, true);
+    draw_edit_field(r, font, search_box, query_, query_chrome_, true);
 
     // Scope toggle label and cycle instruction
     const float scope_y = search_y + SEARCH_BOX_H + 12;

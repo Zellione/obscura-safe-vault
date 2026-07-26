@@ -30,6 +30,7 @@
 #include "ui/tag_chip.h"
 #include "ui/tag_inherit.h"
 #include "ui/tag_list_parse.h"
+#include "ui/text_input_event.h"
 #include "ui/tile_thumb.h"
 #include "ui/video_repair.h"
 #include "ui/waste_threshold.h"
@@ -520,7 +521,7 @@ void GalleryGrid::finish_naming()
 
     // If this is a zip import, trigger the import with the chosen name.
     if (naming_.zip.active) {
-        naming_.zip.gallery_name = naming_.buf;
+        naming_.zip.gallery_name = naming_.buf.str();
         naming_.buf.clear();
 
         // Phase 35: if the archive needs a password, open the password prompt first
@@ -537,7 +538,7 @@ void GalleryGrid::finish_naming()
 
     // If this is a folder import, enqueue it with the chosen name (Phase 51, Task 12).
     if (naming_.folder.active) {
-        queue_.enqueue_folder(naming_.folder.path, nav_.path(), naming_.buf);
+        queue_.enqueue_folder(naming_.folder.path, nav_.path(), naming_.buf.str());
         naming_.folder.active = false;
         naming_.buf.clear();
         status_ = "Import queued — Shift+I for status";
@@ -548,7 +549,7 @@ void GalleryGrid::finish_naming()
     // Otherwise, create a new gallery.
     using enum vault::VaultResult;
     const std::string base = nav_.path();
-    switch (const std::string full = base.empty() ? naming_.buf : base + "/" + naming_.buf;
+    switch (const std::string full = base.empty() ? naming_.buf.str() : base + "/" + naming_.buf.str();
             vault_.create_gallery(full)) {
         case Ok:            break;
         case AlreadyExists: error_ = "Gallery already exists."; break;
@@ -640,11 +641,11 @@ bool GalleryGrid::pump_thumbs()
 
 void GalleryGrid::handle_naming_key(const SDL_Event& e)
 {
-    if (e.type == SDL_EVENT_TEXT_INPUT) { naming_.buf += e.text.text; return; }
+    // Precedence rule (Phase 54): the prompt consumes editing keys first, so its
+    // Ctrl+A selects the typed name rather than every tile behind the modal.
+    if (handle_text_input_event(naming_.buf, e)) return;
     if (e.type != SDL_EVENT_KEY_DOWN) return;
-    if (e.key.key == SDLK_BACKSPACE && !naming_.buf.empty())
-        naming_.buf.pop_back();
-    else if (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER)
+    if (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER)
         finish_naming();
     else if (e.key.key == SDLK_ESCAPE) {
         naming_.active = false;
@@ -658,11 +659,9 @@ void GalleryGrid::handle_naming_key(const SDL_Event& e)
 
 void GalleryGrid::handle_password_key(const SDL_Event& e)
 {
-    if (e.type == SDL_EVENT_TEXT_INPUT) { naming_.password.buf.push_utf8(e.text.text); return; }
+    if (handle_text_input_event(naming_.password.buf, e)) return;
     if (e.type != SDL_EVENT_KEY_DOWN) return;
-    if (e.key.key == SDLK_BACKSPACE) {
-        naming_.password.buf.backspace();
-    } else if (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER) {
+    if (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER) {
         naming_.password.active = false;
         SDL_StopTextInput(win_.sdl_window());
         do_zip_import(naming_.zip.path);
@@ -1047,7 +1046,7 @@ ArchiveExtKind classify_archive_ext(std::string_view ext)
     return {false, false};   // .zip and anything else: the existing miniz mirror/append path
 }
 
-// Copy a SecureTextField's typed bytes into an owned SecureBytes (moved into
+// Copy a SecureTextInput's typed bytes into an owned SecureBytes (moved into
 // the background job's worker lambda). Empty when the field is empty, or if
 // the allocation itself fails — the job/import layer already treats an empty
 // password as "not yet supplied" (Phase 35), so a rare alloc failure here
@@ -1055,11 +1054,11 @@ ArchiveExtKind classify_archive_ext(std::string_view ext)
 // into a too-small buffer (code-review fix: the resize() result must be
 // checked before memcpy, or a failed resize leaves `pw` at size 0 while the
 // memcpy below still writes f.length() bytes into it — a buffer overflow).
-crypto::SecureBytes password_bytes(const SecureTextField& f)
+crypto::SecureBytes password_bytes(const SecureTextInput& f)
 {
     crypto::SecureBytes pw;
-    if (!f.empty() && pw.resize(f.length()))
-        std::memcpy(pw.data(), f.bytes().data(), f.length());
+    if (!f.empty() && pw.resize(f.size()))
+        std::memcpy(pw.data(), f.bytes().data(), f.size());
     return pw;
 }
 } // namespace
@@ -1123,7 +1122,7 @@ void GalleryGrid::continue_volume_set_naming()
 
     start_naming();
     if (naming_.active) {
-        naming_.buf = std::filesystem::path(naming_.zip.volume_set.stem).stem().string();
+        naming_.buf.set_text(std::filesystem::path(naming_.zip.volume_set.stem).stem().string());
         naming_.zip.cbz             = cbz;
         naming_.zip.archive_backend = archive_backend;
         // A split set's encryption cannot be probed from one volume, so the
@@ -1170,7 +1169,7 @@ void GalleryGrid::handle_single_archive_for_naming(const std::filesystem::path& 
 
     start_naming();
     if (naming_.active) {
-        naming_.buf = gallery_name;
+        naming_.buf.set_text(gallery_name);
         naming_.zip.path = zp;
         naming_.zip.cbz = cbz;
         naming_.zip.archive_backend = archive_backend;
@@ -1243,7 +1242,7 @@ void GalleryGrid::pump_folder_import()
         if (naming_.active) {
             naming_.folder.path = res->front();
             naming_.folder.active = true;
-            naming_.buf = std::filesystem::path(res->front()).filename().string();
+            naming_.buf.set_text(std::filesystem::path(res->front()).filename().string());
         }
     } else {
         // Multiple folders: auto-name each from basename without prompting
@@ -1598,6 +1597,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
             {"Shift+S", "Cycle sort order"}, {"U", "Keep unlocked for session"},
             {"D", "Toggle the detail panel"},
         }},
+        text_editing_help_group(),
     };
 }
 
@@ -1677,7 +1677,8 @@ void GalleryGrid::render(gfx::Renderer& r)
         r.draw_round_rect({mx, my, mw, mh}, RADIUS, SURFACE);
         r.draw_round_rect({mx, my, mw, mh}, RADIUS, ACCENT, /*filled*/ false);
         r.draw_text(font_, mx + 16, my + 16, "New gallery name:", TEXT);
-        draw_text_field(r, font_, {mx + 16, my + 56, mw - 32, 44}, naming_.buf, true);
+        draw_edit_field(r, font_, {mx + 16, my + 56, mw - 32, 44}, naming_.buf,
+                        naming_.buf_chrome, true);
     }
 
     // Delete-confirmation modal: names the target tile; deletion is irreversible.
@@ -1763,8 +1764,9 @@ void GalleryGrid::render(gfx::Renderer& r)
 
         centered(naming_.password.retry ? "Incorrect passphrase." : "Archive password required.",
                  py + 20, naming_.password.retry ? DANGER : TEXT);
-        draw_text_field(r, font_, {px + 20, py + 52, pw - 40, 44},
-                        std::string(naming_.password.buf.length(), '*'), true);
+        draw_edit_field(r, font_, {px + 20, py + 52, pw - 40, 44},
+                        naming_.password.buf, naming_.password.buf_chrome,
+                        true, /*mask*/ true);
         centered("[Enter] Unlock        [Esc] Cancel", py + ph - 26, TEXT_DIM);
     }
 }

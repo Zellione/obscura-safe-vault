@@ -12,6 +12,7 @@
 #include "gfx/window.h"
 #include "ui/tag_chip.h"
 #include "ui/tag_overview_model.h"
+#include "ui/text_input_event.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
 #include "vault/vault.h"
@@ -35,63 +36,10 @@ constexpr float PROMPT_HINT_PAD = 8.0f;       // padding above hint line
 constexpr float PROMPT_INPUT_H = 32.0f;       // height of input field
 constexpr float PROMPT_LINE_H = 20.0f;        // height of title and hint lines (both use this)
 
-// UTF-8 helpers: ensure we don't split multibyte sequences at the boundary.
-// A continuation byte has the high 2 bits set to 0b10.
-[[nodiscard]] constexpr bool is_utf8_continuation(std::byte byte) noexcept
-{
-    // Stay in the std::byte domain — masking the underlying integer instead
-    // trips S6022 (byte-oriented data wants std::byte) and casting for it trips
-    // S7035; keeping the bitwise ops on std::byte avoids both.
-    return (byte & std::byte{0xC0}) == std::byte{0x80};
-}
-
-// Truncate `text` to not exceed `max_bytes`, preserving complete UTF-8 characters.
-[[nodiscard]] std::string truncate_to_byte_limit(std::string_view text, size_t max_bytes)
-{
-    if (text.size() <= max_bytes) return std::string(text);
-
-    // Shrink backwards from the limit to find a safe UTF-8 boundary
-    size_t pos = max_bytes;
-    while (pos > 0 && is_utf8_continuation(std::byte(static_cast<unsigned char>(text[pos - 1])))) {
-        --pos;
-    }
-    return std::string(text.substr(0, pos));
-}
-
-// Show tail of text when it overflows (show caret end, not middle). Returns the
-// visible portion and the pixel offset where the caret should sit (relative to
-// the field's left edge, after inset).
-struct TextFieldDisplay {
-    std::string shown;
-    float caret_offset;
-};
-
-[[nodiscard]] TextFieldDisplay tail_clipped_text(const gfx::FontAtlas& font,
-                                                 std::string_view text, float max_w)
-{
-    constexpr std::string_view ell = "…";
-    if (const int full_w = font.measure(text); full_w <= static_cast<int>(max_w)) {
-        return TextFieldDisplay{.shown = std::string(text), .caret_offset = static_cast<float>(full_w)};
-    }
-
-    // Text overflows; show the tail (caret end). Shrink from the start until it fits.
-    const int ellipsis_w = font.measure(ell);
-    const float tail_max = max_w - static_cast<float>(ellipsis_w);
-
-    std::string shown;
-    size_t pos = text.size();
-    while (pos > 0) {
-        shown = text.substr(pos - 1);
-        if (font.measure(shown) <= static_cast<int>(tail_max)) {
-            shown.insert(shown.begin(), ell.begin(), ell.end());
-            return TextFieldDisplay{.shown = shown, .caret_offset = max_w - 1.0f};
-        }
-        --pos;
-    }
-
-    // Even "…" alone doesn't fit; just show "…"
-    return TextFieldDisplay{.shown = std::string(ell), .caret_offset = static_cast<float>(ellipsis_w)};
-}
+// Phase 54 removed this file's private UTF-8 truncation and tail-clipping
+// helpers: TextInputModel's byte cap does the former (on whole characters) and
+// layout_text_field does the latter, for every field in the app rather than
+// just this one.
 
 // List geometry shared by render() + row_at() so a click lands on the row it
 // looks like it lands on. `first` keeps the selection roughly centred when the
@@ -147,7 +95,7 @@ void TagOverviewScreen::reload()
 
 void TagOverviewScreen::rebuild()
 {
-    shown_ = filter_tags(all_, filter_);
+    shown_ = filter_tags(all_, filter_.str());
     sort_tags(shown_, sort_);
     nav_.set_count(static_cast<int>(shown_.size()));
 }
@@ -184,26 +132,19 @@ void TagOverviewScreen::handle_key_down_in_browse_mode(const SDL_KeyboardEvent& 
         case SDLK_E:
             if (nav_.selected() >= 0 && nav_.selected() < static_cast<int>(shown_.size())) {
                 prompting_ = true;
-                prompt_buf_ = shown_[nav_.selected()].description;
+                prompt_buf_.set_text(shown_[nav_.selected()].description);
                 prompt_skip_text_input_ = true;
                 error_.clear();
                 SDL_StartTextInput(win_.sdl_window());
             }
             break;
         case SDLK_SLASH:
-            if (filter_.empty()) {
-                filter_ = "";
-                rebuild();
-                SDL_StartTextInput(win_.sdl_window());
-            }
+            filtering_ = true;
+            SDL_StartTextInput(win_.sdl_window());
             break;
         case SDLK_BACKSPACE:
-            if (!filter_.empty()) { filter_.pop_back(); rebuild(); }
-            else                  request(NavKind::ToGallery, "", 0);
-            break;
         case SDLK_ESCAPE:
-            if (!filter_.empty()) { filter_.clear(); SDL_StopTextInput(win_.sdl_window()); rebuild(); }
-            else                  request(NavKind::ToGallery, "", 0);
+            request(NavKind::ToGallery, "", 0);
             break;
         default: break;
     }
@@ -219,29 +160,25 @@ void TagOverviewScreen::handle_event(const SDL_Event& e)
     }
 
     if (prompting_) {
-        if (e.type == SDL_EVENT_TEXT_INPUT) {
-            if (prompt_skip_text_input_) {
-                prompt_skip_text_input_ = false;
-                return;
-            }
-            if (const auto new_buf = prompt_buf_ + e.text.text; new_buf.size() <= vault::INDEX_MAX_TAG_DESC_BYTES) {
-                prompt_buf_ = truncate_to_byte_limit(new_buf, vault::INDEX_MAX_TAG_DESC_BYTES);
-            }
+        // The 'E' that opened the prompt also arrives as a text event; swallow
+        // exactly that one so the field does not start with an "e" in it.
+        if (e.type == SDL_EVENT_TEXT_INPUT && prompt_skip_text_input_) {
+            prompt_skip_text_input_ = false;
             return;
         }
+        // Precedence rule (Phase 54): the description field consumes editing
+        // keys before the prompt's own Enter/Esc. The byte limit is the field's
+        // own cap now, so an over-long paste truncates instead of being dropped.
+        if (handle_text_input_event(prompt_buf_, e)) return;
         handle_prompt_key_event(e);
         return;
     }
 
+    if (filtering_) { handle_filter_event(e); return; }
+
     switch (e.type) {
         case SDL_EVENT_KEY_DOWN:
             handle_key_down_in_browse_mode(e.key);
-            break;
-        case SDL_EVENT_TEXT_INPUT:
-            if ((!filter_.empty() || e.text.text[0] == '/') && e.text.text[0] != '/') {
-                filter_ += e.text.text;
-                rebuild();
-            }
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
             if (const int idx = row_at(e.button.y); idx >= 0) {
@@ -253,22 +190,49 @@ void TagOverviewScreen::handle_event(const SDL_Event& e)
     }
 }
 
+void TagOverviewScreen::close_filter()
+{
+    filter_.clear();
+    filtering_ = false;
+    SDL_StopTextInput(win_.sdl_window());
+    rebuild();
+}
+
+void TagOverviewScreen::handle_filter_event(const SDL_Event& e)
+{
+    // Precedence rule (Phase 54): the filter field owns editing keys while it is
+    // open. field_owns_event means a Backspace on an EMPTY filter falls through
+    // below and closes filter mode instead of being silently swallowed.
+    if (field_owns_event(filter_, e)) {
+        const uint64_t rev = filter_.revision();
+        if (handle_text_input_event(filter_, e)) {
+            if (filter_.revision() != rev) rebuild();
+            return;
+        }
+    }
+    if (e.type != SDL_EVENT_KEY_DOWN) return;
+    switch (e.key.key) {
+        case SDLK_ESCAPE:
+        case SDLK_BACKSPACE: close_filter();  break;
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER:  open_selected(); break;
+        case SDLK_UP:        nav_.move(-1);   break;
+        case SDLK_DOWN:      nav_.move(1);    break;
+        default: break;
+    }
+}
+
 void TagOverviewScreen::handle_prompt_key_event(const SDL_Event& e)
 {
     if (e.type != SDL_EVENT_KEY_DOWN) return;
 
     switch (e.key.key) {
-        case SDLK_BACKSPACE:
-            if (!prompt_buf_.empty()) {
-                prompt_buf_.pop_back();
-            }
-            return;
         case SDLK_RETURN:
         case SDLK_KP_ENTER:
             // Save the description
             if (const int sel = nav_.selected(); sel >= 0 && sel < static_cast<int>(shown_.size())) {
                 auto s = vault::vault_settings(vault_);
-                vault::set_tag_description(s, shown_[sel].tag, prompt_buf_);
+                vault::set_tag_description(s, shown_[sel].tag, prompt_buf_.str());
                 if (vault::set_vault_settings(vault_, std::move(s)) != vault::VaultResult::Ok) {
                     error_ = "Could not save the tag description";
                 } else {
@@ -303,9 +267,13 @@ void TagOverviewScreen::render(gfx::Renderer& r)
     const char* sort_label = (sort_ == TagSort::Name) ? "Sort: name (Tab)" : "Sort: count (Tab)";
     r.draw_text(font_, OX, 84, "[F1] Help", TEXT_FAINT);
     r.draw_text(font_, OX, 112, sort_label, TEXT_FAINT);
-    if (!filter_.empty())
-        r.draw_text(font_, OX + 280, 112,
-                    fit_text(font_, "Filter: " + filter_, W - (OX + 280) - OX), TEXT);
+    if (filtering_ || !filter_.empty()) {
+        const float fx = OX + 280;
+        const auto  lw = static_cast<float>(font_.measure("Filter: "));
+        r.draw_text(font_, fx, 112, "Filter: ", TEXT);
+        draw_inline_edit_text(r, font_, fx + lw, 112, W - (fx + lw) - OX,
+                              filter_, filter_chrome_);
+    }
 
     // Draw error message if present
     if (!error_.empty())
@@ -391,10 +359,9 @@ void TagOverviewScreen::render(gfx::Renderer& r)
                          RADIUS, BORDER, /*filled*/ false);
 
         // Draw input text with tail clipping (show what you're typing at the caret end)
-        const auto text_display = tail_clipped_text(font_, prompt_buf_, input_inner_w);
         const float text_y = input_y + (input_h - font_.pixel_height()) / 2.0f;
-        r.draw_text(font_, prompt_x + PROMPT_PAD + 4, text_y,
-                   prompt_buf_.empty() ? "_" : text_display.shown, TEXT);
+        draw_inline_edit_text(r, font_, prompt_x + PROMPT_PAD + 4, text_y, input_inner_w,
+                              prompt_buf_, prompt_chrome_);
 
         // Hint line: remaining bytes
         const float hint_y = input_y + input_h + PROMPT_HINT_PAD;
@@ -411,7 +378,8 @@ std::vector<HelpGroup> TagOverviewScreen::help_groups() const
         {"/", "Filter tags"}, {"Tab", "Toggle sort (name/count)"},
         {"E", "Edit description"},
         {"Esc", "Back"},
-    }}};
+    }},
+    text_editing_help_group()};
 }
 
 } // namespace ui

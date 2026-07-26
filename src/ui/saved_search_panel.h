@@ -6,6 +6,8 @@
 #include <vector>
 
 #include "ui/advanced_search_model.h"
+#include "ui/text_input_model.h"
+#include "ui/widgets.h"
 #include "vault/vault_search.h"
 
 namespace gfx { class FontAtlas; class Renderer; }
@@ -50,9 +52,6 @@ public:
     // Returns an action signal to avoid duplicate processing in the parent screen.
     Action handle_key(const SDL_KeyboardEvent& key);
 
-    // Text input while saving_=true (called by AdvancedSearchScreen::handle_text when panel is in save mode)
-    void handle_text_input(const char* text);
-
     // Load the focused saved search into query_ (output via AdvancedQuery& parameter).
     // Called by Enter in the saved field. Returns true on success, false on error.
     // Caller (AdvancedSearchScreen) must then rerun() and reload_saved().
@@ -79,9 +78,14 @@ public:
     int  get_cursor() const;
     void set_cursor(int cur);
 
-    // Return pointer to the active text buffer (for text input routing), or nullptr if none.
-    // When saving_=true, returns &save_buf_; otherwise nullptr.
-    std::string* active_buffer();
+    // The active text field (for event routing), or nullptr when not saving.
+    // Phase 54: a full editable field — before it, this buffer had no Backspace
+    // handler at all, so a typo could only be fixed by cancelling the save.
+    [[nodiscard]] ITextInput* active_buffer();
+
+    // Caret/scroll state for the save-name field, drawn by the parent screen's
+    // save modal (the panel itself only draws the sidebar list).
+    [[nodiscard]] TextFieldChrome& save_chrome() noexcept { return save_chrome_; }
 
 private:
     vault::VaultSearch&               search_;  // vault facade for save/delete operations
@@ -91,7 +95,8 @@ private:
 
     int         cur_saved_ = 0;    // selected saved search index
     bool        saving_    = false; // naming a search to save
-    std::string save_buf_;         // the name being typed while saving_=true
+    TextInputModel  save_buf_;     // the name being typed while saving_=true
+    TextFieldChrome save_chrome_;
 };
 
 } // namespace ui

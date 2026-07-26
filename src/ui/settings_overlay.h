@@ -25,6 +25,6 @@ void close_settings(SettingsState& state, const gfx::Window& window);
                                          const SDL_Event& e, bool& commit_out);
 
 void draw_settings_overlay(gfx::Renderer& r, gfx::FontAtlas& font,
-                           float win_w, float win_h, const SettingsState& state);
+                           float win_w, float win_h, SettingsState& state);
 
 } // namespace ui

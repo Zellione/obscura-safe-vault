@@ -11,6 +11,7 @@
 #include "platform/file_dialog.h"
 #include "platform/paths.h"
 #include "platform/vault_registry.h"
+#include "ui/text_input_event.h"
 #include "ui/widgets.h"
 
 namespace ui {
@@ -120,8 +121,7 @@ bool VaultUnlockPicker::handle_pick_vault_key(SDL_Keycode k)
 
 bool VaultUnlockPicker::handle_unlock_key(SDL_Keycode k)
 {
-    if (k == SDLK_BACKSPACE) dest_.pw.backspace();
-    else if (k == SDLK_TAB) { dlg_.open_keyfile(win_.sdl_window()); dest_.awaiting_keyfile = true; }
+    if (k == SDLK_TAB) { dlg_.open_keyfile(win_.sdl_window()); dest_.awaiting_keyfile = true; }
     else if (k == SDLK_RETURN || k == SDLK_KP_ENTER) try_unlock();
     return true;
 }
@@ -130,10 +130,9 @@ bool VaultUnlockPicker::handle_event(const SDL_Event& e)
 {
     if (!active_) return false;
 
-    if (e.type == SDL_EVENT_TEXT_INPUT && stage_ == Stage::Unlock) {
-        dest_.pw.push_utf8(e.text.text);
-        return true;
-    }
+    // Precedence rule (Phase 54): the password field consumes editing keys —
+    // Ctrl+A included — before any of this dialog's own shortcuts.
+    if (stage_ == Stage::Unlock && handle_text_input_event(dest_.pw, e)) return true;
     if (e.type != SDL_EVENT_KEY_DOWN) return true;
 
     const SDL_Keycode k = e.key.key;
@@ -152,7 +151,7 @@ void VaultUnlockPicker::update()
 }
 
 void VaultUnlockPicker::render(gfx::Renderer& r, gfx::FontAtlas& font, float ix, float iy,
-                               float mw) const
+                               float mw)
 {
     using namespace gfx::theme;
 
@@ -176,8 +175,8 @@ void VaultUnlockPicker::render(gfx::Renderer& r, gfx::FontAtlas& font, float ix,
                     fit_text(font, "Unlock " + std::filesystem::path(dest_.path).filename().string(),
                             mw - 40),
                     TEXT_DIM);
-        std::string masked(dest_.pw.length(), '*');
-        draw_text_field(r, font, {ix, iy + 72, mw - 40, 40}, masked, true);
+        draw_edit_field(r, font, {ix, iy + 72, mw - 40, 40}, dest_.pw, dest_.pw_chrome,
+                        true, /*mask*/ true);
         r.draw_text(font, ix, iy + 122,
                     dest_.keyfile_path.empty() ? "[Tab] add keyfile  [Enter] unlock"
                                                : "keyfile set  •  [Enter] unlock",

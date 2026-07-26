@@ -6,7 +6,8 @@
 #include <string>
 #include <vector>
 
-#include "ui/secure_text_field.h"
+#include "ui/secure_text_input.h"
+#include "ui/widgets.h"
 #include "vault/vault.h"
 
 namespace gfx { class Renderer; class FontAtlas; class Window; }
@@ -45,7 +46,7 @@ public:
 
     [[nodiscard]] bool handle_event(const SDL_Event& e);   // true if consumed
     void update();                                          // poll the keyfile dialog
-    void render(gfx::Renderer& r, gfx::FontAtlas& font, float ix, float iy, float mw) const;
+    void render(gfx::Renderer& r, gfx::FontAtlas& font, float ix, float iy, float mw);
 
 private:
     enum class Stage { PickVault, Unlock };
@@ -70,7 +71,8 @@ private:
     struct Dest {
         vault::Vault    vault;
         std::string     path;
-        SecureTextField pw;
+        SecureTextInput pw;
+        TextFieldChrome pw_chrome;   // caret/scroll view state, advanced by render()
         std::string     keyfile_path;
         bool            awaiting_keyfile = false;
         bool            is_self = false;

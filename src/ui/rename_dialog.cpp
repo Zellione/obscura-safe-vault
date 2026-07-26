@@ -7,6 +7,7 @@
 #include "gfx/text.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "ui/text_input_event.h"
 #include "ui/widgets.h"
 #include "vault/vault.h"
 
@@ -17,7 +18,7 @@ void RenameDialog::open(std::string gallery_path, std::string old_name)
     active_       = true;
     gallery_path_ = std::move(gallery_path);
     old_name_     = std::move(old_name);
-    buf_          = old_name_;
+    buf_.set_text(old_name_);
     error_.clear();
     SDL_StartTextInput(win_.sdl_window());
 }
@@ -32,22 +33,20 @@ bool RenameDialog::handle_event(vault::Vault& v, const SDL_Event& e)
 {
     if (!active_) return false;
 
-    if (e.type == SDL_EVENT_TEXT_INPUT) { buf_ += e.text.text; return true; }
+    // Precedence rule (Phase 54): the field consumes editing keys first.
+    if (handle_text_input_event(buf_, e)) return true;
     if (e.type != SDL_EVENT_KEY_DOWN) return true;
 
     switch (e.key.key) {
         case SDLK_ESCAPE:
             close();
             return true;
-        case SDLK_BACKSPACE:
-            if (!buf_.empty()) buf_.pop_back();
-            return true;
         case SDLK_RETURN:
         case SDLK_KP_ENTER: {
             using enum vault::VaultResult;
             if (buf_.empty()) { error_ = "Name cannot be empty."; return true; }
-            if (const vault::VaultResult r = vault::rename_node(v, gallery_path_, old_name_, buf_); r == Ok) {
-                status_ = std::format(R"(Renamed "{}" to "{}".)", old_name_, buf_);
+            if (const vault::VaultResult r = vault::rename_node(v, gallery_path_, old_name_, buf_.str()); r == Ok) {
+                status_ = std::format(R"(Renamed "{}" to "{}".)", old_name_, buf_.str());
                 done_   = true;
                 close();
             } else if (r == AlreadyExists) {
@@ -72,7 +71,7 @@ bool RenameDialog::consume_completed(std::string& status_out)
     return true;
 }
 
-void RenameDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H) const
+void RenameDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
 {
     if (!active_) return;
     using namespace gfx::theme;
@@ -87,7 +86,7 @@ void RenameDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float
     const float ix = mx + 20;
     const float iy = my + 20;
     r.draw_text(font, ix, iy, std::format("Rename \"{}\"", old_name_), TEXT);
-    draw_text_field(r, font, {ix, iy + 40, mw - 40, 40}, buf_, true);
+    draw_edit_field(r, font, {ix, iy + 40, mw - 40, 40}, buf_, buf_chrome_, true);
     r.draw_text(font, ix, iy + 96, "[Enter] Rename  [Esc] Cancel", TEXT_FAINT);
     if (!error_.empty()) r.draw_text(font, ix, iy + 124, error_, DANGER);
 }

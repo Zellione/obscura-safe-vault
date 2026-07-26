@@ -8,6 +8,9 @@
 #include "gfx/theme.h"
 #include "vault/index.h"
 
+#include "ui/text_input_model.h"
+#include "ui/widgets.h"
+
 namespace ui {
 
 enum class SettingsSection : uint8_t { Appearance = 0, Browsing, TagColours };
@@ -25,7 +28,8 @@ struct SettingsState {
     // is the row being renamed, or -1 when adding.
     bool        prompting  = false;
     int         prompt_row = -1;
-    std::string prompt_buf;
+    TextInputModel  prompt_buf{vault::INDEX_MAX_CATEGORY_BYTES};
+    TextFieldChrome prompt_chrome;   // caret/scroll view state, advanced while drawing
     std::string error;        // one-line failure shown in the overlay footer
 };
 
