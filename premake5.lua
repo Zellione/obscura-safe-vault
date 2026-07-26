@@ -28,6 +28,14 @@ if _OPTIONS["asan"] and _OPTIONS["tsan"] then
     error("--asan and --tsan cannot be combined in one binary")
 end
 
+-- Sanitizer builds get their own output directories (build/bin/Debug-asan, …)
+-- so an --asan/--tsan generation can never overwrite the plain binaries a
+-- developer launches: previously `test.sh --asan` rebuilt build/bin/Debug/osv
+-- with sanitizers baked in, and the next app launch silently ran 3-10x slower.
+-- Side benefit: plain and sanitizer object trees stay warm side by side, so
+-- alternating test.sh / test.sh --asan no longer forces full rebuilds.
+local san_suffix = _OPTIONS["asan"] and "-asan" or (_OPTIONS["tsan"] and "-tsan" or "")
+
 -- ---------------------------------------------------------------------------
 -- SDL3 linkage helper — shared by the app and the test runner.
 -- Uses the vendored cmake build if scripts/setup.sh has produced it, otherwise
@@ -290,8 +298,8 @@ workspace "ObscuraSafeVault"
     -- Path (relative to the repo root / process cwd) of the bundled UI font.
     defines { 'OSV_DEFAULT_FONT="assets/fonts/NotoSans-Regular.ttf"' }
 
-    objdir  "build/obj/%{cfg.buildcfg}/%{prj.name}"
-    targetdir "build/bin/%{cfg.buildcfg}"
+    objdir  ("build/obj/%{cfg.buildcfg}" .. san_suffix .. "/%{prj.name}")
+    targetdir ("build/bin/%{cfg.buildcfg}" .. san_suffix)
 
     filter "configurations:Debug"
         defines  { "OSV_DEBUG" }

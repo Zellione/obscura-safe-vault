@@ -86,12 +86,12 @@ Both the test suite and the ASAN/UBSan run are enforced in CI on every pull requ
 
 ### ASAN + UBSAN (recommended for development)
 
-Pass `--asan` to the generator to add AddressSanitizer + UndefinedBehaviorSanitizer to every native project:
+Pass `--asan` to the generator to add AddressSanitizer + UndefinedBehaviorSanitizer to every native project. Sanitizer builds land in their own `build/bin/<Config>-asan` / `-tsan` directories, so they never overwrite the plain binaries, and `scripts/test.sh --asan` restores plain build files on exit — a later `scripts/build.sh` always produces uninstrumented binaries.
 
 ```bash
 scripts/test.sh --asan           # build + run the tests under ASAN/UBSan/LSan
 bin/premake5 --asan ninja        # ...or regenerate, then build any target by hand
-ninja Debug_x64 && build/bin/Debug/osv
+ninja Debug_x64 && build/bin/Debug-asan/osv
 ```
 
 ### Valgrind (memory leaks / secure-wipe verification)

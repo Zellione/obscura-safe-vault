@@ -214,3 +214,49 @@ TEST(gif_repair_survives_a_reopen)
     }
     cleanup_dir(dir);
 }
+
+// --- GifSniffGate (navigation must not re-read a GIF on every visit) --------
+//
+// The viewer's legacy-flag sniff reads + decrypts the FULL image; GifSniffGate
+// limits that to GIF images whose animated flag is unset (only they can need
+// the pre-Phase-47 repair), at most once per chunk per viewer session.
+
+TEST(gif_sniff_gate_ignores_non_gif_and_flagged_animated)
+{
+    ui::GifSniffGate gate;
+
+    vault::IndexNode jpeg;
+    jpeg.type        = vault::IndexNode::Type::Image;
+    jpeg.meta.format = vault::ImageFormat::JPEG;
+    CHECK_FALSE(gate.should_sniff(jpeg));
+
+    // animated == true is trustworthy (import and repair both store the value
+    // sniffed from the actual bytes), so playback needs no re-check.
+    vault::IndexNode anim;
+    anim.type          = vault::IndexNode::Type::Image;
+    anim.meta.format   = vault::ImageFormat::GIF;
+    anim.meta.animated = true;
+    CHECK_FALSE(gate.should_sniff(anim));
+
+    vault::IndexNode gallery;  // non-image nodes never sniff
+    CHECK_FALSE(gate.should_sniff(gallery));
+}
+
+TEST(gif_sniff_gate_sniffs_each_legacy_gif_once)
+{
+    ui::GifSniffGate gate;
+
+    vault::IndexNode g1;
+    g1.type             = vault::IndexNode::Type::Image;
+    g1.meta.format      = vault::ImageFormat::GIF;
+    g1.meta.animated    = false;
+    g1.meta.data_offset = 100;
+
+    vault::IndexNode g2 = g1;
+    g2.meta.data_offset = 200;
+
+    CHECK_TRUE(gate.should_sniff(g1));
+    CHECK_FALSE(gate.should_sniff(g1));  // same chunk: checked this session
+    CHECK_TRUE(gate.should_sniff(g2));   // different chunk: first visit
+    CHECK_FALSE(gate.should_sniff(g2));
+}

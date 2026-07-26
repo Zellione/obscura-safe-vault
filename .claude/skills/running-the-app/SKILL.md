@@ -28,8 +28,9 @@ the app immediately (`pkill -x osv`) and tell them.
 ## Launch
 
 ```bash
-# 1. Sanitizer runs leave the binary instrumented — rebuild plain first, or the
-#    app aborts on a libgallium data race that has nothing to do with your change.
+# 1. Make sure the binary is fresh. (Sanitizer runs build into their own
+#    build/bin/Debug-asan / -tsan dirs and restore plain build files on exit,
+#    so they no longer leave build/bin/Debug/osv instrumented.)
 scripts/gen.sh && scripts/build.sh
 
 # 2. Virtual display. Wait for it — querying too early looks like a dead display.
