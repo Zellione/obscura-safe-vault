@@ -361,4 +361,27 @@ TEST(archive_reader_open_files_extraction_with_all_volumes)
     }
 }
 
+// A hostile archive can declare a huge number of entries; enumerating them all
+// into an unbounded in-memory list is a memory-exhaustion DoS. open() must
+// refuse an archive whose entry count exceeds MAX_ENTRIES rather than build the
+// list, and it must fail closed (no partial entry list) — security audit finding.
+TEST(archive_reader_rejects_archive_exceeding_max_entries)
+{
+    std::vector<std::pair<std::string, std::vector<uint8_t>>> items;
+    items.reserve(ui::ArchiveReader::MAX_ENTRIES + 1);
+    for (size_t i = 0; i <= ui::ArchiveReader::MAX_ENTRIES; ++i) {
+        items.emplace_back("e" + std::to_string(i) + ".dat", std::vector<uint8_t>{});
+    }
+    const auto path  = fresh_path("reader_toomany.tar");
+    const auto bytes = read_file(make_archive(items, "ustar", path));
+    REQUIRE(!bytes.empty());
+
+    ui::ArchiveReader r;
+    CHECK_FALSE(r.open(bytes));       // refused, not enumerated
+    CHECK_EQ(r.entries().size(), 0U); // fail closed: no partial list
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
 #endif // OSV_VENDORED_ARCHIVE

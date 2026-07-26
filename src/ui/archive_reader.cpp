@@ -68,6 +68,34 @@ struct archive* open_stream_files(const std::vector<std::filesystem::path>& file
 
 } // namespace
 
+bool ArchiveReader::scan_entries(struct archive* a)
+{
+    struct archive_entry* entry = nullptr;
+    for (;;) {
+        const int r = archive_read_next_header(a, &entry);
+        if (r == ARCHIVE_EOF) {
+            return true;
+        }
+        if (r == ARCHIVE_FATAL || r < ARCHIVE_WARN) {
+            // Hostile/corrupt archive mid-stream: fail closed rather than
+            // return a partial entry list.
+            std::println(stderr, "[ArchiveReader] header read failed: {}", archive_error_string(a));
+            return false;
+        }
+        if (entries_.size() >= MAX_ENTRIES) {
+            // Too many entries to be a real gallery archive; refuse rather than
+            // let an unbounded list exhaust memory.
+            std::println(stderr, "[ArchiveReader] archive declares more than {} entries — refusing",
+                         MAX_ENTRIES);
+            return false;
+        }
+        const char* path = archive_entry_pathname(entry);
+        entries_.emplace_back(path ? std::string(path) : std::string{},
+                              archive_entry_filetype(entry) == AE_IFDIR);
+        archive_read_data_skip(a);
+    }
+}
+
 bool ArchiveReader::open(std::span<const uint8_t> data, std::string_view passphrase)
 {
     data_.assign(data.begin(), data.end());
@@ -90,23 +118,11 @@ bool ArchiveReader::open(std::span<const uint8_t> data, std::string_view passphr
         return false;
     }
 
-    struct archive_entry* entry = nullptr;
-    for (;;) {
-        const int r = archive_read_next_header(a, &entry);
-        if (r == ARCHIVE_EOF) break;
-        if (r == ARCHIVE_FATAL || r < ARCHIVE_WARN) {
-            // Hostile/corrupt archive mid-stream: fail closed rather than
-            // return a partial entry list.
-            std::println(stderr, "[ArchiveReader] header read failed: {}", archive_error_string(a));
-            archive_read_free(a);
-            data_.clear();
-            entries_.clear();
-            return false;
-        }
-        const char* path = archive_entry_pathname(entry);
-        entries_.emplace_back(path ? std::string(path) : std::string{},
-                              archive_entry_filetype(entry) == AE_IFDIR);
-        archive_read_data_skip(a);
+    if (!scan_entries(a)) {
+        archive_read_free(a);
+        data_.clear();
+        entries_.clear();
+        return false;
     }
     archive_read_free(a);
     return true;
@@ -234,26 +250,14 @@ bool ArchiveReader::open_files(std::span<const std::filesystem::path> volumes,
         return false;
     }
 
-    // Parse the entry list in one forward pass (same logic as open())
-    struct archive_entry* entry = nullptr;
-    for (;;) {
-        const int r = archive_read_next_header(a, &entry);
-        if (r == ARCHIVE_EOF) break;
-        if (r == ARCHIVE_FATAL || r < ARCHIVE_WARN) {
-            // Hostile/corrupt archive mid-stream: fail closed rather than
-            // return a partial entry list.
-            std::println(stderr, "[ArchiveReader] header read failed: {}", archive_error_string(a));
-            archive_read_free(a);
-            entries_.clear();
-            file_paths_.clear();
-            passphrase_.wipe();
-            (void)passphrase_.resize(0);
-            return false;
-        }
-        const char* path = archive_entry_pathname(entry);
-        entries_.emplace_back(path ? std::string(path) : std::string{},
-                              archive_entry_filetype(entry) == AE_IFDIR);
-        archive_read_data_skip(a);
+    // Parse the entry list in one forward pass (shared with open()).
+    if (!scan_entries(a)) {
+        archive_read_free(a);
+        entries_.clear();
+        file_paths_.clear();
+        passphrase_.wipe();
+        (void)passphrase_.resize(0);
+        return false;
     }
     archive_read_free(a);
     return true;
