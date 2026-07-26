@@ -143,6 +143,16 @@ scripts/       setup.sh · gen.sh · build.sh · test.sh · build_codecs.sh ·
 
 ---
 
+## Tag dictionary import
+
+The tag overview (`Shift+T`) imports a JSON tag dictionary with `Ctrl+I`: a file of
+`{category, name, description}` entries that registers tag **categories** (each with a
+colour) and stores per-tag **descriptions**. It populates the vocabulary only — it tags
+no images or galleries. File format, worked examples and per-field rules:
+[docs/TAG_DICTIONARY_JSON.md](docs/TAG_DICTIONARY_JSON.md).
+
+---
+
 ## Advanced search
 
 The advanced-search screen (`Shift+/`) builds a structured tag query. A candidate
