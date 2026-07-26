@@ -33,6 +33,11 @@ scripts/test.sh --asan    # AddressSanitizer + UBSan + LSan
 scripts/test.sh --release
 scripts/test.sh --tsan    # ThreadSanitizer (mutually exclusive with --asan)
 ```
+Sanitizer builds are isolated (PR #122): `--asan`/`--tsan` output to
+`build/bin/<Config>-asan` / `-tsan` (own objdirs too, so plain and sanitizer
+object trees stay warm side by side), and `test.sh` restores PLAIN build files
+on exit after a sanitizer run — `build/bin/Debug/osv` is never instrumented and
+a later `scripts/build.sh` always produces plain binaries.
 ⚠ `scripts/test.sh` builds ONLY the test binary — for app-side changes,
 `scripts/build.sh` must also pass (`-Werror` branch-wide since audit-improvements).
 Clang parity check (matches CI's clang leg): `bin/premake5 ninja --cc=clang && ninja -k0 -f build.ninja`,

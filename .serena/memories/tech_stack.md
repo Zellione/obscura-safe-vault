@@ -7,6 +7,12 @@
 - **premake5 beta8** → **Ninja** (gmake2 fallback). Binary at `bin/premake5` (downloaded by `scripts/setup.sh`, not committed).
 - Lua config: `premake5.lua` at project root.
 - Generated files: `osv.ninja`, `osv_tests.ninja`, `monocypher.ninja`, `build.ninja`, `compile_commands.json` (gitignored).
+- **Sanitizer build isolation (PR #122):** `--asan`/`--tsan` generations suffix targetdir/objdir
+  (`build/bin/<Config>-asan` / `-tsan`), so sanitizer builds never overwrite plain binaries, and
+  `scripts/test.sh` restores plain build files on EXIT after a sanitizer run. Root cause fixed: an
+  `--asan` gate used to rebuild `build/bin/Debug/osv` instrumented AND leave `-fsanitize` in
+  build.ninja for every later `build.sh` — the launched app then ran 3-10x slower. CI's
+  `tests-asan`/`tests-tsan`/`tests-asan-codecs` legs run the suffixed binary paths.
 
 ## Runtime deps (vendored git submodules under `vendor/`)
 | Library | Version | How compiled |
