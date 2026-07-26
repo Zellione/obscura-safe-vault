@@ -1261,6 +1261,30 @@ std::vector<SearchHit> Vault::list_favorite_galleries() const
 
 namespace {
 
+// Append a media node's on-disk chunk spans (offset, length) to `live`: an
+// image's data + optional thumb, or a video's chunks + optional poster. Used by
+// reclaim() to build the set of spans that must NOT be punched.
+void collect_media_spans(const IndexNode& n, std::vector<std::pair<uint64_t, uint64_t>>& live)
+{
+    if (n.is_image()) {
+        if (n.meta.data_length > 0) {
+            live.emplace_back(n.meta.data_offset, n.meta.data_length);
+        }
+        if (n.meta.thumb_length > 0) {
+            live.emplace_back(n.meta.thumb_offset, n.meta.thumb_length);
+        }
+    } else if (n.is_video()) {
+        for (const VideoChunk& c : n.vmeta.chunks) {
+            if (c.length > 0) {
+                live.emplace_back(c.offset, c.length);
+            }
+        }
+        if (n.vmeta.poster_length > 0) {
+            live.emplace_back(n.vmeta.poster_offset, n.vmeta.poster_length);
+        }
+    }
+}
+
 // Count total chunks to copy for progress reporting.
 void count_compact_chunks(const IndexNode& root, int& total_chunks)
 {
@@ -1508,26 +1532,8 @@ VaultResult Vault::reclaim()
             live.emplace_back(s.offset, s.length);
         }
     }
-    for_each_media(root_, [&live](const IndexNode& n) {
-        if (n.is_image()) {
-            if (n.meta.data_length > 0) {
-                live.emplace_back(n.meta.data_offset, n.meta.data_length);
-            }
-            if (n.meta.thumb_length > 0) {
-                live.emplace_back(n.meta.thumb_offset, n.meta.thumb_length);
-            }
-        } else if (n.is_video()) {
-            for (const VideoChunk& c : n.vmeta.chunks) {
-                if (c.length > 0) {
-                    live.emplace_back(c.offset, c.length);
-                }
-            }
-            if (n.vmeta.poster_length > 0) {
-                live.emplace_back(n.vmeta.poster_offset, n.vmeta.poster_length);
-            }
-        }
-    });
-    std::sort(live.begin(), live.end());
+    for_each_media(root_, [&live](const IndexNode& n) { collect_media_spans(n, live); });
+    std::ranges::sort(live);
 
     // Punch every gap between consecutive live spans. `cursor` is the first byte
     // not yet known to be live; a span starting past it exposes a dead gap. Spans
@@ -1551,8 +1557,8 @@ void Vault::auto_reclaim_space()
     // meaningful fraction of the file (rewriting to save a few KiB costs more I/O
     // than it saves). Same thresholds the two delete paths shared before.
     uint64_t size = 0;
-    const uint64_t waste = wasted_bytes();
-    if (waste < AUTO_COMPACT_MIN_WASTE || !fileutil::file_size(fp_, size) ||
+    if (const uint64_t waste = wasted_bytes();
+        waste < AUTO_COMPACT_MIN_WASTE || !fileutil::file_size(fp_, size) ||
         waste * AUTO_COMPACT_WASTE_RATIO < size) {
         return;
     }
