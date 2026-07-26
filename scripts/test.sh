@@ -51,6 +51,28 @@ PREMAKE_OPTS=()
 $ASAN && PREMAKE_OPTS+=("--asan")
 $TSAN && PREMAKE_OPTS+=("--tsan")
 
+# Sanitizer binaries build into their own directories (build/bin/Debug-asan, …)
+# so they never overwrite the plain app binary (see premake5.lua).
+SAN_SUFFIX=""
+$ASAN && SAN_SUFFIX="-asan"
+$TSAN && SAN_SUFFIX="-tsan"
+
+# A sanitizer run must not leave sanitizer flags in the generated build files:
+# scripts/build.sh reuses whatever build.ninja/Makefile exists, so a later plain
+# build would silently produce instrumented (3-10x slower) binaries. Restore
+# plain build files on exit — even when the build or the tests fail.
+restore_plain_build_files() {
+    if [[ "$USE_GMAKE" = true ]]; then
+        "$PREMAKE" gmake2 > /dev/null
+    else
+        "$PREMAKE" ninja > /dev/null
+        "$REPO_ROOT/scripts/fix_ninja_deps.sh"
+    fi
+}
+if [[ "$ASAN" == true || "$TSAN" == true ]]; then
+    trap restore_plain_build_files EXIT
+fi
+
 if [[ "$USE_GMAKE" = true ]]; then
     echo "==> Generating GNU Makefiles..."
     "$PREMAKE" "${PREMAKE_OPTS[@]}" gmake2
@@ -73,7 +95,7 @@ else
 fi
 
 # --- Run --------------------------------------------------------------------
-BIN="build/bin/${CONFIG}/osv_tests"
+BIN="build/bin/${CONFIG}${SAN_SUFFIX}/osv_tests"
 if [[ ! -x "$BIN" ]]; then
     echo "Test binary not found at $BIN"
     exit 1

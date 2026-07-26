@@ -183,14 +183,15 @@ void ImageViewer::sync_gif_for_current_index()
 
     if (index_ >= 0 && index_ < static_cast<int>(album_.images.size())) {
         const vault::IndexNode* node = album_.images[index_];
-        if (node != nullptr && node->is_image() && node->meta.format == vault::ImageFormat::GIF) {
-            // Attempt to repair the animated flag for legacy GIFs stored before Phase 47
+        // Repair the animated flag for legacy GIFs stored before Phase 47. The
+        // sniff costs a full read + decrypt, so gif_sniff_gate_ runs it only for
+        // unset flags and only once per chunk — not on every navigation.
+        if (node != nullptr && gif_sniff_gate_.should_sniff(*node)) {
             crypto::SecureBytes bytes;
             if (vault_.read_image(*node, bytes) == vault::VaultResult::Ok) {
+                // The node pointer stays valid: repair only touches in-memory
+                // metadata; the construct below sees the post-repair flag.
                 (void)maybe_repair_gif_animated(vault_, album_.gallery_path, *node, bytes.as_span());
-                // Refresh the node pointer after repair (in case the list changed)
-                // Actually, we keep using the same node pointer since we only modified
-                // in-memory metadata; the construct below will see the post-repair flag
             }
         }
     }

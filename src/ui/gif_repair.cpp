@@ -30,4 +30,13 @@ bool maybe_repair_gif_animated(vault::Vault& v, std::string_view gallery_path,
     return v.repair_image_animated(node_path, actual);
 }
 
+bool GifSniffGate::should_sniff(const vault::IndexNode& node)
+{
+    if (!node.is_image() || node.meta.format != vault::ImageFormat::GIF ||
+        node.meta.animated) {
+        return false;
+    }
+    return sniffed_.insert(node.meta.data_offset).second;
+}
+
 }  // namespace ui

@@ -344,7 +344,9 @@ jobs:
           SDL_VIDEODRIVER: dummy
           ASAN_OPTIONS: detect_leaks=1
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
-        run: ./build/bin/Debug/osv_tests
+        # Sanitizer builds land in suffixed directories (see premake5.lua) so
+        # they can never clobber the plain binaries.
+        run: ./build/bin/Debug-asan/osv_tests
 
   # ===========================================================================
   # ThreadSanitizer gate — builds and runs the full test suite under TSan.
@@ -408,7 +410,7 @@ jobs:
           # so SDL never tries to open a display on the CI runner.
           SDL_VIDEODRIVER: dummy
           TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
-        run: ./build/bin/Debug/osv_tests
+        run: ./build/bin/Debug-tsan/osv_tests
 
   # ===========================================================================
   # ASAN+UBSan codecs — fuzz test + ASAN-instrumented codec builds.
@@ -469,7 +471,7 @@ jobs:
           SDL_VIDEODRIVER: dummy
           ASAN_OPTIONS: detect_leaks=1
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
-        run: ./build/bin/Debug/osv_tests
+        run: ./build/bin/Debug-asan/osv_tests
 
   # ===========================================================================
   # SonarQube analysis — static analysis of src/ via the compilation database

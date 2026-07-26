@@ -15,6 +15,7 @@
 #include "ui/gallery_session_state.h"
 #include "ui/gif_model.h"
 #include "ui/gif_playback.h"
+#include "ui/gif_repair.h"
 #include "ui/quick_switch.h"
 #include "ui/screen.h"
 #include "ui/scroll_model.h"
@@ -259,6 +260,10 @@ private:
     // on scroll the GIF can be torn down and rebuilt before rendering. -1 when
     // gif_ is null. Used to detect and reconcile index changes (Phase 47 fix).
     int gif_index_ = -1;
+
+    // Limits the legacy animated-flag sniff (a full image read + decrypt) to
+    // once per GIF chunk per viewer session; see GifSniffGate.
+    GifSniffGate gif_sniff_gate_;
 
     // Rebuild gif_ for the current index if it has moved. Called from both
     // show_image_at() and update() to keep gif_ in sync regardless of how
