@@ -18,11 +18,11 @@ namespace {
 // above any field's byte cap, so it never truncates a legitimate paste.
 constexpr size_t CLIPBOARD_MAX_BYTES = 1U << 20;
 
-size_t bounded_length(const char* p, size_t cap) noexcept
+std::string_view bounded_view(const char* p) noexcept
 {
     size_t n = 0;
-    while (n < cap && p[n] != '\0') ++n;
-    return n;
+    while (n < CLIPBOARD_MAX_BYTES && p[n] != '\0') ++n;
+    return {p, n};
 }
 
 class SdlClipboard final : public ClipboardBackend {
@@ -35,7 +35,7 @@ public:
         // SDL hands back a heap copy of the clipboard contents. If it held a
         // password, that copy is a second in-process exposure — wipe it before
         // freeing rather than leaving it in the allocator's free list.
-        crypto_wipe(p, bounded_length(p, CLIPBOARD_MAX_BYTES));
+        crypto_wipe(p, bounded_view(p).size());
         SDL_free(p);
     }
 
@@ -71,12 +71,12 @@ bool paste_from_clipboard(ITextInput& field)
     char* raw = cb.get_text();
     if (raw == nullptr) return false;
 
-    const size_t n = bounded_length(raw, CLIPBOARD_MAX_BYTES);
-    if (n == 0) { cb.release_text(raw); return false; }
+    // A view straight over the backend's buffer: for a secure field the bytes go
+    // from here into mlock'd storage with no std::string in between.
+    const std::string_view text = bounded_view(raw);
+    if (text.empty()) { cb.release_text(raw); return false; }
 
-    // A string_view straight over the backend's buffer: for a secure field the
-    // bytes go from here into mlock'd storage with no std::string in between.
-    field.insert(std::string_view(raw, n));
+    field.insert(text);
     cb.release_text(raw);
     return true;
 }

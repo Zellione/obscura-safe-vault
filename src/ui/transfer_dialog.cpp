@@ -314,7 +314,7 @@ void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, flo
 }
 
 void TransferDialog::render_mode_body(gfx::Renderer& r, gfx::FontAtlas& font,
-                                      float ix, float iy, float mw)
+                                      float ix, float iy, float mw) const
 {
     using namespace gfx::theme;
     r.draw_text(font, ix, iy + 36, "Action:", TEXT_DIM);

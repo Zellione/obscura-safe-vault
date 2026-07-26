@@ -72,7 +72,7 @@ private:
     void render_body(gfx::Renderer& r, gfx::FontAtlas& font,
                      float ix, float iy, float mw, float mh, float my);  // per-stage body
     void render_mode_body(gfx::Renderer& r, gfx::FontAtlas& font,
-                          float ix, float iy, float mw);
+                          float ix, float iy, float mw) const;
     void render_pick_gallery_body(gfx::Renderer& r, gfx::FontAtlas& font,
                                   float ix, float iy, float mw, float mh, float my);
 

@@ -57,7 +57,7 @@ struct PrefixWidths {
 };
 
 template <class Measure>
-[[nodiscard]] PrefixWidths build_prefix_widths(std::string_view text, Measure&& measure)
+[[nodiscard]] PrefixWidths build_prefix_widths(std::string_view text, const Measure& measure)
 {
     PrefixWidths pw;
     const std::span<const uint8_t> bytes{reinterpret_cast<const uint8_t*>(text.data()), text.size()};
@@ -89,7 +89,7 @@ template <class Measure>
 [[nodiscard]] TextFieldLayout layout_text_field(std::string_view text, size_t caret,
                                                 size_t sel_begin, size_t sel_end,
                                                 float field_w, float prev_scroll,
-                                                Measure&& measure)
+                                                const Measure& measure)
 {
     TextFieldLayout out;
     if (field_w <= 0.0F) return out;
