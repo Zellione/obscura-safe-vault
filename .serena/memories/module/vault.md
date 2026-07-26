@@ -27,6 +27,32 @@ caller already flushed, so zero prod impact) to keep read-after-append on the sa
 working. Guarded by `tests/vault/test_file_util.cpp` (position-neutrality + a concurrent
 seek0-writer/size-reader race that misplaces writes on the old impl).
 
+Also in file_util.h (PR #119): `fileutil::punch_hole(fp, off, len)` — Linux
+`fallocate(FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE)` (a no-op returning false elsewhere) —
+and `fileutil::file_allocated_bytes` (`st_blocks * 512`, physical size for sparse-aware waste
+measurement). See the reclamation note below.
+
+### Reclamation — compact() vs. reclaim() (PR #119)
+Two ways to reclaim orphaned chunk space (deleted chunks + the superseded index slot):
+- `Vault::compact()` — copies every LIVE chunk into `vault.osv.compact`, writes a fresh index +
+  header, then atomically renames over the original (3-step rename, secure-wipes the old file).
+  SHRINKS logical size but transiently needs ~2x the vault size on disk. Invalidates IndexNode
+  pointers. Still the manual `Shift+C` path and the non-Linux reclaim fallback.
+- `Vault::reclaim()` (Linux) — punches holes over the DEAD spans in place (dead = complement of
+  the live-span set: active index blob + every image data/thumb + video chunks/poster).
+  Offset-stable (no index rewrite, no reopen, pointers stay valid), no temp copy → NO disk spike.
+  Crash-safe by construction (only dead bytes touched). Freed blocks return to the FS; the file
+  stays SPARSE, so logical size and `wasted_bytes()` (a LOGICAL measure) are unchanged — physical
+  disk drops but the waste indicator still shows the holes. `Locked` if locked; `Ok` (no-op) where
+  hole-punch is unsupported. Serialized against the CommitLane: `flush()` the lane, hold
+  `write_mutex_` across scan+punch, snapshot the active slot under `header_mutex_`. Span collection
+  lives in the free helper `collect_media_spans` (keeps reclaim() under the cpp:S3776 complexity cap).
+- `Vault::auto_reclaim_space()` — the shared best-effort gate (thresholds `AUTO_COMPACT_MIN_WASTE`
+  + `AUTO_COMPACT_WASTE_RATIO`) called by `remove_image`/`remove_gallery`: `reclaim()` on Linux,
+  else `compact()`. Tests: `tests/vault/test_vault_compact.cpp` (reclaim preserves media + survives
+  reopen, frees blocks without shrinking logical size, `Locked` when locked; physical assertions
+  guarded by a runtime hole-punch probe) and `test_file_util.cpp` (punch_hole zeroes + frees blocks).
+
 ### Phase 50 concurrency: "main-thread tree" architecture
 The index tree is **main-thread-only**; no tree locks exist. The vault file opens two handles + one write-path mutex for thread-safe import background queue:
 - **`read_fp_`** — second read-only unbuffered FILE* (opened at unlock, closed+wiped at lock). All read paths move to it: thumbnail decrypt, full-image fetch, `VideoSource` (chunks are immutable once appended, so reads never race worker appends). No contention with worker writes.

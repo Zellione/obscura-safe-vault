@@ -88,7 +88,11 @@ fresh random 24-byte nonce per chunk.
 
 Append chunks → fsync → write index to inactive slot → fsync → flip
 `active_slot` → fsync. A crash before the flip leaves the previous index
-valid; orphaned chunks are reclaimed by compaction.
+valid; orphaned chunks are reclaimed either by `compact()` (full rewrite to a
+new file, shrinks logical size, ~2x transient disk) or, on Linux, by `reclaim()`
+which punches holes over the dead spans in place — offset-stable, no temp copy,
+no disk spike, so the file just goes sparse (logical size unchanged). See
+`mem:module/vault` "Reclamation".
 
 ## See also
 

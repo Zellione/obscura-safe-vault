@@ -327,7 +327,11 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
     throws, and the project is exception-free).
   - `recursive_hooks.*` — the real backends: miniz for zip/cbz, ArchiveReader for the rest,
     MediaSink for galleries/placement/tags. `create_gallery` treats AlreadyExists as success
-    (every plan lists every ancestor, so it is the normal case).
+    (every plan lists every ancestor, so it is the normal case). The archive password is held in
+    a `SecurePassword` = `shared_ptr<crypto::SecureBytes>` (via `make_secure_password`), shared by
+    the list/extract closures and `crypto_wipe`'d when the last closure dies — NOT a plain
+    std::string, which would leave the plaintext password in freed heap (invariant #2; security
+    audit finding, PR #118). Backends still get a `string_view` over the buffer.
   - `recursive_exec.*` — `import_archive_recursive`, what ImportQueue's Zip/Archive tasks call.
     `sink_root` is REQUIRED, not defaulted: DirectVaultSink's base already includes the gallery
     name, StagingSink's does not, and guessing drops or duplicates a whole gallery level.
