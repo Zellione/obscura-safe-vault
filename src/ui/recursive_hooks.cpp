@@ -105,27 +105,48 @@ bool arc_extract(std::span<const uint8_t> bytes, std::string_view password, std:
     return absolute;
 }
 
+// A read-only view over a SecurePassword's bytes for the arc backends, which
+// take a string_view. Empty (or a resize failure) yields an empty view.
+std::string_view pw_view(const SecurePassword& pw)
+{
+    if (!pw || pw->size() == 0) {
+        return {};
+    }
+    return {reinterpret_cast<const char*>(pw->data()), pw->size()};
+}
+
 } // namespace
+
+SecurePassword make_secure_password(std::string_view password)
+{
+    auto pw = std::make_shared<crypto::SecureBytes>();
+    if (!password.empty() && pw->resize(password.size())) {
+        std::memcpy(pw->data(), password.data(), password.size());
+    }
+    return pw;
+}
 
 RecursiveHooks make_recursive_hooks(MediaSink& sink, std::string_view root_gallery,
                                     std::string_view password)
 {
     const std::string root(root_gallery);
-    // Copied, not captured by reference: the hooks outlive this call, and the
-    // background queue wipes its password buffer when the task ends.
-    const std::string pw(password);
+    // The password lives in a shared, wiping SecureBytes rather than a plain
+    // std::string: the hook closures outlive this call and are the only owners,
+    // so the plaintext is crypto_wipe'd (never left in freed heap) once the last
+    // closure is destroyed — invariant #2. Shared so both closures hold one copy.
+    const SecurePassword pw = make_secure_password(password);
 
     RecursiveHooks h;
 
     h.list_entries = [pw](std::span<const uint8_t> bytes, ArchiveKind kind,
                           std::vector<ZipEntry>& out) {
-        return kind_is_zip(kind) ? zip_list(bytes, out) : arc_list(bytes, pw, out);
+        return kind_is_zip(kind) ? zip_list(bytes, out) : arc_list(bytes, pw_view(pw), out);
     };
 
     h.extract_entry = [pw](std::span<const uint8_t> bytes, ArchiveKind kind, std::size_t index,
                            crypto::SecureBytes& out) {
         return kind_is_zip(kind) ? zip_extract(bytes, index, out)
-                                 : arc_extract(bytes, pw, index, out);
+                                 : arc_extract(bytes, pw_view(pw), index, out);
     };
 
     h.create_gallery = [&sink, root](std::string_view gallery) {
