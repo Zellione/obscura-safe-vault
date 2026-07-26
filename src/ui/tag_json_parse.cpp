@@ -2,6 +2,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <memory>
+
 #include "ui/tag_inherit.h"        // tag_ci_equal — the UI's one tag-identity rule
 #include "ui/text_input_model.h"   // utf8_prev_boundary
 
@@ -38,7 +40,9 @@ std::string str_field(const json& obj, const char* key)
     return trimmed(it->get_ref<const std::string&>());
 }
 
-bool is_continuation(unsigned char b) noexcept
+// uint8_t, not unsigned char: this file's byte type is the span element type the
+// UTF-8 helpers take, matching text_input_model.cpp's identical predicate.
+bool is_continuation(uint8_t b) noexcept
 {
     return (b & 0xC0) == 0x80;
 }
@@ -53,7 +57,7 @@ bool truncate_utf8(std::string& s, size_t cap)
     // A cut landing ON a continuation byte splits a character; step back to the
     // start of the character that byte belongs to. A cut landing on a lead byte
     // is already a boundary.
-    const size_t cut = is_continuation(static_cast<unsigned char>(s[cap]))
+    const size_t cut = is_continuation(buf[cap])
                            ? utf8_prev_boundary(buf, cap)
                            : cap;
     s.resize(cut);
@@ -86,7 +90,7 @@ const json* entry_array(const json& doc)
     if (doc.is_array()) return &doc;
     if (!doc.is_object()) return nullptr;
     const auto it = doc.find("tags");
-    return (it != doc.end() && it->is_array()) ? &*it : nullptr;
+    return (it != doc.end() && it->is_array()) ? std::to_address(it) : nullptr;
 }
 
 }  // namespace

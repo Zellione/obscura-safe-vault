@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <memory>
 #include <string>
 
 #include "ui/tag_inherit.h"   // tag_ci_equal — the UI's one tag-identity rule
@@ -19,7 +20,7 @@ const TagCategory* find_category(const VaultSettings& s, std::string_view name)
 {
     const auto it = std::ranges::find_if(
         s.categories, [name](const TagCategory& c) { return tag_ci_equal(c.name, name); });
-    return it == s.categories.end() ? nullptr : &*it;
+    return it == s.categories.end() ? nullptr : std::to_address(it);
 }
 
 // The palette index to give a category being registered now: the lowest one no
