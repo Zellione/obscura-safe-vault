@@ -6,7 +6,8 @@
 #include <string>
 #include <vector>
 
-#include "ui/secure_text_field.h"
+#include "ui/secure_text_input.h"
+#include "ui/widgets.h"
 #include "vault/vault.h"
 
 namespace gfx { class Renderer; class FontAtlas; class Window; }
@@ -70,7 +71,10 @@ private:
     struct Dest {
         vault::Vault    vault;
         std::string     path;
-        SecureTextField pw;
+        SecureTextInput pw;
+        // View-only caret/scroll state. `mutable` because render() is const and
+        // this is a per-frame drawing cache, not part of the dialog's state.
+        mutable TextFieldChrome pw_chrome;
         std::string     keyfile_path;
         bool            awaiting_keyfile = false;
         bool            is_self = false;

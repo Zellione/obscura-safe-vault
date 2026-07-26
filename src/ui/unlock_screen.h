@@ -6,7 +6,8 @@
 #include <string>
 
 #include "ui/screen.h"
-#include "ui/secure_text_field.h"
+#include "ui/secure_text_input.h"
+#include "ui/widgets.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; }
 namespace vault { class Vault; }
@@ -51,8 +52,10 @@ private:
     std::filesystem::path vault_path_;
     bool                  create_mode_;
     int                   focus_ = 0;   // 0 = password, 1 = confirm
-    SecureTextField       pw_;
-    SecureTextField       confirm_;
+    SecureTextInput       pw_;
+    SecureTextInput       confirm_;
+    TextFieldChrome       pw_chrome_;
+    TextFieldChrome       confirm_chrome_;
     std::string           keyfile_path_;
     std::string           error_;
     Pending               pending_   = Pending::None;

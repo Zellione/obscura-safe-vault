@@ -15,6 +15,7 @@
 #include "platform/paths.h"
 #include "ui/clipboard_secret.h"
 #include "ui/passphrase.h"
+#include "ui/text_input_event.h"
 #include "ui/unlock_logic.h"
 #include "ui/widgets.h"
 #include "vault/vault.h"
@@ -90,17 +91,20 @@ UnlockScreen::Layout UnlockScreen::layout() const
 
 void UnlockScreen::handle_event(const SDL_Event& e)
 {
-    switch (e.type) {
-        case SDL_EVENT_TEXT_INPUT: {
-            SecureTextField& f = (create_mode_ && focus_ == 1) ? confirm_ : pw_;
-            f.push_utf8(e.text.text);
-            reveal_pw_ = false;  // edited by hand: stop displaying it
-            break;
+    // Precedence rule (Phase 54): the focused field gets first refusal on every
+    // event, so its Ctrl+A / Ctrl+V never fall through to a screen shortcut.
+    SecureTextInput& f = (create_mode_ && focus_ == 1) ? confirm_ : pw_;
+    if (e.type == SDL_EVENT_TEXT_INPUT || e.type == SDL_EVENT_KEY_DOWN) {
+        const size_t before = f.size();
+        if (handle_text_input_event(f, e)) {
+            if (f.size() != before) reveal_pw_ = false;   // edited by hand: stop displaying it
+            return;
         }
-        case SDL_EVENT_KEY_DOWN: {
-            SecureTextField& f = (create_mode_ && focus_ == 1) ? confirm_ : pw_;
+    }
+
+    switch (e.type) {
+        case SDL_EVENT_KEY_DOWN:
             switch (e.key.key) {
-                case SDLK_BACKSPACE: f.backspace(); reveal_pw_ = false; break;
                 case SDLK_TAB:       if (create_mode_) focus_ ^= 1; break;
                 case SDLK_RETURN:
                 case SDLK_KP_ENTER:  submit(); break;
@@ -108,7 +112,6 @@ void UnlockScreen::handle_event(const SDL_Event& e)
                 default: break;
             }
             break;
-        }
         case SDL_EVENT_MOUSE_MOTION:
             mouse_x_ = e.motion.x;
             mouse_y_ = e.motion.y;
@@ -138,9 +141,7 @@ void UnlockScreen::handle_click(const SDL_MouseButtonEvent& b)
         // Fill both fields with one random passphrase and show it so the user
         // can write it down before creating the vault.
         if (generate_passphrase(pw_)) {
-            confirm_.clear();
-            confirm_.push_utf8(std::string_view(
-                reinterpret_cast<const char*>(pw_.bytes().data()), pw_.length()));
+            confirm_.set_text(pw_.text_view());   // view straight over the mlock'd bytes
             reveal_pw_ = true;
             error_.clear();
             copy_password_to_clipboard();   // Phase 45 Part 3: auto-copy the generated passphrase
@@ -209,7 +210,7 @@ void UnlockScreen::apply_dialog_result(const std::string& path)
 void UnlockScreen::copy_password_to_clipboard()
 {
     if (pw_.empty()) return;
-    std::string tmp(reinterpret_cast<const char*>(pw_.bytes().data()), pw_.length());
+    std::string tmp(pw_.text_view());
     SDL_SetClipboardText(tmp.c_str());
     crypto_wipe(clipboard_last_set_.data(), clipboard_last_set_.size());
     clipboard_last_set_   = tmp;
@@ -286,12 +287,12 @@ void UnlockScreen::render(gfx::Renderer& r)
     const float fw = W - 120;
     const float fh = 44;
     r.draw_text(font_, fx, 126, "Password", TEXT_DIM);
-    draw_text_field(r, font_, {fx, 160, fw, fh},
-                    std::string(pw_.length(), '*'), !create_mode_ || focus_ == 0);
+    draw_edit_field(r, font_, {fx, 160, fw, fh}, pw_, pw_chrome_,
+                    !create_mode_ || focus_ == 0, /*mask*/ true);
     if (create_mode_) {
         r.draw_text(font_, fx, 226, "Confirm", TEXT_DIM);
-        draw_text_field(r, font_, {fx, 260, fw, fh},
-                        std::string(confirm_.length(), '*'), focus_ == 1);
+        draw_edit_field(r, font_, {fx, 260, fw, fh}, confirm_, confirm_chrome_,
+                        focus_ == 1, /*mask*/ true);
 
         // The password is the vault's real security boundary: show what the
         // user is committing to.
@@ -307,10 +308,7 @@ void UnlockScreen::render(gfx::Renderer& r)
         btn(L0.new_keyfile_btn, "New keyfile...");
         if (reveal_pw_ && !pw_.empty()) {
             // string_view straight over the mlock'd buffer — no unlocked copy.
-            r.draw_text(font_, fx, 372,
-                        std::string_view(reinterpret_cast<const char*>(pw_.bytes().data()),
-                                         pw_.length()),
-                        gfx::Color{200, 210, 160, 255});
+            r.draw_text(font_, fx, 372, pw_.text_view(), gfx::Color{200, 210, 160, 255});
             r.draw_text(font_, fx, 398, "Write this down, then press Create.", TEXT_DIM);
         }
     }
@@ -331,6 +329,12 @@ std::vector<ui::HelpGroup> UnlockScreen::help_groups() const
     return {{"Unlock", {
         {"Tab", "Switch field (create mode)"}, {"Enter", "Submit"},
         {"Esc", "Back to vault manager"},
+    }},
+    {"Editing", {
+        {"Left/Right", "Move caret"}, {"Ctrl+Left/Right", "Move by word"},
+        {"Home/End", "Start / end of field"}, {"Shift+move", "Select"},
+        {"Ctrl+A", "Select all"}, {"Ctrl+V", "Paste"},
+        {"Backspace/Del", "Delete"},
     }}};
 }
 

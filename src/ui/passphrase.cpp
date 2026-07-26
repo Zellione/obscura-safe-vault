@@ -101,7 +101,7 @@ std::string_view passphrase_word(size_t i) noexcept
     return i < WORDLIST.size() ? WORDLIST[i] : std::string_view{};
 }
 
-bool generate_passphrase(SecureTextField& out, int words)
+bool generate_passphrase(SecureTextInput& out, int words)
 {
     out.clear();
     if (words < 1 || words > PASSPHRASE_MAX_WORDS) return false;
@@ -114,8 +114,8 @@ bool generate_passphrase(SecureTextField& out, int words)
     }
 
     for (int i = 0; i < words; ++i) {
-        if (i > 0) out.push_utf8(" ");
-        out.push_utf8(WORDLIST[pick[static_cast<size_t>(i)]]);
+        if (i > 0) out.insert(" ");
+        out.insert(WORDLIST[pick[static_cast<size_t>(i)]]);
     }
     crypto_wipe(pick.data(), pick.size());
     return true;

@@ -11,14 +11,14 @@
 // Generation samples words from an embedded 256-word list with one CSPRNG byte
 // per word (256 entries make byte-sampling exactly uniform): 8 bits/word, 64
 // bits for the default 8 words — on top of Argon2id's work factor. Generated
-// bytes land directly in a SecureTextField (mlock'd, wiped), never std::string.
+// bytes land directly in a SecureTextInput (mlock'd, wiped), never std::string.
 
 #include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string_view>
 
-#include "ui/secure_text_field.h"
+#include "ui/secure_text_input.h"
 
 namespace ui {
 
@@ -42,7 +42,7 @@ inline constexpr int    PASSPHRASE_MAX_WORDS     = 32;
 
 // Replace `out` with `words` random space-separated wordlist words. Returns
 // false (leaving `out` cleared) on a bad word count or CSPRNG failure.
-[[nodiscard]] bool generate_passphrase(SecureTextField& out,
+[[nodiscard]] bool generate_passphrase(SecureTextInput& out,
                                        int words = PASSPHRASE_DEFAULT_WORDS);
 
 } // namespace ui

@@ -5,7 +5,7 @@
 #include <string_view>
 
 #include "ui/passphrase.h"
-#include "ui/secure_text_field.h"
+#include "ui/secure_text_input.h"
 
 // Phase 7: passphrase strength estimation + diceware-style generation.
 
@@ -74,8 +74,8 @@ TEST(passphrase_wordlist_is_well_formed)
 
 TEST(passphrase_generation_produces_valid_strong_phrase)
 {
-    ui::SecureTextField out;
-    out.push_utf8("stale");  // must be cleared by generate
+    ui::SecureTextInput out;
+    out.insert("stale");  // must be cleared by generate
     REQUIRE(ui::generate_passphrase(out));
 
     const auto b = out.bytes();
@@ -103,8 +103,8 @@ TEST(passphrase_generation_produces_valid_strong_phrase)
 
 TEST(passphrase_generation_is_random)
 {
-    ui::SecureTextField a;
-    ui::SecureTextField b;
+    ui::SecureTextInput a;
+    ui::SecureTextInput b;
     REQUIRE(ui::generate_passphrase(a));
     REQUIRE(ui::generate_passphrase(b));
     // 8 words of 8 bits each: a collision is a 2^-64 event.
@@ -113,7 +113,7 @@ TEST(passphrase_generation_is_random)
 
 TEST(passphrase_generation_rejects_bad_word_count)
 {
-    ui::SecureTextField out;
+    ui::SecureTextInput out;
     CHECK_FALSE(ui::generate_passphrase(out, 0));
     CHECK_FALSE(ui::generate_passphrase(out, -3));
 }

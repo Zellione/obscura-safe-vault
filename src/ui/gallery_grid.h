@@ -25,10 +25,12 @@
 #include "ui/rename_dialog.h"
 #include "ui/screen.h"
 #include "ui/search_overlay.h"
-#include "ui/secure_text_field.h"
+#include "ui/secure_text_input.h"
 #include "ui/selection_model.h"
 #include "ui/tag_editor.h"
+#include "ui/text_input_model.h"
 #include "ui/transfer_dialog.h"
+#include "ui/widgets.h"
 #include "ui/zip_plan.h"
 #include "ui/import_queue.h"
 
@@ -249,8 +251,9 @@ void toggle_select();          // toggle the current item in the export selectio
         bool                  active = false;  // import in flight
     };
     struct Naming {
-        bool         active = false;   // manual new-gallery text entry
-        std::string  buf;
+        bool            active = false;   // manual new-gallery text entry
+        TextInputModel  buf;
+        TextFieldChrome buf_chrome;
         PendingZip   zip;              // zip import descriptor in flight
         PendingFolder folder;          // folder import descriptor in flight
         // Phase 35: masked password entry for an encrypted zip/cbz. Mirrors
@@ -262,7 +265,8 @@ void toggle_select();          // toggle the current item in the export selectio
         struct PasswordPrompt {
             bool            active = false;
             bool            retry  = false;   // true after a wrong password (changes the modal's message)
-            SecureTextField buf{256};
+            SecureTextInput buf{256};
+            TextFieldChrome buf_chrome;
         };
         PasswordPrompt password;
         FileOpJob    file_op;          // background executor for export/delete/compact (Phase 25/26)

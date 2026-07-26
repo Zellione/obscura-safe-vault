@@ -3,11 +3,24 @@
 #include <algorithm>
 #include <cmath>
 
+#include <string>
+
 #include "gfx/renderer.h"
 #include "gfx/text.h"
 #include "gfx/theme.h"
+#include "ui/text_field_view.h"
+#include "ui/text_input_model.h"
 
 namespace ui {
+
+namespace {
+
+// Inset of the text from the field box's left edge; also the caret's home when
+// the field is empty.
+constexpr float FIELD_PAD = 12.0f;
+constexpr float CARET_W   = 2.0f;
+
+} // namespace
 
 bool point_in_rect(float x, float y, const SDL_FRect& r) noexcept
 {
@@ -71,6 +84,61 @@ void draw_text_field(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& bo
     r.draw_round_rect(box, RADIUS_SMALL, focused ? ACCENT : BORDER, /*filled*/ false);
     r.draw_text(font, box.x + 12.0f, font.text_top_for_center(box.y + box.h * 0.5f),
                 shown, TEXT);
+}
+
+void draw_edit_field(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& box,
+                     const ITextInput& field, TextFieldChrome& chrome,
+                     bool focused, bool mask)
+{
+    using namespace gfx::theme;
+    r.draw_round_rect(box, RADIUS_SMALL, SURFACE);
+    r.draw_round_rect(box, RADIUS_SMALL, focused ? ACCENT : BORDER, /*filled*/ false);
+
+    const auto  raw   = field.bytes();
+    const auto* chars = reinterpret_cast<const char*>(raw.data());
+
+    // A masked field lays out one '*' per CHARACTER, and its caret/selection
+    // offsets are counted in characters too — byte offsets would put the caret
+    // in the wrong place the moment a multi-byte character is typed.
+    std::string      masked;
+    std::string_view shown(chars, raw.size());
+    size_t caret = field.caret();
+    size_t sel_b = field.sel_begin();
+    size_t sel_e = field.sel_end();
+    if (mask) {
+        masked.assign(utf8_char_count(raw), '*');
+        shown = masked;
+        caret = utf8_char_count(raw.first(caret));
+        sel_b = utf8_char_count(raw.first(sel_b));
+        sel_e = utf8_char_count(raw.first(sel_e));
+    }
+
+    const float inner_w = box.w - 2 * FIELD_PAD;
+    const TextFieldLayout L = layout_text_field(
+        shown, caret, sel_b, sel_e, inner_w, chrome.scroll,
+        [&font](std::string_view t) { return font.measure(t); });
+    chrome.scroll = L.scroll;
+
+    const float text_y = font.text_top_for_center(box.y + box.h * 0.5f);
+    if (L.sel_w > 0.0f) {
+        r.draw_rect({box.x + FIELD_PAD + L.sel_x, box.y + 4.0f,
+                     L.sel_w, box.h - 8.0f}, ACCENT_DIM);
+    }
+    r.draw_text(font, box.x + FIELD_PAD + L.text_x, text_y,
+                shown.substr(L.vis_begin, L.vis_end - L.vis_begin), TEXT);
+
+    // Solid for CARET_BLINK_MS after anything changes, then blinking. The change
+    // is detected by comparing against what the last frame drew, so no host has
+    // to report its edits.
+    if (chrome.seen_caret != field.caret() || chrome.seen_size != raw.size()) {
+        chrome.seen_caret   = field.caret();
+        chrome.seen_size    = raw.size();
+        chrome.last_edit_ms = SDL_GetTicks();
+    }
+    if (focused && L.caret_visible && caret_is_on(SDL_GetTicks(), chrome.last_edit_ms)) {
+        r.draw_rect({box.x + FIELD_PAD + L.caret_x, box.y + 4.0f,
+                     CARET_W, box.h - 8.0f}, ACCENT);
+    }
 }
 
 void draw_chrome_band(gfx::Renderer& r, const SDL_FRect& band, gfx::Color fill,
