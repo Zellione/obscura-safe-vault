@@ -594,6 +594,11 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `gif_repair.*` (Phase 47) — `maybe_repair_gif_animated(...)` + `Vault::repair_image_animated(path,bool)`:
   lazy bidirectional healing for GIFs stored before Phase 47, persisted via the same crash-safe
   `commit_index()` path as video repair. No-op when the animated flag is already correct.
+  `GifSniffGate` (PR #122) gates the viewer's sniff, which costs a full image read+decrypt:
+  `should_sniff(node)` is true only for a GIF image whose animated flag is UNSET (a set flag is
+  trustworthy — import and repair both persist the value sniffed from actual bytes), at most once
+  per `data_offset` per gate lifetime. ImageViewer holds one per session (`gif_sniff_gate_`);
+  before this, EVERY navigation onto any GIF re-read the whole image.
 - `video_repair.*` — `repair_unknown_video_metadata(vault,gallery_path,children)` sweeps a
   freshly listed gallery for videos still at `VideoCodec::Unknown` + calls
   `Vault::repair_video_metadata` per node. Called from GalleryGrid::refresh() so previously-
