@@ -15,7 +15,7 @@
 
 namespace gfx { class Window; class FontAtlas; class Renderer; }
 namespace vault { class Vault; }
-namespace platform { class VaultRegistry; }
+namespace platform { class VaultRegistry; class FileDialog; }
 
 namespace ui {
 
@@ -31,11 +31,13 @@ namespace ui {
 class TagOverviewScreen : public Screen {
 public:
     TagOverviewScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                      platform::VaultRegistry& registry, std::string active_path);
+                      platform::VaultRegistry& registry, std::string active_path,
+                      platform::FileDialog& file_dialog);
 
     void on_enter() override;
     void on_exit() override;
     void handle_event(const SDL_Event& e) override;
+    void update(double dt) override;
     void render(gfx::Renderer& r) override;
 
     [[nodiscard]] std::vector<ui::HelpGroup> help_groups() const override;
@@ -50,9 +52,16 @@ private:
     void handle_prompt_key_event(const SDL_Event& e);  // handle SDL_EVENT_KEY_DOWN while prompting
     void handle_key_down_in_browse_mode(const SDL_KeyboardEvent& key);
 
-    gfx::Window&    win_;
-    gfx::FontAtlas& font_;
-    vault::Vault&   vault_;
+    // Phase 55: Ctrl+I → pick a .json tag dictionary; the result is drained by
+    // update() and applied in one settings commit.
+    void open_tag_dict_picker();
+    void import_tag_dict(const std::string& path);
+    void render_import_summary(gfx::Renderer& r, float win_w, float win_h);
+
+    gfx::Window&          win_;
+    gfx::FontAtlas&       font_;
+    vault::Vault&         vault_;
+    platform::FileDialog& file_dialog_;
     QuickSwitch     quick_switch_;   // ` overlay: jump to another vault
     NavModel        nav_;            // selection over shown_ (one row each)
 
@@ -73,6 +82,10 @@ private:
     TextInputModel  prompt_buf_{vault::INDEX_MAX_TAG_DESC_BYTES};
     TextFieldChrome prompt_chrome_;
     std::string     error_;
+
+    // Phase 55: the tag-dictionary import summary. Non-empty exactly while the
+    // modal is up; any key dismisses it.
+    std::vector<std::string> import_summary_;
 };
 
 } // namespace ui

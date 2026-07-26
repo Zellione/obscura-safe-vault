@@ -143,6 +143,26 @@ type-ahead because `E` already opens the description prompt. Before Phase 54 the
 filter was documented but **unreachable**: its gate read
 `(!filter_.empty() || c == '/') && c != '/'`, which is false for every input.
 
+**[Ctrl+I] tag dictionary import (Phase 55):** opens a `*.json` file dialog
+(`FileDialog::Purpose::TagJson` — its own purpose so no other poller drains it).
+A **modifier chord** is mandatory here: plain letters go to the filter field and
+the `E` prompt. The picked file registers tag **categories** and stores per-tag
+**descriptions** in the vault-global settings block; it tags no content. One
+`set_vault_settings` commit for the whole file.
+
+A **summary modal** then reports the outcome — categories added, descriptions
+added, descriptions updated, always; plus entries skipped (malformed), entries
+skipped (vault full), categories not registered (vault full), and fields
+shortened, each only when non-zero. Any key dismisses it, and while it is up it
+owns every key so the acknowledging keystroke cannot also act on the list behind
+it. A failed commit shows the error line and **no** modal.
+
+Note the overview lists tags something in the vault **carries**, so a description
+imported for an unused tag is stored and safe but has no row until that tag is
+applied — a direct consequence of this import deliberately tagging nothing.
+User-facing JSON format reference:
+`docs/superpowers/specs/2026-07-25-phase55-json-tag-dictionary-import-design.md`.
+
 ## Sub-gallery tile counts (Phase 51)
 
 Gallery tiles now show a small **counts row** beneath the label (dim text, `CHIP_ROW_H`

@@ -125,7 +125,13 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   byte cap and `layout_text_field` supersede them, for every field rather than one). Counts
   from `VaultSearch::tag_overview`; Enter -> TagGalleries. **Phase 51:** two-line rows (chip
   + counts, then dim description or `(no description — [E] to add)`); `[E]` inline edit prompt
-  reusing the settings-overlay pattern; description drawn via `ui::fit_text`.
+  reusing the settings-overlay pattern; description drawn via `ui::fit_text`. **Phase 55:**
+  holds a `platform::FileDialog&` (passed by App); `Ctrl+I` (modifier chord — bare letters
+  belong to the filter/prompt) opens a `Purpose::TagJson` pick, `update()` drains it,
+  `import_tag_dict()` reads + parses + applies + does the ONE `set_vault_settings` commit
+  and only then shows the summary modal (`import_summary_`, non-empty exactly while up,
+  any key dismisses, owns every key while up). A failed commit sets `error_` and shows no
+  modal — a failed write is never reported as a successful import.
 - `tag_galleries.*` — galleries-only view of galleries directly carrying one tag
   (`NavKind::ToTagGalleries`, tag in Nav::path); thin FavoritesScreen subclass over
   `VaultSearch::galleries_with_tag` whose `go_back()` returns to the overview. Tab toggles to
@@ -534,6 +540,30 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `tag_list_parse.*` — `parse_tag_list(span)` -> normalised tags (split LF, trim, drop blanks,
   ci de-dupe keeping first casing, `TAG_MAX_BYTES=0xFFFF`, cap INDEX_MAX_TAGS; non-UTF-8
   opaque). GalleryGrid `Shift+G` on a gallery tile opens a .txt dialog -> add_tag each (merge).
+- `tag_json_parse.*` (Phase 55) — `parse_tag_dict_json(span) -> TagDictParseResult{entries,
+  malformed_skipped, fields_truncated, over_cap_skipped}`. Exception-free nlohmann
+  (`allow_exceptions=false`, guards, no try/catch — the `meta_json.cpp` pattern). Accepts a
+  bare array OR `{"tags":[…]}`. Per entry: `TagDictEntry{category,name,description}` +
+  `key()` (`"cat:name"` or bare `name`). Trims every field; `name` REQUIRED and must not
+  contain `:` (resolve_tag splits on the first colon — rejected loudly, counted malformed);
+  category/description truncated to `INDEX_MAX_CATEGORY_BYTES`/`INDEX_MAX_TAG_DESC_BYTES`
+  on a UTF-8 boundary (via `utf8_prev_boundary`) and counted in `fields_truncated` — a
+  truncated entry is still IMPORTED, never counted as skipped; ci de-dupe on `key()` within
+  the file (first casing + first description win); entry count capped at
+  `INDEX_MAX_TAG_DESCRIPTIONS` (`over_cap_skipped`). Pure — no vault, no SDL, no disk.
+- `tag_dict_import.*` (Phase 55) — `apply_tag_dict(vault::VaultSettings&,
+  const TagDictParseResult&) -> TagDictImportSummary`. Pure over the SETTINGS struct (never a
+  Vault), which is what makes the whole import unit-testable unopened; the CALLER does the
+  single `set_vault_settings` commit. New category → lowest palette index no category uses,
+  wrapping `size % TAG_SWATCH_COUNT` once all 16 are taken; an existing category is NEVER
+  recoloured. Descriptions upserted via `vault::set_tag_description`; an EMPTY description
+  leaves an existing one intact — deliberate divergence from Phase 51's edit-time "empty
+  removes" (an empty field in a file is ambiguous). Identical text counts as neither added
+  nor updated. `INDEX_MAX_TAG_CATEGORIES` is checked HERE (only the applier knows the vault's
+  count) → `categories_skipped_over_cap`, description cap → `entries_skipped_over_cap`; the
+  entry's description still lands when only the category was refused. `tag_dict_summary_lines`
+  is the pure modal body: three "what changed" counts always, each non-zero skip/truncation
+  on its own line — no cap is ever silent.
 - `tag_overview_model.*` — `TagTally{tag,gallery_count,image_count,description}` (Phase 51) +
   sort_tags(Name/Count) + filter_tags(ci prefix).
 - `detail_model.*` (Phase 48) — pure detail-panel content: `DetailRow`/`DetailSection`/

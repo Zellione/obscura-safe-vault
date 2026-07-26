@@ -135,6 +135,45 @@ TEST(file_dialog_no_arg_take_is_purpose_agnostic)
     CHECK(res->size() == 1);
 }
 
+// Phase 55: a tag-dictionary (.json) pick is its own Purpose so it cannot be
+// drained by the tag-list (.txt) poller or any other handler sharing the dialog.
+TEST(file_dialog_tagjson_result_isolated_from_other_purposes)
+{
+    FileDialog d;
+    Peer::arm(d, Purpose::TagJson);
+    Peer::complete(d, {"/tmp/dict.json"});
+
+    CHECK_FALSE(d.take_result(Purpose::TagList).has_value());
+    CHECK_FALSE(d.take_result(Purpose::Images).has_value());
+    CHECK_FALSE(d.take_result(Purpose::Zip).has_value());
+
+    auto json = d.take_result(Purpose::TagJson);
+    REQUIRE(json.has_value());
+    REQUIRE(json->size() == 1);
+    CHECK(std::filesystem::path(json->front()) == std::filesystem::path("/tmp/dict.json"));
+}
+
+TEST(file_dialog_taglist_result_not_taken_by_tagjson_purpose)
+{
+    FileDialog d;
+    Peer::arm(d, Purpose::TagList);
+    Peer::complete(d, {"/tmp/tags.txt"});
+
+    CHECK_FALSE(d.take_result(Purpose::TagJson).has_value());
+    CHECK(d.take_result(Purpose::TagList).has_value());
+}
+
+TEST(file_dialog_cancelled_tagjson_pick_still_resolves)
+{
+    FileDialog d;
+    Peer::arm(d, Purpose::TagJson);
+    Peer::complete(d, {});   // user cancelled
+
+    auto json = d.take_result(Purpose::TagJson);
+    REQUIRE(json.has_value());
+    CHECK(json->empty());
+}
+
 // Phase 51 Task 14: Multi-select archives. The zip dialog now accepts
 // allow_many=true, so multiple archives can be picked at once.
 TEST(file_dialog_zip_multi_select)

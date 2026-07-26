@@ -10,7 +10,11 @@
 #include "gfx/text.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "platform/file_dialog.h"
+#include "platform/paths.h"
 #include "ui/tag_chip.h"
+#include "ui/tag_dict_import.h"
+#include "ui/tag_json_parse.h"
 #include "ui/tag_overview_model.h"
 #include "ui/text_input_event.h"
 #include "ui/widgets.h"
@@ -70,8 +74,9 @@ std::string count_label(int galleries, int images)
 } // namespace
 
 TagOverviewScreen::TagOverviewScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                                     platform::VaultRegistry& registry, std::string active_path)
-    : win_(win), font_(font), vault_(vault),
+                                     platform::VaultRegistry& registry, std::string active_path,
+                                     platform::FileDialog& file_dialog)
+    : win_(win), font_(font), vault_(vault), file_dialog_(file_dialog),
       quick_switch_(registry, std::move(active_path))
 {
 }
@@ -117,9 +122,60 @@ int TagOverviewScreen::row_at(float my) const
                ? row : -1;
 }
 
+void TagOverviewScreen::open_tag_dict_picker()
+{
+    if (file_dialog_.busy()) return;
+    error_.clear();
+    file_dialog_.open_tag_json(win_.sdl_window());
+}
+
+void TagOverviewScreen::import_tag_dict(const std::string& path)
+{
+    // A .json tag dictionary carries vocabulary only — no key material and no
+    // decrypted vault content — so reading it is invariant-safe. The path came
+    // back through platform::normalize_user_path in the dialog callback.
+    const auto bytes = platform::read_file(path);
+    if (!bytes) { error_ = "Could not read the tag dictionary."; return; }
+
+    const TagDictParseResult parsed = parse_tag_dict_json(*bytes);
+    if (parsed.entries.empty() && parsed.malformed_skipped == 0 &&
+        parsed.over_cap_skipped == 0) {
+        error_ = "That file holds no tag entries.";
+        return;
+    }
+
+    auto       settings = vault::vault_settings(vault_);
+    const auto summary  = apply_tag_dict(settings, parsed);
+    // One commit for the whole file, not one per entry. It can fail, and a
+    // failed commit must never be reported as a successful import.
+    if (vault::set_vault_settings(vault_, std::move(settings)) != vault::VaultResult::Ok) {
+        error_ = "Could not save the imported tag dictionary";
+        return;
+    }
+
+    error_.clear();
+    import_summary_ = tag_dict_summary_lines(summary);
+    reload();
+}
+
+void TagOverviewScreen::update(double dt)
+{
+    (void)dt;
+    if (auto res = file_dialog_.take_result(platform::FileDialog::Purpose::TagJson)) {
+        if (!res->empty()) import_tag_dict(res->front());   // empty => cancelled
+        mark_dirty();
+    }
+}
+
 void TagOverviewScreen::handle_key_down_in_browse_mode(const SDL_KeyboardEvent& key)
 {
     if (is_quick_switch_key(key)) { quick_switch_.open(); return; }
+    // A modifier chord, not a bare letter: '/' aside, plain keys belong to the
+    // filter field and the E prompt.
+    if (key.key == SDLK_I && (key.mod & SDL_KMOD_CTRL) != 0) {
+        open_tag_dict_picker();
+        return;
+    }
     switch (key.key) {
         case SDLK_UP:       nav_.move(-1);                              break;
         case SDLK_DOWN:     nav_.move(1);                               break;
@@ -156,6 +212,13 @@ void TagOverviewScreen::handle_event(const SDL_Event& e)
         (void)quick_switch_.handle_event(e);
         if (std::string p; quick_switch_.consume_choice(p))
             request(NavKind::ToUnlock, std::move(p));
+        return;
+    }
+
+    // The import summary is modal: it owns every key until it is dismissed, so
+    // a keystroke meant to acknowledge it cannot also act on the list behind it.
+    if (!import_summary_.empty()) {
+        if (e.type == SDL_EVENT_KEY_DOWN) import_summary_.clear();
         return;
     }
 
@@ -369,6 +432,36 @@ void TagOverviewScreen::render(gfx::Renderer& r)
         const std::string hint = std::format("{} bytes left", bytes_left);
         r.draw_text(font_, prompt_x + PROMPT_PAD, hint_y, hint, TEXT_FAINT);
     }
+
+    render_import_summary(r, W, H);
+}
+
+void TagOverviewScreen::render_import_summary(gfx::Renderer& r, float win_w, float win_h)
+{
+    using namespace gfx::theme;
+    if (import_summary_.empty()) return;
+
+    const float line_h = font_.pixel_height() + 8;
+    const float box_w  = std::clamp(win_w * PROMPT_WIDTH_RATIO, PROMPT_MIN_W, PROMPT_MAX_W);
+    const float box_h  = PROMPT_TITLE_PAD + PROMPT_LINE_H + PROMPT_INPUT_PAD +
+                         line_h * static_cast<float>(import_summary_.size()) +
+                         PROMPT_HINT_PAD + PROMPT_LINE_H + PROMPT_PAD;
+    const float box_x  = (win_w - box_w) / 2.0f;
+    const float box_y  = (win_h - box_h) / 2.0f;
+
+    const SDL_FRect box{.x = box_x, .y = box_y, .w = box_w, .h = box_h};
+    r.draw_round_rect(box, RADIUS, SURFACE);
+    r.draw_round_rect(box, RADIUS, ACCENT, /*filled*/ false);
+
+    const float title_y = box_y + PROMPT_TITLE_PAD;
+    r.draw_text(font_, box_x + PROMPT_PAD, title_y, "Tag dictionary imported", TEXT);
+
+    float y = title_y + PROMPT_LINE_H + PROMPT_INPUT_PAD;
+    for (const std::string& line : import_summary_) {
+        r.draw_text(font_, box_x + PROMPT_PAD, y, line, TEXT_DIM);
+        y += line_h;
+    }
+    r.draw_text(font_, box_x + PROMPT_PAD, y + PROMPT_HINT_PAD, "Any key to dismiss", TEXT_FAINT);
 }
 
 std::vector<HelpGroup> TagOverviewScreen::help_groups() const
@@ -377,6 +470,7 @@ std::vector<HelpGroup> TagOverviewScreen::help_groups() const
         {"Up/Down", "Move selection"}, {"Enter", "Open tag"},
         {"/", "Filter tags"}, {"Tab", "Toggle sort (name/count)"},
         {"E", "Edit description"},
+        {"Ctrl+I", "Import tag dictionary"},
         {"Esc", "Back"},
     }},
     text_editing_help_group()};

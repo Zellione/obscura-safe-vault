@@ -519,6 +519,8 @@ project "osv_tests"
         "src/ui/file_op_job.cpp",
         "src/ui/progress_modal.cpp",
         "src/ui/tag_list_parse.cpp",
+        "src/ui/tag_json_parse.cpp",
+        "src/ui/tag_dict_import.cpp",
         "src/ui/tag_inherit.cpp",
         "src/ui/tag_category.cpp",
         "src/ui/tag_suggest.cpp",

@@ -218,7 +218,7 @@ void App::to_tag_overview()
 {
     state_  = State::Browsing;
     screen_ = std::make_unique<ui::TagOverviewScreen>(
-        window_, font_, *vault_state_.active, registry_, vault_state_.active_path);
+        window_, font_, *vault_state_.active, registry_, vault_state_.active_path, dialog_);
     screen_->on_enter();
 }
 

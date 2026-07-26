@@ -91,6 +91,19 @@ void FileDialog::open_tag_list(SDL_Window* parent)
                            static_cast<int>(f.size()), nullptr, /*allow_many*/ false);
 }
 
+void FileDialog::open_tag_json(SDL_Window* parent)
+{
+    // Its own Purpose (not TagList's): the tag overview and the gallery grid can
+    // both have a pick outstanding, and an untagged result would be drained by
+    // whichever poller ran first (the Phase 21 regression this enum exists for).
+    if (!begin_open(Purpose::TagJson)) return;
+    static constexpr std::array f{
+        SDL_DialogFileFilter{"Tag dictionary (JSON)", "json"},
+        SDL_DialogFileFilter{"All files", "*"}};
+    SDL_ShowOpenFileDialog(on_files, this, parent, f.data(),
+                           static_cast<int>(f.size()), nullptr, /*allow_many*/ false);
+}
+
 void FileDialog::save_keyfile(SDL_Window* parent)
 {
     if (!begin_open(Purpose::SaveKeyfile)) return;
