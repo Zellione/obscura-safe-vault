@@ -730,8 +730,13 @@ void AdvancedSearchScreen::render(gfx::Renderer& r)
         const SDL_FRect box{W / 2 - 220, H / 2 - 40, 440, 80};
         r.draw_round_rect(box, RADIUS, SURFACE);
         r.draw_round_rect(box, RADIUS, ACCENT, /*filled*/ false);
-        r.draw_text(font_, box.x + 16, box.y + 14, "Clear search? Resets all parameters.", TEXT_DIM);
-        r.draw_text(font_, box.x + 16, box.y + 44, "[Y] Yes      [N] No", TEXT);
+        // Both lines are elided to the box: it is a fixed 440 px wide, and the
+        // prompt is wider than that at the app's font.
+        const float box_text_w = box.w - 32;
+        r.draw_text(font_, box.x + 16, box.y + 14,
+                    fit_text(font_, "Clear search? Resets all parameters.", box_text_w), TEXT_DIM);
+        r.draw_text(font_, box.x + 16, box.y + 44,
+                    fit_text(font_, "[Y] Yes      [N] No", box_text_w), TEXT);
     }
     if (!status_.empty()) r.draw_text(font_, PAD, H - 24, status_, TEXT_FAINT);
 

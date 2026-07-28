@@ -3,6 +3,7 @@
 #include "gfx/renderer.h"
 #include "gfx/text.h"
 #include "gfx/theme.h"
+#include "ui/widgets.h"   // fit_text
 
 namespace ui {
 
@@ -35,7 +36,10 @@ void draw_op_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
         r.draw_round_rect({bar.x, bar.y, bar.w * frac, bar.h}, 4, ACCENT);
     }
 
-    r.draw_text(font, mx + PAD, my + mh - PAD - line, m.hint, TEXT_FAINT);
+    // The hint is supplied by whichever job owns the modal, so its length is not
+    // knowable here — elide it rather than let a long one run past the border.
+    r.draw_text(font, mx + PAD, my + mh - PAD - line,
+                fit_text(font, m.hint, mw - 2 * PAD), TEXT_FAINT);
 }
 
 } // namespace ui

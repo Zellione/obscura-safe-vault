@@ -326,7 +326,8 @@ void TransferDialog::render_mode_body(gfx::Renderer& r, gfx::FontAtlas& font,
         if (on) r.draw_round_rect({ix, ry, mw - 40, 30}, RADIUS_SMALL, SURFACE_HI);
         r.draw_text(font, ix + 8, ry + 4, fit_text(font, modes[i], mw - 56), on ? TEXT : TEXT_DIM);
     }
-    r.draw_text(font, ix, iy + 150, "[Up/Down] choose  [Enter] next", TEXT_FAINT);
+    r.draw_text(font, ix, iy + 150,
+                fit_text(font, "[Up/Down] choose  [Enter] next", mw - 40), TEXT_FAINT);
 }
 
 void TransferDialog::render_pick_gallery_body(gfx::Renderer& r, gfx::FontAtlas& font,
