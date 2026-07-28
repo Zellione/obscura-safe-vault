@@ -25,7 +25,7 @@ namespace ui {
 struct GifPlayback::Impl {
     crypto::SecureBytes     bytes_;             // decrypted GIF data (borrowed by decoder_)
     media::GifDecoder       dec_;               // reads frames from bytes_
-    media::GifFrame         current_;           // frame on screen
+    media::AnimFrame         current_;           // frame on screen
     SDL_Texture*            tex_ = nullptr;     // RGBA streaming texture (created lazily)
     double                  acc_ = 0.0;         // frame-advance accumulator
     bool                    paused_ = false;    // Space toggle

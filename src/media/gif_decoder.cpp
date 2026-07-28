@@ -188,7 +188,7 @@ bool GifDecoder::open(std::span<const uint8_t> data)
     return true;
 }
 
-std::optional<GifFrame> GifDecoder::next_frame()
+std::optional<AnimFrame> GifDecoder::next_frame()
 {
     if (impl_->fmt == nullptr || impl_->codec == nullptr || impl_->frame == nullptr || impl_->pkt == nullptr) {
         return std::nullopt;
@@ -258,7 +258,7 @@ std::optional<GifFrame> GifDecoder::next_frame()
 
     ++impl_->decoded;
 
-    GifFrame result;
+    AnimFrame result;
     result.rgba    = std::move(rgba);
     result.width   = frame_width;
     result.height  = frame_height;

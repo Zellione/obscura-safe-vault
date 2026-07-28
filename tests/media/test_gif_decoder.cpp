@@ -4,11 +4,13 @@
 
 #include <array>
 #include <cstdio>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <vector>
 
+#include "media/anim_decoder.h"
 #include "media/gif_decoder.h"
 
 namespace {
@@ -128,6 +130,28 @@ TEST(gif_decoder_reports_real_frame_delays)
     }
     // tiny_anim.gif has 4 frames
     CHECK(frame_count == 4);
+}
+
+// Phase 57: GifDecoder is one backend behind media::AnimDecoder, so playback can
+// drive it and WebpAnimDecoder through the same handle.
+TEST(gif_decoder_is_usable_through_the_anim_decoder_interface)
+{
+    const auto bytes = read_fixture("tiny_anim.gif");
+    REQUIRE(!bytes.empty());
+
+    std::unique_ptr<media::AnimDecoder> d = std::make_unique<media::GifDecoder>();
+    REQUIRE(d->open(bytes));
+    CHECK(d->width()  > 0);
+    CHECK(d->height() > 0);
+
+    const auto first = d->next_frame();
+    REQUIRE(first.has_value());
+    CHECK_EQ(first->rgba.size(),
+             static_cast<size_t>(first->width) * static_cast<size_t>(first->height) * 4);
+    CHECK(first->delay_s >= media::kMinFrameDelay);
+
+    d->rewind();
+    CHECK_EQ(d->frames_decoded(), static_cast<size_t>(0));
 }
 
 #endif // OSV_VENDORED_AV
