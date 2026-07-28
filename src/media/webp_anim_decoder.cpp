@@ -22,7 +22,14 @@ struct WebpAnimDecoder::Impl {
     size_t             decoded = 0;
     int                prev_ts = 0;
 
+    Impl() = default;
     ~Impl() { close(); }
+
+    // Unmovable: it owns a raw ::WebPAnimDecoder* that must be deleted exactly
+    // once, and it only ever lives inside the owning unique_ptr. Deleting the
+    // move assignment deletes every other implicit special member with it
+    // (C++ Core Guidelines C.21).
+    Impl& operator=(Impl&&) = delete;
 
     void close() noexcept
     {
