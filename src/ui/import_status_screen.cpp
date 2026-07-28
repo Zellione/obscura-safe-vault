@@ -9,6 +9,8 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "ui/import_queue.h"
+#include "ui/import_status_row.h"
+#include "ui/text_metrics.h"
 #include "ui/widgets.h"
 
 namespace ui {
@@ -19,74 +21,46 @@ constexpr float OY  = 150;   // list top (after optional lane-failure banner)
 constexpr float PAD = 9;     // vertical padding inside a row
 constexpr float BANNER_H = 48.0f;  // lane-failure banner height
 
-// Format a single import task row's display text based on its state.
-std::string format_row_text(const ImportTaskInfo& task)
-{
-    using enum ImportTaskState;
-    switch (task.state) {
-        case Running:
-            return std::format("{} — {}", task.display_name,
-                               format_task_progress(task.done, task.total, task.expanding));
-        case Queued:
-            return std::format("#{} {} → {}",
-                             task.id & 0xFF, task.display_name,
-                             task.dest_gallery.empty() ? "root" : task.dest_gallery);
-        case Done:
-            return std::format("✓ {} imported, {} skipped", task.imported, task.skipped);
-        case Failed:
-            return task.error.empty() ? std::string("✗ Import failed")
-                                      : std::format("✗ {}", task.error);
-        case Cancelled:
-            return std::string("− Cancelled");
-    }
-    return std::string();
-}
-
-// Helper to draw a running (progress bar) row
-void draw_running_row(gfx::Renderer& r, gfx::FontAtlas& font, const ImportTaskInfo& task,
-                      float y, float W, float row_h, float ph)
+// Line 1 of every row: the route. Elided to the row's usable width so a long
+// archive name never runs under the row border.
+void draw_route_line(gfx::Renderer& r, gfx::FontAtlas& font, const ImportTaskInfo& task,
+                     float y, float w)
 {
     using namespace gfx::theme;
-
-    const float bar_y = y + (row_h - 4 - 12) * 0.5f;
-    const float bar_w = W - 2 * OX - 24;
-    const float progress = task.total > 0 ? static_cast<float>(task.done) / static_cast<float>(task.total) : 0.0f;
-    const float ty = y + (row_h - 4 - ph) * 0.5f;
-
-    // Background bar
-    SDL_FRect bar_bg{OX + 14, bar_y, bar_w, 12};
-    r.draw_round_rect(bar_bg, 2, OK);
-
-    // Filled bar
-    SDL_FRect bar_fill{OX + 14, bar_y, bar_w * progress, 12};
-    r.draw_round_rect(bar_fill, 2, ACCENT);
-
-    // Text: name and "done/total"
-    const std::string prog_text = format_task_progress(task.done, task.total, task.expanding);
-    const float name_width = W - OX - 14 - 100 - 20;
-    const std::string display = fit_text(font, task.display_name, name_width);
-    r.draw_text(font, OX + 14, ty, display, TEXT);
-    r.draw_text(font, W - OX - 14 - static_cast<float>(font.measure(prog_text)), ty, prog_text, TEXT_DIM);
+    const std::string route = fit_text(font, format_task_route(task), w - 2 * OX - 28);
+    r.draw_text(font, OX + 14, y, route, TEXT);
 }
 
-// Helper to draw a queued or finished row
-void draw_queued_finished_row(gfx::Renderer& r, gfx::FontAtlas& font, const ImportTaskInfo& task,
-                              float y, float row_h, float ph, float W)
+// Line 2 for a Running task: the progress bar plus its done/total text. The bar
+// owns this band alone — the Phase 56 fix for the bar being drawn over the text.
+void draw_progress_line(gfx::Renderer& r, gfx::FontAtlas& font, const ImportTaskInfo& task,
+                        float y, float w, float pitch)
 {
     using namespace gfx::theme;
+    constexpr float BAR_H = 12.0f;
 
-    const float ty = y + (row_h - 4 - ph) * 0.5f;
-    const std::string text = format_row_text(task);
-    const std::string display = fit_text(font, text, W - 2 * OX - 28);
+    const std::string prog = format_task_status(task);
+    const auto  prog_w  = static_cast<float>(font.measure(prog));
+    const float bar_w   = w - 2 * OX - 28 - prog_w - 16.0f;
+    const float bar_y   = y + (pitch - BAR_H) * 0.5f;
+    const float progress = task.total > 0
+        ? static_cast<float>(task.done) / static_cast<float>(task.total) : 0.0f;
 
-    gfx::Color text_color = TEXT;
-    if (task.state == ImportTaskState::Failed) {
-        text_color = DANGER;
-    } else if (task.state == ImportTaskState::Done) {
-        text_color = OK;
-    }
+    r.draw_round_rect({OX + 14, bar_y, std::max(0.0f, bar_w), BAR_H}, 2, OK);
+    r.draw_round_rect({OX + 14, bar_y, std::max(0.0f, bar_w) * progress, BAR_H}, 2, ACCENT);
+    r.draw_text(font, w - OX - 14 - prog_w, y, prog, TEXT_DIM);
+}
 
-    r.draw_text(font, OX + 14, ty, display, text_color);
+// Line 2 for every other state: the outcome, coloured by state.
+void draw_status_line(gfx::Renderer& r, gfx::FontAtlas& font, const ImportTaskInfo& task,
+                      float y, float w)
+{
+    using namespace gfx::theme;
+    gfx::Color c = TEXT_DIM;
+    if (task.state == ImportTaskState::Failed)    c = DANGER;
+    else if (task.state == ImportTaskState::Done) c = OK;
+
+    r.draw_text(font, OX + 14, y, fit_text(font, format_task_status(task), w - 2 * OX - 28), c);
 }
 
 // Geometry shared by every row of one frame's list rendering; bundled so the
@@ -99,6 +73,7 @@ struct RowLayout {
     int   first    = 0;
     int   sel      = 0;
     float scroll   = 0;
+    float pitch    = 0;
 };
 
 // Draw a single row of the import list
@@ -111,18 +86,20 @@ void draw_row(gfx::Renderer& r, gfx::FontAtlas& font, const RowLayout& lay, int 
 
     const SDL_FRect row{OX, y, lay.w - 2 * OX, lay.row_h - 4};
     const bool      sel_row = (i == lay.sel);
-    const float     ph      = font.pixel_height();
 
     // Draw selection glow and background
     if (sel_row) r.draw_selection_glow(row, RADIUS, ACCENT);
     r.draw_round_rect(row, RADIUS, sel_row ? SURFACE_HI : SURFACE);
     r.draw_round_rect(row, RADIUS, sel_row ? ACCENT : BORDER, /*filled*/ false);
 
-    if (task.state == ImportTaskState::Running) {
-        draw_running_row(r, font, task, y, lay.w, lay.row_h, ph);
-    } else {
-        draw_queued_finished_row(r, font, task, y, lay.row_h, ph, lay.w);
-    }
+    const float line1 = y + PAD;
+    const float line2 = line1 + lay.pitch;
+
+    draw_route_line(r, font, task, line1, lay.w);
+    if (task.state == ImportTaskState::Running)
+        draw_progress_line(r, font, task, line2, lay.w, lay.pitch);
+    else
+        draw_status_line(r, font, task, line2, lay.w);
 }
 
 } // namespace
@@ -243,7 +220,8 @@ void ImportStatusScreen::render(gfx::Renderer& r)
 
     // Compute scroll geometry
     const float bottom = H - 24.0f;  // reserve footer band
-    const float row_h = ph + 2 * PAD;
+    const float pitch = line_pitch(ph);
+    const float row_h = import_row_height(ph, PAD);
     const int  visible = std::max(1, static_cast<int>((bottom - list_top) / row_h));
     int        first   = 0;
     const auto count   = static_cast<int>(rows_.size());
@@ -256,7 +234,7 @@ void ImportStatusScreen::render(gfx::Renderer& r)
 
     // Render rows
     const RowLayout lay{.list_top = list_top, .bottom = bottom, .row_h = row_h,
-                        .w = W, .first = first, .sel = sel_, .scroll = scroll_};
+                        .w = W, .first = first, .sel = sel_, .scroll = scroll_, .pitch = pitch};
     for (int i = first; i < first + visible && i < count; ++i) {
         draw_row(r, font_, lay, i, rows_[static_cast<size_t>(i)]);
     }
