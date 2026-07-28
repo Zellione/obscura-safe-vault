@@ -10,6 +10,7 @@
 #include "gfx/texture_cache.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "ui/album_rebind.h"
 #include "ui/export.h"
 #include "ui/gif_model.h"
 #include "ui/gif_repair.h"
@@ -94,20 +95,35 @@ void ImageViewer::on_exit()
 
 void ImageViewer::on_vault_changed()
 {
-    // Phase 50: vault's index tree changed (background import drain attached nodes).
-    // album_.images pointers are now stale; re-list and clamp index.
+    // Phase 50: the vault's index tree changed (a background import drain
+    // attached nodes), so album_.images pointers are stale and must be re-listed.
+    // Phase 56: re-listing must not disturb what the user is looking at. The
+    // current item is re-found by PATH, and when it is still there we assign
+    // index_ directly instead of calling show_image_at() — that call refits
+    // (fit_.fitted = false), re-runs scroll_to_image() and rebuilds video_/gif_,
+    // which is exactly the zoom/scroll/playback reset this fixes. Keeping the
+    // decoder alive is safe: VideoSource copies the node's chunk table at open
+    // and never retains the IndexNode.
+    const std::string current = album_.paths.empty() || index_ < 0 ||
+                                index_ >= static_cast<int>(album_.paths.size())
+        ? std::string{}
+        : album_.paths[static_cast<size_t>(index_)];
+
     if (!album_.from_collection) {
         album_.images.clear();
         album_.paths.clear();
         for (const vault::IndexNode* n : vault_.list(album_.gallery_path)) {
             if (!n->is_media()) continue;
             album_.images.push_back(n);
-            album_.paths.push_back(album_.gallery_path.empty() ? n->name
-                                                   : album_.gallery_path + "/" + n->name);
+            album_.paths.push_back(album_.gallery_path.empty()
+                                       ? n->name
+                                       : album_.gallery_path + "/" + n->name);
         }
     }
-    // Clamp index to the new size and refresh view
-    show_image_at(index_);
+
+    const AlbumRebind rebind = rebind_album_index(album_.paths, current, index_);
+    if (rebind.preserve) index_ = rebind.index;
+    else                 show_image_at(rebind.index);
     mark_dirty();
 }
 
