@@ -384,8 +384,13 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `archive_reader.*` — ArchiveReader: thin wrapper over libarchive's streaming read API
   (`archive_read_open_memory` over an mlock'd buffer), whole-file gated `OSV_VENDORED_ARCHIVE`.
   `open()` does one forward pass building `entries()` (reuses ZipEntry from zip_plan.h,
-  format-agnostic); `extract(index,out)` re-opens a fresh stream + walks forward to index EACH
-  call (libarchive has no random access) — O(n) per extract, fine for gallery-sized archives.
+  format-agnostic); `extract(index,out)` holds a FORWARD STREAM CURSOR (PR #124): the open
+  stream stays positioned past the last extracted entry, so ascending extracts (the import
+  loop's pattern) share one stream and a full import is a single pass — libarchive has no
+  random access, and the old reopen-per-extract was O(n²) decompression (~150x slower than
+  zip on a solid 7z). An index behind the cursor transparently reopens; ANY extract failure
+  resets the cursor (per-call independence preserved); `stream_opens()` observable pins the
+  contract in tests. Reader is now non-copyable/non-movable (destructor frees the handle).
   `MAX_ENTRY_BYTES=4 GiB` bomb guard checked against the declared size before allocating.
   `open_files(paths, passphrase)` (Phase 53) opens an ORDERED multi-volume set via
   `archive_read_open_filenames` — libarchive's RAR multivolume support only works file-oriented,
