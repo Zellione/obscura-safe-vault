@@ -110,17 +110,29 @@ ImportStatusScreen::ImportStatusScreen(gfx::Window& win, gfx::FontAtlas& font,
 {
 }
 
-void ImportStatusScreen::move_selection(int delta)
+int ImportStatusScreen::sel_index() const
 {
-    if (rows_.empty()) return;
-    sel_ = std::clamp(sel_ + delta, 0, static_cast<int>(rows_.size()) - 1);
+    if (rows_.empty()) return -1;
+    const int i = index_of_task(rows_, sel_id_);
+    return i >= 0 ? i : 0;   // selection vanished (cleared/cancelled): fall to the top row
 }
 
-// Ctrl+Up/Down: reorder the selected QUEUED row (the queue rejects other states).
+void ImportStatusScreen::move_selection(int delta)
+{
+    const int cur = sel_index();
+    if (cur < 0) return;
+    const int next = std::clamp(cur + delta, 0, static_cast<int>(rows_.size()) - 1);
+    sel_id_ = rows_[static_cast<size_t>(next)].id;
+}
+
+// Ctrl+Up/Down: reorder the selected QUEUED row (the queue rejects other
+// states). sel_id_ is deliberately NOT touched — the selection is the task, not
+// the slot, so focus follows the move and the chord can be repeated.
 void ImportStatusScreen::reorder_selected(int delta)
 {
-    if (rows_.empty() || sel_ < 0 || sel_ >= static_cast<int>(rows_.size())) return;
-    (void)queue_.reorder(rows_[sel_].id, delta);
+    const int cur = sel_index();
+    if (cur < 0) return;
+    (void)queue_.reorder(rows_[static_cast<size_t>(cur)].id, delta);
 }
 
 void ImportStatusScreen::handle_key(const SDL_KeyboardEvent& key)
@@ -135,10 +147,11 @@ void ImportStatusScreen::handle_key(const SDL_KeyboardEvent& key)
             if (ctrl) reorder_selected(1);
             else      move_selection(1);
             break;
-        case SDLK_DELETE:
-            if (!rows_.empty() && sel_ >= 0 && sel_ < static_cast<int>(rows_.size()))
-                (void)queue_.cancel(rows_[sel_].id);
+        case SDLK_DELETE: {
+            const int sel = sel_index();
+            if (sel >= 0) (void)queue_.cancel(rows_[static_cast<size_t>(sel)].id);
             break;
+        }
         case SDLK_C:
             queue_.clear_finished();
             break;
@@ -173,11 +186,8 @@ void ImportStatusScreen::update(double dt)
     // Mark dirty if snapshot changed or lane failure status flipped
     if (!(snapshot == rows_)) {
         rows_ = snapshot;
-        // Clamp selection after refresh
-        if (!rows_.empty()) {
-            sel_ = std::clamp(sel_, 0, static_cast<int>(rows_.size()) - 1);
-        } else {
-            sel_ = 0;
+        if (sel_id_ == 0 || index_of_task(rows_, sel_id_) < 0) {
+            sel_id_ = rows_.empty() ? 0 : rows_.front().id;
         }
         mark_dirty();
     }
@@ -225,7 +235,8 @@ void ImportStatusScreen::render(gfx::Renderer& r)
     const int  visible = std::max(1, static_cast<int>((bottom - list_top) / row_h));
     int        first   = 0;
     const auto count   = static_cast<int>(rows_.size());
-    if (count > visible) first = std::clamp(sel_ - visible / 2, 0, count - visible);
+    const int  sel     = sel_index();
+    if (count > visible) first = std::clamp(sel - visible / 2, 0, count - visible);
 
     // Clamp scroll position
     const float content_h  = row_h * static_cast<float>(count);
@@ -234,7 +245,7 @@ void ImportStatusScreen::render(gfx::Renderer& r)
 
     // Render rows
     const RowLayout lay{.list_top = list_top, .bottom = bottom, .row_h = row_h,
-                        .w = W, .first = first, .sel = sel_, .scroll = scroll_, .pitch = pitch};
+                        .w = W, .first = first, .sel = sel, .scroll = scroll_, .pitch = pitch};
     for (int i = first; i < first + visible && i < count; ++i) {
         draw_row(r, font_, lay, i, rows_[static_cast<size_t>(i)]);
     }
