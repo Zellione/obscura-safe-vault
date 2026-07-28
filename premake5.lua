@@ -488,6 +488,7 @@ project "osv_tests"
         "src/platform/volume_pref.cpp",
         "src/platform/file_dialog.cpp",
         "src/platform/folder_dialog.cpp",
+        "src/app/back_click.cpp",
         "src/ui/input.cpp",
         "src/ui/nav_model.cpp",
         "src/ui/passphrase.cpp",

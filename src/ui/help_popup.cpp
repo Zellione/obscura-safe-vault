@@ -155,7 +155,7 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
     using namespace gfx::theme;
 
     std::vector<HelpGroup> all_groups = {
-        {.title = "Global", .entries = {{.key = "F1", .description = "Help"}, {.key = "F2", .description = "Settings"}}}
+        {.title = "Global", .entries = {{.key = "F1", .description = "Help"}, {.key = "F2", .description = "Settings"}, {.key = "Right-click", .description = "Back / up one level"}}}
     };
     all_groups.insert(all_groups.end(), groups.begin(), groups.end());
 

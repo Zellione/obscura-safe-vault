@@ -6,6 +6,7 @@
 #include <string>
 
 #include "app/auto_lock.h"
+#include "app/back_click.h"
 #include "app/keep_unlocked_badge.h"
 #include "gfx/renderer.h"
 #include "gfx/theme.h"
@@ -395,6 +396,15 @@ bool App::dispatch_overlay_event(App& app, const SDL_Event& e)
 void App::dispatch_event(const SDL_Event& e)
 {
     if (is_user_input(e)) idle_.reset();
+    // Phase 56: right-click is a universal "back". Translate it here, once, so
+    // every screen and modal reuses its own Esc handling instead of growing a
+    // parallel cancel path. The release is dropped — a surface that never saw
+    // the press must not see a dangling release.
+    if (is_back_click_release(e)) return;
+    if (is_back_click(e)) {
+        dispatch_event(make_back_key_event());
+        return;
+    }
     // Phase 50: park SDL_EVENT_QUIT if imports are pending; replayed after confirm
     if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
         if (import_ui_.queue.busy() && !import_ui_.lock_confirm.open) {
