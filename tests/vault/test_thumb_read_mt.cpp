@@ -1,15 +1,17 @@
 #include "test_framework.h"
-#include "ui/zip_test_helpers.h"   // ziptest::make_vault, fake_jpeg, fresh_dir, cleanup_dir
+#include "ui/zip_test_helpers.h"   // ziptest::make_vault, fresh_dir, cleanup_dir
+#include "image/fixtures.h"        // fixtures::solid_jpeg
 #include "vault/vault.h"
 
 #include <thread>
 
 using ziptest::cleanup_dir;
-using ziptest::fake_jpeg;
 using ziptest::fresh_dir;
 using ziptest::make_vault;
 
-// Basic thumbnail read test: verify read_thumbnail works on a freshly added image.
+// Concurrent thumbnail reads from multiple threads are thread-safe. Four worker threads
+// hammer read_thumbnail and read_thumb_span on different images while the main thread
+// does read_image, ensuring the dedicated thumb_fp_ + thumb_mutex_ handles concurrent access.
 TEST(thumbnail_reads_are_thread_safe)
 {
     const auto dir = fresh_dir("thumb_read_mt");
@@ -17,9 +19,11 @@ TEST(thumbnail_reads_are_thread_safe)
     make_vault(v, dir / "a.osv");
     REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
 
-    // Add two images so we have thumbnails to read.
-    REQUIRE(v.add_image("g", fake_jpeg(1), "img1.jpg") == vault::VaultResult::Ok);
-    REQUIRE(v.add_image("g", fake_jpeg(2), "img2.jpg") == vault::VaultResult::Ok);
+    // Add two images using a real decodable JPEG so thumbnails are actually generated.
+    const auto real_jpeg_1 = fixtures::solid_jpeg(8, 8, 0x11, 0x22, 0x33);
+    const auto real_jpeg_2 = fixtures::solid_jpeg(8, 8, 0xaa, 0xbb, 0xcc);
+    REQUIRE(v.add_image("g", real_jpeg_1, "img1.jpg") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("g", real_jpeg_2, "img2.jpg") == vault::VaultResult::Ok);
 
     // Get the nodes after adding images (adding invalidates previous list() pointers).
     auto nodes = v.list("g");
@@ -27,9 +31,13 @@ TEST(thumbnail_reads_are_thread_safe)
     const auto* node_a = nodes.at(0);
     const auto* node_b = nodes.at(1);
 
+    // Verify thumbnails were actually generated and stored.
+    REQUIRE(node_a->meta.thumb_length > 0);
+    REQUIRE(node_b->meta.thumb_length > 0);
+
     // Collect thumbnail spans from node_b for read_thumb_span testing.
-    const uint64_t span_b_off = node_b->is_video() ? node_b->vmeta.poster_offset : node_b->meta.thumb_offset;
-    const uint64_t span_b_len = node_b->is_video() ? node_b->vmeta.poster_length : node_b->meta.thumb_length;
+    const uint64_t span_b_off = node_b->meta.thumb_offset;
+    const uint64_t span_b_len = node_b->meta.thumb_length;
 
     // Basic test: can we read thumbnails?
     {
@@ -76,22 +84,27 @@ TEST(thumbnail_read_after_lock_returns_locked)
     vault::Vault v;
     make_vault(v, dir / "a.osv");
     REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
-    REQUIRE(v.add_image("g", fake_jpeg(1), "locked_img.jpg") == vault::VaultResult::Ok);
 
-    // Get the node and read a thumbnail to verify it works while unlocked.
+    // Add an image using a real decodable JPEG so a thumbnail is actually generated.
+    const auto real_jpeg = fixtures::solid_jpeg(8, 8, 0x55, 0x66, 0x77);
+    REQUIRE(v.add_image("g", real_jpeg, "locked_img.jpg") == vault::VaultResult::Ok);
+
+    // Get the node and verify it has a thumbnail.
     auto nodes = v.list("g");
     REQUIRE(nodes.size() >= 1);
     const auto* node = nodes.at(0);
+    REQUIRE(node->meta.thumb_length > 0);
+
+    // Read thumbnail while unlocked to verify it works.
     {
         crypto::SecureBytes out;
-        auto result = v.read_thumbnail(*node, out);
-        CHECK(result == vault::VaultResult::Ok);
+        CHECK(v.read_thumbnail(*node, out) == vault::VaultResult::Ok);
     }
 
     // Copy the node data (it is a value struct) because lock() will clear the tree.
     const auto node_copy = *node;
-    const uint64_t span_off = node->is_video() ? node->vmeta.poster_offset : node->meta.thumb_offset;
-    const uint64_t span_len = node->is_video() ? node->vmeta.poster_length : node->meta.thumb_length;
+    const uint64_t span_off = node->meta.thumb_offset;
+    const uint64_t span_len = node->meta.thumb_length;
 
     // Lock the vault (clears the tree, wipes the master key, sets unlocked_ = false).
     v.lock();
