@@ -778,65 +778,84 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
     label(y, Focus::Scope, std::format("Scope: {}", scope_label(query_.scope)));                 y += LINE;
 
     // --- Include (weighted) ---
-    label(y, Focus::Include, "Include:"); y += ROW;
-    for (int i = 0; i < static_cast<int>(query_.include.size()); ++i) {
-        const float row_y = list_row_y({.top = y, .row_h = ROW}, i);
-        const bool sel = focused(Focus::Include) && cur_.tag == i;
-        if (sel) {
-            r.draw_round_rect({x - 6, row_y + ink_dy - ROW * 0.5f, colw + 12, ROW},
-                              RADIUS_SMALL, SURFACE_HI);
-            r.draw_text(font_, x + 4, row_y, ">", ACCENT);
+    // Draw the include section as a cohesive block: existing tags, optional edit row,
+    // and dropdown position tracking. Extracted to reduce cognitive complexity.
+    auto render_include = [&]() -> float {
+        label(y, Focus::Include, "Include:");
+        float section_y = y + ROW;
+        for (int i = 0; i < static_cast<int>(query_.include.size()); ++i) {
+            const float row_y = list_row_y({.top = section_y, .row_h = ROW}, i);
+            const bool sel = focused(Focus::Include) && cur_.tag == i;
+            if (sel) {
+                r.draw_round_rect({x - 6, row_y + ink_dy - ROW * 0.5f, colw + 12, ROW},
+                                  RADIUS_SMALL, SURFACE_HI);
+                r.draw_text(font_, x + 4, row_y, ">", ACCENT);
+            }
+            r.draw_text(font_, x + 24, row_y, fit_text(font_, std::format("{} (w{})", query_.include[i].tag, query_.include[i].weight), colw - 24), sel ? TEXT : TEXT_DIM);
         }
-        r.draw_text(font_, x + 24, row_y, fit_text(font_, std::format("{} (w{})", query_.include[i].tag, query_.include[i].weight), colw - 24), sel ? TEXT : TEXT_DIM);
-    }
-    if (focused(Focus::Include)) {
-        // The weight is right-aligned so it cannot be pushed off-screen by a
-        // long tag, and so it never sits where the caret needs to be.
-        const std::string wlabel = std::format("w{}", edit_.weight);
-        const auto        wlab_w = static_cast<float>(font_.measure(wlabel));
-        const float edit_y = list_row_y({.top = y, .row_h = ROW}, static_cast<int>(query_.include.size()));
-        r.draw_text(font_, x + colw - wlab_w, edit_y, wlabel, TEXT_FAINT);
-        draw_inline_edit_text(r, font_, x + 24, edit_y, colw - 24, edit_.include, edit_chrome_.include);
-        y = edit_y + ROW;
-        if (!suggestions_.empty()) drop_y = y;
-    } else {
-        y = list_row_y({.top = y, .row_h = ROW}, static_cast<int>(query_.include.size()));
-    }
+        if (focused(Focus::Include)) {
+            const std::string wlabel = std::format("w{}", edit_.weight);
+            const auto        wlab_w = static_cast<float>(font_.measure(wlabel));
+            const float edit_y = list_row_y({.top = section_y, .row_h = ROW}, static_cast<int>(query_.include.size()));
+            r.draw_text(font_, x + colw - wlab_w, edit_y, wlabel, TEXT_FAINT);
+            draw_inline_edit_text(r, font_, x + 24, edit_y, colw - 24, edit_.include, edit_chrome_.include);
+            section_y = edit_y + ROW;
+            if (!suggestions_.empty()) drop_y = section_y;
+        } else {
+            section_y = list_row_y({.top = section_y, .row_h = ROW}, static_cast<int>(query_.include.size()));
+        }
+        return section_y;
+    };
+    y = render_include();
 
     // --- Exclude ---
-    label(y, Focus::Exclude, "Exclude:"); y += ROW;
-    for (int i = 0; i < static_cast<int>(query_.exclude.size()); ++i) {
-        const float row_y = list_row_y({.top = y, .row_h = ROW}, i);
-        const bool sel = focused(Focus::Exclude) && cur_.tag == i;
-        if (sel) {
-            r.draw_round_rect({x - 6, row_y + ink_dy - ROW * 0.5f, colw + 12, ROW},
-                              RADIUS_SMALL, SURFACE_HI);
-            r.draw_text(font_, x + 4, row_y, ">", ACCENT);
+    // Draw the exclude section: existing tags and optional edit row when focused.
+    // Extracted to reduce cognitive complexity of the main function.
+    auto render_exclude = [&]() -> float {
+        label(y, Focus::Exclude, "Exclude:");
+        float section_y = y + ROW;
+        for (int i = 0; i < static_cast<int>(query_.exclude.size()); ++i) {
+            const float row_y = list_row_y({.top = section_y, .row_h = ROW}, i);
+            const bool sel = focused(Focus::Exclude) && cur_.tag == i;
+            if (sel) {
+                r.draw_round_rect({x - 6, row_y + ink_dy - ROW * 0.5f, colw + 12, ROW},
+                                  RADIUS_SMALL, SURFACE_HI);
+                r.draw_text(font_, x + 4, row_y, ">", ACCENT);
+            }
+            r.draw_text(font_, x + 24, row_y, fit_text(font_, query_.exclude[i], colw - 24), sel ? TEXT : TEXT_DIM);
         }
-        r.draw_text(font_, x + 24, row_y, fit_text(font_, query_.exclude[i], colw - 24), sel ? TEXT : TEXT_DIM);
-    }
-    if (focused(Focus::Exclude)) {
-        const float edit_y = list_row_y({.top = y, .row_h = ROW}, static_cast<int>(query_.exclude.size()));
-        draw_inline_edit_text(r, font_, x + 24, edit_y, colw - 24, edit_.exclude, edit_chrome_.exclude);
-        y = edit_y + ROW;
-    } else {
-        y = list_row_y({.top = y, .row_h = ROW}, static_cast<int>(query_.exclude.size()));
-    }
+        if (focused(Focus::Exclude)) {
+            const float edit_y = list_row_y({.top = section_y, .row_h = ROW}, static_cast<int>(query_.exclude.size()));
+            draw_inline_edit_text(r, font_, x + 24, edit_y, colw - 24, edit_.exclude, edit_chrome_.exclude);
+            section_y = edit_y + ROW;
+        } else {
+            section_y = list_row_y({.top = section_y, .row_h = ROW}, static_cast<int>(query_.exclude.size()));
+        }
+        return section_y;
+    };
+    y = render_exclude();
 
     // --- Groups ---
-    label(y, Focus::Group, "Groups:"); y += ROW;
-    y = draw_groups(r, font_, query_.groups,
-                    {.cur_group = cur_.group,
-                     .sel_tag   = focused(Focus::Group) ? cur_.tag : -1,
-                     .focused   = focused(Focus::Group),
-                     .x = x, .colw = colw, .y = y});
-    if (focused(Focus::Group)) {
-        draw_inline_edit_text(r, font_, x + 24, y, colw - 24, edit_.group, edit_chrome_.group);
-        y += ROW;
-        r.draw_text(font_, x + 8, y, "Enter=add  empty Enter=new group  Del=AND/OR", TEXT_FAINT);
-        y += ROW;
-        if (!suggestions_.empty()) drop_y = y;
-    }
+    // Draw the groups section: existing groups plus optional edit row when focused.
+    // Uses draw_groups() free function for the groups list itself.
+    auto render_groups = [&]() -> float {
+        label(y, Focus::Group, "Groups:");
+        float section_y = y + ROW;
+        section_y = draw_groups(r, font_, query_.groups,
+                        {.cur_group = cur_.group,
+                         .sel_tag   = focused(Focus::Group) ? cur_.tag : -1,
+                         .focused   = focused(Focus::Group),
+                         .x = x, .colw = colw, .y = section_y});
+        if (focused(Focus::Group)) {
+            draw_inline_edit_text(r, font_, x + 24, section_y, colw - 24, edit_.group, edit_chrome_.group);
+            section_y += ROW;
+            r.draw_text(font_, x + 8, section_y, "Enter=add  empty Enter=new group  Del=AND/OR", TEXT_FAINT);
+            section_y += ROW;
+            if (!suggestions_.empty()) drop_y = section_y;
+        }
+        return section_y;
+    };
+    y = render_groups();
 
     label(y, Focus::GroupJoin, std::format("Join groups: {}", join_label(query_.group_join)));
 

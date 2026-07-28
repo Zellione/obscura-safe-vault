@@ -121,9 +121,8 @@ void ImageViewer::on_vault_changed()
         }
     }
 
-    const AlbumRebind rebind = rebind_album_index(album_.paths, current, index_);
-    if (rebind.preserve) index_ = rebind.index;
-    else                 show_image_at(rebind.index);
+    if (const AlbumRebind rebind = rebind_album_index(album_.paths, current, index_); rebind.preserve) index_ = rebind.index;
+    else                                                                            show_image_at(rebind.index);
     mark_dirty();
 }
 

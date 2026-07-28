@@ -148,8 +148,7 @@ void ImportStatusScreen::handle_key(const SDL_KeyboardEvent& key)
             else      move_selection(1);
             break;
         case SDLK_DELETE: {
-            const int sel = sel_index();
-            if (sel >= 0) (void)queue_.cancel(rows_[static_cast<size_t>(sel)].id);
+            if (const int sel = sel_index(); sel >= 0) (void)queue_.cancel(rows_[static_cast<size_t>(sel)].id);
             break;
         }
         case SDLK_C:

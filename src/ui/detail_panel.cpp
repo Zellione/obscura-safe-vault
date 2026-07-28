@@ -67,27 +67,28 @@ float draw_detail_panel(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect&
         const float y = start_y + l.y;
         if (y + l.height <= rect.y || y >= rect.y + rect.h) continue;   // cull off-panel
         switch (l.kind) {
-            case DetailLineKind::Heading:
+            using enum DetailLineKind;
+            case Heading:
                 (void)line(ctx, y, l.height, content.heading, TEXT);
                 break;
-            case DetailLineKind::Subheading:
+            case Subheading:
                 (void)line(ctx, y, l.height, content.subheading, FAVORITE);
                 break;
-            case DetailLineKind::SectionTitle:
-            case DetailLineKind::TagSectionTitle:
+            case SectionTitle:
+            case TagSectionTitle:
                 (void)line(ctx, y, l.height, content.sections[l.section].title, TEXT_FAINT);
                 break;
-            case DetailLineKind::Row: {
+            case Row: {
                 const DetailRow& row = content.sections[l.section].rows[l.item];
                 (void)line(ctx, y, l.height, std::format("{}  {}", row.label, row.value), TEXT_DIM);
                 break;
             }
-            case DetailLineKind::Bullet:
+            case Bullet:
                 (void)line(ctx, y, l.height,
                            std::format("• {}", content.sections[l.section].bullets[l.item]),
                            TEXT_DIM);
                 break;
-            case DetailLineKind::TagBullet: {
+            case TagBullet: {
                 const std::string& tag = content.sections[l.section].bullets[l.item];
                 draw_tag_chips(r, font, x, y + (m.chip_line_h - CHIP_ROW_H) * 0.5f,
                                rect.w - (2.0f * PAD), std::span(&tag, 1), categories);
