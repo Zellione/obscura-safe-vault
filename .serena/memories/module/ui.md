@@ -156,7 +156,7 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   written back on change. `R` toggles loop (process-lifetime `media::saved_loop_enabled()`;
   VideoPlayback re-seeks to 0 and keeps playing at EOF when set); on-screen ring indicator next
   to play/pause. **Phase 56:** `on_vault_changed()` uses the `album_rebind.*` module to re-bind
-  by path, preserving zoom, pan, fill-scroll offset, video position and GIF frame.
+  by path, preserving zoom, pan, fill-scroll offset, video position and animation frame.
   Chrome: `viewer_chrome(const ImageViewer&)` free friend returns the `ChromeBands` for the
   whole viewer area (window minus strip) — an OPAQUE STRIP_BG header band (name/index/zoom +
   [F1] Help) and an opaque footer band, with the media fit into `.content` only, so a band
@@ -175,13 +175,21 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `apply_video_resume` (seek a freshly (re)opened matching video to the remembered position,
   called right after `on_enter()` builds video_). "Collection mode" (explicit image set +
   per-image path + exit Nav) lets the viewer serve favorites/tag sets, not just one gallery.
-- `gif_playback.*` (Phase 47, gated `OSV_VENDORED_AV`) — `GifPlayback`: pImpl, FFmpeg
-  confined to `.cpp` so `image_viewer.h` compiles everywhere. Auto-loop, Space toggles pause,
-  zoom/pan unchanged. Decrypted bytes held in mlock'd `crypto::SecureBytes` outliving the
-  decoder. Frames uploaded row-by-row honoring `SDL_LockTexture` pitch.
-- `gif_model.*` (Phase 47) — pure logic: `GifHoverGate` (200 ms dwell, one start-edge per
-  hover), `gif_within_hover_dimension_budget(w,h)`, `gif_hover_frame_count_exceeded(frames)`,
-  `gif_frames_to_advance(...)` with 64-frame catch-up cap.
+- `anim_playback.*` (Phase 47 GIF, Phase 57 WebP; was `gif_playback.*`) — `AnimPlayback`:
+  pImpl, decoder libs confined to `.cpp`. Picks its `media::AnimDecoder` backend from
+  `node.meta.format` — WebP via libwebp (ALWAYS available), GIF via FFmpeg (`OSV_VENDORED_AV`
+  only); no backend -> `valid()==false` and the host shows the static first frame. Auto-loop
+  (a file's declared loop count is deliberately IGNORED, so both formats behave alike), Space
+  toggles pause, zoom/pan unchanged. Decrypted bytes held in mlock'd `crypto::SecureBytes`
+  outliving the decoder. Frames uploaded row-by-row honoring `SDL_LockTexture` pitch.
+  **Phase 57 fixed a latent break here:** the file used to open `namespace ui {` INSIDE its
+  `#ifdef OSV_VENDORED_AV`, so the `#else` stub landed outside the namespace and the TU did not
+  compile at all without vendored FFmpeg. `Impl` is now always compiled; only the GIF backend is
+  gated. No CI job builds without `OSV_VENDORED_AV`, so nothing would have caught it.
+- `anim_model.*` (Phase 47; was `gif_model.*`) — pure logic: `AnimHoverGate` (200 ms dwell, one
+  start-edge per hover), `anim_within_hover_dimension_budget(w,h)`,
+  `anim_hover_frame_count_exceeded(frames)`, `anim_frames_to_advance(...)` with 64-frame
+  catch-up cap.
 - `video_playback.*` — in-viewer player: `VideoDecoder` (demux only, render-thread-side) +
   `VideoDecodeWorker` (codec-level decode, bg thread, see `mem:module/media`) + YUV texture +
   `SDL_AudioStream` (master audio clock) + seek bar (both tracks); mute/volume via
@@ -614,14 +622,17 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `scroll_detail_panel(st,wheel_y)` (clamps at 0 only; the host applies the upper clamp).
   **Phase 56:** line layout derives from `detail_layout.*` module.
   Hosted by GalleryGrid, FavoritesScreen (covers all 4 subclasses), AdvancedSearchScreen.
-- `gif_repair.*` (Phase 47) — `maybe_repair_gif_animated(...)` + `Vault::repair_image_animated(path,bool)`:
-  lazy bidirectional healing for GIFs stored before Phase 47, persisted via the same crash-safe
-  `commit_index()` path as video repair. No-op when the animated flag is already correct.
-  `GifSniffGate` (PR #122) gates the viewer's sniff, which costs a full image read+decrypt:
-  `should_sniff(node)` is true only for a GIF image whose animated flag is UNSET (a set flag is
-  trustworthy — import and repair both persist the value sniffed from actual bytes), at most once
-  per `data_offset` per gate lifetime. ImageViewer holds one per session (`gif_sniff_gate_`);
-  before this, EVERY navigation onto any GIF re-read the whole image.
+- `anim_repair.*` (Phase 47; was `gif_repair.*`) — `maybe_repair_animated(...)` +
+  `Vault::repair_image_animated(path,bool)`: lazy bidirectional healing for images stored before
+  their format's animation support landed, persisted via the same crash-safe `commit_index()`
+  path as video repair. No-op when the animated flag is already correct. Gated on
+  `vault::format_can_animate`, so it covers GIF and WebP — though the WebP arm is unreachable for
+  pre-Phase-57 vaults (an animated WebP could not be imported at all, so no such node exists).
+  `AnimSniffGate` (PR #122) gates the viewer's sniff, which costs a full image read+decrypt:
+  `should_sniff(node)` is true only for an animatable image whose animated flag is UNSET (a set
+  flag is trustworthy — import and repair both persist the value sniffed from actual bytes), at
+  most once per `data_offset` per gate lifetime. ImageViewer holds one per session
+  (`anim_sniff_gate_`); before this, EVERY navigation onto any GIF re-read the whole image.
 - `video_repair.*` — `repair_unknown_video_metadata(vault,gallery_path,children)` sweeps a
   freshly listed gallery for videos still at `VideoCodec::Unknown` + calls
   `Vault::repair_video_metadata` per node. Called from GalleryGrid::refresh() so previously-
@@ -659,8 +670,10 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `tile_thumb.*` — shared tile-thumbnail draw: `ThumbContext{vault,cache,worker,failed}` +
   draw_tile_thumb / tile_thumb_texture / tile_cover_tex. Gallery -> folder + cover montage;
   image -> aspect-fit thumb; video -> poster + play-badge. Phase 47: `tile_shows_animated_badge(node)`,
-  `draw_animated_badge(...)` draw an "A" badge top-right for animated GIFs; `tile_can_hover_animate(node)`
-  gates hover animation by badge + dimension budget. `thumb_key_for` pure index lookup.
+  `draw_animated_badge(...)` draw an "A" badge top-right for animated images (GIF, plus WebP
+  since Phase 57 — both via `vault::format_can_animate`, so a stale flag on a non-animatable
+  format never badges); `tile_can_hover_animate(node)` gates hover animation by badge +
+  dimension budget. `thumb_key_for` pure index lookup.
   Decrypt -> off-thread decode -> GPU upload via shared cache. Reused by GalleryGrid + the
   advanced-search grid view.
 - `waste_threshold.h` — vault-bloat thresholds: `should_display_waste(wasted,file_size)` (true

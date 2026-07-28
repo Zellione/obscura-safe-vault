@@ -13,9 +13,9 @@
 #include "ui/export_ui.h"
 #include "ui/full_tex_cache.h"
 #include "ui/gallery_session_state.h"
-#include "ui/gif_model.h"
-#include "ui/gif_playback.h"
-#include "ui/gif_repair.h"
+#include "ui/anim_model.h"
+#include "ui/anim_playback.h"
+#include "ui/anim_repair.h"
 #include "ui/quick_switch.h"
 #include "ui/screen.h"
 #include "ui/scroll_model.h"
@@ -109,7 +109,7 @@ public:
     {
         if (mode_ == ViewMode::Slideshow && slideshow_.animating()) return true;
         if (video_ && video_->animating()) return true;   // a playing video keeps the loop ticking
-        return gif_ && gif_->animating();                 // a playing GIF keeps the loop ticking
+        return anim_ && anim_->animating();                 // a playing animation keeps the loop ticking
     }
 
     [[nodiscard]] std::vector<ui::HelpGroup> help_groups() const override;
@@ -125,7 +125,7 @@ private:
     void handle_key_fit(SDL_Keycode key);
     void handle_key_scroll(SDL_Keycode key);
     void handle_key_video(SDL_Keycode key, SDL_Scancode sc);  // Space/,/./J/L + F/arrows + [ ] volume
-    bool handle_key_gif(SDL_Keycode key);                      // Space toggles pause; true if consumed
+    bool handle_key_anim(SDL_Keycode key);                      // Space toggles pause; true if consumed
     void handle_mouse_down(const SDL_MouseButtonEvent& b);
     void handle_wheel(const SDL_MouseWheelEvent& w);
     [[nodiscard]] bool handle_overlay_event(const SDL_Event& e);  // modal overlays; true if consumed
@@ -251,34 +251,34 @@ private:
     // destroyed on exit / item change before any lock (invariant: no UAF).
     std::unique_ptr<VideoPlayback> video_;
 
-    // Animated-GIF playback for the current item (Phase 47). Null unless the
-    // current image is a GIF with meta.animated set. Same lifetime rules as
-    // video_: destroyed before any vault lock / idle / switch.
-    std::unique_ptr<GifPlayback> gif_;
+    // Animation playback for the current item (Phase 47 GIF, Phase 57 WebP).
+    // Null unless the current image has meta.animated set. Same lifetime rules
+    // as video_: destroyed before any vault lock / idle / switch.
+    std::unique_ptr<AnimPlayback> anim_;
 
-    // Tracks which album index the current gif_ was constructed for, so that
-    // on scroll the GIF can be torn down and rebuilt before rendering. -1 when
-    // gif_ is null. Used to detect and reconcile index changes (Phase 47 fix).
-    int gif_index_ = -1;
+    // Tracks which album index the current anim_ was constructed for, so that on
+    // scroll the animation can be torn down and rebuilt before rendering. -1
+    // when anim_ is null. Used to reconcile index changes (Phase 47 fix).
+    int anim_index_ = -1;
 
     // Limits the legacy animated-flag sniff (a full image read + decrypt) to
-    // once per GIF chunk per viewer session; see GifSniffGate.
-    GifSniffGate gif_sniff_gate_;
+    // once per animated chunk per viewer session; see AnimSniffGate.
+    AnimSniffGate anim_sniff_gate_;
 
-    // Rebuild gif_ for the current index if it has moved. Called from both
-    // show_image_at() and update() to keep gif_ in sync regardless of how
+    // Rebuild anim_ for the current index if it has moved. Called from both
+    // show_image_at() and update() to keep anim_ in sync regardless of how
     // index_ changed.
-    void sync_gif_for_current_index();
+    void sync_anim_for_current_index();
 
     // Start or stop strip hover animation on the given thumbnail index.
     // Checks both the animated badge and the dimension budget before constructing.
     void start_strip_hover_animation(int strip_thumb);
 
-    // Strip hover animation (Phase 47 Task 10). Independent of the main gif_
+    // Strip hover animation (Phase 47 Task 10). Independent of the main anim_
     // playback (both may run at once). At most one strip hover animation at a time.
-    GifHoverGate                 strip_hover_gate_;
-    std::unique_ptr<GifPlayback> strip_hover_gif_;
-    int                          strip_hover_gif_index_ = -1;
+    AnimHoverGate                 strip_hover_gate_;
+    std::unique_ptr<AnimPlayback> strip_hover_anim_;
+    int                          strip_hover_anim_index_ = -1;
 };
 
 // Free friends of ImageViewer (see the in-class declarations): current_strip_side /

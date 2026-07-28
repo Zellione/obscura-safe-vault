@@ -35,6 +35,16 @@ enum class ImageFormat : uint8_t {
     Unknown = 0xFF,
 };
 
+// Formats whose files can carry an animation: GIF (Phase 47) and WebP
+// (Phase 57). The single source of truth for the import flag, the lazy repair,
+// the sniff gate, the "A" badge and the hover gate — so they cannot drift apart.
+// Anything else stores animated = false and never badges, whatever its flag
+// happens to say.
+[[nodiscard]] constexpr bool format_can_animate(ImageFormat f) noexcept
+{
+    return f == ImageFormat::GIF || f == ImageFormat::WebP;
+}
+
 // Metadata + chunk locations for one stored image. A thumb_length of 0 means no
 // thumbnail is stored yet (Phase 2 stores images without thumbnails; Phase 3
 // wires thumbnail generation into Vault::add_image).
@@ -251,7 +261,7 @@ struct VaultSettings {
 // block after the tree root (Phase 18); pre-v5 blobs read with an empty list.
 // v6: per-gallery sort_key (Phase 37); pre-v6 blobs read every node as Manual.
 // v7: per-image `animated` flag (Phase 47); pre-v7 blobs read every image as
-// not animated, and are healed lazily on first view (see ui/gif_repair.*).
+// not animated, and are healed lazily on first view (see ui/anim_repair.*).
 // v8: vault-global settings block after the saved-searches block, and sort_key
 // byte 0 re-read as `Default` with a new `Insertion = 7` (Phase 49); pre-v8
 // blobs read with the seeded default settings and every gallery at `Default`.

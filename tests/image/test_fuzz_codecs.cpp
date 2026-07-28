@@ -140,6 +140,29 @@ TEST(fuzz_webp_survives_500_malformed_inputs)
     }
 }
 
+// The animated path (WebPAnimDecoder) is a different parser from the static one
+// above, and mutating an animated fixture is the only way to reach it.
+TEST(fuzz_animated_webp_survives_500_malformed_inputs)
+{
+    Prng rng(0xDECAFBAE);
+    const auto webp = fixtures::load_anim_webp();
+
+    // Skip if fixture not found.
+    if (webp.empty()) {
+        fprintf(stderr, "SKIP: animated WebP fixture not found\n");
+        return;
+    }
+
+    for (int i = 0; i < 500; ++i) {
+        const auto blob = mutate_codec(rng, webp, false, false);
+        // Cap input size to prevent hangs.
+        if (blob.size() <= MAX_FUZZ_INPUT) {
+            // decode_from_memory must return nullopt or a valid DecodedImage, never crash.
+            (void)image::decode_from_memory(blob);
+        }
+    }
+}
+
 TEST(fuzz_heic_survives_500_malformed_inputs)
 {
     Prng rng(0xC0DECAFE);

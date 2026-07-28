@@ -115,10 +115,12 @@ local function link_image_codecs()
         -- We link libheif statically; without this its headers declare the API
         -- as __declspec(dllimport) on MSVC (no-op elsewhere), which breaks the link.
         defines { "OSV_VENDORED_CODECS", "LIBHEIF_STATIC_BUILD" }
+        -- libwebpdemux (Phase 57) provides WebPAnimDecoder for animated WebP and
+        -- depends on libwebp, so it must precede it in the static link order.
         filter "system:windows"
-            links { "heif", "libde265", "aom", "libwebp", "libsharpyuv" }
+            links { "heif", "libde265", "aom", "libwebpdemux", "libwebp", "libsharpyuv" }
         filter { "system:not windows" }
-            links { "heif", "de265", "aom", "webp", "sharpyuv" }
+            links { "heif", "de265", "aom", "webpdemux", "webp", "sharpyuv" }
         filter {}
     end
 end
@@ -551,9 +553,9 @@ project "osv_tests"
         "src/ui/spanned_zip.cpp",
         "src/ui/gallery_sort.cpp",
         "src/ui/gallery_view.cpp",
-        "src/ui/gif_model.cpp",
-        "src/ui/gif_playback.cpp",
-        "src/ui/gif_repair.cpp",
+        "src/ui/anim_model.cpp",
+        "src/ui/anim_playback.cpp",
+        "src/ui/anim_repair.cpp",
         "src/ui/help_popup.cpp",
         "src/ui/help_layout.cpp",
         "src/ui/detail_layout.cpp",

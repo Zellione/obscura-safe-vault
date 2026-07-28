@@ -6,7 +6,7 @@
 #include <unordered_set>
 
 #include "ui/gallery_cover.h"   // ui::CoverSpan
-#include "ui/gif_model.h"        // gif_within_hover_dimension_budget
+#include "ui/anim_model.h"        // anim_within_hover_dimension_budget
 
 namespace gfx { class Renderer; class FontAtlas; class TextureCache; }
 namespace image { class DecodeWorker; }
@@ -70,7 +70,7 @@ void draw_tile_thumb(gfx::Renderer& r, gfx::FontAtlas& font,
 [[nodiscard]] bool tile_shows_animated_badge(const vault::IndexNode& node) noexcept;
 
 // True when a tile can be animated on hover: it must show the animated badge
-// and have dimensions within the GIF hover budget.
+// and have dimensions within the hover budget.
 [[nodiscard]] bool tile_can_hover_animate(const vault::IndexNode& node) noexcept;
 
 // Draw an animated badge ("A") in the top-right corner of a tile.

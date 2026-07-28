@@ -1,23 +1,24 @@
-#include "ui/gif_repair.h"
+#include "ui/anim_repair.h"
 
-#include "image/gif_info.h"
+#include "image/anim_info.h"
 #include "vault/index.h"
 #include "vault/vault.h"
 
 namespace ui {
 
-bool maybe_repair_gif_animated(vault::Vault& v, std::string_view gallery_path,
-                               const vault::IndexNode& node,
-                               std::span<const uint8_t> data)
+bool maybe_repair_animated(vault::Vault& v, std::string_view gallery_path,
+                           const vault::IndexNode& node,
+                           std::span<const uint8_t> data)
 {
     if (node.type != vault::IndexNode::Type::Image) {
         return false;
     }
-    if (node.meta.format != vault::ImageFormat::GIF) {
+    if (!vault::format_can_animate(node.meta.format)) {
         return false;
     }
 
-    const bool actual = image::gif_is_animated(data);
+    const bool actual =
+        image::is_animated(static_cast<image::ImageFormat>(node.meta.format), data);
     if (actual == node.meta.animated) {
         return false;
     }
@@ -30,9 +31,9 @@ bool maybe_repair_gif_animated(vault::Vault& v, std::string_view gallery_path,
     return v.repair_image_animated(node_path, actual);
 }
 
-bool GifSniffGate::should_sniff(const vault::IndexNode& node)
+bool AnimSniffGate::should_sniff(const vault::IndexNode& node)
 {
-    if (!node.is_image() || node.meta.format != vault::ImageFormat::GIF ||
+    if (!node.is_image() || !vault::format_can_animate(node.meta.format) ||
         node.meta.animated) {
         return false;
     }

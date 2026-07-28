@@ -11,7 +11,7 @@
 #include "ui/zip_import.h"
 #include "ui/zip_plan.h"
 #include "image/decode.h"
-#include "image/gif_info.h"
+#include "image/anim_info.h"
 #include "image/thumbnail.h"
 #include "vault/staging.h"
 #include "platform/safe_print.h"
@@ -143,10 +143,8 @@ private:
                     job->result.thumb_jpeg = std::move(*thumb_bytes);
                 }
 
-                // Set animated flag for GIFs
-                if (decoded->format == image::ImageFormat::GIF) {
-                    job->result.animated = image::gif_is_animated(job->data);
-                }
+                // Set the animated flag for formats that can carry animation
+                job->result.animated = image::is_animated(decoded->format, job->data);
             }
             job->data.clear();  // Free the source pixels
             job->done.store(true);

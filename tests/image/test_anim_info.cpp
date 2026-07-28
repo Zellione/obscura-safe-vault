@@ -4,7 +4,8 @@
 #include <span>
 #include <vector>
 
-#include "image/gif_info.h"
+#include "image/anim_info.h"
+#include "image/fixtures.h"
 
 namespace {
 
@@ -125,4 +126,76 @@ TEST(gif_info_extension_blocks_are_skipped)
     blocks.insert(blocks.end(), f.begin(), f.end());
     const auto g = gif_with(blocks);
     CHECK(image::gif_is_animated(g));
+}
+
+// --- WebP animation detection (Phase 57) --------------------------------------
+// The WebP probe delegates to libwebp's own header parser (WebPGetFeatures)
+// rather than walking RIFF ourselves, so these tests pin the contract we rely on
+// rather than a parser of our own: an animated file says yes, everything else —
+// including hostile input — says no without reading past the buffer.
+
+TEST(webp_is_animated_true_for_animated_fixture)
+{
+    const auto buf = fixtures::load_anim_webp();
+    REQUIRE(!buf.empty());
+    CHECK(image::webp_is_animated(buf));
+}
+
+TEST(webp_is_animated_true_for_animated_fixture_with_alpha)
+{
+    const auto buf = fixtures::load_anim_webp_alpha();
+    REQUIRE(!buf.empty());
+    CHECK(image::webp_is_animated(buf));
+}
+
+TEST(webp_is_animated_false_for_static_fixture)
+{
+    const auto buf = fixtures::load_webp();
+    REQUIRE(!buf.empty());
+    CHECK(!image::webp_is_animated(buf));
+}
+
+TEST(webp_is_animated_false_for_truncated_input)
+{
+    auto buf = fixtures::load_anim_webp();
+    REQUIRE(buf.size() > 20);
+    buf.resize(20);                 // RIFF/VP8X header only, no frame data
+    CHECK(!image::webp_is_animated(buf));
+}
+
+TEST(webp_is_animated_false_for_empty_and_garbage)
+{
+    CHECK(!image::webp_is_animated({}));
+
+    // "RIFF" with a non-WEBP form type must be rejected, not probed further.
+    const std::vector<uint8_t> not_webp{'R', 'I', 'F', 'F', 4, 0, 0, 0, 'A', 'V', 'I', ' '};
+    CHECK(!image::webp_is_animated(not_webp));
+
+    const std::vector<uint8_t> noise(64, 0xAB);
+    CHECK(!image::webp_is_animated(noise));
+}
+
+TEST(is_animated_dispatches_on_format)
+{
+    const auto webp_anim  = fixtures::load_anim_webp();
+    const auto webp_still = fixtures::load_webp();
+    REQUIRE(!webp_anim.empty());
+    REQUIRE(!webp_still.empty());
+
+    CHECK(image::is_animated(image::ImageFormat::WebP, webp_anim));
+    CHECK(!image::is_animated(image::ImageFormat::WebP, webp_still));
+
+    // A format that cannot animate is never probed, whatever the bytes hold.
+    CHECK(!image::is_animated(image::ImageFormat::PNG, webp_anim));
+    CHECK(!image::is_animated(image::ImageFormat::JPEG, webp_anim));
+}
+
+TEST(is_animated_routes_gif_to_the_gif_walker)
+{
+    const auto g = gif_with(frames(2));
+    CHECK(image::is_animated(image::ImageFormat::GIF, g));
+    CHECK(image::gif_is_animated(g));
+
+    const auto one = gif_with(frames(1));
+    CHECK(!image::is_animated(image::ImageFormat::GIF, one));
 }

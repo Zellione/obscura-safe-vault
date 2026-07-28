@@ -9,14 +9,22 @@ and `src/media/` (FFmpeg video/audio, whole subsystem gated `OSV_VENDORED_AV`).
 - `decoder.*` — `Decoder` interface + `DecoderRegistry` (polymorphic dispatch;
   `default_registry()` wires WebP/HEIF/stb decoders).
 - `decode_webp.*`, `decode_heif.*` — libwebp (WebP), libheif (HEIC/AVIF).
-- `gif_info.*` — Phase 47: `gif_is_animated()`, pure bounds-checked GIF block
-  walker. Not gated on `OSV_VENDORED_AV`, so the badge works everywhere.
+  Phase 57: an animated WebP has no top-level VP8/VP8L chunk, so
+  `WebPDecodeRGBInto` fails on it (while `WebPGetInfo` still reports the VP8X
+  canvas size) — `decode_webp_from_memory` routes those through
+  `WebPAnimDecoder`'s frame 0, flattened over black. Before that, animated WebPs
+  could not be imported at all.
+- `anim_info.*` (was `gif_info.*`) — `is_animated(ImageFormat, span)` dispatches
+  to `gif_is_animated()` (Phase 47: pure bounds-checked GIF block walker) or
+  `webp_is_animated()` (Phase 57: one `WebPGetFeatures()` call reading the VP8X
+  ANIMATION flag — libwebp's own parser, not one of ours, on untrusted input).
+  Not gated on `OSV_VENDORED_AV`, so the badge works everywhere.
 - `decode_worker.*` — off-thread image decoder: caller reads+decrypts on its thread, worker
   runs `decode_from_memory()` on one bg thread, caller uploads result to GPU. Coalesces by
   key, SDL wake event, `retain()`/`pending()`. Each screen owns its own worker; FullTexCache
   + GalleryGrid use it for async decode.
 
-## media/ (all gated OSV_VENDORED_AV)
+## media/ (gated OSV_VENDORED_AV except anim_decoder.h + webp_anim_decoder.*)
 Files: `video_source.*`, `chunk_avio.*`, `mem_avio.*`, `video_decoder.*`, `audio_decoder.*`,
 `av_sync.*`, `audio_frame.h`, `volume_setting.*`, `loop_setting.*`, `video_probe.*`,
 `decoded_frame.h`, plus `frame_convert.*`, `video_decode_worker.*`, `hw_accel.*`.
@@ -44,11 +52,23 @@ Files: `video_source.*`, `chunk_avio.*`, `mem_avio.*`, `video_decoder.*`, `audio
 - `AudioDecoder` owns an `AVStream*`, decodes planar PCM → interleaved F32 in
   `AudioFrame{samples,channels,sample_rate,pts_seconds}`. Phase 52 added decoders for
   legacy formats (MP2, WMA v1/v2, Cook, RealAudio 144/288, PCM s16le/u8, ADPCM ms/ima_wav).
-- `gif_decoder.*` (Phase 47, gated `OSV_VENDORED_AV`) — `GifDecoder`: `MemAvio`
-  over decrypted bytes → gif demuxer → gif decoder → swscale to RGBA. Streaming,
-  one frame at a time, constant memory. No audio, no packet queues, no seeking,
-  no hwaccel. `rewind()` for looping. Per-frame delay clamped to 20 ms floor.
-  `open()` borrows caller's buffer.
+- `anim_decoder.h` (Phase 57, NOT gated) — `AnimFrame{rgba,width,height,delay_s}`
+  (was `GifFrame`) + the abstract `AnimDecoder` (`open`/`next_frame`/`rewind`/
+  `width`/`height`/`frames_decoded`) and `kMinFrameDelay` (20 ms). Pulls in
+  neither FFmpeg nor libwebp, so it is includable in any build. `open()` BORROWS
+  the caller's buffer; every emitted frame is complete and opaque RGBA.
+- `gif_decoder.*` (Phase 47, gated `OSV_VENDORED_AV`) — `GifDecoder`, an
+  `AnimDecoder` backend: `MemAvio` over decrypted bytes → gif demuxer → gif
+  decoder → swscale to RGBA. Streaming, one frame at a time, constant memory. No
+  audio, no packet queues, no seeking, no hwaccel.
+- `webp_anim_decoder.*` (Phase 57, NOT gated — libwebp is a hard dependency, so
+  animated WebP plays even without vendored FFmpeg) — `WebpAnimDecoder`, the
+  other `AnimDecoder` backend, over libwebp's `WebPAnimDecoder` (libwebpdemux).
+  Copies each frame out of libwebp's internal canvas (invalidated by the next
+  `GetNext`/`Reset`), flattens alpha over black, and converts libwebp's
+  CUMULATIVE ms timestamps to per-frame deltas via the pure
+  `webp_frame_delay_s(prev_ms, ms)`, clamped to `kMinFrameDelay`. `open()`
+  rejects a single-frame file. `rewind()` = `WebPAnimDecoderReset`.
 - `av_sync` = PURE logic (no SDL/FFmpeg) for audio-clock tracking: `decide(audio_clock,
   frame_pts,...)` → `FrameAction{Present,Hold,Drop}`; `audio_clock(base,samples_consumed,
   rate)`; `clamp_volume`/`effective_gain` helpers; unit-tested.

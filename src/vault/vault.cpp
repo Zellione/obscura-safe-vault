@@ -18,7 +18,7 @@
 #include "safe_name.h"
 
 #include "image/decode.h"
-#include "image/gif_info.h"
+#include "image/anim_info.h"
 #include "image/thumbnail.h"
 
 #include "vault/video_format.h"
@@ -912,7 +912,7 @@ bool Vault::repair_image_animated(std::string_view node_path, bool animated)
         return false;
     }
 
-    if (n->meta.format != ImageFormat::GIF) {
+    if (!format_can_animate(n->meta.format)) {
         return false;
     }
 

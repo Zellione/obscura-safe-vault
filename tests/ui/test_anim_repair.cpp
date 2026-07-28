@@ -1,14 +1,16 @@
 #include "test_framework.h"
 
-#include "ui/gif_repair.h"
+#include "image/fixtures.h"
+#include "ui/anim_repair.h"
 #include "ui/zip_test_helpers.h"
 #include "vault/vault.h"
 
 #include <fstream>
 #include <vector>
 
-// Tests for ui::maybe_repair_gif_animated — lazy self-healing for legacy GIFs
-// stored before Phase 47 with the wrong animated flag.
+// Tests for ui::maybe_repair_animated — lazy self-healing for images stored
+// before their format's animation support landed (GIF: Phase 47, WebP: Phase 57)
+// with the wrong animated flag.
 
 namespace {
 
@@ -59,7 +61,7 @@ using ziptest::cleanup_dir;
 using ziptest::fresh_dir;
 using ziptest::make_vault;
 
-TEST(gif_repair_sets_the_flag_on_a_legacy_animated_gif)
+TEST(anim_repair_gif_sets_the_flag_on_a_legacy_animated_gif)
 {
     auto anim_bytes = load_vault_gif_fixture("anim.gif");
     REQUIRE(!anim_bytes.empty());
@@ -85,7 +87,7 @@ TEST(gif_repair_sets_the_flag_on_a_legacy_animated_gif)
         REQUIRE(!children2[0]->meta.animated);
 
         // Repair should detect that it's animated and fix it
-        CHECK(ui::maybe_repair_gif_animated(v, "", *children2[0], anim_bytes));
+        CHECK(ui::maybe_repair_animated(v, "", *children2[0], anim_bytes));
 
         // Verify flag is now set
         auto children3 = v.list("");
@@ -95,7 +97,7 @@ TEST(gif_repair_sets_the_flag_on_a_legacy_animated_gif)
     cleanup_dir(dir);
 }
 
-TEST(gif_repair_is_a_no_op_when_the_flag_is_already_correct)
+TEST(anim_repair_gif_is_a_no_op_when_the_flag_is_already_correct)
 {
     auto anim_bytes = load_vault_gif_fixture("anim.gif");
     REQUIRE(!anim_bytes.empty());
@@ -111,7 +113,7 @@ TEST(gif_repair_is_a_no_op_when_the_flag_is_already_correct)
         REQUIRE(children[0]->meta.animated);
 
         // Repair should be a no-op since the flag is already correct
-        CHECK(!ui::maybe_repair_gif_animated(v, "", *children[0], anim_bytes));
+        CHECK(!ui::maybe_repair_animated(v, "", *children[0], anim_bytes));
 
         auto children2 = v.list("");
         REQUIRE(children2.size() == 1);
@@ -120,7 +122,7 @@ TEST(gif_repair_is_a_no_op_when_the_flag_is_already_correct)
     cleanup_dir(dir);
 }
 
-TEST(gif_repair_clears_a_wrongly_set_flag_on_a_still_gif)
+TEST(anim_repair_gif_clears_a_wrongly_set_flag_on_a_still_gif)
 {
     auto still_bytes = load_vault_gif_fixture("still.gif");
     REQUIRE(!still_bytes.empty());
@@ -143,7 +145,7 @@ TEST(gif_repair_clears_a_wrongly_set_flag_on_a_still_gif)
         REQUIRE(children2[0]->meta.animated);
 
         // Repair should detect it's not animated and fix it
-        CHECK(ui::maybe_repair_gif_animated(v, "", *children2[0], still_bytes));
+        CHECK(ui::maybe_repair_animated(v, "", *children2[0], still_bytes));
 
         auto children3 = v.list("");
         REQUIRE(children3.size() == 1);
@@ -152,7 +154,7 @@ TEST(gif_repair_clears_a_wrongly_set_flag_on_a_still_gif)
     cleanup_dir(dir);
 }
 
-TEST(gif_repair_ignores_non_gif_images)
+TEST(anim_repair_gif_ignores_non_gif_images)
 {
     auto jpeg_bytes = load_jpeg_fixture();
     REQUIRE(!jpeg_bytes.empty());
@@ -168,12 +170,12 @@ TEST(gif_repair_ignores_non_gif_images)
         REQUIRE(children[0]->meta.format != vault::ImageFormat::GIF);
 
         // Repair should be a no-op for non-GIF images
-        CHECK(!ui::maybe_repair_gif_animated(v, "", *children[0], jpeg_bytes));
+        CHECK(!ui::maybe_repair_animated(v, "", *children[0], jpeg_bytes));
     }
     cleanup_dir(dir);
 }
 
-TEST(gif_repair_survives_a_reopen)
+TEST(anim_repair_gif_survives_a_reopen)
 {
     auto anim_bytes = load_vault_gif_fixture("anim.gif");
     REQUIRE(!anim_bytes.empty());
@@ -192,7 +194,7 @@ TEST(gif_repair_survives_a_reopen)
         REQUIRE(!children[0]->meta.animated);
 
         // Repair it
-        CHECK(ui::maybe_repair_gif_animated(v, "", *children[0], anim_bytes));
+        CHECK(ui::maybe_repair_animated(v, "", *children[0], anim_bytes));
 
         auto children2 = v.list("");
         REQUIRE(children2.size() == 1);
@@ -215,15 +217,15 @@ TEST(gif_repair_survives_a_reopen)
     cleanup_dir(dir);
 }
 
-// --- GifSniffGate (navigation must not re-read a GIF on every visit) --------
+// --- AnimSniffGate (navigation must not re-read a GIF on every visit) --------
 //
-// The viewer's legacy-flag sniff reads + decrypts the FULL image; GifSniffGate
+// The viewer's legacy-flag sniff reads + decrypts the FULL image; AnimSniffGate
 // limits that to GIF images whose animated flag is unset (only they can need
 // the pre-Phase-47 repair), at most once per chunk per viewer session.
 
-TEST(gif_sniff_gate_ignores_non_gif_and_flagged_animated)
+TEST(anim_sniff_gate_ignores_non_gif_and_flagged_animated)
 {
-    ui::GifSniffGate gate;
+    ui::AnimSniffGate gate;
 
     vault::IndexNode jpeg;
     jpeg.type        = vault::IndexNode::Type::Image;
@@ -242,9 +244,9 @@ TEST(gif_sniff_gate_ignores_non_gif_and_flagged_animated)
     CHECK_FALSE(gate.should_sniff(gallery));
 }
 
-TEST(gif_sniff_gate_sniffs_each_legacy_gif_once)
+TEST(anim_sniff_gate_sniffs_each_legacy_gif_once)
 {
-    ui::GifSniffGate gate;
+    ui::AnimSniffGate gate;
 
     vault::IndexNode g1;
     g1.type             = vault::IndexNode::Type::Image;
@@ -259,4 +261,94 @@ TEST(gif_sniff_gate_sniffs_each_legacy_gif_once)
     CHECK_FALSE(gate.should_sniff(g1));  // same chunk: checked this session
     CHECK_TRUE(gate.should_sniff(g2));   // different chunk: first visit
     CHECK_FALSE(gate.should_sniff(g2));
+}
+
+// --- WebP (Phase 57) ----------------------------------------------------------
+
+TEST(anim_repair_heals_a_webp_stored_with_a_stale_flag)
+{
+    // Mirrors anim_repair_gif_sets_the_flag_on_a_legacy_animated_gif for the
+    // format Phase 57 adds.
+    const auto anim_bytes = fixtures::load_anim_webp();
+    REQUIRE(!anim_bytes.empty());
+
+    auto dir = fresh_dir("osv_anim_repair_webp");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        REQUIRE(v.add_image("", anim_bytes, "anim.webp") == vault::VaultResult::Ok);
+
+        auto children = v.list("");
+        REQUIRE(children.size() == 1);
+        REQUIRE(children[0]->meta.animated);
+
+        // Simulate a vault written before WebP animation was recognised.
+        REQUIRE(v.repair_image_animated("anim.webp", false) == true);
+
+        auto children2 = v.list("");
+        REQUIRE(children2.size() == 1);
+        REQUIRE(!children2[0]->meta.animated);
+
+        CHECK(ui::maybe_repair_animated(v, "", *children2[0], anim_bytes));
+
+        auto children3 = v.list("");
+        REQUIRE(children3.size() == 1);
+        CHECK(children3[0]->meta.animated);
+
+        // Second call is a no-op: the flag is already correct.
+        CHECK(!ui::maybe_repair_animated(v, "", *children3[0], anim_bytes));
+    }
+    cleanup_dir(dir);
+}
+
+TEST(anim_repair_clears_a_wrongly_set_flag_on_a_still_webp)
+{
+    const auto still_bytes = fixtures::load_webp();
+    REQUIRE(!still_bytes.empty());
+
+    auto dir = fresh_dir("osv_anim_repair_still_webp");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        REQUIRE(v.add_image("", still_bytes, "still.webp") == vault::VaultResult::Ok);
+
+        auto children = v.list("");
+        REQUIRE(children.size() == 1);
+        REQUIRE(!children[0]->meta.animated);
+
+        // Force the flag on, as a buggy writer might have.
+        REQUIRE(v.repair_image_animated("still.webp", true) == true);
+
+        auto children2 = v.list("");
+        REQUIRE(children2.size() == 1);
+        REQUIRE(children2[0]->meta.animated);
+
+        CHECK(ui::maybe_repair_animated(v, "", *children2[0], still_bytes));
+
+        auto children3 = v.list("");
+        REQUIRE(children3.size() == 1);
+        CHECK(!children3[0]->meta.animated);
+    }
+    cleanup_dir(dir);
+}
+
+TEST(anim_sniff_gate_sniffs_a_legacy_webp)
+{
+    ui::AnimSniffGate gate;
+
+    vault::IndexNode w;
+    w.type             = vault::IndexNode::Type::Image;
+    w.meta.format      = vault::ImageFormat::WebP;
+    w.meta.animated    = false;
+    w.meta.data_offset = 300;
+
+    CHECK_TRUE(gate.should_sniff(w));
+    CHECK_FALSE(gate.should_sniff(w));   // same chunk: checked this session
+
+    // A format that cannot animate is never sniffed, whatever its flag.
+    vault::IndexNode heic;
+    heic.type             = vault::IndexNode::Type::Image;
+    heic.meta.format      = vault::ImageFormat::HEIC;
+    heic.meta.data_offset = 400;
+    CHECK_FALSE(gate.should_sniff(heic));
 }

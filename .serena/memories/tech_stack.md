@@ -20,7 +20,7 @@
 | SDL3 | 3.4.10 | cmake once via `setup.sh`; static lib at `vendor/SDL3/build/libSDL3.a` (Linux) or `vendor/SDL3/build/SDL3-static.lib` / `Release/SDL3-static.lib` (Windows) |
 | Monocypher | 4.0.2 | single `monocypher.c` compiled by premake |
 | stb | head | header-only (`stb_image.h`, `stb_truetype.h`) |
-| libwebp | 1.4.0 | WebP decode; cmake → `vendor/codecs-prefix` |
+| libwebp | 1.4.0 | WebP decode; cmake → `vendor/codecs-prefix`. Phase 57 also links **libwebpdemux** (`WebPAnimDecoder`) for animated WebP — the same cmake build already produced `libwebpdemux.a`, so only the premake `links` line changed. It is NOT gated: unlike GIF (FFmpeg), animated WebP plays in every build |
 | libde265 | 1.0.15 | HEIC (HEVC) decode; cmake → `vendor/codecs-prefix` |
 | libaom | 3.14.1 | AVIF (AV1) *stills* decode via libheif, decoder-only; needs **nasm**; cmake → `vendor/codecs-prefix`. Phase 40: also linked a second time into FFmpeg as the `libaom-av1` decoder for AV1 *video* (see FFmpeg row) — one vendored copy, two independent consumers |
 | libheif | 1.18.2 | HEIC/AVIF container; one `decode_heif_from_memory` covers both |
@@ -33,7 +33,8 @@
 
 Image codecs are built by `scripts/build_codecs.{sh,bat}` (shared by `setup.{sh,bat}` and CI)
 and installed into `vendor/codecs-prefix/`; premake's `link_image_codecs()` links them in
-order `heif → de265 → aom → webp → sharpyuv`. The build passes
+order `heif → de265 → aom → webpdemux → webp → sharpyuv` (demux before webp: static-archive
+resolution is single-pass and libwebpdemux depends on libwebp). The build passes
 `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` (libde265's pre-3.5 cmake_minimum under CMake 4.x).
 
 **FFmpeg (Phase 15–16)** is a sibling vendored submodule (`vendor/ffmpeg`) built via **configure**

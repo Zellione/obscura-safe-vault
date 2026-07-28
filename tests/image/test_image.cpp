@@ -237,6 +237,80 @@ TEST(decode_malformed_webp_returns_nullopt)
     CHECK_FALSE(image::decode_from_memory(bad).has_value());
 }
 
+// An animated WebP has no top-level VP8/VP8L chunk, so WebPDecodeRGBInto fails
+// on it — before Phase 57 that made every animated WebP unimportable. The
+// decoder now falls back to the animation decoder's frame 0.
+
+TEST(vault_add_animated_webp_sets_the_animated_flag)
+{
+    const auto buf = fixtures::load_anim_webp();
+    REQUIRE(!buf.empty());
+
+    TempVault tv("animwebp");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), {reinterpret_cast<const uint8_t*>("pw"), 2},
+                                 {}, kFastKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", buf, "anim.webp") == vault::VaultResult::Ok);
+
+    const auto kids = v.list("");
+    REQUIRE(kids.size() == 1);
+    const auto& meta = kids[0]->meta;
+    CHECK_EQ(meta.format, vault::ImageFormat::WebP);
+    CHECK(meta.animated);
+    CHECK(meta.thumb_length > 0);   // the first frame produced a thumbnail
+    CHECK_EQ(meta.width,  8u);
+    CHECK_EQ(meta.height, 8u);
+}
+
+TEST(vault_add_static_webp_leaves_the_animated_flag_clear)
+{
+    const auto buf = fixtures::load_webp();
+    REQUIRE(!buf.empty());
+
+    TempVault tv("stillwebp");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), {reinterpret_cast<const uint8_t*>("pw"), 2},
+                                 {}, kFastKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", buf, "still.webp") == vault::VaultResult::Ok);
+
+    const auto kids = v.list("");
+    REQUIRE(kids.size() == 1);
+    CHECK(!kids[0]->meta.animated);
+}
+
+TEST(decode_animated_webp_returns_first_frame)
+{
+    const auto buf = fixtures::load_anim_webp();
+    REQUIRE(!buf.empty());
+    const auto img = image::decode_from_memory(buf);
+    REQUIRE(img.has_value());
+    CHECK_EQ(img->format, image::ImageFormat::WebP);
+    CHECK_EQ(img->width,  8);
+    CHECK_EQ(img->height, 8);
+    CHECK_EQ(img->pixels.size(), static_cast<size_t>(8 * 8 * 3));
+
+    // Frame 0 of the fixture is solid #3366cc, encoded lossless.
+    CHECK_EQ(img->pixels[0], 0x33);
+    CHECK_EQ(img->pixels[1], 0x66);
+    CHECK_EQ(img->pixels[2], 0xcc);
+}
+
+TEST(decode_animated_webp_flattens_transparency_to_black)
+{
+    const auto buf = fixtures::load_anim_webp_alpha();
+    REQUIRE(!buf.empty());
+    const auto img = image::decode_from_memory(buf);
+    REQUIRE(img.has_value());
+    CHECK_EQ(img->width,  8);
+    CHECK_EQ(img->height, 8);
+
+    // Frame 0 is fully transparent; flattened over black it is (0, 0, 0) — and
+    // definitively not stale heap bytes.
+    CHECK_EQ(img->pixels[0], 0x00);
+    CHECK_EQ(img->pixels[1], 0x00);
+    CHECK_EQ(img->pixels[2], 0x00);
+}
+
 // ---------------------------------------------------------------------------
 // HEIC / AVIF decode (libheif: libde265 + libaom) — fixture-backed
 // ---------------------------------------------------------------------------

@@ -108,7 +108,7 @@ void draw_tile_thumb(gfx::Renderer& r, gfx::FontAtlas& font, const ThumbContext&
 bool tile_shows_animated_badge(const vault::IndexNode& node) noexcept
 {
     return node.type == vault::IndexNode::Type::Image
-        && node.meta.format == vault::ImageFormat::GIF
+        && vault::format_can_animate(node.meta.format)
         && node.meta.animated;
 }
 
@@ -117,7 +117,7 @@ bool tile_can_hover_animate(const vault::IndexNode& node) noexcept
     if (!tile_shows_animated_badge(node)) {
         return false;
     }
-    return gif_within_hover_dimension_budget(node.meta.width, node.meta.height);
+    return anim_within_hover_dimension_budget(node.meta.width, node.meta.height);
 }
 
 void draw_animated_badge(gfx::Renderer& r, gfx::FontAtlas& font,

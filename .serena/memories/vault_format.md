@@ -73,10 +73,16 @@ galleries adopt the vault default with **no migration**. `read_node` bounds
 `sort_key` per version (v6/v7 max 6, v8 max 7).
 
 **INDEX_VERSION = 7** (Phase 47): Image nodes carry an `animated u8` flag
-(0=static, 1=animated GIF) after `thumb_length`. v1–v6 blobs read as false.
+(0=static, 1=animated) after `thumb_length`. v1–v6 blobs read as false.
 Bytes other than 0/1 are rejected on deserialise (not clamped), matching the
 Phase 37 `sort_key` rule. Lazy repair via `Vault::repair_image_animated` heals
 pre-v7 GIFs on first view.
+
+The flag is **format-neutral**, which is why Phase 57 added animated WebP with
+**no version bump at all**: only which formats the writer/reader consult
+(`vault::format_can_animate` — GIF and WebP) changed, not the layout. A vault
+written before Phase 57 cannot contain an animated WebP, because such a file
+failed to decode and was rejected at import.
 
 ## Key hierarchy
 
