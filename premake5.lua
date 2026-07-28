@@ -558,6 +558,7 @@ project "osv_tests"
         "src/ui/detail_layout.cpp",
         "src/ui/prompt_layout.cpp",
         "src/ui/list_layout.cpp",
+        "src/ui/import_status_row.cpp",
         "src/ui/text_metrics.cpp",
         "src/ui/settings_model.cpp",
         "src/ui/tile_thumb.cpp",
