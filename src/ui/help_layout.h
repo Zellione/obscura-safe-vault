@@ -19,6 +19,19 @@ struct HelpGroup;   // ui/help_popup.h
 // Clamp a line-index scroll offset into [0, max(0, total_lines - visible_lines)].
 [[nodiscard]] int clamp_help_line(int scroll_line, int total_lines, int visible_lines);
 
+// The clipped content band of the help panel: where text starts, how tall the
+// band is, and how many whole lines fit. Chrome is a title row above and a hint
+// row below, each `pad + line_h + 8`. The band is a whole number of lines, so
+// with a pitch derived from the font (ui::line_pitch) the last line's glyph box
+// is fully inside it — the Phase 56 fix for text cut by the panel's bottom edge.
+struct HelpBand {
+    float content_top   = 0.0f;
+    float band_h        = 0.0f;
+    int   visible_lines = 0;
+};
+
+[[nodiscard]] HelpBand help_content_band(float panel_y, float panel_h, float pad, float line_h);
+
 // One packed column: which groups it holds (indices into the caller's group
 // vector, in order) and how many rendered lines they occupy.
 struct HelpColumn {

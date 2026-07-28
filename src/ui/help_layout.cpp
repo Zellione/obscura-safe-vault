@@ -22,6 +22,16 @@ int clamp_help_line(int scroll_line, int total_lines, int visible_lines) // NOLI
     return std::clamp(scroll_line, 0, max_scroll);
 }
 
+HelpBand help_content_band(float panel_y, float panel_h, float pad, float line_h)
+{
+    const float chrome_one = pad + line_h + 8.0f;   // title row / hint row
+    const float top        = panel_y + chrome_one;
+    const int   visible    = help_visible_lines(panel_h - 2.0f * chrome_one, line_h);
+    return {.content_top = top,
+            .band_h = static_cast<float>(visible) * line_h,
+            .visible_lines = visible};
+}
+
 namespace {
 // Rendered height of one group: its title plus one line per entry. The blank
 // spacer line between groups is a *separator*, so it is charged only when the
