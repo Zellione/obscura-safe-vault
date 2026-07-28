@@ -7,14 +7,15 @@
 #include "gfx/renderer.h"
 #include "gfx/theme.h"
 #include "gfx/text.h"
+#include "ui/list_layout.h"
+#include "ui/text_metrics.h"
 #include "ui/widgets.h"
 
 namespace ui {
 
 namespace {
 
-constexpr float TOP  = 110.0f;
-constexpr float LINE = 30.0f;
+constexpr float TOP = 110.0f;
 
 std::string trim(std::string_view s)
 {
@@ -109,6 +110,7 @@ bool SavedSearchPanel::finalize_save(const AdvancedQuery& query)
 void SavedSearchPanel::render(gfx::Renderer& r, float x, float max_w, bool hot)
 {
     using namespace gfx::theme;
+    const float LINE = line_pitch(font_.pixel_height());
     if (hot) r.draw_text(font_, x - 16, TOP, ">", ACCENT);
     r.draw_text(font_, x, TOP, "Saved searches", TEXT_DIM);
 
@@ -119,7 +121,7 @@ void SavedSearchPanel::render(gfx::Renderer& r, float x, float max_w, bool hot)
                     fit_text(font_, std::format("{} {}", sel ? ">" : " ", saved_[i].name),
                              max_w),
                     sel ? TEXT : TEXT_DIM);
-        y += LINE * 0.9f;
+        y = list_row_y({.top = TOP + LINE, .row_h = LINE}, i + 1);
     }
     if (saved_.empty()) r.draw_text(font_, x, y, "(none — Ctrl+S to save)", TEXT_FAINT);
 }

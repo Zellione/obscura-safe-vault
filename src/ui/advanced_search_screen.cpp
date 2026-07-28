@@ -13,8 +13,10 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "ui/grid_layout.h"
+#include "ui/list_layout.h"
 #include "ui/nav_model.h"
 #include "ui/text_input_event.h"
+#include "ui/text_metrics.h"
 #include "ui/tile_thumb.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
@@ -23,10 +25,8 @@ namespace ui {
 
 namespace {
 
-constexpr float PAD  = 32.0f;
-constexpr float TOP  = 110.0f;
-constexpr float LINE = 30.0f;
-constexpr float ROW  = LINE * 0.85f;   // compact row height for per-tag lists
+constexpr float PAD = 32.0f;
+constexpr float TOP = 110.0f;
 
 std::string trim(std::string_view s)
 {
@@ -66,6 +66,8 @@ float draw_groups(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<TagG
                   const GroupLayout& lay)
 {
     using namespace gfx::theme;
+    const float LINE = line_pitch(font.pixel_height());
+    const float ROW  = LINE;   // per-tag rows are full lines now, not 0.85 of one
     // Offset from a draw-y to the text's ink centre (see render_builder), so the
     // selected-tag highlight box can be centred on the tag text it wraps.
     const float ink_dy = -font.text_top_for_center(0.0f);
@@ -99,6 +101,8 @@ void draw_dropdown(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<std
                    int sel, float x, float y, float colw)
 {
     using namespace gfx::theme;
+    const float LINE = line_pitch(font.pixel_height());
+    const float ROW  = LINE;   // per-tag rows are full lines now, not 0.85 of one
     const int n = std::min(static_cast<int>(sugg.size()), 6);
     if (n == 0) return;
     // Panel covers n ROW-tall slots starting at `y`; it spans the column width and
@@ -745,6 +749,8 @@ void AdvancedSearchScreen::render(gfx::Renderer& r)
 void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, float colw)
 {
     using namespace gfx::theme;
+    const float LINE = line_pitch(font_.pixel_height());
+    const float ROW  = LINE;   // per-tag rows are full lines now, not 0.85 of one
     auto focused = [&](Focus f) { return focus_ == f && !saved_panel_.active_buffer() && !clearing_; };
     auto label   = [&](float ly, Focus f, std::string_view s) {
         if (focused(f)) r.draw_text(font_, x - 16, ly, ">", ACCENT);
@@ -831,6 +837,7 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
 void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
 {
     using namespace gfx::theme;
+    const float LINE = line_pitch(font_.pixel_height());
     const bool hot = (focus_ == Focus::Results && !saved_panel_.active_buffer() && !clearing_);
     if (result_view_.get_view() == ResultView::Grid) { result_view_.render(r, x, colw, hot); return; }
 

@@ -10,6 +10,7 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "ui/advanced_search_model.h"
+#include "ui/list_layout.h"
 #include "ui/nav_model.h"
 #include "ui/tag_category.h"
 #include "ui/tag_chip.h"
@@ -17,6 +18,7 @@
 #include "ui/tag_scroll.h"
 #include "ui/tag_suggest.h"
 #include "ui/text_input_event.h"
+#include "ui/text_metrics.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
 #include "vault/vault.h"
@@ -29,11 +31,7 @@ constexpr float MODAL_W = 500.0f;
 constexpr float MODAL_H = 450.0f;
 constexpr float PAD = 16.0f;
 constexpr float INPUT_BOX_H = 40.0f;
-constexpr float TAG_ROW_H = 32.0f;
 constexpr float TAG_LIST_GAP = 6.0f;
-// Baseline-to-baseline spacing for the 28px UI font; 24px was too tight and
-// caused the title/subtitle and the "Current tags:" label/first row to collide.
-constexpr float LINE = 34.0f;
 constexpr float INHERIT_LINE = 30.0f;   // line pitch within the inherited-tags section
 
 // Trim surrounding ASCII whitespace only; interior spaces are kept so multi-word
@@ -298,6 +296,8 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     if (!active_) return;
 
     using namespace gfx::theme;
+    const float LINE      = line_pitch(font.pixel_height());
+    const float TAG_ROW_H = row_height(font.pixel_height(), 6.0f);
 
     // Dim the background
     r.draw_rect({0, 0, W, H}, {0, 0, 0, 180}, /*filled*/ true);
@@ -404,6 +404,7 @@ void TagEditor::draw_tag_rows(gfx::Renderer& r, gfx::FontAtlas& font, float mx, 
                                float tags_start, float row_pitch, int max_visible) const
 {
     using namespace gfx::theme;
+    const float TAG_ROW_H = row_height(font.pixel_height(), 6.0f);
 
     const auto total = static_cast<int>(tally_.size());
     const int  first  = tag_scroll_first(total, selected_, max_visible);

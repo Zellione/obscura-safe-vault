@@ -8,9 +8,11 @@
 #include "gfx/text.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "ui/list_layout.h"
 #include "ui/nav_model.h"
 #include "ui/search_model.h"
 #include "ui/text_input_event.h"
+#include "ui/text_metrics.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
 #include "vault/vault.h"
@@ -25,11 +27,7 @@ constexpr float PAD = 24.0f;         // panel inset: keeps rows/text off the bor
 constexpr float ROW_TEXT_INSET = 14.0f;   // text inset within a result row
 constexpr float SEARCH_BOX_H = 44.0f;
 constexpr float SCOPE_TOGGLE_H = 36.0f;
-constexpr float RESULT_ROW_H = 40.0f;
 constexpr float RESULT_LIST_GAP = 8.0f;
-// Baseline-to-baseline spacing for the 28px UI font; smaller gaps let the title
-// crowd the search box on the way down.
-constexpr float LINE = 34.0f;
 
 // Build a one-line result label: kind icon + path + up to two effective tags.
 std::string format_hit_label(const vault::SearchHit& hit)
@@ -174,6 +172,8 @@ void SearchOverlay::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
     if (!active_) return;
 
     using namespace gfx::theme;
+    const float LINE         = line_pitch(font.pixel_height());
+    const float RESULT_ROW_H = row_height(font.pixel_height(), 6.0f);
 
     // Dim the background
     r.draw_rect({0, 0, W, H}, {0, 0, 0, 180}, /*filled*/ true);
@@ -212,11 +212,11 @@ void SearchOverlay::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
     const float list_h = mh - (list_y - my) - PAD;
 
     // Draw results
-    int visible = 0;
-    for (int i = 0; i < static_cast<int>(filtered_.size()); ++i) {
+    const int max_rows = list_rows_fit({.top = list_y, .row_h = RESULT_ROW_H, .gap = RESULT_LIST_GAP},
+                                        my + mh - PAD, static_cast<int>(filtered_.size()));
+    for (int i = 0; i < max_rows; ++i) {
         const float row_y =
-            list_y + static_cast<float>(visible) * (RESULT_ROW_H + RESULT_LIST_GAP);
-        if (row_y + RESULT_ROW_H > my + mh - PAD) break;
+            list_row_y({.top = list_y, .row_h = RESULT_ROW_H, .gap = RESULT_LIST_GAP}, i);
 
         const auto& hit = *filtered_[i];
         const SDL_FRect row_rect{mx + PAD, row_y, mw - 2 * PAD, RESULT_ROW_H};
@@ -234,8 +234,6 @@ void SearchOverlay::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
         const float text_y =
             font.text_top_for_center(row_rect.y + row_rect.h * 0.5f);
         r.draw_text(font, row_rect.x + ROW_TEXT_INSET, text_y, display, TEXT);
-
-        visible++;
     }
 
     if (filtered_.empty()) {
