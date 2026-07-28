@@ -106,9 +106,16 @@ TEST(detail_layout_height_is_the_end_of_the_last_line)
     CHECK_EQ(ui::detail_content_height(lines), last.y + last.height);
 }
 
-TEST(detail_layout_of_empty_content_is_empty)
+TEST(detail_layout_always_reserves_the_heading_line)
 {
-    const auto lines = ui::layout_detail_lines({}, ui::detail_metrics(FONT_PX));
-    CHECK(lines.empty());
-    CHECK_EQ(ui::detail_content_height(lines), 0.0f);
+    // The heading is unconditional: the old drawing loop reserved HEADING_H even
+    // when the heading was empty, and callers clamp their scroll against the
+    // returned content height. Preserve that exactly.
+    const ui::DetailMetrics m = ui::detail_metrics(FONT_PX);
+    const auto lines = ui::layout_detail_lines({}, m);
+    REQUIRE(lines.size() == 1);
+    CHECK(lines[0].kind == ui::DetailLineKind::Heading);
+    CHECK_EQ(lines[0].y, 0.0f);
+    CHECK_EQ(lines[0].height, m.heading_h);
+    CHECK_EQ(ui::detail_content_height(lines), m.heading_h);
 }

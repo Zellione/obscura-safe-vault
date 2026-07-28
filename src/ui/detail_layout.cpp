@@ -24,7 +24,10 @@ std::vector<DetailLine> layout_detail_lines(const DetailContent& content, const 
         y += h;
     };
 
-    if (!content.heading.empty())    push(DetailLineKind::Heading, m.heading_h, 0, 0);
+    // Heading is unconditional: the old drawing loop reserved 34 px whether or not
+    // the heading was empty, and the return value (content height) feeds the callers'
+    // scroll clamp. Subheading is conditional on content.
+    push(DetailLineKind::Heading, m.heading_h, 0, 0);
     if (!content.subheading.empty()) push(DetailLineKind::Subheading, m.subheading_h, 0, 0);
 
     for (std::size_t s = 0; s < content.sections.size(); ++s) {
