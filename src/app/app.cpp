@@ -426,12 +426,22 @@ bool App::pump_events(bool animating)
     bool      should_redraw = false;
     if (animating) {
         // Keep ticking the animation: never block, just drain the queue.
-        while (window_.poll_event(e)) { dispatch_event(e); should_redraw = true; }
+        while (window_.poll_event(e)) {
+            // Phase 56: SDL reports mouse positions in window points; every layout in
+            // this app is in render pixels. Convert once, here, before any consumer.
+            gfx::scale_mouse_event(e, window_.pixel_density());
+            dispatch_event(e);
+            should_redraw = true;
+        }
     } else if (SDL_WaitEventTimeout(&e, IDLE_HEARTBEAT_MS)) {
         // Idle: block until an event (or the heartbeat) rather than spinning.
+        gfx::scale_mouse_event(e, window_.pixel_density());
         dispatch_event(e);
         should_redraw = true;
-        while (window_.poll_event(e)) dispatch_event(e);
+        while (window_.poll_event(e)) {
+            gfx::scale_mouse_event(e, window_.pixel_density());
+            dispatch_event(e);
+        }
     } else if (window_.is_visible()) {
         // Heartbeat woke with no event: redraw anyway (a static frame; nothing
         // changed). On Windows with G-SYNC + Auto HDR, letting the swapchain go

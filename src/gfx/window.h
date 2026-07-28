@@ -15,6 +15,40 @@ namespace gfx {
     return (flags & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN | SDL_WINDOW_OCCLUDED)) == 0;
 }
 
+// Convert a mouse event's coordinates from window POINTS (what SDL delivers)
+// into render-output PIXELS (what Window::width()/height() report and what every
+// layout in this app is expressed in). The two differ by the window's pixel
+// density whenever the display is scaled — the normal Windows case at 125%/150%
+// — and the app never sets a logical presentation, so a plain multiply is exact.
+// Scroll tick counts are not coordinates and are left alone. A non-positive
+// density (an unavailable window) is ignored rather than collapsing every
+// coordinate to zero.
+// If SDL_SetRenderLogicalPresentation is ever introduced, replace this with
+// SDL_ConvertEventToRenderCoordinates.
+inline void scale_mouse_event(SDL_Event& e, float density) noexcept
+{
+    if (density <= 0.0f || density == 1.0f) return;
+    switch (e.type) {
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+            e.button.x *= density;
+            e.button.y *= density;
+            break;
+        case SDL_EVENT_MOUSE_MOTION:
+            e.motion.x    *= density;
+            e.motion.y    *= density;
+            e.motion.xrel *= density;
+            e.motion.yrel *= density;
+            break;
+        case SDL_EVENT_MOUSE_WHEEL:
+            e.wheel.mouse_x *= density;
+            e.wheel.mouse_y *= density;
+            break;
+        default:
+            break;
+    }
+}
+
 struct WindowConfig {
     std::string title    = "Obscura-Safe-Vault";
     int         width    = 1280;
@@ -62,7 +96,11 @@ public:
     int           width()        const noexcept;
     int           height()       const noexcept;
 
-    // Current mouse position in window-relative coordinates (pixels). Relative to
+    // Window points → render pixels ratio (1.0 on an unscaled display).
+    [[nodiscard]] float pixel_density() const noexcept;
+
+    // Current mouse position in window-relative coordinates (render pixels after
+    // scale_mouse_event conversion; see scale_mouse_event for details). Relative to
     // the focused window; returns the last known position if the window is not focused.
     [[nodiscard]] float mouse_x() const noexcept;
     [[nodiscard]] float mouse_y() const noexcept;
