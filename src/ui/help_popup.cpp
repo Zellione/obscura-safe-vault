@@ -7,6 +7,7 @@
 #include "gfx/text.h"
 #include "gfx/theme.h"
 #include "ui/help_layout.h"
+#include "ui/text_metrics.h"
 
 namespace ui {
 
@@ -58,11 +59,10 @@ struct HelpPanelDims {
     float col_width = 0.0f;
 };
 
-HelpPanelDims compute_help_panel_dims(float W, float H, int total_lines,
+HelpPanelDims compute_help_panel_dims(float W, float H, float line_h, int total_lines,
                                        const std::vector<HelpColumn>& cols)
 {
     using namespace gfx::theme;
-    constexpr float LINE_H = 24.0f;
     constexpr float PAD = 24.0f;
 
     const float max_pw = W - 80.0f;
@@ -72,9 +72,9 @@ HelpPanelDims compute_help_panel_dims(float W, float H, int total_lines,
     int longest = 0;
     for (const auto& c : cols) longest = std::max(longest, c.lines);
 
-    const float chrome_h = 2.0f * (PAD + LINE_H + 8.0f);
+    const float chrome_h = 2.0f * (PAD + line_h + 8.0f);
     const float max_ph = H - 80.0f;
-    const float wanted_ph = chrome_h + static_cast<float>(longest) * LINE_H;
+    const float wanted_ph = chrome_h + static_cast<float>(longest) * line_h;
     const float ph = std::min(max_ph, wanted_ph);
 
     const float px = (W - pw) / 2.0f;
@@ -93,6 +93,7 @@ struct HelpColumnBand {
     float content_top = 0.0f;    // first drawable y
     float content_bottom = 0.0f; // last drawable y
     int   scroll_line = 0;       // whole-line scroll offset
+    float line_h = 0.0f;         // line pitch (from font)
 };
 
 // Draw one packed column's titles + entries into the clipped band. Lifted out of
@@ -104,26 +105,25 @@ void draw_help_column(gfx::Renderer& r, gfx::FontAtlas& font,
                       const HelpColumnBand& band)
 {
     using namespace gfx::theme;
-    constexpr float LINE_H = 24.0f;
 
     const float col_x =
         band.base_x + static_cast<float>(std::distance(cols.data(), &col)) * band.col_width;
-    float y = band.content_top - static_cast<float>(band.scroll_line) * LINE_H;
+    float y = band.content_top - static_cast<float>(band.scroll_line) * band.line_h;
     for (size_t gidx : col.group_indices) {
         const auto& grp = all_groups[gidx];
         if (gidx > 0 && col.group_indices.front() != gidx) {
-            y += LINE_H;
+            y += band.line_h;
         }
-        if (y >= band.content_top - LINE_H && y <= band.content_bottom) {
+        if (y >= band.content_top - band.line_h && y <= band.content_bottom) {
             r.draw_text(font, col_x, y, grp.title, ACCENT);
         }
-        y += LINE_H;
+        y += band.line_h;
         for (const auto& e : grp.entries) {
-            if (y >= band.content_top - LINE_H && y <= band.content_bottom) {
+            if (y >= band.content_top - band.line_h && y <= band.content_bottom) {
                 const std::string line = "  [" + e.key + "]  " + e.description;
                 r.draw_text(font, col_x, y, line, TEXT_DIM);
             }
-            y += LINE_H;
+            y += band.line_h;
         }
     }
 }
@@ -155,13 +155,13 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
     using namespace gfx::theme;
 
     std::vector<HelpGroup> all_groups = {
-        {.title = "Global", .entries = {{.key = "F1", .description = "Help"}, {.key = "F2", .description = "Settings"}}}
+        {.title = "Global", .entries = {{.key = "F1", .description = "Help"}, {.key = "F2", .description = "Settings"}, {.key = "Right-click", .description = "Back / up one level"}}}
     };
     all_groups.insert(all_groups.end(), groups.begin(), groups.end());
 
     r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
 
-    constexpr float LINE_H = 24.0f;
+    const float LINE_H = line_pitch(font.pixel_height());
     constexpr float PAD    = 24.0f;
 
     const int total_lines = help_line_count(all_groups);
@@ -170,7 +170,7 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
     const int lines_per_column = (total_lines + target_columns - 1) / target_columns;
 
     const auto cols = pack_help_columns(all_groups, lines_per_column, target_columns);
-    const auto dims = compute_help_panel_dims(W, H, total_lines, cols);
+    const auto dims = compute_help_panel_dims(W, H, LINE_H, total_lines, cols);
 
     r.draw_round_rect({dims.x, dims.y, dims.w, dims.h}, RADIUS, SURFACE);
     r.draw_round_rect({dims.x, dims.y, dims.w, dims.h}, RADIUS, BORDER, /*filled*/ false);
@@ -179,11 +179,10 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
     r.draw_text(font, dims.x + PAD, dims.y + dims.h - PAD - LINE_H,
                "[Esc/Q] Close   [Up/Down] Scroll", TEXT_FAINT);
 
-    const float chrome_h = 2.0f * (PAD + LINE_H + 8.0f);
-    const float content_top = dims.y + PAD + LINE_H + 8.0f;
-    const float raw_viewport = dims.h - chrome_h;
-    const int visible_lines = help_visible_lines(raw_viewport, LINE_H);
-    const float band_h = static_cast<float>(visible_lines) * LINE_H;
+    const HelpBand band_geom = help_content_band(dims.y, dims.h, PAD, LINE_H);
+    const float content_top    = band_geom.content_top;
+    const int   visible_lines  = band_geom.visible_lines;
+    const float band_h         = band_geom.band_h;
     const float content_bottom = content_top + band_h;
 
     s.scroll_line = clamp_help_line(s.scroll_line, dims.longest, visible_lines);
@@ -196,7 +195,8 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
                               .col_width = dims.col_width,
                               .content_top = content_top,
                               .content_bottom = content_bottom,
-                              .scroll_line = s.scroll_line};
+                              .scroll_line = s.scroll_line,
+                              .line_h = LINE_H};
     for (const auto& col : cols) {
         draw_help_column(r, font, all_groups, cols, col, band);
     }

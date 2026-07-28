@@ -170,3 +170,43 @@ TEST(help_pack_columns_groups_never_split_in_balanced_layout)
         CHECK_EQ(count, 1);  // Each group in exactly one column
     }
 }
+
+// Phase 56: the band the help popup clips its content to must contain the FULL
+// glyph box of its last visible line. Before this, the band was a whole number
+// of 24 px pitches while the font baked at 28 px, so scrolling to the bottom
+// clipped the last line's descenders against the band edge.
+
+#include "ui/text_metrics.h"
+
+TEST(help_band_contains_the_full_glyph_box_of_its_last_line)
+{
+    constexpr float FONT_PX = 28.0f;
+    const float     pitch   = ui::line_pitch(FONT_PX);   // 35
+
+    for (float panel_h = 200.0f; panel_h <= 1400.0f; panel_h += 7.0f) {
+        const ui::HelpBand band = ui::help_content_band(100.0f, panel_h, 24.0f, pitch);
+        if (band.visible_lines == 0) continue;
+        const float last_line_top    = static_cast<float>(band.visible_lines - 1) * pitch;
+        const float last_line_bottom = last_line_top + FONT_PX;
+        CHECK(last_line_bottom <= band.band_h);
+    }
+}
+
+TEST(help_band_is_a_whole_number_of_pitches)
+{
+    const ui::HelpBand band = ui::help_content_band(100.0f, 800.0f, 24.0f, 35.0f);
+    CHECK_EQ(band.band_h, static_cast<float>(band.visible_lines) * 35.0f);
+}
+
+TEST(help_band_starts_below_the_title_chrome)
+{
+    const ui::HelpBand band = ui::help_content_band(100.0f, 800.0f, 24.0f, 35.0f);
+    CHECK_EQ(band.content_top, 100.0f + 24.0f + 35.0f + 8.0f);
+}
+
+TEST(help_band_collapses_rather_than_going_negative_in_a_tiny_panel)
+{
+    const ui::HelpBand band = ui::help_content_band(0.0f, 40.0f, 24.0f, 35.0f);
+    CHECK_EQ(band.visible_lines, 0);
+    CHECK_EQ(band.band_h, 0.0f);
+}

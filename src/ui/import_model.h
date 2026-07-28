@@ -41,6 +41,11 @@ struct ImportTaskInfo {
 [[nodiscard]] bool reorder_import_task(std::vector<ImportTaskInfo>& tasks,
                                        uint64_t id, int delta);
 
+// Row index of the task with `id`, or -1 when it is no longer in the list.
+// Selection is tracked by ID rather than position so it rides a reorder and
+// survives a snapshot refresh (Phase 56).
+[[nodiscard]] int index_of_task(const std::vector<ImportTaskInfo>& tasks, uint64_t id);
+
 // Drop finished rows. Returns removed count.
 int clear_finished_imports(std::vector<ImportTaskInfo>& tasks);
 

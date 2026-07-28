@@ -12,6 +12,7 @@
 #include "gfx/window.h"
 #include "platform/file_dialog.h"
 #include "platform/paths.h"
+#include "ui/prompt_layout.h"
 #include "ui/tag_chip.h"
 #include "ui/tag_dict_import.h"
 #include "ui/tag_json_parse.h"
@@ -30,15 +31,8 @@ constexpr float OY  = 150;   // list top
 constexpr float PAD = 9;     // vertical padding inside a row
 
 // Prompt sizing: scales to window width with sensible bounds
-constexpr float PROMPT_WIDTH_RATIO = 0.75f;   // 75% of window width
-constexpr float PROMPT_MAX_W = 900.0f;        // absolute max width
-constexpr float PROMPT_MIN_W = 500.0f;        // absolute min width
 constexpr float PROMPT_PAD = 16.0f;           // internal padding in prompt box
-constexpr float PROMPT_TITLE_PAD = 12.0f;     // padding above title
-constexpr float PROMPT_INPUT_PAD = 12.0f;     // padding above input field
-constexpr float PROMPT_HINT_PAD = 8.0f;       // padding above hint line
 constexpr float PROMPT_INPUT_H = 32.0f;       // height of input field
-constexpr float PROMPT_LINE_H = 20.0f;        // height of title and hint lines (both use this)
 
 // Phase 54 removed this file's private UTF-8 truncation and tail-clipping
 // helpers: TextInputModel's byte cap does the former (on whole characters) and
@@ -390,47 +384,34 @@ void TagOverviewScreen::render(gfx::Renderer& r)
 
     // Draw prompt overlay if active
     if (prompting_) {
-        // Size the prompt relative to the window, with bounds
-        const float prompt_w = std::clamp(W * PROMPT_WIDTH_RATIO, PROMPT_MIN_W, PROMPT_MAX_W);
-        const float prompt_x = (W - prompt_w) / 2.0f;
-
-        // Prompt height: title + input field + hint line, all with padding
-        const float title_h = PROMPT_LINE_H;
-        const float input_h = PROMPT_INPUT_H;
-        const float hint_h = PROMPT_LINE_H;
-        const float prompt_h = PROMPT_TITLE_PAD + title_h + PROMPT_INPUT_PAD + input_h +
-                               PROMPT_HINT_PAD + hint_h + PROMPT_PAD;
-        const float prompt_y = (H - prompt_h) / 2.0f;
+        const PromptBoxLayout l = prompt_box_layout({.font_px = font_.pixel_height(),
+                                                     .window_w = W, .window_h = H,
+                                                     .input_h = PROMPT_INPUT_H});
 
         // Draw prompt background and border
-        r.draw_round_rect({.x = prompt_x, .y = prompt_y, .w = prompt_w, .h = prompt_h}, RADIUS,
-                         SURFACE);
-        r.draw_round_rect({.x = prompt_x, .y = prompt_y, .w = prompt_w, .h = prompt_h}, RADIUS,
-                         ACCENT, /*filled*/ false);
+        r.draw_round_rect(l.box, RADIUS, SURFACE);
+        r.draw_round_rect(l.box, RADIUS, ACCENT, /*filled*/ false);
 
         // Title
-        const float title_y = prompt_y + PROMPT_TITLE_PAD;
-        r.draw_text(font_, prompt_x + PROMPT_PAD, title_y, "Edit tag description", TEXT);
+        r.draw_text(font_, l.box.x + PROMPT_PAD, l.title_y, "Edit tag description", TEXT);
 
         // Input field
-        const float input_y = title_y + title_h + PROMPT_INPUT_PAD;
-        const float input_field_w = prompt_w - 2 * PROMPT_PAD;
+        const float input_field_w = l.box.w - 2 * PROMPT_PAD;
         const float input_inner_w = input_field_w - 2 * 4;  // 4px inset on each side
-        r.draw_round_rect({.x = prompt_x + PROMPT_PAD, .y = input_y, .w = input_field_w, .h = input_h},
+        r.draw_round_rect({.x = l.box.x + PROMPT_PAD, .y = l.input_y, .w = input_field_w, .h = PROMPT_INPUT_H},
                          RADIUS, SURFACE_HI);
-        r.draw_round_rect({.x = prompt_x + PROMPT_PAD, .y = input_y, .w = input_field_w, .h = input_h},
+        r.draw_round_rect({.x = l.box.x + PROMPT_PAD, .y = l.input_y, .w = input_field_w, .h = PROMPT_INPUT_H},
                          RADIUS, BORDER, /*filled*/ false);
 
         // Draw input text with tail clipping (show what you're typing at the caret end)
-        const float text_y = input_y + (input_h - font_.pixel_height()) / 2.0f;
-        draw_inline_edit_text(r, font_, prompt_x + PROMPT_PAD + 4, text_y, input_inner_w,
+        const float text_y = l.input_y + (PROMPT_INPUT_H - font_.pixel_height()) / 2.0f;
+        draw_inline_edit_text(r, font_, l.box.x + PROMPT_PAD + 4, text_y, input_inner_w,
                               prompt_buf_, prompt_chrome_);
 
         // Hint line: remaining bytes
-        const float hint_y = input_y + input_h + PROMPT_HINT_PAD;
         const auto bytes_left = vault::INDEX_MAX_TAG_DESC_BYTES - prompt_buf_.size();
         const std::string hint = std::format("{} bytes left", bytes_left);
-        r.draw_text(font_, prompt_x + PROMPT_PAD, hint_y, hint, TEXT_FAINT);
+        r.draw_text(font_, l.box.x + PROMPT_PAD, l.hint_y, hint, TEXT_FAINT);
     }
 
     render_import_summary(r, W, H);
@@ -441,27 +422,24 @@ void TagOverviewScreen::render_import_summary(gfx::Renderer& r, float win_w, flo
     using namespace gfx::theme;
     if (import_summary_.empty()) return;
 
-    const float line_h = font_.pixel_height() + 8;
-    const float box_w  = std::clamp(win_w * PROMPT_WIDTH_RATIO, PROMPT_MIN_W, PROMPT_MAX_W);
-    const float box_h  = PROMPT_TITLE_PAD + PROMPT_LINE_H + PROMPT_INPUT_PAD +
-                         line_h * static_cast<float>(import_summary_.size()) +
-                         PROMPT_HINT_PAD + PROMPT_LINE_H + PROMPT_PAD;
-    const float box_x  = (win_w - box_w) / 2.0f;
-    const float box_y  = (win_h - box_h) / 2.0f;
+    const float body_line_h = font_.pixel_height() + 8;
+    const PromptBoxLayout l = prompt_box_layout({.font_px = font_.pixel_height(),
+                                                 .window_w = win_w, .window_h = win_h,
+                                                 .input_h = 0.0f,
+                                                 .body_lines = static_cast<int>(import_summary_.size()),
+                                                 .body_line_h = body_line_h});
 
-    const SDL_FRect box{.x = box_x, .y = box_y, .w = box_w, .h = box_h};
-    r.draw_round_rect(box, RADIUS, SURFACE);
-    r.draw_round_rect(box, RADIUS, ACCENT, /*filled*/ false);
+    r.draw_round_rect(l.box, RADIUS, SURFACE);
+    r.draw_round_rect(l.box, RADIUS, ACCENT, /*filled*/ false);
 
-    const float title_y = box_y + PROMPT_TITLE_PAD;
-    r.draw_text(font_, box_x + PROMPT_PAD, title_y, "Tag dictionary imported", TEXT);
+    r.draw_text(font_, l.box.x + PROMPT_PAD, l.title_y, "Tag dictionary imported", TEXT);
 
-    float y = title_y + PROMPT_LINE_H + PROMPT_INPUT_PAD;
+    float y = l.body_y;
     for (const std::string& line : import_summary_) {
-        r.draw_text(font_, box_x + PROMPT_PAD, y, line, TEXT_DIM);
-        y += line_h;
+        r.draw_text(font_, l.box.x + PROMPT_PAD, y, line, TEXT_DIM);
+        y += body_line_h;
     }
-    r.draw_text(font_, box_x + PROMPT_PAD, y + PROMPT_HINT_PAD, "Any key to dismiss", TEXT_FAINT);
+    r.draw_text(font_, l.box.x + PROMPT_PAD, l.hint_y, "Any key to dismiss", TEXT_FAINT);
 }
 
 std::vector<HelpGroup> TagOverviewScreen::help_groups() const

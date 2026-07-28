@@ -57,6 +57,9 @@ invent its own key handling.
   folders-first (Phase 46).
 - Breadcrumb bar at top shows current path.
 - Keyboard: `Enter`/`Space` open, `Backspace`/`Esc` up.
+- **Phase 56:** `Right-click` is Esc — clears any active multi-selection first, then ascends
+  to the parent gallery (exactly like Esc). At the root gallery, right-click exits to the vault
+  manager.
 - `Ctrl+A` (Phase 53) toggles select-all over the current gallery's **direct
   children only** — never recursive, so it matches what the user can see. It is
   handled BEFORE the plain-letter switch, otherwise `A` swallows it. Selectable
@@ -73,6 +76,12 @@ invent its own key handling.
 - Bottom ~25%: horizontal thumbnail strip, scrolled to + highlighting the
   current image. `Left`/`Right` prev/next in the leaf gallery; `Up`/`Esc`
   back to gallery grid.
+- **Phase 56:** Viewer re-binds by path when the vault tree changes (background import commits),
+  preserving zoom, pan, fill-scroll offset, video position and GIF frame. The current item's
+  path is remembered and looked up in the refreshed list; if found, the index is updated and
+  nothing else changes; if deleted or moved away, falls back to showing the same index (now a
+  different item). **Right-click** is a universal "back / up one level" (via synthetic Esc): in
+  borderless fullscreen the first right-click leaves fullscreen, the second returns to gallery.
 
 ## Help popup convention (Phase 39)
 Single global `F1` popup, context-sensitive shortcuts grouped by task/area —
@@ -90,6 +99,7 @@ appears when content overflows. No partial lines clip at viewport edges at any w
 
 Phase 49 base: `draw_help_popup` prepends a synthesised "Global" group listing `F1` Help
 and `F2` Settings, since `help_groups()` is per-screen and had no shared entry point.
+**Phase 56:** The Global group gains **`Right-click — Back / up one level`**.
 
 ## Tag chips (Phase 49)
 
@@ -250,6 +260,15 @@ Shows:
 - **Finished/failed items:** outcomes (imported/skipped counts, error text). `C` clears finished entries.
 - **Lane-failure banner:** surfaces hard-stop commit errors (hard stop, queue halted).
 - **Help group (F1):** standard. **Esc** returns to previous screen.
+
+**Phase 56 redesign — two-line rows + id-based selection:**
+- Every row, in every state (Queued, Running, Done, Failed, Cancelled), is **two lines**:
+  1. **Route line** — `source_name → destination_gallery` (or `root` when destination is empty), always elided to fit.
+  2. **Status line** — progress bar (for Running) with done/total text, or the outcome (✓ N imported M skipped / ✗ error / − Cancelled / Queued #id).
+- The progress bar occupies only the status line, so bar and route text never overlap.
+- **Selection is id-based, not positional.** `Ctrl+Up`/`Ctrl+Down` reorders the queued item
+  and keeps focus on it, so the chord can be repeated on the same item. When a running import
+  completes and reorders the list, focus stays on the selected task's new position.
 
 ### Footer bar (Phase 50)
 Live summary while queue is non-empty: `"Importing <name> 128/450 · 2 queued"` (done/total, remainder queued).

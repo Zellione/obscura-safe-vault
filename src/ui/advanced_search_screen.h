@@ -129,6 +129,13 @@ private:
     void render_builder(gfx::Renderer& r, float x, float top, float colw);
     void render_results(gfx::Renderer& r, float x, float colw);
 
+    // Rendering helpers for include/exclude sections: extracted from render_builder to
+    // reduce cognitive complexity. Private methods for access to focus_, query_, etc.
+    [[nodiscard]] float render_include_section(gfx::Renderer& r, float x, float y, float colw,
+                                               float row_h, float ink_dy, float& drop_y);
+    [[nodiscard]] float render_exclude_section(gfx::Renderer& r, float x, float y, float colw,
+                                               float row_h, float ink_dy);
+
     gfx::Window&         win_;
     gfx::FontAtlas&      font_;
     vault::Vault&        vault_;

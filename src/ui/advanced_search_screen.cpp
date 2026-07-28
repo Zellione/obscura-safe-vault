@@ -13,8 +13,10 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "ui/grid_layout.h"
+#include "ui/list_layout.h"
 #include "ui/nav_model.h"
 #include "ui/text_input_event.h"
+#include "ui/text_metrics.h"
 #include "ui/tile_thumb.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
@@ -23,10 +25,8 @@ namespace ui {
 
 namespace {
 
-constexpr float PAD  = 32.0f;
-constexpr float TOP  = 110.0f;
-constexpr float LINE = 30.0f;
-constexpr float ROW  = LINE * 0.85f;   // compact row height for per-tag lists
+constexpr float PAD = 32.0f;
+constexpr float TOP = 110.0f;
 
 std::string trim(std::string_view s)
 {
@@ -66,6 +66,8 @@ float draw_groups(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<TagG
                   const GroupLayout& lay)
 {
     using namespace gfx::theme;
+    const float LINE = line_pitch(font.pixel_height());
+    const float ROW  = LINE;   // per-tag rows are full lines now, not 0.85 of one
     // Offset from a draw-y to the text's ink centre (see render_builder), so the
     // selected-tag highlight box can be centred on the tag text it wraps.
     const float ink_dy = -font.text_top_for_center(0.0f);
@@ -99,6 +101,8 @@ void draw_dropdown(gfx::Renderer& r, gfx::FontAtlas& font, const std::vector<std
                    int sel, float x, float y, float colw)
 {
     using namespace gfx::theme;
+    const float LINE = line_pitch(font.pixel_height());
+    const float ROW  = LINE;   // per-tag rows are full lines now, not 0.85 of one
     const int n = std::min(static_cast<int>(sugg.size()), 6);
     if (n == 0) return;
     // Panel covers n ROW-tall slots starting at `y`; it spans the column width and
@@ -745,6 +749,8 @@ void AdvancedSearchScreen::render(gfx::Renderer& r)
 void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, float colw)
 {
     using namespace gfx::theme;
+    const float LINE = line_pitch(font_.pixel_height());
+    const float ROW  = LINE;   // per-tag rows are full lines now, not 0.85 of one
     auto focused = [&](Focus f) { return focus_ == f && !saved_panel_.active_buffer() && !clearing_; };
     auto label   = [&](float ly, Focus f, std::string_view s) {
         if (focused(f)) r.draw_text(font_, x - 16, ly, ">", ACCENT);
@@ -754,25 +760,8 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
     // box can be centred on the text it wraps (the text itself stays aligned with the
     // field labels above it).
     const float ink_dy = -font_.text_top_for_center(0.0f);
-    // One committed-tag row; highlighted when `sel`. Advances `ly` by ROW.
-    auto tag_row = [&](float& ly, bool sel, std::string_view s) {
-        if (sel) {
-            r.draw_round_rect({x - 6, ly + ink_dy - ROW * 0.5f, colw + 12, ROW},
-                              RADIUS_SMALL, SURFACE_HI);
-            r.draw_text(font_, x + 4, ly, ">", ACCENT);
-        }
-        r.draw_text(font_, x + 24, ly, fit_text(font_, s, colw - 24), sel ? TEXT : TEXT_DIM);
-        ly += ROW;
-    };
-    // The focused field's edit row. Records where the autocomplete dropdown should
-    // float; the dropdown itself is painted last (after all fields) so it sits on
-    // top of the fields below instead of being overdrawn by them.
+    // The autocomplete dropdown should float at this y; set when edit row is drawn.
     float drop_y = -1.0f;
-    auto edit_row = [&](float& ly, const ITextInput& field, TextFieldChrome& chrome) {
-        draw_inline_edit_text(r, font_, x + 24, ly, colw - 24, field, chrome);
-        ly += ROW;
-        if (!suggestions_.empty()) drop_y = ly;
-    };
 
     float y = top;
     // "Name:" stays a label; the value beside it becomes a real editable run
@@ -790,23 +779,11 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
 
     // --- Include (weighted) ---
     label(y, Focus::Include, "Include:"); y += ROW;
-    for (int i = 0; i < static_cast<int>(query_.include.size()); ++i)
-        tag_row(y, focused(Focus::Include) && cur_.tag == i,
-                std::format("{} (w{})", query_.include[i].tag, query_.include[i].weight));
-    if (focused(Focus::Include)) {
-        // The weight is right-aligned so it cannot be pushed off-screen by a
-        // long tag, and so it never sits where the caret needs to be.
-        const std::string wlabel = std::format("w{}", edit_.weight);
-        const auto        wlab_w = static_cast<float>(font_.measure(wlabel));
-        r.draw_text(font_, x + colw - wlab_w, y, wlabel, TEXT_FAINT);
-        edit_row(y, edit_.include, edit_chrome_.include);
-    }
+    y = render_include_section(r, x, y, colw, ROW, ink_dy, drop_y);
 
     // --- Exclude ---
     label(y, Focus::Exclude, "Exclude:"); y += ROW;
-    for (int i = 0; i < static_cast<int>(query_.exclude.size()); ++i)
-        tag_row(y, focused(Focus::Exclude) && cur_.tag == i, query_.exclude[i]);
-    if (focused(Focus::Exclude)) edit_row(y, edit_.exclude, edit_chrome_.exclude);
+    y = render_exclude_section(r, x, y, colw, ROW, ink_dy);
 
     // --- Groups ---
     label(y, Focus::Group, "Groups:"); y += ROW;
@@ -816,9 +793,11 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
                      .focused   = focused(Focus::Group),
                      .x = x, .colw = colw, .y = y});
     if (focused(Focus::Group)) {
-        edit_row(y, edit_.group, edit_chrome_.group);
+        draw_inline_edit_text(r, font_, x + 24, y, colw - 24, edit_.group, edit_chrome_.group);
+        y += ROW;
         r.draw_text(font_, x + 8, y, "Enter=add  empty Enter=new group  Del=AND/OR", TEXT_FAINT);
         y += ROW;
+        if (!suggestions_.empty()) drop_y = y;
     }
 
     label(y, Focus::GroupJoin, std::format("Join groups: {}", join_label(query_.group_join)));
@@ -831,6 +810,7 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
 void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
 {
     using namespace gfx::theme;
+    const float LINE = line_pitch(font_.pixel_height());
     const bool hot = (focus_ == Focus::Results && !saved_panel_.active_buffer() && !clearing_);
     if (result_view_.get_view() == ResultView::Grid) { result_view_.render(r, x, colw, hot); return; }
 
@@ -856,6 +836,77 @@ void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
         y += rh;
     }
     if (result_view_.get_results().empty()) r.draw_text(font_, x, y, "(no matches)", TEXT_FAINT);
+}
+
+float AdvancedSearchScreen::render_include_section(gfx::Renderer& r, float x, float y, float colw,
+                                                   float row_h, float ink_dy, float& drop_y)
+{
+    using namespace gfx::theme;
+    const float ROW = row_h;
+    const bool is_focused = focus_ == Focus::Include && !saved_panel_.active_buffer() && !clearing_;
+
+    for (int i = 0; i < static_cast<int>(query_.include.size()); ++i) {
+        const float row_y = list_row_y({.top = y, .row_h = ROW}, i);
+        const bool sel = is_focused && cur_.tag == i;
+        if (sel) {
+            r.draw_round_rect({x - 6, row_y + ink_dy - ROW * 0.5f, colw + 12, ROW},
+                              RADIUS_SMALL, SURFACE_HI);
+            r.draw_text(font_, x + 4, row_y, ">", ACCENT);
+        }
+        r.draw_text(font_, x + 24, row_y,
+                    fit_text(font_, std::format("{} (w{})", query_.include[i].tag,
+                                               query_.include[i].weight),
+                             colw - 24),
+                    sel ? TEXT : TEXT_DIM);
+    }
+    if (is_focused) {
+        // The weight is right-aligned so it cannot be pushed off-screen by a
+        // long tag, and so it never sits where the caret needs to be.
+        const std::string wlabel = std::format("w{}", edit_.weight);
+        const auto        wlab_w = static_cast<float>(font_.measure(wlabel));
+        const float edit_y = list_row_y({.top = y, .row_h = ROW},
+                                        static_cast<int>(query_.include.size()));
+        r.draw_text(font_, x + colw - wlab_w, edit_y, wlabel, TEXT_FAINT);
+        draw_inline_edit_text(r, font_, x + 24, edit_y, colw - 24, edit_.include,
+                              edit_chrome_.include);
+        y = edit_y + ROW;
+        if (!suggestions_.empty()) drop_y = y;
+    } else {
+        y = list_row_y({.top = y, .row_h = ROW},
+                       static_cast<int>(query_.include.size()));
+    }
+    return y;
+}
+
+float AdvancedSearchScreen::render_exclude_section(gfx::Renderer& r, float x, float y, float colw,
+                                                   float row_h, float ink_dy)
+{
+    using namespace gfx::theme;
+    const float ROW = row_h;
+    const bool is_focused = focus_ == Focus::Exclude && !saved_panel_.active_buffer() && !clearing_;
+
+    for (int i = 0; i < static_cast<int>(query_.exclude.size()); ++i) {
+        const float row_y = list_row_y({.top = y, .row_h = ROW}, i);
+        const bool sel = is_focused && cur_.tag == i;
+        if (sel) {
+            r.draw_round_rect({x - 6, row_y + ink_dy - ROW * 0.5f, colw + 12, ROW},
+                              RADIUS_SMALL, SURFACE_HI);
+            r.draw_text(font_, x + 4, row_y, ">", ACCENT);
+        }
+        r.draw_text(font_, x + 24, row_y, fit_text(font_, query_.exclude[i], colw - 24),
+                    sel ? TEXT : TEXT_DIM);
+    }
+    if (is_focused) {
+        const float edit_y = list_row_y({.top = y, .row_h = ROW},
+                                        static_cast<int>(query_.exclude.size()));
+        draw_inline_edit_text(r, font_, x + 24, edit_y, colw - 24, edit_.exclude,
+                              edit_chrome_.exclude);
+        y = edit_y + ROW;
+    } else {
+        y = list_row_y({.top = y, .row_h = ROW},
+                       static_cast<int>(query_.exclude.size()));
+    }
+    return y;
 }
 
 std::vector<ui::HelpGroup> AdvancedSearchScreen::help_groups() const

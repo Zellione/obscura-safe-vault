@@ -35,6 +35,14 @@ bool reorder_import_task(std::vector<ImportTaskInfo>& tasks,
     return true;
 }
 
+int index_of_task(const std::vector<ImportTaskInfo>& tasks, uint64_t id)
+{
+    for (size_t i = 0; i < tasks.size(); ++i) {
+        if (tasks[i].id == id) return static_cast<int>(i);
+    }
+    return -1;
+}
+
 int clear_finished_imports(std::vector<ImportTaskInfo>& tasks)
 {
     const auto initial_size = tasks.size();

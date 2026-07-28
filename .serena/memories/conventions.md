@@ -20,6 +20,7 @@
 - Use `draw_round_rect` / `draw_selection_glow` for surfaces and selection; `theme::RADIUS` / `RADIUS_SMALL` for corner radii.
 - Keep pixel/layout maths in pure, headless, unit-tested helpers (e.g. `strip_layout`, `scroll_model`, `viewer_model.h`); screens own only SDL plumbing.
 - Any unbounded vault-derived string (paths, names, tags) drawn into a fixed-width box must be middle-elided first via `ui::fit_text(font, s, max_w)` (widgets.h) — never `draw_text` it raw (PR #54 swept the whole UI for this).
+- **Never hardcode a text-line pitch.** Derive it from `font.pixel_height()` via `ui::line_pitch(font_px)` → `ceil(font_px * 1.25)`. The 1.25 leading ensures each line exceeds the font height, so adjacent lines cannot touch and a clip band cannot cut a descender. The single source of truth prevents silent regressions from surface-specific constants drifting apart.
 
 ## Cross-platform (MSVC vs libstdc++)
 - `std::array`/`std::vector` iterators are raw pointers in libstdc++ but class types in MSVC's STL.

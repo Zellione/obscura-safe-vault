@@ -6,6 +6,7 @@
 #include <string>
 
 #include "app/auto_lock.h"
+#include "app/back_click.h"
 #include "app/keep_unlocked_badge.h"
 #include "gfx/renderer.h"
 #include "gfx/theme.h"
@@ -395,6 +396,15 @@ bool App::dispatch_overlay_event(App& app, const SDL_Event& e)
 void App::dispatch_event(const SDL_Event& e)
 {
     if (is_user_input(e)) idle_.reset();
+    // Phase 56: right-click is a universal "back". Translate it here, once, so
+    // every screen and modal reuses its own Esc handling instead of growing a
+    // parallel cancel path. The release is dropped — a surface that never saw
+    // the press must not see a dangling release.
+    if (is_back_click_release(e)) return;
+    if (is_back_click(e)) {
+        dispatch_event(make_back_key_event());
+        return;
+    }
     // Phase 50: park SDL_EVENT_QUIT if imports are pending; replayed after confirm
     if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
         if (import_ui_.queue.busy() && !import_ui_.lock_confirm.open) {
@@ -416,12 +426,22 @@ bool App::pump_events(bool animating)
     bool      should_redraw = false;
     if (animating) {
         // Keep ticking the animation: never block, just drain the queue.
-        while (window_.poll_event(e)) { dispatch_event(e); should_redraw = true; }
+        while (window_.poll_event(e)) {
+            // Phase 56: SDL reports mouse positions in window points; every layout in
+            // this app is in render pixels. Convert once, here, before any consumer.
+            gfx::scale_mouse_event(e, window_.pixel_density());
+            dispatch_event(e);
+            should_redraw = true;
+        }
     } else if (SDL_WaitEventTimeout(&e, IDLE_HEARTBEAT_MS)) {
         // Idle: block until an event (or the heartbeat) rather than spinning.
+        gfx::scale_mouse_event(e, window_.pixel_density());
         dispatch_event(e);
         should_redraw = true;
-        while (window_.poll_event(e)) dispatch_event(e);
+        while (window_.poll_event(e)) {
+            gfx::scale_mouse_event(e, window_.pixel_density());
+            dispatch_event(e);
+        }
     } else if (window_.is_visible()) {
         // Heartbeat woke with no event: redraw anyway (a static frame; nothing
         // changed). On Windows with G-SYNC + Auto HDR, letting the swapchain go

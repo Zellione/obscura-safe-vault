@@ -10,16 +10,17 @@
 #include "gfx/texture_cache.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "ui/list_layout.h"
 #include "ui/nav_model.h"
 #include "ui/result_grid.h"
+#include "ui/text_metrics.h"
 #include "ui/tile_thumb.h"
 #include "vault/index.h"
 
 namespace ui {
 
 namespace {
-constexpr float TOP  = 110.0f;
-constexpr float LINE = 30.0f;
+constexpr float TOP = 110.0f;
 }
 
 SearchResultView::SearchResultView(vault::Vault& vault, gfx::Window& win, gfx::FontAtlas& font,
@@ -89,6 +90,7 @@ void SearchResultView::activate_focused()
 void SearchResultView::render(gfx::Renderer& r, float x, float colw, bool hot)
 {
     using namespace gfx::theme;
+    const float LINE = line_pitch(font_.pixel_height());
     // This render method can be called to draw the entire result grid or list view.
     // For now, we check grid_view_ and render accordingly.
     // Note: render_results() in AdvancedSearchScreen dispatches to us, so we just

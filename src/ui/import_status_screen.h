@@ -27,13 +27,14 @@ private:
     void move_selection(int delta);
     void reorder_selected(int delta);          // Ctrl+Up/Down on the selected queued row
     void handle_key(const SDL_KeyboardEvent& key);
+    [[nodiscard]] int sel_index() const;   // sel_id_ resolved against rows_, clamped
 
     gfx::Window&   win_;
     gfx::FontAtlas& font_;
     ImportQueue&   queue_;
     Nav            back_;
     std::vector<ImportTaskInfo> rows_;    // last snapshot
-    int            sel_ = 0;
+    uint64_t       sel_id_ = 0;            // selected task's ID; 0 = nothing selected
     float          scroll_ = 0.0f;         // vertical scroll offset (pixels scrolled down)
     bool           last_lane_failed_ = false;  // track lane failure for dirty marking
 };

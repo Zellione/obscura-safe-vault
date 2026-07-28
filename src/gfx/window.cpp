@@ -60,6 +60,11 @@ int Window::height() const noexcept
     return h;
 }
 
+float Window::pixel_density() const noexcept
+{
+    return window_ ? SDL_GetWindowPixelDensity(window_) : 1.0f;
+}
+
 float Window::mouse_x() const noexcept
 {
     float x = 0.0f;
@@ -67,7 +72,7 @@ float Window::mouse_x() const noexcept
     if (window_ != nullptr) {
         SDL_GetMouseState(&x, &y);
     }
-    return x;
+    return x * pixel_density();   // points → render pixels (see scale_mouse_event)
 }
 
 float Window::mouse_y() const noexcept
@@ -77,7 +82,7 @@ float Window::mouse_y() const noexcept
     if (window_ != nullptr) {
         SDL_GetMouseState(&x, &y);
     }
-    return y;
+    return y * pixel_density();   // points → render pixels (see scale_mouse_event)
 }
 
 void Window::shutdown()
