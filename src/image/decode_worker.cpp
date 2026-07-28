@@ -43,6 +43,16 @@ void DecodeWorker::submit(uint64_t key, crypto::SecureBytes&& encoded)
     cv_.notify_one();
 }
 
+void DecodeWorker::submit_fetch(uint64_t key, Fetcher fetch)
+{
+    {
+        std::lock_guard lock(mtx_);
+        if (!inflight_.insert(key).second) return;   // already queued / decoding
+        queue_.emplace_back(key, crypto::SecureBytes{}, fetch);
+    }
+    cv_.notify_one();
+}
+
 bool DecodeWorker::pending(uint64_t key) const
 {
     std::lock_guard lock(mtx_);
@@ -79,6 +89,25 @@ void DecodeWorker::run()
             if (stop_ && queue_.empty()) return;
             job = std::move(queue_.front());
             queue_.pop_front();
+        }
+
+        // Fetch stage: if a fetcher is provided, call it to obtain the encoded bytes
+        if (job.fetch) {
+            crypto::SecureBytes fetched;
+            if (!job.fetch(fetched)) {
+                // Fetch failed — report empty result
+                {
+                    std::lock_guard lock(mtx_);
+                    done_.emplace_back(job.key, std::nullopt);
+                }
+                if (wake_event_ != 0) {
+                    SDL_Event e{};
+                    e.type = wake_event_;
+                    SDL_PushEvent(&e);
+                }
+                continue;
+            }
+            job.encoded = std::move(fetched);
         }
 
         // Decode outside the lock — this is the slow part. `job.encoded` (the

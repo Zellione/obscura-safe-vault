@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -59,6 +60,14 @@ public:
     // ownership of `encoded`.
     void submit(uint64_t key, crypto::SecureBytes&& encoded);
 
+    // Fetch stage (Phase 58): like submit(), but the WORKER thread first runs
+    // `fetch` to obtain the encoded bytes (typically a vault thumbnail
+    // read+decrypt via a thread-safe vault call — see ui/tile_thumb.cpp; this
+    // header stays vault-agnostic). A false return reports Result{key, nullopt}
+    // so the caller memoizes the failure exactly like a failed decode.
+    using Fetcher = std::function<bool(crypto::SecureBytes& out)>;
+    void submit_fetch(uint64_t key, Fetcher fetch);
+
     // True while `key` is queued or being decoded (its result not yet taken).
     [[nodiscard]] bool pending(uint64_t key) const;
 
@@ -74,6 +83,7 @@ private:
     struct Job {
         uint64_t            key = 0;
         crypto::SecureBytes encoded;
+        Fetcher             fetch;   // null => encoded is already populated
     };
 
     void run();
