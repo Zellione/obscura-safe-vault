@@ -43,6 +43,16 @@ a later `scripts/build.sh` always produces plain binaries.
 Clang parity check (matches CI's clang leg): `bin/premake5 ninja --cc=clang && ninja -k0 -f build.ninja`,
 then restore with `scripts/gen.sh`.
 
+No-FFmpeg parity check (matches CI's `tests-no-av` leg — the configuration where
+every `#ifdef OSV_VENDORED_AV` takes its `#else` branch):
+```bash
+bin/premake5 --no-av ninja && ninja Debug_x64 && ./build/bin/Debug/osv_tests
+scripts/gen.sh            # restore the normal (FFmpeg) build files afterwards
+```
+`--no-av` ignores the built FFmpeg prefix instead of deleting it, so nothing has
+to be rebuilt either way. Expect ~1514 tests instead of ~1677: the GIF/video
+suites compile out, while animated WebP still runs (libwebp is not optional).
+
 ## ASAN-instrumented codecs (audit-improvements)
 ```bash
 scripts/build_codecs.sh --asan   # → vendor/codecs-prefix-asan/ (separate prefix, gitignored)

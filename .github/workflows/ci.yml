@@ -287,6 +287,78 @@ jobs:
           retention-days: 7
 
   # ===========================================================================
+  # No-FFmpeg gate — builds and tests with OSV_VENDORED_AV undefined.
+  #
+  # Every other job builds the full vendored codec set, so the `#else` half of
+  # every `#ifdef OSV_VENDORED_AV` was never compiled anywhere in CI. That blind
+  # spot let `src/ui/gif_playback.cpp` sit un-compilable in this configuration
+  # from Phase 47 until Phase 57 found it by hand: the file opened `namespace ui`
+  # INSIDE the #ifdef, so its #else stub was declared outside the namespace.
+  # Two more test files were broken the same way when this job was added.
+  #
+  # `--no-av` makes premake ignore the FFmpeg prefix rather than deleting it, so
+  # this job reuses the shared codecs cache untouched (~minutes, not the ~30 the
+  # FFmpeg build costs). It also gives CI its only proof of the Phase 57 claim
+  # that animated WebP plays without FFmpeg — libwebp is a hard dependency, so
+  # those tests run here while every GIF animation test compiles out.
+  # ===========================================================================
+  tests-no-av:
+    name: No FFmpeg / tests / Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name != 'schedule'
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        uses: ./.github/actions/setup-apt-deps
+        with:
+          cache-key-suffix: no-av
+
+      - name: Use gcc-14 as default gcc
+        run: |
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
+            --slave /usr/bin/g++ g++ /usr/bin/g++-14
+
+      - name: Setup premake5 + vendored SDL3
+        uses: ./.github/actions/setup-premake-sdl3
+
+      # The image codecs are NOT optional — libwebp/libheif are hard
+      # dependencies, and libwebp is what makes animated WebP work here. Only
+      # FFmpeg is dropped, and only by --no-av below; the cache is shared with
+      # every other job and read as-is.
+      - name: Cache vendored codecs build
+        uses: actions/cache@v4
+        id: cache-codecs
+        with:
+          path: vendor/codecs-prefix
+          key: codecs-v4-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
+
+      - name: Build vendored codecs
+        if: steps.cache-codecs.outputs.cache-hit != 'true'
+        run: scripts/build_codecs.sh
+
+      - name: Generate Ninja build files (--no-av)
+        run: bin/premake5 --no-av ninja --cc=gcc
+
+      # Builds the app too, not just the tests: `osv` compiles ~25 src/ui/*.cpp
+      # files that the osv_tests target does not list, and this configuration is
+      # exactly where an unguarded #ifdef in one of them would hide.
+      - name: Build osv + osv_tests (no FFmpeg)
+        run: ninja Debug_x64
+
+      - name: Run tests (no FFmpeg)
+        env:
+          # gfx tests use SDL's software renderer; force a headless video driver
+          # so SDL never tries to open a display on the CI runner.
+          SDL_VIDEODRIVER: dummy
+        run: ./build/bin/Debug/osv_tests
+
+  # ===========================================================================
   # Sanitiser gate — builds and runs the full test suite under ASAN + UBSan +
   # LSan. Enforces the Phase 1 acceptance criterion ("no leaks; mlock handled
   # gracefully") on every PR. As of Phase 4 the osv_tests target links the

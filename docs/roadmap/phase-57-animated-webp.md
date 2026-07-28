@@ -89,9 +89,13 @@ FFmpeg. **1677 tests / 0 failed; `scripts/test.sh --asan` clean.**
   without vendored FFmpeg (the stub was also missing the `frame_count()` its
   public wrapper called). Phase 47's "non-FFmpeg builds still show the badge and
   the static first frame" was therefore not buildable. The `AnimPlayback`
-  restructure fixes it by construction, but **nothing in CI would have caught
-  it** — a non-`OSV_VENDORED_AV` compile job is the real remedy and is still
-  missing.
+  restructure fixes it by construction, but nothing in CI would have caught it.
+  **Closed by the follow-up PR that added the `tests-no-av` CI job** (`--no-av`
+  premake option, Linux, builds app + tests and runs the suite); adding that job
+  immediately exposed two more files broken the same way —
+  `tests/media/test_sar_display.cpp` (used gated `media::display_dims` ungated)
+  and `tests/ui/test_anim_playback.cpp` (a helper left unused once the WebP cases
+  moved outside the gate, tripping `-Werror=unused-function`).
 - **Canvas-sized allocation from untrusted input.** `WebPAnimDecoder` allocates
   w×h×4 and the WebP container permits 16384², so a hostile vault can provoke a
   large allocation. Not a new exposure — the static WebP path (`WebPDecodeRGBInto`,
