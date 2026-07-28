@@ -78,7 +78,9 @@ void QuickSwitch::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float 
 
     const float ix = mx + 20;
     r.draw_text(font, ix, my + 20, "Switch vault", TEXT);
-    r.draw_text(font, ix, my + 56, "[Up/Down] choose  [Enter] open  [Esc] cancel", TEXT_FAINT);
+    r.draw_text(font, ix, my + 56,
+                fit_text(font, "[Up/Down] choose  [Enter] open  [Esc] cancel", mw - 40),
+                TEXT_FAINT);
 
     for (size_t i = 0; i < vaults_.size(); ++i) {
         const float ry = my + 96 + static_cast<float>(i) * 34.0f;

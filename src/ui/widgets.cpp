@@ -196,6 +196,12 @@ std::string fit_text(const gfx::FontAtlas& font, std::string_view s, float max_w
                         [&font](std::string_view t) { return font.measure(t); });
 }
 
+std::string fit_text_tail(const gfx::FontAtlas& font, std::string_view s, float max_w)
+{
+    return elide_tail(s, static_cast<int>(max_w),
+                      [&font](std::string_view t) { return font.measure(t); });
+}
+
 ButtonState button_state(const SDL_FRect& rect, float mx, float my,
                          bool mouse_down) noexcept
 {

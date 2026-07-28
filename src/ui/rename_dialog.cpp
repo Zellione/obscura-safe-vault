@@ -85,9 +85,13 @@ void RenameDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float
 
     const float ix = mx + 20;
     const float iy = my + 20;
-    r.draw_text(font, ix, iy, std::format("Rename \"{}\"", old_name_), TEXT);
+    // The title carries a vault-supplied node name, so its length is unbounded —
+    // elide it, and the hint with it, rather than letting either run past the border.
+    r.draw_text(font, ix, iy,
+                fit_text(font, std::format("Rename \"{}\"", old_name_), mw - 40), TEXT);
     draw_edit_field(r, font, {ix, iy + 40, mw - 40, 40}, buf_, buf_chrome_, true);
-    r.draw_text(font, ix, iy + 96, "[Enter] Rename  [Esc] Cancel", TEXT_FAINT);
+    r.draw_text(font, ix, iy + 96,
+                fit_text(font, "[Enter] Rename  [Esc] Cancel", mw - 40), TEXT_FAINT);
     if (!error_.empty()) r.draw_text(font, ix, iy + 124, error_, DANGER);
 }
 

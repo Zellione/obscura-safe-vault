@@ -395,8 +395,12 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
 
     // Footer hint: one LINE pitch above the modal bottom
     const float hint_y = my + MODAL_H - LINE - PAD;
+    // Elided like every other string in this modal (see the subtitle above): at
+    // the app's font this hint is wider than the modal, so drawing it raw put
+    // "[Esc] Close" outside the right border.
     r.draw_text(font, mx + PAD, hint_y,
-                "[Enter] Add  [Up/Down] Scroll  [Del] Remove  [Esc] Close",
+                fit_text(font, "[Enter] Add  [Up/Down] Scroll  [Del] Remove  [Esc] Close",
+                         MODAL_W - 2 * PAD),
                 TEXT_FAINT);
 
     // Autosuggest dropdown (Phase 29) — drawn last so it overlays the tag list
