@@ -19,7 +19,7 @@ std::optional<ImageData> decode_animated_webp_first_frame(std::span<const uint8_
     const WebPData webp_data{.bytes = data.data(), .size = data.size()};
 
     WebPAnimDecoderOptions opts;
-    if (!WebPAnimDecoderOptionsInit(&opts)) {
+    if (WebPAnimDecoderOptionsInit(&opts) == 0) {
         return std::nullopt;
     }
     opts.color_mode  = MODE_RGBA;
@@ -35,9 +35,9 @@ std::optional<ImageData> decode_animated_webp_first_frame(std::span<const uint8_
     int          timestamp_ms = 0;
     std::optional<ImageData> out;
 
-    if (WebPAnimDecoderGetInfo(dec, &info) && info.canvas_width > 0 && info.canvas_height > 0
-        && WebPAnimDecoderHasMoreFrames(dec)
-        && WebPAnimDecoderGetNext(dec, &rgba, &timestamp_ms) && rgba != nullptr) {
+    if (WebPAnimDecoderGetInfo(dec, &info) != 0 && info.canvas_width > 0
+        && info.canvas_height > 0 && WebPAnimDecoderHasMoreFrames(dec) != 0
+        && WebPAnimDecoderGetNext(dec, &rgba, &timestamp_ms) != 0 && rgba != nullptr) {
         const auto w = static_cast<size_t>(info.canvas_width);
         const auto h = static_cast<size_t>(info.canvas_height);
 
