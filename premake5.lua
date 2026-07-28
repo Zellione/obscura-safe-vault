@@ -556,6 +556,7 @@ project "osv_tests"
         "src/ui/help_popup.cpp",
         "src/ui/help_layout.cpp",
         "src/ui/detail_layout.cpp",
+        "src/ui/prompt_layout.cpp",
         "src/ui/text_metrics.cpp",
         "src/ui/settings_model.cpp",
         "src/ui/tile_thumb.cpp",
