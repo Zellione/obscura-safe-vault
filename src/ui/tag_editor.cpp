@@ -375,7 +375,9 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
         ? 0.0f
         : INHERIT_LINE * static_cast<float>(1 + wrap_from_contents.lines.size()) + 8.0f;
 
-    const float list_bottom = my + MODAL_H - 50 - inherit_h - from_contents_h;
+    // Footer area: error line (one pitch) + hint line (one pitch) + padding, all above modal bottom
+    const float footer_h = 2.0f * LINE + PAD;
+    const float list_bottom = my + MODAL_H - footer_h - inherit_h - from_contents_h;
 
     const int max_visible =
         std::max(1, static_cast<int>((list_bottom - tags_start) / row_pitch));
@@ -384,13 +386,16 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     draw_inherited_tags(r, font, mx, list_bottom, wrap_inherited);
     draw_from_contents_tags(r, font, mx, list_bottom + inherit_h, wrap_from_contents);
 
-    // Error message
+    // Footer area: positioned above the modal bottom with pitch-based spacing.
+    // Error message: one LINE pitch above the hint
+    const float error_y = my + MODAL_H - 2.0f * LINE - PAD;
     if (!error_.empty()) {
-        r.draw_text(font, mx + PAD, my + MODAL_H - 32, error_, DANGER);
+        r.draw_text(font, mx + PAD, error_y, error_, DANGER);
     }
 
-    // Footer hint
-    r.draw_text(font, mx + PAD, my + MODAL_H - 12,
+    // Footer hint: one LINE pitch above the modal bottom
+    const float hint_y = my + MODAL_H - LINE - PAD;
+    r.draw_text(font, mx + PAD, hint_y,
                 "[Enter] Add  [Up/Down] Scroll  [Del] Remove  [Esc] Close",
                 TEXT_FAINT);
 
