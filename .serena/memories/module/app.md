@@ -33,6 +33,10 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   `draw_keep_unlocked_badge`) over whatever screen is active whenever `active_ &&
   keep_unlocked_` — an App-level overlay, not per-screen.
 
+### Event handling (Phase 56)
+- `back_click.{h,cpp}` — `is_back_click(SDL_Event&)` detects right button-down; `make_back_key_event()` constructs a synthetic Escape key-down. `App::dispatch_event` translates every right button-down into an Escape and swallows the release, so the button mirrors Esc exactly everywhere (grid multi-selection clears first, fullscreen exits on first click, modals all inherit Esc handling). Pure helpers are testable without a window.
+- `App::pump_events` and `gfx::Window` — HiDPI mouse coordinate fixing. `pump_events` runs `SDL_ConvertEventToRenderCoordinates(renderer, &e)` on each SDL event before dispatching, converting button/motion/wheel positions from window points into render-pixel space. `Window::mouse_x()`/`mouse_y()` route `SDL_GetMouseState` through `SDL_RenderCoordinatesFromWindow`. Both conversions are identity at 1.0 density (Linux dev box) and scale at >1.0 (Windows). Hit-testing (tile clicks, strip hover, video seek bar) and edge-click navigation now land where the cursor is on all displays.
+
 ### Session state
 - App owns `ui::GallerySessionState session_` (mirrors `adv_session_`): last GalleryGrid view
   density (List/GridS/GridM/GridL/GridXL) + ImageViewer strip side + a single "last video

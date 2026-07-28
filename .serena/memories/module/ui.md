@@ -115,7 +115,7 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   change; restored on_enter / saved on_exit (results re-derived, node ptrs not persisted).
   Ctrl+R clears the query behind a Y/N modal. Phase 48: detail panel + `Ctrl+D` toggle (bare
   `D` types into query buffer); all result repopulation funnels through `rerun()`, which clears
-  the cache key.
+  the cache key. **Phase 56:** list layout derives from `list_layout.*` module.
 - `tag_overview.*` — `Shift+T` first-class Screen (`NavKind::ToTagOverview`): scrollable tag
   list (Up/Down, Enter, Tab=toggle sort, `/`=enter filter mode then type, `` ` ``=quick-switch).
   **Phase 54:** filtering needed an explicit `filtering_` flag — the old browse-mode gate
@@ -131,7 +131,8 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `import_tag_dict()` reads + parses + applies + does the ONE `set_vault_settings` commit
   and only then shows the summary modal (`import_summary_`, non-empty exactly while up,
   any key dismisses, owns every key while up). A failed commit sets `error_` and shows no
-  modal — a failed write is never reported as a successful import.
+  modal — a failed write is never reported as a successful import. **Phase 56:** prompt geometry
+  derives from `prompt_layout.*` module.
 - `tag_galleries.*` — galleries-only view of galleries directly carrying one tag
   (`NavKind::ToTagGalleries`, tag in Nav::path); thin FavoritesScreen subclass over
   `VaultSearch::galleries_with_tag` whose `go_back()` returns to the overview. Tab toggles to
@@ -152,7 +153,8 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   AltGr) + physical bracket scancodes; level seeded from `media::saved_volume()` on open,
   written back on change. `R` toggles loop (process-lifetime `media::saved_loop_enabled()`;
   VideoPlayback re-seeks to 0 and keeps playing at EOF when set); on-screen ring indicator next
-  to play/pause.
+  to play/pause. **Phase 56:** `on_vault_changed()` uses the `album_rebind.*` module to re-bind
+  by path, preserving zoom, pan, fill-scroll offset, video position and GIF frame.
   Chrome: `viewer_chrome(const ImageViewer&)` free friend returns the `ChromeBands` for the
   whole viewer area (window minus strip) — an OPAQUE STRIP_BG header band (name/index/zoom +
   [F1] Help) and an opaque footer band, with the media fit into `.content` only, so a band
@@ -251,9 +253,10 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   to tally_ only (structurally impossible to delete a tag not in the node's own tags).
   Autosuggest dropdown while typing (`VaultSearch::all_tags` vocab refreshed on open/add/remove;
   `ui::editor_tag_suggestions`; Up/Down highlight via move_tag_cursor, -1=buffer; Enter adds the
-  TYPED text unless a suggestion is highlighted; Esc deselects first).
+  TYPED text unless a suggestion is highlighted; Esc deselects first). **Phase 56:** list layout
+  derives from `list_layout.*` module.
 - `search_overlay.*` — `/` live-filtered search modal in GalleryGrid; Tab cycles scope
-  (Both/Images/Galleries).
+  (Both/Images/Galleries). **Phase 56:** list layout derives from `list_layout.*` module.
 - `consent_dialog.*` — modal "export anyway?" confirm (SDL plumbing).
 - `theme_picker.*` — **DELETED in Phase 49.** Its behaviour moved into the `F2` settings
   overlay's Appearance section (`settings_overlay.*`); the vault manager's `C` now emits
@@ -425,6 +428,9 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   current item (name, progress bar, source kind), queued items (Ctrl+Up/Down reorder, Del cancel), finished/failed with outcomes.
   `C` clears finished entries. Lane-failure banner surfaces hard stops. Esc returns to previous screen.
   Free friend gate (exclusive-op guards): blocks delete/transfer/combine/compact when queue is non-empty.
+  **Phase 56:** Selection is now id-based (not positional index) so `Ctrl+Up`/`Ctrl+Down` keeps focus on the item it just moved.
+  Each row is two lines — `source → destination` above, progress bar or outcome below — via `import_status_row.*` module.
+  Summary modal geometry via `prompt_layout.*` module.
 - `MediaSink` (Phase 50) — executor seam for add_image/add_video, unifying legacy `FileOpJob` path (now retired)
   and new queue path. Abstract `struct MediaSink` with `add_image(Vault,...)` and `add_video(Vault,...)` virtuals;
   `DirectVaultSink` calls vault directly (synchronous); `test_only_*` seam for testing.
@@ -440,6 +446,14 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   ImportTaskKind::Folder: `scan_folder(task.source)` -> archive-style ZipEntry list -> `build_zip_plan` -> stage each
   file (decrypt-to-memory, no temp file) -> attach gallery tree. Bytes read into mlock'd SecureBytes.
   Main-thread-only invariant: tree untouched by worker (attach/commit only on queue drain).
+
+## Layout modules — pure geometry helpers (Phase 56 extractions)
+- `text_metrics.{h,cpp}` — font-derived text pitch: `line_pitch(font_px)` → `ceil(font_px * 1.25)` and `row_height(font_px, pad)` → `line_pitch + 2 * pad`. The 1.25 leading guarantees each pitch exceeds the font height, so adjacent lines cannot touch and a whole-line clip band cannot cut a descender. Pure, unit-tested; the SINGLE source of truth for all text-line pitches.
+- `detail_layout.{h,cpp}` — detail-panel line layout. Pure, unit-tested. Used by `detail_panel.*`.
+- `prompt_layout.{h,cpp}` — centred prompt/summary box geometry (used by tag overview edit prompt and import-summary modal). Pure, unit-tested. Used by `tag_overview.*` and `import_status_screen.*`.
+- `list_layout.{h,cpp}` — shared vertical-list geometry for five surfaces (advanced search, saved-search panel, search result view, search overlay, tag editor). Pure, unit-tested. Encapsulates all list row heights and scrolling maths for these screens.
+- `import_status_row.{h,cpp}` — Import Status two-line row formatting: `format_task_route(task)` → `"name → dest"`, `format_task_status(task)` → state string, `import_row_height(font_px, pad)` → `2 * pitch + 2 * pad`. Pure, unit-tested.
+- `album_rebind.{h,cpp}` — Viewer album binding logic: when the vault tree changes, remember the current item's path, re-list the album, then look up the remembered path. Returns whether the item survives and whether to preserve zoom/pan/playback state. Pure, unit-tested. Used by `ImageViewer::on_vault_changed`.
 
 ## Pure view / sort / model helpers (SDL-free unless noted, all unit-tested)
 - `child_counts.*` (Phase 51) — `direct_child_counts(node) -> SubtreeCounts` (galleries, images, videos counted
@@ -528,11 +542,12 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   run_search.
 - `search_result_view.*` / `result_grid.*` — result grid+list view state (`ResultView{List,
   Grid}` + toggle + move nav; List ±1 row, Grid ±1/±cols clamped, cols>=1). search_result_view
-  owns the off-thread decode worker + feeds the thumbnail cache.
+  owns the off-thread decode worker + feeds the thumbnail cache. **Phase 56:** list layout
+  derives from `list_layout.*` module.
 - `saved_search_panel.*` — saved-search sidebar: list rendering + CRUD (Ctrl+S/Enter/Del). Pure
   vault/SDL-free. Phase 54: `save_buf_` is a `TextInputModel` and `active_buffer()` returns
   `ITextInput*`; before that this field had NO Backspace handler at all, so a typo could only
-  be undone by cancelling the save (regression-tested now).
+  be undone by cancelling the save (regression-tested now). **Phase 56:** list layout derives from `list_layout.*` module.
 - `tag_suggest.*` — pure autosuggest source: `editor_tag_suggestions(buffer,vocab,own_tags)` —
   trim, rank, hide own tags, cap `TAG_SUGGEST_MAX=5`.
 - `tag_inherit.*` — ancestor-gallery tag union: `inherited_tags(vault,node_path)` — root→parent
@@ -590,6 +605,7 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `vault::vault_settings(vault_).categories`), `handle_detail_panel_scroll` (Ctrl+Up/Down) + pure `detail_panel_hit(open,window_w,mouse_x)`
   (region derived from detail_panel_width, so it cannot disagree with the reserved strip) and
   `scroll_detail_panel(st,wheel_y)` (clamps at 0 only; the host applies the upper clamp).
+  **Phase 56:** line layout derives from `detail_layout.*` module.
   Hosted by GalleryGrid, FavoritesScreen (covers all 4 subclasses), AdvancedSearchScreen.
 - `gif_repair.*` (Phase 47) — `maybe_repair_gif_animated(...)` + `Vault::repair_image_animated(path,bool)`:
   lazy bidirectional healing for GIFs stored before Phase 47, persisted via the same crash-safe
