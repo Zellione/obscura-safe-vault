@@ -151,6 +151,19 @@ local composite actions, `.github/actions/setup-apt-deps/` and
 out — its `if: env.SONAR_TOKEN != ''` guard on every step is a pre-existing
 special case).
 
+The no-FFmpeg job (`tests-no-av`, Phase 57 follow-up) also runs on every PR:
+`--no-av` premake option, gcc-14, Debug-only, Linux-only. It makes `link_av()`
+return early so `OSV_VENDORED_AV` stays undefined, WITHOUT touching the shared
+`vendor/codecs-prefix` cache — the image codecs are still linked (libwebp is a
+hard dependency), only FFmpeg is dropped. It builds the full `Debug_x64` target,
+app included, because `osv` compiles ~25 `src/ui/*.cpp` files the `osv_tests`
+target does not list. Rationale: before it, no CI job compiled the `#else` half
+of any `#ifdef OSV_VENDORED_AV`, which let `ui/gif_playback.cpp` stay
+un-compilable in that configuration from Phase 47 to Phase 57 (it opened
+`namespace ui` INSIDE the #ifdef); adding the job immediately exposed two more
+test files broken the same way. It is also CI's only proof that animated WebP
+plays without FFmpeg.
+
 **Codec cache auto-bust (Phase 52):** The CI cache key for the vendored codec build
 is generated from the hash of `.gitmodules` + `scripts/build_codecs.sh` + `scripts/build_ffmpeg_windows.sh`.
 When either build script changes (e.g., new decoder list, new demuxer, new hwaccel registration),

@@ -47,12 +47,6 @@ struct TempVault {
     std::string str() const { return path.string(); }
 };
 
-std::vector<uint8_t> read_file(const char* file_path)
-{
-    std::ifstream f(file_path, std::ios::binary);
-    return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
-}
-
 std::span<const uint8_t> bytes(const std::string& s)
 {
     return {reinterpret_cast<const uint8_t*>(s.data()), s.size()};
@@ -71,6 +65,17 @@ const vault::IndexNode* first_animated_image(const std::vector<const vault::Inde
 
 // --- GIF backend (needs vendored FFmpeg) --------------------------------------
 #ifdef OSV_VENDORED_AV
+
+namespace {
+// Only the GIF cases read a fixture off disk; the WebP ones use the in-repo
+// image fixtures, so this helper lives inside the gate to stay used in every
+// build configuration.
+std::vector<uint8_t> read_file(const char* file_path)
+{
+    std::ifstream f(file_path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+}
+}  // namespace
 
 TEST(anim_playback_gif_opens_an_animated_gif)
 {

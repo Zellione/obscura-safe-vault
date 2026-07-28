@@ -22,6 +22,17 @@ newoption {
     description = "Build with ThreadSanitizer",
 }
 
+-- Simulates a machine that never ran the FFmpeg half of scripts/build_codecs.sh,
+-- WITHOUT deleting the built prefix: link_av() skips the whole block, so
+-- OSV_VENDORED_AV stays undefined and every gated translation unit compiles on
+-- its non-AV path. Cheap to run in CI (the codecs cache is reused as-is) and the
+-- only way to catch a break in code that only exists when the macro is absent —
+-- Phase 57 found `ui/gif_playback.cpp` had not compiled without it since Phase 47.
+newoption {
+    trigger     = "no-av",
+    description = "Ignore the vendored FFmpeg prefix (build as if it were not installed)",
+}
+
 -- --asan and --tsan cannot be combined in one binary (conflicting runtime
 -- instrumentation) — fail fast rather than producing a broken build.
 if _OPTIONS["asan"] and _OPTIONS["tsan"] then
@@ -135,6 +146,11 @@ end
 -- scripts/build_codecs.sh --asan) with a fallback + warning to the normal prefix.
 -- ---------------------------------------------------------------------------
 local function link_av()
+    -- --no-av: behave exactly as if FFmpeg had never been built into the prefix.
+    if _OPTIONS["no-av"] then
+        return
+    end
+
     local prefix = path.join(os.getcwd(), "vendor/codecs-prefix")
     -- Try ASAN prefix first if --asan was passed.
     if _OPTIONS["asan"] then
