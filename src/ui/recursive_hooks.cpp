@@ -66,8 +66,11 @@ bool zip_extract(std::span<const uint8_t> bytes, std::size_t index, crypto::Secu
 
 // --- libarchive path (7z / rar / tar) ---------------------------------------
 //
-// ArchiveReader re-scans from the start on every extract (O(n) per entry), so
-// a fresh reader per call costs no more than reusing one would.
+// These hooks are stateless by design (span in, bytes out), so each call
+// builds a fresh reader. That forfeits ArchiveReader's forward stream cursor
+// (which only pays off across extracts on ONE reader) — acceptable here
+// because nested-archive candidates are rare, and the recursive walk extracts
+// the nested archive once and then imports from its in-memory bytes.
 
 bool arc_list(std::span<const uint8_t> bytes, std::string_view password,
               std::vector<ZipEntry>& out)

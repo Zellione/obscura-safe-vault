@@ -22,13 +22,16 @@ namespace ui {
 // discipline. libarchive's read API is STREAMING ONLY (sequential
 // archive_read_next_header/archive_read_data, no random access by index like
 // miniz's central-directory reader), so open() does one forward pass to
-// snapshot the entry list, and extract() re-opens a fresh stream and re-scans
-// forward to the requested index each time, rather than decompressing every
-// entry up front and holding them all in memory simultaneously (which could
-// blow past mlock limits for a many-page archive). O(n) per extract, O(n^2)
-// for a full sequential import — fine for typical gallery sizes (tens to a
-// few hundred entries). ArchiveReader keeps its own copy of the source bytes
-// so a re-scan is always possible after open() returns.
+// snapshot the entry list, and extract() holds a forward cursor: an open
+// stream positioned just past the last extracted entry. Ascending extracts —
+// the import loop's access pattern — continue that stream, so a full import
+// is ONE pass over the archive; a target behind the cursor transparently
+// reopens from the start. (Reopening per extract instead would re-decompress
+// the whole prefix each time — O(n^2) total, ~150x slower than the zip path
+// on a 150-entry solid 7z — while decompressing every entry up front could
+// blow past mlock limits for a many-page archive.) ArchiveReader keeps its
+// own copy of the source bytes so a re-scan is always possible after open()
+// returns.
 // True if `msg` (a libarchive archive_error_string()) indicates the extract
 // failed specifically because of a missing/wrong password, as opposed to any
 // other reason (corrupt entry, an encryption flavor this build's libarchive
@@ -42,6 +45,16 @@ namespace ui {
 
 class ArchiveReader {
 public:
+    ArchiveReader() = default;
+    ~ArchiveReader();
+    // The cached stream cursor owns a raw libarchive handle; nothing copies or
+    // moves a reader (they are stack-local and passed by reference), so delete
+    // both rather than write transfer semantics nobody uses.
+    ArchiveReader(const ArchiveReader&)            = delete;
+    ArchiveReader& operator=(const ArchiveReader&) = delete;
+    ArchiveReader(ArchiveReader&&)                 = delete;
+    ArchiveReader& operator=(ArchiveReader&&)      = delete;
+
     // Auto-detects the archive format (7z/RAR/TAR + gzip/xz filters) and
     // parses its entry list (name + is_dir) in one forward pass. Keeps a copy
     // of `data`. Returns false if libarchive can't recognise/open it at all.
@@ -59,7 +72,8 @@ public:
     [[nodiscard]] const std::vector<ZipEntry>& entries() const noexcept { return entries_; }
 
     // Decompress the entry at `index` into an mlock'd buffer, replacing
-    // `out`'s contents. Re-scans from the start of the archive. Returns false
+    // `out`'s contents. Continues the forward cursor when `index` is at or
+    // ahead of it; re-scans from the start otherwise. Returns false
     // if `index` is out of range, the entry is a directory, its declared size
     // is unknown or exceeds MAX_ENTRY_BYTES (corrupt/hostile size guard —
     // bounded before allocating, mirroring chunk_codec's orig_len check), or
@@ -73,6 +87,12 @@ public:
     // retry — otherwise an encryption flavor this build can't decrypt at all
     // (e.g. WinZip AES, no crypto backend compiled in) would loop forever.
     [[nodiscard]] bool extract_failed_needs_password() const noexcept { return needs_password_; }
+
+    // Number of underlying libarchive stream opens performed by extract()
+    // since the last open()/open_files(). Observable for the forward-cursor
+    // perf contract (ascending extracts share one stream); asserted by tests,
+    // no UI use.
+    [[nodiscard]] size_t stream_opens() const noexcept { return stream_opens_; }
 
     // Sanity cap on a single entry's decompressed size: large enough for any
     // real photo/video, small enough that a corrupt or hostile archive
@@ -93,6 +113,11 @@ private:
     // open() and open_files() so the cap can't drift between the two.
     [[nodiscard]] bool scan_entries(struct archive* a);
 
+    // Free the cached stream cursor (if any) and rewind the logical position.
+    // Called on any extract failure (per-call independence, exactly as if each
+    // extract had its own stream), on re-open, and from the destructor.
+    void reset_stream() const noexcept;
+
     std::vector<uint8_t>  data_;
     std::vector<ZipEntry> entries_;
     // Non-empty (with a trailing NUL byte, since SecureBytes zero-initialises
@@ -102,6 +127,14 @@ private:
 
     crypto::SecureBytes   passphrase_;
     mutable bool          needs_password_ = false;
+    mutable size_t        stream_opens_   = 0;
+
+    // Forward stream cursor (see class comment): `stream_` is an open read
+    // handle whose next archive_read_next_header() returns entry
+    // `stream_next_`, or nullptr when no stream is cached. Mutable because
+    // the cursor is a pure cache — extract() stays logically const.
+    mutable struct archive* stream_      = nullptr;
+    mutable size_t          stream_next_ = 0;
 
     // File paths for file-oriented archives (Phase 53: multi-volume RAR support).
     // If non-empty, extract() uses these paths; otherwise uses data_.

@@ -48,6 +48,97 @@ TEST(archive_reader_extract_returns_correct_bytes)
     CHECK(std::memcmp(out.data(), data2.data(), data2.size()) == 0);
 }
 
+// Forward stream cursor perf contract: libarchive can't seek, so reaching
+// entry N decompresses everything before it — a reopen-per-extract import is
+// O(n^2) in decompression work (7z solid archives measured ~150x slower than
+// the miniz zip path at just 150 entries). Ascending extracts — the shape of
+// every import loop, since plan placements follow entry order — must share
+// ONE open stream. stream_opens() is the observable for that contract.
+TEST(archive_reader_ascending_extracts_reuse_one_stream)
+{
+    std::vector<std::pair<std::string, std::vector<uint8_t>>> items;
+    for (int i = 0; i < 4; ++i) {
+        items.emplace_back("p" + std::to_string(i) + ".jpg",
+                           fake_bytes(static_cast<uint8_t>(10 * (i + 1)), 64));
+    }
+    auto bytes = read_file(make_archive(items, "7zip", fresh_path("reader_7z_seq.7z")));
+    ui::ArchiveReader r;
+    REQUIRE(r.open(bytes));
+
+    crypto::SecureBytes out;
+    for (size_t i = 0; i < 4; ++i) {
+        REQUIRE(r.extract(i, out));
+        const auto expect = fake_bytes(static_cast<uint8_t>(10 * (i + 1)), 64);
+        REQUIRE(out.size() == expect.size());
+        CHECK(std::memcmp(out.data(), expect.data(), expect.size()) == 0);
+    }
+    CHECK_EQ(r.stream_opens(), size_t{1});
+}
+
+// Rewinding (index behind the cursor) must transparently reopen — bytes stay
+// correct, at the cost of one more stream open. This is the shape of the
+// password-probe-then-import path: open_archive() probes the first entry,
+// then run_placements() starts again from entry 0.
+TEST(archive_reader_rewind_extract_reopens_and_stays_correct)
+{
+    const auto data0 = fake_bytes(21, 96);
+    const auto data2 = fake_bytes(23, 96);
+    auto bytes = read_file(make_archive({{"a.jpg", data0},
+                                         {"b.jpg", fake_bytes(22, 96)},
+                                         {"c.jpg", data2}},
+                                        "7zip", fresh_path("reader_7z_rewind.7z")));
+    ui::ArchiveReader r;
+    REQUIRE(r.open(bytes));
+
+    crypto::SecureBytes out;
+    REQUIRE(r.extract(2, out));
+    REQUIRE(out.size() == data2.size());
+    CHECK(std::memcmp(out.data(), data2.data(), data2.size()) == 0);
+
+    REQUIRE(r.extract(0, out));
+    REQUIRE(out.size() == data0.size());
+    CHECK(std::memcmp(out.data(), data0.data(), data0.size()) == 0);
+    CHECK_EQ(r.stream_opens(), size_t{2});
+}
+
+// A failed extract on a directory index is rejected before the stream is
+// touched — it must not cost a reopen or desync the cursor for the entries
+// around it.
+TEST(archive_reader_dir_extract_between_files_keeps_stream)
+{
+    const auto data0 = fake_bytes(31, 64);
+    const auto data2 = fake_bytes(33, 64);
+    auto bytes = read_file(make_archive({{"a.jpg", data0}, {"sub/", {}}, {"sub/b.jpg", data2}},
+                                        "ustar", fresh_path("reader_tar_dirskip.tar")));
+    ui::ArchiveReader r;
+    REQUIRE(r.open(bytes));
+
+    crypto::SecureBytes out;
+    REQUIRE(r.extract(0, out));
+    CHECK(!r.extract(1, out));  // directory: refused, stream untouched
+    REQUIRE(r.extract(2, out));
+    REQUIRE(out.size() == data2.size());
+    CHECK(std::memcmp(out.data(), data2.data(), data2.size()) == 0);
+    CHECK_EQ(r.stream_opens(), size_t{1});
+}
+
+// Extracting the same index twice (probe pattern) rewinds and stays correct.
+TEST(archive_reader_repeated_extract_same_index_is_correct)
+{
+    const auto data = fake_bytes(41, 128);
+    auto bytes = read_file(make_archive({{"only.jpg", data}}, "7zip",
+                                        fresh_path("reader_7z_repeat.7z")));
+    ui::ArchiveReader r;
+    REQUIRE(r.open(bytes));
+
+    crypto::SecureBytes out;
+    for (int pass = 0; pass < 2; ++pass) {
+        REQUIRE(r.extract(0, out));
+        REQUIRE(out.size() == data.size());
+        CHECK(std::memcmp(out.data(), data.data(), data.size()) == 0);
+    }
+}
+
 TEST(archive_reader_open_rejects_garbage)
 {
     std::vector<uint8_t> junk{0x00, 0x01, 0x02, 0x03, 'n', 'o', 't', 'a', 'n', 'a', 'r', 'c'};

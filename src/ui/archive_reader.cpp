@@ -96,10 +96,26 @@ bool ArchiveReader::scan_entries(struct archive* a)
     }
 }
 
+ArchiveReader::~ArchiveReader()
+{
+    reset_stream();
+}
+
+void ArchiveReader::reset_stream() const noexcept
+{
+    if (stream_) {
+        archive_read_free(stream_);
+        stream_ = nullptr;
+    }
+    stream_next_ = 0;
+}
+
 bool ArchiveReader::open(std::span<const uint8_t> data, std::string_view passphrase)
 {
+    reset_stream();
     data_.assign(data.begin(), data.end());
     entries_.clear();
+    stream_opens_ = 0;
     passphrase_.wipe();
     (void)passphrase_.resize(0);
     if (!passphrase.empty()) {
@@ -133,45 +149,58 @@ bool ArchiveReader::extract(size_t index, crypto::SecureBytes& out) const
     needs_password_ = false;
     if (index >= entries_.size() || entries_[index].is_dir) return false;
 
-    // Use file-based extraction if file_paths_ is populated (multi-volume),
-    // otherwise use memory-based extraction
-    struct archive* a = file_paths_.empty()
-        ? open_stream(data_, passphrase_cstr(passphrase_))
-        : open_stream_files(file_paths_, passphrase_cstr(passphrase_));
-    if (!a) return false;
+    // Forward cursor: libarchive streams can't seek, so reaching entry N
+    // means decompressing everything before it. Reuse the open stream whenever
+    // the target is at or ahead of the cursor — the import loop's ascending
+    // access pattern then costs ONE pass over the archive instead of a reopen
+    // per entry (which re-decompresses the whole prefix each time: O(n^2)
+    // total, measured ~150x slower than the zip path on a 150-entry solid 7z).
+    // A target behind the cursor transparently falls back to a fresh stream.
+    if (!stream_ || index < stream_next_) {
+        reset_stream();
+        // Use file-based extraction if file_paths_ is populated (multi-volume),
+        // otherwise use memory-based extraction
+        stream_ = file_paths_.empty()
+            ? open_stream(data_, passphrase_cstr(passphrase_))
+            : open_stream_files(file_paths_, passphrase_cstr(passphrase_));
+        if (!stream_) return false;
+        ++stream_opens_;
+    }
+    struct archive* const a = stream_;
 
     // A while loop (not a for loop) so the loop header stays concerned only
-    // with `i`/`found` control, and a single break covers the one early-exit
+    // with cursor/`found` control, and a single break covers the one early-exit
     // case (a fatal/EOF read mid-stream) — `found` naturally ends the loop
-    // via the condition once the target header has been read.
+    // via the condition once the target header has been read. Note
+    // archive_read_next_header implicitly discards any unread tail of the
+    // previous entry, so the cursor cannot desync after a successful extract.
     struct archive_entry* entry = nullptr;
     bool found = false;
-    size_t i = 0;
-    while (!found && i <= index) {
+    while (!found && stream_next_ <= index) {
         if (const int r = archive_read_next_header(a, &entry);
             r == ARCHIVE_EOF || (r != ARCHIVE_OK && r < ARCHIVE_WARN))
             break;
-        found = (i == index);
+        found = (stream_next_ == index);
         if (!found) archive_read_data_skip(a);
-        ++i;
+        ++stream_next_;
     }
     if (!found) {
-        archive_read_free(a);
+        reset_stream();
         return false;
     }
 
     if (!archive_entry_size_is_set(entry)) {
-        archive_read_free(a);
+        reset_stream();
         return false;
     }
     const int64_t declared = archive_entry_size(entry);
     if (declared < 0 || static_cast<uint64_t>(declared) > MAX_ENTRY_BYTES) {
-        archive_read_free(a);
+        reset_stream();
         return false;
     }
 
     if (!out.resize(static_cast<size_t>(declared))) {
-        archive_read_free(a);
+        reset_stream();
         return false;
     }
 
@@ -184,7 +213,7 @@ bool ArchiveReader::extract(size_t index, crypto::SecureBytes& out) const
             needs_password_ = archive_error_is_passphrase_issue(msg);
             out.wipe();
             (void)out.resize(0);
-            archive_read_free(a);
+            reset_stream();
             return false;
         }
         if (n == 0) break;  // short read: entry had less data than declared
@@ -193,7 +222,7 @@ bool ArchiveReader::extract(size_t index, crypto::SecureBytes& out) const
     if (total != out.size()) {
         out.wipe();
         (void)out.resize(0);
-        archive_read_free(a);
+        reset_stream();
         return false;
     }
 
@@ -212,18 +241,20 @@ bool ArchiveReader::extract(size_t index, crypto::SecureBytes& out) const
         needs_password_ = archive_error_is_passphrase_issue(msg);
         out.wipe();
         (void)out.resize(0);
-        archive_read_free(a);
+        reset_stream();
         return false;
     }
-    archive_read_free(a);
+    // Success: keep the stream open for the next (ascending) extract.
     return true;
 }
 
 bool ArchiveReader::open_files(std::span<const std::filesystem::path> volumes,
                                 std::string_view passphrase)
 {
+    reset_stream();
     entries_.clear();
     file_paths_.clear();
+    stream_opens_ = 0;
     passphrase_.wipe();
     (void)passphrase_.resize(0);
 
