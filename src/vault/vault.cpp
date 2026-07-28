@@ -394,6 +394,8 @@ Vault::Vault(Vault&& o) noexcept
     : path_(std::move(o.path_)),
       fp_(o.fp_),
       read_fp_(o.read_fp_),
+      thumb_fp_(o.thumb_fp_),
+      thumb_mutex_(std::move(o.thumb_mutex_)),
       write_mutex_(std::move(o.write_mutex_)),
       header_mutex_(std::move(o.header_mutex_)),
       header_(o.header_),
@@ -410,6 +412,7 @@ Vault::Vault(Vault&& o) noexcept
 
     o.fp_       = nullptr;
     o.read_fp_  = nullptr;
+    o.thumb_fp_ = nullptr;
     o.unlocked_ = false;
 }
 
@@ -425,6 +428,8 @@ Vault& Vault::operator=(Vault&& o) noexcept
         path_         = std::move(o.path_);
         fp_           = o.fp_;
         read_fp_      = o.read_fp_;
+        thumb_fp_     = o.thumb_fp_;
+        thumb_mutex_  = std::move(o.thumb_mutex_);
         write_mutex_  = std::move(o.write_mutex_);
         header_mutex_ = std::move(o.header_mutex_);
         header_       = o.header_;
@@ -435,6 +440,7 @@ Vault& Vault::operator=(Vault&& o) noexcept
         settings_     = std::move(o.settings_);
         o.fp_         = nullptr;
         o.read_fp_    = nullptr;
+        o.thumb_fp_   = nullptr;
         o.unlocked_   = false;
     }
     return *this;
@@ -458,10 +464,20 @@ void Vault::lock() noexcept
 
 void Vault::reset() noexcept
 {
+    // Phase 58: Close thumb_fp_ under the mutex BEFORE the master key wipe.
+    // This ensures an in-flight thumbnail read either completes against valid state
+    // or observes unlocked_ == false. The lock() call below wipes the master key.
+    if (thumb_mutex_) {
+        const std::lock_guard lk(*thumb_mutex_);
+        unlocked_ = false;
+        if (thumb_fp_ != nullptr) { std::fclose(thumb_fp_); thumb_fp_ = nullptr; }
+    }
+
     lock();
     if (fp_) { std::fclose(fp_); fp_ = nullptr; }
     if (read_fp_) { std::fclose(read_fp_); read_fp_ = nullptr; }
     write_mutex_.reset();
+    thumb_mutex_.reset();
     path_.clear();
     header_ = Header{};
     settings_ = VaultSettings{};
@@ -519,6 +535,7 @@ VaultResult Vault::create(const std::string&       path,
     out.settings_     = VaultSettings::seeded();
     out.write_mutex_  = std::make_unique<std::mutex>();
     out.header_mutex_ = std::make_unique<std::mutex>();
+    out.thumb_mutex_  = std::make_unique<std::mutex>();
 
     // Write the initial (empty) index + a valid header via the crash-safe path.
     if (const VaultResult r = out.commit_index(); r != VaultResult::Ok) { out.reset(); return r; }
@@ -532,6 +549,14 @@ VaultResult Vault::create(const std::string&       path,
     // Disable buffering on read_fp_ so it always reads fresh from disk,
     // avoiding buffering conflicts with fp_'s writes.
     std::setvbuf(out.read_fp_, nullptr, _IONBF, 0);
+
+    // Open thumb_fp_ the same way for thread-safe background thumbnail reads.
+    out.thumb_fp_     = std::fopen(path.c_str(), "rb");
+    if (!out.thumb_fp_) {
+        out.reset();
+        return VaultResult::IoError;
+    }
+    std::setvbuf(out.thumb_fp_, nullptr, _IONBF, 0);
     return VaultResult::Ok;
 }
 
@@ -565,10 +590,21 @@ VaultResult Vault::open(const std::string& path, Vault& out)
     // Disable buffering on read_fp_ so it always reads fresh from disk,
     // avoiding buffering conflicts with fp_'s writes.
     std::setvbuf(out.read_fp_, nullptr, _IONBF, 0);
+
+    // Open thumb_fp_ the same way for thread-safe background thumbnail reads.
+    out.thumb_fp_     = std::fopen(path.c_str(), "rb");
+    if (!out.thumb_fp_) {
+        std::fclose(out.read_fp_);
+        std::fclose(fp);
+        return VaultResult::IoError;
+    }
+    std::setvbuf(out.thumb_fp_, nullptr, _IONBF, 0);
+
     out.header_       = h;
     out.unlocked_     = false;
     out.write_mutex_  = std::make_unique<std::mutex>();
     out.header_mutex_ = std::make_unique<std::mutex>();
+    out.thumb_mutex_  = std::make_unique<std::mutex>();
     return VaultResult::Ok;
 }
 
@@ -777,7 +813,6 @@ VaultResult Vault::read_image(const IndexNode& node, crypto::SecureBytes& out) c
 VaultResult Vault::read_thumbnail(const IndexNode& node, crypto::SecureBytes& out) const
 {
     using enum VaultResult;
-    if (!unlocked_)              return Locked;
     if (!node.is_media())        return InvalidArg;
 
     // Determine thumbnail location: video uses poster, image uses meta.
@@ -785,7 +820,11 @@ VaultResult Vault::read_thumbnail(const IndexNode& node, crypto::SecureBytes& ou
     const uint64_t thumb_off = node.is_video() ? node.vmeta.poster_offset : node.meta.thumb_offset;
     if (thumb_len == 0) return NotFound;
 
-    if (ChunkStore store(read_fp_, master_key_.as_span(), framed_chunks(header_));
+    // Phase 58: Use dedicated thumb_fp_ + mutex for thread-safe background reads.
+    if (!thumb_mutex_) return Locked;
+    const std::lock_guard lk(*thumb_mutex_);
+    if (!unlocked_) return Locked;
+    if (ChunkStore store(thumb_fp_, master_key_.as_span(), framed_chunks(header_));
         !store.read_chunk({thumb_off, thumb_len}, out)) {
         return AuthFailed;
     }
@@ -796,10 +835,13 @@ VaultResult read_thumb_span(const Vault& v, uint64_t offset, uint64_t length,
                             crypto::SecureBytes& out)
 {
     using enum VaultResult;
-    if (!v.unlocked_)  return Locked;
     if (length == 0)   return InvalidArg;
 
-    if (ChunkStore store(v.read_fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+    // Phase 58: Use dedicated thumb_fp_ + mutex for thread-safe background reads.
+    if (!v.thumb_mutex_) return Locked;
+    const std::lock_guard lk(*v.thumb_mutex_);
+    if (!v.unlocked_)  return Locked;
+    if (ChunkStore store(v.thumb_fp_, v.master_key_.as_span(), framed_chunks(v.header_));
         !store.read_chunk({offset, length}, out)) {
         return AuthFailed;
     }

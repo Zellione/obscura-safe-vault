@@ -346,6 +346,16 @@ private:
     // position with a main-thread read. Opened by create()/open(), closed by
     // reset(). Chunks are immutable once appended, so reads need no lock.
     std::FILE*                             read_fp_ = nullptr;
+    // Phase 58: dedicated handle for BACKGROUND thumbnail reads (DecodeWorker
+    // fetch stage). read_fp_ stays main-thread-only (read_image / read_video /
+    // VideoSource / FileOpJob), so thumb I/O can never stall video streaming or
+    // race a file-op worker. thumb_mutex_ serialises the seek+read of one
+    // thumbnail AND guards close-on-lock: reset() flips unlocked_ and closes
+    // thumb_fp_ under this mutex BEFORE wiping the master key, so an in-flight
+    // fetch either completes against valid state or observes Locked. Never
+    // taken together with write_mutex_/header_mutex_ (no nesting, no ordering).
+    std::FILE*                             thumb_fp_ = nullptr;
+    std::unique_ptr<std::mutex>            thumb_mutex_;
     // Phase 50: serialises ALL writes to fp_ (chunk appends from stage_*,
     // index slot writes from the commit lane / commit_index). unique_ptr keeps
     // Vault movable. Held for one whole chunk per acquisition — never released
