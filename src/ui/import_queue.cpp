@@ -11,7 +11,7 @@
 #include "ui/zip_import.h"
 #include "ui/zip_plan.h"
 #include "image/decode.h"
-#include "image/gif_info.h"
+#include "image/anim_info.h"
 #include "image/thumbnail.h"
 #include "vault/staging.h"
 #include "platform/safe_print.h"

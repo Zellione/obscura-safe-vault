@@ -18,7 +18,7 @@
 #include "safe_name.h"
 
 #include "image/decode.h"
-#include "image/gif_info.h"
+#include "image/anim_info.h"
 #include "image/thumbnail.h"
 
 #include "vault/video_format.h"

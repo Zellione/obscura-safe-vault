@@ -1,6 +1,8 @@
-#include "image/gif_info.h"
+#include "image/anim_info.h"
 
 #include <cstddef>
+
+#include <webp/decode.h>
 
 namespace image {
 namespace {
@@ -118,6 +120,31 @@ bool gif_is_animated(std::span<const uint8_t> data) noexcept
     }
 
     return false;
+}
+
+bool webp_is_animated(std::span<const uint8_t> data) noexcept
+{
+    if (data.empty()) {
+        return false;
+    }
+
+    // WebPGetFeatures parses the RIFF/VP8X headers and reports the ANIMATION
+    // flag. It returns non-OK on truncated, malformed, or non-WebP input, so
+    // this untrusted path needs no container walking of our own.
+    WebPBitstreamFeatures features{};
+    if (WebPGetFeatures(data.data(), data.size(), &features) != VP8_STATUS_OK) {
+        return false;
+    }
+    return features.has_animation != 0;
+}
+
+bool is_animated(ImageFormat fmt, std::span<const uint8_t> data) noexcept
+{
+    switch (fmt) {
+    case ImageFormat::GIF:  return gif_is_animated(data);
+    case ImageFormat::WebP: return webp_is_animated(data);
+    default:                return false;
+    }
 }
 
 } // namespace image

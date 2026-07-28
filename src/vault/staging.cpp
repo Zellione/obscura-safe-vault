@@ -8,7 +8,7 @@
 #include "vault_ops.h"
 
 #include "image/decode.h"
-#include "image/gif_info.h"
+#include "image/anim_info.h"
 #include "image/thumbnail.h"
 #include "media/video_probe.h"
 #include "platform/error_log.h"

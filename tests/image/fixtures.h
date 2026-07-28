@@ -31,6 +31,13 @@ std::vector<uint8_t> malformed_jpeg();
 std::vector<uint8_t> load_fixture(const char* name);
 
 inline std::vector<uint8_t> load_webp() { return load_fixture("sample.webp"); }
+
+// Animated WebP (Phase 57). sample_anim.webp is 3 opaque frames 100 ms apart;
+// sample_anim_alpha.webp is 2 frames whose first is fully transparent, pinning
+// the flatten-over-black rule. Both are lossless, so pixel checks are exact.
+inline std::vector<uint8_t> load_anim_webp()       { return load_fixture("sample_anim.webp"); }
+inline std::vector<uint8_t> load_anim_webp_alpha() { return load_fixture("sample_anim_alpha.webp"); }
+
 inline std::vector<uint8_t> load_heic() { return load_fixture("sample.heic"); }
 inline std::vector<uint8_t> load_avif() { return load_fixture("sample.avif"); }
 

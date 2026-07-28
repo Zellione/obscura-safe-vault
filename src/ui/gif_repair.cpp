@@ -1,6 +1,6 @@
 #include "ui/gif_repair.h"
 
-#include "image/gif_info.h"
+#include "image/anim_info.h"
 #include "vault/index.h"
 #include "vault/vault.h"
 
