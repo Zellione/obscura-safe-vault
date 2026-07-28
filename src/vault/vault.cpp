@@ -912,7 +912,7 @@ bool Vault::repair_image_animated(std::string_view node_path, bool animated)
         return false;
     }
 
-    if (n->meta.format != ImageFormat::GIF) {
+    if (!format_can_animate(n->meta.format)) {
         return false;
     }
 

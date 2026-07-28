@@ -186,6 +186,80 @@ TEST(anim_playback_gif_loops_past_the_end)
 
 // --- WebP backend (works in every build) --------------------------------------
 
+TEST(anim_playback_plays_an_animated_webp)
+{
+    const auto wbytes = fixtures::load_anim_webp();
+    REQUIRE(!wbytes.empty());
+
+    TempVault tv("webp");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("c", wbytes, "anim.webp") == vault::VaultResult::Ok);
+
+    const vault::IndexNode* node = first_animated_image(v.list("c"));
+    REQUIRE(node != nullptr);           // meta.animated is set at import
+
+    ui::AnimPlayback p(v, *node);
+    CHECK(p.valid());
+    CHECK(p.animating());
+    CHECK(!p.paused());
+}
+
+TEST(anim_playback_webp_space_toggles_pause)
+{
+    const auto wbytes = fixtures::load_anim_webp();
+    REQUIRE(!wbytes.empty());
+
+    TempVault tv("webppause");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("c", wbytes, "anim.webp") == vault::VaultResult::Ok);
+
+    const vault::IndexNode* node = first_animated_image(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    ui::AnimPlayback p(v, *node);
+    REQUIRE(p.valid());
+    p.toggle_pause();
+    CHECK(p.paused());
+    CHECK(!p.animating());
+    p.toggle_pause();
+    CHECK(!p.paused());
+    CHECK(p.animating());
+}
+
+TEST(anim_playback_webp_advances_and_loops)
+{
+    const auto wbytes = fixtures::load_anim_webp();
+    REQUIRE(!wbytes.empty());
+
+    TempVault tv("webpadvance");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("c", wbytes, "anim.webp") == vault::VaultResult::Ok);
+
+    const vault::IndexNode* node = first_animated_image(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    ui::AnimPlayback p(v, *node);
+    REQUIRE(p.valid());
+
+    const size_t before = p.frames_shown();
+    p.update(0.25);                     // 3 frames @ 100 ms: advances two
+    CHECK(p.frames_shown() > before);
+
+    // Past the end of a 3-frame animation it must loop, not stall: the file's
+    // loop count is deliberately ignored (Phase 57 decision).
+    for (int i = 0; i < 10; ++i) {
+        p.update(0.1);
+    }
+    CHECK(p.frames_shown() > 4);
+    CHECK(p.animating());
+}
+
 TEST(anim_playback_is_invalid_for_a_static_webp)
 {
     const auto wbytes = fixtures::load_webp();

@@ -35,6 +35,16 @@ enum class ImageFormat : uint8_t {
     Unknown = 0xFF,
 };
 
+// Formats whose files can carry an animation: GIF (Phase 47) and WebP
+// (Phase 57). The single source of truth for the import flag, the lazy repair,
+// the sniff gate, the "A" badge and the hover gate — so they cannot drift apart.
+// Anything else stores animated = false and never badges, whatever its flag
+// happens to say.
+[[nodiscard]] constexpr bool format_can_animate(ImageFormat f) noexcept
+{
+    return f == ImageFormat::GIF || f == ImageFormat::WebP;
+}
+
 // Metadata + chunk locations for one stored image. A thumb_length of 0 means no
 // thumbnail is stored yet (Phase 2 stores images without thumbnails; Phase 3
 // wires thumbnail generation into Vault::add_image).

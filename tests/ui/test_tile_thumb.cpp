@@ -170,3 +170,53 @@ TEST(tile_can_hover_animate_false_for_video)
     vault::IndexNode n = vault::IndexNode::video("clip.mp4");
     CHECK(!ui::tile_can_hover_animate(n));
 }
+
+// --- Animated WebP (Phase 57) -------------------------------------------------
+// The badge and the hover gate defer to vault::format_can_animate, so WebP is
+// treated exactly like GIF and a format that cannot animate never badges.
+
+TEST(tile_badge_shown_for_an_animated_webp)
+{
+    vault::IndexNode n = vault::IndexNode::image("loop.webp");
+    n.meta.format   = vault::ImageFormat::WebP;
+    n.meta.animated = true;
+    CHECK(ui::tile_shows_animated_badge(n));
+}
+
+TEST(tile_badge_hidden_for_a_still_webp)
+{
+    vault::IndexNode n = vault::IndexNode::image("still.webp");
+    n.meta.format   = vault::ImageFormat::WebP;
+    n.meta.animated = false;
+    CHECK(!ui::tile_shows_animated_badge(n));
+}
+
+TEST(tile_badge_hidden_for_a_flagged_non_animatable_format)
+{
+    // Defence in depth: a stale or hostile flag on a format that cannot animate
+    // must not produce a badge the viewer can never honour.
+    vault::IndexNode n = vault::IndexNode::image("photo.heic");
+    n.meta.format   = vault::ImageFormat::HEIC;
+    n.meta.animated = true;
+    CHECK(!ui::tile_shows_animated_badge(n));
+}
+
+TEST(tile_can_hover_animate_true_for_animated_webp_within_budget)
+{
+    vault::IndexNode n = vault::IndexNode::image("loop.webp");
+    n.meta.format   = vault::ImageFormat::WebP;
+    n.meta.animated = true;
+    n.meta.width    = 320;
+    n.meta.height   = 240;
+    CHECK(ui::tile_can_hover_animate(n));
+}
+
+TEST(tile_can_hover_animate_false_for_animated_webp_exceeding_budget)
+{
+    vault::IndexNode n = vault::IndexNode::image("big.webp");
+    n.meta.format   = vault::ImageFormat::WebP;
+    n.meta.animated = true;
+    n.meta.width    = 4000;
+    n.meta.height   = 240;
+    CHECK(!ui::tile_can_hover_animate(n));
+}

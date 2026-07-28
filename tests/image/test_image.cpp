@@ -241,6 +241,43 @@ TEST(decode_malformed_webp_returns_nullopt)
 // on it — before Phase 57 that made every animated WebP unimportable. The
 // decoder now falls back to the animation decoder's frame 0.
 
+TEST(vault_add_animated_webp_sets_the_animated_flag)
+{
+    const auto buf = fixtures::load_anim_webp();
+    REQUIRE(!buf.empty());
+
+    TempVault tv("animwebp");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), {reinterpret_cast<const uint8_t*>("pw"), 2},
+                                 {}, kFastKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", buf, "anim.webp") == vault::VaultResult::Ok);
+
+    const auto kids = v.list("");
+    REQUIRE(kids.size() == 1);
+    const auto& meta = kids[0]->meta;
+    CHECK_EQ(meta.format, vault::ImageFormat::WebP);
+    CHECK(meta.animated);
+    CHECK(meta.thumb_length > 0);   // the first frame produced a thumbnail
+    CHECK_EQ(meta.width,  8u);
+    CHECK_EQ(meta.height, 8u);
+}
+
+TEST(vault_add_static_webp_leaves_the_animated_flag_clear)
+{
+    const auto buf = fixtures::load_webp();
+    REQUIRE(!buf.empty());
+
+    TempVault tv("stillwebp");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), {reinterpret_cast<const uint8_t*>("pw"), 2},
+                                 {}, kFastKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", buf, "still.webp") == vault::VaultResult::Ok);
+
+    const auto kids = v.list("");
+    REQUIRE(kids.size() == 1);
+    CHECK(!kids[0]->meta.animated);
+}
+
 TEST(decode_animated_webp_returns_first_frame)
 {
     const auto buf = fixtures::load_anim_webp();
