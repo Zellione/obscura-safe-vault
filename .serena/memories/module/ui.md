@@ -145,8 +145,10 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 
 ## Image / video viewer
 - `image_viewer.*`, `widgets.*` — viewer has Fit + FillScroll + Slideshow modes, bottom/left
-  strip toggle (keys F/T, P starts slideshow). `widgets` has button_state + elide_middle +
-  fit_text (elide_middle bound to a FontAtlas). Hosts a fit-only VideoPlayback when the current
+  strip toggle (keys F/T, P starts slideshow). `widgets` has button_state + elide_middle /
+  elide_tail (pure, templated on the measure callable) + their font-bound bindings fit_text /
+  fit_text_tail — middle by default, tail where the string's start carries the meaning
+  (`[key]  description` help lines). Hosts a fit-only VideoPlayback when the current
   item `is_video()`: Space play/pause, J/L ±5s, `,`/`.` frame-step, drag seek bar; M mute,
   volume ∓5% (seek bar seeks video+audio in-sync). Volume via `ui::volume_dir` — `-`/`+` glyph
   keys (HUD `[-/+] Vol`) + `[`/`]` produced char resolved through `SDL_GetModState` (German
