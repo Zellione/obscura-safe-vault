@@ -1,11 +1,13 @@
 #include "test_framework.h"
 
 // AnimPlayback wires the decoder + frame-advance model + RGBA texture together.
-// The pure frame-advance logic is covered by test_gif_model; this drives the
-// whole glue against a real encrypted fixture, and asserts the security invariant
-// that playback writes nothing to disk. Gated on the vendored FFmpeg build
-// (valid() is always false without it).
-#ifdef OSV_VENDORED_AV
+// The pure frame-advance logic is covered by test_anim_model; this drives the
+// whole glue against a real encrypted fixture, and asserts the security
+// invariant that playback writes nothing to disk.
+//
+// The helpers and the WebP cases are deliberately OUTSIDE the OSV_VENDORED_AV
+// gate: libwebp is a hard dependency, so animated WebP must play in a build
+// without vendored FFmpeg. Only the GIF cases are gated.
 
 #include <chrono>
 #include <filesystem>
@@ -17,6 +19,7 @@
 #include <SDL3/SDL.h>
 
 #include "crypto/kdf.h"
+#include "image/fixtures.h"
 #include "ui/anim_playback.h"
 #include "vault/index.h"
 #include "vault/vault.h"
@@ -65,6 +68,9 @@ const vault::IndexNode* first_animated_image(const std::vector<const vault::Inde
     return nullptr;
 }
 }  // namespace
+
+// --- GIF backend (needs vendored FFmpeg) --------------------------------------
+#ifdef OSV_VENDORED_AV
 
 TEST(anim_playback_gif_opens_an_animated_gif)
 {
@@ -177,3 +183,45 @@ TEST(anim_playback_gif_loops_past_the_end)
 }
 
 #endif  // OSV_VENDORED_AV
+
+// --- WebP backend (works in every build) --------------------------------------
+
+TEST(anim_playback_is_invalid_for_a_static_webp)
+{
+    const auto wbytes = fixtures::load_webp();
+    REQUIRE(!wbytes.empty());
+
+    TempVault tv("webpstatic");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("c", wbytes, "still.webp") == vault::VaultResult::Ok);
+
+    const auto kids = v.list("c");
+    REQUIRE(kids.size() == 1);
+
+    ui::AnimPlayback p(v, *kids[0]);
+    CHECK(!p.valid());                  // a single frame is not an animation
+    CHECK(!p.animating());
+    CHECK_EQ(p.frame_count(), static_cast<size_t>(0));
+}
+
+TEST(anim_playback_is_invalid_for_a_non_animatable_format)
+{
+    // A JPEG can never animate: the playback component must decline to build
+    // rather than construct a decoder for it.
+    const auto jbytes = fixtures::solid_jpeg(8, 8, 0x33, 0x66, 0xcc);
+    REQUIRE(!jbytes.empty());
+
+    TempVault tv("jpeg");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("c", jbytes, "photo.jpg") == vault::VaultResult::Ok);
+
+    const auto kids = v.list("c");
+    REQUIRE(kids.size() == 1);
+
+    ui::AnimPlayback p(v, *kids[0]);
+    CHECK(!p.valid());
+}

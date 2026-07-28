@@ -4,15 +4,20 @@
 
 #include <memory>
 
-// Self-contained animated GIF playback component (Phase 47). Owns the decoder,
-// the RGBA texture, and the frame-advance clock; hosted by ImageViewer when
-// the current leaf item is an animated GIF. All frame-advance logic lives in
-// the pure ui::anim_frames_to_advance; this is the SDL + FFmpeg plumbing on top.
+// Self-contained animation playback component (Phase 47 for GIF, Phase 57 for
+// WebP). Owns the decoder, the RGBA texture, and the frame-advance clock; hosted
+// by ImageViewer and GalleryGrid when the item is animated. All frame-advance
+// logic lives in the pure ui::anim_frames_to_advance; this is the SDL plumbing
+// on top.
 //
-// pImpl: the FFmpeg-bearing implementation is gated by OSV_VENDORED_AV *inside*
-// gif_playback.cpp, so this header (and therefore ImageViewer) compiles
-// everywhere. On a build without vendored FFmpeg, valid() returns false and the
-// host falls back to showing the static first frame.
+// The backend is chosen from the node's format: WebP decodes through libwebp
+// (always available), GIF through FFmpeg (OSV_VENDORED_AV only). pImpl keeps
+// both out of this header, so it compiles everywhere. When no backend exists for
+// a format in this build, valid() returns false and the host falls back to
+// showing the static first frame.
+//
+// Playback loops forever: a file's declared loop count is deliberately ignored,
+// so GIF and WebP behave identically.
 //
 // Lifetime: borrows the unlocked vault's file handle + master key through the
 // decrypted image bytes. The host destroys this before any vault lock / idle /
@@ -30,8 +35,9 @@ public:
     AnimPlayback(const AnimPlayback&)            = delete;
     AnimPlayback& operator=(const AnimPlayback&) = delete;
 
-    // True when the decoder opened a decodable animated GIF. False on an
-    // undecodable file, a static GIF, or a non-FFmpeg build.
+    // True when a backend opened a decodable animation. False on an
+    // undecodable file, a single-frame image, or a format with no backend in
+    // this build.
     [[nodiscard]] bool valid() const noexcept;
 
     // True while playing — the host reports animating() so the event loop keeps
@@ -45,7 +51,7 @@ public:
     [[nodiscard]] size_t frames_shown() const noexcept;
 
     // Number of frames decoded so far. Used to enforce the hover budget:
-    // the frame count is unknown until the GIF has been partially or fully
+    // the frame count is unknown until the animation has been partially or fully
     // decoded. This accessor allows GalleryGrid to monitor the count during
     // playback and stop if it exceeds kAnimHoverMaxFrames (300).
     [[nodiscard]] size_t frame_count() const noexcept;

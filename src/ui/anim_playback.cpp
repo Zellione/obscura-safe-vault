@@ -2,8 +2,6 @@
 
 #include <SDL3/SDL.h>
 
-#ifdef OSV_VENDORED_AV
-
 #include <cstring>
 #include <memory>
 #include <optional>
@@ -11,20 +9,47 @@
 
 #include "crypto/secure_mem.h"
 #include "gfx/renderer.h"
-#include "media/gif_decoder.h"
+#include "media/anim_decoder.h"
+#include "media/webp_anim_decoder.h"
 #include "ui/anim_model.h"
 #include "vault/index.h"
 #include "vault/vault.h"
 
+#ifdef OSV_VENDORED_AV
+#include "media/gif_decoder.h"
+#endif
+
 namespace ui {
 
-// Full implementation: a SecureBytes holds the decrypted GIF; a GifDecoder
-// reads frames from it one at a time; decoded RGBA frames upload to a
-// streaming texture. The pure anim_frames_to_advance owns the playback clock.
-// No bytes touch disk (invariant #1).
+namespace {
+
+// Picks the decoder for a node's format. GIF needs vendored FFmpeg; WebP does
+// not, so an animated WebP plays in every build. Any other format returns
+// nullptr, which surfaces as valid() == false and leaves the host showing the
+// static first frame.
+std::unique_ptr<media::AnimDecoder> make_decoder(vault::ImageFormat format)
+{
+    switch (format) {
+    case vault::ImageFormat::WebP:
+        return std::make_unique<media::WebpAnimDecoder>();
+#ifdef OSV_VENDORED_AV
+    case vault::ImageFormat::GIF:
+        return std::make_unique<media::GifDecoder>();
+#endif
+    default:
+        return nullptr;
+    }
+}
+
+} // namespace
+
+// A SecureBytes holds the decrypted image; an AnimDecoder backend reads frames
+// from it one at a time; decoded RGBA frames upload to a streaming texture. The
+// pure anim_frames_to_advance owns the playback clock. No bytes touch disk
+// (invariant #1).
 struct AnimPlayback::Impl {
-    crypto::SecureBytes     bytes_;             // decrypted GIF data (borrowed by decoder_)
-    media::GifDecoder       dec_;               // reads frames from bytes_
+    crypto::SecureBytes                 bytes_;   // decrypted image (borrowed by dec_)
+    std::unique_ptr<media::AnimDecoder> dec_;     // reads frames from bytes_
     media::AnimFrame         current_;           // frame on screen
     SDL_Texture*            tex_ = nullptr;     // RGBA streaming texture (created lazily)
     double                  acc_ = 0.0;         // frame-advance accumulator
@@ -35,35 +60,41 @@ struct AnimPlayback::Impl {
 
     Impl(const vault::Vault& vault, const vault::IndexNode& node)
     {
-        // Read the decrypted GIF into mlock'd SecureBytes
+        // No backend for this format in this build (a GIF without vendored
+        // FFmpeg, or a format that cannot animate at all).
+        dec_ = make_decoder(node.meta.format);
+        if (!dec_) {
+            return;
+        }
+
+        // Read the decrypted image into mlock'd SecureBytes
         if (vault.read_image(node, bytes_) != vault::VaultResult::Ok) {
             std::println(stderr, "[AnimPlayback] read_image failed");
             return;
         }
 
         // Open the decoder, which borrows bytes_ (must stay alive)
-        if (!dec_.open(bytes_.as_span())) {
+        if (!dec_->open(bytes_.as_span())) {
             std::println(stderr, "[AnimPlayback] decoder open failed");
             return;
         }
 
         // Decode the first frame
-        auto f = dec_.next_frame();
+        auto f = dec_->next_frame();
         if (!f) {
             std::println(stderr, "[AnimPlayback] failed to decode first frame");
             return;
         }
         current_ = std::move(*f);
 
-        // Check if there's a second frame to confirm it's animated (not static).
-        // If there is, rewind so the decoder is back at the start.
-        if (auto f2 = dec_.next_frame(); !f2) {
-            // Only one frame: static GIF, reject for animation playback
-            std::println(stderr, "[AnimPlayback] single-frame GIF, not animated");
+        // A second frame confirms it really animates. WebpAnimDecoder::open
+        // already rejects single-frame files, but GifDecoder does not, so the
+        // check stays here for both. Rewind so playback starts from the top.
+        if (auto f2 = dec_->next_frame(); !f2) {
+            std::println(stderr, "[AnimPlayback] single-frame image, not animated");
             return;
         }
-        // GIF has at least 2 frames: it's animated. Rewind to start.
-        dec_.rewind();
+        dec_->rewind();
         shown_ = 1;  // First frame is on display from construction
 
         valid_ = true;
@@ -83,7 +114,7 @@ struct AnimPlayback::Impl {
     [[nodiscard]] bool animating() const { return valid_ && !paused_; }
     [[nodiscard]] bool paused() const { return paused_; }
     [[nodiscard]] size_t frames_shown() const { return shown_; }
-    [[nodiscard]] size_t frame_count() const { return dec_.frames_decoded(); }
+    [[nodiscard]] size_t frame_count() const { return dec_ ? dec_->frames_decoded() : 0; }
 
     void toggle_pause() { paused_ = !paused_; }
 
@@ -95,11 +126,11 @@ struct AnimPlayback::Impl {
 
         const int steps = anim_frames_to_advance(acc_, dt, current_.delay_s, paused_);
         for (int i = 0; i < steps; ++i) {
-            auto f = dec_.next_frame();
+            auto f = dec_->next_frame();
             if (!f) {
                 // End of stream: rewind and loop
-                dec_.rewind();
-                f = dec_.next_frame();
+                dec_->rewind();
+                f = dec_->next_frame();
                 if (!f) {
                     // Undecodable on rewind: hold the last frame and pause
                     paused_ = true;
@@ -169,21 +200,6 @@ struct AnimPlayback::Impl {
         SDL_UnlockTexture(tex_);
     }
 };
-
-#else  // !OSV_VENDORED_AV — playback unavailable; host shows the static first frame.
-
-struct AnimPlayback::Impl {
-    Impl(const vault::Vault&, const vault::IndexNode&) {}
-    [[nodiscard]] bool valid() const { return false; }
-    [[nodiscard]] bool animating() const { return false; }
-    [[nodiscard]] bool paused() const { return false; }
-    [[nodiscard]] size_t frames_shown() const { return 0; }
-    void toggle_pause() {}
-    void update(double) {}
-    void render(gfx::Renderer&, const SDL_FRect&) {}
-};
-
-#endif  // OSV_VENDORED_AV
 
 // --- Public API -----
 
