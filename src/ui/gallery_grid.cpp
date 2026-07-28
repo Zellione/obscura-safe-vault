@@ -23,7 +23,7 @@
 #include "ui/detail_model.h"
 #include "ui/detail_panel.h"
 #include "ui/gallery_sort.h"
-#include "ui/gif_model.h"
+#include "ui/anim_model.h"
 #include "ui/grid_layout.h"
 #include "ui/input.h"
 #include "ui/progress_modal.h"
@@ -231,8 +231,8 @@ void GalleryGrid::on_exit()
     // Tear down hover animation (Phase 47 Task 10): the vault is about to be locked
     // or we're switching screens. A decoder outliving a vault lock holds a vault handle
     // and decrypted data past the point the user expects it gone.
-    hover_gif_.reset();
-    hover_gif_tile_ = -1;
+    hover_anim_.reset();
+    hover_anim_tile_ = -1;
     hover_gate_.reset();
 
     // Phase 50: release exclusive gate if transfer/combine dialogs held it at teardown.
@@ -267,8 +267,8 @@ void GalleryGrid::refresh()
     sel_.clear();   // selection indices are only valid against the current listing
 
     // Tear down hover animation (Phase 47 Task 10): the listing changed, so tile indices are stale.
-    hover_gif_.reset();
-    hover_gif_tile_ = -1;
+    hover_anim_.reset();
+    hover_anim_tile_ = -1;
     hover_gate_.reset();
 
     // Phase 51: cache direct child counts for sub-gallery tiles
@@ -1557,18 +1557,18 @@ void GalleryGrid::update(double dt)
     if (const int tile = hit_test(win_.mouse_x(), win_.mouse_y());
         hover_gate_.update(tile, dt)) {
         start_hover_animation(tile);
-    } else if (hover_gate_.active_tile() != hover_gif_tile_) {
+    } else if (hover_gate_.active_tile() != hover_anim_tile_) {
         // Cursor moved off the animated tile or to a different one
-        hover_gif_.reset();
-        hover_gif_tile_ = -1;
+        hover_anim_.reset();
+        hover_anim_tile_ = -1;
     }
-    if (hover_gif_) {
-        hover_gif_->update(dt);
-        // Enforce the frame count budget: if the GIF has decoded more than 300 frames,
+    if (hover_anim_) {
+        hover_anim_->update(dt);
+        // Enforce the frame count budget: if the animation has decoded more than 300 frames,
         // tear down the playback immediately to cap resource cost.
-        if (gif_hover_frame_count_exceeded(hover_gif_->frame_count())) {
-            hover_gif_.reset();
-            hover_gif_tile_ = -1;
+        if (anim_hover_frame_count_exceeded(hover_anim_->frame_count())) {
+            hover_anim_.reset();
+            hover_anim_tile_ = -1;
         }
     }
 
@@ -1793,7 +1793,7 @@ void draw_tile_badges(gfx::Renderer& r, gfx::FontAtlas& font, const SDL_FRect& c
         r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
     }
 
-    // Animated badge: a small square for animated GIFs, positioned to the left
+    // Animated badge: a small square for animated images, positioned to the left
     // of the favorite badge (or in its place if no favorite).
     if (tile_shows_animated_badge(*n)) {
         const float x_shift = n->favorite ? -(18.0f + 6.0f) : 0.0f;
@@ -1828,8 +1828,8 @@ void GalleryGrid::render_grid_tile(gfx::Renderer& r, int i, float W)
     const SDL_FRect thumb_rect{cellr.x + 6, cellr.y + 6,
                                cell - 12, label_y - cellr.y - 12.0f};
 
-    if (hover_gif_ && hover_gif_->valid() && i == hover_gif_tile_) {
-        hover_gif_->render(r, thumb_rect);
+    if (hover_anim_ && hover_anim_->valid() && i == hover_anim_tile_) {
+        hover_anim_->render(r, thumb_rect);
     } else {
         draw_tile_thumb(r, *n, thumb_rect);
     }
@@ -1970,8 +1970,8 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float bottom)
 
         const SDL_FRect thumb{row.x + 5, row.y + 5, row.h - 10, row.h - 10};
         // Render hover animation if active on this tile, otherwise render the static thumbnail.
-        if (hover_gif_ && hover_gif_->valid() && i == hover_gif_tile_) {
-            hover_gif_->render(r, thumb);
+        if (hover_anim_ && hover_anim_->valid() && i == hover_anim_tile_) {
+            hover_anim_->render(r, thumb);
         } else {
             draw_tile_thumb(r, *n, thumb);
         }
@@ -2028,39 +2028,39 @@ void GalleryGrid::start_hover_animation(int tile)
 {
     // Resolve the node at this tile index.
     if (tile < 0 || tile >= static_cast<int>(children_.size())) {
-        hover_gif_.reset();
-        hover_gif_tile_ = -1;
+        hover_anim_.reset();
+        hover_anim_tile_ = -1;
         return;
     }
 
     const vault::IndexNode* node = children_[tile];
     if (!node) {
-        hover_gif_.reset();
-        hover_gif_tile_ = -1;
+        hover_anim_.reset();
+        hover_anim_tile_ = -1;
         return;
     }
 
     // Check if this tile can be animated on hover: must have the animated badge
-    // and dimensions within the GIF hover budget.
+    // and dimensions within the hover budget.
     if (!tile_can_hover_animate(*node)) {
-        hover_gif_.reset();
-        hover_gif_tile_ = -1;
+        hover_anim_.reset();
+        hover_anim_tile_ = -1;
         return;
     }
 
     // Construct the playback decoder.
-    auto playback = std::make_unique<GifPlayback>(vault_, *node);
+    auto playback = std::make_unique<AnimPlayback>(vault_, *node);
 
     // Verify it's valid.
     if (!playback->valid()) {
-        hover_gif_.reset();
-        hover_gif_tile_ = -1;
+        hover_anim_.reset();
+        hover_anim_tile_ = -1;
         return;
     }
 
     // All checks passed; keep the playback alive.
-    hover_gif_ = std::move(playback);
-    hover_gif_tile_ = tile;
+    hover_anim_ = std::move(playback);
+    hover_anim_tile_ = tile;
 }
 
 } // namespace ui

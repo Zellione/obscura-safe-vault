@@ -7,7 +7,7 @@
 // Self-contained animated GIF playback component (Phase 47). Owns the decoder,
 // the RGBA texture, and the frame-advance clock; hosted by ImageViewer when
 // the current leaf item is an animated GIF. All frame-advance logic lives in
-// the pure ui::gif_frames_to_advance; this is the SDL + FFmpeg plumbing on top.
+// the pure ui::anim_frames_to_advance; this is the SDL + FFmpeg plumbing on top.
 //
 // pImpl: the FFmpeg-bearing implementation is gated by OSV_VENDORED_AV *inside*
 // gif_playback.cpp, so this header (and therefore ImageViewer) compiles
@@ -22,13 +22,13 @@ namespace vault { class Vault; struct IndexNode; }
 
 namespace ui {
 
-class GifPlayback {
+class AnimPlayback {
 public:
-    GifPlayback(const vault::Vault& vault, const vault::IndexNode& node);
-    ~GifPlayback();
+    AnimPlayback(const vault::Vault& vault, const vault::IndexNode& node);
+    ~AnimPlayback();
 
-    GifPlayback(const GifPlayback&)            = delete;
-    GifPlayback& operator=(const GifPlayback&) = delete;
+    AnimPlayback(const AnimPlayback&)            = delete;
+    AnimPlayback& operator=(const AnimPlayback&) = delete;
 
     // True when the decoder opened a decodable animated GIF. False on an
     // undecodable file, a static GIF, or a non-FFmpeg build.
@@ -47,7 +47,7 @@ public:
     // Number of frames decoded so far. Used to enforce the hover budget:
     // the frame count is unknown until the GIF has been partially or fully
     // decoded. This accessor allows GalleryGrid to monitor the count during
-    // playback and stop if it exceeds kGifHoverMaxFrames (300).
+    // playback and stop if it exceeds kAnimHoverMaxFrames (300).
     [[nodiscard]] size_t frame_count() const noexcept;
 
     // Space toggles pause/play.

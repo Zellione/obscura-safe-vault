@@ -1,6 +1,6 @@
 #include "test_framework.h"
 
-// GifPlayback wires the decoder + frame-advance model + RGBA texture together.
+// AnimPlayback wires the decoder + frame-advance model + RGBA texture together.
 // The pure frame-advance logic is covered by test_gif_model; this drives the
 // whole glue against a real encrypted fixture, and asserts the security invariant
 // that playback writes nothing to disk. Gated on the vendored FFmpeg build
@@ -17,7 +17,7 @@
 #include <SDL3/SDL.h>
 
 #include "crypto/kdf.h"
-#include "ui/gif_playback.h"
+#include "ui/anim_playback.h"
 #include "vault/index.h"
 #include "vault/vault.h"
 
@@ -66,7 +66,7 @@ const vault::IndexNode* first_animated_image(const std::vector<const vault::Inde
 }
 }  // namespace
 
-TEST(gif_playback_opens_an_animated_gif)
+TEST(anim_playback_gif_opens_an_animated_gif)
 {
     auto gbytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_anim.gif");
     REQUIRE(!gbytes.empty());
@@ -80,13 +80,13 @@ TEST(gif_playback_opens_an_animated_gif)
     const vault::IndexNode* node = first_animated_image(v.list("c"));
     REQUIRE(node != nullptr);
 
-    ui::GifPlayback p(v, *node);
+    ui::AnimPlayback p(v, *node);
     CHECK(p.valid());
     CHECK(p.animating());
     CHECK(!p.paused());
 }
 
-TEST(gif_playback_space_toggles_pause)
+TEST(anim_playback_gif_space_toggles_pause)
 {
     auto gbytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_anim.gif");
     REQUIRE(!gbytes.empty());
@@ -100,7 +100,7 @@ TEST(gif_playback_space_toggles_pause)
     const vault::IndexNode* node = first_animated_image(v.list("c"));
     REQUIRE(node != nullptr);
 
-    ui::GifPlayback p(v, *node);
+    ui::AnimPlayback p(v, *node);
     REQUIRE(p.valid());
     p.toggle_pause();
     CHECK(p.paused());
@@ -110,7 +110,7 @@ TEST(gif_playback_space_toggles_pause)
     CHECK(p.animating());
 }
 
-TEST(gif_playback_advances_frames_over_time)
+TEST(anim_playback_gif_advances_frames_over_time)
 {
     auto gbytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_anim.gif");
     REQUIRE(!gbytes.empty());
@@ -124,14 +124,14 @@ TEST(gif_playback_advances_frames_over_time)
     const vault::IndexNode* node = first_animated_image(v.list("c"));
     REQUIRE(node != nullptr);
 
-    ui::GifPlayback p(v, *node);
+    ui::AnimPlayback p(v, *node);
     REQUIRE(p.valid());
     const size_t start = p.frames_shown();
     for (int i = 0; i < 60; ++i) p.update(0.050);   // 3 seconds of playback
     CHECK(p.frames_shown() > start);
 }
 
-TEST(gif_playback_paused_does_not_advance)
+TEST(anim_playback_gif_paused_does_not_advance)
 {
     auto gbytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_anim.gif");
     REQUIRE(!gbytes.empty());
@@ -145,7 +145,7 @@ TEST(gif_playback_paused_does_not_advance)
     const vault::IndexNode* node = first_animated_image(v.list("c"));
     REQUIRE(node != nullptr);
 
-    ui::GifPlayback p(v, *node);
+    ui::AnimPlayback p(v, *node);
     REQUIRE(p.valid());
     for (int i = 0; i < 10; ++i) p.update(0.050);
     p.toggle_pause();
@@ -154,7 +154,7 @@ TEST(gif_playback_paused_does_not_advance)
     CHECK_EQ(p.frames_shown(), held);
 }
 
-TEST(gif_playback_loops_past_the_end)
+TEST(anim_playback_gif_loops_past_the_end)
 {
     auto gbytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_anim.gif");
     REQUIRE(!gbytes.empty());
@@ -168,7 +168,7 @@ TEST(gif_playback_loops_past_the_end)
     const vault::IndexNode* node = first_animated_image(v.list("c"));
     REQUIRE(node != nullptr);
 
-    ui::GifPlayback p(v, *node);
+    ui::AnimPlayback p(v, *node);
     REQUIRE(p.valid());
     // tiny_anim.gif has 4 frames at 0.25s per frame = 1 second
     for (int i = 0; i < 200; ++i) p.update(0.050);   // 10 seconds, ~10 loops

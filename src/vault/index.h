@@ -251,7 +251,7 @@ struct VaultSettings {
 // block after the tree root (Phase 18); pre-v5 blobs read with an empty list.
 // v6: per-gallery sort_key (Phase 37); pre-v6 blobs read every node as Manual.
 // v7: per-image `animated` flag (Phase 47); pre-v7 blobs read every image as
-// not animated, and are healed lazily on first view (see ui/gif_repair.*).
+// not animated, and are healed lazily on first view (see ui/anim_repair.*).
 // v8: vault-global settings block after the saved-searches block, and sort_key
 // byte 0 re-read as `Default` with a new `Insertion = 7` (Phase 49); pre-v8
 // blobs read with the seeded default settings and every gallery at `Default`.

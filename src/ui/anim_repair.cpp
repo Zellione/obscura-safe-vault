@@ -1,4 +1,4 @@
-#include "ui/gif_repair.h"
+#include "ui/anim_repair.h"
 
 #include "image/anim_info.h"
 #include "vault/index.h"
@@ -6,7 +6,7 @@
 
 namespace ui {
 
-bool maybe_repair_gif_animated(vault::Vault& v, std::string_view gallery_path,
+bool maybe_repair_animated(vault::Vault& v, std::string_view gallery_path,
                                const vault::IndexNode& node,
                                std::span<const uint8_t> data)
 {
@@ -30,7 +30,7 @@ bool maybe_repair_gif_animated(vault::Vault& v, std::string_view gallery_path,
     return v.repair_image_animated(node_path, actual);
 }
 
-bool GifSniffGate::should_sniff(const vault::IndexNode& node)
+bool AnimSniffGate::should_sniff(const vault::IndexNode& node)
 {
     if (!node.is_image() || node.meta.format != vault::ImageFormat::GIF ||
         node.meta.animated) {

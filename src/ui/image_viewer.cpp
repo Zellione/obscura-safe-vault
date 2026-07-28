@@ -12,8 +12,8 @@
 #include "gfx/window.h"
 #include "ui/album_rebind.h"
 #include "ui/export.h"
-#include "ui/gif_model.h"
-#include "ui/gif_repair.h"
+#include "ui/anim_model.h"
+#include "ui/anim_repair.h"
 #include "ui/input.h"
 #include "ui/meta_format.h"
 #include "ui/strip_layout.h"
@@ -36,7 +36,7 @@ bool item_is_video(const std::vector<const vault::IndexNode*>& imgs, int idx)
     return idx >= 0 && idx < static_cast<int>(imgs.size()) && imgs[idx]->is_video();
 }
 
-bool item_is_animated_gif(const std::vector<const vault::IndexNode*>& imgs, int idx)
+bool item_is_animated(const std::vector<const vault::IndexNode*>& imgs, int idx)
 {
     if (idx < 0 || idx >= static_cast<int>(imgs.size())) return false;
     const vault::IndexNode* node = imgs[idx];
@@ -86,9 +86,9 @@ void ImageViewer::on_enter()
 void ImageViewer::on_exit()
 {
     video_.reset();                 // stop decode + wipe the VideoSource cache first
-    gif_.reset();                   // stop GIF playback
-    strip_hover_gif_.reset();       // stop strip hover animation (Phase 47 Task 10)
-    strip_hover_gif_index_ = -1;
+    anim_.reset();                   // stop animation playback
+    strip_hover_anim_.reset();       // stop strip hover animation (Phase 47 Task 10)
+    strip_hover_anim_index_ = -1;
     strip_hover_gate_.reset();
     full_cache_.evict_except({});   // destroy all cached textures
 }
@@ -100,7 +100,7 @@ void ImageViewer::on_vault_changed()
     // Phase 56: re-listing must not disturb what the user is looking at. The
     // current item is re-found by PATH, and when it is still there we assign
     // index_ directly instead of calling show_image_at() — that call refits
-    // (fit_.fitted = false), re-runs scroll_to_image() and rebuilds video_/gif_,
+    // (fit_.fitted = false), re-runs scroll_to_image() and rebuilds video_/anim_,
     // which is exactly the zoom/scroll/playback reset this fixes. Keeping the
     // decoder alive is safe: VideoSource copies the node's chunk table at open
     // and never retains the IndexNode.
@@ -181,39 +181,40 @@ SDL_FRect ImageViewer::strip_rect() const
 
 // --- Fit-mode view state ---------------------------------------------------
 
-void ImageViewer::sync_gif_for_current_index()
+void ImageViewer::sync_anim_for_current_index()
 {
-    // Rebuild gif_ when index_ has moved away from gif_index_, or tear it down
-    // when the current item is no longer an animated GIF. Never tear down and
+    // Rebuild anim_ when index_ has moved away from anim_index_, or tear it down
+    // when the current item is no longer an animated image. Never tear down and
     // rebuild if index_ hasn't changed (that would restart the animation every
     // frame).
-    if (gif_index_ == index_) {
-        return;   // GIF is still valid for the current index
+    if (anim_index_ == index_) {
+        return;   // the animation is still valid for the current index
     }
 
-    // Index has changed or gif_ was never built — rebuild if the current item
-    // is an animated GIF, otherwise tear down.
-    gif_.reset();
-    gif_index_ = -1;
+    // Index has changed or anim_ was never built — rebuild if the current item
+    // is an animated image, otherwise tear down.
+    anim_.reset();
+    anim_index_ = -1;
 
     if (index_ >= 0 && index_ < static_cast<int>(album_.images.size())) {
         const vault::IndexNode* node = album_.images[index_];
-        // Repair the animated flag for legacy GIFs stored before Phase 47. The
-        // sniff costs a full read + decrypt, so gif_sniff_gate_ runs it only for
+        // Repair the animated flag for images stored before their format's
+        // animation support landed (GIF: Phase 47, WebP: Phase 57). The
+        // sniff costs a full read + decrypt, so anim_sniff_gate_ runs it only for
         // unset flags and only once per chunk — not on every navigation.
-        if (node != nullptr && gif_sniff_gate_.should_sniff(*node)) {
+        if (node != nullptr && anim_sniff_gate_.should_sniff(*node)) {
             crypto::SecureBytes bytes;
             if (vault_.read_image(*node, bytes) == vault::VaultResult::Ok) {
                 // The node pointer stays valid: repair only touches in-memory
                 // metadata; the construct below sees the post-repair flag.
-                (void)maybe_repair_gif_animated(vault_, album_.gallery_path, *node, bytes.as_span());
+                (void)maybe_repair_animated(vault_, album_.gallery_path, *node, bytes.as_span());
             }
         }
     }
 
-    if (item_is_animated_gif(album_.images, index_)) {
-        gif_ = std::make_unique<GifPlayback>(vault_, *album_.images[index_]);
-        gif_index_ = index_;
+    if (item_is_animated(album_.images, index_)) {
+        anim_ = std::make_unique<AnimPlayback>(vault_, *album_.images[index_]);
+        anim_index_ = index_;
     }
 }
 
@@ -221,39 +222,39 @@ void ImageViewer::start_strip_hover_animation(int strip_thumb)
 {
     // Resolve the node at this thumbnail index.
     if (strip_thumb < 0 || strip_thumb >= static_cast<int>(album_.images.size())) {
-        strip_hover_gif_.reset();
-        strip_hover_gif_index_ = -1;
+        strip_hover_anim_.reset();
+        strip_hover_anim_index_ = -1;
         return;
     }
 
     const vault::IndexNode* node = album_.images[strip_thumb];
     if (!node) {
-        strip_hover_gif_.reset();
-        strip_hover_gif_index_ = -1;
+        strip_hover_anim_.reset();
+        strip_hover_anim_index_ = -1;
         return;
     }
 
     // Check if this tile can be animated on hover: must have the animated badge
-    // and dimensions within the GIF hover budget.
+    // and dimensions within the hover budget.
     if (!tile_can_hover_animate(*node)) {
-        strip_hover_gif_.reset();
-        strip_hover_gif_index_ = -1;
+        strip_hover_anim_.reset();
+        strip_hover_anim_index_ = -1;
         return;
     }
 
     // Construct the playback decoder.
-    auto playback = std::make_unique<GifPlayback>(vault_, *node);
+    auto playback = std::make_unique<AnimPlayback>(vault_, *node);
 
     // Verify it's valid.
     if (!playback->valid()) {
-        strip_hover_gif_.reset();
-        strip_hover_gif_index_ = -1;
+        strip_hover_anim_.reset();
+        strip_hover_anim_index_ = -1;
         return;
     }
 
     // All checks passed; keep the playback alive.
-    strip_hover_gif_ = std::move(playback);
-    strip_hover_gif_index_ = strip_thumb;
+    strip_hover_anim_ = std::move(playback);
+    strip_hover_anim_index_ = strip_thumb;
 }
 
 void ImageViewer::show_image_at(int idx)
@@ -270,9 +271,9 @@ void ImageViewer::show_image_at(int idx)
     if (mode_ == ViewMode::Fit && item_is_video(album_.images, index_)) {
         video_ = std::make_unique<VideoPlayback>(vault_, *album_.images[index_]);
     }
-    // Sync animated GIF playback for the current item; tears down the previous
+    // Sync animated image playback for the current item; tears down the previous
     // decoder (RAII) before any vault lock if the index has changed.
-    sync_gif_for_current_index();
+    sync_anim_for_current_index();
 }
 
 void ImageViewer::handle_key_video(SDL_Keycode key, SDL_Scancode sc)
@@ -320,12 +321,12 @@ bool ImageViewer::handle_shared_key(SDL_Keycode key)
     }
 }
 
-bool ImageViewer::handle_key_gif(SDL_Keycode key)
+bool ImageViewer::handle_key_anim(SDL_Keycode key)
 {
     // Space toggles pause; every other key falls through to normal image
-    // handling (navigation, fit/scroll, ...), so a GIF still navigates.
-    if (gif_viewer_consumes_key(key) && gif_ && gif_->valid()) {
-        gif_->toggle_pause();
+    // handling (navigation, fit/scroll, ...), so an animation still navigates.
+    if (anim_viewer_consumes_key(key) && anim_ && anim_->valid()) {
+        anim_->toggle_pause();
         return true;
     }
     return false;
@@ -470,9 +471,9 @@ void ImageViewer::handle_key(SDL_Keycode key, SDL_Scancode sc)
     // Keys shared by images and videos.
     if (handle_shared_key(key)) { return; }
     if (item_is_video(album_.images, index_)) { handle_key_video(key, sc); return; }
-    // A GIF only claims Space (pause); any other key falls through to the image
+    // An animation only claims Space (pause); any other key falls through to the image
     // keys below so arrows still navigate between items.
-    if (item_is_animated_gif(album_.images, index_) && handle_key_gif(key)) { return; }
+    if (item_is_animated(album_.images, index_) && handle_key_anim(key)) { return; }
     // Image-only keys.
     switch (key) {
         case SDLK_F:      // toggle fit <-> fill-width scroll
@@ -571,10 +572,10 @@ void ImageViewer::update(double dt)
     }
 
     if (video_) video_->update(dt);
-    if (gif_) gif_->update(dt);
-    sync_gif_for_current_index();  // reconcile gif_ when index_ changed via scroll
+    if (anim_) anim_->update(dt);
+    sync_anim_for_current_index();  // reconcile anim_ when index_ changed via scroll
 
-    // Update strip hover animation (Phase 47 Task 10): independent of the main gif_
+    // Update strip hover animation (Phase 47 Task 10): independent of the main anim_
     // playback (both may run at once). Only update when the strip is visible.
     // Note: hovered index calculation requires the strip layout to be known, which
     // is determined during render. For now, always update to handle hover state
@@ -584,18 +585,18 @@ void ImageViewer::update(double dt)
         strip_hover_gate_.update(strip_thumb, dt)) {
         // Dwell completed; start animation if possible
         start_strip_hover_animation(strip_thumb);
-    } else if (strip_hover_gate_.active_tile() != strip_hover_gif_index_) {
+    } else if (strip_hover_gate_.active_tile() != strip_hover_anim_index_) {
         // Cursor moved off the hovered thumbnail
-        strip_hover_gif_.reset();
-        strip_hover_gif_index_ = -1;
+        strip_hover_anim_.reset();
+        strip_hover_anim_index_ = -1;
     }
-    if (strip_hover_gif_) {
-        strip_hover_gif_->update(dt);
-        // Enforce the frame count budget: if the GIF has decoded more than 300 frames,
+    if (strip_hover_anim_) {
+        strip_hover_anim_->update(dt);
+        // Enforce the frame count budget: if the animation has decoded more than 300 frames,
         // tear down the playback immediately to cap resource cost.
-        if (gif_hover_frame_count_exceeded(strip_hover_gif_->frame_count())) {
-            strip_hover_gif_.reset();
-            strip_hover_gif_index_ = -1;
+        if (anim_hover_frame_count_exceeded(strip_hover_anim_->frame_count())) {
+            strip_hover_anim_.reset();
+            strip_hover_anim_index_ = -1;
         }
     }
 
@@ -694,15 +695,15 @@ std::vector<ui::HelpGroup> ImageViewer::help_groups() const
         return groups;
     }
     const bool is_video = !album_.images.empty() && item_is_video(album_.images, index_);
-    const bool is_animated_gif = !album_.images.empty() && item_is_animated_gif(album_.images, index_);
+    const bool is_animated = !album_.images.empty() && item_is_animated(album_.images, index_);
     if (is_video) {
         groups.push_back({"Video playback", {
             {"Space", "Play/Pause"}, {"J / L", "Seek -/+5s"}, {", / .", "Step one frame"},
             {"- / +", "Volume"}, {"M", "Mute"}, {"R", "Toggle loop"},
             {"Left/Right", "Prev/Next item"},
         }});
-    } else if (is_animated_gif) {
-        groups.push_back({"GIF playback", {
+    } else if (is_animated) {
+        groups.push_back({"Animation playback", {
             {"Space", "Play/Pause"},
             {"Left/Right", "Prev/Next item"},
         }});
@@ -756,8 +757,8 @@ void ImageViewer::render_fit(gfx::Renderer& r, const SDL_FRect& vp)
                         static_cast<int>(vp.w), static_cast<int>(vp.h)};
     SDL_SetRenderClipRect(r.sdl(), &clip);
     const SDL_FRect dest{dx, dy, sw, sh};
-    if (gif_index_ == index_ && gif_ != nullptr && gif_->valid()) {
-        gif_->render(r, dest);
+    if (anim_index_ == index_ && anim_ != nullptr && anim_->valid()) {
+        anim_->render(r, dest);
     } else {
         r.draw_image(ft->tex, dest);
     }
@@ -788,8 +789,8 @@ void ImageViewer::render_scroll(gfx::Renderer& r, const SDL_FRect& vp)
         const float top = vp.y + m.image_top(i) - scroll_y_;
         const float h   = scaled_height(*album_.images[i], vp.w);
         const SDL_FRect dest{vp.x, top, vp.w, h};
-        if (i == index_ && gif_index_ == index_ && gif_ != nullptr && gif_->valid()) {
-            gif_->render(r, dest);
+        if (i == index_ && anim_index_ == index_ && anim_ != nullptr && anim_->valid()) {
+            anim_->render(r, dest);
         } else if (FullTex* ft = full_cache_.acquire(*album_.images[i])) {
             r.draw_image(ft->tex, dest);
         } else {
@@ -827,9 +828,9 @@ void ImageViewer::render_strip(gfx::Renderer& r)
                                                       STRIP_GAP, scroll, vertical);
 
         // Render hover animation if active on this thumbnail.
-        if (strip_hover_gif_ && strip_hover_gif_->valid() &&
-            static_cast<int>(i) == strip_hover_gif_index_) {
-            strip_hover_gif_->render(r, thumb_rect);
+        if (strip_hover_anim_ && strip_hover_anim_->valid() &&
+            static_cast<int>(i) == strip_hover_anim_index_) {
+            strip_hover_anim_->render(r, thumb_rect);
         }
 
         // Draw animated badge.

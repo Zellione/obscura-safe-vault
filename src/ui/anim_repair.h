@@ -21,7 +21,7 @@ struct IndexNode;
 namespace ui {
 
 // Returns true iff a correction was persisted.
-bool maybe_repair_gif_animated(vault::Vault& v, std::string_view gallery_path,
+bool maybe_repair_animated(vault::Vault& v, std::string_view gallery_path,
                                const vault::IndexNode& node,
                                std::span<const uint8_t> data);
 
@@ -31,7 +31,7 @@ bool maybe_repair_gif_animated(vault::Vault& v, std::string_view gallery_path,
 // bytes, so a set flag is trustworthy), and each such chunk needs it at most
 // once per session — without this, every navigation onto a GIF re-read the
 // whole image just to re-confirm a flag that cannot have changed.
-class GifSniffGate {
+class AnimSniffGate {
 public:
     [[nodiscard]] bool should_sniff(const vault::IndexNode& node);
 

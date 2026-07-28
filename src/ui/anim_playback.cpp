@@ -1,4 +1,4 @@
-#include "ui/gif_playback.h"
+#include "ui/anim_playback.h"
 
 #include <SDL3/SDL.h>
 
@@ -12,7 +12,7 @@
 #include "crypto/secure_mem.h"
 #include "gfx/renderer.h"
 #include "media/gif_decoder.h"
-#include "ui/gif_model.h"
+#include "ui/anim_model.h"
 #include "vault/index.h"
 #include "vault/vault.h"
 
@@ -20,9 +20,9 @@ namespace ui {
 
 // Full implementation: a SecureBytes holds the decrypted GIF; a GifDecoder
 // reads frames from it one at a time; decoded RGBA frames upload to a
-// streaming texture. The pure gif_frames_to_advance owns the playback clock.
+// streaming texture. The pure anim_frames_to_advance owns the playback clock.
 // No bytes touch disk (invariant #1).
-struct GifPlayback::Impl {
+struct AnimPlayback::Impl {
     crypto::SecureBytes     bytes_;             // decrypted GIF data (borrowed by decoder_)
     media::GifDecoder       dec_;               // reads frames from bytes_
     media::AnimFrame         current_;           // frame on screen
@@ -37,20 +37,20 @@ struct GifPlayback::Impl {
     {
         // Read the decrypted GIF into mlock'd SecureBytes
         if (vault.read_image(node, bytes_) != vault::VaultResult::Ok) {
-            std::println(stderr, "[GifPlayback] read_image failed");
+            std::println(stderr, "[AnimPlayback] read_image failed");
             return;
         }
 
         // Open the decoder, which borrows bytes_ (must stay alive)
         if (!dec_.open(bytes_.as_span())) {
-            std::println(stderr, "[GifPlayback] decoder open failed");
+            std::println(stderr, "[AnimPlayback] decoder open failed");
             return;
         }
 
         // Decode the first frame
         auto f = dec_.next_frame();
         if (!f) {
-            std::println(stderr, "[GifPlayback] failed to decode first frame");
+            std::println(stderr, "[AnimPlayback] failed to decode first frame");
             return;
         }
         current_ = std::move(*f);
@@ -59,7 +59,7 @@ struct GifPlayback::Impl {
         // If there is, rewind so the decoder is back at the start.
         if (auto f2 = dec_.next_frame(); !f2) {
             // Only one frame: static GIF, reject for animation playback
-            std::println(stderr, "[GifPlayback] single-frame GIF, not animated");
+            std::println(stderr, "[AnimPlayback] single-frame GIF, not animated");
             return;
         }
         // GIF has at least 2 frames: it's animated. Rewind to start.
@@ -93,7 +93,7 @@ struct GifPlayback::Impl {
             return;
         }
 
-        const int steps = gif_frames_to_advance(acc_, dt, current_.delay_s, paused_);
+        const int steps = anim_frames_to_advance(acc_, dt, current_.delay_s, paused_);
         for (int i = 0; i < steps; ++i) {
             auto f = dec_.next_frame();
             if (!f) {
@@ -129,7 +129,7 @@ struct GifPlayback::Impl {
                                     SDL_TEXTUREACCESS_STREAMING,
                                     current_.width, current_.height);
             if (tex_ == nullptr) {
-                std::println(stderr, "[GifPlayback] texture creation failed: {}",
+                std::println(stderr, "[AnimPlayback] texture creation failed: {}",
                              SDL_GetError());
                 return;
             }
@@ -172,7 +172,7 @@ struct GifPlayback::Impl {
 
 #else  // !OSV_VENDORED_AV — playback unavailable; host shows the static first frame.
 
-struct GifPlayback::Impl {
+struct AnimPlayback::Impl {
     Impl(const vault::Vault&, const vault::IndexNode&) {}
     [[nodiscard]] bool valid() const { return false; }
     [[nodiscard]] bool animating() const { return false; }
@@ -187,21 +187,21 @@ struct GifPlayback::Impl {
 
 // --- Public API -----
 
-GifPlayback::GifPlayback(const vault::Vault& vault, const vault::IndexNode& node)
+AnimPlayback::AnimPlayback(const vault::Vault& vault, const vault::IndexNode& node)
     : impl_(std::make_unique<Impl>(vault, node))
 {
 }
 
-GifPlayback::~GifPlayback() = default;
+AnimPlayback::~AnimPlayback() = default;
 
-bool GifPlayback::valid() const noexcept { return impl_->valid(); }
-bool GifPlayback::animating() const noexcept { return impl_->animating(); }
-bool GifPlayback::paused() const noexcept { return impl_->paused(); }
-size_t GifPlayback::frames_shown() const noexcept { return impl_->frames_shown(); }
-size_t GifPlayback::frame_count() const noexcept { return impl_->frame_count(); }
-void GifPlayback::toggle_pause() noexcept { impl_->toggle_pause(); }
-void GifPlayback::update(double dt) { impl_->update(dt); }
-void GifPlayback::render(gfx::Renderer& r, const SDL_FRect& dest)
+bool AnimPlayback::valid() const noexcept { return impl_->valid(); }
+bool AnimPlayback::animating() const noexcept { return impl_->animating(); }
+bool AnimPlayback::paused() const noexcept { return impl_->paused(); }
+size_t AnimPlayback::frames_shown() const noexcept { return impl_->frames_shown(); }
+size_t AnimPlayback::frame_count() const noexcept { return impl_->frame_count(); }
+void AnimPlayback::toggle_pause() noexcept { impl_->toggle_pause(); }
+void AnimPlayback::update(double dt) { impl_->update(dt); }
+void AnimPlayback::render(gfx::Renderer& r, const SDL_FRect& dest)
 {
     impl_->render(r, dest);
 }

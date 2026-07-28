@@ -18,8 +18,8 @@
 #include "ui/file_op_job.h"
 #include "ui/gallery_session_state.h"
 #include "ui/gallery_view.h"
-#include "ui/gif_model.h"
-#include "ui/gif_playback.h"
+#include "ui/anim_model.h"
+#include "ui/anim_playback.h"
 #include "ui/nav_model.h"
 #include "ui/quick_switch.h"
 #include "ui/rename_dialog.h"
@@ -299,9 +299,9 @@ void toggle_select();          // toggle the current item in the export selectio
 
     // Hover animation (Phase 47 Task 10). At most one animation at a time across
     // the whole screen. The gate tracks dwell time; playback renders the animation.
-    GifHoverGate                 hover_gate_;
-    std::unique_ptr<GifPlayback> hover_gif_;
-    int                          hover_gif_tile_ = -1;
+    AnimHoverGate                 hover_gate_;
+    std::unique_ptr<AnimPlayback> hover_anim_;
+    int                          hover_anim_tile_ = -1;
 };
 
 // Free friends of GalleryGrid (see the in-class declarations): poll_file_job drains

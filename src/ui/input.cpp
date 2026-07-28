@@ -21,7 +21,7 @@ InputAction map_key(SDL_Keycode key, SDL_Keymod /*mods*/) noexcept
     }
 }
 
-bool gif_viewer_consumes_key(SDL_Keycode key) noexcept
+bool anim_viewer_consumes_key(SDL_Keycode key) noexcept
 {
     return key == SDLK_SPACE;
 }

@@ -36,12 +36,12 @@ TEST(input_unmapped_is_none)
 // GIF branch used to swallow all keys).
 TEST(gif_viewer_consumes_only_space)
 {
-    CHECK(ui::gif_viewer_consumes_key(SDLK_SPACE));
-    CHECK(!ui::gif_viewer_consumes_key(SDLK_LEFT));
-    CHECK(!ui::gif_viewer_consumes_key(SDLK_RIGHT));
-    CHECK(!ui::gif_viewer_consumes_key(SDLK_UP));
-    CHECK(!ui::gif_viewer_consumes_key(SDLK_DOWN));
-    CHECK(!ui::gif_viewer_consumes_key(SDLK_F));
-    CHECK(!ui::gif_viewer_consumes_key(SDLK_P));
-    CHECK(!ui::gif_viewer_consumes_key(SDLK_X));
+    CHECK(ui::anim_viewer_consumes_key(SDLK_SPACE));
+    CHECK(!ui::anim_viewer_consumes_key(SDLK_LEFT));
+    CHECK(!ui::anim_viewer_consumes_key(SDLK_RIGHT));
+    CHECK(!ui::anim_viewer_consumes_key(SDLK_UP));
+    CHECK(!ui::anim_viewer_consumes_key(SDLK_DOWN));
+    CHECK(!ui::anim_viewer_consumes_key(SDLK_F));
+    CHECK(!ui::anim_viewer_consumes_key(SDLK_P));
+    CHECK(!ui::anim_viewer_consumes_key(SDLK_X));
 }
