@@ -1,4 +1,4 @@
-## Phase 56 — UI layout, import status & navigation polish 🔜
+## Phase 56 — UI layout, import status & navigation polish ✅
 
 **Goal:** Fix five owner-reported UI defects plus one HiDPI defect found while
 tracing them. Popups stop cutting their bottom line, the Import Status page shows
