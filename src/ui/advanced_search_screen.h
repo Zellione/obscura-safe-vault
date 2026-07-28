@@ -111,6 +111,15 @@ private:
     friend void remove_selected_tag(AdvancedSearchScreen& s);      // erase selected tag, rerun
     friend void edit_selected_tag(AdvancedSearchScreen& s);        // pull selected tag into buffer
 
+    // Rendering helpers for include/exclude sections: extracted from render_builder to
+    // reduce cognitive complexity while staying under the method budget (cpp:S1448).
+    friend float render_include_section(gfx::Renderer& r, gfx::FontAtlas& font, float x,
+                                       float y, float colw, float row_h, float ink_dy,
+                                       float& drop_y, AdvancedSearchScreen& screen);
+    friend float render_exclude_section(gfx::Renderer& r, gfx::FontAtlas& font, float x,
+                                       float y, float colw, float row_h, float ink_dy,
+                                       AdvancedSearchScreen& screen);
+
     void cycle_focus(int dir);
     void cycle_scope(int dir);
     void move_suggestion(int dir);
