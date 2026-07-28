@@ -555,6 +555,7 @@ project "osv_tests"
         "src/ui/gif_repair.cpp",
         "src/ui/help_popup.cpp",
         "src/ui/help_layout.cpp",
+        "src/ui/text_metrics.cpp",
         "src/ui/settings_model.cpp",
         "src/ui/tile_thumb.cpp",
         "src/ui/video_repair.cpp",
