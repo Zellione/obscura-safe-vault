@@ -119,8 +119,35 @@ template <class Measure>
     return std::string(ell);
 }
 
+// Like elide_middle, but drops only the TAIL: the result is always a prefix of
+// `name` followed by "...". Use it where the start of the string carries the
+// meaning and the end is the expendable part — a help line reads
+// "[key]  description", so cutting its middle out mangles exactly the words a
+// reader is scanning for. Same contracts as elide_middle: unchanged if it fits,
+// "" if even the ellipsis won't.
+template <class Measure>
+[[nodiscard]] std::string elide_tail(std::string_view name, int max_w, Measure&& measure)
+{
+    if (measure(name) <= max_w) return std::string(name);
+
+    constexpr std::string_view ell = "...";
+    if (measure(ell) > max_w) return std::string();
+
+    for (auto keep = static_cast<int>(name.size()) - 1; keep >= 0; --keep) {
+        std::string cand;
+        cand.append(name.substr(0, static_cast<size_t>(keep)));
+        cand.append(ell);
+        if (measure(cand) <= max_w) return cand;
+    }
+    return std::string(ell);
+}
+
 // elide_middle bound to a real font: fit `s` into `max_w` px measured by `font`.
 [[nodiscard]] std::string fit_text(const gfx::FontAtlas& font, std::string_view s,
                                    float max_w);
+
+// elide_tail bound to a real font — the tail-dropping counterpart of fit_text.
+[[nodiscard]] std::string fit_text_tail(const gfx::FontAtlas& font, std::string_view s,
+                                        float max_w);
 
 } // namespace ui

@@ -112,6 +112,10 @@ void draw_help_column(gfx::Renderer& r, gfx::FontAtlas& font,
     // clip rect) — the horizontal twin of the bottom-edge clipping the pitch
     // rule fixed. The gutter keeps two columns' text visibly apart rather than
     // butting the elision right up against the neighbour.
+    //
+    // TAIL elision here, not the middle elision used elsewhere: a line reads
+    // "[key]  description", so the key and the first words are what a reader
+    // scans for. Cutting the middle out would mangle exactly those.
     constexpr float COL_GUTTER = 16.0f;
     const float text_w = std::max(0.0f, band.col_width - COL_GUTTER);
 
@@ -124,13 +128,13 @@ void draw_help_column(gfx::Renderer& r, gfx::FontAtlas& font,
             y += band.line_h;
         }
         if (y >= band.content_top - band.line_h && y <= band.content_bottom) {
-            r.draw_text(font, col_x, y, fit_text(font, grp.title, text_w), ACCENT);
+            r.draw_text(font, col_x, y, fit_text_tail(font, grp.title, text_w), ACCENT);
         }
         y += band.line_h;
         for (const auto& e : grp.entries) {
             if (y >= band.content_top - band.line_h && y <= band.content_bottom) {
                 const std::string line = "  [" + e.key + "]  " + e.description;
-                r.draw_text(font, col_x, y, fit_text(font, line, text_w), TEXT_DIM);
+                r.draw_text(font, col_x, y, fit_text_tail(font, line, text_w), TEXT_DIM);
             }
             y += band.line_h;
         }
