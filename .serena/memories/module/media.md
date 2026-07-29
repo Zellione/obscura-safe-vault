@@ -22,7 +22,11 @@ and `src/media/` (FFmpeg video/audio, whole subsystem gated `OSV_VENDORED_AV`).
 - `decode_worker.*` — off-thread image decoder: caller reads+decrypts on its thread, worker
   runs `decode_from_memory()` on one bg thread, caller uploads result to GPU. Coalesces by
   key, SDL wake event, `retain()`/`pending()`. Each screen owns its own worker; FullTexCache
-  + GalleryGrid use it for async decode.
+  + GalleryGrid use it for async decode. **Phase 58:** added `submit_fetch(key, Fetcher)` —
+  a two-stage pipeline where `Fetcher = std::function<bool(crypto::SecureBytes&)>` runs on the
+  worker thread BEFORE decode. Hosts (tile_thumb, grid detail) wire the Fetcher to their vault's
+  `read_thumbnail()` and cache strategy; a false return yields an empty Result (memoized as
+  failed). `image/` stays vault-agnostic: the caller brings the fetch logic.
 
 ## media/ (gated OSV_VENDORED_AV except anim_decoder.h + webp_anim_decoder.*)
 Files: `video_source.*`, `chunk_avio.*`, `mem_avio.*`, `video_decoder.*`, `audio_decoder.*`,

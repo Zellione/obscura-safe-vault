@@ -19,6 +19,11 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   `PendingLockConfirm` modal parks LockActive/ToUnlock/Quit behind a Y/N confirm ("N imports pending — finish current file, discard the rest, and lock?")
   when queue is non-empty; SDL_EVENT_QUIT also flows through this gate. `replay_nav_` mechanism re-enters `apply_nav` after SDL_EVENT_QUIT confirmation.
 
+### Perf instrumentation (Phase 58)
+- **`App::update(dt)` extracted from `run()`** — behavior identical, but extracted to host the
+  `app.update` scope for `platform::PerfScope` tracing. Render loop is now `frame()` (rendering)
+  + `update()` (game logic / UI refresh). See `platform/perf.*`.
+
 ### Idle auto-lock
 - `app/idle_timer.h` `IdleTimer` (reset on user input in `dispatch_event`);
   `maybe_auto_lock(dt)` wipes `active_` + `to_manager()` after `IDLE_LOCK_SECS = 5 min`.

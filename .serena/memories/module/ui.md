@@ -548,17 +548,36 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   keycode, because the add/rename prompt needs SDL_EVENT_TEXT_INPUT and
   SDL_StartTextInput/StopTextInput need a Window), and `draw_settings_overlay`. Theme rows
   apply live and persist exactly as the retired ThemePicker did. Not in `osv_tests`.
+- `listing_remap.*` (Phase 58) — `ui::remap_listing(before, after, import_dict) ->
+  ListingRemap` — preserve gallery scroll and multi-selection across drain batches by remapping
+  selection by name (not tile identity/path). Import flows selection/multi-selection through
+  `import_dict` (vault path -> node name), fills `child_names_` (the single fill site for
+  GalleryGrid::child_names_), and hands a remap to detect re-exports (same path) vs
+  no-ops (nothing exported) vs new children (added names) — grid can now skip unnecessary
+  re-renders. Returns `child_names_` and selection keyed by name for the grid to reestablish.
 - `search_model.*` — pure query tokenise/match/rank; drives the `/` overlay's live filter+rank.
   tokenize/matches reused by GalleryPickerModel.
 - `advanced_search_model.*` — pure advanced query: `AdvancedQuery{weighted include (OR gate +
   scorers), exclude (hard filter), AND/OR TagGroups + top-level join, name substring,
   SearchScope}`; `evaluate()`->{matched,score}; serialize/deserialize (opaque blob);
   `tag_suggestions(prefix,vocab)` ranked autocomplete. vault.cpp includes it (one-way dep) for
-  run_search.
+  run_search. **Phase 58:** SearchOverlay split gather (vault walk → cached hits) from filter
+  (per-keystroke predicate over hits). `gather_results(vault, scope)` walks the index once per
+  open/scope-change/vault-change and caches `SearchHit`s (dangling `IndexNode*` refs fixed on
+  `on_vault_changed()` — now public, called by GalleryGrid on drain; AdvancedSearchScreen calls
+  it too on same event). `filter_results` runs per keystroke over the cache (no vault I/O).
+  Eliminates per-keystroke 50k-item index walk.
+- `debounce.h` (Phase 58) — header-only `Debounce<Fn>` timer: call `maybe_run(dt)` and it runs
+  `fn` after `idle_threshold` seconds of elapsed `dt` without a `reset()` (keystroke fires reset).
+  Used by AdvancedSearchScreen to debounce rerun to 150 ms input silence (simpler than immediate
+  per-keystroke walks on large result sets). Other rerun sites (simple/search overlay) use immediate
+  (no debounce). Debounce flushes (immediate run) before result-open and saved-search save to avoid
+  stale display.
 - `search_result_view.*` / `result_grid.*` — result grid+list view state (`ResultView{List,
   Grid}` + toggle + move nav; List ±1 row, Grid ±1/±cols clamped, cols>=1). search_result_view
   owns the off-thread decode worker + feeds the thumbnail cache. **Phase 56:** list layout
-  derives from `list_layout.*` module.
+  derives from `list_layout.*` module. **Phase 58:** `update_results(vault, hits)` invalidates
+  CoverCache and clears failed thumbs.
 - `saved_search_panel.*` — saved-search sidebar: list rendering + CRUD (Ctrl+S/Enter/Del). Pure
   vault/SDL-free. Phase 54: `save_buf_` is a `TextInputModel` and `active_buffer()` returns
   `ITextInput*`; before that this field had NO Backspace handler at all, so a typo could only
@@ -622,6 +641,12 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `scroll_detail_panel(st,wheel_y)` (clamps at 0 only; the host applies the upper clamp).
   **Phase 56:** line layout derives from `detail_layout.*` module.
   Hosted by GalleryGrid, FavoritesScreen (covers all 4 subclasses), AdvancedSearchScreen.
+- `compact_album.*` (Phase 58) — `compact_album(vault, root_node_path) -> vector<IndexNode*>` —
+  flattened list of media nodes for collection-mode viewers (favorites, tag overview, search
+  results). Re-resolves `IndexNode*` pointers from paths to survive drains (import batches).
+  Called on every viewer `on_vault_changed`, so collection viewers' album stays valid across
+  vault mutations. Delegates to `vault::resolve_node` (path-safe). Fixes dangling pointers that
+  caused playback/selection reset during imports.
 - `anim_repair.*` (Phase 47; was `gif_repair.*`) — `maybe_repair_animated(...)` +
   `Vault::repair_image_animated(path,bool)`: lazy bidirectional healing for images stored before
   their format's animation support landed, persisted via the same crash-safe `commit_index()`
@@ -664,7 +689,13 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `gallery_cover.*` — cover resolution (walks index tree -> thumb chunk spans only):
   `resolve_single_cover` (leaf: first image thumb / first video poster; non-leaf: recurse first
   sub-gallery) + `resolve_covers` (non-leaf: up to 4 sub-gallery covers in child order).
-  Depth-bounded by INDEX_MAX_DEPTH, cycle-free. No decode, no disk.
+  Depth-bounded by INDEX_MAX_DEPTH, cycle-free. No decode, no disk. **Phase 58:** extracted to
+  pure function (`resolve_single_cover`, `resolve_covers`), no cache internal.
+- `cover_cache.*` (Phase 58) — `CoverCache{spans_by_node}` — gallery cover spans computed once
+  per listing and keyed by `IndexNode*`. Eliminates per-frame re-resolution cost on grid refresh.
+  Hosts (GalleryGrid::refresh, SearchResultView::update_results, import drains) MUST invalidate
+  on gallery refetch (no auto-invalidation). GalleryGrid also clears `thumbs_.failed` on refresh
+  so failed reads are retried on new gallery list (not cached stale).
 - `cover_layout.*` — `cover_montage_rects` (tile rect + 1–4 covers -> sub-rects; single fill
   for 1, row-major 2×2 for 2–4).
 - `tile_thumb.*` — shared tile-thumbnail draw: `ThumbContext{vault,cache,worker,failed}` +
@@ -675,7 +706,11 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   format never badges); `tile_can_hover_animate(node)` gates hover animation by badge +
   dimension budget. `thumb_key_for` pure index lookup.
   Decrypt -> off-thread decode -> GPU upload via shared cache. Reused by GalleryGrid + the
-  advanced-search grid view.
+  advanced-search grid view. **Phase 58:** `ThumbKey{key, offset, length, present}` — cache
+  identity (key) unchanged; offset/length span added. Render thread no longer does vault I/O
+  for thumbs; `DecodeWorker::submit_fetch` wires a Fetcher to vault's `read_thumbnail()`. Read
+  failures memoized as empty Result (like decode failures) instead of retried every frame;
+  hosts clear `failed` on refetch.
 - `waste_threshold.h` — vault-bloat thresholds: `should_display_waste(wasted,file_size)` (true
   if waste > max(50 MiB, 10% of file_size)); `should_hint_cancelled_import_waste(wasted)` (true
   if > 1 MiB). Drives GalleryGrid's `Shift+C` compact-confirm footer hint.
