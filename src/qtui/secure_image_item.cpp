@@ -191,12 +191,16 @@ void SecureImageRenderer::render(QRhiCommandBuffer* cb)
     // Test-only: increment render counter (proof that this render path executed)
     if (item_) {
         item_->testOnlyIncrementRenderCount();
+        static int renderCalls = 0;
+        qDebug() << "SecureImageRenderer::render()" << ++renderCalls << "item_size=" << item_->size() << "toUpload_=" << (toUpload_ ? "yes" : "no") << "tex_=" << (tex_ ? "exists" : "null");
     }
 
     // Upload new texture if pending
     if (toUpload_) {
         const auto& px = *toUpload_;
+        qDebug() << "  -> uploading texture" << px.width << "x" << px.height;
         if (!tex_ || tex_->pixelSize() != QSize(px.width, px.height)) {
+            qDebug() << "    -> (re)creating texture";
             // Destroy old texture per documented QRhiResource lifecycle.
             // QRhiResource::destroy() (qrhi.h:835) is the safe pattern to release GPU resources
             // before heap deallocation. The destructor alone does not release GPU state.
@@ -216,6 +220,7 @@ void SecureImageRenderer::render(QRhiCommandBuffer* cb)
 
     // Rebuild SRB if texture changed
     if (resourcesDirty_) {
+        qDebug() << "  -> rebuilding SRB (resourcesDirty)";
         rebuildResources();
     }
 
@@ -237,6 +242,7 @@ void SecureImageRenderer::render(QRhiCommandBuffer* cb)
     cb->beginPass(renderTarget(), clear, {1.0f, 0});
 
     if (tex_ && pipeline_) {
+        qDebug() << "  -> drawing texture";
         cb->setGraphicsPipeline(pipeline_.get());
         QSize sz = renderTarget()->pixelSize();
         cb->setViewport({0.0f, 0.0f, static_cast<float>(sz.width()),
@@ -245,6 +251,8 @@ void SecureImageRenderer::render(QRhiCommandBuffer* cb)
         const QRhiCommandBuffer::VertexInput vin(vbuf_.get(), 0);
         cb->setVertexInput(0, 1, &vin);
         cb->draw(4);
+    } else {
+        qDebug() << "  -> NOT drawing (tex_=" << (tex_ ? "valid" : "null") << "pipeline_=" << (pipeline_ ? "valid" : "null") << ")";
     }
 
     cb->endPass();
@@ -280,7 +288,6 @@ void SecureImageItem::setNodeKey(quintptr key)
         return;
 
     nodeKey_ = key;
-    qDebug() << "SecureImageItem::setNodeKey" << key;
     emit nodeKeyChanged();
 
     // Try to get cached pixels now
@@ -302,20 +309,39 @@ void SecureImageItem::setNodeKey(quintptr key)
     connect(cache, &ThumbCache::ready, this, &SecureImageItem::onThumbReady, Qt::UniqueConnection);
 
     cache->request(key);
+
+    // CRITICAL: After request() and connect(), re-check cache to avoid race condition.
+    // The worker thread may have decoded and stored the thumbnail between our
+    // pixels(key) check and the connect() call above. If so, the ready(key) signal
+    // has already been emitted and our just-made connection will never receive it.
+    // Re-checking after connect() ensures we don't miss a fast decode.
+    auto pixelsAgain = cache->pixels(key);
+    if (pixelsAgain) {
+        setImage(pixelsAgain);
+    }
 }
 
 void SecureImageItem::onThumbReady(quintptr key)
 {
+    qDebug() << "SecureImageItem::onThumbReady" << "key=" << key << "nodeKey_=" << nodeKey_ << "this=" << this;
+
     // Guard: only accept if this is for our current key
-    if (key != nodeKey_)
+    if (key != nodeKey_) {
+        qDebug() << "  -> stale key, ignoring";
         return;
+    }
 
     auto cache = ThumbCache::instance();
-    if (!cache)
+    if (!cache) {
+        qWarning() << "  -> cache is null!";
         return;
+    }
 
     auto pixels = cache->pixels(key);
     if (pixels) {
+        qDebug() << "  -> got pixels" << pixels->width << "x" << pixels->height << ", calling setImage";
         setImage(pixels);
+    } else {
+        qWarning() << "  -> pixels() returned null!";
     }
 }
