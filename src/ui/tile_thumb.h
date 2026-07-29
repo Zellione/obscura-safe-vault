@@ -6,6 +6,7 @@
 #include <unordered_set>
 
 #include "ui/gallery_cover.h"   // ui::CoverSpan
+#include "ui/cover_cache.h"       // ui::CoverCache
 #include "ui/anim_model.h"        // anim_within_hover_dimension_budget
 
 namespace gfx { class Renderer; class FontAtlas; class TextureCache; }
@@ -16,21 +17,25 @@ namespace ui {
 
 // The shared dependencies a tile-thumbnail draw needs: the vault to decrypt
 // thumb/poster chunks from, the GPU texture cache they upload into, the
-// off-thread decode worker that turns decrypted bytes into pixels, and the
-// per-screen set of chunk keys whose decode gave up. Bundled so the draw/texture
-// helpers below take a single context argument (and to keep host screens within
-// the SonarCloud method/field budgets, cpp:S1448/S1820).
+// off-thread decode worker that turns decrypted bytes into pixels, the
+// per-screen set of chunk keys whose decode gave up, and the per-listing
+// gallery cover cache. Bundled so the draw/texture helpers below take a single
+// context argument (and to keep host screens within the SonarCloud
+// method/field budgets, cpp:S1448/S1820).
 //
-// Each host screen owns its own worker + failed-set and pumps finished decodes
-// into the cache itself (see GalleryGrid::pump_thumbs); these helpers only
-// *request* a decode (returning nullptr until it lands) and draw whatever the
-// cache already has. No new disk path — decryption flows through the existing
-// SecureBytes -> worker pipeline.
+// Each host screen owns its own worker + failed-set + cover cache and pumps
+// finished decodes into the cache itself (see GalleryGrid::pump_thumbs); these
+// helpers only *request* a decode (returning nullptr until it lands) and draw
+// whatever the cache already has. No new disk path — decryption flows through
+// the existing SecureBytes -> worker pipeline. Covers are cached per listing
+// and must be cleared whenever the tree may have changed (refresh /
+// on_vault_changed / refetch).
 struct ThumbContext {
     const vault::Vault&           vault;
     gfx::TextureCache&            cache;
     image::DecodeWorker&          worker;
     std::unordered_set<uint64_t>& failed;
+    CoverCache&                   covers;
 };
 
 // A stable per-node cache key for its thumbnail texture, and whether one

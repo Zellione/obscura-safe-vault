@@ -521,6 +521,7 @@ project "osv_tests"
         "src/ui/strip_layout.cpp",
         "src/ui/cover_layout.cpp",
         "src/ui/gallery_cover.cpp",
+        "src/ui/cover_cache.cpp",
         "src/ui/scroll_model.cpp",
         "src/ui/gallery_picker.cpp",
         "src/ui/grid_layout.cpp",

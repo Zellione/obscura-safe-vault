@@ -259,6 +259,9 @@ void GalleryGrid::on_vault_changed()
 
 void GalleryGrid::refresh()
 {
+    thumbs_.covers.clear();
+    thumbs_.failed.clear();
+
     children_ = vault_.list(nav_.path());
     // Self-heal videos imported before this build could decode their codec
     // (Phase 40 bugfix) — no separate migration step needed.
@@ -622,7 +625,7 @@ void GalleryGrid::cycle_gallery_sort()
 
 SDL_Texture* GalleryGrid::thumb_texture(const vault::IndexNode& node)
 {
-    return tile_thumb_texture({vault_, cache_, thumbs_.worker, thumbs_.failed}, node);
+    return tile_thumb_texture({vault_, cache_, thumbs_.worker, thumbs_.failed, thumbs_.covers}, node);
 }
 
 bool GalleryGrid::pump_thumbs()
@@ -1996,7 +1999,7 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float bottom)
 void GalleryGrid::draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
                                   const SDL_FRect& box)
 {
-    ui::draw_tile_thumb(r, font_, {vault_, cache_, thumbs_.worker, thumbs_.failed}, n, box);
+    ui::draw_tile_thumb(r, font_, {vault_, cache_, thumbs_.worker, thumbs_.failed, thumbs_.covers}, n, box);
 }
 
 int GalleryGrid::hit_test(float mx, float my) const

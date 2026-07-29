@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "image/decode_worker.h"
+#include "ui/cover_cache.h"
 #include "ui/nav_model.h"
 #include "ui/result_grid.h"
 #include "ui/screen.h"
@@ -95,6 +96,7 @@ private:
 
     image::DecodeWorker              grid_worker_{image::decode_wake_event()};
     std::unordered_set<uint64_t>     grid_failed_;  // failed thumbnail chunks
+    ui::CoverCache                   grid_covers_;  // gallery cover memoisation per listing
 
     RequestCallback request_cb_;  // callback to parent Screen for navigation
 };

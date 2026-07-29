@@ -72,12 +72,12 @@ void draw_tile_thumb(gfx::Renderer& r, gfx::FontAtlas& font, const ThumbContext&
         r.draw_round_rect(ff.tab, RADIUS_SMALL, FOLDER);
         r.draw_round_rect(ff.body, RADIUS_SMALL, FOLDER);
 
-        const auto covers = resolve_covers(n);
+        const auto covers = ctx.covers.get(n);
         if (covers.empty()) return;
 
         const auto cells =
             cover_montage_rects(ff.inner, static_cast<int>(covers.size()));
-        for (size_t i = 0; i < cells.size(); ++i) {
+        for (size_t i = 0; i < covers.size(); ++i) {
             r.draw_rect(cells[i], gfx::Color{0, 0, 0, 255});   // backing, never stretched
             if (SDL_Texture* tex = tile_cover_tex(ctx, covers[i])) {
                 float tw = 0;

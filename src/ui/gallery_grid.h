@@ -11,6 +11,7 @@
 
 #include "image/decode_worker.h"
 #include "ui/combine_dialog.h"
+#include "ui/cover_cache.h"
 #include "ui/consent_dialog.h"
 #include "ui/volume_set_dialog.h"
 #include "ui/delete_summary.h"
@@ -278,10 +279,13 @@ void toggle_select();          // toggle the current item in the export selectio
 
     // Off-thread thumbnail decoding, scoped to this grid (its own worker; see the
     // note in ImageViewer for why each screen keeps a separate one). Grouped to
-    // keep the field count down.
+    // keep the field count down. CoverCache must be cleared whenever the listing
+    // may have changed (refresh / on_vault_changed / refetch) or lookups
+    // dereference stale keys.
     struct ThumbDecode {
         image::DecodeWorker          worker{image::decode_wake_event()};
         std::unordered_set<uint64_t> failed;   // thumbs that gave up decoding
+        ui::CoverCache               covers;   // gallery cover memoisation per listing
     };
     ThumbDecode thumbs_;
 
