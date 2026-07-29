@@ -34,6 +34,7 @@
 #include "ui/widgets.h"
 #include "ui/zip_plan.h"
 #include "ui/import_queue.h"
+#include "ui/listing_remap.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
 namespace vault { class Vault; struct IndexNode; }
@@ -218,6 +219,7 @@ void toggle_select();          // toggle the current item in the export selectio
     int                   cols_ = 1;
     GalleryView           view_ = GalleryView::GridM;
     float                 scroll_ = 0.0f;  // vertical scroll offset (pixels scrolled down)
+    std::vector<std::string> child_names_;   // names of children_, cached because the pointers go stale on tree change
     std::string           error_;
     std::string           status_;   // transient export result message
     std::string           last_footer_;   // Phase 50: track footer summary changes for mark_dirty()

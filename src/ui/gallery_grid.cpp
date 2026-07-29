@@ -251,9 +251,21 @@ void GalleryGrid::on_exit()
 
 void GalleryGrid::on_vault_changed()
 {
-    // Phase 50: vault's index tree changed (background import drain attached nodes).
-    // children_ pointers are now stale; re-list and refresh selection.
-    refresh();
+    // Phase 58: an import drain must not disturb what the user is doing. The
+    // old listing's NAMES were cached at the last refresh (the node pointers
+    // themselves are stale now, so they must never be re-read here); selection,
+    // multi-selection and scroll are remapped onto the fresh listing by name.
+    const std::vector<std::string> old_names = std::move(child_names_);
+    const int   old_sel    = nav_.selected();
+    const auto  old_multi  = sel_.indices();
+    const float old_scroll = scroll_;
+
+    refresh();   // re-list + rebuild names/counts/covers; clears sel_ and hover
+
+    const ListingRemap m = remap_listing(old_names, child_names_, old_sel, old_multi);
+    nav_.select(m.selected);
+    for (const int i : m.multi) sel_.toggle(i);
+    scroll_ = old_scroll;   // update_scroll_to_selection clamps next frame
     mark_dirty();
 }
 
@@ -281,6 +293,12 @@ void GalleryGrid::refresh()
         child_counts_.push_back(n && n->is_gallery() ? ui::direct_child_counts(*n)
                                                      : ui::SubtreeCounts{});
     counts_row_ = ui::any_tile_counts_to_show(children_);
+
+    // Phase 58: cache children's names for remap on the next vault change
+    child_names_.clear();
+    child_names_.reserve(children_.size());
+    for (const auto* n : children_)
+        child_names_.push_back(n != nullptr ? n->name : std::string{});
 }
 
 void GalleryGrid::open_selected()
