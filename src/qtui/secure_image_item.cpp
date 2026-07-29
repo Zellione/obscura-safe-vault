@@ -38,14 +38,18 @@ void SecureImageRenderer::initialize(QRhiCommandBuffer* cb)
 {
     QRhi* rhi = this->rhi();
 
-    // Create vertex buffer: textured quad
+    // Create vertex buffer: textured quad as 2 triangles (6 vertices)
     struct Vertex {
         float pos[4];      // x, y, 0, 1
         float uv[2];       // u, v
     };
 
     const Vertex vertices[] = {
+        // Triangle 1 (top-left)
         {{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},  // top-left
+        {{1.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 0.0f}},  // top-right
+        {{0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},  // bottom-left
+        // Triangle 2 (bottom-right)
         {{1.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 0.0f}},  // top-right
         {{1.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},  // bottom-right
         {{0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},  // bottom-left
@@ -191,16 +195,12 @@ void SecureImageRenderer::render(QRhiCommandBuffer* cb)
     // Test-only: increment render counter (proof that this render path executed)
     if (item_) {
         item_->testOnlyIncrementRenderCount();
-        static int renderCalls = 0;
-        qDebug() << "SecureImageRenderer::render()" << ++renderCalls << "item_size=" << item_->size() << "toUpload_=" << (toUpload_ ? "yes" : "no") << "tex_=" << (tex_ ? "exists" : "null");
     }
 
     // Upload new texture if pending
     if (toUpload_) {
         const auto& px = *toUpload_;
-        qDebug() << "  -> uploading texture" << px.width << "x" << px.height;
         if (!tex_ || tex_->pixelSize() != QSize(px.width, px.height)) {
-            qDebug() << "    -> (re)creating texture";
             // Destroy old texture per documented QRhiResource lifecycle.
             // QRhiResource::destroy() (qrhi.h:835) is the safe pattern to release GPU resources
             // before heap deallocation. The destructor alone does not release GPU state.
@@ -220,16 +220,16 @@ void SecureImageRenderer::render(QRhiCommandBuffer* cb)
 
     // Rebuild SRB if texture changed
     if (resourcesDirty_) {
-        qDebug() << "  -> rebuilding SRB (resourcesDirty)";
         rebuildResources();
     }
 
     // Update MVP matrix
+    // Vertices are in normalized coordinates (0-1), so ortho should map 0-1 to clip space,
+    // not pixel coordinates. This ensures a vertex at (1,1) fills the entire render target.
     if (ubuf_) {
-        QSize sz = renderTarget()->pixelSize();
         QMatrix4x4 mvp;
-        mvp.ortho(0.0f, static_cast<float>(sz.width()),
-                  static_cast<float>(sz.height()), 0.0f,
+        mvp.ortho(0.0f, 1.0f,  // left, right (in normalized coords)
+                  1.0f, 0.0f,  // top, bottom (in normalized coords, flipped)
                   -1.0f, 1.0f);
 
         batch->updateDynamicBuffer(ubuf_.get(), 0, 64, mvp.constData());
@@ -242,7 +242,6 @@ void SecureImageRenderer::render(QRhiCommandBuffer* cb)
     cb->beginPass(renderTarget(), clear, {1.0f, 0});
 
     if (tex_ && pipeline_) {
-        qDebug() << "  -> drawing texture";
         cb->setGraphicsPipeline(pipeline_.get());
         QSize sz = renderTarget()->pixelSize();
         cb->setViewport({0.0f, 0.0f, static_cast<float>(sz.width()),
@@ -250,9 +249,7 @@ void SecureImageRenderer::render(QRhiCommandBuffer* cb)
         cb->setShaderResources(srb_.get());
         const QRhiCommandBuffer::VertexInput vin(vbuf_.get(), 0);
         cb->setVertexInput(0, 1, &vin);
-        cb->draw(4);
-    } else {
-        qDebug() << "  -> NOT drawing (tex_=" << (tex_ ? "valid" : "null") << "pipeline_=" << (pipeline_ ? "valid" : "null") << ")";
+        cb->draw(6);  // 6 vertices = 2 triangles
     }
 
     cb->endPass();
