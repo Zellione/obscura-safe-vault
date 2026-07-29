@@ -404,17 +404,16 @@ void ImageViewer::scroll_by(float dy)
 
 SDL_Texture* ImageViewer::thumb_texture(const vault::IndexNode& node)
 {
-    const auto [key, present] = ui::thumb_key_for(node);
-    if (!present) return nullptr;
-    if (SDL_Texture* t = cache_.get(key)) return t;
+    const ui::ThumbKey k = ui::thumb_key_for(node);
+    if (!k.present) return nullptr;
+    if (SDL_Texture* t = cache_.get(k.key)) return t;
 
-    // A thumbnail that already failed to decode is not retried; an in-flight
-    // decode lands when update() pumps the worker. Otherwise read+decrypt
-    // here (fast) and enqueue the slow decode off-thread.
-    if (thumbs_.failed.contains(key) || thumbs_.worker.pending(key)) return nullptr;
-    crypto::SecureBytes sb;
-    if (vault_.read_thumbnail(node, sb) != vault::VaultResult::Ok) return nullptr;
-    thumbs_.worker.submit(key, std::move(sb));
+    // Phase 58: async fetch via worker thread (thread-safe vault read).
+    if (thumbs_.failed.contains(k.key) || thumbs_.worker.pending(k.key)) return nullptr;
+    thumbs_.worker.submit_fetch(k.key,
+        [&v = vault_, off = k.offset, len = k.length](crypto::SecureBytes& out) {
+            return vault::read_thumb_span(v, off, len, out) == vault::VaultResult::Ok;
+        });
     return nullptr;
 }
 

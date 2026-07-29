@@ -37,8 +37,11 @@ struct ThumbContext {
 // exists at all. A video's thumbnail is its poster frame (vmeta.poster_*) —
 // the image thumbnail fields (meta.thumb_*) are always zero on a video node,
 // so gating on those alone always reports "no thumbnail" for every video.
+// offset/length are the span to READ from the vault (thumb chunk / poster chunk).
 struct ThumbKey {
-    uint64_t key;
+    uint64_t key;      // texture-cache identity (unchanged from today)
+    uint64_t offset;   // span to read (thumb chunk / poster chunk)
+    uint64_t length;
     bool     present;
 };
 
