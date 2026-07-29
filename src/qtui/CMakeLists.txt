@@ -81,10 +81,13 @@ if(EXISTS "${CODEC_PREFIX}/lib/libavcodec.a")
     target_link_libraries(osv_qt_core PUBLIC
         ${CODEC_PREFIX}/lib/libavformat.a
         ${CODEC_PREFIX}/lib/libavcodec.a
+        ${CODEC_PREFIX}/lib/libavfilter.a
         ${CODEC_PREFIX}/lib/libswscale.a
         ${CODEC_PREFIX}/lib/libswresample.a
         ${CODEC_PREFIX}/lib/libavutil.a
+        ${CODEC_PREFIX}/lib/libosv_vaapi_shim.a  # dlopen forwarding shim for VAAPI symbols
         ${CODEC_PREFIX}/lib/libaom.a          # second aom mention — single-pass ld
+        dl                                      # for dlopen in vaapi shim
     )
 endif()
 

@@ -1049,8 +1049,10 @@ int main(int argc, char** argv)
     GalleryModel galleryModel(&unlockController.vault());
     ViewerController viewerController(&unlockController.vault(), &galleryModel);
     ThemePalette themePalette;
+    PlaybackEngine playbackEngine;
     unlockController.setViewerController(&viewerController);
     galleryModel.setViewerController(&viewerController);
+    playbackEngine.setVault(&unlockController.vault());
 
     engine.rootContext()->setContextProperty("unlockController", &unlockController);
     engine.rootContext()->setContextProperty("thumbCache", &thumbCache);

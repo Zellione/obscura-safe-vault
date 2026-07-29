@@ -22,7 +22,7 @@ PlaybackEngine::PlaybackEngine(QObject* parent)
 PlaybackEngine::~PlaybackEngine()
 {
     // Stop the worker thread and clean up resources.
-    // Order: stop thread → destroy worker/decoder/source
+    // Order: stop thread → destroy worker/decoder/avio (which owns source)
     if (thread_.joinable()) {
         thread_.request_stop();
         thread_.join();
@@ -31,7 +31,7 @@ PlaybackEngine::~PlaybackEngine()
     // Explicit cleanup (thread_ dtor would also clean these, but be explicit)
     worker_.reset();
     decoder_.reset();
-    source_.reset();
+    avio_.reset();
 }
 
 void PlaybackEngine::open(quintptr nodeKey)
@@ -53,10 +53,8 @@ void PlaybackEngine::open(quintptr nodeKey)
     }
 
     try {
-        // Open VideoSource
+        // Open VideoSource and wrap in ChunkAvio (ChunkAvio takes ownership)
         media::VideoSource source = media::VideoSource::open(*vault_, *node);
-
-        // Wrap in ChunkAvio to provide AVIOContext for FFmpeg
         avio_ = std::make_unique<media::ChunkAvio>(std::move(source));
         if (!avio_->valid()) {
             qCWarning(lcPlayback) << "Failed to create ChunkAvio";
@@ -89,14 +87,14 @@ void PlaybackEngine::open(quintptr nodeKey)
         elapsed_.restart();
         position_ = 0.0;
 
-        thread_ = std::jthread([this](std::stop_token st) { runWorker(); });
+        thread_ = std::jthread([this](std::stop_token st) { runWorker(st); });
 
         qDebug(lcPlayback) << "Video opened:" << duration_ << "seconds";
     } catch (const std::exception& e) {
         qCWarning(lcPlayback) << "Exception opening video:" << e.what();
         worker_.reset();
         decoder_.reset();
-        source_.reset();
+        avio_.reset();  // avio_ owns source, so reset it
     }
 }
 
@@ -113,7 +111,7 @@ void PlaybackEngine::stop()
         thread_.join();
     }
 
-    // Clean up in order: worker first (owns codec fed by pkts), then decoder, then avio (which owns source)
+    // Clean up in order: worker first (owns codec fed by pkts), then decoder, then avio (owns source)
     worker_.reset();
     decoder_.reset();
     avio_.reset();
@@ -158,10 +156,8 @@ QString PlaybackEngine::clockText() const
     return QString::fromStdString(ui::format_clock(position_));
 }
 
-void PlaybackEngine::runWorker()
+void PlaybackEngine::runWorker(std::stop_token st)
 {
-    std::stop_token st = std::this_thread::get_stop_token();
-
     while (!st.stop_requested()) {
         // Drain control queue
         {
@@ -170,10 +166,13 @@ void PlaybackEngine::runWorker()
                 const auto& msg = *pendingControl_;
                 if (msg.type == ControlMsg::Type::Seek) {
                     ++generation_;
-                    decoder_->seek_demux_only(msg.seekTarget);
-                    worker_->begin_seek(msg.seekTarget);
-                    clockBase_ = msg.seekTarget;
-                    sentEof_ = false;
+                    if (!decoder_->seek_demux_only(msg.seekTarget)) {
+                        qCWarning(lcPlayback) << "Seek failed at" << msg.seekTarget;
+                    } else {
+                        worker_->begin_seek(msg.seekTarget);
+                        clockBase_ = msg.seekTarget;
+                        sentEof_ = false;
+                    }
                 } else if (msg.type == ControlMsg::Type::Stop) {
                     break;
                 }
@@ -182,7 +181,12 @@ void PlaybackEngine::runWorker()
         }
 
         // Check if we should fetch more packets
-        if (!st.stop_requested() && worker_->outstanding() < 3 && !sentEof_) {
+        bool shouldPlay = false;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            shouldPlay = playing_;
+        }
+        if (!st.stop_requested() && shouldPlay && worker_->outstanding() < 3 && !sentEof_) {
             auto* pkt = decoder_->demux_next_video_packet();
             worker_->submit(pkt, generation_);
             if (!pkt) {

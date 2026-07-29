@@ -5,6 +5,7 @@
 #include <memory>
 #include <atomic>
 #include <thread>
+#include <stop_token>
 #include <mutex>
 #include <optional>
 #include <cstdint>
@@ -76,8 +77,8 @@ private:
         bool play = false;
     };
 
-    // Worker thread main loop
-    void runWorker();
+    // Worker thread main loop (receives stop_token from jthread)
+    void runWorker(std::stop_token st);
 
     // GUI thread: called by runWorker via queued invoke to render a frame
     void onFrameReady(std::shared_ptr<const FrameBox> frame);
@@ -94,7 +95,7 @@ private:
     std::optional<ControlMsg> pendingControl_;
 
     // --- Worker thread state ---
-    std::unique_ptr<media::ChunkAvio> avio_;
+    std::unique_ptr<media::ChunkAvio> avio_;        // owns the VideoSource internally
     std::unique_ptr<media::VideoDecoder> decoder_;
     std::unique_ptr<media::VideoDecodeWorker> worker_;
     uint64_t generation_ = 0;
