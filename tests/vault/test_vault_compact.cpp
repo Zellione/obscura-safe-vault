@@ -713,3 +713,43 @@ TEST(reclaim_on_a_locked_vault_reports_locked)
     vault::Vault v;
     CHECK_EQ(v.reclaim(), vault::VaultResult::Locked);
 }
+
+// Phase 58 regression: compact() must reopen thumb_fp_ after atomic rename.
+// Without this fix, thumbnail reads return stale handle errors after compact.
+TEST(compact_reopens_thumb_fp_for_thumbnail_reads_after_atomic_rename)
+{
+    TempVault tv("compact_thumb_reopen");
+    const auto decodable_jpeg = fixtures::solid_jpeg(64, 48, 10, 200, 30);
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+
+    // Add a decodable image that gets a thumbnail stored.
+    REQUIRE(v.add_image("", decodable_jpeg, "pic.jpg") == vault::VaultResult::Ok);
+
+    // Add a dead image to create waste for compact to reclaim.
+    REQUIRE(v.add_image("", random_payload(100 * 1024), "dead.bin") == vault::VaultResult::Ok);
+    REQUIRE(v.remove_image("", "dead.bin") == vault::VaultResult::Ok);
+
+    // Get the image node and verify it has a thumbnail.
+    auto kids = v.list("");
+    REQUIRE(kids.size() == 1);
+    const auto* node = kids[0];
+    REQUIRE(node->meta.thumb_length > 0);
+
+    // Compact the vault (triggers atomic rename sequence).
+    REQUIRE(v.compact() == vault::VaultResult::Ok);
+
+    // Refresh the node list since compact may invalidate pointers.
+    kids = v.list("");
+    REQUIRE(kids.size() == 1);
+    const auto* node_after = kids[0];
+    REQUIRE(node_after->meta.thumb_length > 0);
+
+    // CRITICAL TEST: read_thumbnail must work after compact.
+    // Without the fix (thumb_fp_ not reopened), this reads from the renamed-away file.
+    crypto::SecureBytes thumb;
+    REQUIRE(v.read_thumbnail(*node_after, thumb) == vault::VaultResult::Ok);
+    CHECK_TRUE(thumb.size() > 0);  // thumbnail decrypted successfully, not stale/empty
+}

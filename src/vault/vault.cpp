@@ -1490,6 +1490,15 @@ VaultResult Vault::compact(OpProgress* progress)
         std::fclose(read_fp_);
         read_fp_ = nullptr;
     }
+    // Phase 58: Close thumb_fp_ under the mutex to ensure an in-flight thumbnail
+    // read either completes against valid state or observes a stale file after rename.
+    if (thumb_mutex_) {
+        const std::lock_guard lk(*thumb_mutex_);
+        if (thumb_fp_ != nullptr) {
+            std::fclose(thumb_fp_);
+            thumb_fp_ = nullptr;
+        }
+    }
     const std::string old_path = path_ + ".old";
 
     // Step 1: Rename original aside (vault.osv -> vault.osv.old, fsync dir).
@@ -1500,7 +1509,13 @@ VaultResult Vault::compact(OpProgress* progress)
         fp_ = std::fopen(path_.c_str(), "r+b");
         read_fp_ = std::fopen(path_.c_str(), "rb");
         if (read_fp_) std::setvbuf(read_fp_, nullptr, _IONBF, 0);
-        if (!fp_ || !read_fp_) reset();  // intact on disk; force a clean re-open
+        // Phase 58: reacquire thumb_fp_ under the mutex (mirrors reset() pattern).
+        if (thumb_mutex_) {
+            const std::lock_guard lk(*thumb_mutex_);
+            thumb_fp_ = std::fopen(path_.c_str(), "rb");
+            if (thumb_fp_) std::setvbuf(thumb_fp_, nullptr, _IONBF, 0);
+        }
+        if (!fp_ || !read_fp_ || !thumb_fp_) reset();  // intact on disk; force a clean re-open
         return IoError;
     }
     fileutil::sync_dir_of(old_path);
@@ -1518,7 +1533,13 @@ VaultResult Vault::compact(OpProgress* progress)
         fp_ = std::fopen(path_.c_str(), "r+b");
         read_fp_ = std::fopen(path_.c_str(), "rb");
         if (read_fp_) std::setvbuf(read_fp_, nullptr, _IONBF, 0);
-        if (!fp_ || !read_fp_) reset();  // intact on disk; force a clean re-open
+        // Phase 58: reacquire thumb_fp_ under the mutex (mirrors reset() pattern).
+        if (thumb_mutex_) {
+            const std::lock_guard lk(*thumb_mutex_);
+            thumb_fp_ = std::fopen(path_.c_str(), "rb");
+            if (thumb_fp_) std::setvbuf(thumb_fp_, nullptr, _IONBF, 0);
+        }
+        if (!fp_ || !read_fp_ || !thumb_fp_) reset();  // intact on disk; force a clean re-open
         return IoError;
     }
     fileutil::sync_dir_of(path_);
@@ -1540,6 +1561,18 @@ VaultResult Vault::compact(OpProgress* progress)
     }
     // Disable buffering on read_fp_ (same as in create/open).
     std::setvbuf(read_fp_, nullptr, _IONBF, 0);
+    // Phase 58: reopen thumb_fp_ under the mutex (mirrors reset() pattern).
+    if (thumb_mutex_) {
+        const std::lock_guard lk(*thumb_mutex_);
+        thumb_fp_ = std::fopen(path_.c_str(), "rb");
+        if (thumb_fp_) std::setvbuf(thumb_fp_, nullptr, _IONBF, 0);
+    }
+    if (!thumb_fp_) {
+        // The compacted vault is intact on disk but we lost our thumb_fp_ handle;
+        // wipe keys and force a clean re-open rather than limp along.
+        reset();
+        return IoError;
+    }
     header_ = h;
     root_   = std::move(new_root);
     return Ok;
