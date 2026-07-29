@@ -8,6 +8,7 @@
 #include "secure_image_item.h"
 #include "secure_text_field.h"
 #include "pixel_buffer.h"
+#include "thumb_cache.h"
 
 void UnlockController::setError(const QString& e)
 {
@@ -55,7 +56,20 @@ void UnlockController::unlock(SecureTextField* field)
 
 void UnlockController::lock()
 {
+    // CRITICAL: Drain thumbnail cache before locking vault.
+    // Drain-before-lock ordering ensures workers finish before vault wipes the index tree.
+    auto cache = ThumbCache::instance();
+    if (cache) {
+        cache->shutdownAndDrain();
+    }
+
     vault_.lock();
+
+    // Clear cache after vault is locked (vault tree is now freed)
+    if (cache) {
+        cache->clearAll();
+    }
+
     emit unlockedChanged();
 }
 

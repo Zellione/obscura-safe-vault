@@ -282,12 +282,6 @@ void SecureImageItem::setNodeKey(quintptr key)
     nodeKey_ = key;
     emit nodeKeyChanged();
 
-    // Disconnect previous ready signal if any
-    if (thumbReadyConnected_) {
-        // We need to be careful: we can't disconnect a lambda by connection
-        // So we'll just rely on the guard check below
-    }
-
     // Try to get cached pixels now
     auto cache = ThumbCache::instance();
     if (!cache) {
@@ -301,11 +295,9 @@ void SecureImageItem::setNodeKey(quintptr key)
         return;
     }
 
-    // Not in cache yet, request decode and connect to ready signal
-    if (!thumbReadyConnected_) {
-        connect(cache, &ThumbCache::ready, this, &SecureImageItem::onThumbReady, Qt::UniqueConnection);
-        thumbReadyConnected_ = true;
-    }
+    // Not in cache yet, request decode and connect to ready signal.
+    // Qt::UniqueConnection prevents multiple identical connections from this item.
+    connect(cache, &ThumbCache::ready, this, &SecureImageItem::onThumbReady, Qt::UniqueConnection);
 
     cache->request(key);
 }

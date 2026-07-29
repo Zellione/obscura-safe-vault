@@ -88,9 +88,13 @@ add_executable(osv_qt_secure_field_test tests/secure_field_test.cpp secure_text_
 target_link_libraries(osv_qt_secure_field_test PRIVATE osv_qt_core Qt6::Gui Qt6::Quick)
 target_include_directories(osv_qt_secure_field_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_executable(osv_qt_gallery_model_test tests/gallery_model_test.cpp gallery_model.cpp)
+add_executable(osv_qt_gallery_model_test tests/gallery_model_test.cpp gallery_model.cpp thumb_cache.cpp)
 target_link_libraries(osv_qt_gallery_model_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::Quick)
 target_include_directories(osv_qt_gallery_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_executable(osv_qt_thumb_stress_test tests/thumb_stress_test.cpp gallery_model.cpp thumb_cache.cpp)
+target_link_libraries(osv_qt_thumb_stress_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::Quick)
+target_include_directories(osv_qt_thumb_stress_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_executable(osv-qt-mkvault tools/mkvault.cpp)
 target_link_libraries(osv-qt-mkvault PRIVATE osv_qt_core)

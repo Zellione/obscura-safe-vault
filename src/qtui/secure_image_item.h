@@ -42,5 +42,4 @@ private:
     QSize sourceSize_;
     int renderCount_ = 0;  // test-only counter
     quintptr nodeKey_ = 0;  // opaque node pointer
-    bool thumbReadyConnected_ = false;  // guard against multiple signal connections
 };
