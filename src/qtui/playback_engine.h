@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QElapsedTimer>
+#include <QPointer>
 #include <memory>
 #include <atomic>
 #include <thread>
@@ -44,7 +45,7 @@ public:
     PlaybackEngine& operator=(const PlaybackEngine&) = delete;
 
     // Bind the renderer for frame delivery
-    void setFrameItem(VideoFrameItem* item) { frameItem_ = item; }
+    Q_INVOKABLE void setFrameItem(VideoFrameItem* item) { frameItem_ = item; }
 
     // Bind the vault for node resolution
     void setVault(vault::Vault* vault) { vault_ = vault; }
@@ -84,7 +85,7 @@ private:
     void onFrameReady(std::shared_ptr<const FrameBox> frame);
 
     // --- GUI thread state ---
-    VideoFrameItem* frameItem_ = nullptr;
+    QPointer<VideoFrameItem> frameItem_;
     vault::Vault* vault_ = nullptr;
     double position_ = 0.0;
     double duration_ = 0.0;

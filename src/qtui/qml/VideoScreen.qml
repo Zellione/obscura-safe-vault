@@ -4,7 +4,7 @@ import Osv 1.0
 
 Rectangle {
     id: root
-    color: themePalette.videoBg ?? "#000000"
+    color: themePalette.imgBg
     focus: true
 
     property real scale: 1.0

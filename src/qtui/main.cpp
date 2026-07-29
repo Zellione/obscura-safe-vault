@@ -495,13 +495,16 @@ static int runSelftest(const QString& vaultPath)
     // Poll timer for thumbnail-wait mode: check deliveredCount every 100ms
     QTimer pollTimer;
     QObject::connect(&pollTimer, &QTimer::timeout, window, [&]() {
-        if (testComplete || transitionedToViewer) return;
+        if (testComplete || transitionedToViewer || transitionedToVideo) return;
 
         int delivered = thumbCache.deliveredCount();
         if (delivered >= targetThumbnailCount) {
             // Wait 2 more frames for delegates to repaint
             if (frameCount >= 5) {
-                testComplete = true;
+                // Only mark test complete if not in video/viewer mode (they have their own handlers)
+                if (!testVideo && !testViewer) {
+                    testComplete = true;
+                }
 
                 // Grab and analyze image
                 QImage grabbed = window->grabWindow();
@@ -595,7 +598,7 @@ static int runSelftest(const QString& vaultPath)
                             fprintf(stdout, "Screenshot saved to %s\n", shotPath.toStdString().c_str());
                         }
 
-                        if (!testViewer) {
+                        if (!testViewer && !testVideo) {
                             resultCode = 0;
                             testComplete = true;
                             QCoreApplication::exit(0);
