@@ -8,6 +8,7 @@
 #include "gfx/text.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "platform/perf.h"
 #include "ui/list_layout.h"
 #include "ui/nav_model.h"
 #include "ui/search_model.h"
@@ -68,6 +69,7 @@ void SearchOverlay::close()
 
 void SearchOverlay::gather_results()
 {
+    const platform::PerfScope perf("search.gather");
     // Gather all matches in the current scope
     all_results_ = vault_.search("", scope_);
     filter_results();

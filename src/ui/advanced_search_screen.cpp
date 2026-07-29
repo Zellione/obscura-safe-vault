@@ -12,6 +12,7 @@
 #include "gfx/texture_cache.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "platform/perf.h"
 #include "ui/grid_layout.h"
 #include "ui/list_layout.h"
 #include "ui/nav_model.h"
@@ -210,6 +211,7 @@ void AdvancedSearchScreen::reload_saved()
 
 void AdvancedSearchScreen::rerun()
 {
+    const platform::PerfScope perf("advsearch.rerun");
     auto results = search_.run_search(query_);
     result_view_.update_results(results);
     detail_.key.clear();   // SearchHit::node pointers are now invalid

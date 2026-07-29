@@ -8,6 +8,7 @@
 #include "gfx/texture_cache.h"
 #include "gfx/theme.h"
 #include "image/decode_worker.h"
+#include "platform/perf.h"
 #include "ui/cover_layout.h"
 #include "ui/gallery_cover.h"
 #include "ui/widgets.h"          // fit_rect
@@ -40,6 +41,7 @@ SDL_Texture* tile_thumb_texture(const ThumbContext& ctx, const vault::IndexNode&
 
     ctx.worker.submit_fetch(k.key,
         [&v = ctx.vault, off = k.offset, len = k.length](crypto::SecureBytes& out) {
+            const platform::PerfScope perf("thumb.fetch", 5.0);
             return vault::read_thumb_span(v, off, len, out) == vault::VaultResult::Ok;
         });
     return nullptr;
@@ -54,6 +56,7 @@ SDL_Texture* tile_cover_tex(const ThumbContext& ctx, const CoverSpan& span)
     // Phase 58: async fetch via worker thread (thread-safe vault read).
     ctx.worker.submit_fetch(key,
         [&v = ctx.vault, off = span.offset, len = span.length](crypto::SecureBytes& out) {
+            const platform::PerfScope perf("thumb.fetch", 5.0);
             return vault::read_thumb_span(v, off, len, out) == vault::VaultResult::Ok;
         });
     return nullptr;

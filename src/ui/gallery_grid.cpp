@@ -18,6 +18,7 @@
 #include "platform/file_dialog.h"
 #include "platform/folder_dialog.h"
 #include "platform/paths.h"
+#include "platform/perf.h"
 #include "ui/chrome_layout.h"
 #include "ui/delete_summary.h"
 #include "ui/detail_model.h"
@@ -169,6 +170,7 @@ void rebuild_detail(GalleryGrid& g)
     std::string key = std::format("{}|{}|{}|{}", multi ? "multi" : "single", g.nav_.path(),
                                   sel_idx, g.sel_.revision());
     if (key == g.detail_.key) return;
+    const platform::PerfScope perf("grid.detail");
     g.detail_.key = std::move(key);
     g.detail_.panel.scroll = 0.0f;   // a new subject starts at the top of the panel
 
@@ -272,6 +274,7 @@ void GalleryGrid::on_vault_changed()
 
 void GalleryGrid::refresh()
 {
+    const platform::PerfScope perf("grid.refresh");
     thumbs_.covers.clear();
     thumbs_.failed.clear();
 

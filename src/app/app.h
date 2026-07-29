@@ -69,6 +69,7 @@ private:
     bool pump_events(bool animating);            // wait/poll + dispatch; should redraw?
     bool apply_nav();                            // resolve a transition; transitioned?
     bool maybe_auto_lock(double dt);             // idle -> wipe active_, return to manager
+    void update(double dt);                      // update frame state and drain import queue
     void render_frame();                         // draw + present + frame-cap fallback
     void open_settings_overlay();                // seed settings state and open the overlay
 
