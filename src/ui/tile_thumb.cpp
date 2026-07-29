@@ -77,7 +77,7 @@ void draw_tile_thumb(gfx::Renderer& r, gfx::FontAtlas& font, const ThumbContext&
 
         const auto cells =
             cover_montage_rects(ff.inner, static_cast<int>(covers.size()));
-        for (size_t i = 0; i < covers.size(); ++i) {
+        for (size_t i = 0; i < cells.size(); ++i) {
             r.draw_rect(cells[i], gfx::Color{0, 0, 0, 255});   // backing, never stretched
             if (SDL_Texture* tex = tile_cover_tex(ctx, covers[i])) {
                 float tw = 0;
