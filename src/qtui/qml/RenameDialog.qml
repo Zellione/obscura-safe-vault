@@ -11,6 +11,7 @@ Dialog {
     // Public: set these before opening
     property string originalName: ""
     property int targetRow: -1
+    property string errorMessage: ""
 
     // Result signal (empty text = success, non-empty = error message)
     signal renamed(string errorText)
@@ -53,6 +54,21 @@ Dialog {
             Keys.onEscapePressed: {
                 dialog.reject()
             }
+
+            // Clear error message on input change
+            onTextChanged: {
+                dialog.errorMessage = ""
+            }
+        }
+
+        // Inline error display
+        Text {
+            width: parent.width
+            text: dialog.errorMessage
+            color: themePalette.danger
+            wrapMode: Text.Wrap
+            font.pixelSize: 11
+            visible: text.length > 0
         }
 
         Row {
@@ -87,7 +103,9 @@ Dialog {
                 }
                 contentItem: Text {
                     text: parent.text
-                    color: "#000000"
+                    // Use themePalette.bg for text on accent: works for dark accents (light bg)
+                    // and HighContrast (pure black bg on yellow accent maintains contrast)
+                    color: themePalette.bg
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                 }
@@ -98,7 +116,7 @@ Dialog {
     onAccepted: {
         const newName = nameField.text.trim();
         if (newName.length === 0) {
-            renamed("Name cannot be empty");
+            errorMessage = "Name cannot be empty";
             return;
         }
 
@@ -108,10 +126,21 @@ Dialog {
         }
 
         const errorText = galleryModel.rename(dialog.targetRow, newName);
-        renamed(errorText);
+        if (!errorText.isEmpty()) {
+            // Validation failed; keep dialog open and show error
+            errorMessage = errorText;
+        } else {
+            // Success; close and signal
+            renamed(errorText);
+        }
     }
 
     onRejected: {
         // cancelled, don't signal anything
+    }
+
+    onOpened: {
+        // Clear error message when dialog is opened
+        errorMessage = ""
     }
 }
