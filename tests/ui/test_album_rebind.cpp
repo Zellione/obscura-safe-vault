@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "ui/album_rebind.h"
+#include "vault/index.h"
 
 TEST(rebind_follows_the_item_when_a_node_is_inserted_before_it)
 {
@@ -55,4 +56,28 @@ TEST(rebind_matches_the_whole_path_not_a_prefix)
     const ui::AlbumRebind r = ui::rebind_album_index(after, "g/b.jpg", 0);
     CHECK_EQ(r.index, 1);
     CHECK(r.preserve);
+}
+
+TEST(compact_album_drops_null_pairs_in_order)
+{
+    vault::IndexNode a = vault::IndexNode::image("a");
+    vault::IndexNode c = vault::IndexNode::image("c");
+    std::vector<const vault::IndexNode*> images{&a, nullptr, &c, nullptr};
+    std::vector<std::string>             paths{"g/a", "g/b", "g/c", "g/d"};
+
+    const size_t removed = ui::compact_album(images, paths);
+
+    CHECK_EQ(removed, 2u);
+    REQUIRE(images.size() == 2u);
+    CHECK(images[0] == &a); CHECK(images[1] == &c);
+    REQUIRE(paths.size() == 2u);
+    CHECK_EQ(paths[0], "g/a"); CHECK_EQ(paths[1], "g/c");
+}
+
+TEST(compact_album_all_null_empties_both)
+{
+    std::vector<const vault::IndexNode*> images{nullptr};
+    std::vector<std::string>             paths{"g/x"};
+    CHECK_EQ(ui::compact_album(images, paths), 1u);
+    CHECK(images.empty()); CHECK(paths.empty());
 }

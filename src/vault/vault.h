@@ -316,6 +316,14 @@ public:
     // unsupported. Locked if the vault is locked.
     [[nodiscard]] VaultResult reclaim();
 
+    // Resolve a slash-separated path to any node (gallery OR image). Intermediate
+    // segments must be galleries; the final segment may be any node kind. Empty
+    // path resolves to the root. Returns nullptr if any segment is missing.
+    // Phase 58: const overload used by ImageViewer::on_vault_changed to re-resolve
+    // collection album paths after a vault mutation.
+    [[nodiscard]] IndexNode*       resolve_node(std::string_view path);
+    [[nodiscard]] const IndexNode* resolve_node(std::string_view path) const;
+
 private:
     // Best-effort space reclamation after a delete, gated on AUTO_COMPACT_*:
     // in-place hole punching where supported (no disk spike), else a full
@@ -330,11 +338,6 @@ private:
     // not a gallery). Empty path resolves to the root.
     [[nodiscard]] IndexNode*       find_gallery(std::string_view path);
     [[nodiscard]] const IndexNode* find_gallery(std::string_view path) const;
-    // Resolve a slash-separated path to any node (gallery OR image). Intermediate
-    // segments must be galleries; the final segment may be any node kind. Empty
-    // path resolves to the root. Returns nullptr if any segment is missing.
-    [[nodiscard]] IndexNode*       resolve_node(std::string_view path);
-    [[nodiscard]] const IndexNode* resolve_node(std::string_view path) const;
 
     void reset() noexcept;  // close file, wipe key, clear state
 

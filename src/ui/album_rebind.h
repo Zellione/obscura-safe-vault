@@ -8,6 +8,8 @@
 #include <string_view>
 #include <vector>
 
+#include "vault/index.h"
+
 namespace ui {
 
 struct AlbumRebind {
@@ -21,5 +23,11 @@ struct AlbumRebind {
 [[nodiscard]] AlbumRebind rebind_album_index(const std::vector<std::string>& new_paths,
                                              std::string_view current_path,
                                              int current_index);
+
+// Remove index-parallel (image, path) pairs whose node is null — used after a
+// vault change re-resolves a collection album's paths and some vanished.
+// Returns the number of pairs removed.
+size_t compact_album(std::vector<const vault::IndexNode*>& images,
+                     std::vector<std::string>&             paths);
 
 } // namespace ui

@@ -10,6 +10,8 @@
 #include "gfx/texture_cache.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "platform/perf.h"
+#include "platform/safe_print.h"
 #include "ui/album_rebind.h"
 #include "ui/export.h"
 #include "ui/anim_model.h"
@@ -119,10 +121,26 @@ void ImageViewer::on_vault_changed()
                                        ? n->name
                                        : album_.gallery_path + "/" + n->name);
         }
+    } else {
+        // Phase 58: collection albums hold nodes from all over the tree; a
+        // drain may have reallocated any of them. Re-resolve every path
+        // against the fresh tree and drop entries that vanished — the old
+        // pointers must not survive this call (dangling after realloc).
+        for (size_t i = 0; i < album_.images.size(); ++i)
+            album_.images[i] = vault_.resolve_node(album_.paths[i]);
+        compact_album(album_.images, album_.paths);
+        if (album_.images.empty()) { go_back(); return; }
     }
 
-    if (const AlbumRebind rebind = rebind_album_index(album_.paths, current, index_); rebind.preserve) index_ = rebind.index;
-    else                                                                            show_image_at(rebind.index);
+    if (const AlbumRebind rebind = rebind_album_index(album_.paths, current, index_); rebind.preserve) {
+        index_ = rebind.index;
+    } else {
+        if (platform::perf_log_enabled())
+            platform::safe_println(stderr,
+                "[Viewer] rebind fell back to show_image_at (collection={})",
+                album_.from_collection);
+        show_image_at(rebind.index);
+    }
     mark_dirty();
 }
 
