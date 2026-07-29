@@ -94,10 +94,23 @@ target_link_libraries(osv-qt-mkvault PRIVATE osv_qt_core)
 qt_add_executable(osv-qt
     main.cpp
     secure_text_field.cpp
+    secure_image_item.cpp
     unlock_controller.cpp
 )
+
+# Shaders: compile to .qsb and embed as resources
+qt6_add_shaders(osv-qt "osv_qt_shaders"
+    PREFIX "/osvqt"
+    FILES shaders/texquad.vert shaders/texquad.frag
+)
+
 target_compile_definitions(osv-qt PRIVATE
     QTUI_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
 )
-target_include_directories(osv-qt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# Add version-specific Qt6 Gui headers for RHI access
+set(QT6_GUI_PRIVATE_PATH "/usr/include/qt6/QtGui/6.11.1/QtGui")
+target_include_directories(osv-qt PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${QT6_GUI_PRIVATE_PATH}
+)
 target_link_libraries(osv-qt PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)

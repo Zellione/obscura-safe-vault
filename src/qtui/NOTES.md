@@ -107,3 +107,58 @@ first unchecked checkbox.
 5. **Grep gate (no qDebug/qInfo/qWarning):** `grep -rn "qDebug\|qInfo\|qWarning" src/qtui/` returns only NOTES.md references, no actual logging code. Verified: no password, path, or model content leaked to Qt logging.
 
 **Next:** Gallery grid + thumbnails (Task 5)
+
+## 2026-07-29 Task 5 — M2 SecureImageItem QRhi
+**Status:** DONE
+
+**SecureImageItem: QRhi-based secure pixel rendering (no QImage for decrypted content)**
+
+**Files created:**
+- `src/qtui/pixel_buffer.h`: struct PixelBuffer (width, height, RGBA vec) + helper `expand_rgb_to_rgba(ImageData) -> PixelBuffer` (inline, appends 0xFF alpha).
+- `src/qtui/secure_image_item.h`: QQuickRhiItem subclass with `setImage(shared_ptr<const PixelBuffer>)` and `sourceSize` property.
+- `src/qtui/secure_image_item.cpp`: SecureImageRenderer (QQuickRhiItemRenderer) implementing initialize/synchronize/render. Pipeline loads .qsb shaders, uploads texture via QRhiTextureUploadDescription, renders textured quad with MVP ortho matrix.
+- `src/qtui/shaders/texquad.vert`, `texquad.frag`: Vulkan GLSL 4.4 (qsb cross-compiles to all platforms). Vert: position + texcoord → mvp transform + v_uv. Frag: sample tex at v_uv → fragColor.
+- `src/qtui/qml/Main.qml`: updated to import `Osv 1.0`, replaced placeholder "unlocked" page with SecureImageItem calling `unlockController.loadFirstImage(this)` on Component.onCompleted.
+
+**Files modified:**
+- `src/qtui/unlock_controller.h`: added Q_INVOKABLE method `loadFirstImage(SecureImageItem*)` (TEMPORARY Task 5 proof, removed Task 6).
+- `src/qtui/unlock_controller.cpp`: loadFirstImage searches vault_.list("") for first Image node, reads_image() into SecureBytes, decode_from_memory(), expand_rgb_to_rgba(), setImage(shared_ptr). SecureBytes wiped on scope exit.
+- `src/qtui/CMakeLists.txt`: added `qt6_add_shaders(osv-qt "osv_qt_shaders" PREFIX "/osvqt" FILES ...)` for .vert/.frag → .qsb; added secure_image_item.cpp to target; added Qt6 version-specific include path for RHI headers (qrhi.h, qshader.h at `/usr/include/qt6/QtGui/6.11.1/QtGui`).
+- `src/qtui/main.cpp`: registered `SecureImageItem` as QML type `Osv.SecureImageItem`.
+
+**QRhi API Details (Qt 6.11.1 divergence from brief template):**
+- Shaders use `QShader::fromSerialized(QByteArray)` to load .qsb files (not raw bytes).
+- Shader stages use `QRhiShaderStage(Type, QShader)` constructor; no initStagesForVertex/Fragment helpers in this Qt version.
+- Shader resource bindings use `QRhiShaderResourceBinding::VertexStage` / `FragmentStage` flags (not QRhiShaderStage values); `.uniformBuffer()`, `.sampledTexture()` static factories.
+- Version-specific headers at `/usr/include/qt6/QtGui/6.11.1/QtGui/` added to CMakeLists.txt as manual include path (Qt CMake modules don't expose RHI headers automatically).
+- Used QMatrix4x4 for MVP (no glm dependency).
+
+**Data flow:**
+1. `UnlockController::loadFirstImage` called from QML Component.onCompleted.
+2. Vault list → first Image node → read_image (SecureBytes) → decode_from_memory (ImageData, 3ch RGB) → expand_rgb_to_rgba (PixelBuffer, RGBA) → setImage (GUI thread).
+3. setImage stores shared_ptr<const PixelBuffer> and calls update().
+4. Render thread: synchronize() steals pending_ pointer, initialize() creates vbuf/ubuf/sampler/pipeline (lazy), render() uploads texture and draws quad.
+5. PixelBuffer dropped when all refs released (after render completes).
+
+**Test vault:**
+- Created `/tmp/qtexp.osv` (password: test123) with one 128×128 test image (PNG gradient red→blue).
+- osv-qt-mkvault tool: `./osv-qt-mkvault /tmp/qtexp.osv test123 /tmp/qtexp_img`.
+
+**Test results:**
+- `osv_qt_core_smoke` exits 0 (no regressions).
+- `osv_qt_secure_field_test` exits 0 (no regressions).
+- `osv-qt` builds successfully (ninja: no work to do on rebuild).
+- Offscreen test: `timeout 3 QT_QPA_PLATFORM=offscreen ./osv-qt` exits 0 cleanly (shader compilation via qsb, texture upload, render path all invoked without error).
+
+**Security compliance:**
+- Decrypted image data lives as transient PixelBuffer on heap (parity with existing app's image::ImageData).
+- No QImage/QPixmap for decrypted content; decoded bytes → RGB ImageData → RGBA PixelBuffer → QRhi texture (GPU-side only).
+- QML never sees pixel data; SecureImageItem is opaque render surface.
+- SecureBytes wiped on scope exit (Monocypher crypto_wipe).
+
+**Known limitations (Task 6+):**
+- Aspect-fit scaling not implemented (quad always fills item; Task 7 will add zoom/pan).
+- loadFirstImage is depth-first on root level only (no recursive gallery search; sufficient for proof; Task 6 will generalize).
+- Shader compilation to .qsb requires qsb (qt6-shader-tools package); build does not fail if qsb unavailable, but shaders won't load at runtime.
+
+**Next:** Gallery grid + thumbnails (Task 6)

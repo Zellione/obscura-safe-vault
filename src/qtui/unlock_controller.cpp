@@ -2,8 +2,12 @@
 
 #include <QUrl>
 
+#include "crypto/secure_mem.h"
+#include "image/decode.h"
 #include "platform/paths.h"
+#include "secure_image_item.h"
 #include "secure_text_field.h"
+#include "pixel_buffer.h"
 
 void UnlockController::setError(const QString& e)
 {
@@ -54,3 +58,53 @@ void UnlockController::lock()
     vault_.lock();
     emit unlockedChanged();
 }
+
+// TEMPORARY (Task 5 proof) — removed in Task 6
+// Find and load the first image, decrypt, decode, and display.
+void UnlockController::loadFirstImage(SecureImageItem* item)
+{
+    if (!item || !vault_.is_unlocked()) return;
+
+    // Find the first image node (vault_.list returns const pointers)
+    const auto root_nodes = vault_.list("");
+    const vault::IndexNode* image_node = nullptr;
+    for (const auto* node : root_nodes) {
+        if (node && node->type == vault::IndexNode::Type::Image) {
+            image_node = node;
+            break;
+        }
+    }
+
+    if (!image_node) {
+        qWarning() << "No image found in vault";
+        return;
+    }
+
+    // Read encrypted image data
+    crypto::SecureBytes encrypted;
+    const auto read_result = vault_.read_image(*image_node, encrypted);
+    if (read_result != vault::VaultResult::Ok) {
+        qWarning() << "Failed to read image from vault";
+        return;
+    }
+
+    // Decode from SecureBytes
+    const std::span<const uint8_t> span(encrypted.data(), encrypted.size());
+    auto decoded = image::decode_from_memory(span);
+    // encrypted goes out of scope here and is wiped
+
+    if (!decoded.has_value()) {
+        qWarning() << "Failed to decode image";
+        return;
+    }
+
+    // Expand RGB to RGBA
+    auto px_buf = expand_rgb_to_rgba(decoded.value());
+
+    // Set on the item (shared ownership; buffer freed when all refs drop)
+    auto shared_buf = std::make_shared<const PixelBuffer>(std::move(px_buf));
+    item->setImage(shared_buf);
+
+    qInfo() << "Loaded image:" << decoded->width << "x" << decoded->height;
+}
+

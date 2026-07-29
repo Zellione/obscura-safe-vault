@@ -6,6 +6,7 @@
 #include "vault/vault.h"
 
 class SecureTextField;
+class SecureImageItem;
 
 class UnlockController : public QObject {
     Q_OBJECT
@@ -15,6 +16,9 @@ public:
     Q_INVOKABLE bool openVault(const QUrl& fileUrl);
     Q_INVOKABLE void unlock(SecureTextField* field);
     Q_INVOKABLE void lock();
+
+    // TEMPORARY (Task 5 proof) — removed in Task 6
+    Q_INVOKABLE void loadFirstImage(SecureImageItem* item);
 
     [[nodiscard]] bool unlocked() const { return vault_.is_unlocked(); }
     [[nodiscard]] QString errorText() const { return error_; }

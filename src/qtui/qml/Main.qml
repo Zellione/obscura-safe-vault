@@ -1,4 +1,5 @@
 import QtQuick
+import Osv 1.0
 
 Window {
     id: root
@@ -34,11 +35,9 @@ Window {
             id: unlockedPage
             Rectangle {
                 color: "#14161a"
-                Text {
-                    anchors.centerIn: parent
-                    text: "unlocked"
-                    color: "#c8ccd4"
-                    font.pixelSize: 24
+                SecureImageItem {
+                    anchors.fill: parent
+                    Component.onCompleted: unlockController.loadFirstImage(this)
                 }
             }
         }
