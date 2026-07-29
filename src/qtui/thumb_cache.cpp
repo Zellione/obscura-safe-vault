@@ -108,8 +108,10 @@ void ThumbCache::request(quintptr key)
 {
     // Bail if stopping or no vault
     if (stopping_.load(std::memory_order_acquire) || !vault_) {
+        qCDebug(lcThumbCache) << "request() noop: stopping=" << stopping_.load() << "vault=" << (vault_ ? "set" : "null");
         return;
     }
+    qCDebug(lcThumbCache) << "request() for key=" << key;
 
     uint64_t current_gen;
     {
@@ -187,6 +189,7 @@ void ThumbCache::clearAll()
         cache_.clear();
         inFlight_.clear();
         lruOrder_.clear();
+        deliveredCount_ = 0;  // Reset test counter
         vault_ = nullptr;  // Invalidate vault pointer
     }
 
@@ -212,6 +215,7 @@ void ThumbCache::onPixelsReady(quintptr key, std::shared_ptr<const PixelBuffer> 
         // Add to cache (not already there due to inFlight dedup)
         cache_[key] = pixels;
         lruOrder_.push_back(key);
+        deliveredCount_++;  // Test-only: track successful deliveries
 
         // Evict oldest LRU entry if over limit
         while (cache_.size() > MAX_LRU_ENTRIES && !lruOrder_.empty()) {

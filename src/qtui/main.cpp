@@ -7,6 +7,7 @@
 #include <QImage>
 #include <QTimer>
 #include <memory>
+#include <set>
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
@@ -45,6 +46,22 @@ static bool isUniformColor(const QImage& img, int tolerance = 5)
         }
     }
     return true;
+}
+
+// Helper: Count unique colors in a QImage
+static int countUniqueColors(const QImage& img)
+{
+    if (img.isNull()) {
+        return 0;
+    }
+
+    std::set<QRgb> colors;
+    for (int y = 0; y < img.height(); ++y) {
+        for (int x = 0; x < img.width(); ++x) {
+            colors.insert(img.pixel(x, y));
+        }
+    }
+    return colors.size();
 }
 
 // Selftest: Unlock vault programmatically and verify rendering
@@ -147,12 +164,20 @@ static int runSelftest(const QString& vaultPath)
     galleryModel.refresh();
 
     fprintf(stdout, "PASS (Step 2): Vault unlocked via controller\n");
+    fprintf(stdout, "DEBUG: Gallery model has %d items\n", galleryModel.rowCount());
 
     // Step 3: Wait for rendering and verify pixels
-    // Use a timer to check render state after a few frames
     int frameCount = 0;
     int resultCode = 1;  // default to failure
     bool testComplete = false;
+
+    // Check for thumbnail-wait mode (requires OSV_QT_SELFTEST_WAIT_THUMBS)
+    const char* wait_thumbs_env = std::getenv("OSV_QT_SELFTEST_WAIT_THUMBS");
+    int targetThumbnailCount = wait_thumbs_env ? std::atoi(wait_thumbs_env) : 0;
+
+    // Get screenshot output path if specified
+    const char* shot_path_env = std::getenv("OSV_QT_SELFTEST_SHOT");
+    QString shotPath = shot_path_env ? QString::fromUtf8(shot_path_env) : QString();
 
     // Find and force update on SecureImageItem
     SecureImageItem* imageItem = nullptr;
@@ -162,6 +187,58 @@ static int runSelftest(const QString& vaultPath)
         break;
     }
 
+    // Poll timer for thumbnail-wait mode: check deliveredCount every 100ms
+    QTimer pollTimer;
+    QObject::connect(&pollTimer, &QTimer::timeout, window, [&]() {
+        if (testComplete) return;
+
+        int delivered = thumbCache.deliveredCount();
+        if (delivered >= targetThumbnailCount) {
+            // Wait 2 more frames for delegates to repaint
+            if (frameCount >= 5) {
+                testComplete = true;
+
+                // Grab and analyze image
+                QImage grabbed = window->grabWindow();
+                if (grabbed.isNull() || grabbed.width() == 0 || grabbed.height() == 0) {
+                    fprintf(stderr, "FAIL (Step 3): Could not grab window\n");
+                    resultCode = 1;
+                    QCoreApplication::exit(1);
+                    return;
+                }
+
+                int uniqueColors = countUniqueColors(grabbed);
+                fprintf(stdout, "DEBUG: Grabbed image %dx%d, unique colors: %d\n",
+                        grabbed.width(), grabbed.height(), uniqueColors);
+
+                if (uniqueColors > 300) {
+                    fprintf(stdout, "PASS (Step 3, thumbnail-wait): %d thumbnails delivered, "
+                            "%d unique colors in grabbed image (%dx%d)\n",
+                            delivered, uniqueColors, grabbed.width(), grabbed.height());
+
+                    // Save screenshot if requested
+                    if (!shotPath.isEmpty()) {
+                        if (grabbed.save(shotPath)) {
+                            fprintf(stdout, "DEBUG: Saved screenshot to %s\n", shotPath.toStdString().c_str());
+                        } else {
+                            fprintf(stderr, "WARNING: Failed to save screenshot to %s\n", shotPath.toStdString().c_str());
+                        }
+                    }
+
+                    resultCode = 0;
+                    QCoreApplication::exit(0);
+                    return;
+                } else {
+                    fprintf(stderr, "FAIL (Step 3): Only %d unique colors (need >300 for thumbnails), "
+                            "%d thumbnails delivered\n", uniqueColors, delivered);
+                    resultCode = 1;
+                    QCoreApplication::exit(1);
+                    return;
+                }
+            }
+        }
+    });
+
     // Connect to frameSwapped to count frames.
     // frameSwapped is emitted from QSGRenderThread; a direct connection would run this lambda
     // (and grabWindow) on the render thread and deadlock against the GUI thread's sync wait.
@@ -170,7 +247,12 @@ static int runSelftest(const QString& vaultPath)
         if (testComplete) return;
         frameCount++;
 
-        // After 3+ frames, check render results (allow time for StackView transition).
+        // If thumbnail-wait mode, just count frames (poll timer handles the work)
+        if (targetThumbnailCount > 0) {
+            return;
+        }
+
+        // Legacy mode: After 3+ frames, check render results (allow time for StackView transition).
         // A static scene may only swap a few frames; 10 may never arrive.
         if (frameCount >= 3) {
             testComplete = true;
@@ -221,17 +303,24 @@ static int runSelftest(const QString& vaultPath)
         }
     }, Qt::QueuedConnection);
 
-    // Watchdog timer: hard timeout at 5 seconds
+    // Start thumbnail-wait poll if needed
+    if (targetThumbnailCount > 0) {
+        fprintf(stdout, "DEBUG: Thumbnail-wait mode: waiting for %d thumbnails\n", targetThumbnailCount);
+        pollTimer.start(100);  // Poll every 100ms
+    }
+
+    // Watchdog timer: hard timeout at 5 or 15 seconds depending on mode
     QTimer watchdog;
+    int watchdogTime = targetThumbnailCount > 0 ? 15000 : 5000;
     QObject::connect(&watchdog, &QTimer::timeout, [&]() {
         if (!testComplete) {
-            fprintf(stderr, "FAIL (Step 3): timeout (5s) — render never completed\n");
+            fprintf(stderr, "FAIL (Step 3): timeout (%dms) — test never completed\n", watchdogTime);
             resultCode = 1;
             QCoreApplication::exit(1);
         }
     });
     watchdog.setSingleShot(true);
-    watchdog.start(5000);
+    watchdog.start(watchdogTime);
 
     // Run event loop until test completes
     int appExitCode = QGuiApplication::exec();

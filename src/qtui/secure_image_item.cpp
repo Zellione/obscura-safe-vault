@@ -280,11 +280,13 @@ void SecureImageItem::setNodeKey(quintptr key)
         return;
 
     nodeKey_ = key;
+    qDebug() << "SecureImageItem::setNodeKey" << key;
     emit nodeKeyChanged();
 
     // Try to get cached pixels now
     auto cache = ThumbCache::instance();
     if (!cache) {
+        qWarning() << "SecureImageItem::setNodeKey: ThumbCache::instance() is null!";
         return;
     }
 

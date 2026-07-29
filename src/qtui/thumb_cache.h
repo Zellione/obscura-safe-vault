@@ -47,6 +47,12 @@ public:
     // Updates LRU order (true LRU, not FIFO).
     [[nodiscard]] std::shared_ptr<const PixelBuffer> pixels(quintptr key);
 
+    // Test-only: count of thumbnails successfully delivered to cache.
+    [[nodiscard]] int deliveredCount() const {
+        std::lock_guard<std::mutex> lock(cacheMutex_);
+        return deliveredCount_;
+    }
+
     // Wait for in-flight workers to complete (for model refresh before tree rebuild).
     // Does NOT stop accepting new requests (use before GalleryModel::refresh).
     void drainPending();
@@ -90,6 +96,9 @@ private:
 
     // In-flight requests (to avoid duplicate work)
     std::set<quintptr> inFlight_;
+
+    // Test-only: count of thumbnails successfully delivered
+    int deliveredCount_ = 0;
 
     // Dedicated thread pool for this cache (enables waitForDone before lock)
     QThreadPool pool_;
