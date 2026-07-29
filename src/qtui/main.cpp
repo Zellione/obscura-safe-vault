@@ -14,6 +14,8 @@
 #include "secure_text_field.h"
 #include "secure_image_item.h"
 #include "unlock_controller.h"
+#include "gallery_model.h"
+#include "thumb_cache.h"
 #include "vault/vault.h"
 
 // Helper: Check if QImage is uniformly a single color (within tolerance)
@@ -102,8 +104,12 @@ static int runSelftest(const QString& vaultPath)
 
     QQmlApplicationEngine engine;
     UnlockController unlockController;
+    ThumbCache thumbCache;
+    GalleryModel galleryModel(&unlockController.vault());
 
     engine.rootContext()->setContextProperty("unlockController", &unlockController);
+    engine.rootContext()->setContextProperty("thumbCache", &thumbCache);
+    engine.rootContext()->setContextProperty("galleryModel", &galleryModel);
     engine.load(QUrl::fromLocalFile(QStringLiteral(QTUI_QML_DIR "/Main.qml")));
 
     if (engine.rootObjects().isEmpty()) {
@@ -135,6 +141,10 @@ static int runSelftest(const QString& vaultPath)
         fprintf(stderr, "FAIL: Could not unlock vault via controller\n");
         return 1;
     }
+
+    // Update ThumbCache and GalleryModel with unlocked vault
+    thumbCache.setVault(&unlockController.vault());
+    galleryModel.refresh();
 
     fprintf(stdout, "PASS (Step 2): Vault unlocked via controller\n");
 
@@ -246,7 +256,7 @@ int main(int argc, char** argv)
 
     QQmlApplicationEngine engine;
 
-    // Add QML directory to import path so it can find UnlockScreen.qml
+    // Add QML directory to import path so it can find UnlockScreen.qml and GalleryScreen.qml
     engine.addImportPath(QStringLiteral(QTUI_QML_DIR));
 
     // Connect warnings to stderr for debugging
@@ -261,7 +271,12 @@ int main(int argc, char** argv)
     });
 
     UnlockController unlockController;
+    ThumbCache thumbCache;
+    GalleryModel galleryModel(&unlockController.vault());
+
     engine.rootContext()->setContextProperty("unlockController", &unlockController);
+    engine.rootContext()->setContextProperty("thumbCache", &thumbCache);
+    engine.rootContext()->setContextProperty("galleryModel", &galleryModel);
 
     const QString qmlPath = QStringLiteral(QTUI_QML_DIR "/Main.qml");
     engine.load(QUrl::fromLocalFile(qmlPath));
@@ -269,5 +284,16 @@ int main(int argc, char** argv)
         fprintf(stderr, "QML load failed: %s\n", qmlPath.toStdString().c_str());
         return 1;
     }
+
+    // Connect unlock signal to update models
+    QObject::connect(&unlockController, &UnlockController::unlockedChanged, [&]() {
+        if (unlockController.unlocked()) {
+            thumbCache.setVault(&unlockController.vault());
+            galleryModel.refresh();
+        } else {
+            thumbCache.clearAll();
+        }
+    });
+
     return QGuiApplication::exec();
 }

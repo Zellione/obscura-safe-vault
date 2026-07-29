@@ -18,9 +18,6 @@ public:
     Q_INVOKABLE void unlock(SecureTextField* field);
     Q_INVOKABLE void lock();
 
-    // TEMPORARY (Task 5 proof) — removed in Task 6
-    Q_INVOKABLE void loadFirstImage(SecureImageItem* item);
-
     // Test-only helper for selftest (not exposed to QML)
     bool unlockWithPassword(const std::span<const uint8_t>& password);
 

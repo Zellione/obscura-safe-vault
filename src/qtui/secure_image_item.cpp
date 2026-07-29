@@ -1,4 +1,5 @@
 #include "secure_image_item.h"
+#include "thumb_cache.h"
 
 #include <QFile>
 #include <QMatrix4x4>
@@ -271,4 +272,56 @@ void SecureImageItem::setImage(std::shared_ptr<const PixelBuffer> px)
 QSize SecureImageItem::sourceSize() const
 {
     return sourceSize_;
+}
+
+void SecureImageItem::setNodeKey(quintptr key)
+{
+    if (nodeKey_ == key)
+        return;
+
+    nodeKey_ = key;
+    emit nodeKeyChanged();
+
+    // Disconnect previous ready signal if any
+    if (thumbReadyConnected_) {
+        // We need to be careful: we can't disconnect a lambda by connection
+        // So we'll just rely on the guard check below
+    }
+
+    // Try to get cached pixels now
+    auto cache = ThumbCache::instance();
+    if (!cache) {
+        return;
+    }
+
+    auto pixels = cache->pixels(key);
+    if (pixels) {
+        // Already in cache, load it
+        setImage(pixels);
+        return;
+    }
+
+    // Not in cache yet, request decode and connect to ready signal
+    if (!thumbReadyConnected_) {
+        connect(cache, &ThumbCache::ready, this, &SecureImageItem::onThumbReady, Qt::UniqueConnection);
+        thumbReadyConnected_ = true;
+    }
+
+    cache->request(key);
+}
+
+void SecureImageItem::onThumbReady(quintptr key)
+{
+    // Guard: only accept if this is for our current key
+    if (key != nodeKey_)
+        return;
+
+    auto cache = ThumbCache::instance();
+    if (!cache)
+        return;
+
+    auto pixels = cache->pixels(key);
+    if (pixels) {
+        setImage(pixels);
+    }
 }

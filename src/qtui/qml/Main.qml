@@ -130,14 +130,13 @@ Window {
             }
         }
 
-        // Unlocked page with image viewer
+        // Unlocked page with gallery grid
         Component {
             id: unlockedPageComponent
             Rectangle {
                 color: "#14161a"
-                SecureImageItem {
+                GalleryScreen {
                     anchors.fill: parent
-                    Component.onCompleted: unlockController.loadFirstImage(this)
                 }
             }
         }
