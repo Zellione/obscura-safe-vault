@@ -8,12 +8,18 @@
 
 class SecureTextField;
 class SecureImageItem;
+class ViewerController;
 
 class UnlockController : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool unlocked READ unlocked NOTIFY unlockedChanged)
     Q_PROPERTY(QString errorText READ errorText NOTIFY errorTextChanged)
 public:
+    explicit UnlockController(QObject* parent = nullptr);
+
+    // Set viewer controller for coordinated shutdown (optional, for async image loading).
+    void setViewerController(ViewerController* viewer) noexcept { viewerController_ = viewer; }
+
     Q_INVOKABLE bool openVault(const QUrl& fileUrl);
     Q_INVOKABLE void unlock(SecureTextField* field);
     Q_INVOKABLE void lock();
@@ -33,4 +39,5 @@ private:
     void setError(const QString& e);
     vault::Vault vault_;
     QString      error_;
+    ViewerController* viewerController_ = nullptr;
 };

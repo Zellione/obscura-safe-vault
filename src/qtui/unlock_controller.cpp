@@ -9,6 +9,12 @@
 #include "secure_text_field.h"
 #include "pixel_buffer.h"
 #include "thumb_cache.h"
+#include "viewer_controller.h"
+
+UnlockController::UnlockController(QObject* parent)
+    : QObject(parent)
+{
+}
 
 void UnlockController::setError(const QString& e)
 {
@@ -56,8 +62,15 @@ void UnlockController::unlock(SecureTextField* field)
 
 void UnlockController::lock()
 {
-    // CRITICAL: Drain thumbnail cache before locking vault.
+    // CRITICAL: Drain both viewer and thumbnail caches before locking vault.
     // Drain-before-lock ordering ensures workers finish before vault wipes the index tree.
+
+    // Drain viewer controller (async full-image loads)
+    if (viewerController_) {
+        viewerController_->shutdownAndDrain();
+    }
+
+    // Drain thumbnail cache
     auto cache = ThumbCache::instance();
     if (cache) {
         cache->shutdownAndDrain();

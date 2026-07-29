@@ -28,6 +28,14 @@ Window {
             }
         }
 
+        Connections {
+            target: galleryModel
+            function onOpenViewer(row) {
+                stack.push(viewerScreenComponent);
+                viewerController.open(row);
+            }
+        }
+
         // Inline unlock screen (was UnlockScreen.qml)
         Component {
             id: unlockScreenComponent
@@ -215,6 +223,13 @@ Window {
                         galleryModel.upOneLevel()
                     }
                 }
+            }
+        }
+
+        // Image viewer screen
+        Component {
+            id: viewerScreenComponent
+            ViewerScreen {
             }
         }
     }

@@ -17,6 +17,7 @@
 #include "unlock_controller.h"
 #include "gallery_model.h"
 #include "thumb_cache.h"
+#include "viewer_controller.h"
 #include "vault/vault.h"
 
 // Helper: Check if QImage is uniformly a single color (within tolerance)
@@ -395,10 +396,13 @@ static int runSelftest(const QString& vaultPath)
     UnlockController unlockController;
     ThumbCache thumbCache;
     GalleryModel galleryModel(&unlockController.vault());
+    ViewerController viewerController(&unlockController.vault(), &galleryModel);
+    unlockController.setViewerController(&viewerController);
 
     engine.rootContext()->setContextProperty("unlockController", &unlockController);
     engine.rootContext()->setContextProperty("thumbCache", &thumbCache);
     engine.rootContext()->setContextProperty("galleryModel", &galleryModel);
+    engine.rootContext()->setContextProperty("viewerController", &viewerController);
     engine.load(QUrl::fromLocalFile(QStringLiteral(QTUI_QML_DIR "/Main.qml")));
 
     if (engine.rootObjects().isEmpty()) {
@@ -450,10 +454,16 @@ static int runSelftest(const QString& vaultPath)
     const char* shot_path_env = std::getenv("OSV_QT_SELFTEST_SHOT");
     QString shotPath = shot_path_env ? QString::fromUtf8(shot_path_env) : QString();
 
+    // Check for viewer selftest mode (requires OSV_QT_SELFTEST_VIEWER=1)
+    const char* viewer_env = std::getenv("OSV_QT_SELFTEST_VIEWER");
+    bool testViewer = viewer_env && std::atoi(viewer_env) > 0;
+    bool viewerTestComplete = false;
+    bool transitionedToViewer = false;
+
     // Poll timer for thumbnail-wait mode: check deliveredCount every 100ms
     QTimer pollTimer;
     QObject::connect(&pollTimer, &QTimer::timeout, window, [&]() {
-        if (testComplete) return;
+        if (testComplete || transitionedToViewer) return;
 
         int delivered = thumbCache.deliveredCount();
         if (delivered >= targetThumbnailCount) {
@@ -494,11 +504,45 @@ static int runSelftest(const QString& vaultPath)
                         fprintf(stdout, "PASS (Step 3, thumbnail-wait): %d thumbnails delivered, "
                                 "%d unique colors (delegates not instantiated in QObject tree)\n",
                                 delivered, uniqueColors);
-                        if (!shotPath.isEmpty() && grabbed.save(shotPath)) {
+
+                        // Check if we should transition to viewer test mode
+                        if (testViewer && !transitionedToViewer) {
+                            fprintf(stdout, "TRANSITION: Moving to viewer test mode\n");
+                            transitionedToViewer = true;
+                            // Find first image row (skip galleries) and activate via QML
+                            int firstImageRow = -1;
+                            for (int i = 0; i < galleryModel.rowCount(); ++i) {
+                                QModelIndex idx = galleryModel.index(i);
+                                bool isGallery = galleryModel.data(idx, GalleryModel::IsGalleryRole).toBool();
+                                if (!isGallery) {
+                                    firstImageRow = i;
+                                    break;
+                                }
+                            }
+
+                            if (firstImageRow >= 0) {
+                                // Activate via QML (this emits openViewer which pushes viewer screen and opens image)
+                                QMetaObject::invokeMethod(&galleryModel, "activate", Qt::QueuedConnection,
+                                    Q_ARG(int, firstImageRow));
+                                return;
+                            } else {
+                                fprintf(stderr, "FAIL (Viewer test): No image rows found in gallery\n");
+                                resultCode = 1;
+                                QCoreApplication::exit(1);
+                                return;
+                            }
+                        }
+
+                        // Save screenshot if requested (thumbnail mode only, no viewer test)
+                        if (!shotPath.isEmpty() && !testViewer && grabbed.save(shotPath)) {
                             fprintf(stdout, "Screenshot saved to %s\n", shotPath.toStdString().c_str());
                         }
-                        resultCode = 0;
-                        QCoreApplication::exit(0);
+
+                        if (!testViewer) {
+                            resultCode = 0;
+                            testComplete = true;
+                            QCoreApplication::exit(0);
+                        }
                         return;
                     } else {
                         fprintf(stderr, "FAIL (Step 3): Insufficient unique colors: %d (need >300)\n", uniqueColors);
@@ -548,8 +592,38 @@ static int runSelftest(const QString& vaultPath)
                             "%d/%d tiles have colored centers (requirement: >=3)\n",
                             delivered, colorfulTiles, totalTiles);
 
-                    // Save screenshot if requested
-                    if (!shotPath.isEmpty()) {
+                    // Check if we should transition to viewer test mode
+                    if (testViewer && !transitionedToViewer) {
+                        fprintf(stdout, "TRANSITION: Moving to viewer test mode\n");
+                        transitionedToViewer = true;
+                        // Find first image row (skip galleries) and activate via QML
+                        int firstImageRow = -1;
+                        for (int i = 0; i < galleryModel.rowCount(); ++i) {
+                            QModelIndex idx = galleryModel.index(i);
+                            bool isGallery = galleryModel.data(idx, GalleryModel::IsGalleryRole).toBool();
+                            if (!isGallery) {
+                                firstImageRow = i;
+                                break;
+                            }
+                        }
+
+                        if (firstImageRow >= 0) {
+                            // Activate via QML (this emits openViewer which pushes viewer screen and opens image)
+                            QMetaObject::invokeMethod(&galleryModel, "activate", Qt::QueuedConnection,
+                                Q_ARG(int, firstImageRow));
+                            // Continue to viewer verification (don't exit yet)
+                            // transitionedToViewer flag prevents poll timer from running again
+                            return;
+                        } else {
+                            fprintf(stderr, "FAIL (Viewer test): No image rows found in gallery\n");
+                            resultCode = 1;
+                            QCoreApplication::exit(1);
+                            return;
+                        }
+                    }
+
+                    // Save screenshot if requested (thumbnail mode only, no viewer test)
+                    if (!shotPath.isEmpty() && !testViewer) {
                         if (grabbed.save(shotPath)) {
                             fprintf(stdout, "Screenshot saved to %s\n", shotPath.toStdString().c_str());
                         } else {
@@ -557,8 +631,11 @@ static int runSelftest(const QString& vaultPath)
                         }
                     }
 
-                    resultCode = 0;
-                    QCoreApplication::exit(0);
+                    if (!testViewer) {
+                        resultCode = 0;
+                        testComplete = true;  // Mark complete so poll doesn't run again
+                        QCoreApplication::exit(0);
+                    }
                     return;
                 } else {
                     fprintf(stderr, "FAIL (Step 3): Tile sampling failed. Found %d tiles (need >=3), "
@@ -645,12 +722,68 @@ static int runSelftest(const QString& vaultPath)
         pollTimer.start(100);  // Poll every 100ms
     }
 
-    // Watchdog timer: hard timeout at 5 or 15 seconds depending on mode
+    // Viewer test mode: verify image loads and renders with proper colors
+    if (testViewer) {
+        QObject::connect(&viewerController, &ViewerController::imageLoaded, window, [&]() {
+            if (viewerTestComplete) return;
+
+            // Give a few frames for rendering
+            QTimer::singleShot(300, window, [&]() {
+                if (viewerTestComplete) return;
+                viewerTestComplete = true;
+
+                // Grab and verify viewer pixels
+                QImage grabbed = window->grabWindow();
+                if (grabbed.isNull() || grabbed.width() == 0 || grabbed.height() == 0) {
+                    fprintf(stderr, "FAIL (Viewer): Could not grab window\n");
+                    resultCode = 1;
+                    QCoreApplication::exit(1);
+                    return;
+                }
+
+                // Sample center pixel of viewer area (should be image content, not black or background)
+                int centerX = grabbed.width() / 2;
+                int centerY = grabbed.height() / 2;
+                QRgb centerPixel = grabbed.pixel(centerX, centerY);
+                int r = qRed(centerPixel);
+                int g = qGreen(centerPixel);
+                int b = qBlue(centerPixel);
+
+                fprintf(stdout, "Viewer center pixel: RGB(%d, %d, %d)\n", r, g, b);
+
+                // Background is #000000 (black); content should be colorful
+                // Allow some tolerance: if max component > 50, it's not pure black/background
+                int maxComponent = std::max({r, g, b});
+                bool isContent = maxComponent > 50;
+
+                if (isContent) {
+                    fprintf(stdout, "PASS (Viewer): Center pixel is content (not background/black)\n");
+
+                    // Save screenshot if requested
+                    if (!shotPath.isEmpty() && grabbed.save(shotPath)) {
+                        fprintf(stdout, "Viewer screenshot saved to %s\n", shotPath.toStdString().c_str());
+                    }
+
+                    resultCode = 0;
+                    QCoreApplication::exit(0);
+                } else {
+                    fprintf(stderr, "FAIL (Viewer): Center pixel is black/background (RGB %d,%d,%d)\n", r, g, b);
+                    resultCode = 1;
+                    QCoreApplication::exit(1);
+                }
+            });
+        }, Qt::QueuedConnection);
+    }
+
+    // Watchdog timer: hard timeout depending on mode
     QTimer watchdog;
-    int watchdogTime = targetThumbnailCount > 0 ? 15000 : 5000;
+    int watchdogTime = 5000;  // default
+    if (targetThumbnailCount > 0) {
+        watchdogTime = testViewer ? 30000 : 15000;  // 30s for viewer test, 15s for thumbnail test
+    }
     QObject::connect(&watchdog, &QTimer::timeout, [&]() {
-        if (!testComplete) {
-            fprintf(stderr, "FAIL (Step 3): timeout (%dms) — test never completed\n", watchdogTime);
+        if (!testComplete && !viewerTestComplete) {
+            fprintf(stderr, "FAIL: timeout (%dms) — test never completed\n", watchdogTime);
             resultCode = 1;
             QCoreApplication::exit(1);
         }
@@ -701,10 +834,13 @@ int main(int argc, char** argv)
     UnlockController unlockController;
     ThumbCache thumbCache;
     GalleryModel galleryModel(&unlockController.vault());
+    ViewerController viewerController(&unlockController.vault(), &galleryModel);
+    unlockController.setViewerController(&viewerController);
 
     engine.rootContext()->setContextProperty("unlockController", &unlockController);
     engine.rootContext()->setContextProperty("thumbCache", &thumbCache);
     engine.rootContext()->setContextProperty("galleryModel", &galleryModel);
+    engine.rootContext()->setContextProperty("viewerController", &viewerController);
 
     const QString qmlPath = QStringLiteral(QTUI_QML_DIR "/Main.qml");
     engine.load(QUrl::fromLocalFile(qmlPath));

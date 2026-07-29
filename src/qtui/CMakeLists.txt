@@ -106,6 +106,7 @@ qt_add_executable(osv-qt
     unlock_controller.cpp
     gallery_model.cpp
     thumb_cache.cpp
+    viewer_controller.cpp
 )
 
 # Shaders: compile to .qsb and embed as resources
