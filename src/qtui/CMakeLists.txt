@@ -94,6 +94,7 @@ target_link_libraries(osv-qt-mkvault PRIVATE osv_qt_core)
 qt_add_executable(osv-qt
     main.cpp
     secure_text_field.cpp
+    unlock_controller.cpp
 )
 target_compile_definitions(osv-qt PRIVATE
     QTUI_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
