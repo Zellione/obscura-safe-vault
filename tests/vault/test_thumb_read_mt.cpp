@@ -119,3 +119,98 @@ TEST(thumbnail_read_after_lock_returns_locked)
 
     cleanup_dir(dir);
 }
+
+// Move assignment operator transfers thumb_fp_ and thumb_mutex_ correctly.
+// Phase 58: exercise that moved-to vault can read thumbnails from the moved state.
+TEST(vault_move_assignment_preserves_thumb_handle)
+{
+    const auto dir = fresh_dir("thumb_move_assign");
+    vault::Vault v1;
+    make_vault(v1, dir / "v1.osv");
+    REQUIRE(v1.create_gallery("g") == vault::VaultResult::Ok);
+
+    // Add an image with a real JPEG thumbnail.
+    const auto real_jpeg = fixtures::solid_jpeg(8, 8, 0x99, 0xaa, 0xbb);
+    REQUIRE(v1.add_image("g", real_jpeg, "move_test.jpg") == vault::VaultResult::Ok);
+
+    auto nodes = v1.list("g");
+    REQUIRE(nodes.size() >= 1);
+    const auto* node1 = nodes.at(0);
+    REQUIRE(node1->meta.thumb_length > 0);
+
+    // Verify we can read the thumbnail before move.
+    {
+        crypto::SecureBytes out;
+        CHECK(v1.read_thumbnail(*node1, out) == vault::VaultResult::Ok);
+    }
+
+    // Move-assign v1 to v2 (tests lines 431, 432, 443 in move assignment).
+    vault::Vault v2;
+    v2 = std::move(v1);
+
+    // After move, v2 should have a valid thumb_fp_ and thumb_mutex_.
+    // Re-list from v2 to get the node pointers.
+    nodes = v2.list("g");
+    REQUIRE(nodes.size() >= 1);
+    const auto* node2 = nodes.at(0);
+    REQUIRE(node2->meta.thumb_length > 0);
+
+    // Read thumbnail from v2's moved-to state (exercises thumb_fp_ transfer).
+    crypto::SecureBytes out2;
+    CHECK(v2.read_thumbnail(*node2, out2) == vault::VaultResult::Ok);
+
+    cleanup_dir(dir);
+}
+
+// open() path with thumbnail reads exercises the thumb_fp_ initialization
+// and error handling in the open() method (lines 597-599).
+TEST(vault_open_initializes_thumb_handle_for_reads)
+{
+    const auto dir = fresh_dir("thumb_open");
+
+    // Phase 1: Create and populate a vault.
+    vault::Vault v1;
+    make_vault(v1, dir / "test.osv");
+    REQUIRE(v1.create_gallery("g") == vault::VaultResult::Ok);
+
+    const auto real_jpeg = fixtures::solid_jpeg(16, 16, 0x42, 0x43, 0x44);
+    REQUIRE(v1.add_image("g", real_jpeg, "open_test.jpg") == vault::VaultResult::Ok);
+
+    auto nodes = v1.list("g");
+    REQUIRE(nodes.size() >= 1);
+    const auto* node_before_open = nodes.at(0);
+    REQUIRE(node_before_open->meta.thumb_length > 0);
+
+    const uint64_t thumb_off = node_before_open->meta.thumb_offset;
+    const uint64_t thumb_len = node_before_open->meta.thumb_length;
+
+    // Read thumbnail to verify it exists.
+    {
+        crypto::SecureBytes out;
+        CHECK(v1.read_thumbnail(*node_before_open, out) == vault::VaultResult::Ok);
+    }
+
+    // Lock vault to prepare for re-opening (clearing state).
+    v1.lock();
+
+    // Phase 2: Re-open the same vault (exercises open() thumb_fp_ initialization at lines 595-601).
+    vault::Vault v2;
+    const auto path_str = (dir / "test.osv").string();
+    REQUIRE(vault::Vault::open(path_str, v2) == vault::VaultResult::Ok);
+    const std::vector<uint8_t> pw{'p', 'w'};
+    REQUIRE(v2.unlock(pw, {}) == vault::VaultResult::Ok);
+
+    // Verify that v2's thumb_fp_ is working by reading the same thumbnail.
+    nodes = v2.list("g");
+    REQUIRE(nodes.size() >= 1);
+    const auto* node_after_open = nodes.at(0);
+
+    crypto::SecureBytes out_after;
+    CHECK(v2.read_thumbnail(*node_after_open, out_after) == vault::VaultResult::Ok);
+
+    // Also verify read_thumb_span works with the opened vault's thumb_fp_.
+    crypto::SecureBytes span_out;
+    CHECK(vault::read_thumb_span(v2, thumb_off, thumb_len, span_out) == vault::VaultResult::Ok);
+
+    cleanup_dir(dir);
+}

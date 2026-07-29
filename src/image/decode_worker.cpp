@@ -79,6 +79,28 @@ void DecodeWorker::retain(std::span<const uint64_t> keep)
     });
 }
 
+bool DecodeWorker::run_fetch_stage(Job& job)
+{
+    if (!job.fetch) return true;
+
+    crypto::SecureBytes fetched;
+    if (!job.fetch(fetched)) {
+        // Fetch failed — report empty result
+        {
+            std::lock_guard lock(mtx_);
+            done_.emplace_back(job.key, std::nullopt);
+        }
+        if (wake_event_ != 0) {
+            SDL_Event e{};
+            e.type = wake_event_;
+            SDL_PushEvent(&e);
+        }
+        return false;
+    }
+    job.encoded = std::move(fetched);
+    return true;
+}
+
 void DecodeWorker::run()
 {
     for (;;) {
@@ -92,23 +114,7 @@ void DecodeWorker::run()
         }
 
         // Fetch stage: if a fetcher is provided, call it to obtain the encoded bytes
-        if (job.fetch) {
-            crypto::SecureBytes fetched;
-            if (!job.fetch(fetched)) {
-                // Fetch failed — report empty result
-                {
-                    std::lock_guard lock(mtx_);
-                    done_.emplace_back(job.key, std::nullopt);
-                }
-                if (wake_event_ != 0) {
-                    SDL_Event e{};
-                    e.type = wake_event_;
-                    SDL_PushEvent(&e);
-                }
-                continue;
-            }
-            job.encoded = std::move(fetched);
-        }
+        if (!run_fetch_stage(job)) continue;
 
         // Decode outside the lock — this is the slow part. `job.encoded` (the
         // mlock'd compressed plaintext) is wiped when `job` goes out of scope.

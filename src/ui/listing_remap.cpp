@@ -26,9 +26,7 @@ ListingRemap remap_listing(std::span<const std::string> old_names,
     ListingRemap out;
     out.unchanged = std::ranges::equal(old_names, new_names);
 
-    const bool sel_valid = old_selected >= 0 &&
-                           old_selected < static_cast<int>(old_names.size());
-    if (sel_valid) {
+    if (old_selected >= 0 && old_selected < static_cast<int>(old_names.size())) {
         const int idx = index_of(new_names, old_names[static_cast<size_t>(old_selected)]);
         out.selected = idx >= 0 ? idx : clamped(old_selected, new_names);
     } else {

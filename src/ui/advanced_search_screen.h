@@ -86,6 +86,12 @@ private:
         int tag    = -1;   // selected committed tag in the focused field (-1 = none/editing)
     };
 
+    // Live search mechanics: debounce for query reruns and typeahead suggestions.
+    struct LiveSearch {
+        Debounce                 rerun;       // debounce query reruns to input silence
+        std::vector<std::string> suggestions;  // current typeahead list
+    };
+
     // --- data flow ---
     void rerun();             // re-evaluate query_ → results_
     void reload_saved();      // refresh saved_ + vocabulary_ from the vault
@@ -155,7 +161,7 @@ private:
     EditChrome edit_chrome_;
     Cursor cur_;
 
-    Debounce    rerun_debounce_;   // Phase 58: debounce query reruns to input silence (150 ms)
+    LiveSearch  live_;             // Phase 58: live search state (debounce + suggestions)
     bool        clearing_ = false; // confirming a clear-search (Ctrl+R -> Y/N)
     std::string status_;           // transient feedback line
 

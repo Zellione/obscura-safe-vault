@@ -23,8 +23,7 @@ std::string perf_line(const char* label, double ms)
 }
 
 PerfScope::PerfScope(const char* label, double threshold_ms) noexcept
-    : label_(label), threshold_ms_(threshold_ms),
-      start_(std::chrono::steady_clock::now())
+    : label_(label), threshold_ms_(threshold_ms)
 {
 }
 

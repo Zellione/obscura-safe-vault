@@ -86,6 +86,7 @@ private:
         Fetcher             fetch;   // null => encoded is already populated
     };
 
+    bool run_fetch_stage(Job& job);
     void run();
 
     mutable std::mutex           mtx_;

@@ -6,7 +6,7 @@ namespace ui {
 // exactly once, delay_s after the LAST arm. cancel()+run-now for paths that
 // must not act on stale results (e.g. Enter opening a result).
 struct Debounce {
-    double delay_s = 0.15;
+    explicit Debounce(double delay_s = 0.15) noexcept : delay_s_(delay_s) {}
 
     void arm() noexcept { pending_ = true; elapsed_ = 0.0; }
     void cancel() noexcept { pending_ = false; }
@@ -15,12 +15,13 @@ struct Debounce {
     {
         if (!pending_) return false;
         elapsed_ += dt;
-        if (elapsed_ < delay_s) return false;
+        if (elapsed_ < delay_s_) return false;
         pending_ = false;
         return true;
     }
 
 private:
+    double delay_s_;
     bool   pending_ = false;
     double elapsed_ = 0.0;
 };

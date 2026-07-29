@@ -30,7 +30,7 @@ public:
 private:
     const char*                           label_;
     double                                threshold_ms_;
-    std::chrono::steady_clock::time_point start_;
+    std::chrono::steady_clock::time_point start_ = std::chrono::steady_clock::now();
 };
 
 } // namespace platform
