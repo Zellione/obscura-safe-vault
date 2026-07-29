@@ -16,6 +16,7 @@
 #include "media/volume_setting.h"
 #include "platform/theme_pref.h"
 #include "platform/volume_pref.h"
+#include "platform/perf.h"
 #include "ui/advanced_search_screen.h"
 #include "ui/favorites_galleries.h"
 #include "ui/favorites_images.h"
@@ -579,8 +580,22 @@ bool App::maybe_auto_lock(double dt)
     return true;
 }
 
+void App::update(double dt)
+{
+    const platform::PerfScope perf("app.update", 10.0);
+    if (screen_) screen_->update(dt);
+    badge_elapsed_ += dt;   // Phase 45 Part 6
+
+    // Phase 50: drain the import queue and refresh screens when records are applied
+    if (vault_state_.active && import_ui_.queue.drain(dt) > 0 && screen_) {
+        screen_->on_vault_changed();
+        screen_->mark_dirty();
+    }
+}
+
 void App::render_frame()
 {
+    const platform::PerfScope perf("frame", 20.0);
     const uint64_t render_start = SDL_GetTicksNS();
     window_.begin_frame(gfx::theme::BG.r, gfx::theme::BG.g, gfx::theme::BG.b);
     if (screen_) {
@@ -643,14 +658,7 @@ void App::run()
         const double   dt  = static_cast<double>(now - prev) / 1'000'000'000.0;
         prev = now;
 
-        if (screen_) screen_->update(dt);
-        badge_elapsed_ += dt;   // Phase 45 Part 6
-
-        // Phase 50: drain the import queue and refresh screens when records are applied
-        if (vault_state_.active && import_ui_.queue.drain(dt) > 0 && screen_) {
-            screen_->on_vault_changed();
-            screen_->mark_dirty();
-        }
+        update(dt);
 
         // Idle auto-lock runs before nav resolution so the manager paints this frame.
         const bool auto_locked = maybe_auto_lock(dt);

@@ -60,6 +60,24 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
 - **`header_mutex_`** — separate guard for slot-field mutations during commit (active_slot flip + generation update), to reduce lock hold time contention.
 - **`Vault::lock()` auto-stops the CommitLane** before key wipe, preventing mid-flight commits after the key is gone.
 
+### Phase 58 concurrency: `thumb_fp_` + `thumb_mutex_` (async-safe thumbnail reads)
+- **`thumb_fp_`** — THIRD dedicated file handle, separate from `read_fp_`, for thread-safe
+  `read_thumbnail()`/`read_thumb_span()` calls from ANY thread (UI threads, decode workers, etc.).
+  WHY: decouples thumbnail I/O from the main index/data read path, eliminating render-thread file
+  seeking that causes 0.5–1 s UI latency on large vaults (50k+ items); ThumbnailKey resolves the
+  offset/length span, worker thread does the seek+read, render thread never touches the vault.
+  Opened at unlock (before key is available), closed at lock.
+- **`thumb_mutex_`** — guards all `thumb_fp_` access. `reset()` (called at lock-time) flips
+  `unlocked_` state and closes `thumb_fp_` UNDER the mutex BEFORE `crypto_wipe(master_key_)` —
+  **quiesce-before-wipe ordering** prevents a concurrent `read_thumbnail` call from waking up
+  post-lock and trying to use a wiped key. `unlocked_` is checked BEFORE dropping the lock in
+  read_thumbnail, and if false, the call returns `Locked`. The mutex is never held during I/O —
+  it guards only the state check/file operations.
+- **`resolve_node` promoted to public** (Phase 58) — necessary for thumbnail cache (ThumbKey)
+  to build and validate node identities without exposing internal tree navigation.
+- Consequence: `read_fp_` now handles **only** full-image data and video chunks; all thumbnail
+  I/O and metadata header reads flow through the dedicated, contention-free `thumb_fp_`.
+
 ### staging.* (Phase 50) — worker-to-tree hand-off
 - `stage_image(Vault, data, ...)` / `stage_video(data, ...)` — any thread, stream encrypted chunks to disk with fflush (no fsync), return a ready IndexNode with chunk spans. Plaintext stays mlock'd; nodes are ready but **not attached**.
 - `attach_staged(Vault, node, gallery_path)` — main-thread only, performs tree insertion, **no commit issued**. Commit is scheduled separately by batching policy (see CommitLane below).

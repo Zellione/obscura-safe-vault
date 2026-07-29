@@ -8,6 +8,7 @@
 #include "gfx/text.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "platform/perf.h"
 #include "ui/list_layout.h"
 #include "ui/nav_model.h"
 #include "ui/search_model.h"
@@ -53,7 +54,7 @@ void SearchOverlay::open()
     query_.clear();
     scope_ = vault::SearchScope::Both;
     selected_ = 0;
-    refresh_results();
+    gather_results();
     SDL_StartTextInput(win_.sdl_window());
 }
 
@@ -66,11 +67,16 @@ void SearchOverlay::close()
     all_results_.clear();
 }
 
-void SearchOverlay::refresh_results()
+void SearchOverlay::gather_results()
 {
+    const platform::PerfScope perf("search.gather");
     // Gather all matches in the current scope
     all_results_ = vault_.search("", scope_);
+    filter_results();
+}
 
+void SearchOverlay::filter_results()
+{
     // Tokenize the query and filter/rank the results
     const auto tokens = tokenize(query_.view());
     filtered_.clear();
@@ -107,7 +113,7 @@ bool SearchOverlay::handle_event(const SDL_Event& e)
     // Precedence rule (Phase 54): the query field consumes editing keys before
     // any of this overlay's own shortcuts.
     if (const uint64_t rev = query_.revision(); handle_text_input_event(query_, e)) {
-        if (query_.revision() != rev) refresh_results();
+        if (query_.revision() != rev) filter_results();
         return true;
     }
 
@@ -132,7 +138,7 @@ void SearchOverlay::cycle_scope()
         case Images:    scope_ = Galleries; break;
         case Galleries: scope_ = Both;      break;
     }
-    refresh_results();
+    gather_results();
 }
 
 void SearchOverlay::move_selection(int delta)
@@ -165,6 +171,11 @@ void SearchOverlay::activate_selected()
     const auto& hit = *filtered_[selected_];
     nav_ = hit.is_gallery ? Nav{NavKind::ToGallery, hit.path, 0} : nav_for_image(hit);
     close();
+}
+
+void SearchOverlay::on_vault_changed()
+{
+    if (active_) gather_results();
 }
 
 void SearchOverlay::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)

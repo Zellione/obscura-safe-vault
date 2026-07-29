@@ -18,6 +18,7 @@
 #include "platform/file_dialog.h"
 #include "platform/folder_dialog.h"
 #include "platform/paths.h"
+#include "platform/perf.h"
 #include "ui/chrome_layout.h"
 #include "ui/delete_summary.h"
 #include "ui/detail_model.h"
@@ -169,6 +170,7 @@ void rebuild_detail(GalleryGrid& g)
     std::string key = std::format("{}|{}|{}|{}", multi ? "multi" : "single", g.nav_.path(),
                                   sel_idx, g.sel_.revision());
     if (key == g.detail_.key) return;
+    const platform::PerfScope perf("grid.detail");
     g.detail_.key = std::move(key);
     g.detail_.panel.scroll = 0.0f;   // a new subject starts at the top of the panel
 
@@ -251,14 +253,31 @@ void GalleryGrid::on_exit()
 
 void GalleryGrid::on_vault_changed()
 {
-    // Phase 50: vault's index tree changed (background import drain attached nodes).
-    // children_ pointers are now stale; re-list and refresh selection.
-    refresh();
+    // Phase 58: an import drain must not disturb what the user is doing. The
+    // old listing's NAMES were cached at the last refresh (the node pointers
+    // themselves are stale now, so they must never be re-read here); selection,
+    // multi-selection and scroll are remapped onto the fresh listing by name.
+    const std::vector<std::string> old_names = std::move(child_names_);
+    const int   old_sel    = nav_.selected();
+    const auto  old_multi  = sel_.indices();
+    const float old_scroll = scroll_;
+
+    refresh();   // re-list + rebuild names/counts/covers; clears sel_ and hover
+
+    const ListingRemap m = remap_listing(old_names, child_names_, old_sel, old_multi);
+    nav_.select(m.selected);
+    for (const int i : m.multi) sel_.toggle(i);
+    scroll_ = old_scroll;   // update_scroll_to_selection clamps next frame
     mark_dirty();
+    search_.on_vault_changed();
 }
 
 void GalleryGrid::refresh()
 {
+    const platform::PerfScope perf("grid.refresh");
+    thumbs_.covers.clear();
+    thumbs_.failed.clear();
+
     children_ = vault_.list(nav_.path());
     // Self-heal videos imported before this build could decode their codec
     // (Phase 40 bugfix) — no separate migration step needed.
@@ -278,6 +297,12 @@ void GalleryGrid::refresh()
         child_counts_.push_back(n && n->is_gallery() ? ui::direct_child_counts(*n)
                                                      : ui::SubtreeCounts{});
     counts_row_ = ui::any_tile_counts_to_show(children_);
+
+    // Phase 58: cache children's names for remap on the next vault change
+    child_names_.clear();
+    child_names_.reserve(children_.size());
+    for (const auto* n : children_)
+        child_names_.push_back(n != nullptr ? n->name : std::string{});
 }
 
 void GalleryGrid::open_selected()
@@ -622,7 +647,7 @@ void GalleryGrid::cycle_gallery_sort()
 
 SDL_Texture* GalleryGrid::thumb_texture(const vault::IndexNode& node)
 {
-    return tile_thumb_texture({vault_, cache_, thumbs_.worker, thumbs_.failed}, node);
+    return tile_thumb_texture({vault_, cache_, thumbs_.worker, thumbs_.failed, thumbs_.covers}, node);
 }
 
 bool GalleryGrid::pump_thumbs()
@@ -1996,7 +2021,7 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float bottom)
 void GalleryGrid::draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
                                   const SDL_FRect& box)
 {
-    ui::draw_tile_thumb(r, font_, {vault_, cache_, thumbs_.worker, thumbs_.failed}, n, box);
+    ui::draw_tile_thumb(r, font_, {vault_, cache_, thumbs_.worker, thumbs_.failed, thumbs_.covers}, n, box);
 }
 
 int GalleryGrid::hit_test(float mx, float my) const

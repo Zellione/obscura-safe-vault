@@ -43,8 +43,14 @@ public:
 
     void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
 
+    // Phase 58: a background import drain invalidates SearchHit::node pointers
+    // (vault.h: "valid until the next mutating call"). Host screens call this
+    // from their own on_vault_changed; a closed overlay has nothing cached.
+    void on_vault_changed();
+
 private:
-    void refresh_results();        // rebuild the result list based on query_ and scope_
+    void gather_results();         // vault walk: all_results_ for the current scope, then filter
+    void filter_results();         // in-memory: tokenize query_, rebuild filtered_, rank, clamp
     void cycle_scope();            // Both -> Images -> Galleries -> Both
     void move_selection(int delta); // clamp the highlighted row
     void activate_selected();      // turn the highlighted result into a nav request

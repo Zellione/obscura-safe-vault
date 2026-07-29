@@ -8,6 +8,7 @@
 #include "gfx/texture_cache.h"
 #include "gfx/theme.h"
 #include "image/decode_worker.h"
+#include "platform/perf.h"
 #include "ui/cover_layout.h"
 #include "ui/gallery_cover.h"
 #include "ui/widgets.h"          // fit_rect
@@ -19,23 +20,30 @@ namespace ui {
 ThumbKey thumb_key_for(const vault::IndexNode& node)
 {
     if (node.is_video())
-        return {node.vmeta.poster_offset, node.vmeta.poster_length > 0};
-    return {node.meta.data_offset, node.meta.thumb_length > 0};
+        return {node.vmeta.poster_offset, node.vmeta.poster_offset,
+                node.vmeta.poster_length, node.vmeta.poster_length > 0};
+    return {node.meta.data_offset, node.meta.thumb_offset,
+            node.meta.thumb_length, node.meta.thumb_length > 0};
 }
 
 SDL_Texture* tile_thumb_texture(const ThumbContext& ctx, const vault::IndexNode& node)
 {
-    const auto [key, present] = thumb_key_for(node);
-    if (!present) return nullptr;
-    if (SDL_Texture* t = ctx.cache.get(key)) return t;
+    const ThumbKey k = thumb_key_for(node);
+    if (!k.present) return nullptr;
+    if (SDL_Texture* t = ctx.cache.get(k.key)) return t;
 
-    // A thumbnail that already failed to decode is not retried; an in-flight
-    // decode lands when the host screen pumps the worker. Otherwise read+decrypt
-    // here (fast) and enqueue the slow decode off-thread.
-    if (ctx.failed.contains(key) || ctx.worker.pending(key)) return nullptr;
-    crypto::SecureBytes sb;
-    if (ctx.vault.read_thumbnail(node, sb) != vault::VaultResult::Ok) return nullptr;
-    ctx.worker.submit(key, std::move(sb));
+    // Phase 58: the read+decrypt happens on the worker thread (thread-safe
+    // dedicated vault handle) — the render thread never touches the disk or
+    // the cipher. Capture the vault by reference: App's Vault outlives every
+    // screen, and Vault::reset() quiesces thumb reads under thumb_mutex_
+    // before wiping the key, so a post-lock fetch just lands as Locked/failed.
+    if (ctx.failed.contains(k.key) || ctx.worker.pending(k.key)) return nullptr;
+
+    ctx.worker.submit_fetch(k.key,
+        [&v = ctx.vault, off = k.offset, len = k.length](crypto::SecureBytes& out) {
+            const platform::PerfScope perf("thumb.fetch", 5.0);
+            return vault::read_thumb_span(v, off, len, out) == vault::VaultResult::Ok;
+        });
     return nullptr;
 }
 
@@ -44,10 +52,13 @@ SDL_Texture* tile_cover_tex(const ThumbContext& ctx, const CoverSpan& span)
     const uint64_t key = span.offset;
     if (SDL_Texture* t = ctx.cache.get(key)) return t;
     if (ctx.failed.contains(key) || ctx.worker.pending(key)) return nullptr;
-    crypto::SecureBytes sb;
-    if (vault::read_thumb_span(ctx.vault, span.offset, span.length, sb) != vault::VaultResult::Ok)
-        return nullptr;
-    ctx.worker.submit(key, std::move(sb));
+
+    // Phase 58: async fetch via worker thread (thread-safe vault read).
+    ctx.worker.submit_fetch(key,
+        [&v = ctx.vault, off = span.offset, len = span.length](crypto::SecureBytes& out) {
+            const platform::PerfScope perf("thumb.fetch", 5.0);
+            return vault::read_thumb_span(v, off, len, out) == vault::VaultResult::Ok;
+        });
     return nullptr;
 }
 
@@ -64,7 +75,7 @@ void draw_tile_thumb(gfx::Renderer& r, gfx::FontAtlas& font, const ThumbContext&
         r.draw_round_rect(ff.tab, RADIUS_SMALL, FOLDER);
         r.draw_round_rect(ff.body, RADIUS_SMALL, FOLDER);
 
-        const auto covers = resolve_covers(n);
+        const auto covers = ctx.covers.get(n);
         if (covers.empty()) return;
 
         const auto cells =

@@ -11,6 +11,7 @@
 
 #include "image/decode_worker.h"
 #include "ui/combine_dialog.h"
+#include "ui/cover_cache.h"
 #include "ui/consent_dialog.h"
 #include "ui/volume_set_dialog.h"
 #include "ui/delete_summary.h"
@@ -33,6 +34,7 @@
 #include "ui/widgets.h"
 #include "ui/zip_plan.h"
 #include "ui/import_queue.h"
+#include "ui/listing_remap.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
 namespace vault { class Vault; struct IndexNode; }
@@ -217,6 +219,7 @@ void toggle_select();          // toggle the current item in the export selectio
     int                   cols_ = 1;
     GalleryView           view_ = GalleryView::GridM;
     float                 scroll_ = 0.0f;  // vertical scroll offset (pixels scrolled down)
+    std::vector<std::string> child_names_;   // names of children_, cached because the pointers go stale on tree change
     std::string           error_;
     std::string           status_;   // transient export result message
     std::string           last_footer_;   // Phase 50: track footer summary changes for mark_dirty()
@@ -278,10 +281,13 @@ void toggle_select();          // toggle the current item in the export selectio
 
     // Off-thread thumbnail decoding, scoped to this grid (its own worker; see the
     // note in ImageViewer for why each screen keeps a separate one). Grouped to
-    // keep the field count down.
+    // keep the field count down. CoverCache must be cleared whenever the listing
+    // may have changed (refresh / on_vault_changed / refetch) or lookups
+    // dereference stale keys.
     struct ThumbDecode {
         image::DecodeWorker          worker{image::decode_wake_event()};
         std::unordered_set<uint64_t> failed;   // thumbs that gave up decoding
+        ui::CoverCache               covers;   // gallery cover memoisation per listing
     };
     ThumbDecode thumbs_;
 

@@ -85,3 +85,43 @@ TEST(decode_worker_empty_image_on_garbage)
     CHECK_EQ(r->key, uint64_t{5});
     CHECK_FALSE(r->image.has_value());   // decode failed -> no image
 }
+
+TEST(decode_worker_fetch_success_decodes)
+{
+    image::DecodeWorker w(0);
+    const auto png = fixtures::solid_png(8, 5, 10, 20, 30);
+    w.submit_fetch(7, [&png](crypto::SecureBytes& out) {
+        out = crypto::SecureBytes(png.size());
+        std::copy(png.begin(), png.end(), out.data());
+        return true;
+    });
+    auto r = wait_result(w);
+    REQUIRE(r.has_value());
+    CHECK_EQ(r->key, uint64_t{7});
+    REQUIRE(r->image.has_value());
+    CHECK_EQ(r->image->width, 8);
+    CHECK_EQ(r->image->height, 5);
+}
+
+TEST(decode_worker_fetch_failure_reports_empty)
+{
+    image::DecodeWorker w(0);
+    w.submit_fetch(9, [](crypto::SecureBytes&) { return false; });
+    auto r = wait_result(w);
+    REQUIRE(r.has_value());
+    CHECK_EQ(r->key, uint64_t{9});
+    CHECK_FALSE(r->image.has_value());
+}
+
+TEST(decode_worker_fetch_coalesces_by_key)
+{
+    image::DecodeWorker w(0);
+    w.submit_fetch(3, [](crypto::SecureBytes&) { return false; });
+    w.submit_fetch(3, [](crypto::SecureBytes&) { return false; });   // no-op
+    CHECK(w.pending(3));
+    auto r = wait_result(w);
+    REQUIRE(r.has_value());
+    CHECK_EQ(r->key, uint64_t{3});
+    // Only one result for key 3
+    CHECK_FALSE(w.take_result().has_value());
+}

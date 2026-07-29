@@ -316,6 +316,14 @@ public:
     // unsupported. Locked if the vault is locked.
     [[nodiscard]] VaultResult reclaim();
 
+    // Resolve a slash-separated path to any node (gallery OR image). Intermediate
+    // segments must be galleries; the final segment may be any node kind. Empty
+    // path resolves to the root. Returns nullptr if any segment is missing.
+    // Phase 58: const overload used by ImageViewer::on_vault_changed to re-resolve
+    // collection album paths after a vault mutation.
+    [[nodiscard]] IndexNode*       resolve_node(std::string_view path);
+    [[nodiscard]] const IndexNode* resolve_node(std::string_view path) const;
+
 private:
     // Best-effort space reclamation after a delete, gated on AUTO_COMPACT_*:
     // in-place hole punching where supported (no disk spike), else a full
@@ -330,11 +338,6 @@ private:
     // not a gallery). Empty path resolves to the root.
     [[nodiscard]] IndexNode*       find_gallery(std::string_view path);
     [[nodiscard]] const IndexNode* find_gallery(std::string_view path) const;
-    // Resolve a slash-separated path to any node (gallery OR image). Intermediate
-    // segments must be galleries; the final segment may be any node kind. Empty
-    // path resolves to the root. Returns nullptr if any segment is missing.
-    [[nodiscard]] IndexNode*       resolve_node(std::string_view path);
-    [[nodiscard]] const IndexNode* resolve_node(std::string_view path) const;
 
     void reset() noexcept;  // close file, wipe key, clear state
 
@@ -346,6 +349,16 @@ private:
     // position with a main-thread read. Opened by create()/open(), closed by
     // reset(). Chunks are immutable once appended, so reads need no lock.
     std::FILE*                             read_fp_ = nullptr;
+    // Phase 58: dedicated handle for BACKGROUND thumbnail reads (DecodeWorker
+    // fetch stage). read_fp_ stays main-thread-only (read_image / read_video /
+    // VideoSource / FileOpJob), so thumb I/O can never stall video streaming or
+    // race a file-op worker. thumb_mutex_ serialises the seek+read of one
+    // thumbnail AND guards close-on-lock: reset() flips unlocked_ and closes
+    // thumb_fp_ under this mutex BEFORE wiping the master key, so an in-flight
+    // fetch either completes against valid state or observes Locked. Never
+    // taken together with write_mutex_/header_mutex_ (no nesting, no ordering).
+    std::FILE*                             thumb_fp_ = nullptr;
+    std::unique_ptr<std::mutex>            thumb_mutex_;
     // Phase 50: serialises ALL writes to fp_ (chunk appends from stage_*,
     // index slot writes from the commit lane / commit_index). unique_ptr keeps
     // Vault movable. Held for one whole chunk per acquisition — never released

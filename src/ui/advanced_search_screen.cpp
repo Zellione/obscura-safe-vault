@@ -12,6 +12,7 @@
 #include "gfx/texture_cache.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "platform/perf.h"
 #include "ui/grid_layout.h"
 #include "ui/list_layout.h"
 #include "ui/nav_model.h"
@@ -136,7 +137,7 @@ AdvancedSearchScreen::AdvancedSearchScreen(gfx::Window& win, gfx::FontAtlas& fon
     detail_.panel.open = initial_detail_open;
     // Wire up the result view's request callback to navigate to opened results
     result_view_.set_request_callback([this](int nav_kind, const std::string& path, int idx) {
-        request(static_cast<NavKind>(nav_kind), path, idx);
+        open_result(nav_kind, path, idx);
     });
 }
 
@@ -210,9 +211,18 @@ void AdvancedSearchScreen::reload_saved()
 
 void AdvancedSearchScreen::rerun()
 {
+    const platform::PerfScope perf("advsearch.rerun");
     auto results = search_.run_search(query_);
     result_view_.update_results(results);
     detail_.key.clear();   // SearchHit::node pointers are now invalid
+}
+
+void AdvancedSearchScreen::open_result(int nav_kind, const std::string& path, int idx)
+{
+    // Phase 58: flush any pending debounced rerun before opening a result,
+    // so the user never opens a stale result from before they finished typing.
+    if (live_.rerun.armed()) { live_.rerun.cancel(); rerun(); }
+    request(static_cast<NavKind>(nav_kind), path, idx);
 }
 
 void AdvancedSearchScreen::rebuild_detail()
@@ -270,18 +280,18 @@ void AdvancedSearchScreen::refresh_suggestions()
     const ITextInput* buf = active_buffer();
     const bool tag_field = !saved_panel_.active_buffer() && (focus_ == Include || focus_ == Exclude || focus_ == Group);
     if (tag_field && buf && !buf->empty()) {
-        suggestions_ = tag_suggestions(buffer_text(*buf), vocabulary_);
-        cur_.sugg    = suggestions_.empty() ? -1 : 0;
+        live_.suggestions = tag_suggestions(buffer_text(*buf), vocabulary_);
+        cur_.sugg    = live_.suggestions.empty() ? -1 : 0;
     } else {
-        suggestions_.clear();
+        live_.suggestions.clear();
         cur_.sugg = -1;
     }
 }
 
 std::string AdvancedSearchScreen::accepted(const std::string& buf) const
 {
-    if (cur_.sugg >= 0 && cur_.sugg < static_cast<int>(suggestions_.size()))
-        return suggestions_[cur_.sugg];
+    if (cur_.sugg >= 0 && cur_.sugg < static_cast<int>(live_.suggestions.size()))
+        return live_.suggestions[cur_.sugg];
     return trim(buf);
 }
 
@@ -312,9 +322,10 @@ void AdvancedSearchScreen::handle_event(const SDL_Event& e)
     }
 }
 
-void AdvancedSearchScreen::update(double /*dt*/)
+void AdvancedSearchScreen::update(double dt)
 {
     result_view_.pump_thumbnails();   // upload any off-thread thumb/cover decodes
+    if (live_.rerun.fire(dt)) rerun();   // Phase 58: fire debounced query reruns
     if (std::string s; rename_.consume_completed(s)) {
         status_ = std::move(s);
         rerun();   // the renamed result's new name/path must show up
@@ -328,9 +339,9 @@ void AdvancedSearchScreen::after_buffer_edit()
     cur_.tag = -1;
     if (!saved_panel_.active_buffer() && focus_ == Focus::Name) {
         query_.name_query = edit_.name.str();
-        rerun();
+        live_.rerun.arm();   // Phase 58: debounce name-query reruns to input silence
     }
-    refresh_suggestions();
+    refresh_suggestions();   // in-memory autocomplete is cheap; stays immediate
 }
 
 void AdvancedSearchScreen::handle_clearing_key(const SDL_KeyboardEvent& key)
@@ -353,6 +364,9 @@ void AdvancedSearchScreen::handle_clearing_key(const SDL_KeyboardEvent& key)
 void AdvancedSearchScreen::handle_save_mode_key(const SDL_KeyboardEvent& key)
 {
     if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) {
+        // Phase 58: flush any pending debounced rerun before saving,
+        // so the saved search captures the final query after typing.
+        if (live_.rerun.armed()) { live_.rerun.cancel(); rerun(); }
         if (saved_panel_.finalize_save(query_)) {
             reload_saved();
         }
@@ -531,8 +545,8 @@ void AdvancedSearchScreen::cycle_scope(int dir)
 
 void AdvancedSearchScreen::move_suggestion(int dir)
 {
-    if (suggestions_.empty()) return;
-    const auto n = static_cast<int>(suggestions_.size());
+    if (live_.suggestions.empty()) return;
+    const auto n = static_cast<int>(live_.suggestions.size());
     cur_.sugg    = (cur_.sugg + dir + n) % n;
 }
 
@@ -802,14 +816,14 @@ void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, 
         y += ROW;
         r.draw_text(font_, x + 8, y, "Enter=add  empty Enter=new group  Del=AND/OR", TEXT_FAINT);
         y += ROW;
-        if (!suggestions_.empty()) drop_y = y;
+        if (!live_.suggestions.empty()) drop_y = y;
     }
 
     label(y, Focus::GroupJoin, std::format("Join groups: {}", join_label(query_.group_join)));
 
     // Floating autocomplete dropdown, painted on top of everything above.
-    if (drop_y >= 0.0f && !suggestions_.empty())
-        draw_dropdown(r, font_, suggestions_, cur_.sugg, x, drop_y, colw);
+    if (drop_y >= 0.0f && !live_.suggestions.empty())
+        draw_dropdown(r, font_, live_.suggestions, cur_.sugg, x, drop_y, colw);
 }
 
 void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
@@ -875,7 +889,7 @@ float AdvancedSearchScreen::render_include_section(gfx::Renderer& r, float x, fl
         draw_inline_edit_text(r, font_, x + 24, edit_y, colw - 24, edit_.include,
                               edit_chrome_.include);
         y = edit_y + ROW;
-        if (!suggestions_.empty()) drop_y = y;
+        if (!live_.suggestions.empty()) drop_y = y;
     } else {
         y = list_row_y({.top = y, .row_h = ROW},
                        static_cast<int>(query_.include.size()));

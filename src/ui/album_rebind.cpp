@@ -17,4 +17,23 @@ AlbumRebind rebind_album_index(const std::vector<std::string>& new_paths,
             .preserve = false};
 }
 
+size_t compact_album(std::vector<const vault::IndexNode*>& images,
+                     std::vector<std::string>&             paths)
+{
+    const size_t n = std::min(images.size(), paths.size());
+    size_t w = 0;
+    for (size_t r = 0; r < n; ++r) {
+        if (images[r] == nullptr) continue;
+        if (w != r) {
+            images[w] = images[r];
+            paths[w]  = std::move(paths[r]);
+        }
+        ++w;
+    }
+    const size_t removed = n - w;
+    images.resize(w);
+    paths.resize(w);
+    return removed;
+}
+
 } // namespace ui

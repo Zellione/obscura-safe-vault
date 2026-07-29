@@ -31,6 +31,7 @@ SearchResultView::SearchResultView(vault::Vault& vault, gfx::Window& win, gfx::F
 
 void SearchResultView::update_results(const std::vector<vault::SearchHit>& new_results)
 {
+    grid_covers_.clear();
     results_ = new_results;
     cur_result_ = std::clamp(cur_result_, 0, std::max(0, static_cast<int>(results_.size()) - 1));
 }
@@ -117,7 +118,7 @@ void SearchResultView::render(gfx::Renderer& r, float x, float colw, bool hot)
     const int cur_row   = (total > 0) ? cur_result_ / cols : 0;
     const int first_row = std::clamp(cur_row - vis_rows / 2, 0, std::max(0, rows - vis_rows));
 
-    const ThumbContext ctx{vault_, cache_, grid_worker_, grid_failed_};
+    const ThumbContext ctx{vault_, cache_, grid_worker_, grid_failed_, grid_covers_};
     const GridSpec spec{cols, TILE, TGAP, x, top - static_cast<float>(first_row) * pitch};
     for (int i = first_row * cols; i < total && i < (first_row + vis_rows) * cols; ++i) {
         const SDL_FRect         cell = grid_cell_rect(i, spec);

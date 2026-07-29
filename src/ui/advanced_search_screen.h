@@ -8,6 +8,7 @@
 
 #include "ui/advanced_search_model.h"
 #include "ui/advanced_search_state.h"
+#include "ui/debounce.h"
 #include "ui/detail_model.h"
 #include "ui/detail_panel.h"
 #include "ui/rename_dialog.h"
@@ -85,11 +86,18 @@ private:
         int tag    = -1;   // selected committed tag in the focused field (-1 = none/editing)
     };
 
+    // Live search mechanics: debounce for query reruns and typeahead suggestions.
+    struct LiveSearch {
+        Debounce                 rerun;       // debounce query reruns to input silence
+        std::vector<std::string> suggestions;  // current typeahead list
+    };
+
     // --- data flow ---
     void rerun();             // re-evaluate query_ → results_
     void reload_saved();      // refresh saved_ + vocabulary_ from the vault
     void refresh_suggestions();
     void rebuild_detail();    // cache detail content when focused result changes
+    void open_result(int nav_kind, const std::string& path, int idx);  // result activation with debounce flush
 
     // --- event handling (split into small per-focus handlers) ---
     void handle_key(const SDL_KeyboardEvent& key);
@@ -146,13 +154,13 @@ private:
     AdvancedQuery                   query_;
     std::vector<vault::SavedSearch> saved_;
     std::vector<std::string>        vocabulary_;   // distinct vault tags (autocomplete)
-    std::vector<std::string>        suggestions_;  // current typeahead list
 
     Focus  focus_ = Focus::Include;
     Edit       edit_;
     EditChrome edit_chrome_;
     Cursor cur_;
 
+    LiveSearch  live_;             // Phase 58: live search state (debounce + suggestions)
     bool        clearing_ = false; // confirming a clear-search (Ctrl+R -> Y/N)
     std::string status_;           // transient feedback line
 
