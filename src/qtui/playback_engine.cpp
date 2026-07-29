@@ -89,6 +89,9 @@ void PlaybackEngine::open(quintptr nodeKey)
 
         thread_ = std::jthread([this](std::stop_token st) { runWorker(st); });
 
+        // Auto-start playback when a video is opened
+        setPlaying(true);
+
         qDebug(lcPlayback) << "Video opened:" << duration_ << "seconds";
     } catch (const std::exception& e) {
         qCWarning(lcPlayback) << "Exception opening video:" << e.what();

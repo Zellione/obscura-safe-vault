@@ -440,6 +440,15 @@ static int runSelftest(const QString& vaultPath)
         return 1;
     }
 
+    // Connect video signal to playback (C++ fallback for QML connection)
+    // This ensures playback starts even if the QML connection doesn't work
+    QObject::connect(&galleryModel, &GalleryModel::openVideo, window,
+        [&playbackEngine, &galleryModel, window](int row) {
+            auto nodeKey = galleryModel.data(galleryModel.index(row, 0), GalleryModel::NodeKeyRole).toULongLong();
+            playbackEngine.open(nodeKey);
+            // Note: playbackEngine::open() now calls setPlaying(true) automatically
+        });
+
     // Make window visible for rendering
     window->show();
 
@@ -858,7 +867,7 @@ static int runSelftest(const QString& vaultPath)
 
     // Video test mode: verify video playback, frames, position, and motion
     if (testVideo) {
-        QObject::connect(&playbackEngine, QOverload<>::of(&PlaybackEngine::positionChanged), window, [&]() {
+        bool connOk = QObject::connect(&playbackEngine, &PlaybackEngine::positionChanged, window, [&]() {
             // Monitor playback position
             static QElapsedTimer videoTestTimer;
             static int videoFrameSnapshots = 0;
