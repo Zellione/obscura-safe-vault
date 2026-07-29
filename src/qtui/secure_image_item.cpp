@@ -197,7 +197,7 @@ void SecureImageRenderer::render(QRhiCommandBuffer* cb)
         const auto& px = *toUpload_;
         if (!tex_ || tex_->pixelSize() != QSize(px.width, px.height)) {
             // Destroy old texture per documented QRhiResource lifecycle.
-            // QRhiResource::destroy() (qrhi.h) is the safe pattern to release GPU resources
+            // QRhiResource::destroy() (qrhi.h:835) is the safe pattern to release GPU resources
             // before heap deallocation. The destructor alone does not release GPU state.
             if (tex_) {
                 tex_->destroy();
