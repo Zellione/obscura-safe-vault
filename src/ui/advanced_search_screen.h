@@ -154,7 +154,6 @@ private:
     AdvancedQuery                   query_;
     std::vector<vault::SavedSearch> saved_;
     std::vector<std::string>        vocabulary_;   // distinct vault tags (autocomplete)
-    std::vector<std::string>        suggestions_;  // current typeahead list
 
     Focus  focus_ = Focus::Include;
     Edit       edit_;
