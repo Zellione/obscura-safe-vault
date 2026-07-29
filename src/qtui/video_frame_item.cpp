@@ -197,8 +197,11 @@ void VideoFrameRenderer::synchronize(QQuickRhiItem* item)
 {
     auto* video_item = static_cast<VideoFrameItem*>(item);
     item_ = video_item;
-    toUpload_ = video_item->pending_;
-    video_item->pending_.reset();
+    // Always consume pending frame if present (not just when it changes)
+    if (video_item->pending_) {
+        toUpload_ = video_item->pending_;
+        video_item->pending_.reset();
+    }
 }
 
 void VideoFrameRenderer::render(QRhiCommandBuffer* cb)
@@ -335,6 +338,9 @@ void VideoFrameItem::setFrame(std::shared_ptr<const FrameBox> frame)
         }
     }
     pending_ = frame;
+    // Increment frameCounter to force Qt Quick to detect a property change and re-render
+    ++frameCounter_;
+    emit frameCounterChanged();
     update();
 }
 

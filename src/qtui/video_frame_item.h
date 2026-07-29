@@ -23,6 +23,7 @@ class VideoFrameItem : public QQuickRhiItem {
     Q_OBJECT
     Q_PROPERTY(QSize sourceSize READ sourceSize NOTIFY sourceSizeChanged)
     Q_PROPERTY(double pts READ pts NOTIFY ptsChanged)
+    Q_PROPERTY(int frameCounter READ frameCounter NOTIFY frameCounterChanged)
 
 public:
     QQuickRhiItemRenderer* createRenderer() override;
@@ -32,6 +33,7 @@ public:
 
     [[nodiscard]] QSize sourceSize() const;
     [[nodiscard]] double pts() const { return pts_; }
+    [[nodiscard]] int frameCounter() const { return frameCounter_; }
 
     // Test-only: how many times has render() been called
     [[nodiscard]] int testOnlyRenderCount() const { return renderCount_; }
@@ -40,6 +42,7 @@ public:
 signals:
     void sourceSizeChanged();
     void ptsChanged();
+    void frameCounterChanged();
 
 private:
     friend class VideoFrameRenderer;
@@ -47,5 +50,6 @@ private:
     std::shared_ptr<const FrameBox> pending_;  // read in synchronize()
     QSize sourceSize_;
     double pts_ = 0.0;
-    int renderCount_ = 0;  // test-only counter
+    int frameCounter_ = 0;  // incremented on every setFrame to trigger re-render
+    int renderCount_ = 0;   // test-only counter
 };

@@ -540,10 +540,10 @@ static int runSelftest(const QString& vaultPath)
                                 "%d unique colors (delegates not instantiated in QObject tree)\n",
                                 delivered, uniqueColors);
 
-                        // Check if we should transition to video or viewer test mode
+                        // Check if we should transition to video or viewer test mode (set flags first to prevent re-entry)
                         if (testVideo && !transitionedToVideo) {
+                            transitionedToVideo = true;  // Set BEFORE invoking to prevent re-entry
                             fprintf(stdout, "TRANSITION: Moving to video test mode\n");
-                            transitionedToVideo = true;
                             // Find first video row and activate via QML
                             int firstVideoRow = -1;
                             for (int i = 0; i < galleryModel.rowCount(); ++i) {
@@ -567,8 +567,8 @@ static int runSelftest(const QString& vaultPath)
                                 return;
                             }
                         } else if (testViewer && !transitionedToViewer) {
+                            transitionedToViewer = true;  // Set BEFORE invoking to prevent re-entry
                             fprintf(stdout, "TRANSITION: Moving to viewer test mode\n");
-                            transitionedToViewer = true;
                             // Find first image row (skip galleries) and activate via QML
                             int firstImageRow = -1;
                             for (int i = 0; i < galleryModel.rowCount(); ++i) {
@@ -882,9 +882,9 @@ static int runSelftest(const QString& vaultPath)
                 renderCount = videoItems[0]->testOnlyRenderCount();
             }
 
-            // After ~2 seconds, collect motion samples and verify
-            if (videoTestTimer.elapsed() >= 500 && videoFrameSnapshots == 0) {
-                // First sample at 500ms
+            // Collect motion samples at 1.5s and 2.5s, verify at 2.5s
+            if (videoTestTimer.elapsed() >= 1500 && videoFrameSnapshots == 0) {
+                // First sample at 1500ms
                 QImage grabbed = window->grabWindow();
                 if (!grabbed.isNull()) {
                     // Find VideoFrameItem and map its center to scene coordinates
@@ -905,14 +905,14 @@ static int runSelftest(const QString& vaultPath)
                         videoFrameSnapshots++;
                     }
                 }
-            } else if (videoTestTimer.elapsed() >= 1000 && videoFrameSnapshots == 1) {
-                // Second sample at 1000ms
+            } else if (videoTestTimer.elapsed() >= 2500 && videoFrameSnapshots == 1) {
+                // Second sample at 2500ms
                 QImage grabbed = window->grabWindow();
                 if (!grabbed.isNull()) {
                     videoGrabSample2 = grabbed.copy();
                     videoFrameSnapshots++;
                 }
-            } else if (videoTestTimer.elapsed() >= 2000 && !videoTestComplete) {
+            } else if (videoTestTimer.elapsed() >= 2500 && !videoTestComplete) {
                 // Verify all assertions
                 videoTestComplete = true;
 
