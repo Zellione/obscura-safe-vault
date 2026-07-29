@@ -136,7 +136,7 @@ AdvancedSearchScreen::AdvancedSearchScreen(gfx::Window& win, gfx::FontAtlas& fon
     detail_.panel.open = initial_detail_open;
     // Wire up the result view's request callback to navigate to opened results
     result_view_.set_request_callback([this](int nav_kind, const std::string& path, int idx) {
-        request(static_cast<NavKind>(nav_kind), path, idx);
+        open_result(nav_kind, path, idx);
     });
 }
 
@@ -213,6 +213,14 @@ void AdvancedSearchScreen::rerun()
     auto results = search_.run_search(query_);
     result_view_.update_results(results);
     detail_.key.clear();   // SearchHit::node pointers are now invalid
+}
+
+void AdvancedSearchScreen::open_result(int nav_kind, const std::string& path, int idx)
+{
+    // Phase 58: flush any pending debounced rerun before opening a result,
+    // so the user never opens a stale result from before they finished typing.
+    if (rerun_debounce_.armed()) { rerun_debounce_.cancel(); rerun(); }
+    request(static_cast<NavKind>(nav_kind), path, idx);
 }
 
 void AdvancedSearchScreen::rebuild_detail()
@@ -312,9 +320,10 @@ void AdvancedSearchScreen::handle_event(const SDL_Event& e)
     }
 }
 
-void AdvancedSearchScreen::update(double /*dt*/)
+void AdvancedSearchScreen::update(double dt)
 {
     result_view_.pump_thumbnails();   // upload any off-thread thumb/cover decodes
+    if (rerun_debounce_.fire(dt)) rerun();   // Phase 58: fire debounced query reruns
     if (std::string s; rename_.consume_completed(s)) {
         status_ = std::move(s);
         rerun();   // the renamed result's new name/path must show up
@@ -328,9 +337,9 @@ void AdvancedSearchScreen::after_buffer_edit()
     cur_.tag = -1;
     if (!saved_panel_.active_buffer() && focus_ == Focus::Name) {
         query_.name_query = edit_.name.str();
-        rerun();
+        rerun_debounce_.arm();   // Phase 58: debounce name-query reruns to input silence
     }
-    refresh_suggestions();
+    refresh_suggestions();   // in-memory autocomplete is cheap; stays immediate
 }
 
 void AdvancedSearchScreen::handle_clearing_key(const SDL_KeyboardEvent& key)
@@ -353,6 +362,9 @@ void AdvancedSearchScreen::handle_clearing_key(const SDL_KeyboardEvent& key)
 void AdvancedSearchScreen::handle_save_mode_key(const SDL_KeyboardEvent& key)
 {
     if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) {
+        // Phase 58: flush any pending debounced rerun before saving,
+        // so the saved search captures the final query after typing.
+        if (rerun_debounce_.armed()) { rerun_debounce_.cancel(); rerun(); }
         if (saved_panel_.finalize_save(query_)) {
             reload_saved();
         }

@@ -8,6 +8,7 @@
 
 #include "ui/advanced_search_model.h"
 #include "ui/advanced_search_state.h"
+#include "ui/debounce.h"
 #include "ui/detail_model.h"
 #include "ui/detail_panel.h"
 #include "ui/rename_dialog.h"
@@ -90,6 +91,7 @@ private:
     void reload_saved();      // refresh saved_ + vocabulary_ from the vault
     void refresh_suggestions();
     void rebuild_detail();    // cache detail content when focused result changes
+    void open_result(int nav_kind, const std::string& path, int idx);  // result activation with debounce flush
 
     // --- event handling (split into small per-focus handlers) ---
     void handle_key(const SDL_KeyboardEvent& key);
@@ -153,6 +155,7 @@ private:
     EditChrome edit_chrome_;
     Cursor cur_;
 
+    Debounce    rerun_debounce_;   // Phase 58: debounce query reruns to input silence (150 ms)
     bool        clearing_ = false; // confirming a clear-search (Ctrl+R -> Y/N)
     std::string status_;           // transient feedback line
 
