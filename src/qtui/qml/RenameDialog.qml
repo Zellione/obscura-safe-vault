@@ -126,7 +126,7 @@ Dialog {
         }
 
         const errorText = galleryModel.rename(dialog.targetRow, newName);
-        if (!errorText.isEmpty()) {
+        if (errorText !== "") {
             // Validation failed; keep dialog open and show error
             errorMessage = errorText;
         } else {
