@@ -24,6 +24,7 @@ public:
     enum Role {
         NameRole = Qt::UserRole + 1,
         IsGalleryRole,
+        IsVideoRole,
         NodeKeyRole
     };
     Q_ENUM(Role)
@@ -51,6 +52,7 @@ public:
 signals:
     void currentPathChanged();
     void openViewer(int row);  // emitted by activate(row) for images; Task 7 connects
+    void openVideo(int row);   // emitted by activate(row) for videos; Task 9 connects
 
 private:
 

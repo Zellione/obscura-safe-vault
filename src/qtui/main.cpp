@@ -14,6 +14,8 @@
 
 #include "secure_text_field.h"
 #include "secure_image_item.h"
+#include "video_frame_item.h"
+#include "playback_engine.h"
 #include "unlock_controller.h"
 #include "gallery_model.h"
 #include "thumb_cache.h"
@@ -402,6 +404,8 @@ static int runSelftest(const QString& vaultPath)
 
     qmlRegisterType<SecureTextField>("Osv", 1, 0, "SecureTextField");
     qmlRegisterType<SecureImageItem>("Osv", 1, 0, "SecureImageItem");
+    qmlRegisterType<VideoFrameItem>("Osv", 1, 0, "VideoFrameItem");
+    qmlRegisterType<PlaybackEngine>("Osv", 1, 0, "PlaybackEngine");
 
     QQmlApplicationEngine engine;
     UnlockController unlockController;
@@ -409,14 +413,17 @@ static int runSelftest(const QString& vaultPath)
     GalleryModel galleryModel(&unlockController.vault());
     ViewerController viewerController(&unlockController.vault(), &galleryModel);
     ThemePalette themePalette;
+    PlaybackEngine playbackEngine;
     unlockController.setViewerController(&viewerController);
     galleryModel.setViewerController(&viewerController);
+    playbackEngine.setVault(&unlockController.vault());
 
     engine.rootContext()->setContextProperty("unlockController", &unlockController);
     engine.rootContext()->setContextProperty("thumbCache", &thumbCache);
     engine.rootContext()->setContextProperty("galleryModel", &galleryModel);
     engine.rootContext()->setContextProperty("viewerController", &viewerController);
     engine.rootContext()->setContextProperty("themePalette", &themePalette);
+    engine.rootContext()->setContextProperty("playbackEngine", &playbackEngine);
     engine.load(QUrl::fromLocalFile(QStringLiteral(QTUI_QML_DIR "/Main.qml")));
 
     if (engine.rootObjects().isEmpty()) {
@@ -837,6 +844,8 @@ int main(int argc, char** argv)
 
     qmlRegisterType<SecureTextField>("Osv", 1, 0, "SecureTextField");
     qmlRegisterType<SecureImageItem>("Osv", 1, 0, "SecureImageItem");
+    qmlRegisterType<VideoFrameItem>("Osv", 1, 0, "VideoFrameItem");
+    qmlRegisterType<PlaybackEngine>("Osv", 1, 0, "PlaybackEngine");
 
     QQmlApplicationEngine engine;
 
@@ -867,6 +876,7 @@ int main(int argc, char** argv)
     engine.rootContext()->setContextProperty("galleryModel", &galleryModel);
     engine.rootContext()->setContextProperty("viewerController", &viewerController);
     engine.rootContext()->setContextProperty("themePalette", &themePalette);
+    engine.rootContext()->setContextProperty("playbackEngine", &playbackEngine);
 
     const QString qmlPath = QStringLiteral(QTUI_QML_DIR "/Main.qml");
     engine.load(QUrl::fromLocalFile(qmlPath));

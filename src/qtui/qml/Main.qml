@@ -40,6 +40,10 @@ Window {
                 stack.push(viewerScreenComponent);
                 viewerController.open(row);
             }
+            function onOpenVideo(row) {
+                stack.push(videoScreenComponent);
+                playbackEngine.open(galleryModel.data(galleryModel.index(row, 0), galleryModel.roleNames()['nodeKey']));
+            }
         }
 
         // Inline unlock screen (was UnlockScreen.qml)
@@ -254,6 +258,13 @@ Window {
         Component {
             id: viewerScreenComponent
             ViewerScreen {
+            }
+        }
+
+        // Video player screen
+        Component {
+            id: videoScreenComponent
+            VideoScreen {
             }
         }
     }

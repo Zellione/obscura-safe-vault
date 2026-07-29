@@ -65,3 +65,114 @@ Implemented a full-featured image viewer in Qt Quick/QML with the following capa
 - src/qtui/unlock_controller.h / .cpp (add setViewerController, drain in lock())
 - src/qtui/gallery_model.cpp (already emits openViewer for images)
 - src/qtui/CMakeLists.txt (add viewer_controller.cpp)
+
+---
+
+## 2026-07-29 — Task 9: M6a video-only playback (VideoFrameItem YUV + PlaybackEngine)
+
+### Implementation Summary
+
+**VideoFrameItem (src/qtui/video_frame_item.h/cpp)**
+- QRhi-based YUV frame rendering, following SecureImageItem pattern exactly
+- Three R8 textures: Y (full resolution), U/V (quarter for I420 4:2:0)
+- 6-vertex normalized quad, ortho(0,1) MVP (matches image rendering for consistency)
+- Per-plane setDataStride() on upload to handle YUV row padding
+- Test-only render counter for selftest verification
+
+**yuv.frag Shader (src/qtui/shaders/yuv.frag)**
+- BT.601 limited-range YUV→RGB conversion (matches SDL_PIXELFORMAT_IYUV internal path)
+- Verified coefficients against src/gfx/yuv_texture.cpp
+- Y: scale from limited range [16/255, 235/255] to full [0,1]
+- U/V: centered at 0.5, sampled directly
+- Output: RGB(Y + 1.402*V, Y - 0.344136*U - 0.714136*V, Y + 1.772*U)
+
+**PlaybackEngine (src/qtui/playback_engine.h/cpp)**
+- std::jthread worker: demux→submit→pace→deliver pattern
+- Main thread API: open(nodeKey), play/pause, seekBy(s), stop()
+- Lifecycle: VideoSource::open → ChunkAvio wrapper → VideoDecoder::open → VideoDecodeWorker thread
+- Frame pacing: clock = base + elapsed_timer.elapsed()/1000.0 vs PlaybackModel::frame_due(clock, pts)
+- Queued invoke to setFrame on GUI thread (worker jthread context → GUI via Qt::QueuedConnection)
+- Frames held until due time (small sleep if not yet due) to maintain sync
+- Generation counter discards results from old seeks (monotonic > comparison on generation field)
+
+**Gallery Model + Main Integration**
+- Added `isVideo` role to GalleryModel (reports Type::Video nodes)
+- Split activate(): Gallery→enterGallery, Video→openVideo, Image→openViewer
+- Main.qml: openVideo signal → stack.push(videoScreenComponent) + playbackEngine.open(nodeKey)
+- PlaybackEngine bound as context property + frame item binding in VideoScreen.qml onCompleted
+
+**VideoScreen.qml**
+- Letterboxed VideoFrameItem (preserves aspect ratio, centered)
+- Controls: Play/Pause button, position/duration text, Space to toggle play
+- Seek: J/L keys ±5s (PLAYBACK_SEEK_STEP), Esc to close
+- Auto-play on load (may be configurable in future)
+
+**CMakeLists.txt**
+- Added `OSV_MEDIA_SRC` glob (all src/media/*.cpp including video_decoder, video_decode_worker, chunk_avio)
+- FFmpeg libs guarded by `EXISTS ${CODEC_PREFIX}/lib/libavcodec.a`
+  - Defines OSV_QT_HAS_AV (gates media code at compile time)
+  - Links: libavformat, libavcodec, libswscale, libswresample, libavutil, libaom (second mention for ld single-pass ordering)
+- Added playback_model.cpp (pure transport math, no SDL dependency, previously missing from Qt build)
+- Shader: yuv.frag added to qt6_add_shaders
+
+**mkvault Video Support**
+- Extension check: .mp4 / .mkv / .webm / .mov → v.add_video()
+- All other extensions → v.add_image() (backward compatible)
+
+### Frame Pacing Observations
+
+**Clock Model (Video-Only, M6a)**
+- No audio → clock driven by QElapsedTimer from play/seek base
+- QElapsedTimer::elapsed() is reliable across platforms for frame timing
+- Frame due check: `frame_pts <= clock + 1e-9` (epsilon detects frame drift < 1ns)
+- Worker yields if frame not due (small sleep to avoid busy-loop on precise PTS)
+
+**Seek Mechanics**
+- Increment generation_ on seek to invalidate old results
+- decoder.seek_demux_only(): I/O only, flushes packet queues (no codec reset needed)
+- worker.begin_seek(pts): sets pending target, drops queued packets, discards decoded frames < target
+- Render thread compares result->generation == current; old-generation results silent-discarded
+- Frame plane pointers re-pointed into FrameBox::storage (owned by frame, not worker)
+
+**Thread Safety**
+- Worker state: jthread-local (decoder, avio, worker thread storage)
+- Shared state: mutex-guarded (pendingControl_)
+- Result delivery: queued invoke PlaybackEngine::onFrameReady() on GUI thread
+- Vault / master key: passed once at open(), never accessed again in worker
+
+### Known Limitations / Deferred
+
+1. **Video Selftest Leg** (env OSV_QT_SELFTEST_VIDEO=1)
+   - Main.cpp scaffold does not yet wire video test mode
+   - Would verify: frame count >= 10, position > 1.0s, center pixel colorful, two grabs 500ms apart differ
+   - Deferred to follow-up (task 10 will refactor test harness for A/V sync)
+
+2. **NV12 Support**
+   - Fixture is I420 (H.264 -pix_fmt yuv420p baseline)
+   - Shader logic for NV12 exists; texture upload code sketched but I420 path only
+   - Deferred: real NV12 fixture + render verification needed
+
+3. **Audio** (Task 10)
+   - PlaybackEngine deliberately headless: VideoDecodeWorker(wake_event=0)
+   - Video clock will need A/V sync in next phase
+   - No audio_frame queueing infrastructure yet
+
+### Build & Test
+
+- Build: `nice -n 19 scripts/build_qt_experiment.sh` (debug, ~3–4 min)
+- Fixture: 30 PNG gradients + 8s H.264 video (testsrc2 pattern, colorful + moving)
+  - Video: 640x360 30fps, I420, baseline profile (broadly compatible)
+  - Vault: /tmp/qtexp_av.osv password: "password"
+- Manual verification: osv-qt /tmp/qtexp_av.osv → unlock → activate video row → Space play/pause, J/L seek ±5s, Esc close
+
+### Files Modified/Created
+
+- src/qtui/video_frame_item.h / .cpp (new)
+- src/qtui/playback_engine.h / .cpp (new)
+- src/qtui/shaders/yuv.frag (new)
+- src/qtui/qml/VideoScreen.qml (new)
+- src/qtui/gallery_model.h / .cpp (add isVideo role, openVideo signal, route Type::Video in activate)
+- src/qtui/main.cpp (register VideoFrameItem/PlaybackEngine, set context property)
+- src/qtui/qml/Main.qml (wire openVideo signal, push VideoScreen component)
+- src/qtui/tools/mkvault.cpp (add .mp4/.mkv/.webm/.mov support)
+- src/qtui/CMakeLists.txt (add media sources, FFmpeg linking, yuv.frag shader, video sources to executable)

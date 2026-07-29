@@ -33,6 +33,8 @@ QVariant GalleryModel::data(const QModelIndex& index, int role) const
             return QString::fromStdString(node->name);
         case IsGalleryRole:
             return node->type == vault::IndexNode::Type::Gallery;
+        case IsVideoRole:
+            return node->type == vault::IndexNode::Type::Video;
         case NodeKeyRole:
             // Opaque pointer, safe to pass as quintptr because workers
             // only use it with ThumbCache.request(key), never dereference
@@ -47,6 +49,7 @@ QHash<int, QByteArray> GalleryModel::roleNames() const
     QHash<int, QByteArray> roles;
     roles[NameRole] = "name";
     roles[IsGalleryRole] = "isGallery";
+    roles[IsVideoRole] = "isVideo";
     roles[NodeKeyRole] = "nodeKey";
     return roles;
 }
@@ -146,8 +149,11 @@ void GalleryModel::activate(int row)
 
     if (node->type == vault::IndexNode::Type::Gallery) {
         enterGallery(row);
+    } else if (node->type == vault::IndexNode::Type::Video) {
+        // Video: route to video playback (Task 9)
+        emit openVideo(row);
     } else {
-        // Image or Video: signal to open viewer (Task 7 will connect this)
+        // Image: route to image viewer (Task 7)
         emit openViewer(row);
     }
 }

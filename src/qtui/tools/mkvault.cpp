@@ -28,7 +28,17 @@ int main(int argc, char** argv)
             std::ifstream f(e.path(), std::ios::binary);
             std::vector<uint8_t> data((std::istreambuf_iterator<char>(f)),
                                       std::istreambuf_iterator<char>());
-            auto r = v.add_image("", data, e.path().filename().string());
+
+            auto ext = e.path().extension().string();
+            // Convert to lowercase for comparison
+            for (auto& c : ext) c = std::tolower(c);
+
+            vault::VaultResult r = vault::VaultResult::Ok;
+            if (ext == ".mp4" || ext == ".mkv" || ext == ".webm" || ext == ".mov") {
+                r = v.add_video("", data, e.path().filename().string());
+            } else {
+                r = v.add_image("", data, e.path().filename().string());
+            }
             std::printf("%s: %s\n", e.path().filename().c_str(),
                         r == vault::VaultResult::Ok ? "ok" : "skipped");
         }

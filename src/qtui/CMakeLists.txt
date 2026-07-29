@@ -15,6 +15,7 @@ set(CODEC_PREFIX "${REPO_ROOT}/vendor/codecs-prefix")
 
 file(GLOB OSV_CRYPTO_SRC "${REPO_ROOT}/src/crypto/*.cpp")
 file(GLOB OSV_VAULT_SRC  "${REPO_ROOT}/src/vault/*.cpp")
+file(GLOB OSV_MEDIA_SRC  "${REPO_ROOT}/src/media/*.cpp")
 
 add_library(osv_qt_core STATIC
     ${OSV_CRYPTO_SRC}
@@ -31,10 +32,12 @@ add_library(osv_qt_core STATIC
     # deps vault.cpp pulls in
     ${REPO_ROOT}/src/platform/error_log.cpp
     ${REPO_ROOT}/src/platform/paths.cpp
-    ${REPO_ROOT}/src/media/video_probe.cpp
+    # media: video decode + demux (Task 9 adds video playback)
+    ${OSV_MEDIA_SRC}
     ${REPO_ROOT}/src/ui/advanced_search_model.cpp
     ${REPO_ROOT}/src/ui/gallery_sort.cpp
     ${REPO_ROOT}/src/ui/natural_sort.cpp
+    ${REPO_ROOT}/src/ui/playback_model.cpp
     # text input models (Task 3 uses SecureTextInput)
     ${REPO_ROOT}/src/ui/text_input_model.cpp
     ${REPO_ROOT}/src/ui/secure_text_input.cpp
@@ -56,6 +59,9 @@ target_include_directories(osv_qt_core PUBLIC
     ${REPO_ROOT}/vendor/SDL3/include
     ${CODEC_PREFIX}/include
 )
+target_compile_definitions(osv_qt_core PUBLIC
+    OSV_VENDORED_AV
+)
 target_compile_definitions(osv_qt_core PRIVATE
     MINIZ_NO_ZLIB_COMPATIBLE_NAMES
     _POSIX_C_SOURCE=200809L
@@ -69,6 +75,19 @@ set_source_files_properties(
     PROPERTIES
     COMPILE_FLAGS "-w"
 )
+# Guard FFmpeg/video support on codec prefix presence
+if(EXISTS "${CODEC_PREFIX}/lib/libavcodec.a")
+    target_compile_definitions(osv_qt_core PUBLIC OSV_QT_HAS_AV)
+    target_link_libraries(osv_qt_core PUBLIC
+        ${CODEC_PREFIX}/lib/libavformat.a
+        ${CODEC_PREFIX}/lib/libavcodec.a
+        ${CODEC_PREFIX}/lib/libswscale.a
+        ${CODEC_PREFIX}/lib/libswresample.a
+        ${CODEC_PREFIX}/lib/libavutil.a
+        ${CODEC_PREFIX}/lib/libaom.a          # second aom mention — single-pass ld
+    )
+endif()
+
 # Same single-pass archive order premake uses: heif → de265 → aom → webpdemux → webp → sharpyuv
 target_link_libraries(osv_qt_core PUBLIC
     ${REPO_ROOT}/vendor/SDL3/build/libSDL3.a
@@ -105,17 +124,19 @@ qt_add_executable(osv-qt
     main.cpp
     secure_text_field.cpp
     secure_image_item.cpp
+    video_frame_item.cpp
     unlock_controller.cpp
     gallery_model.cpp
     thumb_cache.cpp
     viewer_controller.cpp
     theme_palette.cpp
+    playback_engine.cpp
 )
 
 # Shaders: compile to .qsb and embed as resources
 qt6_add_shaders(osv-qt "osv_qt_shaders"
     PREFIX "/osvqt"
-    FILES shaders/texquad.vert shaders/texquad.frag
+    FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
 )
 
 target_compile_definitions(osv-qt PRIVATE
