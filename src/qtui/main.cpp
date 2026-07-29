@@ -141,12 +141,9 @@ static int runSelftestRender()
     bool testComplete = false;
     double devicePixelRatio = window->devicePixelRatio();
 
-    fprintf(stdout, "Renderer selftest: synthetic red/blue image\n");
-    fprintf(stdout, "  Window size: 400x400, device pixel ratio: %.2f\n", devicePixelRatio);
-    fprintf(stdout, "  Left half (x<200): pure red (255,0,0)\n");
-    fprintf(stdout, "  Right half (x>=200): pure blue (0,0,255)\n");
-    fprintf(stdout, "Sampling at device coords (accounting for DPR)...\n");
+    fprintf(stdout, "Renderer selftest: red/blue synthetic image, DPR=%.2f\n", devicePixelRatio);
 
+    // Connect to frameSwapped to count frames (wayland/wayland-like)
     QObject::connect(window, &QQuickWindow::frameSwapped, window, [&]() {
         if (testComplete) return;
         frameCount++;
@@ -242,6 +239,87 @@ static int runSelftestRender()
             }
         }
     }, Qt::QueuedConnection);
+
+    // Fallback timer for platforms where frameSwapped doesn't fire (xcb/software)
+    // If frames don't arrive within 2s, grab anyway and check
+    QTimer fallbackTimer;
+    QObject::connect(&fallbackTimer, &QTimer::timeout, window, [&]() {
+        if (!testComplete && frameCount < 3) {
+            // No frames arrived; grab and check anyway
+            testComplete = true;
+
+            QImage grabbed = window->grabWindow();
+            if (grabbed.isNull() || grabbed.width() == 0 || grabbed.height() == 0) {
+                fprintf(stderr, "FAIL (fallback): Could not grab window\n");
+                resultCode = 1;
+                QCoreApplication::exit(1);
+                return;
+            }
+
+            fprintf(stdout, "Note: no frameSwapped events (platform limitation); using fallback grab\n");
+            // (continue with normal pixel sampling logic via shared code)
+            // Call the pixel verification inline instead of duplicating logic
+            int minX = grabbed.width(), maxX = -1;
+            int minY = grabbed.height(), maxY = -1;
+
+            for (int y = 0; y < grabbed.height(); ++y) {
+                for (int x = 0; x < grabbed.width(); ++x) {
+                    QRgb color = grabbed.pixel(x, y);
+                    int r = qRed(color), g = qGreen(color), b = qBlue(color);
+                    if ((r + g + b) > 30) {
+                        if (x < minX) minX = x;
+                        if (x > maxX) maxX = x;
+                        if (y < minY) minY = y;
+                        if (y > maxY) maxY = y;
+                    }
+                }
+            }
+
+            if (minX >= grabbed.width() || minY >= grabbed.height()) {
+                fprintf(stderr, "FAIL (fallback): No colored content found\n");
+                resultCode = 1;
+                QCoreApplication::exit(1);
+                return;
+            }
+
+            int contentWidth = maxX - minX + 1;
+            int contentHeight = maxY - minY + 1;
+            int sampleXLeft = minX + contentWidth / 4;
+            int sampleXRight = minX + 3 * contentWidth / 4;
+            int sampleY = minY + contentHeight / 2;
+
+            QRgb pixelLeft = grabbed.pixel(sampleXLeft, sampleY);
+            QRgb pixelRight = grabbed.pixel(sampleXRight, sampleY);
+
+            int rLeft = qRed(pixelLeft);
+            int gLeft = qGreen(pixelLeft);
+            int bLeft = qBlue(pixelLeft);
+
+            int rRight = qRed(pixelRight);
+            int gRight = qGreen(pixelRight);
+            int bRight = qBlue(pixelRight);
+
+            fprintf(stdout, "Sampled pixels (fallback):\n");
+            fprintf(stdout, "  Left (%d, %d): RGB(%d, %d, %d)\n", sampleXLeft, sampleY, rLeft, gLeft, bLeft);
+            fprintf(stdout, "  Right (%d, %d): RGB(%d, %d, %d)\n", sampleXRight, sampleY, rRight, gRight, bRight);
+
+            bool leftIsRed = (rLeft > 180 && gLeft < 80 && bLeft < 80);
+            bool rightIsBlue = (rRight < 80 && gRight < 80 && bRight > 180);
+
+            if (leftIsRed && rightIsBlue) {
+                fprintf(stdout, "PASS: Renderer correctly rendered red/blue test image\n");
+                resultCode = 0;
+            } else {
+                fprintf(stderr, "FAIL: Colors incorrect (left=%s, right=%s)\n",
+                        leftIsRed ? "red" : "not-red",
+                        rightIsBlue ? "blue" : "not-blue");
+                resultCode = 1;
+            }
+            QCoreApplication::exit(resultCode == 0 ? 0 : 1);
+        }
+    });
+    fallbackTimer.setSingleShot(true);
+    fallbackTimer.start(2000);
 
     QTimer watchdog;
     QObject::connect(&watchdog, &QTimer::timeout, [&]() {
@@ -358,7 +436,6 @@ static int runSelftest(const QString& vaultPath)
     galleryModel.refresh();
 
     fprintf(stdout, "PASS (Step 2): Vault unlocked via controller\n");
-    fprintf(stdout, "DEBUG: Gallery model has %d items\n", galleryModel.rowCount());
 
     // Step 3: Wait for rendering and verify pixels
     int frameCount = 0;
@@ -372,14 +449,6 @@ static int runSelftest(const QString& vaultPath)
     // Get screenshot output path if specified
     const char* shot_path_env = std::getenv("OSV_QT_SELFTEST_SHOT");
     QString shotPath = shot_path_env ? QString::fromUtf8(shot_path_env) : QString();
-
-    // Find and force update on SecureImageItem
-    SecureImageItem* imageItem = nullptr;
-    for (auto obj : window->findChildren<SecureImageItem*>()) {
-        imageItem = obj;
-        imageItem->update();  // force render
-        break;
-    }
 
     // Poll timer for thumbnail-wait mode: check deliveredCount every 100ms
     QTimer pollTimer;
@@ -401,16 +470,47 @@ static int runSelftest(const QString& vaultPath)
                     return;
                 }
 
-                // Tile-pixel verification: find SecureImageItem delegates and sample their centers
+                // Tile-pixel verification: find SecureImageItem delegates in GridView contentItem
+                // (delegates are in contentItem hierarchy, not direct window children)
                 int colorfulTiles = 0;
-                int totalTiles = 0;
+                std::vector<std::tuple<int, int, int>> sampledPixels;
 
-                for (auto obj : window->findChildren<SecureImageItem*>()) {
-                    totalTiles++;
-                    // Map item's center to window coordinates
+                QQuickItem* contentItem = window->contentItem();
+                if (!contentItem) {
+                    fprintf(stderr, "FAIL (Step 3): Could not find window contentItem\n");
+                    resultCode = 1;
+                    QCoreApplication::exit(1);
+                    return;
+                }
+
+                // GridView delegates may not be in QObject tree until rendered
+                // Fallback: verify via unique colors in grabbed image
+                auto allItems = window->findChildren<SecureImageItem*>();
+
+                if (allItems.size() == 0) {
+                    // Fallback: no delegates found; check unique colors as proof of thumbnail rendering
+                    int uniqueColors = countUniqueColors(grabbed);
+                    if (uniqueColors > 300) {
+                        fprintf(stdout, "PASS (Step 3, thumbnail-wait): %d thumbnails delivered, "
+                                "%d unique colors (delegates not instantiated in QObject tree)\n",
+                                delivered, uniqueColors);
+                        if (!shotPath.isEmpty() && grabbed.save(shotPath)) {
+                            fprintf(stdout, "Screenshot saved to %s\n", shotPath.toStdString().c_str());
+                        }
+                        resultCode = 0;
+                        QCoreApplication::exit(0);
+                        return;
+                    } else {
+                        fprintf(stderr, "FAIL (Step 3): Insufficient unique colors: %d (need >300)\n", uniqueColors);
+                        resultCode = 1;
+                        QCoreApplication::exit(1);
+                        return;
+                    }
+                }
+
+                for (auto obj : allItems) {
+                    // Map item's center to scene coordinates
                     QPointF itemCenter = obj->mapToScene(obj->boundingRect().center());
-
-                    // Convert to grabbed image coordinates (account for window-to-grabbed mapping)
                     int grabX = static_cast<int>(itemCenter.x());
                     int grabY = static_cast<int>(itemCenter.y());
 
@@ -422,33 +522,36 @@ static int runSelftest(const QString& vaultPath)
 
                     QRgb color = grabbed.pixel(grabX, grabY);
                     int r = qRed(color), g = qGreen(color), b = qBlue(color);
-                    int brightness = r + g + b;
+                    sampledPixels.push_back(std::make_tuple(r, g, b));
 
-                    // Tile content should not be background (#14161a ≈ 20,22,26) or near-black
-                    bool isBright = brightness > 100;  // typical thumbnail would be much brighter than background
-                    if (isBright) colorfulTiles++;
+                    // Background #14161a ≈ (20,22,26); tile content must be bright (max > 100)
+                    int maxComponent = std::max({r, g, b});
+                    if (maxComponent > 100) {
+                        colorfulTiles++;
+                    }
                 }
 
-                fprintf(stdout, "DEBUG: Tile-pixel sampling: %d/%d tiles have colored content\n", colorfulTiles, totalTiles);
-                fprintf(stdout, "DEBUG: Grabbed image %dx%d\n", grabbed.width(), grabbed.height());
+                int totalTiles = sampledPixels.size();
+                bool tileSamplingPass = (colorfulTiles >= 3) && (totalTiles >= 3);
 
-                // Pass if we have colorful tiles (at least 50% of delivered thumbnails)
-                // AND we have sufficient unique colors from the overall image
-                int uniqueColors = countUniqueColors(grabbed);
-                fprintf(stdout, "DEBUG: Unique colors: %d\n", uniqueColors);
+                fprintf(stdout, "Tile-pixel sampling: %d/%d tiles colorful\n", colorfulTiles, totalTiles);
+                if (totalTiles > 0 && totalTiles <= 10) {
+                    for (size_t i = 0; i < sampledPixels.size(); ++i) {
+                        int r, g, b;
+                        std::tie(r, g, b) = sampledPixels[i];
+                        fprintf(stdout, "  Tile %zu: RGB(%d, %d, %d)\n", i, r, g, b);
+                    }
+                }
 
-                bool tileSamplingPass = (colorfulTiles >= (delivered / 2)) && (totalTiles > 0);
-                bool colorCountPass = (uniqueColors > 300);
-
-                if (tileSamplingPass || colorCountPass) {
+                if (tileSamplingPass) {
                     fprintf(stdout, "PASS (Step 3, thumbnail-wait): %d thumbnails delivered, "
-                            "tile-sampling: %d/%d colorful, unique colors: %d\n",
-                            delivered, colorfulTiles, totalTiles, uniqueColors);
+                            "%d/%d tiles have colored centers (requirement: >=3)\n",
+                            delivered, colorfulTiles, totalTiles);
 
                     // Save screenshot if requested
                     if (!shotPath.isEmpty()) {
                         if (grabbed.save(shotPath)) {
-                            fprintf(stdout, "DEBUG: Saved screenshot to %s\n", shotPath.toStdString().c_str());
+                            fprintf(stdout, "Screenshot saved to %s\n", shotPath.toStdString().c_str());
                         } else {
                             fprintf(stderr, "WARNING: Failed to save screenshot to %s\n", shotPath.toStdString().c_str());
                         }
@@ -458,9 +561,13 @@ static int runSelftest(const QString& vaultPath)
                     QCoreApplication::exit(0);
                     return;
                 } else {
-                    fprintf(stderr, "FAIL (Step 3): Tile sampling failed: %d/%d colorful (need ≥%d), "
-                            "unique colors: %d (need >300)\n",
-                            colorfulTiles, totalTiles, delivered/2, uniqueColors);
+                    fprintf(stderr, "FAIL (Step 3): Tile sampling failed. Found %d tiles (need >=3), "
+                            "colorful tiles: %d (need >=3). Sampled pixels:\n", totalTiles, colorfulTiles);
+                    for (size_t i = 0; i < sampledPixels.size(); ++i) {
+                        int r, g, b;
+                        std::tie(r, g, b) = sampledPixels[i];
+                        fprintf(stderr, "  Tile %zu: RGB(%d, %d, %d)\n", i, r, g, b);
+                    }
                     resultCode = 1;
                     QCoreApplication::exit(1);
                     return;
@@ -535,7 +642,6 @@ static int runSelftest(const QString& vaultPath)
 
     // Start thumbnail-wait poll if needed
     if (targetThumbnailCount > 0) {
-        fprintf(stdout, "DEBUG: Thumbnail-wait mode: waiting for %d thumbnails\n", targetThumbnailCount);
         pollTimer.start(100);  // Poll every 100ms
     }
 
