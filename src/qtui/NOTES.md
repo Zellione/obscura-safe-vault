@@ -14,8 +14,12 @@ first unchecked checkbox.
 **osv_qt_core target built:** reuses untouched src/crypto, src/vault, non-SDL src/image, plus key models and platform shims.
 
 **TUs added beyond brief's base list (due to linker demands):**
-- `src/platform/paths.cpp` (required by error_log.cpp; depends on SDL3 for config_dir())
+- `src/platform/paths.cpp` (required by error_log.cpp; provides config_dir())
 - `src/media/video_probe.cpp` (required by vault.cpp add_video/repair_video_metadata; best-effort no-FFmpeg fallback)
+- `vendor/miniz/miniz.c`, `miniz_tdef.c`, `miniz_tinfl.c`, `miniz_zip.c` (required by vault::chunk_codec.cpp for ZIP handling)
+
+**Library linkage beyond brief's template:**
+- `vendor/SDL3/build/libSDL3.a` (pulled in by src/platform/paths.cpp for SDL_GetPrefPath/SDL_free)
 
 **Build artifacts:**
 - `osv_qt_core`: static library (reusable by all later tasks)
