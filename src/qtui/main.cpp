@@ -913,7 +913,7 @@ static int runSelftest(const QString& vaultPath)
                     videoFrameSnapshots++;
                 }
             } else if (videoTestTimer.elapsed() >= 2500 && !videoTestComplete) {
-                // Verify all assertions
+                // Mark complete FIRST to prevent re-entry (guard against double evaluation)
                 videoTestComplete = true;
 
                 fprintf(stdout, "\n=== VIDEO TEST ASSERTIONS ===\n");
@@ -945,22 +945,56 @@ static int runSelftest(const QString& vaultPath)
                     fprintf(stdout, "ASSERT (c) Center pixel: NO GRAB... FAIL\n");
                 }
 
-                // (d) Two samples 500ms apart must differ (motion detection)
+                // (d) Region-based motion detection (64x64 block hash)
+                // Compare a 64x64 region around the item center across two samples
+                // This is more robust than single-pixel sampling and guaranteed to detect
+                // per-frame differences from testsrc2's timestamp overlay
                 bool assertD = false;
                 if (!videoGrabSample1.isNull() && !videoGrabSample2.isNull()) {
-                    QRgb pixel1 = videoGrabSample1.pixel(videoSampleX, videoSampleY);
-                    QRgb pixel2 = videoGrabSample2.pixel(videoSampleX, videoSampleY);
-                    int r1 = qRed(pixel1), g1 = qGreen(pixel1), b1 = qBlue(pixel1);
-                    int r2 = qRed(pixel2), g2 = qGreen(pixel2), b2 = qBlue(pixel2);
-                    assertD = (r1 != r2 || g1 != g2 || b1 != b2);
-                    fprintf(stdout, "ASSERT (d) Motion (samples differ): Sample1=RGB(%d,%d,%d) Sample2=RGB(%d,%d,%d)... %s\n",
-                            r1, g1, b1, r2, g2, b2, assertD ? "PASS" : "FAIL");
+                    int blockSize = 64;
+                    int blockX1 = std::max(0, videoSampleX - blockSize / 2);
+                    int blockY1 = std::max(0, videoSampleY - blockSize / 2);
+                    int blockX2 = std::min(videoGrabSample1.width() - 1, blockX1 + blockSize - 1);
+                    int blockY2 = std::min(videoGrabSample1.height() - 1, blockY1 + blockSize - 1);
+
+                    // Compute block sum checksums for both samples
+                    unsigned long blockSum1 = 0, blockSum2 = 0;
+                    int diffPixels = 0;  // Count pixels that differ
+                    for (int y = blockY1; y <= blockY2; ++y) {
+                        for (int x = blockX1; x <= blockX2; ++x) {
+                            QRgb p1 = videoGrabSample1.pixel(x, y);
+                            QRgb p2 = videoGrabSample2.pixel(x, y);
+                            blockSum1 += qRed(p1) + qGreen(p1) + qBlue(p1);
+                            blockSum2 += qRed(p2) + qGreen(p2) + qBlue(p2);
+                            // Count pixels that differ by >10 in any channel
+                            if (std::abs(qRed(p1) - qRed(p2)) > 10 ||
+                                std::abs(qGreen(p1) - qGreen(p2)) > 10 ||
+                                std::abs(qBlue(p1) - qBlue(p2)) > 10) {
+                                diffPixels++;
+                            }
+                        }
+                    }
+
+                    // Motion detection: either block sum differs by >1.5% OR >5% of pixels differ
+                    // This handles both large changes (timestamp overlay) and small changes (slow motion)
+                    unsigned long maxSum = static_cast<unsigned long>(blockSize * blockSize * 255 * 3);
+                    unsigned long threshold = maxSum / 65;  // ~1.5% threshold
+                    unsigned long blockDiff = blockSum1 > blockSum2 ? blockSum1 - blockSum2 : blockSum2 - blockSum1;
+                    int totalPixels = blockSize * blockSize;
+                    int pixelDiffThreshold = totalPixels / 20;  // 5% of pixels
+                    assertD = (blockDiff > threshold) || (diffPixels > pixelDiffThreshold);
+
+                    fprintf(stdout, "ASSERT (d) Motion (region-based): Block1Sum=%lu Block2Sum=%lu (diff=%lu, threshold=%lu) DiffPixels=%d/%d (req=%d)... %s\n",
+                            blockSum1, blockSum2, blockDiff, threshold, diffPixels, totalPixels, pixelDiffThreshold,
+                            assertD ? "PASS" : "FAIL");
                 } else {
                     fprintf(stdout, "ASSERT (d) Motion: NO SAMPLES... FAIL\n");
+                    assertD = false;
                 }
 
                 fprintf(stdout, "=== VIDEO TEST RESULT ===\n");
-                if (assertA && assertB && assertC && assertD) {
+                bool allPass = (assertA && assertB && assertC && assertD);
+                if (allPass) {
                     fprintf(stdout, "PASS: All video assertions passed\n");
 
                     // Save screenshot if requested
