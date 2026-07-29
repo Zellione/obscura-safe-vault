@@ -585,6 +585,7 @@ VaultResult Vault::open(const std::string& path, Vault& out)
     out.read_fp_      = std::fopen(path.c_str(), "rb");
     if (!out.read_fp_) {
         std::fclose(fp);
+        out.fp_ = nullptr;  // Null the pointer so reset() doesn't double-close
         return VaultResult::IoError;
     }
     // Disable buffering on read_fp_ so it always reads fresh from disk,
@@ -596,6 +597,9 @@ VaultResult Vault::open(const std::string& path, Vault& out)
     if (!out.thumb_fp_) {
         std::fclose(out.read_fp_);
         std::fclose(fp);
+        // Null the pointers so reset() doesn't double-close
+        out.read_fp_ = nullptr;
+        out.fp_ = nullptr;
         return VaultResult::IoError;
     }
     std::setvbuf(out.thumb_fp_, nullptr, _IONBF, 0);
