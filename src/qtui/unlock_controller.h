@@ -9,6 +9,7 @@
 class SecureTextField;
 class SecureImageItem;
 class ViewerController;
+class PlaybackEngine;
 
 class UnlockController : public QObject {
     Q_OBJECT
@@ -19,6 +20,9 @@ public:
 
     // Set viewer controller for coordinated shutdown (optional, for async image loading).
     void setViewerController(ViewerController* viewer) noexcept { viewerController_ = viewer; }
+
+    // Set playback engine for coordinated shutdown (optional, for video playback).
+    void setPlaybackEngine(PlaybackEngine* playback) noexcept { playbackEngine_ = playback; }
 
     Q_INVOKABLE bool openVault(const QUrl& fileUrl);
     Q_INVOKABLE void unlock(SecureTextField* field);
@@ -40,4 +44,5 @@ private:
     vault::Vault vault_;
     QString      error_;
     ViewerController* viewerController_ = nullptr;
+    PlaybackEngine* playbackEngine_ = nullptr;
 };

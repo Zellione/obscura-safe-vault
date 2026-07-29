@@ -10,6 +10,7 @@
 #include "pixel_buffer.h"
 #include "thumb_cache.h"
 #include "viewer_controller.h"
+#include "playback_engine.h"
 
 UnlockController::UnlockController(QObject* parent)
     : QObject(parent)
@@ -62,8 +63,13 @@ void UnlockController::unlock(SecureTextField* field)
 
 void UnlockController::lock()
 {
-    // CRITICAL: Drain both viewer and thumbnail caches before locking vault.
-    // Drain-before-lock ordering ensures workers finish before vault wipes the index tree.
+    // CRITICAL: Drain viewer, playback, and thumbnail workers before locking vault.
+    // Drain-before-lock ordering ensures all workers finish before vault wipes the index tree.
+
+    // Stop video playback (worker thread drains on stop())
+    if (playbackEngine_) {
+        playbackEngine_->stop();
+    }
 
     // Drain viewer controller (async full-image loads)
     if (viewerController_) {

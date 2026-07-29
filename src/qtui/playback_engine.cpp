@@ -92,7 +92,7 @@ void PlaybackEngine::open(quintptr nodeKey)
         // Auto-start playback when a video is opened
         setPlaying(true);
 
-        qDebug(lcPlayback) << "Video opened:" << duration_ << "seconds";
+        qCDebug(lcPlayback) << "Video opened:" << duration_ << "seconds";
     } catch (const std::exception& e) {
         qCWarning(lcPlayback) << "Exception opening video:" << e.what();
         worker_.reset();
@@ -127,15 +127,22 @@ void PlaybackEngine::stop()
 
 void PlaybackEngine::setPlaying(bool on)
 {
-    if (playing_ == on) return;
-    playing_ = on;
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (playing_ == on) return;
+        playing_ = on;
+        changed = true;
 
-    if (on) {
-        elapsed_.restart();
-        clockBase_ = position_;
+        if (on) {
+            elapsed_.restart();
+            clockBase_ = position_;
+        }
     }
 
-    emit playingChanged();
+    if (changed) {
+        emit playingChanged();
+    }
 }
 
 void PlaybackEngine::seekBy(double s)
@@ -212,7 +219,12 @@ void PlaybackEngine::runWorker(std::stop_token st)
 
             if (result->frame) {
                 // Compute current playback clock and delay to frame delivery
-                double clock = clockBase_ + elapsed_.elapsed() / 1000.0;
+                // Must protect both clockBase_ and elapsed_ reads with mutex_
+                double clock = 0.0;
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    clock = clockBase_ + elapsed_.elapsed() / 1000.0;
+                }
                 double delay = result->frame->pts_seconds - clock;
 
                 // If frame is not yet due, sleep until it is (then re-check stop)

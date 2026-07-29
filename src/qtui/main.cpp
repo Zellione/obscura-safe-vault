@@ -418,7 +418,9 @@ static int runSelftest(const QString& vaultPath)
     ThemePalette themePalette;
     PlaybackEngine playbackEngine;
     unlockController.setViewerController(&viewerController);
+    unlockController.setPlaybackEngine(&playbackEngine);
     galleryModel.setViewerController(&viewerController);
+    galleryModel.setPlaybackEngine(&playbackEngine);
     playbackEngine.setVault(&unlockController.vault());
 
     engine.rootContext()->setContextProperty("unlockController", &unlockController);
@@ -1089,7 +1091,9 @@ int main(int argc, char** argv)
     ThemePalette themePalette;
     PlaybackEngine playbackEngine;
     unlockController.setViewerController(&viewerController);
+    unlockController.setPlaybackEngine(&playbackEngine);
     galleryModel.setViewerController(&viewerController);
+    galleryModel.setPlaybackEngine(&playbackEngine);
     playbackEngine.setVault(&unlockController.vault());
 
     engine.rootContext()->setContextProperty("unlockController", &unlockController);

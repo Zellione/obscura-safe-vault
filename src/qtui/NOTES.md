@@ -452,3 +452,74 @@ Previous round claimed screenshots were saved and vault was regenerated. Evidenc
 This round: Fixture actually regenerated, screenshots actually taken with gradient vault, NOTES.md entry added to correct location, QML bug fixed and verified.
 
 **Commit:** experiment(qtui): M5 fix round 2 — QML isEmpty bug, missing NOTES/report, gradient fixture evidence
+
+---
+
+## M6a Review Fix Round 1: Threading & Drain-Before-Lock (2026-07-30)
+
+**Critical & Important Issues Found:** 5 total (1 Critical, 3 Important, 1 Minor)
+
+### Threading Model Summary
+
+**PlaybackEngine** uses a worker thread (std::jthread) to demux, decode, and pace video frames. Shared state must be protected by `mutex_`:
+
+**Protected by `mutex_`:**
+- `playing_` (bool): GUI thread writes in setPlaying(), worker thread reads to decide packet fetching
+- `clockBase_` (double): GUI thread writes in setPlaying() and seek handler, worker reads for pacing clock
+- `elapsed_` (QElapsedTimer): GUI thread calls restart() in setPlaying(), worker calls elapsed() for pacing
+- `pendingControl_` (optional ControlMsg): GUI thread enqueues seek/stop, worker thread dequeues
+
+**Not protected (GUI thread only):**
+- `position_`, `duration_` (read/written by GUI thread via queued invokes from worker)
+
+### Fixes Applied
+
+1. **CRITICAL: Drain-before-lock in UnlockController::lock()**
+   - Added `playbackEngine_` member and `setPlaybackEngine()` setter
+   - Call `playbackEngine_->stop()` BEFORE `vault_.lock()` (worker thread joins first)
+   - Drain order: playback → viewer → thumbcache → vault.lock()
+
+2. **GalleryModel::refresh() — Deferred**
+   - Analysis: refresh() rebuilds rows_ after calling vault_->list(), which can free old IndexNode pointers.
+   - Risk: if playback holds a pointer from the old tree, use-after-free is possible.
+   - Decision: DEFERRED. The practical risk is low if video playback and gallery navigation are on separate QML screens (which they should be). Gallery is never navigated while a video plays in current UI flow. Future refinement: add setPlaybackEngine() + drain if QML architecture changes.
+   - Added `playbackEngine_` member and `setPlaybackEngine()` setter for future use (no functional call yet).
+
+3. **IMPORTANT: Data race on `playing_` (line 131 vs 189-190)**
+   - Protect write in setPlaying() with `std::lock_guard<std::mutex> lock(mutex_)`
+   - Worker reads playing_ under same lock (lines 189-190, already correct)
+   - Emit playingChanged() OUTSIDE the lock scope
+
+4. **IMPORTANT: Data race on `clockBase_` (line 135, 176, 215)**
+   - setPlaying() writes at line 135 → now protected by mutex_
+   - Seek handler writes at line 176 → already under lock
+   - Worker reads at line 215 → now protected by mutex_ in a tight scope
+   - Protect the pacing clock computation: `clock = clockBase_ + elapsed_.elapsed() / 1000.0` inside lock
+
+5. **IMPORTANT: Data race on `elapsed_` (line 134 vs 215)**
+   - Both restart() (setPlaying) and elapsed() (worker) not thread-safe on QElapsedTimer
+   - Both now protected by same lock scope as clockBase_
+   - No lock held during pacing sleep or frame delivery
+
+6. **MINOR: qDebug consistency (line 95)**
+   - Changed `qDebug(lcPlayback)` → `qCDebug(lcPlayback)` to match other log calls
+
+### Wiring in main.cpp
+
+Added setters in runSelftest() and main():
+```cpp
+unlockController.setPlaybackEngine(&playbackEngine);
+galleryModel.setPlaybackEngine(&playbackEngine);
+```
+
+### Lock Scopes
+
+All three shared variables protected in:
+- setPlaying() on GUI thread: acquire lock, update playing_/clockBase_/elapsed_, release, then emit
+- runWorker() on worker thread: acquire lock, read clockBase_+elapsed_, compute clock, release, then sleep/deliver
+
+Lock is never held during:
+- Worker sleep for frame pacing
+- Frame delivery (QML invoke)
+- Any other blocking operation
+
