@@ -59,6 +59,21 @@ void UnlockController::lock()
     emit unlockedChanged();
 }
 
+// Test-only helper for selftest: unlock with explicit password bytes
+bool UnlockController::unlockWithPassword(const std::span<const uint8_t>& password)
+{
+    const auto r = vault_.unlock(password, {});
+    if (r == vault::VaultResult::Ok) {
+        setError({});
+        emit unlockedChanged();
+        return true;
+    }
+    setError(r == vault::VaultResult::AuthFailed
+                 ? QStringLiteral("Wrong password")
+                 : QStringLiteral("Unlock failed"));
+    return false;
+}
+
 // TEMPORARY (Task 5 proof) — removed in Task 6
 // Find and load the first image, decrypt, decode, and display.
 void UnlockController::loadFirstImage(SecureImageItem* item)

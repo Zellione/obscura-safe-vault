@@ -22,6 +22,7 @@ private:
     void rebuildResources();
     void ensurePipeline();
 
+    SecureImageItem* item_ = nullptr;  // stored in synchronize()
     std::shared_ptr<const PixelBuffer> toUpload_;
     std::unique_ptr<QRhiTexture> tex_;
     std::unique_ptr<QRhiSampler> sampler_;
@@ -176,6 +177,7 @@ void SecureImageRenderer::ensurePipeline()
 void SecureImageRenderer::synchronize(QQuickRhiItem* item)
 {
     auto* image_item = static_cast<SecureImageItem*>(item);
+    item_ = image_item;  // store for render() use
     toUpload_ = image_item->pending_;
     image_item->pending_.reset();
 }
@@ -185,11 +187,18 @@ void SecureImageRenderer::render(QRhiCommandBuffer* cb)
     QRhi* rhi = this->rhi();
     QRhiResourceUpdateBatch* batch = rhi->nextResourceUpdateBatch();
 
+    // Test-only: increment render counter (proof that this render path executed)
+    if (item_) {
+        item_->testOnlyIncrementRenderCount();
+    }
+
     // Upload new texture if pending
     if (toUpload_) {
         const auto& px = *toUpload_;
         if (!tex_ || tex_->pixelSize() != QSize(px.width, px.height)) {
-            // Destroy old texture per QRhiResource lifecycle (qrhi.h: virtual void destroy())
+            // Destroy old texture per documented QRhiResource lifecycle.
+            // QRhiResource::destroy() (qrhi.h) is the safe pattern to release GPU resources
+            // before heap deallocation. The destructor alone does not release GPU state.
             if (tex_) {
                 tex_->destroy();
             }

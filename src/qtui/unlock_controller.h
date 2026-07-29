@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QUrl>
+#include <span>
 
 #include "vault/vault.h"
 
@@ -19,6 +20,9 @@ public:
 
     // TEMPORARY (Task 5 proof) — removed in Task 6
     Q_INVOKABLE void loadFirstImage(SecureImageItem* item);
+
+    // Test-only helper for selftest (not exposed to QML)
+    bool unlockWithPassword(const std::span<const uint8_t>& password);
 
     [[nodiscard]] bool unlocked() const { return vault_.is_unlocked(); }
     [[nodiscard]] QString errorText() const { return error_; }
