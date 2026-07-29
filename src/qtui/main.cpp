@@ -398,6 +398,7 @@ static int runSelftest(const QString& vaultPath)
     GalleryModel galleryModel(&unlockController.vault());
     ViewerController viewerController(&unlockController.vault(), &galleryModel);
     unlockController.setViewerController(&viewerController);
+    galleryModel.setViewerController(&viewerController);
 
     engine.rootContext()->setContextProperty("unlockController", &unlockController);
     engine.rootContext()->setContextProperty("thumbCache", &thumbCache);
@@ -836,6 +837,7 @@ int main(int argc, char** argv)
     GalleryModel galleryModel(&unlockController.vault());
     ViewerController viewerController(&unlockController.vault(), &galleryModel);
     unlockController.setViewerController(&viewerController);
+    galleryModel.setViewerController(&viewerController);
 
     engine.rootContext()->setContextProperty("unlockController", &unlockController);
     engine.rootContext()->setContextProperty("thumbCache", &thumbCache);

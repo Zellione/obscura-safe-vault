@@ -1,5 +1,6 @@
 #include "gallery_model.h"
 #include "thumb_cache.h"
+#include "viewer_controller.h"
 #include "vault/vault.h"
 
 GalleryModel::GalleryModel(vault::Vault* vault, QObject* parent)
@@ -51,13 +52,16 @@ QHash<int, QByteArray> GalleryModel::roleNames() const
 
 void GalleryModel::refresh()
 {
-    // Drain pending thumbnail workers before rebuilding rows.
-    // Workers must never outlive the row snapshot that produced their node pointers.
-    // This ensures all in-flight workers (who hold pointers to old tree nodes) complete
+    // Drain pending workers before rebuilding rows.
+    // Workers (both thumbnail and full-image viewers) must never outlive the row snapshot
+    // that produced their node pointers. This ensures all in-flight workers complete
     // before we discard rows_ and the old IndexNode* pointers become stale.
     auto cache = ThumbCache::instance();
     if (cache) {
         cache->drainPending();
+    }
+    if (viewerController_) {
+        viewerController_->shutdownAndDrain();
     }
 
     beginResetModel();

@@ -58,6 +58,11 @@ Rectangle {
         updateFitScale();
     }
 
+    // Unbind from controller on destruction (prevents use-after-free if image load is in flight)
+    Component.onDestruction: {
+        viewerController.bindItem(null);
+    }
+
     // Update fit scale when image loads or window resizes
     onWidthChanged: updateFitScale()
     onHeightChanged: updateFitScale()

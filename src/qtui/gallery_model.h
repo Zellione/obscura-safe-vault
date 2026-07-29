@@ -9,6 +9,8 @@ namespace vault {
     struct IndexNode;
 }
 
+class ViewerController;
+
 // Gallery list model: displays galleries and media from vault().list(currentPath).
 // Roles: name (QString), isGallery (bool), nodeKey (quintptr — opaque const IndexNode*).
 // Invokables: enterGallery(int row), upOneLevel(), activate(int row).
@@ -39,6 +41,9 @@ public:
 
     [[nodiscard]] QString currentPath() const { return currentPath_; }
 
+    // Set viewer controller for drain coordination (optional, for async image loading)
+    void setViewerController(ViewerController* viewer) noexcept { viewerController_ = viewer; }
+
     // Public refresh for programmatic update (e.g., after unlock)
     void refresh();
 
@@ -49,6 +54,7 @@ signals:
 private:
 
     vault::Vault* vault_;
+    ViewerController* viewerController_ = nullptr;
     std::vector<const vault::IndexNode*> rows_;
     QString currentPath_;  // "/" for root, "/foo/bar" for nested
 };

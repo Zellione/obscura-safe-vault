@@ -86,6 +86,11 @@ ViewerController::~ViewerController()
 
 void ViewerController::bindItem(SecureImageItem* item)
 {
+    // If unbinding (item == nullptr), bump generation to invalidate any in-flight workers.
+    // This ensures stale results won't call setImage on the unbound (possibly destroyed) item.
+    if (!item && boundItem_) {
+        bumpGeneration();
+    }
     boundItem_ = item;
 }
 
@@ -208,10 +213,12 @@ void ViewerController::onImageReady(std::shared_ptr<const PixelBuffer> pixels, u
     setLoading(false);
 
     if (!pixels || !boundItem_) {
+        // boundItem_ is null if the QML item was destroyed (QPointer tracks this),
+        // or if unbind was called. Either way, drop the result safely.
         return;
     }
 
-    // Deliver pixels to the bound SecureImageItem
+    // Deliver pixels to the bound SecureImageItem (safe: QPointer checked above)
     boundItem_->setImage(pixels);
     emit imageLoaded();
 }

@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QThreadPool>
+#include <QPointer>
 #include <memory>
 #include <atomic>
 
@@ -69,9 +70,9 @@ private:
 
     vault::Vault* vault_;
     GalleryModel* galleryModel_;
-    SecureImageItem* boundItem_ = nullptr;
+    QPointer<SecureImageItem> boundItem_;  // QPointer nulls automatically if destroyed
 
-    // Generation epoch: bumped on every open/next/prev/lock to invalidate stale workers
+    // Generation epoch: bumped on every open/next/prev/lock/unbind to invalidate stale workers
     std::atomic<uint64_t> generation_{0};
     // Stopping flag: set by shutdownAndDrain
     std::atomic<bool> stopping_{false};
