@@ -413,6 +413,9 @@ static int runSelftest(const QString& vaultPath)
     UnlockController unlockController;
     ThumbCache thumbCache;
     GalleryModel galleryModel(&unlockController.vault());
+
+    // Explicitly register galleryModel so signals are properly exposed to QML
+    qmlRegisterSingletonInstance("Osv", 1, 0, "GalleryModel", &galleryModel);
     ViewerController viewerController(&unlockController.vault(), &galleryModel);
     ThemePalette themePalette;
     PlaybackEngine playbackEngine;

@@ -13,6 +13,7 @@ Window {
 
     property int currentThemeIndex: 0
 
+
     RenameDialog {
         id: renameDialog
     }
