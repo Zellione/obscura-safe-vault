@@ -405,9 +405,11 @@ static int runSelftest(const QString& vaultPath)
     qmlRegisterType<SecureTextField>("Osv", 1, 0, "SecureTextField");
     qmlRegisterType<SecureImageItem>("Osv", 1, 0, "SecureImageItem");
     qmlRegisterType<VideoFrameItem>("Osv", 1, 0, "VideoFrameItem");
-    qmlRegisterType<PlaybackEngine>("Osv", 1, 0, "PlaybackEngine");
 
     QQmlApplicationEngine engine;
+    // The QML engine needs to know where to find QML modules
+    engine.addImportPath(QStringLiteral(QTUI_QML_DIR));
+
     UnlockController unlockController;
     ThumbCache thumbCache;
     GalleryModel galleryModel(&unlockController.vault());
@@ -481,6 +483,14 @@ static int runSelftest(const QString& vaultPath)
     bool viewerTestComplete = false;
     bool transitionedToViewer = false;
 
+    // Check for video selftest mode (requires OSV_QT_SELFTEST_VIDEO=1)
+    const char* video_env = std::getenv("OSV_QT_SELFTEST_VIDEO");
+    bool testVideo = video_env && std::atoi(video_env) > 0;
+    bool videoTestComplete = false;
+    bool transitionedToVideo = false;
+    QImage videoGrabSample1, videoGrabSample2;
+    int videoSampleX = 0, videoSampleY = 0;
+
     // Poll timer for thumbnail-wait mode: check deliveredCount every 100ms
     QTimer pollTimer;
     QObject::connect(&pollTimer, &QTimer::timeout, window, [&]() {
@@ -526,8 +536,33 @@ static int runSelftest(const QString& vaultPath)
                                 "%d unique colors (delegates not instantiated in QObject tree)\n",
                                 delivered, uniqueColors);
 
-                        // Check if we should transition to viewer test mode
-                        if (testViewer && !transitionedToViewer) {
+                        // Check if we should transition to video or viewer test mode
+                        if (testVideo && !transitionedToVideo) {
+                            fprintf(stdout, "TRANSITION: Moving to video test mode\n");
+                            transitionedToVideo = true;
+                            // Find first video row and activate via QML
+                            int firstVideoRow = -1;
+                            for (int i = 0; i < galleryModel.rowCount(); ++i) {
+                                QModelIndex idx = galleryModel.index(i);
+                                bool isVideo = galleryModel.data(idx, GalleryModel::IsVideoRole).toBool();
+                                if (isVideo) {
+                                    firstVideoRow = i;
+                                    break;
+                                }
+                            }
+
+                            if (firstVideoRow >= 0) {
+                                // Activate via QML (this emits openVideo which pushes video screen and opens video)
+                                QMetaObject::invokeMethod(&galleryModel, "activate", Qt::QueuedConnection,
+                                    Q_ARG(int, firstVideoRow));
+                                return;
+                            } else {
+                                fprintf(stderr, "FAIL (Video test): No video rows found in gallery\n");
+                                resultCode = 1;
+                                QCoreApplication::exit(1);
+                                return;
+                            }
+                        } else if (testViewer && !transitionedToViewer) {
                             fprintf(stdout, "TRANSITION: Moving to viewer test mode\n");
                             transitionedToViewer = true;
                             // Find first image row (skip galleries) and activate via QML
@@ -613,8 +648,33 @@ static int runSelftest(const QString& vaultPath)
                             "%d/%d tiles have colored centers (requirement: >=3)\n",
                             delivered, colorfulTiles, totalTiles);
 
-                    // Check if we should transition to viewer test mode
-                    if (testViewer && !transitionedToViewer) {
+                    // Check if we should transition to video or viewer test mode
+                    if (testVideo && !transitionedToVideo) {
+                        fprintf(stdout, "TRANSITION: Moving to video test mode\n");
+                        transitionedToVideo = true;
+                        // Find first video row and activate via QML
+                        int firstVideoRow = -1;
+                        for (int i = 0; i < galleryModel.rowCount(); ++i) {
+                            QModelIndex idx = galleryModel.index(i);
+                            bool isVideo = galleryModel.data(idx, GalleryModel::IsVideoRole).toBool();
+                            if (isVideo) {
+                                firstVideoRow = i;
+                                break;
+                            }
+                        }
+
+                        if (firstVideoRow >= 0) {
+                            // Activate via QML (this emits openVideo which pushes video screen and opens video)
+                            QMetaObject::invokeMethod(&galleryModel, "activate", Qt::QueuedConnection,
+                                Q_ARG(int, firstVideoRow));
+                            return;
+                        } else {
+                            fprintf(stderr, "FAIL (Video test): No video rows found in gallery\n");
+                            resultCode = 1;
+                            QCoreApplication::exit(1);
+                            return;
+                        }
+                    } else if (testViewer && !transitionedToViewer) {
                         fprintf(stdout, "TRANSITION: Moving to viewer test mode\n");
                         transitionedToViewer = true;
                         // Find first image row (skip galleries) and activate via QML
@@ -643,8 +703,8 @@ static int runSelftest(const QString& vaultPath)
                         }
                     }
 
-                    // Save screenshot if requested (thumbnail mode only, no viewer test)
-                    if (!shotPath.isEmpty() && !testViewer) {
+                    // Save screenshot if requested (thumbnail mode only, no viewer/video test)
+                    if (!shotPath.isEmpty() && !testViewer && !testVideo) {
                         if (grabbed.save(shotPath)) {
                             fprintf(stdout, "Screenshot saved to %s\n", shotPath.toStdString().c_str());
                         } else {
@@ -652,7 +712,7 @@ static int runSelftest(const QString& vaultPath)
                         }
                     }
 
-                    if (!testViewer) {
+                    if (!testViewer && !testVideo) {
                         resultCode = 0;
                         testComplete = true;  // Mark complete so poll doesn't run again
                         QCoreApplication::exit(0);
@@ -796,14 +856,136 @@ static int runSelftest(const QString& vaultPath)
         }, Qt::QueuedConnection);
     }
 
+    // Video test mode: verify video playback, frames, position, and motion
+    if (testVideo) {
+        QObject::connect(&playbackEngine, QOverload<>::of(&PlaybackEngine::positionChanged), window, [&]() {
+            // Monitor playback position
+            static QElapsedTimer videoTestTimer;
+            static int videoFrameSnapshots = 0;
+            static bool firstSnapshot = true;
+
+            if (firstSnapshot) {
+                videoTestTimer.start();
+                firstSnapshot = false;
+            }
+
+            double pos = playbackEngine.position();
+            int renderCount = 0;
+
+            // Find VideoFrameItem to get render count
+            auto videoItems = window->findChildren<VideoFrameItem*>();
+            if (videoItems.size() > 0) {
+                renderCount = videoItems[0]->testOnlyRenderCount();
+            }
+
+            // After ~2 seconds, collect motion samples and verify
+            if (videoTestTimer.elapsed() >= 500 && videoFrameSnapshots == 0) {
+                // First sample at 500ms
+                QImage grabbed = window->grabWindow();
+                if (!grabbed.isNull()) {
+                    // Find VideoFrameItem and map its center to scene coordinates
+                    auto items = window->findChildren<VideoFrameItem*>();
+                    if (items.size() > 0) {
+                        VideoFrameItem* videoItem = items[0];
+                        QPointF itemCenter = videoItem->mapToScene(videoItem->boundingRect().center());
+                        videoSampleX = static_cast<int>(itemCenter.x() * grabbed.width() / window->width());
+                        videoSampleY = static_cast<int>(itemCenter.y() * grabbed.height() / window->height());
+
+                        // Clamp to valid coordinates
+                        if (videoSampleX < 0) videoSampleX = 0;
+                        if (videoSampleY < 0) videoSampleY = 0;
+                        if (videoSampleX >= grabbed.width()) videoSampleX = grabbed.width() - 1;
+                        if (videoSampleY >= grabbed.height()) videoSampleY = grabbed.height() - 1;
+
+                        videoGrabSample1 = grabbed.copy();
+                        videoFrameSnapshots++;
+                    }
+                }
+            } else if (videoTestTimer.elapsed() >= 1000 && videoFrameSnapshots == 1) {
+                // Second sample at 1000ms
+                QImage grabbed = window->grabWindow();
+                if (!grabbed.isNull()) {
+                    videoGrabSample2 = grabbed.copy();
+                    videoFrameSnapshots++;
+                }
+            } else if (videoTestTimer.elapsed() >= 2000 && !videoTestComplete) {
+                // Verify all assertions
+                videoTestComplete = true;
+
+                fprintf(stdout, "\n=== VIDEO TEST ASSERTIONS ===\n");
+
+                // (a) Frame counter >= 10
+                auto items = window->findChildren<VideoFrameItem*>();
+                int frameCount = items.size() > 0 ? items[0]->testOnlyRenderCount() : 0;
+                fprintf(stdout, "ASSERT (a) Frame count: %d (requirement: >= 10)... %s\n", frameCount,
+                        frameCount >= 10 ? "PASS" : "FAIL");
+                bool assertA = frameCount >= 10;
+
+                // (b) Position advanced > 1.0s
+                double position = playbackEngine.position();
+                fprintf(stdout, "ASSERT (b) Position: %.2f seconds (requirement: > 1.0)... %s\n", position,
+                        position > 1.0 ? "PASS" : "FAIL");
+                bool assertB = position > 1.0;
+
+                // (c) Center pixel not black/background
+                bool assertC = false;
+                if (!videoGrabSample1.isNull()) {
+                    int grabX = videoSampleX, grabY = videoSampleY;
+                    QRgb centerPixel = videoGrabSample1.pixel(grabX, grabY);
+                    int r = qRed(centerPixel), g = qGreen(centerPixel), b = qBlue(centerPixel);
+                    int maxComponent = std::max({r, g, b});
+                    assertC = maxComponent > 50;  // Not near-black, not background
+                    fprintf(stdout, "ASSERT (c) Center pixel: RGB(%d, %d, %d) max=%d (requirement: > 50)... %s\n",
+                            r, g, b, maxComponent, assertC ? "PASS" : "FAIL");
+                } else {
+                    fprintf(stdout, "ASSERT (c) Center pixel: NO GRAB... FAIL\n");
+                }
+
+                // (d) Two samples 500ms apart must differ (motion detection)
+                bool assertD = false;
+                if (!videoGrabSample1.isNull() && !videoGrabSample2.isNull()) {
+                    QRgb pixel1 = videoGrabSample1.pixel(videoSampleX, videoSampleY);
+                    QRgb pixel2 = videoGrabSample2.pixel(videoSampleX, videoSampleY);
+                    int r1 = qRed(pixel1), g1 = qGreen(pixel1), b1 = qBlue(pixel1);
+                    int r2 = qRed(pixel2), g2 = qGreen(pixel2), b2 = qBlue(pixel2);
+                    assertD = (r1 != r2 || g1 != g2 || b1 != b2);
+                    fprintf(stdout, "ASSERT (d) Motion (samples differ): Sample1=RGB(%d,%d,%d) Sample2=RGB(%d,%d,%d)... %s\n",
+                            r1, g1, b1, r2, g2, b2, assertD ? "PASS" : "FAIL");
+                } else {
+                    fprintf(stdout, "ASSERT (d) Motion: NO SAMPLES... FAIL\n");
+                }
+
+                fprintf(stdout, "=== VIDEO TEST RESULT ===\n");
+                if (assertA && assertB && assertC && assertD) {
+                    fprintf(stdout, "PASS: All video assertions passed\n");
+
+                    // Save screenshot if requested
+                    if (!shotPath.isEmpty() && videoGrabSample2.save(shotPath)) {
+                        fprintf(stdout, "Video screenshot saved to %s\n", shotPath.toStdString().c_str());
+                    }
+
+                    resultCode = 0;
+                    QCoreApplication::exit(0);
+                } else {
+                    fprintf(stderr, "FAIL: Video test assertions failed (a=%d b=%d c=%d d=%d)\n",
+                            assertA, assertB, assertC, assertD);
+                    resultCode = 1;
+                    QCoreApplication::exit(1);
+                }
+            }
+        }, Qt::QueuedConnection);
+    }
+
     // Watchdog timer: hard timeout depending on mode
     QTimer watchdog;
     int watchdogTime = 5000;  // default
     if (targetThumbnailCount > 0) {
-        watchdogTime = testViewer ? 30000 : 15000;  // 30s for viewer test, 15s for thumbnail test
+        watchdogTime = (testVideo || testViewer) ? 30000 : 15000;  // 30s for video/viewer test, 15s for thumbnail test
+    } else if (testVideo || testViewer) {
+        watchdogTime = 30000;
     }
     QObject::connect(&watchdog, &QTimer::timeout, [&]() {
-        if (!testComplete && !viewerTestComplete) {
+        if (!testComplete && !viewerTestComplete && !videoTestComplete) {
             fprintf(stderr, "FAIL: timeout (%dms) — test never completed\n", watchdogTime);
             resultCode = 1;
             QCoreApplication::exit(1);
@@ -845,7 +1027,6 @@ int main(int argc, char** argv)
     qmlRegisterType<SecureTextField>("Osv", 1, 0, "SecureTextField");
     qmlRegisterType<SecureImageItem>("Osv", 1, 0, "SecureImageItem");
     qmlRegisterType<VideoFrameItem>("Osv", 1, 0, "VideoFrameItem");
-    qmlRegisterType<PlaybackEngine>("Osv", 1, 0, "PlaybackEngine");
 
     QQmlApplicationEngine engine;
 
