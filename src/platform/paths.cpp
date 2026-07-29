@@ -1,6 +1,8 @@
 #include "platform/paths.h"
 
+#ifndef PLATFORM_PATHS_NO_SDL
 #include <SDL3/SDL.h>
+#endif
 
 #include <monocypher.h>
 
@@ -60,6 +62,7 @@ std::optional<std::filesystem::path> normalize_user_path(std::string_view raw)
     return p;
 }
 
+#ifndef PLATFORM_PATHS_NO_SDL
 std::filesystem::path config_dir()
 {
     char* pref = SDL_GetPrefPath("ObscuraSafeVault", "ObscuraSafeVault");
@@ -71,6 +74,7 @@ std::filesystem::path config_dir()
     if (!s.empty() && (s.back() == '/' || s.back() == '\\')) s.pop_back();
     return std::filesystem::path{s};
 }
+#endif
 
 std::filesystem::path default_vault_path()
 {
