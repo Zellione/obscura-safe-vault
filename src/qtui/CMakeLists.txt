@@ -38,6 +38,8 @@ add_library(osv_qt_core STATIC
     # text input models (Task 3 uses SecureTextInput)
     ${REPO_ROOT}/src/ui/text_input_model.cpp
     ${REPO_ROOT}/src/ui/secure_text_input.cpp
+    # theme system (Task 8)
+    ${REPO_ROOT}/src/gfx/theme.cpp
     ${REPO_ROOT}/vendor/monocypher/src/monocypher.c
     # miniz: ZIP reader (same sources as premake builds)
     ${REPO_ROOT}/vendor/miniz/miniz.c
@@ -88,7 +90,7 @@ add_executable(osv_qt_secure_field_test tests/secure_field_test.cpp secure_text_
 target_link_libraries(osv_qt_secure_field_test PRIVATE osv_qt_core Qt6::Gui Qt6::Quick)
 target_include_directories(osv_qt_secure_field_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_executable(osv_qt_gallery_model_test tests/gallery_model_test.cpp gallery_model.cpp thumb_cache.cpp viewer_controller.cpp secure_image_item.cpp)
+add_executable(osv_qt_gallery_model_test tests/gallery_model_test.cpp gallery_model.cpp thumb_cache.cpp viewer_controller.cpp secure_image_item.cpp theme_palette.cpp)
 target_link_libraries(osv_qt_gallery_model_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick)
 target_include_directories(osv_qt_gallery_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -107,6 +109,7 @@ qt_add_executable(osv-qt
     gallery_model.cpp
     thumb_cache.cpp
     viewer_controller.cpp
+    theme_palette.cpp
 )
 
 # Shaders: compile to .qsb and embed as resources

@@ -2,6 +2,7 @@
 #include "thumb_cache.h"
 #include "viewer_controller.h"
 #include "vault/vault.h"
+#include "vault/safe_name.h"
 
 GalleryModel::GalleryModel(vault::Vault* vault, QObject* parent)
     : QAbstractListModel(parent), vault_(vault), currentPath_("/")
@@ -150,3 +151,37 @@ void GalleryModel::activate(int row)
         emit openViewer(row);
     }
 }
+
+QString GalleryModel::rename(int row, const QString& newName)
+{
+    // Validate input
+    if (row < 0 || row >= rowCount())
+        return "Invalid row";
+
+    const auto* node = rows_[row];
+    if (!node)
+        return "Node not found";
+
+    // Check if the name is safe
+    if (!vault::is_safe_node_name(newName.toStdString())) {
+        return "Invalid name";
+    }
+
+    // Call vault::rename_node
+    const auto result = vault::rename_node(
+        *vault_,
+        currentPath_.toStdString(),
+        node->name,
+        newName.toStdString()
+    );
+
+    if (result != vault::VaultResult::Ok) {
+        return "Rename failed";
+    }
+
+    // Refresh to pick up the change
+    refresh();
+
+    return "";  // empty string = success
+}
+

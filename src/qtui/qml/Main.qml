@@ -8,8 +8,14 @@ Window {
     width: 1280
     height: 800
     visible: true
-    color: "#14161a"
+    color: themePalette.bg
     title: "osv-qt (experiment)"
+
+    property int currentThemeIndex: 0
+
+    RenameDialog {
+        id: renameDialog
+    }
 
     StackView {
         id: stack
@@ -41,7 +47,7 @@ Window {
             id: unlockScreenComponent
             Rectangle {
                 id: unlockRoot
-                color: "#14161a"
+                color: themePalette.bg
 
                 FileDialog {
                     id: fileDialog
@@ -62,8 +68,8 @@ Window {
                     Rectangle {
                         width: parent.width
                         height: 44
-                        color: "#2a2d33"
-                        border.color: "#3f4349"
+                        color: themePalette.surface
+                        border.color: themePalette.border
                         border.width: 1
                         radius: 4
 
@@ -75,7 +81,7 @@ Window {
                         Text {
                             anchors.centerIn: parent
                             text: "Open Vault"
-                            color: "#c8ccd4"
+                            color: themePalette.text
                             font.pixelSize: 14
                         }
                     }
@@ -89,8 +95,8 @@ Window {
 
                         Rectangle {
                             anchors.fill: parent
-                            color: "#2a2d33"
-                            border.color: "#3f4349"
+                            color: themePalette.surface
+                            border.color: themePalette.border
                             border.width: 1
                             radius: 4
                             z: -1
@@ -105,8 +111,8 @@ Window {
                     Rectangle {
                         width: parent.width
                         height: 44
-                        color: "#2a2d33"
-                        border.color: "#3f4349"
+                        color: themePalette.surface
+                        border.color: themePalette.border
                         border.width: 1
                         radius: 4
 
@@ -120,7 +126,7 @@ Window {
                         Text {
                             anchors.centerIn: parent
                             text: "Unlock"
-                            color: "#c8ccd4"
+                            color: themePalette.text
                             font.pixelSize: 14
                         }
                     }
@@ -129,7 +135,7 @@ Window {
                     Text {
                         width: parent.width
                         text: unlockController.errorText
-                        color: "#ff6b6b"
+                        color: themePalette.danger
                         font.pixelSize: 12
                         wrapMode: Text.Wrap
                         visible: text.length > 0
@@ -143,12 +149,12 @@ Window {
             id: unlockedPageComponent
             Rectangle {
                 id: galleryRoot
-                color: "#14161a"
+                color: themePalette.bg
                 anchors.fill: parent
 
                 // Gallery grid view: displays galleries and media from galleryModel.
                 // Galleries shown as folder glyphs, media as thumbnails.
-                // Arrow keys navigate, Enter opens, Esc up/back.
+                // Arrow keys navigate, Enter opens, Esc up/back, F2 rename, T cycle theme.
                 GridView {
                     id: grid
                     anchors.fill: parent
@@ -164,7 +170,7 @@ Window {
                         Rectangle {
                             anchors.fill: parent
                             anchors.margins: 6
-                            color: GridView.isCurrentItem ? "#2a3140" : "#1b1f27"
+                            color: GridView.isCurrentItem ? themePalette.surfaceHi : themePalette.surface
                             radius: 6
 
                             // Thumbnail image for media
@@ -196,7 +202,7 @@ Window {
                                 width: parent.width - 12
                                 elide: Text.ElideMiddle
                                 text: model.name
-                                color: "#c8ccd4"
+                                color: themePalette.text
                                 horizontalAlignment: Text.AlignHCenter
                                 font.pixelSize: 12
                             }
@@ -221,6 +227,24 @@ Window {
                     }
                     Keys.onEscapePressed: {
                         galleryModel.upOneLevel()
+                    }
+                    Keys.onPressed: {
+                        if (event.key === Qt.Key_F2) {
+                            // Rename current item
+                            if (grid.currentIndex >= 0 && grid.currentIndex < galleryModel.rowCount()) {
+                                const nodeName = galleryModel.data(galleryModel.index(grid.currentIndex), galleryModel.roleNames()['name']);
+                                renameDialog.originalName = nodeName;
+                                renameDialog.targetRow = grid.currentIndex;
+                                renameDialog.open();
+                            }
+                            event.accepted = true;
+                        } else if (event.key === Qt.Key_T) {
+                            // Cycle to next theme (0->1->2->3->0)
+                            // We track theme state by trying incrementally
+                            root.currentThemeIndex = (root.currentThemeIndex + 1) % 4;
+                            themePalette.setThemeIndex(root.currentThemeIndex);
+                            event.accepted = true;
+                        }
                     }
                 }
             }

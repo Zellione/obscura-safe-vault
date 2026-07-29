@@ -193,6 +193,74 @@ int main(int argc, char** argv)
         }
         printf("PASS: upOneLevel navigates correctly\n");
 
+        // Test 8: rename to valid name
+        QString originalName = model.data(model.index(1, 0), GalleryModel::NameRole).toString();
+        QString newName = "image_renamed";
+        QString error = model.rename(1, newName);
+        if (!error.isEmpty()) {
+            fprintf(stderr, "FAIL: rename should succeed, got error: %s\n", error.toStdString().c_str());
+            return 1;
+        }
+        QString renamedName = model.data(model.index(1, 0), GalleryModel::NameRole).toString();
+        printf("Test 8 (rename valid): '%s' -> '%s'\n", originalName.toStdString().c_str(), renamedName.toStdString().c_str());
+        if (renamedName != newName) {
+            fprintf(stderr, "FAIL: Expected name '%s', got '%s'\n", newName.toStdString().c_str(), renamedName.toStdString().c_str());
+            return 1;
+        }
+        printf("PASS: Valid rename succeeds\n");
+
+        // Test 9: rename to invalid name (contains path separator)
+        error = model.rename(1, "image/invalid");
+        if (error.isEmpty()) {
+            fprintf(stderr, "FAIL: rename should reject path separators\n");
+            return 1;
+        }
+        printf("Test 9 (rename invalid): error='%s'\n", error.toStdString().c_str());
+        printf("PASS: Invalid name rejected\n");
+
+        // Test 10: rename with empty name
+        error = model.rename(1, "");
+        if (error.isEmpty()) {
+            fprintf(stderr, "FAIL: rename should reject empty name\n");
+            return 1;
+        }
+        printf("Test 10 (rename empty): error='%s'\n", error.toStdString().c_str());
+        printf("PASS: Empty name rejected\n");
+
+        // Test 11: rename to ".." (invalid)
+        error = model.rename(1, "..");
+        if (error.isEmpty()) {
+            fprintf(stderr, "FAIL: rename should reject '..'\n");
+            return 1;
+        }
+        printf("Test 11 (rename '..'): error='%s'\n", error.toStdString().c_str());
+        printf("PASS: '..' name rejected\n");
+
+        // Test 12: verify rename persists after vault reopen
+        // Reopen vault in a new instance
+        vault::Vault vault2;
+        std::string pw_str = "test123";
+        const std::span<const uint8_t> pw_span2(reinterpret_cast<const uint8_t*>(pw_str.data()), pw_str.size());
+        auto open_result = vault::Vault::open(test_vault_path, vault2);
+        if (open_result != vault::VaultResult::Ok) {
+            fprintf(stderr, "FAIL: Could not reopen vault\n");
+            return 1;
+        }
+        auto unlock_result = vault2.unlock(pw_span2, {});
+        if (unlock_result != vault::VaultResult::Ok) {
+            fprintf(stderr, "FAIL: Could not unlock reopened vault\n");
+            return 1;
+        }
+
+        GalleryModel model2(&vault2);
+        QString reopenedName = model2.data(model2.index(1, 0), GalleryModel::NameRole).toString();
+        printf("Test 12 (rename persistence): after reopen, name='%s'\n", reopenedName.toStdString().c_str());
+        if (reopenedName != newName) {
+            fprintf(stderr, "FAIL: Expected name '%s' after reopen, got '%s'\n", newName.toStdString().c_str(), reopenedName.toStdString().c_str());
+            return 1;
+        }
+        printf("PASS: Rename persists after vault reopen\n");
+
         printf("\nAll GalleryModel tests PASSED\n");
         return 0;
 

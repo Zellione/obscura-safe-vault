@@ -38,6 +38,7 @@ public:
     Q_INVOKABLE void enterGallery(int row);
     Q_INVOKABLE void upOneLevel();
     Q_INVOKABLE void activate(int row);
+    Q_INVOKABLE QString rename(int row, const QString& newName);
 
     [[nodiscard]] QString currentPath() const { return currentPath_; }
 

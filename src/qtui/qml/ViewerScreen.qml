@@ -4,7 +4,7 @@ import Osv 1.0
 
 Rectangle {
     id: root
-    color: "#000000"
+    color: themePalette.imgBg
     focus: true
 
     // Zoom and pan state
@@ -92,7 +92,7 @@ Rectangle {
     Text {
         anchors.centerIn: parent
         text: "Loading..."
-        color: "#888888"
+        color: themePalette.textDim
         font.pixelSize: 16
         visible: viewerController.loading
     }
@@ -181,7 +181,7 @@ Rectangle {
             margins: 12
         }
         text: viewerController.imageName
-        color: "#c8ccd4"
+        color: themePalette.text
         font.pixelSize: 12
         elide: Text.ElideRight
         width: Math.min(300, parent.width - 24)

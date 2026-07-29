@@ -18,7 +18,9 @@
 #include "gallery_model.h"
 #include "thumb_cache.h"
 #include "viewer_controller.h"
+#include "theme_palette.h"
 #include "vault/vault.h"
+#include "gfx/theme.h"
 
 // Helper: Check if QImage is uniformly a single color (within tolerance)
 static bool isUniformColor(const QImage& img, int tolerance = 5)
@@ -389,6 +391,15 @@ static int runSelftest(const QString& vaultPath)
 
     // Step 2: Run the app with the real QML UI to test rendering
     // Register types and load QML
+    // Initialize theme from environment variable if specified (OSV_QT_THEME=0..3)
+    const char* theme_env = std::getenv("OSV_QT_THEME");
+    if (theme_env) {
+        int theme_idx = std::atoi(theme_env);
+        if (theme_idx >= 0 && theme_idx < gfx::THEME_COUNT) {
+            gfx::set_theme(static_cast<gfx::ThemeId>(theme_idx));
+        }
+    }
+
     qmlRegisterType<SecureTextField>("Osv", 1, 0, "SecureTextField");
     qmlRegisterType<SecureImageItem>("Osv", 1, 0, "SecureImageItem");
 
@@ -397,6 +408,7 @@ static int runSelftest(const QString& vaultPath)
     ThumbCache thumbCache;
     GalleryModel galleryModel(&unlockController.vault());
     ViewerController viewerController(&unlockController.vault(), &galleryModel);
+    ThemePalette themePalette;
     unlockController.setViewerController(&viewerController);
     galleryModel.setViewerController(&viewerController);
 
@@ -404,6 +416,7 @@ static int runSelftest(const QString& vaultPath)
     engine.rootContext()->setContextProperty("thumbCache", &thumbCache);
     engine.rootContext()->setContextProperty("galleryModel", &galleryModel);
     engine.rootContext()->setContextProperty("viewerController", &viewerController);
+    engine.rootContext()->setContextProperty("themePalette", &themePalette);
     engine.load(QUrl::fromLocalFile(QStringLiteral(QTUI_QML_DIR "/Main.qml")));
 
     if (engine.rootObjects().isEmpty()) {
@@ -813,6 +826,15 @@ int main(int argc, char** argv)
     }
 
     // Normal flow
+    // Initialize theme from environment variable if specified (OSV_QT_THEME=0..3)
+    const char* theme_env = std::getenv("OSV_QT_THEME");
+    if (theme_env) {
+        int theme_idx = std::atoi(theme_env);
+        if (theme_idx >= 0 && theme_idx < gfx::THEME_COUNT) {
+            gfx::set_theme(static_cast<gfx::ThemeId>(theme_idx));
+        }
+    }
+
     qmlRegisterType<SecureTextField>("Osv", 1, 0, "SecureTextField");
     qmlRegisterType<SecureImageItem>("Osv", 1, 0, "SecureImageItem");
 
@@ -836,6 +858,7 @@ int main(int argc, char** argv)
     ThumbCache thumbCache;
     GalleryModel galleryModel(&unlockController.vault());
     ViewerController viewerController(&unlockController.vault(), &galleryModel);
+    ThemePalette themePalette;
     unlockController.setViewerController(&viewerController);
     galleryModel.setViewerController(&viewerController);
 
@@ -843,6 +866,7 @@ int main(int argc, char** argv)
     engine.rootContext()->setContextProperty("thumbCache", &thumbCache);
     engine.rootContext()->setContextProperty("galleryModel", &galleryModel);
     engine.rootContext()->setContextProperty("viewerController", &viewerController);
+    engine.rootContext()->setContextProperty("themePalette", &themePalette);
 
     const QString qmlPath = QStringLiteral(QTUI_QML_DIR "/Main.qml");
     engine.load(QUrl::fromLocalFile(qmlPath));
