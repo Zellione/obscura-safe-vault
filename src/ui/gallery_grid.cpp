@@ -267,6 +267,7 @@ void GalleryGrid::on_vault_changed()
     for (const int i : m.multi) sel_.toggle(i);
     scroll_ = old_scroll;   // update_scroll_to_selection clamps next frame
     mark_dirty();
+    search_.on_vault_changed();
 }
 
 void GalleryGrid::refresh()
