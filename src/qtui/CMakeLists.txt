@@ -8,7 +8,7 @@ set(CMAKE_AUTOMOC ON)
 # Repo root, for reusing src/ and vendor/ untouched.
 get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 
-find_package(Qt6 6.7 REQUIRED COMPONENTS Core Gui Qml Quick ShaderTools)
+find_package(Qt6 6.7 REQUIRED COMPONENTS Core Gui GuiPrivate Qml Quick ShaderTools)
 qt_standard_project_setup()
 
 set(CODEC_PREFIX "${REPO_ROOT}/vendor/codecs-prefix")
@@ -107,10 +107,7 @@ qt6_add_shaders(osv-qt "osv_qt_shaders"
 target_compile_definitions(osv-qt PRIVATE
     QTUI_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
 )
-# Add version-specific Qt6 Gui headers for RHI access
-set(QT6_GUI_PRIVATE_PATH "/usr/include/qt6/QtGui/6.11.1/QtGui")
 target_include_directories(osv-qt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${QT6_GUI_PRIVATE_PATH}
 )
-target_link_libraries(osv-qt PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
+target_link_libraries(osv-qt PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)

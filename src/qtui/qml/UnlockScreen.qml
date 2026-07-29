@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Dialogs
-import Osv 1.0
 
 Rectangle {
     id: root

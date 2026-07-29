@@ -189,6 +189,10 @@ void SecureImageRenderer::render(QRhiCommandBuffer* cb)
     if (toUpload_) {
         const auto& px = *toUpload_;
         if (!tex_ || tex_->pixelSize() != QSize(px.width, px.height)) {
+            // Destroy old texture per QRhiResource lifecycle (qrhi.h: virtual void destroy())
+            if (tex_) {
+                tex_->destroy();
+            }
             tex_.reset(rhi->newTexture(QRhiTexture::RGBA8, QSize(px.width, px.height)));
             tex_->create();
             resourcesDirty_ = true;
