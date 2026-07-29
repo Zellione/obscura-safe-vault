@@ -211,38 +211,38 @@ void PlaybackEngine::runWorker(std::stop_token st)
             }
 
             if (result->frame) {
-                // Compute current playback clock
+                // Compute current playback clock and delay to frame delivery
                 double clock = clockBase_ + elapsed_.elapsed() / 1000.0;
+                double delay = result->frame->pts_seconds - clock;
 
-                // Check if frame is due
-                if (ui::PlaybackModel::frame_due(clock, result->frame->pts_seconds)) {
-                    // Frame is due now
-                    auto frameBox = std::make_shared<FrameBox>();
-                    frameBox->meta = *result->frame;
-                    frameBox->storage = std::move(result->storage);
-
-                    // Re-point the plane pointers into storage
-                    frameBox->meta.planes[0] = frameBox->storage.data();
-                    int y_size = frameBox->meta.linesizes[0] * frameBox->meta.height;
-                    frameBox->meta.planes[1] = frameBox->storage.data() + y_size;
-                    int u_size = frameBox->meta.linesizes[1] * ((frameBox->meta.height + 1) / 2);
-                    frameBox->meta.planes[2] = frameBox->storage.data() + y_size + u_size;
-
-                    // Update position and deliver frame
-                    double newPos = result->frame->pts_seconds;
-                    QMetaObject::invokeMethod(this, [this, frameBox, newPos]() {
-                        position_ = newPos;
-                        emit positionChanged();
-                        onFrameReady(frameBox);
-                    }, Qt::QueuedConnection);
-                } else {
-                    // Frame not due yet; sleep for the delta
-                    double delay = result->frame->pts_seconds - clock;
-                    if (delay > 0.001) {
-                        std::this_thread::sleep_for(
-                            std::chrono::milliseconds(static_cast<int>(delay * 1000)));
+                // If frame is not yet due, sleep until it is (then re-check stop)
+                if (delay > 0.001) {
+                    std::this_thread::sleep_for(
+                        std::chrono::milliseconds(static_cast<int>(delay * 1000)));
+                    if (st.stop_requested()) {
+                        continue;
                     }
                 }
+
+                // Unconditionally build and deliver the frame
+                auto frameBox = std::make_shared<FrameBox>();
+                frameBox->meta = *result->frame;
+                frameBox->storage = std::move(result->storage);
+
+                // Re-point the plane pointers into storage
+                frameBox->meta.planes[0] = frameBox->storage.data();
+                int y_size = frameBox->meta.linesizes[0] * frameBox->meta.height;
+                frameBox->meta.planes[1] = frameBox->storage.data() + y_size;
+                int u_size = frameBox->meta.linesizes[1] * ((frameBox->meta.height + 1) / 2);
+                frameBox->meta.planes[2] = frameBox->storage.data() + y_size + u_size;
+
+                // Update position and deliver frame
+                double newPos = result->frame->pts_seconds;
+                QMetaObject::invokeMethod(this, [this, frameBox, newPos]() {
+                    position_ = newPos;
+                    emit positionChanged();
+                    onFrameReady(frameBox);
+                }, Qt::QueuedConnection);
             }
         }
 
