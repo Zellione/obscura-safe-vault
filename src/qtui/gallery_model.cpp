@@ -191,3 +191,15 @@ QString GalleryModel::rename(int row, const QString& newName)
     return "";  // empty string = success
 }
 
+quintptr GalleryModel::nodeKeyAt(int row) const
+{
+    if (row < 0 || row >= rowCount())
+        return 0;
+
+    const auto* node = rows_[row];
+    if (!node)
+        return 0;
+
+    return static_cast<quintptr>(reinterpret_cast<uintptr_t>(node));
+}
+

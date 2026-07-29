@@ -40,6 +40,7 @@ public:
     Q_INVOKABLE void upOneLevel();
     Q_INVOKABLE void activate(int row);
     Q_INVOKABLE QString rename(int row, const QString& newName);
+    Q_INVOKABLE quintptr nodeKeyAt(int row) const;
 
     [[nodiscard]] QString currentPath() const { return currentPath_; }
 

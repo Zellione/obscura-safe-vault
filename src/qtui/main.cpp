@@ -414,8 +414,6 @@ static int runSelftest(const QString& vaultPath)
     ThumbCache thumbCache;
     GalleryModel galleryModel(&unlockController.vault());
 
-    // Explicitly register galleryModel so signals are properly exposed to QML
-    qmlRegisterSingletonInstance("Osv", 1, 0, "GalleryModel", &galleryModel);
     ViewerController viewerController(&unlockController.vault(), &galleryModel);
     ThemePalette themePalette;
     PlaybackEngine playbackEngine;
@@ -442,15 +440,6 @@ static int runSelftest(const QString& vaultPath)
         fprintf(stderr, "FAIL: No window from QML root\n");
         return 1;
     }
-
-    // Connect video signal to playback (C++ fallback for QML connection)
-    // This ensures playback starts even if the QML connection doesn't work
-    QObject::connect(&galleryModel, &GalleryModel::openVideo, window,
-        [&playbackEngine, &galleryModel, window](int row) {
-            auto nodeKey = galleryModel.data(galleryModel.index(row, 0), GalleryModel::NodeKeyRole).toULongLong();
-            playbackEngine.open(nodeKey);
-            // Note: playbackEngine::open() now calls setPlaying(true) automatically
-        });
 
     // Make window visible for rendering
     window->show();

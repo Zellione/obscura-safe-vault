@@ -42,8 +42,9 @@ Window {
                 viewerController.open(row);
             }
             function onOpenVideo(row) {
+                var nodeKey = galleryModel.nodeKeyAt(row);
                 stack.push(videoScreenComponent);
-                playbackEngine.open(galleryModel.data(galleryModel.index(row, 0), galleryModel.roleNames()['nodeKey']));
+                playbackEngine.open(nodeKey);
             }
         }
 
