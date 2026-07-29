@@ -51,6 +51,10 @@ static bool isUniformColor(const QImage& img, int tolerance = 5)
 // Returns 0 on success; 1 on failure
 static int runSelftest(const QString& vaultPath)
 {
+    // stdout is block-buffered when piped; a timeout kill would discard it.
+    // Set to unbuffered for immediate output visibility.
+    setvbuf(stdout, nullptr, _IONBF, 0);
+
     // Get password from environment
     const char* pw_env = std::getenv("OSV_QT_TEST_PW");
     if (!pw_env) {
@@ -148,13 +152,17 @@ static int runSelftest(const QString& vaultPath)
         break;
     }
 
-    // Connect to frameSwapped to count frames
-    QObject::connect(window, &QQuickWindow::frameSwapped, [&]() {
+    // Connect to frameSwapped to count frames.
+    // frameSwapped is emitted from QSGRenderThread; a direct connection would run this lambda
+    // (and grabWindow) on the render thread and deadlock against the GUI thread's sync wait.
+    // Use Qt::QueuedConnection to defer execution to the GUI thread.
+    QObject::connect(window, &QQuickWindow::frameSwapped, window, [&]() {
         if (testComplete) return;
         frameCount++;
 
-        // After 10+ frames, check render results (allow time for StackView transition)
-        if (frameCount >= 10) {
+        // After 3+ frames, check render results (allow time for StackView transition).
+        // A static scene may only swap a few frames; 10 may never arrive.
+        if (frameCount >= 3) {
             testComplete = true;
 
             // Try grabWindow for pixel verification
@@ -201,7 +209,7 @@ static int runSelftest(const QString& vaultPath)
             resultCode = 1;
             QCoreApplication::exit(1);
         }
-    });
+    }, Qt::QueuedConnection);
 
     // Watchdog timer: hard timeout at 5 seconds
     QTimer watchdog;
