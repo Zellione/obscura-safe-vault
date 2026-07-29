@@ -84,13 +84,19 @@ target_link_libraries(osv_qt_core PUBLIC
 add_executable(osv_qt_core_smoke tests/core_smoke.cpp)
 target_link_libraries(osv_qt_core_smoke PRIVATE osv_qt_core)
 
+add_executable(osv_qt_secure_field_test tests/secure_field_test.cpp secure_text_field.cpp)
+target_link_libraries(osv_qt_secure_field_test PRIVATE osv_qt_core Qt6::Gui Qt6::Quick)
+target_include_directories(osv_qt_secure_field_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 add_executable(osv-qt-mkvault tools/mkvault.cpp)
 target_link_libraries(osv-qt-mkvault PRIVATE osv_qt_core)
 
 qt_add_executable(osv-qt
     main.cpp
+    secure_text_field.cpp
 )
 target_compile_definitions(osv-qt PRIVATE
     QTUI_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
 )
-target_link_libraries(osv-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
+target_include_directories(osv-qt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(osv-qt PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)

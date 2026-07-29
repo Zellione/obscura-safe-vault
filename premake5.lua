@@ -419,6 +419,12 @@ project "osv"
         "src/**.h",
     }
 
+    -- Exclude Qt experiment files (Task 3 onward); they require Qt and are built separately via CMake.
+    removefiles {
+        "src/qtui/**.cpp",
+        "src/qtui/**.h",
+    }
+
     includedirs {
         "src",
         "vendor/monocypher/src",
