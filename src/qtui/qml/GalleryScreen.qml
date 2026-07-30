@@ -292,4 +292,19 @@ Rectangle {
     DetailPanel {
         id: detailPanel
     }
+
+    // WS2 Task 2.3: Wire detail panel to show selected node's details
+    Connections {
+        target: grid
+        function onCurrentIndexChanged() {
+            if (grid.currentIndex >= 0 && grid.currentIndex < grid.model.count) {
+                // Get the node key from the current item
+                const nodeKey = grid.model.data(grid.model.index(grid.currentIndex, 0), GalleryModel.NodeKeyRole)
+                // Show node with empty inherited tags and from-contents for now (TODO: compute from vault)
+                detailController.showNode(nodeKey, [], [])
+            } else {
+                detailController.clear()
+            }
+        }
+    }
 }
