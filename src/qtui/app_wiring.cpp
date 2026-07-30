@@ -12,6 +12,7 @@
 #include "video_frame_item.h"
 #include "unlock_controller.h"
 #include "vault_list_model.h"
+#include "vault_manager_controller.h"
 #include "gallery_model.h"
 #include "thumb_cache.h"
 #include "viewer_controller.h"
@@ -23,6 +24,7 @@
 #include "help_model.h"
 #include "selection_controller.h"
 #include "session_state.h"
+#include "autolock.h"
 #include "gfx/theme.h"
 
 void initThemeFromEnv()
@@ -59,6 +61,9 @@ AppContext::AppContext()
     galleryModel.setViewerController(&viewerController);
     playbackEngine.setVault(&unlockController.vault());
 
+    // Wire AutoLock
+    autoLock.setUnlockController(&unlockController);
+
     // Wire vault unlock state to settings controller
     QObject::connect(&unlockController, &UnlockController::unlockedChanged,
                      &settingsController, [this]() {
@@ -75,6 +80,7 @@ void AppContext::expose(QQmlApplicationEngine& engine)
 {
     QQmlContext* ctx = engine.rootContext();
     ctx->setContextProperty("unlockController", &unlockController);
+    ctx->setContextProperty("vaultManagerController", &vaultManagerController);
     ctx->setContextProperty("thumbCache", &thumbCache);
     ctx->setContextProperty("galleryModel", &galleryModel);
     ctx->setContextProperty("viewerController", &viewerController);
@@ -87,4 +93,5 @@ void AppContext::expose(QQmlApplicationEngine& engine)
     ctx->setContextProperty("helpModel", &helpModel);
     ctx->setContextProperty("selectionController", &selectionController);
     ctx->setContextProperty("sessionState", &sessionState);
+    ctx->setContextProperty("autoLock", &autoLock);
 }
