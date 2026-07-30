@@ -22,6 +22,9 @@ class SettingsController : public QObject {
     Q_PROPERTY(QStringList themeList READ themeList CONSTANT)
     Q_PROPERTY(int currentThemeIndex READ currentThemeIndex WRITE setCurrentThemeIndex NOTIFY themeIndexChanged)
     Q_PROPERTY(bool vaultUnlocked READ vaultUnlocked WRITE setVaultUnlocked NOTIFY vaultUnlockedChanged)
+    Q_PROPERTY(QStringList sortOrderList READ sortOrderList CONSTANT)
+    Q_PROPERTY(int currentSortOrderIndex READ currentSortOrderIndex WRITE setCurrentSortOrderIndex NOTIFY sortOrderChanged)
+    Q_PROPERTY(bool tilesShowTags READ tilesShowTags WRITE setTilesShowTags NOTIFY tilesShowTagsChanged)
     Q_PROPERTY(QVariantList categories READ categories NOTIFY categoriesChanged)
     Q_PROPERTY(QString errorLine READ errorLine NOTIFY errorLineChanged)
 
@@ -33,14 +36,17 @@ public:
     [[nodiscard]] QStringList themeList() const { return themeList_; }
     [[nodiscard]] int currentThemeIndex() const { return currentThemeIndex_; }
     [[nodiscard]] bool vaultUnlocked() const { return vaultUnlocked_; }
+    [[nodiscard]] QStringList sortOrderList() const { return sortOrderList_; }
+    [[nodiscard]] int currentSortOrderIndex() const { return currentSortOrderIndex_; }
+    [[nodiscard]] bool tilesShowTags() const { return tilesShowTags_; }
     [[nodiscard]] QVariantList categories() const;
     [[nodiscard]] QString errorLine() const { return errorLine_; }
 
-    // Setter for theme
+    // Setters
     void setCurrentThemeIndex(int index);
-
-    // Setter for vault locked state (from UnlockController)
     void setVaultUnlocked(bool unlocked);
+    void setCurrentSortOrderIndex(int index);
+    void setTilesShowTags(bool show);
 
     // For testing: override theme persistence path (normally uses XDG default)
     void setThemePersistPath(const std::string& path);
@@ -53,6 +59,8 @@ public:
 signals:
     void themeIndexChanged();
     void vaultUnlockedChanged();
+    void sortOrderChanged();
+    void tilesShowTagsChanged();
     void categoriesChanged();
     void errorLineChanged();
 
@@ -61,8 +69,11 @@ private:
     void notifyThemeChange();
 
     QStringList themeList_;
+    QStringList sortOrderList_;
     int currentThemeIndex_ = 0;
+    int currentSortOrderIndex_ = 0;
     bool vaultUnlocked_ = false;
+    bool tilesShowTags_ = true;
     QString errorLine_;
 
     std::string themePersistPath_;

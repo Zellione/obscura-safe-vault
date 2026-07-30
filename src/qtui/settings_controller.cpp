@@ -20,10 +20,15 @@ SettingsController::SettingsController(QObject* parent)
         );
     }
 
+    // Build sort order list (skip Default which is a redirect, start from NameAsc)
+    sortOrderList_ << "Name (A-Z)" << "Name (Z-A)" << "Date (oldest)" << "Date (newest)"
+                   << "Size (smallest)" << "Size (largest)" << "Insertion";
+
     // Initialize settings model
     settingsState_.vault_unlocked = false;
     settingsState_.theme = gfx::active_theme_id();
     currentThemeIndex_ = static_cast<int>(gfx::active_theme_id());
+    tilesShowTags_ = true;  // default from VaultSettings
 }
 
 SettingsController::~SettingsController()
@@ -91,6 +96,51 @@ void SettingsController::setThemePersistPath(const std::string& path)
     auto loadedTheme = pref.load();
     currentThemeIndex_ = static_cast<int>(loadedTheme);
     settingsState_.theme = loadedTheme;
+}
+
+void SettingsController::setCurrentSortOrderIndex(int index)
+{
+    qCDebug(lcSettingsController) << "setCurrentSortOrderIndex(" << index << ")";
+
+    if (!vaultUnlocked_) {
+        return;  // Silently no-op when locked
+    }
+
+    if (index < 0 || index >= sortOrderList_.size()) {
+        qCWarning(lcSettingsController) << "Invalid sort order index:" << index;
+        return;
+    }
+
+    // Map index to SortKey: skip Default (0), so index 0 → NameAsc (1), etc.
+    int sortKeyValue = index + 1;  // +1 to skip Default
+    auto sortKey = static_cast<vault::SortKey>(sortKeyValue);
+
+    if (sortKey == settingsState_.draft.default_sort) {
+        return;  // No change
+    }
+
+    settingsState_.draft.default_sort = sortKey;
+    currentSortOrderIndex_ = index;
+
+    emit sortOrderChanged();
+}
+
+void SettingsController::setTilesShowTags(bool show)
+{
+    qCDebug(lcSettingsController) << "setTilesShowTags(" << show << ")";
+
+    if (!vaultUnlocked_) {
+        return;  // Silently no-op when locked
+    }
+
+    if (show == tilesShowTags_) {
+        return;  // No change
+    }
+
+    tilesShowTags_ = show;
+    settingsState_.draft.tiles_show_tags = show;
+
+    emit tilesShowTagsChanged();
 }
 
 QString SettingsController::addCategory(QString name)

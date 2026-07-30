@@ -17,6 +17,9 @@ Rectangle {
     property bool inPane: false  // false: rail focus, true: pane focus
     property int currentSection: 0  // 0=Appearance, 1=Browsing, 2=TagColours
     property int currentRow: 0  // focused row within section
+    property bool renamingCategory: false  // inline rename mode
+    property int renamingRow: -1  // which category is being renamed
+    property string renamingText: ""  // current rename text
 
     // Signal emitted when overlay closes to allow focus restoration
     signal closed()
@@ -86,11 +89,21 @@ Rectangle {
         }
         // Browsing section: only if unlocked
         else if (currentSection === 1 && settingsController.vaultUnlocked) {
-            // Placeholder: would handle sort order, toggles, etc. via SettingsController
+            if (currentRow === 0) {
+                // Cycle sort order
+                let idx = settingsController.currentSortOrderIndex;
+                idx = (idx + delta) % settingsController.sortOrderList.length;
+                if (idx < 0) idx += settingsController.sortOrderList.length;
+                settingsController.setCurrentSortOrderIndex(idx);
+            } else if (currentRow === 1) {
+                // Toggle tiles show tags
+                settingsController.setTilesShowTags(!settingsController.tilesShowTags);
+            }
+            // Rows 2 and 3 (auto-lock, keep-unlocked) are placeholders, no-op
         }
         // TagColours section: only if unlocked
         else if (currentSection === 2 && settingsController.vaultUnlocked) {
-            // Placeholder: would handle category swatch cycling via SettingsController
+            // Placeholder: would handle category swatch cycling
         }
     }
 
@@ -320,81 +333,143 @@ Rectangle {
                         font.bold: true
                     }
 
-                    // Placeholder rows for browsing settings
+                    // Browsing settings rows
                     Column {
                         visible: settingsController && settingsController.vaultUnlocked
                         width: parent.width
                         spacing: 4
 
+                        // Row 0: Default sort order
                         Rectangle {
                             width: parent.width - 16
                             height: 40
-                            visible: settingsOverlay.currentRow === 0
-                            color: settingsOverlay.inPane ? Qt.rgba(themePalette.accent.r, themePalette.accent.g, themePalette.accent.b, 0.2) : "transparent"
-                            border.color: settingsOverlay.inPane ? themePalette.accent : "transparent"
+                            color: (settingsOverlay.inPane && settingsOverlay.currentRow === 0)
+                                   ? Qt.rgba(themePalette.accent.r, themePalette.accent.g, themePalette.accent.b, 0.2)
+                                   : "transparent"
+                            border.color: (settingsOverlay.inPane && settingsOverlay.currentRow === 0)
+                                         ? themePalette.accent : "transparent"
                             border.width: 2
                             radius: 4
 
-                            Text {
+                            Row {
                                 anchors { fill: parent; margins: 8 }
-                                text: "Default sort order"
-                                color: themePalette.text
-                                font.pixelSize: 11
-                                verticalAlignment: Text.AlignVCenter
+                                spacing: 12
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "Default sort:"
+                                    color: themePalette.text
+                                    font.pixelSize: 11
+                                    width: 100
+                                }
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: (settingsController && settingsController.sortOrderList.length > settingsController.currentSortOrderIndex)
+                                          ? settingsController.sortOrderList[settingsController.currentSortOrderIndex]
+                                          : "—"
+                                    color: themePalette.textDim
+                                    font.pixelSize: 11
+                                }
                             }
                         }
 
+                        // Row 1: Show tags in tiles
                         Rectangle {
                             width: parent.width - 16
                             height: 40
-                            visible: settingsOverlay.currentRow === 1
-                            color: settingsOverlay.inPane ? Qt.rgba(themePalette.accent.r, themePalette.accent.g, themePalette.accent.b, 0.2) : "transparent"
-                            border.color: settingsOverlay.inPane ? themePalette.accent : "transparent"
+                            color: (settingsOverlay.inPane && settingsOverlay.currentRow === 1)
+                                   ? Qt.rgba(themePalette.accent.r, themePalette.accent.g, themePalette.accent.b, 0.2)
+                                   : "transparent"
+                            border.color: (settingsOverlay.inPane && settingsOverlay.currentRow === 1)
+                                         ? themePalette.accent : "transparent"
                             border.width: 2
                             radius: 4
 
-                            Text {
+                            Row {
                                 anchors { fill: parent; margins: 8 }
-                                text: "Show tags in tiles"
-                                color: themePalette.text
-                                font.pixelSize: 11
-                                verticalAlignment: Text.AlignVCenter
+                                spacing: 12
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "Show tags:"
+                                    color: themePalette.text
+                                    font.pixelSize: 11
+                                    width: 100
+                                }
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: settingsController && settingsController.tilesShowTags ? "Yes" : "No"
+                                    color: themePalette.textDim
+                                    font.pixelSize: 11
+                                }
                             }
                         }
 
+                        // Row 2: Auto-lock (placeholder - not yet in vault settings)
                         Rectangle {
                             width: parent.width - 16
                             height: 40
-                            visible: settingsOverlay.currentRow === 2
-                            color: settingsOverlay.inPane ? Qt.rgba(themePalette.accent.r, themePalette.accent.g, themePalette.accent.b, 0.2) : "transparent"
-                            border.color: settingsOverlay.inPane ? themePalette.accent : "transparent"
+                            color: (settingsOverlay.inPane && settingsOverlay.currentRow === 2)
+                                   ? Qt.rgba(themePalette.accent.r, themePalette.accent.g, themePalette.accent.b, 0.2)
+                                   : "transparent"
+                            border.color: (settingsOverlay.inPane && settingsOverlay.currentRow === 2)
+                                         ? themePalette.accent : "transparent"
                             border.width: 2
                             radius: 4
 
-                            Text {
+                            Row {
                                 anchors { fill: parent; margins: 8 }
-                                text: "Auto-lock after (seconds)"
-                                color: themePalette.text
-                                font.pixelSize: 11
-                                verticalAlignment: Text.AlignVCenter
+                                spacing: 12
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "Auto-lock (sec):"
+                                    color: themePalette.text
+                                    font.pixelSize: 11
+                                    width: 100
+                                }
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "—"
+                                    color: themePalette.textDim
+                                    font.pixelSize: 11
+                                }
                             }
                         }
 
+                        // Row 3: Keep unlocked (placeholder - not yet in vault settings)
                         Rectangle {
                             width: parent.width - 16
                             height: 40
-                            visible: settingsOverlay.currentRow === 3
-                            color: settingsOverlay.inPane ? Qt.rgba(themePalette.accent.r, themePalette.accent.g, themePalette.accent.b, 0.2) : "transparent"
-                            border.color: settingsOverlay.inPane ? themePalette.accent : "transparent"
+                            color: (settingsOverlay.inPane && settingsOverlay.currentRow === 3)
+                                   ? Qt.rgba(themePalette.accent.r, themePalette.accent.g, themePalette.accent.b, 0.2)
+                                   : "transparent"
+                            border.color: (settingsOverlay.inPane && settingsOverlay.currentRow === 3)
+                                         ? themePalette.accent : "transparent"
                             border.width: 2
                             radius: 4
 
-                            Text {
+                            Row {
                                 anchors { fill: parent; margins: 8 }
-                                text: "Keep vault unlocked"
-                                color: themePalette.text
-                                font.pixelSize: 11
-                                verticalAlignment: Text.AlignVCenter
+                                spacing: 12
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "Keep unlocked:"
+                                    color: themePalette.text
+                                    font.pixelSize: 11
+                                    width: 100
+                                }
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "—"
+                                    color: themePalette.textDim
+                                    font.pixelSize: 11
+                                }
                             }
                         }
                     }
@@ -418,7 +493,7 @@ Rectangle {
                         font.bold: true
                     }
 
-                    // Category list with focus indication
+                    // Category list with focus indication and inline rename
                     Column {
                         width: parent.width
                         spacing: 4
@@ -454,11 +529,45 @@ Rectangle {
                                         opacity: 0.3
                                     }
 
+                                    // Show name or inline edit field
                                     Text {
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: modelData.name
                                         color: themePalette.text
                                         font.pixelSize: 11
+                                        visible: !settingsOverlay.renamingCategory || settingsOverlay.renamingRow !== index
+                                    }
+
+                                    TextInput {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: settingsOverlay.renamingText
+                                        color: themePalette.text
+                                        font.pixelSize: 11
+                                        selectByMouse: true
+                                        visible: settingsOverlay.renamingCategory && settingsOverlay.renamingRow === index
+                                        focus: visible
+                                        onTextChanged: settingsOverlay.renamingText = text
+
+                                        Keys.onPressed: (event) => {
+                                            if (event.key === Qt.Key_Return) {
+                                                // Commit rename
+                                                if (settingsController) {
+                                                    settingsController.renameCategory(settingsOverlay.renamingRow, settingsOverlay.renamingText);
+                                                    settingsOverlay.renamingCategory = false;
+                                                    settingsOverlay.renamingRow = -1;
+                                                    settingsOverlay.renamingText = "";
+                                                }
+                                                event.accepted = true;
+                                                contentPanel.forceActiveFocus();
+                                            } else if (event.key === Qt.Key_Escape) {
+                                                // Cancel rename without closing overlay
+                                                settingsOverlay.renamingCategory = false;
+                                                settingsOverlay.renamingRow = -1;
+                                                settingsOverlay.renamingText = "";
+                                                event.accepted = true;
+                                                contentPanel.forceActiveFocus();
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -466,7 +575,7 @@ Rectangle {
 
                         // Add category hint (N key)
                         Text {
-                            text: "(N) Add category"
+                            text: "(N) Add, (R) Rename, (Del) Remove"
                             color: themePalette.textDim
                             font.pixelSize: 10
                             topPadding: 8
@@ -500,53 +609,66 @@ Rectangle {
             }
         }
 
-        // Key handlers
+        // Key handlers (bypass if renaming category)
         Keys.onPressed: (event) => {
             if (event.key === Qt.Key_Escape) {
-                settingsOverlay.close();
-                event.accepted = true;
-            }
-            else if (event.key === Qt.Key_Tab) {
-                settingsOverlay.inPane = !settingsOverlay.inPane;
-                if (settingsOverlay.inPane) {
-                    settingsOverlay.currentRow = 0;  // Reset row when entering pane
+                if (settingsOverlay.renamingCategory) {
+                    // Cancel rename, don't close overlay
+                    settingsOverlay.renamingCategory = false;
+                    settingsOverlay.renamingRow = -1;
+                    settingsOverlay.renamingText = "";
+                    event.accepted = true;
+                } else {
+                    settingsOverlay.close();
+                    event.accepted = true;
                 }
-                event.accepted = true;
             }
-            else if (event.key === Qt.Key_Up) {
-                settingsOverlay.moveRow(-1);
-                event.accepted = true;
-            }
-            else if (event.key === Qt.Key_Down) {
-                settingsOverlay.moveRow(1);
-                event.accepted = true;
-            }
-            else if (event.key === Qt.Key_Left) {
-                settingsOverlay.changeValue(-1);
-                event.accepted = true;
-            }
-            else if (event.key === Qt.Key_Right) {
-                settingsOverlay.changeValue(1);
-                event.accepted = true;
-            }
-            else if (event.key === Qt.Key_N && settingsOverlay.currentSection === 2 && settingsController && settingsController.vaultUnlocked && settingsOverlay.inPane) {
-                // Add category in Tag Colours section
-                settingsController.addCategory("New Category");
-                event.accepted = true;
-            }
-            else if (event.key === Qt.Key_R && settingsOverlay.currentSection === 2 && settingsController && settingsController.vaultUnlocked && settingsOverlay.inPane) {
-                // Rename category - placeholder
-                if (settingsOverlay.currentRow < (settingsController.categories ? settingsController.categories.length : 0)) {
-                    // Would open inline rename dialog
+            else if (!settingsOverlay.renamingCategory) {
+                // Only process navigation/action keys if not renaming
+                if (event.key === Qt.Key_Tab) {
+                    settingsOverlay.inPane = !settingsOverlay.inPane;
+                    if (settingsOverlay.inPane) {
+                        settingsOverlay.currentRow = 0;  // Reset row when entering pane
+                    }
+                    event.accepted = true;
                 }
-                event.accepted = true;
-            }
-            else if (event.key === Qt.Key_Delete && settingsOverlay.currentSection === 2 && settingsController && settingsController.vaultUnlocked && settingsOverlay.inPane) {
-                // Remove category
-                if (settingsOverlay.currentRow < (settingsController.categories ? settingsController.categories.length : 0)) {
-                    settingsController.removeCategory(settingsOverlay.currentRow);
+                else if (event.key === Qt.Key_Up) {
+                    settingsOverlay.moveRow(-1);
+                    event.accepted = true;
                 }
-                event.accepted = true;
+                else if (event.key === Qt.Key_Down) {
+                    settingsOverlay.moveRow(1);
+                    event.accepted = true;
+                }
+                else if (event.key === Qt.Key_Left) {
+                    settingsOverlay.changeValue(-1);
+                    event.accepted = true;
+                }
+                else if (event.key === Qt.Key_Right) {
+                    settingsOverlay.changeValue(1);
+                    event.accepted = true;
+                }
+                else if (event.key === Qt.Key_N && settingsOverlay.currentSection === 2 && settingsController && settingsController.vaultUnlocked && settingsOverlay.inPane) {
+                    // Add category in Tag Colours section
+                    settingsController.addCategory("New Category");
+                    event.accepted = true;
+                }
+                else if (event.key === Qt.Key_R && settingsOverlay.currentSection === 2 && settingsController && settingsController.vaultUnlocked && settingsOverlay.inPane) {
+                    // Start inline rename
+                    if (settingsOverlay.currentRow < (settingsController.categories ? settingsController.categories.length : 0)) {
+                        settingsOverlay.renamingCategory = true;
+                        settingsOverlay.renamingRow = settingsOverlay.currentRow;
+                        settingsOverlay.renamingText = settingsController.categories[settingsOverlay.currentRow].name;
+                    }
+                    event.accepted = true;
+                }
+                else if (event.key === Qt.Key_Delete && settingsOverlay.currentSection === 2 && settingsController && settingsController.vaultUnlocked && settingsOverlay.inPane) {
+                    // Remove category
+                    if (settingsOverlay.currentRow < (settingsController.categories ? settingsController.categories.length : 0)) {
+                        settingsController.removeCategory(settingsOverlay.currentRow);
+                    }
+                    event.accepted = true;
+                }
             }
         }
     }
