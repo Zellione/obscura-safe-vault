@@ -217,6 +217,15 @@ void ViewerController::openAlbum(const QList<quintptr>& nodeKeys, int startIndex
     loadImageAtAlbumIndex(startIndex);
 }
 
+// TODO (Phase 56): Wire ui::album_rebind to handle vault tree changes.
+// Currently, album nodeKeys become stale after vault refresh (import/delete).
+// Integration requires:
+// 1. Listening for vault change events
+// 2. Storing node paths alongside nodeKeys
+// 3. Re-resolving paths after refresh
+// 4. Using ui::album_rebind to find new index and preserve zoom/pan state
+// This is deferred to WS7 (album reliability phase).
+
 void ViewerController::loadImageAtAlbumIndex(int albumIndex)
 {
     if (albumIndex < 0 || albumIndex >= albumNodeKeys_.size() || !vault_) {
