@@ -2,9 +2,11 @@
 
 #include <QAbstractListModel>
 #include <QString>
+#include <memory>
 #include <vector>
 
 #include "vault/index.h"
+#include "cover_provider.h"
 
 namespace vault {
     class Vault;
@@ -28,7 +30,11 @@ public:
         NameRole = Qt::UserRole + 1,
         IsGalleryRole,
         IsVideoRole,
-        NodeKeyRole
+        NodeKeyRole,
+        CoverRole,             // Task 2.4: CoverSpan vector for gallery tiles
+        ChildCountsRole,       // Task 2.4: "X galleries · Y items" string
+        IsAnimatedRole,        // Task 2.4: animated badge (format_can_animate AND animated flag)
+        IsFavoriteRole         // Task 2.4: favorite gold-star (favorite bit)
     };
     Q_ENUM(Role)
 
@@ -73,6 +79,7 @@ private:
 
     vault::Vault* vault_;
     ViewerController* viewerController_ = nullptr;
+    std::unique_ptr<CoverProvider> coverProvider_;  // Task 2.4: Cover cache
     std::vector<const vault::IndexNode*> rows_;
     QString currentPath_;  // "/" for root, "/foo/bar" for nested
     vault::SortKey sortKey_ = vault::SortKey::Default;

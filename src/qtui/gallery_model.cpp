@@ -1,14 +1,17 @@
 #include "gallery_model.h"
+#include "cover_provider.h"
 #include "thumb_cache.h"
 #include "viewer_controller.h"
 #include "vault/vault.h"
 #include "vault/safe_name.h"
 #include "ui/gallery_sort.h"
+#include "ui/child_counts.h"
 
 #include <span>
 
 GalleryModel::GalleryModel(vault::Vault* vault, QObject* parent)
-    : QAbstractListModel(parent), vault_(vault), currentPath_("/")
+    : QAbstractListModel(parent), vault_(vault), currentPath_("/"),
+      coverProvider_(std::make_unique<CoverProvider>(this))
 {
     if (vault_ && vault_->is_unlocked()) {
         refresh();
@@ -42,6 +45,47 @@ QVariant GalleryModel::data(const QModelIndex& index, int role) const
             // Opaque pointer, safe to pass as quintptr because workers
             // only use it with ThumbCache.request(key), never dereference
             return QVariant::fromValue(static_cast<quintptr>(reinterpret_cast<uintptr_t>(node)));
+        case CoverRole: {
+            // Task 2.4: Return cover spans for gallery tiles
+            // Only galleries have covers; media files return empty
+            if (node->type != vault::IndexNode::Type::Gallery)
+                return QVariant();
+
+            // Get covers from provider (memoised until refresh)
+            const auto& covers = coverProvider_->getCovers(node);
+            if (covers.empty())
+                return QVariant();  // Empty gallery, fall back to folder icon
+
+            // Return cover offset as first item (QML will use ThumbCache to render)
+            // For now, return the first cover's offset as a uint64
+            return QVariant::fromValue(static_cast<quint64>(covers[0].offset));
+        }
+        case ChildCountsRole: {
+            // Task 2.4: Return "X galleries · Y items" string for galleries only
+            if (node->type != vault::IndexNode::Type::Gallery)
+                return QVariant();
+
+            const auto counts = ui::direct_child_counts(*node);
+            const auto label = ui::format_tile_counts(counts);
+            return QString::fromStdString(label);
+        }
+        case IsAnimatedRole: {
+            // Task 2.4: Badge for GIF/WebP with animated flag set
+            // Returns true only if format_can_animate(format) AND animated flag
+            if (node->type != vault::IndexNode::Type::Image)
+                return false;
+
+            // Check if format can animate (GIF or WebP)
+            if (!vault::format_can_animate(node->meta.format))
+                return false;
+
+            // Check animated flag
+            return node->meta.animated;
+        }
+        case IsFavoriteRole: {
+            // Task 2.4: Gold-star for favorite bit (read-only, WS5 provides toggle)
+            return node->favorite;
+        }
         default:
             return QVariant();
     }
@@ -54,6 +98,10 @@ QHash<int, QByteArray> GalleryModel::roleNames() const
     roles[IsGalleryRole] = "isGallery";
     roles[IsVideoRole] = "isVideo";
     roles[NodeKeyRole] = "nodeKey";
+    roles[CoverRole] = "cover";                  // Task 2.4
+    roles[ChildCountsRole] = "childCounts";      // Task 2.4
+    roles[IsAnimatedRole] = "isAnimated";        // Task 2.4
+    roles[IsFavoriteRole] = "isFavorite";        // Task 2.4
     return roles;
 }
 
@@ -69,6 +117,11 @@ void GalleryModel::refresh()
     }
     if (viewerController_) {
         viewerController_->shutdownAndDrain();
+    }
+
+    // Task 2.4: Clear cover cache on refresh (invalidate memoised covers)
+    if (coverProvider_) {
+        coverProvider_->clear();
     }
 
     beginResetModel();
