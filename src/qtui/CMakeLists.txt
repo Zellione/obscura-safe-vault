@@ -50,6 +50,7 @@ add_library(osv_qt_core STATIC
     ${REPO_ROOT}/src/ui/tag_overview_model.cpp
     ${REPO_ROOT}/src/ui/tag_json_parse.cpp
     ${REPO_ROOT}/src/ui/tag_dict_import.cpp
+    ${REPO_ROOT}/src/ui/tag_list_parse.cpp
     # text input models (Task 3 uses SecureTextInput)
     ${REPO_ROOT}/src/ui/text_input_model.cpp
     ${REPO_ROOT}/src/ui/secure_text_input.cpp
@@ -168,6 +169,10 @@ target_include_directories(osv_qt_favorites_controller_test PRIVATE ${CMAKE_CURR
 add_executable(osv_qt_tag_overview_controller_test tests/tag_overview_controller_test.cpp tag_overview_controller.cpp)
 target_link_libraries(osv_qt_tag_overview_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
 target_include_directories(osv_qt_tag_overview_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_executable(osv_qt_tag_list_import_adapter_test tests/tag_list_import_adapter_test.cpp tag_list_import_adapter.cpp)
+target_link_libraries(osv_qt_tag_list_import_adapter_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
+target_include_directories(osv_qt_tag_list_import_adapter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_executable(osv_qt_search_model_adapter_test tests/search_model_adapter_test.cpp search_model_adapter.cpp)
 target_link_libraries(osv_qt_search_model_adapter_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
