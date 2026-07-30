@@ -40,6 +40,7 @@ add_library(osv_qt_core STATIC
     ${REPO_ROOT}/src/ui/gallery_sort.cpp
     ${REPO_ROOT}/src/ui/natural_sort.cpp
     ${REPO_ROOT}/src/ui/playback_model.cpp
+    ${REPO_ROOT}/src/ui/slideshow_model.cpp
     ${REPO_ROOT}/src/ui/nav_model.cpp
     ${REPO_ROOT}/src/ui/settings_model.cpp
     ${REPO_ROOT}/src/ui/selection_model.cpp
@@ -154,6 +155,10 @@ add_executable(osv_qt_viewer_controller_test tests/viewer_controller_test.cpp)
 target_link_libraries(osv_qt_viewer_controller_test PRIVATE osv_qt_core Qt6::Core)
 target_include_directories(osv_qt_viewer_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(osv_qt_slideshow_controller_test tests/slideshow_controller_test.cpp)
+target_link_libraries(osv_qt_slideshow_controller_test PRIVATE osv_qt_core Qt6::Core)
+target_include_directories(osv_qt_slideshow_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 qt_add_executable(osv_qt_help_popup_qml_test tests/help_popup_qml_test.cpp)
 target_link_libraries(osv_qt_help_popup_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
 target_include_directories(osv_qt_help_popup_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -213,6 +218,7 @@ qt_add_executable(osv-qt
     gallery_model.cpp
     thumb_cache.cpp
     viewer_controller.cpp
+    slideshow_controller.cpp
     theme_palette.cpp
     playback_engine.cpp
     audio_pipe.cpp
