@@ -44,7 +44,7 @@ static bool test_current_theme_index()
     return true;
 }
 
-// Test 3: setCurrentThemeIndex applies and persists
+// Test 3: setCurrentThemeIndex applies and persists (with startup simulation)
 static bool test_set_current_theme_index()
 {
     printf("Test 3: setCurrentThemeIndex applies and persists...\n");
@@ -58,14 +58,14 @@ static bool test_set_current_theme_index()
 
     auto configPath = tempTestDir.filePath("theme.conf");
 
-    // Create controller, set theme, destroy it
+    // Simulate first app run: create controller, set theme, destroy it
     {
         auto controller = std::make_unique<SettingsController>();
         controller->setThemePersistPath(configPath.toStdString());
         controller->setCurrentThemeIndex(2);
     }
 
-    // Create new controller and verify theme persisted
+    // Simulate app restart: create new controller (reads persisted theme)
     {
         auto controller = std::make_unique<SettingsController>();
         controller->setThemePersistPath(configPath.toStdString());
@@ -73,6 +73,24 @@ static bool test_set_current_theme_index()
         int idx = controller->currentThemeIndex();
         if (idx != 2) {
             fprintf(stderr, "FAIL: theme persisted as %d, expected 2\n", idx);
+            return false;
+        }
+    }
+
+    // Simulate another app restart with different theme
+    {
+        auto controller = std::make_unique<SettingsController>();
+        controller->setThemePersistPath(configPath.toStdString());
+        controller->setCurrentThemeIndex(1);
+    }
+
+    {
+        auto controller = std::make_unique<SettingsController>();
+        controller->setThemePersistPath(configPath.toStdString());
+
+        int idx = controller->currentThemeIndex();
+        if (idx != 1) {
+            fprintf(stderr, "FAIL: theme persisted as %d, expected 1\n", idx);
             return false;
         }
     }

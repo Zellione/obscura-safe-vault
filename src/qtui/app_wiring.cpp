@@ -5,6 +5,8 @@
 #include <QtQml/qqml.h>
 #include <cstdlib>
 
+#include "platform/theme_pref.h"
+
 #include "secure_text_field.h"
 #include "secure_image_item.h"
 #include "video_frame_item.h"
@@ -23,6 +25,12 @@
 
 void initThemeFromEnv()
 {
+    // Phase 1: Load persisted theme from config (like SDL app does)
+    auto pref = platform::ThemePref::default_location();
+    auto loadedTheme = pref.load();
+    gfx::set_theme(loadedTheme);
+
+    // Phase 2: Let OSV_QT_THEME env override (for selftest/testing)
     const char* theme_env = std::getenv("OSV_QT_THEME");
     if (theme_env) {
         int theme_idx = std::atoi(theme_env);
