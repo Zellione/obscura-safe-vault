@@ -23,7 +23,7 @@ int SessionState::viewDensity() const
 
 void SessionState::setViewDensity(int density)
 {
-    if (density >= 0 && density < 4) {
+    if (density >= 0 && density < 4 && static_cast<int>(state_.view) != density) {
         state_.view = static_cast<ui::GalleryView>(density);
         emit viewDensityChanged();
     }
@@ -50,7 +50,7 @@ int SessionState::stripSide() const
 
 void SessionState::setStripSide(int side)
 {
-    if (side >= 0 && side < 4) {
+    if (side >= 0 && side < 4 && static_cast<int>(state_.strip_side) != side) {
         state_.strip_side = static_cast<ui::StripSide>(side);
         emit stripSideChanged();
     }

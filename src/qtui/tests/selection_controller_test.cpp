@@ -149,23 +149,46 @@ static bool test_clear()
     return true;
 }
 
-// Test 5: Phase 53 Ctrl+A — empty gallery inert (select_all(0) doesn't change)
+// Test 5: Phase 53 Ctrl+A — empty gallery inert (prior selection survives)
 static bool test_ctrl_a_empty_gallery_inert()
 {
-    printf("Test 5: Ctrl+A on empty gallery is inert...\n");
+    printf("Test 5: Ctrl+A on empty gallery is inert (selection survives)...\n");
 
     MockGalleryModel model;
     SelectionController controller;
     controller.setNameLookup([&model](int row) { return model.nameAt(row); });
 
-    // Set count to 0 (empty gallery simulation)
-    int empty_count = 0;
+    // Pre-populate selection from a non-empty gallery (4 items)
+    controller.toggle(0);  // "image1"
+    controller.toggle(2);  // "image2"
+    if (controller.count() != 2) {
+        fprintf(stderr, "FAIL: Initial selection failed\n");
+        return false;
+    }
 
-    // toggleAll() on empty — should stay empty
-    controller.toggleAll(empty_count);
-    if (controller.count() != 0) {
-        fprintf(stderr, "FAIL: toggleAll(0) should leave selection empty, got count=%d\n",
+    // Verify we have the names before emptying gallery
+    QList<QString> selected_before = controller.selectedNames();
+    if (selected_before.size() != 2 || !selected_before.contains("image1") ||
+        !selected_before.contains("image2")) {
+        fprintf(stderr, "FAIL: Pre-empty selection should have image1 and image2\n");
+        return false;
+    }
+
+    // Simulate navigating to an EMPTY gallery (count = 0)
+    // toggleAll(0) should be a no-op: selection remains intact
+    controller.toggleAll(0);
+    if (controller.count() != 2) {
+        fprintf(stderr,
+                "FAIL: toggleAll(0) on empty gallery should preserve prior selection, got count=%d\n",
                 controller.count());
+        return false;
+    }
+
+    // Verify selection is still there
+    QList<QString> selected_after = controller.selectedNames();
+    if (selected_after.size() != 2 || !selected_after.contains("image1") ||
+        !selected_after.contains("image2")) {
+        fprintf(stderr, "FAIL: Selection should survive empty gallery toggleAll\n");
         return false;
     }
 

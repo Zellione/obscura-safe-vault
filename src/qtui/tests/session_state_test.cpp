@@ -229,9 +229,69 @@ static bool test_reset()
     return true;
 }
 
+// Test 9: setViewDensity no-op doesn't emit signal
+static bool test_view_density_no_op()
+{
+    printf("Test 9: setViewDensity no-op skips signal...\n");
+
+    QGuiApplication::processEvents();
+
+    SessionState state;
+    QSignalSpy spy(&state, &SessionState::viewDensityChanged);
+
+    // Set to value 1
+    state.setViewDensity(1);
+    if (spy.count() != 1) {
+        fprintf(stderr, "FAIL: First setViewDensity should emit, got %d signals\n", spy.count());
+        return false;
+    }
+
+    // Set to same value again (no-op)
+    spy.clear();
+    state.setViewDensity(1);
+    if (spy.count() != 0) {
+        fprintf(stderr, "FAIL: No-op setViewDensity should not emit, got %d signals\n", spy.count());
+        return false;
+    }
+
+    printf("PASS\n");
+    return true;
+}
+
+// Test 10: setStripSide no-op doesn't emit signal
+static bool test_strip_side_no_op()
+{
+    printf("Test 10: setStripSide no-op skips signal...\n");
+
+    QGuiApplication::processEvents();
+
+    SessionState state;
+    QSignalSpy spy(&state, &SessionState::stripSideChanged);
+
+    // Set to value 2
+    state.setStripSide(2);
+    if (spy.count() != 1) {
+        fprintf(stderr, "FAIL: First setStripSide should emit, got %d signals\n", spy.count());
+        return false;
+    }
+
+    // Set to same value again (no-op)
+    spy.clear();
+    state.setStripSide(2);
+    if (spy.count() != 0) {
+        fprintf(stderr, "FAIL: No-op setStripSide should not emit, got %d signals\n", spy.count());
+        return false;
+    }
+
+    printf("PASS\n");
+    return true;
+}
+
 int main(int argc, char** argv)
 {
     QGuiApplication app(argc, argv);
+
+    qRegisterMetaType<QString>("QString");
 
     int passed = 0;
     int failed = 0;
@@ -244,6 +304,8 @@ int main(int argc, char** argv)
     if (test_video_resume()) { ++passed; } else { ++failed; }
     if (test_video_resume_overwrite()) { ++passed; } else { ++failed; }
     if (test_reset()) { ++passed; } else { ++failed; }
+    if (test_view_density_no_op()) { ++passed; } else { ++failed; }
+    if (test_strip_side_no_op()) { ++passed; } else { ++failed; }
 
     printf("\n=== Test Summary ===\n");
     printf("Passed: %d\n", passed);
