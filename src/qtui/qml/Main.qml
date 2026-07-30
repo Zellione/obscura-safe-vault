@@ -233,12 +233,80 @@ Window {
                 color: themePalette.bg
                 anchors.fill: parent
 
+                // `focus: true` only grants scope focus inside the StackView;
+                // keys (Esc = up, arrows) need ACTIVE focus on the grid — force
+                // it when the page appears and again when the viewer/video
+                // screen pops back to it.
+                Component.onCompleted: grid.forceActiveFocus()
+                StackView.onActivated: grid.forceActiveFocus()
+
+                // Header: current gallery path + mouse affordance to go up.
+                Rectangle {
+                    id: galleryHeader
+                    anchors {
+                        top: parent.top
+                        left: parent.left
+                        right: parent.right
+                    }
+                    height: 44
+                    color: themePalette.surface
+
+                    Row {
+                        anchors {
+                            verticalCenter: parent.verticalCenter
+                            left: parent.left
+                            leftMargin: 8
+                        }
+                        spacing: 10
+
+                        Rectangle {
+                            width: 72
+                            height: 30
+                            radius: 4
+                            visible: galleryModel.currentPath !== "/"
+                            color: upMouse.pressed ? themePalette.surfaceHi : themePalette.bg
+                            border.color: themePalette.border
+                            border.width: 1
+                            anchors.verticalCenter: parent.verticalCenter
+
+                            MouseArea {
+                                id: upMouse
+                                anchors.fill: parent
+                                onClicked: {
+                                    galleryModel.upOneLevel()
+                                    grid.forceActiveFocus()
+                                }
+                            }
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "⬆ Up"
+                                color: themePalette.text
+                                font.pixelSize: 13
+                            }
+                        }
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: galleryModel.currentPath
+                            color: themePalette.textDim
+                            font.pixelSize: 13
+                            elide: Text.ElideLeft
+                        }
+                    }
+                }
+
                 // Gallery grid view: displays galleries and media from galleryModel.
                 // Galleries shown as folder glyphs, media as thumbnails.
                 // Arrow keys navigate, Enter opens, Esc up/back, F2 rename, T cycle theme.
                 GridView {
                     id: grid
-                    anchors.fill: parent
+                    anchors {
+                        top: galleryHeader.bottom
+                        left: parent.left
+                        right: parent.right
+                        bottom: parent.bottom
+                    }
                     cellWidth: 176
                     cellHeight: 200
                     model: galleryModel
@@ -289,9 +357,13 @@ Window {
                             }
                         }
 
-                        // Single-tap: select item
+                        // Single-tap: select item (and give the grid key focus,
+                        // so Esc/arrows work after any mouse interaction)
                         TapHandler {
-                            onTapped: grid.currentIndex = index
+                            onTapped: {
+                                grid.currentIndex = index
+                                grid.forceActiveFocus()
+                            }
                         }
 
                         // Double-tap: activate (open gallery or image viewer)

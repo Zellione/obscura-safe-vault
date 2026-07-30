@@ -648,3 +648,18 @@ Audio clock for sync: clock = audioSeekBase_ + samples_consumed / sample_rate. U
 3. **Bug fix (pre-existing, exposed by driving the unlock screen headlessly): `SecureTextField` could never gain active focus by click.** `QQuickPaintedItem` does not take focus on click, and QML `focus: true` grants scope focus — not active focus — inside a `StackView`. Symptom: no caret, no mask dots, all typing silently dropped, `accepted()` never emitted; unlock only "worked" via tab-focus. Fix: `mousePressEvent` override calling `forceActiveFocus(Qt::MouseFocusReason)` (secure_text_field.{h,cpp}) + QML uses `passwordField.forceActiveFocus()` after row click / dialog accept.
 
 **Verification:** end-to-end on Xvfb :81 with isolated `XDG_DATA_HOME` (seeded registry with 2 vaults + `vault.osv` in the data folder): unlock screen shows all 3 with correct ordering and elided paths (screenshot verified); click row 1 → type `test123` (7 mask dots + caret now visible) → Return → gallery renders 32 thumbnails + video thumb. Real registry never touched (read-only model + isolated env for tests). Regression battery: core_smoke / secure_field / gallery_model / thumb_stress all 0; render / thumbs / viewer / video / audio legs all 0.
+
+---
+
+## Post-PR: Gallery Up-Navigation Fix (2026-07-30)
+
+**Owner report:** "navigation feels broken, can't go up from gallery."
+
+**Root causes (both in Main.qml; GalleryModel::upOneLevel itself is unit-tested and fine):**
+
+1. **The grid never had ACTIVE focus for mouse users** — same scope-focus trap as the SecureTextField fix: `focus: true` inside a StackView grants scope focus only, so `Keys.onEscapePressed` (the only up-navigation) was dead unless focus arrived via tab. Fix: `grid.forceActiveFocus()` on `Component.onCompleted` and `StackView.onActivated` (covers unlock → gallery AND viewer/video pop-back), plus on single-tap of a tile.
+2. **No mouse affordance to go up existed at all.** Fix: 44px header bar on the gallery page with an "⬆ Up" button (visible when `galleryModel.currentPath !== "/"`, calls `upOneLevel()` and refocuses the grid) and the current path label (ElideLeft). Grid anchors below the header.
+
+**Tooling:** `osv-qt-mkvault` now turns a first-level subdirectory of image-dir into a sub-gallery (`create_gallery` + per-file add with parent path), so navigation fixtures can be built; shared `add_file` lambda keeps root/sub adds single-sourced.
+
+**Verification (Xvfb :81, isolated XDG dirs, /tmp/qtexp_nav.osv = 6 root images + "holiday" sub-gallery of 4):** unlock via picker → double-click folder tile → header shows "⬆ Up  /holiday" with only the 4 sub-images (screenshot) → click Up → back at root ("/" header, folder + 6 images, screenshot) → re-enter → press Escape → back at root (colour-count match). Full battery re-run: 4 unit tests + 5 selftest legs all exit 0.
