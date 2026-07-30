@@ -44,6 +44,8 @@ add_library(osv_qt_core STATIC
     ${REPO_ROOT}/src/ui/settings_model.cpp
     ${REPO_ROOT}/src/ui/selection_model.cpp
     ${REPO_ROOT}/src/ui/tag_inherit.cpp
+    ${REPO_ROOT}/src/ui/tag_suggest.cpp
+    ${REPO_ROOT}/src/ui/tag_category.cpp
     # text input models (Task 3 uses SecureTextInput)
     ${REPO_ROOT}/src/ui/text_input_model.cpp
     ${REPO_ROOT}/src/ui/secure_text_input.cpp
@@ -150,6 +152,10 @@ add_executable(osv_qt_session_state_test tests/session_state_test.cpp session_st
 target_link_libraries(osv_qt_session_state_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_session_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(osv_qt_tag_controller_test tests/tag_controller_test.cpp tag_controller.cpp)
+target_link_libraries(osv_qt_tag_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
+target_include_directories(osv_qt_tag_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 qt_add_executable(osv_qt_help_popup_qml_test tests/help_popup_qml_test.cpp)
 target_link_libraries(osv_qt_help_popup_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
 target_include_directories(osv_qt_help_popup_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -205,6 +211,7 @@ qt_add_executable(osv-qt
     help_model.cpp
     selection_controller.cpp
     session_state.cpp
+    tag_controller.cpp
 )
 
 # Shaders: compile to .qsb and embed as resources

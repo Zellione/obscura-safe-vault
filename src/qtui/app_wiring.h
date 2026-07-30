@@ -14,6 +14,7 @@
 #include "help_model.h"
 #include "selection_controller.h"
 #include "session_state.h"
+#include "tag_controller.h"
 
 class QQmlApplicationEngine;
 
@@ -39,6 +40,7 @@ struct AppContext {
     HelpModel helpModel;
     SelectionController selectionController;
     SessionState sessionState;
+    TagController tagController;
 
     AppContext();
 
