@@ -40,6 +40,12 @@ public:
 
     void setVault(vault::Vault* v) noexcept { vault_ = v; }
 
+    // Called when vault changes (lock/unlock/switch) to clear stale results
+    Q_INVOKABLE void onVaultChanged();
+
+    // Called when results are explicitly cleared
+    Q_INVOKABLE void clearResults() { results_.clear(); emit resultsChanged(); }
+
     QList<AdvancedSearchResultItem> results() const { return results_; }
     QList<SavedSearchItem> savedSearches() const { return savedSearches_; }
     QStringList tagVocabulary() const { return tagVocab_; }

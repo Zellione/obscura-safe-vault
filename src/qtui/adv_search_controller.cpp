@@ -149,3 +149,12 @@ void AdvancedSearchController::refreshTagVocabulary()
     tagVocab_.sort();
     emit tagVocabularyChanged();
 }
+
+void AdvancedSearchController::onVaultChanged()
+{
+    // Clear results when vault changes (lock/unlock/switch)
+    // Prevents dangling node pointers from torn-down index
+    results_.clear();
+    debounce_.cancel();  // Cancel any pending search
+    emit resultsChanged();
+}

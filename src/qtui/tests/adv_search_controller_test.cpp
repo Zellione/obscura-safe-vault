@@ -93,6 +93,25 @@ TEST_F(AdvancedSearchControllerTest, DeleteSavedSearch)
     EXPECT_EQ(controller_.savedSearches().size(), 0);
 }
 
+TEST_F(AdvancedSearchControllerTest, ResultsClearedOnVaultChange)
+{
+    // Add test images
+    osvqt_test::addTinyImages(vault_, "photo", 1);
+
+    // Perform search and trigger it
+    QStringList empty;
+    controller_.search(empty, empty, "", 2);
+    controller_.updateDebounce(0.2);  // Fire search
+    EXPECT_GT(controller_.results().size(), 0);
+    EXPECT_NE(controller_.results()[0].nodeKey, 0);
+
+    // Simulate vault change (lock) by calling onVaultChanged
+    controller_.onVaultChanged();
+
+    // Results should be cleared (no dangling pointers)
+    EXPECT_EQ(controller_.results().size(), 0);
+}
+
 TEST_F(AdvancedSearchControllerTest, DebounceDelaysSearchWithFakeClock)
 {
     // Add test images
