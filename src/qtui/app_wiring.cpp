@@ -62,6 +62,7 @@ AppContext::AppContext()
     unlockController.setPlaybackEngine(&playbackEngine);
     galleryModel.setViewerController(&viewerController);
     playbackEngine.setVault(&unlockController.vault());
+    playbackEngine.setSessionState(&sessionState);
 
     // Wire vault unlock state to settings controller
     QObject::connect(&unlockController, &UnlockController::unlockedChanged,

@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QElapsedTimer>
 #include <QPointer>
+#include <QString>
 #include <memory>
 #include <atomic>
 #include <thread>
@@ -17,6 +18,7 @@
 // Forward declarations
 class VideoFrameItem;
 class AudioPipe;
+class SessionState;
 namespace vault { class Vault; class IndexNode; }
 namespace media {
     class VideoSource;
@@ -55,6 +57,9 @@ public:
 
     // Bind the vault for node resolution
     void setVault(vault::Vault* vault) { vault_ = vault; }
+
+    // Bind the session state for video resume bookmark
+    void setSessionState(SessionState* state) { sessionState_ = state; }
 
     // Public interface (all callable from GUI thread)
     Q_INVOKABLE void open(quintptr nodeKey);
@@ -112,6 +117,7 @@ private:
     // --- GUI thread state ---
     QPointer<VideoFrameItem> frameItem_;
     vault::Vault* vault_ = nullptr;
+    SessionState* sessionState_ = nullptr;
     double position_ = 0.0;
     double duration_ = 0.0;
     bool playing_ = false;
@@ -119,6 +125,7 @@ private:
     double volume_ = 1.0;
     bool loopEnabled_ = false;  // R key toggle for loop playback
     float currentGain_ = 1.0f;  // Last gain applied to audio pipe (for testing)
+    QString currentNodePath_;  // Current node path for session resume
 
     // --- Shared state (guarded by mutex) ---
     mutable std::mutex mutex_;

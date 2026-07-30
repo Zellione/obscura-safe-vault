@@ -167,7 +167,7 @@ add_executable(osv_qt_anim_controller_test tests/anim_controller_test.cpp anim_c
 target_link_libraries(osv_qt_anim_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Test)
 target_include_directories(osv_qt_anim_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-qt_add_executable(osv_qt_playback_engine_test tests/playback_engine_test.cpp playback_engine.cpp audio_pipe.cpp video_frame_item.cpp rhi_quad_renderer.cpp)
+qt_add_executable(osv_qt_playback_engine_test tests/playback_engine_test.cpp playback_engine.cpp audio_pipe.cpp video_frame_item.cpp rhi_quad_renderer.cpp session_state.cpp)
 target_link_libraries(osv_qt_playback_engine_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_playback_engine_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
