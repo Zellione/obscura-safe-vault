@@ -18,9 +18,21 @@ Window {
         id: renameDialog
     }
 
+    Rectangle {
+        id: footerBar
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: 32
+        color: themePalette.bg
+    }
+
     StackView {
         id: stack
-        anchors.fill: parent
+        anchors {
+            fill: parent
+            bottom: footerBar.top
+        }
 
         initialItem: unlockScreenComponent
 
@@ -212,4 +224,4 @@ Window {
                 }
             }
         }
-    }
+}
