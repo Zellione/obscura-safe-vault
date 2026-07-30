@@ -219,6 +219,7 @@ qt_add_executable(osv-qt
     thumb_cache.cpp
     viewer_controller.cpp
     slideshow_controller.cpp
+    anim_controller.cpp
     theme_palette.cpp
     playback_engine.cpp
     audio_pipe.cpp
