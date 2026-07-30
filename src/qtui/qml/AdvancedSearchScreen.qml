@@ -220,9 +220,42 @@ Rectangle {
                                 text: includeText
                                 color: themePalette.text
                                 font.pixelSize: 11
-                                onTextChanged: { includeText = text; performSearch(); }
-                                Keys.onTabPressed: { focusField = 1; includeInput.focus = false }
+                                onTextChanged: {
+                                    includeText = text;
+                                    performSearch();
+                                    // Show autocomplete if text is not empty
+                                    if (text.length > 0) {
+                                        includeAutocomplete.currentText = text;
+                                        includeAutocomplete.show();
+                                    } else {
+                                        includeAutocomplete.close();
+                                    }
+                                }
+                                onFocusChanged: {
+                                    if (focus && text.length > 0) {
+                                        includeAutocomplete.currentText = text;
+                                        includeAutocomplete.show();
+                                    } else {
+                                        includeAutocomplete.close();
+                                    }
+                                }
+                                Keys.onTabPressed: {
+                                    if (includeAutocomplete.opened && includeAutocomplete.selectedIndex >= 0) {
+                                        includeAutocomplete.handleKeyPress(event);
+                                    } else {
+                                        focusField = 1;
+                                        includeInput.focus = false;
+                                    }
+                                }
                                 Keys.onBacktabPressed: { focusField = 4; includeInput.focus = false }
+                                Keys.onPressed: (event) => {
+                                    if (includeAutocomplete.opened && (event.key === Qt.Key_Up || event.key === Qt.Key_Down || event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
+                                        includeAutocomplete.handleKeyPress(event);
+                                    } else if (event.key === Qt.Key_Escape) {
+                                        includeAutocomplete.close();
+                                        event.accepted = true;
+                                    }
+                                }
                             }
                         }
                     }
@@ -249,9 +282,42 @@ Rectangle {
                                 text: excludeText
                                 color: themePalette.text
                                 font.pixelSize: 11
-                                onTextChanged: { excludeText = text; performSearch(); }
-                                Keys.onTabPressed: { focusField = 2; excludeInput.focus = false }
+                                onTextChanged: {
+                                    excludeText = text;
+                                    performSearch();
+                                    // Show autocomplete if text is not empty
+                                    if (text.length > 0) {
+                                        excludeAutocomplete.currentText = text;
+                                        excludeAutocomplete.show();
+                                    } else {
+                                        excludeAutocomplete.close();
+                                    }
+                                }
+                                onFocusChanged: {
+                                    if (focus && text.length > 0) {
+                                        excludeAutocomplete.currentText = text;
+                                        excludeAutocomplete.show();
+                                    } else {
+                                        excludeAutocomplete.close();
+                                    }
+                                }
+                                Keys.onTabPressed: {
+                                    if (excludeAutocomplete.opened && excludeAutocomplete.selectedIndex >= 0) {
+                                        excludeAutocomplete.handleKeyPress(event);
+                                    } else {
+                                        focusField = 2;
+                                        excludeInput.focus = false;
+                                    }
+                                }
                                 Keys.onBacktabPressed: { focusField = 0; excludeInput.focus = false }
+                                Keys.onPressed: (event) => {
+                                    if (excludeAutocomplete.opened && (event.key === Qt.Key_Up || event.key === Qt.Key_Down || event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
+                                        excludeAutocomplete.handleKeyPress(event);
+                                    } else if (event.key === Qt.Key_Escape) {
+                                        excludeAutocomplete.close();
+                                        event.accepted = true;
+                                    }
+                                }
                             }
                         }
                     }
@@ -608,6 +674,43 @@ Rectangle {
                                                excludeText.split(/[\s,]+/).filter(t => t.length > 0),
                                                nameText, scopeIndex);
             advancedSearchController.refreshSavedSearches();
+        }
+    }
+
+    // Include field tag autocomplete
+    Local.TagAutocompletePopup {
+        id: includeAutocomplete
+        themePalette: root.themePalette
+        vocabulary: root.advancedSearchController.tagVocabulary
+        textInput: includeInput
+
+        x: {
+            // Position below the include input
+            const parent = includeInput.parent;
+            while (parent && parent.parent) {
+                // Find the root position
+            }
+            return 60;  // Approximate x position of include field
+        }
+        y: 240  // Approximate y position below include field
+
+        onTagSelected: {
+            performSearch();
+        }
+    }
+
+    // Exclude field tag autocomplete
+    Local.TagAutocompletePopup {
+        id: excludeAutocomplete
+        themePalette: root.themePalette
+        vocabulary: root.advancedSearchController.tagVocabulary
+        textInput: excludeInput
+
+        x: 60
+        y: 290  // Approximate y position below exclude field
+
+        onTagSelected: {
+            performSearch();
         }
     }
 }
