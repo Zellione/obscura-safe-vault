@@ -22,6 +22,8 @@ Rectangle {
 
     property var currentResults: []
     property bool listView: false  // false=grid, true=list
+    property var savedSearchList: []  // Populated from controller
+    property string savedSearchFilter: ""
 
     ColumnLayout {
         anchors.fill: parent
@@ -355,6 +357,14 @@ Rectangle {
                 openResult(currentResults[0]);
             }
             event.accepted = true;
+        } else if (event.key === Qt.Key_S && (event.modifiers & Qt.ControlModifier)) {
+            // Ctrl+S: save current search with a name (for now, use timestamp)
+            const name = "Search_" + new Date().getTime();
+            advancedSearchController.saveSearch(name, includeText.split(/[\s,]+/).filter(t => t.length > 0),
+                                               excludeText.split(/[\s,]+/).filter(t => t.length > 0),
+                                               nameText, scopeIndex);
+            advancedSearchController.refreshSavedSearches();
+            event.accepted = true;
         }
     }
 
@@ -362,6 +372,7 @@ Rectangle {
 
     Component.onCompleted: {
         advancedSearchController.refreshTagVocabulary();
+        advancedSearchController.refreshSavedSearches();
         performSearch();
     }
 
@@ -369,6 +380,9 @@ Rectangle {
         target: advancedSearchController
         function onResultsChanged() {
             currentResults = advancedSearchController.results;
+        }
+        function onSavedSearchesChanged() {
+            savedSearchList = advancedSearchController.savedSearches;
         }
     }
 }
