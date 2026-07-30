@@ -24,6 +24,10 @@ on:
       - '.gitignore'
       - '.serena/**'
   pull_request:
+    # experiment/qt-quick-ui is TEMPORARY: it gates the Qt-UI parity workstream
+    # PRs (Stage 2, plan 2026-07-30). This entry lives only on the experiment
+    # lineage — main's ci.yml is unaffected. Drop it when the experiment branch
+    # is finally merged (or abandoned).
     branches: [main, experiment/qt-quick-ui]
     paths-ignore:
       - '**/*.md'
