@@ -1,8 +1,11 @@
 #include "import_controller.h"
 
 #include <algorithm>
+#include <QFileDialog>
+#include <QStandardPaths>
 #include "vault/vault.h"
 #include "ui/import_model.h"
+#include "platform/paths.h"
 
 ImportController::ImportController(QObject* parent)
     : QObject(parent)
@@ -47,20 +50,84 @@ void ImportController::end_session()
 
 void ImportController::pickFiles()
 {
-    // Placeholder: in full implementation, would show file dialog
-    // and call enqueueFiles with selected paths
+    if (!vault_ || !session_active_.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    // Open file dialog for images/videos (multi-select)
+    QStringList fileNames = QFileDialog::getOpenFileNames(
+        nullptr,  // parent widget (nullptr for headless compatibility in tests)
+        "Select Images or Videos",
+        QStandardPaths::writableLocation(QStandardPaths::HomeLocation),
+        "Images & Video (*.jpg *.jpeg *.png *.gif *.bmp *.tga *.webp *.heic *.avif "
+        "*.mp4 *.mkv *.webm *.mov *.m4v *.avi *.mpg *.mpeg *.wmv *.asf *.flv);;All files (*)"
+    );
+
+    if (fileNames.isEmpty()) {
+        return;
+    }
+
+    // Normalize each path and filter out invalid ones
+    QList<QString> normalized_paths;
+    for (const auto& path : fileNames) {
+        if (auto norm_path = platform::normalize_user_path(path.toStdString())) {
+            normalized_paths.append(QString::fromStdString(norm_path->string()));
+        }
+    }
+
+    if (!normalized_paths.isEmpty()) {
+        enqueueFiles(normalized_paths);
+    }
 }
 
 void ImportController::pickFolders()
 {
-    // Placeholder: in full implementation, would show folder dialog
-    // and call enqueueFolder with selected path
+    if (!vault_ || !session_active_.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    // Open folder dialog (single-select)
+    QString folderPath = QFileDialog::getExistingDirectory(
+        nullptr,  // parent widget (nullptr for headless compatibility in tests)
+        "Select Folder to Import",
+        QStandardPaths::writableLocation(QStandardPaths::HomeLocation),
+        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks
+    );
+
+    if (folderPath.isEmpty()) {
+        return;
+    }
+
+    // Normalize path
+    if (auto norm_path = platform::normalize_user_path(folderPath.toStdString())) {
+        enqueueFolder(QString::fromStdString(norm_path->string()));
+    }
 }
 
 void ImportController::pickArchives()
 {
-    // Placeholder: in full implementation, would show file dialog
-    // filtered for archives, and call enqueueArchive with selected path
+    if (!vault_ || !session_active_.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    // Open file dialog for archives (multi-select, but typically one at a time)
+    QStringList fileNames = QFileDialog::getOpenFileNames(
+        nullptr,  // parent widget (nullptr for headless compatibility in tests)
+        "Select Archive File",
+        QStandardPaths::writableLocation(QStandardPaths::HomeLocation),
+        "Archives (*.zip *.cbz *.7z *.rar *.tar *.tar.gz *.tar.xz *.cbr *.cb7 *.cbt);;All files (*)"
+    );
+
+    if (fileNames.isEmpty()) {
+        return;
+    }
+
+    // For each archive, normalize and enqueue
+    for (const auto& path : fileNames) {
+        if (auto norm_path = platform::normalize_user_path(path.toStdString())) {
+            enqueueArchive(QString::fromStdString(norm_path->string()));
+        }
+    }
 }
 
 void ImportController::enqueueFiles(const QList<QString>& paths)
