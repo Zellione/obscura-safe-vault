@@ -227,6 +227,32 @@ void PlaybackEngine::toggleMute()
     setMuted(!muted_);
 }
 
+void PlaybackEngine::stepFrame(int direction)
+{
+    // Frame-step while paused: advance by the frame duration
+    // direction: +1 for forward, -1 for backward
+    //
+    // TODO (Phase 47/57): Implement frame-accurate stepping
+    // Currently placeholder; full implementation requires decoder integration
+    // to know the per-frame duration and seek to exact frame boundaries.
+    // For now, this method exists for API completeness.
+    //
+    // When implemented:
+    // 1. Get current frame from decoder
+    // 2. Calculate time of next/prev frame based on frame duration
+    // 3. Seek to that position
+    // 4. Deliver frame to renderer
+
+    if (direction == 0) {
+        return;  // No-op
+    }
+
+    // Placeholder: step by 1/30 second (~33ms, typical video frame at 30 FPS)
+    // Real implementation would query the decoder for actual frame duration
+    const double frameDuration = 1.0 / 30.0;
+    seekBy(direction * frameDuration);
+}
+
 uint64_t PlaybackEngine::testOnlySamplesConsumed() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
