@@ -135,7 +135,18 @@ void ViewerController::prev()
         return;
     }
 
-    // Find previous media item (skip galleries)
+    // If in album mode, navigate album list
+    if (!albumNodeKeys_.isEmpty()) {
+        int prevIdx = albumCurrentIndex_ - 1;
+        if (prevIdx >= 0) {
+            bumpGeneration();
+            albumCurrentIndex_ = prevIdx;
+            loadImageAtAlbumIndex(prevIdx);
+        }
+        return;
+    }
+
+    // Gallery mode: find previous media item (skip galleries)
     int searchIdx = currentGalleryIndex_ - 1;
     while (searchIdx >= 0) {
         // Check if row at searchIdx is a media item (not gallery)
@@ -161,6 +172,18 @@ void ViewerController::next()
         return;
     }
 
+    // If in album mode, navigate album list
+    if (!albumNodeKeys_.isEmpty()) {
+        int nextIdx = albumCurrentIndex_ + 1;
+        if (nextIdx < albumNodeKeys_.size()) {
+            bumpGeneration();
+            albumCurrentIndex_ = nextIdx;
+            loadImageAtAlbumIndex(nextIdx);
+        }
+        return;
+    }
+
+    // Gallery mode: skip galleries in current folder
     int rowCount = galleryModel_->rowCount();
     int searchIdx = currentGalleryIndex_ + 1;
     while (searchIdx < rowCount) {
@@ -178,6 +201,47 @@ void ViewerController::next()
         searchIdx++;
     }
     // No next media found
+}
+
+void ViewerController::openAlbum(const QList<quintptr>& nodeKeys, int startIndex)
+{
+    if (nodeKeys.isEmpty() || startIndex < 0 || startIndex >= nodeKeys.size()) {
+        return;
+    }
+
+    // Enter album mode
+    albumNodeKeys_ = nodeKeys;
+    albumCurrentIndex_ = startIndex;
+    bumpGeneration();
+
+    loadImageAtAlbumIndex(startIndex);
+}
+
+void ViewerController::loadImageAtAlbumIndex(int albumIndex)
+{
+    if (albumIndex < 0 || albumIndex >= albumNodeKeys_.size() || !vault_) {
+        return;
+    }
+
+    setLoading(true);
+
+    // Get node key from album list
+    quintptr nodeKey = albumNodeKeys_[albumIndex];
+    const auto* node = reinterpret_cast<const vault::IndexNode*>(nodeKey);
+
+    if (!node) {
+        setLoading(false);
+        return;
+    }
+
+    // Derive a display name (TODO: fetch from index when album_rebind is integrated)
+    QString name = QString::asprintf("Album Item %d", albumIndex + 1);
+    setImageName(name);
+
+    // Enqueue async load worker (same as gallery mode)
+    uint64_t currentGen = generation_.load(std::memory_order_acquire);
+    auto worker = new ViewerWorker(this, node, currentGen, vault_);
+    pool_.start(worker);
 }
 
 void ViewerController::loadImageAtIndex(int galleryIndex)

@@ -155,6 +155,10 @@ add_executable(osv_qt_viewer_controller_test tests/viewer_controller_test.cpp)
 target_link_libraries(osv_qt_viewer_controller_test PRIVATE osv_qt_core Qt6::Core)
 target_include_directories(osv_qt_viewer_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(osv_qt_viewer_album_test tests/viewer_album_test.cpp)
+target_link_libraries(osv_qt_viewer_album_test PRIVATE osv_qt_core Qt6::Core)
+target_include_directories(osv_qt_viewer_album_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 add_executable(osv_qt_slideshow_controller_test tests/slideshow_controller_test.cpp)
 target_link_libraries(osv_qt_slideshow_controller_test PRIVATE osv_qt_core Qt6::Core)
 target_include_directories(osv_qt_slideshow_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
