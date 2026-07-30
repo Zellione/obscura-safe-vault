@@ -129,7 +129,7 @@ Rectangle {
     }
 
     function cycleZoomMode() {
-        // Videos stay in Fit mode only
+        // Videos stay in Fit mode only (Finding 1 / SDL parity: F key is no-op for videos)
         if (isCurrentItemVideo()) {
             return;
         }
