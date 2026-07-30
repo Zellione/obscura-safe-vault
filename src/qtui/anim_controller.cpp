@@ -1,7 +1,7 @@
 #include "anim_controller.h"
 
 AnimController::AnimController(QObject* parent)
-    : QObject(parent)
+    : QObject(parent), playing_(false)
 {
     timer_.setInterval(16);  // ~60 FPS
     connect(&timer_, &QTimer::timeout, this, &AnimController::onTick);
