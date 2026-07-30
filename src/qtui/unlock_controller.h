@@ -15,6 +15,7 @@ class UnlockController : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool unlocked READ unlocked NOTIFY unlockedChanged)
     Q_PROPERTY(QString errorText READ errorText NOTIFY errorTextChanged)
+    Q_PROPERTY(QUrl currentVaultPath READ currentVaultPath NOTIFY currentVaultPathChanged)
 public:
     explicit UnlockController(QObject* parent = nullptr);
 
@@ -38,16 +39,20 @@ public:
 
     [[nodiscard]] bool unlocked() const { return vault_.is_unlocked(); }
     [[nodiscard]] QString errorText() const { return error_; }
+    [[nodiscard]] QUrl currentVaultPath() const { return currentVaultPath_; }
     [[nodiscard]] vault::Vault& vault() noexcept { return vault_; }
 
 signals:
     void unlockedChanged();
     void errorTextChanged();
+    void currentVaultPathChanged();
 
 private:
     void setError(const QString& e);
+    void setCurrentVaultPath(const QUrl& path);
     vault::Vault vault_;
     QString      error_;
+    QUrl         currentVaultPath_;
     ViewerController* viewerController_ = nullptr;
     PlaybackEngine* playbackEngine_ = nullptr;
 };

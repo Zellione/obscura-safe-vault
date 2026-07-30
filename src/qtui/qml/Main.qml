@@ -32,6 +32,7 @@ Window {
 
     QuickSwitchPopup {
         id: quickSwitchPopup
+        activeVaultPath: unlockController.currentVaultPath
         onSwitchToVault: (vaultPath) => {
             if (unlockController.openVault(vaultPath)) {
                 stack.replace(unlockScreenComponent);

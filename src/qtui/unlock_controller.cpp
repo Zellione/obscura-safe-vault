@@ -29,6 +29,14 @@ void UnlockController::setError(const QString& e)
     }
 }
 
+void UnlockController::setCurrentVaultPath(const QUrl& path)
+{
+    if (currentVaultPath_ != path) {
+        currentVaultPath_ = path;
+        emit currentVaultPathChanged();
+    }
+}
+
 bool UnlockController::openVault(const QUrl& fileUrl)
 {
     const auto pathOpt = platform::normalize_user_path(fileUrl.toLocalFile().toStdString());
@@ -39,6 +47,7 @@ bool UnlockController::openVault(const QUrl& fileUrl)
     const auto result = vault::Vault::open(pathOpt.value().string(), vault_);
     if (result == vault::VaultResult::Ok) {
         setError({});
+        setCurrentVaultPath(fileUrl);
         return true;
     }
     setError(result == vault::VaultResult::IoError        ? QStringLiteral("Failed to open file")
@@ -146,6 +155,7 @@ void UnlockController::lock()
         cache->clearAll();
     }
 
+    setCurrentVaultPath({});
     emit unlockedChanged();
 }
 
@@ -254,6 +264,7 @@ bool UnlockController::createVault(const QUrl& fileUrl, SecureTextField* passwor
     registry.add(pathOpt.value());
 
     setError({});
+    setCurrentVaultPath(fileUrl);
     emit unlockedChanged();
     return true;
 }

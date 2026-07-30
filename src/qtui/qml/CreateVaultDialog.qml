@@ -83,12 +83,13 @@ Rectangle {
                     : QUrl.fromLocalFile("/tmp/vault.osv");
 
         // Call the unlock controller to create the vault
-        if (unlockController.createVault(url, passwordField, confirmField, keyfileField)) {
+        if (unlockController.createVault(url, passwordField, confirmField, keyfilePath)) {
             // Success: clear fields and go back
             vaultPathField.text = "";
             passwordField.clearSecret();
             confirmField.clearSecret();
             keyfileField.clearSecret();
+            keyfilePath = "";
             createRoot.vaultCreated();
             if (parent && typeof parent.pop === 'function') parent.pop();
         } else {

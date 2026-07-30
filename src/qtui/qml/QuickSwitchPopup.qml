@@ -12,6 +12,7 @@ Rectangle {
 
     property int currentIndex: 0
     property bool isOpen: false
+    property url activeVaultPath: ""  // Path to the currently-unlocked vault
 
     signal switchToVault(url vaultPath)
 
@@ -65,8 +66,11 @@ Rectangle {
             return;
         }
 
-        // Check if this is the currently unlocked vault
-        // (If both paths are the same, it's a no-op)
+        // Check if this is the currently unlocked vault (no-op if selecting the active vault)
+        if (url.toString() === activeVaultPath.toString()) {
+            close();
+            return;
+        }
 
         // Lock current vault
         if (unlockController.unlocked) {
@@ -134,6 +138,9 @@ Rectangle {
                         height: 52
                         color: quickSwitchRoot.currentIndex === index
                                ? themePalette.surfaceHi : themePalette.surface
+                        border.color: model.fileUrl.toString() === quickSwitchRoot.activeVaultPath.toString()
+                                      ? themePalette.accent : "transparent"
+                        border.width: model.fileUrl.toString() === quickSwitchRoot.activeVaultPath.toString() ? 2 : 0
 
                         Column {
                             anchors {
@@ -145,13 +152,27 @@ Rectangle {
                             }
                             spacing: 2
 
-                            Text {
+                            Row {
                                 width: parent.width
-                                text: model.name
-                                color: themePalette.text
-                                font.pixelSize: 14
-                                elide: Text.ElideMiddle
+                                spacing: 8
+
+                                Text {
+                                    width: parent.width - currentSuffix.width
+                                    text: model.name
+                                    color: themePalette.text
+                                    font.pixelSize: 14
+                                    elide: Text.ElideMiddle
+                                }
+
+                                Text {
+                                    id: currentSuffix
+                                    text: model.fileUrl.toString() === quickSwitchRoot.activeVaultPath.toString()
+                                          ? "(current)" : ""
+                                    color: themePalette.textDim
+                                    font.pixelSize: 12
+                                }
                             }
+
                             Text {
                                 width: parent.width
                                 text: model.dir
