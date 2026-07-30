@@ -44,6 +44,10 @@ add_library(osv_qt_core STATIC
     ${REPO_ROOT}/src/ui/settings_model.cpp
     ${REPO_ROOT}/src/ui/selection_model.cpp
     ${REPO_ROOT}/src/ui/tag_inherit.cpp
+    ${REPO_ROOT}/src/ui/detail_model.cpp
+    ${REPO_ROOT}/src/ui/detail_layout.cpp
+    ${REPO_ROOT}/src/ui/delete_summary.cpp
+    ${REPO_ROOT}/src/ui/text_metrics.cpp
     # text input models (Task 3 uses SecureTextInput)
     ${REPO_ROOT}/src/ui/text_input_model.cpp
     ${REPO_ROOT}/src/ui/secure_text_input.cpp
@@ -126,6 +130,10 @@ add_executable(osv_qt_gallery_model_test tests/gallery_model_test.cpp gallery_mo
 target_link_libraries(osv_qt_gallery_model_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick)
 target_include_directories(osv_qt_gallery_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(osv_qt_detail_controller_test tests/detail_controller_test.cpp detail_controller.cpp)
+target_link_libraries(osv_qt_detail_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick)
+target_include_directories(osv_qt_detail_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 add_executable(osv_qt_file_op_controller_test tests/file_op_controller_test.cpp file_op_controller.cpp)
 target_link_libraries(osv_qt_file_op_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_file_op_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -194,6 +202,7 @@ qt_add_executable(osv-qt
     unlock_controller.cpp
     vault_list_model.cpp
     gallery_model.cpp
+    detail_controller.cpp
     thumb_cache.cpp
     viewer_controller.cpp
     theme_palette.cpp
