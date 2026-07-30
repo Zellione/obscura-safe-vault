@@ -50,7 +50,7 @@ Rectangle {
     ConfirmDialog {
         id: deleteConfirmDialog
         title: "Remove Vault from List"
-        body: "This removes the vault from your list, but does not delete the file."
+        bodyText: "This removes the vault from your list, but does not delete the file."
         danger: true
         onAccepted: {
             if (currentSelection >= 0 && vaultManagerController.removeVaultFromRegistry(currentSelection)) {

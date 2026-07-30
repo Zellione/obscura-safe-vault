@@ -15,10 +15,14 @@ Rectangle {
     property url activeVaultPath: ""  // Path to the currently-unlocked vault
 
     signal switchToVault(url vaultPath)
+    signal closed()
 
     // Pick up registry changes when screen appears
     Component.onCompleted: vaultManagerController.refreshVaultList()
-    onVisibleChanged: if (visible) vaultManagerController.refreshVaultList()
+    onVisibleChanged: {
+        if (visible) vaultManagerController.refreshVaultList();
+        else closed();
+    }
 
     // Keyboard handlers
     Keys.onPressed: (event) => {

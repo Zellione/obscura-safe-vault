@@ -182,7 +182,6 @@ Rectangle {
                 spacing: 8
 
                 Rectangle {
-                    Layout.fillWidth: true
                     width: parent.width - 72
                     height: 40
                     color: themePalette.surface
