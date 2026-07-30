@@ -11,7 +11,7 @@ Window {
     color: themePalette.bg
     title: "osv-qt (experiment)"
 
-    // Global F1/F2/Shift+T key handlers
+    // Global F1/F2/Shift+T/Shift+G key handlers
     Keys.onPressed: (event) => {
         if (event.key === Qt.Key_F1) {
             helpPopup.toggle();
@@ -22,6 +22,10 @@ Window {
         } else if (event.key === Qt.Key_T && (event.modifiers & Qt.ShiftModifier)) {
             // Shift+T: open tag overview screen
             stack.push(tagOverviewScreenComponent);
+            event.accepted = true;
+        } else if (event.key === Qt.Key_G && (event.modifiers & Qt.ShiftModifier)) {
+            // Shift+G: import tags from file to current gallery
+            tagListImportFileDialog.open();
             event.accepted = true;
         }
     }
@@ -48,6 +52,31 @@ Window {
 
         // Restore focus to the active screen when settings closes
         onClosed: {
+            if (stack.currentItem) {
+                stack.currentItem.forceActiveFocus();
+            }
+        }
+    }
+
+    // FileDialog for importing tag lists
+    FileDialog {
+        id: tagListImportFileDialog
+        title: "Import Tags from File"
+        nameFilters: ["Text files (*.txt)", "All files (*)"]
+        onAccepted: {
+            // Import tags to current gallery path
+            const currentPath = galleryModel.currentPath;
+            const result = tagListImportController.importTagsFromFile(currentPath, selectedFile.toString());
+            if (result >= 0) {
+                statusController.set(0, `Imported ${result} tags`);
+            } else {
+                statusController.set(2, tagListImportController.errorMessage());
+            }
+            if (stack.currentItem) {
+                stack.currentItem.forceActiveFocus();
+            }
+        }
+        onRejected: {
             if (stack.currentItem) {
                 stack.currentItem.forceActiveFocus();
             }

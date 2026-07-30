@@ -276,6 +276,8 @@ qt_add_executable(osv-qt
     tag_controller.cpp
     favorites_controller.cpp
     tag_overview_controller.cpp
+    tag_list_import_adapter.cpp
+    tag_list_import_controller.cpp
     search_model_adapter.cpp
 )
 

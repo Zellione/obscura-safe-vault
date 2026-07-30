@@ -55,6 +55,7 @@ void registerOsvQmlTypes()
     qmlRegisterType<TagController>("Osv", 1, 0, "TagController");
     qmlRegisterType<FavoritesController>("Osv", 1, 0, "FavoritesController");
     qmlRegisterType<TagOverviewController>("Osv", 1, 0, "TagOverviewController");
+    qmlRegisterType<TagListImportController>("Osv", 1, 0, "TagListImportController");
     qmlRegisterType<SearchModelAdapter>("Osv", 1, 0, "SearchModelAdapter");
 }
 
@@ -69,6 +70,7 @@ AppContext::AppContext()
     tagController.setVault(&unlockController.vault());
     favoritesController.setVault(&unlockController.vault());
     tagOverviewController.setVault(&unlockController.vault());
+    tagListImportController.setVault(&unlockController.vault());
     searchModelAdapter.setVault(&unlockController.vault());
 
     // Wire vault unlock state to settings controller
@@ -102,5 +104,6 @@ void AppContext::expose(QQmlApplicationEngine& engine)
     ctx->setContextProperty("tagController", &tagController);
     ctx->setContextProperty("favoritesController", &favoritesController);
     ctx->setContextProperty("tagOverviewController", &tagOverviewController);
+    ctx->setContextProperty("tagListImportController", &tagListImportController);
     ctx->setContextProperty("searchModelAdapter", &searchModelAdapter);
 }

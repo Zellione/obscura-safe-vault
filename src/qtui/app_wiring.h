@@ -17,6 +17,7 @@
 #include "tag_controller.h"
 #include "favorites_controller.h"
 #include "tag_overview_controller.h"
+#include "tag_list_import_controller.h"
 #include "search_model_adapter.h"
 
 class QQmlApplicationEngine;
@@ -46,6 +47,7 @@ struct AppContext {
     TagController tagController;
     FavoritesController favoritesController;
     TagOverviewController tagOverviewController;
+    TagListImportController tagListImportController;
     SearchModelAdapter searchModelAdapter;
 
     AppContext();
