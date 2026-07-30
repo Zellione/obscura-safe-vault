@@ -607,3 +607,15 @@ Audio clock for sync: clock = audioSeekBase_ + samples_consumed / sample_rate. U
 **Files Modified in M7:**
 - `src/qtui/NOTES.md` (this entry)
 - `docs/superpowers/specs/2026-07-29-qt-quick-ui-experiment-verdict.md` (written, untracked)
+
+---
+
+## Final Review Fix Wave (2026-07-30)
+
+**Five scoped fixes applied; no refactoring or scope creep.**
+
+1. **Security: Node names never logged** — main.cpp:392 changed from `"PASS (Step 1): Vault unlocked, found image: %s\n", imageNode->name.data()` to `"PASS (Step 1): Vault unlocked, image node found\n"` (invariant: vault node names must not appear in output)
+2. **Security: Password buffer wipe** — main.cpp:369-370 added `PwWipe` scope guard to crypto_wipe pw_str on all exit paths (via monocypher.h include)
+3. **Important: Platform-independent temp path** — core_smoke.cpp:18 replaced `/tmp/osv_qt_core_smoke.osv` with `(std::filesystem::temp_directory_path() / "osv_qt_core_smoke.osv").string()`
+4. **Important: Remove dead code** — Deleted GalleryModel::setPlaybackEngine() method, playbackEngine_ member, forward decl; removed 2 call sites in main.cpp (UnlockController's setPlaybackEngine is live, retained)
+5. **Important: Audio reopen guard** — audio_pipe.cpp::open() added check-and-quit for leaked subsystem if prior open() failed with `subsystem_owned_=true` but `stream_=nullptr`

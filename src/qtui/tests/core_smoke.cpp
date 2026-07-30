@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <span>
 #include <string>
 
@@ -15,7 +16,7 @@ static std::span<const uint8_t> b(const char* s)
 
 int main()
 {
-    const std::string path = "/tmp/osv_qt_core_smoke.osv";
+    const std::string path = (std::filesystem::temp_directory_path() / "osv_qt_core_smoke.osv").string();
     std::remove(path.c_str());
 
     {

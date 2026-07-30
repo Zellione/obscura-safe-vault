@@ -10,7 +10,6 @@ namespace vault {
 }
 
 class ViewerController;
-class PlaybackEngine;
 
 // Gallery list model: displays galleries and media from vault().list(currentPath).
 // Roles: name (QString), isGallery (bool), nodeKey (quintptr — opaque const IndexNode*).
@@ -48,9 +47,6 @@ public:
     // Set viewer controller for drain coordination (optional, for async image loading)
     void setViewerController(ViewerController* viewer) noexcept { viewerController_ = viewer; }
 
-    // Set playback engine for drain coordination (optional, for video playback)
-    void setPlaybackEngine(PlaybackEngine* playback) noexcept { playbackEngine_ = playback; }
-
     // Public refresh for programmatic update (e.g., after unlock)
     void refresh();
 
@@ -63,7 +59,6 @@ private:
 
     vault::Vault* vault_;
     ViewerController* viewerController_ = nullptr;
-    PlaybackEngine* playbackEngine_ = nullptr;
     std::vector<const vault::IndexNode*> rows_;
     QString currentPath_;  // "/" for root, "/foo/bar" for nested
 };

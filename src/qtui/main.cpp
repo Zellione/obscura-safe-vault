@@ -23,6 +23,7 @@
 #include "theme_palette.h"
 #include "vault/vault.h"
 #include "gfx/theme.h"
+#include <monocypher.h>
 
 // Helper: Check if QImage is uniformly a single color (within tolerance)
 static bool isUniformColor(const QImage& img, int tolerance = 5)
@@ -367,6 +368,7 @@ static int runSelftest(const QString& vaultPath)
     }
 
     std::string pw_str = std::string(pw_env);
+    struct PwWipe { std::string& s; ~PwWipe() { if (!s.empty()) crypto_wipe(s.data(), s.size()); } } pwWipe{pw_str};
     const std::span<const uint8_t> pw_span(reinterpret_cast<const uint8_t*>(pw_str.data()), pw_str.size());
     result = v.unlock(pw_span, {});
     if (result != vault::VaultResult::Ok) {
@@ -389,7 +391,7 @@ static int runSelftest(const QString& vaultPath)
         return 1;
     }
 
-    fprintf(stdout, "PASS (Step 1): Vault unlocked, found image: %s\n", imageNode->name.data());
+    fprintf(stdout, "PASS (Step 1): Vault unlocked, image node found\n");
 
     // Step 2: Run the app with the real QML UI to test rendering
     // Register types and load QML
@@ -420,7 +422,6 @@ static int runSelftest(const QString& vaultPath)
     unlockController.setViewerController(&viewerController);
     unlockController.setPlaybackEngine(&playbackEngine);
     galleryModel.setViewerController(&viewerController);
-    galleryModel.setPlaybackEngine(&playbackEngine);
     playbackEngine.setVault(&unlockController.vault());
 
     engine.rootContext()->setContextProperty("unlockController", &unlockController);
@@ -1238,7 +1239,6 @@ int main(int argc, char** argv)
     unlockController.setViewerController(&viewerController);
     unlockController.setPlaybackEngine(&playbackEngine);
     galleryModel.setViewerController(&viewerController);
-    galleryModel.setPlaybackEngine(&playbackEngine);
     playbackEngine.setVault(&unlockController.vault());
 
     engine.rootContext()->setContextProperty("unlockController", &unlockController);

@@ -27,6 +27,12 @@ bool AudioPipe::open(int channels, int sample_rate)
         return false;
     }
 
+    // Reopen after failed init must not double-init: quit subsystem from failed attempt
+    if (!stream_ && subsystem_owned_) {
+        SDL_QuitSubSystem(SDL_INIT_AUDIO);
+        subsystem_owned_ = false;
+    }
+
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         std::println(stderr, "[AudioPipe] audio subsystem init failed: {}", SDL_GetError());
         return false;
