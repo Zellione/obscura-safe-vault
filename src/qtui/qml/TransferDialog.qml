@@ -38,18 +38,18 @@ Dialog {
         // Vault selection (placeholder)
         Text {
             text: "Select destination vault (with unlock if needed)"
-            color: root.themePalette ? root.themePalette.text : "black"
+            color: root.themePalette.text
         }
 
         // Gallery selection (placeholder)
         Text {
             text: "Select destination gallery"
-            color: root.themePalette ? root.themePalette.text : "black"
+            color: root.themePalette.text
         }
 
         Text {
             text: root.selectedCount + " item(s) selected"
-            color: root.themePalette ? root.themePalette.textDim : "gray"
+            color: root.themePalette.textDim
         }
     }
 

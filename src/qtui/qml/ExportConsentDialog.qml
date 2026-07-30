@@ -17,14 +17,14 @@ Dialog {
         Rectangle {
             Layout.fillWidth: true
             height: 60
-            color: root.themePalette ? root.themePalette.danger : "#ffcccc"
+            color: root.themePalette.danger
             radius: 4
 
             Text {
                 anchors.fill: parent
                 anchors.margins: 8
                 text: "WARNING: This will write decrypted data to disk"
-                color: "white"
+                color: root.themePalette.bg
                 font.bold: true
                 wrapMode: Text.Wrap
             }
@@ -33,7 +33,7 @@ Dialog {
         Text {
             Layout.fillWidth: true
             text: "Exported files will be stored in plaintext. Only selected items will be exported.\n\nContinue?"
-            color: root.themePalette ? root.themePalette.text : "black"
+            color: root.themePalette.text
             wrapMode: Text.Wrap
         }
     }
