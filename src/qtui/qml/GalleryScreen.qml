@@ -126,8 +126,7 @@ Rectangle {
                         hoverEnabled: true
                         onClicked: {
                             if (galleryModel.currentPath !== "/") {
-                                galleryModel.enterGallery(0)
-                                // Note: This is a bit of a hack; proper implementation would need upOneLevel loop
+                                // Go to root by repeatedly calling upOneLevel
                                 while (galleryModel.currentPath !== "/") {
                                     galleryModel.upOneLevel()
                                 }
@@ -194,23 +193,89 @@ Rectangle {
                 border.color: selectionController.isSelected(index) ? themePalette.accent : "transparent"
                 border.width: selectionController.isSelected(index) ? 2 : 0
 
-                // Thumbnail image for media
-                SecureImageItem {
-                    visible: !model.isGallery
+                // Gallery cover or media thumbnail (Finding 1, 2)
+                Item {
                     anchors {
-                        fill: parent
-                        margins: 6
-                        bottomMargin: 26
+                        top: parent.top
+                        left: parent.left
+                        right: parent.right
+                        bottom: countsLabel.visible ? countsLabel.top : parent.bottom
                     }
-                    nodeKey: model.nodeKey
+                    anchors.margins: 6
+                    anchors.bottomMargin: model.isGallery ? 6 : 26  // Reserve space for counts if gallery
+
+                    // Media thumbnail
+                    SecureImageItem {
+                        visible: !model.isGallery
+                        anchors.fill: parent
+                        nodeKey: model.nodeKey
+                    }
+
+                    // Gallery cover image (if available) or folder icon
+                    SecureImageItem {
+                        visible: model.isGallery && model.cover !== undefined && model.cover !== null
+                        anchors.fill: parent
+                        nodeKey: model.cover  // cover is the thumbnail chunk offset
+                    }
+
+                    // Folder icon fallback for galleries without covers (Finding 1)
+                    Text {
+                        visible: model.isGallery && (model.cover === undefined || model.cover === null)
+                        anchors.centerIn: parent
+                        text: "📁"
+                        font.pixelSize: 48
+                    }
                 }
 
-                // Folder glyph for galleries
+                // Animated badge "A" (Finding 4)
+                Rectangle {
+                    visible: model.isAnimated && !model.isGallery
+                    anchors {
+                        top: parent.top
+                        right: parent.right
+                        margins: 6
+                    }
+                    width: 20
+                    height: 20
+                    radius: 4
+                    color: themePalette.accent
+                    Text {
+                        anchors.centerIn: parent
+                        text: "A"
+                        color: themePalette.bg
+                        font.bold: true
+                        font.pixelSize: 11
+                    }
+                }
+
+                // Favorite star (Finding 4)
                 Text {
-                    visible: model.isGallery
-                    anchors.centerIn: parent
-                    text: "📁"
-                    font.pixelSize: 48
+                    visible: model.isFavorite
+                    anchors {
+                        top: parent.top
+                        right: parent.right
+                        margins: 4
+                    }
+                    text: "★"
+                    color: themePalette.favorite
+                    font.pixelSize: 20
+                }
+
+                // Child counts for galleries (Finding 2)
+                Text {
+                    id: countsLabel
+                    visible: model.isGallery && model.childCounts !== undefined
+                    anchors {
+                        bottom: parent.bottom
+                        left: parent.left
+                        right: parent.right
+                        margins: 4
+                    }
+                    text: model.childCounts || ""
+                    color: themePalette.textDim
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
+                    horizontalAlignment: Text.AlignHCenter
                 }
 
                 // Name label
