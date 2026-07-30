@@ -286,9 +286,12 @@ Rectangle {
 
                     Text {
                         anchors { fill: parent; margins: 8 }
-                        text: keyfileField.model.text_view.length > 0 ? "[keyfile selected]" : "[none]"
+                        text: keyfilePath.toString().length > 0
+                              ? keyfilePath.toString().split('/').pop()
+                              : "[none]"
                         color: themePalette.textDim
                         font.pixelSize: 11
+                        elide: Text.ElideMiddle
                     }
                 }
 

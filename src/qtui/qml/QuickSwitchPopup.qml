@@ -138,9 +138,9 @@ Rectangle {
                         height: 52
                         color: quickSwitchRoot.currentIndex === index
                                ? themePalette.surfaceHi : themePalette.surface
-                        border.color: model.fileUrl.toString() === quickSwitchRoot.activeVaultPath.toString()
+                        border.color: vaultManagerController.vaultListModel.fileUrlAt(index).toString() === quickSwitchRoot.activeVaultPath.toString()
                                       ? themePalette.accent : "transparent"
-                        border.width: model.fileUrl.toString() === quickSwitchRoot.activeVaultPath.toString() ? 2 : 0
+                        border.width: vaultManagerController.vaultListModel.fileUrlAt(index).toString() === quickSwitchRoot.activeVaultPath.toString() ? 2 : 0
 
                         Column {
                             anchors {
@@ -166,7 +166,7 @@ Rectangle {
 
                                 Text {
                                     id: currentSuffix
-                                    text: model.fileUrl.toString() === quickSwitchRoot.activeVaultPath.toString()
+                                    text: vaultManagerController.vaultListModel.fileUrlAt(index).toString() === quickSwitchRoot.activeVaultPath.toString()
                                           ? "(current)" : ""
                                     color: themePalette.textDim
                                     font.pixelSize: 12
