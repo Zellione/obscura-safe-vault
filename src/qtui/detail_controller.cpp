@@ -46,6 +46,38 @@ void DetailController::showNode(quintptr nodeKey,
     emit contentChanged();
 }
 
+void DetailController::showNodeWithPath(quintptr nodeKey, const QString& nodePath)
+{
+    if (!vault_) {
+        clear();
+        return;
+    }
+
+    // Recover the IndexNode* from the opaque key
+    const auto* node = reinterpret_cast<const vault::IndexNode*>(nodeKey);
+    if (!node) {
+        clear();
+        return;
+    }
+
+    // Compute inherited tags from the vault (Scope: WS2.4 — wire ui::tag_inherit)
+    const auto inherited = ui::inherited_tags(*vault_, nodePath.toStdString());
+
+    // Compute from-contents tags (only for galleries)
+    std::vector<std::string> fromContents;
+    if (node->is_gallery()) {
+        fromContents = ui::contents_tags(*vault_, nodePath.toStdString());
+    }
+
+    // Get vault default sort for label generation
+    const auto& settings = vault::vault_settings(*vault_);
+
+    // Build the detail content
+    content_ = ui::build_node_details(*node, inherited, fromContents, settings.default_sort);
+    updateLayout();
+    emit contentChanged();
+}
+
 void DetailController::showSelection(const QList<quintptr>& nodeKeys,
                                     const QStringList& inheritedTags)
 {

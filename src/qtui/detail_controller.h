@@ -31,6 +31,9 @@ public:
                              const QStringList& inheritedTags,
                              const QStringList& fromContentsTags);
 
+    // Show details for a single node, computing inherited/from-contents tags from vault (Scope: WS2.4)
+    Q_INVOKABLE void showNodeWithPath(quintptr nodeKey, const QString& nodePath);
+
     // Show details for a multi-selection of nodes
     Q_INVOKABLE void showSelection(const QList<quintptr>& nodeKeys,
                                   const QStringList& inheritedTags);
