@@ -176,6 +176,19 @@ qt6_add_shaders(osv_qt_settings_overlay_qml_test "osv_qt_settings_overlay_qml_te
     FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
 )
 
+qt_add_executable(osv_qt_thumb_strip_qml_test tests/thumb_strip_qml_test.cpp)
+target_link_libraries(osv_qt_thumb_strip_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::Test)
+target_include_directories(osv_qt_thumb_strip_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(osv_qt_thumb_strip_qml_test PRIVATE
+    QTUI_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+)
+
+# Shaders for thumb_strip test
+qt6_add_shaders(osv_qt_thumb_strip_qml_test "osv_qt_thumb_strip_qml_test_shaders"
+    PREFIX "/osvqt"
+    FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
+)
+
 add_executable(osv_qt_thumb_stress_test tests/thumb_stress_test.cpp gallery_model.cpp thumb_cache.cpp viewer_controller.cpp secure_image_item.cpp rhi_quad_renderer.cpp)
 target_link_libraries(osv_qt_thumb_stress_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick)
 target_include_directories(osv_qt_thumb_stress_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
