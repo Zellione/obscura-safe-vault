@@ -7,6 +7,43 @@
 #include "export_controller.h"
 #include "test_vault_util.h"
 
+// Helper: set up vault and export directory
+struct TestExportSetup {
+    bool valid = false;
+    QTemporaryDir vault_dir;
+    QTemporaryDir export_dir;
+    vault::Vault vault;
+
+    static TestExportSetup create() {
+        TestExportSetup setup;
+        if (!setup.vault_dir.isValid() || !setup.export_dir.isValid()) {
+            return setup;
+        }
+        try {
+            std::string vault_path = (setup.vault_dir.path() + "/test.osv").toStdString();
+            setup.vault = osvqt_test::createTestVault(vault_path);
+            setup.valid = true;
+        } catch (const std::exception& e) {
+            return setup;
+        }
+        return setup;
+    }
+};
+
+// Helper: wait for export completion with timeout
+static void waitForExportCompletion(QSignalSpy& finishedSpy, ExportController& controller, int timeoutMs = 5000)
+{
+    if (finishedSpy.isEmpty()) {
+        QEventLoop loop;
+        QTimer timer;
+        timer.setSingleShot(true);
+        QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+        QObject::connect(&controller, &ExportController::finished, &loop, &QEventLoop::quit);
+        timer.start(timeoutMs);
+        loop.exec();
+    }
+}
+
 class ExportControllerTest : public QObject {
     Q_OBJECT
 
@@ -14,45 +51,28 @@ private slots:
     void testExportedBytesMatchOriginals()
     {
         // TDD: real export writes exact decrypted bytes
-        QTemporaryDir temp_dir;
-        QVERIFY(temp_dir.isValid());
-
-        std::string vault_path = (temp_dir.path() + "/test.osv").toStdString();
-        auto vault = osvqt_test::createTestVault(vault_path);
+        auto setup = TestExportSetup::create();
+        QVERIFY(setup.valid);
 
         // Add a test image to the vault
-        osvqt_test::addTinyImages(vault, "test", 1);
+        osvqt_test::addTinyImages(setup.vault, "test", 1);
 
         // Find the added image in the index
-        auto nodes = vault.list("");  // "" = root gallery
+        auto nodes = setup.vault.list("");  // "" = root gallery
         QCOMPARE((int)nodes.size(), 1);
         const auto& image_node = nodes[0];
         QVERIFY(!image_node->is_gallery());
 
-        // Export to temp directory
-        QTemporaryDir export_dir;
-        QVERIFY(export_dir.isValid());
-
+        // Export the image
         ExportController controller;
         QSignalSpy finishedSpy(&controller, &ExportController::finished);
-
-        // Export the image
         QList<quintptr> nodeIds;
         nodeIds.append(reinterpret_cast<quintptr>(image_node));
 
-        controller.setVault(&vault);
-        controller.startExport(export_dir.path(), nodeIds);
+        controller.setVault(&setup.vault);
+        controller.startExport(setup.export_dir.path(), nodeIds);
 
-        // Wait for completion
-        if (finishedSpy.isEmpty()) {
-            QEventLoop loop;
-            QTimer timer;
-            timer.setSingleShot(true);
-            connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
-            connect(&controller, &ExportController::finished, &loop, &QEventLoop::quit);
-            timer.start(5000);  // 5 second timeout
-            loop.exec();
-        }
+        waitForExportCompletion(finishedSpy, controller);
 
         QVERIFY(!finishedSpy.isEmpty());
         auto args = finishedSpy.takeFirst();
@@ -60,7 +80,7 @@ private slots:
         QVERIFY(ok);  // Export must succeed
 
         // Verify exported file exists and matches original
-        QString exported_path = export_dir.path() + "/" +
+        QString exported_path = setup.export_dir.path() + "/" +
                                QString::fromStdString(image_node->name);
         QVERIFY(QFile::exists(exported_path));
 
@@ -79,43 +99,27 @@ private slots:
     {
         // SECURITY TEST: invalid export directory is refused
         // (per CLAUDE.md invariant: path validation)
-        QTemporaryDir temp_dir;
-        QVERIFY(temp_dir.isValid());
+        auto setup = TestExportSetup::create();
+        QVERIFY(setup.valid);
 
-        std::string vault_path = (temp_dir.path() + "/test2.osv").toStdString();
-        auto vault = osvqt_test::createTestVault(vault_path);
-
-        osvqt_test::addTinyImages(vault, "test", 1);
+        osvqt_test::addTinyImages(setup.vault, "test", 1);
 
         // Get the node
-        auto nodes = vault.list("");
+        auto nodes = setup.vault.list("");
         QCOMPARE((int)nodes.size(), 1);
 
-        QTemporaryDir export_dir;
-        QVERIFY(export_dir.isValid());
-
         // Try exporting to a non-existent path (outside export directory)
-        QString evilExportDir = export_dir.path() + "/../nonexistent/etc";
+        QString evilExportDir = setup.export_dir.path() + "/../nonexistent/etc";
 
         ExportController controller;
         QSignalSpy finishedSpy(&controller, &ExportController::finished);
-
         QList<quintptr> nodeIds;
         nodeIds.append(reinterpret_cast<quintptr>(nodes[0]));
 
-        controller.setVault(&vault);
+        controller.setVault(&setup.vault);
         controller.startExport(evilExportDir, nodeIds);
 
-        // Wait for completion
-        if (finishedSpy.isEmpty()) {
-            QEventLoop loop;
-            QTimer timer;
-            timer.setSingleShot(true);
-            connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
-            connect(&controller, &ExportController::finished, &loop, &QEventLoop::quit);
-            timer.start(5000);
-            loop.exec();
-        }
+        waitForExportCompletion(finishedSpy, controller);
 
         QVERIFY(!finishedSpy.isEmpty());
         auto args = finishedSpy.takeFirst();
@@ -126,18 +130,12 @@ private slots:
     void testExportSimpleSuccess()
     {
         // TDD: basic export functionality works
-        QTemporaryDir temp_dir;
-        QVERIFY(temp_dir.isValid());
+        auto setup = TestExportSetup::create();
+        QVERIFY(setup.valid);
 
-        std::string vault_path = (temp_dir.path() + "/test3.osv").toStdString();
-        auto vault = osvqt_test::createTestVault(vault_path);
-
-        osvqt_test::addTinyImages(vault, "img", 2);
-        auto nodes = vault.list("");
+        osvqt_test::addTinyImages(setup.vault, "img", 2);
+        auto nodes = setup.vault.list("");
         QCOMPARE((int)nodes.size(), 2);
-
-        QTemporaryDir export_dir;
-        QVERIFY(export_dir.isValid());
 
         ExportController controller;
         QSignalSpy finishedSpy(&controller, &ExportController::finished);
@@ -148,19 +146,10 @@ private slots:
             nodeIds.append(reinterpret_cast<quintptr>(node));
         }
 
-        controller.setVault(&vault);
-        controller.startExport(export_dir.path(), nodeIds);
+        controller.setVault(&setup.vault);
+        controller.startExport(setup.export_dir.path(), nodeIds);
 
-        // Wait for completion
-        if (finishedSpy.isEmpty()) {
-            QEventLoop loop;
-            QTimer timer;
-            timer.setSingleShot(true);
-            connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
-            connect(&controller, &ExportController::finished, &loop, &QEventLoop::quit);
-            timer.start(5000);
-            loop.exec();
-        }
+        waitForExportCompletion(finishedSpy, controller);
 
         QVERIFY(!finishedSpy.isEmpty());
         auto args = finishedSpy.takeFirst();
