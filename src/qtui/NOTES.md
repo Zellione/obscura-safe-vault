@@ -619,3 +619,18 @@ Audio clock for sync: clock = audioSeekBase_ + samples_consumed / sample_rate. U
 3. **Important: Platform-independent temp path** — core_smoke.cpp:18 replaced `/tmp/osv_qt_core_smoke.osv` with `(std::filesystem::temp_directory_path() / "osv_qt_core_smoke.osv").string()`
 4. **Important: Remove dead code** — Deleted GalleryModel::setPlaybackEngine() method, playbackEngine_ member, forward decl; removed 2 call sites in main.cpp (UnlockController's setPlaybackEngine is live, retained)
 5. **Important: Audio reopen guard** — audio_pipe.cpp::open() added check-and-quit for leaked subsystem if prior open() failed with `subsystem_owned_=true` but `stream_=nullptr`
+
+---
+
+## Post-PR: SonarCloud Duplication Fix Wave (2026-07-30)
+
+**Trigger:** PR #133 quality gate failed on 12.6% duplication on new code (threshold ≤3%); zero bugs/smells/hotspots. All duplication was in src/qtui.
+
+**Dedup refactors (behavior-preserving; all selftest legs + unit tests re-verified green):**
+
+1. **`rhi_quad_renderer.{h,cpp}` (new)** — `TexQuadRendererBase` extracts the scaffolding shared verbatim by `SecureImageRenderer` and `VideoFrameRenderer`: quad vertex buffer + MVP ubuf + sampler init, SRB rebuild (subclass supplies `textureBindings()`), lazy pipeline from .qsb resources (subclass supplies `fragmentShaderResource()`), and the MVP-update → beginPass → draw → endPass tail (`finishRender(cb, batch, canDraw)`). Subclasses keep only their texture upload + synchronize. Logging for shared code moves to category `osv.rhi_quad`.
+2. **`main.cpp`** — extracted `verifyRedBlueGrab()` (render-selftest primary + fallback paths shared), `initThemeFromEnv()` + `registerOsvQmlTypes()` + `AppContext` struct (controller graph construction/wiring/context-property exposure shared by `runSelftest` and `main`), `activateFirstMediaRow` + `transitionToRequestedLeg` lambdas (the 4× find-first-row-and-activate blocks), and `assertPlaybackBasics` (video/audio shared assertions a+b).
+   - **Latent bug fixed by unification:** the tile-sampling poll branch never handled `OSV_QT_SELFTEST_AUDIO` and would have exited 0 without running the audio assertions if delegates were found in the QObject tree; the shared transition helper covers all three legs in both branches.
+3. **`tests/test_vault_util.h` (new)** — `osvqt_test::tiny_jpeg`, `createTestVault()` (test-speed KdfParams), `addTinyImages()`; used by `gallery_model_test.cpp` and `thumb_stress_test.cpp` (which now wraps its body in try/catch to match the helper's throwing contract). Tests 9–11 (invalid renames) collapsed into a data-driven loop.
+
+**Verification (all true exit codes, Xvfb :80 + xcb + software GL):** render leg 0, thumbs leg 0 (33 delivered), viewer leg 0 on images-only vault (center RGB 118,110,248), video leg 0 (frames=77, pos=2.57s, motion diff 198071 > 48206), audio leg 0 under SDL_AUDIO_DRIVER=dummy (fallback asserted, gain 0.0→0.5). Unit tests: core_smoke, gallery_model_test (12), thumb_stress (120-image tomb safety), secure_field all pass. Note: viewer leg against the av vault activates the video row (first non-gallery row) by design — use an images-only fixture for that leg (unchanged semantics from pre-refactor code).

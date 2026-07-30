@@ -70,6 +70,132 @@ static int countUniqueColors(const QImage& img)
     return colors.size();
 }
 
+// Shared pixel verification for --selftest-render (primary and fallback grab
+// paths): locate the colored-content bounding box, sample at 25%/75% of its
+// width, expect left=red, right=blue. Prints details; returns 0 pass, 1 fail.
+static int verifyRedBlueGrab(const QImage& grabbed, const char* label)
+{
+    // Scan the image to find the boundaries of the rendered content
+    int minX = grabbed.width(), maxX = -1;
+    int minY = grabbed.height(), maxY = -1;
+
+    for (int y = 0; y < grabbed.height(); ++y) {
+        for (int x = 0; x < grabbed.width(); ++x) {
+            QRgb color = grabbed.pixel(x, y);
+            int r = qRed(color), g = qGreen(color), b = qBlue(color);
+            // Look for non-black content (r+g+b > 30 to account for small artifacts)
+            if ((r + g + b) > 30) {
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+        }
+    }
+
+    fprintf(stdout, "Found colored content bounding box: (%d,%d) to (%d,%d)\n", minX, minY, maxX, maxY);
+
+    if (minX >= grabbed.width() || minY >= grabbed.height()) {
+        fprintf(stderr, "FAIL (%s): No colored content found in grabbed image\n", label);
+        return 1;
+    }
+
+    // Sample at 25% and 75% of the content width (quarter and three-quarter points)
+    int contentWidth = maxX - minX + 1;
+    int contentHeight = maxY - minY + 1;
+    int sampleXLeft = minX + contentWidth / 4;
+    int sampleXRight = minX + 3 * contentWidth / 4;
+    int sampleY = minY + contentHeight / 2;
+
+    QRgb pixelLeft = grabbed.pixel(sampleXLeft, sampleY);
+    QRgb pixelRight = grabbed.pixel(sampleXRight, sampleY);
+
+    int rLeft = qRed(pixelLeft);
+    int gLeft = qGreen(pixelLeft);
+    int bLeft = qBlue(pixelLeft);
+
+    int rRight = qRed(pixelRight);
+    int gRight = qGreen(pixelRight);
+    int bRight = qBlue(pixelRight);
+
+    fprintf(stdout, "Sampled pixels (%s):\n", label);
+    fprintf(stdout, "  Left (%d, %d) [25%% of width]: RGB(%d, %d, %d)\n", sampleXLeft, sampleY, rLeft, gLeft, bLeft);
+    fprintf(stdout, "  Right (%d, %d) [75%% of width]: RGB(%d, %d, %d)\n", sampleXRight, sampleY, rRight, gRight, bRight);
+
+    // Verify colors (allow some tolerance for compression/filtering)
+    bool leftIsRed = (rLeft > 180 && gLeft < 80 && bLeft < 80);
+    bool rightIsBlue = (rRight < 80 && gRight < 80 && bRight > 180);
+
+    if (leftIsRed && rightIsBlue) {
+        fprintf(stdout, "PASS: Renderer correctly rendered red/blue test image\n");
+        return 0;
+    }
+
+    fprintf(stderr, "FAIL: Colors incorrect. Expected left=red, right=blue\n");
+    fprintf(stderr, "  Left: %s (r>180? %s, g<80? %s, b<80? %s)\n",
+            leftIsRed ? "RED" : "NOT_RED",
+            (rLeft > 180) ? "yes" : "no",
+            (gLeft < 80) ? "yes" : "no",
+            (bLeft < 80) ? "yes" : "no");
+    fprintf(stderr, "  Right: %s (r<80? %s, g<80? %s, b>180? %s)\n",
+            rightIsBlue ? "BLUE" : "NOT_BLUE",
+            (rRight < 80) ? "yes" : "no",
+            (gRight < 80) ? "yes" : "no",
+            (bRight > 180) ? "yes" : "no");
+    return 1;
+}
+
+// Initialize theme from environment variable if specified (OSV_QT_THEME=0..3)
+static void initThemeFromEnv()
+{
+    const char* theme_env = std::getenv("OSV_QT_THEME");
+    if (theme_env) {
+        int theme_idx = std::atoi(theme_env);
+        if (theme_idx >= 0 && theme_idx < gfx::THEME_COUNT) {
+            gfx::set_theme(static_cast<gfx::ThemeId>(theme_idx));
+        }
+    }
+}
+
+static void registerOsvQmlTypes()
+{
+    qmlRegisterType<SecureTextField>("Osv", 1, 0, "SecureTextField");
+    qmlRegisterType<SecureImageItem>("Osv", 1, 0, "SecureImageItem");
+    qmlRegisterType<VideoFrameItem>("Osv", 1, 0, "VideoFrameItem");
+}
+
+// The app's controller/model object graph and its QML context wiring, shared
+// by the normal run path and the selftest harness.
+struct AppContext {
+    UnlockController unlockController;
+    ThumbCache thumbCache;
+    GalleryModel galleryModel;
+    ViewerController viewerController;
+    ThemePalette themePalette;
+    PlaybackEngine playbackEngine;
+
+    AppContext()
+        : galleryModel(&unlockController.vault()),
+          viewerController(&unlockController.vault(), &galleryModel)
+    {
+        unlockController.setViewerController(&viewerController);
+        unlockController.setPlaybackEngine(&playbackEngine);
+        galleryModel.setViewerController(&viewerController);
+        playbackEngine.setVault(&unlockController.vault());
+    }
+
+    void expose(QQmlApplicationEngine& engine)
+    {
+        QQmlContext* ctx = engine.rootContext();
+        ctx->setContextProperty("unlockController", &unlockController);
+        ctx->setContextProperty("thumbCache", &thumbCache);
+        ctx->setContextProperty("galleryModel", &galleryModel);
+        ctx->setContextProperty("viewerController", &viewerController);
+        ctx->setContextProperty("themePalette", &themePalette);
+        ctx->setContextProperty("playbackEngine", &playbackEngine);
+    }
+};
+
 // Helper: Create a synthetic test image (red left, blue right)
 static PixelBuffer createSyntheticTestImage(int width, int height)
 {
@@ -167,82 +293,10 @@ static int runSelftestRender()
 
             fprintf(stdout, "Grabbed image: %dx%d\n", grabbed.width(), grabbed.height());
 
-            // The grabbed image may be larger than the rendered item.
-            // Find non-black content by scanning for colored pixels.
-            // Expected: left half red (r>180), right half blue (b>180)
-
-            // Scan the image to find the boundaries of the rendered content
-            int minX = grabbed.width(), maxX = -1;
-            int minY = grabbed.height(), maxY = -1;
-
-            for (int y = 0; y < grabbed.height(); ++y) {
-                for (int x = 0; x < grabbed.width(); ++x) {
-                    QRgb color = grabbed.pixel(x, y);
-                    int r = qRed(color), g = qGreen(color), b = qBlue(color);
-                    // Look for non-black content (r+g+b > 30 to account for small artifacts)
-                    if ((r + g + b) > 30) {
-                        if (x < minX) minX = x;
-                        if (x > maxX) maxX = x;
-                        if (y < minY) minY = y;
-                        if (y > maxY) maxY = y;
-                    }
-                }
-            }
-
-            fprintf(stdout, "Found colored content bounding box: (%d,%d) to (%d,%d)\n", minX, minY, maxX, maxY);
-
-            if (minX >= grabbed.width() || minY >= grabbed.height()) {
-                fprintf(stderr, "FAIL: No colored content found in grabbed image\n");
-                resultCode = 1;
-                QCoreApplication::exit(1);
-                return;
-            }
-
-            // Sample at 25% and 75% of the content width (quarter and three-quarter points)
-            int contentWidth = maxX - minX + 1;
-            int contentHeight = maxY - minY + 1;
-            int sampleXLeft = minX + contentWidth / 4;
-            int sampleXRight = minX + 3 * contentWidth / 4;
-            int sampleY = minY + contentHeight / 2;
-
-            QRgb pixelLeft = grabbed.pixel(sampleXLeft, sampleY);
-            QRgb pixelRight = grabbed.pixel(sampleXRight, sampleY);
-
-            int rLeft = qRed(pixelLeft);
-            int gLeft = qGreen(pixelLeft);
-            int bLeft = qBlue(pixelLeft);
-
-            int rRight = qRed(pixelRight);
-            int gRight = qGreen(pixelRight);
-            int bRight = qBlue(pixelRight);
-
-            fprintf(stdout, "Sampled pixels (within content bounding box):\n");
-            fprintf(stdout, "  Left (%d, %d) [25%% of width]: RGB(%d, %d, %d)\n", sampleXLeft, sampleY, rLeft, gLeft, bLeft);
-            fprintf(stdout, "  Right (%d, %d) [75%% of width]: RGB(%d, %d, %d)\n", sampleXRight, sampleY, rRight, gRight, bRight);
-
-            // Verify colors (allow some tolerance for compression/filtering)
-            bool leftIsRed = (rLeft > 180 && gLeft < 80 && bLeft < 80);
-            bool rightIsBlue = (rRight < 80 && gRight < 80 && bRight > 180);
-
-            if (leftIsRed && rightIsBlue) {
-                fprintf(stdout, "PASS: Renderer correctly rendered red/blue test image\n");
-                resultCode = 0;
-                QCoreApplication::exit(0);
-            } else {
-                fprintf(stderr, "FAIL: Colors incorrect. Expected left=red, right=blue\n");
-                fprintf(stderr, "  Left: %s (r>180? %s, g<80? %s, b<80? %s)\n",
-                        leftIsRed ? "RED" : "NOT_RED",
-                        (rLeft > 180) ? "yes" : "no",
-                        (gLeft < 80) ? "yes" : "no",
-                        (bLeft < 80) ? "yes" : "no");
-                fprintf(stderr, "  Right: %s (r<80? %s, g<80? %s, b>180? %s)\n",
-                        rightIsBlue ? "BLUE" : "NOT_BLUE",
-                        (rRight < 80) ? "yes" : "no",
-                        (gRight < 80) ? "yes" : "no",
-                        (bRight > 180) ? "yes" : "no");
-                resultCode = 1;
-                QCoreApplication::exit(1);
-            }
+            // The grabbed image may be larger than the rendered item;
+            // verifyRedBlueGrab locates the content and samples it.
+            resultCode = verifyRedBlueGrab(grabbed, "within content bounding box");
+            QCoreApplication::exit(resultCode);
         }
     }, Qt::QueuedConnection);
 
@@ -263,65 +317,8 @@ static int runSelftestRender()
             }
 
             fprintf(stdout, "Note: no frameSwapped events (platform limitation); using fallback grab\n");
-            // (continue with normal pixel sampling logic via shared code)
-            // Call the pixel verification inline instead of duplicating logic
-            int minX = grabbed.width(), maxX = -1;
-            int minY = grabbed.height(), maxY = -1;
-
-            for (int y = 0; y < grabbed.height(); ++y) {
-                for (int x = 0; x < grabbed.width(); ++x) {
-                    QRgb color = grabbed.pixel(x, y);
-                    int r = qRed(color), g = qGreen(color), b = qBlue(color);
-                    if ((r + g + b) > 30) {
-                        if (x < minX) minX = x;
-                        if (x > maxX) maxX = x;
-                        if (y < minY) minY = y;
-                        if (y > maxY) maxY = y;
-                    }
-                }
-            }
-
-            if (minX >= grabbed.width() || minY >= grabbed.height()) {
-                fprintf(stderr, "FAIL (fallback): No colored content found\n");
-                resultCode = 1;
-                QCoreApplication::exit(1);
-                return;
-            }
-
-            int contentWidth = maxX - minX + 1;
-            int contentHeight = maxY - minY + 1;
-            int sampleXLeft = minX + contentWidth / 4;
-            int sampleXRight = minX + 3 * contentWidth / 4;
-            int sampleY = minY + contentHeight / 2;
-
-            QRgb pixelLeft = grabbed.pixel(sampleXLeft, sampleY);
-            QRgb pixelRight = grabbed.pixel(sampleXRight, sampleY);
-
-            int rLeft = qRed(pixelLeft);
-            int gLeft = qGreen(pixelLeft);
-            int bLeft = qBlue(pixelLeft);
-
-            int rRight = qRed(pixelRight);
-            int gRight = qGreen(pixelRight);
-            int bRight = qBlue(pixelRight);
-
-            fprintf(stdout, "Sampled pixels (fallback):\n");
-            fprintf(stdout, "  Left (%d, %d): RGB(%d, %d, %d)\n", sampleXLeft, sampleY, rLeft, gLeft, bLeft);
-            fprintf(stdout, "  Right (%d, %d): RGB(%d, %d, %d)\n", sampleXRight, sampleY, rRight, gRight, bRight);
-
-            bool leftIsRed = (rLeft > 180 && gLeft < 80 && bLeft < 80);
-            bool rightIsBlue = (rRight < 80 && gRight < 80 && bRight > 180);
-
-            if (leftIsRed && rightIsBlue) {
-                fprintf(stdout, "PASS: Renderer correctly rendered red/blue test image\n");
-                resultCode = 0;
-            } else {
-                fprintf(stderr, "FAIL: Colors incorrect (left=%s, right=%s)\n",
-                        leftIsRed ? "red" : "not-red",
-                        rightIsBlue ? "blue" : "not-blue");
-                resultCode = 1;
-            }
-            QCoreApplication::exit(resultCode == 0 ? 0 : 1);
+            resultCode = verifyRedBlueGrab(grabbed, "fallback");
+            QCoreApplication::exit(resultCode);
         }
     });
     fallbackTimer.setSingleShot(true);
@@ -394,42 +391,21 @@ static int runSelftest(const QString& vaultPath)
     fprintf(stdout, "PASS (Step 1): Vault unlocked, image node found\n");
 
     // Step 2: Run the app with the real QML UI to test rendering
-    // Register types and load QML
-    // Initialize theme from environment variable if specified (OSV_QT_THEME=0..3)
-    const char* theme_env = std::getenv("OSV_QT_THEME");
-    if (theme_env) {
-        int theme_idx = std::atoi(theme_env);
-        if (theme_idx >= 0 && theme_idx < gfx::THEME_COUNT) {
-            gfx::set_theme(static_cast<gfx::ThemeId>(theme_idx));
-        }
-    }
-
-    qmlRegisterType<SecureTextField>("Osv", 1, 0, "SecureTextField");
-    qmlRegisterType<SecureImageItem>("Osv", 1, 0, "SecureImageItem");
-    qmlRegisterType<VideoFrameItem>("Osv", 1, 0, "VideoFrameItem");
+    initThemeFromEnv();
+    registerOsvQmlTypes();
 
     QQmlApplicationEngine engine;
     // The QML engine needs to know where to find QML modules
     engine.addImportPath(QStringLiteral(QTUI_QML_DIR));
 
-    UnlockController unlockController;
-    ThumbCache thumbCache;
-    GalleryModel galleryModel(&unlockController.vault());
+    AppContext appCtx;
+    UnlockController& unlockController = appCtx.unlockController;
+    ThumbCache& thumbCache = appCtx.thumbCache;
+    GalleryModel& galleryModel = appCtx.galleryModel;
+    ViewerController& viewerController = appCtx.viewerController;
+    PlaybackEngine& playbackEngine = appCtx.playbackEngine;
 
-    ViewerController viewerController(&unlockController.vault(), &galleryModel);
-    ThemePalette themePalette;
-    PlaybackEngine playbackEngine;
-    unlockController.setViewerController(&viewerController);
-    unlockController.setPlaybackEngine(&playbackEngine);
-    galleryModel.setViewerController(&viewerController);
-    playbackEngine.setVault(&unlockController.vault());
-
-    engine.rootContext()->setContextProperty("unlockController", &unlockController);
-    engine.rootContext()->setContextProperty("thumbCache", &thumbCache);
-    engine.rootContext()->setContextProperty("galleryModel", &galleryModel);
-    engine.rootContext()->setContextProperty("viewerController", &viewerController);
-    engine.rootContext()->setContextProperty("themePalette", &themePalette);
-    engine.rootContext()->setContextProperty("playbackEngine", &playbackEngine);
+    appCtx.expose(engine);
     engine.load(QUrl::fromLocalFile(QStringLiteral(QTUI_QML_DIR "/Main.qml")));
 
     if (engine.rootObjects().isEmpty()) {
@@ -501,6 +477,72 @@ static int runSelftest(const QString& vaultPath)
     QImage videoGrabSample1, videoGrabSample2;
     int videoSampleX = 0, videoSampleY = 0;
 
+    // Find the first gallery row matching the wanted media kind and queue its
+    // activation (emits openVideo/openViewer, which pushes the target screen).
+    // On failure prints FAIL and exits the app; either way the caller returns.
+    auto activateFirstMediaRow = [&](bool wantVideo, const char* testName) {
+        int row = -1;
+        for (int i = 0; i < galleryModel.rowCount(); ++i) {
+            QModelIndex idx = galleryModel.index(i);
+            bool match = wantVideo
+                ? galleryModel.data(idx, GalleryModel::IsVideoRole).toBool()
+                : !galleryModel.data(idx, GalleryModel::IsGalleryRole).toBool();
+            if (match) {
+                row = i;
+                break;
+            }
+        }
+        if (row < 0) {
+            fprintf(stderr, "FAIL (%s): No %s rows found in gallery\n",
+                    testName, wantVideo ? "video" : "image");
+            resultCode = 1;
+            QCoreApplication::exit(1);
+            return;
+        }
+        QMetaObject::invokeMethod(&galleryModel, "activate", Qt::QueuedConnection,
+            Q_ARG(int, row));
+    };
+
+    // After the thumbnail assertion passes, hand off to the requested leg
+    // (audio > video > viewer precedence; the transitioned* flag is set BEFORE
+    // invoking to prevent poll re-entry). Returns true if a transition was
+    // initiated (or failed fatally) — the caller must then return.
+    auto transitionToRequestedLeg = [&]() -> bool {
+        if (testAudio && !transitionedToAudio) {
+            transitionedToAudio = true;
+            fprintf(stdout, "TRANSITION: Moving to audio test mode\n");
+            activateFirstMediaRow(true, "Audio test");
+            return true;
+        }
+        if (testVideo && !transitionedToVideo) {
+            transitionedToVideo = true;
+            fprintf(stdout, "TRANSITION: Moving to video test mode\n");
+            activateFirstMediaRow(true, "Video test");
+            return true;
+        }
+        if (testViewer && !transitionedToViewer) {
+            transitionedToViewer = true;
+            fprintf(stdout, "TRANSITION: Moving to viewer test mode\n");
+            activateFirstMediaRow(false, "Viewer test");
+            return true;
+        }
+        return false;
+    };
+
+    // Shared assertions (a) frame count and (b) position for the video/audio legs.
+    auto assertPlaybackBasics = [&](bool& assertA, bool& assertB) {
+        auto items = window->findChildren<VideoFrameItem*>();
+        int frames = items.size() > 0 ? items[0]->testOnlyRenderCount() : 0;
+        fprintf(stdout, "ASSERT (a) Frame count: %d (requirement: >= 10)... %s\n", frames,
+                frames >= 10 ? "PASS" : "FAIL");
+        assertA = frames >= 10;
+
+        double position = playbackEngine.position();
+        fprintf(stdout, "ASSERT (b) Position: %.2f seconds (requirement: > 1.0)... %s\n", position,
+                position > 1.0 ? "PASS" : "FAIL");
+        assertB = position > 1.0;
+    };
+
     // Poll timer for thumbnail-wait mode: check deliveredCount every 100ms
     QTimer pollTimer;
     QObject::connect(&pollTimer, &QTimer::timeout, window, [&]() {
@@ -549,81 +591,9 @@ static int runSelftest(const QString& vaultPath)
                                 "%d unique colors (delegates not instantiated in QObject tree)\n",
                                 delivered, uniqueColors);
 
-                        // Check if we should transition to audio, video or viewer test mode (set flags first to prevent re-entry)
-                        if (testAudio && !transitionedToAudio) {
-                            transitionedToAudio = true;
-                            fprintf(stdout, "TRANSITION: Moving to audio test mode\n");
-                            // Find first video row (has audio) and activate via QML
-                            int firstVideoRow = -1;
-                            for (int i = 0; i < galleryModel.rowCount(); ++i) {
-                                QModelIndex idx = galleryModel.index(i);
-                                bool isVideo = galleryModel.data(idx, GalleryModel::IsVideoRole).toBool();
-                                if (isVideo) {
-                                    firstVideoRow = i;
-                                    break;
-                                }
-                            }
-
-                            if (firstVideoRow >= 0) {
-                                QMetaObject::invokeMethod(&galleryModel, "activate", Qt::QueuedConnection,
-                                    Q_ARG(int, firstVideoRow));
-                                return;
-                            } else {
-                                fprintf(stderr, "FAIL (Audio test): No video rows found in gallery\n");
-                                resultCode = 1;
-                                QCoreApplication::exit(1);
-                                return;
-                            }
-                        } else if (testVideo && !transitionedToVideo) {
-                            transitionedToVideo = true;  // Set BEFORE invoking to prevent re-entry
-                            fprintf(stdout, "TRANSITION: Moving to video test mode\n");
-                            // Find first video row and activate via QML
-                            int firstVideoRow = -1;
-                            for (int i = 0; i < galleryModel.rowCount(); ++i) {
-                                QModelIndex idx = galleryModel.index(i);
-                                bool isVideo = galleryModel.data(idx, GalleryModel::IsVideoRole).toBool();
-                                if (isVideo) {
-                                    firstVideoRow = i;
-                                    break;
-                                }
-                            }
-
-                            if (firstVideoRow >= 0) {
-                                // Activate via QML (this emits openVideo which pushes video screen and opens video)
-                                QMetaObject::invokeMethod(&galleryModel, "activate", Qt::QueuedConnection,
-                                    Q_ARG(int, firstVideoRow));
-                                return;
-                            } else {
-                                fprintf(stderr, "FAIL (Video test): No video rows found in gallery\n");
-                                resultCode = 1;
-                                QCoreApplication::exit(1);
-                                return;
-                            }
-                        } else if (testViewer && !transitionedToViewer) {
-                            transitionedToViewer = true;  // Set BEFORE invoking to prevent re-entry
-                            fprintf(stdout, "TRANSITION: Moving to viewer test mode\n");
-                            // Find first image row (skip galleries) and activate via QML
-                            int firstImageRow = -1;
-                            for (int i = 0; i < galleryModel.rowCount(); ++i) {
-                                QModelIndex idx = galleryModel.index(i);
-                                bool isGallery = galleryModel.data(idx, GalleryModel::IsGalleryRole).toBool();
-                                if (!isGallery) {
-                                    firstImageRow = i;
-                                    break;
-                                }
-                            }
-
-                            if (firstImageRow >= 0) {
-                                // Activate via QML (this emits openViewer which pushes viewer screen and opens image)
-                                QMetaObject::invokeMethod(&galleryModel, "activate", Qt::QueuedConnection,
-                                    Q_ARG(int, firstImageRow));
-                                return;
-                            } else {
-                                fprintf(stderr, "FAIL (Viewer test): No image rows found in gallery\n");
-                                resultCode = 1;
-                                QCoreApplication::exit(1);
-                                return;
-                            }
+                        // Check if we should transition to audio, video or viewer test mode
+                        if (transitionToRequestedLeg()) {
+                            return;
                         }
 
                         // Save screenshot if requested (thumbnail mode only, no viewer test)
@@ -685,59 +655,12 @@ static int runSelftest(const QString& vaultPath)
                             "%d/%d tiles have colored centers (requirement: >=3)\n",
                             delivered, colorfulTiles, totalTiles);
 
-                    // Check if we should transition to video or viewer test mode
-                    if (testVideo && !transitionedToVideo) {
-                        fprintf(stdout, "TRANSITION: Moving to video test mode\n");
-                        transitionedToVideo = true;
-                        // Find first video row and activate via QML
-                        int firstVideoRow = -1;
-                        for (int i = 0; i < galleryModel.rowCount(); ++i) {
-                            QModelIndex idx = galleryModel.index(i);
-                            bool isVideo = galleryModel.data(idx, GalleryModel::IsVideoRole).toBool();
-                            if (isVideo) {
-                                firstVideoRow = i;
-                                break;
-                            }
-                        }
-
-                        if (firstVideoRow >= 0) {
-                            // Activate via QML (this emits openVideo which pushes video screen and opens video)
-                            QMetaObject::invokeMethod(&galleryModel, "activate", Qt::QueuedConnection,
-                                Q_ARG(int, firstVideoRow));
-                            return;
-                        } else {
-                            fprintf(stderr, "FAIL (Video test): No video rows found in gallery\n");
-                            resultCode = 1;
-                            QCoreApplication::exit(1);
-                            return;
-                        }
-                    } else if (testViewer && !transitionedToViewer) {
-                        fprintf(stdout, "TRANSITION: Moving to viewer test mode\n");
-                        transitionedToViewer = true;
-                        // Find first image row (skip galleries) and activate via QML
-                        int firstImageRow = -1;
-                        for (int i = 0; i < galleryModel.rowCount(); ++i) {
-                            QModelIndex idx = galleryModel.index(i);
-                            bool isGallery = galleryModel.data(idx, GalleryModel::IsGalleryRole).toBool();
-                            if (!isGallery) {
-                                firstImageRow = i;
-                                break;
-                            }
-                        }
-
-                        if (firstImageRow >= 0) {
-                            // Activate via QML (this emits openViewer which pushes viewer screen and opens image)
-                            QMetaObject::invokeMethod(&galleryModel, "activate", Qt::QueuedConnection,
-                                Q_ARG(int, firstImageRow));
-                            // Continue to viewer verification (don't exit yet)
-                            // transitionedToViewer flag prevents poll timer from running again
-                            return;
-                        } else {
-                            fprintf(stderr, "FAIL (Viewer test): No image rows found in gallery\n");
-                            resultCode = 1;
-                            QCoreApplication::exit(1);
-                            return;
-                        }
+                    // Check if we should transition to audio, video or viewer test mode.
+                    // (Previously this branch skipped the audio leg and would have
+                    // exited 0 without running its assertions; the shared helper
+                    // handles all three legs.)
+                    if (transitionToRequestedLeg()) {
+                        return;
                     }
 
                     // Save screenshot if requested (thumbnail mode only, no viewer/video test)
@@ -951,18 +874,9 @@ static int runSelftest(const QString& vaultPath)
 
                 fprintf(stdout, "\n=== VIDEO TEST ASSERTIONS ===\n");
 
-                // (a) Frame counter >= 10
-                auto items = window->findChildren<VideoFrameItem*>();
-                int frameCount = items.size() > 0 ? items[0]->testOnlyRenderCount() : 0;
-                fprintf(stdout, "ASSERT (a) Frame count: %d (requirement: >= 10)... %s\n", frameCount,
-                        frameCount >= 10 ? "PASS" : "FAIL");
-                bool assertA = frameCount >= 10;
-
-                // (b) Position advanced > 1.0s
-                double position = playbackEngine.position();
-                fprintf(stdout, "ASSERT (b) Position: %.2f seconds (requirement: > 1.0)... %s\n", position,
-                        position > 1.0 ? "PASS" : "FAIL");
-                bool assertB = position > 1.0;
+                // (a) Frame counter >= 10, (b) position advanced > 1.0s
+                bool assertA = false, assertB = false;
+                assertPlaybackBasics(assertA, assertB);
 
                 // (c) Center pixel not black/background
                 bool assertC = false;
@@ -1070,18 +984,9 @@ static int runSelftest(const QString& vaultPath)
 
                 fprintf(stdout, "\n=== AUDIO TEST ASSERTIONS ===\n");
 
-                // (a) Frame counter >= 10
-                auto items = window->findChildren<VideoFrameItem*>();
-                int frameCount = items.size() > 0 ? items[0]->testOnlyRenderCount() : 0;
-                fprintf(stdout, "ASSERT (a) Frame count: %d (requirement: >= 10)... %s\n", frameCount,
-                        frameCount >= 10 ? "PASS" : "FAIL");
-                bool assertA = frameCount >= 10;
-
-                // (b) Position advanced > 1.0s
-                double position = playbackEngine.position();
-                fprintf(stdout, "ASSERT (b) Position: %.2f seconds (requirement: > 1.0)... %s\n", position,
-                        position > 1.0 ? "PASS" : "FAIL");
-                bool assertB = position > 1.0;
+                // (a) Frame counter >= 10, (b) position advanced > 1.0s
+                bool assertA = false, assertB = false;
+                assertPlaybackBasics(assertA, assertB);
 
                 // (c) Audio active: samples_consumed > 0 OR fallback engaged
                 // IMPORTANT: if audio init failed, assertion (c) MUST FAIL with distinct message
@@ -1201,18 +1106,8 @@ int main(int argc, char** argv)
     }
 
     // Normal flow
-    // Initialize theme from environment variable if specified (OSV_QT_THEME=0..3)
-    const char* theme_env = std::getenv("OSV_QT_THEME");
-    if (theme_env) {
-        int theme_idx = std::atoi(theme_env);
-        if (theme_idx >= 0 && theme_idx < gfx::THEME_COUNT) {
-            gfx::set_theme(static_cast<gfx::ThemeId>(theme_idx));
-        }
-    }
-
-    qmlRegisterType<SecureTextField>("Osv", 1, 0, "SecureTextField");
-    qmlRegisterType<SecureImageItem>("Osv", 1, 0, "SecureImageItem");
-    qmlRegisterType<VideoFrameItem>("Osv", 1, 0, "VideoFrameItem");
+    initThemeFromEnv();
+    registerOsvQmlTypes();
 
     QQmlApplicationEngine engine;
 
@@ -1230,23 +1125,8 @@ int main(int argc, char** argv)
         }
     });
 
-    UnlockController unlockController;
-    ThumbCache thumbCache;
-    GalleryModel galleryModel(&unlockController.vault());
-    ViewerController viewerController(&unlockController.vault(), &galleryModel);
-    ThemePalette themePalette;
-    PlaybackEngine playbackEngine;
-    unlockController.setViewerController(&viewerController);
-    unlockController.setPlaybackEngine(&playbackEngine);
-    galleryModel.setViewerController(&viewerController);
-    playbackEngine.setVault(&unlockController.vault());
-
-    engine.rootContext()->setContextProperty("unlockController", &unlockController);
-    engine.rootContext()->setContextProperty("thumbCache", &thumbCache);
-    engine.rootContext()->setContextProperty("galleryModel", &galleryModel);
-    engine.rootContext()->setContextProperty("viewerController", &viewerController);
-    engine.rootContext()->setContextProperty("themePalette", &themePalette);
-    engine.rootContext()->setContextProperty("playbackEngine", &playbackEngine);
+    AppContext appCtx;
+    appCtx.expose(engine);
 
     const QString qmlPath = QStringLiteral(QTUI_QML_DIR "/Main.qml");
     engine.load(QUrl::fromLocalFile(qmlPath));
@@ -1256,12 +1136,12 @@ int main(int argc, char** argv)
     }
 
     // Connect unlock signal to update models
-    QObject::connect(&unlockController, &UnlockController::unlockedChanged, [&]() {
-        if (unlockController.unlocked()) {
-            thumbCache.setVault(&unlockController.vault());
-            galleryModel.refresh();
+    QObject::connect(&appCtx.unlockController, &UnlockController::unlockedChanged, [&appCtx]() {
+        if (appCtx.unlockController.unlocked()) {
+            appCtx.thumbCache.setVault(&appCtx.unlockController.vault());
+            appCtx.galleryModel.refresh();
         } else {
-            thumbCache.clearAll();
+            appCtx.thumbCache.clearAll();
         }
     });
 
