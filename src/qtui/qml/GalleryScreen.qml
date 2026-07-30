@@ -19,7 +19,8 @@ Rectangle {
                 { keys: "Enter", description: "Open image/video or enter gallery" },
                 { keys: "Esc", description: "Go up one level" },
                 { keys: "Shift+S", description: "Cycle sort order" },
-                { keys: "L", description: "Cycle view density (grid/list)" }
+                { keys: "L", description: "Cycle view density (grid/list)" },
+                { keys: "Ctrl+D", description: "Toggle detail panel (WS2 Task 2.3)" }
             ]
         },
         {
@@ -29,6 +30,13 @@ Rectangle {
                 { keys: "Click", description: "Toggle selection" },
                 { keys: "Shift+Click", description: "Range select" },
                 { keys: "Ctrl+A", description: "Select all items" }
+            ]
+        },
+        {
+            title: "Detail Panel (WS2 Task 2.3)",
+            entries: [
+                { keys: "Ctrl+Up/Down", description: "Scroll detail panel" },
+                { keys: "Mouse Wheel", description: "Scroll over panel" }
             ]
         }
     ]
@@ -122,12 +130,13 @@ Rectangle {
     // Gallery grid view: displays galleries and media from galleryModel.
     // Galleries shown as folder glyphs, media as thumbnails.
     // Arrow keys navigate, Enter opens, Esc up/back, Shift+S sort, L view mode.
+    // WS2 Task 2.3: Grid reflows left when detail panel is open (no overlay).
     GridView {
         id: grid
         anchors {
             top: galleryHeader.bottom
             left: parent.left
-            right: parent.right
+            right: detailPanel.left
             bottom: galleryFooter.top
         }
         cellWidth: currentViewMode === 0 ? width : cellSizes[currentViewMode] + 12
@@ -240,17 +249,22 @@ Rectangle {
                 // L: cycle view density
                 nextViewMode()
                 event.accepted = true
+            } else if (event.text === "D" && event.modifiers & Qt.ControlModifier) {
+                // WS2 Task 2.3: Ctrl+D toggle detail panel
+                sessionState.setDetailOpen(!sessionState.detailOpen)
+                event.accepted = true
             }
         }
     }
 
     // WS2 Task 2.2: Footer showing selection count
+    // WS2 Task 2.3: Footer respects detail panel width (reflows with grid)
     Rectangle {
         id: galleryFooter
         anchors {
             bottom: parent.bottom
             left: parent.left
-            right: parent.right
+            right: detailPanel.left
         }
         height: selectionController.count > 0 ? 40 : 0
         color: themePalette.surface
@@ -272,5 +286,10 @@ Rectangle {
             color: themePalette.text
             font.pixelSize: 14
         }
+    }
+
+    // WS2 Task 2.3: Detail panel showing metadata/tags for selected item
+    DetailPanel {
+        id: detailPanel
     }
 }
