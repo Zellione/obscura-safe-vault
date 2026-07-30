@@ -64,6 +64,10 @@ Window {
                     root.currentThemeIndex = (root.currentThemeIndex + 1) % 4;
                     themePalette.setThemeIndex(root.currentThemeIndex);
                 }
+                onBack: {
+                    // Navigation contract satisfied; upOneLevel() already called by GalleryScreen.
+                    // WS1's vault-manager route will consume this signal for deeper back behaviors.
+                }
             }
         }
 

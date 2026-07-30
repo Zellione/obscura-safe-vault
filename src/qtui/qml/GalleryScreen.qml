@@ -13,6 +13,9 @@ Rectangle {
     // Signal to request theme cycling (Main.qml handles the state)
     signal themeCycleRequested()
 
+    // Signal for back navigation (Main.qml wires to galleryModel.upOneLevel)
+    signal back()
+
     // `focus: true` only grants scope focus inside the StackView;
     // keys (Esc = up, arrows) need ACTIVE focus on the grid — force
     // it when the page appears and again when the viewer/video
@@ -53,8 +56,11 @@ Rectangle {
                     id: upMouse
                     anchors.fill: parent
                     onClicked: {
-                        galleryModel.upOneLevel()
-                        grid.forceActiveFocus()
+                        if (galleryModel.currentPath !== "/") {
+                            galleryModel.upOneLevel()
+                            grid.forceActiveFocus()
+                            galleryRoot.back()
+                        }
                     }
                 }
 
@@ -160,17 +166,16 @@ Rectangle {
         }
         Keys.onEscapePressed: {
             galleryModel.upOneLevel()
+            galleryRoot.back()
         }
         Keys.onPressed: {
             if (event.key === Qt.Key_F2) {
                 // Rename current item
                 if (grid.currentIndex >= 0 && grid.currentIndex < galleryModel.rowCount()) {
                     const nodeName = galleryModel.data(galleryModel.index(grid.currentIndex), galleryModel.roleNames()['name']);
-                    if (renameDialog) {
-                        renameDialog.originalName = nodeName;
-                        renameDialog.targetRow = grid.currentIndex;
-                        renameDialog.open();
-                    }
+                    renameDialog.originalName = nodeName;
+                    renameDialog.targetRow = grid.currentIndex;
+                    renameDialog.open();
                 }
                 event.accepted = true;
             } else if (event.key === Qt.Key_T) {
