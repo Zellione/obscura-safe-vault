@@ -16,6 +16,7 @@
 #include "session_state.h"
 #include "tag_controller.h"
 #include "favorites_controller.h"
+#include "search_model_adapter.h"
 
 class QQmlApplicationEngine;
 
@@ -43,6 +44,7 @@ struct AppContext {
     SessionState sessionState;
     TagController tagController;
     FavoritesController favoritesController;
+    SearchModelAdapter searchModelAdapter;
 
     AppContext();
 
