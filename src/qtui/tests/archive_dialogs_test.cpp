@@ -29,9 +29,10 @@ private slots:
         QString content = in.readAll();
         qmlFile.close();
 
-        QVERIFY(content.contains("TextField"));
-        QVERIFY(content.contains("echoMode"));
+        // Now uses SecureTextField (C++ component) instead of TextField
+        QVERIFY(content.contains("SecureTextField"));
         QVERIFY(content.contains("password", Qt::CaseInsensitive));
+        QVERIFY(content.contains("importController"));  // password submission hook
     }
 
     void testVolumeSetDialogHasListView()

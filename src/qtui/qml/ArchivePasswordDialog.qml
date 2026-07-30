@@ -1,11 +1,15 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "." as QmlUI
 
 Dialog {
     id: root
     title: "Archive Password"
     standardButtons: Dialog.Ok | Dialog.Cancel
+
+    required property var themePalette
+    required property var importController
 
     property string archiveName: ""
 
@@ -15,20 +19,34 @@ Dialog {
 
         Text {
             text: "Enter password for " + root.archiveName
-            color: "black"
+            color: root.themePalette.text
             wrapMode: Text.Wrap
         }
 
-        TextField {
+        QmlUI.SecureTextField {
             id: passwordField
             Layout.fillWidth: true
-            echoMode: TextInput.Password
-            placeholderText: "Password"
+            Layout.preferredHeight: 32
+        }
+
+        Text {
+            text: "Password: " + passwordField.length + " characters"
+            color: root.themePalette.textDim
+            font.pixelSize: 11
         }
     }
 
     onAccepted: {
-        // Return password via signal or property
-        // Full impl: pass SecurePassword to controller
+        // Pass SecurePassword (SecureTextInput bytes) to controller
+        // Controller will handle wrapping as shared_ptr<SecureBytes>
+        importController.submitArchivePassword(archiveName, passwordField.model)
+        passwordField.clearSecret()
+        root.close()
+    }
+
+    onRejected: {
+        // Clear on cancel
+        passwordField.clearSecret()
+        root.close()
     }
 }
