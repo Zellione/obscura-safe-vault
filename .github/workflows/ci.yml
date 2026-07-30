@@ -24,7 +24,7 @@ on:
       - '.gitignore'
       - '.serena/**'
   pull_request:
-    branches: [main]
+    branches: [main, experiment/qt-quick-ui]
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
