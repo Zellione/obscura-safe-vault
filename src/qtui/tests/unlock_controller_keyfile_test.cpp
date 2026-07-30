@@ -13,6 +13,33 @@
 
 namespace fs = std::filesystem;
 
+// Helper: Set up a test vault with temporary directory and unlocked vault.
+// Returns (valid, tempDir, vault). Caller must keep tempDir alive while using vault.
+struct TestVaultSetup {
+    bool valid = false;
+    QTemporaryDir tempDir;
+    vault::Vault vault;
+};
+
+static TestVaultSetup setupTestVault()
+{
+    TestVaultSetup setup;
+    if (!setup.tempDir.isValid()) {
+        fprintf(stderr, "FAIL: Could not create temp directory\n");
+        return setup;
+    }
+
+    try {
+        const auto vaultPath = fs::path(setup.tempDir.path().toStdString()) / "test.osv";
+        setup.vault = osvqt_test::createTestVault(vaultPath.string());
+        setup.valid = true;
+    } catch (const std::exception& e) {
+        fprintf(stderr, "FAIL: Could not create test vault: %s\n", e.what());
+    }
+
+    return setup;
+}
+
 // Helper: Create a temporary keyfile with random bytes
 static std::string createTempKeyfile(const std::string& tempDir, const std::vector<uint8_t>& bytes)
 {
@@ -36,9 +63,8 @@ static bool test_create_with_keyfile_round_trip()
 {
     printf("Test 1: Create with keyfile → lock → unlock with keyfile round-trip...\n");
 
-    QTemporaryDir tempDir;
-    if (!tempDir.isValid()) {
-        fprintf(stderr, "FAIL: Could not create temp directory\n");
+    auto setup = setupTestVault();
+    if (!setup.valid) {
         return false;
     }
 
@@ -48,17 +74,14 @@ static bool test_create_with_keyfile_round_trip()
         for (size_t i = 0; i < keyfile_bytes.size(); ++i) {
             keyfile_bytes[i] = (uint8_t)(i * 7 % 256);  // Deterministic "random" bytes
         }
-        const auto keyfilePath = createTempKeyfile(tempDir.path().toStdString(), keyfile_bytes);
-
-        // Create vault with password + keyfile
-        const auto vaultPath = fs::path(tempDir.path().toStdString()) / "test_kf.osv";
-        auto vault = osvqt_test::createTestVault(vaultPath.string());
+        const auto keyfilePath = createTempKeyfile(setup.tempDir.path().toStdString(), keyfile_bytes);
 
         // Now we need to create a vault WITH keyfile using the controller
         // For now, verify that unlock/lock cycle works via controller
         UnlockController controller;
 
         // Open the vault
+        const auto vaultPath = fs::path(setup.tempDir.path().toStdString()) / "test.osv";
         const auto vaultUrl = QUrl::fromLocalFile(QString::fromStdString(vaultPath.string()));
         if (!controller.openVault(vaultUrl)) {
             fprintf(stderr, "FAIL: Could not open vault\n");
@@ -95,18 +118,14 @@ static bool test_wrong_keyfile_generic_error()
 {
     printf("Test 2: Wrong keyfile gives same generic error as wrong password...\n");
 
-    QTemporaryDir tempDir;
-    if (!tempDir.isValid()) {
-        fprintf(stderr, "FAIL: Could not create temp directory\n");
+    auto setup = setupTestVault();
+    if (!setup.valid) {
         return false;
     }
 
     try {
-        // Create a vault with the standard password
-        const auto vaultPath = fs::path(tempDir.path().toStdString()) / "test_kf2.osv";
-        auto vault = osvqt_test::createTestVault(vaultPath.string());
-
         UnlockController controller;
+        const auto vaultPath = fs::path(setup.tempDir.path().toStdString()) / "test.osv";
         const auto vaultUrl = QUrl::fromLocalFile(QString::fromStdString(vaultPath.string()));
         if (!controller.openVault(vaultUrl)) {
             fprintf(stderr, "FAIL: Could not open vault\n");
@@ -141,18 +160,14 @@ static bool test_missing_keyfile_error()
 {
     printf("Test 3: Missing keyfile file returns error without crash...\n");
 
-    QTemporaryDir tempDir;
-    if (!tempDir.isValid()) {
-        fprintf(stderr, "FAIL: Could not create temp directory\n");
+    auto setup = setupTestVault();
+    if (!setup.valid) {
         return false;
     }
 
     try {
-        // Create a vault
-        const auto vaultPath = fs::path(tempDir.path().toStdString()) / "test_kf3.osv";
-        auto vault = osvqt_test::createTestVault(vaultPath.string());
-
         UnlockController controller;
+        const auto vaultPath = fs::path(setup.tempDir.path().toStdString()) / "test.osv";
         const auto vaultUrl = QUrl::fromLocalFile(QString::fromStdString(vaultPath.string()));
         if (!controller.openVault(vaultUrl)) {
             fprintf(stderr, "FAIL: Could not open vault\n");
@@ -193,22 +208,18 @@ static bool test_keyfile_wipe_on_error()
 {
     printf("Test 4: Keyfile bytes are wiped on error (code path check)...\n");
 
-    QTemporaryDir tempDir;
-    if (!tempDir.isValid()) {
-        fprintf(stderr, "FAIL: Could not create temp directory\n");
+    auto setup = setupTestVault();
+    if (!setup.valid) {
         return false;
     }
 
     try {
         // Create a keyfile with a known pattern
         std::vector<uint8_t> keyfile_bytes{0xAA, 0xBB, 0xCC, 0xDD};
-        const auto keyfilePath = createTempKeyfile(tempDir.path().toStdString(), keyfile_bytes);
-
-        // Create a vault
-        const auto vaultPath = fs::path(tempDir.path().toStdString()) / "test_kf4.osv";
-        auto vault = osvqt_test::createTestVault(vaultPath.string());
+        const auto keyfilePath = createTempKeyfile(setup.tempDir.path().toStdString(), keyfile_bytes);
 
         UnlockController controller;
+        const auto vaultPath = fs::path(setup.tempDir.path().toStdString()) / "test.osv";
         const auto vaultUrl = QUrl::fromLocalFile(QString::fromStdString(vaultPath.string()));
         if (!controller.openVault(vaultUrl)) {
             fprintf(stderr, "FAIL: Could not open vault\n");
