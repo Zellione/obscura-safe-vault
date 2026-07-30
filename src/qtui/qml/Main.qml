@@ -197,7 +197,7 @@ Window {
                     Text {
                         anchors.centerIn: parent
                         text: "Loading video..."
-                        color: themePalette.textDim ?? "#aaaaaa"
+                        color: themePalette.textDim
                         font.pixelSize: 16
                         visible: !videoItem.visible
                     }
@@ -224,7 +224,7 @@ Window {
                             Button {
                                 text: playbackEngine.playing ? "Pause" : "Play"
                                 onClicked: playbackEngine.playing ? playbackEngine.pause() : playbackEngine.play()
-                                palette.buttonText: themePalette.text ?? "white"
+                                palette.buttonText: themePalette.text
                             }
 
                             Text {
@@ -235,7 +235,7 @@ Window {
                                     const secs = Math.floor(d % 60);
                                     return (mins < 10 ? "0" : "") + mins + ":" + (secs < 10 ? "0" : "") + secs;
                                 })()
-                                color: themePalette.text ?? "white"
+                                color: themePalette.text
                                 font.pixelSize: 12
                             }
                         }
