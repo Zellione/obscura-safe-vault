@@ -182,6 +182,23 @@ add_executable(osv_qt_import_controller_test tests/import_controller_test.cpp im
 target_link_libraries(osv_qt_import_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_import_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(osv_qt_import_status_screen_test tests/import_status_screen_test.cpp)
+target_link_libraries(osv_qt_import_status_screen_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
+target_include_directories(osv_qt_import_status_screen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+qt_add_executable(osv_qt_import_status_screen_qml_test tests/import_status_screen_qml_test.cpp)
+target_link_libraries(osv_qt_import_status_screen_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::Test)
+target_include_directories(osv_qt_import_status_screen_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(osv_qt_import_status_screen_qml_test PRIVATE
+    QTUI_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+)
+
+# Shaders for import_status_screen test
+qt6_add_shaders(osv_qt_import_status_screen_qml_test "osv_qt_import_status_screen_qml_test_shaders"
+    PREFIX "/osvqt"
+    FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
+)
+
 qt_add_executable(osv_qt_help_popup_qml_test tests/help_popup_qml_test.cpp)
 target_link_libraries(osv_qt_help_popup_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
 target_include_directories(osv_qt_help_popup_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
