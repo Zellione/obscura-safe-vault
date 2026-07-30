@@ -187,6 +187,11 @@ qt6_add_shaders(osv_qt_settings_overlay_qml_test "osv_qt_settings_overlay_qml_te
     FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
 )
 
+# Finding 5: DetailPanel tag-section method test (bulletCount, bullet, isBulletTag)
+# Tests verify DetailController methods exist and work, preventing undefined-method crashes
+add_executable(osv_qt_detail_panel_qml_test tests/detail_panel_qml_test.cpp)
+target_link_libraries(osv_qt_detail_panel_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui)
+
 add_executable(osv_qt_thumb_stress_test tests/thumb_stress_test.cpp gallery_model.cpp cover_provider.cpp thumb_cache.cpp viewer_controller.cpp secure_image_item.cpp rhi_quad_renderer.cpp status_controller.cpp)
 target_link_libraries(osv_qt_thumb_stress_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick)
 target_include_directories(osv_qt_thumb_stress_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
