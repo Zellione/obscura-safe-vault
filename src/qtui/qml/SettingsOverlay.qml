@@ -28,8 +28,9 @@ Rectangle {
     function rowCountForSection(section) {
         if (section === 0) return 1;  // Appearance: theme
         if (section === 1) {
-            // Browsing: 4 rows if unlocked, 0 if locked
-            return settingsController && settingsController.vaultUnlocked ? 4 : 0;
+            // Browsing: 2 rows if unlocked (sort order, show tags), 0 if locked
+            // Auto-lock + keep-unlocked rows arrive with the WS1 autolock controller (session-scoped state, not settings_model)
+            return settingsController && settingsController.vaultUnlocked ? 2 : 0;
         }
         if (section === 2) {
             // TagColours: category count if unlocked, 0 if locked
@@ -99,7 +100,6 @@ Rectangle {
                 // Toggle tiles show tags
                 settingsController.setTilesShowTags(!settingsController.tilesShowTags);
             }
-            // Rows 2 and 3 (auto-lock, keep-unlocked) are placeholders, no-op
         }
         // TagColours section: only if unlocked
         else if (currentSection === 2 && settingsController.vaultUnlocked) {
@@ -407,72 +407,8 @@ Rectangle {
                             }
                         }
 
-                        // Row 2: Auto-lock (placeholder - not yet in vault settings)
-                        Rectangle {
-                            width: parent.width - 16
-                            height: 40
-                            color: (settingsOverlay.inPane && settingsOverlay.currentRow === 2)
-                                   ? Qt.rgba(themePalette.accent.r, themePalette.accent.g, themePalette.accent.b, 0.2)
-                                   : "transparent"
-                            border.color: (settingsOverlay.inPane && settingsOverlay.currentRow === 2)
-                                         ? themePalette.accent : "transparent"
-                            border.width: 2
-                            radius: 4
-
-                            Row {
-                                anchors { fill: parent; margins: 8 }
-                                spacing: 12
-
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "Auto-lock (sec):"
-                                    color: themePalette.text
-                                    font.pixelSize: 11
-                                    width: 100
-                                }
-
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "—"
-                                    color: themePalette.textDim
-                                    font.pixelSize: 11
-                                }
-                            }
-                        }
-
-                        // Row 3: Keep unlocked (placeholder - not yet in vault settings)
-                        Rectangle {
-                            width: parent.width - 16
-                            height: 40
-                            color: (settingsOverlay.inPane && settingsOverlay.currentRow === 3)
-                                   ? Qt.rgba(themePalette.accent.r, themePalette.accent.g, themePalette.accent.b, 0.2)
-                                   : "transparent"
-                            border.color: (settingsOverlay.inPane && settingsOverlay.currentRow === 3)
-                                         ? themePalette.accent : "transparent"
-                            border.width: 2
-                            radius: 4
-
-                            Row {
-                                anchors { fill: parent; margins: 8 }
-                                spacing: 12
-
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "Keep unlocked:"
-                                    color: themePalette.text
-                                    font.pixelSize: 11
-                                    width: 100
-                                }
-
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "—"
-                                    color: themePalette.textDim
-                                    font.pixelSize: 11
-                                }
-                            }
-                        }
                     }
+                    // Auto-lock + keep-unlocked rows arrive with the WS1 autolock controller (session-scoped state, not settings_model)
                 }
 
                 // Tag Colours section
