@@ -110,19 +110,54 @@ Rectangle {
                 }
             }
 
-            Text {
+            // WS2 Task 2.5: Breadcrumb with "Home" root + clickable segments
+            Row {
                 anchors.verticalCenter: parent.verticalCenter
-                text: {
-                    let path = galleryModel.currentPath
-                    let label = galleryModel.sortLabel()
-                    if (label) {
-                        return path + "   Sort: " + label
+                spacing: 4
+
+                Text {
+                    text: "Home"
+                    color: themePalette.textDim
+                    font.pixelSize: 13
+                    font.underline: homeMouse.containsMouse
+                    MouseArea {
+                        id: homeMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            if (galleryModel.currentPath !== "/") {
+                                galleryModel.enterGallery(0)
+                                // Note: This is a bit of a hack; proper implementation would need upOneLevel loop
+                                while (galleryModel.currentPath !== "/") {
+                                    galleryModel.upOneLevel()
+                                }
+                            }
+                        }
                     }
-                    return path
                 }
-                color: themePalette.textDim
-                font.pixelSize: 13
-                elide: Text.ElideLeft
+
+                Text {
+                    visible: galleryModel.currentPath !== "/"
+                    text: " / "
+                    color: themePalette.textDim
+                    font.pixelSize: 13
+                }
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: {
+                        let path = galleryModel.currentPath
+                        if (path === "/") return ""
+                        let label = galleryModel.sortLabel()
+                        if (label) {
+                            return path.substring(1) + "   Sort: " + label
+                        }
+                        return path.substring(1)
+                    }
+                    color: themePalette.textDim
+                    font.pixelSize: 13
+                    elide: Text.ElideLeft
+                }
             }
         }
     }
@@ -302,8 +337,28 @@ Rectangle {
                 const nodeKey = grid.model.data(grid.model.index(grid.currentIndex, 0), GalleryModel.NodeKeyRole)
                 // Show node with empty inherited tags and from-contents for now (TODO: compute from vault)
                 detailController.showNode(nodeKey, [], [])
+
+                // WS2 Task 2.5: Record the focused tile index for this path
+                sessionState.recordFocusIndex(galleryModel.currentPath, grid.currentIndex)
             } else {
                 detailController.clear()
+            }
+        }
+    }
+
+    // WS2 Task 2.5: Restore focused tile index when gallery changes
+    Connections {
+        target: galleryModel
+        function onCurrentPathChanged() {
+            // Recall the saved focus index for this path
+            const savedIndex = sessionState.recallFocusIndex(galleryModel.currentPath)
+            if (savedIndex >= 0 && savedIndex < grid.model.count) {
+                grid.currentIndex = savedIndex
+                grid.positionViewAtIndex(savedIndex, GridView.Contain)
+            } else if (grid.model.count > 0) {
+                // Default to first item if no saved index
+                grid.currentIndex = 0
+                grid.positionViewAtIndex(0, GridView.Beginning)
             }
         }
     }
