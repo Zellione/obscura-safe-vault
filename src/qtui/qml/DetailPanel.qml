@@ -90,7 +90,7 @@ Rectangle {
                             }
 
                             Text {
-                                Layout.fillWidth: true
+                                width: parent.width - 80 - 8  // parent width - label width - spacing
                                 text: detailController.rowValue(index, modelData)
                                 color: themePalette.text
                                 font.pixelSize: 11
@@ -125,20 +125,8 @@ Rectangle {
         }
     }
 
-    // Scroll bar on the right
-    ScrollBar {
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        anchors.rightMargin: 1
-        anchors.topMargin: 1
-        anchors.bottomMargin: 1
-        width: 8
-        policy: ScrollBar.AsNeeded
-        hoverPolicy: ScrollBar.AsNeeded
-        active: hovered || pressed
-        Flickable.flickableItem: flickable
-    }
+    // Scroll bar on the right — TODO: wire to Flickable once Qt.labs.controls or proper attached object is available
+    // For now, Flickable is directly scrollable via mouse wheel and keyboard (Ctrl+Up/Down)
 
     // Keyboard support: Ctrl+Up/Down to scroll
     Keys.onPressed: (event) => {
