@@ -10,6 +10,7 @@ Rectangle {
     required property var advancedSearchController
     required property var selectionController
     required property var viewerController
+    required property var sessionState
 
     signal back()
 
@@ -323,6 +324,31 @@ Rectangle {
         const includes = includeText.split(/[\s,]+/).filter(t => t.length > 0);
         const excludes = excludeText.split(/[\s,]+/).filter(t => t.length > 0);
         advancedSearchController.search(includes, excludes, nameText, scopeIndex);
+        // Session persistence: save query state
+        sessionState.setCustomData("adv_search_query", JSON.stringify({
+            include: includeText,
+            exclude: excludeText,
+            name: nameText,
+            scope: scopeIndex,
+            listView: listView
+        }));
+    }
+
+    function restoreSessionState() {
+        // Restore query from session state if available
+        const saved = sessionState.getCustomData("adv_search_query");
+        if (saved) {
+            try {
+                const data = JSON.parse(saved);
+                includeText = data.include || "";
+                excludeText = data.exclude || "";
+                nameText = data.name || "";
+                scopeIndex = data.scope || 2;
+                listView = data.listView || false;
+            } catch (e) {
+                // Ignore parse errors, use defaults
+            }
+        }
     }
 
     function openResult(item) {
@@ -365,6 +391,10 @@ Rectangle {
                                                nameText, scopeIndex);
             advancedSearchController.refreshSavedSearches();
             event.accepted = true;
+        } else if (event.key === Qt.Key_D && (event.modifiers & Qt.ControlModifier)) {
+            // contract: WS2 DetailPanel — wired in integration
+            // Ctrl+D: open detail panel (deferred to WS2)
+            event.accepted = true;
         }
     }
 
@@ -373,7 +403,19 @@ Rectangle {
     Component.onCompleted: {
         advancedSearchController.refreshTagVocabulary();
         advancedSearchController.refreshSavedSearches();
+        restoreSessionState();
         performSearch();
+    }
+
+    Component.onDestruction: {
+        // Persist session state on exit
+        sessionState.setCustomData("adv_search_query", JSON.stringify({
+            include: includeText,
+            exclude: excludeText,
+            name: nameText,
+            scope: scopeIndex,
+            listView: listView
+        }));
     }
 
     Connections {
