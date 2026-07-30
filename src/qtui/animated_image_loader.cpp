@@ -113,6 +113,8 @@ void AnimatedImageLoader::open(vault::Vault* vault,
         px->width = firstFrame->width;
         px->height = firstFrame->height;
         px->rgba = std::move(firstFrame->rgba);
+        // Flatten transparent areas to black (Phase 47 Task 10: alpha composition)
+        flatten_alpha_to_black(*px);
         item_->setImage(px);
         currentFrameIndex_ = 1;
     }
@@ -168,6 +170,8 @@ void AnimatedImageLoader::onFrameAdvance(int framesToAdvance)
         px->width = f->width;
         px->height = f->height;
         px->rgba = std::move(f->rgba);
+        // Flatten transparent areas to black (Phase 47 Task 10: alpha composition)
+        flatten_alpha_to_black(*px);
         item_->setImage(px);
     }
 }
