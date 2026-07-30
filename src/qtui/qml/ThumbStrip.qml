@@ -1,4 +1,5 @@
 import QtQuick
+import Osv 1.0
 
 Rectangle {
     id: root
@@ -61,23 +62,13 @@ Rectangle {
                 }
             }
 
-            // Thumbnail image (placeholder for test; will be SecureImageItem in ViewerScreen)
-            Rectangle {
+            // Thumbnail image: SecureImageItem loads from ThumbCache
+            SecureImageItem {
                 anchors {
                     fill: parent
                     margins: 2
                 }
-                color: themePalette.imgBg
-
-                // Show a simple label with item name for now
-                Text {
-                    anchors.centerIn: parent
-                    text: name
-                    color: themePalette.textDim
-                    font.pixelSize: 10
-                    elide: Text.ElideRight
-                    width: parent.width - 4
-                }
+                nodeKey: model.nodeKey
             }
 
             // Click handler: jump to this item
