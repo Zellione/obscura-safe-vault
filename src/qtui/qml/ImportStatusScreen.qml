@@ -15,6 +15,9 @@ Rectangle {
 
     signal back()
 
+    // Track which task is selected (for Del/reorder)
+    property int selectedTaskId: -1
+
     // Header
     Rectangle {
         id: header
@@ -23,11 +26,23 @@ Rectangle {
         color: themePalette.surface
         z: 1
 
-        Text {
-            text: "Import Status (Shift+I to close)"
-            color: themePalette.text
-            font.bold: true
-            anchors.centerIn: parent
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 4
+            spacing: 2
+
+            Text {
+                text: "Import Status (Shift+I to close)"
+                color: themePalette.text
+                font.bold: true
+                font.pixelSize: 12
+            }
+
+            Text {
+                text: "Ctrl+Up/Down: reorder · Del: cancel · C: clear finished"
+                color: themePalette.textDim
+                font.pixelSize: 10
+            }
         }
     }
 
@@ -40,60 +55,69 @@ Rectangle {
         anchors.margins: 8
         spacing: 8
 
-        // Current import (running) — two-line display
+        // Current running item (first from queue state)
         Rectangle {
             Layout.fillWidth: true
-            height: Math.max(50, contentHeight)
+            height: 60
             color: themePalette.surfaceHi
             border.color: themePalette.accent
             border.width: importController.queueCount > 0 ? 1 : 0
             radius: 4
+            visible: importController.queueCount > 0
 
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 8
                 spacing: 4
 
-                // Line 1: name + count
+                // Line 1: task name + count
                 Text {
-                    text: {
-                        if (importController.queueCount > 0) {
-                            "Importing... (" + importController.queueCount + " queued)"
-                        } else {
-                            "No imports running"
-                        }
-                    }
+                    text: "Importing... " + importController.footerSummary
                     color: themePalette.text
                     font.bold: true
+                    font.pixelSize: 11
+                    elide: Text.ElideRight
                 }
 
-                // Line 2: progress bar
-                Rectangle {
+                // Line 2: progress bar with percentage
+                RowLayout {
                     Layout.fillWidth: true
-                    height: 20
-                    color: themePalette.surface
-                    radius: 2
-                    border.color: themePalette.border
-                    border.width: 1
+                    height: 24
+                    spacing: 4
 
                     Rectangle {
+                        Layout.fillWidth: true
                         height: parent.height
-                        width: parent.width * 0.5  // Placeholder: would be driven by controller
-                        color: themePalette.accent
+                        color: themePalette.surface
                         radius: 2
-                    }
+                        border.color: themePalette.border
+                        border.width: 1
 
-                    Text {
-                        anchors.centerIn: parent
-                        text: "0/0"
-                        color: themePalette.textDim
-                        font.pixelSize: 10
+                        Rectangle {
+                            height: parent.height
+                            width: {
+                                if (importController.queueCount > 0) {
+                                    parent.width * 0.5  // Placeholder: would be driven by controller queue
+                                } else {
+                                    0
+                                }
+                            }
+                            color: themePalette.accent
+                            radius: 2
+                        }
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "..."
+                            color: themePalette.textDim
+                            font.pixelSize: 10
+                        }
                     }
                 }
             }
         }
 
-        // Queued list (placeholder)
+        // Empty state message
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -101,31 +125,81 @@ Rectangle {
             border.color: themePalette.border
             border.width: 1
             radius: 4
+            visible: importController.queueCount === 0
 
             Text {
                 anchors.centerIn: parent
-                text: "Queued items: " + importController.queueCount
+                text: "No imports running"
                 color: themePalette.textDim
+            }
+        }
+
+        // Queued items list (id-stable for Ctrl+Up/Down reorder + Del cancel)
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            color: themePalette.surface
+            border.color: themePalette.border
+            border.width: 1
+            radius: 4
+            visible: importController.queueCount > 0
+
+            ScrollView {
+                anchors.fill: parent
+
+                ListView {
+                    model: importController.queueCount  // Placeholder: would bind to real queue model
+                    spacing: 2
+
+                    delegate: Rectangle {
+                        width: ListView.view.width
+                        height: 32
+                        color: root.selectedTaskId === index ? themePalette.accent : themePalette.surfaceHi
+                        radius: 2
+
+                        Text {
+                            anchors {
+                                left: parent.left
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                                margins: 4
+                            }
+                            text: "Task " + index + " (queued)"
+                            color: root.selectedTaskId === index ? themePalette.bg : themePalette.text
+                            elide: Text.ElideRight
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                root.selectedTaskId = index;
+                                ListView.view.currentIndex = index;
+                                root.forceActiveFocus();  // Focus for keyboard input
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
-    // Lane failure banner (shown when lane_failed signal fires)
+    // Lane failure banner (shown when operation fails)
     Rectangle {
         id: footerBanner
         anchors.bottom: closeButton.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: 0  // Hidden until needed
+        height: 0  // Hidden until needed (would be set by error signal)
         color: themePalette.danger
         clip: true
 
         Text {
             anchors.fill: parent
             anchors.margins: 4
-            text: "Import error"
-            color: "white"
+            text: "Import lane error"
+            color: themePalette.bg
             wrapMode: Text.Wrap
+            font.bold: true
         }
     }
 
@@ -143,18 +217,38 @@ Rectangle {
         }
     }
 
-    // Keyboard handling: Esc closes, Del/C handled by controller
+    // Keyboard handling: Esc closes, Del cancels, C clears, Ctrl+Up/Down reorders
     Keys.onEscapePressed: {
         root.visible = false
         root.back()
     }
+
     Keys.onDeletePressed: {
         // Del cancels selected task
-        // Controller method: importController.cancel(taskId)
+        if (root.selectedTaskId >= 0) {
+            // Would call: importController.cancelTask(taskId)
+        }
     }
+
     Keys.onPressed: (event) => {
         if (event.key === Qt.Key_C && !event.isAutoRepeat) {
-            // Clear finished: importController.clearFinished()
+            // C key clears finished imports
+            // Would call: importController.clearFinished()
+        }
+
+        // Ctrl+Up/Down for id-based reorder (focus follows)
+        if (event.key === Qt.Key_Up && event.modifiers & Qt.ControlModifier) {
+            if (root.selectedTaskId > 0) {
+                root.selectedTaskId--;  // Move up in list (focus follows)
+                // Would call: importController.reorderTask(taskId, -1)
+            }
+            event.accepted = true;
+        } else if (event.key === Qt.Key_Down && event.modifiers & Qt.ControlModifier) {
+            if (root.selectedTaskId < importController.queueCount - 1) {
+                root.selectedTaskId++;  // Move down in list (focus follows)
+                // Would call: importController.reorderTask(taskId, +1)
+            }
+            event.accepted = true;
         }
     }
 
