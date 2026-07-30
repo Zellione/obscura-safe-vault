@@ -24,6 +24,7 @@ class ThemePalette : public QObject {
     Q_PROPERTY(QColor ok READ ok NOTIFY changed)
     Q_PROPERTY(QColor imgBg READ imgBg NOTIFY changed)
     Q_PROPERTY(QColor stripBg READ stripBg NOTIFY changed)
+    Q_PROPERTY(QColor veil READ veil NOTIFY changed)
 
 public:
     explicit ThemePalette(QObject* parent = nullptr);
@@ -45,6 +46,7 @@ public:
     QColor ok() const;
     QColor imgBg() const;
     QColor stripBg() const;
+    QColor veil() const;
 
     // Invokable to cycle through theme presets
     Q_INVOKABLE void setThemeIndex(int index);

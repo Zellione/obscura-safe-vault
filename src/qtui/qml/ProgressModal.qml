@@ -3,7 +3,7 @@ import QtQuick.Controls
 
 Rectangle {
     id: modal
-    color: "#00000080"  // Dark veil with transparency
+    color: themePalette.veil
     anchors.fill: parent
     visible: false
 

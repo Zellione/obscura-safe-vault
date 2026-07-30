@@ -86,6 +86,12 @@ QColor ThemePalette::stripBg() const {
     return QColor::fromRgb(c.r, c.g, c.b, c.a);
 }
 
+QColor ThemePalette::veil() const {
+    // Full-window veil overlay for modals (matches src/ui/progress_modal.cpp:14)
+    // RGB(8, 9, 12) with full opacity — very dark neutral color
+    return QColor::fromRgb(8, 9, 12, 255);
+}
+
 void ThemePalette::setThemeIndex(int index) {
     if (index < 0 || index >= gfx::THEME_COUNT) {
         return;  // out of range, silently ignore
