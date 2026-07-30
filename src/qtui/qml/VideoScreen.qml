@@ -152,6 +152,16 @@ Rectangle {
         } else if (event.key === Qt.Key_F) {
             root.resetFit();
             event.accepted = true;
+        } else if (event.key === Qt.Key_M) {
+            playbackEngine.toggleMute();
+            event.accepted = true;
+        } else if (event.key === Qt.Key_Plus || event.key === Qt.Key_Equal) {
+            // + or = key (same key on US keyboard)
+            playbackEngine.setVolume(playbackEngine.volume + 0.05);
+            event.accepted = true;
+        } else if (event.key === Qt.Key_Minus) {
+            playbackEngine.setVolume(playbackEngine.volume - 0.05);
+            event.accepted = true;
         }
     }
 

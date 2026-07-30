@@ -134,6 +134,7 @@ qt_add_executable(osv-qt
     viewer_controller.cpp
     theme_palette.cpp
     playback_engine.cpp
+    audio_pipe.cpp
 )
 
 # Shaders: compile to .qsb and embed as resources

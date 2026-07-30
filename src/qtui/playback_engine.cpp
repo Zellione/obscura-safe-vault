@@ -10,6 +10,7 @@
 #include "media/chunk_avio.h"
 #include "media/video_decoder.h"
 #include "media/video_decode_worker.h"
+#include "media/av_sync.h"
 #include "ui/playback_model.h"
 
 Q_LOGGING_CATEGORY(lcPlayback, "osv.playback")
@@ -75,6 +76,11 @@ void PlaybackEngine::open(quintptr nodeKey)
         duration_ = decoder_->duration_us() / 1e6;
         emit durationChanged();
 
+        // Open audio pipe if audio stream exists (M6b)
+        // Note: Audio initialization is deferred to the worker thread to avoid
+        // blocking the GUI thread on device detection/initialization
+        (void)decoder_;  // suppress unused warning for now
+
         // Create decode worker
         auto params = decoder_->video_codecpar();
         auto time_base = decoder_->video_time_base();
@@ -114,7 +120,9 @@ void PlaybackEngine::stop()
         thread_.join();
     }
 
-    // Clean up in order: worker first (owns codec fed by pkts), then decoder, then avio (owns source)
+    // Clean up in order: audio pipe, then worker, decoder, avio
+    // Audio pipe must be torn down before decoder (no pending callbacks)
+    audioPipe_.reset();
     worker_.reset();
     decoder_.reset();
     avio_.reset();
@@ -141,6 +149,14 @@ void PlaybackEngine::setPlaying(bool on)
     }
 
     if (changed) {
+        // Pause/resume audio stream
+        if (audioPipe_) {
+            if (on) {
+                audioPipe_->resume();
+            } else {
+                audioPipe_->pause();
+            }
+        }
         emit playingChanged();
     }
 }
@@ -166,9 +182,58 @@ QString PlaybackEngine::clockText() const
     return QString::fromStdString(ui::format_clock(position_));
 }
 
+void PlaybackEngine::setVolume(double v)
+{
+    double clamped = v;
+    if (clamped < 0.0) clamped = 0.0;
+    if (clamped > 1.0) clamped = 1.0;
+
+    if (volume_ == clamped) return;
+
+    volume_ = clamped;
+    if (audioPipe_) {
+        audioPipe_->set_gain(media::effective_gain(static_cast<float>(volume_), muted_));
+    }
+    emit volumeChanged();
+}
+
+void PlaybackEngine::setMuted(bool m)
+{
+    if (muted_ == m) return;
+    muted_ = m;
+    if (audioPipe_) {
+        audioPipe_->set_gain(media::effective_gain(static_cast<float>(volume_), muted_));
+    }
+    emit mutedChanged();
+}
+
+void PlaybackEngine::toggleMute()
+{
+    setMuted(!muted_);
+}
+
 void PlaybackEngine::runWorker(std::stop_token st)
 {
+    bool dummy_driver_warned = false;
+    bool audio_initialized = false;
+
     while (!st.stop_requested()) {
+        // Lazy initialize audio on first worker iteration (avoids blocking GUI thread)
+        if (!audio_initialized) {
+            audio_initialized = true;  // Only try once, even if decoder_ is null
+            if (decoder_ && decoder_->has_audio()) {
+                audioPipe_ = std::make_unique<AudioPipe>();
+                auto ainfo = decoder_->audio_info();
+                if (audioPipe_->open(ainfo.channels, ainfo.sample_rate)) {
+                    qCDebug(lcPlayback) << "Audio device opened successfully";
+                } else {
+                    qCWarning(lcPlayback) << "Failed to open audio device";
+                    audioPipe_.reset();  // audio optional; keep playing video
+                }
+            } else {
+                qCDebug(lcPlayback) << "No audio stream in video";
+            }
+        }
         // Drain control queue
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -181,12 +246,36 @@ void PlaybackEngine::runWorker(std::stop_token st)
                     } else {
                         worker_->begin_seek(msg.seekTarget);
                         clockBase_ = msg.seekTarget;
+                        audioSeekBase_ = msg.seekTarget;
                         sentEof_ = false;
+                        // Clear audio stream on seek
+                        if (audioPipe_) {
+                            audioPipe_->clear();
+                        }
                     }
                 } else if (msg.type == ControlMsg::Type::Stop) {
                     break;
                 }
                 pendingControl_.reset();
+            }
+        }
+
+        // Pump audio frames (M6b)
+        if (audioPipe_) {
+            // Feed audio into the buffer, targeting ~200ms queued
+            for (int attempt = 0; attempt < 5; ++attempt) {
+                auto a = decoder_->next_audio_frame();
+                if (!a) break;
+                audioPipe_->feed(*a);
+            }
+
+            // Check for dummy driver fallback (consumes no samples after several feeds)
+            if (!dummy_driver_warned && audioPipe_->is_dummy_driver()) {
+                // Dummy driver detected; fall back to wall clock
+                std::lock_guard<std::mutex> lock(mutex_);
+                audioUsingFallback_ = true;
+                dummy_driver_warned = true;
+                qCDebug(lcPlayback) << "Dummy audio driver detected, using wall clock fallback";
             }
         }
 
@@ -204,57 +293,74 @@ void PlaybackEngine::runWorker(std::stop_token st)
             }
         }
 
-        // Check for decoded frames
-        if (auto result = worker_->wait_result()) {
+        // Try to fetch and deliver a frame (short wait, don't block)
+        auto result = worker_->wait_result();
+        if (result) {
             // Discard mismatched generations (from old seeks)
             if (result->generation != generation_) {
-                continue;
-            }
-
-            if (result->eof) {
-                // Pause at end
+                // Stale result; discard and continue
+            } else if (result->eof) {
+                // End of stream; pause playback
                 QMetaObject::invokeMethod(this, [this]() { setPlaying(false); }, Qt::QueuedConnection);
-                continue;
-            }
-
-            if (result->frame) {
-                // Compute current playback clock and delay to frame delivery
-                // Must protect both clockBase_ and elapsed_ reads with mutex_
+            } else if (result->frame) {
+                // Compute clock and decide on frame action
                 double clock = 0.0;
+                bool using_audio_clock = false;
                 {
                     std::lock_guard<std::mutex> lock(mutex_);
-                    clock = clockBase_ + elapsed_.elapsed() / 1000.0;
-                }
-                double delay = result->frame->pts_seconds - clock;
-
-                // If frame is not yet due, sleep until it is (then re-check stop)
-                if (delay > 0.001) {
-                    std::this_thread::sleep_for(
-                        std::chrono::milliseconds(static_cast<int>(delay * 1000)));
-                    if (st.stop_requested()) {
-                        continue;
+                    if (audioPipe_ && !audioUsingFallback_) {
+                        // Use audio clock for synchronization (M6b audio-driven playback)
+                        uint64_t samples_consumed = audioPipe_->samples_consumed();
+                        clock = media::audio_clock(audioSeekBase_, samples_consumed,
+                                                   decoder_->audio_info().sample_rate);
+                        using_audio_clock = true;
+                    } else {
+                        // Wall clock fallback (M6a video-only, or audio unavailable)
+                        clock = clockBase_ + elapsed_.elapsed() / 1000.0;
                     }
                 }
 
-                // Unconditionally build and deliver the frame
-                auto frameBox = std::make_shared<FrameBox>();
-                frameBox->meta = *result->frame;
-                frameBox->storage = std::move(result->storage);
+                bool should_present = false;
+                if (using_audio_clock) {
+                    // With audio clock, use av_sync for precise frame pacing
+                    media::FrameAction action = media::decide(clock, result->frame->pts_seconds);
+                    should_present = (action == media::FrameAction::Present);
+                } else {
+                    // With wall clock, use simple delay-based pacing (original M6a approach)
+                    double delay = result->frame->pts_seconds - clock;
+                    if (delay > 0.001) {
+                        // Frame not yet due; sleep until it is
+                        std::this_thread::sleep_for(
+                            std::chrono::milliseconds(static_cast<int>(delay * 1000)));
+                        // Check for stop request, otherwise present the frame
+                        if (st.stop_requested()) {
+                            continue;
+                        }
+                    }
+                    should_present = true;
+                }
 
-                // Re-point the plane pointers into storage
-                frameBox->meta.planes[0] = frameBox->storage.data();
-                int y_size = frameBox->meta.linesizes[0] * frameBox->meta.height;
-                frameBox->meta.planes[1] = frameBox->storage.data() + y_size;
-                int u_size = frameBox->meta.linesizes[1] * ((frameBox->meta.height + 1) / 2);
-                frameBox->meta.planes[2] = frameBox->storage.data() + y_size + u_size;
+                if (should_present) {
+                    // Build and deliver the frame
+                    auto frameBox = std::make_shared<FrameBox>();
+                    frameBox->meta = *result->frame;
+                    frameBox->storage = std::move(result->storage);
 
-                // Update position and deliver frame
-                double newPos = result->frame->pts_seconds;
-                QMetaObject::invokeMethod(this, [this, frameBox, newPos]() {
-                    position_ = newPos;
-                    emit positionChanged();
-                    onFrameReady(frameBox);
-                }, Qt::QueuedConnection);
+                    // Re-point the plane pointers into storage
+                    frameBox->meta.planes[0] = frameBox->storage.data();
+                    int y_size = frameBox->meta.linesizes[0] * frameBox->meta.height;
+                    frameBox->meta.planes[1] = frameBox->storage.data() + y_size;
+                    int u_size = frameBox->meta.linesizes[1] * ((frameBox->meta.height + 1) / 2);
+                    frameBox->meta.planes[2] = frameBox->storage.data() + y_size + u_size;
+
+                    // Update position and deliver frame
+                    double newPos = result->frame->pts_seconds;
+                    QMetaObject::invokeMethod(this, [this, frameBox, newPos]() {
+                        position_ = newPos;
+                        emit positionChanged();
+                        onFrameReady(frameBox);
+                    }, Qt::QueuedConnection);
+                }
             }
         }
 
