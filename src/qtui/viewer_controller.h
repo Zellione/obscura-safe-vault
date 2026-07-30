@@ -97,7 +97,12 @@ private:
     // When empty, viewer is in gallery mode (reads from current gallery)
     // When non-empty, viewer is in album mode (navigates albumNodeKeys_)
     QList<quintptr> albumNodeKeys_;
+    QStringList albumNodePaths_;  // parallel to albumNodeKeys_: node paths for rebind
     int albumCurrentIndex_ = -1;  // index into albumNodeKeys_ (when in album mode)
+    QString albumCurrentPath_;    // path of currently viewing item (for rebind)
+
+    // Helper: re-resolve album after vault tree refresh via ui::album_rebind
+    void rebindAlbumAfterRefresh();
 
     // Dedicated thread pool for full-image loading
     QThreadPool pool_;
