@@ -24,6 +24,7 @@
 #include "help_model.h"
 #include "selection_controller.h"
 #include "session_state.h"
+#include "autolock.h"
 #include "gfx/theme.h"
 
 void initThemeFromEnv()
@@ -60,6 +61,9 @@ AppContext::AppContext()
     galleryModel.setViewerController(&viewerController);
     playbackEngine.setVault(&unlockController.vault());
 
+    // Wire AutoLock
+    autoLock.setUnlockController(&unlockController);
+
     // Wire vault unlock state to settings controller
     QObject::connect(&unlockController, &UnlockController::unlockedChanged,
                      &settingsController, [this]() {
@@ -89,4 +93,5 @@ void AppContext::expose(QQmlApplicationEngine& engine)
     ctx->setContextProperty("helpModel", &helpModel);
     ctx->setContextProperty("selectionController", &selectionController);
     ctx->setContextProperty("sessionState", &sessionState);
+    ctx->setContextProperty("autoLock", &autoLock);
 }

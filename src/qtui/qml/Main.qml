@@ -11,7 +11,7 @@ Window {
     color: themePalette.bg
     title: "osv-qt (experiment)"
 
-    // Global F1/F2 key handlers
+    // Global F1/F2/backtick key handlers
     Keys.onPressed: (event) => {
         if (event.key === Qt.Key_F1) {
             helpPopup.toggle();
@@ -19,11 +19,29 @@ Window {
         } else if (event.key === Qt.Key_F2) {
             settingsOverlay.toggle();
             event.accepted = true;
+        } else if (event.text === "`") {
+            // Backtick opens quick-switch (only if not typing in a text field)
+            quickSwitchPopup.open();
+            event.accepted = true;
         }
     }
 
     RenameDialog {
         id: renameDialog
+    }
+
+    QuickSwitchPopup {
+        id: quickSwitchPopup
+        onSwitchToVault: (vaultPath) => {
+            if (unlockController.openVault(vaultPath)) {
+                stack.replace(unlockScreenComponent);
+            }
+        }
+        onClosed: {
+            if (stack.currentItem) {
+                stack.currentItem.forceActiveFocus();
+            }
+        }
     }
 
     HelpPopup {

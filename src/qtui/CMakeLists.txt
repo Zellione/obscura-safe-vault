@@ -212,6 +212,7 @@ qt_add_executable(osv-qt
     help_model.cpp
     selection_controller.cpp
     session_state.cpp
+    autolock.cpp
 )
 
 # Shaders: compile to .qsb and embed as resources

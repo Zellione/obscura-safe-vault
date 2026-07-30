@@ -64,6 +64,32 @@ void UnlockController::unlock(SecureTextField* field)
     }
 }
 
+void UnlockController::unlockWithKeyfile(SecureTextField* passwordField, SecureTextField* keyfileField)
+{
+    if (passwordField == nullptr || keyfileField == nullptr) return;
+
+    // Get password bytes
+    const auto pw_view = passwordField->model().text_view();
+    const std::span<const uint8_t> pw_span{reinterpret_cast<const uint8_t*>(pw_view.data()), pw_view.size()};
+
+    // Get keyfile bytes (stored in SecureTextField)
+    const auto keyfile_view = keyfileField->model().text_view();
+    const std::span<const uint8_t> keyfile_span{reinterpret_cast<const uint8_t*>(keyfile_view.data()), keyfile_view.size()};
+
+    // Unlock with both password and keyfile
+    const auto r = vault_.unlock(pw_span, keyfile_span);
+    if (r == vault::VaultResult::Ok) {
+        passwordField->clearSecret();
+        keyfileField->clearSecret();
+        setError({});
+        emit unlockedChanged();
+    } else {
+        setError(r == vault::VaultResult::AuthFailed
+                     ? QStringLiteral("Wrong password or keyfile")
+                     : QStringLiteral("Unlock failed"));
+    }
+}
+
 void UnlockController::lock()
 {
     // CRITICAL: Drain viewer, playback, and thumbnail workers before locking vault.

@@ -26,6 +26,7 @@ public:
 
     Q_INVOKABLE bool openVault(const QUrl& fileUrl);
     Q_INVOKABLE void unlock(SecureTextField* field);
+    Q_INVOKABLE void unlockWithKeyfile(SecureTextField* passwordField, SecureTextField* keyfileField);
     Q_INVOKABLE void lock();
 
     // Create a new vault at the given path with the given password and optional keyfile.

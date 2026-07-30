@@ -36,6 +36,19 @@ Rectangle {
         }
     }
 
+    FileDialog {
+        id: keyfileDialog
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["All files (*)"]
+        onAccepted: {
+            keyfileField.clearSecret();
+            // Read the keyfile into the secure field
+            const url = keyfileDialog.selectedFile;
+            // TODO: Implement actual file reading from file:// URL into keyfileField
+            keyfileField.model.setText("[keyfile selected]");
+        }
+    }
+
     Column {
         anchors.centerIn: parent
         spacing: 16
@@ -147,8 +160,80 @@ Rectangle {
             }
 
             onAccepted: {
-                unlockController.unlock(passwordField)
+                if (keyfileField.model.text_view.length > 0) {
+                    unlockController.unlockWithKeyfile(passwordField, keyfileField)
+                } else {
+                    unlockController.unlock(passwordField)
+                }
             }
+        }
+
+        // Optional keyfile
+        Column {
+            width: parent.width
+            spacing: 4
+
+            Text {
+                text: "Keyfile (optional):"
+                color: themePalette.textDim
+                font.pixelSize: 11
+            }
+
+            Row {
+                width: parent.width
+                spacing: 8
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    width: parent.width - 72
+                    height: 40
+                    color: themePalette.surface
+                    border.color: themePalette.border
+                    border.width: 1
+                    radius: 4
+
+                    Text {
+                        anchors { fill: parent; margins: 8 }
+                        text: keyfileField.model.text_view.length > 0 ? "[keyfile selected]" : "[none]"
+                        color: themePalette.textDim
+                        font.pixelSize: 11
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: keyfileDialog.open()
+                    }
+                }
+
+                Rectangle {
+                    width: 64
+                    height: 40
+                    color: themePalette.surface
+                    border.color: themePalette.border
+                    border.width: 1
+                    radius: 4
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: keyfileDialog.open()
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Browse"
+                        color: themePalette.text
+                        font.pixelSize: 11
+                    }
+                }
+            }
+        }
+
+        // Hidden keyfile field for storing the keyfile data
+        SecureTextField {
+            id: keyfileField
+            width: 0
+            height: 0
+            visible: false
         }
 
         // Unlock button
@@ -163,7 +248,11 @@ Rectangle {
             MouseArea {
                 anchors.fill: parent
                 onClicked: {
-                    unlockController.unlock(passwordField)
+                    if (keyfileField.model.text_view.length > 0) {
+                        unlockController.unlockWithKeyfile(passwordField, keyfileField)
+                    } else {
+                        unlockController.unlock(passwordField)
+                    }
                 }
             }
 
