@@ -32,6 +32,7 @@ signals:
 
 protected:
     void keyPressEvent(QKeyEvent* e) override;
+    void mousePressEvent(QMouseEvent* e) override;
     void inputMethodEvent(QInputMethodEvent* e) override;
     [[nodiscard]] QVariant inputMethodQuery(Qt::InputMethodQuery q) const override;
 

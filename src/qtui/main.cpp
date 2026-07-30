@@ -17,6 +17,7 @@
 #include "video_frame_item.h"
 #include "playback_engine.h"
 #include "unlock_controller.h"
+#include "vault_list_model.h"
 #include "gallery_model.h"
 #include "thumb_cache.h"
 #include "viewer_controller.h"
@@ -173,6 +174,7 @@ struct AppContext {
     ViewerController viewerController;
     ThemePalette themePalette;
     PlaybackEngine playbackEngine;
+    VaultListModel vaultListModel;
 
     AppContext()
         : galleryModel(&unlockController.vault()),
@@ -193,6 +195,7 @@ struct AppContext {
         ctx->setContextProperty("viewerController", &viewerController);
         ctx->setContextProperty("themePalette", &themePalette);
         ctx->setContextProperty("playbackEngine", &playbackEngine);
+        ctx->setContextProperty("vaultListModel", &vaultListModel);
     }
 };
 

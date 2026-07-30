@@ -63,6 +63,15 @@ void SecureTextField::keyPressEvent(QKeyEvent* e)
     update();
 }
 
+void SecureTextField::mousePressEvent(QMouseEvent* e)
+{
+    // Click-to-focus. Without this the field is only reachable via tab focus:
+    // QQuickPaintedItem does not take active focus on click by itself, and
+    // QML `focus: true` grants scope focus, not active focus, inside StackView.
+    forceActiveFocus(Qt::MouseFocusReason);
+    e->accept();
+}
+
 void SecureTextField::inputMethodEvent(QInputMethodEvent* e)
 {
     // Commit string only; the preedit is never stored or painted.

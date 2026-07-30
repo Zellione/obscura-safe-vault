@@ -32,6 +32,7 @@ add_library(osv_qt_core STATIC
     # deps vault.cpp pulls in
     ${REPO_ROOT}/src/platform/error_log.cpp
     ${REPO_ROOT}/src/platform/paths.cpp
+    ${REPO_ROOT}/src/platform/vault_registry.cpp
     # media: video decode + demux (Task 9 adds video playback)
     ${OSV_MEDIA_SRC}
     ${REPO_ROOT}/src/ui/advanced_search_model.cpp
@@ -130,6 +131,7 @@ qt_add_executable(osv-qt
     video_frame_item.cpp
     rhi_quad_renderer.cpp
     unlock_controller.cpp
+    vault_list_model.cpp
     gallery_model.cpp
     thumb_cache.cpp
     viewer_controller.cpp
