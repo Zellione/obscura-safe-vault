@@ -4,8 +4,15 @@
 #include <QString>
 #include <QList>
 
-// Transfer controller: handles move/copy/delete/combine/compact operations
-// Guarded by exclusive-op rule: all blocked while imports active (ImportController::queueCount > 0)
+namespace vault { class Vault; }
+
+// Transfer controller: wraps ui::transfer_*, vault::combine_galleries, and vault::compact
+// All vault-mutating operations run on a background thread via FileOpController.
+//
+// Threading contract:
+// - Delete, transfer, combine, compact all use FileOpController worker threads
+// - Finished signal (queued) indicates completion; caller must NOT touch vault until then
+// - Exclusive-op guard: operations fail if ImportController::queueCount > 0
 class TransferController : public QObject {
     Q_OBJECT
 
@@ -13,24 +20,29 @@ public:
     explicit TransferController(QObject* parent = nullptr);
     ~TransferController();
 
-    // Delete selected items with confirm dialog
-    // nodeIds: selected node IDs to delete
+    // Set the vault for operations (required before calling any operation)
+    void setVault(vault::Vault* vault) { vault_ = vault; }
+
+    // Delete one or more items (images, videos, or galleries and their subtrees)
+    // nodeIds are pointers to IndexNode objects
     Q_INVOKABLE void deleteItems(const QList<quintptr>& nodeIds);
 
-    // Move/copy selected items
+    // Transfer (move/copy) items between galleries (same or different vaults)
+    // copy=true: copy mode; copy=false: move mode
     Q_INVOKABLE void transferItems(const QList<quintptr>& nodeIds, bool copy,
                                    const QString& destVaultPath, const QString& destGalleryPath);
 
-    // Combine source gallery into destination
+    // Combine source gallery into destination gallery (recursive merge)
+    // sourceGalleryId, destGalleryId: pointers to IndexNode objects
     Q_INVOKABLE void combineGalleries(quintptr sourceGalleryId, quintptr destGalleryId);
 
-    // Compact vault (reclaim dead space after deletes)
+    // Compact the vault in-place (reclaim dead space from deletes)
     Q_INVOKABLE void compact();
 
 signals:
-    // Emitted when operation completes
+    // Emitted when operation completes (ok=true for success, ok=false on error)
     void finished(bool ok, QString error);
 
 private:
-    // FileOpController is delegated to for actual work
+    vault::Vault* vault_ = nullptr;  // not owned, set by caller
 };
