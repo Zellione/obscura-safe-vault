@@ -175,6 +175,115 @@ private slots:
         QVERIFY(!finishedSpy.isEmpty());
     }
 
+    void testTransferMediaFilesMove()
+    {
+        // Item 1: Media-file transfer — move 2 of 3 images between vaults
+        QGuiApplication::processEvents();
+
+        QTemporaryDir temp_dir;
+        QVERIFY(temp_dir.isValid());
+
+        // Source vault: 3 images
+        std::string src_path = (temp_dir.path() + "/src_media.osv").toStdString();
+        auto src_vault = osvqt_test::createTestVault(src_path);
+        osvqt_test::addTinyImages(src_vault, "img", 3);
+
+        auto src_nodes = src_vault.list("");
+        QCOMPARE((int)src_nodes.size(), 3);
+
+        // Destination vault: empty
+        std::string dst_path = (temp_dir.path() + "/dst_media.osv").toStdString();
+        auto dst_vault = osvqt_test::createTestVault(dst_path);
+
+        // Move first 2 images
+        QList<quintptr> to_move{
+            reinterpret_cast<quintptr>(src_nodes[0]),
+            reinterpret_cast<quintptr>(src_nodes[1])
+        };
+
+        FileOpController file_op;
+        TransferController controller;
+        QSignalSpy finishedSpy(&controller, &TransferController::finished);
+
+        controller.setVault(&src_vault);
+        controller.setFileOpController(&file_op);
+        controller.setQueueCountProvider([]() { return 0; });
+
+        controller.transferItems(to_move, false, QString::fromStdString(dst_path), "");
+
+        // Wait for completion
+        for (int i = 0; i < 100 && finishedSpy.count() == 0; ++i) {
+            QGuiApplication::processEvents();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        QVERIFY(!finishedSpy.isEmpty());
+        auto args = finishedSpy.takeFirst();
+        bool ok = args.at(0).toBool();
+        QVERIFY(ok);
+
+        // Verify source: 1 image remains (moved removed 2)
+        auto src_remaining = src_vault.list("");
+        QCOMPARE((int)src_remaining.size(), 1);
+
+        // Verify destination: 2 images added
+        auto dst_items = dst_vault.list("");
+        QCOMPARE((int)dst_items.size(), 2);
+    }
+
+    void testTransferMediaFilesCopy()
+    {
+        // Item 1: Media-file transfer — copy leaves source intact
+        QGuiApplication::processEvents();
+
+        QTemporaryDir temp_dir;
+        QVERIFY(temp_dir.isValid());
+
+        // Source vault: 2 images
+        std::string src_path = (temp_dir.path() + "/src_copy.osv").toStdString();
+        auto src_vault = osvqt_test::createTestVault(src_path);
+        osvqt_test::addTinyImages(src_vault, "img", 2);
+
+        auto src_nodes = src_vault.list("");
+        QCOMPARE((int)src_nodes.size(), 2);
+
+        // Destination vault: empty
+        std::string dst_path = (temp_dir.path() + "/dst_copy.osv").toStdString();
+        auto dst_vault = osvqt_test::createTestVault(dst_path);
+
+        // Copy first image
+        QList<quintptr> to_copy{reinterpret_cast<quintptr>(src_nodes[0])};
+
+        FileOpController file_op;
+        TransferController controller;
+        QSignalSpy finishedSpy(&controller, &TransferController::finished);
+
+        controller.setVault(&src_vault);
+        controller.setFileOpController(&file_op);
+        controller.setQueueCountProvider([]() { return 0; });
+
+        controller.transferItems(to_copy, true, QString::fromStdString(dst_path), "");
+
+        // Wait for completion
+        for (int i = 0; i < 100 && finishedSpy.count() == 0; ++i) {
+            QGuiApplication::processEvents();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        QVERIFY(!finishedSpy.isEmpty());
+        auto args = finishedSpy.takeFirst();
+        bool ok = args.at(0).toBool();
+        QVERIFY(ok);
+
+        // Verify source: still has 2 images (copy leaves intact)
+        auto src_after = src_vault.list("");
+        QCOMPARE((int)src_after.size(), 2);
+
+        // Verify destination: 1 image added
+        auto dst_items = dst_vault.list("");
+        QCOMPARE((int)dst_items.size(), 1);
+    }
+
     void testCompactSignalsCompletion()
     {
         QGuiApplication::processEvents();

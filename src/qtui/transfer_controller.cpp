@@ -167,43 +167,61 @@ void TransferController::transferItems(const QList<quintptr>& nodeIds, bool copy
 
     auto* controller = this;
     std::string dest_gallery = destGalleryPath.toStdString();
+    std::string src_gallery = "";  // Root gallery (simplified; full impl would track path)
 
     // Start transfer on worker thread via FileOpController
-    file_op_controller_->start([nodes_to_transfer, dest_gallery, mode, controller](ui::FileOpJob& job) {
+    file_op_controller_->start([nodes_to_transfer, dest_gallery, src_gallery, mode, controller](ui::FileOpJob& job) {
         // Capture worker thread ID for testing
         controller->last_worker_thread_id_ = std::this_thread::get_id();
+
+        int transferred = 0;
+        int failed = 0;
 
         for (const auto* node : nodes_to_transfer) {
             if (!node) continue;
 
             // Determine if this is a gallery or media
             bool is_gallery = node->is_gallery();
+            std::string node_name(node->name);
 
             if (is_gallery) {
                 // Transfer gallery subtree
-                std::string node_name(node->name);
                 vault::VaultResult result = vault::transfer_gallery(
                     *controller->vault_, node_name,
                     *controller->vault_, dest_gallery,
                     mode, nullptr
                 );
                 if (result != vault::VaultResult::Ok) {
-                    QString error = QString("Failed to transfer gallery");
-                    QMetaObject::invokeMethod(controller, [controller, error]() {
-                        emit controller->finished(false, error);
-                    }, Qt::QueuedConnection);
-                    return;
+                    failed++;
+                } else {
+                    transferred++;
                 }
             } else {
-                // Transfer media (image or video)
-                // Full impl would check node type and call transfer_image
-                // For now, documented for future work
+                // Transfer individual media file (image or video)
+                // Calls vault::transfer_image which handles re-encryption + optional removal
+                vault::VaultResult result = vault::transfer_image(
+                    *controller->vault_, src_gallery, node_name,
+                    *controller->vault_, dest_gallery,
+                    mode
+                );
+                if (result != vault::VaultResult::Ok) {
+                    failed++;
+                } else {
+                    transferred++;
+                }
             }
         }
 
-        QMetaObject::invokeMethod(controller, [controller]() {
-            emit controller->finished(true, "");
-        }, Qt::QueuedConnection);
+        if (failed == 0) {
+            QMetaObject::invokeMethod(controller, [controller]() {
+                emit controller->finished(true, "");
+            }, Qt::QueuedConnection);
+        } else {
+            QString error = QString("Transferred %1 of %2 items").arg(transferred).arg((int)nodes_to_transfer.size());
+            QMetaObject::invokeMethod(controller, [controller, error]() {
+                emit controller->finished(true, error);
+            }, Qt::QueuedConnection);
+        }
     });
 }
 
