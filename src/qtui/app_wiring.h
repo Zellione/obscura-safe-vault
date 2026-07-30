@@ -3,6 +3,7 @@
 
 #include "unlock_controller.h"
 #include "vault_list_model.h"
+#include "vault_manager_controller.h"
 #include "gallery_model.h"
 #include "thumb_cache.h"
 #include "viewer_controller.h"
@@ -14,6 +15,7 @@
 #include "help_model.h"
 #include "selection_controller.h"
 #include "session_state.h"
+#include "autolock.h"
 
 class QQmlApplicationEngine;
 
@@ -27,6 +29,7 @@ void registerOsvQmlTypes();
 // by the normal run path and the selftest harness.
 struct AppContext {
     UnlockController unlockController;
+    VaultManagerController vaultManagerController;
     ThumbCache thumbCache;
     GalleryModel galleryModel;
     ViewerController viewerController;
@@ -39,6 +42,7 @@ struct AppContext {
     HelpModel helpModel;
     SelectionController selectionController;
     SessionState sessionState;
+    AutoLock autoLock;
 
     AppContext();
 

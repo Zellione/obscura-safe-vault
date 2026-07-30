@@ -28,9 +28,8 @@ Rectangle {
     function rowCountForSection(section) {
         if (section === 0) return 1;  // Appearance: theme
         if (section === 1) {
-            // Browsing: 2 rows if unlocked (sort order, show tags), 0 if locked
-            // Auto-lock + keep-unlocked rows arrive with the WS1 autolock controller (session-scoped state, not settings_model)
-            return settingsController && settingsController.vaultUnlocked ? 2 : 0;
+            // Browsing: base 2 rows (sort order, show tags) + 2 WS1 autolock rows if unlocked
+            return settingsController && settingsController.vaultUnlocked ? 4 : 0;
         }
         if (section === 2) {
             // TagColours: category count if unlocked, 0 if locked
@@ -99,6 +98,14 @@ Rectangle {
             } else if (currentRow === 1) {
                 // Toggle tiles show tags
                 settingsController.setTilesShowTags(!settingsController.tilesShowTags);
+            } else if (currentRow === 2 && autoLock) {
+                // Change auto-lock idle seconds (delta of ±60 seconds, clamped to 30-3600)
+                let newVal = autoLock.idleSeconds + (delta * 60);
+                newVal = Math.max(30, Math.min(newVal, 3600));
+                autoLock.setIdleSeconds(newVal);
+            } else if (currentRow === 3 && autoLock) {
+                // Toggle keep unlocked
+                autoLock.setKeepUnlocked(!autoLock.keepUnlocked);
             }
         }
         // TagColours section: only if unlocked
@@ -407,8 +414,73 @@ Rectangle {
                             }
                         }
 
+                        // Row 2: Auto-lock idle seconds (WS1 autolock controller, session-scoped)
+                        Rectangle {
+                            width: parent.width - 16
+                            height: 40
+                            color: (settingsOverlay.inPane && settingsOverlay.currentRow === 2)
+                                   ? Qt.rgba(themePalette.accent.r, themePalette.accent.g, themePalette.accent.b, 0.2)
+                                   : "transparent"
+                            border.color: (settingsOverlay.inPane && settingsOverlay.currentRow === 2)
+                                         ? themePalette.accent : "transparent"
+                            border.width: 2
+                            radius: 4
+
+                            Row {
+                                anchors { fill: parent; margins: 8 }
+                                spacing: 12
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "Auto-lock (seconds):"
+                                    color: themePalette.text
+                                    font.pixelSize: 11
+                                    width: 140
+                                }
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: autoLock ? autoLock.idleSeconds.toString() : "300"
+                                    color: themePalette.textDim
+                                    font.pixelSize: 11
+                                }
+                            }
+                        }
+
+                        // Row 3: Keep unlocked toggle (WS1 autolock controller, session-scoped)
+                        Rectangle {
+                            width: parent.width - 16
+                            height: 40
+                            color: (settingsOverlay.inPane && settingsOverlay.currentRow === 3)
+                                   ? Qt.rgba(themePalette.accent.r, themePalette.accent.g, themePalette.accent.b, 0.2)
+                                   : "transparent"
+                            border.color: (settingsOverlay.inPane && settingsOverlay.currentRow === 3)
+                                         ? themePalette.accent : "transparent"
+                            border.width: 2
+                            radius: 4
+
+                            Row {
+                                anchors { fill: parent; margins: 8 }
+                                spacing: 12
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "Keep unlocked:"
+                                    color: themePalette.text
+                                    font.pixelSize: 11
+                                    width: 140
+                                }
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: autoLock && autoLock.keepUnlocked ? "Yes" : "No"
+                                    color: themePalette.textDim
+                                    font.pixelSize: 11
+                                }
+                            }
+                        }
+
                     }
-                    // Auto-lock + keep-unlocked rows arrive with the WS1 autolock controller (session-scoped state, not settings_model)
                 }
 
                 // Tag Colours section
