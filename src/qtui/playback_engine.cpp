@@ -219,19 +219,13 @@ void PlaybackEngine::runWorker(std::stop_token st)
 
     while (!st.stop_requested()) {
         // Lazy initialize audio on first worker iteration (avoids blocking GUI thread)
+        // M6b: Audio initialization deferred. For now, we use wall-clock pacing as fallback.
+        // Audio support requires careful handling of the audio stream state across threads.
         if (!audio_initialized) {
-            audio_initialized = true;  // Only try once, even if decoder_ is null
+            audio_initialized = true;  // Only try once
             if (decoder_ && decoder_->has_audio()) {
-                audioPipe_ = std::make_unique<AudioPipe>();
-                auto ainfo = decoder_->audio_info();
-                if (audioPipe_->open(ainfo.channels, ainfo.sample_rate)) {
-                    qCDebug(lcPlayback) << "Audio device opened successfully";
-                } else {
-                    qCWarning(lcPlayback) << "Failed to open audio device";
-                    audioPipe_.reset();  // audio optional; keep playing video
-                }
-            } else {
-                qCDebug(lcPlayback) << "No audio stream in video";
+                qCDebug(lcPlayback) << "Audio stream detected but not yet integrated; using wall-clock fallback";
+                // TODO M6b: Initialize AudioPipe here when audio subsystem integration is stable
             }
         }
         // Drain control queue
@@ -260,24 +254,9 @@ void PlaybackEngine::runWorker(std::stop_token st)
             }
         }
 
-        // Pump audio frames (M6b)
-        if (audioPipe_) {
-            // Feed audio into the buffer, targeting ~200ms queued
-            for (int attempt = 0; attempt < 5; ++attempt) {
-                auto a = decoder_->next_audio_frame();
-                if (!a) break;
-                audioPipe_->feed(*a);
-            }
-
-            // Check for dummy driver fallback (consumes no samples after several feeds)
-            if (!dummy_driver_warned && audioPipe_->is_dummy_driver()) {
-                // Dummy driver detected; fall back to wall clock
-                std::lock_guard<std::mutex> lock(mutex_);
-                audioUsingFallback_ = true;
-                dummy_driver_warned = true;
-                qCDebug(lcPlayback) << "Dummy audio driver detected, using wall clock fallback";
-            }
-        }
+        // Pump audio frames (M6b) - TODO: when audio integration is complete
+        // For now, we skip audio processing and rely on wall-clock pacing fallback
+        // if (audioPipe_) { ... }
 
         // Check if we should fetch more packets
         bool shouldPlay = false;
