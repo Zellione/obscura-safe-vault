@@ -47,6 +47,9 @@ add_library(osv_qt_core STATIC
     ${REPO_ROOT}/src/ui/tag_inherit.cpp
     ${REPO_ROOT}/src/ui/tag_suggest.cpp
     ${REPO_ROOT}/src/ui/tag_category.cpp
+    ${REPO_ROOT}/src/ui/tag_overview_model.cpp
+    ${REPO_ROOT}/src/ui/tag_json_parse.cpp
+    ${REPO_ROOT}/src/ui/tag_dict_import.cpp
     # text input models (Task 3 uses SecureTextInput)
     ${REPO_ROOT}/src/ui/text_input_model.cpp
     ${REPO_ROOT}/src/ui/secure_text_input.cpp
@@ -70,6 +73,7 @@ target_include_directories(osv_qt_core PUBLIC
     ${REPO_ROOT}/vendor/miniz-shim
     ${REPO_ROOT}/vendor/stb
     ${REPO_ROOT}/vendor/SDL3/include
+    ${REPO_ROOT}/vendor/json/single_include
     ${CODEC_PREFIX}/include
 )
 target_compile_definitions(osv_qt_core PUBLIC
@@ -161,6 +165,10 @@ add_executable(osv_qt_favorites_controller_test tests/favorites_controller_test.
 target_link_libraries(osv_qt_favorites_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
 target_include_directories(osv_qt_favorites_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(osv_qt_tag_overview_controller_test tests/tag_overview_controller_test.cpp tag_overview_controller.cpp)
+target_link_libraries(osv_qt_tag_overview_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
+target_include_directories(osv_qt_tag_overview_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 add_executable(osv_qt_search_model_adapter_test tests/search_model_adapter_test.cpp search_model_adapter.cpp)
 target_link_libraries(osv_qt_search_model_adapter_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
 target_include_directories(osv_qt_search_model_adapter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -249,6 +257,7 @@ qt_add_executable(osv-qt
     session_state.cpp
     tag_controller.cpp
     favorites_controller.cpp
+    tag_overview_controller.cpp
     search_model_adapter.cpp
 )
 

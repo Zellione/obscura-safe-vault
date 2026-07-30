@@ -25,6 +25,7 @@
 #include "session_state.h"
 #include "tag_controller.h"
 #include "favorites_controller.h"
+#include "tag_overview_controller.h"
 #include "search_model_adapter.h"
 #include "gfx/theme.h"
 
@@ -53,6 +54,7 @@ void registerOsvQmlTypes()
     qmlRegisterType<FileOpController>("Osv", 1, 0, "FileOpController");
     qmlRegisterType<TagController>("Osv", 1, 0, "TagController");
     qmlRegisterType<FavoritesController>("Osv", 1, 0, "FavoritesController");
+    qmlRegisterType<TagOverviewController>("Osv", 1, 0, "TagOverviewController");
     qmlRegisterType<SearchModelAdapter>("Osv", 1, 0, "SearchModelAdapter");
 }
 
@@ -66,6 +68,7 @@ AppContext::AppContext()
     playbackEngine.setVault(&unlockController.vault());
     tagController.setVault(&unlockController.vault());
     favoritesController.setVault(&unlockController.vault());
+    tagOverviewController.setVault(&unlockController.vault());
     searchModelAdapter.setVault(&unlockController.vault());
 
     // Wire vault unlock state to settings controller
@@ -98,5 +101,6 @@ void AppContext::expose(QQmlApplicationEngine& engine)
     ctx->setContextProperty("sessionState", &sessionState);
     ctx->setContextProperty("tagController", &tagController);
     ctx->setContextProperty("favoritesController", &favoritesController);
+    ctx->setContextProperty("tagOverviewController", &tagOverviewController);
     ctx->setContextProperty("searchModelAdapter", &searchModelAdapter);
 }
