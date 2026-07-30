@@ -88,11 +88,14 @@ target_include_directories(osv_qt_core PUBLIC
     ${REPO_ROOT}/vendor/miniz
     ${REPO_ROOT}/vendor/miniz-shim
     ${REPO_ROOT}/vendor/stb
+    ${REPO_ROOT}/vendor/json/include
     ${REPO_ROOT}/vendor/SDL3/include
     ${CODEC_PREFIX}/include
 )
 target_compile_definitions(osv_qt_core PUBLIC
     OSV_VENDORED_AV
+    OSV_VENDORED_ARCHIVE
+    LIBARCHIVE_STATIC
 )
 target_compile_definitions(osv_qt_core PRIVATE
     MINIZ_NO_ZLIB_COMPATIBLE_NAMES
@@ -123,9 +126,11 @@ if(EXISTS "${CODEC_PREFIX}/lib/libavcodec.a")
     )
 endif()
 
-# Same single-pass archive order premake uses: heif → de265 → aom → webpdemux → webp → sharpyuv
+# Same single-pass archive order premake uses: libarchive (depends on liblzma + system zlib) → heif → de265 → aom → webpdemux → webp → sharpyuv
 target_link_libraries(osv_qt_core PUBLIC
     ${REPO_ROOT}/vendor/SDL3/build/libSDL3.a
+    ${CODEC_PREFIX}/lib/libarchive.a
+    ${CODEC_PREFIX}/lib/liblzma.a
     ${CODEC_PREFIX}/lib/libheif.a
     ${CODEC_PREFIX}/lib/libde265.a
     ${CODEC_PREFIX}/lib/libaom.a
@@ -135,6 +140,7 @@ target_link_libraries(osv_qt_core PUBLIC
     pthread
     dl
     m
+    z
 )
 
 add_executable(osv_qt_core_smoke tests/core_smoke.cpp)
