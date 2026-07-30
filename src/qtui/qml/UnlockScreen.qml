@@ -9,6 +9,7 @@ Rectangle {
 
     // Row of the known-vault list currently opened (-1: none / file dialog)
     property int selectedVaultRow: -1
+    property url selectedKeyfileUrl: ""
 
     // Help groups for F1 help popup
     property var helpGroups: [
@@ -25,27 +26,24 @@ Rectangle {
     Component.onCompleted: vaultListModel.refresh()
 
     FileDialog {
-        id: fileDialog
+        id: vaultFileDialog
         fileMode: FileDialog.OpenFile
         nameFilters: ["Vault files (*.osv)", "All files (*)"]
         onAccepted: {
-            if (unlockController.openVault(fileDialog.selectedFile)) {
+            if (unlockController.openVault(vaultFileDialog.selectedFile)) {
                 unlockRoot.selectedVaultRow = -1
+                selectedKeyfileUrl = "";
             }
             passwordField.forceActiveFocus()
         }
     }
 
     FileDialog {
-        id: keyfileDialog
+        id: keyfilePickerDialog
         fileMode: FileDialog.OpenFile
         nameFilters: ["All files (*)"]
         onAccepted: {
-            keyfileField.clearSecret();
-            // Read the keyfile into the secure field
-            const url = keyfileDialog.selectedFile;
-            // TODO: Implement actual file reading from file:// URL into keyfileField
-            keyfileField.model.setText("[keyfile selected]");
+            selectedKeyfileUrl = keyfilePickerDialog.selectedFile;
         }
     }
 
@@ -132,7 +130,7 @@ Rectangle {
 
             MouseArea {
                 anchors.fill: parent
-                onClicked: fileDialog.open()
+                onClicked: vaultFileDialog.open()
             }
 
             Text {
@@ -160,8 +158,8 @@ Rectangle {
             }
 
             onAccepted: {
-                if (keyfileField.model.text_view.length > 0) {
-                    unlockController.unlockWithKeyfile(passwordField, keyfileField)
+                if (unlockRoot.selectedKeyfileUrl.toString().length > 0) {
+                    unlockController.unlockWithKeyfile(passwordField, selectedKeyfileUrl)
                 } else {
                     unlockController.unlock(passwordField)
                 }
@@ -194,14 +192,17 @@ Rectangle {
 
                     Text {
                         anchors { fill: parent; margins: 8 }
-                        text: keyfileField.model.text_view.length > 0 ? "[keyfile selected]" : "[none]"
+                        text: selectedKeyfileUrl.toString().length > 0
+                              ? selectedKeyfileUrl.toString().split('/').pop()
+                              : "[none]"
                         color: themePalette.textDim
                         font.pixelSize: 11
+                        elide: Text.ElideMiddle
                     }
 
                     MouseArea {
                         anchors.fill: parent
-                        onClicked: keyfileDialog.open()
+                        onClicked: keyfilePickerDialog.open()
                     }
                 }
 
@@ -215,7 +216,7 @@ Rectangle {
 
                     MouseArea {
                         anchors.fill: parent
-                        onClicked: keyfileDialog.open()
+                        onClicked: keyfilePickerDialog.open()
                     }
 
                     Text {
@@ -226,14 +227,6 @@ Rectangle {
                     }
                 }
             }
-        }
-
-        // Hidden keyfile field for storing the keyfile data
-        SecureTextField {
-            id: keyfileField
-            width: 0
-            height: 0
-            visible: false
         }
 
         // Unlock button
@@ -248,8 +241,8 @@ Rectangle {
             MouseArea {
                 anchors.fill: parent
                 onClicked: {
-                    if (keyfileField.model.text_view.length > 0) {
-                        unlockController.unlockWithKeyfile(passwordField, keyfileField)
+                    if (unlockRoot.selectedKeyfileUrl.toString().length > 0) {
+                        unlockController.unlockWithKeyfile(passwordField, selectedKeyfileUrl)
                     } else {
                         unlockController.unlock(passwordField)
                     }

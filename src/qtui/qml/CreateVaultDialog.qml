@@ -33,13 +33,13 @@ Rectangle {
         fileMode: FileDialog.OpenFile
         nameFilters: ["All files (*)"]
         onAccepted: {
-            keyfileField.clearSecret();
-            // For now, store the path as text; Task 1.3 will handle binary keyfiles
-            keyfileField.model.setText(keyfileDialog.selectedFile.toString());
+            keyfilePath = keyfileDialog.selectedFile;
             createRoot.currentFocus = 4;
             createButton.forceActiveFocus();
         }
     }
+
+    property url keyfilePath: ""
 
     Keys.onEscapePressed: {
         passwordField.clearSecret();

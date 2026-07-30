@@ -1,6 +1,7 @@
 #include "unlock_controller.h"
 
 #include <QUrl>
+#include <vector>
 
 #include "crypto/secure_mem.h"
 #include "crypto/kdf.h"
@@ -64,23 +65,50 @@ void UnlockController::unlock(SecureTextField* field)
     }
 }
 
-void UnlockController::unlockWithKeyfile(SecureTextField* passwordField, SecureTextField* keyfileField)
+void UnlockController::unlockWithKeyfile(SecureTextField* passwordField, const QUrl& keyfileUrl)
 {
-    if (passwordField == nullptr || keyfileField == nullptr) return;
+    if (passwordField == nullptr) return;
 
     // Get password bytes
     const auto pw_view = passwordField->model().text_view();
     const std::span<const uint8_t> pw_span{reinterpret_cast<const uint8_t*>(pw_view.data()), pw_view.size()};
 
-    // Get keyfile bytes (stored in SecureTextField)
-    const auto keyfile_view = keyfileField->model().text_view();
-    const std::span<const uint8_t> keyfile_span{reinterpret_cast<const uint8_t*>(keyfile_view.data()), keyfile_view.size()};
+    // Read keyfile bytes from disk
+    const auto keyfilePath = keyfileUrl.toLocalFile().toStdString();
+    const auto keyfilePathOpt = platform::normalize_user_path(keyfilePath);
+    if (!keyfilePathOpt.has_value()) {
+        setError(QStringLiteral("Invalid keyfile path"));
+        passwordField->clearSecret();
+        return;
+    }
+
+    // Open and read keyfile (matching SDL app pattern via platform::read_file)
+    std::FILE* kf = std::fopen(keyfilePathOpt.value().c_str(), "rb");
+    if (!kf) {
+        setError(QStringLiteral("Cannot read keyfile"));
+        passwordField->clearSecret();
+        return;
+    }
+
+    std::vector<uint8_t> keyfile_bytes;
+    uint8_t buf[4096];
+    size_t nread;
+    while ((nread = std::fread(buf, 1, sizeof(buf), kf)) > 0) {
+        keyfile_bytes.insert(keyfile_bytes.end(), buf, buf + nread);
+    }
+    std::fclose(kf);
 
     // Unlock with both password and keyfile
+    const std::span<const uint8_t> keyfile_span(keyfile_bytes.data(), keyfile_bytes.size());
     const auto r = vault_.unlock(pw_span, keyfile_span);
+
+    // Wipe keyfile bytes immediately
+    if (!keyfile_bytes.empty()) {
+        crypto_wipe(keyfile_bytes.data(), keyfile_bytes.size());
+    }
+    passwordField->clearSecret();
+
     if (r == vault::VaultResult::Ok) {
-        passwordField->clearSecret();
-        keyfileField->clearSecret();
         setError({});
         emit unlockedChanged();
     } else {
@@ -137,14 +165,14 @@ bool UnlockController::unlockWithPassword(const std::span<const uint8_t>& passwo
 }
 
 bool UnlockController::createVault(const QUrl& fileUrl, SecureTextField* passwordField,
-                                    SecureTextField* confirmField, SecureTextField* keyfileField)
+                                    SecureTextField* confirmField, const QUrl& keyfileUrl)
 {
     if (passwordField == nullptr || confirmField == nullptr) {
         setError(QStringLiteral("Invalid arguments"));
         return false;
     }
 
-    // Validate the path
+    // Validate the vault path
     const auto pathOpt = platform::normalize_user_path(fileUrl.toLocalFile().toStdString());
     if (!pathOpt.has_value()) {
         setError(QStringLiteral("Invalid path"));
@@ -166,14 +194,33 @@ bool UnlockController::createVault(const QUrl& fileUrl, SecureTextField* passwor
         return false;
     }
 
-    // Get optional keyfile bytes
-    std::vector<uint8_t> keyfile_data;
-    if (keyfileField != nullptr) {
-        const auto keyfile_view = keyfileField->model().text_view();
-        // For now, keyfile is treated as text (binary files come in Task 1.3)
-        keyfile_data.assign(
-            reinterpret_cast<const uint8_t*>(keyfile_view.data()),
-            reinterpret_cast<const uint8_t*>(keyfile_view.data()) + keyfile_view.size());
+    // Read optional keyfile bytes from disk (empty if no keyfile provided)
+    std::vector<uint8_t> keyfile_bytes;
+    if (!keyfileUrl.isEmpty()) {
+        const auto keyfilePath = keyfileUrl.toLocalFile().toStdString();
+        const auto keyfilePathOpt = platform::normalize_user_path(keyfilePath);
+        if (!keyfilePathOpt.has_value()) {
+            setError(QStringLiteral("Invalid keyfile path"));
+            passwordField->clearSecret();
+            confirmField->clearSecret();
+            return false;
+        }
+
+        // Open and read keyfile
+        std::FILE* kf = std::fopen(keyfilePathOpt.value().c_str(), "rb");
+        if (!kf) {
+            setError(QStringLiteral("Cannot read keyfile"));
+            passwordField->clearSecret();
+            confirmField->clearSecret();
+            return false;
+        }
+
+        uint8_t buf[4096];
+        size_t nread;
+        while ((nread = std::fread(buf, 1, sizeof(buf), kf)) > 0) {
+            keyfile_bytes.insert(keyfile_bytes.end(), buf, buf + nread);
+        }
+        std::fclose(kf);
     }
 
     // Create the vault with default KDF params
@@ -181,15 +228,15 @@ bool UnlockController::createVault(const QUrl& fileUrl, SecureTextField* passwor
     const auto result = vault::Vault::create(
         pathOpt.value().string(),
         pw_span,
-        std::span<const uint8_t>(keyfile_data.data(), keyfile_data.size()),
+        std::span<const uint8_t>(keyfile_bytes.data(), keyfile_bytes.size()),
         crypto::DEFAULT_KDF_PARAMS,
         newVault);
 
-    // Wipe password fields immediately
+    // Wipe password fields and keyfile immediately
     passwordField->clearSecret();
     confirmField->clearSecret();
-    if (keyfileField) {
-        keyfileField->clearSecret();
+    if (!keyfile_bytes.empty()) {
+        crypto_wipe(keyfile_bytes.data(), keyfile_bytes.size());
     }
 
     if (result != vault::VaultResult::Ok) {

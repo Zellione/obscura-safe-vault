@@ -26,13 +26,12 @@ public:
 
     Q_INVOKABLE bool openVault(const QUrl& fileUrl);
     Q_INVOKABLE void unlock(SecureTextField* field);
-    Q_INVOKABLE void unlockWithKeyfile(SecureTextField* passwordField, SecureTextField* keyfileField);
+    Q_INVOKABLE void unlockWithKeyfile(SecureTextField* passwordField, const QUrl& keyfileUrl);
     Q_INVOKABLE void lock();
 
     // Create a new vault at the given path with the given password and optional keyfile.
-    // The vault is created and immediately unlocked on success.
-    // Returns true on success, false on error (errorText contains the reason).
-    Q_INVOKABLE bool createVault(const QUrl& fileUrl, SecureTextField* passwordField, SecureTextField* confirmField, SecureTextField* keyfileField);
+    // keyfileUrl is empty if no keyfile is used. Returns true on success.
+    Q_INVOKABLE bool createVault(const QUrl& fileUrl, SecureTextField* passwordField, SecureTextField* confirmField, const QUrl& keyfileUrl);
 
     // Test-only helper for selftest (not exposed to QML)
     bool unlockWithPassword(const std::span<const uint8_t>& password);
