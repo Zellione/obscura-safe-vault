@@ -8,7 +8,7 @@ set(CMAKE_AUTOMOC ON)
 # Repo root, for reusing src/ and vendor/ untouched.
 get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 
-find_package(Qt6 6.7 REQUIRED COMPONENTS Core Gui GuiPrivate Qml Quick ShaderTools Test)
+find_package(Qt6 6.7 REQUIRED COMPONENTS Core Gui GuiPrivate Qml Quick ShaderTools Test Widgets)
 qt_standard_project_setup()
 
 set(CODEC_PREFIX "${REPO_ROOT}/vendor/codecs-prefix")
@@ -54,10 +54,34 @@ add_library(osv_qt_core STATIC
     # text input models (Task 3 uses SecureTextInput)
     ${REPO_ROOT}/src/ui/text_input_model.cpp
     ${REPO_ROOT}/src/ui/secure_text_input.cpp
+    ${REPO_ROOT}/src/ui/passphrase.cpp
+    ${REPO_ROOT}/src/ui/unlock_logic.cpp
     # file operations (Task F3: FileOpController)
     ${REPO_ROOT}/src/ui/file_op_job.cpp
     ${REPO_ROOT}/src/ui/export.cpp
     ${REPO_ROOT}/src/ui/meta_format.cpp
+    # import operations (Task WS4: ImportController) — include all UI support modules
+    # to avoid linker errors from cross-dependencies
+    ${REPO_ROOT}/src/ui/import_queue.cpp
+    ${REPO_ROOT}/src/ui/import_model.cpp
+    ${REPO_ROOT}/src/ui/import_common.cpp
+    ${REPO_ROOT}/src/ui/archive_import.cpp
+    ${REPO_ROOT}/src/ui/archive_kind.cpp
+    ${REPO_ROOT}/src/ui/archive_reader.cpp
+    ${REPO_ROOT}/src/ui/zip_import.cpp
+    ${REPO_ROOT}/src/ui/zip_plan.cpp
+    ${REPO_ROOT}/src/ui/zip_encoding.cpp
+    ${REPO_ROOT}/src/ui/spanned_zip.cpp
+    ${REPO_ROOT}/src/ui/recursive_import.cpp
+    ${REPO_ROOT}/src/ui/recursive_exec.cpp
+    ${REPO_ROOT}/src/ui/recursive_hooks.cpp
+    ${REPO_ROOT}/src/ui/volume_import.cpp
+    ${REPO_ROOT}/src/ui/volume_set.cpp
+    ${REPO_ROOT}/src/ui/tag_dict_import.cpp
+    ${REPO_ROOT}/src/ui/meta_json.cpp
+    ${REPO_ROOT}/src/ui/import_status_row.cpp
+    ${REPO_ROOT}/src/ui/import_status_screen.cpp
+    ${REPO_ROOT}/src/ui/folder_scan.cpp
     # theme system (Task 8)
     ${REPO_ROOT}/src/gfx/theme.cpp
     ${REPO_ROOT}/vendor/monocypher/src/monocypher.c
@@ -73,11 +97,14 @@ target_include_directories(osv_qt_core PUBLIC
     ${REPO_ROOT}/vendor/miniz
     ${REPO_ROOT}/vendor/miniz-shim
     ${REPO_ROOT}/vendor/stb
+    ${REPO_ROOT}/vendor/json/include
     ${REPO_ROOT}/vendor/SDL3/include
     ${CODEC_PREFIX}/include
 )
 target_compile_definitions(osv_qt_core PUBLIC
     OSV_VENDORED_AV
+    OSV_VENDORED_ARCHIVE
+    LIBARCHIVE_STATIC
 )
 target_compile_definitions(osv_qt_core PRIVATE
     MINIZ_NO_ZLIB_COMPATIBLE_NAMES
@@ -108,9 +135,11 @@ if(EXISTS "${CODEC_PREFIX}/lib/libavcodec.a")
     )
 endif()
 
-# Same single-pass archive order premake uses: heif → de265 → aom → webpdemux → webp → sharpyuv
+# Same single-pass archive order premake uses: libarchive (depends on liblzma + system zlib) → heif → de265 → aom → webpdemux → webp → sharpyuv
 target_link_libraries(osv_qt_core PUBLIC
     ${REPO_ROOT}/vendor/SDL3/build/libSDL3.a
+    ${CODEC_PREFIX}/lib/libarchive.a
+    ${CODEC_PREFIX}/lib/liblzma.a
     ${CODEC_PREFIX}/lib/libheif.a
     ${CODEC_PREFIX}/lib/libde265.a
     ${CODEC_PREFIX}/lib/libaom.a
@@ -120,6 +149,7 @@ target_link_libraries(osv_qt_core PUBLIC
     pthread
     dl
     m
+    z
 )
 
 add_executable(osv_qt_core_smoke tests/core_smoke.cpp)
@@ -160,6 +190,50 @@ target_include_directories(osv_qt_selection_controller_test PRIVATE ${CMAKE_CURR
 add_executable(osv_qt_session_state_test tests/session_state_test.cpp session_state.cpp)
 target_link_libraries(osv_qt_session_state_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_session_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_executable(osv_qt_import_controller_test tests/import_controller_test.cpp import_controller.cpp)
+target_link_libraries(osv_qt_import_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test Qt6::Widgets)
+target_include_directories(osv_qt_import_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_executable(osv_qt_import_status_screen_test tests/import_status_screen_test.cpp)
+target_link_libraries(osv_qt_import_status_screen_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
+target_include_directories(osv_qt_import_status_screen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+qt_add_executable(osv_qt_import_status_screen_qml_test tests/import_status_screen_qml_test.cpp)
+target_link_libraries(osv_qt_import_status_screen_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::Test)
+target_include_directories(osv_qt_import_status_screen_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(osv_qt_import_status_screen_qml_test PRIVATE
+    QTUI_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+)
+
+# Shaders for import_status_screen test
+qt6_add_shaders(osv_qt_import_status_screen_qml_test "osv_qt_import_status_screen_qml_test_shaders"
+    PREFIX "/osvqt"
+    FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
+)
+
+add_executable(osv_qt_archive_dialogs_test tests/archive_dialogs_test.cpp)
+target_link_libraries(osv_qt_archive_dialogs_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
+target_include_directories(osv_qt_archive_dialogs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(osv_qt_archive_dialogs_test PRIVATE
+    QTUI_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+)
+
+add_executable(osv_qt_export_controller_test tests/export_controller_test.cpp export_controller.cpp)
+target_link_libraries(osv_qt_export_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
+target_include_directories(osv_qt_export_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_executable(osv_qt_transfer_controller_test tests/transfer_controller_test.cpp transfer_controller.cpp file_op_controller.cpp)
+target_link_libraries(osv_qt_transfer_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test Qt6::Widgets)
+target_include_directories(osv_qt_transfer_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_executable(osv_qt_vault_manager_controller_test tests/vault_manager_controller_test.cpp vault_manager_controller.cpp vault_list_model.cpp)
+target_link_libraries(osv_qt_vault_manager_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
+target_include_directories(osv_qt_vault_manager_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_executable(osv_qt_unlock_controller_keyfile_test tests/unlock_controller_keyfile_test.cpp unlock_controller.cpp secure_text_field.cpp secure_image_item.cpp video_frame_item.cpp viewer_controller.cpp playback_engine.cpp audio_pipe.cpp rhi_quad_renderer.cpp thumb_cache.cpp gallery_model.cpp)
+target_link_libraries(osv_qt_unlock_controller_keyfile_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
+target_include_directories(osv_qt_unlock_controller_keyfile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 qt_add_executable(osv_qt_help_popup_qml_test tests/help_popup_qml_test.cpp)
 target_link_libraries(osv_qt_help_popup_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
@@ -213,6 +287,7 @@ qt_add_executable(osv-qt
     rhi_quad_renderer.cpp
     unlock_controller.cpp
     vault_list_model.cpp
+    vault_manager_controller.cpp
     gallery_model.cpp
     cover_provider.cpp
     detail_controller.cpp
@@ -224,9 +299,13 @@ qt_add_executable(osv-qt
     file_op_controller.cpp
     status_controller.cpp
     settings_controller.cpp
+    import_controller.cpp
+    export_controller.cpp
+    transfer_controller.cpp
     help_model.cpp
     selection_controller.cpp
     session_state.cpp
+    autolock.cpp
 )
 
 # Shaders: compile to .qsb and embed as resources
@@ -241,4 +320,4 @@ target_compile_definitions(osv-qt PRIVATE
 target_include_directories(osv-qt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
-target_link_libraries(osv-qt PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
+target_link_libraries(osv-qt PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::Widgets)
