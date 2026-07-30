@@ -15,18 +15,13 @@ Rectangle {
     signal openTagGalleries(string tag)
     signal openTagImages(string tag)
 
-    // Help groups
+    // Help groups (deferred features E, Ctrl+I, Ctrl+L omitted per standing rule)
     property list<var> helpGroups: [
         { title: "Navigation", entries: [
             { key: "Up/Down", text: "Browse tags" },
             { key: "Enter", text: "View tag items (toggle with Tab)" },
             { key: "Tab", text: "Toggle: galleries ↔ images" },
             { key: "Esc", text: "Return to gallery" }
-        ]},
-        { title: "Editing", entries: [
-            { key: "E", text: "Edit description inline" },
-            { key: "Ctrl+I", text: "Import JSON tag dictionary" },
-            { key: "Ctrl+L", text: "Toggle view: list ↔ grid" }
         ]},
         { title: "Filtering", entries: [
             { key: "/", text: "Enter filter mode" },
