@@ -13,6 +13,9 @@ Rectangle {
     property real panY: 0
     property real fitScale: 1.0
 
+    // Zoom modes: 0=Fit (entire image visible), 1=FillScroll (image covers viewport, pan to see)
+    property int zoomMode: 0
+
     // Help groups for F1 help popup
     property var helpGroups: [
         {
@@ -21,7 +24,9 @@ Rectangle {
                 { keys: "Esc", description: "Close viewer" },
                 { keys: "Arrow Keys/Mouse Drag", description: "Pan image" },
                 { keys: "+/-/Scroll", description: "Zoom in/out" },
-                { keys: "F", description: "Fit to window / Cycle zoom modes" },
+                { keys: "F", description: "Cycle zoom modes (Fit ↔ FillScroll)" },
+                { keys: "1", description: "Reset to fit" },
+                { keys: "Shift+F", description: "Toggle fullscreen" },
                 { keys: "T", description: "Toggle thumbnail strip visibility" }
             ]
         }
@@ -34,8 +39,12 @@ Rectangle {
                 width / imageItem.sourceSize.width,
                 height / imageItem.sourceSize.height
             );
-            // Clamp zoom to at least fitScale
-            if (zoom < fitScale) {
+            // In Fit mode, ensure zoom is at fitScale
+            if (zoomMode === 0) {
+                zoom = fitScale;
+                resetPan();
+            } else if (zoom < fitScale) {
+                // In FillScroll mode, allow zooming out to fitScale minimum
                 zoom = fitScale;
                 resetPan();
             }
@@ -43,8 +52,24 @@ Rectangle {
     }
 
     function resetFit() {
+        zoomMode = 0;  // Switch back to Fit mode
         zoom = fitScale;
         resetPan();
+    }
+
+    function cycleZoomMode() {
+        zoomMode = (zoomMode + 1) % 2;
+        if (zoomMode === 0) {
+            // Switching to Fit mode
+            resetFit();
+        } else {
+            // Switching to FillScroll mode: zoom to cover viewport
+            zoom = Math.max(fitScale, Math.max(
+                width / imageItem.sourceSize.width,
+                height / imageItem.sourceSize.height
+            ));
+            resetPan();
+        }
     }
 
     function resetPan() {
@@ -193,10 +218,18 @@ Rectangle {
     }
     Keys.onPressed: {
         if (event.key === Qt.Key_F) {
-            // Task 3.1: Toggle strip side (bottom ↔ left)
-            // Task 3.2 will override this behavior for zoom mode cycling
-            let newSide = (sessionState.stripSide() + 1) % 2;
-            sessionState.setStripSide(newSide);
+            // Task 3.2: F cycles zoom modes (Fit ↔ FillScroll)
+            if (event.modifiers & Qt.ShiftModifier) {
+                // Shift+F: toggle fullscreen (not implemented yet - placeholder)
+                event.accepted = true;
+            } else {
+                // F: cycle zoom modes
+                root.cycleZoomMode();
+                event.accepted = true;
+            }
+        } else if (event.key === Qt.Key_1 || event.key === Qt.Key_Exclam) {
+            // 1: reset to fit
+            root.resetFit();
             event.accepted = true;
         } else if (event.key === Qt.Key_T) {
             // Toggle strip visibility
