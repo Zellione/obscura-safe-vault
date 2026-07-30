@@ -11,22 +11,32 @@ AdvancedSearchController::AdvancedSearchController(QObject* parent)
 void AdvancedSearchController::search(const QStringList& includeTags, const QStringList& excludeTags,
                                      const QString& nameQuery, int scope)
 {
+    // Store search parameters and arm debounce (150ms)
+    currentInclude_ = includeTags;
+    currentExclude_ = excludeTags;
+    currentName_ = nameQuery;
+    currentScope_ = scope;
+    arm();
+}
+
+void AdvancedSearchController::performDebouncedSearch()
+{
     if (!vault_ || !vault_->is_unlocked()) {
         results_.clear();
         emit resultsChanged();
         return;
     }
 
-    // Build the query
+    // Build the query from pending parameters
     ui::AdvancedQuery query;
-    query.scope = static_cast<ui::SearchScope>(scope);
-    query.name_query = nameQuery.toStdString();
+    query.scope = static_cast<ui::SearchScope>(pendingScope_);
+    query.name_query = pendingName_.toStdString();
 
-    for (const auto& tag : includeTags) {
+    for (const auto& tag : pendingInclude_) {
         query.include.push_back({tag.toStdString(), 1});
     }
 
-    for (const auto& tag : excludeTags) {
+    for (const auto& tag : pendingExclude_) {
         query.exclude.push_back(tag.toStdString());
     }
 

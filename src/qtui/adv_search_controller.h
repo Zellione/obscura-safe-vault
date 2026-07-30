@@ -4,6 +4,7 @@
 #include <QList>
 #include <QString>
 #include <QStringList>
+#include <ui/debounce.h>
 
 namespace vault { class Vault; }
 namespace ui { struct AdvancedQuery; }
@@ -55,14 +56,32 @@ public:
 
     Q_INVOKABLE void refreshTagVocabulary();
 
+    // Debounce control (for testing with fake clock)
+    void arm() noexcept { debounce_.arm(); pendingInclude_ = currentInclude_; pendingExclude_ = currentExclude_; pendingName_ = currentName_; pendingScope_ = currentScope_; }
+    bool isArmed() const noexcept { return debounce_.armed(); }
+    void updateDebounce(double dt) noexcept {
+        if (debounce_.fire(dt)) {
+            performDebouncedSearch();
+        }
+    }
+
 signals:
     void resultsChanged();
     void savedSearchesChanged();
     void tagVocabularyChanged();
 
 private:
+    void performDebouncedSearch();
+
     vault::Vault* vault_ = nullptr;
     QList<AdvancedSearchResultItem> results_;
     QList<SavedSearchItem> savedSearches_;
     QStringList tagVocab_;
+    ui::Debounce debounce_{0.15};  // 150ms debounce
+
+    // Pending search parameters (for debouncing)
+    QStringList currentInclude_, pendingInclude_;
+    QStringList currentExclude_, pendingExclude_;
+    QString currentName_, pendingName_;
+    int currentScope_ = 2, pendingScope_ = 2;
 };
