@@ -32,7 +32,7 @@ bool TagController::addTag(const QString& nodePath, const QString& tag)
             return true;
         }
     } catch (...) {
-        qWarning() << "Exception adding tag:" << tag << "to" << nodePath;
+        qWarning() << "Exception adding tag:" << tag;
     }
     return false;
 }
@@ -51,7 +51,7 @@ bool TagController::removeTag(const QString& nodePath, const QString& tag)
             return true;
         }
     } catch (...) {
-        qWarning() << "Exception removing tag:" << tag << "from" << nodePath;
+        qWarning() << "Exception removing tag:" << tag;
     }
     return false;
 }
@@ -71,7 +71,7 @@ QStringList TagController::getOwnTags(const QString& nodePath) const
         }
         return result;
     } catch (...) {
-        qWarning() << "Exception getting own tags for" << nodePath;
+        qWarning() << "Exception getting tags";
     }
     return {};
 }
@@ -89,7 +89,7 @@ QStringList TagController::getInheritedTags(const QString& nodePath) const
         }
         return result;
     } catch (...) {
-        qWarning() << "Exception getting inherited tags for" << nodePath;
+        qWarning() << "Exception getting inherited tags";
     }
     return {};
 }
@@ -107,7 +107,7 @@ QStringList TagController::getContentsTags(const QString& nodePath) const
         }
         return result;
     } catch (...) {
-        qWarning() << "Exception getting contents tags for" << nodePath;
+        qWarning() << "Exception getting contents tags";
     }
     return {};
 }

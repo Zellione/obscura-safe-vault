@@ -143,7 +143,7 @@ bool TagOverviewController::setTagDescription(const QString& tag, const QString&
             return true;
         }
     } catch (...) {
-        qWarning() << "Exception setting tag description for" << tag;
+        qWarning() << "Exception setting tag description";
     }
     return false;
 }
