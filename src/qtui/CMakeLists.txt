@@ -150,6 +150,10 @@ add_executable(osv_qt_session_state_test tests/session_state_test.cpp session_st
 target_link_libraries(osv_qt_session_state_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_session_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(osv_qt_viewer_controller_test tests/viewer_controller_test.cpp)
+target_link_libraries(osv_qt_viewer_controller_test PRIVATE osv_qt_core Qt6::Core)
+target_include_directories(osv_qt_viewer_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 qt_add_executable(osv_qt_help_popup_qml_test tests/help_popup_qml_test.cpp)
 target_link_libraries(osv_qt_help_popup_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
 target_include_directories(osv_qt_help_popup_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
