@@ -21,6 +21,15 @@ Rectangle {
                 { keys: "Shift+S", description: "Cycle sort order" },
                 { keys: "L", description: "Cycle view density (grid/list)" }
             ]
+        },
+        {
+            title: "Multi-Selection (WS2 Task 2.2)",
+            entries: [
+                { keys: "Space", description: "Toggle selection of current item" },
+                { keys: "Click", description: "Toggle selection" },
+                { keys: "Shift+Click", description: "Range select" },
+                { keys: "Ctrl+A", description: "Select all items" }
+            ]
         }
     ]
 
@@ -117,7 +126,7 @@ Rectangle {
             top: galleryHeader.bottom
             left: parent.left
             right: parent.right
-            bottom: parent.bottom
+            bottom: galleryFooter.top
         }
         cellWidth: currentViewMode === 0 ? width : cellSizes[currentViewMode] + 12
         cellHeight: currentViewMode === 0 ? 60 : cellSizes[currentViewMode] + 12
@@ -133,6 +142,9 @@ Rectangle {
                 anchors.margins: 6
                 color: GridView.isCurrentItem ? themePalette.surfaceHi : themePalette.surface
                 radius: 6
+                // WS2 Task 2.2: Show ACCENT border when selected
+                border.color: selectionController.isSelected(index) ? themePalette.accent : "transparent"
+                border.width: selectionController.isSelected(index) ? 2 : 0
 
                 // Thumbnail image for media
                 SecureImageItem {
@@ -175,6 +187,18 @@ Rectangle {
                 onTapped: {
                     grid.currentIndex = index
                     grid.forceActiveFocus()
+                    // WS2 Task 2.2: Toggle selection on click
+                    selectionController.toggle(index)
+                }
+            }
+
+            // Shift+Click: range select (WS2 Task 2.2)
+            TapHandler {
+                acceptedButtons: Qt.LeftButton
+                onTapped: (eventPoint) => {
+                    if (eventPoint.modifiers & Qt.ShiftModifier) {
+                        selectionController.rangeSelectTo(index)
+                    }
                 }
             }
 
@@ -194,17 +218,55 @@ Rectangle {
             galleryModel.upOneLevel()
             galleryRoot.back()
         }
+        Keys.onSpacePressed: {
+            // WS2 Task 2.2: Space toggles selection
+            selectionController.toggle(grid.currentIndex)
+        }
         // Note: F2 is now global (opens settings overlay from Main.qml)
         Keys.onPressed: (event) => {
             if (event.text === "S" && event.modifiers & Qt.ShiftModifier) {
                 // Shift+S: cycle sort order
                 galleryModel.nextSort()
                 event.accepted = true
+            } else if (event.text === "A" && event.modifiers & Qt.ControlModifier) {
+                // WS2 Task 2.2: Ctrl+A select all
+                selectionController.toggleAll(grid.model.count)
+                event.accepted = true
             } else if (event.text === "L" || event.text === "l") {
                 // L: cycle view density
                 nextViewMode()
                 event.accepted = true
             }
+        }
+    }
+
+    // WS2 Task 2.2: Footer showing selection count
+    Rectangle {
+        id: galleryFooter
+        anchors {
+            bottom: parent.bottom
+            left: parent.left
+            right: parent.right
+        }
+        height: selectionController.count > 0 ? 40 : 0
+        color: themePalette.surface
+        border.color: themePalette.border
+        border.width: 1
+        visible: height > 0
+
+        Text {
+            anchors {
+                verticalCenter: parent.verticalCenter
+                left: parent.left
+                leftMargin: 16
+            }
+            text: {
+                const count = selectionController.count
+                if (count === 1) return "1 item selected"
+                return count + " items selected"
+            }
+            color: themePalette.text
+            font.pixelSize: 14
         }
     }
 }

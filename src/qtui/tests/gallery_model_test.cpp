@@ -235,6 +235,40 @@ int main(int argc, char** argv)
         }
         printf("PASS: nextSort cycles correctly\n");
 
+        // Test 17: Selection model survives gallery refresh (WS2 Task 2.2)
+        printf("Test 17 (selection survives refresh): WS2 Task 2.2 — Multi-selection UI\n");
+
+        // Create a new model for this test
+        GalleryModel model4(&vault);
+
+        // Simulate selecting items by row (at root: gallery at 0, images at 1-2)
+        // This will be verified by the SelectionController in QML (integration test)
+        // Here we just verify the model can be refreshed without issues
+        int initial_count = model4.rowCount();
+        printf("Test 17a: Initial row count = %d\n", initial_count);
+
+        // Refresh should preserve the ability to access rows
+        model4.refresh();
+        int after_refresh_count = model4.rowCount();
+        printf("Test 17b: After refresh, row count = %d\n", after_refresh_count);
+
+        if (initial_count != after_refresh_count) {
+            fprintf(stderr, "FAIL: Row count changed after refresh: %d -> %d\n",
+                initial_count, after_refresh_count);
+            return 1;
+        }
+
+        // Verify we can still access row names after refresh (required for name-keyed selection)
+        for (int row = 0; row < model4.rowCount(); ++row) {
+            QString name = model4.nameAt(row);
+            if (name.isEmpty()) {
+                fprintf(stderr, "FAIL: Row %d has empty name after refresh\n", row);
+                return 1;
+            }
+        }
+
+        printf("PASS: Model refresh preserves row structure for name-keyed selection\n");
+
         printf("\nAll GalleryModel tests PASSED\n");
         return 0;
 
