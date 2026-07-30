@@ -16,8 +16,8 @@ Rectangle {
             title: "Gallery Navigation",
             entries: [
                 { keys: "Arrow Keys", description: "Navigate gallery" },
-                { keys: "Enter/Space", description: "Open image/video or enter gallery" },
-                { keys: "Esc/Backspace", description: "Go up one level" },
+                { keys: "Enter", description: "Open image/video or enter gallery" },
+                { keys: "Esc", description: "Go up one level" },
                 { keys: "F2", description: "Rename" }
             ]
         }

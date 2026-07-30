@@ -18,7 +18,7 @@ Rectangle {
         {
             title: "Image Viewer",
             entries: [
-                { keys: "Esc/Backspace", description: "Close viewer" },
+                { keys: "Esc", description: "Close viewer" },
                 { keys: "Arrow Keys/Mouse Drag", description: "Pan image" },
                 { keys: "+/-/Scroll", description: "Zoom in/out" },
                 { keys: "F", description: "Fit to window" }

@@ -28,6 +28,13 @@ Window {
     HelpPopup {
         id: helpPopup
         helpModel: helpModel
+
+        // Restore focus to the active screen when help closes
+        onClosed: {
+            if (stack.currentItem) {
+                stack.currentItem.forceActiveFocus();
+            }
+        }
     }
 
     FooterBar {

@@ -10,6 +10,11 @@ HelpModel::~HelpModel() = default;
 
 void HelpModel::setScreenGroups(const QVariantList& screenGroups)
 {
+    // No-op if groups are identical
+    if (screenGroups_ == screenGroups) {
+        return;
+    }
+
     screenGroups_ = screenGroups;
     updateGroups();
     emit groupsChanged();

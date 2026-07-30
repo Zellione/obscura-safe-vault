@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 
 Rectangle {
     id: helpPopup
@@ -16,8 +17,9 @@ Rectangle {
 
     // Computed properties
     property int columnCount: width > 1000 ? 2 : 1
-    property real columnWidth: columnCount === 2 ? (contentPanel.width - 20) / 2 : contentPanel.width
-    property real lineHeight: 24
+
+    // Signal emitted when popup closes to allow focus restoration
+    signal closed()
 
     // Called from Main.qml
     function toggle() {
@@ -44,6 +46,7 @@ Rectangle {
         visible = false;
         veilRect.opacity = 0;
         contentPanel.opacity = 0;
+        closed();  // Emit signal to restore focus
     }
 
     // Veil (semi-transparent overlay)
@@ -83,9 +86,14 @@ Rectangle {
             anchors { top: parent.top; left: parent.left; right: parent.right }
             height: 40
             color: themePalette.surfaceHi
-            border.bottom.color: themePalette.border
-            border.bottom.width: 1
             radius: 8
+
+            // Bottom border line
+            Rectangle {
+                anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+                height: 1
+                color: themePalette.border
+            }
 
             Text {
                 anchors {
@@ -111,7 +119,7 @@ Rectangle {
             }
         }
 
-        // Scrollable content
+        // Scrollable content with two-column reflow
         ScrollView {
             id: scrollView
             anchors {
@@ -139,65 +147,160 @@ Rectangle {
                 }
             }
 
-            Column {
+            // Two-column layout: groups pack into columns, never split mid-group
+            ColumnLayout {
                 width: scrollView.width - scrollView.ScrollBar.vertical.width
                 spacing: 0
-                padding: 12
 
-                Repeater {
-                    model: helpModel ? helpModel.groups : []
+                // Create columns based on columnCount
+                Row {
+                    Layout.fillWidth: true
+                    spacing: 16
 
+                    // Column 1 (always present)
                     Column {
-                        width: parent.width - parent.padding * 2
+                        width: helpPopup.columnCount === 2
+                               ? (parent.width - 16) / 2
+                               : parent.width
                         spacing: 8
+                        padding: 12
 
-                        // Group title
-                        Text {
-                            width: parent.width
-                            text: modelData.title
-                            color: themePalette.accent
-                            font.pixelSize: 13
-                            font.bold: true
-                            wrapMode: Text.Wrap
-                        }
+                        // Groups that go in column 1
+                        Repeater {
+                            model: helpModel ? helpModel.groups : []
 
-                        // Group entries
-                        Column {
-                            width: parent.width
-                            spacing: 4
+                            // Only show groups assigned to column 1
+                            Item {
+                                width: parent.width - parent.padding * 2
+                                height: groupColumn.height
+                                visible: helpPopup.columnCount === 1 ||
+                                         index < Math.ceil((helpModel.groups.length) / 2)
 
-                            Repeater {
-                                model: modelData.entries ? modelData.entries : []
-
-                                Row {
+                                Column {
+                                    id: groupColumn
                                     width: parent.width
-                                    spacing: 12
+                                    spacing: 8
 
+                                    // Group title
                                     Text {
-                                        width: 80
-                                        text: modelData.keys
-                                        color: themePalette.textDim
-                                        font.pixelSize: 11
-                                        font.family: "monospace"
-                                        horizontalAlignment: Text.AlignLeft
+                                        width: parent.width
+                                        text: modelData.title
+                                        color: themePalette.accent
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                        wrapMode: Text.Wrap
                                     }
 
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: modelData.description
-                                        color: themePalette.text
-                                        font.pixelSize: 11
-                                        wrapMode: Text.Wrap
+                                    // Group entries
+                                    Column {
+                                        width: parent.width
+                                        spacing: 4
+
+                                        Repeater {
+                                            model: modelData.entries ? modelData.entries : []
+
+                                            Row {
+                                                width: parent.width
+                                                spacing: 12
+
+                                                Text {
+                                                    width: 80
+                                                    text: modelData.keys
+                                                    color: themePalette.textDim
+                                                    font.pixelSize: 11
+                                                    font.family: "monospace"
+                                                    horizontalAlignment: Text.AlignLeft
+                                                }
+
+                                                Text {
+                                                    width: parent.width - 80 - parent.spacing
+                                                    text: modelData.description
+                                                    color: themePalette.text
+                                                    font.pixelSize: 11
+                                                    wrapMode: Text.Wrap
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Spacer between groups
+                                    Rectangle {
+                                        width: parent.width
+                                        height: (helpPopup.columnCount === 1 &&
+                                                 index < (helpModel ? helpModel.groups.length - 1 : 0))
+                                                ? 8 : 0
+                                        color: "transparent"
                                     }
                                 }
                             }
                         }
+                    }
 
-                        // Spacer between groups (not before first)
-                        Rectangle {
-                            width: parent.width
-                            height: index < (helpModel ? helpModel.groups.length - 1 : 0) ? 8 : 0
-                            color: "transparent"
+                    // Column 2 (only if two-column mode)
+                    Column {
+                        width: (parent.width - 16) / 2
+                        spacing: 8
+                        padding: 12
+                        visible: helpPopup.columnCount === 2
+
+                        // Groups that go in column 2
+                        Repeater {
+                            model: helpModel ? helpModel.groups : []
+
+                            // Only show groups assigned to column 2
+                            Item {
+                                width: parent.width - parent.padding * 2
+                                height: groupColumn2.height
+                                visible: index >= Math.ceil((helpModel.groups.length) / 2)
+
+                                Column {
+                                    id: groupColumn2
+                                    width: parent.width
+                                    spacing: 8
+
+                                    // Group title
+                                    Text {
+                                        width: parent.width
+                                        text: modelData.title
+                                        color: themePalette.accent
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                        wrapMode: Text.Wrap
+                                    }
+
+                                    // Group entries
+                                    Column {
+                                        width: parent.width
+                                        spacing: 4
+
+                                        Repeater {
+                                            model: modelData.entries ? modelData.entries : []
+
+                                            Row {
+                                                width: parent.width
+                                                spacing: 12
+
+                                                Text {
+                                                    width: 80
+                                                    text: modelData.keys
+                                                    color: themePalette.textDim
+                                                    font.pixelSize: 11
+                                                    font.family: "monospace"
+                                                    horizontalAlignment: Text.AlignLeft
+                                                }
+
+                                                Text {
+                                                    width: parent.width - 80 - parent.spacing
+                                                    text: modelData.description
+                                                    color: themePalette.text
+                                                    font.pixelSize: 11
+                                                    wrapMode: Text.Wrap
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
