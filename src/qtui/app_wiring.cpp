@@ -16,6 +16,7 @@
 #include "theme_palette.h"
 #include "playback_engine.h"
 #include "file_op_controller.h"
+#include "status_controller.h"
 #include "gfx/theme.h"
 
 void initThemeFromEnv()
@@ -58,4 +59,5 @@ void AppContext::expose(QQmlApplicationEngine& engine)
     ctx->setContextProperty("playbackEngine", &playbackEngine);
     ctx->setContextProperty("vaultListModel", &vaultListModel);
     ctx->setContextProperty("fileOpController", &fileOpController);
+    ctx->setContextProperty("statusController", &statusController);
 }

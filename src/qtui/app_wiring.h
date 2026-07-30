@@ -9,6 +9,7 @@
 #include "theme_palette.h"
 #include "playback_engine.h"
 #include "file_op_controller.h"
+#include "status_controller.h"
 
 class QQmlApplicationEngine;
 
@@ -29,6 +30,7 @@ struct AppContext {
     PlaybackEngine playbackEngine;
     VaultListModel vaultListModel;
     FileOpController fileOpController;
+    StatusController statusController;
 
     AppContext();
 
