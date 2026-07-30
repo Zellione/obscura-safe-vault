@@ -230,10 +230,14 @@ static bool test_keyfile_wipe_on_error()
             return false;
         }
 
-        // The keyfile bytes should have been wiped (code path verification only)
-        // We can't directly verify the wipe without memory inspection, but we verify
-        // that the code path completes without crash
-        printf("PASS: Keyfile unlock with error completed without crash (wipe verified in code path)\n");
+        // Verify password field has been wiped via public API (length() == 0)
+        if (passwordField.length() != 0) {
+            fprintf(stderr, "FAIL: Password field should be wiped after failed unlock (length=%d, expected 0)\n",
+                    passwordField.length());
+            return false;
+        }
+
+        printf("PASS: Keyfile and password wiped on error (password length verified)\n");
         return true;
     } catch (const std::exception& e) {
         fprintf(stderr, "FAIL: Exception: %s\n", e.what());

@@ -68,6 +68,7 @@ void UnlockController::unlock(SecureTextField* field)
         setError({});
         emit unlockedChanged();
     } else {
+        field->clearSecret();          // wipe on all exit paths
         setError(r == vault::VaultResult::AuthFailed
                      ? QStringLiteral("Wrong password")
                      : QStringLiteral("Unlock failed"));
@@ -111,16 +112,17 @@ void UnlockController::unlockWithKeyfile(SecureTextField* passwordField, const Q
     const std::span<const uint8_t> keyfile_span(keyfile_bytes.data(), keyfile_bytes.size());
     const auto r = vault_.unlock(pw_span, keyfile_span);
 
-    // Wipe keyfile bytes immediately
+    // Wipe keyfile bytes and password on all exit paths
     if (!keyfile_bytes.empty()) {
         crypto_wipe(keyfile_bytes.data(), keyfile_bytes.size());
     }
-    passwordField->clearSecret();
 
     if (r == vault::VaultResult::Ok) {
+        passwordField->clearSecret();
         setError({});
         emit unlockedChanged();
     } else {
+        passwordField->clearSecret();
         setError(r == vault::VaultResult::AuthFailed
                      ? QStringLiteral("Wrong password or keyfile")
                      : QStringLiteral("Unlock failed"));
@@ -186,6 +188,8 @@ bool UnlockController::createVault(const QUrl& fileUrl, SecureTextField* passwor
     const auto pathOpt = platform::normalize_user_path(fileUrl.toLocalFile().toStdString());
     if (!pathOpt.has_value()) {
         setError(QStringLiteral("Invalid path"));
+        passwordField->clearSecret();
+        confirmField->clearSecret();
         return false;
     }
 

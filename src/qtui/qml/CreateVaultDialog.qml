@@ -44,7 +44,6 @@ Rectangle {
     Keys.onEscapePressed: {
         passwordField.clearSecret();
         confirmField.clearSecret();
-        keyfileField.clearSecret();
         createRoot.vaultCreated();
         if (parent && typeof parent.pop === 'function') parent.pop();
     }
@@ -88,7 +87,6 @@ Rectangle {
             vaultPathField.text = "";
             passwordField.clearSecret();
             confirmField.clearSecret();
-            keyfileField.clearSecret();
             keyfilePath = "";
             createRoot.vaultCreated();
             if (parent && typeof parent.pop === 'function') parent.pop();
@@ -322,14 +320,6 @@ Rectangle {
             }
         }
 
-        // Hidden keyfile field for storing the path
-        SecureTextField {
-            id: keyfileField
-            width: 0
-            height: 0
-            visible: false
-        }
-
         // Error message
         Text {
             width: parent.width
@@ -380,7 +370,6 @@ Rectangle {
                 onClicked: {
                     passwordField.clearSecret();
                     confirmField.clearSecret();
-                    keyfileField.clearSecret();
                     createRoot.vaultCreated();
                     if (parent && typeof parent.pop === 'function') parent.pop();
                 }
