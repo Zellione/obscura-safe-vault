@@ -7,6 +7,7 @@
 #include <QModelIndex>
 
 #include "vault/vault.h"
+#include "ui/gallery_sort.h"
 #include "gallery_model.h"
 #include "test_vault_util.h"
 
@@ -170,6 +171,69 @@ int main(int argc, char** argv)
             return 1;
         }
         printf("PASS: Rename persists after vault reopen\n");
+
+        // Test 13: sort cycle order and symmetry (WS2 Task 2.1)
+        GalleryModel model3(&vault);
+
+        // Test sort cycle: Default -> NameAsc -> NameDesc -> DateAsc -> DateDesc -> SizeAsc -> SizeDesc -> Insertion -> Default
+        auto expectedCycle = {
+            vault::SortKey::Default,
+            vault::SortKey::NameAsc,
+            vault::SortKey::NameDesc,
+            vault::SortKey::DateAsc,
+            vault::SortKey::DateDesc,
+            vault::SortKey::SizeAsc,
+            vault::SortKey::SizeDesc,
+            vault::SortKey::Insertion
+        };
+
+        printf("Test 13 (sort cycle order): Testing nextSortKey cycle\n");
+        vault::SortKey current = vault::SortKey::Default;
+        for (const auto& expected : expectedCycle) {
+            if (current != expected) {
+                fprintf(stderr, "FAIL: Expected sort key %d, got %d\n",
+                    static_cast<int>(expected), static_cast<int>(current));
+                return 1;
+            }
+            current = ui::next_sort_key(current);
+        }
+        // After cycling through all, we should be back at Default
+        if (current != vault::SortKey::Default) {
+            fprintf(stderr, "FAIL: Cycle should wrap to Default, got %d\n", static_cast<int>(current));
+            return 1;
+        }
+        printf("PASS: Sort cycle order correct\n");
+
+        // Test 14: sort cycle symmetry (prev and next are inverses)
+        printf("Test 14 (sort cycle symmetry): Testing prev_sort_key is inverse of next_sort_key\n");
+        current = vault::SortKey::NameAsc;
+        auto next = ui::next_sort_key(current);
+        auto prev_of_next = ui::prev_sort_key(next);
+        if (prev_of_next != current) {
+            fprintf(stderr, "FAIL: prev(next(x)) should equal x, but got %d instead of %d\n",
+                static_cast<int>(prev_of_next), static_cast<int>(current));
+            return 1;
+        }
+        printf("PASS: Sort cycle symmetry verified (prev and next are inverses)\n");
+
+        // Test 15: setSortKey and sortKey property
+        printf("Test 15 (setSortKey and sortKey property)\n");
+        model3.setSortKey(static_cast<int>(vault::SortKey::NameAsc));
+        if (model3.sortKey() != static_cast<int>(vault::SortKey::NameAsc)) {
+            fprintf(stderr, "FAIL: Expected sort key NameAsc, got %d\n", model3.sortKey());
+            return 1;
+        }
+        printf("PASS: setSortKey and sortKey work correctly\n");
+
+        // Test 16: nextSort cycles the sort key
+        printf("Test 16 (nextSort cycles sort key)\n");
+        model3.setSortKey(static_cast<int>(vault::SortKey::Default));
+        model3.nextSort();
+        if (model3.sortKey() != static_cast<int>(vault::SortKey::NameAsc)) {
+            fprintf(stderr, "FAIL: nextSort() should cycle to NameAsc, got %d\n", model3.sortKey());
+            return 1;
+        }
+        printf("PASS: nextSort cycles correctly\n");
 
         printf("\nAll GalleryModel tests PASSED\n");
         return 0;

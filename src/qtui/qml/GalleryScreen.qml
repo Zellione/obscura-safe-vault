@@ -17,13 +17,25 @@ Rectangle {
             entries: [
                 { keys: "Arrow Keys", description: "Navigate gallery" },
                 { keys: "Enter", description: "Open image/video or enter gallery" },
-                { keys: "Esc", description: "Go up one level" }
+                { keys: "Esc", description: "Go up one level" },
+                { keys: "Shift+S", description: "Cycle sort order" },
+                { keys: "L", description: "Cycle view density (grid/list)" }
             ]
         }
     ]
 
     // Signal for back navigation (Main.qml wires to galleryModel.upOneLevel)
     signal back()
+
+    // View mode helpers (synchronized with sessionState)
+    // GalleryView enum: 0=List, 1=GridS, 2=GridM, 3=GridL, 4=GridXL
+    readonly property var cellSizes: [0, 128, 188, 248, 320]  // index 0 (List) is ignored
+    readonly property int currentViewMode: sessionState.viewDensity()
+
+    function nextViewMode() {
+        // Cycle: 0(List) -> 1(GridS) -> 2(GridM) -> 3(GridL) -> 4(GridXL) -> 0(List)
+        sessionState.setViewDensity((currentViewMode + 1) % 5)
+    }
 
     // `focus: true` only grants scope focus inside the StackView;
     // keys (Esc = up, arrows) need ACTIVE focus on the grid — force
@@ -83,7 +95,12 @@ Rectangle {
 
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: galleryModel.currentPath
+                text: {
+                    let path = galleryModel.currentPath
+                    // TODO: Task 2.1 - add sort key label when non-Default
+                    // when (galleryModel.sortKey) implemented
+                    return path
+                }
                 color: themePalette.textDim
                 font.pixelSize: 13
                 elide: Text.ElideLeft
@@ -93,7 +110,7 @@ Rectangle {
 
     // Gallery grid view: displays galleries and media from galleryModel.
     // Galleries shown as folder glyphs, media as thumbnails.
-    // Arrow keys navigate, Enter opens, Esc up/back, F2 rename, T cycle theme.
+    // Arrow keys navigate, Enter opens, Esc up/back, Shift+S sort, L view mode.
     GridView {
         id: grid
         anchors {
@@ -102,8 +119,8 @@ Rectangle {
             right: parent.right
             bottom: parent.bottom
         }
-        cellWidth: 176
-        cellHeight: 200
+        cellWidth: currentViewMode === 0 ? width : cellSizes[currentViewMode] + 12
+        cellHeight: currentViewMode === 0 ? 60 : cellSizes[currentViewMode] + 12
         model: galleryModel
         focus: true
 
@@ -179,7 +196,15 @@ Rectangle {
         }
         // Note: F2 is now global (opens settings overlay from Main.qml)
         Keys.onPressed: (event) => {
-            // Placeholder for future gallery-specific key handlers
+            if (event.text === "S" && event.modifiers & Qt.ShiftModifier) {
+                // Shift+S: cycle sort order
+                galleryModel.nextSort()
+                event.accepted = true
+            } else if (event.text === "L" || event.text === "l") {
+                // L: cycle view density
+                nextViewMode()
+                event.accepted = true
+            }
         }
     }
 }

@@ -3,6 +3,9 @@
 #include "viewer_controller.h"
 #include "vault/vault.h"
 #include "vault/safe_name.h"
+#include "ui/gallery_sort.h"
+
+#include <span>
 
 GalleryModel::GalleryModel(vault::Vault* vault, QObject* parent)
     : QAbstractListModel(parent), vault_(vault), currentPath_("/")
@@ -77,11 +80,14 @@ void GalleryModel::refresh()
     }
 
     // Get all nodes from vault at current path
-    const auto all_nodes = vault_->list(currentPath_.toStdString());
+    auto all_nodes = vault_->list(currentPath_.toStdString());
 
-    // Partition: galleries first, then media
+    // Sort using the current sort key (convert vector to span for sort_children)
+    auto sorted = ui::sort_children(all_nodes, sortKey_);
+
+    // Partition sorted results into galleries and media, preserving sort order within each group
     std::vector<const vault::IndexNode*> galleries, media;
-    for (const auto* node : all_nodes) {
+    for (const auto* node : sorted) {
         if (!node)
             continue;
         if (node->type == vault::IndexNode::Type::Gallery) {
@@ -91,7 +97,7 @@ void GalleryModel::refresh()
         }
     }
 
-    // Combine: galleries first, then media
+    // Combine: galleries first, then media (both maintain their sort order)
     rows_.reserve(galleries.size() + media.size());
     rows_.insert(rows_.end(), galleries.begin(), galleries.end());
     rows_.insert(rows_.end(), media.begin(), media.end());
@@ -213,5 +219,33 @@ QString GalleryModel::nameAt(int row) const
         return QString();
 
     return QString::fromStdString(node->name);
+}
+
+void GalleryModel::nextSort()
+{
+    setSortKey(static_cast<int>(ui::next_sort_key(sortKey_)));
+}
+
+void GalleryModel::prevSort()
+{
+    setSortKey(static_cast<int>(ui::prev_sort_key(sortKey_)));
+}
+
+int GalleryModel::sortKey() const
+{
+    return static_cast<int>(sortKey_);
+}
+
+void GalleryModel::setSortKey(int key)
+{
+    auto newKey = static_cast<vault::SortKey>(key);
+    if (newKey == sortKey_)
+        return;
+
+    sortKey_ = newKey;
+    emit sortKeyChanged();
+
+    // Refresh with new sort order
+    refresh();
 }
 
