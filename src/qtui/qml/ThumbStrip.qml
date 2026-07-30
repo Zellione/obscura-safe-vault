@@ -7,6 +7,7 @@ Rectangle {
     // Properties
     property int stripSide: 0  // 0 = Bottom, 1 = Left (persisted in SessionState)
     property int currentIndex: -1  // Currently viewed item index in the strip
+    property var model: undefined  // Gallery model passed from ViewerScreen
     // visible property is inherited from Rectangle (used by T key to toggle)
 
     // Colors from theme palette
@@ -36,8 +37,8 @@ Rectangle {
         orientation: root.stripSide === 0 ? ListView.Horizontal : ListView.Vertical
         spacing: 10
 
-        // Model will be set by ViewerScreen from galleryModel
-        model: undefined
+        // Model passed from ViewerScreen
+        model: root.model
 
         // Thumbnail delegate: SecureImageItem in a clickable container
         delegate: Rectangle {

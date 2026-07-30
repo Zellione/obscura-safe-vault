@@ -523,7 +523,7 @@ Rectangle {
     Rectangle {
         anchors {
             bottom: root.thumbStripVisible && root.stripSide === 0 ? thumbStrip.top : parent.bottom
-            bottom.margins: 20
+            bottomMargin: 20
             horizontalCenter: parent.horizontalCenter
         }
         width: 200
