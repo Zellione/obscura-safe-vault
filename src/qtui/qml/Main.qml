@@ -11,7 +11,7 @@ Window {
     color: themePalette.bg
     title: "osv-qt (experiment)"
 
-    // Global F1/F2/Shift+T/Shift+G key handlers
+    // Global F1/F2/Shift+T/Shift+G/Shift+/ key handlers
     Keys.onPressed: (event) => {
         if (event.key === Qt.Key_F1) {
             helpPopup.toggle();
@@ -26,6 +26,10 @@ Window {
         } else if (event.key === Qt.Key_G && (event.modifiers & Qt.ShiftModifier)) {
             // Shift+G: import tags from file to current gallery
             tagListImportFileDialog.open();
+            event.accepted = true;
+        } else if (event.key === Qt.Key_Slash && (event.modifiers & Qt.ShiftModifier)) {
+            // Shift+/: open advanced search screen
+            stack.push(advancedSearchScreenComponent);
             event.accepted = true;
         }
     }
@@ -306,6 +310,16 @@ Window {
         Component {
             id: tagOverviewScreenComponent
             TagOverviewScreen {
+                onBack: {
+                    stack.pop();
+                }
+            }
+        }
+
+        // Advanced search screen
+        Component {
+            id: advancedSearchScreenComponent
+            AdvancedSearchScreen {
                 onBack: {
                     stack.pop();
                 }
