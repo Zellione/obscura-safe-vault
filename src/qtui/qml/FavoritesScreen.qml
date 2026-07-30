@@ -17,6 +17,16 @@ Rectangle {
     signal openGallery(nodePath: string)
     signal openViewer(nodeKey: int)
 
+    // Help groups
+    property list<var> helpGroups: [
+        { title: "Navigation", entries: [
+            { key: "Tab", text: "Toggle: galleries ↔ images" },
+            { key: "Up/Down", text: "Navigate favorites" },
+            { key: "Enter/Return", text: "Open selected" },
+            { key: "Esc", text: "Return to gallery" }
+        ]}
+    ]
+
     // Track which face is active: 0 = galleries, 1 = images
     property int activeFace: 0
     property var currentFavorites: []

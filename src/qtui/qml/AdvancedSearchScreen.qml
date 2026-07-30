@@ -15,6 +15,28 @@ Rectangle {
 
     signal back()
 
+    // Help groups
+    property list<var> helpGroups: [
+        { title: "Search Fields", entries: [
+            { key: "Tab", text: "Cycle focus: include → exclude → name → scope → sidebar" },
+            { key: "Ctrl+L", text: "Toggle view: grid ↔ list" }
+        ]},
+        { title: "Results", entries: [
+            { key: "Up/Down", text: "Navigate results" },
+            { key: "Enter", text: "Open selected result" }
+        ]},
+        { title: "Saved Searches", entries: [
+            { key: "Ctrl+S", text: "Save search with name" },
+            { key: "Enter", text: "Load selected saved search" },
+            { key: "Delete", text: "Remove selected saved search" },
+            { key: "/", text: "Filter saved searches" }
+        ]},
+        { title: "Other", entries: [
+            { key: "Ctrl+R", text: "Clear all fields" },
+            { key: "Esc", text: "Return to gallery" }
+        ]}
+    ]
+
     // Tab order for input fields
     property int focusField: 0  // 0=include, 1=exclude, 2=name, 3=scope, 4=sidebar
     property string includeText: ""

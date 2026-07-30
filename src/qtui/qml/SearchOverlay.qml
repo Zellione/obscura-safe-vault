@@ -17,6 +17,16 @@ Rectangle {
     signal openGallery(nodePath: string)
     signal openViewer(nodeKey: int)
 
+    // Help groups
+    property list<var> helpGroups: [
+        { title: "Search", entries: [
+            { key: "Tab", text: "Cycle scope: Both ↔ Images ↔ Galleries" },
+            { key: "Up/Down", text: "Navigate results" },
+            { key: "Enter", text: "Open selected" },
+            { key: "Esc", text: "Close overlay" }
+        ]}
+    ]
+
     property bool active: false
     property int currentScope: 0  // 0=Both, 1=Images, 2=Galleries
     property var searchResults: []
