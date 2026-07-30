@@ -81,10 +81,12 @@ Rectangle {
                 width: gridView.cellWidth - 4
                 height: gridView.cellHeight - 4
                 color: themePalette.surface
-                border.color: (selectionController.isSelected(modelData.path))
+                border.color: (gridView.currentIndex === index)
                     ? themePalette.accent
-                    : themePalette.border
-                border.width: 2
+                    : (selectionController.isSelected(modelData.path))
+                        ? themePalette.accent
+                        : themePalette.border
+                border.width: (gridView.currentIndex === index) ? 3 : 2
 
                 ColumnLayout {
                     anchors.fill: parent
@@ -177,10 +179,13 @@ Rectangle {
 
     onActiveFaceChanged: {
         updateFavorites();
+        gridView.forceActiveFocus();
+        gridView.currentIndex = 0;
     }
 
     Component.onCompleted: {
         updateFavorites();
+        gridView.forceActiveFocus();
     }
 
     function updateFavorites() {
@@ -202,20 +207,28 @@ Rectangle {
             activeFace = (activeFace + 1) % 2;
             event.accepted = true;
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            if (selectionController.currentRow >= 0 &&
-                selectionController.currentRow < currentFavorites.length) {
-                let item = currentFavorites[selectionController.currentRow];
+            if (gridView.currentIndex >= 0 &&
+                gridView.currentIndex < currentFavorites.length) {
+                let item = currentFavorites[gridView.currentIndex];
                 if (item.is_gallery) {
                     root.openGallery(item.path);
                 } else {
                     // contract: WS3 openAlbum
                     viewerController.openAlbum(
                         currentFavorites.map(it => it.nodeKey || 0),
-                        selectionController.currentRow
+                        gridView.currentIndex
                     );
                 }
             }
             event.accepted = true;
+        } else if (event.key === Qt.Key_Up || event.key === Qt.Key_Down ||
+                   event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
+            // Let GridView handle arrow keys natively (currentIndex will change automatically)
+            // Sync selection with currentIndex
+            if (gridView.currentIndex >= 0 && gridView.currentIndex < currentFavorites.length) {
+                selectionController.setSelected(currentFavorites[gridView.currentIndex].path, true);
+            }
+            event.accepted = false;  // Let GridView process it
         }
     }
 
