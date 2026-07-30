@@ -24,6 +24,7 @@
 #include "selection_controller.h"
 #include "session_state.h"
 #include "tag_controller.h"
+#include "favorites_controller.h"
 #include "gfx/theme.h"
 
 void initThemeFromEnv()
@@ -50,6 +51,7 @@ void registerOsvQmlTypes()
     qmlRegisterType<VideoFrameItem>("Osv", 1, 0, "VideoFrameItem");
     qmlRegisterType<FileOpController>("Osv", 1, 0, "FileOpController");
     qmlRegisterType<TagController>("Osv", 1, 0, "TagController");
+    qmlRegisterType<FavoritesController>("Osv", 1, 0, "FavoritesController");
 }
 
 AppContext::AppContext()
@@ -61,6 +63,7 @@ AppContext::AppContext()
     galleryModel.setViewerController(&viewerController);
     playbackEngine.setVault(&unlockController.vault());
     tagController.setVault(&unlockController.vault());
+    favoritesController.setVault(&unlockController.vault());
 
     // Wire vault unlock state to settings controller
     QObject::connect(&unlockController, &UnlockController::unlockedChanged,
@@ -91,4 +94,5 @@ void AppContext::expose(QQmlApplicationEngine& engine)
     ctx->setContextProperty("selectionController", &selectionController);
     ctx->setContextProperty("sessionState", &sessionState);
     ctx->setContextProperty("tagController", &tagController);
+    ctx->setContextProperty("favoritesController", &favoritesController);
 }

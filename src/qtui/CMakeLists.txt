@@ -156,6 +156,10 @@ add_executable(osv_qt_tag_controller_test tests/tag_controller_test.cpp tag_cont
 target_link_libraries(osv_qt_tag_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
 target_include_directories(osv_qt_tag_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(osv_qt_favorites_controller_test tests/favorites_controller_test.cpp favorites_controller.cpp)
+target_link_libraries(osv_qt_favorites_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
+target_include_directories(osv_qt_favorites_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 qt_add_executable(osv_qt_help_popup_qml_test tests/help_popup_qml_test.cpp)
 target_link_libraries(osv_qt_help_popup_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
 target_include_directories(osv_qt_help_popup_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -178,6 +182,29 @@ target_compile_definitions(osv_qt_settings_overlay_qml_test PRIVATE
 
 # Shaders for settings_overlay test
 qt6_add_shaders(osv_qt_settings_overlay_qml_test "osv_qt_settings_overlay_qml_test_shaders"
+    PREFIX "/osvqt"
+    FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
+)
+
+qt_add_executable(osv_qt_favorites_screen_qml_test
+    tests/favorites_screen_qml_test.cpp
+    theme_palette.cpp
+    favorites_controller.cpp
+    gallery_model.cpp
+    viewer_controller.cpp
+    selection_controller.cpp
+    thumb_cache.cpp
+    secure_image_item.cpp
+    rhi_quad_renderer.cpp
+)
+target_link_libraries(osv_qt_favorites_screen_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
+target_include_directories(osv_qt_favorites_screen_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(osv_qt_favorites_screen_qml_test PRIVATE
+    QTUI_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+)
+
+# Shaders for favorites_screen test
+qt6_add_shaders(osv_qt_favorites_screen_qml_test "osv_qt_favorites_screen_qml_test_shaders"
     PREFIX "/osvqt"
     FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
 )
@@ -212,6 +239,7 @@ qt_add_executable(osv-qt
     selection_controller.cpp
     session_state.cpp
     tag_controller.cpp
+    favorites_controller.cpp
 )
 
 # Shaders: compile to .qsb and embed as resources
