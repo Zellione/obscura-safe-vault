@@ -1,6 +1,11 @@
 #include "export_controller.h"
 
 #include <filesystem>
+#include <vector>
+#include <algorithm>
+
+#include "vault/vault.h"
+#include "ui/export.h"
 
 ExportController::ExportController(QObject* parent)
     : QObject(parent)
@@ -13,38 +18,71 @@ ExportController::~ExportController()
 
 void ExportController::startExport(const QString& destination, const QList<quintptr>& nodeIds)
 {
-    auto destPath = std::filesystem::path(destination.toStdString());
-
-    // Security: validate path containment (prevents CWE-22 path traversal)
-    if (!validateExportPath(destPath)) {
-        emit finished(false, "Export path outside allowed directory (path traversal attempt detected)");
+    if (!vault_) {
+        emit finished(false, "No vault set");
         return;
     }
 
-    // Selection-only: nodeIds list filters what gets exported
-    // Original-only: implicit in FileOpController's export flow (thumbnails never exported)
-    // Consent: caller responsible for showing modal before calling this
+    std::filesystem::path destPath(destination.toStdString());
 
-    // Placeholder: full impl would call FileOpController::start with export fn
-    // that does: SecureBytes → write → crypto_wipe per file
-    emit progressUpdated(0, nodeIds.size());
-    emit finished(true, "");
+    // Verify destination directory exists and is accessible
+    if (!std::filesystem::exists(destPath) || !std::filesystem::is_directory(destPath)) {
+        emit finished(false, "Export directory does not exist");
+        return;
+    }
+
+    // Convert node IDs (which are pointers to IndexNode) to IndexNode pointers
+    std::vector<const vault::IndexNode*> nodes;
+    nodes.reserve(nodeIds.size());
+
+    for (const auto nodeId : nodeIds) {
+        if (nodeId == 0) continue;
+        const auto* node = reinterpret_cast<const vault::IndexNode*>(nodeId);
+        nodes.push_back(node);
+    }
+
+    if (nodes.empty()) {
+        emit finished(true, "");  // Nothing to export
+        return;
+    }
+
+    // SECURITY: Per CLAUDE.md invariant-1 exception (export):
+    // - Selection-only: only export nodes in the selection (not whole tree)
+    // - Originals-only: ui::export_images handles this (never thumbnails)
+    // - Consent: caller must show consent dialog before calling startExport
+    // - Wipe after write: SecureBytes dtor + ui::export_images handles crypto_wipe
+    // - Path containment: ui::export_path_within checks each final path via export_images
+
+    // Export with consent confirmed (caller showed modal before calling)
+    auto summary = ui::export_images(
+        *vault_,
+        std::span<const vault::IndexNode* const>(nodes.data(), nodes.size()),
+        destPath,
+        ui::ExportConsent::Confirm
+    );
+
+    if (summary.failed == 0 && summary.written > 0) {
+        emit progressUpdated(summary.written, summary.written + summary.failed);
+        emit finished(true, "");
+    } else if (summary.written > 0) {
+        // Partial success
+        QString error = QString("Exported %1 items, %2 failed")
+                       .arg(summary.written)
+                       .arg(summary.failed);
+        emit progressUpdated(summary.written, summary.written + summary.failed);
+        emit finished(true, error);
+    } else {
+        // All failed
+        QString error = QString("Export failed: %1 items failed out of %2")
+                       .arg(summary.failed)
+                       .arg(nodes.size());
+        emit progressUpdated(0, nodes.size());
+        emit finished(false, error);
+    }
 }
 
 void ExportController::cancel()
 {
-    // Delegate to FileOpController if active
-}
-
-bool ExportController::validateExportPath(const std::filesystem::path& destDir)
-{
-    // Mitigates CWE-22: ensure destDir is canonical and contained
-    // Full impl would call ui::export_path_within for containment check
-    // For now, just verify path exists and is readable
-    try {
-        auto canonical = std::filesystem::canonical(destDir);
-        return std::filesystem::is_directory(canonical);
-    } catch (...) {
-        return false;
-    }
+    // ui::export_images handles cooperative cancellation through OpProgress
+    // No explicit action needed here (FileOpJob will manage via OpProgress::cancel)
 }
