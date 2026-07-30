@@ -6,6 +6,7 @@
 
 #include "vault/vault.h"
 #include "ui/export.h"
+#include "import_controller.h"
 
 ExportController::ExportController(QObject* parent)
     : QObject(parent)
@@ -16,10 +17,32 @@ ExportController::~ExportController()
 {
 }
 
+int ExportController::getQueueCount() const
+{
+    if (queue_count_provider_) {
+        return queue_count_provider_();
+    }
+    if (import_controller_) {
+        return import_controller_->queueCount();
+    }
+    return 0;
+}
+
+bool ExportController::shouldBlockForExclusiveOp() const
+{
+    return getQueueCount() > 0;
+}
+
 void ExportController::startExport(const QString& destination, const QList<quintptr>& nodeIds)
 {
     if (!vault_) {
         emit finished(false, "No vault set");
+        return;
+    }
+
+    // Check exclusive-op guard: refuse if imports are active
+    if (shouldBlockForExclusiveOp()) {
+        emit finished(false, "Cannot export while imports are active");
         return;
     }
 

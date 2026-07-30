@@ -3,8 +3,12 @@
 #include <QObject>
 #include <QString>
 #include <QList>
+#include <functional>
+#include <thread>
 
 namespace vault { class Vault; }
+class FileOpController;
+class ImportController;
 
 // Transfer controller: wraps ui::transfer_*, vault::combine_galleries, and vault::compact
 // All vault-mutating operations run on a background thread via FileOpController.
@@ -22,6 +26,13 @@ public:
 
     // Set the vault for operations (required before calling any operation)
     void setVault(vault::Vault* vault) { vault_ = vault; }
+
+    // Set dependencies for exclusive-op guard and thread pool
+    void setFileOpController(FileOpController* controller) { file_op_controller_ = controller; }
+    void setImportController(ImportController* controller) { import_controller_ = controller; }
+
+    // Alternative: inject a queue-count provider (for testing without full ImportController)
+    void setQueueCountProvider(std::function<int()> provider) { queue_count_provider_ = provider; }
 
     // Delete one or more items (images, videos, or galleries and their subtrees)
     // nodeIds are pointers to IndexNode objects
@@ -45,4 +56,17 @@ signals:
 
 private:
     vault::Vault* vault_ = nullptr;  // not owned, set by caller
+    FileOpController* file_op_controller_ = nullptr;  // not owned; required for worker threads
+    ImportController* import_controller_ = nullptr;  // not owned; used for exclusive-op guard
+    std::function<int()> queue_count_provider_;  // alternative to import_controller_ for testing
+
+    // Helper: check if exclusive-op guard should block this operation
+    [[nodiscard]] bool shouldBlockForExclusiveOp() const;
+
+    // Helper: get current import queue count (from provider or import_controller_)
+    [[nodiscard]] int getQueueCount() const;
+
+    // These are for testing: track last worker thread ID
+    friend class TransferControllerTest;
+    mutable std::thread::id last_worker_thread_id_;
 };
