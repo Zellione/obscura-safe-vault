@@ -167,6 +167,22 @@ Rectangle {
                 gesturePolicy: TapHandler.DragThreshold
                 onDoubleTapped: galleryModel.activate(index)
             }
+
+            // WS3 Finding 2: Hover auto-play gate (AnimHoverProbe hook — minimal integration line for merge)
+            AnimHoverProbe {
+                visible: !model.isGallery
+                isAnimated: false  // TODO: bind to model.isAnimated once GalleryModel has role
+                imageWidth: imageItem.sourceSize.width
+                imageHeight: imageItem.sourceSize.height
+                frameCount: 0  // TODO: bind to model.frameCount once available
+                onHoverStart: (ctrl) => {
+                    // Auto-play starts: connect to SecureImageItem
+                    // ctrl.frameAdvance → imageItem pixel updates
+                }
+                onHoverStop: {
+                    // Auto-play stops: cleanup
+                }
+            }
         }
 
         // Keyboard navigation
