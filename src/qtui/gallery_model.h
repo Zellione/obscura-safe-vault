@@ -14,6 +14,7 @@ namespace vault {
 }
 
 class ViewerController;
+class StatusController;
 
 // Gallery list model: displays galleries and media from vault().list(currentPath).
 // Roles: name (QString), isGallery (bool), nodeKey (quintptr — opaque const IndexNode*).
@@ -66,8 +67,14 @@ public:
     // Set viewer controller for drain coordination (optional, for async image loading)
     void setViewerController(ViewerController* viewer) noexcept { viewerController_ = viewer; }
 
+    // Set status controller for waste hint display (Scope: WS2.4)
+    void setStatusController(StatusController* status) noexcept { statusController_ = status; }
+
     // Public refresh for programmatic update (e.g., after unlock)
     void refresh();
+
+    // Check and display waste hint (Scope: WS2.4)
+    void checkAndDisplayWasteHint();
 
 signals:
     void currentPathChanged();
@@ -79,6 +86,7 @@ private:
 
     vault::Vault* vault_;
     ViewerController* viewerController_ = nullptr;
+    StatusController* statusController_ = nullptr;    // Scope: WS2.4 for waste hint
     std::unique_ptr<CoverProvider> coverProvider_;  // Task 2.4: Cover cache
     std::vector<const vault::IndexNode*> rows_;
     QString currentPath_;  // "/" for root, "/foo/bar" for nested

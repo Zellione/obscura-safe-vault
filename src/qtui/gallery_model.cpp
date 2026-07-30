@@ -1,11 +1,13 @@
 #include "gallery_model.h"
 #include "cover_provider.h"
+#include "status_controller.h"
 #include "thumb_cache.h"
 #include "viewer_controller.h"
 #include "vault/vault.h"
 #include "vault/safe_name.h"
 #include "ui/gallery_sort.h"
 #include "ui/child_counts.h"
+#include "ui/waste_threshold.h"
 
 #include <span>
 
@@ -156,6 +158,9 @@ void GalleryModel::refresh()
     rows_.insert(rows_.end(), media.begin(), media.end());
 
     endResetModel();
+
+    // Scope: WS2.4 — Check and display waste hint on refresh
+    checkAndDisplayWasteHint();
 }
 
 void GalleryModel::enterGallery(int row)
@@ -311,5 +316,21 @@ QString GalleryModel::sortLabel() const
     const auto& settings = vault::vault_settings(*vault_);
     auto label = ui::sort_key_label(sortKey_, settings.default_sort);
     return QString::fromStdString(label);
+}
+
+void GalleryModel::checkAndDisplayWasteHint()
+{
+    if (!vault_ || !statusController_)
+        return;
+
+    // Get waste info from vault
+    const auto wasted = vault_->wasted_bytes();
+    const auto file_size = vault::vault_file_bytes(*vault_);
+
+    // Check if waste exceeds threshold (Scope: WS2.4)
+    if (ui::should_display_waste(wasted, file_size)) {
+        // Display hint with Shift+C compact shortcut
+        statusController_->set(0, "Vault has unused space. Press Shift+C to compact.");
+    }
 }
 
