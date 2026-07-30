@@ -11,13 +11,17 @@ Window {
     color: themePalette.bg
     title: "osv-qt (experiment)"
 
-    // Global F1/F2 key handlers
+    // Global F1/F2/Shift+T key handlers
     Keys.onPressed: (event) => {
         if (event.key === Qt.Key_F1) {
             helpPopup.toggle();
             event.accepted = true;
         } else if (event.key === Qt.Key_F2) {
             settingsOverlay.toggle();
+            event.accepted = true;
+        } else if (event.key === Qt.Key_T && (event.modifiers & Qt.ShiftModifier)) {
+            // Shift+T: open tag overview screen
+            stack.push(tagOverviewScreenComponent);
             event.accepted = true;
         }
     }
@@ -265,6 +269,16 @@ Window {
                         if (parent && typeof parent.pop === 'function') parent.pop();
                         event.accepted = true;
                     }
+                }
+            }
+        }
+
+        // Tag overview screen
+        Component {
+            id: tagOverviewScreenComponent
+            TagOverviewScreen {
+                onBack: {
+                    stack.pop();
                 }
             }
         }
