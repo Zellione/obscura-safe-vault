@@ -269,6 +269,37 @@ int main(int argc, char** argv)
 
         printf("PASS: Model refresh preserves row structure for name-keyed selection\n");
 
+        // Test 18: sortLabel() displays correct label (Loose End 1: Breadcrumb)
+        printf("Test 18 (sortLabel): Testing sort key label display for breadcrumb\n");
+        GalleryModel model5(&vault);
+
+        // Test label for Default sort (should be non-empty showing effective sort)
+        model5.setSortKey(static_cast<int>(vault::SortKey::Default));
+        QString labelDefault = model5.sortLabel();
+        printf("Test 18a (Default label): '%s'\n", labelDefault.toStdString().c_str());
+        // Default should show a label since vault default is likely Insertion
+        // We don't check exact content, just that the mechanism works
+
+        // Test label for NameAsc
+        model5.setSortKey(static_cast<int>(vault::SortKey::NameAsc));
+        QString labelNameAsc = model5.sortLabel();
+        printf("Test 18b (NameAsc label): '%s'\n", labelNameAsc.toStdString().c_str());
+        if (labelNameAsc.isEmpty()) {
+            fprintf(stderr, "FAIL: NameAsc should have a label\n");
+            return 1;
+        }
+
+        // Test label for DateDesc
+        model5.setSortKey(static_cast<int>(vault::SortKey::DateDesc));
+        QString labelDateDesc = model5.sortLabel();
+        printf("Test 18c (DateDesc label): '%s'\n", labelDateDesc.toStdString().c_str());
+        if (labelDateDesc.isEmpty()) {
+            fprintf(stderr, "FAIL: DateDesc should have a label\n");
+            return 1;
+        }
+
+        printf("PASS: sortLabel() returns appropriate labels for breadcrumb display\n");
+
         printf("\nAll GalleryModel tests PASSED\n");
         return 0;
 

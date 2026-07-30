@@ -51,6 +51,7 @@ public:
     // Sort control (Task 2.1: Shift+S cycles forward, Shift+Cmd+S cycles backward)
     Q_INVOKABLE void nextSort();
     Q_INVOKABLE void prevSort();
+    Q_INVOKABLE QString sortLabel() const;  // For breadcrumb display (Loose End 1)
 
     [[nodiscard]] QString currentPath() const { return currentPath_; }
     [[nodiscard]] int sortKey() const;

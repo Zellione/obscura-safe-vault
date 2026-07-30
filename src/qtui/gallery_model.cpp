@@ -249,3 +249,14 @@ void GalleryModel::setSortKey(int key)
     refresh();
 }
 
+QString GalleryModel::sortLabel() const
+{
+    if (!vault_)
+        return QString();
+
+    // Get the vault default sort and generate the label for breadcrumb display
+    const auto& settings = vault::vault_settings(*vault_);
+    auto label = ui::sort_key_label(sortKey_, settings.default_sort);
+    return QString::fromStdString(label);
+}
+

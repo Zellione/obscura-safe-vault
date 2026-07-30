@@ -106,8 +106,10 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 text: {
                     let path = galleryModel.currentPath
-                    // TODO: Task 2.1 - add sort key label when non-Default
-                    // when (galleryModel.sortKey) implemented
+                    let label = galleryModel.sortLabel()
+                    if (label) {
+                        return path + "   Sort: " + label
+                    }
                     return path
                 }
                 color: themePalette.textDim
@@ -129,7 +131,9 @@ Rectangle {
             bottom: galleryFooter.top
         }
         cellWidth: currentViewMode === 0 ? width : cellSizes[currentViewMode] + 12
-        cellHeight: currentViewMode === 0 ? 60 : cellSizes[currentViewMode] + 12
+        // List row height (mode 0): 44px per SDL ROW_H (two-line name + metadata layout)
+        // Grid modes: cell size + 12px padding
+        cellHeight: currentViewMode === 0 ? 44 : cellSizes[currentViewMode] + 12
         model: galleryModel
         focus: true
 
