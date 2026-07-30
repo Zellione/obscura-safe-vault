@@ -8,7 +8,7 @@ set(CMAKE_AUTOMOC ON)
 # Repo root, for reusing src/ and vendor/ untouched.
 get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 
-find_package(Qt6 6.7 REQUIRED COMPONENTS Core Gui GuiPrivate Qml Quick ShaderTools)
+find_package(Qt6 6.7 REQUIRED COMPONENTS Core Gui GuiPrivate Qml Quick ShaderTools Test)
 qt_standard_project_setup()
 
 set(CODEC_PREFIX "${REPO_ROOT}/vendor/codecs-prefix")
@@ -42,6 +42,10 @@ add_library(osv_qt_core STATIC
     # text input models (Task 3 uses SecureTextInput)
     ${REPO_ROOT}/src/ui/text_input_model.cpp
     ${REPO_ROOT}/src/ui/secure_text_input.cpp
+    # file operations (Task F3: FileOpController)
+    ${REPO_ROOT}/src/ui/file_op_job.cpp
+    ${REPO_ROOT}/src/ui/export.cpp
+    ${REPO_ROOT}/src/ui/meta_format.cpp
     # theme system (Task 8)
     ${REPO_ROOT}/src/gfx/theme.cpp
     ${REPO_ROOT}/vendor/monocypher/src/monocypher.c
@@ -117,6 +121,10 @@ add_executable(osv_qt_gallery_model_test tests/gallery_model_test.cpp gallery_mo
 target_link_libraries(osv_qt_gallery_model_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick)
 target_include_directories(osv_qt_gallery_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(osv_qt_file_op_controller_test tests/file_op_controller_test.cpp file_op_controller.cpp)
+target_link_libraries(osv_qt_file_op_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
+target_include_directories(osv_qt_file_op_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 add_executable(osv_qt_thumb_stress_test tests/thumb_stress_test.cpp gallery_model.cpp thumb_cache.cpp viewer_controller.cpp secure_image_item.cpp rhi_quad_renderer.cpp)
 target_link_libraries(osv_qt_thumb_stress_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick)
 target_include_directories(osv_qt_thumb_stress_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -140,6 +148,7 @@ qt_add_executable(osv-qt
     theme_palette.cpp
     playback_engine.cpp
     audio_pipe.cpp
+    file_op_controller.cpp
 )
 
 # Shaders: compile to .qsb and embed as resources

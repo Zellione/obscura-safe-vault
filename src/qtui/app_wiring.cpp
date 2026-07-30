@@ -15,6 +15,7 @@
 #include "viewer_controller.h"
 #include "theme_palette.h"
 #include "playback_engine.h"
+#include "file_op_controller.h"
 #include "gfx/theme.h"
 
 void initThemeFromEnv()
@@ -33,6 +34,7 @@ void registerOsvQmlTypes()
     qmlRegisterType<SecureTextField>("Osv", 1, 0, "SecureTextField");
     qmlRegisterType<SecureImageItem>("Osv", 1, 0, "SecureImageItem");
     qmlRegisterType<VideoFrameItem>("Osv", 1, 0, "VideoFrameItem");
+    qmlRegisterType<FileOpController>("Osv", 1, 0, "FileOpController");
 }
 
 AppContext::AppContext()
@@ -55,4 +57,5 @@ void AppContext::expose(QQmlApplicationEngine& engine)
     ctx->setContextProperty("themePalette", &themePalette);
     ctx->setContextProperty("playbackEngine", &playbackEngine);
     ctx->setContextProperty("vaultListModel", &vaultListModel);
+    ctx->setContextProperty("fileOpController", &fileOpController);
 }
