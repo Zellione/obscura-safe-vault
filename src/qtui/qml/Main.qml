@@ -18,13 +18,9 @@ Window {
         id: renameDialog
     }
 
-    Rectangle {
+    FooterBar {
         id: footerBar
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        height: 32
-        color: themePalette.bg
+        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
     }
 
     StackView {
