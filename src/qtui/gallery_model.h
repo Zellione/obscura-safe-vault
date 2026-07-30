@@ -42,6 +42,9 @@ public:
     Q_INVOKABLE QString rename(int row, const QString& newName);
     Q_INVOKABLE quintptr nodeKeyAt(int row) const;
 
+    // For SelectionController name-keying (Phase 58): get the name of row's node
+    Q_INVOKABLE QString nameAt(int row) const;
+
     [[nodiscard]] QString currentPath() const { return currentPath_; }
 
     // Set viewer controller for drain coordination (optional, for async image loading)

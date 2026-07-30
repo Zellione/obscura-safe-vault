@@ -203,3 +203,15 @@ quintptr GalleryModel::nodeKeyAt(int row) const
     return static_cast<quintptr>(reinterpret_cast<uintptr_t>(node));
 }
 
+QString GalleryModel::nameAt(int row) const
+{
+    if (row < 0 || row >= rowCount())
+        return QString();
+
+    const auto* node = rows_[row];
+    if (!node)
+        return QString();
+
+    return QString::fromStdString(node->name);
+}
+

@@ -21,6 +21,8 @@
 #include "status_controller.h"
 #include "settings_controller.h"
 #include "help_model.h"
+#include "selection_controller.h"
+#include "session_state.h"
 #include "gfx/theme.h"
 
 void initThemeFromEnv()
@@ -62,6 +64,11 @@ AppContext::AppContext()
                      &settingsController, [this]() {
                          settingsController.setVaultUnlocked(unlockController.unlocked());
                      });
+
+    // Wire SelectionController to GalleryModel for name-keyed selection
+    selectionController.setNameLookup([this](int row) {
+        return galleryModel.nameAt(row);
+    });
 }
 
 void AppContext::expose(QQmlApplicationEngine& engine)
@@ -78,4 +85,6 @@ void AppContext::expose(QQmlApplicationEngine& engine)
     ctx->setContextProperty("statusController", &statusController);
     ctx->setContextProperty("settingsController", &settingsController);
     ctx->setContextProperty("helpModel", &helpModel);
+    ctx->setContextProperty("selectionController", &selectionController);
+    ctx->setContextProperty("sessionState", &sessionState);
 }

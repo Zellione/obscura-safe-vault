@@ -12,6 +12,8 @@
 #include "status_controller.h"
 #include "settings_controller.h"
 #include "help_model.h"
+#include "selection_controller.h"
+#include "session_state.h"
 
 class QQmlApplicationEngine;
 
@@ -35,6 +37,8 @@ struct AppContext {
     StatusController statusController;
     SettingsController settingsController;
     HelpModel helpModel;
+    SelectionController selectionController;
+    SessionState sessionState;
 
     AppContext();
 
