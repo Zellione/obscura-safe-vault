@@ -66,6 +66,7 @@ void AudioPipe::clear()
         SDL_ClearAudioStream(stream_);
         samples_fed_ = 0;
     }
+    audio_eof_ = false;  // Reset EOF flag on seek
 }
 
 void AudioPipe::feed(const media::AudioFrame& frame)
@@ -91,11 +92,32 @@ uint64_t AudioPipe::samples_consumed() noexcept
     // Convert bytes to sample count (F32 = 4 bytes per sample)
     uint64_t queued_samples = (uint64_t)queued_bytes / (sizeof(float) * (channels_ > 0 ? channels_ : 1));
 
-    // Consumed = fed - queued, clamped to 0
+    // Consumed = fed - queued, clamped to 0 (mirrors SDL app clock(), lines 388-389)
     if (samples_fed_ > queued_samples) {
         return samples_fed_ - queued_samples;
     }
     return 0;
+}
+
+void AudioPipe::pump_audio(std::function<std::optional<media::AudioFrame>()> get_frame_callback,
+                           int sample_rate, int channels)
+{
+    if (!stream_ || audio_eof_) {
+        return;  // Already at EOF, stop pulling
+    }
+
+    // Target ~200ms of buffered audio (mirrors SDL app pump_audio, lines 371)
+    const int target = sample_rate * channels * (int)sizeof(float) / 5;
+
+    // Feed audio frames while queued < target (mirrors lines 372-378)
+    while (SDL_GetAudioStreamQueued(stream_) < target) {
+        auto a = get_frame_callback();
+        if (!a) {
+            audio_eof_ = true;  // Mark EOF, stop calling get_frame_callback
+            break;
+        }
+        feed(*a);
+    }
 }
 
 void AudioPipe::set_gain(float gain) noexcept

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <functional>
 
 // Forward declarations
 struct SDL_AudioStream;
@@ -25,15 +26,23 @@ public:
     // Must be called before any feed/clock/gain operations.
     [[nodiscard]] bool open(int channels, int sample_rate);
 
-    // Clear the audio stream (used on seek). Retained for compatibility with SDL app.
+    // Clear the audio stream (used on seek). Resets fed/queued accounting and audioEof_ flag.
     void clear();
 
-    // Feed one decoded audio frame to the stream. Called repeatedly from worker
-    // to maintain ~200ms buffer. No-op if stream not open.
+    // Feed one decoded audio frame to the stream. Called by pump_audio or directly.
     void feed(const media::AudioFrame& frame);
 
+    // Pump audio frames until ~200ms queued (mirrors SDL app pump_audio, lines 366-379).
+    // Feeds frames until SDL_GetAudioStreamQueued >= target bytes, or decoder EOF reached.
+    // Called once per worker iteration to maintain buffer.
+    // get_frame_callback: returns std::optional<AudioFrame> (nullptr at EOF).
+    // After first call returns nullopt, pump_audio stops calling get_frame_callback
+    // until the next seek (clear() resets the flag).
+    void pump_audio(std::function<std::optional<media::AudioFrame>()> get_frame_callback,
+                    int sample_rate, int channels);
+
     // Return the number of audio samples consumed by the device since seek_base.
-    // Derived from total fed minus currently queued bytes, adjusted for interleaving.
+    // Mirrors SDL app clock() derivation (lines 388-389): fed - queued_bytes_converted.
     [[nodiscard]] uint64_t samples_consumed() noexcept;
 
     // Set playback gain (0.0 = silent, 1.0 = full). Clamped to [0, 1].
@@ -60,4 +69,5 @@ private:
     int              sample_rate_     = 0;
     bool             dummy_driver_    = false;  // Set on open if device is dummy
     bool             subsystem_owned_ = false;  // Did we init SDL audio subsystem
+    bool             audio_eof_       = false;  // Decoder has reached EOF; stop calling get_frame
 };

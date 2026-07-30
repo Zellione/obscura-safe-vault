@@ -76,10 +76,7 @@ void PlaybackEngine::open(quintptr nodeKey)
         duration_ = decoder_->duration_us() / 1e6;
         emit durationChanged();
 
-        // Open audio pipe if audio stream exists (M6b)
-        // Note: Audio initialization is deferred to the worker thread to avoid
-        // blocking the GUI thread on device detection/initialization
-        (void)decoder_;  // suppress unused warning for now
+        // Audio initialization deferred to worker thread (M6b, avoids blocking GUI on device setup)
 
         // Create decode worker
         auto params = decoder_->video_codecpar();
@@ -216,18 +213,25 @@ void PlaybackEngine::runWorker(std::stop_token st)
 {
     bool dummy_driver_warned = false;
     bool audio_initialized = false;
+    int audio_no_consume_count = 0;  // Track iterations where samples_consumed stays at 0
+    uint64_t last_samples_consumed = 0;
 
     while (!st.stop_requested()) {
         // Lazy initialize audio on first worker iteration (avoids blocking GUI thread)
-        // M6b: Audio initialization deferred. For now, we use wall-clock pacing as fallback.
-        // Audio support requires careful handling of the audio stream state across threads.
         if (!audio_initialized) {
             audio_initialized = true;  // Only try once
             if (decoder_ && decoder_->has_audio()) {
-                qCDebug(lcPlayback) << "Audio stream detected but not yet integrated; using wall-clock fallback";
-                // TODO M6b: Initialize AudioPipe here when audio subsystem integration is stable
+                audioPipe_ = std::make_unique<AudioPipe>();
+                auto ainfo = decoder_->audio_info();
+                if (audioPipe_->open(ainfo.channels, ainfo.sample_rate)) {
+                    qCDebug(lcPlayback) << "Audio device opened successfully";
+                } else {
+                    qCWarning(lcPlayback) << "Failed to open audio device";
+                    audioPipe_.reset();  // audio optional; keep playing video
+                }
             }
         }
+
         // Drain control queue
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -242,7 +246,7 @@ void PlaybackEngine::runWorker(std::stop_token st)
                         clockBase_ = msg.seekTarget;
                         audioSeekBase_ = msg.seekTarget;
                         sentEof_ = false;
-                        // Clear audio stream on seek
+                        // Clear audio stream on seek (reset fed/eof tracking)
                         if (audioPipe_) {
                             audioPipe_->clear();
                         }
@@ -254,9 +258,32 @@ void PlaybackEngine::runWorker(std::stop_token st)
             }
         }
 
-        // Pump audio frames (M6b) - TODO: when audio integration is complete
-        // For now, we skip audio processing and rely on wall-clock pacing fallback
-        // if (audioPipe_) { ... }
+        // Pump audio frames (M6b) - mirrors SDL app pump_audio (lines 366-379)
+        // Feed until ~200ms queued, or decoder EOF reached
+        if (audioPipe_) {
+            audioPipe_->pump_audio(
+                [this]() { return decoder_->next_audio_frame(); },
+                decoder_->audio_info().sample_rate,
+                decoder_->audio_info().channels
+            );
+
+            // Detect if audio device is not consuming (dummy driver or no hardware)
+            uint64_t current_consumed = audioPipe_->samples_consumed();
+            if (current_consumed == last_samples_consumed) {
+                audio_no_consume_count++;
+                if (audio_no_consume_count >= 10 && !dummy_driver_warned) {
+                    // After 10 iterations with no consumed samples, switch to wall-clock
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    audioUsingFallback_ = true;
+                    dummy_driver_warned = true;
+                    qCDebug(lcPlayback) << "Audio not consuming samples, switching to wall-clock fallback";
+                }
+            } else {
+                // Audio is consuming, keep using audio clock
+                audio_no_consume_count = 0;
+                last_samples_consumed = current_consumed;
+            }
+        }
 
         // Check if we should fetch more packets
         bool shouldPlay = false;
