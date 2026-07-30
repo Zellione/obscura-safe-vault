@@ -47,6 +47,8 @@ add_library(osv_qt_core STATIC
     # text input models (Task 3 uses SecureTextInput)
     ${REPO_ROOT}/src/ui/text_input_model.cpp
     ${REPO_ROOT}/src/ui/secure_text_input.cpp
+    ${REPO_ROOT}/src/ui/passphrase.cpp
+    ${REPO_ROOT}/src/ui/unlock_logic.cpp
     # file operations (Task F3: FileOpController)
     ${REPO_ROOT}/src/ui/file_op_job.cpp
     ${REPO_ROOT}/src/ui/export.cpp
@@ -150,6 +152,10 @@ add_executable(osv_qt_session_state_test tests/session_state_test.cpp session_st
 target_link_libraries(osv_qt_session_state_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_session_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(osv_qt_vault_manager_controller_test tests/vault_manager_controller_test.cpp vault_manager_controller.cpp vault_list_model.cpp)
+target_link_libraries(osv_qt_vault_manager_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
+target_include_directories(osv_qt_vault_manager_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 qt_add_executable(osv_qt_help_popup_qml_test tests/help_popup_qml_test.cpp)
 target_link_libraries(osv_qt_help_popup_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
 target_include_directories(osv_qt_help_popup_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -193,6 +199,7 @@ qt_add_executable(osv-qt
     rhi_quad_renderer.cpp
     unlock_controller.cpp
     vault_list_model.cpp
+    vault_manager_controller.cpp
     gallery_model.cpp
     thumb_cache.cpp
     viewer_controller.cpp

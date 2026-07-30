@@ -12,6 +12,7 @@
 #include "video_frame_item.h"
 #include "unlock_controller.h"
 #include "vault_list_model.h"
+#include "vault_manager_controller.h"
 #include "gallery_model.h"
 #include "thumb_cache.h"
 #include "viewer_controller.h"
@@ -75,6 +76,7 @@ void AppContext::expose(QQmlApplicationEngine& engine)
 {
     QQmlContext* ctx = engine.rootContext();
     ctx->setContextProperty("unlockController", &unlockController);
+    ctx->setContextProperty("vaultManagerController", &vaultManagerController);
     ctx->setContextProperty("thumbCache", &thumbCache);
     ctx->setContextProperty("galleryModel", &galleryModel);
     ctx->setContextProperty("viewerController", &viewerController);

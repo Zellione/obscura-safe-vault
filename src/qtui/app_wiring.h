@@ -3,6 +3,7 @@
 
 #include "unlock_controller.h"
 #include "vault_list_model.h"
+#include "vault_manager_controller.h"
 #include "gallery_model.h"
 #include "thumb_cache.h"
 #include "viewer_controller.h"
@@ -27,6 +28,7 @@ void registerOsvQmlTypes();
 // by the normal run path and the selftest harness.
 struct AppContext {
     UnlockController unlockController;
+    VaultManagerController vaultManagerController;
     ThumbCache thumbCache;
     GalleryModel galleryModel;
     ViewerController viewerController;
