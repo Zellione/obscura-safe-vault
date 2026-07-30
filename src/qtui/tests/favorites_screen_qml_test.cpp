@@ -5,12 +5,14 @@
 #include <QQmlContext>
 #include <QObject>
 #include <QUrl>
+#include <QtQml/qqml.h>
 
 #include "../theme_palette.h"
 #include "../favorites_controller.h"
 #include "../gallery_model.h"
 #include "../viewer_controller.h"
 #include "../selection_controller.h"
+#include "../secure_image_item.h"
 
 // Test 1: FavoritesScreen.qml loads without QML compile errors
 static bool test_favorites_screen_qml_loads()
@@ -18,6 +20,7 @@ static bool test_favorites_screen_qml_loads()
     printf("Test 1: FavoritesScreen.qml loads without errors...\n");
 
     QQmlEngine engine;
+    qmlRegisterType<SecureImageItem>("Osv", 1, 0, "SecureImageItem");
     QUrl qmlPath("file://" QTUI_QML_DIR "/FavoritesScreen.qml");
     QQmlComponent component(&engine, qmlPath);
 
@@ -41,6 +44,7 @@ static bool test_favorites_screen_instantiates()
     printf("Test 2: FavoritesScreen instantiates without errors...\n");
 
     QQmlEngine engine;
+    qmlRegisterType<SecureImageItem>("Osv", 1, 0, "SecureImageItem");
 
     // Create the required objects for context properties
     ThemePalette themePalette;
