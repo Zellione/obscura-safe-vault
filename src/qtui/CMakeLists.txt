@@ -210,6 +210,10 @@ add_executable(osv_qt_export_controller_test tests/export_controller_test.cpp ex
 target_link_libraries(osv_qt_export_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_export_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(osv_qt_transfer_controller_test tests/transfer_controller_test.cpp transfer_controller.cpp)
+target_link_libraries(osv_qt_transfer_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
+target_include_directories(osv_qt_transfer_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 qt_add_executable(osv_qt_help_popup_qml_test tests/help_popup_qml_test.cpp)
 target_link_libraries(osv_qt_help_popup_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
 target_include_directories(osv_qt_help_popup_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -264,6 +268,7 @@ qt_add_executable(osv-qt
     settings_controller.cpp
     import_controller.cpp
     export_controller.cpp
+    transfer_controller.cpp
     help_model.cpp
     selection_controller.cpp
     session_state.cpp
