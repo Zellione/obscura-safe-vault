@@ -37,6 +37,7 @@ add_library(osv_qt_core STATIC
     # media: video decode + demux (Task 9 adds video playback)
     ${OSV_MEDIA_SRC}
     ${REPO_ROOT}/src/ui/advanced_search_model.cpp
+    ${REPO_ROOT}/src/ui/search_model.cpp
     ${REPO_ROOT}/src/ui/gallery_sort.cpp
     ${REPO_ROOT}/src/ui/natural_sort.cpp
     ${REPO_ROOT}/src/ui/playback_model.cpp
@@ -160,6 +161,10 @@ add_executable(osv_qt_favorites_controller_test tests/favorites_controller_test.
 target_link_libraries(osv_qt_favorites_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
 target_include_directories(osv_qt_favorites_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(osv_qt_search_model_adapter_test tests/search_model_adapter_test.cpp search_model_adapter.cpp)
+target_link_libraries(osv_qt_search_model_adapter_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
+target_include_directories(osv_qt_search_model_adapter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 qt_add_executable(osv_qt_help_popup_qml_test tests/help_popup_qml_test.cpp)
 target_link_libraries(osv_qt_help_popup_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
 target_include_directories(osv_qt_help_popup_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -240,6 +245,7 @@ qt_add_executable(osv-qt
     session_state.cpp
     tag_controller.cpp
     favorites_controller.cpp
+    search_model_adapter.cpp
 )
 
 # Shaders: compile to .qsb and embed as resources
