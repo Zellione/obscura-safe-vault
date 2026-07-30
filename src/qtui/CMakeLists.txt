@@ -174,6 +174,10 @@ add_executable(osv_qt_tag_list_import_adapter_test tests/tag_list_import_adapter
 target_link_libraries(osv_qt_tag_list_import_adapter_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
 target_include_directories(osv_qt_tag_list_import_adapter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(osv_qt_tag_list_import_controller_test tests/tag_list_import_controller_test.cpp tag_list_import_controller.cpp tag_list_import_adapter.cpp)
+target_link_libraries(osv_qt_tag_list_import_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
+target_include_directories(osv_qt_tag_list_import_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 add_executable(osv_qt_adv_search_controller_test tests/adv_search_controller_test.cpp adv_search_controller.cpp)
 target_link_libraries(osv_qt_adv_search_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
 target_include_directories(osv_qt_adv_search_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

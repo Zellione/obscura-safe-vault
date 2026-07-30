@@ -1,6 +1,7 @@
 #include "tag_list_import_controller.h"
 #include "tag_list_import_adapter.h"
 #include <vault/vault.h>
+#include <platform/paths.h>
 #include <QFile>
 #include <QUrl>
 
@@ -48,10 +49,19 @@ int TagListImportController::importTagsFromFile(const QString& nodePath, const Q
         actualPath = QUrl(filePath).toLocalFile();
     }
 
+    // SECURITY: Normalize user-supplied path per CLAUDE.md invariant
+    // "Externally-supplied paths go through platform::normalize_user_path before fopen"
+    auto normalized = platform::normalize_user_path(actualPath.toStdString());
+    if (!normalized) {
+        lastError_ = "Invalid file path";
+        emit importFinished(-1);
+        return -1;
+    }
+
     // Read file
-    QFile file(actualPath);
+    QFile file(QString::fromStdString(normalized->string()));
     if (!file.open(QIODevice::ReadOnly)) {
-        lastError_ = "Failed to open file: " + file.errorString();
+        lastError_ = "Failed to open file";
         emit importFinished(-1);
         return -1;
     }
