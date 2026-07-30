@@ -278,10 +278,10 @@ Rectangle {
                     horizontalAlignment: Text.AlignHCenter
                 }
 
-                // Name label
+                // Name label — anchors above counts when visible (BREAKAGE FIX)
                 Text {
                     anchors {
-                        bottom: parent.bottom
+                        bottom: countsLabel.visible ? countsLabel.top : parent.bottom
                         horizontalCenter: parent.horizontalCenter
                         margins: 4
                     }
