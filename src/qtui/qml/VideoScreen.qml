@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 import Osv 1.0
 
 Rectangle {
@@ -11,6 +12,24 @@ Rectangle {
     property real panX: 0
     property real panY: 0
     property real fitScale: 1.0
+
+    // Help groups for F1 help popup
+    property var helpGroups: [
+        {
+            title: "Video Player",
+            entries: [
+                { keys: "Space", description: "Play/pause" },
+                { keys: "J/L", description: "Seek ±5 seconds" },
+                { keys: "R", description: "Toggle loop" },
+                { keys: "[/]", description: "Volume ±5%" },
+                { keys: ",/.", description: "Frame-step forward/backward" },
+                { keys: "M", description: "Mute" },
+                { keys: "+/-", description: "Volume ±5%" },
+                { keys: "Scroll", description: "Zoom" },
+                { keys: "Esc", description: "Exit video" }
+            ]
+        }
+    ]
 
     // Bind playback engine to this video item
     Component.onCompleted: {
@@ -84,50 +103,108 @@ Rectangle {
 
     // Playback controls overlay (bottom)
     Rectangle {
+        id: controlsOverlay
         anchors {
             bottom: parent.bottom
             left: parent.left
             right: parent.right
             margins: 0
         }
-        height: 60
         color: Qt.rgba(0, 0, 0, 0.6)
         visible: playbackEngine && playbackEngine.duration > 0
 
-        Row {
+        Column {
             anchors {
-                verticalCenter: parent.verticalCenter
                 left: parent.left
-                margins: 12
+                right: parent.right
+                bottom: parent.bottom
+                margins: 0
             }
-            spacing: 12
+            spacing: 0
 
-            // Play/pause button
-            Button {
-                text: playbackEngine.playing ? "Pause" : "Play"
-                onClicked: {
-                    if (playbackEngine.playing) {
-                        playbackEngine.pause();
-                    } else {
-                        playbackEngine.play();
+            // Seek bar
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: 8
+                color: Qt.rgba(0.3, 0.3, 0.3, 0.8)
+
+                Rectangle {
+                    height: parent.height
+                    width: playbackEngine.duration > 0 ?
+                           (playbackEngine.position / playbackEngine.duration) * parent.width : 0
+                    color: themePalette.accent
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: (mouse) => {
+                        if (playbackEngine.duration > 0) {
+                            const pos = (mouse.x / width) * playbackEngine.duration;
+                            playbackEngine.seekBy(pos - playbackEngine.position);
+                        }
                     }
                 }
-                palette.buttonText: themePalette.text
             }
 
-            // Position display
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: (playbackEngine.clockText ?? "0:00") + " / " +
-                      (function() {
-                        const d = playbackEngine.duration;
-                        const mins = Math.floor(d / 60);
-                        const secs = Math.floor(d % 60);
-                        return (mins < 10 ? "0" : "") + mins + ":" +
-                               (secs < 10 ? "0" : "") + secs;
-                      })()
-                color: themePalette.text
-                font.pixelSize: 12
+            // Controls row
+            Row {
+                anchors {
+                    left: parent.left
+                    right: parent.right
+                    margins: 12
+                }
+                height: 60
+                spacing: 12
+                padding: 8
+
+                // Play/pause button
+                Button {
+                    text: playbackEngine.playing ? "Pause" : "Play"
+                    onClicked: {
+                        if (playbackEngine.playing) {
+                            playbackEngine.pause();
+                        } else {
+                            playbackEngine.play();
+                        }
+                    }
+                    palette.buttonText: themePalette.text
+                }
+
+                // Position display
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: (playbackEngine.clockText ?? "0:00") + " / " +
+                          (function() {
+                            const d = playbackEngine.duration;
+                            const mins = Math.floor(d / 60);
+                            const secs = Math.floor(d % 60);
+                            return (mins < 10 ? "0" : "") + mins + ":" +
+                                   (secs < 10 ? "0" : "") + secs;
+                          })()
+                    color: themePalette.text
+                    font.pixelSize: 12
+                }
+
+                // Spacer
+                Item { Layout.fillWidth: true }
+
+                // Loop indicator
+                Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 40
+                    height: 24
+                    color: playbackEngine.loopEnabled ? themePalette.accent : Qt.rgba(0.4, 0.4, 0.4, 0.5)
+                    radius: 4
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "R"
+                        color: playbackEngine.loopEnabled ? themePalette.imgBg : themePalette.textDim
+                        font.pixelSize: 12
+                        font.bold: true
+                    }
+                }
             }
         }
     }
@@ -155,6 +232,10 @@ Rectangle {
         } else if (event.key === Qt.Key_M) {
             playbackEngine.toggleMute();
             event.accepted = true;
+        } else if (event.key === Qt.Key_R) {
+            // R: toggle loop mode
+            playbackEngine.toggleLoop();
+            event.accepted = true;
         } else if (event.key === Qt.Key_Plus || event.key === Qt.Key_Equal) {
             // + or = key (same key on US keyboard)
             playbackEngine.setVolume(playbackEngine.volume + 0.05);
@@ -162,6 +243,26 @@ Rectangle {
         } else if (event.key === Qt.Key_Minus) {
             playbackEngine.setVolume(playbackEngine.volume - 0.05);
             event.accepted = true;
+        } else if (event.key === Qt.Key_BracketLeft) {
+            // [: volume -5%
+            playbackEngine.setVolume(playbackEngine.volume - 0.05);
+            event.accepted = true;
+        } else if (event.key === Qt.Key_BracketRight) {
+            // ]: volume +5%
+            playbackEngine.setVolume(playbackEngine.volume + 0.05);
+            event.accepted = true;
+        } else if (event.key === Qt.Key_Comma) {
+            // ,: frame-step backward (when paused)
+            if (!playbackEngine.playing) {
+                playbackEngine.stepFrame(-1);
+                event.accepted = true;
+            }
+        } else if (event.key === Qt.Key_Period) {
+            // .: frame-step forward (when paused)
+            if (!playbackEngine.playing) {
+                playbackEngine.stepFrame(1);
+                event.accepted = true;
+            }
         }
     }
 
