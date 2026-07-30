@@ -30,6 +30,7 @@ class ViewerController : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString imageName READ imageName NOTIFY imageNameChanged)
     Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
+    Q_PROPERTY(int currentIndex READ currentIndex NOTIFY currentIndexChanged)
 public:
     explicit ViewerController(vault::Vault* vault, GalleryModel* galleryModel, QObject* parent = nullptr);
     ~ViewerController();
@@ -51,11 +52,13 @@ public:
 
     [[nodiscard]] QString imageName() const { return imageName_; }
     [[nodiscard]] bool loading() const { return loading_; }
+    [[nodiscard]] int currentIndex() const { return currentGalleryIndex_; }
 
 signals:
     void imageLoaded();
     void imageNameChanged();
     void loadingChanged();
+    void currentIndexChanged();
 
 private:
     friend class ViewerWorker;

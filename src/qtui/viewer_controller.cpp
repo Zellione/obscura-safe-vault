@@ -122,7 +122,10 @@ void ViewerController::open(int galleryRow)
     }
 
     bumpGeneration();
-    currentGalleryIndex_ = galleryRow;
+    if (currentGalleryIndex_ != galleryRow) {
+        currentGalleryIndex_ = galleryRow;
+        emit currentIndexChanged();
+    }
     loadImageAtIndex(galleryRow);
 }
 
@@ -140,7 +143,10 @@ void ViewerController::prev()
         bool isGallery = galleryModel_->data(idx, GalleryModel::IsGalleryRole).toBool();
         if (!isGallery) {
             bumpGeneration();
-            currentGalleryIndex_ = searchIdx;
+            if (currentGalleryIndex_ != searchIdx) {
+                currentGalleryIndex_ = searchIdx;
+                emit currentIndexChanged();
+            }
             loadImageAtIndex(searchIdx);
             return;
         }
@@ -162,7 +168,10 @@ void ViewerController::next()
         bool isGallery = galleryModel_->data(idx, GalleryModel::IsGalleryRole).toBool();
         if (!isGallery) {
             bumpGeneration();
-            currentGalleryIndex_ = searchIdx;
+            if (currentGalleryIndex_ != searchIdx) {
+                currentGalleryIndex_ = searchIdx;
+                emit currentIndexChanged();
+            }
             loadImageAtIndex(searchIdx);
             return;
         }

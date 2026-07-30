@@ -51,6 +51,9 @@ Rectangle {
             border.color: root.currentIndex === index ? themePalette.accent : "transparent"
             border.width: root.currentIndex === index ? 2 : 0
 
+            // Skip galleries (only show media items)
+            visible: !isGallery
+
             // Clamp spacing when at boundaries
             ListView.onAdd: {
                 if (root.currentIndex === index) {
@@ -65,6 +68,16 @@ Rectangle {
                     margins: 2
                 }
                 color: themePalette.imgBg
+
+                // Show a simple label with item name for now
+                Text {
+                    anchors.centerIn: parent
+                    text: name
+                    color: themePalette.textDim
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
+                    width: parent.width - 4
+                }
             }
 
             // Click handler: jump to this item

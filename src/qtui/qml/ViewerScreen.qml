@@ -21,7 +21,8 @@ Rectangle {
                 { keys: "Esc", description: "Close viewer" },
                 { keys: "Arrow Keys/Mouse Drag", description: "Pan image" },
                 { keys: "+/-/Scroll", description: "Zoom in/out" },
-                { keys: "F", description: "Fit to window" }
+                { keys: "F", description: "Fit to window / Cycle zoom modes" },
+                { keys: "T", description: "Toggle thumbnail strip visibility" }
             ]
         }
     ]
@@ -64,6 +65,10 @@ Rectangle {
         panX = Math.max(-maxPanX, Math.min(maxPanX, panX));
         panY = Math.max(-maxPanY, Math.min(maxPanY, panY));
     }
+
+    // Keyboard shortcuts
+    property real thumbStripAnimDuration: 200  // ms
+    property bool thumbStripVisible: true  // persisted via SessionState
 
     // Bind to controller
     Component.onCompleted: {
@@ -163,6 +168,20 @@ Rectangle {
         }
     }
 
+    // Thumbnail strip
+    ThumbStrip {
+        id: thumbStrip
+        stripSide: sessionState.stripSide()  // 0=Bottom, 1=Left
+        currentIndex: viewerController.currentIndex
+        visible: root.thumbStripVisible
+
+        model: galleryModel
+
+        onJumpToIndex: (index) => {
+            viewerController.open(index);
+        }
+    }
+
     // Keyboard navigation
     Keys.onLeftPressed: {
         viewerController.prev();
@@ -174,7 +193,14 @@ Rectangle {
     }
     Keys.onPressed: {
         if (event.key === Qt.Key_F) {
-            root.resetFit();
+            // Task 3.1: Toggle strip side (bottom ↔ left)
+            // Task 3.2 will override this behavior for zoom mode cycling
+            let newSide = (sessionState.stripSide() + 1) % 2;
+            sessionState.setStripSide(newSide);
+            event.accepted = true;
+        } else if (event.key === Qt.Key_T) {
+            // Toggle strip visibility
+            root.thumbStripVisible = !root.thumbStripVisible;
             event.accepted = true;
         }
     }
