@@ -82,6 +82,16 @@ void SessionState::setVideoResumeSeconds(double seconds)
     }
 }
 
+void SessionState::recordCustomData(const QString& key, const QString& value)
+{
+    state_.record_custom_data(key.toStdString(), value.toStdString());
+}
+
+QString SessionState::recallCustomData(const QString& key) const
+{
+    return QString::fromStdString(state_.recall_custom_data(key.toStdString()));
+}
+
 void SessionState::reset()
 {
     state_.reset();

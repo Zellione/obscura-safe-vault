@@ -40,12 +40,26 @@ struct GallerySessionState {
     // sub-galleries without ever being destroyed.
     std::unordered_map<std::string, int> last_index_by_path;
 
+    // Custom session data for screens (e.g., query state, filter settings)
+    std::unordered_map<std::string, std::string> custom_data;
+
     void record(std::string_view path, int index) { last_index_by_path[std::string(path)] = index; }
 
     [[nodiscard]] int recall(std::string_view path) const
     {
         const auto it = last_index_by_path.find(std::string(path));
         return it == last_index_by_path.end() ? 0 : it->second;
+    }
+
+    void record_custom_data(std::string_view key, std::string_view value)
+    {
+        custom_data[std::string(key)] = std::string(value);
+    }
+
+    [[nodiscard]] std::string recall_custom_data(std::string_view key) const
+    {
+        const auto it = custom_data.find(std::string(key));
+        return it == custom_data.end() ? "" : it->second;
     }
 
     void reset() { *this = GallerySessionState{}; }

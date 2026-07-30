@@ -325,7 +325,7 @@ Rectangle {
         const excludes = excludeText.split(/[\s,]+/).filter(t => t.length > 0);
         advancedSearchController.search(includes, excludes, nameText, scopeIndex);
         // Session persistence: save query state
-        sessionState.setCustomData("adv_search_query", JSON.stringify({
+        sessionState.recordCustomData("adv_search_query", JSON.stringify({
             include: includeText,
             exclude: excludeText,
             name: nameText,
@@ -336,7 +336,7 @@ Rectangle {
 
     function restoreSessionState() {
         // Restore query from session state if available
-        const saved = sessionState.getCustomData("adv_search_query");
+        const saved = sessionState.recallCustomData("adv_search_query");
         if (saved) {
             try {
                 const data = JSON.parse(saved);
@@ -409,7 +409,7 @@ Rectangle {
 
     Component.onDestruction: {
         // Persist session state on exit
-        sessionState.setCustomData("adv_search_query", JSON.stringify({
+        sessionState.recordCustomData("adv_search_query", JSON.stringify({
             include: includeText,
             exclude: excludeText,
             name: nameText,

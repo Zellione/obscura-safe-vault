@@ -287,6 +287,57 @@ static bool test_strip_side_no_op()
     return true;
 }
 
+// Test 11: Custom data round-trip
+static bool test_custom_data()
+{
+    printf("Test 11: Custom data round-trip...\n");
+
+    SessionState state;
+
+    // Store and retrieve JSON data
+    const QString jsonData = R"({"include":"tag1","exclude":"tag2","name":"test"})";
+    state.recordCustomData("adv_search_query", jsonData);
+
+    const QString retrieved = state.recallCustomData("adv_search_query");
+    if (retrieved != jsonData) {
+        fprintf(stderr, "FAIL: Retrieved data doesn't match stored data\n");
+        fprintf(stderr, "  Expected: %s\n", jsonData.toStdString().c_str());
+        fprintf(stderr, "  Got: %s\n", retrieved.toStdString().c_str());
+        return false;
+    }
+
+    printf("PASS\n");
+    return true;
+}
+
+// Test 12: Custom data with multiple keys
+static bool test_custom_data_multiple_keys()
+{
+    printf("Test 12: Multiple custom data keys independent...\n");
+
+    SessionState state;
+
+    state.recordCustomData("key1", "value1");
+    state.recordCustomData("key2", "value2");
+    state.recordCustomData("key3", "value3");
+
+    if (state.recallCustomData("key1") != "value1" ||
+        state.recallCustomData("key2") != "value2" ||
+        state.recallCustomData("key3") != "value3") {
+        fprintf(stderr, "FAIL: Custom data values don't match\n");
+        return false;
+    }
+
+    // Unknown key should return empty string
+    if (!state.recallCustomData("unknown").isEmpty()) {
+        fprintf(stderr, "FAIL: Unknown key should return empty string\n");
+        return false;
+    }
+
+    printf("PASS\n");
+    return true;
+}
+
 int main(int argc, char** argv)
 {
     QGuiApplication app(argc, argv);
@@ -306,6 +357,8 @@ int main(int argc, char** argv)
     if (test_reset()) { ++passed; } else { ++failed; }
     if (test_view_density_no_op()) { ++passed; } else { ++failed; }
     if (test_strip_side_no_op()) { ++passed; } else { ++failed; }
+    if (test_custom_data()) { ++passed; } else { ++failed; }
+    if (test_custom_data_multiple_keys()) { ++passed; } else { ++failed; }
 
     printf("\n=== Test Summary ===\n");
     printf("Passed: %d\n", passed);

@@ -37,6 +37,10 @@ public:
     [[nodiscard]] double videoResumeSeconds() const;
     void setVideoResumeSeconds(double seconds);
 
+    // Custom session data (arbitrary key-value pairs; e.g., query state)
+    Q_INVOKABLE void recordCustomData(const QString& key, const QString& value);
+    Q_INVOKABLE QString recallCustomData(const QString& key) const;
+
     // Clear all session state
     void reset();
 
