@@ -231,7 +231,7 @@ add_executable(osv_qt_vault_manager_controller_test tests/vault_manager_controll
 target_link_libraries(osv_qt_vault_manager_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_vault_manager_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_executable(osv_qt_unlock_controller_keyfile_test tests/unlock_controller_keyfile_test.cpp unlock_controller.cpp secure_text_field.cpp secure_image_item.cpp video_frame_item.cpp viewer_controller.cpp playback_engine.cpp audio_pipe.cpp rhi_quad_renderer.cpp thumb_cache.cpp gallery_model.cpp)
+add_executable(osv_qt_unlock_controller_keyfile_test tests/unlock_controller_keyfile_test.cpp unlock_controller.cpp secure_text_field.cpp secure_image_item.cpp video_frame_item.cpp viewer_controller.cpp playback_engine.cpp audio_pipe.cpp rhi_quad_renderer.cpp thumb_cache.cpp gallery_model.cpp cover_provider.cpp status_controller.cpp theme_palette.cpp)
 target_link_libraries(osv_qt_unlock_controller_keyfile_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_unlock_controller_keyfile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
