@@ -205,6 +205,29 @@ void ViewerController::next()
     // No next media found
 }
 
+// Helper: recursively find node path in vault tree
+// Returns the full path (e.g., "/folder/subfolder/image.jpg") or empty string if not found
+static std::string find_node_path(const vault::IndexNode& root, const vault::IndexNode* target, const std::string& current_path = "")
+{
+    if (&root == target) {
+        // Found it - return current path
+        return current_path.empty() ? "/" + root.name : current_path + "/" + root.name;
+    }
+
+    // Search children (galleries have children)
+    if (root.is_gallery()) {
+        for (const auto& child : root.children) {
+            std::string child_path = current_path.empty() ? "/" + root.name : current_path + "/" + root.name;
+            std::string result = find_node_path(child, target, child_path);
+            if (!result.empty()) {
+                return result;
+            }
+        }
+    }
+
+    return "";
+}
+
 void ViewerController::openAlbum(const QList<quintptr>& nodeKeys, int startIndex)
 {
     if (nodeKeys.isEmpty() || startIndex < 0 || startIndex >= nodeKeys.size() || !vault_) {
@@ -215,11 +238,20 @@ void ViewerController::openAlbum(const QList<quintptr>& nodeKeys, int startIndex
     albumNodeKeys_ = nodeKeys;
     albumCurrentIndex_ = startIndex;
 
-    // TODO (Phase 56): Extract node paths for rebind on vault refresh.
-    // Requires: accessing vault tree to compute paths from node pointers.
-    // Currently deferred as nodes don't carry path information directly.
-    albumNodePaths_.resize(nodeKeys.size());
-    std::fill(albumNodePaths_.begin(), albumNodePaths_.end(), "");
+    // Populate real node paths for rebind on vault refresh
+    albumNodePaths_.clear();
+    const vault::IndexNode* root = vault_->resolve_node("");  // Empty path = root
+    if (root) {
+        for (quintptr nodeKey : nodeKeys) {
+            const auto* node = reinterpret_cast<const vault::IndexNode*>(nodeKey);
+            std::string path = find_node_path(*root, node);
+            albumNodePaths_.append(QString::fromStdString(path));
+        }
+    } else {
+        // Fallback if no root
+        albumNodePaths_.resize(nodeKeys.size());
+        std::fill(albumNodePaths_.begin(), albumNodePaths_.end(), "");
+    }
 
     bumpGeneration();
     loadImageAtAlbumIndex(startIndex);
