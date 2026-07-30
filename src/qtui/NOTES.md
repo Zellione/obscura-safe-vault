@@ -586,3 +586,24 @@ Audio clock for sync: clock = audioSeekBase_ + samples_consumed / sample_rate. U
 - src/qtui/main.cpp: assertion (c) checks testOnlyAudioInitFailed() and FAILs if init failed
 
 **Verification:** All assertions now falsifiable; exit codes reflect verdicts.
+
+---
+
+## M7 — Experiment Complete, Verdict Ready (2026-07-30)
+
+**Status:** All 10 implementation tasks complete, review-clean, M7 verdict written.
+
+**Verdict Location:** `docs/superpowers/specs/2026-07-29-qt-quick-ui-experiment-verdict.md` (untracked)
+
+**One-line Recommendation:** CONDITIONAL GO — Adopt Qt Quick for chrome (grid, dialogs, theming deliver velocity), accept one-time threading debugging cost (13 fix rounds across Tasks 5–10 but patterns now reusable), resolve Windows builds + LGPLv3 packaging before shipping. Owner decision.
+
+**Key Evidence:**
+- **LOC:** Qt experiment = 6595 lines tracked (756 .h + 3516 .cpp + 976 QML + 51 shaders + build/tools); comparable SDL screens = 5291 lines (unlock+gallery+viewer+video+rename). **Net +1304 lines (19.7% overhead), offset by (a) no hand-rolled grid virtualization, (b) declarative chrome, (c) QML theme binding eliminates scattered color constants.**
+- **Threading Cost:** 13 fix rounds (frameSwapped signal affinity, setFrameItem non-invokable silent error, MVP matrix, vertex-count bug, drain-before-lock races, audio pointer/samples/fallback data races). All patterns documented; reusable for Phase 2 screens.
+- **Security:** Password path stays mlock'd, no QImage/QPixmap for pixels, QML never sees bytes, audit found zero regressions vs SDL path.
+- **Performance:** Grid scroll + resize dramatically improved (Phase 58 pain points); thumbnail decode async; video pacing stable; audio fallback clock proven.
+- **Caveats:** Live audio device consumption unproven (owner interactive pass needed); Windows builds unexplored; 8+ screens (40% of UI layer) remain ported; LGPLv3 packaging must be documented.
+
+**Files Modified in M7:**
+- `src/qtui/NOTES.md` (this entry)
+- `docs/superpowers/specs/2026-07-29-qt-quick-ui-experiment-verdict.md` (written, untracked)
