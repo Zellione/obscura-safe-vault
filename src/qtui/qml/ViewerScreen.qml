@@ -13,6 +13,19 @@ Rectangle {
     property real panY: 0
     property real fitScale: 1.0
 
+    // Help groups for F1 help popup
+    property var helpGroups: [
+        {
+            title: "Image Viewer",
+            entries: [
+                { keys: "Esc/Backspace", description: "Close viewer" },
+                { keys: "Arrow Keys/Mouse Drag", description: "Pan image" },
+                { keys: "+/-/Scroll", description: "Zoom in/out" },
+                { keys: "F", description: "Fit to window" }
+            ]
+        }
+    ]
+
     // Calculate fit-to-viewport scale
     function updateFitScale() {
         if (imageItem.sourceSize.width > 0 && imageItem.sourceSize.height > 0) {

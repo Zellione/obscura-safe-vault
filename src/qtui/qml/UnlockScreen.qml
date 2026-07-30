@@ -10,6 +10,17 @@ Rectangle {
     // Row of the known-vault list currently opened (-1: none / file dialog)
     property int selectedVaultRow: -1
 
+    // Help groups for F1 help popup
+    property var helpGroups: [
+        {
+            title: "Unlock",
+            entries: [
+                { keys: "Enter", description: "Unlock vault" },
+                { keys: "Arrow Up/Down", description: "Select vault" }
+            ]
+        }
+    ]
+
     // Pick up registry/folder changes each time the screen appears
     Component.onCompleted: vaultListModel.refresh()
 

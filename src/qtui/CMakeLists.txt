@@ -129,6 +129,10 @@ add_executable(osv_qt_status_controller_test tests/status_controller_test.cpp st
 target_link_libraries(osv_qt_status_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_status_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(osv_qt_help_model_test tests/help_model_test.cpp help_model.cpp)
+target_link_libraries(osv_qt_help_model_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
+target_include_directories(osv_qt_help_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 add_executable(osv_qt_thumb_stress_test tests/thumb_stress_test.cpp gallery_model.cpp thumb_cache.cpp viewer_controller.cpp secure_image_item.cpp rhi_quad_renderer.cpp)
 target_link_libraries(osv_qt_thumb_stress_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick)
 target_include_directories(osv_qt_thumb_stress_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -154,6 +158,7 @@ qt_add_executable(osv-qt
     audio_pipe.cpp
     file_op_controller.cpp
     status_controller.cpp
+    help_model.cpp
 )
 
 # Shaders: compile to .qsb and embed as resources

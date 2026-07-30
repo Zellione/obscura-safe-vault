@@ -13,9 +13,21 @@ Window {
 
     property int currentThemeIndex: 0
 
+    // Global F1 key handler
+    Keys.onPressed: (event) => {
+        if (event.key === Qt.Key_F1) {
+            helpPopup.toggle();
+            event.accepted = true;
+        }
+    }
 
     RenameDialog {
         id: renameDialog
+    }
+
+    HelpPopup {
+        id: helpPopup
+        helpModel: helpModel
     }
 
     FooterBar {
@@ -31,6 +43,13 @@ Window {
         }
 
         initialItem: unlockScreenComponent
+
+        // When current item changes, update help popup with new screen's groups
+        onCurrentItemChanged: {
+            if (currentItem && currentItem.helpGroups !== undefined) {
+                helpModel.setScreenGroups(currentItem.helpGroups);
+            }
+        }
 
         Connections {
             target: unlockController
@@ -97,6 +116,19 @@ Window {
                     property real videoPanX: 0
                     property real videoPanY: 0
                     property real videoFitScale: 1.0
+
+                    // Help groups for F1 help popup
+                    property var helpGroups: [
+                        {
+                            title: "Video Player",
+                            entries: [
+                                { keys: "Space", description: "Play/pause" },
+                                { keys: "J/L", description: "Seek -5s / +5s" },
+                                { keys: "F", description: "Fit to window" },
+                                { keys: "Esc", description: "Close player" }
+                            ]
+                        }
+                    ]
 
                     function updateFitScale() {
                         if (videoItem && videoItem.sourceSize && videoItem.sourceSize.width > 0) {

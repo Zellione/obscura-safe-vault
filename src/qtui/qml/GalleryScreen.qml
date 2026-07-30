@@ -10,6 +10,19 @@ Rectangle {
     // Dialog for renaming items (passed from Main.qml)
     property var renameDialog: null
 
+    // Help groups for F1 help popup
+    property var helpGroups: [
+        {
+            title: "Gallery Navigation",
+            entries: [
+                { keys: "Arrow Keys", description: "Navigate gallery" },
+                { keys: "Enter/Space", description: "Open image/video or enter gallery" },
+                { keys: "Esc/Backspace", description: "Go up one level" },
+                { keys: "F2", description: "Rename" }
+            ]
+        }
+    ]
+
     // Signal to request theme cycling (Main.qml handles the state)
     signal themeCycleRequested()
 
