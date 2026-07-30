@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import "." as Local
 
 Rectangle {
     id: root
@@ -552,12 +553,9 @@ Rectangle {
             }
             event.accepted = true;
         } else if (event.key === Qt.Key_S && (event.modifiers & Qt.ControlModifier)) {
-            // Ctrl+S: save current search with a name (placeholder for now, use timestamp)
-            const name = "Search_" + new Date().getTime();
-            advancedSearchController.saveSearch(name, includeText.split(/[\s,]+/).filter(t => t.length > 0),
-                                               excludeText.split(/[\s,]+/).filter(t => t.length > 0),
-                                               nameText, scopeIndex);
-            advancedSearchController.refreshSavedSearches();
+            // Ctrl+S: open dialog to save with a user-provided name
+            saveSearchDialog.existingNames = savedSearchList.map(s => s.name);
+            saveSearchDialog.open();
             event.accepted = true;
         } else if (event.key === Qt.Key_D && (event.modifiers & Qt.ControlModifier)) {
             // contract: WS2 DetailPanel — wired in integration
@@ -593,6 +591,23 @@ Rectangle {
         }
         function onSavedSearchesChanged() {
             savedSearchList = advancedSearchController.savedSearches;
+        }
+    }
+
+    // Save search dialog
+    Local.SaveSearchDialog {
+        id: saveSearchDialog
+        themePalette: root.themePalette
+        advancedSearchController: root.advancedSearchController
+
+        onSaved: {
+            // User confirmed save; perform the actual save
+            const name = saveSearchDialog.getSearchName();
+            advancedSearchController.saveSearch(name,
+                                               includeText.split(/[\s,]+/).filter(t => t.length > 0),
+                                               excludeText.split(/[\s,]+/).filter(t => t.length > 0),
+                                               nameText, scopeIndex);
+            advancedSearchController.refreshSavedSearches();
         }
     }
 }
