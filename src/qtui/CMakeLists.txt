@@ -126,6 +126,8 @@ target_link_libraries(osv-qt-mkvault PRIVATE osv_qt_core)
 
 qt_add_executable(osv-qt
     main.cpp
+    app_wiring.cpp
+    selftest.cpp
     secure_text_field.cpp
     secure_image_item.cpp
     video_frame_item.cpp
