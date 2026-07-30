@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <optional>
 #include <functional>
+#include <atomic>
 
 // Forward declarations
 struct SDL_AudioStream;
@@ -11,9 +12,14 @@ namespace media { struct AudioFrame; struct AudioInfo; }
 // AudioPipe: encapsulates SDL audio stream lifecycle and feeding.
 // Manages audio buffer, samples tracking, and gain/mute control.
 //
-// Thread safety: This class is not thread-safe internally. All methods
-// (feed, samples_consumed, set_gain, clock) must be called from the same
-// thread that owns the worker loop.
+// Thread safety:
+//   Worker-only (must be called from worker thread only):
+//     - open(), feed(), pump_audio(), clear(), pause(), resume()
+//   Cross-thread safe:
+//     - samples_consumed() (uses atomic samples_fed_ for lockless reads)
+//     - set_gain() (SDL_SetAudioStreamGain is internally thread-safe)
+//   Read-only:
+//     - is_open(), is_dummy_driver()
 class AudioPipe {
 public:
     explicit AudioPipe();
@@ -63,11 +69,11 @@ public:
     [[nodiscard]] bool is_dummy_driver() const noexcept { return dummy_driver_; }
 
 private:
-    SDL_AudioStream* stream_          = nullptr;
-    uint64_t         samples_fed_     = 0;
-    int              channels_        = 0;
-    int              sample_rate_     = 0;
-    bool             dummy_driver_    = false;  // Set on open if device is dummy
-    bool             subsystem_owned_ = false;  // Did we init SDL audio subsystem
-    bool             audio_eof_       = false;  // Decoder has reached EOF; stop calling get_frame
+    SDL_AudioStream* stream_                  = nullptr;
+    std::atomic<uint64_t> samples_fed_ {0};   // Atomic for cross-thread sample count tracking
+    int              channels_                = 0;
+    int              sample_rate_             = 0;
+    bool             dummy_driver_            = false;  // Set on open if device is dummy
+    bool             subsystem_owned_         = false;  // Did we init SDL audio subsystem
+    bool             audio_eof_               = false;  // Decoder has reached EOF; stop calling get_frame
 };

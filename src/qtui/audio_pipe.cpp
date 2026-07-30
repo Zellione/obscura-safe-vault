@@ -49,7 +49,7 @@ bool AudioPipe::open(int channels, int sample_rate)
 
     channels_     = channels;
     sample_rate_  = sample_rate;
-    samples_fed_  = 0;
+    samples_fed_.store(0, std::memory_order_relaxed);
 
     // Detect dummy driver (for fallback gating in headless environments)
     const char* driver_name = SDL_GetCurrentAudioDriver();
@@ -64,7 +64,7 @@ void AudioPipe::clear()
 {
     if (stream_) {
         SDL_ClearAudioStream(stream_);
-        samples_fed_ = 0;
+        samples_fed_.store(0, std::memory_order_relaxed);
     }
     audio_eof_ = false;  // Reset EOF flag on seek
 }
@@ -77,7 +77,9 @@ void AudioPipe::feed(const media::AudioFrame& frame)
     if (!frame.samples.empty()) {
         SDL_PutAudioStreamData(stream_, frame.samples.data(),
                                (int)(frame.samples.size() * sizeof(float)));
-        samples_fed_ += frame.samples.size() / (channels_ > 0 ? channels_ : 1);
+        uint64_t new_fed = samples_fed_.load(std::memory_order_relaxed) +
+                          (frame.samples.size() / (channels_ > 0 ? channels_ : 1));
+        samples_fed_.store(new_fed, std::memory_order_relaxed);
     }
 }
 
@@ -93,8 +95,9 @@ uint64_t AudioPipe::samples_consumed() noexcept
     uint64_t queued_samples = (uint64_t)queued_bytes / (sizeof(float) * (channels_ > 0 ? channels_ : 1));
 
     // Consumed = fed - queued, clamped to 0 (mirrors SDL app clock(), lines 388-389)
-    if (samples_fed_ > queued_samples) {
-        return samples_fed_ - queued_samples;
+    uint64_t fed = samples_fed_.load(std::memory_order_relaxed);
+    if (fed > queued_samples) {
+        return fed - queued_samples;
     }
     return 0;
 }

@@ -133,6 +133,7 @@ void PlaybackEngine::stop()
 void PlaybackEngine::setPlaying(bool on)
 {
     bool changed = false;
+    AudioPipe* pipePtr = nullptr;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (playing_ == on) return;
@@ -143,15 +144,16 @@ void PlaybackEngine::setPlaying(bool on)
             elapsed_.restart();
             clockBase_ = position_;
         }
+        pipePtr = audioPipe_.get();  // Copy raw pointer under lock
     }
 
     if (changed) {
-        // Pause/resume audio stream
-        if (audioPipe_) {
+        // Pause/resume audio stream (call outside lock, SDL calls are internally thread-safe)
+        if (pipePtr) {
             if (on) {
-                audioPipe_->resume();
+                pipePtr->resume();
             } else {
-                audioPipe_->pause();
+                pipePtr->pause();
             }
         }
         emit playingChanged();
@@ -189,8 +191,15 @@ void PlaybackEngine::setVolume(double v)
 
     volume_ = clamped;
     currentGain_ = media::effective_gain(static_cast<float>(volume_), muted_);
-    if (audioPipe_) {
-        audioPipe_->set_gain(currentGain_);
+
+    AudioPipe* pipePtr = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        pipePtr = audioPipe_.get();
+    }
+
+    if (pipePtr) {
+        pipePtr->set_gain(currentGain_);
     }
     emit volumeChanged();
 }
@@ -200,8 +209,15 @@ void PlaybackEngine::setMuted(bool m)
     if (muted_ == m) return;
     muted_ = m;
     currentGain_ = media::effective_gain(static_cast<float>(volume_), muted_);
-    if (audioPipe_) {
-        audioPipe_->set_gain(currentGain_);
+
+    AudioPipe* pipePtr = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        pipePtr = audioPipe_.get();
+    }
+
+    if (pipePtr) {
+        pipePtr->set_gain(currentGain_);
     }
     emit mutedChanged();
 }
@@ -213,8 +229,21 @@ void PlaybackEngine::toggleMute()
 
 uint64_t PlaybackEngine::testOnlySamplesConsumed() const
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!audioPipe_) return 0;
     return audioPipe_->samples_consumed();
+}
+
+bool PlaybackEngine::testOnlyAudioFallback() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return audioUsingFallback_;
+}
+
+bool PlaybackEngine::testOnlyAudioInitFailed() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return audioInitFailed_;
 }
 
 void PlaybackEngine::runWorker(std::stop_token st)
@@ -229,13 +258,17 @@ void PlaybackEngine::runWorker(std::stop_token st)
         if (!audio_initialized) {
             audio_initialized = true;  // Only try once
             if (decoder_ && decoder_->has_audio()) {
-                audioPipe_ = std::make_unique<AudioPipe>();
+                std::unique_ptr<AudioPipe> pipe = std::make_unique<AudioPipe>();
                 auto ainfo = decoder_->audio_info();
-                if (audioPipe_->open(ainfo.channels, ainfo.sample_rate)) {
+                if (pipe->open(ainfo.channels, ainfo.sample_rate)) {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    audioPipe_ = std::move(pipe);
                     qCDebug(lcPlayback) << "Audio device opened successfully";
                 } else {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    audioInitFailed_ = true;  // Mark init as failed
                     qCWarning(lcPlayback) << "Failed to open audio device";
-                    audioPipe_.reset();  // audio optional; keep playing video
+                    // audio optional; keep playing video
                 }
             }
         }
@@ -268,15 +301,21 @@ void PlaybackEngine::runWorker(std::stop_token st)
 
         // Pump audio frames (M6b) - mirrors SDL app pump_audio (lines 366-379)
         // Feed until ~200ms queued, or decoder EOF reached
-        if (audioPipe_) {
-            audioPipe_->pump_audio(
+        AudioPipe* pipePtr = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            pipePtr = audioPipe_.get();
+        }
+
+        if (pipePtr) {
+            pipePtr->pump_audio(
                 [this]() { return decoder_->next_audio_frame(); },
                 decoder_->audio_info().sample_rate,
                 decoder_->audio_info().channels
             );
 
             // Detect if audio device is not consuming (dummy driver or no hardware)
-            uint64_t current_consumed = audioPipe_->samples_consumed();
+            uint64_t current_consumed = pipePtr->samples_consumed();
             if (current_consumed == last_samples_consumed) {
                 audio_no_consume_count++;
                 if (audio_no_consume_count >= 10 && !dummy_driver_warned) {

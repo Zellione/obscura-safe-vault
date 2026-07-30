@@ -523,3 +523,66 @@ Lock is never held during:
 - Frame delivery (QML invoke)
 - Any other blocking operation
 
+
+---
+
+## Audio Architecture Summary (M6b)
+
+**Step 1 — Audio Loop Architecture** (recorded retroactively per brief requirement)
+
+**Which thread demuxes audio?**
+The worker thread (PlaybackEngine::runWorker) demuxes audio packets alongside video packets via decoder_->demux_next_video_packet() / decoder_->next_audio_frame(). No separate audio thread; audio and video share the worker thread's event loop.
+
+**When is the stream fed?**
+pump_audio() is called once per worker iteration (~5ms cycle). It feeds decoded audio frames until SDL_GetAudioStreamQueued() reaches ~200ms target, then stops. This throttles the feed to prevent a runaway decoder from draining the entire video file's audio in 1 second (avoiding EOF-loop hangs).
+
+**How is samples_consumed tracked?**
+AudioPipe::samples_consumed() reads two atomic values:
+- samples_fed_ (atomic counter, updated on each feed() call)
+- SDL_GetAudioStreamQueued() (device's buffered bytes)
+Result: consumed = fed - queued (clamped to 0). Queued is converted from bytes to samples (÷ sizeof(float) ÷ channels).
+
+Audio clock for sync: clock = audioSeekBase_ + samples_consumed / sample_rate. Updated each worker iteration for precise frame pacing via media::av_sync::decide().
+
+---
+
+## 2026-07-30: M6b Review-Fix Round 1
+
+**Problem:** Threading violations in audio pipeline (Critical 1–5 from code review).
+
+**Fixes:**
+
+1. **CRITICAL 1 — audioPipe_ unique_ptr data race**
+   - audioPipe_ lazily created on worker thread but read/written on GUI thread (setVolume, setMuted, test seams)
+   - Fix: Moved audioPipe_ to shared state (guarded by mutex_)
+   - Lazy-init: worker acquires lock before assignment; GUI methods acquire lock before dereferencing
+   - Raw pointer extracted under lock, SDL calls (thread-safe internally) made outside lock
+
+2. **CRITICAL 2 — samples_fed_ cross-thread without synchronization**
+   - samples_fed_ (uint64_t) updated by feed() in worker, read by samples_consumed() in test seam on GUI
+   - Fix: Made samples_fed_ std::atomic<uint64_t> with memory_order_relaxed
+   - Updated header to clarify cross-thread-safe methods: samples_consumed(), set_gain()
+
+3. **CRITICAL 3 — audioUsingFallback_ written under mutex_ but read unlocked**
+   - testOnlyAudioFallback() read audioUsingFallback_ without lock
+   - Fix: Added lock_guard in testOnlyAudioFallback() (now takes mutex_)
+
+4. **IMPORTANT 4 — Audio init failure masked**
+   - If audioPipe_->open() failed, pipe reset, but test still passed
+   - Fix: Added audioInitFailed_ flag (guarded by mutex_)
+   - New seam testOnlyAudioInitFailed() with lock
+   - Assertion (c) now FAILs with distinct message if init failed; fallback PASS only valid when init succeeded
+
+5. **IMPORTANT 5 — Step 1 architecture summary missing**
+   - Brief required 10-line summary of audio loop (which thread, when fed, how consumed tracked) in NOTES.md
+   - Fix: Added summary above (this entry)
+   - Moved this round's entry to src/qtui/NOTES.md per brief requirement (not repo root)
+
+**Files modified:**
+- src/qtui/playback_engine.h: moved audioPipe_ to shared state, added audioInitFailed_, updated test seams
+- src/qtui/playback_engine.cpp: protect all GUI-side audioPipe_ access with mutex_, updated lazy-init, fallback detection, added testOnlyAudioInitFailed()
+- src/qtui/audio_pipe.h: made samples_fed_ atomic, clarified thread-safety contract
+- src/qtui/audio_pipe.cpp: use atomic ops on samples_fed_ (load/store relaxed)
+- src/qtui/main.cpp: assertion (c) checks testOnlyAudioInitFailed() and FAILs if init failed
+
+**Verification:** All assertions now falsifiable; exit codes reflect verdicts.

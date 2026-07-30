@@ -1083,13 +1083,19 @@ static int runSelftest(const QString& vaultPath)
                 bool assertB = position > 1.0;
 
                 // (c) Audio active: samples_consumed > 0 OR fallback engaged
+                // IMPORTANT: if audio init failed, assertion (c) MUST FAIL with distinct message
                 bool assertC = false;
                 const char* audioDriver = std::getenv("SDL_AUDIO_DRIVER");
+                bool initFailed = playbackEngine.testOnlyAudioInitFailed();
                 bool fallback = playbackEngine.testOnlyAudioFallback();
                 uint64_t samplesConsumed = playbackEngine.testOnlySamplesConsumed();
 
-                if (audioDriver && std::strcmp(audioDriver, "dummy") == 0) {
-                    // Dummy driver: MUST have fallback engaged
+                if (initFailed) {
+                    // Audio initialization failed; this is a real failure
+                    fprintf(stdout, "ASSERT (c) Audio state: Audio device init FAILED... FAIL\n");
+                    assertC = false;
+                } else if (audioDriver && std::strcmp(audioDriver, "dummy") == 0) {
+                    // Dummy driver: MUST have fallback engaged (only if init succeeded)
                     if (fallback) {
                         fprintf(stdout, "ASSERT (c) Audio state: Dummy driver, fallback ASSERTED (consumed=%lu)... PASS\n", samplesConsumed);
                         assertC = true;

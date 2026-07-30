@@ -73,7 +73,8 @@ public:
 
     // Test seams (M6b audio testing)
     [[nodiscard]] uint64_t testOnlySamplesConsumed() const;
-    [[nodiscard]] bool testOnlyAudioFallback() const { return audioUsingFallback_; }
+    [[nodiscard]] bool testOnlyAudioFallback() const;
+    [[nodiscard]] bool testOnlyAudioInitFailed() const;
     [[nodiscard]] float testOnlyCurrentGain() const { return currentGain_; }
 
     void setMuted(bool m);
@@ -117,15 +118,19 @@ private:
     std::optional<ControlMsg> pendingControl_;
     double audioSeekBase_ = 0.0;      // set on seek; audio clock = base + consumed/rate
     bool audioUsingFallback_ = false; // audio exists but dummy driver doesn't consume → use wall clock
+    bool audioInitFailed_ = false;    // audio open() failed; audio unavailable
 
     // --- Worker thread state ---
     std::unique_ptr<media::ChunkAvio> avio_;        // owns the VideoSource internally
     std::unique_ptr<media::VideoDecoder> decoder_;
     std::unique_ptr<media::VideoDecodeWorker> worker_;
-    std::unique_ptr<AudioPipe> audioPipe_;          // manages SDL audio stream (M6b)
     uint64_t generation_ = 0;
     QElapsedTimer elapsed_;  // clock base for frame pacing (M6a fallback)
     double clockBase_ = 0.0;  // seek/rewind base PTS
     bool sentEof_ = false;
     std::jthread thread_;
+
+    // --- Shared state: audio pipe (guarded by mutex_) ---
+    // Lazily created on worker thread but accessed from GUI thread (setVolume, setMuted, test seams)
+    std::unique_ptr<AudioPipe> audioPipe_;
 };
