@@ -20,6 +20,13 @@ Rectangle {
     property bool isFullscreen: false
     property int fullscreenExitChain: 0  // 0=normal, 1=first right-click (exit fullscreen), 2=second right-click (return to gallery)
 
+    // Slideshow state
+    property bool slideshowRunning: false
+    property real slideshowDwell: 3.0  // seconds per image
+    property real slideshowElapsed: 0.0  // accumulated time toward next advance
+    property int slideshowFadeOutIndex: -1  // index of image fading out (or -1)
+    property real slideshowFadeProgress: 0.0  // 0=new image, 1=old image fully out
+
     // Help groups for F1 help popup
     property var helpGroups: [
         {
@@ -31,7 +38,9 @@ Rectangle {
                 { keys: "F", description: "Cycle zoom modes (Fit ↔ FillScroll)" },
                 { keys: "1", description: "Reset to fit" },
                 { keys: "Shift+F", description: "Toggle fullscreen" },
-                { keys: "T", description: "Toggle thumbnail strip visibility" }
+                { keys: "T", description: "Toggle thumbnail strip visibility" },
+                { keys: "P", description: "Toggle slideshow" },
+                { keys: "[/]", description: "Adjust slideshow dwell time" }
             ]
         }
     ]
@@ -157,6 +166,56 @@ Rectangle {
         panY = Math.max(-maxPanY, Math.min(maxPanY, panY));
     }
 
+    // Slideshow functions
+    function toggleSlideshow() {
+        slideshowRunning = !slideshowRunning;
+        if (slideshowRunning) {
+            slideshowElapsed = 0.0;
+        } else {
+            slideshowFadeOutIndex = -1;
+            slideshowFadeProgress = 0.0;
+        }
+    }
+
+    function setSlideshowDwell(dwell) {
+        // Clamp between 1 and 30 seconds
+        slideshowDwell = Math.max(1.0, Math.min(30.0, dwell));
+    }
+
+    function adjustSlideshowDwell(delta) {
+        setSlideshowDwell(slideshowDwell + delta);
+    }
+
+    function advanceSlideshow() {
+        // Start a cross-fade and advance to next image
+        slideshowFadeOutIndex = viewerController.currentIndex;
+        slideshowFadeProgress = 0.0;
+        slideshowElapsed = 0.0;
+        viewerController.next();
+    }
+
+    // Slideshow timer tick (called at ~60 FPS)
+    function tickSlideshow(dt) {
+        if (!slideshowRunning) {
+            return;
+        }
+
+        // Advance fade progress if in a fade
+        if (slideshowFadeOutIndex >= 0) {
+            slideshowFadeProgress += dt / 0.5;  // 0.5 second cross-fade
+            if (slideshowFadeProgress >= 1.0) {
+                slideshowFadeProgress = 1.0;
+                slideshowFadeOutIndex = -1;
+            }
+        }
+
+        // Accumulate time toward next advance
+        slideshowElapsed += dt;
+        if (slideshowElapsed >= slideshowDwell) {
+            advanceSlideshow();
+        }
+    }
+
     // Fullscreen mode enter/exit
     function enterFullscreen() {
         isFullscreen = true;
@@ -215,11 +274,23 @@ Rectangle {
     Component.onCompleted: {
         viewerController.bindItem(imageItem);
         updateFitScale();
+        slideshowTimer.start();
     }
 
     // Unbind from controller on destruction (prevents use-after-free if image load is in flight)
     Component.onDestruction: {
         viewerController.bindItem(null);
+        slideshowTimer.stop();
+    }
+
+    // Slideshow timer: ticks at ~60 FPS to drive advance and fade animations
+    Timer {
+        id: slideshowTimer
+        interval: 16  // ~60 FPS
+        repeat: true
+        onTriggered: {
+            root.tickSlideshow(0.016);  // 16.67 ms per frame
+        }
     }
 
     // Update fit scale when image loads or window resizes
@@ -241,10 +312,23 @@ Rectangle {
         x: root.width / 2 - width / 2 + panX
         y: root.height / 2 - height / 2 + panY
         visible: viewerController.imageName.length > 0
+        opacity: 1.0 - root.slideshowFadeProgress
 
         onSourceSizeChanged: {
             root.updateFitScale();
         }
+    }
+
+    // Slideshow fade-out image (previous image fading out)
+    // Note: In the current architecture, we don't have direct access to the previous image's pixels
+    // This is a placeholder for the fade effect. Real implementation would need prev_image pixel buffer
+    // For now, we use a semi-transparent overlay effect
+    Rectangle {
+        id: slideshowFadeOverlay
+        anchors.fill: parent
+        color: themePalette.imgBg
+        opacity: root.slideshowFadeProgress * 0.3  // subtle fade during transition
+        visible: root.slideshowFadeOutIndex >= 0
     }
 
     // Loading indicator
@@ -373,12 +457,29 @@ Rectangle {
             // Toggle strip visibility
             root.thumbStripVisible = !root.thumbStripVisible;
             event.accepted = true;
+        } else if (event.key === Qt.Key_P) {
+            // P: toggle slideshow
+            root.toggleSlideshow();
+            event.accepted = true;
+        } else if (event.key === Qt.Key_BracketLeft) {
+            // [: decrease slideshow dwell
+            root.adjustSlideshowDwell(-1.0);
+            event.accepted = true;
+        } else if (event.key === Qt.Key_BracketRight) {
+            // ]: increase slideshow dwell
+            root.adjustSlideshowDwell(1.0);
+            event.accepted = true;
         }
     }
     Keys.onEscapePressed: {
-        // Pop back to gallery view - parent is StackView when pushed
-        if (parent && typeof parent.pop === 'function') {
-            parent.pop();
+        // Esc: exit slideshow first, then viewer
+        if (root.slideshowRunning) {
+            root.toggleSlideshow();
+        } else {
+            // Pop back to gallery view - parent is StackView when pushed
+            if (parent && typeof parent.pop === 'function') {
+                parent.pop();
+            }
         }
         event.accepted = true;
     }
@@ -404,5 +505,50 @@ Rectangle {
         elide: Text.ElideRight
         width: Math.min(400, parent.width - 24)
         visible: root.isFullscreen || !root.isFullscreen  // always visible in normal mode; hide in fullscreen if no text
+    }
+
+    // Slideshow HUD: dwell time indicator and status
+    Rectangle {
+        anchors {
+            bottom: root.thumbStripVisible && root.stripSide === 0 ? thumbStrip.top : parent.bottom
+            bottom.margins: 20
+            horizontalCenter: parent.horizontalCenter
+        }
+        width: 200
+        height: 60
+        color: themePalette.bg
+        opacity: 0.8
+        radius: 8
+        visible: root.slideshowRunning
+
+        Column {
+            anchors.centerIn: parent
+            spacing: 4
+            width: parent.width - 20
+
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "Slideshow"
+                color: themePalette.text
+                font.pixelSize: 14
+                font.bold: true
+            }
+
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "Dwell: " + root.slideshowDwell.toFixed(1) + "s"
+                color: themePalette.textDim
+                font.pixelSize: 12
+            }
+
+            ProgressBar {
+                width: parent.width - 20
+                anchors.horizontalCenter: parent.horizontalCenter
+                from: 0
+                to: root.slideshowDwell
+                value: root.slideshowElapsed
+                height: 4
+            }
+        }
     }
 }
