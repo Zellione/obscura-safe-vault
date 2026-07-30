@@ -12,6 +12,8 @@ class VaultListModel;
 // user interactions.
 class VaultManagerController : public QObject {
     Q_OBJECT
+    // Model is created in the constructor and lives as long as the controller.
+    Q_PROPERTY(VaultListModel* vaultListModel READ vaultListModel CONSTANT)
 public:
     explicit VaultManagerController(QObject* parent = nullptr);
 
