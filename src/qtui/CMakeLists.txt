@@ -224,6 +224,7 @@ qt_add_executable(osv-qt
     viewer_controller.cpp
     slideshow_controller.cpp
     anim_controller.cpp
+    animated_image_loader.cpp
     theme_palette.cpp
     playback_engine.cpp
     audio_pipe.cpp
