@@ -105,3 +105,23 @@ TEST_F(FavoritesControllerTest, IsFavoriteReflectsState) {
     fav = controller_->isFavorite("/TestGallery");
     EXPECT_TRUE(fav);
 }
+
+// Test: nodeKey is populated for thumbnail rendering
+TEST_F(FavoritesControllerTest, NodeKeyPopulatedForThumbnails) {
+    ASSERT_TRUE(vault_->is_unlocked());
+
+    // Add an image to root
+    std::vector<uint8_t> image_data(osvqt_test::tiny_jpeg, osvqt_test::tiny_jpeg + sizeof(osvqt_test::tiny_jpeg));
+    const std::span<const uint8_t> img_span(image_data.data(), image_data.size());
+    auto result = vault_->add_image("", img_span, "TestImage");
+    ASSERT_EQ(result, vault::VaultResult::Ok);
+
+    // Toggle it as favorite
+    bool toggled = controller_->toggleFavorite("/TestImage");
+    EXPECT_TRUE(toggled);
+
+    // Get favorites and check nodeKey is non-zero
+    auto favImages = controller_->getFavoriteImages();
+    EXPECT_EQ(favImages.size(), 1);
+    EXPECT_NE(favImages[0].nodeKey, 0) << "nodeKey should be non-zero for thumbnail rendering";
+}

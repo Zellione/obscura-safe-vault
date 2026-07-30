@@ -84,9 +84,18 @@ Rectangle {
                         Layout.fillHeight: true
                         color: themePalette.imgBg
 
+                        // Thumbnail image for media
+                        SecureImageItem {
+                            visible: !modelData.is_gallery
+                            anchors.fill: parent
+                            nodeKey: modelData.nodeKey
+                        }
+
+                        // Folder glyph for galleries
                         Text {
+                            visible: modelData.is_gallery
                             anchors.centerIn: parent
-                            text: modelData.is_gallery ? "📁" : "🖼"
+                            text: "📁"
                             font.pixelSize: 36
                         }
                     }

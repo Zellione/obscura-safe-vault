@@ -92,5 +92,9 @@ FavoriteItem FavoritesController::searchHitToItem(const vault::SearchHit& hit) c
     item.path = QString::fromStdString(hit.path);
     item.is_gallery = hit.is_gallery;
     item.name = QString::fromStdString(hit.name);
+    // Convert node pointer to quintptr for QML access
+    if (hit.node) {
+        item.nodeKey = static_cast<quintptr>(reinterpret_cast<uintptr_t>(hit.node));
+    }
     return item;
 }

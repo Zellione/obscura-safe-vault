@@ -17,10 +17,12 @@ public:
     Q_PROPERTY(QString path MEMBER path)
     Q_PROPERTY(bool is_gallery MEMBER is_gallery)
     Q_PROPERTY(QString name MEMBER name)
+    Q_PROPERTY(quintptr nodeKey MEMBER nodeKey)
 
     QString path;
     bool is_gallery = false;
     QString name;
+    quintptr nodeKey = 0;
 };
 
 Q_DECLARE_METATYPE(FavoriteItem)
