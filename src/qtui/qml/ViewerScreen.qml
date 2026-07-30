@@ -38,6 +38,7 @@ Rectangle {
                 { keys: "F", description: "Cycle zoom modes (Fit ↔ FillScroll)" },
                 { keys: "1", description: "Reset to fit" },
                 { keys: "Shift+F", description: "Toggle fullscreen" },
+                { keys: "Space", description: "Play/pause animated image" },
                 { keys: "T", description: "Toggle thumbnail strip visibility" },
                 { keys: "P", description: "Toggle slideshow" },
                 { keys: "[/]", description: "Adjust slideshow dwell time" }
@@ -270,6 +271,10 @@ Rectangle {
     property real thumbStripAnimDuration: 200  // ms
     property bool thumbStripVisible: true  // persisted via SessionState
 
+    // Animated image playback controllers (created/wired by ViewerController when animated image opens)
+    property var animController: null
+    property var animatedImageLoader: null
+
     // Bind to controller
     Component.onCompleted: {
         viewerController.bindItem(imageItem);
@@ -432,6 +437,13 @@ Rectangle {
     Keys.onRightPressed: {
         viewerController.next();
         event.accepted = true;
+    }
+    Keys.onSpacePressed: {
+        // Space: play/pause animated image
+        if (animController !== null && animController !== undefined) {
+            animController.togglePlayPause();
+            event.accepted = true;
+        }
     }
     Keys.onPressed: {
         if (event.key === Qt.Key_F) {
