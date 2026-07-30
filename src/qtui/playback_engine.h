@@ -71,6 +71,11 @@ public:
     [[nodiscard]] bool muted() const { return muted_; }
     [[nodiscard]] double volume() const { return volume_; }
 
+    // Test seams (M6b audio testing)
+    [[nodiscard]] uint64_t testOnlySamplesConsumed() const;
+    [[nodiscard]] bool testOnlyAudioFallback() const { return audioUsingFallback_; }
+    [[nodiscard]] float testOnlyCurrentGain() const { return currentGain_; }
+
     void setMuted(bool m);
 
 signals:
@@ -105,6 +110,7 @@ private:
     bool playing_ = false;
     bool muted_ = false;
     double volume_ = 1.0;
+    float currentGain_ = 1.0f;  // Last gain applied to audio pipe (for testing)
 
     // --- Shared state (guarded by mutex) ---
     mutable std::mutex mutex_;

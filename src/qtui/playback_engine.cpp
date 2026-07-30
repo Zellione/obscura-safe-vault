@@ -188,8 +188,9 @@ void PlaybackEngine::setVolume(double v)
     if (volume_ == clamped) return;
 
     volume_ = clamped;
+    currentGain_ = media::effective_gain(static_cast<float>(volume_), muted_);
     if (audioPipe_) {
-        audioPipe_->set_gain(media::effective_gain(static_cast<float>(volume_), muted_));
+        audioPipe_->set_gain(currentGain_);
     }
     emit volumeChanged();
 }
@@ -198,8 +199,9 @@ void PlaybackEngine::setMuted(bool m)
 {
     if (muted_ == m) return;
     muted_ = m;
+    currentGain_ = media::effective_gain(static_cast<float>(volume_), muted_);
     if (audioPipe_) {
-        audioPipe_->set_gain(media::effective_gain(static_cast<float>(volume_), muted_));
+        audioPipe_->set_gain(currentGain_);
     }
     emit mutedChanged();
 }
@@ -207,6 +209,12 @@ void PlaybackEngine::setMuted(bool m)
 void PlaybackEngine::toggleMute()
 {
     setMuted(!muted_);
+}
+
+uint64_t PlaybackEngine::testOnlySamplesConsumed() const
+{
+    if (!audioPipe_) return 0;
+    return audioPipe_->samples_consumed();
 }
 
 void PlaybackEngine::runWorker(std::stop_token st)

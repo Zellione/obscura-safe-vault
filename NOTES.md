@@ -176,3 +176,140 @@ Implemented a full-featured image viewer in Qt Quick/QML with the following capa
 - src/qtui/qml/Main.qml (wire openVideo signal, push VideoScreen component)
 - src/qtui/tools/mkvault.cpp (add .mp4/.mkv/.webm/.mov support)
 - src/qtui/CMakeLists.txt (add media sources, FFmpeg linking, yuv.frag shader, video sources to executable)
+
+---
+
+## 2026-07-30: M6b Audio + A/V Sync — Fix Round 3 (Falsifiable Assertions)
+
+### Problem Statement (Round 3)
+
+After implementing throttled audio feed (Round 2), assertions (c) and (d) in the audio selftest were **vacuous**:
+- Assertion (c): both branches printed "PASS" unconditionally (dummy driver OR real device both reached PASS)
+- Assertion (d): checked for crashes only, never verified actual gain values
+
+This prevented the test from detecting regressions if audio consumption broke or gain transitions failed.
+
+### Solution: Test Seams + Numeric Assertions
+
+Added three **testOnly*** methods to PlaybackEngine to expose audio internals for falsifiable selftest assertions:
+
+**1. testOnlySamplesConsumed() → uint64_t**
+- Returns `audioPipe_->samples_consumed()` if audio pipe exists, else 0
+- Allows selftest to distinguish between "audio active/consuming" vs "stuck"
+- Thread-safe: calls pipe method directly (pipe guards its own state)
+
+**2. testOnlyAudioFallback() → bool**
+- Exposes `audioUsingFallback_` (atomic, set by worker when dummy driver detected)
+- Allows selftest to verify fallback correctly triggered
+- Set: worker detects zero samples_consumed for 10 iterations, flips audioUsingFallback_ to true
+- Fallback = use wall-clock pacing instead of audio clock
+
+**3. testOnlyCurrentGain() → float**
+- Exposes `currentGain_` (GUI-thread only, set by setVolume/setMuted)
+- Stores result of `media::effective_gain(volume, muted)` after each volume/mute change
+- Allows selftest to verify gain transitions: 0.0 when muted, volume otherwise
+
+**Rewritten Assertions (C & D)**
+
+**Assertion (c) — Audio State (falsifiable)**
+```
+if (SDL_AUDIO_DRIVER == "dummy") {
+  // Dummy driver never consumes: fallback MUST be true
+  FAIL if testOnlyAudioFallback() != true
+} else {
+  // Real device: FAIL if neither (samples_consumed > 0) AND (fallback set)
+  // i.e., FAIL if: (consumed == 0 AND !fallback)
+}
+Prints: actual values (consumed, fallback status) for diagnostics
+```
+
+**Assertion (d) — Gain Transitions (numeric)**
+```
+setVolume(0.5)
+toggleMute()
+read currentGain = testOnlyCurrentGain()
+assert |gain - 0.0f| < 1e-6  // muted → gain should be 0
+FAIL if not (prints expected vs actual)
+
+toggleMute()
+read currentGain = testOnlyCurrentGain()
+assert |gain - 0.5f| < 1e-6  // unmuted → gain should be 0.5
+FAIL if not (prints expected vs actual)
+```
+
+**Overall Verdict**
+```
+allPass = (a AND b AND c AND d)
+EXIT = allPass ? 0 : 1
+```
+
+### Test Results
+
+**Audio Test with Dummy Driver**
+```
+ASSERT (c) Audio state: Dummy driver, fallback ASSERTED (consumed=0)... PASS
+ASSERT (d) Volume control: gain transitions correct (0.0→0.5)... PASS
+EXIT CODE: 0 ✓
+```
+
+**Audio Test with Real Device (or no audio sink)**
+```
+ASSERT (c) Audio state: No consuming device available, fallback engaged... PASS
+ASSERT (d) Volume control: gain transitions correct (0.0→0.5)... PASS
+EXIT CODE: 0 ✓
+```
+
+**Video Test Regression (M6a)**
+```
+ASSERT (a) Frame count: 26 (requirement: >= 10)... PASS
+ASSERT (b) Position: 2.53 seconds (requirement: > 1.0)... PASS
+ASSERT (c) Center pixel: RGB(73, 71, 129) max=129 (requirement: > 50)... PASS
+ASSERT (d) Motion (region-based): Block1Sum=1570912 Block2Sum=1370934 (diff=199978)... PASS
+EXIT CODE: 0 ✓
+```
+
+**Unit Tests**
+```
+✓ osv_qt_core_smoke
+✓ osv_qt_gallery_model_test
+✓ osv_qt_thumb_stress_test
+✓ osv_qt_secure_field_test
+```
+
+### Implementation Details
+
+**PlaybackEngine.h additions**
+- `float currentGain_ = 1.0f` (GUI-thread only)
+- Three new test seam methods (inline or stub in header)
+
+**PlaybackEngine.cpp updates**
+- `setVolume()`: compute `currentGain_ = media::effective_gain(volume, muted_)`, apply to pipe
+- `setMuted()`: compute `currentGain_ = media::effective_gain(volume_, muted)`, apply to pipe
+- `testOnlySamplesConsumed()`: return audioPipe_ ? audioPipe_->samples_consumed() : 0
+- Worker thread: lazy init, pump_audio() throttled, fallback detection after 10 zero iterations
+
+**Main.cpp audio selftest (M6b)**
+- ASSERT (c): reads testOnlyAudioFallback() + testOnlySamplesConsumed()
+  - Dummy driver: FAIL if fallback not set
+  - Real device: FAIL if consumed==0 AND fallback not set
+- ASSERT (d): calls setVolume(0.5), toggleMute(), reads testOnlyCurrentGain()
+  - Asserts |gain - 0.0f| < 1e-6 (gain when muted)
+  - Asserts |gain - 0.5f| < 1e-6 after un-mute
+- Overall exit = allPass ? 0 : 1
+
+### Files Modified
+
+- src/qtui/playback_engine.h: added testOnly* methods, currentGain_ member
+- src/qtui/playback_engine.cpp: setVolume/setMuted compute and store currentGain_
+- src/qtui/main.cpp: rewritten assertions (c) and (d) to read from test seams and verify numeric values
+
+### Build & Test
+
+```bash
+nice -n 19 scripts/build_qt_experiment.sh   # Build
+SDL_AUDIO_DRIVER=dummy OSV_QT_SELFTEST_AUDIO=1 osv-qt /tmp/qtexp_audio.osv   # Audio + dummy
+OSV_QT_SELFTEST_AUDIO=1 osv-qt /tmp/qtexp_audio.osv   # Audio + real device
+OSV_QT_SELFTEST_VIDEO=1 osv-qt /tmp/qtexp_av.osv      # Video regression
+```
+
+All assertions now falsifiable; exit codes reflect actual test verdicts (0 = all pass, 1 = ≥1 fail).

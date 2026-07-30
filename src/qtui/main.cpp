@@ -1083,27 +1083,60 @@ static int runSelftest(const QString& vaultPath)
                 bool assertB = position > 1.0;
 
                 // (c) Audio active: samples_consumed > 0 OR fallback engaged
-                // Try to call a test-only method on playbackEngine to get audio state
-                // For now, print fallback detection (dummy driver detection)
                 bool assertC = false;
                 const char* audioDriver = std::getenv("SDL_AUDIO_DRIVER");
+                bool fallback = playbackEngine.testOnlyAudioFallback();
+                uint64_t samplesConsumed = playbackEngine.testOnlySamplesConsumed();
+
                 if (audioDriver && std::strcmp(audioDriver, "dummy") == 0) {
-                    fprintf(stdout, "ASSERT (c) Audio state: Dummy driver detected, wall-clock fallback engaged... PASS\n");
-                    assertC = true;
+                    // Dummy driver: MUST have fallback engaged
+                    if (fallback) {
+                        fprintf(stdout, "ASSERT (c) Audio state: Dummy driver, fallback ASSERTED (consumed=%lu)... PASS\n", samplesConsumed);
+                        assertC = true;
+                    } else {
+                        fprintf(stdout, "ASSERT (c) Audio state: Dummy driver but fallback NOT engaged (consumed=%lu)... FAIL\n", samplesConsumed);
+                        assertC = false;
+                    }
                 } else {
-                    fprintf(stdout, "ASSERT (c) Audio state: Real device or fallback detected... PASS (assumed consuming)\n");
-                    assertC = true;  // Conservative: assume real device is working
+                    // Real device: MUST have samples_consumed > 0 OR explicit fallback
+                    if (samplesConsumed > 0) {
+                        fprintf(stdout, "ASSERT (c) Audio state: Real device, samples consumed=%lu... PASS\n", samplesConsumed);
+                        assertC = true;
+                    } else if (fallback) {
+                        fprintf(stdout, "ASSERT (c) Audio state: No consuming device available, fallback engaged... PASS\n");
+                        assertC = true;
+                    } else {
+                        fprintf(stdout, "ASSERT (c) Audio state: No consuming device AND no fallback (consumed=%lu, fallback=%d)... FAIL\n",
+                                samplesConsumed, fallback);
+                        assertC = false;
+                    }
                 }
 
-                // (d) Volume control doesn't crash
+                // (d) Volume control: assert gain reflects setVolume/toggleMute
                 bool assertD = true;
-                try {
-                    playbackEngine.toggleMute();
-                    playbackEngine.setVolume(0.5);
-                    fprintf(stdout, "ASSERT (d) Volume control (mute/setVolume): No crash... PASS\n");
-                } catch (...) {
-                    fprintf(stdout, "ASSERT (d) Volume control: CRASHED... FAIL\n");
+                float expectedGain0_5Muted = 0.0f;  // effective_gain(0.5f, true) = 0.0f
+                float expectedGain0_5Unmuted = 0.5f;  // effective_gain(0.5f, false) = 0.5f
+
+                playbackEngine.setVolume(0.5);
+                playbackEngine.toggleMute();  // Now muted
+                float currentGain = playbackEngine.testOnlyCurrentGain();
+                float gainDiffMuted = std::abs(currentGain - expectedGain0_5Muted);
+                if (gainDiffMuted >= 1e-6f) {
+                    fprintf(stdout, "ASSERT (d) Volume control (setVolume(0.5)+toggleMute): expected %.6f, got %.6f... FAIL\n",
+                            expectedGain0_5Muted, currentGain);
                     assertD = false;
+                } else {
+                    playbackEngine.toggleMute();  // Now unmuted
+                    currentGain = playbackEngine.testOnlyCurrentGain();
+                    float gainDiffUnmuted = std::abs(currentGain - expectedGain0_5Unmuted);
+                    if (gainDiffUnmuted >= 1e-6f) {
+                        fprintf(stdout, "ASSERT (d) Volume control (toggleMute again): expected %.6f, got %.6f... FAIL\n",
+                                expectedGain0_5Unmuted, currentGain);
+                        assertD = false;
+                    } else {
+                        fprintf(stdout, "ASSERT (d) Volume control: gain transitions correct (0.0→0.5)... PASS\n");
+                        assertD = true;
+                    }
                 }
 
                 fprintf(stdout, "=== AUDIO TEST RESULT ===\n");
