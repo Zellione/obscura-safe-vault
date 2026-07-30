@@ -11,12 +11,13 @@ Window {
     color: themePalette.bg
     title: "osv-qt (experiment)"
 
-    property int currentThemeIndex: 0
-
-    // Global F1 key handler
+    // Global F1/F2 key handlers
     Keys.onPressed: (event) => {
         if (event.key === Qt.Key_F1) {
             helpPopup.toggle();
+            event.accepted = true;
+        } else if (event.key === Qt.Key_F2) {
+            settingsOverlay.toggle();
             event.accepted = true;
         }
     }
@@ -30,6 +31,18 @@ Window {
         helpModel: helpModel
 
         // Restore focus to the active screen when help closes
+        onClosed: {
+            if (stack.currentItem) {
+                stack.currentItem.forceActiveFocus();
+            }
+        }
+    }
+
+    SettingsOverlay {
+        id: settingsOverlay
+        settingsController: settingsController
+
+        // Restore focus to the active screen when settings closes
         onClosed: {
             if (stack.currentItem) {
                 stack.currentItem.forceActiveFocus();
@@ -94,10 +107,6 @@ Window {
             id: unlockedPageComponent
             GalleryScreen {
                 renameDialog: renameDialog
-                onThemeCycleRequested: {
-                    root.currentThemeIndex = (root.currentThemeIndex + 1) % 4;
-                    themePalette.setThemeIndex(root.currentThemeIndex);
-                }
                 onBack: {
                     // Navigation contract satisfied; upOneLevel() already called by GalleryScreen.
                     // WS1's vault-manager route will consume this signal for deeper back behaviors.

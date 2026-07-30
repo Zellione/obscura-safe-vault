@@ -17,14 +17,10 @@ Rectangle {
             entries: [
                 { keys: "Arrow Keys", description: "Navigate gallery" },
                 { keys: "Enter", description: "Open image/video or enter gallery" },
-                { keys: "Esc", description: "Go up one level" },
-                { keys: "F2", description: "Rename" }
+                { keys: "Esc", description: "Go up one level" }
             ]
         }
     ]
-
-    // Signal to request theme cycling (Main.qml handles the state)
-    signal themeCycleRequested()
 
     // Signal for back navigation (Main.qml wires to galleryModel.upOneLevel)
     signal back()
@@ -181,22 +177,9 @@ Rectangle {
             galleryModel.upOneLevel()
             galleryRoot.back()
         }
-        Keys.onPressed: {
-            if (event.key === Qt.Key_F2) {
-                // Rename current item
-                if (grid.currentIndex >= 0 && grid.currentIndex < galleryModel.rowCount()) {
-                    const nodeName = galleryModel.data(galleryModel.index(grid.currentIndex), galleryModel.roleNames()['name']);
-                    renameDialog.originalName = nodeName;
-                    renameDialog.targetRow = grid.currentIndex;
-                    renameDialog.open();
-                }
-                event.accepted = true;
-            } else if (event.key === Qt.Key_T) {
-                // Cycle to next theme (0->1->2->3->0)
-                // Signal to Main.qml to handle theme cycling
-                galleryRoot.themeCycleRequested();
-                event.accepted = true;
-            }
+        // Note: F2 is now global (opens settings overlay from Main.qml)
+        Keys.onPressed: (event) => {
+            // Placeholder for future gallery-specific key handlers
         }
     }
 }

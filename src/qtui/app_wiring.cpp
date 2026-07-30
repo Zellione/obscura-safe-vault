@@ -17,6 +17,7 @@
 #include "playback_engine.h"
 #include "file_op_controller.h"
 #include "status_controller.h"
+#include "settings_controller.h"
 #include "help_model.h"
 #include "gfx/theme.h"
 
@@ -47,6 +48,12 @@ AppContext::AppContext()
     unlockController.setPlaybackEngine(&playbackEngine);
     galleryModel.setViewerController(&viewerController);
     playbackEngine.setVault(&unlockController.vault());
+
+    // Wire vault unlock state to settings controller
+    QObject::connect(&unlockController, &UnlockController::unlockedChanged,
+                     &settingsController, [this]() {
+                         settingsController.setVaultUnlocked(unlockController.unlocked());
+                     });
 }
 
 void AppContext::expose(QQmlApplicationEngine& engine)
@@ -61,5 +68,6 @@ void AppContext::expose(QQmlApplicationEngine& engine)
     ctx->setContextProperty("vaultListModel", &vaultListModel);
     ctx->setContextProperty("fileOpController", &fileOpController);
     ctx->setContextProperty("statusController", &statusController);
+    ctx->setContextProperty("settingsController", &settingsController);
     ctx->setContextProperty("helpModel", &helpModel);
 }

@@ -33,12 +33,16 @@ add_library(osv_qt_core STATIC
     ${REPO_ROOT}/src/platform/error_log.cpp
     ${REPO_ROOT}/src/platform/paths.cpp
     ${REPO_ROOT}/src/platform/vault_registry.cpp
+    ${REPO_ROOT}/src/platform/theme_pref.cpp
     # media: video decode + demux (Task 9 adds video playback)
     ${OSV_MEDIA_SRC}
     ${REPO_ROOT}/src/ui/advanced_search_model.cpp
     ${REPO_ROOT}/src/ui/gallery_sort.cpp
     ${REPO_ROOT}/src/ui/natural_sort.cpp
     ${REPO_ROOT}/src/ui/playback_model.cpp
+    ${REPO_ROOT}/src/ui/nav_model.cpp
+    ${REPO_ROOT}/src/ui/settings_model.cpp
+    ${REPO_ROOT}/src/ui/tag_inherit.cpp
     # text input models (Task 3 uses SecureTextInput)
     ${REPO_ROOT}/src/ui/text_input_model.cpp
     ${REPO_ROOT}/src/ui/secure_text_input.cpp
@@ -129,6 +133,10 @@ add_executable(osv_qt_status_controller_test tests/status_controller_test.cpp st
 target_link_libraries(osv_qt_status_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_status_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(osv_qt_settings_controller_test tests/settings_controller_test.cpp settings_controller.cpp)
+target_link_libraries(osv_qt_settings_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
+target_include_directories(osv_qt_settings_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 add_executable(osv_qt_help_model_test tests/help_model_test.cpp help_model.cpp)
 target_link_libraries(osv_qt_help_model_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_help_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -142,6 +150,19 @@ target_compile_definitions(osv_qt_help_popup_qml_test PRIVATE
 
 # Shaders for help_popup test
 qt6_add_shaders(osv_qt_help_popup_qml_test "osv_qt_help_popup_qml_test_shaders"
+    PREFIX "/osvqt"
+    FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
+)
+
+qt_add_executable(osv_qt_settings_overlay_qml_test tests/settings_overlay_qml_test.cpp)
+target_link_libraries(osv_qt_settings_overlay_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
+target_include_directories(osv_qt_settings_overlay_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(osv_qt_settings_overlay_qml_test PRIVATE
+    QTUI_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+)
+
+# Shaders for settings_overlay test
+qt6_add_shaders(osv_qt_settings_overlay_qml_test "osv_qt_settings_overlay_qml_test_shaders"
     PREFIX "/osvqt"
     FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
 )
@@ -171,6 +192,7 @@ qt_add_executable(osv-qt
     audio_pipe.cpp
     file_op_controller.cpp
     status_controller.cpp
+    settings_controller.cpp
     help_model.cpp
 )
 

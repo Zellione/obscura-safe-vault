@@ -10,6 +10,7 @@
 #include "playback_engine.h"
 #include "file_op_controller.h"
 #include "status_controller.h"
+#include "settings_controller.h"
 #include "help_model.h"
 
 class QQmlApplicationEngine;
@@ -32,6 +33,7 @@ struct AppContext {
     VaultListModel vaultListModel;
     FileOpController fileOpController;
     StatusController statusController;
+    SettingsController settingsController;
     HelpModel helpModel;
 
     AppContext();
