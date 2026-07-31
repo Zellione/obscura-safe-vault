@@ -24,6 +24,8 @@
 #include "detail_controller.h"
 #include "autolock.h"
 #include "import_controller.h"
+#include "export_controller.h"
+#include "transfer_controller.h"
 
 class QQmlApplicationEngine;
 
@@ -59,6 +61,8 @@ struct AppContext {
     DetailController detailController;
     AutoLock autoLock;
     ImportController importController;
+    ExportController exportController;
+    TransferController transferController;
 
     AppContext();
 

@@ -38,6 +38,19 @@ Rectangle {
                 { keys: "Ctrl+Up/Down", description: "Scroll detail panel" },
                 { keys: "Mouse Wheel", description: "Scroll over panel" }
             ]
+        },
+        {
+            title: "Vault Operations (WS4)",
+            entries: [
+                { keys: "E", description: "Export selected items" },
+                { keys: "Del", description: "Delete selected items" },
+                { keys: "M", description: "Move selected items" },
+                { keys: "Shift+M", description: "Copy selected items" },
+                { keys: "Shift+C", description: "Compact vault" },
+                { keys: "O", description: "Import from folder" },
+                { keys: "Ctrl+O", description: "Import from files" },
+                { keys: "Z", description: "Import from archive" }
+            ]
         }
     ]
 
@@ -49,9 +62,31 @@ Rectangle {
     readonly property var cellSizes: [0, 128, 188, 248, 320]  // index 0 (List) is ignored
     readonly property int currentViewMode: sessionState.viewDensity()
 
+    // Temporary storage for selected node keys (WS4 shortcuts)
+    property var currentNodeKeys: []
+
     function nextViewMode() {
         // Cycle: 0(List) -> 1(GridS) -> 2(GridM) -> 3(GridL) -> 4(GridXL) -> 0(List)
         sessionState.setViewDensity((currentViewMode + 1) % 5)
+    }
+
+    function getSelectedNodeKeys() {
+        // Collect node keys from selected items, or current item if nothing selected
+        currentNodeKeys = []
+        if (selectionController.count > 0) {
+            // Get node keys for all selected items by iterating through grid
+            for (let i = 0; i < grid.model.count; i++) {
+                const nodeName = grid.model.data(grid.model.index(i, 0), GalleryModel.NameRole)
+                if (selectionController.isSelected(i)) {
+                    const nodeKey = grid.model.data(grid.model.index(i, 0), GalleryModel.NodeKeyRole)
+                    currentNodeKeys.push(nodeKey)
+                }
+            }
+        } else if (grid.currentIndex >= 0 && grid.currentIndex < grid.model.count) {
+            // Use current item if no selection
+            const nodeKey = grid.model.data(grid.model.index(grid.currentIndex, 0), GalleryModel.NodeKeyRole)
+            currentNodeKeys.push(nodeKey)
+        }
     }
 
     // `focus: true` only grants scope focus inside the StackView;
@@ -368,6 +403,50 @@ Rectangle {
             } else if (event.text === "D" && event.modifiers & Qt.ControlModifier) {
                 // WS2 Task 2.3: Ctrl+D toggle detail panel
                 sessionState.setDetailOpen(!sessionState.detailOpen)
+                event.accepted = true
+            } else if (event.text === "E" && !(event.modifiers & (Qt.ControlModifier | Qt.ShiftModifier))) {
+                // WS4: E - export selected items
+                getSelectedNodeKeys()
+                if (currentNodeKeys.length > 0) {
+                    exportController.startExport("", currentNodeKeys)
+                }
+                event.accepted = true
+            } else if (event.key === Qt.Key_Delete) {
+                // WS4: Del - delete selected items
+                getSelectedNodeKeys()
+                if (currentNodeKeys.length > 0) {
+                    transferController.deleteItems(currentNodeKeys)
+                }
+                event.accepted = true
+            } else if (event.text === "M" && !(event.modifiers & (Qt.ControlModifier | Qt.ShiftModifier))) {
+                // WS4: M - move selected items
+                getSelectedNodeKeys()
+                if (currentNodeKeys.length > 0) {
+                    transferController.transferItems(currentNodeKeys, false, "", "")
+                }
+                event.accepted = true
+            } else if (event.text === "M" && (event.modifiers & Qt.ShiftModifier)) {
+                // WS4: Shift+M - copy selected items
+                getSelectedNodeKeys()
+                if (currentNodeKeys.length > 0) {
+                    transferController.transferItems(currentNodeKeys, true, "", "")
+                }
+                event.accepted = true
+            } else if (event.text === "C" && (event.modifiers & Qt.ShiftModifier)) {
+                // WS4: Shift+C - compact vault
+                transferController.compact()
+                event.accepted = true
+            } else if (event.text === "O" && !(event.modifiers & Qt.ControlModifier)) {
+                // WS4: O - import from folders
+                importController.pickFolders()
+                event.accepted = true
+            } else if (event.text === "O" && (event.modifiers & Qt.ControlModifier)) {
+                // WS4: Ctrl+O - import from files
+                importController.pickFiles()
+                event.accepted = true
+            } else if (event.text === "Z" && !(event.modifiers & (Qt.ControlModifier | Qt.ShiftModifier))) {
+                // WS4: Z - import from archive
+                importController.pickArchives()
                 event.accepted = true
             }
         }

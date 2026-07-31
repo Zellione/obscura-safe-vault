@@ -34,6 +34,9 @@
 #include "animated_image_loader.h"
 #include "detail_controller.h"
 #include "autolock.h"
+#include "export_controller.h"
+#include "transfer_controller.h"
+#include "import_controller.h"
 #include "gfx/theme.h"
 
 void initThemeFromEnv()
@@ -134,4 +137,6 @@ void AppContext::expose(QQmlApplicationEngine& engine)
     ctx->setContextProperty("detailController", &detailController);
     ctx->setContextProperty("autoLock", &autoLock);
     ctx->setContextProperty("importController", &importController);
+    ctx->setContextProperty("exportController", &exportController);
+    ctx->setContextProperty("transferController", &transferController);
 }
