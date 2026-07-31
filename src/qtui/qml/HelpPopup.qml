@@ -9,8 +9,9 @@ Rectangle {
     visible: false
     z: 1000  // Above other content
 
-    // Public API
-    property var helpModel: null
+    // helpModel comes from the engine context property (a shadowing property
+    // declaration made the old `helpModel: helpModel` shell binding self-refer
+    // and left it null — T3.1 W5).
 
     // Internal state
     property bool isOpen: false
@@ -141,7 +142,10 @@ Rectangle {
                 event.accepted = true;
             }
             Keys.onPressed: (event) => {
-                if (event.key === Qt.Key_Escape || event.key === Qt.Key_Q) {
+                if (event.key === Qt.Key_Escape || event.key === Qt.Key_Q
+                        || event.key === Qt.Key_F1) {
+                    // F1 closes too: the popup holds focus while open, so the
+                    // shell's F1 toggle can't see the key (T3.1 W5)
                     helpPopup.close();
                     event.accepted = true;
                 }

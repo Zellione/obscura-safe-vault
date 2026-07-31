@@ -6,7 +6,8 @@ import Osv 1.0
 Rectangle {
     id: managerRoot
     color: themePalette.bg
-    anchors.fill: parent
+    // No anchors here: StackView manages the current item's geometry
+    // (anchors on a StackView child trigger "conflicting anchors" warnings).
 
     // Help groups for F1 help popup
     property var helpGroups: [

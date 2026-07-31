@@ -7,23 +7,21 @@ Rectangle {
     id: root
     color: themePalette.bg
 
-    required property var themePalette
-    required property var favoritesController
-    required property var galleryModel
-    required property var viewerController
-    required property var selectionController
+    // themePalette / favoritesController come from engine context properties
+    // (required-property shadowing breaks self-named bindings — T3.1 W5).
 
     signal back()
     signal openGallery(nodePath: string)
-    signal openViewer(nodeKey: int)
+    // T3.1 W5: shell pushes the viewer screen then calls viewerController.openAlbum
+    signal openAlbum(var nodeKeys, int startIndex)
 
     // Help groups
     property list<var> helpGroups: [
         { title: "Navigation", entries: [
-            { key: "Tab", text: "Toggle: galleries ↔ images" },
-            { key: "Up/Down", text: "Navigate favorites" },
-            { key: "Enter/Return", text: "Open selected" },
-            { key: "Esc", text: "Return to gallery" }
+            { keys: "Tab", description: "Toggle: galleries ↔ images" },
+            { keys: "Up/Down", description: "Navigate favorites" },
+            { keys: "Enter/Return", description: "Open selected" },
+            { keys: "Esc", description: "Return to gallery" }
         ]}
     ]
 
@@ -78,14 +76,14 @@ Rectangle {
             model: currentFavorites.length
 
             delegate: Rectangle {
+                // model is a count — resolve the row via index (modelData is just the int)
+                readonly property var favItem: currentFavorites[index]
                 width: gridView.cellWidth - 4
                 height: gridView.cellHeight - 4
                 color: themePalette.surface
                 border.color: (gridView.currentIndex === index)
                     ? themePalette.accent
-                    : (selectionController.isSelected(modelData.path))
-                        ? themePalette.accent
-                        : themePalette.border
+                    : themePalette.border
                 border.width: (gridView.currentIndex === index) ? 3 : 2
 
                 ColumnLayout {
@@ -99,14 +97,14 @@ Rectangle {
 
                         // Thumbnail image for media
                         SecureImageItem {
-                            visible: !modelData.is_gallery
+                            visible: !favItem.is_gallery
                             anchors.fill: parent
-                            nodeKey: modelData.nodeKey
+                            nodeKey: favItem.nodeKey
                         }
 
                         // Folder glyph for galleries
                         Text {
-                            visible: modelData.is_gallery
+                            visible: favItem.is_gallery
                             anchors.centerIn: parent
                             text: "📁"
                             font.pixelSize: 36
@@ -115,7 +113,7 @@ Rectangle {
 
                     Text {
                         Layout.fillWidth: true
-                        text: modelData.name
+                        text: favItem.name
                         color: themePalette.text
                         font.pixelSize: 10
                         elide: Text.ElideRight
@@ -126,28 +124,18 @@ Rectangle {
                 MouseArea {
                     anchors.fill: parent
                     onClicked: {
-                        selectionController.setSelected(modelData.path, true);
+                        gridView.currentIndex = index;
                     }
                     onDoubleClicked: {
-                        if (modelData.is_gallery) {
-                            root.openGallery(modelData.path);
+                        gridView.currentIndex = index;
+                        if (favItem.is_gallery) {
+                            root.openGallery(favItem.path);
                         } else {
                             // Open in collection mode (WS3 contract)
-                            // Find the index in the currentFavorites array
-                            let index = -1;
-                            for (let i = 0; i < currentFavorites.length; i++) {
-                                if (currentFavorites[i].path === modelData.path) {
-                                    index = i;
-                                    break;
-                                }
-                            }
-                            if (index >= 0) {
-                                // contract: WS3 openAlbum
-                                viewerController.openAlbum(
-                                    currentFavorites.map(item => item.nodeKey || 0),
-                                    index
-                                );
-                            }
+                            root.openAlbum(
+                                currentFavorites.map(item => item.nodeKey || 0),
+                                index
+                            );
                         }
                     }
                 }
@@ -214,22 +202,15 @@ Rectangle {
                     root.openGallery(item.path);
                 } else {
                     // contract: WS3 openAlbum
-                    viewerController.openAlbum(
+                    root.openAlbum(
                         currentFavorites.map(it => it.nodeKey || 0),
                         gridView.currentIndex
                     );
                 }
             }
             event.accepted = true;
-        } else if (event.key === Qt.Key_Up || event.key === Qt.Key_Down ||
-                   event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
-            // Let GridView handle arrow keys natively (currentIndex will change automatically)
-            // Sync selection with currentIndex
-            if (gridView.currentIndex >= 0 && gridView.currentIndex < currentFavorites.length) {
-                selectionController.setSelected(currentFavorites[gridView.currentIndex].path, true);
-            }
-            event.accepted = false;  // Let GridView process it
         }
+        // Arrow keys: let GridView handle them natively (currentIndex follows)
     }
 
     focus: true

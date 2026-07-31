@@ -274,6 +274,10 @@ add_executable(osv_qt_import_controller_test tests/import_controller_test.cpp im
 target_link_libraries(osv_qt_import_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test Qt6::Widgets)
 target_include_directories(osv_qt_import_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(osv_qt_import_autolock_wiring_test tests/import_autolock_wiring_test.cpp)
+target_link_libraries(osv_qt_import_autolock_wiring_test PRIVATE Qt6::Core Qt6::Test)
+target_include_directories(osv_qt_import_autolock_wiring_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 add_executable(osv_qt_import_status_screen_test tests/import_status_screen_test.cpp)
 target_link_libraries(osv_qt_import_status_screen_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_import_status_screen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

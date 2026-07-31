@@ -16,9 +16,11 @@ class SessionState : public QObject {
 public:
     explicit SessionState(QObject* parent = nullptr);
 
-    // Per-path focused tile index (Phase 40 Part 2)
-    void recordFocusIndex(const QString& path, int index);
-    [[nodiscard]] int recallFocusIndex(const QString& path) const;
+    // Per-path focused tile index (Phase 40 Part 2).
+    // Q_INVOKABLE: called from GalleryScreen.qml (T3.1 W5 — plain methods are
+    // not callable from QML and silently broke session position memory).
+    Q_INVOKABLE void recordFocusIndex(const QString& path, int index);
+    [[nodiscard]] Q_INVOKABLE int recallFocusIndex(const QString& path) const;
 
     // Global view density (last-used gallery grid density)
     [[nodiscard]] int viewDensity() const;
@@ -28,9 +30,10 @@ public:
     [[nodiscard]] bool detailOpen() const;
     void setDetailOpen(bool open);
 
-    // Global thumbnail strip side (0=Bottom, 1=Right, ...)
-    [[nodiscard]] int stripSide() const;
-    void setStripSide(int side);
+    // Global thumbnail strip side (0=Bottom, 1=Right, ...).
+    // Q_INVOKABLE: read from ViewerScreen.qml (T3.1 W5).
+    [[nodiscard]] Q_INVOKABLE int stripSide() const;
+    Q_INVOKABLE void setStripSide(int side);
 
     // Video resume bookmark (last-paused video + position)
     [[nodiscard]] QString lastMediaPath() const;

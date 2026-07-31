@@ -8,34 +8,35 @@ Rectangle {
     color: themePalette.veil
     z: 1000
 
-    required property var themePalette
-    required property var searchModelAdapter
-    required property var viewerController
-    required property var galleryModel
+    // themePalette / searchModelAdapter come from engine context properties
+    // (required-property shadowing breaks self-named bindings — T3.1 W5).
 
     signal back()
     signal openGallery(nodePath: string)
-    signal openViewer(nodeKey: int)
+    // T3.1 W5: shell pushes the viewer screen then calls viewerController.openAlbum
+    signal openAlbum(var nodeKeys, int startIndex)
 
     // Help groups
     property list<var> helpGroups: [
         { title: "Search", entries: [
-            { key: "Tab", text: "Cycle scope: Both ↔ Images ↔ Galleries" },
-            { key: "Up/Down", text: "Navigate results" },
-            { key: "Enter", text: "Open selected" },
-            { key: "Esc", text: "Close overlay" }
+            { keys: "Tab", description: "Cycle scope: Both ↔ Images ↔ Galleries" },
+            { keys: "Up/Down", description: "Navigate results" },
+            { keys: "Enter", description: "Open selected" },
+            { keys: "Esc", description: "Close overlay" }
         ]}
     ]
 
     property bool active: false
-    property int currentScope: 0  // 0=Both, 1=Images, 2=Galleries
+    // Values MUST match vault::SearchScope: Images=0, Galleries=1, Both=2
+    // (T3.1 W5: the old 0=Both assumption silently searched Images-only).
+    property int currentScope: 2
     property var searchResults: []
     property int selectedIndex: 0
 
     // SearchScope enum from vault (via C++)
-    readonly property int ScopeBoth: 0
-    readonly property int ScopeImages: 1
-    readonly property int ScopeGalleries: 2
+    readonly property int scopeImages: 0
+    readonly property int scopeGalleries: 1
+    readonly property int scopeBoth: 2
 
     function open() {
         active = true;
@@ -45,12 +46,12 @@ Rectangle {
 
     function close() {
         active = false;
-        currentScope = ScopeBoth;
+        currentScope = scopeBoth;
         inputField.text = "";
         selectedIndex = 0;
     }
 
-    function cycleScopee() {
+    function cycleScope() {
         currentScope = (currentScope + 1) % 3;
         updateSearch();
     }
@@ -87,7 +88,7 @@ Rectangle {
         } else {
             // Open image in collection-mode viewer (WS3 contract)
             let nodeKeys = searchResults.map(it => it.nodeKey || 0);
-            viewerController.openAlbum(nodeKeys, selectedIndex);
+            root.openAlbum(nodeKeys, selectedIndex);
         }
         close();
     }
@@ -132,7 +133,7 @@ Rectangle {
                     onAccepted: root.activateSelected()
 
                     Keys.onEscapePressed: root.close()
-                    Keys.onTabPressed: root.cycleScopee()
+                    Keys.onTabPressed: root.cycleScope()
                     Keys.onUpPressed: root.selectPrevious()
                     Keys.onDownPressed: root.selectNext()
                     Keys.onReturnPressed: root.activateSelected()
@@ -141,9 +142,9 @@ Rectangle {
                 Text {
                     text: {
                         switch (root.currentScope) {
-                        case ScopeBoth: return "Both";
-                        case ScopeImages: return "Images";
-                        case ScopeGalleries: return "Galleries";
+                        case scopeBoth: return "Both";
+                        case scopeImages: return "Images";
+                        case scopeGalleries: return "Galleries";
                         default: return "Both";
                         }
                     }

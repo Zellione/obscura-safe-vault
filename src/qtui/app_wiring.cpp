@@ -34,6 +34,9 @@
 #include "animated_image_loader.h"
 #include "detail_controller.h"
 #include "autolock.h"
+#include "export_controller.h"
+#include "transfer_controller.h"
+#include "import_controller.h"
 #include "gfx/theme.h"
 
 void initThemeFromEnv()
@@ -89,6 +92,13 @@ AppContext::AppContext()
     // Wire AutoLock
     autoLock.setUnlockController(&unlockController);
 
+    // Wire ImportController's queueCount to AutoLock's setSuppressed
+    // When import queue is non-empty, suppress auto-lock (WS2 contract)
+    QObject::connect(&importController, &ImportController::queueChanged,
+                     [this]() {
+                         autoLock.setSuppressed(importController.queueCount() > 0);
+                     });
+
     // Wire vault unlock state to settings controller
     QObject::connect(&unlockController, &UnlockController::unlockedChanged,
                      &settingsController, [this]() {
@@ -126,4 +136,7 @@ void AppContext::expose(QQmlApplicationEngine& engine)
     ctx->setContextProperty("searchModelAdapter", &searchModelAdapter);
     ctx->setContextProperty("detailController", &detailController);
     ctx->setContextProperty("autoLock", &autoLock);
+    ctx->setContextProperty("importController", &importController);
+    ctx->setContextProperty("exportController", &exportController);
+    ctx->setContextProperty("transferController", &transferController);
 }

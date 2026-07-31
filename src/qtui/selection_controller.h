@@ -30,7 +30,9 @@ public:
     // - clear(): drop all selections
 
     [[nodiscard]] int count() const { return static_cast<int>(model_.count()); }
-    [[nodiscard]] bool isSelected(int row) const { return model_.contains(row); }
+    // Q_INVOKABLE: called from QML (tile borders, getSelectedNodeKeys) — a plain
+    // public method is not callable from QML and silently breaks selection UI.
+    [[nodiscard]] Q_INVOKABLE bool isSelected(int row) const { return model_.contains(row); }
 
     Q_INVOKABLE void toggle(int row);
     Q_INVOKABLE void toggleAll(int count);

@@ -6,9 +6,8 @@ import "." as QmlUI
 Rectangle {
     id: root
 
-    // Required properties (bound by shell)
-    required property var importController
-    required property var themePalette
+    // importController / themePalette come from engine context properties
+    // (required-property shadowing breaks self-named bindings — T3.1 W5).
 
     color: themePalette.bg
     visible: false
@@ -233,7 +232,8 @@ Rectangle {
     Keys.onPressed: (event) => {
         if (event.key === Qt.Key_C && !event.isAutoRepeat) {
             // C key clears finished imports
-            // Would call: importController.clearFinished()
+            importController.clearFinished()
+            event.accepted = true
         }
 
         // Ctrl+Up/Down for id-based reorder (focus follows)

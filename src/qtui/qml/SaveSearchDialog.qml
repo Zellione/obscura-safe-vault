@@ -8,9 +8,9 @@ Dialog {
     modal: true
     anchors.centerIn: parent
 
+    // themePalette / advancedSearchController come from engine context properties
+    // (shadowing property declarations break self-named bindings — T3.1 W5).
     // Public: set these before opening
-    property var advancedSearchController
-    property var themePalette
     property var existingNames: []  // List of existing saved search names
     property string errorMessage: ""
 

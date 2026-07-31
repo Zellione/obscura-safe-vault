@@ -5,10 +5,15 @@ import Osv 1.0
 Rectangle {
     id: galleryRoot
     color: themePalette.bg
-    anchors.fill: parent
+    // No anchors here: StackView manages the current item's geometry
+    // (anchors on a StackView child trigger "conflicting anchors" warnings).
 
     // Dialog for renaming items (passed from Main.qml)
     property var renameDialog: null
+
+    // T3.1 W5: quick-search overlay + tag editor dialog (passed from Main.qml)
+    property var searchOverlay: null
+    property var tagEditorDialog: null
 
     // Help groups for F1 help popup
     property var helpGroups: [
@@ -38,6 +43,33 @@ Rectangle {
                 { keys: "Ctrl+Up/Down", description: "Scroll detail panel" },
                 { keys: "Mouse Wheel", description: "Scroll over panel" }
             ]
+        },
+        {
+            title: "Vault Operations (WS4)",
+            entries: [
+                { keys: "E", description: "Export selected items" },
+                { keys: "Del", description: "Delete selected items" },
+                { keys: "M", description: "Move selected items" },
+                { keys: "Shift+M", description: "Copy selected items" },
+                { keys: "Shift+C", description: "Compact vault" },
+                { keys: "O", description: "Import from folder" },
+                { keys: "Ctrl+O", description: "Import from files" },
+                { keys: "Z", description: "Import from archive" },
+                { keys: "Shift+I", description: "Import status screen" }
+            ]
+        },
+        {
+            title: "Tags, Search & Favorites (WS5)",
+            entries: [
+                { keys: "/", description: "Quick search" },
+                { keys: "Shift+/", description: "Advanced search" },
+                { keys: "G", description: "Edit tags of focused item" },
+                { keys: "Shift+G", description: "Import tag list to gallery" },
+                { keys: "B", description: "Toggle favorite" },
+                { keys: "Shift+F", description: "Favorites screen" },
+                { keys: "Shift+T", description: "Tag overview" },
+                { keys: "R", description: "Rename focused item" }
+            ]
         }
     ]
 
@@ -47,11 +79,42 @@ Rectangle {
     // View mode helpers (synchronized with sessionState)
     // GalleryView enum: 0=List, 1=GridS, 2=GridM, 3=GridL, 4=GridXL
     readonly property var cellSizes: [0, 128, 188, 248, 320]  // index 0 (List) is ignored
-    readonly property int currentViewMode: sessionState.viewDensity()
+    readonly property int currentViewMode: sessionState.viewDensity
+
+    // Temporary storage for selected node keys (WS4 shortcuts)
+    property var currentNodeKeys: []
 
     function nextViewMode() {
         // Cycle: 0(List) -> 1(GridS) -> 2(GridM) -> 3(GridL) -> 4(GridXL) -> 0(List)
-        sessionState.setViewDensity((currentViewMode + 1) % 5)
+        sessionState.viewDensity = (currentViewMode + 1) % 5
+    }
+
+    // T3.1 W5: UI-style path of the row's node ("/name" at root, "/gal/name" nested) —
+    // the path form tagController / favoritesController expect.
+    function nodePathAt(row) {
+        const name = galleryModel.nameAt(row)
+        if (name === "") return ""
+        return galleryModel.currentPath === "/" ? "/" + name
+                                                : galleryModel.currentPath + "/" + name
+    }
+
+    function getSelectedNodeKeys() {
+        // Collect node keys from selected items, or current item if nothing selected
+        currentNodeKeys = []
+        if (selectionController.count > 0) {
+            // Get node keys for all selected items by iterating through grid
+            for (let i = 0; i < grid.model.count; i++) {
+                const nodeName = grid.model.data(grid.model.index(i, 0), GalleryModel.NameRole)
+                if (selectionController.isSelected(i)) {
+                    const nodeKey = grid.model.data(grid.model.index(i, 0), GalleryModel.NodeKeyRole)
+                    currentNodeKeys.push(nodeKey)
+                }
+            }
+        } else if (grid.currentIndex >= 0 && grid.currentIndex < grid.model.count) {
+            // Use current item if no selection
+            const nodeKey = grid.model.data(grid.model.index(grid.currentIndex, 0), GalleryModel.NodeKeyRole)
+            currentNodeKeys.push(nodeKey)
+        }
     }
 
     // `focus: true` only grants scope focus inside the StackView;
@@ -60,6 +123,9 @@ Rectangle {
     // screen pops back to it.
     Component.onCompleted: grid.forceActiveFocus()
     StackView.onActivated: grid.forceActiveFocus()
+    // T3.1 W5: popups restore focus to the screen ROOT (stack.currentItem);
+    // delegate it down to the grid where the key handlers live.
+    onActiveFocusChanged: if (activeFocus) grid.forceActiveFocus()
 
     // Header: current gallery path + mouse affordance to go up.
     Rectangle {
@@ -94,10 +160,12 @@ Rectangle {
                     id: upMouse
                     anchors.fill: parent
                     onClicked: {
+                        // T3.1 W5: just go up — emitting back() after upOneLevel
+                        // made the shell see currentPath === "/" and LOCK the
+                        // vault when leaving a first-level gallery.
                         if (galleryModel.currentPath !== "/") {
                             galleryModel.upOneLevel()
                             grid.forceActiveFocus()
-                            galleryRoot.back()
                         }
                     }
                 }
@@ -215,7 +283,9 @@ Rectangle {
                     SecureImageItem {
                         visible: model.isGallery && model.cover !== undefined && model.cover !== null
                         anchors.fill: parent
-                        nodeKey: model.cover  // cover is the thumbnail chunk offset
+                        // cover node's key (T3.1 W5: was a chunk offset — crashed ThumbCache);
+                        // media rows have no cover → bind 0, the item stays invisible
+                        nodeKey: (model.cover !== undefined && model.cover !== null) ? model.cover : 0
                     }
 
                     // Folder icon fallback for galleries without covers (Finding 1)
@@ -293,18 +363,21 @@ Rectangle {
                     font.pixelSize: 12
                 }
 
-                // WS3 Finding 2: Hover auto-play gate (AnimHoverProbe QML integration pending)
-                // TODO (Phase 57): Instantiate AnimHoverProbe here when GalleryModel has isAnimated + frameCount roles
-                // Template (to be uncommented after Phase 57 adds model roles):
-                // AnimHoverProbe {
-                //     visible: !model.isGallery
-                //     isAnimated: model.isAnimated        // Bind once model has role
-                //     imageWidth: imageItem.sourceSize.width
-                //     imageHeight: imageItem.sourceSize.height
-                //     frameCount: model.frameCount        // Bind once model has role
-                //     onHoverStart: (ctrl) => { /* wire to SecureImageItem */ }
-                //     onHoverStop: { /* cleanup */ }
-                // }
+                // WS3 Finding 2: Hover auto-play gate (AnimHoverProbe QML integration)
+                AnimHoverProbe {
+                    anchors.fill: parent
+                    visible: !model.isGallery && model.isAnimated
+                    isAnimated: model.isAnimated
+                    // frameCount defaults to 0 (unknown) since vault doesn't store frame metadata
+                    // This is safe: 0 <= kAnimHoverMaxFrames (300), so budget check passes
+                    onHoverStart: (ctrl) => {
+                        // Animation control wired here in Phase 57 once SecureImageItem
+                        // exposes animation playback API
+                    }
+                    onHoverStop: {
+                        // Cleanup wired here in Phase 57
+                    }
+                }
             }
 
             // Single-tap: select item (and give the grid key focus,
@@ -341,30 +414,120 @@ Rectangle {
             galleryModel.activate(grid.currentIndex)
         }
         Keys.onEscapePressed: {
-            galleryModel.upOneLevel()
-            galleryRoot.back()
+            // T3.1 W5: Esc inside a gallery goes UP one level; only Esc at the
+            // root emits back() (shell locks + returns to the vault manager).
+            // The old up-then-back sequence locked the vault from any
+            // first-level gallery.
+            if (galleryModel.currentPath === "/") {
+                galleryRoot.back()
+            } else {
+                galleryModel.upOneLevel()
+            }
         }
         Keys.onSpacePressed: {
             // WS2 Task 2.2: Space toggles selection
             selectionController.toggle(grid.currentIndex)
         }
         // Note: F2 is now global (opens settings overlay from Main.qml)
+        // T3.1 W5: all shortcuts match on event.key (layout-stable). The previous
+        // event.text === "E"-style matching never fired for unshifted keys ("e" != "E")
+        // and never fired for Ctrl chords (Ctrl+O produces a control character).
         Keys.onPressed: (event) => {
-            if (event.text === "S" && event.modifiers & Qt.ShiftModifier) {
+            const shift = event.modifiers & Qt.ShiftModifier
+            const ctrl = event.modifiers & Qt.ControlModifier
+            if (event.key === Qt.Key_S && shift && !ctrl) {
                 // Shift+S: cycle sort order
                 galleryModel.nextSort()
                 event.accepted = true
-            } else if (event.text === "A" && event.modifiers & Qt.ControlModifier) {
+            } else if (event.key === Qt.Key_A && ctrl) {
                 // WS2 Task 2.2: Ctrl+A select all
                 selectionController.toggleAll(grid.model.count)
                 event.accepted = true
-            } else if (event.text === "L" || event.text === "l") {
+            } else if (event.key === Qt.Key_L && !shift && !ctrl) {
                 // L: cycle view density
                 nextViewMode()
                 event.accepted = true
-            } else if (event.text === "D" && event.modifiers & Qt.ControlModifier) {
+            } else if (event.key === Qt.Key_D && ctrl) {
                 // WS2 Task 2.3: Ctrl+D toggle detail panel
-                sessionState.setDetailOpen(!sessionState.detailOpen)
+                sessionState.detailOpen = !sessionState.detailOpen
+                event.accepted = true
+            } else if (event.key === Qt.Key_E && !shift && !ctrl) {
+                // WS4: E - export selected items
+                getSelectedNodeKeys()
+                if (currentNodeKeys.length > 0) {
+                    exportController.startExport("", currentNodeKeys)
+                }
+                event.accepted = true
+            } else if (event.key === Qt.Key_Delete) {
+                // WS4: Del - delete selected items
+                getSelectedNodeKeys()
+                if (currentNodeKeys.length > 0) {
+                    transferController.deleteItems(currentNodeKeys)
+                }
+                event.accepted = true
+            } else if (event.key === Qt.Key_M && !shift && !ctrl) {
+                // WS4: M - move selected items
+                getSelectedNodeKeys()
+                if (currentNodeKeys.length > 0) {
+                    transferController.transferItems(currentNodeKeys, false, "", "")
+                }
+                event.accepted = true
+            } else if (event.key === Qt.Key_M && shift && !ctrl) {
+                // WS4: Shift+M - copy selected items
+                getSelectedNodeKeys()
+                if (currentNodeKeys.length > 0) {
+                    transferController.transferItems(currentNodeKeys, true, "", "")
+                }
+                event.accepted = true
+            } else if (event.key === Qt.Key_C && shift && !ctrl) {
+                // WS4: Shift+C - compact vault
+                transferController.compact()
+                event.accepted = true
+            } else if (event.key === Qt.Key_O && !ctrl && !shift) {
+                // WS4: O - import from folders
+                importController.pickFolders()
+                event.accepted = true
+            } else if (event.key === Qt.Key_O && ctrl) {
+                // WS4: Ctrl+O - import from files
+                importController.pickFiles()
+                event.accepted = true
+            } else if (event.key === Qt.Key_Z && !ctrl && !shift) {
+                // WS4: Z - import from archive
+                importController.pickArchives()
+                event.accepted = true
+            } else if (event.key === Qt.Key_Slash && !ctrl && !shift) {
+                // WS5: / - quick search overlay (Shift+/ = advanced search, handled globally)
+                if (searchOverlay) searchOverlay.open()
+                event.accepted = true
+            } else if (event.key === Qt.Key_G && !ctrl && !shift) {
+                // WS5: G - edit tags of focused item
+                if (tagEditorDialog && grid.currentIndex >= 0) {
+                    const path = nodePathAt(grid.currentIndex)
+                    if (path !== "") {
+                        tagEditorDialog.nodePath = path
+                        tagEditorDialog.open()
+                    }
+                }
+                event.accepted = true
+            } else if (event.key === Qt.Key_B && !ctrl && !shift) {
+                // WS5: B - toggle favorite on focused item
+                if (grid.currentIndex >= 0) {
+                    const path = nodePathAt(grid.currentIndex)
+                    if (path !== "" && favoritesController.toggleFavorite(path)) {
+                        galleryModel.refresh()  // update the gold-star badge
+                    }
+                }
+                event.accepted = true
+            } else if (event.key === Qt.Key_R && !ctrl && !shift) {
+                // WS5: R - rename focused item
+                if (renameDialog && grid.currentIndex >= 0) {
+                    const name = galleryModel.nameAt(grid.currentIndex)
+                    if (name !== "") {
+                        renameDialog.originalName = name
+                        renameDialog.targetRow = grid.currentIndex
+                        renameDialog.open()
+                    }
+                }
                 event.accepted = true
             }
         }
@@ -409,6 +572,15 @@ Rectangle {
     // WS2 Task 2.3: Wire detail panel to show selected node's details
     Connections {
         target: grid
+        // T3.1 W5: a model reset (unlock, refresh) leaves currentIndex at -1 and
+        // no currentPathChanged fires — restore or default the focused tile so
+        // per-tile keys (B favorite, G tags, R rename) have a target.
+        function onCountChanged() {
+            if (grid.currentIndex < 0 && grid.count > 0) {
+                const saved = sessionState.recallFocusIndex(galleryModel.currentPath)
+                grid.currentIndex = (saved >= 0 && saved < grid.count) ? saved : 0
+            }
+        }
         function onCurrentIndexChanged() {
             if (grid.currentIndex >= 0 && grid.currentIndex < grid.model.count) {
                 // Get the node key from the current item

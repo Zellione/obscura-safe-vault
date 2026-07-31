@@ -11,35 +11,43 @@ Window {
     color: themePalette.bg
     title: "osv-qt (experiment)"
 
-    // Global F1/F2/backtick/Shift+T/Shift+G/Shift+/ key handlers
-    Keys.onPressed: (event) => {
-        if (event.key === Qt.Key_F1) {
-            helpPopup.toggle();
-            event.accepted = true;
-        } else if (event.key === Qt.Key_F2) {
-            settingsOverlay.toggle();
-            event.accepted = true;
-        } else if (event.key === Qt.Key_T && (event.modifiers & Qt.ShiftModifier)) {
-            // Shift+T: open tag overview screen
-            stack.push(tagOverviewScreenComponent);
-            event.accepted = true;
-        } else if (event.key === Qt.Key_G && (event.modifiers & Qt.ShiftModifier)) {
-            // Shift+G: import tags from file to current gallery
-            tagListImportFileDialog.open();
-            event.accepted = true;
-        } else if (event.key === Qt.Key_Slash && (event.modifiers & Qt.ShiftModifier)) {
-            // Shift+/: open advanced search screen
-            stack.push(advancedSearchScreenComponent);
-            event.accepted = true;
-        } else if (event.text === "`") {
-            // Backtick opens quick-switch (only if not typing in a text field)
-            quickSwitchPopup.open();
-            event.accepted = true;
-        }
+    // Screen pushes are guarded: vault must be unlocked, and pressing the chord
+    // again while already on the target screen must not push a duplicate.
+    function canPushScreen(name) {
+        return unlockController.unlocked
+            && stack.currentItem && stack.currentItem.objectName !== name;
     }
 
     RenameDialog {
-        id: renameDialog
+        id: globalRenameDialog
+    }
+
+    // T3.1 W5: tag editor dialog (gallery G opens it on the focused item)
+    TagEditorDialog {
+        id: globalTagEditorDialog
+        onClosed: {
+            if (stack.currentItem) {
+                stack.currentItem.forceActiveFocus();
+            }
+        }
+    }
+
+    // T3.1 W5: quick-search overlay (gallery `/` opens it)
+    SearchOverlay {
+        id: globalSearchOverlay
+        anchors.fill: parent
+        onOpenGallery: (nodePath) => {
+            galleryModel.navigateToPath(nodePath);
+        }
+        onOpenAlbum: (nodeKeys, startIndex) => {
+            stack.push(viewerScreenComponent);
+            viewerController.openAlbum(nodeKeys, startIndex);
+        }
+        onActiveChanged: {
+            if (!active && stack.currentItem) {
+                stack.currentItem.forceActiveFocus();
+            }
+        }
     }
 
     QuickSwitchPopup {
@@ -59,7 +67,6 @@ Window {
 
     HelpPopup {
         id: helpPopup
-        helpModel: helpModel
 
         // Restore focus to the active screen when help closes
         onClosed: {
@@ -71,7 +78,6 @@ Window {
 
     SettingsOverlay {
         id: settingsOverlay
-        settingsController: settingsController
 
         // Restore focus to the active screen when settings closes
         onClosed: {
@@ -116,6 +122,60 @@ Window {
         anchors {
             fill: parent
             bottom: footerBar.top
+        }
+
+        // Global F1/F2/backtick/Shift+T/Shift+G/Shift+F/Shift+I/Shift+/ handlers.
+        // T3.1 W5: these lived as Keys.onPressed on the Window, but Keys is an
+        // Item attached property — on a Window it never receives events, so no
+        // global shortcut ever fired. The StackView is an ancestor of every
+        // screen's focused item, so unhandled keys bubble up to here (and text
+        // fields keep consuming their own keys before this sees them).
+        Keys.onPressed: (event) => {
+            if (event.key === Qt.Key_F1) {
+                helpPopup.toggle();
+                event.accepted = true;
+            } else if (event.key === Qt.Key_F2) {
+                settingsOverlay.toggle();
+                event.accepted = true;
+            } else if (event.key === Qt.Key_T && (event.modifiers & Qt.ShiftModifier)) {
+                // Shift+T: open tag overview screen
+                if (root.canPushScreen("tagOverviewScreen")) {
+                    stack.push(tagOverviewScreenComponent);
+                }
+                event.accepted = true;
+            } else if (event.key === Qt.Key_G && (event.modifiers & Qt.ShiftModifier)) {
+                // Shift+G: import tags from file to current gallery
+                if (unlockController.unlocked) {
+                    tagListImportFileDialog.open();
+                }
+                event.accepted = true;
+            } else if (event.key === Qt.Key_Question
+                       || (event.key === Qt.Key_Slash && (event.modifiers & Qt.ShiftModifier))) {
+                // Shift+/: open advanced search screen. On layouts where Shift+/
+                // types '?', Qt reports Key_Question — match both.
+                if (root.canPushScreen("advancedSearchScreen")) {
+                    stack.push(advancedSearchScreenComponent);
+                }
+                event.accepted = true;
+            } else if (event.key === Qt.Key_F && (event.modifiers & Qt.ShiftModifier)) {
+                // Shift+F: favorites screen (the viewer consumes Shift+F for
+                // fullscreen before the event can bubble up here)
+                if (root.canPushScreen("favoritesScreen")) {
+                    stack.push(favoritesScreenComponent);
+                }
+                event.accepted = true;
+            } else if (event.key === Qt.Key_I && (event.modifiers & Qt.ShiftModifier)) {
+                // Shift+I: import status screen
+                if (root.canPushScreen("importStatusScreen")) {
+                    stack.push(importStatusScreenComponent);
+                }
+                event.accepted = true;
+            } else if (event.text === "`") {
+                // Backtick opens quick-switch (only reachable when no text field
+                // consumed the key first)
+                quickSwitchPopup.open();
+                event.accepted = true;
+            }
         }
 
         initialItem: vaultManagerScreenComponent
@@ -193,10 +253,14 @@ Window {
         Component {
             id: unlockedPageComponent
             GalleryScreen {
-                renameDialog: renameDialog
+                objectName: "galleryScreen"
+                renameDialog: globalRenameDialog
+                searchOverlay: globalSearchOverlay
+                tagEditorDialog: globalTagEditorDialog
                 onBack: {
-                    // Navigation contract satisfied; upOneLevel() already called by GalleryScreen.
-                    // When at gallery root (currentPath === "/"), route back to vault manager and lock vault.
+                    // T3.1 W5 contract: GalleryScreen emits back() only from the
+                    // gallery ROOT (Esc inside a gallery just goes up a level).
+                    // Back at root = lock the vault and return to the manager.
                     if (galleryModel.currentPath === "/") {
                         unlockController.lock();
                         stack.replace(vaultManagerScreenComponent);
@@ -364,6 +428,7 @@ Window {
         Component {
             id: tagOverviewScreenComponent
             TagOverviewScreen {
+                objectName: "tagOverviewScreen"
                 onBack: {
                     stack.pop();
                 }
@@ -374,6 +439,48 @@ Window {
         Component {
             id: advancedSearchScreenComponent
             AdvancedSearchScreen {
+                objectName: "advancedSearchScreen"
+                onBack: {
+                    stack.pop();
+                }
+                onOpenGallery: (nodePath) => {
+                    galleryModel.navigateToPath(nodePath);
+                    stack.pop();  // back to the gallery screen, now at the target path
+                }
+                onOpenAlbum: (nodeKeys, startIndex) => {
+                    stack.push(viewerScreenComponent);
+                    viewerController.openAlbum(nodeKeys, startIndex);
+                }
+            }
+        }
+
+        // Favorites screen (WS5 Task 5.2, wired T3.1 W5)
+        Component {
+            id: favoritesScreenComponent
+            FavoritesScreen {
+                objectName: "favoritesScreen"
+                onBack: {
+                    stack.pop();
+                }
+                onOpenGallery: (nodePath) => {
+                    galleryModel.navigateToPath(nodePath);
+                    stack.pop();  // back to the gallery screen, now at the target path
+                }
+                onOpenAlbum: (nodeKeys, startIndex) => {
+                    stack.push(viewerScreenComponent);
+                    viewerController.openAlbum(nodeKeys, startIndex);
+                }
+            }
+        }
+
+        // Import status screen (WS4 Task 4.2, wired T3.1 W5)
+        Component {
+            id: importStatusScreenComponent
+            ImportStatusScreen {
+                objectName: "importStatusScreen"
+                // ImportStatusScreen.qml defaults to hidden; StackView manages
+                // visibility from here on.
+                visible: true
                 onBack: {
                     stack.pop();
                 }

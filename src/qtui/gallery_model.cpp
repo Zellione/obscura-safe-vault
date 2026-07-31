@@ -11,6 +11,28 @@
 
 #include <span>
 
+namespace {
+
+// T3.1 W5 crash fix: the representative cover NODE for a gallery tile.
+// Mirrors ui::resolve_single_cover's traversal (gallery_cover.cpp) but yields
+// the node instead of a chunk span — the Qt thumb pipeline (SecureImageItem →
+// ThumbCache) is keyed by IndexNode*, and feeding it a chunk offset made
+// ThumbCache reinterpret_cast a file offset into a node pointer (segfault on
+// unlock for any gallery tile with a cover).
+const vault::IndexNode* resolveCoverNode(const vault::IndexNode& gallery, uint32_t max_depth)
+{
+    if (max_depth == 0) return nullptr;
+    for (const auto& child : gallery.children) {
+        if (child.is_image() && child.meta.thumb_length > 0) return &child;
+        if (child.is_video() && child.vmeta.poster_length > 0) return &child;
+        if (child.is_gallery())
+            if (const auto* node = resolveCoverNode(child, max_depth - 1)) return node;
+    }
+    return nullptr;
+}
+
+}  // namespace
+
 GalleryModel::GalleryModel(vault::Vault* vault, QObject* parent)
     : QAbstractListModel(parent), vault_(vault), currentPath_("/"),
       coverProvider_(std::make_unique<CoverProvider>(this))
@@ -48,19 +70,19 @@ QVariant GalleryModel::data(const QModelIndex& index, int role) const
             // only use it with ThumbCache.request(key), never dereference
             return QVariant::fromValue(static_cast<quintptr>(reinterpret_cast<uintptr_t>(node)));
         case CoverRole: {
-            // Task 2.4: Return cover spans for gallery tiles
-            // Only galleries have covers; media files return empty
+            // Task 2.4 / T3.1 W5: the representative cover NODE's key for
+            // gallery tiles (renders through the normal SecureImageItem →
+            // ThumbCache path, exactly like a media tile's own thumbnail).
+            // Only galleries have covers; media files return empty.
             if (node->type != vault::IndexNode::Type::Gallery)
                 return QVariant();
 
-            // Get covers from provider (memoised until refresh)
-            const auto& covers = coverProvider_->getCovers(node);
-            if (covers.empty())
+            const auto* cover = resolveCoverNode(*node, vault::INDEX_MAX_DEPTH);
+            if (cover == nullptr)
                 return QVariant();  // Empty gallery, fall back to folder icon
 
-            // Return cover offset as first item (QML will use ThumbCache to render)
-            // For now, return the first cover's offset as a uint64
-            return QVariant::fromValue(static_cast<quint64>(covers[0].offset));
+            return QVariant::fromValue(
+                static_cast<quintptr>(reinterpret_cast<uintptr_t>(cover)));
         }
         case ChildCountsRole: {
             // Task 2.4: Return "X galleries · Y items" string for galleries only
@@ -200,6 +222,30 @@ void GalleryModel::upOneLevel()
 
     refresh();
     emit currentPathChanged();
+}
+
+bool GalleryModel::navigateToPath(const QString& path)
+{
+    if (!vault_ || !vault_->is_unlocked())
+        return false;
+
+    // Normalize to segment list (drops leading/trailing/duplicate slashes),
+    // matching what find_gallery's split_path resolves.
+    const QStringList segments = path.split('/', Qt::SkipEmptyParts);
+    const QString normalized = "/" + segments.join('/');
+
+    const auto* node =
+        static_cast<const vault::Vault*>(vault_)->resolve_node(path.toStdString());
+    if (node == nullptr || !node->is_gallery())
+        return false;  // missing, or a media node
+
+    if (normalized == currentPath_)
+        return true;  // already there; skip the refresh
+
+    currentPath_ = normalized;
+    refresh();
+    emit currentPathChanged();
+    return true;
 }
 
 void GalleryModel::activate(int row)

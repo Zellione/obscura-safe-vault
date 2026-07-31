@@ -48,6 +48,13 @@ public:
     // Invokables for QML
     Q_INVOKABLE void enterGallery(int row);
     Q_INVOKABLE void upOneLevel();
+
+    // Navigate directly to a gallery by path (T3.1 W5: quick-search / favorites /
+    // advanced-search "open gallery" actions). Accepts both vault-style
+    // ("foo/bar", as in SearchHit.path) and UI-style ("/foo/bar") paths;
+    // "" and "/" mean root. Returns false (no state change) unless every
+    // segment resolves to a gallery.
+    Q_INVOKABLE bool navigateToPath(const QString& path);
     Q_INVOKABLE void activate(int row);
     Q_INVOKABLE QString rename(int row, const QString& newName);
     Q_INVOKABLE quintptr nodeKeyAt(int row) const;
@@ -70,8 +77,9 @@ public:
     // Set status controller for waste hint display (Scope: WS2.4)
     void setStatusController(StatusController* status) noexcept { statusController_ = status; }
 
-    // Public refresh for programmatic update (e.g., after unlock)
-    void refresh();
+    // Public refresh for programmatic update (e.g., after unlock).
+    // Q_INVOKABLE: QML calls it after favorite toggles to update tile badges.
+    Q_INVOKABLE void refresh();
 
     // Check and display waste hint (Scope: WS2.4)
     void checkAndDisplayWasteHint();

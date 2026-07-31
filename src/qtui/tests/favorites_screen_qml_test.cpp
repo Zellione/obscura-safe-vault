@@ -64,15 +64,9 @@ static bool test_favorites_screen_instantiates()
         return false;
     }
 
-    // Create with initial properties
-    QVariantMap initialProps;
-    initialProps["themePalette"] = QVariant::fromValue(&themePalette);
-    initialProps["favoritesController"] = QVariant::fromValue(&favoritesController);
-    initialProps["galleryModel"] = QVariant::fromValue(&galleryModel);
-    initialProps["viewerController"] = QVariant::fromValue(&viewerController);
-    initialProps["selectionController"] = QVariant::fromValue(&selectionController);
-
-    QObject* obj = component.createWithInitialProperties(initialProps);
+    // T3.1 W5: the screen reads controllers from context properties directly
+    // (required-property shadowing broke self-named bindings in the shell).
+    QObject* obj = component.create();
     if (!obj) {
         fprintf(stderr, "FAIL: FavoritesScreen instantiation failed\n");
         osvqt_test::print_component_errors(component, "  Error");

@@ -7,33 +7,36 @@ Rectangle {
     id: root
     color: themePalette.bg
 
-    required property var themePalette
-    required property var advancedSearchController
-    required property var selectionController
-    required property var viewerController
-    required property var sessionState
+    // themePalette / advancedSearchController / sessionState come from engine
+    // context properties (required-property shadowing breaks self-named bindings — T3.1 W5).
 
     signal back()
+    // T3.1 W5: navigation is the shell's job — the shell navigates the gallery
+    // model / pushes the viewer screen (a bare viewerController.openAlbum call
+    // would load pixels into a screen that was never pushed).
+    signal openGallery(nodePath: string)
+    signal openAlbum(var nodeKeys, int startIndex)
 
     // Help groups
     property list<var> helpGroups: [
         { title: "Search Fields", entries: [
-            { key: "Tab", text: "Cycle focus: include → exclude → name → scope → sidebar" },
-            { key: "Ctrl+L", text: "Toggle view: grid ↔ list" }
+            { keys: "Tab", description: "Cycle focus: include → exclude → name → scope → sidebar" },
+            { keys: "Ctrl+L", description: "Toggle view: grid ↔ list" }
         ]},
         { title: "Results", entries: [
-            { key: "Up/Down", text: "Navigate results" },
-            { key: "Enter", text: "Open selected result" }
+            { keys: "Up/Down", description: "Navigate results" },
+            { keys: "Enter", description: "Open selected result" }
         ]},
         { title: "Saved Searches", entries: [
-            { key: "Ctrl+S", text: "Save search with name" },
-            { key: "Enter", text: "Load selected saved search" },
-            { key: "Delete", text: "Remove selected saved search" },
-            { key: "/", text: "Filter saved searches" }
+            { keys: "Ctrl+S", description: "Save search with name" },
+            { keys: "Enter", description: "Load selected saved search" },
+            { keys: "Delete", description: "Remove selected saved search" },
+            { keys: "/", description: "Filter saved searches" }
         ]},
         { title: "Other", entries: [
-            { key: "Ctrl+R", text: "Clear all fields" },
-            { key: "Esc", text: "Return to gallery" }
+            { keys: "Ctrl+R", description: "Clear all fields" },
+            { keys: "Ctrl+D", description: "Toggle detail panel" },
+            { keys: "Esc", description: "Return to gallery" }
         ]}
     ]
 
@@ -52,7 +55,10 @@ Rectangle {
     property bool sidebarFilterMode: false  // `/` enters filter mode
 
     RowLayout {
-        anchors.fill: parent
+        anchors {
+            fill: parent
+            rightMargin: detailPanel.visible ? detailPanel.width : 0
+        }
         spacing: 0
 
         // Left sidebar: Saved searches
@@ -408,15 +414,18 @@ Rectangle {
                     clip: true
 
                     delegate: Rectangle {
+                        // model is a count — resolve the row via index (modelData is just the int)
+                        readonly property var resultItem: currentResults[index]
                         width: resultsGrid.cellWidth - 4
                         height: resultsGrid.cellHeight - 4
                         color: themePalette.surface
-                        border.color: themePalette.border
-                        border.width: 1
+                        border.color: (resultsGrid.currentIndex === index)
+                            ? themePalette.accent : themePalette.border
+                        border.width: (resultsGrid.currentIndex === index) ? 2 : 1
 
                         Text {
                             anchors.centerIn: parent
-                            text: modelData.is_gallery ? "📁" : "🖼"
+                            text: resultItem.is_gallery ? "📁" : "🖼"
                             font.pixelSize: 32
                         }
 
@@ -427,7 +436,7 @@ Rectangle {
                                 right: parent.right
                                 margins: 4
                             }
-                            text: modelData.name
+                            text: resultItem.name
                             color: themePalette.text
                             font.pixelSize: 10
                             elide: Text.ElideRight
@@ -435,8 +444,8 @@ Rectangle {
 
                         MouseArea {
                             anchors.fill: parent
-                            onClicked: selectionController.setSelected(modelData.path, true)
-                            onDoubleClicked: openResult(modelData)
+                            onClicked: resultsGrid.currentIndex = index
+                            onDoubleClicked: openResult(resultItem)
                         }
                     }
 
@@ -454,10 +463,13 @@ Rectangle {
                     clip: true
 
                     delegate: Rectangle {
+                        // model is a count — resolve the row via index (modelData is just the int)
+                        readonly property var resultItem: currentResults[index]
                         width: resultsList.width
                         height: 32
                         color: themePalette.surface
-                        border.color: themePalette.border
+                        border.color: (resultsList.currentIndex === index)
+                            ? themePalette.accent : themePalette.border
                         border.width: 1
 
                         RowLayout {
@@ -466,12 +478,12 @@ Rectangle {
                             spacing: 8
 
                             Text {
-                                text: modelData.is_gallery ? "📁" : "🖼"
+                                text: resultItem.is_gallery ? "📁" : "🖼"
                                 font.pixelSize: 16
                             }
 
                             Text {
-                                text: modelData.name
+                                text: resultItem.name
                                 color: themePalette.text
                                 font.pixelSize: 11
                                 Layout.fillWidth: true
@@ -481,8 +493,8 @@ Rectangle {
 
                         MouseArea {
                             anchors.fill: parent
-                            onClicked: selectionController.setSelected(modelData.path, true)
-                            onDoubleClicked: openResult(modelData)
+                            onClicked: resultsList.currentIndex = index
+                            onDoubleClicked: openResult(resultItem)
                         }
                     }
 
@@ -568,12 +580,12 @@ Rectangle {
 
     function openResult(item) {
         if (item.is_gallery) {
-            // Open gallery
+            root.openGallery(item.path);
         } else {
             // Open image in collection viewer (WS3 contract)
             const nodeKeys = currentResults.map(r => r.nodeKey);
             const index = currentResults.indexOf(item);
-            viewerController.openAlbum(nodeKeys, index);
+            root.openAlbum(nodeKeys, index);
         }
     }
 
@@ -646,8 +658,8 @@ Rectangle {
             saveSearchDialog.open();
             event.accepted = true;
         } else if (event.key === Qt.Key_D && (event.modifiers & Qt.ControlModifier)) {
-            // contract: WS2 DetailPanel — wired in integration
-            // Ctrl+D: open detail panel (deferred to WS2)
+            // Ctrl+D: toggle detail panel
+            sessionState.detailOpen = !sessionState.detailOpen;
             event.accepted = true;
         }
     }
@@ -685,8 +697,6 @@ Rectangle {
     // Save search dialog
     Local.SaveSearchDialog {
         id: saveSearchDialog
-        themePalette: root.themePalette
-        advancedSearchController: root.advancedSearchController
 
         onSaved: {
             // User confirmed save; perform the actual save
@@ -702,18 +712,12 @@ Rectangle {
     // Include field tag autocomplete
     Local.TagAutocompletePopup {
         id: includeAutocomplete
-        themePalette: root.themePalette
-        vocabulary: root.advancedSearchController.tagVocabulary
+        vocabulary: advancedSearchController.tagVocabulary
         textInput: includeInput
 
-        x: {
-            // Position below the include input
-            const parent = includeInput.parent;
-            while (parent && parent.parent) {
-                // Find the root position
-            }
-            return 60;  // Approximate x position of include field
-        }
+        // T3.1 W5: the old binding here spun forever in an empty
+        // `while (parent && parent.parent)` loop — approximate placement is fine.
+        x: 60   // Approximate x position of include field
         y: 240  // Approximate y position below include field
 
         onTagSelected: {
@@ -724,8 +728,7 @@ Rectangle {
     // Exclude field tag autocomplete
     Local.TagAutocompletePopup {
         id: excludeAutocomplete
-        themePalette: root.themePalette
-        vocabulary: root.advancedSearchController.tagVocabulary
+        vocabulary: advancedSearchController.tagVocabulary
         textInput: excludeInput
 
         x: 60
@@ -733,6 +736,38 @@ Rectangle {
 
         onTagSelected: {
             performSearch();
+        }
+    }
+
+    // Detail panel showing metadata/tags for selected result (WS2 Task 2.3)
+    DetailPanel {
+        id: detailPanel
+    }
+
+    // Wire detail panel to show selected result's details
+    Connections {
+        target: resultsGrid
+        function onCurrentIndexChanged() {
+            if (resultsGrid.currentIndex >= 0 && resultsGrid.currentIndex < currentResults.length) {
+                const result = currentResults[resultsGrid.currentIndex];
+                // Show node with empty inherited tags and from-contents
+                detailController.showNode(result.nodeKey, [], []);
+            } else {
+                detailController.clear();
+            }
+        }
+    }
+
+    Connections {
+        target: resultsList
+        function onCurrentIndexChanged() {
+            if (resultsList.currentIndex >= 0 && resultsList.currentIndex < currentResults.length) {
+                const result = currentResults[resultsList.currentIndex];
+                // Show node with empty inherited tags and from-contents
+                detailController.showNode(result.nodeKey, [], []);
+            } else {
+                detailController.clear();
+            }
         }
     }
 }

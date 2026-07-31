@@ -9,8 +9,9 @@ Rectangle {
     visible: false
     z: 1000  // Above other content
 
-    // Public API
-    property var settingsController: null
+    // settingsController comes from the engine context property (a shadowing
+    // property declaration made the old `settingsController: settingsController`
+    // shell binding self-refer and left it null — T3.1 W5).
 
     // Internal state
     property bool isOpen: false
@@ -85,7 +86,7 @@ Rectangle {
             let idx = settingsController.currentThemeIndex;
             idx = (idx + delta) % 4;
             if (idx < 0) idx += 4;
-            settingsController.setCurrentThemeIndex(idx);
+            settingsController.currentThemeIndex = idx;
         }
         // Browsing section: only if unlocked
         else if (currentSection === 1 && settingsController.vaultUnlocked) {
@@ -94,18 +95,18 @@ Rectangle {
                 let idx = settingsController.currentSortOrderIndex;
                 idx = (idx + delta) % settingsController.sortOrderList.length;
                 if (idx < 0) idx += settingsController.sortOrderList.length;
-                settingsController.setCurrentSortOrderIndex(idx);
+                settingsController.currentSortOrderIndex = idx;
             } else if (currentRow === 1) {
                 // Toggle tiles show tags
-                settingsController.setTilesShowTags(!settingsController.tilesShowTags);
+                settingsController.tilesShowTags = !settingsController.tilesShowTags;
             } else if (currentRow === 2 && autoLock) {
                 // Change auto-lock idle seconds (delta of ±60 seconds, clamped to 30-3600)
                 let newVal = autoLock.idleSeconds + (delta * 60);
                 newVal = Math.max(30, Math.min(newVal, 3600));
-                autoLock.setIdleSeconds(newVal);
+                autoLock.idleSeconds = newVal;
             } else if (currentRow === 3 && autoLock) {
                 // Toggle keep unlocked
-                autoLock.setKeepUnlocked(!autoLock.keepUnlocked);
+                autoLock.keepUnlocked = !autoLock.keepUnlocked;
             }
         }
         // TagColours section: only if unlocked
@@ -314,7 +315,7 @@ Rectangle {
                                 currentIndex: settingsController ? settingsController.currentThemeIndex : 0
                                 onCurrentIndexChanged: {
                                     if (settingsController) {
-                                        settingsController.setCurrentThemeIndex(currentIndex);
+                                        settingsController.currentThemeIndex = currentIndex;
                                     }
                                 }
                             }
@@ -630,6 +631,12 @@ Rectangle {
                     settingsOverlay.close();
                     event.accepted = true;
                 }
+            }
+            else if (event.key === Qt.Key_F2 && !settingsOverlay.renamingCategory) {
+                // F2 closes too: the overlay holds focus while open, so the
+                // shell's F2 toggle can't see the key (T3.1 W5)
+                settingsOverlay.close();
+                event.accepted = true;
             }
             else if (!settingsOverlay.renamingCategory) {
                 // Only process navigation/action keys if not renaming

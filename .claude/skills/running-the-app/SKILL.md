@@ -7,6 +7,23 @@ description: Use when launching, driving, or screenshotting the Obscura-Safe-Vau
 
 SDL3 desktop app. Launching it headlessly needs four non-obvious settings; each
 one below cost a failed attempt to discover. The binary is `build/bin/Debug/osv`.
+(For the Qt experiment app `osv-qt`, see the last section — same hazards plus
+two of its own.)
+
+## ⚠️ ALWAYS cap the app's memory — it has killed this machine
+
+A runaway allocation once grew the Qt app to **22 GB in minutes**, and the OOM
+killer took down the developer's tmux session and Claude Code with it — twice.
+Launch ANY app binary you intend to drive inside a memory-capped scope:
+
+```bash
+systemd-run --user --scope -q -p MemoryMax=2G -p MemorySwapMax=0 \
+  --unit=osvrun$RANDOM -- env <ENV VARS> ./build/.../osv... > app.log 2>&1 &
+```
+
+If it hits the cap, only the app dies (journal: `systemd[..]: <unit>: Failed
+with result 'oom-kill'`) and you have found a real bug instead of killing the
+host. Never launch uncapped "just for a quick check".
 
 ## ⚠️ File dialogs escape the sandbox — read this first
 
@@ -104,3 +121,41 @@ injects real input and works.
   still instrumented from `scripts/test.sh --tsan|--asan`. Rebuild plain.
 - **A dialog appears on the developer's screen** → you pressed a dialog key. Kill
   the app and say so; do not retry.
+
+## Qt experiment app (osv-qt)
+
+Binary: `build/qt-experiment/osv-qt` (built by `scripts/build_qt_experiment.sh`).
+Same Xvfb + XTEST + isolated-XDG recipe as above, with these differences:
+
+```bash
+RUN=/tmp/osvqtrun; mkdir -p "$RUN/cfg" "$RUN/data"
+# Vault discovery scans SDL_GetPrefPath = $XDG_DATA_HOME/ObscuraSafeVault/ObscuraSafeVault/
+mkdir -p "$RUN/data/ObscuraSafeVault/ObscuraSafeVault"   # put fixture .osv here
+systemd-run --user --scope -q -p MemoryMax=2G -p MemorySwapMax=0 --unit=osvqt$RANDOM -- \
+  env DISPLAY=:77 QT_QPA_PLATFORM=xcb QT_FORCE_STDERR_LOGGING=1 \
+  XDG_CONFIG_HOME="$RUN/cfg" XDG_DATA_HOME="$RUN/data" LIBGL_ALWAYS_SOFTWARE=1 \
+  ./build/qt-experiment/osv-qt > "$RUN/app.log" 2>&1 &
+```
+
+- **`QT_FORCE_STDERR_LOGGING=1` is load-bearing.** On this Arch box Qt logging
+  (including QML `console.warn`) goes to journald, not stderr — without it your
+  instrumentation and qDebug output silently vanish and "no output" tells you
+  nothing.
+- **Unlock flow:** the password field takes focus only after a CLICK
+  (`xdotool mousemove 640 397 click 1`), then type the password + Return.
+  Typing without the click lands nowhere.
+- **File-dialog keys for osv-qt:** gallery `O` / `Ctrl+O` / `Z` (imports, via
+  QFileDialog → portal → REAL screen), `E` (export folder pick), vault manager
+  "Open Other Vault…"/"Create New Vault" buttons and `Shift+G` (tag list
+  import). Never press these headlessly. NEVER type free text at the gallery
+  (a stray `o` is an import key) — only type into a field you have verified
+  has focus via a screenshot.
+- **Idle auto-lock is armed once unlocked** — long waits between inputs will
+  drop you back to the unlock screen mid-drive; re-unlock or keep steps brisk.
+- Fixture vaults: `./build/qt-experiment/osv-qt-mkvault <vault.osv> <password>
+  [image-dir]` (subdirs become sub-galleries).
+- Selftest legs (headless gates): `--selftest-render`, and
+  `OSV_QT_TEST_PW=<pw> OSV_QT_SELFTEST_WAIT_THUMBS=<n> [OSV_QT_SELFTEST_VIEWER=1]
+  ./osv-qt --selftest-image <vault>` — set WAIT_THUMBS to at most the number of
+  tiles the root listing will show (images + covered galleries), or the leg
+  times out at full delivery.
