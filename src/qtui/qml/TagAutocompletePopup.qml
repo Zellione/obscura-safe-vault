@@ -9,8 +9,9 @@ Popup {
     width: 200
     height: Math.min(contentHeight + 8, 300)
 
+    // themePalette comes from the engine context property
+    // (a shadowing property declaration breaks self-named bindings — T3.1 W5).
     // Public properties
-    property var themePalette
     property var vocabulary: []  // Full list of available tags
     property string currentText: ""  // Current text in the input field
     property var textInput  // Reference to the TextInput to inject tags

@@ -376,6 +376,36 @@ int main(int argc, char** argv)
         }
         printf("PASS: IsFavoriteRole correctly reads favorite bit\n");
 
+        // Test 24: navigateToPath — absolute navigation for search/favorites results (T3.1 W5)
+        printf("\nTest 24 (navigateToPath): T3.1 W5 — navigate to gallery by path\n");
+        // Vault-style path (no leading slash, as produced by SearchHit.path)
+        if (!model6.navigateToPath("subfolder") || model6.currentPath() != "/subfolder") {
+            fprintf(stderr, "FAIL: navigateToPath(\"subfolder\") should land on '/subfolder', got '%s'\n",
+                    model6.currentPath().toStdString().c_str());
+            return 1;
+        }
+        // Root, both spellings
+        if (!model6.navigateToPath("/") || model6.currentPath() != "/") {
+            fprintf(stderr, "FAIL: navigateToPath(\"/\") should land on root\n");
+            return 1;
+        }
+        // UI-style path (leading slash)
+        if (!model6.navigateToPath("/subfolder") || model6.currentPath() != "/subfolder") {
+            fprintf(stderr, "FAIL: navigateToPath(\"/subfolder\") should land on '/subfolder'\n");
+            return 1;
+        }
+        // Nonexistent gallery: refused, path unchanged
+        if (model6.navigateToPath("/nonexistent") || model6.currentPath() != "/subfolder") {
+            fprintf(stderr, "FAIL: navigateToPath to missing gallery must return false and keep path\n");
+            return 1;
+        }
+        // Media path: refused (only galleries are navigation targets)
+        if (model6.navigateToPath("image2") || model6.currentPath() != "/subfolder") {
+            fprintf(stderr, "FAIL: navigateToPath to an image must return false and keep path\n");
+            return 1;
+        }
+        printf("PASS: navigateToPath resolves galleries, refuses media and missing paths\n");
+
         printf("\nAll GalleryModel tests PASSED\n");
         return 0;
 

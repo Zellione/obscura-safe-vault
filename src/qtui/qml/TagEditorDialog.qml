@@ -72,27 +72,26 @@ Dialog {
                         border.width: 1
                         radius: 3
 
-                        Row {
+                        Item {
                             anchors {
                                 fill: parent
                                 leftMargin: 8
                                 rightMargin: 4
                             }
-                            spacing: 8
 
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
+                                anchors.left: parent.left
                                 text: tagController.getTagDisplayText(dialog.ownTags[index])
                                 color: themePalette.text
                                 font.pixelSize: 12
                             }
 
-                            Item { Layout.fillWidth: true }
-
                             Button {
                                 width: 20
                                 height: 20
                                 anchors.verticalCenter: parent.verticalCenter
+                                anchors.right: parent.right
                                 text: "Del"
                                 font.pixelSize: 10
 
@@ -132,7 +131,7 @@ Dialog {
                 border.width: 1
                 radius: 4
 
-                TextInput {
+                TextField {
                     id: tagInput
                     anchors {
                         fill: parent
@@ -145,6 +144,7 @@ Dialog {
                     font.pixelSize: 12
                     placeholderText: "Add tag..."
                     placeholderTextColor: themePalette.textDim
+                    background: Rectangle { color: "transparent" }
 
                     onTextChanged: {
                         dialog.inputBuffer = text
