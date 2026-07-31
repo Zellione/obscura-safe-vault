@@ -204,3 +204,11 @@ match the `.desktop` file's `Icon=` key and be >=8x8, or linuxdeploy fails late 
 "could not find suitable icon" error. Windows via `windeployqt --qmldir src/qtui/qml` (portable zip).
 Reuses `release.yml`'s exact SDL3/codec cache keys on both platforms so the two workflows share warm
 caches. Publishes a draft **pre-release** (owner publishes manually, same convention as `release.yml`).
+
+**`install-qt-action` `modules:` gotcha (first beta tag, `qtui-v1.3.3-beta1`):** `qtdeclarative`
+is NOT an installable add-on module for Qt 6.7.3 — QML/Quick ship as part of the essential base
+install, so requesting it via `--modules` makes `aqt` fail with `The packages ['qtdeclarative']
+were not found while parsing XML of package information!`, on both Linux and Windows legs. Confirmed
+via `aqt list-qt linux desktop --long-modules 6.7.3 linux_gcc_64` — only `qtshadertools` (plus
+unrelated addons like `qtquick3d`) is listed; `qtdeclarative` isn't. Fix: `modules: 'qtshadertools'`
+only, on both `install-qt-action` steps.

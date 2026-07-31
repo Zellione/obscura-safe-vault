@@ -134,7 +134,7 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
-          modules: 'qtdeclarative qtshadertools'
+          modules: 'qtshadertools'
           cache: true
 
       - name: Configure (CMake, Release)
@@ -279,7 +279,7 @@ jobs:
         with:
           version: ${{ env.QT_VERSION }}
           arch: win64_msvc2019_64
-          modules: 'qtdeclarative qtshadertools'
+          modules: 'qtshadertools'
           cache: true
 
       - name: Cache vendored SDL3 build
