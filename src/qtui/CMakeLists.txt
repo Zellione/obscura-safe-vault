@@ -44,6 +44,13 @@ add_library(osv_qt_core STATIC
     ${REPO_ROOT}/src/ui/settings_model.cpp
     ${REPO_ROOT}/src/ui/selection_model.cpp
     ${REPO_ROOT}/src/ui/tag_inherit.cpp
+    ${REPO_ROOT}/src/ui/detail_model.cpp
+    ${REPO_ROOT}/src/ui/detail_layout.cpp
+    ${REPO_ROOT}/src/ui/delete_summary.cpp
+    ${REPO_ROOT}/src/ui/text_metrics.cpp
+    ${REPO_ROOT}/src/ui/gallery_cover.cpp
+    ${REPO_ROOT}/src/ui/cover_cache.cpp
+    ${REPO_ROOT}/src/ui/child_counts.cpp
     # text input models (Task 3 uses SecureTextInput)
     ${REPO_ROOT}/src/ui/text_input_model.cpp
     ${REPO_ROOT}/src/ui/secure_text_input.cpp
@@ -152,9 +159,13 @@ add_executable(osv_qt_secure_field_test tests/secure_field_test.cpp secure_text_
 target_link_libraries(osv_qt_secure_field_test PRIVATE osv_qt_core Qt6::Gui Qt6::Quick)
 target_include_directories(osv_qt_secure_field_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_executable(osv_qt_gallery_model_test tests/gallery_model_test.cpp gallery_model.cpp thumb_cache.cpp viewer_controller.cpp secure_image_item.cpp rhi_quad_renderer.cpp theme_palette.cpp)
+add_executable(osv_qt_gallery_model_test tests/gallery_model_test.cpp gallery_model.cpp cover_provider.cpp thumb_cache.cpp viewer_controller.cpp secure_image_item.cpp rhi_quad_renderer.cpp theme_palette.cpp status_controller.cpp)
 target_link_libraries(osv_qt_gallery_model_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick)
 target_include_directories(osv_qt_gallery_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_executable(osv_qt_detail_controller_test tests/detail_controller_test.cpp detail_controller.cpp)
+target_link_libraries(osv_qt_detail_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick)
+target_include_directories(osv_qt_detail_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_executable(osv_qt_file_op_controller_test tests/file_op_controller_test.cpp file_op_controller.cpp)
 target_link_libraries(osv_qt_file_op_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
@@ -220,7 +231,7 @@ add_executable(osv_qt_vault_manager_controller_test tests/vault_manager_controll
 target_link_libraries(osv_qt_vault_manager_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_vault_manager_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_executable(osv_qt_unlock_controller_keyfile_test tests/unlock_controller_keyfile_test.cpp unlock_controller.cpp secure_text_field.cpp secure_image_item.cpp video_frame_item.cpp viewer_controller.cpp playback_engine.cpp audio_pipe.cpp rhi_quad_renderer.cpp thumb_cache.cpp gallery_model.cpp)
+add_executable(osv_qt_unlock_controller_keyfile_test tests/unlock_controller_keyfile_test.cpp unlock_controller.cpp secure_text_field.cpp secure_image_item.cpp video_frame_item.cpp viewer_controller.cpp playback_engine.cpp audio_pipe.cpp rhi_quad_renderer.cpp thumb_cache.cpp gallery_model.cpp cover_provider.cpp status_controller.cpp theme_palette.cpp)
 target_link_libraries(osv_qt_unlock_controller_keyfile_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_unlock_controller_keyfile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -250,7 +261,16 @@ qt6_add_shaders(osv_qt_settings_overlay_qml_test "osv_qt_settings_overlay_qml_te
     FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
 )
 
-add_executable(osv_qt_thumb_stress_test tests/thumb_stress_test.cpp gallery_model.cpp thumb_cache.cpp viewer_controller.cpp secure_image_item.cpp rhi_quad_renderer.cpp)
+# Finding 5 + BREAKAGE FIX: DetailPanel QML load test + tag-section method test
+# Test 0: catches attached-object QML load failures (Line 93/140 in DetailPanel.qml)
+# Tests 1-3: verify DetailController methods exist and work, preventing undefined-method crashes
+add_executable(osv_qt_detail_panel_qml_test tests/detail_panel_qml_test.cpp)
+target_link_libraries(osv_qt_detail_panel_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
+target_compile_definitions(osv_qt_detail_panel_qml_test PRIVATE
+    QTUI_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+)
+
+add_executable(osv_qt_thumb_stress_test tests/thumb_stress_test.cpp gallery_model.cpp cover_provider.cpp thumb_cache.cpp viewer_controller.cpp secure_image_item.cpp rhi_quad_renderer.cpp status_controller.cpp)
 target_link_libraries(osv_qt_thumb_stress_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick)
 target_include_directories(osv_qt_thumb_stress_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -269,6 +289,8 @@ qt_add_executable(osv-qt
     vault_list_model.cpp
     vault_manager_controller.cpp
     gallery_model.cpp
+    cover_provider.cpp
+    detail_controller.cpp
     thumb_cache.cpp
     viewer_controller.cpp
     theme_palette.cpp

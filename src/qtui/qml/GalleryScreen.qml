@@ -17,13 +17,42 @@ Rectangle {
             entries: [
                 { keys: "Arrow Keys", description: "Navigate gallery" },
                 { keys: "Enter", description: "Open image/video or enter gallery" },
-                { keys: "Esc", description: "Go up one level" }
+                { keys: "Esc", description: "Go up one level" },
+                { keys: "Shift+S", description: "Cycle sort order" },
+                { keys: "L", description: "Cycle view density (grid/list)" },
+                { keys: "Ctrl+D", description: "Toggle detail panel (WS2 Task 2.3)" }
+            ]
+        },
+        {
+            title: "Multi-Selection (WS2 Task 2.2)",
+            entries: [
+                { keys: "Space", description: "Toggle selection of current item" },
+                { keys: "Click", description: "Toggle selection" },
+                { keys: "Shift+Click", description: "Range select" },
+                { keys: "Ctrl+A", description: "Select all items" }
+            ]
+        },
+        {
+            title: "Detail Panel (WS2 Task 2.3)",
+            entries: [
+                { keys: "Ctrl+Up/Down", description: "Scroll detail panel" },
+                { keys: "Mouse Wheel", description: "Scroll over panel" }
             ]
         }
     ]
 
     // Signal for back navigation (Main.qml wires to galleryModel.upOneLevel)
     signal back()
+
+    // View mode helpers (synchronized with sessionState)
+    // GalleryView enum: 0=List, 1=GridS, 2=GridM, 3=GridL, 4=GridXL
+    readonly property var cellSizes: [0, 128, 188, 248, 320]  // index 0 (List) is ignored
+    readonly property int currentViewMode: sessionState.viewDensity()
+
+    function nextViewMode() {
+        // Cycle: 0(List) -> 1(GridS) -> 2(GridM) -> 3(GridL) -> 4(GridXL) -> 0(List)
+        sessionState.setViewDensity((currentViewMode + 1) % 5)
+    }
 
     // `focus: true` only grants scope focus inside the StackView;
     // keys (Esc = up, arrows) need ACTIVE focus on the grid — force
@@ -81,29 +110,73 @@ Rectangle {
                 }
             }
 
-            Text {
+            // WS2 Task 2.5: Breadcrumb with "Home" root + clickable segments
+            Row {
                 anchors.verticalCenter: parent.verticalCenter
-                text: galleryModel.currentPath
-                color: themePalette.textDim
-                font.pixelSize: 13
-                elide: Text.ElideLeft
+                spacing: 4
+
+                Text {
+                    text: "Home"
+                    color: themePalette.textDim
+                    font.pixelSize: 13
+                    font.underline: homeMouse.containsMouse
+                    MouseArea {
+                        id: homeMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            if (galleryModel.currentPath !== "/") {
+                                // Go to root by repeatedly calling upOneLevel
+                                while (galleryModel.currentPath !== "/") {
+                                    galleryModel.upOneLevel()
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    visible: galleryModel.currentPath !== "/"
+                    text: " / "
+                    color: themePalette.textDim
+                    font.pixelSize: 13
+                }
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: {
+                        let path = galleryModel.currentPath
+                        if (path === "/") return ""
+                        let label = galleryModel.sortLabel()
+                        if (label) {
+                            return path.substring(1) + "   Sort: " + label
+                        }
+                        return path.substring(1)
+                    }
+                    color: themePalette.textDim
+                    font.pixelSize: 13
+                    elide: Text.ElideLeft
+                }
             }
         }
     }
 
     // Gallery grid view: displays galleries and media from galleryModel.
     // Galleries shown as folder glyphs, media as thumbnails.
-    // Arrow keys navigate, Enter opens, Esc up/back, F2 rename, T cycle theme.
+    // Arrow keys navigate, Enter opens, Esc up/back, Shift+S sort, L view mode.
+    // WS2 Task 2.3: Grid reflows left when detail panel is open (no overlay).
     GridView {
         id: grid
         anchors {
             top: galleryHeader.bottom
             left: parent.left
-            right: parent.right
-            bottom: parent.bottom
+            right: detailPanel.left
+            bottom: galleryFooter.top
         }
-        cellWidth: 176
-        cellHeight: 200
+        cellWidth: currentViewMode === 0 ? width : cellSizes[currentViewMode] + 12
+        // List row height (mode 0): 44px per SDL ROW_H (two-line name + metadata layout)
+        // Grid modes: cell size + 12px padding
+        cellHeight: currentViewMode === 0 ? 44 : cellSizes[currentViewMode] + 12
         model: galleryModel
         focus: true
 
@@ -116,30 +189,99 @@ Rectangle {
                 anchors.margins: 6
                 color: GridView.isCurrentItem ? themePalette.surfaceHi : themePalette.surface
                 radius: 6
+                // WS2 Task 2.2: Show ACCENT border when selected
+                border.color: selectionController.isSelected(index) ? themePalette.accent : "transparent"
+                border.width: selectionController.isSelected(index) ? 2 : 0
 
-                // Thumbnail image for media
-                SecureImageItem {
-                    visible: !model.isGallery
+                // Gallery cover or media thumbnail (Finding 1, 2)
+                Item {
                     anchors {
-                        fill: parent
-                        margins: 6
-                        bottomMargin: 26
+                        top: parent.top
+                        left: parent.left
+                        right: parent.right
+                        bottom: countsLabel.visible ? countsLabel.top : parent.bottom
                     }
-                    nodeKey: model.nodeKey
+                    anchors.margins: 6
+                    anchors.bottomMargin: model.isGallery ? 6 : 26  // Reserve space for counts if gallery
+
+                    // Media thumbnail
+                    SecureImageItem {
+                        visible: !model.isGallery
+                        anchors.fill: parent
+                        nodeKey: model.nodeKey
+                    }
+
+                    // Gallery cover image (if available) or folder icon
+                    SecureImageItem {
+                        visible: model.isGallery && model.cover !== undefined && model.cover !== null
+                        anchors.fill: parent
+                        nodeKey: model.cover  // cover is the thumbnail chunk offset
+                    }
+
+                    // Folder icon fallback for galleries without covers (Finding 1)
+                    Text {
+                        visible: model.isGallery && (model.cover === undefined || model.cover === null)
+                        anchors.centerIn: parent
+                        text: "📁"
+                        font.pixelSize: 48
+                    }
                 }
 
-                // Folder glyph for galleries
-                Text {
-                    visible: model.isGallery
-                    anchors.centerIn: parent
-                    text: "📁"
-                    font.pixelSize: 48
+                // Animated badge "A" (Finding 4)
+                Rectangle {
+                    visible: model.isAnimated && !model.isGallery
+                    anchors {
+                        top: parent.top
+                        right: parent.right
+                        margins: 6
+                    }
+                    width: 20
+                    height: 20
+                    radius: 4
+                    color: themePalette.accent
+                    Text {
+                        anchors.centerIn: parent
+                        text: "A"
+                        color: themePalette.bg
+                        font.bold: true
+                        font.pixelSize: 11
+                    }
                 }
 
-                // Name label
+                // Favorite star (Finding 4)
                 Text {
+                    visible: model.isFavorite
+                    anchors {
+                        top: parent.top
+                        right: parent.right
+                        margins: 4
+                    }
+                    text: "★"
+                    color: themePalette.favorite
+                    font.pixelSize: 20
+                }
+
+                // Child counts for galleries (Finding 2)
+                Text {
+                    id: countsLabel
+                    visible: model.isGallery && model.childCounts !== undefined
                     anchors {
                         bottom: parent.bottom
+                        left: parent.left
+                        right: parent.right
+                        margins: 4
+                    }
+                    text: model.childCounts || ""
+                    color: themePalette.textDim
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
+                    horizontalAlignment: Text.AlignHCenter
+                }
+
+                // Name label — anchors above counts when visible (BREAKAGE FIX)
+                Text {
+                    anchors {
+                        bottom: countsLabel.visible ? countsLabel.top : parent.bottom
                         horizontalCenter: parent.horizontalCenter
                         margins: 4
                     }
@@ -158,6 +300,18 @@ Rectangle {
                 onTapped: {
                     grid.currentIndex = index
                     grid.forceActiveFocus()
+                    // WS2 Task 2.2: Toggle selection on click
+                    selectionController.toggle(index)
+                }
+            }
+
+            // Shift+Click: range select (WS2 Task 2.2)
+            TapHandler {
+                acceptedButtons: Qt.LeftButton
+                onTapped: (eventPoint) => {
+                    if (eventPoint.modifiers & Qt.ShiftModifier) {
+                        selectionController.rangeSelectTo(index)
+                    }
                 }
             }
 
@@ -177,9 +331,100 @@ Rectangle {
             galleryModel.upOneLevel()
             galleryRoot.back()
         }
+        Keys.onSpacePressed: {
+            // WS2 Task 2.2: Space toggles selection
+            selectionController.toggle(grid.currentIndex)
+        }
         // Note: F2 is now global (opens settings overlay from Main.qml)
         Keys.onPressed: (event) => {
-            // Placeholder for future gallery-specific key handlers
+            if (event.text === "S" && event.modifiers & Qt.ShiftModifier) {
+                // Shift+S: cycle sort order
+                galleryModel.nextSort()
+                event.accepted = true
+            } else if (event.text === "A" && event.modifiers & Qt.ControlModifier) {
+                // WS2 Task 2.2: Ctrl+A select all
+                selectionController.toggleAll(grid.model.count)
+                event.accepted = true
+            } else if (event.text === "L" || event.text === "l") {
+                // L: cycle view density
+                nextViewMode()
+                event.accepted = true
+            } else if (event.text === "D" && event.modifiers & Qt.ControlModifier) {
+                // WS2 Task 2.3: Ctrl+D toggle detail panel
+                sessionState.setDetailOpen(!sessionState.detailOpen)
+                event.accepted = true
+            }
+        }
+    }
+
+    // WS2 Task 2.2: Footer showing selection count
+    // WS2 Task 2.3: Footer respects detail panel width (reflows with grid)
+    Rectangle {
+        id: galleryFooter
+        anchors {
+            bottom: parent.bottom
+            left: parent.left
+            right: detailPanel.left
+        }
+        height: selectionController.count > 0 ? 40 : 0
+        color: themePalette.surface
+        border.color: themePalette.border
+        border.width: 1
+        visible: height > 0
+
+        Text {
+            anchors {
+                verticalCenter: parent.verticalCenter
+                left: parent.left
+                leftMargin: 16
+            }
+            text: {
+                const count = selectionController.count
+                if (count === 1) return "1 item selected"
+                return count + " items selected"
+            }
+            color: themePalette.text
+            font.pixelSize: 14
+        }
+    }
+
+    // WS2 Task 2.3: Detail panel showing metadata/tags for selected item
+    DetailPanel {
+        id: detailPanel
+    }
+
+    // WS2 Task 2.3: Wire detail panel to show selected node's details
+    Connections {
+        target: grid
+        function onCurrentIndexChanged() {
+            if (grid.currentIndex >= 0 && grid.currentIndex < grid.model.count) {
+                // Get the node key from the current item
+                const nodeKey = grid.model.data(grid.model.index(grid.currentIndex, 0), GalleryModel.NodeKeyRole)
+                // Show node with empty inherited tags and from-contents for now (TODO: compute from vault)
+                detailController.showNode(nodeKey, [], [])
+
+                // WS2 Task 2.5: Record the focused tile index for this path
+                sessionState.recordFocusIndex(galleryModel.currentPath, grid.currentIndex)
+            } else {
+                detailController.clear()
+            }
+        }
+    }
+
+    // WS2 Task 2.5: Restore focused tile index when gallery changes
+    Connections {
+        target: galleryModel
+        function onCurrentPathChanged() {
+            // Recall the saved focus index for this path
+            const savedIndex = sessionState.recallFocusIndex(galleryModel.currentPath)
+            if (savedIndex >= 0 && savedIndex < grid.model.count) {
+                grid.currentIndex = savedIndex
+                grid.positionViewAtIndex(savedIndex, GridView.Contain)
+            } else if (grid.model.count > 0) {
+                // Default to first item if no saved index
+                grid.currentIndex = 0
+                grid.positionViewAtIndex(0, GridView.Beginning)
+            }
         }
     }
 }

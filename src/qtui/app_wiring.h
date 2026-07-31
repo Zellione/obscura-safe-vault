@@ -15,6 +15,7 @@
 #include "help_model.h"
 #include "selection_controller.h"
 #include "session_state.h"
+#include "detail_controller.h"
 #include "autolock.h"
 
 class QQmlApplicationEngine;
@@ -42,6 +43,7 @@ struct AppContext {
     HelpModel helpModel;
     SelectionController selectionController;
     SessionState sessionState;
+    DetailController detailController;
     AutoLock autoLock;
 
     AppContext();
