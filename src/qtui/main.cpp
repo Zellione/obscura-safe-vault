@@ -5,6 +5,7 @@
 #include <cstdio>
 
 #include "app_wiring.h"
+#include "qml_dir.h"
 #include "selftest.h"
 
 int main(int argc, char** argv)
@@ -28,8 +29,10 @@ int main(int argc, char** argv)
 
     QQmlApplicationEngine engine;
 
+    const QString qmlDir = resolveQmlDir();
+
     // Add QML directory to import path so it can find UnlockScreen.qml and GalleryScreen.qml
-    engine.addImportPath(QStringLiteral(QTUI_QML_DIR));
+    engine.addImportPath(qmlDir);
 
     // Connect warnings to stderr for debugging
     QObject::connect(&engine, &QQmlApplicationEngine::warnings,
@@ -45,7 +48,7 @@ int main(int argc, char** argv)
     AppContext appCtx;
     appCtx.expose(engine);
 
-    const QString qmlPath = QStringLiteral(QTUI_QML_DIR "/Main.qml");
+    const QString qmlPath = qmlDir + QStringLiteral("/Main.qml");
     engine.load(QUrl::fromLocalFile(qmlPath));
     if (engine.rootObjects().isEmpty()) {
         fprintf(stderr, "QML load failed: %s\n", qmlPath.toStdString().c_str());

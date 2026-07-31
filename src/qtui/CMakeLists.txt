@@ -446,6 +446,7 @@ qt_add_executable(osv-qt
     main.cpp
     app_wiring.cpp
     selftest.cpp
+    qml_dir.cpp
     secure_text_field.cpp
     secure_image_item.cpp
     video_frame_item.cpp
@@ -489,10 +490,17 @@ qt6_add_shaders(osv-qt "osv_qt_shaders"
     FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
 )
 
-target_compile_definitions(osv-qt PRIVATE
-    QTUI_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
-)
 target_include_directories(osv-qt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 target_link_libraries(osv-qt PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::Widgets)
+
+# osv-qt resolves its QML at runtime relative to the executable (qml_dir.cpp),
+# not a compile-time path — a packaged release binary isn't run from the
+# source tree it was built in. Keep dev builds and packaged releases on the
+# same code path by copying qml/ next to the binary here too.
+add_custom_command(TARGET osv-qt POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/qml"
+        "$<TARGET_FILE_DIR:osv-qt>/qml"
+)

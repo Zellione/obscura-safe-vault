@@ -19,6 +19,7 @@
 #include "secure_image_item.h"
 #include "video_frame_item.h"
 #include "app_wiring.h"
+#include "qml_dir.h"
 #include "unlock_controller.h"
 #include "vault_list_model.h"
 #include "gallery_model.h"
@@ -188,9 +189,10 @@ int runSelftestRender()
     // Register types
     qmlRegisterType<SecureImageItem>("Osv", 1, 0, "SecureImageItem");
 
+    const QString qmlDir = resolveQmlDir();
     QQmlApplicationEngine engine;
-    engine.addImportPath(QStringLiteral(QTUI_QML_DIR));
-    engine.load(QUrl::fromLocalFile(QStringLiteral(QTUI_QML_DIR "/RenderTest.qml")));
+    engine.addImportPath(qmlDir);
+    engine.load(QUrl::fromLocalFile(qmlDir + QStringLiteral("/RenderTest.qml")));
 
     if (engine.rootObjects().isEmpty()) {
         fprintf(stderr, "FAIL: RenderTest.qml failed to load\n");
@@ -347,9 +349,10 @@ int runSelftest(const QString& vaultPath)
     initThemeFromEnv();
     registerOsvQmlTypes();
 
+    const QString qmlDir = resolveQmlDir();
     QQmlApplicationEngine engine;
     // The QML engine needs to know where to find QML modules
-    engine.addImportPath(QStringLiteral(QTUI_QML_DIR));
+    engine.addImportPath(qmlDir);
 
     AppContext appCtx;
     UnlockController& unlockController = appCtx.unlockController;
@@ -359,7 +362,7 @@ int runSelftest(const QString& vaultPath)
     PlaybackEngine& playbackEngine = appCtx.playbackEngine;
 
     appCtx.expose(engine);
-    engine.load(QUrl::fromLocalFile(QStringLiteral(QTUI_QML_DIR "/Main.qml")));
+    engine.load(QUrl::fromLocalFile(qmlDir + QStringLiteral("/Main.qml")));
 
     if (engine.rootObjects().isEmpty()) {
         fprintf(stderr, "FAIL: QML failed to load\n");
