@@ -11,7 +11,9 @@
 #include "media/video_decoder.h"
 #include "media/video_decode_worker.h"
 #include "media/av_sync.h"
+#include "media/volume_setting.h"
 #include "ui/playback_model.h"
+#include "session_state.h"
 
 Q_LOGGING_CATEGORY(lcPlayback, "osv.playback")
 
@@ -43,6 +45,11 @@ void PlaybackEngine::open(quintptr nodeKey)
         return;
     }
 
+    // Save current position before stopping
+    if (sessionState_ && !currentNodePath_.isEmpty()) {
+        sessionState_->setVideoResumeSeconds(position_);
+    }
+
     // Stop any existing playback
     stop();
 
@@ -52,6 +59,9 @@ void PlaybackEngine::open(quintptr nodeKey)
         qCWarning(lcPlayback) << "Invalid or non-video node";
         return;
     }
+
+    // Construct node path for session resume (use node address as unique key)
+    currentNodePath_ = QString::number(nodeKey);
 
     try {
         // Open VideoSource and wrap in ChunkAvio (ChunkAvio takes ownership)
@@ -76,6 +86,27 @@ void PlaybackEngine::open(quintptr nodeKey)
         duration_ = decoder_->duration_us() / 1e6;
         emit durationChanged();
 
+        // Seed volume from saved preference
+        volume_ = media::saved_volume();
+        currentGain_ = media::effective_gain(static_cast<float>(volume_), muted_);
+        emit volumeChanged();
+
+        // Check if we should restore previous position (session resume)
+        position_ = 0.0;
+        if (sessionState_) {
+            if (sessionState_->lastMediaPath() == currentNodePath_) {
+                // Same video reopened; restore previous position
+                double resumePos = sessionState_->videoResumeSeconds();
+                if (resumePos > 0.0 && resumePos < duration_) {
+                    position_ = resumePos;
+                    // Will seek to this position via control message
+                }
+            } else {
+                // Different video; record this as the new "last media"
+                sessionState_->setLastMediaPath(currentNodePath_);
+            }
+        }
+
         // Audio initialization deferred to worker thread (M6b, avoids blocking GUI on device setup)
 
         // Create decode worker
@@ -88,14 +119,23 @@ void PlaybackEngine::open(quintptr nodeKey)
         sentEof_ = false;
         clockBase_ = 0.0;
         elapsed_.restart();
-        position_ = 0.0;
+        emit positionChanged();
 
         thread_ = std::jthread([this](std::stop_token st) { runWorker(st); });
 
-        // Auto-start playback when a video is opened
-        setPlaying(true);
+        // If we have a resume position, seek to it
+        if (position_ > 0.0) {
+            seekBy(0);  // Seek to audioSeekBase_ which was set to position_
+        }
 
-        qCDebug(lcPlayback) << "Video opened:" << duration_ << "seconds";
+        // Auto-start playback when a video is opened, but paused if resuming
+        if (position_ > 0.0) {
+            setPlaying(false);  // Pause at resume point
+        } else {
+            setPlaying(true);   // Auto-play from start
+        }
+
+        qCDebug(lcPlayback) << "Video opened:" << duration_ << "seconds (resume:" << position_ << ")";
     } catch (const std::exception& e) {
         qCWarning(lcPlayback) << "Exception opening video:" << e.what();
         worker_.reset();
@@ -106,6 +146,12 @@ void PlaybackEngine::open(quintptr nodeKey)
 
 void PlaybackEngine::stop()
 {
+    // Save current position before stopping (for session resume)
+    if (sessionState_ && !currentNodePath_.isEmpty()) {
+        sessionState_->setLastMediaPath(currentNodePath_);
+        sessionState_->setVideoResumeSeconds(position_);
+    }
+
     // Pause playback
     setPlaying(false);
 
@@ -126,6 +172,7 @@ void PlaybackEngine::stop()
 
     position_ = 0.0;
     duration_ = 0.0;
+    currentNodePath_ = "";
     emit positionChanged();
     emit durationChanged();
 }
@@ -192,6 +239,9 @@ void PlaybackEngine::setVolume(double v)
     volume_ = clamped;
     currentGain_ = media::effective_gain(static_cast<float>(volume_), muted_);
 
+    // Persist volume preference
+    media::set_saved_volume(static_cast<float>(volume_));
+
     AudioPipe* pipePtr = nullptr;
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -225,6 +275,32 @@ void PlaybackEngine::setMuted(bool m)
 void PlaybackEngine::toggleMute()
 {
     setMuted(!muted_);
+}
+
+void PlaybackEngine::stepFrame(int direction)
+{
+    // Frame-step while paused: advance by the frame duration
+    // direction: +1 for forward, -1 for backward
+    //
+    // TODO (Phase 47/57): Implement frame-accurate stepping
+    // Currently placeholder; full implementation requires decoder integration
+    // to know the per-frame duration and seek to exact frame boundaries.
+    // For now, this method exists for API completeness.
+    //
+    // When implemented:
+    // 1. Get current frame from decoder
+    // 2. Calculate time of next/prev frame based on frame duration
+    // 3. Seek to that position
+    // 4. Deliver frame to renderer
+
+    if (direction == 0) {
+        return;  // No-op
+    }
+
+    // Placeholder: step by 1/30 second (~33ms, typical video frame at 30 FPS)
+    // Real implementation would query the decoder for actual frame duration
+    const double frameDuration = 1.0 / 30.0;
+    seekBy(direction * frameDuration);
 }
 
 uint64_t PlaybackEngine::testOnlySamplesConsumed() const

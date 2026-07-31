@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QElapsedTimer>
 #include <QPointer>
+#include <QString>
 #include <memory>
 #include <atomic>
 #include <thread>
@@ -17,6 +18,7 @@
 // Forward declarations
 class VideoFrameItem;
 class AudioPipe;
+class SessionState;
 namespace vault { class Vault; class IndexNode; }
 namespace media {
     class VideoSource;
@@ -41,6 +43,7 @@ class PlaybackEngine : public QObject {
     Q_PROPERTY(QString clockText READ clockText NOTIFY clockTextChanged)
     Q_PROPERTY(bool muted READ muted WRITE setMuted NOTIFY mutedChanged)
     Q_PROPERTY(double volume READ volume WRITE setVolume NOTIFY volumeChanged)
+    Q_PROPERTY(bool loopEnabled READ loopEnabled WRITE setLoopEnabled NOTIFY loopEnabledChanged)
 
 public:
     explicit PlaybackEngine(QObject* parent = nullptr);
@@ -55,6 +58,9 @@ public:
     // Bind the vault for node resolution
     void setVault(vault::Vault* vault) { vault_ = vault; }
 
+    // Bind the session state for video resume bookmark
+    void setSessionState(SessionState* state) { sessionState_ = state; }
+
     // Public interface (all callable from GUI thread)
     Q_INVOKABLE void open(quintptr nodeKey);
     Q_INVOKABLE void play() { setPlaying(true); }
@@ -63,6 +69,8 @@ public:
     Q_INVOKABLE void stop();
     Q_INVOKABLE void setVolume(double v);
     Q_INVOKABLE void toggleMute();
+    Q_INVOKABLE void toggleLoop() { setLoopEnabled(!loopEnabled_); }
+    Q_INVOKABLE void stepFrame(int direction);  // +1 forward, -1 backward (while paused)
 
     [[nodiscard]] double position() const { return position_; }
     [[nodiscard]] double duration() const { return duration_; }
@@ -70,6 +78,8 @@ public:
     [[nodiscard]] QString clockText() const;
     [[nodiscard]] bool muted() const { return muted_; }
     [[nodiscard]] double volume() const { return volume_; }
+    [[nodiscard]] bool loopEnabled() const { return loopEnabled_; }
+    void setLoopEnabled(bool loop) { loopEnabled_ = loop; emit loopEnabledChanged(); }
 
     // Test seams (M6b audio testing)
     [[nodiscard]] uint64_t testOnlySamplesConsumed() const;
@@ -86,6 +96,7 @@ signals:
     void clockTextChanged();
     void mutedChanged();
     void volumeChanged();
+    void loopEnabledChanged();
 
 private:
     void setPlaying(bool on);
@@ -106,12 +117,15 @@ private:
     // --- GUI thread state ---
     QPointer<VideoFrameItem> frameItem_;
     vault::Vault* vault_ = nullptr;
+    SessionState* sessionState_ = nullptr;
     double position_ = 0.0;
     double duration_ = 0.0;
     bool playing_ = false;
     bool muted_ = false;
     double volume_ = 1.0;
+    bool loopEnabled_ = false;  // R key toggle for loop playback
     float currentGain_ = 1.0f;  // Last gain applied to audio pipe (for testing)
+    QString currentNodePath_;  // Current node path for session resume
 
     // --- Shared state (guarded by mutex) ---
     mutable std::mutex mutex_;

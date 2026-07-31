@@ -24,6 +24,8 @@
 #include "help_model.h"
 #include "selection_controller.h"
 #include "session_state.h"
+#include "anim_controller.h"
+#include "animated_image_loader.h"
 #include "detail_controller.h"
 #include "autolock.h"
 #include "gfx/theme.h"
@@ -51,6 +53,8 @@ void registerOsvQmlTypes()
     qmlRegisterType<SecureImageItem>("Osv", 1, 0, "SecureImageItem");
     qmlRegisterType<VideoFrameItem>("Osv", 1, 0, "VideoFrameItem");
     qmlRegisterType<FileOpController>("Osv", 1, 0, "FileOpController");
+    // AnimController and AnimatedImageLoader are created programmatically in C++
+    // not exposed to QML as creatable types
 }
 
 AppContext::AppContext()
@@ -62,6 +66,7 @@ AppContext::AppContext()
     unlockController.setPlaybackEngine(&playbackEngine);
     galleryModel.setViewerController(&viewerController);
     playbackEngine.setVault(&unlockController.vault());
+    playbackEngine.setSessionState(&sessionState);
 
     // Wire AutoLock
     autoLock.setUnlockController(&unlockController);

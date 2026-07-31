@@ -292,6 +292,19 @@ Rectangle {
                     horizontalAlignment: Text.AlignHCenter
                     font.pixelSize: 12
                 }
+
+                // WS3 Finding 2: Hover auto-play gate (AnimHoverProbe QML integration pending)
+                // TODO (Phase 57): Instantiate AnimHoverProbe here when GalleryModel has isAnimated + frameCount roles
+                // Template (to be uncommented after Phase 57 adds model roles):
+                // AnimHoverProbe {
+                //     visible: !model.isGallery
+                //     isAnimated: model.isAnimated        // Bind once model has role
+                //     imageWidth: imageItem.sourceSize.width
+                //     imageHeight: imageItem.sourceSize.height
+                //     frameCount: model.frameCount        // Bind once model has role
+                //     onHoverStart: (ctrl) => { /* wire to SecureImageItem */ }
+                //     onHoverStop: { /* cleanup */ }
+                // }
             }
 
             // Single-tap: select item (and give the grid key focus,
