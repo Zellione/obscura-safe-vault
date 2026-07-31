@@ -169,3 +169,38 @@ is generated from the hash of `.gitmodules` + `scripts/build_codecs.sh` + `scrip
 When either build script changes (e.g., new decoder list, new demuxer, new hwaccel registration),
 the cache automatically misses and a full FFmpeg rebuild is triggered on both CI legs — no
 manual version bump needed.
+
+## Qt UI experiment (`src/qtui/`) — build, packaging, release
+
+Standalone CMake project (`src/qtui/CMakeLists.txt`, Qt6 6.7+ Core/Gui/GuiPrivate/Qml/Quick/
+ShaderTools/Test/Widgets), NOT part of the premake `osv` target — `premake5.lua` explicitly
+`removefiles`s `src/qtui/**` from `osv` since it needs Qt and is built separately. Links the same
+`src/crypto`/`src/vault`/`src/media`/`src/image` core plus a large `src/ui/*` subset against Qt6
+Quick instead of SDL3+the software renderer; still statically links vendored SDL3 and
+`vendor/codecs-prefix` (same build as the SDL app). Local dev build: `scripts/build_qt_experiment.sh`
+→ `build/qt-experiment/osv-qt` (Debug, standalone CMake, Linux-only — no Windows dev recipe exists
+locally). No `ctest`/`enable_testing()` is configured; the ~40+ `osv_qt_*_test` binaries are run
+directly (`QT_QPA_PLATFORM=offscreen ./osv_qt_*_test`), which is also how CI runs them (see below) —
+per-commit "Gate status" messages on the qtui-parity branches predate any CI enforcement of this.
+
+**QML is resolved at runtime, not baked in at compile time** (fixed on `experiment/qtui-release-packaging`,
+merges into `experiment/qt-quick-ui`): `qml_dir.cpp`/`qml_dir.h`'s `resolveQmlDir()` returns
+`OSV_QT_QML_DIR` env var if set, else `QCoreApplication::applicationDirPath() + "/qml"`. `main.cpp`
+and `selftest.cpp` (both compiled only into the `osv-qt` target) use this instead of the
+`QTUI_QML_DIR` compile-define the ~40+ test executables still use directly (those stay in-tree,
+no packaging concern). A CMake `POST_BUILD` step on the `osv-qt` target copies `src/qtui/qml/` next
+to the built binary, so dev builds and packaged releases share the same on-disk layout. Before this
+fix, a release binary only ever found its QML on the exact machine/path it was built on — the app
+was not packageable at all.
+
+**Release packaging** (`.github/workflows/release-qtui.yml`, tag-triggered on `qtui-v*` — deliberately
+NOT `v*`, since that's `release.yml`'s trigger and would double-build/mislabel the plain SDL app on
+the same tag): installs Qt6 via `jurplel/install-qt-action`, builds `osv-qt` Release via CMake+Ninja,
+runs the full `osv_qt_*_test` suite, then deploys platform-native: Linux via `linuxdeploy` +
+`linuxdeploy-plugin-qt` into an AppDir (tarball, entry point `AppRun`) — requires `NO_STRIP=1` env var
+or the continuous-build `linuxdeploy`'s bundled `strip` aborts the whole run on RELR (`.relr.dyn`)
+relocations some distros' system libs now use; the placeholder icon file's basename must exactly
+match the `.desktop` file's `Icon=` key and be >=8x8, or linuxdeploy fails late with a confusing
+"could not find suitable icon" error. Windows via `windeployqt --qmldir src/qtui/qml` (portable zip).
+Reuses `release.yml`'s exact SDL3/codec cache keys on both platforms so the two workflows share warm
+caches. Publishes a draft **pre-release** (owner publishes manually, same convention as `release.yml`).
