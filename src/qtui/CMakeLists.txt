@@ -220,6 +220,10 @@ target_link_libraries(osv_qt_playback_engine_test PRIVATE osv_qt_core Qt6::Core 
 target_include_directories(osv_qt_playback_engine_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 qt6_add_shaders(osv_qt_playback_engine_test "osv_qt_playback_engine_test_shaders"
+    PREFIX "/osvqt"
+    FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
+)
+
 add_executable(osv_qt_import_controller_test tests/import_controller_test.cpp import_controller.cpp)
 target_link_libraries(osv_qt_import_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test Qt6::Widgets)
 target_include_directories(osv_qt_import_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -260,7 +264,7 @@ add_executable(osv_qt_vault_manager_controller_test tests/vault_manager_controll
 target_link_libraries(osv_qt_vault_manager_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_vault_manager_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_executable(osv_qt_unlock_controller_keyfile_test tests/unlock_controller_keyfile_test.cpp unlock_controller.cpp secure_text_field.cpp secure_image_item.cpp video_frame_item.cpp viewer_controller.cpp playback_engine.cpp audio_pipe.cpp rhi_quad_renderer.cpp thumb_cache.cpp gallery_model.cpp)
+add_executable(osv_qt_unlock_controller_keyfile_test tests/unlock_controller_keyfile_test.cpp unlock_controller.cpp secure_text_field.cpp secure_image_item.cpp video_frame_item.cpp viewer_controller.cpp playback_engine.cpp audio_pipe.cpp rhi_quad_renderer.cpp thumb_cache.cpp gallery_model.cpp session_state.cpp)
 target_link_libraries(osv_qt_unlock_controller_keyfile_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_unlock_controller_keyfile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
