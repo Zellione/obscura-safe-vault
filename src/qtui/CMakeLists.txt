@@ -345,6 +345,8 @@ qt_add_executable(osv_qt_favorites_screen_qml_test
     theme_palette.cpp
     favorites_controller.cpp
     gallery_model.cpp
+    cover_provider.cpp
+    status_controller.cpp
     viewer_controller.cpp
     selection_controller.cpp
     thumb_cache.cpp
