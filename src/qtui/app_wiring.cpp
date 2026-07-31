@@ -24,6 +24,12 @@
 #include "help_model.h"
 #include "selection_controller.h"
 #include "session_state.h"
+#include "tag_controller.h"
+#include "favorites_controller.h"
+#include "tag_overview_controller.h"
+#include "tag_list_import_controller.h"
+#include "adv_search_controller.h"
+#include "search_model_adapter.h"
 #include "anim_controller.h"
 #include "animated_image_loader.h"
 #include "detail_controller.h"
@@ -53,6 +59,12 @@ void registerOsvQmlTypes()
     qmlRegisterType<SecureImageItem>("Osv", 1, 0, "SecureImageItem");
     qmlRegisterType<VideoFrameItem>("Osv", 1, 0, "VideoFrameItem");
     qmlRegisterType<FileOpController>("Osv", 1, 0, "FileOpController");
+    qmlRegisterType<TagController>("Osv", 1, 0, "TagController");
+    qmlRegisterType<FavoritesController>("Osv", 1, 0, "FavoritesController");
+    qmlRegisterType<TagOverviewController>("Osv", 1, 0, "TagOverviewController");
+    qmlRegisterType<TagListImportController>("Osv", 1, 0, "TagListImportController");
+    qmlRegisterType<AdvancedSearchController>("Osv", 1, 0, "AdvancedSearchController");
+    qmlRegisterType<SearchModelAdapter>("Osv", 1, 0, "SearchModelAdapter");
     // AnimController and AnimatedImageLoader are created programmatically in C++
     // not exposed to QML as creatable types
 }
@@ -66,6 +78,12 @@ AppContext::AppContext()
     unlockController.setPlaybackEngine(&playbackEngine);
     galleryModel.setViewerController(&viewerController);
     playbackEngine.setVault(&unlockController.vault());
+    tagController.setVault(&unlockController.vault());
+    favoritesController.setVault(&unlockController.vault());
+    tagOverviewController.setVault(&unlockController.vault());
+    tagListImportController.setVault(&unlockController.vault());
+    advancedSearchController.setVault(&unlockController.vault());
+    searchModelAdapter.setVault(&unlockController.vault());
     playbackEngine.setSessionState(&sessionState);
 
     // Wire AutoLock
@@ -100,6 +118,12 @@ void AppContext::expose(QQmlApplicationEngine& engine)
     ctx->setContextProperty("helpModel", &helpModel);
     ctx->setContextProperty("selectionController", &selectionController);
     ctx->setContextProperty("sessionState", &sessionState);
+    ctx->setContextProperty("tagController", &tagController);
+    ctx->setContextProperty("favoritesController", &favoritesController);
+    ctx->setContextProperty("tagOverviewController", &tagOverviewController);
+    ctx->setContextProperty("tagListImportController", &tagListImportController);
+    ctx->setContextProperty("advancedSearchController", &advancedSearchController);
+    ctx->setContextProperty("searchModelAdapter", &searchModelAdapter);
     ctx->setContextProperty("detailController", &detailController);
     ctx->setContextProperty("autoLock", &autoLock);
 }

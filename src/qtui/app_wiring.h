@@ -15,6 +15,12 @@
 #include "help_model.h"
 #include "selection_controller.h"
 #include "session_state.h"
+#include "tag_controller.h"
+#include "favorites_controller.h"
+#include "tag_overview_controller.h"
+#include "tag_list_import_controller.h"
+#include "adv_search_controller.h"
+#include "search_model_adapter.h"
 #include "detail_controller.h"
 #include "autolock.h"
 
@@ -43,6 +49,12 @@ struct AppContext {
     HelpModel helpModel;
     SelectionController selectionController;
     SessionState sessionState;
+    TagController tagController;
+    FavoritesController favoritesController;
+    TagOverviewController tagOverviewController;
+    TagListImportController tagListImportController;
+    AdvancedSearchController advancedSearchController;
+    SearchModelAdapter searchModelAdapter;
     DetailController detailController;
     AutoLock autoLock;
 

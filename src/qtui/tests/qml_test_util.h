@@ -52,4 +52,23 @@ inline QObject* instantiate_qml_component(QQmlComponent& component, const char* 
     return obj;
 }
 
+// Complete load+instantiate smoke test for components needing no context
+// properties. Returns a process exit code: 0 on pass, 1 on fail.
+inline int run_component_smoke_test(const QUrl& url, const char* componentName)
+{
+    QQmlEngine engine;
+    QQmlComponent component(&engine, url);
+
+    printf("Test 1: %s loads without errors...\n", componentName);
+    if (!expect_qml_loads(component, componentName)) return 1;
+    printf("PASS\n");
+
+    printf("Test 2: %s instantiates without errors...\n", componentName);
+    QObject* obj = instantiate_qml_component(component, componentName);
+    if (!obj) return 1;
+    delete obj;
+    printf("PASS\n");
+    return 0;
+}
+
 }  // namespace osvqt_test

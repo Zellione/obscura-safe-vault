@@ -37,6 +37,7 @@ add_library(osv_qt_core STATIC
     # media: video decode + demux (Task 9 adds video playback)
     ${OSV_MEDIA_SRC}
     ${REPO_ROOT}/src/ui/advanced_search_model.cpp
+    ${REPO_ROOT}/src/ui/search_model.cpp
     ${REPO_ROOT}/src/ui/gallery_sort.cpp
     ${REPO_ROOT}/src/ui/natural_sort.cpp
     ${REPO_ROOT}/src/ui/playback_model.cpp
@@ -45,6 +46,12 @@ add_library(osv_qt_core STATIC
     ${REPO_ROOT}/src/ui/settings_model.cpp
     ${REPO_ROOT}/src/ui/selection_model.cpp
     ${REPO_ROOT}/src/ui/tag_inherit.cpp
+    ${REPO_ROOT}/src/ui/tag_suggest.cpp
+    ${REPO_ROOT}/src/ui/tag_category.cpp
+    ${REPO_ROOT}/src/ui/tag_overview_model.cpp
+    ${REPO_ROOT}/src/ui/tag_json_parse.cpp
+    ${REPO_ROOT}/src/ui/tag_dict_import.cpp
+    ${REPO_ROOT}/src/ui/tag_list_parse.cpp
     ${REPO_ROOT}/src/ui/detail_model.cpp
     ${REPO_ROOT}/src/ui/detail_layout.cpp
     ${REPO_ROOT}/src/ui/delete_summary.cpp
@@ -102,6 +109,7 @@ target_include_directories(osv_qt_core PUBLIC
     ${REPO_ROOT}/vendor/stb
     ${REPO_ROOT}/vendor/json/include
     ${REPO_ROOT}/vendor/SDL3/include
+    ${REPO_ROOT}/vendor/json/single_include
     ${CODEC_PREFIX}/include
 )
 target_compile_definitions(osv_qt_core PUBLIC
@@ -194,6 +202,33 @@ add_executable(osv_qt_session_state_test tests/session_state_test.cpp session_st
 target_link_libraries(osv_qt_session_state_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_session_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(osv_qt_tag_controller_test tests/tag_controller_test.cpp tag_controller.cpp)
+target_link_libraries(osv_qt_tag_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
+target_include_directories(osv_qt_tag_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_executable(osv_qt_favorites_controller_test tests/favorites_controller_test.cpp favorites_controller.cpp)
+target_link_libraries(osv_qt_favorites_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
+target_include_directories(osv_qt_favorites_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_executable(osv_qt_tag_overview_controller_test tests/tag_overview_controller_test.cpp tag_overview_controller.cpp)
+target_link_libraries(osv_qt_tag_overview_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
+target_include_directories(osv_qt_tag_overview_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_executable(osv_qt_tag_list_import_adapter_test tests/tag_list_import_adapter_test.cpp tag_list_import_adapter.cpp)
+target_link_libraries(osv_qt_tag_list_import_adapter_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
+target_include_directories(osv_qt_tag_list_import_adapter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_executable(osv_qt_tag_list_import_controller_test tests/tag_list_import_controller_test.cpp tag_list_import_controller.cpp tag_list_import_adapter.cpp)
+target_link_libraries(osv_qt_tag_list_import_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
+target_include_directories(osv_qt_tag_list_import_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_executable(osv_qt_adv_search_controller_test tests/adv_search_controller_test.cpp adv_search_controller.cpp)
+target_link_libraries(osv_qt_adv_search_controller_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
+target_include_directories(osv_qt_adv_search_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_executable(osv_qt_search_model_adapter_test tests/search_model_adapter_test.cpp search_model_adapter.cpp)
+target_link_libraries(osv_qt_search_model_adapter_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test gtest gtest_main)
+target_include_directories(osv_qt_search_model_adapter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_executable(osv_qt_viewer_controller_test tests/viewer_controller_test.cpp)
 target_link_libraries(osv_qt_viewer_controller_test PRIVATE osv_qt_core Qt6::Core)
 target_include_directories(osv_qt_viewer_controller_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -305,6 +340,31 @@ qt6_add_shaders(osv_qt_settings_overlay_qml_test "osv_qt_settings_overlay_qml_te
     FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
 )
 
+qt_add_executable(osv_qt_favorites_screen_qml_test
+    tests/favorites_screen_qml_test.cpp
+    theme_palette.cpp
+    favorites_controller.cpp
+    gallery_model.cpp
+    cover_provider.cpp
+    status_controller.cpp
+    viewer_controller.cpp
+    selection_controller.cpp
+    thumb_cache.cpp
+    secure_image_item.cpp
+    rhi_quad_renderer.cpp
+)
+target_link_libraries(osv_qt_favorites_screen_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
+target_include_directories(osv_qt_favorites_screen_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(osv_qt_favorites_screen_qml_test PRIVATE
+    QTUI_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+)
+
+# Shaders for favorites_screen test
+qt6_add_shaders(osv_qt_favorites_screen_qml_test "osv_qt_favorites_screen_qml_test_shaders"
+    PREFIX "/osvqt"
+    FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
+)
+
 qt_add_executable(osv_qt_thumb_strip_qml_test tests/thumb_strip_qml_test.cpp)
 target_link_libraries(osv_qt_thumb_strip_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_thumb_strip_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -316,6 +376,50 @@ target_compile_definitions(osv_qt_thumb_strip_qml_test PRIVATE
 qt6_add_shaders(osv_qt_thumb_strip_qml_test "osv_qt_thumb_strip_qml_test_shaders"
     PREFIX "/osvqt"
     FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
+)
+
+add_executable(osv_qt_search_overlay_qml_test tests/search_overlay_qml_test.cpp)
+target_link_libraries(osv_qt_search_overlay_qml_test PRIVATE Qt6::Core)
+target_include_directories(osv_qt_search_overlay_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+qt_add_executable(osv_qt_tag_overview_screen_qml_test tests/tag_overview_screen_qml_test.cpp)
+target_link_libraries(osv_qt_tag_overview_screen_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
+target_include_directories(osv_qt_tag_overview_screen_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(osv_qt_tag_overview_screen_qml_test PRIVATE
+    QTUI_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+)
+
+# Shaders for tag_overview_screen test
+qt6_add_shaders(osv_qt_tag_overview_screen_qml_test "osv_qt_tag_overview_screen_qml_test_shaders"
+    PREFIX "/osvqt"
+    FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
+)
+
+qt_add_executable(osv_qt_adv_search_screen_qml_test tests/adv_search_screen_qml_test.cpp)
+target_link_libraries(osv_qt_adv_search_screen_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
+target_include_directories(osv_qt_adv_search_screen_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(osv_qt_adv_search_screen_qml_test PRIVATE
+    QTUI_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+)
+
+# Shaders for adv_search_screen test
+qt6_add_shaders(osv_qt_adv_search_screen_qml_test "osv_qt_adv_search_screen_qml_test_shaders"
+    PREFIX "/osvqt"
+    FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
+)
+
+add_executable(osv_qt_save_search_dialog_qml_test tests/save_search_dialog_qml_test.cpp)
+target_link_libraries(osv_qt_save_search_dialog_qml_test PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
+target_include_directories(osv_qt_save_search_dialog_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(osv_qt_save_search_dialog_qml_test PRIVATE
+    QTUI_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+)
+
+add_executable(osv_qt_tag_autocomplete_popup_qml_test tests/tag_autocomplete_popup_qml_test.cpp)
+target_link_libraries(osv_qt_tag_autocomplete_popup_qml_test PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
+target_include_directories(osv_qt_tag_autocomplete_popup_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(osv_qt_tag_autocomplete_popup_qml_test PRIVATE
+    QTUI_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
 )
 
 # Finding 5 + BREAKAGE FIX: DetailPanel QML load test + tag-section method test
@@ -365,6 +469,13 @@ qt_add_executable(osv-qt
     help_model.cpp
     selection_controller.cpp
     session_state.cpp
+    tag_controller.cpp
+    favorites_controller.cpp
+    tag_overview_controller.cpp
+    tag_list_import_adapter.cpp
+    tag_list_import_controller.cpp
+    adv_search_controller.cpp
+    search_model_adapter.cpp
     autolock.cpp
 )
 
