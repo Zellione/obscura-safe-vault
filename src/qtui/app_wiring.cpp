@@ -26,6 +26,7 @@
 #include "session_state.h"
 #include "anim_controller.h"
 #include "animated_image_loader.h"
+#include "detail_controller.h"
 #include "autolock.h"
 #include "gfx/theme.h"
 
@@ -58,7 +59,8 @@ void registerOsvQmlTypes()
 
 AppContext::AppContext()
     : galleryModel(&unlockController.vault()),
-      viewerController(&unlockController.vault(), &galleryModel)
+      viewerController(&unlockController.vault(), &galleryModel),
+      detailController(&unlockController.vault())
 {
     unlockController.setViewerController(&viewerController);
     unlockController.setPlaybackEngine(&playbackEngine);
@@ -98,5 +100,6 @@ void AppContext::expose(QQmlApplicationEngine& engine)
     ctx->setContextProperty("helpModel", &helpModel);
     ctx->setContextProperty("selectionController", &selectionController);
     ctx->setContextProperty("sessionState", &sessionState);
+    ctx->setContextProperty("detailController", &detailController);
     ctx->setContextProperty("autoLock", &autoLock);
 }

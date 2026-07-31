@@ -1,11 +1,19 @@
 #include "gallery_model.h"
+#include "cover_provider.h"
+#include "status_controller.h"
 #include "thumb_cache.h"
 #include "viewer_controller.h"
 #include "vault/vault.h"
 #include "vault/safe_name.h"
+#include "ui/gallery_sort.h"
+#include "ui/child_counts.h"
+#include "ui/waste_threshold.h"
+
+#include <span>
 
 GalleryModel::GalleryModel(vault::Vault* vault, QObject* parent)
-    : QAbstractListModel(parent), vault_(vault), currentPath_("/")
+    : QAbstractListModel(parent), vault_(vault), currentPath_("/"),
+      coverProvider_(std::make_unique<CoverProvider>(this))
 {
     if (vault_ && vault_->is_unlocked()) {
         refresh();
@@ -39,6 +47,47 @@ QVariant GalleryModel::data(const QModelIndex& index, int role) const
             // Opaque pointer, safe to pass as quintptr because workers
             // only use it with ThumbCache.request(key), never dereference
             return QVariant::fromValue(static_cast<quintptr>(reinterpret_cast<uintptr_t>(node)));
+        case CoverRole: {
+            // Task 2.4: Return cover spans for gallery tiles
+            // Only galleries have covers; media files return empty
+            if (node->type != vault::IndexNode::Type::Gallery)
+                return QVariant();
+
+            // Get covers from provider (memoised until refresh)
+            const auto& covers = coverProvider_->getCovers(node);
+            if (covers.empty())
+                return QVariant();  // Empty gallery, fall back to folder icon
+
+            // Return cover offset as first item (QML will use ThumbCache to render)
+            // For now, return the first cover's offset as a uint64
+            return QVariant::fromValue(static_cast<quint64>(covers[0].offset));
+        }
+        case ChildCountsRole: {
+            // Task 2.4: Return "X galleries · Y items" string for galleries only
+            if (node->type != vault::IndexNode::Type::Gallery)
+                return QVariant();
+
+            const auto counts = ui::direct_child_counts(*node);
+            const auto label = ui::format_tile_counts(counts);
+            return QString::fromStdString(label);
+        }
+        case IsAnimatedRole: {
+            // Task 2.4: Badge for GIF/WebP with animated flag set
+            // Returns true only if format_can_animate(format) AND animated flag
+            if (node->type != vault::IndexNode::Type::Image)
+                return false;
+
+            // Check if format can animate (GIF or WebP)
+            if (!vault::format_can_animate(node->meta.format))
+                return false;
+
+            // Check animated flag
+            return node->meta.animated;
+        }
+        case IsFavoriteRole: {
+            // Task 2.4: Gold-star for favorite bit (read-only, WS5 provides toggle)
+            return node->favorite;
+        }
         default:
             return QVariant();
     }
@@ -51,6 +100,10 @@ QHash<int, QByteArray> GalleryModel::roleNames() const
     roles[IsGalleryRole] = "isGallery";
     roles[IsVideoRole] = "isVideo";
     roles[NodeKeyRole] = "nodeKey";
+    roles[CoverRole] = "cover";                  // Task 2.4
+    roles[ChildCountsRole] = "childCounts";      // Task 2.4
+    roles[IsAnimatedRole] = "isAnimated";        // Task 2.4
+    roles[IsFavoriteRole] = "isFavorite";        // Task 2.4
     return roles;
 }
 
@@ -68,6 +121,11 @@ void GalleryModel::refresh()
         viewerController_->shutdownAndDrain();
     }
 
+    // Task 2.4: Clear cover cache on refresh (invalidate memoised covers)
+    if (coverProvider_) {
+        coverProvider_->clear();
+    }
+
     beginResetModel();
     rows_.clear();
 
@@ -77,11 +135,14 @@ void GalleryModel::refresh()
     }
 
     // Get all nodes from vault at current path
-    const auto all_nodes = vault_->list(currentPath_.toStdString());
+    auto all_nodes = vault_->list(currentPath_.toStdString());
 
-    // Partition: galleries first, then media
+    // Sort using the current sort key (convert vector to span for sort_children)
+    auto sorted = ui::sort_children(all_nodes, sortKey_);
+
+    // Partition sorted results into galleries and media, preserving sort order within each group
     std::vector<const vault::IndexNode*> galleries, media;
-    for (const auto* node : all_nodes) {
+    for (const auto* node : sorted) {
         if (!node)
             continue;
         if (node->type == vault::IndexNode::Type::Gallery) {
@@ -91,12 +152,15 @@ void GalleryModel::refresh()
         }
     }
 
-    // Combine: galleries first, then media
+    // Combine: galleries first, then media (both maintain their sort order)
     rows_.reserve(galleries.size() + media.size());
     rows_.insert(rows_.end(), galleries.begin(), galleries.end());
     rows_.insert(rows_.end(), media.begin(), media.end());
 
     endResetModel();
+
+    // Scope: WS2.4 — Check and display waste hint on refresh
+    checkAndDisplayWasteHint();
 }
 
 void GalleryModel::enterGallery(int row)
@@ -213,5 +277,60 @@ QString GalleryModel::nameAt(int row) const
         return QString();
 
     return QString::fromStdString(node->name);
+}
+
+void GalleryModel::nextSort()
+{
+    setSortKey(static_cast<int>(ui::next_sort_key(sortKey_)));
+}
+
+void GalleryModel::prevSort()
+{
+    setSortKey(static_cast<int>(ui::prev_sort_key(sortKey_)));
+}
+
+int GalleryModel::sortKey() const
+{
+    return static_cast<int>(sortKey_);
+}
+
+void GalleryModel::setSortKey(int key)
+{
+    auto newKey = static_cast<vault::SortKey>(key);
+    if (newKey == sortKey_)
+        return;
+
+    sortKey_ = newKey;
+    emit sortKeyChanged();
+
+    // Refresh with new sort order
+    refresh();
+}
+
+QString GalleryModel::sortLabel() const
+{
+    if (!vault_)
+        return QString();
+
+    // Get the vault default sort and generate the label for breadcrumb display
+    const auto& settings = vault::vault_settings(*vault_);
+    auto label = ui::sort_key_label(sortKey_, settings.default_sort);
+    return QString::fromStdString(label);
+}
+
+void GalleryModel::checkAndDisplayWasteHint()
+{
+    if (!vault_ || !statusController_)
+        return;
+
+    // Get waste info from vault
+    const auto wasted = vault_->wasted_bytes();
+    const auto file_size = vault::vault_file_bytes(*vault_);
+
+    // Check if waste exceeds threshold (Scope: WS2.4)
+    if (ui::should_display_waste(wasted, file_size)) {
+        // Display hint with Shift+C compact shortcut
+        statusController_->set(0, "Vault has unused space. Press Shift+C to compact.");
+    }
 }
 

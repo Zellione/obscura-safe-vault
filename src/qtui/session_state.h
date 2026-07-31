@@ -10,6 +10,8 @@
 // video resume bookmark.
 class SessionState : public QObject {
     Q_OBJECT
+    Q_PROPERTY(int viewDensity READ viewDensity WRITE setViewDensity NOTIFY viewDensityChanged)
+    Q_PROPERTY(bool detailOpen READ detailOpen WRITE setDetailOpen NOTIFY detailOpenChanged)
 
 public:
     explicit SessionState(QObject* parent = nullptr);
