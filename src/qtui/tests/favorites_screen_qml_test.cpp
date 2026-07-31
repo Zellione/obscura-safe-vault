@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <QGuiApplication>
+#include "qml_test_util.h"
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QQmlContext>
@@ -24,13 +25,7 @@ static bool test_favorites_screen_qml_loads()
     QUrl qmlPath("file://" QTUI_QML_DIR "/FavoritesScreen.qml");
     QQmlComponent component(&engine, qmlPath);
 
-    if (component.isError()) {
-        fprintf(stderr, "FAIL: FavoritesScreen.qml has QML errors:\n");
-        for (const auto& error : component.errors()) {
-            fprintf(stderr, "  Line %d: %s\n",
-                    error.line(),
-                    error.description().toStdString().c_str());
-        }
+    if (!osvqt_test::expect_qml_loads(component, "FavoritesScreen.qml")) {
         return false;
     }
 
@@ -80,11 +75,7 @@ static bool test_favorites_screen_instantiates()
     QObject* obj = component.createWithInitialProperties(initialProps);
     if (!obj) {
         fprintf(stderr, "FAIL: FavoritesScreen instantiation failed\n");
-        if (component.isError()) {
-            for (const auto& error : component.errors()) {
-                fprintf(stderr, "  %s\n", error.description().toStdString().c_str());
-            }
-        }
+        osvqt_test::print_component_errors(component, "  Error");
         return false;
     }
 

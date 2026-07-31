@@ -1,36 +1,21 @@
 #include <QGuiApplication>
-#include <QQmlApplicationEngine>
 #include <QQmlComponent>
-#include <QString>
-#include <iostream>
+#include <QQmlEngine>
 
-int main(int argc, char** argv) {
+#include "qml_test_util.h"
+
+// Load-only check: AdvancedSearchScreen needs context properties to
+// instantiate, so instantiation is covered by the app-level QML load gate.
+int main(int argc, char** argv)
+{
     QGuiApplication app(argc, argv);
 
-    QQmlApplicationEngine engine;
+    QQmlEngine engine;
+    QQmlComponent component(&engine,
+                            QUrl::fromLocalFile(QStringLiteral(QTUI_QML_DIR "/AdvancedSearchScreen.qml")));
 
-    std::cout << "Test 1: AdvancedSearchScreen.qml loads without errors...\n";
-
-    const QString qmlPath = QStringLiteral(QTUI_QML_DIR "/AdvancedSearchScreen.qml");
-    const QUrl url = QUrl::fromLocalFile(qmlPath);
-
-    QQmlComponent component(&engine, url);
-    if (component.isError()) {
-        std::cerr << "FAIL: " << qmlPath.toStdString() << " has QML errors:\n";
-        for (const auto& error : component.errors()) {
-            std::cerr << "  Line " << error.line() << ": " << error.description().toStdString() << "\n";
-        }
-        std::cout << "FAIL\n";
-        return 1;
-    }
-
-    std::cout << "PASS\n";
-
-    std::cout << "PASS\n";
-
-    std::cout << "\n=== Test Summary ===\n";
-    std::cout << "Passed: 1\n";
-    std::cout << "Failed: 0\n";
-
+    printf("Test 1: AdvancedSearchScreen.qml loads without errors...\n");
+    if (!osvqt_test::expect_qml_loads(component, "AdvancedSearchScreen.qml")) return 1;
+    printf("PASS\n");
     return 0;
 }
