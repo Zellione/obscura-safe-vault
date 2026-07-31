@@ -1,0 +1,414 @@
+# =============================================================================
+# Release — Qt UI beta packaging (experiment/qt-quick-ui workstream).
+#
+# Separate from release.yml on purpose: release.yml's premake/ninja build
+# explicitly EXCLUDES src/qtui/**  (see premake5.lua, "osv" project ->
+# removefiles) — the Qt UI is a standalone CMake project (src/qtui/CMakeLists.txt)
+# that links osv's core (crypto/vault/media/etc.) against Qt6 Quick instead of
+# SDL3+the software renderer. Tagging a commit `v*` only ever builds+ships the
+# SDL app, regardless of which branch it's on, so a distinct 'qtui-v*' tag
+# prefix is used here to avoid double-building/mislabeling on the same tag.
+#
+# Pre-release / beta: this is NOT feature-complete UI parity with the SDL app.
+# Published releases from this workflow should be marked as a GitHub
+# pre-release by the owner.
+# =============================================================================
+name: Release Qt UI Beta
+
+on:
+  push:
+    tags: ['qtui-v*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  QT_VERSION: '6.7.3'
+
+jobs:
+  # ===========================================================================
+  # Linux — gcc Release build of osv-qt, packaged as a linuxdeploy AppDir
+  # (mirrors release.yml's Linux leg for the shared apt/SDL3/codec steps).
+  # ===========================================================================
+  linux:
+    name: Package / Linux (Qt UI)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /tmp/apt-cache
+          key: apt-matrix-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-matrix-
+
+      - name: Install build dependencies
+        run: |
+          sudo mkdir -p /tmp/apt-cache/partial
+          sudo chmod -R 1777 /tmp/apt-cache
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDir::Cache::archives "/tmp/apt-cache";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' \
+            | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
+          sudo rm -f /etc/apt/sources.list.d/*microsoft* /etc/apt/sources.list.d/*azure* 2>/dev/null || true
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build \
+            nasm \
+            gcc-14 \
+            g++-14 \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxss-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-0 \
+            libwayland-dev \
+            wayland-protocols \
+            libasound2-dev \
+            libpulse-dev \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxcb-xinerama0 \
+            fuse
+          sudo chmod -R a+rX /tmp/apt-cache
+
+      - name: Cache vendored SDL3 build
+        uses: actions/cache@v4
+        id: cache-sdl3
+        with:
+          path: vendor/SDL3/build
+          key: sdl3-linux-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored SDL3
+        if: steps.cache-sdl3.outputs.cache-hit != 'true'
+        run: |
+          cmake -S vendor/SDL3 -B vendor/SDL3/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSDL_STATIC=ON            \
+            -DSDL_SHARED=OFF           \
+            -DSDL_TESTS=OFF            \
+            -DSDL_EXAMPLES=OFF         \
+            -DSDL_INSTALL_TESTS=OFF    \
+            -DSDL_X11_XTEST=OFF        \
+            -DSDL_JOYSTICK=OFF         \
+            -DSDL_HAPTIC=OFF           \
+            -DSDL_SENSOR=OFF           \
+            -DSDL_CAMERA=OFF           \
+            -G "Ninja"
+          cmake --build vendor/SDL3/build --parallel "$(nproc)"
+
+      - name: Use gcc-14 as default gcc
+        run: |
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
+            --slave /usr/bin/g++ g++ /usr/bin/g++-14
+
+      # Same cache key as release.yml's Linux codec cache, so a warm SDL app
+      # release build already primes this for the Qt UI build (and vice versa).
+      - name: Cache vendored codecs build
+        uses: actions/cache@v4
+        id: cache-codecs
+        with:
+          path: vendor/codecs-prefix
+          key: codecs-v4-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
+
+      - name: Build vendored codecs
+        if: steps.cache-codecs.outputs.cache-hit != 'true'
+        run: scripts/build_codecs.sh
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: 'qtdeclarative qtshadertools'
+          cache: true
+
+      - name: Configure (CMake, Release)
+        run: |
+          cmake -S src/qtui -B build/qt-experiment -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build/qt-experiment --parallel "$(nproc)"
+
+      # A release build that fails its tests must not publish. No ctest target
+      # is configured (src/qtui/CMakeLists.txt doesn't call enable_testing()),
+      # so run every osv_qt_*_test binary directly — mirrors the per-commit
+      # "Gate status" checks this workstream has relied on so far.
+      - name: Run tests (Release)
+        working-directory: build/qt-experiment
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          fail=0
+          for t in osv_qt_*_test osv_qt_core_smoke; do
+            [ -x "./$t" ] || continue
+            echo "::group::$t"
+            if ! timeout 120 "./$t"; then
+              echo "FAILED: $t"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $fail
+
+      - name: Package (linuxdeploy AppDir)
+        env:
+          OSV_VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${OSV_VERSION#qtui-v}"
+          VERSION="${VERSION#v}"  # also strip a plain 'v' for workflow_dispatch runs
+
+          curl -fsSL -o linuxdeploy.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -fsSL -o linuxdeploy-plugin-qt.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
+
+          APPDIR="AppDir"
+          mkdir -p "$APPDIR/usr/bin"
+          cp build/qt-experiment/osv-qt "$APPDIR/usr/bin/"
+          cp -r build/qt-experiment/qml "$APPDIR/usr/bin/qml"
+
+          # Minimal placeholder icon/desktop file — linuxdeploy requires both
+          # to build a valid AppDir. Not a designed app icon; fine for a beta.
+          # Must be >=8x8 (linuxdeploy rejects smaller) and its basename must
+          # match the desktop file's Icon= key exactly (verified locally: a
+          # mismatched name fails with "Could not find suitable icon").
+          base64 -d > osv-qt.png <<'PNGB64'
+          iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR42mPQztlAU8QwasGoBaMW
+          jFowasGoBaMWjFowasGoBaMWDBULAIi3HEyeTSRbAAAAAElFTkSuQmCC
+          PNGB64
+          cat > osv-qt.desktop <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=Obscura Safe Vault (Qt UI Beta)
+          Exec=osv-qt
+          Icon=osv-qt
+          Categories=Graphics;
+          EOF
+
+          export QML_SOURCES_PATHS="$PWD/src/qtui/qml"
+          export QMAKE="$(command -v qmake6 || command -v qmake)"
+          # NO_STRIP: the continuous-build linuxdeploy's bundled `strip` can't
+          # parse RELR (.relr.dyn) relocations some distros' system libs now
+          # use, and aborts the whole run (verified locally — reproduced this
+          # exact failure without it). Binary size doesn't matter for a beta.
+          export NO_STRIP=1
+          ./linuxdeploy.AppImage --appimage-extract-and-run \
+            --appdir "$APPDIR" \
+            --executable "$APPDIR/usr/bin/osv-qt" \
+            --desktop-file osv-qt.desktop \
+            --icon-file osv-qt.png \
+            --plugin qt
+
+          # Qt6 apps deploy via rpath + qt.conf, not an env-wrapper script, so
+          # AppRun is just a symlink to the real executable (verified locally
+          # by running it from a location with no source tree present).
+          PKG="osv-qt-${VERSION}-beta-linux-x86_64"
+          mkdir -p "dist/$PKG"
+          cp -r "$APPDIR"/. "dist/$PKG/"
+          echo "Portable Qt UI beta build. Run: ./AppRun" > "dist/$PKG/README-BETA.txt"
+          mkdir -p dist
+          tar -czf "dist/${PKG}.tar.gz" -C dist "$PKG"
+          rm -rf "dist/$PKG"
+          ls -la dist/
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: osv-qt-linux-beta
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  # ===========================================================================
+  # Windows — MSVC Release build of osv-qt, packaged as a portable zip via
+  # windeployqt (mirrors release.yml's Windows leg for the shared codec/FFmpeg
+  # build steps, same cache keys).
+  # ===========================================================================
+  windows:
+    name: Package / Windows (Qt UI)
+    runs-on: windows-2022
+    timeout-minutes: 150
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install nasm
+        shell: pwsh
+        run: |
+          choco install nasm --no-progress -y
+          echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Set up MSYS2 (for FFmpeg build)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          path-type: inherit
+          install: make diffutils
+
+      - name: Hide MSYS2's link.exe (avoid MSVC link.exe collision)
+        shell: msys2 {0}
+        run: |
+          if [ -f /usr/bin/link.exe ]; then
+            mv /usr/bin/link.exe /usr/bin/link.exe.msys2-bak
+          fi
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_msvc2019_64
+          modules: 'qtdeclarative qtshadertools'
+          cache: true
+
+      - name: Cache vendored SDL3 build
+        uses: actions/cache@v4
+        id: cache-sdl3
+        with:
+          path: vendor/SDL3/build
+          key: sdl3-win2022-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
+
+      - name: Build vendored SDL3
+        if: steps.cache-sdl3.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          cmake -S vendor/SDL3 -B vendor/SDL3/build `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DSDL_STATIC=ON -DSDL_SHARED=OFF `
+            -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_INSTALL_TESTS=OFF `
+            -G "Ninja"
+          cmake --build vendor/SDL3/build --parallel
+
+      # Same cache key as release.yml's Windows codec cache — shared warm cache.
+      - name: Cache vendored codecs build
+        uses: actions/cache@v4
+        id: cache-codecs
+        with:
+          path: vendor/codecs-prefix
+          key: codecs-v5-${{ runner.os }}-win2022-${{ hashFiles('.gitmodules', 'scripts/build_codecs.bat', 'scripts/build_ffmpeg_windows.sh') }}-${{ runner.arch }}
+
+      - name: Build vendored codecs
+        if: steps.cache-codecs.outputs.cache-hit != 'true'
+        shell: cmd
+        run: scripts\build_codecs.bat
+
+      - name: Build vendored FFmpeg (Windows, MSVC toolchain)
+        if: steps.cache-codecs.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: scripts/build_ffmpeg_windows.sh
+
+      - name: Configure (CMake, Release)
+        shell: pwsh
+        run: cmake -S src/qtui -B build/qt-experiment -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build/qt-experiment --parallel
+
+      - name: Run tests (Release)
+        shell: pwsh
+        working-directory: build/qt-experiment
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $fail = 0
+          Get-ChildItem -Filter "osv_qt_*_test.exe" | ForEach-Object {
+            Write-Host "::group::$($_.Name)"
+            & $_.FullName
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "FAILED: $($_.Name)"
+              $fail = 1
+            }
+            Write-Host "::endgroup::"
+          }
+          & ".\osv_qt_core_smoke.exe"
+          if ($LASTEXITCODE -ne 0) { $fail = 1 }
+          exit $fail
+
+      - name: Package (windeployqt + portable zip)
+        shell: pwsh
+        env:
+          OSV_VERSION: ${{ github.ref_name }}
+        run: |
+          $version = $env:OSV_VERSION -replace '^qtui-v', '' -replace '^v', ''
+          $pkg = "osv-qt-$version-beta-windows-x64"
+          $stage = "dist\$pkg"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+
+          Copy-Item "build\qt-experiment\osv-qt.exe" -Destination $stage
+          Copy-Item "build\qt-experiment\qml" -Destination "$stage\qml" -Recurse
+
+          windeployqt --qmldir src\qtui\qml --release "$stage\osv-qt.exe"
+
+          Copy-Item "LICENSE" -Destination $stage
+          Copy-Item "README.md" -Destination $stage
+
+          Compress-Archive -Path $stage -DestinationPath "dist\$pkg.zip"
+          Get-ChildItem dist
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: osv-qt-windows-beta
+          path: dist/*.zip
+          retention-days: 7
+
+  # ===========================================================================
+  # Publish — gather packages, checksum, attach to a draft (pre-)release for
+  # the qtui-v* tag. Owner reviews + marks pre-release + publishes manually.
+  # ===========================================================================
+  publish:
+    name: Publish Qt UI beta release assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [linux, windows]
+    if: startsWith(github.ref, 'refs/tags/qtui-v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS.txt
+        run: |
+          cd assets
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Obscura Safe Vault Qt UI Beta ${GITHUB_REF_NAME#qtui-v}" \
+              --draft --prerelease --generate-notes
+          fi
+          gh release upload "$GITHUB_REF_NAME" assets/* \
+            --repo "$GITHUB_REPOSITORY" --clobber
