@@ -33,6 +33,7 @@ Rectangle {
         ]},
         { title: "Other", entries: [
             { key: "Ctrl+R", text: "Clear all fields" },
+            { key: "Ctrl+D", text: "Toggle detail panel" },
             { key: "Esc", text: "Return to gallery" }
         ]}
     ]
@@ -52,7 +53,10 @@ Rectangle {
     property bool sidebarFilterMode: false  // `/` enters filter mode
 
     RowLayout {
-        anchors.fill: parent
+        anchors {
+            fill: parent
+            rightMargin: detailPanel.visible ? detailPanel.width : 0
+        }
         spacing: 0
 
         // Left sidebar: Saved searches
@@ -646,8 +650,8 @@ Rectangle {
             saveSearchDialog.open();
             event.accepted = true;
         } else if (event.key === Qt.Key_D && (event.modifiers & Qt.ControlModifier)) {
-            // contract: WS2 DetailPanel — wired in integration
-            // Ctrl+D: open detail panel (deferred to WS2)
+            // Ctrl+D: toggle detail panel
+            sessionState.setDetailOpen(!sessionState.detailOpen);
             event.accepted = true;
         }
     }
@@ -733,6 +737,38 @@ Rectangle {
 
         onTagSelected: {
             performSearch();
+        }
+    }
+
+    // Detail panel showing metadata/tags for selected result (WS2 Task 2.3)
+    DetailPanel {
+        id: detailPanel
+    }
+
+    // Wire detail panel to show selected result's details
+    Connections {
+        target: resultsGrid
+        function onCurrentIndexChanged() {
+            if (resultsGrid.currentIndex >= 0 && resultsGrid.currentIndex < currentResults.length) {
+                const result = currentResults[resultsGrid.currentIndex];
+                // Show node with empty inherited tags and from-contents
+                detailController.showNode(result.nodeKey, [], []);
+            } else {
+                detailController.clear();
+            }
+        }
+    }
+
+    Connections {
+        target: resultsList
+        function onCurrentIndexChanged() {
+            if (resultsList.currentIndex >= 0 && resultsList.currentIndex < currentResults.length) {
+                const result = currentResults[resultsList.currentIndex];
+                // Show node with empty inherited tags and from-contents
+                detailController.showNode(result.nodeKey, [], []);
+            } else {
+                detailController.clear();
+            }
         }
     }
 }
