@@ -11,7 +11,7 @@ Window {
     color: themePalette.bg
     title: "osv-qt (experiment)"
 
-    // Global F1/F2/Shift+T/Shift+G/Shift+/ key handlers
+    // Global F1/F2/backtick/Shift+T/Shift+G/Shift+/ key handlers
     Keys.onPressed: (event) => {
         if (event.key === Qt.Key_F1) {
             helpPopup.toggle();
@@ -31,11 +31,30 @@ Window {
             // Shift+/: open advanced search screen
             stack.push(advancedSearchScreenComponent);
             event.accepted = true;
+        } else if (event.text === "`") {
+            // Backtick opens quick-switch (only if not typing in a text field)
+            quickSwitchPopup.open();
+            event.accepted = true;
         }
     }
 
     RenameDialog {
         id: renameDialog
+    }
+
+    QuickSwitchPopup {
+        id: quickSwitchPopup
+        activeVaultPath: unlockController.currentVaultPath
+        onSwitchToVault: (vaultPath) => {
+            if (unlockController.openVault(vaultPath)) {
+                stack.replace(unlockScreenComponent);
+            }
+        }
+        onClosed: {
+            if (stack.currentItem) {
+                stack.currentItem.forceActiveFocus();
+            }
+        }
     }
 
     HelpPopup {
@@ -99,7 +118,7 @@ Window {
             bottom: footerBar.top
         }
 
-        initialItem: unlockScreenComponent
+        initialItem: vaultManagerScreenComponent
 
         // When current item changes, update help popup with new screen's groups
         onCurrentItemChanged: {
@@ -132,10 +151,41 @@ Window {
             }
         }
 
+        // Vault manager screen
+        Component {
+            id: vaultManagerScreenComponent
+            VaultManagerScreen {
+                onOpenVault: (vaultPath) => {
+                    if (unlockController.openVault(vaultPath)) {
+                        stack.replace(unlockScreenComponent);
+                    }
+                }
+                onCreateVault: {
+                    stack.push(createVaultDialogComponent);
+                }
+            }
+        }
+
         // Unlock screen
         Component {
             id: unlockScreenComponent
             UnlockScreen {
+            }
+        }
+
+        // Create vault dialog (Task 1.2)
+        Component {
+            id: createVaultDialogComponent
+            CreateVaultDialog {
+                onVaultCreated: {
+                    // Vault is now created and unlocked; navigate to gallery
+                    if (unlockController.unlocked) {
+                        stack.replace(unlockedPageComponent);
+                    } else {
+                        // Creation failed; stay on manager screen
+                        stack.replace(vaultManagerScreenComponent);
+                    }
+                }
             }
         }
 
@@ -146,7 +196,11 @@ Window {
                 renameDialog: renameDialog
                 onBack: {
                     // Navigation contract satisfied; upOneLevel() already called by GalleryScreen.
-                    // WS1's vault-manager route will consume this signal for deeper back behaviors.
+                    // When at gallery root (currentPath === "/"), route back to vault manager and lock vault.
+                    if (galleryModel.currentPath === "/") {
+                        unlockController.lock();
+                        stack.replace(vaultManagerScreenComponent);
+                    }
                 }
             }
         }

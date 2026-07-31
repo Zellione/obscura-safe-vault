@@ -12,6 +12,7 @@
 #include "video_frame_item.h"
 #include "unlock_controller.h"
 #include "vault_list_model.h"
+#include "vault_manager_controller.h"
 #include "gallery_model.h"
 #include "thumb_cache.h"
 #include "viewer_controller.h"
@@ -29,6 +30,10 @@
 #include "tag_list_import_controller.h"
 #include "adv_search_controller.h"
 #include "search_model_adapter.h"
+#include "anim_controller.h"
+#include "animated_image_loader.h"
+#include "detail_controller.h"
+#include "autolock.h"
 #include "gfx/theme.h"
 
 void initThemeFromEnv()
@@ -60,11 +65,14 @@ void registerOsvQmlTypes()
     qmlRegisterType<TagListImportController>("Osv", 1, 0, "TagListImportController");
     qmlRegisterType<AdvancedSearchController>("Osv", 1, 0, "AdvancedSearchController");
     qmlRegisterType<SearchModelAdapter>("Osv", 1, 0, "SearchModelAdapter");
+    // AnimController and AnimatedImageLoader are created programmatically in C++
+    // not exposed to QML as creatable types
 }
 
 AppContext::AppContext()
     : galleryModel(&unlockController.vault()),
-      viewerController(&unlockController.vault(), &galleryModel)
+      viewerController(&unlockController.vault(), &galleryModel),
+      detailController(&unlockController.vault())
 {
     unlockController.setViewerController(&viewerController);
     unlockController.setPlaybackEngine(&playbackEngine);
@@ -76,6 +84,10 @@ AppContext::AppContext()
     tagListImportController.setVault(&unlockController.vault());
     advancedSearchController.setVault(&unlockController.vault());
     searchModelAdapter.setVault(&unlockController.vault());
+    playbackEngine.setSessionState(&sessionState);
+
+    // Wire AutoLock
+    autoLock.setUnlockController(&unlockController);
 
     // Wire vault unlock state to settings controller
     QObject::connect(&unlockController, &UnlockController::unlockedChanged,
@@ -93,6 +105,7 @@ void AppContext::expose(QQmlApplicationEngine& engine)
 {
     QQmlContext* ctx = engine.rootContext();
     ctx->setContextProperty("unlockController", &unlockController);
+    ctx->setContextProperty("vaultManagerController", &vaultManagerController);
     ctx->setContextProperty("thumbCache", &thumbCache);
     ctx->setContextProperty("galleryModel", &galleryModel);
     ctx->setContextProperty("viewerController", &viewerController);
@@ -111,4 +124,6 @@ void AppContext::expose(QQmlApplicationEngine& engine)
     ctx->setContextProperty("tagListImportController", &tagListImportController);
     ctx->setContextProperty("advancedSearchController", &advancedSearchController);
     ctx->setContextProperty("searchModelAdapter", &searchModelAdapter);
+    ctx->setContextProperty("detailController", &detailController);
+    ctx->setContextProperty("autoLock", &autoLock);
 }

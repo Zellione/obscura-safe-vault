@@ -35,3 +35,28 @@ struct PixelBuffer {
 
     return buf;
 }
+
+// Helper: flatten RGBA to black background (alpha composition).
+// For each pixel: output = input_rgb * (input_a / 255), with alpha = 0xFF.
+// This ensures transparent areas composite as black instead of staying transparent.
+[[nodiscard]] inline void flatten_alpha_to_black(PixelBuffer& buf)
+{
+    if (buf.rgba.empty()) {
+        return;
+    }
+
+    const size_t pixel_count = static_cast<size_t>(buf.width) * static_cast<size_t>(buf.height);
+    for (size_t i = 0; i < pixel_count; ++i) {
+        const size_t idx = i * 4;
+        const uint8_t r = buf.rgba[idx];
+        const uint8_t g = buf.rgba[idx + 1];
+        const uint8_t b = buf.rgba[idx + 2];
+        const uint8_t a = buf.rgba[idx + 3];
+
+        // Composite over black: out = in * (alpha / 255)
+        buf.rgba[idx]     = static_cast<uint8_t>((static_cast<int>(r) * a) / 255);
+        buf.rgba[idx + 1] = static_cast<uint8_t>((static_cast<int>(g) * a) / 255);
+        buf.rgba[idx + 2] = static_cast<uint8_t>((static_cast<int>(b) * a) / 255);
+        buf.rgba[idx + 3] = 0xFF;  // Set alpha to fully opaque
+    }
+}

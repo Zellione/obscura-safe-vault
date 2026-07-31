@@ -3,9 +3,11 @@ build/
 bin/
 obj/
 
-# Vendored image-codec staging prefix (built by setup.sh; not committed)
-vendor/codecs-prefix/
-vendor/codecs-prefix-asan/
+# Vendored image-codec staging prefix (built by setup.sh; not committed).
+# No trailing slash: must also match a symlinked prefix (a trailing slash
+# matches directories only, which once let a symlink get committed).
+vendor/codecs-prefix
+vendor/codecs-prefix-asan
 
 # libarchive's own source tree ships a tracked build/ directory (cmake helper
 # modules), so its out-of-tree build output goes to a sibling dir instead.
