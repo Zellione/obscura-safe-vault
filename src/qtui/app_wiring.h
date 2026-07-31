@@ -23,6 +23,7 @@
 #include "search_model_adapter.h"
 #include "detail_controller.h"
 #include "autolock.h"
+#include "import_controller.h"
 
 class QQmlApplicationEngine;
 
@@ -57,6 +58,7 @@ struct AppContext {
     SearchModelAdapter searchModelAdapter;
     DetailController detailController;
     AutoLock autoLock;
+    ImportController importController;
 
     AppContext();
 
