@@ -1,6 +1,7 @@
 #include <QGuiApplication>
 #include <QQmlComponent>
 #include <QQmlEngine>
+#include <QtQml/qqml.h>
 
 #include "qml_test_util.h"
 
@@ -9,6 +10,10 @@
 int main(int argc, char** argv)
 {
     QGuiApplication app(argc, argv);
+
+    // The screen embeds DetailPanel, whose `import Osv 1.0` must resolve;
+    // no Osv type is referenced at load time, so the bare module suffices.
+    qmlRegisterModule("Osv", 1, 0);
 
     QQmlEngine engine;
     QQmlComponent component(&engine,
