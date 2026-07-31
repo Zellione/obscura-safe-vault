@@ -22,10 +22,10 @@ Rectangle {
     property var onHoverStop: null          // Callback when auto-play should stop
 
     // Constants (from ui/anim_model.h via tdd_anim_hover_probe_test)
-    readonly property double kAnimHoverDwell = 0.200   // 200ms threshold
-    readonly property int kAnimHoverMaxWidth = 1920    // Dimension budget
-    readonly property int kAnimHoverMaxHeight = 1080
-    readonly property int kAnimHoverMaxFrames = 300    // Frame count budget
+    readonly property double kAnimHoverDwell: 0.200
+    readonly property int kAnimHoverMaxWidth: 1920
+    readonly property int kAnimHoverMaxHeight: 1080
+    readonly property int kAnimHoverMaxFrames: 300
 
     // Internal state
     property double hoverDwell: 0.0         // Accumulated hover time
@@ -34,7 +34,7 @@ Rectangle {
 
     // HoverHandler: detect cursor entry/leave
     HoverHandler {
-        onHovered: {
+        onHoveredChanged: {
             if (hovered) {
                 // Cursor entered: reset dwell and start timer
                 probe.hoverDwell = 0.0

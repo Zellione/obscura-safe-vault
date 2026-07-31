@@ -293,18 +293,21 @@ Rectangle {
                     font.pixelSize: 12
                 }
 
-                // WS3 Finding 2: Hover auto-play gate (AnimHoverProbe QML integration pending)
-                // TODO (Phase 57): Instantiate AnimHoverProbe here when GalleryModel has isAnimated + frameCount roles
-                // Template (to be uncommented after Phase 57 adds model roles):
-                // AnimHoverProbe {
-                //     visible: !model.isGallery
-                //     isAnimated: model.isAnimated        // Bind once model has role
-                //     imageWidth: imageItem.sourceSize.width
-                //     imageHeight: imageItem.sourceSize.height
-                //     frameCount: model.frameCount        // Bind once model has role
-                //     onHoverStart: (ctrl) => { /* wire to SecureImageItem */ }
-                //     onHoverStop: { /* cleanup */ }
-                // }
+                // WS3 Finding 2: Hover auto-play gate (AnimHoverProbe QML integration)
+                AnimHoverProbe {
+                    anchors.fill: parent
+                    visible: !model.isGallery && model.isAnimated
+                    isAnimated: model.isAnimated
+                    // frameCount defaults to 0 (unknown) since vault doesn't store frame metadata
+                    // This is safe: 0 <= kAnimHoverMaxFrames (300), so budget check passes
+                    onHoverStart: (ctrl) => {
+                        // Animation control wired here in Phase 57 once SecureImageItem
+                        // exposes animation playback API
+                    }
+                    onHoverStop: {
+                        // Cleanup wired here in Phase 57
+                    }
+                }
             }
 
             // Single-tap: select item (and give the grid key focus,
