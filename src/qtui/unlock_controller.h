@@ -15,6 +15,7 @@ class UnlockController : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool unlocked READ unlocked NOTIFY unlockedChanged)
     Q_PROPERTY(QString errorText READ errorText NOTIFY errorTextChanged)
+    Q_PROPERTY(QUrl currentVaultPath READ currentVaultPath NOTIFY currentVaultPathChanged)
 public:
     explicit UnlockController(QObject* parent = nullptr);
 
@@ -26,23 +27,32 @@ public:
 
     Q_INVOKABLE bool openVault(const QUrl& fileUrl);
     Q_INVOKABLE void unlock(SecureTextField* field);
+    Q_INVOKABLE void unlockWithKeyfile(SecureTextField* passwordField, const QUrl& keyfileUrl);
     Q_INVOKABLE void lock();
+
+    // Create a new vault at the given path with the given password and optional keyfile.
+    // keyfileUrl is empty if no keyfile is used. Returns true on success.
+    Q_INVOKABLE bool createVault(const QUrl& fileUrl, SecureTextField* passwordField, SecureTextField* confirmField, const QUrl& keyfileUrl);
 
     // Test-only helper for selftest (not exposed to QML)
     bool unlockWithPassword(const std::span<const uint8_t>& password);
 
     [[nodiscard]] bool unlocked() const { return vault_.is_unlocked(); }
     [[nodiscard]] QString errorText() const { return error_; }
+    [[nodiscard]] QUrl currentVaultPath() const { return currentVaultPath_; }
     [[nodiscard]] vault::Vault& vault() noexcept { return vault_; }
 
 signals:
     void unlockedChanged();
     void errorTextChanged();
+    void currentVaultPathChanged();
 
 private:
     void setError(const QString& e);
+    void setCurrentVaultPath(const QUrl& path);
     vault::Vault vault_;
     QString      error_;
+    QUrl         currentVaultPath_;
     ViewerController* viewerController_ = nullptr;
     PlaybackEngine* playbackEngine_ = nullptr;
 };

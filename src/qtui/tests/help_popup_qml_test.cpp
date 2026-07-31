@@ -1,9 +1,9 @@
 #include <cstdio>
 #include <QGuiApplication>
-#include <QQmlComponent>
-#include <QQmlEngine>
 #include <QObject>
 #include <QUrl>
+
+#include "qml_test_util.h"
 
 // Test 1: HelpPopup.qml loads without QML compile errors
 static bool test_help_popup_qml_loads()
@@ -11,17 +11,10 @@ static bool test_help_popup_qml_loads()
     printf("Test 1: HelpPopup.qml loads without errors...\n");
 
     QQmlEngine engine;
-    // Load from filesystem: relative to the source tree
     QUrl qmlPath("file://" QTUI_QML_DIR "/HelpPopup.qml");
     QQmlComponent component(&engine, qmlPath);
 
-    if (component.isError()) {
-        fprintf(stderr, "FAIL: HelpPopup.qml has QML errors:\n");
-        for (const auto& error : component.errors()) {
-            fprintf(stderr, "  Line %d: %s\n",
-                    error.line(),
-                    error.description().toStdString().c_str());
-        }
+    if (!osvqt_test::expect_qml_loads(component, "HelpPopup.qml")) {
         return false;
     }
 
@@ -38,19 +31,12 @@ static bool test_help_popup_instantiates()
     QUrl qmlPath("file://" QTUI_QML_DIR "/HelpPopup.qml");
     QQmlComponent component(&engine, qmlPath);
 
-    if (component.isError()) {
-        fprintf(stderr, "FAIL: Component has errors (see Test 1)\n");
+    if (!osvqt_test::expect_qml_loads(component, "HelpPopup")) {
         return false;
     }
 
-    QObject* obj = component.create();
+    QObject* obj = osvqt_test::instantiate_qml_component(component, "HelpPopup");
     if (!obj) {
-        fprintf(stderr, "FAIL: HelpPopup instantiation failed\n");
-        if (component.isError()) {
-            for (const auto& error : component.errors()) {
-                fprintf(stderr, "  %s\n", error.description().toStdString().c_str());
-            }
-        }
         return false;
     }
 
