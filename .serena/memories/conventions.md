@@ -34,6 +34,25 @@
   non-fatal in CI, so the suggestion costs nothing to ignore; following it breaks the Windows legs.
 - Local runs are Linux-only and cannot catch this class of break. The MSVC CI legs are the gate.
 
+### Paths and files (learned porting the Qt UI to MSVC, `qtui-v1.3.3-beta1`)
+- **Never pass `std::filesystem::path::c_str()` to `std::fopen`.** `path::value_type` is `wchar_t`
+  on Windows, so it is a hard compile error there. Use `path.string().c_str()`, or better
+  `platform::read_file()` — which additionally does one sized read instead of a growing vector, so
+  key material isn't strewn across reallocated heap blocks.
+- **Never build a file URL as `"file://" + path`.** On Windows the path starts with a drive letter,
+  so you get `file://D:/...` where `D:` parses as the URL *host* and the path is silently lost. Use
+  `QUrl::fromLocalFile()`.
+- **Never compare `QUrl::toLocalFile()` against `path::string()`.** Qt returns forward slashes,
+  `string()` returns native separators. Compare `generic_string()` on both sides.
+- **Close a file before unlinking it.** POSIX unlinks open files happily; Windows refuses with
+  "being used by another process". `Vault::lock()` does NOT close the file (documented) — destroy or
+  move-assign over the `Vault`. In a gtest fixture that means doing it in `TearDown()`, which runs
+  *before* the fixture destructor. Prefer the `std::error_code` overload of `remove`/`remove_all` in
+  teardown so cleanup can't throw out of it.
+- **No hardcoded `/tmp`** in tests or defaults — `std::filesystem::temp_directory_path()`. Likewise
+  no `mkdtemp()` (POSIX-only; it also rewrites its argument in place, so holding the returned `char*`
+  past the buffer's scope dangles).
+
 ## Module boundaries
 - `src/crypto/` wraps Monocypher — no SDL or UI deps.
 - `src/vault/` depends on crypto only.

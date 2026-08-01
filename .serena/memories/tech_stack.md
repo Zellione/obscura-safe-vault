@@ -233,3 +233,34 @@ runner is `windows-2022`, so MSVC 2022 is what `ilammy/msvc-dev-cmd` sets up any
 Useful local probe for all of the above — no CI round-trip needed:
 `pipx run --spec aqtinstall aqt install-qt linux desktop <ver> linux_gcc_64 --archives qtbase
 --outputdir /tmp/q && ls /tmp/q/<ver>/gcc_64/lib/cmake | grep Private`
+
+**The Qt UI builds on Windows as of `qtui-v1.3.3-beta1`** — it had only ever been built on Linux, and
+`src/qtui/CMakeLists.txt` encoded that. What the port needed (premake5.lua already documented all of
+it for the SDL app; that file is the reference when something else turns out to be Linux-shaped):
+- Static-lib naming differs: GCC/Clang emit `lib<n>.a`, MSVC `<n>.lib`, and libde265/libwebp/
+  libsharpyuv keep a literal `lib` inside `OUTPUT_NAME`. `osv_require_static_lib()` tries all three
+  and FATAL_ERRORs at configure time — a bare missing path otherwise surfaces only as
+  `ninja: error: '<...>.a', needed by '<...>.exe', missing and no known rule to make it`.
+- FFmpeg is the exception: its own non-CMake build emits `lib<n>.a` on every platform, MSVC included.
+- The VAAPI shim is Linux-only and must be gated on file existence. Windows needs no counterpart —
+  FFmpeg's `hwcontext_d3d11va.c` `LoadLibrary()`s `d3d11.dll` at runtime, so there is no link-time dep.
+- SDL3's static lib is `SDL3-static.lib` under MSVC naming and `libSDL3.a` elsewhere (SDL3's own
+  CMakeLists picks the name to avoid colliding with the shared build's import lib) — use `find_library`.
+- zlib's vendored static target is `zs` on Windows; Linux links the system `-lz`.
+- `LIBARCHIVE_STATIC` **and** `LIBHEIF_STATIC_BUILD` are both required, or MSVC demands import libs
+  for `__imp_archive_*` / `__imp_heif_*`. Windows also needs bcrypt (BCryptGenRandom) plus static
+  SDL3's ole32/user32/... set, and `NOMINMAX`/`WIN32_LEAN_AND_MEAN`. miniz's silence flag is `/w`.
+
+**googletest is a vendored submodule** (`vendor/googletest`, pinned v1.17.0), added for the same beta.
+Seven `osv_qt_*_test` targets use gtest; the dev box had been supplying it from Arch's system package
+and the Windows runner has none. Added with `EXCLUDE_FROM_ALL`, so only the tests that link it build
+it. Do NOT re-add `libgtest-dev` to the CI apt list — both legs use the pinned submodule. See
+`docs/VENDORED_DEPS.md`.
+
+**MSYS2 needs `pkgconf` on the Windows legs** (`release.yml` AND `release-qtui.yml`; `ci.yml` always
+had it). `scripts/build_ffmpeg_windows.sh` points FFmpeg's configure at `build_codecs.bat`'s `aom.pc`
+via `PKG_CONFIG_PATH`; with no pkg-config binary, configure aborts with `ERROR: aom >= 2.0.0 not found
+using pkg-config`. This was latent for a long time because the step only runs on a **codec cache
+miss** — and the `codecs-v5` key hashes `.gitmodules`, so adding the googletest submodule went and
+invalidated it for both workflows at once. General lesson: a cache-guarded build step can hide a
+broken script indefinitely; touching `.gitmodules` re-tests all of them.
