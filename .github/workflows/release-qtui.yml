@@ -63,12 +63,18 @@ jobs:
             | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
           sudo rm -f /etc/apt/sources.list.d/*microsoft* /etc/apt/sources.list.d/*azure* 2>/dev/null || true
           sudo apt-get update -qq
+          # libgtest-dev: seven osv_qt_*_test targets link bare `gtest gtest_main`
+          # (src/qtui/CMakeLists.txt), which the dev box satisfies from Arch's
+          # system gtest. On noble the package ships prebuilt
+          # /usr/lib/x86_64-linux-gnu/libgtest{,_main}.a plus headers, so the
+          # bare -lgtest works with no GTest::gtest / FetchContent plumbing.
           sudo apt-get install -y --no-install-recommends \
             cmake \
             ninja-build \
             nasm \
             gcc-14 \
             g++-14 \
+            libgtest-dev \
             libgl1-mesa-dev \
             libx11-dev \
             libxext-dev \
