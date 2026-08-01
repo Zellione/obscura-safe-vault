@@ -24,7 +24,13 @@ permissions:
   contents: read
 
 env:
-  QT_VERSION: '6.7.3'
+  # 6.9.x is the FLOOR for the CI binaries, not just a "newer is nicer" bump:
+  # src/qtui/CMakeLists.txt requests the Qt6 `GuiPrivate` component (QRhi —
+  # secure_image_item.cpp includes <rhi/qrhi.h>), and Qt's official binary
+  # packages only started shipping lib/cmake/Qt6GuiPrivate/ in 6.9. Verified by
+  # installing qtbase via aqt and listing lib/cmake: 6.7.3 and 6.8.3 have no
+  # Qt6GuiPrivate package (find_package fails at configure), 6.9.3 does.
+  QT_VERSION: '6.9.3'
 
 jobs:
   # ===========================================================================
@@ -278,7 +284,11 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
-          arch: win64_msvc2019_64
+          # Qt 6.9 dropped the msvc2019 desktop build; msvc2022 is the only
+          # 64-bit MSVC arch it publishes (`aqt list-qt windows desktop --arch
+          # 6.9.3` -> win64_llvm_mingw win64_mingw win64_msvc2022_64
+          # win64_msvc2022_arm64_cross_compiled). The runner is windows-2022.
+          arch: win64_msvc2022_64
           modules: 'qtshadertools'
           cache: true
 

@@ -212,3 +212,24 @@ were not found while parsing XML of package information!`, on both Linux and Win
 via `aqt list-qt linux desktop --long-modules 6.7.3 linux_gcc_64` — only `qtshadertools` (plus
 unrelated addons like `qtquick3d`) is listed; `qtdeclarative` isn't. Fix: `modules: 'qtshadertools'`
 only, on both `install-qt-action` steps.
+
+**Qt 6.9 is the CI FLOOR (`QT_VERSION: '6.9.3'`), because of `GuiPrivate`:**
+`src/qtui/CMakeLists.txt` requests the Qt6 `GuiPrivate` component — `secure_image_item.cpp` includes
+`<rhi/qrhi.h>` for the QRhi-backed `SecureImageItem`, which is private Qt Gui API. Qt's *official
+binary* packages only began shipping `lib/cmake/Qt6GuiPrivate/` in **6.9**; on 6.7.3/6.8.3 the header
+`include/QtGui/<ver>/QtGui/rhi/qrhi.h` is present but the CMake package is not, so `find_package(Qt6
+... COMPONENTS ... GuiPrivate ...)` dies at configure with *Failed to find required Qt component
+"GuiPrivate" ... Qt6GuiPrivateConfig.cmake does NOT exist* on both legs. Verified by installing
+qtbase per version via aqt and listing `lib/cmake` (6.7.3: no `Qt6GuiPrivate`; 6.8.3: no; 6.9.3: yes).
+Distro builds are more generous (Arch's 6.11.1 ships it), which is why the dev box never saw this —
+`CMakeLists.txt` keeps its `6.7` minimum so source/distro Qt installs that *do* carry the private
+package still work; only the CI pin is raised.
+
+**Windows arch pin follows from that bump:** Qt 6.9 no longer publishes an msvc2019 desktop build, so
+`arch:` had to move `win64_msvc2019_64` -> `win64_msvc2022_64` (`aqt list-qt windows desktop --arch
+6.9.3` -> `win64_llvm_mingw win64_mingw win64_msvc2022_64 win64_msvc2022_arm64_cross_compiled`). The
+runner is `windows-2022`, so MSVC 2022 is what `ilammy/msvc-dev-cmd` sets up anyway.
+
+Useful local probe for all of the above — no CI round-trip needed:
+`pipx run --spec aqtinstall aqt install-qt linux desktop <ver> linux_gcc_64 --archives qtbase
+--outputdir /tmp/q && ls /tmp/q/<ver>/gcc_64/lib/cmake | grep Private`
