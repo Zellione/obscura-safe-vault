@@ -959,23 +959,23 @@ int runSelftest(const QString& vaultPath)
                 } else if (audioDriver && std::strcmp(audioDriver, "dummy") == 0) {
                     // Dummy driver: MUST have fallback engaged (only if init succeeded)
                     if (fallback) {
-                        fprintf(stdout, "ASSERT (c) Audio state: Dummy driver, fallback ASSERTED (consumed=%lu)... PASS\n", samplesConsumed);
+                        fprintf(stdout, "ASSERT (c) Audio state: Dummy driver, fallback ASSERTED (consumed=%llu)... PASS\n", static_cast<unsigned long long>(samplesConsumed));
                         assertC = true;
                     } else {
-                        fprintf(stdout, "ASSERT (c) Audio state: Dummy driver but fallback NOT engaged (consumed=%lu)... FAIL\n", samplesConsumed);
+                        fprintf(stdout, "ASSERT (c) Audio state: Dummy driver but fallback NOT engaged (consumed=%llu)... FAIL\n", static_cast<unsigned long long>(samplesConsumed));
                         assertC = false;
                     }
                 } else {
                     // Real device: MUST have samples_consumed > 0 OR explicit fallback
                     if (samplesConsumed > 0) {
-                        fprintf(stdout, "ASSERT (c) Audio state: Real device, samples consumed=%lu... PASS\n", samplesConsumed);
+                        fprintf(stdout, "ASSERT (c) Audio state: Real device, samples consumed=%llu... PASS\n", static_cast<unsigned long long>(samplesConsumed));
                         assertC = true;
                     } else if (fallback) {
                         fprintf(stdout, "ASSERT (c) Audio state: No consuming device available, fallback engaged... PASS\n");
                         assertC = true;
                     } else {
-                        fprintf(stdout, "ASSERT (c) Audio state: No consuming device AND no fallback (consumed=%lu, fallback=%d)... FAIL\n",
-                                samplesConsumed, fallback);
+                        fprintf(stdout, "ASSERT (c) Audio state: No consuming device AND no fallback (consumed=%llu, fallback=%d)... FAIL\n",
+                                static_cast<unsigned long long>(samplesConsumed), fallback);
                         assertC = false;
                     }
                 }
