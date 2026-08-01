@@ -11,7 +11,7 @@ static bool test_settings_overlay_qml_loads()
     printf("Test 1: SettingsOverlay.qml loads without errors...\n");
 
     QQmlEngine engine;
-    QUrl qmlPath("file://" QTUI_QML_DIR "/SettingsOverlay.qml");
+    QUrl qmlPath = QUrl::fromLocalFile(QTUI_QML_DIR "/SettingsOverlay.qml");
     QQmlComponent component(&engine, qmlPath);
 
     if (!osvqt_test::expect_qml_loads(component, "SettingsOverlay.qml")) {
@@ -28,7 +28,7 @@ static bool test_settings_overlay_instantiates()
     printf("Test 2: SettingsOverlay instantiates without errors...\n");
 
     QQmlEngine engine;
-    QUrl qmlPath("file://" QTUI_QML_DIR "/SettingsOverlay.qml");
+    QUrl qmlPath = QUrl::fromLocalFile(QTUI_QML_DIR "/SettingsOverlay.qml");
     QQmlComponent component(&engine, qmlPath);
 
     if (!osvqt_test::expect_qml_loads(component, "SettingsOverlay")) {

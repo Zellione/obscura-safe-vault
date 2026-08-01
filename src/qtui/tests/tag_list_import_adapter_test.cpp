@@ -20,9 +20,17 @@ protected:
     }
 
     void TearDown() override {
-        if (std::filesystem::exists(vault_path_)) {
-            std::filesystem::remove(vault_path_);
-        }
+        // Close the vault BEFORE unlinking. POSIX happily unlinks a file that
+        // still has an open descriptor, so this was invisible on Linux, but
+        // Windows refuses ("The process cannot access the file because it is
+        // being used by another process") and remove() then throws out of
+        // TearDown, failing every test in the fixture. Vault::lock() is not
+        // enough — it wipes the key but documents that the file stays open —
+        // so move-assign a fresh Vault to run the destructor. gtest destroys
+        // the fixture only after TearDown returns, hence doing it by hand.
+        vault_ = vault::Vault{};
+        std::error_code ec;
+        std::filesystem::remove(vault_path_, ec);
     }
 
     std::string vault_path_;

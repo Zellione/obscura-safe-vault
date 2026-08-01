@@ -22,7 +22,7 @@ static bool test_favorites_screen_qml_loads()
 
     QQmlEngine engine;
     qmlRegisterType<SecureImageItem>("Osv", 1, 0, "SecureImageItem");
-    QUrl qmlPath("file://" QTUI_QML_DIR "/FavoritesScreen.qml");
+    QUrl qmlPath = QUrl::fromLocalFile(QTUI_QML_DIR "/FavoritesScreen.qml");
     QQmlComponent component(&engine, qmlPath);
 
     if (!osvqt_test::expect_qml_loads(component, "FavoritesScreen.qml")) {
@@ -56,7 +56,7 @@ static bool test_favorites_screen_instantiates()
     ctx->setContextProperty("viewerController", &viewerController);
     ctx->setContextProperty("selectionController", &selectionController);
 
-    QUrl qmlPath("file://" QTUI_QML_DIR "/FavoritesScreen.qml");
+    QUrl qmlPath = QUrl::fromLocalFile(QTUI_QML_DIR "/FavoritesScreen.qml");
     QQmlComponent component(&engine, qmlPath);
 
     if (component.isError()) {

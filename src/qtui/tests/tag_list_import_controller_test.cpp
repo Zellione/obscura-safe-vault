@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QTemporaryDir>
 #include <QFile>
+#include <QUrl>
 #include <gtest/gtest.h>
 
 #include "tag_list_import_controller.h"
@@ -78,8 +79,10 @@ TEST_F(TagListImportControllerTest, FileURLConversionPreservesNormalization)
     testFile.write("tag1\ntag2\n");
     testFile.close();
 
-    // Test with file:// URL
-    QString fileUrl = "file://" + testFilePath;
+    // Test with file:// URL. fromLocalFile, not "file://" + path: on Windows a
+    // path starts with a drive letter, so the concatenation yields
+    // file://C:/... where "C:" parses as the URL's HOST and the path is lost.
+    QString fileUrl = QUrl::fromLocalFile(testFilePath).toString();
 
     // Without a vault, this will fail early but demonstrates path handling
     int result = controller.importTagsFromFile("test/node", fileUrl);

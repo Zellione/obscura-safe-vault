@@ -21,9 +21,12 @@ protected:
     }
 
     void TearDown() override {
-        if (std::filesystem::exists(vault_path_)) {
-            std::filesystem::remove(vault_path_);
-        }
+        // Close the vault before unlinking — Windows refuses to remove a file
+        // with an open handle, and the throwing remove() overload would then
+        // fail every test in the fixture. See tag_list_import_adapter_test.cpp.
+        vault_ = vault::Vault{};
+        std::error_code ec;
+        std::filesystem::remove(vault_path_, ec);
     }
 
     std::string vault_path_;

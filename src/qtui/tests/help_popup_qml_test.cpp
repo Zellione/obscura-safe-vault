@@ -11,7 +11,7 @@ static bool test_help_popup_qml_loads()
     printf("Test 1: HelpPopup.qml loads without errors...\n");
 
     QQmlEngine engine;
-    QUrl qmlPath("file://" QTUI_QML_DIR "/HelpPopup.qml");
+    QUrl qmlPath = QUrl::fromLocalFile(QTUI_QML_DIR "/HelpPopup.qml");
     QQmlComponent component(&engine, qmlPath);
 
     if (!osvqt_test::expect_qml_loads(component, "HelpPopup.qml")) {
@@ -28,7 +28,7 @@ static bool test_help_popup_instantiates()
     printf("Test 2: HelpPopup instantiates without errors...\n");
 
     QQmlEngine engine;
-    QUrl qmlPath("file://" QTUI_QML_DIR "/HelpPopup.qml");
+    QUrl qmlPath = QUrl::fromLocalFile(QTUI_QML_DIR "/HelpPopup.qml");
     QQmlComponent component(&engine, qmlPath);
 
     if (!osvqt_test::expect_qml_loads(component, "HelpPopup")) {

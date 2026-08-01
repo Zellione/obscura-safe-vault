@@ -90,7 +90,10 @@ static bool test_registry_add_remove()
     for (int i = 0; i < model->rowCount(); ++i) {
         const auto url = model->fileUrlAt(i);
         const auto localPath = url.toLocalFile().toStdString();
-        if (localPath == vaultPath.string()) {
+        // Compare in generic (forward-slash) form: QUrl::toLocalFile() returns
+        // "C:/Users/..." on Windows while path::string() returns the native
+        // "C:\Users\...", so a raw string compare never matches there.
+        if (fs::path(localPath).generic_string() == vaultPath.generic_string()) {
             removeRow = i;
             break;
         }
@@ -111,7 +114,10 @@ static bool test_registry_add_remove()
     for (int i = 0; i < model->rowCount(); ++i) {
         const auto url = model->fileUrlAt(i);
         const auto localPath = url.toLocalFile().toStdString();
-        if (localPath == vaultPath.string()) {
+        // Compare in generic (forward-slash) form: QUrl::toLocalFile() returns
+        // "C:/Users/..." on Windows while path::string() returns the native
+        // "C:\Users\...", so a raw string compare never matches there.
+        if (fs::path(localPath).generic_string() == vaultPath.generic_string()) {
             found = true;
             break;
         }

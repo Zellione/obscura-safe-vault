@@ -6,5 +6,5 @@ int main(int argc, char** argv)
 {
     QGuiApplication app(argc, argv);
     return osvqt_test::run_component_smoke_test(
-        QUrl("file://" QTUI_QML_DIR "/SaveSearchDialog.qml"), "SaveSearchDialog");
+        QUrl::fromLocalFile(QTUI_QML_DIR "/SaveSearchDialog.qml"), "SaveSearchDialog");
 }
