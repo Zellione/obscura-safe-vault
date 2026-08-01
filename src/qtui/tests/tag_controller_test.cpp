@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <gtest/gtest.h>
 #include <memory>
 #include <QTest>
@@ -11,7 +12,9 @@ class TagControllerTest : public ::testing::Test {
 protected:
     void SetUp() override {
         // Create a temporary test vault
-        std::string path = "/tmp/test_tag_controller.osv";
+        // temp_directory_path(), not a hardcoded "/tmp/...": Windows has no /tmp.
+        std::string path =
+            (std::filesystem::temp_directory_path() / "test_tag_controller.osv").string();
         vault_ = std::make_unique<vault::Vault>(osvqt_test::createTestVault(path));
         controller_ = std::make_unique<TagController>();
         controller_->setVault(vault_.get());

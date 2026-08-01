@@ -44,7 +44,9 @@ static TestVaultSetup setupTestVault()
 static std::string createTempKeyfile(const std::string& tempDir, const std::vector<uint8_t>& bytes)
 {
     const auto keyfilePath = fs::path(tempDir) / "test.keyfile";
-    std::FILE* f = std::fopen(keyfilePath.c_str(), "wb");
+    // .string().c_str(), not .c_str(): path::value_type is wchar_t on Windows,
+    // so path::c_str() gives a const wchar_t* that std::fopen won't take.
+    std::FILE* f = std::fopen(keyfilePath.string().c_str(), "wb");
     if (!f) {
         fprintf(stderr, "FAIL: Could not create keyfile\n");
         throw std::runtime_error("Could not create keyfile");

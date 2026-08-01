@@ -7,7 +7,9 @@
 class TagListImportAdapterTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        vault_path_ = "/tmp/osv_test_tag_list_import.osv";
+        // temp_directory_path(), not a hardcoded "/tmp/...": Windows has no /tmp.
+        vault_path_ =
+            (std::filesystem::temp_directory_path() / "osv_test_tag_list_import.osv").string();
         try {
             vault_ = osvqt_test::createTestVault(vault_path_);
             osvqt_test::addTinyImages(vault_, "img", 1);

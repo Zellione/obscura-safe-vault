@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
 
 #include <QGuiApplication>
@@ -29,7 +30,10 @@ int main(int argc, char** argv)
     QGuiApplication app(argc, argv);
 
     // Create test vault
-    const std::string test_vault_path = "/tmp/osv_qt_detail_controller_test.osv";
+    // temp_directory_path(), not a hardcoded "/tmp/...": Windows has no /tmp,
+    // so the vault create would fail there at runtime.
+    const std::string test_vault_path =
+        (std::filesystem::temp_directory_path() / "osv_qt_detail_controller_test.osv").string();
     try {
         vault::Vault vault = createTestVault(test_vault_path);
 

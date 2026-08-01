@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <gtest/gtest.h>
 #include <memory>
 #include <QString>
@@ -9,7 +10,9 @@
 class SearchModelAdapterTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        std::string path = "/tmp/test_search_model_adapter.osv";
+        // temp_directory_path(), not a hardcoded "/tmp/...": Windows has no /tmp.
+        std::string path =
+            (std::filesystem::temp_directory_path() / "test_search_model_adapter.osv").string();
         vault_ = std::make_unique<vault::Vault>(osvqt_test::createTestVault(path));
         adapter_ = std::make_unique<SearchModelAdapter>();
         adapter_->setVault(vault_.get());

@@ -8,7 +8,9 @@ class TagOverviewControllerTest : public ::testing::Test {
 protected:
     void SetUp() override {
         // Create a temporary test vault
-        vault_path_ = "/tmp/osv_test_tag_overview.osv";
+        // temp_directory_path(), not a hardcoded "/tmp/...": Windows has no /tmp.
+        vault_path_ =
+            (std::filesystem::temp_directory_path() / "osv_test_tag_overview.osv").string();
         try {
             vault_ = osvqt_test::createTestVault(vault_path_);
             osvqt_test::addTinyImages(vault_, "img", 3);
