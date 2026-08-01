@@ -11,12 +11,21 @@ class AdvancedSearchControllerTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        // Create temp vault
-        char tmpdir_template[] = "/tmp/osv-qt-test-XXXXXX";
-        tmpdir_ = mkdtemp(tmpdir_template);
-        ASSERT_NE(tmpdir_, nullptr);
+        // Create temp vault. Uses temp_directory_path() rather than mkdtemp()
+        // + a hardcoded "/tmp/...": mkdtemp is POSIX-only (MSVC: "error C3861:
+        // 'mkdtemp': identifier not found"), and its old use here also left
+        // tmpdir_ dangling — mkdtemp rewrites its argument in place and returns
+        // that same pointer, so tmpdir_ pointed into a local array that died at
+        // the end of SetUp and was then handed to remove_all() in TearDown.
+        // The owning fs::path here has the test's lifetime.
+        tmpdir_ = std::filesystem::temp_directory_path() /
+                  ("osv-qt-adv-search-test-" + std::to_string(
+                       ::testing::UnitTest::GetInstance()->random_seed()));
+        std::error_code ec;
+        std::filesystem::remove_all(tmpdir_, ec);
+        ASSERT_TRUE(std::filesystem::create_directories(tmpdir_, ec)) << ec.message();
 
-        vault_path_ = std::string(tmpdir_) + "/test.osv";
+        vault_path_ = (tmpdir_ / "test.osv").string();
 
         // Create test vault
         try {
@@ -30,12 +39,13 @@ protected:
 
     void TearDown() override
     {
-        if (tmpdir_) {
-            std::filesystem::remove_all(tmpdir_);
+        if (!tmpdir_.empty()) {
+            std::error_code ec;
+            std::filesystem::remove_all(tmpdir_, ec);
         }
     }
 
-    char* tmpdir_ = nullptr;
+    std::filesystem::path tmpdir_;
     std::string vault_path_;
     vault::Vault vault_;
     AdvancedSearchController controller_;

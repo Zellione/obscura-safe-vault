@@ -24,7 +24,13 @@ permissions:
   contents: read
 
 env:
-  QT_VERSION: '6.7.3'
+  # 6.9.x is the FLOOR for the CI binaries, not just a "newer is nicer" bump:
+  # src/qtui/CMakeLists.txt requests the Qt6 `GuiPrivate` component (QRhi —
+  # secure_image_item.cpp includes <rhi/qrhi.h>), and Qt's official binary
+  # packages only started shipping lib/cmake/Qt6GuiPrivate/ in 6.9. Verified by
+  # installing qtbase via aqt and listing lib/cmake: 6.7.3 and 6.8.3 have no
+  # Qt6GuiPrivate package (find_package fails at configure), 6.9.3 does.
+  QT_VERSION: '6.9.3'
 
 jobs:
   # ===========================================================================
@@ -57,6 +63,9 @@ jobs:
             | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
           sudo rm -f /etc/apt/sources.list.d/*microsoft* /etc/apt/sources.list.d/*azure* 2>/dev/null || true
           sudo apt-get update -qq
+          # No libgtest-dev here on purpose: the seven gtest-based osv_qt_*_test
+          # targets build against the vendored vendor/googletest submodule, so
+          # both legs use the same pinned gtest and the build stays hermetic.
           sudo apt-get install -y --no-install-recommends \
             cmake \
             ninja-build \
@@ -172,6 +181,12 @@ jobs:
           set -euo pipefail
           VERSION="${OSV_VERSION#qtui-v}"
           VERSION="${VERSION#v}"  # also strip a plain 'v' for workflow_dispatch runs
+          # A workflow_dispatch run's ref_name is a BRANCH name, which may contain
+          # '/' (e.g. fix/qtui-release-modules). Unsanitized, the tarball lands in
+          # dist/<first-segment>/ instead of dist/, `dist/*.tar.gz` matches nothing,
+          # and the upload silently produces an empty artifact. Tag runs are
+          # unaffected, but a dispatch run should still verify packaging.
+          VERSION="${VERSION//\//-}"
 
           curl -fsSL -o linuxdeploy.AppImage \
             https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
@@ -265,7 +280,13 @@ jobs:
         with:
           msystem: MSYS
           path-type: inherit
-          install: make diffutils
+          # pkgconf is REQUIRED, not optional: scripts/build_ffmpeg_windows.sh
+          # points FFmpeg's configure at build_codecs.bat's aom.pc via
+          # PKG_CONFIG_PATH, and with no pkg-config binary on PATH configure
+          # reports "ERROR: aom >= 2.0.0 not found using pkg-config" and aborts.
+          # ci.yml has always installed it; this workflow (and release.yml) were
+          # missing it, which stayed invisible only while the codec cache was warm.
+          install: make diffutils pkgconf
 
       - name: Hide MSYS2's link.exe (avoid MSVC link.exe collision)
         shell: msys2 {0}
@@ -278,7 +299,11 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
-          arch: win64_msvc2019_64
+          # Qt 6.9 dropped the msvc2019 desktop build; msvc2022 is the only
+          # 64-bit MSVC arch it publishes (`aqt list-qt windows desktop --arch
+          # 6.9.3` -> win64_llvm_mingw win64_mingw win64_msvc2022_64
+          # win64_msvc2022_arm64_cross_compiled). The runner is windows-2022.
+          arch: win64_msvc2022_64
           modules: 'qtshadertools'
           cache: true
 
@@ -351,7 +376,10 @@ jobs:
         env:
           OSV_VERSION: ${{ github.ref_name }}
         run: |
-          $version = $env:OSV_VERSION -replace '^qtui-v', '' -replace '^v', ''
+          # Trailing -replace '/': a workflow_dispatch ref_name is a branch name
+          # and may contain '/', which would nest the zip out of dist\ and make
+          # the dist/*.zip upload glob match nothing. Tag runs are unaffected.
+          $version = $env:OSV_VERSION -replace '^qtui-v', '' -replace '^v', '' -replace '/', '-'
           $pkg = "osv-qt-$version-beta-windows-x64"
           $stage = "dist\$pkg"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null

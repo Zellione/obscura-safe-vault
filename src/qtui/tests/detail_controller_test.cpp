@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
 
 #include <QGuiApplication>
@@ -9,29 +10,17 @@
 #include "detail_controller.h"
 #include "test_vault_util.h"
 
-// Helper: create a minimal test vault with a sub-gallery and two images
-static vault::Vault createTestVault(const std::string& vault_path)
-{
-    vault::Vault vault = osvqt_test::createTestVault(vault_path);
-
-    auto result = vault.create_gallery("subfolder");
-    if (result != vault::VaultResult::Ok) {
-        fprintf(stderr, "Failed to create gallery\n");
-        throw std::runtime_error("create_gallery failed");
-    }
-
-    osvqt_test::addTinyImages(vault, "image", 2);
-    return vault;
-}
-
 int main(int argc, char** argv)
 {
     QGuiApplication app(argc, argv);
 
     // Create test vault
-    const std::string test_vault_path = "/tmp/osv_qt_detail_controller_test.osv";
+    // temp_directory_path(), not a hardcoded "/tmp/...": Windows has no /tmp,
+    // so the vault create would fail there at runtime.
+    const std::string test_vault_path =
+        (std::filesystem::temp_directory_path() / "osv_qt_detail_controller_test.osv").string();
     try {
-        vault::Vault vault = createTestVault(test_vault_path);
+        vault::Vault vault = osvqt_test::createTestVaultWithSubgallery(test_vault_path);
 
         // Test 1: Initial state is empty
         printf("Test 1 (Initial state): DetailController empty state\n");

@@ -76,15 +76,20 @@ Rectangle {
     }
 
     function attemptCreate() {
-        // Get the vault path
+        // Get the vault path. The fallback is the platform's per-user vault
+        // location (UnlockController.defaultVaultPath -> config_dir()/vault.osv),
+        // not a hardcoded "/tmp/vault.osv" — /tmp doesn't exist on Windows, and
+        // a vault in a world-writable temp dir is a poor default anywhere.
         const url = vaultPathField.text.length > 0
                     ? vaultPathField.text
-                    : QUrl.fromLocalFile("/tmp/vault.osv");
+                    : unlockController.defaultVaultPath;
 
         // Call the unlock controller to create the vault
         if (unlockController.createVault(url, passwordField, confirmField, keyfilePath)) {
-            // Success: clear fields and go back
-            vaultPathField.text = "";
+            // Success: reset fields and go back. The path resets to the default
+            // rather than "" so a second create in the same session starts from
+            // the same valid state as the first.
+            vaultPathField.text = unlockController.defaultVaultPath.toString();
             passwordField.clearSecret();
             confirmField.clearSecret();
             keyfilePath = "";
@@ -135,10 +140,16 @@ Rectangle {
 
                     TextInput {
                         id: vaultPathField
+                        objectName: "vaultPathField"  // findChild() hook for the QML test
                         anchors { fill: parent; margins: 8 }
                         color: themePalette.text
                         readOnly: true
-                        text: "vault.osv"
+                        // The real default URL, not the bare label "vault.osv":
+                        // attemptCreate() passes this text straight through as a
+                        // URL, and a schemeless relative "vault.osv" yields an
+                        // empty toLocalFile() on the C++ side, so creating without
+                        // first opening the file dialog failed with "Invalid path".
+                        text: unlockController.defaultVaultPath.toString()
                     }
                 }
 
@@ -198,6 +209,8 @@ Rectangle {
 
             // Strength indicator (live feedback)
             Rectangle {
+                id: strengthBar
+                objectName: "strengthBar"  // findChild() hook for the QML test
                 width: parent.width
                 height: 8
                 color: themePalette.surface
@@ -206,18 +219,27 @@ Rectangle {
                 radius: 4
                 clip: true
 
+                // SecureTextField.strength: a 0..100 reading derived from the
+                // char-class entropy model in ui/passphrase.h. Only this number
+                // leaves the field — the password itself never enters QML.
+                property real strengthEstimate: passwordField.strength
+
                 Rectangle {
                     height: parent.height - 2
                     y: 1
-                    width: (strengthEstimate / 100) * (parent.width - 2)
+                    // strengthBar.strengthEstimate, not a bare name: the property
+                    // lives on the PARENT, and QML's unqualified lookup only sees
+                    // this object's own scope and the component root — not an
+                    // intervening object. Unqualified, these bindings threw
+                    // "ReferenceError: strengthEstimate is not defined" and the
+                    // bar never rendered.
+                    width: (strengthBar.strengthEstimate / 100) * (parent.width - 2)
                     x: 1
-                    color: strengthEstimate < 33 ? themePalette.danger
-                           : strengthEstimate < 66 ? themePalette.warn
+                    color: strengthBar.strengthEstimate < 33 ? themePalette.danger
+                           : strengthBar.strengthEstimate < 66 ? themePalette.warn
                            : themePalette.ok
                     radius: 2
                 }
-
-                property real strengthEstimate: 0  // TODO: Wire to passphrase strength
             }
 
             Text {

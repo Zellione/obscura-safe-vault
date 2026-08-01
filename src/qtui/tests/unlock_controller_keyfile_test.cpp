@@ -44,7 +44,9 @@ static TestVaultSetup setupTestVault()
 static std::string createTempKeyfile(const std::string& tempDir, const std::vector<uint8_t>& bytes)
 {
     const auto keyfilePath = fs::path(tempDir) / "test.keyfile";
-    std::FILE* f = std::fopen(keyfilePath.c_str(), "wb");
+    // .string().c_str(), not .c_str(): path::value_type is wchar_t on Windows,
+    // so path::c_str() gives a const wchar_t* that std::fopen won't take.
+    std::FILE* f = std::fopen(keyfilePath.string().c_str(), "wb");
     if (!f) {
         fprintf(stderr, "FAIL: Could not create keyfile\n");
         throw std::runtime_error("Could not create keyfile");
@@ -56,6 +58,21 @@ static std::string createTempKeyfile(const std::string& tempDir, const std::vect
     }
     std::fclose(f);
     return keyfilePath.string();
+}
+
+// Helper: point `controller` at the setup's vault and lock it — the same three
+// steps every test below opens with (resolve test.osv inside the temp dir, open
+// it, lock it). Reports and returns false if the vault can't be opened.
+static bool openTestVaultLocked(UnlockController& controller, const TestVaultSetup& setup)
+{
+    const auto vaultPath = fs::path(setup.tempDir.path().toStdString()) / "test.osv";
+    const auto vaultUrl = QUrl::fromLocalFile(QString::fromStdString(vaultPath.string()));
+    if (!controller.openVault(vaultUrl)) {
+        fprintf(stderr, "FAIL: Could not open vault\n");
+        return false;
+    }
+    controller.lock();
+    return true;
 }
 
 // Test 1: Create vault with keyfile, lock, unlock with same keyfile
@@ -79,17 +96,9 @@ static bool test_create_with_keyfile_round_trip()
         // Now we need to create a vault WITH keyfile using the controller
         // For now, verify that unlock/lock cycle works via controller
         UnlockController controller;
-
-        // Open the vault
-        const auto vaultPath = fs::path(setup.tempDir.path().toStdString()) / "test.osv";
-        const auto vaultUrl = QUrl::fromLocalFile(QString::fromStdString(vaultPath.string()));
-        if (!controller.openVault(vaultUrl)) {
-            fprintf(stderr, "FAIL: Could not open vault\n");
+        if (!openTestVaultLocked(controller, setup)) {
             return false;
         }
-
-        // Lock the vault
-        controller.lock();
         if (controller.unlocked()) {
             fprintf(stderr, "FAIL: Vault still unlocked after lock()\n");
             return false;
@@ -125,14 +134,9 @@ static bool test_wrong_keyfile_generic_error()
 
     try {
         UnlockController controller;
-        const auto vaultPath = fs::path(setup.tempDir.path().toStdString()) / "test.osv";
-        const auto vaultUrl = QUrl::fromLocalFile(QString::fromStdString(vaultPath.string()));
-        if (!controller.openVault(vaultUrl)) {
-            fprintf(stderr, "FAIL: Could not open vault\n");
+        if (!openTestVaultLocked(controller, setup)) {
             return false;
         }
-
-        controller.lock();
 
         // Get the wrong password error
         SecureTextField wrongPasswordField;
@@ -167,14 +171,9 @@ static bool test_missing_keyfile_error()
 
     try {
         UnlockController controller;
-        const auto vaultPath = fs::path(setup.tempDir.path().toStdString()) / "test.osv";
-        const auto vaultUrl = QUrl::fromLocalFile(QString::fromStdString(vaultPath.string()));
-        if (!controller.openVault(vaultUrl)) {
-            fprintf(stderr, "FAIL: Could not open vault\n");
+        if (!openTestVaultLocked(controller, setup)) {
             return false;
         }
-
-        controller.lock();
 
         // Try to unlock with a missing keyfile
         SecureTextField passwordField;
@@ -219,14 +218,9 @@ static bool test_keyfile_wipe_on_error()
         const auto keyfilePath = createTempKeyfile(setup.tempDir.path().toStdString(), keyfile_bytes);
 
         UnlockController controller;
-        const auto vaultPath = fs::path(setup.tempDir.path().toStdString()) / "test.osv";
-        const auto vaultUrl = QUrl::fromLocalFile(QString::fromStdString(vaultPath.string()));
-        if (!controller.openVault(vaultUrl)) {
-            fprintf(stderr, "FAIL: Could not open vault\n");
+        if (!openTestVaultLocked(controller, setup)) {
             return false;
         }
-
-        controller.lock();
 
         // Try to unlock with wrong keyfile (should fail and wipe keyfile bytes)
         SecureTextField passwordField;

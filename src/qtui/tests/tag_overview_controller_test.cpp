@@ -8,7 +8,9 @@ class TagOverviewControllerTest : public ::testing::Test {
 protected:
     void SetUp() override {
         // Create a temporary test vault
-        vault_path_ = "/tmp/osv_test_tag_overview.osv";
+        // temp_directory_path(), not a hardcoded "/tmp/...": Windows has no /tmp.
+        vault_path_ =
+            (std::filesystem::temp_directory_path() / "osv_test_tag_overview.osv").string();
         try {
             vault_ = osvqt_test::createTestVault(vault_path_);
             osvqt_test::addTinyImages(vault_, "img", 3);
@@ -19,9 +21,12 @@ protected:
     }
 
     void TearDown() override {
-        if (std::filesystem::exists(vault_path_)) {
-            std::filesystem::remove(vault_path_);
-        }
+        // Close the vault before unlinking — Windows refuses to remove a file
+        // with an open handle, and the throwing remove() overload would then
+        // fail every test in the fixture. See tag_list_import_adapter_test.cpp.
+        vault_ = vault::Vault{};
+        std::error_code ec;
+        std::filesystem::remove(vault_path_, ec);
     }
 
     std::string vault_path_;

@@ -19,6 +19,7 @@ This document tracks the pinned versions of all vendored third-party libraries a
 | **zlib** | 1.3.2 | gzip filter for libarchive (`.tar.gz`) | **Yes** |
 | **xz / liblzma** | 5.8.3 | LZMA2 filter for libarchive (`.7z`, `.txz`) | **Yes** |
 | **libarchive** | 3.8.8 | 7z/RAR/TAR archive read (decode-only; Phase 34) | **Yes** |
+| **googletest** | v1.17.0 (52eb810) | Unit-test framework for the Qt UI's seven controller tests (`src/qtui/tests/*`). Test-only — never linked into `osv` or `osv-qt` | No |
 | **libva** | 2.22.0 (217da1c) | VA-API public headers only (Linux hardware video decode, Phase 43 Part 2) — never built; `vendor/vaapi-shim` dlopens the real `libva.so.2`/`libva-drm.so.2` at runtime instead of linking them | No |
 
 ### Decode-Only Rationale
@@ -110,6 +111,14 @@ If new CVEs are discovered, follow the bump procedure (see below).
 - **monocypher** is pinned to **4.0.2** (0d85f98 release tag). Upstream tag 4.0.3 exists with constant-time hardening fixes (fe_ccopy volatile mask, fe_cswap fix, loop-unroll mitigation) — upgrade is an owner decision.
 - **miniz** and **stb** are pinned to `master` branches of their respective repositories, not stable release tags. Both are stable, widely-used libraries with infrequent breaking changes. Monitor for updates every 6 months.
 - **SDL3** is the only windowing/platform layer; it is NOT an untrusted-input parser.
+- **googletest** is **test-only** and is excluded from the CVE cadence above: it
+  parses no untrusted input, and no `gtest` object ever reaches a shipped
+  binary. `src/qtui/CMakeLists.txt` adds it with `EXCLUDE_FROM_ALL`, so it is
+  built only when one of the seven gtest-based `osv_qt_*_test` targets is. It is
+  vendored rather than taken from the system package (`libgtest-dev`) so the Qt
+  UI's Windows leg — which has no system gtest — builds the same pinned version
+  as Linux, and the build stays hermetic like every other dependency. Note the
+  SDL app's own `tests/` use a hand-rolled harness, not gtest.
 - **libva** is vendored **headers-only** and never built: `vendor/vaapi-shim`
   (Phase 43 Part 2) uses its headers to compile a `dlopen`-based forwarding
   shim, so the app never links or requires real libva at build time. See

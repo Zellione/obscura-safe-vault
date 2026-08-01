@@ -13,7 +13,7 @@ static bool test_detail_panel_qml_loads()
     printf("Test 0: DetailPanel.qml QML syntax check (attached-object validation)...\n");
 
     QQmlEngine engine;
-    QUrl qmlPath("file://" QTUI_QML_DIR "/DetailPanel.qml");
+    QUrl qmlPath = QUrl::fromLocalFile(QTUI_QML_DIR "/DetailPanel.qml");
     QQmlComponent component(&engine, qmlPath);
 
     // If component fails to load, check if it's a real error or just missing Osv module

@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -18,7 +19,9 @@ int main(int argc, char** argv)
     printf("=== ThumbCache Stress Test: Tomb Safety ===\n");
 
     // Create stress test vault with many images
-    const std::string test_vault_path = "/tmp/osv_qt_thumb_stress.osv";
+    // temp_directory_path(), not a hardcoded "/tmp/...": Windows has no /tmp.
+    const std::string test_vault_path =
+        (std::filesystem::temp_directory_path() / "osv_qt_thumb_stress.osv").string();
 
     printf("Creating vault with 120 images...\n");
 

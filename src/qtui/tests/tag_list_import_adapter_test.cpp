@@ -7,7 +7,9 @@
 class TagListImportAdapterTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        vault_path_ = "/tmp/osv_test_tag_list_import.osv";
+        // temp_directory_path(), not a hardcoded "/tmp/...": Windows has no /tmp.
+        vault_path_ =
+            (std::filesystem::temp_directory_path() / "osv_test_tag_list_import.osv").string();
         try {
             vault_ = osvqt_test::createTestVault(vault_path_);
             osvqt_test::addTinyImages(vault_, "img", 1);
@@ -18,9 +20,17 @@ protected:
     }
 
     void TearDown() override {
-        if (std::filesystem::exists(vault_path_)) {
-            std::filesystem::remove(vault_path_);
-        }
+        // Close the vault BEFORE unlinking. POSIX happily unlinks a file that
+        // still has an open descriptor, so this was invisible on Linux, but
+        // Windows refuses ("The process cannot access the file because it is
+        // being used by another process") and remove() then throws out of
+        // TearDown, failing every test in the fixture. Vault::lock() is not
+        // enough — it wipes the key but documents that the file stays open —
+        // so move-assign a fresh Vault to run the destructor. gtest destroys
+        // the fixture only after TearDown returns, hence doing it by hand.
+        vault_ = vault::Vault{};
+        std::error_code ec;
+        std::filesystem::remove(vault_path_, ec);
     }
 
     std::string vault_path_;

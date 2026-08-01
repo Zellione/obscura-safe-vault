@@ -92,21 +92,20 @@ void UnlockController::unlockWithKeyfile(SecureTextField* passwordField, const Q
         return;
     }
 
-    // Open and read keyfile (matching SDL app pattern via platform::read_file)
-    std::FILE* kf = std::fopen(keyfilePathOpt.value().c_str(), "rb");
-    if (!kf) {
+    // Read the keyfile through platform::read_file rather than a local
+    // fopen/fread loop: it sizes the file first and does a single allocation +
+    // single read, precisely so key material isn't strewn across freed heap
+    // blocks by a chunk-growing vector (see its comment in platform/paths.cpp).
+    // It also spells the path narrow via path::string(), which is what makes
+    // this compile on Windows at all — path::value_type is wchar_t there, so
+    // passing path::c_str() straight to fopen() is a type error.
+    auto keyfileRead = platform::read_file(keyfilePathOpt.value());
+    if (!keyfileRead.has_value()) {
         setError(QStringLiteral("Cannot read keyfile"));
         passwordField->clearSecret();
         return;
     }
-
-    std::vector<uint8_t> keyfile_bytes;
-    uint8_t buf[4096];
-    size_t nread;
-    while ((nread = std::fread(buf, 1, sizeof(buf), kf)) > 0) {
-        keyfile_bytes.insert(keyfile_bytes.end(), buf, buf + nread);
-    }
-    std::fclose(kf);
+    std::vector<uint8_t> keyfile_bytes = std::move(keyfileRead.value());
 
     // Unlock with both password and keyfile
     const std::span<const uint8_t> keyfile_span(keyfile_bytes.data(), keyfile_bytes.size());
@@ -127,6 +126,14 @@ void UnlockController::unlockWithKeyfile(SecureTextField* passwordField, const Q
                      ? QStringLiteral("Wrong password or keyfile")
                      : QStringLiteral("Unlock failed"));
     }
+}
+
+QUrl UnlockController::defaultVaultPath() const
+{
+    // fromLocalFile, not "file://" + path: on Windows the path starts with a
+    // drive letter, and "file://C:/..." parses "C:" as the URL's host.
+    return QUrl::fromLocalFile(
+        QString::fromStdString(platform::default_vault_path().string()));
 }
 
 void UnlockController::lock()
@@ -220,21 +227,15 @@ bool UnlockController::createVault(const QUrl& fileUrl, SecureTextField* passwor
             return false;
         }
 
-        // Open and read keyfile
-        std::FILE* kf = std::fopen(keyfilePathOpt.value().c_str(), "rb");
-        if (!kf) {
+        // Same single-allocation read as the unlock path above.
+        auto keyfileRead = platform::read_file(keyfilePathOpt.value());
+        if (!keyfileRead.has_value()) {
             setError(QStringLiteral("Cannot read keyfile"));
             passwordField->clearSecret();
             confirmField->clearSecret();
             return false;
         }
-
-        uint8_t buf[4096];
-        size_t nread;
-        while ((nread = std::fread(buf, 1, sizeof(buf), kf)) > 0) {
-            keyfile_bytes.insert(keyfile_bytes.end(), buf, buf + nread);
-        }
-        std::fclose(kf);
+        keyfile_bytes = std::move(keyfileRead.value());
     }
 
     // Create the vault with default KDF params

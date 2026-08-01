@@ -13,6 +13,48 @@ qt_standard_project_setup()
 
 set(CODEC_PREFIX "${REPO_ROOT}/vendor/codecs-prefix")
 
+# ---------------------------------------------------------------------------
+# Locate a static lib in the codec staging prefix. CMake's default static-lib
+# naming differs by toolchain: GCC/Clang follow the Unix convention
+# lib<name>.a, MSVC has no "lib" prefix and uses <name>.lib. None of the
+# vendored codecs override CMAKE_STATIC_LIBRARY_PREFIX/SUFFIX — they only set
+# OUTPUT_NAME — so the platform default applies, and a few keep a literal
+# "lib" inside OUTPUT_NAME (libde265/libwebp/libsharpyuv), hence the third
+# candidate. Mirrors premake5.lua's cmake_static_lib(); see its comment for
+# why checking only the Unix name silently no-ops the feature on Windows.
+#
+# Fails loudly at configure time rather than letting the name fall through to
+# the generator: a bare missing path shows up as an inscrutable
+# "ninja: error: '<...>.a', needed by '<...>.exe', missing and no known rule
+# to make it" only once the build starts.
+# ---------------------------------------------------------------------------
+function(osv_require_static_lib out name)
+    foreach(candidate
+            "${CODEC_PREFIX}/lib/lib${name}.a"      # Linux / GCC / Clang
+            "${CODEC_PREFIX}/lib/${name}.lib"       # Windows / MSVC
+            "${CODEC_PREFIX}/lib/lib${name}.lib")   # Windows, OUTPUT_NAME keeps "lib"
+        if(EXISTS "${candidate}")
+            set(${out} "${candidate}" PARENT_SCOPE)
+            return()
+        endif()
+    endforeach()
+    message(FATAL_ERROR
+        "Vendored static lib '${name}' not found in ${CODEC_PREFIX}/lib "
+        "(tried lib${name}.a, ${name}.lib, lib${name}.lib). "
+        "Run scripts/build_codecs.sh (Linux) or scripts\\build_codecs.bat (Windows) first.")
+endfunction()
+
+# googletest — vendored submodule (pinned v1.17.0), not the system package.
+# Seven osv_qt_*_test targets use gtest; every other vendored dependency is a
+# submodule, and the Windows runner has no system gtest at all, so vendoring is
+# what makes the suite buildable on both legs while keeping the build hermetic.
+# EXCLUDE_FROM_ALL: only the test targets that link it pull it into the build.
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)  # match MSVC's default /MD
+set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)            # gmock is unused
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+add_subdirectory(${REPO_ROOT}/vendor/googletest
+                 ${CMAKE_BINARY_DIR}/vendor-googletest EXCLUDE_FROM_ALL)
+
 file(GLOB OSV_CRYPTO_SRC "${REPO_ROOT}/src/crypto/*.cpp")
 file(GLOB OSV_VAULT_SRC  "${REPO_ROOT}/src/vault/*.cpp")
 file(GLOB OSV_MEDIA_SRC  "${REPO_ROOT}/src/media/*.cpp")
@@ -115,22 +157,42 @@ target_include_directories(osv_qt_core PUBLIC
 target_compile_definitions(osv_qt_core PUBLIC
     OSV_VENDORED_AV
     OSV_VENDORED_ARCHIVE
+    # LIBARCHIVE_STATIC / LIBHEIF_STATIC_BUILD: both headers default their API
+    # declarations to __declspec(dllimport) on MSVC unless told the link is
+    # static, which makes the linker demand an import lib for symbols that only
+    # exist in the static archive (unresolved __imp_archive_* / __imp_heif_*).
+    # No-ops on every other platform — premake5.lua defines both the same way.
     LIBARCHIVE_STATIC
+    LIBHEIF_STATIC_BUILD
 )
-target_compile_definitions(osv_qt_core PRIVATE
-    MINIZ_NO_ZLIB_COMPATIBLE_NAMES
-    _POSIX_C_SOURCE=200809L
-)
-# Silence warnings in vendored miniz
+target_compile_definitions(osv_qt_core PRIVATE MINIZ_NO_ZLIB_COMPATIBLE_NAMES)
+if(WIN32)
+    # Same set premake5.lua defines for the SDL app's Windows build: NOMINMAX
+    # so <windows.h>'s min/max macros don't shred std::min/std::max, and
+    # WIN32_LEAN_AND_MEAN to keep winsock/ole out of every translation unit.
+    target_compile_definitions(osv_qt_core PUBLIC
+        NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+else()
+    target_compile_definitions(osv_qt_core PRIVATE _POSIX_C_SOURCE=200809L)
+endif()
+# Silence warnings in vendored miniz (MSVC spells the "no warnings" flag /w)
+if(MSVC)
+    set(OSV_NO_WARN_FLAG "/w")
+else()
+    set(OSV_NO_WARN_FLAG "-w")
+endif()
 set_source_files_properties(
     ${REPO_ROOT}/vendor/miniz/miniz.c
     ${REPO_ROOT}/vendor/miniz/miniz_tdef.c
     ${REPO_ROOT}/vendor/miniz/miniz_tinfl.c
     ${REPO_ROOT}/vendor/miniz/miniz_zip.c
     PROPERTIES
-    COMPILE_FLAGS "-w"
+    COMPILE_FLAGS "${OSV_NO_WARN_FLAG}"
 )
-# Guard FFmpeg/video support on codec prefix presence
+# Guard FFmpeg/video support on codec prefix presence. FFmpeg has its own
+# (non-CMake) build system that emits lib<name>.a on every platform including
+# MSVC — see scripts/build_ffmpeg_windows.sh — so unlike the CMake-built codecs
+# below, these names need no per-toolchain lookup.
 if(EXISTS "${CODEC_PREFIX}/lib/libavcodec.a")
     target_compile_definitions(osv_qt_core PUBLIC OSV_QT_HAS_AV)
     target_link_libraries(osv_qt_core PUBLIC
@@ -140,28 +202,72 @@ if(EXISTS "${CODEC_PREFIX}/lib/libavcodec.a")
         ${CODEC_PREFIX}/lib/libswscale.a
         ${CODEC_PREFIX}/lib/libswresample.a
         ${CODEC_PREFIX}/lib/libavutil.a
-        ${CODEC_PREFIX}/lib/libosv_vaapi_shim.a  # dlopen forwarding shim for VAAPI symbols
-        ${CODEC_PREFIX}/lib/libaom.a          # second aom mention — single-pass ld
-        dl                                      # for dlopen in vaapi shim
     )
+    # VAAPI shim — Linux only, and only when built (scripts/build_codecs.sh).
+    # FFmpeg's hwcontext_vaapi.c references va* symbols that need a real
+    # link-time provider; vendor/vaapi-shim supplies them via its own internal
+    # dlopen("libva.so.2")/dlsym() forwarding, so nothing here gets a DT_NEEDED
+    # on libva. Windows needs no counterpart: hwcontext_d3d11va.c LoadLibrary()s
+    # d3d11.dll/dxgi.dll at runtime, so there is no link-time dependency at all.
+    # Same existence gating as premake5.lua; linking it unconditionally is what
+    # broke the Windows release leg (`libosv_vaapi_shim.a ... missing`).
+    # No OSV_HWACCEL_* define here — matching this build's existing behavior,
+    # which links the shim to satisfy FFmpeg but leaves our own hwaccel path
+    # compiled out.
+    if(EXISTS "${CODEC_PREFIX}/lib/libosv_vaapi_shim.a")
+        target_link_libraries(osv_qt_core PUBLIC ${CODEC_PREFIX}/lib/libosv_vaapi_shim.a)
+    endif()
+    # Second aom mention — single-pass ld
+    osv_require_static_lib(OSV_LIB_AOM_AV aom)
+    target_link_libraries(osv_qt_core PUBLIC ${OSV_LIB_AOM_AV})
 endif()
 
-# Same single-pass archive order premake uses: libarchive (depends on liblzma + system zlib) → heif → de265 → aom → webpdemux → webp → sharpyuv
+# SDL3's own CMakeLists sets the static target's OUTPUT_NAME to "SDL3-static"
+# when the toolchain uses MSVC naming (empty prefix + .lib suffix), to avoid
+# colliding with the shared build's import lib, and plain "SDL3" everywhere
+# else — so the file is libSDL3.a on Linux and SDL3-static.lib on Windows.
+find_library(OSV_SDL3_LIB
+    NAMES SDL3-static SDL3
+    PATHS "${REPO_ROOT}/vendor/SDL3/build"
+    NO_DEFAULT_PATH
+    REQUIRED)
+
+foreach(codec archive lzma heif de265 aom webpdemux webp sharpyuv)
+    osv_require_static_lib(OSV_LIB_${codec} ${codec})
+endforeach()
+
+# zlib: the vendored static target is named "zs" on Windows (its CMakeLists
+# appends a static-only suffix there); on Linux the system zlib is linked
+# instead, exactly as premake5.lua does.
+if(WIN32)
+    osv_require_static_lib(OSV_LIB_Z zs)
+else()
+    set(OSV_LIB_Z z)
+endif()
+
+# Same single-pass archive order premake uses: libarchive (depends on liblzma + zlib) → heif → de265 → aom → webpdemux → webp → sharpyuv
 target_link_libraries(osv_qt_core PUBLIC
-    ${REPO_ROOT}/vendor/SDL3/build/libSDL3.a
-    ${CODEC_PREFIX}/lib/libarchive.a
-    ${CODEC_PREFIX}/lib/liblzma.a
-    ${CODEC_PREFIX}/lib/libheif.a
-    ${CODEC_PREFIX}/lib/libde265.a
-    ${CODEC_PREFIX}/lib/libaom.a
-    ${CODEC_PREFIX}/lib/libwebpdemux.a
-    ${CODEC_PREFIX}/lib/libwebp.a
-    ${CODEC_PREFIX}/lib/libsharpyuv.a
-    pthread
-    dl
-    m
-    z
+    ${OSV_SDL3_LIB}
+    ${OSV_LIB_archive}
+    ${OSV_LIB_lzma}
+    ${OSV_LIB_heif}
+    ${OSV_LIB_de265}
+    ${OSV_LIB_aom}
+    ${OSV_LIB_webpdemux}
+    ${OSV_LIB_webp}
+    ${OSV_LIB_sharpyuv}
+    ${OSV_LIB_Z}
 )
+
+if(WIN32)
+    # bcrypt: crypto/random.cpp's BCryptGenRandom. The rest are what a static
+    # SDL3 needs. Mirrors premake5.lua's link_platform_extras().
+    target_link_libraries(osv_qt_core PUBLIC
+        bcrypt winmm imm32 version setupapi ole32 oleaut32
+        advapi32 shell32 user32 gdi32 uuid)
+else()
+    target_link_libraries(osv_qt_core PUBLIC pthread dl m)
+endif()
 
 add_executable(osv_qt_core_smoke tests/core_smoke.cpp)
 target_link_libraries(osv_qt_core_smoke PRIVATE osv_qt_core)
@@ -317,6 +423,27 @@ target_include_directories(osv_qt_vault_manager_controller_test PRIVATE ${CMAKE_
 add_executable(osv_qt_unlock_controller_keyfile_test tests/unlock_controller_keyfile_test.cpp unlock_controller.cpp secure_text_field.cpp secure_image_item.cpp video_frame_item.cpp viewer_controller.cpp playback_engine.cpp audio_pipe.cpp rhi_quad_renderer.cpp thumb_cache.cpp gallery_model.cpp session_state.cpp cover_provider.cpp status_controller.cpp theme_palette.cpp)
 target_link_libraries(osv_qt_unlock_controller_keyfile_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_unlock_controller_keyfile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+# CreateVaultDialog needs a real UnlockController for its defaultVaultPath
+# binding, hence the same source set as osv_qt_unlock_controller_keyfile_test.
+qt_add_executable(osv_qt_create_vault_dialog_qml_test
+    tests/create_vault_dialog_qml_test.cpp
+    unlock_controller.cpp secure_text_field.cpp secure_image_item.cpp
+    video_frame_item.cpp viewer_controller.cpp playback_engine.cpp audio_pipe.cpp
+    rhi_quad_renderer.cpp thumb_cache.cpp gallery_model.cpp session_state.cpp
+    cover_provider.cpp status_controller.cpp theme_palette.cpp
+)
+target_link_libraries(osv_qt_create_vault_dialog_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
+target_include_directories(osv_qt_create_vault_dialog_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(osv_qt_create_vault_dialog_qml_test PRIVATE
+    QTUI_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+)
+
+# Shaders for create_vault_dialog test
+qt6_add_shaders(osv_qt_create_vault_dialog_qml_test "osv_qt_create_vault_dialog_qml_test_shaders"
+    PREFIX "/osvqt"
+    FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
+)
 
 qt_add_executable(osv_qt_help_popup_qml_test tests/help_popup_qml_test.cpp)
 target_link_libraries(osv_qt_help_popup_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
