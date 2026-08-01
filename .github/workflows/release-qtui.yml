@@ -280,7 +280,13 @@ jobs:
         with:
           msystem: MSYS
           path-type: inherit
-          install: make diffutils
+          # pkgconf is REQUIRED, not optional: scripts/build_ffmpeg_windows.sh
+          # points FFmpeg's configure at build_codecs.bat's aom.pc via
+          # PKG_CONFIG_PATH, and with no pkg-config binary on PATH configure
+          # reports "ERROR: aom >= 2.0.0 not found using pkg-config" and aborts.
+          # ci.yml has always installed it; this workflow (and release.yml) were
+          # missing it, which stayed invisible only while the codec cache was warm.
+          install: make diffutils pkgconf
 
       - name: Hide MSYS2's link.exe (avoid MSVC link.exe collision)
         shell: msys2 {0}
