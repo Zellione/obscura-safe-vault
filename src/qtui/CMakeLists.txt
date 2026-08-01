@@ -424,6 +424,27 @@ add_executable(osv_qt_unlock_controller_keyfile_test tests/unlock_controller_key
 target_link_libraries(osv_qt_unlock_controller_keyfile_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Quick Qt6::Test)
 target_include_directories(osv_qt_unlock_controller_keyfile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+# CreateVaultDialog needs a real UnlockController for its defaultVaultPath
+# binding, hence the same source set as osv_qt_unlock_controller_keyfile_test.
+qt_add_executable(osv_qt_create_vault_dialog_qml_test
+    tests/create_vault_dialog_qml_test.cpp
+    unlock_controller.cpp secure_text_field.cpp secure_image_item.cpp
+    video_frame_item.cpp viewer_controller.cpp playback_engine.cpp audio_pipe.cpp
+    rhi_quad_renderer.cpp thumb_cache.cpp gallery_model.cpp session_state.cpp
+    cover_provider.cpp status_controller.cpp theme_palette.cpp
+)
+target_link_libraries(osv_qt_create_vault_dialog_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
+target_include_directories(osv_qt_create_vault_dialog_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(osv_qt_create_vault_dialog_qml_test PRIVATE
+    QTUI_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+)
+
+# Shaders for create_vault_dialog test
+qt6_add_shaders(osv_qt_create_vault_dialog_qml_test "osv_qt_create_vault_dialog_qml_test_shaders"
+    PREFIX "/osvqt"
+    FILES shaders/texquad.vert shaders/texquad.frag shaders/yuv.frag
+)
+
 qt_add_executable(osv_qt_help_popup_qml_test tests/help_popup_qml_test.cpp)
 target_link_libraries(osv_qt_help_popup_qml_test PRIVATE osv_qt_core Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick)
 target_include_directories(osv_qt_help_popup_qml_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

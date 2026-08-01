@@ -76,15 +76,20 @@ Rectangle {
     }
 
     function attemptCreate() {
-        // Get the vault path
+        // Get the vault path. The fallback is the platform's per-user vault
+        // location (UnlockController.defaultVaultPath -> config_dir()/vault.osv),
+        // not a hardcoded "/tmp/vault.osv" — /tmp doesn't exist on Windows, and
+        // a vault in a world-writable temp dir is a poor default anywhere.
         const url = vaultPathField.text.length > 0
                     ? vaultPathField.text
-                    : QUrl.fromLocalFile("/tmp/vault.osv");
+                    : unlockController.defaultVaultPath;
 
         // Call the unlock controller to create the vault
         if (unlockController.createVault(url, passwordField, confirmField, keyfilePath)) {
-            // Success: clear fields and go back
-            vaultPathField.text = "";
+            // Success: reset fields and go back. The path resets to the default
+            // rather than "" so a second create in the same session starts from
+            // the same valid state as the first.
+            vaultPathField.text = unlockController.defaultVaultPath.toString();
             passwordField.clearSecret();
             confirmField.clearSecret();
             keyfilePath = "";
@@ -135,10 +140,16 @@ Rectangle {
 
                     TextInput {
                         id: vaultPathField
+                        objectName: "vaultPathField"  // findChild() hook for the QML test
                         anchors { fill: parent; margins: 8 }
                         color: themePalette.text
                         readOnly: true
-                        text: "vault.osv"
+                        // The real default URL, not the bare label "vault.osv":
+                        // attemptCreate() passes this text straight through as a
+                        // URL, and a schemeless relative "vault.osv" yields an
+                        // empty toLocalFile() on the C++ side, so creating without
+                        // first opening the file dialog failed with "Invalid path".
+                        text: unlockController.defaultVaultPath.toString()
                     }
                 }
 

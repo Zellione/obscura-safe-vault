@@ -16,6 +16,9 @@ class UnlockController : public QObject {
     Q_PROPERTY(bool unlocked READ unlocked NOTIFY unlockedChanged)
     Q_PROPERTY(QString errorText READ errorText NOTIFY errorTextChanged)
     Q_PROPERTY(QUrl currentVaultPath READ currentVaultPath NOTIFY currentVaultPathChanged)
+    // Where a new vault goes when the user doesn't pick a location. CONSTANT:
+    // it derives from the per-user config dir, which can't change while running.
+    Q_PROPERTY(QUrl defaultVaultPath READ defaultVaultPath CONSTANT)
 public:
     explicit UnlockController(QObject* parent = nullptr);
 
@@ -40,6 +43,9 @@ public:
     [[nodiscard]] bool unlocked() const { return vault_.is_unlocked(); }
     [[nodiscard]] QString errorText() const { return error_; }
     [[nodiscard]] QUrl currentVaultPath() const { return currentVaultPath_; }
+    // platform::default_vault_path() — config_dir()/vault.osv, the same place
+    // the SDL app puts a default vault, so both UIs agree on one location.
+    [[nodiscard]] QUrl defaultVaultPath() const;
     [[nodiscard]] vault::Vault& vault() noexcept { return vault_; }
 
 signals:

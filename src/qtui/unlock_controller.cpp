@@ -128,6 +128,14 @@ void UnlockController::unlockWithKeyfile(SecureTextField* passwordField, const Q
     }
 }
 
+QUrl UnlockController::defaultVaultPath() const
+{
+    // fromLocalFile, not "file://" + path: on Windows the path starts with a
+    // drive letter, and "file://C:/..." parses "C:" as the URL's host.
+    return QUrl::fromLocalFile(
+        QString::fromStdString(platform::default_vault_path().string()));
+}
+
 void UnlockController::lock()
 {
     // CRITICAL: Drain viewer, playback, and thumbnail workers before locking vault.
