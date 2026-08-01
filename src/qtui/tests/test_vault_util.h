@@ -107,4 +107,22 @@ inline void addTinyImages(vault::Vault& vault, const char* prefix, int count, in
     }
 }
 
+// createTestVault() plus one sub-gallery named "subfolder" and two images —
+// the vault shape the gallery/detail tests need. Lives here rather than being
+// copy-pasted per test file (which is what SonarCloud's duplication gate
+// flagged). Throws on failure, like the helpers above.
+inline vault::Vault createTestVaultWithSubgallery(const std::string& vault_path)
+{
+    vault::Vault vault = createTestVault(vault_path);
+
+    auto result = vault.create_gallery("subfolder");
+    if (result != vault::VaultResult::Ok) {
+        fprintf(stderr, "Failed to create gallery\n");
+        throw std::runtime_error("create_gallery failed");
+    }
+
+    addTinyImages(vault, "image", 2);
+    return vault;
+}
+
 }  // namespace osvqt_test
