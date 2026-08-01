@@ -132,6 +132,98 @@ static bool test_create_vault_dialog_seeds_path_field()
     return true;
 }
 
+// Test 4: the strength bar binds to the field, and its bands line up
+//
+// Regression test for two defects in the strength meter:
+//   - `strengthEstimate` was declared on the OUTER Rectangle but referenced
+//     unqualified from its child. QML's unqualified lookup sees only the
+//     object's own scope and the component root, not an intervening object, so
+//     every one of those bindings threw "ReferenceError: strengthEstimate is
+//     not defined" and the bar never rendered.
+//   - the property was a TODO stub pinned at 0. It now tracks
+//     SecureTextField::strength, whose bands are chosen from
+//     ui::classify_strength so the bar's <33 / <66 colour thresholds cannot
+//     drift away from the Weak/Medium/Strong classification.
+static bool test_strength_bar_tracks_password()
+{
+    printf("Test 4: strength bar binds to the password field...\n");
+
+    QQmlEngine engine;
+    qmlRegisterType<SecureTextField>("Osv", 1, 0, "SecureTextField");
+
+    ThemePalette themePalette;
+    StatusController statusController;
+    UnlockController unlockController;
+
+    QQmlContext* ctx = engine.rootContext();
+    ctx->setContextProperty("themePalette", &themePalette);
+    ctx->setContextProperty("statusController", &statusController);
+    ctx->setContextProperty("unlockController", &unlockController);
+
+    QQmlComponent component(&engine,
+        QUrl::fromLocalFile(QTUI_QML_DIR "/CreateVaultDialog.qml"));
+    QObject* obj = osvqt_test::instantiate_qml_component(component, "CreateVaultDialog");
+    if (obj == nullptr) {
+        return false;
+    }
+
+    QObject* bar = obj->findChild<QObject*>(QStringLiteral("strengthBar"));
+    if (bar == nullptr) {
+        fprintf(stderr, "FAIL: could not find strengthBar\n");
+        delete obj;
+        return false;
+    }
+
+    // Empty password -> empty bar.
+    if (bar->property("strengthEstimate").toInt() != 0) {
+        fprintf(stderr, "FAIL: empty password should give strength 0, got %d\n",
+                bar->property("strengthEstimate").toInt());
+        delete obj;
+        return false;
+    }
+
+    // Type into the field; the binding must carry the new reading through.
+    auto* field = obj->findChild<SecureTextField*>();
+    if (field == nullptr) {
+        fprintf(stderr, "FAIL: could not find a SecureTextField\n");
+        delete obj;
+        return false;
+    }
+    field->model().insert("Tr0ub4dor&3-Xyzzy-Plugh-Correct-Horse");
+    emit field->lengthChanged();
+
+    const int strong = bar->property("strengthEstimate").toInt();
+    if (strong <= 0) {
+        fprintf(stderr, "FAIL: strength stayed at %d after typing — the binding "
+                        "is not tracking the field\n", strong);
+        delete obj;
+        return false;
+    }
+    // A Strong password must land in the bar's "ok" colour band (>= 66), not
+    // merely somewhere above zero — that band alignment is the whole point of
+    // deriving the reading from classify_strength.
+    if (strong < 66) {
+        fprintf(stderr, "FAIL: a strong password read %d, below the ok band\n", strong);
+        delete obj;
+        return false;
+    }
+
+    // ...and a weak one must stay inside the "danger" band (< 33).
+    field->clearSecret();
+    field->model().insert("abc");
+    emit field->lengthChanged();
+    const int weak = bar->property("strengthEstimate").toInt();
+    if (weak >= 33) {
+        fprintf(stderr, "FAIL: weak password read %d, outside the danger band\n", weak);
+        delete obj;
+        return false;
+    }
+
+    delete obj;
+    printf("PASS (strong -> %d, weak -> %d)\n", strong, weak);
+    return true;
+}
+
 int main(int argc, char* argv[])
 {
     QGuiApplication app(argc, argv);
@@ -142,6 +234,7 @@ int main(int argc, char* argv[])
     if (test_create_vault_dialog_qml_loads()) { ++passed; } else { ++failed; }
     if (test_default_vault_path_is_absolute_local_file()) { ++passed; } else { ++failed; }
     if (test_create_vault_dialog_seeds_path_field()) { ++passed; } else { ++failed; }
+    if (test_strength_bar_tracks_password()) { ++passed; } else { ++failed; }
 
     printf("\n=== Test Summary ===\n");
     printf("Passed: %d\n", passed);

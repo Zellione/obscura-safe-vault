@@ -209,6 +209,8 @@ Rectangle {
 
             // Strength indicator (live feedback)
             Rectangle {
+                id: strengthBar
+                objectName: "strengthBar"  // findChild() hook for the QML test
                 width: parent.width
                 height: 8
                 color: themePalette.surface
@@ -217,18 +219,27 @@ Rectangle {
                 radius: 4
                 clip: true
 
+                // SecureTextField.strength: a 0..100 reading derived from the
+                // char-class entropy model in ui/passphrase.h. Only this number
+                // leaves the field — the password itself never enters QML.
+                property real strengthEstimate: passwordField.strength
+
                 Rectangle {
                     height: parent.height - 2
                     y: 1
-                    width: (strengthEstimate / 100) * (parent.width - 2)
+                    // strengthBar.strengthEstimate, not a bare name: the property
+                    // lives on the PARENT, and QML's unqualified lookup only sees
+                    // this object's own scope and the component root — not an
+                    // intervening object. Unqualified, these bindings threw
+                    // "ReferenceError: strengthEstimate is not defined" and the
+                    // bar never rendered.
+                    width: (strengthBar.strengthEstimate / 100) * (parent.width - 2)
                     x: 1
-                    color: strengthEstimate < 33 ? themePalette.danger
-                           : strengthEstimate < 66 ? themePalette.warn
+                    color: strengthBar.strengthEstimate < 33 ? themePalette.danger
+                           : strengthBar.strengthEstimate < 66 ? themePalette.warn
                            : themePalette.ok
                     radius: 2
                 }
-
-                property real strengthEstimate: 0  // TODO: Wire to passphrase strength
             }
 
             Text {

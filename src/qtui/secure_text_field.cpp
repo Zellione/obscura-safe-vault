@@ -5,6 +5,9 @@
 #include <QKeyEvent>
 #include <QPainter>
 
+#include <algorithm>
+
+#include "ui/passphrase.h"         // estimate_entropy_bits / classify_strength
 #include "ui/text_input_model.h"   // utf8_char_count
 
 SecureTextField::SecureTextField(QQuickItem* parent) : QQuickPaintedItem(parent)
@@ -17,6 +20,30 @@ SecureTextField::SecureTextField(QQuickItem* parent) : QQuickPaintedItem(parent)
 int SecureTextField::length() const
 {
     return static_cast<int>(ui::utf8_char_count(model_.bytes()));
+}
+
+int SecureTextField::strength() const
+{
+    // The bar's colour thresholds (<33 danger, <66 warn, else ok) have to agree
+    // with ui::classify_strength, so the band is chosen from the classification
+    // first and the entropy only positions the fill WITHIN that band. Scaling
+    // bits linearly instead would let a Weak password light up the "medium"
+    // colour, since Weak runs all the way to 50 bits.
+    const auto bytes = model_.bytes();
+    if (bytes.empty()) {
+        return 0;
+    }
+
+    const double bits = ui::estimate_entropy_bits(bytes);
+    switch (ui::classify_strength(bytes)) {
+    case ui::Strength::Weak:    // 0 -> <50 bits  maps to 0..32
+        return static_cast<int>(bits / 50.0 * 32.0);
+    case ui::Strength::Medium:  // 50 -> <80 bits maps to 33..65
+        return 33 + static_cast<int>((bits - 50.0) / 30.0 * 32.0);
+    case ui::Strength::Strong:  // 80+ bits maps to 66..100, saturating at 120
+        return 66 + static_cast<int>(std::min(1.0, (bits - 80.0) / 40.0) * 34.0);
+    }
+    return 0;
 }
 
 void SecureTextField::clearSecret()
