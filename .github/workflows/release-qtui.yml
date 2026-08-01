@@ -63,18 +63,15 @@ jobs:
             | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
           sudo rm -f /etc/apt/sources.list.d/*microsoft* /etc/apt/sources.list.d/*azure* 2>/dev/null || true
           sudo apt-get update -qq
-          # libgtest-dev: seven osv_qt_*_test targets link bare `gtest gtest_main`
-          # (src/qtui/CMakeLists.txt), which the dev box satisfies from Arch's
-          # system gtest. On noble the package ships prebuilt
-          # /usr/lib/x86_64-linux-gnu/libgtest{,_main}.a plus headers, so the
-          # bare -lgtest works with no GTest::gtest / FetchContent plumbing.
+          # No libgtest-dev here on purpose: the seven gtest-based osv_qt_*_test
+          # targets build against the vendored vendor/googletest submodule, so
+          # both legs use the same pinned gtest and the build stays hermetic.
           sudo apt-get install -y --no-install-recommends \
             cmake \
             ninja-build \
             nasm \
             gcc-14 \
             g++-14 \
-            libgtest-dev \
             libgl1-mesa-dev \
             libx11-dev \
             libxext-dev \
@@ -184,6 +181,12 @@ jobs:
           set -euo pipefail
           VERSION="${OSV_VERSION#qtui-v}"
           VERSION="${VERSION#v}"  # also strip a plain 'v' for workflow_dispatch runs
+          # A workflow_dispatch run's ref_name is a BRANCH name, which may contain
+          # '/' (e.g. fix/qtui-release-modules). Unsanitized, the tarball lands in
+          # dist/<first-segment>/ instead of dist/, `dist/*.tar.gz` matches nothing,
+          # and the upload silently produces an empty artifact. Tag runs are
+          # unaffected, but a dispatch run should still verify packaging.
+          VERSION="${VERSION//\//-}"
 
           curl -fsSL -o linuxdeploy.AppImage \
             https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
@@ -367,7 +370,10 @@ jobs:
         env:
           OSV_VERSION: ${{ github.ref_name }}
         run: |
-          $version = $env:OSV_VERSION -replace '^qtui-v', '' -replace '^v', ''
+          # Trailing -replace '/': a workflow_dispatch ref_name is a branch name
+          # and may contain '/', which would nest the zip out of dist\ and make
+          # the dist/*.zip upload glob match nothing. Tag runs are unaffected.
+          $version = $env:OSV_VERSION -replace '^qtui-v', '' -replace '^v', '' -replace '/', '-'
           $pkg = "osv-qt-$version-beta-windows-x64"
           $stage = "dist\$pkg"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
