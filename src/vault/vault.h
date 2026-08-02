@@ -81,6 +81,13 @@ struct SearchHit {
     const IndexNode*         node = nullptr;  // valid until the next mutating call
 };
 
+// Result stats of batch media removal (duplicate finder): how many media nodes were
+// removed and how many named paths were missing or non-media.
+struct RemoveBatchStats {
+    std::size_t removed = 0;
+    std::size_t missing = 0;
+};
+
 class Vault {
 public:
     // Auto-compaction gates (remove_image): rewrite the vault only when at
@@ -289,6 +296,13 @@ public:
     // to keep Vault under the cpp:S1448 method cap.
     friend uint64_t vault_file_bytes(const Vault& v) noexcept;
 
+    // Batch media removal (duplicate finder): erase every media node named by
+    // `node_paths`, then ONE commit_index() + one auto_reclaim_space(). Kept a
+    // free friend to keep Vault under the cpp:S1448 method cap.
+    friend VaultResult remove_media_batch(Vault& v,
+                                          std::span<const std::string> node_paths,
+                                          RemoveBatchStats* stats);
+
     // Phase 50: while the import queue is active, App points this at the
     // CommitLane; Vault::commit_index() then routes through the lane
     // (serialize + enqueue, async durability) instead of committing
@@ -409,6 +423,15 @@ private:
 // Locked if the vault is locked; AuthFailed on tamper/corruption.
 [[nodiscard]] VaultResult read_thumb_span(const Vault& v, uint64_t offset,
                                           uint64_t length, crypto::SecureBytes& out);
+
+// Batch media removal (duplicate finder): erase every media node named by
+// `node_paths` (full slash-paths). Missing / non-media paths are counted, not
+// errors. ONE commit_index() for the whole batch (none if nothing was removed),
+// then one auto_reclaim_space(). Locked if locked; IoError if the commit fails
+// (tree already mutated — same contract as remove_image's failed commit).
+[[nodiscard]] VaultResult remove_media_batch(Vault& v,
+                                             std::span<const std::string> node_paths,
+                                             RemoveBatchStats* stats = nullptr);
 
 // Get the vault file's current size in bytes. Returns 0 if locked or on I/O error.
 // Used by the UI to display waste/compaction information (Phase 26).

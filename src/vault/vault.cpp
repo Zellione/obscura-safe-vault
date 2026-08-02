@@ -1057,6 +1057,45 @@ VaultResult Vault::remove_gallery(std::string_view gallery_path)
     return NotFound;
 }
 
+VaultResult remove_media_batch(Vault& v, std::span<const std::string> node_paths,
+                               RemoveBatchStats* stats)
+{
+    using enum VaultResult;
+    if (stats) *stats = {};
+    if (!v.unlocked_) return Locked;
+
+    std::size_t removed = 0, missing = 0;
+    for (const std::string& path : node_paths) {
+        // Split "gal/sub/name" into parent gallery + leaf name.
+        const auto   slash  = path.find_last_of('/');
+        const auto   parent = (slash == std::string::npos)
+                                  ? std::string_view{}
+                                  : std::string_view(path).substr(0, slash);
+        const auto   leaf   = (slash == std::string::npos)
+                                  ? std::string_view(path)
+                                  : std::string_view(path).substr(slash + 1);
+        IndexNode* g = v.find_gallery(parent);
+        bool hit = false;
+        if (g) {
+            for (auto it = g->children.begin(); it != g->children.end(); ++it) {
+                if (it->is_media() && it->name == leaf) {
+                    g->children.erase(it);  // chunks orphaned until reclamation
+                    hit = true;
+                    break;
+                }
+            }
+        }
+        hit ? ++removed : ++missing;
+    }
+
+    if (removed > 0) {
+        if (const VaultResult r = v.commit_index(); r != Ok) return r;
+        v.auto_reclaim_space();  // best-effort, same gate as remove_image
+    }
+    if (stats) *stats = {.removed = removed, .missing = missing};
+    return Ok;
+}
+
 std::vector<const IndexNode*> Vault::list(std::string_view gallery_path) const
 {
     std::vector<const IndexNode*> out;
