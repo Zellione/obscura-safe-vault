@@ -49,8 +49,11 @@ Thumbs.db
 *.dll
 *.exe
 
-# Test vault files (contain personal data)
+# Test vault files (contain personal data). Committed test FIXTURES are
+# re-included below — they are synthetic, required by the suite, and were
+# previously force-added past this rule (e.g. legacy_noflags.osv).
 *.osv
+!tests/vault/fixtures/*.osv
 
 # Packaging output
 dist/
