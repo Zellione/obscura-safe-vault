@@ -48,6 +48,16 @@ namespace index_io {
 [[nodiscard]] VaultResult commit_plain_blob(IndexIoContext& ctx,
                                             std::span<const uint8_t> plain);
 
+// Same crash-safe 3-phase commit as commit_plain_blob, but the sealed blob is
+// written at `offset` (which may equal EOF) instead of appended. In-place
+// compaction uses this for its FINAL commit so the blob lands just after the
+// packed data instead of pinning the dead tail against truncation. The caller
+// guarantees [offset, offset + plain.size() + crypto::TAG_SIZE) is dead per
+// the last-committed index and holds the vault write mutex.
+[[nodiscard]] VaultResult commit_plain_blob_at(IndexIoContext& ctx,
+                                               std::span<const uint8_t> plain,
+                                               uint64_t offset);
+
 // Serialize + seal + append the current index to the vault file, then
 // atomically switch the active slot. Returns Ok on success, or IoError /
 // CryptoError on failure. The crash-safe procedure is:

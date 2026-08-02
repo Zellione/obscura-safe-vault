@@ -7,9 +7,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <sys/stat.h>
-#include <filesystem>
-#include <string>
-#include <vector>
 
 #if defined(_WIN32)
 #  include <io.h>
@@ -112,6 +109,20 @@ namespace vault::fileutil {
 #endif
 }
 
+// Truncate the file to exactly `new_size` bytes (flushing stdio first so no
+// buffered write lands past the new end). Used by in-place compaction to cut
+// the dead tail after the final index commit. The stream position is left
+// unspecified — callers seek before the next read/write.
+[[nodiscard]] inline bool truncate_file(std::FILE* fp, uint64_t new_size) noexcept
+{
+    if (std::fflush(fp) != 0) return false;
+#if defined(_WIN32)
+    return _chsize_s(_fileno(fp), static_cast<long long>(new_size)) == 0;
+#else
+    return ::ftruncate(::fileno(fp), static_cast<off_t>(new_size)) == 0;
+#endif
+}
+
 // --- fault injection (crash-safety tests) ---------------------------------
 // The double-buffered index swap is only crash-safe if an fsync failure at any
 // step leaves a reopenable vault. There is no portable way to make a real
@@ -128,30 +139,6 @@ inline int& sync_fail_after() noexcept
 inline void inject_sync_failure(int after_calls) noexcept { sync_fail_after() = after_calls; }
 inline void clear_sync_failure() noexcept                 { sync_fail_after() = -1; }
 
-// Same arm-once pattern for rename: compaction's atomic commit is a rename,
-// and its failure-recovery path (reacquire the original handle) is otherwise
-// untestable — there is no portable way to make a real rename fail on demand.
-inline int& rename_fail_after() noexcept
-{
-    static int n = -1;
-    return n;
-}
-
-inline void inject_rename_failure(int after_calls) noexcept { rename_fail_after() = after_calls; }
-inline void clear_rename_failure() noexcept                 { rename_fail_after() = -1; }
-
-// Rename `from` over `to`. Returns false on failure (injected or real).
-[[nodiscard]] inline bool rename_file(const std::string& from, const std::string& to) noexcept
-{
-    if (int& n = rename_fail_after(); n >= 0) {
-        if (n == 0) { n = -1; return false; }
-        --n;
-    }
-    std::error_code ec;
-    std::filesystem::rename(from, to, ec);
-    return !ec;
-}
-
 // Flush stdio buffers and fsync to durable storage.
 [[nodiscard]] inline bool sync(std::FILE* fp) noexcept
 {
@@ -165,74 +152,6 @@ inline void clear_rename_failure() noexcept                 { rename_fail_after(
 #else
     return fsync(fileno(fp)) == 0;
 #endif
-}
-
-// Best-effort fsync of the directory containing `path`, making a just-renamed
-// file durable on POSIX (the rename itself lives in directory metadata).
-// Windows has no directory handles to fsync this way; metadata durability is
-// handled by the filesystem there.
-inline void sync_dir_of(const std::string& path) noexcept
-{
-#if !defined(_WIN32)
-    std::string dir = path;
-    if (const auto slash = dir.find_last_of('/'); slash != std::string::npos) {
-        dir.resize(slash == 0 ? 1 : slash);
-    } else {
-        dir = ".";
-    }
-    if (const int fd = ::open(dir.c_str(), O_RDONLY); fd >= 0) {
-        (void)::fsync(fd);
-        ::close(fd);
-    }
-#else
-    (void)path;
-#endif
-}
-
-// Helper to wipe a file's contents (flatten nesting, reduce S134).
-// Overwrites with zeros in chunks, then closes the file.
-// Returns true only if the entire file was wiped successfully.
-[[nodiscard]] inline bool wipe_file_contents(std::FILE* fp) noexcept
-{
-    constexpr size_t WIPE_CHUNK = 1024 * 1024;  // 1 MiB chunks
-    std::vector<uint8_t> zeros(WIPE_CHUNK, 0);
-    uint64_t remaining = 0;
-    // Guard clause: if seek fails, close and report failure.
-    if (!seek_end(fp, remaining) || !seek_to(fp, 0)) {
-        std::fclose(fp);
-        return false;
-    }
-    // Write zeros in chunks.
-    while (remaining > 0) {
-        const size_t to_write = std::min(static_cast<size_t>(remaining), WIPE_CHUNK);
-        if (std::fwrite(zeros.data(), 1, to_write, fp) != to_write) {
-            break;  // write failed; remove what we have
-        }
-        remaining -= to_write;
-    }
-    // Best-effort fsync the wipe.
-    (void)sync(fp);
-    std::fclose(fp);
-    return true;
-}
-
-// Best-effort secure wipe: overwrite a file's contents with zeros in chunks,
-// then remove it. Failures are logged but non-fatal; the file is removed
-// regardless. Works on both POSIX and Windows.
-// NOTE: This is a best-effort wipe. Copy-on-write filesystems (btrfs, APFS),
-// SSD wear-leveling, and snapshots may retain old blocks regardless of
-// overwriting. This helper mitigates forensic recovery for typical
-// filesystems only.
-inline void wipe_and_remove(const std::filesystem::path& path) noexcept
-{
-    const std::string p = path.string();
-    // Guard clause: if file doesn't open, skip straight to remove.
-    if (std::FILE* fp = std::fopen(p.c_str(), "r+b")) {
-        (void)wipe_file_contents(fp);  // best-effort wipe (nesting depth 1, not 4)
-    }
-    // Remove the file regardless of wipe success (non-fatal).
-    std::error_code ec;
-    std::filesystem::remove(p, ec);
 }
 
 } // namespace vault::fileutil

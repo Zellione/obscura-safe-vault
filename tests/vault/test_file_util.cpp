@@ -162,3 +162,42 @@ TEST(punch_hole_releases_allocated_blocks_where_supported)
     std::fclose(fp);
     fs::remove(path);
 }
+
+TEST(truncate_file_shrinks_to_requested_size)
+{
+    std::FILE* fp = std::tmpfile();
+    REQUIRE(fp != nullptr);
+    const std::vector<uint8_t> buf(64 * 1024, 0xAB);
+    REQUIRE(std::fwrite(buf.data(), 1, buf.size(), fp) == buf.size());
+
+    REQUIRE(vault::fileutil::truncate_file(fp, 10 * 1024));
+
+    uint64_t size = 0;
+    REQUIRE(vault::fileutil::file_size(fp, size));
+    CHECK_EQ(size, static_cast<uint64_t>(10 * 1024));
+
+    // Bytes below the cut are intact.
+    REQUIRE(vault::fileutil::seek_to(fp, 0));
+    std::vector<uint8_t> back(10 * 1024);
+    REQUIRE(std::fread(back.data(), 1, back.size(), fp) == back.size());
+    for (uint8_t b : back) REQUIRE(b == 0xAB);
+    std::fclose(fp);
+}
+
+TEST(truncate_file_to_zero_and_same_size_are_ok)
+{
+    std::FILE* fp = std::tmpfile();
+    REQUIRE(fp != nullptr);
+    const std::vector<uint8_t> buf(4096, 0x11);
+    REQUIRE(std::fwrite(buf.data(), 1, buf.size(), fp) == buf.size());
+
+    REQUIRE(vault::fileutil::truncate_file(fp, 4096));  // no-op truncate
+    uint64_t size = 0;
+    REQUIRE(vault::fileutil::file_size(fp, size));
+    CHECK_EQ(size, static_cast<uint64_t>(4096));
+
+    REQUIRE(vault::fileutil::truncate_file(fp, 0));
+    REQUIRE(vault::fileutil::file_size(fp, size));
+    CHECK_EQ(size, static_cast<uint64_t>(0));
+    std::fclose(fp);
+}

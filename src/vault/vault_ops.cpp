@@ -65,26 +65,6 @@ bool holds_galleries(const IndexNode& g)
     return std::ranges::any_of(g.children, [](const auto& c) { return c.is_gallery(); });
 }
 
-void relocate_node_chunks(const ChunkStore& src, ChunkStore& dst, IndexNode& node, VaultResult& err)
-{
-    auto copy_span = [&err, &src, &dst](uint64_t& off, uint64_t len) {
-        if (err != VaultResult::Ok || len == 0) return;
-        std::vector<uint8_t> blob;
-        uint64_t new_off = 0;
-        if (!src.read_raw(off, len, blob) || !dst.append_raw(blob, new_off)) {
-            err = VaultResult::IoError;
-            return;
-        }
-        off = new_off;
-    };
-    if (node.is_image()) {
-        copy_span(node.meta.data_offset, node.meta.data_length);
-        copy_span(node.meta.thumb_offset, node.meta.thumb_length);
-    } else if (node.is_video()) {
-        for (auto& chunk : node.vmeta.chunks) copy_span(chunk.offset, chunk.length);
-        copy_span(node.vmeta.poster_offset, node.vmeta.poster_length);
-    }
-}
 
 bool push_child(std::vector<IndexNode>& children, IndexNode node) noexcept
 {
