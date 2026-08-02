@@ -64,3 +64,7 @@ dist/
 
 # Superpowers brainstorming session scratch (mockups, server state)
 .superpowers/
+
+# Serena clangd symbol caches (derived binaries, churn every session —
+# .serena/memories/ stays tracked, it is the canonical code documentation)
+.serena/cache/
