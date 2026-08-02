@@ -68,4 +68,85 @@ std::vector<std::vector<size_t>> cluster_similar(std::span<const uint64_t> hashe
     return out;
 }
 
+uint64_t group_reclaimable(const DupGroup& g)
+{
+    uint64_t sum = 0, biggest = 0;
+    for (const DupMember& m : g.members) {
+        sum += m.bytes;
+        biggest = std::max(biggest, m.bytes);
+    }
+    return sum - biggest;
+}
+
+DupReview::DupReview(std::vector<DupGroup> groups) : groups_(std::move(groups))
+{
+    std::ranges::stable_sort(groups_, [](const DupGroup& a, const DupGroup& b) {
+        return group_reclaimable(a) > group_reclaimable(b);
+    });
+}
+
+const std::vector<DupGroup>& DupReview::groups() const noexcept { return groups_; }
+
+void DupReview::toggle(size_t g, size_t m)
+{
+    if (g < groups_.size() && m < groups_[g].members.size())
+        groups_[g].members[m].keep = !groups_[g].members[m].keep;
+}
+
+void DupReview::keep_only(size_t g, size_t m)
+{
+    if (g >= groups_.size() || m >= groups_[g].members.size()) return;
+    for (size_t i = 0; i < groups_[g].members.size(); ++i)
+        groups_[g].members[i].keep = (i == m);
+}
+
+bool DupReview::group_all_removed(size_t g) const
+{
+    if (g >= groups_.size()) return false;
+    return std::ranges::none_of(groups_[g].members,
+                                [](const DupMember& m) { return m.keep; });
+}
+
+bool DupReview::any_marked() const
+{
+    for (const DupGroup& g : groups_)
+        for (const DupMember& m : g.members)
+            if (!m.keep) return true;
+    return false;
+}
+
+bool DupReview::can_apply() const
+{
+    if (!any_marked()) return false;
+    for (size_t g = 0; g < groups_.size(); ++g)
+        if (group_all_removed(g)) return false;
+    return true;
+}
+
+size_t DupReview::marked_count() const
+{
+    size_t n = 0;
+    for (const DupGroup& g : groups_)
+        for (const DupMember& m : g.members) n += !m.keep;
+    return n;
+}
+
+uint64_t DupReview::marked_bytes() const
+{
+    uint64_t n = 0;
+    for (const DupGroup& g : groups_)
+        for (const DupMember& m : g.members)
+            if (!m.keep) n += m.bytes;
+    return n;
+}
+
+std::vector<std::string> DupReview::marked_paths() const
+{
+    std::vector<std::string> out;
+    for (const DupGroup& g : groups_)
+        for (const DupMember& m : g.members)
+            if (!m.keep) out.push_back(m.node_path);
+    return out;
+}
+
 } // namespace ui

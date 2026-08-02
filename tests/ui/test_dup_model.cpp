@@ -89,3 +89,71 @@ TEST(dup_cluster_no_singletons_and_empty_input)
     CHECK(ui::cluster_similar(lone, 1).empty());
     CHECK(ui::cluster_similar({}, 1).empty());
 }
+
+// --- DupReview -------------------------------------------------------------
+
+static ui::DupGroup make_group(std::initializer_list<uint64_t> sizes)
+{
+    ui::DupGroup g;
+    int i = 0;
+    for (uint64_t b : sizes) {
+        ui::DupMember m;
+        m.name      = "f" + std::to_string(i);
+        m.node_path = "g/f" + std::to_string(i++);
+        m.bytes     = b;
+        g.members.push_back(std::move(m));
+    }
+    return g;
+}
+
+TEST(dup_group_reclaimable_is_all_but_largest)
+{
+    CHECK_EQ(ui::group_reclaimable(make_group({100, 300, 200})), uint64_t{300});
+    CHECK_EQ(ui::group_reclaimable(make_group({50})), uint64_t{0});
+}
+
+TEST(dup_review_sorts_groups_by_reclaimable_desc)
+{
+    std::vector<ui::DupGroup> gs;
+    gs.push_back(make_group({10, 10}));        // reclaimable 10
+    gs.push_back(make_group({500, 500, 500})); // reclaimable 1000
+    const ui::DupReview rev(std::move(gs));
+    REQUIRE(rev.groups().size() == 2);
+    CHECK_EQ(rev.groups()[0].members[0].bytes, uint64_t{500});
+}
+
+TEST(dup_review_toggle_and_totals)
+{
+    ui::DupReview rev({make_group({100, 100})});
+    CHECK(!rev.any_marked());
+    CHECK(!rev.can_apply());          // nothing marked -> nothing to apply
+    rev.toggle(0, 1);                 // REMOVE second copy
+    CHECK(rev.any_marked());
+    CHECK(rev.can_apply());
+    CHECK_EQ(rev.marked_count(), size_t{1});
+    CHECK_EQ(rev.marked_bytes(), uint64_t{100});
+    const auto paths = rev.marked_paths();
+    REQUIRE(paths.size() == 1);
+    CHECK_EQ(paths[0], std::string("g/f1"));
+    rev.toggle(0, 1);                 // back to KEEP
+    CHECK(!rev.any_marked());
+}
+
+TEST(dup_review_refuses_fully_removed_group)
+{
+    ui::DupReview rev({make_group({100, 100})});
+    rev.toggle(0, 0);
+    rev.toggle(0, 1);
+    CHECK(rev.group_all_removed(0));
+    CHECK(!rev.can_apply());          // would delete every copy
+}
+
+TEST(dup_review_keep_only)
+{
+    ui::DupReview rev({make_group({100, 100, 100})});
+    rev.keep_only(0, 2);
+    CHECK_EQ(rev.marked_count(), size_t{2});
+    CHECK(rev.groups()[0].members[2].keep);
+    CHECK(!rev.groups()[0].members[0].keep);
+    CHECK(rev.can_apply());
+}
