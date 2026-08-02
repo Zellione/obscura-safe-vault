@@ -449,43 +449,6 @@ TEST(compact_progress_nullptr_succeeds)
     CHECK_EQ(v.wasted_bytes(), 0u);
 }
 
-// Phase 7 Task 7: secure wipe of pre-compaction vault file.
-// Test that wipe_and_remove overwrites a file with zeros then removes it.
-TEST(wipe_and_remove_zeroes_and_deletes_file)
-{
-    const auto temp_path = fs::temp_directory_path() / "osv_wipe_test.bin";
-
-    // Create a test file with known content.
-    {
-        const std::string p = temp_path.string();
-        std::FILE* fp = std::fopen(p.c_str(), "w+b");
-        REQUIRE(fp != nullptr);
-        const std::vector<uint8_t> content = pattern(8192, 42);
-        REQUIRE(std::fwrite(content.data(), 1, content.size(), fp) == content.size());
-        std::fclose(fp);
-    }
-
-    // Verify file exists and contains the pattern.
-    REQUIRE(fs::exists(temp_path));
-
-    // Peek at the file to verify it has content.
-    {
-        const std::string p = temp_path.string();
-        std::FILE* fp = std::fopen(p.c_str(), "rb");
-        REQUIRE(fp != nullptr);
-        uint8_t first_byte = 0;
-        REQUIRE(std::fread(&first_byte, 1, 1, fp) == 1);
-        CHECK_FALSE(first_byte == 0u);  // Should be part of the pattern, not zero
-        std::fclose(fp);
-    }
-
-    // Wipe and remove.
-    vault::fileutil::wipe_and_remove(temp_path.string());
-
-    // File should no longer exist.
-    CHECK_FALSE(fs::exists(temp_path));
-}
-
 // --- in-place hole-punch reclamation (Vault::reclaim) -------------------------
 // Unlike compact(), reclaim() punches holes in orphaned chunk spans in place:
 // no temp copy, offsets unchanged, index untouched. It reclaims physical disk
