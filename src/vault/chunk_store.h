@@ -54,6 +54,12 @@ public:
     // Read `length` raw bytes at `offset` (no decryption) into `out`.
     [[nodiscard]] bool read_raw(uint64_t offset, uint64_t length, std::vector<uint8_t>& out) const noexcept;
 
+    // Write `bytes` verbatim at `offset` (no encryption, no fsync — the caller
+    // orders durability). May extend the file when offset == EOF. Used by
+    // in-place compaction, whose crash-safety contract is that `offset` ranges
+    // over bytes the last-committed index does not reference.
+    [[nodiscard]] bool write_raw_at(uint64_t offset, std::span<const uint8_t> bytes) noexcept;
+
     // Flush buffered writes and fsync to durable storage. Call between the
     // ordered steps of a crash-safe write.
     [[nodiscard]] bool sync() noexcept;

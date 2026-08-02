@@ -255,3 +255,49 @@ TEST(chunk_store_append_reports_flush_failure)
     std::fclose(fp);
 }
 #endif
+
+TEST(chunk_store_write_raw_at_overwrites_in_place)
+{
+    auto key = random_key();
+    std::FILE* fp = std::tmpfile();
+    REQUIRE(fp != nullptr);
+    ChunkStore store(fp, key.as_span(), false);
+
+    // Lay down 1000 bytes, then overwrite the middle 200 at offset 300.
+    auto base = pattern(1000, 4);
+    uint64_t off0 = 0;
+    REQUIRE(store.append_raw(base, off0));
+    auto patch = pattern(200, 9);
+    REQUIRE(store.write_raw_at(300, patch));
+
+    std::vector<uint8_t> out;
+    REQUIRE(store.read_raw(300, 200, out));
+    CHECK_BYTES_EQ(std::span<const uint8_t>(out), std::span<const uint8_t>(patch));
+    // Bytes outside the patch are untouched.
+    REQUIRE(store.read_raw(0, 300, out));
+    CHECK_BYTES_EQ(std::span<const uint8_t>(out),
+                   std::span<const uint8_t>(base).subspan(0, 300));
+    REQUIRE(store.read_raw(500, 500, out));
+    CHECK_BYTES_EQ(std::span<const uint8_t>(out),
+                   std::span<const uint8_t>(base).subspan(500, 500));
+    std::fclose(fp);
+}
+
+TEST(chunk_store_write_raw_at_end_extends_file)
+{
+    auto key = random_key();
+    std::FILE* fp = std::tmpfile();
+    REQUIRE(fp != nullptr);
+    ChunkStore store(fp, key.as_span(), false);
+
+    auto base = pattern(100, 1);
+    uint64_t off0 = 0;
+    REQUIRE(store.append_raw(base, off0));
+    auto tail = pattern(50, 2);
+    REQUIRE(store.write_raw_at(100, tail));  // exactly at EOF
+
+    std::vector<uint8_t> out;
+    REQUIRE(store.read_raw(100, 50, out));
+    CHECK_BYTES_EQ(std::span<const uint8_t>(out), std::span<const uint8_t>(tail));
+    std::fclose(fp);
+}

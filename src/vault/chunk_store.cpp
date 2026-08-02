@@ -133,6 +133,16 @@ bool ChunkStore::read_raw(uint64_t offset, uint64_t length, std::vector<uint8_t>
     return true;
 }
 
+bool ChunkStore::write_raw_at(uint64_t offset, std::span<const uint8_t> bytes) noexcept
+{
+    if (bytes.empty()) return true;
+    if (!fileutil::seek_to(fp_, offset)) return false;
+    if (std::fwrite(bytes.data(), 1, bytes.size(), fp_) != bytes.size()) return false;
+    // Keep read-after-write on the same handle coherent (mirrors append_at_end's
+    // post-write fflush — see file_util.h's position-independence note).
+    return std::fflush(fp_) == 0;
+}
+
 bool ChunkStore::sync() noexcept
 {
     return fileutil::sync(fp_);
