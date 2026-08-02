@@ -1,8 +1,13 @@
 #include "test_framework.h"
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
+#include <fstream>
+#include <stdexcept>
+#include <span>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "ui/dup_scan.h"
@@ -22,6 +27,12 @@ static std::vector<uint8_t> pattern(size_t n, uint8_t seed)
     std::vector<uint8_t> v(n);
     for (size_t i = 0; i < n; ++i) v[i] = static_cast<uint8_t>(i * 37 + seed);
     return v;
+}
+
+static std::vector<uint8_t> read_file(const fs::path& p)
+{
+    std::ifstream f(p, std::ios::binary);
+    return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
 }
 
 namespace {
@@ -73,4 +84,99 @@ TEST(dup_scan_items_cover_whole_tree)
     CHECK_EQ(leaf.bytes, uint64_t{300});
     REQUIRE(leaf.data_spans.size() == 1);
     CHECK(leaf.data_spans[0].second > 0);   // on-disk chunk length recorded
+}
+
+// --- DupScanJob worker tests ---
+
+static ui::DupScanOutcome run_scan(const vault::Vault& v, bool perceptual)
+{
+    ui::DupScanJob job;
+    job.start(v, ui::collect_scan_items(v), perceptual);
+    while (job.active()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    auto out = job.take_outcome();
+    if (!out.has_value()) throw std::runtime_error("take_outcome() returned nullopt");
+    return *out;
+}
+
+TEST(dup_scan_finds_exact_duplicates_across_galleries)
+{
+    TempVault tv("exact");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kFastKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
+    const auto dup    = pattern(4096, 7);
+    const auto other  = pattern(4096, 9);   // same SIZE, different bytes
+    const auto unique = pattern(1234, 5);
+    REQUIRE(v.add_image("",  dup,    "one.png")   == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("g", dup,    "two.png")   == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("g", other,  "decoy.png") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("",  unique, "solo.png")  == vault::VaultResult::Ok);
+
+    const auto out = run_scan(v, /*perceptual=*/false);
+    CHECK(!out.cancelled);
+    REQUIRE(out.groups.size() == 1);           // size-collided decoy must NOT group
+    const auto& g = out.groups[0];
+    CHECK(g.kind == ui::DupGroup::Kind::Identical);
+    REQUIRE(g.members.size() == 2);
+    std::vector<std::string> paths{g.members[0].node_path, g.members[1].node_path};
+    std::ranges::sort(paths);
+    CHECK_EQ(paths[0], std::string("g/two.png"));
+    CHECK_EQ(paths[1], std::string("one.png"));
+}
+
+TEST(dup_scan_no_duplicates_yields_empty)
+{
+    TempVault tv("none");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kFastKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", pattern(100, 1), "a.png") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", pattern(200, 2), "b.png") == vault::VaultResult::Ok);
+    const auto out = run_scan(v, false);
+    CHECK(out.groups.empty());
+    CHECK_EQ(out.skipped, size_t{0});
+}
+
+// Perceptual pass end-to-end: the same decodable WebP twice, once with a
+// trailing junk byte appended. Different byte size -> NOT an exact dupe; the
+// decoder ignores trailing garbage -> identical pixels -> identical dHash ->
+// one Similar group at distance 0.
+TEST(dup_scan_perceptual_groups_reencoded_copy)
+{
+    TempVault tv("percep");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kFastKdf, v)
+            == vault::VaultResult::Ok);
+    const auto webp = read_file(fs::path(OSV_FIXTURE_DIR) / "sample.webp");
+    REQUIRE(!webp.empty());
+    auto padded = webp;
+    padded.push_back(0x00);
+    REQUIRE(v.add_image("", webp,   "orig.webp") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", padded, "copy.webp") == vault::VaultResult::Ok);
+
+    const auto out = run_scan(v, /*perceptual=*/true);
+    REQUIRE(out.groups.size() == 1);
+    CHECK(out.groups[0].kind == ui::DupGroup::Kind::Similar);
+    CHECK_EQ(out.groups[0].distance_bits, 0);
+    CHECK_EQ(out.groups[0].members.size(), size_t{2});
+}
+
+TEST(dup_scan_cancel_stops_and_reports_cancelled)
+{
+    TempVault tv("cancel");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kFastKdf, v)
+            == vault::VaultResult::Ok);
+    const auto dup = pattern(1 << 16, 3);
+    for (int i = 0; i < 20; ++i)
+        REQUIRE(v.add_image("", dup, "img" + std::to_string(i) + ".png")
+                == vault::VaultResult::Ok);
+    ui::DupScanJob job;
+    job.start(v, ui::collect_scan_items(v), false);
+    job.cancel();
+    while (job.active()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    auto out = job.take_outcome();
+    REQUIRE(out.has_value());
+    CHECK(out->cancelled);
 }
