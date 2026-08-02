@@ -43,7 +43,6 @@ using vault_ops::split_path;
 using vault_ops::resolve_gallery;
 using vault_ops::child_named;
 using vault_ops::for_each_media;
-using vault_ops::relocate_node_chunks;
 
 // Trim ASCII whitespace from start and end of a string_view.
 std::string_view trim_ws(std::string_view s)
@@ -1613,7 +1612,7 @@ void Vault::auto_reclaim_space()
     // second copy compact() writes, so a delete never briefly doubles disk use.
     (void)reclaim();
 #else
-    // No portable hole-punch: fall back to the full copy-and-rename rewrite.
+    // No portable hole-punch: fall back to in-place compact (no disk spike).
     (void)compact();
 #endif
 }

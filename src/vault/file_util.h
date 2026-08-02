@@ -142,30 +142,6 @@ inline int& sync_fail_after() noexcept
 inline void inject_sync_failure(int after_calls) noexcept { sync_fail_after() = after_calls; }
 inline void clear_sync_failure() noexcept                 { sync_fail_after() = -1; }
 
-// Same arm-once pattern for rename: compaction's atomic commit is a rename,
-// and its failure-recovery path (reacquire the original handle) is otherwise
-// untestable — there is no portable way to make a real rename fail on demand.
-inline int& rename_fail_after() noexcept
-{
-    static int n = -1;
-    return n;
-}
-
-inline void inject_rename_failure(int after_calls) noexcept { rename_fail_after() = after_calls; }
-inline void clear_rename_failure() noexcept                 { rename_fail_after() = -1; }
-
-// Rename `from` over `to`. Returns false on failure (injected or real).
-[[nodiscard]] inline bool rename_file(const std::string& from, const std::string& to) noexcept
-{
-    if (int& n = rename_fail_after(); n >= 0) {
-        if (n == 0) { n = -1; return false; }
-        --n;
-    }
-    std::error_code ec;
-    std::filesystem::rename(from, to, ec);
-    return !ec;
-}
-
 // Flush stdio buffers and fsync to durable storage.
 [[nodiscard]] inline bool sync(std::FILE* fp) noexcept
 {
@@ -178,28 +154,6 @@ inline void clear_rename_failure() noexcept                 { rename_fail_after(
     return _commit(_fileno(fp)) == 0;
 #else
     return fsync(fileno(fp)) == 0;
-#endif
-}
-
-// Best-effort fsync of the directory containing `path`, making a just-renamed
-// file durable on POSIX (the rename itself lives in directory metadata).
-// Windows has no directory handles to fsync this way; metadata durability is
-// handled by the filesystem there.
-inline void sync_dir_of(const std::string& path) noexcept
-{
-#if !defined(_WIN32)
-    std::string dir = path;
-    if (const auto slash = dir.find_last_of('/'); slash != std::string::npos) {
-        dir.resize(slash == 0 ? 1 : slash);
-    } else {
-        dir = ".";
-    }
-    if (const int fd = ::open(dir.c_str(), O_RDONLY); fd >= 0) {
-        (void)::fsync(fd);
-        ::close(fd);
-    }
-#else
-    (void)path;
 #endif
 }
 

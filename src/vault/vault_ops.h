@@ -44,10 +44,6 @@ template <typename NodeT>
 template <typename NodeT, typename Fn>
 void for_each_media(NodeT& n, Fn&& fn);
 
-// Copy a media node's live chunk(s) from `src` to `dst` verbatim (ciphertext —
-// no decrypt/re-encrypt), rewriting each offset to its new location.
-// Sets `err` to IoError on the first failed read/append. Used by compaction.
-void relocate_node_chunks(const ChunkStore& src, ChunkStore& dst, IndexNode& node, VaultResult& err);
 
 // Append `node` to `children`, catching an allocation-failure exception
 // (bad_alloc/length_error) from vector growth instead of letting it escape

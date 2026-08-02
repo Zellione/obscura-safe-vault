@@ -39,7 +39,7 @@ inline constexpr uint64_t INFLATE_SLACK     = 64;
 // fail on demand, so tests arm this counter to make the Nth upcoming
 // vector-buffer resize inside encode_frame/decode_frame throw (0 = the very
 // next resize). Disarmed by default and after firing. Mirrors
-// vault::fileutil's sync_fail_after/rename_fail_after pattern.
+// vault::fileutil's sync_fail_after pattern.
 inline int& resize_fail_after() noexcept
 {
     static int n = -1;
