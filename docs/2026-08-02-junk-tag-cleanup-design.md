@@ -26,12 +26,13 @@ matches, no commit happens and the summary says so. N/Esc cancels.
 
 The junk predicate lives in `ui` and `vault` must not depend on `ui`, so:
 
-- **`vault::Vault::prune_tags(bool (*keep)(std::string_view), PruneTagsStats*)`**
+- **`vault::Vault::prune_tags(const std::function<bool(std::string_view)>& keep, PruneTagsStats*)`**
   — walks the index recursively from the root, erases every tag for which
   `keep` returns false, and calls `commit_index()` once, only if anything
   changed. `PruneTagsStats` returns `tags_removed` / `nodes_touched`.
-  Plain function pointer (no `std::function` in vault, matching existing
-  style). Returns `Locked` when locked, `InvalidArg` for a null predicate.
+  The predicate is a `std::function` (SonarCloud S5205; cold path, so the
+  indirection is free). Returns `Locked` when locked, `InvalidArg` for an
+  empty predicate.
 - **`ui::TagOverviewScreen`** passes `ui::tag_has_renderable_text` as the
   policy; owns the `confirm_prune_` Y/N state and the summary display.
 

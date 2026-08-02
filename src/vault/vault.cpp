@@ -1164,11 +1164,12 @@ VaultResult Vault::add_tag(std::string_view node_path, std::string_view tag)
 namespace {
 
 // Depth-first tag prune over the index tree; counts into `stats`.
-void prune_node_tags(IndexNode& node, bool (*keep)(std::string_view), PruneTagsStats& stats)
+void prune_node_tags(IndexNode& node, const std::function<bool(std::string_view)>& keep,
+                     PruneTagsStats& stats)
 {
-    const auto removed = std::erase_if(node.tags,
-                                       [&](const std::string& t) { return !keep(t); });
-    if (removed > 0) {
+    if (const auto removed = std::erase_if(node.tags,
+                                           [&keep](const std::string& t) { return !keep(t); });
+        removed > 0) {
         stats.tags_removed += removed;
         ++stats.nodes_touched;
     }
@@ -1177,12 +1178,13 @@ void prune_node_tags(IndexNode& node, bool (*keep)(std::string_view), PruneTagsS
 
 }  // namespace
 
-VaultResult Vault::prune_tags(bool (*keep)(std::string_view), PruneTagsStats* stats)
+VaultResult Vault::prune_tags(const std::function<bool(std::string_view)>& keep,
+                              PruneTagsStats* stats)
 {
     using enum VaultResult;
     if (stats) *stats = {};
     if (!unlocked_) return Locked;
-    if (keep == nullptr) return InvalidArg;
+    if (!keep) return InvalidArg;
 
     PruneTagsStats local;
     prune_node_tags(root_, keep, local);

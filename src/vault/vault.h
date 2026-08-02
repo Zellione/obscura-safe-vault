@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -263,10 +264,11 @@ public:
 
     // Remove every tag on every node (root included) for which `keep` returns
     // false, in one index commit — no commit when nothing matched. The predicate
-    // is pure policy (e.g. ui::tag_has_renderable_text for the junk-tag cleanup);
-    // a plain function pointer keeps the vault free of caller state. `stats` (if
-    // non-null) is always written — zeroed on Locked/InvalidArg.
-    [[nodiscard]] VaultResult prune_tags(bool (*keep)(std::string_view), PruneTagsStats* stats);
+    // is pure policy (e.g. ui::tag_has_renderable_text for the junk-tag cleanup).
+    // `stats` (if non-null) is always written — zeroed on Locked/InvalidArg
+    // (InvalidArg for an empty predicate).
+    [[nodiscard]] VaultResult prune_tags(const std::function<bool(std::string_view)>& keep,
+                                         PruneTagsStats* stats);
 
     // Walk the decrypted in-memory tree; return every in-scope node whose name OR any
     // effective tag contains `query` (case-insensitive substring). Empty query matches
