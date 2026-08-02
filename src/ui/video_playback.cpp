@@ -40,6 +40,10 @@ constexpr size_t PREFETCH_DEPTH   = 2;           // packets kept queued ahead of
 constexpr size_t MAX_STEADY_IN_FLIGHT = 16;      // ceiling on in-flight packets outside an active seek —
                                                   // covers codec startup/B-frame reordering delay without
                                                   // letting the backlog grow without bound over a whole clip
+constexpr size_t SEEK_FEED_DEPTH      = 32;      // per-tick worker top-up while a seek's decode-forward is
+                                                  // pending (Phase 59): the gap is one-time and GOP-bounded,
+                                                  // so feed well ahead of PREFETCH_DEPTH to keep the worker
+                                                  // busy between render ticks without blocking on it
 }  // namespace
 
 #ifdef OSV_VENDORED_AV
@@ -183,6 +187,7 @@ struct VideoPlayback::Impl {
     // count is decremented by the worker itself as it finishes each job.)
     void consume_result(media::VideoDecodeWorker::Result& r)
     {
+        const bool resolving_seek = skip_pending_;
         skip_pending_ = false;  // the worker has published a real result for this
                                 // generation, so any seek-skip window has closed —
                                 // subsequent timeouts mean "still decoding", not
@@ -198,6 +203,10 @@ struct VideoPlayback::Impl {
         if (frame_.shown_pts >= 0.0 && p > frame_.shown_pts)
             frame_.frame_dt = std::max(1e-3, p - frame_.shown_pts);
         frame_.pending_pts = p;
+        if (resolving_seek)
+            model_.seek_to(p);  // realign the transport from the seek's requested target
+                                // to the frame the decode-forward actually landed on
+                                // (do_seek() no longer waits around to do this itself)
     }
 
     // Tops up the worker's queue to PREFETCH_DEPTH packets ahead (so the
@@ -206,7 +215,8 @@ struct VideoPlayback::Impl {
     // decoder_.next_frame()'s old blocking contract — the caller can rely on
     // pending_ being up to date when this returns — but the wait now
     // overlaps with the worker's own progress instead of being the decode
-    // itself.
+    // itself. Since Phase 59 only the constructor's first-frame decode uses
+    // this; seeks resolve asynchronously via try_advance_pending().
     //
     // While a seek target is pending (skip_pending_), the worker's own
     // decode-forward logic silently discards frames whose pts lands before
@@ -219,9 +229,7 @@ struct VideoPlayback::Impl {
     // than more time. So while skip_pending_
     // is set, feed one more packet on every wait_result() timeout before
     // retrying, uncapped — a seek's decode-forward gap is a one-time,
-    // GOP-bounded cost, not a per-frame recurring one, and the existing
-    // av_sync seek-realign test expects a seek to fully resolve within a
-    // single decode_into_pending() call.
+    // GOP-bounded cost, not a per-frame recurring one.
     //
     // Outside a pending seek, every submitted packet is still guaranteed to
     // eventually publish exactly one Result (frame or eof), so a timeout
@@ -326,15 +334,25 @@ struct VideoPlayback::Impl {
     // now", and leaving a stale non-null value in place would spin that
     // loop forever re-processing the same already-handled frame) and this
     // returns — the render loop just tries again on the next tick, which
-    // happens right away while animating() is true. do_seek() and the
-    // constructor's initial frame keep using the original blocking
-    // decode_into_pending(): a seek is a one-time, bounded user action
-    // where resolving within a single call is the expected (and already
-    // tested) contract, not a per-frame recurring cost.
+    // happens right away while animating() is true. Only the constructor's
+    // initial frame still uses the blocking decode_into_pending(): frame 0
+    // is a keyframe, so there is no decode-forward gap to wait through.
+    // Seeks resolve through here too (Phase 59): do_seek() used to block in
+    // decode_into_pending() until the decode-forward reached the target,
+    // which froze the render thread for seconds on long-GOP/slow-codec
+    // clips — now it just arms skip_pending_ and lets this per-tick path
+    // (with a deeper SEEK_FEED_DEPTH top-up) carry the seek to resolution.
     void try_advance_pending()
     {
         frame_.pending.reset();
-        prefetch_upto(PREFETCH_DEPTH);
+        // While a seek's decode-forward is pending, top the worker up far past
+        // the steady-state depth (Phase 59): the worker silently discards
+        // below-target frames without publishing Results, so per-tick it can
+        // burn through many packets — a shallow queue would leave it starved
+        // between ticks and stretch the seek out for no reason. The gap is
+        // one-time and GOP-bounded, the same reasoning the old blocking seek
+        // loop used for its uncapped feed.
+        prefetch_upto(skip_pending_ ? SEEK_FEED_DEPTH : PREFETCH_DEPTH);
 
         auto r = video_worker_->wait_result();
         for (;;) {
@@ -350,7 +368,9 @@ struct VideoPlayback::Impl {
                 // this call's own cost stays capped at a single
                 // wait_result(); if still more is needed, later ticks keep
                 // feeding one at a time until decode catches up.
-                if (video_worker_->outstanding() < MAX_STEADY_IN_FLIGHT && !demux_eof_)
+                if (const bool may_feed_more =
+                        skip_pending_ || video_worker_->outstanding() < MAX_STEADY_IN_FLIGHT;
+                    may_feed_more && !demux_eof_)
                     feed_one_packet();
                 return;   // caller retries next tick
             }
@@ -465,8 +485,9 @@ struct VideoPlayback::Impl {
         frame_.pending.reset();
         frame_.shown_pts = -1.0;
         frame_.eof = false;
-        decode_into_pending();
-        model_.seek_to(frame_.pending ? frame_.pending_pts : tt);
+        model_.seek_to(tt);      // transport (seek bar, clock label) jumps immediately;
+                                  // realigned to the decoded frame's actual pts by
+                                  // consume_result() once the seek resolves
         frame_.need_present = true;
     }
 
@@ -703,7 +724,13 @@ struct VideoPlayback::Impl {
     }
 
     [[nodiscard]] bool valid() const { return valid_; }
-    [[nodiscard]] bool animating() const { return valid_ && model_.playing(); }
+    [[nodiscard]] bool animating() const
+    {
+        // A pending seek needs render ticks to resolve even while paused —
+        // skip_pending_ keeps App::run()'s poll gate open until the first
+        // post-seek result lands (Phase 59).
+        return valid_ && (model_.playing() || skip_pending_);
+    }
     [[nodiscard]] bool has_audio() const { return decoder_.has_audio(); }
     [[nodiscard]] double position() const { return clock(); }
     [[nodiscard]] bool audio_active() const
