@@ -81,7 +81,17 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   height minus the reserved `FOOTER_H` status band, via `grid_bands`) is the SINGLE
   content-bottom source: visible-range culling, the render clip rects, `ensure_visible` /
   `clamp_scroll`, and hit_test all use it, so tiles/rows stop above the footer instead of
-  scrolling under its text. `render_grid`/`render_list` take `bottom`, NOT the window height.
+  scrolling under its text. Scroll-to-selection is a ONE-SHOT request, not per-frame: private
+  `ScrollFollow{None,Ensure,Center}` member `follow_`, applied then cleared by
+  `update_scroll_to_selection` (which itself only clamps every call — following every frame
+  would fight the mouse wheel, which scrolls without moving the selection → snap-back jitter).
+  Arrow keys and the `L` density cycle request `Ensure` (minimal `ui::ensure_visible`);
+  on_enter / go_up / open_selected-descend / jump_to_gallery request `Center`
+  (`ui::center_scroll` in grid_layout — unclamped centering, then `clamp_scroll` = "as centered
+  as the range allows"). on_enter applies the follow immediately (apply_nav runs after this
+  frame's update(), so deferring would paint the first frame uncentered for up to an idle
+  heartbeat). on_vault_changed deliberately requests nothing — an import drain keeps the
+  user's scroll. `render_grid`/`render_list` take `bottom`, NOT the window height.
   hit_test rejects `my` outside `[OY, content_bottom)` — the chrome is not pickable.
   **Phase 50:** Gain `on_vault_changed()` virtual (overridden by GalleryGrid/ImageViewer/FavoritesScreen/AdvancedSearchScreen);
   called by App when the index tree changes (import drain, add/delete, etc.) to refetch stale IndexNode* refs. Password-at-enqueue
@@ -132,7 +142,10 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   and only then shows the summary modal (`import_summary_`, non-empty exactly while up,
   any key dismisses, owns every key while up). A failed commit sets `error_` and shows no
   modal — a failed write is never reported as a successful import. **Phase 56:** prompt geometry
-  derives from `prompt_layout.*` module.
+  derives from `prompt_layout.*` module. **PR #148:** `Ctrl+X` junk-tag cleanup — Y/N confirm
+  modal (compact-confirm pattern) -> `Vault::prune_tags(tag_has_renderable_text, &stats)` ->
+  summary modal "Removed N junk tags from M items" + `reload()`. The summary modal's title is
+  the `summary_title_` member (dict import and cleanup each set their own).
 - `tag_galleries.*` — galleries-only view of galleries directly carrying one tag
   (`NavKind::ToTagGalleries`, tag in Nav::path); thin FavoritesScreen subclass over
   `VaultSearch::galleries_with_tag` whose `go_back()` returns to the overview. Tab toggles to
@@ -207,13 +220,20 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   play/pause (restores a resume bookmark right after ctor; playback opens paused). Impl demuxes
   (`demux_next_video_packet()`) + submits packets by `generation_`, reads back Results. Shared
   helpers `feed_one_packet()`/`prefetch_upto()`/`consume_result()`: `decode_into_pending()`
-  blocks (bounded by `wait_result()`'s ~20ms timeout, retried) — used by the ctor's first frame
-  + `do_seek()`; `try_advance_pending()` is the steady path, a single `wait_result()` (no
-  retry) so `render()` never blocks >~20ms under a slow codec. Both keep the worker's
-  `outstanding()` backlog to `PREFETCH_DEPTH` packets ahead and, on a miss, feed one more up to
-  `MAX_STEADY_IN_FLIGHT` (uncapped while `skip_pending_` is set, since a seek's decode-forward
-  gap is one-time GOP-bounded). `do_seek()` bumps `generation_` + calls `begin_seek()`;
-  stale-generation Results are discarded (the worker un-counts every finished job incl.
+  blocks (bounded by `wait_result()`'s ~20ms timeout, retried) — used ONLY by the ctor's first
+  frame (pts 0 is a keyframe, no decode-forward gap); `try_advance_pending()` is the steady
+  path, a single `wait_result()` (no retry) so `render()` never blocks >~20ms under a slow
+  codec. Both keep the worker's `outstanding()` backlog to `PREFETCH_DEPTH` packets ahead and,
+  on a miss, feed one more up to `MAX_STEADY_IN_FLIGHT`.
+  **Seeks are asynchronous (Phase 59):** `do_seek()` is a pure state transition — demux reseek
+  (`seek_demux_only`), `++generation_` + `begin_seek()`, audio re-base, `model_.seek_to(target)`
+  (transport jumps immediately) — and returns without waiting; the last-shown frame stays up
+  until the first at-or-after-target frame lands. While `skip_pending_` is set (a seek's
+  decode-forward in progress): `animating()` reports true even when paused (keeps App::run's
+  poll gate open so the seek gets ticks), `try_advance_pending()` tops up to `SEEK_FEED_DEPTH`
+  (32) instead of `PREFETCH_DEPTH` and feeds uncapped on timeout (one-time GOP-bounded gap),
+  and `consume_result()` realigns the transport to the decoded frame's actual pts on resolve.
+  Stale-generation Results are discarded (the worker un-counts every finished job incl.
   silently-discarded seek frames, so no phantom backlog wedges feed). Impl's audio + pending-
   frame state each live in nested `AudioState`/`FrameState` structs (SonarQube struct-size).
 - `playback_model.*` — pure video transport maths: clock/clamp/seek-bar map/mm:ss/frame-due
@@ -427,7 +447,8 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `meta_json.*` — pure archive meta.json parser (nlohmann/json, header-only): `parse_meta_json`
   (tolerant, exception-free) -> `ArchiveMeta{title_english,title_japanese,tags}`;
   `meta_gallery_name` (english->japanese->fallback; '/'->'_') + `meta_gallery_tags` (japanese
-  title first, searchable). Unit-tested.
+  title first, searchable; tags failing `tag_has_renderable_text` — CJK-only titles, bracket
+  shells — are dropped, PR #148). Unit-tested.
 
 ## Background import queue (Phase 50)
 - `import_queue.*` — `ImportQueue`: lifecycle managed by App (owns one, destroyed on app shutdown).
@@ -602,6 +623,11 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `tag_list_parse.*` — `parse_tag_list(span)` -> normalised tags (split LF, trim, drop blanks,
   ci de-dupe keeping first casing, `TAG_MAX_BYTES=0xFFFF`, cap INDEX_MAX_TAGS; non-UTF-8
   opaque). GalleryGrid `Shift+G` on a gallery tile opens a .txt dialog -> add_tag each (merge).
+  Also home of `tag_has_renderable_text(sv)` (PR #148): true iff the tag has ≥1 ASCII
+  letter/digit — the font atlas is printable-ASCII-only, so a failing tag renders as an empty
+  bracket shell (`[()]`, `[]`, `()`) or a blank chip. Every tag-import parse point drops
+  failing tags (`parse_tag_list` lines, `meta_gallery_tags`); it is also the junk predicate
+  for `Vault::prune_tags` (Ctrl+X cleanup, see tag_overview).
 - `tag_json_parse.*` (Phase 55) — `parse_tag_dict_json(span) -> TagDictParseResult{entries,
   malformed_skipped, fields_truncated, over_cap_skipped}`. Exception-free nlohmann
   (`allow_exceptions=false`, guards, no try/catch — the `meta_json.cpp` pattern). Accepts a
