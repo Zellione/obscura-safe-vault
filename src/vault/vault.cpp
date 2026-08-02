@@ -1538,9 +1538,9 @@ VaultResult Vault::compact(OpProgress* progress)
             planned_mib += (units[m.unit_id].length >> 20) + 1;
         if (progress) progress->total.store(static_cast<int>(planned_mib));
 
-        MoveExecState state{units,       offset_fields,      store,    ctx, progress, planned_mib,
-                            moved_bytes, moved_since_commit, cancelled};
-        if (execute_pass_moves(moves, state, BATCH_BYTES) != Ok) {
+        if (MoveExecState state{units, offset_fields, store, ctx, progress, planned_mib,
+                                moved_bytes, moved_since_commit, cancelled};
+            execute_pass_moves(moves, state, BATCH_BYTES) != Ok) {
             return IoError;
         }
         // Pass boundary commit: legalises this pass's vacated space for the
