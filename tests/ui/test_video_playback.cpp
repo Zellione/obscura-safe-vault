@@ -461,9 +461,15 @@ TEST(video_playback_seek_moves_position_and_stays_paused)
         CHECK_EQ(vp.position(), 0.0);
 
         vp.seek(0.3);
-        vp.render(r, font, {0, 0, 320, 240});
-        CHECK(vp.position() >= 0.2);   // moved close to the requested target
-        CHECK_FALSE(vp.animating());   // still paused after the seek
+        CHECK(vp.position() >= 0.2);   // transport jumps to the target immediately
+
+        // The seek resolves asynchronously (Phase 59): animating() stays true
+        // (demanding render ticks) until the first post-seek frame lands, then
+        // drops back to false — the clip itself never left the paused state.
+        for (int i = 0; i < 1000 && vp.animating(); ++i)
+            vp.render(r, font, {0, 0, 320, 240});
+        CHECK(vp.position() >= 0.2);   // realigned near the requested target
+        CHECK_FALSE(vp.animating());   // resolved, and still paused
     }
 
     SDL_DestroyRenderer(sr);
@@ -738,8 +744,9 @@ TEST(video_playback_render_does_not_block_render_thread_during_slow_decode)
     //
     // The fix: steady playback now polls the worker with a short bounded
     // wait (try_advance_pending(), added alongside the existing blocking
-    // decode_into_pending() which do_seek() and the constructor's initial
-    // frame still use) — if the next frame isn't ready within that bound,
+    // decode_into_pending() which only the constructor's initial frame
+    // still uses, seeks having gone async in Phase 59) — if the next
+    // frame isn't ready within that bound,
     // render() just keeps showing the last-uploaded texture and returns,
     // so the outer event loop keeps cycling. This test asserts no render()
     // call takes anywhere near the artificial per-frame decode delay.
@@ -793,6 +800,73 @@ TEST(video_playback_render_does_not_block_render_thread_during_slow_decode)
         // regression check (an unbounded-blocking reintroduction would
         // still show ~200ms, nowhere close to this threshold).
         CHECK(max_ms < 50);
+    }
+
+    SDL_DestroySurface(surf);
+}
+
+TEST(video_playback_seek_does_not_block_render_thread_during_slow_decode)
+{
+    // A seek's decode-forward from the anchor keyframe to the target used to
+    // run to completion inside do_seek() (the blocking decode_into_pending()),
+    // on the render thread. With a long GOP or a slow software codec that is
+    // seconds of frozen UI per seek — no event pumping, compositor marks the
+    // window unresponsive. The async-seek contract asserted here:
+    //   (a) seek() returns without waiting for any decode result;
+    //   (b) while the seek is resolving, animating() reports true even though
+    //       the clip is paused — App::run()'s poll gate, so the pending seek
+    //       keeps getting ticks and can actually finish;
+    //   (c) pumping update()/render() resolves the seek (animating() drops
+    //       back to false, the clip still being paused) with the transport
+    //       realigned near the target.
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+    auto vbytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");   // 10 frames, no audio
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("async_seek");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        // 300ms artificial per-job decode delay: a blocking seek must wait
+        // for at least one decoded frame, so it cannot return in under
+        // 300ms; the async one never waits on a decode result at all.
+        ui::VideoPlayback vp(v, *node, std::chrono::milliseconds(300));
+        REQUIRE(vp.valid());
+        const SDL_FRect area{0, 0, 320, 240};
+
+        vp.render(r, font, area);       // first frame (construction path; not measured)
+        CHECK_FALSE(vp.animating());    // paused
+
+        const auto t0 = std::chrono::steady_clock::now();
+        vp.seek(0.2);
+        const auto seek_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::steady_clock::now() - t0)
+                                 .count();
+        CHECK(seek_ms < 100);           // (a) returned without a 300ms decode wait
+        CHECK(vp.position() >= 0.15);   // seek bar/transport jumped immediately
+        CHECK(vp.animating());          // (b) pending seek demands ticks while paused
+
+        // (c) Pump ticks until the seek resolves. Decode-forward is at most
+        // ~10 frames x 300ms plus scheduling slack; cap generously.
+        for (int i = 0; i < 1000 && vp.animating(); ++i) {
+            vp.update(1.0 / 30.0);
+            vp.render(r, font, area);
+        }
+        CHECK_FALSE(vp.animating());    // resolved, and still paused
+        CHECK(vp.position() >= 0.15);   // realigned near the target
     }
 
     SDL_DestroySurface(surf);
