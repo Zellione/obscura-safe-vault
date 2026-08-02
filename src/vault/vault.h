@@ -297,12 +297,17 @@ public:
     // needed to know what is live.
     [[nodiscard]] uint64_t wasted_bytes() const;
 
-    // Rewrite the vault to hold only live data: copy live chunks verbatim into
-    // a new file, write a fresh index + header, fsync, then atomically rename
-    // over the original. Reclaims wasted_bytes(). Invalidates all IndexNode
-    // pointers previously returned by list().
-    // If progress is provided, tracks total/done in chunks copied and honors cancel
-    // between chunks, aborting before the atomic rename (original always intact).
+    // Compact the vault IN PLACE (Phase 60): pack live chunks down into dead
+    // space (deleted chunks + superseded index blobs), commit the index in
+    // batches via the crash-safe slot swap, write the final index blob just
+    // after the packed data, then truncate the dead tail (+ hole-punch any
+    // residual gaps where supported). Byte-verbatim ciphertext moves — never
+    // a decrypt. O(1) extra disk: no temp copy, no rename, handles stay open.
+    // Crash-safe by construction: a move's destination is always dead per the
+    // last-committed index, so a crash at any instant reopens to a valid,
+    // partially-compacted vault; re-running continues. Cancel (via progress)
+    // keeps completed work and returns Ok; progress counts MiB moved.
+    // Invalidates all IndexNode pointers previously returned by list().
     [[nodiscard]] VaultResult compact(OpProgress* progress = nullptr);
 
     // Reclaim orphaned chunk space IN PLACE by punching holes in the dead spans

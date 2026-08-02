@@ -264,40 +264,6 @@ TEST(compact_requires_unlocked_vault)
     CHECK_EQ(v2.wasted_bytes(), 0u);  // unknown while locked
 }
 
-TEST(compact_rename_failure_keeps_original_vault_usable)
-{
-    TempVault tv("renamefail");
-    const auto keep = pattern(8 * 1024, 9);
-
-    vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-            == vault::VaultResult::Ok);
-    REQUIRE(v.add_image("", pattern(100 * 1024, 6), "gone.bin") == vault::VaultResult::Ok);
-    REQUIRE(v.add_image("", keep, "keep.bin")                   == vault::VaultResult::Ok);
-    REQUIRE(v.remove_image("", "gone.bin") == vault::VaultResult::Ok);
-
-    // The atomic-commit rename fails: compact() must report IoError, leave the
-    // original vault file in place, and reacquire its handle (the temp file's
-    // contents must never become the vault without a successful rename).
-    vault::fileutil::inject_rename_failure(0);
-    CHECK_EQ(v.compact(), vault::VaultResult::IoError);
-    vault::fileutil::clear_rename_failure();
-
-    CHECK_TRUE(v.wasted_bytes() > 0);  // nothing was reclaimed
-    auto kids = v.list("");
-    REQUIRE(kids.size() == 1);
-    crypto::SecureBytes out;
-    REQUIRE(v.read_image(*kids[0], out) == vault::VaultResult::Ok);
-    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(keep));
-
-    // A later compact (rename now succeeding) completes normally.
-    REQUIRE(v.compact() == vault::VaultResult::Ok);
-    CHECK_EQ(v.wasted_bytes(), 0u);
-    crypto::SecureBytes again;
-    REQUIRE(v.read_image(*v.list("")[0], again) == vault::VaultResult::Ok);
-    CHECK_BYTES_EQ(again.as_span(), std::span<const uint8_t>(keep));
-}
-
 // Phase 15 PR2: video chunks must survive compaction (regression test for
 // data-loss bug where compact() only copied image chunks, leaving video
 // chunks pointing into the discarded original file).
@@ -414,7 +380,7 @@ TEST(compact_preserves_both_image_and_video_when_deleting_image)
 }
 
 // Phase 26: compact with OpProgress tracking and cancellation support.
-TEST(compact_progress_tracks_chunks_copied)
+TEST(compact_progress_reaches_total)
 {
     TempVault tv("progress_track");
     vault::Vault v;
@@ -468,87 +434,6 @@ TEST(compact_cancel_before_start_is_noop)
     CHECK_TRUE(v.wasted_bytes() > 0);
 }
 
-TEST(compact_cancel_mid_operation_leaves_original_intact)
-{
-    // Genuine mid-loop cancel test: run compact on a vault with multiple chunks
-    // in a background thread, spin-wait until done >= 1, then set cancel.
-    // Structure the assertion to accept either:
-    //   (a) cancelled with original intact, or
-    //   (b) completed successfully.
-    // Run the race ~10 times to give it a chance to hit the mid-loop window.
-    // This test may pass "trivially" (cancel too late, compact finishes) —
-    // that is acceptable; the important case is when cancel arrives mid-loop,
-    // original must be intact and no temp file left.
-
-    for (int iteration = 0; iteration < 10; ++iteration) {
-        TempVault tv(("cancel_mid_" + std::to_string(iteration)).c_str());
-        vault::Vault v;
-        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-                == vault::VaultResult::Ok);
-
-        // Create multiple images so we have multiple chunks to compact.
-        REQUIRE(v.add_image("", pattern(100 * 1024, 1), "a.bin") == vault::VaultResult::Ok);
-        REQUIRE(v.add_image("", pattern(100 * 1024, 2), "b.bin") == vault::VaultResult::Ok);
-        REQUIRE(v.add_image("", pattern(100 * 1024, 3), "c.bin") == vault::VaultResult::Ok);
-        REQUIRE(v.remove_image("", "a.bin") == vault::VaultResult::Ok);
-        REQUIRE(v.remove_image("", "b.bin") == vault::VaultResult::Ok);
-
-        const uint64_t size_before = size_on_disk(tv.path);
-        const uint64_t waste_before = v.wasted_bytes();
-        REQUIRE(waste_before > 0);  // ensure we have waste to reclaim
-
-        vault::OpProgress prog;
-        vault::VaultResult compact_result = vault::VaultResult::IoError;  // sentinel; overwritten by thread
-        std::atomic<bool> cancel_sent(false);
-
-        // Run compact on a background thread.
-        std::thread t([&v, &prog, &compact_result]() {
-            compact_result = v.compact(&prog);
-        });
-
-        // Spin-wait until done >= 1 (compaction has started processing chunks),
-        // then set cancel. Use a generous hard timeout (1 second) to avoid infinite
-        // waits if the test framework hangs.
-        auto start = std::chrono::steady_clock::now();
-        const auto timeout = std::chrono::seconds(1);
-        while (std::chrono::steady_clock::now() - start < timeout) {
-            if (prog.done.load() >= 1) {
-                prog.cancel.store(true);
-                cancel_sent.store(true);
-                break;
-            }
-            std::this_thread::yield();
-        }
-
-        // Join the worker thread.
-        t.join();
-
-        // Verify the outcome: either cancelled or completed successfully.
-        if (compact_result == vault::VaultResult::Ok) {
-            // Compact completed successfully (cancel too late, or not sent).
-            // File may be smaller after reclaiming waste, or slightly larger due to index overhead.
-            CHECK_TRUE(size_on_disk(tv.path) <= size_before + 4096);  // allow small overhead
-        } else {
-            // Compact failed (cancel succeeded mid-loop): original must be untouched.
-            CHECK_EQ(size_on_disk(tv.path), size_before);
-        }
-
-        // Vault must still be usable.
-        auto kids = v.list("");
-        REQUIRE(kids.size() == 1);  // only "c.bin" remains
-        crypto::SecureBytes out;
-        REQUIRE(v.read_image(*kids[0], out) == vault::VaultResult::Ok);
-
-        // No temp file should remain in the directory.
-        for (const auto& entry : fs::directory_iterator(fs::temp_directory_path())) {
-            const auto fname = entry.path().filename().string();
-            if (fname.find("compact_tmp") != std::string::npos) {
-                CHECK_FALSE(true);  // stray temp file found
-            }
-        }
-    }
-}
-
 TEST(compact_progress_nullptr_succeeds)
 {
     TempVault tv("progress_null");
@@ -599,36 +484,6 @@ TEST(wipe_and_remove_zeroes_and_deletes_file)
 
     // File should no longer exist.
     CHECK_FALSE(fs::exists(temp_path));
-}
-
-// Test that compact leaves no .old file after successful completion.
-TEST(compact_removes_old_file_after_success)
-{
-    TempVault tv("old_file_cleanup");
-    const auto keep = pattern(80 * 1024, 7);
-
-    vault::Vault v;
-    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
-            == vault::VaultResult::Ok);
-
-    // Create waste to compact.
-    REQUIRE(v.add_image("", pattern(100 * 1024, 3), "gone.bin") == vault::VaultResult::Ok);
-    REQUIRE(v.add_image("", keep, "keep.bin")                   == vault::VaultResult::Ok);
-    REQUIRE(v.remove_image("", "gone.bin") == vault::VaultResult::Ok);
-
-    const std::string old_path = tv.str() + ".old";
-
-    // After compact, there should be no .old file.
-    REQUIRE(v.compact() == vault::VaultResult::Ok);
-    CHECK_FALSE(fs::exists(old_path));
-
-    // The original vault file should exist and be usable.
-    CHECK_TRUE(fs::exists(tv.path));
-    auto kids = v.list("");
-    REQUIRE(kids.size() == 1);
-    crypto::SecureBytes out;
-    REQUIRE(v.read_image(*kids[0], out) == vault::VaultResult::Ok);
-    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(keep));
 }
 
 // --- in-place hole-punch reclamation (Vault::reclaim) -------------------------
@@ -714,42 +569,191 @@ TEST(reclaim_on_a_locked_vault_reports_locked)
     CHECK_EQ(v.reclaim(), vault::VaultResult::Locked);
 }
 
-// Phase 58 regression: compact() must reopen thumb_fp_ after atomic rename.
-// Without this fix, thumbnail reads return stale handle errors after compact.
-TEST(compact_reopens_thumb_fp_for_thumbnail_reads_after_atomic_rename)
+// Phase 60: in-place compact must not need a second copy of the vault. The
+// strongest observable proxy without an rlimit sandbox: no sibling temp file
+// is ever created, and the file's own size never exceeds its starting size
+// plus one commit's overhead (index blob + slack), monitored from a watcher
+// thread while compact runs.
+TEST(compact_in_place_never_creates_a_second_file)
 {
-    TempVault tv("compact_thumb_reopen");
-    const auto decodable_jpeg = fixtures::solid_jpeg(64, 48, 10, 200, 30);
-
+    TempVault tv("inplace_nofile");
     vault::Vault v;
     REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
             == vault::VaultResult::Ok);
+    for (int i = 0; i < 8; ++i) {
+        REQUIRE(v.add_image("", random_payload(64 * 1024),
+                            "img" + std::to_string(i) + ".bin")
+                == vault::VaultResult::Ok);
+    }
+    REQUIRE(v.remove_image("", "img0.bin") == vault::VaultResult::Ok);
+    REQUIRE(v.remove_image("", "img3.bin") == vault::VaultResult::Ok);
 
-    // Add a decodable image that gets a thumbnail stored.
-    REQUIRE(v.add_image("", decodable_jpeg, "pic.jpg") == vault::VaultResult::Ok);
+    const uint64_t size_before = size_on_disk(tv.path);
+    std::atomic<bool> stop{false};
+    uint64_t peak = 0;
+    std::atomic<bool> saw_temp{false};
+    std::thread watcher([&] {
+        while (!stop.load()) {
+            peak = std::max(peak, size_on_disk(tv.path));
+            if (fs::exists(tv.str() + ".compact") || fs::exists(tv.str() + ".old"))
+                saw_temp.store(true);
+            std::this_thread::yield();
+        }
+    });
+    REQUIRE(v.compact() == vault::VaultResult::Ok);
+    stop.store(true);
+    watcher.join();
 
-    // Add a dead image to create waste for compact to reclaim.
-    REQUIRE(v.add_image("", random_payload(100 * 1024), "dead.bin") == vault::VaultResult::Ok);
-    REQUIRE(v.remove_image("", "dead.bin") == vault::VaultResult::Ok);
+    CHECK_FALSE(saw_temp.load());
+    // In-place: the file may grow by batch-commit blobs, never by a data copy.
+    CHECK_TRUE(peak <= size_before + 64 * 1024);
+    CHECK_TRUE(size_on_disk(tv.path) < size_before);
+    CHECK_EQ(v.wasted_bytes(), 0u);
+}
 
-    // Get the image node and verify it has a thumbnail.
-    auto kids = v.list("");
-    REQUIRE(kids.size() == 1);
-    const auto* node = kids[0];
-    REQUIRE(node->meta.thumb_length > 0);
+// The stuck-hole case: a small hole in front of larger units cannot be packed
+// (an overlapping slide is forbidden by the crash-safety rule). compact() must
+// converge, keep every image intact, and leave only the bounded residual.
+TEST(compact_stuck_hole_leaves_bounded_residual_and_intact_data)
+{
+    TempVault tv("stuckhole");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    // small (4 KiB, will be deleted) then three big 256 KiB images: the 4 KiB
+    // hole fits no big unit, so it survives packing as logical residual.
+    REQUIRE(v.add_image("", random_payload(4 * 1024), "small.bin") == vault::VaultResult::Ok);
+    std::vector<std::vector<uint8_t>> big;
+    for (int i = 0; i < 3; ++i) {
+        big.push_back(random_payload(256 * 1024));
+        REQUIRE(v.add_image("", big.back(), "big" + std::to_string(i) + ".bin")
+                == vault::VaultResult::Ok);
+    }
+    REQUIRE(v.remove_image("", "small.bin") == vault::VaultResult::Ok);
 
-    // Compact the vault (triggers atomic rename sequence).
     REQUIRE(v.compact() == vault::VaultResult::Ok);
 
-    // Refresh the node list since compact may invalidate pointers.
-    kids = v.list("");
-    REQUIRE(kids.size() == 1);
-    const auto* node_after = kids[0];
-    REQUIRE(node_after->meta.thumb_length > 0);
+    // Residual bound: the stuck hole (~4 KiB + AEAD framing) plus superseded
+    // index blobs too small to host any 256 KiB unit, plus commit slack.
+    CHECK_TRUE(v.wasted_bytes() <= 32 * 1024);
+    auto kids = v.list("");
+    REQUIRE(kids.size() == 3);
+    for (const auto* k : kids) {
+        crypto::SecureBytes out;
+        REQUIRE(v.read_image(*k, out) == vault::VaultResult::Ok);
+    }
+    // Cold reopen still unlocks and reads everything.
+    v.lock();
+    REQUIRE(v.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+    for (const auto* k : v.list("")) {
+        crypto::SecureBytes out;
+        REQUIRE(v.read_image(*k, out) == vault::VaultResult::Ok);
+    }
+}
 
-    // CRITICAL TEST: read_thumbnail must work after compact.
-    // Without the fix (thumb_fp_ not reopened), this reads from the renamed-away file.
-    crypto::SecureBytes thumb;
-    REQUIRE(v.read_thumbnail(*node_after, thumb) == vault::VaultResult::Ok);
-    CHECK_TRUE(thumb.size() > 0);  // thumbnail decrypted successfully, not stale/empty
+// Crash-safety: a sync failure mid-compact aborts with the last committed
+// index intact — a cold reopen from disk must see every image, whatever step
+// the failure hit. Sweeping N over the first dozen sync calls covers phase A
+// (blob append), B (slot write) and C (flip) of both batch and final commits.
+TEST(compact_survives_sync_failure_at_every_step)
+{
+    for (int n = 0; n < 12; ++n) {
+        TempVault tv(("synfail" + std::to_string(n)).c_str());
+        std::vector<std::vector<uint8_t>> keep;
+        {
+            vault::Vault v;
+            REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+                    == vault::VaultResult::Ok);
+            REQUIRE(v.add_image("", random_payload(64 * 1024), "gone.bin")
+                    == vault::VaultResult::Ok);
+            for (int i = 0; i < 3; ++i) {
+                keep.push_back(random_payload(48 * 1024));
+                REQUIRE(v.add_image("", keep.back(),
+                                    "keep" + std::to_string(i) + ".bin")
+                        == vault::VaultResult::Ok);
+            }
+            REQUIRE(v.remove_image("", "gone.bin") == vault::VaultResult::Ok);
+
+            vault::fileutil::inject_sync_failure(n);
+            const auto r = v.compact();
+            vault::fileutil::clear_sync_failure();
+            // Either the injected failure surfaced (IoError) or compact used
+            // fewer than n syncs and succeeded — both must leave a valid vault.
+            REQUIRE((r == vault::VaultResult::Ok) || (r == vault::VaultResult::IoError));
+        }  // dtor closes like a crash
+
+        vault::Vault v2;
+        REQUIRE(vault::Vault::open(tv.str(), v2) == vault::VaultResult::Ok);
+        REQUIRE(v2.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+        auto kids = v2.list("");
+        REQUIRE(kids.size() == 3);
+        for (size_t i = 0; i < kids.size(); ++i) {
+            crypto::SecureBytes out;
+            REQUIRE(v2.read_image(*kids[i], out) == vault::VaultResult::Ok);
+        }
+        // And a rerun converges from wherever the abort left the file.
+        REQUIRE(v2.compact() == vault::VaultResult::Ok);
+    }
+}
+
+// Cancel keeps the work done so far and a rerun finishes the job.
+TEST(compact_cancel_keeps_partial_progress_and_rerun_converges)
+{
+    TempVault tv("cancel_keep");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", random_payload(200 * 1024), "gone.bin") == vault::VaultResult::Ok);
+    const auto keep = random_payload(100 * 1024);
+    REQUIRE(v.add_image("", keep, "keep.bin") == vault::VaultResult::Ok);
+    REQUIRE(v.remove_image("", "gone.bin") == vault::VaultResult::Ok);
+
+    // Cancel as soon as the first move lands: done>=1 then cancel (same
+    // spin-wait pattern as the old mid-cancel test, but the outcome is now
+    // deterministic: Ok either way, vault valid, progress kept).
+    vault::OpProgress prog;
+    vault::VaultResult r = vault::VaultResult::IoError;
+    std::thread t([&] { r = v.compact(&prog); });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (prog.done.load() >= 1) { prog.cancel.store(true); break; }
+        std::this_thread::yield();
+    }
+    t.join();
+    REQUIRE(r == vault::VaultResult::Ok);
+
+    crypto::SecureBytes out;
+    auto kids = v.list("");
+    REQUIRE(kids.size() == 1);
+    REQUIRE(v.read_image(*kids[0], out) == vault::VaultResult::Ok);
+    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(keep));
+
+    // Rerun (no cancel) reclaims everything that remains.
+    REQUIRE(v.compact() == vault::VaultResult::Ok);
+    CHECK_EQ(v.wasted_bytes(), 0u);
+    REQUIRE(v.read_image(*v.list("")[0], out) == vault::VaultResult::Ok);
+    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(keep));
+}
+
+// A framed (compressed) vault compacts identically — moves are byte-verbatim,
+// so framing must be irrelevant to packing. (Vault::create writes framed
+// vaults by default since Phase 26; this pins that assumption explicitly by
+// exercising compact on a vault that stores compressible data.)
+TEST(compact_preserves_framed_vault_content)
+{
+    TempVault tv("framed");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    const auto compressible = pattern(300 * 1024, 7);  // deflates well
+    REQUIRE(v.add_image("", random_payload(100 * 1024), "gone.bin") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", compressible, "keep.bin") == vault::VaultResult::Ok);
+    REQUIRE(v.remove_image("", "gone.bin") == vault::VaultResult::Ok);
+    REQUIRE(v.compact() == vault::VaultResult::Ok);
+
+    v.lock();
+    REQUIRE(v.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+    crypto::SecureBytes out;
+    REQUIRE(v.read_image(*v.list("")[0], out) == vault::VaultResult::Ok);
+    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(compressible));
 }

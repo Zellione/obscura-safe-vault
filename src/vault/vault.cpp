@@ -14,6 +14,7 @@
 
 #include "chunk_codec.h"
 #include "chunk_store.h"
+#include "compact_plan.h"
 #include "file_util.h"
 #include "safe_name.h"
 
@@ -1331,42 +1332,44 @@ void collect_media_spans(const IndexNode& n, std::vector<std::pair<uint64_t, uin
     }
 }
 
-// Count total chunks to copy for progress reporting.
-void count_compact_chunks(const IndexNode& root, int& total_chunks)
+// Gather every movable on-disk span from `root` (image data + thumb, video
+// chunks + poster) as planner units, with a parallel back-reference to the
+// node field so an executed move can update the tree copy. unit.id is the
+// index into both vectors.
+void collect_units(IndexNode& root,
+                   std::vector<compact_plan::Unit>& units,
+                   std::vector<uint64_t*>& offset_fields)
 {
-    for_each_media(root, [&total_chunks](const IndexNode& node) {
-        if (node.is_image()) {
-            ++total_chunks;  // data + thumb each are separate for counting
-        } else if (node.is_video()) {
-            total_chunks += static_cast<int>(node.vmeta.chunks.size()) + 1;  // +1 for poster
+    for_each_media(root, [&](IndexNode& n) {
+        auto add = [&](uint64_t& offset, uint64_t length) {
+            if (length == 0) return;
+            units.push_back({offset, length, static_cast<uint32_t>(units.size())});
+            offset_fields.push_back(&offset);
+        };
+        if (n.is_image()) {
+            add(n.meta.data_offset, n.meta.data_length);
+            add(n.meta.thumb_offset, n.meta.thumb_length);
+        } else if (n.is_video()) {
+            for (VideoChunk& c : n.vmeta.chunks) add(c.offset, c.length);
+            add(n.vmeta.poster_offset, n.vmeta.poster_length);
         }
     });
 }
 
-// Copy all chunks with progress tracking and cancellation support.
-VaultResult copy_compact_chunks(IndexNode& root, const ChunkStore& src, ChunkStore& dst,
-                                 OpProgress* progress)
+// Stream one unit's bytes to its destination through a bounded buffer. The
+// destination is dead space (disjoint from every live span including the
+// source), so slice order is irrelevant and no whole-unit RAM copy is needed.
+// Ciphertext is moved verbatim — no decrypt, invariant #1 untouched.
+bool stream_move(ChunkStore& store, uint64_t src, uint64_t dest, uint64_t length)
 {
-    using enum VaultResult;
-    VaultResult copy_err = Ok;
-    int chunks_done = 0;
-    for_each_media(root, [progress, &copy_err, &src, &dst, &chunks_done](IndexNode& node) {
-        // Check for cancellation before processing each node.
-        if (progress && progress->cancel.load()) {
-            copy_err = VaultResult::Ok;  // signal to abort, but it's not an error
-            return;         // Early return from lambda
-        }
-        relocate_node_chunks(src, dst, node, copy_err);
-        if (progress) {
-            if (node.is_image()) {
-                ++chunks_done;
-            } else if (node.is_video()) {
-                chunks_done += static_cast<int>(node.vmeta.chunks.size()) + 1;
-            }
-            progress->done.store(chunks_done);
-        }
-    });
-    return copy_err;
+    constexpr uint64_t SLICE = 1u << 20;  // 1 MiB
+    std::vector<uint8_t> buf;
+    for (uint64_t i = 0; i < length; i += SLICE) {
+        const uint64_t n = std::min(SLICE, length - i);
+        if (!store.read_raw(src + i, n, buf)) return false;
+        if (!store.write_raw_at(dest + i, buf)) return false;
+    }
+    return true;
 }
 
 }  // namespace
@@ -1404,181 +1407,145 @@ uint64_t Vault::wasted_bytes() const
 VaultResult Vault::compact(OpProgress* progress)
 {
     using enum VaultResult;
-    if (!unlocked_) return Locked;
+    if (!unlocked_ || !fp_) return Locked;
+    // Early cancel is a true no-op: not even an index commit (a UI cancel that
+    // races the job start must leave the file byte-identical).
+    if (progress && progress->cancel.load()) return Ok;
 
-    const std::string tmp_path = path_ + ".compact";
-    std::FILE* tmp = std::fopen(tmp_path.c_str(), "w+b");
-    if (!tmp) return IoError;
+    // Quiesce the commit lane (it appends blobs + flips slots from another
+    // thread), then own the write path for the whole operation — mirrors
+    // reclaim()'s contract.
+    if (commit_router_ && commit_router_->running() && !commit_router_->flush()) {
+        return IoError;
+    }
+    std::lock_guard wlk(*write_mutex_);
 
-    // Any failure below abandons the temp file; the original vault is untouched.
-    auto fail = [&](VaultResult r) {
-        std::fclose(tmp);
-        std::remove(tmp_path.c_str());
-        return r;
-    };
+    // Work on a COPY of the tree (same pattern the old compact used): the live
+    // root_ keeps pre-move offsets for any in-flight background thumb read;
+    // moves only write into dead space, so those reads stay valid all the way
+    // until the final publish below.
+    IndexNode new_root = root_;
+    std::vector<compact_plan::Unit> units;
+    std::vector<uint64_t*> offset_fields;
+    collect_units(new_root, units, offset_fields);
 
-    std::array<uint8_t, HEADER_SIZE> raw{};
-    if (std::fwrite(raw.data(), 1, raw.size(), tmp) != raw.size()) return fail(IoError);
+    ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
+    IndexIoContext ctx{fp_, header_, master_key_, new_root,
+                       saved_searches_, settings_, header_mutex_.get()};
 
-    // Copy each live chunk verbatim. A byte-identical `nonce|ciphertext|tag`
-    // copy under the same key reveals nothing new (it IS the old ciphertext),
-    // keeps invariant #1 (plaintext never touches an unlocked buffer here),
-    // and skips a pointless decrypt/re-encrypt pass.
-    IndexNode  new_root = root_;
-    ChunkStore src(fp_, master_key_.as_span(), framed_chunks(header_));
-    ChunkStore dst(tmp, master_key_.as_span(), framed_chunks(header_));
+    constexpr uint64_t BATCH_BYTES = 256ull << 20;  // commit cadence: ~256 MiB
+    uint64_t moved_since_commit = 0;
+    uint64_t planned_mib = 0;
+    uint64_t moved_bytes = 0;
+    bool cancelled = false;
 
-    // Count total chunks to copy for progress reporting.
-    int total_chunks = 0;
-    if (progress) {
-        count_compact_chunks(new_root, total_chunks);
-        progress->total.store(total_chunks);
-        progress->done.store(0);
+    // Pack until a pass plans nothing. Each pass's plan is computed against
+    // the layout the last-committed index describes (units + the active blob),
+    // so every destination is crash-safe dead space; the commit between
+    // passes is what legalises space vacated by the previous one.
+    while (!cancelled) {
+        compact_plan::Unit pinned_blob{};
+        {
+            std::lock_guard hlk(*header_mutex_);
+            const IndexSlot& s = header_.slot[header_.active_slot];
+            pinned_blob = {s.offset, s.length, 0};
+        }
+        const std::span<const compact_plan::Unit> pinned(&pinned_blob,
+                                                         pinned_blob.length ? 1 : 0);
+        const auto moves = compact_plan::plan_pass(units, HEADER_SIZE, pinned);
+        if (moves.empty()) break;
+
+        for (const auto& m : moves) planned_mib += (units[m.unit_id].length >> 20) + 1;
+        if (progress) progress->total.store(static_cast<int>(planned_mib));
+
+        for (const compact_plan::Move& m : moves) {
+            if (progress && progress->cancel.load()) { cancelled = true; break; }
+            compact_plan::Unit& u = units[m.unit_id];
+            if (!stream_move(store, u.offset, m.dest, u.length)) return IoError;
+            u.offset = m.dest;
+            *offset_fields[m.unit_id] = m.dest;
+            moved_since_commit += u.length;
+            moved_bytes += u.length;
+            if (progress) {
+                progress->done.store(static_cast<int>(
+                    std::min<uint64_t>(planned_mib, (moved_bytes >> 20) + 1)));
+            }
+            if (moved_since_commit >= BATCH_BYTES) {
+                // Data must be durable before any index references it; the
+                // commit's Phase A sync flushes our buffered moves too (same
+                // FILE*). Failure -> abort WITHOUT this batch: the last
+                // committed index is still fully valid.
+                if (index_io::commit_index(ctx) != Ok) return IoError;
+                moved_since_commit = 0;
+            }
+        }
+        // Pass boundary commit: legalises this pass's vacated space for the
+        // next pass's plan. Skipped only if the pass committed on its very
+        // last move.
+        if (moved_since_commit > 0) {
+            if (index_io::commit_index(ctx) != Ok) return IoError;
+            moved_since_commit = 0;
+        }
     }
 
-    VaultResult copy_err = copy_compact_chunks(new_root, src, dst, progress);
-    // If cancelled, abort before the atomic rename (original is untouched).
-    if (progress && progress->cancel.load()) return fail(Ok);
-    if (copy_err != Ok) return fail(copy_err);
+    // Idempotent short-circuit: nothing moved AND the file is already tight
+    // (active blob sits directly at/after the packed data with nothing beyond
+    // it) AND there's no old inactive blob in the way -> true no-op. Without
+    // this, re-compacting a tight vault would place a fresh blob after the
+    // active one and leave one blob of slack forever.
+    if (moved_bytes == 0) {
+        uint64_t fsize = 0;
+        std::lock_guard hlk(*header_mutex_);
+        const IndexSlot& active = header_.slot[header_.active_slot];
+        const IndexSlot& inactive = header_.slot[1 - header_.active_slot];
+        if (fileutil::file_size(fp_, fsize) && active.length > 0 &&
+            active.offset >= compact_plan::live_end(units, HEADER_SIZE) &&
+            fsize == active.offset + active.length &&
+            (inactive.length == 0 || inactive.offset >= active.offset + active.length)) {
+            if (progress) { progress->total.store(1); progress->done.store(1); }
+            return Ok;
+        }
+    }
 
-    // Seal and write the index blob to temp file
-    std::vector<uint8_t> blob;
-    Header h{};
-    std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
+    // Final placed commit: the blob goes right after the packed data so it
+    // does not pin the dead tail. If that spot would overlap the currently
+    // active blob (an already-tight vault), fall back to just after it —
+    // the cost is one blob of slack, reclaimed by the next compact.
+    std::vector<uint8_t> plain;
+    if (!index_io::serialize_plain_index(ctx, plain)) return CryptoError;
+    const uint64_t sealed_len = plain.size() + crypto::TAG_SIZE;
+    uint64_t dest = compact_plan::live_end(units, HEADER_SIZE);
     {
-        // === STEP 1: Serialize and seal the index blob ===
-        // Fresh sealed index into slot A; slot B starts empty in the new file.
-        // Saved searches and settings carry over unchanged (vault-global metadata).
-        serialize_index(new_root, saved_searches_, settings_, blob);
-
-        // Phase 26: framed vaults frame the index blob (mirrors commit_index —
-        // unlock de-frames unconditionally when the flag is set, and slot B is
-        // empty here, so an unframed blob would make the vault unopenable).
-        if (framed_chunks(header_)) {
-            std::vector<uint8_t> framed_blob;
-            if (!chunk_codec::encode_frame(blob, framed_blob)) return fail(CryptoError);
-            blob = std::move(framed_blob);
-        }
-
-        if (!crypto::fill_random(nonce)) return fail(CryptoError);
-        std::vector<uint8_t> sealed;
-        crypto::seal(master_key_.as_span(), nonce, blob, sealed);
-
-        // === STEP 2: Write sealed index to temp file (order is load-bearing) ===
-        uint64_t idx_off = 0;
-        if (!dst.append_raw(sealed, idx_off) || !dst.sync()) return fail(IoError);
-
-        h = header_;  // KDF params, salt, and master-key wrap carry over
-        h.slot[0] = IndexSlot{.offset = idx_off, .length = sealed.size(), .nonce = nonce};
-        h.slot[1] = IndexSlot{};
-        h.active_slot = 0;
-    }
-
-    h.serialize(raw);
-    // Write header then sync before rename (order is load-bearing: index must be durable first)
-    if (!fileutil::seek_to(tmp, 0) ||
-        std::fwrite(raw.data(), 1, raw.size(), tmp) != raw.size() ||
-        !fileutil::sync(tmp)) {
-        return fail(IoError);
-    }
-    std::fclose(tmp);
-
-    // Atomic commit point: crash-safe 3-step rename sequence to enable secure
-    // wipe of the original file (Task 7). At every instant, either the original
-    // or .old file exists complete under a discoverable name.
-    // Close our handles first — Windows refuses to replace a file that is open
-    // (POSIX would happily swap the inode under us).
-    std::fclose(fp_);
-    fp_ = nullptr;
-    if (read_fp_) {
-        std::fclose(read_fp_);
-        read_fp_ = nullptr;
-    }
-    // Phase 58: Close thumb_fp_ under the mutex to ensure an in-flight thumbnail
-    // read either completes against valid state or observes a stale file after rename.
-    if (thumb_mutex_) {
-        const std::lock_guard lk(*thumb_mutex_);
-        if (thumb_fp_ != nullptr) {
-            std::fclose(thumb_fp_);
-            thumb_fp_ = nullptr;
+        std::lock_guard hlk(*header_mutex_);
+        const IndexSlot& s = header_.slot[header_.active_slot];
+        if (s.length > 0 && dest < s.offset + s.length && s.offset < dest + sealed_len) {
+            dest = s.offset + s.length;
         }
     }
-    const std::string old_path = path_ + ".old";
+    if (index_io::commit_plain_blob_at(ctx, plain, dest) != Ok) return IoError;
+    if (!fileutil::truncate_file(fp_, dest + sealed_len)) return IoError;
 
-    // Step 1: Rename original aside (vault.osv -> vault.osv.old, fsync dir).
-    // If this fails, the temp file is abandoned and the original remains in place.
-    if (!fileutil::rename_file(path_, old_path)) {
-        std::remove(tmp_path.c_str());
-        // The original is untouched; reacquire our handles to it.
-        fp_ = std::fopen(path_.c_str(), "r+b");
-        read_fp_ = std::fopen(path_.c_str(), "rb");
-        if (read_fp_) std::setvbuf(read_fp_, nullptr, _IONBF, 0);
-        // Phase 58: reacquire thumb_fp_ under the mutex (mirrors reset() pattern).
-        if (thumb_mutex_) {
-            const std::lock_guard lk(*thumb_mutex_);
-            thumb_fp_ = std::fopen(path_.c_str(), "rb");
-            if (thumb_fp_) std::setvbuf(thumb_fp_, nullptr, _IONBF, 0);
+    // Residual holes cost no physical disk where hole-punch exists (Linux;
+    // a silent no-op elsewhere). Punch the gaps between live spans, exactly
+    // like reclaim() but against the packed layout.
+    {
+        std::vector<std::pair<uint64_t, uint64_t>> live;
+        for (const auto& u : units) live.emplace_back(u.offset, u.length);
+        live.emplace_back(dest, sealed_len);
+        std::ranges::sort(live);
+        uint64_t cursor = HEADER_SIZE;
+        for (const auto& [off, len] : live) {
+            if (off > cursor) (void)fileutil::punch_hole(fp_, cursor, off - cursor);
+            cursor = std::max(cursor, off + len);
         }
-        if (!fp_ || !read_fp_ || !thumb_fp_) reset();  // intact on disk; force a clean re-open
-        return IoError;
     }
-    fileutil::sync_dir_of(old_path);
 
-    // Step 2: Rename temp into place (vault.osv.compact -> vault.osv, fsync dir).
-    // If this fails, vault.osv.old still exists with the original intact;
-    // reacquire the original handles.
-    if (!fileutil::rename_file(tmp_path, path_)) {
-        // vault.osv.old has the original; vault.osv.compact is abandoned.
-        std::remove(tmp_path.c_str());
-        // Restore the original from .old (reverse step 1, best-effort).
-        if (!fileutil::rename_file(old_path, path_))
-            std::fprintf(stderr, "[Vault] compact recovery: could not restore %s from %s — vault remains at the .old path\n",
-                         path_.c_str(), old_path.c_str());
-        fp_ = std::fopen(path_.c_str(), "r+b");
-        read_fp_ = std::fopen(path_.c_str(), "rb");
-        if (read_fp_) std::setvbuf(read_fp_, nullptr, _IONBF, 0);
-        // Phase 58: reacquire thumb_fp_ under the mutex (mirrors reset() pattern).
-        if (thumb_mutex_) {
-            const std::lock_guard lk(*thumb_mutex_);
-            thumb_fp_ = std::fopen(path_.c_str(), "rb");
-            if (thumb_fp_) std::setvbuf(thumb_fp_, nullptr, _IONBF, 0);
-        }
-        if (!fp_ || !read_fp_ || !thumb_fp_) reset();  // intact on disk; force a clean re-open
-        return IoError;
+    if (progress) {
+        progress->total.store(static_cast<int>(planned_mib));
+        progress->done.store(static_cast<int>(planned_mib));
     }
-    fileutil::sync_dir_of(path_);
-
-    // Step 3: Zero-overwrite and remove the old file (best-effort, non-fatal).
-    // If the wipe fails, the old file is still removed; if the remove fails,
-    // the old file stays on disk but is harmless (the vault has moved on).
-    // NOTE: best-effort wipe. CoW filesystems (btrfs, APFS), SSD wear-leveling,
-    // and snapshots may retain old blocks regardless.
-    fileutil::wipe_and_remove(old_path);
-
-    fp_ = std::fopen(path_.c_str(), "r+b");
-    read_fp_ = std::fopen(path_.c_str(), "rb");
-    if (!fp_ || !read_fp_) {
-        // The compacted vault is intact on disk but we lost our handle to it;
-        // wipe keys and force a clean re-open rather than limp along.
-        reset();
-        return IoError;
-    }
-    // Disable buffering on read_fp_ (same as in create/open).
-    std::setvbuf(read_fp_, nullptr, _IONBF, 0);
-    // Phase 58: reopen thumb_fp_ under the mutex (mirrors reset() pattern).
-    if (thumb_mutex_) {
-        const std::lock_guard lk(*thumb_mutex_);
-        thumb_fp_ = std::fopen(path_.c_str(), "rb");
-        if (thumb_fp_) std::setvbuf(thumb_fp_, nullptr, _IONBF, 0);
-    }
-    if (!thumb_fp_) {
-        // The compacted vault is intact on disk but we lost our thumb_fp_ handle;
-        // wipe keys and force a clean re-open rather than limp along.
-        reset();
-        return IoError;
-    }
-    header_ = h;
-    root_   = std::move(new_root);
+    root_ = std::move(new_root);  // publish moved offsets (job-worker hand-off,
+                                  // modal blocks tree readers — same as before)
     return Ok;
 }
 
