@@ -537,6 +537,7 @@ project "osv_tests"
         "src/ui/child_counts.cpp",
         "src/ui/detail_model.cpp",
         "src/ui/dup_model.cpp",
+        "src/ui/dup_scan.cpp",
         "src/ui/detail_panel.cpp",
         "src/ui/natural_sort.cpp",
         "src/ui/meta_json.cpp",
