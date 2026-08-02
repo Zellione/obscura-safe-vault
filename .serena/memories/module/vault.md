@@ -30,14 +30,34 @@ seek0-writer/size-reader race that misplaces writes on the old impl).
 Also in file_util.h (PR #119): `fileutil::punch_hole(fp, off, len)` — Linux
 `fallocate(FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE)` (a no-op returning false elsewhere) —
 and `fileutil::file_allocated_bytes` (`st_blocks * 512`, physical size for sparse-aware waste
-measurement). See the reclamation note below.
+measurement). Phase 60 adds `fileutil::truncate_file(fp, new_size)` (fflush + ftruncate/_chsize_s); the rename
+fault-injection family, `wipe_and_remove`/`wipe_file_contents`, and `sync_dir_of` were deleted with
+the copy-rewrite compact (sync fault-injection `inject_sync_failure` remains — the compact
+crash-sweep test uses it). See the reclamation note below.
 
 ### Reclamation — compact() vs. reclaim() (PR #119)
 Two ways to reclaim orphaned chunk space (deleted chunks + the superseded index slot):
-- `Vault::compact()` — copies every LIVE chunk into `vault.osv.compact`, writes a fresh index +
-  header, then atomically renames over the original (3-step rename, secure-wipes the old file).
-  SHRINKS logical size but transiently needs ~2x the vault size on disk. Invalidates IndexNode
-  pointers. Still the manual `Shift+C` path and the non-Linux reclaim fallback.
+- `Vault::compact()` — **Phase 60: in-place dead-space packing** (no temp file, no rename, O(1)
+  extra disk; the old ~2x copy-rewrite is gone). Cardinal invariant: **no byte referenced by the
+  last-committed index is ever overwritten.** Pure planner `compact_plan.*` (`Unit`/`Move`,
+  `plan_pass`, `live_end`) computes moves into a FROZEN free list (dead space of the committed
+  layout; tail-first, earliest-fit; active index blob pinned; space vacated by a pass is only
+  reused after the next commit legalises it; property-tested in `test_compact_plan.cpp`).
+  compact() quiesces the CommitLane, holds `write_mutex_` throughout, mutates a COPY of the
+  tree, streams byte-verbatim ciphertext moves (1 MiB slices via `ChunkStore::write_raw_at` —
+  never a decrypt), batch-commits every 256 MiB + per pass via `index_io::commit_index`, places
+  the FINAL blob just after the packed data (`index_io::commit_plain_blob_at`; falls past the
+  active blob on overlap — one blob of slack, reclaimed next run), truncates
+  (`fileutil::truncate_file`), punches residual stuck holes (holes smaller than every later
+  unit = bounded logical slack), then publishes the copy into root_. Crash at ANY instant
+  reopens to a valid partially-compacted vault; rerun resumes; cancel keeps progress (returns
+  Ok); an idempotent short-circuit makes compacting a tight vault a true no-op. Progress is
+  MiB-moved (done <= total). Invalidates IndexNode pointers. Still the manual `Shift+C` path
+  (gated on `queue_.busy()`) and the non-Linux auto-reclaim fallback — Windows deletes no
+  longer spike 2x disk. Helpers: file-local `collect_units`/`stream_move`/`execute_pass_moves`
+  + `MoveExecState` (S107 cap). DELETED with the copy-rewrite: `relocate_node_chunks`, rename
+  fault-injection (`rename_file`/`inject_rename_failure`), `wipe_and_remove`/
+  `wipe_file_contents`, `sync_dir_of`, and the `.compact`/`.old` 3-step rename dance.
 - `Vault::reclaim()` (Linux) — punches holes over the DEAD spans in place (dead = complement of
   the live-span set: active index blob + every image data/thumb + video chunks/poster).
   Offset-stable (no index rewrite, no reopen, pointers stay valid), no temp copy → NO disk spike.
@@ -51,7 +71,12 @@ Two ways to reclaim orphaned chunk space (deleted chunks + the superseded index 
   + `AUTO_COMPACT_WASTE_RATIO`) called by `remove_image`/`remove_gallery`: `reclaim()` on Linux,
   else `compact()`. Tests: `tests/vault/test_vault_compact.cpp` (reclaim preserves media + survives
   reopen, frees blocks without shrinking logical size, `Locked` when locked; physical assertions
-  guarded by a runtime hole-punch probe) and `test_file_util.cpp` (punch_hole zeroes + frees blocks).
+  guarded by a runtime hole-punch probe) and `test_file_util.cpp` (punch_hole zeroes + frees blocks; truncate_file). Phase 60 adds:
+  in-place watcher (no sibling temp file, peak size bounded to one commit's overhead), stuck-hole
+  residual bound (<=32 KiB), sync-failure sweep (inject n=0..11 → cold reopen valid + rerun
+  converges), cancel-keeps-progress + rerun-converges, framed round-trip; the planner's
+  crash-safety contract is property-tested in `tests/vault/test_compact_plan.cpp` (200 random
+  layouts: dests dead per frozen layout, pairwise disjoint, strict progress, termination).
 
 ### Phase 50 concurrency: "main-thread tree" architecture
 The index tree is **main-thread-only**; no tree locks exist. The vault file opens two handles + one write-path mutex for thread-safe import background queue:
@@ -148,6 +173,11 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
 - Favorites: `Vault::toggle_favorite(node_path)` + flat whole-tree
   `list_favorite_images()`/`list_favorite_galleries()` -> `vector<SearchHit>`.
 - Tag API + scoped search: `set_tags`/`add_tag`/`remove_tag(node_path)`,
+  `prune_tags(const std::function<bool(std::string_view)>& keep, PruneTagsStats*)` (PR #148:
+  removes every tag on every node, root included, that `keep` rejects — ONE `commit_index()`,
+  none when nothing matched; stats = `tags_removed`/`nodes_touched`, zeroed on Locked/InvalidArg.
+  Predicate is caller policy — the UI passes `ui::tag_has_renderable_text` for the Ctrl+X
+  junk-tag cleanup on the tag overview),
   `search(query, SearchScope{Images,Galleries,Both})` -> `vector<SearchHit>`.
   Read-time tag cascade (effective tags = own ∪ ancestor galleries; root tags global).
   `resolve_node` resolves a path to a gallery OR image.
@@ -177,6 +207,10 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   state. **Split into**:
   - `serialize_plain_index(vault, context)` — memory-only, fast, produces a serialized index blob.
   - `commit_plain_blob(vault, blob, generation)` — enqueues the blob to CommitLane with a generation tag for ordered, coalesced writes.
+  - `commit_plain_blob_at(ctx, plain, offset)` (Phase 60) — same 3-phase swap but the sealed blob
+    is WRITTEN AT a caller-chosen dead offset (`ChunkStore::write_raw_at`) instead of appended;
+    compact()'s final commit uses it so the blob doesn't pin the dead tail against truncation.
+    Phases B+C are shared with `commit_plain_blob` via the file-local `swap_slots` helper.
 - `vault_ops.*` — tree navigation + path resolution + structural validation (split_path,
   resolve_gallery, resolve_node_impl, child_named, holds_media, holds_galleries,
   for_each_media, relocate_node_chunks). Pure traversal, no I/O. `push_child(children,node)`
