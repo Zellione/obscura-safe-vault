@@ -825,33 +825,50 @@ void ImageViewer::render_strip(gfx::Renderer& r)
 
     const float thumb = thumb_size();
     const bool  vertical = (strip_side_ == StripSide::Left);
-    scratch_.thumbs.clear();
-    scratch_.thumbs.reserve(album_.images.size());
-    for (const vault::IndexNode* n : album_.images) scratch_.thumbs.push_back(thumb_texture(*n));
-
+    const int   count = static_cast<int>(album_.images.size());
     const float extent = vertical ? strip.h : strip.w;
-    const float scroll = strip_scroll_centered(index_, static_cast<int>(album_.images.size()),
-                                               thumb, STRIP_GAP, extent);
+    const float scroll = strip_scroll_centered(index_, count, thumb, STRIP_GAP, extent);
+
+    // Request textures ONLY for cells near the visible window. Requesting the
+    // whole album enqueues every thumbnail in the album as a background
+    // fetch+decode job (Phase 58), which grinds the disk for minutes on a big
+    // cold vault and starves the render thread's video demux reads — and an
+    // album larger than the texture budget re-evicts and re-fetches forever.
+    // Off-window cells draw as placeholders until they scroll near.
+    scratch_.thumbs.clear();
+    scratch_.thumbs.assign(album_.images.size(), nullptr);
+    scratch_.strip_keys.clear();
+    const auto [first, last] =
+        strip_visible_range(scroll, extent, thumb, STRIP_GAP, count, STRIP_PREFETCH_CELLS);
+    for (int i = first; i <= last; ++i) {
+        scratch_.thumbs[static_cast<size_t>(i)] = thumb_texture(*album_.images[i]);
+        if (const ui::ThumbKey k = ui::thumb_key_for(*album_.images[i]); k.present)
+            scratch_.strip_keys.push_back(k.key);
+    }
+    // Drop queued fetches that fell out of the window (a running one finishes);
+    // they re-enqueue if their cell scrolls near again.
+    thumbs_.worker.retain(scratch_.strip_keys);
     r.draw_thumbnail_strip(scratch_.thumbs, strip,
                            gfx::ThumbnailStrip{.size = thumb, .gap = STRIP_GAP,
                                                .scroll = scroll, .selected = index_,
                                                .highlight = gfx::theme::ACCENT,
                                                .vertical = vertical});
 
-    // Draw hover animation if active on a thumbnail, and draw animated badges on tiles.
-    for (size_t i = 0; i < album_.images.size(); ++i) {
+    // Draw hover animation if active on a thumbnail, and draw animated badges on
+    // tiles. Bounded to the same near-visible window: off-window cells draw no
+    // thumbnail, so hover/badges there would be invisible draw calls anyway.
+    for (int i = first; i <= last; ++i) {
         // Get the thumbnail's rect from the single source of truth (strip_layout).
-        const SDL_FRect thumb_rect = strip_cell_rect(static_cast<int>(i), strip, thumb,
-                                                      STRIP_GAP, scroll, vertical);
+        const SDL_FRect thumb_rect = strip_cell_rect(i, strip, thumb,
+                                                     STRIP_GAP, scroll, vertical);
 
         // Render hover animation if active on this thumbnail.
-        if (strip_hover_anim_ && strip_hover_anim_->valid() &&
-            static_cast<int>(i) == strip_hover_anim_index_) {
+        if (strip_hover_anim_ && strip_hover_anim_->valid() && i == strip_hover_anim_index_) {
             strip_hover_anim_->render(r, thumb_rect);
         }
 
         // Draw animated badge.
-        if (tile_shows_animated_badge(*album_.images[i])) {
+        if (tile_shows_animated_badge(*album_.images[static_cast<size_t>(i)])) {
             // Use 12x12 badge size and y_offset of 6 to match the original positioning.
             draw_animated_badge(r, font_, thumb_rect, 12.0f, 0.0f, 6.0f);
         }

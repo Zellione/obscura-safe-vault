@@ -17,6 +17,7 @@ inline constexpr float STRIP_FRACTION = 0.25f;  // used only to derive thumb siz
 inline constexpr float STRIP_MARGIN   = 16.0f;  // thumb-size derivation only
 inline constexpr float STRIP_PAD      = 10.0f;  // padding between thumbs and bar edges
 inline constexpr float STRIP_GAP      = 10.0f;  // gap between thumbnails
+inline constexpr int   STRIP_PREFETCH_CELLS = 8;  // fetch margin beyond the visible window
 
 // Thumbnail side length: HALF the cross-axis space of the bottom strip (the
 // "half size" overhaul). Shared by both orientations so a thumb is the same size
@@ -45,5 +46,18 @@ inline constexpr float STRIP_GAP      = 10.0f;  // gap between thumbnails
 // Used by both the renderer and badge drawing to ensure consistent layout.
 [[nodiscard]] SDL_FRect strip_cell_rect(int index, const SDL_FRect& strip, float thumb,
                                         float gap, float scroll, bool vertical) noexcept;
+
+// Inclusive [first, last] range of thumbnail indices whose cells intersect a
+// strip window of `extent` pixels scrolled by `scroll`, widened by `margin`
+// cells on each side (clamped to [0, count-1]). Empty when first > last.
+// Exists so the viewer requests/fetches ONLY near-visible thumbnails — asking
+// for the whole album floods the background fetch worker with the entire
+// vault's thumb I/O and starves video streaming off the same disk.
+struct StripRange {
+    int first = 0;
+    int last  = -1;
+};
+[[nodiscard]] StripRange strip_visible_range(float scroll, float extent, float thumb,
+                                             float gap, int count, int margin) noexcept;
 
 } // namespace ui

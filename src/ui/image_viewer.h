@@ -222,8 +222,9 @@ private:
 
     // Reused render-path scratch buffers (cleared, not reallocated, each frame).
     struct RenderScratch {
-        std::vector<uint64_t>     keep;     // evict keep-list
-        std::vector<SDL_Texture*> thumbs;   // strip textures
+        std::vector<uint64_t>     keep;       // evict keep-list
+        std::vector<SDL_Texture*> thumbs;     // strip textures
+        std::vector<uint64_t>     strip_keys; // near-visible strip fetch keys (retain set)
     };
     RenderScratch scratch_;
 
