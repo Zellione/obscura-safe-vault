@@ -90,6 +90,13 @@ private:
     std::vector<vault::SearchHit> favs_;
     int             cols_ = 1;
     float           scroll_ = 0.0f;  // vertical scroll offset (pixels scrolled down)
+    // One-shot scroll-follow request, applied then cleared by update(): set when
+    // key navigation moves the selection. The mouse wheel scrolls WITHOUT moving
+    // the selection, so following every frame would snap the view back (jitter,
+    // and a hard wall at the selection's visibility window) — same contract as
+    // GalleryGrid::ScrollFollow, minus the Center mode (entering always lands on
+    // index 0 at scroll 0, so there is nothing to center).
+    bool            follow_scroll_ = false;
     std::string     status_;         // transient feedback line (e.g. rename result)
 
     // Phase 48 detail panel. Bundled into a single member to stay under the

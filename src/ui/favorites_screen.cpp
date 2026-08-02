@@ -91,23 +91,25 @@ void FavoritesScreen::on_vault_changed()
 
 void FavoritesScreen::update(double)
 {
-    // Update scroll to keep the selected item visible.
+    // Clamp every frame (content/viewport can change under the scroll), but
+    // FOLLOW the selection only when key navigation just moved it — following
+    // unconditionally fights the mouse wheel, which scrolls without moving the
+    // selection, snapping the view back each frame (jitter, and a hard wall at
+    // the selection's visibility window). Same fix as GalleryGrid's ScrollFollow.
     const int sel_idx = nav_.selected();
     const auto W = static_cast<float>(win_.width());
     const auto H = static_cast<float>(win_.height());
     const auto cW = W - detail_panel_width(detail_.panel.open, W);
-    if (sel_idx >= 0 && sel_idx < static_cast<int>(favs_.size())) {
+    // Content height = number of rows * (cell_height + gap) - gap + top offset
+    const int cols = grid_columns(cW - 2 * OX, CELL, GAP);
+    const int total_rows = (static_cast<int>(favs_.size()) + cols - 1) / cols;
+    const float content_height = OY + static_cast<float>(total_rows) * (CELL + GAP);
+    if (follow_scroll_ && sel_idx >= 0 && sel_idx < static_cast<int>(favs_.size())) {
         const SDL_FRect cellr = grid_cell_rect(sel_idx, grid_spec(cW, cols_));
-        const float item_top = cellr.y;
-        const float item_bottom = cellr.y + CELL;
-        // Content height = number of rows * (cell_height + gap) - gap + top offset
-        const int cols = grid_columns(cW - 2 * OX, CELL, GAP);
-        const int total_rows = (static_cast<int>(favs_.size()) + cols - 1) / cols;
-        const float content_height = OY + static_cast<float>(total_rows) * (CELL + GAP);
-        // Apply selection-following scroll
-        scroll_ = ui::ensure_visible(scroll_, item_top, item_bottom, OY, H);
-        scroll_ = ui::clamp_scroll(scroll_, content_height, H);
+        scroll_ = ui::ensure_visible(scroll_, cellr.y, cellr.y + CELL, OY, H);
     }
+    follow_scroll_ = false;
+    scroll_ = ui::clamp_scroll(scroll_, content_height, H);
 
     if (std::string s; rename_.consume_completed(s)) {
         status_ = std::move(s);
@@ -165,10 +167,10 @@ void FavoritesScreen::handle_event(const SDL_Event& e)
             }
             if (handle_extra_key(e.key)) break;   // subclass consumed it (e.g. tag-view toggle)
             switch (map_key(e.key.key, e.key.mod)) {
-                case NavLeft:  nav_.move(-1);     break;
-                case NavRight: nav_.move(1);      break;
-                case NavUp:    nav_.move(-cols_); break;
-                case NavDown:  nav_.move(cols_);  break;
+                case NavLeft:  nav_.move(-1);     follow_scroll_ = true; break;
+                case NavRight: nav_.move(1);      follow_scroll_ = true; break;
+                case NavUp:    nav_.move(-cols_); follow_scroll_ = true; break;
+                case NavDown:  nav_.move(cols_);  follow_scroll_ = true; break;
                 case Select:   open_selected();   break;
                 case Back:     go_back();          break;
                 default:       break;

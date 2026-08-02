@@ -99,6 +99,13 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   Exclusive-op guards: delete/transfer/combine/compact blocked when import queue non-empty ("Imports running — press Shift+I").
   **Phase 51:** `[O]` key opens FolderDialog with Purpose ImportFolder and multi-select; naming popup prefilled with folder basename;
   multiple folders enqueued with auto-naming from their own stems, no prompt. Tile counts cached parallel to children_.
+- `favorites_screen.*` update() mirrors GalleryGrid's one-shot scroll-follow: `bool
+  follow_scroll_` set by the arrow-key nav cases, applied (ensure_visible) then cleared by
+  update(), which otherwise only clamps — per-frame following fights the wheel (snap-back
+  jitter). No Center mode: entering always lands on index 0 at scroll 0. NOTE:
+  `FavoritesImages::update` (also inherited by TagImages) overrides the base and MUST call
+  `FavoritesScreen::update(dt)` first — dropping that call silently loses all scroll
+  clamping/following for both image grids (that exact bug shipped for a while).
 - `favorites_screen.*` render clips scrolled tiles to below OY (the fixed header) and draws a
   BORDER hairline there — without the clip a scrolled tile paints over the title/[F1]/status.
   Covers all four subclasses. `tag_overview.*` paginates (rows never scroll partially), so it
