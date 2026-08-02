@@ -180,3 +180,32 @@ TEST(dup_scan_cancel_stops_and_reports_cancelled)
     REQUIRE(out.has_value());
     CHECK(out->cancelled);
 }
+
+TEST(dup_scan_vault_locked_under_worker_reports_cancelled)
+{
+    TempVault tv("locked");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kFastKdf, v)
+            == vault::VaultResult::Ok);
+    const auto dup = pattern(4096, 7);
+    REQUIRE(v.add_image("", dup, "one.png") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", dup, "two.png") == vault::VaultResult::Ok);
+
+    // Collect items while vault is unlocked.
+    auto items = ui::collect_scan_items(v);
+    REQUIRE(items.size() == 2);
+
+    // Lock the vault BEFORE starting the worker.
+    v.lock();
+
+    // Start scan with locked vault; worker should detect Locked on first read attempt
+    // and set cancelled=true immediately.
+    ui::DupScanJob job;
+    job.start(v, std::move(items), false);
+    while (job.active()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    auto out = job.take_outcome();
+    REQUIRE(out.has_value());
+    CHECK(out->cancelled);
+    // No groups should be formed; all work stopped on vault lock.
+    CHECK(out->groups.empty());
+}

@@ -49,6 +49,13 @@ void walk(const vault::Vault& v, const std::string& path,
 
 using Digest = std::array<uint8_t, 32>;
 
+// Result of a hash operation: Success, Failed (recoverable), or Locked (vault locked under us).
+enum class HashResult {
+    Success,
+    Failed,  // Read error (AuthFailed, NotFound, etc.)
+    Locked   // Vault locked under us — must stop immediately
+};
+
 DupMember to_member(const DupScanItem& it)
 {
     DupMember m;
@@ -65,21 +72,23 @@ DupMember to_member(const DupScanItem& it)
 }
 
 // Hash one item's full plaintext through the thread-safe span reader.
-// False on any read failure (or a zero-span item).
-bool hash_item(const vault::Vault& v, const DupScanItem& it, Digest& out)
+// Returns Success on successful hash, Failed on read errors (skip and continue),
+// or Locked if vault was locked under us (must stop immediately).
+HashResult hash_item(const vault::Vault& v, const DupScanItem& it, Digest& out)
 {
-    if (it.data_spans.empty()) return false;
+    if (it.data_spans.empty()) return HashResult::Failed;
     crypto_blake2b_ctx ctx;
     crypto_blake2b_init(&ctx, out.size());
     crypto::SecureBytes scratch;
     for (const auto& [off, len] : it.data_spans) {
-        if (vault::read_thumb_span(v, off, len, scratch) != vault::VaultResult::Ok)
-            return false;
+        const auto res = vault::read_thumb_span(v, off, len, scratch);
+        if (res == vault::VaultResult::Locked) return HashResult::Locked;
+        if (res != vault::VaultResult::Ok) return HashResult::Failed;
         crypto_blake2b_update(&ctx, scratch.data(), scratch.size());
         // scratch is reused; SecureBytes wipes on reassignment/destruction.
     }
     crypto_blake2b_final(&ctx, out.data());
-    return true;
+    return HashResult::Success;
 }
 
 // Exact pass: hash items and group by hash.
@@ -115,7 +124,12 @@ DupScanOutcome exact_pass(const vault::Vault& v, const std::vector<DupScanItem>&
             }
 
             Digest digest;
-            if (!hash_item(v, it, digest)) {
+            const auto hash_res = hash_item(v, it, digest);
+            if (hash_res == HashResult::Locked) {
+                out.cancelled = true;
+                return out;
+            }
+            if (hash_res == HashResult::Failed) {
                 out.skipped++;
             } else {
                 hash_groups[digest].push_back(idx);
@@ -176,8 +190,12 @@ void perceptual_pass(const vault::Vault& v, const std::vector<DupScanItem>& item
         }
 
         crypto::SecureBytes thumb;
-        if (vault::read_thumb_span(v, it.thumb_offset, it.thumb_length, thumb) !=
-            vault::VaultResult::Ok) {
+        const auto read_res = vault::read_thumb_span(v, it.thumb_offset, it.thumb_length, thumb);
+        if (read_res == vault::VaultResult::Locked) {
+            out.cancelled = true;
+            return;
+        }
+        if (read_res != vault::VaultResult::Ok) {
             out.skipped++;
             done++;
             continue;
@@ -322,8 +340,8 @@ void DupScanJob::run(const vault::Vault& v, std::vector<DupScanItem> items, bool
     {
         const std::lock_guard lk(mtx_);
         outcome_ = std::move(out);
+        running_.store(false);
     }
-    running_.store(false);
 }
 
 } // namespace ui
