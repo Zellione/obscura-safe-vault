@@ -608,7 +608,10 @@ TEST(compact_in_place_never_creates_a_second_file)
     // In-place: the file may grow by batch-commit blobs, never by a data copy.
     CHECK_TRUE(peak <= size_before + 64 * 1024);
     CHECK_TRUE(size_on_disk(tv.path) < size_before);
-    CHECK_EQ(v.wasted_bytes(), 0u);
+    // Bounded residual: dead index blobs interleaved between the surviving
+    // 64 KiB images form stuck holes smaller than any movable unit — the spec's
+    // crash-safe bounded residual, hole-punched where supported (Linux).
+    CHECK_TRUE(v.wasted_bytes() <= 32 * 1024);
 }
 
 // The stuck-hole case: a small hole in front of larger units cannot be packed
