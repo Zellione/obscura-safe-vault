@@ -825,7 +825,7 @@ void ImageViewer::render_strip(gfx::Renderer& r)
 
     const float thumb = thumb_size();
     const bool  vertical = (strip_side_ == StripSide::Left);
-    const int   count = static_cast<int>(album_.images.size());
+    const auto  count = static_cast<int>(album_.images.size());
     const float extent = vertical ? strip.h : strip.w;
     const float scroll = strip_scroll_centered(index_, count, thumb, STRIP_GAP, extent);
 
