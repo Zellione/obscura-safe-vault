@@ -112,6 +112,20 @@ namespace vault::fileutil {
 #endif
 }
 
+// Truncate the file to exactly `new_size` bytes (flushing stdio first so no
+// buffered write lands past the new end). Used by in-place compaction to cut
+// the dead tail after the final index commit. The stream position is left
+// unspecified — callers seek before the next read/write.
+[[nodiscard]] inline bool truncate_file(std::FILE* fp, uint64_t new_size) noexcept
+{
+    if (std::fflush(fp) != 0) return false;
+#if defined(_WIN32)
+    return _chsize_s(_fileno(fp), static_cast<long long>(new_size)) == 0;
+#else
+    return ::ftruncate(::fileno(fp), static_cast<off_t>(new_size)) == 0;
+#endif
+}
+
 // --- fault injection (crash-safety tests) ---------------------------------
 // The double-buffered index swap is only crash-safe if an fsync failure at any
 // step leaves a reopenable vault. There is no portable way to make a real
