@@ -19,6 +19,9 @@ scripts/build.sh          # Debug
 scripts/build.sh --release
 scripts/build.sh --clean  # wipe this config's outputs first, then build (combinable with --release/--gmake)
 ```
+`build.sh` builds the APP target only (`ninja osv_<Config>_x64` / `make osv`) — not the
+aggregate config target, which would also compile osv_tests (the test project recompiles
+shared src/ sources under its own fixture defines ≈ double the compile work).
 
 ## Run
 ```bash
@@ -38,8 +41,10 @@ Sanitizer builds are isolated (PR #122): `--asan`/`--tsan` output to
 object trees stay warm side by side), and `test.sh` restores PLAIN build files
 on exit after a sanitizer run — `build/bin/Debug/osv` is never instrumented and
 a later `scripts/build.sh` always produces plain binaries.
-⚠ `scripts/test.sh` builds ONLY the test binary — for app-side changes,
-`scripts/build.sh` must also pass (`-Werror` branch-wide since audit-improvements).
+⚠ `scripts/test.sh` builds the WHOLE config (osv + osv_tests — a compile error in either
+would otherwise be missed); `scripts/build.sh` builds only osv, so test-side compile
+breakage surfaces at `test.sh` time, not `build.sh` time (`-Werror` branch-wide since
+audit-improvements).
 Clang parity check (matches CI's clang leg): `bin/premake5 ninja --cc=clang && ninja -k0 -f build.ninja`,
 then restore with `scripts/gen.sh`.
 
