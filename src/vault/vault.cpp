@@ -1409,35 +1409,44 @@ bool stream_move(ChunkStore& store, uint64_t src, uint64_t dest, uint64_t length
     return true;
 }
 
+// State bundle for move execution: reduces parameter count for S107 compliance.
+struct MoveExecState {
+    std::vector<compact_plan::Unit>& units;
+    std::vector<uint64_t*>& offset_fields;
+    ChunkStore& store;
+    IndexIoContext& ctx;
+    OpProgress* progress;
+    uint64_t planned_mib;  // const by value (S995: never written)
+    uint64_t& moved_bytes;
+    uint64_t& moved_since_commit;
+    bool& cancelled;
+};
+
 // Execute all moves in a compaction pass: stream each unit to its destination,
 // update in-memory offset references, track progress, and commit batches when
 // BATCH_BYTES is reached. Sets cancelled if progress.cancel is signalled.
-VaultResult execute_pass_moves(const std::vector<compact_plan::Move>& moves,
-                               std::vector<compact_plan::Unit>& units,
-                               std::vector<uint64_t*>& offset_fields, ChunkStore& store,
-                               IndexIoContext& ctx, OpProgress* progress,
-                               uint64_t& planned_mib, uint64_t& moved_bytes,
-                               uint64_t& moved_since_commit, bool& cancelled, uint64_t batch_bytes)
+VaultResult execute_pass_moves(const std::vector<compact_plan::Move>& moves, MoveExecState& state,
+                               uint64_t batch_bytes)
 {
     using enum VaultResult;
     for (const compact_plan::Move& m : moves) {
-        if (progress && progress->cancel.load()) {
-            cancelled = true;
+        if (state.progress && state.progress->cancel.load()) {
+            state.cancelled = true;
             break;
         }
-        compact_plan::Unit& u = units[m.unit_id];
-        if (!stream_move(store, u.offset, m.dest, u.length)) return IoError;
+        compact_plan::Unit& u = state.units[m.unit_id];
+        if (!stream_move(state.store, u.offset, m.dest, u.length)) return IoError;
         u.offset = m.dest;
-        *offset_fields[m.unit_id] = m.dest;
-        moved_since_commit += u.length;
-        moved_bytes += u.length;
-        if (progress) {
-            progress->done.store(
-                static_cast<int>(std::min<uint64_t>(planned_mib, (moved_bytes >> 20) + 1)));
+        *state.offset_fields[m.unit_id] = m.dest;
+        state.moved_since_commit += u.length;
+        state.moved_bytes += u.length;
+        if (state.progress) {
+            state.progress->done.store(static_cast<int>(
+                std::min<uint64_t>(state.planned_mib, (state.moved_bytes >> 20) + 1)));
         }
-        if (moved_since_commit >= batch_bytes) {
-            if (index_io::commit_index(ctx) != Ok) return IoError;
-            moved_since_commit = 0;
+        if (state.moved_since_commit >= batch_bytes) {
+            if (index_io::commit_index(state.ctx) != Ok) return IoError;
+            state.moved_since_commit = 0;
         }
     }
     return Ok;
@@ -1529,8 +1538,9 @@ VaultResult Vault::compact(OpProgress* progress)
             planned_mib += (units[m.unit_id].length >> 20) + 1;
         if (progress) progress->total.store(static_cast<int>(planned_mib));
 
-        if (execute_pass_moves(moves, units, offset_fields, store, ctx, progress, planned_mib,
-                               moved_bytes, moved_since_commit, cancelled, BATCH_BYTES) != Ok) {
+        MoveExecState state{units,       offset_fields,      store,    ctx, progress, planned_mib,
+                            moved_bytes, moved_since_commit, cancelled};
+        if (execute_pass_moves(moves, state, BATCH_BYTES) != Ok) {
             return IoError;
         }
         // Pass boundary commit: legalises this pass's vacated space for the

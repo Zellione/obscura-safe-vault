@@ -65,8 +65,7 @@ std::vector<Move> plan_pass(std::vector<Unit> units, uint64_t floor, std::span<c
     for (auto it = units.rbegin(); it != units.rend(); ++it) {
         const Unit& u = *it;
         if (u.length > max_free) continue;
-        FreeRange* r = find_suitable_free_range(u, free);
-        if (r) {
+        if (FreeRange* r = find_suitable_free_range(u, free); r != nullptr) {
             moves.push_back({u.id, r->start});
             r->start += u.length;  // frozen list only ever shrinks
             r->length -= u.length;
