@@ -1,6 +1,7 @@
 #include "ui/strip_layout.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace ui {
 
@@ -68,6 +69,19 @@ SDL_FRect strip_cell_rect(int index, const SDL_FRect& strip, float thumb,
     } else {
         return SDL_FRect{along, cross, thumb, thumb};
     }
+}
+
+StripRange strip_visible_range(float scroll, float extent, float thumb,
+                               float gap, int count, int margin) noexcept
+{
+    if (count <= 0 || extent <= 0.0f || thumb <= 0.0f) return {};
+    const float pitch = thumb + gap;
+    // Cell i spans [i*pitch - scroll, i*pitch - scroll + thumb) on screen.
+    // Visibility is strict on both edges: a cell ending exactly at 0 or
+    // starting exactly at `extent` shows zero pixels and is excluded.
+    const int first = static_cast<int>(std::floor((scroll - thumb) / pitch)) + 1;
+    const int last  = static_cast<int>(std::ceil((scroll + extent) / pitch)) - 1;
+    return {std::max(0, first - margin), std::min(count - 1, last + margin)};
 }
 
 } // namespace ui

@@ -182,6 +182,62 @@ TEST(strip_cell_rect_and_hit_axis_are_consistent)
     }
 }
 
+TEST(strip_visible_range_covers_only_cells_intersecting_the_window)
+{
+    // thumb 30, gap 10 (pitch 40), extent 100, no scroll:
+    // cell 0 [0,30), cell 1 [40,70), cell 2 [80,110) partially visible -> {0, 2}.
+    const auto r = ui::strip_visible_range(0.0f, 100.0f, 30.0f, 10.0f, 10, 0);
+    CHECK_EQ(r.first, 0);
+    CHECK_EQ(r.last, 2);
+}
+
+TEST(strip_visible_range_respects_scroll)
+{
+    // Scroll 50: cell 0 ends at -20 (gone), cell 1 spans [-10,20) (partial),
+    // cell 3 spans [70,100) exclusive end -> last visible is cell 3.
+    const auto r = ui::strip_visible_range(50.0f, 100.0f, 30.0f, 10.0f, 10, 0);
+    CHECK_EQ(r.first, 1);
+    CHECK_EQ(r.last, 3);
+}
+
+TEST(strip_visible_range_excludes_exact_boundary_cells)
+{
+    // Scroll 30: cell 0 ends exactly at window position 0 -> zero pixels shown.
+    // Extent 120 with scroll 0: cell 3 starts exactly at 120 -> not visible.
+    CHECK_EQ(ui::strip_visible_range(30.0f, 100.0f, 30.0f, 10.0f, 10, 0).first, 1);
+    CHECK_EQ(ui::strip_visible_range(0.0f, 120.0f, 30.0f, 10.0f, 10, 0).last, 2);
+}
+
+TEST(strip_visible_range_margin_widens_and_clamps)
+{
+    // Same window as the scroll test ({1,3}), margin 2 -> {0, 5}; a huge margin
+    // clamps to the album bounds.
+    const auto r = ui::strip_visible_range(50.0f, 100.0f, 30.0f, 10.0f, 10, 2);
+    CHECK_EQ(r.first, 0);
+    CHECK_EQ(r.last, 5);
+
+    const auto all = ui::strip_visible_range(50.0f, 100.0f, 30.0f, 10.0f, 10, 100);
+    CHECK_EQ(all.first, 0);
+    CHECK_EQ(all.last, 9);
+}
+
+TEST(strip_visible_range_empty_album_yields_empty_range)
+{
+    // Empty range is reported as first > last; degenerate geometry too.
+    const auto none = ui::strip_visible_range(0.0f, 100.0f, 30.0f, 10.0f, 0, 3);
+    CHECK(none.first > none.last);
+    const auto flat = ui::strip_visible_range(0.0f, 0.0f, 30.0f, 10.0f, 10, 0);
+    CHECK(flat.first > flat.last);
+}
+
+TEST(strip_visible_range_short_album_is_fully_visible)
+{
+    // 3 cells in a wide window: everything visible, margin changes nothing.
+    const auto r = ui::strip_visible_range(0.0f, 1000.0f, 30.0f, 10.0f, 3, 4);
+    CHECK_EQ(r.first, 0);
+    CHECK_EQ(r.last, 2);
+}
+
 TEST(strip_cell_rect_gap_between_cells)
 {
     // Consecutive cells must maintain the gap between them.

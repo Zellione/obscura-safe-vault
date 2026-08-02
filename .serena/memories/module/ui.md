@@ -175,6 +175,15 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `apply_video_resume` (seek a freshly (re)opened matching video to the remembered position,
   called right after `on_enter()` builds video_). "Collection mode" (explicit image set +
   per-image path + exit Nav) lets the viewer serve favorites/tag sets, not just one gallery.
+  **Strip fetch windowing (post-Phase-58 fix):** `render_strip` requests thumbnail textures
+  ONLY for cells in `strip_visible_range(scroll, extent, thumb, gap, count,
+  STRIP_PREFETCH_CELLS)` (pure helper in `strip_layout.*`, ±8-cell margin) and calls
+  `DecodeWorker::retain()` with the window's keys each frame so out-of-window queued fetches
+  are dropped. Requesting the whole album (the Phase 58 shape) enqueued every thumbnail in
+  the album as a background fetch+decode job — on a big cold vault that ground the disk for
+  minutes, starved the render thread's video demux reads (~3 fps playback), and an album
+  bigger than the 256 MB texture budget re-evicted and re-fetched forever. The badge/hover
+  loop is bounded to the same window. Off-window cells draw as placeholders.
 - `anim_playback.*` (Phase 47 GIF, Phase 57 WebP; was `gif_playback.*`) — `AnimPlayback`:
   pImpl, decoder libs confined to `.cpp`. Picks its `media::AnimDecoder` backend from
   `node.meta.format` — WebP via libwebp (ALWAYS available), GIF via FFmpeg (`OSV_VENDORED_AV`
