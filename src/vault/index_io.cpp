@@ -3,10 +3,10 @@
 #include <array>
 #include <cstring>
 
-#include "crypto/aead.h"
-#include "crypto/random.h"
 #include "chunk_codec.h"
 #include "chunk_store.h"
+#include "crypto/aead.h"
+#include "crypto/random.h"
 #include "file_util.h"
 
 namespace vault::index_io {
@@ -19,13 +19,14 @@ VaultResult swap_slots(IndexIoContext& ctx, uint64_t offset, uint64_t sealed_len
                        const std::array<uint8_t, crypto::NONCE_SIZE>& nonce)
 {
     using enum VaultResult;
-    auto do_swap = [&]() -> VaultResult {
+    auto do_swap = [&]() {
         const uint8_t inactive = ctx.header_.active_slot == 0 ? 1 : 0;
-        ctx.header_.slot[inactive] = IndexSlot{.offset = offset,
-                                               .length = sealed_len,
-                                               .nonce  = nonce};
+        ctx.header_.slot[inactive] =
+            IndexSlot{.offset = offset, .length = sealed_len, .nonce = nonce};
+        // Phase B: persist slot allocation.
         if (!write_header(ctx.fp_, ctx.header_)) return IoError;
         ctx.header_.active_slot = inactive;
+        // Phase C: flip active_slot (atomic commit point).
         if (!write_header(ctx.fp_, ctx.header_)) return IoError;
         return Ok;
     };
@@ -47,8 +48,7 @@ bool write_header(std::FILE* fp, const Header& h)
     return fileutil::sync(fp);
 }
 
-bool serialize_plain_index(const IndexIoContext& ctx,
-                           std::vector<uint8_t>& out)
+bool serialize_plain_index(const IndexIoContext& ctx, std::vector<uint8_t>& out)
 {
     // Serialize the index (tree + saved searches + settings) using the 4-arg form.
     serialize_index(ctx.root_, ctx.saved_searches_, ctx.settings_, out);
@@ -63,8 +63,7 @@ bool serialize_plain_index(const IndexIoContext& ctx,
     return true;
 }
 
-VaultResult commit_plain_blob(IndexIoContext& ctx,
-                              std::span<const uint8_t> plain)
+VaultResult commit_plain_blob(IndexIoContext& ctx, std::span<const uint8_t> plain)
 {
     using enum VaultResult;
     std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
@@ -75,7 +74,7 @@ VaultResult commit_plain_blob(IndexIoContext& ctx,
     ChunkStore store(ctx.fp_, ctx.master_key_.as_span(), framed_chunks(ctx.header_));
     uint64_t offset = 0;
     if (!store.append_raw(sealed, offset)) return IoError;
-    if (!store.sync())                     return IoError;
+    if (!store.sync()) return IoError;
     return swap_slots(ctx, offset, sealed.size(), nonce);
 }
 
@@ -91,8 +90,7 @@ VaultResult commit_index(IndexIoContext& ctx)
     return commit_plain_blob(ctx, blob);
 }
 
-VaultResult commit_plain_blob_at(IndexIoContext& ctx,
-                                 std::span<const uint8_t> plain,
+VaultResult commit_plain_blob_at(IndexIoContext& ctx, std::span<const uint8_t> plain,
                                  uint64_t offset)
 {
     using enum VaultResult;
@@ -103,8 +101,8 @@ VaultResult commit_plain_blob_at(IndexIoContext& ctx,
 
     ChunkStore store(ctx.fp_, ctx.master_key_.as_span(), framed_chunks(ctx.header_));
     if (!store.write_raw_at(offset, sealed)) return IoError;
-    if (!store.sync())                       return IoError;
+    if (!store.sync()) return IoError;
     return swap_slots(ctx, offset, sealed.size(), nonce);
 }
 
-} // namespace vault::index_io
+}  // namespace vault::index_io

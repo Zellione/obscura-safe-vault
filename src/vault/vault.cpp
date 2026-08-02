@@ -18,20 +18,20 @@
 #include "file_util.h"
 #include "safe_name.h"
 
-#include "image/decode.h"
 #include "image/anim_info.h"
+#include "image/decode.h"
 #include "image/thumbnail.h"
 
-#include "vault/video_format.h"
-#include "vault/vault_search.h"
-#include "vault/index_io.h"
-#include "vault/commit_lane.h"
-#include "vault/vault_ops.h"
-#include "vault/staging.h"
 #include "media/video_probe.h"
 #include "platform/error_log.h"
 #include "ui/advanced_search_model.h"  // AdvancedQuery + evaluate (pure, SDL/vault-free)
 #include "ui/gallery_sort.h"           // sort_children (pure, SDL/vault-free, Phase 37)
+#include "vault/commit_lane.h"
+#include "vault/index_io.h"
+#include "vault/staging.h"
+#include "vault/vault_ops.h"
+#include "vault/vault_search.h"
+#include "vault/video_format.h"
 
 namespace vault {
 
@@ -39,20 +39,22 @@ namespace {
 
 // Wrappers around vault_ops functions for backward compatibility in this TU,
 // avoiding the need to update every call site.
-using vault_ops::split_path;
-using vault_ops::resolve_gallery;
 using vault_ops::child_named;
 using vault_ops::for_each_media;
+using vault_ops::resolve_gallery;
+using vault_ops::split_path;
 
 // Trim ASCII whitespace from start and end of a string_view.
 std::string_view trim_ws(std::string_view s)
 {
     size_t start = 0;
-    while (start < s.size() && (s[start] == ' ' || s[start] == '\t' ||
-                                 s[start] == '\n' || s[start] == '\r')) ++start;
+    while (start < s.size() &&
+           (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r'))
+        ++start;
     size_t end = s.size();
-    while (end > start && (s[end - 1] == ' ' || s[end - 1] == '\t' ||
-                            s[end - 1] == '\n' || s[end - 1] == '\r')) --end;
+    while (end > start &&
+           (s[end - 1] == ' ' || s[end - 1] == '\t' || s[end - 1] == '\n' || s[end - 1] == '\r'))
+        --end;
     return s.substr(start, end - start);
 }
 
@@ -172,7 +174,7 @@ std::vector<std::string> search_dfs(const IndexNode& node, std::string_view pref
     std::vector<std::string> subtree_tags;
 
     for (const auto& child : node.children) {
-        auto              effective = compute_effective_tags(child.tags, inherited);
+        auto effective = compute_effective_tags(child.tags, inherited);
         const std::string full_path = join_child_path(prefix, child.name);
 
         // Recurse first to get the child's subtree tags.
@@ -189,11 +191,11 @@ std::vector<std::string> search_dfs(const IndexNode& node, std::string_view pref
 
         if (node_in_scope(child, scope) && node_matches(child.name, query, match_tags)) {
             out.push_back(SearchHit{
-                .path           = full_path,
-                .is_gallery     = child.is_gallery(),
-                .name           = child.name,
+                .path = full_path,
+                .is_gallery = child.is_gallery(),
+                .name = child.name,
                 .effective_tags = effective,
-                .node           = &child,
+                .node = &child,
             });
         }
 
@@ -206,7 +208,8 @@ std::vector<std::string> search_dfs(const IndexNode& node, std::string_view pref
 
         // Union into subtree_tags (case-insensitive).
         for (const auto& tag : to_union) {
-            if (!std::ranges::any_of(subtree_tags, [&](const auto& t) { return ci_equal(t, tag); })) {
+            if (!std::ranges::any_of(subtree_tags,
+                                     [&](const auto& t) { return ci_equal(t, tag); })) {
                 subtree_tags.push_back(tag);
             }
         }
@@ -218,8 +221,8 @@ std::vector<std::string> search_dfs(const IndexNode& node, std::string_view pref
 // Walk the tree collecting every favorited node of the requested kind (galleries
 // when `want_galleries`, otherwise media: images or videos) into `out`, flat, with full paths.
 // effective_tags is intentionally left empty — favorites lists don't cascade tags.
-void collect_favorites(const IndexNode& node, std::string_view prefix,
-                       bool want_galleries, std::vector<SearchHit>& out)
+void collect_favorites(const IndexNode& node, std::string_view prefix, bool want_galleries,
+                       std::vector<SearchHit>& out)
 {
     for (const auto& child : node.children) {
         const std::string full_path = join_child_path(prefix, child.name);
@@ -227,16 +230,15 @@ void collect_favorites(const IndexNode& node, std::string_view prefix,
         if (const bool matches = want_galleries ? child.is_gallery() : child.is_media();
             child.favorite && matches) {
             out.push_back(SearchHit{
-                .path           = full_path,
-                .is_gallery     = child.is_gallery(),
-                .name           = child.name,
+                .path = full_path,
+                .is_gallery = child.is_gallery(),
+                .name = child.name,
                 .effective_tags = {},
-                .node           = &child,
+                .node = &child,
             });
         }
 
-        if (child.is_gallery())
-            collect_favorites(child, full_path, want_galleries, out);
+        if (child.is_gallery()) collect_favorites(child, full_path, want_galleries, out);
     }
 }
 
@@ -248,7 +250,8 @@ void collect_tags(const IndexNode& node, std::vector<std::string>& out)
         if (!std::ranges::any_of(out, [&](const auto& x) { return ci_equal(x, t); }))
             out.push_back(t);
     }
-    for (const auto& c : node.children) collect_tags(c, out);
+    for (const auto& c : node.children)
+        collect_tags(c, out);
 }
 
 // Count, per distinct tag, the galleries and leaf media that DIRECTLY carry it
@@ -261,12 +264,13 @@ void collect_tags(const IndexNode& node, std::vector<std::string>& out)
 // to keep that walk's nesting shallow (cpp:S134).
 void bump_tag_tally(std::vector<ui::TagTally>& tallies, std::string_view tag, bool is_gallery)
 {
-    auto it = std::ranges::find_if(tallies, [&](const ui::TagTally& tt) {
-        return ci_equal(tt.tag, tag);
-    });
+    auto it = std::ranges::find_if(tallies,
+                                   [&](const ui::TagTally& tt) { return ci_equal(tt.tag, tag); });
     if (it == tallies.end()) return;
-    if (is_gallery) ++it->gallery_count;
-    else            ++it->image_count;
+    if (is_gallery)
+        ++it->gallery_count;
+    else
+        ++it->image_count;
 }
 
 void count_direct_tags(const IndexNode& node, std::vector<ui::TagTally>& tallies)
@@ -289,11 +293,11 @@ void collect_galleries_with_tag(const IndexNode& node, std::string_view prefix,
         const std::string full_path = join_child_path(prefix, child.name);
         if (std::ranges::any_of(child.tags, [&](const auto& t) { return ci_equal(t, tag); }))
             out.push_back(SearchHit{
-                .path           = full_path,
-                .is_gallery     = true,
-                .name           = child.name,
+                .path = full_path,
+                .is_gallery = true,
+                .name = child.name,
                 .effective_tags = {},
-                .node           = &child,
+                .node = &child,
             });
         collect_galleries_with_tag(child, full_path, tag, out);
     }
@@ -303,8 +307,8 @@ void collect_galleries_with_tag(const IndexNode& node, std::string_view prefix,
 // (case-insensitive exact match — not substring, not cascade), flat with full
 // paths. effective_tags is left empty (this lookup never computes the cascade).
 // Mirrors collect_galleries_with_tag but for !is_gallery() nodes (Phase 22 f/u).
-void collect_images_with_tag(const IndexNode& node, std::string_view prefix,
-                             std::string_view tag, std::vector<SearchHit>& out)
+void collect_images_with_tag(const IndexNode& node, std::string_view prefix, std::string_view tag,
+                             std::vector<SearchHit>& out)
 {
     for (const auto& child : node.children) {
         const std::string full_path = join_child_path(prefix, child.name);
@@ -314,11 +318,11 @@ void collect_images_with_tag(const IndexNode& node, std::string_view prefix,
         }
         if (std::ranges::any_of(child.tags, [&](const auto& t) { return ci_equal(t, tag); }))
             out.push_back(SearchHit{
-                .path           = full_path,
-                .is_gallery     = false,
-                .name           = child.name,
+                .path = full_path,
+                .is_gallery = false,
+                .name = child.name,
                 .effective_tags = {},
-                .node           = &child,
+                .node = &child,
             });
     }
 }
@@ -336,7 +340,7 @@ std::vector<std::string> adv_search_dfs(const IndexNode& node, std::string_view 
     std::vector<std::string> subtree_tags;
 
     for (const auto& child : node.children) {
-        auto              effective = compute_effective_tags(child.tags, inherited);
+        auto effective = compute_effective_tags(child.tags, inherited);
         const std::string full_path = join_child_path(prefix, child.name);
 
         // Recurse first to get the child's subtree tags.
@@ -357,12 +361,12 @@ std::vector<std::string> adv_search_dfs(const IndexNode& node, std::string_view 
             const ui::EvalResult r = ui::evaluate(query, child.name, match_tags);
             if (r.matched) {
                 out.emplace_back(r.score, SearchHit{
-                    .path           = full_path,
-                    .is_gallery     = child.is_gallery(),
-                    .name           = child.name,
-                    .effective_tags = effective,
-                    .node           = &child,
-                });
+                                              .path = full_path,
+                                              .is_gallery = child.is_gallery(),
+                                              .name = child.name,
+                                              .effective_tags = effective,
+                                              .node = &child,
+                                          });
             }
         }
 
@@ -375,7 +379,8 @@ std::vector<std::string> adv_search_dfs(const IndexNode& node, std::string_view 
 
         // Union into subtree_tags (case-insensitive).
         for (const auto& tag : to_union) {
-            if (!std::ranges::any_of(subtree_tags, [&](const auto& t) { return ci_equal(t, tag); })) {
+            if (!std::ranges::any_of(subtree_tags,
+                                     [&](const auto& t) { return ci_equal(t, tag); })) {
                 subtree_tags.push_back(tag);
             }
         }
@@ -384,34 +389,29 @@ std::vector<std::string> adv_search_dfs(const IndexNode& node, std::string_view 
     return subtree_tags;
 }
 
-} // namespace
+}  // namespace
 
 // --- lifecycle ------------------------------------------------------------
 
-Vault::~Vault() { reset(); }
+Vault::~Vault()
+{
+    reset();
+}
 
 Vault::Vault(Vault&& o) noexcept
-    : path_(std::move(o.path_)),
-      fp_(o.fp_),
-      read_fp_(o.read_fp_),
-      thumb_fp_(o.thumb_fp_),
-      thumb_mutex_(std::move(o.thumb_mutex_)),
-      write_mutex_(std::move(o.write_mutex_)),
-      header_mutex_(std::move(o.header_mutex_)),
-      header_(o.header_),
-      unlocked_(o.unlocked_),
-      master_key_(std::move(o.master_key_)),
-      root_(std::move(o.root_)),
-      saved_searches_(std::move(o.saved_searches_)),
-      settings_(std::move(o.settings_))
+    : path_(std::move(o.path_)), fp_(o.fp_), read_fp_(o.read_fp_), thumb_fp_(o.thumb_fp_),
+      thumb_mutex_(std::move(o.thumb_mutex_)), write_mutex_(std::move(o.write_mutex_)),
+      header_mutex_(std::move(o.header_mutex_)), header_(o.header_), unlocked_(o.unlocked_),
+      master_key_(std::move(o.master_key_)), root_(std::move(o.root_)),
+      saved_searches_(std::move(o.saved_searches_)), settings_(std::move(o.settings_))
 {
     // Phase 50: A bound CommitLane holds a raw Vault* to &o. App holds the active
     // vault behind unique_ptr and never moves it while a session is live — this
     // assert turns a violation into a loud debug failure instead of a dangling pointer.
     assert(!o.commit_router_ && "cannot move a Vault with an active CommitLane bound");
 
-    o.fp_       = nullptr;
-    o.read_fp_  = nullptr;
+    o.fp_ = nullptr;
+    o.read_fp_ = nullptr;
     o.thumb_fp_ = nullptr;
     o.unlocked_ = false;
 }
@@ -425,23 +425,23 @@ Vault& Vault::operator=(Vault&& o) noexcept
         // assert turns a violation into a loud debug failure instead of a dangling pointer.
         assert(!o.commit_router_ && "cannot move a Vault with an active CommitLane bound");
 
-        path_         = std::move(o.path_);
-        fp_           = o.fp_;
-        read_fp_      = o.read_fp_;
-        thumb_fp_     = o.thumb_fp_;
-        thumb_mutex_  = std::move(o.thumb_mutex_);
-        write_mutex_  = std::move(o.write_mutex_);
+        path_ = std::move(o.path_);
+        fp_ = o.fp_;
+        read_fp_ = o.read_fp_;
+        thumb_fp_ = o.thumb_fp_;
+        thumb_mutex_ = std::move(o.thumb_mutex_);
+        write_mutex_ = std::move(o.write_mutex_);
         header_mutex_ = std::move(o.header_mutex_);
-        header_       = o.header_;
-        unlocked_     = o.unlocked_;
-        master_key_   = std::move(o.master_key_);
-        root_         = std::move(o.root_);
+        header_ = o.header_;
+        unlocked_ = o.unlocked_;
+        master_key_ = std::move(o.master_key_);
+        root_ = std::move(o.root_);
         saved_searches_ = std::move(o.saved_searches_);
-        settings_     = std::move(o.settings_);
-        o.fp_         = nullptr;
-        o.read_fp_    = nullptr;
-        o.thumb_fp_   = nullptr;
-        o.unlocked_   = false;
+        settings_ = std::move(o.settings_);
+        o.fp_ = nullptr;
+        o.read_fp_ = nullptr;
+        o.thumb_fp_ = nullptr;
+        o.unlocked_ = false;
     }
     return *this;
 }
@@ -458,7 +458,7 @@ void Vault::lock() noexcept
 
     master_key_.wipe();
     unlocked_ = false;
-    root_     = IndexNode::gallery("");
+    root_ = IndexNode::gallery("");
     saved_searches_.clear();
 }
 
@@ -470,12 +470,21 @@ void Vault::reset() noexcept
     if (thumb_mutex_) {
         const std::lock_guard lk(*thumb_mutex_);
         unlocked_ = false;
-        if (thumb_fp_ != nullptr) { std::fclose(thumb_fp_); thumb_fp_ = nullptr; }
+        if (thumb_fp_ != nullptr) {
+            std::fclose(thumb_fp_);
+            thumb_fp_ = nullptr;
+        }
     }
 
     lock();
-    if (fp_) { std::fclose(fp_); fp_ = nullptr; }
-    if (read_fp_) { std::fclose(read_fp_); read_fp_ = nullptr; }
+    if (fp_) {
+        std::fclose(fp_);
+        fp_ = nullptr;
+    }
+    if (read_fp_) {
+        std::fclose(read_fp_);
+        read_fp_ = nullptr;
+    }
     write_mutex_.reset();
     thumb_mutex_.reset();
     path_.clear();
@@ -483,11 +492,9 @@ void Vault::reset() noexcept
     settings_ = VaultSettings{};
 }
 
-VaultResult Vault::create(const std::string&       path,
-                          std::span<const uint8_t>  password,
-                          std::span<const uint8_t>  keyfile,
-                          const crypto::KdfParams&  params,
-                          Vault&                    out)
+VaultResult Vault::create(const std::string& path, std::span<const uint8_t> password,
+                          std::span<const uint8_t> keyfile, const crypto::KdfParams& params,
+                          Vault& out)
 {
     out.reset();
 
@@ -495,15 +502,14 @@ VaultResult Vault::create(const std::string&       path,
     if (!fp) return VaultResult::IoError;
 
     Header h;
-    h.kdf              = params;
-    h.kdf_algo         = 0;  // Argon2id
+    h.kdf = params;
+    h.kdf_algo = 0;  // Argon2id
     h.keyfile_required = keyfile.empty() ? 0 : 1;
     h.flags |= FLAG_FRAMED_CHUNKS;  // Phase 26: new vaults frame chunk + index plaintext
 
     crypto::SecureBuffer<crypto::KEY_SIZE> master;
     crypto::SecureBuffer<crypto::KEY_SIZE> kek;
-    if (!crypto::fill_random(h.salt) ||
-        !crypto::fill_random(master.span()) ||
+    if (!crypto::fill_random(h.salt) || !crypto::fill_random(master.span()) ||
         !crypto::fill_random(h.mk_nonce)) {
         std::fclose(fp);
         return VaultResult::CryptoError;
@@ -521,27 +527,31 @@ VaultResult Vault::create(const std::string&       path,
 
     // Reserve the fixed header region so the data region begins at HEADER_SIZE.
     // The real header is written by commit_index() below.
-    if (const std::array<uint8_t, HEADER_SIZE> placeholder{}; std::fwrite(placeholder.data(), 1, placeholder.size(), fp) != placeholder.size()) {
+    if (const std::array<uint8_t, HEADER_SIZE> placeholder{};
+        std::fwrite(placeholder.data(), 1, placeholder.size(), fp) != placeholder.size()) {
         std::fclose(fp);
         return VaultResult::IoError;
     }
 
-    out.path_         = path;
-    out.fp_           = fp;
-    out.header_       = h;
-    out.master_key_   = std::move(master);
-    out.root_         = IndexNode::gallery("");
-    out.unlocked_     = true;
-    out.settings_     = VaultSettings::seeded();
-    out.write_mutex_  = std::make_unique<std::mutex>();
+    out.path_ = path;
+    out.fp_ = fp;
+    out.header_ = h;
+    out.master_key_ = std::move(master);
+    out.root_ = IndexNode::gallery("");
+    out.unlocked_ = true;
+    out.settings_ = VaultSettings::seeded();
+    out.write_mutex_ = std::make_unique<std::mutex>();
     out.header_mutex_ = std::make_unique<std::mutex>();
-    out.thumb_mutex_  = std::make_unique<std::mutex>();
+    out.thumb_mutex_ = std::make_unique<std::mutex>();
 
     // Write the initial (empty) index + a valid header via the crash-safe path.
-    if (const VaultResult r = out.commit_index(); r != VaultResult::Ok) { out.reset(); return r; }
+    if (const VaultResult r = out.commit_index(); r != VaultResult::Ok) {
+        out.reset();
+        return r;
+    }
 
     // Open read_fp_ after the initial commit so it sees the complete file.
-    out.read_fp_     = std::fopen(path.c_str(), "rb");
+    out.read_fp_ = std::fopen(path.c_str(), "rb");
     if (!out.read_fp_) {
         out.reset();
         return VaultResult::IoError;
@@ -551,7 +561,7 @@ VaultResult Vault::create(const std::string&       path,
     std::setvbuf(out.read_fp_, nullptr, _IONBF, 0);
 
     // Open thumb_fp_ the same way for thread-safe background thumbnail reads.
-    out.thumb_fp_     = std::fopen(path.c_str(), "rb");
+    out.thumb_fp_ = std::fopen(path.c_str(), "rb");
     if (!out.thumb_fp_) {
         out.reset();
         return VaultResult::IoError;
@@ -568,8 +578,7 @@ VaultResult Vault::open(const std::string& path, Vault& out)
     if (!fp) return VaultResult::IoError;
 
     std::array<uint8_t, HEADER_SIZE> raw{};
-    if (!fileutil::seek_to(fp, 0) ||
-        std::fread(raw.data(), 1, raw.size(), fp) != raw.size()) {
+    if (!fileutil::seek_to(fp, 0) || std::fread(raw.data(), 1, raw.size(), fp) != raw.size()) {
         std::fclose(fp);
         return VaultResult::BadFormat;
     }
@@ -580,9 +589,9 @@ VaultResult Vault::open(const std::string& path, Vault& out)
         return VaultResult::BadFormat;
     }
 
-    out.path_         = path;
-    out.fp_           = fp;
-    out.read_fp_      = std::fopen(path.c_str(), "rb");
+    out.path_ = path;
+    out.fp_ = fp;
+    out.read_fp_ = std::fopen(path.c_str(), "rb");
     if (!out.read_fp_) {
         std::fclose(fp);
         out.fp_ = nullptr;  // Null the pointer so reset() doesn't double-close
@@ -593,7 +602,7 @@ VaultResult Vault::open(const std::string& path, Vault& out)
     std::setvbuf(out.read_fp_, nullptr, _IONBF, 0);
 
     // Open thumb_fp_ the same way for thread-safe background thumbnail reads.
-    out.thumb_fp_     = std::fopen(path.c_str(), "rb");
+    out.thumb_fp_ = std::fopen(path.c_str(), "rb");
     if (!out.thumb_fp_) {
         std::fclose(out.read_fp_);
         std::fclose(fp);
@@ -604,11 +613,11 @@ VaultResult Vault::open(const std::string& path, Vault& out)
     }
     std::setvbuf(out.thumb_fp_, nullptr, _IONBF, 0);
 
-    out.header_       = h;
-    out.unlocked_     = false;
-    out.write_mutex_  = std::make_unique<std::mutex>();
+    out.header_ = h;
+    out.unlocked_ = false;
+    out.write_mutex_ = std::make_unique<std::mutex>();
     out.header_mutex_ = std::make_unique<std::mutex>();
-    out.thumb_mutex_  = std::make_unique<std::mutex>();
+    out.thumb_mutex_ = std::make_unique<std::mutex>();
     return VaultResult::Ok;
 }
 
@@ -616,8 +625,8 @@ namespace {
 
 // Attempt to load and deserialize the index from a vault slot.
 [[nodiscard]] bool try_load_slot(std::FILE* fp, const Header& header,
-                                 std::span<const uint8_t, crypto::KEY_SIZE> master_key, uint8_t slot_idx,
-                                 IndexNode& root_out,
+                                 std::span<const uint8_t, crypto::KEY_SIZE> master_key,
+                                 uint8_t slot_idx, IndexNode& root_out,
                                  std::vector<SavedSearch>& searches_out,
                                  VaultSettings& settings_out)
 {
@@ -626,7 +635,8 @@ namespace {
         return false;
     }
     std::vector<uint8_t> on_disk;
-    if (ChunkStore store(fp, master_key, framed_chunks(header)); !store.read_raw(s.offset, s.length, on_disk)) {
+    if (ChunkStore store(fp, master_key, framed_chunks(header));
+        !store.read_raw(s.offset, s.length, on_disk)) {
         return false;
     }
     std::vector<uint8_t> blob;
@@ -654,12 +664,15 @@ namespace {
 
 }  // namespace
 
-VaultResult Vault::unlock(std::span<const uint8_t> password,
-                          std::span<const uint8_t> keyfile)
+VaultResult Vault::unlock(std::span<const uint8_t> password, std::span<const uint8_t> keyfile)
 {
     using enum VaultResult;
-    if (fp_ == nullptr) { return IoError; }
-    if (unlocked_)      { return Ok; }
+    if (fp_ == nullptr) {
+        return IoError;
+    }
+    if (unlocked_) {
+        return Ok;
+    }
 
     crypto::SecureBuffer<crypto::KEY_SIZE> kek;
     if (!crypto::derive_key(password, keyfile, header_.salt, header_.kdf, kek)) {
@@ -678,8 +691,8 @@ VaultResult Vault::unlock(std::span<const uint8_t> password,
     // Load the index from the active slot, falling back to the other slot if the
     // active one is unreadable (crash during a swap left it truncated/corrupt).
     if (const uint8_t active = header_.active_slot == 0 ? 0 : 1;
-        !try_load_slot(fp_, header_, master_key_.as_span(), active, root_,
-                       saved_searches_, settings_) &&
+        !try_load_slot(fp_, header_, master_key_.as_span(), active, root_, saved_searches_,
+                       settings_) &&
         !try_load_slot(fp_, header_, master_key_.as_span(), active == 0 ? 1 : 0, root_,
                        saved_searches_, settings_)) {
         master_key_.wipe();
@@ -735,11 +748,23 @@ VaultResult Vault::change_password(std::span<const uint8_t> old_password,
 
 // --- structure ------------------------------------------------------------
 
-IndexNode*       Vault::find_gallery(std::string_view p)       { return vault_ops::resolve_gallery(&root_, p); }
-const IndexNode* Vault::find_gallery(std::string_view p) const { return vault_ops::resolve_gallery(&root_, p); }
+IndexNode* Vault::find_gallery(std::string_view p)
+{
+    return vault_ops::resolve_gallery(&root_, p);
+}
+const IndexNode* Vault::find_gallery(std::string_view p) const
+{
+    return vault_ops::resolve_gallery(&root_, p);
+}
 
-IndexNode*       Vault::resolve_node(std::string_view path)       { return vault_ops::resolve_node_impl(&root_, path); }
-const IndexNode* Vault::resolve_node(std::string_view path) const { return vault_ops::resolve_node_impl(&root_, path); }
+IndexNode* Vault::resolve_node(std::string_view path)
+{
+    return vault_ops::resolve_node_impl(&root_, path);
+}
+const IndexNode* Vault::resolve_node(std::string_view path) const
+{
+    return vault_ops::resolve_node_impl(&root_, path);
+}
 
 VaultResult Vault::create_gallery(std::string_view gallery_path)
 {
@@ -754,8 +779,8 @@ VaultResult Vault::create_gallery(std::string_view gallery_path)
     for (std::string_view seg : segments)
         if (!is_safe_node_name(seg)) return InvalidArg;
 
-    IndexNode* cur     = &root_;
-    bool       created = false;
+    IndexNode* cur = &root_;
+    bool created = false;
     for (std::string_view seg : segments) {
         IndexNode* child = child_named(cur, seg);
         if (child) {
@@ -763,7 +788,7 @@ VaultResult Vault::create_gallery(std::string_view gallery_path)
             cur = child;
         } else {
             cur->children.push_back(IndexNode::gallery(std::string(seg)));
-            cur     = &cur->children.back();
+            cur = &cur->children.back();
             created = true;
         }
     }
@@ -772,13 +797,12 @@ VaultResult Vault::create_gallery(std::string_view gallery_path)
     return commit_index();
 }
 
-VaultResult Vault::add_image(std::string_view         gallery_path,
-                             std::span<const uint8_t> file_data,
-                             std::string_view         filename)
+VaultResult Vault::add_image(std::string_view gallery_path, std::span<const uint8_t> file_data,
+                             std::string_view filename)
 {
     using enum VaultResult;
-    if (!unlocked_)                     return Locked;
-    if (!is_safe_node_name(filename))   return InvalidArg;  // no traversal into the index
+    if (!unlocked_) return Locked;
+    if (!is_safe_node_name(filename)) return InvalidArg;  // no traversal into the index
 
     // Fail-fast pre-checks: do these before staging to avoid orphaning chunks
     // on the synchronous path.
@@ -791,12 +815,12 @@ VaultResult Vault::add_image(std::string_view         gallery_path,
     if (staged.status != Ok) return staged.status;
 
     // Attach the staged node to the tree (no commit yet).
-    if (const VaultResult r = attach_staged(*this, gallery_path, std::move(staged.node));
-        r != Ok) return r;
+    if (const VaultResult r = attach_staged(*this, gallery_path, std::move(staged.node)); r != Ok)
+        return r;
 
     // Synchronize the staged chunks to stable storage (fsync).
-    if (ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
-        !store.sync()) return IoError;
+    if (ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_)); !store.sync())
+        return IoError;
 
     return commit_index();
 }
@@ -804,7 +828,7 @@ VaultResult Vault::add_image(std::string_view         gallery_path,
 VaultResult Vault::read_image(const IndexNode& node, crypto::SecureBytes& out) const
 {
     using enum VaultResult;
-    if (!unlocked_)       return Locked;
+    if (!unlocked_) return Locked;
     if (!node.is_image()) return InvalidArg;
 
     if (ChunkStore store(read_fp_, master_key_.as_span(), framed_chunks(header_));
@@ -817,7 +841,7 @@ VaultResult Vault::read_image(const IndexNode& node, crypto::SecureBytes& out) c
 VaultResult Vault::read_thumbnail(const IndexNode& node, crypto::SecureBytes& out) const
 {
     using enum VaultResult;
-    if (!node.is_media())        return InvalidArg;
+    if (!node.is_media()) return InvalidArg;
 
     // Determine thumbnail location: video uses poster, image uses meta.
     const uint64_t thumb_len = node.is_video() ? node.vmeta.poster_length : node.meta.thumb_length;
@@ -839,12 +863,12 @@ VaultResult read_thumb_span(const Vault& v, uint64_t offset, uint64_t length,
                             crypto::SecureBytes& out)
 {
     using enum VaultResult;
-    if (length == 0)   return InvalidArg;
+    if (length == 0) return InvalidArg;
 
     // Phase 58: Use dedicated thumb_fp_ + mutex for thread-safe background reads.
     if (!v.thumb_mutex_) return Locked;
     const std::lock_guard lk(*v.thumb_mutex_);
-    if (!v.unlocked_)  return Locked;
+    if (!v.unlocked_) return Locked;
     if (ChunkStore store(v.thumb_fp_, v.master_key_.as_span(), framed_chunks(v.header_));
         !store.read_chunk({offset, length}, out)) {
         return AuthFailed;
@@ -860,15 +884,13 @@ uint64_t vault_file_bytes(const Vault& v) noexcept
     return size;
 }
 
-VaultResult Vault::add_video(std::string_view         gallery_path,
-                             std::span<const uint8_t> file_data,
-                             std::string_view         filename,
-                             uint32_t                 chunk_size)
+VaultResult Vault::add_video(std::string_view gallery_path, std::span<const uint8_t> file_data,
+                             std::string_view filename, uint32_t chunk_size)
 {
     using enum VaultResult;
-    if (!unlocked_)                     return Locked;
-    if (!is_safe_node_name(filename))   return InvalidArg;  // no traversal into the index
-    if (chunk_size == 0)                return InvalidArg;
+    if (!unlocked_) return Locked;
+    if (!is_safe_node_name(filename)) return InvalidArg;  // no traversal into the index
+    if (chunk_size == 0) return InvalidArg;
 
     // Fail-fast pre-checks: do these before staging to avoid orphaning chunks
     // on the synchronous path. Probe the video file first to detect metadata and
@@ -884,12 +906,12 @@ VaultResult Vault::add_video(std::string_view         gallery_path,
     if (staged.status != Ok) return staged.status;
 
     // Attach the staged node to the tree (no commit yet).
-    if (const VaultResult r = attach_staged(*this, gallery_path, std::move(staged.node));
-        r != Ok) return r;
+    if (const VaultResult r = attach_staged(*this, gallery_path, std::move(staged.node)); r != Ok)
+        return r;
 
     // Synchronize the staged chunks to stable storage (fsync).
-    if (ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
-        !store.sync()) return IoError;
+    if (ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_)); !store.sync())
+        return IoError;
 
     return commit_index();
 }
@@ -897,7 +919,7 @@ VaultResult Vault::add_video(std::string_view         gallery_path,
 VaultResult Vault::read_video(const IndexNode& node, crypto::SecureBytes& out) const
 {
     using enum VaultResult;
-    if (!unlocked_)       return Locked;
+    if (!unlocked_) return Locked;
     if (!node.is_video()) return InvalidArg;
 
     if (!out.resize(node.vmeta.orig_size)) return IoError;
@@ -905,12 +927,21 @@ VaultResult Vault::read_video(const IndexNode& node, crypto::SecureBytes& out) c
     size_t pos = 0;
     for (const VideoChunk& c : node.vmeta.chunks) {
         crypto::SecureBytes piece;
-        if (!store.read_chunk({c.offset, c.length}, piece)) { (void)out.resize(0); return AuthFailed; }
-        if (pos + piece.size() > out.size())                { (void)out.resize(0); return AuthFailed; }
+        if (!store.read_chunk({c.offset, c.length}, piece)) {
+            (void)out.resize(0);
+            return AuthFailed;
+        }
+        if (pos + piece.size() > out.size()) {
+            (void)out.resize(0);
+            return AuthFailed;
+        }
         std::copy(piece.data(), piece.data() + piece.size(), out.data() + pos);
         pos += piece.size();
     }
-    if (pos != out.size()) { (void)out.resize(0); return AuthFailed; }
+    if (pos != out.size()) {
+        (void)out.resize(0);
+        return AuthFailed;
+    }
     return Ok;
 }
 
@@ -920,26 +951,26 @@ VaultResult Vault::repair_video_metadata(std::string_view node_path)
     if (!unlocked_) return Locked;
 
     IndexNode* n = resolve_node(node_path);
-    if (!n || !n->is_video())                  return NotFound;
-    if (n->vmeta.codec != VideoCodec::Unknown)  return Ok;  // already has real metadata
+    if (!n || !n->is_video()) return NotFound;
+    if (n->vmeta.codec != VideoCodec::Unknown) return Ok;  // already has real metadata
 
     crypto::SecureBytes raw;
     if (const VaultResult r = read_video(*n, raw); r != Ok) return r;
 
     media::VideoProbeResult probe;
-    if (!media::probe_video(raw.as_span(), probe))         return Ok;  // still not probeable
-    if (probe.codec == VideoCodec::Unknown)                 return Ok;  // still not decodable
+    if (!media::probe_video(raw.as_span(), probe)) return Ok;  // still not probeable
+    if (probe.codec == VideoCodec::Unknown) return Ok;         // still not decodable
 
-    n->vmeta.codec       = probe.codec;
-    n->vmeta.width       = probe.width;
-    n->vmeta.height      = probe.height;
+    n->vmeta.codec = probe.codec;
+    n->vmeta.width = probe.width;
+    n->vmeta.height = probe.height;
     n->vmeta.duration_us = probe.duration_us;
 
     if (n->vmeta.poster_length == 0 && !probe.poster_jpeg.empty()) {
         ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
-        ChunkSpan  poster_span;
+        ChunkSpan poster_span;
         if (!store.append_chunk(probe.poster_jpeg, poster_span)) return IoError;
-        if (!store.sync())                                       return IoError;
+        if (!store.sync()) return IoError;
         n->vmeta.poster_offset = poster_span.offset;
         n->vmeta.poster_length = poster_span.length;
     }
@@ -986,7 +1017,7 @@ VaultResult Vault::remove_image(std::string_view gallery_path, std::string_view 
 
     for (auto it = g->children.begin(); it != g->children.end(); ++it) {
         if (it->is_media() && it->name == filename) {  // remove image or video
-            g->children.erase(it);  // chunk(s) are orphaned until reclamation
+            g->children.erase(it);                     // chunk(s) are orphaned until reclamation
             if (const VaultResult r = commit_index(); r != Ok) return r;
 
             // Best-effort space reclamation: the remove itself already
@@ -1004,7 +1035,7 @@ VaultResult Vault::remove_gallery(std::string_view gallery_path)
     if (!unlocked_) return Locked;
 
     const auto segments = split_path(gallery_path);
-    if (segments.empty()) return InvalidArg;   // the root cannot be removed
+    if (segments.empty()) return InvalidArg;  // the root cannot be removed
 
     // Walk to the parent of the target (all segments but the last).
     IndexNode* parent = &root_;
@@ -1032,7 +1063,8 @@ std::vector<const IndexNode*> Vault::list(std::string_view gallery_path) const
     const IndexNode* g = find_gallery(gallery_path);
     if (!g) return out;
     out.reserve(g->children.size());
-    for (const auto& c : g->children) out.push_back(&c);
+    for (const auto& c : g->children)
+        out.push_back(&c);
     return ui::sort_children(out, ui::effective_sort_key(g->sort_key, settings_.default_sort));
 }
 
@@ -1082,7 +1114,7 @@ VaultResult rename_node(Vault& v, std::string_view gallery_path, std::string_vie
     IndexNode* node = child_named(g, old_name);
     if (!node) return NotFound;
 
-    if (new_name == old_name) return Ok;   // no-op
+    if (new_name == old_name) return Ok;  // no-op
 
     for (const auto& c : g->children)
         if (&c != node && c.name == new_name) return AlreadyExists;
@@ -1188,7 +1220,8 @@ std::vector<SearchHit> VaultSearch::run_search(const ui::AdvancedQuery& query) c
     if (!v_.unlocked_) return out;
 
     std::vector<std::pair<int, SearchHit>> scored;
-    [[maybe_unused]] auto _ = adv_search_dfs(v_.root_, "", v_.root_.tags, query, query.scope, scored);
+    [[maybe_unused]] auto _ =
+        adv_search_dfs(v_.root_, "", v_.root_.tags, query, query.scope, scored);
 
     // Rank by descending score, breaking ties by ascending path for stability.
     std::ranges::sort(scored, [](const auto& a, const auto& b) {
@@ -1197,7 +1230,8 @@ std::vector<SearchHit> VaultSearch::run_search(const ui::AdvancedQuery& query) c
     });
 
     out.reserve(scored.size());
-    for (auto& [score, hit] : scored) out.push_back(std::move(hit));
+    for (auto& [score, hit] : scored)
+        out.push_back(std::move(hit));
     return out;
 }
 
@@ -1212,7 +1246,8 @@ std::vector<ui::TagTally> VaultSearch::tag_overview() const
 
     std::vector<ui::TagTally> out;
     out.reserve(vocab.size());
-    for (auto& t : vocab) out.push_back(ui::TagTally{.tag = std::move(t)});
+    for (auto& t : vocab)
+        out.push_back(ui::TagTally{.tag = std::move(t)});
 
     count_direct_tags(v_.root_, out);
 
@@ -1249,14 +1284,17 @@ std::vector<SavedSearch> VaultSearch::list_saved_searches() const
 VaultResult VaultSearch::save_search(std::string_view name, const ui::AdvancedQuery& query)
 {
     using enum VaultResult;
-    if (!v_.unlocked_)  return Locked;
-    if (name.empty())   return InvalidArg;
+    if (!v_.unlocked_) return Locked;
+    if (name.empty()) return InvalidArg;
 
     std::vector<uint8_t> blob = ui::serialize_query(query);
 
     // Upsert: replace an existing same-name entry, else append (bounded).
     for (auto& s : v_.saved_searches_) {
-        if (s.name == name) { s.query = std::move(blob); return v_.commit_index(); }
+        if (s.name == name) {
+            s.query = std::move(blob);
+            return v_.commit_index();
+        }
     }
     if (v_.saved_searches_.size() >= INDEX_MAX_SAVED_SEARCHES) return InvalidArg;
     v_.saved_searches_.emplace_back(std::string(name), std::move(blob));
@@ -1335,21 +1373,21 @@ void collect_media_spans(const IndexNode& n, std::vector<std::pair<uint64_t, uin
 // chunks + poster) as planner units, with a parallel back-reference to the
 // node field so an executed move can update the tree copy. unit.id is the
 // index into both vectors.
-void collect_units(IndexNode& root,
-                   std::vector<compact_plan::Unit>& units,
+void collect_units(IndexNode& root, std::vector<compact_plan::Unit>& units,
                    std::vector<uint64_t*>& offset_fields)
 {
-    for_each_media(root, [&](IndexNode& n) {
-        auto add = [&](uint64_t& offset, uint64_t length) {
+    for_each_media(root, [&units, &offset_fields](IndexNode& n) {
+        auto add = [&units, &offset_fields](uint64_t& offset, uint64_t length) {
             if (length == 0) return;
-            units.push_back({offset, length, static_cast<uint32_t>(units.size())});
+            units.emplace_back(offset, length, static_cast<uint32_t>(units.size()));
             offset_fields.push_back(&offset);
         };
         if (n.is_image()) {
             add(n.meta.data_offset, n.meta.data_length);
             add(n.meta.thumb_offset, n.meta.thumb_length);
         } else if (n.is_video()) {
-            for (VideoChunk& c : n.vmeta.chunks) add(c.offset, c.length);
+            for (VideoChunk& c : n.vmeta.chunks)
+                add(c.offset, c.length);
             add(n.vmeta.poster_offset, n.vmeta.poster_length);
         }
     });
@@ -1364,11 +1402,45 @@ bool stream_move(ChunkStore& store, uint64_t src, uint64_t dest, uint64_t length
     constexpr uint64_t SLICE = 1u << 20;  // 1 MiB
     std::vector<uint8_t> buf;
     for (uint64_t i = 0; i < length; i += SLICE) {
-        const uint64_t n = std::min(SLICE, length - i);
-        if (!store.read_raw(src + i, n, buf)) return false;
+        if (const uint64_t n = std::min(SLICE, length - i); !store.read_raw(src + i, n, buf))
+            return false;
         if (!store.write_raw_at(dest + i, buf)) return false;
     }
     return true;
+}
+
+// Execute all moves in a compaction pass: stream each unit to its destination,
+// update in-memory offset references, track progress, and commit batches when
+// BATCH_BYTES is reached. Sets cancelled if progress.cancel is signalled.
+VaultResult execute_pass_moves(const std::vector<compact_plan::Move>& moves,
+                               std::vector<compact_plan::Unit>& units,
+                               std::vector<uint64_t*>& offset_fields, ChunkStore& store,
+                               IndexIoContext& ctx, OpProgress* progress,
+                               uint64_t& planned_mib, uint64_t& moved_bytes,
+                               uint64_t& moved_since_commit, bool& cancelled, uint64_t batch_bytes)
+{
+    using enum VaultResult;
+    for (const compact_plan::Move& m : moves) {
+        if (progress && progress->cancel.load()) {
+            cancelled = true;
+            break;
+        }
+        compact_plan::Unit& u = units[m.unit_id];
+        if (!stream_move(store, u.offset, m.dest, u.length)) return IoError;
+        u.offset = m.dest;
+        *offset_fields[m.unit_id] = m.dest;
+        moved_since_commit += u.length;
+        moved_bytes += u.length;
+        if (progress) {
+            progress->done.store(
+                static_cast<int>(std::min<uint64_t>(planned_mib, (moved_bytes >> 20) + 1)));
+        }
+        if (moved_since_commit >= batch_bytes) {
+            if (index_io::commit_index(ctx) != Ok) return IoError;
+            moved_since_commit = 0;
+        }
+    }
+    return Ok;
 }
 
 }  // namespace
@@ -1429,10 +1501,10 @@ VaultResult Vault::compact(OpProgress* progress)
     collect_units(new_root, units, offset_fields);
 
     ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
-    IndexIoContext ctx{fp_, header_, master_key_, new_root,
-                       saved_searches_, settings_, header_mutex_.get()};
+    IndexIoContext ctx{
+        fp_, header_, master_key_, new_root, saved_searches_, settings_, header_mutex_.get()};
 
-    constexpr uint64_t BATCH_BYTES = 256ull << 20;  // commit cadence: ~256 MiB
+    constexpr uint64_t BATCH_BYTES = 256ULL << 20;  // commit cadence: ~256 MiB
     uint64_t moved_since_commit = 0;
     uint64_t planned_mib = 0;
     uint64_t moved_bytes = 0;
@@ -1449,34 +1521,17 @@ VaultResult Vault::compact(OpProgress* progress)
             const IndexSlot& s = header_.slot[header_.active_slot];
             pinned_blob = {s.offset, s.length, 0};
         }
-        const std::span<const compact_plan::Unit> pinned(&pinned_blob,
-                                                         pinned_blob.length ? 1 : 0);
+        const std::span<const compact_plan::Unit> pinned(&pinned_blob, pinned_blob.length ? 1 : 0);
         const auto moves = compact_plan::plan_pass(units, HEADER_SIZE, pinned);
         if (moves.empty()) break;
 
-        for (const auto& m : moves) planned_mib += (units[m.unit_id].length >> 20) + 1;
+        for (const auto& m : moves)
+            planned_mib += (units[m.unit_id].length >> 20) + 1;
         if (progress) progress->total.store(static_cast<int>(planned_mib));
 
-        for (const compact_plan::Move& m : moves) {
-            if (progress && progress->cancel.load()) { cancelled = true; break; }
-            compact_plan::Unit& u = units[m.unit_id];
-            if (!stream_move(store, u.offset, m.dest, u.length)) return IoError;
-            u.offset = m.dest;
-            *offset_fields[m.unit_id] = m.dest;
-            moved_since_commit += u.length;
-            moved_bytes += u.length;
-            if (progress) {
-                progress->done.store(static_cast<int>(
-                    std::min<uint64_t>(planned_mib, (moved_bytes >> 20) + 1)));
-            }
-            if (moved_since_commit >= BATCH_BYTES) {
-                // Data must be durable before any index references it; the
-                // commit's Phase A sync flushes our buffered moves too (same
-                // FILE*). Failure -> abort WITHOUT this batch: the last
-                // committed index is still fully valid.
-                if (index_io::commit_index(ctx) != Ok) return IoError;
-                moved_since_commit = 0;
-            }
+        if (execute_pass_moves(moves, units, offset_fields, store, ctx, progress, planned_mib,
+                               moved_bytes, moved_since_commit, cancelled, BATCH_BYTES) != Ok) {
+            return IoError;
         }
         // Pass boundary commit: legalises this pass's vacated space for the
         // next pass's plan. Skipped only if the pass committed on its very
@@ -1501,7 +1556,10 @@ VaultResult Vault::compact(OpProgress* progress)
             active.offset >= compact_plan::live_end(units, HEADER_SIZE) &&
             fsize == active.offset + active.length &&
             (inactive.length == 0 || inactive.offset >= active.offset + active.length)) {
-            if (progress) { progress->total.store(1); progress->done.store(1); }
+            if (progress) {
+                progress->total.store(1);
+                progress->done.store(1);
+            }
             return Ok;
         }
     }
@@ -1529,7 +1587,8 @@ VaultResult Vault::compact(OpProgress* progress)
     // like reclaim() but against the packed layout.
     {
         std::vector<std::pair<uint64_t, uint64_t>> live;
-        for (const auto& u : units) live.emplace_back(u.offset, u.length);
+        for (const auto& u : units)
+            live.emplace_back(u.offset, u.length);
         live.emplace_back(dest, sealed_len);
         std::ranges::sort(live);
         uint64_t cursor = HEADER_SIZE;
@@ -1602,9 +1661,9 @@ void Vault::auto_reclaim_space()
     // meaningful fraction of the file (rewriting to save a few KiB costs more I/O
     // than it saves). Same thresholds the two delete paths shared before.
     uint64_t size = 0;
-    if (const uint64_t waste = wasted_bytes();
-        waste < AUTO_COMPACT_MIN_WASTE || !fileutil::file_size(fp_, size) ||
-        waste * AUTO_COMPACT_WASTE_RATIO < size) {
+    if (const uint64_t waste = wasted_bytes(); waste < AUTO_COMPACT_MIN_WASTE ||
+                                               !fileutil::file_size(fp_, size) ||
+                                               waste * AUTO_COMPACT_WASTE_RATIO < size) {
         return;
     }
 #if defined(__linux__)
@@ -1637,15 +1696,15 @@ VaultResult Vault::commit_index()
     // Synchronous commit path (default, pre-Phase-50 behavior).
     std::lock_guard lk(*write_mutex_);
     IndexIoContext ctx{
-        .fp_           = fp_,
-        .header_       = header_,
-        .master_key_   = master_key_,
-        .root_         = root_,
+        .fp_ = fp_,
+        .header_ = header_,
+        .master_key_ = master_key_,
+        .root_ = root_,
         .saved_searches_ = saved_searches_,
-        .settings_     = settings_,
+        .settings_ = settings_,
         .header_mutex_ = header_mutex_.get(),
     };
     return index_io::commit_index(ctx);
 }
 
-} // namespace vault
+}  // namespace vault
