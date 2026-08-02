@@ -18,6 +18,7 @@
 #include "platform/volume_pref.h"
 #include "platform/perf.h"
 #include "ui/advanced_search_screen.h"
+#include "ui/duplicates_screen.h"
 #include "ui/favorites_galleries.h"
 #include "ui/favorites_images.h"
 #include "ui/gallery_grid.h"
@@ -292,6 +293,21 @@ void App::to_import_status()
     screen_->on_enter();
 }
 
+void App::to_duplicates()
+{
+    using enum ui::NavKind;
+    if (!vault_state_.active) return;
+
+    ui::Nav back{ToGallery, {}, 0};
+    if (const auto* grid = dynamic_cast<const ui::GalleryGrid*>(screen_.get()))
+        back = ui::Nav{ToGallery, ui::current_gallery_path(*grid), 0};
+
+    state_  = State::Browsing;
+    screen_ = std::make_unique<ui::DuplicatesScreen>(
+        window_, font_, *vault_state_.active, *cache_, back);
+    screen_->on_enter();
+}
+
 namespace {
 // Manual frame-rate floor, used only when the renderer can't VSync (software /
 // headless backends); otherwise SDL_RenderPresent paces presentation.
@@ -528,6 +544,7 @@ bool App::apply_nav()
         case ToTagImages:         to_tag_images(nav.path);             return true;
         case ToTagViewer:         to_tag_viewer(nav.path, nav.index);  return true;
         case ToImportStatus:      to_import_status(); return true;  // Phase 50
+        case ToDuplicates:        to_duplicates(); return true;
         case ToUnlock:
             import_ui_.queue.end_session();          // Phase 50: flush before switch
             to_unlock(nav.path);

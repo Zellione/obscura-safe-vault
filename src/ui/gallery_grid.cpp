@@ -853,6 +853,16 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         handle_shift_c_key(*this, key);
         return;
     }
+    if (key.key == SDLK_D && (key.mod & SDL_KMOD_CTRL) != 0) {
+        // Duplicate finder is an exclusive op: same import-queue gate as compact.
+        if (queue_.busy()) {
+            status_ = "Imports running — press Shift+I for status";
+            mark_dirty();
+            return;
+        }
+        request(NavKind::ToDuplicates);
+        return;
+    }
     if ((key.key == SDLK_I) && (key.mod & SDL_KMOD_SHIFT)) {
         request(NavKind::ToImportStatus);
         return;
@@ -1645,6 +1655,9 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
         {"Import & export", {
             {"I", "Import files"}, {"Shift+I", "Import status"}, {"Z", "Import ZIP/CBZ"}, {"O", "Import folder"}, {"N", "New gallery"},
             {"X", "Export selection"}, {"M", "Move/copy"}, {"Shift+M", "Combine gallery"}, {"R", "Rename"}, {"Del", "Delete"},
+        }},
+        {"Vault tools", {
+            {"Shift+C", "Compact vault"}, {"Ctrl+D", "Find duplicate files"},
         }},
         {"Session", {
             {"Shift+S", "Cycle sort order"}, {"U", "Keep unlocked for session"},
