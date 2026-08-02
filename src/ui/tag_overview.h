@@ -58,6 +58,12 @@ private:
     void import_tag_dict(const std::string& path);
     void render_import_summary(gfx::Renderer& r, float win_w, float win_h);
 
+    // Ctrl+X → Y/N confirm → Vault::prune_tags with the junk-tag predicate
+    // (ui::tag_has_renderable_text); the result reuses the summary modal.
+    bool handle_prune_confirm_key(const SDL_Event& e);   // true while confirming
+    void run_junk_tag_cleanup();
+    void render_prune_confirm(gfx::Renderer& r, float win_w, float win_h);
+
     gfx::Window&          win_;
     gfx::FontAtlas&       font_;
     vault::Vault&         vault_;
@@ -83,9 +89,13 @@ private:
     TextFieldChrome prompt_chrome_;
     std::string     error_;
 
-    // Phase 55: the tag-dictionary import summary. Non-empty exactly while the
-    // modal is up; any key dismisses it.
+    // Phase 55: the summary modal (dict import / junk-tag cleanup). Non-empty
+    // exactly while the modal is up; any key dismisses it.
     std::vector<std::string> import_summary_;
+    std::string              summary_title_;
+
+    // Ctrl+X junk-tag cleanup: awaiting the Y/N confirm.
+    bool confirm_prune_ = false;
 };
 
 } // namespace ui
