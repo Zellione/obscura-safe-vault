@@ -14,8 +14,9 @@ std::vector<vault::SearchHit> FavoritesImages::fetch() const
     return vault_ref().list_favorite_images();
 }
 
-void FavoritesImages::update(double)
+void FavoritesImages::update(double dt)
 {
+    FavoritesScreen::update(dt);       // scroll clamp + one-shot selection follow
     if (pump_thumbs()) mark_dirty();   // off-thread thumbnail decode(s) landed
 }
 
