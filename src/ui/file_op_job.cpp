@@ -120,13 +120,13 @@ FileOpOutcome run_compact(vault::Vault& v, vault::OpProgress& progress)
         FileOpOutcome oc;
         oc.ok = true; oc.cancelled = true;
         oc.kind = FileOpKind::Compact;
-        oc.status = "Compaction cancelled.";
+        oc.status = "Compact cancelled — progress kept.";
         return oc;
     }
 
     // compact() owns progress.total and progress.done; it scans all chunks and
-    // writes them to a temp file with progress updates before atomically
-    // replacing the original.
+    // packs them in-place, with progress updates before atomic index batch-commits.
+    const uint64_t before = vault::vault_file_bytes(v);
     const vault::VaultResult r = v.compact(&progress);
     FileOpOutcome oc;
     oc.kind = FileOpKind::Compact;
@@ -134,7 +134,9 @@ FileOpOutcome run_compact(vault::Vault& v, vault::OpProgress& progress)
         oc.ok = true;
         oc.done = progress.done.load();
         oc.total = progress.total.load();
-        oc.status = "Vault compacted successfully.";
+        const uint64_t after = vault::vault_file_bytes(v);
+        oc.status = std::format("Vault compacted — {:.1f} MiB reclaimed.",
+                                before > after ? double(before - after) / (1 << 20) : 0.0);
     } else {
         oc.error = std::format("Compaction failed: {:d}.", std::to_underlying(r));
     }
