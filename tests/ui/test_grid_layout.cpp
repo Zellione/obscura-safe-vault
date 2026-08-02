@@ -346,3 +346,37 @@ TEST(clamp_scroll_zero_view_height)
     float result = ui::clamp_scroll(500.0f, 1000.0f, 0.0f);
     CHECK_EQ(result, 500.0f);
 }
+
+// --- center_scroll tests ---
+
+TEST(center_scroll_centers_item_in_viewport)
+{
+    // Item [400, 500] (center 450); viewport band [0, 500] (center 250).
+    // scroll = 450 - 250 = 200 puts the item's center on the band's center.
+    float result = ui::center_scroll(400.0f, 500.0f, 0.0f, 500.0f);
+    CHECK_EQ(result, 200.0f);
+}
+
+TEST(center_scroll_item_near_top_goes_negative)
+{
+    // Item [100, 200] (center 150); viewport [0, 500] (center 250).
+    // scroll = -100: centering is unclamped — the caller clamps to >= 0,
+    // which yields "as centered as possible" for items near the top.
+    float result = ui::center_scroll(100.0f, 200.0f, 0.0f, 500.0f);
+    CHECK_EQ(result, -100.0f);
+}
+
+TEST(center_scroll_respects_header_offset_band)
+{
+    // Viewport band [80, 580] (center 330, e.g. below a fixed header);
+    // item [1000, 1100] (center 1050). scroll = 1050 - 330 = 720.
+    float result = ui::center_scroll(1000.0f, 1100.0f, 80.0f, 580.0f);
+    CHECK_EQ(result, 720.0f);
+}
+
+TEST(center_scroll_item_already_centered)
+{
+    // Item [200, 300] (center 250) == viewport [0, 500] center → scroll 0.
+    float result = ui::center_scroll(200.0f, 300.0f, 0.0f, 500.0f);
+    CHECK_EQ(result, 0.0f);
+}

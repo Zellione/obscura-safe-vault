@@ -121,6 +121,14 @@ float ensure_visible(float scroll, float item_top, float item_bottom,
     return scroll;
 }
 
+float center_scroll(float item_top, float item_bottom,
+                    float view_top, float view_bottom) noexcept
+{
+    const float item_center = (item_top + item_bottom) * 0.5f;
+    const float view_center = (view_top + view_bottom) * 0.5f;
+    return item_center - view_center;
+}
+
 float clamp_scroll(float scroll, float content_height, float view_height) noexcept
 {
     const float max_scroll = std::max(0.0f, content_height - view_height);

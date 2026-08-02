@@ -222,6 +222,12 @@ void GalleryGrid::on_enter()
     // hit-testing work on the first frame's events (render() recomputes it each
     // frame to track window resizes).
     cols_ = grid_columns(content_width(*this) - 2 * OX, cell_size_for(view_), GAP);
+    // Center the restored selection NOW, not on the next update(): on_enter runs
+    // after this frame's update() (apply_nav resolves transitions between update
+    // and render), so deferring would paint the first frame — and hold it for up
+    // to an idle heartbeat — with the selection possibly off-screen.
+    follow_ = ScrollFollow::Center;
+    update_scroll_to_selection(*this);
 }
 
 void GalleryGrid::on_exit()
@@ -315,6 +321,7 @@ void GalleryGrid::open_selected()
         nav_.enter(n->name);
         refresh();
         nav_.select(session_.recall(nav_.path()));   // restore this sub-gallery's remembered tile
+        follow_ = ScrollFollow::Center;
     } else {
         request(NavKind::ToViewer, nav_.path(), s);
     }
@@ -326,6 +333,7 @@ void GalleryGrid::go_up()
     if (!nav_.up()) { request(NavKind::ToVaultManager); return; }
     refresh();
     nav_.select(session_.recall(nav_.path()));   // restore the parent's remembered tile
+    follow_ = ScrollFollow::Center;
 }
 
 void GalleryGrid::toggle_select()
@@ -503,6 +511,7 @@ void GalleryGrid::jump_to_gallery(const std::string& path)
     for (const auto& seg : split_path(path)) nav_.enter(seg);
     refresh();
     nav_.select(0);
+    follow_ = ScrollFollow::Center;
 }
 
 void GalleryGrid::do_export(const std::filesystem::path& dest)
@@ -788,7 +797,12 @@ bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& 
         return true;
     }
     switch (key.key) {
-        case SDLK_L: g.view_ = next_gallery_view(g.view_); return true;
+        case SDLK_L:
+            g.view_ = next_gallery_view(g.view_);
+            // The tile geometry just changed under the selection — minimally
+            // re-follow so the selected tile doesn't land off-screen.
+            g.follow_ = GalleryGrid::ScrollFollow::Ensure;
+            return true;
         case SDLK_X: g.start_export(); return true;
         case SDLK_M:
             if (key.mod & SDL_KMOD_SHIFT) { g.start_combine(); return true; }
@@ -852,10 +866,10 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
 
     using enum InputAction;
     switch (map_key(key.key, key.mod)) {
-        case NavLeft:    nav_.move(-1);     break;
-        case NavRight:   nav_.move(1);      break;
-        case NavUp:      nav_.move(-cols_); break;
-        case NavDown:    nav_.move(cols_);  break;
+        case NavLeft:    nav_.move(-1);     follow_ = ScrollFollow::Ensure; break;
+        case NavRight:   nav_.move(1);      follow_ = ScrollFollow::Ensure; break;
+        case NavUp:      nav_.move(-cols_); follow_ = ScrollFollow::Ensure; break;
+        case NavDown:    nav_.move(cols_);  follow_ = ScrollFollow::Ensure; break;
         case Select:     open_selected();   break;
         case Back:
             if (!sel_.empty()) { sel_.clear(); status_.clear(); }
@@ -1512,13 +1526,16 @@ void poll_pending_pickers(GalleryGrid& g)
 
 void update_scroll_to_selection_list(GalleryGrid& g, int sel_idx, float bottom)
 {
-    // For list view: item at row sel_idx
-    const float item_top = OY + LIST_HEADER + static_cast<float>(sel_idx) * ROW_H;
-    const float item_bottom = item_top + ROW_H;
     // Content height = header + (num_items * row_height)
     const float content_height = OY + LIST_HEADER + static_cast<float>(g.children_.size()) * ROW_H;
-    // Apply selection-following scroll
-    g.scroll_ = ui::ensure_visible(g.scroll_, item_top, item_bottom, OY + LIST_HEADER, bottom);
+    if (sel_idx >= 0) {
+        // For list view: item at row sel_idx
+        const float item_top = OY + LIST_HEADER + static_cast<float>(sel_idx) * ROW_H;
+        const float item_bottom = item_top + ROW_H;
+        g.scroll_ = (g.follow_ == GalleryGrid::ScrollFollow::Center)
+            ? ui::center_scroll(item_top, item_bottom, OY + LIST_HEADER, bottom)
+            : ui::ensure_visible(g.scroll_, item_top, item_bottom, OY + LIST_HEADER, bottom);
+    }
     g.scroll_ = ui::clamp_scroll(g.scroll_, content_height, bottom);
 }
 
@@ -1532,27 +1549,38 @@ void update_scroll_to_selection_grid(GalleryGrid& g, int sel_idx, float bottom)
     const auto W = content_width(g);
     const float cell = cell_size_for(g.view_);
     const int cols = grid_columns(W - 2 * OX, cell, GAP);
-    const SDL_FRect cellr = grid_cell_rect(sel_idx, grid_spec(W, cols, cell));
-    const float item_top = cellr.y;
-    const float item_bottom = cellr.y + cell;
     // Content height = number of rows * (cell_height + gap) - gap + top offset
     const int total_rows = (static_cast<int>(g.children_.size()) + cols - 1) / cols;
     const float content_height = OY + static_cast<float>(total_rows) * (cell + GAP);
-    // Apply selection-following scroll
-    g.scroll_ = ui::ensure_visible(g.scroll_, item_top, item_bottom, OY, bottom);
+    if (sel_idx >= 0) {
+        const SDL_FRect cellr = grid_cell_rect(sel_idx, grid_spec(W, cols, cell));
+        const float item_top = cellr.y;
+        const float item_bottom = cellr.y + cell;
+        g.scroll_ = (g.follow_ == GalleryGrid::ScrollFollow::Center)
+            ? ui::center_scroll(item_top, item_bottom, OY, bottom)
+            : ui::ensure_visible(g.scroll_, item_top, item_bottom, OY, bottom);
+    }
     g.scroll_ = ui::clamp_scroll(g.scroll_, content_height, bottom);
 }
 
 void update_scroll_to_selection(GalleryGrid& g)
 {
-    const int sel_idx = g.nav_.selected();
-    if (sel_idx < 0 || sel_idx >= static_cast<int>(g.children_.size())) return;
+    // Clamp every call (content and viewport can change under the scroll: vault
+    // changes, window resizes), but FOLLOW the selection only when something just
+    // moved it (arrow keys → Ensure, entering/leaving a gallery → Center).
+    // Following unconditionally would fight the mouse wheel, which scrolls
+    // without moving the selection — the view would snap back every frame
+    // (jitter, and a hard wall once the selected tile would leave the screen).
+    const int  sel_idx = g.nav_.selected();
+    const bool follow  = g.follow_ != GalleryGrid::ScrollFollow::None
+                         && sel_idx >= 0 && sel_idx < static_cast<int>(g.children_.size());
     // content_bottom, not the window height: the selected tile has to end up above
     // the reserved footer band, and the scroll clamp has to stop there too — else
     // the last row parks underneath the status line.
     const float cb = content_bottom(g);
-    if (g.view_ == GalleryView::List) update_scroll_to_selection_list(g, sel_idx, cb);
-    else                              update_scroll_to_selection_grid(g, sel_idx, cb);
+    if (g.view_ == GalleryView::List) update_scroll_to_selection_list(g, follow ? sel_idx : -1, cb);
+    else                              update_scroll_to_selection_grid(g, follow ? sel_idx : -1, cb);
+    g.follow_ = GalleryGrid::ScrollFollow::None;
 }
 
 void GalleryGrid::update(double dt)

@@ -219,6 +219,13 @@ void toggle_select();          // toggle the current item in the export selectio
     int                   cols_ = 1;
     GalleryView           view_ = GalleryView::GridM;
     float                 scroll_ = 0.0f;  // vertical scroll offset (pixels scrolled down)
+    // One-shot scroll-follow request, applied then cleared by update_scroll_to_selection:
+    //   None   — leave scroll alone (the mouse wheel scrolls without moving the
+    //            selection, so following every frame would snap the view back),
+    //   Ensure — minimally scroll the selection into view (arrow-key navigation),
+    //   Center — center the selection in the viewport (entering/leaving a gallery).
+    enum class ScrollFollow : unsigned char { None, Ensure, Center };
+    ScrollFollow          follow_ = ScrollFollow::Center;   // first frame centers initial_.selected
     std::vector<std::string> child_names_;   // names of children_, cached because the pointers go stale on tree change
     std::string           error_;
     std::string           status_;   // transient export result message

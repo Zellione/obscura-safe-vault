@@ -49,6 +49,15 @@ namespace ui {
 [[nodiscard]] float ensure_visible(float scroll, float item_top, float item_bottom,
                                    float view_top, float view_bottom) noexcept;
 
+// Compute the scroll offset that places an item's center on the viewport band's
+// center. Same coordinate model as ensure_visible: item_top/item_bottom are in
+// document coordinates, [view_top, view_bottom] is the on-screen band, and
+// screen_y = document_y - scroll. The result is UNCLAMPED (it can be negative or
+// past the content end) — pass it through clamp_scroll to get "as centered as
+// the scroll range allows".
+[[nodiscard]] float center_scroll(float item_top, float item_bottom,
+                                  float view_top, float view_bottom) noexcept;
+
 // Clamp a scroll offset to the valid range [0, max(0, content_height - view_height)].
 // Inputs:
 //   scroll: the scroll offset to clamp
