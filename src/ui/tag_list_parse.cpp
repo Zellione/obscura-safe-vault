@@ -1,5 +1,7 @@
 #include "ui/tag_list_parse.h"
 
+#include <algorithm>
+
 #include "vault/index.h"
 
 namespace ui {
@@ -32,6 +34,13 @@ bool ci_equal(const std::string& a, const std::string& b)
 
 }  // namespace
 
+bool tag_has_renderable_text(std::string_view tag)
+{
+    return std::ranges::any_of(tag, [](char c) {
+        return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+    });
+}
+
 std::vector<std::string> parse_tag_list(std::span<const uint8_t> bytes)
 {
     std::vector<std::string> out;
@@ -46,6 +55,7 @@ std::vector<std::string> parse_tag_list(std::span<const uint8_t> bytes)
         p = (nl < end) ? nl + 1 : end;
 
         if (tag.empty()) continue;
+        if (!tag_has_renderable_text(tag)) continue;
         if (tag.size() > TAG_MAX_BYTES) tag.resize(TAG_MAX_BYTES);
 
         bool dup = false;

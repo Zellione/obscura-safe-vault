@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -61,6 +62,13 @@ struct StagedThumb;
 struct StagedNode;
 
 enum class SearchScope { Images, Galleries, Both };
+
+// Result stats of Vault::prune_tags: how many tags were removed, from how
+// many distinct nodes.
+struct PruneTagsStats {
+    std::size_t tags_removed  = 0;
+    std::size_t nodes_touched = 0;
+};
 
 // A node matched by search. `path` is the full slash-path to the node (including
 // its own name); `effective_tags` = the node's own tags unioned with all ancestor
@@ -253,6 +261,14 @@ public:
 
     // Remove one tag (case-insensitive; idempotent — Ok even if absent).
     [[nodiscard]] VaultResult remove_tag(std::string_view node_path, std::string_view tag);
+
+    // Remove every tag on every node (root included) for which `keep` returns
+    // false, in one index commit — no commit when nothing matched. The predicate
+    // is pure policy (e.g. ui::tag_has_renderable_text for the junk-tag cleanup).
+    // `stats` (if non-null) is always written — zeroed on Locked/InvalidArg
+    // (InvalidArg for an empty predicate).
+    [[nodiscard]] VaultResult prune_tags(const std::function<bool(std::string_view)>& keep,
+                                         PruneTagsStats* stats);
 
     // Walk the decrypted in-memory tree; return every in-scope node whose name OR any
     // effective tag contains `query` (case-insensitive substring). Empty query matches

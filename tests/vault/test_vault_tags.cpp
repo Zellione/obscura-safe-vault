@@ -762,3 +762,84 @@ TEST(tags_tag_overview_counts_are_unchanged_by_the_rollup)
     CHECK_EQ(it->gallery_count, 0);
     CHECK_EQ(it->image_count, 1);
 }
+
+// --- prune_tags (junk-tag cleanup pass) -----------------------------------
+
+TEST(prune_tags_removes_junk_across_nested_nodes_and_persists)
+{
+    TempVault tv("prune_nested");
+    auto img = pattern(4000, 23);
+
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+                == vault::VaultResult::Ok);
+        REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
+        REQUIRE(v.create_gallery("g/sub") == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("g/sub", img, "a.jpg") == vault::VaultResult::Ok);
+
+        // Junk mixed with real tags at every level, root included.
+        // "サークル" is a CJK-only tag; "[()]"/"()" are bracket shells.
+        REQUIRE(v.set_tags("", {"rootreal", "[()]"}) == vault::VaultResult::Ok);
+        REQUIRE(v.set_tags("g", {"[()]", "keep me", "()"}) == vault::VaultResult::Ok);
+        REQUIRE(v.set_tags("g/sub", {"\xE3\x82\xB5\xE3\x83\xBC\xE3\x82\xAF\xE3\x83\xAB"})
+                == vault::VaultResult::Ok);
+        REQUIRE(v.set_tags("g/sub/a.jpg", {"beach", "[]", "sunset"})
+                == vault::VaultResult::Ok);
+
+        vault::PruneTagsStats stats;
+        REQUIRE(v.prune_tags(ui::tag_has_renderable_text, &stats) == vault::VaultResult::Ok);
+        CHECK_EQ(stats.tags_removed, static_cast<size_t>(5));
+        CHECK_EQ(stats.nodes_touched, static_cast<size_t>(4));
+        v.lock();
+    }
+
+    // Survivors (and their order) persist across reopen; junk is gone.
+    vault::Vault v2;
+    REQUIRE(vault::Vault::open(tv.str(), v2) == vault::VaultResult::Ok);
+    REQUIRE(v2.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+
+    const auto* g = v2.list("")[0];
+    REQUIRE(g->tags.size() == 1);
+    CHECK_EQ(g->tags[0], "keep me");
+
+    const auto* sub = v2.list("g")[0];
+    CHECK(sub->tags.empty());
+
+    const auto* a = v2.list("g/sub")[0];
+    REQUIRE(a->tags.size() == 2);
+    CHECK_EQ(a->tags[0], "beach");
+    CHECK_EQ(a->tags[1], "sunset");
+}
+
+TEST(prune_tags_noop_on_clean_vault)
+{
+    TempVault tv("prune_noop");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
+    REQUIRE(v.set_tags("g", {"real", "R-18"}) == vault::VaultResult::Ok);
+
+    vault::PruneTagsStats stats;
+    REQUIRE(v.prune_tags(ui::tag_has_renderable_text, &stats) == vault::VaultResult::Ok);
+    CHECK_EQ(stats.tags_removed, static_cast<size_t>(0));
+    CHECK_EQ(stats.nodes_touched, static_cast<size_t>(0));
+
+    const auto* g = v.list("")[0];
+    CHECK_EQ(g->tags.size(), static_cast<size_t>(2));
+}
+
+TEST(prune_tags_locked_and_null_predicate)
+{
+    TempVault tv("prune_locked");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    CHECK(v.prune_tags(nullptr, nullptr) == vault::VaultResult::InvalidArg);
+
+    v.lock();
+    vault::PruneTagsStats stats{.tags_removed = 99, .nodes_touched = 99};
+    CHECK(v.prune_tags(ui::tag_has_renderable_text, &stats) == vault::VaultResult::Locked);
+    CHECK_EQ(stats.tags_removed, static_cast<size_t>(0));   // zeroed on failure
+}

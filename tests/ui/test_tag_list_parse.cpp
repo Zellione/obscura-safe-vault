@@ -81,6 +81,29 @@ TEST(tag_list_parse_caps_count_at_index_max_tags)
     CHECK_EQ(tags.size(), static_cast<size_t>(vault::INDEX_MAX_TAGS));
 }
 
+TEST(tag_has_renderable_text_predicate)
+{
+    CHECK(ui::tag_has_renderable_text("alpha"));
+    CHECK(ui::tag_has_renderable_text("R-18"));
+    CHECK(ui::tag_has_renderable_text("[Group] Title"));
+    CHECK(!ui::tag_has_renderable_text(""));
+    CHECK(!ui::tag_has_renderable_text("[()]"));
+    CHECK(!ui::tag_has_renderable_text("[]"));
+    CHECK(!ui::tag_has_renderable_text("()"));
+    // CJK-only ("サークル"): every byte is outside the printable-ASCII atlas.
+    CHECK(!ui::tag_has_renderable_text("\xE3\x82\xB5\xE3\x83\xBC\xE3\x82\xAF\xE3\x83\xAB"));
+    // CJK wrapped in brackets ("[サークル (作者)]") renders as just "[()]".
+    CHECK(!ui::tag_has_renderable_text(
+        "[\xE3\x82\xB5\xE3\x83\xBC\xE3\x82\xAF\xE3\x83\xAB (\xE4\xBD\x9C\xE8\x80\x85)]"));
+}
+
+TEST(tag_list_parse_drops_tags_without_renderable_text)
+{
+    auto tags = parse("[()]\n[]\n()\n\xE3\x82\xB5\xE3\x83\xBC\xE3\x82\xAF\xE3\x83\xAB\nreal tag\n");
+    REQUIRE(tags.size() == 1);
+    CHECK(tags[0] == "real tag");
+}
+
 TEST(tag_list_parse_truncates_long_tag_to_u16_bound)
 {
     std::string blob(ui::TAG_MAX_BYTES + 100, 'x');

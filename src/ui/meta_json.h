@@ -27,8 +27,10 @@ struct ArchiveMeta {
 [[nodiscard]] std::string meta_gallery_name(const ArchiveMeta& m, std::string_view fallback);
 
 // Tags to seed the imported gallery: the japanese title (so it stays
-// searchable) plus every "type:name" tag. Trailing normalisation and
-// case-insensitive de-dupe are Vault::add_tag's job.
+// searchable) plus every "type:name" tag. Tags without renderable text
+// (ui::tag_has_renderable_text — e.g. a CJK-only title that would display
+// as "[()]" in the ASCII-only UI font) are dropped. Trailing normalisation
+// and case-insensitive de-dupe are Vault::add_tag's job.
 [[nodiscard]] std::vector<std::string> meta_gallery_tags(const ArchiveMeta& m);
 
 } // namespace ui

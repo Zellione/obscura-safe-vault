@@ -16,6 +16,7 @@
 #include "ui/tag_chip.h"
 #include "ui/tag_dict_import.h"
 #include "ui/tag_json_parse.h"
+#include "ui/tag_list_parse.h"
 #include "ui/tag_overview_model.h"
 #include "ui/text_input_event.h"
 #include "ui/widgets.h"
@@ -148,8 +149,50 @@ void TagOverviewScreen::import_tag_dict(const std::string& path)
     }
 
     error_.clear();
+    summary_title_  = "Tag dictionary imported";
     import_summary_ = tag_dict_summary_lines(summary);
     reload();
+}
+
+// The Ctrl+X confirm is modal like the compact confirm on the gallery grid:
+// Y runs the cleanup, Esc/N cancels, every other key is swallowed.
+bool TagOverviewScreen::handle_prune_confirm_key(const SDL_Event& e)
+{
+    if (!confirm_prune_) return false;
+    if (e.type != SDL_EVENT_KEY_DOWN) return true;   // modal swallows non-key events
+
+    const SDL_Keycode k = e.key.key;
+    if (k == SDLK_ESCAPE || k == SDLK_N) {
+        confirm_prune_ = false;
+        return true;
+    }
+    if (k != SDLK_Y) return true;                    // swallow every other key
+
+    confirm_prune_ = false;
+    run_junk_tag_cleanup();
+    return true;
+}
+
+void TagOverviewScreen::run_junk_tag_cleanup()
+{
+    // Junk = no renderable text (ui::tag_has_renderable_text): tags that draw
+    // as empty bracket shells ("[()]", "[]", "()") in the ASCII-only UI font.
+    vault::PruneTagsStats stats;
+    if (vault_.prune_tags(tag_has_renderable_text, &stats) != vault::VaultResult::Ok) {
+        error_ = "Could not save the cleaned tags.";
+        return;
+    }
+
+    error_.clear();
+    summary_title_ = "Junk-tag cleanup";
+    if (stats.tags_removed == 0) {
+        import_summary_ = {"No junk tags found."};
+    } else {
+        import_summary_ = {std::format("Removed {} junk tag{} from {} item{}.",
+                                       stats.tags_removed, stats.tags_removed == 1 ? "" : "s",
+                                       stats.nodes_touched, stats.nodes_touched == 1 ? "" : "s")};
+        reload();
+    }
 }
 
 void TagOverviewScreen::update(double dt)
@@ -168,6 +211,11 @@ void TagOverviewScreen::handle_key_down_in_browse_mode(const SDL_KeyboardEvent& 
     // filter field and the E prompt.
     if (key.key == SDLK_I && (key.mod & SDL_KMOD_CTRL) != 0) {
         open_tag_dict_picker();
+        return;
+    }
+    if (key.key == SDLK_X && (key.mod & SDL_KMOD_CTRL) != 0) {
+        confirm_prune_ = true;
+        error_.clear();
         return;
     }
     switch (key.key) {
@@ -215,6 +263,8 @@ void TagOverviewScreen::handle_event(const SDL_Event& e)
         if (e.type == SDL_EVENT_KEY_DOWN) import_summary_.clear();
         return;
     }
+
+    if (handle_prune_confirm_key(e)) return;
 
     if (prompting_) {
         // The 'E' that opened the prompt also arrives as a text event; swallow
@@ -414,7 +464,32 @@ void TagOverviewScreen::render(gfx::Renderer& r)
         r.draw_text(font_, l.box.x + PROMPT_PAD, l.hint_y, hint, TEXT_FAINT);
     }
 
+    render_prune_confirm(r, W, H);
     render_import_summary(r, W, H);
+}
+
+void TagOverviewScreen::render_prune_confirm(gfx::Renderer& r, float win_w, float win_h)
+{
+    using namespace gfx::theme;
+    if (!confirm_prune_) return;
+
+    r.draw_rect({0, 0, win_w, win_h}, gfx::Color{8, 9, 12, 255});   // veil
+
+    const float pw = 560;
+    const float ph = 160;
+    const float px = (win_w - pw) / 2;
+    const float py = (win_h - ph) / 2;
+    r.draw_round_rect({px, py, pw, ph}, RADIUS, SURFACE);
+    r.draw_round_rect({px, py, pw, ph}, RADIUS, ACCENT, /*filled*/ false);
+
+    auto centered = [&](const std::string& s, float y, gfx::Color c) {
+        const auto tw = static_cast<float>(font_.measure(s));
+        r.draw_text(font_, px + (pw - tw) / 2, y, s, c);
+    };
+
+    centered("Remove all junk tags from this vault?", py + 28, TEXT);
+    centered("Tags with no readable text (like \"[()]\") are deleted.", py + 64, TEXT_DIM);
+    centered("[Esc/N] Cancel        [Y] Remove", py + ph - 50, TEXT_DIM);
 }
 
 void TagOverviewScreen::render_import_summary(gfx::Renderer& r, float win_w, float win_h)
@@ -432,7 +507,7 @@ void TagOverviewScreen::render_import_summary(gfx::Renderer& r, float win_w, flo
     r.draw_round_rect(l.box, RADIUS, SURFACE);
     r.draw_round_rect(l.box, RADIUS, ACCENT, /*filled*/ false);
 
-    r.draw_text(font_, l.box.x + PROMPT_PAD, l.title_y, "Tag dictionary imported", TEXT);
+    r.draw_text(font_, l.box.x + PROMPT_PAD, l.title_y, summary_title_, TEXT);
 
     float y = l.body_y;
     for (const std::string& line : import_summary_) {
@@ -449,6 +524,7 @@ std::vector<HelpGroup> TagOverviewScreen::help_groups() const
         {"/", "Filter tags"}, {"Tab", "Toggle sort (name/count)"},
         {"E", "Edit description"},
         {"Ctrl+I", "Import tag dictionary"},
+        {"Ctrl+X", "Remove junk tags"},
         {"Esc", "Back"},
     }},
     text_editing_help_group()};

@@ -1161,6 +1161,39 @@ VaultResult Vault::add_tag(std::string_view node_path, std::string_view tag)
     return commit_index();
 }
 
+namespace {
+
+// Depth-first tag prune over the index tree; counts into `stats`.
+void prune_node_tags(IndexNode& node, const std::function<bool(std::string_view)>& keep,
+                     PruneTagsStats& stats)
+{
+    if (const auto removed = std::erase_if(node.tags,
+                                           [&keep](const std::string& t) { return !keep(t); });
+        removed > 0) {
+        stats.tags_removed += removed;
+        ++stats.nodes_touched;
+    }
+    for (IndexNode& c : node.children) prune_node_tags(c, keep, stats);
+}
+
+}  // namespace
+
+VaultResult Vault::prune_tags(const std::function<bool(std::string_view)>& keep,
+                              PruneTagsStats* stats)
+{
+    using enum VaultResult;
+    if (stats) *stats = {};
+    if (!unlocked_) return Locked;
+    if (!keep) return InvalidArg;
+
+    PruneTagsStats local;
+    prune_node_tags(root_, keep, local);
+    if (stats) *stats = local;
+
+    if (local.tags_removed == 0) return Ok;   // nothing changed — no commit
+    return commit_index();
+}
+
 VaultResult Vault::remove_tag(std::string_view node_path, std::string_view tag)
 {
     using enum VaultResult;

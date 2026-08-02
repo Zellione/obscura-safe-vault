@@ -1,5 +1,6 @@
 #include "ui/meta_json.h"
 
+#include "ui/tag_list_parse.h"
 #include "vault/safe_name.h"
 
 #include <nlohmann/json.hpp>
@@ -93,9 +94,13 @@ std::string meta_gallery_name(const ArchiveMeta& m, std::string_view fallback)
 
 std::vector<std::string> meta_gallery_tags(const ArchiveMeta& m)
 {
+    // Tags with no renderable text (a CJK-only japanese title, bracket shells
+    // like "[()]") would display as empty-brace chips in the ASCII-only UI
+    // font — drop them here so no import path seeds them.
     std::vector<std::string> tags;
-    if (!m.title_japanese.empty()) tags.push_back(m.title_japanese);
-    tags.insert(tags.end(), m.tags.begin(), m.tags.end());
+    if (tag_has_renderable_text(m.title_japanese)) tags.push_back(m.title_japanese);
+    for (const std::string& t : m.tags)
+        if (tag_has_renderable_text(t)) tags.push_back(t);
     return tags;
 }
 

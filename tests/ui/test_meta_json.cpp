@@ -156,3 +156,22 @@ TEST(meta_gallery_tags_include_japanese_title)
     no_jp.tags = {"tag:a"};
     CHECK_EQ(ui::meta_gallery_tags(no_jp).size(), static_cast<size_t>(1));
 }
+
+TEST(meta_gallery_tags_drop_unrenderable_tags)
+{
+    // A CJK-only japanese title ("[サークル (作者)] タイトル") and bracket-shell
+    // tags would all render as "[()]"/"[]"/"()" in the ASCII-only UI font — the
+    // import drops them instead of seeding junk chips.
+    ui::ArchiveMeta m;
+    m.title_japanese = "[\xE3\x82\xB5\xE3\x83\xBC\xE3\x82\xAF\xE3\x83\xAB "
+                       "(\xE4\xBD\x9C\xE8\x80\x85)] \xE3\x82\xBF\xE3\x82\xA4\xE3\x83\x88\xE3\x83\xAB";
+    m.tags = {"[()]", "()", "\xE3\x82\xB5\xE3\x83\xBC\xE3\x82\xAF\xE3\x83\xAB", "tag:a"};
+    const auto tags = ui::meta_gallery_tags(m);
+    REQUIRE(tags.size() == static_cast<size_t>(1));
+    CHECK_EQ(tags[0], std::string("tag:a"));
+
+    // A japanese title with renderable text is still seeded as a tag.
+    ui::ArchiveMeta romaji;
+    romaji.title_japanese = "[\xE3\x82\xB5\xE3\x83\xBC\xE3\x82\xAF\xE3\x83\xAB] Title 2";
+    CHECK_EQ(ui::meta_gallery_tags(romaji).size(), static_cast<size_t>(1));
+}
