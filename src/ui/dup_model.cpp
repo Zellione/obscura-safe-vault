@@ -21,7 +21,7 @@ uint8_t cell_luma(std::span<const uint8_t> rgb, int w, int h,
             sum += (2u * p[0] + 5u * p[1] + p[2]) / 8u;  // cheap integer luma
             ++n;
         }
-    return n ? static_cast<uint8_t>(sum / n) : 0;
+    return static_cast<uint8_t>(n ? sum / n : 0);
 }
 
 } // namespace
