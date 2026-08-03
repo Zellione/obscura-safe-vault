@@ -204,6 +204,34 @@ void draw_confirm_leave_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W,
     centered("[Enter/Y] leave · [Esc/N] stay", py + ph - 50, TEXT_DIM);
 }
 
+// Draw confirm-skip overlay
+void draw_confirm_skip_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen)
+{
+    using namespace gfx::theme;
+
+    // Veil the whole window
+    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
+
+    const float pw = 560;
+    const float ph = 230;
+    const float px = (W - pw) / 2;
+    const float py = (H - ph) / 2;
+    r.draw_round_rect({px, py, pw, ph}, 8, SURFACE);
+    r.draw_round_rect({px, py, pw, ph}, 8, BORDER, /*filled*/ false);
+
+    auto centered = [&](const std::string& s, float y, gfx::Color c) {
+        const auto tw = static_cast<float>(font.measure(s));
+        r.draw_text(font, px + (pw - tw) / 2, y, s, c);
+    };
+
+    const std::string title = std::format("Skip wave {} of {}?", screen.review_.wave_index() + 1, screen.review_.wave_count());
+    centered(title, py + 28, TEXT);
+    centered(std::format("Discard {} touched marks? Files stay in the vault.", screen.review_.marked_count()),
+             py + 58, TEXT_DIM);
+
+    centered("[Enter/Y] skip wave · [Esc/N] stay", py + ph - 50, TEXT_DIM);
+}
+
 // Draw inspect overlay
 void draw_inspect_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, DuplicatesScreen& screen)
 {
@@ -296,6 +324,12 @@ bool consume_overlay_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
         screen.mark_dirty();
         return true;
     }
+    if (screen.confirm_.skip) {
+        screen.confirm_.skip = false;
+        if (accept) screen.skip_wave();
+        screen.mark_dirty();
+        return true;
+    }
     if (screen.inspect_.key.has_value()) {   // any key closes the inspect view
         screen.close_inspect();
         screen.mark_dirty();
@@ -366,6 +400,15 @@ void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
                 screen.leave();
             }
             break;
+        case SDLK_N:
+            if (screen.review_.touched() && screen.review_.any_marked()) {
+                screen.confirm_.skip = true;
+                screen.status_ = "Skip this wave? Touched marks will be discarded";
+            } else {
+                screen.skip_wave();
+            }
+            screen.mark_dirty();
+            break;
         default:
             break;
     }
@@ -395,22 +438,62 @@ bool read_inspect_payload(const vault::Vault& v, const DupMember& m, crypto::Sec
 
 void DuplicatesScreen::apply_marked_batch()
 {
-    const auto doomed = review_.marked_paths();
+    const auto     doomed       = review_.marked_paths();   // current wave only
+    const uint64_t doomed_bytes = review_.marked_bytes();
     vault::RemoveBatchStats stats;
     if (vault::remove_media_batch(vault_, doomed, &stats) != vault::VaultResult::Ok) {
         status_ = "Delete failed — vault unchanged on disk";
         return;
     }
-    done_summary_ = std::format("Removed {} files ({}){}",
-        stats.removed,
-        fmt_bytes(review_.marked_bytes()),
-        stats.missing ? std::format(" — {} already gone", stats.missing) : "");
-    state_ = State::Done;
+    applied_files_ += stats.removed;
+    applied_bytes_ += doomed_bytes;
+    ++waves_applied_;
+    review_.finish_wave();
+    // auto_reclaim_space may have relocated (Windows compact) or freed-for-
+    // reuse the surviving chunks: re-read every remaining span from the index,
+    // and drop the offset-keyed texture/failure memos before anything fetches.
+    refresh_review_members(vault_, review_);
+    failed_.clear();
+    cache_.clear();
+    advance_after_wave();
+}
+
+void DuplicatesScreen::skip_wave()
+{
+    ++waves_skipped_;
+    review_.finish_wave();
+    advance_after_wave();
+}
+
+void DuplicatesScreen::advance_after_wave()
+{
+    close_inspect();
+    focus_group_  = 0;
+    focus_member_ = 0;
+    scroll_       = 0.0f;
+    status_.clear();
+    if (review_.groups().empty()) {
+        done_summary_ = wave_summary();
+        state_ = State::Done;
+    }
+    mark_dirty();
+}
+
+std::string DuplicatesScreen::wave_summary() const
+{
+    if (applied_files_ == 0) return "No duplicates removed";
+    std::string s = std::format("Removed {} files ({}) in {} wave{}",
+                                applied_files_, fmt_bytes(applied_bytes_),
+                                waves_applied_, waves_applied_ == 1 ? "" : "s");
+    if (waves_skipped_ > 0)
+        s += std::format(" · {} wave{} skipped", waves_skipped_,
+                         waves_skipped_ == 1 ? "" : "s");
+    return s;
 }
 
 void DuplicatesScreen::follow_focus(int delta)
 {
-    const size_t last = review_.groups().size() - 1;
+    const size_t last = review_.wave_size() - 1;
     if (delta < 0 && focus_group_ > 0) --focus_group_;
     if (delta > 0 && focus_group_ < last) ++focus_group_;
     focus_member_ = 0;
@@ -588,6 +671,11 @@ void DuplicatesScreen::handle_event(const SDL_Event& e)
 
 void DuplicatesScreen::start_scan(bool perceptual)
 {
+    applied_files_ = 0;
+    applied_bytes_ = 0;
+    waves_applied_ = 0;
+    waves_skipped_ = 0;
+    stale_ = false;      // a fresh scan supersedes any stale results
     auto items = collect_scan_items(vault_);
     job_.start(vault_, std::move(items), perceptual);
     state_ = State::Scanning;
@@ -642,6 +730,8 @@ void DuplicatesScreen::render(gfx::Renderer& r)
             draw_confirm_apply_overlay(r, font_, W, H, *this);
         } else if (confirm_.leave) {
             draw_confirm_leave_overlay(r, font_, W, H, *this);
+        } else if (confirm_.skip) {
+            draw_confirm_skip_overlay(r, font_, W, H, *this);
         } else if (inspect_.key.has_value()) {
             draw_inspect_overlay(r, font_, W, H, *this);
         }
@@ -717,7 +807,7 @@ void DuplicatesScreen::render_review(gfx::Renderer& r, float W, float H)
     const float row_h =
         dup_row_layout(OX, W - 2 * OX, tile_h, font_.pixel_height(), 1).row_h;
     const float view_h = H - dup_footer_height(font_.pixel_height()) - OY;
-    const size_t n = review_.groups().size();
+    const size_t n = review_.wave_size();
     const auto first = std::min(n, static_cast<size_t>(std::max(0.0f, scroll_ / row_h)));
     const auto last  = std::min(n, static_cast<size_t>((scroll_ + view_h) / row_h) + 1);
     for (size_t g = first; g < last; ++g) {
@@ -738,15 +828,18 @@ void DuplicatesScreen::render_review(gfx::Renderer& r, float W, float H)
     // Opaque header band: title + skipped notice + stale warning.
     draw_chrome_band(r, {0, 0, W, OY - 8}, BG, /*rule_at_bottom*/ true);
 
-    size_t total_files = 0;
-    uint64_t total_reclaimable = 0;
-    for (const auto& g : review_.groups()) {
-        total_files += g.members.size();
-        total_reclaimable += group_reclaimable(g);
+    size_t   wave_files       = 0;
+    uint64_t wave_reclaimable = 0;
+    for (size_t g = 0; g < review_.wave_size(); ++g) {
+        wave_files       += review_.groups()[g].members.size();
+        wave_reclaimable += group_reclaimable(review_.groups()[g]);
     }
-    const std::string header = std::format("Duplicates — {} groups · {} files · {} reclaimable",
-                                           review_.groups().size(), total_files,
-                                           fmt_bytes(total_reclaimable));
+    const size_t later = review_.groups().size() - review_.wave_size();
+    const std::string header = std::format(
+        "Duplicates — wave {}/{} · {} groups · {} files · {} reclaimable{}",
+        review_.wave_index() + 1, review_.wave_count(), review_.wave_size(),
+        wave_files, fmt_bytes(wave_reclaimable),
+        later > 0 ? std::format(" · {} groups in later waves", later) : "");
     r.draw_text(font_, OX, 40, header, TEXT_DIM);
 
     if (skipped_ > 0) {
@@ -776,7 +869,8 @@ void DuplicatesScreen::render_review(gfx::Renderer& r, float W, float H)
     r.draw_text(font_, OX, footer_y + pitch, marked_text, TEXT_DIM);
 
     r.draw_text(font_, OX, footer_y + pitch * 2,
-                "[Space] keep/remove  [A] keep only  [Ctrl+Enter] apply  [Esc] back", TEXT_FAINT);
+                "[Space] keep/remove  [A] keep only  [Ctrl+Enter] apply wave  [N] skip wave  [Esc] back",
+                TEXT_FAINT);
 }
 
 std::vector<HelpGroup> DuplicatesScreen::help_groups() const
@@ -806,7 +900,8 @@ std::vector<HelpGroup> DuplicatesScreen::help_groups() const
                     {"Space", "Toggle keep/remove"},
                     {"A", "Keep only this member"},
                     {"Enter", "Inspect full original"},
-                    {"Ctrl+Enter", "Apply marks"},
+                    {"Ctrl+Enter", "Apply this wave's marks"},
+                    {"N", "Skip this wave (no changes)"},
                     {"Esc", "Back (or confirm leave if marks)"},
                 }},
             };
