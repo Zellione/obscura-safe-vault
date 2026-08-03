@@ -24,12 +24,16 @@ namespace vault { class Vault; }
 namespace ui {
 
 struct DupScanItem {
-    std::string node_path, name, parent_path;
+    std::string node_path;
+    std::string name;
+    std::string parent_path;
     bool        is_video = false;
     uint64_t    bytes = 0;
-    uint32_t    width = 0, height = 0;
+    uint32_t    width  = 0;
+    uint32_t    height = 0;
     std::vector<std::pair<uint64_t, uint64_t>> data_spans;  // (offset,length)
-    uint64_t    thumb_offset = 0, thumb_length = 0;         // thumb / poster span
+    uint64_t    thumb_offset = 0;   // thumb / poster span; 0 length = none
+    uint64_t    thumb_length = 0;
 };
 
 // Main-thread ONLY (walks the index tree via Vault::list). Every image and
@@ -67,7 +71,8 @@ private:
     std::jthread              thread_;
     std::atomic<bool>         running_{false};
     std::atomic<bool>         cancel_{false};
-    std::atomic<size_t>       done_{0}, total_{0};
+    std::atomic<size_t>       done_{0};
+    std::atomic<size_t>       total_{0};
     mutable std::mutex        mtx_;      // guards current_ + outcome_
     std::string               current_;
     std::optional<DupScanOutcome> outcome_;

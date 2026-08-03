@@ -209,3 +209,59 @@ TEST(dup_scan_vault_locked_under_worker_reports_cancelled)
     // No groups should be formed; all work stopped on vault lock.
     CHECK(out->groups.empty());
 }
+
+// Flip one byte at `pos` in the file at `path` (at-rest tamper, same helper as
+// tests/vault/test_vault_integration.cpp).
+static bool flip_byte(const std::string& path, long pos)
+{
+    std::FILE* fp = std::fopen(path.c_str(), "r+b");
+    if (!fp) return false;
+    bool ok = std::fseek(fp, pos, SEEK_SET) == 0;
+    int c = ok ? std::fgetc(fp) : EOF;
+    ok = ok && c != EOF && std::fseek(fp, pos, SEEK_SET) == 0 &&
+         std::fputc(c ^ 0x01, fp) != EOF;
+    std::fclose(fp);
+    return ok;
+}
+
+// A skipped (unreadable) thumbnail must not shift the mapping between hashes
+// and items: with a.webp / b.webp / c.webp all visually identical and b's
+// stored thumbnail tampered, the Similar group must contain a and c — not b.
+TEST(dup_scan_perceptual_skip_keeps_member_mapping)
+{
+    TempVault tv("skipmap");
+    const auto webp = read_file(fs::path(OSV_FIXTURE_DIR) / "sample.webp");
+    REQUIRE(!webp.empty());
+    auto padded1 = webp; padded1.push_back(0x00);
+    auto padded2 = webp; padded2.push_back(0x00); padded2.push_back(0x00);
+
+    uint64_t b_thumb_offset = 0;
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kFastKdf, v)
+                == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("", webp,    "a.webp") == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("", padded1, "b.webp") == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("", padded2, "c.webp") == vault::VaultResult::Ok);
+        for (const auto* n : v.list("")) {
+            if (n->name == "b.webp") b_thumb_offset = n->meta.thumb_offset;
+        }
+        REQUIRE(b_thumb_offset != 0);
+    }
+    // Corrupt b's stored thumbnail ciphertext (past the 24-byte nonce).
+    REQUIRE(flip_byte(tv.str(), static_cast<long>(b_thumb_offset) + 30));
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
+    REQUIRE(v.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+
+    const auto out = run_scan(v, /*perceptual=*/true);
+    CHECK_EQ(out.skipped, size_t{1});
+    REQUIRE(out.groups.size() == 1);
+    REQUIRE(out.groups[0].members.size() == size_t{2});
+    std::vector<std::string> names;
+    for (const auto& m : out.groups[0].members) names.push_back(m.name);
+    std::ranges::sort(names);
+    CHECK_EQ(names[0], std::string("a.webp"));
+    CHECK_EQ(names[1], std::string("c.webp"));
+}

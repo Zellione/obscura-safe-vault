@@ -93,39 +93,47 @@ HashResult hash_item(const vault::Vault& v, const DupScanItem& it, Digest& out)
 }
 
 // Exact pass: hash items and group by hash.
-DupScanOutcome exact_pass(const vault::Vault& v, const std::vector<DupScanItem>& items,
-                          std::atomic<bool>& cancel, std::atomic<size_t>& done,
-                          [[maybe_unused]] std::atomic<size_t>& total, std::mutex& mtx, std::string& current_,
-                          std::vector<bool>& in_exact)
+// Shared state threaded through the scan passes (keeps each pass under the
+// cpp:S107 parameter cap). Everything is borrowed from DupScanJob::run.
+struct PassCtx {
+    const vault::Vault&             v;
+    const std::vector<DupScanItem>& items;
+    const std::atomic<bool>&        cancel;
+    std::atomic<size_t>&            done;
+    std::mutex&                     mtx;
+    std::string&                    current;
+};
+
+DupScanOutcome exact_pass(const PassCtx& ctx, std::vector<bool>& in_exact)
 {
     DupScanOutcome out;
 
     // Build size buckets.
     std::map<std::pair<bool, uint64_t>, std::vector<size_t>> size_buckets;
-    for (size_t i = 0; i < items.size(); ++i) {
-        const auto& it = items[i];
+    for (size_t i = 0; i < ctx.items.size(); ++i) {
+        const auto& it = ctx.items[i];
         size_buckets[std::make_pair(it.is_video, it.bytes)].push_back(i);
     }
 
     // Process each bucket.
     std::map<Digest, std::vector<size_t>> hash_groups;
-    for (auto& [key, indices] : size_buckets) {
+    for (const auto& [key, indices] : size_buckets) {
         if (indices.size() < 2) continue;  // No duplicates in this bucket
 
         for (size_t idx : indices) {
-            if (cancel.load()) {
+            if (ctx.cancel.load()) {
                 out.cancelled = true;
                 return out;
             }
 
-            const auto& it = items[idx];
+            const auto& it = ctx.items[idx];
             {
-                const std::lock_guard lk(mtx);
-                current_ = it.node_path;
+                const std::lock_guard lk(ctx.mtx);
+                ctx.current = it.node_path;
             }
 
             Digest digest;
-            const auto hash_res = hash_item(v, it, digest);
+            const auto hash_res = hash_item(ctx.v, it, digest);
             if (hash_res == HashResult::Locked) {
                 out.cancelled = true;
                 return out;
@@ -137,18 +145,18 @@ DupScanOutcome exact_pass(const vault::Vault& v, const std::vector<DupScanItem>&
                 in_exact[idx] = false;  // Mark as potentially exact
             }
 
-            done++;
+            ctx.done++;
         }
     }
 
     // Convert hash groups to DupGroup.
-    for (auto& [digest, indices] : hash_groups) {
+    for (const auto& [digest, indices] : hash_groups) {
         if (indices.size() >= 2) {
             DupGroup g;
             g.kind = DupGroup::Kind::Identical;
             g.distance_bits = 0;
             for (size_t idx : indices) {
-                g.members.push_back(to_member(items[idx]));
+                g.members.push_back(to_member(ctx.items[idx]));
                 in_exact[idx] = true;
             }
             out.groups.push_back(std::move(g));
@@ -159,66 +167,58 @@ DupScanOutcome exact_pass(const vault::Vault& v, const std::vector<DupScanItem>&
 }
 
 // Perceptual pass: decode thumbnails and cluster by dHash.
-void perceptual_pass(const vault::Vault& v, const std::vector<DupScanItem>& items,
-                     const std::vector<bool>& in_exact, bool perceptual,
-                     std::atomic<bool>& cancel, std::atomic<size_t>& done,
-                     [[maybe_unused]] std::atomic<size_t>& total, std::mutex& mtx, std::string& current_,
+void perceptual_pass(const PassCtx& ctx, const std::vector<bool>& in_exact, bool perceptual,
                      DupScanOutcome& out)
 {
     if (!perceptual) return;
 
+    // Parallel vectors: hashes[k] belongs to ctx.items[hashed_indices[k]].
+    // A skipped (unreadable/undecodable) thumbnail must not push an entry into
+    // either — a mismatch here silently attaches the WRONG file to a group.
     std::vector<uint64_t> hashes;
-    std::vector<size_t> image_indices;
+    std::vector<size_t> hashed_indices;
 
-    // Collect decodable images not in exact groups.
-    for (size_t i = 0; i < items.size(); ++i) {
-        if (!items[i].is_video && items[i].thumb_length > 0 && !in_exact[i]) {
-            image_indices.push_back(i);
-        }
-    }
+    for (size_t i = 0; i < ctx.items.size(); ++i) {
+        const auto& it = ctx.items[i];
+        if (it.is_video || it.thumb_length == 0 || in_exact[i]) continue;
 
-    // Decode and hash.
-    for (size_t idx : image_indices) {
-        if (cancel.load()) {
+        if (ctx.cancel.load()) {
             out.cancelled = true;
             return;
         }
-
-        const auto& it = items[idx];
         {
-            const std::lock_guard lk(mtx);
-            current_ = it.node_path;
+            const std::lock_guard lk(ctx.mtx);
+            ctx.current = it.node_path;
         }
 
         crypto::SecureBytes thumb;
-        const auto read_res = vault::read_thumb_span(v, it.thumb_offset, it.thumb_length, thumb);
+        const auto read_res = vault::read_thumb_span(ctx.v, it.thumb_offset, it.thumb_length, thumb);
         if (read_res == vault::VaultResult::Locked) {
             out.cancelled = true;
             return;
         }
         if (read_res != vault::VaultResult::Ok) {
             out.skipped++;
-            done++;
+            ctx.done++;
             continue;
         }
 
         auto decoded = image::decode_from_memory(thumb.as_span());
         if (!decoded) {
             out.skipped++;
-            done++;
+            ctx.done++;
             continue;
         }
 
-        const auto h = dhash64(std::span(decoded->pixels.data(), decoded->pixels.size()),
-                              decoded->width, decoded->height);
-        hashes.push_back(h);
-
-        done++;
+        hashes.push_back(dhash64(std::span(decoded->pixels.data(), decoded->pixels.size()),
+                                 decoded->width, decoded->height));
+        hashed_indices.push_back(i);
+        ctx.done++;
     }
 
     // Cluster similar hashes.
     if (hashes.empty()) return;
-    auto clusters = cluster_similar(hashes, DUP_SIMILAR_MAX_BITS);
+    const auto clusters = cluster_similar(hashes, DUP_SIMILAR_MAX_BITS);
 
     // Convert clusters to DupGroup.
     for (const auto& cluster : clusters) {
@@ -237,7 +237,7 @@ void perceptual_pass(const vault::Vault& v, const std::vector<DupScanItem>& item
         }
 
         for (size_t idx : cluster) {
-            g.members.push_back(to_member(items[image_indices[idx]]));
+            g.members.push_back(to_member(ctx.items[hashed_indices[idx]]));
         }
 
         out.groups.push_back(std::move(g));
@@ -308,8 +308,7 @@ void DupScanJob::run(const vault::Vault& v, std::vector<DupScanItem> items, bool
 
     size_t total_perceptual = 0;
     if (perceptual) {
-        for (size_t i = 0; i < items.size(); ++i) {
-            const auto& it = items[i];
+        for (const auto& it : items) {
             if (!it.is_video && it.thumb_length > 0) total_perceptual++;
         }
     }
@@ -319,25 +318,16 @@ void DupScanJob::run(const vault::Vault& v, std::vector<DupScanItem> items, bool
     // Track which items ended up in exact groups.
     std::vector<bool> in_exact(items.size(), false);
 
+    const PassCtx ctx{.v = v, .items = items, .cancel = cancel_,
+                      .done = done_, .mtx = mtx_, .current = current_};
+
     // Exact pass.
-    auto out = exact_pass(v, items, cancel_, done_, total_, mtx_, current_, in_exact);
-    if (out.cancelled) {
-        const std::lock_guard lk(mtx_);
-        outcome_ = std::move(out);
-        running_.store(false);
-        return;
+    auto out = exact_pass(ctx, in_exact);
+    if (!out.cancelled) {
+        // Perceptual pass appends its groups to the same outcome.
+        perceptual_pass(ctx, in_exact, perceptual, out);
     }
 
-    // Perceptual pass.
-    perceptual_pass(v, items, in_exact, perceptual, cancel_, done_, total_, mtx_, current_, out);
-    if (out.cancelled) {
-        const std::lock_guard lk(mtx_);
-        outcome_ = std::move(out);
-        running_.store(false);
-        return;
-    }
-
-    // Store outcome.
     {
         const std::lock_guard lk(mtx_);
         outcome_ = std::move(out);
