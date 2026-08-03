@@ -128,6 +128,20 @@ App tries `assets/…` relative to cwd first, then `SDL_GetBasePath()` (packaged
 
 ## CI
 `.github/workflows/` — ci.yml matrix covers Linux and Windows (macOS support dropped).
+
+The Windows legs compile with `/MP` (`flags { "MultiProcessorCompile" }` in premake5.lua)
+and `/Z7` debug info (`debugformat "c7"` — no mspdbsrv serialisation, and the ccache
+prerequisite: ccache cannot cache `/Zi`). On top, ci.yml wires **ccache** for the app
+build: the REAL ccache.exe (NOT chocolatey's shim launcher — that re-launches with
+argv[0]=ccache and breaks masquerading with exit -1) is copied as `cl.exe` into a dir
+handed to MSBuild via `/p:CLToolPath`, with `/p:TrackFileAccess=false` (FileTracker is
+incompatible with a wrapped compiler) and `/p:UseMultiToolTask=true` (one cl.exe per
+source file — MSBuild's MTT replaces `/MP`, which ccache cannot cache). `.ccache` is
+cached per config (`ccache-win2022-<config>-<sha>` + restore-keys prefix), a "ccache
+stats" step after the build is the tell-tale if invocations ever start falling back to
+the real compiler. Measured (PR #155): warm-cache hit rate 505/505; Windows Debug
+12m29s → ~3m, Release 17m45s → ~3m warm (worst case on a cold cache ≈ the /MP-only
+9-14m). release.yml does NOT wire ccache (rare tag builds; it still benefits from /MP).
 release.yml runs on tag pushes (`v*`): rebuilds the two Release packages with OSV_VERSION
 from the tag (mirrors ci.yml's Release legs + cache keys — keep in sync), runs tests, then
 attaches packages + SHA256SUMS.txt to the tag's GitHub release (draft-created if absent).
