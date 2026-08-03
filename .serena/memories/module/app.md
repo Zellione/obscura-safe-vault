@@ -94,7 +94,15 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
 - `harden.{h,cpp}` — `disable_core_dumps()`: `prctl(PR_SET_DUMPABLE,0)` +
   `setrlimit(RLIMIT_CORE,{0,0})` on Linux, no-op on Windows (macOS removed — `#error` guard in
   `src/crypto/random.cpp`); called once at app init, Release (NDEBUG) builds only, before any
-  vault unlock, to keep decrypted data/keys out of core dumps. Also
+  vault unlock, to keep decrypted data/keys out of core dumps.
+  `grow_secure_mem_budget(bytes)`: best-effort growth of the page-lockable budget, called
+  once in `App::init()` (ALL configs, 256 MiB) before any SecureBuffer/SecureBytes exists —
+  Windows raises the minimum working-set size via `SetProcessWorkingSetSize` (VirtualLock's
+  cap; ~200 KB default meant every pixel-buffer lock silently failed), Linux raises soft
+  `RLIMIT_MEMLOCK` to the hard limit. Returns whether the platform now reports >= `bytes`
+  lockable. Windows caveat: VirtualLock does not protect against hibernation
+  (`hiberfil.sys`). The mlock-failure warning text comes from `crypto::mlock_fail_hint()`
+  (platform-appropriate advice, secure_mem.h). Also
   `redirect_stream_to_file`/`redirect_diagnostics_to_log_file` (Windows Release only — a
   windowless WindowedApp process has no valid stdout/stderr handle, so every
   `std::println(stderr,...)` would throw `std::system_error` and terminate(); redirects both to

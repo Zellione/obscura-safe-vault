@@ -1,5 +1,6 @@
 #include "test_framework.h"
 
+#include "crypto/secure_mem.h"
 #include "platform/harden.h"
 
 #include <cstdio>
@@ -117,3 +118,38 @@ TEST(redirect_diagnostics_to_log_file_call)
     CHECK_TRUE(saved_out >= 0 && saved_err >= 0);
 #endif
 }
+
+// grow_secure_mem_budget() must report success for a small request on every
+// supported platform: 1 MiB is below both the Linux RLIMIT_MEMLOCK default
+// (8 MiB) and anything a grown Windows working set provides.
+TEST(grow_secure_mem_budget_small_request_succeeds)
+{
+    CHECK_TRUE(platform::grow_secure_mem_budget(1u << 20));
+}
+
+#if defined(__linux__)
+// On Linux the call raises the soft RLIMIT_MEMLOCK to the hard limit (the
+// most an unprivileged process may lock without configuration changes).
+TEST(grow_secure_mem_budget_raises_soft_memlock_to_hard)
+{
+    REQUIRE(platform::grow_secure_mem_budget(1));
+    struct rlimit rl{};
+    REQUIRE(getrlimit(RLIMIT_MEMLOCK, &rl) == 0);
+    CHECK_TRUE(rl.rlim_cur == rl.rlim_max);
+}
+#endif
+
+#if defined(_WIN32)
+// The point of the Windows path: VirtualLock's per-process cap is the minimum
+// working-set size (~200 KB by default — below a single decoded thumbnail
+// strip, let alone an image), so without growing it every multi-MiB
+// SecureBytes silently degrades to swappable memory. After growing the
+// budget, a 4 MiB lock must actually succeed.
+TEST(grow_secure_mem_budget_makes_multi_mib_lock_succeed)
+{
+    REQUIRE(platform::grow_secure_mem_budget(64u << 20));
+    crypto::SecureBytes sb;
+    REQUIRE(sb.resize(4u << 20));
+    CHECK_TRUE(sb.is_locked());
+}
+#endif

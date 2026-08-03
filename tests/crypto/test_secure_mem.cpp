@@ -3,6 +3,7 @@
 #include <array>
 #include <cstring>
 #include <memory>
+#include <string_view>
 
 #include "crypto/secure_mem.h"
 
@@ -76,4 +77,31 @@ TEST(should_warn_mlock_once)
     // first should be true; second and third should be false (or first could be false
     // if already triggered). At least ensure not all are true.
     CHECK_TRUE(!first || (!second && !third));
+}
+
+// The warning body itself must be safely callable: CI never fails an mlock,
+// so the failure path in the SecureBuffer/SecureBytes constructors can only
+// be exercised through this direct call (the once-per-process gate around it
+// is tested separately above).
+TEST(mlock_warning_prints_without_crashing)
+{
+    crypto::print_mlock_warning();
+    // The once-gated wrapper is what the constructors actually call; whether
+    // it prints here depends on which test consumed the process-wide flag
+    // first — both are valid, it just must not crash either way.
+    crypto::warn_mlock_failure_once();
+    CHECK_TRUE(true);  // reaching here is the assertion — neither call may throw
+}
+
+// The once-per-process mlock warning must give remedy advice for THIS
+// platform: "ulimit -l" means nothing on Windows, where the cap is the
+// process's minimum working-set size, not RLIMIT_MEMLOCK.
+TEST(mlock_fail_hint_names_platform_remedy)
+{
+    const std::string_view hint = crypto::mlock_fail_hint();
+#if defined(_WIN32)
+    CHECK_TRUE(hint.find("working set") != std::string_view::npos);
+#else
+    CHECK_TRUE(hint.find("ulimit") != std::string_view::npos);
+#endif
 }

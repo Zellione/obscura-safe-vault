@@ -68,6 +68,21 @@ bool App::init()
     platform::disable_core_dumps();
 #endif
 
+    // Grow the page-lockable budget BEFORE anything allocates a SecureBuffer/
+    // SecureBytes: on Windows VirtualLock is capped by the minimum working-set
+    // size (~200 KB by default — below a single decoded image, so every pixel
+    // buffer silently degraded to swappable memory); on Linux this raises the
+    // soft RLIMIT_MEMLOCK to the hard limit. 256 MiB covers the viewer's
+    // decoded image + the thumbnail strip; larger buffers keep the documented
+    // warn-once best-effort behaviour. All build configs: this is not a
+    // debugging tradeoff like the core-dump gate above.
+    if (constexpr size_t SECURE_MEM_BUDGET = size_t{256} << 20;
+        !platform::grow_secure_mem_budget(SECURE_MEM_BUDGET)) {
+        std::println(stderr, "[App] secure-memory budget below {} MiB — "
+                     "large decoded images may not be page-locked.",
+                     SECURE_MEM_BUDGET >> 20);
+    }
+
     if (!window_.init()) {
         std::println(stderr, "[App] Window initialisation failed.");
         return false;
