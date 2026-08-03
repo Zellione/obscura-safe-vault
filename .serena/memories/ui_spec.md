@@ -274,7 +274,7 @@ Shows:
 Live summary while queue is non-empty: `"Importing <name> 128/450 · 2 queued"` (done/total, remainder queued).
 **Priority:** error > import summary > status. Clickable to jump to ImportStatusScreen.
 
-## Duplicate finder screen (Phase 61)
+## Duplicate finder screen (Phase 61; waves + memory fix Phase 64)
 `Ctrl+D` on the gallery grid (plain `D` toggles the detail panel) opens
 `NavKind::ToDuplicates` — an exclusive op behind the same import-queue gate as
 compact (`queue_.busy()` → "Imports running — press Shift+I" status). The grid's
@@ -292,26 +292,41 @@ Four screen states (the chooser is a state, not a modal dialog class):
    Hamming ≤ 7). Matches group as **"Similar video"**; review/marking/apply
    are identical to other groups. Non-FFmpeg builds fall back to the
    duration+poster verdict.
-3. **Review:** scrollable group list, largest-reclaimable-bytes first. Group
-   header (`Identical · 3 files · 24.1 MB reclaimable` / `Similar (N bits)`),
-   then a horizontal row of side-by-side member tiles (thumbnail or video
-   poster; name, parent gallery path, size, resolution beneath) each carrying a
-   KEEP/REMOVE badge, all starting KEEP. Tiles share the full content width,
-   centered, scaling down as the group grows; row heights are font-derived and
-   the header/footer are opaque chrome bands (`ui/dup_layout.*`, pure/tested). Keys: `Left/Right` member focus,
-   `Up/Down` group focus, `Space` toggle mark, `A` keep only the focused member,
-   `Enter` full-screen inspect of the decoded original (any key returns), `F1`
-   help, `Esc` leave (confirm prompt while unapplied REMOVE marks exist).
+3. **Review (Phase 64: wave-based):** groups sort largest-reclaimable-bytes
+   first and present in **waves of ≤ 20 groups**; only the current wave is
+   navigable and markable. Header: `Duplicates — wave 2/5 · 20 groups · 47
+   files · 312 MB reclaimable · 61 groups in later waves`. Group header
+   (`Identical · 3 files · 24.1 MB reclaimable` / `Similar (N bits)`), then a
+   horizontal row of side-by-side member tiles (thumbnail or video poster;
+   name, parent gallery path, size, resolution beneath) each carrying a
+   KEEP/REMOVE badge — groups arrive pre-marked keep-first/remove-rest
+   (Phase 63). Tiles share the full content width, centered, scaling down as
+   the group grows; row heights are font-derived and the header/footer are
+   opaque chrome bands (`ui/dup_layout.*`, pure/tested). Rendering is
+   viewport-culled (Phase 64): off-screen rows neither draw nor fetch
+   thumbnails, so review memory no longer scales with group count. Keys:
+   `Left/Right` member focus, `Up/Down` group focus, `Space` toggle mark, `A`
+   keep only the focused member, `Enter` full-screen inspect of the decoded
+   original (any key returns), `N` skip the current wave (default-cancel
+   confirm when user-touched marks exist; skipped files simply stay), `F1`
+   help, `Esc` leave (confirm prompt only while USER-TOUCHED unapplied marks
+   exist).
    **Group invariant:** a group with ALL members marked REMOVE renders in a
    warning state and blocks apply — that would be deletion, not de-duplication.
-4. **Done:** reports what was removed; grid refreshes via `on_vault_changed()`.
+4. **Done:** reports totals accumulated across all applied waves ("Removed 37
+   files (1.2 GB) in 3 waves · 1 wave skipped"; "No duplicates removed" when
+   nothing was applied); grid refreshes via `on_vault_changed()`. `Enter`
+   rescans and resets the totals + stale banner.
 
-**Apply:** footer shows the running total ("12 files marked · 96.3 MB");
-`Ctrl+Enter` (deliberate destructive chord) → default-cancel confirm with count
-+ total size → one main-thread `vault::remove_media_batch` (N erases, ONE
-commit, one auto-reclaim). `blocks_idle_lock()` is true while scanning or while
-unapplied REMOVE marks exist; manual lock mid-scan cancels the worker before
-key wipe.
+**Apply (per wave):** footer shows the current wave's running total ("12 files
+marked · 96.3 MB") and the keybar `[Space] keep/remove  [A] keep only
+[Ctrl+Enter] apply wave  [N] skip wave  [Esc] back`; `Ctrl+Enter` (deliberate
+destructive chord) → default-cancel confirm with the wave's count + size → one
+main-thread `vault::remove_media_batch` (N erases, ONE commit, one
+auto-reclaim) → remaining groups' spans re-resolved from the index (Windows
+auto-reclaim may compact and relocate chunks) → next wave. `blocks_idle_lock()`
+is true while scanning or while the current wave has user-touched unapplied
+marks; manual lock mid-scan cancels the worker before key wipe.
 
 ## Multi-volume archive confirm (Phase 53)
 Picking any volume of a split set (`.7z.001`, `.z01`, `.partN.rar`, `.r00`, …)

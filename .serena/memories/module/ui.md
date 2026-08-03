@@ -194,9 +194,29 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   every vertical extent is font-derived via `ui::line_pitch`; header/footer are opaque
   chrome bands (reserve, never overlay). `dup_layout.cpp` is listed explicitly in
   osv_tests' premake5.lua files{}.
-  Apply: `Ctrl+Enter` → default-cancel confirm (count + total size) → ONE main-thread
-  `vault::remove_media_batch` call → Done state reports the result; grid refreshes via
-  `on_vault_changed()`. `blocks_idle_lock()` true while scanning or unapplied marks exist.
+  **Phase 64 — waves + memory fix.** Review presents groups in waves of
+  `DUP_WAVE_GROUPS`=20 (current wave = the model's front window); rendering is
+  VIEWPORT-CULLED — only rows intersecting the view draw/fetch (uniform `row_h`
+  arithmetic) and `worker_.retain(visible thumb keys + inspect key)` prunes
+  queued decodes each frame. Pre-64 the screen drew/fetched ALL groups every
+  frame and churned the 256 MiB texture LRU (decrypt→decode→evict→refetch,
+  observed ~8 GB RSS).
+  Apply (per wave): `Ctrl+Enter` → default-cancel confirm (the CURRENT wave's
+  count + size) → ONE main-thread `vault::remove_media_batch` → accumulate into
+  the nested `WaveTotals` struct (applied files/bytes, waves applied/skipped,
+  done_summary) → `finish_wave()` → `ui::refresh_review_members` re-resolves the
+  remaining spans from the index (Windows auto-reclaim may compact() and
+  RELOCATE chunks) → `failed_.clear()` + shared `cache_.clear()` (both
+  offset-keyed; compact can reuse offsets) → `advance_after_wave()` (close
+  inspect, reset focus/scroll; empty → Done with the accumulated summary). `N`
+  skips the wave (default-cancel confirm when touched marks exist; no vault
+  mutation). The three confirm overlays (apply/leave/skip) share the file-local
+  `draw_confirm_box` chrome. `start_scan()` resets `WaveTotals` + `stale_` (the
+  banner previously never cleared); `on_vault_changed()` untouched — it only
+  fires from the import-queue drain and dedupe is exclusive-gated, so an own
+  apply never trips the stale banner. Done reports totals across all waves;
+  grid refreshes via `on_vault_changed()`. `blocks_idle_lock()` true while
+  scanning or current-wave TOUCHED marks exist.
   The all-REMOVE group invariant is enforced in `dup_model` (warning render + apply refused).
 
 ## Image / video viewer
@@ -401,6 +421,13 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   gracefully (manual lock cancels the worker before key wipe); undecodable files are skipped
   and counted; cancel flag checked between items; progress/results polled from the main
   thread. Hashes are session-lifetime heap data — never persisted, never logged.
+  **Phase 64:** `refresh_review_members(v, review)` — MAIN-THREAD-only
+  post-apply re-resolution: re-reads every remaining member's
+  bytes/data_spans/thumb span via `resolve_node` through the file-local
+  `refresh_member` helper (drops vanished / gallery / type-changed members,
+  counts drops; `DupReview::refresh_members` then drops groups < 2). Needed
+  because `remove_media_batch` → `auto_reclaim_space()` can compact() and
+  relocate chunks on Windows.
   **Phase 62 — perceptual video pass** (same "Exact + visually similar" mode, no new UI):
   three-stage funnel in `video_perceptual_pass` — duration gate from the snapshot's
   `duration_us` (±2 %, 500 ms floor, zero I/O), poster dHash prefilter (stored first-frame
@@ -591,6 +618,13 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `cluster_video_sigs` (union-find over duration_close && video_sig_match pairs).
   `DupGroup::Kind` gains `SimilarVideo` (renders "Similar video"). Listed explicitly in
   osv_tests' premake5.lua files{}.
+  **Phase 64 wave window:** `DUP_WAVE_GROUPS`=20; the CURRENT wave is always the
+  FIRST `wave_size()` groups of `groups()`; `wave_index()`/`wave_count()`/
+  `finish_wave()` (erases the front window, counts it done, resets touched).
+  toggle/keep_only refuse `g >= wave_size()`; any_marked/can_apply/marked_count/
+  marked_bytes/marked_paths iterate the wave only. `refresh_members(fn)`:
+  fn(DupMember&)→false drops the member, groups shrinking < 2 are dropped,
+  default marks re-applied — call only right after `finish_wave()`.
 - `child_counts.*` (Phase 51) — `direct_child_counts(node) -> SubtreeCounts` (galleries, images, videos counted
   separately, reusing the existing SubtreeCounts struct); `format_tile_counts(counts) -> string` — plural-aware
   formatting ("3 galleries · 12 items" / "1 gallery · 1 item" / "12 items" / "empty"), collapsing images+videos
