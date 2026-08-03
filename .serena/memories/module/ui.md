@@ -180,8 +180,8 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `Up/Down` group focus, `Space` toggle (refused with a footer notice when the member is
   its group's last keeper), `A` keep only the focused member, `Enter` full-screen inspect
   of the decoded ORIGINAL, `Esc` prompts only if USER-TOUCHED unapplied marks exist
-  (`marks_touched_`, also gates `blocks_idle_lock` — Phase 63: groups arrive pre-marked
-  keep-first/remove-rest, and untouched defaults are not invested work). The inspect
+  (`DupReview::touched()`, also gates `blocks_idle_lock` — Phase 63: groups arrive
+  pre-marked keep-first/remove-rest, and untouched defaults are not invested work). The inspect
   texture is OWNED by `InspectState` (uploaded on first overlay draw, destroyed by
   `close_inspect()` on close/replace/dtor; request keys carry bit 63) and deliberately
   NEVER enters the shared thumbnail TextureCache — a full-res upload there evicted the

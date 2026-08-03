@@ -276,31 +276,37 @@ void DuplicatesScreen::close_inspect()
     inspect_.decoding = false;
 }
 
-void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
+// The pending-confirmation overlays and the inspect view own every key while
+// up. Returns true when the key was consumed by one of them.
+bool consume_overlay_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
 {
     const bool accept = key.key == SDLK_RETURN || key.key == SDLK_Y;
-
-    // Pending-confirmation overlays own every key while up.
     if (screen.confirm_.apply) {
         screen.confirm_.apply = false;
         if (accept) screen.apply_marked_batch();
         screen.mark_dirty();
-        return;
+        return true;
     }
     if (screen.confirm_.leave) {
         screen.confirm_.leave = false;
         if (accept) {
             screen.leave();
-            return;
+            return true;
         }
         screen.mark_dirty();
-        return;
+        return true;
     }
     if (screen.inspect_.key.has_value()) {   // any key closes the inspect view
         screen.close_inspect();
         screen.mark_dirty();
-        return;
+        return true;
     }
+    return false;
+}
+
+void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
+{
+    if (consume_overlay_key(screen, key)) return;
 
     const auto& groups = screen.review_.groups();
     if (groups.empty()) return;
@@ -324,18 +330,15 @@ void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
             screen.mark_dirty();
             break;
         case SDLK_SPACE:
-            if (screen.review_.toggle(screen.focus_group_, screen.focus_member_)) {
-                screen.marks_touched_ = true;
+            if (screen.review_.toggle(screen.focus_group_, screen.focus_member_))
                 screen.status_.clear();
-            } else {
+            else
                 screen.status_ = "At least one copy of each group stays kept";
-            }
             screen.mark_dirty();
             break;
         case SDLK_A:
             if (!ctrl) {
                 screen.review_.keep_only(screen.focus_group_, screen.focus_member_);
-                screen.marks_touched_ = true;
                 screen.mark_dirty();
             }
             break;
@@ -355,7 +358,7 @@ void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
         case SDLK_ESCAPE:
             // Only user-touched marks are worth a leave-confirm; the untouched
             // defaults are recreated by any rescan.
-            if (screen.marks_touched_ && screen.review_.any_marked()) {
+            if (screen.review_.touched() && screen.review_.any_marked()) {
                 screen.confirm_.leave = true;
                 screen.status_ = "Unapplied marks — Ctrl+Enter to apply, Esc again to discard";
                 screen.mark_dirty();
@@ -465,22 +468,25 @@ void DuplicatesScreen::request_inspect()
     mark_dirty();
 }
 
+// Inspect results stay OUT of the shared thumbnail cache (see InspectState).
+// A stale result (inspect already closed or replaced) is simply dropped.
+void DuplicatesScreen::take_inspect_result(image::DecodeWorker::Result& res)
+{
+    if (inspect_.key != res.key) return;
+    if (res.image) {
+        inspect_.image = std::move(*res.image);
+    } else {
+        close_inspect();                // failed to decode the inspect image
+        status_ = "Could not decode this file";
+    }
+    inspect_.decoding = false;
+}
+
 void DuplicatesScreen::pump_decode_results()
 {
     while (auto res = worker_.take_result()) {
         if ((res->key & INSPECT_KEY_BIT) != 0) {
-            // Inspect results stay OUT of the shared thumbnail cache (see
-            // InspectState). A stale result (inspect already closed or
-            // replaced) is simply dropped.
-            if (inspect_.key == res->key) {
-                if (res->image) {
-                    inspect_.image = std::move(*res->image);
-                } else {
-                    close_inspect();    // failed to decode the inspect image
-                    status_ = "Could not decode this file";
-                }
-                inspect_.decoding = false;
-            }
+            take_inspect_result(*res);
         } else if (res->image) {
             (void)cache_.get_or_upload(res->key, *res->image);
         } else {
@@ -501,7 +507,6 @@ void DuplicatesScreen::finish_scan(DupScanOutcome outcome)
     focus_group_ = 0;
     focus_member_ = 0;
     scroll_ = 0.0f;
-    marks_touched_ = false;
     status_.clear();
     if (review_.groups().empty() && skipped_ == 0) {
         done_summary_ = "No duplicates found";
@@ -557,7 +562,6 @@ void DuplicatesScreen::handle_key(const SDL_KeyboardEvent& key)
                     focus_group_ = 0;
                     focus_member_ = 0;
                     scroll_ = 0.0f;
-                    marks_touched_ = false;
                     status_.clear();
                     done_summary_.clear();
                     mark_dirty();

@@ -61,6 +61,10 @@ public:
     // when the member is its group's last keeper or g/m is out of range.
     bool toggle(size_t g, size_t m);
     void keep_only(size_t g, size_t m);      // member m KEEP, siblings REMOVE
+    // True once the USER changed any mark (toggle/keep_only) — the ctor's
+    // pre-applied defaults don't count. Gates the leave-confirm and the
+    // idle-lock suppression in the review screen.
+    [[nodiscard]] bool touched() const noexcept { return touched_; }
     [[nodiscard]] bool group_all_removed(size_t g) const;
     [[nodiscard]] bool any_marked() const;
     [[nodiscard]] bool can_apply() const;    // any_marked() && no fully-removed group
@@ -69,6 +73,7 @@ public:
     [[nodiscard]] std::vector<std::string> marked_paths() const;
 private:
     std::vector<DupGroup> groups_;
+    bool                  touched_ = false;
 };
 
 // ---- Phase 62: perceptual video duplicates ----

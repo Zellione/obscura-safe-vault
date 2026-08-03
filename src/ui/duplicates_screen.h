@@ -31,6 +31,7 @@ namespace ui {
 // a non-const screen: drawing a missing thumbnail submits a decode fetch
 // (favorites_images pattern — the pipeline members are ordinary, not mutable).
 void handle_review_key(class DuplicatesScreen& screen, const SDL_KeyboardEvent& key);
+bool consume_overlay_key(class DuplicatesScreen& screen, const SDL_KeyboardEvent& key);
 void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, class DuplicatesScreen& screen,
                       const DupMember& member, bool focused, const SDL_FRect& tile_rect);
 void draw_group_row(gfx::Renderer& r, gfx::FontAtlas& font, class DuplicatesScreen& screen,
@@ -41,6 +42,7 @@ void draw_inspect_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float
 
 class DuplicatesScreen final : public Screen {
     friend void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key);
+    friend bool consume_overlay_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key);
     friend void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, DuplicatesScreen& screen,
                                  const DupMember& member, bool focused, const SDL_FRect& tile_rect);
     friend void draw_group_row(gfx::Renderer& r, gfx::FontAtlas& font, DuplicatesScreen& screen,
@@ -65,7 +67,7 @@ public:
         // Review blocks the idle lock only once the user has actually touched
         // the marks — the pre-applied defaults alone are not invested work.
         return state_ == State::Scanning ||
-               (state_ == State::Review && marks_touched_ && review_.any_marked());
+               (state_ == State::Review && review_.touched() && review_.any_marked());
     }
     [[nodiscard]] std::vector<HelpGroup> help_groups() const override;
     void on_vault_changed() override;
@@ -98,6 +100,7 @@ private:
     void request_inspect();             // Enter: decode the focused original
     void close_inspect();               // destroy the owned texture, clear state
     void pump_decode_results();         // drain worker results (tiles + inspect)
+    void take_inspect_result(image::DecodeWorker::Result& res);
     void finish_scan(DupScanOutcome outcome);
     void render_choose(gfx::Renderer& r, float W, float H);
     void render_scanning(gfx::Renderer& r, float W, float H);
@@ -115,7 +118,6 @@ private:
     DupReview  review_;
     size_t     skipped_     = 0;
     bool       stale_       = false;    // vault changed under the review
-    bool       marks_touched_ = false;  // user changed a KEEP/REMOVE mark
 
     // Review navigation / apply state (Tasks 7-8).
     size_t focus_group_  = 0;

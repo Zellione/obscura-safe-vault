@@ -61,9 +61,10 @@ no hole-punch reclaim, so the dead blobs accumulate until a manual compact.
   unreachable through the UI (the apply-time refusal stays as defense). The
   refused `Space` shows "At least one copy of each group stays kept".
 - [x] Because marks now pre-exist, the leave-confirm on `Esc` and
-  `blocks_idle_lock()` are gated on a new `marks_touched_` flag — untouched
-  defaults are not invested work and must neither nag on exit nor suppress
-  the idle auto-lock.
+  `blocks_idle_lock()` are gated on `DupReview::touched()` (set by
+  `toggle`/`keep_only`, not by the ctor defaults or a refused toggle) —
+  untouched defaults are not invested work and must neither nag on exit nor
+  suppress the idle auto-lock.
 - [x] **Inspect preview blanking to a black box.** `Enter`'s full-screen
   inspect uploaded the decoded *full-resolution original* into the **shared
   thumbnail `TextureCache`** — the exact anti-pattern `FullTexCache` exists to
@@ -76,4 +77,4 @@ no hole-punch reclaim, so the dead blobs accumulate until a manual compact.
   shared cache; a failed upload (e.g. past the GPU's max texture size) closes
   the inspect with a status message instead of a silent black box.
 
-1786 tests / 0 failed (plain + ASan/UBSan).
+1787 tests / 0 failed (plain + ASan/UBSan).

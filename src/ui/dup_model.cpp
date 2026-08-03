@@ -112,6 +112,7 @@ bool DupReview::toggle(size_t g, size_t m)
         if (keepers <= 1) return false;
     }
     member.keep = !member.keep;
+    touched_ = true;
     return true;
 }
 
@@ -120,6 +121,7 @@ void DupReview::keep_only(size_t g, size_t m)
     if (g >= groups_.size() || m >= groups_[g].members.size()) return;
     for (size_t i = 0; i < groups_[g].members.size(); ++i)
         groups_[g].members[i].keep = (i == m);
+    touched_ = true;
 }
 
 bool DupReview::group_all_removed(size_t g) const

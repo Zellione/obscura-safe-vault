@@ -174,6 +174,23 @@ TEST(dup_review_toggle_out_of_range_is_refused)
     CHECK(!rev.toggle(0, 2));
 }
 
+// touched() reports USER mark changes only: the ctor's pre-applied defaults
+// and refused toggles don't count. Gates the review screen's leave-confirm
+// and idle-lock suppression.
+TEST(dup_review_touched_tracks_user_changes_only)
+{
+    ui::DupReview rev({make_group({100, 100})});
+    CHECK(!rev.touched());            // defaults alone are not user work
+    CHECK(!rev.toggle(0, 0));         // refused (last keeper) -> still untouched
+    CHECK(!rev.touched());
+    CHECK(rev.toggle(0, 1));
+    CHECK(rev.touched());
+
+    ui::DupReview rev2({make_group({100, 100, 100})});
+    rev2.keep_only(0, 2);
+    CHECK(rev2.touched());
+}
+
 TEST(dup_review_keep_only)
 {
     ui::DupReview rev({make_group({100, 100, 100})});
