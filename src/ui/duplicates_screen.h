@@ -32,7 +32,7 @@ void handle_review_key(class DuplicatesScreen& screen, const SDL_KeyboardEvent& 
 void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, const class DuplicatesScreen& screen,
                       const DupMember& member, bool focused, const SDL_FRect& tile_rect);
 void draw_group_row(gfx::Renderer& r, gfx::FontAtlas& font, const class DuplicatesScreen& screen,
-                    size_t group_idx, float y);
+                    size_t group_idx, float y, const struct DupRowLayout& lay);
 void draw_confirm_apply_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const class DuplicatesScreen& screen);
 void draw_confirm_leave_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const class DuplicatesScreen& screen);
 void draw_inspect_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const class DuplicatesScreen& screen);
@@ -42,7 +42,7 @@ class DuplicatesScreen final : public Screen {
     friend void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, const DuplicatesScreen& screen,
                                  const DupMember& member, bool focused, const SDL_FRect& tile_rect);
     friend void draw_group_row(gfx::Renderer& r, gfx::FontAtlas& font, const DuplicatesScreen& screen,
-                               size_t group_idx, float y);
+                               size_t group_idx, float y, const DupRowLayout& lay);
     friend void draw_confirm_apply_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen);
     friend void draw_confirm_leave_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen);
     friend void draw_inspect_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen);

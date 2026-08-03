@@ -11,6 +11,7 @@
 #include "gfx/texture_cache.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "ui/dup_layout.h"
 #include "ui/meta_format.h"
 #include "ui/text_metrics.h"
 #include "ui/widgets.h"
@@ -21,11 +22,9 @@ namespace ui {
 namespace {
 constexpr float OX  = 40;    // left margin
 constexpr float OY  = 150;   // list top
-constexpr float TILE_W = 180.0f;       // member tile width (approx)
-constexpr float TILE_H = 180.0f;       // member tile height (image area)
-constexpr float TEXT_LINES_H = 50.0f;  // space for text below tile
-constexpr float TILE_GAP = 12.0f;      // horizontal gap between tiles
-constexpr float GROUP_GAP = 24.0f;     // vertical gap between groups
+// Tile/row geometry lives in ui/dup_layout.* (pure, unit-tested): tiles share
+// the full content width, scale down with member count, and row heights are
+// font-derived so text can never bleed into the next group's header.
 constexpr float BADGE_SIZE = 24.0f;    // keep/remove badge size
 constexpr float RADIUS = 8.0f;         // border radius
 
@@ -41,7 +40,6 @@ void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, const DuplicatesSc
                       const DupMember& member, bool focused, const SDL_FRect& tile_rect)
 {
     using namespace gfx::theme;
-    const float ph = font.pixel_height();
 
     // Draw tile background
     r.draw_rect(tile_rect, gfx::Color{0, 0, 0, 255});
@@ -94,30 +92,31 @@ void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, const DuplicatesSc
     r.draw_text(font, badge.x + 2, badge.y + 2,
                 member.keep ? "K" : "R", badge_text);
 
-    // Draw text below tile (in the TEXT_LINES_H space)
+    // Draw text below tile (inside the layout's text_h band)
     const float text_y = tile_rect.y + tile_rect.h + 4;
-    
+    const float text_w = tile_rect.w - 4;
+    const float pitch = line_pitch(font.pixel_height());
+
     // Name line (truncate if needed)
-    const std::string name_text = fit_text(font, member.name, static_cast<int>(TILE_W - 4));
+    const std::string name_text = fit_text(font, member.name, text_w);
     r.draw_text(font, tile_rect.x + 2, text_y, name_text, TEXT);
 
     // Parent path line
     const std::string parent_text = member.parent_path.empty() ? "/" : member.parent_path;
-    const std::string parent_display = fit_text(font, parent_text, static_cast<int>(TILE_W - 4));
-    r.draw_text(font, tile_rect.x + 2, text_y + ph + 2, parent_display, TEXT_DIM);
+    const std::string parent_display = fit_text(font, parent_text, text_w);
+    r.draw_text(font, tile_rect.x + 2, text_y + pitch, parent_display, TEXT_DIM);
 
     // Dimensions and size line
     const std::string dim_text = std::format("{}x{} · {}", member.width, member.height, fmt_bytes(member.bytes));
-    const std::string dim_display = fit_text(font, dim_text, static_cast<int>(TILE_W - 4));
-    r.draw_text(font, tile_rect.x + 2, text_y + (ph + 2) * 2, dim_display, TEXT_FAINT);
+    const std::string dim_display = fit_text(font, dim_text, text_w);
+    r.draw_text(font, tile_rect.x + 2, text_y + pitch * 2, dim_display, TEXT_FAINT);
 }
 
 void draw_group_row(gfx::Renderer& r, gfx::FontAtlas& font, const DuplicatesScreen& screen,
-                    size_t group_idx, float y)
+                    size_t group_idx, float y, const DupRowLayout& lay)
 {
     using namespace gfx::theme;
     const auto& group = screen.review_.groups()[group_idx];
-    const float ph = font.pixel_height();
 
     // Group header line
     std::string kind_str = (group.kind == DupGroup::Kind::Identical) ? "Identical" : "Similar";
@@ -131,16 +130,16 @@ void draw_group_row(gfx::Renderer& r, gfx::FontAtlas& font, const DuplicatesScre
     const gfx::Color header_color = screen.review_.group_all_removed(group_idx) ? DANGER : TEXT_DIM;
     r.draw_text(font, OX, y, header, header_color);
 
-    // Draw member tiles horizontally
-    float tile_x = OX;
+    // Member tiles: centered band across the full content width.
+    float tile_x = lay.first_x;
     for (size_t m = 0; m < group.members.size(); ++m) {
         const auto& member = group.members[m];
         const bool focused = (group_idx == screen.focus_group_ && m == screen.focus_member_);
 
-        const SDL_FRect tile_rect{tile_x, y + ph + 8, TILE_W, TILE_H};
+        const SDL_FRect tile_rect{tile_x, y + lay.header_h, lay.tile_w, lay.tile_h};
         draw_member_tile(r, font, screen, member, focused, tile_rect);
 
-        tile_x += TILE_W + TILE_GAP;
+        tile_x += lay.tile_w + DUP_TILE_GAP;
     }
 }
 
@@ -298,10 +297,12 @@ void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
                 --screen.focus_group_;
             }
             screen.focus_member_ = 0;
-            // Scroll to keep focused group at top of scroll area (fully visible below header).
-            // Math: group_top = OY + focus_group * (TILE_H + TEXT_LINES_H + GROUP_GAP) - scroll_
-            // To position at OY: scroll_ = focus_group * (TILE_H + TEXT_LINES_H + GROUP_GAP)
-            screen.scroll_ = static_cast<float>(screen.focus_group_) * (TILE_H + TEXT_LINES_H + GROUP_GAP);
+            // Scroll to keep the focused group at the top of the scroll area.
+            // Row height is member-count independent (ui::dup_row_layout).
+            const auto lay = dup_row_layout(OX, static_cast<float>(screen.win_.width()) - 2 * OX,
+                                            dup_tile_height(static_cast<float>(screen.win_.height())),
+                                            screen.font_.pixel_height(), 1);
+            screen.scroll_ = static_cast<float>(screen.focus_group_) * lay.row_h;
             screen.scroll_ = std::max(0.0f, screen.scroll_);
             screen.mark_dirty();
             break;
@@ -311,11 +312,15 @@ void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
                 ++screen.focus_group_;
             }
             screen.focus_member_ = 0;
-            // Scroll to keep focused group visible at bottom of scroll area (before footer).
-            // Math: group_bottom = OY + focus_group * (...) + (TILE_H + TEXT_LINES_H) - scroll_
-            // To position at screen_bottom: scroll_ = focus_group * (...) + (TILE_H + TEXT_LINES_H) - (screen_bottom - OY)
-            const float screen_bottom = static_cast<float>(screen.win_.height()) - 60.0f;
-            screen.scroll_ = static_cast<float>(screen.focus_group_) * (TILE_H + TEXT_LINES_H + GROUP_GAP) + TILE_H + TEXT_LINES_H - (screen_bottom - OY);
+            // Scroll to keep the focused group's full extent (header + tile +
+            // text) visible above the footer.
+            const auto lay = dup_row_layout(OX, static_cast<float>(screen.win_.width()) - 2 * OX,
+                                            dup_tile_height(static_cast<float>(screen.win_.height())),
+                                            screen.font_.pixel_height(), 1);
+            const float extent = lay.header_h + lay.tile_h + lay.text_h;
+            const float screen_bottom = static_cast<float>(screen.win_.height())
+                                        - dup_footer_height(screen.font_.pixel_height());
+            screen.scroll_ = static_cast<float>(screen.focus_group_) * lay.row_h + extent - (screen_bottom - OY);
             screen.scroll_ = std::max(0.0f, screen.scroll_);
             screen.mark_dirty();
             break;
@@ -662,8 +667,22 @@ void DuplicatesScreen::render(gfx::Renderer& r)
         const std::string cancel_hint = "Esc to cancel";
         r.draw_text(font_, OX, H - 40, cancel_hint, TEXT_FAINT);
     } else if (state_ == State::Review) {
-        // Review state: display groups with member tiles
-        // Header: title + skipped notice + stale warning
+        // Scrolled group rows first; the opaque chrome bands paint over them
+        // afterwards (reserve, never overlay — same rule as the gallery grid).
+        // Row height is member-count independent, so one group's layout
+        // differs from the next only in tile width/centering.
+        const float tile_h = dup_tile_height(H);
+        float group_y = OY;
+        for (size_t g = 0; g < review_.groups().size(); ++g) {
+            const auto lay = dup_row_layout(OX, W - 2 * OX, tile_h, font_.pixel_height(),
+                                            review_.groups()[g].members.size());
+            draw_group_row(r, font_, *this, g, group_y - scroll_, lay);
+            group_y += lay.row_h;
+        }
+
+        // Opaque header band: title + skipped notice + stale warning.
+        draw_chrome_band(r, {0, 0, W, OY - 8}, BG, /*rule_at_bottom*/ true);
+
         const size_t total_groups = review_.groups().size();
         size_t total_files = 0;
         uint64_t total_reclaimable = 0;
@@ -671,7 +690,6 @@ void DuplicatesScreen::render(gfx::Renderer& r)
             total_files += g.members.size();
             total_reclaimable += group_reclaimable(g);
         }
-
         const std::string header = std::format("Duplicates — {} groups · {} files · {} reclaimable",
                                                total_groups, total_files, fmt_bytes(total_reclaimable));
         r.draw_text(font_, OX, 40, header, TEXT_DIM);
@@ -689,25 +707,22 @@ void DuplicatesScreen::render(gfx::Renderer& r)
                        TEXT);
         }
 
-        // Scrolled group rows
-        float group_y = OY;
-        for (size_t g = 0; g < review_.groups().size(); ++g) {
-            draw_group_row(r, font_, *this, g, group_y - scroll_);
-            group_y += TILE_H + TEXT_LINES_H + GROUP_GAP;
-        }
+        // Opaque footer band: status + marked totals + key hints, one
+        // font-derived line each.
+        const float pitch = line_pitch(font_.pixel_height());
+        const float footer_h = dup_footer_height(font_.pixel_height());
+        draw_chrome_band(r, {0, H - footer_h, W, footer_h}, BG, /*rule_at_bottom*/ false);
 
-        // Status line (if any error message)
+        const float footer_y = H - footer_h + 6;
         if (!status_.empty()) {
-            r.draw_text(font_, OX, H - 60, status_, DANGER);
+            r.draw_text(font_, OX, footer_y, status_, DANGER);
         }
-
-        // Footer: marked totals and key hints
         const std::string marked_text = std::format("{} files marked · {}",
                                                     review_.marked_count(), fmt_bytes(review_.marked_bytes()));
-        r.draw_text(font_, OX, H - 40, marked_text, TEXT_DIM);
-        
+        r.draw_text(font_, OX, footer_y + pitch, marked_text, TEXT_DIM);
+
         const std::string hints = "[Space] keep/remove  [A] keep only  [Ctrl+Enter] apply  [Esc] back";
-        r.draw_text(font_, OX, H - 20, hints, TEXT_FAINT);
+        r.draw_text(font_, OX, footer_y + pitch * 2, hints, TEXT_FAINT);
     } else if (state_ == State::Done) {
         // Done state
         r.draw_text(font_, OX, OY, done_summary_, TEXT_DIM);
