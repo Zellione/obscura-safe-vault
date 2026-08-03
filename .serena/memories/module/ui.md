@@ -172,6 +172,12 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `Up/Down` group focus, `Space` toggle, `A` keep only the focused member, `Enter`
   full-screen inspect of the decoded ORIGINAL (texture key derived from chunk/poster offset —
   never colliding; empty payloads guarded), `Esc` prompts if unapplied REMOVE marks exist.
+  Review-row geometry is the pure `dup_layout.*` module (`dup_row_layout`,
+  `dup_tile_height`, `dup_footer_height`, unit-tested): tiles share the full content
+  width, centered, scaling down as member count grows; tile height follows the window;
+  every vertical extent is font-derived via `ui::line_pitch`; header/footer are opaque
+  chrome bands (reserve, never overlay). `dup_layout.cpp` is listed explicitly in
+  osv_tests' premake5.lua files{}.
   Apply: `Ctrl+Enter` → default-cancel confirm (count + total size) → ONE main-thread
   `vault::remove_media_batch` call → Done state reports the result; grid refreshes via
   `on_vault_changed()`. `blocks_idle_lock()` true while scanning or unapplied marks exist.

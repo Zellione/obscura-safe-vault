@@ -290,7 +290,9 @@ Four screen states (the chooser is a state, not a modal dialog class):
    header (`Identical · 3 files · 24.1 MB reclaimable` / `Similar (N bits)`),
    then a horizontal row of side-by-side member tiles (thumbnail or video
    poster; name, parent gallery path, size, resolution beneath) each carrying a
-   KEEP/REMOVE badge, all starting KEEP. Keys: `Left/Right` member focus,
+   KEEP/REMOVE badge, all starting KEEP. Tiles share the full content width,
+   centered, scaling down as the group grows; row heights are font-derived and
+   the header/footer are opaque chrome bands (`ui/dup_layout.*`, pure/tested). Keys: `Left/Right` member focus,
    `Up/Down` group focus, `Space` toggle mark, `A` keep only the focused member,
    `Enter` full-screen inspect of the decoded original (any key returns), `F1`
    help, `Esc` leave (confirm prompt while unapplied REMOVE marks exist).
