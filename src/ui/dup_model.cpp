@@ -184,4 +184,35 @@ bool video_sig_match(const VideoSig& a, const VideoSig& b) noexcept
            hamming64(a.poster_hash, b.poster_hash) <= DUP_VID_POSTER_MAX_BITS;
 }
 
+std::vector<std::vector<size_t>> cluster_video_sigs(std::span<const VideoSig> sigs,
+                                                    std::span<const uint64_t> duration_us)
+{
+    // Union-find over indices, same shape as cluster_similar; the pair scan is
+    // O(n^2) over videos that already passed the cheap prefilters.
+    std::vector<size_t> parent(sigs.size());
+    std::iota(parent.begin(), parent.end(), size_t{0});
+    auto find = [&](size_t i) {
+        while (parent[i] != i) {
+            parent[i] = parent[parent[i]];   // path halving
+            i = parent[i];
+        }
+        return i;
+    };
+    for (size_t i = 0; i < sigs.size(); ++i)
+        for (size_t j = i + 1; j < sigs.size(); ++j)
+            if (duration_close(duration_us[i], duration_us[j]) &&
+                video_sig_match(sigs[i], sigs[j]))
+                parent[find(i)] = find(j);
+
+    std::vector<std::vector<size_t>> by_root(sigs.size());
+    for (size_t i = 0; i < sigs.size(); ++i) by_root[find(i)].push_back(i);
+    std::vector<std::vector<size_t>> out;
+    for (auto& c : by_root)
+        if (c.size() >= 2) {
+            std::ranges::sort(c);
+            out.push_back(std::move(c));
+        }
+    return out;
+}
+
 } // namespace ui

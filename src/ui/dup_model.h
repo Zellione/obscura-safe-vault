@@ -43,7 +43,7 @@ struct DupMember {
     bool        keep = true;
 };
 struct DupGroup {
-    enum class Kind : uint8_t { Identical, Similar };
+    enum class Kind : uint8_t { Identical, Similar, SimilarVideo };
     Kind kind = Kind::Identical;
     int  distance_bits = 0;    // max pairwise Hamming (Similar only)
     std::vector<DupMember> members;
@@ -94,5 +94,12 @@ struct VideoSig {
 // sides share >= DUP_VID_MIN_MATCHED valid positions; otherwise falls back
 // to the poster verdict (poster_ok on both && hamming <= POSTER_MAX_BITS).
 [[nodiscard]] bool video_sig_match(const VideoSig& a, const VideoSig& b) noexcept;
+
+// Cluster videos whose signatures match pairwise (duration_close &&
+// video_sig_match) via union-find; `duration_us[i]` parallels `sigs[i]`.
+// Returns clusters of positions into `sigs` with >= 2 members, ordered by
+// first index.
+[[nodiscard]] std::vector<std::vector<size_t>>
+cluster_video_sigs(std::span<const VideoSig> sigs, std::span<const uint64_t> duration_us);
 
 } // namespace ui

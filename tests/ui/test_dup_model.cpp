@@ -214,3 +214,29 @@ TEST(video_sig_match_poster_fallback_without_frames)
     b.poster_hash = a.poster_hash;
     CHECK(ui::video_sig_match(a, b));
 }
+
+TEST(cluster_video_sigs_groups_transitively)
+{
+    ui::VideoSig s;
+    s.frame_valid = 0b11111;
+    for (auto& h : s.frame_hash) h = 0xAAAA5555AAAA5555ull;
+    ui::VideoSig near1 = s;
+    near1.frame_hash[2] ^= 0x7Full;                             // 7 bits at one position
+    ui::VideoSig far1 = s;
+    for (auto& h : far1.frame_hash) h = ~h;
+    const std::vector<ui::VideoSig> sigs{s, near1, far1};
+    const std::vector<uint64_t> dur{60'000'000, 60'500'000, 60'000'000};
+    const auto clusters = ui::cluster_video_sigs(sigs, dur);
+    REQUIRE(clusters.size() == 1);
+    CHECK_EQ(clusters[0].size(), size_t{2});                    // s + near1; far1 excluded
+}
+
+TEST(cluster_video_sigs_duration_gate_blocks_lookalikes)
+{
+    ui::VideoSig s;
+    s.frame_valid = 0b11111;
+    for (auto& h : s.frame_hash) h = 0x1234123412341234ull;
+    const std::vector<ui::VideoSig> sigs{s, s};                 // identical sigs
+    const std::vector<uint64_t> dur{60'000'000, 90'000'000};    // durations differ
+    CHECK(ui::cluster_video_sigs(sigs, dur).empty());
+}
