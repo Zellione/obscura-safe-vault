@@ -327,7 +327,7 @@ namespace {
 
 // Concatenate a member's decrypted payload for inspect: the poster span for a
 // video, every data span for an image.
-bool read_inspect_payload(vault::Vault& v, const DupMember& m, crypto::SecureBytes& out)
+bool read_inspect_payload(const vault::Vault& v, const DupMember& m, crypto::SecureBytes& out)
 {
     if (m.is_video) {
         return vault::read_thumb_span(v, m.thumb_offset, m.thumb_length, out)
@@ -394,9 +394,9 @@ void DuplicatesScreen::request_inspect()
     if (focus_member_ >= members.size()) return;
     const DupMember& member = members[focus_member_];
 
-    const bool no_payload = member.is_video ? member.thumb_length == 0
-                                            : member.data_spans.empty();
-    if (no_payload) {
+    if (const bool no_payload = member.is_video ? member.thumb_length == 0
+                                                : member.data_spans.empty();
+        no_payload) {
         status_ = "Nothing to inspect for this file";
         mark_dirty();
         return;
@@ -537,11 +537,12 @@ void DuplicatesScreen::start_scan(bool perceptual)
 void DuplicatesScreen::update(double dt)
 {
     (void)dt;
+    using enum State;
 
     // Pump worker results for thumbnail/inspect decoding.
-    if (state_ == State::Review || state_ == State::Done) pump_decode_results();
+    if (state_ == Review || state_ == Done) pump_decode_results();
 
-    if (state_ != State::Scanning) return;
+    if (state_ != Scanning) return;
     if (job_.active()) {
         mark_dirty();               // progress may have changed
         return;
@@ -557,6 +558,7 @@ void DuplicatesScreen::leave()
 void DuplicatesScreen::render(gfx::Renderer& r)
 {
     using namespace gfx::theme;
+    using enum State;
     const auto W = static_cast<float>(win_.width());
     const auto H = static_cast<float>(win_.height());
 
@@ -565,17 +567,17 @@ void DuplicatesScreen::render(gfx::Renderer& r)
     r.draw_text(font_, OX, 84, "[F1] Help", TEXT_FAINT);
 
     switch (state_) {
-        case State::Choose:   render_choose(r, W, H);   break;
-        case State::Scanning: render_scanning(r, W, H); break;
-        case State::Review:   render_review(r, W, H);   break;
-        case State::Done:
+        case Choose:   render_choose(r, W, H);   break;
+        case Scanning: render_scanning(r, W, H); break;
+        case Review:   render_review(r, W, H);   break;
+        case Done:
             r.draw_text(font_, OX, OY, done_summary_, TEXT_DIM);
             r.draw_text(font_, OX, H - 40, "[Enter] rescan · [Esc] back", TEXT_FAINT);
             break;
     }
 
     // Overlays on top.
-    if (state_ == State::Review) {
+    if (state_ == Review) {
         if (confirm_.apply) {
             draw_confirm_apply_overlay(r, font_, W, H, *this);
         } else if (confirm_.leave) {
