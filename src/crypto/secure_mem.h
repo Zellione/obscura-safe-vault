@@ -43,6 +43,21 @@ inline bool should_warn_mlock_once() noexcept
     return !warned.test_and_set();
 }
 
+// Platform-appropriate remedy advice for the once-per-process mlock warning.
+// On Windows the cap is the process's minimum working-set size (VirtualLock),
+// not RLIMIT_MEMLOCK, so ulimit advice would be meaningless there. Startup
+// grows the budget via platform::grow_secure_mem_budget() (harden.h); a
+// failure after that means the machine is under real memory pressure.
+inline const char* mlock_fail_hint() noexcept
+{
+#if defined(_WIN32)
+    return "process working set too small — startup grows it via "
+           "SetProcessWorkingSetSize, so the system is likely low on memory";
+#else
+    return "RLIMIT_MEMLOCK too low? Raise with: ulimit -l / systemd LimitMEMLOCK";
+#endif
+}
+
 namespace detail {
 
 // Best-effort page-lock. Returns true on success. Never throws.
@@ -91,8 +106,8 @@ public:
         if (!locked_ && should_warn_mlock_once()) {
             // Non-fatal: we still wipe on destruction. Warn once process-wide.
             std::println(stderr,
-                "[SecureMem] WARNING: mlock failed (RLIMIT_MEMLOCK too low?) — "
-                "decoded data may be swappable. Raise with: ulimit -l / systemd LimitMEMLOCK.");
+                "[SecureMem] WARNING: mlock failed — decoded data may be swappable ({}).",
+                mlock_fail_hint());
         }
     }
 
@@ -198,8 +213,8 @@ public:
         locked_ = detail::mem_lock(data_.get(), size_);
         if (!locked_ && should_warn_mlock_once()) {
             std::println(stderr,
-                "[SecureMem] WARNING: mlock failed (RLIMIT_MEMLOCK too low?) — "
-                "decoded data may be swappable. Raise with: ulimit -l / systemd LimitMEMLOCK.");
+                "[SecureMem] WARNING: mlock failed — decoded data may be swappable ({}).",
+                mlock_fail_hint());
         }
         return true;
     }

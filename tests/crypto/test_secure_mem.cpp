@@ -3,6 +3,7 @@
 #include <array>
 #include <cstring>
 #include <memory>
+#include <string_view>
 
 #include "crypto/secure_mem.h"
 
@@ -76,4 +77,17 @@ TEST(should_warn_mlock_once)
     // first should be true; second and third should be false (or first could be false
     // if already triggered). At least ensure not all are true.
     CHECK_TRUE(!first || (!second && !third));
+}
+
+// The once-per-process mlock warning must give remedy advice for THIS
+// platform: "ulimit -l" means nothing on Windows, where the cap is the
+// process's minimum working-set size, not RLIMIT_MEMLOCK.
+TEST(mlock_fail_hint_names_platform_remedy)
+{
+    const std::string_view hint = crypto::mlock_fail_hint();
+#if defined(_WIN32)
+    CHECK_TRUE(hint.find("working set") != std::string_view::npos);
+#else
+    CHECK_TRUE(hint.find("ulimit") != std::string_view::npos);
+#endif
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdio>
 #include <filesystem>
 
@@ -41,5 +42,21 @@ bool redirect_stream_to_file(std::FILE* stream, const std::filesystem::path& pat
 // for the first time. Call once, early, at app startup (before any
 // diagnostic print).
 void redirect_diagnostics_to_log_file() noexcept;
+
+// Best-effort: grow the amount of memory this process may page-lock so the
+// SecureBuffer/SecureBytes mlock/VirtualLock calls (crypto/secure_mem.h) can
+// actually succeed for decoded-image-sized buffers. Returns true when the
+// platform reports a lockable budget of at least `bytes` afterwards.
+//
+// Windows: VirtualLock's per-process cap is the *minimum working-set size*
+// (~200 KB by default — far below one decoded image), so raise it via
+// SetProcessWorkingSetSize(). Needs no privilege beyond the default
+// SeIncreaseWorkingSetPrivilege every user holds.
+// Linux: raise the soft RLIMIT_MEMLOCK to the hard limit (allowed without
+// privileges); anything beyond the hard limit needs ulimit/systemd config.
+//
+// Called once at app startup (all build configs). Failure is non-fatal:
+// secure_mem.h keeps its warn-once + degrade-to-swappable behaviour.
+bool grow_secure_mem_budget(size_t bytes) noexcept;
 
 } // namespace platform
