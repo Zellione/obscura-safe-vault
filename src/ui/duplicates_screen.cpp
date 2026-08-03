@@ -374,8 +374,29 @@ void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
                     if (screen.focus_member_ < group.members.size()) {
                         const auto& member = group.members[screen.focus_member_];
 
-                        // Compute inspect key: thumb_offset with bit 63 set
-                        const uint64_t inspect_key = member.thumb_offset | (uint64_t{1} << 63);
+                        // Guard 1: Videos require a poster to inspect
+                        if (member.is_video && member.thumb_length == 0) {
+                            screen.status_ = "Nothing to inspect for this file";
+                            screen.mark_dirty();
+                            break;
+                        }
+
+                        // Guard 2: Images require data_spans to inspect
+                        if (!member.is_video && member.data_spans.empty()) {
+                            screen.status_ = "Nothing to inspect for this file";
+                            screen.mark_dirty();
+                            break;
+                        }
+
+                        // Compute unique inspect key: use first data span offset (guaranteed nonzero after guards)
+                        uint64_t base_offset = 0;
+                        if (member.is_video) {
+                            base_offset = member.thumb_offset;
+                        } else {
+                            base_offset = member.data_spans[0].first;  // first chunk offset
+                        }
+                        const uint64_t inspect_key = base_offset | (uint64_t{1} << 63);
+
                         screen.inspect_ = inspect_key;
                         screen.inspect_decoding_ = true;
 
