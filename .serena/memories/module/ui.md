@@ -177,9 +177,17 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   dialog class); Scanning polls the `DupScanJob` with progress + graceful Esc-cancel; Review
   lists groups largest-reclaimable-first as side-by-side member tiles (thumb/poster, name,
   parent path, size, resolution) with KEEP/REMOVE badges — `Left/Right` member focus,
-  `Up/Down` group focus, `Space` toggle, `A` keep only the focused member, `Enter`
-  full-screen inspect of the decoded ORIGINAL (texture key derived from chunk/poster offset —
-  never colliding; empty payloads guarded), `Esc` prompts if unapplied REMOVE marks exist.
+  `Up/Down` group focus, `Space` toggle (refused with a footer notice when the member is
+  its group's last keeper), `A` keep only the focused member, `Enter` full-screen inspect
+  of the decoded ORIGINAL, `Esc` prompts only if USER-TOUCHED unapplied marks exist
+  (`marks_touched_`, also gates `blocks_idle_lock` — Phase 63: groups arrive pre-marked
+  keep-first/remove-rest, and untouched defaults are not invested work). The inspect
+  texture is OWNED by `InspectState` (uploaded on first overlay draw, destroyed by
+  `close_inspect()` on close/replace/dtor; request keys carry bit 63) and deliberately
+  NEVER enters the shared thumbnail TextureCache — a full-res upload there evicted the
+  review thumbs and could evict the inspect itself mid-view (black-box blanking; same
+  rationale as FullTexCache). A failed upload (GPU max texture size) closes the inspect
+  with a status message.
   Review-row geometry is the pure `dup_layout.*` module (`dup_row_layout`,
   `dup_tile_height`, `dup_footer_height`, unit-tested): tiles share the full content
   width, centered, scaling down as member count grows; tile height follows the window;
@@ -571,8 +579,11 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   grayscale cells → 64-bit difference hash), `hamming64`, `cluster_similar` (union-find at
   Hamming ≤ `DUP_SIMILAR_MAX_BITS` = 5); `DupGroup` (Identical / Similar-N-bits, sorted
   largest-reclaimable-bytes first) + `DupReview` KEEP/REMOVE marking state with the
-  at-least-one-KEEP-per-group invariant (`A` = keep only focused; apply refused while any
-  group is all-REMOVE). Phase 62 adds the video-signature model: `VideoSig` (poster hash +
+  at-least-one-KEEP-per-group invariant. Phase 63: the ctor pre-marks every group
+  keep-first/remove-rest (an untouched review applies to one copy per group) and
+  `toggle` returns bool, refusing to unmark a group's last keeper — all-REMOVE is
+  unreachable via the UI (`A` = keep only focused; the apply-time refusal stays as
+  defense). Phase 62 adds the video-signature model: `VideoSig` (poster hash +
   5 sampled-frame hashes + validity bitmask), `duration_close` (±`DUP_VID_DURATION_TOL`=2 %
   with `DUP_VID_DURATION_ABS_US`=500 ms floor), `video_sig_match` (frame evidence decides
   when ≥ `DUP_VID_MIN_MATCHED`=4 of 5 positions are shared-valid at Hamming ≤

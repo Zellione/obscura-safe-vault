@@ -153,6 +153,13 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   name, never a path, so no cascade). Drives the `R` RenameDialog.
 - `vault::repair_video_metadata` — re-probes a node stuck at placeholder Unknown video
   metadata and fills it in if the codec has since become decodable; no-op otherwise.
+  Phase 63: the poster append holds `write_mutex_` (it used to be the ONE unguarded `fp_`
+  write path — racing the CommitLane worker's commit on the same FILE* could misplace
+  `write_header`'s payload at EOF, PR #109 class, losing the slot flip so repairs re-ran
+  and regrew the vault every unlock); a failed probe sets the transient (never serialized)
+  `VideoMeta::probe_failed_session` so gallery refresh doesn't re-read the whole video
+  every visit (retried next unlock). `Vault::unlock` now `platform::log_error`s when the
+  active index slot is unreadable and the previous slot is recovered (was silent).
   Test-only friend `vault::test_only_force_video_codec_unknown` (in tests/vault/test_video.cpp).
 
 ### index.* — the index tree
