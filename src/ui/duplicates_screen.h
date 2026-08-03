@@ -31,6 +31,7 @@ namespace ui {
 // a non-const screen: drawing a missing thumbnail submits a decode fetch
 // (favorites_images pattern — the pipeline members are ordinary, not mutable).
 void handle_review_key(class DuplicatesScreen& screen, const SDL_KeyboardEvent& key);
+bool consume_overlay_key(class DuplicatesScreen& screen, const SDL_KeyboardEvent& key);
 void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, class DuplicatesScreen& screen,
                       const DupMember& member, bool focused, const SDL_FRect& tile_rect);
 void draw_group_row(gfx::Renderer& r, gfx::FontAtlas& font, class DuplicatesScreen& screen,
@@ -41,6 +42,7 @@ void draw_inspect_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float
 
 class DuplicatesScreen final : public Screen {
     friend void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key);
+    friend bool consume_overlay_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key);
     friend void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, DuplicatesScreen& screen,
                                  const DupMember& member, bool focused, const SDL_FRect& tile_rect);
     friend void draw_group_row(gfx::Renderer& r, gfx::FontAtlas& font, DuplicatesScreen& screen,
@@ -54,6 +56,7 @@ public:
 
     DuplicatesScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                      gfx::TextureCache& cache, Nav back);
+    ~DuplicatesScreen() override;
 
     void handle_event(const SDL_Event& e) override;
     void update(double dt) override;
@@ -61,8 +64,10 @@ public:
     [[nodiscard]] bool animating() const override { return state_ == State::Scanning; }
     [[nodiscard]] bool blocks_idle_lock() const override
     {
+        // Review blocks the idle lock only once the user has actually touched
+        // the marks — the pre-applied defaults alone are not invested work.
         return state_ == State::Scanning ||
-               (state_ == State::Review && review_.any_marked());
+               (state_ == State::Review && review_.touched() && review_.any_marked());
     }
     [[nodiscard]] std::vector<HelpGroup> help_groups() const override;
     void on_vault_changed() override;
@@ -73,10 +78,16 @@ private:
         bool apply = false;   // Ctrl+Enter pressed, awaiting Y/Enter
         bool leave = false;   // Esc pressed with pending marks
     };
-    // Full-screen inspect of the focused member's decoded original.
+    // Full-screen inspect of the focused member's decoded original. The
+    // texture is OWNED here, never stored in the shared thumbnail cache: a
+    // full-resolution upload there evicts the review thumbnails and can
+    // itself be evicted mid-inspect (image blanks to the backdrop). Mirrors
+    // the FullTexCache rationale for the viewer.
     struct InspectState {
-        std::optional<uint64_t> key;   // inspect texture key (bit 63 set)
+        std::optional<uint64_t> key;   // inspect request key (bit 63 set)
         bool decoding = false;         // waiting for worker to decode
+        std::optional<image::ImageData> image;  // decoded, awaiting GPU upload
+        SDL_Texture* tex = nullptr;    // owned; destroyed by close_inspect()
     };
 
     void handle_key(const SDL_KeyboardEvent& key);
@@ -87,7 +98,9 @@ private:
     void apply_marked_batch();          // accepted confirm: one-commit delete
     void follow_focus(int delta);       // Up/Down group focus + scroll-follow
     void request_inspect();             // Enter: decode the focused original
+    void close_inspect();               // destroy the owned texture, clear state
     void pump_decode_results();         // drain worker results (tiles + inspect)
+    void take_inspect_result(image::DecodeWorker::Result& res);
     void finish_scan(DupScanOutcome outcome);
     void render_choose(gfx::Renderer& r, float W, float H);
     void render_scanning(gfx::Renderer& r, float W, float H);

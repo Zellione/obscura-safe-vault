@@ -28,6 +28,10 @@ constexpr float OY  = 150;   // list top
 constexpr float BADGE_SIZE = 24.0f;    // keep/remove badge size
 constexpr float RADIUS = 8.0f;         // border radius
 
+// Inspect request keys carry bit 63 so they can never collide with a
+// thumbnail key (a raw chunk offset) in the decode worker.
+constexpr uint64_t INSPECT_KEY_BIT = uint64_t{1} << 63;
+
 // Format byte count for display
 [[nodiscard]] std::string fmt_bytes(uint64_t bytes)
 {
@@ -216,14 +220,32 @@ void draw_inspect_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float
         const auto tw = static_cast<float>(font.measure(msg));
         r.draw_text(font, (W - tw) / 2, H / 2 - font.pixel_height() / 2, msg, TEXT_DIM);
     } else {
-        // Try to render the inspect texture
-        SDL_Texture* tex = screen.cache_.get(*screen.inspect_.key);
-        if (tex) {
+        // Upload the decoded pixels into the OWNED inspect texture on first
+        // draw (mirrors FullTexCache::upload; never the shared thumb cache).
+        if (!screen.inspect_.tex && screen.inspect_.image) {
+            const image::ImageData& img = *screen.inspect_.image;
+            SDL_Texture* tex = SDL_CreateTexture(r.sdl(), SDL_PIXELFORMAT_RGB24,
+                                                 SDL_TEXTUREACCESS_STATIC,
+                                                 img.width, img.height);
+            if (tex && !SDL_UpdateTexture(tex, nullptr, img.pixels.data(), img.width * 3)) {
+                SDL_DestroyTexture(tex);
+                tex = nullptr;
+            }
+            screen.inspect_.tex = tex;
+            screen.inspect_.image.reset();
+            if (!tex) {                 // e.g. exceeds the GPU's max texture size
+                screen.close_inspect();
+                screen.status_ = "Could not display this image (too large?)";
+                screen.mark_dirty();
+                return;
+            }
+        }
+        if (screen.inspect_.tex) {
             float tw = 0;
             float th = 0;
-            SDL_GetTextureSize(tex, &tw, &th);
+            SDL_GetTextureSize(screen.inspect_.tex, &tw, &th);
             const SDL_FRect display = fit_rect(tw, th, {40, 40, W - 80, H - 80});
-            r.draw_image(tex, display);
+            r.draw_image(screen.inspect_.tex, display);
         }
     }
 
@@ -240,32 +262,51 @@ DuplicatesScreen::DuplicatesScreen(gfx::Window& win, gfx::FontAtlas& font,
 {
 }
 
-void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
+DuplicatesScreen::~DuplicatesScreen()
+{
+    close_inspect();
+}
+
+void DuplicatesScreen::close_inspect()
+{
+    if (inspect_.tex) SDL_DestroyTexture(inspect_.tex);
+    inspect_.tex = nullptr;
+    inspect_.image.reset();
+    inspect_.key.reset();
+    inspect_.decoding = false;
+}
+
+// The pending-confirmation overlays and the inspect view own every key while
+// up. Returns true when the key was consumed by one of them.
+bool consume_overlay_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
 {
     const bool accept = key.key == SDLK_RETURN || key.key == SDLK_Y;
-
-    // Pending-confirmation overlays own every key while up.
     if (screen.confirm_.apply) {
         screen.confirm_.apply = false;
         if (accept) screen.apply_marked_batch();
         screen.mark_dirty();
-        return;
+        return true;
     }
     if (screen.confirm_.leave) {
         screen.confirm_.leave = false;
         if (accept) {
             screen.leave();
-            return;
+            return true;
         }
         screen.mark_dirty();
-        return;
+        return true;
     }
     if (screen.inspect_.key.has_value()) {   // any key closes the inspect view
-        screen.inspect_.key.reset();
-        screen.inspect_.decoding = false;
+        screen.close_inspect();
         screen.mark_dirty();
-        return;
+        return true;
     }
+    return false;
+}
+
+void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
+{
+    if (consume_overlay_key(screen, key)) return;
 
     const auto& groups = screen.review_.groups();
     if (groups.empty()) return;
@@ -289,7 +330,10 @@ void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
             screen.mark_dirty();
             break;
         case SDLK_SPACE:
-            screen.review_.toggle(screen.focus_group_, screen.focus_member_);
+            if (screen.review_.toggle(screen.focus_group_, screen.focus_member_))
+                screen.status_.clear();
+            else
+                screen.status_ = "At least one copy of each group stays kept";
             screen.mark_dirty();
             break;
         case SDLK_A:
@@ -312,7 +356,9 @@ void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
             screen.mark_dirty();
             break;
         case SDLK_ESCAPE:
-            if (screen.review_.any_marked()) {
+            // Only user-touched marks are worth a leave-confirm; the untouched
+            // defaults are recreated by any rescan.
+            if (screen.review_.touched() && screen.review_.any_marked()) {
                 screen.confirm_.leave = true;
                 screen.status_ = "Unapplied marks — Ctrl+Enter to apply, Esc again to discard";
                 screen.mark_dirty();
@@ -404,33 +450,45 @@ void DuplicatesScreen::request_inspect()
         return;
     }
 
-    // Unique texture key: chunk/poster offset with bit 63 set (never collides
+    // Unique request key: chunk/poster offset with bit 63 set (never collides
     // with a thumbnail key; offset is nonzero after the payload guard).
     const uint64_t base_offset = member.is_video ? member.thumb_offset
                                                  : member.data_spans[0].first;
-    const uint64_t inspect_key = base_offset | (uint64_t{1} << 63);
+    const uint64_t inspect_key = base_offset | INSPECT_KEY_BIT;
 
     crypto::SecureBytes payload;
     if (!read_inspect_payload(vault_, member, payload)) {
         mark_dirty();
         return;
     }
+    close_inspect();                 // drop any previous inspect texture
     inspect_.key = inspect_key;
     inspect_.decoding = true;
     worker_.submit(inspect_key, std::move(payload));
     mark_dirty();
 }
 
+// Inspect results stay OUT of the shared thumbnail cache (see InspectState).
+// A stale result (inspect already closed or replaced) is simply dropped.
+void DuplicatesScreen::take_inspect_result(image::DecodeWorker::Result& res)
+{
+    if (inspect_.key != res.key) return;
+    if (res.image) {
+        inspect_.image = std::move(*res.image);
+    } else {
+        close_inspect();                // failed to decode the inspect image
+        status_ = "Could not decode this file";
+    }
+    inspect_.decoding = false;
+}
+
 void DuplicatesScreen::pump_decode_results()
 {
     while (auto res = worker_.take_result()) {
-        const bool for_inspect = inspect_.key.has_value() && res->key == *inspect_.key;
-        if (res->image) {
+        if ((res->key & INSPECT_KEY_BIT) != 0) {
+            take_inspect_result(*res);
+        } else if (res->image) {
             (void)cache_.get_or_upload(res->key, *res->image);
-            if (for_inspect) inspect_.decoding = false;
-        } else if (for_inspect) {
-            inspect_.key.reset();       // failed to decode the inspect image
-            inspect_.decoding = false;
         } else {
             failed_.insert(res->key);   // regular thumbnail gave up
         }

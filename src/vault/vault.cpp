@@ -692,11 +692,17 @@ VaultResult Vault::unlock(std::span<const uint8_t> password, std::span<const uin
     // active one is unreadable (crash during a swap left it truncated/corrupt).
     if (const uint8_t active = header_.active_slot == 0 ? 0 : 1;
         !try_load_slot(fp_, header_, master_key_.as_span(), active, root_, saved_searches_,
-                       settings_) &&
-        !try_load_slot(fp_, header_, master_key_.as_span(), active == 0 ? 1 : 0, root_,
-                       saved_searches_, settings_)) {
-        master_key_.wipe();
-        return BadFormat;
+                       settings_)) {
+        if (!try_load_slot(fp_, header_, master_key_.as_span(), active == 0 ? 1 : 0, root_,
+                           saved_searches_, settings_)) {
+            master_key_.wipe();
+            return BadFormat;
+        }
+        // Never silent: the most recent commit was lost (interrupted or
+        // corrupted), so recent changes may replay — leave a trace for
+        // diagnosis (no key material, invariant #5).
+        platform::log_error("Vault",
+                            "active index slot unreadable — recovered from the previous slot");
     }
 
     unlocked_ = true;
@@ -953,26 +959,39 @@ VaultResult Vault::repair_video_metadata(std::string_view node_path)
     IndexNode* n = resolve_node(node_path);
     if (!n || !n->is_video()) return NotFound;
     if (n->vmeta.codec != VideoCodec::Unknown) return Ok;  // already has real metadata
+    if (n->vmeta.probe_failed_session) return Ok;          // already probed this session
 
     crypto::SecureBytes raw;
     if (const VaultResult r = read_video(*n, raw); r != Ok) return r;
 
-    media::VideoProbeResult probe;
-    if (!media::probe_video(raw.as_span(), probe)) return Ok;  // still not probeable
-    if (probe.codec == VideoCodec::Unknown) return Ok;         // still not decodable
+    if (media::VideoProbeResult probe;
+        !media::probe_video(raw.as_span(), probe) || probe.codec == VideoCodec::Unknown) {
+        // Still not decodable. Memoize so the next gallery visit doesn't
+        // re-read + re-probe the whole video again (retried on next unlock).
+        n->vmeta.probe_failed_session = true;
+        return Ok;
+    } else {
+        n->vmeta.codec = probe.codec;
+        n->vmeta.width = probe.width;
+        n->vmeta.height = probe.height;
+        n->vmeta.duration_us = probe.duration_us;
 
-    n->vmeta.codec = probe.codec;
-    n->vmeta.width = probe.width;
-    n->vmeta.height = probe.height;
-    n->vmeta.duration_us = probe.duration_us;
-
-    if (n->vmeta.poster_length == 0 && !probe.poster_jpeg.empty()) {
-        ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
-        ChunkSpan poster_span;
-        if (!store.append_chunk(probe.poster_jpeg, poster_span)) return IoError;
-        if (!store.sync()) return IoError;
-        n->vmeta.poster_offset = poster_span.offset;
-        n->vmeta.poster_length = poster_span.length;
+        if (n->vmeta.poster_length == 0 && !probe.poster_jpeg.empty()) {
+            // Appends on fp_ must hold write_mutex_ (Phase 50 protocol): the
+            // CommitLane worker may be committing an EARLIER repair's index
+            // blob on this same FILE* right now, and an unguarded seek+write
+            // can interleave with the commit's appends and header writes
+            // (misplacing the header at EOF — the PR #109 failure class), so
+            // the just-committed slot never persists and the repair reruns —
+            // and regrows the vault — on every unlock.
+            std::lock_guard lk(*write_mutex_);
+            ChunkStore store(fp_, master_key_.as_span(), framed_chunks(header_));
+            ChunkSpan poster_span;
+            if (!store.append_chunk(probe.poster_jpeg, poster_span)) return IoError;
+            if (!store.sync()) return IoError;
+            n->vmeta.poster_offset = poster_span.offset;
+            n->vmeta.poster_length = poster_span.length;
+        }
     }
 
     return commit_index();
