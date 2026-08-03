@@ -58,8 +58,8 @@ void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, const DuplicatesSc
             SDL_GetTextureSize(tex, &tw, &th);
             r.draw_image(tex, fit_rect(tw, th, tile_rect));
         } else if (!screen.worker_.pending(key)) {
-            // Submit fetch for this thumbnail - note: const_cast needed because worker is const but submit_fetch is non-const
-            const_cast<image::DecodeWorker&>(screen.worker_).submit_fetch(key,
+            // Submit fetch for this thumbnail
+            screen.worker_.submit_fetch(key,
                 [&v = screen.vault_, off = member.thumb_offset, len = member.thumb_length](crypto::SecureBytes& out) {
                     return vault::read_thumb_span(v, off, len, out) == vault::VaultResult::Ok;
                 });
@@ -165,11 +165,11 @@ void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
                 --screen.focus_group_;
             }
             screen.focus_member_ = 0;
-            // Scroll to keep focused group visible
-            const float group_top = OY + static_cast<float>(screen.focus_group_) * (TILE_H + TEXT_LINES_H + GROUP_GAP) - screen.scroll_;
-            if (group_top < OY) {
-                screen.scroll_ = static_cast<float>(screen.focus_group_) * (TILE_H + TEXT_LINES_H + GROUP_GAP) - OY;
-            }
+            // Scroll to keep focused group at top of scroll area (fully visible below header).
+            // Math: group_top = OY + focus_group * (TILE_H + TEXT_LINES_H + GROUP_GAP) - scroll_
+            // To position at OY: scroll_ = focus_group * (TILE_H + TEXT_LINES_H + GROUP_GAP)
+            screen.scroll_ = static_cast<float>(screen.focus_group_) * (TILE_H + TEXT_LINES_H + GROUP_GAP);
+            screen.scroll_ = std::max(0.0f, screen.scroll_);
             screen.mark_dirty();
             break;
         }
@@ -178,13 +178,12 @@ void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
                 ++screen.focus_group_;
             }
             screen.focus_member_ = 0;
-            // Scroll to keep focused group visible
-            const float group_top = OY + static_cast<float>(screen.focus_group_) * (TILE_H + TEXT_LINES_H + GROUP_GAP) - screen.scroll_;
-            const float group_bottom = group_top + TILE_H + TEXT_LINES_H;
+            // Scroll to keep focused group visible at bottom of scroll area (before footer).
+            // Math: group_bottom = OY + focus_group * (...) + (TILE_H + TEXT_LINES_H) - scroll_
+            // To position at screen_bottom: scroll_ = focus_group * (...) + (TILE_H + TEXT_LINES_H) - (screen_bottom - OY)
             const float screen_bottom = static_cast<float>(screen.win_.height()) - 60.0f;
-            if (group_bottom > screen_bottom) {
-                screen.scroll_ = static_cast<float>(screen.focus_group_) * (TILE_H + TEXT_LINES_H + GROUP_GAP) + TILE_H + TEXT_LINES_H - (screen_bottom - OY);
-            }
+            screen.scroll_ = static_cast<float>(screen.focus_group_) * (TILE_H + TEXT_LINES_H + GROUP_GAP) + TILE_H + TEXT_LINES_H - (screen_bottom - OY);
+            screen.scroll_ = std::max(0.0f, screen.scroll_);
             screen.mark_dirty();
             break;
         }

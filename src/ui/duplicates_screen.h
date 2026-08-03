@@ -87,8 +87,8 @@ private:
     std::string done_summary_;
 
     // Tile pipeline (favorites_images.h pattern).
-    image::DecodeWorker          worker_{image::decode_wake_event()};
-    std::unordered_set<uint64_t> failed_;
+    mutable image::DecodeWorker          worker_{image::decode_wake_event()};
+    mutable std::unordered_set<uint64_t> failed_;
 };
 
 } // namespace ui
