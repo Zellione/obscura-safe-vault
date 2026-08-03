@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "crypto/secure_mem.h"
+#include "vault/commit_lane.h"
 #include "vault/vault.h"
 #include "vault/index.h"
 #include "vault/vault_ops.h"
@@ -440,6 +441,93 @@ TEST(repair_video_metadata_noop_on_genuinely_undecodable_codec)
           static_cast<int>(vault::VideoCodec::Unknown));
     CHECK(after[0]->vmeta.duration_us == 0);
     CHECK(after[0]->vmeta.poster_length == 0);
+}
+
+TEST(repair_video_metadata_memoizes_failed_probe_per_session)
+{
+    // A permanently-undecodable video must be read + probed at most ONCE per
+    // session: gallery refresh calls repair on every visit, and re-reading
+    // whole videos each time is exactly the "laggy unlock" failure mode.
+    auto v_bytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tinylegacy_ffvhuff.mkv");
+    REQUIRE(!v_bytes.empty());
+
+    TempVault tv("repair_memo");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("", v_bytes, "ffvhuff.mkv", 4096) == vault::VaultResult::Ok);
+
+    auto before = v.list("");
+    REQUIRE(before.size() == 1);
+    REQUIRE(!before[0]->vmeta.probe_failed_session);
+
+    CHECK(v.repair_video_metadata("ffvhuff.mkv") == vault::VaultResult::Ok);
+    auto after = v.list("");
+    REQUIRE(after.size() == 1);
+    CHECK(after[0]->vmeta.probe_failed_session);   // memoized: skip next time
+    CHECK(static_cast<int>(after[0]->vmeta.codec) ==
+          static_cast<int>(vault::VideoCodec::Unknown));
+
+    // Second call is a memoized no-op and must not disturb the state.
+    CHECK(v.repair_video_metadata("ffvhuff.mkv") == vault::VaultResult::Ok);
+    CHECK(static_cast<int>(v.list("")[0]->vmeta.codec) ==
+          static_cast<int>(vault::VideoCodec::Unknown));
+}
+
+TEST(repair_video_metadata_persists_under_running_commit_lane)
+{
+    // Regression for the Windows "vault grows on every unlock" bug: the
+    // gallery-refresh repair loop runs while the CommitLane (started at
+    // unlock) is asynchronously committing the PREVIOUS repair's index blob
+    // on the same FILE*. The poster append must hold write_mutex_, or its
+    // seek+write interleaves with the commit's appends/header writes, the
+    // active-slot flip is lost, and a reopen sees the videos as Unknown again
+    // — repeating the repairs (and regrowing the file) forever.
+    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!video_bytes.empty());
+
+    TempVault tv("repair_under_lane");
+    constexpr int kVideos = 8;
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+                == vault::VaultResult::Ok);
+        for (int i = 0; i < kVideos; ++i) {
+            const std::string name = "vid" + std::to_string(i) + ".mp4";
+            REQUIRE(v.add_video("", video_bytes, name, 4096) == vault::VaultResult::Ok);
+            vault::test_only_force_video_codec_unknown(v, name);
+        }
+
+        // Route commits through a running lane, exactly like an unlocked app
+        // session, and repair every video back-to-back on this thread.
+        vault::CommitLane lane;
+        lane.start(v);
+        v.set_commit_router(&lane);
+        for (int i = 0; i < kVideos; ++i)
+            CHECK(v.repair_video_metadata("vid" + std::to_string(i) + ".mp4")
+                  == vault::VaultResult::Ok);
+        CHECK(lane.flush());
+        lane.stop();
+        v.set_commit_router(nullptr);
+        v.lock();
+    }
+
+    // Reopen cold: every repair must have persisted, and every poster must
+    // decrypt cleanly (an AuthFailed poster = interleaved/corrupted appends).
+    vault::Vault v;
+    REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
+    REQUIRE(v.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+    auto children = v.list("");
+    REQUIRE(children.size() == size_t{kVideos});
+    for (const auto* n : children) {
+        CHECK(static_cast<int>(n->vmeta.codec) == static_cast<int>(vault::VideoCodec::H264));
+        REQUIRE(n->vmeta.poster_length > 0);
+        crypto::SecureBytes poster;
+        CHECK(v.read_thumbnail(*n, poster) == vault::VaultResult::Ok);
+        crypto::SecureBytes full;
+        REQUIRE(v.read_video(*n, full) == vault::VaultResult::Ok);
+        CHECK_BYTES_EQ(full.as_span(), std::span<const uint8_t>(video_bytes));
+    }
 }
 
 #endif  // OSV_VENDORED_AV

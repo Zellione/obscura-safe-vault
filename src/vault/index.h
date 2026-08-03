@@ -140,6 +140,10 @@ struct VideoMeta {
     std::vector<VideoChunk> chunks;              // ordered encrypted-chunk locations
     uint64_t               poster_offset  = 0;   // first-frame JPEG poster (Phase 15 PR4); 0 length = none
     uint64_t               poster_length  = 0;
+    // Transient, NEVER serialized: a repair probe already failed for this
+    // video in this session, so repair_video_metadata() skips re-reading the
+    // whole file on every gallery visit (it retries on the next unlock).
+    bool                   probe_failed_session = false;
 };
 
 // Per-gallery children display order (Phase 37). Persisted on Gallery nodes
