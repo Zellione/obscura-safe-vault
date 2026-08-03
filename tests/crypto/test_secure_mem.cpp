@@ -79,6 +79,16 @@ TEST(should_warn_mlock_once)
     CHECK_TRUE(!first || (!second && !third));
 }
 
+// The warning body itself must be safely callable: CI never fails an mlock,
+// so the failure path in the SecureBuffer/SecureBytes constructors can only
+// be exercised through this direct call (the once-per-process gate around it
+// is tested separately above).
+TEST(mlock_warning_prints_without_crashing)
+{
+    crypto::print_mlock_warning();
+    CHECK_TRUE(true);  // reaching here is the assertion — the print must not throw
+}
+
 // The once-per-process mlock warning must give remedy advice for THIS
 // platform: "ulimit -l" means nothing on Windows, where the cap is the
 // process's minimum working-set size, not RLIMIT_MEMLOCK.

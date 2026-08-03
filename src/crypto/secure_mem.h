@@ -58,6 +58,21 @@ inline const char* mlock_fail_hint() noexcept
 #endif
 }
 
+// Body of the once-per-process mlock warning. Split from the once-gate so the
+// failure path stays testable: CI never fails an mlock, so this line would
+// otherwise only ever run on an end-user machine.
+inline void print_mlock_warning() noexcept
+{
+    std::println(stderr, "[SecureMem] WARNING: mlock failed — decoded data may be swappable ({}).",
+                 mlock_fail_hint());
+}
+
+// Non-fatal degrade: the buffer still wipes on destruction. Warn once process-wide.
+inline void warn_mlock_failure_once() noexcept
+{
+    if (should_warn_mlock_once()) print_mlock_warning();
+}
+
 namespace detail {
 
 // Best-effort page-lock. Returns true on success. Never throws.
@@ -103,12 +118,7 @@ public:
     SecureBuffer() noexcept
         : locked_(detail::mem_lock(bytes_.data(), bytes_.size()))
     {
-        if (!locked_ && should_warn_mlock_once()) {
-            // Non-fatal: we still wipe on destruction. Warn once process-wide.
-            std::println(stderr,
-                "[SecureMem] WARNING: mlock failed — decoded data may be swappable ({}).",
-                mlock_fail_hint());
-        }
+        if (!locked_) warn_mlock_failure_once();
     }
 
     ~SecureBuffer()
@@ -211,11 +221,7 @@ public:
         }
         size_   = n;
         locked_ = detail::mem_lock(data_.get(), size_);
-        if (!locked_ && should_warn_mlock_once()) {
-            std::println(stderr,
-                "[SecureMem] WARNING: mlock failed — decoded data may be swappable ({}).",
-                mlock_fail_hint());
-        }
+        if (!locked_) warn_mlock_failure_once();
         return true;
     }
 
