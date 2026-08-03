@@ -162,6 +162,20 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `VaultSearch::images_with_tag`. Tab -> galleries face; Enter opens a collection viewer over
   the tagged set (`NavKind::ToTagViewer`; `App::to_tag_viewer` mirrors to_favorite_viewer);
   `go_back()` -> tag overview. No favorite badge.
+- `duplicates_screen.*` (Phase 61) — `NavKind::ToDuplicates`, opened via **`Ctrl+D`** on the
+  gallery grid (exclusive op gated on `queue_.busy()` like compact; F1 "Vault tools" group
+  documents `Shift+C` + `Ctrl+D`). `State{Choose,Scanning,Review,Done}`: Choose is the mode
+  chooser as the screen's initial STATE (exact / exact + visually similar — not a modal
+  dialog class); Scanning polls the `DupScanJob` with progress + graceful Esc-cancel; Review
+  lists groups largest-reclaimable-first as side-by-side member tiles (thumb/poster, name,
+  parent path, size, resolution) with KEEP/REMOVE badges — `Left/Right` member focus,
+  `Up/Down` group focus, `Space` toggle, `A` keep only the focused member, `Enter`
+  full-screen inspect of the decoded ORIGINAL (texture key derived from chunk/poster offset —
+  never colliding; empty payloads guarded), `Esc` prompts if unapplied REMOVE marks exist.
+  Apply: `Ctrl+Enter` → default-cancel confirm (count + total size) → ONE main-thread
+  `vault::remove_media_batch` call → Done state reports the result; grid refreshes via
+  `on_vault_changed()`. `blocks_idle_lock()` true while scanning or unapplied marks exist.
+  The all-REMOVE group invariant is enforced in `dup_model` (warning render + apply refused).
 
 ## Image / video viewer
 - `image_viewer.*`, `widgets.*` — viewer has Fit + FillScroll + Slideshow modes, bottom/left
@@ -353,6 +367,18 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   GalleryGrid owns one for export+delete; TransferDialog owns one (Running stage). ImageViewer's
   single-image export stays synchronous. The GalleryGrid gate
   (vault_busy/poll_file_job/handle_job_input) is free friends. Unit-tested.
+- `dup_scan.*` (Phase 61) — duplicate-scan worker. `ui::collect_scan_items(vault)` runs on the
+  MAIN thread (the index tree is main-thread-only) and snapshots every media node: path, type,
+  byte size, thumb/poster span. `DupScanJob` then runs on a bg thread over the snapshot and
+  only ever calls the thread-safe `vault::read_thumb_span` (generic chunk-span decryptor —
+  data chunks, video chunks, thumbnails alike) — NEVER the tree. Exact pass (images+videos):
+  group by (type,size) from metadata, then incremental `crypto_blake2b_*` over the full
+  plaintext decrypted into mlock'd `SecureBytes`, wiped immediately — only size-colliding
+  files are ever decrypted. Optional perceptual pass (images only, not already
+  exact-grouped): dHash over the stored thumbnail. A `Locked` read result ends the scan
+  gracefully (manual lock cancels the worker before key wipe); undecodable files are skipped
+  and counted; cancel flag checked between items; progress/results polled from the main
+  thread. Hashes are session-lifetime heap data — never persisted, never logged.
 
 ## Import planning & archive reading
 - `folder_scan.*` (Phase 51) — `scan_folder(root) -> vector<ZipEntry>` via
@@ -508,6 +534,12 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `album_rebind.{h,cpp}` — Viewer album binding logic: when the vault tree changes, remember the current item's path, re-list the album, then look up the remembered path. Returns whether the item survives and whether to preserve zoom/pan/playback state. Pure, unit-tested. Used by `ImageViewer::on_vault_changed`.
 
 ## Pure view / sort / model helpers (SDL-free unless noted, all unit-tested)
+- `dup_model.*` (Phase 61) — pure duplicate-finder model: `dhash64` (RGB buffer → 9×8
+  grayscale cells → 64-bit difference hash), `hamming64`, `cluster_similar` (union-find at
+  Hamming ≤ `DUP_SIMILAR_MAX_BITS` = 5); `DupGroup` (Identical / Similar-N-bits, sorted
+  largest-reclaimable-bytes first) + `DupReview` KEEP/REMOVE marking state with the
+  at-least-one-KEEP-per-group invariant (`A` = keep only focused; apply refused while any
+  group is all-REMOVE). Listed explicitly in osv_tests' premake5.lua files{}.
 - `child_counts.*` (Phase 51) — `direct_child_counts(node) -> SubtreeCounts` (galleries, images, videos counted
   separately, reusing the existing SubtreeCounts struct); `format_tile_counts(counts) -> string` — plural-aware
   formatting ("3 galleries · 12 items" / "1 gallery · 1 item" / "12 items" / "empty"), collapsing images+videos
