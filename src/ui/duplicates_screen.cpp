@@ -38,6 +38,34 @@ constexpr uint64_t INSPECT_KEY_BIT = uint64_t{1} << 63;
     return ui::format_size(bytes);
 }
 
+// Shared confirm-dialog chrome: full-window veil, centered panel, then the
+// title / body / hint lines centered at fixed offsets.
+void draw_confirm_box(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
+                      const std::string& title, const std::string& body,
+                      const std::string& hint)
+{
+    using namespace gfx::theme;
+
+    // Veil the whole window
+    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
+
+    const float pw = 560;
+    const float ph = 230;
+    const float px = (W - pw) / 2;
+    const float py = (H - ph) / 2;
+    r.draw_round_rect({px, py, pw, ph}, 8, SURFACE);
+    r.draw_round_rect({px, py, pw, ph}, 8, BORDER, /*filled*/ false);
+
+    auto centered = [&](const std::string& s, float y, gfx::Color c) {
+        const auto tw = static_cast<float>(font.measure(s));
+        r.draw_text(font, px + (pw - tw) / 2, y, s, c);
+    };
+
+    centered(title, py + 28, TEXT);
+    if (!body.empty()) centered(body, py + 58, TEXT_DIM);
+    centered(hint, py + ph - 50, TEXT_DIM);
+}
+
 }
 
 void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, DuplicatesScreen& screen,
@@ -153,83 +181,29 @@ void draw_group_row(gfx::Renderer& r, gfx::FontAtlas& font, DuplicatesScreen& sc
 // Draw confirm-apply overlay
 void draw_confirm_apply_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen)
 {
-    using namespace gfx::theme;
-
-    // Veil the whole window
-    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
-
-    const float pw = 560;
-    const float ph = 230;
-    const float px = (W - pw) / 2;
-    const float py = (H - ph) / 2;
-    r.draw_round_rect({px, py, pw, ph}, 8, SURFACE);
-    r.draw_round_rect({px, py, pw, ph}, 8, BORDER, /*filled*/ false);
-
-    auto centered = [&](const std::string& s, float y, gfx::Color c) {
-        const auto tw = static_cast<float>(font.measure(s));
-        r.draw_text(font, px + (pw - tw) / 2, y, s, c);
-    };
-
     const std::string title = std::format("Delete {} files ({})?",
         screen.review_.marked_count(), fmt_bytes(screen.review_.marked_bytes()));
-    centered(title, py + 28, TEXT);
-    centered("This cannot be undone.", py + 58, TEXT_DIM);
-
-    centered("[Enter/Y] delete · [Esc/N] cancel", py + ph - 50, TEXT_DIM);
+    const std::string body = "This cannot be undone.";
+    const std::string hint = "[Enter/Y] delete · [Esc/N] cancel";
+    draw_confirm_box(r, font, W, H, title, body, hint);
 }
 
 // Draw confirm-leave overlay
 void draw_confirm_leave_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen)
 {
-    using namespace gfx::theme;
-
-    // Veil the whole window
-    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
-
-    const float pw = 560;
-    const float ph = 230;
-    const float px = (W - pw) / 2;
-    const float py = (H - ph) / 2;
-    r.draw_round_rect({px, py, pw, ph}, 8, SURFACE);
-    r.draw_round_rect({px, py, pw, ph}, 8, BORDER, /*filled*/ false);
-
-    auto centered = [&](const std::string& s, float y, gfx::Color c) {
-        const auto tw = static_cast<float>(font.measure(s));
-        r.draw_text(font, px + (pw - tw) / 2, y, s, c);
-    };
-
     const std::string title = std::format("Discard {} unapplied marks?", screen.review_.marked_count());
-    centered(title, py + 28, TEXT);
-
-    centered("[Enter/Y] leave · [Esc/N] stay", py + ph - 50, TEXT_DIM);
+    const std::string body;
+    const std::string hint = "[Enter/Y] leave · [Esc/N] stay";
+    draw_confirm_box(r, font, W, H, title, body, hint);
 }
 
 // Draw confirm-skip overlay
 void draw_confirm_skip_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen)
 {
-    using namespace gfx::theme;
-
-    // Veil the whole window
-    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
-
-    const float pw = 560;
-    const float ph = 230;
-    const float px = (W - pw) / 2;
-    const float py = (H - ph) / 2;
-    r.draw_round_rect({px, py, pw, ph}, 8, SURFACE);
-    r.draw_round_rect({px, py, pw, ph}, 8, BORDER, /*filled*/ false);
-
-    auto centered = [&](const std::string& s, float y, gfx::Color c) {
-        const auto tw = static_cast<float>(font.measure(s));
-        r.draw_text(font, px + (pw - tw) / 2, y, s, c);
-    };
-
     const std::string title = std::format("Skip wave {} of {}?", screen.review_.wave_index() + 1, screen.review_.wave_count());
-    centered(title, py + 28, TEXT);
-    centered(std::format("Discard {} touched marks? Files stay in the vault.", screen.review_.marked_count()),
-             py + 58, TEXT_DIM);
-
-    centered("[Enter/Y] skip wave · [Esc/N] stay", py + ph - 50, TEXT_DIM);
+    const std::string body = std::format("Discard {} touched marks? Files stay in the vault.", screen.review_.marked_count());
+    const std::string hint = "[Enter/Y] skip wave · [Esc/N] stay";
+    draw_confirm_box(r, font, W, H, title, body, hint);
 }
 
 // Draw inspect overlay
@@ -445,9 +419,9 @@ void DuplicatesScreen::apply_marked_batch()
         status_ = "Delete failed — vault unchanged on disk";
         return;
     }
-    applied_files_ += stats.removed;
-    applied_bytes_ += doomed_bytes;
-    ++waves_applied_;
+    totals_.applied_files += stats.removed;
+    totals_.applied_bytes += doomed_bytes;
+    ++totals_.waves_applied;
     review_.finish_wave();
     // auto_reclaim_space may have relocated (Windows compact) or freed-for-
     // reuse the surviving chunks: re-read every remaining span from the index,
@@ -460,7 +434,7 @@ void DuplicatesScreen::apply_marked_batch()
 
 void DuplicatesScreen::skip_wave()
 {
-    ++waves_skipped_;
+    ++totals_.waves_skipped;
     review_.finish_wave();
     advance_after_wave();
 }
@@ -473,7 +447,7 @@ void DuplicatesScreen::advance_after_wave()
     scroll_       = 0.0f;
     status_.clear();
     if (review_.groups().empty()) {
-        done_summary_ = wave_summary();
+        totals_.done_summary = wave_summary();
         state_ = State::Done;
     }
     mark_dirty();
@@ -481,13 +455,13 @@ void DuplicatesScreen::advance_after_wave()
 
 std::string DuplicatesScreen::wave_summary() const
 {
-    if (applied_files_ == 0) return "No duplicates removed";
+    if (totals_.applied_files == 0) return "No duplicates removed";
     std::string s = std::format("Removed {} files ({}) in {} wave{}",
-                                applied_files_, fmt_bytes(applied_bytes_),
-                                waves_applied_, waves_applied_ == 1 ? "" : "s");
-    if (waves_skipped_ > 0)
-        s += std::format(" · {} wave{} skipped", waves_skipped_,
-                         waves_skipped_ == 1 ? "" : "s");
+                                totals_.applied_files, fmt_bytes(totals_.applied_bytes),
+                                totals_.waves_applied, totals_.waves_applied == 1 ? "" : "s");
+    if (totals_.waves_skipped > 0)
+        s += std::format(" · {} wave{} skipped", totals_.waves_skipped,
+                         totals_.waves_skipped == 1 ? "" : "s");
     return s;
 }
 
@@ -592,7 +566,7 @@ void DuplicatesScreen::finish_scan(DupScanOutcome outcome)
     scroll_ = 0.0f;
     status_.clear();
     if (review_.groups().empty() && skipped_ == 0) {
-        done_summary_ = "No duplicates found";
+        totals_.done_summary = "No duplicates found";
         state_ = State::Done;
     } else {
         state_ = State::Review;
@@ -646,7 +620,7 @@ void DuplicatesScreen::handle_key(const SDL_KeyboardEvent& key)
                     focus_member_ = 0;
                     scroll_ = 0.0f;
                     status_.clear();
-                    done_summary_.clear();
+                    totals_.done_summary.clear();
                     mark_dirty();
                     break;
                 case SDLK_ESCAPE:
@@ -671,10 +645,10 @@ void DuplicatesScreen::handle_event(const SDL_Event& e)
 
 void DuplicatesScreen::start_scan(bool perceptual)
 {
-    applied_files_ = 0;
-    applied_bytes_ = 0;
-    waves_applied_ = 0;
-    waves_skipped_ = 0;
+    totals_.applied_files = 0;
+    totals_.applied_bytes = 0;
+    totals_.waves_applied = 0;
+    totals_.waves_skipped = 0;
     stale_ = false;      // a fresh scan supersedes any stale results
     auto items = collect_scan_items(vault_);
     job_.start(vault_, std::move(items), perceptual);
@@ -719,7 +693,7 @@ void DuplicatesScreen::render(gfx::Renderer& r)
         case Scanning: render_scanning(r, W, H); break;
         case Review:   render_review(r, W, H);   break;
         case Done:
-            r.draw_text(font_, OX, OY, done_summary_, TEXT_DIM);
+            r.draw_text(font_, OX, OY, totals_.done_summary, TEXT_DIM);
             r.draw_text(font_, OX, H - 40, "[Enter] rescan · [Esc] back", TEXT_FAINT);
             break;
     }

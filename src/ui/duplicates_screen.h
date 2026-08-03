@@ -92,6 +92,15 @@ private:
         std::optional<image::ImageData> image;  // decoded, awaiting GPU upload
         SDL_Texture* tex = nullptr;    // owned; destroyed by close_inspect()
     };
+    // Totals accumulated across wave applies/skips (Phase 64); reset by
+    // start_scan(). summary is built by wave_summary() for the Done state.
+    struct WaveTotals {
+        size_t      applied_files = 0;
+        uint64_t    applied_bytes = 0;
+        size_t      waves_applied = 0;
+        size_t      waves_skipped = 0;
+        std::string done_summary;
+    };
 
     void handle_key(const SDL_KeyboardEvent& key);
     void start_scan(bool perceptual);
@@ -132,13 +141,7 @@ private:
     ConfirmState confirm_;
     InspectState inspect_;
     std::string status_;                // one-line footer notice (apply refusals etc.)
-    std::string done_summary_;
-
-    // Accumulated across wave applies (Phase 64); reset by start_scan().
-    size_t   applied_files_ = 0;
-    uint64_t applied_bytes_ = 0;
-    size_t   waves_applied_ = 0;
-    size_t   waves_skipped_ = 0;
+    WaveTotals totals_;
 
     // Tile pipeline (favorites_images.h pattern).
     image::DecodeWorker          worker_{image::decode_wake_event()};
