@@ -159,4 +159,29 @@ std::vector<std::string> DupReview::marked_paths() const
     return out;
 }
 
+bool duration_close(uint64_t a_us, uint64_t b_us) noexcept
+{
+    const uint64_t hi = std::max(a_us, b_us);
+    const uint64_t lo = std::min(a_us, b_us);
+    const uint64_t tol = std::max<uint64_t>(
+        static_cast<uint64_t>(static_cast<double>(hi) * DUP_VID_DURATION_TOL),
+        DUP_VID_DURATION_ABS_US);
+    return hi - lo <= tol;
+}
+
+bool video_sig_match(const VideoSig& a, const VideoSig& b) noexcept
+{
+    const uint8_t common = a.frame_valid & b.frame_valid;
+    int shared = 0;
+    int matched = 0;
+    for (size_t i = 0; i < DUP_VID_FRAME_POSITIONS.size(); ++i) {
+        if (!(common & (1u << i))) continue;
+        ++shared;
+        if (hamming64(a.frame_hash[i], b.frame_hash[i]) <= DUP_VID_FRAME_MAX_BITS) ++matched;
+    }
+    if (shared >= DUP_VID_MIN_MATCHED) return matched >= DUP_VID_MIN_MATCHED;
+    return a.poster_ok && b.poster_ok &&
+           hamming64(a.poster_hash, b.poster_hash) <= DUP_VID_POSTER_MAX_BITS;
+}
+
 } // namespace ui

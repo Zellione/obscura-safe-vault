@@ -157,3 +157,60 @@ TEST(dup_review_keep_only)
     CHECK(!rev.groups()[0].members[0].keep);
     CHECK(rev.can_apply());
 }
+
+// ---- Phase 62: perceptual video duplicates — signature model ----
+
+TEST(duration_close_relative_and_absolute)
+{
+    // 2% of 100 s = 2 s
+    CHECK(ui::duration_close(100'000'000, 101'900'000));
+    CHECK(!ui::duration_close(100'000'000, 103'000'000));
+    // short clips use the 500 ms absolute floor (2% of 3 s is only 60 ms)
+    CHECK(ui::duration_close(3'000'000, 3'400'000));
+    CHECK(!ui::duration_close(3'000'000, 3'600'000));
+    CHECK(ui::duration_close(0, 0));
+}
+
+TEST(video_sig_match_frames_decide_when_available)
+{
+    ui::VideoSig a;
+    ui::VideoSig b;
+    a.frame_valid = b.frame_valid = 0b11111;
+    for (size_t i = 0; i < 5; ++i) {
+        a.frame_hash[i] = 0xF0F0F0F0F0F0F0F0ull;
+        b.frame_hash[i] = a.frame_hash[i];
+    }
+    CHECK(ui::video_sig_match(a, b));
+    // 2 of 5 positions far apart -> only 3 matched < DUP_VID_MIN_MATCHED
+    b.frame_hash[0] = ~a.frame_hash[0];
+    b.frame_hash[1] = ~a.frame_hash[1];
+    CHECK(!ui::video_sig_match(a, b));
+    // 1 of 5 far apart -> 4 matched, still a match
+    b.frame_hash[1] = a.frame_hash[1];
+    CHECK(ui::video_sig_match(a, b));
+    // frames present and agreeing -> a disagreeing poster must NOT veto
+    a.poster_ok = b.poster_ok = true;
+    a.poster_hash = 0;
+    b.poster_hash = ~0ull;
+    b.frame_hash[0] = a.frame_hash[0];
+    CHECK(ui::video_sig_match(a, b));
+}
+
+TEST(video_sig_match_poster_fallback_without_frames)
+{
+    ui::VideoSig a;                       // frame_valid == 0 (non-FFmpeg build)
+    ui::VideoSig b;
+    a.poster_ok = b.poster_ok = true;
+    a.poster_hash = 0xFFFF0000FFFF0000ull;
+    b.poster_hash = a.poster_hash ^ 0x3FFull;   // 10 bits apart == threshold
+    CHECK(ui::video_sig_match(a, b));
+    b.poster_hash = a.poster_hash ^ 0x7FFull;   // 11 bits apart
+    CHECK(!ui::video_sig_match(a, b));
+    b.poster_ok = false;                        // no poster either -> never match
+    CHECK(!ui::video_sig_match(a, b));
+    // frames on ONE side only (other failed every seek) -> poster fallback
+    a.frame_valid = 0b11111;
+    b.poster_ok = true;
+    b.poster_hash = a.poster_hash;
+    CHECK(ui::video_sig_match(a, b));
+}
