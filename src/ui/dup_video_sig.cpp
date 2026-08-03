@@ -191,9 +191,10 @@ bool frame_to_hash(SigCtx& c, uint64_t& out_hash)
     std::vector<uint8_t> rgb(static_cast<size_t>(HASH_SIDE) * HASH_SIDE * 3);
     std::array<uint8_t*, 1>  dst{rgb.data()};
     const std::array<int, 1> dst_stride{HASH_SIDE * 3};
-    const int scaled = sws_scale(c.sws, c.frame->data, c.frame->linesize, 0,
-                                 c.frame->height, dst.data(), dst_stride.data());
-    if (scaled <= 0) return false;
+    if (const int scaled = sws_scale(c.sws, c.frame->data, c.frame->linesize, 0,
+                                     c.frame->height, dst.data(), dst_stride.data());
+        scaled <= 0)
+        return false;
 
     out_hash = dhash64(std::span(rgb.data(), rgb.size()), HASH_SIDE, HASH_SIDE);
     return true;
