@@ -42,6 +42,16 @@ struct DupScanItem {
 // video in the whole vault, recursively.
 [[nodiscard]] std::vector<DupScanItem> collect_scan_items(const vault::Vault& v);
 
+// Post-apply re-resolution (Phase 64). remove_media_batch ends in
+// auto_reclaim_space(), which on Windows can compact() — relocating every
+// surviving chunk — so the remaining groups' spans must be re-read from the
+// index before the next wave renders or fetches anything. MAIN-THREAD ONLY
+// (walks the index tree). Members whose node_path no longer resolves to a
+// media node of the same type are dropped; groups shrinking below 2 members
+// are dropped (DupReview::refresh_members semantics). Returns the number of
+// dropped members.
+size_t refresh_review_members(const vault::Vault& v, DupReview& review);
+
 struct DupScanOutcome {
     std::vector<DupGroup> groups;
     size_t skipped   = 0;

@@ -283,3 +283,140 @@ TEST(cluster_video_sigs_duration_gate_blocks_lookalikes)
     const std::vector<uint64_t> dur{60'000'000, 90'000'000};    // durations differ
     CHECK(ui::cluster_video_sigs(sigs, dur).empty());
 }
+
+// --- wave window (Phase 64) -------------------------------------------------
+
+namespace {
+
+ui::DupGroup make_group(const std::string& prefix, size_t members, uint64_t bytes = 100)
+{
+    ui::DupGroup g;
+    g.kind = ui::DupGroup::Kind::Identical;
+    for (size_t i = 0; i < members; ++i) {
+        ui::DupMember m;
+        m.node_path = prefix + "/" + std::to_string(i);
+        m.name      = std::to_string(i);
+        m.bytes     = bytes;
+        g.members.push_back(std::move(m));
+    }
+    return g;
+}
+
+// n identical-reclaimable groups: the ctor's stable_sort keeps insertion
+// order, so group k's paths keep the "g<k>/" prefix.
+std::vector<ui::DupGroup> make_groups(size_t n, size_t members = 2)
+{
+    std::vector<ui::DupGroup> out;
+    for (size_t i = 0; i < n; ++i)
+        out.push_back(make_group("g" + std::to_string(i), members));
+    return out;
+}
+
+} // namespace
+
+TEST(dup_wave_partition_counts)
+{
+    CHECK_EQ(ui::DupReview{}.wave_count(), size_t{0});
+    CHECK_EQ(ui::DupReview{}.wave_size(),  size_t{0});
+    CHECK_EQ(ui::DupReview(make_groups(1)).wave_count(),  size_t{1});
+    CHECK_EQ(ui::DupReview(make_groups(20)).wave_count(), size_t{1});
+    CHECK_EQ(ui::DupReview(make_groups(21)).wave_count(), size_t{2});
+    CHECK_EQ(ui::DupReview(make_groups(45)).wave_count(), size_t{3});
+    CHECK_EQ(ui::DupReview(make_groups(45)).wave_size(),  size_t{20});
+    CHECK_EQ(ui::DupReview(make_groups(45)).wave_index(), size_t{0});
+}
+
+TEST(dup_wave_finish_advances_and_erases)
+{
+    ui::DupReview r(make_groups(45));
+    r.finish_wave();
+    CHECK_EQ(r.groups().size(), size_t{25});
+    CHECK_EQ(r.wave_index(), size_t{1});
+    CHECK_EQ(r.wave_count(), size_t{3});
+    CHECK_EQ(r.wave_size(),  size_t{20});
+    r.finish_wave();
+    CHECK_EQ(r.groups().size(), size_t{5});
+    CHECK_EQ(r.wave_size(),  size_t{5});
+    r.finish_wave();
+    CHECK(r.groups().empty());
+    CHECK_EQ(r.wave_index(), size_t{3});
+    CHECK_EQ(r.wave_count(), size_t{3});
+    r.finish_wave();                       // no-op on empty
+    CHECK_EQ(r.wave_index(), size_t{3});
+}
+
+TEST(dup_wave_scopes_marked_queries)
+{
+    ui::DupReview r(make_groups(25));      // default marks: 1 REMOVE per group
+    CHECK_EQ(r.marked_count(), size_t{20});
+    CHECK_EQ(r.marked_bytes(), uint64_t{20 * 100});
+    const auto paths = r.marked_paths();
+    REQUIRE(paths.size() == 20);
+    for (const auto& p : paths)            // nothing from groups 20..24
+        CHECK(p != "g20/1" && p != "g21/1" && p != "g22/1" && p != "g23/1" && p != "g24/1");
+    r.finish_wave();
+    CHECK_EQ(r.marked_count(), size_t{5});
+}
+
+TEST(dup_wave_touched_resets_on_finish)
+{
+    ui::DupReview r(make_groups(21));
+    CHECK(!r.touched());
+    CHECK(r.toggle(0, 1));                 // REMOVE -> KEEP, user-touched
+    CHECK(r.touched());
+    r.finish_wave();
+    CHECK(!r.touched());
+}
+
+TEST(dup_wave_marks_beyond_wave_are_unreachable)
+{
+    ui::DupReview r(make_groups(21));
+    CHECK(!r.toggle(20, 1));               // group 20 is in wave 2
+    r.keep_only(20, 1);                    // must be a no-op
+    CHECK(!r.touched());
+    CHECK(!r.groups()[20].members[1].keep);   // still the pre-applied default
+}
+
+TEST(dup_wave_can_apply_goes_false_when_empty)
+{
+    ui::DupReview r(make_groups(25));
+    CHECK(r.can_apply());
+    r.finish_wave();
+    r.finish_wave();
+    CHECK(!r.any_marked());
+    CHECK(!r.can_apply());
+}
+
+TEST(dup_refresh_drops_vanished_and_shrunken)
+{
+    std::vector<ui::DupGroup> gs{make_group("a", 3), make_group("b", 2)};
+    ui::DupReview r(std::move(gs));
+    r.refresh_members([](ui::DupMember& m) { return m.node_path != "b/0"; });
+    REQUIRE(r.groups().size() == 1);           // b fell below 2 members
+    CHECK_EQ(r.groups()[0].members.size(), size_t{3});
+    CHECK_EQ(r.groups()[0].members[0].node_path, std::string("a/0"));
+}
+
+TEST(dup_refresh_applies_field_updates)
+{
+    ui::DupReview r(std::vector<ui::DupGroup>{make_group("a", 2)});
+    r.refresh_members([](ui::DupMember& m) {
+        m.thumb_offset = 777;
+        m.data_spans   = {{123, 456}};
+        return true;
+    });
+    CHECK_EQ(r.groups()[0].members[0].thumb_offset, uint64_t{777});
+    CHECK_EQ(r.groups()[0].members[1].data_spans[0].first, uint64_t{123});
+}
+
+TEST(dup_refresh_reapplies_default_marks)
+{
+    ui::DupReview r(std::vector<ui::DupGroup>{make_group("a", 3)});
+    // Default marks: a/0 KEEP, a/1 + a/2 REMOVE. Drop the keeper: the new
+    // first member must become the keeper.
+    r.refresh_members([](ui::DupMember& m) { return m.node_path != "a/0"; });
+    REQUIRE(r.groups().size() == 1);
+    REQUIRE(r.groups()[0].members.size() == 2);
+    CHECK(r.groups()[0].members[0].keep);      // a/1, re-defaulted to KEEP
+    CHECK(!r.groups()[0].members[1].keep);     // a/2
+}

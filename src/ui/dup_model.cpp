@@ -102,7 +102,7 @@ const std::vector<DupGroup>& DupReview::groups() const noexcept { return groups_
 
 bool DupReview::toggle(size_t g, size_t m)
 {
-    if (g >= groups_.size() || m >= groups_[g].members.size()) return false;
+    if (g >= wave_size() || m >= groups_[g].members.size()) return false;
     DupMember& member = groups_[g].members[m];
     // Refuse to unmark the group's last keeper: at least one copy always
     // stays KEEP, so the all-REMOVE state is unreachable via toggling.
@@ -118,7 +118,7 @@ bool DupReview::toggle(size_t g, size_t m)
 
 void DupReview::keep_only(size_t g, size_t m)
 {
-    if (g >= groups_.size() || m >= groups_[g].members.size()) return;
+    if (g >= wave_size() || m >= groups_[g].members.size()) return;
     for (size_t i = 0; i < groups_[g].members.size(); ++i)
         groups_[g].members[i].keep = (i == m);
     touched_ = true;
@@ -133,8 +133,8 @@ bool DupReview::group_all_removed(size_t g) const
 
 bool DupReview::any_marked() const
 {
-    for (const DupGroup& g : groups_)
-        for (const DupMember& m : g.members)
+    for (size_t g = 0; g < wave_size(); ++g)
+        for (const DupMember& m : groups_[g].members)
             if (!m.keep) return true;
     return false;
 }
@@ -142,7 +142,7 @@ bool DupReview::any_marked() const
 bool DupReview::can_apply() const
 {
     if (!any_marked()) return false;
-    for (size_t g = 0; g < groups_.size(); ++g)
+    for (size_t g = 0; g < wave_size(); ++g)
         if (group_all_removed(g)) return false;
     return true;
 }
@@ -150,18 +150,17 @@ bool DupReview::can_apply() const
 size_t DupReview::marked_count() const
 {
     size_t n = 0;
-    for (const DupGroup& g : groups_)
-        for (const DupMember& m : g.members) {
+    for (size_t g = 0; g < wave_size(); ++g)
+        for (const DupMember& m : groups_[g].members)
             if (!m.keep) ++n;
-        }
     return n;
 }
 
 uint64_t DupReview::marked_bytes() const
 {
     uint64_t n = 0;
-    for (const DupGroup& g : groups_)
-        for (const DupMember& m : g.members)
+    for (size_t g = 0; g < wave_size(); ++g)
+        for (const DupMember& m : groups_[g].members)
             if (!m.keep) n += m.bytes;
     return n;
 }
@@ -169,10 +168,39 @@ uint64_t DupReview::marked_bytes() const
 std::vector<std::string> DupReview::marked_paths() const
 {
     std::vector<std::string> out;
-    for (const DupGroup& g : groups_)
-        for (const DupMember& m : g.members)
+    for (size_t g = 0; g < wave_size(); ++g)
+        for (const DupMember& m : groups_[g].members)
             if (!m.keep) out.push_back(m.node_path);
     return out;
+}
+
+size_t DupReview::wave_size() const noexcept
+{
+    return std::min(DUP_WAVE_GROUPS, groups_.size());
+}
+
+size_t DupReview::wave_count() const noexcept
+{
+    return waves_done_ + (groups_.size() + DUP_WAVE_GROUPS - 1) / DUP_WAVE_GROUPS;
+}
+
+void DupReview::finish_wave()
+{
+    if (groups_.empty()) return;
+    groups_.erase(groups_.begin(),
+                  groups_.begin() + static_cast<std::ptrdiff_t>(wave_size()));
+    ++waves_done_;
+    touched_ = false;
+}
+
+void DupReview::refresh_members(const std::function<bool(DupMember&)>& fn)
+{
+    for (DupGroup& g : groups_)
+        std::erase_if(g.members, [&fn](DupMember& m) { return !fn(m); });
+    std::erase_if(groups_, [](const DupGroup& g) { return g.members.size() < 2; });
+    for (DupGroup& g : groups_)
+        for (size_t i = 0; i < g.members.size(); ++i)
+            g.members[i].keep = (i == 0);
 }
 
 bool duration_close(uint64_t a_us, uint64_t b_us) noexcept

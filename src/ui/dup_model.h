@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <string>
 #include <vector>
@@ -15,6 +16,11 @@ namespace ui {
 // Perceptual-match threshold: max Hamming distance (bits of 64) between two
 // dHashes still considered "the same picture".
 inline constexpr int DUP_SIMILAR_MAX_BITS = 5;
+
+// Wave window (Phase 64): the review is resolved in waves of at most this
+// many groups; the current wave is always the FIRST wave_size() entries of
+// groups(). Marks beyond it are unreachable until finish_wave().
+inline constexpr size_t DUP_WAVE_GROUPS = 20;
 
 // 64-bit difference hash over 3-channel RGB row-major pixels: box-sample to a
 // 9x8 grayscale grid, then bit (y*8+x) = grid[y][x] < grid[y][x+1].
@@ -71,9 +77,26 @@ public:
     [[nodiscard]] size_t   marked_count() const;
     [[nodiscard]] uint64_t marked_bytes() const;
     [[nodiscard]] std::vector<std::string> marked_paths() const;
+
+    // ---- Wave window (Phase 64). Scoped queries: any_marked / can_apply /
+    // marked_* / toggle / keep_only all operate on the current wave only.
+    [[nodiscard]] size_t wave_size()  const noexcept;
+    [[nodiscard]] size_t wave_index() const noexcept { return waves_done_; }
+    [[nodiscard]] size_t wave_count() const noexcept;
+    // Complete the current wave (applied or skipped): erase its groups,
+    // count it finished, reset touched(). No-op when groups() is empty.
+    void finish_wave();
+
+    // Post-apply re-resolution over the remaining groups (Phase 64): fn
+    // returning false drops the member (its node vanished). Groups left with
+    // < 2 members are dropped; default marks are re-applied — call this only
+    // right after finish_wave(), when no remaining group carries user marks.
+    void refresh_members(const std::function<bool(DupMember&)>& fn);
+
 private:
     std::vector<DupGroup> groups_;
     bool                  touched_ = false;
+    size_t                waves_done_ = 0;
 };
 
 // ---- Phase 62: perceptual video duplicates ----

@@ -38,6 +38,7 @@ void draw_group_row(gfx::Renderer& r, gfx::FontAtlas& font, class DuplicatesScre
                     size_t group_idx, float y, const struct DupRowLayout& lay);
 void draw_confirm_apply_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const class DuplicatesScreen& screen);
 void draw_confirm_leave_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const class DuplicatesScreen& screen);
+void draw_confirm_skip_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const class DuplicatesScreen& screen);
 void draw_inspect_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, class DuplicatesScreen& screen);
 
 class DuplicatesScreen final : public Screen {
@@ -49,6 +50,7 @@ class DuplicatesScreen final : public Screen {
                                size_t group_idx, float y, const DupRowLayout& lay);
     friend void draw_confirm_apply_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen);
     friend void draw_confirm_leave_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen);
+    friend void draw_confirm_skip_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen);
     friend void draw_inspect_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, DuplicatesScreen& screen);
 
 public:
@@ -77,6 +79,7 @@ private:
     struct ConfirmState {
         bool apply = false;   // Ctrl+Enter pressed, awaiting Y/Enter
         bool leave = false;   // Esc pressed with pending marks
+        bool skip = false;    // N pressed with touched marks
     };
     // Full-screen inspect of the focused member's decoded original. The
     // texture is OWNED here, never stored in the shared thumbnail cache: a
@@ -89,6 +92,15 @@ private:
         std::optional<image::ImageData> image;  // decoded, awaiting GPU upload
         SDL_Texture* tex = nullptr;    // owned; destroyed by close_inspect()
     };
+    // Totals accumulated across wave applies/skips (Phase 64); reset by
+    // start_scan(). summary is built by wave_summary() for the Done state.
+    struct WaveTotals {
+        size_t      applied_files = 0;
+        uint64_t    applied_bytes = 0;
+        size_t      waves_applied = 0;
+        size_t      waves_skipped = 0;
+        std::string done_summary;
+    };
 
     void handle_key(const SDL_KeyboardEvent& key);
     void start_scan(bool perceptual);
@@ -96,6 +108,9 @@ private:
 
     // handle_review_key / update / render helpers (complexity kept per-piece).
     void apply_marked_batch();          // accepted confirm: one-commit delete
+    void skip_wave();                   // N (confirmed if touched): no changes
+    void advance_after_wave();          // reset focus/scroll; empty -> Done
+    [[nodiscard]] std::string wave_summary() const;
     void follow_focus(int delta);       // Up/Down group focus + scroll-follow
     void request_inspect();             // Enter: decode the focused original
     void close_inspect();               // destroy the owned texture, clear state
@@ -126,7 +141,7 @@ private:
     ConfirmState confirm_;
     InspectState inspect_;
     std::string status_;                // one-line footer notice (apply refusals etc.)
-    std::string done_summary_;
+    WaveTotals totals_;
 
     // Tile pipeline (favorites_images.h pattern).
     image::DecodeWorker          worker_{image::decode_wake_event()};

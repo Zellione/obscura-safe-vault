@@ -38,6 +38,34 @@ constexpr uint64_t INSPECT_KEY_BIT = uint64_t{1} << 63;
     return ui::format_size(bytes);
 }
 
+// Shared confirm-dialog chrome: full-window veil, centered panel, then the
+// title / body / hint lines centered at fixed offsets.
+void draw_confirm_box(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
+                      const std::string& title, const std::string& body,
+                      const std::string& hint)
+{
+    using namespace gfx::theme;
+
+    // Veil the whole window
+    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
+
+    const float pw = 560;
+    const float ph = 230;
+    const float px = (W - pw) / 2;
+    const float py = (H - ph) / 2;
+    r.draw_round_rect({px, py, pw, ph}, 8, SURFACE);
+    r.draw_round_rect({px, py, pw, ph}, 8, BORDER, /*filled*/ false);
+
+    auto centered = [&](const std::string& s, float y, gfx::Color c) {
+        const auto tw = static_cast<float>(font.measure(s));
+        r.draw_text(font, px + (pw - tw) / 2, y, s, c);
+    };
+
+    centered(title, py + 28, TEXT);
+    if (!body.empty()) centered(body, py + 58, TEXT_DIM);
+    centered(hint, py + ph - 50, TEXT_DIM);
+}
+
 }
 
 void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, DuplicatesScreen& screen,
@@ -153,55 +181,29 @@ void draw_group_row(gfx::Renderer& r, gfx::FontAtlas& font, DuplicatesScreen& sc
 // Draw confirm-apply overlay
 void draw_confirm_apply_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen)
 {
-    using namespace gfx::theme;
-
-    // Veil the whole window
-    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
-
-    const float pw = 560;
-    const float ph = 230;
-    const float px = (W - pw) / 2;
-    const float py = (H - ph) / 2;
-    r.draw_round_rect({px, py, pw, ph}, 8, SURFACE);
-    r.draw_round_rect({px, py, pw, ph}, 8, BORDER, /*filled*/ false);
-
-    auto centered = [&](const std::string& s, float y, gfx::Color c) {
-        const auto tw = static_cast<float>(font.measure(s));
-        r.draw_text(font, px + (pw - tw) / 2, y, s, c);
-    };
-
     const std::string title = std::format("Delete {} files ({})?",
         screen.review_.marked_count(), fmt_bytes(screen.review_.marked_bytes()));
-    centered(title, py + 28, TEXT);
-    centered("This cannot be undone.", py + 58, TEXT_DIM);
-
-    centered("[Enter/Y] delete · [Esc/N] cancel", py + ph - 50, TEXT_DIM);
+    const std::string body = "This cannot be undone.";
+    const std::string hint = "[Enter/Y] delete · [Esc/N] cancel";
+    draw_confirm_box(r, font, W, H, title, body, hint);
 }
 
 // Draw confirm-leave overlay
 void draw_confirm_leave_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen)
 {
-    using namespace gfx::theme;
-
-    // Veil the whole window
-    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
-
-    const float pw = 560;
-    const float ph = 230;
-    const float px = (W - pw) / 2;
-    const float py = (H - ph) / 2;
-    r.draw_round_rect({px, py, pw, ph}, 8, SURFACE);
-    r.draw_round_rect({px, py, pw, ph}, 8, BORDER, /*filled*/ false);
-
-    auto centered = [&](const std::string& s, float y, gfx::Color c) {
-        const auto tw = static_cast<float>(font.measure(s));
-        r.draw_text(font, px + (pw - tw) / 2, y, s, c);
-    };
-
     const std::string title = std::format("Discard {} unapplied marks?", screen.review_.marked_count());
-    centered(title, py + 28, TEXT);
+    const std::string body;
+    const std::string hint = "[Enter/Y] leave · [Esc/N] stay";
+    draw_confirm_box(r, font, W, H, title, body, hint);
+}
 
-    centered("[Enter/Y] leave · [Esc/N] stay", py + ph - 50, TEXT_DIM);
+// Draw confirm-skip overlay
+void draw_confirm_skip_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen)
+{
+    const std::string title = std::format("Skip wave {} of {}?", screen.review_.wave_index() + 1, screen.review_.wave_count());
+    const std::string body = std::format("Discard {} touched marks? Files stay in the vault.", screen.review_.marked_count());
+    const std::string hint = "[Enter/Y] skip wave · [Esc/N] stay";
+    draw_confirm_box(r, font, W, H, title, body, hint);
 }
 
 // Draw inspect overlay
@@ -296,6 +298,12 @@ bool consume_overlay_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
         screen.mark_dirty();
         return true;
     }
+    if (screen.confirm_.skip) {
+        screen.confirm_.skip = false;
+        if (accept) screen.skip_wave();
+        screen.mark_dirty();
+        return true;
+    }
     if (screen.inspect_.key.has_value()) {   // any key closes the inspect view
         screen.close_inspect();
         screen.mark_dirty();
@@ -366,6 +374,15 @@ void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
                 screen.leave();
             }
             break;
+        case SDLK_N:
+            if (screen.review_.touched() && screen.review_.any_marked()) {
+                screen.confirm_.skip = true;
+                screen.status_ = "Skip this wave? Touched marks will be discarded";
+            } else {
+                screen.skip_wave();
+            }
+            screen.mark_dirty();
+            break;
         default:
             break;
     }
@@ -395,22 +412,62 @@ bool read_inspect_payload(const vault::Vault& v, const DupMember& m, crypto::Sec
 
 void DuplicatesScreen::apply_marked_batch()
 {
-    const auto doomed = review_.marked_paths();
+    const auto     doomed       = review_.marked_paths();   // current wave only
+    const uint64_t doomed_bytes = review_.marked_bytes();
     vault::RemoveBatchStats stats;
     if (vault::remove_media_batch(vault_, doomed, &stats) != vault::VaultResult::Ok) {
         status_ = "Delete failed — vault unchanged on disk";
         return;
     }
-    done_summary_ = std::format("Removed {} files ({}){}",
-        stats.removed,
-        fmt_bytes(review_.marked_bytes()),
-        stats.missing ? std::format(" — {} already gone", stats.missing) : "");
-    state_ = State::Done;
+    totals_.applied_files += stats.removed;
+    totals_.applied_bytes += doomed_bytes;
+    ++totals_.waves_applied;
+    review_.finish_wave();
+    // auto_reclaim_space may have relocated (Windows compact) or freed-for-
+    // reuse the surviving chunks: re-read every remaining span from the index,
+    // and drop the offset-keyed texture/failure memos before anything fetches.
+    refresh_review_members(vault_, review_);
+    failed_.clear();
+    cache_.clear();
+    advance_after_wave();
+}
+
+void DuplicatesScreen::skip_wave()
+{
+    ++totals_.waves_skipped;
+    review_.finish_wave();
+    advance_after_wave();
+}
+
+void DuplicatesScreen::advance_after_wave()
+{
+    close_inspect();
+    focus_group_  = 0;
+    focus_member_ = 0;
+    scroll_       = 0.0f;
+    status_.clear();
+    if (review_.groups().empty()) {
+        totals_.done_summary = wave_summary();
+        state_ = State::Done;
+    }
+    mark_dirty();
+}
+
+std::string DuplicatesScreen::wave_summary() const
+{
+    if (totals_.applied_files == 0) return "No duplicates removed";
+    std::string s = std::format("Removed {} files ({}) in {} wave{}",
+                                totals_.applied_files, fmt_bytes(totals_.applied_bytes),
+                                totals_.waves_applied, totals_.waves_applied == 1 ? "" : "s");
+    if (totals_.waves_skipped > 0)
+        s += std::format(" · {} wave{} skipped", totals_.waves_skipped,
+                         totals_.waves_skipped == 1 ? "" : "s");
+    return s;
 }
 
 void DuplicatesScreen::follow_focus(int delta)
 {
-    const size_t last = review_.groups().size() - 1;
+    const size_t last = review_.wave_size() - 1;
     if (delta < 0 && focus_group_ > 0) --focus_group_;
     if (delta > 0 && focus_group_ < last) ++focus_group_;
     focus_member_ = 0;
@@ -509,7 +566,7 @@ void DuplicatesScreen::finish_scan(DupScanOutcome outcome)
     scroll_ = 0.0f;
     status_.clear();
     if (review_.groups().empty() && skipped_ == 0) {
-        done_summary_ = "No duplicates found";
+        totals_.done_summary = "No duplicates found";
         state_ = State::Done;
     } else {
         state_ = State::Review;
@@ -563,7 +620,7 @@ void DuplicatesScreen::handle_key(const SDL_KeyboardEvent& key)
                     focus_member_ = 0;
                     scroll_ = 0.0f;
                     status_.clear();
-                    done_summary_.clear();
+                    totals_.done_summary.clear();
                     mark_dirty();
                     break;
                 case SDLK_ESCAPE:
@@ -588,6 +645,11 @@ void DuplicatesScreen::handle_event(const SDL_Event& e)
 
 void DuplicatesScreen::start_scan(bool perceptual)
 {
+    totals_.applied_files = 0;
+    totals_.applied_bytes = 0;
+    totals_.waves_applied = 0;
+    totals_.waves_skipped = 0;
+    stale_ = false;      // a fresh scan supersedes any stale results
     auto items = collect_scan_items(vault_);
     job_.start(vault_, std::move(items), perceptual);
     state_ = State::Scanning;
@@ -631,7 +693,7 @@ void DuplicatesScreen::render(gfx::Renderer& r)
         case Scanning: render_scanning(r, W, H); break;
         case Review:   render_review(r, W, H);   break;
         case Done:
-            r.draw_text(font_, OX, OY, done_summary_, TEXT_DIM);
+            r.draw_text(font_, OX, OY, totals_.done_summary, TEXT_DIM);
             r.draw_text(font_, OX, H - 40, "[Enter] rescan · [Esc] back", TEXT_FAINT);
             break;
     }
@@ -642,6 +704,8 @@ void DuplicatesScreen::render(gfx::Renderer& r)
             draw_confirm_apply_overlay(r, font_, W, H, *this);
         } else if (confirm_.leave) {
             draw_confirm_leave_overlay(r, font_, W, H, *this);
+        } else if (confirm_.skip) {
+            draw_confirm_skip_overlay(r, font_, W, H, *this);
         } else if (inspect_.key.has_value()) {
             draw_inspect_overlay(r, font_, W, H, *this);
         }
@@ -708,27 +772,48 @@ void DuplicatesScreen::render_review(gfx::Renderer& r, float W, float H)
     // afterwards (reserve, never overlay — same rule as the gallery grid).
     // Row height is member-count independent, so one group's layout differs
     // from the next only in tile width/centering.
+
+    // Viewport culling: row_h is member-count independent (dup_layout.h), so
+    // the visible index range is direct arithmetic. Off-screen rows are never
+    // drawn — and since draw_member_tile is what submits thumbnail fetches,
+    // they cost no decode work either (the 8 GB review-churn fix).
     const float tile_h = dup_tile_height(H);
-    float group_y = OY;
-    for (size_t g = 0; g < review_.groups().size(); ++g) {
+    const float row_h =
+        dup_row_layout(OX, W - 2 * OX, tile_h, font_.pixel_height(), 1).row_h;
+    const float view_h = H - dup_footer_height(font_.pixel_height()) - OY;
+    const size_t n = review_.wave_size();
+    const auto first = std::min(n, static_cast<size_t>(std::max(0.0f, scroll_ / row_h)));
+    const auto last  = std::min(n, static_cast<size_t>((scroll_ + view_h) / row_h) + 1);
+    for (size_t g = first; g < last; ++g) {
         const auto lay = dup_row_layout(OX, W - 2 * OX, tile_h, font_.pixel_height(),
                                         review_.groups()[g].members.size());
-        draw_group_row(r, font_, *this, g, group_y - scroll_, lay);
-        group_y += lay.row_h;
+        draw_group_row(r, font_, *this, g, OY + static_cast<float>(g) * row_h - scroll_, lay);
     }
+
+    // Prune queued decodes that scrolled out of view (image_viewer.cpp:850
+    // pattern); keep the inspect request alive.
+    std::vector<uint64_t> keep;
+    for (size_t g = first; g < last; ++g)
+        for (const DupMember& m : review_.groups()[g].members)
+            if (m.thumb_length > 0) keep.push_back(m.thumb_offset);
+    if (inspect_.key.has_value()) keep.push_back(*inspect_.key);
+    worker_.retain(keep);
 
     // Opaque header band: title + skipped notice + stale warning.
     draw_chrome_band(r, {0, 0, W, OY - 8}, BG, /*rule_at_bottom*/ true);
 
-    size_t total_files = 0;
-    uint64_t total_reclaimable = 0;
-    for (const auto& g : review_.groups()) {
-        total_files += g.members.size();
-        total_reclaimable += group_reclaimable(g);
+    size_t   wave_files       = 0;
+    uint64_t wave_reclaimable = 0;
+    for (size_t g = 0; g < review_.wave_size(); ++g) {
+        wave_files       += review_.groups()[g].members.size();
+        wave_reclaimable += group_reclaimable(review_.groups()[g]);
     }
-    const std::string header = std::format("Duplicates — {} groups · {} files · {} reclaimable",
-                                           review_.groups().size(), total_files,
-                                           fmt_bytes(total_reclaimable));
+    const size_t later = review_.groups().size() - review_.wave_size();
+    const std::string header = std::format(
+        "Duplicates — wave {}/{} · {} groups · {} files · {} reclaimable{}",
+        review_.wave_index() + 1, review_.wave_count(), review_.wave_size(),
+        wave_files, fmt_bytes(wave_reclaimable),
+        later > 0 ? std::format(" · {} groups in later waves", later) : "");
     r.draw_text(font_, OX, 40, header, TEXT_DIM);
 
     if (skipped_ > 0) {
@@ -758,7 +843,8 @@ void DuplicatesScreen::render_review(gfx::Renderer& r, float W, float H)
     r.draw_text(font_, OX, footer_y + pitch, marked_text, TEXT_DIM);
 
     r.draw_text(font_, OX, footer_y + pitch * 2,
-                "[Space] keep/remove  [A] keep only  [Ctrl+Enter] apply  [Esc] back", TEXT_FAINT);
+                "[Space] keep/remove  [A] keep only  [Ctrl+Enter] apply wave  [N] skip wave  [Esc] back",
+                TEXT_FAINT);
 }
 
 std::vector<HelpGroup> DuplicatesScreen::help_groups() const
@@ -788,7 +874,8 @@ std::vector<HelpGroup> DuplicatesScreen::help_groups() const
                     {"Space", "Toggle keep/remove"},
                     {"A", "Keep only this member"},
                     {"Enter", "Inspect full original"},
-                    {"Ctrl+Enter", "Apply marks"},
+                    {"Ctrl+Enter", "Apply this wave's marks"},
+                    {"N", "Skip this wave (no changes)"},
                     {"Esc", "Back (or confirm leave if marks)"},
                 }},
             };
