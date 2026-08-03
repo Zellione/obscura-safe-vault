@@ -57,6 +57,32 @@ build/bin/Debug/osv
 build/bin/Release/osv
 ```
 
+#### Locked-memory limit (`RLIMIT_MEMLOCK`)
+
+Decrypted data is held in `mlock`'d buffers so it can never be swapped to
+disk. Locking is **best-effort**: if the OS refuses, the app prints one
+warning per run —
+
+```
+[SecureMem] WARNING: mlock failed (RLIMIT_MEMLOCK too low?) — decoded data may be swappable.
+```
+
+— and keeps working; buffers are still wiped on free, but plaintext could
+theoretically reach swap under memory pressure. The common cause is a low
+default limit (often 8 MiB — check with `ulimit -l`): decoding a large image,
+or the duplicate finder hashing a large original, needs to lock more than
+that in one buffer.
+
+To raise the limit:
+
+```bash
+ulimit -l unlimited      # this shell only, then launch osv from it
+```
+
+For desktop launches, raise it session-wide, e.g. on systemd distros set
+`DefaultLimitMEMLOCK=2G` in `/etc/systemd/user.conf` (or a
+`LimitMEMLOCK=` drop-in for your compositor's service) and log out/in.
+
 ---
 
 ## Testing
