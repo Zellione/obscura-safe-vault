@@ -11,12 +11,6 @@
 
 namespace fs = std::filesystem;
 
-static std::vector<uint8_t> load_fixture(const char* name)
-{
-    std::ifstream f(fs::path(OSV_MEDIA_FIXTURE_DIR) / name, std::ios::binary);
-    return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
-}
-
 // Byte reader over an in-memory buffer, matching the DupStreamRead contract.
 static ui::DupStreamRead mem_reader(const std::vector<uint8_t>& buf)
 {
@@ -37,6 +31,12 @@ TEST(video_frame_sig_garbage_input_fails_cleanly)
 }
 
 #ifdef OSV_VENDORED_AV
+
+static std::vector<uint8_t> load_fixture(const char* name)
+{
+    std::ifstream f(fs::path(OSV_MEDIA_FIXTURE_DIR) / name, std::ios::binary);
+    return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+}
 
 TEST(video_frame_sig_same_content_two_codecs_match)
 {
