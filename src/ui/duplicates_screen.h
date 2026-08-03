@@ -27,25 +27,27 @@ namespace vault { class Vault; }
 
 namespace ui {
 
-// Forward declarations for friend functions
+// Forward declarations for friend functions. The tile/row/inspect painters take
+// a non-const screen: drawing a missing thumbnail submits a decode fetch
+// (favorites_images pattern — the pipeline members are ordinary, not mutable).
 void handle_review_key(class DuplicatesScreen& screen, const SDL_KeyboardEvent& key);
-void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, const class DuplicatesScreen& screen,
+void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, class DuplicatesScreen& screen,
                       const DupMember& member, bool focused, const SDL_FRect& tile_rect);
-void draw_group_row(gfx::Renderer& r, gfx::FontAtlas& font, const class DuplicatesScreen& screen,
+void draw_group_row(gfx::Renderer& r, gfx::FontAtlas& font, class DuplicatesScreen& screen,
                     size_t group_idx, float y, const struct DupRowLayout& lay);
 void draw_confirm_apply_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const class DuplicatesScreen& screen);
 void draw_confirm_leave_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const class DuplicatesScreen& screen);
-void draw_inspect_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const class DuplicatesScreen& screen);
+void draw_inspect_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, class DuplicatesScreen& screen);
 
 class DuplicatesScreen final : public Screen {
     friend void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key);
-    friend void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, const DuplicatesScreen& screen,
+    friend void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, DuplicatesScreen& screen,
                                  const DupMember& member, bool focused, const SDL_FRect& tile_rect);
-    friend void draw_group_row(gfx::Renderer& r, gfx::FontAtlas& font, const DuplicatesScreen& screen,
+    friend void draw_group_row(gfx::Renderer& r, gfx::FontAtlas& font, DuplicatesScreen& screen,
                                size_t group_idx, float y, const DupRowLayout& lay);
     friend void draw_confirm_apply_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen);
     friend void draw_confirm_leave_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen);
-    friend void draw_inspect_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen);
+    friend void draw_inspect_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, DuplicatesScreen& screen);
 
 public:
     enum class State : uint8_t { Choose, Scanning, Review, Done };
@@ -66,9 +68,30 @@ public:
     void on_vault_changed() override;
 
 private:
+    // Pending-confirmation overlays (each owns every key while up).
+    struct ConfirmState {
+        bool apply = false;   // Ctrl+Enter pressed, awaiting Y/Enter
+        bool leave = false;   // Esc pressed with pending marks
+    };
+    // Full-screen inspect of the focused member's decoded original.
+    struct InspectState {
+        std::optional<uint64_t> key;   // inspect texture key (bit 63 set)
+        bool decoding = false;         // waiting for worker to decode
+    };
+
     void handle_key(const SDL_KeyboardEvent& key);
     void start_scan(bool perceptual);
     void leave();                       // Esc: back nav (confirm if marks pending)
+
+    // handle_review_key / update / render helpers (complexity kept per-piece).
+    void apply_marked_batch();          // accepted confirm: one-commit delete
+    void follow_focus(int delta);       // Up/Down group focus + scroll-follow
+    void request_inspect();             // Enter: decode the focused original
+    void pump_decode_results();         // drain worker results (tiles + inspect)
+    void finish_scan(DupScanOutcome outcome);
+    void render_choose(gfx::Renderer& r, float W, float H);
+    void render_scanning(gfx::Renderer& r, float W, float H);
+    void render_review(gfx::Renderer& r, float W, float H);
 
     gfx::Window&       win_;
     gfx::FontAtlas&    font_;
@@ -87,16 +110,14 @@ private:
     size_t focus_group_  = 0;
     size_t focus_member_ = 0;
     float  scroll_       = 0.0f;
-    bool   confirm_apply_ = false;      // Ctrl+Enter pressed, awaiting Y/Enter
-    bool   confirm_leave_ = false;      // Esc pressed with pending marks
+    ConfirmState confirm_;
+    InspectState inspect_;
     std::string status_;                // one-line footer notice (apply refusals etc.)
     std::string done_summary_;
-    std::optional<uint64_t> inspect_;   // key for inspect texture (bit 63 set)
-    bool   inspect_decoding_ = false;   // waiting for worker to decode
 
     // Tile pipeline (favorites_images.h pattern).
-    mutable image::DecodeWorker          worker_{image::decode_wake_event()};
-    mutable std::unordered_set<uint64_t> failed_;
+    image::DecodeWorker          worker_{image::decode_wake_event()};
+    std::unordered_set<uint64_t> failed_;
 };
 
 } // namespace ui

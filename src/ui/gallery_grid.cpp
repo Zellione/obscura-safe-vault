@@ -753,6 +753,18 @@ void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
     }
 }
 
+// Extract Ctrl+D handler to reduce handle_key_down's cognitive complexity (S3776).
+void handle_ctrl_d_key(GalleryGrid& g)
+{
+    // Duplicate finder is an exclusive op: same import-queue gate as compact.
+    if (g.queue_.busy()) {
+        g.status_ = "Imports running — press Shift+I for status";
+        g.mark_dirty();
+        return;
+    }
+    g.request(NavKind::ToDuplicates);
+}
+
 // Extract Delete handler to reduce handle_key_down's cognitive complexity (S3776).
 void handle_delete_key(GalleryGrid& g)
 {
@@ -854,13 +866,7 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         return;
     }
     if (key.key == SDLK_D && (key.mod & SDL_KMOD_CTRL) != 0) {
-        // Duplicate finder is an exclusive op: same import-queue gate as compact.
-        if (queue_.busy()) {
-            status_ = "Imports running — press Shift+I for status";
-            mark_dirty();
-            return;
-        }
-        request(NavKind::ToDuplicates);
+        handle_ctrl_d_key(*this);
         return;
     }
     if ((key.key == SDLK_I) && (key.mod & SDL_KMOD_SHIFT)) {

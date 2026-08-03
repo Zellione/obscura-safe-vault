@@ -1057,6 +1057,20 @@ VaultResult Vault::remove_gallery(std::string_view gallery_path)
     return NotFound;
 }
 
+// Erase the media child named `leaf` from `g` (nullptr-safe). Returns whether
+// a matching child was found; its chunks stay orphaned until reclamation.
+static bool erase_media_child(IndexNode* g, std::string_view leaf)
+{
+    if (!g) return false;
+    for (auto it = g->children.begin(); it != g->children.end(); ++it) {
+        if (it->is_media() && it->name == leaf) {
+            g->children.erase(it);
+            return true;
+        }
+    }
+    return false;
+}
+
 VaultResult remove_media_batch(Vault& v, std::span<const std::string> node_paths,
                                RemoveBatchStats* stats)
 {
@@ -1064,7 +1078,8 @@ VaultResult remove_media_batch(Vault& v, std::span<const std::string> node_paths
     if (stats) *stats = {};
     if (!v.unlocked_) return Locked;
 
-    std::size_t removed = 0, missing = 0;
+    std::size_t removed = 0;
+    std::size_t missing = 0;
     for (const std::string& path : node_paths) {
         // Split "gal/sub/name" into parent gallery + leaf name.
         const auto   slash  = path.find_last_of('/');
@@ -1074,17 +1089,7 @@ VaultResult remove_media_batch(Vault& v, std::span<const std::string> node_paths
         const auto   leaf   = (slash == std::string::npos)
                                   ? std::string_view(path)
                                   : std::string_view(path).substr(slash + 1);
-        IndexNode* g = v.find_gallery(parent);
-        bool hit = false;
-        if (g) {
-            for (auto it = g->children.begin(); it != g->children.end(); ++it) {
-                if (it->is_media() && it->name == leaf) {
-                    g->children.erase(it);  // chunks orphaned until reclamation
-                    hit = true;
-                    break;
-                }
-            }
-        }
+        const bool hit = erase_media_child(v.find_gallery(parent), leaf);
         hit ? ++removed : ++missing;
     }
 

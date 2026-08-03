@@ -1,6 +1,7 @@
 #include "ui/dup_model.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <numeric>
 
@@ -12,9 +13,12 @@ namespace {
 uint8_t cell_luma(std::span<const uint8_t> rgb, int w, int h,
                   int cx, int cy, int gw, int gh)
 {
-    const int x0 = cx * w / gw, x1 = std::max(x0 + 1, (cx + 1) * w / gw);
-    const int y0 = cy * h / gh, y1 = std::max(y0 + 1, (cy + 1) * h / gh);
-    uint64_t sum = 0, n = 0;
+    const int x0 = cx * w / gw;
+    const int x1 = std::max(x0 + 1, (cx + 1) * w / gw);
+    const int y0 = cy * h / gh;
+    const int y1 = std::max(y0 + 1, (cy + 1) * h / gh);
+    uint64_t sum = 0;
+    uint64_t n = 0;
     for (int y = y0; y < std::min(y1, h); ++y)
         for (int x = x0; x < std::min(x1, w); ++x) {
             const uint8_t* p = &rgb[(static_cast<size_t>(y) * w + x) * 3];
@@ -29,7 +33,7 @@ uint8_t cell_luma(std::span<const uint8_t> rgb, int w, int h,
 uint64_t dhash64(std::span<const uint8_t> rgb, int w, int h)
 {
     if (w < 1 || h < 1 || rgb.size() < static_cast<size_t>(w) * h * 3) return 0;
-    uint8_t grid[8][9];
+    std::array<std::array<uint8_t, 9>, 8> grid{};
     for (int y = 0; y < 8; ++y)
         for (int x = 0; x < 9; ++x) grid[y][x] = cell_luma(rgb, w, h, x, y, 9, 8);
     uint64_t bits = 0;
@@ -49,7 +53,10 @@ std::vector<std::vector<size_t>> cluster_similar(std::span<const uint64_t> hashe
     std::vector<size_t> parent(hashes.size());
     std::iota(parent.begin(), parent.end(), size_t{0});
     auto find = [&](size_t i) {
-        while (parent[i] != i) i = parent[i] = parent[parent[i]];
+        while (parent[i] != i) {
+            parent[i] = parent[parent[i]];   // path halving
+            i = parent[i];
+        }
         return i;
     };
     for (size_t i = 0; i < hashes.size(); ++i)
@@ -70,7 +77,8 @@ std::vector<std::vector<size_t>> cluster_similar(std::span<const uint64_t> hashe
 
 uint64_t group_reclaimable(const DupGroup& g)
 {
-    uint64_t sum = 0, biggest = 0;
+    uint64_t sum = 0;
+    uint64_t biggest = 0;
     for (const DupMember& m : g.members) {
         sum += m.bytes;
         biggest = std::max(biggest, m.bytes);
@@ -127,7 +135,9 @@ size_t DupReview::marked_count() const
 {
     size_t n = 0;
     for (const DupGroup& g : groups_)
-        for (const DupMember& m : g.members) n += !m.keep;
+        for (const DupMember& m : g.members) {
+            if (!m.keep) ++n;
+        }
     return n;
 }
 

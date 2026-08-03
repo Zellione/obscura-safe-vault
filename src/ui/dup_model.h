@@ -34,8 +34,10 @@ struct DupMember {
     std::string parent_path;   // "" = root
     bool        is_video = false;
     uint64_t    bytes = 0;     // plaintext orig_size
-    uint32_t    width = 0, height = 0;
-    uint64_t    thumb_offset = 0, thumb_length = 0;  // tile span; 0 len = none
+    uint32_t    width  = 0;
+    uint32_t    height = 0;
+    uint64_t    thumb_offset = 0;   // tile span; 0 length = none
+    uint64_t    thumb_length = 0;
     std::vector<std::pair<uint64_t, uint64_t>> data_spans;  // (offset,length) for full original
     bool        keep = true;
 };
