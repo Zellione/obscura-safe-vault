@@ -162,6 +162,8 @@ void toggle_select();          // toggle the current item in the export selectio
     friend bool vault_busy(const GalleryGrid& g);       // any worker owns the vault(s)?
     friend bool handle_job_input(GalleryGrid& g, const SDL_Event& e);  // job-active Esc→cancel gate
     friend void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key);  // Shift+C compact confirm
+    friend void handle_import_dialog_key(GalleryGrid& g, const SDL_KeyboardEvent& key);  // Z / O import dialogs
+    friend void handle_ctrl_d_key(GalleryGrid& g);                                   // Ctrl+D duplicate finder
     friend void handle_delete_key(GalleryGrid& g);                                   // Del confirm
     friend bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key);     // detail panel scroll/toggle
     friend bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& key);  // L/X/M/R/SPACE/G/B/F/T/S/U shortcuts
@@ -328,6 +330,8 @@ void poll_file_job(GalleryGrid& g);
 [[nodiscard]] bool vault_busy(const GalleryGrid& g);
 [[nodiscard]] bool handle_job_input(GalleryGrid& g, const SDL_Event& e);
 void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
+void handle_import_dialog_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
+void handle_ctrl_d_key(GalleryGrid& g);
 void handle_delete_key(GalleryGrid& g);
 void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);
 [[nodiscard]] GalleryView current_gallery_view(const GalleryGrid& g);

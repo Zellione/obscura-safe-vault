@@ -15,7 +15,7 @@ namespace ui {
 enum class NavKind {
     None, ToUnlock, ToGallery, ToViewer, ToFavoriteImages, ToFavoriteGalleries,
     ToFavoriteViewer, ToAdvancedSearch, ToTagOverview, ToTagGalleries,
-    ToTagImages, ToTagViewer, ToImportStatus,
+    ToTagImages, ToTagViewer, ToImportStatus, ToDuplicates,
     ToVaultManager, LockActive, ToggleKeepUnlocked, ToSettings, Quit
 };
 

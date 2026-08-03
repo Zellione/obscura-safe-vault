@@ -274,6 +274,39 @@ Shows:
 Live summary while queue is non-empty: `"Importing <name> 128/450 · 2 queued"` (done/total, remainder queued).
 **Priority:** error > import summary > status. Clickable to jump to ImportStatusScreen.
 
+## Duplicate finder screen (Phase 61)
+`Ctrl+D` on the gallery grid (plain `D` toggles the detail panel) opens
+`NavKind::ToDuplicates` — an exclusive op behind the same import-queue gate as
+compact (`queue_.busy()` → "Imports running — press Shift+I" status). The grid's
+`F1` popup gains a **"Vault tools"** group: `Shift+C — Compact vault`,
+`Ctrl+D — Find duplicate files`.
+
+Four screen states (the chooser is a state, not a modal dialog class):
+1. **Choose:** "Exact duplicates" / "Exact + visually similar"; `Esc` leaves.
+2. **Scanning:** progress (hashed/total candidates) + current name; `Esc`
+   cancels gracefully between files. Files that fail to decrypt/decode are
+   skipped and counted — the results show "couldn't examine N files".
+3. **Review:** scrollable group list, largest-reclaimable-bytes first. Group
+   header (`Identical · 3 files · 24.1 MB reclaimable` / `Similar (N bits)`),
+   then a horizontal row of side-by-side member tiles (thumbnail or video
+   poster; name, parent gallery path, size, resolution beneath) each carrying a
+   KEEP/REMOVE badge, all starting KEEP. Tiles share the full content width,
+   centered, scaling down as the group grows; row heights are font-derived and
+   the header/footer are opaque chrome bands (`ui/dup_layout.*`, pure/tested). Keys: `Left/Right` member focus,
+   `Up/Down` group focus, `Space` toggle mark, `A` keep only the focused member,
+   `Enter` full-screen inspect of the decoded original (any key returns), `F1`
+   help, `Esc` leave (confirm prompt while unapplied REMOVE marks exist).
+   **Group invariant:** a group with ALL members marked REMOVE renders in a
+   warning state and blocks apply — that would be deletion, not de-duplication.
+4. **Done:** reports what was removed; grid refreshes via `on_vault_changed()`.
+
+**Apply:** footer shows the running total ("12 files marked · 96.3 MB");
+`Ctrl+Enter` (deliberate destructive chord) → default-cancel confirm with count
++ total size → one main-thread `vault::remove_media_batch` (N erases, ONE
+commit, one auto-reclaim). `blocks_idle_lock()` is true while scanning or while
+unapplied REMOVE marks exist; manual lock mid-scan cancels the worker before
+key wipe.
+
 ## Multi-volume archive confirm (Phase 53)
 Picking any volume of a split set (`.7z.001`, `.z01`, `.partN.rar`, `.r00`, …)
 auto-discovers its siblings from the containing directory and opens

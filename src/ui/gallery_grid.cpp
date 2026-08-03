@@ -753,6 +753,34 @@ void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
     }
 }
 
+// Extract the archive (Z) / folder (O) import-dialog keys to reduce
+// handle_key_down's cognitive complexity (S3776).
+void handle_import_dialog_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
+{
+    if (key.key == SDLK_Z) {
+        if (g.dialogs_.file.busy() || g.transfer_.active()) return;
+        g.error_.clear();
+        g.dialogs_.file.open_zip(g.win_.sdl_window());
+        return;
+    }
+    if (g.dialogs_.folder.busy() || g.transfer_.active()) return;
+    g.error_.clear();
+    g.dialogs_.folder.open(g.win_.sdl_window(), platform::FolderDialog::Purpose::ImportFolder,
+                           /*allow_many*/ true);
+}
+
+// Extract Ctrl+D handler to reduce handle_key_down's cognitive complexity (S3776).
+void handle_ctrl_d_key(GalleryGrid& g)
+{
+    // Duplicate finder is an exclusive op: same import-queue gate as compact.
+    if (g.queue_.busy()) {
+        g.status_ = "Imports running — press Shift+I for status";
+        g.mark_dirty();
+        return;
+    }
+    g.request(NavKind::ToDuplicates);
+}
+
 // Extract Delete handler to reduce handle_key_down's cognitive complexity (S3776).
 void handle_delete_key(GalleryGrid& g)
 {
@@ -832,17 +860,8 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
     // Detail-panel handling (Ctrl+Up/Down scroll, D toggle). Extracted to reduce
     // cognitive complexity; must run first, before every other key.
     if (handle_detail_key(*this, key)) { return; }
-    if (key.key == SDLK_Z) {
-        if (dialogs_.file.busy() || transfer_.active()) return;
-        error_.clear();
-        dialogs_.file.open_zip(win_.sdl_window());
-        return;
-    }
-    if (key.key == SDLK_O && !(key.mod & SDL_KMOD_SHIFT)) {
-        if (dialogs_.folder.busy() || transfer_.active()) return;
-        error_.clear();
-        dialogs_.folder.open(win_.sdl_window(), platform::FolderDialog::Purpose::ImportFolder,
-                             /*allow_many*/ true);
+    if (key.key == SDLK_Z || (key.key == SDLK_O && !(key.mod & SDL_KMOD_SHIFT))) {
+        handle_import_dialog_key(*this, key);
         return;
     }
     if (key.key == SDLK_DELETE) {
@@ -851,6 +870,10 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
     }
     if ((key.key == SDLK_C) && (key.mod & SDL_KMOD_SHIFT)) {
         handle_shift_c_key(*this, key);
+        return;
+    }
+    if (key.key == SDLK_D && (key.mod & SDL_KMOD_CTRL) != 0) {
+        handle_ctrl_d_key(*this);
         return;
     }
     if ((key.key == SDLK_I) && (key.mod & SDL_KMOD_SHIFT)) {
@@ -1645,6 +1668,9 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
         {"Import & export", {
             {"I", "Import files"}, {"Shift+I", "Import status"}, {"Z", "Import ZIP/CBZ"}, {"O", "Import folder"}, {"N", "New gallery"},
             {"X", "Export selection"}, {"M", "Move/copy"}, {"Shift+M", "Combine gallery"}, {"R", "Rename"}, {"Del", "Delete"},
+        }},
+        {"Vault tools", {
+            {"Shift+C", "Compact vault"}, {"Ctrl+D", "Find duplicate files"},
         }},
         {"Session", {
             {"Shift+S", "Cycle sort order"}, {"U", "Keep unlocked for session"},
