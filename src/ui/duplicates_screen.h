@@ -33,6 +33,9 @@ void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, const class Duplic
                       const DupMember& member, bool focused, const SDL_FRect& tile_rect);
 void draw_group_row(gfx::Renderer& r, gfx::FontAtlas& font, const class DuplicatesScreen& screen,
                     size_t group_idx, float y);
+void draw_confirm_apply_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const class DuplicatesScreen& screen);
+void draw_confirm_leave_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const class DuplicatesScreen& screen);
+void draw_inspect_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const class DuplicatesScreen& screen);
 
 class DuplicatesScreen final : public Screen {
     friend void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key);
@@ -40,6 +43,9 @@ class DuplicatesScreen final : public Screen {
                                  const DupMember& member, bool focused, const SDL_FRect& tile_rect);
     friend void draw_group_row(gfx::Renderer& r, gfx::FontAtlas& font, const DuplicatesScreen& screen,
                                size_t group_idx, float y);
+    friend void draw_confirm_apply_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen);
+    friend void draw_confirm_leave_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen);
+    friend void draw_inspect_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen);
 
 public:
     enum class State : uint8_t { Choose, Scanning, Review, Done };
@@ -85,6 +91,8 @@ private:
     bool   confirm_leave_ = false;      // Esc pressed with pending marks
     std::string status_;                // one-line footer notice (apply refusals etc.)
     std::string done_summary_;
+    std::optional<uint64_t> inspect_;   // key for inspect texture (bit 63 set)
+    bool   inspect_decoding_ = false;   // waiting for worker to decode
 
     // Tile pipeline (favorites_images.h pattern).
     mutable image::DecodeWorker          worker_{image::decode_wake_event()};

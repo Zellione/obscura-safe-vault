@@ -1,6 +1,7 @@
 #include "ui/duplicates_screen.h"
 
 #include <algorithm>
+#include <cstring>
 #include <format>
 #include <string>
 
@@ -135,12 +136,98 @@ void draw_group_row(gfx::Renderer& r, gfx::FontAtlas& font, const DuplicatesScre
     for (size_t m = 0; m < group.members.size(); ++m) {
         const auto& member = group.members[m];
         const bool focused = (group_idx == screen.focus_group_ && m == screen.focus_member_);
-        
+
         const SDL_FRect tile_rect{tile_x, y + ph + 8, TILE_W, TILE_H};
         draw_member_tile(r, font, screen, member, focused, tile_rect);
-        
+
         tile_x += TILE_W + TILE_GAP;
     }
+}
+
+// Draw confirm-apply overlay
+void draw_confirm_apply_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen)
+{
+    using namespace gfx::theme;
+
+    // Veil the whole window
+    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
+
+    const float pw = 560;
+    const float ph = 230;
+    const float px = (W - pw) / 2;
+    const float py = (H - ph) / 2;
+    r.draw_round_rect({px, py, pw, ph}, 8, SURFACE);
+    r.draw_round_rect({px, py, pw, ph}, 8, BORDER, /*filled*/ false);
+
+    auto centered = [&](const std::string& s, float y, gfx::Color c) {
+        const auto tw = static_cast<float>(font.measure(s));
+        r.draw_text(font, px + (pw - tw) / 2, y, s, c);
+    };
+
+    const std::string title = std::format("Delete {} files ({})?",
+        screen.review_.marked_count(), fmt_bytes(screen.review_.marked_bytes()));
+    centered(title, py + 28, TEXT);
+    centered("This cannot be undone.", py + 58, TEXT_DIM);
+
+    centered("[Enter/Y] delete · [Esc/N] cancel", py + ph - 50, TEXT_DIM);
+}
+
+// Draw confirm-leave overlay
+void draw_confirm_leave_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen)
+{
+    using namespace gfx::theme;
+
+    // Veil the whole window
+    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
+
+    const float pw = 560;
+    const float ph = 230;
+    const float px = (W - pw) / 2;
+    const float py = (H - ph) / 2;
+    r.draw_round_rect({px, py, pw, ph}, 8, SURFACE);
+    r.draw_round_rect({px, py, pw, ph}, 8, BORDER, /*filled*/ false);
+
+    auto centered = [&](const std::string& s, float y, gfx::Color c) {
+        const auto tw = static_cast<float>(font.measure(s));
+        r.draw_text(font, px + (pw - tw) / 2, y, s, c);
+    };
+
+    const std::string title = std::format("Discard {} unapplied marks?", screen.review_.marked_count());
+    centered(title, py + 28, TEXT);
+
+    centered("[Enter/Y] leave · [Esc/N] stay", py + ph - 50, TEXT_DIM);
+}
+
+// Draw inspect overlay
+void draw_inspect_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H, const DuplicatesScreen& screen)
+{
+    using namespace gfx::theme;
+
+    if (!screen.inspect_) return;
+
+    // Dimmed backdrop
+    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 200});
+
+    if (screen.inspect_decoding_) {
+        // Show "decoding..." message
+        const std::string msg = "decoding...";
+        const auto tw = static_cast<float>(font.measure(msg));
+        r.draw_text(font, (W - tw) / 2, H / 2 - font.pixel_height() / 2, msg, TEXT_DIM);
+    } else {
+        // Try to render the inspect texture
+        SDL_Texture* tex = screen.cache_.get(*screen.inspect_);
+        if (tex) {
+            float tw = 0, th = 0;
+            SDL_GetTextureSize(tex, &tw, &th);
+            const SDL_FRect display = fit_rect(tw, th, {40, 40, W - 80, H - 80});
+            r.draw_image(tex, display);
+        }
+    }
+
+    // Hint at bottom
+    const std::string hint = "Any key to close";
+    const auto tw = static_cast<float>(font.measure(hint));
+    r.draw_text(font, (W - tw) / 2, H - 40, hint, TEXT_FAINT);
 }
 
 
@@ -152,8 +239,54 @@ DuplicatesScreen::DuplicatesScreen(gfx::Window& win, gfx::FontAtlas& font,
 
 void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
 {
-    // This function is not technically a method, but has access to the screen's private members
-    // through the friend arrangement. For now we'll access through public interface where possible.
+    // Handle confirm-apply overlay
+    if (screen.confirm_apply_) {
+        if (key.key == SDLK_RETURN || key.key == SDLK_Y) {
+            // Apply the deletion
+            const auto doomed = screen.review_.marked_paths();
+            vault::RemoveBatchStats stats;
+            const auto res = vault::remove_media_batch(screen.vault_, doomed, &stats);
+            screen.confirm_apply_ = false;
+            if (res == vault::VaultResult::Ok) {
+                screen.done_summary_ = std::format("Removed {} files ({}){}",
+                    stats.removed,
+                    fmt_bytes(screen.review_.marked_bytes()),
+                    stats.missing ? std::format(" — {} already gone", stats.missing) : "");
+                screen.state_ = DuplicatesScreen::State::Done;
+            } else {
+                screen.status_ = "Delete failed — vault unchanged on disk";
+            }
+            screen.mark_dirty();
+        } else {
+            // Any other key cancels
+            screen.confirm_apply_ = false;
+            screen.mark_dirty();
+        }
+        return;
+    }
+
+    // Handle confirm-leave overlay
+    if (screen.confirm_leave_) {
+        if (key.key == SDLK_RETURN || key.key == SDLK_Y) {
+            // Leave
+            screen.confirm_leave_ = false;
+            screen.leave();
+        } else {
+            // Any other key cancels the leave
+            screen.confirm_leave_ = false;
+            screen.mark_dirty();
+        }
+        return;
+    }
+
+    // Handle inspect view
+    if (screen.inspect_) {
+        screen.inspect_.reset();
+        screen.inspect_decoding_ = false;
+        screen.mark_dirty();
+        return;
+    }
+
     const auto& groups = screen.review_.groups();
     if (groups.empty()) return;
 
@@ -233,6 +366,56 @@ void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
                     }
                 }
                 screen.mark_dirty();
+            } else {
+                // Enter without Ctrl: start inspect
+                const auto& inspect_groups = screen.review_.groups();
+                if (!inspect_groups.empty() && screen.focus_group_ < inspect_groups.size()) {
+                    const auto& group = inspect_groups[screen.focus_group_];
+                    if (screen.focus_member_ < group.members.size()) {
+                        const auto& member = group.members[screen.focus_member_];
+
+                        // Compute inspect key: thumb_offset with bit 63 set
+                        const uint64_t inspect_key = member.thumb_offset | (uint64_t{1} << 63);
+                        screen.inspect_ = inspect_key;
+                        screen.inspect_decoding_ = true;
+
+                        // For videos, use poster span; for images, concatenate all data_spans
+                        crypto::SecureBytes data_to_decode;
+                        if (member.is_video) {
+                            // Use poster span
+                            const auto res = vault::read_thumb_span(screen.vault_, member.thumb_offset, member.thumb_length, data_to_decode);
+                            if (res != vault::VaultResult::Ok) {
+                                screen.inspect_.reset();
+                                screen.inspect_decoding_ = false;
+                            }
+                        } else {
+                            // Concatenate all data_spans
+                            for (const auto& [off, len] : member.data_spans) {
+                                crypto::SecureBytes span;
+                                const auto res = vault::read_thumb_span(screen.vault_, off, len, span);
+                                if (res != vault::VaultResult::Ok) {
+                                    screen.inspect_.reset();
+                                    screen.inspect_decoding_ = false;
+                                    break;
+                                }
+                                // Append to data_to_decode
+                                const size_t old_size = data_to_decode.size();
+                                if (!data_to_decode.resize(old_size + span.size())) {
+                                    screen.inspect_.reset();
+                                    screen.inspect_decoding_ = false;
+                                    break;
+                                }
+                                std::memcpy(data_to_decode.data() + old_size, span.data(), span.size());
+                            }
+                        }
+
+                        if (screen.inspect_) {
+                            // Submit to worker
+                            screen.worker_.submit(inspect_key, std::move(data_to_decode));
+                        }
+                    }
+                }
+                screen.mark_dirty();
             }
             break;
         }
@@ -288,7 +471,24 @@ void DuplicatesScreen::handle_key(const SDL_KeyboardEvent& key)
             break;
 
         case State::Done:
-            if (key.key == SDLK_ESCAPE) leave();
+            switch (key.key) {
+                case SDLK_RETURN:
+                    // Rescan
+                    state_ = State::Choose;
+                    choose_sel_ = 0;
+                    focus_group_ = 0;
+                    focus_member_ = 0;
+                    scroll_ = 0.0f;
+                    status_.clear();
+                    done_summary_.clear();
+                    mark_dirty();
+                    break;
+                case SDLK_ESCAPE:
+                    leave();
+                    break;
+                default:
+                    break;
+            }
             break;
 
         default:
@@ -316,12 +516,25 @@ void DuplicatesScreen::update(double dt)
     (void)dt;
 
     // Pump worker results for thumbnail decoding (any state that shows thumbnails)
-    if (state_ == State::Review) {
+    if (state_ == State::Review || state_ == State::Done) {
         while (auto res = worker_.take_result()) {
-            if (res->image) {
-                (void)cache_.get_or_upload(res->key, *res->image);
+            if (inspect_ && res->key == *inspect_) {
+                // This is an inspect result
+                if (res->image) {
+                    (void)cache_.get_or_upload(res->key, *res->image);
+                    inspect_decoding_ = false;
+                } else {
+                    // Failed to decode inspect image
+                    inspect_.reset();
+                    inspect_decoding_ = false;
+                }
             } else {
-                failed_.insert(res->key);
+                // Regular thumbnail result
+                if (res->image) {
+                    (void)cache_.get_or_upload(res->key, *res->image);
+                } else {
+                    failed_.insert(res->key);
+                }
             }
             mark_dirty();
         }
@@ -477,7 +690,18 @@ void DuplicatesScreen::render(gfx::Renderer& r)
     } else if (state_ == State::Done) {
         // Done state
         r.draw_text(font_, OX, OY, done_summary_, TEXT_DIM);
-        r.draw_text(font_, OX, H - 40, "Esc to back", TEXT_FAINT);
+        r.draw_text(font_, OX, H - 40, "[Enter] rescan · [Esc] back", TEXT_FAINT);
+    }
+
+    // Draw overlays on top
+    if (state_ == State::Review) {
+        if (confirm_apply_) {
+            draw_confirm_apply_overlay(r, font_, W, H, *this);
+        } else if (confirm_leave_) {
+            draw_confirm_leave_overlay(r, font_, W, H, *this);
+        } else if (inspect_) {
+            draw_inspect_overlay(r, font_, W, H, *this);
+        }
     }
 }
 
@@ -492,14 +716,14 @@ std::vector<HelpGroup> DuplicatesScreen::help_groups() const
                     {"Esc", "Cancel"},
                 }},
             };
-        
+
         case State::Scanning:
             return {
                 {"Scan", {
                     {"Esc", "Cancel scan"},
                 }},
             };
-        
+
         case State::Review:
             return {
                 {"Review", {
@@ -507,18 +731,20 @@ std::vector<HelpGroup> DuplicatesScreen::help_groups() const
                     {"Left/Right", "Focus member"},
                     {"Space", "Toggle keep/remove"},
                     {"A", "Keep only this member"},
+                    {"Enter", "Inspect full original"},
                     {"Ctrl+Enter", "Apply marks"},
-                    {"Esc", "Back (or confirm leave)"},
+                    {"Esc", "Back (or confirm leave if marks)"},
                 }},
             };
-        
+
         case State::Done:
             return {
                 {"Done", {
+                    {"Enter", "Rescan"},
                     {"Esc", "Back"},
                 }},
             };
-        
+
         default:
             return {};
     }

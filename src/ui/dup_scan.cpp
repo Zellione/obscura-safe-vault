@@ -68,6 +68,7 @@ DupMember to_member(const DupScanItem& it)
     m.height       = it.height;
     m.thumb_offset = it.thumb_offset;
     m.thumb_length = it.thumb_length;
+    m.data_spans   = it.data_spans;
     return m;
 }
 
