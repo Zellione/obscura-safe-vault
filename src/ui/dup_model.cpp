@@ -193,6 +193,16 @@ void DupReview::finish_wave()
     touched_ = false;
 }
 
+void DupReview::refresh_members(const std::function<bool(DupMember&)>& fn)
+{
+    for (DupGroup& g : groups_)
+        std::erase_if(g.members, [&fn](DupMember& m) { return !fn(m); });
+    std::erase_if(groups_, [](const DupGroup& g) { return g.members.size() < 2; });
+    for (DupGroup& g : groups_)
+        for (size_t i = 0; i < g.members.size(); ++i)
+            g.members[i].keep = (i == 0);
+}
+
 bool duration_close(uint64_t a_us, uint64_t b_us) noexcept
 {
     const uint64_t hi = std::max(a_us, b_us);

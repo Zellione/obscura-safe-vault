@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <string>
 #include <vector>
@@ -85,6 +86,12 @@ public:
     // Complete the current wave (applied or skipped): erase its groups,
     // count it finished, reset touched(). No-op when groups() is empty.
     void finish_wave();
+
+    // Post-apply re-resolution over the remaining groups (Phase 64): fn
+    // returning false drops the member (its node vanished). Groups left with
+    // < 2 members are dropped; default marks are re-applied — call this only
+    // right after finish_wave(), when no remaining group carries user marks.
+    void refresh_members(const std::function<bool(DupMember&)>& fn);
 
 private:
     std::vector<DupGroup> groups_;

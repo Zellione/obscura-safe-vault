@@ -386,3 +386,37 @@ TEST(dup_wave_can_apply_goes_false_when_empty)
     CHECK(!r.any_marked());
     CHECK(!r.can_apply());
 }
+
+TEST(dup_refresh_drops_vanished_and_shrunken)
+{
+    std::vector<ui::DupGroup> gs{make_group("a", 3), make_group("b", 2)};
+    ui::DupReview r(std::move(gs));
+    r.refresh_members([](ui::DupMember& m) { return m.node_path != "b/0"; });
+    REQUIRE(r.groups().size() == 1);           // b fell below 2 members
+    CHECK_EQ(r.groups()[0].members.size(), size_t{3});
+    CHECK_EQ(r.groups()[0].members[0].node_path, std::string("a/0"));
+}
+
+TEST(dup_refresh_applies_field_updates)
+{
+    ui::DupReview r(std::vector<ui::DupGroup>{make_group("a", 2)});
+    r.refresh_members([](ui::DupMember& m) {
+        m.thumb_offset = 777;
+        m.data_spans   = {{123, 456}};
+        return true;
+    });
+    CHECK_EQ(r.groups()[0].members[0].thumb_offset, uint64_t{777});
+    CHECK_EQ(r.groups()[0].members[1].data_spans[0].first, uint64_t{123});
+}
+
+TEST(dup_refresh_reapplies_default_marks)
+{
+    ui::DupReview r(std::vector<ui::DupGroup>{make_group("a", 3)});
+    // Default marks: a/0 KEEP, a/1 + a/2 REMOVE. Drop the keeper: the new
+    // first member must become the keeper.
+    r.refresh_members([](ui::DupMember& m) { return m.node_path != "a/0"; });
+    REQUIRE(r.groups().size() == 1);
+    REQUIRE(r.groups()[0].members.size() == 2);
+    CHECK(r.groups()[0].members[0].keep);      // a/1, re-defaulted to KEEP
+    CHECK(!r.groups()[0].members[1].keep);     // a/2
+}
