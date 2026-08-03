@@ -227,7 +227,14 @@ jobs:
         run: |
           $shim = Join-Path $env:RUNNER_TEMP "ccache-cl"
           New-Item -ItemType Directory -Force -Path $shim | Out-Null
-          Copy-Item (Get-Command ccache).Source (Join-Path $shim "cl.exe")
+          # (Get-Command ccache) resolves to Chocolatey's SHIM exe; copying
+          # that as cl.exe breaks masquerading (the shim re-launches the real
+          # ccache with argv[0]="ccache", which then expects a compiler as its
+          # first argument and dies with exit -1 on "/c"). Copy the real
+          # binary out of the package's tools dir instead.
+          $real = Get-ChildItem "C:\ProgramData\chocolatey\lib\ccache\tools" -Recurse -Filter ccache.exe | Select-Object -First 1
+          if (-not $real) { throw "real ccache.exe not found under chocolatey lib" }
+          Copy-Item $real.FullName (Join-Path $shim "cl.exe")
           Add-Content -Path $env:GITHUB_ENV -Encoding utf8 -Value @(
             "OSV_CCACHE_SHIM=$shim",
             "CCACHE_DIR=$env:GITHUB_WORKSPACE\.ccache",
