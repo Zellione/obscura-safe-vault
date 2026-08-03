@@ -286,6 +286,12 @@ Four screen states (the chooser is a state, not a modal dialog class):
 2. **Scanning:** progress (hashed/total candidates) + current name; `Esc`
    cancels gracefully between files. Files that fail to decrypt/decode are
    skipped and counted — the results show "couldn't examine N files".
+   **Phase 62:** the "Exact + visually similar" mode also compares videos —
+   duration gate (±2 %, 500 ms floor), poster dHash prefilter, then 5
+   software-decoded frames at 10–90 % of the timeline (≥ 4 of 5 within
+   Hamming ≤ 7). Matches group as **"Similar video"**; review/marking/apply
+   are identical to other groups. Non-FFmpeg builds fall back to the
+   duration+poster verdict.
 3. **Review:** scrollable group list, largest-reclaimable-bytes first. Group
    header (`Identical · 3 files · 24.1 MB reclaimable` / `Similar (N bits)`),
    then a horizontal row of side-by-side member tiles (thumbnail or video

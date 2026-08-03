@@ -1,8 +1,9 @@
-# Phase 62 — Perceptual video duplicates (planned 🔜)
+# Phase 62 — Perceptual video duplicates
 
-Status: **planned** — design decisions made interactively with the owner
-(2026-08-03). Full step-by-step implementation plan (local working doc):
-`docs/superpowers/plans/2026-08-03-perceptual-video-duplicates.md`.
+Status: **done** — design decisions made interactively with the owner
+(2026-08-03); implemented as planned in
+`docs/superpowers/plans/2026-08-03-perceptual-video-duplicates.md` (local
+working doc).
 
 ## Problem
 
@@ -55,6 +56,33 @@ this feature's purposes).
 | Snapshot gains `duration_us` + `chunk_size`; worker gains the three-stage video pass after the image perceptual pass | `ui/dup_scan.*` |
 | "Similar video" group header | `ui/duplicates_screen.cpp` |
 | Same-content-two-codecs fixtures (`dup_a_h264.mp4` / `dup_a_vp9.webm` / `dup_other.mp4`) | `scripts/gen_media_fixtures.sh` |
+
+## Implementation notes (found while building)
+
+- **Decode-loop EOF bug:** after the demux-EOF flush, `av_packet_unref` resets
+  `stream_index` to 0 — which is usually the video stream — so the stale
+  packet must never be sent after flushing; doing so errored out late timeline
+  positions (90 %) on single-keyframe MP4s. `decode_until` flushes exactly
+  once and then only drains.
+- **Fixture determinism:** lavfi `gradients` randomizes its colors per
+  invocation, so two "same content" encodings genuinely differed; the fixtures
+  use `testsrc2` (deterministic). Cross-codec per-position dHash distances on
+  the final fixtures: 0–1 bits.
+- The frame signatures for candidates stay index-aligned with the candidate
+  list by construction (parallel vectors pushed in lockstep) — the same
+  invariant whose violation caused the Phase 61 image-pass mapping bug.
+
+## Tests
+
+`test_dup_model.cpp` (duration gate boundaries, frame/poster match semantics
+incl. the non-FFmpeg poster fallback, signature clustering + duration veto),
+`test_dup_video_sig.cpp` (cross-codec fixture match, different-content
+non-match, garbage-input failure; mem-buffer reader), `test_dup_scan.cpp`
+(vault-level: re-encoded pair groups as SimilarVideo while the equal-duration
+different clip stays out; exact-only scans decode no frames). End-to-end
+headless: scan → "Similar video" group → keep-only → apply → rescan clean.
+
+1774 tests / 0 failed; ASAN clean; TSAN clean in project code.
 
 ## Acceptance criteria
 

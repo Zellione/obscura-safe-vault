@@ -120,9 +120,11 @@ void draw_group_row(gfx::Renderer& r, gfx::FontAtlas& font, DuplicatesScreen& sc
     const auto& group = screen.review_.groups()[group_idx];
 
     // Group header line
-    std::string kind_str = (group.kind == DupGroup::Kind::Identical) ? "Identical" : "Similar";
+    std::string kind_str = "Identical";
     if (group.kind == DupGroup::Kind::Similar) {
         kind_str = std::format("Similar ({} bits)", group.distance_bits);
+    } else if (group.kind == DupGroup::Kind::SimilarVideo) {
+        kind_str = "Similar video";
     }
     const uint64_t reclaimable = group_reclaimable(group);
     const std::string header = std::format("{} · {} files · {} reclaimable",

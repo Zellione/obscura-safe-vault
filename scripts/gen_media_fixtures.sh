@@ -205,6 +205,24 @@ ffmpeg -f lavfi -i "testsrc2=s=160x120:d=0.1" \
     echo "  [SKIP] tinylegacy_ffvhuff.mkv - encoder not available"
 }
 
+# ---- Phase 62: perceptual-video-duplicate fixtures ----
+# dup_a_h264.mp4 and dup_a_vp9.webm encode the SAME deterministic content
+# (high-contrast moving box on a gradient — stable dHash across codecs);
+# dup_other.mp4 is visually different with the same duration.
+DUP_SRC="testsrc2=s=64x64:d=2:r=10"
+if [ ! -f "$FIXTURE_DIR/dup_a_h264.mp4" ]; then
+    ffmpeg -y -f lavfi -i "$DUP_SRC" -c:v libx264 -pix_fmt yuv420p -r 10 \
+        "$FIXTURE_DIR/dup_a_h264.mp4" -loglevel error
+fi
+if [ ! -f "$FIXTURE_DIR/dup_a_vp9.webm" ]; then
+    ffmpeg -y -f lavfi -i "$DUP_SRC" -c:v libvpx-vp9 -pix_fmt yuv420p -r 10 \
+        "$FIXTURE_DIR/dup_a_vp9.webm" -loglevel error
+fi
+if [ ! -f "$FIXTURE_DIR/dup_other.mp4" ]; then
+    ffmpeg -y -f lavfi -i "smptebars=s=64x64:d=2" -c:v libx264 -pix_fmt yuv420p -r 10 \
+        "$FIXTURE_DIR/dup_other.mp4" -loglevel error
+fi
+
 echo ""
 echo "Fixture sizes:"
 for f in "$FIXTURE_DIR"/tinylegacy_*.{mpg,avi,mov,flv,ogv,mkv,rm,asf,dv}; do

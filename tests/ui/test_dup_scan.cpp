@@ -265,3 +265,54 @@ TEST(dup_scan_perceptual_skip_keeps_member_mapping)
     CHECK_EQ(names[0], std::string("a.webp"));
     CHECK_EQ(names[1], std::string("c.webp"));
 }
+
+#ifdef OSV_VENDORED_AV
+// Phase 62: the perceptual pass groups the same clip stored in two codecs and
+// leaves an equal-duration different clip alone.
+TEST(scan_finds_reencoded_video_pair)
+{
+    TempVault tv("vidsim");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kFastKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("a") == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("b") == vault::VaultResult::Ok);
+    const auto h264  = read_file(fs::path(OSV_MEDIA_FIXTURE_DIR) / "dup_a_h264.mp4");
+    const auto vp9   = read_file(fs::path(OSV_MEDIA_FIXTURE_DIR) / "dup_a_vp9.webm");
+    const auto other = read_file(fs::path(OSV_MEDIA_FIXTURE_DIR) / "dup_other.mp4");
+    REQUIRE(!h264.empty());
+    REQUIRE(!vp9.empty());
+    REQUIRE(!other.empty());
+    REQUIRE(v.add_video("a", h264,  "one.mp4")   == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("b", vp9,   "two.webm")  == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("b", other, "other.mp4") == vault::VaultResult::Ok);
+
+    const auto out = run_scan(v, /*perceptual=*/true);
+    size_t video_groups = 0;
+    for (const auto& g : out.groups) {
+        if (g.kind == ui::DupGroup::Kind::SimilarVideo) {
+            ++video_groups;
+            REQUIRE(g.members.size() == size_t{2});
+            std::vector<std::string> names{g.members[0].name, g.members[1].name};
+            std::ranges::sort(names);
+            CHECK_EQ(names[0], std::string("one.mp4"));
+            CHECK_EQ(names[1], std::string("two.webm"));
+        }
+    }
+    CHECK_EQ(video_groups, size_t{1});
+}
+
+// Without the perceptual option no video frames are compared at all.
+TEST(scan_exact_only_ignores_reencoded_videos)
+{
+    TempVault tv("videxact");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kFastKdf, v) == vault::VaultResult::Ok);
+    const auto h264 = read_file(fs::path(OSV_MEDIA_FIXTURE_DIR) / "dup_a_h264.mp4");
+    const auto vp9  = read_file(fs::path(OSV_MEDIA_FIXTURE_DIR) / "dup_a_vp9.webm");
+    REQUIRE(v.add_video("", h264, "one.mp4")  == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("", vp9,  "two.webm") == vault::VaultResult::Ok);
+
+    const auto out = run_scan(v, /*perceptual=*/false);
+    CHECK(out.groups.empty());
+}
+#endif // OSV_VENDORED_AV

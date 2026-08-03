@@ -4,6 +4,7 @@
 // Hash primitives + grouping + review-marking state. No I/O, no vault types —
 // fully unit-testable headless.
 
+#include <array>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -42,7 +43,7 @@ struct DupMember {
     bool        keep = true;
 };
 struct DupGroup {
-    enum class Kind : uint8_t { Identical, Similar };
+    enum class Kind : uint8_t { Identical, Similar, SimilarVideo };
     Kind kind = Kind::Identical;
     int  distance_bits = 0;    // max pairwise Hamming (Similar only)
     std::vector<DupMember> members;
@@ -65,5 +66,40 @@ public:
 private:
     std::vector<DupGroup> groups_;
 };
+
+// ---- Phase 62: perceptual video duplicates ----
+//
+// A video pair may only match when duration-close; frame evidence (sampled
+// dHashes at fixed timeline fractions) decides when both sides carry it, and
+// the stored-poster dHash is the fallback verdict otherwise (non-FFmpeg
+// builds never fill frames).
+
+inline constexpr float    DUP_VID_DURATION_TOL     = 0.02f;      // relative
+inline constexpr uint64_t DUP_VID_DURATION_ABS_US  = 500'000;    // short-clip floor
+inline constexpr int      DUP_VID_POSTER_MAX_BITS  = 10;
+inline constexpr std::array<float, 5> DUP_VID_FRAME_POSITIONS{0.10f, 0.30f, 0.50f, 0.70f, 0.90f};
+inline constexpr int      DUP_VID_FRAME_MAX_BITS   = 7;
+inline constexpr int      DUP_VID_MIN_MATCHED      = 4;
+
+struct VideoSig {
+    uint64_t                poster_hash = 0;
+    bool                    poster_ok   = false;
+    std::array<uint64_t, 5> frame_hash{};
+    uint32_t                frame_valid = 0;   // bitmask, bit i = position i decoded
+};
+
+[[nodiscard]] bool duration_close(uint64_t a_us, uint64_t b_us) noexcept;
+
+// Match verdict for a duration-close pair. Frame evidence wins when both
+// sides share >= DUP_VID_MIN_MATCHED valid positions; otherwise falls back
+// to the poster verdict (poster_ok on both && hamming <= POSTER_MAX_BITS).
+[[nodiscard]] bool video_sig_match(const VideoSig& a, const VideoSig& b) noexcept;
+
+// Cluster videos whose signatures match pairwise (duration_close &&
+// video_sig_match) via union-find; `duration_us[i]` parallels `sigs[i]`.
+// Returns clusters of positions into `sigs` with >= 2 members, ordered by
+// first index.
+[[nodiscard]] std::vector<std::vector<size_t>>
+cluster_video_sigs(std::span<const VideoSig> sigs, std::span<const uint64_t> duration_us);
 
 } // namespace ui
