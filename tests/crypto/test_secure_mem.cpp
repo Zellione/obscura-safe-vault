@@ -86,7 +86,11 @@ TEST(should_warn_mlock_once)
 TEST(mlock_warning_prints_without_crashing)
 {
     crypto::print_mlock_warning();
-    CHECK_TRUE(true);  // reaching here is the assertion — the print must not throw
+    // The once-gated wrapper is what the constructors actually call; whether
+    // it prints here depends on which test consumed the process-wide flag
+    // first — both are valid, it just must not crash either way.
+    crypto::warn_mlock_failure_once();
+    CHECK_TRUE(true);  // reaching here is the assertion — neither call may throw
 }
 
 // The once-per-process mlock warning must give remedy advice for THIS
