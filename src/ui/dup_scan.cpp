@@ -1,11 +1,14 @@
 #include "ui/dup_scan.h"
 
+#include <algorithm>
 #include <array>
+#include <cstring>
 #include <map>
 #include <monocypher.h>
 
 #include "crypto/secure_mem.h"
 #include "image/decode.h"
+#include "ui/dup_video_sig.h"
 #include "vault/vault.h"
 
 namespace ui {
@@ -42,6 +45,8 @@ void walk(const vault::Vault& v, const std::string& path,
                 it.data_spans.emplace_back(c.offset, c.length);
             it.thumb_offset = n->vmeta.poster_offset;
             it.thumb_length = n->vmeta.poster_length;
+            it.duration_us  = n->vmeta.duration_us;
+            it.chunk_size   = n->vmeta.chunk_size;
         }
         out.push_back(std::move(it));
     }
@@ -100,6 +105,7 @@ struct PassCtx {
     const std::vector<DupScanItem>& items;
     const std::atomic<bool>&        cancel;
     std::atomic<size_t>&            done;
+    std::atomic<size_t>&            total;
     std::mutex&                     mtx;
     std::string&                    current;
 };
@@ -244,6 +250,148 @@ void perceptual_pass(const PassCtx& ctx, const std::vector<bool>& in_exact, bool
     }
 }
 
+// Byte reader over a video's plaintext stream for compute_video_frame_sig.
+// VideoSource::fill_one's chunk mapping re-hosted on the thread-safe
+// vault::read_thumb_span — the scan worker must never touch read_fp_. Caches
+// the one most-recently-decrypted chunk (mlock'd, wiped on replacement).
+struct VideoStream {
+    const vault::Vault& v;
+    const DupScanItem&  item;
+    crypto::SecureBytes cache;
+    int64_t             cached_index = -1;
+    bool                locked       = false;
+
+    int64_t read(uint64_t offset, std::span<uint8_t> dst)
+    {
+        if (item.chunk_size == 0 || offset >= item.bytes) return offset >= item.bytes ? 0 : -1;
+        const auto idx = static_cast<int64_t>(offset / item.chunk_size);
+        if (idx >= static_cast<int64_t>(item.data_spans.size())) return 0;
+        if (idx != cached_index) {
+            const auto& [off, len] = item.data_spans[static_cast<size_t>(idx)];
+            const auto res = vault::read_thumb_span(v, off, len, cache);
+            if (res != vault::VaultResult::Ok) {
+                locked = res == vault::VaultResult::Locked;
+                cached_index = -1;
+                return -1;
+            }
+            cached_index = idx;
+        }
+        const uint64_t in_chunk = offset - static_cast<uint64_t>(idx) * item.chunk_size;
+        if (in_chunk >= cache.size()) return 0;
+        const size_t n = std::min(dst.size(), cache.size() - static_cast<size_t>(in_chunk));
+        std::memcpy(dst.data(), cache.data() + in_chunk, n);
+        return static_cast<int64_t>(n);
+    }
+};
+
+// Poster dHash for one video candidate; leaves poster_ok false on any failure.
+// Returns Locked only when the vault locked underneath the read.
+vault::VaultResult poster_hash(const PassCtx& ctx, const DupScanItem& it, VideoSig& sig)
+{
+    if (it.thumb_length == 0) return vault::VaultResult::Ok;
+    crypto::SecureBytes poster;
+    const auto res = vault::read_thumb_span(ctx.v, it.thumb_offset, it.thumb_length, poster);
+    if (res != vault::VaultResult::Ok) return res;
+    const auto decoded = image::decode_from_memory(poster.as_span());
+    if (!decoded) return vault::VaultResult::Ok;
+    sig.poster_hash = dhash64(std::span(decoded->pixels.data(), decoded->pixels.size()),
+                              decoded->width, decoded->height);
+    sig.poster_ok = true;
+    return vault::VaultResult::Ok;
+}
+
+// True when i/j are plausible partners on the cheap evidence alone: duration
+// close AND poster-close (or a poster missing on either side).
+bool plausible_pair(const std::vector<DupScanItem>& items, std::span<const VideoSig> sigs,
+                    std::span<const size_t> cand, size_t i, size_t j)
+{
+    if (!duration_close(items[cand[i]].duration_us, items[cand[j]].duration_us)) return false;
+    if (!sigs[i].poster_ok || !sigs[j].poster_ok) return true;
+    return hamming64(sigs[i].poster_hash, sigs[j].poster_hash) <= DUP_VID_POSTER_MAX_BITS;
+}
+
+// Phase 62: perceptual video pass — duration gate (index metadata only),
+// poster dHash prefilter, then sampled-frame confirm for surviving pairs.
+void video_perceptual_pass(const PassCtx& ctx, const std::vector<bool>& in_exact,
+                           bool perceptual, DupScanOutcome& out)
+{
+    if (!perceptual) return;
+
+    // Stage 1 — duration gate, zero I/O: a video proceeds only when another
+    // non-exact video is duration-close to it.
+    std::vector<size_t> cand;
+    for (size_t i = 0; i < ctx.items.size(); ++i)
+        if (ctx.items[i].is_video && !in_exact[i]) cand.push_back(i);
+    std::erase_if(cand, [&](size_t i) {
+        return std::ranges::none_of(cand, [&](size_t j) {
+            return j != i && duration_close(ctx.items[i].duration_us, ctx.items[j].duration_us);
+        });
+    });
+    if (cand.size() < 2) return;
+    ctx.total += cand.size();
+
+    // Stage 2 — poster dHash per candidate. sigs[k] parallels cand[k].
+    std::vector<VideoSig> sigs(cand.size());
+    for (size_t k = 0; k < cand.size(); ++k) {
+        if (ctx.cancel.load()) {
+            out.cancelled = true;
+            return;
+        }
+        const auto& it = ctx.items[cand[k]];
+        {
+            const std::lock_guard lk(ctx.mtx);
+            ctx.current = it.node_path;
+        }
+        if (poster_hash(ctx, it, sigs[k]) == vault::VaultResult::Locked) {
+            out.cancelled = true;
+            return;
+        }
+        ctx.done++;
+    }
+
+    // Stage 3 — sampled-frame signatures for videos with a plausible partner.
+    std::vector<char> wants_frames(cand.size(), 0);
+    for (size_t i = 0; i < cand.size(); ++i)
+        for (size_t j = i + 1; j < cand.size(); ++j)
+            if (plausible_pair(ctx.items, sigs, cand, i, j))
+                wants_frames[i] = wants_frames[j] = 1;
+
+    const auto frame_count = static_cast<size_t>(std::ranges::count(wants_frames, char{1}));
+    ctx.total += frame_count;
+    for (size_t k = 0; k < cand.size(); ++k) {
+        if (!wants_frames[k]) continue;
+        if (ctx.cancel.load()) {
+            out.cancelled = true;
+            return;
+        }
+        const auto& it = ctx.items[cand[k]];
+        {
+            const std::lock_guard lk(ctx.mtx);
+            ctx.current = it.node_path;
+        }
+        VideoStream stream{.v = ctx.v, .item = it, .cache = {}};
+        const DupStreamRead reader = [&stream](uint64_t off, std::span<uint8_t> dst) {
+            return stream.read(off, dst);
+        };
+        if (!compute_video_frame_sig(reader, it.bytes, sigs[k]) && stream.locked) {
+            out.cancelled = true;
+            return;
+        }
+        ctx.done++;
+    }
+
+    // Stage 4 — cluster and emit. durations[k] parallels sigs[k]/cand[k].
+    std::vector<uint64_t> durations(cand.size());
+    for (size_t k = 0; k < cand.size(); ++k) durations[k] = ctx.items[cand[k]].duration_us;
+    for (const auto& cluster : cluster_video_sigs(sigs, durations)) {
+        DupGroup g;
+        g.kind = DupGroup::Kind::SimilarVideo;
+        g.distance_bits = 0;
+        for (size_t pos : cluster) g.members.push_back(to_member(ctx.items[cand[pos]]));
+        out.groups.push_back(std::move(g));
+    }
+}
+
 } // namespace
 
 std::vector<DupScanItem> collect_scan_items(const vault::Vault& v)
@@ -318,14 +466,17 @@ void DupScanJob::run(const vault::Vault& v, std::vector<DupScanItem> items, bool
     // Track which items ended up in exact groups.
     std::vector<bool> in_exact(items.size(), false);
 
-    const PassCtx ctx{.v = v, .items = items, .cancel = cancel_,
-                      .done = done_, .mtx = mtx_, .current = current_};
+    const PassCtx ctx{.v = v, .items = items, .cancel = cancel_, .done = done_,
+                      .total = total_, .mtx = mtx_, .current = current_};
 
     // Exact pass.
     auto out = exact_pass(ctx, in_exact);
     if (!out.cancelled) {
-        // Perceptual pass appends its groups to the same outcome.
+        // Perceptual passes append their groups to the same outcome.
         perceptual_pass(ctx, in_exact, perceptual, out);
+    }
+    if (!out.cancelled) {
+        video_perceptual_pass(ctx, in_exact, perceptual, out);
     }
 
     {

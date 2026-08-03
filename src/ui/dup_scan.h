@@ -34,6 +34,8 @@ struct DupScanItem {
     std::vector<std::pair<uint64_t, uint64_t>> data_spans;  // (offset,length)
     uint64_t    thumb_offset = 0;   // thumb / poster span; 0 length = none
     uint64_t    thumb_length = 0;
+    uint64_t    duration_us  = 0;   // videos only (Phase 62 duration gate)
+    uint32_t    chunk_size   = 0;   // videos only: plaintext chunk split size
 };
 
 // Main-thread ONLY (walks the index tree via Vault::list). Every image and
