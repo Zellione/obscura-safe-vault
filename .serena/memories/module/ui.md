@@ -63,6 +63,14 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `unlock_screen.*` — password + optional keyfile unlock. `secure_text_input.*` /
   `unlock_logic.*` back it (secure entry field + unlock logic). `passphrase.*` helpers
   (`generate_passphrase` fills a `SecureTextInput` directly, never a std::string).
+  `unlock_job.*` — `UnlockJob`: runs open+unlock / create (both pay the Argon2id KDF) on a
+  `std::jthread` so the screen never freezes; copies password+keyfile into mlock'd
+  SecureBytes on start (worker wipes them after the vault call), `active()` /
+  `take_outcome()` polling like FileOpJob, no cancel (KDF not interruptible; dtor joins).
+  While active the screen swallows ALL input (incl. Esc — a nav would tear the screen down
+  under a worker holding &vault_), `animating()` returns true to keep frames ticking, and
+  render shows "Deriving key…". Tests: `test_unlock_job.cpp` (real temp vaults, tiny
+  KdfParams).
 - `gallery_grid.*` — GalleryGrid: Grid + detailed List views (key `L`), live width reflow,
   centred/elided labels. `Shift+S` cycles a gallery's persisted sort_key; breadcrumb shows
   "Sort: <label>" once non-Manual. Ctor takes `initial_view` (default Grid) + a

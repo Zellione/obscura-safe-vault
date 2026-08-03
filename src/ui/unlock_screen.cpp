@@ -91,6 +91,12 @@ UnlockScreen::Layout UnlockScreen::layout() const
 
 void UnlockScreen::handle_event(const SDL_Event& e)
 {
+    // While the KDF worker owns the vault, swallow ALL input: a second submit
+    // would race the job, editing fields mid-derivation is misleading, and Esc
+    // would tear the screen down under a worker holding &vault_ (the job dtor
+    // would join, but the derivation is not cancellable anyway).
+    if (job_.active()) return;
+
     // Precedence rule (Phase 54): the focused field gets first refusal on every
     // event, so its Ctrl+A / Ctrl+V never fall through to a screen shortcut.
     SecureTextInput& f = (create_mode_ && focus_ == 1) ? confirm_ : pw_;
@@ -159,8 +165,34 @@ void UnlockScreen::handle_click(const SDL_MouseButtonEvent& b)
     }
 }
 
+// Human-facing wording for a failed open/unlock/create (no secrets).
+static const char* unlock_error_message(vault::VaultResult r)
+{
+    using enum vault::VaultResult;
+    switch (r) {
+        case AuthFailed: return "Wrong password or keyfile.";
+        case BadFormat:  return "Not a valid vault file.";
+        case IoError:    return "Could not read/write the vault file.";
+        default:         return "Unlock failed.";
+    }
+}
+
 void UnlockScreen::update(double dt)
 {
+    // Collect the KDF worker's outcome (animating() keeps frames ticking
+    // while it runs, so this polls promptly).
+    if (auto oc = job_.take_outcome()) {
+        if (*oc == vault::VaultResult::Ok) {
+            pw_.clear();
+            confirm_.clear();
+            reveal_pw_ = false;
+            request(NavKind::ToGallery);
+        } else {
+            error_ = unlock_error_message(*oc);
+        }
+        mark_dirty();
+    }
+
     if (auto res = dlg_.take_result()) {
         if (!res->empty()) apply_dialog_result((*res)[0]);
         pending_ = Pending::None;
@@ -242,30 +274,18 @@ void UnlockScreen::submit()
         return;
     }
 
-    vault::VaultResult r;
+    // Hand the KDF to the worker; the job copies password + keyfile into its
+    // own mlock'd buffers before returning, so both can be wiped/kept here.
+    // update() collects the outcome and navigates / reports the error.
     if (d.action == SubmitAction::Create) {
-        r = vault::Vault::create(vault_path_.string(), pw_.bytes(), keyfile,
-                                 crypto::DEFAULT_KDF_PARAMS, vault_);
+        job_.start_create(vault_, vault_path_.string(), pw_.bytes(), keyfile,
+                          crypto::DEFAULT_KDF_PARAMS);
     } else {
-        r = vault::Vault::open(vault_path_.string(), vault_);
-        if (r == Ok) r = vault_.unlock(pw_.bytes(), keyfile);
+        job_.start_unlock(vault_, vault_path_.string(), pw_.bytes(), keyfile);
     }
     if (!keyfile.empty()) crypto_wipe(keyfile.data(), keyfile.size());
-
-    if (r == Ok) {
-        pw_.clear();
-        confirm_.clear();
-        reveal_pw_ = false;
-        request(NavKind::ToGallery);
-        return;
-    }
-    switch (r) {
-        case AuthFailed: error_ = "Wrong password or keyfile."; break;
-        case BadFormat:  error_ = "Not a valid vault file.";    break;
-        case IoError:    error_ = "Could not read/write the vault file."; break;
-        default:         error_ = "Unlock failed.";             break;
-    }
 }
+
 
 void UnlockScreen::render(gfx::Renderer& r)
 {
@@ -320,8 +340,14 @@ void UnlockScreen::render(gfx::Renderer& r)
     btn(L.submit_btn, create_mode_ ? "Create" : "Unlock");
     btn(L.copy_btn, "Copy");
 
-    if (!error_.empty())
+    if (job_.active()) {
+        // KDF in flight: input is swallowed (handle_event) until the worker
+        // hands back its outcome, so tell the user why nothing reacts.
+        r.draw_text(font_, 60, H - 70,
+                    create_mode_ ? "Creating vault — deriving key…" : "Deriving key…", TEXT_DIM);
+    } else if (!error_.empty()) {
         r.draw_text(font_, 60, H - 70, error_, DANGER);
+    }
 }
 
 std::vector<ui::HelpGroup> UnlockScreen::help_groups() const

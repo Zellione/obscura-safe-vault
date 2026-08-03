@@ -7,6 +7,7 @@
 
 #include "ui/screen.h"
 #include "ui/secure_text_input.h"
+#include "ui/unlock_job.h"
 #include "ui/widgets.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; }
@@ -26,6 +27,10 @@ public:
     void update(double dt) override;
     void render(gfx::Renderer& r) override;
     [[nodiscard]] std::vector<ui::HelpGroup> help_groups() const override;
+
+    // Keep frames ticking while the KDF worker runs, so update() polls the
+    // outcome promptly and the "Deriving key…" notice animates redraws.
+    [[nodiscard]] bool animating() const override { return job_.active(); }
 
 private:
     struct Layout {
@@ -60,6 +65,7 @@ private:
     std::string           error_;
     Pending               pending_   = Pending::None;
     bool                  reveal_pw_ = false;  // show a freshly generated passphrase
+    UnlockJob             job_;                // Argon2id runs off the main thread
 
     // Phase 45 Part 3: what we last copied (for the auto-clear equality
     // check) and how long ago (-1 = no pending auto-clear).

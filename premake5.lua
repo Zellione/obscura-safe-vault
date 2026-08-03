@@ -517,6 +517,7 @@ project "osv_tests"
         "src/ui/clipboard.cpp",
         "src/ui/text_input_event.cpp",
         "src/ui/unlock_logic.cpp",
+        "src/ui/unlock_job.cpp",
         "src/ui/widgets.cpp",
         "src/ui/strip_layout.cpp",
         "src/ui/cover_layout.cpp",
