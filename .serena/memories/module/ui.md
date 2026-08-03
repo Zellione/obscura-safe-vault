@@ -385,6 +385,25 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   gracefully (manual lock cancels the worker before key wipe); undecodable files are skipped
   and counted; cancel flag checked between items; progress/results polled from the main
   thread. Hashes are session-lifetime heap data — never persisted, never logged.
+  **Phase 62 — perceptual video pass** (same "Exact + visually similar" mode, no new UI):
+  three-stage funnel in `video_perceptual_pass` — duration gate from the snapshot's
+  `duration_us` (±2 %, 500 ms floor, zero I/O), poster dHash prefilter (stored first-frame
+  JPEG, Hamming ≤ `DUP_VID_POSTER_MAX_BITS`=10, missing poster = plausible), then sampled
+  frames for videos with ≥ 1 plausible partner. Frame sigs stay index-aligned with the
+  candidate list (parallel vectors — the Phase 61 mapping-bug lesson). Groups emit as
+  `DupGroup::Kind::SimilarVideo`; non-FFmpeg builds accept the duration+poster verdict.
+- `dup_video_sig.*` (Phase 62) — `compute_video_frame_sig(DupStreamRead, total_size,
+  VideoSig&)`: software-decodes one frame at each `DUP_VID_FRAME_POSITIONS` fraction
+  (10–90 %) of the timeline through its own callback AVIO (mirrors `media::ChunkAvio`'s
+  callbacks) and dHashes each (96×96 RGB24 via swscale). `OSV_VENDORED_AV`-guarded; the
+  non-AV stub returns false with `frame_valid` 0. The worker backs `DupStreamRead` with a
+  chunk-caching `read_thumb_span` reader (`VideoStream` in dup_scan.cpp — `VideoSource`
+  borrows the main-thread `read_fp_` and is FORBIDDEN on the worker). Gotcha fixed here:
+  after the demux-EOF flush, `av_packet_unref` resets `stream_index` to 0, so the stale
+  packet must never be sent post-flush (`decode_until` flushes exactly once, then drains).
+  Listed explicitly in osv_tests' premake5.lua files{}. Fixtures: same 2 s `testsrc2` clip
+  pre-encoded H.264/MP4 + VP9/WebM in `scripts/gen_media_fixtures.sh` (lavfi `gradients`
+  randomizes colors per invocation — do not use it for "same content" fixtures).
 
 ## Import planning & archive reading
 - `folder_scan.*` (Phase 51) — `scan_folder(root) -> vector<ZipEntry>` via
@@ -540,12 +559,19 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `album_rebind.{h,cpp}` — Viewer album binding logic: when the vault tree changes, remember the current item's path, re-list the album, then look up the remembered path. Returns whether the item survives and whether to preserve zoom/pan/playback state. Pure, unit-tested. Used by `ImageViewer::on_vault_changed`.
 
 ## Pure view / sort / model helpers (SDL-free unless noted, all unit-tested)
-- `dup_model.*` (Phase 61) — pure duplicate-finder model: `dhash64` (RGB buffer → 9×8
+- `dup_model.*` (Phase 61, extended Phase 62) — pure duplicate-finder model: `dhash64` (RGB buffer → 9×8
   grayscale cells → 64-bit difference hash), `hamming64`, `cluster_similar` (union-find at
   Hamming ≤ `DUP_SIMILAR_MAX_BITS` = 5); `DupGroup` (Identical / Similar-N-bits, sorted
   largest-reclaimable-bytes first) + `DupReview` KEEP/REMOVE marking state with the
   at-least-one-KEEP-per-group invariant (`A` = keep only focused; apply refused while any
-  group is all-REMOVE). Listed explicitly in osv_tests' premake5.lua files{}.
+  group is all-REMOVE). Phase 62 adds the video-signature model: `VideoSig` (poster hash +
+  5 sampled-frame hashes + validity bitmask), `duration_close` (±`DUP_VID_DURATION_TOL`=2 %
+  with `DUP_VID_DURATION_ABS_US`=500 ms floor), `video_sig_match` (frame evidence decides
+  when ≥ `DUP_VID_MIN_MATCHED`=4 of 5 positions are shared-valid at Hamming ≤
+  `DUP_VID_FRAME_MAX_BITS`=7; otherwise poster fallback at ≤ 10 bits), and
+  `cluster_video_sigs` (union-find over duration_close && video_sig_match pairs).
+  `DupGroup::Kind` gains `SimilarVideo` (renders "Similar video"). Listed explicitly in
+  osv_tests' premake5.lua files{}.
 - `child_counts.*` (Phase 51) — `direct_child_counts(node) -> SubtreeCounts` (galleries, images, videos counted
   separately, reusing the existing SubtreeCounts struct); `format_tile_counts(counts) -> string` — plural-aware
   formatting ("3 galleries · 12 items" / "1 gallery · 1 item" / "12 items" / "empty"), collapsing images+videos
