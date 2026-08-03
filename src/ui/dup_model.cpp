@@ -171,7 +171,7 @@ bool duration_close(uint64_t a_us, uint64_t b_us) noexcept
 
 bool video_sig_match(const VideoSig& a, const VideoSig& b) noexcept
 {
-    const uint8_t common = a.frame_valid & b.frame_valid;
+    const uint32_t common = a.frame_valid & b.frame_valid;
     int shared = 0;
     int matched = 0;
     for (size_t i = 0; i < DUP_VID_FRAME_POSITIONS.size(); ++i) {

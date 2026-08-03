@@ -4,6 +4,7 @@
 #include <array>
 #include <cstring>
 #include <map>
+#include <span>
 #include <monocypher.h>
 
 #include "crypto/secure_mem.h"
@@ -268,8 +269,8 @@ struct VideoStream {
         if (idx >= static_cast<int64_t>(item.data_spans.size())) return 0;
         if (idx != cached_index) {
             const auto& [off, len] = item.data_spans[static_cast<size_t>(idx)];
-            const auto res = vault::read_thumb_span(v, off, len, cache);
-            if (res != vault::VaultResult::Ok) {
+            if (const auto res = vault::read_thumb_span(v, off, len, cache);
+                res != vault::VaultResult::Ok) {
                 locked = res == vault::VaultResult::Locked;
                 cached_index = -1;
                 return -1;
@@ -288,16 +289,18 @@ struct VideoStream {
 // Returns Locked only when the vault locked underneath the read.
 vault::VaultResult poster_hash(const PassCtx& ctx, const DupScanItem& it, VideoSig& sig)
 {
-    if (it.thumb_length == 0) return vault::VaultResult::Ok;
+    using enum vault::VaultResult;
+    if (it.thumb_length == 0) return Ok;
     crypto::SecureBytes poster;
-    const auto res = vault::read_thumb_span(ctx.v, it.thumb_offset, it.thumb_length, poster);
-    if (res != vault::VaultResult::Ok) return res;
+    if (const auto res = vault::read_thumb_span(ctx.v, it.thumb_offset, it.thumb_length, poster);
+        res != Ok)
+        return res;
     const auto decoded = image::decode_from_memory(poster.as_span());
-    if (!decoded) return vault::VaultResult::Ok;
+    if (!decoded) return Ok;
     sig.poster_hash = dhash64(std::span(decoded->pixels.data(), decoded->pixels.size()),
                               decoded->width, decoded->height);
     sig.poster_ok = true;
-    return vault::VaultResult::Ok;
+    return Ok;
 }
 
 // True when i/j are plausible partners on the cheap evidence alone: duration
@@ -308,6 +311,59 @@ bool plausible_pair(const std::vector<DupScanItem>& items, std::span<const Video
     if (!duration_close(items[cand[i]].duration_us, items[cand[j]].duration_us)) return false;
     if (!sigs[i].poster_ok || !sigs[j].poster_ok) return true;
     return hamming64(sigs[i].poster_hash, sigs[j].poster_hash) <= DUP_VID_POSTER_MAX_BITS;
+}
+
+// Stage 2 — poster dHash per candidate. sigs[k] parallels cand[k].
+// False = cancelled (user or vault lock); out.cancelled is already set.
+bool poster_stage(const PassCtx& ctx, std::span<const size_t> cand,
+                  std::vector<VideoSig>& sigs, DupScanOutcome& out)
+{
+    for (size_t k = 0; k < cand.size(); ++k) {
+        if (ctx.cancel.load()) {
+            out.cancelled = true;
+            return false;
+        }
+        const auto& it = ctx.items[cand[k]];
+        {
+            const std::lock_guard lk(ctx.mtx);
+            ctx.current = it.node_path;
+        }
+        if (poster_hash(ctx, it, sigs[k]) == vault::VaultResult::Locked) {
+            out.cancelled = true;
+            return false;
+        }
+        ctx.done++;
+    }
+    return true;
+}
+
+// Stage 3 — sampled-frame signatures for flagged candidates. False = cancelled.
+bool frame_stage(const PassCtx& ctx, std::span<const size_t> cand,
+                 std::span<const char> wants_frames, std::vector<VideoSig>& sigs,
+                 DupScanOutcome& out)
+{
+    for (size_t k = 0; k < cand.size(); ++k) {
+        if (!wants_frames[k]) continue;
+        if (ctx.cancel.load()) {
+            out.cancelled = true;
+            return false;
+        }
+        const auto& it = ctx.items[cand[k]];
+        {
+            const std::lock_guard lk(ctx.mtx);
+            ctx.current = it.node_path;
+        }
+        VideoStream stream{.v = ctx.v, .item = it, .cache = {}};
+        if (const DupStreamRead reader = [&stream](uint64_t off, std::span<uint8_t> dst) {
+                return stream.read(off, dst);
+            };
+            !compute_video_frame_sig(reader, it.bytes, sigs[k]) && stream.locked) {
+            out.cancelled = true;
+            return false;
+        }
+        ctx.done++;
+    }
+    return true;
 }
 
 // Phase 62: perceptual video pass — duration gate (index metadata only),
@@ -322,63 +378,28 @@ void video_perceptual_pass(const PassCtx& ctx, const std::vector<bool>& in_exact
     std::vector<size_t> cand;
     for (size_t i = 0; i < ctx.items.size(); ++i)
         if (ctx.items[i].is_video && !in_exact[i]) cand.push_back(i);
-    std::erase_if(cand, [&](size_t i) {
-        return std::ranges::none_of(cand, [&](size_t j) {
+    std::erase_if(cand, [&cand, &ctx](size_t i) {
+        return std::ranges::none_of(cand, [&ctx, i](size_t j) {
             return j != i && duration_close(ctx.items[i].duration_us, ctx.items[j].duration_us);
         });
     });
     if (cand.size() < 2) return;
     ctx.total += cand.size();
 
-    // Stage 2 — poster dHash per candidate. sigs[k] parallels cand[k].
     std::vector<VideoSig> sigs(cand.size());
-    for (size_t k = 0; k < cand.size(); ++k) {
-        if (ctx.cancel.load()) {
-            out.cancelled = true;
-            return;
-        }
-        const auto& it = ctx.items[cand[k]];
-        {
-            const std::lock_guard lk(ctx.mtx);
-            ctx.current = it.node_path;
-        }
-        if (poster_hash(ctx, it, sigs[k]) == vault::VaultResult::Locked) {
-            out.cancelled = true;
-            return;
-        }
-        ctx.done++;
-    }
+    if (!poster_stage(ctx, cand, sigs, out)) return;
 
-    // Stage 3 — sampled-frame signatures for videos with a plausible partner.
+    // Flag videos with at least one plausible partner for frame decoding.
     std::vector<char> wants_frames(cand.size(), 0);
     for (size_t i = 0; i < cand.size(); ++i)
         for (size_t j = i + 1; j < cand.size(); ++j)
-            if (plausible_pair(ctx.items, sigs, cand, i, j))
-                wants_frames[i] = wants_frames[j] = 1;
+            if (plausible_pair(ctx.items, sigs, cand, i, j)) {
+                wants_frames[i] = 1;
+                wants_frames[j] = 1;
+            }
 
-    const auto frame_count = static_cast<size_t>(std::ranges::count(wants_frames, char{1}));
-    ctx.total += frame_count;
-    for (size_t k = 0; k < cand.size(); ++k) {
-        if (!wants_frames[k]) continue;
-        if (ctx.cancel.load()) {
-            out.cancelled = true;
-            return;
-        }
-        const auto& it = ctx.items[cand[k]];
-        {
-            const std::lock_guard lk(ctx.mtx);
-            ctx.current = it.node_path;
-        }
-        VideoStream stream{.v = ctx.v, .item = it, .cache = {}};
-        const DupStreamRead reader = [&stream](uint64_t off, std::span<uint8_t> dst) {
-            return stream.read(off, dst);
-        };
-        if (!compute_video_frame_sig(reader, it.bytes, sigs[k]) && stream.locked) {
-            out.cancelled = true;
-            return;
-        }
-        ctx.done++;
-    }
+    ctx.total += static_cast<size_t>(std::ranges::count(wants_frames, char{1}));
+    if (!frame_stage(ctx, cand, wants_frames, sigs, out)) return;
 
     // Stage 4 — cluster and emit. durations[k] parallels sigs[k]/cand[k].
     std::vector<uint64_t> durations(cand.size());

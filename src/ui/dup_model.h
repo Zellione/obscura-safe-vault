@@ -85,7 +85,7 @@ struct VideoSig {
     uint64_t                poster_hash = 0;
     bool                    poster_ok   = false;
     std::array<uint64_t, 5> frame_hash{};
-    uint8_t                 frame_valid = 0;   // bitmask, bit i = position i decoded
+    uint32_t                frame_valid = 0;   // bitmask, bit i = position i decoded
 };
 
 [[nodiscard]] bool duration_close(uint64_t a_us, uint64_t b_us) noexcept;

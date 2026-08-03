@@ -27,7 +27,7 @@ TEST(video_frame_sig_garbage_input_fails_cleanly)
     const std::vector<uint8_t> junk(4096, 0x5A);
     ui::VideoSig s;
     CHECK(!ui::compute_video_frame_sig(mem_reader(junk), junk.size(), s));
-    CHECK_EQ(s.frame_valid, uint8_t{0});
+    CHECK_EQ(s.frame_valid, uint32_t{0});
 }
 
 #ifdef OSV_VENDORED_AV
