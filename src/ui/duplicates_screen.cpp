@@ -575,7 +575,7 @@ void DuplicatesScreen::update(double dt)
                 focus_member_ = 0;
                 scroll_ = 0.0f;
                 status_.clear();
-                if (outcome->groups.empty() && outcome->skipped == 0) {
+                if (review_.groups().empty() && skipped_ == 0) {
                     done_summary_ = "No duplicates found";
                     state_ = State::Done;
                 } else {
