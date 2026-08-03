@@ -708,14 +708,32 @@ void DuplicatesScreen::render_review(gfx::Renderer& r, float W, float H)
     // afterwards (reserve, never overlay — same rule as the gallery grid).
     // Row height is member-count independent, so one group's layout differs
     // from the next only in tile width/centering.
+
+    // Viewport culling: row_h is member-count independent (dup_layout.h), so
+    // the visible index range is direct arithmetic. Off-screen rows are never
+    // drawn — and since draw_member_tile is what submits thumbnail fetches,
+    // they cost no decode work either (the 8 GB review-churn fix).
     const float tile_h = dup_tile_height(H);
-    float group_y = OY;
-    for (size_t g = 0; g < review_.groups().size(); ++g) {
+    const float row_h =
+        dup_row_layout(OX, W - 2 * OX, tile_h, font_.pixel_height(), 1).row_h;
+    const float view_h = H - dup_footer_height(font_.pixel_height()) - OY;
+    const size_t n = review_.groups().size();
+    const auto first = std::min(n, static_cast<size_t>(std::max(0.0f, scroll_ / row_h)));
+    const auto last  = std::min(n, static_cast<size_t>((scroll_ + view_h) / row_h) + 1);
+    for (size_t g = first; g < last; ++g) {
         const auto lay = dup_row_layout(OX, W - 2 * OX, tile_h, font_.pixel_height(),
                                         review_.groups()[g].members.size());
-        draw_group_row(r, font_, *this, g, group_y - scroll_, lay);
-        group_y += lay.row_h;
+        draw_group_row(r, font_, *this, g, OY + static_cast<float>(g) * row_h - scroll_, lay);
     }
+
+    // Prune queued decodes that scrolled out of view (image_viewer.cpp:850
+    // pattern); keep the inspect request alive.
+    std::vector<uint64_t> keep;
+    for (size_t g = first; g < last; ++g)
+        for (const DupMember& m : review_.groups()[g].members)
+            if (m.thumb_length > 0) keep.push_back(m.thumb_offset);
+    if (inspect_.key.has_value()) keep.push_back(*inspect_.key);
+    worker_.retain(keep);
 
     // Opaque header band: title + skipped notice + stale warning.
     draw_chrome_band(r, {0, 0, W, OY - 8}, BG, /*rule_at_bottom*/ true);
