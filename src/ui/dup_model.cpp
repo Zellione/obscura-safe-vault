@@ -91,14 +91,28 @@ DupReview::DupReview(std::vector<DupGroup> groups) : groups_(std::move(groups))
     std::ranges::stable_sort(groups_, [](const DupGroup& a, const DupGroup& b) {
         return group_reclaimable(a) > group_reclaimable(b);
     });
+    // Default marks: keep the first member of each group, pre-mark the rest
+    // REMOVE — a review applied untouched dedups down to one copy per group.
+    for (DupGroup& g : groups_)
+        for (size_t i = 0; i < g.members.size(); ++i)
+            g.members[i].keep = (i == 0);
 }
 
 const std::vector<DupGroup>& DupReview::groups() const noexcept { return groups_; }
 
-void DupReview::toggle(size_t g, size_t m)
+bool DupReview::toggle(size_t g, size_t m)
 {
-    if (g < groups_.size() && m < groups_[g].members.size())
-        groups_[g].members[m].keep = !groups_[g].members[m].keep;
+    if (g >= groups_.size() || m >= groups_[g].members.size()) return false;
+    DupMember& member = groups_[g].members[m];
+    // Refuse to unmark the group's last keeper: at least one copy always
+    // stays KEEP, so the all-REMOVE state is unreachable via toggling.
+    if (member.keep) {
+        const auto keepers = std::ranges::count_if(
+            groups_[g].members, [](const DupMember& x) { return x.keep; });
+        if (keepers <= 1) return false;
+    }
+    member.keep = !member.keep;
+    return true;
 }
 
 void DupReview::keep_only(size_t g, size_t m)

@@ -122,30 +122,56 @@ TEST(dup_review_sorts_groups_by_reclaimable_desc)
     CHECK_EQ(rev.groups()[0].members[0].bytes, uint64_t{500});
 }
 
+// Default marks: the first member of every group is the keeper, every other
+// member starts marked REMOVE — one Ctrl+Enter dedups without manual marking.
+TEST(dup_review_defaults_keep_first_member_only)
+{
+    ui::DupReview rev({make_group({100, 200, 300})});
+    REQUIRE(rev.groups().size() == 1);
+    CHECK(rev.groups()[0].members[0].keep);
+    CHECK(!rev.groups()[0].members[1].keep);
+    CHECK(!rev.groups()[0].members[2].keep);
+    CHECK(rev.any_marked());
+    CHECK(rev.can_apply());
+    CHECK_EQ(rev.marked_count(), size_t{2});
+    CHECK_EQ(rev.marked_bytes(), uint64_t{500});
+}
+
 TEST(dup_review_toggle_and_totals)
 {
     ui::DupReview rev({make_group({100, 100})});
-    CHECK(!rev.any_marked());
-    CHECK(!rev.can_apply());          // nothing marked -> nothing to apply
-    rev.toggle(0, 1);                 // REMOVE second copy
-    CHECK(rev.any_marked());
-    CHECK(rev.can_apply());
+    CHECK(rev.any_marked());          // default: second copy pre-marked REMOVE
     CHECK_EQ(rev.marked_count(), size_t{1});
     CHECK_EQ(rev.marked_bytes(), uint64_t{100});
     const auto paths = rev.marked_paths();
     REQUIRE(paths.size() == 1);
     CHECK_EQ(paths[0], std::string("g/f1"));
-    rev.toggle(0, 1);                 // back to KEEP
+    CHECK(rev.toggle(0, 1));          // back to KEEP
     CHECK(!rev.any_marked());
+    CHECK(!rev.can_apply());          // nothing marked -> nothing to apply
+    CHECK(rev.toggle(0, 1));          // REMOVE second copy again
+    CHECK(rev.can_apply());
 }
 
-TEST(dup_review_refuses_fully_removed_group)
+// Space can never unmark a group's last keeper: the toggle is refused so the
+// all-REMOVE state is unreachable through the UI.
+TEST(dup_review_toggle_refuses_last_keeper)
 {
     ui::DupReview rev({make_group({100, 100})});
-    rev.toggle(0, 0);
-    rev.toggle(0, 1);
-    CHECK(rev.group_all_removed(0));
-    CHECK(!rev.can_apply());          // would delete every copy
+    CHECK(!rev.toggle(0, 0));         // members[0] is the only keeper
+    CHECK(rev.groups()[0].members[0].keep);
+    CHECK(!rev.group_all_removed(0));
+    CHECK(rev.toggle(0, 1));          // make members[1] a keeper too
+    CHECK(rev.toggle(0, 0));          // now members[0] may be removed
+    CHECK(!rev.toggle(0, 1));         // ...which makes members[1] the last keeper
+    CHECK(rev.groups()[0].members[1].keep);
+}
+
+TEST(dup_review_toggle_out_of_range_is_refused)
+{
+    ui::DupReview rev({make_group({100, 100})});
+    CHECK(!rev.toggle(1, 0));
+    CHECK(!rev.toggle(0, 2));
 }
 
 TEST(dup_review_keep_only)

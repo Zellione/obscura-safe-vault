@@ -53,9 +53,13 @@ struct DupGroup {
 class DupReview {
 public:
     DupReview() = default;
-    explicit DupReview(std::vector<DupGroup> groups);  // sorts reclaimable desc
+    // Sorts groups largest-reclaimable first, then applies the default marks:
+    // the first member of each group is KEEP, every other member REMOVE.
+    explicit DupReview(std::vector<DupGroup> groups);
     [[nodiscard]] const std::vector<DupGroup>& groups() const noexcept;
-    void toggle(size_t g, size_t m);
+    // Flip one member's KEEP/REMOVE mark. Refused (returns false, no change)
+    // when the member is its group's last keeper or g/m is out of range.
+    bool toggle(size_t g, size_t m);
     void keep_only(size_t g, size_t m);      // member m KEEP, siblings REMOVE
     [[nodiscard]] bool group_all_removed(size_t g) const;
     [[nodiscard]] bool any_marked() const;
