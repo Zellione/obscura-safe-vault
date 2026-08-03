@@ -422,6 +422,34 @@ std::vector<DupScanItem> collect_scan_items(const vault::Vault& v)
     return out;
 }
 
+size_t refresh_review_members(const vault::Vault& v, DupReview& review)
+{
+    size_t dropped = 0;
+    review.refresh_members([&v, &dropped](DupMember& m) {
+        const vault::IndexNode* n = v.resolve_node(m.node_path);
+        if (!n || n->is_gallery() || n->is_video() != m.is_video) {
+            ++dropped;
+            return false;
+        }
+        if (n->is_image()) {
+            m.bytes        = n->meta.orig_size;
+            m.data_spans   = {{n->meta.data_offset, n->meta.data_length}};
+            m.thumb_offset = n->meta.thumb_offset;
+            m.thumb_length = n->meta.thumb_length;
+        } else {
+            m.bytes = n->vmeta.orig_size;
+            m.data_spans.clear();
+            m.data_spans.reserve(n->vmeta.chunks.size());
+            for (const vault::VideoChunk& c : n->vmeta.chunks)
+                m.data_spans.emplace_back(c.offset, c.length);
+            m.thumb_offset = n->vmeta.poster_offset;
+            m.thumb_length = n->vmeta.poster_length;
+        }
+        return true;
+    });
+    return dropped;
+}
+
 // --- DupScanJob implementation ---
 
 DupScanJob::~DupScanJob()
