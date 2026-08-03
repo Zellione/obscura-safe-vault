@@ -17,7 +17,6 @@ namespace ui {
 namespace {
 constexpr float OX  = 40;    // left margin
 constexpr float OY  = 150;   // list top
-constexpr float PAD = 9;     // vertical padding inside a row
 }
 
 DuplicatesScreen::DuplicatesScreen(gfx::Window& win, gfx::FontAtlas& font,
