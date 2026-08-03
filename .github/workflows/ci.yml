@@ -194,6 +194,57 @@ jobs:
             mv /usr/bin/link.exe /usr/bin/link.exe.msys2-bak
           fi
 
+      # ---------------------------------------------------------------------
+      # ccache for the app build (MSVC support, ccache >= 4.8). Wiring follows
+      # ccache's documented MSBuild recipe: a copy of ccache.exe named cl.exe
+      # is handed to MSBuild via /p:CLToolPath (the shim dir is NOT on PATH,
+      # so ccache resolves the *real* cl.exe through the msvc-dev-cmd PATH
+      # without recursing), /p:TrackFileAccess=false disables the FileTracker
+      # (incompatible with a wrapped compiler; CI builds are full builds, so
+      # nothing is lost), and /p:UseMultiToolTask=true schedules one cl.exe
+      # per source file — replacing /MP, which ccache cannot cache (it would
+      # silently fall back to the real compiler on every TU). Debug info is
+      # /Z7 (premake `debugformat "c7"`), the other ccache prerequisite.
+      # Fallback is safe by construction: an invocation ccache can't cache is
+      # forwarded to the real cl.exe — worst case is an uncached compile.
+      # ---------------------------------------------------------------------
+      - name: Install ccache
+        shell: pwsh
+        run: choco install ccache --no-progress -y
+
+      # Primary key never matches (sha suffix), so every run restores the
+      # newest prior cache for this config and saves its own updated copy.
+      - name: Cache ccache directory
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-win2022-${{ matrix.config }}-${{ github.sha }}
+          restore-keys: |
+            ccache-win2022-${{ matrix.config }}-
+
+      - name: Set up ccache cl.exe shim
+        shell: pwsh
+        run: |
+          $shim = Join-Path $env:RUNNER_TEMP "ccache-cl"
+          New-Item -ItemType Directory -Force -Path $shim | Out-Null
+          # (Get-Command ccache) resolves to Chocolatey's SHIM exe; copying
+          # that as cl.exe breaks masquerading (the shim re-launches the real
+          # ccache with argv[0]="ccache", which then expects a compiler as its
+          # first argument and dies with exit -1 on "/c"). Copy the real
+          # binary out of the package's tools dir instead.
+          $real = Get-ChildItem "C:\ProgramData\chocolatey\lib\ccache\tools" -Recurse -Filter ccache.exe | Select-Object -First 1
+          if (-not $real) { throw "real ccache.exe not found under chocolatey lib" }
+          Copy-Item $real.FullName (Join-Path $shim "cl.exe")
+          Add-Content -Path $env:GITHUB_ENV -Encoding utf8 -Value @(
+            "OSV_CCACHE_SHIM=$shim",
+            "CCACHE_DIR=$env:GITHUB_WORKSPACE\.ccache",
+            # content: re-hash the compiler binary instead of trusting mtime,
+            # so a runner-image MSVC update invalidates cleanly.
+            "CCACHE_COMPILERCHECK=content",
+            "CCACHE_MAXSIZE=800M"
+          )
+          ccache --zero-stats
+
       - name: Cache premake5 binary
         uses: actions/cache@v4
         id: cache-premake5
@@ -259,8 +310,17 @@ jobs:
       - name: Generate VS2022 solution
         run: bin\premake5.exe vs2022
 
+      # CLToolPath/TrackFileAccess/UseMultiToolTask: see the ccache comment
+      # block above. EnforceProcessCountAcrossBuilds keeps the per-file cl
+      # scheduling within the machine's core budget across the /m project nodes.
       - name: Build (${{ matrix.config }})
-        run: msbuild ObscuraSafeVault.sln /m "/p:Configuration=${{ matrix.config }}" /p:Platform=x64
+        run: msbuild ObscuraSafeVault.sln /m "/p:Configuration=${{ matrix.config }}" /p:Platform=x64 "/p:CLToolPath=$env:OSV_CCACHE_SHIM" /p:TrackFileAccess=false /p:UseMultiToolTask=true /p:EnforceProcessCountAcrossBuilds=true
+
+      # Hit/miss numbers for this run — the tell-tale if ccache ever starts
+      # falling back (e.g. "unsupported compiler option" after a flag change).
+      - name: ccache stats
+        shell: pwsh
+        run: ccache --show-stats -v
 
       - name: Run tests (${{ matrix.config }})
         env:

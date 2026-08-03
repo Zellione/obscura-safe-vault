@@ -313,6 +313,13 @@ workspace "ObscuraSafeVault"
     cppdialect "C++23"
     warnings   "Extra"
 
+    -- MSVC: compile each project's sources in parallel (/MP). Only the Visual
+    -- Studio generator consumes this — Ninja/gmake parallelise via their own
+    -- schedulers. Without it, msbuild /m only parallelises across the 4
+    -- projects while every .cpp inside a project compiles serially, which is
+    -- what made the Windows CI leg spend 10-15 min in cl.exe.
+    flags { "MultiProcessorCompile" }
+
     -- Path (relative to the repo root / process cwd) of the bundled UI font.
     defines { 'OSV_DEFAULT_FONT="assets/fonts/NotoSans-Regular.ttf"' }
 
@@ -344,6 +351,12 @@ workspace "ObscuraSafeVault"
     -- stdio is deliberate; see vault/file_util.h).
     filter "system:windows"
         defines { "NOMINMAX", "WIN32_LEAN_AND_MEAN", "_CRT_SECURE_NO_WARNINGS" }
+        -- /Z7 (C7-compatible debug info embedded in the .obj) instead of /Zi:
+        -- /Zi funnels every parallel cl.exe instance through one mspdbsrv.exe
+        -- to serialise PDB writes, which throttles the /MP parallelism enabled
+        -- above. /Z7 needs no PDB server, and it is also what a future
+        -- ccache/sccache integration would require (neither can cache /Zi).
+        debugformat "c7"
         -- All vendored static libs (SDL3, libheif/libde265/libaom/libwebp) are
         -- built Release, so pin the whole workspace to the release dynamic CRT and
         -- release iterators in every config; otherwise a Debug build hits LNK2038
