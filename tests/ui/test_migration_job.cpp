@@ -16,6 +16,7 @@
 namespace fixtures {
 // Forward declare from test fixtures
 std::vector<uint8_t> load_anim_webp();
+std::vector<uint8_t> load_webp();
 std::vector<uint8_t> solid_png(uint32_t w, uint32_t h, uint8_t r, uint8_t g, uint8_t b);
 }
 
@@ -183,10 +184,7 @@ TEST(migration_job_fixes_video_codec)
 
     // Load real MP4 fixture
     auto mp4_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
-    if (mp4_bytes.empty()) {
-        CHECK(true);  // Skip if fixture missing
-        return;
-    }
+    REQUIRE(!mp4_bytes.empty());
     REQUIRE(v.add_video("", mp4_bytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
 
     // Force codec to Unknown (simulating old vault before this build's FFmpeg)
@@ -204,9 +202,17 @@ TEST(migration_job_fixes_video_codec)
     CHECK(out.ok);
     CHECK(!out.cancelled);
     CHECK_EQ(static_cast<int>(out.total), static_cast<int>(scan.total()));
-    CHECK(out.videos_fixed + out.videos_skipped >= 1);
+    CHECK_EQ(out.videos_fixed, 1);
+    CHECK_EQ(out.failed, 0);
 
-    // Verify watermark was stamped even if codec couldn't be resolved
+    // Verify the video node's codec was actually detected
+    const std::vector<const vault::IndexNode*> kids = v.list("");
+    REQUIRE(kids.size() == 1);
+    CHECK(kids[0]->vmeta.codec != vault::VideoCodec::Unknown);
+    CHECK(kids[0]->vmeta.width > 0);
+    CHECK(kids[0]->vmeta.poster_length > 0);
+
+    // Verify watermark was stamped
     CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
 #endif
 }
@@ -269,4 +275,72 @@ TEST(migration_job_cancel_prevents_watermark)
     // Verify watermark was NOT stamped (migration still pending)
     // This is the critical test: that the race condition fix prevents watermark when cancelled
     CHECK(vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
+}
+
+TEST(migration_job_flips_animated_webp_and_leaves_static_webp_alone)
+{
+    JobTempVault tv("anim_static_webp");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
+            == vault::VaultResult::Ok);
+
+    // Load both animated and static WebP fixtures
+    const auto anim_webp = fixtures::load_anim_webp();
+    const auto static_webp = fixtures::load_webp();
+    REQUIRE(!anim_webp.empty());
+    REQUIRE(!static_webp.empty());
+
+    // Add both to the vault
+    REQUIRE(v.add_image("", anim_webp, "anim.webp") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", static_webp, "static.webp") == vault::VaultResult::Ok);
+
+    // Force both to the pre-v7 state (animated flag unknown) that the migration repairs
+    REQUIRE(vault::apply_image_animated(v, "anim.webp", false) == vault::VaultResult::Ok);
+    REQUIRE(vault::apply_image_animated(v, "static.webp", false) == vault::VaultResult::Ok);
+
+    // Run the migration
+    ui::MigrationJob job;
+    REQUIRE(job.start(v));
+    const ui::MigrationOutcome out = run_to_completion(job);
+
+    CHECK(out.ok);
+    CHECK(!out.cancelled);
+    CHECK_EQ(out.images_fixed, 2);
+
+    // Verify each image ended up with the correct flag
+    for (const vault::IndexNode* n : v.list("")) {
+        if (n->name == "anim.webp") {
+            CHECK(n->meta.animated);
+        } else if (n->name == "static.webp") {
+            CHECK(!n->meta.animated);
+        }
+    }
+}
+
+TEST(migration_job_not_reoffered_after_completion)
+{
+    JobTempVault tv("not_reoffered");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
+            == vault::VaultResult::Ok);
+
+    // Add an image that needs repair (animated WebP forced to unknown)
+    auto anim_webp = fixtures::load_anim_webp();
+    REQUIRE(v.add_image("", anim_webp, "anim.webp") == vault::VaultResult::Ok);
+    REQUIRE(vault::apply_image_animated(v, "anim.webp", false) == vault::VaultResult::Ok);
+
+    // Verify migration is pending before the job
+    CHECK(vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
+    CHECK(!vault::scan_migration(v).empty());
+
+    // Run the job to completion
+    ui::MigrationJob job;
+    REQUIRE(job.start(v));
+    const ui::MigrationOutcome out = run_to_completion(job);
+    CHECK(out.ok);
+    CHECK(!out.cancelled);
+
+    // After a successful full pass, migration should NOT be pending
+    CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
+    CHECK(vault::scan_migration(v).empty());
 }
