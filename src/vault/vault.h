@@ -223,6 +223,11 @@ public:
     // change between import time and now can.
     friend void test_only_force_video_codec_unknown(Vault& v, std::string_view node_path);
 
+    // Phase 65 test seam: force an animatable image to appear un-backfilled by
+    // clearing the animated flag, simulating "imported before animation detection
+    // was implemented". Used to test scan_migration's image-counting arm.
+    friend void test_only_force_image_animated_unknown(Vault& v, std::string_view node_path);
+
     // Remove an image from the index (its chunk is orphaned, reclaimed by Phase 7
     // compaction). NotFound if the image does not exist.
     [[nodiscard]] VaultResult remove_image(std::string_view gallery_path,

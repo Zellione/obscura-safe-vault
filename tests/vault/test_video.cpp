@@ -24,6 +24,14 @@ void test_only_force_video_codec_unknown(Vault& v, std::string_view node_path)
     n->vmeta.poster_offset = 0;
     n->vmeta.poster_length = 0;
 }
+
+// Phase 65 test seam — see the friend declaration + comment in vault.h.
+void test_only_force_image_animated_unknown(Vault& v, std::string_view node_path)
+{
+    IndexNode* n = v.resolve_node(node_path);
+    if (!n) return;
+    n->meta.animated = false;
+}
 }  // namespace vault
 
 namespace {
