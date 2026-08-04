@@ -15,7 +15,9 @@
 - **Phase 50 write protocol:** every append to `fp_` holds `write_mutex_`. Worker threads read **only** through `vault::read_thumb_span` (which uses `thumb_fp_` + `thumb_mutex_`); they must never touch `read_fp_` or the index tree.
 - **Persisted-byte rule:** an out-of-range persisted value is **rejected on deserialise, not clamped** (the Phase 37/47/49 rule).
 - **Layering:** `src/vault/` must not depend on `src/media/`. `vault.h` never includes `media/*.h`.
-- **TDD:** every task writes the failing test first, watches it fail, then implements.
+- **TDD:** every task writes the failing test first, watches it fail, then implements. **Two sanctioned exceptions, agreed with the owner before execution — these are not violations:**
+  - **Task 6 (decode pool)** is a behaviour-preserving refactor. Its new test is expected to PASS serially before the pool exists; it is a regression net, not a red-green cycle. The real gates are the unchanged Task 4/5 tests plus ThreadSanitizer.
+  - **Task 8 (UI wiring)** has no automated tests. This codebase has no headless harness for screens, and inventing one is out of scope for this phase. It is gated by manual verification through the `running-the-app` skill.
 - **Tests run the whole suite** — `tests/test_framework.h` has no name filter. To check one test, grep the output.
 - **`scripts/gen.sh`** must be re-run whenever a source file is added, moved, or removed (regenerates `compile_commands.json` for clangd).
 - **⛔ Never merge.** Owner merges. Post the PR and stop.
@@ -1250,16 +1252,34 @@ TEST(migration_job_cancel_leaves_watermark_unset)
     REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
             == vault::VaultResult::Ok);
 
+    // Enough items that a cancel reliably lands MID-pass. Cancelling an empty
+    // vault would assert nothing: the repair loop never runs, `cancelled` stays
+    // false, and the watermark is stamped exactly as on a clean full pass.
+    const std::vector<uint8_t> anim = read_image_fixture("animated.gif");
+    constexpr int kCount = 64;
+    for (int i = 0; i < kCount; ++i) {
+        const std::string name = "c" + std::to_string(i) + ".gif";
+        REQUIRE(v.add_image("", anim, name) == vault::VaultResult::Ok);
+        REQUIRE(vault::apply_image_animated(v, name, false) == vault::VaultResult::Ok);
+    }
+
     ui::MigrationJob job;
     REQUIRE(job.start(v));
+    // Cancel immediately. Deliberately NOT "spin until done() > 0 then cancel":
+    // that spin exits when the job finishes, turning cancel() into a no-op and
+    // making the assertions below fail. Cancelling at once only requires the
+    // flag to arrive before 64 decrypt+decode items finish, which the loop
+    // checks at the top of every iteration.
     job.cancel();
     const ui::MigrationOutcome out = run_to_completion(job);
 
-    // A cancel is a clean partial: the vault stays readable and un-stamped.
+    // A cancel is a clean partial: committed, durable, readable — but NOT
+    // stamped, so the next unlock re-offers the migration. These assertions are
+    // unconditional on purpose.
     CHECK(out.ok);
-    if (out.cancelled) {
-        CHECK(vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
-    }
+    CHECK(out.cancelled);
+    CHECK(vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
+    CHECK(out.images_fixed < kCount);   // stopped early, did not silently finish
 }
 ```
 
