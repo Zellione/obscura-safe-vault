@@ -554,6 +554,7 @@ project "osv_tests"
         "src/ui/dup_model.cpp",
         "src/ui/dup_scan.cpp",
         "src/ui/dup_video_sig.cpp",
+        "src/ui/migration_job.cpp",
         "src/ui/detail_panel.cpp",
         "src/ui/natural_sort.cpp",
         "src/ui/meta_json.cpp",
