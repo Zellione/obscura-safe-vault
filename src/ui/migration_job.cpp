@@ -195,6 +195,10 @@ void MigrationJob::run(vault::Vault& v)
     // The watermark is stamped ONLY on a full pass. A cancel still commits the
     // work already applied — it is correct and durable — but leaves the vault
     // marked un-migrated so the next unlock re-offers it.
+    // Re-read cancel before stamping to catch a cancel arriving after loop exit.
+    if (progress_.cancel.load()) {
+        out.cancelled = true;
+    }
     vault::VaultSettings settings = vault::vault_settings(v);
     if (!out.cancelled) {
         settings = vault::stamp_migrated(settings, media::PROBE_CAPS_GEN);
