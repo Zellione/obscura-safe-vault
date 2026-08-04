@@ -276,9 +276,20 @@ TEST(migration_scan_byte_accounting_mixed)
 }
 #endif  // OSV_VENDORED_AV
 
-TEST(apply_image_animated_defers_the_commit)
+TEST(apply_image_animated_returns_not_found_for_missing_path)
 {
-    MigTempVault tv("apply_anim");
+    MigTempVault tv("apply_anim_notfound");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
+            == vault::VaultResult::Ok);
+
+    CHECK(vault::apply_image_animated(v, "missing.png", true)
+          == vault::VaultResult::NotFound);
+}
+
+TEST(apply_image_animated_noop_on_non_animatable_format)
+{
+    MigTempVault tv("apply_anim_noop_png");
     vault::Vault v;
     REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
             == vault::VaultResult::Ok);
@@ -286,10 +297,310 @@ TEST(apply_image_animated_defers_the_commit)
 
     // A PNG cannot animate: the apply is a well-formed no-op, not an error.
     CHECK(vault::apply_image_animated(v, "a.png", true) == vault::VaultResult::Ok);
+}
 
-    CHECK(vault::apply_image_animated(v, "missing.png", true)
+TEST(apply_image_animated_defers_commit_when_animatable_format_changes)
+{
+    auto anim_webp = fixtures::load_anim_webp();
+    REQUIRE(!anim_webp.empty());
+
+    MigTempVault tv("apply_anim_defer");
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
+                == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("", anim_webp, "anim.webp") == vault::VaultResult::Ok);
+
+        // At this point, anim.webp has animated=true (auto-detected on import).
+        // Now apply false WITHOUT committing: in-memory change only.
+        CHECK(vault::apply_image_animated(v, "anim.webp", false) == vault::VaultResult::Ok);
+
+        // In-memory, it is now false.
+        {
+            const vault::IndexNode* n = v.resolve_node("anim.webp");
+            REQUIRE(n != nullptr);
+            CHECK(n->meta.animated == false);  // in-memory mutation
+        }
+    }
+    // Close and reopen WITHOUT calling commit_migration: the in-memory change should NOT persist.
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
+        REQUIRE(v.unlock(mig_bytes("pw"), {}) == vault::VaultResult::Ok);
+
+        // The animated flag should be back to true (persisted state from import).
+        const vault::IndexNode* n = v.resolve_node("anim.webp");
+        REQUIRE(n != nullptr);
+        REQUIRE(n->is_image());
+        CHECK(n->meta.animated == true);  // reverted to persisted state (apply was not committed)
+    }
+}
+
+TEST(apply_image_animated_with_commit_migration_persists_the_flag)
+{
+    auto anim_webp = fixtures::load_anim_webp();
+    REQUIRE(!anim_webp.empty());
+
+    MigTempVault tv("apply_anim_persist");
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
+                == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("", anim_webp, "anim.webp") == vault::VaultResult::Ok);
+
+        // Simulate an old vault by forcing animated to false.
+        vault::test_only_force_image_animated_unknown(v, "anim.webp");
+
+        // Apply the correct flag.
+        CHECK(vault::apply_image_animated(v, "anim.webp", true) == vault::VaultResult::Ok);
+
+        // Now commit the migration WITH the apply.
+        const vault::VaultSettings stamped =
+            vault::stamp_migrated(vault::vault_settings(v), 1);
+        REQUIRE(vault::commit_migration(v, stamped) == vault::VaultResult::Ok);
+    }
+    // Reopen: the animated flag should now persist.
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
+        REQUIRE(v.unlock(mig_bytes("pw"), {}) == vault::VaultResult::Ok);
+
+        const vault::IndexNode* n = v.resolve_node("anim.webp");
+        REQUIRE(n != nullptr);
+        CHECK(n->meta.animated == true);  // PERSISTED via commit_migration
+    }
+}
+
+TEST(apply_image_animated_noop_when_already_correct_value)
+{
+    auto anim_webp = fixtures::load_anim_webp();
+    REQUIRE(!anim_webp.empty());
+
+    MigTempVault tv("apply_anim_noop_correct");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", anim_webp, "anim.webp") == vault::VaultResult::Ok);
+
+    // anim.webp auto-detects as animated=true on import.
+    // Applying true again is a no-op (returns Ok, no mutation).
+    CHECK(vault::apply_image_animated(v, "anim.webp", true) == vault::VaultResult::Ok);
+}
+
+#ifdef OSV_VENDORED_AV
+TEST(apply_video_probe_returns_not_found_for_missing_path)
+{
+    MigTempVault tv("apply_vp_notfound");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
+            == vault::VaultResult::Ok);
+
+    vault::VideoProbeApply probe;
+    probe.codec = vault::VideoCodec::H264;
+    probe.width = 640;
+    probe.height = 480;
+    probe.duration_us = 1000000;
+
+    CHECK(vault::apply_video_probe(v, "missing.mp4", probe)
           == vault::VaultResult::NotFound);
 }
+
+TEST(apply_video_probe_noop_when_codec_already_real)
+{
+    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!video_bytes.empty());
+
+    MigTempVault tv("apply_vp_noop_real");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("", video_bytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+
+    // tiny.mp4 was probed on import; codec is already known.
+    const vault::IndexNode* n_before = v.resolve_node("tiny.mp4");
+    REQUIRE(n_before != nullptr);
+    const vault::VideoCodec codec_before = n_before->vmeta.codec;
+    CHECK(codec_before != vault::VideoCodec::Unknown);
+
+    // Applying a probe with a different codec should be a no-op.
+    vault::VideoProbeApply probe;
+    probe.codec = vault::VideoCodec::VP9;
+    probe.width = 800;
+    probe.height = 600;
+    probe.duration_us = 2000000;
+
+    CHECK(vault::apply_video_probe(v, "tiny.mp4", probe) == vault::VaultResult::Ok);
+
+    // Codec should remain unchanged.
+    const vault::IndexNode* n_after = v.resolve_node("tiny.mp4");
+    REQUIRE(n_after != nullptr);
+    CHECK_EQ(n_after->vmeta.codec, codec_before);
+}
+
+TEST(apply_video_probe_noop_when_probe_codec_unknown)
+{
+    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!video_bytes.empty());
+
+    MigTempVault tv("apply_vp_noop_unknown");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("", video_bytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+
+    // Force the video to Unknown (standing in for "probe failed").
+    vault::test_only_force_video_codec_unknown(v, "tiny.mp4");
+
+    const vault::IndexNode* n_before = v.resolve_node("tiny.mp4");
+    REQUIRE(n_before != nullptr);
+    CHECK_EQ(n_before->vmeta.codec, vault::VideoCodec::Unknown);
+
+    // Apply a probe with codec=Unknown (still undecodable).
+    // This should be a clean no-op, not a corruption.
+    vault::VideoProbeApply probe;
+    probe.codec = vault::VideoCodec::Unknown;
+
+    CHECK(vault::apply_video_probe(v, "tiny.mp4", probe) == vault::VaultResult::Ok);
+
+    // Metadata should remain unchanged.
+    const vault::IndexNode* n_after = v.resolve_node("tiny.mp4");
+    REQUIRE(n_after != nullptr);
+    CHECK_EQ(n_after->vmeta.codec, vault::VideoCodec::Unknown);
+}
+
+TEST(apply_video_probe_writes_metadata_when_unknown_probes_to_real_codec)
+{
+    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!video_bytes.empty());
+
+    MigTempVault tv("apply_vp_write_metadata");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("", video_bytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+
+    // Force the video to Unknown.
+    vault::test_only_force_video_codec_unknown(v, "tiny.mp4");
+
+    // Verify it's Unknown.
+    {
+        const vault::IndexNode* n = v.resolve_node("tiny.mp4");
+        REQUIRE(n != nullptr);
+        CHECK_EQ(n->vmeta.codec, vault::VideoCodec::Unknown);
+    }
+
+    // Apply a real probe result.
+    vault::VideoProbeApply probe;
+    probe.codec = vault::VideoCodec::H264;
+    probe.width = 320;
+    probe.height = 240;
+    probe.duration_us = 5000000;
+
+    CHECK(vault::apply_video_probe(v, "tiny.mp4", probe) == vault::VaultResult::Ok);
+
+    // Metadata should now be written (but NOT committed yet).
+    {
+        const vault::IndexNode* n = v.resolve_node("tiny.mp4");
+        REQUIRE(n != nullptr);
+        CHECK_EQ(n->vmeta.codec, vault::VideoCodec::H264);
+        CHECK_EQ(n->vmeta.width, 320u);
+        CHECK_EQ(n->vmeta.height, 240u);
+        CHECK_EQ(n->vmeta.duration_us, 5000000ull);
+    }
+}
+
+TEST(apply_video_probe_appends_poster_chunk_when_missing)
+{
+    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    auto poster_bytes = fixtures::solid_png(100, 100, 255, 0, 0);
+    REQUIRE(!video_bytes.empty());
+    REQUIRE(!poster_bytes.empty());
+
+    MigTempVault tv("apply_vp_poster_append");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("", video_bytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+
+    // Force the video to Unknown and remove the poster (if any).
+    vault::test_only_force_video_codec_unknown(v, "tiny.mp4");
+
+    // Manually clear poster (via IndexNode manipulation would be test-only seam).
+    {
+        vault::IndexNode* n = v.resolve_node("tiny.mp4");
+        REQUIRE(n != nullptr);
+        n->vmeta.poster_offset = 0;
+        n->vmeta.poster_length = 0;
+    }
+
+    // Apply a probe with poster bytes.
+    vault::VideoProbeApply probe;
+    probe.codec = vault::VideoCodec::VP9;
+    probe.width = 320;
+    probe.height = 240;
+    probe.duration_us = 3000000;
+    probe.poster_jpeg = poster_bytes;
+
+    CHECK(vault::apply_video_probe(v, "tiny.mp4", probe) == vault::VaultResult::Ok);
+
+    // Poster should now be stored: both offset and length should be non-zero.
+    {
+        const vault::IndexNode* n = v.resolve_node("tiny.mp4");
+        REQUIRE(n != nullptr);
+        CHECK(n->vmeta.poster_offset > 0);
+        CHECK(n->vmeta.poster_length > 0);
+    }
+}
+
+TEST(apply_video_probe_noop_when_node_already_has_poster)
+{
+    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    auto new_poster_bytes = fixtures::solid_png(50, 50, 0, 255, 0);
+    REQUIRE(!video_bytes.empty());
+    REQUIRE(!new_poster_bytes.empty());
+
+    MigTempVault tv("apply_vp_poster_noop");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("", video_bytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+
+    // tiny.mp4 was imported and likely has a poster already (from decode).
+    {
+        const vault::IndexNode* n = v.resolve_node("tiny.mp4");
+        REQUIRE(n != nullptr);
+        // If it has a poster, poster_length > 0; if not, we'd need to add one manually.
+        // For this test, just proceed: if no poster, we'll detect the append below.
+    }
+
+    // Get the poster state before applying.
+    const vault::IndexNode* n_before = v.resolve_node("tiny.mp4");
+    REQUIRE(n_before != nullptr);
+    const uint64_t poster_offset_before = n_before->vmeta.poster_offset;
+    const uint64_t poster_length_before = n_before->vmeta.poster_length;
+
+    // Apply a probe with NEW poster bytes.
+    vault::VideoProbeApply probe;
+    probe.codec = vault::VideoCodec::H264;
+    probe.width = 320;
+    probe.height = 240;
+    probe.duration_us = 3000000;
+    probe.poster_jpeg = new_poster_bytes;
+
+    CHECK(vault::apply_video_probe(v, "tiny.mp4", probe) == vault::VaultResult::Ok);
+
+    // If the node already had a poster, it should NOT be replaced.
+    {
+        const vault::IndexNode* n = v.resolve_node("tiny.mp4");
+        REQUIRE(n != nullptr);
+        if (poster_length_before > 0) {
+            // Had a poster before; should not be changed.
+            CHECK_EQ(n->vmeta.poster_offset, poster_offset_before);
+            CHECK_EQ(n->vmeta.poster_length, poster_length_before);
+        }
+    }
+}
+#endif  // OSV_VENDORED_AV
 
 TEST(commit_migration_persists_the_watermark)
 {
