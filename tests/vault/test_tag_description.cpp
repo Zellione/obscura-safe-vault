@@ -44,11 +44,11 @@ TEST(tag_description_round_trips_through_serialisation)
     CHECK_EQ(back.tag_descriptions[1].text, std::string("Active 2011-2019"));
 }
 
-TEST(tag_description_blob_declares_version_9)
+TEST(tag_description_blob_declares_version_10)
 {
     std::vector<uint8_t> blob;
     serialize_index(make_root(), {}, VaultSettings{}, blob);
-    CHECK_EQ(static_cast<int>(blob[0]), 9);
+    CHECK_EQ(static_cast<int>(blob[0]), 10);
 }
 
 TEST(tag_description_empty_list_round_trips)

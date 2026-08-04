@@ -347,6 +347,11 @@ void write_settings(ByteWriter& w, const VaultSettings& s)
         w.bytes(std::span<const uint8_t>(
             reinterpret_cast<const uint8_t*>(text.data()), text_len));
     }
+
+    // Phase 65 watermark. Clamped on write so a pathological in-memory value
+    // can never emit a blob this reader would reject (the write_settings rule).
+    w.u8(s.migrated_index_version > INDEX_VERSION ? 0 : s.migrated_index_version);
+    w.u16(s.migrated_probe_caps);
 }
 
 // Helper: read category block. Bounds-checked before allocation, duplicates
@@ -428,6 +433,21 @@ bool read_settings(ByteReader& r, VaultSettings& s, uint8_t version)
     if (version < 9) return true;
 
     if (!read_descriptions(r, s.tag_descriptions)) return false;
+
+    // The watermark sub-block exists only from v10 on; a v9 blob ends after the
+    // descriptions and must not be read past.
+    if (version < 10) return true;
+
+    const uint8_t migrated = r.u8();
+    // Rejected, not clamped: a blob claiming a backfill from a future build is
+    // malformed input, and silently accepting it would suppress a migration
+    // this build genuinely still needs to run.
+    if (!r.ok() || migrated > INDEX_VERSION) return false;
+    s.migrated_index_version = migrated;
+
+    s.migrated_probe_caps = r.u16();
+    if (!r.ok()) return false;
+
     return true;
 }
 

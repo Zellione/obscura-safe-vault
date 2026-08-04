@@ -606,13 +606,13 @@ TEST(index_animated_flag_round_trips)
     CHECK(!out.children[1].meta.animated);
 }
 
-TEST(index_version_is_nine)
+TEST(index_version_is_ten)
 {
     IndexNode root = IndexNode::gallery("root");
     std::vector<uint8_t> blob;
     vault::serialize_index(root, blob);
     REQUIRE(!blob.empty());
-    CHECK_EQ(blob[0], uint8_t{9});
+    CHECK_EQ(blob[0], uint8_t{10});
 }
 
 TEST(index_v6_blob_reads_animated_as_false)
@@ -668,7 +668,11 @@ TEST(index_rejects_out_of_range_animated_byte)
 
     std::vector<uint8_t> blob;
     vault::serialize_index(root, blob);
-    blob.back() = 0x02;   // neither 0 nor 1
+    // With v10 watermark, settings block is: default_sort(1) + tiles_show_tags(1) +
+    // cat_count(2) + desc_count(2) + watermark(3). The animated flag is in the tree,
+    // which precedes the 2-byte saved_searches_count and the 9-byte settings block.
+    // Animated flag is 12 bytes from the end.
+    blob[blob.size() - 12] = 0x02;   // neither 0 nor 1
 
     IndexNode out;
     CHECK(!vault::deserialize_index(blob, out));
@@ -685,7 +689,7 @@ TEST(index_v8_accepts_insertion_sort_key)
     std::vector<uint8_t> blob;
     serialize_index(root, blob);
     CHECK_EQ(blob[0], INDEX_VERSION);
-    CHECK_EQ(blob[0], 9);
+    CHECK_EQ(blob[0], 10);
 
     IndexNode out;
     CHECK(deserialize_index(blob, out));
@@ -777,7 +781,8 @@ TEST(index_settings_rejects_out_of_range_swatch)
 
     std::vector<uint8_t> blob;
     vault::serialize_index(root, {}, s, blob);
-    blob.back() = vault::TAG_SWATCH_COUNT;   // swatch is the last byte written
+    // With v10 watermark (3 bytes), swatch is 3 bytes before the end
+    blob[blob.size() - 3] = vault::TAG_SWATCH_COUNT;
 
     IndexNode out;
     std::vector<vault::SavedSearch> searches;
@@ -791,9 +796,9 @@ TEST(index_settings_rejects_bad_tiles_flag)
     std::vector<uint8_t> blob;
     vault::serialize_index(root, {}, vault::VaultSettings{}, blob);
 
-    // The settings block is the tail: default_sort, tiles_show_tags, cat_count(u16), desc_count(u16).
-    // tiles_show_tags is at position -5 (2 bytes for desc_count after cat_count).
-    const size_t tiles_at = blob.size() - 5;
+    // The settings block is the tail: default_sort, tiles_show_tags, cat_count(u16), desc_count(u16), watermark(u8 + u16).
+    // tiles_show_tags is at position -8 (2 bytes for desc_count + 3 bytes for watermark after cat_count).
+    const size_t tiles_at = blob.size() - 8;
     CHECK_EQ(blob[tiles_at], 1);
     blob[tiles_at] = 2;
 
@@ -836,8 +841,8 @@ TEST(index_settings_rejects_over_long_category_name)
 
     // A hand-forged blob declaring a longer name is rejected outright.
     std::vector<uint8_t> forged = blob;
-    // With desc_count added at the end, the name_len is now 2 bytes earlier.
-    const size_t name_len_at = forged.size() - 1 - 2 - vault::INDEX_MAX_CATEGORY_BYTES - 2;
+    // With desc_count and watermark (3 bytes) added at the end, the name_len is now 5 bytes earlier.
+    const size_t name_len_at = forged.size() - 1 - 2 - vault::INDEX_MAX_CATEGORY_BYTES - 2 - 3;
     forged[name_len_at]     = 0xFF;
     forged[name_len_at + 1] = 0x00;
     IndexNode out2;
@@ -855,8 +860,9 @@ TEST(index_pre_v8_blob_reads_seeded_settings)
     vault::serialize_index(root, {}, vault::VaultSettings{}, v8);
 
     // With desc_count added in v9, the settings block is now 6 bytes (was 4 in v8).
-    // We strip the entire v9 settings block to create a v7 blob.
-    std::vector<uint8_t> v7(v8.begin(), v8.end() - 6);   // drop the settings block
+    // With watermark added in v10, the settings block is now 9 bytes.
+    // We strip the entire v10 settings block to create a v7 blob.
+    std::vector<uint8_t> v7(v8.begin(), v8.end() - 9);   // drop the settings block
     v7[0] = 7;
 
     IndexNode out;

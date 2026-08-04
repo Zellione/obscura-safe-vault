@@ -253,6 +253,12 @@ struct VaultSettings {
     std::vector<TagCategory>   categories;
     std::vector<TagDescription> tag_descriptions;
 
+    // Phase 65: what content backfills have been run against this vault.
+    // 0/0 is the correct reading for every pre-v10 blob — such a vault has
+    // never been migrated. See docs/roadmap/phase-65-blocking-migration.md.
+    uint8_t  migrated_index_version = 0;
+    uint16_t migrated_probe_caps    = 0;
+
     // The starting category set for a vault that has never stored one: a freshly
     // created vault and every pre-v8 vault. An empty SAVED list is a legitimate
     // state and is never re-seeded.
@@ -271,7 +277,17 @@ struct VaultSettings {
 // blobs read with the seeded default settings and every gallery at `Default`.
 // v9: per-tag descriptions appended to the vault-global settings block
 // (Phase 51); pre-v9 blobs read with an empty list.
-inline constexpr uint8_t INDEX_VERSION = 9;
+// v10: vault-global migration watermark appended to the settings block
+// (Phase 65: migrated_index_version u8, migrated_probe_caps u16); pre-v10
+// blobs read 0/0 and are therefore treated as never migrated.
+inline constexpr uint8_t INDEX_VERSION = 10;
+
+// Phase 65: the index version whose content backfills the migration performs.
+// Bump ONLY when a NEW index version adds a field needing a content backfill —
+// NOT on every INDEX_VERSION bump, or unrelated format changes would re-offer a
+// migration that has nothing to do with them. Currently 7: the version that
+// introduced ImageMeta::animated.
+inline constexpr uint8_t MIGRATION_INDEX_VERSION = 7;
 
 // Maximum tree depth accepted on deserialisation — guards against stack overflow
 // from a deeply-nested hostile blob.
