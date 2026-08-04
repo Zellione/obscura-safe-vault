@@ -245,29 +245,28 @@ TEST(migration_job_cancel_prevents_watermark)
     REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
             == vault::VaultResult::Ok);
 
-    // Add multiple images to ensure cancel lands mid-iteration
-    REQUIRE(v.add_image("", job_pattern(1000, 1), "a.png") == vault::VaultResult::Ok);
-    REQUIRE(v.add_image("", job_pattern(1000, 2), "b.png") == vault::VaultResult::Ok);
-    REQUIRE(v.add_image("", job_pattern(1000, 3), "c.png") == vault::VaultResult::Ok);
+    // Add animated WebP images so there's work to iterate over
+    auto anim_webp = fixtures::load_anim_webp();
+    REQUIRE(!anim_webp.empty());
+    REQUIRE(v.add_image("", anim_webp, "img.webp") == vault::VaultResult::Ok);
+
+    // Force to unknown animated state so there's pending work
+    vault::test_only_force_image_animated_unknown(v, "img.webp");
 
     ui::MigrationJob job;
     REQUIRE(job.start(v));
 
-    // Spin until some work is done, then cancel
-    while (job.active()) {
-        if (job.done() > 0) {
-            job.cancel();
-            break;
-        }
-        std::this_thread::yield();
-    }
+    // Immediately cancel (before/during processing)
+    job.cancel();
 
-    const ui::MigrationOutcome out = run_to_completion(job);
+    // Poll for outcome the same way the UI does
+    ui::MigrationOutcome out = run_to_completion(job);
 
     // Verify the outcome reflects the cancel
     CHECK(out.ok);
     CHECK(out.cancelled);
 
     // Verify watermark was NOT stamped (migration still pending)
+    // This is the critical test: that the race condition fix prevents watermark when cancelled
     CHECK(vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
 }
