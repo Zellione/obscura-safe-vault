@@ -1026,6 +1026,57 @@ bool Vault::repair_image_animated(std::string_view node_path, bool animated)
     return true;
 }
 
+VaultResult apply_video_probe(Vault& v, std::string_view node_path,
+                              const VideoProbeApply& probe)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+
+    IndexNode* n = v.resolve_node(node_path);
+    if (!n || !n->is_video()) return NotFound;
+    if (n->vmeta.codec != VideoCodec::Unknown) return Ok;   // already real metadata
+    if (probe.codec == VideoCodec::Unknown) return Ok;      // nothing learned
+
+    n->vmeta.codec       = probe.codec;
+    n->vmeta.width       = probe.width;
+    n->vmeta.height      = probe.height;
+    n->vmeta.duration_us = probe.duration_us;
+
+    if (n->vmeta.poster_length == 0 && !probe.poster_jpeg.empty()) {
+        // Phase 50 protocol: every append to fp_ holds write_mutex_.
+        std::lock_guard lk(*v.write_mutex_);
+        ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+        ChunkSpan poster_span;
+        if (!store.append_chunk(probe.poster_jpeg, poster_span)) return IoError;
+        if (!store.sync()) return IoError;
+        n->vmeta.poster_offset = poster_span.offset;
+        n->vmeta.poster_length = poster_span.length;
+    }
+    return Ok;
+}
+
+VaultResult apply_image_animated(Vault& v, std::string_view node_path, bool animated)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+
+    IndexNode* n = v.resolve_node(node_path);
+    if (!n || !n->is_image()) return NotFound;
+    if (!format_can_animate(n->meta.format)) return Ok;
+    if (n->meta.animated == animated) return Ok;
+
+    n->meta.animated = animated;
+    return Ok;
+}
+
+VaultResult commit_migration(Vault& v, VaultSettings settings)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+    v.settings_ = std::move(settings);
+    return v.commit_index();
+}
+
 VaultResult Vault::remove_image(std::string_view gallery_path, std::string_view filename)
 {
     using enum VaultResult;

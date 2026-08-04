@@ -275,3 +275,42 @@ TEST(migration_scan_byte_accounting_mixed)
     CHECK_EQ(scan.bytes, static_cast<uint64_t>(anim_webp.size() + video_bytes.size()));
 }
 #endif  // OSV_VENDORED_AV
+
+TEST(apply_image_animated_defers_the_commit)
+{
+    MigTempVault tv("apply_anim");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", mig_pattern(1000, 1), "a.png") == vault::VaultResult::Ok);
+
+    // A PNG cannot animate: the apply is a well-formed no-op, not an error.
+    CHECK(vault::apply_image_animated(v, "a.png", true) == vault::VaultResult::Ok);
+
+    CHECK(vault::apply_image_animated(v, "missing.png", true)
+          == vault::VaultResult::NotFound);
+}
+
+TEST(commit_migration_persists_the_watermark)
+{
+    MigTempVault tv("commit_wm");
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
+                == vault::VaultResult::Ok);
+        CHECK(vault::migration_pending(vault::vault_settings(v), 1));
+
+        const vault::VaultSettings stamped =
+            vault::stamp_migrated(vault::vault_settings(v), 1);
+        REQUIRE(vault::commit_migration(v, stamped) == vault::VaultResult::Ok);
+        CHECK(!vault::migration_pending(vault::vault_settings(v), 1));
+    }
+    // Survives a close/reopen — this is the whole point of the watermark.
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
+        REQUIRE(v.unlock(mig_bytes("pw"), {}) == vault::VaultResult::Ok);
+        CHECK(!vault::migration_pending(vault::vault_settings(v), 1));
+        CHECK(vault::migration_pending(vault::vault_settings(v), 2));
+    }
+}

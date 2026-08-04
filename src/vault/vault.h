@@ -88,6 +88,18 @@ struct RemoveBatchStats {
     std::size_t missing = 0;
 };
 
+// Probed video metadata handed back from a migration worker. Mirrors
+// media::VideoProbeResult field-for-field ON PURPOSE: vault.h must not include
+// media/video_probe.h (vault/ does not depend on media/), and the poster is
+// borrowed as a span rather than owned.
+struct VideoProbeApply {
+    VideoCodec               codec       = VideoCodec::Unknown;
+    uint32_t                 width       = 0;
+    uint32_t                 height      = 0;
+    uint64_t                 duration_us = 0;
+    std::span<const uint8_t> poster_jpeg;   // empty = leave the poster alone
+};
+
 class Vault {
 public:
     // Auto-compaction gates (remove_image): rewrite the vault only when at
@@ -308,6 +320,14 @@ public:
                                           std::span<const std::string> node_paths,
                                           RemoveBatchStats* stats);
 
+    // Phase 65 migration: apply probed metadata WITHOUT committing, so a whole
+    // migration pass costs one index write instead of one per node.
+    friend VaultResult apply_video_probe(Vault& v, std::string_view node_path,
+                                         const VideoProbeApply& probe);
+    friend VaultResult apply_image_animated(Vault& v, std::string_view node_path,
+                                            bool animated);
+    friend VaultResult commit_migration(Vault& v, VaultSettings settings);
+
     // Phase 50: while the import queue is active, App points this at the
     // CommitLane; Vault::commit_index() then routes through the lane
     // (serialize + enqueue, async durability) instead of committing
@@ -460,6 +480,26 @@ private:
 // Replace the vault's global settings and persist them via the crash-safe index
 // swap. Locked if not unlocked. Phase 49.
 [[nodiscard]] VaultResult set_vault_settings(Vault& v, VaultSettings s);
+
+// Write probed metadata onto a video node and append its poster chunk if the
+// node has none, WITHOUT committing the index. Locked if locked; NotFound if
+// the path does not resolve to a video; IoError if the poster append fails.
+// A node that already has a real codec is left alone (Ok, no write).
+// Coordinator-thread only — mutates the tree and appends to fp_.
+[[nodiscard]] VaultResult apply_video_probe(Vault& v, std::string_view node_path,
+                                            const VideoProbeApply& probe);
+
+// Set an image node's animated flag WITHOUT committing the index. Ok (no write)
+// when the flag is already correct or the format cannot animate; NotFound if the
+// path does not resolve to an image. Coordinator-thread only.
+[[nodiscard]] VaultResult apply_image_animated(Vault& v, std::string_view node_path,
+                                               bool animated);
+
+// Persist `settings` (carrying the Phase 65 watermark) together with every
+// pending apply_* mutation in ONE commit_index(). Locked if locked; IoError if
+// the commit fails (the tree is already mutated — the remove_media_batch
+// contract).
+[[nodiscard]] VaultResult commit_migration(Vault& v, VaultSettings settings);
 
 // Rename an image, video, or gallery's own `name` field in place — a pure
 // leaf-field edit. Descendants, tags, favorite flag, sort key, and cover all
