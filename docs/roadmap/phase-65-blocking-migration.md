@@ -12,10 +12,14 @@ file changes on the filesystem during ordinary reading:
    `GalleryGrid::refresh()` (`src/ui/gallery_grid.cpp:290`). Every video whose
    `vmeta.codec == VideoCodec::Unknown` (imported before a decoder for its codec
    existed) is fully decrypted, re-probed with `media::probe_video()`, and given a
-   **newly appended poster chunk** plus an index rewrite — on every gallery visit.
-   It runs **on the main thread**, so the UI stalls for the decrypt and probe. It has
-   no per-session gate, so a still-undecodable video repeats that full cost on *every*
-   refresh, forever.
+   **newly appended poster chunk** plus an index rewrite. It runs **on the main
+   thread**, so the UI stalls for the decrypt and probe.
+
+   A failed probe is memoized for the session by `VideoMeta::probe_failed_session`
+   (`src/vault/index.h:146`), so it does not repeat per gallery visit — but the flag is
+   not persisted, so a still-undecodable video pays the full read + decrypt + probe
+   again on **every unlock**, forever. Persisting that "gave up" verdict across sessions
+   is precisely what the watermark provides.
 
 2. **Animated-flag repair** — `src/ui/anim_repair.cpp:9`, called from `ImageViewer`
    (`src/ui/image_viewer.cpp:228`). Images from pre-`INDEX_VERSION 7` vaults carry
@@ -117,7 +121,8 @@ job owns the vault exclusively and the UI only polls progress and draws a modal.
 New `ui::MigrationJob` (`src/ui/migration_job.*`), reusing `vault::OpProgress` for the
 N/M bar and cooperative cancel:
 
-- **One coordinator thread** owns the index tree and `write_fp_`. It builds the work list
+- **One coordinator thread** owns the index tree and all writes to `fp_` (guarded by
+  `write_mutex_`, per the Phase 50 append protocol). It builds the work list
   from the tree (stable — nothing else mutates it during the job), feeds the pool, drains
   results, applies metadata, and appends poster chunks.
 - **A decode pool** of `max(1, hardware_concurrency() - 1)` workers performs the pure-CPU
