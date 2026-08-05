@@ -80,7 +80,7 @@ TEST(detail_video_field_set)
 TEST(detail_video_unknown_codec_reads_video)
 {
     // A video imported before its codec was decodable sits at Unknown until
-    // video_repair heals it on the next gallery open.
+    // fixed during vault migration (Phase 65).
     IndexNode n = make_video();
     n.vmeta.codec = vault::VideoCodec::Unknown;
     CHECK(ui::build_node_details(n, {}, {}, vault::SortKey::Insertion).sections.at(0).rows.at(0).value == "Video");

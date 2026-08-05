@@ -15,7 +15,6 @@
 #include "ui/album_rebind.h"
 #include "ui/export.h"
 #include "ui/anim_model.h"
-#include "ui/anim_repair.h"
 #include "ui/input.h"
 #include "ui/meta_format.h"
 #include "ui/strip_layout.h"
@@ -213,22 +212,6 @@ void ImageViewer::sync_anim_for_current_index()
     // is an animated image, otherwise tear down.
     anim_.reset();
     anim_index_ = -1;
-
-    if (index_ >= 0 && index_ < static_cast<int>(album_.images.size())) {
-        const vault::IndexNode* node = album_.images[index_];
-        // Repair the animated flag for images stored before their format's
-        // animation support landed (GIF: Phase 47, WebP: Phase 57). The
-        // sniff costs a full read + decrypt, so anim_sniff_gate_ runs it only for
-        // unset flags and only once per chunk — not on every navigation.
-        if (node != nullptr && anim_sniff_gate_.should_sniff(*node)) {
-            crypto::SecureBytes bytes;
-            if (vault_.read_image(*node, bytes) == vault::VaultResult::Ok) {
-                // The node pointer stays valid: repair only touches in-memory
-                // metadata; the construct below sees the post-repair flag.
-                (void)maybe_repair_animated(vault_, album_.gallery_path, *node, bytes.as_span());
-            }
-        }
-    }
 
     if (item_is_animated(album_.images, index_)) {
         anim_ = std::make_unique<AnimPlayback>(vault_, *album_.images[index_]);
