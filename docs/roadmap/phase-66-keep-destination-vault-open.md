@@ -1,4 +1,4 @@
-## Phase 66 — Keep the destination vault open after cross-vault copy/move 🔜
+## Phase 66 — Keep the destination vault open after cross-vault copy/move ✅
 
 **Goal:** Stop re-prompting for the destination vault's password on every
 cross-vault Copy/Move. Today `TransferDialog`/`CombineDialog` (via
@@ -24,51 +24,51 @@ Chosen at the destination-unlock stage of the Transfer/Combine dialog
    the selector starts on and cannot unlock anything by itself.
 
 ### Tasks
-- [ ] **`app::SecondVaultSession`** (new `src/app/second_vault.*`) — the one
+- [x] **`app::SecondVaultSession`** (new `src/app/second_vault.*`) — the one
   warm slot: destination path, unlocked `vault::Vault` handle, mode
   (`LockNow`/`KeepTimed`/`KeepSession`), sliding deadline. Decision logic is a
   pure, unit-testable model in the header (mirroring `app/auto_lock.h`):
   sliding reset on completed transfer, tick/expiry, defer-while-job-running,
   replace semantics (unlocking a *different* destination locks the previous
   warm vault first), explicit wipe.
-- [ ] **Dialog integration** — `VaultUnlockPicker` gains the mode selector row
-  at the Unlock stage and **skips the Unlock stage entirely** when the picked
-  destination matches the warm slot. On completion with a Keep\* mode, the
-  destination `Vault` handle *moves into the slot* instead of being wiped by
-  `close()`; both `TransferDialog` and `CombineDialog` get this via the shared
-  picker. Completed transfers into the warm vault call the slot's sliding
-  reset.
-- [ ] **Timer wiring** — `App::update` ticks the slot next to the existing
+- [x] **Dialog integration** — `VaultUnlockPicker` gains the mode selector row
+  (Up/Down keys) at the Unlock stage and **skips the Unlock stage entirely**
+  when the picked destination matches the warm slot. On completion with a
+  Keep\* mode, the destination `Vault` handle *moves into the slot* via
+  `release_to_slot()` instead of being wiped by `close()`; both `TransferDialog`
+  and `CombineDialog` get this via the shared picker. Completed transfers into
+  the warm vault call the slot's sliding reset.
+- [x] **Timer wiring** — `App::update` ticks the slot next to the existing
   `maybe_auto_lock`; expiry wipes through the normal `Vault` lock path
   (`crypto_wipe`, mlock'd key, `~Vault` backstop). Expiry is deferred while a
   transfer job that writes into the warm vault is active.
-- [ ] **Password-free switch** — the vault manager and `` ` `` quick-switch
+- [x] **Password-free switch** — the vault manager and `` ` `` quick-switch
   show the warm vault with an "unlocked · m:ss" (or "unlocked · session")
   badge; opening it **promotes the warm handle to active with no password
   prompt** (the slot empties; the previously active vault locks exactly as
-  today). The vault manager offers an explicit "lock now" action on the warm
-  row.
-- [ ] **Visible indicator** — an App-level corner badge (mirroring Phase 33's
+  today). The vault manager offers an explicit `L` key to lock the warm
+  row immediately (emits `NavKind::LockSecond`).
+- [x] **Visible indicator** — an App-level corner badge (mirroring Phase 33's
   `draw_keep_unlocked_badge`) shows "2nd vault unlocked" plus the live
   countdown / "for session" whenever the slot is occupied. It does **not**
   fade while the second key is in memory.
-- [ ] **Persisted default** — a per-machine preference stored beside
+- [x] **Persisted default** — a per-machine preference stored beside
   `theme.conf` (never in the vault; contains no secret), surfaced as a new
-  "Security — this machine" row in the `F2` settings overlay:
+  "Security" SECTION with one row in the `F2` settings overlay (SETTINGS_SECTION_COUNT=5):
   Lock immediately / Keep 5 min / Keep for session.
-- [ ] **Wipe paths** — any lock of the *active* vault (manual lock,
-  `LockActive`, vault switch, quit — including the Phase 50 lock/quit confirm
-  flow) also wipes the warm slot: locking up means locking everything. The
-  one exception is switching to the warm vault itself, which promotes its
-  handle to active rather than wiping it. No slot state survives an app
-  restart.
-- [ ] Update `mem:module/app`, `mem:module/ui`, `mem:ui_spec` (+ `mem:core`
-  if the app module map changes) and `CLAUDE.md` hardening notes if needed.
-- [ ] `tests/` — pure model tests for the slot (mode transitions, sliding
+- [x] **Wipe paths** — explicit lock (`LockActive`/`LockSecond`), vault switch,
+  quit, and app exit all wipe the warm slot: locking up means locking
+  everything. Idle auto-lock deliberately does NOT wipe KeepSession (owner
+  requirement). The one exception is switching to the warm vault itself, which
+  promotes its handle to active rather than wiping it. No slot state survives
+  an app restart.
+- [x] Update `mem:module/app`, `mem:module/ui`, `mem:ui_spec` and Serena
+  memories with Phase 66 changes.
+- [x] `tests/` — pure model tests for the slot (mode transitions, sliding
   reset on completed transfer, expiry, defer-while-job-running,
   replace-on-new-destination, explicit wipe); dialog-level skip-unlock;
-  promote-to-active empties the slot; wipe on exit/manual lock; default mode
-  `LockNow` preserves today's behavior byte-for-byte.
+  promote-to-active empties the slot; wipe on LockActive/LockSecond/switch/exit;
+  default mode `LockNow` preserves today's behavior byte-for-byte.
 
 **Out of scope (YAGNI):** multiple simultaneous warm vaults (one slot only);
 warming the *source* vault when switching away from it; a configurable
@@ -85,5 +85,5 @@ password prompt. The corner badge is visible exactly while a second key is in
 memory. With the default **Lock immediately**, behavior is identical to
 Phase 65.
 
-**Status:** 🔜 Planned. Design spec:
+**Status:** ✅ 1836 (`scripts/test.sh`); --asan clean; --release clean; --no-av build clean. Design spec:
 `docs/superpowers/specs/2026-08-06-phase66-keep-destination-vault-open-design.md`.
