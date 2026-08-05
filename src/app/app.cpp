@@ -170,6 +170,8 @@ void App::promote_pending()
                 *vault_state_.active, vault::stamp_migrated(vault::vault_settings(*vault_state_.active),
                                                              media::PROBE_CAPS_GEN));
         } else {
+            // Guard against import queue race: hold exclusive until outcome is taken
+            import_ui_.queue.set_exclusive(true);
             migration_ui_.pending_migration = scan;      // drives the offer modal
             migration_ui_.offer_open = true;
         }
@@ -424,6 +426,25 @@ bool App::dispatch_overlay_event(App& app, const SDL_Event& e)
         }
         return true;
     }
+    // Phase 65: handle manual migration trigger from VaultOps section (before settings swallow input)
+    if (app.overlays_.settings.open && app.overlays_.settings.trigger_migration && app.vault_state_.active) {
+        app.overlays_.settings.trigger_migration = false;
+
+        // Scan for actual pending work regardless of watermark state
+        const vault::MigrationScan scan = vault::scan_migration(*app.vault_state_.active);
+        if (scan.empty()) {
+            // Nothing to do: inform user and keep settings open
+            app.overlays_.settings.error = "Nothing to upgrade";
+            return true;
+        } else {
+            // Close settings and show offer (guard against import queue race)
+            ui::close_settings(app.overlays_.settings, app.window_);
+            app.import_ui_.queue.set_exclusive(true);
+            app.migration_ui_.pending_migration = scan;
+            app.migration_ui_.offer_open = true;
+            // Do NOT return; let the offer modal get rendered and input this frame
+        }
+    }
     // Settings panel (second priority: swallows all events)
     if (app.overlays_.settings.open) {
         if (bool commit = false;
@@ -431,14 +452,6 @@ bool App::dispatch_overlay_event(App& app, const SDL_Event& e)
             app.overlays_.settings.vault_unlocked && app.vault_state_.active &&
             vault::set_vault_settings(*app.vault_state_.active, app.overlays_.settings.draft) != vault::VaultResult::Ok) {
             app.overlays_.settings.error = "Could not save settings";
-        }
-        // Phase 65: handle manual migration trigger from VaultOps section
-        if (app.overlays_.settings.trigger_migration && app.vault_state_.active) {
-            app.overlays_.settings.trigger_migration = false;
-            ui::close_settings(app.overlays_.settings, app.window_);
-            // Start migration regardless of watermark state
-            app.migration_ui_.pending_migration = {.videos = 1};  // non-empty to show offer
-            app.migration_ui_.offer_open = true;
         }
         return true;
     }
@@ -478,6 +491,8 @@ bool App::dispatch_overlay_event(App& app, const SDL_Event& e)
             } else if (e.key.key == SDLK_ESCAPE || e.key.key == SDLK_N) {
                 // "Not now" — dismiss for this session, re-offer at next unlock
                 app.migration_ui_.offer_open = false;
+                // Release exclusive since migration was never started
+                app.import_ui_.queue.set_exclusive(false);
                 return true;
             }
         }
@@ -710,6 +725,8 @@ void App::update(double dt)
                         *vault_state_.active,
                         vault::stamp_migrated(vault::vault_settings(*vault_state_.active), media::PROBE_CAPS_GEN));
                 }
+                // Release exclusive hold on import queue (success, cancel, or error)
+                import_ui_.queue.set_exclusive(false);
             }
         }
 
