@@ -43,6 +43,25 @@ static std::vector<uint8_t> job_pattern(size_t n, uint8_t seed)
     return v;
 }
 
+// High-entropy bytes from a fixed-seed splitmix64 — deterministic across
+// platforms, but incompressible, so a chunk's STORED size tracks its raw size.
+// job_pattern() is the opposite: it repeats with period 256 and deflates to
+// almost nothing, which makes any "stored bytes >= N" assertion a function of
+// the compressor rather than of the payload.
+static std::vector<uint8_t> job_incompressible(size_t n, uint64_t seed)
+{
+    std::vector<uint8_t> v(n);
+    uint64_t             x = seed;
+    for (size_t i = 0; i < n; ++i) {
+        x += 0x9E3779B97F4A7C15ULL;
+        uint64_t z = x;
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+        v[i] = static_cast<uint8_t>(z >> 31);
+    }
+    return v;
+}
+
 #ifdef OSV_VENDORED_AV
 // Only the video test below reads a fixture off disk. Guarded to match that
 // test's own guard — without FFmpeg this is an unused static and -Werror bites.
@@ -428,16 +447,24 @@ TEST(migration_job_compaction_reclaims_orphaned_chunks)
     REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
             == vault::VaultResult::Ok);
 
-    // Add two large images: one to keep, one to delete. Must produce enough waste to
-    // exceed AUTO_COMPACT_MIN_WASTE (256 KiB) when deleted, to trigger the floor gate.
-    // Chunks are compressed via framing, so use 70 MB raw pattern to produce ~256+ KiB waste.
-    const auto pattern1 = job_pattern(70000000, 1);  // 70 MB (compresses to ~256+ KiB)
-    const auto pattern2 = job_pattern(70000000, 2);  // 70 MB (compresses to ~256+ KiB)
-    REQUIRE(v.add_image("", pattern1, "keep.png") == vault::VaultResult::Ok);
-    REQUIRE(v.add_image("", pattern2, "delete.png") == vault::VaultResult::Ok);
+    // Add two images: one to keep, one to delete. Deleting the second must orphan
+    // more than AUTO_COMPACT_MIN_WASTE (256 KiB) to trigger the floor gate.
+    //
+    // The payload is INCOMPRESSIBLE on purpose. An earlier version pushed 70 MB of
+    // job_pattern() through the framing compressor and relied on the residue landing
+    // above the floor; it cleared it by 10 KiB (272286 vs 262144, under 4%), so the
+    // test was really asserting a property of deflate. It passed on Linux and failed
+    // on MSVC the first time the Windows build got far enough to run it. With
+    // incompressible bytes the stored size tracks the raw size, so 2 MiB clears the
+    // floor ~8x over and no longer depends on the compressor at all — and it moves
+    // 140 MB less data per run.
+    const auto keep_bytes   = job_incompressible(2u << 20, 1);
+    const auto delete_bytes = job_incompressible(2u << 20, 2);
+    REQUIRE(v.add_image("", keep_bytes, "keep.png") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", delete_bytes, "delete.png") == vault::VaultResult::Ok);
     REQUIRE(v.list("").size() == 2u);
 
-    // Delete the second image, which orphans its chunks (70 MB raw → ~256+ KiB compressed waste)
+    // Delete the second image, orphaning its ~2 MiB of chunks.
     REQUIRE(v.remove_image("", "delete.png") == vault::VaultResult::Ok);
     REQUIRE(v.list("").size() == 1u);
 
