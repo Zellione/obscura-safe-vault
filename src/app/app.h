@@ -77,13 +77,14 @@ private:
     void open_settings_overlay();                // seed settings state and open the overlay
 
     // Dispatch event to overlays (help > settings > migration > lock_confirm);
-    // true if handled. Split per overlay so each stays readable on its own.
+    // true if handled.
     static bool dispatch_overlay_event(App& app, const SDL_Event& e);
-    static bool dispatch_help_event(App& app, const SDL_Event& e);
-    static bool dispatch_settings_event(App& app, const SDL_Event& e);
-    static bool dispatch_migration_event(App& app, const SDL_Event& e);
-    static bool dispatch_lock_confirm_event(App& app, const SDL_Event& e);
-    void        handle_migration_offer_key(SDL_Keycode key);  // Phase 65 offer modal
+
+    // The per-overlay handlers dispatch_overlay_event fans out to, defined in
+    // app.cpp. A nested type rather than more App members: it reaches App's
+    // privates exactly as a member would, without growing App's own interface
+    // for what is one function's worth of internal structure.
+    struct OverlayDispatch;
 
     gfx::Window                        window_;
     gfx::FontAtlas                     font_;

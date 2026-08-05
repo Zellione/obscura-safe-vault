@@ -499,131 +499,135 @@ void draw_migration_result(gfx::Renderer& r, gfx::FontAtlas& font, float win_w, 
 }
 } // namespace
 
-bool App::dispatch_help_event(App& app, const SDL_Event& e)
-{
-    // F1 toggles help (checked before the help.open guard so it opens/closes
-    // over settings).
-    if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F1) {
-        ui::toggle_help(app.overlays_.help);
-        return true;
-    }
-    // Help popup (highest priority: swallows arrow/wheel; over settings)
-    if (!app.overlays_.help.open) return false;
-    if (e.type == SDL_EVENT_KEY_DOWN) {
-        ui::handle_help_key(app.overlays_.help, e.key.key);
-    } else if (e.type == SDL_EVENT_MOUSE_WHEEL) {
-        ui::handle_help_wheel(app.overlays_.help, e.wheel.y);
-    }
-    return true;
-}
-
-bool App::dispatch_settings_event(App& app, const SDL_Event& e)
-{
-    // F2 toggles settings
-    if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F2) {
-        if (app.overlays_.settings.open) {
-            ui::close_settings(app.overlays_.settings, app.window_);
-        } else {
-            app.open_settings_overlay();
-        }
-        return true;
-    }
-    // Phase 65: manual migration trigger from the VaultOps section, handled
-    // before the settings panel swallows input. On a non-empty scan this
-    // deliberately does NOT report the event as handled: settings closes and the
-    // offer modal must see this same event, so it renders and takes input on
-    // this frame instead of the next one.
-    if (app.overlays_.settings.open && app.overlays_.settings.trigger_migration &&
-        app.vault_state_.active) {
-        app.overlays_.settings.trigger_migration = false;
-
-        // Scan for actual pending work regardless of watermark state
-        const vault::MigrationScan scan = vault::scan_migration(*app.vault_state_.active);
-        if (scan.empty()) {
-            // Nothing to do: inform the user and keep settings open
-            app.overlays_.settings.error = "Nothing to upgrade";
+struct App::OverlayDispatch {
+    static bool help(App& app, const SDL_Event& e)
+    {
+        // F1 toggles help (checked before the help.open guard so it opens/closes
+        // over settings).
+        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F1) {
+            ui::toggle_help(app.overlays_.help);
             return true;
         }
-        ui::close_settings(app.overlays_.settings, app.window_);
-        app.import_ui_.queue.set_exclusive(true);   // guard against an import race
-        app.migration_ui_.pending_migration = scan;
-        app.migration_ui_.offer_open        = true;
-    }
-    // Settings panel (second priority: swallows all events)
-    if (!app.overlays_.settings.open) return false;
-    if (bool commit = false;
-        ui::handle_settings_event(app.overlays_.settings, app.window_, e, commit) && commit &&
-        app.overlays_.settings.vault_unlocked && app.vault_state_.active &&
-        vault::set_vault_settings(*app.vault_state_.active, app.overlays_.settings.draft) !=
-            vault::VaultResult::Ok) {
-        app.overlays_.settings.error = "Could not save settings";
-    }
-    return true;
-}
-
-// Enter/Y starts the job; Esc/N dismisses it for this session (it is re-offered
-// at the next unlock). Any other key is ignored — the caller still swallows it.
-void App::handle_migration_offer_key(SDL_Keycode key)
-{
-    if (key == SDLK_RETURN || key == SDLK_Y) {
-        // "Upgrade now" — start the migration job
-        if (!vault_state_.active) return;
-        if (!migration_ui_.job) migration_ui_.job = std::make_unique<ui::MigrationJob>();
-        if (migration_ui_.job->start(*vault_state_.active)) {
-            migration_ui_.offer_open    = false;
-            migration_ui_.progress_open = true;
+        // Help popup (highest priority: swallows arrow/wheel; over settings)
+        if (!app.overlays_.help.open) return false;
+        if (e.type == SDL_EVENT_KEY_DOWN) {
+            ui::handle_help_key(app.overlays_.help, e.key.key);
+        } else if (e.type == SDL_EVENT_MOUSE_WHEEL) {
+            ui::handle_help_wheel(app.overlays_.help, e.wheel.y);
         }
-    } else if (key == SDLK_ESCAPE || key == SDLK_N) {
-        // "Not now" — dismiss for this session, re-offer at next unlock
-        migration_ui_.offer_open = false;
-        // Release exclusivity: the migration was never started
-        import_ui_.queue.set_exclusive(false);
-    }
-}
-
-// Phase 65 modals, in priority order: result > progress > offer. Each swallows
-// every event while it is up — the job owns the vault exclusively while it runs.
-bool App::dispatch_migration_event(App& app, const SDL_Event& e)
-{
-    if (app.migration_ui_.result_open) {
-        if (e.type == SDL_EVENT_KEY_DOWN) app.migration_ui_.result_open = false;
         return true;
     }
-    if (app.migration_ui_.progress_open) {
-        // Only Esc does anything: it asks the job to stop between items.
-        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE && app.migration_ui_.job)
-            app.migration_ui_.job->cancel();
+
+    static bool settings(App& app, const SDL_Event& e)
+    {
+        // F2 toggles settings
+        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F2) {
+            if (app.overlays_.settings.open) {
+                ui::close_settings(app.overlays_.settings, app.window_);
+            } else {
+                app.open_settings_overlay();
+            }
+            return true;
+        }
+        // Phase 65: manual migration trigger from the VaultOps section, handled
+        // before the settings panel swallows input. On a non-empty scan this
+        // deliberately does NOT report the event as handled: settings closes and the
+        // offer modal must see this same event, so it renders and takes input on
+        // this frame instead of the next one.
+        if (app.overlays_.settings.open && app.overlays_.settings.trigger_migration &&
+            app.vault_state_.active) {
+            app.overlays_.settings.trigger_migration = false;
+
+            // Scan for actual pending work regardless of watermark state
+            const vault::MigrationScan scan = vault::scan_migration(*app.vault_state_.active);
+            if (scan.empty()) {
+                // Nothing to do: inform the user and keep settings open
+                app.overlays_.settings.error = "Nothing to upgrade";
+                return true;
+            }
+            ui::close_settings(app.overlays_.settings, app.window_);
+            app.import_ui_.queue.set_exclusive(true);   // guard against an import race
+            app.migration_ui_.pending_migration = scan;
+            app.migration_ui_.offer_open        = true;
+        }
+        // Settings panel (second priority: swallows all events)
+        if (!app.overlays_.settings.open) return false;
+        if (bool commit = false;
+            ui::handle_settings_event(app.overlays_.settings, app.window_, e, commit) && commit &&
+            app.overlays_.settings.vault_unlocked && app.vault_state_.active &&
+            vault::set_vault_settings(*app.vault_state_.active, app.overlays_.settings.draft) !=
+                vault::VaultResult::Ok) {
+            app.overlays_.settings.error = "Could not save settings";
+        }
         return true;
     }
-    if (!app.migration_ui_.offer_open) return false;
-    if (e.type == SDL_EVENT_KEY_DOWN) app.handle_migration_offer_key(e.key.key);
-    return true;
-}
 
-// Lock-confirm modal (lowest priority: key events only; Phase 50)
-bool App::dispatch_lock_confirm_event(App& app, const SDL_Event& e)
-{
-    if (!app.import_ui_.lock_confirm.open) return false;
-    if (e.type == SDL_EVENT_KEY_DOWN) {
-        using enum ui::LockConfirmKey;
-        const auto key = ui::classify_lock_confirm_key(e.key.key);
-        if (key == Confirm) {
-            app.import_ui_.queue.abort_and_flush();
-            app.import_ui_.replay_nav   = app.import_ui_.lock_confirm.action;
-            app.import_ui_.lock_confirm = {};
-        } else if (key == Cancel) {
-            app.import_ui_.lock_confirm = {};
+    // Enter/Y starts the job; Esc/N dismisses it for this session (it is re-offered
+    // at the next unlock). Any other key is ignored — the caller still swallows it.
+    static void offer_key(App& app, SDL_Keycode key)
+    {
+        if (key == SDLK_RETURN || key == SDLK_Y) {
+            // "Upgrade now" — start the migration job
+            if (!app.vault_state_.active) return;
+            if (!app.migration_ui_.job)
+                app.migration_ui_.job = std::make_unique<ui::MigrationJob>();
+            if (app.migration_ui_.job->start(*app.vault_state_.active)) {
+                app.migration_ui_.offer_open    = false;
+                app.migration_ui_.progress_open = true;
+            }
+        } else if (key == SDLK_ESCAPE || key == SDLK_N) {
+            // "Not now" — dismiss for this session, re-offer at next unlock
+            app.migration_ui_.offer_open = false;
+            // Release exclusivity: the migration was never started
+            app.import_ui_.queue.set_exclusive(false);
         }
     }
-    return true;
-}
+
+    // Phase 65 modals, in priority order: result > progress > offer. Each swallows
+    // every event while it is up — the job owns the vault exclusively while it runs.
+    static bool migration(App& app, const SDL_Event& e)
+    {
+        if (app.migration_ui_.result_open) {
+            if (e.type == SDL_EVENT_KEY_DOWN) app.migration_ui_.result_open = false;
+            return true;
+        }
+        if (app.migration_ui_.progress_open) {
+            // Only Esc does anything: it asks the job to stop between items.
+            if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE && app.migration_ui_.job)
+                app.migration_ui_.job->cancel();
+            return true;
+        }
+        if (!app.migration_ui_.offer_open) return false;
+        if (e.type == SDL_EVENT_KEY_DOWN) offer_key(app, e.key.key);
+        return true;
+    }
+
+    // Lock-confirm modal (lowest priority: key events only; Phase 50)
+    static bool lock_confirm(App& app, const SDL_Event& e)
+    {
+        if (!app.import_ui_.lock_confirm.open) return false;
+        if (e.type == SDL_EVENT_KEY_DOWN) {
+            using enum ui::LockConfirmKey;
+            const auto key = ui::classify_lock_confirm_key(e.key.key);
+            if (key == Confirm) {
+                app.import_ui_.queue.abort_and_flush();
+                app.import_ui_.replay_nav   = app.import_ui_.lock_confirm.action;
+                app.import_ui_.lock_confirm = {};
+            } else if (key == Cancel) {
+                app.import_ui_.lock_confirm = {};
+            }
+        }
+        return true;
+    }
+};
 
 bool App::dispatch_overlay_event(App& app, const SDL_Event& e)
 {
-    if (dispatch_help_event(app, e)) return true;
-    if (dispatch_settings_event(app, e)) return true;
-    if (dispatch_migration_event(app, e)) return true;
-    return dispatch_lock_confirm_event(app, e);
+    using D = OverlayDispatch;
+    if (D::help(app, e)) return true;
+    if (D::settings(app, e)) return true;
+    if (D::migration(app, e)) return true;
+    return D::lock_confirm(app, e);
 }
 
 void App::dispatch_event(const SDL_Event& e)
