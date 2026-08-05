@@ -169,6 +169,22 @@ namespace {
     return false;
 }
 
+// Handle VaultOps actions (Enter to trigger migration).
+[[nodiscard]] bool handle_vault_ops_action(SettingsState& state, SDL_Keycode key)
+{
+    if (state.section != SettingsSection::VaultOps || !state.in_pane || !state.vault_unlocked) {
+        return false;
+    }
+    if (key == SDLK_RETURN || key == SDLK_KP_ENTER) {
+        if (state.row == 0) {
+            // Phase 65: trigger migration check
+            state.trigger_migration = true;
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 void open_settings(SettingsState& state, SettingsSection section)
@@ -217,7 +233,8 @@ bool handle_settings_event(SettingsState& state, const gfx::Window& window,
     // of whether a handler acted on it.
     const bool consumed = handle_navigation_event(state, window, e.key.key)
                        || handle_value_change(state, e.key.key, commit_out)
-                       || handle_category_crud(state, window, e.key.key, commit_out);
+                       || handle_category_crud(state, window, e.key.key, commit_out)
+                       || handle_vault_ops_action(state, e.key.key);
     (void)consumed;
     return true;
 }
@@ -253,6 +270,8 @@ void draw_rail(gfx::Renderer& r, gfx::FontAtlas& font, float rail_x, float rail_
             sec_name = "Browsing";
         } else if (sec == SettingsSection::TagColours) {
             sec_name = "Tag Colours";
+        } else if (sec == SettingsSection::VaultOps) {
+            sec_name = "Vault";
         }
 
         r.draw_text(font, rail_x + 8.0f, item_y + 8.0f, sec_name,
@@ -297,6 +316,12 @@ void draw_pane_row(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float p
                              RADIUS_SMALL, swatch_color);
             label = cat.name;
             value = gfx::tag_swatch_name(cat.swatch);
+        }
+    } else if (state.section == SettingsSection::VaultOps) {
+        // Phase 65: vault operations (only available when unlocked)
+        if (row_index == 0) {
+            label = "Re-check vault for upgrades";
+            value = "[Enter]";
         }
     }
 
