@@ -719,12 +719,9 @@ void App::update(double dt)
                 migration_ui_.progress_open = false;
                 migration_ui_.result_open = true;
 
-                // Commit the watermark after successful migration
-                if (outcome->ok && !outcome->cancelled) {
-                    (void)vault::commit_migration(
-                        *vault_state_.active,
-                        vault::stamp_migrated(vault::vault_settings(*vault_state_.active), media::PROBE_CAPS_GEN));
-                }
+                // MigrationJob owns watermark stamping and commits it in its finalization phase.
+                // Do not duplicate the commit here; it would append an index blob after compaction.
+
                 // Release exclusive hold on import queue (success, cancel, or error)
                 import_ui_.queue.set_exclusive(false);
             }
