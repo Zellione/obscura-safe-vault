@@ -538,6 +538,7 @@ project "osv_tests"
         "src/ui/gallery_cover.cpp",
         "src/ui/cover_cache.cpp",
         "src/ui/scroll_model.cpp",
+        "src/ui/second_vault.cpp",
         "src/ui/gallery_picker.cpp",
         "src/ui/grid_layout.cpp",
         "src/ui/chrome_layout.cpp",
