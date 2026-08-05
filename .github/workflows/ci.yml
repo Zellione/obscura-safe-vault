@@ -855,126 +855,100 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ===========================================================================
-  # Linting — clang-format (dry-run) + clang-tidy (non-blocking).
-  # Runs on PRs only, reuses setup from build-and-test (minimal cost).
-  # continue-on-error: true so lint findings don't block the workflow.
+  # Linting — clang-format on changed lines only. Non-blocking.
+  #
+  # clang-tidy was REMOVED here. With a real compile_commands.json it analyses
+  # ~170 TUs and needs ~29 minutes even at one process per core — it blew the
+  # job timeout without finishing. Before that it had no compilation database at
+  # all, so it silently analysed nothing and reported the project's own headers
+  # as "file not found". Its real output is ~4377 findings, ~3000 of them from
+  # four checks this codebase deliberately rejects (brace style, literal-suffix
+  # case, easily-swappable-parameters, implicit-bool-conversion). Run it locally
+  # instead: scripts/gen.sh writes compile_commands.json for exactly this.
   # ===========================================================================
   lint:
-    name: Lint / clang-format + clang-tidy / Linux
+    name: Lint / clang-format / Linux
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     if: github.event_name != 'schedule'
     continue-on-error: true
 
+    # Single place to bump the formatter. Changing this changes what the check
+    # considers correctly formatted, so it is a deliberate edit, not a drift.
+    env:
+      CLANG_FORMAT_MAJOR: "18"
+
     steps:
-      - name: Checkout (with submodules)
+      # fetch-depth: 0 is LOAD-BEARING. The step below diffs against the PR base
+      # commit, which a shallow clone does not contain. At the default depth of 1
+      # this failed instantly with "<sha> is not a commit" and `|| true` swallowed
+      # it, so the step never checked a single line on any PR. No submodules: only
+      # first-party src/ and tests/ are formatted, and skipping them drops the
+      # large vendored checkouts.
+      - name: Checkout (full history — needed for the merge-base diff)
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          fetch-depth: 0
 
-      - name: Cache apt packages
-        uses: actions/cache@v4
-        with:
-          path: /tmp/apt-cache
-          key: apt-lint-${{ hashFiles('.github/workflows/ci.yml') }}
-          restore-keys: apt-lint-
-
-      - name: Install build dependencies (clang + ninja for compile_commands.json)
+      # PINNED. `apt-get install clang-format` follows the runner image's default
+      # (18.1.3 today, whatever GitHub ships tomorrow), and clang-format's output
+      # changes between major versions — an unpinned formatter silently redefines
+      # what "correctly formatted" means, and the check would start flagging code
+      # that was clean yesterday. clang-format-18 is the versioned package; the
+      # git-clang-format wrapper is a version-agnostic differ, so it is pointed at
+      # the pinned binary via --binary rather than being pinned itself.
+      - name: Install clang-format ${{ env.CLANG_FORMAT_MAJOR }} (pinned)
         run: |
-          sudo mkdir -p /tmp/apt-cache/partial
-          sudo chmod -R 1777 /tmp/apt-cache
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDir::Cache::archives "/tmp/apt-cache";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' \
-            | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
           sudo rm -f /etc/apt/sources.list.d/*microsoft* /etc/apt/sources.list.d/*azure* 2>/dev/null || true
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+            | sudo tee /etc/apt/apt.conf.d/99-osv-ci-timeout >/dev/null
           sudo apt-get update -qq
+          # clang-format-N provides the pinned binary; clang-format provides the
+          # git-clang-format wrapper script (never invoked as a formatter itself).
           sudo apt-get install -y --no-install-recommends \
-            cmake \
-            ninja-build \
-            clang-format \
-            clang-tidy \
-            gcc-14 \
-            libgl1-mesa-dev \
-            libx11-dev \
-            libxext-dev \
-            libxrandr-dev \
-            libxcursor-dev \
-            libxi-dev \
-            libxss-dev \
-            libxkbcommon-dev \
-            libwayland-dev \
-            wayland-protocols \
-            libasound2-dev \
-            libpulse-dev
-          sudo chmod -R a+rX /tmp/apt-cache
-
-      - name: Cache premake5 binary
-        uses: actions/cache@v4
-        id: cache-premake5
-        with:
-          path: bin/premake5
-          key: premake5-5.0.0-beta8-linux
-
-      - name: Download premake5
-        if: steps.cache-premake5.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p bin
-          curl -fsSL \
-            "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-linux.tar.gz" \
-            -o /tmp/premake5.tar.gz
-          tar -xzf /tmp/premake5.tar.gz -C bin/
-          chmod +x bin/premake5
-
-      - name: Cache vendored SDL3 build
-        uses: actions/cache@v4
-        id: cache-sdl3
-        with:
-          path: vendor/SDL3/build
-          key: sdl3-linux-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
-
-      - name: Build vendored SDL3
-        if: steps.cache-sdl3.outputs.cache-hit != 'true'
-        run: |
-          cmake -S vendor/SDL3 -B vendor/SDL3/build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DSDL_STATIC=ON            \
-            -DSDL_SHARED=OFF           \
-            -DSDL_TESTS=OFF            \
-            -DSDL_EXAMPLES=OFF         \
-            -DSDL_INSTALL_TESTS=OFF    \
-            -DSDL_X11_XTEST=OFF        \
-            -DSDL_JOYSTICK=OFF         \
-            -DSDL_HAPTIC=OFF           \
-            -DSDL_SENSOR=OFF           \
-            -DSDL_CAMERA=OFF           \
-            -G "Ninja"
-          cmake --build vendor/SDL3/build --parallel "$(nproc)"
-
-      - name: Use gcc-14 as default gcc
-        run: |
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100 \
-            --slave /usr/bin/g++ g++ /usr/bin/g++-14
-
-      - name: Generate Ninja build files (for compile_commands.json)
-        run: bin/premake5 ninja --cc=gcc
+            "clang-format-${CLANG_FORMAT_MAJOR}" clang-format
+          # Assert the pin held. Drift must fail loudly here, not silently change
+          # the diff three months from now.
+          got="$(clang-format-${CLANG_FORMAT_MAJOR} --version)"
+          echo "pinned binary: $got"
+          case "$got" in
+            *"clang-format version ${CLANG_FORMAT_MAJOR}."*) ;;
+            *) echo "::error::expected clang-format ${CLANG_FORMAT_MAJOR}.x, got: $got"
+               exit 1 ;;
+          esac
 
       - name: clang-format --diff (changed lines only)
         run: |
-          # For PR events, check against the merge base. For push events (main),
-          # fall back to HEAD~1. This ensures we only enforce style on new/changed
-          # code, not the entire tree (which has hand-aligned struct members
-          # incompatible with automated reformatting).
+          # Enforce style on new/changed code only — the existing tree has
+          # hand-aligned struct members clang-format cannot reproduce (see the
+          # header of .clang-format).
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE="${{ github.event.pull_request.base.sha }}"
           else
             BASE="HEAD~1"
           fi
-          git clang-format --diff "$BASE" -- src/ tests/ || true
-
-      - name: clang-tidy (src/)
-        run: |
-          find src -type f -name "*.cpp" \
-            -exec clang-tidy -p . {} + 2>&1 | tee /tmp/clang-tidy-output.txt
-          # Extract summary line
-          grep -E "warning:|error:" /tmp/clang-tidy-output.txt | head -20 || true
-          echo "---"
-          echo "Total issues found: $(grep -c -E "warning:|error:" /tmp/clang-tidy-output.txt || echo 0)"
+          # Verify the base is actually present before diffing against it. This is
+          # the check whose absence hid the bug above: without it a missing commit
+          # looks identical to a clean diff.
+          if ! git rev-parse --verify --quiet "$BASE^{commit}" >/dev/null; then
+            echo "::error::base commit $BASE is not present in the clone — checkout needs fetch-depth: 0"
+            exit 1
+          fi
+          # git clang-format --diff exits 1 when changed lines would be
+          # reformatted and 0 when they are clean, so the two cases MUST be told
+          # apart. The old blanket `|| true` collapsed them together with genuine
+          # errors, which is how the "not a commit" failure above stayed hidden.
+          # Formatting differences stay advisory (this repo formats new/changed
+          # code only); anything else is a real failure and is surfaced.
+          set +e
+          diff_out=$(git clang-format --binary "clang-format-${CLANG_FORMAT_MAJOR}" \
+                       --diff "$BASE" -- src/ tests/ 2>&1)
+          rc=$?
+          set -e
+          printf '%s\n' "$diff_out"
+          case "$rc" in
+            0) echo "clang-format: changed lines are clean" ;;
+            1) echo "::warning::clang-format would reformat changed lines (advisory — diff above)" ;;
+            *) echo "::error::git clang-format failed with exit $rc (not a formatting difference)"
+               exit "$rc" ;;
+          esac
