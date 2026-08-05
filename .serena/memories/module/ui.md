@@ -570,6 +570,10 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   Ordering: decode parallel, append+attach strictly in sequence via a resequencer (lookahead cap 8 items/256MiB).
   Methods: `enqueue` (any thread, refuse if stopped), `abort_and_flush` (idempotent), `begin_session` (clears stale state/flags),
   `set_exclusive` (inhibit until released). Worker stops gracefully on Vault::lock().
+  **Phase 65:** `maybe_end_batch()` is latched by `batch_ended_` — end-of-batch `enqueue_snapshot()` + `flush()` 
+  fires once per busy→idle transition, re-arming when work arrives (reset in `begin_session()`). Previously 
+  (Phase 50–64): the snapshot+flush ran unconditionally every idle frame, appending a full index blob and growing 
+  the vault at ~795 bytes/second with no user input, unbounded.
   **Phase 51:** `enqueue_folder(vault, folder_path, dest_gallery_path, progress)` enqueues an ImportTaskKind::Folder,
   mirroring `enqueue_files`. Multiple folder picks create multiple tasks (one per folder).
   **Phase 53:** `enqueue_volume_set(volumes, style, stem, dest, gallery_name, kind, password)` — Task gained
