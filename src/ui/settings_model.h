@@ -13,8 +13,8 @@
 
 namespace ui {
 
-enum class SettingsSection : uint8_t { Appearance = 0, Browsing, TagColours };
-inline constexpr int SETTINGS_SECTION_COUNT = 3;
+enum class SettingsSection : uint8_t { Appearance = 0, Browsing, TagColours, VaultOps };
+inline constexpr int SETTINGS_SECTION_COUNT = 4;
 
 struct SettingsState {
     SettingsSection    section           = SettingsSection::Appearance;
@@ -31,6 +31,8 @@ struct SettingsState {
     TextInputModel  prompt_buf{vault::INDEX_MAX_CATEGORY_BYTES};
     TextFieldChrome prompt_chrome;   // caret/scroll view state, advanced while drawing
     std::string error;        // one-line failure shown in the overlay footer
+    // Phase 65: set by VaultOps section when user presses Enter on "Re-check vault"
+    bool        trigger_migration = false;
 };
 
 // Navigate between sections; clamp to [0, SETTINGS_SECTION_COUNT). Reset row to 0.

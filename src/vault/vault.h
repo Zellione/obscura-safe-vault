@@ -88,6 +88,18 @@ struct RemoveBatchStats {
     std::size_t missing = 0;
 };
 
+// Probed video metadata handed back from a migration worker. Mirrors
+// media::VideoProbeResult field-for-field ON PURPOSE: vault.h must not include
+// media/video_probe.h (vault/ does not depend on media/), and the poster is
+// borrowed as a span rather than owned.
+struct VideoProbeApply {
+    VideoCodec               codec       = VideoCodec::Unknown;
+    uint32_t                 width       = 0;
+    uint32_t                 height      = 0;
+    uint64_t                 duration_us = 0;
+    std::span<const uint8_t> poster_jpeg;   // empty = leave the poster alone
+};
+
 class Vault {
 public:
     // Auto-compaction gates (remove_image): rewrite the vault only when at
@@ -195,33 +207,19 @@ public:
     // Decrypt + concatenate all of a video node's chunks into mlock'd memory.
     [[nodiscard]] VaultResult read_video(const IndexNode& node, crypto::SecureBytes& out) const;
 
-    // Re-probe a video node whose metadata was never filled in — codec ==
-    // Unknown, stored when add_video() imported it before a decoder for its
-    // codec existed (e.g. an AV1 .webm imported before Phase 40). Best
-    // effort: decrypts the raw container, re-runs media::probe_video(), and
-    // if it now succeeds with a real codec, updates codec/width/height/
-    // duration_us and stores a poster (if one wasn't already stored),
-    // persisting via the normal crash-safe index swap. A no-op success (Ok,
-    // no write) if the node already has real metadata, isn't a video, or
-    // still can't be decoded. Locked if not unlocked; NotFound if node_path
-    // doesn't resolve.
-    [[nodiscard]] VaultResult repair_video_metadata(std::string_view node_path);
-
-    // Phase 47: correct a stale ImageMeta::animated on an image imported before
-    // the flag existed. Sets the flag and persists the index; returns false if
-    // `node_path` is not an image, the write failed, or the flag was already
-    // correct (no-op). Locked if not unlocked; NotFound if node_path doesn't
-    // resolve.
-    [[nodiscard]] bool repair_image_animated(std::string_view node_path, bool animated);
-
     // Test-only seam (defined in tests/vault/test_video.cpp, not part of any
     // production translation unit): resets a just-imported, fully-decodable
-    // video node's metadata back to the Unknown/0/empty state repair_video_metadata()
-    // above is meant to fix, simulating "imported before this build could
-    // decode its codec". Production code can never produce that state for a
-    // file the current build CAN decode — only a real FFmpeg capability
-    // change between import time and now can.
+    // video node's metadata back to the Unknown/0/empty state that would need
+    // fixing, simulating "imported before this build could decode its codec".
+    // Production code can never produce that state for a file the current build
+    // CAN decode — only a real FFmpeg capability change between import time and
+    // now can.
     friend void test_only_force_video_codec_unknown(Vault& v, std::string_view node_path);
+
+    // Phase 65 test seam: force an animatable image to appear un-backfilled by
+    // clearing the animated flag, simulating "imported before animation detection
+    // was implemented". Used to test scan_migration's image-counting arm.
+    friend void test_only_force_image_animated_unknown(Vault& v, std::string_view node_path);
 
     // Remove an image from the index (its chunk is orphaned, reclaimed by Phase 7
     // compaction). NotFound if the image does not exist.
@@ -302,6 +300,14 @@ public:
     friend VaultResult remove_media_batch(Vault& v,
                                           std::span<const std::string> node_paths,
                                           RemoveBatchStats* stats);
+
+    // Phase 65 migration: apply probed metadata WITHOUT committing, so a whole
+    // migration pass costs one index write instead of one per node.
+    friend VaultResult apply_video_probe(Vault& v, std::string_view node_path,
+                                         const VideoProbeApply& probe);
+    friend VaultResult apply_image_animated(Vault& v, std::string_view node_path,
+                                            bool animated);
+    friend VaultResult commit_migration(Vault& v, VaultSettings settings);
 
     // Phase 50: while the import queue is active, App points this at the
     // CommitLane; Vault::commit_index() then routes through the lane
@@ -455,6 +461,26 @@ private:
 // Replace the vault's global settings and persist them via the crash-safe index
 // swap. Locked if not unlocked. Phase 49.
 [[nodiscard]] VaultResult set_vault_settings(Vault& v, VaultSettings s);
+
+// Write probed metadata onto a video node and append its poster chunk if the
+// node has none, WITHOUT committing the index. Locked if locked; NotFound if
+// the path does not resolve to a video; IoError if the poster append fails.
+// A node that already has a real codec is left alone (Ok, no write).
+// Coordinator-thread only — mutates the tree and appends to fp_.
+[[nodiscard]] VaultResult apply_video_probe(Vault& v, std::string_view node_path,
+                                            const VideoProbeApply& probe);
+
+// Set an image node's animated flag WITHOUT committing the index. Ok (no write)
+// when the flag is already correct or the format cannot animate; NotFound if the
+// path does not resolve to an image. Coordinator-thread only.
+[[nodiscard]] VaultResult apply_image_animated(Vault& v, std::string_view node_path,
+                                               bool animated);
+
+// Persist `settings` (carrying the Phase 65 watermark) together with every
+// pending apply_* mutation in ONE commit_index(). Locked if locked; IoError if
+// the commit fails (the tree is already mutated — the remove_media_batch
+// contract).
+[[nodiscard]] VaultResult commit_migration(Vault& v, VaultSettings settings);
 
 // Rename an image, video, or gallery's own `name` field in place — a pure
 // leaf-field edit. Descendants, tags, favorite flag, sort key, and cover all

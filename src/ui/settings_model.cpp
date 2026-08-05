@@ -55,6 +55,8 @@ int settings_row_count(const SettingsState& state) noexcept
         auto size = static_cast<int>(state.draft.categories.size());
         return state.vault_unlocked ? size : 0;
     }
+    case VaultOps:
+        return state.vault_unlocked ? 1 : 0; // Phase 65: re-check vault for upgrades
     }
     return 0;
 }

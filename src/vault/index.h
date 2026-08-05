@@ -140,10 +140,6 @@ struct VideoMeta {
     std::vector<VideoChunk> chunks;              // ordered encrypted-chunk locations
     uint64_t               poster_offset  = 0;   // first-frame JPEG poster (Phase 15 PR4); 0 length = none
     uint64_t               poster_length  = 0;
-    // Transient, NEVER serialized: a repair probe already failed for this
-    // video in this session, so repair_video_metadata() skips re-reading the
-    // whole file on every gallery visit (it retries on the next unlock).
-    bool                   probe_failed_session = false;
 };
 
 // Per-gallery children display order (Phase 37). Persisted on Gallery nodes
@@ -253,6 +249,12 @@ struct VaultSettings {
     std::vector<TagCategory>   categories;
     std::vector<TagDescription> tag_descriptions;
 
+    // Phase 65: what content backfills have been run against this vault.
+    // 0/0 is the correct reading for every pre-v10 blob — such a vault has
+    // never been migrated. See docs/roadmap/phase-65-blocking-migration.md.
+    uint8_t  migrated_index_version = 0;
+    uint16_t migrated_probe_caps    = 0;
+
     // The starting category set for a vault that has never stored one: a freshly
     // created vault and every pre-v8 vault. An empty SAVED list is a legitimate
     // state and is never re-seeded.
@@ -265,13 +267,23 @@ struct VaultSettings {
 // block after the tree root (Phase 18); pre-v5 blobs read with an empty list.
 // v6: per-gallery sort_key (Phase 37); pre-v6 blobs read every node as Manual.
 // v7: per-image `animated` flag (Phase 47); pre-v7 blobs read every image as
-// not animated, and are healed lazily on first view (see ui/anim_repair.*).
+// not animated, and are fixed during vault migration (Phase 65).
 // v8: vault-global settings block after the saved-searches block, and sort_key
 // byte 0 re-read as `Default` with a new `Insertion = 7` (Phase 49); pre-v8
 // blobs read with the seeded default settings and every gallery at `Default`.
 // v9: per-tag descriptions appended to the vault-global settings block
 // (Phase 51); pre-v9 blobs read with an empty list.
-inline constexpr uint8_t INDEX_VERSION = 9;
+// v10: vault-global migration watermark appended to the settings block
+// (Phase 65: migrated_index_version u8, migrated_probe_caps u16); pre-v10
+// blobs read 0/0 and are therefore treated as never migrated.
+inline constexpr uint8_t INDEX_VERSION = 10;
+
+// Phase 65: the index version whose content backfills the migration performs.
+// Bump ONLY when a NEW index version adds a field needing a content backfill —
+// NOT on every INDEX_VERSION bump, or unrelated format changes would re-offer a
+// migration that has nothing to do with them. Currently 7: the version that
+// introduced ImageMeta::animated.
+inline constexpr uint8_t MIGRATION_INDEX_VERSION = 7;
 
 // Maximum tree depth accepted on deserialisation — guards against stack overflow
 // from a deeply-nested hostile blob.

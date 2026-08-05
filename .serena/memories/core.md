@@ -56,12 +56,12 @@ vendor/      git submodules — pinned versions, build mechanics, CI matrix in m
 `KEK = Argon2id(password [‖ keyfile], salt)` → unwraps a random 32-byte master key.
 All data/thumbnail/index chunks are encrypted with the master key + a fresh nonce per chunk.
 
-## Vault write atomicity & Phase 50 concurrency
+## Vault write atomicity & concurrency
 
 Append chunks → fsync → write index to inactive slot → fsync → flip `active_slot` → fsync.
 (Full 3-phase detail in `mem:module/vault` index_io.*.)
 
-**Phase 50 main-thread-tree architecture (Phase 50):**
+**Phase 50 main-thread-tree architecture:**
 - **Index tree is main-thread-only** — no tree locks, no concurrent mutations. Worker stages chunks; main thread attaches via `Vault::attach_staged`.
 - **Vault has two FILE\* handles + write_mutex_:**
   - `read_fp_` (read-only) — all read paths (thumbnail decrypt, image fetch, VideoSource) to avoid contention.
@@ -70,6 +70,9 @@ Append chunks → fsync → write index to inactive slot → fsync → flip `act
 - **CommitLane owns a jthread** — batches index writes (N=32 files or 2s), generation-ordered with coalescing (newest blob wins).
   Flush on queue drain, cancel, lock (auto-stop before key wipe), shutdown. Write failure halts queue (hard stop, error on status page).
   Crash mid-batch loses at most the last batch's index entries; orphans reclaimable by compact.
+
+**Phase 65 blocking-job concurrency model:**
+`MigrationJob` follows `FileOpJob`'s contract: exclusive vault ownership while `active()`, main-thread polls progress/outcome, renders a modal. **One coordinator thread** owns the index tree and all `fp_` writes (guarded by `write_mutex_`); **a decode pool** of `max(1, hardware_concurrency()-1)` workers runs decrypt → probe/sniff → encode poster in parallel. Results read through `vault::read_thumb_span` (any-thread-safe). Queue bounded at ~`workers * 2` to stay within the 256 MiB `mlock`'d budget (decoded frames + posters are `SecureBytes`). One `commit_index()` at the end, then watermark write, then `compact()` if `wasted >= AUTO_COMPACT_MIN_WASTE`. Cancel commits work but does NOT stamp watermark (re-offered next unlock). Crash leaves vault as-is; orphaned chunks are dead ciphertext reclaimed by compact.
 
 ## Other memories
 - Tech stack, pinned deps, build mechanics, CI matrix: `mem:tech_stack`

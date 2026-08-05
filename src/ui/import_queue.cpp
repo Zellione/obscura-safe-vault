@@ -309,6 +309,7 @@ void ImportQueue::begin_session(vault::Vault& v)
     lane_->start(v);
     v_->set_commit_router(lane_.get());
     worker_stop_ = false;
+    batch_ended_ = false;  // Re-arm the latch for the new session
     worker_ = std::jthread([this]() { worker_loop(); });
 }
 
@@ -1258,10 +1259,16 @@ void ImportQueue::maybe_end_batch()
 {
     // Check if fully idle: no tasks, no records, lane idle
     if (!tasks_.empty() || !records_.empty() || (lane_ && !lane_->idle())) {
+        // Work present: re-arm the latch for the next busy→idle transition
+        batch_ended_ = false;
         return;
     }
 
-    // Queue is idle: enqueue final snapshot, flush, and uninstall router
+    // Already ended this batch; do nothing until new work arrives (re-arms latch above)
+    if (batch_ended_) return;
+
+    // First transition to idle: enqueue final snapshot, flush, and uninstall router
+    batch_ended_ = true;
     if (lane_) {
         (void)lane_->enqueue_snapshot();
         (void)lane_->flush();

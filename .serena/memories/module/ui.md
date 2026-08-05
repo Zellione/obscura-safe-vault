@@ -447,6 +447,19 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   Listed explicitly in osv_tests' premake5.lua files{}. Fixtures: same 2 s `testsrc2` clip
   pre-encoded H.264/MP4 + VP9/WebM in `scripts/gen_media_fixtures.sh` (lavfi `gradients`
   randomizes colors per invocation — do not use it for "same content" fixtures).
+- `migration_job.*` (Phase 65) — one-time blocking vault upgrade pass. `MigrationJob` follows
+  the same contract as `FileOpJob`: exclusive vault ownership while `active()`, main-thread
+  polls progress and draws a modal, Esc -> cancel(). Unlike import, there is no staging dance
+  because blocking ops have no concurrent browsing — the job owns the vault exclusively.
+  **Architecture:** One coordinator thread owns the index tree and all writes to `fp_` (guarded
+  by `write_mutex_`); a pool of `max(1, hardware_concurrency()-1)` workers decrypt → probe/sniff →
+  encode poster. Results read through `vault::read_thumb_span` (the any-thread-safe path). The
+  queue is bounded at ~`workers * 2` to stay within the 256 MiB `mlock`'d budget (decoded
+  frames + encoded posters live in mlock'd `SecureBytes`). One `commit_index()` at the end,
+  then watermark write, then `compact(&progress)` as a third phase if `wasted_bytes() >=
+  AUTO_COMPACT_MIN_WASTE` (floor-only gate, no ratio term). Cancel commits applied work but
+  does NOT stamp the watermark, so the pass re-runs at the next unlock. Crash mid-pass leaves
+  the vault as it was; orphaned poster chunks are dead ciphertext reclaimed by compact.
 
 ## Import planning & archive reading
 - `folder_scan.*` (Phase 51) — `scan_folder(root) -> vector<ZipEntry>` via
@@ -557,6 +570,10 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   Ordering: decode parallel, append+attach strictly in sequence via a resequencer (lookahead cap 8 items/256MiB).
   Methods: `enqueue` (any thread, refuse if stopped), `abort_and_flush` (idempotent), `begin_session` (clears stale state/flags),
   `set_exclusive` (inhibit until released). Worker stops gracefully on Vault::lock().
+  **Phase 65:** `maybe_end_batch()` is latched by `batch_ended_` — end-of-batch `enqueue_snapshot()` + `flush()` 
+  fires once per busy→idle transition, re-arming when work arrives (reset in `begin_session()`). Previously 
+  (Phase 50–64): the snapshot+flush ran unconditionally every idle frame, appending a full index blob and growing 
+  the vault at ~795 bytes/second with no user input, unbounded.
   **Phase 51:** `enqueue_folder(vault, folder_path, dest_gallery_path, progress)` enqueues an ImportTaskKind::Folder,
   mirroring `enqueue_files`. Multiple folder picks create multiple tasks (one per folder).
   **Phase 53:** `enqueue_volume_set(volumes, style, stem, dest, gallery_name, kind, password)` — Task gained
@@ -806,21 +823,6 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   Called on every viewer `on_vault_changed`, so collection viewers' album stays valid across
   vault mutations. Delegates to `vault::resolve_node` (path-safe). Fixes dangling pointers that
   caused playback/selection reset during imports.
-- `anim_repair.*` (Phase 47; was `gif_repair.*`) — `maybe_repair_animated(...)` +
-  `Vault::repair_image_animated(path,bool)`: lazy bidirectional healing for images stored before
-  their format's animation support landed, persisted via the same crash-safe `commit_index()`
-  path as video repair. No-op when the animated flag is already correct. Gated on
-  `vault::format_can_animate`, so it covers GIF and WebP — though the WebP arm is unreachable for
-  pre-Phase-57 vaults (an animated WebP could not be imported at all, so no such node exists).
-  `AnimSniffGate` (PR #122) gates the viewer's sniff, which costs a full image read+decrypt:
-  `should_sniff(node)` is true only for an animatable image whose animated flag is UNSET (a set
-  flag is trustworthy — import and repair both persist the value sniffed from actual bytes), at
-  most once per `data_offset` per gate lifetime. ImageViewer holds one per session
-  (`anim_sniff_gate_`); before this, EVERY navigation onto any GIF re-read the whole image.
-- `video_repair.*` — `repair_unknown_video_metadata(vault,gallery_path,children)` sweeps a
-  freshly listed gallery for videos still at `VideoCodec::Unknown` + calls
-  `Vault::repair_video_metadata` per node. Called from GalleryGrid::refresh() so previously-
-  imported videos self-heal (thumbnail+duration) on next open — no migration.
 - `strip_layout.*` — orientation-aware viewer-strip geometry + half-size thumbnails.
   Phase 47: `strip_cell_rect(...)` added for forward index→rect mapping (inverse `strip_hit_axis`
   pre-existed). NOTE: `gfx::Renderer::draw_thumbnail_strip` duplicates this layout internally

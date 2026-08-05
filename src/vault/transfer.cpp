@@ -194,6 +194,26 @@ VaultResult transfer_image(Vault& src, std::string_view src_gallery,
             return r;
     }
 
+    // Phase 65: content from an un-migrated vault carries un-backfilled metadata
+    // (codec Unknown, animated flag never sniffed). With the lazy repair paths gone,
+    // nothing would ever fix it if the destination kept claiming to be migrated —
+    // so the destination inherits the source's lower watermark and re-offers the
+    // migration at its next unlock.
+    {
+        const VaultSettings& s_src = vault_settings(src);
+        VaultSettings        s_dst = vault_settings(dst);
+        bool lowered = false;
+        if (s_src.migrated_index_version < s_dst.migrated_index_version) {
+            s_dst.migrated_index_version = s_src.migrated_index_version;
+            lowered = true;
+        }
+        if (s_src.migrated_probe_caps < s_dst.migrated_probe_caps) {
+            s_dst.migrated_probe_caps = s_src.migrated_probe_caps;
+            lowered = true;
+        }
+        if (lowered) (void)set_vault_settings(dst, std::move(s_dst));
+    }
+
     if (mode == TransferMode::Move) return src.remove_image(src_gallery, filename);
     return Ok;
 }
@@ -255,6 +275,26 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
     // A cancel leaves the source intact even for Move — the partial copy in dst is a
     // recoverable duplicate, never a loss.
     if (progress && progress->cancel.load()) return Ok;
+
+    // Phase 65: content from an un-migrated vault carries un-backfilled metadata
+    // (codec Unknown, animated flag never sniffed). With the lazy repair paths gone,
+    // nothing would ever fix it if the destination kept claiming to be migrated —
+    // so the destination inherits the source's lower watermark and re-offers the
+    // migration at its next unlock.
+    {
+        const VaultSettings& s_src = vault_settings(src);
+        VaultSettings        s_dst = vault_settings(dst);
+        bool lowered = false;
+        if (s_src.migrated_index_version < s_dst.migrated_index_version) {
+            s_dst.migrated_index_version = s_src.migrated_index_version;
+            lowered = true;
+        }
+        if (s_src.migrated_probe_caps < s_dst.migrated_probe_caps) {
+            s_dst.migrated_probe_caps = s_src.migrated_probe_caps;
+            lowered = true;
+        }
+        if (lowered) (void)set_vault_settings(dst, std::move(s_dst));
+    }
 
     // Everything copied into dst — for a Move, drop the source subtree (copy-then-delete).
     if (mode == TransferMode::Move) return src.remove_gallery(src_gallery);

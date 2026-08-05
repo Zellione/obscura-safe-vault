@@ -554,6 +554,7 @@ project "osv_tests"
         "src/ui/dup_model.cpp",
         "src/ui/dup_scan.cpp",
         "src/ui/dup_video_sig.cpp",
+        "src/ui/migration_job.cpp",
         "src/ui/detail_panel.cpp",
         "src/ui/natural_sort.cpp",
         "src/ui/meta_json.cpp",
@@ -592,7 +593,6 @@ project "osv_tests"
         "src/ui/gallery_view.cpp",
         "src/ui/anim_model.cpp",
         "src/ui/anim_playback.cpp",
-        "src/ui/anim_repair.cpp",
         "src/ui/help_popup.cpp",
         "src/ui/help_layout.cpp",
         "src/ui/detail_layout.cpp",
@@ -603,7 +603,6 @@ project "osv_tests"
         "src/ui/text_metrics.cpp",
         "src/ui/settings_model.cpp",
         "src/ui/tile_thumb.cpp",
-        "src/ui/video_repair.cpp",
     }
 
     includedirs {

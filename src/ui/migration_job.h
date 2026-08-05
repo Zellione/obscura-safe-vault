@@ -1,0 +1,79 @@
+#pragma once
+
+// Phase 65: the one-time blocking vault migration.
+//
+// Threading contract (FileOpJob's, NOT the Phase 50 staging contract): while
+// active(), this job owns the vault EXCLUSIVELY. The owning screen must not
+// read the vault — no thumbnail decrypt, no listing — until take_outcome()
+// returns; it only polls progress and draws a modal. That exclusivity is what
+// lets the coordinator mutate the index tree directly, which a background
+// import (running concurrently with browsing) may never do.
+//
+// Cancel stops between items. Work applied so far is committed and durable, but
+// the watermark is NOT stamped and compaction is skipped, so the migration is
+// re-offered at the next unlock.
+
+#include <atomic>
+#include <cstdint>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <thread>
+
+#include "vault/op_progress.h"
+
+namespace vault { class Vault; }
+
+namespace ui {
+
+// Coarse stage, for the modal's label. Progress counters are per-stage.
+enum class MigrationPhase { Idle, Scanning, Repairing, Committing, Compacting, Done };
+
+struct MigrationOutcome {
+    bool        ok        = false;  // ran to completion (or a clean cancel)
+    bool        cancelled = false;
+    int         videos_fixed   = 0; // codec resolved and metadata written
+    int         videos_skipped = 0; // still undecodable — watermark still advances
+    int         images_fixed   = 0; // animated flag corrected
+    int         failed         = 0; // read/decrypt failures
+    int         total          = 0; // items attempted
+    uint64_t    reclaimed_bytes = 0;// freed by the compaction phase
+    std::string status;             // human-facing summary (never any content)
+    std::string error;              // set when ok == false
+};
+
+class MigrationJob {
+public:
+    MigrationJob() = default;
+    ~MigrationJob();
+
+    MigrationJob(const MigrationJob&)            = delete;
+    MigrationJob& operator=(const MigrationJob&) = delete;
+
+    // Spawn the coordinator. False if a job is already in flight. `v` must
+    // outlive the job and must not be touched by anyone else until
+    // take_outcome() returns.
+    bool start(vault::Vault& v);
+
+    [[nodiscard]] bool active() const noexcept { return active_.load(); }
+    [[nodiscard]] int  total()  const noexcept { return progress_.total.load(); }
+    [[nodiscard]] int  done()   const noexcept { return progress_.done.load(); }
+    [[nodiscard]] MigrationPhase phase() const noexcept { return phase_.load(); }
+
+    void cancel() noexcept { progress_.cancel.store(true); }
+
+    // Join and hand back the outcome exactly once; nullopt while still running.
+    [[nodiscard]] std::optional<MigrationOutcome> take_outcome();
+
+private:
+    void run(vault::Vault& v);
+
+    vault::OpProgress            progress_;
+    std::atomic<bool>            active_{false};
+    std::atomic<bool>            done_{false};
+    std::atomic<MigrationPhase>  phase_{MigrationPhase::Idle};
+    MigrationOutcome             outcome_;   // written by worker, read after join
+    std::jthread                 thread_;
+};
+
+} // namespace ui

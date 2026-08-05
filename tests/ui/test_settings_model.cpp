@@ -28,7 +28,7 @@ TEST(settings_section_navigation_clamps)
     ui::settings_move_section(s, 1);
     CHECK(s.section == ui::SettingsSection::Browsing);
     ui::settings_move_section(s, 99);
-    CHECK(s.section == ui::SettingsSection::TagColours);   // clamped at the end
+    CHECK(s.section == ui::SettingsSection::VaultOps);   // clamped at the end (Phase 65)
 }
 
 TEST(settings_section_change_resets_the_row)

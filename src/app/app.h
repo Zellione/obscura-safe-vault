@@ -16,7 +16,9 @@
 #include "ui/import_queue.h"
 #include "ui/screen.h"
 #include "ui/settings_model.h"
+#include "ui/migration_job.h"
 #include "vault/vault.h"
+#include "vault/migration.h"
 
 namespace ui { class ImageViewer; }
 
@@ -74,8 +76,15 @@ private:
     void render_frame();                         // draw + present + frame-cap fallback
     void open_settings_overlay();                // seed settings state and open the overlay
 
-    // Dispatch event to overlays (help > settings > lock_confirm); true if handled
+    // Dispatch event to overlays (help > settings > migration > lock_confirm);
+    // true if handled.
     static bool dispatch_overlay_event(App& app, const SDL_Event& e);
+
+    // The per-overlay handlers dispatch_overlay_event fans out to, defined in
+    // app.cpp. A nested type rather than more App members: it reaches App's
+    // privates exactly as a member would, without growing App's own interface
+    // for what is one function's worth of internal structure.
+    struct OverlayDispatch;
 
     gfx::Window                        window_;
     gfx::FontAtlas                     font_;
@@ -129,6 +138,19 @@ private:
     };
     Overlays                           overlays_;
 
+    // Phase 65: unlock-time migration. Sequenced carefully to ensure the job has
+    // exclusive vault access: migration is offered and run BEFORE the import queue
+    // begins_session (see promote_pending and update).
+    struct MigrationUi {
+        vault::MigrationScan pending_migration;  // detected at unlock; triggers offer modal
+        std::unique_ptr<ui::MigrationJob> job;  // the running coordinator (ptr to avoid deleted ops)
+        bool                 offer_open = false; // offer modal is showing
+        bool                 progress_open = false;  // progress modal is showing
+        bool                 result_open = false;    // result summary is showing
+        ui::MigrationOutcome result;             // handed back by take_outcome()
+    };
+    MigrationUi                        migration_ui_;
+
     // Phase 50: import queue and related UI state. Declared after active_/pending_
     // so ~ImportQueue (which flushes into the vault) runs before the vault is destroyed.
     struct ImportUi {
@@ -144,6 +166,10 @@ private:
 
         // Background import queue.
         ui::ImportQueue queue;
+
+        // True when import session has not yet begun (deferred until after
+        // migration completes at unlock). Set by promote_pending, consumed by update.
+        bool need_begin_session = false;
     };
     ImportUi                           import_ui_;
 };

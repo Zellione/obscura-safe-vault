@@ -30,6 +30,20 @@
 
 ## Index versions
 
+**INDEX_VERSION = 10** (Phase 65): a **migration watermark**, serialised at the tail
+of the Phase 49 vault-global settings block (after category list):
+
+```
+migrated_index_version  u8
+migrated_probe_caps     u16 (LE)
+```
+
+Pre-v10 blobs read with watermark `0/0` (never migrated). Out-of-range watermark
+bytes are **rejected on deserialise, not clamped**. Staleness is computed against
+`vault::MIGRATION_INDEX_VERSION` (= 7, the version introducing `animated`) and
+`media::PROBE_CAPS_GEN` (= 1, current decode capability), NOT against `INDEX_VERSION`
+itself — a future sort field or per-node flag would not re-trigger the migration.
+
 **INDEX_VERSION = 9** (Phase 51): a **tag-descriptions sub-block**, serialised
 after the Phase 49 vault-global settings block:
 

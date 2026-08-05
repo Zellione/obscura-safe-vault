@@ -15,7 +15,6 @@
 #include "ui/gallery_session_state.h"
 #include "ui/anim_model.h"
 #include "ui/anim_playback.h"
-#include "ui/anim_repair.h"
 #include "ui/quick_switch.h"
 #include "ui/screen.h"
 #include "ui/scroll_model.h"
@@ -261,10 +260,6 @@ private:
     // scroll the animation can be torn down and rebuilt before rendering. -1
     // when anim_ is null. Used to reconcile index changes (Phase 47 fix).
     int anim_index_ = -1;
-
-    // Limits the legacy animated-flag sniff (a full image read + decrypt) to
-    // once per animated chunk per viewer session; see AnimSniffGate.
-    AnimSniffGate anim_sniff_gate_;
 
     // Rebuild anim_ for the current index if it has moved. Called from both
     // show_image_at() and update() to keep anim_ in sync regardless of how
