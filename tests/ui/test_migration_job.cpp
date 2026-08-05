@@ -388,9 +388,16 @@ TEST(migration_job_skips_compaction_when_nothing_is_wasted)
     const ui::MigrationOutcome out = run_to_completion(job);
 
     CHECK(out.ok);
-    // Post-commit waste in an empty vault is only a few KiB (superseded index blob),
-    // far below AUTO_COMPACT_MIN_WASTE (256 KiB), so compaction must be skipped.
+    // Compaction must have been skipped: reclaimed_bytes == 0 is not enough to distinguish
+    // skip from compact-failure. Instead, assert residual waste directly:
+    // - Waste still in the file proves compact() did not run (successful compact ~= 0 waste)
+    // - Waste below floor proves the skip happened for the right reason, not by accident
+    // Residual waste is more reliable than file-size checks, which commit itself changes.
     CHECK_EQ(out.reclaimed_bytes, 0u);
+    const uint64_t residual = v.wasted_bytes();
+    CHECK(residual > 0u);  // waste still exists, so compaction was skipped
+    CHECK(residual < vault::Vault::AUTO_COMPACT_MIN_WASTE);  // and below the floor
+
     // The vault remains valid and readable.
     CHECK_EQ(v.list("").size(), 0u);
 }
@@ -419,20 +426,21 @@ TEST(migration_job_compaction_reclaims_orphaned_chunks)
 
     // Add two large images: one to keep, one to delete. Must produce enough waste to
     // exceed AUTO_COMPACT_MIN_WASTE (256 KiB) when deleted, to trigger the floor gate.
-    // Use 100 MB images to ensure ample waste margin.
-    const auto pattern1 = job_pattern(100000000, 1);  // 100 MB
-    const auto pattern2 = job_pattern(100000000, 2);  // 100 MB
+    // Chunks are compressed via framing, so use 70 MB raw pattern to produce ~256+ KiB waste.
+    const auto pattern1 = job_pattern(70000000, 1);  // 70 MB (compresses to ~256+ KiB)
+    const auto pattern2 = job_pattern(70000000, 2);  // 70 MB (compresses to ~256+ KiB)
     REQUIRE(v.add_image("", pattern1, "keep.png") == vault::VaultResult::Ok);
     REQUIRE(v.add_image("", pattern2, "delete.png") == vault::VaultResult::Ok);
     REQUIRE(v.list("").size() == 2u);
 
-    // Delete the second image, which orphans its chunks (100 MB of data)
+    // Delete the second image, which orphans its chunks (70 MB raw → ~256+ KiB compressed waste)
     REQUIRE(v.remove_image("", "delete.png") == vault::VaultResult::Ok);
     REQUIRE(v.list("").size() == 1u);
 
-    // Verify there are now wasted bytes from the orphaned chunks
-    const uint64_t wasted_before = v.wasted_bytes();
-    CHECK(wasted_before > 0u);
+    // Self-verify the fixture produces enough waste to cross the compaction floor.
+    // If this REQUIRE fails, the payload is too small; if the constant changes,
+    // this test immediately fails rather than silently testing the skip branch.
+    REQUIRE(v.wasted_bytes() >= vault::Vault::AUTO_COMPACT_MIN_WASTE);
 
     // Record file size before migration to verify compaction actually reclaimed space
     const std::uintmax_t size_before = fs::file_size(tv.path);
