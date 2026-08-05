@@ -6,6 +6,7 @@
 #include <string>
 
 #include "gfx/theme.h"
+#include "platform/second_vault_pref.h"
 #include "vault/index.h"
 
 #include "ui/text_input_model.h"
@@ -13,8 +14,8 @@
 
 namespace ui {
 
-enum class SettingsSection : uint8_t { Appearance = 0, Browsing, TagColours, VaultOps };
-inline constexpr int SETTINGS_SECTION_COUNT = 4;
+enum class SettingsSection : uint8_t { Appearance = 0, Browsing, TagColours, VaultOps, Security };
+inline constexpr int SETTINGS_SECTION_COUNT = 5;
 
 struct SettingsState {
     SettingsSection    section           = SettingsSection::Appearance;
@@ -24,6 +25,8 @@ struct SettingsState {
     bool               vault_unlocked    = false;
     vault::VaultSettings draft;
     gfx::ThemeId       theme             = gfx::ThemeId::RefinedSlate;
+    // Phase 66: machine-scoped, like theme
+    platform::SecondVaultMode second_vault_default = platform::SecondVaultMode::LockNow;
     // Inline "add category" / "rename category" prompt (Phase 49). `prompt_row`
     // is the row being renamed, or -1 when adding.
     bool        prompting  = false;

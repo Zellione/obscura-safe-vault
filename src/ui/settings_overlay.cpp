@@ -4,6 +4,7 @@
 #include "gfx/text.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "platform/second_vault_pref.h"
 #include "platform/theme_pref.h"
 #include "ui/gallery_sort.h"
 #include "ui/settings_model.h"
@@ -105,6 +106,10 @@ namespace {
                 gfx::set_theme(state.theme);
                 (void)platform::ThemePref::default_location().save(state.theme);
                 commit_out = false;  // theme is persisted by the pref save
+            } else if (state.section == SettingsSection::Security) {
+                settings_change_value(state, -1);
+                (void)platform::SecondVaultPref::default_location().save(state.second_vault_default);
+                commit_out = false;
             } else if (state.vault_unlocked) {
                 settings_change_value(state, -1);
                 commit_out = true;
@@ -119,6 +124,10 @@ namespace {
                 gfx::set_theme(state.theme);
                 (void)platform::ThemePref::default_location().save(state.theme);
                 commit_out = false;  // theme is persisted by the pref save
+            } else if (state.section == SettingsSection::Security) {
+                settings_change_value(state, 1);
+                (void)platform::SecondVaultPref::default_location().save(state.second_vault_default);
+                commit_out = false;
             } else if (state.vault_unlocked) {
                 settings_change_value(state, 1);
                 commit_out = true;
@@ -239,6 +248,20 @@ bool handle_settings_event(SettingsState& state, const gfx::Window& window,
 
 namespace {
 
+// Convert SecondVaultMode to a display label.
+[[nodiscard]] std::string second_vault_mode_label(platform::SecondVaultMode mode) noexcept
+{
+    switch (mode) {
+    case platform::SecondVaultMode::LockNow:
+        return "Lock now";
+    case platform::SecondVaultMode::KeepTimed:
+        return "5 minutes";
+    case platform::SecondVaultMode::KeepSession:
+        return "Session";
+    }
+    return "Unknown";
+}
+
 constexpr float RADIUS       = 8.0f;
 constexpr float RADIUS_SMALL = 4.0f;
 constexpr float PAD          = 20.0f;
@@ -270,6 +293,8 @@ void draw_rail(gfx::Renderer& r, gfx::FontAtlas& font, float rail_x, float rail_
             sec_name = "Tag Colours";
         } else if (sec == SettingsSection::VaultOps) {
             sec_name = "Vault";
+        } else if (sec == SettingsSection::Security) {
+            sec_name = "Security";
         }
 
         r.draw_text(font, rail_x + 8.0f, item_y + 8.0f, sec_name,
@@ -319,6 +344,10 @@ void draw_pane_row(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float p
         // Phase 65: vault operations (only available when unlocked)
         label = "Re-check vault for upgrades";
         value = "[Enter]";
+    } else if (state.section == SettingsSection::Security && row_index == 0) {
+        // Phase 66: machine-scoped keep-open default
+        label = "Keep 2nd vault after transfer";
+        value = second_vault_mode_label(state.second_vault_default);
     }
 
     r.draw_text(font, pane_x + 30.0f, item_y + 8.0f, label,

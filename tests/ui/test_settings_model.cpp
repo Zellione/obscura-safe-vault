@@ -28,7 +28,7 @@ TEST(settings_section_navigation_clamps)
     ui::settings_move_section(s, 1);
     CHECK(s.section == ui::SettingsSection::Browsing);
     ui::settings_move_section(s, 99);
-    CHECK(s.section == ui::SettingsSection::VaultOps);   // clamped at the end (Phase 65)
+    CHECK(s.section == ui::SettingsSection::Security);   // clamped at the end (Phase 66)
 }
 
 TEST(settings_section_change_resets_the_row)
@@ -192,4 +192,29 @@ TEST(settings_default_sort_steps_backwards_and_skips_default)
     s.draft.default_sort = vault::SortKey::NameAsc;
     ui::settings_change_value(s, -1);
     CHECK(s.draft.default_sort == vault::SortKey::Insertion);   // skipped Default
+}
+
+TEST(settings_security_section_always_has_one_row)
+{
+    ui::SettingsState st;
+    st.section = ui::SettingsSection::Security;
+    st.vault_unlocked = false;                  // machine-scoped: no vault needed
+    CHECK_EQ(ui::settings_row_count(st), 1);
+}
+
+TEST(settings_security_value_cycles_and_wraps_both_ways)
+{
+    using platform::SecondVaultMode;
+    ui::SettingsState st;
+    st.section = ui::SettingsSection::Security;
+    st.in_pane = true;
+    CHECK(st.second_vault_default == SecondVaultMode::LockNow);
+    ui::settings_change_value(st, 1);
+    CHECK(st.second_vault_default == SecondVaultMode::KeepTimed);
+    ui::settings_change_value(st, 1);
+    CHECK(st.second_vault_default == SecondVaultMode::KeepSession);
+    ui::settings_change_value(st, 1);           // wraps forward
+    CHECK(st.second_vault_default == SecondVaultMode::LockNow);
+    ui::settings_change_value(st, -1);          // wraps backward
+    CHECK(st.second_vault_default == SecondVaultMode::KeepSession);
 }
