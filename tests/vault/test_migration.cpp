@@ -7,8 +7,10 @@
 #include <vector>
 
 #include "image/fixtures.h"
+#include "media/video_probe.h"
 #include "vault/index.h"
 #include "vault/migration.h"
+#include "vault/transfer.h"
 #include "vault/vault.h"
 
 namespace vault {
@@ -623,5 +625,104 @@ TEST(commit_migration_persists_the_watermark)
         REQUIRE(v.unlock(mig_bytes("pw"), {}) == vault::VaultResult::Ok);
         CHECK(!vault::migration_pending(vault::vault_settings(v), 1));
         CHECK(vault::migration_pending(vault::vault_settings(v), 2));
+    }
+}
+
+TEST(transfer_from_unmigrated_vault_lowers_destination_watermark)
+{
+    MigTempVault src_tv("xfer_src");
+    MigTempVault dst_tv("xfer_dst");
+
+    vault::Vault src;
+    REQUIRE(vault::Vault::create(src_tv.str(), mig_bytes("pw"), {}, kMigKdf, src)
+            == vault::VaultResult::Ok);
+    REQUIRE(src.create_gallery("g") == vault::VaultResult::Ok);
+    REQUIRE(src.add_image("g", mig_pattern(1000, 1), "a.png") == vault::VaultResult::Ok);
+    // src stays un-migrated (watermark 0/0).
+    CHECK(vault::migration_pending(vault::vault_settings(src), media::PROBE_CAPS_GEN));
+
+    vault::Vault dst;
+    REQUIRE(vault::Vault::create(dst_tv.str(), mig_bytes("pw"), {}, kMigKdf, dst)
+            == vault::VaultResult::Ok);
+    REQUIRE(dst.create_gallery("dst_g") == vault::VaultResult::Ok);
+    REQUIRE(vault::commit_migration(
+                dst, vault::stamp_migrated(vault::vault_settings(dst), media::PROBE_CAPS_GEN))
+            == vault::VaultResult::Ok);
+    CHECK(!vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN));
+
+    REQUIRE(vault::transfer_image(src, "g", "a.png", dst, "dst_g",
+                                  vault::TransferMode::Copy) == vault::VaultResult::Ok);
+
+    // The destination inherited un-backfilled content, so it owes a migration again.
+    CHECK(vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN));
+}
+
+TEST(transfer_clean_content_does_not_lower_watermark)
+{
+    MigTempVault src_tv("xfer_clean_src");
+    MigTempVault dst_tv("xfer_clean_dst");
+
+    vault::Vault src;
+    REQUIRE(vault::Vault::create(src_tv.str(), mig_bytes("pw"), {}, kMigKdf, src)
+            == vault::VaultResult::Ok);
+    REQUIRE(src.create_gallery("g") == vault::VaultResult::Ok);
+    // Add a clean PNG (no backfill needed)
+    REQUIRE(src.add_image("g", mig_pattern(1000, 1), "clean.png") == vault::VaultResult::Ok);
+    // Mark the source as fully migrated (to simulate content that's already been backfilled)
+    REQUIRE(vault::commit_migration(
+                src, vault::stamp_migrated(vault::vault_settings(src), media::PROBE_CAPS_GEN))
+            == vault::VaultResult::Ok);
+    CHECK(!vault::migration_pending(vault::vault_settings(src), media::PROBE_CAPS_GEN));
+
+    vault::Vault dst;
+    REQUIRE(vault::Vault::create(dst_tv.str(), mig_bytes("pw"), {}, kMigKdf, dst)
+            == vault::VaultResult::Ok);
+    REQUIRE(dst.create_gallery("dst_g") == vault::VaultResult::Ok);
+    REQUIRE(vault::commit_migration(
+                dst, vault::stamp_migrated(vault::vault_settings(dst), media::PROBE_CAPS_GEN))
+            == vault::VaultResult::Ok);
+    CHECK(!vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN));
+
+    REQUIRE(vault::transfer_image(src, "g", "clean.png", dst, "dst_g",
+                                  vault::TransferMode::Copy) == vault::VaultResult::Ok);
+
+    // dst's watermark should NOT have been lowered (source was also migrated)
+    CHECK(!vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN));
+}
+
+TEST(transfer_watermark_lowering_persists_after_close_reopen)
+{
+    MigTempVault src_tv("xfer_persist_src");
+    MigTempVault dst_tv("xfer_persist_dst");
+
+    {
+        vault::Vault src;
+        REQUIRE(vault::Vault::create(src_tv.str(), mig_bytes("pw"), {}, kMigKdf, src)
+                == vault::VaultResult::Ok);
+        REQUIRE(src.create_gallery("g") == vault::VaultResult::Ok);
+        REQUIRE(src.add_image("g", mig_pattern(1000, 1), "a.png") == vault::VaultResult::Ok);
+
+        vault::Vault dst;
+        REQUIRE(vault::Vault::create(dst_tv.str(), mig_bytes("pw"), {}, kMigKdf, dst)
+                == vault::VaultResult::Ok);
+        REQUIRE(dst.create_gallery("dst_g") == vault::VaultResult::Ok);
+        REQUIRE(vault::commit_migration(
+                    dst, vault::stamp_migrated(vault::vault_settings(dst), media::PROBE_CAPS_GEN))
+                == vault::VaultResult::Ok);
+        CHECK(!vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN));
+
+        REQUIRE(vault::transfer_image(src, "g", "a.png", dst, "dst_g",
+                                      vault::TransferMode::Copy) == vault::VaultResult::Ok);
+
+        // Watermark lowered in memory
+        CHECK(vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN));
+    }
+    // Close and reopen to verify watermark was persisted
+    {
+        vault::Vault dst;
+        REQUIRE(vault::Vault::open(dst_tv.str(), dst) == vault::VaultResult::Ok);
+        REQUIRE(dst.unlock(mig_bytes("pw"), {}) == vault::VaultResult::Ok);
+        // Watermark must be lowered and persist across reopen
+        CHECK(vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN));
     }
 }
