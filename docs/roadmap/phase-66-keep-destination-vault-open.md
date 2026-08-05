@@ -24,10 +24,10 @@ Chosen at the destination-unlock stage of the Transfer/Combine dialog
    the selector starts on and cannot unlock anything by itself.
 
 ### Tasks
-- [x] **`app::SecondVaultSession`** (new `src/app/second_vault.*`) — the one
+- [x] **`ui::SecondVaultSession`** (new `src/ui/second_vault.*`) — the one
   warm slot: destination path, unlocked `vault::Vault` handle, mode
   (`LockNow`/`KeepTimed`/`KeepSession`), sliding deadline. Decision logic is a
-  pure, unit-testable model in the header (mirroring `app/auto_lock.h`):
+  pure, unit-tested model (tests/ui/test_second_vault.cpp):
   sliding reset on completed transfer, tick/expiry, defer-while-job-running,
   replace semantics (unlocking a *different* destination locks the previous
   warm vault first), explicit wipe.
