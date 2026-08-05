@@ -344,3 +344,31 @@ TEST(migration_job_not_reoffered_after_completion)
     CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
     CHECK(vault::scan_migration(v).empty());
 }
+
+TEST(migration_job_pool_handles_many_items_without_loss)
+{
+    JobTempVault tv("pool");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
+            == vault::VaultResult::Ok);
+
+    const std::vector<uint8_t> anim = fixtures::load_anim_webp();
+    constexpr int kCount = 64;
+    for (int i = 0; i < kCount; ++i) {
+        const std::string name = "g" + std::to_string(i) + ".webp";
+        REQUIRE(v.add_image("", anim, name) == vault::VaultResult::Ok);
+        REQUIRE(vault::apply_image_animated(v, name, false) == vault::VaultResult::Ok);
+    }
+
+    ui::MigrationJob job;
+    REQUIRE(job.start(v));
+    const ui::MigrationOutcome out = run_to_completion(job);
+
+    CHECK(out.ok);
+    CHECK_EQ(out.total, kCount);
+    CHECK_EQ(out.images_fixed, kCount);   // every item applied, none dropped
+    CHECK_EQ(out.failed, 0);
+    CHECK_EQ(job.done(), kCount);         // progress reached the denominator
+
+    for (const vault::IndexNode* n : v.list("")) CHECK(n->meta.animated);
+}

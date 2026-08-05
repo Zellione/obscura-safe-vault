@@ -1,6 +1,11 @@
 #include "ui/migration_job.h"
 
+#include <algorithm>
+#include <atomic>
+#include <condition_variable>
 #include <cstring>
+#include <deque>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -128,6 +133,78 @@ Result process(const vault::Vault& v, const Item& it, size_t index)
     return r;
 }
 
+// Bounded result queue. The bound is not hygiene: decoded frames and encoded
+// posters live in mlock'd SecureBytes and the process budget is 256 MiB
+// (platform::grow_secure_mem_budget), so an unbounded queue would exhaust the
+// lockable pool and start failing locks mid-migration.
+class ResultQueue {
+public:
+    explicit ResultQueue(size_t cap) : cap_(cap) {}
+
+    void push(Result r)
+    {
+        std::unique_lock lk(m_);
+        not_full_.wait(lk, [this] { return q_.size() < cap_ || closed_; });
+        q_.push_back(std::move(r));
+        lk.unlock();
+        not_empty_.notify_one();
+    }
+
+    bool pop(Result& out)
+    {
+        std::unique_lock lk(m_);
+        not_empty_.wait(lk, [this] { return !q_.empty() || closed_; });
+        if (q_.empty()) return false;
+        out = std::move(q_.front());
+        q_.pop_front();
+        lk.unlock();
+        not_full_.notify_one();
+        return true;
+    }
+
+    void close()
+    {
+        { std::lock_guard lk(m_); closed_ = true; }
+        not_empty_.notify_all();
+        not_full_.notify_all();
+    }
+
+private:
+    std::mutex              m_;
+    std::condition_variable not_empty_, not_full_;
+    std::deque<Result>      q_;
+    size_t                  cap_;
+    bool                    closed_ = false;
+};
+
+// Coordinator-thread only: mutates the tree and may append to fp_.
+void apply_one(vault::Vault& v, const Item& it, const Result& r, MigrationOutcome& out)
+{
+    if (!r.ok) { ++out.failed; return; }
+
+    if (it.is_video) {
+        if (!r.resolved) { ++out.videos_skipped; return; }
+        const vault::VideoProbeApply apply{
+            .codec       = r.codec,
+            .width       = r.width,
+            .height      = r.height,
+            .duration_us = r.duration_us,
+            .poster_jpeg = std::span<const uint8_t>(r.poster_jpeg),
+        };
+        if (vault::apply_video_probe(v, it.node_path, apply) == vault::VaultResult::Ok)
+            ++out.videos_fixed;
+        else
+            ++out.failed;
+        return;
+    }
+
+    if (vault::apply_image_animated(v, it.node_path, r.animated) ==
+        vault::VaultResult::Ok)
+        ++out.images_fixed;
+    else
+        ++out.failed;
+}
+
 } // namespace
 
 MigrationJob::~MigrationJob() = default;
@@ -156,39 +233,48 @@ void MigrationJob::run(vault::Vault& v)
     progress_.total.store(out.total);
 
     phase_.store(MigrationPhase::Repairing);
-    for (size_t i = 0; i < items.size(); ++i) {
-        if (progress_.cancel.load()) { out.cancelled = true; break; }
 
-        const Result r = process(v, items[i], i);
-        if (!r.ok) {
-            ++out.failed;
-        } else if (items[i].is_video) {
-            if (r.resolved) {
-                const vault::VideoProbeApply apply{
-                    .codec       = r.codec,
-                    .width       = r.width,
-                    .height      = r.height,
-                    .duration_us = r.duration_us,
-                    .poster_jpeg = std::span<const uint8_t>(r.poster_jpeg),
-                };
-                if (vault::apply_video_probe(v, items[i].node_path, apply) ==
-                    vault::VaultResult::Ok) {
-                    ++out.videos_fixed;
-                } else {
-                    ++out.failed;
+    const unsigned hw = std::thread::hardware_concurrency();
+    const size_t workers =
+        std::min<size_t>(items.size(), std::max<unsigned>(1u, hw > 1 ? hw - 1 : 1u));
+
+    if (!items.empty()) {
+        ResultQueue results(std::max<size_t>(2, workers * 2));
+        std::atomic<size_t> next{0};
+        std::atomic<size_t> active_workers{workers};
+
+        std::vector<std::jthread> pool;
+        pool.reserve(workers);
+        for (size_t w = 0; w < workers; ++w) {
+            pool.emplace_back([&] {
+                for (;;) {
+                    const size_t i = next.fetch_add(1);
+                    if (i >= items.size() || progress_.cancel.load()) break;
+                    results.push(process(v, items[i], i));
                 }
-            } else {
-                ++out.videos_skipped;
-            }
-        } else {
-            if (vault::apply_image_animated(v, items[i].node_path, r.animated) ==
-                vault::VaultResult::Ok) {
-                ++out.images_fixed;
-            } else {
-                ++out.failed;
-            }
+                // Signal that this worker is done processing
+                if (active_workers.fetch_sub(1) == 1) {
+                    // Last worker to exit closes the queue so coordinator can drain
+                    results.close();
+                }
+            });
         }
-        progress_.done.store(static_cast<int>(i + 1));
+
+        // The coordinator is the ONLY thread that touches the tree or fp_.
+        int collected = 0;
+        const int expect = static_cast<int>(items.size());
+        Result r;
+        while (collected < expect && results.pop(r)) {
+            apply_one(v, items[r.index], r, out);
+            ++collected;
+            progress_.done.store(collected);
+            if (progress_.cancel.load()) { out.cancelled = true; break; }
+        }
+        // Close queue if not already closed by workers (e.g., if we broke early)
+        if (active_workers.load() > 0) {
+            results.close();
+        }
+        for (auto& t : pool) if (t.joinable()) t.join();
     }
 
     phase_.store(MigrationPhase::Committing);
