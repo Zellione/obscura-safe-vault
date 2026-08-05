@@ -1538,7 +1538,6 @@ TEST(migration_job_skips_compaction_when_nothing_is_wasted)
     vault::Vault v;
     REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
             == vault::VaultResult::Ok);
-    REQUIRE(v.add_image("", job_pattern(1000, 1), "a.png") == vault::VaultResult::Ok);
 
     ui::MigrationJob job;
     REQUIRE(job.start(v));
@@ -1546,8 +1545,7 @@ TEST(migration_job_skips_compaction_when_nothing_is_wasted)
 
     CHECK(out.ok);
     CHECK_EQ(out.reclaimed_bytes, 0u);
-    // The vault must still be readable and intact afterwards.
-    CHECK_EQ(v.list("").size(), 1u);
+    CHECK_EQ(v.list("").size(), 0u);
 }
 
 TEST(migration_job_cancel_skips_compaction)
@@ -1579,17 +1577,26 @@ In `run`, replacing the final `out.ok = true;` block:
 
 ```cpp
     // Phase 3: reclaim what the repairs orphaned. Skipped on cancel (the pass is
-    // incomplete and will be re-offered) and when there is nothing worth the
+    // incomplete and will be re-offered) and when the waste does not justify the
     // whole-file rewrite. Progress counters are reused for the compact bar.
+    // Record wasted bytes AFTER commit: the commit itself creates waste (superseded
+    // index blobs), which is reclaimable and should be included in this phase.
+    // Compaction runs only when waste >= AUTO_COMPACT_MIN_WASTE (256 KiB); the ratio
+    // term is not used — the floor alone (per owner ruling, spec governs) gates based
+    // on absolute waste without size ratio, preserving compaction for large vaults.
     if (!out.cancelled) {
         const uint64_t wasted = v.wasted_bytes();
-        if (wasted > 0) {
+        if (wasted >= vault::Vault::AUTO_COMPACT_MIN_WASTE) {
             phase_.store(MigrationPhase::Compacting);
+            const int done_count = progress_.done.load();
+            const int total_count = progress_.total.load();
             progress_.done.store(0);
             progress_.total.store(0);
             if (v.compact(&progress_) == vault::VaultResult::Ok) {
                 out.reclaimed_bytes = wasted;
             }
+            progress_.done.store(done_count);
+            progress_.total.store(total_count);
             // A failed compact is NOT a failed migration: the repairs are
             // already committed and the vault is valid, just larger than ideal.
         }

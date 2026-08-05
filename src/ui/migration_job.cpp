@@ -301,13 +301,17 @@ void MigrationJob::run(vault::Vault& v)
     }
 
     // Phase 3: reclaim what the repairs orphaned. Skipped on cancel (the pass is
-    // incomplete and will be re-offered) and when there is nothing worth the
+    // incomplete and will be re-offered) and when the waste does not justify the
     // whole-file rewrite. Progress counters are reused for the compact bar.
     // Record wasted bytes AFTER commit: the commit itself creates waste (superseded
     // index blobs), which is reclaimable and should be included in this phase.
+    // Compaction runs only when waste >= AUTO_COMPACT_MIN_WASTE (256 KiB); the ratio
+    // term is not used — rewriting to reclaim a few KiB costs more I/O than it saves,
+    // but large vaults need the option to compact (on explicit user request), so the
+    // floor is used alone without waste/size ratio gating.
     if (!out.cancelled) {
         const uint64_t wasted = v.wasted_bytes();
-        if (wasted > 0) {
+        if (wasted >= vault::Vault::AUTO_COMPACT_MIN_WASTE) {
             phase_.store(MigrationPhase::Compacting);
             // Save the repairing-phase progress to restore after compaction.
             // This preserves the report of completed repair work and ensures

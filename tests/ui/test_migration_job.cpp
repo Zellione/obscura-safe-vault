@@ -388,8 +388,10 @@ TEST(migration_job_skips_compaction_when_nothing_is_wasted)
     const ui::MigrationOutcome out = run_to_completion(job);
 
     CHECK(out.ok);
-    // After migration, compaction may run if the commit created waste (superseded
-    // index blobs). The key is that the vault remains valid and readable.
+    // Post-commit waste in an empty vault is only a few KiB (superseded index blob),
+    // far below AUTO_COMPACT_MIN_WASTE (256 KiB), so compaction must be skipped.
+    CHECK_EQ(out.reclaimed_bytes, 0u);
+    // The vault remains valid and readable.
     CHECK_EQ(v.list("").size(), 0u);
 }
 
@@ -415,14 +417,16 @@ TEST(migration_job_compaction_reclaims_orphaned_chunks)
     REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
             == vault::VaultResult::Ok);
 
-    // Add two images: one to keep, one to delete
-    const auto pattern1 = job_pattern(10000, 1);
-    const auto pattern2 = job_pattern(20000, 2);
+    // Add two large images: one to keep, one to delete. Must produce enough waste to
+    // exceed AUTO_COMPACT_MIN_WASTE (256 KiB) when deleted, to trigger the floor gate.
+    // Use 100 MB images to ensure ample waste margin.
+    const auto pattern1 = job_pattern(100000000, 1);  // 100 MB
+    const auto pattern2 = job_pattern(100000000, 2);  // 100 MB
     REQUIRE(v.add_image("", pattern1, "keep.png") == vault::VaultResult::Ok);
     REQUIRE(v.add_image("", pattern2, "delete.png") == vault::VaultResult::Ok);
     REQUIRE(v.list("").size() == 2u);
 
-    // Delete the second image, which orphans its chunks
+    // Delete the second image, which orphans its chunks (100 MB of data)
     REQUIRE(v.remove_image("", "delete.png") == vault::VaultResult::Ok);
     REQUIRE(v.list("").size() == 1u);
 
