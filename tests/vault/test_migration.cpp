@@ -20,12 +20,15 @@ void test_only_force_video_codec_unknown(Vault& v, std::string_view node_path);
 void test_only_force_image_animated_unknown(Vault& v, std::string_view node_path);
 }  // namespace vault
 
-// Read a fixture file into a vector.
+#ifdef OSV_VENDORED_AV
+// Read a fixture file into a vector. Only the video tests below do this, so the
+// guard matches theirs — without FFmpeg this is an unused static and -Werror bites.
 static std::vector<uint8_t> read_file(const char* path)
 {
     std::ifstream f(path, std::ios::binary);
     return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
 }
+#endif
 
 TEST(migration_watermark_round_trips_at_v10)
 {

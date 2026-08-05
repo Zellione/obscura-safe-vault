@@ -8,17 +8,17 @@
 #include <vector>
 
 #include "image/anim_info.h"
+#include "image/fixtures.h"
 #include "media/video_probe.h"
 #include "ui/migration_job.h"
 #include "vault/migration.h"
 #include "vault/vault.h"
 
-namespace fixtures {
-// Forward declare from test fixtures
-std::vector<uint8_t> load_anim_webp();
-std::vector<uint8_t> load_webp();
-std::vector<uint8_t> solid_png(uint32_t w, uint32_t h, uint8_t r, uint8_t g, uint8_t b);
-}
+// NOTE: include image/fixtures.h rather than re-declaring the loaders here.
+// load_webp()/load_anim_webp() are `inline` in that header; declaring them
+// non-inline compiles but links only by luck at -O0, where other TUs that do
+// include the header emit weak out-of-line copies. Release inlines those away
+// and the link fails with an undefined reference.
 
 namespace vault {
 // Test-only seams defined in tests/vault/test_video.cpp (linked into osv_tests).
@@ -43,11 +43,15 @@ static std::vector<uint8_t> job_pattern(size_t n, uint8_t seed)
     return v;
 }
 
+#ifdef OSV_VENDORED_AV
+// Only the video test below reads a fixture off disk. Guarded to match that
+// test's own guard — without FFmpeg this is an unused static and -Werror bites.
 static std::vector<uint8_t> read_file(const char* path)
 {
     std::ifstream f(path, std::ios::binary);
     return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
 }
+#endif
 
 namespace {
 struct JobTempVault {
