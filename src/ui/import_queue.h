@@ -202,6 +202,12 @@ private:
     // Batch commit policy
     BatchCommitPolicy policy_;
 
+    // Latch to end batch only once per busy→idle transition (Phase 65 defect fix).
+    // Set to false when work arrives (early return in maybe_end_batch), and set to
+    // true after enqueuing the final snapshot+flush. Prevents idle frames from
+    // repeatedly committing. Reset at begin_session so each session re-arms.
+    bool batch_ended_ = false;
+
     // Decode pool for images
     std::unique_ptr<DecodePool> decode_pool_;
 };
