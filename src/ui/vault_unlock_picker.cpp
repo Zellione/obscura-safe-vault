@@ -11,6 +11,7 @@
 #include "platform/file_dialog.h"
 #include "platform/paths.h"
 #include "platform/vault_registry.h"
+#include "ui/second_vault.h"
 #include "ui/text_input_event.h"
 #include "ui/widgets.h"
 
@@ -30,20 +31,35 @@ std::string unlock_error_message(vault::VaultResult r) noexcept
     if (r == BadFormat)  return "Not a valid vault file.";
     return "Could not open the destination vault.";
 }
+
+[[nodiscard]] std::string second_vault_mode_label(platform::SecondVaultMode mode) noexcept
+{
+    switch (mode) {
+    case platform::SecondVaultMode::LockNow:
+        return "Lock immediately";
+    case platform::SecondVaultMode::KeepTimed:
+        return "Keep open 5 min";
+    case platform::SecondVaultMode::KeepSession:
+        return "Keep open for session";
+    }
+    return "Unknown";
+}
 } // namespace
 
 VaultUnlockPicker::VaultUnlockPicker(platform::VaultRegistry& registry, platform::FileDialog& dlg,
-                                     gfx::Window& win)
-    : registry_(registry), dlg_(dlg), win_(win) {}
+                                     gfx::Window& win, SecondVaultSession* second)
+    : registry_(registry), dlg_(dlg), win_(win), second_(second) {}
 
 void VaultUnlockPicker::open(std::string src_path)
 {
     active_    = true;
     chosen_    = false;
+    from_warm_ = false;
     stage_     = Stage::PickVault;
     src_path_  = std::move(src_path);
     vault_sel_ = 0;
     error_.clear();
+    keep_mode_ = second_ ? second_->default_mode() : platform::SecondVaultMode::LockNow;
     dest_.is_self = false;
     dest_.pw.clear();
     dest_.keyfile_path.clear();
@@ -67,6 +83,11 @@ std::string VaultUnlockPicker::dest_label() const
     return dest_.is_self ? "this vault" : std::filesystem::path(dest_.path).stem().string();
 }
 
+vault::Vault& VaultUnlockPicker::unlocked_vault() noexcept
+{
+    return from_warm_ ? second_->vault() : dest_.vault;
+}
+
 void VaultUnlockPicker::choose_vault()
 {
     error_.clear();
@@ -82,6 +103,14 @@ void VaultUnlockPicker::choose_vault()
     dest_.path    = candidates_[static_cast<size_t>(ci)].string();
     dest_.pw.clear();
     dest_.keyfile_path.clear();
+
+    // Phase 66: the warm slot skips the password stage entirely.
+    if (second_ && second_->occupied() && second_->path() == dest_.path) {
+        from_warm_ = true;
+        active_    = false;
+        chosen_    = true;
+        return;
+    }
     stage_ = Stage::Unlock;
 }
 
@@ -110,6 +139,16 @@ void VaultUnlockPicker::try_unlock()
     chosen_ = true;
 }
 
+void VaultUnlockPicker::release_to_slot()
+{
+    if (is_self() || !chosen_) return;
+    if (from_warm_) {
+        second_->on_transfer_completed();
+    } else if (keep_mode_ != platform::SecondVaultMode::LockNow && second_) {
+        second_->adopt(std::move(dest_.vault), dest_.path, keep_mode_);
+    }
+}
+
 bool VaultUnlockPicker::handle_pick_vault_key(SDL_Keycode k)
 {
     const auto n = static_cast<int>(candidates_.size()) + 1;
@@ -121,6 +160,13 @@ bool VaultUnlockPicker::handle_pick_vault_key(SDL_Keycode k)
 
 bool VaultUnlockPicker::handle_unlock_key(SDL_Keycode k)
 {
+    if (second_) {
+        if (k == SDLK_UP || k == SDLK_DOWN) {
+            keep_mode_ = static_cast<platform::SecondVaultMode>(
+                (static_cast<int>(keep_mode_) + (k == SDLK_DOWN ? 1 : 2)) % 3);
+            return true;
+        }
+    }
     if (k == SDLK_TAB) { dlg_.open_keyfile(win_.sdl_window()); dest_.awaiting_keyfile = true; }
     else if (k == SDLK_RETURN || k == SDLK_KP_ENTER) try_unlock();
     return true;
@@ -181,6 +227,12 @@ void VaultUnlockPicker::render(gfx::Renderer& r, gfx::FontAtlas& font, float ix,
                     dest_.keyfile_path.empty() ? "[Tab] add keyfile  [Enter] unlock"
                                                : "keyfile set  •  [Enter] unlock",
                     TEXT_FAINT);
+        if (second_) {
+            r.draw_text(font, ix, iy + 152,
+                        fit_text(font, std::string("After transfer: ") + second_vault_mode_label(keep_mode_) +
+                                           "  [Up/Down]", mw - 40),
+                        TEXT_FAINT);
+        }
     }
 }
 
