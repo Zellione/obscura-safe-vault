@@ -175,12 +175,10 @@ namespace {
     if (state.section != SettingsSection::VaultOps || !state.in_pane || !state.vault_unlocked) {
         return false;
     }
-    if (key == SDLK_RETURN || key == SDLK_KP_ENTER) {
-        if (state.row == 0) {
-            // Phase 65: trigger migration check
-            state.trigger_migration = true;
-            return true;
-        }
+    if ((key == SDLK_RETURN || key == SDLK_KP_ENTER) && state.row == 0) {
+        // Phase 65: trigger migration check
+        state.trigger_migration = true;
+        return true;
     }
     return false;
 }
@@ -317,12 +315,10 @@ void draw_pane_row(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float p
             label = cat.name;
             value = gfx::tag_swatch_name(cat.swatch);
         }
-    } else if (state.section == SettingsSection::VaultOps) {
+    } else if (state.section == SettingsSection::VaultOps && row_index == 0) {
         // Phase 65: vault operations (only available when unlocked)
-        if (row_index == 0) {
-            label = "Re-check vault for upgrades";
-            value = "[Enter]";
-        }
+        label = "Re-check vault for upgrades";
+        value = "[Enter]";
     }
 
     r.draw_text(font, pane_x + 30.0f, item_y + 8.0f, label,

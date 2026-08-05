@@ -76,8 +76,14 @@ private:
     void render_frame();                         // draw + present + frame-cap fallback
     void open_settings_overlay();                // seed settings state and open the overlay
 
-    // Dispatch event to overlays (help > settings > lock_confirm); true if handled
+    // Dispatch event to overlays (help > settings > migration > lock_confirm);
+    // true if handled. Split per overlay so each stays readable on its own.
     static bool dispatch_overlay_event(App& app, const SDL_Event& e);
+    static bool dispatch_help_event(App& app, const SDL_Event& e);
+    static bool dispatch_settings_event(App& app, const SDL_Event& e);
+    static bool dispatch_migration_event(App& app, const SDL_Event& e);
+    static bool dispatch_lock_confirm_event(App& app, const SDL_Event& e);
+    void        handle_migration_offer_key(SDL_Keycode key);  // Phase 65 offer modal
 
     gfx::Window                        window_;
     gfx::FontAtlas                     font_;

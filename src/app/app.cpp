@@ -399,24 +399,126 @@ void draw_keep_unlocked_badge(gfx::Renderer& r, gfx::FontAtlas& font, int win_w,
     r.draw_round_rect(box, RADIUS_SMALL, WARN, /*filled*/ false);
     r.draw_text(font, box.x + PAD, box.y + PAD, LABEL, WARN);
 }
+
+// Phase 65 migration modals. Split out of render_frame so the frame path stays a
+// dispatcher instead of a wall of panel layout. Each veils the whole window: the
+// migration owns the vault exclusively while it runs, so nothing behind it is
+// safe to interact with.
+void draw_migration_offer(gfx::Renderer& r, gfx::FontAtlas& font, float win_w, float win_h,
+                          const vault::MigrationScan& scan)
+{
+    r.draw_rect({0, 0, win_w, win_h}, gfx::Color{8, 9, 12, 255});
+    const float pw = 600;
+    const float ph = 300;
+    const float px = (win_w - pw) / 2;
+    const float py = (win_h - ph) / 2;
+    r.draw_round_rect({px, py, pw, ph}, gfx::theme::RADIUS, gfx::theme::SURFACE);
+    r.draw_round_rect({px, py, pw, ph}, gfx::theme::RADIUS, gfx::theme::ACCENT, false);
+
+    r.draw_text(font, px + 20, py + 20, "Vault upgrade available", gfx::theme::TEXT);
+
+    float       text_y = py + 60;
+    const float line_h = 20;
+    r.draw_text(font, px + 20, text_y,
+                std::format("This vault has {} video(s) and {} image(s)", scan.videos, scan.images),
+                gfx::theme::TEXT);
+    text_y += line_h;
+    r.draw_text(font, px + 20, text_y,
+                "that were imported before this build could read them fully.", gfx::theme::TEXT);
+    text_y += line_h;
+    r.draw_text(font, px + 20, text_y,
+                std::format("Upgrading reads {} and rewrites the vault once.",
+                            ui::format_size(scan.bytes)),
+                gfx::theme::TEXT);
+    text_y += line_h;
+    r.draw_text(font, px + 20, text_y, "Unused space is reclaimed.", gfx::theme::TEXT);
+    text_y += line_h + 10;
+    r.draw_text(font, px + 20, text_y,
+                "The app is unusable while this runs. You can cancel at any time.",
+                gfx::theme::TEXT);
+
+    r.draw_text(font, px + 20, py + ph - 30, "[ Upgrade now (Y) ]  [ Not now (N) ]",
+                gfx::theme::TEXT_DIM);
+}
+
+void draw_migration_progress(gfx::Renderer& r, gfx::FontAtlas& font, float win_w, float win_h,
+                             const ui::MigrationJob& job)
+{
+    using enum ui::MigrationPhase;
+    const int   total = job.total();
+    const int   done  = job.done();
+    std::string phase_label;
+    switch (job.phase()) {
+        case Repairing:  phase_label = std::format("Upgrading {} / {}", done, total); break;
+        case Committing: phase_label = "Saving…"; break;
+        case Compacting: phase_label = "Reclaiming space…"; break;
+        default:         phase_label = "Preparing…"; break;
+    }
+    const std::string count_line =
+        total > 0 ? std::format("{} / {}", done, total) : "Preparing…";
+    ui::draw_op_progress(r, font, win_w, win_h,
+                         {.title = phase_label, .count_line = count_line,
+                          .done = done, .total = total});
+}
+
+void draw_migration_result(gfx::Renderer& r, gfx::FontAtlas& font, float win_w, float win_h,
+                           const ui::MigrationOutcome& res)
+{
+    r.draw_rect({0, 0, win_w, win_h}, gfx::Color{8, 9, 12, 255});
+    const float pw = 560;
+    const float ph = 320;
+    const float px = (win_w - pw) / 2;
+    const float py = (win_h - ph) / 2;
+    r.draw_round_rect({px, py, pw, ph}, gfx::theme::RADIUS, gfx::theme::SURFACE);
+    r.draw_round_rect({px, py, pw, ph}, gfx::theme::RADIUS,
+                      res.ok ? gfx::theme::ACCENT : gfx::theme::DANGER, false);
+
+    r.draw_text(font, px + 20, py + 20, res.ok ? "Upgrade complete" : "Upgrade failed",
+                gfx::theme::TEXT);
+
+    float       text_y = py + 60;
+    const float line_h = 20;
+    if (res.cancelled) {
+        r.draw_text(font, px + 20, text_y, "Cancelled. Retry at next unlock.", gfx::theme::TEXT);
+    } else if (res.ok) {
+        for (const std::string& line :
+             {std::format("Fixed {} video(s)", res.videos_fixed),
+              std::format("Fixed {} image(s)", res.images_fixed),
+              std::format("Skipped {} video(s)", res.videos_skipped),
+              std::format("Reclaimed {}", ui::format_size(res.reclaimed_bytes))}) {
+            r.draw_text(font, px + 20, text_y, line, gfx::theme::TEXT);
+            text_y += line_h;
+        }
+    } else {
+        r.draw_text(font, px + 20, text_y, std::format("Error: {}", res.error),
+                    gfx::theme::DANGER);
+    }
+
+    r.draw_text(font, px + 20, py + ph - 30, "[Enter or any key to continue]",
+                gfx::theme::TEXT_DIM);
+}
 } // namespace
 
-bool App::dispatch_overlay_event(App& app, const SDL_Event& e)
+bool App::dispatch_help_event(App& app, const SDL_Event& e)
 {
-    // F1 toggles help (checked before help.open guard so it opens/closes over settings)
+    // F1 toggles help (checked before the help.open guard so it opens/closes
+    // over settings).
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F1) {
         ui::toggle_help(app.overlays_.help);
         return true;
     }
     // Help popup (highest priority: swallows arrow/wheel; over settings)
-    if (app.overlays_.help.open) {
-        if (e.type == SDL_EVENT_KEY_DOWN) {
-            ui::handle_help_key(app.overlays_.help, e.key.key);
-        } else if (e.type == SDL_EVENT_MOUSE_WHEEL) {
-            ui::handle_help_wheel(app.overlays_.help, e.wheel.y);
-        }
-        return true;
+    if (!app.overlays_.help.open) return false;
+    if (e.type == SDL_EVENT_KEY_DOWN) {
+        ui::handle_help_key(app.overlays_.help, e.key.key);
+    } else if (e.type == SDL_EVENT_MOUSE_WHEEL) {
+        ui::handle_help_wheel(app.overlays_.help, e.wheel.y);
     }
+    return true;
+}
+
+bool App::dispatch_settings_event(App& app, const SDL_Event& e)
+{
     // F2 toggles settings
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F2) {
         if (app.overlays_.settings.open) {
@@ -426,95 +528,102 @@ bool App::dispatch_overlay_event(App& app, const SDL_Event& e)
         }
         return true;
     }
-    // Phase 65: handle manual migration trigger from VaultOps section (before settings swallow input)
-    if (app.overlays_.settings.open && app.overlays_.settings.trigger_migration && app.vault_state_.active) {
+    // Phase 65: manual migration trigger from the VaultOps section, handled
+    // before the settings panel swallows input. On a non-empty scan this
+    // deliberately does NOT report the event as handled: settings closes and the
+    // offer modal must see this same event, so it renders and takes input on
+    // this frame instead of the next one.
+    if (app.overlays_.settings.open && app.overlays_.settings.trigger_migration &&
+        app.vault_state_.active) {
         app.overlays_.settings.trigger_migration = false;
 
         // Scan for actual pending work regardless of watermark state
         const vault::MigrationScan scan = vault::scan_migration(*app.vault_state_.active);
         if (scan.empty()) {
-            // Nothing to do: inform user and keep settings open
+            // Nothing to do: inform the user and keep settings open
             app.overlays_.settings.error = "Nothing to upgrade";
             return true;
-        } else {
-            // Close settings and show offer (guard against import queue race)
-            ui::close_settings(app.overlays_.settings, app.window_);
-            app.import_ui_.queue.set_exclusive(true);
-            app.migration_ui_.pending_migration = scan;
-            app.migration_ui_.offer_open = true;
-            // Do NOT return; let the offer modal get rendered and input this frame
         }
+        ui::close_settings(app.overlays_.settings, app.window_);
+        app.import_ui_.queue.set_exclusive(true);   // guard against an import race
+        app.migration_ui_.pending_migration = scan;
+        app.migration_ui_.offer_open        = true;
     }
     // Settings panel (second priority: swallows all events)
-    if (app.overlays_.settings.open) {
-        if (bool commit = false;
-            ui::handle_settings_event(app.overlays_.settings, app.window_, e, commit) && commit &&
-            app.overlays_.settings.vault_unlocked && app.vault_state_.active &&
-            vault::set_vault_settings(*app.vault_state_.active, app.overlays_.settings.draft) != vault::VaultResult::Ok) {
-            app.overlays_.settings.error = "Could not save settings";
-        }
-        return true;
+    if (!app.overlays_.settings.open) return false;
+    if (bool commit = false;
+        ui::handle_settings_event(app.overlays_.settings, app.window_, e, commit) && commit &&
+        app.overlays_.settings.vault_unlocked && app.vault_state_.active &&
+        vault::set_vault_settings(*app.vault_state_.active, app.overlays_.settings.draft) !=
+            vault::VaultResult::Ok) {
+        app.overlays_.settings.error = "Could not save settings";
     }
-    // Phase 65: migration result modal (shows summary after completion)
+    return true;
+}
+
+// Enter/Y starts the job; Esc/N dismisses it for this session (it is re-offered
+// at the next unlock). Any other key is ignored — the caller still swallows it.
+void App::handle_migration_offer_key(SDL_Keycode key)
+{
+    if (key == SDLK_RETURN || key == SDLK_Y) {
+        // "Upgrade now" — start the migration job
+        if (!vault_state_.active) return;
+        if (!migration_ui_.job) migration_ui_.job = std::make_unique<ui::MigrationJob>();
+        if (migration_ui_.job->start(*vault_state_.active)) {
+            migration_ui_.offer_open    = false;
+            migration_ui_.progress_open = true;
+        }
+    } else if (key == SDLK_ESCAPE || key == SDLK_N) {
+        // "Not now" — dismiss for this session, re-offer at next unlock
+        migration_ui_.offer_open = false;
+        // Release exclusivity: the migration was never started
+        import_ui_.queue.set_exclusive(false);
+    }
+}
+
+// Phase 65 modals, in priority order: result > progress > offer. Each swallows
+// every event while it is up — the job owns the vault exclusively while it runs.
+bool App::dispatch_migration_event(App& app, const SDL_Event& e)
+{
     if (app.migration_ui_.result_open) {
-        if (e.type == SDL_EVENT_KEY_DOWN) {
-            app.migration_ui_.result_open = false;
-            return true;
-        }
-        return true;  // swallow all input while result is showing
-    }
-
-    // Phase 65: migration progress modal (only Esc to cancel)
-    if (app.migration_ui_.progress_open) {
-        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) {
-            if (app.migration_ui_.job) app.migration_ui_.job->cancel();
-            return true;
-        }
-        return true;  // swallow all input while progress is showing
-    }
-
-    // Phase 65: migration offer modal (offer to run the migration)
-    if (app.migration_ui_.offer_open) {
-        if (e.type == SDL_EVENT_KEY_DOWN) {
-            if (e.key.key == SDLK_RETURN || e.key.key == SDLK_Y) {
-                // "Upgrade now" — start the migration job
-                if (app.vault_state_.active) {
-                    if (!app.migration_ui_.job) {
-                        app.migration_ui_.job = std::make_unique<ui::MigrationJob>();
-                    }
-                    if (app.migration_ui_.job->start(*app.vault_state_.active)) {
-                        app.migration_ui_.offer_open = false;
-                        app.migration_ui_.progress_open = true;
-                    }
-                }
-                return true;
-            } else if (e.key.key == SDLK_ESCAPE || e.key.key == SDLK_N) {
-                // "Not now" — dismiss for this session, re-offer at next unlock
-                app.migration_ui_.offer_open = false;
-                // Release exclusive since migration was never started
-                app.import_ui_.queue.set_exclusive(false);
-                return true;
-            }
-        }
-        return true;  // swallow all input while offer is open
-    }
-
-    // Lock-confirm modal (lowest priority: key events only; Phase 50)
-    if (app.import_ui_.lock_confirm.open) {
-        if (e.type == SDL_EVENT_KEY_DOWN) {
-            using enum ui::LockConfirmKey;
-            const auto key = ui::classify_lock_confirm_key(e.key.key);
-            if (key == Confirm) {
-                app.import_ui_.queue.abort_and_flush();
-                app.import_ui_.replay_nav = app.import_ui_.lock_confirm.action;
-                app.import_ui_.lock_confirm = {};
-            } else if (key == Cancel) {
-                app.import_ui_.lock_confirm = {};
-            }
-        }
+        if (e.type == SDL_EVENT_KEY_DOWN) app.migration_ui_.result_open = false;
         return true;
     }
-    return false;
+    if (app.migration_ui_.progress_open) {
+        // Only Esc does anything: it asks the job to stop between items.
+        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE && app.migration_ui_.job)
+            app.migration_ui_.job->cancel();
+        return true;
+    }
+    if (!app.migration_ui_.offer_open) return false;
+    if (e.type == SDL_EVENT_KEY_DOWN) app.handle_migration_offer_key(e.key.key);
+    return true;
+}
+
+// Lock-confirm modal (lowest priority: key events only; Phase 50)
+bool App::dispatch_lock_confirm_event(App& app, const SDL_Event& e)
+{
+    if (!app.import_ui_.lock_confirm.open) return false;
+    if (e.type == SDL_EVENT_KEY_DOWN) {
+        using enum ui::LockConfirmKey;
+        const auto key = ui::classify_lock_confirm_key(e.key.key);
+        if (key == Confirm) {
+            app.import_ui_.queue.abort_and_flush();
+            app.import_ui_.replay_nav   = app.import_ui_.lock_confirm.action;
+            app.import_ui_.lock_confirm = {};
+        } else if (key == Cancel) {
+            app.import_ui_.lock_confirm = {};
+        }
+    }
+    return true;
+}
+
+bool App::dispatch_overlay_event(App& app, const SDL_Event& e)
+{
+    if (dispatch_help_event(app, e)) return true;
+    if (dispatch_settings_event(app, e)) return true;
+    if (dispatch_migration_event(app, e)) return true;
+    return dispatch_lock_confirm_event(app, e);
 }
 
 void App::dispatch_event(const SDL_Event& e)
@@ -761,88 +870,12 @@ void App::render_frame()
         const auto w = static_cast<float>(window_.width());
         const auto h = static_cast<float>(window_.height());
         if (migration_ui_.offer_open) {
-            // Veil
-            r.draw_rect({0, 0, w, h}, gfx::Color{8, 9, 12, 255});
-            const float pw = 600;
-            const float ph = 300;
-            const float px = (w - pw) / 2;
-            const float py = (h - ph) / 2;
-            r.draw_round_rect({px, py, pw, ph}, gfx::theme::RADIUS, gfx::theme::SURFACE);
-            r.draw_round_rect({px, py, pw, ph}, gfx::theme::RADIUS, gfx::theme::ACCENT, false);
-
-            // Title
-            r.draw_text(font_, px + 20, py + 20, "Vault upgrade available", gfx::theme::TEXT);
-
-            // Detail text (multiline)
-            float text_y = py + 60;
-            const float line_h = 20;
-            r.draw_text(font_, px + 20, text_y, std::format("This vault has {} video(s) and {} image(s)",
-                migration_ui_.pending_migration.videos,
-                migration_ui_.pending_migration.images), gfx::theme::TEXT);
-            text_y += line_h;
-            r.draw_text(font_, px + 20, text_y, "that were imported before this build could read them fully.", gfx::theme::TEXT);
-            text_y += line_h;
-            r.draw_text(font_, px + 20, text_y, std::format("Upgrading reads {} and rewrites the vault once.",
-                ui::format_size(migration_ui_.pending_migration.bytes)), gfx::theme::TEXT);
-            text_y += line_h;
-            r.draw_text(font_, px + 20, text_y, "Unused space is reclaimed.", gfx::theme::TEXT);
-            text_y += line_h + 10;
-            r.draw_text(font_, px + 20, text_y, "The app is unusable while this runs. You can cancel at any time.", gfx::theme::TEXT);
-
-            // Buttons: [ Upgrade now ] [ Not now ]
-            r.draw_text(font_, px + 20, py + ph - 30, "[ Upgrade now (Y) ]  [ Not now (N) ]", gfx::theme::TEXT_DIM);
-        } else if (migration_ui_.progress_open && migration_ui_.job && migration_ui_.job->active()) {
-            // Progress modal
-            std::string phase_label = "Preparing…";
-            switch (migration_ui_.job->phase()) {
-                case ui::MigrationPhase::Scanning:  phase_label = "Preparing…"; break;
-                case ui::MigrationPhase::Repairing: phase_label = std::format("Upgrading {} / {}",
-                    migration_ui_.job->done(), migration_ui_.job->total()); break;
-                case ui::MigrationPhase::Committing: phase_label = "Saving…"; break;
-                case ui::MigrationPhase::Compacting: phase_label = "Reclaiming space…"; break;
-                default: break;
-            }
-            const int total = migration_ui_.job->total();
-            const int done = migration_ui_.job->done();
-            const std::string count_line =
-                total > 0 ? std::format("{} / {}", done, total) : "Preparing…";
-            ui::draw_op_progress(r, font_, w, h,
-                {.title = phase_label, .count_line = count_line, .done = done, .total = total});
+            draw_migration_offer(r, font_, w, h, migration_ui_.pending_migration);
+        } else if (migration_ui_.progress_open && migration_ui_.job &&
+                   migration_ui_.job->active()) {
+            draw_migration_progress(r, font_, w, h, *migration_ui_.job);
         } else if (migration_ui_.result_open) {
-            // Result summary modal
-            r.draw_rect({0, 0, w, h}, gfx::Color{8, 9, 12, 255});
-            const float pw = 560;
-            const float ph = 320;
-            const float px = (w - pw) / 2;
-            const float py = (h - ph) / 2;
-            r.draw_round_rect({px, py, pw, ph}, gfx::theme::RADIUS, gfx::theme::SURFACE);
-            r.draw_round_rect({px, py, pw, ph}, gfx::theme::RADIUS,
-                            migration_ui_.result.ok ? gfx::theme::ACCENT : gfx::theme::DANGER, false);
-
-            // Title
-            const std::string title = migration_ui_.result.ok ? "Upgrade complete" : "Upgrade failed";
-            r.draw_text(font_, px + 20, py + 20, title, gfx::theme::TEXT);
-
-            // Summary text
-            float text_y = py + 60;
-            const float line_h = 20;
-            if (migration_ui_.result.ok && !migration_ui_.result.cancelled) {
-                // Success summary
-                r.draw_text(font_, px + 20, text_y, std::format("Fixed {} video(s)", migration_ui_.result.videos_fixed), gfx::theme::TEXT);
-                text_y += line_h;
-                r.draw_text(font_, px + 20, text_y, std::format("Fixed {} image(s)", migration_ui_.result.images_fixed), gfx::theme::TEXT);
-                text_y += line_h;
-                r.draw_text(font_, px + 20, text_y, std::format("Skipped {} video(s)", migration_ui_.result.videos_skipped), gfx::theme::TEXT);
-                text_y += line_h;
-                r.draw_text(font_, px + 20, text_y, std::format("Reclaimed {}", ui::format_size(migration_ui_.result.reclaimed_bytes)), gfx::theme::TEXT);
-            } else if (migration_ui_.result.cancelled) {
-                r.draw_text(font_, px + 20, text_y, "Cancelled. Retry at next unlock.", gfx::theme::TEXT);
-            } else {
-                // Error
-                r.draw_text(font_, px + 20, text_y, std::format("Error: {}", migration_ui_.result.error), gfx::theme::DANGER);
-            }
-
-            r.draw_text(font_, px + 20, py + ph - 30, "[Enter or any key to continue]", gfx::theme::TEXT_DIM);
+            draw_migration_result(r, font_, w, h, migration_ui_.result);
         }
 
         // Phase 50: render lock_confirm modal after migration/settings so it stays on top

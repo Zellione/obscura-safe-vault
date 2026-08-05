@@ -37,7 +37,8 @@ struct Result {
     bool     ok    = false;
     bool     resolved = false;    // video: a real codec came back
     vault::VideoCodec codec = vault::VideoCodec::Unknown;
-    uint32_t width = 0, height = 0;
+    uint32_t width = 0;
+    uint32_t height = 0;
     uint64_t duration_us = 0;
     std::vector<uint8_t> poster_jpeg;
     bool     animated = false;    // images only
@@ -67,7 +68,7 @@ void collect(const vault::Vault& v, const std::string& path, std::vector<Item>& 
             it.node_path  = child;
             it.is_video   = false;
             it.bytes      = n->meta.orig_size;
-            it.format     = static_cast<uint8_t>(n->meta.format);
+            it.format     = std::to_underlying(n->meta.format);
             it.data_spans = {{n->meta.data_offset, n->meta.data_length}};
             out.push_back(std::move(it));
         }
@@ -97,7 +98,7 @@ bool read_item(const vault::Vault& v, const Item& it, crypto::SecureBytes& out)
         crypto_wipe(joined.data(), joined.size());
         return false;
     }
-    std::copy(joined.begin(), joined.end(), out.span().begin());
+    std::ranges::copy(joined, out.span().begin());
     crypto_wipe(joined.data(), joined.size());
     return true;
 }
@@ -113,8 +114,8 @@ Result process(const vault::Vault& v, const Item& it, size_t index)
     if (!read_item(v, it, data)) return r;   // ok stays false
 
     if (it.is_video) {
-        media::VideoProbeResult probe;
-        if (media::probe_video(data.as_span(), probe) &&
+        if (media::VideoProbeResult probe;
+            media::probe_video(data.as_span(), probe) &&
             probe.codec != vault::VideoCodec::Unknown) {
             r.resolved    = true;
             r.codec       = probe.codec;
@@ -143,21 +144,23 @@ public:
 
     void push(Result r)
     {
-        std::unique_lock lk(m_);
-        not_full_.wait(lk, [this] { return q_.size() < cap_ || closed_; });
-        q_.push_back(std::move(r));
-        lk.unlock();
+        {
+            std::unique_lock lk(m_);
+            not_full_.wait(lk, [this] { return q_.size() < cap_ || closed_; });
+            q_.push_back(std::move(r));
+        }
         not_empty_.notify_one();
     }
 
     bool pop(Result& out)
     {
-        std::unique_lock lk(m_);
-        not_empty_.wait(lk, [this] { return !q_.empty() || closed_; });
-        if (q_.empty()) return false;
-        out = std::move(q_.front());
-        q_.pop_front();
-        lk.unlock();
+        {
+            std::unique_lock lk(m_);
+            not_empty_.wait(lk, [this] { return !q_.empty() || closed_; });
+            if (q_.empty()) return false;
+            out = std::move(q_.front());
+            q_.pop_front();
+        }
         not_full_.notify_one();
         return true;
     }
@@ -171,7 +174,8 @@ public:
 
 private:
     std::mutex              m_;
-    std::condition_variable not_empty_, not_full_;
+    std::condition_variable not_empty_;
+    std::condition_variable not_full_;
     std::deque<Result>      q_;
     size_t                  cap_;
     bool                    closed_ = false;
@@ -184,14 +188,14 @@ void apply_one(vault::Vault& v, const Item& it, const Result& r, MigrationOutcom
 
     if (it.is_video) {
         if (!r.resolved) { ++out.videos_skipped; return; }
-        const vault::VideoProbeApply apply{
-            .codec       = r.codec,
-            .width       = r.width,
-            .height      = r.height,
-            .duration_us = r.duration_us,
-            .poster_jpeg = std::span<const uint8_t>(r.poster_jpeg),
-        };
-        if (vault::apply_video_probe(v, it.node_path, apply) == vault::VaultResult::Ok)
+        if (const vault::VideoProbeApply apply{
+                .codec       = r.codec,
+                .width       = r.width,
+                .height      = r.height,
+                .duration_us = r.duration_us,
+                .poster_jpeg = std::span<const uint8_t>(r.poster_jpeg),
+            };
+            vault::apply_video_probe(v, it.node_path, apply) == vault::VaultResult::Ok)
             ++out.videos_fixed;
         else
             ++out.failed;
@@ -203,6 +207,77 @@ void apply_one(vault::Vault& v, const Item& it, const Result& r, MigrationOutcom
         ++out.images_fixed;
     else
         ++out.failed;
+}
+
+// Fan `items` across a worker pool and apply each result on the CALLING thread.
+// Workers only ever read through the any-thread-safe decrypt path; the caller is
+// the coordinator, and the only thread that mutates the tree or fp_.
+// Precondition: `items` is non-empty (so at least one worker is spawned).
+void run_pool(vault::Vault& v, const std::vector<Item>& items,
+              vault::OpProgress& progress, MigrationOutcome& out)
+{
+    const unsigned hw = std::thread::hardware_concurrency();
+    const size_t   workers =
+        std::min<size_t>(items.size(), std::max<unsigned>(1u, hw > 1 ? hw - 1 : 1u));
+
+    ResultQueue         results(std::max<size_t>(2, workers * 2));
+    std::atomic<size_t> next{0};
+    std::atomic<size_t> active_workers{workers};
+
+    std::vector<std::jthread> pool;
+    pool.reserve(workers);
+    for (size_t w = 0; w < workers; ++w) {
+        pool.emplace_back([&v, &items, &progress, &results, &next, &active_workers] {
+            for (;;) {
+                const size_t i = next.fetch_add(1);
+                if (i >= items.size() || progress.cancel.load()) break;
+                results.push(process(v, items[i], i));
+            }
+            // The last worker to leave closes the queue so the coordinator drains.
+            if (active_workers.fetch_sub(1) == 1) results.close();
+        });
+    }
+
+    int        collected = 0;
+    const auto expect    = static_cast<int>(items.size());
+    Result     r;
+    while (collected < expect && results.pop(r)) {
+        apply_one(v, items[r.index], r, out);
+        ++collected;
+        progress.done.store(collected);
+        if (progress.cancel.load()) { out.cancelled = true; break; }
+    }
+    // Close the queue if the workers have not already (e.g. we broke out early).
+    if (active_workers.load() > 0) results.close();
+    for (auto& t : pool) if (t.joinable()) t.join();
+}
+
+// Reclaim what the repairs orphaned. Runs only when the waste justifies the
+// whole-file rewrite: compaction is gated on AUTO_COMPACT_MIN_WASTE (256 KiB)
+// alone, with no waste/size ratio term — rewriting to reclaim a few KiB costs
+// more I/O than it saves, but large vaults still need the option.
+// A failed compact is NOT a failed migration: the repairs are already committed
+// and the vault is valid, just larger than ideal.
+void maybe_compact(vault::Vault& v, std::atomic<MigrationPhase>& phase,
+                   vault::OpProgress& progress, MigrationOutcome& out)
+{
+    const uint64_t wasted = v.wasted_bytes();
+    if (wasted < vault::Vault::AUTO_COMPACT_MIN_WASTE) return;
+
+    phase.store(MigrationPhase::Compacting);
+    // Save the repairing-phase progress to restore after compaction. This
+    // preserves the report of completed repair work and ensures job.done()
+    // reflects the actual repairs finished, not the compaction phase. See
+    // migration_job_pool_handles_many_items_without_loss.
+    const int done_count  = progress.done.load();
+    const int total_count = progress.total.load();
+    progress.done.store(0);
+    progress.total.store(0);
+    if (v.compact(&progress) == vault::VaultResult::Ok) out.reclaimed_bytes = wasted;
+    // Restore progress regardless of compact()'s result, so a failed compaction
+    // doesn't leave misleading progress state (total == done == 0).
+    progress.done.store(done_count);
+    progress.total.store(total_count);
 }
 
 } // namespace
@@ -234,48 +309,7 @@ void MigrationJob::run(vault::Vault& v)
 
     phase_.store(MigrationPhase::Repairing);
 
-    const unsigned hw = std::thread::hardware_concurrency();
-    const size_t workers =
-        std::min<size_t>(items.size(), std::max<unsigned>(1u, hw > 1 ? hw - 1 : 1u));
-
-    if (!items.empty()) {
-        ResultQueue results(std::max<size_t>(2, workers * 2));
-        std::atomic<size_t> next{0};
-        std::atomic<size_t> active_workers{workers};
-
-        std::vector<std::jthread> pool;
-        pool.reserve(workers);
-        for (size_t w = 0; w < workers; ++w) {
-            pool.emplace_back([&] {
-                for (;;) {
-                    const size_t i = next.fetch_add(1);
-                    if (i >= items.size() || progress_.cancel.load()) break;
-                    results.push(process(v, items[i], i));
-                }
-                // Signal that this worker is done processing
-                if (active_workers.fetch_sub(1) == 1) {
-                    // Last worker to exit closes the queue so coordinator can drain
-                    results.close();
-                }
-            });
-        }
-
-        // The coordinator is the ONLY thread that touches the tree or fp_.
-        int collected = 0;
-        const int expect = static_cast<int>(items.size());
-        Result r;
-        while (collected < expect && results.pop(r)) {
-            apply_one(v, items[r.index], r, out);
-            ++collected;
-            progress_.done.store(collected);
-            if (progress_.cancel.load()) { out.cancelled = true; break; }
-        }
-        // Close queue if not already closed by workers (e.g., if we broke early)
-        if (active_workers.load() > 0) {
-            results.close();
-        }
-        for (auto& t : pool) if (t.joinable()) t.join();
-    }
+    if (!items.empty()) run_pool(v, items, progress_, out);
 
     phase_.store(MigrationPhase::Committing);
     // The watermark is stamped ONLY on a full pass. A cancel still commits the
@@ -300,38 +334,11 @@ void MigrationJob::run(vault::Vault& v)
         return;
     }
 
-    // Phase 3: reclaim what the repairs orphaned. Skipped on cancel (the pass is
-    // incomplete and will be re-offered) and when the waste does not justify the
-    // whole-file rewrite. Progress counters are reused for the compact bar.
-    // Record wasted bytes AFTER commit: the commit itself creates waste (superseded
-    // index blobs), which is reclaimable and should be included in this phase.
-    // Compaction runs only when waste >= AUTO_COMPACT_MIN_WASTE (256 KiB); the ratio
-    // term is not used — rewriting to reclaim a few KiB costs more I/O than it saves,
-    // but large vaults need the option to compact (on explicit user request), so the
-    // floor is used alone without waste/size ratio gating.
-    if (!out.cancelled) {
-        const uint64_t wasted = v.wasted_bytes();
-        if (wasted >= vault::Vault::AUTO_COMPACT_MIN_WASTE) {
-            phase_.store(MigrationPhase::Compacting);
-            // Save the repairing-phase progress to restore after compaction.
-            // This preserves the report of completed repair work and ensures
-            // job.done() reflects the actual repairs finished, not the
-            // compaction phase. See migration_job_pool_handles_many_items_without_loss.
-            const int done_count = progress_.done.load();
-            const int total_count = progress_.total.load();
-            progress_.done.store(0);
-            progress_.total.store(0);
-            if (v.compact(&progress_) == vault::VaultResult::Ok) {
-                out.reclaimed_bytes = wasted;
-            }
-            // Restore progress regardless of compact() result, so failed compaction
-            // doesn't leave misleading progress state (total == done == 0).
-            progress_.done.store(done_count);
-            progress_.total.store(total_count);
-            // A failed compact is NOT a failed migration: the repairs are
-            // already committed and the vault is valid, just larger than ideal.
-        }
-    }
+    // Phase 3: reclaim what the repairs orphaned. Skipped on cancel — the pass is
+    // incomplete and will be re-offered. Progress counters are reused for the
+    // compact bar. Waste is measured AFTER commit: the commit itself creates waste
+    // (superseded index blobs), which is reclaimable and belongs in this phase.
+    if (!out.cancelled) maybe_compact(v, phase_, progress_, out);
 
     out.ok = true;
     phase_.store(MigrationPhase::Done);
