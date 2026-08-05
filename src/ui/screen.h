@@ -16,7 +16,7 @@ enum class NavKind {
     None, ToUnlock, ToGallery, ToViewer, ToFavoriteImages, ToFavoriteGalleries,
     ToFavoriteViewer, ToAdvancedSearch, ToTagOverview, ToTagGalleries,
     ToTagImages, ToTagViewer, ToImportStatus, ToDuplicates,
-    ToVaultManager, LockActive, ToggleKeepUnlocked, ToSettings, Quit
+    ToVaultManager, LockActive, LockSecond, ToggleKeepUnlocked, ToSettings, Quit
 };
 
 // A transition request. `path`/`index` carry context for the destination:

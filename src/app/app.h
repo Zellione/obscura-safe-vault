@@ -15,6 +15,7 @@
 #include "ui/help_popup.h"
 #include "ui/import_queue.h"
 #include "ui/screen.h"
+#include "ui/second_vault.h"
 #include "ui/settings_model.h"
 #include "ui/migration_job.h"
 #include "vault/vault.h"
@@ -102,6 +103,12 @@ private:
         std::string                   pending_path;
     };
     VaultState                         vault_state_;
+    // Phase 66: the one warm cross-vault destination (path + unlocked Vault +
+    // mode + sliding deadline). Session-only; App ticks/wipes it; dialogs adopt
+    // into it via GridVaultCtx. Declared next to vault_state_ so its ~Vault
+    // backstop runs in the same destruction neighborhood as the active vault.
+    ui::SecondVaultSession             second_;
+    int                                second_badge_secs_ = -1;   // last drawn countdown second
     // Advanced-search state preserved across visits within one unlocked-vault
     // session; reset in promote_pending() whenever the active vault changes.
     ui::AdvancedSearchState            adv_session_;
