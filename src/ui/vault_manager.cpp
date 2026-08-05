@@ -7,7 +7,9 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "platform/file_dialog.h"
+#include "platform/second_vault_pref.h"
 #include "platform/vault_registry.h"
+#include "ui/second_vault.h"
 #include "ui/widgets.h"
 
 namespace ui {
@@ -95,7 +97,15 @@ void VaultManager::handle_key(const SDL_KeyboardEvent& key)
         case SDLK_O:      dlg_.open_vault(win_.sdl_window()); awaiting_dialog_ = true; break;
         case SDLK_R:
         case SDLK_DELETE: remove_selected(); break;
-        case SDLK_L:      if (!active_path_.empty()) { request(LockActive); } break;
+        case SDLK_L: {
+            const auto warm = ui::second_vault_status();
+            if (!entries_.empty() && selected_ >= 0 && selected_ < static_cast<int>(entries_.size())) {
+                const std::string sel_path = entries_[static_cast<size_t>(selected_)].string();
+                if (warm.occupied && sel_path == warm.path) { request(LockSecond); break; }
+            }
+            if (!active_path_.empty()) request(LockActive);
+            break;
+        }
         case SDLK_C:      request(ToSettings); break;
         case SDLK_ESCAPE:
         case SDLK_Q:      request(Quit); break;
@@ -174,6 +184,7 @@ void VaultManager::render(gfx::Renderer& r)
     }
 
     const float row_pad = 12.0f;
+    const auto warm = ui::second_vault_status();
     for (size_t i = 0; i < entries_.size(); ++i) {
         const SDL_FRect box{40.0f, L.list_top + static_cast<float>(i) * L.row_h,
                             W - 80.0f, L.row_h - row_pad};
@@ -193,6 +204,13 @@ void VaultManager::render(gfx::Renderer& r)
 
         if (!active_path_.empty() && full == active_path_)
             r.draw_text(font_, box.x + box.w - 130.0f, box.y + 14.0f, "unlocked", OK);
+
+        if (warm.occupied && full == warm.path) {
+            const std::string badge = warm.mode == platform::SecondVaultMode::KeepSession
+                                           ? "unlocked · session"
+                                           : "unlocked · " + ui::format_keep_open_left(warm.seconds_left);
+            r.draw_text(font_, box.x + box.w - 130.0f, box.y + 14.0f, badge, OK);
+        }
     }
 
     auto btn = [this, &r](const SDL_FRect& rect, std::string_view text) {
@@ -209,7 +227,7 @@ std::vector<ui::HelpGroup> VaultManager::help_groups() const
         {"Vaults", {
             {"Up/Down", "Move selection"}, {"Enter / Space", "Open selected vault"},
             {"N", "Create new vault"}, {"O", "Open existing vault file"},
-            {"R / Del", "Remove from list"}, {"L", "Lock the active vault"},
+            {"R / Del", "Remove from list"}, {"L", "Lock the selected/active vault"},
             {"Shift+I", "Import status"},
         }},
         {"App", {{"C", "Open settings"}, {"Esc / Q", "Quit"}}},
