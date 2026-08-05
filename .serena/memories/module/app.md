@@ -54,6 +54,18 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   promote_pending.
 - App also owns `HelpPopupState` (intercepts F1 globally, renders the overlay on top) and
   `AdvancedSearchState adv_session_` (reset on vault change).
+- **Overlay dispatch structure (Phase 65 cleanup).** `dispatch_event` delegates to the static
+  `App::dispatch_overlay_event`, which is now only a fan-out: it calls, in priority order,
+  `OverlayDispatch::help` → `::settings` → `::migration` → `::lock_confirm`, returning on the
+  first that reports the event handled. `App::OverlayDispatch` is a nested struct declared in
+  `app.h` and defined in `app.cpp`; nested rather than more App members because a nested class
+  reaches the enclosing class's privates exactly as a member does, without growing App's own
+  interface (App sits just under Sonar's `cpp:S1448` 35-method cap — five more members trips it).
+  The ordering described below is unchanged, only relocated.
+  One non-obvious contract: on a non-empty scan the settings VaultOps migration trigger closes
+  settings and deliberately reports the event as NOT handled, so the offer modal receives the
+  same event and renders on this frame rather than the next. Do not "tidy" that into a `return
+  true`.
 - Phase 49: App owns `ui::SettingsState settings_` and intercepts **F2** globally, mirroring
   the F1 convention — the overlay draws over whichever screen is active, so `Esc` returns to a
   paused video / scroll position intact (it is deliberately NOT a `Screen`). Event order in

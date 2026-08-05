@@ -49,6 +49,36 @@
 - Unit tests in `tests/<module>/`, integration tests exercise full round-trips.
 - Crypto tests must include known-answer vectors (Monocypher suite / RFC vectors).
 - Tests must pass before a phase is complete.
+- **`scripts/test.sh` alone is not "tests pass".** It is Debug + FFmpeg — the one
+  configuration where several whole classes of break are invisible. Before calling a
+  phase done, also run `scripts/test.sh --release` and
+  `bin/premake5 --no-av ninja --cc=gcc && ninja Debug_x64` (then `scripts/gen.sh` to
+  restore the normal build files). PR #161 shipped three separate failures that Debug
+  +FFmpeg could not see; each cost a CI round-trip to find one at a time, because
+  ninja stops at the first error and reports only that one.
+- **Never assert on a size that the compressor decides.** A fixture that pushes highly
+  compressible bytes through chunk framing and asserts the stored/wasted result exceeds
+  a threshold is asserting a property of deflate. `migration_job_compaction_reclaims_
+  orphaned_chunks` cleared `AUTO_COMPACT_MIN_WASTE` by under 4% (272286 vs 262144) that
+  way. Use incompressible bytes (`job_incompressible`, fixed-seed splitmix64) so stored
+  size tracks raw size, and leave a multiple of margin.
+- **A test that has never run on Windows is not a passing test.** When an MSVC leg is
+  red for a build reason, every test in it is unverified, and fixing the build can
+  expose real failures that were hidden for a whole phase. Do not read "MSVC was
+  already failing" as "MSVC is fine".
+- **Deletion leaves different state per platform** — see `mem:module/vault`
+  `auto_reclaim_space`. A test that deletes media and then asserts on `wasted_bytes()`
+  must keep the waste under the auto-reclaim gate (`waste * AUTO_COMPACT_WASTE_RATIO
+  < size`), or it silently asserts Linux-only behaviour.
+
+## Build configurations (beyond MSVC-vs-libstdc++ source differences)
+- An `inline` function defined in a header must be *included*, never hand-forward-declared
+  in a `.cpp`. A non-inline declaration links at `-O0` only by luck — off the weak
+  out-of-line copies other TUs emit — and fails every Release build with an undefined
+  reference. `tests/ui/test_migration_job.cpp` did this to `fixtures::load_webp` /
+  `load_anim_webp` and broke all three Release legs.
+- A `static` helper used only inside `#ifdef OSV_VENDORED_AV` must carry the same guard,
+  or the `--no-av` leg fails on `-Werror=unused-function`.
 
 ## Security invariants
 See `mem:core` — six hard invariants, never relax them.
