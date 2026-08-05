@@ -447,18 +447,28 @@ TEST(migration_job_compaction_reclaims_orphaned_chunks)
     REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
             == vault::VaultResult::Ok);
 
-    // Add two images: one to keep, one to delete. Deleting the second must orphan
-    // more than AUTO_COMPACT_MIN_WASTE (256 KiB) to trigger the floor gate.
+    // Add two images: one to keep, one to delete. Deleting the second must leave
+    // more than AUTO_COMPACT_MIN_WASTE (256 KiB) orphaned, so the migration job's
+    // compaction phase has something to reclaim.
     //
-    // The payload is INCOMPRESSIBLE on purpose. An earlier version pushed 70 MB of
-    // job_pattern() through the framing compressor and relied on the residue landing
-    // above the floor; it cleared it by 10 KiB (272286 vs 262144, under 4%), so the
-    // test was really asserting a property of deflate. It passed on Linux and failed
-    // on MSVC the first time the Windows build got far enough to run it. With
-    // incompressible bytes the stored size tracks the raw size, so 2 MiB clears the
-    // floor ~8x over and no longer depends on the compressor at all — and it moves
-    // 140 MB less data per run.
-    const auto keep_bytes   = job_incompressible(2u << 20, 1);
+    // Two properties of the payload are load-bearing, and getting either wrong
+    // makes this test assert something other than what it means to:
+    //
+    // 1. INCOMPRESSIBLE. An earlier version pushed 70 MB of job_pattern() through
+    //    the framing compressor and relied on the compressed residue landing above
+    //    the floor — it cleared it by under 4% (272286 vs 262144), so the REQUIRE
+    //    was really asserting a property of deflate.
+    //
+    // 2. keep >> delete. remove_image() calls auto_reclaim_space(), which reclaims
+    //    only when waste >= AUTO_COMPACT_MIN_WASTE AND waste * 4 >= file size. That
+    //    reclaim is hole-punching on Linux (logical size unchanged, so wasted_bytes
+    //    still reports the holes) but a truncating compact() everywhere else — so on
+    //    Windows an auto-reclaimed delete leaves NOTHING for the migration job, and
+    //    this test could never pass there. Keeping 24 MiB against a 2 MiB delete puts
+    //    waste well under size/4, so the auto gate declines on every platform and the
+    //    orphan survives to be reclaimed by the job. MigrationJob's own compaction
+    //    gate is the floor alone, with no ratio term, so it still runs.
+    const auto keep_bytes   = job_incompressible(24u << 20, 1);
     const auto delete_bytes = job_incompressible(2u << 20, 2);
     REQUIRE(v.add_image("", keep_bytes, "keep.png") == vault::VaultResult::Ok);
     REQUIRE(v.add_image("", delete_bytes, "delete.png") == vault::VaultResult::Ok);
