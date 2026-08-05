@@ -372,3 +372,76 @@ TEST(migration_job_pool_handles_many_items_without_loss)
 
     for (const vault::IndexNode* n : v.list("")) CHECK(n->meta.animated);
 }
+
+TEST(migration_job_skips_compaction_when_nothing_is_wasted)
+{
+    JobTempVault tv("nocompact");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
+            == vault::VaultResult::Ok);
+    // Empty vault has nothing to compact
+    REQUIRE(v.list("").size() == 0u);
+    REQUIRE(v.wasted_bytes() == 0u);
+
+    ui::MigrationJob job;
+    REQUIRE(job.start(v));
+    const ui::MigrationOutcome out = run_to_completion(job);
+
+    CHECK(out.ok);
+    // With zero wasted bytes, compaction is skipped and reclaimed_bytes stays 0
+    CHECK_EQ(out.reclaimed_bytes, 0u);
+}
+
+TEST(migration_job_cancel_skips_compaction)
+{
+    JobTempVault tv("cancelcompact");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
+            == vault::VaultResult::Ok);
+
+    ui::MigrationJob job;
+    REQUIRE(job.start(v));
+    job.cancel();
+    const ui::MigrationOutcome out = run_to_completion(job);
+
+    CHECK_EQ(out.reclaimed_bytes, 0u);
+}
+
+TEST(migration_job_compaction_reclaims_orphaned_chunks)
+{
+    JobTempVault tv("compact_reclaim");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
+            == vault::VaultResult::Ok);
+
+    // Add two images: one to keep, one to delete
+    const auto pattern1 = job_pattern(10000, 1);
+    const auto pattern2 = job_pattern(20000, 2);
+    REQUIRE(v.add_image("", pattern1, "keep.png") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", pattern2, "delete.png") == vault::VaultResult::Ok);
+    REQUIRE(v.list("").size() == 2u);
+
+    // Delete the second image, which orphans its chunks
+    REQUIRE(v.remove_image("", "delete.png") == vault::VaultResult::Ok);
+    REQUIRE(v.list("").size() == 1u);
+
+    // Verify there are now wasted bytes from the orphaned chunks
+    const uint64_t wasted_before = v.wasted_bytes();
+    CHECK(wasted_before > 0u);
+
+    // Run the migration job
+    ui::MigrationJob job;
+    REQUIRE(job.start(v));
+    const ui::MigrationOutcome out = run_to_completion(job);
+
+    // Verify migration succeeded and reclaimed the wasted bytes
+    CHECK(out.ok);
+    CHECK(!out.cancelled);
+    CHECK(out.reclaimed_bytes == wasted_before);
+    CHECK(out.reclaimed_bytes > 0u);
+
+    // Verify the vault is still readable and contains only the kept image
+    REQUIRE(v.list("").size() == 1u);
+    CHECK_EQ(v.list("")[0]->name, "keep.png");
+}
+

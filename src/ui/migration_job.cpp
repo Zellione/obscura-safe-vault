@@ -285,6 +285,14 @@ void MigrationJob::run(vault::Vault& v)
     if (progress_.cancel.load()) {
         out.cancelled = true;
     }
+
+    // Record wasted bytes BEFORE commit so we only compact existing waste,
+    // not waste created by the commit itself.
+    uint64_t wasted_before_commit = 0;
+    if (!out.cancelled) {
+        wasted_before_commit = v.wasted_bytes();
+    }
+
     vault::VaultSettings settings = vault::vault_settings(v);
     if (!out.cancelled) {
         settings = vault::stamp_migrated(settings, media::PROBE_CAPS_GEN);
@@ -297,6 +305,25 @@ void MigrationJob::run(vault::Vault& v)
         outcome_ = std::move(out);
         done_.store(true);
         return;
+    }
+
+    // Phase 3: reclaim what the repairs orphaned. Skipped on cancel (the pass is
+    // incomplete and will be re-offered) and when there is nothing worth the
+    // whole-file rewrite. Progress counters are reused for the compact bar.
+    if (!out.cancelled && wasted_before_commit > 0) {
+        phase_.store(MigrationPhase::Compacting);
+        // Save the repairing-phase progress to restore after compaction
+        const int done_count = progress_.done.load();
+        progress_.done.store(0);
+        progress_.total.store(0);
+        if (v.compact(&progress_) == vault::VaultResult::Ok) {
+            out.reclaimed_bytes = wasted_before_commit;
+        }
+        // Restore progress to reflect the repair work that was completed
+        progress_.done.store(done_count);
+        progress_.total.store(done_count);
+        // A failed compact is NOT a failed migration: the repairs are
+        // already committed and the vault is valid, just larger than ideal.
     }
 
     out.ok = true;
