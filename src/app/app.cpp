@@ -413,13 +413,18 @@ void draw_second_vault_badge(gfx::Renderer& r, gfx::FontAtlas& font, int win_w, 
 {
     using namespace gfx::theme;
     const auto st = ui::second_vault_status();
-    const std::string label =
+    std::string label =
         st.mode == platform::SecondVaultMode::KeepSession
             ? std::format("2nd vault unlocked · session — {}",
                           std::filesystem::path(st.path).stem().string())
             : std::format("2nd vault unlocked · {} — {}", ui::format_keep_open_left(st.seconds_left),
                           std::filesystem::path(st.path).stem().string());
     static constexpr float PAD = 10.0f, MARGIN = 16.0f;
+    const float max_w = static_cast<float>(win_w) * 0.6f;
+    const float measured_w = static_cast<float>(font.measure(label));
+    if (measured_w > max_w) {
+        label = ui::fit_text(font, label, max_w);
+    }
     const auto  tw = static_cast<float>(font.measure(label));
     const float th = font.pixel_height();
     const float bw = tw + (PAD * 2);
