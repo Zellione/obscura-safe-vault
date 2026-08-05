@@ -16,6 +16,7 @@
 
 namespace gfx { class Renderer; class FontAtlas; class Window; }
 namespace platform { class VaultRegistry; class FileDialog; }
+namespace ui { class SecondVaultSession; }
 
 namespace ui {
 
@@ -35,7 +36,7 @@ public:
     // destination-vault candidate list (the registry stores paths, not handles).
     TransferDialog(vault::Vault& src, std::string src_path,
                    platform::VaultRegistry& registry,
-                   platform::FileDialog& dlg, gfx::Window& win);
+                   platform::FileDialog& dlg, gfx::Window& win, SecondVaultSession* second);
 
     // Activate to move `filenames` (image names within `src_gallery`).
     void open(std::string src_gallery, std::vector<std::string> filenames);

@@ -189,7 +189,7 @@ void App::to_gallery(const std::string& path, int selected, bool explicit_index)
     screen_ = std::make_unique<ui::GalleryGrid>(
         window_, font_, *vault_state_.active, *cache_,
         ui::GalleryGrid::GridDialogs{dialog_, folder_dialog_},
-        ui::GalleryGrid::GridVaultCtx{registry_, vault_state_.active_path},
+        ui::GalleryGrid::GridVaultCtx{registry_, vault_state_.active_path, nullptr},
         session_, import_ui_.queue,
         ui::GridLocation{path, seed, session_.view});
     screen_->on_enter();
