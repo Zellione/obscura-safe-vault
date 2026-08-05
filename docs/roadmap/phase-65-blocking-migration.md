@@ -1,6 +1,6 @@
-# Blocking vault migration (proposed Phase 65) — design
+# Blocking vault migration (Phase 65) — shipping specification
 
-**Status:** design approved, not yet planned or implemented
+**Status:** ✅ shipped
 **Date:** 2026-08-05
 
 ## Problem

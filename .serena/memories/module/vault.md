@@ -151,39 +151,59 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
 - `vault::rename_node(v,gallery_path,old_name,new_name)` — validates `is_safe_node_name` +
   no sibling collision, then a pure leaf-field edit (an IndexNode persists only its local
   name, never a path, so no cascade). Drives the `R` RenameDialog.
-- `vault::repair_video_metadata` — re-probes a node stuck at placeholder Unknown video
-  metadata and fills it in if the codec has since become decodable; no-op otherwise.
-  Phase 63: the poster append holds `write_mutex_` (it used to be the ONE unguarded `fp_`
-  write path — racing the CommitLane worker's commit on the same FILE* could misplace
-  `write_header`'s payload at EOF, PR #109 class, losing the slot flip so repairs re-ran
-  and regrew the vault every unlock); a failed probe sets the transient (never serialized)
-  `VideoMeta::probe_failed_session` so gallery refresh doesn't re-read the whole video
-  every visit (retried next unlock). `Vault::unlock` now `platform::log_error`s when the
-  active index slot is unreadable and the previous slot is recovered (was silent).
-  Test-only friend `vault::test_only_force_video_codec_unknown` (in tests/vault/test_video.cpp).
+
+### migration.* (Phase 65) — vault upgrade orchestration
+- `scan_migration(const Vault&, MigrationStatus*)` — pure tree walk (zero I/O). Detects pending
+  migrations by counting videos with `codec == Unknown` and images missing the animated flag
+  for formats that support animation. Returns counts and total bytes to be read. Deliberately
+  over-counts the animated arm: a genuinely static GIF is indistinguishable from an un-backfilled
+  one without decrypting, so it IS real work that must be done once. **The watermark, not the
+  detector, prevents recurrence.**
+- `MIGRATION_INDEX_VERSION` (u8) — constant 7 (the index version that introduced `animated`).
+  Staleness checks `settings.migrated_index_version < MIGRATION_INDEX_VERSION`, never against
+  raw `INDEX_VERSION`. Gating on `INDEX_VERSION` would re-trigger on every future version bump.
+- `migration_is_pending(const VaultSettings&)` — watermark is stale against
+  `MIGRATION_INDEX_VERSION` or `media::PROBE_CAPS_GEN`.
+- `apply_video_probe(Vault&, const IndexNode::Video&, VideoMeta&)` — free friend. Re-probes
+  a video with `codec == Unknown` and returns Ok without mutating if still undecodable (skipped
+  in the pass, watermark still advances). Otherwise fills codec, dimensions, duration, and poster
+  span. Does NOT commit.
+- `apply_image_animated(Vault&, const IndexNode::Image&, ImageMeta&)` — free friend. Re-sniffs
+  an image in a format that supports animation, setting the animated flag if needed. Does NOT commit.
+- `commit_migration(Vault&)` — free friend. After all apply_* calls, ONE `commit_index()` to
+  serialize the migration work atomically. Called by ui::MigrationJob.
+- **Transfer rule (Phase 65):** `transfer_image` and `transfer_gallery` (the two primitives
+  all cross-vault operations funnel through) now lower the destination's watermark to the source's
+  whenever the source is behind. This re-offers the migration if content from an un-migrated vault
+  arrives at a migrated destination.
 
 ### index.* — the index tree
 - `IndexNode` carries `std::vector<std::string> tags` + `bool favorite` (gallery + image),
   a `SortKey` u8 (meaningful only on Gallery nodes: Default/NameAsc/NameDesc/DateAsc/DateDesc/
   SizeAsc/SizeDesc/Insertion; out-of-range byte rejected, not clamped, bounded PER VERSION —
   v6/v7 max 6, v8 max 7), and Type::Video + VideoMeta (multi-chunk list + poster).
-- `INDEX_VERSION=9`. Vault-global SavedSearch block after the root (name + opaque
+- `INDEX_VERSION=10` (Phase 65). Vault-global SavedSearch block after the root (name + opaque
   `ui::AdvancedQuery` blob, `INDEX_MAX_SAVED_SEARCHES=4096`), then the Phase 49 vault-global
-  **settings block**, then the Phase 51 **tag-descriptions block** — see `mem:vault_format` for
-  their byte layouts. `INDEX_MAX_TAGS=4096`. Back-compat: v1–v5 read as empty tags / favorite=false /
-  no saved searches; pre-v8 read with `default_sort=Insertion`, tile tags on, and
-  `VaultSettings::seeded()`; pre-v9 read with empty descriptions.
+  **settings block**, then the Phase 51 **tag-descriptions block**, then the Phase 65
+  **migration watermark** — see `mem:vault_format` for their byte layouts. `INDEX_MAX_TAGS=4096`.
+  Back-compat: v1–v5 read as empty tags / favorite=false / no saved searches; pre-v8 read with
+  `default_sort=Insertion`, tile tags on, and `VaultSettings::seeded()`; pre-v9 read with empty
+  descriptions; pre-v10 read with `migrated_index_version=0` + `migrated_probe_caps=0` (never
+  migrated).
 - Phase 49 types: `TagCategory{std::string name; uint8_t swatch;}` and
   `VaultSettings{SortKey default_sort; bool tiles_show_tags; std::vector<TagCategory>
   categories;}` with a static `seeded()` (8 nhentai-style categories on distinct swatches).
   Caps `INDEX_MAX_TAG_CATEGORIES=256`, `INDEX_MAX_CATEGORY_BYTES=64`, `TAG_SWATCH_COUNT=16`.
   Phase 51 adds: `std::vector<TagDescription> tag_descriptions` where `TagDescription{std::string
   name; std::string description;}`, caps `INDEX_MAX_TAG_DESCRIPTIONS=4096`,
-  `INDEX_MAX_TAG_DESC_BYTES=512`. `write_settings`/`read_settings` mirror the saved-searches pair
-  — the writer CLAMPS, the reader REJECTS. `serialize_index`/`deserialize_index` gained 4-arg forms;
+  `INDEX_MAX_TAG_DESC_BYTES=512`. Phase 65 adds: `uint8_t migrated_index_version` +
+  `uint16_t migrated_probe_caps` — the vault upgrade watermark, read as 0/0 by pre-v10 blobs.
+  `write_settings`/`read_settings` mirror the saved-searches pair — the writer CLAMPS, the reader
+  REJECTS out-of-range watermark bytes. `serialize_index`/`deserialize_index` gained 4-arg forms;
   the 2- and 3-arg ones delegate. **Any new call site must use the 4-arg form** — the fuzz harness's
   base blob does, so description bytes are reachable by mutation. `read_settings` gained a `version`
-  parameter to govern which blocks are read (v8 stops after category block, v9 continues to descriptions).
+  parameter to govern which blocks are read (v8 stops after category block, v9 continues to descriptions,
+  v10 continues to migration watermark).
 - Favorites: `Vault::toggle_favorite(node_path)` + flat whole-tree
   `list_favorite_images()`/`list_favorite_galleries()` -> `vector<SearchHit>`.
 - Tag API + scoped search: `set_tags`/`add_tag`/`remove_tag(node_path)`,

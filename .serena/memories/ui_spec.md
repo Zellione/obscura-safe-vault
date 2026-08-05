@@ -52,6 +52,22 @@ invent its own key handling.
 - Create New Vault: passphrase-strength meter; offer to generate a random
   passphrase (password is the genuine security boundary).
 
+## Vault migration offer (Phase 65)
+**Post-unlock, before the gallery renders:** if the vault's migration watermark is
+stale and there is pending work (unknown videos or un-backfilled animated images),
+`MigrationJob` is offered in a **default-cancel modal** stating the counts and
+total bytes to be read — no time estimate (an honest byte count beats a fabricated
+ETA). **Accept** runs the blocking upgrade pass with a progress modal (four-phase
+bar: decrypt, probe/sniff, encode poster, commit+compact). **Decline** does nothing;
+the vault does not mutate while browsing (lazy repair paths are removed), videos
+simply render without a poster and un-backfilled images render as static. Migration
+is re-offered at the next unlock and invocable manually from the settings overlay
+(`F2`, "Re-check vault for upgrades" button).
+
+Crash mid-pass leaves the vault as it was; orphaned poster chunks are dead
+ciphertext reclaimed by compact. Cancel commits applied work but does not stamp the
+watermark, so the pass re-runs at the next unlock.
+
 ## Gallery grid (Phase 5)
 - Tile grid: sub-galleries (folder icon) and image thumbnails, rendered
   folders-first (Phase 46).
