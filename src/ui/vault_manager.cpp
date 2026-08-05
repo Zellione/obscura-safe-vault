@@ -193,7 +193,12 @@ void VaultManager::render(gfx::Renderer& r)
         r.draw_round_rect(box, RADIUS, sel ? SURFACE_HI : SURFACE);
 
         const std::string full = entries_[i].string();
-        const std::string label = entries_[i].filename().string();
+        std::string label = entries_[i].filename().string();
+        // Append warm vault badge before elision (warm and active can never be the same row)
+        if (warm.occupied && full == warm.path)
+            label += warm.mode == platform::SecondVaultMode::KeepSession
+                         ? "  (unlocked · session)"
+                         : "  (unlocked · " + ui::format_keep_open_left(warm.seconds_left) + ")";
         // Reserve room for the "unlocked" badge drawn at box.w - 130.
         r.draw_text(font_, box.x + 18.0f, box.y + 8.0f,
                     fit_text(font_, label, box.w - 160.0f), TEXT);
@@ -204,13 +209,6 @@ void VaultManager::render(gfx::Renderer& r)
 
         if (!active_path_.empty() && full == active_path_)
             r.draw_text(font_, box.x + box.w - 130.0f, box.y + 14.0f, "unlocked", OK);
-
-        if (warm.occupied && full == warm.path) {
-            const std::string badge = warm.mode == platform::SecondVaultMode::KeepSession
-                                           ? "unlocked · session"
-                                           : "unlocked · " + ui::format_keep_open_left(warm.seconds_left);
-            r.draw_text(font_, box.x + box.w - 130.0f, box.y + 14.0f, badge, OK);
-        }
     }
 
     auto btn = [this, &r](const SDL_FRect& rect, std::string_view text) {
