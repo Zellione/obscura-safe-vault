@@ -25,6 +25,10 @@ See [`CLAUDE.md`](CLAUDE.md) for all technology decisions and [`ROADMAP.md`](ROA
 | `nasm` | assembler for the vendored **libaom** (AVIF decode) | Arch: `sudo pacman -S nasm` · Debian/Ubuntu: `sudo apt install nasm` · Windows: `choco install nasm` |
 | `pkg-config` (or `pkgconf`) | FFmpeg's configure detects the vendored **libaom** through it, for AV1 video decode | Arch: `sudo pacman -S pkgconf` · Debian/Ubuntu: `sudo apt install pkg-config` · Windows (MSYS2): `pkgconf` package |
 
+> **Windows:** a complete step-by-step guide — prerequisites with install
+> commands, checkout, setup, and Debug/Release builds — is in
+> [Windows — manual build walkthrough](#windows--manual-build-walkthrough-checkout--binary) below.
+
 ### First-time setup
 
 Initialises git submodules, downloads the `premake5` binary, and cmake-builds the vendored static libraries (SDL3, plus the image codecs libwebp / libde265 / libaom / libheif into `vendor/codecs-prefix/`).
@@ -82,6 +86,108 @@ ulimit -l unlimited      # this shell only, then launch osv from it
 For desktop launches, raise it session-wide, e.g. on systemd distros set
 `DefaultLimitMEMLOCK=2G` in `/etc/systemd/user.conf` (or a
 `LimitMEMLOCK=` drop-in for your compositor's service) and log out/in.
+
+### Windows — manual build walkthrough (checkout → binary)
+
+Unless noted otherwise, every command below runs in a **"x64 Native Tools
+Command Prompt for VS 2022"** (Developer prompt) from the repository root —
+the build needs `cl.exe` and `msbuild` on `PATH`.
+
+**1. Prerequisites (once per machine)**
+
+| Tool | Needed for | How to install |
+|---|---|---|
+| **Visual Studio 2022** (*Desktop development with C++* workload) | MSVC compiler, `msbuild`, the Developer prompt | Installer from <https://visualstudio.microsoft.com/downloads/> (Community is fine), or `winget install Microsoft.VisualStudio.2022.Community` — then tick *Desktop development with C++* in the VS Installer |
+| **git** | checkout + submodules | <https://git-scm.com/download/win>, or `winget install Git.Git` |
+| **cmake** | building the vendored static libs | `choco install cmake` or `winget install Kitware.CMake` (VS 2022's bundled cmake works too) |
+| **ninja** | cmake generator for the vendored libs | `choco install ninja` or `winget install Ninja-build.Ninja` |
+| **nasm** | assembler for libaom (AVIF stills + AV1 video) | `choco install nasm` or installer from <https://nasm.us> — then add `C:\Program Files\NASM` to `PATH` yourself (neither does it for you) |
+| **MSYS2** — *optional, only for video/audio support* | POSIX shell + make for FFmpeg's `./configure` (MSVC still does the compiling) | <https://www.msys2.org> installer, or `winget install MSYS2.MSYS2` (default location `C:\msys64`) |
+
+Notes:
+
+- Stick with **VS 2022's** MSVC: the newer VS 18 / MSVC 14.51 toolchain
+  miscompiles freshly-built vendored libs in Release (CI pins `windows-2022`
+  for the same reason — see `.github/workflows/ci.yml`).
+- Chocolatey (`choco`) itself installs per <https://chocolatey.org/install>;
+  `winget` ships with Windows 10/11. Either works — pick one.
+- After installing, verify from a **fresh** VS 2022 Developer prompt that
+  `git`, `cmake`, `ninja`, and `nasm` all resolve (`where cmake` etc.) —
+  PATH edits only apply to newly-opened prompts.
+
+**2. Checkout**
+
+```bat
+git clone --recurse-submodules https://github.com/Zellione/obscura-safe-vault.git
+cd obscura-safe-vault
+```
+
+(After a plain clone, `git submodule update --init --recursive` — `setup.bat`
+also does this for you.)
+
+**3. One-time setup**
+
+```bat
+scripts\setup.bat
+```
+
+Initialises submodules, downloads `bin\premake5.exe`, and cmake-builds the
+vendored static libs: SDL3 into `vendor\SDL3\build\`, and the image/archive
+codecs (libwebp, libde265, libaom, libheif, zlib, xz, libarchive) into
+`vendor\codecs-prefix\`. Already-built libs are skipped, so re-running is cheap.
+
+**4. Optional — vendored FFmpeg (video/audio decode)**
+
+`setup.bat` does **not** build FFmpeg. Without it the app still builds and
+runs fine — the video code paths are simply compiled out. To include them,
+launch an MSYS2 shell **from the same VS Developer prompt** so it inherits the
+MSVC environment:
+
+```bat
+C:\msys64\msys2_shell.cmd -msys -use-full-path -here
+```
+
+then, inside that MSYS2 shell:
+
+```bash
+pacman -S --needed make diffutils pkgconf
+mv /usr/bin/link.exe /usr/bin/link.exe.msys2-bak   # MSYS2's link.exe shadows MSVC's linker
+scripts/build_ffmpeg_windows.sh
+```
+
+This builds a decode-only, MSVC-ABI static FFmpeg into `vendor\codecs-prefix\`
+(see the header of `scripts/build_ffmpeg_windows.sh` for the details). Back in
+the Developer prompt, continue with step 5 — premake picks the FFmpeg prefix
+up automatically.
+
+**5. Generate the Visual Studio solution**
+
+```bat
+bin\premake5.exe vs2022
+```
+
+This writes `ObscuraSafeVault.sln`. Re-run it after adding, moving, or
+removing source files.
+
+**6. Build**
+
+```bat
+msbuild ObscuraSafeVault.sln /m /p:Configuration=Debug /p:Platform=x64
+msbuild ObscuraSafeVault.sln /m /p:Configuration=Release /p:Platform=x64
+```
+
+(Or open `ObscuraSafeVault.sln` in the VS IDE and build the wanted
+configuration there.)
+
+**7. Result**
+
+```
+build\bin\Debug\osv.exe       build\bin\Debug\osv_tests.exe
+build\bin\Release\osv.exe     build\bin\Release\osv_tests.exe
+```
+
+Day-to-day rebuilds only need step 6; step 5 after source-file changes; step 3
+(and 4) only when vendored submodules change.
 
 ---
 
