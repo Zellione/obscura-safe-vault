@@ -7,24 +7,28 @@ namespace ui {
 namespace {
 // File-local global: the read-only snapshot pushed by every mutator and tick.
 // Single-threaded UI state, main thread only.
-SecondVaultStatus g_status;
+SecondVaultStatus& global_status()
+{
+    static SecondVaultStatus s;
+    return s;
+}
 }  // namespace
 
 SecondVaultStatus second_vault_status()
 {
-    return g_status;
+    return global_status();
 }
 
 std::string format_keep_open_left(double secs)
 {
     secs = std::max(0.0, secs);
-    int t = (int)secs;
+    auto t = static_cast<int>(secs);
     return std::format("{}:{:02}", t / 60, t % 60);
 }
 
 SecondVaultSession::SecondVaultSession()
 {
-    g_status = SecondVaultStatus{};
+    global_status() = SecondVaultStatus{};
 }
 
 SecondVaultSession::~SecondVaultSession()
@@ -125,10 +129,10 @@ void SecondVaultSession::set_default_mode(platform::SecondVaultMode m) noexcept
 
 void SecondVaultSession::push_status_() noexcept
 {
-    g_status.occupied = occupied_;
-    g_status.path = path_;
-    g_status.mode = mode_;
-    g_status.seconds_left = seconds_left_;
+    global_status().occupied = occupied_;
+    global_status().path = path_;
+    global_status().mode = mode_;
+    global_status().seconds_left = seconds_left_;
 }
 
 } // namespace ui

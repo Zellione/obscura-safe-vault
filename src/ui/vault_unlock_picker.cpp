@@ -34,12 +34,13 @@ std::string unlock_error_message(vault::VaultResult r) noexcept
 
 [[nodiscard]] std::string second_vault_mode_label(platform::SecondVaultMode mode) noexcept
 {
+    using enum platform::SecondVaultMode;
     switch (mode) {
-    case platform::SecondVaultMode::LockNow:
+    case LockNow:
         return "Lock immediately";
-    case platform::SecondVaultMode::KeepTimed:
+    case KeepTimed:
         return "Keep open 5 min";
-    case platform::SecondVaultMode::KeepSession:
+    case KeepSession:
         return "Keep open for session";
     }
     return "Unknown";
@@ -160,12 +161,10 @@ bool VaultUnlockPicker::handle_pick_vault_key(SDL_Keycode k)
 
 bool VaultUnlockPicker::handle_unlock_key(SDL_Keycode k)
 {
-    if (second_) {
-        if (k == SDLK_UP || k == SDLK_DOWN) {
-            keep_mode_ = static_cast<platform::SecondVaultMode>(
-                (static_cast<int>(keep_mode_) + (k == SDLK_DOWN ? 1 : 2)) % 3);
-            return true;
-        }
+    if (second_ && (k == SDLK_UP || k == SDLK_DOWN)) {
+        keep_mode_ = static_cast<platform::SecondVaultMode>(
+            (std::to_underlying(keep_mode_) + (k == SDLK_DOWN ? 1 : 2)) % 3);
+        return true;
     }
     if (k == SDLK_TAB) { dlg_.open_keyfile(win_.sdl_window()); dest_.awaiting_keyfile = true; }
     else if (k == SDLK_RETURN || k == SDLK_KP_ENTER) try_unlock();

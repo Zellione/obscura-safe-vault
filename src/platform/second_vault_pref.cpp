@@ -20,12 +20,13 @@ SecondVaultPref SecondVaultPref::default_location()
 namespace {
 [[nodiscard]] std::string_view mode_slug(SecondVaultMode m)
 {
+    using enum SecondVaultMode;
     switch (m) {
-        case SecondVaultMode::LockNow:
+        case LockNow:
             return "lock";
-        case SecondVaultMode::KeepTimed:
+        case KeepTimed:
             return "5min";
-        case SecondVaultMode::KeepSession:
+        case KeepSession:
             return "session";
     }
     // unreachable; present for compiler completeness
@@ -34,9 +35,10 @@ namespace {
 
 [[nodiscard]] SecondVaultMode mode_from_slug(std::string_view slug)
 {
-    if (slug == "5min") return SecondVaultMode::KeepTimed;
-    if (slug == "session") return SecondVaultMode::KeepSession;
-    return SecondVaultMode::LockNow;                       // unknown/missing → safe default
+    using enum SecondVaultMode;
+    if (slug == "5min") return KeepTimed;
+    if (slug == "session") return KeepSession;
+    return LockNow;                       // unknown/missing → safe default
 }
 } // namespace
 

@@ -107,8 +107,11 @@ private:
     // mode + sliding deadline). Session-only; App ticks/wipes it; dialogs adopt
     // into it via GridVaultCtx. Declared next to vault_state_ so its ~Vault
     // backstop runs in the same destruction neighborhood as the active vault.
-    ui::SecondVaultSession             second_;
-    int                                second_badge_secs_ = -1;   // last drawn countdown second
+    struct SecondVaultUi {
+        ui::SecondVaultSession session;
+        int badge_secs = -1;  // last drawn countdown second
+    };
+    SecondVaultUi                      second_;
     // Advanced-search state preserved across visits within one unlocked-vault
     // session; reset in promote_pending() whenever the active vault changes.
     ui::AdvancedSearchState            adv_session_;

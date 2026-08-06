@@ -251,12 +251,13 @@ namespace {
 // Convert SecondVaultMode to a display label.
 [[nodiscard]] std::string second_vault_mode_label(platform::SecondVaultMode mode) noexcept
 {
+    using enum platform::SecondVaultMode;
     switch (mode) {
-    case platform::SecondVaultMode::LockNow:
+    case LockNow:
         return "Lock now";
-    case platform::SecondVaultMode::KeepTimed:
+    case KeepTimed:
         return "5 minutes";
-    case platform::SecondVaultMode::KeepSession:
+    case KeepSession:
         return "Session";
     }
     return "Unknown";
@@ -272,6 +273,7 @@ constexpr float GAP          = 8.0f;
 void draw_rail(gfx::Renderer& r, gfx::FontAtlas& font, float rail_x, float rail_y,
                float rail_w, const SettingsState& state)
 {
+    using enum ui::SettingsSection;
     for (int i = 0; i < SETTINGS_SECTION_COUNT; ++i) {
         const auto sec = static_cast<SettingsSection>(i);
         const float item_y = rail_y + static_cast<float>(i) * (ITEM_H + GAP);
@@ -285,15 +287,15 @@ void draw_rail(gfx::Renderer& r, gfx::FontAtlas& font, float rail_x, float rail_
 
         // Section title
         std::string sec_name;
-        if (sec == SettingsSection::Appearance) {
+        if (sec == Appearance) {
             sec_name = "Appearance";
-        } else if (sec == SettingsSection::Browsing) {
+        } else if (sec == Browsing) {
             sec_name = "Browsing";
-        } else if (sec == SettingsSection::TagColours) {
+        } else if (sec == TagColours) {
             sec_name = "Tag Colours";
-        } else if (sec == SettingsSection::VaultOps) {
+        } else if (sec == VaultOps) {
             sec_name = "Vault";
-        } else if (sec == SettingsSection::Security) {
+        } else if (sec == Security) {
             sec_name = "Security";
         }
 
