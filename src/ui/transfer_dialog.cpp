@@ -247,7 +247,9 @@ void TransferDialog::update()
     // then close() (which wipes the destination key now that it is done with it).
     if (stage_ == Stage::Running) {
         if (auto oc = run_.job.take_outcome()) {
-            run_.status = oc->ok ? std::move(oc->status) : oc->error;
+            run_.completion.status = oc->ok ? std::move(oc->status) : oc->error;
+            run_.completion.failed_total = oc->failed;
+            run_.completion.failures = std::move(oc->failures);
             run_.done   = true;
             // Phase 66: a Keep mode hands the unlocked destination to the warm
             // slot (or slides its window) BEFORE close() wipes anything.
@@ -260,10 +262,10 @@ void TransferDialog::update()
     if (stage_ == Stage::PickingDest) picker_dest_.update();
 }
 
-bool TransferDialog::consume_completed(std::string& status_out)
+bool TransferDialog::consume_completed(TransferCompletion& out)
 {
     if (!run_.done) return false;
-    status_out = std::move(run_.status);
+    out = std::move(run_.completion);
     run_.done = false;
     return true;
 }

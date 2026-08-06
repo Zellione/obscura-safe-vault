@@ -6,6 +6,7 @@
 
 #include "platform/paths.h"
 #include "ui/export.h"
+#include "ui/failure_list_dialog.h"
 #include "ui/meta_format.h"
 #include "vault/combine.h"
 #include "vault/safe_name.h"
@@ -72,7 +73,8 @@ FileOpOutcome run_delete(vault::Vault& v, const std::string& base, const std::st
 
 // Format a transfer outcome from a tally (shared by the image-list + gallery paths).
 FileOpOutcome transfer_outcome(vault::TransferMode mode, int done, int failed, int total,
-                               bool cancelled, const std::string& label)
+                               bool cancelled, const std::string& label,
+                               std::vector<vault::TransferFailure> failures = {})
 {
     const char* verb        = (mode == vault::TransferMode::Copy) ? "Copied" : "Moved";
     const char* cancel_verb = (mode == vault::TransferMode::Copy) ? "Copy"   : "Move";
@@ -83,6 +85,7 @@ FileOpOutcome transfer_outcome(vault::TransferMode mode, int done, int failed, i
     oc.failed    = failed;
     oc.total     = total;
     oc.kind      = FileOpKind::Transfer;
+    oc.failures  = std::move(failures);
     if (cancelled)
         oc.status = std::format("{} cancelled — {} of {} to {}", cancel_verb, done, total, label);
     else
@@ -199,10 +202,10 @@ bool FileOpJob::start_transfer_images(vault::Vault& src, std::string src_gallery
                   [this, &src, src_gallery = std::move(src_gallery),
                    filenames = std::move(filenames), &dst, dst_gallery = std::move(dst_gallery),
                    mode, label = std::move(label)]() {
-        const vault::TransferTally t =
+        vault::TransferTally t =
             vault::transfer_images(src, src_gallery, filenames, dst, dst_gallery, mode, &progress_);
         return transfer_outcome(mode, t.done, t.failed, static_cast<int>(filenames.size()),
-                                progress_.cancel.load(), label);
+                                progress_.cancel.load(), label, std::move(t.failures));
     });
 }
 
@@ -213,20 +216,23 @@ bool FileOpJob::start_transfer_gallery(vault::Vault& src, std::string src_galler
     return launch(FileOpKind::Transfer,
                   [this, &src, src_gallery = std::move(src_gallery), &dst,
                    dst_parent = std::move(dst_parent), mode, label = std::move(label)]() {
+        vault::TransferTally tally;
         const vault::VaultResult r =
-            vault::transfer_gallery(src, src_gallery, dst, dst_parent, mode, &progress_);
+            vault::transfer_gallery(src, src_gallery, dst, dst_parent, mode, &progress_, &tally);
         const bool cancelled = progress_.cancel.load();
 
         if (r != vault::VaultResult::Ok) {
             FileOpOutcome oc;
             oc.kind = FileOpKind::Transfer;
-            oc.error = "Move/Copy failed.";
+            oc.error = "Move/Copy failed - " +
+                       transfer_failure_reason(r, vault::TransferFailure::Stage::Write);
             return oc;
         }
         // Gallery transfer is one logical item; report media progress as the counts.
         const int total = progress_.total.load();
         const int done  = progress_.done.load();
-        return transfer_outcome(mode, done, 0, total, cancelled, label);
+        return transfer_outcome(mode, done, tally.failed, total, cancelled, label,
+                                std::move(tally.failures));
     });
 }
 
@@ -237,10 +243,10 @@ bool FileOpJob::start_transfer_galleries(vault::Vault& src, std::vector<std::str
     return launch(FileOpKind::Transfer,
                   [this, &src, src_paths = std::move(src_paths), &dst,
                    dst_parent = std::move(dst_parent), mode, label = std::move(label)]() {
-        const vault::TransferTally t = vault::transfer_galleries(
+        vault::TransferTally t = vault::transfer_galleries(
             src, src_paths, dst, dst_parent, mode, &progress_);
         return transfer_outcome(mode, t.done, t.failed, static_cast<int>(src_paths.size()),
-                                progress_.cancel.load(), label);
+                                progress_.cancel.load(), label, std::move(t.failures));
     });
 }
 

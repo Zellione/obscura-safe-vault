@@ -11,7 +11,7 @@
 #include "ui/text_input_model.h"
 #include "ui/widgets.h"
 #include "ui/vault_unlock_picker.h"
-#include "vault/transfer.h"   // vault::TransferMode
+#include "vault/transfer.h"   // vault::TransferMode, vault::TransferFailure
 #include "vault/vault.h"      // owns the source vault
 
 namespace gfx { class Renderer; class FontAtlas; class Window; }
@@ -19,6 +19,13 @@ namespace platform { class VaultRegistry; class FileDialog; }
 namespace ui { class SecondVaultSession; }
 
 namespace ui {
+
+// Result of a completed transfer, including per-item failures for dialog display.
+struct TransferCompletion {
+    std::string status;
+    int failed_total = 0;
+    std::vector<vault::TransferFailure> failures;
+};
 
 // Modal that moves OR copies the grid's selected images / a gallery subtree to
 // another vault — or within the active vault (Phase 14 PR2/3/4). Stages: choose
@@ -58,7 +65,7 @@ public:
 
     [[nodiscard]] bool handle_event(const SDL_Event& e);   // true if consumed
     void update();                                          // poll the keyfile dialog + the transfer job
-    [[nodiscard]] bool consume_completed(std::string& status_out);
+    [[nodiscard]] bool consume_completed(TransferCompletion& out);
     void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
 
 private:
@@ -110,12 +117,12 @@ private:
     std::string error_;
 
     // Background transfer run — the worker-thread job plus its finished outcome,
-    // bundled to keep the field count ≤20 (S1820). `done`/`status` are set when the
+    // bundled to keep the field count ≤20 (S1820). `done`/`completion` are set when the
     // job completes and drained by consume_completed.
     struct Run {
-        FileOpJob   job;
-        bool        done = false;
-        std::string status;
+        FileOpJob         job;
+        bool              done = false;
+        TransferCompletion completion;
     };
     Run         run_;
 };

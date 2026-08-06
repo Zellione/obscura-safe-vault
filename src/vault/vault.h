@@ -59,6 +59,7 @@ inline constexpr uint32_t VIDEO_CHUNK_SIZE = 1u << 20;
 // Forward declare staging structures (full definitions in staging.h, which is included at EOF).
 // These are needed for friend declarations inside the Vault class.
 struct StagedThumb;
+struct StagedVideoInfo;
 struct StagedNode;
 
 enum class SearchScope { Images, Galleries, Both };
@@ -166,10 +167,17 @@ public:
                                   const StagedThumb* precomputed);
     friend StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
                                   std::string_view filename,
-                                  uint32_t chunk_size);
+                                  uint32_t chunk_size,
+                                  const StagedVideoInfo* precomputed);
     friend VaultResult attach_staged(Vault& v, std::string_view gallery_path,
                                      IndexNode&& node);
     friend VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path);
+    friend VaultResult add_image_prestaged(Vault& v, std::string_view,
+                                           std::span<const uint8_t>, std::string_view,
+                                           const StagedThumb&, uint64_t);
+    friend VaultResult add_video_prestaged(Vault& v, std::string_view,
+                                           std::span<const uint8_t>, std::string_view,
+                                           const StagedVideoInfo&, uint64_t);
 
     [[nodiscard]] bool is_unlocked() const noexcept { return unlocked_; }
 

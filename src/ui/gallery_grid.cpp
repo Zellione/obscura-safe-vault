@@ -981,6 +981,8 @@ bool GalleryGrid::handle_overlay_event(const SDL_Event& e)
 
     if (rename_.active()) { (void)rename_.handle_event(vault_, e); return true; }
 
+    if (failures_.active()) { (void)failures_.handle_event(e); return true; }
+
     if (combine_.active()) { (void)combine_.handle_event(e); return true; }
 
     if (transfer_.active()) { (void)transfer_.handle_event(e); return true; }
@@ -1381,6 +1383,8 @@ void poll_file_job(GalleryGrid& g)
     if (auto oc = g.naming_.file_op.take_outcome()) {
         if (!oc->ok && !oc->error.empty()) g.error_ = oc->error;
         else                               g.status_ = oc->status;
+        if (oc->kind == FileOpKind::Transfer && !oc->failures.empty())
+            g.failures_.open(oc->failures, oc->failed);
         g.sel_.clear();
         g.refresh();   // a delete changed the listing; harmless after an export
         g.queue_.set_exclusive(false);  // Phase 50: unlock import queue
@@ -1468,8 +1472,10 @@ void poll_transfer_and_combine(GalleryGrid& g)
     // A finished transfer closes the dialog synchronously (active_ -> false) during
     // the keypress, so its result MUST be drained regardless of active state — else
     // the listing only refreshes after leaving and re-entering the gallery.
-    if (std::string s; g.transfer_.consume_completed(s)) {
-        g.status_ = std::move(s);
+    if (ui::TransferCompletion tc; g.transfer_.consume_completed(tc)) {
+        g.status_ = std::move(tc.status);
+        if (!tc.failures.empty())
+            g.failures_.open(tc.failures, tc.failed_total);
         g.sel_.clear();
         g.refresh();                   // moved images are gone from this listing
         g.mark_dirty();
@@ -1817,6 +1823,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     rename_.render(r, font_, W, H);
     combine_.render(r, font_, W, H);
     transfer_.render(r, font_, W, H);
+    failures_.render(r, font_, W, H);
     quick_switch_.render(r, font_, W, H);
 
     // Password-prompt modal: shown when the import outcome reported

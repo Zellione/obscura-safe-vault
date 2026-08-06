@@ -130,7 +130,8 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
 }
 
 StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
-                       std::string_view filename, uint32_t chunk_size)
+                       std::string_view filename, uint32_t chunk_size,
+                       const StagedVideoInfo* precomputed)
 {
     using enum VaultResult;
 
@@ -144,11 +145,11 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
         return {InvalidArg, {}};
     }
 
-    // Probe the video file first (before storing chunks) to detect metadata and
-    // generate poster. This ensures we don't create orphan chunks if the video is
-    // invalid.
+    // Probe only when the caller supplied no metadata: a cross-vault transfer
+    // (Phase 67) carries the source's stored metadata, and re-probing would
+    // reject legacy videos whose codec is still Unknown.
     media::VideoProbeResult probe;
-    if (!media::probe_video(file_data, probe)) {
+    if (!precomputed && !media::probe_video(file_data, probe)) {
         return {InvalidArg, {}};
     }
 
@@ -177,11 +178,14 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
     // Store the poster if it was generated.
     uint64_t poster_offset = 0;
     uint64_t poster_length = 0;
-    if (!probe.poster_jpeg.empty()) {
+    if (const std::span<const uint8_t> poster =
+            precomputed ? std::span<const uint8_t>(precomputed->poster_jpeg)
+                        : std::span<const uint8_t>(probe.poster_jpeg);
+        !poster.empty()) {
         ChunkSpan poster_span;
         {
             std::lock_guard lk(*v.write_mutex_);
-            if (!store.append_chunk(probe.poster_jpeg, poster_span)) {
+            if (!store.append_chunk(poster, poster_span)) {
                 return {IoError, {}};
             }
             std::fflush(v.fp_);
@@ -192,11 +196,11 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
 
     // Build the fully-populated but UNATTACHED IndexNode.
     IndexNode vid = IndexNode::video(std::string(filename));
-    vid.vmeta.container = probe.container;
-    vid.vmeta.codec = probe.codec;
-    vid.vmeta.width = probe.width;
-    vid.vmeta.height = probe.height;
-    vid.vmeta.duration_us = probe.duration_us;
+    vid.vmeta.container   = precomputed ? precomputed->container   : probe.container;
+    vid.vmeta.codec       = precomputed ? precomputed->codec       : probe.codec;
+    vid.vmeta.width       = precomputed ? precomputed->width       : probe.width;
+    vid.vmeta.height      = precomputed ? precomputed->height      : probe.height;
+    vid.vmeta.duration_us = precomputed ? precomputed->duration_us : probe.duration_us;
     vid.vmeta.orig_size = file_data.size();
     vid.vmeta.created_ts = static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::seconds>(
@@ -256,6 +260,56 @@ VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path)
     }
 
     return Ok;  // idempotent: return Ok even if nothing was created
+}
+
+VaultResult add_image_prestaged(Vault& v, std::string_view gallery_path,
+                                std::span<const uint8_t> file_data,
+                                std::string_view filename,
+                                const StagedThumb& thumb, uint64_t created_ts)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+    if (!is_safe_node_name(filename)) return InvalidArg;
+
+    IndexNode* g = v.find_gallery(gallery_path);
+    if (!g) return NotFound;
+    if (vault_ops::child_named(g, filename)) return AlreadyExists;
+
+    StagedNode staged = stage_image(v, file_data, filename, &thumb);
+    if (staged.status != Ok) return staged.status;
+    if (created_ts != 0) staged.node.meta.created_ts = created_ts;
+
+    if (const VaultResult r = attach_staged(v, gallery_path, std::move(staged.node)); r != Ok)
+        return r;
+    if (ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+        !store.sync())
+        return IoError;
+    return v.commit_index();
+}
+
+VaultResult add_video_prestaged(Vault& v, std::string_view gallery_path,
+                                std::span<const uint8_t> file_data,
+                                std::string_view filename,
+                                const StagedVideoInfo& info, uint64_t created_ts)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+    if (!is_safe_node_name(filename)) return InvalidArg;
+
+    IndexNode* g = v.find_gallery(gallery_path);
+    if (!g) return NotFound;
+    if (vault_ops::child_named(g, filename)) return AlreadyExists;
+
+    StagedNode staged = stage_video(v, file_data, filename, VIDEO_CHUNK_SIZE, &info);
+    if (staged.status != Ok) return staged.status;
+    if (created_ts != 0) staged.node.vmeta.created_ts = created_ts;
+
+    if (const VaultResult r = attach_staged(v, gallery_path, std::move(staged.node)); r != Ok)
+        return r;
+    if (ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+        !store.sync())
+        return IoError;
+    return v.commit_index();
 }
 
 }  // namespace vault
