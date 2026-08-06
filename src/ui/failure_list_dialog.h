@@ -29,7 +29,7 @@ class FailureListDialog {
 public:
     // Populate the dialog with a list of failures. If failed_total > failures.size(),
     // append "...and N more" to indicate truncation.
-    void open(std::vector<vault::TransferFailure> failures, int failed_total);
+    void open(const std::vector<vault::TransferFailure>& failures, int failed_total);
 
     void close();
 

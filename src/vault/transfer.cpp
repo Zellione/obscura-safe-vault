@@ -1,6 +1,7 @@
 #include "vault/transfer.h"
 
 #include <algorithm>
+#include <ranges>
 
 #include "crypto/secure_mem.h"
 #include "vault/staging.h"
@@ -12,7 +13,7 @@ void record_failure(TransferTally& t, std::string path, VaultResult code,
 {
     ++t.failed;
     if (t.failures.size() < MAX_TRANSFER_FAILURES)
-        t.failures.push_back({std::move(path), code, stage});
+        t.failures.emplace_back(std::move(path), code, stage);
 }
 
 namespace {
@@ -280,16 +281,25 @@ bool is_same_vault_cycle(const Vault& src, const Vault& dst,
     return dst_parent.starts_with(std::string(src_gallery) + "/");
 }
 
+// Merge per-file failures from a sub-tally into the output, respecting the cap.
+void merge_failures(TransferTally& out, TransferTally&& sub)
+{
+    for (auto& f : sub.failures) {
+        if (out.failures.size() < MAX_TRANSFER_FAILURES)
+            out.failures.push_back(std::move(f));
+    }
+}
+
 // Prune empty galleries bottom-up (reverse snapshot order = children before parents),
 // skipping failed branches so an empty gallery inside a never-copied branch is not lost.
 void prune_moved_galleries(Vault& src, std::string_view src_gallery,
                            const std::vector<GallerySnap>& snaps,
                            const std::vector<std::string>& failed_rels)
 {
-    auto in_failed_branch = [&](const std::string& rel) {
-        for (const auto& p : failed_rels)
-            if (rel == p || rel.starts_with(p + "/")) return true;
-        return false;
+    auto in_failed_branch = [&](std::string_view rel) {
+        return std::ranges::any_of(failed_rels, [rel](std::string_view p) {
+            return rel == p || rel.starts_with(std::string(p) + "/");
+        });
     };
     for (auto it = snaps.rbegin(); it != snaps.rend(); ++it) {
         if (in_failed_branch(it->rel)) continue;
@@ -448,16 +458,12 @@ TransferTally transfer_galleries(Vault& src, const std::vector<std::string>& src
     for (const auto& path : src_paths) {
         if (progress && progress->cancel.load()) break;
         TransferTally sub;
-        const VaultResult r = transfer_gallery(src, path, dst, dst_parent, mode, nullptr, &sub);
-        if (r == Ok) {
+        if (const VaultResult r = transfer_gallery(src, path, dst, dst_parent, mode, nullptr, &sub); r == Ok) {
             ++out.done;
             // Merge per-file failures from this subtree into the output.
-            for (auto& f : sub.failures) {
-                if (out.failures.size() < MAX_TRANSFER_FAILURES)
-                    out.failures.push_back(std::move(f));
-            }
             // per-file failures inside a structurally-Ok subtree do not change the
             // SUBTREE done/failed counts, but the entries surface in the dialog
+            merge_failures(out, std::move(sub));
         } else {
             // Structural failure: record as a gallery-level entry.
             record_failure(out, std::string(path), r, TransferFailure::Stage::Write);

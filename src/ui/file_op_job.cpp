@@ -202,7 +202,7 @@ bool FileOpJob::start_transfer_images(vault::Vault& src, std::string src_gallery
                   [this, &src, src_gallery = std::move(src_gallery),
                    filenames = std::move(filenames), &dst, dst_gallery = std::move(dst_gallery),
                    mode, label = std::move(label)]() {
-        const vault::TransferTally t =
+        vault::TransferTally t =
             vault::transfer_images(src, src_gallery, filenames, dst, dst_gallery, mode, &progress_);
         return transfer_outcome(mode, t.done, t.failed, static_cast<int>(filenames.size()),
                                 progress_.cancel.load(), label, std::move(t.failures));
@@ -243,7 +243,7 @@ bool FileOpJob::start_transfer_galleries(vault::Vault& src, std::vector<std::str
     return launch(FileOpKind::Transfer,
                   [this, &src, src_paths = std::move(src_paths), &dst,
                    dst_parent = std::move(dst_parent), mode, label = std::move(label)]() {
-        const vault::TransferTally t = vault::transfer_galleries(
+        vault::TransferTally t = vault::transfer_galleries(
             src, src_paths, dst, dst_parent, mode, &progress_);
         return transfer_outcome(mode, t.done, t.failed, static_cast<int>(src_paths.size()),
                                 progress_.cancel.load(), label, std::move(t.failures));

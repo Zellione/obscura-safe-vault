@@ -178,10 +178,10 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
     // Store the poster if it was generated.
     uint64_t poster_offset = 0;
     uint64_t poster_length = 0;
-    const std::span<const uint8_t> poster =
-        precomputed ? std::span<const uint8_t>(precomputed->poster_jpeg)
-                    : std::span<const uint8_t>(probe.poster_jpeg);
-    if (!poster.empty()) {
+    if (const std::span<const uint8_t> poster =
+            precomputed ? std::span<const uint8_t>(precomputed->poster_jpeg)
+                        : std::span<const uint8_t>(probe.poster_jpeg);
+        !poster.empty()) {
         ChunkSpan poster_span;
         {
             std::lock_guard lk(*v.write_mutex_);

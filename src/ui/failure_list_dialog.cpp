@@ -13,25 +13,25 @@ namespace ui {
 std::string transfer_failure_reason(vault::VaultResult code,
                                     vault::TransferFailure::Stage stage)
 {
-    using vault::VaultResult;
+    using enum vault::VaultResult;
     using Stage = vault::TransferFailure::Stage;
 
     // Phase 67 spec table: ASCII-only reasons (font atlas bakes 32–126).
     switch (code) {
-        case VaultResult::InvalidArg:
+        case InvalidArg:
             return "name not allowed in destination";
-        case VaultResult::AlreadyExists:
+        case AlreadyExists:
             return "name already exists at destination";
-        case VaultResult::AuthFailed:
+        case AuthFailed:
             return "source data corrupt or unreadable";
-        case VaultResult::IoError:
+        case IoError:
             if (stage == Stage::Read)
                 return "could not read source (possibly out of memory)";
             else
                 return "destination write failed (disk full?)";
-        case VaultResult::NotFound:
+        case NotFound:
             return "item not found in source";
-        case VaultResult::Locked:
+        case Locked:
             return "vault locked";
         default:
             return "failed";
@@ -43,7 +43,7 @@ std::string transfer_failure_line(const vault::TransferFailure& f)
     return f.path + " - " + transfer_failure_reason(f.code, f.stage);
 }
 
-void FailureListDialog::open(std::vector<vault::TransferFailure> failures, int failed_total)
+void FailureListDialog::open(const std::vector<vault::TransferFailure>& failures, int failed_total)
 {
     lines_.clear();
     for (const auto& f : failures) {

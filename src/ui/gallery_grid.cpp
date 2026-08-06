@@ -1384,7 +1384,7 @@ void poll_file_job(GalleryGrid& g)
         if (!oc->ok && !oc->error.empty()) g.error_ = oc->error;
         else                               g.status_ = oc->status;
         if (oc->kind == FileOpKind::Transfer && !oc->failures.empty())
-            g.failures_.open(std::move(oc->failures), oc->failed);
+            g.failures_.open(oc->failures, oc->failed);
         g.sel_.clear();
         g.refresh();   // a delete changed the listing; harmless after an export
         g.queue_.set_exclusive(false);  // Phase 50: unlock import queue
@@ -1475,7 +1475,7 @@ void poll_transfer_and_combine(GalleryGrid& g)
     if (ui::TransferCompletion tc; g.transfer_.consume_completed(tc)) {
         g.status_ = std::move(tc.status);
         if (!tc.failures.empty())
-            g.failures_.open(std::move(tc.failures), tc.failed_total);
+            g.failures_.open(tc.failures, tc.failed_total);
         g.sel_.clear();
         g.refresh();                   // moved images are gone from this listing
         g.mark_dirty();
