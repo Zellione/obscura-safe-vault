@@ -13,6 +13,7 @@ namespace gfx { class Renderer; class FontAtlas; class Window; }
 namespace platform { class VaultRegistry; class FileDialog; }
 
 namespace ui {
+class SecondVaultSession;  // Phase 66: forward declare
 
 // Result of a finished combine, drained by the host grid to decide where to
 // navigate (Phase 44 Part 4).
@@ -31,7 +32,7 @@ struct CombineOutcome {
 class CombineDialog {
 public:
     CombineDialog(vault::Vault& src, std::string src_path, platform::VaultRegistry& registry,
-                 platform::FileDialog& dlg, gfx::Window& win);
+                 platform::FileDialog& dlg, gfx::Window& win, SecondVaultSession* second);
 
     void open(std::string src_gallery);   // src_gallery: the currently browsed gallery (nav_.path())
     void close();

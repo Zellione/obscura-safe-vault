@@ -6,12 +6,14 @@
 #include <string>
 #include <vector>
 
+#include "platform/second_vault_pref.h"
 #include "ui/secure_text_input.h"
 #include "ui/widgets.h"
 #include "vault/vault.h"
 
 namespace gfx { class Renderer; class FontAtlas; class Window; }
 namespace platform { class VaultRegistry; class FileDialog; }
+namespace ui { class SecondVaultSession; }
 
 namespace ui {
 
@@ -27,10 +29,13 @@ namespace ui {
 // vault — that's the caller's own active vault, which this class doesn't (and
 // shouldn't) know about; callers combine is_self()/unlocked_vault() with their
 // own `Vault& src_` to get "the vault to write into", exactly as
-// TransferDialog::dest_vault() already does.
+// TransferDialog::dest_vault() already does. Unless a Keep mode hands the
+// unlocked destination to the app's SecondVaultSession via release_to_slot()
+// (Phase 66).
 class VaultUnlockPicker {
 public:
-    VaultUnlockPicker(platform::VaultRegistry& registry, platform::FileDialog& dlg, gfx::Window& win);
+    VaultUnlockPicker(platform::VaultRegistry& registry, platform::FileDialog& dlg, gfx::Window& win,
+                      SecondVaultSession* second = nullptr);
 
     // Rebuilds candidates (every registered vault path except `src_path`) and
     // enters PickVault. "This vault" is always row 0.
@@ -40,9 +45,13 @@ public:
     [[nodiscard]] bool active() const noexcept { return active_; }   // still in PickVault/Unlock
     [[nodiscard]] bool chosen() const noexcept { return chosen_; }   // a usable destination is ready
     [[nodiscard]] bool is_self() const noexcept { return dest_.is_self; }
-    [[nodiscard]] vault::Vault& unlocked_vault() noexcept { return dest_.vault; }
+    [[nodiscard]] vault::Vault& unlocked_vault() noexcept;
     [[nodiscard]] std::string dest_label() const;
     [[nodiscard]] const std::string& error() const noexcept { return error_; }
+
+    [[nodiscard]] bool from_warm() const noexcept { return from_warm_; }
+    [[nodiscard]] platform::SecondVaultMode keep_mode() const noexcept { return keep_mode_; }
+    void release_to_slot();
 
     [[nodiscard]] bool handle_event(const SDL_Event& e);   // true if consumed
     void update();                                          // poll the keyfile dialog
@@ -59,10 +68,13 @@ private:
     platform::VaultRegistry& registry_;
     platform::FileDialog&    dlg_;
     gfx::Window&              win_;
+    SecondVaultSession*       second_ = nullptr;
 
     bool  active_ = false;
     bool  chosen_ = false;
+    bool  from_warm_ = false;
     Stage stage_  = Stage::PickVault;
+    platform::SecondVaultMode keep_mode_ = platform::SecondVaultMode::LockNow;
 
     std::string src_path_;
     std::vector<std::filesystem::path> candidates_;

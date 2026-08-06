@@ -129,7 +129,9 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `vault_manager.*` — multi-vault home screen: lists known vaults from VaultRegistry;
   open/create(save dialog)/remove/lock/select. Emits `NavKind::ToVaultManager`/`LockActive`/
   `ToUnlock(path)`/`ToGallery`. `C` emits `NavKind::ToSettings` (Phase 49; it opened the
-  now-deleted ThemePicker before).
+  now-deleted ThemePicker before). **Phase 66:** a warm vault row shows an "unlocked · m:ss" or
+  "unlocked · session" badge; selecting it promotes the warm handle to active with no password.
+  `L` on the warm row emits `NavKind::LockSecond` to lock it immediately.
 - `advanced_search_screen.*` — `Shift+/` (`NavKind::ToAdvancedSearch`) dedicated screen:
   keyboard query builder (Tab cycles fields, autocomplete dropdown) + live result list +
   saved-searches sidebar (Ctrl+S save, Enter load/open, Del delete). Image result -> gallery
@@ -312,22 +314,29 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   another vault or within the active vault. Source enum `{Images,Gallery,Galleries}`;
   open()/open_gallery()/open_galleries(). Stages: Mode(Move/Copy) → PickingDest (delegated to
   VaultUnlockPicker) → PickGallery (GalleryPickerModel, scrollable + `/`-filterable, "+ New
-  gallery…" pinned via set_pinned_suffix) → run `vault::transfer_*` per mode → dest re-locked
-  on every exit (src never locked here). Grid skips its import dlg poll while active(); M with
-  no selection acts on the focused tile.
+  gallery…" pinned via set_pinned_suffix) → run `vault::transfer_*` per mode. **Phase 66:**
+  on completion with a Keep\* mode, the destination handle is handed off to the warm slot via
+  `release_to_slot()` before the dialog closes; the slot's sliding reset is called after
+  transfer success. Grid skips its import dlg poll while active(); M with no selection acts on
+  the focused tile.
 - `combine_dialog.*` — `Shift+M` modal: merges the CURRENTLY BROWSED gallery into another via
   `vault::combine_galleries` (same- or cross-vault). Stages PickingDest (VaultUnlockPicker) ->
   PickTarget (GalleryPickerModel over `combine_target_galleries`) -> Running (progress modal).
   `CombineOutcome{status,source_gone,same_vault,dest_path}` drained by GalleryGrid::update()
   for post-combine nav: source_gone && same_vault -> jump_to_gallery(dest_path); source_gone &&
   !same_vault -> go_up(); !source_gone -> refresh() (partial merge from a collision).
-  source_gone read as `src_.list(src_gallery_).empty()`.
+  source_gone read as `src_.list(src_gallery_).empty()`. **Phase 66:** on completion with a
+  Keep\* mode, the destination handle is handed off via `release_to_slot()` and the slot's
+  sliding reset called after success.
 - `vault_unlock_picker.*` — "pick a destination vault, then unlock it" flow, extracted so both
   TransferDialog + CombineDialog reuse it. Stages PickVault ("This vault" row 0, or a registry
   entry) -> Unlock (password + optional keyfile, skipped for "This vault"). Esc cancels the
   whole flow. Owns a transient dest `vault::Vault`; `close()` is idempotent (locks/wipes only
   if actually unlocked). `is_self()`/`unlocked_vault()` combine with the caller's active vault
-  to resolve "the vault to write into".
+  to resolve "the vault to write into". **Phase 66:** the Unlock stage gains an Up/Down mode
+  selector (LockNow/KeepTimed/KeepSession); skips Unlock entirely when the picked destination
+  matches the warm slot (password-free); and calls `release_to_slot(mode)` on completion with
+  a Keep\* mode so the destination stays warm instead of being wiped.
 - `gallery_picker.*` — `GalleryPickerModel`: pure SDL-free filterable/scrollable list model
   shared by TransferDialog + CombineDialog. set_items, open/close_filter (`/`), filter_*,
   move(delta), filtered(), selected(), geom(visible_rows). `set_pinned_suffix(item)` keeps one
@@ -366,7 +375,15 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `quick_switch.*` — global `` ` `` (grave) overlay: lists registry vaults; choosing one emits
   `NavKind::ToUnlock(path)` (App locks current + unlocks chosen); Esc or the active vault =
   no-op. Hosted by GalleryGrid, ImageViewer, FavoritesScreen base (take a VaultRegistry& +
-  active vault path). `consume_choice()` drains the pick.
+  active vault path). `consume_choice()` drains the pick. **Phase 66:** if the warm vault matches
+  the picked vault, selecting it promotes the warm handle to active without a password prompt
+  (the slot then empties).
+- `second_vault.*` (Phase 66) — `ui::SecondVaultSession`: the app-owned warm slot holding a
+  destination vault unlocked across multiple transfers. Pure model in the header: sliding reset
+  on completed transfer, tick/expiry, defer-while-job-running, replace-on-new-destination,
+  explicit wipe. `SecondVaultStatus` / `second_vault_status()` / `format_keep_open_left(secs)`
+  are the global-snapshot readers for badge rendering. Released/wipes in transitions to
+  LockActive, vault switch, LockSecond, or app exit. Tested alongside App in integration tests.
 - `progress_modal.*` — `draw_op_progress`: shared veil + "N/M" bar + cancel-hint modal reused
   by every screen hosting a background job.
 - `help_popup.*` — shared `F1` help popup: HelpGroup/HelpEntry types + pure open/close/scroll
@@ -701,24 +718,28 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `SettingsState::prompt_buf` is a `TextInputModel`, so `SettingsState` is now non-copyable
   and non-movable** (every use was already by reference; only the test fixture changed, and
   `state = {}`-style resets are not available). Contents:
-  `SettingsSection{Appearance,Browsing,TagColours}` + `SETTINGS_SECTION_COUNT`, and
+  `SettingsSection{Appearance,Browsing,TagColours,Security}` + `SETTINGS_SECTION_COUNT = 5`, and
   `SettingsState{section,in_pane,row,open,vault_unlocked,draft,theme,prompting,prompt_row,
   prompt_buf,error}`. `settings_move_section` (clamps, resets row), `settings_move_row`
   (clamps), `settings_change_value` (theme wraps both ways; default sort steps via
   next_/prev_sort_key SKIPPING `Default`, which is meaningless as a vault default; tile flag
-  toggles; a category row wraps its swatch mod 16), `settings_row_count` (Appearance always 1;
-  the two vault sections 0 unless `vault_unlocked`), and category CRUD
+  toggles; a category row wraps its swatch mod 16; Security section cycles mode via
+  next_/prev_second_vault_mode), `settings_row_count` (Appearance always 1; Security always 1
+  machine-scoped row; the two vault sections 0 unless `vault_unlocked`), and category CRUD
   `settings_add_category`/`settings_rename_category`/`settings_remove_category` (trim, reject
   blank/duplicate via `ui::tag_ci_equal`, honour `INDEX_MAX_CATEGORY_BYTES`/
   `INDEX_MAX_TAG_CATEGORIES`). NOTE: the CRUD/value entry points do NOT themselves check
   `vault_unlocked` — they are memory-safe either way, so the OVERLAY must not route value keys
-  into a locked vault's sections.
+  into a locked vault's sections. **Phase 66:** Security section added for cross-vault keep-open
+  mode preferences (LockNow/KeepTimed/KeepSession), machine-scoped via `platform::SecondVaultPref`
+  (persisted in second_vault.conf beside theme.conf).
 - `settings_overlay.*` (Phase 49, SDL) — draws the overlay (veil + section rail + row pane +
   footer) and handles its input: `open_settings`, `close_settings(state, window)`,
   `handle_settings_event(state, window, event, commit_out)` (takes the full SDL_Event, not a
   keycode, because the add/rename prompt needs SDL_EVENT_TEXT_INPUT and
   SDL_StartTextInput/StopTextInput need a Window), and `draw_settings_overlay`. Theme rows
-  apply live and persist exactly as the retired ThemePicker did. Not in `osv_tests`.
+  apply live and persist exactly as the retired ThemePicker did. Not in `osv_tests`. **Phase 66:**
+  Security section displays and cycles the default cross-vault keep-open mode via Up/Down.
 - `listing_remap.*` (Phase 58) — `ui::remap_listing(before, after, import_dict) ->
   ListingRemap` — preserve gallery scroll and multi-selection across drain batches by remapping
   selection by name (not tile identity/path). Import flows selection/multi-selection through

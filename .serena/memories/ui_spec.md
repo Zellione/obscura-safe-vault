@@ -367,3 +367,42 @@ something to do silently off one click.
 Manual lock, vault switch, or quit with pending queue: default-cancel modal reads **"N imports pending — finish current file, discard the rest, and lock?"**
 On confirm (Y): current file completes, queue discarded, final commit-lane flush, passwords/keys wiped.
 SDL_EVENT_QUIT also flows through this gate.
+
+## Cross-vault keep-open (Phase 66)
+Three modes chosen at the destination-unlock stage of Transfer/Combine dialogs via Up/Down:
+- **Lock immediately** — today's behavior (default, seeded from F2 Security default).
+- **Keep open 5 minutes** — sliding 5-minute window, reset by every completed transfer
+  into the warm vault, never expires while a job writing into it is active.
+- **Keep open for the session** — never auto-locks; wiped only by explicit user action or app exit.
+
+**Unlock stage (VaultUnlockPicker):** the mode selector row appears; choosing it changes the
+row's label. Selecting the destination unlocks if needed; if the destination matches the
+app-owned warm slot, the password stage is skipped entirely (slot's warm handle is promoted to
+active). First unlock each session always requires the password, regardless of mode or slot
+occupation (at-rest security is unchanged). Selecting a different destination than the current
+slot replaces it (old slot is wiped first). Transfer/Combine on completion with a Keep\* mode
+hands the destination handle to the slot via `release_to_slot()` instead of closing it; the
+transfer's success flow calls the slot's sliding reset.
+
+**Vault manager / quick-switch:** a warm vault row displays an `"unlocked · M:SS"` or
+`"unlocked · session"` badge (no fade); selecting it promotes the warm handle to active
+without a password prompt (slot empties). Pressing `L` on the warm row emits `NavKind::LockSecond`
+to lock it immediately.
+
+**Badges:** an app-level corner badge (like the Phase 33 auto-lock-off badge) shows
+`"2nd vault unlocked"` + the live countdown / `"for session"` whenever the second slot
+occupies a key. The badge does NOT fade.
+
+**F2 Security section:** one machine-scoped row displays the saved default (LockNow/KeepTimed/KeepSession);
+Up/Down cycles it; changes persist to `second_vault.conf` immediately. Only the per-machine
+default is persisted; no per-vault or per-session state is stored. The mode chosen during
+unlock is never persisted beyond that session.
+
+**Wipe/expiry:** explicit lock (`L` in vault manager), manual LockActive (`M` via the button),
+vault switch, `LockSecond` nav, or app exit all wipe the slot. Idle auto-lock deliberately
+does NOT (owner requirement: no key wipe except explicit user action). Expiry of KeepTimed mode
+is deferred while an import/transfer/combine job writes into the warm vault, and cancelling a
+job mid-operation while KeepTimed is in an expiry window locks the slot when the worker exits.
+
+**No `.osv` change:** INDEX_VERSION stays 10. The warm slot is session-only and in-memory;
+nothing persists to the vault file.

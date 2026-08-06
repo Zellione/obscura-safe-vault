@@ -9,9 +9,16 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   `mark_dirty`/`consume_dirty`), so the GPU idles instead of free-running. VSync on
   (`Window::vsync()`); manual ~60fps cap fallback when VSync is unavailable.
 - VaultManager is the home screen. App owns ONE unlocked vault (`active_`) at a time + a
-  transient `pending_` during unlock. Single-active / lock-on-switch: opening another vault
-  wipes the old key; shutdown wipes both. `promote_pending()` runs only on unlock success
-  (ToGallery while state==Locked).
+  transient `pending_` during unlock + a second app-owned slot `second_` (Phase 66, warm vault).
+  Single-active / lock-on-switch: opening another vault wipes the old key; shutdown wipes both
+  active and second. `promote_pending()` runs only on unlock success (ToGallery while state==Locked).
+  **Phase 66:** App intercepts ToUnlock and checks if the destination matches `second_`: if so,
+  calls `second_.take()` to promote the warm handle to active, skipping the unlock password
+  entirely (first unlock each session always requires the password, so at-rest security is
+  unchanged). After transfer/combine success into the warm vault, the slot's sliding reset is
+  called. Wipe paths (lock-now, switch, LockSecond, shutdown) all call `second_.wipe()` to
+  zero the mlock'd key. Idle auto-lock deliberately does NOT wipe KeepSession mode (owner
+  requirement — no key wipe except explicit user action).
 - **Phase 50:** App owns `ui::ImportQueue queue_` (declared after vaults for destruction order, so queue drains before vault wipes key).
   `App::update(dt)` drains queue each frame: `queue_.drain(dt)` attaches staged nodes + triggers `on_vault_changed()` broadcast
   on all active screens (GalleryGrid, ImageViewer, FavoritesScreen, AdvancedSearchScreen refetch cached IndexNode* refs).
@@ -36,7 +43,12 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   to false in `promote_pending()` + the LockActive nav case, so re-unlocking always starts
   with auto-lock ON. `App::render_frame` draws a corner badge ("Auto-lock off [U]",
   `draw_keep_unlocked_badge`) over whatever screen is active whenever `active_ &&
-  keep_unlocked_` — an App-level overlay, not per-screen.
+  keep_unlocked_` — an App-level overlay, not per-screen. **Phase 66:** adds a second corner
+  badge stacking below keep_unlocked: `draw_second_vault_badge` reads a global `second_vault_status()`
+  snapshot and renders "2nd vault unlocked" + live countdown/session label whenever the slot
+  occupies a key. Badge does NOT fade (unlike keep_unlocked's 10 s timeout). A dirty flag
+  `second_badge_secs_` marks status changes; update() ticks `second_` and invalidates on mode
+  change or seconds-tick. The slot is owned by App; visibility is tied to `second_.occupied()`.
 
 ### Event handling (Phase 56)
 - `back_click.{h,cpp}` — `is_back_click(SDL_Event&)` detects right button-down; `make_back_key_event()` constructs a synthetic Escape key-down. `App::dispatch_event` translates every right button-down into an Escape and swallows the release, so the button mirrors Esc exactly everywhere (grid multi-selection clears first, fullscreen exits on first click, modals all inherit Esc handling). Pure helpers are testable without a window.
@@ -100,6 +112,12 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   atomic temp+rename (mirrors vault_registry). Loaded in `App::init()`, saved live by the
   `F2` settings overlay's Appearance section (Phase 49; ThemePicker, which used to do this,
   was deleted).
+- `second_vault_pref.*` (Phase 66) — per-machine default for cross-vault keep-open mode:
+  `config_dir()/second_vault.conf` holds the mode (LockNow/KeepTimed/KeepSession) ONLY (no
+  secrets); `load()`->SecondVaultMode (missing/unknown -> LockNow), `save(mode)`; atomic
+  temp+rename. Loaded in `App::init()`, saved live by the `F2` settings overlay's Security
+  section. Nothing persists per-vault or per-session state; only the per-machine default is
+  stored.
 - `VolumePref` — `config_dir()/volume.conf`, one float [0,1], atomic write, missing/invalid
   -> 1.0; App loads at init + saves on clean exit (the in-memory global lives in
   `media/volume_setting.*`, not AV-gated).

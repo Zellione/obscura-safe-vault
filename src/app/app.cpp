@@ -13,6 +13,7 @@
 #include "platform/error_log.h"
 #include "platform/harden.h"
 #include "platform/paths.h"
+#include "platform/second_vault_pref.h"
 #include "media/volume_setting.h"
 #include "platform/theme_pref.h"
 #include "platform/volume_pref.h"
@@ -113,6 +114,9 @@ bool App::init()
     // again on exit at the end of run().
     media::set_saved_volume(platform::VolumePref::default_location().load());
 
+    // Phase 66: seed the warm slot with the persisted default mode
+    second_.session.set_default_mode(platform::SecondVaultPref::default_location().load());
+
     registry_ = platform::VaultRegistry::default_location();
     registry_.seed_if_empty(platform::default_vault_path());
     to_manager();
@@ -147,6 +151,7 @@ void App::promote_pending()
 {
     if (!vault_state_.pending) return;
     if (vault_state_.active) vault_state_.active->lock();                 // lock-on-switch: wipe the old key
+    second_.session.wipe();                                // Phase 66: vault switch locks the warm slot too
     adv_session_   = {};                          // new vault session -> fresh advanced search
     session_.reset();                             // new vault session -> fresh gallery/viewer memory
     keep_unlocked_ = false;                       // new session always starts with auto-lock on
@@ -189,7 +194,7 @@ void App::to_gallery(const std::string& path, int selected, bool explicit_index)
     screen_ = std::make_unique<ui::GalleryGrid>(
         window_, font_, *vault_state_.active, *cache_,
         ui::GalleryGrid::GridDialogs{dialog_, folder_dialog_},
-        ui::GalleryGrid::GridVaultCtx{registry_, vault_state_.active_path},
+        ui::GalleryGrid::GridVaultCtx{registry_, vault_state_.active_path, &second_.session},
         session_, import_ui_.queue,
         ui::GridLocation{path, seed, session_.view});
     screen_->on_enter();
@@ -400,6 +405,38 @@ void draw_keep_unlocked_badge(gfx::Renderer& r, gfx::FontAtlas& font, int win_w,
     r.draw_text(font, box.x + PAD, box.y + PAD, LABEL, WARN);
 }
 
+// Phase 66: corner badge shown while a SECOND vault's key is in memory. Never
+// fades (unlike the Phase 45 keep-unlocked badge): visibility must match key
+// lifetime exactly. Stacks above the keep-unlocked badge when both are shown.
+void draw_second_vault_badge(gfx::Renderer& r, gfx::FontAtlas& font, int win_w, int win_h,
+                             bool stacked)
+{
+    using namespace gfx::theme;
+    const auto st = ui::second_vault_status();
+    std::string label =
+        st.mode == platform::SecondVaultMode::KeepSession
+            ? std::format("2nd vault unlocked · session — {}",
+                          std::filesystem::path(st.path).stem().string())
+            : std::format("2nd vault unlocked · {} — {}", ui::format_keep_open_left(st.seconds_left),
+                          std::filesystem::path(st.path).stem().string());
+    static constexpr auto PAD    = 10.0f;
+    static constexpr auto MARGIN = 16.0f;
+    const auto max_w = static_cast<float>(win_w) * 0.6f;
+    if (const auto measured_w = static_cast<float>(font.measure(label)); measured_w > max_w) {
+        label = ui::fit_text(font, label, max_w);
+    }
+    const auto  tw = static_cast<float>(font.measure(label));
+    const float th = font.pixel_height();
+    const float bw = tw + (PAD * 2);
+    const float bh = th + (PAD * 2);
+    const float lift = stacked ? bh + 8.0f : 0.0f;   // clear the keep-unlocked badge
+    const SDL_FRect box{static_cast<float>(win_w) - bw - MARGIN,
+                        static_cast<float>(win_h) - bh - MARGIN - lift, bw, bh};
+    r.draw_round_rect(box, RADIUS_SMALL, SURFACE);
+    r.draw_round_rect(box, RADIUS_SMALL, WARN, /*filled*/ false);
+    r.draw_text(font, box.x + PAD, box.y + PAD, label, WARN);
+}
+
 // Phase 65 migration modals. Split out of render_frame so the frame path stays a
 // dispatcher instead of a wall of panel layout. Each veils the whole window: the
 // migration owns the vault exclusively while it runs, so nothing behind it is
@@ -552,12 +589,15 @@ struct App::OverlayDispatch {
         }
         // Settings panel (second priority: swallows all events)
         if (!app.overlays_.settings.open) return false;
-        if (bool commit = false;
-            ui::handle_settings_event(app.overlays_.settings, app.window_, e, commit) && commit &&
-            app.overlays_.settings.vault_unlocked && app.vault_state_.active &&
-            vault::set_vault_settings(*app.vault_state_.active, app.overlays_.settings.draft) !=
-                vault::VaultResult::Ok) {
-            app.overlays_.settings.error = "Could not save settings";
+        if (bool commit = false; ui::handle_settings_event(app.overlays_.settings, app.window_, e, commit)) {
+            // Phase 66: sync the default mode whenever the event was handled
+            app.second_.session.set_default_mode(app.overlays_.settings.second_vault_default);
+            // Commit vault settings if the commit flag was set
+            if (commit && app.overlays_.settings.vault_unlocked && app.vault_state_.active &&
+                vault::set_vault_settings(*app.vault_state_.active, app.overlays_.settings.draft) !=
+                    vault::VaultResult::Ok) {
+                app.overlays_.settings.error = "Could not save settings";
+            }
         }
         return true;
     }
@@ -717,6 +757,7 @@ void App::open_settings_overlay()
     overlays_.settings.draft = overlays_.settings.vault_unlocked ? vault::vault_settings(*vault_state_.active)
                                                                   : vault::VaultSettings{};
     overlays_.settings.theme = gfx::active_theme_id();
+    overlays_.settings.second_vault_default = second_.session.default_mode();   // Phase 66
     ui::open_settings(overlays_.settings, ui::SettingsSection::Appearance);
 }
 
@@ -741,10 +782,10 @@ bool App::apply_nav()
         return false;   // screen stays; event will be re-queued by dispatch_event
     }
 
-    // Every transition below except ToggleKeepUnlocked/ToSettings/Quit/None destroys the
+    // Every transition below except ToggleKeepUnlocked/ToSettings/LockSecond/Quit/None destroys the
     // current screen.
     if (nav.kind != None && nav.kind != ToggleKeepUnlocked && nav.kind != ToSettings &&
-        nav.kind != Quit) {
+        nav.kind != LockSecond && nav.kind != Quit) {
         capture_session_state();
         screen_->on_exit();
     }
@@ -767,15 +808,30 @@ bool App::apply_nav()
         case ToDuplicates:        to_duplicates(); return true;
         case ToUnlock:
             import_ui_.queue.end_session();          // Phase 50: flush before switch
+            // Phase 66: switching to the warm vault promotes its already-unlocked
+            // handle — no password prompt. take() empties the slot; promote_pending
+            // then locks the old active and runs the standard new-session resets.
+            if (second_.session.occupied() && second_.session.path() == nav.path) {
+                vault_state_.pending      = std::make_unique<vault::Vault>(second_.session.take());
+                vault_state_.pending_path = nav.path;
+                promote_pending();
+                to_gallery();
+                return true;
+            }
             to_unlock(nav.path);
             return true;
         case ToVaultManager:      vault_state_.pending.reset(); to_manager();      return true;
         case LockActive:
             keep_unlocked_ = false;
+            second_.session.wipe();                          // Phase 66: locking up means locking everything
             session_.reset();                     // Phase 39 Part 2: fresh session on lock
             import_ui_.queue.end_session();          // Phase 50: flush before lock
             if (vault_state_.active) { vault_state_.active->lock(); vault_state_.active.reset(); vault_state_.active_path.clear(); }
             to_manager();
+            return true;
+        case LockSecond:
+            // Phase 66: explicit "lock now" on the warm slot (vault manager).
+            second_.session.wipe();
             return true;
         case ToSettings:
             // Stays on the current screen: the overlay draws over it, so no
@@ -823,6 +879,16 @@ void App::update(double dt)
     if (screen_) screen_->update(dt);
     badge_elapsed_ += dt;   // Phase 45 Part 6
 
+    // Phase 66: tick the warm slot. Expiry is deferred while a background job
+    // owns a vault handle (same signals that suppress the idle auto-lock).
+    {
+        const bool defer = (screen_ && screen_->blocks_idle_lock()) || import_ui_.queue.busy();
+        const bool expired = second_.session.tick(dt, defer);
+        const int  secs    = second_.session.occupied() ? static_cast<int>(second_.session.seconds_left()) : -1;
+        if ((expired || secs != second_.badge_secs) && screen_) screen_->mark_dirty();
+        second_.badge_secs = secs;
+    }
+
     // Phase 65: handle migration job outcome and start import session after migration
     if (vault_state_.active) {
         if (migration_ui_.job && migration_ui_.job->active()) {
@@ -863,8 +929,11 @@ void App::render_frame()
     if (screen_) {
         gfx::Renderer r(window_.sdl_renderer());
         screen_->render(r);
-        if (vault_state_.active && should_show_badge(keep_unlocked_, badge_elapsed_, BADGE_WINDOW_SECS))
+        const bool keep_badge = vault_state_.active && should_show_badge(keep_unlocked_, badge_elapsed_, BADGE_WINDOW_SECS);
+        if (keep_badge)
             draw_keep_unlocked_badge(r, font_, window_.width(), window_.height());
+        if (second_.session.occupied())
+            draw_second_vault_badge(r, font_, window_.width(), window_.height(), keep_badge);
         if (overlays_.settings.open) {
             ui::draw_settings_overlay(r, font_, static_cast<float>(window_.width()),
                                       static_cast<float>(window_.height()), overlays_.settings);
@@ -953,6 +1022,7 @@ void App::shutdown()
 {
     if (screen_) { screen_->on_exit(); screen_.reset(); }
     import_ui_.queue.end_session();        // Phase 50: flush before lock (blocking, acceptable at shutdown)
+    second_.session.wipe();                        // Phase 66: wipe warm slot before vault teardown
     if (vault_state_.active)  vault_state_.active->lock();      // wipe master key
     if (vault_state_.pending) vault_state_.pending->lock();
     vault_state_.active.reset();

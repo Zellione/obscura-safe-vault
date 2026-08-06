@@ -57,6 +57,8 @@ int settings_row_count(const SettingsState& state) noexcept
     }
     case VaultOps:
         return state.vault_unlocked ? 1 : 0; // Phase 65: re-check vault for upgrades
+    case Security:
+        return 1; // machine-scoped: always 1
     }
     return 0;
 }
@@ -116,6 +118,17 @@ void change_swatch_value(SettingsState& state, int delta) noexcept
     }
 }
 
+// Handle second vault default mode value change.
+void change_security_value(SettingsState& state, int delta) noexcept
+{
+    auto current = static_cast<int>(std::to_underlying(state.second_vault_default));
+    int  next    = (current + delta + 3) % 3;
+    if (next < 0) {
+        next += 3;
+    }
+    state.second_vault_default = static_cast<platform::SecondVaultMode>(next);
+}
+
 }  // namespace
 
 void settings_change_value(SettingsState& state, int delta) noexcept
@@ -127,6 +140,8 @@ void settings_change_value(SettingsState& state, int delta) noexcept
         change_browsing_value(state, delta);
     } else if (state.section == TagColours) {
         change_swatch_value(state, delta);
+    } else if (state.section == Security) {
+        change_security_value(state, delta);
     }
 }
 

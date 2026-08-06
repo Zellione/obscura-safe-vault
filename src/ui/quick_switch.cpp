@@ -5,7 +5,9 @@
 #include "gfx/renderer.h"
 #include "gfx/text.h"
 #include "gfx/theme.h"
+#include "platform/second_vault_pref.h"
 #include "platform/vault_registry.h"
+#include "ui/second_vault.h"
 #include "ui/widgets.h"
 
 namespace ui {
@@ -82,12 +84,17 @@ void QuickSwitch::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float 
                 fit_text(font, "[Up/Down] choose  [Enter] open  [Esc] cancel", mw - 40),
                 TEXT_FAINT);
 
+    const auto warm = ui::second_vault_status();
     for (size_t i = 0; i < vaults_.size(); ++i) {
         const float ry = my + 96 + static_cast<float>(i) * 34.0f;
         const bool  on = (static_cast<int>(i) == sel_);
         if (on) r.draw_round_rect({ix, ry, mw - 40, 30}, RADIUS_SMALL, SURFACE_HI);
         std::string label = vaults_[i].filename().string();
         if (vaults_[i].string() == active_path_) label += "  (current)";
+        if (warm.occupied && vaults_[i].string() == warm.path)
+            label += warm.mode == platform::SecondVaultMode::KeepSession
+                         ? "  (unlocked · session)"
+                         : "  (unlocked · " + ui::format_keep_open_left(warm.seconds_left) + ")";
         r.draw_text(font, ix + 8, ry + 4, fit_text(font, label, mw - 56),
                     on ? TEXT : TEXT_DIM);
     }

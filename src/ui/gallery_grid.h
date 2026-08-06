@@ -41,6 +41,7 @@ namespace vault { class Vault; struct IndexNode; }
 namespace platform { class FileDialog; class FolderDialog; class VaultRegistry; }
 
 namespace ui {
+class SecondVaultSession;  // Phase 66: forward declare for GridVaultCtx
 
 // Layout width available to the grid: the window minus whatever the detail panel
 // reserves. A free friend for the same cpp:S1448 reason as current_gallery_view.
@@ -86,10 +87,11 @@ public:
         platform::FolderDialog& folder;
     };
 
-    // Vault context: registry and active vault path (used to construct TransferDialog).
+    // Vault context: registry, active vault path, and warm slot (used to construct TransferDialog/CombineDialog).
     struct GridVaultCtx {
         platform::VaultRegistry& registry;
         std::string              active_vault_path;
+        SecondVaultSession*      second_vault = nullptr;   // Phase 66: warm slot (App-owned)
     };
 
     GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,

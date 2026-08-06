@@ -17,8 +17,8 @@ namespace ui {
 
 CombineDialog::CombineDialog(vault::Vault& src, std::string src_path,
                              platform::VaultRegistry& registry, platform::FileDialog& dlg,
-                             gfx::Window& win)
-    : src_(src), src_path_(std::move(src_path)), win_(win), picker_dest_(registry, dlg, win) {}
+                             gfx::Window& win, SecondVaultSession* second)
+    : src_(src), src_path_(std::move(src_path)), win_(win), picker_dest_(registry, dlg, win, second) {}
 
 void CombineDialog::open(std::string src_gallery)
 {
@@ -140,6 +140,9 @@ void CombineDialog::finish_running_stage()
     run_.outcome.source_gone = src_.list(src_gallery_).empty();
     run_.outcome.dest_path   = selected_target_dest_path();
     run_.done = true;
+    // Phase 66: a Keep mode hands the unlocked destination to the warm
+    // slot (or slides its window) BEFORE close() wipes anything.
+    picker_dest_.release_to_slot();
     close();
 }
 

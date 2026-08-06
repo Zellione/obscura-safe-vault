@@ -25,8 +25,8 @@ constexpr const char* kNewGalleryRow = "+ New gallery…";
 
 TransferDialog::TransferDialog(vault::Vault& src, std::string src_path,
                                platform::VaultRegistry& registry,
-                               platform::FileDialog& dlg, gfx::Window& win)
-    : src_(src), src_path_(std::move(src_path)), win_(win), picker_dest_(registry, dlg, win) {}
+                               platform::FileDialog& dlg, gfx::Window& win, SecondVaultSession* second)
+    : src_(src), src_path_(std::move(src_path)), win_(win), picker_dest_(registry, dlg, win, second) {}
 
 void TransferDialog::open(std::string src_gallery, std::vector<std::string> filenames)
 {
@@ -249,6 +249,9 @@ void TransferDialog::update()
         if (auto oc = run_.job.take_outcome()) {
             run_.status = oc->ok ? std::move(oc->status) : oc->error;
             run_.done   = true;
+            // Phase 66: a Keep mode hands the unlocked destination to the warm
+            // slot (or slides its window) BEFORE close() wipes anything.
+            picker_dest_.release_to_slot();
             close();
         }
         return;

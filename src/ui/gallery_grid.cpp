@@ -203,9 +203,9 @@ GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& v
       search_(vault, win), tag_editor_(vault, win),
       quick_switch_(vault_ctx.registry, vault_ctx.active_vault_path),
       transfer_(vault, vault_ctx.active_vault_path, vault_ctx.registry,
-                dialogs.file, win),
+                dialogs.file, win, vault_ctx.second_vault),
       rename_(win),
-      combine_(vault, vault_ctx.active_vault_path, vault_ctx.registry, dialogs.file, win),
+      combine_(vault, vault_ctx.active_vault_path, vault_ctx.registry, dialogs.file, win, vault_ctx.second_vault),
       initial_(std::move(at)), view_(initial_.view)
 {
     detail_.panel.open = session_.detail_open;
