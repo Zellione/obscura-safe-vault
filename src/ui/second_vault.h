@@ -65,7 +65,7 @@ private:
     bool occupied_ = false;
     platform::SecondVaultMode default_mode_ = platform::SecondVaultMode::LockNow;
 
-    void push_status_() noexcept;
+    void push_status_() const noexcept;
 };
 
 } // namespace ui

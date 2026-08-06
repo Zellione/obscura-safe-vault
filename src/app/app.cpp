@@ -419,7 +419,8 @@ void draw_second_vault_badge(gfx::Renderer& r, gfx::FontAtlas& font, int win_w, 
                           std::filesystem::path(st.path).stem().string())
             : std::format("2nd vault unlocked · {} — {}", ui::format_keep_open_left(st.seconds_left),
                           std::filesystem::path(st.path).stem().string());
-    static constexpr auto PAD = 10.0f, MARGIN = 16.0f;
+    static constexpr auto PAD    = 10.0f;
+    static constexpr auto MARGIN = 16.0f;
     const auto max_w = static_cast<float>(win_w) * 0.6f;
     if (const auto measured_w = static_cast<float>(font.measure(label)); measured_w > max_w) {
         label = ui::fit_text(font, label, max_w);

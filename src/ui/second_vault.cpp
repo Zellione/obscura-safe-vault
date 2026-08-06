@@ -127,7 +127,7 @@ void SecondVaultSession::set_default_mode(platform::SecondVaultMode m) noexcept
     default_mode_ = m;
 }
 
-void SecondVaultSession::push_status_() noexcept
+void SecondVaultSession::push_status_() const noexcept
 {
     global_status().occupied = occupied_;
     global_status().path = path_;
