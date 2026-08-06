@@ -16,6 +16,7 @@
 #include "ui/volume_set_dialog.h"
 #include "ui/delete_summary.h"
 #include "ui/detail_panel.h"
+#include "ui/failure_list_dialog.h"
 #include "ui/file_op_job.h"
 #include "ui/gallery_session_state.h"
 #include "ui/gallery_view.h"
@@ -213,6 +214,7 @@ void toggle_select();          // toggle the current item in the export selectio
     QuickSwitch             quick_switch_;   // declared before transfer_ so it copies
     TransferDialog          transfer_;       // the active path before transfer_ moves it
     bool                    transfer_had_exclusive_ = false;  // Phase 50: track exclusive
+    FailureListDialog       failures_;       // Phase 67: per-item transfer failures
     RenameDialog            rename_;         // Phase 44 Part 2
     CombineDialog           combine_;        // Phase 44 Part 4
     bool                    combine_had_exclusive_ = false;   // Phase 50: track exclusive

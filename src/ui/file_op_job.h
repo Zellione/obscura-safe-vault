@@ -1,7 +1,7 @@
 #pragma once
 
 #include "vault/op_progress.h"
-#include "vault/transfer.h"   // vault::TransferMode
+#include "vault/transfer.h"   // vault::TransferMode, vault::TransferFailure
 
 #include <atomic>
 #include <filesystem>
@@ -32,6 +32,7 @@ struct FileOpOutcome {
     FileOpKind  kind      = FileOpKind::None;
     std::string status;              // human-facing summary (no secrets)
     std::string error;               // set when ok == false
+    std::vector<vault::TransferFailure> failures;   // per-item transfer failures (Phase 67)
 };
 
 // Runs a bulk file operation — export, delete, or move/copy (transfer) — on a
