@@ -7,6 +7,14 @@
 
 namespace vault {
 
+void record_failure(TransferTally& t, std::string path, VaultResult code,
+                    TransferFailure::Stage stage)
+{
+    ++t.failed;
+    if (t.failures.size() < MAX_TRANSFER_FAILURES)
+        t.failures.push_back({std::move(path), code, stage});
+}
+
 namespace {
 
 // Append `gallery`'s slash-path child name; "" stays "".
@@ -138,11 +146,15 @@ void lower_dst_watermark(const Vault& src, Vault& dst)
 
 // Copy one media (image or video) `fname` from src/src_gallery into dst/dst_gallery,
 // decrypting through the reused mlock'd `plain`. Copy only — source untouched.
+// `failed_stage` tracks whether failure occurred on read (source side) or write
+// (destination add side).
 VaultResult copy_one_media(const Vault& src, std::string_view src_gallery,
                            Vault& dst, std::string_view dst_gallery,
-                           std::string_view fname, crypto::SecureBytes& plain)
+                           std::string_view fname, crypto::SecureBytes& plain,
+                           TransferFailure::Stage& failed_stage)
 {
     using enum VaultResult;
+    failed_stage = TransferFailure::Stage::Read;
     const IndexNode* node = find_image_node(src, src_gallery, fname);
     if (!node) return NotFound;
 
@@ -153,6 +165,7 @@ VaultResult copy_one_media(const Vault& src, std::string_view src_gallery,
         if (VaultResult r = prestage_image_info(src, *node, thumb); r != Ok) return r;
         const uint64_t ts = node->meta.created_ts;
         if (VaultResult r = src.read_image(*node, plain); r != Ok) return r;
+        failed_stage = TransferFailure::Stage::Write;
         return add_image_prestaged(dst, dst_gallery, plain.as_span(), fname, thumb, ts);
     }
     if (node->is_video()) {
@@ -160,6 +173,7 @@ VaultResult copy_one_media(const Vault& src, std::string_view src_gallery,
         if (VaultResult r = prestage_video_info(src, *node, info); r != Ok) return r;
         const uint64_t ts = node->vmeta.created_ts;
         if (VaultResult r = src.read_video(*node, plain); r != Ok) return r;
+        failed_stage = TransferFailure::Stage::Write;
         return add_video_prestaged(dst, dst_gallery, plain.as_span(), fname, info, ts);
     }
     return Ok;
@@ -177,7 +191,8 @@ VaultResult copy_images(const Vault& src, std::string_view src_gallery,
     using enum VaultResult;
     for (const auto& fname : images) {
         if (progress && progress->cancel.load()) return Ok;   // clean partial: stop between files
-        if (VaultResult r = copy_one_media(src, src_gallery, dst, dst_gallery, fname, plain);
+        TransferFailure::Stage stage = TransferFailure::Stage::Read;
+        if (VaultResult r = copy_one_media(src, src_gallery, dst, dst_gallery, fname, plain, stage);
             r != Ok)
             return r;
         if (progress) progress->done.fetch_add(1);
@@ -223,22 +238,38 @@ bool is_same_vault_cycle(const Vault& src, const Vault& dst,
 
 } // namespace
 
-VaultResult transfer_image(Vault& src, std::string_view src_gallery,
-                           std::string_view filename,
-                           Vault& dst, std::string_view dst_gallery,
-                           TransferMode mode)
+// Internal transfer_image with stage tracking for per-file failure recording.
+// Sets `stage_out` to indicate where failure occurred (Read side or Write side).
+VaultResult transfer_image_ex(Vault& src, std::string_view src_gallery,
+                              std::string_view filename,
+                              Vault& dst, std::string_view dst_gallery,
+                              TransferMode mode, TransferFailure::Stage& stage_out)
 {
     using enum VaultResult;
 
     crypto::SecureBytes plain;
-    if (VaultResult r = copy_one_media(src, src_gallery, dst, dst_gallery, filename, plain);
+    if (VaultResult r = copy_one_media(src, src_gallery, dst, dst_gallery, filename, plain, stage_out);
         r != Ok)
         return r;
 
     lower_dst_watermark(src, dst);
 
-    if (mode == TransferMode::Move) return src.remove_image(src_gallery, filename);
+    if (mode == TransferMode::Move) {
+        if (VaultResult r = src.remove_image(src_gallery, filename); r != Ok) {
+            stage_out = TransferFailure::Stage::Write;
+            return r;
+        }
+    }
     return Ok;
+}
+
+VaultResult transfer_image(Vault& src, std::string_view src_gallery,
+                           std::string_view filename,
+                           Vault& dst, std::string_view dst_gallery,
+                           TransferMode mode)
+{
+    TransferFailure::Stage stage = TransferFailure::Stage::Read;
+    return transfer_image_ex(src, src_gallery, filename, dst, dst_gallery, mode, stage);
 }
 
 std::vector<std::string> image_target_galleries(const Vault& v)
@@ -317,8 +348,13 @@ TransferTally transfer_images(Vault& src, std::string_view src_gallery,
     TransferTally tally;
     for (const auto& fname : filenames) {
         if (progress && progress->cancel.load()) break;   // clean partial: stop between files
-        if (transfer_image(src, src_gallery, fname, dst, dst_gallery, mode) == Ok) ++tally.done;
-        else                                                                       ++tally.failed;
+        auto stage = TransferFailure::Stage::Read;
+        if (VaultResult r = transfer_image_ex(src, src_gallery, fname, dst, dst_gallery,
+                                              mode, stage);
+            r == Ok)
+            ++tally.done;
+        else
+            record_failure(tally, child_path(src_gallery, fname), r, stage);
         if (progress) progress->done.fetch_add(1);
     }
     return tally;

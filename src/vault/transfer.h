@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -13,13 +14,31 @@ namespace vault {
 // the destination commit. Same code path for cross-vault and same-vault transfers.
 enum class TransferMode { Move, Copy };
 
+inline constexpr size_t MAX_TRANSFER_FAILURES = 100;
+
+// One item a transfer could not move/copy: the item's full slash-path IN THE
+// SOURCE vault, the result code, and which side failed (Read = source
+// decrypt/fetch, Write = destination add or source remove).
+struct TransferFailure {
+    enum class Stage : uint8_t { Read, Write };
+    std::string path;
+    VaultResult code  = VaultResult::Ok;
+    Stage       stage = Stage::Write;
+};
+
 // Result of a bulk media transfer: how many files committed to the destination
 // and how many failed (skipped). done + failed == the number attempted, which is
 // <= the input size when a cancel stopped the loop early.
 struct TransferTally {
     int done   = 0;
     int failed = 0;
+    std::vector<TransferFailure> failures;   // first MAX_TRANSFER_FAILURES only
 };
+
+// Bump `failed` and store the entry while under MAX_TRANSFER_FAILURES (further
+// failures are counted but not stored).
+void record_failure(TransferTally& t, std::string path, VaultResult code,
+                    TransferFailure::Stage stage);
 
 // Transfer one media (image or video) from `src` (gallery `src_gallery`, file `filename`)
 // into `dst`'s `dst_gallery`, keeping the filename. Reads the source plaintext into an
