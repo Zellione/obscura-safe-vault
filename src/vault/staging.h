@@ -30,6 +30,20 @@ struct StagedThumb {
     bool                 animated = false;
 };
 
+// Source-vault-supplied video metadata for a cross-vault transfer (Phase 67).
+// When passed to stage_video, probe_video is SKIPPED and these fields populate
+// the node verbatim — a legacy video whose codec is still Unknown (Phase 65
+// migration skips undecodable ones) must transfer as-is, not be re-probed and
+// rejected at the destination.
+struct StagedVideoInfo {
+    std::vector<uint8_t> poster_jpeg;   // empty => no poster
+    VideoContainer       container   = VideoContainer::Unknown;
+    VideoCodec           codec       = VideoCodec::Unknown;
+    uint32_t             width       = 0;
+    uint32_t             height      = 0;
+    uint64_t             duration_us = 0;
+};
+
 struct StagedNode {
     VaultResult status = VaultResult::Ok;
     IndexNode   node{};   // fully populated, UNATTACHED (chunks already on disk)
@@ -49,7 +63,8 @@ struct StagedNode {
 // is locked; InvalidArg for an unsafe filename.
 [[nodiscard]] StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
                                      std::string_view filename,
-                                     uint32_t chunk_size = VIDEO_CHUNK_SIZE);
+                                     uint32_t chunk_size = VIDEO_CHUNK_SIZE,
+                                     const StagedVideoInfo* precomputed = nullptr);
 
 // MAIN THREAD ONLY: attach a staged node under gallery_path. AlreadyExists if
 // the name is taken (the staged chunks stay orphaned — reclaimed by compact,
