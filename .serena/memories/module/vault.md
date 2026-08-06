@@ -103,8 +103,9 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
 - Consequence: `read_fp_` now handles **only** full-image data and video chunks; all thumbnail
   I/O and metadata header reads flow through the dedicated, contention-free `thumb_fp_`.
 
-### staging.* (Phase 50) — worker-to-tree hand-off
-- `stage_image(Vault, data, ...)` / `stage_video(data, ...)` — any thread, stream encrypted chunks to disk with fflush (no fsync), return a ready IndexNode with chunk spans. Plaintext stays mlock'd; nodes are ready but **not attached**.
+### staging.* (Phase 50 + Phase 67 transfer) — worker-to-tree hand-off
+- `stage_image(Vault, data, ...)` / `stage_video(Vault, data, precomputed_meta, ...)` — any thread, stream encrypted chunks to disk with fflush (no fsync), return a ready IndexNode with chunk spans. Plaintext stays mlock'd; nodes are ready but **not attached**. **Phase 67:** `stage_video` gains a 5th `precomputed_meta` param (a `StagedVideoInfo{dimensions, duration, codec, poster_offset, poster_len}`) so cross-vault transfers avoid re-probing videos already decoded at the source. Null metadata falls back to `MediaProbe::probe_bytes` on attach (backward compat). `StagedVideoInfo` is computed at source by `MediaProbe::extract_staged_video_info`.
+- `add_image_prestaged(Vault, node, name, gallery_path)` / `add_video_prestaged(Vault, node, name, gallery_path)` — **free friends, Phase 67.** Main-thread only, attach a pre-staged node to a gallery + commit atomically. Sugar for `attach_staged` + `commit_index` where the attachment is the only tree mutation. Exist to let transfer loops call one friend per file instead of managing attachment and commits separately.
 - `attach_staged(Vault, node, gallery_path)` — main-thread only, performs tree insertion, **no commit issued**. Commit is scheduled separately by batching policy (see CommitLane below).
 - `ensure_gallery_path(Vault, path)` — creates missing ancestor galleries as needed on attach.
 
@@ -151,6 +152,38 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
 - `vault::rename_node(v,gallery_path,old_name,new_name)` — validates `is_safe_node_name` +
   no sibling collision, then a pure leaf-field edit (an IndexNode persists only its local
   name, never a path, so no cascade). Drives the `R` RenameDialog.
+
+### transfer.* + transfer_result.* (Phase 67) — cross-vault & within-vault copy/move
+- **TransferFailure** — reason a single-file transfer failed (ASCII enum for display):
+  `{SizeMismatch, NotAnImage, NotAVideo, ProbeFailure, AuthFailure, WriteFailure, Collision, Unknown}`.
+- **TransferTally** — per-file transfer status (`Success`, `Failed(reason)`, `Skipped`).
+- **TransferCompletion** — post-transfer outcome: `status` (Ok/Locked/IoError), `destination_path`, 
+  `counts{total_files, succeeded, failed, skipped}`, `failures` (vec of `{name, reason}` for UI modal). 
+  `name` is the node's local name only (no path).
+- **Per-file transfer tolerance:** `transfer_image` + `transfer_gallery` + `transfer_galleries` (the three 
+  public primitives) process each file independently: a collision (destination sibling exists) or a probe 
+  failure (video undecodable at source) fails that file, records its reason, and continues. At the end, 
+  a `TransferCompletion` summarizes counts + failures list. Callers decide failure policy (UI shows 
+  modal with reasons; batch script may fail/ignore). An Ok status means at least one file transferred; 
+  a Skipped or Failed file does not prevent Ok return.
+- **Move with prune_moved_galleries (Phase 67):** `transfer_gallery` and `transfer_galleries` each take a 
+  `prune_moved_galleries` bool. True: after transfer completes, deletes every source gallery that 
+  (a) was explicitly moved (not copied) AND (b) is now empty (all its media was transferred away). 
+  Rationale: user moves a folder + its contents to another vault; we auto-clean the empty shell. 
+  Pruning happens AFTER the final commit (transfer itself is atomic; pruning is best-effort and 
+  happens in a second pass if `!status.is_error()`). Pruning is logged to `RemoveBatchStats`; 
+  transfer status unaffected by prune results.
+- **Cancel semantics (Phase 67):** transfer runs on the CommitLane. A user-initiated cancel (Esc in 
+  dialog) tells the lane to drain (queued work finishes, no new work enqueued). Already-committed 
+  chunks stay in the destination; the destination index is NOT rewound. Cancelling mid-transfer 
+  leaves the destination vault partially populated. Source is untouched (move semantics deferred 
+  until post-transfer, so cancelling before source is deleted is safe). On resume (same transfer 
+  request re-invoked), skip-collisions logic prevents re-transfer.
+- **Source metadata hand-off:** `transfer_image`/`transfer_video` receive metadata from the source 
+  (image orientation, video dimensions/duration/codec via `StagedVideoInfo`). The destination 
+  receives the exact metadata + any tags the source carries (read-time cascade applies). Videos 
+  carry pre-probed codec/dimensions so the destination never re-probes (perf + consistency across 
+  unknown-codec moves).
 
 ### migration.* (Phase 65) — vault upgrade orchestration
 - `scan_migration(const Vault&, MigrationStatus*)` — pure tree walk (zero I/O). Detects pending

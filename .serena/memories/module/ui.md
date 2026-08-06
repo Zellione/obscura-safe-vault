@@ -328,6 +328,14 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   source_gone read as `src_.list(src_gallery_).empty()`. **Phase 66:** on completion with a
   Keep\* mode, the destination handle is handed off via `release_to_slot()` and the slot's
   sliding reset called after success.
+- `failure_list_dialog.*` — **Phase 67 modal**, shown when a `TransferDialog` or `CombineDialog` 
+  completes with `failures` in the `TransferCompletion` / `CombineOutcome`. Lists each failed 
+  item (node name only) + its ASCII reason (`SizeMismatch`, `NotAnImage`, `ProbeFailure`, etc.). 
+  Scrollable if many failures; Esc or a close button dismisses. Owned by `GalleryGrid`; opened 
+  by `gallery_grid::update()` when it drains a completed transfer/combine with failures. Takes 
+  the `TransferCompletion` hand-off from `TransferDialog` (via the result queue, not live state) 
+  to populate the list. Render draws the modal veil + a centered box listing "Failed items:" 
+  header, then rows of `name: reason` in a fixed-pitch font for clarity.
 - `vault_unlock_picker.*` — "pick a destination vault, then unlock it" flow, extracted so both
   TransferDialog + CombineDialog reuse it. Stages PickVault ("This vault" row 0, or a registry
   entry) -> Unlock (password + optional keyfile, skipped for "This vault"). Esc cancels the
