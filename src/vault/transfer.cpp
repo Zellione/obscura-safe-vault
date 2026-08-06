@@ -448,7 +448,8 @@ TransferTally transfer_galleries(Vault& src, const std::vector<std::string>& src
     for (const auto& path : src_paths) {
         if (progress && progress->cancel.load()) break;
         TransferTally sub;
-        if (transfer_gallery(src, path, dst, dst_parent, mode, nullptr, &sub) == Ok) {
+        const VaultResult r = transfer_gallery(src, path, dst, dst_parent, mode, nullptr, &sub);
+        if (r == Ok) {
             ++out.done;
             // Merge per-file failures from this subtree into the output.
             for (auto& f : sub.failures) {
@@ -458,11 +459,8 @@ TransferTally transfer_galleries(Vault& src, const std::vector<std::string>& src
             // per-file failures inside a structurally-Ok subtree do not change the
             // SUBTREE done/failed counts, but the entries surface in the dialog
         } else {
-            ++out.failed;
             // Structural failure: record as a gallery-level entry.
-            if (out.failures.size() < MAX_TRANSFER_FAILURES)
-                out.failures.push_back({std::string(path), VaultResult::Ok,
-                                       TransferFailure::Stage::Write});
+            record_failure(out, std::string(path), r, TransferFailure::Stage::Write);
         }
         if (progress) progress->done.fetch_add(1);
     }

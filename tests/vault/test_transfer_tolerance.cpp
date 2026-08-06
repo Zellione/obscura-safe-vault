@@ -244,3 +244,30 @@ TEST(transfer_gallery_records_bad_named_media)
     CHECK(tally.failures[0].code == InvalidArg);
     CHECK(tally.failures[0].stage == vault::TransferFailure::Stage::Write);
 }
+
+// transfer_galleries records CORRECT error codes (NotFound) for structurally-failed
+// subtrees; the actual error code matters (not hardcoded Ok), and continues with others
+// (one done, one failed with actual NotFound code, not Ok).
+TEST(transfer_galleries_records_structural_error_codes)
+{
+    using enum vault::VaultResult;
+    TempVault sa("s6"), da("d6");
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+    // Setup src: one good gallery, one nonexistent (will fail with NotFound).
+    REQUIRE(src.create_gallery("good") == Ok);
+    REQUIRE(src.add_image("good", pattern(1000, 1), "x.jpg") == Ok);
+
+    const auto tally = vault::transfer_galleries(
+        src, {"nonexistent", "good"}, dst, "",
+        vault::TransferMode::Copy);
+
+    // One succeeded (good), one failed (nonexistent NotFound).
+    CHECK_EQ(tally.done, 1);
+    CHECK_EQ(tally.failed, 1);
+    REQUIRE(tally.failures.size() == 1u);
+    // Verify error code is correct NotFound, NOT hardcoded Ok (the bug this test catches).
+    CHECK_EQ(tally.failures[0].path, std::string("nonexistent"));
+    CHECK(tally.failures[0].code == NotFound);
+}
