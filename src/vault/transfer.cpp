@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "crypto/secure_mem.h"
+#include "vault/staging.h"
 
 namespace vault {
 
@@ -81,6 +82,60 @@ const IndexNode* find_image_node(const Vault& v, std::string_view gallery,
     return nullptr;
 }
 
+// Build destination-side prestaged info from the source node, fetching the
+// stored thumbnail/poster blob — Phase 67: no re-decode, no re-probe.
+VaultResult prestage_image_info(const Vault& src, const IndexNode& node, StagedThumb& out)
+{
+    using enum VaultResult;
+    out.format   = node.meta.format;
+    out.width    = node.meta.width;
+    out.height   = node.meta.height;
+    out.animated = node.meta.animated;
+    out.thumb_jpeg.clear();
+    if (node.meta.thumb_length == 0) return Ok;   // source has no thumbnail
+    crypto::SecureBytes blob;
+    if (VaultResult r = src.read_thumbnail(node, blob); r != Ok) return r;
+    out.thumb_jpeg.assign(blob.data(), blob.data() + blob.size());
+    return Ok;
+}
+
+VaultResult prestage_video_info(const Vault& src, const IndexNode& node, StagedVideoInfo& out)
+{
+    using enum VaultResult;
+    out.container   = node.vmeta.container;
+    out.codec       = node.vmeta.codec;
+    out.width       = node.vmeta.width;
+    out.height      = node.vmeta.height;
+    out.duration_us = node.vmeta.duration_us;
+    out.poster_jpeg.clear();
+    if (node.vmeta.poster_length == 0) return Ok;
+    crypto::SecureBytes blob;
+    if (VaultResult r = src.read_thumbnail(node, blob); r != Ok) return r;
+    out.poster_jpeg.assign(blob.data(), blob.data() + blob.size());
+    return Ok;
+}
+
+// Phase 65: content from an un-migrated vault carries un-backfilled metadata
+// (codec Unknown, animated flag never sniffed). With the lazy repair paths gone,
+// nothing would ever fix it if the destination kept claiming to be migrated —
+// so the destination inherits the source's lower watermark and re-offers the
+// migration at its next unlock.
+void lower_dst_watermark(const Vault& src, Vault& dst)
+{
+    const VaultSettings& s_src = vault_settings(src);
+    VaultSettings        s_dst = vault_settings(dst);
+    bool lowered = false;
+    if (s_src.migrated_index_version < s_dst.migrated_index_version) {
+        s_dst.migrated_index_version = s_src.migrated_index_version;
+        lowered = true;
+    }
+    if (s_src.migrated_probe_caps < s_dst.migrated_probe_caps) {
+        s_dst.migrated_probe_caps = s_src.migrated_probe_caps;
+        lowered = true;
+    }
+    if (lowered) (void)set_vault_settings(dst, std::move(s_dst));
+}
+
 // Copy one media (image or video) `fname` from src/src_gallery into dst/dst_gallery,
 // decrypting through the reused mlock'd `plain`. Copy only — source untouched.
 VaultResult copy_one_media(const Vault& src, std::string_view src_gallery,
@@ -91,14 +146,21 @@ VaultResult copy_one_media(const Vault& src, std::string_view src_gallery,
     const IndexNode* node = find_image_node(src, src_gallery, fname);
     if (!node) return NotFound;
 
-    // Branch on media type: image → read_image/add_image, video → read_video/add_video.
+    // Capture everything needed from `node` BEFORE the destination add: a
+    // same-vault add can reallocate the index and dangle the pointer.
     if (node->is_image()) {
+        StagedThumb thumb;
+        if (VaultResult r = prestage_image_info(src, *node, thumb); r != Ok) return r;
+        const uint64_t ts = node->meta.created_ts;
         if (VaultResult r = src.read_image(*node, plain); r != Ok) return r;
-        return dst.add_image(dst_gallery, plain.as_span(), fname);
+        return add_image_prestaged(dst, dst_gallery, plain.as_span(), fname, thumb, ts);
     }
     if (node->is_video()) {
+        StagedVideoInfo info;
+        if (VaultResult r = prestage_video_info(src, *node, info); r != Ok) return r;
+        const uint64_t ts = node->vmeta.created_ts;
         if (VaultResult r = src.read_video(*node, plain); r != Ok) return r;
-        return dst.add_video(dst_gallery, plain.as_span(), fname);
+        return add_video_prestaged(dst, dst_gallery, plain.as_span(), fname, info, ts);
     }
     return Ok;
 }
@@ -168,51 +230,12 @@ VaultResult transfer_image(Vault& src, std::string_view src_gallery,
 {
     using enum VaultResult;
 
-    // Locate the source media (image or video) node.
-    const IndexNode* node = find_image_node(src, src_gallery, filename);
-    if (!node) return NotFound;
-
-    // Decrypt into mlock'd memory, then re-encrypt into the destination.
     crypto::SecureBytes plain;
+    if (VaultResult r = copy_one_media(src, src_gallery, dst, dst_gallery, filename, plain);
+        r != Ok)
+        return r;
 
-    // Branch on media type: image → read_image/add_image, video → read_video/add_video
-    if (node->is_image()) {
-        if (VaultResult r = src.read_image(*node, plain); r != Ok) return r;
-    } else if (node->is_video()) {
-        if (VaultResult r = src.read_video(*node, plain); r != Ok) return r;
-    }
-
-    // dst commits first (crash-safe: a crash before the source remove leaves a
-    // recoverable duplicate, never a loss). A failed add leaves the source intact.
-    // `node` is not used past this point, so a same-vault add that reallocates the
-    // index cannot dangle it.
-    if (node->is_image()) {
-        if (VaultResult r = dst.add_image(dst_gallery, plain.as_span(), filename); r != Ok)
-            return r;
-    } else if (node->is_video()) {
-        if (VaultResult r = dst.add_video(dst_gallery, plain.as_span(), filename); r != Ok)
-            return r;
-    }
-
-    // Phase 65: content from an un-migrated vault carries un-backfilled metadata
-    // (codec Unknown, animated flag never sniffed). With the lazy repair paths gone,
-    // nothing would ever fix it if the destination kept claiming to be migrated —
-    // so the destination inherits the source's lower watermark and re-offers the
-    // migration at its next unlock.
-    {
-        const VaultSettings& s_src = vault_settings(src);
-        VaultSettings        s_dst = vault_settings(dst);
-        bool lowered = false;
-        if (s_src.migrated_index_version < s_dst.migrated_index_version) {
-            s_dst.migrated_index_version = s_src.migrated_index_version;
-            lowered = true;
-        }
-        if (s_src.migrated_probe_caps < s_dst.migrated_probe_caps) {
-            s_dst.migrated_probe_caps = s_src.migrated_probe_caps;
-            lowered = true;
-        }
-        if (lowered) (void)set_vault_settings(dst, std::move(s_dst));
-    }
+    lower_dst_watermark(src, dst);
 
     if (mode == TransferMode::Move) return src.remove_image(src_gallery, filename);
     return Ok;
@@ -276,25 +299,7 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
     // recoverable duplicate, never a loss.
     if (progress && progress->cancel.load()) return Ok;
 
-    // Phase 65: content from an un-migrated vault carries un-backfilled metadata
-    // (codec Unknown, animated flag never sniffed). With the lazy repair paths gone,
-    // nothing would ever fix it if the destination kept claiming to be migrated —
-    // so the destination inherits the source's lower watermark and re-offers the
-    // migration at its next unlock.
-    {
-        const VaultSettings& s_src = vault_settings(src);
-        VaultSettings        s_dst = vault_settings(dst);
-        bool lowered = false;
-        if (s_src.migrated_index_version < s_dst.migrated_index_version) {
-            s_dst.migrated_index_version = s_src.migrated_index_version;
-            lowered = true;
-        }
-        if (s_src.migrated_probe_caps < s_dst.migrated_probe_caps) {
-            s_dst.migrated_probe_caps = s_src.migrated_probe_caps;
-            lowered = true;
-        }
-        if (lowered) (void)set_vault_settings(dst, std::move(s_dst));
-    }
+    lower_dst_watermark(src, dst);
 
     // Everything copied into dst — for a Move, drop the source subtree (copy-then-delete).
     if (mode == TransferMode::Move) return src.remove_gallery(src_gallery);

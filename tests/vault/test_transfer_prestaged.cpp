@@ -193,3 +193,79 @@ TEST(add_image_prestaged_validates_name_and_collision)
     CHECK(vault::add_image_prestaged(v, "", pattern(100, 2), "a.jpg", none, 0)
           == AlreadyExists);
 }
+
+// The Phase 67 headline: a legacy video (codec Unknown — Phase 65 migration
+// legitimately skips undecodable ones) must transfer instead of being re-probed
+// and rejected with InvalidArg at the destination.
+TEST(transfer_unknown_codec_video_succeeds)
+{
+    using enum vault::VaultResult;
+    TempVault sa("v7s"), da("v7d");
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+
+    vault::StagedVideoInfo info;
+    info.codec = vault::VideoCodec::Unknown;
+    info.poster_jpeg = {0xFF, 0xD8, 5, 5};
+    REQUIRE(vault::add_video_prestaged(src, "", pattern(1u << 20, 3), "legacy.avi",
+                                       info, 1111) == Ok);
+
+    REQUIRE(vault::transfer_image(src, "", "legacy.avi", dst, "",
+                                  vault::TransferMode::Move) == Ok);
+    const auto* moved = find_image(dst, "", "legacy.avi");
+    REQUIRE(moved != nullptr);
+    CHECK(moved->vmeta.codec == vault::VideoCodec::Unknown);
+    CHECK_EQ(moved->vmeta.created_ts, 1111u);         // timestamp preserved
+    crypto::SecureBytes poster;
+    REQUIRE(dst.read_thumbnail(*moved, poster) == Ok); // poster carried verbatim
+    CHECK_BYTES_EQ(poster.as_span(), std::span<const uint8_t>(info.poster_jpeg));
+    CHECK(find_image(src, "", "legacy.avi") == nullptr);
+}
+
+// Image transfer copies the stored thumbnail bytes instead of re-decoding: an
+// Unknown-format image (undecodable) keeps its thumb and metadata across the move.
+TEST(transfer_image_carries_thumb_verbatim)
+{
+    using enum vault::VaultResult;
+    TempVault sa("v8s"), da("v8d");
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+
+    vault::StagedThumb thumb;
+    thumb.thumb_jpeg = {0xFF, 0xD8, 7, 7, 7};
+    thumb.format = vault::ImageFormat::Unknown;
+    thumb.width = 11; thumb.height = 22; thumb.animated = false;
+    REQUIRE(vault::add_image_prestaged(src, "", pattern(5000, 4), "odd.bin",
+                                       thumb, 2222) == Ok);
+
+    REQUIRE(vault::transfer_image(src, "", "odd.bin", dst, "",
+                                  vault::TransferMode::Copy) == Ok);
+    const auto* copied = find_image(dst, "", "odd.bin");
+    REQUIRE(copied != nullptr);
+    CHECK(copied->meta.format == vault::ImageFormat::Unknown);
+    CHECK_EQ(copied->meta.width, 11u);
+    CHECK_EQ(copied->meta.created_ts, 2222u);
+    crypto::SecureBytes tb;
+    REQUIRE(dst.read_thumbnail(*copied, tb) == Ok);
+    CHECK_BYTES_EQ(tb.as_span(), std::span<const uint8_t>(thumb.thumb_jpeg));
+}
+
+// A source item without a thumbnail transfers without one (no regeneration).
+TEST(transfer_image_no_thumb_stays_no_thumb)
+{
+    using enum vault::VaultResult;
+    TempVault sa("v9s"), da("v9d");
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+    const vault::StagedThumb none;   // empty thumb_jpeg
+    REQUIRE(vault::add_image_prestaged(src, "", pattern(700, 8), "n.bin", none, 0) == Ok);
+
+    REQUIRE(vault::transfer_image(src, "", "n.bin", dst, "",
+                                  vault::TransferMode::Copy) == Ok);
+    const auto* copied = find_image(dst, "", "n.bin");
+    REQUIRE(copied != nullptr);
+    CHECK_EQ(copied->meta.thumb_length, 0u);
+}
