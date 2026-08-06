@@ -47,6 +47,7 @@ private:
     std::vector<std::string>  lines_;       // one line per failure + "...and N more" if truncated
     int                       scroll_       = 0;  // scroll offset in lines
     int                       failed_total_ = 0;  // total number of failures (may be > lines_.size())
+    mutable int               visible_lines_ = 0;  // last rendered visible line count (for scroll clamping)
 };
 
 } // namespace ui
