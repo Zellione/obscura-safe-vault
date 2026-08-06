@@ -113,3 +113,83 @@ TEST(stage_video_without_precomputed_still_probes)
         vault::stage_video(v, pattern(4096, 2), "bad.mp4", vault::VIDEO_CHUNK_SIZE);
     CHECK(staged.status == InvalidArg);
 }
+
+// add_image_prestaged must store the given thumbnail bytes VERBATIM (no decode)
+// and honour created_ts. Unknown format + undecodable bytes must be accepted.
+TEST(add_image_prestaged_carries_thumb_and_ts)
+{
+    using enum vault::VaultResult;
+    TempVault tv("v4");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kKdf, v) == Ok);
+
+    vault::StagedThumb thumb;
+    thumb.thumb_jpeg = {0xFF, 0xD8, 9, 8, 7, 6};
+    thumb.format     = vault::ImageFormat::Unknown;
+    thumb.width      = 123;
+    thumb.height     = 45;
+    thumb.animated   = true;
+
+    REQUIRE(vault::add_image_prestaged(v, "", pattern(2000, 5), "x.bin", thumb,
+                                       /*created_ts=*/424242) == Ok);
+
+    const auto* n = find_image(v, "", "x.bin");
+    REQUIRE(n != nullptr);
+    CHECK(n->meta.format == vault::ImageFormat::Unknown);
+    CHECK_EQ(n->meta.width, 123u);
+    CHECK_EQ(n->meta.height, 45u);
+    CHECK(n->meta.animated);
+    CHECK_EQ(n->meta.created_ts, 424242u);
+
+    crypto::SecureBytes tb;
+    REQUIRE(v.read_thumbnail(*n, tb) == Ok);
+    CHECK_BYTES_EQ(tb.as_span(), std::span<const uint8_t>(thumb.thumb_jpeg));
+}
+
+// add_video_prestaged: Unknown codec + garbage bytes accepted, poster verbatim,
+// created_ts preserved, and everything survives a reopen.
+TEST(add_video_prestaged_roundtrip_across_reopen)
+{
+    using enum vault::VaultResult;
+    TempVault tv("v5");
+    const auto data = pattern(2u << 20, 6);
+    vault::StagedVideoInfo info;
+    info.poster_jpeg = {0xFF, 0xD8, 1, 2, 3};
+    info.codec       = vault::VideoCodec::Unknown;
+    info.container   = vault::VideoContainer::Unknown;
+    info.width = 320; info.height = 240; info.duration_us = 99;
+
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kKdf, v) == Ok);
+        REQUIRE(vault::add_video_prestaged(v, "", data, "old.avi", info, 777) == Ok);
+    }
+    vault::Vault v2;
+    REQUIRE(vault::Vault::open(tv.str(), v2) == Ok);
+    REQUIRE(v2.unlock(bytes("pw"), {}) == Ok);
+    const auto* n = find_image(v2, "", "old.avi");
+    REQUIRE(n != nullptr);
+    CHECK(n->vmeta.codec == vault::VideoCodec::Unknown);
+    CHECK_EQ(n->vmeta.created_ts, 777u);
+    crypto::SecureBytes out;
+    REQUIRE(v2.read_video(*n, out) == Ok);
+    CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(data));
+    crypto::SecureBytes poster;
+    REQUIRE(v2.read_thumbnail(*n, poster) == Ok);
+    CHECK_BYTES_EQ(poster.as_span(), std::span<const uint8_t>(info.poster_jpeg));
+}
+
+// Prestaged adds still enforce the vault ingress boundary (safe name, collision).
+TEST(add_image_prestaged_validates_name_and_collision)
+{
+    using enum vault::VaultResult;
+    TempVault tv("v6");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kKdf, v) == Ok);
+    const vault::StagedThumb none;
+    CHECK(vault::add_image_prestaged(v, "", pattern(100, 1), "bad<name>", none, 0)
+          == InvalidArg);
+    REQUIRE(vault::add_image_prestaged(v, "", pattern(100, 1), "a.jpg", none, 0) == Ok);
+    CHECK(vault::add_image_prestaged(v, "", pattern(100, 2), "a.jpg", none, 0)
+          == AlreadyExists);
+}

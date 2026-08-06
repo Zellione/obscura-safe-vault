@@ -172,6 +172,12 @@ public:
     friend VaultResult attach_staged(Vault& v, std::string_view gallery_path,
                                      IndexNode&& node);
     friend VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path);
+    friend VaultResult add_image_prestaged(Vault& v, std::string_view,
+                                           std::span<const uint8_t>, std::string_view,
+                                           const StagedThumb&, uint64_t);
+    friend VaultResult add_video_prestaged(Vault& v, std::string_view,
+                                           std::span<const uint8_t>, std::string_view,
+                                           const StagedVideoInfo&, uint64_t);
 
     [[nodiscard]] bool is_unlocked() const noexcept { return unlocked_; }
 

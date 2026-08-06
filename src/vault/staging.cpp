@@ -262,4 +262,54 @@ VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path)
     return Ok;  // idempotent: return Ok even if nothing was created
 }
 
+VaultResult add_image_prestaged(Vault& v, std::string_view gallery_path,
+                                std::span<const uint8_t> file_data,
+                                std::string_view filename,
+                                const StagedThumb& thumb, uint64_t created_ts)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+    if (!is_safe_node_name(filename)) return InvalidArg;
+
+    IndexNode* g = v.find_gallery(gallery_path);
+    if (!g) return NotFound;
+    if (vault_ops::child_named(g, filename)) return AlreadyExists;
+
+    StagedNode staged = stage_image(v, file_data, filename, &thumb);
+    if (staged.status != Ok) return staged.status;
+    if (created_ts != 0) staged.node.meta.created_ts = created_ts;
+
+    if (const VaultResult r = attach_staged(v, gallery_path, std::move(staged.node)); r != Ok)
+        return r;
+    if (ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+        !store.sync())
+        return IoError;
+    return v.commit_index();
+}
+
+VaultResult add_video_prestaged(Vault& v, std::string_view gallery_path,
+                                std::span<const uint8_t> file_data,
+                                std::string_view filename,
+                                const StagedVideoInfo& info, uint64_t created_ts)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+    if (!is_safe_node_name(filename)) return InvalidArg;
+
+    IndexNode* g = v.find_gallery(gallery_path);
+    if (!g) return NotFound;
+    if (vault_ops::child_named(g, filename)) return AlreadyExists;
+
+    StagedNode staged = stage_video(v, file_data, filename, VIDEO_CHUNK_SIZE, &info);
+    if (staged.status != Ok) return staged.status;
+    if (created_ts != 0) staged.node.vmeta.created_ts = created_ts;
+
+    if (const VaultResult r = attach_staged(v, gallery_path, std::move(staged.node)); r != Ok)
+        return r;
+    if (ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+        !store.sync())
+        return IoError;
+    return v.commit_index();
+}
+
 }  // namespace vault

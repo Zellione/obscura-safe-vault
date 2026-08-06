@@ -76,4 +76,19 @@ struct StagedNode {
 // the archive-import drain; Ok if it already exists as a gallery).
 [[nodiscard]] VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path);
 
+// Cross-vault transfer ingress (Phase 67): same pre-check → stage → attach →
+// sync → commit sequence as Vault::add_image/add_video, but with caller-supplied
+// metadata (no decode, no probe). created_ts == 0 keeps "now"; nonzero preserves
+// the source's timestamp. Free functions: Vault is at its S1448 method cap.
+[[nodiscard]] VaultResult add_image_prestaged(Vault& v, std::string_view gallery_path,
+                                              std::span<const uint8_t> file_data,
+                                              std::string_view filename,
+                                              const StagedThumb& thumb,
+                                              uint64_t created_ts);
+[[nodiscard]] VaultResult add_video_prestaged(Vault& v, std::string_view gallery_path,
+                                              std::span<const uint8_t> file_data,
+                                              std::string_view filename,
+                                              const StagedVideoInfo& info,
+                                              uint64_t created_ts);
+
 }  // namespace vault
