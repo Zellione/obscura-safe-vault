@@ -213,8 +213,9 @@ bool FileOpJob::start_transfer_gallery(vault::Vault& src, std::string src_galler
     return launch(FileOpKind::Transfer,
                   [this, &src, src_gallery = std::move(src_gallery), &dst,
                    dst_parent = std::move(dst_parent), mode, label = std::move(label)]() {
+        vault::TransferTally tally;
         const vault::VaultResult r =
-            vault::transfer_gallery(src, src_gallery, dst, dst_parent, mode, &progress_);
+            vault::transfer_gallery(src, src_gallery, dst, dst_parent, mode, &progress_, &tally);
         const bool cancelled = progress_.cancel.load();
 
         if (r != vault::VaultResult::Ok) {
@@ -226,7 +227,7 @@ bool FileOpJob::start_transfer_gallery(vault::Vault& src, std::string src_galler
         // Gallery transfer is one logical item; report media progress as the counts.
         const int total = progress_.total.load();
         const int done  = progress_.done.load();
-        return transfer_outcome(mode, done, 0, total, cancelled, label);
+        return transfer_outcome(mode, done, tally.failed, total, cancelled, label);
     });
 }
 

@@ -17,6 +17,16 @@ void record_failure(TransferTally& t, std::string path, VaultResult code,
 
 namespace {
 
+// Shared context for the subtree copy loop (bundled for cpp:S107).
+struct CopyCtx {
+    Vault&               src;
+    Vault&               dst;
+    TransferMode         mode;
+    crypto::SecureBytes& plain;
+    OpProgress*          progress;   // may be null
+    TransferTally&       tally;
+};
+
 // Append `gallery`'s slash-path child name; "" stays "".
 std::string child_path(std::string_view gallery, std::string_view name)
 {
@@ -179,50 +189,84 @@ VaultResult copy_one_media(const Vault& src, std::string_view src_gallery,
     return Ok;
 }
 
-// Copy every media named in `images` from `src`/`src_gallery` into `dst`/`dst_gallery`.
-// `progress` (optional) is bumped per file; a set cancel flag stops the copy between
-// files (returning Ok) — the caller detects the cancel via progress->cancel and leaves
-// the source intact.
-VaultResult copy_images(const Vault& src, std::string_view src_gallery,
-                        Vault& dst, std::string_view dst_gallery,
-                        const std::vector<std::string>& images, crypto::SecureBytes& plain,
-                        OpProgress* progress)
+// Copy one media via context; records failures and handles per-file Move.
+// Never aborts on per-file failures; returns void.
+void copy_one_media_ex(CopyCtx& c, std::string_view src_abs, std::string_view dst_gallery,
+                       std::string_view fname)
 {
     using enum VaultResult;
-    for (const auto& fname : images) {
-        if (progress && progress->cancel.load()) return Ok;   // clean partial: stop between files
-        TransferFailure::Stage stage = TransferFailure::Stage::Read;
-        if (VaultResult r = copy_one_media(src, src_gallery, dst, dst_gallery, fname, plain, stage);
-            r != Ok)
-            return r;
-        if (progress) progress->done.fetch_add(1);
+    auto stage = TransferFailure::Stage::Read;
+    if (VaultResult r = copy_one_media(c.src, src_abs, c.dst, dst_gallery, fname, c.plain, stage);
+        r != Ok) {
+        record_failure(c.tally, child_path(src_abs, fname), r, stage);
+    } else if (c.mode == TransferMode::Move) {
+        // Per-file Move (Phase 67): the destination add committed, so remove
+        // the source item now. A failed remove leaves a recoverable
+        // duplicate — reported, not fatal, and not double-counted as done.
+        if (VaultResult r2 = c.src.remove_image(src_abs, fname); r2 != Ok)
+            record_failure(c.tally, child_path(src_abs, fname), r2, TransferFailure::Stage::Write);
+        else
+            ++c.tally.done;
+    } else {
+        ++c.tally.done;
     }
-    return Ok;
+    if (c.progress) c.progress->done.fetch_add(1);
+}
+
+// Copy every media named in `images` from `src_abs` into `dst_gallery`.
+// Never aborts on per-file failures; records each and continues.
+void copy_images(CopyCtx& c, const std::string& src_abs, const std::string& dst_gallery,
+                 const std::vector<std::string>& images)
+{
+    for (const auto& fname : images) {
+        if (c.progress && c.progress->cancel.load()) return;
+        copy_one_media_ex(c, src_abs, dst_gallery, fname);
+    }
 }
 
 // Recreate the snapshotted subtree under `dest_root` in `dst` and copy each gallery's
-// media (parent-before-child order). Stops early (returning Ok) on cancel; the caller
-// checks progress->cancel to decide whether to remove the source. Returns the first error.
-VaultResult copy_subtree(const Vault& src, std::string_view src_gallery, Vault& dst,
-                         const std::string& dest_root, const std::vector<GallerySnap>& snaps,
-                         OpProgress* progress)
+// media (parent-before-child order). Collects failed sub-branch rel-prefixes for the
+// pruner. Never aborts on per-file failures; they are recorded in c.tally. snaps are
+// depth-first, parent-before-child, so a failed gallery's descendants form a CONTIGUOUS
+// run — the `skip_prefix` scan relies on this.
+void copy_subtree(CopyCtx& c, std::string_view src_gallery, const std::string& dest_root,
+                  const std::vector<GallerySnap>& snaps,
+                  std::vector<std::string>& failed_rels)
 {
     using enum VaultResult;
-    crypto::SecureBytes plain;
+    std::string skip_prefix;
+    bool skipping = false;
     for (const auto& snap : snaps) {
+        if (c.progress && c.progress->cancel.load()) return;
+        if (skipping &&
+            (snap.rel == skip_prefix || snap.rel.starts_with(skip_prefix + "/"))) {
+            // Unreachable branch: media counted failed (no per-file entries —
+            // the gallery's own entry covers the branch).
+            c.tally.failed += static_cast<int>(snap.images.size());
+            if (c.progress)
+                c.progress->done.fetch_add(static_cast<int>(snap.images.size()));
+            continue;
+        }
+        skipping = false;
+
         const std::string dst_gallery = snap.rel.empty() ? dest_root
                                                          : dest_root + "/" + snap.rel;
-        const std::string src_abs = snap.rel.empty() ? std::string(src_gallery)
-                                                      : std::string(src_gallery) + "/" + snap.rel;
-
-        if (VaultResult r = dst.create_gallery(dst_gallery); r != Ok && r != AlreadyExists)
-            return r;
-        if (VaultResult r = copy_images(src, src_abs, dst, dst_gallery, snap.images, plain, progress);
-            r != Ok)
-            return r;
-        if (progress && progress->cancel.load()) return Ok;   // cancelled between galleries
+        const std::string src_abs = snap.rel.empty()
+                                        ? std::string(src_gallery)
+                                        : std::string(src_gallery) + "/" + snap.rel;
+        if (VaultResult r = c.dst.create_gallery(dst_gallery); r != Ok && r != AlreadyExists) {
+            record_failure(c.tally, src_abs, r, TransferFailure::Stage::Write);
+            c.tally.failed += static_cast<int>(snap.images.size());
+            if (c.progress)
+                c.progress->done.fetch_add(static_cast<int>(snap.images.size()));
+            failed_rels.push_back(snap.rel);
+            if (snap.rel.empty()) return;   // subtree ROOT failed: nothing is reachable
+            skip_prefix = snap.rel;
+            skipping = true;
+            continue;
+        }
+        copy_images(c, src_abs, dst_gallery, snap.images);
     }
-    return Ok;
 }
 
 // A same-vault transfer forms a cycle when the destination parent is the moved
@@ -234,6 +278,27 @@ bool is_same_vault_cycle(const Vault& src, const Vault& dst,
     if (&src != &dst) return false;
     if (dst_parent == src_gallery) return true;
     return dst_parent.starts_with(std::string(src_gallery) + "/");
+}
+
+// Prune empty galleries bottom-up (reverse snapshot order = children before parents),
+// skipping failed branches so an empty gallery inside a never-copied branch is not lost.
+void prune_moved_galleries(Vault& src, std::string_view src_gallery,
+                           const std::vector<GallerySnap>& snaps,
+                           const std::vector<std::string>& failed_rels)
+{
+    auto in_failed_branch = [&](const std::string& rel) {
+        for (const auto& p : failed_rels)
+            if (rel == p || rel.starts_with(p + "/")) return true;
+        return false;
+    };
+    for (auto it = snaps.rbegin(); it != snaps.rend(); ++it) {
+        if (in_failed_branch(it->rel)) continue;
+        const std::string abs = it->rel.empty()
+                                    ? std::string(src_gallery)
+                                    : std::string(src_gallery) + "/" + it->rel;
+        if (src.resolve_node(abs) != nullptr && src.list(abs).empty())
+            (void)src.remove_gallery(abs);
+    }
 }
 
 } // namespace
@@ -290,7 +355,8 @@ std::vector<std::string> gallery_target_parents(const Vault& v)
 
 VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
                              Vault& dst, std::string_view dst_parent,
-                             TransferMode mode, OpProgress* progress)
+                             TransferMode mode, OpProgress* progress,
+                             TransferTally* tally)
 {
     using enum VaultResult;
 
@@ -323,17 +389,28 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
         progress->total.store(media);
     }
 
-    if (VaultResult r = copy_subtree(src, src_gallery, dst, dest_root, snaps, progress); r != Ok)
-        return r;
+    TransferTally local;
+    TransferTally& t = tally ? *tally : local;
 
-    // A cancel leaves the source intact even for Move — the partial copy in dst is a
-    // recoverable duplicate, never a loss.
-    if (progress && progress->cancel.load()) return Ok;
+    crypto::SecureBytes plain;
+    CopyCtx ctx{src, dst, mode, plain, progress, t};
+    std::vector<std::string> failed_rels;
+    copy_subtree(ctx, src_gallery, dest_root, snaps, failed_rels);
+
+    // The subtree root itself could not be created: structural failure, source
+    // untouched (per-file Move never ran — copy_one_media was never reached).
+    if (!failed_rels.empty() && failed_rels.front().empty())
+        return t.failures.empty() ? IoError : t.failures.front().code;
 
     lower_dst_watermark(src, dst);
 
-    // Everything copied into dst — for a Move, drop the source subtree (copy-then-delete).
-    if (mode == TransferMode::Move) return src.remove_gallery(src_gallery);
+    // A cancel stops cleanly between files: items moved so far live only in the
+    // destination (their source copies are already removed per-file), the rest
+    // only in the source — no duplicates, nothing lost. Skip pruning: galleries
+    // not yet recreated at the destination must survive.
+    if (progress && progress->cancel.load()) return Ok;
+
+    if (mode == TransferMode::Move) prune_moved_galleries(src, src_gallery, snaps, failed_rels);
     return Ok;
 }
 
@@ -364,16 +441,32 @@ TransferTally transfer_galleries(Vault& src, const std::vector<std::string>& src
                                  Vault& dst, std::string_view dst_parent,
                                  TransferMode mode, OpProgress* progress)
 {
+    using enum VaultResult;
     if (progress) progress->total.store(static_cast<int>(src_paths.size()));
 
-    TransferTally tally;
+    TransferTally out;
     for (const auto& path : src_paths) {
         if (progress && progress->cancel.load()) break;
-        if (transfer_gallery(src, path, dst, dst_parent, mode) == VaultResult::Ok) ++tally.done;
-        else                                                                       ++tally.failed;
+        TransferTally sub;
+        if (transfer_gallery(src, path, dst, dst_parent, mode, nullptr, &sub) == Ok) {
+            ++out.done;
+            // Merge per-file failures from this subtree into the output.
+            for (auto& f : sub.failures) {
+                if (out.failures.size() < MAX_TRANSFER_FAILURES)
+                    out.failures.push_back(std::move(f));
+            }
+            // per-file failures inside a structurally-Ok subtree do not change the
+            // SUBTREE done/failed counts, but the entries surface in the dialog
+        } else {
+            ++out.failed;
+            // Structural failure: record as a gallery-level entry.
+            if (out.failures.size() < MAX_TRANSFER_FAILURES)
+                out.failures.push_back({std::string(path), VaultResult::Ok,
+                                       TransferFailure::Stage::Write});
+        }
         if (progress) progress->done.fetch_add(1);
     }
-    return tally;
+    return out;
 }
 
 } // namespace vault

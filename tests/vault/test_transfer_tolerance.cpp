@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "vault/staging.h"
 #include "vault/transfer.h"
 #include "vault/vault.h"
 
@@ -118,4 +119,128 @@ TEST(transfer_images_records_failures_and_continues)
     CHECK(find_image(src, "g", "c.jpg") != nullptr);
     CHECK(find_image(src, "g", "a.jpg") == nullptr);
     CHECK(find_image(dst, "", "d.jpg") != nullptr);
+}
+
+// stage under a safe name, rename the UNATTACHED node, then attach:
+// attach_staged checks only sibling collision, not name safety — exactly the
+// trust gap a foreign vault exploits.
+static bool forge_bad_named_image(vault::Vault& v, const std::string& gallery,
+                                  const std::string& bad_name)
+{
+    auto staged = vault::stage_image(v, pattern(500, 42), "tmp_safe.jpg");
+    if (staged.status != vault::VaultResult::Ok) return false;
+    staged.node.name = bad_name;
+    return vault::attach_staged(v, gallery, std::move(staged.node))
+           == vault::VaultResult::Ok;
+}
+
+// A corrupt file inside a moved gallery no longer aborts the transfer: the rest
+// moves, the bad file + its ancestors survive at the source, and the failure is
+// recorded. Also proves per-file Move + empty-gallery pruning.
+TEST(transfer_gallery_tolerates_corrupt_file)
+{
+    using enum vault::VaultResult;
+    TempVault sa("s2"), da("d2");
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+    REQUIRE(src.create_gallery("album/sub") == Ok);
+    REQUIRE(src.add_image("album", pattern(3000, 1), "ok1.jpg") == Ok);
+    REQUIRE(src.add_image("album/sub", pattern(3000, 2), "bad.jpg") == Ok);
+    REQUIRE(src.add_image("album/sub", pattern(3000, 3), "ok2.jpg") == Ok);
+    tamper_data_chunk(sa.path, find_image(src, "album/sub", "bad.jpg")->meta.data_offset);
+
+    vault::TransferTally tally;
+    REQUIRE(vault::transfer_gallery(src, "album", dst, "", vault::TransferMode::Move,
+                                    nullptr, &tally) == Ok);
+
+    CHECK_EQ(tally.done, 2);
+    CHECK_EQ(tally.failed, 1);
+    REQUIRE(tally.failures.size() == 1u);
+    CHECK_EQ(tally.failures[0].path, std::string("album/sub/bad.jpg"));
+    CHECK(tally.failures[0].code == AuthFailed);
+    // Destination holds the two good files.
+    CHECK(find_image(dst, "album", "ok1.jpg") != nullptr);
+    CHECK(find_image(dst, "album/sub", "ok2.jpg") != nullptr);
+    // Source residue: bad.jpg + its ancestor galleries survive, nothing else.
+    CHECK(find_image(src, "album/sub", "bad.jpg") != nullptr);
+    CHECK(find_image(src, "album", "ok1.jpg") == nullptr);
+    CHECK(find_image(src, "album/sub", "ok2.jpg") == nullptr);
+}
+
+// A fully successful Move still removes the whole source subtree (pruning).
+TEST(transfer_gallery_full_move_prunes_source)
+{
+    using enum vault::VaultResult;
+    TempVault sa("s3"), da("d3");
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+    REQUIRE(src.create_gallery("a/b/c") == Ok);      // includes an EMPTY leaf
+    REQUIRE(src.add_image("a/b", pattern(2000, 1), "x.jpg") == Ok);
+
+    vault::TransferTally tally;
+    REQUIRE(vault::transfer_gallery(src, "a", dst, "", vault::TransferMode::Move,
+                                    nullptr, &tally) == Ok);
+    CHECK_EQ(tally.failed, 0);
+    CHECK(src.resolve_node("a") == nullptr);          // fully pruned
+    CHECK(dst.resolve_node("a/b/c") != nullptr);      // empty leaf recreated
+    CHECK(find_image(dst, "a/b", "x.jpg") != nullptr);
+}
+
+// An unsafe-NAMED sub-gallery (foreign vault): ONE failure entry for the
+// gallery, its media counted failed but not individually recorded, siblings
+// still transfer, and the skipped branch fully survives at the source.
+TEST(transfer_gallery_skips_bad_named_subbranch)
+{
+    using enum vault::VaultResult;
+    TempVault sa("s4"), da("d4");
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+    REQUIRE(src.create_gallery("top") == Ok);
+    REQUIRE(src.add_image("top", pattern(1000, 1), "keep.jpg") == Ok);
+    // Forge gallery "bad<g>" under top, holding two images.
+    REQUIRE(vault::attach_staged(src, "top", vault::IndexNode::gallery("bad<g>")) == Ok);
+    for (const char* n : {"in1.jpg", "in2.jpg"}) {
+        auto st = vault::stage_image(src, pattern(1000, 7), n);
+        REQUIRE(st.status == Ok);
+        REQUIRE(vault::attach_staged(src, "top/bad<g>", std::move(st.node)) == Ok);
+    }
+
+    vault::TransferTally tally;
+    REQUIRE(vault::transfer_gallery(src, "top", dst, "", vault::TransferMode::Move,
+                                    nullptr, &tally) == Ok);
+    CHECK_EQ(tally.done, 1);                       // keep.jpg
+    CHECK_EQ(tally.failed, 3);                     // the gallery + its 2 images
+    REQUIRE(tally.failures.size() == 1u);          // ONE entry: the gallery itself
+    CHECK_EQ(tally.failures[0].path, std::string("top/bad<g>"));
+    CHECK(tally.failures[0].code == InvalidArg);
+    // Skipped branch intact at source (including its media), moved file gone.
+    REQUIRE(src.resolve_node("top/bad<g>") != nullptr);
+    CHECK_EQ(src.list("top/bad<g>").size(), static_cast<size_t>(2));
+    CHECK(find_image(src, "top", "keep.jpg") == nullptr);
+}
+
+// A forged bad-named MEDIA file fails with InvalidArg/Write and the rest moves.
+TEST(transfer_gallery_records_bad_named_media)
+{
+    using enum vault::VaultResult;
+    TempVault sa("s5"), da("d5");
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+    REQUIRE(src.create_gallery("g") == Ok);
+    REQUIRE(src.add_image("g", pattern(1000, 1), "fine.jpg") == Ok);
+    REQUIRE(forge_bad_named_image(src, "g", "trailing dot."));
+
+    vault::TransferTally tally;
+    REQUIRE(vault::transfer_gallery(src, "g", dst, "", vault::TransferMode::Copy,
+                                    nullptr, &tally) == Ok);
+    CHECK_EQ(tally.done, 1);
+    CHECK_EQ(tally.failed, 1);
+    REQUIRE(tally.failures.size() == 1u);
+    CHECK_EQ(tally.failures[0].path, std::string("g/trailing dot."));
+    CHECK(tally.failures[0].code == InvalidArg);
+    CHECK(tally.failures[0].stage == vault::TransferFailure::Stage::Write);
 }
