@@ -101,7 +101,7 @@ the build needs `cl.exe` and `msbuild` on `PATH`.
 | **git** | checkout + submodules | <https://git-scm.com/download/win>, or `winget install Git.Git` |
 | **cmake** | building the vendored static libs | `choco install cmake` or `winget install Kitware.CMake` (VS 2022's bundled cmake works too) |
 | **ninja** | cmake generator for the vendored libs | `choco install ninja` or `winget install Ninja-build.Ninja` |
-| **nasm** | assembler for libaom (AVIF stills + AV1 video) | `choco install nasm` or installer from <https://nasm.us> — then add `C:\Program Files\NASM` to `PATH` yourself (neither does it for you) |
+| **nasm** | assembler for libaom (AVIF stills + AV1 video) | `choco install nasm`, `winget install -e --id NASM.NASM` (**from an elevated prompt** — non-admin winget silently installs nothing), or installer from <https://nasm.us> — then add `C:\Program Files\NASM` to `PATH` yourself (none of them do it for you) |
 | **MSYS2** — *optional, only for video/audio support* | POSIX shell + make for FFmpeg's `./configure` (MSVC still does the compiling) | <https://www.msys2.org> installer, or `winget install MSYS2.MSYS2` (default location `C:\msys64`) |
 
 Notes:
