@@ -11,6 +11,8 @@
 #include "ui/album_rebind.h"
 #include "vault/index.h"
 
+using vault::IndexNode;
+
 TEST(rebind_follows_the_item_when_a_node_is_inserted_before_it)
 {
     const std::vector<std::string> after{"g/a.jpg", "g/new.jpg", "g/b.jpg"};
@@ -80,4 +82,81 @@ TEST(compact_album_all_null_empties_both)
     std::vector<std::string>             paths{"g/x"};
     CHECK_EQ(ui::compact_album(images, paths), 1u);
     CHECK(images.empty()); CHECK(paths.empty());
+}
+
+// Phase 46 made galleries mixed: sub-galleries and media are siblings, and the
+// sorted listing partitions galleries FIRST. The grid/search screens index that
+// full listing, while the viewer's album holds media only — the two index
+// spaces differ by the number of sub-galleries. These helpers convert at the
+// boundary; without them, activating a video (or image) behind N sub-galleries
+// opened the item N positions later.
+
+TEST(media_index_skips_sub_galleries_before_the_item)
+{
+    IndexNode g1 = IndexNode::gallery("sub1");
+    IndexNode g2 = IndexNode::gallery("sub2");
+    IndexNode a = IndexNode::image("a.jpg");
+    IndexNode v = IndexNode::video("v.mp4");
+    IndexNode b = IndexNode::image("b.jpg");
+    const std::vector<const IndexNode*> listing{&g1, &g2, &a, &v, &b};
+
+    CHECK_EQ(ui::media_index_in_listing(listing, 3), 1);  // the video
+    CHECK_EQ(ui::media_index_in_listing(listing, 2), 0);  // first image
+    CHECK_EQ(ui::media_index_in_listing(listing, 4), 2);  // last image
+}
+
+TEST(media_index_is_identity_without_sub_galleries)
+{
+    IndexNode a = IndexNode::image("a.jpg");
+    IndexNode v = IndexNode::video("v.mp4");
+    const std::vector<const IndexNode*> listing{&a, &v};
+
+    CHECK_EQ(ui::media_index_in_listing(listing, 0), 0);
+    CHECK_EQ(ui::media_index_in_listing(listing, 1), 1);
+}
+
+TEST(media_index_clamps_out_of_range_and_empty)
+{
+    IndexNode g = IndexNode::gallery("sub");
+    IndexNode a = IndexNode::image("a.jpg");
+    const std::vector<const IndexNode*> listing{&g, &a};
+
+    CHECK_EQ(ui::media_index_in_listing(listing, -1), 0);
+    CHECK_EQ(ui::media_index_in_listing(listing, 99), 0);  // one media item → clamped to it
+    CHECK_EQ(ui::media_index_in_listing({}, 0), 0);
+}
+
+TEST(media_index_on_a_gallery_entry_lands_on_the_next_media)
+{
+    IndexNode g = IndexNode::gallery("sub");
+    IndexNode a = IndexNode::image("a.jpg");
+    const std::vector<const IndexNode*> listing{&g, &a};
+
+    CHECK_EQ(ui::media_index_in_listing(listing, 0), 0);  // defensive: not a media tile
+}
+
+TEST(listing_index_restores_the_sub_gallery_offset)
+{
+    IndexNode g1 = IndexNode::gallery("sub1");
+    IndexNode g2 = IndexNode::gallery("sub2");
+    IndexNode a = IndexNode::image("a.jpg");
+    IndexNode v = IndexNode::video("v.mp4");
+    const std::vector<const IndexNode*> listing{&g1, &g2, &a, &v};
+
+    CHECK_EQ(ui::listing_index_of_media(listing, 0), 2);
+    CHECK_EQ(ui::listing_index_of_media(listing, 1), 3);
+}
+
+TEST(listing_index_clamps_out_of_range_and_empty)
+{
+    IndexNode g = IndexNode::gallery("sub");
+    IndexNode a = IndexNode::image("a.jpg");
+    const std::vector<const IndexNode*> listing{&g, &a};
+
+    CHECK_EQ(ui::listing_index_of_media(listing, 99), 1);  // clamped to the last media
+    CHECK_EQ(ui::listing_index_of_media(listing, -1), 1);
+    CHECK_EQ(ui::listing_index_of_media({}, 0), 0);
+
+    const std::vector<const IndexNode*> only_galleries{&g};
+    CHECK_EQ(ui::listing_index_of_media(only_galleries, 0), 0);  // no media at all
 }

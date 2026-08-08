@@ -66,18 +66,25 @@ ImageViewer::ImageViewer(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& v
 
 void ImageViewer::on_enter()
 {
-    // Gallery mode snapshots the leaf gallery's images (a leaf holds only images,
-    // but filter defensively). Collection mode (e.g. favorites) was handed an
-    // explicit image set + parallel paths at construction — don't re-list.
+    // Gallery mode snapshots the gallery's media children (a mixed gallery also
+    // holds sub-galleries — Phase 46). Collection mode (e.g. favorites) was
+    // handed an explicit image set + parallel paths at construction — don't
+    // re-list.
     if (!album_.from_collection) {
+        const std::vector<const vault::IndexNode*> listing = vault_.list(album_.gallery_path);
         album_.images.clear();
         album_.paths.clear();
-        for (const vault::IndexNode* n : vault_.list(album_.gallery_path)) {
+        for (const vault::IndexNode* n : listing) {
             if (!n->is_media()) continue;   // images and videos (mixed leaf galleries)
             album_.images.push_back(n);
             album_.paths.push_back(album_.gallery_path.empty() ? n->name
                                                    : album_.gallery_path + "/" + n->name);
         }
+        // The grid and the search screens hand over an index into the FULL
+        // listing (sub-galleries partition first); the album above is media
+        // only. Convert, or every item after the sub-gallery block opens
+        // shifted by the number of sub-galleries.
+        index_ = media_index_in_listing(listing, index_);
     }
 
     if (album_.images.empty()) { go_back(); return; }
@@ -341,9 +348,15 @@ void ImageViewer::set_index(int delta)
 void ImageViewer::go_back()
 {
     // Collection mode returns to wherever it was launched from (e.g. the favorites
-    // grid); gallery mode returns to its leaf gallery at the current image.
-    if (album_.from_collection) request(album_.back.kind, album_.back.path, album_.back.index);
-    else                  request(NavKind::ToGallery, album_.gallery_path, index_);
+    // grid); gallery mode returns to its gallery at the current item. The grid
+    // selects by FULL-listing index, so the media-only album index converts back
+    // (the inverse of the on_enter conversion).
+    if (album_.from_collection) {
+        request(album_.back.kind, album_.back.path, album_.back.index);
+    } else {
+        request(NavKind::ToGallery, album_.gallery_path,
+                listing_index_of_media(vault_.list(album_.gallery_path), index_));
+    }
 }
 
 void ImageViewer::zoom_by(float factor, float cx, float cy)
