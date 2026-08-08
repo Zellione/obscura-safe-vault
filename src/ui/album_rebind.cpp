@@ -38,7 +38,7 @@ size_t compact_album(std::vector<const vault::IndexNode*>& images,
 
 int media_index_in_listing(std::span<const vault::IndexNode* const> listing, int listing_index)
 {
-    const int n = static_cast<int>(listing.size());
+    const auto n = static_cast<int>(listing.size());
     const int idx = std::clamp(listing_index, 0, std::max(0, n - 1));
     int media_before = 0;
     for (int i = 0; i < idx; ++i) {
@@ -58,8 +58,9 @@ int listing_index_of_media(std::span<const vault::IndexNode* const> listing, int
     const int want = std::clamp(media_index, 0, media_count - 1);
     int seen = 0;
     for (int i = 0; i < static_cast<int>(listing.size()); ++i) {
-        const vault::IndexNode* node = listing[static_cast<size_t>(i)];
-        if (node == nullptr || !node->is_media()) continue;
+        if (const vault::IndexNode* node = listing[static_cast<size_t>(i)];
+            node == nullptr || !node->is_media())
+            continue;
         if (seen == want) return i;
         ++seen;
     }
