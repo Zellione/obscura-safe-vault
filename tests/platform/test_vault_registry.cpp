@@ -4,6 +4,7 @@
 #include <fstream>
 #include <string>
 
+#include "platform/path_utf8.h"
 #include "platform/vault_registry.h"
 
 namespace fs = std::filesystem;
@@ -162,4 +163,18 @@ TEST(registry_empty_path_instance_is_safe_noop)
     CHECK_TRUE(reg.list().empty());
     CHECK_FALSE(reg.add("/vaults/a.osv"));   // nothing to write to
     CHECK_TRUE(reg.list().empty());
+}
+
+// A vault under a CJK/emoji directory must survive the add → write → list
+// round-trip byte-identically.
+TEST(registry_roundtrips_unicode_path)
+{
+    TempFile tf("unicode");
+    platform::VaultRegistry reg(tf.path);
+    const auto vault =
+        platform::utf8_to_path("/data/\xE6\x97\xA5\xE6\x9C\xAC/photos \xF0\x9F\x96\xBC.osv");
+    REQUIRE(reg.add(vault));
+    const auto entries = reg.list();
+    REQUIRE(entries.size() == 1u);
+    CHECK(entries[0] == vault.lexically_normal());
 }

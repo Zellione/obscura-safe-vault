@@ -10,6 +10,7 @@
 #include "gfx/window.h"
 #include "platform/file_dialog.h"
 #include "platform/paths.h"
+#include "platform/path_utf8.h"
 #include "platform/vault_registry.h"
 #include "ui/keybindings.h"
 #include "ui/progress_modal.h"
@@ -329,7 +330,7 @@ void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, flo
     std::string title;
     if (source_ == Source::Gallery) {
         title = std::format("{} gallery \"{}\"", verb,
-                             std::filesystem::path(src_gallery_).filename().string());
+                             platform::path_to_utf8(platform::utf8_to_path(src_gallery_).filename()));
     } else if (source_ == Source::Galleries) {
         title = std::format("{} {} galleries", verb, src_galleries_.size());
     } else {

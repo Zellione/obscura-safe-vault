@@ -6,6 +6,7 @@
 #include "ui/meta_json.h"
 #include "ui/zip_encoding.h"
 #include "vault/vault.h"
+#include "platform/path_utf8.h"
 
 #include "miniz.h"
 
@@ -149,7 +150,7 @@ bool open_archive(const std::filesystem::path& path, const char* tag,
         mz_zip_reader_init_mem(&zip, archive.data(), archive.size(), 0))
         return true;
     out.error = "Could not open archive";
-    std::println(stderr, "[{}] open failed: {}", tag, path.string());
+    std::println(stderr, "[{}] open failed: {}", tag, platform::path_to_utf8(path));
     return false;
 }
 

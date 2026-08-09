@@ -9,6 +9,7 @@
 #include "platform/file_dialog.h"
 #include "platform/second_vault_pref.h"
 #include "platform/vault_registry.h"
+#include "platform/path_utf8.h"
 #include "ui/second_vault.h"
 #include "ui/widgets.h"
 
@@ -63,7 +64,7 @@ void VaultManager::open_selected()
 {
     if (entries_.empty() || selected_ < 0 || selected_ >= static_cast<int>(entries_.size()))
         return;
-    const std::string path = entries_[static_cast<size_t>(selected_)].string();
+    const std::string path = platform::path_to_utf8(entries_[static_cast<size_t>(selected_)]);
     if (!active_path_.empty() && path == active_path_)
         request(NavKind::ToGallery);            // already unlocked: jump straight in
     else
@@ -100,7 +101,7 @@ void VaultManager::handle_key(const SDL_KeyboardEvent& key)
         case SDLK_L: {
             const auto warm = ui::second_vault_status();
             if (!entries_.empty() && selected_ >= 0 && selected_ < static_cast<int>(entries_.size())) {
-                const std::string sel_path = entries_[static_cast<size_t>(selected_)].string();
+                const std::string sel_path = platform::path_to_utf8(entries_[static_cast<size_t>(selected_)]);
                 if (warm.occupied && sel_path == warm.path) { request(LockSecond); break; }
             }
             if (!active_path_.empty()) request(LockActive);
@@ -192,8 +193,8 @@ void VaultManager::render(gfx::Renderer& r)
         if (sel) r.draw_selection_glow(box, RADIUS, ACCENT);
         r.draw_round_rect(box, RADIUS, sel ? SURFACE_HI : SURFACE);
 
-        const std::string full = entries_[i].string();
-        std::string label = entries_[i].filename().string();
+        const std::string full = platform::path_to_utf8(entries_[i]);
+        std::string label = platform::path_to_utf8(entries_[i].filename());
         // Append warm vault badge before elision (warm and active can never be the same row)
         if (warm.occupied && full == warm.path)
             label += warm.mode == platform::SecondVaultMode::KeepSession

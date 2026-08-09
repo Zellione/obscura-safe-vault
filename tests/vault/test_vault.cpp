@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "image/fixtures.h"
+#include "platform/path_utf8.h"
 #include "vault/vault.h"
 #include "vault/vault_ops.h"
 
@@ -443,4 +444,28 @@ TEST(vault_add_image_marks_animated_gif)
 
     CHECK(anim_node->meta.animated);
     CHECK(!still_node->meta.animated);
+}
+
+// A vault FILE whose path contains non-ANSI characters must create, unlock,
+// and reopen. On Windows this exercises the _wfopen path; on Linux it pins
+// UTF-8 byte passthrough.
+TEST(vault_at_unicode_path_roundtrips)
+{
+    using enum vault::VaultResult;
+    namespace fs = std::filesystem;
+    const fs::path p = fs::temp_directory_path() /
+        platform::utf8_to_path("osv_\xE6\x97\xA5\xE6\x9C\xAC_\xF0\x9F\x96\xBC.osv");
+    std::error_code ec; fs::remove(p, ec);
+    const std::string path_utf8 = platform::path_to_utf8(p);
+
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(path_utf8, bytes("pw"), {}, kTestKdf, v) == Ok);
+        REQUIRE(v.add_image("", std::vector<uint8_t>(64, 7), "a.jpg") == Ok);
+    }
+    vault::Vault v2;
+    REQUIRE(vault::Vault::open(path_utf8, v2) == Ok);
+    REQUIRE(v2.unlock(bytes("pw"), {}) == Ok);
+    CHECK(v2.list("").size() == 1u);
+    fs::remove(p, ec);
 }

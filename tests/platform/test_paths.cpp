@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <string>
 
+#include "platform/path_utf8.h"
 #include "platform/paths.h"
 
 TEST(paths_default_vault_filename)
@@ -138,4 +139,14 @@ TEST(normalize_user_path_leaves_an_ordinary_path_alone)
     auto p = platform::normalize_user_path("/media/usb/photos.osv");
     REQUIRE(p.has_value());
     CHECK_EQ(p->generic_string(), std::string("/media/usb/photos.osv"));
+}
+
+// normalize_user_path must decode its input as UTF-8 (SDL dialogs hand back
+// UTF-8), not the ANSI code page — byte-identical round-trip is the contract.
+TEST(normalize_user_path_preserves_utf8_bytes)
+{
+    const std::string raw = "vaults/\xE6\x97\xA5\xE6\x9C\xAC/\xF0\x9F\x96\xBC.osv";
+    const auto p = platform::normalize_user_path(raw);
+    REQUIRE(p.has_value());
+    CHECK_EQ(platform::path_to_utf8_generic(*p), raw);
 }

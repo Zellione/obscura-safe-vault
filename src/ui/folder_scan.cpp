@@ -3,6 +3,8 @@
 #include <print>
 #include <system_error>
 
+#include "platform/path_utf8.h"
+
 namespace fs = std::filesystem;
 
 namespace ui {
@@ -30,7 +32,7 @@ std::vector<ZipEntry> scan_folder(const fs::path& root, ScanLimits limits)
         const fs::path rel = fs::relative(e.path(), root, ec);
         if (ec) { ec.clear(); continue; }
 
-        out.push_back({.path = rel.generic_string(), .is_dir = e.is_directory(ec)});
+        out.push_back({.path = platform::path_to_utf8_generic(rel), .is_dir = e.is_directory(ec)});
         ec.clear();
     }
     return out;

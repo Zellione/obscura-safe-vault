@@ -6,6 +6,8 @@
 #include "ui/recursive_hooks.h"
 #include "ui/recursive_import.h"
 
+#include "platform/path_utf8.h"
+
 #include <vector>
 
 namespace ui {
@@ -23,7 +25,7 @@ ZipImportOutcome import_archive_recursive(MediaSink&                   sink,
         out.error = "Could not read archive";
         return out;
     }
-    return import_archive_bytes_recursive(sink, bytes, archive_path.filename().string(),
+    return import_archive_bytes_recursive(sink, bytes, platform::path_to_utf8(archive_path.filename()),
                                           new_gallery_name, sink_root, progress, password);
 }
 

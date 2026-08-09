@@ -4,6 +4,7 @@
 #include <print>
 #include <string>
 
+#include "platform/path_utf8.h"
 #include "platform/paths.h"
 
 namespace platform {
@@ -41,13 +42,13 @@ bool ThemePref::save(gfx::ThemeId id) const
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         if (!out) {
-            std::println(stderr, "[ThemePref] cannot write {}", tmp.string());
+            std::println(stderr, "[ThemePref] cannot write {}", path_to_utf8(tmp));
             return false;
         }
         out << gfx::theme_slug(id) << '\n';
         out.flush();
         if (!out) {
-            std::println(stderr, "[ThemePref] write error on {}", tmp.string());
+            std::println(stderr, "[ThemePref] write error on {}", path_to_utf8(tmp));
             return false;
         }
     }

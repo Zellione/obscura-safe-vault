@@ -13,6 +13,7 @@
 #endif
 
 #include "crypto/random.h"
+#include "platform/path_utf8.h"
 
 namespace platform {
 
@@ -54,7 +55,7 @@ std::optional<std::filesystem::path> normalize_user_path(std::string_view raw)
     // path that gets opened would differ from the one we validated.
     if (raw.contains('\0')) return std::nullopt;
 
-    std::filesystem::path p{raw};
+    std::filesystem::path p = utf8_to_path(raw);
     p = p.lexically_normal();
     if (p.empty()) return std::nullopt;
     return p;
@@ -80,7 +81,7 @@ std::filesystem::path default_vault_path()
 
 std::optional<std::vector<uint8_t>> read_file(const std::filesystem::path& path)
 {
-    std::FILE* f = std::fopen(path.string().c_str(), "rb");
+    std::FILE* f = fopen_path(path, "rb");
     if (!f) return std::nullopt;
 
     // Size first, then one allocation and one read. Keyfiles pass through
@@ -103,14 +104,14 @@ bool write_new_keyfile(const std::filesystem::path& path)
 {
     if (std::error_code ec; std::filesystem::exists(path, ec)) {
         std::println(stderr, "[Platform] refusing to overwrite existing keyfile {}",
-                     path.string());
+                     path_to_utf8(path));
         return false;
     }
 
     std::array<uint8_t, KEYFILE_SIZE> key{};
     if (!crypto::fill_random(key)) return false;
 
-    std::FILE* f = std::fopen(path.string().c_str(), "wb");
+    std::FILE* f = fopen_path(path, "wb");
     if (!f) {
         crypto_wipe(key.data(), key.size());
         return false;

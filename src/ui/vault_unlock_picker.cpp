@@ -10,6 +10,7 @@
 #include "gfx/window.h"
 #include "platform/file_dialog.h"
 #include "platform/paths.h"
+#include "platform/path_utf8.h"
 #include "platform/vault_registry.h"
 #include "ui/second_vault.h"
 #include "ui/text_input_event.h"
@@ -68,7 +69,7 @@ void VaultUnlockPicker::open(std::string src_path)
 
     candidates_.clear();
     for (const auto& p : registry_.list())
-        if (p.string() != src_path_) candidates_.push_back(p);
+        if (platform::path_to_utf8(p) != src_path_) candidates_.push_back(p);
 }
 
 void VaultUnlockPicker::close()
@@ -81,7 +82,7 @@ void VaultUnlockPicker::close()
 
 std::string VaultUnlockPicker::dest_label() const
 {
-    return dest_.is_self ? "this vault" : std::filesystem::path(dest_.path).stem().string();
+    return dest_.is_self ? "this vault" : platform::path_to_utf8(platform::utf8_to_path(dest_.path).stem());
 }
 
 vault::Vault& VaultUnlockPicker::unlocked_vault() noexcept
@@ -101,7 +102,7 @@ void VaultUnlockPicker::choose_vault()
     const int ci = vault_sel_ - 1;
     if (ci < 0 || ci >= static_cast<int>(candidates_.size())) return;
     dest_.is_self = false;
-    dest_.path    = candidates_[static_cast<size_t>(ci)].string();
+    dest_.path    = platform::path_to_utf8(candidates_[static_cast<size_t>(ci)]);
     dest_.pw.clear();
     dest_.keyfile_path.clear();
 
@@ -213,11 +214,11 @@ void VaultUnlockPicker::render(gfx::Renderer& r, gfx::FontAtlas& font, float ix,
     if (stage_ == Stage::PickVault) {
         r.draw_text(font, ix, iy + 36, "Destination vault:", TEXT_DIM);
         std::vector<std::string> labels = {"This vault"};
-        for (const auto& p : candidates_) labels.push_back(p.filename().string());
+        for (const auto& p : candidates_) labels.push_back(platform::path_to_utf8(p.filename()));
         row_list(labels, vault_sel_, iy + 72);
     } else {
         r.draw_text(font, ix, iy + 36,
-                    fit_text(font, "Unlock " + std::filesystem::path(dest_.path).filename().string(),
+                    fit_text(font, "Unlock " + platform::path_to_utf8(platform::utf8_to_path(dest_.path).filename()),
                             mw - 40),
                     TEXT_DIM);
         draw_edit_field(r, font, {ix, iy + 72, mw - 40, 40}, dest_.pw, dest_.pw_chrome,
