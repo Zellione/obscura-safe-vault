@@ -6,6 +6,7 @@
 #include <print>
 
 #include "platform/paths.h"
+#include "platform/path_utf8.h"
 
 #if defined(_WIN32)
 // Get/SetProcessWorkingSetSize for grow_secure_mem_budget(). (Core dumps work
@@ -42,7 +43,7 @@ bool redirect_stream_to_file(std::FILE* stream, const std::filesystem::path& pat
     // Binary mode: text mode on Windows translates '\n' to "\r\n", which
     // would make the on-disk line endings platform-dependent (mirrors
     // error_log.cpp / theme_pref.cpp's own file writes).
-    return std::freopen(path.string().c_str(), "ab", stream) != nullptr;
+    return platform::freopen_path(path, "ab", stream) != nullptr;
 }
 
 void redirect_diagnostics_to_log_file() noexcept

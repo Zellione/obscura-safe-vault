@@ -7,6 +7,7 @@
 #include "gfx/theme.h"
 #include "platform/second_vault_pref.h"
 #include "platform/vault_registry.h"
+#include "platform/path_utf8.h"
 #include "ui/second_vault.h"
 #include "ui/widgets.h"
 
@@ -34,7 +35,7 @@ void QuickSwitch::open()
 void QuickSwitch::choose()
 {
     if (sel_ < 0 || sel_ >= static_cast<int>(vaults_.size())) { close(); return; }
-    const auto path = vaults_[static_cast<size_t>(sel_)].string();
+    const auto path = platform::path_to_utf8(vaults_[static_cast<size_t>(sel_)]);
     close();
     if (path == active_path_) return;   // already active — no-op
     chosen_     = path;
@@ -89,9 +90,9 @@ void QuickSwitch::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float 
         const float ry = my + 96 + static_cast<float>(i) * 34.0f;
         const bool  on = (static_cast<int>(i) == sel_);
         if (on) r.draw_round_rect({ix, ry, mw - 40, 30}, RADIUS_SMALL, SURFACE_HI);
-        std::string label = vaults_[i].filename().string();
-        if (vaults_[i].string() == active_path_) label += "  (current)";
-        if (warm.occupied && vaults_[i].string() == warm.path)
+        std::string label = platform::path_to_utf8(vaults_[i].filename());
+        if (platform::path_to_utf8(vaults_[i]) == active_path_) label += "  (current)";
+        if (warm.occupied && platform::path_to_utf8(vaults_[i]) == warm.path)
             label += warm.mode == platform::SecondVaultMode::KeepSession
                          ? "  (unlocked · session)"
                          : "  (unlocked · " + ui::format_keep_open_left(warm.seconds_left) + ")";

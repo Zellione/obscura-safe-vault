@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <print>
 
+#include "platform/path_utf8.h"
 #include "vault/safe_name.h"
 
 namespace ui {
@@ -47,7 +48,7 @@ vault::VaultResult export_one_media(const vault::Vault&          vault,
 
     // Deliberate, gated deviation from invariant #1: write the plaintext to disk.
     bool ok = false;
-    if (std::FILE* fp = std::fopen(out_path.string().c_str(), "wb")) {
+    if (std::FILE* fp = platform::fopen_path(out_path, "wb")) {
         const size_t n = scratch.size();
         ok = (n == 0) || (std::fwrite(scratch.data(), 1, n, fp) == n);
         ok = (std::fflush(fp) == 0) && ok;
@@ -58,7 +59,7 @@ vault::VaultResult export_one_media(const vault::Vault&          vault,
     scratch.wipe();
 
     if (!ok) {
-        std::println(stderr, "[Export] failed to write {}", out_path.string());
+        std::println(stderr, "[Export] failed to write {}", platform::path_to_utf8(out_path));
         return vault::VaultResult::IoError;
     }
     return vault::VaultResult::Ok;
@@ -93,7 +94,7 @@ ExportSummary export_images(const vault::Vault&                      vault,
             if (!export_path_within(dest_dir, out)) {
                 std::println(stderr,
                              "[Export] refusing to write outside the chosen folder: {}",
-                             out.string());
+                             platform::path_to_utf8(out));
                 ++sum.failed;
             } else if (export_one_media(vault, *node, out, scratch) == vault::VaultResult::Ok) {
                 ++sum.written;

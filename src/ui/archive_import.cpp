@@ -6,6 +6,7 @@
 #include "image/format_registry.h"
 #include "ui/archive_reader.h"
 #include "ui/import_common.h"
+#include "platform/path_utf8.h"
 
 #include <print>
 #include <vector>
@@ -22,7 +23,7 @@ bool open_archive(const std::filesystem::path& path, const char* tag,
     if (std::vector<uint8_t> bytes;
         !read_whole_file(path, bytes) || !reader.open(bytes, password)) {
         out.error = "Could not open archive";
-        std::println(stderr, "[{}] open failed: {}", tag, path.string());
+        std::println(stderr, "[{}] open failed: {}", tag, platform::path_to_utf8(path));
         return false;
     }
     if (!password_protected) return true;

@@ -6,6 +6,7 @@
 
 #include <array>
 #include "ui/archive_import.h"
+#include "platform/path_utf8.h"
 #include "ui/folder_scan.h"
 #include "ui/media_sink.h"
 #include "ui/zip_import.h"
@@ -456,7 +457,7 @@ uint64_t ImportQueue::enqueue_archive(std::filesystem::path archive,
     Task task{
         .id = id,
         .kind = kind,
-        .display_name = archive.filename().string(),
+        .display_name = platform::path_to_utf8(archive.filename()),
         .dest_gallery = std::move(dest_gallery),
         .files = {},
         .archive_path = std::move(archive),
@@ -496,7 +497,7 @@ uint64_t ImportQueue::enqueue_volume_set(std::vector<std::filesystem::path> volu
     Task task{
         .id = id,
         .kind = kind,
-        .display_name = first.filename().string(),
+        .display_name = platform::path_to_utf8(first.filename()),
         .dest_gallery = std::move(dest_gallery),
         .files = {},
         .archive_path = first,
@@ -1046,7 +1047,7 @@ void ImportQueue::process_files_task(Task& task)
             }
 
             // Stage the file
-            const std::string filename = file_path.filename().string();
+            const std::string filename = platform::path_to_utf8(file_path.filename());
             const vault::StagedThumb* thumb = nullptr;
             if (pf.decode_job && decode_pool_->is_done(pf.decode_job)) {
                 thumb = &pf.decode_job->result;
@@ -1134,7 +1135,7 @@ void ImportQueue::process_volume_set_task(Task& task, StagingSink& sink,
     set.style = task.volume_style;
     set.volumes.reserve(task.volumes.size());
     for (const auto& v : task.volumes) {
-        set.volumes.push_back(v.filename().string());
+        set.volumes.push_back(platform::path_to_utf8(v.filename()));
     }
 
     const auto assembled = assemble_volume_set(set, task.volumes.front().parent_path());

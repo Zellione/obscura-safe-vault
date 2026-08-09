@@ -69,4 +69,17 @@ namespace platform {
 #endif
 }
 
+// freopen that accepts the FULL native path range: _wfreopen on Windows (narrow
+// freopen goes through the ANSI code page and fails on unmappable names),
+// plain freopen elsewhere.
+[[nodiscard]] inline std::FILE* freopen_path(const std::filesystem::path& p, const char* mode, std::FILE* stream)
+{
+#if defined(_WIN32)
+    std::wstring wmode(mode, mode + std::strlen(mode));   // modes are ASCII
+    return ::_wfreopen(p.c_str(), wmode.c_str(), stream);
+#else
+    return std::freopen(p.c_str(), mode, stream);
+#endif
+}
+
 } // namespace platform

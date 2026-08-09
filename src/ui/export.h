@@ -27,6 +27,7 @@
 #include <string>
 #include <string_view>
 
+#include "platform/path_utf8.h"
 #include "vault/op_progress.h"
 #include "vault/vault.h"
 
@@ -69,8 +70,8 @@ template <class Exists>
 
     // Split "name.ext" so the counter goes before the extension: "name (1).ext".
     const std::filesystem::path base(filename);
-    const std::string stem = base.stem().string();
-    const std::string ext  = base.extension().string();
+    const std::string stem = platform::path_to_utf8(base.stem());
+    const std::string ext  = platform::path_to_utf8(base.extension());
     for (int n = 1;; ++n) {
         candidate = dir / std::format("{} ({}){}", stem, n, ext);
         if (!exists(candidate)) return candidate;

@@ -20,6 +20,7 @@
 #include "platform/folder_dialog.h"
 #include "platform/paths.h"
 #include "platform/perf.h"
+#include "platform/path_utf8.h"
 #include "ui/chrome_layout.h"
 #include "ui/delete_summary.h"
 #include "ui/detail_model.h"
@@ -541,7 +542,7 @@ void GalleryGrid::do_export(const std::filesystem::path& dest)
     // UI does not refresh while the job runs — so they stay valid on the worker.
     error_.clear();
     status_.clear();
-    naming_.file_op.start_export(vault_, std::move(picked), dest, dest.string());
+    naming_.file_op.start_export(vault_, std::move(picked), dest, platform::path_to_utf8(dest));
     mark_dirty();
 }
 
@@ -1177,7 +1178,7 @@ void GalleryGrid::process_next_queued_zip_import()
     std::vector<std::string> names;
     std::error_code          ec;
     for (const auto& e : std::filesystem::directory_iterator(picked.parent_path(), ec)) {
-        names.push_back(e.path().filename().string());
+        names.push_back(platform::path_to_utf8(e.path().filename()));
     }
     return names;   // empty on error: a set simply is not detected
 }
@@ -1188,18 +1189,18 @@ void GalleryGrid::continue_volume_set_naming()
 {
     const auto& zp = naming_.zip.path;
 
-    std::string ext = zp.extension().string();
+    std::string ext = platform::path_to_utf8(zp.extension());
     std::ranges::transform(ext, ext.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     // Classify from the SET's stem, not the volume: "movie.tar.001" is a tar.
-    std::string stem_ext = std::filesystem::path(naming_.zip.volume_set.stem).extension().string();
+    std::string stem_ext = platform::path_to_utf8(platform::utf8_to_path(naming_.zip.volume_set.stem).extension());
     std::ranges::transform(stem_ext, stem_ext.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     const auto [cbz, archive_backend] = classify_archive_ext(stem_ext);
 
     start_naming();
     if (naming_.active) {
-        naming_.buf.set_text(std::filesystem::path(naming_.zip.volume_set.stem).stem().string());
+        naming_.buf.set_text(platform::path_to_utf8(platform::utf8_to_path(naming_.zip.volume_set.stem).stem()));
         naming_.zip.cbz             = cbz;
         naming_.zip.archive_backend = archive_backend;
         // A split set's encryption cannot be probed from one volume, so the
@@ -1214,7 +1215,7 @@ void GalleryGrid::handle_single_archive_for_naming(const std::filesystem::path& 
 {
     // Phase 53: is this one volume of a split set? Detection is by name only,
     // so a lone "photos.zip" with no siblings stays an ordinary archive.
-    if (const VolumeSet set = detect_volume_set(zp.filename().string(), sibling_names(zp));
+    if (const VolumeSet set = detect_volume_set(platform::path_to_utf8(zp.filename()), sibling_names(zp));
         set.style != VolumeStyle::None) {
         naming_.zip.volume_set = set;
         naming_.zip.volume_paths.clear();
@@ -1232,7 +1233,7 @@ void GalleryGrid::handle_single_archive_for_naming(const std::filesystem::path& 
     naming_.zip.volume_set   = {};
     naming_.zip.volume_paths.clear();
 
-    std::string ext = zp.extension().string();
+    std::string ext = platform::path_to_utf8(zp.extension());
     std::ranges::transform(ext, ext.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     auto [cbz, archive_backend] = classify_archive_ext(ext);
@@ -1241,8 +1242,8 @@ void GalleryGrid::handle_single_archive_for_naming(const std::filesystem::path& 
     if (needs_password) archive_backend = true;
 
     const std::string gallery_name = archive_backend
-        ? zp.stem().string()
-        : ui::meta_gallery_name(ui::peek_archive_meta(zp), zp.stem().string());
+        ? platform::path_to_utf8(zp.stem())
+        : ui::meta_gallery_name(ui::peek_archive_meta(zp), platform::path_to_utf8(zp.stem()));
 
     start_naming();
     if (naming_.active) {
@@ -1258,8 +1259,8 @@ void GalleryGrid::handle_single_archive_for_naming(const std::filesystem::path& 
 void GalleryGrid::handle_multiple_archives_enqueue(const std::vector<std::string>& paths)
 {
     for (const auto& path : paths) {
-        std::filesystem::path zp(path);
-        std::string ext = zp.extension().string();
+        std::filesystem::path zp = platform::utf8_to_path(path);
+        std::string ext = platform::path_to_utf8(zp.extension());
         std::ranges::transform(ext, ext.begin(),
                                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         auto [cbz, archive_backend] = classify_archive_ext(ext);
@@ -1268,8 +1269,8 @@ void GalleryGrid::handle_multiple_archives_enqueue(const std::vector<std::string
         if (needs_password) archive_backend = true;
 
         const std::string gallery_name = archive_backend
-            ? zp.stem().string()
-            : ui::meta_gallery_name(ui::peek_archive_meta(zp), zp.stem().string());
+            ? platform::path_to_utf8(zp.stem())
+            : ui::meta_gallery_name(ui::peek_archive_meta(zp), platform::path_to_utf8(zp.stem()));
 
         if (!needs_password) {
             // Unencrypted: enqueue directly
@@ -1319,13 +1320,13 @@ void GalleryGrid::pump_folder_import()
         if (naming_.active) {
             naming_.folder.path = res->front();
             naming_.folder.active = true;
-            naming_.buf.set_text(std::filesystem::path(res->front()).filename().string());
+            naming_.buf.set_text(platform::path_to_utf8(platform::utf8_to_path(res->front()).filename()));
         }
     } else {
         // Multiple folders: auto-name each from basename without prompting
         for (const auto& p : *res) {
-            const std::filesystem::path root(p);
-            queue_.enqueue_folder(root, nav_.path(), root.filename().string());
+            const std::filesystem::path root = platform::utf8_to_path(p);
+            queue_.enqueue_folder(root, nav_.path(), platform::path_to_utf8(root.filename()));
         }
         status_ = "Import queued — Shift+I for status";
     }

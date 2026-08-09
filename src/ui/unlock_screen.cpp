@@ -13,6 +13,7 @@
 #include "gfx/window.h"
 #include "platform/file_dialog.h"
 #include "platform/paths.h"
+#include "platform/path_utf8.h"
 #include "ui/clipboard_secret.h"
 #include "ui/passphrase.h"
 #include "ui/text_input_event.h"
@@ -278,10 +279,10 @@ void UnlockScreen::submit()
     // own mlock'd buffers before returning, so both can be wiped/kept here.
     // update() collects the outcome and navigates / reports the error.
     if (d.action == SubmitAction::Create) {
-        job_.start_create(vault_, vault_path_.string(), pw_.bytes(), keyfile,
+        job_.start_create(vault_, platform::path_to_utf8(vault_path_), pw_.bytes(), keyfile,
                           crypto::DEFAULT_KDF_PARAMS);
     } else {
-        job_.start_unlock(vault_, vault_path_.string(), pw_.bytes(), keyfile);
+        job_.start_unlock(vault_, platform::path_to_utf8(vault_path_), pw_.bytes(), keyfile);
     }
     if (!keyfile.empty()) crypto_wipe(keyfile.data(), keyfile.size());
 }
@@ -301,7 +302,7 @@ void UnlockScreen::render(gfx::Renderer& r)
 
     r.draw_text(font_, 60, 44, create_mode_ ? "Create Vault" : "Unlock Vault", TEXT);
     r.draw_text(font_, 60, 92,
-                fit_text(font_, "Vault: " + vault_path_.string(), W - 120), TEXT_DIM);
+                fit_text(font_, "Vault: " + platform::path_to_utf8(vault_path_), W - 120), TEXT_DIM);
 
     const float fx = 60;
     const float fw = W - 120;

@@ -1,6 +1,7 @@
 #include "ui/volume_import.h"
 
 #include "platform/paths.h"
+#include "platform/path_utf8.h"
 
 #include <cstdio>
 #include <format>
@@ -26,7 +27,7 @@ namespace {
 // this module does not depend on the import pipeline.
 [[nodiscard]] bool read_volume(const std::filesystem::path& p, std::vector<uint8_t>& out)
 {
-    std::FILE* fp = std::fopen(p.string().c_str(), "rb");
+    std::FILE* fp = platform::fopen_path(p, "rb");
     if (fp == nullptr) {
         return false;
     }
@@ -89,7 +90,7 @@ AssembledVolumes assemble_volume_set(const VolumeSet& set, const std::filesystem
     std::vector<std::filesystem::path> paths;
     paths.reserve(set.volumes.size());
     for (const std::string& name : set.volumes) {
-        const auto normalised = platform::normalize_user_path((dir / name).string());
+        const auto normalised = platform::normalize_user_path(platform::path_to_utf8(dir / name));
         if (!normalised.has_value()) {
             out.error = std::format("Unusable volume path: {}", name);
             return out;
@@ -111,7 +112,7 @@ AssembledVolumes assemble_volume_set(const VolumeSet& set, const std::filesystem
         if (!read_volume(p, b)) {
             // Detection saw the name in a listing; the file can still be gone,
             // unreadable, or renamed by the time the user confirms.
-            out.error = std::format("Could not read volume: {}", p.filename().string());
+            out.error = std::format("Could not read volume: {}", platform::path_to_utf8(p.filename()));
             return out;
         }
         bufs.push_back(std::move(b));

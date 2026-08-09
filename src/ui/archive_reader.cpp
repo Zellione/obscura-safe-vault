@@ -8,6 +8,8 @@
 #include <cstring>
 #include <print>
 
+#include "platform/path_utf8.h"
+
 namespace ui {
 namespace {
 
@@ -45,7 +47,7 @@ struct archive* open_stream_files(const std::vector<std::filesystem::path>& file
     // Convert to C strings in a vector that stays alive for archive_read_open_filenames
     std::vector<std::string> vol_strings;
     for (const auto& vol : file_paths) {
-        vol_strings.push_back(vol.string());
+        vol_strings.push_back(platform::path_to_utf8(vol));
     }
 
     std::vector<const char*> vol_cstrs;

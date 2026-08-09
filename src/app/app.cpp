@@ -13,6 +13,7 @@
 #include "platform/error_log.h"
 #include "platform/harden.h"
 #include "platform/paths.h"
+#include "platform/path_utf8.h"
 #include "platform/second_vault_pref.h"
 #include "media/volume_setting.h"
 #include "platform/theme_pref.h"
@@ -428,9 +429,9 @@ void draw_second_vault_badge(gfx::Renderer& r, gfx::FontAtlas& font, int win_w, 
     std::string label =
         st.mode == platform::SecondVaultMode::KeepSession
             ? std::format("2nd vault unlocked · session — {}",
-                          std::filesystem::path(st.path).stem().string())
+                          platform::path_to_utf8(platform::utf8_to_path(st.path).stem()))
             : std::format("2nd vault unlocked · {} — {}", ui::format_keep_open_left(st.seconds_left),
-                          std::filesystem::path(st.path).stem().string());
+                          platform::path_to_utf8(platform::utf8_to_path(st.path).stem()));
     static constexpr auto PAD    = 10.0f;
     static constexpr auto MARGIN = 16.0f;
     const auto max_w = static_cast<float>(win_w) * 0.6f;
