@@ -12,6 +12,7 @@
 #include "gfx/window.h"
 #include "ui/list_layout.h"
 #include "ui/nav_model.h"
+#include "ui/position_label.h"
 #include "ui/result_grid.h"
 #include "ui/text_metrics.h"
 #include "ui/tile_thumb.h"
@@ -116,7 +117,14 @@ void SearchResultView::render(gfx::Renderer& r, float x, float colw, bool hot)
 
     // Grid view rendering
     if (hot) r.draw_text(font_, x - 16, TOP, ">", ACCENT);
-    r.draw_text(font_, x, TOP, std::format("Results ({})", results_.size()), TEXT_DIM);
+
+    // Phase 68: Build results header with position counter if available
+    std::string header = std::format("Results ({})", results_.size());
+    const std::string pos = ui::position_label(cur_result_, results_.size());
+    if (!pos.empty()) {
+        header += " · " + pos;
+    }
+    r.draw_text(font_, x, TOP, header, TEXT_DIM);
 
     constexpr float TILE = 92.0f;
     constexpr float TGAP = 12.0f;

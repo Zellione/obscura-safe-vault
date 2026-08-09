@@ -18,6 +18,7 @@
 #include "ui/list_layout.h"
 #include "ui/parent_group.h"
 #include "ui/nav_model.h"
+#include "ui/position_label.h"
 #include "ui/text_input_event.h"
 #include "ui/text_metrics.h"
 #include "ui/tile_thumb.h"
@@ -951,7 +952,15 @@ void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
 
     // List view rendering (when not in grid mode)
     if (hot) r.draw_text(font_, x - 16, TOP, ">", ACCENT);
-    r.draw_text(font_, x, TOP, std::format("Results ({})", result_view_.get_results().size()), TEXT_DIM);
+
+    // Phase 68: Build results header with position counter if available
+    std::string header = std::format("Results ({})", result_view_.get_results().size());
+    const std::string pos = ui::position_label(result_view_.get_cursor(),
+                                                result_view_.get_results().size());
+    if (!pos.empty()) {
+        header += " · " + pos;
+    }
+    r.draw_text(font_, x, TOP, header, TEXT_DIM);
 
     const auto  H        = static_cast<float>(win_.height());
     const float rh       = LINE * 0.9f;

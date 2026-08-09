@@ -17,6 +17,7 @@
 #include "ui/grid_layout.h"
 #include "ui/input.h"
 #include "ui/parent_group.h"
+#include "ui/position_label.h"
 #include "ui/tag_inherit.h"
 #include "ui/widgets.h"
 #include "vault/vault.h"
@@ -339,6 +340,15 @@ void FavoritesScreen::render(gfx::Renderer& r)
     const auto cW = W - detail_panel_width(detail_.panel.open, W);
 
     r.draw_text(font_, OX, 40, title(), TEXT_DIM);
+
+    // Phase 68: Draw position counter right-aligned at y=40
+    const std::string pos_label = ui::position_label(nav_.selected(), favs_.size());
+    if (!pos_label.empty()) {
+        const auto text_w = static_cast<float>(font_.measure(pos_label));
+        const float rx = cW - OX - text_w;
+        r.draw_text(font_, rx, 40, pos_label, TEXT_FAINT);
+    }
+
     r.draw_text(font_, OX, 90, "[F1] Help", TEXT_FAINT);
 
     const auto H = static_cast<float>(win_.height());
