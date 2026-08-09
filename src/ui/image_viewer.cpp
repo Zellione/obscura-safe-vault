@@ -586,10 +586,14 @@ void ImageViewer::handle_mouse_down(const SDL_MouseButtonEvent& b)
 void ImageViewer::handle_wheel(const SDL_MouseWheelEvent& w)
 {
     if (mode_ == ViewMode::Slideshow) return;   // no zoom/scroll while playing
-    if (video_) return;                         // a playing video is fit-only (no zoom/scroll)
 
-    // Strip wheel scrolling (Phase 68 Part 3): check if cursor is over the strip.
-    if (!win_.is_fullscreen() && strip_hit(w.mouse_x, w.mouse_y) >= 0) {
+    // Strip wheel scrolling (Phase 68 Part 3): the whole strip BAND scrolls
+    // (rect containment, not strip_hit — that returns -1 in the gaps between
+    // thumbnails), and it works while a video plays, so this must run before
+    // the video early-out below.
+    if (const SDL_FRect s = strip_rect();
+        !win_.is_fullscreen() && w.mouse_x >= s.x && w.mouse_x < s.x + s.w &&
+        w.mouse_y >= s.y && w.mouse_y < s.y + s.h) {
         const float thumb   = thumb_size();
         const bool  vertical = (strip_side_ == StripSide::Left);
         const float extent  = vertical ? strip_rect().h : strip_rect().w;
@@ -606,6 +610,8 @@ void ImageViewer::handle_wheel(const SDL_MouseWheelEvent& w)
         mark_dirty();
         return;
     }
+
+    if (video_) return;                         // a playing video is fit-only (no zoom/scroll)
 
     if (mode_ == ViewMode::FillScroll)
         scroll_by(w.y > 0 ? -SCROLL_STEP : SCROLL_STEP);
