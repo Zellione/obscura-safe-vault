@@ -832,3 +832,61 @@ TEST(import_queue_idle_latch_rearms_on_new_work)
     q.end_session();
     ziptest::cleanup_dir(temp_dir);
 }
+
+// Regression (found post-Phase 52): the file-picker import staged EVERY picked
+// file as an image, so an mp4 became an image node with format Unknown — no
+// thumbnail in the grid, no video player on open. Videos picked directly must
+// import exactly as they do from a zip: as video nodes with probed metadata.
+TEST(import_queue_files_routes_mp4_to_video_node)
+{
+    const auto temp_dir = ziptest::fresh_dir("test_import_queue_files_video");
+    const auto vault_path = temp_dir / "vault.osv";
+
+    vault::Vault v;
+    ziptest::make_vault(v, vault_path);
+
+    // One image + one real mp4 (vault fixture), picked together.
+    const auto files_dir = temp_dir / "files";
+    fs::create_directories(files_dir);
+    const auto jpg_path = files_dir / "pic.jpg";
+    const auto jpeg_data = ziptest::fake_jpeg(7);
+    std::ofstream(jpg_path, std::ios::binary)
+        .write(reinterpret_cast<const char*>(jpeg_data.data()),
+               static_cast<std::streamsize>(jpeg_data.size()));
+
+    ui::ImportQueue q;
+    q.begin_session(v);
+    (void)q.enqueue_files({jpg_path, fs::path(OSV_VAULT_FIXTURE_DIR) / "tiny.mp4"}, "dest");
+    pump_until_idle(q);
+
+    const auto snap = q.snapshot();
+    REQUIRE(snap.size() == 1);
+    CHECK(snap[0].state == ui::ImportTaskState::Done);
+    CHECK_EQ(snap[0].imported, 2);
+
+    const auto kids = v.list("dest");
+    const vault::IndexNode* vid = nullptr;
+    const vault::IndexNode* img = nullptr;
+    for (const auto* n : kids) {
+        if (n->name == "tiny.mp4") vid = n;
+        if (n->name == "pic.jpg") img = n;
+    }
+    REQUIRE(img != nullptr);
+    CHECK(img->is_image());
+    REQUIRE(vid != nullptr);
+    CHECK(vid->is_video());
+    CHECK_EQ(static_cast<int>(vid->vmeta.container),
+             static_cast<int>(vault::VideoContainer::MP4));
+    CHECK(vid->vmeta.orig_size > 0);
+
+#ifdef OSV_VENDORED_AV
+    // FFmpeg-enabled builds probe dimensions + codec and store a poster, so the
+    // grid has a thumbnail and the viewer opens the video player.
+    CHECK_EQ(vid->vmeta.width, 160);
+    CHECK_EQ(vid->vmeta.height, 120);
+    CHECK(vid->vmeta.poster_length > 0);
+#endif
+
+    q.end_session();
+    ziptest::cleanup_dir(temp_dir);
+}
