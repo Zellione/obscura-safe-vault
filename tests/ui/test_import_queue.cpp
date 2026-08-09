@@ -977,3 +977,34 @@ TEST(import_queue_worker_exception_fails_task_and_continues)
     q.end_session();
     ziptest::cleanup_dir(temp_dir);
 }
+
+// Phase 68: a real zip truncated mid-file (interrupted download, bad disk)
+// must fail the task with a reason — the app used to close or report Done.
+TEST(import_queue_truncated_zip_fails_task)
+{
+    const auto temp_dir = ziptest::fresh_dir("test_import_queue_truncated_zip");
+    const auto vault_path = temp_dir / "vault.osv";
+
+    vault::Vault v;
+    ziptest::make_vault(v, vault_path);
+
+    const auto img = ziptest::fake_jpeg(7);
+    const auto zip = ziptest::make_archive({{"a.jpg", img}, {"b.jpg", img}}, temp_dir / "in.zip");
+
+    // Truncate to 60%: the central directory (at the tail) is gone.
+    const auto full = fs::file_size(zip);
+    fs::resize_file(zip, full * 6 / 10);
+
+    ui::ImportQueue q;
+    q.begin_session(v);
+    (void)q.enqueue_archive(zip, "", "Trunc", ui::ImportTaskKind::Zip);
+    pump_until_idle(q);
+
+    const auto snap = q.snapshot();
+    REQUIRE(snap.size() == static_cast<size_t>(1));
+    CHECK(snap[0].state == ui::ImportTaskState::Failed);
+    CHECK(!snap[0].error.empty());
+
+    q.end_session();
+    ziptest::cleanup_dir(temp_dir);
+}
