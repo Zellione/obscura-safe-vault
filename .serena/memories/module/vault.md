@@ -149,6 +149,12 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   `RemoveBatchStats{removed, missing}`, not errors. Locked if locked; IoError if the commit
   fails (tree already mutated — same contract as `remove_image`'s failed commit). Main-thread
   only (mutates the tree). Tests: `tests/vault/test_remove_batch.cpp`.
+- `vault::set_favorites_batch(v, span<const string> node_paths, bool value)` (Phase 68
+  multiselect, free friend beside remove_media_batch) — sets every resolving path's favorite
+  flag (galleries and media alike) to `value`, ONE `commit_index()` — and none at all when no
+  node actually changed. Non-resolving paths are skipped, not errors. Locked if locked;
+  IoError if the commit fails. Main-thread only. The any-unfavorited→favorite-all TOGGLE rule
+  lives UI-side (`ui::batch_favorite_target`). Tests: `tests/vault/test_vault_favorites.cpp`.
 - `vault::rename_node(v,gallery_path,old_name,new_name)` — validates `is_safe_node_name` +
   no sibling collision, then a pure leaf-field edit (an IndexNode persists only its local
   name, never a path, so no cascade). Drives the `R` RenameDialog.

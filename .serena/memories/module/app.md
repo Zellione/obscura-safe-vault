@@ -25,6 +25,12 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   `should_auto_lock` gained `import_busy` parameter (suppresses idle lock while queue non-empty).
   `PendingLockConfirm` modal parks LockActive/ToUnlock/Quit behind a Y/N confirm ("N imports pending — finish current file, discard the rest, and lock?")
   when queue is non-empty; SDL_EVENT_QUIT also flows through this gate. `replay_nav_` mechanism re-enters `apply_nav` after SDL_EVENT_QUIT confirmation.
+- **Phase 68:** the four collection-screen ctors (`to_favorite_images/galleries`,
+  `to_tag_images/galleries`) take a `ui::FavoritesScreen::CollectionOps{dialog_,
+  folder_dialog_, import_ui_.queue, &second_.session, vault_state_.active_path}` ctx, and
+  `to_advanced_search` passes the analogous `ui::CollectionBatchOps::Deps` — both wire the
+  batch B/X/M multiselect flows (export + grouped transfer) into those screens. The
+  FolderDialog stays App-owned (its async callback must outlive any screen).
 
 ### Perf instrumentation (Phase 58)
 - **`App::update(dt)` extracted from `run()`** — behavior identical, but extracted to host the

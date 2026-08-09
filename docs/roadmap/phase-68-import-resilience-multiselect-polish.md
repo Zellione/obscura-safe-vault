@@ -137,4 +137,4 @@ status line without the grid's per-item `FailureListDialog`; exporting a
 selected gallery hit on the search screen is skipped (media only), matching
 export's originals-only rule.
 
-**Status:** ✅ Implemented — 1895 tests / 0 failed (+ ASAN). Awaiting owner merge.
+**Status:** ✅ Shipped — 1895 tests / 0 failed (+ ASAN). Merged in PR #173.

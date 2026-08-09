@@ -406,3 +406,27 @@ job mid-operation while KeepTimed is in an expiry window locks the slot when the
 
 **No `.osv` change:** INDEX_VERSION stays 10. The warm slot is session-only and in-memory;
 nothing persists to the vault file.
+
+## Multiselect batch ops & position counters (Phase 68)
+
+- **One selection convention everywhere:** Space toggles a tile into the
+  multi-selection (Enter opens), `Ctrl+A` selects all — or clears when
+  everything is already selected — on the gallery grid, the favorites/tag
+  screens, and the advanced-search result panel (Results focus). Selected
+  tiles carry the 18×18 accent square top-left (10×10 gutter marker on the
+  search LIST rows).
+- **B / X / M act on the selection** (focused tile when empty): B batch
+  favorite (any-unfavorited → favorite all, else unfavorite all — the
+  "select-all checkbox" convention), X consent-gated export, M move/copy.
+  A grid selection may mix images, videos, and galleries in one run; on
+  collection screens items span parent galleries and are grouped per parent.
+  While imports run, M refuses with "Imports running — press Shift+I".
+- **Wheel on side surfaces:** the viewer thumbnail strip scrolls under the
+  cursor (both dock sides, also during video playback; navigation re-centers),
+  and the saved-search sidebar scrolls with clamped offset. Detail-panel wheel
+  routing unchanged (all hosts had it).
+- **`n / N` position counters:** grid chrome line (right-aligned),
+  favorites/tag title line, `Results (N) · n / N` on both search result views,
+  and a viewer strip-edge badge that relocates to the window's bottom-right in
+  fullscreen (strip + header hidden there). Formatting via `ui::position_label`
+  ("" hides the counter when the listing is empty).
