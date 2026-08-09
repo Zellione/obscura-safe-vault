@@ -7,6 +7,7 @@
 #include "gfx/renderer.h"
 #include "gfx/theme.h"
 #include "gfx/text.h"
+#include "ui/grid_layout.h"
 #include "ui/list_layout.h"
 #include "ui/text_metrics.h"
 #include "ui/widgets.h"
@@ -42,10 +43,20 @@ SavedSearchPanel::Action SavedSearchPanel::handle_key(const SDL_KeyboardEvent& k
     const int last = static_cast<int>(saved_.size()) - 1;
     if (key.key == SDLK_DOWN) {
         cur_saved_ = std::min(cur_saved_ + 1, last);
+        // Keep the focused row visible when navigating.
+        const float LINE = line_pitch(font_.pixel_height());
+        const float row_top = TOP + (static_cast<float>(cur_saved_) + 1.0f) * LINE;  // +1 for header
+        const float row_bottom = row_top + LINE;
+        scroll_ = ui::ensure_visible(scroll_, row_top, row_bottom, TOP + LINE, last_max_h_);
         return None;
     }
     if (key.key == SDLK_UP) {
         cur_saved_ = std::max(cur_saved_ - 1, 0);
+        // Keep the focused row visible when navigating.
+        const float LINE = line_pitch(font_.pixel_height());
+        const float row_top = TOP + (static_cast<float>(cur_saved_) + 1.0f) * LINE;  // +1 for header
+        const float row_bottom = row_top + LINE;
+        scroll_ = ui::ensure_visible(scroll_, row_top, row_bottom, TOP + LINE, last_max_h_);
         return None;
     }
     if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) {
@@ -59,6 +70,20 @@ SavedSearchPanel::Action SavedSearchPanel::handle_key(const SDL_KeyboardEvent& k
         return Deleted;  // Caller will reload_saved()
     }
     return None;
+}
+
+void SavedSearchPanel::handle_wheel(float wheel_y, float max_h)
+{
+    const float LINE = line_pitch(font_.pixel_height());
+    const int count = static_cast<int>(saved_.size());
+
+    // Apply wheel motion: adjust scroll by LINE * wheel_y (inverted).
+    scroll_ -= wheel_y * LINE * 2.0f;
+
+    // Clamp scroll to valid range.
+    scroll_ = ui::list_clamp_scroll(scroll_, count, LINE, TOP + LINE, max_h);
+
+    last_max_h_ = max_h;  // Cache for handle_key
 }
 
 bool SavedSearchPanel::load_focused(AdvancedQuery& out_query)
@@ -107,23 +132,42 @@ bool SavedSearchPanel::finalize_save(const AdvancedQuery& query)
     return false;
 }
 
-void SavedSearchPanel::render(gfx::Renderer& r, float x, float max_w, bool hot)
+void SavedSearchPanel::render(gfx::Renderer& r, float x, float max_w, float max_h, bool hot)
 {
     using namespace gfx::theme;
     const float LINE = line_pitch(font_.pixel_height());
+
+    // Cache the window height for keyboard navigation (Phase 68 Part 3).
+    last_max_h_ = max_h;
+
+    // Header (fixed, not scrolled).
     if (hot) r.draw_text(font_, x - 16, TOP, ">", ACCENT);
     r.draw_text(font_, x, TOP, "Saved searches", TEXT_DIM);
 
-    float y = TOP + LINE;
+    const float content_top = TOP + LINE;
+    const float content_bottom = max_h;
+
+    // Apply scroll to render rows.
     for (int i = 0; i < static_cast<int>(saved_.size()); ++i) {
+        const float row_y = content_top + static_cast<float>(i) * LINE - scroll_;
+
+        // Skip rows entirely outside the viewport.
+        if (row_y + LINE < content_top || row_y >= content_bottom) continue;
+
         const bool sel = (i == cur_saved_ && hot);
-        r.draw_text(font_, x, y,
+        r.draw_text(font_, x, row_y,
                     fit_text(font_, std::format("{} {}", sel ? ">" : " ", saved_[i].name),
                              max_w),
                     sel ? TEXT : TEXT_DIM);
-        y = list_row_y({.top = TOP + LINE, .row_h = LINE}, i + 1);
     }
-    if (saved_.empty()) r.draw_text(font_, x, y, "(none — Ctrl+S to save)", TEXT_FAINT);
+
+    // Empty list message (if scrolled to top).
+    if (saved_.empty()) {
+        const float msg_y = content_top - scroll_;
+        if (msg_y + LINE >= content_top && msg_y < content_bottom) {
+            r.draw_text(font_, x, msg_y, "(none — Ctrl+S to save)", TEXT_FAINT);
+        }
+    }
 }
 
 int SavedSearchPanel::get_cursor() const

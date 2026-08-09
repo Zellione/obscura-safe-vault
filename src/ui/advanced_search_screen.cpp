@@ -392,9 +392,25 @@ void AdvancedSearchScreen::handle_event(const SDL_Event& e)
     }
 
     if (e.type == SDL_EVENT_KEY_DOWN) handle_key(e.key);
-    else if (e.type == SDL_EVENT_MOUSE_WHEEL &&
-             detail_panel_hit(detail_.panel.open, static_cast<float>(win_.width()), e.wheel.mouse_x)) {
-        scroll_detail_panel(detail_.panel, e.wheel.y);
+    else if (e.type == SDL_EVENT_MOUSE_WHEEL) {
+        // Route wheel to detail panel if over that region.
+        if (detail_panel_hit(detail_.panel.open, static_cast<float>(win_.width()), e.wheel.mouse_x)) {
+            scroll_detail_panel(detail_.panel, e.wheel.y);
+            return;
+        }
+
+        // Route wheel to saved-panel if over that region (Phase 68 Part 3 Task B).
+        const auto W = static_cast<float>(win_.width());
+        const auto H = static_cast<float>(win_.height());
+        const auto cW = W - detail_panel_width(detail_.panel.open, W);
+        const float colW = (cW - 2 * PAD) / 3.0f - 16;
+        const float mx = PAD + colW + 24;
+        const float saved_x = mx + colW + 24;
+        if (e.wheel.mouse_x >= saved_x) {
+            saved_panel_.handle_wheel(e.wheel.y, H);
+            mark_dirty();
+            return;
+        }
     }
 }
 
@@ -828,7 +844,7 @@ void AdvancedSearchScreen::render(gfx::Renderer& r)
     render_results(r, mx, colW);
     const bool saved_hot = (focus_ == Focus::Saved && !saved_panel_.active_buffer() && !clearing_);
     const float saved_x = mx + colW + 24;
-    saved_panel_.render(r, saved_x, cW - saved_x - PAD, saved_hot);
+    saved_panel_.render(r, saved_x, cW - saved_x - PAD, H, saved_hot);
 
     if (saved_panel_.active_buffer()) {
         r.draw_rect({0, 0, W, H}, {0, 0, 0, 180}, /*filled*/ true);

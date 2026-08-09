@@ -24,4 +24,11 @@ struct ListMetrics {
 // list_visible_rows capped by how many items there actually are.
 [[nodiscard]] int list_rows_fit(const ListMetrics& m, float bottom, int count);
 
+// Clamp scroll offset for a vertical list: ensures items are within [0, max_offset]
+// where max_offset = max(0, content_height - available_height). Phase 68 Part 3.
+// content_height = (count + 1) * row_h (header + row items)
+// available_height = max_h - top (viewport height for scrollable area)
+[[nodiscard]] float list_clamp_scroll(float scroll, int count, float row_h, float top,
+                                      float max_h) noexcept;
+
 } // namespace ui
