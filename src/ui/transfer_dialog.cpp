@@ -67,6 +67,15 @@ void TransferDialog::open_mixed(std::string src_gallery, std::vector<std::string
     src_galleries_ = std::move(gallery_paths);
 }
 
+void TransferDialog::open_collection(std::vector<ParentGroup> media_groups,
+                                     std::vector<std::string> gallery_paths)
+{
+    open("", {});                  // reuse open() to reset all state + build candidates
+    source_        = Source::Collection;
+    media_groups_  = std::move(media_groups);
+    src_galleries_ = std::move(gallery_paths);
+}
+
 void TransferDialog::close()
 {
     picker_dest_.close();   // wipes/locks the transient destination vault, if any
@@ -124,6 +133,9 @@ void TransferDialog::do_move(std::string_view dst_target)
     else if (source_ == Source::Mixed)
         run_.job.start_transfer_mixed(src_, src_gallery_, filenames_, src_galleries_, dv,
                                       std::string(dst_target), mode_, where);
+    else if (source_ == Source::Collection)
+        run_.job.start_transfer_collection(src_, media_groups_, src_galleries_, dv,
+                                           std::string(dst_target), mode_, where);
     else
         run_.job.start_transfer_images(src_, src_gallery_, filenames_, dv, std::string(dst_target),
                                        mode_, where);

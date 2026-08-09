@@ -93,6 +93,14 @@ public:
                                       vault::Vault& dst, std::string dst_gallery,
                                       vault::TransferMode mode, std::string label);
 
+    // The full collection-screen selection in one run (Phase 68): per-parent
+    // media groups PLUS whole gallery subtrees (`gallery_paths`), all landing
+    // in/under dst_target. Tallies merge into one outcome.
+    bool start_transfer_collection(vault::Vault& src, std::vector<ParentGroup> groups,
+                                   std::vector<std::string> gallery_paths,
+                                   vault::Vault& dst, std::string dst_target,
+                                   vault::TransferMode mode, std::string label);
+
     // Move/Copy a MIXED multi-selection in one run (Phase 68): `media_names`
     // (in src/src_gallery) land inside dst/dst_target, and each gallery subtree
     // in `gallery_paths` lands under it. Tallies are merged into one outcome.

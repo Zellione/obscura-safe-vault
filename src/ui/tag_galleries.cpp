@@ -10,8 +10,8 @@ namespace ui {
 
 TagGalleries::TagGalleries(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                            platform::VaultRegistry& registry, std::string active_path,
-                           std::string tag)
-    : FavoritesScreen(win, font, vault, registry, std::move(active_path)),
+                           std::string tag, CollectionOps ops)
+    : FavoritesScreen(win, font, vault, registry, std::move(active_path), ops),
       tag_(std::move(tag))
 {
     title_ = "Galleries tagged '" + tag_ + "'";

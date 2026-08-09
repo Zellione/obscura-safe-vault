@@ -23,7 +23,7 @@ class TagImages : public FavoritesImages {
 public:
     TagImages(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
               gfx::TextureCache& cache, platform::VaultRegistry& registry,
-              std::string active_path, std::string tag);
+              std::string active_path, std::string tag, CollectionOps ops);
 
 protected:
     [[nodiscard]] std::vector<vault::SearchHit> fetch() const override;

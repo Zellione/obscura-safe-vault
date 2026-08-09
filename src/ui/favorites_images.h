@@ -27,8 +27,8 @@ class FavoritesImages : public FavoritesScreen {
 public:
     FavoritesImages(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                     gfx::TextureCache& cache, platform::VaultRegistry& registry,
-                    std::string active_path)
-        : FavoritesScreen(win, font, vault, registry, std::move(active_path)),
+                    std::string active_path, CollectionOps ops)
+        : FavoritesScreen(win, font, vault, registry, std::move(active_path), ops),
           cache_(cache) {}
 
     void update(double dt) override;
