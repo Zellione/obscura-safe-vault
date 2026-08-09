@@ -250,6 +250,40 @@ bool FileOpJob::start_transfer_galleries(vault::Vault& src, std::vector<std::str
     });
 }
 
+bool FileOpJob::start_transfer_mixed(vault::Vault& src, std::string src_gallery,
+                                     std::vector<std::string> media_names,
+                                     std::vector<std::string> gallery_paths,
+                                     vault::Vault& dst, std::string dst_target,
+                                     vault::TransferMode mode, std::string label)
+{
+    return launch(FileOpKind::Transfer,
+                  [this, &src, src_gallery = std::move(src_gallery),
+                   media_names = std::move(media_names),
+                   gallery_paths = std::move(gallery_paths), &dst,
+                   dst_target = std::move(dst_target), mode, label = std::move(label)]() {
+        // Media first, then subtrees; a cancel between the two is a clean
+        // partial (each vault::transfer_* item is a committed unit).
+        vault::TransferTally media_t;
+        if (!media_names.empty())
+            media_t = vault::transfer_images(src, src_gallery, media_names, dst, dst_target,
+                                             mode, &progress_);
+        vault::TransferTally gal_t;
+        if (!gallery_paths.empty() && !progress_.cancel.load())
+            gal_t = vault::transfer_galleries(src, gallery_paths, dst, dst_target, mode,
+                                              &progress_);
+
+        auto failures = std::move(media_t.failures);
+        failures.insert(failures.end(), std::make_move_iterator(gal_t.failures.begin()),
+                        std::make_move_iterator(gal_t.failures.end()));
+        // The bar's total is per-phase (each transfer_* stores its own); the
+        // outcome's numbers come from the merged tallies instead.
+        return transfer_outcome(mode, media_t.done + gal_t.done,
+                                media_t.failed + gal_t.failed,
+                                media_t.done + gal_t.done + media_t.failed + gal_t.failed,
+                                progress_.cancel.load(), label, std::move(failures));
+    });
+}
+
 bool FileOpJob::start_combine(vault::Vault& src, std::string src_gallery,
                               vault::Vault& dst, std::string dst_gallery, std::string label)
 {

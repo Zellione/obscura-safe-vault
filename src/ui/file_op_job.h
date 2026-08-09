@@ -85,6 +85,15 @@ public:
                                   vault::Vault& dst, std::string dst_parent,
                                   vault::TransferMode mode, std::string label);
 
+    // Move/Copy a MIXED multi-selection in one run (Phase 68): `media_names`
+    // (in src/src_gallery) land inside dst/dst_target, and each gallery subtree
+    // in `gallery_paths` lands under it. Tallies are merged into one outcome.
+    bool start_transfer_mixed(vault::Vault& src, std::string src_gallery,
+                              std::vector<std::string> media_names,
+                              std::vector<std::string> gallery_paths,
+                              vault::Vault& dst, std::string dst_target,
+                              vault::TransferMode mode, std::string label);
+
     // Combine src/src_gallery into dst/dst_gallery — recursive merge, deletes
     // src_gallery once empty (Phase 44 Part 4). `label` names the destination
     // vault for the outcome message.

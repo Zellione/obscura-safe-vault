@@ -1,5 +1,6 @@
 #include "ui/gallery_grid.h"
 
+#include "ui/favorite_batch.h"
 #include "ui/selectable.h"
 
 #include <algorithm>
@@ -406,52 +407,67 @@ void start_transfer_focused(GalleryGrid& g)
     }
 }
 
-void start_transfer_galleries_selection(GalleryGrid& g)
+// B with a Space/Ctrl+A selection toggles favorite on ALL of it (Phase 68):
+// if any selected node is not yet a favorite the batch favorites everything,
+// else it unfavorites everything — one crash-safe index commit either way.
+// Empty selection keeps the focused-tile toggle. Best-effort like the single
+// toggle: the flags flip on the same in-memory nodes the tiles point at, so
+// the stars re-render next frame without a refresh() (which would clear the
+// selection).
+void toggle_favorite_selection(GalleryGrid& g)
 {
-    std::vector<std::string> paths;
-    for (int idx : g.sel_.indices()) {
-        if (idx < 0 || idx >= static_cast<int>(g.children_.size()) || !g.children_[idx]->is_gallery())
-            continue;
-        const auto& name = g.children_[idx]->name;
-        paths.push_back(g.nav_.path().empty() ? name : g.nav_.path() + "/" + name);
-    }
-    g.error_.clear();
-    // Phase 50: acquire exclusive before opening transfer dialog
-    g.queue_.set_exclusive(true);
-    g.transfer_had_exclusive_ = true;
-    g.transfer_.open_galleries(std::move(paths));
-}
-
-void start_transfer_images_selection(GalleryGrid& g)
-{
-    std::vector<std::string> names;
-    for (int idx : g.sel_.indices()) {
-        if (idx >= 0 && idx < static_cast<int>(g.children_.size()) && g.children_[idx]->is_image())
-            names.push_back(g.children_[idx]->name);
-    }
-    if (names.empty()) { g.error_ = "Nothing selected to move."; return; }
-    g.error_.clear();
-    // Phase 50: acquire exclusive before opening transfer dialog
-    g.queue_.set_exclusive(true);
-    g.transfer_had_exclusive_ = true;
-    g.transfer_.open(g.nav_.path(), std::move(names));
-}
-
-void start_transfer_selection(GalleryGrid& g)
-{
-    int image_count   = 0;
-    int gallery_count = 0;
-    for (int idx : g.sel_.indices()) {
-        if (idx < 0 || idx >= static_cast<int>(g.children_.size())) continue;
-        if (g.children_[idx]->is_image())        ++image_count;
-        else if (g.children_[idx]->is_gallery())  ++gallery_count;
-    }
-    if (image_count > 0 && gallery_count > 0) {
-        g.error_ = "Select only images or only galleries to move at once.";
+    if (g.sel_.empty()) {
+        g.toggle_favorite_current();
         return;
     }
-    if (gallery_count > 0) { start_transfer_galleries_selection(g); return; }
-    start_transfer_images_selection(g);
+    std::vector<const vault::IndexNode*> nodes;
+    std::vector<std::string> paths;
+    const std::string& base = g.nav_.path();
+    for (int idx : g.sel_.indices()) {
+        if (idx < 0 || idx >= static_cast<int>(g.children_.size())) continue;
+        const vault::IndexNode* n = g.children_[idx];
+        nodes.push_back(n);
+        paths.push_back(base.empty() ? n->name : base + "/" + n->name);
+    }
+    if (paths.empty()) {
+        g.toggle_favorite_current();
+        return;
+    }
+    (void)vault::set_favorites_batch(g.vault_, paths, batch_favorite_target(nodes));
+}
+
+// Any mix of images, videos, and galleries transfers in one dialog run
+// (Phase 68). Before, videos were silently dropped (is_image() filter) and a
+// mixed media+gallery selection was refused outright.
+void start_transfer_selection(GalleryGrid& g)
+{
+    std::vector<std::string> media;
+    std::vector<std::string> galleries;
+    const std::string& base = g.nav_.path();
+    for (int idx : g.sel_.indices()) {
+        if (idx < 0 || idx >= static_cast<int>(g.children_.size())) continue;
+        const vault::IndexNode* n = g.children_[idx];
+        if (n->is_media()) {
+            media.push_back(n->name);
+        } else if (n->is_gallery()) {
+            galleries.push_back(base.empty() ? n->name : base + "/" + n->name);
+        }
+    }
+    if (media.empty() && galleries.empty()) {
+        g.error_ = "Nothing selected to move.";
+        return;
+    }
+    g.error_.clear();
+    // Phase 50: acquire exclusive before opening transfer dialog
+    g.queue_.set_exclusive(true);
+    g.transfer_had_exclusive_ = true;
+    if (galleries.empty()) {
+        g.transfer_.open(base, std::move(media));
+    } else if (media.empty()) {
+        g.transfer_.open_galleries(std::move(galleries));
+    } else {
+        g.transfer_.open_mixed(base, std::move(media), std::move(galleries));
+    }
 }
 
 void GalleryGrid::start_transfer()
@@ -835,7 +851,7 @@ bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& 
         case SDLK_R: g.start_rename(); return true;
         case SDLK_SPACE: g.toggle_or_open(); return true;
         case SDLK_G: g.start_tag_editor((key.mod & SDL_KMOD_SHIFT) != 0); return true;
-        case SDLK_B: g.toggle_favorite_current(); return true;
+        case SDLK_B: toggle_favorite_selection(g); return true;
         case SDLK_F:
             g.request((key.mod & SDL_KMOD_SHIFT) ? ToFavoriteGalleries
                       : ToFavoriteImages);
@@ -1665,7 +1681,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
             {"/", "Search"}, {"Shift+/ (?)", "Advanced search"},
             {"G", "Edit tags (2+ selected: bulk add/remove)"}, {"Shift+G", "Import a tag list"},
             {"Shift+T", "Tags overview"},
-            {"B", "Favorite"}, {"F", "Favorite images"}, {"Shift+F", "Favorite galleries"},
+            {"B", "Favorite (acts on selection)"}, {"F", "Favorite images"}, {"Shift+F", "Favorite galleries"},
         }},
         {"Import & export", {
             {"I", "Import files"}, {"Shift+I", "Import status"}, {"Z", "Import ZIP/CBZ"}, {"O", "Import folder"}, {"N", "New gallery"},

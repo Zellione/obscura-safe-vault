@@ -59,6 +59,14 @@ void TransferDialog::open_galleries(std::vector<std::string> src_paths)
     src_galleries_ = std::move(src_paths);
 }
 
+void TransferDialog::open_mixed(std::string src_gallery, std::vector<std::string> media_names,
+                                std::vector<std::string> gallery_paths)
+{
+    open(std::move(src_gallery), std::move(media_names));
+    source_        = Source::Mixed;
+    src_galleries_ = std::move(gallery_paths);
+}
+
 void TransferDialog::close()
 {
     picker_dest_.close();   // wipes/locks the transient destination vault, if any
@@ -78,9 +86,11 @@ vault::Vault& TransferDialog::dest_vault() noexcept
 void TransferDialog::rebuild_targets()
 {
     const vault::Vault& dv = dest_vault();
-    std::vector<std::string> targets = (source_ == Source::Gallery || source_ == Source::Galleries)
-        ? vault::gallery_target_parents(dv)
-        : vault::image_target_galleries(dv);
+    // Mixed uses the galleries constraint: any gallery holds media (Phase 46),
+    // but a subtree target must exclude move-into-own-subtree cycles.
+    std::vector<std::string> targets = (source_ == Source::Images)
+        ? vault::image_target_galleries(dv)
+        : vault::gallery_target_parents(dv);
     picker_.set_items(std::move(targets));
     picker_.set_pinned_suffix(kNewGalleryRow);
 }
@@ -111,6 +121,9 @@ void TransferDialog::do_move(std::string_view dst_target)
     else if (source_ == Source::Galleries)
         run_.job.start_transfer_galleries(src_, src_galleries_, dv, std::string(dst_target),
                                           mode_, where);
+    else if (source_ == Source::Mixed)
+        run_.job.start_transfer_mixed(src_, src_gallery_, filenames_, src_galleries_, dv,
+                                      std::string(dst_target), mode_, where);
     else
         run_.job.start_transfer_images(src_, src_gallery_, filenames_, dv, std::string(dst_target),
                                        mode_, where);
