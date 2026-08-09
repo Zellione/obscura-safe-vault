@@ -592,6 +592,10 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 ## Background import queue (Phase 50)
 - `import_queue.*` — `ImportQueue`: lifecycle managed by App (owns one, destroyed on app shutdown).
   One worker jthread + decode pool (min(hw,4) threads). Per-file pipeline: read source → decode → encrypt → append chunks → stage IndexNode.
+  A Files task routes each pick by content, exactly like the archive/folder importers: `image::detect_format`
+  hit → `stage_image`, everything else → `stage_video` (its container probe rejects non-video junk → skipped).
+  Before PR #171, Files tasks staged EVERY pick as an image — an mp4 picked directly became an Unknown-format
+  image node (no thumbnail, no player); such pre-existing nodes need delete + re-import (video_repair skips them).
   Ordering: decode parallel, append+attach strictly in sequence via a resequencer (lookahead cap 8 items/256MiB).
   Methods: `enqueue` (any thread, refuse if stopped), `abort_and_flush` (idempotent), `begin_session` (clears stale state/flags),
   `set_exclusive` (inhibit until released). Worker stops gracefully on Vault::lock().
