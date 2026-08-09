@@ -11,6 +11,7 @@
 #include "ui/zip_import.h"
 #include "ui/zip_plan.h"
 #include "image/decode.h"
+#include "image/format_registry.h"
 #include "image/anim_info.h"
 #include "image/thumbnail.h"
 #include "vault/staging.h"
@@ -997,7 +998,12 @@ void ImportQueue::process_files_task(Task& task)
                 thumb = &pf.decode_job->result;
             }
 
-            auto staged = vault::stage_image(*v_, pf.data, filename, thumb);
+            // Same discrimination the archive/folder importers use: anything the
+            // image decoders can identify is an image, everything else goes to
+            // video (stage_video's container probe rejects non-video bytes).
+            const bool is_img = image::detect_format(pf.data) != image::ImageFormat::Unknown;
+            auto staged = is_img ? vault::stage_image(*v_, pf.data, filename, thumb)
+                                 : vault::stage_video(*v_, pf.data, filename);
             if (staged.status == vault::VaultResult::Ok) {
                 std::lock_guard lock(mu_);
                 records_.push_back(StagedRecord{task.dest_gallery, std::move(staged.node),
