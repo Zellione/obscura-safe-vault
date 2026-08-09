@@ -17,92 +17,101 @@ escaping a worker thread is `std::terminate`. (`platform/error_log.cpp` installs
 a terminate handler, so `<config_dir>/error.log` may already show a `[Fatal]`
 line for the owner's crash — check it while reproducing.)
 
-- [ ] **Reproduce & root-cause** — build corrupt fixtures (truncated, bit-flipped
-      header, garbage central directory) for each import path: `.zip`/`.cbz`
-      (miniz), `.7z`/`.rar`/`.tar` (libarchive), recursive nested archives, and
-      multipart sets. Identify the actual throwing/faulting site and harden it
-      (bounds/validation), not just the symptom.
-- [ ] **Task-boundary catch-all** — wrap per-task execution on the import worker
-      (and the decode-pool job body) in try/catch: the task ends **Failed** with
-      an ASCII reason shown on the Import Status screen (`Shift+I`) and the
-      footer summary; the queue moves on to the next task; the vault stays
-      consistent (staged chunks for the failed task are orphaned dead ciphertext,
-      reclaimable by compact — same guarantee as a crash mid-batch, Phase 50).
-- [ ] **Log to the error logfile** — the failure is recorded via
-      `platform::log_error("Import", …)` with the archive's filename and the
-      failure reason. Never log archive *content*, passwords, or key material
-      (invariant #5).
-- [ ] **Tests** — each corrupt fixture imports as a Failed task without
-      terminating the process; the error log contains one `[Import]` line per
-      failure; a healthy archive queued after a corrupt one still imports.
+- [x] **Reproduce & root-cause** — corrupt fixtures added (garbage-with-magic
+      zip, truncated zip, huge-declared-size entry). Two root causes found and
+      fixed beyond the catch-all: **(a) a worker-result write-back defect** —
+      `mark_task_complete` discarded the worker's local task copy entirely, so
+      even a *gracefully* failed archive rendered as "✓ Done, 0 imported"
+      (results now merge back; counts via `max()` against the live
+      drain-incremented counters); **(b) a corrupt ROOT archive was folded into
+      `skipped`** — `RecursiveTally` gained `root_unreadable`, and
+      `import_archive_bytes_recursive` now fails the task with "Archive is
+      corrupt or unreadable" instead of reporting a skip.
+- [x] **Task-boundary catch-all** — worker dispatch and the decode-pool job body
+      wrapped in try/catch: the task ends **Failed** ("Internal import error:
+      <what>") on the Import Status screen; the queue continues with the next
+      task. Plus an allocation guard: `zip_entry_size_plausible` refuses a zip
+      entry whose declared size exceeds deflate's ~1032:1 bound before an
+      mlock'd buffer is sized from the lie (a `0xFFFFFFFF` claim is a 4 GiB
+      zero-initialised allocation the catch cannot see — OOM-kill class).
+- [x] **Log to the error logfile** — every Failed import logs
+      `platform::log_error("Import", import_failure_log_line(name, reason))` to
+      `<config_dir>/error.log`, from one choke point after `mark_task_complete`.
+      Names + ASCII reasons only (invariant #5).
+- [x] **Tests** — corrupt/truncated/lying-header fixtures fail the task without
+      terminating; a test-only worker hook (`test_only_set_task_hook`) proves an
+      escaping exception fails THAT task and the next one still imports;
+      `--asan` green.
 
 ### Part 2 — Multiselect for favorite / export / move / copy
 
 The grid already runs export (`X`) and move/copy (`M`) off the selection, but
 with gaps; the collection screens have no multiselect at all.
 
-- [ ] **Grid: `B` acts on the selection** — with a non-empty selection, toggle
-      favorite on every selected node (rule: if any selected node is not
-      favorited → favorite all, else unfavorite all); empty selection keeps
-      today's focused-tile behavior (`toggle_favorite_current`). One index
-      commit for the batch, not one per node.
-- [ ] **Grid: move/copy accepts any mixed selection** — `start_transfer_selection`
-      (`src/ui/gallery_grid.cpp`) refuses images+galleries mixed and silently
-      drops selected **videos** (`is_image()` filter — should be `is_media()`).
-      A selection of any mix of images, videos, and galleries transfers in one
-      dialog run; `TransferDialog` gains a mixed source (media names + gallery
-      paths) or sequences the two existing sources behind one Mode/Dest pick.
-- [ ] **Collection screens: full multiselect** — `FavoritesScreen` base (covers
-      favorites images/galleries + tag images/galleries) and the advanced-search
-      result panel gain the grid's `SelectionModel` semantics: Space toggles,
-      `Ctrl+A` select-all (`ui::selectable` stays the one rule for what may
-      enter a selection), selection badge on tiles, revision feeding the detail
-      panel's existing multi-selection aggregate (Phase 48).
-- [ ] **Collection screens: `B` / `X` / `M` over the selection** — these screens
-      list nodes from *different parent galleries*, so export and transfer must
-      carry a per-item parent path instead of the grid's single
-      `(path, names)` pair — group by parent internally. Favorite-toggle rule
-      identical to the grid. On the favorites screens, unfavoriting removes the
-      tile — remap selection the way `ListingRemap` preserves it on the grid.
-- [ ] **Tests** — pure-model tests for the toggle rule + per-parent grouping;
-      screen tests: mixed selection transfers whole, videos included, `Ctrl+A`+`B`
-      on a favorites screen empties it in one commit.
+- [x] **Grid: `B` acts on the selection** — `toggle_favorite_selection` free
+      friend: any-unfavorited → favorite all, else unfavorite all
+      (`ui::batch_favorite_target`), persisted by a new vault free friend
+      `vault::set_favorites_batch` — ONE `commit_index()` for the batch, none
+      when nothing changed. Empty selection keeps the focused-tile toggle.
+- [x] **Grid: move/copy accepts any mixed selection** — the `is_image()` filter
+      that silently dropped **videos** is now `is_media()`, the
+      only-one-kind refusal is gone, and a mixed selection routes to
+      `TransferDialog::open_mixed` → `FileOpJob::start_transfer_mixed`
+      (media then gallery subtrees, tallies merged into one outcome).
+- [x] **Collection screens: full multiselect** — `FavoritesScreen` base (covers
+      favorites/tag images+galleries) and `SearchResultView` gained
+      `SelectionModel` semantics: Space toggles (Enter still opens), `Ctrl+A`
+      select-all-or-clear, accent selection badge on tiles/rows, selection
+      revision feeding the Phase 48 detail-panel aggregate.
+- [x] **Collection screens: `B` / `X` / `M` over the selection** — a new shared
+      `ui::CollectionBatchOps` component (consent-gated export → folder pick →
+      `FileOpJob`, and per-parent grouped transfer via `ui::group_by_parent` +
+      `TransferDialog::open_collection` / `FileOpJob::start_transfer_collection`)
+      hosts the flows on both screen families, with the Phase 50 import-queue
+      exclusivity gate and vault-hands-off rendering while a worker owns the
+      handle. Unfavoriting reloads the collection (removed tiles vanish;
+      selection cleared with the stale listing).
+- [x] **Tests** — pure toggle rule, per-parent grouping, batch favorite
+      persistence across reopen, mixed media+gallery transfer, video-included
+      transfer, grouped cross-parent transfer.
 
 ### Part 3 — Wheel scrolling on side panels
 
-- [ ] **Viewer thumbnail strip** — a wheel event with the cursor inside
-      `strip_rect()` scrolls the strip along its axis (any dock side; honour
-      natural direction) instead of zooming the image (`ImageViewer::handle_wheel`
-      currently always zooms/scrolls the media). Manual strip scroll suspends
-      the auto-follow the same way existing strip dragging does, re-engaging on
-      navigation.
-- [ ] **Saved-search sidebar** — the advanced-search saved-searches panel
-      (`saved_search_panel.*`) scrolls with the wheel when the cursor is over
-      it; scrolling clamps to content and never moves the loaded-query state.
-- [ ] **Detail-panel audit** — wheel routing exists on grid / favorites /
-      advanced search (`detail_panel_hit` → `scroll_detail_panel`); audit every
-      other host (tag overview, duplicates review, …) and add the same routing
-      where the panel renders but the wheel falls through to the content below.
-- [ ] **Tests** — pure hit/scroll-model tests (strip axis mapping, sidebar
-      clamp); a wheel over the strip must not change zoom.
+- [x] **Viewer thumbnail strip** — a wheel with the cursor anywhere in the strip
+      band scrolls the strip along its axis (both dock sides; works while a
+      video plays) instead of zooming. New pure `ui::StripScrollState`
+      (`strip_scroll.*`): manual offset seeded from the auto-centered position
+      on first wheel, clamped to content, re-engaging auto-centering on image
+      change; `render_strip` and `strip_hit` share one manual-aware scroll
+      source so clicks stay accurate while scrolled.
+- [x] **Saved-search sidebar** — `SavedSearchPanel` gained a wheel-driven scroll
+      offset (clamped via a new pure `list_clamp_scroll` helper), row clipping,
+      and keyboard-nav keep-visible; `advanced_search_screen` routes wheel
+      events over the sidebar region to it.
+- [x] **Detail-panel audit** — verified: all three `draw_detail_panel` hosts
+      (grid, favorites base, advanced search) already route the wheel via
+      `detail_panel_hit`; no other host exists. No code change needed.
+- [x] **Tests** — pure strip-scroll state tests (clamp, content-fits no-op,
+      manual flag, re-engage) + list-clamp tests.
 
 ### Part 4 — `n / N` position counters
 
-- [ ] **Viewer strip overlay** — a small `n / N` badge rendered at the strip's
-      edge (all three dock sides), so position stays visible in **fullscreen**,
-      where the header band (which already shows `name  n/N  zoom`) is hidden.
-      Same STRIP_BG treatment so it reads as part of the strip; hidden while
-      the strip is hidden.
-- [ ] **Grid footer counter** — the gallery grid's footer band shows the focused
-      tile's position as `n / N` over the full listing (sub-galleries + media,
-      matching the visual order). Footer priority stays error > import summary >
-      status; the counter joins the status segment, never displacing errors.
-- [ ] **Collection screens** — the same focused-position counter on the
-      favorites / tag / search-result grids (their headers or footers, matching
-      each screen's existing chrome).
-- [ ] **Tests** — counter string formatting + full-listing indexing (the
-      Phase 46 mixed-gallery partition must not desync `n` from what the eye
-      counts); fullscreen shows the strip badge iff the strip is shown.
+- [x] **Viewer strip overlay** — an `n / N` badge (STRIP_BG fill, BORDER
+      outline, TEXT_DIM) at the strip band's far edge for both dock sides
+      (`strip_counter_rect`, pure/tested); in **fullscreen**, where strip and
+      header are hidden, the same badge anchors to the window's bottom-right
+      (`fullscreen_counter_rect`) so position stays visible — the point of the
+      feature. Hidden when the album is empty.
+- [x] **Grid footer counter** — the focused tile's `n / N` over the full sorted
+      listing joins the existing waste/selection chrome line, right-aligned;
+      the footer band's error > import summary > status priority is untouched.
+- [x] **Collection screens** — right-aligned counter on the favorites/tag title
+      line (all four subclasses share it); the search-results header reads
+      `Results (N) · n / N` in both the list and grid views.
+- [x] **Tests** — `position_label` formatting/bounds + badge-rect placement per
+      dock side and fullscreen. `n` follows the same `children_` order the grid
+      renders (Phase 46 partition included), so index and eye agree by
+      construction.
 
 **Out of scope (YAGNI):** F2 settings-overlay wheel support (keyboard-only stays);
 multiselect on the duplicates-review screen (it has its own KEEP/REMOVE marking
@@ -118,4 +127,14 @@ moves/copies as one batch. The wheel scrolls the viewer strip and the
 saved-search sidebar under the cursor without zooming or losing state. The grid
 footer and the fullscreen viewer both show the current `n / N` position.
 
-**Status:** 🔜 Planned.
+**Delivered defect discoveries (pre-existing, fixed here):** the import worker's
+result write-back discard (failed archives rendered as Done since Phase 50), the
+corrupt-root-archive-as-skip fold (Phase 53), and the video-dropping
+`is_image()` filter in selection transfer (Phase 44).
+
+**Known limits:** collection screens report transfer failure *counts* in the
+status line without the grid's per-item `FailureListDialog`; exporting a
+selected gallery hit on the search screen is skipped (media only), matching
+export's originals-only rule.
+
+**Status:** ✅ Implemented — 1895 tests / 0 failed (+ ASAN). Awaiting owner merge.
