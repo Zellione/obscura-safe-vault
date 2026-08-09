@@ -111,6 +111,10 @@ struct RecursiveTally {
     int budget_stopped      = 0;   // any other guard tripped
     int encrypted_skipped   = 0;   // needs a password the parent's did not fit
     int unreadable          = 0;   // backend refused the buffer
+    // Phase 68: the ROOT archive itself failed to list. A nested unreadable
+    // archive is a per-entry skip; an unreadable root means the user's pick was
+    // corrupt and the whole task must fail loudly, not report "Done, 1 skipped".
+    bool root_unreadable    = false;
 };
 
 // Backend hooks. `bytes` is the archive buffer being read.

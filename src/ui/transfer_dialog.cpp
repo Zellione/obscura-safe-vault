@@ -59,6 +59,26 @@ void TransferDialog::open_galleries(std::vector<std::string> src_paths)
     src_galleries_ = std::move(src_paths);
 }
 
+void TransferDialog::open_mixed(std::string src_gallery, std::vector<std::string> media_names,
+                                std::vector<std::string> gallery_paths)
+{
+    // A grid mixed selection is one Collection with a single media group.
+    std::vector<ParentGroup> groups;
+    if (!media_names.empty()) {
+        groups.push_back({.parent = std::move(src_gallery), .names = std::move(media_names)});
+    }
+    open_collection(std::move(groups), std::move(gallery_paths));
+}
+
+void TransferDialog::open_collection(std::vector<ParentGroup> media_groups,
+                                     std::vector<std::string> gallery_paths)
+{
+    open("", {});                  // reuse open() to reset all state + build candidates
+    source_        = Source::Collection;
+    media_groups_  = std::move(media_groups);
+    src_galleries_ = std::move(gallery_paths);
+}
+
 void TransferDialog::close()
 {
     picker_dest_.close();   // wipes/locks the transient destination vault, if any
@@ -78,9 +98,11 @@ vault::Vault& TransferDialog::dest_vault() noexcept
 void TransferDialog::rebuild_targets()
 {
     const vault::Vault& dv = dest_vault();
-    std::vector<std::string> targets = (source_ == Source::Gallery || source_ == Source::Galleries)
-        ? vault::gallery_target_parents(dv)
-        : vault::image_target_galleries(dv);
+    // Mixed uses the galleries constraint: any gallery holds media (Phase 46),
+    // but a subtree target must exclude move-into-own-subtree cycles.
+    std::vector<std::string> targets = (source_ == Source::Images)
+        ? vault::image_target_galleries(dv)
+        : vault::gallery_target_parents(dv);
     picker_.set_items(std::move(targets));
     picker_.set_pinned_suffix(kNewGalleryRow);
 }
@@ -111,6 +133,9 @@ void TransferDialog::do_move(std::string_view dst_target)
     else if (source_ == Source::Galleries)
         run_.job.start_transfer_galleries(src_, src_galleries_, dv, std::string(dst_target),
                                           mode_, where);
+    else if (source_ == Source::Collection)
+        run_.job.start_transfer_collection(src_, media_groups_, src_galleries_, dv,
+                                           std::string(dst_target), mode_, where);
     else
         run_.job.start_transfer_images(src_, src_gallery_, filenames_, dv, std::string(dst_target),
                                        mode_, where);

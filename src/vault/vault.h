@@ -309,6 +309,12 @@ public:
                                           std::span<const std::string> node_paths,
                                           RemoveBatchStats* stats);
 
+    // Batch favorite set (Phase 68 multiselect): flip every resolving path to
+    // `value`, ONE commit_index(). Kept a free friend for the same S1448 reason.
+    friend VaultResult set_favorites_batch(Vault& v,
+                                           std::span<const std::string> node_paths,
+                                           bool value);
+
     // Phase 65 migration: apply probed metadata WITHOUT committing, so a whole
     // migration pass costs one index write instead of one per node.
     friend VaultResult apply_video_probe(Vault& v, std::string_view node_path,
@@ -446,6 +452,14 @@ private:
 [[nodiscard]] VaultResult remove_media_batch(Vault& v,
                                              std::span<const std::string> node_paths,
                                              RemoveBatchStats* stats = nullptr);
+
+// Batch favorite set (Phase 68): set every resolving path's favorite flag to
+// `value` (galleries and media alike); non-resolving paths are skipped, not
+// errors. ONE commit_index() for the whole batch — and none at all when no
+// node actually changed. Locked if locked; IoError if the commit fails.
+[[nodiscard]] VaultResult set_favorites_batch(Vault& v,
+                                              std::span<const std::string> node_paths,
+                                              bool value);
 
 // Get the vault file's current size in bytes. Returns 0 if locked or on I/O error.
 // Used by the UI to display waste/compaction information (Phase 26).

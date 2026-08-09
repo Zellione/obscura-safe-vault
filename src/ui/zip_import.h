@@ -26,6 +26,13 @@ struct ZipImportOutcome {
     std::string              error;
 };
 
+// Corrupt/hostile-header guard (Phase 68): true iff a zip entry's declared
+// uncompressed size is achievable from its compressed size. Deflate cannot
+// exceed ~1032:1, so a header claiming more is lying — refuse it BEFORE an
+// mlock'd buffer is sized from the claim (a 0xFFFFFFFF lie is a 4 GiB
+// zero-initialised allocation, i.e. an OOM the task-boundary catch cannot see).
+[[nodiscard]] bool zip_entry_size_plausible(uint64_t comp_size, uint64_t uncomp_size) noexcept;
+
 // Shared, thread-safe progress for a running import (Phase 24). An alias of
 // the generic vault::OpProgress (Phase 25) used by import executors and the queue.
 // The importer stores `total` (files to place) before the first page and bumps

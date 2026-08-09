@@ -8,8 +8,8 @@ namespace ui {
 
 TagImages::TagImages(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                      gfx::TextureCache& cache, platform::VaultRegistry& registry,
-                     std::string active_path, std::string tag)
-    : FavoritesImages(win, font, vault, cache, registry, std::move(active_path)),
+                     std::string tag, const CollectionOps& ops)
+    : FavoritesImages(win, font, vault, cache, registry, ops),
       tag_(std::move(tag))
 {
     title_ = "Images tagged '" + tag_ + "'";

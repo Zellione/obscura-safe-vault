@@ -76,3 +76,43 @@ TEST(a_degenerate_row_height_yields_no_rows_rather_than_dividing_by_zero)
     const ui::ListMetrics m{.top = 100.0f, .row_h = 0.0f, .gap = 0.0f};
     CHECK_EQ(ui::list_visible_rows(m, 900.0f), 0);
 }
+
+TEST(list_clamp_scroll_returns_zero_when_content_fits)
+{
+    // 10 rows at 28px each + 1 header = 11*28 = 308px. Available = 720-100 = 620px.
+    // Content fits entirely -> scroll should always be 0.
+    const float row_h = ui::line_pitch(FONT_PX);
+    const float scroll = ui::list_clamp_scroll(100.0f, 10, row_h, 100.0f, 720.0f);
+    CHECK_EQ(scroll, 0.0f);
+}
+
+TEST(list_clamp_scroll_clamps_to_valid_range)
+{
+    // 100 rows, available space limited. Calculate expected max_offset.
+    const float row_h = ui::line_pitch(FONT_PX);
+    const float top = 100.0f;
+    const float max_h = 400.0f;           // only 300px available
+    const int count = 100;
+    const float content_h = (count + 1.0f) * row_h;  // header + 100 rows
+    const float max_offset = content_h - (max_h - top);
+
+    // Test values get clamped to [0, max_offset].
+    CHECK_EQ(ui::list_clamp_scroll(-10.0f, count, row_h, top, max_h), 0.0f);
+    CHECK_EQ(ui::list_clamp_scroll(max_offset + 10.0f, count, row_h, top, max_h), max_offset);
+    CHECK_EQ(ui::list_clamp_scroll(max_offset * 0.5f, count, row_h, top, max_h), max_offset * 0.5f);
+}
+
+TEST(list_clamp_scroll_with_zero_rows)
+{
+    const float row_h = ui::line_pitch(FONT_PX);
+    const float scroll = ui::list_clamp_scroll(50.0f, 0, row_h, 100.0f, 500.0f);
+    CHECK_EQ(scroll, 0.0f);  // No rows = no scroll
+}
+
+TEST(list_clamp_scroll_with_degenerate_dimensions)
+{
+    // top >= max_h -> no available space -> no scroll
+    CHECK_EQ(ui::list_clamp_scroll(100.0f, 10, 28.0f, 500.0f, 400.0f), 0.0f);
+    // zero row_h -> no scroll
+    CHECK_EQ(ui::list_clamp_scroll(100.0f, 10, 0.0f, 100.0f, 500.0f), 0.0f);
+}

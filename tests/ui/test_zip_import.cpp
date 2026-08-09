@@ -217,3 +217,21 @@ TEST(zip_import_decodes_legacy_cp437_entry_name)
     }
     cleanup_dir(dir);
 }
+
+// Phase 68: a zip header can lie about m_uncomp_size (corrupt or hostile). An
+// entry claiming to inflate beyond deflate's theoretical bound is refused
+// before the mlock'd buffer is sized from it.
+TEST(zip_entry_size_plausible_accepts_normal_ratios)
+{
+    CHECK(ui::zip_entry_size_plausible(100, 100));      // stored
+    CHECK(ui::zip_entry_size_plausible(100, 50000));    // strong but possible
+    CHECK(ui::zip_entry_size_plausible(0, 0));          // empty entry
+}
+
+TEST(zip_entry_size_plausible_rejects_lying_headers)
+{
+    CHECK(!ui::zip_entry_size_plausible(100, 0xFFFFFFFFull));
+    CHECK(!ui::zip_entry_size_plausible(4, 1u << 20));
+    // 0 compressed bytes cannot inflate to anything.
+    CHECK(!ui::zip_entry_size_plausible(0, 1));
+}

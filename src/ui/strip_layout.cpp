@@ -84,4 +84,38 @@ StripRange strip_visible_range(float scroll, float extent, float thumb,
     return {std::max(0, first - margin), std::min(count - 1, last + margin)};
 }
 
+SDL_FRect strip_counter_rect(StripSide side, SDL_FRect strip, float text_w,
+                             float line_h) noexcept
+{
+    constexpr float PAD = 8.0f;
+    const float badge_w = text_w + 2.0f * PAD;
+    const float badge_h = line_h + 2.0f * PAD;
+
+    if (side == StripSide::Bottom) {
+        // Bottom strip: badge at right edge, vertically centered.
+        const float x = strip.x + strip.w - PAD - badge_w;
+        const float y = strip.y + (strip.h - badge_h) * 0.5f;
+        return SDL_FRect{x, y, badge_w, badge_h};
+    } else {
+        // Left strip: badge at bottom-right corner.
+        const float x = strip.x + strip.w - PAD - badge_w;
+        const float y = strip.y + strip.h - PAD - badge_h;
+        return SDL_FRect{x, y, badge_w, badge_h};
+    }
+}
+
+SDL_FRect fullscreen_counter_rect(float win_w, float win_h, float text_w,
+                                  float line_h) noexcept
+{
+    constexpr float MARGIN = 12.0f;
+    constexpr float PAD = 8.0f;
+    const float badge_w = text_w + 2.0f * PAD;
+    const float badge_h = line_h + 2.0f * PAD;
+
+    // Bottom-right corner with MARGIN from edges.
+    const float x = win_w - MARGIN - badge_w;
+    const float y = win_h - MARGIN - badge_h;
+    return SDL_FRect{x, y, badge_w, badge_h};
+}
+
 } // namespace ui

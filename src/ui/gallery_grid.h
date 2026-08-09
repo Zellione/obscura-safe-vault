@@ -180,8 +180,7 @@ void toggle_select();          // toggle the current item in the export selectio
     // from start_transfer() and update() (Phase 44 SonarQube follow-up).
     friend void start_transfer_focused(GalleryGrid& g);
     friend void start_transfer_selection(GalleryGrid& g);
-    friend void start_transfer_galleries_selection(GalleryGrid& g);
-    friend void start_transfer_images_selection(GalleryGrid& g);
+    friend void toggle_favorite_selection(GalleryGrid& g);   // B over the multi-selection (Phase 68)
     friend void poll_transfer_and_combine(GalleryGrid& g);
     friend void poll_pending_pickers(GalleryGrid& g);
     friend void update_scroll_to_selection(GalleryGrid& g);

@@ -4,17 +4,21 @@
 
 #include <vector>
 
+#include "ui/collection_ops.h"
 #include "ui/detail_model.h"
 #include "ui/detail_panel.h"
 #include "ui/nav_model.h"
 #include "ui/quick_switch.h"
 #include "ui/rename_dialog.h"
 #include "ui/screen.h"
+#include "ui/selection_model.h"
 #include "vault/vault.h"   // vault::SearchHit
 
 namespace gfx { class Window; class FontAtlas; class Renderer; }
 namespace vault { class Vault; }
-namespace platform { class VaultRegistry; }
+namespace platform { class VaultRegistry; class FileDialog; class FolderDialog; }
+
+namespace ui { class ImportQueue; class SecondVaultSession; }
 
 namespace ui {
 
@@ -25,8 +29,22 @@ namespace ui {
 // labels — this base owns only the common SDL plumbing + grid layout.
 class FavoritesScreen : public Screen {
 public:
+    // App-owned collaborators for the Phase 68 batch operations (B/X/M over the
+    // Space/Ctrl+A selection). Bundled so the ctor stays under the S107 cap:
+    // the file dialog feeds the destination-vault keyfile pick, the folder
+    // dialog picks the export destination (App-owned — its async callback must
+    // outlive this screen), the queue gates transfers (Phase 50 exclusivity),
+    // and the warm second-vault slot is Phase 66's.
+    struct CollectionOps {
+        platform::FileDialog&   file_dialog;
+        platform::FolderDialog& folder_dialog;
+        ImportQueue&            queue;
+        SecondVaultSession*     second;
+        std::string             active_path;   // active vault's file path
+    };
+
     FavoritesScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                    platform::VaultRegistry& registry, std::string active_path);
+                    platform::VaultRegistry& registry, const CollectionOps& ops);
 
     void on_enter() override;
     void on_vault_changed() override;  // Phase 50: re-fetch favorites after tree reallocation
@@ -75,11 +93,25 @@ protected:
     [[nodiscard]] gfx::FontAtlas& font_ref()  const noexcept { return font_; }
     [[nodiscard]] vault::Vault&   vault_ref() const noexcept { return vault_; }
 
+    // True while a batch worker (export job or transfer) owns the vault handle.
+    // Subclasses MUST NOT touch the vault (no thumbnail decode submits) while
+    // this holds — same contract as GalleryGrid's vault_busy.
+    [[nodiscard]] bool batch_ops_busy() const noexcept { return ops_.busy(); }
+
 private:
     void open_selected();
+    // The SDL_EVENT_KEY_DOWN half of handle_event, split out to keep each
+    // function under the S3776 cognitive-complexity cap.
+    void handle_key_down(const SDL_KeyboardEvent& key);
     [[nodiscard]] int hit_test(float mx, float my) const;
     void start_rename();   // R: rename the focused item (Phase 45 Part 1)
     void rebuild_detail();
+
+    // Phase 68 batch operations over the Space/Ctrl+A selection.
+    void toggle_select_all();
+    void toggle_favorite_batch();    // B
+    void start_export();             // X: consent modal first
+    void start_transfer();           // M: per-parent groups + gallery subtrees
 
     gfx::Window&    win_;
     gfx::FontAtlas& font_;
@@ -109,6 +141,11 @@ private:
         float            content_h = 0.0f;
     };
     DetailState detail_;
+
+    // Phase 68: the shared batch-operation flows (consent-gated export, grouped
+    // move/copy) + the multi-selection they act on.
+    CollectionBatchOps ops_;
+    SelectionModel     sel_;
 
     friend bool current_detail_open(const FavoritesScreen& s);
 };

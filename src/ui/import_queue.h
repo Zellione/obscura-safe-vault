@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -103,6 +104,12 @@ public:
     // between batch commits. Never called by production code.
     friend void test_only_drop_without_flush(ImportQueue& q);
 
+    // Test seam (Phase 68): runs on the worker thread inside the task-boundary
+    // try scope, before the task's processing. Lets a test throw from "inside"
+    // a task to prove an escaping exception fails that task instead of
+    // terminating the process. Never set by production code.
+    friend void test_only_set_task_hook(ImportQueue& q, std::function<void()> hook);
+
 private:
     // Nested types: defined in-header for MSVC's std::deque to require complete element types at member declaration
     struct StagedRecord {
@@ -177,7 +184,17 @@ private:
                           std::filesystem::path& out_archive_path,
                           std::string& out_gallery_name, std::string& out_dest_gallery,
                           std::shared_ptr<vault::OpProgress>& out_progress);  // Called under lock
-    void mark_task_complete(uint64_t task_id, const std::shared_ptr<vault::OpProgress>& progress);  // Called under lock
+    // Runs one task's processing on the worker thread inside the Phase 68
+    // task-boundary try/catch (an escaping exception fails the task instead of
+    // terminating the process). Extracted from worker_loop for S134 nesting.
+    void run_worker_task(Task& work_task, const std::function<void()>& hook);
+
+    // Called under lock. `result` is the worker's finished local task copy:
+    // a terminal state (Failed/Cancelled) plus its error and outcome counts
+    // are written back to the queued row (Phase 68 — they used to be
+    // discarded, so a failed archive rendered as "Done, 0 imported").
+    void mark_task_complete(uint64_t task_id, const Task& result,
+                            const std::shared_ptr<vault::OpProgress>& progress);
 
     // Synchronization
     mutable std::mutex mu_;
@@ -194,6 +211,10 @@ private:
     uint64_t next_task_id_ = 1;
     std::atomic<bool> exclusive_{false};
     std::atomic<bool> worker_stop_{false};
+
+    // Phase 68 test seam; guarded by mu_. Called (copied out under lock) once
+    // per task on the worker thread, inside the task-boundary try scope.
+    std::function<void()> test_task_hook_;
     bool aborted_ = false;  // Tracks abort_and_flush idempotence (checked under mu_)
 
     // Record queue for main thread to drain

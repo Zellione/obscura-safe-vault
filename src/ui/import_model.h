@@ -62,6 +62,12 @@ int clear_finished_imports(std::vector<ImportTaskInfo>& tasks);
                                                 bool lane_failed,
                                                 std::string_view lane_error = {});
 
+// One error-log line for a Failed import task (Phase 68), logged via
+// platform::log_error("Import", ...): "<display_name>: <error>", with
+// fallbacks so neither half can be empty. Never pass content or passwords.
+[[nodiscard]] std::string import_failure_log_line(std::string_view display_name,
+                                                  std::string_view error);
+
 // Batched-commit policy (spec: every 32 attached files or 2 s, whichever
 // first, and only when at least one file is uncommitted).
 struct BatchCommitPolicy {

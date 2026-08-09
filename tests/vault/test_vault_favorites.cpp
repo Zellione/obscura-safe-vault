@@ -233,3 +233,61 @@ TEST(favorites_operations_on_locked_vault_fail)
     CHECK_TRUE(v2.list_favorite_images().empty());
     CHECK_TRUE(v2.list_favorite_galleries().empty());
 }
+
+// --- Phase 68: batch favorite set (one commit) -----------------------------
+
+TEST(favorites_batch_set_persists_across_reopen)
+{
+    TempVault tv("batch_set");
+    auto img = pattern(4000, 9);
+
+    {
+        Vault v;
+        REQUIRE(Vault::create(tv.str(), bytes("pw"), {}, kFavKdf, v) == VaultResult::Ok);
+        REQUIRE(v.add_image("", img, "a.jpg") == VaultResult::Ok);
+        REQUIRE(v.add_image("", img, "b.jpg") == VaultResult::Ok);
+        REQUIRE(v.create_gallery("trip") == VaultResult::Ok);
+
+        const std::vector<std::string> paths{"a.jpg", "b.jpg", "trip"};
+        REQUIRE(vault::set_favorites_batch(v, paths, true) == VaultResult::Ok);
+        for (const auto* c : v.list("")) CHECK_TRUE(c->favorite);
+
+        v.lock();
+    }
+
+    Vault v2;
+    REQUIRE(Vault::open(tv.str(), v2) == VaultResult::Ok);
+    REQUIRE(v2.unlock(bytes("pw"), {}) == VaultResult::Ok);
+    for (const auto* c : v2.list("")) CHECK_TRUE(c->favorite);
+
+    // And back off again, in one batch.
+    const std::vector<std::string> paths{"a.jpg", "b.jpg", "trip"};
+    REQUIRE(vault::set_favorites_batch(v2, paths, false) == VaultResult::Ok);
+    for (const auto* c : v2.list("")) CHECK_TRUE(!c->favorite);
+}
+
+TEST(favorites_batch_skips_missing_path_but_commits_rest)
+{
+    TempVault tv("batch_missing");
+    auto img = pattern(4000, 11);
+
+    Vault v;
+    REQUIRE(Vault::create(tv.str(), bytes("pw"), {}, kFavKdf, v) == VaultResult::Ok);
+    REQUIRE(v.add_image("", img, "a.jpg") == VaultResult::Ok);
+
+    const std::vector<std::string> paths{"a.jpg", "does/not/exist.jpg"};
+    REQUIRE(vault::set_favorites_batch(v, paths, true) == VaultResult::Ok);
+    auto children = v.list("");
+    REQUIRE(children.size() == 1);
+    CHECK_TRUE(children[0]->favorite);
+}
+
+TEST(favorites_batch_on_locked_vault_is_refused)
+{
+    TempVault tv("batch_locked");
+    Vault v;
+    REQUIRE(Vault::create(tv.str(), bytes("pw"), {}, kFavKdf, v) == VaultResult::Ok);
+    v.lock();
+    const std::vector<std::string> paths{"a.jpg"};
+    CHECK(vault::set_favorites_batch(v, paths, true) == VaultResult::Locked);
+}

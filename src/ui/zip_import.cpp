@@ -107,6 +107,10 @@ void import_one(MediaSink& sink, mz_zip_archive& zip, const ZipPlacement& pl,
         ++out.skipped;
         return;
     }
+    if (!zip_entry_size_plausible(st.m_comp_size, st.m_uncomp_size)) {
+        ++out.skipped;   // lying header (Phase 68) — same outcome as a failed extract
+        return;
+    }
 
     crypto::SecureBytes bytes(static_cast<size_t>(st.m_uncomp_size));  // mlock'd; wiped on scope exit
     if (!mz_zip_reader_extract_to_mem(&zip, static_cast<mz_uint>(pl.entry_index),
@@ -198,6 +202,18 @@ void run_placements(MediaSink& sink, mz_zip_archive& zip, const ZipPlan& plan,
 }
 
 }  // namespace
+
+bool zip_entry_size_plausible(uint64_t comp_size, uint64_t uncomp_size) noexcept
+{
+    if (uncomp_size == 0) return true;              // empty entry, nothing to size
+    if (comp_size == 0) return false;               // nothing cannot inflate to something
+    // Deflate's theoretical bound is ~1032:1; the slack absorbs tiny inputs
+    // whose fixed header overhead skews the ratio. Division form: the product
+    // comp_size * ratio could overflow on a hostile comp_size.
+    constexpr uint64_t MAX_RATIO = 1033;
+    constexpr uint64_t SLACK     = 4096;
+    return uncomp_size <= SLACK || uncomp_size / MAX_RATIO <= comp_size;
+}
 
 ZipImportOutcome import_zip(MediaSink&                   sink,
                             const std::filesystem::path& zip_path,

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "ui/advanced_search_model.h"
+#include "ui/list_layout.h"
 #include "ui/text_input_model.h"
 #include "ui/widgets.h"
 #include "vault/vault_search.h"
@@ -69,10 +70,15 @@ public:
     // Returns true on success; caller should only call reload_saved() on true.
     bool finalize_save(const AdvancedQuery& query);
 
+    // Handle mouse wheel scrolling on the saved-search sidebar. Called when wheel event
+    // is detected over the panel. max_h = window height (for scroll clamping).
+    void handle_wheel(float wheel_y, float max_h);
+
     // Render the saved-searches sidebar (list of saved searches, focused highlight, saving modal).
     // hot = whether the Saved field is focused and not in save mode or clearing mode;
-    // max_w = available width in px (long names are middle-elided to fit it)
-    void render(gfx::Renderer& r, float x, float max_w, bool hot);
+    // max_w = available width in px (long names are middle-elided to fit it);
+    // max_h = window height (for scroll clamping and clipping rows outside viewport).
+    void render(gfx::Renderer& r, float x, float max_w, float max_h, bool hot);
 
     // Session state accessors (called by AdvancedSearchScreen::on_enter/on_exit).
     int  get_cursor() const;
@@ -94,6 +100,8 @@ private:
     std::vector<vault::SavedSearch>&  saved_;   // the saved searches list (owned by AdvancedSearchScreen)
 
     int         cur_saved_ = 0;    // selected saved search index
+    float       scroll_    = 0.0f; // vertical scroll offset for the list (Phase 68 Part 3)
+    float       last_max_h_ = 720.0f;  // cached window height for scroll clamping in handle_key
     bool        saving_    = false; // naming a search to save
     TextInputModel  save_buf_;     // the name being typed while saving_=true
     TextFieldChrome save_chrome_;

@@ -250,6 +250,69 @@ bool FileOpJob::start_transfer_galleries(vault::Vault& src, std::vector<std::str
     });
 }
 
+bool FileOpJob::start_transfer_media_grouped(vault::Vault& src, std::vector<ParentGroup> groups,
+                                             vault::Vault& dst, std::string dst_gallery,
+                                             vault::TransferMode mode, std::string label)
+{
+    return start_transfer_collection(src, std::move(groups), {}, dst, std::move(dst_gallery),
+                                     mode, std::move(label));
+}
+
+namespace {
+
+// One collection-screen selection: per-parent media groups + gallery subtrees.
+struct CollectionTransferSpec {
+    std::vector<ParentGroup> groups;
+    std::vector<std::string> gallery_paths;
+};
+
+// Worker body of start_transfer_collection, a named function to keep the
+// launch lambda within the S1188 line budget. Media first, then subtrees; a
+// cancel between phases is a clean partial (each vault::transfer_* item is a
+// committed unit).
+vault::TransferTally run_collection_transfer(vault::Vault& src, const CollectionTransferSpec& spec,
+                                             vault::Vault& dst, const std::string& dst_target,
+                                             vault::TransferMode mode, vault::OpProgress& progress)
+{
+    vault::TransferTally sum;
+    for (const ParentGroup& g : spec.groups) {
+        if (progress.cancel.load()) break;
+        vault::TransferTally t =
+            vault::transfer_images(src, g.parent, g.names, dst, dst_target, mode, &progress);
+        sum.done   += t.done;
+        sum.failed += t.failed;
+        sum.failures.insert(sum.failures.end(), std::make_move_iterator(t.failures.begin()),
+                            std::make_move_iterator(t.failures.end()));
+    }
+    if (!spec.gallery_paths.empty() && !progress.cancel.load()) {
+        vault::TransferTally t =
+            vault::transfer_galleries(src, spec.gallery_paths, dst, dst_target, mode, &progress);
+        sum.done   += t.done;
+        sum.failed += t.failed;
+        sum.failures.insert(sum.failures.end(), std::make_move_iterator(t.failures.begin()),
+                            std::make_move_iterator(t.failures.end()));
+    }
+    return sum;
+}
+
+}  // namespace
+
+bool FileOpJob::start_transfer_collection(vault::Vault& src, std::vector<ParentGroup> groups,
+                                          std::vector<std::string> gallery_paths,
+                                          vault::Vault& dst, std::string dst_target,
+                                          vault::TransferMode mode, std::string label)
+{
+    return launch(FileOpKind::Transfer,
+                  [this, &src,
+                   spec = CollectionTransferSpec{std::move(groups), std::move(gallery_paths)},
+                   &dst, dst_target = std::move(dst_target), mode, label = std::move(label)]() {
+        vault::TransferTally t = run_collection_transfer(src, spec, dst, dst_target, mode,
+                                                         progress_);
+        return transfer_outcome(mode, t.done, t.failed, t.done + t.failed,
+                                progress_.cancel.load(), label, std::move(t.failures));
+    });
+}
+
 bool FileOpJob::start_combine(vault::Vault& src, std::string src_gallery,
                               vault::Vault& dst, std::string dst_gallery, std::string label)
 {

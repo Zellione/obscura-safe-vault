@@ -8,9 +8,17 @@
 
 #include <chrono>
 #include <fstream>
+#include <stdexcept>
 #include <thread>
 
 namespace fs = std::filesystem;
+
+namespace ui {
+// Test seam (Phase 68): runs on the worker thread inside the task-boundary try
+// scope. Declared as friend in import_queue.h; defined in import_queue.cpp.
+// Never set by production code.
+void test_only_set_task_hook(ImportQueue& q, std::function<void()> hook);
+}  // namespace ui
 
 namespace {
 
@@ -886,6 +894,116 @@ TEST(import_queue_files_routes_mp4_to_video_node)
     CHECK_EQ(vid->vmeta.height, 120);
     CHECK(vid->vmeta.poster_length > 0);
 #endif
+
+    q.end_session();
+    ziptest::cleanup_dir(temp_dir);
+}
+
+// Phase 68: a corrupt archive fails the task with a visible reason. Regression
+// guard for the write-back defect where the worker's local Failed state was
+// discarded by mark_task_complete and the row showed "Done, 0 imported".
+TEST(import_queue_corrupt_zip_fails_task_with_reason)
+{
+    const auto temp_dir = ziptest::fresh_dir("test_import_queue_corrupt_zip");
+    const auto vault_path = temp_dir / "vault.osv";
+
+    vault::Vault v;
+    ziptest::make_vault(v, vault_path);
+
+    // ZIP magic followed by garbage: miniz cannot locate a central directory.
+    const auto bad = temp_dir / "bad.zip";
+    std::vector<uint8_t> junk{'P', 'K', 3, 4};
+    for (int i = 0; i < 512; ++i) junk.push_back(static_cast<uint8_t>(i * 7));
+    std::ofstream(bad, std::ios::binary)
+        .write(reinterpret_cast<const char*>(junk.data()),
+               static_cast<std::streamsize>(junk.size()));
+
+    ui::ImportQueue q;
+    q.begin_session(v);
+    (void)q.enqueue_archive(bad, "", "Bad", ui::ImportTaskKind::Zip);
+    pump_until_idle(q);
+
+    const auto snap = q.snapshot();
+    REQUIRE(snap.size() == static_cast<size_t>(1));
+    CHECK(snap[0].state == ui::ImportTaskState::Failed);
+    CHECK(!snap[0].error.empty());
+
+    q.end_session();
+    ziptest::cleanup_dir(temp_dir);
+}
+
+// Phase 68: an exception escaping a task's processing on the worker thread must
+// fail THAT task and keep the queue alive for the next one — it used to escape
+// worker_loop and std::terminate the whole app.
+TEST(import_queue_worker_exception_fails_task_and_continues)
+{
+    const auto temp_dir = ziptest::fresh_dir("test_import_queue_worker_throw");
+    const auto vault_path = temp_dir / "vault.osv";
+
+    vault::Vault v;
+    ziptest::make_vault(v, vault_path);
+
+    const auto files_dir = temp_dir / "files";
+    fs::create_directories(files_dir);
+    std::vector<fs::path> first;
+    std::vector<fs::path> second;
+    for (int i = 0; i < 2; ++i) {
+        const auto path = files_dir / (std::to_string(i) + ".jpg");
+        const auto jpeg_data = ziptest::fake_jpeg(static_cast<uint8_t>(i));
+        std::ofstream(path, std::ios::binary)
+            .write(reinterpret_cast<const char*>(jpeg_data.data()),
+                   static_cast<std::streamsize>(jpeg_data.size()));
+        (i == 0 ? first : second).push_back(path);
+    }
+
+    ui::ImportQueue q;
+    q.begin_session(v);
+    int calls = 0;
+    ui::test_only_set_task_hook(q, [&calls]() {
+        if (++calls == 1) throw std::runtime_error("boom");
+    });
+    (void)q.enqueue_files(first, "dest");
+    (void)q.enqueue_files(second, "dest");
+    pump_until_idle(q);
+
+    const auto snap = q.snapshot();
+    REQUIRE(snap.size() == static_cast<size_t>(2));
+    CHECK(snap[0].state == ui::ImportTaskState::Failed);
+    CHECK(snap[0].error.find("boom") != std::string::npos);
+    CHECK(snap[1].state == ui::ImportTaskState::Done);
+    CHECK_EQ(snap[1].imported, 1);
+
+    ui::test_only_set_task_hook(q, {});
+    q.end_session();
+    ziptest::cleanup_dir(temp_dir);
+}
+
+// Phase 68: a real zip truncated mid-file (interrupted download, bad disk)
+// must fail the task with a reason — the app used to close or report Done.
+TEST(import_queue_truncated_zip_fails_task)
+{
+    const auto temp_dir = ziptest::fresh_dir("test_import_queue_truncated_zip");
+    const auto vault_path = temp_dir / "vault.osv";
+
+    vault::Vault v;
+    ziptest::make_vault(v, vault_path);
+
+    const auto img = ziptest::fake_jpeg(7);
+    const auto zip = ziptest::make_archive({{"a.jpg", img}, {"b.jpg", img}}, temp_dir / "in.zip");
+
+    // Truncate to 60%: the central directory (at the tail) is gone.
+    const auto full = fs::file_size(zip);
+    fs::resize_file(zip, full * 6 / 10);
+
+    ui::ImportQueue q;
+    q.begin_session(v);
+    (void)q.enqueue_archive(zip, "", "Trunc", ui::ImportTaskKind::Zip);
+    pump_until_idle(q);
+
+    const auto snap = q.snapshot();
+    REQUIRE(snap.size() == static_cast<size_t>(1));
+    CHECK(snap[0].state == ui::ImportTaskState::Failed);
+    CHECK(!snap[0].error.empty());
 
     q.end_session();
     ziptest::cleanup_dir(temp_dir);

@@ -54,6 +54,18 @@ public:
     // Activate to move a LIST of whole GALLERY subtrees at once (multi-select).
     void open_galleries(std::vector<std::string> src_paths);
 
+    // Activate for a MIXED multi-selection (Phase 68): media names within
+    // `src_gallery` land inside the picked target; each gallery subtree in
+    // `gallery_paths` lands under it. One Mode/Dest/Target pick for both.
+    void open_mixed(std::string src_gallery, std::vector<std::string> media_names,
+                    std::vector<std::string> gallery_paths);
+
+    // Activate for a COLLECTION-screen selection (Phase 68): media grouped by
+    // their source parent (favorites/tags/search hits span galleries) plus
+    // whole gallery subtrees, in one Mode/Dest/Target pick.
+    void open_collection(std::vector<ParentGroup> media_groups,
+                         std::vector<std::string> gallery_paths);
+
     void close();                                   // wipes dest_.vault key, deactivates
     [[nodiscard]] bool active() const noexcept { return active_; }
 
@@ -104,8 +116,9 @@ private:
     std::string src_gallery_;
     std::vector<std::string> filenames_;
     std::vector<std::string> src_galleries_;   // Source::Galleries payload
+    std::vector<ParentGroup> media_groups_;    // Source::Collection payload (Phase 68)
 
-    enum class Source { Images, Gallery, Galleries };   // Galleries: Phase 44 Part 3
+    enum class Source { Images, Gallery, Galleries, Collection };   // Galleries: Phase 44 Part 3; Collection: Phase 68
     Source      source_ = Source::Images;
 
     VaultUnlockPicker picker_dest_;                     // PickingDest: destination vault selection/unlock

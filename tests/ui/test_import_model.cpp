@@ -376,3 +376,18 @@ TEST(format_task_progress_zero_of_zero_is_not_nonsense)
     const auto s = ui::format_task_progress(0, 0, false);
     CHECK(!s.empty());
 }
+
+// Phase 68: the error-log line for a Failed import task.
+TEST(import_failure_log_line_joins_name_and_reason)
+{
+    CHECK_EQ(ui::import_failure_log_line("bad.zip", "central directory not found"),
+             std::string("bad.zip: central directory not found"));
+}
+
+TEST(import_failure_log_line_never_emits_empty_halves)
+{
+    CHECK_EQ(ui::import_failure_log_line("", "reason"),
+             std::string("import task: reason"));
+    CHECK_EQ(ui::import_failure_log_line("bad.zip", ""),
+             std::string("bad.zip: import failed"));
+}

@@ -220,7 +220,9 @@ void App::to_favorite_images()
 {
     state_  = State::Browsing;
     auto screen = std::make_unique<ui::FavoritesImages>(
-        window_, font_, *vault_state_.active, *cache_, registry_, vault_state_.active_path);
+        window_, font_, *vault_state_.active, *cache_, registry_,
+        ui::FavoritesScreen::CollectionOps{dialog_, folder_dialog_, import_ui_.queue,
+                                           &second_.session, vault_state_.active_path});
     screen->set_detail_open(session_.detail_open);
     screen_ = std::move(screen);
     screen_->on_enter();
@@ -230,7 +232,9 @@ void App::to_favorite_galleries()
 {
     state_  = State::Browsing;
     auto screen = std::make_unique<ui::FavoritesGalleries>(
-        window_, font_, *vault_state_.active, registry_, vault_state_.active_path);
+        window_, font_, *vault_state_.active, registry_,
+        ui::FavoritesScreen::CollectionOps{dialog_, folder_dialog_, import_ui_.queue,
+                                           &second_.session, vault_state_.active_path});
     screen->set_detail_open(session_.detail_open);
     screen_ = std::move(screen);
     screen_->on_enter();
@@ -261,8 +265,12 @@ void App::to_favorite_viewer(int index)
 void App::to_advanced_search()
 {
     state_  = State::Browsing;
-    screen_ = std::make_unique<ui::AdvancedSearchScreen>(window_, font_, *vault_state_.active, *cache_,
-                                                         adv_session_, adv_session_.detail_open);
+    screen_ = std::make_unique<ui::AdvancedSearchScreen>(
+        window_, font_, *vault_state_.active, *cache_, adv_session_,
+        ui::CollectionBatchOps::Deps{*vault_state_.active, vault_state_.active_path, registry_,
+                                     dialog_, window_, &second_.session, folder_dialog_,
+                                     import_ui_.queue},
+        adv_session_.detail_open);
     screen_->on_enter();
 }
 
@@ -278,7 +286,9 @@ void App::to_tag_galleries(const std::string& tag)
 {
     state_  = State::Browsing;
     auto screen = std::make_unique<ui::TagGalleries>(
-        window_, font_, *vault_state_.active, registry_, vault_state_.active_path, tag);
+        window_, font_, *vault_state_.active, registry_, tag,
+        ui::FavoritesScreen::CollectionOps{dialog_, folder_dialog_, import_ui_.queue,
+                                           &second_.session, vault_state_.active_path});
     screen->set_detail_open(session_.detail_open);
     screen_ = std::move(screen);
     screen_->on_enter();
@@ -288,7 +298,9 @@ void App::to_tag_images(const std::string& tag)
 {
     state_  = State::Browsing;
     auto screen = std::make_unique<ui::TagImages>(
-        window_, font_, *vault_state_.active, *cache_, registry_, vault_state_.active_path, tag);
+        window_, font_, *vault_state_.active, *cache_, registry_, tag,
+        ui::FavoritesScreen::CollectionOps{dialog_, folder_dialog_, import_ui_.queue,
+                                           &second_.session, vault_state_.active_path});
     screen->set_detail_open(session_.detail_open);
     screen_ = std::move(screen);
     screen_->on_enter();

@@ -219,3 +219,101 @@ TEST(file_op_job_runs_one_at_a_time)
     cleanup_dir(out);
 }
 
+
+// --- Phase 68: one transfer for a mixed selection --------------------------
+
+namespace {
+std::vector<uint8_t> read_fixture(const char* path)
+{
+    std::ifstream in(path, std::ios::binary);
+    return std::vector<uint8_t>((std::istreambuf_iterator<char>(in)),
+                                std::istreambuf_iterator<char>());
+}
+}  // namespace
+
+// Images + a video + a sub-gallery, Space-selected together, move in ONE run:
+// media into the target, the gallery subtree under it.
+TEST(file_op_job_transfers_mixed_media_and_galleries)
+{
+    auto dir = fresh_dir("osv_fj_mixed");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        REQUIRE(seed_images(v, "a", 2));
+        const auto mp4 = read_fixture(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+        REQUIRE(!mp4.empty());
+        REQUIRE(v.add_video("a", mp4, "clip.mp4", 4096) == vault::VaultResult::Ok);
+        REQUIRE(seed_images(v, "a/sub", 1));
+        REQUIRE(v.create_gallery("dst") == vault::VaultResult::Ok);
+
+        ui::FileOpJob job;
+        CHECK(job.start_transfer_collection(v, {{.parent = "a", .names = {"1.jpg", "2.jpg", "clip.mp4"}}},
+                                            {"a/sub"}, v, "dst", vault::TransferMode::Move, "dst"));
+        auto oc = await_outcome(job);
+        REQUIRE(oc.has_value());
+        CHECK(oc->ok);
+        CHECK_EQ(oc->done, 4);                                     // 3 media + sub's 1 file
+        CHECK_EQ(v.list("dst").size(), static_cast<size_t>(4));    // sub + 3 media tiles
+        CHECK_EQ(v.list("dst/sub").size(), static_cast<size_t>(1));
+        CHECK_EQ(v.list("a").size(), static_cast<size_t>(0));      // everything moved out
+    }
+    cleanup_dir(dir);
+}
+
+// A video in a plain multi-selection must transfer — the selection route used
+// to filter on is_image() and silently dropped videos.
+TEST(file_op_job_transfer_includes_videos)
+{
+    auto dir = fresh_dir("osv_fj_video_sel");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        REQUIRE(v.create_gallery("a") == vault::VaultResult::Ok);
+        const auto mp4 = read_fixture(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+        REQUIRE(!mp4.empty());
+        REQUIRE(v.add_video("a", mp4, "clip.mp4", 4096) == vault::VaultResult::Ok);
+        REQUIRE(v.create_gallery("b") == vault::VaultResult::Ok);
+
+        ui::FileOpJob job;
+        CHECK(job.start_transfer_collection(v, {{.parent = "a", .names = {"clip.mp4"}}}, {},
+                                            v, "b", vault::TransferMode::Move, "b"));
+        auto oc = await_outcome(job);
+        REQUIRE(oc.has_value());
+        CHECK(oc->ok);
+        CHECK_EQ(oc->done, 1);
+        CHECK_EQ(v.list("b").size(), static_cast<size_t>(1));
+        CHECK_EQ(v.list("a").size(), static_cast<size_t>(0));
+    }
+    cleanup_dir(dir);
+}
+
+// Phase 68: a favorites/tag/search selection spans parents; the grouped
+// transfer moves every group in one job run.
+TEST(file_op_job_grouped_transfer_moves_across_parents)
+{
+    auto dir = fresh_dir("osv_fj_grouped");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        REQUIRE(seed_images(v, "a", 1));
+        REQUIRE(seed_images(v, "b", 2));
+        REQUIRE(v.create_gallery("dst") == vault::VaultResult::Ok);
+
+        std::vector<ui::ParentGroup> groups{
+            {.parent = "a", .names = {"1.jpg"}},
+            {.parent = "b", .names = {"2.jpg"}},
+        };
+
+        ui::FileOpJob job;
+        CHECK(job.start_transfer_media_grouped(v, std::move(groups), v, "dst",
+                                               vault::TransferMode::Move, "dst"));
+        auto oc = await_outcome(job);
+        REQUIRE(oc.has_value());
+        CHECK(oc->ok);
+        CHECK_EQ(oc->done, 2);
+        CHECK_EQ(v.list("dst").size(), static_cast<size_t>(2));
+        CHECK_EQ(v.list("a").size(), static_cast<size_t>(0));
+        CHECK_EQ(v.list("b").size(), static_cast<size_t>(1));   // b/1.jpg stays
+    }
+    cleanup_dir(dir);
+}

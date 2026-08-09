@@ -21,8 +21,8 @@ namespace ui {
 class TagGalleries : public FavoritesScreen {
 public:
     TagGalleries(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                 platform::VaultRegistry& registry, std::string active_path,
-                 std::string tag);
+                 platform::VaultRegistry& registry, std::string tag,
+                 const CollectionOps& ops);
 
 protected:
     [[nodiscard]] std::vector<vault::SearchHit> fetch() const override;

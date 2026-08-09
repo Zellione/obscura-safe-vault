@@ -71,6 +71,13 @@ ZipImportOutcome import_archive_bytes_recursive(MediaSink& sink, std::span<const
         progress->expanding.store(false);
     }
 
+    // A corrupt root archive fails the task (Phase 68) — before, it was folded
+    // into `skipped` and the task rendered as "Done, 0 imported, 1 skipped".
+    if (tally.root_unreadable) {
+        out.error = "Archive is corrupt or unreadable";
+        return out;
+    }
+
     out.ok        = true;
     out.imported  = tally.media_placed;
     out.cancelled = sink.cancelled();

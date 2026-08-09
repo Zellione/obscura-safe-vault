@@ -17,6 +17,7 @@
 #include "ui/anim_model.h"
 #include "ui/input.h"
 #include "ui/meta_format.h"
+#include "ui/position_label.h"
 #include "ui/strip_layout.h"
 #include "ui/tile_thumb.h"
 #include "ui/widgets.h"
@@ -282,6 +283,9 @@ void ImageViewer::show_image_at(int idx)
     // Sync animated image playback for the current item; tears down the previous
     // decoder (RAII) before any vault lock if the index has changed.
     sync_anim_for_current_index();
+
+    // Re-engage auto-centering on the strip when the image changes (Phase 68 Part 3).
+    ui::strip_follow_index(strip_scroll_);
 }
 
 void ImageViewer::handle_key_video(SDL_Keycode key, SDL_Scancode sc)
@@ -445,6 +449,24 @@ bool ImageViewer::pump_thumbs()
     return any;
 }
 
+float ImageViewer::current_strip_scroll() const
+{
+    const float thumb   = thumb_size();
+    const bool  vertical = (strip_side_ == StripSide::Left);
+    const float extent  = vertical ? strip_rect().h : strip_rect().w;
+    const auto  count   = static_cast<int>(album_.images.size());
+
+    if (strip_scroll_.manual) {
+        // Use manual scroll, clamped in case window resized.
+        const float content = ui::strip_content_extent(count, thumb, STRIP_GAP);
+        const float max_offset = std::max(0.0f, content - extent);
+        return std::clamp(strip_scroll_.offset, 0.0f, max_offset);
+    }
+
+    // Use auto-centering.
+    return strip_scroll_centered(index_, count, thumb, STRIP_GAP, extent);
+}
+
 int ImageViewer::strip_hit(float mx, float my) const
 {
     if (win_.is_fullscreen()) return -1;   // strip is hidden — nothing to hit (Phase 45 Part 4)
@@ -457,9 +479,7 @@ int ImageViewer::strip_hit(float mx, float my) const
     if (const float cross = vertical ? mx : my; cross < cross0 || cross > cross0 + thumb)
         return -1;
 
-    const float extent = vertical ? strip.h : strip.w;
-    const float scroll = strip_scroll_centered(index_, static_cast<int>(album_.images.size()),
-                                               thumb, STRIP_GAP, extent);
+    const float scroll = current_strip_scroll();
     const float along  = vertical ? my : mx;
     const float origin = vertical ? strip.y : strip.x;
     return strip_hit_axis(along, origin, scroll, thumb, STRIP_GAP,
@@ -567,7 +587,33 @@ void ImageViewer::handle_mouse_down(const SDL_MouseButtonEvent& b)
 void ImageViewer::handle_wheel(const SDL_MouseWheelEvent& w)
 {
     if (mode_ == ViewMode::Slideshow) return;   // no zoom/scroll while playing
+
+    // Strip wheel scrolling (Phase 68 Part 3): the whole strip BAND scrolls
+    // (rect containment, not strip_hit — that returns -1 in the gaps between
+    // thumbnails), and it works while a video plays, so this must run before
+    // the video early-out below.
+    if (const SDL_FRect s = strip_rect();
+        !win_.is_fullscreen() && w.mouse_x >= s.x && w.mouse_x < s.x + s.w &&
+        w.mouse_y >= s.y && w.mouse_y < s.y + s.h) {
+        const float thumb   = thumb_size();
+        const bool  vertical = (strip_side_ == StripSide::Left);
+        const float extent  = vertical ? strip_rect().h : strip_rect().w;
+        const auto  count   = static_cast<int>(album_.images.size());
+        const float content = ui::strip_content_extent(count, thumb, STRIP_GAP);
+
+        // Seed manual scroll from current auto-centered offset on first wheel.
+        if (!strip_scroll_.manual) {
+            strip_scroll_.offset = strip_scroll_centered(index_, count, thumb, STRIP_GAP, extent);
+        }
+
+        // Apply wheel motion.
+        ui::strip_apply_wheel(strip_scroll_, w.y, thumb * 0.9f, extent, content);
+        mark_dirty();
+        return;
+    }
+
     if (video_) return;                         // a playing video is fit-only (no zoom/scroll)
+
     if (mode_ == ViewMode::FillScroll)
         scroll_by(w.y > 0 ? -SCROLL_STEP : SCROLL_STEP);
     else
@@ -823,7 +869,7 @@ void ImageViewer::render_strip(gfx::Renderer& r)
     const bool  vertical = (strip_side_ == StripSide::Left);
     const auto  count = static_cast<int>(album_.images.size());
     const float extent = vertical ? strip.h : strip.w;
-    const float scroll = strip_scroll_centered(index_, count, thumb, STRIP_GAP, extent);
+    const float scroll = current_strip_scroll();
 
     // Request textures ONLY for cells near the visible window. Requesting the
     // whole album enqueues every thumbnail in the album as a background
@@ -868,6 +914,24 @@ void ImageViewer::render_strip(gfx::Renderer& r)
             // Use 12x12 badge size and y_offset of 6 to match the original positioning.
             draw_animated_badge(r, font_, thumb_rect, 12.0f, 0.0f, 6.0f);
         }
+    }
+
+    // Phase 68: Draw position counter badge on the strip.
+    const std::string label = ui::position_label(index_, album_.images.size());
+    if (!label.empty()) {
+        using namespace gfx::theme;
+        const float line_h = font_.pixel_height();
+        const auto text_w = static_cast<float>(font_.measure(label));
+        const SDL_FRect badge_rect = ui::strip_counter_rect(strip_side_, strip, text_w, line_h);
+
+        // Draw filled rounded rect background for the badge
+        r.draw_round_rect(badge_rect, 4.0f, STRIP_BG, true);
+        r.draw_round_rect(badge_rect, 4.0f, BORDER, false);
+
+        // Draw the position text centered in the badge
+        const float text_x = badge_rect.x + (badge_rect.w - text_w) * 0.5f;
+        const float text_y = font_.text_top_for_center(badge_rect.y + badge_rect.h * 0.5f);
+        r.draw_text(font_, text_x, text_y, label, TEXT_DIM);
     }
 }
 
@@ -967,7 +1031,29 @@ void ImageViewer::render(gfx::Renderer& r)
     }
 
     render_hud(r);
-    if (!win_.is_fullscreen()) render_strip(r);   // Phase 45 Part 4
+    if (!win_.is_fullscreen()) {
+        render_strip(r);   // Phase 45 Part 4
+    } else {
+        // Phase 68: Draw position counter badge in fullscreen mode (strip is hidden).
+        const std::string label = ui::position_label(index_, album_.images.size());
+        if (!label.empty()) {
+            using namespace gfx::theme;
+            const float line_h = font_.pixel_height();
+            const auto text_w = static_cast<float>(font_.measure(label));
+            const SDL_FRect badge_rect = ui::fullscreen_counter_rect(
+                static_cast<float>(win_.width()), static_cast<float>(win_.height()),
+                text_w, line_h);
+
+            // Draw filled rounded rect background for the badge
+            r.draw_round_rect(badge_rect, 4.0f, STRIP_BG, true);
+            r.draw_round_rect(badge_rect, 4.0f, BORDER, false);
+
+            // Draw the position text centered in the badge
+            const float text_x = badge_rect.x + (badge_rect.w - text_w) * 0.5f;
+            const float text_y = font_.text_top_for_center(badge_rect.y + badge_rect.h * 0.5f);
+            r.draw_text(font_, text_x, text_y, label, TEXT_DIM);
+        }
+    }
 
     export_.render(r, font_, static_cast<float>(win_.width()),
                    static_cast<float>(win_.height()));

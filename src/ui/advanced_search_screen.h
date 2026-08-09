@@ -8,6 +8,7 @@
 
 #include "ui/advanced_search_model.h"
 #include "ui/advanced_search_state.h"
+#include "ui/collection_ops.h"
 #include "ui/debounce.h"
 #include "ui/detail_model.h"
 #include "ui/detail_panel.h"
@@ -36,8 +37,11 @@ namespace ui {
 // AdvancedQuery, re-runs the search on every change, and renders the columns.
 class AdvancedSearchScreen : public Screen {
 public:
+    // `ops_deps` wires the Phase 68 batch operations (B/X/M over the result
+    // multi-selection) — see CollectionBatchOps.
     AdvancedSearchScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
                          gfx::TextureCache& cache, AdvancedSearchState& session,
+                         const CollectionBatchOps::Deps& ops_deps,
                          bool initial_detail_open = false);
 
     void on_enter() override;
@@ -90,6 +94,7 @@ private:
     struct LiveSearch {
         Debounce                 rerun;       // debounce query reruns to input silence
         std::vector<std::string> suggestions;  // current typeahead list
+        std::vector<std::string> vocabulary;   // distinct vault tags (autocomplete source)
     };
 
     // --- data flow ---
@@ -109,6 +114,13 @@ private:
     void handle_group_nav_key(const SDL_KeyboardEvent& key);
     void handle_weight_key(const SDL_KeyboardEvent& key);
     void start_rename();   // R on a focused result (Phase 45 Part 1)
+
+    // Phase 68 batch operations over the result multi-selection (Results
+    // focus). Free friends, not members, to stay under the S1448 method cap —
+    // same pattern as the grid's start_transfer_* handlers.
+    friend void toggle_favorite_results(AdvancedSearchScreen& s);   // B
+    friend void start_export_results(AdvancedSearchScreen& s);      // X: consent first
+    friend void start_transfer_results(AdvancedSearchScreen& s);    // M: grouped
 
     // Committed-tag selection within the focused tag field (Include/Exclude/Group).
     // Kept as free functions (friends) so they don't count against the class method
@@ -153,7 +165,6 @@ private:
 
     AdvancedQuery                   query_;
     std::vector<vault::SavedSearch> saved_;
-    std::vector<std::string>        vocabulary_;   // distinct vault tags (autocomplete)
 
     Focus  focus_ = Focus::Include;
     Edit       edit_;
@@ -168,6 +179,7 @@ private:
     SearchResultView    result_view_;
     SavedSearchPanel    saved_panel_;
     RenameDialog        rename_{win_};   // Phase 45 Part 1
+    CollectionBatchOps  ops_;            // Phase 68 batch operations (B/X/M)
 
     // Phase 48 detail panel. Bundled into a single member to stay under the
     // cpp:S1448 method cap. `key` is the cache key: rebuilding walks the

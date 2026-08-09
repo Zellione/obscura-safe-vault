@@ -12,6 +12,7 @@
 #include "ui/nav_model.h"
 #include "ui/result_grid.h"
 #include "ui/screen.h"
+#include "ui/selection_model.h"
 #include "ui/widgets.h"
 #include "vault/vault.h"  // vault::SearchHit
 
@@ -78,6 +79,12 @@ public:
     // Called by AdvancedSearchScreen::rerun() after search evaluation.
     void update_results(const std::vector<vault::SearchHit>& new_results);
 
+    // Phase 68 multiselect over the results (Space toggles, Ctrl+A select-all;
+    // both handled in handle_key). Indices are positions in get_results(); the
+    // selection clears on update_results (indices only valid per listing).
+    [[nodiscard]] const SelectionModel& selection() const noexcept { return sel_; }
+    void clear_selection() { sel_.clear(); }
+
     // Callback for the parent Screen to provide a request(NavKind, path, idx) handler.
     // SearchResultView::activate_focused() calls this to navigate to the opened result.
     using RequestCallback = std::function<void(int, const std::string&, int)>;
@@ -93,6 +100,8 @@ private:
     int cur_result_ = 0;      // selected result index
     ResultView grid_view_ = ResultView::List;  // List or Grid toggle (Ctrl+L)
     int grid_cols_ = 1;      // last-rendered column count (drives Up/Down stride)
+
+    SelectionModel sel_;     // Phase 68 multiselect (Space / Ctrl+A)
 
     image::DecodeWorker              grid_worker_{image::decode_wake_event()};
     std::unordered_set<uint64_t>     grid_failed_;  // failed thumbnail chunks
