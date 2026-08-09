@@ -60,4 +60,17 @@ struct StripRange {
 [[nodiscard]] StripRange strip_visible_range(float scroll, float extent, float thumb,
                                              float gap, int count, int margin) noexcept;
 
+// Rectangle for the position counter badge on the thumbnail strip (Phase 68).
+// Badge is 8px padding around the text, positioned at the strip's far edge.
+// For Bottom strip: right edge, vertically centered.
+// For Left strip: bottom-right corner.
+[[nodiscard]] SDL_FRect strip_counter_rect(StripSide side, SDL_FRect strip, float text_w,
+                                           float line_h) noexcept;
+
+// Rectangle for the position counter badge in fullscreen mode (Phase 68).
+// Badge is 8px padding around the text, positioned at the window's bottom-right
+// corner with 12px margin.
+[[nodiscard]] SDL_FRect fullscreen_counter_rect(float win_w, float win_h, float text_w,
+                                                float line_h) noexcept;
+
 } // namespace ui

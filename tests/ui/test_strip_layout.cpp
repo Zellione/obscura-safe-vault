@@ -254,3 +254,74 @@ TEST(strip_cell_rect_gap_between_cells)
     CHECK_EQ(cell1.x, 40.0f);
     CHECK_EQ(cell1.x - (cell0.x + cell0.w), gap);
 }
+
+TEST(strip_counter_rect_bottom_right_edge)
+{
+    // Bottom strip: badge should be bottom-right, inset 8px from the far edge.
+    const SDL_FRect strip{0.0f, 750.0f, 1000.0f, 50.0f};  // strip at y=750, h=50
+    const float text_w = 40.0f;
+    const float line_h = 20.0f;
+
+    const SDL_FRect badge = ui::strip_counter_rect(StripSide::Bottom, strip, text_w, line_h);
+
+    // Badge width = text_w + 2*8 (padding) = 56, height = line_h + 2*8 = 36
+    CHECK_EQ(badge.w, text_w + 16.0f);
+    CHECK_EQ(badge.h, line_h + 16.0f);
+
+    // Badge should be right-aligned with 8px inset: x = strip.x + strip.w - 8 - badge.w
+    const float expected_x = strip.x + strip.w - 8.0f - badge.w;
+    CHECK_EQ(badge.x, expected_x);
+
+    // Badge should be vertically centered within the strip band
+    const float expected_y = strip.y + (strip.h - badge.h) * 0.5f;
+    CHECK_EQ(badge.y, expected_y);
+}
+
+TEST(strip_counter_rect_left_bottom_edge)
+{
+    // Left strip: badge should be bottom-right, inset 8px from the far edges.
+    const SDL_FRect strip{0.0f, 0.0f, 116.0f, 800.0f};  // strip at x=0, y=0, w=116, h=800
+    const float text_w = 40.0f;
+    const float line_h = 20.0f;
+
+    const SDL_FRect badge = ui::strip_counter_rect(StripSide::Left, strip, text_w, line_h);
+
+    // Badge width = text_w + 2*8, height = line_h + 2*8
+    CHECK_EQ(badge.w, text_w + 16.0f);
+    CHECK_EQ(badge.h, line_h + 16.0f);
+
+    // Badge should be right-aligned at the right edge of the strip: x = strip.x + strip.w - 8 - badge.w
+    const float expected_x = strip.x + strip.w - 8.0f - badge.w;
+    CHECK_EQ(badge.x, expected_x);
+
+    // Badge should be bottom-aligned with 8px inset: y = strip.y + strip.h - 8 - badge.h
+    const float expected_y = strip.y + strip.h - 8.0f - badge.h;
+    CHECK_EQ(badge.y, expected_y);
+}
+
+TEST(fullscreen_counter_rect_bottom_right)
+{
+    // Fullscreen: badge should be bottom-right corner with 12px margin.
+    const float win_w = 1920.0f;
+    const float win_h = 1080.0f;
+    const float text_w = 40.0f;
+    const float line_h = 20.0f;
+
+    const SDL_FRect badge = ui::fullscreen_counter_rect(win_w, win_h, text_w, line_h);
+
+    // Badge width = text_w + 2*8, height = line_h + 2*8
+    CHECK_EQ(badge.w, text_w + 16.0f);
+    CHECK_EQ(badge.h, line_h + 16.0f);
+
+    // Badge should be at bottom-right with 12px margin
+    const float expected_x = win_w - 12.0f - badge.w;
+    const float expected_y = win_h - 12.0f - badge.h;
+    CHECK_EQ(badge.x, expected_x);
+    CHECK_EQ(badge.y, expected_y);
+
+    // Badge must be fully within the window
+    CHECK(badge.x >= 0.0f);
+    CHECK(badge.y >= 0.0f);
+    CHECK(badge.x + badge.w <= win_w);
+    CHECK(badge.y + badge.h <= win_h);
+}
