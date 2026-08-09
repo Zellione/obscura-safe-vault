@@ -152,7 +152,7 @@ inline std::atomic<uint64_t>& sync_call_count() noexcept
 // Flush stdio buffers and fsync to durable storage.
 [[nodiscard]] inline bool sync(std::FILE* fp) noexcept
 {
-    sync_call_count().fetch_add(1, std::memory_order_relaxed);
+    sync_call_count().fetch_add(1);
     if (int& n = sync_fail_after(); n >= 0) {
         if (n == 0) { n = -1; return false; }
         --n;

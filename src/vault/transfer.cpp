@@ -506,11 +506,11 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
 TransferTally transfer_images(Vault& src, std::string_view src_gallery,
                               const std::vector<std::string>& filenames,
                               Vault& dst, std::string_view dst_gallery,
-                              TransferMode mode, OpProgress* progress,
-                              bool set_progress_total)
+                              TransferMode mode, TransferProgress prog)
 {
     using enum VaultResult;
-    if (progress && set_progress_total)
+    OpProgress* progress = prog.progress;
+    if (progress && prog.set_total)
         progress->total.store(static_cast<int>(filenames.size()));
 
     TransferTally tally;
@@ -518,8 +518,9 @@ TransferTally transfer_images(Vault& src, std::string_view src_gallery,
     CopyCtx ctx{.src = src, .dst = dst, .mode = mode, .plain = plain,
                 .progress = progress, .tally = tally};
     for (const auto& fname : filenames) {
-        if (progress && progress->cancel.load()) break;   // clean partial: stop between files
-        if (ctx.commit_failed) break;                     // dst commit failure: hard stop
+        // Stop between files on a user cancel (clean partial) or a destination
+        // commit failure (hard stop).
+        if ((progress && progress->cancel.load()) || ctx.commit_failed) break;
         copy_one_media_ex(ctx, src_gallery, dst_gallery, fname);
     }
     finish_copies(ctx);   // one dst commit + one deferred source removal batch

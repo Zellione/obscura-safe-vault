@@ -66,18 +66,21 @@ void record_failure(TransferTally& t, std::string path, VaultResult code,
 // O(files). Destination durability always strictly precedes any source mutation: a crash
 // mid-transfer loses at most the uncommitted batch (still in the source) or leaves
 // already-committed files briefly in both vaults (recoverable duplicates), never neither.
-// With `progress != nullptr`: total is set to filenames.size() up front (skipped when
-// `set_progress_total` is false — for callers like vault combine that manage a larger
+// With `prog.progress != nullptr`: total is set to filenames.size() up front (skipped
+// when `prog.set_total` is false — for callers like vault combine that manage a larger
 // progress total themselves), done is bumped after each file, and the loop stops early
 // when progress->cancel is set — files copied so far are flushed and (for Move) removed
 // from the source, a clean partial. A destination commit failure fails every file of
 // that batch and stops the transfer. Returns {committed, failed}; failed files are left
 // in the source.
+struct TransferProgress {
+    OpProgress* progress  = nullptr;
+    bool        set_total = true;
+};
 [[nodiscard]] TransferTally transfer_images(Vault& src, std::string_view src_gallery,
                                             const std::vector<std::string>& filenames,
                                             Vault& dst, std::string_view dst_gallery,
-                                            TransferMode mode, OpProgress* progress = nullptr,
-                                            bool set_progress_total = true);
+                                            TransferMode mode, TransferProgress prog = {});
 
 // Slash-paths of every gallery in `v` that may legally accept media (images or videos)
 // — holds no sub-galleries, including "" (root) when root holds no sub-galleries. Used

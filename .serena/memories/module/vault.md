@@ -183,7 +183,7 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   transfer status unaffected by prune results.
 - **Batched commits (Phase 69):** the bulk drivers (`transfer_images`, `transfer_gallery` via
   `copy_subtree`, and combine's `move_media_children` which routes through `transfer_images`
-  with its `set_progress_total=false` flag) do NOT pay a durable commit per file. `CopyCtx`
+  with `TransferProgress{.set_total=false}`) do NOT pay a durable commit per file. `CopyCtx`
   carries batch state (`pending` copied-but-uncommitted src paths, `moved` committed paths
   awaiting removal, `dirty`, `commit_failed`); `flush_dst` runs ONE `commit_staged` per
   `TRANSFER_COMMIT_BATCH = 32` files (import-queue batch size); gallery recreation uses

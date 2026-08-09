@@ -36,7 +36,7 @@ commit/reclaim overhead that import never pays.
   `ensure_gallery_path` (idempotent, no commit) instead of `create_gallery`
   (which committed per gallery).
 - **Combine routed through the batched driver:** `move_media_children` calls
-  `transfer_images` with the new `set_progress_total = false` flag (combine
+  `transfer_images` with `TransferProgress{.set_total = false}` (combine
   manages a subtree-wide progress total that the bulk driver must not
   clobber) instead of looping the committing `transfer_image` per file.
 - **Observability:** `fileutil::sync_call_count()` — an atomic counter bumped

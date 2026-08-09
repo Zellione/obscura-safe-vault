@@ -111,8 +111,8 @@ VaultResult move_media_children(Vault& src, std::string_view src_gallery,
     if (names.empty()) return Ok;
 
     const TransferTally t = transfer_images(src, src_gallery, names, dst, dst_gallery,
-                                            TransferMode::Move, progress,
-                                            /*set_progress_total=*/false);
+                                            TransferMode::Move,
+                                            {.progress = progress, .set_total = false});
     tally.media_moved   += t.done;
     tally.media_skipped += t.failed;
     return Ok;

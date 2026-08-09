@@ -203,7 +203,8 @@ bool FileOpJob::start_transfer_images(vault::Vault& src, std::string src_gallery
                    filenames = std::move(filenames), &dst, dst_gallery = std::move(dst_gallery),
                    mode, label = std::move(label)]() {
         vault::TransferTally t =
-            vault::transfer_images(src, src_gallery, filenames, dst, dst_gallery, mode, &progress_);
+            vault::transfer_images(src, src_gallery, filenames, dst, dst_gallery, mode,
+                                   {.progress = &progress_});
         return transfer_outcome(mode, t.done, t.failed, static_cast<int>(filenames.size()),
                                 progress_.cancel.load(), label, std::move(t.failures));
     });
@@ -278,7 +279,8 @@ vault::TransferTally run_collection_transfer(vault::Vault& src, const Collection
     for (const ParentGroup& g : spec.groups) {
         if (progress.cancel.load()) break;
         vault::TransferTally t =
-            vault::transfer_images(src, g.parent, g.names, dst, dst_target, mode, &progress);
+            vault::transfer_images(src, g.parent, g.names, dst, dst_target, mode,
+                                   {.progress = &progress});
         sum.done   += t.done;
         sum.failed += t.failed;
         sum.failures.insert(sum.failures.end(), std::make_move_iterator(t.failures.begin()),
