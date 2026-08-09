@@ -76,10 +76,32 @@ struct StagedNode {
 // the archive-import drain; Ok if it already exists as a gallery).
 [[nodiscard]] VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path);
 
-// Cross-vault transfer ingress (Phase 67): same pre-check → stage → attach →
-// sync → commit sequence as Vault::add_image/add_video, but with caller-supplied
-// metadata (no decode, no probe). created_ts == 0 keeps "now"; nonzero preserves
-// the source's timestamp. Free functions: Vault is at its S1448 method cap.
+// Cross-vault transfer ingress (Phase 67, batched Phase 69): pre-check → stage
+// → attach with caller-supplied metadata (no decode, no probe), WITHOUT the
+// trailing sync + commit — bulk transfer loops attach many files and make them
+// durable in one commit_staged() per batch. created_ts == 0 keeps "now";
+// nonzero preserves the source's timestamp. Main thread (tree mutation). Free
+// functions: Vault is at its S1448 method cap. On a crash before the next
+// commit_staged the attached nodes vanish and their chunks are orphaned dead
+// ciphertext (reclaimed by compact) — same contract as a cancelled import.
+[[nodiscard]] VaultResult attach_image_prestaged(Vault& v, std::string_view gallery_path,
+                                                 std::span<const uint8_t> file_data,
+                                                 std::string_view filename,
+                                                 const StagedThumb& thumb,
+                                                 uint64_t created_ts);
+[[nodiscard]] VaultResult attach_video_prestaged(Vault& v, std::string_view gallery_path,
+                                                 std::span<const uint8_t> file_data,
+                                                 std::string_view filename,
+                                                 const StagedVideoInfo& info,
+                                                 uint64_t created_ts);
+
+// Make everything attached since the last commit durable: one fsync of the
+// staged chunks, then one crash-safe index commit. Locked if the vault is
+// locked; IoError if either step fails (attached nodes stay in-memory only).
+[[nodiscard]] VaultResult commit_staged(Vault& v);
+
+// Single-file convenience: attach_*_prestaged + commit_staged (the pre-batching
+// Phase 67 behavior, kept for one-off transfers).
 [[nodiscard]] VaultResult add_image_prestaged(Vault& v, std::string_view gallery_path,
                                               std::span<const uint8_t> file_data,
                                               std::string_view filename,

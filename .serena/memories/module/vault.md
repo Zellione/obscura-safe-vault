@@ -103,9 +103,11 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
 - Consequence: `read_fp_` now handles **only** full-image data and video chunks; all thumbnail
   I/O and metadata header reads flow through the dedicated, contention-free `thumb_fp_`.
 
-### staging.* (Phase 50 + Phase 67 transfer) — worker-to-tree hand-off
+### staging.* (Phase 50 + Phase 67 transfer + Phase 69 batching) — worker-to-tree hand-off
 - `stage_image(Vault, data, ...)` / `stage_video(Vault, data, precomputed_meta, ...)` — any thread, stream encrypted chunks to disk with fflush (no fsync), return a ready IndexNode with chunk spans. Plaintext stays mlock'd; nodes are ready but **not attached**. **Phase 67:** `stage_video` gains a 5th `precomputed_meta` param (a `StagedVideoInfo{dimensions, duration, codec, poster_offset, poster_len}`) so cross-vault transfers avoid re-probing videos already decoded at the source. Null metadata falls back to `MediaProbe::probe_bytes` on attach (backward compat). `StagedVideoInfo` is computed at source by `MediaProbe::extract_staged_video_info`.
-- `add_image_prestaged(Vault, node, name, gallery_path)` / `add_video_prestaged(Vault, node, name, gallery_path)` — **free friends, Phase 67.** Main-thread only, attach a pre-staged node to a gallery + commit atomically. Sugar for `attach_staged` + `commit_index` where the attachment is the only tree mutation. Exist to let transfer loops call one friend per file instead of managing attachment and commits separately.
+- `attach_image_prestaged` / `attach_video_prestaged` — **free friends, Phase 69.** Main-thread only: pre-check (safe name, gallery exists, no sibling collision) → stage → attach, **no fsync, no commit** — bulk transfer loops attach many files and batch durability. On a crash before the next commit the attached nodes vanish; their chunks are orphaned dead ciphertext reclaimed by compact (same contract as a cancelled import).
+- `commit_staged(Vault&)` — **free friend, Phase 69.** One chunk-store fsync + one crash-safe `commit_index()` for everything attached since the last commit.
+- `add_image_prestaged(Vault, ...)` / `add_video_prestaged(Vault, ...)` — **free friends, Phase 67.** Single-file convenience: `attach_*_prestaged` + `commit_staged` (per-file durable commit). Used by `transfer_image` (the single-file primitive); bulk loops use the attach/commit split instead.
 - `attach_staged(Vault, node, gallery_path)` — main-thread only, performs tree insertion, **no commit issued**. Commit is scheduled separately by batching policy (see CommitLane below).
 - `ensure_gallery_path(Vault, path)` — creates missing ancestor galleries as needed on attach.
 
@@ -159,7 +161,7 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   no sibling collision, then a pure leaf-field edit (an IndexNode persists only its local
   name, never a path, so no cascade). Drives the `R` RenameDialog.
 
-### transfer.* + transfer_result.* (Phase 67) — cross-vault & within-vault copy/move
+### transfer.* + transfer_result.* (Phase 67 + Phase 69 batching) — cross-vault & within-vault copy/move
 - **TransferFailure** — reason a single-file transfer failed (ASCII enum for display):
   `{SizeMismatch, NotAnImage, NotAVideo, ProbeFailure, AuthFailure, WriteFailure, Collision, Unknown}`.
 - **TransferTally** — per-file transfer status (`Success`, `Failed(reason)`, `Skipped`).
@@ -179,12 +181,27 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   Pruning happens AFTER the final commit (transfer itself is atomic; pruning is best-effort and 
   happens in a second pass if `!status.is_error()`). Pruning is logged to `RemoveBatchStats`; 
   transfer status unaffected by prune results.
-- **Cancel semantics (Phase 67):** transfer runs on the CommitLane. A user-initiated cancel (Esc in 
-  dialog) tells the lane to drain (queued work finishes, no new work enqueued). Already-committed 
-  chunks stay in the destination; the destination index is NOT rewound. Cancelling mid-transfer 
-  leaves the destination vault partially populated. Source is untouched (move semantics deferred 
-  until post-transfer, so cancelling before source is deleted is safe). On resume (same transfer 
-  request re-invoked), skip-collisions logic prevents re-transfer.
+- **Batched commits (Phase 69):** the bulk drivers (`transfer_images`, `transfer_gallery` via
+  `copy_subtree`, and combine's `move_media_children` which routes through `transfer_images`
+  with `TransferProgress{.set_total=false}`) do NOT pay a durable commit per file. `CopyCtx`
+  carries batch state (`pending` copied-but-uncommitted src paths, `moved` committed paths
+  awaiting removal, `dirty`, `commit_failed`); `flush_dst` runs ONE `commit_staged` per
+  `TRANSFER_COMMIT_BATCH = 32` files (import-queue batch size); gallery recreation uses
+  `ensure_gallery_path` (no per-gallery commit — rides the batch); `finish_copies` (runs on
+  completion AND cancel) does final flush → `lower_dst_watermark` → ONE `remove_media_batch`
+  for all Move removals (single source commit + single auto-reclaim — the per-file
+  `remove_image` used to re-trigger a full `reclaim()` scan per file once waste crossed the
+  gate, since reclaim never lowers logical `wasted_bytes()`). Destination durability strictly
+  precedes any source mutation; a batch-commit failure fails exactly that batch's files
+  (recorded, stage Write) and hard-stops; earlier batches stay committed and their Move
+  removals still apply. `transfer_image` (single-file) keeps its per-file
+  `commit_staged` + `remove_image`. Observable via `fileutil::sync_call_count` (atomic
+  counter in `fileutil::sync`, same test-hook convention as `inject_sync_failure`); pinned by
+  `tests/vault/test_transfer_batching.cpp` (10-file Copy ≤ 9 syncs, Move ≤ 12, was ~40/~70).
+- **Cancel semantics (Phase 67, amended 69):** cancel is checked between files; `finish_copies`
+  still flushes files copied so far and removes them from the source (Move) — items moved so
+  far live only in the destination, the rest only in the source, no duplicates, nothing lost.
+  On resume (same transfer request re-invoked), skip-collisions logic prevents re-transfer.
 - **Source metadata hand-off:** `transfer_image`/`transfer_video` receive metadata from the source 
   (image orientation, video dimensions/duration/codec via `StagedVideoInfo`). The destination 
   receives the exact metadata + any tags the source carries (read-time cascade applies). Videos 

@@ -178,6 +178,13 @@ public:
     friend VaultResult add_video_prestaged(Vault& v, std::string_view,
                                            std::span<const uint8_t>, std::string_view,
                                            const StagedVideoInfo&, uint64_t);
+    friend VaultResult attach_image_prestaged(Vault& v, std::string_view,
+                                              std::span<const uint8_t>, std::string_view,
+                                              const StagedThumb&, uint64_t);
+    friend VaultResult attach_video_prestaged(Vault& v, std::string_view,
+                                              std::span<const uint8_t>, std::string_view,
+                                              const StagedVideoInfo&, uint64_t);
+    friend VaultResult commit_staged(Vault& v);
 
     [[nodiscard]] bool is_unlocked() const noexcept { return unlocked_; }
 

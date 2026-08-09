@@ -97,7 +97,10 @@ VaultResult validate_combine(const Vault& src, std::string_view src_gallery,
     return Ok;
 }
 
-// The leaf case: every media file in src_gallery moves into dst_gallery.
+// The leaf case: every media file in src_gallery moves into dst_gallery via
+// the batched bulk driver (Phase 69: one destination commit per batch + one
+// deferred source-removal batch, not one of each per file). `progress` total
+// stays untouched — combine set it to the whole subtree's count already.
 VaultResult move_media_children(Vault& src, std::string_view src_gallery,
                                 Vault& dst, std::string_view dst_gallery,
                                 CombineTally& tally, OpProgress* progress)
@@ -105,15 +108,13 @@ VaultResult move_media_children(Vault& src, std::string_view src_gallery,
     using enum VaultResult;
     std::vector<std::string> names;
     for (const auto* c : src.list(src_gallery)) if (c->is_media()) names.push_back(c->name);
+    if (names.empty()) return Ok;
 
-    for (const auto& fname : names) {
-        if (progress && progress->cancel.load()) return Ok;
-        if (transfer_image(src, src_gallery, fname, dst, dst_gallery, TransferMode::Move) == Ok)
-            ++tally.media_moved;
-        else
-            ++tally.media_skipped;
-        if (progress) progress->done.fetch_add(1);
-    }
+    const TransferTally t = transfer_images(src, src_gallery, names, dst, dst_gallery,
+                                            TransferMode::Move,
+                                            {.progress = progress, .set_total = false});
+    tally.media_moved   += t.done;
+    tally.media_skipped += t.failed;
     return Ok;
 }
 

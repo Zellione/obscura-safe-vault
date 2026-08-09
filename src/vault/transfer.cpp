@@ -1,6 +1,7 @@
 #include "vault/transfer.h"
 
 #include <algorithm>
+#include <iterator>
 #include <ranges>
 
 #include "crypto/secure_mem.h"
@@ -18,6 +19,12 @@ void record_failure(TransferTally& t, std::string path, VaultResult code,
 
 namespace {
 
+// Phase 69: destination commits are batched — one durable commit_staged per
+// TRANSFER_COMMIT_BATCH files (mirrors the import queue's CommitLane batch
+// size) instead of one per file, and Move-mode source removals are deferred
+// into one remove_media_batch after the destination is durable.
+inline constexpr size_t TRANSFER_COMMIT_BATCH = 32;
+
 // Shared context for the subtree copy loop (bundled for cpp:S107).
 struct CopyCtx {
     Vault&               src;
@@ -26,6 +33,14 @@ struct CopyCtx {
     crypto::SecureBytes& plain;
     OpProgress*          progress;   // may be null
     TransferTally&       tally;
+    // Batch state (Phase 69). `pending` holds full source slash-paths of files
+    // attached at the destination but not yet durably committed; `moved` holds
+    // committed paths awaiting the deferred Move removal. `dirty` tracks
+    // uncommitted destination-tree mutations (attaches AND ensured galleries).
+    std::vector<std::string> pending{};
+    std::vector<std::string> moved{};
+    bool                     dirty         = false;
+    bool                     commit_failed = false;
 };
 
 // Append `gallery`'s slash-path child name; "" stays "".
@@ -155,6 +170,63 @@ void lower_dst_watermark(const Vault& src, Vault& dst)
     if (lowered) (void)set_vault_settings(dst, std::move(s_dst));
 }
 
+// Make the current batch durable in ONE commit. On success the batch's files
+// count done (Copy) or queue for the deferred source removal (Move). On
+// failure NONE of them is durable: each is recorded failed and the transfer
+// hard-stops (commit_failed) — already-committed batches are unaffected.
+void flush_dst(CopyCtx& c)
+{
+    using enum VaultResult;
+    if (!c.dirty) return;
+    if (const VaultResult r = commit_staged(c.dst); r != Ok) {
+        for (auto& p : c.pending)
+            record_failure(c.tally, std::move(p), r, TransferFailure::Stage::Write);
+        c.pending.clear();
+        c.commit_failed = true;
+        return;
+    }
+    c.dirty = false;
+    if (c.mode == TransferMode::Move) {
+        c.moved.insert(c.moved.end(), std::make_move_iterator(c.pending.begin()),
+                       std::make_move_iterator(c.pending.end()));
+    } else {
+        c.tally.done += static_cast<int>(c.pending.size());
+    }
+    c.pending.clear();
+}
+
+// Record a successful copy (attach only — not yet durable) and flush the batch
+// when it reaches TRANSFER_COMMIT_BATCH files.
+void note_copied(CopyCtx& c, std::string src_path)
+{
+    c.pending.push_back(std::move(src_path));
+    c.dirty = true;
+    if (c.pending.size() >= TRANSFER_COMMIT_BATCH) flush_dst(c);
+}
+
+// Post-copy epilogue (runs on completion AND on cancel): flush the last batch,
+// persist the migration watermark, then apply the deferred Move removals in
+// ONE remove_media_batch — a single source commit + a single auto-reclaim pass
+// instead of one of each per file. Destination durability strictly precedes
+// any source mutation, so a crash anywhere leaves recoverable duplicates,
+// never a lost file.
+void finish_copies(CopyCtx& c)
+{
+    using enum VaultResult;
+    flush_dst(c);
+    lower_dst_watermark(c.src, c.dst);
+    if (c.mode != TransferMode::Move || c.moved.empty()) return;
+    if (const VaultResult r = remove_media_batch(c.src, c.moved, nullptr); r != Ok) {
+        // The copies are durable in dst; a failed remove leaves recoverable
+        // duplicates — reported per file, not fatal (Phase 67 contract).
+        for (auto& p : c.moved)
+            record_failure(c.tally, std::move(p), r, TransferFailure::Stage::Write);
+    } else {
+        c.tally.done += static_cast<int>(c.moved.size());
+    }
+    c.moved.clear();
+}
+
 // Copy one media (image or video) `fname` from src/src_gallery into dst/dst_gallery,
 // decrypting through the reused mlock'd `plain`. Copy only — source untouched.
 // `failed_stage` tracks whether failure occurred on read (source side) or write
@@ -177,7 +249,7 @@ VaultResult copy_one_media(const Vault& src, std::string_view src_gallery,
         const uint64_t ts = node->meta.created_ts;
         if (VaultResult r = src.read_image(*node, plain); r != Ok) return r;
         failed_stage = TransferFailure::Stage::Write;
-        return add_image_prestaged(dst, dst_gallery, plain.as_span(), fname, thumb, ts);
+        return attach_image_prestaged(dst, dst_gallery, plain.as_span(), fname, thumb, ts);
     }
     if (node->is_video()) {
         StagedVideoInfo info;
@@ -185,12 +257,14 @@ VaultResult copy_one_media(const Vault& src, std::string_view src_gallery,
         const uint64_t ts = node->vmeta.created_ts;
         if (VaultResult r = src.read_video(*node, plain); r != Ok) return r;
         failed_stage = TransferFailure::Stage::Write;
-        return add_video_prestaged(dst, dst_gallery, plain.as_span(), fname, info, ts);
+        return attach_video_prestaged(dst, dst_gallery, plain.as_span(), fname, info, ts);
     }
     return Ok;
 }
 
-// Copy one media via context; records failures and handles per-file Move.
+// Copy one media via context; records failures. A success is batched
+// (Phase 69): the file counts done — and, for Move, leaves the source — only
+// after its batch's destination commit lands (flush_dst / finish_copies).
 // Never aborts on per-file failures; returns void.
 void copy_one_media_ex(CopyCtx& c, std::string_view src_abs, std::string_view dst_gallery,
                        std::string_view fname)
@@ -200,27 +274,21 @@ void copy_one_media_ex(CopyCtx& c, std::string_view src_abs, std::string_view ds
     if (VaultResult r = copy_one_media(c.src, src_abs, c.dst, dst_gallery, fname, c.plain, stage);
         r != Ok) {
         record_failure(c.tally, child_path(src_abs, fname), r, stage);
-    } else if (c.mode == TransferMode::Move) {
-        // Per-file Move (Phase 67): the destination add committed, so remove
-        // the source item now. A failed remove leaves a recoverable
-        // duplicate — reported, not fatal, and not double-counted as done.
-        if (VaultResult r2 = c.src.remove_image(src_abs, fname); r2 != Ok)
-            record_failure(c.tally, child_path(src_abs, fname), r2, TransferFailure::Stage::Write);
-        else
-            ++c.tally.done;
     } else {
-        ++c.tally.done;
+        note_copied(c, child_path(src_abs, fname));
     }
     if (c.progress) c.progress->done.fetch_add(1);
 }
 
 // Copy every media named in `images` from `src_abs` into `dst_gallery`.
-// Never aborts on per-file failures; records each and continues.
+// Never aborts on per-file failures; records each and continues. A failed
+// batch commit (commit_failed) is the one hard stop.
 void copy_images(CopyCtx& c, const std::string& src_abs, const std::string& dst_gallery,
                  const std::vector<std::string>& images)
 {
     for (const auto& fname : images) {
         if (c.progress && c.progress->cancel.load()) return;
+        if (c.commit_failed) return;
         copy_one_media_ex(c, src_abs, dst_gallery, fname);
     }
 }
@@ -239,6 +307,7 @@ void copy_subtree(CopyCtx& c, std::string_view src_gallery, const std::string& d
     bool skipping = false;
     for (const auto& snap : snaps) {
         if (c.progress && c.progress->cancel.load()) return;
+        if (c.commit_failed) return;
         if (skipping &&
             (snap.rel == skip_prefix || snap.rel.starts_with(skip_prefix + "/"))) {
             // Unreachable branch: media counted failed (no per-file entries —
@@ -255,7 +324,9 @@ void copy_subtree(CopyCtx& c, std::string_view src_gallery, const std::string& d
         const std::string src_abs = snap.rel.empty()
                                         ? std::string(src_gallery)
                                         : std::string(src_gallery) + "/" + snap.rel;
-        if (VaultResult r = c.dst.create_gallery(dst_gallery); r != Ok && r != AlreadyExists) {
+        // Phase 69: ensure_gallery_path (idempotent, NO per-gallery commit) —
+        // the created galleries ride the next batched commit.
+        if (VaultResult r = ensure_gallery_path(c.dst, dst_gallery); r != Ok) {
             record_failure(c.tally, src_abs, r, TransferFailure::Stage::Write);
             c.tally.failed += static_cast<int>(snap.images.size());
             if (c.progress)
@@ -266,6 +337,7 @@ void copy_subtree(CopyCtx& c, std::string_view src_gallery, const std::string& d
             skipping = true;
             continue;
         }
+        c.dirty = true;   // ensured galleries need the next commit too
         copy_images(c, src_abs, dst_gallery, snap.images);
     }
 }
@@ -326,6 +398,10 @@ VaultResult transfer_image_ex(Vault& src, std::string_view src_gallery,
     if (VaultResult r = copy_one_media(src, src_gallery, dst, dst_gallery, filename, plain, stage_out);
         r != Ok)
         return r;
+
+    // Single-file path: one commit right away (batch loops use CopyCtx instead).
+    stage_out = TransferFailure::Stage::Write;
+    if (VaultResult r = commit_staged(dst); r != Ok) return r;
 
     lower_dst_watermark(src, dst);
 
@@ -403,21 +479,24 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
     TransferTally& t = tally ? *tally : local;
 
     crypto::SecureBytes plain;
-    CopyCtx ctx{src, dst, mode, plain, progress, t};
+    CopyCtx ctx{.src = src, .dst = dst, .mode = mode, .plain = plain,
+                .progress = progress, .tally = t};
     std::vector<std::string> failed_rels;
     copy_subtree(ctx, src_gallery, dest_root, snaps, failed_rels);
 
     // The subtree root itself could not be created: structural failure, source
-    // untouched (per-file Move never ran — copy_one_media was never reached).
+    // untouched (nothing was copied — copy_one_media was never reached).
     if (!failed_rels.empty() && failed_rels.front().empty())
         return t.failures.empty() ? IoError : t.failures.front().code;
 
-    lower_dst_watermark(src, dst);
+    // Flush the last batch, persist the watermark, apply deferred Move
+    // removals (one source commit). Runs on cancel too, so a cancel still
+    // leaves items moved so far only in the destination — no duplicates,
+    // nothing lost.
+    finish_copies(ctx);
 
-    // A cancel stops cleanly between files: items moved so far live only in the
-    // destination (their source copies are already removed per-file), the rest
-    // only in the source — no duplicates, nothing lost. Skip pruning: galleries
-    // not yet recreated at the destination must survive.
+    // Skip pruning on cancel: galleries not yet recreated at the destination
+    // must survive.
     if (progress && progress->cancel.load()) return Ok;
 
     if (mode == TransferMode::Move) prune_moved_galleries(src, src_gallery, snaps, failed_rels);
@@ -427,23 +506,24 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
 TransferTally transfer_images(Vault& src, std::string_view src_gallery,
                               const std::vector<std::string>& filenames,
                               Vault& dst, std::string_view dst_gallery,
-                              TransferMode mode, OpProgress* progress)
+                              TransferMode mode, TransferProgress prog)
 {
     using enum VaultResult;
-    if (progress) progress->total.store(static_cast<int>(filenames.size()));
+    OpProgress* progress = prog.progress;
+    if (progress && prog.set_total)
+        progress->total.store(static_cast<int>(filenames.size()));
 
     TransferTally tally;
+    crypto::SecureBytes plain;
+    CopyCtx ctx{.src = src, .dst = dst, .mode = mode, .plain = plain,
+                .progress = progress, .tally = tally};
     for (const auto& fname : filenames) {
-        if (progress && progress->cancel.load()) break;   // clean partial: stop between files
-        auto stage = TransferFailure::Stage::Read;
-        if (VaultResult r = transfer_image_ex(src, src_gallery, fname, dst, dst_gallery,
-                                              mode, stage);
-            r == Ok)
-            ++tally.done;
-        else
-            record_failure(tally, child_path(src_gallery, fname), r, stage);
-        if (progress) progress->done.fetch_add(1);
+        // Stop between files on a user cancel (clean partial) or a destination
+        // commit failure (hard stop).
+        if ((progress && progress->cancel.load()) || ctx.commit_failed) break;
+        copy_one_media_ex(ctx, src_gallery, dst_gallery, fname);
     }
+    finish_copies(ctx);   // one dst commit + one deferred source removal batch
     return tally;
 }
 

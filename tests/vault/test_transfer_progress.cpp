@@ -47,7 +47,8 @@ TEST(transfer_images_progress_counts)
 
         vault::OpProgress prog;
         const auto tally = vault::transfer_images(src, "a", {"1.jpg", "2.jpg", "3.jpg"},
-                                                  dst, "b", vault::TransferMode::Move, &prog);
+                                                  dst, "b", vault::TransferMode::Move,
+                                                  {.progress = &prog});
         CHECK_EQ(tally.done, 3);
         CHECK_EQ(tally.failed, 0);
         CHECK_EQ(prog.total.load(), 3);
@@ -73,7 +74,8 @@ TEST(transfer_images_cancel_before_start_is_noop)
         vault::OpProgress prog;
         prog.cancel.store(true);
         const auto tally = vault::transfer_images(src, "a", {"1.jpg", "2.jpg", "3.jpg"},
-                                                  dst, "b", vault::TransferMode::Move, &prog);
+                                                  dst, "b", vault::TransferMode::Move,
+                                                  {.progress = &prog});
         CHECK_EQ(tally.done, 0);
         CHECK_EQ(prog.done.load(), 0);
         CHECK_EQ(src.list("a").size(), static_cast<size_t>(3));   // source untouched
@@ -118,7 +120,8 @@ TEST(transfer_images_counts_failures)
 
         vault::OpProgress prog;
         const auto tally = vault::transfer_images(src, "a", {"1.jpg", "missing.jpg"},
-                                                  dst, "b", vault::TransferMode::Move, &prog);
+                                                  dst, "b", vault::TransferMode::Move,
+                                                  {.progress = &prog});
         CHECK_EQ(tally.done, 1);
         CHECK_EQ(tally.failed, 1);
         CHECK_EQ(dst.list("b").size(), static_cast<size_t>(1));   // only the real file moved

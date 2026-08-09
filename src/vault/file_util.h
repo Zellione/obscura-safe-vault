@@ -4,6 +4,7 @@
 // Shared by chunk_store (append/read) and vault (header writes). premake builds
 // 64-bit only, so off_t / _ftelli64 are wide enough for any vault.
 
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <sys/stat.h>
@@ -139,9 +140,19 @@ inline int& sync_fail_after() noexcept
 inline void inject_sync_failure(int after_calls) noexcept { sync_fail_after() = after_calls; }
 inline void clear_sync_failure() noexcept                 { sync_fail_after() = -1; }
 
+// Total sync() calls this process (atomic: the commit lane syncs off-thread).
+// Tests reset it and assert bulk operations batch their durable commits
+// instead of paying one per file; a plain counter, never used for control flow.
+inline std::atomic<uint64_t>& sync_call_count() noexcept
+{
+    static std::atomic<uint64_t> n{0};
+    return n;
+}
+
 // Flush stdio buffers and fsync to durable storage.
 [[nodiscard]] inline bool sync(std::FILE* fp) noexcept
 {
+    sync_call_count().fetch_add(1);
     if (int& n = sync_fail_after(); n >= 0) {
         if (n == 0) { n = -1; return false; }
         --n;

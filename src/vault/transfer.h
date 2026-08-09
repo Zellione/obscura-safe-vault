@@ -42,9 +42,9 @@ void record_failure(TransferTally& t, std::string path, VaultResult code,
 
 // Transfer one media (image or video) from `src` (gallery `src_gallery`, file `filename`)
 // into `dst`'s `dst_gallery`, keeping the filename. Reads the source plaintext into an
-// mlock'd SecureBytes, re-encrypts it into `dst` via add_image or add_video (which
-// regenerates the thumbnail/poster + metadata); for TransferMode::Move it then removes
-// the source. `dst` is committed before `src` is mutated, so a crash mid-Move leaves
+// mlock'd SecureBytes and re-encrypts it into `dst` with the source's own thumbnail/
+// poster + metadata (Phase 67: no re-decode, no re-probe); for TransferMode::Move it
+// then removes the source. `dst` is committed before `src` is mutated, so a crash mid-Move leaves
 // the media in BOTH vaults (a recoverable duplicate) rather than losing it. `&src == &dst`
 // is allowed (same-vault transfer). Plaintext lives only in the locked buffer (invariant #1).
 //   NotFound      - src media, src gallery, or dst gallery missing
@@ -57,17 +57,30 @@ void record_failure(TransferTally& t, std::string path, VaultResult code,
                                          Vault& dst, std::string_view dst_gallery,
                                          TransferMode mode);
 
-// Transfer a list of media (`filenames`, all in src/src_gallery) into dst/dst_gallery,
-// one file at a time via transfer_image (each an atomic copy-then-remove unit). This is
-// the bulk driver behind the move/copy dialog, kept here (not in the UI) so it is
-// headlessly testable. With `progress != nullptr`: total is set to filenames.size()
-// up front, done is bumped after each file, and the loop stops early when
-// progress->cancel is set — files transferred so far remain committed (a clean
-// partial). Returns {committed, failed}; failed files are left in the source.
+// Transfer a list of media (`filenames`, all in src/src_gallery) into dst/dst_gallery.
+// This is the bulk driver behind the move/copy dialog, kept here (not in the UI) so it
+// is headlessly testable. Batched (Phase 69): destination durability is ONE commit per
+// TRANSFER_COMMIT_BATCH files (not one per file), and for TransferMode::Move the source
+// removals are deferred into ONE remove_media_batch after the destination commit — so a
+// bulk transfer costs O(batches) durable commits, like the import queue, instead of
+// O(files). Destination durability always strictly precedes any source mutation: a crash
+// mid-transfer loses at most the uncommitted batch (still in the source) or leaves
+// already-committed files briefly in both vaults (recoverable duplicates), never neither.
+// With `prog.progress != nullptr`: total is set to filenames.size() up front (skipped
+// when `prog.set_total` is false — for callers like vault combine that manage a larger
+// progress total themselves), done is bumped after each file, and the loop stops early
+// when progress->cancel is set — files copied so far are flushed and (for Move) removed
+// from the source, a clean partial. A destination commit failure fails every file of
+// that batch and stops the transfer. Returns {committed, failed}; failed files are left
+// in the source.
+struct TransferProgress {
+    OpProgress* progress  = nullptr;
+    bool        set_total = true;
+};
 [[nodiscard]] TransferTally transfer_images(Vault& src, std::string_view src_gallery,
                                             const std::vector<std::string>& filenames,
                                             Vault& dst, std::string_view dst_gallery,
-                                            TransferMode mode, OpProgress* progress = nullptr);
+                                            TransferMode mode, TransferProgress prog = {});
 
 // Slash-paths of every gallery in `v` that may legally accept media (images or videos)
 // — holds no sub-galleries, including "" (root) when root holds no sub-galleries. Used
@@ -77,8 +90,11 @@ void record_failure(TransferTally& t, std::string path, VaultResult code,
 // Transfer a whole gallery subtree from `src` (the gallery at `src_gallery`) into
 // `dst` under `dst_parent`, keeping the gallery's own name. Per-file tolerance: copy
 // every file; failures are recorded in `tally` (when given) rather than aborting.
-// Copy-then-remove: for TransferMode::Move each file is removed from src immediately
-// after its destination add commits (per-file Move). After all files, if no cancel and
+// Batched (Phase 69): recreated galleries and copied files become durable in ONE
+// destination commit per TRANSFER_COMMIT_BATCH files; for TransferMode::Move the source
+// removals are deferred into ONE remove_media_batch after the destination commit (a
+// crash mid-Move leaves already-committed files briefly in both vaults — recoverable
+// duplicates, never a loss). After all files, if no cancel and
 // all copied OK, empty galleries are pruned bottom-up from the source (residue tree).
 // `&src == &dst` is allowed; a same-vault move into the source itself or any
 // descendant is rejected (cycle). Media plaintext lives only in mlock'd memory (invariant #1).
@@ -92,8 +108,9 @@ void record_failure(TransferTally& t, std::string path, VaultResult code,
 //                   intact if the subtree root's create_gallery fails.
 // `progress` (optional): total is set to the subtree's media count up front, done
 // bumped per copied file, and the copy stops early when progress->cancel is set.
-// A cancel stops cleanly: items moved so far live only in dst (their source copies
-// removed per-file), the rest only in src — no duplicates, nothing lost. Pruning is
+// A cancel stops cleanly: files copied so far are flushed and (for Move) removed from
+// the source in the finish batch, the rest stay only in src — no duplicates, nothing
+// lost. Pruning is
 // skipped on cancel (galleries not yet recreated at dst must survive). Plaintext lives
 // only in mlock'd memory (invariant #1).
 // `tally` (optional): per-file failures are recorded; done/failed tally counts media
