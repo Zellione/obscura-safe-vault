@@ -122,7 +122,17 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   favorites-scoped viewer (ToFavoriteViewer: prev/next iterate the favorites set, Esc returns
   to the grid). `favorites_screen.*` is the shared base (grid/selection/badge) with
   `handle_extra_key`/`extra_hint`/`show_favorite_badge`/`go_back` virtuals used by the tag
-  views.
+  views. **Phase 68:** the base gains a `SelectionModel` (Space toggles, Enter still opens,
+  Ctrl+A select-all-or-clear; cleared by reload()) + B/X/M over the selection via an owned
+  `CollectionBatchOps ops_` — B routes `batch_favorite_target` → `set_favorites_batch` then
+  reload() (unfavorited tiles vanish); X/M go through ops_ (per-parent grouping from
+  `SearchHit.path`). Ctor takes a public `CollectionOps` ctx struct (file/folder dialogs,
+  ImportQueue&, SecondVaultSession*, active_path — App-owned, passed by const ref, all four
+  subclasses forward it). While `batch_ops_busy()` update() only polls and render() draws
+  chrome + ops modal (no tile draws → no vault decode submits). Detail panel shows the
+  Phase 48 aggregate for 2+ selected (key includes `sel_.revision()`; inherited passed empty —
+  collection hits are not siblings). KEY_DOWN handling lives in `handle_key_down` (S3776
+  split); an n/N counter is right-aligned on the title line.
 - `favorites_galleries.*` — flat grid of favorited galleries; navigates the normal grid
   (Shift+F). `B` toggles favorite on the focused grid tile / current viewer image; gold star
   badge on favorited tiles.
@@ -310,11 +320,15 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   SecureBytes, wipe after upload); used by viewer + slideshow.
 
 ## Dialogs
-- `transfer_dialog.*` — `M` modal: move OR copy selected images / a focused gallery subtree to
-  another vault or within the active vault. Source enum `{Images,Gallery,Galleries}`;
-  open()/open_gallery()/open_galleries(). Stages: Mode(Move/Copy) → PickingDest (delegated to
-  VaultUnlockPicker) → PickGallery (GalleryPickerModel, scrollable + `/`-filterable, "+ New
-  gallery…" pinned via set_pinned_suffix) → run `vault::transfer_*` per mode. **Phase 66:**
+- `transfer_dialog.*` — `M` modal: move OR copy the selection / a focused gallery subtree to
+  another vault or within the active vault. Source enum `{Images,Gallery,Galleries,Collection}`
+  (Collection: Phase 68 — per-parent `ParentGroup`s + gallery subtrees in one run);
+  open()/open_gallery()/open_galleries()/open_collection(); `open_mixed(src, media, galleries)`
+  wraps a grid mixed selection as a single-group Collection. Stages: Mode(Move/Copy) →
+  PickingDest (delegated to VaultUnlockPicker) → PickGallery (GalleryPickerModel, scrollable +
+  `/`-filterable, "+ New gallery…" pinned via set_pinned_suffix) → run `vault::transfer_*`
+  per mode (Collection → `FileOpJob::start_transfer_collection`). rebuild_targets: Images uses
+  `image_target_galleries`, everything else `gallery_target_parents`. **Phase 66:**
   on completion with a Keep\* mode, the destination handle is handed off to the warm slot via
   `release_to_slot()` before the dialog closes; the slot's sliding reset is called after
   transfer success. Grid skips its import dlg poll while active(); M with no selection acts on
@@ -407,7 +421,10 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   inside the band, every line reachable, group boundaries never split, column budgets never exceeded.
 
 ## Export (the one gated invariant-#1 deviation)
-- `selection_model.*` — multi-select state for export (pure/tested). Phase 53 adds
+- `selection_model.*` — multi-select state for export AND batch ops (Phase 68:
+  the same Space/Ctrl+A selection drives B favorite-toggle, X export, and M
+  move/copy on the grid, the favorites/tag screens, and the search-result
+  panel). Phase 53 adds
   `select_all(count)` / `all_selected(count)` behind Ctrl+A; `select_all(0)` does NOT clear
   ("select all of nothing" is not a deselect) and `all_selected(0)` is false (else Ctrl+A on an
   empty gallery clears forever). Phase 48: gained
@@ -417,6 +434,29 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `export.*` — decrypt→write-verbatim→wipe export (SDL-free/tested). The ONE deliberate
   deviation from invariant #1: writes decrypted originals to disk on explicit user consent
   (selection-only, never thumbnails, buffer wiped right after write).
+- `favorite_batch.*` — `batch_favorite_target(nodes)` (pure/tested): the batch
+  favorite rule — any node unfavorited → favorite all (true), else unfavorite
+  all. Persisted by `vault::set_favorites_batch` (one commit). Used by the
+  grid's `toggle_favorite_selection` free friend, FavoritesScreen, and the
+  advanced-search `toggle_favorite_results` free friend (Phase 68).
+- `parent_group.*` — `ParentGroup{parent, names}` + `group_by_parent(paths)`
+  (pure/tested): splits full slash-paths per parent gallery, order-preserving.
+  Collection screens list hits from DIFFERENT parents but `transfer_images`
+  works per source gallery — this is the bridge (Phase 68).
+- `collection_ops.*` — `CollectionBatchOps` (Phase 68): the shared batch-op
+  component for collection screens (FavoritesScreen base + AdvancedSearchScreen)
+  — consent-gated export → App-owned FolderDialog pick → `FileOpJob::start_export`
+  (the collect callback resolves selection nodes at pick-land time, never across
+  the async pick), and grouped move/copy via `TransferDialog::open_collection`.
+  Owns consent/job/transfer; enforces Phase 50 import-queue exclusivity
+  (`set_exclusive` + release on completion/close) and the vault-hands-off
+  contract: while `busy()` the host must not walk the tree or submit decodes
+  (hosts draw chrome + `ops.render()` only). `poll()` returns
+  `{status, reload, dirty}` drained every frame.
+- `position_label.*` — `position_label(index, count)` → `"3 / 128"` ("" when
+  empty/out of range) — the ONE n/N formatter (Phase 68): grid chrome line
+  (right-aligned in `FooterStatus`), favorites/tag title line, search-results
+  header (`Results (N) · n / N`), viewer strip badge.
 
 ## Background jobs (mirror each other; each owns the vault's single-thread file handle)
 - `zip_import_job.*` — ZipImportJob runs import_cbz/import_zip (start_cbz/start_zip, shared
@@ -431,7 +471,12 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `file_op_job.*` — FileOpJob runs export / delete / move-copy on a bg worker (same contract).
   start_export/start_delete/start_transfer_images/start_transfer_gallery/
   start_transfer_galleries/start_combine -> `FileOpOutcome{ok,cancelled,done,failed,status,...}`.
-  GalleryGrid owns one for export+delete; TransferDialog owns one (Running stage). ImageViewer's
+  **Phase 68:** `start_transfer_collection(src, groups, gallery_paths, dst, dst_target, mode,
+  label)` runs per-parent `transfer_images` loops then `transfer_galleries`, tallies merged
+  (worker body is the named `run_collection_transfer` helper);
+  `start_transfer_media_grouped` forwards to it with no galleries. A cancel between
+  groups/phases is a clean partial. GalleryGrid owns one for export+delete; TransferDialog
+  owns one (Running stage); CollectionBatchOps owns one per collection screen. ImageViewer's
   single-image export stays synchronous. The GalleryGrid gate
   (vault_busy/poll_file_job/handle_job_input) is free friends. Unit-tested.
 - `dup_scan.*` (Phase 61) — duplicate-scan worker. `ui::collect_scan_items(vault)` runs on the
@@ -605,6 +650,22 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   the vault at ~795 bytes/second with no user input, unbounded.
   **Phase 51:** `enqueue_folder(vault, folder_path, dest_gallery_path, progress)` enqueues an ImportTaskKind::Folder,
   mirroring `enqueue_files`. Multiple folder picks create multiple tasks (one per folder).
+  **Phase 68 (crash resilience):** `run_worker_task` wraps every task's processing in a
+  task-boundary try/catch — an escaping exception marks THAT task Failed ("Internal import
+  error: <what>") instead of std::terminate (the decode-pool job body is guarded the same way).
+  The generic catches are deliberate (accepted S1181/S2738 deviation, commented at the site).
+  `mark_task_complete(task_id, result, progress)` now writes the worker's local task copy BACK
+  to the queued row — terminal Failed/Cancelled state + error, counts merged via `max()`
+  against the live drain-incremented counters (before Phase 68 the copy was discarded and a
+  failed archive rendered "✓ Done, 0 imported"). Every Failed task logs ONE
+  `platform::log_error("Import", import_failure_log_line(name, reason))` line to
+  `<config_dir>/error.log` from the choke point after mark_task_complete (names + ASCII
+  reasons only — invariant #5). A corrupt ROOT archive fails the task ("Archive is corrupt or
+  unreadable", `RecursiveTally::root_unreadable`) instead of folding into `skipped`; a nested
+  unreadable archive stays a per-entry skip. `zip_import.h`'s `zip_entry_size_plausible(comp,
+  uncomp)` refuses a zip entry claiming to inflate past deflate's ~1032:1 bound BEFORE an
+  mlock'd buffer is sized from the lie. Test seam: `test_only_set_task_hook(q, fn)` (friend)
+  runs fn inside the try scope on the worker.
   **Phase 53:** `enqueue_volume_set(volumes, style, stem, dest, gallery_name, kind, password)` — Task gained
   `volumes` / `volume_style` / `volume_stem`. The whole ordered volume list must ride ON the task: the worker
   runs off a task SNAPSHOT, and a snapshot carrying only `source` silently imports the first fragment alone.
@@ -781,11 +842,22 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   Grid}` + toggle + move nav; List ±1 row, Grid ±1/±cols clamped, cols>=1). search_result_view
   owns the off-thread decode worker + feeds the thumbnail cache. **Phase 56:** list layout
   derives from `list_layout.*` module. **Phase 58:** `update_results(vault, hits)` invalidates
-  CoverCache and clears failed thumbs.
+  CoverCache and clears failed thumbs. **Phase 68:** owns a `SelectionModel` (Space toggles,
+  Ctrl+A select-all-or-clear in handle_key; accessors `selection()`/`clear_selection()`;
+  cleared by update_results — indices are per-listing). Accent badge on selected grid tiles;
+  the list view's gutter marker + the `Results (N) · n / N` headers are drawn by the hosts.
+  AdvancedSearchScreen's B/X/M over the selection are FREE FRIENDS (S1448) —
+  `toggle_favorite_results` / `start_export_results` / `start_transfer_results(screen&)` —
+  active only with Results focus, running through the screen's `CollectionBatchOps ops_`.
 - `saved_search_panel.*` — saved-search sidebar: list rendering + CRUD (Ctrl+S/Enter/Del). Pure
   vault/SDL-free. Phase 54: `save_buf_` is a `TextInputModel` and `active_buffer()` returns
   `ITextInput*`; before that this field had NO Backspace handler at all, so a typo could only
   be undone by cancelling the save (regression-tested now). **Phase 56:** list layout derives from `list_layout.*` module.
+  **Phase 68:** wheel-scrollable — `handle_wheel(wheel_y, max_h)` + a scroll offset clamped by
+  `list_clamp_scroll` (pure, in `list_layout.*`); rows clip outside the viewport, the header
+  stays fixed, and Up/Down keep the focused row visible (last max_h memoised from render,
+  which now takes the window height). AdvancedSearchScreen routes wheel events over the
+  sidebar region to it (after the detail-panel hit check).
 - `tag_suggest.*` — pure autosuggest source: `editor_tag_suggestions(buffer,vocab,own_tags)` —
   trim, rank, hide own tags, cap `TAG_SUGGEST_MAX=5`.
 - `tag_inherit.*` — ancestor-gallery tag union: `inherited_tags(vault,node_path)` — root→parent
@@ -860,6 +932,17 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   Phase 47: `strip_cell_rect(...)` added for forward index→rect mapping (inverse `strip_hit_axis`
   pre-existed). NOTE: `gfx::Renderer::draw_thumbnail_strip` duplicates this layout internally
   (gfx must not depend on ui) — both sites carry SYNC comments; keep in sync on geometry changes.
+  **Phase 68:** `strip_counter_rect(side, strip, text_w, line_h)` + `fullscreen_counter_rect(
+  win_w, win_h, text_w, line_h)` — the n/N badge rects (strip far edge windowed; window
+  bottom-right in fullscreen where strip+header are hidden). Pure/tested.
+- `strip_scroll.*` (Phase 68) — pure manual strip-scroll state: `StripScrollState{offset,
+  manual}` + `strip_apply_wheel` (clamps to `strip_content_extent`; no-op when content fits) +
+  `strip_follow_index` (re-engages auto-centering). ImageViewer: wheel anywhere in the strip
+  BAND (rect containment, NOT strip_hit — that returns -1 in gaps) scrolls the strip — checked
+  before the video early-out so it works during playback; first wheel seeds offset from
+  `strip_scroll_centered`; `show_image_at` re-engages follow. `render_strip` and `strip_hit`
+  share ONE manual-aware scroll source (`current_strip_scroll`) so clicks stay accurate while
+  scrolled.
 - `scroll_model.*` — fill-width continuous-scroll maths.
 - `chrome_layout.*` — pure `ChromeBands{header,content,footer}` + `split_chrome(area,header_h,
   footer_h)`: reserves OPAQUE fixed bands at the top/bottom of `area` and hands back the content
