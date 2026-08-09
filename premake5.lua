@@ -534,6 +534,7 @@ project "osv_tests"
         "src/ui/unlock_job.cpp",
         "src/ui/widgets.cpp",
         "src/ui/strip_layout.cpp",
+        "src/ui/strip_scroll.cpp",
         "src/ui/cover_layout.cpp",
         "src/ui/gallery_cover.cpp",
         "src/ui/cover_cache.cpp",

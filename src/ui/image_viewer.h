@@ -21,6 +21,7 @@
 #include "ui/search_overlay.h"
 #include "ui/slideshow_view.h"
 #include "ui/strip_layout.h"
+#include "ui/strip_scroll.h"
 #include "ui/tag_editor.h"
 #include "ui/video_playback.h"
 #include "ui/viewer_model.h"
@@ -150,6 +151,7 @@ private:
     SDL_Texture* thumb_texture(const vault::IndexNode& node);  // shared cache
     [[nodiscard]] bool pump_thumbs();                          // drain worker results into cache
     [[nodiscard]] int strip_hit(float mx, float my) const;     // thumb under cursor, or -1
+    [[nodiscard]] float current_strip_scroll() const;          // scroll offset (manual or auto-centered)
     void render_fit(gfx::Renderer& r, const SDL_FRect& vp);
     void render_scroll(gfx::Renderer& r, const SDL_FRect& vp);
     void render_strip(gfx::Renderer& r);
@@ -192,6 +194,9 @@ private:
     // Persistent layout/mode choices (reset on construction, i.e. per viewer).
     StripSide strip_side_ = StripSide::Bottom;
     ViewMode  mode_       = ViewMode::Fit;
+
+    // Manual scroll state for the thumbnail strip (Phase 68 Part 3).
+    StripScrollState strip_scroll_;
 
     // Fit-mode view state for the current image (grouped to keep the field count
     // in check and to document the cluster as one cohesive unit).
