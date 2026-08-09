@@ -13,8 +13,10 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "platform/perf.h"
+#include "ui/favorite_batch.h"
 #include "ui/grid_layout.h"
 #include "ui/list_layout.h"
+#include "ui/parent_group.h"
 #include "ui/nav_model.h"
 #include "ui/text_input_event.h"
 #include "ui/text_metrics.h"
@@ -129,10 +131,12 @@ bool current_detail_open(const AdvancedSearchScreen& s) { return s.detail_.panel
 AdvancedSearchScreen::AdvancedSearchScreen(gfx::Window& win, gfx::FontAtlas& font,
                                            vault::Vault& vault, gfx::TextureCache& cache,
                                            AdvancedSearchState& session,
+                                           const CollectionBatchOps::Deps& ops_deps,
                                            bool initial_detail_open)
     : win_(win), font_(font), vault_(vault), cache_(cache), session_(session), search_(vault_),
       result_view_(vault_, win_, font_, cache_),
-      saved_panel_(search_, font_, status_, saved_)
+      saved_panel_(search_, font_, status_, saved_),
+      ops_(ops_deps)
 {
     detail_.panel.open = initial_detail_open;
     // Wire up the result view's request callback to navigate to opened results
@@ -259,6 +263,77 @@ void AdvancedSearchScreen::start_rename()
     rename_.open(gallery_path, name);
 }
 
+// --- Phase 68: batch operations over the result multi-selection --------------
+
+namespace {
+
+// The selected hits, or the focused one when nothing is Space-selected.
+std::vector<const vault::SearchHit*> selected_hits(const SearchResultView& view)
+{
+    std::vector<const vault::SearchHit*> out;
+    const auto& results = view.get_results();
+    if (view.selection().empty()) {
+        const int idx = view.get_cursor();
+        if (idx >= 0 && idx < static_cast<int>(results.size())) {
+            out.push_back(&results[static_cast<size_t>(idx)]);
+        }
+        return out;
+    }
+    for (int i : view.selection().indices()) {
+        if (i >= 0 && i < static_cast<int>(results.size())) {
+            out.push_back(&results[static_cast<size_t>(i)]);
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+void AdvancedSearchScreen::toggle_favorite_results()
+{
+    const auto hits = selected_hits(result_view_);
+    std::vector<const vault::IndexNode*> nodes;
+    std::vector<std::string>             paths;
+    for (const vault::SearchHit* h : hits) {
+        nodes.push_back(h->node);
+        paths.push_back(h->path);
+    }
+    if (paths.empty()) { return; }
+    const bool target = batch_favorite_target(nodes);
+    (void)vault::set_favorites_batch(vault_, paths, target);
+    status_ = std::format("{} {} {}", target ? "Favorited" : "Unfavorited", paths.size(),
+                          paths.size() == 1 ? "item" : "items");
+    mark_dirty();
+}
+
+void AdvancedSearchScreen::start_export_results()
+{
+    // The collect callback resolves the selection when the folder pick lands —
+    // a rerun in between clears the selection and turns this into a clean no-op.
+    ops_.request_export(result_view_.selection().empty()
+                            ? (result_view_.get_results().empty() ? 0u : 1u)
+                            : result_view_.selection().count(),
+                        [this]() {
+        std::vector<const vault::IndexNode*> picked;
+        for (const vault::SearchHit* h : selected_hits(result_view_)) {
+            if (h->node != nullptr && !h->is_gallery) { picked.push_back(h->node); }
+        }
+        return picked;
+    }, status_);
+}
+
+void AdvancedSearchScreen::start_transfer_results()
+{
+    std::vector<std::string> media_paths;
+    std::vector<std::string> gallery_paths;
+    for (const vault::SearchHit* h : selected_hits(result_view_)) {
+        (h->is_gallery ? gallery_paths : media_paths).push_back(h->path);
+    }
+    if (media_paths.empty() && gallery_paths.empty()) { return; }
+    ops_.request_transfer(group_by_parent(media_paths), std::move(gallery_paths), status_);
+    mark_dirty();
+}
+
 ITextInput* AdvancedSearchScreen::active_buffer()
 {
     // Check if saved_panel is in save mode (has an active buffer)
@@ -299,6 +374,7 @@ std::string AdvancedSearchScreen::accepted(const std::string& buf) const
 
 void AdvancedSearchScreen::handle_event(const SDL_Event& e)
 {
+    if (ops_.handle_event(e)) { return; }   // Phase 68 batch-op modals first
     if (rename_.active()) { (void)rename_.handle_event(vault_, e); return; }
 
     // Precedence rule (Phase 54): the focused builder field gets first refusal,
@@ -324,6 +400,15 @@ void AdvancedSearchScreen::handle_event(const SDL_Event& e)
 
 void AdvancedSearchScreen::update(double dt)
 {
+    if (auto p = ops_.poll(); p.dirty || p.reload || !p.status.empty()) {
+        if (!p.status.empty()) { status_ = std::move(p.status); }
+        if (p.reload) { rerun(); }   // a Move removed items from the results
+        mark_dirty();
+    }
+    // While a batch worker owns the vault handle the tree must not be walked
+    // (no rerun, no detail rebuild, no decode submits) — Phase 68 contract.
+    if (ops_.busy()) { return; }
+
     result_view_.pump_thumbnails();   // upload any off-thread thumb/cover decodes
     if (live_.rerun.fire(dt)) rerun();   // Phase 58: fire debounced query reruns
     if (std::string s; rename_.consume_completed(s)) {
@@ -405,6 +490,14 @@ void AdvancedSearchScreen::handle_key(const SDL_KeyboardEvent& key)
         return;
     }
     if (focus_ == Focus::Results && key.key == SDLK_R) { start_rename(); return; }
+    // Phase 68 batch ops over the result multi-selection (Results focus only —
+    // elsewhere these letters belong to the builder fields).
+    if (focus_ == Focus::Results && key.key == SDLK_B) { toggle_favorite_results(); return; }
+    if (focus_ == Focus::Results && key.key == SDLK_X) { start_export_results(); return; }
+    if (focus_ == Focus::Results && key.key == SDLK_M && (key.mod & SDL_KMOD_SHIFT) == 0) {
+        start_transfer_results();
+        return;
+    }
 
     switch (key.key) {
         case SDLK_ESCAPE:    request(NavKind::ToGallery, "", 0); return;
@@ -722,6 +815,13 @@ void AdvancedSearchScreen::render(gfx::Renderer& r)
     r.draw_text(font_, PAD, 36, "Advanced Search", TEXT);
     r.draw_text(font_, PAD, 74, "[F1] Help", TEXT_FAINT);
 
+    // While a batch worker owns the vault handle, drawing results would submit
+    // thumbnail decodes against it — draw only the chrome + the modal (Phase 68).
+    if (ops_.busy()) {
+        ops_.render(r, font_, W, H);
+        return;
+    }
+
     const float colW = (cW - 2 * PAD) / 3.0f - 16;
     render_builder(r, PAD, TOP, colW);
     const float mx = PAD + colW + 24;
@@ -848,6 +948,10 @@ void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
         const bool              sel = (i == cur && hot);
         const vault::SearchHit& hit = result_view_.get_results()[i];
         if (sel) r.draw_round_rect({x - 6, y + ink_dy - rh * 0.5f, colw + 12, rh}, RADIUS_SMALL, SURFACE_HI);
+        // Multi-select marker (Phase 68): a small accent square in the row gutter.
+        if (result_view_.selection().contains(i)) {
+            r.draw_round_rect({x - 14, y + ink_dy - 5.0f, 10, 10}, RADIUS_SMALL, ACCENT);
+        }
         r.draw_text(font_, x, y,
                     fit_text(font_, std::format("{}{}", hit.is_gallery ? "[D] " : "    ", hit.path),
                              colw),
@@ -939,6 +1043,9 @@ std::vector<ui::HelpGroup> AdvancedSearchScreen::help_groups() const
         {"Results & saved searches", {
             {"Ctrl+S", "Save search"}, {"Ctrl+L", "Toggle list/grid view"},
             {"Ctrl+R", "Clear query"}, {"R", "Rename focused result"},
+            {"Space", "Select result"}, {"Ctrl+A", "Select all results"},
+            {"B", "Favorite (acts on selection)"}, {"X", "Export selection"},
+            {"M", "Move/copy selection"},
             {"Ctrl+D", "Toggle the detail panel"},
         }},
         {"Navigate", {{"Esc", "Back"}}},

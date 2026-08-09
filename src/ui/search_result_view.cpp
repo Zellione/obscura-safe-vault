@@ -34,6 +34,7 @@ void SearchResultView::update_results(const std::vector<vault::SearchHit>& new_r
     grid_covers_.clear();
     results_ = new_results;
     cur_result_ = std::clamp(cur_result_, 0, std::max(0, static_cast<int>(results_.size()) - 1));
+    sel_.clear();   // selection indices are only valid against the old listing
 }
 
 void SearchResultView::pump_thumbnails()
@@ -60,6 +61,20 @@ void SearchResultView::handle_key(const SDL_KeyboardEvent& key)
         case SDLK_RIGHT: move(MoveDir::Right); break;
         case SDLK_RETURN:
         case SDLK_KP_ENTER: activate_focused(); break;
+        // Phase 68 multiselect: Space toggles, Ctrl+A selects all — and clears
+        // instead when everything is already selected (grid parity).
+        case SDLK_SPACE:
+            if (count > 0) sel_.toggle(cur_result_);
+            break;
+        case SDLK_A:
+            if ((key.mod & SDL_KMOD_CTRL) != 0 && count > 0) {
+                if (sel_.all_selected(count)) {
+                    sel_.clear();
+                } else {
+                    sel_.select_all(count);
+                }
+            }
+            break;
         default: break;
     }
 }
@@ -134,6 +149,13 @@ void SearchResultView::render(gfx::Renderer& r, float x, float colw, bool hot)
         if (hit.node)
             draw_tile_thumb(r, font_, ctx, *hit.node,
                             {cell.x + 6, cell.y + 6, cell.w - 12, cell.h - 12});
+
+        // Multi-select badge, top-left (Phase 68) — the grid's accent square.
+        if (sel_.contains(i)) {
+            const SDL_FRect sbadge{cell.x + 6, cell.y + 6, 14, 14};
+            r.draw_round_rect(sbadge, RADIUS_SMALL, ACCENT);
+            r.draw_round_rect(sbadge, RADIUS_SMALL, BG, /*filled*/ false);
+        }
     }
     if (results_.empty()) r.draw_text(font_, x, top, "(no matches)", TEXT_FAINT);
 }

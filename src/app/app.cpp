@@ -265,8 +265,12 @@ void App::to_favorite_viewer(int index)
 void App::to_advanced_search()
 {
     state_  = State::Browsing;
-    screen_ = std::make_unique<ui::AdvancedSearchScreen>(window_, font_, *vault_state_.active, *cache_,
-                                                         adv_session_, adv_session_.detail_open);
+    screen_ = std::make_unique<ui::AdvancedSearchScreen>(
+        window_, font_, *vault_state_.active, *cache_, adv_session_,
+        ui::CollectionBatchOps::Deps{*vault_state_.active, vault_state_.active_path, registry_,
+                                     dialog_, window_, &second_.session, folder_dialog_,
+                                     import_ui_.queue},
+        adv_session_.detail_open);
     screen_->on_enter();
 }
 
