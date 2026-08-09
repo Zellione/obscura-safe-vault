@@ -274,8 +274,8 @@ std::vector<const vault::SearchHit*> selected_hits(const SearchResultView& view)
     std::vector<const vault::SearchHit*> out;
     const auto& results = view.get_results();
     if (view.selection().empty()) {
-        const int idx = view.get_cursor();
-        if (idx >= 0 && idx < static_cast<int>(results.size())) {
+        if (const int idx = view.get_cursor();
+            idx >= 0 && idx < static_cast<int>(results.size())) {
             out.push_back(&results[static_cast<size_t>(idx)]);
         }
         return out;

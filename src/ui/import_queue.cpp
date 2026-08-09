@@ -832,24 +832,22 @@ void ImportQueue::mark_task_complete(uint64_t task_id, const Task& result,
 {
     using enum ImportTaskState;
     for (auto& t : tasks_) {
-        if (t.id == task_id) {
-            if (t.state == Running) {
-                if (result.state == Failed || result.state == Cancelled) {
-                    t.state = result.state;
-                    t.error = result.error;
-                } else {
-                    // Check if the task was cancelled
-                    t.state = (progress && progress->cancel.load()) ? Cancelled : Done;
-                }
-                // Counts are live-incremented by drain() per attached record;
-                // archive outcomes carry totals (incl. never-staged skips) on
-                // the worker copy instead. max() keeps whichever model fed
-                // this task without zeroing the other.
-                t.imported = std::max(t.imported, result.imported);
-                t.skipped  = std::max(t.skipped, result.skipped);
-            }
-            break;
+        if (t.id != task_id) continue;
+        if (t.state != Running) break;
+        if (result.state == Failed || result.state == Cancelled) {
+            t.state = result.state;
+            t.error = result.error;
+        } else {
+            // Check if the task was cancelled
+            t.state = (progress && progress->cancel.load()) ? Cancelled : Done;
         }
+        // Counts are live-incremented by drain() per attached record; archive
+        // outcomes carry totals (incl. never-staged skips) on the worker copy
+        // instead. max() keeps whichever model fed this task without zeroing
+        // the other.
+        t.imported = std::max(t.imported, result.imported);
+        t.skipped  = std::max(t.skipped, result.skipped);
+        break;
     }
 }
 
