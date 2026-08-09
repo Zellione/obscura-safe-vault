@@ -228,7 +228,8 @@ bool FileOpJob::start_transfer_gallery(vault::Vault& src, std::string src_galler
                    dst_parent = std::move(dst_parent), mode, label = std::move(label)]() {
         vault::TransferTally tally;
         const vault::VaultResult r =
-            vault::transfer_gallery(src, src_gallery, dst, dst_parent, mode, &progress_, &tally);
+            vault::transfer_gallery(src, src_gallery, dst, dst_parent, mode,
+                                    {.progress = &progress_, .tally = &tally});
         const bool cancelled = progress_.cancel.load();
 
         if (r != vault::VaultResult::Ok) {

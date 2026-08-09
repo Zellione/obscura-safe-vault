@@ -255,7 +255,7 @@ TEST(transfer_gallery_move_batches_source_removal)
     vault::fileutil::sync_call_count().store(0);
     vault::TransferTally tally;
     REQUIRE(vault::transfer_gallery(src, "G", dst, "", vault::TransferMode::Move,
-                                    nullptr, &tally) == Ok);
+                                    {.tally = &tally}) == Ok);
     const uint64_t syncs = vault::fileutil::sync_call_count().load();
 
     CHECK(tally.done == 3);

@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <iterator>
+#include <optional>
 #include <ranges>
 
 #include "crypto/secure_mem.h"
+#include "vault/safe_name.h"
 #include "vault/staging.h"
 
 namespace vault {
@@ -104,6 +106,35 @@ std::string last_segment(std::string_view gallery)
     const auto slash = gallery.rfind('/');
     return slash == std::string_view::npos ? std::string(gallery)
                                            : std::string(gallery.substr(slash + 1));
+}
+
+// Longest prefix of `s` that fits max_bytes without splitting a UTF-8 codepoint.
+std::string trim_utf8(std::string_view s, size_t max_bytes)
+{
+    if (s.size() <= max_bytes) return std::string(s);
+    size_t end = max_bytes;
+    while (end > 0 && (static_cast<unsigned char>(s[end]) & 0xC0) == 0x80) --end;
+    return std::string(s.substr(0, end));
+}
+
+// First free "name_2", "name_3", ... among dst_parent's children, trimmed to
+// MAX_NODE_NAME_BYTES on a codepoint boundary. The candidate always ends in
+// ASCII digits, so is_safe_node_name properties (no trailing dot/space) hold.
+// nullopt after _9999 — a bound, not a scenario.
+std::optional<std::string> unique_child_name(const Vault& dst, std::string_view dst_parent,
+                                             std::string_view name)
+{
+    auto taken = [&](const std::string& n) {
+        for (const auto* c : dst.list(dst_parent)) if (c->name == n) return true;
+        return false;
+    };
+    for (int i = 2; i <= 9999; ++i) {
+        const std::string suffix = "_" + std::to_string(i);
+        const std::string cand =
+            trim_utf8(name, MAX_NODE_NAME_BYTES - suffix.size()) + suffix;
+        if (!taken(cand)) return cand;
+    }
+    return std::nullopt;
 }
 
 
@@ -443,10 +474,12 @@ std::vector<std::string> gallery_target_parents(const Vault& v)
 
 VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
                              Vault& dst, std::string_view dst_parent,
-                             TransferMode mode, OpProgress* progress,
-                             TransferTally* tally)
+                             TransferMode mode, GalleryTransferOpts opts)
 {
     using enum VaultResult;
+
+    OpProgress* progress = opts.progress;
+    TransferTally* tally = opts.tally;
 
     if (src_gallery.empty()) return InvalidArg;       // can't transfer the root itself
     // Refuse a same-vault move/copy of a gallery into itself or a descendant.
@@ -459,12 +492,21 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
         if (c->is_gallery() && c->name == name) { src_is_gallery = true; break; }
     if (!src_is_gallery) return NotFound;
 
-    const std::string dest_root = dst_parent.empty() ? name
-                                                      : std::string(dst_parent) + "/" + name;
-
-    // Validate destination up front so collisions/ineligibility leave nothing partial.
-    for (const auto* c : dst.list(dst_parent))
-        if (c->name == name) return AlreadyExists;
+    std::string dest_name = name;
+    for (const auto* c : dst.list(dst_parent)) {
+        if (c->name != name) continue;
+        if (opts.policy == CollisionPolicy::Suffix) {
+            auto fresh = unique_child_name(dst, dst_parent, name);
+            if (!fresh) return AlreadyExists;   // probe bound exhausted
+            dest_name = std::move(*fresh);
+            break;
+        }
+        // Combine handled in a later step (Task 4); Fail — and Combine until
+        // then — keep the pre-Phase-71 contract:
+        return AlreadyExists;
+    }
+    const std::string dest_root = dst_parent.empty() ? dest_name
+                                                     : std::string(dst_parent) + "/" + dest_name;
 
     // Snapshot the source subtree (parent-before-child), then recreate + copy.
     std::vector<GallerySnap> snaps;
@@ -531,7 +573,8 @@ TransferTally transfer_images(Vault& src, std::string_view src_gallery,
 
 TransferTally transfer_galleries(Vault& src, const std::vector<std::string>& src_paths,
                                  Vault& dst, std::string_view dst_parent,
-                                 TransferMode mode, OpProgress* progress)
+                                 TransferMode mode, OpProgress* progress,
+                                 CollisionPolicy policy)
 {
     using enum VaultResult;
     if (progress) progress->total.store(static_cast<int>(src_paths.size()));
@@ -540,7 +583,8 @@ TransferTally transfer_galleries(Vault& src, const std::vector<std::string>& src
     for (const auto& path : src_paths) {
         if (progress && progress->cancel.load()) break;
         TransferTally sub;
-        if (const VaultResult r = transfer_gallery(src, path, dst, dst_parent, mode, nullptr, &sub); r == Ok) {
+        if (const VaultResult r = transfer_gallery(src, path, dst, dst_parent, mode,
+                                                   {.tally = &sub, .policy = policy}); r == Ok) {
             ++out.done;
             // Merge per-file failures from this subtree into the output.
             // per-file failures inside a structurally-Ok subtree do not change the

@@ -138,7 +138,7 @@ VaultResult merge_subgallery_child(Vault& src, std::string_view src_gallery,
         const int subtree_media = count_media(src, child_src);
         TransferTally t;
         if (transfer_gallery(src, child_src, dst, dst_gallery, TransferMode::Move,
-                             nullptr, &t) == Ok) {
+                             {.tally = &t}) == Ok) {
             ++tally.galleries_moved;
         }
         // Account for every file of the subtree, mirroring the leaf path's
