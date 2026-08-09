@@ -38,6 +38,7 @@
 #include "ui/widgets.h"
 #include "ui/zip_import.h"
 #include "ui/child_counts.h"
+#include "ui/position_label.h"
 #include "vault/file_util.h"
 #include "vault/index.h"
 #include "vault/vault.h"
@@ -1431,6 +1432,8 @@ struct FooterStatus {
     const std::string& error;
     const std::string& status;
     const std::string& import_summary;  // Phase 50: footer summary from the import queue
+    int position = 0;                    // Phase 68: focused tile's 0-based index
+    std::size_t total = 0;               // Phase 68: total children count
 };
 
 // Build the breadcrumb line, appending the active sort indicator once it's
@@ -1452,7 +1455,11 @@ void draw_footer_status(gfx::Renderer& r, gfx::FontAtlas& font, float x_offset,
                         const SDL_FRect& footer_band, const FooterStatus& data)
 {
     using namespace gfx::theme;
-    if (data.show_waste || data.show_selection) {
+
+    // Phase 68: right-aligned position counter on the same line as waste/selection
+    const std::string pos_label = ui::position_label(data.position, data.total);
+
+    if (data.show_waste || data.show_selection || !pos_label.empty()) {
         std::string footer;
         if (data.show_selection)
             footer = std::format("{} selected", data.selection_count);
@@ -1462,6 +1469,13 @@ void draw_footer_status(gfx::Renderer& r, gfx::FontAtlas& font, float x_offset,
         }
         const gfx::Color color = data.show_selection ? ACCENT : TEXT_DIM;
         r.draw_text(font, x_offset, 120, footer, color);
+
+        // Draw position counter right-aligned at the same y level
+        if (!pos_label.empty()) {
+            const auto text_w = static_cast<float>(font.measure(pos_label));
+            const float rx = footer_band.x + footer_band.w - x_offset - text_w;
+            r.draw_text(font, rx, 120, pos_label, TEXT_FAINT);
+        }
     }
 
     draw_chrome_band(r, footer_band, gfx::theme::BG, /*rule_at_bottom*/ false);
@@ -1746,7 +1760,9 @@ void GalleryGrid::render(gfx::Renderer& r)
         .selection_count = static_cast<int>(sel_.count()),
         .error = error_,
         .status = status_,
-        .import_summary = queue_.footer_summary()  // Phase 50: display import queue status
+        .import_summary = queue_.footer_summary(),  // Phase 50: display import queue status
+        .position = nav_.selected(),                 // Phase 68: focused tile position
+        .total = children_.size()                    // Phase 68: total children count
     });
 
     // Both take the content area's bottom, not H: rows and tiles must stop above
