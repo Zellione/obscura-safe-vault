@@ -262,10 +262,10 @@ VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path)
     return Ok;  // idempotent: return Ok even if nothing was created
 }
 
-VaultResult add_image_prestaged(Vault& v, std::string_view gallery_path,
-                                std::span<const uint8_t> file_data,
-                                std::string_view filename,
-                                const StagedThumb& thumb, uint64_t created_ts)
+VaultResult attach_image_prestaged(Vault& v, std::string_view gallery_path,
+                                   std::span<const uint8_t> file_data,
+                                   std::string_view filename,
+                                   const StagedThumb& thumb, uint64_t created_ts)
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
@@ -279,18 +279,36 @@ VaultResult add_image_prestaged(Vault& v, std::string_view gallery_path,
     if (staged.status != Ok) return staged.status;
     if (created_ts != 0) staged.node.meta.created_ts = created_ts;
 
-    if (const VaultResult r = attach_staged(v, gallery_path, std::move(staged.node)); r != Ok)
-        return r;
+    return attach_staged(v, gallery_path, std::move(staged.node));
+}
+
+VaultResult commit_staged(Vault& v)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
     if (ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
         !store.sync())
         return IoError;
     return v.commit_index();
 }
 
-VaultResult add_video_prestaged(Vault& v, std::string_view gallery_path,
+VaultResult add_image_prestaged(Vault& v, std::string_view gallery_path,
                                 std::span<const uint8_t> file_data,
                                 std::string_view filename,
-                                const StagedVideoInfo& info, uint64_t created_ts)
+                                const StagedThumb& thumb, uint64_t created_ts)
+{
+    using enum VaultResult;
+    if (const VaultResult r =
+            attach_image_prestaged(v, gallery_path, file_data, filename, thumb, created_ts);
+        r != Ok)
+        return r;
+    return commit_staged(v);
+}
+
+VaultResult attach_video_prestaged(Vault& v, std::string_view gallery_path,
+                                   std::span<const uint8_t> file_data,
+                                   std::string_view filename,
+                                   const StagedVideoInfo& info, uint64_t created_ts)
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
@@ -304,12 +322,20 @@ VaultResult add_video_prestaged(Vault& v, std::string_view gallery_path,
     if (staged.status != Ok) return staged.status;
     if (created_ts != 0) staged.node.vmeta.created_ts = created_ts;
 
-    if (const VaultResult r = attach_staged(v, gallery_path, std::move(staged.node)); r != Ok)
+    return attach_staged(v, gallery_path, std::move(staged.node));
+}
+
+VaultResult add_video_prestaged(Vault& v, std::string_view gallery_path,
+                                std::span<const uint8_t> file_data,
+                                std::string_view filename,
+                                const StagedVideoInfo& info, uint64_t created_ts)
+{
+    using enum VaultResult;
+    if (const VaultResult r =
+            attach_video_prestaged(v, gallery_path, file_data, filename, info, created_ts);
+        r != Ok)
         return r;
-    if (ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
-        !store.sync())
-        return IoError;
-    return v.commit_index();
+    return commit_staged(v);
 }
 
 }  // namespace vault
