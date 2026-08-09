@@ -17,6 +17,7 @@
 #include "ui/anim_model.h"
 #include "ui/input.h"
 #include "ui/meta_format.h"
+#include "ui/position_label.h"
 #include "ui/strip_layout.h"
 #include "ui/tile_thumb.h"
 #include "ui/widgets.h"
@@ -914,6 +915,24 @@ void ImageViewer::render_strip(gfx::Renderer& r)
             draw_animated_badge(r, font_, thumb_rect, 12.0f, 0.0f, 6.0f);
         }
     }
+
+    // Phase 68: Draw position counter badge on the strip.
+    const std::string label = ui::position_label(index_, album_.images.size());
+    if (!label.empty()) {
+        using namespace gfx::theme;
+        const float line_h = font_.pixel_height();
+        const auto text_w = static_cast<float>(font_.measure(label));
+        const SDL_FRect badge_rect = ui::strip_counter_rect(strip_side_, strip, text_w, line_h);
+
+        // Draw filled rounded rect background for the badge
+        r.draw_round_rect(badge_rect, 4.0f, STRIP_BG, true);
+        r.draw_round_rect(badge_rect, 4.0f, BORDER, false);
+
+        // Draw the position text centered in the badge
+        const float text_x = badge_rect.x + (badge_rect.w - text_w) * 0.5f;
+        const float text_y = font_.text_top_for_center(badge_rect.y + badge_rect.h * 0.5f);
+        r.draw_text(font_, text_x, text_y, label, TEXT_DIM);
+    }
 }
 
 void ImageViewer::render_hud(gfx::Renderer& r)
@@ -1012,7 +1031,29 @@ void ImageViewer::render(gfx::Renderer& r)
     }
 
     render_hud(r);
-    if (!win_.is_fullscreen()) render_strip(r);   // Phase 45 Part 4
+    if (!win_.is_fullscreen()) {
+        render_strip(r);   // Phase 45 Part 4
+    } else {
+        // Phase 68: Draw position counter badge in fullscreen mode (strip is hidden).
+        const std::string label = ui::position_label(index_, album_.images.size());
+        if (!label.empty()) {
+            using namespace gfx::theme;
+            const float line_h = font_.pixel_height();
+            const auto text_w = static_cast<float>(font_.measure(label));
+            const SDL_FRect badge_rect = ui::fullscreen_counter_rect(
+                static_cast<float>(win_.width()), static_cast<float>(win_.height()),
+                text_w, line_h);
+
+            // Draw filled rounded rect background for the badge
+            r.draw_round_rect(badge_rect, 4.0f, STRIP_BG, true);
+            r.draw_round_rect(badge_rect, 4.0f, BORDER, false);
+
+            // Draw the position text centered in the badge
+            const float text_x = badge_rect.x + (badge_rect.w - text_w) * 0.5f;
+            const float text_y = font_.text_top_for_center(badge_rect.y + badge_rect.h * 0.5f);
+            r.draw_text(font_, text_x, text_y, label, TEXT_DIM);
+        }
+    }
 
     export_.render(r, font_, static_cast<float>(win_.width()),
                    static_cast<float>(win_.height()));
