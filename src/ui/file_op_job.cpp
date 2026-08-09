@@ -221,15 +221,16 @@ bool FileOpJob::start_transfer_images(vault::Vault& src, std::string src_gallery
 
 bool FileOpJob::start_transfer_gallery(vault::Vault& src, std::string src_gallery,
                                        vault::Vault& dst, std::string dst_parent,
-                                       vault::TransferMode mode, std::string label)
+                                       vault::TransferMode mode, vault::CollisionPolicy policy,
+                                       std::string label)
 {
     return launch(FileOpKind::Transfer,
                   [this, &src, src_gallery = std::move(src_gallery), &dst,
-                   dst_parent = std::move(dst_parent), mode, label = std::move(label)]() {
+                   dst_parent = std::move(dst_parent), mode, policy, label = std::move(label)]() {
         vault::TransferTally tally;
         const vault::VaultResult r =
             vault::transfer_gallery(src, src_gallery, dst, dst_parent, mode,
-                                    {.progress = &progress_, .tally = &tally});
+                                    {.progress = &progress_, .tally = &tally, .policy = policy});
         const bool cancelled = progress_.cancel.load();
 
         if (r != vault::VaultResult::Ok) {
@@ -251,13 +252,14 @@ bool FileOpJob::start_transfer_gallery(vault::Vault& src, std::string src_galler
 
 bool FileOpJob::start_transfer_galleries(vault::Vault& src, std::vector<std::string> src_paths,
                                          vault::Vault& dst, std::string dst_parent,
-                                         vault::TransferMode mode, std::string label)
+                                         vault::TransferMode mode, vault::CollisionPolicy policy,
+                                         std::string label)
 {
     return launch(FileOpKind::Transfer,
                   [this, &src, src_paths = std::move(src_paths), &dst,
-                   dst_parent = std::move(dst_parent), mode, label = std::move(label)]() {
+                   dst_parent = std::move(dst_parent), mode, policy, label = std::move(label)]() {
         vault::TransferTally t = vault::transfer_galleries(
-            src, src_paths, dst, dst_parent, mode, &progress_);
+            src, src_paths, dst, dst_parent, mode, &progress_, policy);
         return transfer_outcome(mode,
                                 {.done = t.done, .failed = t.failed, .skipped = t.skipped,
                                  .total = static_cast<int>(src_paths.size())},
@@ -269,17 +271,11 @@ bool FileOpJob::start_transfer_media_grouped(vault::Vault& src, std::vector<Pare
                                              vault::Vault& dst, std::string dst_gallery,
                                              vault::TransferMode mode, std::string label)
 {
-    return start_transfer_collection(src, std::move(groups), {}, dst, std::move(dst_gallery),
-                                     mode, std::move(label));
+    return start_transfer_collection(src, {std::move(groups), {}}, dst, std::move(dst_gallery),
+                                     mode, vault::CollisionPolicy::Fail, std::move(label));
 }
 
 namespace {
-
-// One collection-screen selection: per-parent media groups + gallery subtrees.
-struct CollectionTransferSpec {
-    std::vector<ParentGroup> groups;
-    std::vector<std::string> gallery_paths;
-};
 
 // Worker body of start_transfer_collection, a named function to keep the
 // launch lambda within the S1188 line budget. Media first, then subtrees; a
@@ -287,7 +283,8 @@ struct CollectionTransferSpec {
 // committed unit).
 vault::TransferTally run_collection_transfer(vault::Vault& src, const CollectionTransferSpec& spec,
                                              vault::Vault& dst, const std::string& dst_target,
-                                             vault::TransferMode mode, vault::OpProgress& progress)
+                                             vault::TransferMode mode, vault::OpProgress& progress,
+                                             vault::CollisionPolicy policy)
 {
     vault::TransferTally sum;
     for (const ParentGroup& g : spec.groups) {
@@ -303,7 +300,7 @@ vault::TransferTally run_collection_transfer(vault::Vault& src, const Collection
     }
     if (!spec.gallery_paths.empty() && !progress.cancel.load()) {
         vault::TransferTally t =
-            vault::transfer_galleries(src, spec.gallery_paths, dst, dst_target, mode, &progress);
+            vault::transfer_galleries(src, spec.gallery_paths, dst, dst_target, mode, &progress, policy);
         sum.done   += t.done;
         sum.failed += t.failed;
         sum.skipped += t.skipped;
@@ -315,17 +312,16 @@ vault::TransferTally run_collection_transfer(vault::Vault& src, const Collection
 
 }  // namespace
 
-bool FileOpJob::start_transfer_collection(vault::Vault& src, std::vector<ParentGroup> groups,
-                                          std::vector<std::string> gallery_paths,
+bool FileOpJob::start_transfer_collection(vault::Vault& src, CollectionTransferSpec spec,
                                           vault::Vault& dst, std::string dst_target,
-                                          vault::TransferMode mode, std::string label)
+                                          vault::TransferMode mode, vault::CollisionPolicy policy,
+                                          std::string label)
 {
     return launch(FileOpKind::Transfer,
-                  [this, &src,
-                   spec = CollectionTransferSpec{std::move(groups), std::move(gallery_paths)},
-                   &dst, dst_target = std::move(dst_target), mode, label = std::move(label)]() {
+                  [this, &src, spec = std::move(spec), &dst, dst_target = std::move(dst_target),
+                   mode, policy, label = std::move(label)]() {
         vault::TransferTally t = run_collection_transfer(src, spec, dst, dst_target, mode,
-                                                         progress_);
+                                                         progress_, policy);
         return transfer_outcome(mode,
                                 {.done = t.done, .failed = t.failed, .skipped = t.skipped,
                                  .total = t.done + t.failed + t.skipped},

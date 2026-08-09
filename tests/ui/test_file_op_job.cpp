@@ -1,12 +1,16 @@
 #include "test_framework.h"
 
+#include "crypto/kdf.h"
 #include "ui/file_op_job.h"
 #include "ui/zip_test_helpers.h"   // make_vault, fake_jpeg, fresh_dir, cleanup_dir
+#include "vault/transfer.h"
 #include "vault/vault.h"
 
 #include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <optional>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -188,7 +192,8 @@ TEST(file_op_job_transfers_gallery_subtree)
         REQUIRE(seed_images(src, "album", 3));
 
         ui::FileOpJob job;
-        CHECK(job.start_transfer_gallery(src, "album", dst, "", vault::TransferMode::Copy, "dst"));
+        CHECK(job.start_transfer_gallery(src, "album", dst, "", vault::TransferMode::Copy,
+                                         vault::CollisionPolicy::Fail, "dst"));
         auto oc = await_outcome(job);
         REQUIRE(oc.has_value());
         CHECK(oc->ok);
@@ -229,6 +234,40 @@ std::vector<uint8_t> read_fixture(const char* path)
     return std::vector<uint8_t>((std::istreambuf_iterator<char>(in)),
                                 std::istreambuf_iterator<char>());
 }
+
+static std::vector<uint8_t> blob(size_t n, uint8_t seed)
+{
+    std::vector<uint8_t> v(n);
+    for (size_t i = 0; i < n; ++i) v[i] = static_cast<uint8_t>(i * 23 + seed);
+    return v;
+}
+
+static std::span<const uint8_t> bytes(const std::string& s)
+{
+    return {reinterpret_cast<const uint8_t*>(s.data()), s.size()};
+}
+
+static const vault::IndexNode* find_child(const vault::Vault& v, std::string_view gallery,
+                                          std::string_view name)
+{
+    for (const auto* c : v.list(gallery)) if (c->name == name) return c;
+    return nullptr;
+}
+
+struct TempVault {
+    fs::path path;
+    explicit TempVault(const char* tag)
+    {
+        static int ctr = 0;
+        path = fs::temp_directory_path() /
+               ("osv_fj_" + std::string(tag) + "_" + std::to_string(ctr++) + ".osv");
+        std::error_code ec; fs::remove(path, ec);
+    }
+    ~TempVault() { std::error_code ec; fs::remove(path, ec); }
+    std::string str() const { return path.string(); }
+};
+
+static const crypto::KdfParams kKdf{.t_cost = 1, .m_cost_kib = 8, .parallelism = 1};
 }  // namespace
 
 // Images + a video + a sub-gallery, Space-selected together, move in ONE run:
@@ -247,8 +286,10 @@ TEST(file_op_job_transfers_mixed_media_and_galleries)
         REQUIRE(v.create_gallery("dst") == vault::VaultResult::Ok);
 
         ui::FileOpJob job;
-        CHECK(job.start_transfer_collection(v, {{.parent = "a", .names = {"1.jpg", "2.jpg", "clip.mp4"}}},
-                                            {"a/sub"}, v, "dst", vault::TransferMode::Move, "dst"));
+        CHECK(job.start_transfer_collection(v, {{{.parent = "a", .names = {"1.jpg", "2.jpg", "clip.mp4"}}},
+                                                 {"a/sub"}},
+                                            v, "dst", vault::TransferMode::Move,
+                                            vault::CollisionPolicy::Fail, "dst"));
         auto oc = await_outcome(job);
         REQUIRE(oc.has_value());
         CHECK(oc->ok);
@@ -275,8 +316,9 @@ TEST(file_op_job_transfer_includes_videos)
         REQUIRE(v.create_gallery("b") == vault::VaultResult::Ok);
 
         ui::FileOpJob job;
-        CHECK(job.start_transfer_collection(v, {{.parent = "a", .names = {"clip.mp4"}}}, {},
-                                            v, "b", vault::TransferMode::Move, "b"));
+        CHECK(job.start_transfer_collection(v, {{{.parent = "a", .names = {"clip.mp4"}}}, {}},
+                                            v, "b", vault::TransferMode::Move,
+                                            vault::CollisionPolicy::Fail, "b"));
         auto oc = await_outcome(job);
         REQUIRE(oc.has_value());
         CHECK(oc->ok);
@@ -343,4 +385,25 @@ TEST(file_op_job_transfer_reports_skips)
         CHECK(oc->status.find("1 skipped") != std::string::npos);
     }
     cleanup_dir(dir);
+}
+
+// The Combine policy flows through the job into the vault layer.
+TEST(file_op_job_transfer_gallery_combine_policy)
+{
+    using enum vault::VaultResult;
+    TempVault sa("cp_s"), da("cp_d");
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+    REQUIRE(src.create_gallery("G") == Ok);
+    REQUIRE(src.add_image("G", blob(2000, 1), "a.jpg") == Ok);
+    REQUIRE(dst.create_gallery("G") == Ok);
+
+    ui::FileOpJob job;
+    REQUIRE(job.start_transfer_gallery(src, "G", dst, "", vault::TransferMode::Move,
+                                       vault::CollisionPolicy::Combine, "dest"));
+    auto oc = await_outcome(job);
+    REQUIRE(oc.has_value());
+    CHECK(oc->ok);
+    CHECK(find_child(dst, "G", "a.jpg") != nullptr);   // merged, not errored
 }

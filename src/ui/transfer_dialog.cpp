@@ -130,13 +130,13 @@ void TransferDialog::do_move(std::string_view dst_target)
     // the outcome. The host grid stops touching the vault while job_active().
     if (source_ == Source::Gallery)
         run_.job.start_transfer_gallery(src_, src_gallery_, dv, std::string(dst_target),
-                                        mode_, where);
+                                        mode_, vault::CollisionPolicy::Fail, where);
     else if (source_ == Source::Galleries)
         run_.job.start_transfer_galleries(src_, src_galleries_, dv, std::string(dst_target),
-                                          mode_, where);
+                                          mode_, vault::CollisionPolicy::Fail, where);
     else if (source_ == Source::Collection)
-        run_.job.start_transfer_collection(src_, media_groups_, src_galleries_, dv,
-                                           std::string(dst_target), mode_, where);
+        run_.job.start_transfer_collection(src_, {std::move(media_groups_), src_galleries_}, dv,
+                                           std::string(dst_target), mode_, vault::CollisionPolicy::Fail, where);
     else
         run_.job.start_transfer_images(src_, src_gallery_, filenames_, dv, std::string(dst_target),
                                        mode_, where);
