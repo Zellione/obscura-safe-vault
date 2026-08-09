@@ -1096,6 +1096,23 @@ VaultResult remove_media_batch(Vault& v, std::span<const std::string> node_paths
     return Ok;
 }
 
+VaultResult set_favorites_batch(Vault& v, std::span<const std::string> node_paths, bool value)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+
+    bool changed = false;
+    for (const std::string& path : node_paths) {
+        IndexNode* node = v.resolve_node(path);
+        if (!node || node->favorite == value) continue;   // missing: skipped, not an error
+        node->favorite = value;
+        changed = true;
+    }
+
+    // One crash-safe index swap for the whole batch; none for a no-op batch.
+    return changed ? v.commit_index() : Ok;
+}
+
 std::vector<const IndexNode*> Vault::list(std::string_view gallery_path) const
 {
     std::vector<const IndexNode*> out;
