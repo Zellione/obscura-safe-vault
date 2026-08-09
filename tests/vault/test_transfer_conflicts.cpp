@@ -166,3 +166,41 @@ TEST(transfer_gallery_combine_into_media_child_fails)
     CHECK(vault::transfer_gallery(src, "X", dst, "", vault::TransferMode::Move,
                                   {.policy = vault::CollisionPolicy::Combine}) == AlreadyExists);
 }
+
+TEST(colliding_galleries_lists_only_clashes)
+{
+    using enum vault::VaultResult;
+    TempVault da("d7");
+    vault::Vault dst;
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+    REQUIRE(dst.create_gallery("Trip") == Ok);
+    REQUIRE(dst.add_image("", blob(10, 1), "Pics") == Ok);   // media child counts too
+
+    const std::vector<std::string> paths = {"old/Trip", "old/Fresh", "Pics"};
+    const auto hits = vault::colliding_galleries(dst, "", paths);
+    REQUIRE(hits.size() == 2u);
+    CHECK_EQ(hits[0], std::string("Trip"));
+    CHECK_EQ(hits[1], std::string("Pics"));
+    CHECK(vault::colliding_galleries(dst, "Trip", paths).empty());
+}
+
+// transfer_galleries forwards the policy to every subtree: with Suffix, the
+// colliding one renames and the clean one keeps its name — both transfer.
+TEST(transfer_galleries_forwards_policy)
+{
+    using enum vault::VaultResult;
+    TempVault sa("s8"), da("d8");
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+    REQUIRE(src.create_gallery("A") == Ok);
+    REQUIRE(src.create_gallery("B") == Ok);
+    REQUIRE(dst.create_gallery("A") == Ok);   // only A collides
+
+    const auto t = vault::transfer_galleries(src, {"A", "B"}, dst, "",
+                                             vault::TransferMode::Move, nullptr,
+                                             vault::CollisionPolicy::Suffix);
+    CHECK_EQ(t.done, 2);
+    CHECK(find_child(dst, "", "A_2") != nullptr);
+    CHECK(find_child(dst, "", "B") != nullptr);
+}

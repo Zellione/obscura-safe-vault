@@ -608,4 +608,18 @@ TransferTally transfer_galleries(Vault& src, const std::vector<std::string>& src
     return out;
 }
 
+std::vector<std::string> colliding_galleries(const Vault& dst, std::string_view dst_parent,
+                                             std::span<const std::string> src_paths)
+{
+    std::vector<std::string> out;
+    if (!dst.is_unlocked()) return out;
+    for (const auto& path : src_paths) {
+        const std::string name = last_segment(path);
+        for (const auto* c : dst.list(dst_parent)) {
+            if (c->name == name) { out.push_back(name); break; }
+        }
+    }
+    return out;
+}
+
 } // namespace vault

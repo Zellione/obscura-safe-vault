@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -160,5 +161,13 @@ struct TransferProgress {
 // holds no images), including "" (root) when root holds no images. Empty while
 // locked. Used to populate the transfer dialog when the source is a gallery.
 [[nodiscard]] std::vector<std::string> gallery_target_parents(const Vault& v);
+
+// Names among `src_paths` (gallery slash-paths) whose LAST segment already
+// exists as a child — gallery or media — of dst_parent in `dst`. The main
+// thread runs this before launching a transfer job to decide whether to show
+// the conflict prompt. Empty while dst is locked.
+[[nodiscard]] std::vector<std::string> colliding_galleries(
+    const Vault& dst, std::string_view dst_parent,
+    std::span<const std::string> src_paths);
 
 } // namespace vault
