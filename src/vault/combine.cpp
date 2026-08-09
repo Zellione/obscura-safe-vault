@@ -136,10 +136,20 @@ VaultResult merge_subgallery_child(Vault& src, std::string_view src_gallery,
 
     if (!find_child(dst, dst_gallery, name)) {
         const int subtree_media = count_media(src, child_src);
-        if (transfer_gallery(src, child_src, dst, dst_gallery, TransferMode::Move) == Ok) {
+        TransferTally t;
+        if (transfer_gallery(src, child_src, dst, dst_gallery, TransferMode::Move,
+                             nullptr, &t) == Ok) {
             ++tally.galleries_moved;
-            if (progress) progress->done.fetch_add(subtree_media);   // OpProgress::done is atomic<int>
         }
+        // Account for every file of the subtree, mirroring the leaf path's
+        // per-file tolerance: moved files count moved; failed AND
+        // never-attempted ones (a structural failure or a batch-commit hard
+        // stop leaves them in the source, recoverable) count skipped. The
+        // combine goes on either way — a partially-moved source gallery is
+        // non-empty and therefore survives for a later retry.
+        tally.media_moved   += t.done;
+        tally.media_skipped += subtree_media - t.done;
+        if (progress) progress->done.fetch_add(subtree_media);   // OpProgress::done is atomic<int>
         return Ok;
     }
 

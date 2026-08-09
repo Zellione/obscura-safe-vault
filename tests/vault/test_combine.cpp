@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "vault/combine.h"
+#include "vault/file_util.h"
 #include "vault/vault.h"
 
 namespace fs = std::filesystem;
@@ -263,4 +264,57 @@ TEST(combine_missing_source_returns_not_found)
     REQUIRE(v.create_gallery("Real") == Ok);
     vault::CombineTally tally;
     CHECK(vault::combine_galleries(v, "Ghost", v, "Real", tally) == NotFound);
+}
+
+// Wholesale-moved subtrees count their media in the tally (Phase 69 follow-up):
+// the "N moved" completion line must include files that moved inside a
+// wholesale transfer_gallery, not only leaf-merged ones.
+TEST(combine_counts_wholesale_moved_media_in_tally)
+{
+    using enum vault::VaultResult;
+    TempVault tv("wholetally");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("p"), {}, kKdf, v) == Ok);
+    REQUIRE(v.create_gallery("Src/Only") == Ok);
+    REQUIRE(v.create_gallery("Dst") == Ok);
+    REQUIRE(v.add_image("Src", blob(300, 1), "leaf.jpg") == Ok);
+    REQUIRE(v.add_image("Src/Only", blob(300, 2), "w1.jpg") == Ok);
+    REQUIRE(v.add_image("Src/Only", blob(300, 3), "w2.jpg") == Ok);
+
+    vault::CombineTally tally;
+    REQUIRE(vault::combine_galleries(v, "Src", v, "Dst", tally) == Ok);
+
+    CHECK(tally.media_moved == 3);     // 1 leaf-merged + 2 wholesale-moved
+    CHECK(tally.media_skipped == 0);
+    CHECK(tally.galleries_moved == 1);
+    CHECK(find_child(v, "Dst/Only", "w1.jpg") != nullptr);
+    CHECK(find_child(v, "Dst/Only", "w2.jpg") != nullptr);
+}
+
+// Per-file failures inside a wholesale subtree move must surface in the
+// combine tally as skipped, not vanish: a failed destination commit fails the
+// batch, the files stay in the source, and the tally reports them.
+TEST(combine_failed_wholesale_move_counts_media_as_skipped)
+{
+    using enum vault::VaultResult;
+    TempVault tv("wholefail");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("p"), {}, kKdf, v) == Ok);
+    REQUIRE(v.create_gallery("Src/Only") == Ok);
+    REQUIRE(v.create_gallery("Dst") == Ok);
+    REQUIRE(v.add_image("Src/Only", blob(300, 1), "a.jpg") == Ok);
+    REQUIRE(v.add_image("Src/Only", blob(300, 2), "b.jpg") == Ok);
+
+    // The next fileutil::sync is the wholesale move's batched destination
+    // commit — fail it, so both files fail the batch.
+    vault::fileutil::inject_sync_failure(0);
+    vault::CombineTally tally;
+    const vault::VaultResult r = vault::combine_galleries(v, "Src", v, "Dst", tally);
+    vault::fileutil::clear_sync_failure();
+
+    REQUIRE(r == Ok);                  // per-item tolerance: combine reports, not aborts
+    CHECK(tally.media_moved == 0);
+    CHECK(tally.media_skipped == 2);   // the failed batch is accounted for
+    CHECK(find_child(v, "Src/Only", "a.jpg") != nullptr);   // still in the source
+    CHECK(find_child(v, "Src/Only", "b.jpg") != nullptr);
 }

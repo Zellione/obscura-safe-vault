@@ -30,9 +30,12 @@ struct CombineTally {
 //
 // Folder case (src_gallery holds sub-galleries): for each sub-gallery child —
 // no same-named child in dst_gallery -> moved wholesale via transfer_gallery
-// (tallies galleries_moved); a same-named child exists -> recurse into this
-// same function on that pair (tallies galleries_merged, plus whatever its
-// own recursive tally reports).
+// (tallies galleries_moved; its media counts into media_moved, and any file
+// that stayed behind — per-file failure, batch-commit hard stop, or a
+// structural transfer failure — counts into media_skipped and remains in the
+// source for a later retry, mirroring the leaf path's tolerance); a
+// same-named child exists -> recurse into this same function on that pair
+// (tallies galleries_merged, plus whatever its own recursive tally reports).
 //
 // Tags: union — every one of src_gallery's own tags is added to dst_gallery
 // via add_tag (already case-insensitively deduped).
