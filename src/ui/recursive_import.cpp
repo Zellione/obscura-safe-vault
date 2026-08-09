@@ -237,6 +237,7 @@ void walk_one(const Frame& f, const RecursiveHooks& hooks, RecursionBudget& budg
     std::vector<ZipEntry> entries;
     if (!hooks.list_entries(f.bytes, f.kind, entries)) {
         ++tally.unreadable;
+        if (f.depth == 0) tally.root_unreadable = true;
         return;
     }
 

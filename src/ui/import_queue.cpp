@@ -15,6 +15,7 @@
 #include "image/anim_info.h"
 #include "image/thumbnail.h"
 #include "vault/staging.h"
+#include "platform/error_log.h"
 #include "platform/safe_print.h"
 
 #include <algorithm>
@@ -133,19 +134,31 @@ private:
                 queue_.pop();
             }  // Lock released here
 
-            // Decode outside the lock
-            if (auto decoded = image::decode_from_memory(job->data)) {
-                job->result.width = decoded->width;
-                job->result.height = decoded->height;
-                job->result.format = static_cast<vault::ImageFormat>(decoded->format);
+            // Decode outside the lock. Guarded (Phase 68): a throw out of the
+            // codec layer on malformed bytes would terminate the process (any
+            // exception escaping a thread's start function is terminate); a
+            // failed decode is already a per-file skip downstream, so an
+            // exception is treated exactly like one.
+            try {
+                if (auto decoded = image::decode_from_memory(job->data)) {
+                    job->result.width = decoded->width;
+                    job->result.height = decoded->height;
+                    job->result.format = static_cast<vault::ImageFormat>(decoded->format);
 
-                // Make thumbnail
-                if (auto thumb_bytes = image::make_thumbnail(*decoded, 256, 85)) {
-                    job->result.thumb_jpeg = std::move(*thumb_bytes);
+                    // Make thumbnail
+                    if (auto thumb_bytes = image::make_thumbnail(*decoded, 256, 85)) {
+                        job->result.thumb_jpeg = std::move(*thumb_bytes);
+                    }
+
+                    // Set the animated flag for formats that can carry animation
+                    job->result.animated = image::is_animated(decoded->format, job->data);
                 }
-
-                // Set the animated flag for formats that can carry animation
-                job->result.animated = image::is_animated(decoded->format, job->data);
+            } catch (const std::exception& e) {
+                job->result = {};
+                platform::log_error("Import", std::string("decode failed: ") + e.what());
+            } catch (...) {
+                job->result = {};
+                platform::log_error("Import", "decode failed: non-std exception");
             }
             job->data.clear();  // Free the source pixels
             job->done.store(true);
@@ -814,14 +827,26 @@ bool ImportQueue::extract_task_data(uint64_t& out_task_id, ImportTaskKind& out_t
 }
 
 // CALLED UNDER lock (mu_): update task state after processing
-void ImportQueue::mark_task_complete(uint64_t task_id, const std::shared_ptr<vault::OpProgress>& progress)
+void ImportQueue::mark_task_complete(uint64_t task_id, const Task& result,
+                                     const std::shared_ptr<vault::OpProgress>& progress)
 {
     using enum ImportTaskState;
     for (auto& t : tasks_) {
         if (t.id == task_id) {
             if (t.state == Running) {
-                // Check if the task was cancelled
-                t.state = (progress && progress->cancel.load()) ? Cancelled : Done;
+                if (result.state == Failed || result.state == Cancelled) {
+                    t.state = result.state;
+                    t.error = result.error;
+                } else {
+                    // Check if the task was cancelled
+                    t.state = (progress && progress->cancel.load()) ? Cancelled : Done;
+                }
+                // Counts are live-incremented by drain() per attached record;
+                // archive outcomes carry totals (incl. never-staged skips) on
+                // the worker copy instead. max() keeps whichever model fed
+                // this task without zeroing the other.
+                t.imported = std::max(t.imported, result.imported);
+                t.skipped  = std::max(t.skipped, result.skipped);
             }
             break;
         }
@@ -842,6 +867,8 @@ void ImportQueue::worker_loop()
         std::vector<std::filesystem::path> task_volumes;
         VolumeStyle                        task_volume_style = VolumeStyle::None;
         std::string                        task_volume_stem;
+        std::string                        task_display_name;
+        std::function<void()>              task_hook;
 
         {
             std::unique_lock lock(mu_);
@@ -869,9 +896,11 @@ void ImportQueue::worker_loop()
                     task_volumes      = t.volumes;
                     task_volume_style = t.volume_style;
                     task_volume_stem  = t.volume_stem;
+                    task_display_name = t.display_name;
                     break;
                 }
             }
+            task_hook = test_task_hook_;
         }  // Lock released here
 
         // Process the task using copied data (no lock held)
@@ -894,18 +923,39 @@ void ImportQueue::worker_loop()
             .progress = task_progress,
         };
 
-        if (task_kind == ImportTaskKind::Files) {
-            process_files_task(work_task);
-        } else if (task_kind == ImportTaskKind::Folder) {
-            process_folder_task(work_task);
-        } else {
-            process_archive_task(work_task);
+        // Task-boundary catch (Phase 68): an exception escaping a task's
+        // processing — corrupt archive tripping an allocation, a decode bug —
+        // must fail THAT task, not std::terminate the whole app (any throw
+        // out of a thread's start function is terminate).
+        try {
+            if (task_hook) task_hook();
+            if (task_kind == ImportTaskKind::Files) {
+                process_files_task(work_task);
+            } else if (task_kind == ImportTaskKind::Folder) {
+                process_folder_task(work_task);
+            } else {
+                process_archive_task(work_task);
+            }
+        } catch (const std::exception& e) {
+            work_task.state = ImportTaskState::Failed;
+            work_task.error = std::string("Internal import error: ") + e.what();
+        } catch (...) {
+            work_task.state = ImportTaskState::Failed;
+            work_task.error = "Internal import error";
         }
 
         // Update the original task with results (re-acquire lock)
         {
             std::lock_guard lock(mu_);
-            mark_task_complete(task_id, task_progress);
+            mark_task_complete(task_id, work_task, task_progress);
+        }
+
+        // Leave a diagnostic trail for every failed import (invariant #5:
+        // names and ASCII reasons only — never content or passwords). Outside
+        // the lock: log_error does file I/O.
+        if (work_task.state == ImportTaskState::Failed) {
+            platform::log_error("Import",
+                                import_failure_log_line(task_display_name, work_task.error));
         }
     }
 }
@@ -1287,6 +1337,12 @@ void ImportQueue::maybe_end_batch()
 
 // Test seam: joins the worker WITHOUT the final lane flush, simulating a crash
 // between batch commits. Never called by production code.
+void test_only_set_task_hook(ImportQueue& q, std::function<void()> hook)
+{
+    std::lock_guard lock(q.mu_);
+    q.test_task_hook_ = std::move(hook);
+}
+
 void test_only_drop_without_flush(ImportQueue& q)
 {
     {

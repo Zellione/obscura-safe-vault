@@ -134,4 +134,11 @@ std::string format_task_progress(int done, int total, bool expanding)
                      : std::format("{}/{}", done, total);
 }
 
+std::string import_failure_log_line(std::string_view display_name, std::string_view error)
+{
+    return std::format("{}: {}",
+                       display_name.empty() ? std::string_view("import task") : display_name,
+                       error.empty() ? std::string_view("import failed") : error);
+}
+
 } // namespace ui
