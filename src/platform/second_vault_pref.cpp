@@ -4,6 +4,7 @@
 #include <print>
 #include <string>
 
+#include "platform/path_utf8.h"
 #include "platform/paths.h"
 
 namespace platform {
@@ -66,13 +67,13 @@ bool SecondVaultPref::save(SecondVaultMode m) const
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         if (!out) {
-            std::println(stderr, "[Platform] cannot write {}", tmp.string());
+            std::println(stderr, "[Platform] cannot write {}", path_to_utf8(tmp));
             return false;
         }
         out << mode_slug(m) << '\n';
         out.flush();
         if (!out) {
-            std::println(stderr, "[Platform] write error on {}", tmp.string());
+            std::println(stderr, "[Platform] write error on {}", path_to_utf8(tmp));
             return false;
         }
     }

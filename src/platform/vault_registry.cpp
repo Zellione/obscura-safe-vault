@@ -4,6 +4,7 @@
 #include <print>
 #include <string>
 
+#include "platform/path_utf8.h"
 #include "platform/paths.h"
 
 namespace platform {
@@ -78,7 +79,7 @@ bool VaultRegistry::write(const std::vector<std::filesystem::path>& entries) con
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         if (!out) {
-            std::println(stderr, "[VaultRegistry] cannot write {}", tmp.string());
+            std::println(stderr, "[VaultRegistry] cannot write {}", path_to_utf8(tmp));
             return false;
         }
         // generic_string(), not string(): list() normalizes every line it reads,
@@ -88,10 +89,10 @@ bool VaultRegistry::write(const std::vector<std::filesystem::path>& entries) con
         // as the caller spelled it) and "C:\y.osv" (round-tripped through list()).
         // Writing the generic form keeps the file in one stable, portable shape;
         // fs::path accepts '/' on Windows, so it reads back identically.
-        for (const auto& e : entries) out << e.generic_string() << '\n';
+        for (const auto& e : entries) out << path_to_utf8_generic(e) << '\n';
         out.flush();
         if (!out) {
-            std::println(stderr, "[VaultRegistry] write error on {}", tmp.string());
+            std::println(stderr, "[VaultRegistry] write error on {}", path_to_utf8(tmp));
             return false;
         }
     }
