@@ -97,13 +97,14 @@ VaultResult validate_combine(const Vault& src, std::string_view src_gallery,
     return Ok;
 }
 
-// The leaf case: every media file in src_gallery moves into dst_gallery via
+// The leaf case: every media file in src_gallery moves or copies into dst_gallery via
 // the batched bulk driver (Phase 69: one destination commit per batch + one
 // deferred source-removal batch, not one of each per file). `progress` total
 // stays untouched — combine set it to the whole subtree's count already.
 VaultResult move_media_children(Vault& src, std::string_view src_gallery,
                                 Vault& dst, std::string_view dst_gallery,
-                                CombineTally& tally, OpProgress* progress)
+                                CombineTally& tally, OpProgress* progress,
+                                TransferMode mode)
 {
     using enum VaultResult;
     std::vector<std::string> names;
@@ -111,7 +112,7 @@ VaultResult move_media_children(Vault& src, std::string_view src_gallery,
     if (names.empty()) return Ok;
 
     const TransferTally t = transfer_images(src, src_gallery, names, dst, dst_gallery,
-                                            TransferMode::Move,
+                                            mode,
                                             {.progress = progress, .set_total = false});
     tally.media_moved   += t.done;
     tally.media_skipped += t.failed + t.skipped;
@@ -119,17 +120,18 @@ VaultResult move_media_children(Vault& src, std::string_view src_gallery,
 }
 
 VaultResult combine_impl(Vault& src, std::string_view src_gallery, Vault& dst,
-                         std::string_view dst_gallery, CombineTally& tally, OpProgress* progress);
+                         std::string_view dst_gallery, CombineTally& tally, OpProgress* progress,
+                         TransferMode mode);
 
 // One sub-gallery child of src_gallery: recurse into it if dst already has a
-// same-named child, else move the whole subtree wholesale (never forwarding
+// same-named child, else move/copy the whole subtree wholesale (never forwarding
 // `progress` into transfer_gallery, which would overwrite total with ITS OWN
 // subtree's count — `done` is bumped by the subtree's whole media count in
 // one step instead).
 VaultResult merge_subgallery_child(Vault& src, std::string_view src_gallery,
                                    Vault& dst, std::string_view dst_gallery,
                                    const std::string& name, CombineTally& tally,
-                                   OpProgress* progress)
+                                   OpProgress* progress, TransferMode mode)
 {
     using enum VaultResult;
     const std::string child_src = child_path(src_gallery, name);
@@ -137,7 +139,7 @@ VaultResult merge_subgallery_child(Vault& src, std::string_view src_gallery,
     if (!find_child(dst, dst_gallery, name)) {
         const int subtree_media = count_media(src, child_src);
         TransferTally t;
-        if (transfer_gallery(src, child_src, dst, dst_gallery, TransferMode::Move,
+        if (transfer_gallery(src, child_src, dst, dst_gallery, mode,
                              {.tally = &t}) == Ok) {
             ++tally.galleries_moved;
         }
@@ -155,7 +157,7 @@ VaultResult merge_subgallery_child(Vault& src, std::string_view src_gallery,
 
     const std::string child_dst = child_path(dst_gallery, name);
     CombineTally sub;
-    if (const VaultResult r = combine_impl(src, child_src, dst, child_dst, sub, progress); r != Ok)
+    if (const VaultResult r = combine_impl(src, child_src, dst, child_dst, sub, progress, mode); r != Ok)
         return r;
     tally.media_moved      += sub.media_moved;
     tally.media_skipped    += sub.media_skipped;
@@ -165,10 +167,11 @@ VaultResult merge_subgallery_child(Vault& src, std::string_view src_gallery,
 }
 
 // The folder case: every sub-gallery child of src_gallery either merges
-// (recursing) or moves wholesale into dst_gallery.
+// (recursing) or moves/copies wholesale into dst_gallery.
 VaultResult move_subgalleries_children(Vault& src, std::string_view src_gallery,
                                        Vault& dst, std::string_view dst_gallery,
-                                       CombineTally& tally, OpProgress* progress)
+                                       CombineTally& tally, OpProgress* progress,
+                                       TransferMode mode)
 {
     using enum VaultResult;
     std::vector<std::string> names;
@@ -177,7 +180,7 @@ VaultResult move_subgalleries_children(Vault& src, std::string_view src_gallery,
     for (const auto& name : names) {
         if (progress && progress->cancel.load()) return Ok;
         if (const VaultResult r =
-                merge_subgallery_child(src, src_gallery, dst, dst_gallery, name, tally, progress);
+                merge_subgallery_child(src, src_gallery, dst, dst_gallery, name, tally, progress, mode);
             r != Ok)
             return r;
     }
@@ -188,7 +191,7 @@ VaultResult move_subgalleries_children(Vault& src, std::string_view src_gallery,
 // (the public entry point below sets that once, up front).
 VaultResult combine_impl(Vault& src, std::string_view src_gallery,
                          Vault& dst, std::string_view dst_gallery,
-                         CombineTally& tally, OpProgress* progress)
+                         CombineTally& tally, OpProgress* progress, TransferMode mode)
 {
     using enum VaultResult;
     const IndexNode* src_node = nullptr;
@@ -198,20 +201,20 @@ VaultResult combine_impl(Vault& src, std::string_view src_gallery,
     for (const auto& t : src_node->tags) (void)dst.add_tag(dst_gallery, t);
 
     if (holds_media(src, src_gallery)) {
-        if (const VaultResult r = move_media_children(src, src_gallery, dst, dst_gallery, tally, progress);
+        if (const VaultResult r = move_media_children(src, src_gallery, dst, dst_gallery, tally, progress, mode);
             r != Ok) {
             return r;
         }
     }
     if (holds_subgalleries(src, src_gallery)) {
         if (const VaultResult r =
-                move_subgalleries_children(src, src_gallery, dst, dst_gallery, tally, progress);
+                move_subgalleries_children(src, src_gallery, dst, dst_gallery, tally, progress, mode);
             r != Ok) {
             return r;
         }
     }
 
-    if (src.list(src_gallery).empty()) {
+    if (mode == TransferMode::Move && src.list(src_gallery).empty()) {
         if (const VaultResult r = src.remove_gallery(src_gallery); r != Ok) return r;
     }
     return Ok;
@@ -221,14 +224,15 @@ VaultResult combine_impl(Vault& src, std::string_view src_gallery,
 
 VaultResult combine_galleries(Vault& src, std::string_view src_gallery,
                               Vault& dst, std::string_view dst_gallery,
-                              CombineTally& tally, OpProgress* progress)
+                              CombineTally& tally, OpProgress* progress,
+                              TransferMode mode)
 {
     using enum VaultResult;
     if (!src.is_unlocked() || !dst.is_unlocked()) return Locked;
     if (src_gallery.empty()) return InvalidArg;
 
     if (progress) progress->total.store(count_media(src, src_gallery));
-    return combine_impl(src, src_gallery, dst, dst_gallery, tally, progress);
+    return combine_impl(src, src_gallery, dst, dst_gallery, tally, progress, mode);
 }
 
 std::vector<std::string> combine_target_galleries(const Vault& dst, const Vault& src,

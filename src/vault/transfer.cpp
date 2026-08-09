@@ -6,6 +6,7 @@
 #include <ranges>
 
 #include "crypto/secure_mem.h"
+#include "vault/combine.h"
 #include "vault/safe_name.h"
 #include "vault/staging.h"
 
@@ -501,9 +502,17 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
             dest_name = std::move(*fresh);
             break;
         }
-        // Combine handled in a later step (Task 4); Fail — and Combine until
-        // then — keep the pre-Phase-71 contract:
-        return AlreadyExists;
+        if (opts.policy == CollisionPolicy::Combine && c->is_gallery()) {
+            CombineTally ct;
+            const VaultResult r = combine_galleries(
+                src, src_gallery, dst, child_path(dst_parent, name), ct, progress, mode);
+            if (tally) {
+                tally->done    += ct.media_moved;
+                tally->skipped += ct.media_skipped;
+            }
+            return r;
+        }
+        return AlreadyExists;   // Fail policy, or Combine into a non-gallery child
     }
     const std::string dest_root = dst_parent.empty() ? dest_name
                                                      : std::string(dst_parent) + "/" + dest_name;

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "vault/op_progress.h"
+#include "vault/transfer.h"
 #include "vault/vault.h"
 
 namespace vault {
@@ -60,9 +61,15 @@ struct CombineTally {
 // wholesale (transfer_gallery is never handed this `progress` object itself —
 // it would clobber `total` with its own subtree's count). A cancel mid-merge
 // leaves everything moved so far in place and does not delete the source.
+//
+// `mode` (optional, default Move): TransferMode::Move transfers media and
+// deletes the source gallery once empty; TransferMode::Copy copies missing
+// files into the destination and skips collisions, leaving the source gallery
+// and all its contents untouched (even if empty).
 [[nodiscard]] VaultResult combine_galleries(Vault& src, std::string_view src_gallery,
                                             Vault& dst, std::string_view dst_gallery,
-                                            CombineTally& tally, OpProgress* progress = nullptr);
+                                            CombineTally& tally, OpProgress* progress = nullptr,
+                                            TransferMode mode = TransferMode::Move);
 
 // Every gallery in `dst` (any depth, including root) that `src_gallery` (in
 // `src`) could legally combine into: structurally compatible (see

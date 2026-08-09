@@ -123,3 +123,46 @@ TEST(transfer_gallery_default_policy_still_fails)
     REQUIRE(dst.create_gallery("Dupe") == Ok);
     CHECK(vault::transfer_gallery(src, "Dupe", dst, "", vault::TransferMode::Move) == AlreadyExists);
 }
+
+// Combine policy on Move: files skip, same-named sub-galleries recurse,
+// source shell is deleted once empty (combine semantics verbatim).
+TEST(transfer_gallery_combine_merges_into_existing)
+{
+    using enum vault::VaultResult;
+    TempVault sa("s5"), da("d5");
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+    REQUIRE(src.create_gallery("Trip/Sub") == Ok);
+    REQUIRE(src.add_image("Trip", blob(2000, 1), "a.jpg") == Ok);
+    REQUIRE(src.add_image("Trip", blob(2000, 2), "b.jpg") == Ok);
+    REQUIRE(src.add_image("Trip/Sub", blob(2000, 3), "c.jpg") == Ok);
+    REQUIRE(dst.create_gallery("Trip/Sub") == Ok);
+    REQUIRE(dst.add_image("Trip", blob(10, 4), "b.jpg") == Ok);   // file collision
+
+    vault::TransferTally t;
+    REQUIRE(vault::transfer_gallery(src, "Trip", dst, "", vault::TransferMode::Move,
+                                    {.tally = &t,
+                                     .policy = vault::CollisionPolicy::Combine}) == Ok);
+    CHECK(find_child(dst, "Trip", "a.jpg") != nullptr);
+    CHECK(find_child(dst, "Trip/Sub", "c.jpg") != nullptr);   // recursed merge
+    CHECK_EQ(t.done, 2);       // a.jpg + c.jpg
+    CHECK_EQ(t.skipped, 1);    // b.jpg collision
+    // Skipped b.jpg keeps the source gallery alive (partial-merge contract).
+    CHECK(find_child(src, "Trip", "b.jpg") != nullptr);
+}
+
+// Combine policy when the same-named destination child is a FILE, not a
+// gallery: nothing to merge into -> AlreadyExists (documented fallback).
+TEST(transfer_gallery_combine_into_media_child_fails)
+{
+    using enum vault::VaultResult;
+    TempVault sa("s6"), da("d6");
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+    REQUIRE(src.create_gallery("X") == Ok);
+    REQUIRE(dst.add_image("", blob(10, 1), "X") == Ok);   // media named "X"
+    CHECK(vault::transfer_gallery(src, "X", dst, "", vault::TransferMode::Move,
+                                  {.policy = vault::CollisionPolicy::Combine}) == AlreadyExists);
+}
