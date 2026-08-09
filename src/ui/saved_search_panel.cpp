@@ -75,7 +75,7 @@ SavedSearchPanel::Action SavedSearchPanel::handle_key(const SDL_KeyboardEvent& k
 void SavedSearchPanel::handle_wheel(float wheel_y, float max_h)
 {
     const float LINE = line_pitch(font_.pixel_height());
-    const int count = static_cast<int>(saved_.size());
+    const auto count = static_cast<int>(saved_.size());
 
     // Apply wheel motion: adjust scroll by LINE * wheel_y (inverted).
     scroll_ -= wheel_y * LINE * 2.0f;

@@ -120,8 +120,8 @@ void SearchResultView::render(gfx::Renderer& r, float x, float colw, bool hot)
 
     // Phase 68: Build results header with position counter if available
     std::string header = std::format("Results ({})", results_.size());
-    const std::string pos = ui::position_label(cur_result_, results_.size());
-    if (!pos.empty()) {
+    if (const std::string pos = ui::position_label(cur_result_, results_.size());
+        !pos.empty()) {
         header += " · " + pos;
     }
     r.draw_text(font_, x, TOP, header, TEXT_DIM);

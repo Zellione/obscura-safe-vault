@@ -40,11 +40,10 @@ GridSpec grid_spec(float win_w, int cols) noexcept
 }
 
 FavoritesScreen::FavoritesScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                                 platform::VaultRegistry& registry, std::string active_path,
-                                 CollectionOps ops)
+                                 platform::VaultRegistry& registry, const CollectionOps& ops)
     : win_(win), font_(font), vault_(vault),
-      quick_switch_(registry, active_path), rename_(win_),
-      ops_(CollectionBatchOps::Deps{vault, std::move(active_path), registry, ops.file_dialog,
+      quick_switch_(registry, ops.active_path), rename_(win_),
+      ops_(CollectionBatchOps::Deps{vault, ops.active_path, registry, ops.file_dialog,
                                     win, ops.second, ops.folder_dialog, ops.queue})
 {
 }
@@ -172,7 +171,7 @@ void FavoritesScreen::start_rename()
 // already selected — then clear (the same key undoes itself).
 void FavoritesScreen::toggle_select_all()
 {
-    const int count = static_cast<int>(favs_.size());
+    const auto count = static_cast<int>(favs_.size());
     if (count == 0) { return; }
     if (sel_.all_selected(count)) {
         sel_.clear();
@@ -252,6 +251,47 @@ void FavoritesScreen::start_transfer()
     mark_dirty();
 }
 
+void FavoritesScreen::handle_key_down(const SDL_KeyboardEvent& key)
+{
+    using enum InputAction;
+    // Phase 50: Shift+I opens import status
+    if ((key.key == SDLK_I) && (key.mod & SDL_KMOD_SHIFT)) {
+        request(NavKind::ToImportStatus);
+        return;
+    }
+    if (is_quick_switch_key(key)) { quick_switch_.open(); return; }   // switch vault (`)
+    if (key.key == SDLK_R) { start_rename(); return; }
+    if (handle_detail_panel_scroll(key, detail_.panel)) { return; }
+    if (key.key == SDLK_D && (key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT)) == 0) {
+        detail_.panel.open = !detail_.panel.open;
+        detail_.key.clear();
+        return;
+    }
+    if (handle_extra_key(key)) { return; }   // subclass consumed it (e.g. tag-view toggle)
+    // Phase 68 multiselect: Space toggles (Enter still opens), Ctrl+A
+    // selects all / clears, B/X/M act on the selection — grid parity.
+    if (key.key == SDLK_SPACE) {
+        if (!favs_.empty()) { sel_.toggle(nav_.selected()); }
+        return;
+    }
+    if (key.key == SDLK_A && (key.mod & SDL_KMOD_CTRL)) {
+        toggle_select_all();
+        return;
+    }
+    if (key.key == SDLK_B) { toggle_favorite_batch(); return; }
+    if (key.key == SDLK_X) { start_export(); return; }
+    if (key.key == SDLK_M && !(key.mod & SDL_KMOD_SHIFT)) { start_transfer(); return; }
+    switch (map_key(key.key, key.mod)) {
+        case NavLeft:  nav_.move(-1);     follow_scroll_ = true; break;
+        case NavRight: nav_.move(1);      follow_scroll_ = true; break;
+        case NavUp:    nav_.move(-cols_); follow_scroll_ = true; break;
+        case NavDown:  nav_.move(cols_);  follow_scroll_ = true; break;
+        case Select:   open_selected();   break;
+        case Back:     go_back();          break;
+        default:       break;
+    }
+}
+
 void FavoritesScreen::handle_event(const SDL_Event& e)
 {
     if (ops_.handle_event(e)) { return; }
@@ -263,45 +303,9 @@ void FavoritesScreen::handle_event(const SDL_Event& e)
         return;
     }
 
-    using enum InputAction;
     switch (e.type) {
         case SDL_EVENT_KEY_DOWN:
-            // Phase 50: Shift+I opens import status
-            if ((e.key.key == SDLK_I) && (e.key.mod & SDL_KMOD_SHIFT)) {
-                request(NavKind::ToImportStatus);
-                break;
-            }
-            if (is_quick_switch_key(e.key)) { quick_switch_.open(); break; }   // switch vault (`)
-            if (e.key.key == SDLK_R) { start_rename(); break; }
-            if (handle_detail_panel_scroll(e.key, detail_.panel)) { break; }
-            if (e.key.key == SDLK_D && (e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT)) == 0) {
-                detail_.panel.open = !detail_.panel.open;
-                detail_.key.clear();
-                break;
-            }
-            if (handle_extra_key(e.key)) break;   // subclass consumed it (e.g. tag-view toggle)
-            // Phase 68 multiselect: Space toggles (Enter still opens), Ctrl+A
-            // selects all / clears, B/X/M act on the selection — grid parity.
-            if (e.key.key == SDLK_SPACE) {
-                if (!favs_.empty()) { sel_.toggle(nav_.selected()); }
-                break;
-            }
-            if (e.key.key == SDLK_A && (e.key.mod & SDL_KMOD_CTRL)) {
-                toggle_select_all();
-                break;
-            }
-            if (e.key.key == SDLK_B) { toggle_favorite_batch(); break; }
-            if (e.key.key == SDLK_X) { start_export(); break; }
-            if (e.key.key == SDLK_M && !(e.key.mod & SDL_KMOD_SHIFT)) { start_transfer(); break; }
-            switch (map_key(e.key.key, e.key.mod)) {
-                case NavLeft:  nav_.move(-1);     follow_scroll_ = true; break;
-                case NavRight: nav_.move(1);      follow_scroll_ = true; break;
-                case NavUp:    nav_.move(-cols_); follow_scroll_ = true; break;
-                case NavDown:  nav_.move(cols_);  follow_scroll_ = true; break;
-                case Select:   open_selected();   break;
-                case Back:     go_back();          break;
-                default:       break;
-            }
+            handle_key_down(e.key);
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
             if (const int idx = hit_test(e.button.x, e.button.y); idx >= 0) {
@@ -342,8 +346,8 @@ void FavoritesScreen::render(gfx::Renderer& r)
     r.draw_text(font_, OX, 40, title(), TEXT_DIM);
 
     // Phase 68: Draw position counter right-aligned at y=40
-    const std::string pos_label = ui::position_label(nav_.selected(), favs_.size());
-    if (!pos_label.empty()) {
+    if (const std::string pos_label = ui::position_label(nav_.selected(), favs_.size());
+        !pos_label.empty()) {
         const auto text_w = static_cast<float>(font_.measure(pos_label));
         const float rx = cW - OX - text_w;
         r.draw_text(font_, rx, 40, pos_label, TEXT_FAINT);

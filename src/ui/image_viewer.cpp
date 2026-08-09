@@ -454,7 +454,7 @@ float ImageViewer::current_strip_scroll() const
     const float thumb   = thumb_size();
     const bool  vertical = (strip_side_ == StripSide::Left);
     const float extent  = vertical ? strip_rect().h : strip_rect().w;
-    const int   count   = static_cast<int>(album_.images.size());
+    const auto  count   = static_cast<int>(album_.images.size());
 
     if (strip_scroll_.manual) {
         // Use manual scroll, clamped in case window resized.
@@ -598,7 +598,7 @@ void ImageViewer::handle_wheel(const SDL_MouseWheelEvent& w)
         const float thumb   = thumb_size();
         const bool  vertical = (strip_side_ == StripSide::Left);
         const float extent  = vertical ? strip_rect().h : strip_rect().w;
-        const int   count   = static_cast<int>(album_.images.size());
+        const auto  count   = static_cast<int>(album_.images.size());
         const float content = ui::strip_content_extent(count, thumb, STRIP_GAP);
 
         // Seed manual scroll from current auto-centered offset on first wheel.

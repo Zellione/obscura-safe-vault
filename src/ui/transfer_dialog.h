@@ -118,7 +118,7 @@ private:
     std::vector<std::string> src_galleries_;   // Source::Galleries payload
     std::vector<ParentGroup> media_groups_;    // Source::Collection payload (Phase 68)
 
-    enum class Source { Images, Gallery, Galleries, Mixed, Collection };   // Galleries: Phase 44 Part 3; Mixed/Collection: Phase 68
+    enum class Source { Images, Gallery, Galleries, Collection };   // Galleries: Phase 44 Part 3; Collection: Phase 68
     Source      source_ = Source::Images;
 
     VaultUnlockPicker picker_dest_;                     // PickingDest: destination vault selection/unlock

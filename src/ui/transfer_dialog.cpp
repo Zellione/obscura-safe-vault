@@ -62,9 +62,12 @@ void TransferDialog::open_galleries(std::vector<std::string> src_paths)
 void TransferDialog::open_mixed(std::string src_gallery, std::vector<std::string> media_names,
                                 std::vector<std::string> gallery_paths)
 {
-    open(std::move(src_gallery), std::move(media_names));
-    source_        = Source::Mixed;
-    src_galleries_ = std::move(gallery_paths);
+    // A grid mixed selection is one Collection with a single media group.
+    std::vector<ParentGroup> groups;
+    if (!media_names.empty()) {
+        groups.push_back({.parent = std::move(src_gallery), .names = std::move(media_names)});
+    }
+    open_collection(std::move(groups), std::move(gallery_paths));
 }
 
 void TransferDialog::open_collection(std::vector<ParentGroup> media_groups,
@@ -130,9 +133,6 @@ void TransferDialog::do_move(std::string_view dst_target)
     else if (source_ == Source::Galleries)
         run_.job.start_transfer_galleries(src_, src_galleries_, dv, std::string(dst_target),
                                           mode_, where);
-    else if (source_ == Source::Mixed)
-        run_.job.start_transfer_mixed(src_, src_gallery_, filenames_, src_galleries_, dv,
-                                      std::string(dst_target), mode_, where);
     else if (source_ == Source::Collection)
         run_.job.start_transfer_collection(src_, media_groups_, src_galleries_, dv,
                                            std::string(dst_target), mode_, where);

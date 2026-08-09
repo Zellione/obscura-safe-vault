@@ -1457,9 +1457,8 @@ void draw_footer_status(gfx::Renderer& r, gfx::FontAtlas& font, float x_offset,
     using namespace gfx::theme;
 
     // Phase 68: right-aligned position counter on the same line as waste/selection
-    const std::string pos_label = ui::position_label(data.position, data.total);
-
-    if (data.show_waste || data.show_selection || !pos_label.empty()) {
+    if (const std::string pos_label = ui::position_label(data.position, data.total);
+        data.show_waste || data.show_selection || !pos_label.empty()) {
         std::string footer;
         if (data.show_selection)
             footer = std::format("{} selected", data.selection_count);

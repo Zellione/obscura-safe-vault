@@ -40,11 +40,11 @@ public:
         platform::FolderDialog& folder_dialog;
         ImportQueue&            queue;
         SecondVaultSession*     second;
+        std::string             active_path;   // active vault's file path
     };
 
     FavoritesScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                    platform::VaultRegistry& registry, std::string active_path,
-                    CollectionOps ops);
+                    platform::VaultRegistry& registry, const CollectionOps& ops);
 
     void on_enter() override;
     void on_vault_changed() override;  // Phase 50: re-fetch favorites after tree reallocation
@@ -100,6 +100,9 @@ protected:
 
 private:
     void open_selected();
+    // The SDL_EVENT_KEY_DOWN half of handle_event, split out to keep each
+    // function under the S3776 cognitive-complexity cap.
+    void handle_key_down(const SDL_KeyboardEvent& key);
     [[nodiscard]] int hit_test(float mx, float my) const;
     void start_rename();   // R: rename the focused item (Phase 45 Part 1)
     void rebuild_detail();

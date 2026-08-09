@@ -247,8 +247,8 @@ TEST(file_op_job_transfers_mixed_media_and_galleries)
         REQUIRE(v.create_gallery("dst") == vault::VaultResult::Ok);
 
         ui::FileOpJob job;
-        CHECK(job.start_transfer_mixed(v, "a", {"1.jpg", "2.jpg", "clip.mp4"}, {"a/sub"},
-                                       v, "dst", vault::TransferMode::Move, "dst"));
+        CHECK(job.start_transfer_collection(v, {{.parent = "a", .names = {"1.jpg", "2.jpg", "clip.mp4"}}},
+                                            {"a/sub"}, v, "dst", vault::TransferMode::Move, "dst"));
         auto oc = await_outcome(job);
         REQUIRE(oc.has_value());
         CHECK(oc->ok);
@@ -275,8 +275,8 @@ TEST(file_op_job_transfer_includes_videos)
         REQUIRE(v.create_gallery("b") == vault::VaultResult::Ok);
 
         ui::FileOpJob job;
-        CHECK(job.start_transfer_mixed(v, "a", {"clip.mp4"}, {},
-                                       v, "b", vault::TransferMode::Move, "b"));
+        CHECK(job.start_transfer_collection(v, {{.parent = "a", .names = {"clip.mp4"}}}, {},
+                                            v, "b", vault::TransferMode::Move, "b"));
         auto oc = await_outcome(job);
         REQUIRE(oc.has_value());
         CHECK(oc->ok);

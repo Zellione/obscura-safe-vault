@@ -853,6 +853,32 @@ void ImportQueue::mark_task_complete(uint64_t task_id, const Task& result,
     }
 }
 
+// Task-boundary catch (Phase 68): an exception escaping a task's processing —
+// corrupt archive tripping an allocation, a decode bug — must fail THAT task,
+// not std::terminate the whole app (any throw out of a thread's start function
+// is terminate). The generic catches are the entire point of this boundary;
+// specific exception types cannot be enumerated for third-party codec/archive
+// code (deliberate S1181/S2738 deviation).
+void ImportQueue::run_worker_task(Task& work_task, const std::function<void()>& hook)
+{
+    try {
+        if (hook) hook();
+        if (work_task.kind == ImportTaskKind::Files) {
+            process_files_task(work_task);
+        } else if (work_task.kind == ImportTaskKind::Folder) {
+            process_folder_task(work_task);
+        } else {
+            process_archive_task(work_task);
+        }
+    } catch (const std::exception& e) {
+        work_task.state = ImportTaskState::Failed;
+        work_task.error = std::string("Internal import error: ") + e.what();
+    } catch (...) {
+        work_task.state = ImportTaskState::Failed;
+        work_task.error = "Internal import error";
+    }
+}
+
 void ImportQueue::worker_loop()
 {
     while (true) {
@@ -923,26 +949,7 @@ void ImportQueue::worker_loop()
             .progress = task_progress,
         };
 
-        // Task-boundary catch (Phase 68): an exception escaping a task's
-        // processing — corrupt archive tripping an allocation, a decode bug —
-        // must fail THAT task, not std::terminate the whole app (any throw
-        // out of a thread's start function is terminate).
-        try {
-            if (task_hook) task_hook();
-            if (task_kind == ImportTaskKind::Files) {
-                process_files_task(work_task);
-            } else if (task_kind == ImportTaskKind::Folder) {
-                process_folder_task(work_task);
-            } else {
-                process_archive_task(work_task);
-            }
-        } catch (const std::exception& e) {
-            work_task.state = ImportTaskState::Failed;
-            work_task.error = std::string("Internal import error: ") + e.what();
-        } catch (...) {
-            work_task.state = ImportTaskState::Failed;
-            work_task.error = "Internal import error";
-        }
+        run_worker_task(work_task, task_hook);
 
         // Update the original task with results (re-acquire lock)
         {

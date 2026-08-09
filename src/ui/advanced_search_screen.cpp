@@ -207,7 +207,7 @@ void AdvancedSearchScreen::on_vault_changed()
 void AdvancedSearchScreen::reload_saved()
 {
     saved_      = search_.list_saved_searches();
-    vocabulary_ = search_.all_tags();
+    live_.vocabulary = search_.all_tags();
     // Clamp saved_panel's cursor to the new size
     int cur = saved_panel_.get_cursor();
     if (cur >= static_cast<int>(saved_.size())) cur = 0;
@@ -290,9 +290,9 @@ std::vector<const vault::SearchHit*> selected_hits(const SearchResultView& view)
 
 }  // namespace
 
-void AdvancedSearchScreen::toggle_favorite_results()
+void toggle_favorite_results(AdvancedSearchScreen& s)
 {
-    const auto hits = selected_hits(result_view_);
+    const auto hits = selected_hits(s.result_view_);
     std::vector<const vault::IndexNode*> nodes;
     std::vector<std::string>             paths;
     for (const vault::SearchHit* h : hits) {
@@ -301,38 +301,37 @@ void AdvancedSearchScreen::toggle_favorite_results()
     }
     if (paths.empty()) { return; }
     const bool target = batch_favorite_target(nodes);
-    (void)vault::set_favorites_batch(vault_, paths, target);
-    status_ = std::format("{} {} {}", target ? "Favorited" : "Unfavorited", paths.size(),
-                          paths.size() == 1 ? "item" : "items");
-    mark_dirty();
+    (void)vault::set_favorites_batch(s.vault_, paths, target);
+    s.status_ = std::format("{} {} {}", target ? "Favorited" : "Unfavorited", paths.size(),
+                            paths.size() == 1 ? "item" : "items");
+    s.mark_dirty();
 }
 
-void AdvancedSearchScreen::start_export_results()
+void start_export_results(AdvancedSearchScreen& s)
 {
     // The collect callback resolves the selection when the folder pick lands —
     // a rerun in between clears the selection and turns this into a clean no-op.
-    ops_.request_export(result_view_.selection().empty()
-                            ? (result_view_.get_results().empty() ? 0u : 1u)
-                            : result_view_.selection().count(),
-                        [this]() {
+    std::size_t count = s.result_view_.selection().count();
+    if (count == 0 && !s.result_view_.get_results().empty()) { count = 1; }   // focused fallback
+    s.ops_.request_export(count, [&s]() {
         std::vector<const vault::IndexNode*> picked;
-        for (const vault::SearchHit* h : selected_hits(result_view_)) {
+        for (const vault::SearchHit* h : selected_hits(s.result_view_)) {
             if (h->node != nullptr && !h->is_gallery) { picked.push_back(h->node); }
         }
         return picked;
-    }, status_);
+    }, s.status_);
 }
 
-void AdvancedSearchScreen::start_transfer_results()
+void start_transfer_results(AdvancedSearchScreen& s)
 {
     std::vector<std::string> media_paths;
     std::vector<std::string> gallery_paths;
-    for (const vault::SearchHit* h : selected_hits(result_view_)) {
+    for (const vault::SearchHit* h : selected_hits(s.result_view_)) {
         (h->is_gallery ? gallery_paths : media_paths).push_back(h->path);
     }
     if (media_paths.empty() && gallery_paths.empty()) { return; }
-    ops_.request_transfer(group_by_parent(media_paths), std::move(gallery_paths), status_);
-    mark_dirty();
+    s.ops_.request_transfer(group_by_parent(media_paths), std::move(gallery_paths), s.status_);
+    s.mark_dirty();
 }
 
 ITextInput* AdvancedSearchScreen::active_buffer()
@@ -356,7 +355,7 @@ void AdvancedSearchScreen::refresh_suggestions()
     const ITextInput* buf = active_buffer();
     const bool tag_field = !saved_panel_.active_buffer() && (focus_ == Include || focus_ == Exclude || focus_ == Group);
     if (tag_field && buf && !buf->empty()) {
-        live_.suggestions = tag_suggestions(buffer_text(*buf), vocabulary_);
+        live_.suggestions = tag_suggestions(buffer_text(*buf), live_.vocabulary);
         cur_.sugg    = live_.suggestions.empty() ? -1 : 0;
     } else {
         live_.suggestions.clear();
@@ -509,10 +508,10 @@ void AdvancedSearchScreen::handle_key(const SDL_KeyboardEvent& key)
     if (focus_ == Focus::Results && key.key == SDLK_R) { start_rename(); return; }
     // Phase 68 batch ops over the result multi-selection (Results focus only —
     // elsewhere these letters belong to the builder fields).
-    if (focus_ == Focus::Results && key.key == SDLK_B) { toggle_favorite_results(); return; }
-    if (focus_ == Focus::Results && key.key == SDLK_X) { start_export_results(); return; }
+    if (focus_ == Focus::Results && key.key == SDLK_B) { toggle_favorite_results(*this); return; }
+    if (focus_ == Focus::Results && key.key == SDLK_X) { start_export_results(*this); return; }
     if (focus_ == Focus::Results && key.key == SDLK_M && (key.mod & SDL_KMOD_SHIFT) == 0) {
-        start_transfer_results();
+        start_transfer_results(*this);
         return;
     }
 
@@ -955,9 +954,9 @@ void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
 
     // Phase 68: Build results header with position counter if available
     std::string header = std::format("Results ({})", result_view_.get_results().size());
-    const std::string pos = ui::position_label(result_view_.get_cursor(),
-                                                result_view_.get_results().size());
-    if (!pos.empty()) {
+    if (const std::string pos = ui::position_label(result_view_.get_cursor(),
+                                                   result_view_.get_results().size());
+        !pos.empty()) {
         header += " · " + pos;
     }
     r.draw_text(font_, x, TOP, header, TEXT_DIM);

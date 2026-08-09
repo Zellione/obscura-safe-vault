@@ -184,6 +184,11 @@ private:
                           std::filesystem::path& out_archive_path,
                           std::string& out_gallery_name, std::string& out_dest_gallery,
                           std::shared_ptr<vault::OpProgress>& out_progress);  // Called under lock
+    // Runs one task's processing on the worker thread inside the Phase 68
+    // task-boundary try/catch (an escaping exception fails the task instead of
+    // terminating the process). Extracted from worker_loop for S134 nesting.
+    void run_worker_task(Task& work_task, const std::function<void()>& hook);
+
     // Called under lock. `result` is the worker's finished local task copy:
     // a terminal state (Failed/Cancelled) plus its error and outcome counts
     // are written back to the queued row (Phase 68 — they used to be

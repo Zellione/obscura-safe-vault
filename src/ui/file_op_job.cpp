@@ -258,74 +258,58 @@ bool FileOpJob::start_transfer_media_grouped(vault::Vault& src, std::vector<Pare
                                      mode, std::move(label));
 }
 
+namespace {
+
+// One collection-screen selection: per-parent media groups + gallery subtrees.
+struct CollectionTransferSpec {
+    std::vector<ParentGroup> groups;
+    std::vector<std::string> gallery_paths;
+};
+
+// Worker body of start_transfer_collection, a named function to keep the
+// launch lambda within the S1188 line budget. Media first, then subtrees; a
+// cancel between phases is a clean partial (each vault::transfer_* item is a
+// committed unit).
+vault::TransferTally run_collection_transfer(vault::Vault& src, const CollectionTransferSpec& spec,
+                                             vault::Vault& dst, const std::string& dst_target,
+                                             vault::TransferMode mode, vault::OpProgress& progress)
+{
+    vault::TransferTally sum;
+    for (const ParentGroup& g : spec.groups) {
+        if (progress.cancel.load()) break;
+        vault::TransferTally t =
+            vault::transfer_images(src, g.parent, g.names, dst, dst_target, mode, &progress);
+        sum.done   += t.done;
+        sum.failed += t.failed;
+        sum.failures.insert(sum.failures.end(), std::make_move_iterator(t.failures.begin()),
+                            std::make_move_iterator(t.failures.end()));
+    }
+    if (!spec.gallery_paths.empty() && !progress.cancel.load()) {
+        vault::TransferTally t =
+            vault::transfer_galleries(src, spec.gallery_paths, dst, dst_target, mode, &progress);
+        sum.done   += t.done;
+        sum.failed += t.failed;
+        sum.failures.insert(sum.failures.end(), std::make_move_iterator(t.failures.begin()),
+                            std::make_move_iterator(t.failures.end()));
+    }
+    return sum;
+}
+
+}  // namespace
+
 bool FileOpJob::start_transfer_collection(vault::Vault& src, std::vector<ParentGroup> groups,
                                           std::vector<std::string> gallery_paths,
                                           vault::Vault& dst, std::string dst_target,
                                           vault::TransferMode mode, std::string label)
 {
     return launch(FileOpKind::Transfer,
-                  [this, &src, groups = std::move(groups),
-                   gallery_paths = std::move(gallery_paths), &dst,
-                   dst_target = std::move(dst_target), mode, label = std::move(label)]() {
-        int total = 0;
-        int done = 0;
-        int failed = 0;
-        std::vector<vault::TransferFailure> failures;
-        for (const ParentGroup& g : groups) {
-            if (progress_.cancel.load()) break;   // clean partial between groups
-            vault::TransferTally t =
-                vault::transfer_images(src, g.parent, g.names, dst, dst_target, mode, &progress_);
-            total  += static_cast<int>(g.names.size());
-            done   += t.done;
-            failed += t.failed;
-            failures.insert(failures.end(), std::make_move_iterator(t.failures.begin()),
-                            std::make_move_iterator(t.failures.end()));
-        }
-        if (!gallery_paths.empty() && !progress_.cancel.load()) {
-            vault::TransferTally t =
-                vault::transfer_galleries(src, gallery_paths, dst, dst_target, mode, &progress_);
-            total  += t.done + t.failed;
-            done   += t.done;
-            failed += t.failed;
-            failures.insert(failures.end(), std::make_move_iterator(t.failures.begin()),
-                            std::make_move_iterator(t.failures.end()));
-        }
-        return transfer_outcome(mode, done, failed, total, progress_.cancel.load(), label,
-                                std::move(failures));
-    });
-}
-
-bool FileOpJob::start_transfer_mixed(vault::Vault& src, std::string src_gallery,
-                                     std::vector<std::string> media_names,
-                                     std::vector<std::string> gallery_paths,
-                                     vault::Vault& dst, std::string dst_target,
-                                     vault::TransferMode mode, std::string label)
-{
-    return launch(FileOpKind::Transfer,
-                  [this, &src, src_gallery = std::move(src_gallery),
-                   media_names = std::move(media_names),
-                   gallery_paths = std::move(gallery_paths), &dst,
-                   dst_target = std::move(dst_target), mode, label = std::move(label)]() {
-        // Media first, then subtrees; a cancel between the two is a clean
-        // partial (each vault::transfer_* item is a committed unit).
-        vault::TransferTally media_t;
-        if (!media_names.empty())
-            media_t = vault::transfer_images(src, src_gallery, media_names, dst, dst_target,
-                                             mode, &progress_);
-        vault::TransferTally gal_t;
-        if (!gallery_paths.empty() && !progress_.cancel.load())
-            gal_t = vault::transfer_galleries(src, gallery_paths, dst, dst_target, mode,
-                                              &progress_);
-
-        auto failures = std::move(media_t.failures);
-        failures.insert(failures.end(), std::make_move_iterator(gal_t.failures.begin()),
-                        std::make_move_iterator(gal_t.failures.end()));
-        // The bar's total is per-phase (each transfer_* stores its own); the
-        // outcome's numbers come from the merged tallies instead.
-        return transfer_outcome(mode, media_t.done + gal_t.done,
-                                media_t.failed + gal_t.failed,
-                                media_t.done + gal_t.done + media_t.failed + gal_t.failed,
-                                progress_.cancel.load(), label, std::move(failures));
+                  [this, &src,
+                   spec = CollectionTransferSpec{std::move(groups), std::move(gallery_paths)},
+                   &dst, dst_target = std::move(dst_target), mode, label = std::move(label)]() {
+        vault::TransferTally t = run_collection_transfer(src, spec, dst, dst_target, mode,
+                                                         progress_);
+        return transfer_outcome(mode, t.done, t.failed, t.done + t.failed,
+                                progress_.cancel.load(), label, std::move(t.failures));
     });
 }
 
