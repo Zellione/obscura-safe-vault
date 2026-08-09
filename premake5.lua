@@ -545,6 +545,7 @@ project "osv_tests"
         "src/ui/chrome_layout.cpp",
         "src/ui/meta_format.cpp",
         "src/ui/selection_model.cpp",
+        "src/ui/position_label.cpp",
         "src/ui/favorite_batch.cpp",
         "src/ui/parent_group.cpp",
         "src/ui/listing_remap.cpp",
