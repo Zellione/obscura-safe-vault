@@ -134,10 +134,14 @@ private:
 
     std::string error_;
 
-    // Conflict stage state (Phase 71): dst target + collision count + selected policy option.
-    std::string pending_target_;
-    int         conflict_count_ = 0;
-    int         conflict_sel_   = 0;
+    // Conflict stage state (Phase 71): dst target + collision count + selected policy option,
+    // bundled to keep the field count ≤20 (S1820).
+    struct Conflict {
+        std::string target;
+        int count = 0;
+        int sel = 0;
+    };
+    Conflict    conflict_;
 
     // Background transfer run — the worker-thread job plus its finished outcome,
     // bundled to keep the field count ≤20 (S1820). `done`/`completion` are set when the

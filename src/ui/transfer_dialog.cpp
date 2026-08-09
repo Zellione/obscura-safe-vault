@@ -15,6 +15,7 @@
 #include "ui/keybindings.h"
 #include "ui/progress_modal.h"
 #include "ui/text_input_event.h"
+#include "ui/text_metrics.h"
 #include "ui/widgets.h"
 #include "vault/transfer.h"
 
@@ -40,6 +41,7 @@ void TransferDialog::open(std::string src_gallery, std::vector<std::string> file
     error_.clear();
     naming_ = false;
     name_buf_.clear();
+    conflict_ = {};
 
     // The new-gallery name overlay consumes SDL_EVENT_TEXT_INPUT, which SDL3 only
     // delivers while text input is active.
@@ -135,10 +137,10 @@ void TransferDialog::do_move(std::string_view dst_target)
     if (!scan.empty()) {
         const auto clashes = vault::colliding_galleries(dest_vault(), dst_target, scan);
         if (!clashes.empty()) {
-            pending_target_ = std::string(dst_target);
-            conflict_count_ = static_cast<int>(clashes.size());
-            conflict_sel_   = 0;
-            stage_          = Stage::Conflict;
+            conflict_.target = std::string(dst_target);
+            conflict_.count = static_cast<int>(clashes.size());
+            conflict_.sel = 0;
+            stage_ = Stage::Conflict;
             return;
         }
     }
@@ -186,13 +188,13 @@ bool TransferDialog::handle_mode_key(SDL_Keycode k)
 
 bool TransferDialog::handle_conflict_key(SDL_Keycode k)
 {
-    if (k == SDLK_UP)   conflict_sel_ = (conflict_sel_ + 2) % 3;
-    if (k == SDLK_DOWN) conflict_sel_ = (conflict_sel_ + 1) % 3;
+    if (k == SDLK_UP)   conflict_.sel = (conflict_.sel + 2) % 3;
+    if (k == SDLK_DOWN) conflict_.sel = (conflict_.sel + 1) % 3;
     if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
-        if (conflict_sel_ == 0)
-            launch_transfer(pending_target_, vault::CollisionPolicy::Combine);
-        else if (conflict_sel_ == 1)
-            launch_transfer(pending_target_, vault::CollisionPolicy::Suffix);
+        if (conflict_.sel == 0)
+            launch_transfer(conflict_.target, vault::CollisionPolicy::Combine);
+        else if (conflict_.sel == 1)
+            launch_transfer(conflict_.target, vault::CollisionPolicy::Suffix);
         else
             close();
     }
@@ -409,19 +411,19 @@ void TransferDialog::render_conflict_body(gfx::Renderer& r, gfx::FontAtlas& font
 {
     using namespace gfx::theme;
     const std::string title = std::format("{} {} already exist{} at destination",
-                                          conflict_count_,
-                                          conflict_count_ == 1 ? "gallery" : "galleries",
-                                          conflict_count_ == 1 ? "s" : "");
+                                          conflict_.count,
+                                          conflict_.count == 1 ? "gallery" : "galleries",
+                                          conflict_.count == 1 ? "s" : "");
     r.draw_text(font, ix, iy + 36, fit_text(font, title, mw - 40), TEXT_DIM);
     const std::vector<std::string> options = {
         "Combine into existing (files skip, sub-galleries merge)",
         "Rename with _2 suffix",
         "Cancel"
     };
-    const float row_h = 34.0f;
+    const float row_h = ui::line_pitch(font.pixel_height());
     for (size_t i = 0; i < options.size(); ++i) {
         const float ry = iy + 72 + static_cast<float>(i) * row_h;
-        const bool  on = (static_cast<int>(i) == conflict_sel_);
+        const bool  on = (static_cast<int>(i) == conflict_.sel);
         if (on) r.draw_round_rect({ix, ry, mw - 40, 30}, RADIUS_SMALL, SURFACE_HI);
         r.draw_text(font, ix + 8, ry + 4, fit_text(font, options[i], mw - 56), on ? TEXT : TEXT_DIM);
     }
