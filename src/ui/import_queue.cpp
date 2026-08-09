@@ -831,24 +831,23 @@ void ImportQueue::mark_task_complete(uint64_t task_id, const Task& result,
                                      const std::shared_ptr<vault::OpProgress>& progress)
 {
     using enum ImportTaskState;
-    for (auto& t : tasks_) {
-        if (t.id != task_id) continue;
-        if (t.state != Running) break;
-        if (result.state == Failed || result.state == Cancelled) {
-            t.state = result.state;
-            t.error = result.error;
-        } else {
-            // Check if the task was cancelled
-            t.state = (progress && progress->cancel.load()) ? Cancelled : Done;
-        }
-        // Counts are live-incremented by drain() per attached record; archive
-        // outcomes carry totals (incl. never-staged skips) on the worker copy
-        // instead. max() keeps whichever model fed this task without zeroing
-        // the other.
-        t.imported = std::max(t.imported, result.imported);
-        t.skipped  = std::max(t.skipped, result.skipped);
-        break;
+    const auto it = std::ranges::find_if(tasks_, [task_id](const Task& t) {
+        return t.id == task_id;
+    });
+    if (it == tasks_.end() || it->state != Running) return;
+    if (result.state == Failed || result.state == Cancelled) {
+        it->state = result.state;
+        it->error = result.error;
+    } else {
+        // Check if the task was cancelled
+        it->state = (progress && progress->cancel.load()) ? Cancelled : Done;
     }
+    // Counts are live-incremented by drain() per attached record; archive
+    // outcomes carry totals (incl. never-staged skips) on the worker copy
+    // instead. max() keeps whichever model fed this task without zeroing
+    // the other.
+    it->imported = std::max(it->imported, result.imported);
+    it->skipped  = std::max(it->skipped, result.skipped);
 }
 
 // Task-boundary catch (Phase 68): an exception escaping a task's processing —
