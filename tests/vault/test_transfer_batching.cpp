@@ -189,11 +189,11 @@ TEST(transfer_images_move_collision_keeps_only_failed_source)
     auto tally = vault::transfer_images(src, "", names, dst, "",
                                         vault::TransferMode::Move);
     CHECK(tally.done == 3);
-    CHECK(tally.failed == 1);
-    REQUIRE(tally.failures.size() == 1u);
-    CHECK(tally.failures[0].code == AlreadyExists);
+    CHECK(tally.failed == 0);           // collision is a skip, not a failure
+    CHECK(tally.skipped == 1);          // f2.jpg collision
+    REQUIRE(tally.failures.size() == 0u);
 
-    CHECK(find_media(src, "", "f2.jpg") != nullptr);   // failed file stays
+    CHECK(find_media(src, "", "f2.jpg") != nullptr);   // skipped (collision) file stays
     CHECK(find_media(src, "", "f0.jpg") == nullptr);   // moved files removed
     CHECK(find_media(src, "", "f1.jpg") == nullptr);
     CHECK(find_media(src, "", "f3.jpg") == nullptr);

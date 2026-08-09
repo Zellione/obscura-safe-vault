@@ -106,15 +106,13 @@ TEST(transfer_images_records_failures_and_continues)
         vault::TransferMode::Move);
 
     CHECK_EQ(tally.done, 2);
-    CHECK_EQ(tally.failed, 2);
-    REQUIRE(tally.failures.size() == 2u);
+    CHECK_EQ(tally.failed, 1);      // only the corrupt b.jpg is a FAILURE now
+    CHECK_EQ(tally.skipped, 1);     // the c.jpg collision is a SKIP, not a failure
+    REQUIRE(tally.failures.size() == 1u);
     CHECK_EQ(tally.failures[0].path, std::string("g/b.jpg"));
     CHECK(tally.failures[0].code == AuthFailed);
     CHECK(tally.failures[0].stage == vault::TransferFailure::Stage::Read);
-    CHECK_EQ(tally.failures[1].path, std::string("g/c.jpg"));
-    CHECK(tally.failures[1].code == AlreadyExists);
-    CHECK(tally.failures[1].stage == vault::TransferFailure::Stage::Write);
-    // Failed files stay in the source; moved ones are gone.
+    // Failed AND skipped files stay in the source; moved ones are gone.
     CHECK(find_image(src, "g", "b.jpg") != nullptr);
     CHECK(find_image(src, "g", "c.jpg") != nullptr);
     CHECK(find_image(src, "g", "a.jpg") == nullptr);

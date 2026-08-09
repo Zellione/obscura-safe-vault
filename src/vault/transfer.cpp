@@ -272,7 +272,9 @@ void copy_one_media_ex(CopyCtx& c, std::string_view src_abs, std::string_view ds
     using enum VaultResult;
     auto stage = TransferFailure::Stage::Read;
     if (VaultResult r = copy_one_media(c.src, src_abs, c.dst, dst_gallery, fname, c.plain, stage);
-        r != Ok) {
+        r == AlreadyExists && stage == TransferFailure::Stage::Write) {
+        ++c.tally.skipped;   // same-named file at dst: skip, keep the source copy
+    } else if (r != Ok) {
         record_failure(c.tally, child_path(src_abs, fname), r, stage);
     } else {
         note_copied(c, child_path(src_abs, fname));

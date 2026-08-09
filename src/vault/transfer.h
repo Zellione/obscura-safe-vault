@@ -30,8 +30,9 @@ struct TransferFailure {
 // and how many failed (skipped). done + failed == the number attempted, which is
 // <= the input size when a cancel stopped the loop early.
 struct TransferTally {
-    int done   = 0;
-    int failed = 0;
+    int done    = 0;
+    int failed  = 0;
+    int skipped = 0;   // destination-name collisions (file left in the source)
     std::vector<TransferFailure> failures;   // first MAX_TRANSFER_FAILURES only
 };
 

@@ -114,7 +114,7 @@ VaultResult move_media_children(Vault& src, std::string_view src_gallery,
                                             TransferMode::Move,
                                             {.progress = progress, .set_total = false});
     tally.media_moved   += t.done;
-    tally.media_skipped += t.failed;
+    tally.media_skipped += t.failed + t.skipped;
     return Ok;
 }
 
