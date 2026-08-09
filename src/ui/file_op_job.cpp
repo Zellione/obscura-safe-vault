@@ -250,6 +250,32 @@ bool FileOpJob::start_transfer_galleries(vault::Vault& src, std::vector<std::str
     });
 }
 
+bool FileOpJob::start_transfer_media_grouped(vault::Vault& src, std::vector<ParentGroup> groups,
+                                             vault::Vault& dst, std::string dst_gallery,
+                                             vault::TransferMode mode, std::string label)
+{
+    return launch(FileOpKind::Transfer,
+                  [this, &src, groups = std::move(groups), &dst,
+                   dst_gallery = std::move(dst_gallery), mode, label = std::move(label)]() {
+        int total = 0;
+        int done = 0;
+        int failed = 0;
+        std::vector<vault::TransferFailure> failures;
+        for (const ParentGroup& g : groups) {
+            if (progress_.cancel.load()) break;   // clean partial between groups
+            vault::TransferTally t =
+                vault::transfer_images(src, g.parent, g.names, dst, dst_gallery, mode, &progress_);
+            total  += static_cast<int>(g.names.size());
+            done   += t.done;
+            failed += t.failed;
+            failures.insert(failures.end(), std::make_move_iterator(t.failures.begin()),
+                            std::make_move_iterator(t.failures.end()));
+        }
+        return transfer_outcome(mode, done, failed, total, progress_.cancel.load(), label,
+                                std::move(failures));
+    });
+}
+
 bool FileOpJob::start_transfer_mixed(vault::Vault& src, std::string src_gallery,
                                      std::vector<std::string> media_names,
                                      std::vector<std::string> gallery_paths,

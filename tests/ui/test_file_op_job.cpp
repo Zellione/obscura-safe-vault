@@ -286,3 +286,34 @@ TEST(file_op_job_transfer_includes_videos)
     }
     cleanup_dir(dir);
 }
+
+// Phase 68: a favorites/tag/search selection spans parents; the grouped
+// transfer moves every group in one job run.
+TEST(file_op_job_grouped_transfer_moves_across_parents)
+{
+    auto dir = fresh_dir("osv_fj_grouped");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        REQUIRE(seed_images(v, "a", 1));
+        REQUIRE(seed_images(v, "b", 2));
+        REQUIRE(v.create_gallery("dst") == vault::VaultResult::Ok);
+
+        std::vector<ui::ParentGroup> groups{
+            {.parent = "a", .names = {"1.jpg"}},
+            {.parent = "b", .names = {"2.jpg"}},
+        };
+
+        ui::FileOpJob job;
+        CHECK(job.start_transfer_media_grouped(v, std::move(groups), v, "dst",
+                                               vault::TransferMode::Move, "dst"));
+        auto oc = await_outcome(job);
+        REQUIRE(oc.has_value());
+        CHECK(oc->ok);
+        CHECK_EQ(oc->done, 2);
+        CHECK_EQ(v.list("dst").size(), static_cast<size_t>(2));
+        CHECK_EQ(v.list("a").size(), static_cast<size_t>(0));
+        CHECK_EQ(v.list("b").size(), static_cast<size_t>(1));   // b/1.jpg stays
+    }
+    cleanup_dir(dir);
+}

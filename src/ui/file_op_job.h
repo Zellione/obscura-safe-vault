@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ui/parent_group.h"  // ParentGroup (Phase 68 grouped transfer)
 #include "vault/op_progress.h"
 #include "vault/transfer.h"   // vault::TransferMode, vault::TransferFailure
 
@@ -84,6 +85,13 @@ public:
     bool start_transfer_galleries(vault::Vault& src, std::vector<std::string> src_paths,
                                   vault::Vault& dst, std::string dst_parent,
                                   vault::TransferMode mode, std::string label);
+
+    // Move/Copy media grouped by SOURCE parent (Phase 68): a collection-screen
+    // selection spans galleries, so each group runs vault::transfer_images from
+    // its own parent; tallies merge into one outcome.
+    bool start_transfer_media_grouped(vault::Vault& src, std::vector<ParentGroup> groups,
+                                      vault::Vault& dst, std::string dst_gallery,
+                                      vault::TransferMode mode, std::string label);
 
     // Move/Copy a MIXED multi-selection in one run (Phase 68): `media_names`
     // (in src/src_gallery) land inside dst/dst_target, and each gallery subtree
