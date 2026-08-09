@@ -17,6 +17,8 @@
 #include <cstdio>
 #include <print>
 
+#include "platform/path_utf8.h"
+
 namespace gfx {
 
 FontAtlas::~FontAtlas()
@@ -80,7 +82,7 @@ bool FontAtlas::bake(std::span<const uint8_t> ttf, float pixel_height)
 bool FontAtlas::bake_from_file(const char* path, float pixel_height)
 {
     if (!path) return false;
-    std::FILE* f = std::fopen(path, "rb");
+    std::FILE* f = platform::fopen_path(platform::utf8_to_path(path), "rb");
     if (!f) {
         std::println(stderr, "[gfx::FontAtlas] cannot open font '{}'", path);
         return false;

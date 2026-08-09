@@ -17,6 +17,7 @@
 #include "compact_plan.h"
 #include "file_util.h"
 #include "safe_name.h"
+#include "platform/path_utf8.h"
 
 #include "image/anim_info.h"
 #include "image/decode.h"
@@ -498,7 +499,7 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
 {
     out.reset();
 
-    std::FILE* fp = std::fopen(path.c_str(), "w+b");
+    std::FILE* fp = platform::fopen_path(platform::utf8_to_path(path), "w+b");
     if (!fp) return VaultResult::IoError;
 
     Header h;
@@ -551,7 +552,7 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     }
 
     // Open read_fp_ after the initial commit so it sees the complete file.
-    out.read_fp_ = std::fopen(path.c_str(), "rb");
+    out.read_fp_ = platform::fopen_path(platform::utf8_to_path(path), "rb");
     if (!out.read_fp_) {
         out.reset();
         return VaultResult::IoError;
@@ -561,7 +562,7 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     std::setvbuf(out.read_fp_, nullptr, _IONBF, 0);
 
     // Open thumb_fp_ the same way for thread-safe background thumbnail reads.
-    out.thumb_fp_ = std::fopen(path.c_str(), "rb");
+    out.thumb_fp_ = platform::fopen_path(platform::utf8_to_path(path), "rb");
     if (!out.thumb_fp_) {
         out.reset();
         return VaultResult::IoError;
@@ -574,7 +575,7 @@ VaultResult Vault::open(const std::string& path, Vault& out)
 {
     out.reset();
 
-    std::FILE* fp = std::fopen(path.c_str(), "r+b");
+    std::FILE* fp = platform::fopen_path(platform::utf8_to_path(path), "r+b");
     if (!fp) return VaultResult::IoError;
 
     std::array<uint8_t, HEADER_SIZE> raw{};
@@ -591,7 +592,7 @@ VaultResult Vault::open(const std::string& path, Vault& out)
 
     out.path_ = path;
     out.fp_ = fp;
-    out.read_fp_ = std::fopen(path.c_str(), "rb");
+    out.read_fp_ = platform::fopen_path(platform::utf8_to_path(path), "rb");
     if (!out.read_fp_) {
         std::fclose(fp);
         out.fp_ = nullptr;  // Null the pointer so reset() doesn't double-close
@@ -602,7 +603,7 @@ VaultResult Vault::open(const std::string& path, Vault& out)
     std::setvbuf(out.read_fp_, nullptr, _IONBF, 0);
 
     // Open thumb_fp_ the same way for thread-safe background thumbnail reads.
-    out.thumb_fp_ = std::fopen(path.c_str(), "rb");
+    out.thumb_fp_ = platform::fopen_path(platform::utf8_to_path(path), "rb");
     if (!out.thumb_fp_) {
         std::fclose(out.read_fp_);
         std::fclose(fp);
