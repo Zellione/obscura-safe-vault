@@ -29,6 +29,7 @@ struct FileOpOutcome {
     bool        cancelled = false;   // stopped early on a user cancel (partial result)
     int         done      = 0;       // items committed to the destination / removed
     int         failed    = 0;       // items that failed (skipped)
+    int         skipped   = 0;       // destination-name collisions (not attempted)
     int         total     = 0;       // items attempted
     FileOpKind  kind      = FileOpKind::None;
     std::string status;              // human-facing summary (no secrets)

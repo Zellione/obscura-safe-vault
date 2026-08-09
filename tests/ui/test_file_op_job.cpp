@@ -317,3 +317,30 @@ TEST(file_op_job_grouped_transfer_moves_across_parents)
     }
     cleanup_dir(dir);
 }
+
+// A destination collision is reported as a skip in the outcome and status
+// line, and produces no failure-list entry.
+TEST(file_op_job_transfer_reports_skips)
+{
+    auto dir = fresh_dir("osv_fj_skip");
+    {
+        vault::Vault src, dst;
+        make_vault(src, dir / "s.osv");
+        make_vault(dst, dir / "d.osv");
+        REQUIRE(seed_images(src, "g", 2));
+        REQUIRE(dst.add_image("", fake_jpeg(3), "2.jpg") == vault::VaultResult::Ok);
+
+        ui::FileOpJob job;
+        CHECK(job.start_transfer_images(src, "g", {"1.jpg", "2.jpg"}, dst, "",
+                                        vault::TransferMode::Move, "dest"));
+        auto oc = await_outcome(job);
+        REQUIRE(oc.has_value());
+        CHECK(oc->ok);
+        CHECK_EQ(oc->done, 1);
+        CHECK_EQ(oc->skipped, 1);
+        CHECK_EQ(oc->failed, 0);
+        CHECK(oc->failures.empty());
+        CHECK(oc->status.find("1 skipped") != std::string::npos);
+    }
+    cleanup_dir(dir);
+}
