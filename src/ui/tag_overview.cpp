@@ -359,53 +359,52 @@ void TagOverviewScreen::render(gfx::Renderer& r)
     if (!error_.empty())
         r.draw_text(font_, OX, 132, error_, gfx::theme::DANGER);
 
-    if (shown_.empty()) {
+    if (!shown_.empty()) {
+        const auto g = compute_geom(font_.pixel_height(), H, static_cast<int>(shown_.size()),
+                                    nav_.selected());
+        const float ph = font_.pixel_height();
+        // Hoisted: vault_settings returns a reference, but binding it by value here
+        // would deep-copy the category vector once per visible row, every frame.
+        const auto& cats = vault::vault_settings(vault_).categories;
+        const float max_desc_w = W - (OX + 14) - OX - 14;  // width available for description text
+        for (int i = g.first; i < g.first + g.visible && i < static_cast<int>(shown_.size()); ++i) {
+            const float    y    = OY + static_cast<float>(i - g.first) * g.row_h;
+            const SDL_FRect row{OX, y, W - 2 * OX, g.row_h - 4};
+            const bool     sel  = (i == nav_.selected());
+            if (sel) r.draw_selection_glow(row, RADIUS, ACCENT);
+            r.draw_round_rect(row, RADIUS, sel ? SURFACE_HI : SURFACE);
+            r.draw_round_rect(row, RADIUS, sel ? ACCENT : BORDER, /*filled*/ false);
+
+            // Line 1: tag chip and counts
+            const float ty = y + (ph - 4) * 0.5f;  // Center first line text within top half
+            const std::string counts = count_label(shown_[i].gallery_count, shown_[i].image_count);
+            const float       cx     = W - OX - 14 - static_cast<float>(font_.measure(counts));
+            // The tag renders as a chip; the count column keeps its exact x, so the
+            // two never shift relative to each other. draw_tag_chips centres its
+            // content within CHIP_ROW_H, so give it the row's top, not the text top.
+            draw_tag_chips(r, font_, OX + 14, y + (ph - CHIP_ROW_H) * 0.5f,
+                           cx - (OX + 14) - 12, std::span(&shown_[i].tag, 1), cats);
+            r.draw_text(font_, cx, ty, counts, TEXT_DIM);
+
+            // Line 2: description (or placeholder)
+            const float desc_y = y + ph + PAD;
+            const std::string shown_desc = shown_[i].description.empty()
+                ? std::string("(no description — [E] to add)")
+                : fit_text(font_, shown_[i].description, max_desc_w);
+            r.draw_text(font_, OX + 14, desc_y, shown_desc,
+                       shown_[i].description.empty() ? TEXT_FAINT : TEXT_DIM);
+        }
+    } else {
+        // Empty state: show placeholder text
         r.draw_text(font_, OX, OY,
                     all_.empty() ? "No tags in this vault yet."
                                  : "No tags match the filter.",
                     TEXT_DIM);
-        quick_switch_.render(r, font_, W, H);
-        return;
-    }
-
-    const auto g = compute_geom(font_.pixel_height(), H, static_cast<int>(shown_.size()),
-                                nav_.selected());
-    const float ph = font_.pixel_height();
-    // Hoisted: vault_settings returns a reference, but binding it by value here
-    // would deep-copy the category vector once per visible row, every frame.
-    const auto& cats = vault::vault_settings(vault_).categories;
-    const float max_desc_w = W - (OX + 14) - OX - 14;  // width available for description text
-    for (int i = g.first; i < g.first + g.visible && i < static_cast<int>(shown_.size()); ++i) {
-        const float    y    = OY + static_cast<float>(i - g.first) * g.row_h;
-        const SDL_FRect row{OX, y, W - 2 * OX, g.row_h - 4};
-        const bool     sel  = (i == nav_.selected());
-        if (sel) r.draw_selection_glow(row, RADIUS, ACCENT);
-        r.draw_round_rect(row, RADIUS, sel ? SURFACE_HI : SURFACE);
-        r.draw_round_rect(row, RADIUS, sel ? ACCENT : BORDER, /*filled*/ false);
-
-        // Line 1: tag chip and counts
-        const float ty = y + (ph - 4) * 0.5f;  // Center first line text within top half
-        const std::string counts = count_label(shown_[i].gallery_count, shown_[i].image_count);
-        const float       cx     = W - OX - 14 - static_cast<float>(font_.measure(counts));
-        // The tag renders as a chip; the count column keeps its exact x, so the
-        // two never shift relative to each other. draw_tag_chips centres its
-        // content within CHIP_ROW_H, so give it the row's top, not the text top.
-        draw_tag_chips(r, font_, OX + 14, y + (ph - CHIP_ROW_H) * 0.5f,
-                       cx - (OX + 14) - 12, std::span(&shown_[i].tag, 1), cats);
-        r.draw_text(font_, cx, ty, counts, TEXT_DIM);
-
-        // Line 2: description (or placeholder)
-        const float desc_y = y + ph + PAD;
-        const std::string shown_desc = shown_[i].description.empty()
-            ? std::string("(no description — [E] to add)")
-            : fit_text(font_, shown_[i].description, max_desc_w);
-        r.draw_text(font_, OX + 14, desc_y, shown_desc,
-                   shown_[i].description.empty() ? TEXT_FAINT : TEXT_DIM);
     }
 
     quick_switch_.render(r, font_, W, H);
 
-    // Draw panels last (template editor and fields form)
+    // Draw panels last (template editor and fields form) — always render on both empty and non-empty paths
     template_editor_.render(r, font_, W, H);
     fields_form_.render(r, font_, W, H);
 
