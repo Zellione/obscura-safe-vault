@@ -5,6 +5,7 @@
 
 #include "gfx/window.h"
 #include "platform/folder_dialog.h"
+#include "platform/path_utf8.h"
 #include "ui/import_queue.h"
 #include "ui/progress_modal.h"
 
@@ -67,7 +68,7 @@ CollectionBatchOps::Poll CollectionBatchOps::poll()
             // Resolve the selection NOW — never across the async folder pick.
             if (auto nodes = collect_(); !nodes.empty()) {
                 const std::string& d = (*dest)[0];
-                job_.start_export(vault_, std::move(nodes), d, d);
+                job_.start_export(vault_, std::move(nodes), platform::utf8_to_path(d), d);
             } else {
                 out.status = "Nothing to export.";
             }

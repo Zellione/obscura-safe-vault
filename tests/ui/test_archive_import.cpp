@@ -4,6 +4,7 @@
 
 #include "ui/archive_import.h"
 #include "archive_test_helpers.h"
+#include "platform/path_utf8.h"
 #include "zip_test_helpers.h"
 
 #include "vault/vault.h"
@@ -300,6 +301,91 @@ TEST(archive_import_cbz_encrypted_zip_correct_password_imports)
     REQUIRE(children.size() == size_t{2});
     CHECK_EQ(children[0]->name, "1.jpg");
     CHECK_EQ(children[1]->name, "2.jpg");
+
+    v.lock();
+    cleanup_dir(dir);
+}
+
+// --- Phase 72: CJK names ----------------------------------------------------
+//
+// 7z stores entry names as UTF-16 in the header. On Windows libarchive's
+// narrow archive_entry_pathname() renders them through the ANSI code page and
+// returns NULL when a CJK name has no mapping — pre-fix, every such entry
+// collapsed to the "unnamed" fallback. The reader must take the UTF-8 name.
+//
+// The fixture is a committed real-7-Zip archive (uuencoded, like the RAR
+// multivolume fixtures): libarchive's own 7z WRITER converts names through
+// the process locale and cannot produce CJK names under "C", so the writer
+// helper cannot build this fixture at test time. Contents: 写真/風景.jpg
+// (= fake_bytes(1)) and 图片.jpg (= fake_bytes(2)) → imported into 相册.
+TEST(archive_import_7z_cjk_entry_names)
+{
+    auto dir = fresh_dir_local("archive_import_7z_cjk");
+    vault::Vault v;
+    make_vault(v, dir / "v.osv");
+
+    const std::filesystem::path fixture_dir = OSV_UI_FIXTURE_DIR;
+    const std::filesystem::path archive = dir / "cjk.7z";
+    archivetest::uudecode(fixture_dir / "cjk_names.7z.uu", archive);
+
+    auto out = ui::import_archive(v, archive, {"", "\xE7\x9B\xB8\xE5\x86\x8C"});
+    REQUIRE(out.ok);
+    CHECK_EQ(out.imported, 2);
+    CHECK_EQ(v.list("\xE7\x9B\xB8\xE5\x86\x8C/\xE5\x86\x99\xE7\x9C\x9F").size(), size_t{1});
+
+    bool found = false;
+    for (const auto* c : v.list("\xE7\x9B\xB8\xE5\x86\x8C"))
+        if (c->name == "\xE5\x9B\xBE\xE7\x89\x87.jpg") found = true;
+    CHECK(found);
+
+    v.lock();
+    cleanup_dir(dir);
+}
+
+// ustar carries entry names as raw bytes; UTF-8 names must round-trip
+// byte-identically into vault node names on every platform.
+TEST(archive_import_tar_cjk_entry_names)
+{
+    auto dir = fresh_dir_local("archive_import_tar_cjk");
+    vault::Vault v;
+    make_vault(v, dir / "v.osv");
+
+    auto archive = make_archive(
+        {{"\xE5\x86\x99\xE7\x9C\x9F/\xE9\xA2\xA8\xE6\x99\xAF.jpg", fake_bytes(3)}},
+        "ustar", dir / "cjk.tar");
+
+    auto out = ui::import_archive(v, archive, {"", "\xE7\x9B\xB8\xE5\x86\x8C"});
+    REQUIRE(out.ok);
+    CHECK_EQ(out.imported, 1);
+
+    bool found = false;
+    for (const auto* c : v.list("\xE7\x9B\xB8\xE5\x86\x8C/\xE5\x86\x99\xE7\x9C\x9F"))
+        if (c->name == "\xE9\xA2\xA8\xE6\x99\xAF.jpg") found = true;
+    CHECK(found);
+
+    v.lock();
+    cleanup_dir(dir);
+}
+
+// The archive FILE itself carries a CJK name (漫画.tar): the import must open
+// it through the native path range, never the ANSI code page.
+TEST(archive_import_cjk_archive_filename)
+{
+    auto dir = fresh_dir_local("archive_import_cjk_name");
+    vault::Vault v;
+    make_vault(v, dir / "v.osv");
+
+    // Write under an ASCII name, then rename — the fixture writer's own path
+    // handling (archive_write_open_filename is narrow) is not under test.
+    auto ascii = make_archive({{"01.jpg", fake_bytes(4)}}, "ustar", dir / "in.tar");
+    const std::filesystem::path archive =
+        dir / platform::utf8_to_path("\xE6\xBC\xAB\xE7\x94\xBB.tar");
+    std::filesystem::rename(ascii, archive);
+
+    auto out = ui::import_archive(v, archive, {"", "Comics"});
+    REQUIRE(out.ok);
+    CHECK_EQ(out.imported, 1);
+    CHECK_EQ(v.list("Comics").size(), size_t{1});
 
     v.lock();
     cleanup_dir(dir);

@@ -53,12 +53,15 @@ std::string decode_cp437(std::string_view raw)
     return out;
 }
 
+} // namespace
+
 // Conservative UTF-8 validator: also rejects overlong encodings, surrogate
 // halves, and codepoints past U+10FFFF (not just structurally-invalid byte
 // sequences), so a CP437 byte string that happens to parse as a "plausible"
-// but wrong UTF-8 codepoint isn't mistaken for real UTF-8. Used only to
-// decide the CP437-vs-pass-through heuristic; never fails, only classifies.
-bool is_valid_utf8(std::string_view s)
+// but wrong UTF-8 codepoint isn't mistaken for real UTF-8. Decides the
+// CP437-vs-pass-through heuristic below and ArchiveReader's narrow-vs-wide
+// entry-name choice (Phase 72).
+bool is_valid_utf8(std::string_view s) noexcept
 {
     size_t i = 0;
     const size_t n = s.size();
@@ -94,8 +97,6 @@ bool is_valid_utf8(std::string_view s)
     }
     return true;
 }
-
-} // namespace
 
 std::string decode_zip_entry_name(std::string_view raw, bool utf8_flag)
 {

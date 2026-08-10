@@ -2,6 +2,7 @@
 
 #include "gfx/window.h"
 #include "platform/folder_dialog.h"
+#include "platform/path_utf8.h"
 
 namespace ui {
 
@@ -21,7 +22,7 @@ std::optional<std::filesystem::path> ExportUi::take_destination()
 {
     if (auto dest = folder_.take_result(platform::FolderDialog::Purpose::Export);
         dest && !dest->empty())
-        return std::filesystem::path((*dest)[0]);
+        return platform::utf8_to_path((*dest)[0]);
     return std::nullopt;   // empty => the picker was cancelled
 }
 

@@ -29,4 +29,10 @@ namespace ui {
 // bytes as CP437 would turn correct text into mojibake.
 [[nodiscard]] std::string decode_zip_entry_name(std::string_view raw, bool utf8_flag);
 
+// Conservative UTF-8 validation (also rejects overlong encodings, surrogate
+// halves, and codepoints past U+10FFFF). Backs the CP437-vs-pass-through
+// heuristic above, and ArchiveReader's narrow-vs-wide entry-name choice
+// (Phase 72); never fails, only classifies.
+[[nodiscard]] bool is_valid_utf8(std::string_view s) noexcept;
+
 } // namespace ui

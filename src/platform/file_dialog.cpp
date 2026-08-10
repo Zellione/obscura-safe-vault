@@ -16,9 +16,13 @@ void SDLCALL FileDialog::on_files(void* userdata, const char* const* filelist, i
         // The single choke point through which every externally-chosen path
         // enters the program. Normalize here, before any of it can reach fopen();
         // a path we cannot make sense of is dropped rather than passed on.
+        // normalize_external_path_utf8, NOT path::string(): on Windows the
+        // latter renders through the ANSI code page and THROWS for a CJK
+        // filename — unhandled inside this SDL callback, i.e. a crash on the
+        // very pick that was supposed to start the import (Phase 72).
         for (const char* const* p = filelist; *p != nullptr; ++p) {
-            if (auto norm = normalize_user_path(*p))
-                self->paths_.push_back(norm->string());
+            if (auto norm = normalize_external_path_utf8(*p))
+                self->paths_.push_back(std::move(*norm));
             else
                 std::println(stderr, "[Platform] ignoring unusable path from file dialog");
         }

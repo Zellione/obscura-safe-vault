@@ -220,7 +220,7 @@ void UnlockScreen::apply_dialog_result(const std::string& path)
     using enum Pending;
     switch (pending_) {
         case Vault:
-            vault_path_  = path;
+            vault_path_  = platform::utf8_to_path(path);
             create_mode_ = !exists_no_throw(vault_path_);
             break;
         case Keyfile:
@@ -228,7 +228,7 @@ void UnlockScreen::apply_dialog_result(const std::string& path)
             error_.clear();  // a freshly picked keyfile invalidates old errors
             break;
         case NewKeyfile:
-            if (platform::write_new_keyfile(path)) {
+            if (platform::write_new_keyfile(platform::utf8_to_path(path))) {
                 keyfile_path_ = path;
                 error_.clear();
             } else {
@@ -263,7 +263,7 @@ void UnlockScreen::submit()
 
     std::vector<uint8_t> keyfile;
     if (!keyfile_path_.empty()) {
-        auto kf = platform::read_file(keyfile_path_);
+        auto kf = platform::read_file(platform::utf8_to_path(keyfile_path_));
         if (!kf) { error_ = "Cannot read keyfile."; return; }
         keyfile = std::move(*kf);
     }

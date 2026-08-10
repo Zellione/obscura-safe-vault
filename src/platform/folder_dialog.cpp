@@ -15,9 +15,11 @@ void SDLCALL FolderDialog::on_folder(void* userdata, const char* const* filelist
         // The single choke point through which every externally-chosen path
         // enters the program. Normalize here, before any of it can reach fopen();
         // a path we cannot make sense of is dropped rather than passed on.
+        // normalize_external_path_utf8, NOT path::string() — see
+        // FileDialog::on_files for why (ANSI code page throw on CJK, Phase 72).
         for (const char* const* p = filelist; *p != nullptr; ++p) {
-            if (auto norm = normalize_user_path(*p))
-                self->paths_.push_back(norm->string());
+            if (auto norm = normalize_external_path_utf8(*p))
+                self->paths_.push_back(std::move(*norm));
             else
                 std::println(stderr, "[Platform] ignoring unusable path from folder dialog");
         }

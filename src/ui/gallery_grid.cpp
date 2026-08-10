@@ -1100,7 +1100,7 @@ void GalleryGrid::pump_import()
     if (auto res = dialogs_.file.take_result(platform::FileDialog::Purpose::Images)) {
         if (!res->empty()) {
             std::vector<std::filesystem::path> paths;
-            for (const auto& s : *res) paths.emplace_back(s);
+            for (const auto& s : *res) paths.push_back(platform::utf8_to_path(s));
             queue_.enqueue_files(std::move(paths), nav_.path());
             status_ = "Import queued — Shift+I for status";
         }
@@ -1301,7 +1301,7 @@ void GalleryGrid::pump_zip_import()
 
     // Phase 51 Task 14: handle single vs. multiple archives.
     if (res->size() == 1) {
-        handle_single_archive_for_naming(res->front());
+        handle_single_archive_for_naming(platform::utf8_to_path(res->front()));
     } else {
         handle_multiple_archives_enqueue(*res);
     }
@@ -1318,7 +1318,7 @@ void GalleryGrid::pump_folder_import()
         // Single folder: use naming popup (prefill with basename, matching zip import behavior)
         start_naming();
         if (naming_.active) {
-            naming_.folder.path = res->front();
+            naming_.folder.path = platform::utf8_to_path(res->front());
             naming_.folder.active = true;
             naming_.buf.set_text(platform::path_to_utf8(platform::utf8_to_path(res->front()).filename()));
         }
@@ -1574,7 +1574,7 @@ void poll_pending_pickers(GalleryGrid& g)
     }
 
     if (auto dest = g.dialogs_.folder.take_result(platform::FolderDialog::Purpose::Export)) {
-        if (!dest->empty()) g.do_export((*dest)[0]);   // empty => the picker was cancelled
+        if (!dest->empty()) g.do_export(platform::utf8_to_path((*dest)[0]));   // empty => the picker was cancelled
         g.mark_dirty();
     }
 }

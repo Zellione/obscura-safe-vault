@@ -122,7 +122,7 @@ void VaultUnlockPicker::try_unlock()
 
     std::vector<uint8_t> keyfile;
     if (!dest_.keyfile_path.empty()) {
-        auto kf = platform::read_file(dest_.keyfile_path);
+        auto kf = platform::read_file(platform::utf8_to_path(dest_.keyfile_path));
         if (!kf) { error_ = "Cannot read keyfile."; return; }
         keyfile = std::move(*kf);
     }

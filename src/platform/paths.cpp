@@ -61,6 +61,13 @@ std::optional<std::filesystem::path> normalize_user_path(std::string_view raw)
     return p;
 }
 
+std::optional<std::string> normalize_external_path_utf8(std::string_view raw)
+{
+    const auto p = normalize_user_path(raw);
+    if (!p.has_value()) return std::nullopt;
+    return path_to_utf8(*p);
+}
+
 std::filesystem::path config_dir()
 {
     char* pref = SDL_GetPrefPath("ObscuraSafeVault", "ObscuraSafeVault");
@@ -70,7 +77,9 @@ std::filesystem::path config_dir()
     std::string s{pref};
     SDL_free(pref);
     if (!s.empty() && (s.back() == '/' || s.back() == '\\')) s.pop_back();
-    return std::filesystem::path{s};
+    // SDL_GetPrefPath documents UTF-8; the narrow path ctor would re-decode it
+    // through the ANSI code page on Windows (wrong dir for a CJK username).
+    return utf8_to_path(s);
 }
 
 std::filesystem::path default_vault_path()
