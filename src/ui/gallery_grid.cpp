@@ -23,6 +23,7 @@
 #include "platform/path_utf8.h"
 #include "ui/chrome_layout.h"
 #include "ui/delete_summary.h"
+#include "ui/batch_delete.h"
 #include "ui/detail_model.h"
 #include "ui/detail_panel.h"
 #include "ui/gallery_sort.h"
@@ -687,6 +688,18 @@ bool GalleryGrid::pump_thumbs()
     return any;
 }
 
+std::vector<std::string> GalleryGrid::selected_delete_paths() const
+{
+    std::vector<std::string> paths;
+    const std::string& base = nav_.path();
+    for (int i : sel_.indices()) {
+        if (i < 0 || i >= static_cast<int>(children_.size())) continue;
+        const std::string& name = children_[static_cast<size_t>(i)]->name;
+        paths.push_back(base.empty() ? name : base + "/" + name);
+    }
+    return prune_descendant_paths(std::move(paths));
+}
+
 void GalleryGrid::handle_naming_key(const SDL_Event& e)
 {
     // Precedence rule (Phase 54): the prompt consumes editing keys first, so its
@@ -805,6 +818,17 @@ void handle_delete_key(GalleryGrid& g)
         return;
     }
 
+    // Phase 74: a multi-selection turns Del into a batch delete.
+    if (!g.sel_.empty()) {
+        const std::vector<std::string> paths = g.selected_delete_paths();
+        g.naming_.batch_summary = summarize_batch_delete(g.vault_, paths);
+        g.naming_.batch_delete  = g.naming_.batch_summary.top_level > 0;
+        g.naming_.confirm_delete = g.naming_.batch_delete;
+        g.error_ = g.naming_.confirm_delete ? std::string{} : "Nothing selected to delete.";
+        return;
+    }
+
+    g.naming_.batch_delete = false;
     const int s = g.nav_.selected();
     g.naming_.confirm_delete = s >= 0 && s < static_cast<int>(g.children_.size());
     g.error_ = g.naming_.confirm_delete ? std::string{} : "Nothing selected to delete.";
@@ -931,10 +955,24 @@ bool GalleryGrid::handle_delete_confirm_key(const SDL_Event& e)
     const SDL_Keycode k = e.key.key;
     if (k == SDLK_ESCAPE || k == SDLK_N) {
         naming_.confirm_delete = false;
+        naming_.batch_delete = false;
         mark_dirty();
         return true;
     }
     if (k != SDLK_Y) return true;                    // swallow every other key
+
+    if (naming_.batch_delete) {                      // Phase 74: selection batch
+        if (const std::vector<std::string> paths = selected_delete_paths();
+            !paths.empty()) {
+            queue_.set_exclusive(true);              // Phase 50: lock out new imports
+            naming_.file_op.start_delete_batch(vault_, paths,
+                                               naming_.batch_summary.item_total);
+        }
+        naming_.batch_delete   = false;
+        naming_.confirm_delete = false;
+        mark_dirty();
+        return true;
+    }
 
     // Run the removal on a worker thread with a progress modal + cancel (Phase 25).
     // A gallery subtree removal counts its descendants for the bar; a single media
@@ -1699,7 +1737,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
         }},
         {"Import & export", {
             {"I", "Import files"}, {"Shift+I", "Import status"}, {"Z", "Import ZIP/CBZ"}, {"O", "Import folder"}, {"N", "New gallery"},
-            {"X", "Export selection"}, {"M", "Move/copy"}, {"Shift+M", "Combine gallery"}, {"R", "Rename"}, {"Del", "Delete"},
+            {"X", "Export selection"}, {"M", "Move/copy"}, {"Shift+M", "Combine gallery"}, {"R", "Rename"}, {"Del", "Delete (acts on selection)"},
         }},
         {"Vault tools", {
             {"Shift+C", "Compact vault"}, {"Ctrl+D", "Find duplicate files"},
@@ -1810,20 +1848,32 @@ void GalleryGrid::render(gfx::Renderer& r)
             r.draw_text(font_, px + (pw - tw) / 2, y, s, c);
         };
 
-        const int s = nav_.selected();
-        const vault::IndexNode* node =
-            (s >= 0 && s < static_cast<int>(children_.size())) ? children_[s] : nullptr;
-        const std::string name = node ? node->name : std::string{};
-        centered("Delete \"" + fit_name(name, pw - 80) + "\"?", py + 28, TEXT);
-        if (node && node->is_gallery()) {
-            SubtreeCounts c;
-            count_subtree(*node, c);
-            centered("This permanently removes the gallery and everything in it.", py + 72, DANGER);
-            centered("Contains " + describe_subtree(c) + ".", py + 104, DANGER);
+        if (naming_.batch_delete) {
+            const BatchDeleteSummary& s = naming_.batch_summary;
+            centered(std::format("Delete {} selected {}?", s.top_level,
+                                 s.top_level == 1 ? "item" : "items"), py + 28, TEXT);
+            centered(s.galleries > 0
+                         ? "This permanently removes them — galleries with everything in them."
+                         : "This permanently removes them from the vault.",
+                     py + 72, DANGER);
+            centered(batch_delete_counts_line(s), py + 104, DANGER);
+            centered("[Esc/N] Cancel        [Y] Delete", py + ph - 50, TEXT_DIM);
         } else {
-            centered("This permanently removes it from the vault.", py + 84, DANGER);
+            const int s = nav_.selected();
+            const vault::IndexNode* node =
+                (s >= 0 && s < static_cast<int>(children_.size())) ? children_[s] : nullptr;
+            const std::string name = node ? node->name : std::string{};
+            centered("Delete \"" + fit_name(name, pw - 80) + "\"?", py + 28, TEXT);
+            if (node && node->is_gallery()) {
+                SubtreeCounts c;
+                count_subtree(*node, c);
+                centered("This permanently removes the gallery and everything in it.", py + 72, DANGER);
+                centered("Contains " + describe_subtree(c) + ".", py + 104, DANGER);
+            } else {
+                centered("This permanently removes it from the vault.", py + 84, DANGER);
+            }
+            centered("[Esc/N] Cancel        [Y] Delete", py + ph - 50, TEXT_DIM);
         }
-        centered("[Esc/N] Cancel        [Y] Delete", py + ph - 50, TEXT_DIM);
     }
 
     // Compact-confirmation modal: shows the waste to reclaim (Phase 26).

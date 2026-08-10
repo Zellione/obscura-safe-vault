@@ -15,6 +15,7 @@
 #include "ui/consent_dialog.h"
 #include "ui/volume_set_dialog.h"
 #include "ui/delete_summary.h"
+#include "ui/batch_delete.h"
 #include "ui/detail_panel.h"
 #include "ui/failure_list_dialog.h"
 #include "ui/file_op_job.h"
@@ -119,6 +120,7 @@ private:
     void handle_naming_key(const SDL_Event& e);          // new-gallery text entry
     void handle_password_key(const SDL_Event& e);         // Phase 35: archive-password text entry
     void toggle_or_open();                               // Space: select image / open
+    [[nodiscard]] std::vector<std::string> selected_delete_paths() const;  // Phase 74: paths from live selection
     void refresh();
     void open_selected();
     void go_up();
@@ -286,6 +288,11 @@ void toggle_select();          // toggle the current item in the export selectio
         PasswordPrompt password;
         FileOpJob    file_op;          // background executor for export/delete/compact (Phase 25/26)
         bool         confirm_delete = false;  // Del on a media tile: awaiting Y/N confirm
+        // Phase 74: non-empty while confirm_delete refers to a multi-selection
+        // (the aggregate summary is snapshotted at Del time for the modal; the
+        // path list is rebuilt from the live selection at confirm time).
+        BatchDeleteSummary batch_summary;
+        bool               batch_delete = false;
         bool         confirm_compact = false; // Shift+C on the gallery: awaiting Y/N compact confirm (Phase 26)
         std::string  tag_target;       // gallery path awaiting a tag-list import (Shift+G, Phase 21)
     };
