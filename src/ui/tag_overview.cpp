@@ -240,6 +240,7 @@ void TagOverviewScreen::handle_key_down_in_browse_mode(const SDL_KeyboardEvent& 
                 fields_form_.open(tag, std::move(cat),
                                   std::vector<std::string>(tmpl.begin(), tmpl.end()),
                                   /*with_description=*/true);
+                fields_form_.skip_next_text_input();  // The 'E' that opened the form arrives as a text event
                 error_.clear();
                 SDL_StartTextInput(win_.sdl_window());
             }

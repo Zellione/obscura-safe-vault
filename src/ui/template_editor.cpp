@@ -63,12 +63,16 @@ void TemplateEditorPanel::open()
 void TemplateEditorPanel::close()
 {
     active_ = false;
+    skip_text_input_ = false;
     SDL_StopTextInput(win_.sdl_window());
 }
 
 void TemplateEditorPanel::transition(Stage s)
 {
     stage_ = s;
+    if (s != Stage::NameField) {
+        skip_text_input_ = false;  // Clear the skip flag when leaving NameField
+    }
     if (s == Stage::PickCategory || s == Stage::EditFields) {
         name_buf_.clear();
         error_.clear();
@@ -142,6 +146,7 @@ bool TemplateEditorPanel::handle_event_edit_fields(const SDL_Event& e)
             field_to_rename_.clear();
             name_buf_.clear();
             transition(Stage::NameField);
+            skip_text_input_ = true;  // The 'A' that opened the field also arrives as a text event
             SDL_StartTextInput(win_.sdl_window());
             return true;
         case SDLK_R:
@@ -151,6 +156,7 @@ bool TemplateEditorPanel::handle_event_edit_fields(const SDL_Event& e)
                 field_to_rename_ = std::string(tmpl[sel]);
                 name_buf_.set_text(field_to_rename_);
                 transition(Stage::NameField);
+                skip_text_input_ = true;  // The 'R' that opened the field also arrives as a text event
                 SDL_StartTextInput(win_.sdl_window());
             }
             return true;
@@ -182,6 +188,13 @@ bool TemplateEditorPanel::handle_event_edit_fields(const SDL_Event& e)
 
 bool TemplateEditorPanel::handle_event_name_field(const SDL_Event& e)
 {
+    // The 'A' or 'R' that opened the field also arrives as a text event; swallow
+    // exactly that one so the field does not start with 'a' or 'r' in it.
+    if (e.type == SDL_EVENT_TEXT_INPUT && skip_text_input_) {
+        skip_text_input_ = false;
+        return true;  // Swallow this text event without inserting
+    }
+
     // Precedence: text input first, then Enter/Esc
     if (handle_text_input_event(name_buf_, e)) return true;
 

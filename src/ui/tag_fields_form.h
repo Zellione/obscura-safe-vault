@@ -40,6 +40,7 @@ public:
     [[nodiscard]] bool handle_event(const SDL_Event& e);
     void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
     [[nodiscard]] bool consume_saved();   // true once after a save
+    void skip_next_text_input() { skip_text_input_ = true; }  // Suppress the opening keypress's text event (E)
 
 private:
     void park_current_row();            // buffer → values_[row_]
@@ -58,6 +59,7 @@ private:
     gfx::Window&  win_;
     bool          active_ = false;
     bool          saved_  = false;
+    bool          skip_text_input_ = false;  // Suppress the opening keypress's text event (E)
     bool          with_description_ = false;
     std::string   tag_;
     std::string   category_;

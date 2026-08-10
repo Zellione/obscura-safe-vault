@@ -47,6 +47,7 @@ void TagFieldsForm::open(std::string tag, std::string category,
 {
     active_           = true;
     saved_            = false;
+    skip_text_input_  = false;  // Reset; caller will set via skip_next_text_input() if needed
     with_description_ = with_description;
     tag_              = std::move(tag);
     category_         = std::move(category);
@@ -78,6 +79,13 @@ void TagFieldsForm::close()
 bool TagFieldsForm::handle_event(const SDL_Event& e)
 {
     if (!active_) return false;
+
+    // The 'E' that opened the form also arrives as a text event; swallow
+    // exactly that one so the field does not start with 'e' in it.
+    if (e.type == SDL_EVENT_TEXT_INPUT && skip_text_input_) {
+        skip_text_input_ = false;
+        return true;  // Swallow this text event without inserting
+    }
 
     if (field_owns_event(buf_, e)) {
         const uint64_t rev = buf_.revision();

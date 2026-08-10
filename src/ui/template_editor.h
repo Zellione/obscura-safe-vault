@@ -57,6 +57,7 @@ private:
     vault::Vault& vault_;
     gfx::Window&  win_;
     bool          active_ = false;
+    bool          skip_text_input_ = false;  // Suppress the opening keypress's text event (A/R)
 
     Stage          stage_ = Stage::PickCategory;
     NavModel       nav_;                  // selection over categories or fields
