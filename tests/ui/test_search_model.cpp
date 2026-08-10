@@ -1,6 +1,7 @@
 #include "test_framework.h"
 
 #include "ui/search_model.h"
+#include "vault/index.h"
 
 // ==================== tokenize tests ====================
 
@@ -237,4 +238,86 @@ TEST(score_consistency_with_matches)
     if (!ui::matches(tokens, "ocean", {})) {
         CHECK_EQ(ui::score(tokens, "ocean", {}), 0);
     }
+}
+
+// ==================== expand_field_value_tags tests (Phase 73) ====================
+
+TEST(expand_field_value_tags_empty_settings_returns_copy)
+{
+    vault::VaultSettings settings;
+    std::vector<std::string> tags{"artist", "nature"};
+    auto expanded = ui::expand_field_value_tags(tags, settings);
+    CHECK_EQ(expanded.size(), tags.size());
+    CHECK_EQ(expanded, tags);
+}
+
+TEST(expand_field_value_tags_produces_field_colon_value)
+{
+    vault::VaultSettings settings;
+    settings.tag_field_values = {
+        {"artist:bob", "country", "Japan"},
+    };
+    std::vector<std::string> tags{"artist:bob"};
+    auto expanded = ui::expand_field_value_tags(tags, settings);
+    REQUIRE(expanded.size() == 2u);
+    CHECK_EQ(expanded[0], std::string("artist:bob"));
+    CHECK_EQ(expanded[1], std::string("country:Japan"));
+}
+
+TEST(expand_field_value_tags_case_insensitive_tag_matching)
+{
+    vault::VaultSettings settings;
+    settings.tag_field_values = {
+        {"ARTIST:BOB", "country", "Japan"},
+    };
+    std::vector<std::string> tags{"artist:bob"};
+    auto expanded = ui::expand_field_value_tags(tags, settings);
+    REQUIRE(expanded.size() == 2u);
+    CHECK_EQ(expanded[1], std::string("country:Japan"));
+}
+
+TEST(expand_field_value_tags_multiple_fields_per_tag)
+{
+    vault::VaultSettings settings;
+    settings.tag_field_values = {
+        {"artist:bob", "country", "Japan"},
+        {"artist:bob", "year", "2023"},
+    };
+    std::vector<std::string> tags{"artist:bob"};
+    auto expanded = ui::expand_field_value_tags(tags, settings);
+    CHECK_EQ(expanded.size(), 3u);
+    CHECK_EQ(expanded[0], std::string("artist:bob"));
+    // Both virtual tags should be present (order depends on iteration)
+    bool has_country = false, has_year = false;
+    for (size_t i = 1; i < expanded.size(); ++i) {
+        if (expanded[i] == "country:Japan") has_country = true;
+        if (expanded[i] == "year:2023") has_year = true;
+    }
+    CHECK(has_country);
+    CHECK(has_year);
+}
+
+TEST(expand_field_value_tags_unrelated_fields_not_added)
+{
+    vault::VaultSettings settings;
+    settings.tag_field_values = {
+        {"artist:ann", "country", "France"},
+    };
+    std::vector<std::string> tags{"artist:bob"};
+    auto expanded = ui::expand_field_value_tags(tags, settings);
+    CHECK_EQ(expanded.size(), 1u);
+    CHECK_EQ(expanded[0], std::string("artist:bob"));
+}
+
+TEST(expand_field_value_tags_matches_with_virtual_tag)
+{
+    vault::VaultSettings settings;
+    settings.tag_field_values = {
+        {"artist:bob", "country", "Japan"},
+    };
+    std::vector<std::string> tags{"artist:bob"};
+    auto expanded = ui::expand_field_value_tags(tags, settings);
+
+    auto tokens = ui::tokenize("japan");
+    CHECK(ui::matches(tokens, "photo", expanded));
 }

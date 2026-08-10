@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cctype>
 
+#include "vault/index.h"
+
 namespace ui {
 
 // Helper: convert a character to lowercase (ASCII only).
@@ -91,6 +93,32 @@ int score(const std::vector<std::string>& tokens, std::string_view name,
         if (any_tag_contains(tags, token))   total_score += tag_weight;
     }
     return total_score;
+}
+
+// Helper: case-insensitive exact tag match.
+static bool tag_ci_equal(std::string_view a, std::string_view b)
+{
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (ascii_lower(a[i]) != ascii_lower(b[i])) return false;
+    }
+    return true;
+}
+
+std::vector<std::string> expand_field_value_tags(
+    const std::vector<std::string>& tags, const vault::VaultSettings& settings)
+{
+    if (settings.tag_field_values.empty()) return tags;
+
+    std::vector<std::string> out = tags;
+    for (const auto& t : tags) {
+        for (const auto& fv : settings.tag_field_values) {
+            if (tag_ci_equal(t, fv.tag)) {
+                out.push_back(fv.field + ":" + fv.value);
+            }
+        }
+    }
+    return out;
 }
 
 } // namespace ui

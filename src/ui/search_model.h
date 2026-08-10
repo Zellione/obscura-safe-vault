@@ -10,6 +10,8 @@
 #include <string_view>
 #include <vector>
 
+namespace vault { struct VaultSettings; }
+
 namespace ui {
 
 // Lowercase the query and split on ASCII whitespace into tokens; empty tokens
@@ -32,5 +34,12 @@ namespace ui {
 [[nodiscard]] int score(const std::vector<std::string>& tokens,
                         std::string_view name,
                         const std::vector<std::string>& tags);
+
+// Phase 73: the tag list a hit should be MATCHED against in client-side
+// filtering — its effective tags plus a virtual "field:value" tag for every
+// stored field value of every carried tag (ci). Match-only: callers must
+// never display the returned list.
+[[nodiscard]] std::vector<std::string> expand_field_value_tags(
+    const std::vector<std::string>& tags, const vault::VaultSettings& settings);
 
 } // namespace ui

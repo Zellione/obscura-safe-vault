@@ -17,6 +17,7 @@
 #include "ui/widgets.h"
 #include "vault/index.h"
 #include "vault/vault.h"
+#include "vault/vault_search.h"
 
 namespace ui {
 
@@ -82,18 +83,33 @@ void SearchOverlay::filter_results()
     filtered_.clear();
     filtered_.reserve(all_results_.size());
 
+    // Phase 73: materialize settings once for tag expansion (match-only, never displayed)
+    const auto& settings = vault::vault_settings(vault_);
+    const bool has_field_values = !settings.tag_field_values.empty();
+
     for (const auto& hit : all_results_) {
-        if (matches(tokens, hit.name, hit.effective_tags)) {
+        // Expand tags with virtual field:value tags only for matching, never for display
+        const auto match_tags =
+            has_field_values ? expand_field_value_tags(hit.effective_tags, settings)
+                            : hit.effective_tags;
+        if (matches(tokens, hit.name, match_tags)) {
             filtered_.push_back(&hit);
         }
     }
 
     // Sort by score (descending), then by name (ascending).
     std::ranges::sort(filtered_,
-                      [&tokens](const vault::SearchHit* a, const vault::SearchHit* b) {
-                          const int score_a = score(tokens, a->name, a->effective_tags);
-                          if (const int score_b = score(tokens, b->name, b->effective_tags);
-                              score_a != score_b) {
+                      [&tokens, &settings, has_field_values](const vault::SearchHit* a,
+                                                              const vault::SearchHit* b) {
+                          const auto a_match_tags = has_field_values
+                                                       ? expand_field_value_tags(a->effective_tags, settings)
+                                                       : a->effective_tags;
+                          const auto b_match_tags = has_field_values
+                                                       ? expand_field_value_tags(b->effective_tags, settings)
+                                                       : b->effective_tags;
+                          const int score_a = score(tokens, a->name, a_match_tags);
+                          const int score_b = score(tokens, b->name, b_match_tags);
+                          if (score_a != score_b) {
                               return score_a > score_b;
                           }
                           return a->name < b->name;
