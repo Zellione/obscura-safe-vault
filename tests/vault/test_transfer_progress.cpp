@@ -96,7 +96,7 @@ TEST(transfer_gallery_progress_counts_media)
 
         vault::OpProgress prog;
         const auto r = vault::transfer_gallery(src, "album", dst, "",
-                                               vault::TransferMode::Move, &prog);
+                                               vault::TransferMode::Move, {.progress = &prog});
         CHECK(r == vault::VaultResult::Ok);
         CHECK_EQ(prog.total.load(), 4);
         CHECK_EQ(prog.done.load(), 4);
@@ -147,7 +147,7 @@ TEST(transfer_gallery_moves_a_video)
         REQUIRE(src.add_image("clips", fake_jpeg(1), "1.jpg") == Ok);
 
         vault::OpProgress prog;
-        REQUIRE(vault::transfer_gallery(src, "clips", dst, "", vault::TransferMode::Move, &prog) == Ok);
+        REQUIRE(vault::transfer_gallery(src, "clips", dst, "", vault::TransferMode::Move, {.progress = &prog}) == Ok);
         CHECK_EQ(prog.total.load(), 2);            // one video + one image
         CHECK_EQ(dst.list("clips").size(), static_cast<size_t>(2));
 
@@ -173,7 +173,7 @@ TEST(transfer_gallery_cancel_leaves_source_intact)
         vault::OpProgress prog;
         prog.cancel.store(true);   // cancel before any file copies
         const auto r = vault::transfer_gallery(src, "album", dst, "",
-                                               vault::TransferMode::Move, &prog);
+                                               vault::TransferMode::Move, {.progress = &prog});
         CHECK(r == vault::VaultResult::Ok);
         CHECK_EQ(src.list("album").size(), static_cast<size_t>(4));   // NOT removed on cancel
     }

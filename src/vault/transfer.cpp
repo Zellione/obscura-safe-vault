@@ -1,10 +1,15 @@
 #include "vault/transfer.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <format>
 #include <iterator>
+#include <optional>
 #include <ranges>
 
 #include "crypto/secure_mem.h"
+#include "vault/combine.h"
+#include "vault/safe_name.h"
 #include "vault/staging.h"
 
 namespace vault {
@@ -106,6 +111,75 @@ std::string last_segment(std::string_view gallery)
                                            : std::string(gallery.substr(slash + 1));
 }
 
+// Longest prefix of `s` that fits max_bytes without splitting a UTF-8 codepoint.
+std::string trim_utf8(std::string_view s, size_t max_bytes)
+{
+    if (s.size() <= max_bytes) return std::string(s);
+    size_t end = max_bytes;
+    while (end > 0 && (static_cast<std::byte>(s[end]) & std::byte{0xC0}) == std::byte{0x80}) --end;
+    return std::string(s.substr(0, end));
+}
+
+// First free "name_2", "name_3", ... among dst_parent's children, trimmed to
+// MAX_NODE_NAME_BYTES on a codepoint boundary. The candidate always ends in
+// ASCII digits, so is_safe_node_name properties (no trailing dot/space) hold.
+// nullopt after _9999 — a bound, not a scenario.
+std::optional<std::string> unique_child_name(const Vault& dst, std::string_view dst_parent,
+                                             std::string_view name)
+{
+    auto taken = [&](std::string_view n) {
+        return std::ranges::contains(dst.list(dst_parent), n,
+                                     [](const IndexNode* c) { return std::string_view(c->name); });
+    };
+    for (int i = 2; i <= 9999; ++i) {
+        const std::string suffix = std::format("_{}", i);
+        const std::string cand =
+            trim_utf8(name, MAX_NODE_NAME_BYTES - suffix.size()) + suffix;
+        if (!taken(cand)) return cand;
+    }
+    return std::nullopt;
+}
+
+// Resolve a same-named child at dst_parent per `policy`: Fail/combine-into-media
+// -> AlreadyExists; Suffix -> rewrites dest_name; Combine (gallery) -> runs the
+// merge and reports via `handled`. Always returns a result; if `handled=true`,
+// combine_galleries ran and transfer_gallery should return its result immediately.
+// Semantics preserved: dispatch before the progress->total store; combine tally
+// mapping media_moved→done, media_skipped→skipped.
+VaultResult resolve_dest_collision(Vault& src, std::string_view src_gallery, Vault& dst,
+                                   std::string_view dst_parent, TransferMode mode,
+                                   const GalleryTransferOpts& opts, std::string_view name,
+                                   std::string& dest_name, bool& handled)
+{
+    using enum VaultResult;
+    for (const auto* c : dst.list(dst_parent)) {
+        if (c->name != name) continue;
+        if (opts.policy == CollisionPolicy::Suffix) {
+            auto fresh = unique_child_name(dst, dst_parent, name);
+            if (!fresh) return AlreadyExists;   // probe bound exhausted
+            dest_name = std::move(*fresh);
+            handled = false;
+            return Ok;
+        }
+        if (opts.policy == CollisionPolicy::Combine && c->is_gallery()) {
+            OpProgress* progress = opts.progress;
+            TransferTally* tally = opts.tally;
+            CombineTally ct;
+            const VaultResult r = combine_galleries(
+                src, src_gallery, dst, child_path(dst_parent, name), ct, progress, mode);
+            if (tally) {
+                tally->done    += ct.media_moved;
+                tally->skipped += ct.media_skipped;
+            }
+            handled = true;
+            return r;
+        }
+        handled = false;
+        return AlreadyExists;   // Fail policy, or Combine into a non-gallery child
+    }
+    handled = false;
+    return Ok;   // no collision
+}
 
 // Locate a media node (image or video) by name in `gallery` (nullptr if absent).
 const IndexNode* find_image_node(const Vault& v, std::string_view gallery,
@@ -272,7 +346,9 @@ void copy_one_media_ex(CopyCtx& c, std::string_view src_abs, std::string_view ds
     using enum VaultResult;
     auto stage = TransferFailure::Stage::Read;
     if (VaultResult r = copy_one_media(c.src, src_abs, c.dst, dst_gallery, fname, c.plain, stage);
-        r != Ok) {
+        r == AlreadyExists && stage == TransferFailure::Stage::Write) {
+        ++c.tally.skipped;   // same-named file at dst: skip, keep the source copy
+    } else if (r != Ok) {
         record_failure(c.tally, child_path(src_abs, fname), r, stage);
     } else {
         note_copied(c, child_path(src_abs, fname));
@@ -441,10 +517,12 @@ std::vector<std::string> gallery_target_parents(const Vault& v)
 
 VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
                              Vault& dst, std::string_view dst_parent,
-                             TransferMode mode, OpProgress* progress,
-                             TransferTally* tally)
+                             TransferMode mode, GalleryTransferOpts opts)
 {
     using enum VaultResult;
+
+    OpProgress* progress = opts.progress;
+    TransferTally* tally = opts.tally;
 
     if (src_gallery.empty()) return InvalidArg;       // can't transfer the root itself
     // Refuse a same-vault move/copy of a gallery into itself or a descendant.
@@ -457,12 +535,14 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
         if (c->is_gallery() && c->name == name) { src_is_gallery = true; break; }
     if (!src_is_gallery) return NotFound;
 
-    const std::string dest_root = dst_parent.empty() ? name
-                                                      : std::string(dst_parent) + "/" + name;
-
-    // Validate destination up front so collisions/ineligibility leave nothing partial.
-    for (const auto* c : dst.list(dst_parent))
-        if (c->name == name) return AlreadyExists;
+    std::string dest_name = name;
+    bool handled = false;
+    const VaultResult collision_result = resolve_dest_collision(
+        src, src_gallery, dst, dst_parent, mode, opts, name, dest_name, handled);
+    if (handled) return collision_result;
+    if (collision_result != Ok) return collision_result;
+    const std::string dest_root = dst_parent.empty() ? dest_name
+                                                     : std::string(dst_parent) + "/" + dest_name;
 
     // Snapshot the source subtree (parent-before-child), then recreate + copy.
     std::vector<GallerySnap> snaps;
@@ -529,7 +609,8 @@ TransferTally transfer_images(Vault& src, std::string_view src_gallery,
 
 TransferTally transfer_galleries(Vault& src, const std::vector<std::string>& src_paths,
                                  Vault& dst, std::string_view dst_parent,
-                                 TransferMode mode, OpProgress* progress)
+                                 TransferMode mode, OpProgress* progress,
+                                 CollisionPolicy policy)
 {
     using enum VaultResult;
     if (progress) progress->total.store(static_cast<int>(src_paths.size()));
@@ -538,7 +619,8 @@ TransferTally transfer_galleries(Vault& src, const std::vector<std::string>& src
     for (const auto& path : src_paths) {
         if (progress && progress->cancel.load()) break;
         TransferTally sub;
-        if (const VaultResult r = transfer_gallery(src, path, dst, dst_parent, mode, nullptr, &sub); r == Ok) {
+        if (const VaultResult r = transfer_gallery(src, path, dst, dst_parent, mode,
+                                                   {.tally = &sub, .policy = policy}); r == Ok) {
             ++out.done;
             // Merge per-file failures from this subtree into the output.
             // per-file failures inside a structurally-Ok subtree do not change the
@@ -549,6 +631,20 @@ TransferTally transfer_galleries(Vault& src, const std::vector<std::string>& src
             record_failure(out, std::string(path), r, TransferFailure::Stage::Write);
         }
         if (progress) progress->done.fetch_add(1);
+    }
+    return out;
+}
+
+std::vector<std::string> colliding_galleries(const Vault& dst, std::string_view dst_parent,
+                                             std::span<const std::string> src_paths)
+{
+    std::vector<std::string> out;
+    if (!dst.is_unlocked()) return out;
+    for (const auto& path : src_paths) {
+        const std::string name = last_segment(path);
+        for (const auto* c : dst.list(dst_parent)) {
+            if (c->name == name) { out.push_back(name); break; }
+        }
     }
     return out;
 }

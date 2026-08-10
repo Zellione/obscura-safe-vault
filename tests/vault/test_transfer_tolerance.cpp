@@ -106,15 +106,13 @@ TEST(transfer_images_records_failures_and_continues)
         vault::TransferMode::Move);
 
     CHECK_EQ(tally.done, 2);
-    CHECK_EQ(tally.failed, 2);
-    REQUIRE(tally.failures.size() == 2u);
+    CHECK_EQ(tally.failed, 1);      // only the corrupt b.jpg is a FAILURE now
+    CHECK_EQ(tally.skipped, 1);     // the c.jpg collision is a SKIP, not a failure
+    REQUIRE(tally.failures.size() == 1u);
     CHECK_EQ(tally.failures[0].path, std::string("g/b.jpg"));
     CHECK(tally.failures[0].code == AuthFailed);
     CHECK(tally.failures[0].stage == vault::TransferFailure::Stage::Read);
-    CHECK_EQ(tally.failures[1].path, std::string("g/c.jpg"));
-    CHECK(tally.failures[1].code == AlreadyExists);
-    CHECK(tally.failures[1].stage == vault::TransferFailure::Stage::Write);
-    // Failed files stay in the source; moved ones are gone.
+    // Failed AND skipped files stay in the source; moved ones are gone.
     CHECK(find_image(src, "g", "b.jpg") != nullptr);
     CHECK(find_image(src, "g", "c.jpg") != nullptr);
     CHECK(find_image(src, "g", "a.jpg") == nullptr);
@@ -152,7 +150,7 @@ TEST(transfer_gallery_tolerates_corrupt_file)
 
     vault::TransferTally tally;
     REQUIRE(vault::transfer_gallery(src, "album", dst, "", vault::TransferMode::Move,
-                                    nullptr, &tally) == Ok);
+                                    {.tally = &tally}) == Ok);
 
     CHECK_EQ(tally.done, 2);
     CHECK_EQ(tally.failed, 1);
@@ -181,7 +179,7 @@ TEST(transfer_gallery_full_move_prunes_source)
 
     vault::TransferTally tally;
     REQUIRE(vault::transfer_gallery(src, "a", dst, "", vault::TransferMode::Move,
-                                    nullptr, &tally) == Ok);
+                                    {.tally = &tally}) == Ok);
     CHECK_EQ(tally.failed, 0);
     CHECK(src.resolve_node("a") == nullptr);          // fully pruned
     CHECK(dst.resolve_node("a/b/c") != nullptr);      // empty leaf recreated
@@ -210,7 +208,7 @@ TEST(transfer_gallery_skips_bad_named_subbranch)
 
     vault::TransferTally tally;
     REQUIRE(vault::transfer_gallery(src, "top", dst, "", vault::TransferMode::Move,
-                                    nullptr, &tally) == Ok);
+                                    {.tally = &tally}) == Ok);
     CHECK_EQ(tally.done, 1);                       // keep.jpg
     CHECK_EQ(tally.failed, 3);                     // the gallery + its 2 images
     REQUIRE(tally.failures.size() == 1u);          // ONE entry: the gallery itself
@@ -236,7 +234,7 @@ TEST(transfer_gallery_records_bad_named_media)
 
     vault::TransferTally tally;
     REQUIRE(vault::transfer_gallery(src, "g", dst, "", vault::TransferMode::Copy,
-                                    nullptr, &tally) == Ok);
+                                    {.tally = &tally}) == Ok);
     CHECK_EQ(tally.done, 1);
     CHECK_EQ(tally.failed, 1);
     REQUIRE(tally.failures.size() == 1u);

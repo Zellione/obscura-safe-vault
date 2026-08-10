@@ -15,6 +15,7 @@
 #include "ui/keybindings.h"
 #include "ui/progress_modal.h"
 #include "ui/text_input_event.h"
+#include "ui/text_metrics.h"
 #include "ui/widgets.h"
 #include "vault/transfer.h"
 
@@ -40,6 +41,7 @@ void TransferDialog::open(std::string src_gallery, std::vector<std::string> file
     error_.clear();
     naming_ = false;
     name_buf_.clear();
+    conflict_ = {};
 
     // The new-gallery name overlay consumes SDL_EVENT_TEXT_INPUT, which SDL3 only
     // delivers while text input is active.
@@ -118,7 +120,34 @@ void TransferDialog::choose_gallery()
     do_move(picked);
 }
 
+std::vector<std::string> TransferDialog::galleries_for_conflict_scan() const
+{
+    using enum Source;
+    if (source_ == Gallery)  return {src_gallery_};
+    if (source_ == Galleries || source_ == Collection) return src_galleries_;
+    return {};   // Images: files always skip; nothing to ask
+}
+
 void TransferDialog::do_move(std::string_view dst_target)
+{
+    // Main-thread pre-scan (the index tree is main-thread-only and the job has
+    // not launched yet, so this is race-free): if any transferred gallery
+    // already exists at the destination, ask ONCE how to resolve — the choice
+    // applies to every colliding gallery in this run.
+    if (const auto scan = galleries_for_conflict_scan(); !scan.empty()) {
+        const auto clashes = vault::colliding_galleries(dest_vault(), dst_target, scan);
+        if (!clashes.empty()) {
+            conflict_.target = std::string(dst_target);
+            conflict_.count = static_cast<int>(clashes.size());
+            conflict_.sel = 0;
+            stage_ = Stage::Conflict;
+            return;
+        }
+    }
+    launch_transfer(dst_target, vault::CollisionPolicy::Fail);
+}
+
+void TransferDialog::launch_transfer(std::string_view dst_target, vault::CollisionPolicy policy)
 {
     vault::Vault& dv = dest_vault();
     const std::string where = picker_dest_.dest_label();
@@ -130,13 +159,13 @@ void TransferDialog::do_move(std::string_view dst_target)
     // the outcome. The host grid stops touching the vault while job_active().
     if (source_ == Source::Gallery)
         run_.job.start_transfer_gallery(src_, src_gallery_, dv, std::string(dst_target),
-                                        mode_, where);
+                                        mode_, policy, where);
     else if (source_ == Source::Galleries)
         run_.job.start_transfer_galleries(src_, src_galleries_, dv, std::string(dst_target),
-                                          mode_, where);
+                                          mode_, policy, where);
     else if (source_ == Source::Collection)
-        run_.job.start_transfer_collection(src_, media_groups_, src_galleries_, dv,
-                                           std::string(dst_target), mode_, where);
+        run_.job.start_transfer_collection(src_, {media_groups_, src_galleries_}, dv,
+                                           std::string(dst_target), mode_, policy, where);
     else
         run_.job.start_transfer_images(src_, src_gallery_, filenames_, dv, std::string(dst_target),
                                        mode_, where);
@@ -153,6 +182,21 @@ bool TransferDialog::handle_mode_key(SDL_Keycode k)
     if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
         picker_dest_.open(src_path_);
         stage_ = Stage::PickingDest;
+    }
+    return true;
+}
+
+bool TransferDialog::handle_conflict_key(SDL_Keycode k)
+{
+    if (k == SDLK_UP)   conflict_.sel = (conflict_.sel + 2) % 3;
+    if (k == SDLK_DOWN) conflict_.sel = (conflict_.sel + 1) % 3;
+    if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
+        if (conflict_.sel == 0)
+            launch_transfer(conflict_.target, vault::CollisionPolicy::Combine);
+        else if (conflict_.sel == 1)
+            launch_transfer(conflict_.target, vault::CollisionPolicy::Suffix);
+        else
+            close();
     }
     return true;
 }
@@ -234,6 +278,7 @@ bool TransferDialog::handle_stage_key(const SDL_KeyboardEvent& key)
     using enum Stage;
     switch (stage_) {
         case Mode:        return handle_mode_key(key.key);
+        case Conflict:    return handle_conflict_key(key.key);
         case PickGallery:
             if (is_search_key(key)) { picker_.open_filter(); return true; }
             return handle_gallery_key(key.key);
@@ -361,6 +406,31 @@ void TransferDialog::render_mode_body(gfx::Renderer& r, gfx::FontAtlas& font,
                 fit_text(font, "[Up/Down] choose  [Enter] next", mw - 40), TEXT_FAINT);
 }
 
+void TransferDialog::render_conflict_body(gfx::Renderer& r, gfx::FontAtlas& font,
+                                          float ix, float iy, float mw) const
+{
+    using namespace gfx::theme;
+    const std::string title = std::format("{} {} already exist{} at destination",
+                                          conflict_.count,
+                                          conflict_.count == 1 ? "gallery" : "galleries",
+                                          conflict_.count == 1 ? "s" : "");
+    r.draw_text(font, ix, iy + 36, fit_text(font, title, mw - 40), TEXT_DIM);
+    const std::vector<std::string> options = {
+        "Combine into existing (files skip, sub-galleries merge)",
+        "Rename with _2 suffix",
+        "Cancel"
+    };
+    const float row_h = ui::line_pitch(font.pixel_height());
+    for (size_t i = 0; i < options.size(); ++i) {
+        const float ry = iy + 72 + static_cast<float>(i) * row_h;
+        const bool  on = (static_cast<int>(i) == conflict_.sel);
+        if (on) r.draw_round_rect({ix, ry, mw - 40, 30}, RADIUS_SMALL, SURFACE_HI);
+        r.draw_text(font, ix + 8, ry + 4, fit_text(font, options[i], mw - 56), on ? TEXT : TEXT_DIM);
+    }
+    r.draw_text(font, ix, iy + 180,
+                fit_text(font, "[Up/Down] Select   [Enter] Confirm   [Esc] Close", mw - 40), TEXT_FAINT);
+}
+
 void TransferDialog::render_pick_gallery_body(gfx::Renderer& r, gfx::FontAtlas& font,
                                               float ix, float iy, float mw, float mh, float my)
 {
@@ -399,6 +469,7 @@ void TransferDialog::render_body(gfx::Renderer& r, gfx::FontAtlas& font,
 {
     if (stage_ == Stage::Mode) { render_mode_body(r, font, ix, iy, mw); return; }
     if (stage_ == Stage::PickingDest) { picker_dest_.render(r, font, ix, iy, mw); return; }
+    if (stage_ == Stage::Conflict) { render_conflict_body(r, font, ix, iy, mw); return; }
     render_pick_gallery_body(r, font, ix, iy, mw, mh, my);   // PickGallery
 }
 

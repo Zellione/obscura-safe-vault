@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -13,6 +14,13 @@ namespace vault {
 // Move (default) or Copy. Copy leaves the source untouched; Move removes it after
 // the destination commit. Same code path for cross-vault and same-vault transfers.
 enum class TransferMode { Move, Copy };
+
+// How transfer_gallery treats a same-named child already at dst_parent.
+enum class CollisionPolicy : uint8_t {
+    Fail,      // AlreadyExists (the pre-Phase-71 behavior; the default)
+    Combine,   // merge into the existing gallery via vault::combine_galleries
+    Suffix,    // transfer under the first free "name_2", "name_3", ...
+};
 
 inline constexpr size_t MAX_TRANSFER_FAILURES = 100;
 
@@ -30,9 +38,17 @@ struct TransferFailure {
 // and how many failed (skipped). done + failed == the number attempted, which is
 // <= the input size when a cancel stopped the loop early.
 struct TransferTally {
-    int done   = 0;
-    int failed = 0;
+    int done    = 0;
+    int failed  = 0;
+    int skipped = 0;   // destination-name collisions (file left in the source)
     std::vector<TransferFailure> failures;   // first MAX_TRANSFER_FAILURES only
+};
+
+// Optional knobs for transfer_gallery, bundled for S107.
+struct GalleryTransferOpts {
+    OpProgress*     progress = nullptr;
+    TransferTally*  tally    = nullptr;
+    CollisionPolicy policy   = CollisionPolicy::Fail;
 };
 
 // Bump `failed` and store the entry while under MAX_TRANSFER_FAILURES (further
@@ -88,8 +104,9 @@ struct TransferProgress {
 [[nodiscard]] std::vector<std::string> image_target_galleries(const Vault& v);
 
 // Transfer a whole gallery subtree from `src` (the gallery at `src_gallery`) into
-// `dst` under `dst_parent`, keeping the gallery's own name. Per-file tolerance: copy
-// every file; failures are recorded in `tally` (when given) rather than aborting.
+// `dst` under `dst_parent`, keeping the gallery's own name (or a renamed variant
+// if a collision occurs and opts.policy != Fail). Per-file tolerance: copy every file;
+// failures are recorded in `opts.tally` (when given) rather than aborting.
 // Batched (Phase 69): recreated galleries and copied files become durable in ONE
 // destination commit per TRANSFER_COMMIT_BATCH files; for TransferMode::Move the source
 // removals are deferred into ONE remove_media_batch after the destination commit (a
@@ -98,28 +115,31 @@ struct TransferProgress {
 // all copied OK, empty galleries are pruned bottom-up from the source (residue tree).
 // `&src == &dst` is allowed; a same-vault move into the source itself or any
 // descendant is rejected (cycle). Media plaintext lives only in mlock'd memory (invariant #1).
-//   Ok            - transfer completed (per-file failures recorded in tally, if given).
+//   Ok            - transfer completed (per-file failures recorded in opts.tally, if given).
 //   NotFound      - src gallery missing / not a gallery
-//   AlreadyExists - dst_parent already holds a child of the same name
+//   AlreadyExists - dst_parent already holds a child of the same name (when policy is Fail
+//                   or Suffix has exhausted _2 through _9999)
 //   InvalidArg    - dst_parent cannot hold a sub-gallery, src_gallery is root (""),
 //                   same-vault cycle, or a sub-gallery's create_gallery failed structurally
 //                   (source left intact; per-file Move never ran).
 //   AuthFailed / IoError / Locked - propagated from structural failures; source left
 //                   intact if the subtree root's create_gallery fails.
-// `progress` (optional): total is set to the subtree's media count up front, done
-// bumped per copied file, and the copy stops early when progress->cancel is set.
+// `opts.progress` (optional): total is set to the subtree's media count up front, done
+// bumped per copied file, and the copy stops early when opts.progress->cancel is set.
 // A cancel stops cleanly: files copied so far are flushed and (for Move) removed from
 // the source in the finish batch, the rest stay only in src — no duplicates, nothing
-// lost. Pruning is
-// skipped on cancel (galleries not yet recreated at dst must survive). Plaintext lives
-// only in mlock'd memory (invariant #1).
-// `tally` (optional): per-file failures are recorded; done/failed tally counts media
+// lost. Pruning is skipped on cancel (galleries not yet recreated at dst must survive).
+// Plaintext lives only in mlock'd memory (invariant #1).
+// `opts.tally` (optional): per-file failures are recorded; done/failed tally counts media
 // (not galleries). Failed files trigger a failure entry; a failed gallery create
 // increments failed by its media count but stores one gallery entry (not per-file).
+// `opts.policy` (default Fail): on a dst_parent child of the same name, Fail returns
+// AlreadyExists (pre-Phase-71 behavior); Suffix probes for the first free "_2", "_3",
+// etc. up to "_9999" (trimmed to fit MAX_NODE_NAME_BYTES on a UTF-8 codepoint boundary);
+// Combine is delegated to a later task.
 [[nodiscard]] VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
                                            Vault& dst, std::string_view dst_parent,
-                                           TransferMode mode, OpProgress* progress = nullptr,
-                                           TransferTally* tally = nullptr);
+                                           TransferMode mode, GalleryTransferOpts opts = {});
 
 // Transfer a LIST of whole gallery subtrees (`src_paths`, all direct entries
 // anywhere in `src`) into dst/dst_parent, one at a time via transfer_gallery
@@ -131,13 +151,23 @@ struct TransferProgress {
 // and left in place; others still proceed. `progress` (optional): total is set
 // to src_paths.size() up front, done bumped per subtree, and the loop stops
 // early on progress->cancel — subtrees moved so far remain committed.
+// `policy` (default Fail): passed through to each transfer_gallery call.
 [[nodiscard]] TransferTally transfer_galleries(Vault& src, const std::vector<std::string>& src_paths,
                                                Vault& dst, std::string_view dst_parent,
-                                               TransferMode mode, OpProgress* progress = nullptr);
+                                               TransferMode mode, OpProgress* progress = nullptr,
+                                               CollisionPolicy policy = CollisionPolicy::Fail);
 
 // Slash-paths of every gallery in `v` that may legally accept a SUB-gallery (i.e.
 // holds no images), including "" (root) when root holds no images. Empty while
 // locked. Used to populate the transfer dialog when the source is a gallery.
 [[nodiscard]] std::vector<std::string> gallery_target_parents(const Vault& v);
+
+// Names among `src_paths` (gallery slash-paths) whose LAST segment already
+// exists as a child — gallery or media — of dst_parent in `dst`. The main
+// thread runs this before launching a transfer job to decide whether to show
+// the conflict prompt. Empty while dst is locked.
+[[nodiscard]] std::vector<std::string> colliding_galleries(
+    const Vault& dst, std::string_view dst_parent,
+    std::span<const std::string> src_paths);
 
 } // namespace vault

@@ -104,6 +104,12 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   drawn, or the popup's scroll bound silently breaks.
 
 ## platform/
+- `path_utf8.h` (Phase 70) — header-only UTF-8↔path vocabulary: `utf8_to_path`,
+  `path_to_utf8` (no-throw), `path_to_utf8_generic`, `fopen_path`/`freopen_path`
+  (`_wfopen`/`_wfreopen` on Windows). Pure std — the ONE platform/ header includable
+  from any module (vault, gfx, ui, app). Exists because narrow `path::string()`/
+  `path{std::string}` go through the ANSI code page on Windows (throwing on CJK —
+  the Phase-70 import crash) and are now banned in src/ (see `mem:conventions`).
 - `paths.*`, `file_dialog.*` — config dirs, SDL file dialogs (`save_vault()`). Each open is
   tagged with a `Purpose` + `take_result(Purpose)` so one shared dialog polled by two handlers
   (image pick vs zip import) can't steal each other's result. `Purpose::TagList` +

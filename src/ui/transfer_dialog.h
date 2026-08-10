@@ -84,22 +84,27 @@ private:
     // Running: the background move/copy worker owns the vault(s); the dialog stays
     // active (keeping the unlocked destination alive) and shows a progress modal
     // until the job completes, then closes (Phase 25).
-    enum class Stage { Mode, PickingDest, PickGallery, Running };
+    enum class Stage { Mode, PickingDest, PickGallery, Conflict, Running };
 
     void choose_gallery();    // PickGallery Enter: move into the selected target (or "New")
-    void do_move(std::string_view dst_gallery);   // run the transfer + re-lock
+    void do_move(std::string_view dst_gallery);   // pre-scan for conflicts; route to Conflict or launch_transfer
+    void launch_transfer(std::string_view dst_target, vault::CollisionPolicy policy);   // run the transfer + re-lock
     void rebuild_targets();   // image_target_galleries(dest_vault()) + the "New gallery…" row
     void render_body(gfx::Renderer& r, gfx::FontAtlas& font,
                      float ix, float iy, float mw, float mh, float my);  // per-stage body
     void render_mode_body(gfx::Renderer& r, gfx::FontAtlas& font,
                           float ix, float iy, float mw) const;
+    void render_conflict_body(gfx::Renderer& r, gfx::FontAtlas& font,
+                              float ix, float iy, float mw) const;
     void render_pick_gallery_body(gfx::Renderer& r, gfx::FontAtlas& font,
                                   float ix, float iy, float mw, float mh, float my);
 
     bool handle_mode_key(SDL_Keycode k);         // Mode stage: toggle Move/Copy
+    bool handle_conflict_key(SDL_Keycode k);     // Conflict stage: choose policy
     vault::Vault& dest_vault() noexcept;         // src_ when same-vault, else picker_dest_'s vault
     bool handle_gallery_key(SDL_Keycode k);
     bool handle_naming_event(const SDL_Event& e);   // new-gallery name overlay
+    [[nodiscard]] std::vector<std::string> galleries_for_conflict_scan() const;   // galleries to check for collisions
     // handle_event() sub-handlers, extracted to keep its cognitive complexity
     // (S3776) and nesting depth (S134) bounded.
     bool handle_picking_dest_event(const SDL_Event& e);
@@ -128,6 +133,15 @@ private:
     TextFieldChrome name_buf_chrome_;   // caret/scroll view state, advanced by render()
 
     std::string error_;
+
+    // Conflict stage state (Phase 71): dst target + collision count + selected policy option,
+    // bundled to keep the field count ≤20 (S1820).
+    struct Conflict {
+        std::string target;
+        int count = 0;
+        int sel = 0;
+    };
+    Conflict    conflict_;
 
     // Background transfer run — the worker-thread job plus its finished outcome,
     // bundled to keep the field count ≤20 (S1820). `done`/`completion` are set when the

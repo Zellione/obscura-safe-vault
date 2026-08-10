@@ -318,3 +318,46 @@ TEST(combine_failed_wholesale_move_counts_media_as_skipped)
     CHECK(find_child(v, "Src/Only", "a.jpg") != nullptr);   // still in the source
     CHECK(find_child(v, "Src/Only", "b.jpg") != nullptr);
 }
+
+// Copy-mode combine: destination gains the missing files, source untouched.
+TEST(combine_copy_mode_leaves_source_intact)
+{
+    using enum vault::VaultResult;
+    TempVault sa("cc_s"), da("cc_d");
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+    REQUIRE(src.create_gallery("G") == Ok);
+    REQUIRE(src.add_image("G", blob(2000, 1), "a.jpg") == Ok);
+    REQUIRE(src.add_image("G", blob(2000, 2), "b.jpg") == Ok);
+    REQUIRE(dst.create_gallery("G") == Ok);
+    REQUIRE(dst.add_image("G", blob(10, 3), "b.jpg") == Ok);   // collision -> skip
+
+    vault::CombineTally t;
+    REQUIRE(vault::combine_galleries(src, "G", dst, "G", t, nullptr,
+                                     vault::TransferMode::Copy) == Ok);
+    CHECK_EQ(t.media_moved, 1);
+    CHECK_EQ(t.media_skipped, 1);
+    // Source keeps EVERYTHING (copy) — including its gallery shell.
+    CHECK(find_child(src, "", "G") != nullptr);
+    CHECK(find_child(src, "G", "a.jpg") != nullptr);
+    CHECK(find_child(src, "G", "b.jpg") != nullptr);
+    CHECK(find_child(dst, "G", "a.jpg") != nullptr);
+}
+
+// Copy-mode combine of an EMPTY source gallery must not delete the source
+// (the Move-mode "delete once empty" rule is gated on mode).
+TEST(combine_copy_mode_never_deletes_empty_source)
+{
+    using enum vault::VaultResult;
+    TempVault sa("ce_s"), da("ce_d");
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+    REQUIRE(src.create_gallery("E") == Ok);
+    REQUIRE(dst.create_gallery("E") == Ok);
+    vault::CombineTally t;
+    REQUIRE(vault::combine_galleries(src, "E", dst, "E", t, nullptr,
+                                     vault::TransferMode::Copy) == Ok);
+    CHECK(find_child(src, "", "E") != nullptr);
+}

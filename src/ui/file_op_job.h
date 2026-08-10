@@ -2,7 +2,7 @@
 
 #include "ui/parent_group.h"  // ParentGroup (Phase 68 grouped transfer)
 #include "vault/op_progress.h"
-#include "vault/transfer.h"   // vault::TransferMode, vault::TransferFailure
+#include "vault/transfer.h"   // vault::TransferMode, vault::TransferFailure, vault::CollisionPolicy
 
 #include <atomic>
 #include <filesystem>
@@ -19,6 +19,12 @@ struct IndexNode;
 
 namespace ui {
 
+// One collection-screen selection: per-parent media groups + gallery subtrees.
+struct CollectionTransferSpec {
+    std::vector<ParentGroup> groups;
+    std::vector<std::string> gallery_paths;
+};
+
 using OpWorkerThread = std::jthread;
 
 // Which bulk operation ran (drives the outcome wording).
@@ -29,6 +35,7 @@ struct FileOpOutcome {
     bool        cancelled = false;   // stopped early on a user cancel (partial result)
     int         done      = 0;       // items committed to the destination / removed
     int         failed    = 0;       // items that failed (skipped)
+    int         skipped   = 0;       // destination-name collisions (not attempted)
     int         total     = 0;       // items attempted
     FileOpKind  kind      = FileOpKind::None;
     std::string status;              // human-facing summary (no secrets)
@@ -77,14 +84,16 @@ public:
     // Move/Copy a whole gallery subtree from src/src_gallery under dst/dst_parent.
     bool start_transfer_gallery(vault::Vault& src, std::string src_gallery,
                                 vault::Vault& dst, std::string dst_parent,
-                                vault::TransferMode mode, std::string label);
+                                vault::TransferMode mode, vault::CollisionPolicy policy,
+                                std::string label);
 
     // Move/Copy a LIST of whole gallery subtrees (`src_paths`) into dst/dst_parent
     // (Phase 44 Part 3) — the bulk sibling of start_transfer_gallery, for a
     // multi-selection of gallery tiles.
     bool start_transfer_galleries(vault::Vault& src, std::vector<std::string> src_paths,
                                   vault::Vault& dst, std::string dst_parent,
-                                  vault::TransferMode mode, std::string label);
+                                  vault::TransferMode mode, vault::CollisionPolicy policy,
+                                  std::string label);
 
     // Move/Copy media grouped by SOURCE parent (Phase 68): a collection-screen
     // selection spans galleries, so each group runs vault::transfer_images from
@@ -94,12 +103,12 @@ public:
                                       vault::TransferMode mode, std::string label);
 
     // The full collection-screen selection in one run (Phase 68): per-parent
-    // media groups PLUS whole gallery subtrees (`gallery_paths`), all landing
-    // in/under dst_target. Tallies merge into one outcome.
-    bool start_transfer_collection(vault::Vault& src, std::vector<ParentGroup> groups,
-                                   std::vector<std::string> gallery_paths,
+    // media groups PLUS whole gallery subtrees, all landing in/under dst_target.
+    // Tallies merge into one outcome.
+    bool start_transfer_collection(vault::Vault& src, CollectionTransferSpec spec,
                                    vault::Vault& dst, std::string dst_target,
-                                   vault::TransferMode mode, std::string label);
+                                   vault::TransferMode mode, vault::CollisionPolicy policy,
+                                   std::string label);
 
     // Combine src/src_gallery into dst/dst_gallery — recursive merge, deletes
     // src_gallery once empty (Phase 44 Part 4). `label` names the destination
