@@ -1,4 +1,5 @@
 #include "test_framework.h"
+#include "platform/path_utf8.h"
 #include "ui/zip_import.h"
 #include "ui/zip_test_helpers.h"
 #include "vault/vault.h"
@@ -234,4 +235,43 @@ TEST(zip_entry_size_plausible_rejects_lying_headers)
     CHECK(!ui::zip_entry_size_plausible(4, 1u << 20));
     // 0 compressed bytes cannot inflate to anything.
     CHECK(!ui::zip_entry_size_plausible(0, 1));
+}
+
+// Phase 72: a CJK-named archive holding CJK-named entries must import on every
+// platform — the archive file opens through the native path range (never the
+// ANSI code page), and entry names survive byte-identically as vault node
+// names. Names: 日本語アルバム.zip / 写真/風景.jpg / 中文/图片.jpg → 相册.
+TEST(zip_import_cjk_archive_name_and_entries)
+{
+    auto img = fake_jpeg(7);
+    auto dir = fresh_dir("osv_zip_test_cjk");
+    // Write the fixture under an ASCII name, then rename it: the fixture
+    // writer's own path handling is not what is under test here.
+    auto ascii = make_archive(
+        {{"\xE5\x86\x99\xE7\x9C\x9F/\xE9\xA2\xA8\xE6\x99\xAF.jpg", img},
+         {"\xE4\xB8\xAD\xE6\x96\x87/\xE5\x9B\xBE\xE7\x89\x87.jpg", img}},
+        dir / "in.zip");
+    const fs::path zip =
+        dir / platform::utf8_to_path("\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E"
+                                     "\xE3\x82\xA2\xE3\x83\xAB\xE3\x83\x90\xE3\x83\xA0.zip");
+    fs::rename(ascii, zip);
+
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        auto out = ui::import_zip(v, zip, "", "\xE7\x9B\xB8\xE5\x86\x8C");
+        CHECK(out.ok);
+        CHECK_EQ(out.imported, 2);
+        CHECK_EQ(v.list("\xE7\x9B\xB8\xE5\x86\x8C/\xE5\x86\x99\xE7\x9C\x9F").size(),
+                 static_cast<size_t>(1));
+        CHECK_EQ(v.list("\xE7\x9B\xB8\xE5\x86\x8C/\xE4\xB8\xAD\xE6\x96\x87").size(),
+                 static_cast<size_t>(1));
+
+        // The image's node name must be the exact UTF-8 bytes from the archive.
+        bool found = false;
+        for (const auto* c : v.list("\xE7\x9B\xB8\xE5\x86\x8C/\xE5\x86\x99\xE7\x9C\x9F"))
+            if (c->name == "\xE9\xA2\xA8\xE6\x99\xAF.jpg") found = true;
+        CHECK(found);
+    }
+    cleanup_dir(dir);
 }

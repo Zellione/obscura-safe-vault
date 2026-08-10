@@ -150,3 +150,34 @@ TEST(normalize_user_path_preserves_utf8_bytes)
     REQUIRE(p.has_value());
     CHECK_EQ(platform::path_to_utf8_generic(*p), raw);
 }
+
+// --- normalize_external_path_utf8 -------------------------------------------
+//
+// The dialog callbacks store their picked paths as std::string, and project
+// convention says a std::string holding a path is UTF-8. Phase 70 fixed every
+// conversion EXCEPT the callbacks themselves: they rendered the normalized
+// path with path::string(), which on Windows converts through the ANSI code
+// page and THROWS std::system_error for a CJK filename — unhandled inside the
+// SDL dialog callback, i.e. the "import of archives and files crashes on
+// Japanese/Chinese names" report (Phase 72). This helper is the one sanctioned
+// normalize→UTF-8 conversion for externally-chosen paths.
+
+TEST(normalize_external_path_utf8_preserves_cjk_bytes)
+{
+    // 日本語/中文相册.7z — not representable in any single ANSI code page.
+    const std::string raw =
+        "vaults/\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E/"
+        "\xE4\xB8\xAD\xE6\x96\x87\xE7\x9B\xB8\xE5\x86\x8C.7z";
+    const auto s = platform::normalize_external_path_utf8(raw);
+    REQUIRE(s.has_value());
+    // Compare in generic form: lexically_normal renders with the platform's
+    // preferred separator ('\' on Windows), which is not what this test checks.
+    CHECK_EQ(platform::path_to_utf8_generic(platform::utf8_to_path(*s)), raw);
+}
+
+TEST(normalize_external_path_utf8_rejects_what_normalize_user_path_rejects)
+{
+    CHECK_FALSE(platform::normalize_external_path_utf8("").has_value());
+    CHECK_FALSE(
+        platform::normalize_external_path_utf8(std::string("/tmp/a\0b", 8)).has_value());
+}

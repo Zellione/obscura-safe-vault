@@ -32,6 +32,15 @@ inline constexpr size_t MAX_USER_PATH_BYTES = 4096;
 // ui::export_path_within, not here.
 [[nodiscard]] std::optional<std::filesystem::path> normalize_user_path(std::string_view raw);
 
+// normalize_user_path, rendered back as UTF-8 — the ONE sanctioned way an
+// externally-chosen path becomes a stored std::string (project convention: a
+// std::string holding a path is UTF-8 by definition). The dialog callbacks
+// MUST use this instead of path::string(): on Windows the latter converts
+// through the ANSI code page and throws std::system_error for a CJK filename,
+// which — unhandled inside the SDL dialog callback — was the Phase 72
+// "import of archives and files crashes on Japanese/Chinese names" bug.
+[[nodiscard]] std::optional<std::string> normalize_external_path_utf8(std::string_view raw);
+
 // Per-user data directory (created if needed). Empty path on failure.
 [[nodiscard]] std::filesystem::path config_dir();
 

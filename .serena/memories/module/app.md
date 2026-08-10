@@ -115,8 +115,23 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   (image pick vs zip import) can't steal each other's result. `Purpose::TagList` +
   `open_tag_list()` (.txt); `open_zip()`'s filter accepts `zip;cbz`. Externally-supplied paths
   (dialog results, `vaults.list` lines) go through `platform::normalize_user_path` before they
-  reach `fopen`.
-- `folder_dialog.*` — export destination picker.
+  reach `fopen`. **Phase 72:** the dialog callbacks store their picked paths via
+  `platform::normalize_external_path_utf8` (paths.h: `normalize_user_path` → `path_to_utf8`)
+  — the ONE sanctioned dialog→`std::string` conversion. They previously used
+  `norm->string()`, which on Windows throws for CJK names inside the SDL callback (the
+  Phase-72 import crash). Consumers convert the stored UTF-8 strings back with
+  `utf8_to_path`, never the narrow `fs::path` ctor. `config_dir()` decodes SDL_GetPrefPath's
+  UTF-8 with `utf8_to_path` too.
+- `folder_dialog.*` — export destination picker (same Phase-72 UTF-8 storage rule).
+- `locale_init.h` (Phase 72) — header-only `platform::init_locale()`: switches **LC_CTYPE
+  only** (never LC_NUMERIC — decimal-comma corruption) to a UTF-8 locale; env locale with
+  `C.UTF-8` fallback on POSIX. **Deliberate NO-OP on Windows** — libarchive keeps the wide
+  name there regardless (ArchiveReader's wide fallback covers 7z/RAR), and any non-"C" CRT
+  locale makes libarchive (get_current_codepage reads setlocale) build an OEM(CP437)→locale
+  conversion for tar names, mangling raw UTF-8 bytes into valid-but-wrong UTF-8. Called first
+  in `app/main.cpp` and `tests/test_main.cpp`, before any threads. Exists because libarchive
+  converts 7z/RAR entry names (UTF-16 in-header) through the current locale at parse time and
+  returns NULL names under the default `"C"` locale (see ArchiveReader in `mem:module/ui`).
 - `vault_registry.*` — recent-vaults list: config-dir file of known vault PATHS ONLY (no
   secrets); `list`/`add`(move-to-front,dedup)/`remove`/`seed_if_empty`; atomic temp+rename.
 - `theme_pref.*` — chosen UI theme persistence: `config_dir()/theme.conf` holds the theme's

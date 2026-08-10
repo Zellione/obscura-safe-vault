@@ -10,6 +10,7 @@
 #include "gfx/texture_cache.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "platform/path_utf8.h"
 #include "platform/perf.h"
 #include "platform/safe_print.h"
 #include "ui/album_rebind.h"
@@ -666,7 +667,7 @@ void ImageViewer::update(double dt)
         const ExportSummary sum =
             export_images(vault_, one, *dest, ExportConsent::Confirm);
         export_.set_status(sum.written == 1
-                               ? std::format("Exported to {}", dest->string())
+                               ? std::format("Exported to {}", platform::path_to_utf8(*dest))
                                : "Export failed.");
         mark_dirty();   // export folder picker resolved — repaint the status line
     }

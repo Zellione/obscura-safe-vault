@@ -44,6 +44,11 @@ inline fs::path fresh_path(const char* name)
 // an explicit directory entry) as a libarchive-produced archive of
 // `format_name` ("7zip" | "ustar" | "gnutar_gz" | "gnutar_xz") to `out`.
 // Returns `out` for chaining, mirroring ziptest::make_archive's signature.
+// NOTE: entry names are raw bytes (fine for tar; UTF-8 names round-trip
+// byte-identically). Do NOT use this for non-ASCII names in a Unicode-header
+// format (7z stores UTF-16): libarchive's WRITER converts names through the
+// process locale and silently mangles them under "C" — use a committed
+// real-archiver fixture instead (see cjk_names.7z.uu).
 inline fs::path make_archive(const std::vector<std::pair<std::string, std::vector<uint8_t>>>& items,
                              const char* format_name, const fs::path& out)
 {

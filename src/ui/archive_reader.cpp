@@ -9,6 +9,7 @@
 #include <print>
 
 #include "platform/path_utf8.h"
+#include "ui/zip_encoding.h"
 
 namespace ui {
 namespace {
@@ -41,31 +42,72 @@ struct archive* open_stream(std::span<const uint8_t> data, const char* passphras
 // and any compression filter. Used for multi-volume archives. Caller owns the
 // result and must archive_read_free() it. Returns nullptr on open failure.
 // `file_paths` is a vector of filesystem::path; ownership remains with caller.
+// The multi-volume open call itself, isolated so the temporary name storage
+// lives exactly as long as the call (libarchive copies each filename at open).
+// Wide variant on Windows: the narrow archive_read_open_filenames() reaches
+// fopen() through the ANSI code page and cannot open a CJK volume name
+// (Phase 72). Narrow UTF-8 elsewhere.
+int open_filenames_portable(struct archive* a,
+                            const std::vector<std::filesystem::path>& file_paths)
+{
+#if defined(_WIN32)
+    std::vector<std::wstring> vol_strings;
+    vol_strings.reserve(file_paths.size());
+    for (const auto& vol : file_paths) vol_strings.push_back(vol.native());
+    std::vector<const wchar_t*> vol_cstrs;
+    vol_cstrs.reserve(vol_strings.size() + 1);
+    for (const auto& vol_str : vol_strings) vol_cstrs.push_back(vol_str.c_str());
+    vol_cstrs.push_back(nullptr);  // NULL-terminate
+    return archive_read_open_filenames_w(a, vol_cstrs.data(), 10240);
+#else
+    std::vector<std::string> vol_strings;
+    vol_strings.reserve(file_paths.size());
+    for (const auto& vol : file_paths) vol_strings.push_back(platform::path_to_utf8(vol));
+    std::vector<const char*> vol_cstrs;
+    vol_cstrs.reserve(vol_strings.size() + 1);
+    for (const auto& vol_str : vol_strings) vol_cstrs.push_back(vol_str.c_str());
+    vol_cstrs.push_back(nullptr);  // NULL-terminate
+    return archive_read_open_filenames(a, vol_cstrs.data(), 10240);
+#endif
+}
+
 struct archive* open_stream_files(const std::vector<std::filesystem::path>& file_paths,
                                    const char* passphrase)
 {
-    // Convert to C strings in a vector that stays alive for archive_read_open_filenames
-    std::vector<std::string> vol_strings;
-    for (const auto& vol : file_paths) {
-        vol_strings.push_back(platform::path_to_utf8(vol));
-    }
-
-    std::vector<const char*> vol_cstrs;
-    for (const auto& vol_str : vol_strings) {
-        vol_cstrs.push_back(vol_str.c_str());
-    }
-    vol_cstrs.push_back(nullptr);  // NULL-terminate
-
     struct archive* a = archive_read_new();
     archive_read_support_format_all(a);
     archive_read_support_filter_all(a);
     if (passphrase) archive_read_add_passphrase(a, passphrase);
-    if (archive_read_open_filenames(a, vol_cstrs.data(), 10240) != ARCHIVE_OK) {
+
+    if (const int r = open_filenames_portable(a, file_paths); r != ARCHIVE_OK) {
         std::println(stderr, "[ArchiveReader] open_files failed: {}", archive_error_string(a));
         archive_read_free(a);
         return nullptr;
     }
     return a;
+}
+
+// An entry's name as UTF-8, independent of the process locale (Phase 72).
+//
+// The narrow accessor is authoritative for raw-byte formats (tar): the bytes
+// pass through untouched, so a UTF-8 name survives byte-identically — take it
+// whenever it IS valid UTF-8 (ASCII included). For a Unicode-header format
+// (7z/RAR store names as UTF-16) with a CJK name, the narrow form converts
+// through the locale / ANSI code page and comes back NULL under the plain
+// "C" locale and on Windows — pre-fix every such entry collapsed to the
+// "unnamed" fallback. (archive_entry_pathname_utf8 is no better: it converts
+// through the same locale machinery and fails identically.) The wide
+// accessor hands the stored UTF-16 back without locale involvement, and
+// std::filesystem::path converts wide→UTF-8 locale-independently. A narrow
+// non-UTF-8 name with no wide form (a legacy locally-encoded tar) passes
+// through raw as before — sanitize_node_name repairs it downstream.
+std::string entry_name_utf8(struct archive_entry* entry)
+{
+    const char* n = archive_entry_pathname(entry);
+    if (n && is_valid_utf8(n)) return std::string{n};
+    if (const wchar_t* w = archive_entry_pathname_w(entry))
+        return platform::path_to_utf8(std::filesystem::path{w});
+    return n ? std::string{n} : std::string{};
 }
 
 } // namespace
@@ -91,8 +133,7 @@ bool ArchiveReader::scan_entries(struct archive* a)
                          MAX_ENTRIES);
             return false;
         }
-        const char* path = archive_entry_pathname(entry);
-        entries_.emplace_back(path ? std::string(path) : std::string{},
+        entries_.emplace_back(entry_name_utf8(entry),
                               archive_entry_filetype(entry) == AE_IFDIR);
         archive_read_data_skip(a);
     }
