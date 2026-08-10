@@ -697,7 +697,7 @@ std::vector<std::string> GalleryGrid::selected_delete_paths() const
         const std::string& name = children_[static_cast<size_t>(i)]->name;
         paths.push_back(base.empty() ? name : base + "/" + name);
     }
-    return prune_descendant_paths(std::move(paths));
+    return prune_descendant_paths(paths);
 }
 
 void GalleryGrid::handle_naming_key(const SDL_Event& e)
@@ -849,6 +849,52 @@ bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
         return true;
     }
     return false;
+}
+
+// Delete-confirmation modal rendering, extracted to reduce render()'s cognitive
+// complexity (S3776). For batch delete, delegates to the shared drawer in batch_delete.h;
+// for single-item, renders the inline version byte-identical to before extraction.
+void render_delete_confirm_modal(GalleryGrid& g, gfx::Renderer& r, float W, float H)
+{
+    if (!g.naming_.confirm_delete) return;
+
+    using namespace gfx::theme;
+    const float RADIUS = 8.0f;
+
+    if (g.naming_.batch_delete) {
+        // (S3776 extraction) Use the shared batch delete drawer
+        draw_batch_delete_confirm(r, g.font_, W, H, g.naming_.batch_summary);
+    } else {
+        // Single-item delete modal (kept byte-identical)
+        r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});   // veil
+
+        const float pw = 560;
+        const float ph = 200;
+        const float px = (W - pw) / 2;
+        const float py = (H - ph) / 2;
+        r.draw_round_rect({px, py, pw, ph}, RADIUS, SURFACE);
+        r.draw_round_rect({px, py, pw, ph}, RADIUS, DANGER, /*filled*/ false);
+
+        auto centered = [&](const std::string& s, float y, gfx::Color c) {
+            const auto tw = static_cast<float>(g.font_.measure(s));
+            r.draw_text(g.font_, px + (pw - tw) / 2, y, s, c);
+        };
+
+        const int s = g.nav_.selected();
+        const vault::IndexNode* node =
+            (s >= 0 && s < static_cast<int>(g.children_.size())) ? g.children_[s] : nullptr;
+        const std::string name = node ? node->name : std::string{};
+        centered("Delete \"" + g.fit_name(name, pw - 80) + "\"?", py + 28, TEXT);
+        if (node && node->is_gallery()) {
+            SubtreeCounts c;
+            count_subtree(*node, c);
+            centered("This permanently removes the gallery and everything in it.", py + 72, DANGER);
+            centered("Contains " + describe_subtree(c) + ".", py + 104, DANGER);
+        } else {
+            centered("This permanently removes it from the vault.", py + 84, DANGER);
+        }
+        centered("[Esc/N] Cancel        [Y] Delete", py + ph - 50, TEXT_DIM);
+    }
 }
 
 // Dispatch shortcut keys (L/X/M/R/SPACE/G/B/F/T/S/U) for handle_key_down (S3776 extraction)
@@ -1832,49 +1878,7 @@ void GalleryGrid::render(gfx::Renderer& r)
                         naming_.buf_chrome, true);
     }
 
-    // Delete-confirmation modal: names the target tile; deletion is irreversible.
-    if (naming_.confirm_delete) {
-        r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});   // veil
-
-        const float pw = 560;
-        const float ph = 200;
-        const float px = (W - pw) / 2;
-        const float py = (H - ph) / 2;
-        r.draw_round_rect({px, py, pw, ph}, RADIUS, SURFACE);
-        r.draw_round_rect({px, py, pw, ph}, RADIUS, DANGER, /*filled*/ false);
-
-        auto centered = [&](const std::string& s, float y, gfx::Color c) {
-            const auto tw = static_cast<float>(font_.measure(s));
-            r.draw_text(font_, px + (pw - tw) / 2, y, s, c);
-        };
-
-        if (naming_.batch_delete) {
-            const BatchDeleteSummary& s = naming_.batch_summary;
-            centered(std::format("Delete {} selected {}?", s.top_level,
-                                 s.top_level == 1 ? "item" : "items"), py + 28, TEXT);
-            centered(s.galleries > 0
-                         ? "This permanently removes them, including everything inside the galleries."
-                         : "This permanently removes them from the vault.",
-                     py + 72, DANGER);
-            centered(batch_delete_counts_line(s), py + 104, DANGER);
-            centered("[Esc/N] Cancel        [Y] Delete", py + ph - 50, TEXT_DIM);
-        } else {
-            const int s = nav_.selected();
-            const vault::IndexNode* node =
-                (s >= 0 && s < static_cast<int>(children_.size())) ? children_[s] : nullptr;
-            const std::string name = node ? node->name : std::string{};
-            centered("Delete \"" + fit_name(name, pw - 80) + "\"?", py + 28, TEXT);
-            if (node && node->is_gallery()) {
-                SubtreeCounts c;
-                count_subtree(*node, c);
-                centered("This permanently removes the gallery and everything in it.", py + 72, DANGER);
-                centered("Contains " + describe_subtree(c) + ".", py + 104, DANGER);
-            } else {
-                centered("This permanently removes it from the vault.", py + 84, DANGER);
-            }
-            centered("[Esc/N] Cancel        [Y] Delete", py + ph - 50, TEXT_DIM);
-        }
-    }
+    render_delete_confirm_modal(*this, r, W, H);
 
     // Compact-confirmation modal: shows the waste to reclaim (Phase 26).
     if (naming_.confirm_compact) {

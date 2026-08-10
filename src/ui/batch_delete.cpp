@@ -11,7 +11,7 @@
 
 namespace ui {
 
-std::vector<std::string> prune_descendant_paths(std::vector<std::string> paths)
+std::vector<std::string> prune_descendant_paths(const std::vector<std::string>& paths)
 {
     std::vector<std::string> out;
     out.reserve(paths.size());

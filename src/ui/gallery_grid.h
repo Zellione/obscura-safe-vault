@@ -170,6 +170,7 @@ void toggle_select();          // toggle the current item in the export selectio
     friend void handle_import_dialog_key(GalleryGrid& g, const SDL_KeyboardEvent& key);  // Z / O import dialogs
     friend void handle_ctrl_d_key(GalleryGrid& g);                                   // Ctrl+D duplicate finder
     friend void handle_delete_key(GalleryGrid& g);                                   // Del confirm
+    friend void render_delete_confirm_modal(GalleryGrid& g, gfx::Renderer& r, float W, float H);  // (S3776 extraction)
     friend bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key);     // detail panel scroll/toggle
     friend bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& key);  // L/X/M/R/SPACE/G/B/F/T/S/U shortcuts
     friend void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);  // cancelled import waste hint
@@ -343,6 +344,7 @@ void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
 void handle_import_dialog_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
 void handle_ctrl_d_key(GalleryGrid& g);
 void handle_delete_key(GalleryGrid& g);
+void render_delete_confirm_modal(GalleryGrid& g, gfx::Renderer& r, float W, float H);
 void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);
 [[nodiscard]] GalleryView current_gallery_view(const GalleryGrid& g);
 [[nodiscard]] std::string current_gallery_path(const GalleryGrid& g);  // Phase 50: for import status back nav

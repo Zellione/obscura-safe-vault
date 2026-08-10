@@ -84,8 +84,7 @@ FileOpOutcome run_delete_batch(vault::Vault& v, const std::vector<std::string>& 
         return oc;
     }
 
-    vault::RemoveBatchStats stats;
-    if (vault::remove_nodes_batch(v, paths, &stats) == vault::VaultResult::Ok) {
+    if (vault::RemoveBatchStats stats; vault::remove_nodes_batch(v, paths, &stats) == vault::VaultResult::Ok) {
         progress.done.store(item_total);
         oc.ok   = true;
         oc.done = item_total;

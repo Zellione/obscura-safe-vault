@@ -17,7 +17,7 @@ namespace ui {
 // selection can hold gallery "g" and "g/a.png"; submitting both would make the
 // batch report a phantom missing item). Component-boundary safe: "g2" is not a
 // descendant of "g". Input order is preserved.
-[[nodiscard]] std::vector<std::string> prune_descendant_paths(std::vector<std::string> paths);
+[[nodiscard]] std::vector<std::string> prune_descendant_paths(const std::vector<std::string>& paths);
 
 // Aggregate of what a batch delete will remove, for the confirm modal and the
 // progress bar. Galleries count recursively (a selected gallery contributes

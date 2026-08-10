@@ -45,8 +45,7 @@ bool CollectionBatchOps::handle_event(const SDL_Event& e)
     }
     if (!delete_paths_.empty()) {                    // Phase 74 delete confirm
         if (e.type != SDL_EVENT_KEY_DOWN) return true;
-        const SDL_Keycode k = e.key.key;
-        if (k == SDLK_ESCAPE || k == SDLK_N) {
+        if (const SDL_Keycode k = e.key.key; k == SDLK_ESCAPE || k == SDLK_N) {
             delete_paths_.clear();
         } else if (k == SDLK_Y) {
             queue_.set_exclusive(true);              // Phase 50 exclusivity
@@ -141,7 +140,7 @@ void CollectionBatchOps::request_delete(std::vector<std::string> node_paths,
         status = "Imports running — press Shift+I for status";
         return;
     }
-    auto paths = prune_descendant_paths(std::move(node_paths));
+    auto paths = prune_descendant_paths(node_paths);
     const BatchDeleteSummary s = summarize_batch_delete(vault_, paths);
     if (s.top_level == 0) {
         status = "Nothing selected to delete.";
