@@ -32,9 +32,11 @@ std::string templated_new_tag_category(std::string_view tag,
                                        const std::vector<std::string>& vocabulary,
                                        const vault::VaultSettings& settings)
 {
-    const bool exists = std::ranges::any_of(vocabulary,
-        [tag](const std::string& t) { return tag_ci_equal(t, tag); });
-    if (exists) return {};
+    if (const bool exists = std::ranges::any_of(vocabulary,
+            [tag](const std::string& t) { return tag_ci_equal(t, tag); });
+        exists) {
+        return {};
+    }
     const std::string_view prefix = vault::tag_category_prefix(tag);
     if (prefix.empty()) return {};
     for (const auto& c : settings.categories)

@@ -192,9 +192,9 @@ struct FieldTagMap {
     {
         std::vector<std::string> out = tags;
         for (const auto& t : tags)
-            for (const auto& e : by_tag)
-                if (ci_equal(e.first, t))
-                    out.insert(out.end(), e.second.begin(), e.second.end());
+            for (const auto& [tag, values] : by_tag)
+                if (ci_equal(tag, t))
+                    out.insert(out.end(), values.begin(), values.end());
         return out;
     }
 };
@@ -367,6 +367,23 @@ void collect_images_with_tag(const IndexNode& node, std::string_view prefix, std
     }
 }
 
+// Helper: accumulate a child's tags into the subtree union (case-insensitive).
+void accumulate_subtree_union(std::vector<std::string>& subtree_tags,
+                              const std::vector<std::string>& child_tags,
+                              const std::vector<std::string>& child_subtree, bool is_child_gallery)
+{
+    // For galleries, include the subtree recursion result.
+    const auto to_union = is_child_gallery ? compute_effective_tags(child_subtree, child_tags)
+                                           : child_tags;
+
+    for (const auto& tag : to_union) {
+        if (!std::ranges::any_of(subtree_tags,
+                                 [&](const auto& t) { return ci_equal(t, tag); })) {
+            subtree_tags.push_back(tag);
+        }
+    }
+}
+
 // Advanced-search DFS (Phase 18): evaluate `query` against every in-scope node,
 // cascading gallery tags, collecting each match with its relevance score.
 // Returns the union of tags from the subtree (including the node itself).
@@ -412,20 +429,7 @@ std::vector<std::string> adv_search_dfs(const IndexNode& node, std::string_view 
             }
         }
 
-        // Accumulate this child's tags into the subtree union.
-        // For galleries, include the subtree recursion result.
-        std::vector<std::string> to_union = child.tags;
-        if (child.is_gallery()) {
-            to_union = compute_effective_tags(child_subtree, child.tags);
-        }
-
-        // Union into subtree_tags (case-insensitive).
-        for (const auto& tag : to_union) {
-            if (!std::ranges::any_of(subtree_tags,
-                                     [&](const auto& t) { return ci_equal(t, tag); })) {
-                subtree_tags.push_back(tag);
-            }
-        }
+        accumulate_subtree_union(subtree_tags, child.tags, child_subtree, child.is_gallery());
     }
 
     return subtree_tags;
@@ -1165,13 +1169,15 @@ VaultResult add_tag_batch(Vault& v, std::span<const std::string> node_paths,
 
     bool changed = false;
     for (const std::string& path : node_paths) {
-        IndexNode* node = v.resolve_node(path);
-        if (!node) continue;   // missing: skipped, not an error
-        const bool dup = std::ranges::any_of(node->tags,
-            [&trimmed](const std::string& e) { return ci_equal(e, trimmed); });
-        if (dup) continue;
-        node->tags.emplace_back(trimmed);
-        changed = true;
+        if (IndexNode* node = v.resolve_node(path); node) {
+            const bool dup = std::ranges::any_of(node->tags,
+                [&trimmed](const std::string& e) { return ci_equal(e, trimmed); });
+            if (!dup) {
+                node->tags.emplace_back(trimmed);
+                changed = true;
+            }
+        }
+        // missing: skipped, not an error
     }
     // One crash-safe index swap for the whole batch; none for a no-op batch.
     return changed ? v.commit_index() : Ok;

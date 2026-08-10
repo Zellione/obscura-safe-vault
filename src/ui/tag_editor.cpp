@@ -109,7 +109,7 @@ void TagEditor::add_chosen_tag()
 
     // Check if this is a brand-new tag of a templated category (Phase 73).
     // Materialize settings once for use in both the detection and template lookup.
-    const auto s = vault::vault_settings(vault_);
+    const auto& s = vault::vault_settings(vault_);
     const std::string sheet_category =
         templated_new_tag_category(chosen, vocabulary_, s);
 

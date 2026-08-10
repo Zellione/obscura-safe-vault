@@ -28,12 +28,13 @@ constexpr float RADIUS = 4.0f;
 
 TemplateEditAction template_edit_action(SDL_Keycode key)
 {
+    using enum TemplateEditAction;
     switch (key) {
-        case SDLK_A:      return TemplateEditAction::AddField;
-        case SDLK_R:      return TemplateEditAction::RenameField;
-        case SDLK_DELETE: return TemplateEditAction::RemoveField;
-        case SDLK_ESCAPE: return TemplateEditAction::Back;
-        default:          return TemplateEditAction::None;
+        case SDLK_A:      return AddField;
+        case SDLK_R:      return RenameField;
+        case SDLK_DELETE: return RemoveField;
+        case SDLK_ESCAPE: return Back;
+        default:          return None;
     }
 }
 
@@ -69,11 +70,12 @@ void TemplateEditorPanel::close()
 
 void TemplateEditorPanel::transition(Stage s)
 {
+    using enum Stage;
     stage_ = s;
-    if (s != Stage::NameField) {
+    if (s != NameField) {
         skip_text_input_ = false;  // Clear the skip flag when leaving NameField
     }
-    if (s == Stage::PickCategory || s == Stage::EditFields) {
+    if (s == PickCategory || s == EditFields) {
         name_buf_.clear();
         error_.clear();
     }
@@ -81,13 +83,14 @@ void TemplateEditorPanel::transition(Stage s)
 
 bool TemplateEditorPanel::handle_event(const SDL_Event& e)
 {
+    using enum Stage;
     if (!active_) return false;
 
     switch (stage_) {
-        case Stage::PickCategory:    return handle_event_pick_category(e);
-        case Stage::EditFields:      return handle_event_edit_fields(e);
-        case Stage::NameField:       return handle_event_name_field(e);
-        case Stage::ConfirmRemove:   return handle_event_confirm_remove(e);
+        case PickCategory:    return handle_event_pick_category(e);
+        case EditFields:      return handle_event_edit_fields(e);
+        case NameField:       return handle_event_name_field(e);
+        case ConfirmRemove:   return handle_event_confirm_remove(e);
         default:                      return false;
     }
 }
@@ -107,15 +110,13 @@ bool TemplateEditorPanel::handle_event_pick_category(const SDL_Event& e)
         case SDLK_KP_ENTER:
             if (const int sel = nav_.selected(); sel >= 0) {
                 const auto& cats = vault::vault_settings(vault_).categories;
-                if (sel < static_cast<int>(cats.size())) {
-                    cat_name_ = cats[sel].name;
-                    transition(Stage::EditFields);
-                    // Set up field list navigation
-                    const auto& fields = cats[sel].fields;
-                    nav_.set_count(static_cast<int>(fields.size()));
-                    if (!fields.empty()) nav_.select(0);
-                    else nav_.select(-1);
-                }
+                if (sel >= static_cast<int>(cats.size())) return true;
+                cat_name_ = cats[sel].name;
+                transition(Stage::EditFields);
+                // Set up field list navigation
+                const auto& fields = cats[sel].fields;
+                nav_.set_count(static_cast<int>(fields.size()));
+                nav_.select(fields.empty() ? -1 : 0);
             }
             return true;
         case SDLK_ESCAPE:
@@ -130,7 +131,7 @@ bool TemplateEditorPanel::handle_event_edit_fields(const SDL_Event& e)
 {
     if (e.type != SDL_EVENT_KEY_DOWN) return true;
 
-    const auto s = vault::vault_settings(vault_);
+    const auto& s = vault::vault_settings(vault_);
     auto tmpl = vault::category_template(s, cat_name_);
 
     switch (e.key.key) {
@@ -249,7 +250,7 @@ bool TemplateEditorPanel::handle_event_name_field(const SDL_Event& e)
             transition(Stage::EditFields);
             {
                 // Reload and restore selection
-                const auto s2 = vault::vault_settings(vault_);
+                const auto& s2 = vault::vault_settings(vault_);
                 auto tmpl = vault::category_template(s2, cat_name_);
                 nav_.set_count(static_cast<int>(tmpl.size()));
                 if (!tmpl.empty()) nav_.select(0);
@@ -260,7 +261,7 @@ bool TemplateEditorPanel::handle_event_name_field(const SDL_Event& e)
             SDL_StopTextInput(win_.sdl_window());
             transition(Stage::EditFields);
             {
-                const auto s2 = vault::vault_settings(vault_);
+                const auto& s2 = vault::vault_settings(vault_);
                 auto tmpl = vault::category_template(s2, cat_name_);
                 nav_.set_count(static_cast<int>(tmpl.size()));
                 if (!tmpl.empty()) nav_.select(0);
@@ -286,7 +287,7 @@ bool TemplateEditorPanel::handle_event_confirm_remove(const SDL_Event& e)
             error_.clear();
             transition(Stage::EditFields);
             {
-                const auto s2 = vault::vault_settings(vault_);
+                const auto& s2 = vault::vault_settings(vault_);
                 auto tmpl = vault::category_template(s2, cat_name_);
                 nav_.set_count(static_cast<int>(tmpl.size()));
                 if (!tmpl.empty()) nav_.select(0);
@@ -297,7 +298,7 @@ bool TemplateEditorPanel::handle_event_confirm_remove(const SDL_Event& e)
         case SDLK_ESCAPE:
             transition(Stage::EditFields);
             {
-                const auto s2 = vault::vault_settings(vault_);
+                const auto& s2 = vault::vault_settings(vault_);
                 auto tmpl = vault::category_template(s2, cat_name_);
                 nav_.set_count(static_cast<int>(tmpl.size()));
                 if (!tmpl.empty()) nav_.select(0);
@@ -310,13 +311,14 @@ bool TemplateEditorPanel::handle_event_confirm_remove(const SDL_Event& e)
 
 void TemplateEditorPanel::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
 {
+    using enum Stage;
     if (!active_) return;
 
     switch (stage_) {
-        case Stage::PickCategory:  render_pick_category(r, font, W, H); break;
-        case Stage::EditFields:    render_edit_fields(r, font, W, H); break;
-        case Stage::NameField:     render_name_field(r, font, W, H); break;
-        case Stage::ConfirmRemove: render_confirm_remove(r, font, W, H); break;
+        case PickCategory:  render_pick_category(r, font, W, H); break;
+        case EditFields:    render_edit_fields(r, font, W, H); break;
+        case NameField:     render_name_field(r, font, W, H); break;
+        case ConfirmRemove: render_confirm_remove(r, font, W, H); break;
     }
 }
 
@@ -371,7 +373,7 @@ void TemplateEditorPanel::render_edit_fields(gfx::Renderer& r, gfx::FontAtlas& f
                                              float W, float H)
 {
     using namespace gfx::theme;
-    const auto s = vault::vault_settings(vault_);
+    const auto& s = vault::vault_settings(vault_);
     auto tmpl = vault::category_template(s, cat_name_);
     const float ph = font.pixel_height();
     const float row_h = ph + 8;

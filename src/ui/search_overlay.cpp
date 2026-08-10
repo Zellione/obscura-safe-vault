@@ -107,8 +107,8 @@ void SearchOverlay::filter_results()
                                                        ? expand_field_value_tags(b->effective_tags, settings)
                                                        : b->effective_tags;
                           const int score_a = score(tokens, a->name, a_match_tags);
-                          const int score_b = score(tokens, b->name, b_match_tags);
-                          if (score_a != score_b) {
+                          if (const int score_b = score(tokens, b->name, b_match_tags);
+                              score_a != score_b) {
                               return score_a > score_b;
                           }
                           return a->name < b->name;
