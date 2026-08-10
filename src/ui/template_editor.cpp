@@ -278,8 +278,8 @@ bool TemplateEditorPanel::handle_event_confirm_remove(const SDL_Event& e)
 
     switch (e.key.key) {
         case SDLK_Y: {
-            auto s = vault::vault_settings(vault_);
-            if (!vault::remove_template_field(s, cat_name_, field_to_remove_) ||
+            if (auto s = vault::vault_settings(vault_);
+                !vault::remove_template_field(s, cat_name_, field_to_remove_) ||
                 vault::set_vault_settings(vault_, std::move(s)) != vault::VaultResult::Ok) {
                 error_ = "Could not remove the field";
                 return true;  // Stay in ConfirmRemove on persist failure
