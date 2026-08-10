@@ -554,6 +554,7 @@ project "osv_tests"
         "src/ui/result_grid.cpp",
         "src/ui/export.cpp",
         "src/ui/delete_summary.cpp",
+        "src/ui/batch_delete.cpp",
         "src/ui/child_counts.cpp",
         "src/ui/detail_model.cpp",
         "src/ui/dup_layout.cpp",

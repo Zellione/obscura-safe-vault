@@ -74,6 +74,14 @@ public:
     bool start_delete(vault::Vault& v, std::string base, std::string name,
                       bool is_gallery, int item_total);
 
+    // Delete every node named by `node_paths` (full slash-paths; media and
+    // gallery subtrees alike) in ONE vault::remove_nodes_batch commit (Phase 74).
+    // `item_total` is the pre-counted progress-bar unit count (media + galleries,
+    // all depths — BatchDeleteSummary::item_total); done jumps to total on the
+    // single atomic commit.
+    bool start_delete_batch(vault::Vault& v, std::vector<std::string> node_paths,
+                            int item_total);
+
     // Move/Copy a list of media (`filenames` in src/src_gallery) into dst/dst_gallery
     // (dst may be the same vault as src). `label` names the destination vault.
     bool start_transfer_images(vault::Vault& src, std::string src_gallery,

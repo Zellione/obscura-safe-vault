@@ -151,6 +151,15 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   `RemoveBatchStats{removed, missing}`, not errors. Locked if locked; IoError if the commit
   fails (tree already mutated — same contract as `remove_image`'s failed commit). Main-thread
   only (mutates the tree). Tests: `tests/vault/test_remove_batch.cpp`.
+- `vault::remove_nodes_batch(v, span<const string> node_paths, RemoveBatchStats*)` (Phase 74
+  multi-select delete, free friend beside remove_media_batch — which stays media-only and
+  unchanged) — same one-commit + one-auto-reclaim contract, but a path may name a media node
+  OR a gallery subtree (`erase_any_child`; a gallery erase orphans every descendant chunk,
+  exactly like `remove_gallery`). Missing paths and the un-erasable root ("") are counted in
+  stats, not errors. Called from `FileOpJob::start_delete_batch` on the file-op worker (the
+  worker owns the vault handle while active — the same threading contract as every FileOpJob
+  op, so "main-thread only" is satisfied by exclusivity, not literal thread identity).
+  Tests: `tests/vault/test_remove_batch.cpp`.
 - `vault::set_favorites_batch(v, span<const string> node_paths, bool value)` (Phase 68
   multiselect, free friend beside remove_media_batch) — sets every resolving path's favorite
   flag (galleries and media alike) to `value`, ONE `commit_index()` — and none at all when no

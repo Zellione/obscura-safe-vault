@@ -112,6 +112,7 @@ private:
     void toggle_favorite_batch();    // B
     void start_export();             // X: consent modal first
     void start_transfer();           // M: per-parent groups + gallery subtrees
+    void start_delete_selection();   // Del: batch delete
 
     gfx::Window&    win_;
     gfx::FontAtlas& font_;

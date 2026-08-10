@@ -71,6 +71,32 @@ FileOpOutcome run_delete(vault::Vault& v, const std::string& base, const std::st
     return oc;
 }
 
+FileOpOutcome run_delete_batch(vault::Vault& v, const std::vector<std::string>& paths,
+                               int item_total, vault::OpProgress& progress)
+{
+    progress.total.store(item_total);
+
+    FileOpOutcome oc;
+    oc.kind  = FileOpKind::Delete;
+    oc.total = item_total;
+    if (progress.cancel.load()) {   // cancelled before it ran — nothing removed
+        oc.ok = true; oc.cancelled = true; oc.status = "Delete cancelled";
+        return oc;
+    }
+
+    if (vault::RemoveBatchStats stats; vault::remove_nodes_batch(v, paths, &stats) == vault::VaultResult::Ok) {
+        progress.done.store(item_total);
+        oc.ok   = true;
+        oc.done = item_total;
+        oc.status = std::format("Removed {} {}", stats.removed,
+                                stats.removed == 1 ? "item" : "items");
+        if (stats.missing > 0) oc.status += std::format(" ({} missing)", stats.missing);
+    } else {
+        oc.error = "Could not delete the selection";
+    }
+    return oc;
+}
+
 // Counts of one finished transfer, bundled for S107.
 struct TransferCounts {
     int done = 0;
@@ -234,6 +260,15 @@ bool FileOpJob::start_delete(vault::Vault& v, std::string base, std::string name
                   [this, &v, base = std::move(base), name = std::move(name),
                    is_gallery, item_total]() {
         return run_delete(v, base, name, is_gallery, item_total, progress_);
+    });
+}
+
+bool FileOpJob::start_delete_batch(vault::Vault& v, std::vector<std::string> node_paths,
+                                   int item_total)
+{
+    return launch(FileOpKind::Delete,
+                  [this, &v, paths = std::move(node_paths), item_total]() {
+        return run_delete_batch(v, paths, item_total, progress_);
     });
 }
 

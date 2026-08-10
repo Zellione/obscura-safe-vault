@@ -15,6 +15,7 @@
 #include "ui/consent_dialog.h"
 #include "ui/volume_set_dialog.h"
 #include "ui/delete_summary.h"
+#include "ui/batch_delete.h"
 #include "ui/detail_panel.h"
 #include "ui/failure_list_dialog.h"
 #include "ui/file_op_job.h"
@@ -119,6 +120,7 @@ private:
     void handle_naming_key(const SDL_Event& e);          // new-gallery text entry
     void handle_password_key(const SDL_Event& e);         // Phase 35: archive-password text entry
     void toggle_or_open();                               // Space: select image / open
+    [[nodiscard]] std::vector<std::string> selected_delete_paths() const;  // Phase 74: paths from live selection
     void refresh();
     void open_selected();
     void go_up();
@@ -168,6 +170,7 @@ void toggle_select();          // toggle the current item in the export selectio
     friend void handle_import_dialog_key(GalleryGrid& g, const SDL_KeyboardEvent& key);  // Z / O import dialogs
     friend void handle_ctrl_d_key(GalleryGrid& g);                                   // Ctrl+D duplicate finder
     friend void handle_delete_key(GalleryGrid& g);                                   // Del confirm
+    friend void render_delete_confirm_modal(GalleryGrid& g, gfx::Renderer& r, float W, float H);  // (S3776 extraction)
     friend bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key);     // detail panel scroll/toggle
     friend bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& key);  // L/X/M/R/SPACE/G/B/F/T/S/U shortcuts
     friend void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);  // cancelled import waste hint
@@ -286,6 +289,11 @@ void toggle_select();          // toggle the current item in the export selectio
         PasswordPrompt password;
         FileOpJob    file_op;          // background executor for export/delete/compact (Phase 25/26)
         bool         confirm_delete = false;  // Del on a media tile: awaiting Y/N confirm
+        // Phase 74: non-empty while confirm_delete refers to a multi-selection
+        // (the aggregate summary is snapshotted at Del time for the modal; the
+        // path list is rebuilt from the live selection at confirm time).
+        BatchDeleteSummary batch_summary;
+        bool               batch_delete = false;
         bool         confirm_compact = false; // Shift+C on the gallery: awaiting Y/N compact confirm (Phase 26)
         std::string  tag_target;       // gallery path awaiting a tag-list import (Shift+G, Phase 21)
     };
@@ -336,6 +344,7 @@ void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
 void handle_import_dialog_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
 void handle_ctrl_d_key(GalleryGrid& g);
 void handle_delete_key(GalleryGrid& g);
+void render_delete_confirm_modal(GalleryGrid& g, gfx::Renderer& r, float W, float H);
 void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);
 [[nodiscard]] GalleryView current_gallery_view(const GalleryGrid& g);
 [[nodiscard]] std::string current_gallery_path(const GalleryGrid& g);  // Phase 50: for import status back nav

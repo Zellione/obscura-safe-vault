@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "ui/batch_delete.h"
 #include "ui/consent_dialog.h"
 #include "ui/file_op_job.h"
 #include "ui/parent_group.h"
@@ -54,7 +55,7 @@ public:
 
     // Any modal of ours (consent / transfer dialog / running job) captures input.
     [[nodiscard]] bool modal_active() const noexcept
-    { return consent_.active() || transfer_.active() || job_.active(); }
+    { return consent_.active() || transfer_.active() || job_.active() || !delete_paths_.empty(); }
 
     // Modal-priority input. Returns true when the event was consumed.
     bool handle_event(const SDL_Event& e);
@@ -81,6 +82,11 @@ public:
     void request_transfer(std::vector<ParentGroup> media_groups,
                           std::vector<std::string> gallery_paths, std::string& status);
 
+    // Del: aggregate confirm modal → one-commit batch delete of the selection
+    // (Phase 74). Paths are full slash-paths; descendants of selected galleries
+    // are pruned. Refuses (status message) while imports run.
+    void request_delete(const std::vector<std::string>& node_paths, std::string& status);
+
     // Draw the consent modal, the transfer dialog, and the job progress modal.
     void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
 
@@ -97,6 +103,10 @@ private:
     TransferDialog transfer_;
     std::function<std::vector<const vault::IndexNode*>()> collect_;
     bool           had_exclusive_ = false;
+
+    // Phase 74 delete-confirm modal: non-empty paths == modal is up.
+    std::vector<std::string> delete_paths_;
+    BatchDeleteSummary       delete_summary_;
 };
 
 } // namespace ui

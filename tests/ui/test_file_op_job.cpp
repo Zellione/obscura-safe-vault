@@ -407,3 +407,29 @@ TEST(file_op_job_transfer_gallery_combine_policy)
     CHECK(oc->ok);
     CHECK(find_child(dst, "G", "a.jpg") != nullptr);   // merged, not errored
 }
+
+// Phase 74: batch delete removes multiple items in one commit
+TEST(file_op_job_delete_batch_removes_selection_in_one_run)
+{
+    TempVault tv("batch");
+    vault::Vault v;
+    using enum vault::VaultResult;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kKdf, v) == Ok);
+    REQUIRE(v.create_gallery("g") == Ok);
+    REQUIRE(v.add_image("g", blob(300, 1), "a.png") == Ok);
+    REQUIRE(v.add_image("", blob(300, 2), "b.png") == Ok);
+    REQUIRE(v.add_image("", blob(300, 3), "keep.png") == Ok);
+
+    ui::FileOpJob job;
+    // item_total: gallery g (1 image + itself = 2) + b.png = 3
+    REQUIRE(job.start_delete_batch(v, {"g", "b.png", "ghost.png"}, 3));
+    auto oc = await_outcome(job);
+    REQUIRE(oc.has_value());
+    CHECK(oc->ok);
+    CHECK(oc->kind == ui::FileOpKind::Delete);
+    CHECK_EQ(oc->done, 3);
+    CHECK(oc->status.find("Removed 2 items") != std::string::npos);
+    CHECK(oc->status.find("(1 missing)") != std::string::npos);
+    CHECK_EQ(v.list("").size(), size_t{1});
+    CHECK_EQ(v.list("")[0]->name, std::string("keep.png"));
+}
