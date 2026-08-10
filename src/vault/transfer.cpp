@@ -48,6 +48,13 @@ struct CopyCtx {
     bool                     commit_failed = false;
 };
 
+// Result of collision resolution (bundled for cpp:S107).
+struct CollisionResolution {
+    VaultResult code;           // Ok, AlreadyExists, or a combine result
+    std::string dest_name;      // Name to use at destination (rewritten by Suffix)
+    bool        handled;        // True if combine_galleries ran; caller returns immediately
+};
+
 // Append `gallery`'s slash-path child name; "" stays "".
 std::string child_path(std::string_view gallery, std::string_view name)
 {
@@ -142,24 +149,22 @@ std::optional<std::string> unique_child_name(const Vault& dst, std::string_view 
 
 // Resolve a same-named child at dst_parent per `policy`: Fail/combine-into-media
 // -> AlreadyExists; Suffix -> rewrites dest_name; Combine (gallery) -> runs the
-// merge and reports via `handled`. Always returns a result; if `handled=true`,
-// combine_galleries ran and transfer_gallery should return its result immediately.
+// merge and reports via handled. Returns collision resolution with dest_name and
+// handled flag; if handled=true, combine_galleries ran and caller returns immediately.
 // Semantics preserved: dispatch before the progress->total store; combine tally
-// mapping media_moved→done, media_skipped→skipped.
-VaultResult resolve_dest_collision(Vault& src, std::string_view src_gallery, Vault& dst,
-                                   std::string_view dst_parent, TransferMode mode,
-                                   const GalleryTransferOpts& opts, std::string_view name,
-                                   std::string& dest_name, bool& handled)
+// mapping media_moved→done, media_skipped→skipped. S107: returns struct instead of
+// output params to fit within 7-parameter cap.
+CollisionResolution resolve_dest_collision(Vault& src, std::string_view src_gallery, Vault& dst,
+                                           std::string_view dst_parent, TransferMode mode,
+                                           const GalleryTransferOpts& opts, std::string_view name)
 {
     using enum VaultResult;
     for (const auto* c : dst.list(dst_parent)) {
         if (c->name != name) continue;
         if (opts.policy == CollisionPolicy::Suffix) {
             auto fresh = unique_child_name(dst, dst_parent, name);
-            if (!fresh) return AlreadyExists;   // probe bound exhausted
-            dest_name = std::move(*fresh);
-            handled = false;
-            return Ok;
+            if (!fresh) return {AlreadyExists, {}, false};   // probe bound exhausted
+            return {Ok, std::move(*fresh), false};
         }
         if (opts.policy == CollisionPolicy::Combine && c->is_gallery()) {
             OpProgress* progress = opts.progress;
@@ -171,14 +176,11 @@ VaultResult resolve_dest_collision(Vault& src, std::string_view src_gallery, Vau
                 tally->done    += ct.media_moved;
                 tally->skipped += ct.media_skipped;
             }
-            handled = true;
-            return r;
+            return {r, {}, true};
         }
-        handled = false;
-        return AlreadyExists;   // Fail policy, or Combine into a non-gallery child
+        return {AlreadyExists, {}, false};   // Fail policy, or Combine into a non-gallery child
     }
-    handled = false;
-    return Ok;   // no collision
+    return {Ok, {}, false};   // no collision
 }
 
 // Locate a media node (image or video) by name in `gallery` (nullptr if absent).
@@ -536,11 +538,11 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
     if (!src_is_gallery) return NotFound;
 
     std::string dest_name = name;
-    bool handled = false;
-    const VaultResult collision_result = resolve_dest_collision(
-        src, src_gallery, dst, dst_parent, mode, opts, name, dest_name, handled);
-    if (handled) return collision_result;
-    if (collision_result != Ok) return collision_result;
+    const CollisionResolution collision = resolve_dest_collision(
+        src, src_gallery, dst, dst_parent, mode, opts, name);
+    if (collision.handled) return collision.code;
+    if (collision.code != Ok) return collision.code;
+    if (!collision.dest_name.empty()) dest_name = collision.dest_name;
     const std::string dest_root = dst_parent.empty() ? dest_name
                                                      : std::string(dst_parent) + "/" + dest_name;
 
