@@ -107,9 +107,11 @@ void TagEditor::add_chosen_tag()
         from_sugg ? suggestions_[sugg_sel_] : trim_surrounding(new_tag_buf_.str());
     if (chosen.empty()) { return; }
 
-    // Check if this is a brand-new tag of a templated category (Phase 73)
+    // Check if this is a brand-new tag of a templated category (Phase 73).
+    // Materialize settings once for use in both the detection and template lookup.
+    const auto s = vault::vault_settings(vault_);
     const std::string sheet_category =
-        templated_new_tag_category(chosen, vocabulary_, vault::vault_settings(vault_));
+        templated_new_tag_category(chosen, vocabulary_, s);
 
     using enum vault::VaultResult;
     if (vault::add_tag_batch(vault_, node_paths_, chosen) != Ok) {
@@ -125,7 +127,6 @@ void TagEditor::add_chosen_tag()
 
     // Open the template fields form if applicable (Phase 73)
     if (!sheet_category.empty()) {
-        const auto s = vault::vault_settings(vault_);
         const auto tmpl = vault::category_template(s, sheet_category);
         fields_form_.open(chosen, sheet_category,
                           std::vector<std::string>(tmpl.begin(), tmpl.end()),
