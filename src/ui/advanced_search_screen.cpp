@@ -334,6 +334,17 @@ void start_transfer_results(AdvancedSearchScreen& s)
     s.mark_dirty();
 }
 
+void start_delete_results(AdvancedSearchScreen& s)
+{
+    std::vector<std::string> paths;
+    for (const vault::SearchHit* h : selected_hits(s.result_view_)) {
+        paths.push_back(h->path);
+    }
+    if (paths.empty()) { return; }
+    s.ops_.request_delete(std::move(paths), s.status_);
+    s.mark_dirty();
+}
+
 ITextInput* AdvancedSearchScreen::active_buffer()
 {
     // Check if saved_panel is in save mode (has an active buffer)
@@ -512,6 +523,10 @@ void AdvancedSearchScreen::handle_key(const SDL_KeyboardEvent& key)
     if (focus_ == Focus::Results && key.key == SDLK_X) { start_export_results(*this); return; }
     if (focus_ == Focus::Results && key.key == SDLK_M && (key.mod & SDL_KMOD_SHIFT) == 0) {
         start_transfer_results(*this);
+        return;
+    }
+    if (focus_ == Focus::Results && key.key == SDLK_DELETE) {
+        start_delete_results(*this);
         return;
     }
 
@@ -879,6 +894,7 @@ void AdvancedSearchScreen::render(gfx::Renderer& r)
     }
 
     rename_.render(r, font_, W, H);
+    ops_.render(r, font_, W, H);
 }
 
 void AdvancedSearchScreen::render_builder(gfx::Renderer& r, float x, float top, float colw)
@@ -1069,7 +1085,7 @@ std::vector<ui::HelpGroup> AdvancedSearchScreen::help_groups() const
             {"Ctrl+R", "Clear query"}, {"R", "Rename focused result"},
             {"Space", "Select result"}, {"Ctrl+A", "Select all results"},
             {"B", "Favorite (acts on selection)"}, {"X", "Export selection"},
-            {"M", "Move/copy selection"},
+            {"M", "Move/copy selection"}, {"Del", "Delete selection"},
             {"Ctrl+D", "Toggle the detail panel"},
         }},
         {"Navigate", {{"Esc", "Back"}}},

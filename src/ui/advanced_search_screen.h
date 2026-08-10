@@ -121,6 +121,7 @@ private:
     friend void toggle_favorite_results(AdvancedSearchScreen& s);   // B
     friend void start_export_results(AdvancedSearchScreen& s);      // X: consent first
     friend void start_transfer_results(AdvancedSearchScreen& s);    // M: grouped
+    friend void start_delete_results(AdvancedSearchScreen& s);      // Del: batch delete
 
     // Committed-tag selection within the focused tag field (Include/Exclude/Group).
     // Kept as free functions (friends) so they don't count against the class method
