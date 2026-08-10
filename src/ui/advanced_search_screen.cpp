@@ -341,7 +341,7 @@ void start_delete_results(AdvancedSearchScreen& s)
         paths.push_back(h->path);
     }
     if (paths.empty()) { return; }
-    s.ops_.request_delete(std::move(paths), s.status_);
+    s.ops_.request_delete(paths, s.status_);
     s.mark_dirty();
 }
 

@@ -267,7 +267,7 @@ void FavoritesScreen::start_delete_selection()
         }
     }
     if (paths.empty()) { return; }
-    ops_.request_delete(std::move(paths), status_);
+    ops_.request_delete(paths, status_);
     mark_dirty();
 }
 

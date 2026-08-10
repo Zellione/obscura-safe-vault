@@ -132,7 +132,7 @@ void CollectionBatchOps::request_transfer(std::vector<ParentGroup> media_groups,
     transfer_.open_collection(std::move(media_groups), std::move(gallery_paths));
 }
 
-void CollectionBatchOps::request_delete(std::vector<std::string> node_paths,
+void CollectionBatchOps::request_delete(const std::vector<std::string>& node_paths,
                                         std::string& status)
 {
     if (modal_active() || busy()) { return; }

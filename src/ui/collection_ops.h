@@ -85,7 +85,7 @@ public:
     // Del: aggregate confirm modal → one-commit batch delete of the selection
     // (Phase 74). Paths are full slash-paths; descendants of selected galleries
     // are pruned. Refuses (status message) while imports run.
-    void request_delete(std::vector<std::string> node_paths, std::string& status);
+    void request_delete(const std::vector<std::string>& node_paths, std::string& status);
 
     // Draw the consent modal, the transfer dialog, and the job progress modal.
     void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
