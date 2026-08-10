@@ -598,7 +598,9 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   When a name lacks the UTF-8 flag (bit 11), decodes via a fixed 128-entry CP437->Unicode table
   (0x80-0xFF; 0x00-0x7F ASCII), unless the raw bytes already parse as valid UTF-8 (passed
   through). Shift_JIS/other double-byte out of scope (imports safely, mis-decoded as CP437).
-  Pure, unit-tested; used by zip_import's read_entry_list.
+  Pure, unit-tested; used by zip_import's read_entry_list. `is_valid_utf8(string_view)` is
+  public since Phase 72 (also used by ArchiveReader's entry-name choice): conservative —
+  rejects overlong encodings, surrogate halves, >U+10FFFF.
 - `zip_import.*` — ZIP/CBZ import executor: miniz reader -> mlock'd SecureBytes (one entry at a
   time, no temp file) -> Vault::add_image/add_video by `image::detect_format`.
   import_cbz reuses the per-entry path over build_cbz_plan (`.cbz` -> one
@@ -623,6 +625,19 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `archive_read_open_filenames` — libarchive's RAR multivolume support only works file-oriented,
   because each volume carries its own header and concatenation truncates. Paths are NOT
   normalised here; `normalize_user_path` stays at the boundary where paths enter (volume_import).
+  On Windows the wide `archive_read_open_filenames_w` is used (Phase 72) — the narrow variant
+  reaches fopen through the ANSI code page and cannot open CJK volume paths.
+  **Entry names (Phase 72):** `scan_entries` names each entry via the file-local
+  `entry_name_utf8`: the narrow `archive_entry_pathname` IF it is valid UTF-8 (authoritative
+  raw bytes for tar), else the wide `archive_entry_pathname_w` converted locale-independently
+  through `std::filesystem::path` (the Windows path — libarchive on Win32 always keeps the
+  wide form even when the ACP conversion fails), else the raw narrow bytes (legacy tar;
+  `sanitize_node_name` repairs downstream). Depends on `platform::init_locale()` having run
+  (app/test main): libarchive converts 7z/RAR UTF-16 names through the current locale at
+  parse time, and under `"C"` every accessor returns NULL (pre-fix such entries collapsed to
+  "unnamed"). Test fixture: `tests/ui/fixtures/cjk_names.7z.uu` — a committed real-7-Zip
+  archive (uuencoded), because libarchive's own 7z WRITER converts names through the locale
+  and cannot produce CJK names under `"C"` (archive_test_helpers' make_archive documents this).
 - `archive_import.*` — import_archive/import_archive_cbz: mirrors zip_import's structure but
   backed by ArchiveReader, covering .7z/.rar/.tar(+.gz/.xz)/.cbr/.cb7/.cbt. Declared
   unconditionally; the .cpp branches internally on OSV_VENDORED_ARCHIVE, returning a graceful

@@ -15,12 +15,17 @@
 // printf/strtod to decimal commas and silently corrupt any formatted-number
 // round trip.
 //
-// Windows note: libarchive on Win32 converts with WideCharToMultiByte(GetACP())
-// — the CRT locale is not consulted, so this helper cannot fix the narrow
-// accessor there. It does not need to: on Win32 libarchive always keeps the
-// wide name (AES_SET_WCS), and ui::ArchiveReader's entry_name_utf8 falls back
-// to archive_entry_pathname_w. The setlocale here is still correct for CRT
-// consistency and is a no-op for that path.
+// Windows is deliberately a NO-OP (stays on "C"). Two reasons, both libarchive:
+// (1) it doesn't need the locale there — on Win32 libarchive always keeps the
+// wide name (AES_SET_WCS) for UTF-16 formats, and ui::ArchiveReader's
+// entry_name_utf8 falls back to archive_entry_pathname_w; (2) setting the CRT
+// locale would actively BREAK tar: libarchive derives its codepage from
+// setlocale(LC_CTYPE, NULL) (archive_string.c get_current_codepage), and any
+// non-"C" value makes default_conversion_for_read build an OEM(CP437)→locale
+// conversion for tar names — mangling raw UTF-8 tar bytes into valid-but-wrong
+// UTF-8 that the narrow-name-first heuristic then trusts (caught by
+// archive_import_tar_cjk_entry_names on Windows CI). Under "C" it applies no
+// conversion and raw tar bytes survive.
 //
 // Call once, from main(), before any threads exist — setlocale is not
 // thread-safe against concurrent locale-dependent calls.
@@ -36,11 +41,7 @@ namespace platform {
 
 inline void init_locale()
 {
-#if defined(_WIN32)
-    // UCRT (Win10 1803+) accepts an explicit UTF-8 locale; on failure the
-    // process stays on "C", which degrades gracefully (see Windows note).
-    (void)std::setlocale(LC_CTYPE, ".UTF-8");
-#else
+#if !defined(_WIN32)
     // The user's environment locale first (respects their UTF-8 variant);
     // if that lands on a non-UTF-8 codeset (headless CI exporting LANG=C),
     // force C.UTF-8 (glibc and musl both ship it).

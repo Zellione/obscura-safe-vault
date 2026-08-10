@@ -56,9 +56,13 @@ unaffected: it reads raw name bytes and `decode_zip_entry_name` handles them.
 
 - **`platform::init_locale()`** (`platform/locale_init.h`): switches
   **LC_CTYPE only** (never LC_NUMERIC — decimal-comma corruption) to a UTF-8
-  locale at startup: env locale on POSIX with a `C.UTF-8` fallback, `.UTF-8`
-  on Windows UCRT. Called from `app/main.cpp` and `tests/test_main.cpp`
-  before any threads exist.
+  locale at startup: env locale on POSIX with a `C.UTF-8` fallback. Called
+  from `app/main.cpp` and `tests/test_main.cpp` before any threads exist.
+  **Deliberate no-op on Windows**: libarchive keeps the wide name there
+  regardless (the `entry_name_utf8` fallback), and a non-"C" CRT locale makes
+  libarchive build an OEM(CP437)→locale conversion for tar names that mangles
+  raw UTF-8 bytes into valid-but-wrong UTF-8 (caught by
+  `archive_import_tar_cjk_entry_names` on Windows CI).
 - **`ArchiveReader` `entry_name_utf8`**: narrow name if it is valid UTF-8
   (authoritative for raw-byte formats like tar — byte-identical pass-through),
   else the **wide** name converted locale-independently via
