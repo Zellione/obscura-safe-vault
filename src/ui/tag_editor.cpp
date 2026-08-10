@@ -107,6 +107,10 @@ void TagEditor::add_chosen_tag()
         from_sugg ? suggestions_[sugg_sel_] : trim_surrounding(new_tag_buf_.str());
     if (chosen.empty()) { return; }
 
+    // Check if this is a brand-new tag of a templated category (Phase 73)
+    const std::string sheet_category =
+        templated_new_tag_category(chosen, vocabulary_, vault::vault_settings(vault_));
+
     using enum vault::VaultResult;
     if (vault::add_tag_batch(vault_, node_paths_, chosen) != Ok) {
         error_ = "Failed to add tag.";
@@ -118,6 +122,15 @@ void TagEditor::add_chosen_tag()
     refresh_vocabulary();
     refresh_suggestions();   // buffer is empty → dropdown closes
     select_tag(chosen);      // scroll the list to reveal it
+
+    // Open the template fields form if applicable (Phase 73)
+    if (!sheet_category.empty()) {
+        const auto s = vault::vault_settings(vault_);
+        const auto tmpl = vault::category_template(s, sheet_category);
+        fields_form_.open(chosen, sheet_category,
+                          std::vector<std::string>(tmpl.begin(), tmpl.end()),
+                          /*with_description=*/false);
+    }
 }
 
 void TagEditor::move_cursor(int dir)
@@ -215,6 +228,18 @@ void TagEditor::select_tag(std::string_view tag)
 bool TagEditor::handle_event(const SDL_Event& e)
 {
     if (!active_) return false;
+
+    // Form handling (Phase 73): the fields_form modal takes precedence over the tag editor
+    // input. When it becomes inactive after consuming an event, restart text input for the
+    // tag editor (the form calls StopTextInput on close, we restart it here).
+    if (fields_form_.active()) {
+        const bool consumed = fields_form_.handle_event(e);
+        if (!fields_form_.active()) {
+            SDL_StartTextInput(win_.sdl_window());   // back to the tag input
+            if (fields_form_.consume_saved()) refresh_vocabulary();
+        }
+        return consumed;
+    }
 
     // Precedence rule (Phase 54): the tag field consumes editing keys first.
     // field_owns_event keeps the empty-buffer behaviour intact — with nothing
@@ -398,6 +423,9 @@ void TagEditor::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
     // like a combobox. Up/Down move the highlight; Enter adds the highlighted
     // suggestion (or, with none highlighted, exactly the typed text).
     draw_suggestions_dropdown(r, font, mx, input_y);
+
+    // Template fields form (Phase 73) — drawn after the editor's dropdown so it overlays everything
+    fields_form_.render(r, font, W, H);
 }
 
 void TagEditor::draw_tag_rows(gfx::Renderer& r, gfx::FontAtlas& font, float mx, float list_y,
