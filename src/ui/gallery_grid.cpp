@@ -859,7 +859,6 @@ void render_delete_confirm_modal(GalleryGrid& g, gfx::Renderer& r, float W, floa
     if (!g.naming_.confirm_delete) return;
 
     using namespace gfx::theme;
-    const float RADIUS = 8.0f;
 
     if (g.naming_.batch_delete) {
         // (S3776 extraction) Use the shared batch delete drawer
