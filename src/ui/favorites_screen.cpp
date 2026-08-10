@@ -251,6 +251,26 @@ void FavoritesScreen::start_transfer()
     mark_dirty();
 }
 
+// Del: batch delete the selection (Phase 74) — focused row when empty. The
+// aggregate confirm modal, queue exclusivity, and the job run live in ops_.
+void FavoritesScreen::start_delete_selection()
+{
+    std::vector<std::string> paths;
+    if (sel_.empty()) {
+        const int s = nav_.selected();
+        if (s < 0 || s >= static_cast<int>(favs_.size())) { return; }
+        paths.push_back(favs_[static_cast<size_t>(s)].path);
+    } else {
+        for (int i : sel_.indices()) {
+            if (i < 0 || i >= static_cast<int>(favs_.size())) { continue; }
+            paths.push_back(favs_[static_cast<size_t>(i)].path);
+        }
+    }
+    if (paths.empty()) { return; }
+    ops_.request_delete(std::move(paths), status_);
+    mark_dirty();
+}
+
 void FavoritesScreen::handle_key_down(const SDL_KeyboardEvent& key)
 {
     using enum InputAction;
@@ -281,6 +301,7 @@ void FavoritesScreen::handle_key_down(const SDL_KeyboardEvent& key)
     if (key.key == SDLK_B) { toggle_favorite_batch(); return; }
     if (key.key == SDLK_X) { start_export(); return; }
     if (key.key == SDLK_M && !(key.mod & SDL_KMOD_SHIFT)) { start_transfer(); return; }
+    if (key.key == SDLK_DELETE) { start_delete_selection(); return; }
     switch (map_key(key.key, key.mod)) {
         case NavLeft:  nav_.move(-1);     follow_scroll_ = true; break;
         case NavRight: nav_.move(1);      follow_scroll_ = true; break;
@@ -434,7 +455,7 @@ std::vector<ui::HelpGroup> FavoritesScreen::help_groups() const
     std::vector<ui::HelpEntry> nav{
         {"Enter", "Open"}, {"Space", "Select"}, {"Ctrl+A", "Select all"},
         {"B", "Favorite (acts on selection)"}, {"X", "Export selection"},
-        {"M", "Move/copy selection"}, {"R", "Rename"}, {"D", "Toggle the detail panel"},
+        {"M", "Move/copy selection"}, {"Del", "Delete selection"}, {"R", "Rename"}, {"D", "Toggle the detail panel"},
         {"Shift+I", "Import status"}, {"`", "Switch vault"}, {"Esc", "Back"},
     };
     for (const auto& e : extra_help_entries()) nav.push_back(e);
