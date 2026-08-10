@@ -73,7 +73,10 @@ FileOpOutcome run_delete(vault::Vault& v, const std::string& base, const std::st
 
 // Counts of one finished transfer, bundled for S107.
 struct TransferCounts {
-    int done = 0, failed = 0, skipped = 0, total = 0;
+    int done = 0;
+    int failed = 0;
+    int skipped = 0;
+    int total = 0;
 };
 
 // Format a transfer outcome from counts (shared by the image-list + gallery paths).
@@ -123,6 +126,33 @@ FileOpOutcome combine_outcome(vault::VaultResult r, const vault::CombineTally& t
     return oc;
 }
 
+
+FileOpOutcome run_gallery_transfer(vault::Vault& src, const std::string& src_gallery,
+                                   vault::Vault& dst, const std::string& dst_parent,
+                                   vault::TransferMode mode, vault::CollisionPolicy policy,
+                                   const std::string& label, vault::OpProgress& progress)
+{
+    vault::TransferTally tally;
+    const vault::VaultResult r =
+        vault::transfer_gallery(src, src_gallery, dst, dst_parent, mode,
+                                {.progress = &progress, .tally = &tally, .policy = policy});
+    const bool cancelled = progress.cancel.load();
+
+    if (r != vault::VaultResult::Ok) {
+        FileOpOutcome oc;
+        oc.kind = FileOpKind::Transfer;
+        oc.error = "Move/Copy failed - " +
+                   transfer_failure_reason(r, vault::TransferFailure::Stage::Write);
+        return oc;
+    }
+    // Gallery transfer is one logical item; report media progress as the counts.
+    const int total = progress.total.load();
+    const int done  = progress.done.load();
+    return transfer_outcome(mode,
+                            {.done = done, .failed = tally.failed, .skipped = tally.skipped,
+                             .total = total},
+                            cancelled, label, std::move(tally.failures));
+}
 
 FileOpOutcome run_compact(vault::Vault& v, vault::OpProgress& progress)
 {
@@ -227,26 +257,7 @@ bool FileOpJob::start_transfer_gallery(vault::Vault& src, std::string src_galler
     return launch(FileOpKind::Transfer,
                   [this, &src, src_gallery = std::move(src_gallery), &dst,
                    dst_parent = std::move(dst_parent), mode, policy, label = std::move(label)]() {
-        vault::TransferTally tally;
-        const vault::VaultResult r =
-            vault::transfer_gallery(src, src_gallery, dst, dst_parent, mode,
-                                    {.progress = &progress_, .tally = &tally, .policy = policy});
-        const bool cancelled = progress_.cancel.load();
-
-        if (r != vault::VaultResult::Ok) {
-            FileOpOutcome oc;
-            oc.kind = FileOpKind::Transfer;
-            oc.error = "Move/Copy failed - " +
-                       transfer_failure_reason(r, vault::TransferFailure::Stage::Write);
-            return oc;
-        }
-        // Gallery transfer is one logical item; report media progress as the counts.
-        const int total = progress_.total.load();
-        const int done  = progress_.done.load();
-        return transfer_outcome(mode,
-                                {.done = done, .failed = tally.failed, .skipped = tally.skipped,
-                                 .total = total},
-                                cancelled, label, std::move(tally.failures));
+        return run_gallery_transfer(src, src_gallery, dst, dst_parent, mode, policy, label, progress_);
     });
 }
 

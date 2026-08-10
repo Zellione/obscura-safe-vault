@@ -25,6 +25,22 @@
   Both are thin bindings over the pure, unit-tested `ui::elide_middle` / `ui::elide_tail` templates (templated on the measure callable, ASCII `"..."` since the atlas bakes 32–126 only). PR #54 and PR #128 each swept the UI for this.
 - **Never hardcode a text-line pitch.** Derive it from `font.pixel_height()` via `ui::line_pitch(font_px)` → `ceil(font_px * 1.25)`. The 1.25 leading ensures each line exceeds the font height, so adjacent lines cannot touch and a clip band cannot cut a descender. The single source of truth prevents silent regressions from surface-specific constants drifting apart.
 
+## Paths are UTF-8 (Phase 70)
+- A `std::string` holding a filesystem path is **UTF-8 by definition**. The narrow
+  conversions `path::string()`, `path::generic_string()`, and `fs::path{std::string}`
+  are **banned in `src/`** — on Windows they round-trip through the ANSI code page:
+  `string()` THROWS `std::system_error` for unmappable chars (the Phase-70 import
+  crash), the narrow ctor mis-decodes SDL's UTF-8 dialog strings, and
+  `fopen(path.string())` cannot open non-ANSI names at all.
+- Use `src/platform/path_utf8.h`: `platform::utf8_to_path(sv)`, `platform::path_to_utf8(p)`
+  (no-throw; ill-formed native names degrade to a placeholder), `path_to_utf8_generic(p)`
+  (forward-slash form — vaults.list lines), `fopen_path(p, mode)` / `freopen_path(p, mode, stream)`
+  (`_wfopen`/`_wfreopen` on Windows).
+- **Layering exception:** `platform/path_utf8.h` is a pure-std vocabulary header (no SDL,
+  no OS handles beyond `_wfopen`) and is includable from ANY module — including `src/vault/`
+  and `src/gfx/` — like a std header. `std::fopen` may appear only in `crypto/random.cpp`
+  (`/dev/urandom` literal, POSIX-only) and inside `path_utf8.h` itself.
+
 ## Cross-platform (MSVC vs libstdc++)
 - `std::array`/`std::vector` iterators are raw pointers in libstdc++ but class types in MSVC's STL.
   Never declare one as `auto*`: `const auto* it = std::ranges::find_if(...)` compiles clean on Linux

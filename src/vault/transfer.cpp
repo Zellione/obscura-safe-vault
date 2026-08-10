@@ -1,6 +1,8 @@
 #include "vault/transfer.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <format>
 #include <iterator>
 #include <optional>
 #include <ranges>
@@ -114,7 +116,7 @@ std::string trim_utf8(std::string_view s, size_t max_bytes)
 {
     if (s.size() <= max_bytes) return std::string(s);
     size_t end = max_bytes;
-    while (end > 0 && (static_cast<unsigned char>(s[end]) & 0xC0) == 0x80) --end;
+    while (end > 0 && (static_cast<std::byte>(s[end]) & std::byte{0xC0}) == std::byte{0x80}) --end;
     return std::string(s.substr(0, end));
 }
 
@@ -125,12 +127,12 @@ std::string trim_utf8(std::string_view s, size_t max_bytes)
 std::optional<std::string> unique_child_name(const Vault& dst, std::string_view dst_parent,
                                              std::string_view name)
 {
-    auto taken = [&](const std::string& n) {
-        for (const auto* c : dst.list(dst_parent)) if (c->name == n) return true;
-        return false;
+    auto taken = [&](std::string_view n) {
+        return std::ranges::contains(dst.list(dst_parent), n,
+                                     [](const IndexNode* c) { return std::string_view(c->name); });
     };
     for (int i = 2; i <= 9999; ++i) {
-        const std::string suffix = "_" + std::to_string(i);
+        const std::string suffix = std::format("_{}", i);
         const std::string cand =
             trim_utf8(name, MAX_NODE_NAME_BYTES - suffix.size()) + suffix;
         if (!taken(cand)) return cand;
@@ -138,6 +140,46 @@ std::optional<std::string> unique_child_name(const Vault& dst, std::string_view 
     return std::nullopt;
 }
 
+// Resolve a same-named child at dst_parent per `policy`: Fail/combine-into-media
+// -> AlreadyExists; Suffix -> rewrites dest_name; Combine (gallery) -> runs the
+// merge and reports via `handled`. Always returns a result; if `handled=true`,
+// combine_galleries ran and transfer_gallery should return its result immediately.
+// Semantics preserved: dispatch before the progress->total store; combine tally
+// mapping media_moved→done, media_skipped→skipped.
+VaultResult resolve_dest_collision(Vault& src, std::string_view src_gallery, Vault& dst,
+                                   std::string_view dst_parent, TransferMode mode,
+                                   const GalleryTransferOpts& opts, std::string_view name,
+                                   std::string& dest_name, bool& handled)
+{
+    using enum VaultResult;
+    for (const auto* c : dst.list(dst_parent)) {
+        if (c->name != name) continue;
+        if (opts.policy == CollisionPolicy::Suffix) {
+            auto fresh = unique_child_name(dst, dst_parent, name);
+            if (!fresh) return AlreadyExists;   // probe bound exhausted
+            dest_name = std::move(*fresh);
+            handled = false;
+            return Ok;
+        }
+        if (opts.policy == CollisionPolicy::Combine && c->is_gallery()) {
+            OpProgress* progress = opts.progress;
+            TransferTally* tally = opts.tally;
+            CombineTally ct;
+            const VaultResult r = combine_galleries(
+                src, src_gallery, dst, child_path(dst_parent, name), ct, progress, mode);
+            if (tally) {
+                tally->done    += ct.media_moved;
+                tally->skipped += ct.media_skipped;
+            }
+            handled = true;
+            return r;
+        }
+        handled = false;
+        return AlreadyExists;   // Fail policy, or Combine into a non-gallery child
+    }
+    handled = false;
+    return Ok;   // no collision
+}
 
 // Locate a media node (image or video) by name in `gallery` (nullptr if absent).
 const IndexNode* find_image_node(const Vault& v, std::string_view gallery,
@@ -494,26 +536,11 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
     if (!src_is_gallery) return NotFound;
 
     std::string dest_name = name;
-    for (const auto* c : dst.list(dst_parent)) {
-        if (c->name != name) continue;
-        if (opts.policy == CollisionPolicy::Suffix) {
-            auto fresh = unique_child_name(dst, dst_parent, name);
-            if (!fresh) return AlreadyExists;   // probe bound exhausted
-            dest_name = std::move(*fresh);
-            break;
-        }
-        if (opts.policy == CollisionPolicy::Combine && c->is_gallery()) {
-            CombineTally ct;
-            const VaultResult r = combine_galleries(
-                src, src_gallery, dst, child_path(dst_parent, name), ct, progress, mode);
-            if (tally) {
-                tally->done    += ct.media_moved;
-                tally->skipped += ct.media_skipped;
-            }
-            return r;
-        }
-        return AlreadyExists;   // Fail policy, or Combine into a non-gallery child
-    }
+    bool handled = false;
+    const VaultResult collision_result = resolve_dest_collision(
+        src, src_gallery, dst, dst_parent, mode, opts, name, dest_name, handled);
+    if (handled) return collision_result;
+    if (collision_result != Ok) return collision_result;
     const std::string dest_root = dst_parent.empty() ? dest_name
                                                      : std::string(dst_parent) + "/" + dest_name;
 

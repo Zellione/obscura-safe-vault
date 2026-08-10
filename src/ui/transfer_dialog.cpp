@@ -122,8 +122,9 @@ void TransferDialog::choose_gallery()
 
 std::vector<std::string> TransferDialog::galleries_for_conflict_scan() const
 {
-    if (source_ == Source::Gallery)  return {src_gallery_};
-    if (source_ == Source::Galleries || source_ == Source::Collection) return src_galleries_;
+    using enum Source;
+    if (source_ == Gallery)  return {src_gallery_};
+    if (source_ == Galleries || source_ == Collection) return src_galleries_;
     return {};   // Images: files always skip; nothing to ask
 }
 
@@ -133,8 +134,7 @@ void TransferDialog::do_move(std::string_view dst_target)
     // not launched yet, so this is race-free): if any transferred gallery
     // already exists at the destination, ask ONCE how to resolve — the choice
     // applies to every colliding gallery in this run.
-    const auto scan = galleries_for_conflict_scan();
-    if (!scan.empty()) {
+    if (const auto scan = galleries_for_conflict_scan(); !scan.empty()) {
         const auto clashes = vault::colliding_galleries(dest_vault(), dst_target, scan);
         if (!clashes.empty()) {
             conflict_.target = std::string(dst_target);
