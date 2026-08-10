@@ -58,8 +58,6 @@ void TemplateEditorPanel::open()
     const auto& cats = vault::vault_settings(vault_).categories;
     nav_.set_count(static_cast<int>(cats.size()));
     if (!cats.empty()) nav_.select(0);
-
-    SDL_StartTextInput(win_.sdl_window());
 }
 
 void TemplateEditorPanel::close()
@@ -235,6 +233,7 @@ bool TemplateEditorPanel::handle_event_name_field(const SDL_Event& e)
             }
 
             error_.clear();
+            SDL_StopTextInput(win_.sdl_window());
             transition(Stage::EditFields);
             {
                 // Reload and restore selection
@@ -246,6 +245,7 @@ bool TemplateEditorPanel::handle_event_name_field(const SDL_Event& e)
             return true;
         }
         case SDLK_ESCAPE:
+            SDL_StopTextInput(win_.sdl_window());
             transition(Stage::EditFields);
             {
                 const auto s2 = vault::vault_settings(vault_);
@@ -269,8 +269,7 @@ bool TemplateEditorPanel::handle_event_confirm_remove(const SDL_Event& e)
             if (!vault::remove_template_field(s, cat_name_, field_to_remove_) ||
                 vault::set_vault_settings(vault_, std::move(s)) != vault::VaultResult::Ok) {
                 error_ = "Could not remove the field";
-                transition(Stage::EditFields);
-                return true;
+                return true;  // Stay in ConfirmRemove on persist failure
             }
             error_.clear();
             transition(Stage::EditFields);
@@ -465,8 +464,12 @@ void TemplateEditorPanel::render_confirm_remove(gfx::Renderer& r, gfx::FontAtlas
     y += ph + 8;
     r.draw_text(font, l.box.x + PROMPT_PAD, y, "Stored values are deleted.", TEXT_DIM);
 
-    r.draw_text(font, l.box.x + PROMPT_PAD, l.hint_y,
-               "[Esc/N] Cancel        [Y] Remove", TEXT_FAINT);
+    if (!error_.empty()) {
+        r.draw_text(font, l.box.x + PROMPT_PAD, l.hint_y, error_, DANGER);
+    } else {
+        r.draw_text(font, l.box.x + PROMPT_PAD, l.hint_y,
+                   "[Esc/N] Cancel        [Y] Remove", TEXT_FAINT);
+    }
 }
 
 } // namespace ui
