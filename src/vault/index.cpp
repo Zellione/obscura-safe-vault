@@ -573,6 +573,115 @@ void set_tag_description(VaultSettings& s, std::string_view tag, std::string_vie
     s.tag_descriptions.emplace_back(std::string(tag), std::string(text));
 }
 
+std::string_view tag_category_prefix(std::string_view tag)
+{
+    const size_t colon = tag.find(':');
+    if (colon == std::string_view::npos || colon == 0 || colon + 1 >= tag.size()) return {};
+    return tag.substr(0, colon);
+}
+
+namespace {
+TagCategory* find_category(VaultSettings& s, std::string_view category)
+{
+    for (auto& c : s.categories)
+        if (category_name_eq(c.name, category)) return &c;
+    return nullptr;
+}
+// True when `tag` belongs to `category` by prefix (ci).
+bool tag_in_category(std::string_view tag, std::string_view category)
+{
+    return category_name_eq(tag_category_prefix(tag), category);
+}
+}  // namespace
+
+std::span<const std::string> category_template(const VaultSettings& s,
+                                               std::string_view category)
+{
+    for (const auto& c : s.categories)
+        if (category_name_eq(c.name, category)) return c.fields;
+    return {};
+}
+
+bool set_category_template(VaultSettings& s, std::string_view category,
+                           std::vector<std::string> fields)
+{
+    TagCategory* c = find_category(s, category);
+    if (!c) return false;
+
+    std::vector<std::string> cleaned;
+    for (auto& f : fields) {
+        if (f.empty()) continue;
+        if (f.size() > INDEX_MAX_FIELD_BYTES) f.resize(INDEX_MAX_FIELD_BYTES);
+        const bool dupe = std::ranges::any_of(cleaned,
+            [&f](const std::string& e) { return category_name_eq(e, f); });
+        if (!dupe) cleaned.push_back(std::move(f));
+        if (cleaned.size() >= INDEX_MAX_TEMPLATE_FIELDS) break;
+    }
+    c->fields = std::move(cleaned);
+    return true;
+}
+
+std::string_view find_tag_field_value(const VaultSettings& s, std::string_view tag,
+                                      std::string_view field)
+{
+    for (const auto& e : s.tag_field_values)
+        if (category_name_eq(e.tag, tag) && category_name_eq(e.field, field))
+            return e.value;
+    return {};
+}
+
+void set_tag_field_value(VaultSettings& s, std::string_view tag,
+                         std::string_view field, std::string_view value)
+{
+    for (auto it = s.tag_field_values.begin(); it != s.tag_field_values.end(); ++it) {
+        if (!category_name_eq(it->tag, tag) || !category_name_eq(it->field, field))
+            continue;
+        if (value.empty()) s.tag_field_values.erase(it);
+        else               it->value = std::string(value);
+        return;
+    }
+    if (value.empty()) return;                                       // nothing to remove
+    if (s.tag_field_values.size() >= INDEX_MAX_TAG_FIELD_VALUES) return;
+    std::string v(value);
+    if (v.size() > INDEX_MAX_FIELD_VALUE_BYTES) v.resize(INDEX_MAX_FIELD_VALUE_BYTES);
+    s.tag_field_values.emplace_back(std::string(tag), std::string(field), std::move(v));
+}
+
+bool rename_template_field(VaultSettings& s, std::string_view category,
+                           std::string_view old_field, std::string_view new_field)
+{
+    if (new_field.empty() || new_field.size() > INDEX_MAX_FIELD_BYTES) return false;
+    TagCategory* c = find_category(s, category);
+    if (!c) return false;
+    auto it = std::ranges::find_if(c->fields,
+        [old_field](const std::string& f) { return category_name_eq(f, old_field); });
+    if (it == c->fields.end()) return false;
+    const bool clash = std::ranges::any_of(c->fields, [&](const std::string& f) {
+        return &f != &*it && category_name_eq(f, new_field);
+    });
+    if (clash) return false;
+
+    *it = std::string(new_field);
+    for (auto& e : s.tag_field_values)
+        if (tag_in_category(e.tag, category) && category_name_eq(e.field, old_field))
+            e.field = std::string(new_field);
+    return true;
+}
+
+bool remove_template_field(VaultSettings& s, std::string_view category,
+                           std::string_view field)
+{
+    TagCategory* c = find_category(s, category);
+    if (!c) return false;
+    const auto removed = std::erase_if(c->fields,
+        [field](const std::string& f) { return category_name_eq(f, field); });
+    if (removed == 0) return false;
+    std::erase_if(s.tag_field_values, [&](const TagFieldValue& e) {
+        return tag_in_category(e.tag, category) && category_name_eq(e.field, field);
+    });
+    return true;
+}
+
 void serialize_index(const IndexNode& root, std::vector<uint8_t>& out)
 {
     serialize_index(root, {}, VaultSettings{}, out);

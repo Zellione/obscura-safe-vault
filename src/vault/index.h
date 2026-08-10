@@ -381,4 +381,43 @@ void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& sear
 // set_vault_settings().
 void set_tag_description(VaultSettings& s, std::string_view tag, std::string_view text);
 
+// --- Phase 73: category templates + per-tag field values --------------------
+// All pure struct operations; the caller persists via set_vault_settings().
+
+// The prefix before the first ':' when both prefix and suffix are non-empty
+// (the same split rule ui::resolve_tag uses), else empty.
+[[nodiscard]] std::string_view tag_category_prefix(std::string_view tag);
+
+// `category`'s template fields. Empty when the category is absent or has no
+// template. The returned span BORROWS from `s` — never call on a temporary.
+[[nodiscard]] std::span<const std::string> category_template(const VaultSettings& s,
+                                                             std::string_view category);
+
+// Replace `category`'s template. False when the category does not exist.
+// Fields are ci de-duped keeping first casing, clamped to
+// INDEX_MAX_TEMPLATE_FIELDS entries; over-long names are truncated to
+// INDEX_MAX_FIELD_BYTES.
+bool set_category_template(VaultSettings& s, std::string_view category,
+                           std::vector<std::string> fields);
+
+// Look up / upsert one (tag, field) value, both keys matched ci. Empty when
+// absent; the returned view BORROWS from `s`. An empty `value` REMOVES the
+// entry; a new entry is dropped silently at INDEX_MAX_TAG_FIELD_VALUES.
+[[nodiscard]] std::string_view find_tag_field_value(const VaultSettings& s,
+                                                    std::string_view tag,
+                                                    std::string_view field);
+void set_tag_field_value(VaultSettings& s, std::string_view tag,
+                         std::string_view field, std::string_view value);
+
+// Rename `old_field` in `category`'s template and re-key every stored value
+// whose tag belongs to `category` (by prefix). False when old_field is absent,
+// new_field already exists (ci), or new_field is empty/over-cap.
+bool rename_template_field(VaultSettings& s, std::string_view category,
+                           std::string_view old_field, std::string_view new_field);
+
+// Remove `field` from `category`'s template and erase its stored values for
+// that category's tags. False when the field is absent.
+bool remove_template_field(VaultSettings& s, std::string_view category,
+                           std::string_view field);
+
 } // namespace vault

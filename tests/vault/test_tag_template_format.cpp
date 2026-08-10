@@ -136,3 +136,65 @@ TEST(tag_template_v10_blob_reads_back_empty)
     VaultSettings            back;
     CHECK_FALSE(deserialize_index(v10, out, searches, back));
 }
+
+TEST(tag_template_helpers_crud)
+{
+    VaultSettings s;
+    s.categories = {{.name = "artist", .swatch = 0, .fields = {}}};
+
+    CHECK(vault::category_template(s, "artist").empty());
+    CHECK_FALSE(vault::set_category_template(s, "nope", {"x"}));
+    CHECK(vault::set_category_template(s, "Artist", {"country", "Country", "style"}));
+    REQUIRE(vault::category_template(s, "artist").size() == 2u);   // ci dedupe
+    CHECK_EQ(vault::category_template(s, "artist")[0], std::string("country"));
+
+    vault::set_tag_field_value(s, "artist:bob", "country", "Japan");
+    CHECK_EQ(vault::find_tag_field_value(s, "ARTIST:BOB", "Country"),
+             std::string_view("Japan"));
+    vault::set_tag_field_value(s, "artist:bob", "country", "");   // empty erases
+    CHECK(vault::find_tag_field_value(s, "artist:bob", "country").empty());
+}
+
+TEST(tag_template_rename_rekeys_values)
+{
+    VaultSettings s;
+    s.categories = {{.name = "artist", .swatch = 0, .fields = {"country"}},
+                    {.name = "studio", .swatch = 1, .fields = {"country"}}};
+    vault::set_tag_field_value(s, "artist:bob", "country", "Japan");
+    vault::set_tag_field_value(s, "studio:acme", "country", "France");
+
+    CHECK(vault::rename_template_field(s, "artist", "country", "origin"));
+    // artist values re-keyed; studio values untouched (per-category scoping).
+    CHECK_EQ(vault::find_tag_field_value(s, "artist:bob", "origin"),
+             std::string_view("Japan"));
+    CHECK(vault::find_tag_field_value(s, "artist:bob", "country").empty());
+    CHECK_EQ(vault::find_tag_field_value(s, "studio:acme", "country"),
+             std::string_view("France"));
+
+    // Rename to an existing field name is refused.
+    CHECK(vault::set_category_template(s, "artist", {"origin", "style"}));
+    CHECK_FALSE(vault::rename_template_field(s, "artist", "origin", "STYLE"));
+}
+
+TEST(tag_template_remove_field_erases_values)
+{
+    VaultSettings s;
+    s.categories = {{.name = "artist", .swatch = 0, .fields = {"country", "style"}}};
+    vault::set_tag_field_value(s, "artist:bob", "country", "Japan");
+    vault::set_tag_field_value(s, "artist:bob", "style", "digital");
+
+    CHECK(vault::remove_template_field(s, "artist", "country"));
+    CHECK(vault::find_tag_field_value(s, "artist:bob", "country").empty());
+    CHECK_EQ(vault::find_tag_field_value(s, "artist:bob", "style"),
+             std::string_view("digital"));
+    REQUIRE(vault::category_template(s, "artist").size() == 1u);
+    CHECK_FALSE(vault::remove_template_field(s, "artist", "country"));   // already gone
+}
+
+TEST(tag_category_prefix_extraction)
+{
+    CHECK_EQ(vault::tag_category_prefix("artist:bob"), std::string_view("artist"));
+    CHECK(vault::tag_category_prefix("plain").empty());
+    CHECK(vault::tag_category_prefix(":bob").empty());
+    CHECK(vault::tag_category_prefix("artist:").empty());
+}
