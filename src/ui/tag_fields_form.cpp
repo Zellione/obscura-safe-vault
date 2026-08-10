@@ -249,7 +249,7 @@ void TagFieldsForm::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
             // Draw the suggestion as plain text
             const auto text_x = drop.x + 10 + static_cast<float>(font.measure("> "));
             const auto max_w = drop.w - (text_x - drop.x) - 10;
-            const auto shown = fit_text(font, sugg_[i], static_cast<int>(max_w));
+            const auto shown = fit_text(font, sugg_[i], max_w);
             r.draw_text(font, text_x, ty, shown, sel ? TEXT : TEXT_DIM);
         }
     }
