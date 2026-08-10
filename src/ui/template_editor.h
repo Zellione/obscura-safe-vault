@@ -49,7 +49,7 @@ private:
     bool handle_event_name_field(const SDL_Event& e);
     bool handle_event_confirm_remove(const SDL_Event& e);
 
-    void render_pick_category(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
+    void render_pick_category(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H) const;
     void render_edit_fields(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
     void render_name_field(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
     void render_confirm_remove(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);

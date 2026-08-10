@@ -65,34 +65,43 @@ std::string count_label(int galleries, int images)
                        galleries, galleries == 1 ? "gallery" : "galleries",
                        images, images == 1 ? "image" : "images");
 }
+
+// Parameters for drawing a single tag overview row (S107 bundle)
+struct TagRowLayout {
+    float row_h;
+    float ph;
+    const TagTally& tally;
+    bool is_selected;
+    const std::vector<vault::TagCategory>& cats;
+};
+
 // Helper: draw a single tag overview row
-void draw_tag_row(gfx::Renderer& r, gfx::FontAtlas& font, float W, float y, float row_h,
-                  float ph, const TagTally& tally, bool is_selected,
-                  const std::vector<vault::TagCategory>& cats)
+void draw_tag_row(gfx::Renderer& r, gfx::FontAtlas& font, float W, float y,
+                  const TagRowLayout& layout)
 {
     using namespace gfx::theme;
-    const float ty = y + (ph - 4) * 0.5f;
-    const SDL_FRect row{OX, y, W - 2 * OX, row_h - 4};
+    const float ty = y + (layout.ph - 4) * 0.5f;
+    const SDL_FRect row{OX, y, W - 2 * OX, layout.row_h - 4};
 
-    if (is_selected) r.draw_selection_glow(row, RADIUS, ACCENT);
-    r.draw_round_rect(row, RADIUS, is_selected ? SURFACE_HI : SURFACE);
-    r.draw_round_rect(row, RADIUS, is_selected ? ACCENT : BORDER, /*filled*/ false);
+    if (layout.is_selected) r.draw_selection_glow(row, RADIUS, ACCENT);
+    r.draw_round_rect(row, RADIUS, layout.is_selected ? SURFACE_HI : SURFACE);
+    r.draw_round_rect(row, RADIUS, layout.is_selected ? ACCENT : BORDER, /*filled*/ false);
 
     // Line 1: tag chip and counts
-    const std::string counts = count_label(tally.gallery_count, tally.image_count);
+    const std::string counts = count_label(layout.tally.gallery_count, layout.tally.image_count);
     const float cx = W - OX - 14 - static_cast<float>(font.measure(counts));
-    draw_tag_chips(r, font, OX + 14, y + (ph - CHIP_ROW_H) * 0.5f,
-                   cx - (OX + 14) - 12, std::span(&tally.tag, 1), cats);
+    draw_tag_chips(r, font, OX + 14, y + (layout.ph - CHIP_ROW_H) * 0.5f,
+                   cx - (OX + 14) - 12, std::span(&layout.tally.tag, 1), layout.cats);
     r.draw_text(font, cx, ty, counts, TEXT_DIM);
 
     // Line 2: description (or placeholder)
-    const float desc_y = y + ph + PAD;
+    const float desc_y = y + layout.ph + PAD;
     const float max_desc_w = W - (OX + 14) - OX - 14;
-    const std::string shown_desc = tally.description.empty()
+    const std::string shown_desc = layout.tally.description.empty()
         ? std::string("(no description — [E] to add)")
-        : fit_text(font, tally.description, max_desc_w);
+        : fit_text(font, layout.tally.description, max_desc_w);
     r.draw_text(font, OX + 14, desc_y, shown_desc,
-               tally.description.empty() ? TEXT_FAINT : TEXT_DIM);
+               layout.tally.description.empty() ? TEXT_FAINT : TEXT_DIM);
 }
 
 } // namespace
@@ -398,7 +407,8 @@ void TagOverviewScreen::render(gfx::Renderer& r)
         for (int i = g.first; i < g.first + g.visible && i < static_cast<int>(shown_.size()); ++i) {
             const float y = OY + static_cast<float>(i - g.first) * g.row_h;
             const bool sel = (i == nav_.selected());
-            draw_tag_row(r, font_, W, y, g.row_h, ph, shown_[i], sel, cats);
+            const TagRowLayout layout{g.row_h, ph, shown_[i], sel, cats};
+            draw_tag_row(r, font_, W, y, layout);
         }
     } else {
         // Empty state: show placeholder text

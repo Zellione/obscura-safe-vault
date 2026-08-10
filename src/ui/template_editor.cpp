@@ -217,11 +217,11 @@ bool TemplateEditorPanel::handle_event_name_field(const SDL_Event& e)
             bool success = false;
             if (is_add_mode_) {
                 // Add: check for ci duplicate
-                const auto exists = std::find_if(fields.begin(), fields.end(),
-                    [&new_name](const std::string& f) {
-                        return tag_ci_equal(f, new_name);
-                    }) != fields.end();
-                if (exists) {
+                if (const auto exists = std::ranges::find_if(fields,
+                        [&new_name](const std::string& f) {
+                            return tag_ci_equal(f, new_name);
+                        }) != fields.end();
+                    exists) {
                     error_ = "Field name already exists (case-insensitive)";
                     return true;
                 }
@@ -229,11 +229,11 @@ bool TemplateEditorPanel::handle_event_name_field(const SDL_Event& e)
                 success = vault::set_category_template(s, cat_name_, std::move(fields));
             } else {
                 // Rename: check for ci duplicate (excluding the old name)
-                const auto exists = std::find_if(fields.begin(), fields.end(),
-                    [&new_name, this](const std::string& f) {
-                        return !tag_ci_equal(f, field_to_rename_) && tag_ci_equal(f, new_name);
-                    }) != fields.end();
-                if (exists) {
+                if (const auto exists = std::ranges::find_if(fields,
+                        [&new_name, this](const std::string& f) {
+                            return !tag_ci_equal(f, field_to_rename_) && tag_ci_equal(f, new_name);
+                        }) != fields.end();
+                    exists) {
                     error_ = "Field name already exists (case-insensitive)";
                     return true;
                 }
@@ -323,7 +323,7 @@ void TemplateEditorPanel::render(gfx::Renderer& r, gfx::FontAtlas& font, float W
 }
 
 void TemplateEditorPanel::render_pick_category(gfx::Renderer& r, gfx::FontAtlas& font,
-                                               float W, float H)
+                                               float W, float H) const
 {
     using namespace gfx::theme;
     const auto& cats = vault::vault_settings(vault_).categories;
@@ -401,7 +401,7 @@ void TemplateEditorPanel::render_edit_fields(gfx::Renderer& r, gfx::FontAtlas& f
             r.draw_round_rect({l.box.x + 8, y, l.box.w - 16, row_h},
                             RADIUS / 2, ACCENT);
         }
-        r.draw_text(font, l.box.x + PROMPT_PAD + 12, y + 2, std::string(tmpl[i]),
+        r.draw_text(font, l.box.x + PROMPT_PAD + 12, y + 2, std::string_view(tmpl[i]),
                    is_sel ? SURFACE : TEXT);
         y += row_h;
     }
