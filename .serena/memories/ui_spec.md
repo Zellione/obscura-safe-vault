@@ -421,6 +421,14 @@ nothing persists to the vault file.
   A grid selection may mix images, videos, and galleries in one run; on
   collection screens items span parent galleries and are grouped per parent.
   While imports run, M refuses with "Imports running — press Shift+I".
+- **Del acts on the selection too (Phase 74)** — same focused-tile-when-empty
+  rule, on the grid, the favorites/tag screens, and advanced-search Results
+  focus (builder focuses keep their chip-removal Del). A mixed selection
+  (media + gallery subtrees) deletes in ONE index commit
+  (`vault::remove_nodes_batch`) behind a default-cancel DANGER modal showing
+  the aggregate ("Delete 3 selected items?" + "1 gallery · 4 images · 12 MB");
+  the summary is snapshotted at Del time, the path list rebuilt at confirm
+  time from the live selection. Same Phase 50 import-queue gate as M.
 - **Wheel on side surfaces:** the viewer thumbnail strip scrolls under the
   cursor (both dock sides, also during video playback; navigation re-centers),
   and the saved-search sidebar scrolls with clamped offset. Detail-panel wheel

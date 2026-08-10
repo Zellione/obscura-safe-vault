@@ -453,7 +453,20 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   (`set_exclusive` + release on completion/close) and the vault-hands-off
   contract: while `busy()` the host must not walk the tree or submit decodes
   (hosts draw chrome + `ops.render()` only). `poll()` returns
-  `{status, reload, dirty}` drained every frame.
+  `{status, reload, dirty}` drained every frame. **Phase 74:** `request_delete(paths,
+  status&)` — prunes descendants, tallies via `summarize_batch_delete`, shows the
+  shared default-cancel DANGER confirm (`draw_batch_delete_confirm`; non-empty
+  `delete_paths_` == modal up, swallows every event), Y → queue exclusivity +
+  `FileOpJob::start_delete_batch`; a Delete outcome sets `poll().reload` and releases
+  exclusivity. The job-progress modal title is now kind-aware ("Deleting…"/"Exporting…").
+- `batch_delete.*` — Phase 74 pure helpers shared by the grid and CollectionBatchOps so
+  confirm-modal numbers cannot drift: `prune_descendant_paths` (drops paths inside another
+  selected gallery path, component-boundary safe, order-preserving),
+  `BatchDeleteSummary{top_level, galleries, images, videos, bytes, item_total}` +
+  `summarize_batch_delete(vault, paths)` (resolves against the live index; galleries tally
+  recursively via `count_subtree`; non-resolving paths skipped), `batch_delete_counts_line`
+  ("2 galleries · 7 images · 312 MB", zero categories dropped), and the drawing-only
+  `draw_batch_delete_confirm`. Tests: `tests/ui/test_batch_delete.cpp`.
 - `position_label.*` — `position_label(index, count)` → `"3 / 128"` ("" when
   empty/out of range) — the ONE n/N formatter (Phase 68): grid chrome line
   (right-aligned in `FooterStatus`), favorites/tag title line, search-results
@@ -977,8 +990,12 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   display name is a build error. Unmapped/`Unknown` falls back to "Video".
 - `delete_summary.*` — recursive tally of a gallery subtree (images/videos/sub-galleries) +
   plural-aware format for the Del confirm popup. Phase 48: `SubtreeCounts` gained `uint64_t bytes`,
-  summing descendant `orig_size`. GalleryGrid Del removes the focused image/video
-  (`Vault::remove_image`) or gallery subtree (`Vault::remove_gallery`) behind the modal.
+  summing descendant `orig_size`. GalleryGrid Del with an EMPTY selection removes the focused
+  image/video (`Vault::remove_image`) or gallery subtree (`Vault::remove_gallery`) behind the
+  modal; with a multi-selection (Phase 74) it batch-deletes via `selected_delete_paths()`
+  (live listing + `prune_descendant_paths`) → `FileOpJob::start_delete_batch` → ONE
+  `vault::remove_nodes_batch` commit, behind the aggregate DANGER modal (summary snapshotted
+  at Del time, paths rebuilt at confirm time; `naming_.batch_delete` cleared on every exit).
 - `gallery_cover.*` — cover resolution (walks index tree -> thumb chunk spans only):
   `resolve_single_cover` (leaf: first image thumb / first video poster; non-leaf: recurse first
   sub-gallery) + `resolve_covers` (non-leaf: up to 4 sub-gallery covers in child order).
