@@ -325,6 +325,20 @@ void write_settings(ByteWriter& w, const VaultSettings& s)
             reinterpret_cast<const uint8_t*>(name.data()), name_len));
         const uint8_t sw = s.categories[i].swatch;
         w.u8(sw < TAG_SWATCH_COUNT ? sw : 0);
+
+        const auto& fields = s.categories[i].fields;
+        const uint8_t field_count = fields.size() > INDEX_MAX_TEMPLATE_FIELDS
+                                        ? INDEX_MAX_TEMPLATE_FIELDS
+                                        : static_cast<uint8_t>(fields.size());
+        w.u8(field_count);
+        for (uint8_t f = 0; f < field_count; ++f) {
+            const uint16_t flen = fields[f].size() > INDEX_MAX_FIELD_BYTES
+                                      ? INDEX_MAX_FIELD_BYTES
+                                      : static_cast<uint16_t>(fields[f].size());
+            w.u16(flen);
+            w.bytes(std::span<const uint8_t>(
+                reinterpret_cast<const uint8_t*>(fields[f].data()), flen));
+        }
     }
 
     const uint16_t desc_count = s.tag_descriptions.size() > INDEX_MAX_TAG_DESCRIPTIONS
@@ -352,11 +366,30 @@ void write_settings(ByteWriter& w, const VaultSettings& s)
     // can never emit a blob this reader would reject (the write_settings rule).
     w.u8(s.migrated_index_version > INDEX_VERSION ? 0 : s.migrated_index_version);
     w.u16(s.migrated_probe_caps);
+
+    // Phase 73 tag-field-values block. Same clamp-on-write rule as above.
+    const uint16_t val_count = s.tag_field_values.size() > INDEX_MAX_TAG_FIELD_VALUES
+                                   ? INDEX_MAX_TAG_FIELD_VALUES
+                                   : static_cast<uint16_t>(s.tag_field_values.size());
+    w.u16(val_count);
+    for (uint16_t i = 0; i < val_count; ++i) {
+        const auto& e = s.tag_field_values[i];
+        auto write_str = [&w](const std::string& str, size_t cap) {
+            const uint16_t len = str.size() > cap ? static_cast<uint16_t>(cap)
+                                                  : static_cast<uint16_t>(str.size());
+            w.u16(len);
+            w.bytes(std::span<const uint8_t>(
+                reinterpret_cast<const uint8_t*>(str.data()), len));
+        };
+        write_str(e.tag, 0xFFFFu);
+        write_str(e.field, INDEX_MAX_FIELD_BYTES);
+        write_str(e.value, INDEX_MAX_FIELD_VALUE_BYTES);
+    }
 }
 
 // Helper: read category block. Bounds-checked before allocation, duplicates
 // dropped case-insensitively, keeping first occurrence.
-bool read_categories(ByteReader& r, std::vector<TagCategory>& categories)
+bool read_categories(ByteReader& r, std::vector<TagCategory>& categories, uint8_t version)
 {
     const uint16_t count = r.u16();
     if (!r.ok() || count > INDEX_MAX_TAG_CATEGORIES) return false;  // bound before alloc
@@ -371,6 +404,24 @@ bool read_categories(ByteReader& r, std::vector<TagCategory>& categories)
         }
         c.swatch = r.u8();
         if (!r.ok() || c.swatch >= TAG_SWATCH_COUNT) return false;
+
+        // Phase 73: the field sub-block exists only from v11 on.
+        if (version >= 11) {
+            const uint8_t field_count = r.u8();
+            if (!r.ok() || field_count > INDEX_MAX_TEMPLATE_FIELDS) return false;
+            for (uint8_t f = 0; f < field_count; ++f) {
+                const uint16_t flen = r.u16();
+                if (!r.ok() || flen > INDEX_MAX_FIELD_BYTES) return false;
+                std::string field(flen, '\0');
+                if (flen > 0) {
+                    r.bytes(std::span<uint8_t>(reinterpret_cast<uint8_t*>(field.data()), flen));
+                    if (!r.ok()) return false;
+                }
+                const bool fdupe = std::ranges::any_of(c.fields,
+                    [&field](const std::string& e) { return category_name_eq(e, field); });
+                if (!fdupe) c.fields.push_back(std::move(field));
+            }
+        }
 
         const bool dupe = std::ranges::any_of(categories, [&c](const TagCategory& e) {
             return category_name_eq(e.name, c.name);
@@ -409,6 +460,36 @@ bool read_descriptions(ByteReader& r, std::vector<TagDescription>& descriptions)
     return true;
 }
 
+// Helper: read the Phase 73 tag-field-values block. Bounds-checked before
+// allocation; duplicate (tag, field) pairs dropped ci, keeping the first.
+bool read_field_values(ByteReader& r, std::vector<TagFieldValue>& values)
+{
+    const uint16_t count = r.u16();
+    if (!r.ok() || count > INDEX_MAX_TAG_FIELD_VALUES) return false;  // bound before alloc
+    for (uint16_t i = 0; i < count; ++i) {
+        TagFieldValue e;
+        auto read_str = [&r](std::string& out, uint32_t cap) {
+            const uint16_t len = r.u16();
+            if (!r.ok() || len > cap) return false;
+            out.resize(len);
+            if (len > 0) {
+                r.bytes(std::span<uint8_t>(reinterpret_cast<uint8_t*>(out.data()), len));
+                if (!r.ok()) return false;
+            }
+            return true;
+        };
+        if (!read_str(e.tag, 0xFFFFu)) return false;
+        if (!read_str(e.field, INDEX_MAX_FIELD_BYTES)) return false;
+        if (!read_str(e.value, INDEX_MAX_FIELD_VALUE_BYTES)) return false;
+
+        const bool dupe = std::ranges::any_of(values, [&e](const TagFieldValue& x) {
+            return category_name_eq(x.tag, e.tag) && category_name_eq(x.field, e.field);
+        });
+        if (!dupe) values.push_back(std::move(e));
+    }
+    return true;
+}
+
 // Read the settings block (v8+). Every field is bounds-checked BEFORE any
 // allocation, and an out-of-range value is REJECTED, not clamped (the Phase 37 /
 // Phase 47 rule). Duplicate category names are dropped case-insensitively,
@@ -417,6 +498,7 @@ bool read_settings(ByteReader& r, VaultSettings& s, uint8_t version)
 {
     s.categories.clear();
     s.tag_descriptions.clear();
+    s.tag_field_values.clear();
 
     const uint8_t sort = r.u8();
     if (!r.ok() || sort > std::to_underlying(SortKey::Insertion)) return false;
@@ -426,7 +508,7 @@ bool read_settings(ByteReader& r, VaultSettings& s, uint8_t version)
     if (!r.ok() || tiles > 1) return false;
     s.tiles_show_tags = (tiles == 1);
 
-    if (!read_categories(r, s.categories)) return false;
+    if (!read_categories(r, s.categories, version)) return false;
 
     // The description sub-block exists only from v9 on; a v8 blob ends after
     // the categories and must not be read past.
@@ -448,6 +530,12 @@ bool read_settings(ByteReader& r, VaultSettings& s, uint8_t version)
     s.migrated_probe_caps = r.u16();
     if (!r.ok()) return false;
 
+    // The field-values sub-block exists only from v11 on; a v10 blob ends after
+    // the watermark and must not be read past.
+    if (version < 11) return true;
+
+    if (!read_field_values(r, s.tag_field_values)) return false;
+
     return true;
 }
 
@@ -459,8 +547,8 @@ VaultSettings VaultSettings::seeded()
     // add, rename and remove rows freely from the settings overlay.
     VaultSettings s;
     s.categories = {
-        {"artist", 0}, {"character", 1}, {"parody", 2},   {"group", 3},
-        {"language", 4}, {"series", 5},  {"male", 6},     {"female", 7},
+        {"artist", 0, {}}, {"character", 1, {}}, {"parody", 2, {}},   {"group", 3, {}},
+        {"language", 4, {}}, {"series", 5, {}},  {"male", 6, {}},     {"female", 7, {}},
     };
     return s;
 }

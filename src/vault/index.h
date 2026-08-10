@@ -225,6 +225,10 @@ struct SavedSearch {
 struct TagCategory {
     std::string name;
     uint8_t     swatch = 0;
+    // Phase 73: the category's optional template — ordered field names, empty =
+    // no template. When a brand-new tag of this category is added, the UI
+    // prompts for one value per field (skippable).
+    std::vector<std::string> fields;
 
     friend bool operator==(const TagCategory&, const TagCategory&) = default;
 };
@@ -240,6 +244,18 @@ struct TagDescription {
     friend bool operator==(const TagDescription&, const TagDescription&) = default;
 };
 
+// One (tag, field) → value entry (Phase 73). Vault-global like TagDescription:
+// a field value belongs to the *tag* (via its category's template), never to a
+// node carrying it. `field` names a field of the tag's category template; the
+// pair (tag, field) is matched case-insensitively, first-seen casing kept.
+struct TagFieldValue {
+    std::string tag;
+    std::string field;
+    std::string value;
+
+    friend bool operator==(const TagFieldValue&, const TagFieldValue&) = default;
+};
+
 // Vault-global user settings (Phase 49), serialised after the saved-searches
 // block. Defaults here are also the values a pre-v8 blob reads back with, except
 // `categories`, which pre-v8 blobs get from seeded() — see deserialize_index.
@@ -248,6 +264,7 @@ struct VaultSettings {
     bool                       tiles_show_tags = true;
     std::vector<TagCategory>   categories;
     std::vector<TagDescription> tag_descriptions;
+    std::vector<TagFieldValue> tag_field_values;   // Phase 73
 
     // Phase 65: what content backfills have been run against this vault.
     // 0/0 is the correct reading for every pre-v10 blob — such a vault has
@@ -276,7 +293,10 @@ struct VaultSettings {
 // v10: vault-global migration watermark appended to the settings block
 // (Phase 65: migrated_index_version u8, migrated_probe_caps u16); pre-v10
 // blobs read 0/0 and are therefore treated as never migrated.
-inline constexpr uint8_t INDEX_VERSION = 10;
+// v11: category template fields appended to each category entry, and a
+// vault-global tag-field-values block appended after the migration watermark
+// (Phase 73); pre-v11 blobs read with no templates and no values.
+inline constexpr uint8_t INDEX_VERSION = 11;
 
 // Phase 65: the index version whose content backfills the migration performs.
 // Bump ONLY when a NEW index version adds a field needing a content backfill —
@@ -311,6 +331,14 @@ inline constexpr uint16_t INDEX_MAX_CATEGORY_BYTES = 64;
 // uncapped beyond its u16 length prefix, matching how node tags are bounded.
 inline constexpr uint16_t INDEX_MAX_TAG_DESCRIPTIONS = 4096;
 inline constexpr uint16_t INDEX_MAX_TAG_DESC_BYTES   = 512;
+
+// Maximum template fields per category, bytes per field name, bytes per stored
+// value, and total stored (tag, field, value) entries — bound a hostile
+// settings block (Phase 73).
+inline constexpr uint8_t  INDEX_MAX_TEMPLATE_FIELDS   = 16;
+inline constexpr uint16_t INDEX_MAX_FIELD_BYTES       = 64;
+inline constexpr uint16_t INDEX_MAX_FIELD_VALUE_BYTES = 256;
+inline constexpr uint16_t INDEX_MAX_TAG_FIELD_VALUES  = 16384;
 
 // Size of gfx's fixed tag-colour palette. Lives here (not in gfx) because it
 // bounds a persisted field: a swatch byte >= this is rejected on deserialise.
