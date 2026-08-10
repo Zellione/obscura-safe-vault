@@ -8,7 +8,9 @@
 #include "ui/nav_model.h"
 #include "ui/quick_switch.h"
 #include "ui/screen.h"
+#include "ui/tag_fields_form.h"
 #include "ui/tag_overview_model.h"   // ui::TagTally, TagSort
+#include "ui/template_editor.h"
 #include "ui/text_input_model.h"
 #include "ui/widgets.h"
 #include "vault/index.h"
@@ -49,7 +51,6 @@ private:
     void close_filter();
     void open_selected();   // Enter → TagGalleries for the focused tag
     [[nodiscard]] int row_at(float my) const;   // mouse y → row index (-1 = none)
-    void handle_prompt_key_event(const SDL_Event& e);  // handle SDL_EVENT_KEY_DOWN while prompting
     void handle_key_down_in_browse_mode(const SDL_KeyboardEvent& key);
 
     // Phase 55: Ctrl+I → pick a .json tag dictionary; the result is drained by
@@ -71,6 +72,10 @@ private:
     QuickSwitch     quick_switch_;   // ` overlay: jump to another vault
     NavModel        nav_;            // selection over shown_ (one row each)
 
+    // Phase 73: template editor and fields form panels (declare after vault_/win_)
+    TemplateEditorPanel template_editor_{vault_, win_};
+    TagFieldsForm       fields_form_{vault_, win_};
+
     std::vector<TagTally> all_;      // full overview, as returned by the vault
     std::vector<TagTally> shown_;    // filtered + sorted view that is navigated
     TagSort               sort_ = TagSort::Name;
@@ -82,12 +87,7 @@ private:
     // without stealing the bare letter keys (E opens the description prompt).
     bool                  filtering_ = false;
 
-    // Phase 51: tag description editing
-    bool            prompting_ = false;
-    bool            prompt_skip_text_input_ = false;  // Suppress the opening keypress's text event
-    TextInputModel  prompt_buf_{vault::INDEX_MAX_TAG_DESC_BYTES};
-    TextFieldChrome prompt_chrome_;
-    std::string     error_;
+    std::string error_;
 
     // Phase 55: the summary modal (dict import / junk-tag cleanup). Non-empty
     // exactly while the modal is up; any key dismisses it.

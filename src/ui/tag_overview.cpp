@@ -218,6 +218,10 @@ void TagOverviewScreen::handle_key_down_in_browse_mode(const SDL_KeyboardEvent& 
         error_.clear();
         return;
     }
+    if (key.key == SDLK_T && (key.mod & SDL_KMOD_CTRL) != 0) {
+        template_editor_.open();
+        return;
+    }
     switch (key.key) {
         case SDLK_UP:       nav_.move(-1);                              break;
         case SDLK_DOWN:     nav_.move(1);                               break;
@@ -229,9 +233,13 @@ void TagOverviewScreen::handle_key_down_in_browse_mode(const SDL_KeyboardEvent& 
             break;
         case SDLK_E:
             if (nav_.selected() >= 0 && nav_.selected() < static_cast<int>(shown_.size())) {
-                prompting_ = true;
-                prompt_buf_.set_text(shown_[nav_.selected()].description);
-                prompt_skip_text_input_ = true;
+                const std::string& tag = shown_[nav_.selected()].tag;
+                const auto s = vault::vault_settings(vault_);
+                std::string cat(vault::tag_category_prefix(tag));
+                auto tmpl = vault::category_template(s, cat);
+                fields_form_.open(tag, std::move(cat),
+                                  std::vector<std::string>(tmpl.begin(), tmpl.end()),
+                                  /*with_description=*/true);
                 error_.clear();
                 SDL_StartTextInput(win_.sdl_window());
             }
@@ -266,18 +274,18 @@ void TagOverviewScreen::handle_event(const SDL_Event& e)
 
     if (handle_prune_confirm_key(e)) return;
 
-    if (prompting_) {
-        // The 'E' that opened the prompt also arrives as a text event; swallow
-        // exactly that one so the field does not start with an "e" in it.
-        if (e.type == SDL_EVENT_TEXT_INPUT && prompt_skip_text_input_) {
-            prompt_skip_text_input_ = false;
-            return;
+    // Route through template editor and fields form before browse mode
+    if (template_editor_.active()) {
+        (void)template_editor_.handle_event(e);
+        if (!template_editor_.active()) reload();
+        return;
+    }
+    if (fields_form_.active()) {
+        (void)fields_form_.handle_event(e);
+        if (!fields_form_.active()) {
+            SDL_StopTextInput(win_.sdl_window());
+            if (fields_form_.consume_saved()) reload();
         }
-        // Precedence rule (Phase 54): the description field consumes editing
-        // keys before the prompt's own Enter/Esc. The byte limit is the field's
-        // own cap now, so an over-long paste truncates instead of being dropped.
-        if (handle_text_input_event(prompt_buf_, e)) return;
-        handle_prompt_key_event(e);
         return;
     }
 
@@ -326,41 +334,6 @@ void TagOverviewScreen::handle_filter_event(const SDL_Event& e)
         case SDLK_UP:        nav_.move(-1);   break;
         case SDLK_DOWN:      nav_.move(1);    break;
         default: break;
-    }
-}
-
-void TagOverviewScreen::handle_prompt_key_event(const SDL_Event& e)
-{
-    if (e.type != SDL_EVENT_KEY_DOWN) return;
-
-    switch (e.key.key) {
-        case SDLK_RETURN:
-        case SDLK_KP_ENTER:
-            // Save the description
-            if (const int sel = nav_.selected(); sel >= 0 && sel < static_cast<int>(shown_.size())) {
-                auto s = vault::vault_settings(vault_);
-                vault::set_tag_description(s, shown_[sel].tag, prompt_buf_.str());
-                if (vault::set_vault_settings(vault_, std::move(s)) != vault::VaultResult::Ok) {
-                    error_ = "Could not save the tag description";
-                } else {
-                    error_.clear();
-                    reload();
-                }
-            }
-            prompting_ = false;
-            prompt_buf_.clear();
-            prompt_skip_text_input_ = false;
-            SDL_StopTextInput(win_.sdl_window());
-            return;
-        case SDLK_ESCAPE:
-            prompting_ = false;
-            prompt_buf_.clear();
-            prompt_skip_text_input_ = false;
-            error_.clear();
-            SDL_StopTextInput(win_.sdl_window());
-            return;
-        default:
-            break;
     }
 }
 
@@ -432,37 +405,9 @@ void TagOverviewScreen::render(gfx::Renderer& r)
 
     quick_switch_.render(r, font_, W, H);
 
-    // Draw prompt overlay if active
-    if (prompting_) {
-        const PromptBoxLayout l = prompt_box_layout({.font_px = font_.pixel_height(),
-                                                     .window_w = W, .window_h = H,
-                                                     .input_h = PROMPT_INPUT_H});
-
-        // Draw prompt background and border
-        r.draw_round_rect(l.box, RADIUS, SURFACE);
-        r.draw_round_rect(l.box, RADIUS, ACCENT, /*filled*/ false);
-
-        // Title
-        r.draw_text(font_, l.box.x + PROMPT_PAD, l.title_y, "Edit tag description", TEXT);
-
-        // Input field
-        const float input_field_w = l.box.w - 2 * PROMPT_PAD;
-        const float input_inner_w = input_field_w - 2 * 4;  // 4px inset on each side
-        r.draw_round_rect({.x = l.box.x + PROMPT_PAD, .y = l.input_y, .w = input_field_w, .h = PROMPT_INPUT_H},
-                         RADIUS, SURFACE_HI);
-        r.draw_round_rect({.x = l.box.x + PROMPT_PAD, .y = l.input_y, .w = input_field_w, .h = PROMPT_INPUT_H},
-                         RADIUS, BORDER, /*filled*/ false);
-
-        // Draw input text with tail clipping (show what you're typing at the caret end)
-        const float text_y = l.input_y + (PROMPT_INPUT_H - font_.pixel_height()) / 2.0f;
-        draw_inline_edit_text(r, font_, l.box.x + PROMPT_PAD + 4, text_y, input_inner_w,
-                              prompt_buf_, prompt_chrome_);
-
-        // Hint line: remaining bytes
-        const auto bytes_left = vault::INDEX_MAX_TAG_DESC_BYTES - prompt_buf_.size();
-        const std::string hint = std::format("{} bytes left", bytes_left);
-        r.draw_text(font_, l.box.x + PROMPT_PAD, l.hint_y, hint, TEXT_FAINT);
-    }
+    // Draw panels last (template editor and fields form)
+    template_editor_.render(r, font_, W, H);
+    fields_form_.render(r, font_, W, H);
 
     render_prune_confirm(r, W, H);
     render_import_summary(r, W, H);
@@ -522,7 +467,8 @@ std::vector<HelpGroup> TagOverviewScreen::help_groups() const
     return {{"Navigate", {
         {"Up/Down", "Move selection"}, {"Enter", "Open tag"},
         {"/", "Filter tags"}, {"Tab", "Toggle sort (name/count)"},
-        {"E", "Edit description"},
+        {"E", "Edit tag description & fields"},
+        {"Ctrl+T", "Edit category templates"},
         {"Ctrl+I", "Import tag dictionary"},
         {"Ctrl+X", "Remove junk tags"},
         {"Esc", "Back"},

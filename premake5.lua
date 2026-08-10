@@ -583,6 +583,7 @@ project "osv_tests"
         "src/ui/tag_chip.cpp",
         "src/ui/tag_overview_model.cpp",
         "src/ui/tag_fields_form.cpp",
+        "src/ui/template_editor.cpp",
         "src/ui/slideshow_model.cpp",
         "src/ui/playback_model.cpp",
         "src/ui/video_playback.cpp",
