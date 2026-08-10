@@ -17,7 +17,6 @@
 #include "ui/widgets.h"
 #include "vault/index.h"
 #include "vault/vault.h"
-#include "vault/vault_search.h"
 
 namespace ui {
 

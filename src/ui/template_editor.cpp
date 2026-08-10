@@ -210,9 +210,8 @@ bool TemplateEditorPanel::handle_event_name_field(const SDL_Event& e)
             }
 
             auto s = vault::vault_settings(vault_);
-            auto fields = std::vector<std::string>(
-                vault::category_template(s, cat_name_).begin(),
-                vault::category_template(s, cat_name_).end());
+            const auto field_tmpl = vault::category_template(s, cat_name_);
+            auto fields = std::vector<std::string>(field_tmpl.begin(), field_tmpl.end());
 
             bool success = false;
             if (is_add_mode_) {
