@@ -2,6 +2,9 @@
 
 #include <format>
 
+#include "gfx/renderer.h"
+#include "gfx/text.h"
+#include "gfx/theme.h"
 #include "ui/delete_summary.h"
 #include "ui/meta_format.h"
 #include "vault/vault.h"
@@ -66,6 +69,35 @@ std::string batch_delete_counts_line(const BatchDeleteSummary& s)
     if (!line.empty()) line += " · ";
     line += format_size(s.bytes);
     return line;
+}
+
+void draw_batch_delete_confirm(gfx::Renderer& r, gfx::FontAtlas& font,
+                               float W, float H, const BatchDeleteSummary& s)
+{
+    using namespace gfx::theme;
+
+    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});   // veil
+
+    const float pw = 560;
+    const float ph = 200;
+    const float px = (W - pw) / 2;
+    const float py = (H - ph) / 2;
+    r.draw_round_rect({px, py, pw, ph}, RADIUS, SURFACE);
+    r.draw_round_rect({px, py, pw, ph}, RADIUS, DANGER, /*filled*/ false);
+
+    const auto centered = [&](const std::string& text, float y, gfx::Color c) {
+        const auto tw = static_cast<float>(font.measure(text));
+        r.draw_text(font, px + (pw - tw) / 2, y, text, c);
+    };
+
+    centered(std::format("Delete {} selected {}?", s.top_level,
+                         s.top_level == 1 ? "item" : "items"), py + 28, TEXT);
+    centered(s.galleries > 0
+                 ? "This permanently removes them — galleries with everything in them."
+                 : "This permanently removes them from the vault.",
+             py + 72, DANGER);
+    centered(batch_delete_counts_line(s), py + 104, DANGER);
+    centered("[Esc/N] Cancel        [Y] Delete", py + ph - 50, TEXT_DIM);
 }
 
 }  // namespace ui

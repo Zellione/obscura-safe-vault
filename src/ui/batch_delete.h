@@ -6,6 +6,7 @@
 #include <vector>
 
 namespace vault { class Vault; }
+namespace gfx { class Renderer; class FontAtlas; }
 
 namespace ui {
 
@@ -38,5 +39,12 @@ struct BatchDeleteSummary {
 // "2 galleries · 7 images · 3 videos · 312 MB" — zero categories dropped,
 // singular/plural per count; bytes always shown via format_size.
 [[nodiscard]] std::string batch_delete_counts_line(const BatchDeleteSummary& s);
+
+// Default-cancel DANGER confirm modal for a batch delete: title with the
+// top-level count, the counts line, the irreversibility warning, [Esc/N]/[Y]
+// keybar. Drawing-only plumbing (ConsentDialog precedent) — key handling is
+// the caller's.
+void draw_batch_delete_confirm(gfx::Renderer& r, gfx::FontAtlas& font,
+                               float W, float H, const BatchDeleteSummary& s);
 
 }  // namespace ui

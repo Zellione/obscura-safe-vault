@@ -43,6 +43,20 @@ bool CollectionBatchOps::handle_event(const SDL_Event& e)
         (void)transfer_.handle_event(e);
         return true;
     }
+    if (!delete_paths_.empty()) {                    // Phase 74 delete confirm
+        if (e.type != SDL_EVENT_KEY_DOWN) return true;
+        const SDL_Keycode k = e.key.key;
+        if (k == SDLK_ESCAPE || k == SDLK_N) {
+            delete_paths_.clear();
+        } else if (k == SDLK_Y) {
+            queue_.set_exclusive(true);              // Phase 50 exclusivity
+            had_exclusive_ = true;
+            job_.start_delete_batch(vault_, std::move(delete_paths_),
+                                    delete_summary_.item_total);
+            delete_paths_.clear();
+        }
+        return true;                                 // modal swallows every key
+    }
     if (job_.active()) {
         if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) { job_.cancel(); }
         return true;
@@ -80,6 +94,10 @@ CollectionBatchOps::Poll CollectionBatchOps::poll()
     if (auto oc = job_.take_outcome()) {
         out.status = oc->ok ? std::move(oc->status) : std::move(oc->error);
         out.dirty  = true;
+        if (oc->kind == FileOpKind::Delete) {
+            out.reload = true;                       // items vanished from the collection
+            release_exclusive();
+        }
     }
     return out;
 }
@@ -115,17 +133,39 @@ void CollectionBatchOps::request_transfer(std::vector<ParentGroup> media_groups,
     transfer_.open_collection(std::move(media_groups), std::move(gallery_paths));
 }
 
+void CollectionBatchOps::request_delete(std::vector<std::string> node_paths,
+                                        std::string& status)
+{
+    if (modal_active() || busy()) { return; }
+    if (queue_.busy()) {
+        status = "Imports running — press Shift+I for status";
+        return;
+    }
+    auto paths = prune_descendant_paths(std::move(node_paths));
+    const BatchDeleteSummary s = summarize_batch_delete(vault_, paths);
+    if (s.top_level == 0) {
+        status = "Nothing selected to delete.";
+        return;
+    }
+    status.clear();
+    delete_paths_   = std::move(paths);
+    delete_summary_ = s;
+}
+
 void CollectionBatchOps::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H)
 {
     consent_.render(r, font, W, H);
     transfer_.render(r, font, W, H);
+    if (!delete_paths_.empty()) {
+        draw_batch_delete_confirm(r, font, W, H, delete_summary_);
+    }
     if (job_.active()) {
         const int done  = job_.done();
         const int total = job_.total();
         const std::string count = std::format("{} / {} files", done, total);
         draw_op_progress(r, font, W, H,
-                         {.title = "Exporting…", .count_line = count,
-                          .done = done, .total = total});
+                         {.title = job_.kind() == FileOpKind::Delete ? "Deleting…" : "Exporting…",
+                          .count_line = count, .done = done, .total = total});
     }
 }
 
