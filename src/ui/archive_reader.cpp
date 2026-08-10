@@ -42,6 +42,35 @@ struct archive* open_stream(std::span<const uint8_t> data, const char* passphras
 // and any compression filter. Used for multi-volume archives. Caller owns the
 // result and must archive_read_free() it. Returns nullptr on open failure.
 // `file_paths` is a vector of filesystem::path; ownership remains with caller.
+// The multi-volume open call itself, isolated so the temporary name storage
+// lives exactly as long as the call (libarchive copies each filename at open).
+// Wide variant on Windows: the narrow archive_read_open_filenames() reaches
+// fopen() through the ANSI code page and cannot open a CJK volume name
+// (Phase 72). Narrow UTF-8 elsewhere.
+int open_filenames_portable(struct archive* a,
+                            const std::vector<std::filesystem::path>& file_paths)
+{
+#if defined(_WIN32)
+    std::vector<std::wstring> vol_strings;
+    vol_strings.reserve(file_paths.size());
+    for (const auto& vol : file_paths) vol_strings.push_back(vol.native());
+    std::vector<const wchar_t*> vol_cstrs;
+    vol_cstrs.reserve(vol_strings.size() + 1);
+    for (const auto& vol_str : vol_strings) vol_cstrs.push_back(vol_str.c_str());
+    vol_cstrs.push_back(nullptr);  // NULL-terminate
+    return archive_read_open_filenames_w(a, vol_cstrs.data(), 10240);
+#else
+    std::vector<std::string> vol_strings;
+    vol_strings.reserve(file_paths.size());
+    for (const auto& vol : file_paths) vol_strings.push_back(platform::path_to_utf8(vol));
+    std::vector<const char*> vol_cstrs;
+    vol_cstrs.reserve(vol_strings.size() + 1);
+    for (const auto& vol_str : vol_strings) vol_cstrs.push_back(vol_str.c_str());
+    vol_cstrs.push_back(nullptr);  // NULL-terminate
+    return archive_read_open_filenames(a, vol_cstrs.data(), 10240);
+#endif
+}
+
 struct archive* open_stream_files(const std::vector<std::filesystem::path>& file_paths,
                                    const char* passphrase)
 {
@@ -50,27 +79,7 @@ struct archive* open_stream_files(const std::vector<std::filesystem::path>& file
     archive_read_support_filter_all(a);
     if (passphrase) archive_read_add_passphrase(a, passphrase);
 
-    // The string vectors must stay alive across the open call.
-#if defined(_WIN32)
-    // Wide variant: the narrow archive_read_open_filenames() reaches fopen()
-    // through the ANSI code page and cannot open a CJK volume name (Phase 72).
-    std::vector<std::wstring> vol_strings;
-    vol_strings.reserve(file_paths.size());
-    for (const auto& vol : file_paths) vol_strings.push_back(vol.native());
-    std::vector<const wchar_t*> vol_cstrs;
-    for (const auto& vol_str : vol_strings) vol_cstrs.push_back(vol_str.c_str());
-    vol_cstrs.push_back(nullptr);  // NULL-terminate
-    const int r = archive_read_open_filenames_w(a, vol_cstrs.data(), 10240);
-#else
-    std::vector<std::string> vol_strings;
-    vol_strings.reserve(file_paths.size());
-    for (const auto& vol : file_paths) vol_strings.push_back(platform::path_to_utf8(vol));
-    std::vector<const char*> vol_cstrs;
-    for (const auto& vol_str : vol_strings) vol_cstrs.push_back(vol_str.c_str());
-    vol_cstrs.push_back(nullptr);  // NULL-terminate
-    const int r = archive_read_open_filenames(a, vol_cstrs.data(), 10240);
-#endif
-    if (r != ARCHIVE_OK) {
+    if (const int r = open_filenames_portable(a, file_paths); r != ARCHIVE_OK) {
         std::println(stderr, "[ArchiveReader] open_files failed: {}", archive_error_string(a));
         archive_read_free(a);
         return nullptr;
