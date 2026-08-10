@@ -1114,6 +1114,47 @@ VaultResult set_favorites_batch(Vault& v, std::span<const std::string> node_path
     return changed ? v.commit_index() : Ok;
 }
 
+VaultResult add_tag_batch(Vault& v, std::span<const std::string> node_paths,
+                          std::string_view tag)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+    const auto trimmed = normalise_tag(tag);
+    if (trimmed.empty()) return InvalidArg;
+
+    bool changed = false;
+    for (const std::string& path : node_paths) {
+        IndexNode* node = v.resolve_node(path);
+        if (!node) continue;   // missing: skipped, not an error
+        const bool dup = std::ranges::any_of(node->tags,
+            [&trimmed](const std::string& e) { return ci_equal(e, trimmed); });
+        if (dup) continue;
+        node->tags.emplace_back(trimmed);
+        changed = true;
+    }
+    // One crash-safe index swap for the whole batch; none for a no-op batch.
+    return changed ? v.commit_index() : Ok;
+}
+
+VaultResult remove_tag_batch(Vault& v, std::span<const std::string> node_paths,
+                             std::string_view tag)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+    const auto trimmed = normalise_tag(tag);
+    if (trimmed.empty()) return Ok;   // idempotent, like remove_tag
+
+    bool changed = false;
+    for (const std::string& path : node_paths) {
+        IndexNode* node = v.resolve_node(path);
+        if (!node) continue;
+        const auto removed = std::erase_if(node->tags,
+            [&trimmed](const std::string& e) { return ci_equal(e, trimmed); });
+        changed = changed || removed > 0;
+    }
+    return changed ? v.commit_index() : Ok;
+}
+
 std::vector<const IndexNode*> Vault::list(std::string_view gallery_path) const
 {
     std::vector<const IndexNode*> out;

@@ -108,12 +108,7 @@ void TagEditor::add_chosen_tag()
     if (chosen.empty()) { return; }
 
     using enum vault::VaultResult;
-    int failures = 0;
-    for (const std::string& path : node_paths_) {
-        if (vault_.add_tag(path, chosen) != Ok) { ++failures; }
-    }
-
-    if (failures == static_cast<int>(node_paths_.size())) {
+    if (vault::add_tag_batch(vault_, node_paths_, chosen) != Ok) {
         error_ = "Failed to add tag.";
         return;
     }
@@ -276,11 +271,7 @@ void TagEditor::delete_selected_tag()
     if (selected_ < 0 || selected_ >= static_cast<int>(tally_.size())) return;
 
     const std::string tag_to_remove = tally_[selected_].tag;
-    bool any_ok = false;
-    for (const std::string& path : node_paths_) {
-        if (vault_.remove_tag(path, tag_to_remove) == vault::VaultResult::Ok) { any_ok = true; }
-    }
-    if (any_ok) {
+    if (vault::remove_tag_batch(vault_, node_paths_, tag_to_remove) == vault::VaultResult::Ok) {
         refresh_tags();
         refresh_vocabulary();
         refresh_suggestions();   // the removed tag is suggestible again
