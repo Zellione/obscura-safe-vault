@@ -316,6 +316,10 @@ public:
                                           std::span<const std::string> node_paths,
                                           RemoveBatchStats* stats);
 
+    friend VaultResult remove_nodes_batch(Vault& v,
+                                          std::span<const std::string> node_paths,
+                                          RemoveBatchStats* stats);
+
     // Batch favorite set (Phase 68 multiselect): flip every resolving path to
     // `value`, ONE commit_index(). Kept a free friend for the same S1448 reason.
     friend VaultResult set_favorites_batch(Vault& v,
@@ -465,6 +469,17 @@ private:
 // then one auto_reclaim_space(). Locked if locked; IoError if the commit fails
 // (tree already mutated — same contract as remove_image's failed commit).
 [[nodiscard]] VaultResult remove_media_batch(Vault& v,
+                                             std::span<const std::string> node_paths,
+                                             RemoveBatchStats* stats = nullptr);
+
+// Batch node removal (Phase 74 multi-select delete): erase every node named by
+// `node_paths` (full slash-paths) — media nodes AND whole gallery subtrees alike
+// (a gallery erase orphans every descendant chunk, exactly like remove_gallery).
+// Missing paths and the un-erasable root ("") are counted, not errors. ONE
+// commit_index() for the whole batch (none if nothing was removed), then one
+// auto_reclaim_space(). Locked if locked; IoError if the commit fails (tree
+// already mutated — same contract as remove_media_batch).
+[[nodiscard]] VaultResult remove_nodes_batch(Vault& v,
                                              std::span<const std::string> node_paths,
                                              RemoveBatchStats* stats = nullptr);
 

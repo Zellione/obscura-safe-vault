@@ -115,3 +115,96 @@ TEST(remove_batch_locked_vault_refused)
     CHECK_EQ(stats.removed, size_t{0});  // stats zeroed on failure (prune_tags contract)
     CHECK_EQ(stats.missing, size_t{0});
 }
+
+TEST(remove_nodes_batch_mixed_media_and_gallery)
+{
+    TempVault tv("nodes_mixed");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kFastKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("g/sub") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("g/sub", pattern(500, 1), "deep.png") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("g", pattern(500, 2), "in_g.png") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", pattern(500, 3), "keep.png") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", pattern(500, 4), "doomed.png") == vault::VaultResult::Ok);
+
+    // One batch: a media node AND a whole gallery subtree.
+    const std::vector<std::string> doomed{"doomed.png", "g"};
+    vault::RemoveBatchStats stats;
+    REQUIRE(vault::remove_nodes_batch(v, doomed, &stats) == vault::VaultResult::Ok);
+    CHECK_EQ(stats.removed, size_t{2});
+    CHECK_EQ(stats.missing, size_t{0});
+    CHECK_EQ(v.list("").size(), size_t{1});           // only keep.png left
+    CHECK_EQ(v.list("")[0]->name, std::string("keep.png"));
+    CHECK(v.resolve_node("g") == nullptr);            // subtree gone
+    CHECK(v.resolve_node("g/sub/deep.png") == nullptr);
+}
+
+TEST(remove_nodes_batch_counts_missing)
+{
+    TempVault tv("nodes_missing");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kFastKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", pattern(100, 1), "a.png") == vault::VaultResult::Ok);
+
+    const std::vector<std::string> doomed{"a.png", "ghost.png", "no/such/gallery"};
+    vault::RemoveBatchStats stats;
+    REQUIRE(vault::remove_nodes_batch(v, doomed, &stats) == vault::VaultResult::Ok);
+    CHECK_EQ(stats.removed, size_t{1});
+    CHECK_EQ(stats.missing, size_t{2});
+    CHECK_EQ(v.list("").size(), size_t{0});
+}
+
+TEST(remove_nodes_batch_survives_reopen)
+{
+    TempVault tv("nodes_reopen");
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kFastKdf, v)
+                == vault::VaultResult::Ok);
+        REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("g", pattern(100, 1), "x.png") == vault::VaultResult::Ok);
+        REQUIRE(v.add_image("", pattern(100, 2), "keep.png") == vault::VaultResult::Ok);
+        const std::vector<std::string> doomed{"g"};
+        REQUIRE(vault::remove_nodes_batch(v, doomed, nullptr) == vault::VaultResult::Ok);
+    }
+    vault::Vault v;
+    REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
+    REQUIRE(v.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
+    REQUIRE(v.list("").size() == 1);
+    CHECK_EQ(v.list("")[0]->name, std::string("keep.png"));
+}
+
+TEST(remove_nodes_batch_locked_refused)
+{
+    TempVault tv("nodes_locked");
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kFastKdf, v)
+                == vault::VaultResult::Ok);
+    }
+    vault::Vault v;
+    REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);  // still locked
+    const std::vector<std::string> doomed{"a.png"};
+    vault::RemoveBatchStats stats{.removed = 99, .missing = 99};
+    CHECK(vault::remove_nodes_batch(v, doomed, &stats) == vault::VaultResult::Locked);
+    CHECK_EQ(stats.removed, size_t{0});   // stats zeroed on failure
+    CHECK_EQ(stats.missing, size_t{0});
+}
+
+TEST(remove_nodes_batch_root_path_is_missing_not_erased)
+{
+    TempVault tv("nodes_root");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kFastKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", pattern(100, 1), "a.png") == vault::VaultResult::Ok);
+    const std::vector<std::string> doomed{""};   // the root is not deletable
+    vault::RemoveBatchStats stats;
+    REQUIRE(vault::remove_nodes_batch(v, doomed, &stats) == vault::VaultResult::Ok);
+    CHECK_EQ(stats.removed, size_t{0});
+    CHECK_EQ(stats.missing, size_t{1});
+    CHECK_EQ(v.list("").size(), size_t{1});
+}
