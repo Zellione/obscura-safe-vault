@@ -93,7 +93,7 @@ void draw_batch_delete_confirm(gfx::Renderer& r, gfx::FontAtlas& font,
     centered(std::format("Delete {} selected {}?", s.top_level,
                          s.top_level == 1 ? "item" : "items"), py + 28, TEXT);
     centered(s.galleries > 0
-                 ? "This permanently removes them — galleries with everything in them."
+                 ? "This permanently removes them, including everything inside the galleries."
                  : "This permanently removes them from the vault.",
              py + 72, DANGER);
     centered(batch_delete_counts_line(s), py + 104, DANGER);
