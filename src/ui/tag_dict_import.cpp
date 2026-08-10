@@ -49,7 +49,7 @@ void register_category(VaultSettings& s, const TagDictEntry& e, TagDictImportSum
         ++sum.categories_skipped_over_cap;
         return;
     }
-    s.categories.push_back({.name = e.category, .swatch = next_swatch(s)});
+    s.categories.push_back({.name = e.category, .swatch = next_swatch(s), .fields = {}});
     ++sum.categories_added;
 }
 

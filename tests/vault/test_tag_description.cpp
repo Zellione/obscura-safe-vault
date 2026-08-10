@@ -48,7 +48,7 @@ TEST(tag_description_blob_declares_version_10)
 {
     std::vector<uint8_t> blob;
     serialize_index(make_root(), {}, VaultSettings{}, blob);
-    CHECK_EQ(static_cast<int>(blob[0]), 10);
+    CHECK_EQ(static_cast<int>(blob[0]), 11);
 }
 
 TEST(tag_description_empty_list_round_trips)
@@ -74,7 +74,7 @@ TEST(tag_description_over_length_text_is_rejected_not_clamped)
     serialize_index(make_root(), {}, s, blob);
 
     // The final entry's desc_len is the last u16 before the 2 text bytes.
-    const size_t desc_len_at = blob.size() - 2 /*text*/ - 2 /*len*/;
+    const size_t desc_len_at = blob.size() - 2 /*text*/ - 2 /*len*/ - 2 /*field_values_count*/;
     blob[desc_len_at]     = 0xFF;   // 65535 > INDEX_MAX_TAG_DESC_BYTES
     blob[desc_len_at + 1] = 0xFF;
 

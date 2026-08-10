@@ -227,10 +227,10 @@ TEST(fuzz_index_deserialize_survives_3000_malformed_blobs)
     settings.default_sort    = vault::SortKey::DateDesc;
     settings.tiles_show_tags = false;
     settings.categories = {
-        {.name = "artist", .swatch = 0},
+        {.name = "artist", .swatch = 0, .fields = {}},
         {.name = std::string(vault::INDEX_MAX_CATEGORY_BYTES, 'x'),
-         .swatch = vault::TAG_SWATCH_COUNT - 1},
-        {.name = "parody", .swatch = 7},
+         .swatch = vault::TAG_SWATCH_COUNT - 1, .fields = {}},
+        {.name = "parody", .swatch = 7, .fields = {}},
     };
     settings.tag_descriptions = {
         {.tag = "beach", .text = "Coastal shots"},

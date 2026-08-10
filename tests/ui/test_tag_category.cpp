@@ -13,7 +13,7 @@ using vault::TagCategory;
 namespace {
 
 const std::vector<TagCategory> CATS = {
-    {.name = "artist", .swatch = 3}, {.name = "parody", .swatch = 7}, {.name = "female", .swatch = 9},
+    {.name = "artist", .swatch = 3, .fields = {}}, {.name = "parody", .swatch = 7, .fields = {}}, {.name = "female", .swatch = 9, .fields = {}},
 };
 
 } // namespace

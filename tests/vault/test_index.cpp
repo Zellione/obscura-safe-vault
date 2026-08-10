@@ -612,7 +612,7 @@ TEST(index_version_is_ten)
     std::vector<uint8_t> blob;
     vault::serialize_index(root, blob);
     REQUIRE(!blob.empty());
-    CHECK_EQ(blob[0], uint8_t{10});
+    CHECK_EQ(blob[0], uint8_t{11});
 }
 
 TEST(index_v6_blob_reads_animated_as_false)
@@ -689,7 +689,7 @@ TEST(index_v8_accepts_insertion_sort_key)
     std::vector<uint8_t> blob;
     serialize_index(root, blob);
     CHECK_EQ(blob[0], INDEX_VERSION);
-    CHECK_EQ(blob[0], 10);
+    CHECK_EQ(blob[0], 11);
 
     IndexNode out;
     CHECK(deserialize_index(blob, out));
@@ -719,7 +719,7 @@ TEST(index_settings_round_trip)
     vault::VaultSettings s;
     s.default_sort    = vault::SortKey::NameAsc;
     s.tiles_show_tags = false;
-    s.categories = {{"artist", 3}, {"parody", 7}};
+    s.categories = {{"artist", 3, {}}, {"parody", 7, {}}};
 
     std::vector<uint8_t> blob;
     vault::serialize_index(root, {}, s, blob);
@@ -758,7 +758,7 @@ TEST(index_settings_dedupes_categories_case_insensitively)
 {
     IndexNode root = IndexNode::gallery("");
     vault::VaultSettings s;
-    s.categories = {{"Artist", 1}, {"artist", 9}, {"parody", 2}};
+    s.categories = {{"Artist", 1, {}}, {"artist", 9, {}}, {"parody", 2, {}}};
 
     std::vector<uint8_t> blob;
     vault::serialize_index(root, {}, s, blob);
@@ -777,12 +777,12 @@ TEST(index_settings_rejects_out_of_range_swatch)
 {
     IndexNode root = IndexNode::gallery("");
     vault::VaultSettings s;
-    s.categories = {{"artist", 3}};
+    s.categories = {{"artist", 3, {}}};
 
     std::vector<uint8_t> blob;
     vault::serialize_index(root, {}, s, blob);
     // With v10 watermark (3 bytes), swatch is 3 bytes before the end
-    blob[blob.size() - 3] = vault::TAG_SWATCH_COUNT;
+    blob[blob.size() - 8] = vault::TAG_SWATCH_COUNT;
 
     IndexNode out;
     std::vector<vault::SavedSearch> searches;
@@ -798,7 +798,7 @@ TEST(index_settings_rejects_bad_tiles_flag)
 
     // The settings block is the tail: default_sort, tiles_show_tags, cat_count(u16), desc_count(u16), watermark(u8 + u16).
     // tiles_show_tags is at position -8 (2 bytes for desc_count + 3 bytes for watermark after cat_count).
-    const size_t tiles_at = blob.size() - 8;
+    const size_t tiles_at = blob.size() - 10;
     CHECK_EQ(blob[tiles_at], 1);
     blob[tiles_at] = 2;
 
@@ -815,7 +815,7 @@ TEST(index_settings_rejects_bad_default_sort)
     vault::serialize_index(root, {}, vault::VaultSettings{}, blob);
 
     // With the desc_count field added (Phase 51), default_sort is now at blob.size() - 6.
-    blob[blob.size() - 6] = 9;   // default_sort byte, one past Insertion
+    blob[blob.size() - 11] = 9;   // default_sort byte, one past Insertion
 
     IndexNode out;
     std::vector<vault::SavedSearch> searches;
@@ -827,7 +827,7 @@ TEST(index_settings_rejects_over_long_category_name)
 {
     IndexNode root = IndexNode::gallery("");
     vault::VaultSettings s;
-    s.categories = {{std::string(vault::INDEX_MAX_CATEGORY_BYTES + 1, 'a'), 0}};
+    s.categories = {{std::string(vault::INDEX_MAX_CATEGORY_BYTES + 1, 'a'), 0, {}}};
 
     std::vector<uint8_t> blob;
     vault::serialize_index(root, {}, s, blob);   // writer clamps to the cap
@@ -842,7 +842,7 @@ TEST(index_settings_rejects_over_long_category_name)
     // A hand-forged blob declaring a longer name is rejected outright.
     std::vector<uint8_t> forged = blob;
     // With desc_count and watermark (3 bytes) added at the end, the name_len is now 5 bytes earlier.
-    const size_t name_len_at = forged.size() - 1 - 2 - vault::INDEX_MAX_CATEGORY_BYTES - 2 - 3;
+    const size_t name_len_at = forged.size() - 1 - 2 - vault::INDEX_MAX_CATEGORY_BYTES - 2 - 3 - 1 - 2;
     forged[name_len_at]     = 0xFF;
     forged[name_len_at + 1] = 0x00;
     IndexNode out2;
@@ -862,7 +862,7 @@ TEST(index_pre_v8_blob_reads_seeded_settings)
     // With desc_count added in v9, the settings block is now 6 bytes (was 4 in v8).
     // With watermark added in v10, the settings block is now 9 bytes.
     // We strip the entire v10 settings block to create a v7 blob.
-    std::vector<uint8_t> v7(v8.begin(), v8.end() - 9);   // drop the settings block
+    std::vector<uint8_t> v7(v8.begin(), v8.end() - 11);   // drop the settings block
     v7[0] = 7;
 
     IndexNode out;
