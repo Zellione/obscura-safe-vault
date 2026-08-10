@@ -31,9 +31,8 @@ constexpr float OX  = 40;    // left margin
 constexpr float OY  = 150;   // list top
 constexpr float PAD = 9;     // vertical padding inside a row
 
-// Prompt sizing: scales to window width with sensible bounds
+// Prompt sizing: scales to window width with sensible bounds (used by import summary modal)
 constexpr float PROMPT_PAD = 16.0f;           // internal padding in prompt box
-constexpr float PROMPT_INPUT_H = 32.0f;       // height of input field
 
 // Phase 54 removed this file's private UTF-8 truncation and tail-clipping
 // helpers: TextInputModel's byte cap does the former (on whole characters) and
