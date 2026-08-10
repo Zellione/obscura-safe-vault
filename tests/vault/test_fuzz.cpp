@@ -227,14 +227,20 @@ TEST(fuzz_index_deserialize_survives_3000_malformed_blobs)
     settings.default_sort    = vault::SortKey::DateDesc;
     settings.tiles_show_tags = false;
     settings.categories = {
-        {.name = "artist", .swatch = 0},
+        {.name = "artist", .swatch = 0, .fields = {"country", "style"}},
         {.name = std::string(vault::INDEX_MAX_CATEGORY_BYTES, 'x'),
-         .swatch = vault::TAG_SWATCH_COUNT - 1},
-        {.name = "parody", .swatch = 7},
+         .swatch = vault::TAG_SWATCH_COUNT - 1, .fields = {}},
+        {.name = "parody", .swatch = 7,
+         .fields = {std::string(vault::INDEX_MAX_FIELD_BYTES, 'f')}},
     };
     settings.tag_descriptions = {
         {.tag = "beach", .text = "Coastal shots"},
         {.tag = "archive", .text = std::string(vault::INDEX_MAX_TAG_DESC_BYTES, 'y')},
+    };
+    settings.tag_field_values = {
+        {.tag = "artist:bob", .field = "country", .value = "Japan"},
+        {.tag = "artist:bob", .field = "style",
+         .value = std::string(vault::INDEX_MAX_FIELD_VALUE_BYTES, 'v')},
     };
     std::vector<uint8_t> valid;
     vault::serialize_index(root, searches, settings, valid);

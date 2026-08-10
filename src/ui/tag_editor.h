@@ -8,6 +8,7 @@
 
 #include "ui/tag_chip.h"     // ui::ChipWrap
 #include "ui/tag_tally.h"    // ui::TagTallyEntry, compute_tag_tally
+#include "ui/tag_fields_form.h"
 #include "ui/text_input_model.h"
 #include "ui/widgets.h"
 
@@ -68,6 +69,7 @@ private:
 
     vault::Vault&        vault_;
     gfx::Window&         win_;
+    TagFieldsForm        fields_form_{vault_, win_};
     bool                       active_ = false;
     std::vector<std::string>   node_paths_;    // one or many (Phase 45 Part 2)
     std::vector<TagTallyEntry> tally_;         // union of node_paths_' tags + counts

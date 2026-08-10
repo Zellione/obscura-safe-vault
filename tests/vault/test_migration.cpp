@@ -43,7 +43,7 @@ TEST(migration_watermark_round_trips_at_v10)
     vault::serialize_index(root, {}, s, blob);
     CHECK(!blob.empty());
     CHECK_EQ(blob[0], vault::INDEX_VERSION);
-    CHECK_EQ(vault::INDEX_VERSION, 10);
+    CHECK_EQ(vault::INDEX_VERSION, 11);
 
     vault::IndexNode out;
     std::vector<vault::SavedSearch> searches;
@@ -82,7 +82,7 @@ TEST(migration_watermark_rejects_future_version)
 
     // The watermark is the last 3 bytes of the settings block, which is the
     // tail of the blob: [.. migrated_index_version u8][migrated_probe_caps u16].
-    blob[blob.size() - 3] = static_cast<uint8_t>(vault::INDEX_VERSION + 1);
+    blob[blob.size() - 5] = static_cast<uint8_t>(vault::INDEX_VERSION + 1);
 
     vault::IndexNode out;
     std::vector<vault::SavedSearch> searches;

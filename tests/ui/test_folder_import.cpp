@@ -7,6 +7,7 @@
 #include <thread>
 
 #include "ui/import_queue.h"
+#include "vault/commit_lane.h"
 #include "ui/zip_test_helpers.h"
 #include "vault/vault.h"
 
@@ -82,7 +83,10 @@ TEST(folder_import_mirrors_subfolders_into_sub_galleries)
 
     // Import
     ui::ImportQueue q;
-    q.begin_session(v);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
+    q.begin_session(v, lane);
     (void)q.enqueue_folder(root, "", "Photos");
 
     // Pump until the queue drains (bounded so a hang fails rather than spins).
@@ -131,7 +135,10 @@ TEST(folder_import_survives_lock_and_reopen)
 
     // Import
     ui::ImportQueue q;
-    q.begin_session(v);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
+    q.begin_session(v, lane);
     (void)q.enqueue_folder(root, "", "Photos");
     pump_until_idle(q);
     q.end_session();
@@ -190,7 +197,10 @@ TEST(folder_import_with_nested_galleries)
 
     // Import
     ui::ImportQueue q;
-    q.begin_session(v);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
+    q.begin_session(v, lane);
     (void)q.enqueue_folder(root, "", "Photos");
     pump_until_idle(q);
     q.end_session();

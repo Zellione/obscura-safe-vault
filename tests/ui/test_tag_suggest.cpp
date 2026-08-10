@@ -1,5 +1,6 @@
 #include "test_framework.h"
 #include "ui/tag_suggest.h"
+#include "vault/index.h"
 
 #include <string>
 #include <vector>
@@ -58,4 +59,29 @@ TEST(tag_suggest_dedupes_ci_keeping_first_casing)
     const auto s = ui::editor_tag_suggestions("pony", vocab, {});
     REQUIRE(s.size() == static_cast<size_t>(1));
     CHECK_EQ(s[0], std::string("Ponytail"));
+}
+
+TEST(field_value_suggestions_scoped_and_ranked)
+{
+    vault::VaultSettings s;
+    s.categories = {{.name = "artist", .swatch = 0, .fields = {"country"}},
+                    {.name = "studio", .swatch = 1, .fields = {"country"}}};
+    vault::set_tag_field_value(s, "artist:bob", "country", "Japan");
+    vault::set_tag_field_value(s, "artist:ann", "country", "France");
+    vault::set_tag_field_value(s, "artist:cat", "country", "japan");     // ci dupe
+    vault::set_tag_field_value(s, "studio:acme", "country", "Germany");  // other category
+
+    // Empty buffer: the full distinct pool for (artist, country), sorted ci.
+    auto out = ui::field_value_suggestions("", "artist", "country", s);
+    REQUIRE(out.size() == 2u);
+    CHECK_EQ(out[0], std::string("France"));
+    CHECK_EQ(out[1], std::string("Japan"));   // first-seen casing kept
+
+    // Typed prefix ranks matches; other categories never leak in.
+    out = ui::field_value_suggestions("ja", "artist", "country", s);
+    REQUIRE(out.size() == 1u);
+    CHECK_EQ(out[0], std::string("Japan"));
+
+    out = ui::field_value_suggestions("", "artist", "missing", s);
+    CHECK(out.empty());
 }

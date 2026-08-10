@@ -35,4 +35,36 @@ std::vector<std::string> editor_tag_suggestions(std::string_view                
     return out;
 }
 
+std::vector<std::string> field_value_suggestions(std::string_view             buffer,
+                                                 std::string_view             category,
+                                                 std::string_view             field,
+                                                 const vault::VaultSettings&  settings)
+{
+    std::vector<std::string> pool;
+    for (const auto& e : settings.tag_field_values) {
+        if (!tag_ci_equal(e.field, field)) continue;
+        if (!tag_ci_equal(vault::tag_category_prefix(e.tag), category)) continue;
+        const bool dupe = std::ranges::any_of(pool,
+            [&e](const std::string& v) { return tag_ci_equal(v, e.value); });
+        if (!dupe) pool.push_back(e.value);
+    }
+
+    const std::string_view typed = trimmed(buffer);
+    std::vector<std::string> out;
+    if (typed.empty()) {
+        out = std::move(pool);
+        std::ranges::sort(out, [](std::string_view a, std::string_view b) {
+            return std::ranges::lexicographical_compare(a, b, [](char x, char y) {
+                return std::tolower(static_cast<unsigned char>(x)) <
+                       std::tolower(static_cast<unsigned char>(y));
+            });
+        });
+    } else {
+        out = tag_suggestions(typed, pool);
+    }
+    if (out.size() > static_cast<size_t>(TAG_SUGGEST_MAX))
+        out.resize(static_cast<size_t>(TAG_SUGGEST_MAX));
+    return out;
+}
+
 } // namespace ui

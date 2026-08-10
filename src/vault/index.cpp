@@ -302,6 +302,87 @@ bool category_name_eq(std::string_view a, std::string_view b)
     return true;
 }
 
+// Helper: write categories block with template fields (Phase 49, Phase 73).
+void write_categories_block(ByteWriter& w, const std::vector<vault::TagCategory>& categories)
+{
+    const uint16_t count = categories.size() > INDEX_MAX_TAG_CATEGORIES
+                               ? INDEX_MAX_TAG_CATEGORIES
+                               : static_cast<uint16_t>(categories.size());
+    w.u16(count);
+    for (uint16_t i = 0; i < count; ++i) {
+        const std::string& name = categories[i].name;
+        const uint16_t name_len = name.size() > INDEX_MAX_CATEGORY_BYTES
+                                      ? INDEX_MAX_CATEGORY_BYTES
+                                      : static_cast<uint16_t>(name.size());
+        w.u16(name_len);
+        w.bytes(std::span<const uint8_t>(
+            reinterpret_cast<const uint8_t*>(name.data()), name_len));
+        const uint8_t sw = categories[i].swatch;
+        w.u8(sw < TAG_SWATCH_COUNT ? sw : 0);
+
+        const auto& fields = categories[i].fields;
+        const uint8_t field_count = fields.size() > INDEX_MAX_TEMPLATE_FIELDS
+                                        ? INDEX_MAX_TEMPLATE_FIELDS
+                                        : static_cast<uint8_t>(fields.size());
+        w.u8(field_count);
+        for (uint8_t f = 0; f < field_count; ++f) {
+            const uint16_t flen = fields[f].size() > INDEX_MAX_FIELD_BYTES
+                                      ? INDEX_MAX_FIELD_BYTES
+                                      : static_cast<uint16_t>(fields[f].size());
+            w.u16(flen);
+            w.bytes(std::span<const uint8_t>(
+                reinterpret_cast<const uint8_t*>(fields[f].data()), flen));
+        }
+    }
+}
+
+// Helper: write tag descriptions block (Phase 49).
+void write_descriptions_block(ByteWriter& w, const std::vector<vault::TagDescription>& descriptions)
+{
+    const uint16_t desc_count = descriptions.size() > INDEX_MAX_TAG_DESCRIPTIONS
+                                    ? INDEX_MAX_TAG_DESCRIPTIONS
+                                    : static_cast<uint16_t>(descriptions.size());
+    w.u16(desc_count);
+    for (uint16_t i = 0; i < desc_count; ++i) {
+        const std::string& tag = descriptions[i].tag;
+        const uint16_t tag_len = tag.size() > 0xFFFFu ? 0xFFFFu
+                                                      : static_cast<uint16_t>(tag.size());
+        w.u16(tag_len);
+        w.bytes(std::span<const uint8_t>(
+            reinterpret_cast<const uint8_t*>(tag.data()), tag_len));
+
+        const std::string& text = descriptions[i].text;
+        const uint16_t text_len = text.size() > INDEX_MAX_TAG_DESC_BYTES
+                                      ? INDEX_MAX_TAG_DESC_BYTES
+                                      : static_cast<uint16_t>(text.size());
+        w.u16(text_len);
+        w.bytes(std::span<const uint8_t>(
+            reinterpret_cast<const uint8_t*>(text.data()), text_len));
+    }
+}
+
+// Helper: write tag field values block (Phase 73).
+void write_field_values_block(ByteWriter& w, const std::vector<vault::TagFieldValue>& values)
+{
+    const uint16_t val_count = values.size() > INDEX_MAX_TAG_FIELD_VALUES
+                                   ? INDEX_MAX_TAG_FIELD_VALUES
+                                   : static_cast<uint16_t>(values.size());
+    w.u16(val_count);
+    for (uint16_t i = 0; i < val_count; ++i) {
+        const auto& e = values[i];
+        auto write_str = [&w](std::string_view str, size_t cap) {
+            const uint16_t len = str.size() > cap ? static_cast<uint16_t>(cap)
+                                                  : static_cast<uint16_t>(str.size());
+            w.u16(len);
+            w.bytes(std::span<const uint8_t>(
+                reinterpret_cast<const uint8_t*>(str.data()), len));
+        };
+        write_str(e.tag, 0xFFFFu);
+        write_str(e.field, INDEX_MAX_FIELD_BYTES);
+        write_str(e.value, INDEX_MAX_FIELD_VALUE_BYTES);
+    }
+}
+
 // Write the Phase 49 settings block: default_sort u8, tiles_show_tags u8,
 // cat_count u16, then per-entry { name (u16 len + bytes), swatch u8 }. Counts,
 // lengths and the swatch are clamped so a pathological in-memory value can't
@@ -311,52 +392,43 @@ void write_settings(ByteWriter& w, const VaultSettings& s)
     w.u8(std::to_underlying(s.default_sort));
     w.u8(s.tiles_show_tags ? 1 : 0);
 
-    const uint16_t count = s.categories.size() > INDEX_MAX_TAG_CATEGORIES
-                               ? INDEX_MAX_TAG_CATEGORIES
-                               : static_cast<uint16_t>(s.categories.size());
-    w.u16(count);
-    for (uint16_t i = 0; i < count; ++i) {
-        const std::string& name = s.categories[i].name;
-        const uint16_t name_len = name.size() > INDEX_MAX_CATEGORY_BYTES
-                                      ? INDEX_MAX_CATEGORY_BYTES
-                                      : static_cast<uint16_t>(name.size());
-        w.u16(name_len);
-        w.bytes(std::span<const uint8_t>(
-            reinterpret_cast<const uint8_t*>(name.data()), name_len));
-        const uint8_t sw = s.categories[i].swatch;
-        w.u8(sw < TAG_SWATCH_COUNT ? sw : 0);
-    }
-
-    const uint16_t desc_count = s.tag_descriptions.size() > INDEX_MAX_TAG_DESCRIPTIONS
-                                    ? INDEX_MAX_TAG_DESCRIPTIONS
-                                    : static_cast<uint16_t>(s.tag_descriptions.size());
-    w.u16(desc_count);
-    for (uint16_t i = 0; i < desc_count; ++i) {
-        const std::string& tag = s.tag_descriptions[i].tag;
-        const uint16_t tag_len = tag.size() > 0xFFFFu ? 0xFFFFu
-                                                      : static_cast<uint16_t>(tag.size());
-        w.u16(tag_len);
-        w.bytes(std::span<const uint8_t>(
-            reinterpret_cast<const uint8_t*>(tag.data()), tag_len));
-
-        const std::string& text = s.tag_descriptions[i].text;
-        const uint16_t text_len = text.size() > INDEX_MAX_TAG_DESC_BYTES
-                                      ? INDEX_MAX_TAG_DESC_BYTES
-                                      : static_cast<uint16_t>(text.size());
-        w.u16(text_len);
-        w.bytes(std::span<const uint8_t>(
-            reinterpret_cast<const uint8_t*>(text.data()), text_len));
-    }
+    write_categories_block(w, s.categories);
+    write_descriptions_block(w, s.tag_descriptions);
 
     // Phase 65 watermark. Clamped on write so a pathological in-memory value
     // can never emit a blob this reader would reject (the write_settings rule).
     w.u8(s.migrated_index_version > INDEX_VERSION ? 0 : s.migrated_index_version);
     w.u16(s.migrated_probe_caps);
+
+    write_field_values_block(w, s.tag_field_values);
+}
+
+// Helper: read the field sub-block for a category (v11+ only).
+// Returns false on malformed input. Duplicates dropped ci, first occurrence kept.
+bool read_category_fields_v11(ByteReader& r, TagCategory& c)
+{
+    const uint8_t field_count = r.u8();
+    if (!r.ok() || field_count > INDEX_MAX_TEMPLATE_FIELDS) return false;
+    for (uint8_t f = 0; f < field_count; ++f) {
+        const uint16_t flen = r.u16();
+        if (!r.ok() || flen > INDEX_MAX_FIELD_BYTES) return false;
+        std::string field(flen, '\0');
+        if (flen > 0) {
+            r.bytes(std::span<uint8_t>(reinterpret_cast<uint8_t*>(field.data()), flen));
+            if (!r.ok()) return false;
+        }
+        if (const bool fdupe = std::ranges::any_of(c.fields,
+                [&field](const std::string& e) { return category_name_eq(e, field); });
+            !fdupe) {
+            c.fields.push_back(std::move(field));
+        }
+    }
+    return true;
 }
 
 // Helper: read category block. Bounds-checked before allocation, duplicates
 // dropped case-insensitively, keeping first occurrence.
-bool read_categories(ByteReader& r, std::vector<TagCategory>& categories)
+bool read_categories(ByteReader& r, std::vector<TagCategory>& categories, uint8_t version)
 {
     const uint16_t count = r.u16();
     if (!r.ok() || count > INDEX_MAX_TAG_CATEGORIES) return false;  // bound before alloc
@@ -372,10 +444,14 @@ bool read_categories(ByteReader& r, std::vector<TagCategory>& categories)
         c.swatch = r.u8();
         if (!r.ok() || c.swatch >= TAG_SWATCH_COUNT) return false;
 
-        const bool dupe = std::ranges::any_of(categories, [&c](const TagCategory& e) {
-            return category_name_eq(e.name, c.name);
-        });
-        if (!dupe) categories.push_back(std::move(c));
+        // Phase 73: the field sub-block exists only from v11 on.
+        if (version >= 11 && !read_category_fields_v11(r, c)) return false;
+
+        if (const bool dupe = std::ranges::any_of(categories, [&c](const TagCategory& e) {
+                return category_name_eq(e.name, c.name);
+            }); !dupe) {
+            categories.push_back(std::move(c));
+        }
     }
     return true;
 }
@@ -409,6 +485,36 @@ bool read_descriptions(ByteReader& r, std::vector<TagDescription>& descriptions)
     return true;
 }
 
+// Helper: read the Phase 73 tag-field-values block. Bounds-checked before
+// allocation; duplicate (tag, field) pairs dropped ci, keeping the first.
+bool read_field_values(ByteReader& r, std::vector<TagFieldValue>& values)
+{
+    const uint16_t count = r.u16();
+    if (!r.ok() || count > INDEX_MAX_TAG_FIELD_VALUES) return false;  // bound before alloc
+    for (uint16_t i = 0; i < count; ++i) {
+        TagFieldValue e;
+        auto read_str = [&r](std::string& out, uint32_t cap) {
+            const uint16_t len = r.u16();
+            if (!r.ok() || len > cap) return false;
+            out.resize(len);
+            if (len > 0) {
+                r.bytes(std::span<uint8_t>(reinterpret_cast<uint8_t*>(out.data()), len));
+                if (!r.ok()) return false;
+            }
+            return true;
+        };
+        if (!read_str(e.tag, 0xFFFFu)) return false;
+        if (!read_str(e.field, INDEX_MAX_FIELD_BYTES)) return false;
+        if (!read_str(e.value, INDEX_MAX_FIELD_VALUE_BYTES)) return false;
+
+        const bool dupe = std::ranges::any_of(values, [&e](const TagFieldValue& x) {
+            return category_name_eq(x.tag, e.tag) && category_name_eq(x.field, e.field);
+        });
+        if (!dupe) values.push_back(std::move(e));
+    }
+    return true;
+}
+
 // Read the settings block (v8+). Every field is bounds-checked BEFORE any
 // allocation, and an out-of-range value is REJECTED, not clamped (the Phase 37 /
 // Phase 47 rule). Duplicate category names are dropped case-insensitively,
@@ -417,6 +523,7 @@ bool read_settings(ByteReader& r, VaultSettings& s, uint8_t version)
 {
     s.categories.clear();
     s.tag_descriptions.clear();
+    s.tag_field_values.clear();
 
     const uint8_t sort = r.u8();
     if (!r.ok() || sort > std::to_underlying(SortKey::Insertion)) return false;
@@ -426,7 +533,7 @@ bool read_settings(ByteReader& r, VaultSettings& s, uint8_t version)
     if (!r.ok() || tiles > 1) return false;
     s.tiles_show_tags = (tiles == 1);
 
-    if (!read_categories(r, s.categories)) return false;
+    if (!read_categories(r, s.categories, version)) return false;
 
     // The description sub-block exists only from v9 on; a v8 blob ends after
     // the categories and must not be read past.
@@ -448,6 +555,12 @@ bool read_settings(ByteReader& r, VaultSettings& s, uint8_t version)
     s.migrated_probe_caps = r.u16();
     if (!r.ok()) return false;
 
+    // The field-values sub-block exists only from v11 on; a v10 blob ends after
+    // the watermark and must not be read past.
+    if (version < 11) return true;
+
+    if (!read_field_values(r, s.tag_field_values)) return false;
+
     return true;
 }
 
@@ -459,8 +572,8 @@ VaultSettings VaultSettings::seeded()
     // add, rename and remove rows freely from the settings overlay.
     VaultSettings s;
     s.categories = {
-        {"artist", 0}, {"character", 1}, {"parody", 2},   {"group", 3},
-        {"language", 4}, {"series", 5},  {"male", 6},     {"female", 7},
+        {"artist", 0, {}}, {"character", 1, {}}, {"parody", 2, {}},   {"group", 3, {}},
+        {"language", 4, {}}, {"series", 5, {}},  {"male", 6, {}},     {"female", 7, {}},
     };
     return s;
 }
@@ -483,6 +596,126 @@ void set_tag_description(VaultSettings& s, std::string_view tag, std::string_vie
     if (text.empty()) return;                                   // nothing to remove
     if (s.tag_descriptions.size() >= INDEX_MAX_TAG_DESCRIPTIONS) return;
     s.tag_descriptions.emplace_back(std::string(tag), std::string(text));
+}
+
+std::string_view tag_category_prefix(std::string_view tag)
+{
+    const size_t colon = tag.find(':');
+    if (colon == std::string_view::npos || colon == 0 || colon + 1 >= tag.size()) return {};
+    return tag.substr(0, colon);
+}
+
+namespace {
+TagCategory* find_category(VaultSettings& s, std::string_view category)
+{
+    for (auto& c : s.categories)
+        if (category_name_eq(c.name, category)) return &c;
+    return nullptr;
+}
+// True when `tag` belongs to `category` by prefix (ci).
+bool tag_in_category(std::string_view tag, std::string_view category)
+{
+    return category_name_eq(tag_category_prefix(tag), category);
+}
+}  // namespace
+
+std::span<const std::string> category_template(const VaultSettings& s,
+                                               std::string_view category)
+{
+    for (const auto& c : s.categories)
+        if (category_name_eq(c.name, category)) return c.fields;
+    return {};
+}
+
+bool set_category_template(VaultSettings& s, std::string_view category,
+                           std::vector<std::string> fields)
+{
+    if (TagCategory* c = find_category(s, category); !c) {
+        return false;
+    } else {
+        std::vector<std::string> cleaned;
+        for (auto& f : fields) {
+            if (f.empty()) continue;
+            if (f.size() > INDEX_MAX_FIELD_BYTES) f.resize(INDEX_MAX_FIELD_BYTES);
+            if (const bool dupe = std::ranges::any_of(cleaned,
+                    [&f](const std::string& e) { return category_name_eq(e, f); });
+                !dupe) {
+                cleaned.push_back(std::move(f));
+            }
+            if (cleaned.size() >= INDEX_MAX_TEMPLATE_FIELDS) break;
+        }
+        c->fields = std::move(cleaned);
+        return true;
+    }
+}
+
+std::string_view find_tag_field_value(const VaultSettings& s, std::string_view tag,
+                                      std::string_view field)
+{
+    for (const auto& e : s.tag_field_values)
+        if (category_name_eq(e.tag, tag) && category_name_eq(e.field, field))
+            return e.value;
+    return {};
+}
+
+void set_tag_field_value(VaultSettings& s, std::string_view tag,
+                         std::string_view field, std::string_view value)
+{
+    for (auto it = s.tag_field_values.begin(); it != s.tag_field_values.end(); ++it) {
+        if (!category_name_eq(it->tag, tag) || !category_name_eq(it->field, field))
+            continue;
+        if (value.empty()) s.tag_field_values.erase(it);
+        else               it->value = std::string(value);
+        return;
+    }
+    if (value.empty()) return;                                       // nothing to remove
+    if (s.tag_field_values.size() >= INDEX_MAX_TAG_FIELD_VALUES) return;
+    std::string v(value);
+    if (v.size() > INDEX_MAX_FIELD_VALUE_BYTES) v.resize(INDEX_MAX_FIELD_VALUE_BYTES);
+    s.tag_field_values.emplace_back(std::string(tag), std::string(field), std::move(v));
+}
+
+bool rename_template_field(VaultSettings& s, std::string_view category,
+                           std::string_view old_field, std::string_view new_field)
+{
+    if (new_field.empty() || new_field.size() > INDEX_MAX_FIELD_BYTES) return false;
+    if (TagCategory* c = find_category(s, category); !c) {
+        return false;
+    } else {
+        auto it = std::ranges::find_if(c->fields,
+            [old_field](const std::string& f) { return category_name_eq(f, old_field); });
+        if (it == c->fields.end()) return false;
+        const auto it_addr = std::to_address(it);
+        if (const bool clash = std::ranges::any_of(c->fields, [&](const std::string& f) {
+                return std::to_address(&f) != it_addr && category_name_eq(f, new_field);
+            }); clash) {
+            return false;
+        }
+
+        *it = std::string(new_field);
+        for (auto& e : s.tag_field_values)
+            if (tag_in_category(e.tag, category) && category_name_eq(e.field, old_field))
+                e.field = std::string(new_field);
+        return true;
+    }
+}
+
+bool remove_template_field(VaultSettings& s, std::string_view category,
+                           std::string_view field)
+{
+    if (TagCategory* c = find_category(s, category); !c) {
+        return false;
+    } else {
+        if (const auto removed = std::erase_if(c->fields,
+                [field](const std::string& f) { return category_name_eq(f, field); });
+            removed == 0) {
+            return false;
+        }
+        std::erase_if(s.tag_field_values, [&category, &field](const TagFieldValue& e) {
+            return tag_in_category(e.tag, category) && category_name_eq(e.field, field);
+        });
+        return true;
+    }
 }
 
 void serialize_index(const IndexNode& root, std::vector<uint8_t>& out)

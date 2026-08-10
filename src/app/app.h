@@ -20,6 +20,7 @@
 #include "ui/migration_job.h"
 #include "vault/vault.h"
 #include "vault/migration.h"
+#include "vault/commit_lane.h"
 
 namespace ui { class ImageViewer; }
 
@@ -163,6 +164,7 @@ private:
 
     // Phase 50: import queue and related UI state. Declared after active_/pending_
     // so ~ImportQueue (which flushes into the vault) runs before the vault is destroyed.
+    // Phase 73: CommitLane moved to App ownership; passed to ImportQueue at begin_session.
     struct ImportUi {
         // A lock-ish action (LockActive / ToUnlock / Quit / manager switch) requested
         // while imports are pending. The action is parked here behind a default-cancel
@@ -173,6 +175,11 @@ private:
         // Nav to be processed on the next apply_nav() call (set by dispatch_event
         // when the user confirms a parked lock action).
         ui::Nav replay_nav;
+
+        // App-owned CommitLane for batching index writes (Phase 73). Created at
+        // begin_session, passed to ImportQueue, and managed by App. Lives across
+        // sessions in App memory.
+        std::unique_ptr<vault::CommitLane> lane;
 
         // Background import queue.
         ui::ImportQueue queue;

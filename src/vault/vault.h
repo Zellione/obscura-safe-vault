@@ -322,6 +322,14 @@ public:
                                            std::span<const std::string> node_paths,
                                            bool value);
 
+    // Batch tag add/remove (Phase 73 non-blocking tagging): apply `tag` to every
+    // resolving path, ONE commit_index() — and none when no node actually changed.
+    // Free friends for the same S1448 reason as set_favorites_batch.
+    friend VaultResult add_tag_batch(Vault& v, std::span<const std::string> node_paths,
+                                     std::string_view tag);
+    friend VaultResult remove_tag_batch(Vault& v, std::span<const std::string> node_paths,
+                                        std::string_view tag);
+
     // Phase 65 migration: apply probed metadata WITHOUT committing, so a whole
     // migration pass costs one index write instead of one per node.
     friend VaultResult apply_video_probe(Vault& v, std::string_view node_path,
@@ -467,6 +475,17 @@ private:
 [[nodiscard]] VaultResult set_favorites_batch(Vault& v,
                                               std::span<const std::string> node_paths,
                                               bool value);
+
+// Batch tag add/remove (Phase 73): add/remove `tag` to/from every resolving path.
+// Non-resolving paths are skipped, not errors. ONE commit_index() for the whole
+// batch — and none at all when no node actually changed.
+// add_tag_batch: returns InvalidArg if the normalised tag is empty (same as add_tag).
+// remove_tag_batch: returns Ok if the normalised tag is empty (idempotent, same as
+// remove_tag). Locked if locked; IoError if the commit fails.
+[[nodiscard]] VaultResult add_tag_batch(Vault& v, std::span<const std::string> node_paths,
+                                        std::string_view tag);
+[[nodiscard]] VaultResult remove_tag_batch(Vault& v, std::span<const std::string> node_paths,
+                                           std::string_view tag);
 
 // Get the vault file's current size in bytes. Returns 0 if locked or on I/O error.
 // Used by the UI to display waste/compaction information (Phase 26).

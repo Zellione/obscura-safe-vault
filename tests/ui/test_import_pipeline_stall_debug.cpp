@@ -1,6 +1,7 @@
 #include "test_framework.h"
 
 #include "ui/import_queue.h"
+#include "vault/commit_lane.h"
 #include "ui/zip_test_helpers.h"
 #include "image/fixtures.h"
 #include "crypto/secure_mem.h"
@@ -38,7 +39,10 @@ TEST(import_pipeline_stall_site_identified)
     }
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
+    q.begin_session(v, lane);
     (void)q.enqueue_files(files, "");
 
     // Sample queue state every 500ms to track progress

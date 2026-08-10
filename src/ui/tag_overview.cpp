@@ -31,9 +31,8 @@ constexpr float OX  = 40;    // left margin
 constexpr float OY  = 150;   // list top
 constexpr float PAD = 9;     // vertical padding inside a row
 
-// Prompt sizing: scales to window width with sensible bounds
+// Prompt sizing: scales to window width with sensible bounds (used by import summary modal)
 constexpr float PROMPT_PAD = 16.0f;           // internal padding in prompt box
-constexpr float PROMPT_INPUT_H = 32.0f;       // height of input field
 
 // Phase 54 removed this file's private UTF-8 truncation and tail-clipping
 // helpers: TextInputModel's byte cap does the former (on whole characters) and
@@ -66,6 +65,45 @@ std::string count_label(int galleries, int images)
                        galleries, galleries == 1 ? "gallery" : "galleries",
                        images, images == 1 ? "image" : "images");
 }
+
+// Parameters for drawing a single tag overview row (S107 bundle)
+struct TagRowLayout {
+    float row_h;
+    float ph;
+    const TagTally& tally;
+    bool is_selected;
+    const std::vector<vault::TagCategory>& cats;
+};
+
+// Helper: draw a single tag overview row
+void draw_tag_row(gfx::Renderer& r, gfx::FontAtlas& font, float W, float y,
+                  const TagRowLayout& layout)
+{
+    using namespace gfx::theme;
+    const float ty = y + (layout.ph - 4) * 0.5f;
+    const SDL_FRect row{OX, y, W - 2 * OX, layout.row_h - 4};
+
+    if (layout.is_selected) r.draw_selection_glow(row, RADIUS, ACCENT);
+    r.draw_round_rect(row, RADIUS, layout.is_selected ? SURFACE_HI : SURFACE);
+    r.draw_round_rect(row, RADIUS, layout.is_selected ? ACCENT : BORDER, /*filled*/ false);
+
+    // Line 1: tag chip and counts
+    const std::string counts = count_label(layout.tally.gallery_count, layout.tally.image_count);
+    const float cx = W - OX - 14 - static_cast<float>(font.measure(counts));
+    draw_tag_chips(r, font, OX + 14, y + (layout.ph - CHIP_ROW_H) * 0.5f,
+                   cx - (OX + 14) - 12, std::span(&layout.tally.tag, 1), layout.cats);
+    r.draw_text(font, cx, ty, counts, TEXT_DIM);
+
+    // Line 2: description (or placeholder)
+    const float desc_y = y + layout.ph + PAD;
+    const float max_desc_w = W - (OX + 14) - OX - 14;
+    const std::string shown_desc = layout.tally.description.empty()
+        ? std::string("(no description — [E] to add)")
+        : fit_text(font, layout.tally.description, max_desc_w);
+    r.draw_text(font, OX + 14, desc_y, shown_desc,
+               layout.tally.description.empty() ? TEXT_FAINT : TEXT_DIM);
+}
+
 } // namespace
 
 TagOverviewScreen::TagOverviewScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
@@ -218,6 +256,10 @@ void TagOverviewScreen::handle_key_down_in_browse_mode(const SDL_KeyboardEvent& 
         error_.clear();
         return;
     }
+    if (key.key == SDLK_T && (key.mod & SDL_KMOD_CTRL) != 0) {
+        template_editor_.open();
+        return;
+    }
     switch (key.key) {
         case SDLK_UP:       nav_.move(-1);                              break;
         case SDLK_DOWN:     nav_.move(1);                               break;
@@ -229,9 +271,14 @@ void TagOverviewScreen::handle_key_down_in_browse_mode(const SDL_KeyboardEvent& 
             break;
         case SDLK_E:
             if (nav_.selected() >= 0 && nav_.selected() < static_cast<int>(shown_.size())) {
-                prompting_ = true;
-                prompt_buf_.set_text(shown_[nav_.selected()].description);
-                prompt_skip_text_input_ = true;
+                const std::string& tag = shown_[nav_.selected()].tag;
+                const auto& s = vault::vault_settings(vault_);  // const ref binds temporary lifetime
+                std::string cat(vault::tag_category_prefix(tag));
+                auto tmpl = vault::category_template(s, cat);
+                fields_form_.open(tag, std::move(cat),
+                                  std::vector<std::string>(tmpl.begin(), tmpl.end()),
+                                  /*with_description=*/true);
+                fields_form_.skip_next_text_input();  // The 'E' that opened the form arrives as a text event
                 error_.clear();
                 SDL_StartTextInput(win_.sdl_window());
             }
@@ -266,18 +313,18 @@ void TagOverviewScreen::handle_event(const SDL_Event& e)
 
     if (handle_prune_confirm_key(e)) return;
 
-    if (prompting_) {
-        // The 'E' that opened the prompt also arrives as a text event; swallow
-        // exactly that one so the field does not start with an "e" in it.
-        if (e.type == SDL_EVENT_TEXT_INPUT && prompt_skip_text_input_) {
-            prompt_skip_text_input_ = false;
-            return;
+    // Route through template editor and fields form before browse mode
+    if (template_editor_.active()) {
+        (void)template_editor_.handle_event(e);
+        if (!template_editor_.active()) reload();
+        return;
+    }
+    if (fields_form_.active()) {
+        (void)fields_form_.handle_event(e);
+        if (!fields_form_.active()) {
+            SDL_StopTextInput(win_.sdl_window());
+            if (fields_form_.consume_saved()) reload();
         }
-        // Precedence rule (Phase 54): the description field consumes editing
-        // keys before the prompt's own Enter/Esc. The byte limit is the field's
-        // own cap now, so an over-long paste truncates instead of being dropped.
-        if (handle_text_input_event(prompt_buf_, e)) return;
-        handle_prompt_key_event(e);
         return;
     }
 
@@ -329,41 +376,6 @@ void TagOverviewScreen::handle_filter_event(const SDL_Event& e)
     }
 }
 
-void TagOverviewScreen::handle_prompt_key_event(const SDL_Event& e)
-{
-    if (e.type != SDL_EVENT_KEY_DOWN) return;
-
-    switch (e.key.key) {
-        case SDLK_RETURN:
-        case SDLK_KP_ENTER:
-            // Save the description
-            if (const int sel = nav_.selected(); sel >= 0 && sel < static_cast<int>(shown_.size())) {
-                auto s = vault::vault_settings(vault_);
-                vault::set_tag_description(s, shown_[sel].tag, prompt_buf_.str());
-                if (vault::set_vault_settings(vault_, std::move(s)) != vault::VaultResult::Ok) {
-                    error_ = "Could not save the tag description";
-                } else {
-                    error_.clear();
-                    reload();
-                }
-            }
-            prompting_ = false;
-            prompt_buf_.clear();
-            prompt_skip_text_input_ = false;
-            SDL_StopTextInput(win_.sdl_window());
-            return;
-        case SDLK_ESCAPE:
-            prompting_ = false;
-            prompt_buf_.clear();
-            prompt_skip_text_input_ = false;
-            error_.clear();
-            SDL_StopTextInput(win_.sdl_window());
-            return;
-        default:
-            break;
-    }
-}
-
 void TagOverviewScreen::render(gfx::Renderer& r)
 {
     using namespace gfx::theme;
@@ -386,83 +398,31 @@ void TagOverviewScreen::render(gfx::Renderer& r)
     if (!error_.empty())
         r.draw_text(font_, OX, 132, error_, gfx::theme::DANGER);
 
-    if (shown_.empty()) {
+    if (!shown_.empty()) {
+        const auto g = compute_geom(font_.pixel_height(), H, static_cast<int>(shown_.size()),
+                                    nav_.selected());
+        const float ph = font_.pixel_height();
+        // Hoisted: vault_settings returns by value; we take const ref to avoid deep-copy per row.
+        const auto& cats = vault::vault_settings(vault_).categories;
+        for (int i = g.first; i < g.first + g.visible && i < static_cast<int>(shown_.size()); ++i) {
+            const float y = OY + static_cast<float>(i - g.first) * g.row_h;
+            const bool sel = (i == nav_.selected());
+            const TagRowLayout layout{g.row_h, ph, shown_[i], sel, cats};
+            draw_tag_row(r, font_, W, y, layout);
+        }
+    } else {
+        // Empty state: show placeholder text
         r.draw_text(font_, OX, OY,
                     all_.empty() ? "No tags in this vault yet."
                                  : "No tags match the filter.",
                     TEXT_DIM);
-        quick_switch_.render(r, font_, W, H);
-        return;
-    }
-
-    const auto g = compute_geom(font_.pixel_height(), H, static_cast<int>(shown_.size()),
-                                nav_.selected());
-    const float ph = font_.pixel_height();
-    // Hoisted: vault_settings returns a reference, but binding it by value here
-    // would deep-copy the category vector once per visible row, every frame.
-    const auto& cats = vault::vault_settings(vault_).categories;
-    const float max_desc_w = W - (OX + 14) - OX - 14;  // width available for description text
-    for (int i = g.first; i < g.first + g.visible && i < static_cast<int>(shown_.size()); ++i) {
-        const float    y    = OY + static_cast<float>(i - g.first) * g.row_h;
-        const SDL_FRect row{OX, y, W - 2 * OX, g.row_h - 4};
-        const bool     sel  = (i == nav_.selected());
-        if (sel) r.draw_selection_glow(row, RADIUS, ACCENT);
-        r.draw_round_rect(row, RADIUS, sel ? SURFACE_HI : SURFACE);
-        r.draw_round_rect(row, RADIUS, sel ? ACCENT : BORDER, /*filled*/ false);
-
-        // Line 1: tag chip and counts
-        const float ty = y + (ph - 4) * 0.5f;  // Center first line text within top half
-        const std::string counts = count_label(shown_[i].gallery_count, shown_[i].image_count);
-        const float       cx     = W - OX - 14 - static_cast<float>(font_.measure(counts));
-        // The tag renders as a chip; the count column keeps its exact x, so the
-        // two never shift relative to each other. draw_tag_chips centres its
-        // content within CHIP_ROW_H, so give it the row's top, not the text top.
-        draw_tag_chips(r, font_, OX + 14, y + (ph - CHIP_ROW_H) * 0.5f,
-                       cx - (OX + 14) - 12, std::span(&shown_[i].tag, 1), cats);
-        r.draw_text(font_, cx, ty, counts, TEXT_DIM);
-
-        // Line 2: description (or placeholder)
-        const float desc_y = y + ph + PAD;
-        const std::string shown_desc = shown_[i].description.empty()
-            ? std::string("(no description — [E] to add)")
-            : fit_text(font_, shown_[i].description, max_desc_w);
-        r.draw_text(font_, OX + 14, desc_y, shown_desc,
-                   shown_[i].description.empty() ? TEXT_FAINT : TEXT_DIM);
     }
 
     quick_switch_.render(r, font_, W, H);
 
-    // Draw prompt overlay if active
-    if (prompting_) {
-        const PromptBoxLayout l = prompt_box_layout({.font_px = font_.pixel_height(),
-                                                     .window_w = W, .window_h = H,
-                                                     .input_h = PROMPT_INPUT_H});
-
-        // Draw prompt background and border
-        r.draw_round_rect(l.box, RADIUS, SURFACE);
-        r.draw_round_rect(l.box, RADIUS, ACCENT, /*filled*/ false);
-
-        // Title
-        r.draw_text(font_, l.box.x + PROMPT_PAD, l.title_y, "Edit tag description", TEXT);
-
-        // Input field
-        const float input_field_w = l.box.w - 2 * PROMPT_PAD;
-        const float input_inner_w = input_field_w - 2 * 4;  // 4px inset on each side
-        r.draw_round_rect({.x = l.box.x + PROMPT_PAD, .y = l.input_y, .w = input_field_w, .h = PROMPT_INPUT_H},
-                         RADIUS, SURFACE_HI);
-        r.draw_round_rect({.x = l.box.x + PROMPT_PAD, .y = l.input_y, .w = input_field_w, .h = PROMPT_INPUT_H},
-                         RADIUS, BORDER, /*filled*/ false);
-
-        // Draw input text with tail clipping (show what you're typing at the caret end)
-        const float text_y = l.input_y + (PROMPT_INPUT_H - font_.pixel_height()) / 2.0f;
-        draw_inline_edit_text(r, font_, l.box.x + PROMPT_PAD + 4, text_y, input_inner_w,
-                              prompt_buf_, prompt_chrome_);
-
-        // Hint line: remaining bytes
-        const auto bytes_left = vault::INDEX_MAX_TAG_DESC_BYTES - prompt_buf_.size();
-        const std::string hint = std::format("{} bytes left", bytes_left);
-        r.draw_text(font_, l.box.x + PROMPT_PAD, l.hint_y, hint, TEXT_FAINT);
-    }
+    // Draw panels last (template editor and fields form) — always render on both empty and non-empty paths
+    template_editor_.render(r, font_, W, H);
+    fields_form_.render(r, font_, W, H);
 
     render_prune_confirm(r, W, H);
     render_import_summary(r, W, H);
@@ -522,7 +482,8 @@ std::vector<HelpGroup> TagOverviewScreen::help_groups() const
     return {{"Navigate", {
         {"Up/Down", "Move selection"}, {"Enter", "Open tag"},
         {"/", "Filter tags"}, {"Tab", "Toggle sort (name/count)"},
-        {"E", "Edit description"},
+        {"E", "Edit tag description & fields"},
+        {"Ctrl+T", "Edit category templates"},
         {"Ctrl+I", "Import tag dictionary"},
         {"Ctrl+X", "Remove junk tags"},
         {"Esc", "Back"},
