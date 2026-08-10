@@ -163,6 +163,42 @@ std::string join_child_path(std::string_view prefix, std::string_view name)
     return std::string(prefix) + "/" + std::string(name);
 }
 
+// Phase 73: tag → virtual "field:value" tags, built once per search from the
+// vault-global settings. Match-only — never surfaced in effective_tags.
+struct FieldTagMap {
+    std::vector<std::pair<std::string, std::vector<std::string>>> by_tag;
+
+    [[nodiscard]] bool empty() const noexcept { return by_tag.empty(); }
+
+    static FieldTagMap build(const VaultSettings& s)
+    {
+        FieldTagMap m;
+        for (const auto& fv : s.tag_field_values) {
+            auto it = std::ranges::find_if(m.by_tag, [&fv](const auto& e) {
+                return ci_equal(e.first, fv.tag);
+            });
+            if (it == m.by_tag.end()) {
+                m.by_tag.emplace_back(fv.tag, std::vector<std::string>{});
+                it = std::prev(m.by_tag.end());
+            }
+            it->second.push_back(fv.field + ":" + fv.value);
+        }
+        return m;
+    }
+
+    // The tags a node should be MATCHED against: `tags` plus every virtual tag
+    // of every carried tag. Returns `tags` untouched when nothing expands.
+    [[nodiscard]] std::vector<std::string> expand(const std::vector<std::string>& tags) const
+    {
+        std::vector<std::string> out = tags;
+        for (const auto& t : tags)
+            for (const auto& e : by_tag)
+                if (ci_equal(e.first, t))
+                    out.insert(out.end(), e.second.begin(), e.second.end());
+        return out;
+    }
+};
+
 // Walk the tree, accumulating ancestor-gallery tags as `inherited`, collecting
 // in-scope nodes that match `query`. Gallery tags cascade to descendants here.
 // Returns the union of tags from the subtree (including the node itself).
@@ -170,7 +206,8 @@ std::string join_child_path(std::string_view prefix, std::string_view name)
 std::vector<std::string> search_dfs(const IndexNode& node, std::string_view prefix,
                                     const std::vector<std::string>& inherited,
                                     std::string_view query, SearchScope scope,
-                                    std::vector<SearchHit>& out)
+                                    std::vector<SearchHit>& out,
+                                    const FieldTagMap& fmap)
 {
     std::vector<std::string> subtree_tags;
 
@@ -181,7 +218,7 @@ std::vector<std::string> search_dfs(const IndexNode& node, std::string_view pref
         // Recurse first to get the child's subtree tags.
         std::vector<std::string> child_subtree;
         if (child.is_gallery()) {
-            child_subtree = search_dfs(child, full_path, effective, query, scope, out);
+            child_subtree = search_dfs(child, full_path, effective, query, scope, out, fmap);
         }
 
         // For galleries, include descendant tags in the match decision (Phase 51).
@@ -190,7 +227,9 @@ std::vector<std::string> search_dfs(const IndexNode& node, std::string_view pref
             match_tags = compute_effective_tags(child_subtree, effective);
         }
 
-        if (node_in_scope(child, scope) && node_matches(child.name, query, match_tags)) {
+        if (node_in_scope(child, scope) &&
+            node_matches(child.name, query,
+                         fmap.empty() ? match_tags : fmap.expand(match_tags))) {
             out.push_back(SearchHit{
                 .path = full_path,
                 .is_gallery = child.is_gallery(),
@@ -335,7 +374,8 @@ void collect_images_with_tag(const IndexNode& node, std::string_view prefix, std
 std::vector<std::string> adv_search_dfs(const IndexNode& node, std::string_view prefix,
                                         const std::vector<std::string>& inherited,
                                         const ui::AdvancedQuery& query, ui::SearchScope scope,
-                                        std::vector<std::pair<int, SearchHit>>& out)
+                                        std::vector<std::pair<int, SearchHit>>& out,
+                                        const FieldTagMap& fmap)
 {
     using enum ui::SearchScope;
     std::vector<std::string> subtree_tags;
@@ -347,7 +387,7 @@ std::vector<std::string> adv_search_dfs(const IndexNode& node, std::string_view 
         // Recurse first to get the child's subtree tags.
         std::vector<std::string> child_subtree;
         if (child.is_gallery()) {
-            child_subtree = adv_search_dfs(child, full_path, effective, query, scope, out);
+            child_subtree = adv_search_dfs(child, full_path, effective, query, scope, out, fmap);
         }
 
         if (const bool in_scope = child.is_gallery() ? (scope == Galleries || scope == Both)
@@ -359,7 +399,8 @@ std::vector<std::string> adv_search_dfs(const IndexNode& node, std::string_view 
                 match_tags = compute_effective_tags(child_subtree, effective);
             }
 
-            const ui::EvalResult r = ui::evaluate(query, child.name, match_tags);
+            const ui::EvalResult r = ui::evaluate(
+                query, child.name, fmap.empty() ? match_tags : fmap.expand(match_tags));
             if (r.matched) {
                 out.emplace_back(r.score, SearchHit{
                                               .path = full_path,
@@ -1322,7 +1363,8 @@ std::vector<SearchHit> Vault::search(std::string_view query, SearchScope scope) 
     // Seed inherited tags with the root's own tags so they cascade globally; the
     // unnamed root itself is never a hit. The returned tag union bubbles up from
     // the root's children but is unused here (Phase 51 roll-up).
-    [[maybe_unused]] auto _ = search_dfs(root_, "", root_.tags, query, scope, out);
+    const FieldTagMap fmap = FieldTagMap::build(settings_);
+    [[maybe_unused]] auto _ = search_dfs(root_, "", root_.tags, query, scope, out, fmap);
     return out;
 }
 
@@ -1351,8 +1393,9 @@ std::vector<SearchHit> VaultSearch::run_search(const ui::AdvancedQuery& query) c
     if (!v_.unlocked_) return out;
 
     std::vector<std::pair<int, SearchHit>> scored;
+    const FieldTagMap fmap = FieldTagMap::build(v_.settings_);
     [[maybe_unused]] auto _ =
-        adv_search_dfs(v_.root_, "", v_.root_.tags, query, query.scope, scored);
+        adv_search_dfs(v_.root_, "", v_.root_.tags, query, query.scope, scored, fmap);
 
     // Rank by descending score, breaking ties by ascending path for stability.
     std::ranges::sort(scored, [](const auto& a, const auto& b) {
