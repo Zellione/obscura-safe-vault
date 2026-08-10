@@ -43,9 +43,10 @@ public:
     ImportQueue& operator=(const ImportQueue&) = delete;
 
     // ---- session (main thread) ----
-    // Bind to the freshly unlocked vault; starts worker + commit lane and
-    // installs the commit router while busy. One session per unlocked vault.
-    void begin_session(vault::Vault& v);
+    // Bind to the freshly unlocked vault and the app-owned CommitLane. App must have
+    // started the lane and installed it as the vault's commit router before calling.
+    // One session per unlocked vault. The app owns CommitLane and must ensure it outlives.
+    void begin_session(vault::Vault& v, vault::CommitLane& lane);
     // Cancel everything, finish the in-flight file, flush the lane, uninstall
     // the router, join threads, wipe queued passwords. Blocking; called before
     // lock/switch/quit (after user confirm) and from end_session().
@@ -203,7 +204,7 @@ private:
 
     // Core state
     vault::Vault* v_ = nullptr;
-    std::unique_ptr<vault::CommitLane> lane_;
+    vault::CommitLane* lane_ = nullptr;  // Borrowed; owned by App
     std::jthread worker_;
 
     // Task management

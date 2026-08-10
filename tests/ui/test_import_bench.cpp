@@ -1,6 +1,7 @@
 #include "test_framework.h"
 
 #include "ui/import_queue.h"
+#include "vault/commit_lane.h"
 #include "ui/zip_import.h"
 #include "ui/zip_test_helpers.h"
 #include "vault/vault.h"
@@ -188,10 +189,14 @@ TEST(import_bench_import_queue_vs_sync)
     vault::Vault v_async;
     make_vault(v_async, dir / "v_async.osv");
 
+    vault::CommitLane lane;
+    lane.start(v_async);
+    v_async.set_commit_router(&lane);
+
     auto start_async = std::chrono::steady_clock::now();
 
     ui::ImportQueue q;
-    q.begin_session(v_async);
+    q.begin_session(v_async, lane);
     (void)q.enqueue_files(files, "");
 
     // Pump until idle with a timeout

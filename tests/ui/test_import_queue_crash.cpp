@@ -1,6 +1,7 @@
 #include "test_framework.h"
 
 #include "ui/import_queue.h"
+#include "vault/commit_lane.h"
 #include "ui/zip_test_helpers.h"
 #include "crypto/secure_mem.h"
 
@@ -77,8 +78,11 @@ TEST(import_queue_mid_batch_crash_recovers)
         vault::Vault v;
         ziptest::make_vault(v, vault_path);
 
+        vault::CommitLane lane;
         ui::ImportQueue q;
-        q.begin_session(v);
+        lane.start(v);
+        v.set_commit_router(&lane);
+        q.begin_session(v, lane);
         (void)q.enqueue_files(files, "");
 
         // Pump until done >= 1 (or until not busy if that's all we get)

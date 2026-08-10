@@ -8,6 +8,7 @@
 
 #include "vault/file_util.h"
 #include "vault/vault.h"
+#include "vault/commit_lane.h"
 
 namespace fs = std::filesystem;
 
@@ -120,4 +121,33 @@ TEST(tag_batch_locked_and_invalid)
     v.lock();
     CHECK(vault::add_tag_batch(v, paths, "x") == VaultResult::Locked);
     CHECK(vault::remove_tag_batch(v, paths, "x") == VaultResult::Locked);
+}
+
+TEST(tag_batch_through_commit_lane_is_async_and_durable)
+{
+    TempVault tv("lane");
+    auto img = pattern(3000, 4);
+    std::vector<std::string> paths;
+    {
+        Vault v;
+        REQUIRE(Vault::create(tv.str(), bytes("pw"), {}, kKdf, v) == VaultResult::Ok);
+        for (int i = 0; i < 10; ++i) {
+            const std::string name = "img" + std::to_string(i) + ".jpg";
+            REQUIRE(v.add_image("", img, name) == VaultResult::Ok);
+            paths.push_back(name);
+        }
+
+        vault::CommitLane lane;
+        lane.start(v);
+        v.set_commit_router(&lane);
+
+        REQUIRE(vault::add_tag_batch(v, paths, "artist:bob") == VaultResult::Ok);
+        CHECK(lane.flush());          // async write completed, no failure
+        v.lock();                     // auto-stops the lane before key wipe
+    }
+    Vault v2;
+    REQUIRE(Vault::open(tv.str(), v2) == VaultResult::Ok);
+    REQUIRE(v2.unlock(bytes("pw"), {}) == VaultResult::Ok);
+    for (const auto* c : v2.list(""))
+        CHECK(std::ranges::count(c->tags, std::string("artist:bob")) == 1);
 }

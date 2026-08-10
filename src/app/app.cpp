@@ -152,6 +152,7 @@ void App::promote_pending()
 {
     if (!vault_state_.pending) return;
     if (vault_state_.active) vault_state_.active->lock();                 // lock-on-switch: wipe the old key
+    import_ui_.lane.reset();                               // Phase 73: lock stops the lane, reset destroys it
     second_.session.wipe();                                // Phase 66: vault switch locks the warm slot too
     adv_session_   = {};                          // new vault session -> fresh advanced search
     session_.reset();                             // new vault session -> fresh gallery/viewer memory
@@ -186,6 +187,13 @@ void App::promote_pending()
     // Phase 50: Defer import queue start until migration completes (if any).
     // This ensures the migration job has exclusive vault access.
     import_ui_.need_begin_session = true;
+
+    // Phase 73: every interactive commit_index() routes through this lane —
+    // serialize on the UI thread, write+fsync on the lane thread. Torn down
+    // at every lock site; Vault::lock() itself stops the lane before key wipe.
+    import_ui_.lane = std::make_unique<vault::CommitLane>();
+    import_ui_.lane->start(*vault_state_.active);
+    vault_state_.active->set_commit_router(import_ui_.lane.get());
 }
 
 void App::to_gallery(const std::string& path, int selected, bool explicit_index)
@@ -821,6 +829,7 @@ bool App::apply_nav()
         case ToDuplicates:        to_duplicates(); return true;
         case ToUnlock:
             import_ui_.queue.end_session();          // Phase 50: flush before switch
+            import_ui_.lane.reset();                 // Phase 73: reset CommitLane after session
             // Phase 66: switching to the warm vault promotes its already-unlocked
             // handle — no password prompt. take() empties the slot; promote_pending
             // then locks the old active and runs the standard new-session resets.
@@ -839,7 +848,12 @@ bool App::apply_nav()
             second_.session.wipe();                          // Phase 66: locking up means locking everything
             session_.reset();                     // Phase 39 Part 2: fresh session on lock
             import_ui_.queue.end_session();          // Phase 50: flush before lock
-            if (vault_state_.active) { vault_state_.active->lock(); vault_state_.active.reset(); vault_state_.active_path.clear(); }
+            if (vault_state_.active) {
+                vault_state_.active->lock();                // Phase 73: lock stops the lane
+                import_ui_.lane.reset();                    // then destroy it
+                vault_state_.active.reset();
+                vault_state_.active_path.clear();
+            }
             to_manager();
             return true;
         case LockSecond:
@@ -878,7 +892,8 @@ bool App::maybe_auto_lock(double dt)
     if (screen_) screen_->on_exit();
     session_.reset();                                  // Phase 39 Part 2: fresh session on idle lock
     import_ui_.queue.end_session();                       // Phase 50: flush before lock
-    vault_state_.active->lock();                                  // wipe the master key
+    vault_state_.active->lock();                       // Phase 73: lock stops the lane
+    import_ui_.lane.reset();                           // then destroy it
     vault_state_.active.reset();
     vault_state_.active_path.clear();
     to_manager();
@@ -923,7 +938,8 @@ void App::update(double dt)
         if (import_ui_.need_begin_session && !migration_ui_.offer_open &&
             !migration_ui_.progress_open && (!migration_ui_.job || !migration_ui_.job->active())) {
             import_ui_.need_begin_session = false;
-            import_ui_.queue.begin_session(*vault_state_.active);
+            // Phase 73: App-owned lane was started in promote_pending; pass to ImportQueue
+            import_ui_.queue.begin_session(*vault_state_.active, *import_ui_.lane);
         }
     }
 
@@ -1036,7 +1052,10 @@ void App::shutdown()
     if (screen_) { screen_->on_exit(); screen_.reset(); }
     import_ui_.queue.end_session();        // Phase 50: flush before lock (blocking, acceptable at shutdown)
     second_.session.wipe();                        // Phase 66: wipe warm slot before vault teardown
-    if (vault_state_.active)  vault_state_.active->lock();      // wipe master key
+    if (vault_state_.active) {
+        vault_state_.active->lock();               // Phase 73: lock stops the lane
+        import_ui_.lane.reset();                   // then destroy it
+    }
     if (vault_state_.pending) vault_state_.pending->lock();
     vault_state_.active.reset();
     vault_state_.pending.reset();

@@ -2,6 +2,7 @@
 
 #include "ui/import_queue.h"
 #include "ui/zip_test_helpers.h"
+#include "vault/commit_lane.h"
 #ifdef OSV_VENDORED_ARCHIVE
 #include "ui/archive_test_helpers.h"
 #endif
@@ -60,7 +61,10 @@ TEST(import_queue_files_end_to_end)
 
     // Import
     ui::ImportQueue q;
-    q.begin_session(v);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
+    q.begin_session(v, lane);
     const uint64_t task_id = q.enqueue_files(files, "dest");
     pump_until_idle(q);
 
@@ -86,6 +90,9 @@ TEST(import_queue_cancel_queued_is_deterministic)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     // Create a file
     const auto files_dir = temp_dir / "files";
@@ -96,7 +103,7 @@ TEST(import_queue_cancel_queued_is_deterministic)
                                                  static_cast<std::streamsize>(jpeg_data.size()));
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
 
     // Park the worker with exclusive gate BEFORE enqueuing
     q.set_exclusive(true);
@@ -134,6 +141,9 @@ TEST(import_queue_runs_tasks_fifo_and_reorders)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     // Create 3 files directories
     std::vector<uint64_t> task_ids;
@@ -156,7 +166,7 @@ TEST(import_queue_runs_tasks_fifo_and_reorders)
     }
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
 
     // Enqueue 3 tasks
     for (int i = 0; i < 3; ++i) {
@@ -184,6 +194,9 @@ TEST(import_queue_cancel_running_is_clean_partial)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     // Create 30 files
     const auto files_dir = temp_dir / "files";
@@ -199,7 +212,7 @@ TEST(import_queue_cancel_running_is_clean_partial)
     }
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
     const uint64_t task_id = q.enqueue_files(files, "dest");
 
     // Pump a bit and then cancel
@@ -243,6 +256,9 @@ TEST(import_queue_zip_task_preserves_cbz_page_order)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     // Create a CBZ with pages in order
     const auto cbz_path = temp_dir / "test.cbz";
@@ -254,7 +270,7 @@ TEST(import_queue_zip_task_preserves_cbz_page_order)
     ziptest::make_archive(entries, cbz_path);
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
     (void)q.enqueue_archive(cbz_path, "", "test_cbz", ui::ImportTaskKind::Cbz);
     pump_until_idle(q);
 
@@ -276,6 +292,9 @@ TEST(import_queue_collision_skips_and_tallies)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     // Pre-add a file
     {
@@ -297,7 +316,7 @@ TEST(import_queue_collision_skips_and_tallies)
     }
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
     (void)q.enqueue_files(files, "");
     pump_until_idle(q);
 
@@ -319,6 +338,9 @@ TEST(import_queue_exclusive_gate_defers_start)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     // Create a file
     const auto files_dir = temp_dir / "files";
@@ -329,7 +351,7 @@ TEST(import_queue_exclusive_gate_defers_start)
                                                  static_cast<std::streamsize>(jpeg_data.size()));
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
 
     // Set exclusive before enqueuing
     q.set_exclusive(true);
@@ -364,6 +386,9 @@ TEST(import_queue_abort_and_flush_discards_queue)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     // Create 2 directories with files
     std::vector<std::vector<fs::path>> file_lists;
@@ -385,7 +410,7 @@ TEST(import_queue_abort_and_flush_discards_queue)
     }
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
 
     // Enqueue 2 tasks
     (void)q.enqueue_files(file_lists[0], "");
@@ -418,13 +443,16 @@ TEST(import_queue_abort_wipes_queued_passwords)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     // Create a dummy archive file
     const auto archive_path = temp_dir / "test.7z";
     std::ofstream(archive_path, std::ios::binary).write("dummy", 5);
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
 
     // Hold exclusive lock so the worker never starts the task (stays Queued)
     q.set_exclusive(true);
@@ -461,9 +489,12 @@ TEST(import_queue_abort_and_flush_idempotent)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
 
     // Enqueue a file task
     const auto files_dir = temp_dir / "files";
@@ -501,11 +532,14 @@ TEST(import_queue_exclusive_gate_reset_on_begin_session)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     ui::ImportQueue q;
 
     // First session: set exclusive to true, then end
-    q.begin_session(v);
+    q.begin_session(v, lane);
     q.set_exclusive(true);
 
     // Verify exclusive is set
@@ -515,7 +549,7 @@ TEST(import_queue_exclusive_gate_reset_on_begin_session)
     q.end_session();
 
     // Second session: begin_session should reset exclusive to false
-    q.begin_session(v);
+    q.begin_session(v, lane);
 
     // Verify the queue is not blocked on exclusive anymore
     // The snapshot should work without hanging
@@ -536,6 +570,9 @@ TEST(import_queue_recurses_into_a_nested_archive)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     // inner.zip holds one image; outer.zip holds a loose image plus inner.zip.
     const auto inner_path = ziptest::make_archive({{"one.jpg", ziptest::fake_jpeg(21)}},
@@ -549,7 +586,7 @@ TEST(import_queue_recurses_into_a_nested_archive)
         {{"top.jpg", ziptest::fake_jpeg(22)}, {"bonus.zip", inner}}, temp_dir / "outer.zip");
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
     (void)q.enqueue_archive(outer_path, "", "Album", ui::ImportTaskKind::Zip);
     pump_until_idle(q);
     q.end_session();
@@ -576,13 +613,16 @@ TEST(import_queue_flat_cbz_creates_its_gallery)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     const auto cbz = ziptest::make_archive({{"001.jpg", ziptest::fake_jpeg(31)},
                                             {"002.jpg", ziptest::fake_jpeg(32)}},
                                            temp_dir / "book.cbz");
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
     (void)q.enqueue_archive(cbz, "", "MyBook", ui::ImportTaskKind::Cbz);
     pump_until_idle(q);
     q.end_session();
@@ -613,6 +653,9 @@ TEST(import_queue_folder_into_a_subgallery_lands_in_one_place)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
     REQUIRE(v.create_gallery("Parent") == vault::VaultResult::Ok);
 
     const auto src = temp_dir / "src";
@@ -623,7 +666,7 @@ TEST(import_queue_folder_into_a_subgallery_lands_in_one_place)
                static_cast<std::streamsize>(jpeg.size()));
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
     (void)q.enqueue_folder(src, "Parent", "MyFolder");
     pump_until_idle(q);
     q.end_session();
@@ -645,6 +688,9 @@ TEST(import_queue_applies_archive_meta_tags)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     const std::string meta = R"({
         "title": { "english": "Some Book" },
@@ -655,7 +701,7 @@ TEST(import_queue_applies_archive_meta_tags)
         temp_dir / "book.zip");
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
     (void)q.enqueue_archive(zip, "", "Book", ui::ImportTaskKind::Zip);
     pump_until_idle(q);
     q.end_session();
@@ -685,6 +731,9 @@ TEST(import_queue_imports_a_split_archive_set)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     // A zip of two images, then split into parts on a byte boundary.
     const auto whole = ziptest::make_archive({{"a.jpg", ziptest::fake_jpeg(71)},
@@ -709,7 +758,7 @@ TEST(import_queue_imports_a_split_archive_set)
     REQUIRE(volumes.size() >= 2);   // if 1, split did not split and this proves nothing
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
     // Stem is "whole.zip" — the KIND comes from that, not from "whole.zip.00".
     (void)q.enqueue_volume_set(volumes, ui::VolumeStyle::NumericSuffix, "whole.zip", "", "Split",
                                ui::ImportTaskKind::Zip);
@@ -733,9 +782,12 @@ TEST(import_queue_idle_does_not_grow_vault)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
 
     // Pump drain() many times while idle (no tasks, no records).
     // Record wasted_bytes before and after to ensure only ONE end-of-batch commit occurs.
@@ -774,6 +826,9 @@ TEST(import_queue_idle_latch_rearms_on_new_work)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     // Create files for two import batches
     std::vector<std::vector<fs::path>> batches;
@@ -794,7 +849,7 @@ TEST(import_queue_idle_latch_rearms_on_new_work)
     }
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
 
     // First batch: enqueue, pump to idle
     (void)q.enqueue_files(batches[0], "batch1");
@@ -852,6 +907,9 @@ TEST(import_queue_files_routes_mp4_to_video_node)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     // One image + one real mp4 (vault fixture), picked together.
     const auto files_dir = temp_dir / "files";
@@ -863,7 +921,7 @@ TEST(import_queue_files_routes_mp4_to_video_node)
                static_cast<std::streamsize>(jpeg_data.size()));
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
     (void)q.enqueue_files({jpg_path, fs::path(OSV_VAULT_FIXTURE_DIR) / "tiny.mp4"}, "dest");
     pump_until_idle(q);
 
@@ -909,6 +967,9 @@ TEST(import_queue_corrupt_zip_fails_task_with_reason)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     // ZIP magic followed by garbage: miniz cannot locate a central directory.
     const auto bad = temp_dir / "bad.zip";
@@ -919,7 +980,7 @@ TEST(import_queue_corrupt_zip_fails_task_with_reason)
                static_cast<std::streamsize>(junk.size()));
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
     (void)q.enqueue_archive(bad, "", "Bad", ui::ImportTaskKind::Zip);
     pump_until_idle(q);
 
@@ -942,6 +1003,9 @@ TEST(import_queue_worker_exception_fails_task_and_continues)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     const auto files_dir = temp_dir / "files";
     fs::create_directories(files_dir);
@@ -957,7 +1021,7 @@ TEST(import_queue_worker_exception_fails_task_and_continues)
     }
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
     int calls = 0;
     ui::test_only_set_task_hook(q, [&calls]() {
         if (++calls == 1) throw std::runtime_error("boom");
@@ -987,6 +1051,9 @@ TEST(import_queue_truncated_zip_fails_task)
 
     vault::Vault v;
     ziptest::make_vault(v, vault_path);
+    vault::CommitLane lane;
+    lane.start(v);
+    v.set_commit_router(&lane);
 
     const auto img = ziptest::fake_jpeg(7);
     const auto zip = ziptest::make_archive({{"a.jpg", img}, {"b.jpg", img}}, temp_dir / "in.zip");
@@ -996,7 +1063,7 @@ TEST(import_queue_truncated_zip_fails_task)
     fs::resize_file(zip, full * 6 / 10);
 
     ui::ImportQueue q;
-    q.begin_session(v);
+    q.begin_session(v, lane);
     (void)q.enqueue_archive(zip, "", "Trunc", ui::ImportTaskKind::Zip);
     pump_until_idle(q);
 

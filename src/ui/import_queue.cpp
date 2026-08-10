@@ -292,7 +292,7 @@ ImportQueue::~ImportQueue()
     }
 }
 
-void ImportQueue::begin_session(vault::Vault& v)
+void ImportQueue::begin_session(vault::Vault& v, vault::CommitLane& lane)
 {
     std::lock_guard lock(mu_);
 
@@ -320,9 +320,9 @@ void ImportQueue::begin_session(vault::Vault& v)
     records_.clear();
 
     v_ = &v;
-    lane_ = std::make_unique<vault::CommitLane>();
-    lane_->start(v);
-    v_->set_commit_router(lane_.get());
+    lane_ = &lane;
+    // Phase 73: App must start the lane and install the router before begin_session
+    assert(lane.running() && "App must start the lane before begin_session");
     worker_stop_ = false;
     batch_ended_ = false;  // Re-arm the latch for the new session
     worker_ = std::jthread([this]() { worker_loop(); });
@@ -333,6 +333,7 @@ void ImportQueue::end_session()
     abort_and_flush();
     std::lock_guard lock(mu_);
     v_ = nullptr;
+    lane_ = nullptr;
 }
 
 void ImportQueue::abort_and_flush()
@@ -396,16 +397,10 @@ void ImportQueue::abort_and_flush()
         }
     }
 
-    // Final commit (stop-aware: enqueue_snapshot and flush handle stopped lanes gracefully)
+    // Final commit (App owns the lane; it stays installed until lock)
     if (lane_) {
         (void)lane_->enqueue_snapshot();
         (void)lane_->flush();
-        lane_->stop();
-    }
-
-    // Uninstall router
-    if (v_) {
-        v_->set_commit_router(nullptr);
     }
 }
 
@@ -1328,15 +1323,12 @@ void ImportQueue::maybe_end_batch()
     // Already ended this batch; do nothing until new work arrives (re-arms latch above)
     if (batch_ended_) return;
 
-    // First transition to idle: enqueue final snapshot, flush, and uninstall router
+    // First transition to idle: enqueue final snapshot and flush
+    // (App owns the lane and manages router installation/removal)
     batch_ended_ = true;
     if (lane_) {
         (void)lane_->enqueue_snapshot();
         (void)lane_->flush();
-    }
-
-    if (v_) {
-        v_->set_commit_router(nullptr);
     }
 }
 
@@ -1403,17 +1395,9 @@ void test_only_drop_without_flush(ImportQueue& q)
         }
     }
 
-    // Uninstall router (but do NOT flush the lane — this simulates a crash)
-    if (q.v_) {
-        q.v_->set_commit_router(nullptr);
-    }
-
-    // Stop the lane without flushing (the lane worker may still be in flight
-    // or have pending writes, but we abandon them here to simulate the crash)
-    if (q.lane_) {
-        // Just stop; don't enqueue_snapshot or flush
-        q.lane_->stop();
-    }
+    // Test seam: do NOT flush the lane or uninstall the router (which App owns).
+    // This simulates a crash between batch commits. The lane is borrowed from
+    // App and will be cleaned up there.
 }
 
 }  // namespace ui
