@@ -34,7 +34,8 @@ vendor/      git submodules — pinned versions, build mechanics, CI matrix in m
   accel: **`mem:module/media`**.
 - `gfx/` — SDL rendering primitives, texture caches, text, themes: **`mem:module/gfx`**.
 - `ui/` — every Screen, the image/video viewer, all dialogs, and the pure SDL-free
-  view/search/sort/session models: **`mem:module/ui`**.
+  view/search/sort/session models: **`mem:module/ui`** (index) with sub-memories for
+  text-input, screens, viewer, dialogs, models, jobs, and import.
 
 ## Project-wide invariants (NEVER violate)
 
