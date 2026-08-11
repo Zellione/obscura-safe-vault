@@ -343,13 +343,18 @@ VaultResult copy_one_media(const Vault& src, std::string_view src_gallery,
 
     // Capture everything needed from `node` BEFORE the destination add: a
     // same-vault add can reallocate the index and dangle the pointer.
+    const std::string src_path = child_path(src_gallery, fname);
+    const auto eff_tags = effective_tags(src, src_path);
+    const bool favorite = node->favorite;
+    const NodeExtras extras{.tags = eff_tags, .favorite = favorite};
+
     if (node->is_image()) {
         StagedThumb thumb;
         if (VaultResult r = prestage_image_info(src, *node, thumb); r != Ok) return r;
         const uint64_t ts = node->meta.created_ts;
         if (VaultResult r = src.read_image(*node, plain); r != Ok) return r;
         failed_stage = TransferFailure::Stage::Write;
-        return attach_image_prestaged(dst, dst_gallery, plain.as_span(), fname, thumb, ts);
+        return attach_image_prestaged(dst, dst_gallery, plain.as_span(), fname, thumb, ts, &extras);
     }
     if (node->is_video()) {
         StagedVideoInfo info;
@@ -357,7 +362,7 @@ VaultResult copy_one_media(const Vault& src, std::string_view src_gallery,
         const uint64_t ts = node->vmeta.created_ts;
         if (VaultResult r = src.read_video(*node, plain); r != Ok) return r;
         failed_stage = TransferFailure::Stage::Write;
-        return attach_video_prestaged(dst, dst_gallery, plain.as_span(), fname, info, ts);
+        return attach_video_prestaged(dst, dst_gallery, plain.as_span(), fname, info, ts, &extras);
     }
     return Ok;
 }

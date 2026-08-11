@@ -161,3 +161,162 @@ TEST(attach_prestaged_caps_extras_at_index_max_tags) {
     REQUIRE(n != nullptr);
     CHECK_EQ(n->tags.size(), vault::INDEX_MAX_TAGS);
 }
+
+TEST(transfer_images_materializes_inherited_tags_cross_vault) {
+    using enum vault::VaultResult;
+    TempVault src_tv("src_xfer");
+    TempVault dst_tv("dst_xfer");
+
+    vault::Vault src;
+    vault::Vault dst;
+    REQUIRE(vault::Vault::create(src_tv.str(), bytes("pw"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(dst_tv.str(), bytes("pw"), {}, kKdf, dst) == Ok);
+
+    // Set up source: gallery "a" tagged "series", image a/x.jpg tagged "own", favorite=true
+    REQUIRE(src.create_gallery("a") == Ok);
+    REQUIRE(src.add_tag("a", "series") == Ok);
+
+    vault::StagedThumb no_thumb;
+    auto img = pattern(64, 10);
+    vault::NodeExtras src_extras{.tags = {"own"}, .favorite = true};
+    REQUIRE(vault::add_image_prestaged(src, "a", img, "x.jpg", no_thumb, 0, &src_extras)
+            == Ok);
+    REQUIRE(vault::commit_staged(src) == Ok);
+
+    // Set up destination: empty gallery "in"
+    REQUIRE(dst.create_gallery("in") == Ok);
+
+    // Transfer image in Copy mode
+    REQUIRE(vault::transfer_images(src, "a", {"x.jpg"}, dst, "in", vault::TransferMode::Copy)
+            .done == 1);
+
+    // Verify destination has effective tags (own + inherited series) and favorite
+    const vault::IndexNode* dst_node = dst.resolve_node("in/x.jpg");
+    REQUIRE(dst_node != nullptr);
+    REQUIRE(dst_node->tags.size() == 2);
+    CHECK(std::ranges::find(dst_node->tags, "own") != dst_node->tags.end());
+    CHECK(std::ranges::find(dst_node->tags, "series") != dst_node->tags.end());
+    CHECK(dst_node->favorite);
+
+    // Verify source is untouched (Copy mode)
+    const vault::IndexNode* src_node = src.resolve_node("a/x.jpg");
+    REQUIRE(src_node != nullptr);
+    CHECK(src_node->favorite);
+}
+
+TEST(transfer_image_move_out_of_tagged_gallery_same_vault) {
+    using enum vault::VaultResult;
+    TempVault tv("samevault_move");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kKdf, v) == Ok);
+
+    // Create galleries: "a" (tagged "series") and "b" (no tags)
+    REQUIRE(v.create_gallery("a") == Ok);
+    REQUIRE(v.create_gallery("b") == Ok);
+    REQUIRE(v.add_tag("a", "series") == Ok);
+
+    // Add image a/x.jpg with own tag "own"
+    vault::StagedThumb no_thumb;
+    auto img = pattern(64, 11);
+    vault::NodeExtras img_extras{.tags = {"own"}, .favorite = false};
+    REQUIRE(vault::add_image_prestaged(v, "a", img, "x.jpg", no_thumb, 0, &img_extras)
+            == Ok);
+    REQUIRE(vault::commit_staged(v) == Ok);
+
+    // Transfer image in Move mode (same vault)
+    REQUIRE(vault::transfer_image(v, "a", "x.jpg", v, "b", vault::TransferMode::Move) == Ok);
+
+    // Verify destination has both tags
+    const vault::IndexNode* dst_node = v.resolve_node("b/x.jpg");
+    REQUIRE(dst_node != nullptr);
+    REQUIRE(dst_node->tags.size() == 2);
+    CHECK(std::ranges::find(dst_node->tags, "own") != dst_node->tags.end());
+    CHECK(std::ranges::find(dst_node->tags, "series") != dst_node->tags.end());
+
+    // Verify source is gone
+    CHECK(v.resolve_node("a/x.jpg") == nullptr);
+}
+
+TEST(transfer_preserves_favorite_and_no_tag_duplication) {
+    using enum vault::VaultResult;
+    TempVault src_tv("src_nodup");
+    TempVault dst_tv("dst_nodup");
+
+    vault::Vault src;
+    vault::Vault dst;
+    REQUIRE(vault::Vault::create(src_tv.str(), bytes("pw"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(dst_tv.str(), bytes("pw"), {}, kKdf, dst) == Ok);
+
+    // Source: gallery "a" (tag "series"), image a/x.jpg (tag "series" duplicate)
+    REQUIRE(src.create_gallery("a") == Ok);
+    REQUIRE(src.add_tag("a", "series") == Ok);
+
+    vault::StagedThumb no_thumb;
+    auto img = pattern(64, 12);
+    vault::NodeExtras img_extras{.tags = {"series"}, .favorite = true};  // ci-duplicate of ancestor
+    REQUIRE(vault::add_image_prestaged(src, "a", img, "x.jpg", no_thumb, 0, &img_extras)
+            == Ok);
+    REQUIRE(vault::commit_staged(src) == Ok);
+
+    // Destination: gallery "in" also tagged "series"
+    REQUIRE(dst.create_gallery("in") == Ok);
+    REQUIRE(dst.add_tag("in", "series") == Ok);
+
+    // Transfer
+    REQUIRE(vault::transfer_images(src, "a", {"x.jpg"}, dst, "in", vault::TransferMode::Copy)
+            .done == 1);
+
+    // Verify no ci-duplicates in destination node tags (effective_tags dedupes, transfer preserves)
+    const vault::IndexNode* dst_node = dst.resolve_node("in/x.jpg");
+    REQUIRE(dst_node != nullptr);
+    CHECK(dst_node->favorite);
+
+    // Check that "series" appears only once (case-insensitive dedup in effective_tags)
+    int series_count = 0;
+    for (const auto& t : dst_node->tags) {
+        if (vault::tag_ci_equal(t, "series")) ++series_count;
+    }
+    CHECK_EQ(series_count, 1);
+}
+
+TEST(transfer_video_carries_extras) {
+    using enum vault::VaultResult;
+    TempVault src_tv("src_video");
+    TempVault dst_tv("dst_video");
+
+    vault::Vault src;
+    vault::Vault dst;
+    REQUIRE(vault::Vault::create(src_tv.str(), bytes("pw"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(dst_tv.str(), bytes("pw"), {}, kKdf, dst) == Ok);
+
+    // Source: gallery "a", video a/test.avi with tags and favorite
+    REQUIRE(src.create_gallery("a") == Ok);
+    REQUIRE(src.add_tag("a", "videos") == Ok);
+
+    const auto video_data = pattern(2u << 20, 13);
+    vault::StagedVideoInfo info;
+    info.poster_jpeg = {0xFF, 0xD8, 1, 2, 3};
+    info.codec       = vault::VideoCodec::Unknown;
+    info.container   = vault::VideoContainer::Unknown;
+    info.width = 320; info.height = 240; info.duration_us = 99;
+
+    vault::NodeExtras vid_extras{.tags = {"action"}, .favorite = true};
+    REQUIRE(vault::add_video_prestaged(src, "a", video_data, "test.avi", info, 777, &vid_extras)
+            == Ok);
+    REQUIRE(vault::commit_staged(src) == Ok);
+
+    // Destination: gallery "in"
+    REQUIRE(dst.create_gallery("in") == Ok);
+
+    // Transfer video
+    REQUIRE(vault::transfer_images(src, "a", {"test.avi"}, dst, "in", vault::TransferMode::Copy)
+            .done == 1);
+
+    // Verify destination video carries both tags and favorite
+    const vault::IndexNode* dst_node = dst.resolve_node("in/test.avi");
+    REQUIRE(dst_node != nullptr);
+    CHECK(dst_node->favorite);
+    REQUIRE(dst_node->tags.size() == 2);
+    CHECK(std::ranges::find(dst_node->tags, "action") != dst_node->tags.end());
+    CHECK(std::ranges::find(dst_node->tags, "videos") != dst_node->tags.end());
+}
