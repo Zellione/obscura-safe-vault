@@ -344,9 +344,10 @@ bool DualGalleryScreen::route_mouse(const SDL_Event& e)
     if (!is_button && !is_motion && !is_wheel) return false;
 
     // Extract mouse coordinates
-    float x = e.wheel.mouse_x;
+    float x = 0.0f;
     if (is_button) x = e.button.x;
     else if (is_motion) x = e.motion.x;
+    else x = e.wheel.mouse_x;
 
     const auto split = dual_split(static_cast<float>(win_.width()), static_cast<float>(win_.height()));
     const int pane_idx = pane_at(split, x);
