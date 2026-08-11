@@ -61,17 +61,20 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
 - `App::pump_events` and `gfx::Window` — HiDPI mouse coordinate fixing. `pump_events` runs `SDL_ConvertEventToRenderCoordinates(renderer, &e)` on each SDL event before dispatching, converting button/motion/wheel positions from window points into render-pixel space. `Window::mouse_x()`/`mouse_y()` route `SDL_GetMouseState` through `SDL_RenderCoordinatesFromWindow`. Both conversions are identity at 1.0 density (Linux dev box) and scale at >1.0 (Windows). Hit-testing (tile clicks, strip hover, video seek bar) and edge-click navigation now land where the cursor is on all displays.
 
 ### Session state
-- App owns `ui::GallerySessionState session_` (mirrors `adv_session_`): last GalleryGrid view
-  density (List/GridS/GridM/GridL/GridXL) + ImageViewer strip side + a single "last video
-  watched" resume bookmark, carried across App's screen reconstruction on every nav
-  transition. `capture_session_state()` (dynamic_cast onto the active Screen) snapshots it
-  right before `on_exit()`; `to_gallery`/`to_viewer`/`to_favorite_viewer`/`to_tag_viewer` feed
-  `session_.view`/`strip_side` back in as the new screen's initial ctor arg. `enter_viewer()`
-  is the shared tail of every ImageViewer construction: `on_enter()` then
-  `ui::apply_video_resume()`. Reset (`session_.reset()`) at LockActive, idle auto-lock, and
-  promote_pending.
-- App also owns `HelpPopupState` (intercepts F1 globally, renders the overlay on top) and
-  `AdvancedSearchState adv_session_` (reset on vault change).
+- App groups all session-scoped UI state into one `SessionUi sessions_` member (cpp:S1820
+  field-cap grouping, same pattern as VaultState/Overlays/MigrationUi/ImportUi): `.adv`
+  (`AdvancedSearchState`), `.dual` (`DualSessionState`, Phase 78 split view), and `.gallery`
+  (`GallerySessionState`). All three reset at the same points: LockActive, idle auto-lock,
+  and promote_pending (vault switch).
+- `sessions_.gallery`: last GalleryGrid view density (List/GridS/GridM/GridL/GridXL) +
+  ImageViewer strip side + a single "last video watched" resume bookmark, carried across
+  App's screen reconstruction on every nav transition. `capture_session_state()`
+  (dynamic_cast onto the active Screen) snapshots it right before `on_exit()`;
+  `to_gallery`/`to_viewer`/`to_favorite_viewer`/`to_tag_viewer` feed
+  `sessions_.gallery.view`/`strip_side` back in as the new screen's initial ctor arg.
+  `enter_viewer()` is the shared tail of every ImageViewer construction: `on_enter()` then
+  `ui::apply_video_resume()`.
+- App also owns `HelpPopupState` (intercepts F1 globally, renders the overlay on top).
 - **Overlay dispatch structure (Phase 65 cleanup).** `dispatch_event` delegates to the static
   `App::dispatch_overlay_event`, which is now only a fan-out: it calls, in priority order,
   `OverlayDispatch::help` → `::settings` → `::migration` → `::lock_confirm`, returning on the
