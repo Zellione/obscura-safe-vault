@@ -30,6 +30,34 @@
 
 ## Index versions
 
+**INDEX_VERSION = 12** (Phase 75): a **thumbnail-budget watermark**, one u16
+appended at the very END of the settings block (after the Phase 73
+tag-field-values block — the field is last so version-gated reads stay
+prefix-stable):
+
+```
+migrated_thumb_side  u16 (LE)   # stored-thumb long side the vault's thumbs
+                                # were last generated at; 0 = legacy
+```
+
+Pre-v12 blobs read `0` and are *offered* one-time thumbnail regeneration at
+unlock (MigrationJob thumb arm). Every u16 value is legal — the
+reject-not-clamp rule applies to `migrated_index_version`, NOT here.
+`Vault::create` stamps `migrated_thumb_side = image::THUMB_MAX_SIDE` (512)
+AND `migrated_index_version`, so fresh vaults owe no migration (an unstamped
+fresh vault used to get a bogus "sharpen thumbnails" offer). Cross-vault
+transfers lower the destination's watermark to the source's when the source
+is behind (`lower_dst_watermark`, mirroring the Phase 65 rule). Staleness:
+`migrated_thumb_side < image::THUMB_MAX_SIDE` (caller passes the constant —
+vault/ stays decoupled the same way probe caps are passed in).
+
+**INDEX_VERSION = 11** (Phase 73): category-template **fields** appended to
+each category entry (field sub-block per category) plus a vault-global
+**tag-field-values block** appended after the migration watermark
+(`{tag, field, value}` entries, matched case-insensitively, single value per
+(tag, field)). Pre-v11 blobs read with no templates and no values; oversized
+counts/lengths are rejected on deserialise, not clamped.
+
 **INDEX_VERSION = 10** (Phase 65): a **migration watermark**, serialised at the tail
 of the Phase 49 vault-global settings block (after category list):
 

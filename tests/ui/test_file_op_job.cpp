@@ -433,3 +433,51 @@ TEST(file_op_job_delete_batch_removes_selection_in_one_run)
     CHECK_EQ(v.list("").size(), size_t{1});
     CHECK_EQ(v.list("")[0]->name, std::string("keep.png"));
 }
+
+// Copy-mode combine through the job wrapper: the source gallery keeps all its
+// files, the destination gains them, and the status verb says "copied".
+TEST(file_op_job_combine_copy_keeps_source)
+{
+    auto dir = fresh_dir("osv_fj_combine_copy");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        REQUIRE(seed_images(v, "src", 2));
+        REQUIRE(v.create_gallery("dst") == vault::VaultResult::Ok);
+
+        ui::FileOpJob job;
+        CHECK(job.start_combine(v, "src", v, "dst", vault::TransferMode::Copy, "dst"));
+        auto oc = await_outcome(job);
+        REQUIRE(oc.has_value());
+        CHECK(oc->ok);
+        CHECK_EQ(oc->done, 2);
+        CHECK_EQ(static_cast<int>(v.list("src").size()), 2);   // copy: source intact
+        CHECK_EQ(static_cast<int>(v.list("dst").size()), 2);
+        CHECK(oc->status.find("copied") != std::string::npos);
+    }
+    cleanup_dir(dir);
+}
+
+// Move-mode combine keeps its historical wording ("moved") and empties the
+// source.
+TEST(file_op_job_combine_move_empties_source)
+{
+    auto dir = fresh_dir("osv_fj_combine_move");
+    {
+        vault::Vault v;
+        make_vault(v, dir / "v.osv");
+        REQUIRE(seed_images(v, "src", 2));
+        REQUIRE(v.create_gallery("dst") == vault::VaultResult::Ok);
+
+        ui::FileOpJob job;
+        CHECK(job.start_combine(v, "src", v, "dst", vault::TransferMode::Move, "dst"));
+        auto oc = await_outcome(job);
+        REQUIRE(oc.has_value());
+        CHECK(oc->ok);
+        CHECK_EQ(oc->done, 2);
+        CHECK(v.list("src").empty());   // move: fully emptied (and removed)
+        CHECK_EQ(static_cast<int>(v.list("dst").size()), 2);
+        CHECK(oc->status.find("moved") != std::string::npos);
+    }
+    cleanup_dir(dir);
+}

@@ -30,12 +30,7 @@ void render_direction_body(gfx::Renderer& r, gfx::FontAtlas& font,
     using namespace gfx::theme;
     r.draw_text(font, ix, iy + 36, "Direction:", TEXT_DIM);
     const std::vector<std::string> directions = {"To another vault…", "From another vault…"};
-    for (size_t i = 0; i < directions.size(); ++i) {
-        const float ry = iy + 72 + static_cast<float>(i) * 34.0f;
-        const bool  on = (static_cast<int>(i) == direction_sel);
-        if (on) r.draw_round_rect({ix, ry, mw - 40, 30}, RADIUS_SMALL, SURFACE_HI);
-        r.draw_text(font, ix + 8, ry + 4, fit_text(font, directions[i], mw - 56), on ? TEXT : TEXT_DIM);
-    }
+    draw_option_rows(r, font, ix, iy + 72, mw, directions, direction_sel);
     r.draw_text(font, ix, iy + 150,
                 fit_text(font, "[Up/Down] choose  [Enter] next", mw - 40), TEXT_FAINT);
 }
@@ -46,13 +41,8 @@ void render_mode_body(gfx::Renderer& r, gfx::FontAtlas& font, float ix, float iy
     using namespace gfx::theme;
     r.draw_text(font, ix, iy + 36, "Action:", TEXT_DIM);
     const std::vector<std::string> modes = {"Move", "Copy"};
-    const int msel = (mode == vault::TransferMode::Copy) ? 1 : 0;
-    for (size_t i = 0; i < modes.size(); ++i) {
-        const float ry = iy + 72 + static_cast<float>(i) * 34.0f;
-        const bool  on = (static_cast<int>(i) == msel);
-        if (on) r.draw_round_rect({ix, ry, mw - 40, 30}, RADIUS_SMALL, SURFACE_HI);
-        r.draw_text(font, ix + 8, ry + 4, fit_text(font, modes[i], mw - 56), on ? TEXT : TEXT_DIM);
-    }
+    draw_option_rows(r, font, ix, iy + 72, mw, modes,
+                     (mode == vault::TransferMode::Copy) ? 1 : 0);
     r.draw_text(font, ix, iy + 150,
                 fit_text(font, "[Up/Down] choose  [Enter] next", mw - 40), TEXT_FAINT);
 }

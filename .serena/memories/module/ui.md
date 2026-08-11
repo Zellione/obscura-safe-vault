@@ -334,13 +334,33 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   transfer success. Grid skips its import dlg poll while active(); M with no selection acts on
   the focused tile.
 - **Phase 71 — TransferDialog `Conflict` stage:** between PickGallery and Running. `do_move` pre-scans on the MAIN thread (race-free — job not launched yet) via `vault::colliding_galleries` over `galleries_for_conflict_scan()` ({src_gallery_} for Gallery, src_galleries_ for Galleries/Collection, {} for Images — media-only never prompts; the typed new-gallery-name path flows through the same pre-scan). ≥1 clash → Conflict stage: "N galleries already exist at destination", rows Combine / Rename with `_2` suffix / Cancel (Up/Down+Enter like the Mode stage; Esc closes). Choice → `launch_transfer(target, CollisionPolicy)` (the old do_move body). Conflict state lives in `struct Conflict {target, count, sel} conflict_` (S1820 fold; reset in open()). Row pitch via `ui::line_pitch`. `FileOpOutcome` gained `skipped` (status line appends "(N skipped)"; skips never reach the failure list); `file_op_job.cpp` bundles counts in `TransferCounts` and gallery-run args in `GalleryTransferSpec` (S107/S1188); `CollectionTransferSpec{groups, gallery_paths}` is now PUBLIC in file_op_job.h and `start_transfer_gallery/galleries/collection` take a `vault::CollisionPolicy` before `label` (`start_transfer_media_grouped` forwards Fail).
+- **Phase 75 — TransferDialog pull direction:** Stage enum gained `Direction` (first stage when
+  the host called `set_current_gallery` — the grid does before all five `open*` sites; collection
+  screens don't, keeping push-only) and `PickSrcGalleries`. Pull state bundled in `struct Pull
+  {active, current_gallery, has_current, direction_sel} pull_` (S1820 cap); render helpers
+  `render_direction_body`/`render_mode_body` are file-local (S1448 cap). Pull flow: Direction=From
+  → Mode → PickingDest with `picker_dest_.open(src_path_, /*include_self=*/false)` + "Source
+  vault:" title → PickSrcGalleries (`picker_.set_items(vault::all_galleries(dest_vault()))`,
+  `set_multi(true)`, no pinned suffix; Space toggles, Enter → `ui::drop_descendant_paths(checked)`
+  → `colliding_galleries(src_, current_gallery, paths)` pre-scan → Conflict or launch). The target
+  is threaded EXPLICITLY through `launch_current(target, policy)` in all four paths (push/pull ×
+  conflict/no-conflict — a regression once launched conflict-free pushes with an empty
+  `conflict_.target`). Pull launch: `start_transfer_galleries(dest_vault()/*source*/, paths,
+  src_/*active=destination*/, current_gallery, mode_, policy, label)`; completion status rewrites
+  " to " → " from "; warm-slot `release_to_slot()` is direction-agnostic. Header reads "Pull from
+  another vault" throughout the pull stages.
 - `combine_dialog.*` — `Shift+M` modal: merges the CURRENTLY BROWSED gallery into another via
-  `vault::combine_galleries` (same- or cross-vault). Stages PickingDest (VaultUnlockPicker) ->
-  PickTarget (GalleryPickerModel over `combine_target_galleries`) -> Running (progress modal).
+  `vault::combine_galleries` (same- or cross-vault; mixed galleries combine fine — media
+  children first, then sub-gallery children). Stages Mode (Move/Copy, Phase 76 — Move deletes
+  the emptied source, Copy leaves the source fully untouched) -> PickingDest
+  (VaultUnlockPicker) -> PickTarget (GalleryPickerModel over `combine_target_galleries`) ->
+  Running (progress modal). The mode threads through `FileOpJob::start_combine(…, TransferMode,
+  label)` into `combine_galleries`; outcome verbs follow it ("N copied" vs "N moved").
   `CombineOutcome{status,source_gone,same_vault,dest_path}` drained by GalleryGrid::update()
   for post-combine nav: source_gone && same_vault -> jump_to_gallery(dest_path); source_gone &&
   !same_vault -> go_up(); !source_gone -> refresh() (partial merge from a collision).
-  source_gone read as `src_.list(src_gallery_).empty()`. **Phase 66:** on completion with a
+  source_gone read as `mode==Move && src_.list(src_gallery_).empty()` (Copy never removes the
+  source, so an empty source must not report gone). **Phase 66:** on completion with a
   Keep\* mode, the destination handle is handed off via `release_to_slot()` and the slot's
   sliding reset called after success.
 - `failure_list_dialog.*` — **Phase 67 modal**, shown when a `TransferDialog` or `CombineDialog` 
@@ -359,7 +379,12 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   to resolve "the vault to write into". **Phase 66:** the Unlock stage gains an Up/Down mode
   selector (LockNow/KeepTimed/KeepSession); skips Unlock entirely when the picked destination
   matches the warm slot (password-free); and calls `release_to_slot(mode)` on completion with
-  a Keep\* mode so the destination stays warm instead of being wiped.
+  a Keep\* mode so the destination stays warm instead of being wiped. **Phase 75:**
+  `open(src_path, bool include_self = true)` — false omits the "This vault" row (pull must not
+  offer the active vault as its own source; selection→registry index mapping shifts by the
+  include_self offset), and `render` takes a title override so the pull flow labels the stage
+  "Source vault:". The picked vault serves as transfer SOURCE in pull — the slot and
+  release_to_slot are direction-agnostic ("the other vault").
 - `gallery_picker.*` — `GalleryPickerModel`: pure SDL-free filterable/scrollable list model
   shared by TransferDialog + CombineDialog. set_items, open/close_filter (`/`), filter_*,
   move(delta), filtered(), selected(), geom(visible_rows). `set_pinned_suffix(item)` keeps one
@@ -368,6 +393,12 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `refilter()` when its `revision()` moved. ONE model, TWO drivers
   (`transfer_dialog.cpp` + `combine_dialog.cpp`) — both routing blocks must stay in
   step, and both entry points (`M` and `Shift+M`) need re-testing on any change.
+  **Phase 75 — opt-in multi-select:** `set_multi(bool)` (CLEARED by `set_items`), `multi()`,
+  `toggle_checked()` (current filtered row; pinned-suffix row toggles nothing; no-op unless
+  multi), `is_checked(item)`, `checked()` (items_ order). Both legacy drivers stay single-select —
+  only the pull PickSrcGalleries stage opts in. Free fn `ui::drop_descendant_paths(paths)`
+  (gallery_picker.h): strict-descendant prune with "/" separator ("ab" is not under "a"),
+  sorted-order output. Tests: test_gallery_picker.cpp.
 - `folder_dialog.*` (Phase 51) — `FolderDialog`: native file-picker for folders. `Purpose` enum:
   `{None, Export, ImportFolder}`. `open(purpose, allow_many)` → SDL_ShowOpenFileDialog with
   SDL_DIALOG_FOLDER. `take_result(purpose)` returns `vector<std::string>` — phase-scoped
@@ -485,6 +516,8 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
 - `file_op_job.*` — FileOpJob runs export / delete / move-copy on a bg worker (same contract).
   start_export/start_delete/start_transfer_images/start_transfer_gallery/
   start_transfer_galleries/start_combine -> `FileOpOutcome{ok,cancelled,done,failed,status,...}`.
+  **Phase 76:** `start_combine` takes a `vault::TransferMode` before `label` and forwards it to
+  `combine_galleries`; `combine_outcome` verbs follow the mode ("copied"/"moved").
   **Phase 68:** `start_transfer_collection(src, groups, gallery_paths, dst, dst_target, mode,
   label)` runs per-parent `transfer_images` loops then `transfer_galleries`, tallies merged
   (worker body is the named `run_collection_transfer` helper);
@@ -544,6 +577,19 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   AUTO_COMPACT_MIN_WASTE` (floor-only gate, no ratio term). Cancel commits applied work but
   does NOT stamp the watermark, so the pass re-runs at the next unlock. Crash mid-pass leaves
   the vault as it was; orphaned poster chunks are dead ciphertext reclaimed by compact.
+  **Phase 75 thumb arm:** `Item` gained `Kind{VideoProbe, ImageAnimated, ImageThumb, VideoPoster}`
+  + a `thumbs_stale` flag; `run()` computes `thumbs_stale = vault_settings(v).migrated_thumb_side
+  < image::THUMB_MAX_SIDE` and passes it to `collect()`, whose arms MIRROR `scan_migration`'s
+  (one item per image: ImageThumb — which also sniffs the animated flag — when stale + has a
+  thumb, else ImageAnimated; known-codec videos → VideoPoster when stale; Unknown-codec stays
+  VideoProbe). `process()` decodes the original → `make_thumbnail(THUMB_MAX_SIDE)` (images) or
+  re-probes for a 512 poster (videos); a failed encode/probe is a SKIP (ok=true, empty thumb),
+  not a failure. `apply_one()` (coordinator-only) routes to `vault::apply_image_thumb` /
+  `apply_video_poster`; the VideoProbe arm ALSO replaces a pre-existing poster via
+  `apply_video_poster` when resolved + thumbs_stale (apply_video_probe fills only empty spans).
+  `MigrationOutcome` gained `thumbs_fixed`. Test hooks `test_only_force_video_codec_unknown` /
+  `test_only_force_image_animated_unknown` (vault.h friends, established test_only_force_*
+  convention) let tests fabricate legacy states.
 
 ## Import planning & archive reading
 - `folder_scan.*` (Phase 51) — `scan_folder(root) -> vector<ZipEntry>` via
@@ -767,8 +813,9 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   to "items". Counts reserved per gallery listing (never per tile); cell does not grow; label moves up,
   thumbnail shrinks by row height, leaving grid metrics and hit-testing untouched.
 - `gallery_view.h/.cpp` — `GalleryView{List,GridS,GridM,GridL,GridXL}` shared enum;
-  `cell_size_for(view)` (S=128/M=188/L=248/XL=320, List unused) + `next_gallery_view(view)`
-  (the `L`-key cycle). GridM==188 matches the old fixed CELL. `gallery_view.cpp` is listed
+  `cell_size_for(view)` (S=192/M=256/L=352/XL=448 since Phase 75; List unused) +
+  `next_gallery_view(view)` (the `L`-key cycle). GridM was 188 (the old fixed CELL) before the
+  Phase 75 bump; stored thumbs are 512 px (`image::THUMB_MAX_SIDE`) so XL stays sharp. `gallery_view.cpp` is listed
   explicitly (not globbed) in osv_tests' premake5.lua files{}.
 - `gallery_session_state.h` — `GallerySessionState{view,strip_side,detail_open,last_media_path,
   video_resume_seconds}` + `last_index_by_path` (unordered_map, key=NavModel::path()) +

@@ -105,7 +105,7 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
 
 ### staging.* (Phase 50 + Phase 67 transfer + Phase 69 batching) — worker-to-tree hand-off
 - `stage_image(Vault, data, ...)` / `stage_video(Vault, data, precomputed_meta, ...)` — any thread, stream encrypted chunks to disk with fflush (no fsync), return a ready IndexNode with chunk spans. Plaintext stays mlock'd; nodes are ready but **not attached**. **Phase 67:** `stage_video` gains a 5th `precomputed_meta` param (a `StagedVideoInfo{dimensions, duration, codec, poster_offset, poster_len}`) so cross-vault transfers avoid re-probing videos already decoded at the source. Null metadata falls back to `MediaProbe::probe_bytes` on attach (backward compat). `StagedVideoInfo` is computed at source by `MediaProbe::extract_staged_video_info`.
-- `attach_image_prestaged` / `attach_video_prestaged` — **free friends, Phase 69.** Main-thread only: pre-check (safe name, gallery exists, no sibling collision) → stage → attach, **no fsync, no commit** — bulk transfer loops attach many files and batch durability. On a crash before the next commit the attached nodes vanish; their chunks are orphaned dead ciphertext reclaimed by compact (same contract as a cancelled import).
+- `attach_image_prestaged` / `attach_video_prestaged` — **free friends, Phase 69.** Main-thread only: pre-check (safe name, gallery exists, no sibling collision) → stage → attach, **no fsync, no commit** — bulk transfer loops attach many files and batch durability. **Phase 75:** all four `attach_*`/`add_*_prestaged` take a trailing `const NodeExtras* extras = nullptr` (`vault::NodeExtras{std::vector<std::string> tags; bool favorite;}`, staging.h) applied to the node BEFORE tree insertion (tags capped at INDEX_MAX_TAGS by truncation) — transferred tags/favorites ride the same batched commit, never a separate one. On a crash before the next commit the attached nodes vanish; their chunks are orphaned dead ciphertext reclaimed by compact (same contract as a cancelled import).
 - `commit_staged(Vault&)` — **free friend, Phase 69.** One chunk-store fsync + one crash-safe `commit_index()` for everything attached since the last commit.
 - `add_image_prestaged(Vault, ...)` / `add_video_prestaged(Vault, ...)` — **free friends, Phase 67.** Single-file convenience: `attach_*_prestaged` + `commit_staged` (per-file durable commit). Used by `transfer_image` (the single-file primitive); bulk loops use the attach/commit split instead.
 - `attach_staged(Vault, node, gallery_path)` — main-thread only, performs tree insertion, **no commit issued**. Commit is scheduled separately by batching policy (see CommitLane below).
@@ -213,10 +213,26 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   far live only in the destination, the rest only in the source, no duplicates, nothing lost.
   On resume (same transfer request re-invoked), skip-collisions logic prevents re-transfer.
 - **Source metadata hand-off:** `transfer_image`/`transfer_video` receive metadata from the source 
-  (image orientation, video dimensions/duration/codec via `StagedVideoInfo`). The destination 
-  receives the exact metadata + any tags the source carries (read-time cascade applies). Videos 
+  (image orientation, video dimensions/duration/codec via `StagedVideoInfo`). Videos 
   carry pre-probed codec/dimensions so the destination never re-probes (perf + consistency across 
   unknown-codec moves).
+- **Phase 75 — tags + favorites persist on every transfer (Move AND Copy, within- and cross-vault):**
+  `copy_one_media` captures `NodeExtras{effective_tags(src, path), node->favorite}` BEFORE the
+  destination attach (same dangling-pointer discipline as the `ts` capture) and passes it to the
+  prestaged attach; every path funnels through it (single-file `transfer_image` via
+  `transfer_image_ex`, bulk `transfer_images`, subtree `copy_subtree`, combine's media moves).
+  `vault::effective_tags(v, node_path)` (declared in transfer.h) = own tags first (own casing wins)
+  ∪ root tags ∪ ancestor-gallery tags root→parent, ci-deduped via `vault::tag_ci_equal` (moved from
+  vault.cpp's file-local `ci_equal` to index.h/.cpp — the single vault-side tag identity).
+  **Gallery subtrees:** `GallerySnap` gained `tags` + `favorite` (captured at snapshot time, copied
+  strings); the transfer driver overwrites the ROOT snap's tags with `effective_tags(src,
+  src_gallery)` (ancestors-above materialize on the root; internal inheritance travels intact);
+  after `ensure_gallery_path`, `apply_gallery_extras` UNIONS tags onto the destination gallery
+  (ci-deduped, capped, favorite ORed — idempotent on rerun, pre-existing destination tags kept).
+  `vault::all_galleries(v)` — every gallery path except root, DFS order, empty while locked (feeds
+  the pull dialog's source list). `lower_dst_watermark` also lowers `migrated_thumb_side`.
+  Tests: test_transfer_tags.cpp (+ combine assertion in test_combine.cpp); batching sync budgets
+  unchanged (extras add zero commits).
 
 ### migration.* (Phase 65) — vault upgrade orchestration
 - `scan_migration(const Vault&, MigrationStatus*)` — pure tree walk (zero I/O). Detects pending
@@ -238,6 +254,20 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   an image in a format that supports animation, setting the animated flag if needed. Does NOT commit.
 - `commit_migration(Vault&)` — free friend. After all apply_* calls, ONE `commit_index()` to
   serialize the migration work atomically. Called by ui::MigrationJob.
+- **Phase 75 thumb arm:** `MigrationScan` gains `size_t thumbs`; `scan_migration(v, bool
+  thumbs_stale)`; `migration_pending(s, probe_caps_gen, thumb_side)` adds
+  `s.migrated_thumb_side < thumb_side`; `stamp_migrated(s, probe_caps_gen, thumb_side)`. The scan
+  counts each image in exactly ONE arm (animated-backfill arm first, else thumbs when stale +
+  `thumb_length > 0`; known-codec videos → thumbs when stale; Unknown-codec stays in the videos
+  arm) — `ui::migration_job.cpp::collect` mirrors this arm parity so offer counts match job totals.
+  New free friends `apply_image_thumb(v, node_path, span thumb_jpeg)` / `apply_video_poster(...)`
+  (vault.cpp, beside apply_video_probe): Locked → empty-blob InvalidArg → resolve+type check →
+  `write_mutex_` → ChunkStore append+sync → REPOINT the span (they REPLACE existing spans, unlike
+  apply_video_probe's fill-only-empty poster arm); NO commit. Superseded chunks are dead
+  ciphertext for compact. `Vault::create` stamps `migrated_index_version` +
+  `migrated_thumb_side = image::THUMB_MAX_SIDE` (fresh vaults owe nothing; unstamped fresh vaults
+  used to get a bogus offer). vault/ may reference image:: (staging already does) but never media::
+  — probe caps stay caller-passed.
 - **Transfer rule (Phase 65):** `transfer_image` and `transfer_gallery` (the two primitives
   all cross-vault operations funnel through) now lower the destination's watermark to the source's
   whenever the source is behind. This re-offers the migration if content from an un-migrated vault
@@ -248,7 +278,7 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   a `SortKey` u8 (meaningful only on Gallery nodes: Default/NameAsc/NameDesc/DateAsc/DateDesc/
   SizeAsc/SizeDesc/Insertion; out-of-range byte rejected, not clamped, bounded PER VERSION —
   v6/v7 max 6, v8 max 7), and Type::Video + VideoMeta (multi-chunk list + poster).
-- `INDEX_VERSION=10` (Phase 65). Vault-global SavedSearch block after the root (name + opaque
+- `INDEX_VERSION=12` (Phase 75; v11 = Phase 73 category-template fields + tag-field-values block, v12 = `migrated_thumb_side` u16 appended LAST in the settings block). Vault-global SavedSearch block after the root (name + opaque
   `ui::AdvancedQuery` blob, `INDEX_MAX_SAVED_SEARCHES=4096`), then the Phase 49 vault-global
   **settings block**, then the Phase 51 **tag-descriptions block**, then the Phase 65
   **migration watermark** — see `mem:vault_format` for their byte layouts. `INDEX_MAX_TAGS=4096`.

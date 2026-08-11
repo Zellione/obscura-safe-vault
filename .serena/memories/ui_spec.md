@@ -54,7 +54,10 @@ invent its own key handling.
 
 ## Vault migration offer (Phase 65)
 **Post-unlock, before the gallery renders:** if the vault's migration watermark is
-stale and there is pending work (unknown videos or un-backfilled animated images),
+stale and there is pending work (unknown videos, un-backfilled animated images, or —
+Phase 75 — thumbnails/posters generated below the current `image::THUMB_MAX_SIDE`
+budget; the modal enumerates the thumbnail count separately, "N thumbnail(s) … to
+sharpen"),
 `MigrationJob` is offered in a **default-cancel modal** stating the counts and
 total bytes to be read — no time estimate (an honest byte count beats a fabricated
 ETA). **Accept** runs the blocking upgrade pass with a progress modal (four-phase
@@ -406,6 +409,35 @@ job mid-operation while KeepTimed is in an expiry window locks the slot when the
 
 **No `.osv` change:** INDEX_VERSION stays 10. The warm slot is session-only and in-memory;
 nothing persists to the vault file.
+
+## Pull transfers (Phase 75)
+
+`M` opens the transfer dialog with a **Direction** stage when the host provided a
+browse context (the gallery grid calls `set_current_gallery(nav path)` before every
+open; collection screens do not, so they keep the push-only dialog): *To another
+vault* (the unchanged push flow) / *From another vault* (pull). Pull stages:
+**Mode (Move/Copy) → "Source vault:" picker** (same `VaultUnlockPicker`, `include_self
+= false` so "This vault" is absent; the Phase 66 warm slot works symmetrically as a
+password-free source and receives the handle on Keep\* completion) → **PickSrcGalleries**
+(header "Pull from another vault"; `[ ]`/`[X]` checkbox rows, Space toggles, `/`
+filter, Enter confirms; a checked descendant of a checked ancestor is silently
+absorbed) → the Phase 71 **Conflict** stage against the browsed gallery (Combine /
+Rename `_2` / Cancel) → Running. The destination is always the currently browsed
+gallery; completion status reads "Copied/Moved N of M **from** <vault>" (push keeps
+"to"). Media directly in the source vault's ROOT is not pullable (documented
+limitation). F1's `M` line reads "Move/copy to — or pull from — another vault".
+
+## Copy-capable combine (Phase 76)
+
+`Shift+M` (combine the currently browsed gallery into another) opens with a **Mode**
+stage — *Move* (merge, delete the source once it empties; historical behavior, default)
+/ *Copy* (union into the destination; source, its media, sub-galleries, and shell stay
+untouched) — before the destination-vault and target-gallery pickers. Same Up/Down/
+Enter row convention as the transfer dialog's Mode stage (shared `ui::draw_option_rows`
+renderer). Completion wording follows the verb ("N copied" vs "N moved"); post-combine
+navigation treats the source as gone only in Move mode. Mixed galleries (media +
+sub-galleries as siblings) combine in either mode; the F1 line reads
+"Shift+M — Combine gallery (move or copy)".
 
 ## Multiselect batch ops & position counters (Phase 68)
 
