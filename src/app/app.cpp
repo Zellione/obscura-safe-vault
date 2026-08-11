@@ -901,12 +901,24 @@ bool App::maybe_auto_lock(double dt)
 {
     // should_auto_lock also covers "a screen with a background import owns the
     // vault's file handle on a worker thread" (blocks_idle_lock), the session's
-    // "keep unlocked" toggle (Phase 33), and a busy import queue (Phase 50) —
+    // "keep unlocked" toggle (Phase 33), a busy import queue (Phase 50), and a
+    // running vault upgrade (Phase 79 — MigrationJob owns the vault exclusively;
+    // a >5-min-idle upgrade must not have it locked and destroyed mid-flight) —
     // see app/auto_lock.h.
+    const bool migration_active = migration_ui_.job && migration_ui_.job->active();
     if (const bool blocks = screen_ && screen_->blocks_idle_lock();
         !should_auto_lock(vault_state_.active != nullptr, blocks, keep_unlocked_, import_ui_.queue.busy(),
-                          idle_, dt))
+                          migration_active, idle_, dt))
         return false;
+    // The upgrade OFFER modal is a different story: the job has not started, so
+    // locking an unattended vault is the right default. Drop the offer's state
+    // with it — the modal must not linger over the manager referencing a locked
+    // vault (it is re-offered at the next unlock), and the import-queue
+    // exclusivity it took must not leak into the locked session.
+    if (migration_ui_.offer_open) {
+        migration_ui_.offer_open = false;
+        import_ui_.queue.set_exclusive(false);
+    }
     if (screen_) screen_->on_exit();
     session_.reset();                                  // Phase 39 Part 2: fresh session on idle lock
     import_ui_.queue.end_session();                       // Phase 50: flush before lock
@@ -935,23 +947,27 @@ void App::update(double dt)
         second_.badge_secs = secs;
     }
 
-    // Phase 65: handle migration job outcome and start import session after migration
-    if (vault_state_.active) {
-        if (migration_ui_.job && migration_ui_.job->active()) {
-            // Migration is running; collect outcome if it just finished
-            if (auto outcome = migration_ui_.job->take_outcome()) {
-                migration_ui_.result = *outcome;
-                migration_ui_.progress_open = false;
-                migration_ui_.result_open = true;
+    // Phase 65: handle migration job outcome and start import session after migration.
+    // Phase 79: the outcome poll must NOT be gated on vault_state_.active — none of
+    // it needs the vault, and if the vault ever goes away under a live job (any
+    // future teardown path), a gated poll leaves job->active() true forever and the
+    // progress modal wedges on screen with no way to dismiss it.
+    if (migration_ui_.job && migration_ui_.job->active()) {
+        // Migration is running; collect outcome if it just finished
+        if (auto outcome = migration_ui_.job->take_outcome()) {
+            migration_ui_.result = *outcome;
+            migration_ui_.progress_open = false;
+            migration_ui_.result_open = true;
 
-                // MigrationJob owns watermark stamping and commits it in its finalization phase.
-                // Do not duplicate the commit here; it would append an index blob after compaction.
+            // MigrationJob owns watermark stamping and commits it in its finalization phase.
+            // Do not duplicate the commit here; it would append an index blob after compaction.
 
-                // Release exclusive hold on import queue (success, cancel, or error)
-                import_ui_.queue.set_exclusive(false);
-            }
+            // Release exclusive hold on import queue (success, cancel, or error)
+            import_ui_.queue.set_exclusive(false);
         }
+    }
 
+    if (vault_state_.active) {
         // Start import session once migration is done (or skipped)
         if (import_ui_.need_begin_session && !migration_ui_.offer_open &&
             !migration_ui_.progress_open && (!migration_ui_.job || !migration_ui_.job->active())) {
@@ -1067,6 +1083,11 @@ void App::run()
 
 void App::shutdown()
 {
+    // Phase 79: closing the window mid-upgrade reaches here with the coordinator
+    // still holding a reference to the active vault — stop it BEFORE any vault
+    // teardown (blocking, acceptable at shutdown; cancel commits applied work
+    // and leaves the watermark unstamped, so the upgrade is re-offered).
+    if (migration_ui_.job) migration_ui_.job->abort_and_join();
     if (screen_) { screen_->on_exit(); screen_.reset(); }
     import_ui_.queue.end_session();        // Phase 50: flush before lock (blocking, acceptable at shutdown)
     second_.session.wipe();                        // Phase 66: wipe warm slot before vault teardown

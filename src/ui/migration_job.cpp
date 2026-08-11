@@ -459,7 +459,9 @@ MigrationProgressText migration_progress_text(MigrationPhase phase, int done, in
     return t;
 }
 
-MigrationJob::~MigrationJob() = default;
+// Cancel before the jthread member's implicit join: a plain join would block
+// destruction until the whole migration ran to completion.
+MigrationJob::~MigrationJob() { abort_and_join(); }
 
 bool MigrationJob::start(vault::Vault& v)
 {
@@ -527,6 +529,15 @@ void MigrationJob::run(vault::Vault& v)
     phase_.store(MigrationPhase::Done);
     outcome_ = std::move(out);
     done_.store(true);
+}
+
+void MigrationJob::abort_and_join()
+{
+    if (!active_.load()) return;
+    progress_.cancel.store(true);
+    if (thread_.joinable()) thread_.join();   // run() exits between items on cancel
+    active_.store(false);
+    done_.store(false);   // outcome deliberately discarded — no one is left to show it
 }
 
 std::optional<MigrationOutcome> MigrationJob::take_outcome()
