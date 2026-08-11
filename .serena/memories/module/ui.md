@@ -598,6 +598,11 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   done, total) -> MigrationProgressText{title, count_line}` (migration_job.h/.cpp) — `Done` now
   gets its own "Finishing…" label instead of falling into the `Idle`/`Scanning` default of
   "Preparing…", which is what made a finished run's last frame(s) read as a hang.
+  **Phase 79:** `abort_and_join()` — cancel + join + deactivate without a `take_outcome()`
+  poll (outcome discarded); used by `App::shutdown()` before vault teardown and by the
+  destructor (a bare jthread join would block, uncancelled, for the whole pass). The idle
+  auto-lock is suppressed while the job is active (see module/app) — it used to fire
+  mid-upgrade and tear the vault down under the coordinator.
 
 ## Import planning & archive reading
 - `folder_scan.*` (Phase 51) — `scan_folder(root) -> vector<ZipEntry>` via

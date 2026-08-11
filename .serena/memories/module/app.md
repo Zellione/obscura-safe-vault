@@ -40,10 +40,18 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
 ### Idle auto-lock
 - `app/idle_timer.h` `IdleTimer` (reset on user input in `dispatch_event`);
   `maybe_auto_lock(dt)` wipes `active_` + `to_manager()` after `IDLE_LOCK_SECS = 5 min`.
-- `app/auto_lock.h` `should_auto_lock(has_active, blocks_idle_lock, keep_unlocked, timer, dt)`
-  — pure, unit-tested extraction of the 3 suppression guards (no active vault / a screen's
-  `blocks_idle_lock` / the session-only `keep_unlocked_` toggle), all of which reset the
-  IdleTimer instead of ticking it.
+- `app/auto_lock.h` `should_auto_lock(has_active, blocks_idle_lock, keep_unlocked,
+  import_busy, migration_active, timer, dt)` — pure, unit-tested extraction of the 5
+  suppression guards (no active vault / a screen's `blocks_idle_lock` / the session-only
+  `keep_unlocked_` toggle / a busy import queue / a running `MigrationJob` — Phase 79: the
+  job is App-owned, so no screen or queue signal covers it; without this guard a >5-min-idle
+  vault upgrade got its vault locked+destroyed under the running coordinator and the progress
+  modal wedged forever), all of which reset the IdleTimer instead of ticking it.
+- Phase 79 companions in App: `maybe_auto_lock` firing while the upgrade OFFER modal is up
+  (job not started — lock is the right default there) also closes the offer + releases import
+  exclusivity; the `take_outcome()` poll in `update()` is NOT gated on `vault_state_.active`
+  (a gated poll is what wedged the modal); `shutdown()` calls
+  `MigrationJob::abort_and_join()` before any vault teardown (window close mid-upgrade).
 - `keep_unlocked_` is a plain App bool, flipped by GalleryGrid's `U` via
   `NavKind::ToggleKeepUnlocked` (`App::apply_nav` flips it in place — no screen swap); reset
   to false in `promote_pending()` + the LockActive nav case, so re-unlocking always starts
