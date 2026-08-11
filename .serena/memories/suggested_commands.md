@@ -32,6 +32,8 @@ build/bin/Release/osv
 ## Tests
 ```bash
 scripts/test.sh           # build + run all tests (Debug)
+build/bin/Debug/osv_tests <substring>   # run only tests whose name contains <substring>
+                                        # (Phase 80: for valgrind/gdb single-test runs)
 scripts/test.sh --asan    # AddressSanitizer + UBSan + LSan
 scripts/test.sh --release
 scripts/test.sh --tsan    # ThreadSanitizer (mutually exclusive with --asan)

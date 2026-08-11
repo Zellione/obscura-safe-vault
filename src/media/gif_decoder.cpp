@@ -3,6 +3,7 @@
 #ifdef OSV_VENDORED_AV
 
 #include <array>
+#include <cstring>
 #include <memory>
 
 #include "media/mem_avio.h"
@@ -218,14 +219,20 @@ std::optional<AnimFrame> GifDecoder::next_frame()
         }
     }
 
-    // Allocate RGBA buffer
-    const size_t rgba_size = static_cast<size_t>(impl_->frame->width)
-                           * static_cast<size_t>(impl_->frame->height) * 4;
-    std::vector<uint8_t> rgba(rgba_size);
+    // Scale into a PADDED scratch, not the tight result buffer: libswscale's
+    // vectorized writers store whole SIMD vectors per row and measurably run
+    // up to ~56 bytes past a tight RGBA allocation at SIMD-unfriendly widths
+    // (Phase 80 — the same overrun class that corrupted the Windows heap in
+    // the poster path). Aligned rows absorb mid-row overshoot; the tail pad
+    // absorbs the final row's. Rows are copied to the tight buffer below.
+    constexpr int kTailPad = 128;
+    const int pad_linesize = FFALIGN(impl_->frame->width * 4, 64);
+    std::vector<uint8_t> scratch(
+        static_cast<size_t>(pad_linesize) * impl_->frame->height + kTailPad);
 
     // Set up destination frame pointers
-    std::array<uint8_t*, 4> dst_data = {rgba.data(), nullptr, nullptr, nullptr};
-    std::array<int, 4> dst_linesize = {impl_->frame->width * 4, 0, 0, 0};
+    std::array<uint8_t*, 4> dst_data = {scratch.data(), nullptr, nullptr, nullptr};
+    std::array<int, 4> dst_linesize = {pad_linesize, 0, 0, 0};
 
     // Scale to RGBA
     const int scale_ret = sws_scale(impl_->sws,
@@ -258,8 +265,14 @@ std::optional<AnimFrame> GifDecoder::next_frame()
 
     ++impl_->decoded;
 
+    // Tight row copy out of the padded scratch (consumers assume stride == w*4).
     AnimFrame result;
-    result.rgba    = std::move(rgba);
+    result.rgba.resize(static_cast<size_t>(frame_width) * frame_height * 4);
+    for (int y = 0; y < frame_height; ++y) {
+        std::memcpy(result.rgba.data() + static_cast<size_t>(y) * frame_width * 4,
+                    scratch.data() + static_cast<size_t>(y) * pad_linesize,
+                    static_cast<size_t>(frame_width) * 4);
+    }
     result.width   = frame_width;
     result.height  = frame_height;
     result.delay_s = delay_s;
