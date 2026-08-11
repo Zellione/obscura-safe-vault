@@ -33,4 +33,8 @@ enum class DualTransferRefusal { None, SameGallery, IntoOwnSubtree };
     std::string_view src_gallery, std::string_view dst_gallery,
     std::span<const std::string> selected_gallery_paths) noexcept;
 
+// Copy an SDL event, shifting mouse coordinates into pane-local space
+// (subtract pane origin). Non-mouse events pass through unchanged.
+[[nodiscard]] SDL_Event translate_event_to_pane(const SDL_Event& e, const SDL_FRect& pane) noexcept;
+
 } // namespace ui

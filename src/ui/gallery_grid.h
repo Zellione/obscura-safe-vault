@@ -199,6 +199,8 @@ void toggle_select();          // toggle the current item in the export selectio
     // Phase 77: snapshot one pane's configuration / rebuild it
     friend PaneState capture_pane_state(const GalleryGrid& g);
     friend void restore_pane_state(GalleryGrid& g, const PaneState& s);
+    // Phase 77: navigate a pane to an absolute gallery path (walk-up on vault change)
+    friend void jump_pane_to(GalleryGrid& g, const std::string& path);
     // The following are free friends for the same S1448/S3776 reasons, extracted
     // from start_transfer() and update() (Phase 44 SonarQube follow-up).
     friend void start_transfer_focused(GalleryGrid& g);

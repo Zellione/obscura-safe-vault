@@ -40,4 +40,28 @@ DualTransferRefusal dual_transfer_check(std::string_view src_gallery,
     return DualTransferRefusal::None;
 }
 
+SDL_Event translate_event_to_pane(const SDL_Event& e, const SDL_FRect& pane) noexcept
+{
+    SDL_Event t = e;
+    switch (e.type) {
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+            t.button.x -= pane.x;
+            t.button.y -= pane.y;
+            break;
+        case SDL_EVENT_MOUSE_MOTION:
+            t.motion.x -= pane.x;
+            t.motion.y -= pane.y;
+            break;
+        case SDL_EVENT_MOUSE_WHEEL:
+            t.wheel.mouse_x -= pane.x;
+            t.wheel.mouse_y -= pane.y;
+            break;
+        default:
+            // Non-mouse events pass through untouched
+            break;
+    }
+    return t;
+}
+
 } // namespace ui

@@ -2329,4 +2329,11 @@ void GalleryGrid::start_hover_animation(int tile)
     hover_anim_tile_ = tile;
 }
 
+// Phase 77: Navigate a pane to an absolute gallery path (used in walk-up on vault change).
+// Wraps jump_to_gallery for DualGalleryScreen's on_vault_changed walk-up rule.
+void jump_pane_to(GalleryGrid& g, const std::string& path)
+{
+    g.jump_to_gallery(path);
+}
+
 } // namespace ui

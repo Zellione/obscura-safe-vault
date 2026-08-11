@@ -84,3 +84,36 @@ TEST(dual_transfer_check_allows_normal_transfer)
     const std::vector<std::string> none;
     CHECK(dual_transfer_check("a", "x", none) == DualTransferRefusal::None);
 }
+
+#include "ui/dual_gallery.h"
+
+TEST(translate_event_shifts_mouse_coords_into_pane_space)
+{
+    SDL_Event e{};
+    e.type       = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    e.button.x   = 700.0f;
+    e.button.y   = 50.0f;
+    const SDL_FRect pane{601.0f, 0.0f, 599.0f, 800.0f};
+    const SDL_Event t = ui::translate_event_to_pane(e, pane);
+    CHECK_EQ(t.button.x, 99.0f);
+    CHECK_EQ(t.button.y, 50.0f);
+}
+
+TEST(translate_event_covers_motion_and_wheel)
+{
+    const SDL_FRect pane{601.0f, 0.0f, 599.0f, 800.0f};
+    SDL_Event m{};
+    m.type = SDL_EVENT_MOUSE_MOTION; m.motion.x = 700.0f; m.motion.y = 10.0f;
+    CHECK_EQ(ui::translate_event_to_pane(m, pane).motion.x, 99.0f);
+    SDL_Event w{};
+    w.type = SDL_EVENT_MOUSE_WHEEL; w.wheel.mouse_x = 700.0f; w.wheel.mouse_y = 10.0f;
+    CHECK_EQ(ui::translate_event_to_pane(w, pane).wheel.mouse_x, 99.0f);
+}
+
+TEST(translate_event_leaves_key_events_untouched)
+{
+    SDL_Event e{};
+    e.type = SDL_EVENT_KEY_DOWN; e.key.key = SDLK_TAB;
+    const SDL_FRect pane{601.0f, 0.0f, 599.0f, 800.0f};
+    CHECK_EQ(ui::translate_event_to_pane(e, pane).key.key, SDLK_TAB);
+}
