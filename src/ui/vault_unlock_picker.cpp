@@ -202,7 +202,7 @@ void VaultUnlockPicker::update()
 }
 
 void VaultUnlockPicker::render(gfx::Renderer& r, gfx::FontAtlas& font, float ix, float iy,
-                               float mw)
+                               float mw, std::string_view title_override)
 {
     using namespace gfx::theme;
 
@@ -217,7 +217,7 @@ void VaultUnlockPicker::render(gfx::Renderer& r, gfx::FontAtlas& font, float ix,
     };
 
     if (stage_ == Stage::PickVault) {
-        r.draw_text(font, ix, iy + 36, "Destination vault:", TEXT_DIM);
+        r.draw_text(font, ix, iy + 36, title_override, TEXT_DIM);
         std::vector<std::string> labels;
         if (include_self_) labels.push_back("This vault");
         for (const auto& p : candidates_) labels.push_back(platform::path_to_utf8(p.filename()));

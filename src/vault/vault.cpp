@@ -28,6 +28,7 @@
 #include "ui/advanced_search_model.h"  // AdvancedQuery + evaluate (pure, SDL/vault-free)
 #include "ui/gallery_sort.h"           // sort_children (pure, SDL/vault-free, Phase 37)
 #include "vault/commit_lane.h"
+#include "vault/index.h"
 #include "vault/index_io.h"
 #include "vault/staging.h"
 #include "vault/vault_ops.h"
@@ -576,6 +577,10 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     out.root_ = IndexNode::gallery("");
     out.unlocked_ = true;
     out.settings_ = VaultSettings::seeded();
+    // Stamp migration watermarks: fresh vaults already have 512px thumbs and current index format
+    // (prevents false "upgrade available" offer at first unlock).
+    out.settings_.migrated_index_version = MIGRATION_INDEX_VERSION;
+    out.settings_.migrated_thumb_side = static_cast<uint16_t>(image::THUMB_MAX_SIDE);
     out.write_mutex_ = std::make_unique<std::mutex>();
     out.header_mutex_ = std::make_unique<std::mutex>();
     out.thumb_mutex_ = std::make_unique<std::mutex>();

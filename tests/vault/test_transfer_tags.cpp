@@ -513,25 +513,26 @@ TEST(transfer_lowers_dst_thumb_side_watermark)
     TempVault src("thumb0");
     vault::Vault v_src;
     REQUIRE(vault::Vault::create(src.str(), bytes("pw"), {}, kKdf, v_src) == Ok);
-    // Settings default to migrated_thumb_side = 0, which is what we want
+    // Phase 75 FINDING 1: fresh vaults are now stamped with migrated_thumb_side = 512.
+    // Reset src to 0 to simulate legacy state for this downgrade test.
+    {
+        vault::VaultSettings s_src = vault::vault_settings(v_src);
+        s_src.migrated_thumb_side = 0;
+        REQUIRE(vault::set_vault_settings(v_src, s_src) == Ok);
+    }
 
-    // Create destination vault and stamp its thumb_side to 512
+    // Create destination vault (now stamped at 512 by FINDING 1 fix)
     TempVault dst("thumb512");
     vault::Vault v_dst;
     REQUIRE(vault::Vault::create(dst.str(), bytes("pw"), {}, kKdf, v_dst) == Ok);
-    {
-        vault::VaultSettings s_dst = vault::vault_settings(v_dst);
-        s_dst.migrated_thumb_side = 512;
-        REQUIRE(vault::set_vault_settings(v_dst, s_dst) == Ok);
-    }
-
-    // Verify dst starts at 512
+    // Fresh vaults are now stamped at 512; verify this is the default
     {
         const auto& s = vault::vault_settings(v_dst);
         CHECK_EQ(s.migrated_thumb_side, 512);
     }
 
-    // Transfer an empty gallery from src to dst
+    // Transfer an empty gallery from src (0) to dst (512)
+    // The transfer should lower dst's watermark to match src's lower value
     REQUIRE(v_src.create_gallery("empty") == Ok);
     REQUIRE(vault::transfer_gallery(v_src, "empty", v_dst, "pulled", vault::TransferMode::Copy) == Ok);
 

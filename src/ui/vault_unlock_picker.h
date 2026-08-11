@@ -56,7 +56,8 @@ public:
 
     [[nodiscard]] bool handle_event(const SDL_Event& e);   // true if consumed
     void update();                                          // poll the keyfile dialog
-    void render(gfx::Renderer& r, gfx::FontAtlas& font, float ix, float iy, float mw);
+    void render(gfx::Renderer& r, gfx::FontAtlas& font, float ix, float iy, float mw,
+                std::string_view title_override = "Destination vault:");
 
 private:
     enum class Stage { PickVault, Unlock };

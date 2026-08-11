@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "image/fixtures.h"
+#include "image/thumbnail.h"
 #include "media/video_probe.h"
 #include "vault/index.h"
 #include "vault/migration.h"
@@ -843,4 +844,45 @@ TEST(apply_video_poster_replaces_existing)
     // Empty blob should return InvalidArg
     CHECK(vault::apply_video_poster(v, "tiny.mp4", {}) == vault::VaultResult::InvalidArg);
 #endif  // OSV_VENDORED_AV
+}
+
+TEST(create_vault_watermarks_thumb_and_index_at_creation)
+{
+    MigTempVault tv("watermark_fresh");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
+            == vault::VaultResult::Ok);
+
+    // Fresh vault should have both watermarks stamped at creation
+    const vault::VaultSettings settings_before = vault::vault_settings(v);
+    CHECK_EQ(settings_before.migrated_index_version, vault::MIGRATION_INDEX_VERSION);
+    CHECK_EQ(settings_before.migrated_thumb_side, static_cast<uint16_t>(image::THUMB_MAX_SIDE));
+
+    // Add one image to the fresh vault
+    auto png = fixtures::solid_png(256, 256, 255, 0, 0);
+    REQUIRE(!png.empty());
+    REQUIRE(v.add_image("", png, "test.png") == vault::VaultResult::Ok);
+
+    // Verify that scan_migration doesn't report thumbs as stale
+    // (if the watermarks weren't set, fresh vault with 1 image would report stale)
+    const bool thumbs_stale = settings_before.migrated_thumb_side < image::THUMB_MAX_SIDE;
+    const vault::MigrationScan scan_before = vault::scan_migration(v, thumbs_stale);
+    CHECK_EQ(scan_before.thumbs, 0);
+
+    // Lock and reopen the vault to verify watermarks persist
+    v.lock();
+    vault::Vault v2;
+    REQUIRE(vault::Vault::open(tv.str(), v2) == vault::VaultResult::Ok);
+    REQUIRE(v2.unlock(mig_bytes("pw"), {}) == vault::VaultResult::Ok);
+
+    const vault::VaultSettings settings_after = vault::vault_settings(v2);
+    CHECK_EQ(settings_after.migrated_index_version, vault::MIGRATION_INDEX_VERSION);
+    CHECK_EQ(settings_after.migrated_thumb_side, static_cast<uint16_t>(image::THUMB_MAX_SIDE));
+
+    // Verify scan_migration still reports no stale thumbs after reopen
+    const bool thumbs_stale_after = settings_after.migrated_thumb_side < image::THUMB_MAX_SIDE;
+    const vault::MigrationScan scan_after = vault::scan_migration(v2, thumbs_stale_after);
+    CHECK_EQ(scan_after.thumbs, 0);
+
+    v2.lock();
 }

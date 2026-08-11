@@ -449,6 +449,14 @@ bool TransferDialog::consume_completed(TransferCompletion& out)
 {
     if (!run_.done) return false;
     out = std::move(run_.completion);
+    // For pull transfers, change "to source" wording to "from source"
+    if (pull_ && !out.status.empty()) {
+        // Replace " to " with " from " (the label is the source vault name in pull mode)
+        size_t pos = out.status.rfind(" to ");
+        if (pos != std::string::npos) {
+            out.status.replace(pos, 4, " from ");
+        }
+    }
     run_.done = false;
     return true;
 }
@@ -483,15 +491,19 @@ void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, flo
 
     const float ix = mx + 20;
     const float iy = my + 20;
-    const char* verb = (mode_ == vault::TransferMode::Copy) ? "Copy" : "Move";
     std::string title;
-    if (source_ == Source::Gallery) {
-        title = std::format("{} gallery \"{}\"", verb,
-                             platform::path_to_utf8(platform::utf8_to_path(src_gallery_).filename()));
-    } else if (source_ == Source::Galleries) {
-        title = std::format("{} {} galleries", verb, src_galleries_.size());
+    if (pull_) {
+        title = "Pull from another vault";
     } else {
-        title = std::format("{} {} image(s)", verb, filenames_.size());
+        const char* verb = (mode_ == vault::TransferMode::Copy) ? "Copy" : "Move";
+        if (source_ == Source::Gallery) {
+            title = std::format("{} gallery \"{}\"", verb,
+                                 platform::path_to_utf8(platform::utf8_to_path(src_gallery_).filename()));
+        } else if (source_ == Source::Galleries) {
+            title = std::format("{} {} galleries", verb, src_galleries_.size());
+        } else {
+            title = std::format("{} {} image(s)", verb, filenames_.size());
+        }
     }
     r.draw_text(font, ix, iy, title, TEXT);
 
@@ -624,7 +636,11 @@ void TransferDialog::render_body(gfx::Renderer& r, gfx::FontAtlas& font,
 {
     if (stage_ == Stage::Direction) { render_direction_body(r, font, ix, iy, mw); return; }
     if (stage_ == Stage::Mode) { render_mode_body(r, font, ix, iy, mw); return; }
-    if (stage_ == Stage::PickingDest) { picker_dest_.render(r, font, ix, iy, mw); return; }
+    if (stage_ == Stage::PickingDest) {
+        const std::string_view title = pull_ ? "Source vault:" : "Destination vault:";
+        picker_dest_.render(r, font, ix, iy, mw, title);
+        return;
+    }
     if (stage_ == Stage::Conflict) { render_conflict_body(r, font, ix, iy, mw); return; }
     if (stage_ == Stage::PickSrcGalleries) { render_src_galleries_body(r, font, ix, iy, mw, mh, my); return; }
     render_pick_gallery_body(r, font, ix, iy, mw, mh, my);   // PickGallery
