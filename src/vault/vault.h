@@ -61,6 +61,7 @@ inline constexpr uint32_t VIDEO_CHUNK_SIZE = 1u << 20;
 struct StagedThumb;
 struct StagedVideoInfo;
 struct StagedNode;
+struct NodeExtras;
 
 enum class SearchScope { Images, Galleries, Both };
 
@@ -174,16 +175,20 @@ public:
     friend VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path);
     friend VaultResult add_image_prestaged(Vault& v, std::string_view,
                                            std::span<const uint8_t>, std::string_view,
-                                           const StagedThumb&, uint64_t);
+                                           const StagedThumb&, uint64_t,
+                                           const NodeExtras*);
     friend VaultResult add_video_prestaged(Vault& v, std::string_view,
                                            std::span<const uint8_t>, std::string_view,
-                                           const StagedVideoInfo&, uint64_t);
+                                           const StagedVideoInfo&, uint64_t,
+                                           const NodeExtras*);
     friend VaultResult attach_image_prestaged(Vault& v, std::string_view,
                                               std::span<const uint8_t>, std::string_view,
-                                              const StagedThumb&, uint64_t);
+                                              const StagedThumb&, uint64_t,
+                                              const NodeExtras*);
     friend VaultResult attach_video_prestaged(Vault& v, std::string_view,
                                               std::span<const uint8_t>, std::string_view,
-                                              const StagedVideoInfo&, uint64_t);
+                                              const StagedVideoInfo&, uint64_t,
+                                              const NodeExtras*);
     friend VaultResult commit_staged(Vault& v);
 
     [[nodiscard]] bool is_unlocked() const noexcept { return unlocked_; }

@@ -49,6 +49,14 @@ struct StagedNode {
     IndexNode   node{};   // fully populated, UNATTACHED (chunks already on disk)
 };
 
+// Ownership metadata carried onto a node at attach time (Phase 75): the tags
+// and favorite flag a transferred item keeps. Applied BEFORE tree insertion so
+// they ride the same batched commit as the attach — never a separate commit.
+struct NodeExtras {
+    std::vector<std::string> tags;        // ci-deduped by the producer; capped here
+    bool                     favorite = false;
+};
+
 // THREAD-SAFE (any thread): encrypt + append the data/thumb chunks under the
 // vault's write mutex and return a ready-to-attach node. Never touches the
 // index tree; never fsyncs (the commit lane's Phase A fsync covers these
@@ -88,12 +96,14 @@ struct StagedNode {
                                                  std::span<const uint8_t> file_data,
                                                  std::string_view filename,
                                                  const StagedThumb& thumb,
-                                                 uint64_t created_ts);
+                                                 uint64_t created_ts,
+                                                 const NodeExtras* extras = nullptr);
 [[nodiscard]] VaultResult attach_video_prestaged(Vault& v, std::string_view gallery_path,
                                                  std::span<const uint8_t> file_data,
                                                  std::string_view filename,
                                                  const StagedVideoInfo& info,
-                                                 uint64_t created_ts);
+                                                 uint64_t created_ts,
+                                                 const NodeExtras* extras = nullptr);
 
 // Make everything attached since the last commit durable: one fsync of the
 // staged chunks, then one crash-safe index commit. Locked if the vault is
@@ -106,11 +116,13 @@ struct StagedNode {
                                               std::span<const uint8_t> file_data,
                                               std::string_view filename,
                                               const StagedThumb& thumb,
-                                              uint64_t created_ts);
+                                              uint64_t created_ts,
+                                              const NodeExtras* extras = nullptr);
 [[nodiscard]] VaultResult add_video_prestaged(Vault& v, std::string_view gallery_path,
                                               std::span<const uint8_t> file_data,
                                               std::string_view filename,
                                               const StagedVideoInfo& info,
-                                              uint64_t created_ts);
+                                              uint64_t created_ts,
+                                              const NodeExtras* extras = nullptr);
 
 }  // namespace vault
