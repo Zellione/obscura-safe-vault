@@ -1888,12 +1888,18 @@ void GalleryGrid::update(double dt)
 
 std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
 {
+    // Build Navigate entries; F3 (split view) only shown when not embedded (Phase 77)
+    std::vector<HelpEntry> nav_entries{
+        {"Enter", "Open"}, {"Space", "Select (export/move)"},
+        {"Ctrl+A", "Select all / none"},
+        {"Esc", "Back"}, {"`", "Switch vault"}, {"L", "Cycle view: list / grid size"},
+    };
+    if (!embedded_) {
+        nav_entries.push_back({"F3", "Split view (side-by-side)"});
+    }
+
     return {
-        {"Navigate", {
-            {"Enter", "Open"}, {"Space", "Select (export/move)"},
-            {"Ctrl+A", "Select all / none"},
-            {"Esc", "Back"}, {"`", "Switch vault"}, {"L", "Cycle view: list / grid size"}, {"F3", "Split view (side-by-side)"},
-        }},
+        {"Navigate", nav_entries},
         {"Search & tags", {
             {"/", "Search"}, {"Shift+/ (?)", "Advanced search"},
             {"G", "Edit tags (2+ selected: bulk add/remove)"}, {"Shift+G", "Import a tag list"},
