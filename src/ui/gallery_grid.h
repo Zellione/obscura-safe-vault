@@ -58,6 +58,13 @@ class SecondVaultSession;  // Phase 66: forward declare for GridVaultCtx
 // illegible. Free friend for the same cpp:S1448 reason as content_width.
 [[nodiscard]] float content_bottom(const class GalleryGrid& g);
 
+// Phase 77: layout size the grid believes it has. Defaults to the real window;
+// DualGalleryScreen overrides it with the pane size. EVERY layout site must use
+// these, never win_.width()/win_.height(), or split-mode picking and drawing
+// disagree with rendering.
+[[nodiscard]] float layout_w(const class GalleryGrid& g);
+[[nodiscard]] float layout_h(const class GalleryGrid& g);
+
 // Rebuild the panel's cached content when the focused node or selection changes.
 // A free friend for the same cpp:S1448 reason as content_width.
 void rebuild_detail(class GalleryGrid& g);
@@ -114,6 +121,15 @@ public:
     [[nodiscard]] bool animating() const override { return vault_busy(*this); }
     [[nodiscard]] bool blocks_idle_lock() const override { return vault_busy(*this); }
     [[nodiscard]] std::vector<ui::HelpGroup> help_groups() const override;
+
+    // Phase 77: set layout override (pane size); <=0 clears
+    void set_layout_override(float w, float h);
+    // Phase 77: set embedded mode (pane mode)
+    void set_embedded(bool on);
+    // Phase 77: query embedded mode
+    [[nodiscard]] bool embedded() const;
+    // Phase 77: gate dialog pumping (import picker polling)
+    void set_dialog_pump(bool on);
 
 private:
     void handle_key_down(const SDL_KeyboardEvent& key);  // browse-mode keys
@@ -191,6 +207,8 @@ void toggle_select();          // toggle the current item in the export selectio
     friend void update_scroll_to_selection_grid(GalleryGrid& g, int sel_idx, float bottom);
     friend float content_width(const GalleryGrid& g);
     friend float content_bottom(const GalleryGrid& g);
+    friend float layout_w(const GalleryGrid& g);      // Phase 77: layout width
+    friend float layout_h(const GalleryGrid& g);      // Phase 77: layout height
     friend void  rebuild_detail(GalleryGrid& g);
     void draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
                          const SDL_FRect& box);
@@ -328,6 +346,12 @@ void toggle_select();          // toggle the current item in the export selectio
     AnimHoverGate                 hover_gate_;
     std::unique_ptr<AnimPlayback> hover_anim_;
     int                          hover_anim_tile_ = -1;
+
+    // Phase 77: layout override (pane size)
+    float layout_w_ = 0.0f;
+    float layout_h_ = 0.0f;
+    bool  embedded_ = false;        // pane mode: Esc/Backspace/right-click at root are inert
+    bool  pump_dialogs_ = true;     // gate dialog polling (pump_import/pump_zip/pump_folder)
 };
 
 // Free friends of GalleryGrid (see the in-class declarations): poll_file_job drains

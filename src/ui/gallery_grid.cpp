@@ -148,14 +148,24 @@ void draw_file_op_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
 
 float content_width(const GalleryGrid& g)
 {
-    const auto w = static_cast<float>(g.win_.width());
+    const auto w = layout_w(g);
     return w - detail_panel_width(g.detail_.panel.open, w);
 }
 
 float content_bottom(const GalleryGrid& g)
 {
-    const ChromeBands b = grid_bands(content_width(g), static_cast<float>(g.win_.height()));
+    const ChromeBands b = grid_bands(content_width(g), layout_h(g));
     return b.content.y + b.content.h;
+}
+
+float layout_w(const GalleryGrid& g)
+{
+    return g.layout_w_ > 0.0f ? g.layout_w_ : static_cast<float>(g.win_.width());
+}
+
+float layout_h(const GalleryGrid& g)
+{
+    return g.layout_h_ > 0.0f ? g.layout_h_ : static_cast<float>(g.win_.height());
 }
 
 // Rebuild detail_.content when — and only when — what it describes has changed.
@@ -330,7 +340,12 @@ void GalleryGrid::open_selected()
 void GalleryGrid::go_up()
 {
     session_.record(nav_.path(), nav_.selected());   // this level's selection is about to go stale
-    if (!nav_.up()) { request(NavKind::ToVaultManager); return; }
+    if (!nav_.up()) {
+        if (!embedded_) {  // Phase 77: inert at root when embedded
+            request(NavKind::ToVaultManager);
+        }
+        return;
+    }
     refresh();
     nav_.select(session_.recall(nav_.path()));   // restore the parent's remembered tile
     follow_ = ScrollFollow::Center;
@@ -918,6 +933,7 @@ bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& 
             return true;
         case SDLK_X: g.start_export(); return true;
         case SDLK_M:
+            if (g.embedded_) return false;  // Phase 77: not handled in embedded mode
             if (key.mod & SDL_KMOD_SHIFT) { g.start_combine(); return true; }
             g.start_transfer();
             return true;
@@ -954,18 +970,27 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         return;
     }
     if ((key.key == SDLK_C) && (key.mod & SDL_KMOD_SHIFT)) {
-        handle_shift_c_key(*this, key);
-        return;
+        if (!embedded_) {
+            handle_shift_c_key(*this, key);
+            return;
+        }
     }
     if (key.key == SDLK_D && (key.mod & SDL_KMOD_CTRL) != 0) {
-        handle_ctrl_d_key(*this);
-        return;
+        if (!embedded_) {
+            handle_ctrl_d_key(*this);
+            return;
+        }
     }
     if ((key.key == SDLK_I) && (key.mod & SDL_KMOD_SHIFT)) {
         request(NavKind::ToImportStatus);
         return;
     }
-    if (is_quick_switch_key(key)) { quick_switch_.open(); return; }
+    if (is_quick_switch_key(key)) {
+        if (!embedded_) {
+            quick_switch_.open();
+            return;
+        }
+    }
     // Shortcut-key dispatch (L/X/M/R/SPACE/G/B/F/T/S/U); extracted to reduce complexity
     if (gallery_grid_handle_shortcut_keys(*this, key)) { return; }
 
@@ -1164,7 +1189,7 @@ void GalleryGrid::handle_event(const SDL_Event& e)
             break;
         }
         case SDL_EVENT_MOUSE_WHEEL: {
-            if (detail_panel_hit(detail_.panel.open, static_cast<float>(win_.width()), e.wheel.mouse_x)) {
+            if (detail_panel_hit(detail_.panel.open, layout_w(*this), e.wheel.mouse_x)) {
                 scroll_detail_panel(detail_.panel, e.wheel.y);
                 break;
             }
@@ -1641,7 +1666,8 @@ void poll_pending_pickers(GalleryGrid& g)
 {
     // The import picker shares dialogs_.file with the transfer's keyfile picker, so
     // only poll it when no transfer is active (don't steal the keyfile result).
-    if (!g.transfer_.active()) {
+    // Phase 77: gate pumping when embedded mode disables dialog polling.
+    if (!g.transfer_.active() && g.pump_dialogs_) {
         g.pump_import();
         g.pump_zip_import();
         g.pump_folder_import();
@@ -1797,10 +1823,31 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
     };
 }
 
+void GalleryGrid::set_layout_override(float w, float h)
+{
+    layout_w_ = w;
+    layout_h_ = h;
+}
+
+void GalleryGrid::set_embedded(bool on)
+{
+    embedded_ = on;
+}
+
+bool GalleryGrid::embedded() const
+{
+    return embedded_;
+}
+
+void GalleryGrid::set_dialog_pump(bool on)
+{
+    pump_dialogs_ = on;
+}
+
 void GalleryGrid::render(gfx::Renderer& r)
 {
-    const auto W = static_cast<float>(win_.width());
-    const auto H = static_cast<float>(win_.height());
+    const auto W = layout_w(*this);
+    const auto H = layout_h(*this);
 
     // While a background file op runs, the worker thread owns the vault — drawing tiles
     // would decrypt thumbnails on this thread and race it. Show only the progress
