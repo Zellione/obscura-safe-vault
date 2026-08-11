@@ -385,7 +385,7 @@ void App::to_import_status()
         // Phase 77: DualGalleryScreen: return to the active pane's path via ToGallery,
         // which will re-enter split view if split_active is true (set by on_exit).
         (void)dual;
-        back = ui::Nav{ToGallery, dual_session_.pane[dual_session_.active_pane].path, 0};
+        back = ui::Nav{ToGallery, dual_session_.pane[static_cast<std::size_t>(dual_session_.active_pane)].path, 0};
     } else if (dynamic_cast<const ui::ImageViewer*>(screen_.get())) {
         // ImageViewer: return to the gallery root
         back = ui::Nav{ToGallery, {}, 0};
@@ -413,7 +413,7 @@ void App::to_duplicates()
     } else if (const auto* dual = dynamic_cast<const ui::DualGalleryScreen*>(screen_.get())) {
         // Phase 77: DualGalleryScreen: return to the active pane's path.
         (void)dual;
-        back = ui::Nav{ToGallery, dual_session_.pane[dual_session_.active_pane].path, 0};
+        back = ui::Nav{ToGallery, dual_session_.pane[static_cast<std::size_t>(dual_session_.active_pane)].path, 0};
     }
 
     state_  = State::Browsing;
@@ -876,8 +876,8 @@ bool App::apply_nav()
             // launched from a dual-pane screen and split is still active, restore
             // that pane's exact position instead of going to single-grid mode.
             if (from_viewer && dual_session_.split_active) {
-                dual_session_.pane[dual_session_.active_pane].path = nav.path;
-                dual_session_.pane[dual_session_.active_pane].selected = nav.index;
+                dual_session_.pane[static_cast<std::size_t>(dual_session_.active_pane)].path = nav.path;
+                dual_session_.pane[static_cast<std::size_t>(dual_session_.active_pane)].selected = nav.index;
                 to_dual_gallery();
                 return true;
             }
