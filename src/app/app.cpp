@@ -222,19 +222,19 @@ void App::to_dual_gallery()
 {
     state_ = State::Browsing;
     // Phase 77: on first entry to split view, seed both panes with the current
-    // gallery path (captured by the outgoing GalleryGrid's handle_key_down before
-    // transitioning). On subsequent visits (via F3 toggle), pane states are
-    // preserved in dual_session_.
-    if (!dual_session_.split_active) {
+    // gallery path. On subsequent visits (via F3 toggle), pane states are
+    // preserved in dual_session_ if has_config is true.
+    if (!dual_session_.has_config) {
         // Capture the path from the current (single) gallery view before swap.
         // This happens only on first F3 press; subsequent F3 presses restore the
-        // saved configuration.
+        // saved configuration if has_config is true.
         if (const auto* grid = dynamic_cast<const ui::GalleryGrid*>(screen_.get())) {
             const std::string here = ui::current_gallery_path(*grid);
             dual_session_.pane[0].path = here;
             dual_session_.pane[1].path = here;
         }
     }
+    dual_session_.split_active = true;  // entering split view
     screen_ = std::make_unique<ui::DualGalleryScreen>(
         window_, font_, *vault_state_.active, *cache_,
         ui::GalleryGrid::GridDialogs{dialog_, folder_dialog_},

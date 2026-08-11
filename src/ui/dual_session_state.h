@@ -20,10 +20,11 @@ struct PaneState {
 
 // Everything needed to rebuild both panes exactly (Phase 77).
 struct DualSessionState {
-    bool      split_active = false;  // a split config exists this session
+    bool      split_active = false;  // true while user is conceptually in split view (set on enter, false on F3-leave)
+    bool      has_config   = false;  // true if pane configs have been saved (set by snapshot, cleared on reset)
     int       active_pane  = 0;      // 0 = left, 1 = right
     PaneState pane[2];
-    void reset() { *this = DualSessionState{}; }
+    void reset() { *this = DualSessionState{}; }  // clears split_active and has_config
 };
 
 } // namespace ui

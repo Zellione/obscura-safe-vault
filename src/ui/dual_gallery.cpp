@@ -59,9 +59,10 @@ void DualGalleryScreen::on_enter()
 void DualGalleryScreen::on_exit()
 {
     snapshot();
-    // Phase 77: keep split_active true so a subsequent F3 press in single-grid
-    // mode restores the saved pane configuration (instead of seeding fresh).
-    dual_.split_active = true;
+    // Phase 77: snapshot() saves config state but does NOT modify split_active.
+    // split_active is only set on deliberate F3-leave (before request(ToGallery))
+    // or on App::to_dual_gallery() entry. Viewer returns keep split_active true
+    // to support restoration to split view.
     left_->on_exit();
     right_->on_exit();
 }
@@ -71,7 +72,7 @@ void DualGalleryScreen::snapshot()
     dual_.pane[0] = capture_pane_state(*left_);
     dual_.pane[1] = capture_pane_state(*right_);
     dual_.active_pane = active_;
-    dual_.split_active = false;  // mark that split is no longer active when exiting
+    dual_.has_config = true;  // Phase 77: mark that pane configs have been saved
 }
 
 GalleryGrid& DualGalleryScreen::active()
@@ -241,7 +242,7 @@ void DualGalleryScreen::handle_event(const SDL_Event& e)
     // 4. F3: leave split view
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F3) {
         snapshot();
-        dual_.split_active = true;
+        dual_.split_active = false;  // Phase 77: user leaving split view
         const std::string path = current_gallery_path(active());
         const int selected = capture_pane_state(active()).selected;
         request(NavKind::ToGallery, path, selected);
@@ -353,7 +354,9 @@ void DualGalleryScreen::handle_event(const SDL_Event& e)
             if (n.kind == NavKind::ToViewer || n.kind == NavKind::ToFavoriteViewer ||
                 n.kind == NavKind::ToTagViewer) {
                 snapshot();
-                dual_.split_active = true;
+                // Phase 77: split_active stays true (we're in split view); only set
+                // false on deliberate F3-leave. Viewer will return to split via
+                // apply_nav's from_viewer && split_active check.
                 dual_.active_pane = active_;
                 request(n.kind, n.path, n.index);
             } else if (n.kind != NavKind::ToVaultManager) {
@@ -381,7 +384,9 @@ void DualGalleryScreen::handle_event(const SDL_Event& e)
             if (n.kind == NavKind::ToViewer || n.kind == NavKind::ToFavoriteViewer ||
                 n.kind == NavKind::ToTagViewer) {
                 snapshot();
-                dual_.split_active = true;
+                // Phase 77: split_active stays true (we're in split view); only set
+                // false on deliberate F3-leave. Viewer will return to split via
+                // apply_nav's from_viewer && split_active check.
                 dual_.active_pane = active_;
                 request(n.kind, n.path, n.index);
             } else if (n.kind != NavKind::ToVaultManager) {
@@ -401,7 +406,9 @@ void DualGalleryScreen::handle_event(const SDL_Event& e)
         if (n.kind == NavKind::ToViewer || n.kind == NavKind::ToFavoriteViewer ||
             n.kind == NavKind::ToTagViewer) {
             snapshot();
-            dual_.split_active = true;
+            // Phase 77: split_active stays true (we're in split view); only set
+            // false on deliberate F3-leave. Viewer will return to split via
+            // apply_nav's from_viewer && split_active check.
             dual_.active_pane = active_;
             request(n.kind, n.path, n.index);
         } else if (n.kind != NavKind::ToVaultManager) {
