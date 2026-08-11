@@ -1504,6 +1504,56 @@ GalleryView current_gallery_view(const GalleryGrid& g) { return g.view_; }
 
 std::string current_gallery_path(const GalleryGrid& g) { return g.nav_.path(); }
 
+// Phase 77: snapshot one pane's exact configuration.
+PaneState capture_pane_state(const GalleryGrid& g)
+{
+    PaneState s;
+    s.path = current_gallery_path(g);
+    s.selected = g.nav_.selected();
+    s.scroll = g.scroll_;
+    s.view = current_gallery_view(g);
+    s.detail_open = g.detail_.panel.open;
+    s.selected_tiles = g.sel_.indices();
+    return s;
+}
+
+// Phase 77: rebuild a pane from a snapshot. Grid is constructed at s.path/s.selected/s.view
+// via GridLocation; this function refines scroll, detail state, and multi-selection.
+void restore_pane_state(GalleryGrid& g, const PaneState& s)
+{
+    // Clamp scroll to valid range, accounting for current content height.
+    const float bottom = content_bottom(g);
+
+    float content_height = 0.0f;
+    if (g.view_ == GalleryView::List) {
+        content_height = OY + LIST_HEADER + static_cast<float>(g.children_.size()) * ROW_H;
+    } else {
+        // Grid view: calculate from column count and total rows
+        const float cell = cell_size_for(g.view_);
+        const float W = content_width(g);
+        const int cols = grid_columns(W - 2 * OX, cell, GAP);
+        const int total_rows = cols > 0 ? (static_cast<int>(g.children_.size()) + cols - 1) / cols : 0;
+        content_height = OY + static_cast<float>(total_rows) * (cell + GAP);
+    }
+
+    g.scroll_ = s.scroll;
+    g.scroll_ = ui::clamp_scroll(g.scroll_, content_height, bottom);
+
+    // Re-apply detail panel open state.
+    g.detail_.panel.open = s.detail_open;
+
+    // Re-select tiles from s.selected_tiles, dropping out-of-range indices.
+    const int count = static_cast<int>(g.children_.size());
+    for (int idx : s.selected_tiles) {
+        if (idx >= 0 && idx < count) {
+            g.sel_.toggle(idx);
+        }
+    }
+
+    // Rebuild detail panel content.
+    rebuild_detail(g);
+}
+
 void poll_file_job(GalleryGrid& g)
 {
     // take_outcome() joins the worker before returning, so touching the vault

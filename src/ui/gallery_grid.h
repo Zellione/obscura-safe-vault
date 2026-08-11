@@ -19,6 +19,7 @@
 #include "ui/detail_panel.h"
 #include "ui/failure_list_dialog.h"
 #include "ui/file_op_job.h"
+#include "ui/dual_session_state.h"
 #include "ui/gallery_session_state.h"
 #include "ui/gallery_view.h"
 #include "ui/anim_model.h"
@@ -195,6 +196,9 @@ void toggle_select();          // toggle the current item in the export selectio
     friend GalleryView current_gallery_view(const GalleryGrid& g);
     // current_gallery_path (Phase 50): App uses it to derive back nav for import status screen
     friend std::string current_gallery_path(const GalleryGrid& g);
+    // Phase 77: snapshot one pane's configuration / rebuild it
+    friend PaneState capture_pane_state(const GalleryGrid& g);
+    friend void restore_pane_state(GalleryGrid& g, const PaneState& s);
     // The following are free friends for the same S1448/S3776 reasons, extracted
     // from start_transfer() and update() (Phase 44 SonarQube follow-up).
     friend void start_transfer_focused(GalleryGrid& g);
@@ -372,5 +376,10 @@ void render_delete_confirm_modal(GalleryGrid& g, gfx::Renderer& r, float W, floa
 void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);
 [[nodiscard]] GalleryView current_gallery_view(const GalleryGrid& g);
 [[nodiscard]] std::string current_gallery_path(const GalleryGrid& g);  // Phase 50: for import status back nav
+// Phase 77: snapshot one pane's exact configuration / rebuild it. The restore
+// clamps `selected` and drops out-of-range `selected_tiles` if the listing changed,
+// then clamps scroll.
+[[nodiscard]] PaneState capture_pane_state(const GalleryGrid& g);
+void restore_pane_state(GalleryGrid& g, const PaneState& s);
 
 } // namespace ui
