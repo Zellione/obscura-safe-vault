@@ -51,7 +51,7 @@ struct Result {
 };
 
 // Build a video item from VideoCodec metadata. Workers never mutate the tree.
-void collect_video_item(Item::Kind kind, const std::string& child,
+void collect_video_item(Item::Kind kind, std::string_view child,
                         const vault::VideoMeta& vmeta, bool thumbs_stale,
                         std::vector<Item>& out)
 {
@@ -68,7 +68,7 @@ void collect_video_item(Item::Kind kind, const std::string& child,
 }
 
 // Build an image item. Workers never mutate the tree.
-void collect_image_item(Item::Kind kind, const std::string& child,
+void collect_image_item(Item::Kind kind, std::string_view child,
                         const vault::ImageMeta& meta, std::vector<Item>& out)
 {
     Item it;
