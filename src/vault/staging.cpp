@@ -33,7 +33,7 @@ namespace {
             result.width = static_cast<uint32_t>(decoded->width);
             result.height = static_cast<uint32_t>(decoded->height);
             result.animated = image::is_animated(decoded->format, file_data);
-            if (auto thumb_jpeg = image::make_thumbnail(*decoded, 256, 85)) {
+            if (auto thumb_jpeg = image::make_thumbnail(*decoded, image::THUMB_MAX_SIDE, 85)) {
                 result.thumb_bytes = *thumb_jpeg;
             }
         }

@@ -515,8 +515,8 @@ TEST(vault_read_thumbnail_round_trip)
 {
     TempVault tv("rt");
 
-    // 512x256 JPEG → thumbnail ≤ 256px on each side.
-    const auto jpeg_buf = fixtures::solid_jpeg(512, 256, 80, 120, 200);
+    // 1024x512 JPEG → thumbnail ≤ THUMB_MAX_SIDE px on each side.
+    const auto jpeg_buf = fixtures::solid_jpeg(1024, 512, 80, 120, 200);
     REQUIRE(!jpeg_buf.empty());
 
     vault::Vault v;
@@ -535,8 +535,8 @@ TEST(vault_read_thumbnail_round_trip)
     // Thumbnail bytes are a JPEG blob; decode to verify dimensions.
     const auto decoded = image::decode_from_memory(thumb_bytes.as_span());
     REQUIRE(decoded.has_value());
-    CHECK(decoded->width  <= 256);
-    CHECK(decoded->height <= 256);
+    CHECK(decoded->width  <= image::THUMB_MAX_SIDE);
+    CHECK(decoded->height <= image::THUMB_MAX_SIDE);
 }
 
 TEST(vault_add_malformed_image_is_soft_failure)

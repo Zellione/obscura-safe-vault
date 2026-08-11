@@ -147,7 +147,7 @@ private:
                     job->result.format = static_cast<vault::ImageFormat>(decoded->format);
 
                     // Make thumbnail
-                    if (auto thumb_bytes = image::make_thumbnail(*decoded, 256, 85)) {
+                    if (auto thumb_bytes = image::make_thumbnail(*decoded, image::THUMB_MAX_SIDE, 85)) {
                         job->result.thumb_jpeg = std::move(*thumb_bytes);
                     }
 

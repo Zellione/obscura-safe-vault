@@ -3,6 +3,10 @@
 #include "vault/staging.h"
 #include "vault/vault.h"
 
+#include "image/decode.h"
+#include "image/fixtures.h"
+#include "image/thumbnail.h"
+
 #include <thread>
 
 using ziptest::cleanup_dir;
@@ -85,5 +89,33 @@ TEST(stage_image_is_safe_beside_main_thread_reads)
         REQUIRE(vault::attach_staged(v, "g", std::move(s.node)) == vault::VaultResult::Ok);
     }
     CHECK_EQ(static_cast<int>(v.list("g").size()), 41);
+    cleanup_dir(dir);
+}
+
+TEST(stage_image_thumbnail_uses_512_budget)
+{
+    // 700x300 solid PNG: old budget would shrink to 256 wide, new to 512.
+    auto png = fixtures::solid_png(700, 300, 40, 90, 200);
+    REQUIRE(!png.empty());
+
+    const auto dir = fresh_dir("staging5");
+    vault::Vault v;
+    make_vault(v, dir / "a.osv");
+
+    auto staged = vault::stage_image(v, png, "big.png", nullptr);
+    REQUIRE(staged.status == vault::VaultResult::Ok);
+    REQUIRE(vault::attach_staged(v, "", std::move(staged.node)) == vault::VaultResult::Ok);
+    REQUIRE(vault::commit_staged(v) == vault::VaultResult::Ok);
+
+    const vault::IndexNode* n = v.resolve_node("big.png");
+    REQUIRE(n != nullptr);
+    crypto::SecureBytes thumb;
+    REQUIRE(v.read_thumbnail(*n, thumb) == vault::VaultResult::Ok);
+
+    auto img = image::decode_from_memory(thumb.as_span());
+    REQUIRE(img.has_value());
+    CHECK_EQ(img->width, 512);  // 700 -> 512 (was 256 under the old budget)
+    CHECK(img->width <= image::THUMB_MAX_SIDE);
+
     cleanup_dir(dir);
 }
