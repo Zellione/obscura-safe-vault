@@ -392,3 +392,35 @@ TEST(combine_copy_mode_never_deletes_empty_source)
                                      vault::TransferMode::Copy) == Ok);
     CHECK(find_child(src, "", "E") != nullptr);
 }
+
+// Copy-mode combine of a MIXED source (media + sub-galleries, cross-vault):
+// the destination gains both kinds; the source keeps everything, shells
+// included.
+TEST(combine_copy_mode_mixed_source_copies_both_kinds)
+{
+    using enum vault::VaultResult;
+    TempVault sa("cm_s"), da("cm_d");
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+    REQUIRE(src.create_gallery("Src") == Ok);
+    REQUIRE(src.add_image("Src", blob(300, 1), "m.jpg") == Ok);
+    REQUIRE(src.create_gallery("Src/Child") == Ok);
+    REQUIRE(src.add_image("Src/Child", blob(300, 2), "c.jpg") == Ok);
+    REQUIRE(dst.create_gallery("Dst") == Ok);
+
+    vault::CombineTally t;
+    REQUIRE(vault::combine_galleries(src, "Src", dst, "Dst", t, nullptr,
+                                     vault::TransferMode::Copy) == Ok);
+    CHECK_EQ(t.media_moved, 2);
+    CHECK_EQ(t.media_skipped, 0);
+    // Destination gained the media file AND the whole subtree.
+    CHECK(find_child(dst, "Dst", "m.jpg") != nullptr);
+    CHECK(find_child(dst, "Dst", "Child") != nullptr);
+    CHECK(find_child(dst, "Dst/Child", "c.jpg") != nullptr);
+    // Source keeps everything (copy) — media, sub-gallery, and its own shell.
+    CHECK(find_child(src, "", "Src") != nullptr);
+    CHECK(find_child(src, "Src", "m.jpg") != nullptr);
+    CHECK(find_child(src, "Src", "Child") != nullptr);
+    CHECK(find_child(src, "Src/Child", "c.jpg") != nullptr);
+}

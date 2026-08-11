@@ -140,7 +140,7 @@ FileOpOutcome transfer_outcome(vault::TransferMode mode, TransferCounts c, bool 
 }
 
 FileOpOutcome combine_outcome(vault::VaultResult r, const vault::CombineTally& tally,
-                              bool cancelled, const std::string& label)
+                              vault::TransferMode mode, bool cancelled, const std::string& label)
 {
     FileOpOutcome oc;
     oc.kind = FileOpKind::Transfer;
@@ -148,16 +148,17 @@ FileOpOutcome combine_outcome(vault::VaultResult r, const vault::CombineTally& t
         oc.error = "Combine failed.";
         return oc;
     }
+    const char* verb = (mode == vault::TransferMode::Copy) ? "copied" : "moved";
     oc.ok        = true;
     oc.cancelled = cancelled;
     oc.done      = tally.media_moved;
     oc.failed    = tally.media_skipped;
     oc.total     = tally.media_moved + tally.media_skipped;
     oc.status    = cancelled
-        ? std::format("Combine cancelled — {} moved, {} skipped, into {}",
-                      tally.media_moved, tally.media_skipped, label)
-        : std::format("Combined into {} — {} moved, {} skipped", label, tally.media_moved,
-                      tally.media_skipped);
+        ? std::format("Combine cancelled — {} {}, {} skipped, into {}",
+                      tally.media_moved, verb, tally.media_skipped, label)
+        : std::format("Combined into {} — {} {}, {} skipped", label, tally.media_moved,
+                      verb, tally.media_skipped);
     return oc;
 }
 
@@ -384,15 +385,16 @@ bool FileOpJob::start_transfer_collection(vault::Vault& src, CollectionTransferS
 }
 
 bool FileOpJob::start_combine(vault::Vault& src, std::string src_gallery,
-                              vault::Vault& dst, std::string dst_gallery, std::string label)
+                              vault::Vault& dst, std::string dst_gallery,
+                              vault::TransferMode mode, std::string label)
 {
     return launch(FileOpKind::Transfer,
                   [this, &src, src_gallery = std::move(src_gallery), &dst,
-                   dst_gallery = std::move(dst_gallery), label = std::move(label)]() {
+                   dst_gallery = std::move(dst_gallery), mode, label = std::move(label)]() {
         vault::CombineTally tally;
         const vault::VaultResult r =
-            vault::combine_galleries(src, src_gallery, dst, dst_gallery, tally, &progress_);
-        return combine_outcome(r, tally, progress_.cancel.load(), label);
+            vault::combine_galleries(src, src_gallery, dst, dst_gallery, tally, &progress_, mode);
+        return combine_outcome(r, tally, mode, progress_.cancel.load(), label);
     });
 }
 

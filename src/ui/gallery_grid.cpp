@@ -1784,7 +1784,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
         }},
         {"Import & export", {
             {"I", "Import files"}, {"Shift+I", "Import status"}, {"Z", "Import ZIP/CBZ"}, {"O", "Import folder"}, {"N", "New gallery"},
-            {"X", "Export selection"}, {"M", "Move/copy to — or pull from — another vault"}, {"Shift+M", "Combine gallery"}, {"R", "Rename"}, {"Del", "Delete (acts on selection)"},
+            {"X", "Export selection"}, {"M", "Move/copy to — or pull from — another vault"}, {"Shift+M", "Combine gallery (move or copy)"}, {"R", "Rename"}, {"Del", "Delete (acts on selection)"},
         }},
         {"Vault tools", {
             {"Shift+C", "Compact vault"}, {"Ctrl+D", "Find duplicate files"},

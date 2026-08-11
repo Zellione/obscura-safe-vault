@@ -61,6 +61,19 @@ SDL_FRect fit_rect(float w, float h, const SDL_FRect& box) noexcept
     return SDL_FRect{box.x + (box.w - nw) * 0.5f, box.y + (box.h - nh) * 0.5f, nw, nh};
 }
 
+void draw_option_rows(gfx::Renderer& r, gfx::FontAtlas& font, float ix, float rows_y,
+                      float mw, std::span<const std::string> options, int selected)
+{
+    using namespace gfx::theme;
+    for (size_t i = 0; i < options.size(); ++i) {
+        const float ry = rows_y + static_cast<float>(i) * 34.0f;
+        const bool  on = (static_cast<int>(i) == selected);
+        if (on) r.draw_round_rect({ix, ry, mw - 40, 30}, RADIUS_SMALL, SURFACE_HI);
+        r.draw_text(font, ix + 8, ry + 4, fit_text(font, options[i], mw - 56),
+                    on ? TEXT : TEXT_DIM);
+    }
+}
+
 void draw_button(gfx::Renderer& r, gfx::FontAtlas& font, const Button& b,
                  bool hover, bool active)
 {

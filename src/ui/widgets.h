@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -41,6 +42,13 @@ struct GridSpec {
 [[nodiscard]] SDL_FRect fit_rect(float w, float h, const SDL_FRect& box) noexcept;
 
 // --- Thin draw helpers (not unit-tested) ---------------------------------
+
+// One highlighted-row option list at the modal dialogs' standard 34px pitch
+// (the Mode / Direction stages of TransferDialog and CombineDialog share it so
+// the two dialogs cannot drift apart visually). Rows start at `rows_y`.
+void draw_option_rows(gfx::Renderer& r, gfx::FontAtlas& font, float ix, float rows_y,
+                      float mw, std::span<const std::string> options, int selected);
+
 struct Button { SDL_FRect rect; std::string label; };
 void draw_button(gfx::Renderer& r, gfx::FontAtlas& font, const Button& b,
                  bool hover, bool active);

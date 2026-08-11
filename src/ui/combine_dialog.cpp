@@ -2,6 +2,7 @@
 
 #include <format>
 #include <utility>
+#include <vector>
 
 #include "gfx/renderer.h"
 #include "gfx/text.h"
@@ -23,10 +24,10 @@ CombineDialog::CombineDialog(vault::Vault& src, std::string src_path,
 void CombineDialog::open(std::string src_gallery)
 {
     active_      = true;
-    stage_       = Stage::PickingDest;
+    stage_       = Stage::Mode;
+    mode_        = vault::TransferMode::Move;
     src_gallery_ = std::move(src_gallery);
     error_.clear();
-    picker_dest_.open(src_path_);
     SDL_StartTextInput(win_.sdl_window());
 }
 
@@ -53,8 +54,24 @@ void CombineDialog::do_combine(const std::string& dst_target)
 {
     vault::Vault& dv = picker_dest_.is_self() ? src_ : picker_dest_.unlocked_vault();
     const std::string where = picker_dest_.dest_label();
-    run_.job.start_combine(src_, src_gallery_, dv, dst_target, where);
+    run_.job.start_combine(src_, src_gallery_, dv, dst_target, mode_, where);
     stage_ = Stage::Running;
+}
+
+// Same Move/Copy toggle convention as TransferDialog::handle_mode_key.
+bool CombineDialog::handle_event_mode(const SDL_Event& e)
+{
+    if (e.type != SDL_EVENT_KEY_DOWN) return true;
+    const SDL_Keycode k = e.key.key;
+    if (k == SDLK_ESCAPE) { close(); return true; }
+    using enum vault::TransferMode;
+    if (k == SDLK_UP || k == SDLK_DOWN || k == SDLK_LEFT || k == SDLK_RIGHT)
+        mode_ = (mode_ == Move) ? Copy : Move;
+    if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
+        picker_dest_.open(src_path_);
+        stage_ = Stage::PickingDest;
+    }
+    return true;
 }
 
 void CombineDialog::advance_from_picking_dest()
@@ -114,11 +131,13 @@ bool CombineDialog::handle_event(const SDL_Event& e)
 {
     if (!active_) return false;
 
-    if (stage_ == Stage::Running) {
+    using enum Stage;
+    if (stage_ == Running) {
         if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) run_.job.cancel();
         return true;
     }
-    if (stage_ == Stage::PickingDest) return handle_event_picking_dest(e);
+    if (stage_ == Mode) return handle_event_mode(e);
+    if (stage_ == PickingDest) return handle_event_picking_dest(e);
     return handle_event_pick_target(e);
 }
 
@@ -137,7 +156,10 @@ void CombineDialog::finish_running_stage()
     if (!oc) return;
     run_.outcome.status      = oc->ok ? oc->status : oc->error;
     run_.outcome.same_vault  = picker_dest_.is_self();
-    run_.outcome.source_gone = src_.list(src_gallery_).empty();
+    // Copy never removes the source — an empty listing there just means the
+    // source gallery was empty to begin with, not that it is gone.
+    run_.outcome.source_gone =
+        mode_ == vault::TransferMode::Move && src_.list(src_gallery_).empty();
     run_.outcome.dest_path   = selected_target_dest_path();
     run_.done = true;
     // Phase 66: a Keep mode hands the unlocked destination to the warm
@@ -185,6 +207,17 @@ void CombineDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
     const float ix = mx + 20;
     const float iy = my + 20;
     r.draw_text(font, ix, iy, std::format("Combine \"{}\" into…", src_gallery_), TEXT);
+
+    if (stage_ == Stage::Mode) {
+        // Same Move/Copy stage convention as TransferDialog's render_mode_body.
+        r.draw_text(font, ix, iy + 36, "Action:", TEXT_DIM);
+        const std::vector<std::string> modes = {"Move", "Copy"};
+        draw_option_rows(r, font, ix, iy + 72, mw, modes,
+                         (mode_ == vault::TransferMode::Copy) ? 1 : 0);
+        r.draw_text(font, ix, iy + 150,
+                    fit_text(font, "[Up/Down] choose  [Enter] next", mw - 40), TEXT_FAINT);
+        return;
+    }
 
     if (stage_ == Stage::PickingDest) {
         picker_dest_.render(r, font, ix, iy, mw);

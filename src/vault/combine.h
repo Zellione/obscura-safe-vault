@@ -25,11 +25,12 @@ struct CombineTally {
 // Vault's public API (list/add_image/add_video/read_image/read_video/
 // add_tag/remove_gallery) — no new Vault friendship needed.
 //
-// Leaf case (src_gallery holds media): every media filename moves via
+// Media children (src_gallery holds media): every media filename moves via
 // transfer_image; a name already present in dst_gallery is skipped and
 // tallied (media_skipped), not a hard failure.
 //
-// Folder case (src_gallery holds sub-galleries): for each sub-gallery child —
+// Sub-gallery children (src_gallery holds sub-galleries) — a MIXED gallery
+// gets both treatments, media first: for each sub-gallery child —
 // no same-named child in dst_gallery -> moved wholesale via transfer_gallery
 // (tallies galleries_moved; its media counts into media_moved, and any file
 // that stayed behind — per-file failure, batch-commit hard stop, or a
@@ -49,10 +50,8 @@ struct CombineTally {
 // vault::rename_node) and retry.
 //
 //   Locked      - either vault is not unlocked
-//   InvalidArg  - src_gallery is the root (""); dst_gallery is src_gallery or
-//                 a descendant of it (same-vault cycle); or the two galleries
-//                 are structurally incompatible (one holds media, the other
-//                 holds sub-galleries)
+//   InvalidArg  - src_gallery is the root (""), or dst_gallery is src_gallery
+//                 or a descendant of it (same-vault cycle)
 //   NotFound    - src_gallery or dst_gallery doesn't resolve to a gallery
 //
 // `progress` (optional): total is set ONCE, up front, to the full media count
@@ -72,10 +71,10 @@ struct CombineTally {
                                             TransferMode mode = TransferMode::Move);
 
 // Every gallery in `dst` (any depth, including root) that `src_gallery` (in
-// `src`) could legally combine into: structurally compatible (see
-// combine_galleries' InvalidArg cases above), and — same-vault only — not
-// `src_gallery` itself or a descendant of it. Used to populate the combine
-// dialog's destination picker. Empty while either vault is locked.
+// `src`) could legally combine into: — same-vault only — not `src_gallery`
+// itself or a descendant of it (any structure is combinable, mixed included).
+// Used to populate the combine dialog's destination picker. Empty while
+// either vault is locked.
 [[nodiscard]] std::vector<std::string> combine_target_galleries(const Vault& dst, const Vault& src,
                                                                  std::string_view src_gallery);
 

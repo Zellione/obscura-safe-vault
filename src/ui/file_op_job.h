@@ -118,11 +118,13 @@ public:
                                    vault::TransferMode mode, vault::CollisionPolicy policy,
                                    std::string label);
 
-    // Combine src/src_gallery into dst/dst_gallery — recursive merge, deletes
-    // src_gallery once empty (Phase 44 Part 4). `label` names the destination
+    // Combine src/src_gallery into dst/dst_gallery — recursive merge; Move
+    // deletes src_gallery once empty, Copy leaves the source untouched
+    // (Phase 44 Part 4; mode since Phase 76). `label` names the destination
     // vault for the outcome message.
     bool start_combine(vault::Vault& src, std::string src_gallery,
-                       vault::Vault& dst, std::string dst_gallery, std::string label);
+                       vault::Vault& dst, std::string dst_gallery,
+                       vault::TransferMode mode, std::string label);
 
     // Compact the vault in-place, reclaiming wasted_bytes(). Runs on background thread
     // with progress tracking and cooperative cancel.

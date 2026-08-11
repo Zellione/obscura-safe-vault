@@ -25,10 +25,10 @@ struct CombineOutcome {
 };
 
 // Modal that merges the CURRENTLY BROWSED gallery into another one, same- or
-// cross-vault (Phase 44 Part 4). Stages: PickingDest (delegated to
-// VaultUnlockPicker) -> PickTarget (a GalleryPickerModel over
-// vault::combine_target_galleries) -> Running (progress modal, mirrors
-// TransferDialog).
+// cross-vault (Phase 44 Part 4). Stages: Mode (Move/Copy, Phase 76) ->
+// PickingDest (delegated to VaultUnlockPicker) -> PickTarget (a
+// GalleryPickerModel over vault::combine_target_galleries) -> Running
+// (progress modal, mirrors TransferDialog).
 class CombineDialog {
 public:
     CombineDialog(vault::Vault& src, std::string src_path, platform::VaultRegistry& registry,
@@ -45,11 +45,12 @@ public:
     void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
 
 private:
-    enum class Stage { PickingDest, PickTarget, Running };
+    enum class Stage { Mode, PickingDest, PickTarget, Running };
 
     void choose_target();
     void do_combine(const std::string& dst_target);
     void advance_from_picking_dest();
+    [[nodiscard]] bool handle_event_mode(const SDL_Event& e);
     [[nodiscard]] bool handle_event_picking_dest(const SDL_Event& e);
     [[nodiscard]] bool handle_event_pick_target(const SDL_Event& e);
     [[nodiscard]] bool handle_event_target_filter(const SDL_Event& e);
@@ -61,7 +62,8 @@ private:
     gfx::Window&             win_;
 
     bool        active_ = false;
-    Stage       stage_  = Stage::PickingDest;
+    Stage       stage_  = Stage::Mode;
+    vault::TransferMode mode_ = vault::TransferMode::Move;
     std::string src_gallery_;
 
     VaultUnlockPicker  picker_dest_;
