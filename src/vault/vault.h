@@ -263,6 +263,8 @@ public:
     // to keep Vault under the cpp:S1448 method cap.
     friend SortKey gallery_sort_key(const Vault& v, std::string_view gallery_path);
     friend VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey key);
+    // Phase 77: check if a gallery path exists in the vault (for on_vault_changed walk-up).
+    friend bool gallery_exists(const Vault& v, std::string_view gallery_path);
 
     // vault_settings/set_vault_settings (Phase 49) are free friends, not members,
     // for the same cpp:S1448 method-cap reason as gallery_sort_key/set_gallery_sort.

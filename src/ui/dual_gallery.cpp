@@ -6,6 +6,7 @@
 #include <span>
 
 #include "gfx/renderer.h"
+#include "gfx/theme.h"
 #include "gfx/window.h"
 #include "ui/dual_layout.h"
 #include "ui/dual_session_state.h"
@@ -95,15 +96,38 @@ void DualGalleryScreen::on_vault_changed()
     right_->on_vault_changed();
 
     // Walk-up rule: if a pane's current gallery path no longer resolves,
-    // walk up path segments until one resolves (root always does).
-    // NOTE: The walk-up logic requires checking if a path exists. Since
-    // vault::find_gallery is private, the complete implementation will
-    // need either: (a) a public vault method to check gallery existence,
-    // or (b) moving this logic into gallery_grid.cpp where find_gallery
-    // is accessible. For now, both grids' on_vault_changed (which they
-    // inherited from Screen) will re-query the vault at their current path,
-    // and empty results will be handled by their own refresh logic.
-    // TODO: implement full walk-up logic in Task 8 or later phase.
+    // walk up path segments until one resolves (root always does)
+    for (int i = 0; i < 2; ++i) {
+        GalleryGrid& grid = (i == 0 ? *left_ : *right_);
+        std::string path = current_gallery_path(grid);
+        if (path.empty()) {
+            continue;  // root always exists
+        }
+
+        // Check if the current path still exists in the vault
+        if (gallery_exists(vault_, path)) {
+            continue;  // path still exists, no walk-up needed
+        }
+
+        // Path no longer exists; walk up segments until one resolves
+        // Start by removing the last segment
+        size_t last_slash = path.rfind('/');
+        while (last_slash != std::string::npos) {
+            path = path.substr(0, last_slash);
+            if (gallery_exists(vault_, path)) {
+                // Found a valid ancestor
+                jump_pane_to(grid, path);
+                break;
+            }
+            last_slash = path.rfind('/');
+        }
+
+        // If we walked all the way up without finding a valid ancestor, jump to root
+        // (which is guaranteed to exist)
+        if (last_slash == std::string::npos && !gallery_exists(vault_, path)) {
+            jump_pane_to(grid, "");  // root
+        }
+    }
 }
 
 void DualGalleryScreen::handle_event(const SDL_Event& e)
@@ -291,9 +315,48 @@ void DualGalleryScreen::render(gfx::Renderer& r)
         SDL_SetRenderViewport(r.sdl(), nullptr);
     }
 
-    // NOTE: Divider and accent border rendering will be implemented in Task 9
-    // along with full theme integration and status line rendering.
-    // For now, both panes are rendered side-by-side with viewports handling separation.
+    // Reset viewport for global (non-pane) drawing
+    SDL_SetRenderViewport(r.sdl(), nullptr);
+
+    // Draw divider strip (full height, theme BORDER color)
+    using namespace gfx::theme;
+    r.draw_rect(split.divider, BORDER, /*filled*/ true);
+
+    // Draw 2px accent border around the active pane
+    {
+        const SDL_FRect& active_pane_rect = active_ == 0 ? split.left : split.right;
+        constexpr float border_width = 2.0f;
+
+        // Top border
+        SDL_FRect top{active_pane_rect.x, active_pane_rect.y, active_pane_rect.w, border_width};
+        r.draw_rect(top, ACCENT, /*filled*/ true);
+
+        // Bottom border
+        SDL_FRect bottom{active_pane_rect.x, active_pane_rect.y + active_pane_rect.h - border_width,
+                         active_pane_rect.w, border_width};
+        r.draw_rect(bottom, ACCENT, /*filled*/ true);
+
+        // Left border
+        SDL_FRect left{active_pane_rect.x, active_pane_rect.y, border_width, active_pane_rect.h};
+        r.draw_rect(left, ACCENT, /*filled*/ true);
+
+        // Right border
+        SDL_FRect right{active_pane_rect.x + active_pane_rect.w - border_width, active_pane_rect.y,
+                        border_width, active_pane_rect.h};
+        r.draw_rect(right, ACCENT, /*filled*/ true);
+    }
+
+    // Draw status line if not empty (small banner at divider bottom)
+    if (!status_.empty()) {
+        // Status line is rendered at the bottom of the divider as a small notification
+        // Position: divider's bottom-left, full divider width, small height
+        constexpr float status_height = 20.0f;
+        SDL_FRect status_bg{split.divider.x, split.divider.y + split.divider.h - status_height,
+                            split.divider.w, status_height};
+        // Use a semi-transparent background to make it visible over whatever is behind
+        r.draw_rect(status_bg, gfx::theme::BG, /*filled*/ true);
+        // TODO: render the actual status text here using font rendering in a future phase
+    }
 }
 
 bool DualGalleryScreen::animating() const
