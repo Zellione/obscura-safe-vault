@@ -9,7 +9,7 @@ TEST(dual_session_state_defaults)
 {
     DualSessionState s;
     CHECK(!s.split_active);
-    CHECK(!s.has_config);          // Phase 77: no pane configs saved yet
+    CHECK(!s.has_config);          // Phase 78: no pane configs saved yet
     CHECK_EQ(s.active_pane, 0);
     CHECK(s.pane[0].path.empty());
     CHECK_EQ(s.pane[1].selected, 0);
@@ -20,7 +20,7 @@ TEST(dual_session_state_reset_clears_every_field)
 {
     DualSessionState s;
     s.split_active            = true;
-    s.has_config              = true;  // Phase 77: mark configs saved
+    s.has_config              = true;  // Phase 78: mark configs saved
     s.active_pane             = 1;
     s.pane[0].path            = "a/b";
     s.pane[0].selected        = 4;
@@ -32,7 +32,7 @@ TEST(dual_session_state_reset_clears_every_field)
     s.reset();
 
     CHECK(!s.split_active);
-    CHECK(!s.has_config);              // Phase 77: reset clears has_config
+    CHECK(!s.has_config);              // Phase 78: reset clears has_config
     CHECK_EQ(s.active_pane, 0);
     CHECK(s.pane[0].path.empty());
     CHECK_EQ(s.pane[0].selected, 0);

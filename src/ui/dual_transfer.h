@@ -7,7 +7,7 @@
 
 namespace ui {
 
-// Pure state machine for the split-mode M prompt (Phase 77). SDL-free.
+// Pure state machine for the split-mode M prompt (Phase 78). SDL-free.
 // Manages the multi-stage transfer confirmation flow:
 // 1. Mode stage: choose Move or Copy
 // 2. Conflict stage (optional): if collisions exist, choose how to resolve

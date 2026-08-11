@@ -342,7 +342,7 @@ void GalleryGrid::go_up()
 {
     session_.record(nav_.path(), nav_.selected());   // this level's selection is about to go stale
     if (!nav_.up()) {
-        if (!embedded_) {  // Phase 77: inert at root when embedded
+        if (!embedded_) {  // Phase 78: inert at root when embedded
             request(NavKind::ToVaultManager);
         }
         return;
@@ -718,7 +718,7 @@ std::vector<std::string> GalleryGrid::selected_delete_paths() const
     return prune_descendant_paths(paths);
 }
 
-// Phase 77 Task 7: Full slash-paths for transfer; fallback to focused tile when empty.
+// Phase 78 Task 7: Full slash-paths for transfer; fallback to focused tile when empty.
 std::vector<std::string> selected_transfer_paths(const GalleryGrid& g)
 {
     std::vector<std::string> paths;
@@ -743,7 +743,7 @@ std::vector<std::string> selected_transfer_paths(const GalleryGrid& g)
     return paths;  // No pruning for transfer (keep all paths, galleries included)
 }
 
-// Phase 77 Task 7 Fix: Clear selection to avoid stale selection after transfers.
+// Phase 78 Task 7 Fix: Clear selection to avoid stale selection after transfers.
 void clear_grid_selection(GalleryGrid& g)
 {
     g.sel_.clear();
@@ -965,7 +965,7 @@ bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& 
             return true;
         case SDLK_X: g.start_export(); return true;
         case SDLK_M:
-            if (g.embedded_) return false;  // Phase 77: not handled in embedded mode
+            if (g.embedded_) return false;  // Phase 78: not handled in embedded mode
             if (key.mod & SDL_KMOD_SHIFT) { g.start_combine(); return true; }
             g.start_transfer();
             return true;
@@ -1546,7 +1546,7 @@ GalleryView current_gallery_view(const GalleryGrid& g) { return g.view_; }
 
 std::string current_gallery_path(const GalleryGrid& g) { return g.nav_.path(); }
 
-// Phase 77: snapshot one pane's exact configuration.
+// Phase 78: snapshot one pane's exact configuration.
 PaneState capture_pane_state(const GalleryGrid& g)
 {
     PaneState s;
@@ -1559,7 +1559,7 @@ PaneState capture_pane_state(const GalleryGrid& g)
     return s;
 }
 
-// Phase 77: rebuild a pane from a snapshot. Grid is constructed at s.path/s.selected/s.view
+// Phase 78: rebuild a pane from a snapshot. Grid is constructed at s.path/s.selected/s.view
 // via GridLocation; this function refines scroll, detail state, and multi-selection.
 void restore_pane_state(GalleryGrid& g, const PaneState& s)
 {
@@ -1758,7 +1758,7 @@ void poll_pending_pickers(GalleryGrid& g)
 {
     // The import picker shares dialogs_.file with the transfer's keyfile picker, so
     // only poll it when no transfer is active (don't steal the keyfile result).
-    // Phase 77: gate pumping when embedded mode disables dialog polling.
+    // Phase 78: gate pumping when embedded mode disables dialog polling.
     if (!g.transfer_.active() && g.pump_dialogs_) {
         g.pump_import();
         g.pump_zip_import();
@@ -1888,7 +1888,7 @@ void GalleryGrid::update(double dt)
 
 std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
 {
-    // Build Navigate entries; F3 (split view) only shown when not embedded (Phase 77)
+    // Build Navigate entries; F3 (split view) only shown when not embedded (Phase 78)
     std::vector<HelpEntry> nav_entries{
         {"Enter", "Open"}, {"Space", "Select (export/move)"},
         {"Ctrl+A", "Select all / none"},
@@ -2377,7 +2377,7 @@ void GalleryGrid::start_hover_animation(int tile)
     hover_anim_tile_ = tile;
 }
 
-// Phase 77: Navigate a pane to an absolute gallery path (used in walk-up on vault change).
+// Phase 78: Navigate a pane to an absolute gallery path (used in walk-up on vault change).
 // Wraps jump_to_gallery for DualGalleryScreen's on_vault_changed walk-up rule.
 void jump_pane_to(GalleryGrid& g, const std::string& path)
 {

@@ -22,7 +22,7 @@ struct DualSessionState;
 // (subtract pane origin). Non-mouse events pass through unchanged.
 [[nodiscard]] SDL_Event translate_event_to_pane(const SDL_Event& e, const SDL_FRect& pane) noexcept;
 
-// Side-by-side dual-pane gallery (Phase 77). Coordinates two GalleryGrid instances
+// Side-by-side dual-pane gallery (Phase 78). Coordinates two GalleryGrid instances
 // with synchronized keyboard/mouse event routing and snapshot/restore of pane state.
 class DualGalleryScreen : public Screen {
 public:

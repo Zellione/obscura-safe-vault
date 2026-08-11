@@ -1297,7 +1297,7 @@ SortKey gallery_sort_key(const Vault& v, std::string_view gallery_path)
     return g ? g->sort_key : SortKey::Default;
 }
 
-// Phase 77: check if a gallery path exists (for DualGalleryScreen walk-up on vault changes).
+// Phase 78: check if a gallery path exists (for DualGalleryScreen walk-up on vault changes).
 bool gallery_exists(const Vault& v, std::string_view gallery_path)
 {
     return v.find_gallery(gallery_path) != nullptr;

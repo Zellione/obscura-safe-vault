@@ -7,7 +7,7 @@
 
 namespace ui {
 
-// Below this window width F3 refuses to enter split view (Phase 77).
+// Below this window width F3 refuses to enter split view (Phase 78).
 inline constexpr float MIN_SPLIT_WIDTH = 900.0f;
 
 // Fixed 50/50 vertical split: left pane, divider strip, right pane. The three
