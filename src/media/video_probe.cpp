@@ -42,7 +42,7 @@ bool probe_video(std::span<const uint8_t> data, VideoProbeResult& out)
 
     // Generate the poster (best effort).
     if (auto rgb = decoder.decode_poster_rgb()) {
-        if (auto poster = image::make_thumbnail(*rgb, 256, 85)) {
+        if (auto poster = image::make_thumbnail(*rgb, image::THUMB_MAX_SIDE, 85)) {
             out.poster_jpeg = *poster;
         }
     }

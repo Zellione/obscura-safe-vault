@@ -140,3 +140,42 @@ TEST(gallery_picker_pinned_suffix_not_duplicated_when_it_also_matches)
     REQUIRE(m.filtered().size() == 1);
     CHECK(m.filtered()[0] == "+ New gallery…");
 }
+
+TEST(picker_multi_select_toggle_and_checked_order)
+{
+    ui::GalleryPickerModel m;
+    m.set_items({"a", "a/b", "c"});
+    m.set_multi(true);
+    m.toggle_checked();               // row 0 = "a"
+    m.move(2);  m.toggle_checked();   // row 2 = "c"
+    CHECK(m.is_checked("a"));
+    CHECK(!m.is_checked("a/b"));
+    CHECK(m.checked() == std::vector<std::string>({"a", "c"}));
+    m.toggle_checked();               // untoggle "c"
+    CHECK(m.checked() == std::vector<std::string>({"a"}));
+}
+
+TEST(picker_multi_select_respects_filter_and_pinned)
+{
+    ui::GalleryPickerModel m;
+    m.set_items({"a", "a/b", "c"});
+    m.set_multi(true);
+    m.set_pinned_suffix("+ New");
+    m.filter_append("a");
+    REQUIRE(m.filtered().size() == 3);  // "a", "a/b", "+ New"
+    m.toggle_checked();  // checks "a"
+    m.move(2);  // move to pinned suffix
+    m.toggle_checked();  // should be no-op on pinned row
+    CHECK(m.checked() == std::vector<std::string>({"a"}));  // only "a" checked
+
+    // set_items() clears multi + checks
+    m.set_items({"x", "y"});
+    CHECK(!m.multi());
+    CHECK(m.checked().empty());
+}
+
+TEST(drop_descendant_paths_prunes_subtrees)
+{
+    auto out = ui::drop_descendant_paths({"a/b", "a", "c/d", "ab"});
+    CHECK(out == std::vector<std::string>({"a", "ab", "c/d"}));   // sorted order
+}

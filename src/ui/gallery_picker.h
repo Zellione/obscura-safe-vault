@@ -18,7 +18,7 @@ namespace ui {
 class GalleryPickerModel {
 public:
     // Replaces the full (unfiltered) item list; resets filter text, filter-open
-    // state, and selection back to 0.
+    // state, and selection back to 0. Clears multi-select mode and checked items.
     void set_items(std::vector<std::string> items);
 
     // An item that is always appended to filtered()'s end, exempt from the
@@ -27,6 +27,20 @@ public:
     // If the pinned item also matches the current filter naturally, it is
     // not duplicated.
     void set_pinned_suffix(std::string item);
+
+    // Multi-select mode (opt-in; default is single-select). Cleared by set_items().
+    void set_multi(bool on) noexcept { multi_ = on; }
+    [[nodiscard]] bool multi() const noexcept { return multi_; }
+
+    // Toggle the checked state of the current row (filtered()[selected()]).
+    // No-op unless multi() is true. The pinned-suffix row (if current) is ignored.
+    void toggle_checked();
+
+    // Check if an item is checked (by exact path match).
+    [[nodiscard]] bool is_checked(std::string_view item) const;
+
+    // All checked items in original items_ order (not check order).
+    [[nodiscard]] std::vector<std::string> checked() const;
 
     // '/' toggles typing a filter query; closing does NOT clear the filter text
     // or its effect on filtered() — only set_items()/filter_clear() do that.
@@ -70,6 +84,13 @@ private:
     std::vector<std::string>  filtered_;
     int                        selected_ = 0;
     std::string               pinned_suffix_;   // empty = none
+    bool                       multi_ = false;
+    std::vector<std::string>  checked_;   // items_ indices of checked items
 };
+
+// Remove every path that is a strict descendant of another path in the list.
+// "a" drops "a/b" and "a/b/c"; "ab" is NOT a descendant of "a" (separator matters).
+// Returns kept paths in sorted order.
+[[nodiscard]] std::vector<std::string> drop_descendant_paths(std::vector<std::string> paths);
 
 } // namespace ui

@@ -9,6 +9,7 @@
 
 #include "crypto/secure_mem.h"
 #include "vault/combine.h"
+#include "vault/index.h"
 #include "vault/safe_name.h"
 #include "vault/staging.h"
 
@@ -20,6 +21,29 @@ void record_failure(TransferTally& t, std::string path, VaultResult code,
     ++t.failed;
     if (t.failures.size() < MAX_TRANSFER_FAILURES)
         t.failures.emplace_back(std::move(path), code, stage);
+}
+
+std::vector<std::string> effective_tags(const Vault& v, std::string_view node_path)
+{
+    const IndexNode* node = v.resolve_node(node_path);
+    if (!node) return {};
+    std::vector<std::string> out = node->tags;
+    auto add_ci = [&out](const std::vector<std::string>& tags) {
+        for (const auto& t : tags)
+            if (!std::ranges::any_of(out, [&](const auto& o) { return tag_ci_equal(o, t); }))
+                out.push_back(t);
+    };
+    // Root tags cascade globally; then each ancestor gallery down to the parent.
+    if (const IndexNode* root = v.resolve_node(""); root) add_ci(root->tags);
+    std::string prefix;
+    for (std::string_view rest = node_path;;) {
+        const auto slash = rest.find('/');
+        if (slash == std::string_view::npos) break;     // last segment = the node itself
+        prefix.append(prefix.empty() ? "" : "/").append(rest.substr(0, slash));
+        if (const IndexNode* g = v.resolve_node(prefix); g && g->is_gallery()) add_ci(g->tags);
+        rest.remove_prefix(slash + 1);
+    }
+    return out;
 }
 
 namespace {
@@ -81,7 +105,9 @@ void collect_all_galleries(const Vault& v, std::string_view gallery,
 // moved gallery itself) and the media (image/video) filenames it directly holds.
 struct GallerySnap {
     std::string              rel;
-    std::vector<std::string> images;  // names of media children (images and videos)
+    std::vector<std::string> images;   // names of media children (images and videos)
+    std::vector<std::string> tags;     // the gallery's OWN tags (root snap: effective tags — set by the driver)
+    bool                     favorite = false;
 };
 
 // Walk `abs` (a gallery in `src`) parent-before-child, recording each gallery's
@@ -95,6 +121,11 @@ void snapshot_subtree(const Vault& src, std::string_view abs, const std::string&
     for (const auto* c : src.list(abs)) {
         if (c->is_media())   snap.images.push_back(c->name);
         else                 subgalleries.push_back(c->name);
+    }
+    // Capture the gallery's own tags and favorite at snapshot time
+    if (const IndexNode* self = src.resolve_node(abs); self && self->is_gallery()) {
+        snap.tags     = self->tags;
+        snap.favorite = self->favorite;
     }
     out.push_back(std::move(snap));
     for (const auto& name : subgalleries) {
@@ -243,6 +274,10 @@ void lower_dst_watermark(const Vault& src, Vault& dst)
         s_dst.migrated_probe_caps = s_src.migrated_probe_caps;
         lowered = true;
     }
+    if (s_src.migrated_thumb_side < s_dst.migrated_thumb_side) {
+        s_dst.migrated_thumb_side = s_src.migrated_thumb_side;
+        lowered = true;
+    }
     if (lowered) (void)set_vault_settings(dst, std::move(s_dst));
 }
 
@@ -319,13 +354,18 @@ VaultResult copy_one_media(const Vault& src, std::string_view src_gallery,
 
     // Capture everything needed from `node` BEFORE the destination add: a
     // same-vault add can reallocate the index and dangle the pointer.
+    const std::string src_path = child_path(src_gallery, fname);
+    const auto eff_tags = effective_tags(src, src_path);
+    const bool favorite = node->favorite;
+    const NodeExtras extras{.tags = eff_tags, .favorite = favorite};
+
     if (node->is_image()) {
         StagedThumb thumb;
         if (VaultResult r = prestage_image_info(src, *node, thumb); r != Ok) return r;
         const uint64_t ts = node->meta.created_ts;
         if (VaultResult r = src.read_image(*node, plain); r != Ok) return r;
         failed_stage = TransferFailure::Stage::Write;
-        return attach_image_prestaged(dst, dst_gallery, plain.as_span(), fname, thumb, ts);
+        return attach_image_prestaged(dst, dst_gallery, plain.as_span(), fname, thumb, ts, &extras);
     }
     if (node->is_video()) {
         StagedVideoInfo info;
@@ -333,7 +373,7 @@ VaultResult copy_one_media(const Vault& src, std::string_view src_gallery,
         const uint64_t ts = node->vmeta.created_ts;
         if (VaultResult r = src.read_video(*node, plain); r != Ok) return r;
         failed_stage = TransferFailure::Stage::Write;
-        return attach_video_prestaged(dst, dst_gallery, plain.as_span(), fname, info, ts);
+        return attach_video_prestaged(dst, dst_gallery, plain.as_span(), fname, info, ts, &extras);
     }
     return Ok;
 }
@@ -369,6 +409,23 @@ void copy_images(CopyCtx& c, const std::string& src_abs, const std::string& dst_
         if (c.commit_failed) return;
         copy_one_media_ex(c, src_abs, dst_gallery, fname);
     }
+}
+
+// Union `tags` onto the gallery at `dst_path` (ci-deduped, existing casing kept)
+// and OR the favorite flag. Called after ensure_gallery_path so a pre-existing
+// destination gallery keeps its tags and a re-run stays idempotent. Tree-only
+// mutation — rides the batch commit.
+void apply_gallery_extras(Vault& dst, std::string_view dst_path,
+                          const std::vector<std::string>& tags, bool favorite)
+{
+    IndexNode* g = dst.resolve_node(dst_path);
+    if (!g || !g->is_gallery()) return;
+    for (const auto& t : tags) {
+        if (g->tags.size() >= INDEX_MAX_TAGS) break;
+        if (!std::ranges::any_of(g->tags, [&](const auto& o) { return tag_ci_equal(o, t); }))
+            g->tags.push_back(t);
+    }
+    if (favorite) g->favorite = true;
 }
 
 // Recreate the snapshotted subtree under `dest_root` in `dst` and copy each gallery's
@@ -416,6 +473,7 @@ void copy_subtree(CopyCtx& c, std::string_view src_gallery, const std::string& d
             continue;
         }
         c.dirty = true;   // ensured galleries need the next commit too
+        apply_gallery_extras(c.dst, dst_gallery, snap.tags, snap.favorite);
         copy_images(c, src_abs, dst_gallery, snap.images);
     }
 }
@@ -462,6 +520,15 @@ void prune_moved_galleries(Vault& src, std::string_view src_gallery,
 }
 
 } // namespace
+
+std::vector<std::string> all_galleries(const Vault& v)
+{
+    std::vector<std::string> out;
+    // Walk from root, excluding the root "" itself
+    for (const auto* c : v.list(""))
+        if (c->is_gallery()) collect_all_galleries(v, c->name, out);
+    return out;
+}
 
 // Internal transfer_image with stage tracking for per-file failure recording.
 // Sets `stage_out` to indicate where failure occurred (Read side or Write side).
@@ -549,6 +616,9 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
     // Snapshot the source subtree (parent-before-child), then recreate + copy.
     std::vector<GallerySnap> snaps;
     snapshot_subtree(src, src_gallery, "", snaps);
+
+    // Materialize the ROOT snap's tags with effective tags (ancestors cascade in).
+    if (!snaps.empty()) snaps[0].tags = effective_tags(src, src_gallery);
 
     // Total media across the subtree drives the progress bar ("N / M files").
     if (progress) {

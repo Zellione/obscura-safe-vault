@@ -98,6 +98,10 @@ struct TransferProgress {
                                             Vault& dst, std::string_view dst_gallery,
                                             TransferMode mode, TransferProgress prog = {});
 
+// Slash-paths of every gallery in `v`, nested depth-first (any nesting, root "" excluded).
+// Used to populate the pull dialog's source-gallery list. Empty while locked.
+[[nodiscard]] std::vector<std::string> all_galleries(const Vault& v);
+
 // Slash-paths of every gallery in `v` that may legally accept media (images or videos)
 // — holds no sub-galleries, including "" (root) when root holds no sub-galleries. Used
 // to populate the transfer dialog's destination-gallery list. Empty while locked.
@@ -169,5 +173,13 @@ struct TransferProgress {
 [[nodiscard]] std::vector<std::string> colliding_galleries(
     const Vault& dst, std::string_view dst_parent,
     std::span<const std::string> src_paths);
+
+// The node's read-time effective tags: own tags first (their casing wins),
+// then every ancestor gallery's tags root->parent (the root's tags cascade
+// globally), case-insensitively de-duplicated. This is what transfers persist
+// onto an item leaving its ancestor chain (Phase 75). Empty when `v` is
+// locked or `node_path` does not resolve.
+[[nodiscard]] std::vector<std::string> effective_tags(const Vault& v,
+                                                      std::string_view node_path);
 
 } // namespace vault

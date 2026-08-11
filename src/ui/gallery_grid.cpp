@@ -401,6 +401,7 @@ void start_transfer_focused(GalleryGrid& g)
     // Phase 50: acquire exclusive before opening transfer dialog
     g.queue_.set_exclusive(true);
     g.transfer_had_exclusive_ = true;
+    g.transfer_.set_current_gallery(g.nav_.path());
     if (node->is_gallery()) {
         const std::string path = g.nav_.path().empty() ? node->name
                                                         : g.nav_.path() + "/" + node->name;
@@ -464,6 +465,7 @@ void start_transfer_selection(GalleryGrid& g)
     // Phase 50: acquire exclusive before opening transfer dialog
     g.queue_.set_exclusive(true);
     g.transfer_had_exclusive_ = true;
+    g.transfer_.set_current_gallery(base);
     if (galleries.empty()) {
         g.transfer_.open(base, std::move(media));
     } else if (media.empty()) {
@@ -1782,7 +1784,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
         }},
         {"Import & export", {
             {"I", "Import files"}, {"Shift+I", "Import status"}, {"Z", "Import ZIP/CBZ"}, {"O", "Import folder"}, {"N", "New gallery"},
-            {"X", "Export selection"}, {"M", "Move/copy"}, {"Shift+M", "Combine gallery"}, {"R", "Rename"}, {"Del", "Delete (acts on selection)"},
+            {"X", "Export selection"}, {"M", "Move/copy to — or pull from — another vault"}, {"Shift+M", "Combine gallery"}, {"R", "Rename"}, {"Del", "Delete (acts on selection)"},
         }},
         {"Vault tools", {
             {"Shift+C", "Compact vault"}, {"Ctrl+D", "Find duplicate files"},

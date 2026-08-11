@@ -33,7 +33,7 @@ namespace {
             result.width = static_cast<uint32_t>(decoded->width);
             result.height = static_cast<uint32_t>(decoded->height);
             result.animated = image::is_animated(decoded->format, file_data);
-            if (auto thumb_jpeg = image::make_thumbnail(*decoded, 256, 85)) {
+            if (auto thumb_jpeg = image::make_thumbnail(*decoded, image::THUMB_MAX_SIDE, 85)) {
                 result.thumb_bytes = *thumb_jpeg;
             }
         }
@@ -265,7 +265,8 @@ VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path)
 VaultResult attach_image_prestaged(Vault& v, std::string_view gallery_path,
                                    std::span<const uint8_t> file_data,
                                    std::string_view filename,
-                                   const StagedThumb& thumb, uint64_t created_ts)
+                                   const StagedThumb& thumb, uint64_t created_ts,
+                                   const NodeExtras* extras)
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
@@ -278,6 +279,13 @@ VaultResult attach_image_prestaged(Vault& v, std::string_view gallery_path,
     StagedNode staged = stage_image(v, file_data, filename, &thumb);
     if (staged.status != Ok) return staged.status;
     if (created_ts != 0) staged.node.meta.created_ts = created_ts;
+
+    if (extras) {
+        staged.node.tags = extras->tags;
+        if (staged.node.tags.size() > INDEX_MAX_TAGS)
+            staged.node.tags.resize(INDEX_MAX_TAGS);
+        staged.node.favorite = extras->favorite;
+    }
 
     return attach_staged(v, gallery_path, std::move(staged.node));
 }
@@ -295,11 +303,12 @@ VaultResult commit_staged(Vault& v)
 VaultResult add_image_prestaged(Vault& v, std::string_view gallery_path,
                                 std::span<const uint8_t> file_data,
                                 std::string_view filename,
-                                const StagedThumb& thumb, uint64_t created_ts)
+                                const StagedThumb& thumb, uint64_t created_ts,
+                                const NodeExtras* extras)
 {
     using enum VaultResult;
     if (const VaultResult r =
-            attach_image_prestaged(v, gallery_path, file_data, filename, thumb, created_ts);
+            attach_image_prestaged(v, gallery_path, file_data, filename, thumb, created_ts, extras);
         r != Ok)
         return r;
     return commit_staged(v);
@@ -308,7 +317,8 @@ VaultResult add_image_prestaged(Vault& v, std::string_view gallery_path,
 VaultResult attach_video_prestaged(Vault& v, std::string_view gallery_path,
                                    std::span<const uint8_t> file_data,
                                    std::string_view filename,
-                                   const StagedVideoInfo& info, uint64_t created_ts)
+                                   const StagedVideoInfo& info, uint64_t created_ts,
+                                   const NodeExtras* extras)
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
@@ -322,17 +332,25 @@ VaultResult attach_video_prestaged(Vault& v, std::string_view gallery_path,
     if (staged.status != Ok) return staged.status;
     if (created_ts != 0) staged.node.vmeta.created_ts = created_ts;
 
+    if (extras) {
+        staged.node.tags = extras->tags;
+        if (staged.node.tags.size() > INDEX_MAX_TAGS)
+            staged.node.tags.resize(INDEX_MAX_TAGS);
+        staged.node.favorite = extras->favorite;
+    }
+
     return attach_staged(v, gallery_path, std::move(staged.node));
 }
 
 VaultResult add_video_prestaged(Vault& v, std::string_view gallery_path,
                                 std::span<const uint8_t> file_data,
                                 std::string_view filename,
-                                const StagedVideoInfo& info, uint64_t created_ts)
+                                const StagedVideoInfo& info, uint64_t created_ts,
+                                const NodeExtras* extras)
 {
     using enum VaultResult;
     if (const VaultResult r =
-            attach_video_prestaged(v, gallery_path, file_data, filename, info, created_ts);
+            attach_video_prestaged(v, gallery_path, file_data, filename, info, created_ts, extras);
         r != Ok)
         return r;
     return commit_staged(v);

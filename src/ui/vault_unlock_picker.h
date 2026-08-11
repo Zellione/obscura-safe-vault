@@ -38,8 +38,9 @@ public:
                       SecondVaultSession* second = nullptr);
 
     // Rebuilds candidates (every registered vault path except `src_path`) and
-    // enters PickVault. "This vault" is always row 0.
-    void open(std::string src_path);
+    // enters PickVault. "This vault" is row 0 if include_self is true (default),
+    // omitted otherwise. Existing callers compile unchanged (default parameter).
+    void open(std::string src_path, bool include_self = true);
     void close();   // locks/wipes the transient dest vault; deactivates
 
     [[nodiscard]] bool active() const noexcept { return active_; }   // still in PickVault/Unlock
@@ -55,7 +56,8 @@ public:
 
     [[nodiscard]] bool handle_event(const SDL_Event& e);   // true if consumed
     void update();                                          // poll the keyfile dialog
-    void render(gfx::Renderer& r, gfx::FontAtlas& font, float ix, float iy, float mw);
+    void render(gfx::Renderer& r, gfx::FontAtlas& font, float ix, float iy, float mw,
+                std::string_view title_override = "Destination vault:");
 
 private:
     enum class Stage { PickVault, Unlock };
@@ -79,6 +81,7 @@ private:
     std::string src_path_;
     std::vector<std::filesystem::path> candidates_;
     int vault_sel_ = 0;
+    bool include_self_ = true;
 
     struct Dest {
         vault::Vault    vault;

@@ -14,6 +14,8 @@ void GalleryPickerModel::set_items(std::vector<std::string> items)
     filter_open_   = false;
     selected_      = 0;
     pinned_suffix_.clear();
+    multi_         = false;
+    checked_.clear();
     rebuild_filtered();
 }
 
@@ -70,6 +72,62 @@ GalleryPickerModel::Geom GalleryPickerModel::geom(int visible_rows) const noexce
     int       first    = 0;
     if (count > visible) first = std::clamp(selected_ - visible / 2, 0, count - visible);
     return {first, visible};
+}
+
+void GalleryPickerModel::toggle_checked()
+{
+    if (!multi_ || filtered_.empty() || selected_ < 0 ||
+        selected_ >= static_cast<int>(filtered_.size()))
+        return;
+
+    const std::string& item = filtered_[selected_];
+
+    // Ignore the pinned suffix row
+    if (!pinned_suffix_.empty() && item == pinned_suffix_) return;
+
+    // Toggle: erase if present, push if absent
+    auto it = std::ranges::find(checked_, item);
+    if (it != checked_.end())
+        checked_.erase(it);
+    else
+        checked_.push_back(item);
+}
+
+bool GalleryPickerModel::is_checked(std::string_view item) const
+{
+    return std::ranges::any_of(checked_, [item](const auto& c) { return c == item; });
+}
+
+std::vector<std::string> GalleryPickerModel::checked() const
+{
+    // Return checked items in items_ order
+    std::vector<std::string> result;
+    for (const auto& item : items_)
+        if (is_checked(item)) result.push_back(item);
+    return result;
+}
+
+// Remove every path that is a strict descendant of another path in the list.
+std::vector<std::string> drop_descendant_paths(std::vector<std::string> paths)
+{
+    // Sort the paths
+    std::ranges::sort(paths);
+
+    // Keep only paths that are not descendants of any previously-kept path
+    std::vector<std::string> kept;
+    for (const auto& path : paths) {
+        bool is_descendant = false;
+        for (const auto& kept_path : kept) {
+            // Check if path is a descendant of kept_path
+            // path is descendant if it starts with kept_path + "/"
+            if (path.starts_with(kept_path + "/")) {
+                is_descendant = true;
+                break;
+            }
+        }
+        if (!is_descendant) kept.push_back(path);
+    }
+    return kept;
 }
 
 } // namespace ui

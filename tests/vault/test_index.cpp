@@ -606,13 +606,13 @@ TEST(index_animated_flag_round_trips)
     CHECK(!out.children[1].meta.animated);
 }
 
-TEST(index_version_is_ten)
+TEST(index_version_is_twelve)
 {
     IndexNode root = IndexNode::gallery("root");
     std::vector<uint8_t> blob;
     vault::serialize_index(root, blob);
     REQUIRE(!blob.empty());
-    CHECK_EQ(blob[0], uint8_t{11});
+    CHECK_EQ(blob[0], uint8_t{12});
 }
 
 TEST(index_v6_blob_reads_animated_as_false)
@@ -689,7 +689,7 @@ TEST(index_v8_accepts_insertion_sort_key)
     std::vector<uint8_t> blob;
     serialize_index(root, blob);
     CHECK_EQ(blob[0], INDEX_VERSION);
-    CHECK_EQ(blob[0], 11);
+    CHECK_EQ(blob[0], 12);
 
     IndexNode out;
     CHECK(deserialize_index(blob, out));
@@ -796,9 +796,13 @@ TEST(index_settings_rejects_bad_tiles_flag)
     std::vector<uint8_t> blob;
     vault::serialize_index(root, {}, vault::VaultSettings{}, blob);
 
-    // The settings block is the tail: default_sort, tiles_show_tags, cat_count(u16), desc_count(u16), watermark(u8 + u16).
-    // tiles_show_tags is at position -8 (2 bytes for desc_count + 3 bytes for watermark after cat_count).
-    const size_t tiles_at = blob.size() - 10;
+    // The settings block is the tail: default_sort, tiles_show_tags, cat_count(u16), desc_count(u16), watermark(u8 + u16), thumb_side(u16).
+    // tiles_show_tags is at position: 2 bytes thumb_side + 3 bytes watermark + 2 bytes desc_count = 7 bytes before the end.
+    // But we need to count from the actual position: blob.size() - 1 (for last byte) - 2 (thumb) - 3 (watermark) - 2 (desc) = blob.size() - 8
+    // Actually simpler: tiles is at blob.size() - (1 byte default_sort + 1 byte tiles + 2 cat + 2 desc + 3 watermark + 2 thumb) from the end
+    // = blob.size() - 11 (but we count backwards from end, so it's at blob.size() - 10 because we're measuring position from size)
+    // With v12 thumb_side added (2 bytes), the offset shifts: blob.size() - (12) = blob.size() - 12
+    const size_t tiles_at = blob.size() - 12;
     CHECK_EQ(blob[tiles_at], 1);
     blob[tiles_at] = 2;
 
@@ -841,8 +845,10 @@ TEST(index_settings_rejects_over_long_category_name)
 
     // A hand-forged blob declaring a longer name is rejected outright.
     std::vector<uint8_t> forged = blob;
-    // With desc_count and watermark (3 bytes) added at the end, the name_len is now 5 bytes earlier.
-    const size_t name_len_at = forged.size() - 1 - 2 - vault::INDEX_MAX_CATEGORY_BYTES - 2 - 3 - 1 - 2;
+    // With desc_count, watermark (3 bytes), field_values_count, and thumb_side added, the name_len is now further.
+    // Name is at: forged.size() - (thumb_side + field_values_count + watermark + desc_count + cat_count + swatch + name_bytes + name_len)
+    // = forged.size() - (2 + 2 + 3 + 2 + 2 + 1 + 64 + 2)
+    const size_t name_len_at = forged.size() - 1 - 2 - vault::INDEX_MAX_CATEGORY_BYTES - 2 - 3 - 1 - 2 - 2 - 2;  // +2 for field_values_count, +2 for thumb_side
     forged[name_len_at]     = 0xFF;
     forged[name_len_at + 1] = 0x00;
     IndexNode out2;
@@ -861,8 +867,10 @@ TEST(index_pre_v8_blob_reads_seeded_settings)
 
     // With desc_count added in v9, the settings block is now 6 bytes (was 4 in v8).
     // With watermark added in v10, the settings block is now 9 bytes.
-    // We strip the entire v10 settings block to create a v7 blob.
-    std::vector<uint8_t> v7(v8.begin(), v8.end() - 11);   // drop the settings block
+    // With field_values_count added in v11, the settings block is now 11 bytes.
+    // With thumb_side added in v12, the settings block is now 13 bytes.
+    // We strip the entire v12 settings block to create a v7 blob.
+    std::vector<uint8_t> v7(v8.begin(), v8.end() - 13);   // drop the settings block
     v7[0] = 7;
 
     IndexNode out;
@@ -887,4 +895,21 @@ TEST(index_seeded_settings_are_eight_distinct_swatches)
     }
     std::ranges::sort(swatches);
     CHECK(std::ranges::adjacent_find(swatches) == swatches.end());   // all distinct
+}
+
+TEST(index_settings_thumb_side_roundtrip)
+{
+    IndexNode root = IndexNode::gallery("");
+    vault::VaultSettings s;
+    s.default_sort = vault::SortKey::NameDesc;
+    s.migrated_thumb_side = 512;
+
+    std::vector<uint8_t> blob;
+    vault::serialize_index(root, {}, s, blob);
+
+    IndexNode out;
+    std::vector<vault::SavedSearch> searches;
+    vault::VaultSettings got;
+    CHECK(vault::deserialize_index(blob, out, searches, got));
+    CHECK_EQ(got.migrated_thumb_side, 512);
 }

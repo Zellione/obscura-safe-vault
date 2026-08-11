@@ -80,11 +80,16 @@ public:
     [[nodiscard]] bool consume_completed(TransferCompletion& out);
     void render(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H);
 
+    // Set the current gallery (browsed gallery in the active vault); enables the
+    // Direction stage for pull transfers. Called immediately before open*() by the grid
+    // only when actively browsing a gallery (not in collection screens).
+    void set_current_gallery(std::string path);
+
 private:
     // Running: the background move/copy worker owns the vault(s); the dialog stays
     // active (keeping the unlocked destination alive) and shows a progress modal
     // until the job completes, then closes (Phase 25).
-    enum class Stage { Mode, PickingDest, PickGallery, Conflict, Running };
+    enum class Stage { Direction, Mode, PickingDest, PickGallery, PickSrcGalleries, Conflict, Running };
 
     void choose_gallery();    // PickGallery Enter: move into the selected target (or "New")
     void do_move(std::string_view dst_gallery);   // pre-scan for conflicts; route to Conflict or launch_transfer
@@ -92,12 +97,12 @@ private:
     void rebuild_targets();   // image_target_galleries(dest_vault()) + the "New gallery…" row
     void render_body(gfx::Renderer& r, gfx::FontAtlas& font,
                      float ix, float iy, float mw, float mh, float my);  // per-stage body
-    void render_mode_body(gfx::Renderer& r, gfx::FontAtlas& font,
-                          float ix, float iy, float mw) const;
     void render_conflict_body(gfx::Renderer& r, gfx::FontAtlas& font,
                               float ix, float iy, float mw) const;
     void render_pick_gallery_body(gfx::Renderer& r, gfx::FontAtlas& font,
                                   float ix, float iy, float mw, float mh, float my);
+    void render_src_galleries_body(gfx::Renderer& r, gfx::FontAtlas& font,
+                                   float ix, float iy, float mw, float mh, float my) const;
 
     bool handle_mode_key(SDL_Keycode k);         // Mode stage: toggle Move/Copy
     bool handle_conflict_key(SDL_Keycode k);     // Conflict stage: choose policy
@@ -110,6 +115,10 @@ private:
     bool handle_picking_dest_event(const SDL_Event& e);
     bool handle_gallery_filter_event(const SDL_Event& e);
     bool handle_stage_key(const SDL_KeyboardEvent& key);
+    bool handle_direction_key(SDL_Keycode k);         // Direction stage: choose push or pull
+    bool handle_src_galleries_key(SDL_Keycode k);     // PickSrcGalleries stage: multi-select + filter
+    bool handle_src_galleries_filter_event(const SDL_Event& e);   // PickSrcGalleries: filter typing
+    void launch_current(std::string_view target, vault::CollisionPolicy policy);   // Route to launch_transfer (push) or pull launcher
 
     vault::Vault&            src_;
     std::string              src_path_;            // active vault's path (excluded as a dest)
@@ -120,8 +129,17 @@ private:
     vault::TransferMode mode_ = vault::TransferMode::Move;
     std::string src_gallery_;
     std::vector<std::string> filenames_;
-    std::vector<std::string> src_galleries_;   // Source::Galleries payload
+    std::vector<std::string> src_galleries_;   // Source::Galleries payload; also PickSrcGalleries multi-select results
     std::vector<ParentGroup> media_groups_;    // Source::Collection payload (Phase 68)
+
+    // Pull mode state: bundled to keep field count ≤20 (S1820)
+    struct Pull {
+        bool        has_current = false;       // enables Direction stage if set
+        std::string current_gallery;            // pull destination (browsed gallery in active vault)
+        bool        active = false;             // true when pulling from another vault
+        int         direction_sel = 0;          // Direction stage selection (0=push, 1=pull)
+    };
+    Pull        pull_;
 
     enum class Source { Images, Gallery, Galleries, Collection };   // Galleries: Phase 44 Part 3; Collection: Phase 68
     Source      source_ = Source::Images;

@@ -28,6 +28,7 @@
 #include "ui/advanced_search_model.h"  // AdvancedQuery + evaluate (pure, SDL/vault-free)
 #include "ui/gallery_sort.h"           // sort_children (pure, SDL/vault-free, Phase 37)
 #include "vault/commit_lane.h"
+#include "vault/index.h"
 #include "vault/index_io.h"
 #include "vault/staging.h"
 #include "vault/vault_ops.h"
@@ -59,16 +60,6 @@ std::string_view trim_ws(std::string_view s)
     return s.substr(start, end - start);
 }
 
-// Case-insensitive comparison of strings.
-bool ci_equal(std::string_view a, std::string_view b)
-{
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        auto to_lower = [](char c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; };
-        if (to_lower(a[i]) != to_lower(b[i])) return false;
-    }
-    return true;
-}
 
 // Case-insensitive substring check.
 bool ci_contains(std::string_view haystack, std::string_view needle)
@@ -107,7 +98,7 @@ std::vector<std::string> normalise_tags(const std::vector<std::string>& input)
         // Check for case-insensitive duplicate.
         bool found = false;
         for (const auto& existing : out) {
-            if (ci_equal(existing, trimmed)) {
+            if (tag_ci_equal(existing, trimmed)) {
                 found = true;
                 break;
             }
@@ -128,7 +119,7 @@ std::vector<std::string> compute_effective_tags(const std::vector<std::string>& 
     for (const auto& inh : inherited_tags) {
         bool found = false;
         for (const auto& own : node_tags) {
-            if (ci_equal(own, inh)) {
+            if (tag_ci_equal(own, inh)) {
                 found = true;
                 break;
             }
@@ -175,7 +166,7 @@ struct FieldTagMap {
         FieldTagMap m;
         for (const auto& fv : s.tag_field_values) {
             auto it = std::ranges::find_if(m.by_tag, [&fv](const auto& e) {
-                return ci_equal(e.first, fv.tag);
+                return tag_ci_equal(e.first, fv.tag);
             });
             if (it == m.by_tag.end()) {
                 m.by_tag.emplace_back(fv.tag, std::vector<std::string>{});
@@ -193,7 +184,7 @@ struct FieldTagMap {
         std::vector<std::string> out = tags;
         for (const auto& t : tags)
             for (const auto& [tag, values] : by_tag)
-                if (ci_equal(tag, t))
+                if (tag_ci_equal(tag, t))
                     out.insert(out.end(), values.begin(), values.end());
         return out;
     }
@@ -249,7 +240,7 @@ std::vector<std::string> search_dfs(const IndexNode& node, std::string_view pref
         // Union into subtree_tags (case-insensitive).
         for (const auto& tag : to_union) {
             if (!std::ranges::any_of(subtree_tags,
-                                     [&](const auto& t) { return ci_equal(t, tag); })) {
+                                     [&](const auto& t) { return tag_ci_equal(t, tag); })) {
                 subtree_tags.push_back(tag);
             }
         }
@@ -287,7 +278,7 @@ void collect_favorites(const IndexNode& node, std::string_view prefix, bool want
 void collect_tags(const IndexNode& node, std::vector<std::string>& out)
 {
     for (const auto& t : node.tags) {
-        if (!std::ranges::any_of(out, [&](const auto& x) { return ci_equal(x, t); }))
+        if (!std::ranges::any_of(out, [&](const auto& x) { return tag_ci_equal(x, t); }))
             out.push_back(t);
     }
     for (const auto& c : node.children)
@@ -305,7 +296,7 @@ void collect_tags(const IndexNode& node, std::vector<std::string>& out)
 void bump_tag_tally(std::vector<ui::TagTally>& tallies, std::string_view tag, bool is_gallery)
 {
     auto it = std::ranges::find_if(tallies,
-                                   [&](const ui::TagTally& tt) { return ci_equal(tt.tag, tag); });
+                                   [&](const ui::TagTally& tt) { return tag_ci_equal(tt.tag, tag); });
     if (it == tallies.end()) return;
     if (is_gallery)
         ++it->gallery_count;
@@ -331,7 +322,7 @@ void collect_galleries_with_tag(const IndexNode& node, std::string_view prefix,
     for (const auto& child : node.children) {
         if (!child.is_gallery()) continue;
         const std::string full_path = join_child_path(prefix, child.name);
-        if (std::ranges::any_of(child.tags, [&](const auto& t) { return ci_equal(t, tag); }))
+        if (std::ranges::any_of(child.tags, [&](const auto& t) { return tag_ci_equal(t, tag); }))
             out.push_back(SearchHit{
                 .path = full_path,
                 .is_gallery = true,
@@ -356,7 +347,7 @@ void collect_images_with_tag(const IndexNode& node, std::string_view prefix, std
             collect_images_with_tag(child, full_path, tag, out);
             continue;
         }
-        if (std::ranges::any_of(child.tags, [&](const auto& t) { return ci_equal(t, tag); }))
+        if (std::ranges::any_of(child.tags, [&](const auto& t) { return tag_ci_equal(t, tag); }))
             out.push_back(SearchHit{
                 .path = full_path,
                 .is_gallery = false,
@@ -378,7 +369,7 @@ void accumulate_subtree_union(std::vector<std::string>& subtree_tags,
 
     for (const auto& tag : to_union) {
         if (!std::ranges::any_of(subtree_tags,
-                                 [&](const auto& t) { return ci_equal(t, tag); })) {
+                                 [&](const auto& t) { return tag_ci_equal(t, tag); })) {
             subtree_tags.push_back(tag);
         }
     }
@@ -586,6 +577,10 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     out.root_ = IndexNode::gallery("");
     out.unlocked_ = true;
     out.settings_ = VaultSettings::seeded();
+    // Stamp migration watermarks: fresh vaults already have 512px thumbs and current index format
+    // (prevents false "upgrade available" offer at first unlock).
+    out.settings_.migrated_index_version = MIGRATION_INDEX_VERSION;
+    out.settings_.migrated_thumb_side = static_cast<uint16_t>(image::THUMB_MAX_SIDE);
     out.write_mutex_ = std::make_unique<std::mutex>();
     out.header_mutex_ = std::make_unique<std::mutex>();
     out.thumb_mutex_ = std::make_unique<std::mutex>();
@@ -1026,6 +1021,44 @@ VaultResult apply_video_probe(Vault& v, std::string_view node_path,
     return Ok;
 }
 
+VaultResult apply_image_thumb(Vault& v, std::string_view node_path,
+                              std::span<const uint8_t> thumb_jpeg)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+    if (thumb_jpeg.empty()) return InvalidArg;
+    IndexNode* n = v.resolve_node(node_path);
+    if (!n || !n->is_image()) return NotFound;
+
+    std::lock_guard lk(*v.write_mutex_);
+    ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+    ChunkSpan span;
+    if (!store.append_chunk(thumb_jpeg, span)) return IoError;
+    if (!store.sync()) return IoError;
+    n->meta.thumb_offset = span.offset;
+    n->meta.thumb_length = span.length;
+    return Ok;
+}
+
+VaultResult apply_video_poster(Vault& v, std::string_view node_path,
+                               std::span<const uint8_t> poster_jpeg)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+    if (poster_jpeg.empty()) return InvalidArg;
+    IndexNode* n = v.resolve_node(node_path);
+    if (!n || !n->is_video()) return NotFound;
+
+    std::lock_guard lk(*v.write_mutex_);
+    ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+    ChunkSpan span;
+    if (!store.append_chunk(poster_jpeg, span)) return IoError;
+    if (!store.sync()) return IoError;
+    n->vmeta.poster_offset = span.offset;
+    n->vmeta.poster_length = span.length;
+    return Ok;
+}
+
 VaultResult apply_image_animated(Vault& v, std::string_view node_path, bool animated)
 {
     using enum VaultResult;
@@ -1216,7 +1249,7 @@ VaultResult add_tag_batch(Vault& v, std::span<const std::string> node_paths,
     for (const std::string& path : node_paths) {
         if (IndexNode* node = v.resolve_node(path); node) {
             const bool dup = std::ranges::any_of(node->tags,
-                [&trimmed](const std::string& e) { return ci_equal(e, trimmed); });
+                [&trimmed](const std::string& e) { return tag_ci_equal(e, trimmed); });
             if (!dup) {
                 node->tags.emplace_back(trimmed);
                 changed = true;
@@ -1241,7 +1274,7 @@ VaultResult remove_tag_batch(Vault& v, std::span<const std::string> node_paths,
         IndexNode* node = v.resolve_node(path);
         if (!node) continue;
         const auto removed = std::erase_if(node->tags,
-            [&trimmed](const std::string& e) { return ci_equal(e, trimmed); });
+            [&trimmed](const std::string& e) { return tag_ci_equal(e, trimmed); });
         changed = changed || removed > 0;
     }
     return changed ? v.commit_index() : Ok;
@@ -1343,7 +1376,7 @@ VaultResult Vault::add_tag(std::string_view node_path, std::string_view tag)
 
     // Check for case-insensitive duplicate.
     for (const auto& existing : node->tags) {
-        if (ci_equal(existing, trimmed)) return Ok;
+        if (tag_ci_equal(existing, trimmed)) return Ok;
     }
 
     // Not found, add it.
@@ -1397,7 +1430,7 @@ VaultResult Vault::remove_tag(std::string_view node_path, std::string_view tag)
 
     // Find and remove the tag case-insensitively.
     for (auto it = node->tags.begin(); it != node->tags.end(); ++it) {
-        if (ci_equal(*it, trimmed)) {
+        if (tag_ci_equal(*it, trimmed)) {
             node->tags.erase(it);
             return commit_index();
         }

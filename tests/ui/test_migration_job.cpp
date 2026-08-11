@@ -8,10 +8,13 @@
 #include <vector>
 
 #include "image/anim_info.h"
+#include "image/decode.h"
 #include "image/fixtures.h"
+#include "image/thumbnail.h"
 #include "media/video_probe.h"
 #include "ui/migration_job.h"
 #include "vault/migration.h"
+#include "vault/staging.h"
 #include "vault/vault.h"
 
 // NOTE: include image/fixtures.h rather than re-declaring the loaders here.
@@ -120,7 +123,7 @@ TEST(migration_job_on_clean_vault_stamps_watermark_and_does_nothing_else)
     CHECK_EQ(out.total, 0);
     CHECK_EQ(out.videos_fixed, 0);
     CHECK_EQ(out.images_fixed, 0);
-    CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
+    CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN, 512));
 }
 
 TEST(migration_job_watermark_survives_reopen)
@@ -139,7 +142,7 @@ TEST(migration_job_watermark_survives_reopen)
         vault::Vault v;
         REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
         REQUIRE(v.unlock(job_bytes("pw"), {}) == vault::VaultResult::Ok);
-        CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
+        CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN, 512));
     }
 }
 
@@ -170,8 +173,14 @@ TEST(migration_job_fixes_animated_image)
     // Force the animated flag to be unknown (as if migrating from old vault)
     vault::test_only_force_image_animated_unknown(v, "anim.webp");
 
+    // Phase 75: pre-stamp thumbnail watermark so this test focuses on animated detection,
+    // not thumbnail regen (which would be an ImageThumb item instead of ImageAnimated).
+    auto settings = vault::vault_settings(v);
+    settings.migrated_thumb_side = 512;
+    REQUIRE(vault::set_vault_settings(v, settings) == vault::VaultResult::Ok);
+
     // Verify it's marked pending before job runs
-    auto scan = vault::scan_migration(v);
+    auto scan = vault::scan_migration(v, false);
     CHECK(scan.total() > 0);
 
     ui::MigrationJob job;
@@ -194,7 +203,7 @@ TEST(migration_job_fixes_animated_image)
     }
 
     // Verify watermark was stamped
-    CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
+    CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN, 512));
 }
 
 TEST(migration_job_fixes_video_codec)
@@ -214,7 +223,7 @@ TEST(migration_job_fixes_video_codec)
     vault::test_only_force_video_codec_unknown(v, "tiny.mp4");
 
     // Verify it's pending
-    auto scan = vault::scan_migration(v);
+    auto scan = vault::scan_migration(v, false);
     CHECK(scan.total() > 0);
 
     ui::MigrationJob job;
@@ -236,7 +245,7 @@ TEST(migration_job_fixes_video_codec)
     CHECK(kids[0]->vmeta.poster_length > 0);
 
     // Verify watermark was stamped
-    CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
+    CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN, 512));
 #endif
 }
 
@@ -297,7 +306,7 @@ TEST(migration_job_cancel_prevents_watermark)
 
     // Verify watermark was NOT stamped (migration still pending)
     // This is the critical test: that the race condition fix prevents watermark when cancelled
-    CHECK(vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
+    CHECK(vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN, 512));
 }
 
 TEST(migration_job_flips_animated_webp_and_leaves_static_webp_alone)
@@ -320,6 +329,11 @@ TEST(migration_job_flips_animated_webp_and_leaves_static_webp_alone)
     // Force both to the pre-v7 state (animated flag unknown) that the migration repairs
     REQUIRE(vault::apply_image_animated(v, "anim.webp", false) == vault::VaultResult::Ok);
     REQUIRE(vault::apply_image_animated(v, "static.webp", false) == vault::VaultResult::Ok);
+
+    // Phase 75: pre-stamp thumbnail watermark so this test focuses on animated detection
+    auto settings = vault::vault_settings(v);
+    settings.migrated_thumb_side = 512;
+    REQUIRE(vault::set_vault_settings(v, settings) == vault::VaultResult::Ok);
 
     // Run the migration
     ui::MigrationJob job;
@@ -353,8 +367,8 @@ TEST(migration_job_not_reoffered_after_completion)
     REQUIRE(vault::apply_image_animated(v, "anim.webp", false) == vault::VaultResult::Ok);
 
     // Verify migration is pending before the job
-    CHECK(vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
-    CHECK(!vault::scan_migration(v).empty());
+    CHECK(vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN, 512));
+    CHECK(!vault::scan_migration(v, false).empty());
 
     // Run the job to completion
     ui::MigrationJob job;
@@ -364,8 +378,8 @@ TEST(migration_job_not_reoffered_after_completion)
     CHECK(!out.cancelled);
 
     // After a successful full pass, migration should NOT be pending
-    CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
-    CHECK(vault::scan_migration(v).empty());
+    CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN, 512));
+    CHECK(vault::scan_migration(v, false).empty());
 }
 
 TEST(migration_job_pool_handles_many_items_without_loss)
@@ -382,6 +396,11 @@ TEST(migration_job_pool_handles_many_items_without_loss)
         REQUIRE(v.add_image("", anim, name) == vault::VaultResult::Ok);
         REQUIRE(vault::apply_image_animated(v, name, false) == vault::VaultResult::Ok);
     }
+
+    // Phase 75: pre-stamp thumbnail watermark so this test focuses on animated detection
+    auto settings = vault::vault_settings(v);
+    settings.migrated_thumb_side = 512;
+    REQUIRE(vault::set_vault_settings(v, settings) == vault::VaultResult::Ok);
 
     ui::MigrationJob job;
     REQUIRE(job.start(v));
@@ -508,5 +527,222 @@ TEST(migration_job_compaction_reclaims_orphaned_chunks)
     // Verify the vault is still readable and contains only the kept image
     REQUIRE(v.list("").size() == 1u);
     CHECK_EQ(v.list("")[0]->name, "keep.png");
+}
+
+TEST(migration_job_regenerates_image_thumbs_at_512)
+{
+    // Phase 75: Build a vault with an image and force migrated_thumb_side to 0
+    // to simulate an old vault with stale thumbnails, then run MigrationJob to
+    // regenerate at 512px.
+    JobTempVault tv("regen_thumbs");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
+            == vault::VaultResult::Ok);
+
+    // Add a normal image (which will have a 512px thumb)
+    auto webp_data = fixtures::load_webp();
+    REQUIRE(v.add_image("", webp_data, "test.webp") == vault::VaultResult::Ok);
+
+    // Verify the image has a thumbnail
+    REQUIRE(v.list("").size() == 1u);
+    const vault::IndexNode* node = v.list("")[0];
+    CHECK(node->meta.thumb_length > 0);
+
+    // Force migrated_thumb_side to 0 to simulate old vault (triggers thumb regen)
+    auto settings = vault::vault_settings(v);
+    settings.migrated_thumb_side = 0;
+    REQUIRE(vault::set_vault_settings(v, settings) == vault::VaultResult::Ok);
+
+    // Verify migration is now pending
+    CHECK(vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN, 512));
+
+    // Run migration job
+    ui::MigrationJob job;
+    REQUIRE(job.start(v));
+    const ui::MigrationOutcome out = run_to_completion(job);
+
+    // Verify migration succeeded and thumbs were fixed
+    CHECK(out.ok);
+    CHECK(!out.cancelled);
+    CHECK(out.thumbs_fixed >= 1);
+
+    // Verify watermark was stamped
+    CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN, 512));
+}
+
+TEST(migration_job_cancel_does_not_stamp_thumb_watermark)
+{
+    // Phase 75: cancel() before completion -> migrated_thumb_side stays unchanged
+    JobTempVault tv("cancel_no_stamp");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
+            == vault::VaultResult::Ok);
+
+    // Add an image
+    auto webp_data = fixtures::load_webp();
+    REQUIRE(v.add_image("", webp_data, "test.webp") == vault::VaultResult::Ok);
+
+    // Force thumb stale to trigger work
+    auto settings = vault::vault_settings(v);
+    settings.migrated_thumb_side = 0;
+    REQUIRE(vault::set_vault_settings(v, settings) == vault::VaultResult::Ok);
+
+    ui::MigrationJob job;
+    REQUIRE(job.start(v));
+
+    // Immediately cancel
+    job.cancel();
+
+    const ui::MigrationOutcome out = run_to_completion(job);
+
+    // Verify cancel was recorded
+    CHECK(out.ok);
+    CHECK(out.cancelled);
+
+    // Verify watermark was NOT stamped (migration still pending)
+    CHECK(vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN, 512));
+}
+
+TEST(migration_job_regenerates_poster_of_resolved_video)
+{
+    // Phase 75: Video with codec Unknown and existing (stale) poster -> job resolves
+    // codec AND replaces poster when thumbs_stale
+#ifdef OSV_VENDORED_AV
+    JobTempVault tv("resolve_poster");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
+            == vault::VaultResult::Ok);
+
+    // Load real MP4 fixture
+    auto mp4_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!mp4_bytes.empty());
+    REQUIRE(v.add_video("", mp4_bytes, "test.mp4", 4096) == vault::VaultResult::Ok);
+
+    // Force codec to Unknown (simulating old vault)
+    vault::test_only_force_video_codec_unknown(v, "test.mp4");
+
+    // Capture poster state before job (may or may not have one)
+    const vault::IndexNode* node = v.list("")[0];
+    CHECK(node->vmeta.codec == vault::VideoCodec::Unknown);
+    const bool had_poster_initially = node->vmeta.poster_length > 0;
+    size_t old_poster_offset = node->vmeta.poster_offset;
+    size_t old_poster_length = node->vmeta.poster_length;
+
+    // Force thumbs_stale by setting migrated_thumb_side to 0
+    auto settings = vault::vault_settings(v);
+    settings.migrated_thumb_side = 0;
+    REQUIRE(vault::set_vault_settings(v, settings) == vault::VaultResult::Ok);
+
+    // Run migration job
+    ui::MigrationJob job;
+    REQUIRE(job.start(v));
+    const ui::MigrationOutcome out = run_to_completion(job);
+
+    // Verify migration succeeded and codec was detected
+    CHECK(out.ok);
+    CHECK(!out.cancelled);
+    CHECK(out.videos_fixed >= 1);
+
+    // Verify the codec was resolved
+    node = v.list("")[0];
+    CHECK(node->vmeta.codec != vault::VideoCodec::Unknown);  // codec resolved
+
+    // If we had a poster initially, verify thumbs_fixed incremented (poster was replaced)
+    if (had_poster_initially) {
+        CHECK(out.thumbs_fixed >= 1);  // poster regen counts as thumbs_fixed
+        CHECK(node->vmeta.poster_offset != old_poster_offset ||
+              node->vmeta.poster_length != old_poster_length);
+    }
+    // If no initial poster, at least check one was created by the probe
+    CHECK(node->vmeta.poster_length > 0);
+#endif
+}
+
+TEST(migration_job_sniffs_animated_for_no_thumb_image_in_thumb_pass)
+{
+    // Phase 75: Image without thumbnail but animatable + animated unknown -> during
+    // thumb-stale pass, should still get ImageAnimated item for sniffing (not just
+    // images with existing thumbs)
+    JobTempVault tv("sniff_no_thumb");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
+            == vault::VaultResult::Ok);
+
+    // Load animated WebP
+    auto anim_webp = fixtures::load_anim_webp();
+    REQUIRE(!anim_webp.empty());
+
+    // Decode it to create a precomputed StagedThumb with EMPTY thumbnail
+    auto decoded = image::decode_from_memory(anim_webp);
+    REQUIRE(decoded.has_value());
+
+    vault::StagedThumb precomp;
+    precomp.thumb_jpeg = {};  // EMPTY - no thumbnail
+    precomp.format = static_cast<vault::ImageFormat>(decoded->format);
+    precomp.width = decoded->width;
+    precomp.height = decoded->height;
+    precomp.animated = false;  // Force animated unknown
+
+    // Add via stage_image with precomputed (no-thumb) staging
+    auto staged = vault::stage_image(v, anim_webp, "anim.webp", &precomp);
+    REQUIRE(staged.status == vault::VaultResult::Ok);
+    REQUIRE(vault::attach_staged(v, "", std::move(staged.node)) == vault::VaultResult::Ok);
+
+    // Verify image has no thumbnail but is animatable with unknown flag
+    const vault::IndexNode* node = v.list("")[0];
+    CHECK_EQ(node->meta.thumb_length, 0);  // No thumbnail
+    CHECK(vault::format_can_animate(node->meta.format));
+    CHECK(!node->meta.animated);  // Unknown/false
+
+    // Force thumbs_stale (even though there's no thumb to regen)
+    auto settings = vault::vault_settings(v);
+    settings.migrated_thumb_side = 0;
+    REQUIRE(vault::set_vault_settings(v, settings) == vault::VaultResult::Ok);
+
+    // Run migration job
+    ui::MigrationJob job;
+    REQUIRE(job.start(v));
+    const ui::MigrationOutcome out = run_to_completion(job);
+
+    // Verify animated flag was detected and set to true
+    CHECK(out.ok);
+    CHECK(!out.cancelled);
+    CHECK(out.images_fixed >= 1);  // Animated sniffing counts as images_fixed
+
+    node = v.list("")[0];
+    CHECK(node->meta.animated);  // Should now be true
+}
+
+TEST(migration_job_thumb_arm_skips_when_fresh)
+{
+    // Phase 75: migrated vault with no pending work -> collect() finds no items
+    JobTempVault tv("skip_fresh");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
+            == vault::VaultResult::Ok);
+
+    // Add an animated WebP
+    auto anim_webp = fixtures::load_anim_webp();
+    REQUIRE(v.add_image("", anim_webp, "anim.webp") == vault::VaultResult::Ok);
+
+    // Pre-mark as animated so no animation detection work is needed
+    REQUIRE(vault::apply_image_animated(v, "anim.webp", true) == vault::VaultResult::Ok);
+
+    // Manually stamp the vault to mark it as already migrated at 512px
+    auto settings = vault::vault_settings(v);
+    settings = vault::stamp_migrated(settings, media::PROBE_CAPS_GEN, 512);
+    REQUIRE(vault::commit_migration(v, settings) == vault::VaultResult::Ok);
+
+    // Now verify migration is NOT pending and job is a no-op
+    CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN, 512));
+
+    ui::MigrationJob job;
+    REQUIRE(job.start(v));
+    const ui::MigrationOutcome out = run_to_completion(job);
+
+    CHECK(out.ok);
+    CHECK(!out.cancelled);
+    CHECK_EQ(out.total, 0);  // nothing to do (already migrated, animated known)
+    CHECK_EQ(out.thumbs_fixed, 0);
 }
 

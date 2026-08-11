@@ -10,8 +10,8 @@ namespace ui {
 // different density.
 enum class GalleryView { List, GridS, GridM, GridL, GridXL };
 
-// Tile side (px) for a grid density; meaningless for List. GridM is 188 —
-// the size every gallery grid used before this density cycle existed.
+// Tile side (px) for a grid density; meaningless for List. GridM is 256
+// (Phase 75 bump; was 188).
 [[nodiscard]] float cell_size_for(GalleryView view) noexcept;
 
 // L-key cycle order: List -> GridS -> GridM -> GridL -> GridXL -> List.

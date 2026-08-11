@@ -401,6 +401,10 @@ void write_settings(ByteWriter& w, const VaultSettings& s)
     w.u16(s.migrated_probe_caps);
 
     write_field_values_block(w, s.tag_field_values);
+
+    // Phase 75 thumb watermark — LAST in the block (version-gated reads rely
+    // on stable prefix order).
+    w.u16(s.migrated_thumb_side);
 }
 
 // Helper: read the field sub-block for a category (v11+ only).
@@ -561,6 +565,10 @@ bool read_settings(ByteReader& r, VaultSettings& s, uint8_t version)
 
     if (!read_field_values(r, s.tag_field_values)) return false;
 
+    // The thumb-side sub-block exists only from v12 on.
+    if (version < 12) return true;
+    s.migrated_thumb_side = r.u16();
+    if (!r.ok()) return false;
     return true;
 }
 
@@ -777,6 +785,16 @@ bool deserialize_index(std::span<const uint8_t> in, IndexNode& out,
     }
     // Trailing bytes after a well-formed blob indicate corruption.
     return r.remaining() == 0;
+}
+
+bool tag_ci_equal(std::string_view a, std::string_view b) noexcept
+{
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        auto to_lower = [](char c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; };
+        if (to_lower(a[i]) != to_lower(b[i])) return false;
+    }
+    return true;
 }
 
 } // namespace vault

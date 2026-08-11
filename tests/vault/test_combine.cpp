@@ -213,6 +213,37 @@ TEST(combine_unions_tags_case_insensitively)
     CHECK(has_tag(b, "sunny"));
 }
 
+TEST(combine_media_carries_effective_tags)
+{
+    using enum vault::VaultResult;
+    TempVault tv("combine_media_tags");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("p"), {}, kKdf, v) == Ok);
+
+    // Source: root (tag "global"), gallery "Src" (tag "series"), image Src/pic.jpg (tag "own")
+    REQUIRE(v.add_tag("", "global") == Ok);
+    REQUIRE(v.create_gallery("Src") == Ok);
+    REQUIRE(v.add_tag("Src", "series") == Ok);
+    REQUIRE(v.add_image("Src", blob(300, 1), "pic.jpg") == Ok);
+    REQUIRE(v.add_tag("Src/pic.jpg", "own") == Ok);
+
+    // Destination: gallery "Dst"
+    REQUIRE(v.create_gallery("Dst") == Ok);
+
+    // Combine: move Src into Dst
+    vault::CombineTally tally;
+    CHECK(vault::combine_galleries(v, "Src", v, "Dst", tally) == Ok);
+
+    // Verify: pic.jpg at Dst/pic.jpg now carries effective tags:
+    // own (media's own) + series (parent gallery) + global (root)
+    const auto* pic = find_child(v, "Dst", "pic.jpg");
+    REQUIRE(pic != nullptr);
+    REQUIRE(pic->tags.size() >= 3);
+    CHECK(has_tag(pic, "own"));
+    CHECK(has_tag(pic, "series"));
+    CHECK(has_tag(pic, "global"));
+}
+
 TEST(combine_cross_vault_merges_and_removes_source)
 {
     using enum vault::VaultResult;

@@ -11,7 +11,9 @@
 
 #include "crypto/secure_mem.h"
 #include "image/anim_info.h"
+#include "image/decode.h"
 #include "image/image.h"
+#include "image/thumbnail.h"
 #include "media/video_probe.h"
 #include "vault/index.h"
 #include "vault/migration.h"
@@ -23,12 +25,14 @@ namespace {
 // One unit of migration work, holding COPIED chunk spans rather than an
 // IndexNode* — the pool added in Task 5 must never hold a tree pointer.
 struct Item {
+    enum class Kind : uint8_t { VideoProbe, ImageAnimated, ImageThumb, VideoPoster };
+    Kind        kind = Kind::ImageAnimated;
     std::string node_path;
-    bool        is_video = false;
     std::vector<std::pair<uint64_t, uint64_t>> data_spans;
     uint64_t    bytes      = 0;
     uint32_t    chunk_size = 0;   // videos only
     uint8_t     format     = 0;   // images only
+    bool        thumbs_stale = false;  // Phase 75: video poster regen gate
 };
 
 // What a worker learned. `ok == false` means the read or decode failed.
@@ -41,36 +45,72 @@ struct Result {
     uint32_t height = 0;
     uint64_t duration_us = 0;
     std::vector<uint8_t> poster_jpeg;
+    std::vector<uint8_t> thumb_jpeg;      // ImageThumb / VideoPoster output (Phase 75)
+    bool     sniff_animated = false;      // ImageThumb also sniffed (format can animate)
     bool     animated = false;    // images only
 };
 
-void collect(const vault::Vault& v, const std::string& path, std::vector<Item>& out)
+// Build a video item from VideoCodec metadata. Workers never mutate the tree.
+void collect_video_item(Item::Kind kind, std::string_view child,
+                        const vault::VideoMeta& vmeta, bool thumbs_stale,
+                        std::vector<Item>& out)
+{
+    Item it;
+    it.kind         = kind;
+    it.node_path    = child;
+    it.bytes        = vmeta.orig_size;
+    it.chunk_size   = vmeta.chunk_size;
+    it.thumbs_stale = thumbs_stale;
+    it.data_spans.reserve(vmeta.chunks.size());
+    for (const vault::VideoChunk& c : vmeta.chunks)
+        it.data_spans.emplace_back(c.offset, c.length);
+    out.push_back(std::move(it));
+}
+
+// Build an image item. Workers never mutate the tree.
+void collect_image_item(Item::Kind kind, std::string_view child,
+                        const vault::ImageMeta& meta, std::vector<Item>& out)
+{
+    Item it;
+    it.kind       = kind;
+    it.node_path  = child;
+    it.bytes      = meta.orig_size;
+    it.format     = std::to_underlying(meta.format);
+    it.data_spans = {{meta.data_offset, meta.data_length}};
+    out.push_back(std::move(it));
+}
+
+void collect(const vault::Vault& v, const std::string& path, std::vector<Item>& out,
+             bool thumbs_stale)
 {
     for (const vault::IndexNode* n : v.list(path)) {
         const std::string child = path.empty() ? n->name : path + "/" + n->name;
-        if (n->is_gallery()) { collect(v, child, out); continue; }
+        if (n->is_gallery()) { collect(v, child, out, thumbs_stale); continue; }
 
-        if (n->is_video() && n->vmeta.codec == vault::VideoCodec::Unknown) {
-            Item it;
-            it.node_path  = child;
-            it.is_video   = true;
-            it.bytes      = n->vmeta.orig_size;
-            it.chunk_size = n->vmeta.chunk_size;
-            it.data_spans.reserve(n->vmeta.chunks.size());
-            for (const vault::VideoChunk& c : n->vmeta.chunks)
-                it.data_spans.emplace_back(c.offset, c.length);
-            out.push_back(std::move(it));
+        if (n->is_video()) {
+            if (n->vmeta.codec == vault::VideoCodec::Unknown) {
+                collect_video_item(Item::Kind::VideoProbe, child, n->vmeta, thumbs_stale, out);
+                continue;
+            }
+            if (thumbs_stale && n->vmeta.codec != vault::VideoCodec::Unknown) {
+                // Phase 75: known-codec videos need poster regen at new budget
+                collect_video_item(Item::Kind::VideoPoster, child, n->vmeta, thumbs_stale, out);
+            }
             continue;
         }
-        if (n->is_image() && vault::format_can_animate(n->meta.format) &&
-            !n->meta.animated) {
-            Item it;
-            it.node_path  = child;
-            it.is_video   = false;
-            it.bytes      = n->meta.orig_size;
-            it.format     = std::to_underlying(n->meta.format);
-            it.data_spans = {{n->meta.data_offset, n->meta.data_length}};
-            out.push_back(std::move(it));
+
+        if (n->is_image()) {
+            if (thumbs_stale && n->meta.thumb_length > 0) {
+                // Phase 75: existing images with thumbnails need regen at the new budget.
+                // This SUBSUMES the animated arm: process() will sniff animated.
+                collect_image_item(Item::Kind::ImageThumb, child, n->meta, out);
+            } else if (vault::format_can_animate(n->meta.format) && !n->meta.animated) {
+                // Animated arm: detect animated flag regardless of thumbs_stale.
+                // During thumb-stale pass, only no-thumb images reach here (those with
+                // thumb_length > 0 become ImageThumb above). During thumb-fresh pass,
+                // all animatable un-sniffed images reach here.
+                collect_image_item(Item::Kind::ImageAnimated, child, n->meta, out);
+            }
         }
     }
 }
@@ -113,7 +153,20 @@ Result process(const vault::Vault& v, const Item& it, size_t index)
     crypto::SecureBytes data;
     if (!read_item(v, it, data)) return r;   // ok stays false
 
-    if (it.is_video) {
+    using enum Item::Kind;
+
+    if (it.kind == VideoPoster) {
+        // Phase 75: regenerate poster at new budget (probe already encodes at THUMB_MAX_SIDE)
+        if (media::VideoProbeResult probe;
+            media::probe_video(data.as_span(), probe)) {
+            r.thumb_jpeg = std::move(probe.poster_jpeg);
+        }
+        r.ok = true;  // empty poster on probe failure is ok (skip, count as skipped)
+        return r;
+    }
+
+    if (it.kind == VideoProbe) {
+        // Existing VideoProbe arm: decode and capture codec metadata
         if (media::VideoProbeResult probe;
             media::probe_video(data.as_span(), probe) &&
             probe.codec != vault::VideoCodec::Unknown) {
@@ -128,6 +181,27 @@ Result process(const vault::Vault& v, const Item& it, size_t index)
         return r;
     }
 
+    if (it.kind == ImageThumb) {
+        // Phase 75: decode, regenerate thumbnail at THUMB_MAX_SIDE, sniff animated
+        if (auto decoded = image::decode_from_memory(data.as_span())) {
+            if (auto thumb = image::make_thumbnail(*decoded, image::THUMB_MAX_SIDE, 85)) {
+                r.thumb_jpeg = std::move(*thumb);
+            }
+            // Sniff animated flag when format can animate
+            const auto vfmt = static_cast<vault::ImageFormat>(it.format);
+            if (vault::format_can_animate(vfmt)) {
+                r.sniff_animated = true;
+                r.animated =
+                    image::is_animated(static_cast<image::ImageFormat>(it.format),
+                                       data.as_span());
+            }
+        }
+        // Empty thumb_jpeg is ok (skip, not failure) — only !ok counts as failure
+        r.ok = true;
+        return r;
+    }
+
+    // ImageAnimated arm (existing behavior)
     r.animated = image::is_animated(static_cast<image::ImageFormat>(it.format),
                                     data.as_span());
     r.ok = true;
@@ -181,27 +255,97 @@ private:
     bool                    closed_ = false;
 };
 
+// Apply image thumb result. Coordinator-thread only.
+void apply_image_thumb_item(vault::Vault& v, const Item& it, const Result& r,
+                            MigrationOutcome& out)
+{
+    // Phase 75: apply the regenerated thumbnail
+    if (!r.thumb_jpeg.empty()) {
+        if (vault::apply_image_thumb(v, it.node_path, r.thumb_jpeg) ==
+            vault::VaultResult::Ok) {
+            ++out.thumbs_fixed;
+        } else {
+            ++out.failed;
+            return;
+        }
+    }
+    // Also sniff and apply the animated flag if applicable
+    if (r.sniff_animated) {
+        (void)vault::apply_image_animated(v, it.node_path, r.animated);
+        // apply_image_animated only counts in images_fixed if the flag actually changed;
+        // here we just apply it for consistency, no separate count needed
+    }
+}
+
+// Apply video poster result. Coordinator-thread only.
+void apply_video_poster_item(vault::Vault& v, const Item& it, const Result& r,
+                             MigrationOutcome& out)
+{
+    // Phase 75: apply the regenerated poster
+    if (!r.thumb_jpeg.empty()) {
+        if (vault::apply_video_poster(v, it.node_path, r.thumb_jpeg) ==
+            vault::VaultResult::Ok) {
+            ++out.thumbs_fixed;
+        } else {
+            ++out.failed;
+        }
+    } else {
+        ++out.videos_skipped;
+    }
+}
+
+// Apply video probe result. Coordinator-thread only.
+void apply_video_probe_item(vault::Vault& v, const Item& it, const Result& r,
+                            MigrationOutcome& out)
+{
+    // Existing VideoProbe arm: detect codec + optionally replace stale poster
+    if (!r.resolved) { ++out.videos_skipped; return; }
+    if (const vault::VideoProbeApply apply{
+            .codec       = r.codec,
+            .width       = r.width,
+            .height      = r.height,
+            .duration_us = r.duration_us,
+            .poster_jpeg = std::span<const uint8_t>(r.poster_jpeg),
+        };
+        vault::apply_video_probe(v, it.node_path, apply) == vault::VaultResult::Ok)
+        ++out.videos_fixed;
+    else {
+        ++out.failed;
+        return;
+    }
+
+    // Phase 75: if thumbs_stale and we have a new poster, also replace the old one
+    // (apply_video_probe only fills EMPTY poster spans)
+    if (it.thumbs_stale && !r.poster_jpeg.empty() &&
+        vault::apply_video_poster(v, it.node_path, r.poster_jpeg) == vault::VaultResult::Ok)
+        ++out.thumbs_fixed;
+    // If poster replace fails, the probe already succeeded, so don't fail the
+    // whole video; just skip the poster regen for this item
+}
+
 // Coordinator-thread only: mutates the tree and may append to fp_.
 void apply_one(vault::Vault& v, const Item& it, const Result& r, MigrationOutcome& out)
 {
     if (!r.ok) { ++out.failed; return; }
 
-    if (it.is_video) {
-        if (!r.resolved) { ++out.videos_skipped; return; }
-        if (const vault::VideoProbeApply apply{
-                .codec       = r.codec,
-                .width       = r.width,
-                .height      = r.height,
-                .duration_us = r.duration_us,
-                .poster_jpeg = std::span<const uint8_t>(r.poster_jpeg),
-            };
-            vault::apply_video_probe(v, it.node_path, apply) == vault::VaultResult::Ok)
-            ++out.videos_fixed;
-        else
-            ++out.failed;
+    using enum Item::Kind;
+
+    if (it.kind == ImageThumb) {
+        apply_image_thumb_item(v, it, r, out);
         return;
     }
 
+    if (it.kind == VideoPoster) {
+        apply_video_poster_item(v, it, r, out);
+        return;
+    }
+
+    if (it.kind == VideoProbe) {
+        apply_video_probe_item(v, it, r, out);
+        return;
+    }
+
+    // ImageAnimated arm (existing behavior)
     if (vault::apply_image_animated(v, it.node_path, r.animated) ==
         vault::VaultResult::Ok)
         ++out.images_fixed;
@@ -302,8 +446,13 @@ void MigrationJob::run(vault::Vault& v)
 {
     MigrationOutcome out;
 
+    // Phase 75: compute thumbs_stale to decide whether to regenerate thumbnails
+    const vault::VaultSettings settings = vault::vault_settings(v);
+    const bool thumbs_stale =
+        settings.migrated_thumb_side < static_cast<uint16_t>(image::THUMB_MAX_SIDE);
+
     std::vector<Item> items;
-    collect(v, "", items);
+    collect(v, "", items, thumbs_stale);
     out.total = static_cast<int>(items.size());
     progress_.total.store(out.total);
 
@@ -320,11 +469,12 @@ void MigrationJob::run(vault::Vault& v)
         out.cancelled = true;
     }
 
-    vault::VaultSettings settings = vault::vault_settings(v);
+    vault::VaultSettings stamped_settings = vault::vault_settings(v);
     if (!out.cancelled) {
-        settings = vault::stamp_migrated(settings, media::PROBE_CAPS_GEN);
+        stamped_settings = vault::stamp_migrated(stamped_settings, media::PROBE_CAPS_GEN,
+                                                  static_cast<uint16_t>(image::THUMB_MAX_SIDE));
     }
-    if (const auto res = vault::commit_migration(v, settings);
+    if (const auto res = vault::commit_migration(v, stamped_settings);
         res != vault::VaultResult::Ok) {
         out.ok    = false;
         out.error = "Migration could not be saved; the vault is unchanged.";
