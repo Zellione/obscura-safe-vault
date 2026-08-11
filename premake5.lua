@@ -613,6 +613,7 @@ project "osv_tests"
         "src/ui/text_metrics.cpp",
         "src/ui/settings_model.cpp",
         "src/ui/dual_layout.cpp",
+        "src/ui/dual_transfer.cpp",
         "src/ui/tile_thumb.cpp",
     }
 

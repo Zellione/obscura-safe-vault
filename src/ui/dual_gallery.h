@@ -8,6 +8,8 @@
 
 #include "ui/screen.h"
 #include "ui/gallery_grid.h"
+#include "ui/dual_transfer.h"
+#include "ui/file_op_job.h"
 
 namespace gfx { class Window; class FontAtlas; class Renderer; class TextureCache; }
 namespace vault { class Vault; }
@@ -52,10 +54,13 @@ private:
     gfx::FontAtlas&           font_;
     vault::Vault&             vault_;
     DualSessionState&         dual_;
+    ImportQueue&              queue_;
     std::unique_ptr<GalleryGrid> left_;
     std::unique_ptr<GalleryGrid> right_;
     int                       active_ = 0;
     std::string               status_;
+    DualTransferPrompt        prompt_;
+    FileOpJob                 job_;
 };
 
 } // namespace ui
