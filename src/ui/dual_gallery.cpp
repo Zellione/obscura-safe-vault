@@ -161,7 +161,6 @@ void DualGalleryScreen::handle_event(const SDL_Event& e)
             const auto launch = prompt_.key(key);
             if (launch.fire) {
                 // Fire the transfer job: build spec and launch
-                const std::string& src_path = current_gallery_path(active());
                 const std::string& dst_path = current_gallery_path(inactive());
 
                 // Build selection paths from active pane
