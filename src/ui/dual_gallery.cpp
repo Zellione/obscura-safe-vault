@@ -143,10 +143,29 @@ void DualGalleryScreen::handle_event(const SDL_Event& e)
 
     // 2. Transfer prompt (Task 7) would check here - skipping for now
 
+    // Input-while-busy routing: if either pane has an active job/import modal,
+    // route ALL key events to that pane so its progress modal/cancel keys work.
+    const bool left_busy = vault_busy(*left_);
+    const bool right_busy = vault_busy(*right_);
+    if (e.type == SDL_EVENT_KEY_DOWN && (left_busy || right_busy)) {
+        GalleryGrid& busy_pane = left_busy ? *left_ : *right_;
+        if ((left_busy && active_ != 0) || (right_busy && active_ != 1)) {
+            // Busy pane is not active; route key to it anyway
+            busy_pane.handle_event(e);
+            Nav n = busy_pane.take_nav();
+            if (n.kind != NavKind::None) {
+                snapshot();
+                request(n.kind, n.path, n.index);
+            }
+            return;
+        }
+        // Busy pane is active; let normal routing handle it below
+    }
+
     // 3. Tab (no modifiers): switch panes or forward if overlay active
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_TAB && e.key.mod == 0) {
         // Check if either pane is busy with overlay/naming
-        if (!vault_busy(*left_) && !vault_busy(*right_)) {
+        if (!left_busy && !right_busy) {
             set_active(1 - active_);
             mark_dirty();
             return;
@@ -164,9 +183,9 @@ void DualGalleryScreen::handle_event(const SDL_Event& e)
         return;
     }
 
-    // 5. M (no mods, active pane not busy): open transfer prompt (Task 7)
+    // 5. M (no mods): open transfer prompt (Task 7), but refuse if either pane busy
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_M && e.key.mod == 0) {
-        if (vault_busy(active())) {
+        if (left_busy || right_busy) {
             status_ = "Transfer in progress";
             mark_dirty();
             return;
@@ -353,9 +372,13 @@ void DualGalleryScreen::render(gfx::Renderer& r)
         constexpr float status_height = 20.0f;
         SDL_FRect status_bg{split.divider.x, split.divider.y + split.divider.h - status_height,
                             split.divider.w, status_height};
-        // Use a semi-transparent background to make it visible over whatever is behind
+        // Draw background to ensure text is readable
         r.draw_rect(status_bg, gfx::theme::BG, /*filled*/ true);
-        // TODO: render the actual status text here using font rendering in a future phase
+
+        // Render the status text centered vertically in the banner, left-aligned
+        const float ty = font_.text_top_for_center(status_bg.y + status_bg.h * 0.5f);
+        constexpr float text_x_offset = 4.0f;  // small padding from left edge
+        r.draw_text(font_, status_bg.x + text_x_offset, ty, status_, gfx::theme::TEXT);
     }
 }
 
