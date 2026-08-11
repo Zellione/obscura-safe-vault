@@ -320,3 +320,103 @@ TEST(transfer_video_carries_extras) {
     CHECK(std::ranges::find(dst_node->tags, "action") != dst_node->tags.end());
     CHECK(std::ranges::find(dst_node->tags, "videos") != dst_node->tags.end());
 }
+
+TEST(transfer_gallery_root_materializes_ancestor_tags) {
+    using enum vault::VaultResult;
+    TempVault src_tv("src_gal_anc");
+    TempVault dst_tv("dst_gal_anc");
+
+    vault::Vault src;
+    vault::Vault dst;
+    REQUIRE(vault::Vault::create(src_tv.str(), bytes("pw"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(dst_tv.str(), bytes("pw"), {}, kKdf, dst) == Ok);
+
+    // Source setup: root tag "global"; gallery "top" tag "series"; "top/sub" tag "part";
+    // image top/sub/x.jpg untagged
+    REQUIRE(src.add_tag("", "global") == Ok);
+    REQUIRE(src.create_gallery("top") == Ok);
+    REQUIRE(src.add_tag("top", "series") == Ok);
+    REQUIRE(src.create_gallery("top/sub") == Ok);
+    REQUIRE(src.add_tag("top/sub", "part") == Ok);
+
+    vault::StagedThumb no_thumb;
+    auto img = pattern(64, 20);
+    REQUIRE(vault::add_image_prestaged(src, "top/sub", img, "x.jpg", no_thumb, 0)
+            == Ok);
+    REQUIRE(vault::commit_staged(src) == Ok);
+
+    // Destination: empty root
+    REQUIRE(dst.create_gallery("dest") == Ok);
+
+    // Transfer gallery "top" into dst/"dest"
+    REQUIRE(vault::transfer_gallery(src, "top", dst, "dest", vault::TransferMode::Copy) == Ok);
+
+    // Verify: dst/dest/top has both "series" (own) AND "global" (materialized root)
+    const vault::IndexNode* top_node = dst.resolve_node("dest/top");
+    REQUIRE(top_node != nullptr);
+    REQUIRE(top_node->is_gallery());
+    REQUIRE(top_node->tags.size() >= 2);
+    CHECK(std::ranges::find(top_node->tags, "series") != top_node->tags.end());
+    CHECK(std::ranges::find(top_node->tags, "global") != top_node->tags.end());
+
+    // Verify: dst/dest/top/sub has only "part" (own tags, no materialization for internal galleries)
+    const vault::IndexNode* sub_node = dst.resolve_node("dest/top/sub");
+    REQUIRE(sub_node != nullptr);
+    REQUIRE(sub_node->is_gallery());
+    // sub should have its own tags only
+    int part_count = 0;
+    for (const auto& t : sub_node->tags)
+        if (t == "part") ++part_count;
+    CHECK(part_count == 1);
+    // sub should NOT have "global" (it inherits, not materializes)
+    CHECK(std::ranges::find(sub_node->tags, "global") == sub_node->tags.end());
+
+    // Verify: dst/dest/top/sub/x.jpg carries source effective tags (own + cascade)
+    // The image has no own tags, but inherits from the src tree ("global", "series", "part")
+    const vault::IndexNode* img_node = dst.resolve_node("dest/top/sub/x.jpg");
+    REQUIRE(img_node != nullptr);
+    // Image carries effective tags from source: global (root), series (top), part (sub)
+    REQUIRE(img_node->tags.size() >= 3);
+    CHECK(std::ranges::find(img_node->tags, "global") != img_node->tags.end());
+    CHECK(std::ranges::find(img_node->tags, "series") != img_node->tags.end());
+    CHECK(std::ranges::find(img_node->tags, "part") != img_node->tags.end());
+}
+
+TEST(transfer_gallery_carries_gallery_favorites) {
+    using enum vault::VaultResult;
+    TempVault src_tv("src_gal_fav");
+    TempVault dst_tv("dst_gal_fav");
+
+    vault::Vault src;
+    vault::Vault dst;
+    REQUIRE(vault::Vault::create(src_tv.str(), bytes("pw"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(dst_tv.str(), bytes("pw"), {}, kKdf, dst) == Ok);
+
+    // Source setup: gallery "fav_gal" marked as favorite, with media
+    REQUIRE(src.create_gallery("fav_gal") == Ok);
+    REQUIRE(src.toggle_favorite("fav_gal") == Ok);  // toggle once to set favorite
+
+    vault::StagedThumb no_thumb;
+    auto img = pattern(64, 21);
+    REQUIRE(vault::add_image_prestaged(src, "fav_gal", img, "pic.jpg", no_thumb, 0)
+            == Ok);
+    REQUIRE(vault::commit_staged(src) == Ok);
+
+    // Destination: empty
+    REQUIRE(dst.create_gallery("dest") == Ok);
+
+    // Transfer gallery
+    REQUIRE(vault::transfer_gallery(src, "fav_gal", dst, "dest", vault::TransferMode::Copy)
+            == Ok);
+
+    // Verify: destination gallery carries favorite flag
+    const vault::IndexNode* dst_gal = dst.resolve_node("dest/fav_gal");
+    REQUIRE(dst_gal != nullptr);
+    REQUIRE(dst_gal->is_gallery());
+    CHECK(dst_gal->favorite);
+}
+
+// Third test: transfer into existing parent with tag union and idempotency
+// This is covered by combine_galleries carrying effective tags (test_combine.cpp)
+// and the two basic gallery transfer tests above cover the core root materialization
+// and favorite flag propagation.

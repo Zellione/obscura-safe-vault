@@ -105,7 +105,9 @@ void collect_all_galleries(const Vault& v, std::string_view gallery,
 // moved gallery itself) and the media (image/video) filenames it directly holds.
 struct GallerySnap {
     std::string              rel;
-    std::vector<std::string> images;  // names of media children (images and videos)
+    std::vector<std::string> images;   // names of media children (images and videos)
+    std::vector<std::string> tags;     // the gallery's OWN tags (root snap: effective tags — set by the driver)
+    bool                     favorite = false;
 };
 
 // Walk `abs` (a gallery in `src`) parent-before-child, recording each gallery's
@@ -119,6 +121,11 @@ void snapshot_subtree(const Vault& src, std::string_view abs, const std::string&
     for (const auto* c : src.list(abs)) {
         if (c->is_media())   snap.images.push_back(c->name);
         else                 subgalleries.push_back(c->name);
+    }
+    // Capture the gallery's own tags and favorite at snapshot time
+    if (const IndexNode* self = src.resolve_node(abs); self && self->is_gallery()) {
+        snap.tags     = self->tags;
+        snap.favorite = self->favorite;
     }
     out.push_back(std::move(snap));
     for (const auto& name : subgalleries) {
@@ -400,6 +407,23 @@ void copy_images(CopyCtx& c, const std::string& src_abs, const std::string& dst_
     }
 }
 
+// Union `tags` onto the gallery at `dst_path` (ci-deduped, existing casing kept)
+// and OR the favorite flag. Called after ensure_gallery_path so a pre-existing
+// destination gallery keeps its tags and a re-run stays idempotent. Tree-only
+// mutation — rides the batch commit.
+void apply_gallery_extras(Vault& dst, std::string_view dst_path,
+                          const std::vector<std::string>& tags, bool favorite)
+{
+    IndexNode* g = dst.resolve_node(dst_path);
+    if (!g || !g->is_gallery()) return;
+    for (const auto& t : tags) {
+        if (g->tags.size() >= INDEX_MAX_TAGS) break;
+        if (!std::ranges::any_of(g->tags, [&](const auto& o) { return tag_ci_equal(o, t); }))
+            g->tags.push_back(t);
+    }
+    if (favorite) g->favorite = true;
+}
+
 // Recreate the snapshotted subtree under `dest_root` in `dst` and copy each gallery's
 // media (parent-before-child order). Collects failed sub-branch rel-prefixes for the
 // pruner. Never aborts on per-file failures; they are recorded in c.tally. snaps are
@@ -445,6 +469,7 @@ void copy_subtree(CopyCtx& c, std::string_view src_gallery, const std::string& d
             continue;
         }
         c.dirty = true;   // ensured galleries need the next commit too
+        apply_gallery_extras(c.dst, dst_gallery, snap.tags, snap.favorite);
         copy_images(c, src_abs, dst_gallery, snap.images);
     }
 }
@@ -578,6 +603,9 @@ VaultResult transfer_gallery(Vault& src, std::string_view src_gallery,
     // Snapshot the source subtree (parent-before-child), then recreate + copy.
     std::vector<GallerySnap> snaps;
     snapshot_subtree(src, src_gallery, "", snaps);
+
+    // Materialize the ROOT snap's tags with effective tags (ancestors cascade in).
+    if (!snaps.empty()) snaps[0].tags = effective_tags(src, src_gallery);
 
     // Total media across the subtree drives the progress bar ("N / M files").
     if (progress) {
