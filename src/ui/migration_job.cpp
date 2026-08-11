@@ -50,6 +50,36 @@ struct Result {
     bool     animated = false;    // images only
 };
 
+// Build a video item from VideoCodec metadata. Workers never mutate the tree.
+void collect_video_item(Item::Kind kind, const std::string& child,
+                        const vault::VideoMeta& vmeta, bool thumbs_stale,
+                        std::vector<Item>& out)
+{
+    Item it;
+    it.kind         = kind;
+    it.node_path    = child;
+    it.bytes        = vmeta.orig_size;
+    it.chunk_size   = vmeta.chunk_size;
+    it.thumbs_stale = thumbs_stale;
+    it.data_spans.reserve(vmeta.chunks.size());
+    for (const vault::VideoChunk& c : vmeta.chunks)
+        it.data_spans.emplace_back(c.offset, c.length);
+    out.push_back(std::move(it));
+}
+
+// Build an image item. Workers never mutate the tree.
+void collect_image_item(Item::Kind kind, const std::string& child,
+                        const vault::ImageMeta& meta, std::vector<Item>& out)
+{
+    Item it;
+    it.kind       = kind;
+    it.node_path  = child;
+    it.bytes      = meta.orig_size;
+    it.format     = std::to_underlying(meta.format);
+    it.data_spans = {{meta.data_offset, meta.data_length}};
+    out.push_back(std::move(it));
+}
+
 void collect(const vault::Vault& v, const std::string& path, std::vector<Item>& out,
              bool thumbs_stale)
 {
@@ -59,30 +89,12 @@ void collect(const vault::Vault& v, const std::string& path, std::vector<Item>& 
 
         if (n->is_video()) {
             if (n->vmeta.codec == vault::VideoCodec::Unknown) {
-                Item it;
-                it.kind         = Item::Kind::VideoProbe;
-                it.node_path    = child;
-                it.bytes        = n->vmeta.orig_size;
-                it.chunk_size   = n->vmeta.chunk_size;
-                it.thumbs_stale = thumbs_stale;  // Phase 75: needed to replace poster if resolved
-                it.data_spans.reserve(n->vmeta.chunks.size());
-                for (const vault::VideoChunk& c : n->vmeta.chunks)
-                    it.data_spans.emplace_back(c.offset, c.length);
-                out.push_back(std::move(it));
+                collect_video_item(Item::Kind::VideoProbe, child, n->vmeta, thumbs_stale, out);
                 continue;
             }
             if (thumbs_stale && n->vmeta.codec != vault::VideoCodec::Unknown) {
                 // Phase 75: known-codec videos need poster regen at new budget
-                Item it;
-                it.kind         = Item::Kind::VideoPoster;
-                it.node_path    = child;
-                it.bytes        = n->vmeta.orig_size;
-                it.chunk_size   = n->vmeta.chunk_size;
-                it.thumbs_stale = thumbs_stale;
-                it.data_spans.reserve(n->vmeta.chunks.size());
-                for (const vault::VideoChunk& c : n->vmeta.chunks)
-                    it.data_spans.emplace_back(c.offset, c.length);
-                out.push_back(std::move(it));
+                collect_video_item(Item::Kind::VideoPoster, child, n->vmeta, thumbs_stale, out);
             }
             continue;
         }
@@ -91,25 +103,13 @@ void collect(const vault::Vault& v, const std::string& path, std::vector<Item>& 
             if (thumbs_stale && n->meta.thumb_length > 0) {
                 // Phase 75: existing images with thumbnails need regen at the new budget.
                 // This SUBSUMES the animated arm: process() will sniff animated.
-                Item it;
-                it.kind       = Item::Kind::ImageThumb;
-                it.node_path  = child;
-                it.bytes      = n->meta.orig_size;
-                it.format     = std::to_underlying(n->meta.format);
-                it.data_spans = {{n->meta.data_offset, n->meta.data_length}};
-                out.push_back(std::move(it));
+                collect_image_item(Item::Kind::ImageThumb, child, n->meta, out);
             } else if (vault::format_can_animate(n->meta.format) && !n->meta.animated) {
                 // Animated arm: detect animated flag regardless of thumbs_stale.
                 // During thumb-stale pass, only no-thumb images reach here (those with
                 // thumb_length > 0 become ImageThumb above). During thumb-fresh pass,
                 // all animatable un-sniffed images reach here.
-                Item it;
-                it.kind       = Item::Kind::ImageAnimated;
-                it.node_path  = child;
-                it.bytes      = n->meta.orig_size;
-                it.format     = std::to_underlying(n->meta.format);
-                it.data_spans = {{n->meta.data_offset, n->meta.data_length}};
-                out.push_back(std::move(it));
+                collect_image_item(Item::Kind::ImageAnimated, child, n->meta, out);
             }
         }
     }
@@ -255,6 +255,74 @@ private:
     bool                    closed_ = false;
 };
 
+// Apply image thumb result. Coordinator-thread only.
+void apply_image_thumb_item(vault::Vault& v, const Item& it, const Result& r,
+                            MigrationOutcome& out)
+{
+    // Phase 75: apply the regenerated thumbnail
+    if (!r.thumb_jpeg.empty()) {
+        if (vault::apply_image_thumb(v, it.node_path, r.thumb_jpeg) ==
+            vault::VaultResult::Ok) {
+            ++out.thumbs_fixed;
+        } else {
+            ++out.failed;
+            return;
+        }
+    }
+    // Also sniff and apply the animated flag if applicable
+    if (r.sniff_animated) {
+        (void)vault::apply_image_animated(v, it.node_path, r.animated);
+        // apply_image_animated only counts in images_fixed if the flag actually changed;
+        // here we just apply it for consistency, no separate count needed
+    }
+}
+
+// Apply video poster result. Coordinator-thread only.
+void apply_video_poster_item(vault::Vault& v, const Item& it, const Result& r,
+                             MigrationOutcome& out)
+{
+    // Phase 75: apply the regenerated poster
+    if (!r.thumb_jpeg.empty()) {
+        if (vault::apply_video_poster(v, it.node_path, r.thumb_jpeg) ==
+            vault::VaultResult::Ok) {
+            ++out.thumbs_fixed;
+        } else {
+            ++out.failed;
+        }
+    } else {
+        ++out.videos_skipped;
+    }
+}
+
+// Apply video probe result. Coordinator-thread only.
+void apply_video_probe_item(vault::Vault& v, const Item& it, const Result& r,
+                            MigrationOutcome& out)
+{
+    // Existing VideoProbe arm: detect codec + optionally replace stale poster
+    if (!r.resolved) { ++out.videos_skipped; return; }
+    if (const vault::VideoProbeApply apply{
+            .codec       = r.codec,
+            .width       = r.width,
+            .height      = r.height,
+            .duration_us = r.duration_us,
+            .poster_jpeg = std::span<const uint8_t>(r.poster_jpeg),
+        };
+        vault::apply_video_probe(v, it.node_path, apply) == vault::VaultResult::Ok)
+        ++out.videos_fixed;
+    else {
+        ++out.failed;
+        return;
+    }
+
+    // Phase 75: if thumbs_stale and we have a new poster, also replace the old one
+    // (apply_video_probe only fills EMPTY poster spans)
+    if (it.thumbs_stale && !r.poster_jpeg.empty() &&
+        vault::apply_video_poster(v, it.node_path, r.poster_jpeg) == vault::VaultResult::Ok)
+        ++out.thumbs_fixed;
+    // If poster replace fails, the probe already succeeded, so don't fail the
+    // whole video; just skip the poster regen for this item
+}
+
 // Coordinator-thread only: mutates the tree and may append to fp_.
 void apply_one(vault::Vault& v, const Item& it, const Result& r, MigrationOutcome& out)
 {
@@ -263,66 +331,17 @@ void apply_one(vault::Vault& v, const Item& it, const Result& r, MigrationOutcom
     using enum Item::Kind;
 
     if (it.kind == ImageThumb) {
-        // Phase 75: apply the regenerated thumbnail
-        if (!r.thumb_jpeg.empty()) {
-            if (vault::apply_image_thumb(v, it.node_path, r.thumb_jpeg) ==
-                vault::VaultResult::Ok) {
-                ++out.thumbs_fixed;
-            } else {
-                ++out.failed;
-                return;
-            }
-        }
-        // Also sniff and apply the animated flag if applicable
-        if (r.sniff_animated) {
-            (void)vault::apply_image_animated(v, it.node_path, r.animated);
-            // apply_image_animated only counts in images_fixed if the flag actually changed;
-            // here we just apply it for consistency, no separate count needed
-        }
+        apply_image_thumb_item(v, it, r, out);
         return;
     }
 
     if (it.kind == VideoPoster) {
-        // Phase 75: apply the regenerated poster
-        if (!r.thumb_jpeg.empty()) {
-            if (vault::apply_video_poster(v, it.node_path, r.thumb_jpeg) ==
-                vault::VaultResult::Ok) {
-                ++out.thumbs_fixed;
-            } else {
-                ++out.failed;
-            }
-        } else {
-            ++out.videos_skipped;
-        }
+        apply_video_poster_item(v, it, r, out);
         return;
     }
 
     if (it.kind == VideoProbe) {
-        // Existing VideoProbe arm: detect codec + optionally replace stale poster
-        if (!r.resolved) { ++out.videos_skipped; return; }
-        if (const vault::VideoProbeApply apply{
-                .codec       = r.codec,
-                .width       = r.width,
-                .height      = r.height,
-                .duration_us = r.duration_us,
-                .poster_jpeg = std::span<const uint8_t>(r.poster_jpeg),
-            };
-            vault::apply_video_probe(v, it.node_path, apply) == vault::VaultResult::Ok)
-            ++out.videos_fixed;
-        else {
-            ++out.failed;
-            return;
-        }
-
-        // Phase 75: if thumbs_stale and we have a new poster, also replace the old one
-        // (apply_video_probe only fills EMPTY poster spans)
-        if (it.thumbs_stale && !r.poster_jpeg.empty()) {
-            if (vault::apply_video_poster(v, it.node_path, r.poster_jpeg) ==
-                vault::VaultResult::Ok)
-                ++out.thumbs_fixed;
-            // If poster replace fails, the probe already succeeded, so don't fail the
-            // whole video; just skip the poster regen for this item
-        }
+        apply_video_probe_item(v, it, r, out);
         return;
     }
 

@@ -219,8 +219,8 @@ void VaultUnlockPicker::render(gfx::Renderer& r, gfx::FontAtlas& font, float ix,
     if (stage_ == Stage::PickVault) {
         r.draw_text(font, ix, iy + 36, title_override, TEXT_DIM);
         std::vector<std::string> labels;
-        if (include_self_) labels.push_back("This vault");
-        for (const auto& p : candidates_) labels.push_back(platform::path_to_utf8(p.filename()));
+        if (include_self_) labels.emplace_back("This vault");
+        for (const auto& p : candidates_) labels.emplace_back(platform::path_to_utf8(p.filename()));
         row_list(labels, vault_sel_, iy + 72);
     } else {
         r.draw_text(font, ix, iy + 36,

@@ -97,16 +97,12 @@ private:
     void rebuild_targets();   // image_target_galleries(dest_vault()) + the "New gallery…" row
     void render_body(gfx::Renderer& r, gfx::FontAtlas& font,
                      float ix, float iy, float mw, float mh, float my);  // per-stage body
-    void render_direction_body(gfx::Renderer& r, gfx::FontAtlas& font,
-                               float ix, float iy, float mw) const;
-    void render_mode_body(gfx::Renderer& r, gfx::FontAtlas& font,
-                          float ix, float iy, float mw) const;
     void render_conflict_body(gfx::Renderer& r, gfx::FontAtlas& font,
                               float ix, float iy, float mw) const;
     void render_pick_gallery_body(gfx::Renderer& r, gfx::FontAtlas& font,
                                   float ix, float iy, float mw, float mh, float my);
     void render_src_galleries_body(gfx::Renderer& r, gfx::FontAtlas& font,
-                                   float ix, float iy, float mw, float mh, float my);
+                                   float ix, float iy, float mw, float mh, float my) const;
 
     bool handle_mode_key(SDL_Keycode k);         // Mode stage: toggle Move/Copy
     bool handle_conflict_key(SDL_Keycode k);     // Conflict stage: choose policy
@@ -136,10 +132,14 @@ private:
     std::vector<std::string> src_galleries_;   // Source::Galleries payload; also PickSrcGalleries multi-select results
     std::vector<ParentGroup> media_groups_;    // Source::Collection payload (Phase 68)
 
-    bool        has_current_gallery_ = false;   // enables Direction stage if set
-    std::string current_gallery_;               // pull destination (browsed gallery in active vault)
-    bool        pull_ = false;                  // true when pulling from another vault
-    int         direction_sel_ = 0;             // Direction stage selection (0=push, 1=pull)
+    // Pull mode state: bundled to keep field count ≤20 (S1820)
+    struct Pull {
+        bool        has_current = false;       // enables Direction stage if set
+        std::string current_gallery;            // pull destination (browsed gallery in active vault)
+        bool        active = false;             // true when pulling from another vault
+        int         direction_sel = 0;          // Direction stage selection (0=push, 1=pull)
+    };
+    Pull        pull_;
 
     enum class Source { Images, Gallery, Galleries, Collection };   // Galleries: Phase 44 Part 3; Collection: Phase 68
     Source      source_ = Source::Images;

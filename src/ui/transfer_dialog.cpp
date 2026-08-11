@@ -23,6 +23,39 @@ namespace ui {
 
 namespace {
 constexpr const char* kNewGalleryRow = "+ New gallery…";
+
+void render_direction_body(gfx::Renderer& r, gfx::FontAtlas& font,
+                           float ix, float iy, float mw, int direction_sel)
+{
+    using namespace gfx::theme;
+    r.draw_text(font, ix, iy + 36, "Direction:", TEXT_DIM);
+    const std::vector<std::string> directions = {"To another vault…", "From another vault…"};
+    for (size_t i = 0; i < directions.size(); ++i) {
+        const float ry = iy + 72 + static_cast<float>(i) * 34.0f;
+        const bool  on = (static_cast<int>(i) == direction_sel);
+        if (on) r.draw_round_rect({ix, ry, mw - 40, 30}, RADIUS_SMALL, SURFACE_HI);
+        r.draw_text(font, ix + 8, ry + 4, fit_text(font, directions[i], mw - 56), on ? TEXT : TEXT_DIM);
+    }
+    r.draw_text(font, ix, iy + 150,
+                fit_text(font, "[Up/Down] choose  [Enter] next", mw - 40), TEXT_FAINT);
+}
+
+void render_mode_body(gfx::Renderer& r, gfx::FontAtlas& font, float ix, float iy, float mw,
+                      vault::TransferMode mode)
+{
+    using namespace gfx::theme;
+    r.draw_text(font, ix, iy + 36, "Action:", TEXT_DIM);
+    const std::vector<std::string> modes = {"Move", "Copy"};
+    const int msel = (mode == vault::TransferMode::Copy) ? 1 : 0;
+    for (size_t i = 0; i < modes.size(); ++i) {
+        const float ry = iy + 72 + static_cast<float>(i) * 34.0f;
+        const bool  on = (static_cast<int>(i) == msel);
+        if (on) r.draw_round_rect({ix, ry, mw - 40, 30}, RADIUS_SMALL, SURFACE_HI);
+        r.draw_text(font, ix + 8, ry + 4, fit_text(font, modes[i], mw - 56), on ? TEXT : TEXT_DIM);
+    }
+    r.draw_text(font, ix, iy + 150,
+                fit_text(font, "[Up/Down] choose  [Enter] next", mw - 40), TEXT_FAINT);
+}
 } // namespace
 
 TransferDialog::TransferDialog(vault::Vault& src, std::string src_path,
@@ -32,15 +65,15 @@ TransferDialog::TransferDialog(vault::Vault& src, std::string src_path,
 
 void TransferDialog::set_current_gallery(std::string path)
 {
-    has_current_gallery_ = true;
-    current_gallery_ = std::move(path);
+    pull_.has_current = true;
+    pull_.current_gallery = std::move(path);
 }
 
 void TransferDialog::open(std::string src_gallery, std::vector<std::string> filenames)
 {
     active_       = true;
     source_       = Source::Images;
-    stage_        = has_current_gallery_ ? Stage::Direction : Stage::Mode;
+    stage_        = pull_.has_current ? Stage::Direction : Stage::Mode;
     mode_         = vault::TransferMode::Move;
     src_gallery_  = std::move(src_gallery);
     filenames_    = std::move(filenames);
@@ -48,8 +81,8 @@ void TransferDialog::open(std::string src_gallery, std::vector<std::string> file
     naming_ = false;
     name_buf_.clear();
     conflict_ = {};
-    pull_ = false;
-    direction_sel_ = 0;
+    pull_.active = false;
+    pull_.direction_sel = 0;
 
     // The new-gallery name overlay consumes SDL_EVENT_TEXT_INPUT, which SDL3 only
     // delivers while text input is active.
@@ -157,7 +190,7 @@ void TransferDialog::do_move(std::string_view dst_target)
 
 void TransferDialog::launch_current(std::string_view target, vault::CollisionPolicy policy)
 {
-    if (pull_) {
+    if (pull_.active) {
         // Pull: source galleries from picker_dest_.unlocked_vault() into src_ (active vault)
         // at target destination.
         vault::Vault& src_vault = picker_dest_.unlocked_vault();   // source in pull mode
@@ -203,9 +236,9 @@ void TransferDialog::launch_transfer(std::string_view dst_target, vault::Collisi
 bool TransferDialog::handle_direction_key(SDL_Keycode k)
 {
     if (k == SDLK_UP || k == SDLK_DOWN || k == SDLK_LEFT || k == SDLK_RIGHT)
-        direction_sel_ = (direction_sel_ == 0) ? 1 : 0;
+        pull_.direction_sel = (pull_.direction_sel == 0) ? 1 : 0;
     if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
-        pull_ = (direction_sel_ == 1);
+        pull_.active = (pull_.direction_sel == 1);
         stage_ = Stage::Mode;
     }
     return true;
@@ -217,7 +250,7 @@ bool TransferDialog::handle_mode_key(SDL_Keycode k)
     if (k == SDLK_UP || k == SDLK_DOWN || k == SDLK_LEFT || k == SDLK_RIGHT)
         mode_ = (mode_ == Move) ? Copy : Move;
     if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
-        if (pull_) {
+        if (pull_.active) {
             picker_dest_.open(src_path_, /*include_self=*/false);
         } else {
             picker_dest_.open(src_path_);
@@ -262,10 +295,10 @@ bool TransferDialog::handle_src_galleries_key(SDL_Keycode k)
     if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
         auto paths = ui::drop_descendant_paths(picker_.checked());
         if (paths.empty()) return true;   // ignore if nothing checked
-        // Pre-scan for collisions: the destination is src_ (active vault), parent is current_gallery_
-        const auto clashes = vault::colliding_galleries(src_, current_gallery_, paths);
-        if (!clashes.empty()) {
-            conflict_.target = current_gallery_;
+        // Pre-scan for collisions: the destination is src_ (active vault), parent is pull_.current_gallery
+        if (const auto clashes = vault::colliding_galleries(src_, pull_.current_gallery, paths);
+            !clashes.empty()) {
+            conflict_.target = pull_.current_gallery;
             conflict_.count = static_cast<int>(clashes.size());
             conflict_.sel = 0;
             src_galleries_ = std::move(paths);
@@ -274,7 +307,7 @@ bool TransferDialog::handle_src_galleries_key(SDL_Keycode k)
         }
         // No conflicts, launch the pull transfer
         src_galleries_ = std::move(paths);
-        launch_current(current_gallery_, vault::CollisionPolicy::Fail);
+        launch_current(pull_.current_gallery, vault::CollisionPolicy::Fail);
     }
     return true;
 }
@@ -314,7 +347,7 @@ bool TransferDialog::handle_picking_dest_event(const SDL_Event& e)
     const bool consumed = picker_dest_.handle_event(e);
     if (!picker_dest_.active()) {
         if (picker_dest_.chosen()) {
-            if (pull_) {
+            if (pull_.active) {
                 // For pull, load galleries from the unlocked source vault (picker_dest_'s vault)
                 picker_.set_items(vault::all_galleries(picker_dest_.unlocked_vault()));
                 picker_.set_multi(true);
@@ -450,7 +483,7 @@ bool TransferDialog::consume_completed(TransferCompletion& out)
     if (!run_.done) return false;
     out = std::move(run_.completion);
     // For pull transfers, change "to source" wording to "from source"
-    if (pull_ && !out.status.empty()) {
+    if (pull_.active && !out.status.empty()) {
         // Replace " to " with " from " (the label is the source vault name in pull mode)
         size_t pos = out.status.rfind(" to ");
         if (pos != std::string::npos) {
@@ -492,7 +525,7 @@ void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, flo
     const float ix = mx + 20;
     const float iy = my + 20;
     std::string title;
-    if (pull_) {
+    if (pull_.active) {
         title = "Pull from another vault";
     } else {
         const char* verb = (mode_ == vault::TransferMode::Copy) ? "Copy" : "Move";
@@ -513,38 +546,6 @@ void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, flo
     if (!err.empty()) r.draw_text(font, ix, my + mh - 30, err, DANGER);
 }
 
-void TransferDialog::render_direction_body(gfx::Renderer& r, gfx::FontAtlas& font,
-                                           float ix, float iy, float mw) const
-{
-    using namespace gfx::theme;
-    r.draw_text(font, ix, iy + 36, "Direction:", TEXT_DIM);
-    const std::vector<std::string> directions = {"To another vault…", "From another vault…"};
-    for (size_t i = 0; i < directions.size(); ++i) {
-        const float ry = iy + 72 + static_cast<float>(i) * 34.0f;
-        const bool  on = (static_cast<int>(i) == direction_sel_);
-        if (on) r.draw_round_rect({ix, ry, mw - 40, 30}, RADIUS_SMALL, SURFACE_HI);
-        r.draw_text(font, ix + 8, ry + 4, fit_text(font, directions[i], mw - 56), on ? TEXT : TEXT_DIM);
-    }
-    r.draw_text(font, ix, iy + 150,
-                fit_text(font, "[Up/Down] choose  [Enter] next", mw - 40), TEXT_FAINT);
-}
-
-void TransferDialog::render_mode_body(gfx::Renderer& r, gfx::FontAtlas& font,
-                                      float ix, float iy, float mw) const
-{
-    using namespace gfx::theme;
-    r.draw_text(font, ix, iy + 36, "Action:", TEXT_DIM);
-    const std::vector<std::string> modes = {"Move", "Copy"};
-    const int msel = (mode_ == vault::TransferMode::Copy) ? 1 : 0;
-    for (size_t i = 0; i < modes.size(); ++i) {
-        const float ry = iy + 72 + static_cast<float>(i) * 34.0f;
-        const bool  on = (static_cast<int>(i) == msel);
-        if (on) r.draw_round_rect({ix, ry, mw - 40, 30}, RADIUS_SMALL, SURFACE_HI);
-        r.draw_text(font, ix + 8, ry + 4, fit_text(font, modes[i], mw - 56), on ? TEXT : TEXT_DIM);
-    }
-    r.draw_text(font, ix, iy + 150,
-                fit_text(font, "[Up/Down] choose  [Enter] next", mw - 40), TEXT_FAINT);
-}
 
 void TransferDialog::render_conflict_body(gfx::Renderer& r, gfx::FontAtlas& font,
                                           float ix, float iy, float mw) const
@@ -605,7 +606,7 @@ void TransferDialog::render_pick_gallery_body(gfx::Renderer& r, gfx::FontAtlas& 
 }
 
 void TransferDialog::render_src_galleries_body(gfx::Renderer& r, gfx::FontAtlas& font,
-                                               float ix, float iy, float mw, float mh, float my)
+                                               float ix, float iy, float mw, float mh, float my) const
 {
     using namespace gfx::theme;
     r.draw_text(font, ix, iy + 36, "Source galleries (Space to select):", TEXT_DIM);
@@ -634,10 +635,10 @@ void TransferDialog::render_src_galleries_body(gfx::Renderer& r, gfx::FontAtlas&
 void TransferDialog::render_body(gfx::Renderer& r, gfx::FontAtlas& font,
                                  float ix, float iy, float mw, float mh, float my)
 {
-    if (stage_ == Stage::Direction) { render_direction_body(r, font, ix, iy, mw); return; }
-    if (stage_ == Stage::Mode) { render_mode_body(r, font, ix, iy, mw); return; }
+    if (stage_ == Stage::Direction) { render_direction_body(r, font, ix, iy, mw, pull_.direction_sel); return; }
+    if (stage_ == Stage::Mode) { render_mode_body(r, font, ix, iy, mw, mode_); return; }
     if (stage_ == Stage::PickingDest) {
-        const std::string_view title = pull_ ? "Source vault:" : "Destination vault:";
+        const std::string_view title = pull_.active ? "Source vault:" : "Destination vault:";
         picker_dest_.render(r, font, ix, iy, mw, title);
         return;
     }
