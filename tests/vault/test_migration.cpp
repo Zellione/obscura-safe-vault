@@ -9,6 +9,7 @@
 #include "image/fixtures.h"
 #include "image/thumbnail.h"
 #include "media/video_probe.h"
+#include "vault/file_util.h"
 #include "vault/index.h"
 #include "vault/migration.h"
 #include "vault/transfer.h"
@@ -843,6 +844,112 @@ TEST(apply_video_poster_replaces_existing)
 
     // Empty blob should return InvalidArg
     CHECK(vault::apply_video_poster(v, "tiny.mp4", {}) == vault::VaultResult::InvalidArg);
+#endif  // OSV_VENDORED_AV
+}
+
+// A whole-vault thumbnail regen (Phase 75) applies one of these per image/video,
+// which used to fsync every single call. That's what made the migration look
+// hung on real-sized vaults: apply_image_thumb/apply_video_poster/apply_video_probe
+// now take an opt-out `sync` parameter so the migration job can defer durability
+// to its own final commit_migration() (which already fsyncs the whole file).
+TEST(apply_image_thumb_sync_false_skips_fsync)
+{
+    MigTempVault tv("apply_thumb_no_sync");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
+            == vault::VaultResult::Ok);
+
+    auto png = fixtures::solid_png(64, 64, 255, 0, 0);
+    REQUIRE(!png.empty());
+    REQUIRE(v.add_image("", png, "img.png") == vault::VaultResult::Ok);
+
+    auto new_thumb = fixtures::solid_png(128, 128, 0, 255, 0);
+    REQUIRE(!new_thumb.empty());
+
+    vault::fileutil::sync_call_count().store(0);
+    CHECK(vault::apply_image_thumb(v, "img.png", new_thumb, /*sync=*/false) ==
+          vault::VaultResult::Ok);
+    CHECK_EQ(vault::fileutil::sync_call_count().load(), 0u);
+
+    // The span still repoints correctly even without an immediate fsync.
+    const vault::IndexNode* n = v.resolve_node("img.png");
+    REQUIRE(n != nullptr);
+    CHECK(n->meta.thumb_length > 0u);
+
+    // Default (no argument) keeps the old immediate-durability behavior.
+    vault::fileutil::sync_call_count().store(0);
+    CHECK(vault::apply_image_thumb(v, "img.png", new_thumb) == vault::VaultResult::Ok);
+    CHECK_EQ(vault::fileutil::sync_call_count().load(), 1u);
+}
+
+TEST(apply_video_poster_sync_false_skips_fsync)
+{
+#ifdef OSV_VENDORED_AV
+    MigTempVault tv("apply_poster_no_sync");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
+            == vault::VaultResult::Ok);
+
+    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!video_bytes.empty());
+    REQUIRE(v.add_video("", video_bytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+
+    auto new_poster = fixtures::solid_png(256, 144, 0, 0, 255);
+    REQUIRE(!new_poster.empty());
+
+    vault::fileutil::sync_call_count().store(0);
+    CHECK(vault::apply_video_poster(v, "tiny.mp4", new_poster, /*sync=*/false) ==
+          vault::VaultResult::Ok);
+    CHECK_EQ(vault::fileutil::sync_call_count().load(), 0u);
+
+    const vault::IndexNode* n = v.resolve_node("tiny.mp4");
+    REQUIRE(n != nullptr);
+    CHECK(n->vmeta.poster_length > 0u);
+
+    // Default (no argument) keeps the old immediate-durability behavior.
+    vault::fileutil::sync_call_count().store(0);
+    CHECK(vault::apply_video_poster(v, "tiny.mp4", new_poster) == vault::VaultResult::Ok);
+    CHECK_EQ(vault::fileutil::sync_call_count().load(), 1u);
+#endif  // OSV_VENDORED_AV
+}
+
+TEST(apply_video_probe_sync_false_skips_poster_fsync)
+{
+#ifdef OSV_VENDORED_AV
+    MigTempVault tv("apply_probe_no_sync");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
+            == vault::VaultResult::Ok);
+
+    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!video_bytes.empty());
+    REQUIRE(v.add_video("", video_bytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+    vault::test_only_force_video_codec_unknown(v, "tiny.mp4");
+    {
+        vault::IndexNode* n = v.resolve_node("tiny.mp4");
+        REQUIRE(n != nullptr);
+        n->vmeta.poster_offset = 0;
+        n->vmeta.poster_length = 0;
+    }
+
+    auto poster_bytes = fixtures::solid_png(100, 100, 255, 0, 0);
+    REQUIRE(!poster_bytes.empty());
+
+    vault::VideoProbeApply probe;
+    probe.codec       = vault::VideoCodec::VP9;
+    probe.width       = 320;
+    probe.height      = 240;
+    probe.duration_us = 3000000;
+    probe.poster_jpeg = poster_bytes;
+
+    vault::fileutil::sync_call_count().store(0);
+    CHECK(vault::apply_video_probe(v, "tiny.mp4", probe, /*sync=*/false) ==
+          vault::VaultResult::Ok);
+    CHECK_EQ(vault::fileutil::sync_call_count().load(), 0u);
+
+    const vault::IndexNode* n = v.resolve_node("tiny.mp4");
+    REQUIRE(n != nullptr);
+    CHECK(n->vmeta.poster_length > 0u);
 #endif  // OSV_VENDORED_AV
 }
 

@@ -525,20 +525,11 @@ void draw_migration_offer(gfx::Renderer& r, gfx::FontAtlas& font, float win_w, f
 void draw_migration_progress(gfx::Renderer& r, gfx::FontAtlas& font, float win_w, float win_h,
                              const ui::MigrationJob& job)
 {
-    using enum ui::MigrationPhase;
-    const int   total = job.total();
-    const int   done  = job.done();
-    std::string phase_label;
-    switch (job.phase()) {
-        case Repairing:  phase_label = std::format("Upgrading {} / {}", done, total); break;
-        case Committing: phase_label = "Saving…"; break;
-        case Compacting: phase_label = "Reclaiming space…"; break;
-        default:         phase_label = "Preparing…"; break;
-    }
-    const std::string count_line =
-        total > 0 ? std::format("{} / {}", done, total) : "Preparing…";
+    const int total = job.total();
+    const int done  = job.done();
+    const ui::MigrationProgressText text = ui::migration_progress_text(job.phase(), done, total);
     ui::draw_op_progress(r, font, win_w, win_h,
-                         {.title = phase_label, .count_line = count_line,
+                         {.title = text.title, .count_line = text.count_line,
                           .done = done, .total = total});
 }
 

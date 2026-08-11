@@ -993,7 +993,7 @@ VaultResult Vault::read_video(const IndexNode& node, crypto::SecureBytes& out) c
 }
 
 VaultResult apply_video_probe(Vault& v, std::string_view node_path,
-                              const VideoProbeApply& probe)
+                              const VideoProbeApply& probe, bool sync)
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
@@ -1014,7 +1014,7 @@ VaultResult apply_video_probe(Vault& v, std::string_view node_path,
         ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
         ChunkSpan poster_span;
         if (!store.append_chunk(probe.poster_jpeg, poster_span)) return IoError;
-        if (!store.sync()) return IoError;
+        if (sync && !store.sync()) return IoError;
         n->vmeta.poster_offset = poster_span.offset;
         n->vmeta.poster_length = poster_span.length;
     }
@@ -1022,7 +1022,7 @@ VaultResult apply_video_probe(Vault& v, std::string_view node_path,
 }
 
 VaultResult apply_image_thumb(Vault& v, std::string_view node_path,
-                              std::span<const uint8_t> thumb_jpeg)
+                              std::span<const uint8_t> thumb_jpeg, bool sync)
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
@@ -1034,14 +1034,14 @@ VaultResult apply_image_thumb(Vault& v, std::string_view node_path,
     ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
     ChunkSpan span;
     if (!store.append_chunk(thumb_jpeg, span)) return IoError;
-    if (!store.sync()) return IoError;
+    if (sync && !store.sync()) return IoError;
     n->meta.thumb_offset = span.offset;
     n->meta.thumb_length = span.length;
     return Ok;
 }
 
 VaultResult apply_video_poster(Vault& v, std::string_view node_path,
-                               std::span<const uint8_t> poster_jpeg)
+                               std::span<const uint8_t> poster_jpeg, bool sync)
 {
     using enum VaultResult;
     if (!v.unlocked_) return Locked;
@@ -1053,7 +1053,7 @@ VaultResult apply_video_poster(Vault& v, std::string_view node_path,
     ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
     ChunkSpan span;
     if (!store.append_chunk(poster_jpeg, span)) return IoError;
-    if (!store.sync()) return IoError;
+    if (sync && !store.sync()) return IoError;
     n->vmeta.poster_offset = span.offset;
     n->vmeta.poster_length = span.length;
     return Ok;

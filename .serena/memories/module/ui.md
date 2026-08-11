@@ -590,6 +590,14 @@ helpers exist purely to keep host Screens under the cpp:S1448 35-method cap.
   `MigrationOutcome` gained `thumbs_fixed`. Test hooks `test_only_force_video_codec_unknown` /
   `test_only_force_image_animated_unknown` (vault.h friends, established test_only_force_*
   convention) let tests fabricate legacy states.
+  **Phase 77 fix:** all four `apply_*` calls in `apply_one()`'s helpers now pass `sync=false` (a
+  whole-vault thumb regen was fsync'ing once per item — see module/vault); durability instead
+  rides `commit_migration()`'s own final sync, which flushes every deferred append made since
+  the run started. Also: the progress modal's phase→label mapping moved out of
+  `app.cpp::draw_migration_progress` into a pure `ui::migration_progress_text(MigrationPhase,
+  done, total) -> MigrationProgressText{title, count_line}` (migration_job.h/.cpp) — `Done` now
+  gets its own "Finishing…" label instead of falling into the `Idle`/`Scanning` default of
+  "Preparing…", which is what made a finished run's last frame(s) read as a hang.
 
 ## Import planning & archive reading
 - `folder_scan.*` (Phase 51) — `scan_folder(root) -> vector<ZipEntry>` via

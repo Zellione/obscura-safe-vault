@@ -268,6 +268,14 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   `migrated_thumb_side = image::THUMB_MAX_SIDE` (fresh vaults owe nothing; unstamped fresh vaults
   used to get a bogus offer). vault/ may reference image:: (staging already does) but never media::
   — probe caps stay caller-passed.
+- **Phase 77 fix:** `apply_video_probe`/`apply_image_thumb`/`apply_video_poster` gained a trailing
+  `bool sync = true` param — `sync && !store.sync()` instead of an unconditional fsync. The default
+  keeps every existing caller's immediate-durability behavior; `ui::MigrationJob`'s coordinator is
+  the only caller passing `false` (see module/ui). Root cause: with `sync` always true, a
+  whole-vault Phase 75 thumb regen fsync'd once per item (thousands of items = thousands of
+  fsyncs) — the migration coordinator's own final `commit_migration()` sync already flushes every
+  buffered append on the same `FILE*`, so per-item syncing was pure overhead, not a safety
+  requirement.
 - **Transfer rule (Phase 65):** `transfer_image` and `transfer_gallery` (the two primitives
   all cross-vault operations funnel through) now lower the destination's watermark to the source's
   whenever the source is behind. This re-offers the migration if content from an un-migrated vault
