@@ -1892,7 +1892,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
         {"Navigate", {
             {"Enter", "Open"}, {"Space", "Select (export/move)"},
             {"Ctrl+A", "Select all / none"},
-            {"Esc", "Back"}, {"`", "Switch vault"}, {"L", "Cycle view: list / grid size"},
+            {"Esc", "Back"}, {"`", "Switch vault"}, {"L", "Cycle view: list / grid size"}, {"F3", "Split view (side-by-side)"},
         }},
         {"Search & tags", {
             {"/", "Search"}, {"Shift+/ (?)", "Advanced search"},

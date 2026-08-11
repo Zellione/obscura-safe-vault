@@ -587,9 +587,9 @@ std::vector<HelpGroup> DualGalleryScreen::help_groups() const
     HelpGroup split_group;
     split_group.title = "Split view";
     split_group.entries = {
-        {"Tab", "switch pane"},
-        {"M", "move/copy to other pane"},
-        {"F3", "leave split view"},
+        {"Tab", "Switch pane"},
+        {"M", "Move/copy to other pane"},
+        {"F3", "Leave split view"},
     };
     groups.push_back(split_group);
 
