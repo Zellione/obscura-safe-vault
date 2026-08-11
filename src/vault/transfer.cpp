@@ -9,6 +9,7 @@
 
 #include "crypto/secure_mem.h"
 #include "vault/combine.h"
+#include "vault/index.h"
 #include "vault/safe_name.h"
 #include "vault/staging.h"
 
@@ -20,6 +21,29 @@ void record_failure(TransferTally& t, std::string path, VaultResult code,
     ++t.failed;
     if (t.failures.size() < MAX_TRANSFER_FAILURES)
         t.failures.emplace_back(std::move(path), code, stage);
+}
+
+std::vector<std::string> effective_tags(const Vault& v, std::string_view node_path)
+{
+    const IndexNode* node = v.resolve_node(node_path);
+    if (!node) return {};
+    std::vector<std::string> out = node->tags;
+    auto add_ci = [&out](const std::vector<std::string>& tags) {
+        for (const auto& t : tags)
+            if (!std::ranges::any_of(out, [&](const auto& o) { return tag_ci_equal(o, t); }))
+                out.push_back(t);
+    };
+    // Root tags cascade globally; then each ancestor gallery down to the parent.
+    if (const IndexNode* root = v.resolve_node(""); root) add_ci(root->tags);
+    std::string prefix;
+    for (std::string_view rest = node_path;;) {
+        const auto slash = rest.find('/');
+        if (slash == std::string_view::npos) break;     // last segment = the node itself
+        prefix.append(prefix.empty() ? "" : "/").append(rest.substr(0, slash));
+        if (const IndexNode* g = v.resolve_node(prefix); g && g->is_gallery()) add_ci(g->tags);
+        rest.remove_prefix(slash + 1);
+    }
+    return out;
 }
 
 namespace {

@@ -779,4 +779,14 @@ bool deserialize_index(std::span<const uint8_t> in, IndexNode& out,
     return r.remaining() == 0;
 }
 
+bool tag_ci_equal(std::string_view a, std::string_view b) noexcept
+{
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        auto to_lower = [](char c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; };
+        if (to_lower(a[i]) != to_lower(b[i])) return false;
+    }
+    return true;
+}
+
 } // namespace vault

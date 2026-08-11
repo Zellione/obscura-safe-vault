@@ -170,4 +170,12 @@ struct TransferProgress {
     const Vault& dst, std::string_view dst_parent,
     std::span<const std::string> src_paths);
 
+// The node's read-time effective tags: own tags first (their casing wins),
+// then every ancestor gallery's tags root->parent (the root's tags cascade
+// globally), case-insensitively de-duplicated. This is what transfers persist
+// onto an item leaving its ancestor chain (Phase 75). Empty when `v` is
+// locked or `node_path` does not resolve.
+[[nodiscard]] std::vector<std::string> effective_tags(const Vault& v,
+                                                      std::string_view node_path);
+
 } // namespace vault

@@ -420,4 +420,9 @@ bool rename_template_field(VaultSettings& s, std::string_view category,
 bool remove_template_field(VaultSettings& s, std::string_view category,
                            std::string_view field);
 
+// ASCII case-insensitive tag identity — the single definition of "same tag"
+// inside vault/ (ui::tag_ci_equal mirrors it for the UI layer, which may not
+// depend on it going the other way).
+[[nodiscard]] bool tag_ci_equal(std::string_view a, std::string_view b) noexcept;
+
 } // namespace vault
