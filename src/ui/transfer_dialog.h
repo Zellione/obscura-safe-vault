@@ -122,7 +122,7 @@ private:
     bool handle_direction_key(SDL_Keycode k);         // Direction stage: choose push or pull
     bool handle_src_galleries_key(SDL_Keycode k);     // PickSrcGalleries stage: multi-select + filter
     bool handle_src_galleries_filter_event(const SDL_Event& e);   // PickSrcGalleries: filter typing
-    void launch_current(vault::CollisionPolicy policy);   // Route to launch_transfer (push) or pull launcher
+    void launch_current(std::string_view target, vault::CollisionPolicy policy);   // Route to launch_transfer (push) or pull launcher
 
     vault::Vault&            src_;
     std::string              src_path_;            // active vault's path (excluded as a dest)

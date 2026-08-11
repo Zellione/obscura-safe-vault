@@ -152,22 +152,22 @@ void TransferDialog::do_move(std::string_view dst_target)
             return;
         }
     }
-    launch_current(vault::CollisionPolicy::Fail);
+    launch_current(dst_target, vault::CollisionPolicy::Fail);
 }
 
-void TransferDialog::launch_current(vault::CollisionPolicy policy)
+void TransferDialog::launch_current(std::string_view target, vault::CollisionPolicy policy)
 {
     if (pull_) {
         // Pull: source galleries from picker_dest_.unlocked_vault() into src_ (active vault)
-        // at current_gallery_ destination.
+        // at target destination.
         vault::Vault& src_vault = picker_dest_.unlocked_vault();   // source in pull mode
         const std::string where = picker_dest_.dest_label();       // source vault label
 
-        run_.job.start_transfer_galleries(src_vault, src_galleries_, src_, current_gallery_,
+        run_.job.start_transfer_galleries(src_vault, src_galleries_, src_, std::string(target),
                                           mode_, policy, where);
     } else {
         // Push: existing behavior (into dest_vault_)
-        launch_transfer(conflict_.target, policy);
+        launch_transfer(target, policy);
         return;   // launch_transfer sets stage_ = Running
     }
     stage_ = Stage::Running;
@@ -233,9 +233,9 @@ bool TransferDialog::handle_conflict_key(SDL_Keycode k)
     if (k == SDLK_DOWN) conflict_.sel = (conflict_.sel + 1) % 3;
     if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
         if (conflict_.sel == 0) {
-            launch_current(vault::CollisionPolicy::Combine);
+            launch_current(conflict_.target, vault::CollisionPolicy::Combine);
         } else if (conflict_.sel == 1) {
-            launch_current(vault::CollisionPolicy::Suffix);
+            launch_current(conflict_.target, vault::CollisionPolicy::Suffix);
         } else {
             close();
         }
@@ -274,8 +274,7 @@ bool TransferDialog::handle_src_galleries_key(SDL_Keycode k)
         }
         // No conflicts, launch the pull transfer
         src_galleries_ = std::move(paths);
-        conflict_.target = current_gallery_;  // Store for launch_current
-        launch_current(vault::CollisionPolicy::Fail);
+        launch_current(current_gallery_, vault::CollisionPolicy::Fail);
     }
     return true;
 }
