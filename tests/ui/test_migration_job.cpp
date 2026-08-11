@@ -13,6 +13,7 @@
 #include "image/thumbnail.h"
 #include "media/video_probe.h"
 #include "ui/migration_job.h"
+#include "vault/file_util.h"
 #include "vault/migration.h"
 #include "vault/staging.h"
 #include "vault/vault.h"
@@ -105,6 +106,33 @@ ui::MigrationOutcome run_to_completion(ui::MigrationJob& job)
     return {};
 }
 } // namespace
+
+// The progress modal's label must never claim "Preparing…" once the job has
+// actually reached a later phase — that's what made a finished-or-nearly-finished
+// migration look stuck. Done, in particular, used to fall through to the
+// switch's default and re-show "Preparing…" right next to a maxed-out N/N count.
+TEST(migration_progress_text_done_does_not_read_as_preparing)
+{
+    const ui::MigrationProgressText t = ui::migration_progress_text(ui::MigrationPhase::Done, 40, 40);
+    CHECK(t.title != "Preparing…");
+}
+
+TEST(migration_progress_text_covers_every_phase)
+{
+    using enum ui::MigrationPhase;
+    CHECK_EQ(ui::migration_progress_text(Idle, 0, 0).title, "Preparing…");
+    CHECK_EQ(ui::migration_progress_text(Scanning, 0, 0).title, "Preparing…");
+    CHECK_EQ(ui::migration_progress_text(Repairing, 3, 10).title, "Upgrading 3 / 10");
+    CHECK_EQ(ui::migration_progress_text(Committing, 10, 10).title, "Saving…");
+    CHECK_EQ(ui::migration_progress_text(Compacting, 5, 10).title, "Reclaiming space…");
+}
+
+TEST(migration_progress_text_count_line_falls_back_when_total_zero)
+{
+    using enum ui::MigrationPhase;
+    CHECK_EQ(ui::migration_progress_text(Repairing, 0, 0).count_line, "Preparing…");
+    CHECK_EQ(ui::migration_progress_text(Repairing, 4, 10).count_line, "4 / 10");
+}
 
 TEST(migration_job_on_clean_vault_stamps_watermark_and_does_nothing_else)
 {
@@ -744,5 +772,46 @@ TEST(migration_job_thumb_arm_skips_when_fresh)
     CHECK(!out.cancelled);
     CHECK_EQ(out.total, 0);  // nothing to do (already migrated, animated known)
     CHECK_EQ(out.thumbs_fixed, 0);
+}
+
+TEST(migration_job_thumb_regen_batches_syncs_not_one_per_item)
+{
+    // Phase 75's thumb-regen arm applies an ImageThumb item for every image in
+    // the vault whenever migrated_thumb_side is stale — effectively the whole
+    // library on a real upgrade. The old apply_image_thumb fsync'd once per
+    // item; on a vault with thousands of images that O(items) fsync cost is
+    // what made the migration look permanently hung. Pin that a batch of
+    // regens now costs a small, roughly-constant number of syncs (the job's
+    // own final commit_migration(), plus compact() if it happens to run),
+    // not one per item.
+    JobTempVault tv("sync_batch");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
+            == vault::VaultResult::Ok);
+
+    auto webp_data = fixtures::load_webp();
+    constexpr int kCount = 40;
+    for (int i = 0; i < kCount; ++i) {
+        REQUIRE(v.add_image("", webp_data, "img" + std::to_string(i) + ".webp") ==
+                vault::VaultResult::Ok);
+    }
+
+    // Force every image's thumbnail to look stale, so all kCount need a regen.
+    auto settings = vault::vault_settings(v);
+    settings.migrated_thumb_side = 0;
+    REQUIRE(vault::set_vault_settings(v, settings) == vault::VaultResult::Ok);
+
+    vault::fileutil::sync_call_count().store(0);
+    ui::MigrationJob job;
+    REQUIRE(job.start(v));
+    const ui::MigrationOutcome out = run_to_completion(job);
+    const uint64_t syncs = vault::fileutil::sync_call_count().load();
+
+    CHECK(out.ok);
+    CHECK_EQ(out.thumbs_fixed, kCount);
+    // Old behavior needed at least kCount syncs (one per item) plus the final
+    // commit; the batched fix stays well under that regardless of whether
+    // compaction also ran.
+    CHECK(syncs < static_cast<uint64_t>(kCount));
 }
 

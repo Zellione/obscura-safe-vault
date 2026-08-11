@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <deque>
+#include <format>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -256,12 +257,20 @@ private:
 };
 
 // Apply image thumb result. Coordinator-thread only.
+//
+// sync=false: a thumb-regen pass applies one of these per image in the vault
+// (potentially the whole library), and each used to fsync individually — O(items)
+// fsyncs turned a routine upgrade into a very long, hang-looking stall. The
+// appended chunk only needs to be durable before the index that references it is
+// committed; MigrationJob::run() syncs once, right before commit_migration(),
+// which covers every deferred append made since the job started (fsync flushes
+// the whole file, not just the most recent write).
 void apply_image_thumb_item(vault::Vault& v, const Item& it, const Result& r,
                             MigrationOutcome& out)
 {
     // Phase 75: apply the regenerated thumbnail
     if (!r.thumb_jpeg.empty()) {
-        if (vault::apply_image_thumb(v, it.node_path, r.thumb_jpeg) ==
+        if (vault::apply_image_thumb(v, it.node_path, r.thumb_jpeg, /*sync=*/false) ==
             vault::VaultResult::Ok) {
             ++out.thumbs_fixed;
         } else {
@@ -277,13 +286,14 @@ void apply_image_thumb_item(vault::Vault& v, const Item& it, const Result& r,
     }
 }
 
-// Apply video poster result. Coordinator-thread only.
+// Apply video poster result. Coordinator-thread only. sync=false — see
+// apply_image_thumb_item.
 void apply_video_poster_item(vault::Vault& v, const Item& it, const Result& r,
                              MigrationOutcome& out)
 {
     // Phase 75: apply the regenerated poster
     if (!r.thumb_jpeg.empty()) {
-        if (vault::apply_video_poster(v, it.node_path, r.thumb_jpeg) ==
+        if (vault::apply_video_poster(v, it.node_path, r.thumb_jpeg, /*sync=*/false) ==
             vault::VaultResult::Ok) {
             ++out.thumbs_fixed;
         } else {
@@ -294,7 +304,8 @@ void apply_video_poster_item(vault::Vault& v, const Item& it, const Result& r,
     }
 }
 
-// Apply video probe result. Coordinator-thread only.
+// Apply video probe result. Coordinator-thread only. sync=false — see
+// apply_image_thumb_item.
 void apply_video_probe_item(vault::Vault& v, const Item& it, const Result& r,
                             MigrationOutcome& out)
 {
@@ -307,7 +318,8 @@ void apply_video_probe_item(vault::Vault& v, const Item& it, const Result& r,
             .duration_us = r.duration_us,
             .poster_jpeg = std::span<const uint8_t>(r.poster_jpeg),
         };
-        vault::apply_video_probe(v, it.node_path, apply) == vault::VaultResult::Ok)
+        vault::apply_video_probe(v, it.node_path, apply, /*sync=*/false) ==
+        vault::VaultResult::Ok)
         ++out.videos_fixed;
     else {
         ++out.failed;
@@ -317,7 +329,8 @@ void apply_video_probe_item(vault::Vault& v, const Item& it, const Result& r,
     // Phase 75: if thumbs_stale and we have a new poster, also replace the old one
     // (apply_video_probe only fills EMPTY poster spans)
     if (it.thumbs_stale && !r.poster_jpeg.empty() &&
-        vault::apply_video_poster(v, it.node_path, r.poster_jpeg) == vault::VaultResult::Ok)
+        vault::apply_video_poster(v, it.node_path, r.poster_jpeg, /*sync=*/false) ==
+            vault::VaultResult::Ok)
         ++out.thumbs_fixed;
     // If poster replace fails, the probe already succeeded, so don't fail the
     // whole video; just skip the poster regen for this item
@@ -425,6 +438,26 @@ void maybe_compact(vault::Vault& v, std::atomic<MigrationPhase>& phase,
 }
 
 } // namespace
+
+MigrationProgressText migration_progress_text(MigrationPhase phase, int done, int total)
+{
+    using enum MigrationPhase;
+    MigrationProgressText t;
+    switch (phase) {
+        case Repairing:  t.title = std::format("Upgrading {} / {}", done, total); break;
+        case Committing: t.title = "Saving…"; break;
+        case Compacting: t.title = "Reclaiming space…"; break;
+        // Done falls out of run() once the job has already finished; showing
+        // "Preparing…" here is what read as a hang stuck at the finish line
+        // (progress modal still up, counters maxed, but the label saying the
+        // opposite of "nearly done"). Idle/Scanning are the only phases where
+        // "Preparing…" is actually correct.
+        case Done:       t.title = "Finishing…"; break;
+        default:         t.title = "Preparing…"; break;   // Idle, Scanning
+    }
+    t.count_line = total > 0 ? std::format("{} / {}", done, total) : "Preparing…";
+    return t;
+}
 
 MigrationJob::~MigrationJob() = default;
 

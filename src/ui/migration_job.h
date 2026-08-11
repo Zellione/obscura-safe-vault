@@ -29,6 +29,18 @@ namespace ui {
 // Coarse stage, for the modal's label. Progress counters are per-stage.
 enum class MigrationPhase { Idle, Scanning, Repairing, Committing, Compacting, Done };
 
+// The progress modal's title + "done / total" line for a given phase — pure
+// and independent of rendering, so it's unit-testable without a gfx::Renderer.
+// draw_migration_progress (src/app/app.cpp) is the sole caller.
+struct MigrationProgressText {
+    std::string title;
+    std::string count_line;
+};
+
+// `done`/`total` are the job's current progress counters (job.done()/total()).
+[[nodiscard]] MigrationProgressText migration_progress_text(MigrationPhase phase, int done,
+                                                             int total);
+
 struct MigrationOutcome {
     bool        ok        = false;  // ran to completion (or a clean cancel)
     bool        cancelled = false;
