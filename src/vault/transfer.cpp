@@ -521,6 +521,15 @@ void prune_moved_galleries(Vault& src, std::string_view src_gallery,
 
 } // namespace
 
+std::vector<std::string> all_galleries(const Vault& v)
+{
+    std::vector<std::string> out;
+    // Walk from root, excluding the root "" itself
+    for (const auto* c : v.list(""))
+        if (c->is_gallery()) collect_all_galleries(v, c->name, out);
+    return out;
+}
+
 // Internal transfer_image with stage tracking for per-file failure recording.
 // Sets `stage_out` to indicate where failure occurred (Read side or Write side).
 VaultResult transfer_image_ex(Vault& src, std::string_view src_gallery,

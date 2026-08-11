@@ -52,13 +52,14 @@ VaultUnlockPicker::VaultUnlockPicker(platform::VaultRegistry& registry, platform
                                      gfx::Window& win, SecondVaultSession* second)
     : registry_(registry), dlg_(dlg), win_(win), second_(second) {}
 
-void VaultUnlockPicker::open(std::string src_path)
+void VaultUnlockPicker::open(std::string src_path, bool include_self)
 {
     active_    = true;
     chosen_    = false;
     from_warm_ = false;
     stage_     = Stage::PickVault;
     src_path_  = std::move(src_path);
+    include_self_ = include_self;
     vault_sel_ = 0;
     error_.clear();
     keep_mode_ = second_ ? second_->default_mode() : platform::SecondVaultMode::LockNow;
@@ -93,13 +94,17 @@ vault::Vault& VaultUnlockPicker::unlocked_vault() noexcept
 void VaultUnlockPicker::choose_vault()
 {
     error_.clear();
-    if (vault_sel_ == 0) {
+
+    // When include_self_ is true: vault_sel_ == 0 means "This vault"
+    if (include_self_ && vault_sel_ == 0) {
         dest_.is_self = true;
         active_       = false;
         chosen_       = true;
         return;
     }
-    const int ci = vault_sel_ - 1;
+
+    // Map vault_sel_ to candidates_ index
+    const int ci = include_self_ ? (vault_sel_ - 1) : vault_sel_;
     if (ci < 0 || ci >= static_cast<int>(candidates_.size())) return;
     dest_.is_self = false;
     dest_.path    = platform::path_to_utf8(candidates_[static_cast<size_t>(ci)]);
@@ -153,7 +158,7 @@ void VaultUnlockPicker::release_to_slot()
 
 bool VaultUnlockPicker::handle_pick_vault_key(SDL_Keycode k)
 {
-    const auto n = static_cast<int>(candidates_.size()) + 1;
+    const auto n = static_cast<int>(candidates_.size()) + (include_self_ ? 1 : 0);
     if (k == SDLK_UP)   vault_sel_ = clamp_index(vault_sel_ - 1, n);
     if (k == SDLK_DOWN) vault_sel_ = clamp_index(vault_sel_ + 1, n);
     if (k == SDLK_RETURN || k == SDLK_KP_ENTER) choose_vault();
@@ -213,7 +218,8 @@ void VaultUnlockPicker::render(gfx::Renderer& r, gfx::FontAtlas& font, float ix,
 
     if (stage_ == Stage::PickVault) {
         r.draw_text(font, ix, iy + 36, "Destination vault:", TEXT_DIM);
-        std::vector<std::string> labels = {"This vault"};
+        std::vector<std::string> labels;
+        if (include_self_) labels.push_back("This vault");
         for (const auto& p : candidates_) labels.push_back(platform::path_to_utf8(p.filename()));
         row_list(labels, vault_sel_, iy + 72);
     } else {

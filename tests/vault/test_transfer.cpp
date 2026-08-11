@@ -302,3 +302,30 @@ TEST(transfer_video_copy_keeps_source)
     CHECK(sg != nullptr);                           // copy left the source intact
     CHECK(sg->is_video());
 }
+
+TEST(all_galleries_lists_every_gallery_except_root)
+{
+    using enum vault::VaultResult;
+    TempVault ta("allgal");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(ta.str(), bytes("pw"), {}, kKdf, v) == Ok);
+
+    // Create galleries: "a", "a/b", "c"
+    REQUIRE(v.create_gallery("a") == Ok);
+    REQUIRE(v.create_gallery("a/b") == Ok);
+    REQUIRE(v.create_gallery("c") == Ok);
+
+    // Add an image to "c" (to test that media doesn't interfere)
+    auto img = pattern(1000, 7);
+    REQUIRE(v.add_image("c", img, "test.jpg") == Ok);
+
+    auto result = vault::all_galleries(v);
+    // DFS order: root children in list order, then recurse; root "" excluded
+    // Expected: "a" (first child), then "a/b" (first child of "a"), then "c" (second child)
+    std::vector<std::string> expected = {"a", "a/b", "c"};
+    CHECK(result == expected);
+
+    // When locked, all_galleries returns empty
+    v.lock();
+    CHECK(vault::all_galleries(v).empty());
+}

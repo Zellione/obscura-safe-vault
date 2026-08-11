@@ -98,6 +98,10 @@ struct TransferProgress {
                                             Vault& dst, std::string_view dst_gallery,
                                             TransferMode mode, TransferProgress prog = {});
 
+// Slash-paths of every gallery in `v`, nested depth-first (any nesting, root "" excluded).
+// Used to populate the pull dialog's source-gallery list. Empty while locked.
+[[nodiscard]] std::vector<std::string> all_galleries(const Vault& v);
+
 // Slash-paths of every gallery in `v` that may legally accept media (images or videos)
 // — holds no sub-galleries, including "" (root) when root holds no sub-galleries. Used
 // to populate the transfer dialog's destination-gallery list. Empty while locked.
