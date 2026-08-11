@@ -527,6 +527,11 @@ private:
 // resolve to a gallery. Phase 37.
 [[nodiscard]] VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey key);
 
+// Check if a gallery path exists in the vault. Returns false if the vault is
+// locked, the path is not a gallery (e.g. an image), or the path is missing.
+// Phase 78.
+[[nodiscard]] bool gallery_exists(const Vault& v, std::string_view gallery_path);
+
 // The vault's global settings — tag categories, default sort, tile-tag flag
 // (Phase 49). Returns the seeded set for a vault that has never stored any.
 // Safe to call while locked (returns the last-loaded value).
