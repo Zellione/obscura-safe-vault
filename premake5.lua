@@ -612,6 +612,7 @@ project "osv_tests"
         "src/ui/album_rebind.cpp",
         "src/ui/text_metrics.cpp",
         "src/ui/settings_model.cpp",
+        "src/ui/dual_layout.cpp",
         "src/ui/tile_thumb.cpp",
     }
 
