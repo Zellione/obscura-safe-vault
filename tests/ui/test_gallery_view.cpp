@@ -20,10 +20,18 @@ TEST(cell_size_for_returns_four_distinct_grid_sizes)
 
 TEST(cell_size_for_grid_m_matches_legacy_fixed_cell_size)
 {
-    // GridM must equal the pre-Phase-40-Part-3 fixed CELL constant exactly, so
-    // existing sessions render identically until a user opts into a different
-    // density.
-    CHECK_EQ(ui::cell_size_for(GalleryView::GridM), 188.0);
+    // GridM was bumped in Phase 75 to 256; this test now verifies the new size.
+    CHECK_EQ(ui::cell_size_for(GalleryView::GridM), 256.0);
+}
+
+TEST(gallery_view_cell_sizes_phase75)
+{
+    using ui::GalleryView;
+    CHECK(ui::cell_size_for(GalleryView::GridS)  == 192.0f);
+    CHECK(ui::cell_size_for(GalleryView::GridM)  == 256.0f);
+    CHECK(ui::cell_size_for(GalleryView::GridL)  == 352.0f);
+    CHECK(ui::cell_size_for(GalleryView::GridXL) == 448.0f);
+    CHECK(ui::cell_size_for(GalleryView::List)   == 0.0f);
 }
 
 // --- next_gallery_view (the L-key cycle) ------------------------------------

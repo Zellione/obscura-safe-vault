@@ -6,13 +6,13 @@ float cell_size_for(GalleryView view) noexcept
 {
     using enum GalleryView;
     switch (view) {
-        case GridS:  return 128.0f;
-        case GridM:  return 188.0f;
-        case GridL:  return 248.0f;
-        case GridXL: return 320.0f;
+        case GridS:  return 192.0f;
+        case GridM:  return 256.0f;
+        case GridL:  return 352.0f;
+        case GridXL: return 448.0f;
         case List:   return 0.0f;   // unused for list layout
     }
-    return 188.0f;
+    return 256.0f;
 }
 
 GalleryView next_gallery_view(GalleryView view) noexcept
