@@ -11,6 +11,7 @@
 #include "platform/folder_dialog.h"
 #include "platform/vault_registry.h"
 #include "ui/advanced_search_state.h"
+#include "ui/dual_session_state.h"
 #include "ui/gallery_session_state.h"
 #include "ui/help_popup.h"
 #include "ui/import_queue.h"
@@ -48,6 +49,7 @@ private:
     // — otherwise `selected` is ignored in favor of session_.recall(path), the
     // last-remembered tile at that path (Phase 40 Part 2).
     void to_gallery(const std::string& path = {}, int selected = 0, bool explicit_index = false);
+    void to_dual_gallery();  // Phase 77: open dual-pane split view
     void to_viewer(const std::string& gallery_path, int index);
     void to_favorite_images();
     void to_favorite_galleries();
@@ -116,6 +118,10 @@ private:
     // Advanced-search state preserved across visits within one unlocked-vault
     // session; reset in promote_pending() whenever the active vault changes.
     ui::AdvancedSearchState            adv_session_;
+    // Dual-pane split view state (Phase 77): both pane paths and selected indices,
+    // plus the active pane index. Preserved across split-view exit via F3 (toggle),
+    // reset when the active vault changes (promote_pending) or is explicitly locked.
+    ui::DualSessionState               dual_session_;
     // Gallery/viewer session state (Phase 39 Part 2): last-used List/Grid view +
     // thumbnail-strip side, plus a single "last video watched" resume bookmark;
     // carried through App's screen reconstruction on every grid<->viewer round

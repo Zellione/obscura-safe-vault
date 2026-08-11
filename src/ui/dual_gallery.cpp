@@ -59,6 +59,9 @@ void DualGalleryScreen::on_enter()
 void DualGalleryScreen::on_exit()
 {
     snapshot();
+    // Phase 77: keep split_active true so a subsequent F3 press in single-grid
+    // mode restores the saved pane configuration (instead of seeding fresh).
+    dual_.split_active = true;
     left_->on_exit();
     right_->on_exit();
 }

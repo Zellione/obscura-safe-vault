@@ -20,6 +20,7 @@
 #include "platform/volume_pref.h"
 #include "platform/perf.h"
 #include "ui/advanced_search_screen.h"
+#include "ui/dual_gallery.h"
 #include "ui/duplicates_screen.h"
 #include "ui/favorites_galleries.h"
 #include "ui/favorites_images.h"
@@ -156,6 +157,7 @@ void App::promote_pending()
     import_ui_.lane.reset();                               // Phase 73: lock stops the lane, reset destroys it
     second_.session.wipe();                                // Phase 66: vault switch locks the warm slot too
     adv_session_   = {};                          // new vault session -> fresh advanced search
+    dual_session_.reset();                        // Phase 77: new vault session -> fresh dual-pane state
     session_.reset();                             // new vault session -> fresh gallery/viewer memory
     keep_unlocked_ = false;                       // new session always starts with auto-lock on
     vault_state_.active        = std::move(vault_state_.pending);
@@ -213,6 +215,31 @@ void App::to_gallery(const std::string& path, int selected, bool explicit_index)
         ui::GalleryGrid::GridVaultCtx{registry_, vault_state_.active_path, &second_.session},
         session_, import_ui_.queue,
         ui::GridLocation{path, seed, session_.view});
+    screen_->on_enter();
+}
+
+void App::to_dual_gallery()
+{
+    state_ = State::Browsing;
+    // Phase 77: on first entry to split view, seed both panes with the current
+    // gallery path (captured by the outgoing GalleryGrid's handle_key_down before
+    // transitioning). On subsequent visits (via F3 toggle), pane states are
+    // preserved in dual_session_.
+    if (!dual_session_.split_active) {
+        // Capture the path from the current (single) gallery view before swap.
+        // This happens only on first F3 press; subsequent F3 presses restore the
+        // saved configuration.
+        if (const auto* grid = dynamic_cast<const ui::GalleryGrid*>(screen_.get())) {
+            const std::string here = ui::current_gallery_path(*grid);
+            dual_session_.pane[0].path = here;
+            dual_session_.pane[1].path = here;
+        }
+    }
+    screen_ = std::make_unique<ui::DualGalleryScreen>(
+        window_, font_, *vault_state_.active, *cache_,
+        ui::GalleryGrid::GridDialogs{dialog_, folder_dialog_},
+        ui::GalleryGrid::GridVaultCtx{registry_, vault_state_.active_path, &second_.session},
+        session_, import_ui_.queue, dual_session_);
     screen_->on_enter();
 }
 
@@ -354,6 +381,11 @@ void App::to_import_status()
     if (const auto* grid = dynamic_cast<const ui::GalleryGrid*>(screen_.get())) {
         // GalleryGrid: return to the same path at index 0
         back = ui::Nav{ToGallery, ui::current_gallery_path(*grid), 0};
+    } else if (const auto* dual = dynamic_cast<const ui::DualGalleryScreen*>(screen_.get())) {
+        // Phase 77: DualGalleryScreen: return to the active pane's path via ToGallery,
+        // which will re-enter split view if split_active is true (set by on_exit).
+        (void)dual;
+        back = ui::Nav{ToGallery, dual_session_.pane[dual_session_.active_pane].path, 0};
     } else if (dynamic_cast<const ui::ImageViewer*>(screen_.get())) {
         // ImageViewer: return to the gallery root
         back = ui::Nav{ToGallery, {}, 0};
@@ -376,8 +408,13 @@ void App::to_duplicates()
     if (!vault_state_.active) return;
 
     ui::Nav back{ToGallery, {}, 0};
-    if (const auto* grid = dynamic_cast<const ui::GalleryGrid*>(screen_.get()))
+    if (const auto* grid = dynamic_cast<const ui::GalleryGrid*>(screen_.get())) {
         back = ui::Nav{ToGallery, ui::current_gallery_path(*grid), 0};
+    } else if (const auto* dual = dynamic_cast<const ui::DualGalleryScreen*>(screen_.get())) {
+        // Phase 77: DualGalleryScreen: return to the active pane's path.
+        (void)dual;
+        back = ui::Nav{ToGallery, dual_session_.pane[dual_session_.active_pane].path, 0};
+    }
 
     state_  = State::Browsing;
     screen_ = std::make_unique<ui::DuplicatesScreen>(
@@ -787,6 +824,10 @@ void App::capture_session_state()
         session_.detail_open = ui::current_detail_open(*fav);
     } else if (const auto* adv = dynamic_cast<const ui::AdvancedSearchScreen*>(screen_.get())) {
         adv_session_.detail_open = ui::current_detail_open(*adv);
+    } else if (const auto* dual = dynamic_cast<const ui::DualGalleryScreen*>(screen_.get())) {
+        // Phase 77: DualGalleryScreen::on_exit() already snapshots both panes into
+        // dual_session_; no additional capture needed here.
+        (void)dual;  // explicitly unused for -Wunused-parameter
     }
 }
 
@@ -831,8 +872,20 @@ bool App::apply_nav()
     switch (nav.kind) {
         case ToGallery:
             if (state_ == State::Locked) promote_pending();   // unlock-screen success
+            // Phase 77: viewer round-trip back to split view. If the viewer was
+            // launched from a dual-pane screen and split is still active, restore
+            // that pane's exact position instead of going to single-grid mode.
+            if (from_viewer && dual_session_.split_active) {
+                dual_session_.pane[dual_session_.active_pane].path = nav.path;
+                dual_session_.pane[dual_session_.active_pane].selected = nav.index;
+                to_dual_gallery();
+                return true;
+            }
             if (vault_state_.active) to_gallery(nav.path, nav.index, from_viewer);
             else         to_manager();                        // defensive: nothing unlocked
+            return true;
+        case ToDualGallery:
+            to_dual_gallery();
             return true;
         case ToViewer:            to_viewer(nav.path, nav.index);      return true;
         case ToFavoriteImages:    to_favorite_images();                return true;
@@ -864,6 +917,7 @@ bool App::apply_nav()
         case LockActive:
             keep_unlocked_ = false;
             second_.session.wipe();                          // Phase 66: locking up means locking everything
+            dual_session_.reset();                // Phase 77: fresh dual-pane state on lock
             session_.reset();                     // Phase 39 Part 2: fresh session on lock
             import_ui_.queue.end_session();          // Phase 50: flush before lock
             if (vault_state_.active) {
@@ -908,6 +962,7 @@ bool App::maybe_auto_lock(double dt)
                           idle_, dt))
         return false;
     if (screen_) screen_->on_exit();
+    dual_session_.reset();                       // Phase 77: fresh dual-pane state on idle lock
     session_.reset();                                  // Phase 39 Part 2: fresh session on idle lock
     import_ui_.queue.end_session();                       // Phase 50: flush before lock
     vault_state_.active->lock();                       // Phase 73: lock stops the lane

@@ -1,5 +1,6 @@
 #include "ui/gallery_grid.h"
 
+#include "ui/dual_layout.h"
 #include "ui/favorite_batch.h"
 #include "ui/selectable.h"
 
@@ -1027,6 +1028,16 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
 
     if (is_search_key(key)) { search_.open(); return; }
     if (is_advanced_search_key(key)) { request(NavKind::ToAdvancedSearch); return; }
+    if (key.key == SDLK_F3) {
+        if (!embedded_) {
+            if (layout_w(*this) < ui::MIN_SPLIT_WIDTH) {
+                status_ = "Window too narrow for split view (needs 900 px)";
+            } else {
+                request(NavKind::ToDualGallery);
+            }
+        }
+        return;
+    }
 
     using enum InputAction;
     switch (map_key(key.key, key.mod)) {
