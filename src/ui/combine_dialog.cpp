@@ -131,12 +131,13 @@ bool CombineDialog::handle_event(const SDL_Event& e)
 {
     if (!active_) return false;
 
-    if (stage_ == Stage::Running) {
+    using enum Stage;
+    if (stage_ == Running) {
         if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) run_.job.cancel();
         return true;
     }
-    if (stage_ == Stage::Mode) return handle_event_mode(e);
-    if (stage_ == Stage::PickingDest) return handle_event_picking_dest(e);
+    if (stage_ == Mode) return handle_event_mode(e);
+    if (stage_ == PickingDest) return handle_event_picking_dest(e);
     return handle_event_pick_target(e);
 }
 
