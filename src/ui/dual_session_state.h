@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -23,7 +24,7 @@ struct DualSessionState {
     bool      split_active = false;  // true while user is conceptually in split view (set on enter, false on F3-leave)
     bool      has_config   = false;  // true if pane configs have been saved (set by snapshot, cleared on reset)
     int       active_pane  = 0;      // 0 = left, 1 = right
-    PaneState pane[2];
+    std::array<PaneState, 2> pane;
     void reset() { *this = DualSessionState{}; }  // clears split_active and has_config
 };
 
