@@ -274,6 +274,10 @@ void lower_dst_watermark(const Vault& src, Vault& dst)
         s_dst.migrated_probe_caps = s_src.migrated_probe_caps;
         lowered = true;
     }
+    if (s_src.migrated_thumb_side < s_dst.migrated_thumb_side) {
+        s_dst.migrated_thumb_side = s_src.migrated_thumb_side;
+        lowered = true;
+    }
     if (lowered) (void)set_vault_settings(dst, std::move(s_dst));
 }
 

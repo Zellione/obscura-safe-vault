@@ -401,6 +401,10 @@ void write_settings(ByteWriter& w, const VaultSettings& s)
     w.u16(s.migrated_probe_caps);
 
     write_field_values_block(w, s.tag_field_values);
+
+    // Phase 75 thumb watermark — LAST in the block (version-gated reads rely
+    // on stable prefix order).
+    w.u16(s.migrated_thumb_side);
 }
 
 // Helper: read the field sub-block for a category (v11+ only).
@@ -561,6 +565,10 @@ bool read_settings(ByteReader& r, VaultSettings& s, uint8_t version)
 
     if (!read_field_values(r, s.tag_field_values)) return false;
 
+    // The thumb-side sub-block exists only from v12 on.
+    if (version < 12) return true;
+    s.migrated_thumb_side = r.u16();
+    if (!r.ok()) return false;
     return true;
 }
 

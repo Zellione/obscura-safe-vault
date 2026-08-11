@@ -195,3 +195,36 @@ TEST(vault_settings_survive_move)
     // Check that the categories are actual allocations (not dangling)
     CHECK(!moved_settings.categories.empty());
 }
+
+TEST(vault_settings_thumb_side_roundtrip)
+{
+    TempVault tv;
+    REQUIRE(tv.create_and_unlock() == VaultResult::Ok);
+
+    VaultSettings s = vault::vault_settings(tv.v);
+    s.migrated_thumb_side = 512;
+    CHECK(vault::set_vault_settings(tv.v, s) == VaultResult::Ok);
+
+    REQUIRE(tv.relock_and_unlock() == VaultResult::Ok);
+    const auto& got = vault::vault_settings(tv.v);
+    CHECK_EQ(got.migrated_thumb_side, 512);
+}
+
+TEST(vault_settings_thumb_side_pre_v12_reads_zero)
+{
+    // A v11 blob: serialize with current version, then strip the v12 thumb_side
+    // field to create a v11 blob and verify it reads back as 0.
+    vault::IndexNode root = vault::IndexNode::gallery("");
+    std::vector<uint8_t> v12;
+    vault::serialize_index(root, {}, vault::VaultSettings{}, v12);
+
+    // v12 adds a u16 (2 bytes) at the very end. Strip it to create a v11 blob.
+    std::vector<uint8_t> v11(v12.begin(), v12.end() - 2);
+    v11[0] = 11;
+
+    vault::IndexNode out;
+    std::vector<vault::SavedSearch> searches;
+    vault::VaultSettings got;
+    CHECK(vault::deserialize_index(v11, out, searches, got));
+    CHECK_EQ(got.migrated_thumb_side, 0);
+}

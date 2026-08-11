@@ -272,6 +272,11 @@ struct VaultSettings {
     uint8_t  migrated_index_version = 0;
     uint16_t migrated_probe_caps    = 0;
 
+    // Phase 75: stored-thumbnail budget (max long side, px) this vault's thumbs
+    // and posters were last generated at. 0 = legacy (pre-v12 blob or never
+    // regenerated) — compared against image::THUMB_MAX_SIDE by the caller.
+    uint16_t migrated_thumb_side = 0;
+
     // The starting category set for a vault that has never stored one: a freshly
     // created vault and every pre-v8 vault. An empty SAVED list is a legitimate
     // state and is never re-seeded.
@@ -296,7 +301,9 @@ struct VaultSettings {
 // v11: category template fields appended to each category entry, and a
 // vault-global tag-field-values block appended after the migration watermark
 // (Phase 73); pre-v11 blobs read with no templates and no values.
-inline constexpr uint8_t INDEX_VERSION = 11;
+// v12: migrated_thumb_side u16 appended after the tag-field-values block
+// (Phase 75); pre-v12 blobs read 0 (thumbnails never regenerated).
+inline constexpr uint8_t INDEX_VERSION = 12;
 
 // Phase 65: the index version whose content backfills the migration performs.
 // Bump ONLY when a NEW index version adds a field needing a content backfill —

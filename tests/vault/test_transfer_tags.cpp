@@ -505,3 +505,39 @@ TEST(transfer_gallery_rerun_does_not_duplicate_tags) {
     // Verify media unchanged (collision prevented re-add)
     CHECK(dst.resolve_node("dest/top/pic.jpg") != nullptr);
 }
+
+TEST(transfer_lowers_dst_thumb_side_watermark)
+{
+    using enum vault::VaultResult;
+    // Create source vault with migrated_thumb_side = 0 (legacy/never regenerated)
+    TempVault src("thumb0");
+    vault::Vault v_src;
+    REQUIRE(vault::Vault::create(src.str(), bytes("pw"), {}, kKdf, v_src) == Ok);
+    // Settings default to migrated_thumb_side = 0, which is what we want
+
+    // Create destination vault and stamp its thumb_side to 512
+    TempVault dst("thumb512");
+    vault::Vault v_dst;
+    REQUIRE(vault::Vault::create(dst.str(), bytes("pw"), {}, kKdf, v_dst) == Ok);
+    {
+        vault::VaultSettings s_dst = vault::vault_settings(v_dst);
+        s_dst.migrated_thumb_side = 512;
+        REQUIRE(vault::set_vault_settings(v_dst, s_dst) == Ok);
+    }
+
+    // Verify dst starts at 512
+    {
+        const auto& s = vault::vault_settings(v_dst);
+        CHECK_EQ(s.migrated_thumb_side, 512);
+    }
+
+    // Transfer an empty gallery from src to dst
+    REQUIRE(v_src.create_gallery("empty") == Ok);
+    REQUIRE(vault::transfer_gallery(v_src, "empty", v_dst, "pulled", vault::TransferMode::Copy) == Ok);
+
+    // After transfer, dst's thumb_side should be lowered to 0 (src's value)
+    {
+        const auto& s = vault::vault_settings(v_dst);
+        CHECK_EQ(s.migrated_thumb_side, 0);
+    }
+}
