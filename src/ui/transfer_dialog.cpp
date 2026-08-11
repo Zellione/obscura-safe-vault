@@ -30,11 +30,17 @@ TransferDialog::TransferDialog(vault::Vault& src, std::string src_path,
                                platform::FileDialog& dlg, gfx::Window& win, SecondVaultSession* second)
     : src_(src), src_path_(std::move(src_path)), win_(win), picker_dest_(registry, dlg, win, second) {}
 
+void TransferDialog::set_current_gallery(std::string path)
+{
+    has_current_gallery_ = true;
+    current_gallery_ = std::move(path);
+}
+
 void TransferDialog::open(std::string src_gallery, std::vector<std::string> filenames)
 {
     active_       = true;
     source_       = Source::Images;
-    stage_        = Stage::Mode;
+    stage_        = has_current_gallery_ ? Stage::Direction : Stage::Mode;
     mode_         = vault::TransferMode::Move;
     src_gallery_  = std::move(src_gallery);
     filenames_    = std::move(filenames);
@@ -42,6 +48,8 @@ void TransferDialog::open(std::string src_gallery, std::vector<std::string> file
     naming_ = false;
     name_buf_.clear();
     conflict_ = {};
+    pull_ = false;
+    direction_sel_ = 0;
 
     // The new-gallery name overlay consumes SDL_EVENT_TEXT_INPUT, which SDL3 only
     // delivers while text input is active.
@@ -50,7 +58,7 @@ void TransferDialog::open(std::string src_gallery, std::vector<std::string> file
 
 void TransferDialog::open_gallery(std::string src_gallery)
 {
-    open("", {});                  // reuse open() to reset all state + build candidates
+    open("", {});                  // reuse open() to reset all state + direction state
     source_      = Source::Gallery;
     src_gallery_ = std::move(src_gallery);
 }
@@ -144,7 +152,25 @@ void TransferDialog::do_move(std::string_view dst_target)
             return;
         }
     }
-    launch_transfer(dst_target, vault::CollisionPolicy::Fail);
+    launch_current(vault::CollisionPolicy::Fail);
+}
+
+void TransferDialog::launch_current(vault::CollisionPolicy policy)
+{
+    if (pull_) {
+        // Pull: source galleries from picker_dest_.unlocked_vault() into src_ (active vault)
+        // at current_gallery_ destination.
+        vault::Vault& src_vault = picker_dest_.unlocked_vault();   // source in pull mode
+        const std::string where = picker_dest_.dest_label();       // source vault label
+
+        run_.job.start_transfer_galleries(src_vault, src_galleries_, src_, current_gallery_,
+                                          mode_, policy, where);
+    } else {
+        // Push: existing behavior (into dest_vault_)
+        launch_transfer(conflict_.target, policy);
+        return;   // launch_transfer sets stage_ = Running
+    }
+    stage_ = Stage::Running;
 }
 
 void TransferDialog::launch_transfer(std::string_view dst_target, vault::CollisionPolicy policy)
@@ -174,13 +200,28 @@ void TransferDialog::launch_transfer(std::string_view dst_target, vault::Collisi
 
 // --- per-stage key handlers ------------------------------------------------
 
+bool TransferDialog::handle_direction_key(SDL_Keycode k)
+{
+    if (k == SDLK_UP || k == SDLK_DOWN || k == SDLK_LEFT || k == SDLK_RIGHT)
+        direction_sel_ = (direction_sel_ == 0) ? 1 : 0;
+    if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
+        pull_ = (direction_sel_ == 1);
+        stage_ = Stage::Mode;
+    }
+    return true;
+}
+
 bool TransferDialog::handle_mode_key(SDL_Keycode k)
 {
     using enum vault::TransferMode;
     if (k == SDLK_UP || k == SDLK_DOWN || k == SDLK_LEFT || k == SDLK_RIGHT)
         mode_ = (mode_ == Move) ? Copy : Move;
     if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
-        picker_dest_.open(src_path_);
+        if (pull_) {
+            picker_dest_.open(src_path_, /*include_self=*/false);
+        } else {
+            picker_dest_.open(src_path_);
+        }
         stage_ = Stage::PickingDest;
     }
     return true;
@@ -191,12 +232,13 @@ bool TransferDialog::handle_conflict_key(SDL_Keycode k)
     if (k == SDLK_UP)   conflict_.sel = (conflict_.sel + 2) % 3;
     if (k == SDLK_DOWN) conflict_.sel = (conflict_.sel + 1) % 3;
     if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
-        if (conflict_.sel == 0)
-            launch_transfer(conflict_.target, vault::CollisionPolicy::Combine);
-        else if (conflict_.sel == 1)
-            launch_transfer(conflict_.target, vault::CollisionPolicy::Suffix);
-        else
+        if (conflict_.sel == 0) {
+            launch_current(vault::CollisionPolicy::Combine);
+        } else if (conflict_.sel == 1) {
+            launch_current(vault::CollisionPolicy::Suffix);
+        } else {
             close();
+        }
     }
     return true;
 }
@@ -206,6 +248,35 @@ bool TransferDialog::handle_gallery_key(SDL_Keycode k)
     if (k == SDLK_UP)   picker_.move(-1);
     if (k == SDLK_DOWN) picker_.move(1);
     if (k == SDLK_RETURN || k == SDLK_KP_ENTER) choose_gallery();
+    return true;
+}
+
+bool TransferDialog::handle_src_galleries_key(SDL_Keycode k)
+{
+    if (k == SDLK_SPACE) {
+        picker_.toggle_checked();
+        return true;
+    }
+    if (k == SDLK_UP)   picker_.move(-1);
+    if (k == SDLK_DOWN) picker_.move(1);
+    if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
+        auto paths = ui::drop_descendant_paths(picker_.checked());
+        if (paths.empty()) return true;   // ignore if nothing checked
+        // Pre-scan for collisions: the destination is src_ (active vault), parent is current_gallery_
+        const auto clashes = vault::colliding_galleries(src_, current_gallery_, paths);
+        if (!clashes.empty()) {
+            conflict_.target = current_gallery_;
+            conflict_.count = static_cast<int>(clashes.size());
+            conflict_.sel = 0;
+            src_galleries_ = std::move(paths);
+            stage_ = Stage::Conflict;
+            return true;
+        }
+        // No conflicts, launch the pull transfer
+        src_galleries_ = std::move(paths);
+        conflict_.target = current_gallery_;  // Store for launch_current
+        launch_current(vault::CollisionPolicy::Fail);
+    }
     return true;
 }
 
@@ -243,8 +314,21 @@ bool TransferDialog::handle_picking_dest_event(const SDL_Event& e)
 {
     const bool consumed = picker_dest_.handle_event(e);
     if (!picker_dest_.active()) {
-        if (picker_dest_.chosen()) { rebuild_targets(); stage_ = Stage::PickGallery; }
-        else                       close();   // Esc inside the picker cancelled the whole dialog
+        if (picker_dest_.chosen()) {
+            if (pull_) {
+                // For pull, load galleries from the unlocked source vault (picker_dest_'s vault)
+                picker_.set_items(vault::all_galleries(picker_dest_.unlocked_vault()));
+                picker_.set_multi(true);
+                picker_.set_pinned_suffix("");   // no "New gallery" when pulling
+                stage_ = Stage::PickSrcGalleries;
+            } else {
+                // For push, load target galleries from the destination
+                rebuild_targets();
+                stage_ = Stage::PickGallery;
+            }
+        } else {
+            close();   // Esc inside the picker cancelled the whole dialog
+        }
     }
     return consumed;
 }
@@ -273,15 +357,43 @@ bool TransferDialog::handle_gallery_filter_event(const SDL_Event& e)
     }
 }
 
+// PickSrcGalleries filter typing — same as PickGallery, but different key handler afterward
+bool TransferDialog::handle_src_galleries_filter_event(const SDL_Event& e)
+{
+    // Precedence rule (Phase 54): the filter field consumes editing keys first.
+    if (const uint64_t rev = picker_.filter_input().revision();
+        handle_text_input_event(picker_.filter_input(), e)) {
+        if (picker_.filter_input().revision() != rev) picker_.refilter();
+        return true;
+    }
+    if (e.type != SDL_EVENT_KEY_DOWN) return true;
+    switch (e.key.key) {
+        case SDLK_ESCAPE:
+            if (!picker_.filter().empty()) { picker_.filter_clear(); return true; }
+            picker_.close_filter();
+            return true;
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER: return handle_src_galleries_key(e.key.key);
+        case SDLK_UP:       picker_.move(-1);  return true;
+        case SDLK_DOWN:     picker_.move(1);   return true;
+        case SDLK_SPACE:    picker_.toggle_checked(); return true;
+        default: return true;   // swallow other keys while typing a filter
+    }
+}
+
 bool TransferDialog::handle_stage_key(const SDL_KeyboardEvent& key)
 {
     using enum Stage;
     switch (stage_) {
+        case Direction:   return handle_direction_key(key.key);
         case Mode:        return handle_mode_key(key.key);
         case Conflict:    return handle_conflict_key(key.key);
         case PickGallery:
             if (is_search_key(key)) { picker_.open_filter(); return true; }
             return handle_gallery_key(key.key);
+        case PickSrcGalleries:
+            if (is_search_key(key)) { picker_.open_filter(); return true; }
+            return handle_src_galleries_key(key.key);
         case PickingDest: return true;   // should not reach here (handled above)
         case Running:     return true;   // handled above (Esc→cancel); nothing else
     }
@@ -305,6 +417,7 @@ bool TransferDialog::handle_event(const SDL_Event& e)
     if (naming_) return handle_naming_event(e);
 
     if (stage_ == Stage::PickGallery && picker_.filter_open()) return handle_gallery_filter_event(e);
+    if (stage_ == Stage::PickSrcGalleries && picker_.filter_open()) return handle_src_galleries_filter_event(e);
 
     if (e.type != SDL_EVENT_KEY_DOWN) return true;   // modal swallows other events
     if (e.key.key == SDLK_ESCAPE) { close(); return true; }
@@ -389,6 +502,22 @@ void TransferDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, flo
     if (!err.empty()) r.draw_text(font, ix, my + mh - 30, err, DANGER);
 }
 
+void TransferDialog::render_direction_body(gfx::Renderer& r, gfx::FontAtlas& font,
+                                           float ix, float iy, float mw) const
+{
+    using namespace gfx::theme;
+    r.draw_text(font, ix, iy + 36, "Direction:", TEXT_DIM);
+    const std::vector<std::string> directions = {"To another vault…", "From another vault…"};
+    for (size_t i = 0; i < directions.size(); ++i) {
+        const float ry = iy + 72 + static_cast<float>(i) * 34.0f;
+        const bool  on = (static_cast<int>(i) == direction_sel_);
+        if (on) r.draw_round_rect({ix, ry, mw - 40, 30}, RADIUS_SMALL, SURFACE_HI);
+        r.draw_text(font, ix + 8, ry + 4, fit_text(font, directions[i], mw - 56), on ? TEXT : TEXT_DIM);
+    }
+    r.draw_text(font, ix, iy + 150,
+                fit_text(font, "[Up/Down] choose  [Enter] next", mw - 40), TEXT_FAINT);
+}
+
 void TransferDialog::render_mode_body(gfx::Renderer& r, gfx::FontAtlas& font,
                                       float ix, float iy, float mw) const
 {
@@ -464,12 +593,41 @@ void TransferDialog::render_pick_gallery_body(gfx::Renderer& r, gfx::FontAtlas& 
     }
 }
 
+void TransferDialog::render_src_galleries_body(gfx::Renderer& r, gfx::FontAtlas& font,
+                                               float ix, float iy, float mw, float mh, float my)
+{
+    using namespace gfx::theme;
+    r.draw_text(font, ix, iy + 36, "Source galleries (Space to select):", TEXT_DIM);
+    const float list_top = iy + 72;
+    const float row_h    = 34.0f;
+    const float list_bottom = my + mh - 20;
+    const int   visible_rows = std::max(1, static_cast<int>((list_bottom - list_top) / row_h));
+    const auto  g = picker_.geom(visible_rows);
+    const auto& shown = picker_.filtered();
+    for (int i = g.first; i < g.first + g.visible && i < static_cast<int>(shown.size()); ++i) {
+        const float ry = list_top + static_cast<float>(i - g.first) * row_h;
+        const bool  on = (i == picker_.selected());
+        const bool  checked = picker_.is_checked(shown[static_cast<size_t>(i)]);
+        if (on) r.draw_round_rect({ix, ry, mw - 40, 30}, RADIUS_SMALL, SURFACE_HI);
+        std::string label = checked ? "[X] " : "[ ] ";
+        label += shown[static_cast<size_t>(i)];
+        r.draw_text(font, ix + 8, ry + 4, fit_text(font, label, mw - 56), on ? TEXT : TEXT_DIM);
+    }
+    if (shown.empty())
+        r.draw_text(font, ix, list_top, "No matches.", TEXT_FAINT);
+    if (picker_.filter_open() || !picker_.filter().empty())
+        r.draw_text(font, ix, iy + 54,
+                    fit_text(font, "Filter: " + std::string(picker_.filter()), mw - 40), TEXT_FAINT);
+}
+
 void TransferDialog::render_body(gfx::Renderer& r, gfx::FontAtlas& font,
                                  float ix, float iy, float mw, float mh, float my)
 {
+    if (stage_ == Stage::Direction) { render_direction_body(r, font, ix, iy, mw); return; }
     if (stage_ == Stage::Mode) { render_mode_body(r, font, ix, iy, mw); return; }
     if (stage_ == Stage::PickingDest) { picker_dest_.render(r, font, ix, iy, mw); return; }
     if (stage_ == Stage::Conflict) { render_conflict_body(r, font, ix, iy, mw); return; }
+    if (stage_ == Stage::PickSrcGalleries) { render_src_galleries_body(r, font, ix, iy, mw, mh, my); return; }
     render_pick_gallery_body(r, font, ix, iy, mw, mh, my);   // PickGallery
 }
 
