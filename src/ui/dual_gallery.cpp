@@ -180,11 +180,12 @@ void DualGalleryScreen::handle_event(const SDL_Event& e)
 
 void DualGalleryScreen::handle_prompt_key(const SDL_KeyboardEvent& key)
 {
+    using enum DualTransferPrompt::Key;
     DualTransferPrompt::Key k;
-    if (key.key == SDLK_UP) k = DualTransferPrompt::Key::Up;
-    else if (key.key == SDLK_DOWN) k = DualTransferPrompt::Key::Down;
-    else if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) k = DualTransferPrompt::Key::Enter;
-    else if (key.key == SDLK_ESCAPE) k = DualTransferPrompt::Key::Esc;
+    if (key.key == SDLK_UP) k = Up;
+    else if (key.key == SDLK_DOWN) k = Down;
+    else if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) k = Enter;
+    else if (key.key == SDLK_ESCAPE) k = Esc;
     else { mark_dirty(); return; }  // Unhandled key in prompt
 
     if (const auto launch = prompt_.key(k); launch.fire) fire_transfer(launch);
@@ -275,11 +276,10 @@ bool DualGalleryScreen::handle_split_key(const SDL_KeyboardEvent& key)
     }
 
     // 6. Shift+M / Ctrl+D / Shift+C / backtick: disabled in split view
-    const bool is_shift_m = key.key == SDLK_M && (key.mod & SDL_KMOD_SHIFT);
-    const bool is_ctrl_d = key.key == SDLK_D && (key.mod & SDL_KMOD_CTRL);
-    const bool is_shift_c = key.key == SDLK_C && (key.mod & SDL_KMOD_SHIFT);
-    const bool is_backtick = key.key == SDLK_GRAVE;
-    if (is_shift_m || is_ctrl_d || is_shift_c || is_backtick) {
+    if ((key.key == SDLK_M && (key.mod & SDL_KMOD_SHIFT)) ||
+        (key.key == SDLK_D && (key.mod & SDL_KMOD_CTRL)) ||
+        (key.key == SDLK_C && (key.mod & SDL_KMOD_SHIFT)) ||
+        key.key == SDLK_GRAVE) {
         status_ = "Not available in split view";
         mark_dirty();
         return true;
