@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <span>
+#include <string>
 
 namespace ui {
 
@@ -22,6 +24,20 @@ DualSplit dual_split(float win_w, float win_h) noexcept
 int pane_at(const DualSplit& s, float x) noexcept
 {
     return x < s.divider.x + s.divider.w / 2.0f ? 0 : 1;
+}
+
+DualTransferRefusal dual_transfer_check(std::string_view src_gallery,
+                                        std::string_view dst_gallery,
+                                        std::span<const std::string> selected_gallery_paths) noexcept
+{
+    if (src_gallery == dst_gallery) return DualTransferRefusal::SameGallery;
+    for (const std::string& g : selected_gallery_paths) {
+        if (dst_gallery == g) return DualTransferRefusal::IntoOwnSubtree;
+        if (dst_gallery.size() > g.size() && dst_gallery.starts_with(g) &&
+            dst_gallery[g.size()] == '/')
+            return DualTransferRefusal::IntoOwnSubtree;
+    }
+    return DualTransferRefusal::None;
 }
 
 } // namespace ui

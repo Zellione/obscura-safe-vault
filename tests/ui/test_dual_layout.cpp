@@ -48,3 +48,39 @@ TEST(min_split_width_is_900)
 {
     CHECK_EQ(ui::MIN_SPLIT_WIDTH, 900.0f);
 }
+
+#include <span>
+#include <string>
+#include <vector>
+
+using ui::dual_transfer_check;
+using ui::DualTransferRefusal;
+
+TEST(dual_transfer_check_refuses_same_gallery)
+{
+    const std::vector<std::string> none;
+    CHECK(dual_transfer_check("a/b", "a/b", none) == DualTransferRefusal::SameGallery);
+    CHECK(dual_transfer_check("", "", none) == DualTransferRefusal::SameGallery);
+}
+
+TEST(dual_transfer_check_refuses_gallery_into_itself_or_descendant)
+{
+    const std::vector<std::string> sel{"a/b"};
+    CHECK(dual_transfer_check("a", "a/b", sel) == DualTransferRefusal::IntoOwnSubtree);
+    CHECK(dual_transfer_check("a", "a/b/c", sel) == DualTransferRefusal::IntoOwnSubtree);
+}
+
+TEST(dual_transfer_check_prefix_is_segment_aware)
+{
+    // "a/bc" is NOT inside "a/b" — naive prefix match would wrongly refuse.
+    const std::vector<std::string> sel{"a/b"};
+    CHECK(dual_transfer_check("a", "a/bc", sel) == DualTransferRefusal::None);
+}
+
+TEST(dual_transfer_check_allows_normal_transfer)
+{
+    const std::vector<std::string> sel{"a/b"};
+    CHECK(dual_transfer_check("a", "x/y", sel) == DualTransferRefusal::None);
+    const std::vector<std::string> none;
+    CHECK(dual_transfer_check("a", "x", none) == DualTransferRefusal::None);
+}

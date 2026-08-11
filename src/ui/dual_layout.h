@@ -1,6 +1,9 @@
 #pragma once
 
 #include <SDL3/SDL.h>
+#include <span>
+#include <string>
+#include <string_view>
 
 namespace ui {
 
@@ -20,5 +23,14 @@ struct DualSplit {
 // Which pane owns window-x coordinate `x`: 0 = left, 1 = right. Divider
 // coordinates resolve to the nearest pane (left half -> 0).
 [[nodiscard]] int pane_at(const DualSplit& s, float x) noexcept;
+
+// Why a pane-to-pane transfer cannot proceed (checked BEFORE the modal opens).
+enum class DualTransferRefusal { None, SameGallery, IntoOwnSubtree };
+
+// src_gallery/dst_gallery: the two panes' current gallery slash-paths.
+// selected_gallery_paths: full paths of galleries in the selection.
+[[nodiscard]] DualTransferRefusal dual_transfer_check(
+    std::string_view src_gallery, std::string_view dst_gallery,
+    std::span<const std::string> selected_gallery_paths) noexcept;
 
 } // namespace ui
