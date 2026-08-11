@@ -26,10 +26,10 @@ struct DualSessionState;
 // with synchronized keyboard/mouse event routing and snapshot/restore of pane state.
 class DualGalleryScreen : public Screen {
 public:
-    // Same dependency set as GalleryGrid (the ctor builds two of them), plus
-    // the dual session state to restore from / snapshot into.
-    DualGalleryScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                      gfx::TextureCache& cache, GalleryGrid::GridDialogs dialogs,
+    // Same dependency set as GalleryGrid (the ctor builds two of them, reusing
+    // its grouped context structs), plus the dual session state to restore
+    // from / snapshot into.
+    DualGalleryScreen(GalleryGrid::GridInitContext ctx, GalleryGrid::GridDialogs dialogs,
                       GalleryGrid::GridVaultCtx vault_ctx, GallerySessionState& session,
                       ImportQueue& queue, DualSessionState& dual);
 
@@ -49,6 +49,17 @@ private:
     GalleryGrid& inactive();
     void set_active(int pane);   // updates dialog-pump flags
     void snapshot();             // both panes -> dual_
+
+    // handle_event stages, in routing order (each owns one branch of the
+    // original dispatcher; see handle_event for the order rationale).
+    void apply_split_layout();                          // push the 50/50 split into both panes
+    void handle_prompt_key(const SDL_KeyboardEvent& key);   // M-prompt key routing
+    void fire_transfer(const DualTransferPrompt::Launch& launch);
+    bool route_busy_pane(const SDL_Event& e);           // keys to a busy inactive pane's modal
+    bool handle_split_key(const SDL_KeyboardEvent& key);    // Tab/F3/M/disabled shortcuts
+    void open_transfer_prompt();                        // M: refusal checks, then prompt_.open
+    bool route_mouse(const SDL_Event& e);               // buttons/motion/wheel to pane under cursor
+    void drain_nav(GalleryGrid& grid);                  // take_nav -> snapshot/request
 
     gfx::Window&              win_;
     gfx::FontAtlas&           font_;

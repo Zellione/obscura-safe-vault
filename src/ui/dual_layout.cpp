@@ -30,14 +30,15 @@ DualTransferRefusal dual_transfer_check(std::string_view src_gallery,
                                         std::string_view dst_gallery,
                                         std::span<const std::string> selected_gallery_paths) noexcept
 {
-    if (src_gallery == dst_gallery) return DualTransferRefusal::SameGallery;
+    using enum DualTransferRefusal;
+    if (src_gallery == dst_gallery) return SameGallery;
     for (const std::string& g : selected_gallery_paths) {
-        if (dst_gallery == g) return DualTransferRefusal::IntoOwnSubtree;
+        if (dst_gallery == g) return IntoOwnSubtree;
         if (dst_gallery.size() > g.size() && dst_gallery.starts_with(g) &&
             dst_gallery[g.size()] == '/')
-            return DualTransferRefusal::IntoOwnSubtree;
+            return IntoOwnSubtree;
     }
-    return DualTransferRefusal::None;
+    return None;
 }
 
 SDL_Event translate_event_to_pane(const SDL_Event& e, const SDL_FRect& pane) noexcept

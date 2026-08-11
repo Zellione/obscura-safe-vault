@@ -987,6 +987,21 @@ bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& 
     }
 }
 
+// F3 (enter split view; Phase 78), extracted from handle_key_down to keep its
+// cognitive complexity under cpp:S3776. Returns true when the key was consumed
+// (embedded panes swallow F3 — the host screen owns split-view toggling).
+bool handle_f3_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
+{
+    if (key.key != SDLK_F3) return false;
+    if (g.embedded_) return true;
+    if (layout_w(g) < ui::MIN_SPLIT_WIDTH) {
+        g.status_ = "Window too narrow for split view (needs 900 px)";
+    } else {
+        g.request(NavKind::ToDualGallery);
+    }
+    return true;
+}
+
 void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
 {
     // Detail-panel handling (Ctrl+Up/Down scroll, D toggle). Extracted to reduce
@@ -1000,43 +1015,28 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         handle_delete_key(*this);
         return;
     }
-    if ((key.key == SDLK_C) && (key.mod & SDL_KMOD_SHIFT)) {
-        if (!embedded_) {
-            handle_shift_c_key(*this, key);
-            return;
-        }
+    if ((key.key == SDLK_C) && (key.mod & SDL_KMOD_SHIFT) && !embedded_) {
+        handle_shift_c_key(*this, key);
+        return;
     }
-    if (key.key == SDLK_D && (key.mod & SDL_KMOD_CTRL) != 0) {
-        if (!embedded_) {
-            handle_ctrl_d_key(*this);
-            return;
-        }
+    if (key.key == SDLK_D && (key.mod & SDL_KMOD_CTRL) != 0 && !embedded_) {
+        handle_ctrl_d_key(*this);
+        return;
     }
     if ((key.key == SDLK_I) && (key.mod & SDL_KMOD_SHIFT)) {
         request(NavKind::ToImportStatus);
         return;
     }
-    if (is_quick_switch_key(key)) {
-        if (!embedded_) {
-            quick_switch_.open();
-            return;
-        }
+    if (is_quick_switch_key(key) && !embedded_) {
+        quick_switch_.open();
+        return;
     }
     // Shortcut-key dispatch (L/X/M/R/SPACE/G/B/F/T/S/U); extracted to reduce complexity
     if (gallery_grid_handle_shortcut_keys(*this, key)) { return; }
 
     if (is_search_key(key)) { search_.open(); return; }
     if (is_advanced_search_key(key)) { request(NavKind::ToAdvancedSearch); return; }
-    if (key.key == SDLK_F3) {
-        if (!embedded_) {
-            if (layout_w(*this) < ui::MIN_SPLIT_WIDTH) {
-                status_ = "Window too narrow for split view (needs 900 px)";
-            } else {
-                request(NavKind::ToDualGallery);
-            }
-        }
-        return;
-    }
+    if (handle_f3_key(*this, key)) { return; }
 
     using enum InputAction;
     switch (map_key(key.key, key.mod)) {
@@ -1584,7 +1584,7 @@ void restore_pane_state(GalleryGrid& g, const PaneState& s)
     g.detail_.panel.open = s.detail_open;
 
     // Re-select tiles from s.selected_tiles, dropping out-of-range indices.
-    const int count = static_cast<int>(g.children_.size());
+    const auto count = static_cast<int>(g.children_.size());
     for (int idx : s.selected_tiles) {
         if (idx >= 0 && idx < count) {
             g.sel_.toggle(idx);
@@ -1894,7 +1894,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
         {"Esc", "Back"}, {"`", "Switch vault"}, {"L", "Cycle view: list / grid size"},
     };
     if (!embedded_) {
-        nav_entries.push_back({"F3", "Split view (side-by-side)"});
+        nav_entries.emplace_back("F3", "Split view (side-by-side)");
     }
 
     return {

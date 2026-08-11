@@ -66,7 +66,8 @@ private:
         TextFieldChrome pw_chrome;
         TextFieldChrome confirm_chrome;
         bool            reveal = false;  // show a freshly generated passphrase
-    } password_;
+    };
+    PasswordInput password_;
 
     // File and status state
     std::string     keyfile_path_;
@@ -78,14 +79,16 @@ private:
     struct ClipboardState {
         std::string last_set;
         double      clear_timer = -1.0;  // -1 = no pending auto-clear
-    } clipboard_;
+    };
+    ClipboardState clipboard_;
 
     // Mouse tracking for button hover/active states
     struct MouseState {
         float x    = -1.0f;
         float y    = -1.0f;
         bool  down = false;
-    } mouse_;
+    };
+    MouseState mouse_;
 };
 
 } // namespace ui

@@ -19,8 +19,10 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <new>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 namespace platform {
 
@@ -35,24 +37,31 @@ namespace platform {
 // UTF-16 surrogate on NTFS) degrades to a placeholder instead of terminating —
 // callers use the result for display, log lines, and vault node names, all of
 // which tolerate a lossy fallback (node names pass sanitize_node_name anyway).
+// The conversion can only throw std::system_error (UTF-16 -> UTF-8 failure;
+// filesystem_error derives from it) or std::bad_alloc (string allocation).
 [[nodiscard]] inline std::string path_to_utf8(const std::filesystem::path& p)
 {
     try {
         const std::u8string s = p.u8string();
         return std::string(std::bit_cast<const char*>(s.data()), s.size());
-    } catch (const std::exception&) {
+    } catch (const std::system_error&) {
+        return "(unrepresentable path)";
+    } catch (const std::bad_alloc&) {
         return "(unrepresentable path)";
     }
 }
 
 // Generic-format (forward-slash) path as UTF-8 — vaults.list stays in one
-// portable shape on every platform (see VaultRegistry::write).
+// portable shape on every platform (see VaultRegistry::write). Same no-throw
+// contract and exception set as path_to_utf8 above.
 [[nodiscard]] inline std::string path_to_utf8_generic(const std::filesystem::path& p)
 {
     try {
         const std::u8string s = p.generic_u8string();
         return std::string(std::bit_cast<const char*>(s.data()), s.size());
-    } catch (const std::exception&) {
+    } catch (const std::system_error&) {
+        return "(unrepresentable path)";
+    } catch (const std::bad_alloc&) {
         return "(unrepresentable path)";
     }
 }

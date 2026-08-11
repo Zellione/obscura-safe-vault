@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <array>
 #include <span>
 
 #include "gfx/renderer.h"
@@ -19,20 +20,17 @@
 
 namespace ui {
 
-DualGalleryScreen::DualGalleryScreen(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                                     gfx::TextureCache& cache, GalleryGrid::GridDialogs dialogs,
+DualGalleryScreen::DualGalleryScreen(GalleryGrid::GridInitContext ctx, GalleryGrid::GridDialogs dialogs,
                                      GalleryGrid::GridVaultCtx vault_ctx, GallerySessionState& session,
                                      ImportQueue& queue, DualSessionState& dual)
-    : win_(win), font_(font), vault_(vault), dual_(dual), queue_(queue)
+    : win_(ctx.win), font_(ctx.font), vault_(ctx.vault), dual_(dual), queue_(queue)
 {
     // Build both grids; don't call on_enter() yet
     left_ = std::make_unique<GalleryGrid>(
-        GalleryGrid::GridInitContext{win, font, vault, cache},
-        dialogs, vault_ctx, session, queue,
+        ctx, dialogs, vault_ctx, session, queue,
         GridLocation{dual.pane[0].path, dual.pane[0].selected, dual.pane[0].view});
     right_ = std::make_unique<GalleryGrid>(
-        GalleryGrid::GridInitContext{win, font, vault, cache},
-        dialogs, vault_ctx, session, queue,
+        ctx, dialogs, vault_ctx, session, queue,
         GridLocation{dual.pane[1].path, dual.pane[1].selected, dual.pane[1].view});
 
     // Mark both as embedded (pane mode)
@@ -40,13 +38,17 @@ DualGalleryScreen::DualGalleryScreen(gfx::Window& win, gfx::FontAtlas& font, vau
     right_->set_embedded(true);
 }
 
-void DualGalleryScreen::on_enter()
+void DualGalleryScreen::apply_split_layout()
 {
     const auto split = dual_split(static_cast<float>(win_.width()), static_cast<float>(win_.height()));
-
-    // Set layout overrides for each pane
     left_->set_layout_override(split.left.w, split.left.h);
     right_->set_layout_override(split.right.w, split.right.h);
+}
+
+void DualGalleryScreen::on_enter()
+{
+    // Set layout overrides for each pane
+    apply_split_layout();
 
     // Enter both grids
     left_->on_enter();
@@ -145,279 +147,241 @@ void DualGalleryScreen::handle_event(const SDL_Event& e)
 {
     // 1. Window resize: recompute the split, set_layout_override both panes
     if (e.type == SDL_EVENT_WINDOW_RESIZED) {
-        const auto split = dual_split(static_cast<float>(win_.width()), static_cast<float>(win_.height()));
-        left_->set_layout_override(split.left.w, split.left.h);
-        right_->set_layout_override(split.right.w, split.right.h);
+        apply_split_layout();
         mark_dirty();
         return;
     }
 
-    // 2. Transfer prompt (Task 7): handle prompt key input while it's open
+    // 2. Transfer prompt (Task 7): route keys into it; swallow everything else
+    // while it is open
     if (prompt_.stage() != DualTransferPrompt::Stage::Closed) {
-        if (e.type == SDL_EVENT_KEY_DOWN) {
-            DualTransferPrompt::Key key;
-            if (e.key.key == SDLK_UP) key = DualTransferPrompt::Key::Up;
-            else if (e.key.key == SDLK_DOWN) key = DualTransferPrompt::Key::Down;
-            else if (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER) key = DualTransferPrompt::Key::Enter;
-            else if (e.key.key == SDLK_ESCAPE) key = DualTransferPrompt::Key::Esc;
-            else { mark_dirty(); return; }  // Unhandled key in prompt
-
-            const auto launch = prompt_.key(key);
-            if (launch.fire) {
-                // Fire the transfer job: build spec and launch
-                const std::string& dst_path = current_gallery_path(inactive());
-
-                // Build selection paths from active pane
-                std::vector<std::string> all_paths = selected_transfer_paths(active());
-
-                // Split into media vs gallery paths
-                std::vector<std::string> media_paths, gallery_paths;
-                for (const auto& path : all_paths) {
-                    if (gallery_exists(vault_, path)) {
-                        gallery_paths.push_back(path);
-                    } else {
-                        media_paths.push_back(path);
-                    }
-                }
-
-                // Build CollectionTransferSpec
-                CollectionTransferSpec spec{
-                    group_by_parent(media_paths),
-                    gallery_paths
-                };
-
-                // Build destination label for status message
-                const std::string dst_leaf = dst_path.empty() ? "Root" : dst_path.substr(dst_path.rfind('/') + 1);
-                const std::string verb = (launch.mode == vault::TransferMode::Copy) ? "Copied" : "Moved";
-                const std::string label = verb + " to " + dst_leaf;
-
-                // Launch the job
-                job_.start_transfer_collection(vault_, spec, vault_, dst_path,
-                                               launch.mode, launch.policy, label);
-            }
-            mark_dirty();
-            return;
-        }
-        // Swallow all other events while prompt is open
+        if (e.type == SDL_EVENT_KEY_DOWN) handle_prompt_key(e.key);
         return;
     }
 
-    // 2b. Job active (transfer in progress): handle Esc to cancel, block all other events
+    // 2b. Job active (transfer in progress): handle Esc to cancel, block all
+    // other events (don't forward to panes)
     if (job_.active()) {
         if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) {
             job_.cancel();
             mark_dirty();
         }
-        // Swallow all events while job is running (don't forward to panes)
         return;
     }
 
-    // Input-while-busy routing: if either pane has an active job/import modal,
-    // route ALL key events to that pane so its progress modal/cancel keys work.
-    const bool left_busy = vault_busy(*left_);
-    const bool right_busy = vault_busy(*right_);
-    if (e.type == SDL_EVENT_KEY_DOWN && (left_busy || right_busy)) {
-        GalleryGrid& busy_pane = left_busy ? *left_ : *right_;
-        if ((left_busy && active_ != 0) || (right_busy && active_ != 1)) {
-            // Busy pane is not active; route key to it anyway
-            busy_pane.handle_event(e);
-            Nav n = busy_pane.take_nav();
-            if (n.kind != NavKind::None) {
-                snapshot();
-                request(n.kind, n.path, n.index);
-            }
-            return;
+    if (route_busy_pane(e)) return;
+    if (e.type == SDL_EVENT_KEY_DOWN && handle_split_key(e.key)) return;
+    if (route_mouse(e)) return;
+
+    // 8. Everything else: forward to active pane untranslated
+    active().handle_event(e);
+    drain_nav(active());
+}
+
+void DualGalleryScreen::handle_prompt_key(const SDL_KeyboardEvent& key)
+{
+    DualTransferPrompt::Key k;
+    if (key.key == SDLK_UP) k = DualTransferPrompt::Key::Up;
+    else if (key.key == SDLK_DOWN) k = DualTransferPrompt::Key::Down;
+    else if (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) k = DualTransferPrompt::Key::Enter;
+    else if (key.key == SDLK_ESCAPE) k = DualTransferPrompt::Key::Esc;
+    else { mark_dirty(); return; }  // Unhandled key in prompt
+
+    if (const auto launch = prompt_.key(k); launch.fire) fire_transfer(launch);
+    mark_dirty();
+}
+
+// Fire the transfer job: build the collection spec from the active pane's
+// selection and launch it toward the inactive pane's gallery.
+void DualGalleryScreen::fire_transfer(const DualTransferPrompt::Launch& launch)
+{
+    const std::string& dst_path = current_gallery_path(inactive());
+
+    // Split the active pane's selection into media vs gallery paths
+    std::vector<std::string> media_paths;
+    std::vector<std::string> gallery_paths;
+    for (const auto& path : selected_transfer_paths(active())) {
+        if (gallery_exists(vault_, path)) {
+            gallery_paths.push_back(path);
+        } else {
+            media_paths.push_back(path);
         }
-        // Busy pane is active; let normal routing handle it below
     }
 
-    // 3. Tab (no modifiers): switch panes or forward if overlay active
-    if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_TAB && e.key.mod == 0) {
-        // Check if either pane is busy with overlay/naming
-        if (!left_busy && !right_busy) {
-            set_active(1 - active_);
-            mark_dirty();
-            return;
+    // Build CollectionTransferSpec
+    CollectionTransferSpec spec{
+        group_by_parent(media_paths),
+        gallery_paths
+    };
+
+    // Build destination label for status message
+    const std::string dst_leaf = dst_path.empty() ? "Root" : dst_path.substr(dst_path.rfind('/') + 1);
+    const std::string verb = (launch.mode == vault::TransferMode::Copy) ? "Copied" : "Moved";
+    const std::string label = verb + " to " + dst_leaf;
+
+    // Launch the job
+    job_.start_transfer_collection(vault_, spec, vault_, dst_path,
+                                   launch.mode, launch.policy, label);
+}
+
+// Input-while-busy routing: if either pane has an active job/import modal,
+// route ALL key events to that pane so its progress modal/cancel keys work.
+// Returns true only when the key was consumed by a busy, inactive pane; a
+// busy ACTIVE pane keeps normal routing.
+bool DualGalleryScreen::route_busy_pane(const SDL_Event& e)
+{
+    if (e.type != SDL_EVENT_KEY_DOWN) return false;
+    const bool left_busy = vault_busy(*left_);
+    const bool right_busy = vault_busy(*right_);
+    if (!left_busy && !right_busy) return false;
+    if ((left_busy && active_ != 0) || (right_busy && active_ != 1)) {
+        // Busy pane is not active; route key to it anyway
+        GalleryGrid& busy_pane = left_busy ? *left_ : *right_;
+        busy_pane.handle_event(e);
+        if (const Nav n = busy_pane.take_nav(); n.kind != NavKind::None) {
+            snapshot();
+            request(n.kind, n.path, n.index);
         }
-        // If busy, fall through to forward to active pane
+        return true;
+    }
+    return false;  // busy pane is active; let normal routing handle it
+}
+
+bool DualGalleryScreen::handle_split_key(const SDL_KeyboardEvent& key)
+{
+    // 3. Tab (no modifiers): switch panes — unless a pane is busy with an
+    // overlay/naming, in which case Tab forwards to the active pane instead
+    if (key.key == SDLK_TAB && key.mod == 0 && !vault_busy(*left_) && !vault_busy(*right_)) {
+        set_active(1 - active_);
+        mark_dirty();
+        return true;
     }
 
     // 4. F3: leave split view
-    if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F3) {
+    if (key.key == SDLK_F3) {
         snapshot();
         dual_.split_active = false;  // Phase 78: user leaving split view
         const std::string path = current_gallery_path(active());
         const int selected = capture_pane_state(active()).selected;
         request(NavKind::ToGallery, path, selected);
-        return;
+        return true;
     }
 
     // 5. M (no mods): open transfer prompt (Task 7), with refusal order
-    if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_M && e.key.mod == 0) {
-        // Phase 78 Task 7: open pane-to-pane transfer prompt
-
-        // Refusal 1: queue busy (imports running)
-        if (queue_.busy()) {
-            status_ = "Imports running — press Shift+I";
-            mark_dirty();
-            return;
-        }
-
-        // Refusal 2: either pane vault_busy or own transfer job active
-        if (left_busy || right_busy || job_.active()) {
-            status_ = "Transfer in progress";
-            mark_dirty();
-            return;
-        }
-
-        // Get source and destination galleries
-        const std::string& src_path = current_gallery_path(active());
-        const std::string& dst_path = current_gallery_path(inactive());
-
-        // Build selection paths from active pane
-        std::vector<std::string> all_paths = selected_transfer_paths(active());
-
-        // Split into media vs gallery paths (for refusal check)
-        std::vector<std::string> gallery_paths_for_check;
-        for (const auto& path : all_paths) {
-            if (gallery_exists(vault_, path)) {
-                gallery_paths_for_check.push_back(path);
-            }
-        }
-
-        // Refusal 3: dual_transfer_check (same gallery or cycle)
-        auto refusal = dual_transfer_check(src_path, dst_path, gallery_paths_for_check);
-        if (refusal != DualTransferRefusal::None) {
-            if (refusal == DualTransferRefusal::SameGallery) {
-                status_ = "Both panes show the same gallery";
-            } else {
-                status_ = "Can't move a gallery into itself";
-            }
-            mark_dirty();
-            return;
-        }
-
-        // Refusal 4 (pre-scan): compute colliding galleries
-        const std::vector<std::string> conflicts = vault::colliding_galleries(
-            vault_, dst_path, gallery_paths_for_check);
-
-        // Get destination leaf name
-        const std::string dst_leaf = dst_path.empty() ? "Root" : dst_path.substr(dst_path.rfind('/') + 1);
-
-        // Open the prompt
-        prompt_.open(dst_leaf, conflicts);
+    if (key.key == SDLK_M && key.mod == 0) {
+        open_transfer_prompt();
         mark_dirty();
-        return;
+        return true;
     }
 
     // 6. Shift+M / Ctrl+D / Shift+C / backtick: disabled in split view
-    if (e.type == SDL_EVENT_KEY_DOWN) {
-        const bool is_shift_m = e.key.key == SDLK_M && (e.key.mod & SDL_KMOD_SHIFT);
-        const bool is_ctrl_d = e.key.key == SDLK_D && (e.key.mod & SDL_KMOD_CTRL);
-        const bool is_shift_c = e.key.key == SDLK_C && (e.key.mod & SDL_KMOD_SHIFT);
-        const bool is_backtick = e.key.key == SDLK_GRAVE;
-
-        if (is_shift_m || is_ctrl_d || is_shift_c || is_backtick) {
-            status_ = "Not available in split view";
-            mark_dirty();
-            return;
-        }
+    const bool is_shift_m = key.key == SDLK_M && (key.mod & SDL_KMOD_SHIFT);
+    const bool is_ctrl_d = key.key == SDLK_D && (key.mod & SDL_KMOD_CTRL);
+    const bool is_shift_c = key.key == SDLK_C && (key.mod & SDL_KMOD_SHIFT);
+    const bool is_backtick = key.key == SDLK_GRAVE;
+    if (is_shift_m || is_ctrl_d || is_shift_c || is_backtick) {
+        status_ = "Not available in split view";
+        mark_dirty();
+        return true;
     }
 
-    // 7. Mouse events: route to pane under cursor
-    if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_UP ||
-        e.type == SDL_EVENT_MOUSE_MOTION) {
-        const auto split = dual_split(static_cast<float>(win_.width()), static_cast<float>(win_.height()));
-        float x = 0.0f;
+    return false;
+}
 
-        // Extract mouse coordinates
-        if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_UP) {
-            x = e.button.x;
-        } else if (e.type == SDL_EVENT_MOUSE_MOTION) {
-            x = e.motion.x;
-        }
-
-        int pane_idx = pane_at(split, x);
-        const SDL_FRect& pane_rect = pane_idx == 0 ? split.left : split.right;
-
-        // Change active pane if clicking on the other pane
-        if (pane_idx != active_) {
-            set_active(pane_idx);
-            mark_dirty();
-        }
-
-        // Translate and forward to the pane
-        SDL_Event translated = translate_event_to_pane(e, pane_rect);
-        GalleryGrid& grid = (pane_idx == 0 ? *left_ : *right_);
-        grid.handle_event(translated);
-
-        // Drain nav from the pane and re-request upward
-        Nav n = grid.take_nav();
-        if (n.kind != NavKind::None) {
-            if (n.kind == NavKind::ToViewer || n.kind == NavKind::ToFavoriteViewer ||
-                n.kind == NavKind::ToTagViewer) {
-                snapshot();
-                // Phase 78: split_active stays true (we're in split view); only set
-                // false on deliberate F3-leave. Viewer will return to split via
-                // apply_nav's from_viewer && split_active check.
-                dual_.active_pane = active_;
-                request(n.kind, n.path, n.index);
-            } else if (n.kind != NavKind::ToVaultManager) {
-                snapshot();
-                request(n.kind, n.path, n.index);
-            }
-        }
+// Phase 78 Task 7: pane-to-pane transfer prompt — run the refusal checks in
+// order and open the prompt only when none applies.
+void DualGalleryScreen::open_transfer_prompt()
+{
+    // Refusal 1: queue busy (imports running)
+    if (queue_.busy()) {
+        status_ = "Imports running — press Shift+I";
         return;
     }
 
-    // Wheel: forward to pane under cursor WITHOUT changing active pane
-    if (e.type == SDL_EVENT_MOUSE_WHEEL) {
-        const auto split = dual_split(static_cast<float>(win_.width()), static_cast<float>(win_.height()));
-        float x = e.wheel.mouse_x;
-        int pane_idx = pane_at(split, x);
-        const SDL_FRect& pane_rect = pane_idx == 0 ? split.left : split.right;
-
-        SDL_Event translated = translate_event_to_pane(e, pane_rect);
-        GalleryGrid& grid = (pane_idx == 0 ? *left_ : *right_);
-        grid.handle_event(translated);
-
-        // Drain nav from the pane
-        Nav n = grid.take_nav();
-        if (n.kind != NavKind::None) {
-            if (n.kind == NavKind::ToViewer || n.kind == NavKind::ToFavoriteViewer ||
-                n.kind == NavKind::ToTagViewer) {
-                snapshot();
-                // Phase 78: split_active stays true (we're in split view); only set
-                // false on deliberate F3-leave. Viewer will return to split via
-                // apply_nav's from_viewer && split_active check.
-                dual_.active_pane = active_;
-                request(n.kind, n.path, n.index);
-            } else if (n.kind != NavKind::ToVaultManager) {
-                snapshot();
-                request(n.kind, n.path, n.index);
-            }
-        }
+    // Refusal 2: either pane vault_busy or own transfer job active
+    if (vault_busy(*left_) || vault_busy(*right_) || job_.active()) {
+        status_ = "Transfer in progress";
         return;
     }
 
-    // 8. Everything else: forward to active pane untranslated
-    active().handle_event(e);
+    // Get source and destination galleries
+    const std::string& src_path = current_gallery_path(active());
+    const std::string& dst_path = current_gallery_path(inactive());
 
-    // Drain nav from active pane
-    Nav n = active().take_nav();
-    if (n.kind != NavKind::None) {
-        if (n.kind == NavKind::ToViewer || n.kind == NavKind::ToFavoriteViewer ||
-            n.kind == NavKind::ToTagViewer) {
-            snapshot();
-            // Phase 78: split_active stays true (we're in split view); only set
-            // false on deliberate F3-leave. Viewer will return to split via
-            // apply_nav's from_viewer && split_active check.
-            dual_.active_pane = active_;
-            request(n.kind, n.path, n.index);
-        } else if (n.kind != NavKind::ToVaultManager) {
-            snapshot();
-            request(n.kind, n.path, n.index);
+    // Gallery paths within the active pane's selection (for the refusal check)
+    std::vector<std::string> gallery_paths_for_check;
+    for (const auto& path : selected_transfer_paths(active())) {
+        if (gallery_exists(vault_, path)) {
+            gallery_paths_for_check.push_back(path);
         }
+    }
+
+    // Refusal 3: dual_transfer_check (same gallery or cycle)
+    if (const auto refusal = dual_transfer_check(src_path, dst_path, gallery_paths_for_check);
+        refusal != DualTransferRefusal::None) {
+        status_ = refusal == DualTransferRefusal::SameGallery
+                      ? "Both panes show the same gallery"
+                      : "Can't move a gallery into itself";
+        return;
+    }
+
+    // Refusal 4 (pre-scan): compute colliding galleries
+    const std::vector<std::string> conflicts = vault::colliding_galleries(
+        vault_, dst_path, gallery_paths_for_check);
+
+    // Open the prompt at the destination's leaf name
+    const std::string dst_leaf = dst_path.empty() ? "Root" : dst_path.substr(dst_path.rfind('/') + 1);
+    prompt_.open(dst_leaf, conflicts);
+}
+
+// 7. Mouse buttons/motion: route to the pane under the cursor (activating it);
+// wheel: route to the pane under the cursor WITHOUT changing the active pane.
+bool DualGalleryScreen::route_mouse(const SDL_Event& e)
+{
+    const bool is_button = e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_UP;
+    const bool is_motion = e.type == SDL_EVENT_MOUSE_MOTION;
+    const bool is_wheel = e.type == SDL_EVENT_MOUSE_WHEEL;
+    if (!is_button && !is_motion && !is_wheel) return false;
+
+    // Extract mouse coordinates
+    float x = e.wheel.mouse_x;
+    if (is_button) x = e.button.x;
+    else if (is_motion) x = e.motion.x;
+
+    const auto split = dual_split(static_cast<float>(win_.width()), static_cast<float>(win_.height()));
+    const int pane_idx = pane_at(split, x);
+    const SDL_FRect& pane_rect = pane_idx == 0 ? split.left : split.right;
+
+    // Change active pane if clicking on the other pane (never for wheel)
+    if (!is_wheel && pane_idx != active_) {
+        set_active(pane_idx);
+        mark_dirty();
+    }
+
+    // Translate and forward to the pane, then drain its nav
+    const SDL_Event translated = translate_event_to_pane(e, pane_rect);
+    GalleryGrid& grid = pane_idx == 0 ? *left_ : *right_;
+    grid.handle_event(translated);
+    drain_nav(grid);
+    return true;
+}
+
+// Drain a routed pane's pending navigation and re-request it upward.
+void DualGalleryScreen::drain_nav(GalleryGrid& grid)
+{
+    using enum NavKind;
+    const Nav n = grid.take_nav();
+    if (n.kind == None) return;
+    if (n.kind == ToViewer || n.kind == ToFavoriteViewer || n.kind == ToTagViewer) {
+        snapshot();
+        // Phase 78: split_active stays true (we're in split view); only set
+        // false on deliberate F3-leave. Viewer will return to split via
+        // apply_nav's from_viewer && split_active check.
+        dual_.active_pane = active_;
+        request(n.kind, n.path, n.index);
+    } else if (n.kind != ToVaultManager) {
+        snapshot();
+        request(n.kind, n.path, n.index);
     }
 }
 
@@ -511,8 +475,8 @@ void DualGalleryScreen::render(gfx::Renderer& r)
     // Draw the transfer prompt modal if open (centered over entire window)
     if (prompt_.stage() != DualTransferPrompt::Stage::Closed) {
         using namespace gfx::theme;
-        const float W = static_cast<float>(win_.width());
-        const float H = static_cast<float>(win_.height());
+        const auto W = static_cast<float>(win_.width());
+        const auto H = static_cast<float>(win_.height());
 
         // Modal background: semi-transparent overlay
         r.draw_rect(SDL_FRect{0, 0, W, H}, gfx::Color{0, 0, 0, 180}, /*filled*/ true);
@@ -538,15 +502,15 @@ void DualGalleryScreen::render(gfx::Renderer& r)
         const float row_width = modal_w - 40.0f;
 
         if (prompt_.stage() == DualTransferPrompt::Stage::Mode) {
-            const std::string mode_rows[] = {"Move to " + (dst_label.empty() ? "Root" : dst_label),
-                                              "Copy to " + (dst_label.empty() ? "Root" : dst_label),
-                                              "Cancel"};
+            const std::array<std::string, 3> mode_rows{"Move to " + (dst_label.empty() ? "Root" : dst_label),
+                                                       "Copy to " + (dst_label.empty() ? "Root" : dst_label),
+                                                       "Cancel"};
             draw_option_rows(r, font_, row_indent_x, rows_y, row_width,
-                           std::span<const std::string>(mode_rows, 3), prompt_.selected());
+                           std::span<const std::string>(mode_rows), prompt_.selected());
         } else if (prompt_.stage() == DualTransferPrompt::Stage::Conflict) {
-            const std::string conflict_rows[] = {"Combine into existing", "Rename (_2)", "Cancel"};
+            const std::array<std::string, 3> conflict_rows{"Combine into existing", "Rename (_2)", "Cancel"};
             draw_option_rows(r, font_, row_indent_x, rows_y, row_width,
-                           std::span<const std::string>(conflict_rows, 3), prompt_.selected());
+                           std::span<const std::string>(conflict_rows), prompt_.selected());
         }
 
         // Help text at bottom

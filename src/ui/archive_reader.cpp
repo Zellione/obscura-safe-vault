@@ -143,8 +143,7 @@ bool read_entry_data(struct archive* a, crypto::SecureBytes& out, bool& needs_pa
 bool finalize_entry(struct archive* a, bool& needs_password)
 {
     uint8_t sentinel = 0;
-    const la_ssize_t n = archive_read_data(a, &sentinel, 1);
-    if (n < 0) {
+    if (const la_ssize_t n = archive_read_data(a, &sentinel, 1); n < 0) {
         const std::string_view msg = archive_error_string(a);
         std::println(stderr, "[ArchiveReader] entry finalize failed: {}", msg);
         needs_password = archive_error_is_passphrase_issue(msg);

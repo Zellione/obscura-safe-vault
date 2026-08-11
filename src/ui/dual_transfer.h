@@ -35,6 +35,11 @@ public:
     [[nodiscard]] const std::vector<std::string>& conflicts() const { return conflicts_; }
 
 private:
+    void mode_key(Key k, Launch& result);      // Mode-stage transitions
+    void conflict_key(Key k, Launch& result);  // Conflict-stage transitions
+    void mode_enter(Launch& result);           // Enter on the Mode stage
+    void conflict_enter(Launch& result);       // Enter on the Conflict stage
+
     Stage               stage_ = Stage::Closed;
     int                 selected_ = 0;
     std::string         dst_label_;

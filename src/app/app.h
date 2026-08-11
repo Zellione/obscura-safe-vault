@@ -46,7 +46,7 @@ private:
     void to_unlock(const std::string& path);
     // `explicit_index` is true only when `selected` is a real, freshly-known
     // position (currently: the viewer returning to its exact launch position)
-    // — otherwise `selected` is ignored in favor of session_.recall(path), the
+    // — otherwise `selected` is ignored in favor of sessions_.gallery.recall(path), the
     // last-remembered tile at that path (Phase 40 Part 2).
     void to_gallery(const std::string& path = {}, int selected = 0, bool explicit_index = false);
     void to_dual_gallery();  // Phase 78: open dual-pane split view
@@ -67,7 +67,7 @@ private:
     // viewer, applies a matching video-resume bookmark, then activates it.
     void enter_viewer(std::unique_ptr<ui::ImageViewer> viewer);
     // Snapshots the outgoing screen's view/strip-side/video-position into
-    // session_, if it is a GalleryGrid or ImageViewer (Phase 39 Part 2). Called
+    // sessions_.gallery, if it is a GalleryGrid or ImageViewer (Phase 39 Part 2). Called
     // right before a screen is torn down by a nav transition.
     void capture_session_state();
 
@@ -115,19 +115,23 @@ private:
         int badge_secs = -1;  // last drawn countdown second
     };
     SecondVaultUi                      second_;
-    // Advanced-search state preserved across visits within one unlocked-vault
-    // session; reset in promote_pending() whenever the active vault changes.
-    ui::AdvancedSearchState            adv_session_;
-    // Dual-pane split view state (Phase 78): both pane paths and selected indices,
-    // plus the active pane index. Preserved across split-view exit via F3 (toggle),
-    // reset when the active vault changes (promote_pending) or is explicitly locked.
-    ui::DualSessionState               dual_session_;
-    // Gallery/viewer session state (Phase 39 Part 2): last-used List/Grid view +
-    // thumbnail-strip side, plus a single "last video watched" resume bookmark;
-    // carried through App's screen reconstruction on every grid<->viewer round
-    // trip. Reset at the same points adv_session_ is (LockActive, idle auto-lock,
-    // vault switch).
-    ui::GallerySessionState             session_;
+    // Session-scoped UI state preserved across screen reconstructions within
+    // one unlocked-vault session. All three reset at the same points: explicit
+    // lock (LockActive), idle auto-lock, and vault switch (promote_pending).
+    struct SessionUi {
+        // Advanced-search state preserved across visits (Phase 18).
+        ui::AdvancedSearchState adv;
+        // Dual-pane split view state (Phase 78): both pane paths and selected
+        // indices, plus the active pane index. Preserved across split-view
+        // exit via F3 (toggle).
+        ui::DualSessionState dual;
+        // Gallery/viewer state (Phase 39 Part 2): last-used List/Grid view +
+        // thumbnail-strip side, plus a single "last video watched" resume
+        // bookmark; carried through App's screen reconstruction on every
+        // grid<->viewer round trip.
+        ui::GallerySessionState gallery;
+    };
+    SessionUi                          sessions_;
     State                              state_   = State::Locked;
     bool                               running_ = false;   // main-loop run flag
 

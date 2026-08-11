@@ -86,6 +86,11 @@ bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
 // handle_key_down's cognitive complexity. Returns true when consumed.
 bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& key);
 
+// F3 (enter split view, Phase 78), extracted for the same S3776 reason.
+// Returns true when the key was consumed (embedded panes swallow F3 — the
+// host screen owns split-view toggling).
+bool handle_f3_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
+
 // Where to (re)open the grid: a gallery path (empty = root), the selected
 // tile index, and the initial List/Grid view (Phase 39 Part 2 session
 // memory). Used to restore position + view mode when returning from the
@@ -204,6 +209,7 @@ void toggle_select();          // toggle the current item in the export selectio
     friend void render_delete_confirm_modal(GalleryGrid& g, gfx::Renderer& r, float W, float H);  // (S3776 extraction)
     friend bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key);     // detail panel scroll/toggle
     friend bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& key);  // L/X/M/R/SPACE/G/B/F/T/S/U shortcuts
+    friend bool handle_f3_key(GalleryGrid& g, const SDL_KeyboardEvent& key);         // F3 enter split view (Phase 78)
     friend void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);  // cancelled import waste hint
     // current_gallery_view is a free friend for the same S1448 reason: App reads it
     // (Phase 39 Part 2) to snapshot the outgoing grid's view mode into GallerySessionState.
