@@ -70,6 +70,9 @@ class SecondVaultSession;  // Phase 66: forward declare for GridVaultCtx
 // Used by DualGalleryScreen to build the transfer spec.
 [[nodiscard]] std::vector<std::string> selected_transfer_paths(const class GalleryGrid& g);
 
+// Phase 77 Task 7 Fix: Clear the selection (used after transfers to prevent stale selection).
+void clear_grid_selection(class GalleryGrid& g);
+
 // Rebuild the panel's cached content when the focused node or selection changes.
 // A free friend for the same cpp:S1448 reason as content_width.
 void rebuild_detail(class GalleryGrid& g);
@@ -207,6 +210,8 @@ void toggle_select();          // toggle the current item in the export selectio
     friend void jump_pane_to(GalleryGrid& g, const std::string& path);
     // Phase 77 Task 7: full slash-paths of selection (or focused tile when empty)
     friend std::vector<std::string> selected_transfer_paths(const GalleryGrid& g);
+    // Phase 77 Task 7 Fix: clear selection (used after transfers to avoid stale selection)
+    friend void clear_grid_selection(GalleryGrid& g);
     // The following are free friends for the same S1448/S3776 reasons, extracted
     // from start_transfer() and update() (Phase 44 SonarQube follow-up).
     friend void start_transfer_focused(GalleryGrid& g);

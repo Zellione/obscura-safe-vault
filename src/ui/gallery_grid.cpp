@@ -742,6 +742,12 @@ std::vector<std::string> selected_transfer_paths(const GalleryGrid& g)
     return paths;  // No pruning for transfer (keep all paths, galleries included)
 }
 
+// Phase 77 Task 7 Fix: Clear selection to avoid stale selection after transfers.
+void clear_grid_selection(GalleryGrid& g)
+{
+    g.sel_.clear();
+}
+
 void GalleryGrid::handle_naming_key(const SDL_Event& e)
 {
     // Precedence rule (Phase 54): the prompt consumes editing keys first, so its

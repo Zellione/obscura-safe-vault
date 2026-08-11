@@ -39,6 +39,7 @@ private:
     int                 selected_ = 0;
     std::string         dst_label_;
     std::vector<std::string> conflicts_;
+    vault::TransferMode mode_ = vault::TransferMode::Move;  // Chosen in Mode stage, used in Conflict stage
 };
 
 } // namespace ui

@@ -129,6 +129,34 @@ TEST(dual_prompt_up_down_clamp)
     CHECK_EQ(p.selected(), 2);
 }
 
+TEST(dual_prompt_copy_conflict_combine_preserves_mode)
+{
+    // Regression test: Copy with conflicts must fire with mode==Copy, not Move
+    P p;
+    p.open("Holiday", {"a"});
+    (void)p.key(P::Key::Down);  // Select Copy row
+    (void)p.key(P::Key::Enter); // Enter Copy + conflicts → Conflict stage
+    CHECK(p.stage() == P::Stage::Conflict);
+    const auto l = p.key(P::Key::Enter);  // Combine (default)
+    CHECK(l.fire);
+    CHECK(l.mode == vault::TransferMode::Copy);  // CRITICAL: must preserve Copy mode
+    CHECK(l.policy == vault::CollisionPolicy::Combine);
+}
+
+TEST(dual_prompt_copy_conflict_suffix_preserves_mode)
+{
+    // Regression test: Copy with conflicts → Rename must fire with mode==Copy
+    P p;
+    p.open("Holiday", {"a"});
+    (void)p.key(P::Key::Down);   // Select Copy row
+    (void)p.key(P::Key::Enter);  // Enter Copy + conflicts → Conflict stage
+    (void)p.key(P::Key::Down);   // Select Rename row
+    const auto l = p.key(P::Key::Enter);  // Fire
+    CHECK(l.fire);
+    CHECK(l.mode == vault::TransferMode::Copy);  // CRITICAL: must preserve Copy mode
+    CHECK(l.policy == vault::CollisionPolicy::Suffix);
+}
+
 // --- Integration tests: FileOpJob transfer through same vault ---
 
 TEST(file_op_job_same_vault_move_transfers_items)

@@ -195,6 +195,16 @@ void DualGalleryScreen::handle_event(const SDL_Event& e)
         return;
     }
 
+    // 2b. Job active (transfer in progress): handle Esc to cancel, block all other events
+    if (job_.active()) {
+        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) {
+            job_.cancel();
+            mark_dirty();
+        }
+        // Swallow all events while job is running (don't forward to panes)
+        return;
+    }
+
     // Input-while-busy routing: if either pane has an active job/import modal,
     // route ALL key events to that pane so its progress modal/cancel keys work.
     const bool left_busy = vault_busy(*left_);
@@ -414,7 +424,8 @@ void DualGalleryScreen::update(double dt)
         if (outcome->ok) {
             // Success: show completion status
             status_ = outcome->status;
-            // Clear active pane selection
+            // Clear active pane selection to avoid stale selection after transfer
+            clear_grid_selection(active());
             // Refresh both panes including walk-up
             on_vault_changed();
         } else {
@@ -423,8 +434,11 @@ void DualGalleryScreen::update(double dt)
         }
         mark_dirty();
     } else if (job_.active()) {
-        // Job still running, preserve status bar update
-        status_ = old_status;
+        // Job still running: show progress (done/total)
+        const int done = job_.done();
+        const int total = job_.total();
+        status_ = std::format("Moving… {}/{}", done, total);
+        mark_dirty();
     }
 }
 

@@ -36,6 +36,7 @@ DualTransferPrompt::Launch DualTransferPrompt::key(Key k)
             case Key::Enter:
                 if (selected_ == 0) {
                     // Move row
+                    mode_       = vault::TransferMode::Move;
                     result.mode = vault::TransferMode::Move;
                     if (conflicts_.empty()) {
                         result.policy = vault::CollisionPolicy::Fail;
@@ -48,6 +49,7 @@ DualTransferPrompt::Launch DualTransferPrompt::key(Key k)
                     }
                 } else if (selected_ == 1) {
                     // Copy row
+                    mode_       = vault::TransferMode::Copy;
                     result.mode = vault::TransferMode::Copy;
                     if (conflicts_.empty()) {
                         result.policy = vault::CollisionPolicy::Fail;
@@ -83,13 +85,13 @@ DualTransferPrompt::Launch DualTransferPrompt::key(Key k)
             case Key::Enter:
                 if (selected_ == 0) {
                     // Combine row
-                    result.mode   = vault::TransferMode::Move;  // mode preserved from prior selection
+                    result.mode   = mode_;  // mode chosen in Mode stage
                     result.policy = vault::CollisionPolicy::Combine;
                     result.fire   = true;
                     stage_        = Stage::Closed;
                 } else if (selected_ == 1) {
                     // Rename row
-                    result.mode   = vault::TransferMode::Move;  // mode preserved from prior selection
+                    result.mode   = mode_;  // mode chosen in Mode stage
                     result.policy = vault::CollisionPolicy::Suffix;
                     result.fire   = true;
                     stage_        = Stage::Closed;
