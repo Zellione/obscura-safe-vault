@@ -39,6 +39,7 @@
 #include "ui/meta_format.h"
 #include "vault/vault_search.h"
 #include "media/video_probe.h"
+#include "image/thumbnail.h"
 
 #ifndef OSV_DEFAULT_FONT
 #define OSV_DEFAULT_FONT "assets/fonts/NotoSans-Regular.ttf"
@@ -168,14 +169,16 @@ void App::promote_pending()
     migration_ui_.progress_open = false;
     migration_ui_.result_open = false;
     migration_ui_.job.reset();  // reset migration job from previous vault
-    if (vault::migration_pending(vault::vault_settings(*vault_state_.active), media::PROBE_CAPS_GEN)) {
-        const vault::MigrationScan scan = vault::scan_migration(*vault_state_.active);
+    if (vault::migration_pending(vault::vault_settings(*vault_state_.active), media::PROBE_CAPS_GEN,
+                                 static_cast<uint16_t>(image::THUMB_MAX_SIDE))) {
+        const vault::MigrationScan scan = vault::scan_migration(*vault_state_.active, false);
         if (scan.empty()) {
             // Nothing to do: stamp and move on silently, so this vault is never
             // asked again.
             (void)vault::commit_migration(
                 *vault_state_.active, vault::stamp_migrated(vault::vault_settings(*vault_state_.active),
-                                                             media::PROBE_CAPS_GEN));
+                                                             media::PROBE_CAPS_GEN,
+                                                             static_cast<uint16_t>(image::THUMB_MAX_SIDE)));
         } else {
             // Guard against import queue race: hold exclusive until outcome is taken
             import_ui_.queue.set_exclusive(true);
@@ -597,7 +600,7 @@ struct App::OverlayDispatch {
             app.overlays_.settings.trigger_migration = false;
 
             // Scan for actual pending work regardless of watermark state
-            const vault::MigrationScan scan = vault::scan_migration(*app.vault_state_.active);
+            const vault::MigrationScan scan = vault::scan_migration(*app.vault_state_.active, false);
             if (scan.empty()) {
                 // Nothing to do: inform the user and keep settings open
                 app.overlays_.settings.error = "Nothing to upgrade";

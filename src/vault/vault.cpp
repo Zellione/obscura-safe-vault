@@ -1016,6 +1016,44 @@ VaultResult apply_video_probe(Vault& v, std::string_view node_path,
     return Ok;
 }
 
+VaultResult apply_image_thumb(Vault& v, std::string_view node_path,
+                              std::span<const uint8_t> thumb_jpeg)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+    if (thumb_jpeg.empty()) return InvalidArg;
+    IndexNode* n = v.resolve_node(node_path);
+    if (!n || !n->is_image()) return NotFound;
+
+    std::lock_guard lk(*v.write_mutex_);
+    ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+    ChunkSpan span;
+    if (!store.append_chunk(thumb_jpeg, span)) return IoError;
+    if (!store.sync()) return IoError;
+    n->meta.thumb_offset = span.offset;
+    n->meta.thumb_length = span.length;
+    return Ok;
+}
+
+VaultResult apply_video_poster(Vault& v, std::string_view node_path,
+                               std::span<const uint8_t> poster_jpeg)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+    if (poster_jpeg.empty()) return InvalidArg;
+    IndexNode* n = v.resolve_node(node_path);
+    if (!n || !n->is_video()) return NotFound;
+
+    std::lock_guard lk(*v.write_mutex_);
+    ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+    ChunkSpan span;
+    if (!store.append_chunk(poster_jpeg, span)) return IoError;
+    if (!store.sync()) return IoError;
+    n->vmeta.poster_offset = span.offset;
+    n->vmeta.poster_length = span.length;
+    return Ok;
+}
+
 VaultResult apply_image_animated(Vault& v, std::string_view node_path, bool animated)
 {
     using enum VaultResult;

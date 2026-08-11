@@ -12,6 +12,7 @@
 #include "crypto/secure_mem.h"
 #include "image/anim_info.h"
 #include "image/image.h"
+#include "image/thumbnail.h"
 #include "media/video_probe.h"
 #include "vault/index.h"
 #include "vault/migration.h"
@@ -322,7 +323,8 @@ void MigrationJob::run(vault::Vault& v)
 
     vault::VaultSettings settings = vault::vault_settings(v);
     if (!out.cancelled) {
-        settings = vault::stamp_migrated(settings, media::PROBE_CAPS_GEN);
+        settings = vault::stamp_migrated(settings, media::PROBE_CAPS_GEN,
+                                         static_cast<uint16_t>(image::THUMB_MAX_SIDE));
     }
     if (const auto res = vault::commit_migration(v, settings);
         res != vault::VaultResult::Ok) {

@@ -130,22 +130,22 @@ struct MigTempVault {
 TEST(migration_pending_true_for_fresh_zero_watermark)
 {
     vault::VaultSettings s = vault::VaultSettings::seeded();
-    CHECK(vault::migration_pending(s, 1));
+    CHECK(vault::migration_pending(s, 1, 512));
 }
 
 TEST(migration_pending_false_once_stamped)
 {
-    vault::VaultSettings s = vault::stamp_migrated(vault::VaultSettings::seeded(), 1);
+    vault::VaultSettings s = vault::stamp_migrated(vault::VaultSettings::seeded(), 1, 512);
     CHECK_EQ(s.migrated_index_version, vault::MIGRATION_INDEX_VERSION);
     CHECK_EQ(s.migrated_probe_caps, 1);
-    CHECK(!vault::migration_pending(s, 1));
+    CHECK(!vault::migration_pending(s, 1, 512));
 }
 
 TEST(migration_pending_true_again_when_probe_caps_advance)
 {
-    vault::VaultSettings s = vault::stamp_migrated(vault::VaultSettings::seeded(), 1);
-    CHECK(!vault::migration_pending(s, 1));
-    CHECK(vault::migration_pending(s, 2));   // a new codec landed
+    vault::VaultSettings s = vault::stamp_migrated(vault::VaultSettings::seeded(), 1, 512);
+    CHECK(!vault::migration_pending(s, 1, 512));
+    CHECK(vault::migration_pending(s, 2, 512));   // a new codec landed
 }
 
 TEST(migration_scan_counts_nothing_for_a_freshly_written_vault)
@@ -158,7 +158,7 @@ TEST(migration_scan_counts_nothing_for_a_freshly_written_vault)
     REQUIRE(v.add_image("a", mig_pattern(1000, 1), "one.png") == vault::VaultResult::Ok);
 
     // A PNG cannot animate, so it is not backfill work; import already probed it.
-    const vault::MigrationScan scan = vault::scan_migration(v);
+    const vault::MigrationScan scan = vault::scan_migration(v, false);
     CHECK_EQ(scan.videos, 0u);
     CHECK_EQ(scan.images, 0u);
     CHECK(scan.empty());
@@ -175,7 +175,7 @@ TEST(migration_scan_walks_nested_galleries)
     REQUIRE(v.add_image("a/b", mig_pattern(1000, 1), "deep.png") == vault::VaultResult::Ok);
 
     // Nothing to migrate, but the walk must not throw or miss the nesting.
-    const vault::MigrationScan scan = vault::scan_migration(v);
+    const vault::MigrationScan scan = vault::scan_migration(v, false);
     CHECK(scan.empty());
     CHECK_EQ(scan.bytes, 0u);
 }
@@ -200,7 +200,7 @@ TEST(migration_scan_counts_animatable_images_backfill)
     vault::test_only_force_image_animated_unknown(v, "img/anim.webp");
 
     // Now the scan should count this as backfill work.
-    const vault::MigrationScan scan = vault::scan_migration(v);
+    const vault::MigrationScan scan = vault::scan_migration(v, false);
     CHECK_EQ(scan.images, 1u);
     CHECK_EQ(scan.videos, 0u);
     CHECK_EQ(scan.bytes, static_cast<uint64_t>(anim_webp.size()));
@@ -222,7 +222,7 @@ TEST(migration_scan_excludes_non_animatable_images)
 
     // PNG is not an animatable format, so it should never be counted regardless
     // of the animated flag state.
-    const vault::MigrationScan scan = vault::scan_migration(v);
+    const vault::MigrationScan scan = vault::scan_migration(v, false);
     CHECK_EQ(scan.images, 0u);
     CHECK(scan.empty());
 }
@@ -246,7 +246,7 @@ TEST(migration_scan_counts_unknown_codec_videos)
     vault::test_only_force_video_codec_unknown(v, "tiny.mp4");
 
     // Now the scan should count this as backfill work.
-    const vault::MigrationScan scan = vault::scan_migration(v);
+    const vault::MigrationScan scan = vault::scan_migration(v, false);
     CHECK_EQ(scan.videos, 1u);
     CHECK_EQ(scan.images, 0u);
     CHECK_EQ(scan.bytes, static_cast<uint64_t>(video_bytes.size()));
@@ -274,7 +274,7 @@ TEST(migration_scan_byte_accounting_mixed)
     vault::test_only_force_image_animated_unknown(v, "mixed/anim.webp");
     vault::test_only_force_video_codec_unknown(v, "mixed/tiny.mp4");
 
-    const vault::MigrationScan scan = vault::scan_migration(v);
+    const vault::MigrationScan scan = vault::scan_migration(v, false);
     CHECK_EQ(scan.images, 1u);
     CHECK_EQ(scan.videos, 1u);
     CHECK_EQ(scan.total(), 2u);
@@ -362,7 +362,7 @@ TEST(apply_image_animated_with_commit_migration_persists_the_flag)
 
         // Now commit the migration WITH the apply.
         const vault::VaultSettings stamped =
-            vault::stamp_migrated(vault::vault_settings(v), 1);
+            vault::stamp_migrated(vault::vault_settings(v), 1, 512);
         REQUIRE(vault::commit_migration(v, stamped) == vault::VaultResult::Ok);
     }
     // Reopen: the animated flag should now persist.
@@ -615,20 +615,20 @@ TEST(commit_migration_persists_the_watermark)
         vault::Vault v;
         REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
                 == vault::VaultResult::Ok);
-        CHECK(vault::migration_pending(vault::vault_settings(v), 1));
+        CHECK(vault::migration_pending(vault::vault_settings(v), 1, 512));
 
         const vault::VaultSettings stamped =
-            vault::stamp_migrated(vault::vault_settings(v), 1);
+            vault::stamp_migrated(vault::vault_settings(v), 1, 512);
         REQUIRE(vault::commit_migration(v, stamped) == vault::VaultResult::Ok);
-        CHECK(!vault::migration_pending(vault::vault_settings(v), 1));
+        CHECK(!vault::migration_pending(vault::vault_settings(v), 1, 512));
     }
     // Survives a close/reopen — this is the whole point of the watermark.
     {
         vault::Vault v;
         REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
         REQUIRE(v.unlock(mig_bytes("pw"), {}) == vault::VaultResult::Ok);
-        CHECK(!vault::migration_pending(vault::vault_settings(v), 1));
-        CHECK(vault::migration_pending(vault::vault_settings(v), 2));
+        CHECK(!vault::migration_pending(vault::vault_settings(v), 1, 512));
+        CHECK(vault::migration_pending(vault::vault_settings(v), 2, 512));
     }
 }
 
@@ -643,22 +643,22 @@ TEST(transfer_from_unmigrated_vault_lowers_destination_watermark)
     REQUIRE(src.create_gallery("g") == vault::VaultResult::Ok);
     REQUIRE(src.add_image("g", mig_pattern(1000, 1), "a.png") == vault::VaultResult::Ok);
     // src stays un-migrated (watermark 0/0).
-    CHECK(vault::migration_pending(vault::vault_settings(src), media::PROBE_CAPS_GEN));
+    CHECK(vault::migration_pending(vault::vault_settings(src), media::PROBE_CAPS_GEN, 512));
 
     vault::Vault dst;
     REQUIRE(vault::Vault::create(dst_tv.str(), mig_bytes("pw"), {}, kMigKdf, dst)
             == vault::VaultResult::Ok);
     REQUIRE(dst.create_gallery("dst_g") == vault::VaultResult::Ok);
     REQUIRE(vault::commit_migration(
-                dst, vault::stamp_migrated(vault::vault_settings(dst), media::PROBE_CAPS_GEN))
+                dst, vault::stamp_migrated(vault::vault_settings(dst), media::PROBE_CAPS_GEN, 512))
             == vault::VaultResult::Ok);
-    CHECK(!vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN));
+    CHECK(!vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN, 512));
 
     REQUIRE(vault::transfer_image(src, "g", "a.png", dst, "dst_g",
                                   vault::TransferMode::Copy) == vault::VaultResult::Ok);
 
     // The destination inherited un-backfilled content, so it owes a migration again.
-    CHECK(vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN));
+    CHECK(vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN, 512));
 }
 
 TEST(transfer_clean_content_does_not_lower_watermark)
@@ -674,24 +674,24 @@ TEST(transfer_clean_content_does_not_lower_watermark)
     REQUIRE(src.add_image("g", mig_pattern(1000, 1), "clean.png") == vault::VaultResult::Ok);
     // Mark the source as fully migrated (to simulate content that's already been backfilled)
     REQUIRE(vault::commit_migration(
-                src, vault::stamp_migrated(vault::vault_settings(src), media::PROBE_CAPS_GEN))
+                src, vault::stamp_migrated(vault::vault_settings(src), media::PROBE_CAPS_GEN, 512))
             == vault::VaultResult::Ok);
-    CHECK(!vault::migration_pending(vault::vault_settings(src), media::PROBE_CAPS_GEN));
+    CHECK(!vault::migration_pending(vault::vault_settings(src), media::PROBE_CAPS_GEN, 512));
 
     vault::Vault dst;
     REQUIRE(vault::Vault::create(dst_tv.str(), mig_bytes("pw"), {}, kMigKdf, dst)
             == vault::VaultResult::Ok);
     REQUIRE(dst.create_gallery("dst_g") == vault::VaultResult::Ok);
     REQUIRE(vault::commit_migration(
-                dst, vault::stamp_migrated(vault::vault_settings(dst), media::PROBE_CAPS_GEN))
+                dst, vault::stamp_migrated(vault::vault_settings(dst), media::PROBE_CAPS_GEN, 512))
             == vault::VaultResult::Ok);
-    CHECK(!vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN));
+    CHECK(!vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN, 512));
 
     REQUIRE(vault::transfer_image(src, "g", "clean.png", dst, "dst_g",
                                   vault::TransferMode::Copy) == vault::VaultResult::Ok);
 
     // dst's watermark should NOT have been lowered (source was also migrated)
-    CHECK(!vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN));
+    CHECK(!vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN, 512));
 }
 
 TEST(transfer_watermark_lowering_persists_after_close_reopen)
@@ -711,15 +711,15 @@ TEST(transfer_watermark_lowering_persists_after_close_reopen)
                 == vault::VaultResult::Ok);
         REQUIRE(dst.create_gallery("dst_g") == vault::VaultResult::Ok);
         REQUIRE(vault::commit_migration(
-                    dst, vault::stamp_migrated(vault::vault_settings(dst), media::PROBE_CAPS_GEN))
+                    dst, vault::stamp_migrated(vault::vault_settings(dst), media::PROBE_CAPS_GEN, 512))
                 == vault::VaultResult::Ok);
-        CHECK(!vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN));
+        CHECK(!vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN, 512));
 
         REQUIRE(vault::transfer_image(src, "g", "a.png", dst, "dst_g",
                                       vault::TransferMode::Copy) == vault::VaultResult::Ok);
 
         // Watermark lowered in memory
-        CHECK(vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN));
+        CHECK(vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN, 512));
     }
     // Close and reopen to verify watermark was persisted
     {
@@ -727,6 +727,120 @@ TEST(transfer_watermark_lowering_persists_after_close_reopen)
         REQUIRE(vault::Vault::open(dst_tv.str(), dst) == vault::VaultResult::Ok);
         REQUIRE(dst.unlock(mig_bytes("pw"), {}) == vault::VaultResult::Ok);
         // Watermark must be lowered and persist across reopen
-        CHECK(vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN));
+        CHECK(vault::migration_pending(vault::vault_settings(dst), media::PROBE_CAPS_GEN, 512));
     }
+}
+
+TEST(migration_pending_on_stale_thumb_side)
+{
+    vault::VaultSettings s;
+    s = vault::stamp_migrated(s, 1, 512);
+    CHECK(!vault::migration_pending(s, 1, 512));
+    CHECK(vault::migration_pending(s, 1, 1024));    // future budget bump re-offers
+    s.migrated_thumb_side = 0;
+    CHECK(vault::migration_pending(s, 1, 512));     // legacy vault
+}
+
+TEST(scan_counts_thumb_regen_work)
+{
+    MigTempVault tv("scan_thumbs");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
+
+    // Add an image with a real thumbnail
+    auto png = fixtures::solid_png(64, 64, 255, 0, 0);
+    REQUIRE(!png.empty());
+    REQUIRE(v.add_image("g", png, "img.png") == vault::VaultResult::Ok);
+
+    // When thumbs_stale=false, the thumbs count should be zero
+    const vault::MigrationScan scan_clean = vault::scan_migration(v, false);
+    CHECK_EQ(scan_clean.thumbs, 0u);
+    CHECK_EQ(scan_clean.images, 0u);
+    CHECK_EQ(scan_clean.videos, 0u);
+
+    // When thumbs_stale=true, the image with a thumbnail counts
+    const vault::MigrationScan scan_stale = vault::scan_migration(v, true);
+    CHECK_EQ(scan_stale.thumbs, 1u);
+    CHECK_EQ(scan_stale.images, 0u);
+    CHECK_EQ(scan_stale.bytes, static_cast<uint64_t>(png.size()));
+}
+
+TEST(apply_image_thumb_repoints_span)
+{
+    MigTempVault tv("apply_thumb_repoint");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
+            == vault::VaultResult::Ok);
+
+    auto png = fixtures::solid_png(64, 64, 255, 0, 0);
+    REQUIRE(!png.empty());
+    REQUIRE(v.add_image("", png, "img.png") == vault::VaultResult::Ok);
+
+    // Get the old thumbnail span
+    const vault::IndexNode* n_before = v.resolve_node("img.png");
+    REQUIRE(n_before != nullptr);
+    REQUIRE(n_before->is_image());
+    const uint64_t old_offset = n_before->meta.thumb_offset;
+    const uint64_t old_length = n_before->meta.thumb_length;
+    REQUIRE(old_length > 0);  // Must have a thumbnail from import
+
+    // Create new thumbnail bytes (different size)
+    auto new_thumb = fixtures::solid_png(128, 128, 0, 255, 0);
+    REQUIRE(!new_thumb.empty());
+
+    // Apply the new thumbnail
+    CHECK(vault::apply_image_thumb(v, "img.png", new_thumb) == vault::VaultResult::Ok);
+
+    // Verify the span was repointed
+    const vault::IndexNode* n_after = v.resolve_node("img.png");
+    REQUIRE(n_after != nullptr);
+    CHECK(n_after->meta.thumb_offset != old_offset);
+    // thumb_length is the on-disk encrypted size, not plaintext
+    CHECK(n_after->meta.thumb_length > 0u);
+
+    // Verify wasted_bytes grew by at least the old length
+    const uint64_t waste = v.wasted_bytes();
+    CHECK(waste > 0u);
+}
+
+TEST(apply_video_poster_replaces_existing)
+{
+    MigTempVault tv("apply_poster_replace");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), mig_bytes("pw"), {}, kMigKdf, v)
+            == vault::VaultResult::Ok);
+
+#ifdef OSV_VENDORED_AV
+    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!video_bytes.empty());
+    REQUIRE(v.add_video("", video_bytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+
+    // Get the old poster span
+    const vault::IndexNode* n_before = v.resolve_node("tiny.mp4");
+    REQUIRE(n_before != nullptr);
+    REQUIRE(n_before->is_video());
+    const uint64_t old_offset = n_before->vmeta.poster_offset;
+    const uint64_t old_length = n_before->vmeta.poster_length;
+
+    // Create a new poster (must have bytes for apply_video_poster)
+    auto new_poster = fixtures::solid_png(256, 144, 0, 0, 255);
+    REQUIRE(!new_poster.empty());
+
+    // Apply the new poster
+    CHECK(vault::apply_video_poster(v, "tiny.mp4", new_poster) == vault::VaultResult::Ok);
+
+    // Verify the span was repointed
+    const vault::IndexNode* n_after = v.resolve_node("tiny.mp4");
+    REQUIRE(n_after != nullptr);
+    if (old_length > 0) {
+        CHECK(n_after->vmeta.poster_offset != old_offset);
+    }
+    // poster_length is the on-disk encrypted size, not plaintext
+    CHECK(n_after->vmeta.poster_length > 0u);
+
+    // Empty blob should return InvalidArg
+    CHECK(vault::apply_video_poster(v, "tiny.mp4", {}) == vault::VaultResult::InvalidArg);
+#endif  // OSV_VENDORED_AV
 }

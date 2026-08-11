@@ -345,6 +345,10 @@ public:
                                          const VideoProbeApply& probe);
     friend VaultResult apply_image_animated(Vault& v, std::string_view node_path,
                                             bool animated);
+    friend VaultResult apply_image_thumb(Vault& v, std::string_view node_path,
+                                         std::span<const uint8_t> thumb_jpeg);
+    friend VaultResult apply_video_poster(Vault& v, std::string_view node_path,
+                                          std::span<const uint8_t> poster_jpeg);
     friend VaultResult commit_migration(Vault& v, VaultSettings settings);
 
     // Phase 50: while the import queue is active, App points this at the
@@ -543,6 +547,23 @@ private:
 // path does not resolve to an image. Coordinator-thread only.
 [[nodiscard]] VaultResult apply_image_animated(Vault& v, std::string_view node_path,
                                                bool animated);
+
+// Phase 75: Append a fresh thumbnail chunk and REPOINT the node's span — the
+// superseded chunk becomes dead ciphertext for compact. Unlike apply_video_probe's
+// poster arm, this REPLACES an existing span. NO commit — the migration batches
+// one at the end. Locked if locked; NotFound if path does not resolve to an image;
+// IoError on chunk append failure; InvalidArg on an empty blob. Coordinator-thread
+// only — mutates the tree and appends to fp_.
+[[nodiscard]] VaultResult apply_image_thumb(Vault& v, std::string_view node_path,
+                                            std::span<const uint8_t> thumb_jpeg);
+
+// Phase 75: Append a fresh poster chunk and REPOINT the node's span — the
+// superseded chunk becomes dead ciphertext for compact. REPLACES an existing span.
+// NO commit — the migration batches one at the end. Locked if locked; NotFound if
+// path does not resolve to a video; IoError on chunk append failure; InvalidArg on
+// an empty blob. Coordinator-thread only — mutates the tree and appends to fp_.
+[[nodiscard]] VaultResult apply_video_poster(Vault& v, std::string_view node_path,
+                                             std::span<const uint8_t> poster_jpeg);
 
 // Persist `settings` (carrying the Phase 65 watermark) together with every
 // pending apply_* mutation in ONE commit_index(). Locked if locked; IoError if

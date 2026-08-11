@@ -120,7 +120,7 @@ TEST(migration_job_on_clean_vault_stamps_watermark_and_does_nothing_else)
     CHECK_EQ(out.total, 0);
     CHECK_EQ(out.videos_fixed, 0);
     CHECK_EQ(out.images_fixed, 0);
-    CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
+    CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN, 512));
 }
 
 TEST(migration_job_watermark_survives_reopen)
@@ -139,7 +139,7 @@ TEST(migration_job_watermark_survives_reopen)
         vault::Vault v;
         REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
         REQUIRE(v.unlock(job_bytes("pw"), {}) == vault::VaultResult::Ok);
-        CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
+        CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN, 512));
     }
 }
 
@@ -171,7 +171,7 @@ TEST(migration_job_fixes_animated_image)
     vault::test_only_force_image_animated_unknown(v, "anim.webp");
 
     // Verify it's marked pending before job runs
-    auto scan = vault::scan_migration(v);
+    auto scan = vault::scan_migration(v, false);
     CHECK(scan.total() > 0);
 
     ui::MigrationJob job;
@@ -194,7 +194,7 @@ TEST(migration_job_fixes_animated_image)
     }
 
     // Verify watermark was stamped
-    CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
+    CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN, 512));
 }
 
 TEST(migration_job_fixes_video_codec)
@@ -214,7 +214,7 @@ TEST(migration_job_fixes_video_codec)
     vault::test_only_force_video_codec_unknown(v, "tiny.mp4");
 
     // Verify it's pending
-    auto scan = vault::scan_migration(v);
+    auto scan = vault::scan_migration(v, false);
     CHECK(scan.total() > 0);
 
     ui::MigrationJob job;
@@ -236,7 +236,7 @@ TEST(migration_job_fixes_video_codec)
     CHECK(kids[0]->vmeta.poster_length > 0);
 
     // Verify watermark was stamped
-    CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
+    CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN, 512));
 #endif
 }
 
@@ -297,7 +297,7 @@ TEST(migration_job_cancel_prevents_watermark)
 
     // Verify watermark was NOT stamped (migration still pending)
     // This is the critical test: that the race condition fix prevents watermark when cancelled
-    CHECK(vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
+    CHECK(vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN, 512));
 }
 
 TEST(migration_job_flips_animated_webp_and_leaves_static_webp_alone)
@@ -353,8 +353,8 @@ TEST(migration_job_not_reoffered_after_completion)
     REQUIRE(vault::apply_image_animated(v, "anim.webp", false) == vault::VaultResult::Ok);
 
     // Verify migration is pending before the job
-    CHECK(vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
-    CHECK(!vault::scan_migration(v).empty());
+    CHECK(vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN, 512));
+    CHECK(!vault::scan_migration(v, false).empty());
 
     // Run the job to completion
     ui::MigrationJob job;
@@ -364,8 +364,8 @@ TEST(migration_job_not_reoffered_after_completion)
     CHECK(!out.cancelled);
 
     // After a successful full pass, migration should NOT be pending
-    CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN));
-    CHECK(vault::scan_migration(v).empty());
+    CHECK(!vault::migration_pending(vault::vault_settings(v), media::PROBE_CAPS_GEN, 512));
+    CHECK(vault::scan_migration(v, false).empty());
 }
 
 TEST(migration_job_pool_handles_many_items_without_loss)
