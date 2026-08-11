@@ -717,6 +717,31 @@ std::vector<std::string> GalleryGrid::selected_delete_paths() const
     return prune_descendant_paths(paths);
 }
 
+// Phase 77 Task 7: Full slash-paths for transfer; fallback to focused tile when empty.
+std::vector<std::string> selected_transfer_paths(const GalleryGrid& g)
+{
+    std::vector<std::string> paths;
+    const std::string& base = g.nav_.path();
+
+    // Use multi-selection if present
+    if (!g.sel_.empty()) {
+        for (int i : g.sel_.indices()) {
+            if (i < 0 || i >= static_cast<int>(g.children_.size())) continue;
+            const std::string& name = g.children_[static_cast<size_t>(i)]->name;
+            paths.push_back(base.empty() ? name : base + "/" + name);
+        }
+    } else {
+        // Fallback: focused tile
+        const int s = g.nav_.selected();
+        if (s >= 0 && s < static_cast<int>(g.children_.size())) {
+            const std::string& name = g.children_[static_cast<size_t>(s)]->name;
+            paths.push_back(base.empty() ? name : base + "/" + name);
+        }
+    }
+
+    return paths;  // No pruning for transfer (keep all paths, galleries included)
+}
+
 void GalleryGrid::handle_naming_key(const SDL_Event& e)
 {
     // Precedence rule (Phase 54): the prompt consumes editing keys first, so its

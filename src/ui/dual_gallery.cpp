@@ -152,13 +152,41 @@ void DualGalleryScreen::handle_event(const SDL_Event& e)
             else if (e.key.key == SDLK_DOWN) key = DualTransferPrompt::Key::Down;
             else if (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER) key = DualTransferPrompt::Key::Enter;
             else if (e.key.key == SDLK_ESCAPE) key = DualTransferPrompt::Key::Esc;
-            else return;  // Unhandled key in prompt
+            else { mark_dirty(); return; }  // Unhandled key in prompt
 
             const auto launch = prompt_.key(key);
             if (launch.fire) {
-                // Fire the transfer job
-                // For now, this is stubbed; full implementation deferred to later iterations
-                status_ = "Transfer job queued (implementation pending)";
+                // Fire the transfer job: build spec and launch
+                const std::string& src_path = current_gallery_path(active());
+                const std::string& dst_path = current_gallery_path(inactive());
+
+                // Build selection paths from active pane
+                std::vector<std::string> all_paths = selected_transfer_paths(active());
+
+                // Split into media vs gallery paths
+                std::vector<std::string> media_paths, gallery_paths;
+                for (const auto& path : all_paths) {
+                    if (gallery_exists(vault_, path)) {
+                        gallery_paths.push_back(path);
+                    } else {
+                        media_paths.push_back(path);
+                    }
+                }
+
+                // Build CollectionTransferSpec
+                CollectionTransferSpec spec{
+                    group_by_parent(media_paths),
+                    gallery_paths
+                };
+
+                // Build destination label for status message
+                const std::string dst_leaf = dst_path.empty() ? "Root" : dst_path.substr(dst_path.rfind('/') + 1);
+                const std::string verb = (launch.mode == vault::TransferMode::Copy) ? "Copied" : "Moved";
+                const std::string label = verb + " to " + dst_leaf;
+
+                // Launch the job
+                job_.start_transfer_collection(vault_, spec, vault_, dst_path,
+                                               launch.mode, launch.policy, label);
             }
             mark_dirty();
             return;
@@ -207,34 +235,41 @@ void DualGalleryScreen::handle_event(const SDL_Event& e)
         return;
     }
 
-    // 5. M (no mods): open transfer prompt (Task 7), but refuse if either pane busy
+    // 5. M (no mods): open transfer prompt (Task 7), with refusal order
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_M && e.key.mod == 0) {
         // Phase 77 Task 7: open pane-to-pane transfer prompt
+
+        // Refusal 1: queue busy (imports running)
         if (queue_.busy()) {
             status_ = "Imports running — press Shift+I";
             mark_dirty();
             return;
         }
-        if (left_busy || right_busy) {
+
+        // Refusal 2: either pane vault_busy or own transfer job active
+        if (left_busy || right_busy || job_.active()) {
             status_ = "Transfer in progress";
             mark_dirty();
             return;
         }
 
-        // Get source and destination galleries + selection from active pane
+        // Get source and destination galleries
         const std::string& src_path = current_gallery_path(active());
         const std::string& dst_path = current_gallery_path(inactive());
 
-        // Build selection paths from active pane: selected tiles or focused tile
-        const auto& sel = capture_pane_state(active());
-        std::vector<std::string> media_paths;
-        std::vector<std::string> gallery_paths;
+        // Build selection paths from active pane
+        std::vector<std::string> all_paths = selected_transfer_paths(active());
 
-        // For now, stub the selection building; will be enhanced with proper tile enumeration
-        // In a real scenario, we'd extract from the active pane's tile selection
+        // Split into media vs gallery paths (for refusal check)
+        std::vector<std::string> gallery_paths_for_check;
+        for (const auto& path : all_paths) {
+            if (gallery_exists(vault_, path)) {
+                gallery_paths_for_check.push_back(path);
+            }
+        }
 
-        // Check refusals
-        auto refusal = dual_transfer_check(src_path, dst_path, gallery_paths);
+        // Refusal 3: dual_transfer_check (same gallery or cycle)
+        auto refusal = dual_transfer_check(src_path, dst_path, gallery_paths_for_check);
         if (refusal != DualTransferRefusal::None) {
             if (refusal == DualTransferRefusal::SameGallery) {
                 status_ = "Both panes show the same gallery";
@@ -245,12 +280,12 @@ void DualGalleryScreen::handle_event(const SDL_Event& e)
             return;
         }
 
-        // Compute colliding galleries
+        // Refusal 4 (pre-scan): compute colliding galleries
         const std::vector<std::string> conflicts = vault::colliding_galleries(
-            vault_, dst_path, gallery_paths);
+            vault_, dst_path, gallery_paths_for_check);
 
         // Get destination leaf name
-        const std::string dst_leaf = dst_path.empty() ? "" : dst_path.substr(dst_path.rfind('/') + 1);
+        const std::string dst_leaf = dst_path.empty() ? "Root" : dst_path.substr(dst_path.rfind('/') + 1);
 
         // Open the prompt
         prompt_.open(dst_leaf, conflicts);
