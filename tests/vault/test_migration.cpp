@@ -803,7 +803,7 @@ TEST(apply_image_thumb_repoints_span)
     CHECK(n_after->meta.thumb_length > 0u);
 
     // Verify wasted_bytes grew by at least the old length
-    const uint64_t waste = v.wasted_bytes();
+    const uint64_t waste = vault::vault_wasted_bytes(v);
     CHECK(waste > 0u);
 }
 

@@ -9,6 +9,23 @@
 
 namespace ui {
 
+// Transparent hasher for std::string keys, enabling heterogeneous lookup with std::string_view.
+struct StringHash {
+    using is_transparent = void;
+
+    [[nodiscard]] size_t operator()(std::string_view sv) const noexcept
+    {
+        return std::hash<std::string_view>{}(sv);
+    }
+
+    [[nodiscard]] size_t operator()(const std::string& s) const noexcept
+    {
+        return std::hash<std::string_view>{}(s);
+    }
+};
+
+
+
 // Session-scoped gallery/viewer state, preserved across grid<->viewer round
 // trips within a single unlocked-vault session (Phase 39 Part 2, modeled on
 // AdvancedSearchState). App owns one instance, reads the outgoing screen's
@@ -38,7 +55,7 @@ struct GallerySessionState {
     // side/video-resume above, which App captures only once at screen exit)
     // because a single GalleryGrid instance can descend through many
     // sub-galleries without ever being destroyed.
-    std::unordered_map<std::string, int> last_index_by_path;
+    std::unordered_map<std::string, int, StringHash, std::equal_to<>> last_index_by_path;
 
     void record(std::string_view path, int index) { last_index_by_path[std::string(path)] = index; }
 

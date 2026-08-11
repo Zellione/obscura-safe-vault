@@ -111,8 +111,15 @@ public:
         SecondVaultSession*      second_vault = nullptr;   // Phase 66: warm slot (App-owned)
     };
 
-    GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                gfx::TextureCache& cache, GridDialogs dialogs,
+    // UI resources and core references bundled to reduce parameter count.
+    struct GridInitContext {
+        gfx::Window&      win;
+        gfx::FontAtlas&   font;
+        vault::Vault&     vault;
+        gfx::TextureCache& cache;
+    };
+
+    GalleryGrid(GridInitContext ctx, GridDialogs dialogs,
                 GridVaultCtx vault_ctx, GallerySessionState& session, ImportQueue& queue,
                 GridLocation at = {});
 

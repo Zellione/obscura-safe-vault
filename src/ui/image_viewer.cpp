@@ -317,7 +317,7 @@ bool ImageViewer::handle_shared_key(SDL_Keycode key)
             return true;
         case SDLK_B:      // toggle favorite (bookmark) on the current item
             // best-effort: favorite toggle failure is benign, UI re-reads state
-            if (!album_.images.empty()) { (void)vault_.toggle_favorite(album_.paths[index_]); }
+            if (!album_.images.empty()) { (void)toggle_favorite_node(vault_, album_.paths[index_]); }
             return true;
         case SDLK_ESCAPE:
             if (win_.is_fullscreen()) { win_.set_fullscreen(false); return true; }

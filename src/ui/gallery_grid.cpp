@@ -209,18 +209,17 @@ void rebuild_detail(GalleryGrid& g)
     g.detail_.content = build_node_details(node, inherited_tags(g.vault_, node_path), from_contents, vault::vault_settings(g.vault_).default_sort);
 }
 
-GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                         gfx::TextureCache& cache, GridDialogs dialogs,
+GalleryGrid::GalleryGrid(GridInitContext ctx, GridDialogs dialogs,
                          GridVaultCtx vault_ctx, GallerySessionState& session, ImportQueue& queue,
                          GridLocation at)
-    : win_(win), font_(font), vault_(vault), cache_(cache), dialogs_(dialogs),
+    : win_(ctx.win), font_(ctx.font), vault_(ctx.vault), cache_(ctx.cache), dialogs_(dialogs),
       session_(session), queue_(queue),
-      search_(vault, win), tag_editor_(vault, win),
+      search_(ctx.vault, ctx.win), tag_editor_(ctx.vault, ctx.win),
       quick_switch_(vault_ctx.registry, vault_ctx.active_vault_path),
-      transfer_(vault, vault_ctx.active_vault_path, vault_ctx.registry,
-                dialogs.file, win, vault_ctx.second_vault),
-      rename_(win),
-      combine_(vault, vault_ctx.active_vault_path, vault_ctx.registry, dialogs.file, win, vault_ctx.second_vault),
+      transfer_(ctx.vault, vault_ctx.active_vault_path, vault_ctx.registry,
+                dialogs.file, ctx.win, vault_ctx.second_vault),
+      rename_(ctx.win),
+      combine_(ctx.vault, vault_ctx.active_vault_path, vault_ctx.registry, dialogs.file, ctx.win, vault_ctx.second_vault),
       initial_(std::move(at)), view_(initial_.view)
 {
     detail_.panel.open = session_.detail_open;
@@ -674,7 +673,7 @@ void GalleryGrid::toggle_favorite_current()
     // star badge re-renders next frame; the key event already triggers a repaint.
     // No refresh() — that would needlessly clear the export selection.
     // best-effort: favorite toggle failure is benign, UI re-reads state
-    (void)vault_.toggle_favorite(full_path);
+    (void)toggle_favorite_node(vault_, full_path);
 }
 
 void GalleryGrid::cycle_gallery_sort()
@@ -819,7 +818,7 @@ void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
     }
 
     const uint64_t file_sz = vault::vault_file_bytes(g.vault_);
-    const uint64_t waste_sz = g.vault_.wasted_bytes();
+    const uint64_t waste_sz = vault::vault_wasted_bytes(g.vault_);
     // Only show the compact option if there's significant waste to reclaim.
     if (should_display_waste(waste_sz, file_sz)) {
         g.naming_.confirm_compact = true;
@@ -1528,7 +1527,7 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path)
 void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun)
 {
     // User pressed Esc during import — check if waste hints are needed (Phase 26).
-    const uint64_t waste = g.vault_.wasted_bytes();
+    const uint64_t waste = vault::vault_wasted_bytes(g.vault_);
     if (should_hint_cancelled_import_waste(waste)) {
         g.status_ = std::format("Import cancelled — {} reclaimable, press [Shift+C]",
                                format_size(waste));
@@ -1979,7 +1978,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     // Show waste hint if it exceeds display threshold (Phase 26).
     // Combine with selection count on the same line to avoid collision.
     const uint64_t file_sz = vault::vault_file_bytes(vault_);
-    const uint64_t waste_sz = vault_.wasted_bytes();
+    const uint64_t waste_sz = vault::vault_wasted_bytes(vault_);
     const bool show_waste = should_display_waste(waste_sz, file_sz);
     const bool show_selection = !sel_.empty();
 
@@ -2042,7 +2041,7 @@ void GalleryGrid::render(gfx::Renderer& r)
             r.draw_text(font_, px + (pw - tw) / 2, y, s, c);
         };
 
-        const uint64_t compact_waste = vault_.wasted_bytes();
+        const uint64_t compact_waste = vault::vault_wasted_bytes(vault_);
         const std::string waste_str = format_size(compact_waste);
 
         centered("Compact vault?", py + 28, TEXT);

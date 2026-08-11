@@ -110,6 +110,49 @@ std::string entry_name_utf8(struct archive_entry* entry)
     return n ? std::string{n} : std::string{};
 }
 
+// Helper: validate entry size and resize output buffer
+bool validate_and_resize_entry(struct archive_entry* entry, crypto::SecureBytes& out)
+{
+    if (!archive_entry_size_is_set(entry)) return false;
+
+    const int64_t declared = archive_entry_size(entry);
+    if (declared < 0 || static_cast<uint64_t>(declared) > ArchiveReader::MAX_ENTRY_BYTES) return false;
+
+    return out.resize(static_cast<size_t>(declared));
+}
+
+// Helper: read entry data from archive into buffer
+bool read_entry_data(struct archive* a, crypto::SecureBytes& out, bool& needs_password)
+{
+    size_t total = 0;
+    while (total < out.size()) {
+        const la_ssize_t n = archive_read_data(a, out.data() + total, out.size() - total);
+        if (n < 0) {
+            const std::string_view msg = archive_error_string(a);
+            std::println(stderr, "[ArchiveReader] data read failed: {}", msg);
+            needs_password = archive_error_is_passphrase_issue(msg);
+            return false;
+        }
+        if (n == 0) break;  // short read: entry had less data than declared
+        total += static_cast<size_t>(n);
+    }
+    return total == out.size();
+}
+
+// Helper: finalize entry and validate CRC
+bool finalize_entry(struct archive* a, bool& needs_password)
+{
+    uint8_t sentinel = 0;
+    const la_ssize_t n = archive_read_data(a, &sentinel, 1);
+    if (n < 0) {
+        const std::string_view msg = archive_error_string(a);
+        std::println(stderr, "[ArchiveReader] entry finalize failed: {}", msg);
+        needs_password = archive_error_is_passphrase_issue(msg);
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 bool ArchiveReader::scan_entries(struct archive* a)
@@ -232,37 +275,14 @@ bool ArchiveReader::extract(size_t index, crypto::SecureBytes& out) const
         return false;
     }
 
-    if (!archive_entry_size_is_set(entry)) {
-        reset_stream();
-        return false;
-    }
-    const int64_t declared = archive_entry_size(entry);
-    if (declared < 0 || static_cast<uint64_t>(declared) > MAX_ENTRY_BYTES) {
+    // Validate entry size and resize output buffer
+    if (!validate_and_resize_entry(entry, out)) {
         reset_stream();
         return false;
     }
 
-    if (!out.resize(static_cast<size_t>(declared))) {
-        reset_stream();
-        return false;
-    }
-
-    size_t total = 0;
-    while (total < out.size()) {
-        const la_ssize_t n = archive_read_data(a, out.data() + total, out.size() - total);
-        if (n < 0) {
-            const std::string_view msg = archive_error_string(a);
-            std::println(stderr, "[ArchiveReader] data read failed: {}", msg);
-            needs_password_ = archive_error_is_passphrase_issue(msg);
-            out.wipe();
-            (void)out.resize(0);
-            reset_stream();
-            return false;
-        }
-        if (n == 0) break;  // short read: entry had less data than declared
-        total += static_cast<size_t>(n);
-    }
-    if (total != out.size()) {
+    // Read data from archive
+    if (!read_entry_data(a, out, needs_password_)) {
         out.wipe();
         (void)out.resize(0);
         reset_stream();
@@ -277,11 +297,7 @@ bool ArchiveReader::extract(size_t index, crypto::SecureBytes& out) const
     // success and the importer would write it — breaking the "nothing written
     // on a wrong password" invariant (CWE-noise, but a real write of
     // attacker-controlled bytes). A clean entry returns 0 (entry EOF) here.
-    uint8_t sentinel = 0;
-    if (const la_ssize_t n = archive_read_data(a, &sentinel, 1); n < 0) {
-        const std::string_view msg = archive_error_string(a);
-        std::println(stderr, "[ArchiveReader] entry finalize failed: {}", msg);
-        needs_password_ = archive_error_is_passphrase_issue(msg);
+    if (!finalize_entry(a, needs_password_)) {
         out.wipe();
         (void)out.resize(0);
         reset_stream();

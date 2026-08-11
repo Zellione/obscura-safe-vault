@@ -18,7 +18,7 @@ TEST(uncommitted_staged_chunks_are_clean_orphans)
         make_vault(v, path);
         REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
         REQUIRE(v.add_image("g", fake_jpeg(1), "committed.jpg") == vault::VaultResult::Ok);
-        wasted_before = v.wasted_bytes();
+        wasted_before = vault::vault_wasted_bytes(v);
         auto s1 = vault::stage_image(v, fake_jpeg(2), "lost1.jpg");
         auto s2 = vault::stage_image(v, fake_jpeg(3), "lost2.jpg");
         REQUIRE(s1.status == vault::VaultResult::Ok);
@@ -28,7 +28,7 @@ TEST(uncommitted_staged_chunks_are_clean_orphans)
     vault::Vault v2;
     REQUIRE(ziptest::open_vault(path, v2));   // helper: open+unlock with test creds
     CHECK_EQ(static_cast<int>(v2.list("g").size()), 1);          // only the committed one
-    CHECK(v2.wasted_bytes() > wasted_before);                    // orphans visible
+    CHECK(vault::vault_wasted_bytes(v2) > wasted_before);                    // orphans visible
     CHECK(v2.compact() == vault::VaultResult::Ok);               // and reclaimable
     CHECK_EQ(static_cast<int>(v2.list("g").size()), 1);
     cleanup_dir(dir);

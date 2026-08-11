@@ -11,7 +11,7 @@ namespace ui {
 
 std::vector<vault::SearchHit> FavoritesImages::fetch() const
 {
-    return vault_ref().list_favorite_images();
+    return vault::list_favorite_images(vault_ref());
 }
 
 void FavoritesImages::update(double dt)

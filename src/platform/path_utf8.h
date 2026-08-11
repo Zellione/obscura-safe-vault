@@ -15,6 +15,7 @@
 // is includable from ANY module — a documented exception to the platform/
 // layering rule, like a std header.
 
+#include <bit>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -27,7 +28,7 @@ namespace platform {
 [[nodiscard]] inline std::filesystem::path utf8_to_path(std::string_view utf8)
 {
     return std::filesystem::path(
-        std::u8string_view(reinterpret_cast<const char8_t*>(utf8.data()), utf8.size()));
+        std::u8string_view(std::bit_cast<const char8_t*>(utf8.data()), utf8.size()));
 }
 
 // Native-format path as UTF-8. No-throw: an ill-formed native name (unpaired
@@ -38,8 +39,8 @@ namespace platform {
 {
     try {
         const std::u8string s = p.u8string();
-        return std::string(reinterpret_cast<const char*>(s.data()), s.size());
-    } catch (...) {
+        return std::string(std::bit_cast<const char*>(s.data()), s.size());
+    } catch (const std::exception&) {
         return "(unrepresentable path)";
     }
 }
@@ -50,8 +51,8 @@ namespace platform {
 {
     try {
         const std::u8string s = p.generic_u8string();
-        return std::string(reinterpret_cast<const char*>(s.data()), s.size());
-    } catch (...) {
+        return std::string(std::bit_cast<const char*>(s.data()), s.size());
+    } catch (const std::exception&) {
         return "(unrepresentable path)";
     }
 }

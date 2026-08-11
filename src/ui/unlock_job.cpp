@@ -29,7 +29,7 @@ bool UnlockJob::start_create(vault::Vault& v, std::string path,
 
 std::optional<vault::VaultResult> UnlockJob::take_outcome()
 {
-    if (!active_.load() || !done_.load(std::memory_order_acquire)) return std::nullopt;
+    if (!active_.load() || !done_.load()) return std::nullopt;
     if (thread_.joinable()) thread_.join();
     active_.store(false);
     return outcome_;
@@ -57,7 +57,7 @@ bool UnlockJob::launch(std::span<const uint8_t> password, std::span<const uint8_
         // way the inputs are no longer needed on any path.
         pw_.wipe();
         keyfile_.wipe();
-        done_.store(true, std::memory_order_release);
+        done_.store(true);
     });
     return true;
 }

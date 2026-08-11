@@ -50,32 +50,42 @@ private:
 
     enum class Pending { None, Vault, Keyfile, NewKeyfile };
 
+    // UI references and configuration
     gfx::Window&          win_;
     gfx::FontAtlas&       font_;
     vault::Vault&         vault_;
     platform::FileDialog& dlg_;
     std::filesystem::path vault_path_;
     bool                  create_mode_;
-    int                   focus_ = 0;   // 0 = password, 1 = confirm
-    SecureTextInput       pw_;
-    SecureTextInput       confirm_;
-    TextFieldChrome       pw_chrome_;
-    TextFieldChrome       confirm_chrome_;
-    std::string           keyfile_path_;
-    std::string           error_;
-    Pending               pending_   = Pending::None;
-    bool                  reveal_pw_ = false;  // show a freshly generated passphrase
-    UnlockJob             job_;                // Argon2id runs off the main thread
 
-    // Phase 45 Part 3: what we last copied (for the auto-clear equality
-    // check) and how long ago (-1 = no pending auto-clear).
-    std::string           clipboard_last_set_;
-    double                clipboard_clear_timer_ = -1.0;
+    // Password input state
+    struct PasswordInput {
+        int             focus = 0;     // 0 = password, 1 = confirm
+        SecureTextInput pw;
+        SecureTextInput confirm;
+        TextFieldChrome pw_chrome;
+        TextFieldChrome confirm_chrome;
+        bool            reveal = false;  // show a freshly generated passphrase
+    } password_;
 
-    // Mouse tracking for button hover/active states.
-    float                 mouse_x_    = -1.0f;
-    float                 mouse_y_    = -1.0f;
-    bool                  mouse_down_ = false;
+    // File and status state
+    std::string     keyfile_path_;
+    std::string     error_;
+    Pending         pending_ = Pending::None;
+    UnlockJob       job_;               // Argon2id runs off the main thread
+
+    // Phase 45 Part 3: clipboard state (what we last copied and timer)
+    struct ClipboardState {
+        std::string last_set;
+        double      clear_timer = -1.0;  // -1 = no pending auto-clear
+    } clipboard_;
+
+    // Mouse tracking for button hover/active states
+    struct MouseState {
+        float x    = -1.0f;
+        float y    = -1.0f;
+        bool  down = false;
+    } mouse_;
 };
 
 } // namespace ui

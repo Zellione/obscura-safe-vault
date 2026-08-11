@@ -142,7 +142,7 @@ TEST(commit_lane_header_mutex_tsan_coverage)
             // Poll wasted_bytes() a few times while the lane is processing.
             // This reads header_.slot[header_.active_slot].length under header_mutex_.
             for (int j = 0; j < 5; ++j) {
-                (void)v.wasted_bytes();
+                (void)vault::vault_wasted_bytes(v);
                 (void)v.list("g").size();
             }
         }

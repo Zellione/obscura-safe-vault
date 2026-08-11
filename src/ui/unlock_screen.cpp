@@ -64,11 +64,11 @@ void UnlockScreen::on_enter() { SDL_StartTextInput(win_.sdl_window()); }
 void UnlockScreen::on_exit()
 {
     SDL_StopTextInput(win_.sdl_window());
-    pw_.clear();
-    confirm_.clear();
-    reveal_pw_ = false;
-    crypto_wipe(clipboard_last_set_.data(), clipboard_last_set_.size());
-    clipboard_last_set_.clear();
+    password_.pw.clear();
+    password_.confirm.clear();
+    password_.reveal = false;
+    crypto_wipe(clipboard_.last_set.data(), clipboard_.last_set.size());
+    clipboard_.last_set.clear();
 }
 
 UnlockScreen::Layout UnlockScreen::layout() const
@@ -100,11 +100,11 @@ void UnlockScreen::handle_event(const SDL_Event& e)
 
     // Precedence rule (Phase 54): the focused field gets first refusal on every
     // event, so its Ctrl+A / Ctrl+V never fall through to a screen shortcut.
-    SecureTextInput& f = (create_mode_ && focus_ == 1) ? confirm_ : pw_;
+    SecureTextInput& f = (create_mode_ && password_.focus == 1) ? password_.confirm : password_.pw;
     if (e.type == SDL_EVENT_TEXT_INPUT || e.type == SDL_EVENT_KEY_DOWN) {
         const size_t before = f.size();
         if (handle_text_input_event(f, e)) {
-            if (f.size() != before) reveal_pw_ = false;   // edited by hand: stop displaying it
+            if (f.size() != before) password_.reveal = false;   // edited by hand: stop displaying it
             return;
         }
     }
@@ -112,7 +112,7 @@ void UnlockScreen::handle_event(const SDL_Event& e)
     switch (e.type) {
         case SDL_EVENT_KEY_DOWN:
             switch (e.key.key) {
-                case SDLK_TAB:       if (create_mode_) focus_ ^= 1; break;
+                case SDLK_TAB:       if (create_mode_) password_.focus ^= 1; break;
                 case SDLK_RETURN:
                 case SDLK_KP_ENTER:  submit(); break;
                 case SDLK_ESCAPE:    request(NavKind::ToVaultManager); break;
@@ -120,11 +120,11 @@ void UnlockScreen::handle_event(const SDL_Event& e)
             }
             break;
         case SDL_EVENT_MOUSE_MOTION:
-            mouse_x_ = e.motion.x;
-            mouse_y_ = e.motion.y;
+            mouse_.x = e.motion.x;
+            mouse_.y = e.motion.y;
             break;
         case SDL_EVENT_MOUSE_BUTTON_UP:
-            if (e.button.button == SDL_BUTTON_LEFT) mouse_down_ = false;
+            if (e.button.button == SDL_BUTTON_LEFT) mouse_.down = false;
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
             handle_click(e.button);
@@ -135,21 +135,21 @@ void UnlockScreen::handle_event(const SDL_Event& e)
 
 void UnlockScreen::handle_click(const SDL_MouseButtonEvent& b)
 {
-    mouse_down_ = (b.button == SDL_BUTTON_LEFT);
-    mouse_x_ = b.x;
-    mouse_y_ = b.y;
+    mouse_.down = (b.button == SDL_BUTTON_LEFT);
+    mouse_.x = b.x;
+    mouse_.y = b.y;
 
     const Layout L = layout();
     const SDL_FPoint p{b.x, b.y};
     if (point_in_rect(p.x, p.y, L.mode_btn)) {
-        create_mode_ = !create_mode_; focus_ = 0; error_.clear();
-        reveal_pw_ = false;
+        create_mode_ = !create_mode_; password_.focus = 0; error_.clear();
+        password_.reveal = false;
     } else if (create_mode_ && point_in_rect(p.x, p.y, L.generate_btn)) {
         // Fill both fields with one random passphrase and show it so the user
         // can write it down before creating the vault.
-        if (generate_passphrase(pw_)) {
-            confirm_.set_text(pw_.text_view());   // view straight over the mlock'd bytes
-            reveal_pw_ = true;
+        if (generate_passphrase(password_.pw)) {
+            password_.confirm.set_text(password_.pw.text_view());   // view straight over the mlock'd bytes
+            password_.reveal = true;
             error_.clear();
             copy_password_to_clipboard();   // Phase 45 Part 3: auto-copy the generated passphrase
         }
@@ -184,9 +184,9 @@ void UnlockScreen::update(double dt)
     // while it runs, so this polls promptly).
     if (auto oc = job_.take_outcome()) {
         if (*oc == vault::VaultResult::Ok) {
-            pw_.clear();
-            confirm_.clear();
-            reveal_pw_ = false;
+            password_.pw.clear();
+            password_.confirm.clear();
+            password_.reveal = false;
             request(NavKind::ToGallery);
         } else {
             error_ = unlock_error_message(*oc);
@@ -200,19 +200,19 @@ void UnlockScreen::update(double dt)
         mark_dirty();   // keyfile/vault picker closed — repaint
     }
 
-    if (clipboard_clear_timer_ < 0.0) return;
-    clipboard_clear_timer_ += dt;
-    if (clipboard_clear_timer_ < CLIPBOARD_CLEAR_SECS) return;
+    if (clipboard_.clear_timer < 0.0) return;
+    clipboard_.clear_timer += dt;
+    if (clipboard_.clear_timer < CLIPBOARD_CLEAR_SECS) return;
 
-    clipboard_clear_timer_ = -1.0;
+    clipboard_.clear_timer = -1.0;
     std::optional<std::string> current;
     if (char* cur = SDL_GetClipboardText()) {
         current = cur;
         SDL_free(cur);
     }
-    if (should_clear_clipboard(current, clipboard_last_set_)) { SDL_SetClipboardText(""); }
-    crypto_wipe(clipboard_last_set_.data(), clipboard_last_set_.size());
-    clipboard_last_set_.clear();
+    if (should_clear_clipboard(current, clipboard_.last_set)) { SDL_SetClipboardText(""); }
+    crypto_wipe(clipboard_.last_set.data(), clipboard_.last_set.size());
+    clipboard_.last_set.clear();
 }
 
 void UnlockScreen::apply_dialog_result(const std::string& path)
@@ -242,12 +242,12 @@ void UnlockScreen::apply_dialog_result(const std::string& path)
 
 void UnlockScreen::copy_password_to_clipboard()
 {
-    if (pw_.empty()) return;
-    std::string tmp(pw_.text_view());
+    if (password_.pw.empty()) return;
+    std::string tmp(password_.pw.text_view());
     SDL_SetClipboardText(tmp.c_str());
-    crypto_wipe(clipboard_last_set_.data(), clipboard_last_set_.size());
-    clipboard_last_set_   = tmp;
-    clipboard_clear_timer_ = 0.0;
+    crypto_wipe(clipboard_.last_set.data(), clipboard_.last_set.size());
+    clipboard_.last_set   = tmp;
+    clipboard_.clear_timer = 0.0;
     crypto_wipe(tmp.data(), tmp.size());
 }
 
@@ -268,7 +268,7 @@ void UnlockScreen::submit()
         keyfile = std::move(*kf);
     }
 
-    const SubmitDecision d = decide_submit(create_mode_, pw_.bytes(), confirm_.bytes());
+    const SubmitDecision d = decide_submit(create_mode_, password_.pw.bytes(), password_.confirm.bytes());
     if (d.error) {
         error_ = d.error;
         if (!keyfile.empty()) crypto_wipe(keyfile.data(), keyfile.size());
@@ -279,10 +279,10 @@ void UnlockScreen::submit()
     // own mlock'd buffers before returning, so both can be wiped/kept here.
     // update() collects the outcome and navigates / reports the error.
     if (d.action == SubmitAction::Create) {
-        job_.start_create(vault_, platform::path_to_utf8(vault_path_), pw_.bytes(), keyfile,
+        job_.start_create(vault_, platform::path_to_utf8(vault_path_), password_.pw.bytes(), keyfile,
                           crypto::DEFAULT_KDF_PARAMS);
     } else {
-        job_.start_unlock(vault_, platform::path_to_utf8(vault_path_), pw_.bytes(), keyfile);
+        job_.start_unlock(vault_, platform::path_to_utf8(vault_path_), password_.pw.bytes(), keyfile);
     }
     if (!keyfile.empty()) crypto_wipe(keyfile.data(), keyfile.size());
 }
@@ -296,7 +296,7 @@ void UnlockScreen::render(gfx::Renderer& r)
 
     // Draw a button wired to live hover/active state.
     auto btn = [&](const SDL_FRect& rect, std::string_view label) {
-        const ButtonState s = button_state(rect, mouse_x_, mouse_y_, mouse_down_);
+        const ButtonState s = button_state(rect, mouse_.x, mouse_.y, mouse_.down);
         draw_button(r, font_, {rect, std::string(label)}, s.hover, s.active);
     };
 
@@ -308,17 +308,17 @@ void UnlockScreen::render(gfx::Renderer& r)
     const float fw = W - 120;
     const float fh = 44;
     r.draw_text(font_, fx, 126, "Password", TEXT_DIM);
-    draw_edit_field(r, font_, {fx, 160, fw, fh}, pw_, pw_chrome_,
-                    !create_mode_ || focus_ == 0, /*mask*/ true);
+    draw_edit_field(r, font_, {fx, 160, fw, fh}, password_.pw, password_.pw_chrome,
+                    !create_mode_ || password_.focus == 0, /*mask*/ true);
     if (create_mode_) {
         r.draw_text(font_, fx, 226, "Confirm", TEXT_DIM);
-        draw_edit_field(r, font_, {fx, 260, fw, fh}, confirm_, confirm_chrome_,
-                        focus_ == 1, /*mask*/ true);
+        draw_edit_field(r, font_, {fx, 260, fw, fh}, password_.confirm, password_.confirm_chrome,
+                        password_.focus == 1, /*mask*/ true);
 
         // The password is the vault's real security boundary: show what the
         // user is committing to.
-        if (!pw_.empty()) {
-            const Strength s = classify_strength(pw_.bytes());
+        if (!password_.pw.empty()) {
+            const Strength s = classify_strength(password_.pw.bytes());
             std::string label = "strength: ";
             label += strength_label(s);
             r.draw_text(font_, fx + 110, 126, label, strength_color(s));
@@ -327,9 +327,9 @@ void UnlockScreen::render(gfx::Renderer& r)
         const Layout L0 = layout();
         btn(L0.generate_btn, "Generate passphrase");
         btn(L0.new_keyfile_btn, "New keyfile...");
-        if (reveal_pw_ && !pw_.empty()) {
+        if (password_.reveal && !password_.pw.empty()) {
             // string_view straight over the mlock'd buffer — no unlocked copy.
-            r.draw_text(font_, fx, 372, pw_.text_view(), gfx::Color{200, 210, 160, 255});
+            r.draw_text(font_, fx, 372, password_.pw.text_view(), gfx::Color{200, 210, 160, 255});
             r.draw_text(font_, fx, 398, "Write this down, then press Create.", TEXT_DIM);
         }
     }

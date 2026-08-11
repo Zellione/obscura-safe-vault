@@ -418,7 +418,7 @@ void run_pool(vault::Vault& v, const std::vector<Item>& items,
 void maybe_compact(vault::Vault& v, std::atomic<MigrationPhase>& phase,
                    vault::OpProgress& progress, MigrationOutcome& out)
 {
-    const uint64_t wasted = v.wasted_bytes();
+    const uint64_t wasted = vault::vault_wasted_bytes(v);
     if (wasted < vault::Vault::AUTO_COMPACT_MIN_WASTE) return;
 
     phase.store(MigrationPhase::Compacting);

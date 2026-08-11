@@ -210,7 +210,7 @@ void App::to_gallery(const std::string& path, int selected, bool explicit_index)
     state_  = State::Browsing;
     const int seed = explicit_index ? selected : session_.recall(path);
     screen_ = std::make_unique<ui::GalleryGrid>(
-        window_, font_, *vault_state_.active, *cache_,
+        ui::GalleryGrid::GridInitContext{window_, font_, *vault_state_.active, *cache_},
         ui::GalleryGrid::GridDialogs{dialog_, folder_dialog_},
         ui::GalleryGrid::GridVaultCtx{registry_, vault_state_.active_path, &second_.session},
         session_, import_ui_.queue,
@@ -291,7 +291,7 @@ void App::to_favorite_viewer(int index)
     ui::ImageViewer::Album album;
     album.from_collection = true;
     album.back            = ui::Nav{ui::NavKind::ToFavoriteImages, {}, 0};
-    auto favs = vault_state_.active->list_favorite_images();
+    auto favs = vault::list_favorite_images(*vault_state_.active);
     album.images.reserve(favs.size());
     album.paths.reserve(favs.size());
     for (auto& h : favs) {

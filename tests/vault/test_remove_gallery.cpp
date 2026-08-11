@@ -95,9 +95,9 @@ TEST(remove_gallery_orphans_chunks_reclaimable_by_compact)
     REQUIRE(v.add_image("Big", blob(4096, 5), "p.jpg") == Ok);
     REQUIRE(v.remove_gallery("Big") == Ok);
 
-    CHECK(v.wasted_bytes() > 0);          // the orphaned chunk is now waste
+    CHECK(vault::vault_wasted_bytes(v) > 0);          // the orphaned chunk is now waste
     REQUIRE(v.compact() == Ok);
-    CHECK_EQ(v.wasted_bytes(), static_cast<uint64_t>(0));   // reclaimed
+    CHECK_EQ(vault::vault_wasted_bytes(v), static_cast<uint64_t>(0));   // reclaimed
 }
 
 TEST(remove_gallery_nested_subtree)

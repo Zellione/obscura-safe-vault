@@ -74,7 +74,7 @@ TEST(favorites_toggle_on_image_persists_across_reopen)
         REQUIRE(Vault::create(tv.str(), bytes("pw"), {}, kFavKdf, v) == VaultResult::Ok);
         REQUIRE(v.add_image("", img, "photo.jpg") == VaultResult::Ok);
 
-        REQUIRE(v.toggle_favorite("photo.jpg") == VaultResult::Ok);
+        REQUIRE(vault::toggle_favorite_node(v, "photo.jpg") == VaultResult::Ok);
         auto children = v.list("");
         REQUIRE(children.size() == 1);
         CHECK_TRUE(children[0]->favorite);
@@ -99,7 +99,7 @@ TEST(favorites_toggle_on_gallery_persists_across_reopen)
         REQUIRE(Vault::create(tv.str(), bytes("pw"), {}, kFavKdf, v) == VaultResult::Ok);
         REQUIRE(v.create_gallery("trip") == VaultResult::Ok);
 
-        REQUIRE(v.toggle_favorite("trip") == VaultResult::Ok);
+        REQUIRE(vault::toggle_favorite_node(v, "trip") == VaultResult::Ok);
         auto children = v.list("");
         REQUIRE(children.size() == 1);
         REQUIRE(children[0]->is_gallery());
@@ -125,9 +125,9 @@ TEST(favorites_toggle_twice_returns_to_unfavorited)
     REQUIRE(Vault::create(tv.str(), bytes("pw"), {}, kFavKdf, v) == VaultResult::Ok);
     REQUIRE(v.add_image("", img, "a.jpg") == VaultResult::Ok);
 
-    REQUIRE(v.toggle_favorite("a.jpg") == VaultResult::Ok);
+    REQUIRE(vault::toggle_favorite_node(v, "a.jpg") == VaultResult::Ok);
     CHECK_TRUE(v.list("")[0]->favorite);
-    REQUIRE(v.toggle_favorite("a.jpg") == VaultResult::Ok);
+    REQUIRE(vault::toggle_favorite_node(v, "a.jpg") == VaultResult::Ok);
     CHECK_FALSE(v.list("")[0]->favorite);
 }
 
@@ -144,10 +144,10 @@ TEST(favorites_list_images_collects_across_whole_tree)
     REQUIRE(v.add_image("a/b", img, "y.jpg") == VaultResult::Ok);
     REQUIRE(v.add_image("a/c", img, "z.jpg") == VaultResult::Ok);
 
-    REQUIRE(v.toggle_favorite("a/b/x.jpg") == VaultResult::Ok);
-    REQUIRE(v.toggle_favorite("a/c/z.jpg") == VaultResult::Ok);
+    REQUIRE(vault::toggle_favorite_node(v, "a/b/x.jpg") == VaultResult::Ok);
+    REQUIRE(vault::toggle_favorite_node(v, "a/c/z.jpg") == VaultResult::Ok);
 
-    auto favs = v.list_favorite_images();
+    auto favs = vault::list_favorite_images(v);
     REQUIRE(favs.size() == 2);
     CHECK_TRUE(has_path(favs, "a/b/x.jpg"));
     CHECK_TRUE(has_path(favs, "a/c/z.jpg"));
@@ -169,10 +169,10 @@ TEST(favorites_list_galleries_collects_favorited_galleries_only)
     REQUIRE(v.create_gallery("a/c") == VaultResult::Ok);
     REQUIRE(v.create_gallery("d") == VaultResult::Ok);
 
-    REQUIRE(v.toggle_favorite("a/b") == VaultResult::Ok);
-    REQUIRE(v.toggle_favorite("d") == VaultResult::Ok);
+    REQUIRE(vault::toggle_favorite_node(v, "a/b") == VaultResult::Ok);
+    REQUIRE(vault::toggle_favorite_node(v, "d") == VaultResult::Ok);
 
-    auto favs = v.list_favorite_galleries();
+    auto favs = vault::list_favorite_galleries(v);
     REQUIRE(favs.size() == 2);
     CHECK_TRUE(has_path(favs, "a/b"));
     CHECK_TRUE(has_path(favs, "d"));
@@ -184,7 +184,7 @@ TEST(favorites_list_galleries_collects_favorited_galleries_only)
     }
 
     // The two lists are disjoint by kind: no galleries in the image list.
-    CHECK_TRUE(v.list_favorite_images().empty());
+    CHECK_TRUE(vault::list_favorite_images(v).empty());
 }
 
 TEST(favorites_unfavorite_removes_from_list)
@@ -197,12 +197,12 @@ TEST(favorites_unfavorite_removes_from_list)
     REQUIRE(v.add_image("", img, "a.jpg") == VaultResult::Ok);
     REQUIRE(v.add_image("", img, "b.jpg") == VaultResult::Ok);
 
-    REQUIRE(v.toggle_favorite("a.jpg") == VaultResult::Ok);
-    REQUIRE(v.toggle_favorite("b.jpg") == VaultResult::Ok);
-    REQUIRE(v.list_favorite_images().size() == 2);
+    REQUIRE(vault::toggle_favorite_node(v, "a.jpg") == VaultResult::Ok);
+    REQUIRE(vault::toggle_favorite_node(v, "b.jpg") == VaultResult::Ok);
+    REQUIRE(vault::list_favorite_images(v).size() == 2);
 
-    REQUIRE(v.toggle_favorite("a.jpg") == VaultResult::Ok);  // un-favorite
-    auto favs = v.list_favorite_images();
+    REQUIRE(vault::toggle_favorite_node(v, "a.jpg") == VaultResult::Ok);  // un-favorite
+    auto favs = vault::list_favorite_images(v);
     REQUIRE(favs.size() == 1);
     CHECK_TRUE(has_path(favs, "b.jpg"));
     CHECK_FALSE(has_path(favs, "a.jpg"));
@@ -214,7 +214,7 @@ TEST(favorites_toggle_missing_path_returns_not_found)
 
     Vault v;
     REQUIRE(Vault::create(tv.str(), bytes("pw"), {}, kFavKdf, v) == VaultResult::Ok);
-    CHECK_EQ(v.toggle_favorite("nope.jpg"), VaultResult::NotFound);
+    CHECK_EQ(vault::toggle_favorite_node(v, "nope.jpg"), VaultResult::NotFound);
 }
 
 TEST(favorites_operations_on_locked_vault_fail)
@@ -229,9 +229,9 @@ TEST(favorites_operations_on_locked_vault_fail)
 
     Vault v2;
     REQUIRE(Vault::open(tv.str(), v2) == VaultResult::Ok);  // opens LOCKED
-    CHECK_EQ(v2.toggle_favorite("anything"), VaultResult::Locked);
-    CHECK_TRUE(v2.list_favorite_images().empty());
-    CHECK_TRUE(v2.list_favorite_galleries().empty());
+    CHECK_EQ(vault::toggle_favorite_node(v2, "anything"), VaultResult::Locked);
+    CHECK_TRUE(vault::list_favorite_images(v2).empty());
+    CHECK_TRUE(vault::list_favorite_galleries(v2).empty());
 }
 
 // --- Phase 68: batch favorite set (one commit) -----------------------------
