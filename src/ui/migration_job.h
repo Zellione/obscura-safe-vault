@@ -35,6 +35,7 @@ struct MigrationOutcome {
     int         videos_fixed   = 0; // codec resolved and metadata written
     int         videos_skipped = 0; // still undecodable — watermark still advances
     int         images_fixed   = 0; // animated flag corrected
+    int         thumbs_fixed   = 0; // Phase 75: thumbnails/posters regenerated at 512px
     int         failed         = 0; // read/decrypt failures
     int         total          = 0; // items attempted
     uint64_t    reclaimed_bytes = 0;// freed by the compaction phase

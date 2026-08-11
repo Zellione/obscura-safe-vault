@@ -171,7 +171,11 @@ void App::promote_pending()
     migration_ui_.job.reset();  // reset migration job from previous vault
     if (vault::migration_pending(vault::vault_settings(*vault_state_.active), media::PROBE_CAPS_GEN,
                                  static_cast<uint16_t>(image::THUMB_MAX_SIDE))) {
-        const vault::MigrationScan scan = vault::scan_migration(*vault_state_.active, false);
+        // Phase 75: compute thumbs_stale to include thumbnail regen in the scan
+        const vault::VaultSettings settings = vault::vault_settings(*vault_state_.active);
+        const bool thumbs_stale =
+            settings.migrated_thumb_side < static_cast<uint16_t>(image::THUMB_MAX_SIDE);
+        const vault::MigrationScan scan = vault::scan_migration(*vault_state_.active, thumbs_stale);
         if (scan.empty()) {
             // Nothing to do: stamp and move on silently, so this vault is never
             // asked again.
@@ -480,12 +484,28 @@ void draw_migration_offer(gfx::Renderer& r, gfx::FontAtlas& font, float win_w, f
 
     float       text_y = py + 60;
     const float line_h = 20;
-    r.draw_text(font, px + 20, text_y,
-                std::format("This vault has {} video(s) and {} image(s)", scan.videos, scan.images),
-                gfx::theme::TEXT);
+
+    // Phase 75: include thumbnail count in the offer message
+    std::string summary;
+    if (scan.thumbs > 0) {
+        summary = std::format("This vault has {} thumbnail(s), {} video(s), and {} image(s)",
+                              scan.thumbs, scan.videos, scan.images);
+    } else {
+        summary = std::format("This vault has {} video(s) and {} image(s)", scan.videos, scan.images);
+    }
+    r.draw_text(font, px + 20, text_y, summary, gfx::theme::TEXT);
     text_y += line_h;
-    r.draw_text(font, px + 20, text_y,
-                "that were imported before this build could read them fully.", gfx::theme::TEXT);
+
+    if (scan.thumbs > 0) {
+        r.draw_text(font, px + 20, text_y, "with thumbnails to sharpen, and videos/images",
+                    gfx::theme::TEXT);
+        text_y += line_h;
+        r.draw_text(font, px + 20, text_y,
+                    "imported before this build could read them fully.", gfx::theme::TEXT);
+    } else {
+        r.draw_text(font, px + 20, text_y,
+                    "that were imported before this build could read them fully.", gfx::theme::TEXT);
+    }
     text_y += line_h;
     r.draw_text(font, px + 20, text_y,
                 std::format("Upgrading reads {} and rewrites the vault once.",
@@ -600,7 +620,11 @@ struct App::OverlayDispatch {
             app.overlays_.settings.trigger_migration = false;
 
             // Scan for actual pending work regardless of watermark state
-            const vault::MigrationScan scan = vault::scan_migration(*app.vault_state_.active, false);
+            // Phase 75: include thumbnail regen in the scan
+            const vault::VaultSettings settings = vault::vault_settings(*app.vault_state_.active);
+            const bool thumbs_stale =
+                settings.migrated_thumb_side < static_cast<uint16_t>(image::THUMB_MAX_SIDE);
+            const vault::MigrationScan scan = vault::scan_migration(*app.vault_state_.active, thumbs_stale);
             if (scan.empty()) {
                 // Nothing to do: inform the user and keep settings open
                 app.overlays_.settings.error = "Nothing to upgrade";
