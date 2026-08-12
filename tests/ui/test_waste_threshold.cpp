@@ -60,6 +60,28 @@ TEST(should_display_waste_zero_vault_size_uses_absolute_only)
     CHECK_TRUE(ui::should_display_waste(fifty_mb, 0));       // still use 50 MiB absolute
 }
 
+TEST(should_offer_compact_any_nonzero_waste)
+{
+    // Phase 82: Shift+C is an explicit request, so ANY reclaimable waste opens
+    // the confirm modal — the display heuristic must not gate it.
+    CHECK_FALSE(ui::should_offer_compact(0));
+    CHECK_TRUE(ui::should_offer_compact(1));
+    CHECK_TRUE(ui::should_offer_compact(1024 * 1024));
+}
+
+TEST(should_offer_compact_below_display_threshold)
+{
+    // The reported case: a 699 MiB vault hides waste under max(50 MiB, 10%) =
+    // 69.9 MiB, and auto_reclaim_space's own gate needs waste >= size/4 =
+    // 175 MiB. 50 MiB of deleted files therefore reclaimed nothing and
+    // reported nothing. Shift+C must still offer it.
+    const uint64_t vault_size = 699 * 1024 * 1024;
+    const uint64_t waste      = 50 * 1024 * 1024;
+
+    CHECK_FALSE(ui::should_display_waste(waste, vault_size));  // footer stays quiet
+    CHECK_TRUE(ui::should_offer_compact(waste));               // but Shift+C works
+}
+
 TEST(should_hint_cancelled_import_waste_at_1mb_threshold)
 {
     const uint64_t one_mb = 1024 * 1024;
