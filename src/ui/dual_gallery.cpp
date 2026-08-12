@@ -13,6 +13,7 @@
 #include "ui/dual_session_state.h"
 #include "ui/gallery_grid.h"
 #include "ui/help_popup.h"
+#include "ui/keybindings.h"
 #include "ui/parent_group.h"
 #include "ui/widgets.h"
 #include "vault/vault.h"
@@ -252,7 +253,7 @@ bool DualGalleryScreen::handle_split_key(const SDL_KeyboardEvent& key)
 {
     // 3. Tab (no modifiers): switch panes — unless a pane is busy with an
     // overlay/naming, in which case Tab forwards to the active pane instead
-    if (key.key == SDLK_TAB && key.mod == 0 && !vault_busy(*left_) && !vault_busy(*right_)) {
+    if (key.key == SDLK_TAB && is_unmodified(key.mod) && !vault_busy(*left_) && !vault_busy(*right_)) {
         set_active(1 - active_);
         mark_dirty();
         return true;
@@ -269,7 +270,7 @@ bool DualGalleryScreen::handle_split_key(const SDL_KeyboardEvent& key)
     }
 
     // 5. M (no mods): open transfer prompt (Task 7), with refusal order
-    if (key.key == SDLK_M && key.mod == 0) {
+    if (key.key == SDLK_M && is_unmodified(key.mod)) {
         open_transfer_prompt();
         mark_dirty();
         return true;
