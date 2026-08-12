@@ -13,7 +13,9 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <print>
 
@@ -26,6 +28,18 @@ namespace {
 // codepoint, so callers map it to REPLACEMENT_GLYPH like any unmapped scalar.
 constexpr uint32_t BAD_CODEPOINT = 0xFFFFFFFFu;
 
+// Smallest scalar each UTF-8 length may legally encode; anything below is an
+// overlong. Indexed by sequence length, so slots 0 and 1 are unused padding.
+constexpr std::array<uint32_t, 5> UTF8_MIN_FOR_LEN{0, 0, 0x80, 0x800, 0x10000};
+
+// One byte of `s` as an integer. Goes through std::byte because these bytes are
+// UTF-8 machinery rather than characters, and keeps every operand of the bit
+// arithmetic below a uint32_t.
+[[nodiscard]] constexpr uint32_t byte_at(std::string_view s, size_t i) noexcept
+{
+    return std::to_integer<uint32_t>(static_cast<std::byte>(s[i]));
+}
+
 // Decode one UTF-8 scalar at `i`, advancing `i` past what it consumed.
 //
 // A vault node name is untrusted input that reaches draw_text directly, so this
@@ -36,29 +50,28 @@ constexpr uint32_t BAD_CODEPOINT = 0xFFFFFFFFu;
 // the overlong C0 AF must not render as '/').
 [[nodiscard]] uint32_t next_codepoint(std::string_view s, size_t& i) noexcept
 {
-    const auto b0 = static_cast<unsigned char>(s[i]);
+    const uint32_t b0 = byte_at(s, i);
     if (b0 < 0x80) { ++i; return b0; }
 
-    int      len = 0;
+    size_t   len = 0;
     uint32_t cp  = 0;
     if      ((b0 & 0xE0) == 0xC0) { len = 2; cp = b0 & 0x1Fu; }
     else if ((b0 & 0xF0) == 0xE0) { len = 3; cp = b0 & 0x0Fu; }
     else if ((b0 & 0xF8) == 0xF0) { len = 4; cp = b0 & 0x07u; }
     else                          { ++i; return BAD_CODEPOINT; }
 
-    if (i + static_cast<size_t>(len) > s.size()) { ++i; return BAD_CODEPOINT; }
-    for (int k = 1; k < len; ++k) {
-        const auto bk = static_cast<unsigned char>(s[i + static_cast<size_t>(k)]);
+    if (i + len > s.size()) { ++i; return BAD_CODEPOINT; }
+    for (size_t k = 1; k < len; ++k) {
+        const uint32_t bk = byte_at(s, i + k);
         if ((bk & 0xC0) != 0x80) { ++i; return BAD_CODEPOINT; }
         cp = (cp << 6) | (bk & 0x3Fu);
     }
 
-    static constexpr uint32_t MIN_FOR_LEN[5] = {0, 0, 0x80, 0x800, 0x10000};
-    if (cp < MIN_FOR_LEN[len] || (cp >= 0xD800 && cp <= 0xDFFF) || cp > 0x10FFFF) {
+    if (cp < UTF8_MIN_FOR_LEN[len] || (cp >= 0xD800 && cp <= 0xDFFF) || cp > 0x10FFFF) {
         ++i;                       // overlong / surrogate / out of range
         return BAD_CODEPOINT;
     }
-    i += static_cast<size_t>(len);
+    i += len;
     return cp;
 }
 
@@ -173,7 +186,7 @@ bool FontAtlas::bake(std::span<const uint8_t> ttf, float pixel_height)
         for (size_t i = 0; i < ascii_end; ++i) glyphs_[i] = to_glyph(i);
         extra_.reserve(cps.size() - ascii_end);
         for (size_t i = ascii_end; i < cps.size(); ++i)
-            extra_.push_back(SparseGlyph{static_cast<uint32_t>(cps[i]), to_glyph(i)});
+            extra_.emplace_back(static_cast<uint32_t>(cps[i]), to_glyph(i));
         // EXTRA_RANGES is authored in ascending order, but sorting makes
         // glyph_for's binary search correct regardless of how it is edited.
         std::ranges::sort(extra_, {}, &SparseGlyph::cp);

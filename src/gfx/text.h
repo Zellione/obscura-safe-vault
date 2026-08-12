@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <array>
 #include <cstdint>
 #include <span>
 #include <string_view>
@@ -31,7 +32,7 @@ struct CodepointRange {
     uint32_t first;
     uint32_t last;
 };
-inline constexpr CodepointRange EXTRA_RANGES[] = {
+inline constexpr auto EXTRA_RANGES = std::to_array<CodepointRange>({
     {0x00A0, 0x00FF},   // Latin-1 Supplement (· × ± § µ and accented letters)
     {0x0100, 0x017F},   // Latin Extended-A
     {0x0180, 0x024F},   // Latin Extended-B
@@ -40,7 +41,7 @@ inline constexpr CodepointRange EXTRA_RANGES[] = {
     {0x2010, 0x2027},   // General Punctuation (– — … • ‖ quotes)
     {0x20A0, 0x20BF},   // Currency symbols
     {0x2212, 0x2212},   // MINUS SIGN
-};
+});
 
 /// One baked glyph: its rectangle within the atlas bitmap plus placement metrics.
 struct BakedGlyph {
