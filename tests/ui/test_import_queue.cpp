@@ -791,20 +791,20 @@ TEST(import_queue_idle_does_not_grow_vault)
 
     // Pump drain() many times while idle (no tasks, no records).
     // Record wasted_bytes before and after to ensure only ONE end-of-batch commit occurs.
-    const uint64_t wasted_before = v.wasted_bytes();
+    const uint64_t wasted_before = vault::vault_wasted_bytes(v);
 
     // First drain: may trigger end-of-batch (lane is fresh and idle)
     (void)q.drain(0.001);
 
     // Record wasted after the first drain (one legitimate end-of-batch should happen)
-    const uint64_t wasted_after_first = v.wasted_bytes();
+    const uint64_t wasted_after_first = vault::vault_wasted_bytes(v);
 
     // Pump many more times: these must be no-ops (latch prevents re-commit)
     for (int i = 0; i < 50; ++i) {
         (void)q.drain(0.001);
     }
 
-    const uint64_t wasted_after_many = v.wasted_bytes();
+    const uint64_t wasted_after_many = vault::vault_wasted_bytes(v);
 
     // Wasted bytes should be identical after the first drain and after 50 more,
     // proving the latch prevents repeated commits. Allow a small margin (< 128 bytes)
@@ -855,14 +855,14 @@ TEST(import_queue_idle_latch_rearms_on_new_work)
     (void)q.enqueue_files(batches[0], "batch1");
     pump_until_idle(q);
 
-    const uint64_t wasted_after_batch1 = v.wasted_bytes();
+    const uint64_t wasted_after_batch1 = vault::vault_wasted_bytes(v);
 
     // Pump several more times to ensure the latch is set (end-of-batch has occurred)
     for (int i = 0; i < 10; ++i) {
         (void)q.drain(0.001);
     }
 
-    const uint64_t wasted_after_batch1_stable = v.wasted_bytes();
+    const uint64_t wasted_after_batch1_stable = vault::vault_wasted_bytes(v);
 
     // Should be identical (latch prevented repeated commits)
     CHECK_EQ(wasted_after_batch1_stable, wasted_after_batch1);
@@ -871,14 +871,14 @@ TEST(import_queue_idle_latch_rearms_on_new_work)
     (void)q.enqueue_files(batches[1], "batch2");
     pump_until_idle(q);
 
-    const uint64_t wasted_after_batch2 = v.wasted_bytes();
+    const uint64_t wasted_after_batch2 = vault::vault_wasted_bytes(v);
 
     // Pump several more times after second batch idles to ensure latch is set
     for (int i = 0; i < 10; ++i) {
         (void)q.drain(0.001);
     }
 
-    const uint64_t wasted_after_batch2_stable = v.wasted_bytes();
+    const uint64_t wasted_after_batch2_stable = vault::vault_wasted_bytes(v);
 
     // After second batch's end-of-batch commit, verify the latch prevents repeated commits
     // by checking that wasted_bytes is stable (same as right after idle).

@@ -19,6 +19,7 @@
 #include "ui/detail_panel.h"
 #include "ui/failure_list_dialog.h"
 #include "ui/file_op_job.h"
+#include "ui/dual_session_state.h"
 #include "ui/gallery_session_state.h"
 #include "ui/gallery_view.h"
 #include "ui/anim_model.h"
@@ -58,6 +59,20 @@ class SecondVaultSession;  // Phase 66: forward declare for GridVaultCtx
 // illegible. Free friend for the same cpp:S1448 reason as content_width.
 [[nodiscard]] float content_bottom(const class GalleryGrid& g);
 
+// Phase 78: layout size the grid believes it has. Defaults to the real window;
+// DualGalleryScreen overrides it with the pane size. EVERY layout site must use
+// these, never win_.width()/win_.height(), or split-mode picking and drawing
+// disagree with rendering.
+[[nodiscard]] float layout_w(const class GalleryGrid& g);
+[[nodiscard]] float layout_h(const class GalleryGrid& g);
+
+// Phase 78 Task 7: Full slash-paths of selected tiles (or focused tile when selection empty).
+// Used by DualGalleryScreen to build the transfer spec.
+[[nodiscard]] std::vector<std::string> selected_transfer_paths(const class GalleryGrid& g);
+
+// Phase 78 Task 7 Fix: Clear the selection (used after transfers to prevent stale selection).
+void clear_grid_selection(class GalleryGrid& g);
+
 // Rebuild the panel's cached content when the focused node or selection changes.
 // A free friend for the same cpp:S1448 reason as content_width.
 void rebuild_detail(class GalleryGrid& g);
@@ -70,6 +85,11 @@ bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
 // Shortcut-key dispatch (L/X/M/R/SPACE/G/B/F/T/S/U), extracted to reduce
 // handle_key_down's cognitive complexity. Returns true when consumed.
 bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& key);
+
+// F3 (enter split view, Phase 78), extracted for the same S3776 reason.
+// Returns true when the key was consumed (embedded panes swallow F3 — the
+// host screen owns split-view toggling).
+bool handle_f3_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
 
 // Where to (re)open the grid: a gallery path (empty = root), the selected
 // tile index, and the initial List/Grid view (Phase 39 Part 2 session
@@ -96,8 +116,15 @@ public:
         SecondVaultSession*      second_vault = nullptr;   // Phase 66: warm slot (App-owned)
     };
 
-    GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                gfx::TextureCache& cache, GridDialogs dialogs,
+    // UI resources and core references bundled to reduce parameter count.
+    struct GridInitContext {
+        gfx::Window&      win;
+        gfx::FontAtlas&   font;
+        vault::Vault&     vault;
+        gfx::TextureCache& cache;
+    };
+
+    GalleryGrid(GridInitContext ctx, GridDialogs dialogs,
                 GridVaultCtx vault_ctx, GallerySessionState& session, ImportQueue& queue,
                 GridLocation at = {});
 
@@ -114,6 +141,15 @@ public:
     [[nodiscard]] bool animating() const override { return vault_busy(*this); }
     [[nodiscard]] bool blocks_idle_lock() const override { return vault_busy(*this); }
     [[nodiscard]] std::vector<ui::HelpGroup> help_groups() const override;
+
+    // Phase 78: set layout override (pane size); <=0 clears
+    void set_layout_override(float w, float h);
+    // Phase 78: set embedded mode (pane mode)
+    void set_embedded(bool on);
+    // Phase 78: query embedded mode
+    [[nodiscard]] bool embedded() const;
+    // Phase 78: gate dialog pumping (import picker polling)
+    void set_dialog_pump(bool on);
 
 private:
     void handle_key_down(const SDL_KeyboardEvent& key);  // browse-mode keys
@@ -173,12 +209,22 @@ void toggle_select();          // toggle the current item in the export selectio
     friend void render_delete_confirm_modal(GalleryGrid& g, gfx::Renderer& r, float W, float H);  // (S3776 extraction)
     friend bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key);     // detail panel scroll/toggle
     friend bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& key);  // L/X/M/R/SPACE/G/B/F/T/S/U shortcuts
+    friend bool handle_f3_key(GalleryGrid& g, const SDL_KeyboardEvent& key);         // F3 enter split view (Phase 78)
     friend void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);  // cancelled import waste hint
     // current_gallery_view is a free friend for the same S1448 reason: App reads it
     // (Phase 39 Part 2) to snapshot the outgoing grid's view mode into GallerySessionState.
     friend GalleryView current_gallery_view(const GalleryGrid& g);
     // current_gallery_path (Phase 50): App uses it to derive back nav for import status screen
     friend std::string current_gallery_path(const GalleryGrid& g);
+    // Phase 78: snapshot one pane's configuration / rebuild it
+    friend PaneState capture_pane_state(const GalleryGrid& g);
+    friend void restore_pane_state(GalleryGrid& g, const PaneState& s);
+    // Phase 78: navigate a pane to an absolute gallery path (walk-up on vault change)
+    friend void jump_pane_to(GalleryGrid& g, const std::string& path);
+    // Phase 78 Task 7: full slash-paths of selection (or focused tile when empty)
+    friend std::vector<std::string> selected_transfer_paths(const GalleryGrid& g);
+    // Phase 78 Task 7 Fix: clear selection (used after transfers to avoid stale selection)
+    friend void clear_grid_selection(GalleryGrid& g);
     // The following are free friends for the same S1448/S3776 reasons, extracted
     // from start_transfer() and update() (Phase 44 SonarQube follow-up).
     friend void start_transfer_focused(GalleryGrid& g);
@@ -191,6 +237,8 @@ void toggle_select();          // toggle the current item in the export selectio
     friend void update_scroll_to_selection_grid(GalleryGrid& g, int sel_idx, float bottom);
     friend float content_width(const GalleryGrid& g);
     friend float content_bottom(const GalleryGrid& g);
+    friend float layout_w(const GalleryGrid& g);      // Phase 78: layout width
+    friend float layout_h(const GalleryGrid& g);      // Phase 78: layout height
     friend void  rebuild_detail(GalleryGrid& g);
     void draw_tile_thumb(gfx::Renderer& r, const vault::IndexNode& n,
                          const SDL_FRect& box);
@@ -328,6 +376,12 @@ void toggle_select();          // toggle the current item in the export selectio
     AnimHoverGate                 hover_gate_;
     std::unique_ptr<AnimPlayback> hover_anim_;
     int                          hover_anim_tile_ = -1;
+
+    // Phase 78: layout override (pane size)
+    float layout_w_ = 0.0f;
+    float layout_h_ = 0.0f;
+    bool  embedded_ = false;        // pane mode: Esc/Backspace/right-click at root are inert
+    bool  pump_dialogs_ = true;     // gate dialog polling (pump_import/pump_zip/pump_folder)
 };
 
 // Free friends of GalleryGrid (see the in-class declarations): poll_file_job drains
@@ -348,5 +402,10 @@ void render_delete_confirm_modal(GalleryGrid& g, gfx::Renderer& r, float W, floa
 void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);
 [[nodiscard]] GalleryView current_gallery_view(const GalleryGrid& g);
 [[nodiscard]] std::string current_gallery_path(const GalleryGrid& g);  // Phase 50: for import status back nav
+// Phase 78: snapshot one pane's exact configuration / rebuild it. The restore
+// clamps `selected` and drops out-of-range `selected_tiles` if the listing changed,
+// then clamps scroll.
+[[nodiscard]] PaneState capture_pane_state(const GalleryGrid& g);
+void restore_pane_state(GalleryGrid& g, const PaneState& s);
 
 } // namespace ui

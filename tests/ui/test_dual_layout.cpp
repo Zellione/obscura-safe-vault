@@ -1,0 +1,119 @@
+#include "test_framework.h"
+
+#include "ui/dual_layout.h"
+
+using ui::dual_split;
+using ui::pane_at;
+
+TEST(dual_split_tiles_window_exactly)
+{
+    const auto s = dual_split(1200.0f, 800.0f);
+    CHECK_EQ(s.left.x, 0.0f);
+    CHECK_EQ(s.left.y, 0.0f);
+    CHECK_EQ(s.left.h, 800.0f);
+    CHECK_EQ(s.right.h, 800.0f);
+    CHECK_EQ(s.divider.h, 800.0f);
+    // left + divider + right tile the width exactly
+    CHECK_EQ(s.divider.x, s.left.x + s.left.w);
+    CHECK_EQ(s.right.x, s.divider.x + s.divider.w);
+    CHECK_EQ(s.right.x + s.right.w, 1200.0f);
+    // 50/50: pane widths differ by at most 1 px (odd widths)
+    CHECK(s.left.w - s.right.w <= 1.0f && s.right.w - s.left.w <= 1.0f);
+}
+
+TEST(dual_split_divider_has_positive_width)
+{
+    const auto s = dual_split(1000.0f, 600.0f);
+    CHECK(s.divider.w >= 1.0f);
+}
+
+TEST(dual_split_survives_tiny_window)
+{
+    // Shrinking while split must not produce negative pane widths.
+    const auto s = dual_split(10.0f, 10.0f);
+    CHECK(s.left.w >= 0.0f);
+    CHECK(s.right.w >= 0.0f);
+}
+
+TEST(pane_at_resolves_left_right_and_divider)
+{
+    const auto s = dual_split(1200.0f, 800.0f);
+    CHECK_EQ(pane_at(s, 10.0f), 0);
+    CHECK_EQ(pane_at(s, 1190.0f), 1);
+    CHECK_EQ(pane_at(s, s.divider.x), 0);            // divider left half -> left
+    CHECK_EQ(pane_at(s, s.right.x), 1);
+}
+
+TEST(min_split_width_is_900)
+{
+    CHECK_EQ(ui::MIN_SPLIT_WIDTH, 900.0f);
+}
+
+#include <span>
+#include <string>
+#include <vector>
+
+using ui::dual_transfer_check;
+using ui::DualTransferRefusal;
+
+TEST(dual_transfer_check_refuses_same_gallery)
+{
+    const std::vector<std::string> none;
+    CHECK(dual_transfer_check("a/b", "a/b", none) == DualTransferRefusal::SameGallery);
+    CHECK(dual_transfer_check("", "", none) == DualTransferRefusal::SameGallery);
+}
+
+TEST(dual_transfer_check_refuses_gallery_into_itself_or_descendant)
+{
+    const std::vector<std::string> sel{"a/b"};
+    CHECK(dual_transfer_check("a", "a/b", sel) == DualTransferRefusal::IntoOwnSubtree);
+    CHECK(dual_transfer_check("a", "a/b/c", sel) == DualTransferRefusal::IntoOwnSubtree);
+}
+
+TEST(dual_transfer_check_prefix_is_segment_aware)
+{
+    // "a/bc" is NOT inside "a/b" — naive prefix match would wrongly refuse.
+    const std::vector<std::string> sel{"a/b"};
+    CHECK(dual_transfer_check("a", "a/bc", sel) == DualTransferRefusal::None);
+}
+
+TEST(dual_transfer_check_allows_normal_transfer)
+{
+    const std::vector<std::string> sel{"a/b"};
+    CHECK(dual_transfer_check("a", "x/y", sel) == DualTransferRefusal::None);
+    const std::vector<std::string> none;
+    CHECK(dual_transfer_check("a", "x", none) == DualTransferRefusal::None);
+}
+
+#include "ui/dual_gallery.h"
+
+TEST(translate_event_shifts_mouse_coords_into_pane_space)
+{
+    SDL_Event e{};
+    e.type       = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    e.button.x   = 700.0f;
+    e.button.y   = 50.0f;
+    const SDL_FRect pane{601.0f, 0.0f, 599.0f, 800.0f};
+    const SDL_Event t = ui::translate_event_to_pane(e, pane);
+    CHECK_EQ(t.button.x, 99.0f);
+    CHECK_EQ(t.button.y, 50.0f);
+}
+
+TEST(translate_event_covers_motion_and_wheel)
+{
+    const SDL_FRect pane{601.0f, 0.0f, 599.0f, 800.0f};
+    SDL_Event m{};
+    m.type = SDL_EVENT_MOUSE_MOTION; m.motion.x = 700.0f; m.motion.y = 10.0f;
+    CHECK_EQ(ui::translate_event_to_pane(m, pane).motion.x, 99.0f);
+    SDL_Event w{};
+    w.type = SDL_EVENT_MOUSE_WHEEL; w.wheel.mouse_x = 700.0f; w.wheel.mouse_y = 10.0f;
+    CHECK_EQ(ui::translate_event_to_pane(w, pane).wheel.mouse_x, 99.0f);
+}
+
+TEST(translate_event_leaves_key_events_untouched)
+{
+    SDL_Event e{};
+    e.type = SDL_EVENT_KEY_DOWN; e.key.key = SDLK_TAB;
+    const SDL_FRect pane{601.0f, 0.0f, 599.0f, 800.0f};
+    CHECK_EQ(ui::translate_event_to_pane(e, pane).key.key, SDLK_TAB);
+}

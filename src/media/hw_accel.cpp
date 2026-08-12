@@ -93,7 +93,7 @@ enum AVPixelFormat pick_hw_format(AVCodecContext*, const enum AVPixelFormat* fmt
 bool try_attach_hwaccel(AVCodecContext* ctx, const AVCodec* decoder)
 {
     if (!decoder_supports_hw(decoder)) return false;
-    AVBufferRef* dev = cached_device_ctx();
+    const AVBufferRef* dev = cached_device_ctx();
     if (!dev) return false;
     AVBufferRef* ref = av_buffer_ref(dev);
     if (!ref) return false;

@@ -37,6 +37,36 @@ TEST(keybindings_bracket_is_constexpr)
     CHECK(true);
 }
 
+// SDL3 reports the LOCK modifiers (Num/Caps/Scroll) in every key event's `mod`
+// field, so a plain `mod == 0` test silently kills a bare-key shortcut for anyone
+// with Num Lock on. is_unmodified() masks the locks out and only rejects the
+// chording modifiers.
+TEST(keybindings_is_unmodified_ignores_lock_modifiers)
+{
+    CHECK(ui::is_unmodified(SDL_KMOD_NONE));
+    CHECK(ui::is_unmodified(SDL_KMOD_NUM));                      // Num Lock on
+    CHECK(ui::is_unmodified(SDL_KMOD_CAPS));                     // Caps Lock on
+    CHECK(ui::is_unmodified(SDL_KMOD_SCROLL));                   // Scroll Lock on
+    CHECK(ui::is_unmodified(SDL_KMOD_NUM | SDL_KMOD_CAPS));
+}
+
+TEST(keybindings_is_unmodified_rejects_chording_modifiers)
+{
+    CHECK(!ui::is_unmodified(SDL_KMOD_LSHIFT));
+    CHECK(!ui::is_unmodified(SDL_KMOD_RSHIFT));
+    CHECK(!ui::is_unmodified(SDL_KMOD_LCTRL));
+    CHECK(!ui::is_unmodified(SDL_KMOD_RCTRL));
+    CHECK(!ui::is_unmodified(SDL_KMOD_LALT));
+    CHECK(!ui::is_unmodified(SDL_KMOD_RALT));
+    CHECK(!ui::is_unmodified(SDL_KMOD_LGUI));
+    CHECK(!ui::is_unmodified(SDL_KMOD_RGUI));
+    CHECK(!ui::is_unmodified(SDL_KMOD_MODE));                    // AltGr
+    // A lock modifier does not excuse a held chording modifier.
+    CHECK(!ui::is_unmodified(SDL_KMOD_NUM | SDL_KMOD_LCTRL));
+    static_assert(ui::is_unmodified(SDL_KMOD_NUM));
+    static_assert(!ui::is_unmodified(SDL_KMOD_LSHIFT));
+}
+
 // Volume is reachable three ways so it works however the user presses it.
 TEST(keybindings_volume_accepts_bracket_glyph_dash_and_scancode)
 {

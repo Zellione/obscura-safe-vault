@@ -1,5 +1,6 @@
 #include "ui/gallery_grid.h"
 
+#include "ui/dual_layout.h"
 #include "ui/favorite_batch.h"
 #include "ui/selectable.h"
 
@@ -148,14 +149,24 @@ void draw_file_op_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
 
 float content_width(const GalleryGrid& g)
 {
-    const auto w = static_cast<float>(g.win_.width());
+    const auto w = layout_w(g);
     return w - detail_panel_width(g.detail_.panel.open, w);
 }
 
 float content_bottom(const GalleryGrid& g)
 {
-    const ChromeBands b = grid_bands(content_width(g), static_cast<float>(g.win_.height()));
+    const ChromeBands b = grid_bands(content_width(g), layout_h(g));
     return b.content.y + b.content.h;
+}
+
+float layout_w(const GalleryGrid& g)
+{
+    return g.layout_w_ > 0.0f ? g.layout_w_ : static_cast<float>(g.win_.width());
+}
+
+float layout_h(const GalleryGrid& g)
+{
+    return g.layout_h_ > 0.0f ? g.layout_h_ : static_cast<float>(g.win_.height());
 }
 
 // Rebuild detail_.content when — and only when — what it describes has changed.
@@ -198,18 +209,17 @@ void rebuild_detail(GalleryGrid& g)
     g.detail_.content = build_node_details(node, inherited_tags(g.vault_, node_path), from_contents, vault::vault_settings(g.vault_).default_sort);
 }
 
-GalleryGrid::GalleryGrid(gfx::Window& win, gfx::FontAtlas& font, vault::Vault& vault,
-                         gfx::TextureCache& cache, GridDialogs dialogs,
+GalleryGrid::GalleryGrid(GridInitContext ctx, GridDialogs dialogs,
                          GridVaultCtx vault_ctx, GallerySessionState& session, ImportQueue& queue,
                          GridLocation at)
-    : win_(win), font_(font), vault_(vault), cache_(cache), dialogs_(dialogs),
+    : win_(ctx.win), font_(ctx.font), vault_(ctx.vault), cache_(ctx.cache), dialogs_(dialogs),
       session_(session), queue_(queue),
-      search_(vault, win), tag_editor_(vault, win),
+      search_(ctx.vault, ctx.win), tag_editor_(ctx.vault, ctx.win),
       quick_switch_(vault_ctx.registry, vault_ctx.active_vault_path),
-      transfer_(vault, vault_ctx.active_vault_path, vault_ctx.registry,
-                dialogs.file, win, vault_ctx.second_vault),
-      rename_(win),
-      combine_(vault, vault_ctx.active_vault_path, vault_ctx.registry, dialogs.file, win, vault_ctx.second_vault),
+      transfer_(ctx.vault, vault_ctx.active_vault_path, vault_ctx.registry,
+                dialogs.file, ctx.win, vault_ctx.second_vault),
+      rename_(ctx.win),
+      combine_(ctx.vault, vault_ctx.active_vault_path, vault_ctx.registry, dialogs.file, ctx.win, vault_ctx.second_vault),
       initial_(std::move(at)), view_(initial_.view)
 {
     detail_.panel.open = session_.detail_open;
@@ -330,7 +340,12 @@ void GalleryGrid::open_selected()
 void GalleryGrid::go_up()
 {
     session_.record(nav_.path(), nav_.selected());   // this level's selection is about to go stale
-    if (!nav_.up()) { request(NavKind::ToVaultManager); return; }
+    if (!nav_.up()) {
+        if (!embedded_) {  // Phase 78: inert at root when embedded
+            request(NavKind::ToVaultManager);
+        }
+        return;
+    }
     refresh();
     nav_.select(session_.recall(nav_.path()));   // restore the parent's remembered tile
     follow_ = ScrollFollow::Center;
@@ -658,7 +673,7 @@ void GalleryGrid::toggle_favorite_current()
     // star badge re-renders next frame; the key event already triggers a repaint.
     // No refresh() — that would needlessly clear the export selection.
     // best-effort: favorite toggle failure is benign, UI re-reads state
-    (void)vault_.toggle_favorite(full_path);
+    (void)toggle_favorite_node(vault_, full_path);
 }
 
 void GalleryGrid::cycle_gallery_sort()
@@ -700,6 +715,37 @@ std::vector<std::string> GalleryGrid::selected_delete_paths() const
         paths.push_back(base.empty() ? name : base + "/" + name);
     }
     return prune_descendant_paths(paths);
+}
+
+// Phase 78 Task 7: Full slash-paths for transfer; fallback to focused tile when empty.
+std::vector<std::string> selected_transfer_paths(const GalleryGrid& g)
+{
+    std::vector<std::string> paths;
+    const std::string& base = g.nav_.path();
+
+    // Use multi-selection if present
+    if (!g.sel_.empty()) {
+        for (int i : g.sel_.indices()) {
+            if (i < 0 || i >= static_cast<int>(g.children_.size())) continue;
+            const std::string& name = g.children_[static_cast<size_t>(i)]->name;
+            paths.push_back(base.empty() ? name : base + "/" + name);
+        }
+    } else {
+        // Fallback: focused tile
+        const int s = g.nav_.selected();
+        if (s >= 0 && s < static_cast<int>(g.children_.size())) {
+            const std::string& name = g.children_[static_cast<size_t>(s)]->name;
+            paths.push_back(base.empty() ? name : base + "/" + name);
+        }
+    }
+
+    return paths;  // No pruning for transfer (keep all paths, galleries included)
+}
+
+// Phase 78 Task 7 Fix: Clear selection to avoid stale selection after transfers.
+void clear_grid_selection(GalleryGrid& g)
+{
+    g.sel_.clear();
 }
 
 void GalleryGrid::handle_naming_key(const SDL_Event& e)
@@ -772,7 +818,7 @@ void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
     }
 
     const uint64_t file_sz = vault::vault_file_bytes(g.vault_);
-    const uint64_t waste_sz = g.vault_.wasted_bytes();
+    const uint64_t waste_sz = vault::vault_wasted_bytes(g.vault_);
     // Only show the compact option if there's significant waste to reclaim.
     if (should_display_waste(waste_sz, file_sz)) {
         g.naming_.confirm_compact = true;
@@ -918,6 +964,7 @@ bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& 
             return true;
         case SDLK_X: g.start_export(); return true;
         case SDLK_M:
+            if (g.embedded_) return false;  // Phase 78: not handled in embedded mode
             if (key.mod & SDL_KMOD_SHIFT) { g.start_combine(); return true; }
             g.start_transfer();
             return true;
@@ -940,6 +987,21 @@ bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& 
     }
 }
 
+// F3 (enter split view; Phase 78), extracted from handle_key_down to keep its
+// cognitive complexity under cpp:S3776. Returns true when the key was consumed
+// (embedded panes swallow F3 — the host screen owns split-view toggling).
+bool handle_f3_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
+{
+    if (key.key != SDLK_F3) return false;
+    if (g.embedded_) return true;
+    if (layout_w(g) < ui::MIN_SPLIT_WIDTH) {
+        g.status_ = "Window too narrow for split view (needs 900 px)";
+    } else {
+        g.request(NavKind::ToDualGallery);
+    }
+    return true;
+}
+
 void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
 {
     // Detail-panel handling (Ctrl+Up/Down scroll, D toggle). Extracted to reduce
@@ -953,11 +1015,11 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         handle_delete_key(*this);
         return;
     }
-    if ((key.key == SDLK_C) && (key.mod & SDL_KMOD_SHIFT)) {
+    if ((key.key == SDLK_C) && (key.mod & SDL_KMOD_SHIFT) && !embedded_) {
         handle_shift_c_key(*this, key);
         return;
     }
-    if (key.key == SDLK_D && (key.mod & SDL_KMOD_CTRL) != 0) {
+    if (key.key == SDLK_D && (key.mod & SDL_KMOD_CTRL) != 0 && !embedded_) {
         handle_ctrl_d_key(*this);
         return;
     }
@@ -965,12 +1027,16 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
         request(NavKind::ToImportStatus);
         return;
     }
-    if (is_quick_switch_key(key)) { quick_switch_.open(); return; }
+    if (is_quick_switch_key(key) && !embedded_) {
+        quick_switch_.open();
+        return;
+    }
     // Shortcut-key dispatch (L/X/M/R/SPACE/G/B/F/T/S/U); extracted to reduce complexity
     if (gallery_grid_handle_shortcut_keys(*this, key)) { return; }
 
     if (is_search_key(key)) { search_.open(); return; }
     if (is_advanced_search_key(key)) { request(NavKind::ToAdvancedSearch); return; }
+    if (handle_f3_key(*this, key)) { return; }
 
     using enum InputAction;
     switch (map_key(key.key, key.mod)) {
@@ -1164,7 +1230,7 @@ void GalleryGrid::handle_event(const SDL_Event& e)
             break;
         }
         case SDL_EVENT_MOUSE_WHEEL: {
-            if (detail_panel_hit(detail_.panel.open, static_cast<float>(win_.width()), e.wheel.mouse_x)) {
+            if (detail_panel_hit(detail_.panel.open, layout_w(*this), e.wheel.mouse_x)) {
                 scroll_detail_panel(detail_.panel, e.wheel.y);
                 break;
             }
@@ -1461,7 +1527,7 @@ void GalleryGrid::do_zip_import(const std::filesystem::path& zip_path)
 void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun)
 {
     // User pressed Esc during import — check if waste hints are needed (Phase 26).
-    const uint64_t waste = g.vault_.wasted_bytes();
+    const uint64_t waste = vault::vault_wasted_bytes(g.vault_);
     if (should_hint_cancelled_import_waste(waste)) {
         g.status_ = std::format("Import cancelled — {} reclaimable, press [Shift+C]",
                                format_size(waste));
@@ -1478,6 +1544,56 @@ bool vault_busy(const GalleryGrid& g)
 GalleryView current_gallery_view(const GalleryGrid& g) { return g.view_; }
 
 std::string current_gallery_path(const GalleryGrid& g) { return g.nav_.path(); }
+
+// Phase 78: snapshot one pane's exact configuration.
+PaneState capture_pane_state(const GalleryGrid& g)
+{
+    PaneState s;
+    s.path = current_gallery_path(g);
+    s.selected = g.nav_.selected();
+    s.scroll = g.scroll_;
+    s.view = current_gallery_view(g);
+    s.detail_open = g.detail_.panel.open;
+    s.selected_tiles = g.sel_.indices();
+    return s;
+}
+
+// Phase 78: rebuild a pane from a snapshot. Grid is constructed at s.path/s.selected/s.view
+// via GridLocation; this function refines scroll, detail state, and multi-selection.
+void restore_pane_state(GalleryGrid& g, const PaneState& s)
+{
+    // Clamp scroll to valid range, accounting for current content height.
+    const float bottom = content_bottom(g);
+
+    float content_height = 0.0f;
+    if (g.view_ == GalleryView::List) {
+        content_height = OY + LIST_HEADER + static_cast<float>(g.children_.size()) * ROW_H;
+    } else {
+        // Grid view: calculate from column count and total rows
+        const float cell = cell_size_for(g.view_);
+        const float W = content_width(g);
+        const int cols = grid_columns(W - 2 * OX, cell, GAP);
+        const int total_rows = cols > 0 ? (static_cast<int>(g.children_.size()) + cols - 1) / cols : 0;
+        content_height = OY + static_cast<float>(total_rows) * (cell + GAP);
+    }
+
+    g.scroll_ = s.scroll;
+    g.scroll_ = ui::clamp_scroll(g.scroll_, content_height, bottom);
+
+    // Re-apply detail panel open state.
+    g.detail_.panel.open = s.detail_open;
+
+    // Re-select tiles from s.selected_tiles, dropping out-of-range indices.
+    const auto count = static_cast<int>(g.children_.size());
+    for (int idx : s.selected_tiles) {
+        if (idx >= 0 && idx < count) {
+            g.sel_.toggle(idx);
+        }
+    }
+
+    // Rebuild detail panel content.
+    rebuild_detail(g);
+}
 
 void poll_file_job(GalleryGrid& g)
 {
@@ -1641,7 +1757,8 @@ void poll_pending_pickers(GalleryGrid& g)
 {
     // The import picker shares dialogs_.file with the transfer's keyfile picker, so
     // only poll it when no transfer is active (don't steal the keyfile result).
-    if (!g.transfer_.active()) {
+    // Phase 78: gate pumping when embedded mode disables dialog polling.
+    if (!g.transfer_.active() && g.pump_dialogs_) {
         g.pump_import();
         g.pump_zip_import();
         g.pump_folder_import();
@@ -1770,12 +1887,18 @@ void GalleryGrid::update(double dt)
 
 std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
 {
+    // Build Navigate entries; F3 (split view) only shown when not embedded (Phase 78)
+    std::vector<HelpEntry> nav_entries{
+        {"Enter", "Open"}, {"Space", "Select (export/move)"},
+        {"Ctrl+A", "Select all / none"},
+        {"Esc", "Back"}, {"`", "Switch vault"}, {"L", "Cycle view: list / grid size"},
+    };
+    if (!embedded_) {
+        nav_entries.emplace_back("F3", "Split view (side-by-side)");
+    }
+
     return {
-        {"Navigate", {
-            {"Enter", "Open"}, {"Space", "Select (export/move)"},
-            {"Ctrl+A", "Select all / none"},
-            {"Esc", "Back"}, {"`", "Switch vault"}, {"L", "Cycle view: list / grid size"},
-        }},
+        {"Navigate", nav_entries},
         {"Search & tags", {
             {"/", "Search"}, {"Shift+/ (?)", "Advanced search"},
             {"G", "Edit tags (2+ selected: bulk add/remove)"}, {"Shift+G", "Import a tag list"},
@@ -1797,10 +1920,31 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
     };
 }
 
+void GalleryGrid::set_layout_override(float w, float h)
+{
+    layout_w_ = w;
+    layout_h_ = h;
+}
+
+void GalleryGrid::set_embedded(bool on)
+{
+    embedded_ = on;
+}
+
+bool GalleryGrid::embedded() const
+{
+    return embedded_;
+}
+
+void GalleryGrid::set_dialog_pump(bool on)
+{
+    pump_dialogs_ = on;
+}
+
 void GalleryGrid::render(gfx::Renderer& r)
 {
-    const auto W = static_cast<float>(win_.width());
-    const auto H = static_cast<float>(win_.height());
+    const auto W = layout_w(*this);
+    const auto H = layout_h(*this);
 
     // While a background file op runs, the worker thread owns the vault — drawing tiles
     // would decrypt thumbnails on this thread and race it. Show only the progress
@@ -1834,7 +1978,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     // Show waste hint if it exceeds display threshold (Phase 26).
     // Combine with selection count on the same line to avoid collision.
     const uint64_t file_sz = vault::vault_file_bytes(vault_);
-    const uint64_t waste_sz = vault_.wasted_bytes();
+    const uint64_t waste_sz = vault::vault_wasted_bytes(vault_);
     const bool show_waste = should_display_waste(waste_sz, file_sz);
     const bool show_selection = !sel_.empty();
 
@@ -1897,7 +2041,7 @@ void GalleryGrid::render(gfx::Renderer& r)
             r.draw_text(font_, px + (pw - tw) / 2, y, s, c);
         };
 
-        const uint64_t compact_waste = vault_.wasted_bytes();
+        const uint64_t compact_waste = vault::vault_wasted_bytes(vault_);
         const std::string waste_str = format_size(compact_waste);
 
         centered("Compact vault?", py + 28, TEXT);
@@ -2230,6 +2374,13 @@ void GalleryGrid::start_hover_animation(int tile)
     // All checks passed; keep the playback alive.
     hover_anim_ = std::move(playback);
     hover_anim_tile_ = tile;
+}
+
+// Phase 78: Navigate a pane to an absolute gallery path (used in walk-up on vault change).
+// Wraps jump_to_gallery for DualGalleryScreen's on_vault_changed walk-up rule.
+void jump_pane_to(GalleryGrid& g, const std::string& path)
+{
+    g.jump_to_gallery(path);
 }
 
 } // namespace ui

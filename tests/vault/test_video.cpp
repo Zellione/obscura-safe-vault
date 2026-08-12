@@ -246,9 +246,9 @@ TEST(favorite_video_appears_in_favorites)
 
     REQUIRE(v.create_gallery("clips") == vault::VaultResult::Ok);
     REQUIRE(v.add_video("clips", video_bytes, "a.mp4", 4096) == vault::VaultResult::Ok);
-    REQUIRE(v.toggle_favorite("clips/a.mp4") == vault::VaultResult::Ok);
+    REQUIRE(vault::toggle_favorite_node(v, "clips/a.mp4") == vault::VaultResult::Ok);
 
-    auto favs = v.list_favorite_images();
+    auto favs = vault::list_favorite_images(v);
     bool found = false;
     for (const auto& h : favs) {
         if (h.name == "a.mp4") { found = true; break; }

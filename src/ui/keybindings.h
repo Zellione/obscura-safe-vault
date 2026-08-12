@@ -41,6 +41,18 @@ enum class BracketKey { None, Decrease, Increase };
     }
 }
 
+// True when no CHORDING modifier is held — i.e. the key press is a bare shortcut.
+//
+// SDL3 reports the LOCK modifiers (Num/Caps/Scroll) in every key event's `mod`
+// field (they live in the same `keyboard->modstate` word as Shift/Ctrl/Alt), so
+// testing `key.mod == 0` silently disables a bare-key shortcut for every user who
+// has Num Lock on. Mask the locks out and reject only Shift/Ctrl/Alt/GUI/AltGr.
+[[nodiscard]] constexpr bool is_unmodified(SDL_Keymod mod) noexcept
+{
+    constexpr SDL_Keymod locks = SDL_KMOD_NUM | SDL_KMOD_CAPS | SDL_KMOD_SCROLL;
+    return (mod & ~locks) == SDL_KMOD_NONE;
+}
+
 enum class VolumeDir { None, Down, Up };
 
 // Resolve a key press to a video-volume adjustment, robustly across layouts. It

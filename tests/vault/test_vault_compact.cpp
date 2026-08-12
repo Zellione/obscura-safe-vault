@@ -115,16 +115,16 @@ TEST(wasted_bytes_tracks_orphaned_chunks)
     vault::Vault v;
     REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
             == vault::VaultResult::Ok);
-    CHECK_EQ(v.wasted_bytes(), 0u);  // fresh vault: header + live index only
+    CHECK_EQ(vault::vault_wasted_bytes(v), 0u);  // fresh vault: header + live index only
 
     const size_t img_size = 100 * 1024;
     REQUIRE(v.add_image("", random_payload(img_size), "a.bin") == vault::VaultResult::Ok);
     REQUIRE(v.add_image("", random_payload(img_size), "b.bin") == vault::VaultResult::Ok);
 
-    const uint64_t before = v.wasted_bytes();  // superseded index blobs only
+    const uint64_t before = vault::vault_wasted_bytes(v);  // superseded index blobs only
     REQUIRE(v.remove_image("", "a.bin") == vault::VaultResult::Ok);
     // The orphaned chunk (incompressible 100 KiB + AEAD framing) is now waste.
-    CHECK_TRUE(v.wasted_bytes() >= before + img_size);
+    CHECK_TRUE(vault::vault_wasted_bytes(v) >= before + img_size);
 }
 
 TEST(compact_reclaims_space_and_preserves_remaining_images)
@@ -148,7 +148,7 @@ TEST(compact_reclaims_space_and_preserves_remaining_images)
     const uint64_t size_after = size_on_disk(tv.path);
 
     CHECK_TRUE(size_after + 200 * 1024 <= size_before);  // both dead chunks gone
-    CHECK_EQ(v.wasted_bytes(), 0u);
+    CHECK_EQ(vault::vault_wasted_bytes(v), 0u);
 
     // Still usable in-session after the rewrite...
     auto kids = v.list("");
@@ -247,7 +247,7 @@ TEST(remove_image_below_threshold_keeps_orphan)
     // 4 KiB of waste is far below AUTO_COMPACT_MIN_WASTE: the orphan stays
     // until an explicit compact() (rewriting the vault per tiny delete would
     // cost more I/O than it reclaims).
-    CHECK_TRUE(v.wasted_bytes() >= 4096);
+    CHECK_TRUE(vault::vault_wasted_bytes(v) >= 4096);
 }
 
 TEST(compact_requires_unlocked_vault)
@@ -261,7 +261,7 @@ TEST(compact_requires_unlocked_vault)
     vault::Vault v2;
     REQUIRE(vault::Vault::open(tv.str(), v2) == vault::VaultResult::Ok);
     CHECK_EQ(v2.compact(), vault::VaultResult::Locked);
-    CHECK_EQ(v2.wasted_bytes(), 0u);  // unknown while locked
+    CHECK_EQ(vault::vault_wasted_bytes(v2), 0u);  // unknown while locked
 }
 
 // Phase 15 PR2: video chunks must survive compaction (regression test for
@@ -431,7 +431,7 @@ TEST(compact_cancel_before_start_is_noop)
     CHECK_EQ(size_before, size_after);
 
     // Waste is still there (not reclaimed).
-    CHECK_TRUE(v.wasted_bytes() > 0);
+    CHECK_TRUE(vault::vault_wasted_bytes(v) > 0);
 }
 
 TEST(compact_progress_nullptr_succeeds)
@@ -446,7 +446,7 @@ TEST(compact_progress_nullptr_succeeds)
 
     // Compact without progress struct (original behavior).
     REQUIRE(v.compact(nullptr) == vault::VaultResult::Ok);
-    CHECK_EQ(v.wasted_bytes(), 0u);
+    CHECK_EQ(vault::vault_wasted_bytes(v), 0u);
 }
 
 // --- in-place hole-punch reclamation (Vault::reclaim) -------------------------
@@ -471,7 +471,7 @@ TEST(reclaim_preserves_remaining_images_and_survives_reopen)
         REQUIRE(v.remove_image("", "gone1.bin") == vault::VaultResult::Ok);
         REQUIRE(v.remove_image("", "gone2.bin") == vault::VaultResult::Ok);
 
-        REQUIRE(v.reclaim() == vault::VaultResult::Ok);
+        REQUIRE(vault::vault_reclaim(v) == vault::VaultResult::Ok);
 
         // The surviving image still decrypts correctly, offsets unchanged.
         const auto kids = v.list("");
@@ -516,7 +516,7 @@ TEST(reclaim_releases_disk_blocks_without_shrinking_the_file)
     // logical size AFTER it so we can prove reclaim() leaves that length alone.
     const uint64_t logical_pre = size_on_disk(tv.path);
 
-    REQUIRE(v.reclaim() == vault::VaultResult::Ok);  // idempotent even if the delete auto-reclaimed
+    REQUIRE(vault::vault_reclaim(v) == vault::VaultResult::Ok);  // idempotent even if the delete auto-reclaimed
 
     // Physical allocation has dropped by roughly the orphaned 512 KiB chunk...
     CHECK_TRUE(allocated_on_disk(tv.path) + 256 * 1024 <= alloc_dense);
@@ -529,7 +529,7 @@ TEST(reclaim_releases_disk_blocks_without_shrinking_the_file)
 TEST(reclaim_on_a_locked_vault_reports_locked)
 {
     vault::Vault v;
-    CHECK_EQ(v.reclaim(), vault::VaultResult::Locked);
+    CHECK_EQ(vault::vault_reclaim(v), vault::VaultResult::Locked);
 }
 
 // Phase 60: in-place compact must not need a second copy of the vault. The
@@ -574,7 +574,7 @@ TEST(compact_in_place_never_creates_a_second_file)
     // Bounded residual: dead index blobs interleaved between the surviving
     // 64 KiB images form stuck holes smaller than any movable unit — the spec's
     // crash-safe bounded residual, hole-punched where supported (Linux).
-    CHECK_TRUE(v.wasted_bytes() <= 32 * 1024);
+    CHECK_TRUE(vault::vault_wasted_bytes(v) <= 32 * 1024);
 }
 
 // The stuck-hole case: a small hole in front of larger units cannot be packed
@@ -601,7 +601,7 @@ TEST(compact_stuck_hole_leaves_bounded_residual_and_intact_data)
 
     // Residual bound: the stuck hole (~4 KiB + AEAD framing) plus superseded
     // index blobs too small to host any 256 KiB unit, plus commit slack.
-    CHECK_TRUE(v.wasted_bytes() <= 32 * 1024);
+    CHECK_TRUE(vault::vault_wasted_bytes(v) <= 32 * 1024);
     auto kids = v.list("");
     REQUIRE(kids.size() == 3);
     for (const auto* k : kids) {
@@ -696,7 +696,7 @@ TEST(compact_cancel_keeps_partial_progress_and_rerun_converges)
 
     // Rerun (no cancel) reclaims everything that remains.
     REQUIRE(v.compact() == vault::VaultResult::Ok);
-    CHECK_EQ(v.wasted_bytes(), 0u);
+    CHECK_EQ(vault::vault_wasted_bytes(v), 0u);
     REQUIRE(v.read_image(*v.list("")[0], out) == vault::VaultResult::Ok);
     CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(keep));
 }

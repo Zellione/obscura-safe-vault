@@ -20,8 +20,10 @@ void safe_println(std::FILE* stream, std::format_string<Args...> fmt, Args&&... 
 {
     try {
         std::println(stream, fmt, std::forward<Args>(args)...);
-    } catch (...) {
+    } catch (const std::exception&) {
         // Deliberately swallowed: a failed diagnostic print must never crash.
+        // std::println can throw std::system_error (I/O failure) or
+        // std::format_error (format string issues); both derive from std::exception.
     }
 }
 

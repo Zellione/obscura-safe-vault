@@ -394,7 +394,7 @@ TEST(transfer_gallery_carries_gallery_favorites) {
 
     // Source setup: gallery "fav_gal" marked as favorite, with media
     REQUIRE(src.create_gallery("fav_gal") == Ok);
-    REQUIRE(src.toggle_favorite("fav_gal") == Ok);  // toggle once to set favorite
+    REQUIRE(vault::toggle_favorite_node(src, "fav_gal") == Ok);  // toggle once to set favorite
 
     vault::StagedThumb no_thumb;
     auto img = pattern(64, 21);

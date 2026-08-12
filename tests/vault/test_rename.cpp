@@ -84,7 +84,7 @@ TEST(rename_gallery_updates_name_children_unaffected)
     REQUIRE(vault::Vault::create(tv.str(), bytes("p"), {}, kKdf, v) == Ok);
     REQUIRE(v.create_gallery("Trips") == Ok);
     REQUIRE(v.add_image("Trips", blob(500, 2), "a.jpg") == Ok);
-    REQUIRE(v.toggle_favorite("Trips") == Ok);
+    REQUIRE(vault::toggle_favorite_node(v, "Trips") == Ok);
 
     REQUIRE(vault::rename_node(v, "", "Trips", "Journeys") == Ok);
     CHECK(find_child(v, "", "Trips") == nullptr);

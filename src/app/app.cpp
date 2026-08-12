@@ -20,6 +20,7 @@
 #include "platform/volume_pref.h"
 #include "platform/perf.h"
 #include "ui/advanced_search_screen.h"
+#include "ui/dual_gallery.h"
 #include "ui/duplicates_screen.h"
 #include "ui/favorites_galleries.h"
 #include "ui/favorites_images.h"
@@ -155,8 +156,9 @@ void App::promote_pending()
     if (vault_state_.active) vault_state_.active->lock();                 // lock-on-switch: wipe the old key
     import_ui_.lane.reset();                               // Phase 73: lock stops the lane, reset destroys it
     second_.session.wipe();                                // Phase 66: vault switch locks the warm slot too
-    adv_session_   = {};                          // new vault session -> fresh advanced search
-    session_.reset();                             // new vault session -> fresh gallery/viewer memory
+    sessions_.adv   = {};                          // new vault session -> fresh advanced search
+    sessions_.dual.reset();                        // Phase 78: new vault session -> fresh dual-pane state
+    sessions_.gallery.reset();                             // new vault session -> fresh gallery/viewer memory
     keep_unlocked_ = false;                       // new session always starts with auto-lock on
     vault_state_.active        = std::move(vault_state_.pending);
     vault_state_.active_path   = std::move(vault_state_.pending_path);
@@ -206,20 +208,45 @@ void App::promote_pending()
 void App::to_gallery(const std::string& path, int selected, bool explicit_index)
 {
     state_  = State::Browsing;
-    const int seed = explicit_index ? selected : session_.recall(path);
+    const int seed = explicit_index ? selected : sessions_.gallery.recall(path);
     screen_ = std::make_unique<ui::GalleryGrid>(
-        window_, font_, *vault_state_.active, *cache_,
+        ui::GalleryGrid::GridInitContext{window_, font_, *vault_state_.active, *cache_},
         ui::GalleryGrid::GridDialogs{dialog_, folder_dialog_},
         ui::GalleryGrid::GridVaultCtx{registry_, vault_state_.active_path, &second_.session},
-        session_, import_ui_.queue,
-        ui::GridLocation{path, seed, session_.view});
+        sessions_.gallery, import_ui_.queue,
+        ui::GridLocation{path, seed, sessions_.gallery.view});
+    screen_->on_enter();
+}
+
+void App::to_dual_gallery()
+{
+    state_ = State::Browsing;
+    // Phase 78: on first entry to split view, seed both panes with the current
+    // gallery path. On subsequent visits (via F3 toggle), pane states are
+    // preserved in sessions_.dual if has_config is true.
+    if (!sessions_.dual.has_config) {
+        // Capture the path from the current (single) gallery view before swap.
+        // This happens only on first F3 press; subsequent F3 presses restore the
+        // saved configuration if has_config is true.
+        if (const auto* grid = dynamic_cast<const ui::GalleryGrid*>(screen_.get())) {
+            const std::string here = ui::current_gallery_path(*grid);
+            sessions_.dual.pane[0].path = here;
+            sessions_.dual.pane[1].path = here;
+        }
+    }
+    sessions_.dual.split_active = true;  // entering split view
+    screen_ = std::make_unique<ui::DualGalleryScreen>(
+        ui::GalleryGrid::GridInitContext{window_, font_, *vault_state_.active, *cache_},
+        ui::GalleryGrid::GridDialogs{dialog_, folder_dialog_},
+        ui::GalleryGrid::GridVaultCtx{registry_, vault_state_.active_path, &second_.session},
+        sessions_.gallery, import_ui_.queue, sessions_.dual);
     screen_->on_enter();
 }
 
 void App::enter_viewer(std::unique_ptr<ui::ImageViewer> viewer)
 {
     viewer->on_enter();
-    ui::apply_video_resume(*viewer, session_);   // resume a matching video, paused
+    ui::apply_video_resume(*viewer, sessions_.gallery);   // resume a matching video, paused
     state_  = State::Viewing;
     screen_ = std::move(viewer);
 }
@@ -228,7 +255,7 @@ void App::to_viewer(const std::string& gallery_path, int index)
 {
     enter_viewer(std::make_unique<ui::ImageViewer>(
         window_, font_, *vault_state_.active, *cache_,
-        ui::ImageViewer::Context{folder_dialog_, registry_, import_ui_.queue, vault_state_.active_path, session_.strip_side},
+        ui::ImageViewer::Context{folder_dialog_, registry_, import_ui_.queue, vault_state_.active_path, sessions_.gallery.strip_side},
         ui::ImageViewer::Album::gallery(gallery_path), index));
 }
 
@@ -239,7 +266,7 @@ void App::to_favorite_images()
         window_, font_, *vault_state_.active, *cache_, registry_,
         ui::FavoritesScreen::CollectionOps{dialog_, folder_dialog_, import_ui_.queue,
                                            &second_.session, vault_state_.active_path});
-    screen->set_detail_open(session_.detail_open);
+    screen->set_detail_open(sessions_.gallery.detail_open);
     screen_ = std::move(screen);
     screen_->on_enter();
 }
@@ -251,7 +278,7 @@ void App::to_favorite_galleries()
         window_, font_, *vault_state_.active, registry_,
         ui::FavoritesScreen::CollectionOps{dialog_, folder_dialog_, import_ui_.queue,
                                            &second_.session, vault_state_.active_path});
-    screen->set_detail_open(session_.detail_open);
+    screen->set_detail_open(sessions_.gallery.detail_open);
     screen_ = std::move(screen);
     screen_->on_enter();
 }
@@ -264,7 +291,7 @@ void App::to_favorite_viewer(int index)
     ui::ImageViewer::Album album;
     album.from_collection = true;
     album.back            = ui::Nav{ui::NavKind::ToFavoriteImages, {}, 0};
-    auto favs = vault_state_.active->list_favorite_images();
+    auto favs = vault::list_favorite_images(*vault_state_.active);
     album.images.reserve(favs.size());
     album.paths.reserve(favs.size());
     for (auto& h : favs) {
@@ -274,7 +301,7 @@ void App::to_favorite_viewer(int index)
 
     enter_viewer(std::make_unique<ui::ImageViewer>(
         window_, font_, *vault_state_.active, *cache_,
-        ui::ImageViewer::Context{folder_dialog_, registry_, import_ui_.queue, vault_state_.active_path, session_.strip_side},
+        ui::ImageViewer::Context{folder_dialog_, registry_, import_ui_.queue, vault_state_.active_path, sessions_.gallery.strip_side},
         std::move(album), index));
 }
 
@@ -282,11 +309,11 @@ void App::to_advanced_search()
 {
     state_  = State::Browsing;
     screen_ = std::make_unique<ui::AdvancedSearchScreen>(
-        window_, font_, *vault_state_.active, *cache_, adv_session_,
+        window_, font_, *vault_state_.active, *cache_, sessions_.adv,
         ui::CollectionBatchOps::Deps{*vault_state_.active, vault_state_.active_path, registry_,
                                      dialog_, window_, &second_.session, folder_dialog_,
                                      import_ui_.queue},
-        adv_session_.detail_open);
+        sessions_.adv.detail_open);
     screen_->on_enter();
 }
 
@@ -305,7 +332,7 @@ void App::to_tag_galleries(const std::string& tag)
         window_, font_, *vault_state_.active, registry_, tag,
         ui::FavoritesScreen::CollectionOps{dialog_, folder_dialog_, import_ui_.queue,
                                            &second_.session, vault_state_.active_path});
-    screen->set_detail_open(session_.detail_open);
+    screen->set_detail_open(sessions_.gallery.detail_open);
     screen_ = std::move(screen);
     screen_->on_enter();
 }
@@ -317,7 +344,7 @@ void App::to_tag_images(const std::string& tag)
         window_, font_, *vault_state_.active, *cache_, registry_, tag,
         ui::FavoritesScreen::CollectionOps{dialog_, folder_dialog_, import_ui_.queue,
                                            &second_.session, vault_state_.active_path});
-    screen->set_detail_open(session_.detail_open);
+    screen->set_detail_open(sessions_.gallery.detail_open);
     screen_ = std::move(screen);
     screen_->on_enter();
 }
@@ -339,7 +366,7 @@ void App::to_tag_viewer(const std::string& tag, int index)
 
     enter_viewer(std::make_unique<ui::ImageViewer>(
         window_, font_, *vault_state_.active, *cache_,
-        ui::ImageViewer::Context{folder_dialog_, registry_, import_ui_.queue, vault_state_.active_path, session_.strip_side},
+        ui::ImageViewer::Context{folder_dialog_, registry_, import_ui_.queue, vault_state_.active_path, sessions_.gallery.strip_side},
         std::move(album), index));
 }
 
@@ -354,6 +381,11 @@ void App::to_import_status()
     if (const auto* grid = dynamic_cast<const ui::GalleryGrid*>(screen_.get())) {
         // GalleryGrid: return to the same path at index 0
         back = ui::Nav{ToGallery, ui::current_gallery_path(*grid), 0};
+    } else if (const auto* dual = dynamic_cast<const ui::DualGalleryScreen*>(screen_.get())) {
+        // Phase 78: DualGalleryScreen: return to the active pane's path via ToGallery,
+        // which will re-enter split view if split_active is true (set by on_exit).
+        (void)dual;
+        back = ui::Nav{ToGallery, sessions_.dual.pane[static_cast<std::size_t>(sessions_.dual.active_pane)].path, 0};
     } else if (dynamic_cast<const ui::ImageViewer*>(screen_.get())) {
         // ImageViewer: return to the gallery root
         back = ui::Nav{ToGallery, {}, 0};
@@ -376,8 +408,13 @@ void App::to_duplicates()
     if (!vault_state_.active) return;
 
     ui::Nav back{ToGallery, {}, 0};
-    if (const auto* grid = dynamic_cast<const ui::GalleryGrid*>(screen_.get()))
+    if (const auto* grid = dynamic_cast<const ui::GalleryGrid*>(screen_.get())) {
         back = ui::Nav{ToGallery, ui::current_gallery_path(*grid), 0};
+    } else if (const auto* dual = dynamic_cast<const ui::DualGalleryScreen*>(screen_.get())) {
+        // Phase 78: DualGalleryScreen: return to the active pane's path.
+        (void)dual;
+        back = ui::Nav{ToGallery, sessions_.dual.pane[static_cast<std::size_t>(sessions_.dual.active_pane)].path, 0};
+    }
 
     state_  = State::Browsing;
     screen_ = std::make_unique<ui::DuplicatesScreen>(
@@ -776,17 +813,21 @@ bool App::pump_events(bool animating)
 void App::capture_session_state()
 {
     // Snapshot the outgoing screen's view/strip-side/video-position into
-    // session_ before it is destroyed (Phase 39 Part 2) — must run before
+    // sessions_.gallery before it is destroyed (Phase 39 Part 2) — must run before
     // on_exit(), which tears down ImageViewer's live video_.
     if (const auto* grid = dynamic_cast<const ui::GalleryGrid*>(screen_.get())) {
-        session_.view = ui::current_gallery_view(*grid);
+        sessions_.gallery.view = ui::current_gallery_view(*grid);
     } else if (const auto* viewer = dynamic_cast<const ui::ImageViewer*>(screen_.get())) {
-        session_.strip_side = ui::current_strip_side(*viewer);
-        ui::capture_video_resume(*viewer, session_);
+        sessions_.gallery.strip_side = ui::current_strip_side(*viewer);
+        ui::capture_video_resume(*viewer, sessions_.gallery);
     } else if (const auto* fav = dynamic_cast<const ui::FavoritesScreen*>(screen_.get())) {
-        session_.detail_open = ui::current_detail_open(*fav);
+        sessions_.gallery.detail_open = ui::current_detail_open(*fav);
     } else if (const auto* adv = dynamic_cast<const ui::AdvancedSearchScreen*>(screen_.get())) {
-        adv_session_.detail_open = ui::current_detail_open(*adv);
+        sessions_.adv.detail_open = ui::current_detail_open(*adv);
+    } else if (const auto* dual = dynamic_cast<const ui::DualGalleryScreen*>(screen_.get())) {
+        // Phase 78: DualGalleryScreen::on_exit() already snapshots both panes into
+        // sessions_.dual; no additional capture needed here.
+        (void)dual;  // explicitly unused for -Wunused-parameter
     }
 }
 
@@ -831,8 +872,20 @@ bool App::apply_nav()
     switch (nav.kind) {
         case ToGallery:
             if (state_ == State::Locked) promote_pending();   // unlock-screen success
+            // Phase 78: viewer round-trip back to split view. If the viewer was
+            // launched from a dual-pane screen and split is still active, restore
+            // that pane's exact position instead of going to single-grid mode.
+            if (from_viewer && sessions_.dual.split_active) {
+                sessions_.dual.pane[static_cast<std::size_t>(sessions_.dual.active_pane)].path = nav.path;
+                sessions_.dual.pane[static_cast<std::size_t>(sessions_.dual.active_pane)].selected = nav.index;
+                to_dual_gallery();
+                return true;
+            }
             if (vault_state_.active) to_gallery(nav.path, nav.index, from_viewer);
             else         to_manager();                        // defensive: nothing unlocked
+            return true;
+        case ToDualGallery:
+            to_dual_gallery();
             return true;
         case ToViewer:            to_viewer(nav.path, nav.index);      return true;
         case ToFavoriteImages:    to_favorite_images();                return true;
@@ -864,7 +917,8 @@ bool App::apply_nav()
         case LockActive:
             keep_unlocked_ = false;
             second_.session.wipe();                          // Phase 66: locking up means locking everything
-            session_.reset();                     // Phase 39 Part 2: fresh session on lock
+            sessions_.dual.reset();                // Phase 78: fresh dual-pane state on lock
+            sessions_.gallery.reset();                     // Phase 39 Part 2: fresh session on lock
             import_ui_.queue.end_session();          // Phase 50: flush before lock
             if (vault_state_.active) {
                 vault_state_.active->lock();                // Phase 73: lock stops the lane
@@ -920,7 +974,8 @@ bool App::maybe_auto_lock(double dt)
         import_ui_.queue.set_exclusive(false);
     }
     if (screen_) screen_->on_exit();
-    session_.reset();                                  // Phase 39 Part 2: fresh session on idle lock
+    sessions_.dual.reset();                       // Phase 78: fresh dual-pane state on idle lock
+    sessions_.gallery.reset();                                  // Phase 39 Part 2: fresh session on idle lock
     import_ui_.queue.end_session();                       // Phase 50: flush before lock
     vault_state_.active->lock();                       // Phase 73: lock stops the lane
     import_ui_.lane.reset();                           // then destroy it

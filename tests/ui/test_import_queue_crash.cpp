@@ -126,7 +126,7 @@ TEST(import_queue_mid_batch_crash_recovers)
 
     // Check wasted_bytes: log the value but don't assert a magnitude
     // (batch commits create legitimate waste from superseded index blobs)
-    const auto wasted = v2.wasted_bytes();
+    const auto wasted = vault::vault_wasted_bytes(v2);
     std::println("[test] crash-recovery: committed={}, done_at_crash={}, total={}, wasted={}",
                 committed_count, done_at_crash, total_enqueued, wasted);
 

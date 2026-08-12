@@ -263,6 +263,8 @@ public:
     // to keep Vault under the cpp:S1448 method cap.
     friend SortKey gallery_sort_key(const Vault& v, std::string_view gallery_path);
     friend VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey key);
+    // Phase 78: check if a gallery path exists in the vault (for on_vault_changed walk-up).
+    friend bool gallery_exists(const Vault& v, std::string_view gallery_path);
 
     // vault_settings/set_vault_settings (Phase 49) are free friends, not members,
     // for the same cpp:S1448 method-cap reason as gallery_sort_key/set_gallery_sort.
@@ -358,23 +360,6 @@ public:
     // pre-Phase-50 behavior. Main-thread only.
     void set_commit_router(CommitLane* lane) noexcept { commit_router_ = lane; }
 
-    // Flip a node's favorite flag (gallery OR image). Persisted via the crash-safe
-    // index swap. Locked if not unlocked; NotFound if node_path doesn't resolve.
-    [[nodiscard]] VaultResult toggle_favorite(std::string_view node_path);
-
-    // Every favorited image (resp. gallery) across the whole tree, flat. Each hit's
-    // `path` is the full slash-path; `node` is valid until the next mutating call.
-    // `effective_tags` is left empty (favorites lists don't compute the tag cascade).
-    // Empty while locked.
-    [[nodiscard]] std::vector<SearchHit> list_favorite_images() const;
-    [[nodiscard]] std::vector<SearchHit> list_favorite_galleries() const;
-
-    // Reclaimable bytes: the part of the data region not referenced by any live
-    // image/thumbnail chunk or the active index blob (orphaned chunks from
-    // deletes plus superseded index blobs). 0 while locked — the index is
-    // needed to know what is live.
-    [[nodiscard]] uint64_t wasted_bytes() const;
-
     // Compact the vault IN PLACE (Phase 60): pack live chunks down into dead
     // space (deleted chunks + superseded index blobs), commit the index in
     // batches via the crash-safe slot swap, write the final index blob just
@@ -406,6 +391,14 @@ public:
     // collection album paths after a vault mutation.
     [[nodiscard]] IndexNode*       resolve_node(std::string_view path);
     [[nodiscard]] const IndexNode* resolve_node(std::string_view path) const;
+
+    // Flip a node's favorite flag (gallery OR image), list favorites, query waste,
+    // and reclaim space — kept as free friends to stay under the cpp:S1448 method cap.
+    friend VaultResult toggle_favorite_node(Vault& v, std::string_view node_path);
+    friend std::vector<SearchHit> list_favorite_images(const Vault& v);
+    friend std::vector<SearchHit> list_favorite_galleries(const Vault& v);
+    friend uint64_t vault_wasted_bytes(const Vault& v);
+    friend VaultResult vault_reclaim(Vault& v);
 
 private:
     // Best-effort space reclamation after a delete, gated on AUTO_COMPACT_*:
@@ -515,6 +508,28 @@ private:
 // Used by the UI to display waste/compaction information (Phase 26).
 [[nodiscard]] uint64_t vault_file_bytes(const Vault& v) noexcept;
 
+// Flip a node's favorite flag (gallery OR image). Persisted via the crash-safe
+// index swap. Locked if not unlocked; NotFound if node_path doesn't resolve.
+// Free friend to keep Vault under the cpp:S1448 method cap.
+[[nodiscard]] VaultResult toggle_favorite_node(Vault& v, std::string_view node_path);
+
+// Query every favorited image or gallery across the whole tree, flat. Each hit's
+// `path` is the full slash-path; `node` is valid until the next mutating call.
+// `effective_tags` is left empty (favorites lists don't compute the tag cascade).
+// Empty while locked. Free friends to keep Vault under the cpp:S1448 method cap.
+[[nodiscard]] std::vector<SearchHit> list_favorite_images(const Vault& v);
+[[nodiscard]] std::vector<SearchHit> list_favorite_galleries(const Vault& v);
+
+// Reclaimable bytes: the part of the data region not referenced by any live
+// image/thumbnail chunk or the active index blob (orphaned chunks from
+// deletes plus superseded index blobs). 0 while locked — the index is
+// needed to know what is live. Free friend to keep Vault under the cpp:S1448 method cap.
+[[nodiscard]] uint64_t vault_wasted_bytes(const Vault& v);
+
+// Reclaim orphaned chunk space IN PLACE by punching holes in the dead spans.
+// Free friend to keep Vault under the cpp:S1448 method cap.
+[[nodiscard]] VaultResult vault_reclaim(Vault& v);
+
 // The gallery's own stored sort_key (Manual if gallery_path doesn't resolve to a
 // gallery). Phase 37.
 [[nodiscard]] SortKey gallery_sort_key(const Vault& v, std::string_view gallery_path);
@@ -524,6 +539,11 @@ private:
 // is unchanged. Locked if not unlocked; NotFound if gallery_path doesn't
 // resolve to a gallery. Phase 37.
 [[nodiscard]] VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey key);
+
+// Check if a gallery path exists in the vault. Returns false if the vault is
+// locked, the path is not a gallery (e.g. an image), or the path is missing.
+// Phase 78.
+[[nodiscard]] bool gallery_exists(const Vault& v, std::string_view gallery_path);
 
 // The vault's global settings — tag categories, default sort, tile-tag flag
 // (Phase 49). Returns the seeded set for a vault that has never stored any.

@@ -493,7 +493,7 @@ TEST(migration_job_skips_compaction_when_nothing_is_wasted)
             == vault::VaultResult::Ok);
     // Empty vault has nothing to compact initially
     REQUIRE(v.list("").size() == 0u);
-    REQUIRE(v.wasted_bytes() == 0u);
+    REQUIRE(vault::vault_wasted_bytes(v) == 0u);
 
     ui::MigrationJob job;
     REQUIRE(job.start(v));
@@ -506,7 +506,7 @@ TEST(migration_job_skips_compaction_when_nothing_is_wasted)
     // - Waste below floor proves the skip happened for the right reason, not by accident
     // Residual waste is more reliable than file-size checks, which commit itself changes.
     CHECK_EQ(out.reclaimed_bytes, 0u);
-    const uint64_t residual = v.wasted_bytes();
+    const uint64_t residual = vault::vault_wasted_bytes(v);
     CHECK(residual > 0u);  // waste still exists, so compaction was skipped
     CHECK(residual < vault::Vault::AUTO_COMPACT_MIN_WASTE);  // and below the floor
 
@@ -570,7 +570,7 @@ TEST(migration_job_compaction_reclaims_orphaned_chunks)
     // Self-verify the fixture produces enough waste to cross the compaction floor.
     // If this REQUIRE fails, the payload is too small; if the constant changes,
     // this test immediately fails rather than silently testing the skip branch.
-    REQUIRE(v.wasted_bytes() >= vault::Vault::AUTO_COMPACT_MIN_WASTE);
+    REQUIRE(vault::vault_wasted_bytes(v) >= vault::Vault::AUTO_COMPACT_MIN_WASTE);
 
     // Record file size before migration to verify compaction actually reclaimed space
     const std::uintmax_t size_before = fs::file_size(tv.path);

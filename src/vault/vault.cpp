@@ -1297,6 +1297,13 @@ SortKey gallery_sort_key(const Vault& v, std::string_view gallery_path)
     return g ? g->sort_key : SortKey::Default;
 }
 
+// Phase 78: check if a gallery path exists (for DualGalleryScreen walk-up on vault changes).
+bool gallery_exists(const Vault& v, std::string_view gallery_path)
+{
+    if (!v.is_unlocked()) return false;
+    return v.find_gallery(gallery_path) != nullptr;
+}
+
 VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey key)
 {
     using enum VaultResult;
@@ -1571,31 +1578,32 @@ VaultResult VaultSearch::delete_saved_search(std::string_view name)
     return v_.commit_index();
 }
 
-VaultResult Vault::toggle_favorite(std::string_view node_path)
+// Free friend implementations
+VaultResult toggle_favorite_node(Vault& v, std::string_view node_path)
 {
     using enum VaultResult;
-    if (!unlocked_) return Locked;
+    if (!v.unlocked_) return Locked;
 
-    IndexNode* node = resolve_node(node_path);
+    IndexNode* node = v.resolve_node(node_path);
     if (!node) return NotFound;
 
     node->favorite = !node->favorite;
-    return commit_index();
+    return v.commit_index();
 }
 
-std::vector<SearchHit> Vault::list_favorite_images() const
+std::vector<SearchHit> list_favorite_images(const Vault& v)
 {
     std::vector<SearchHit> out;
-    if (!unlocked_) return out;
-    collect_favorites(root_, "", /*want_galleries=*/false, out);
+    if (!v.unlocked_) return out;
+    collect_favorites(v.root_, "", /*want_galleries=*/false, out);
     return out;
 }
 
-std::vector<SearchHit> Vault::list_favorite_galleries() const
+std::vector<SearchHit> list_favorite_galleries(const Vault& v)
 {
     std::vector<SearchHit> out;
-    if (!unlocked_) return out;
-    collect_favorites(root_, "", /*want_galleries=*/true, out);
+    if (!v.unlocked_) return out;
+    collect_favorites(v.root_, "", /*want_galleries=*/true, out);
     return out;
 }
 
@@ -1714,21 +1722,21 @@ VaultResult execute_pass_moves(const std::vector<compact_plan::Move>& moves, Mov
 
 // --- compaction --------- --------------------------------------------------
 
-uint64_t Vault::wasted_bytes() const
+uint64_t vault_wasted_bytes(const Vault& v)
 {
-    if (!unlocked_ || !fp_) return 0;
+    if (!v.unlocked_ || !v.fp_) return 0;
 
     uint64_t size = 0;
-    if (!fileutil::file_size(fp_, size)) return 0;
+    if (!fileutil::file_size(v.fp_, size)) return 0;
 
     // Phase 50: guard access to header_.slot and header_.active_slot, which can
     // race with the commit lane thread's index commits.
     uint64_t live = 0;
     {
-        std::lock_guard lk(*header_mutex_);
-        live = HEADER_SIZE + header_.slot[header_.active_slot].length;
+        std::lock_guard lk(*v.header_mutex_);
+        live = HEADER_SIZE + v.header_.slot[v.header_.active_slot].length;
     }
-    for_each_media(root_, [&live](const IndexNode& node) {
+    for_each_media(v.root_, [&live](const IndexNode& node) {
         if (node.is_image()) {
             live += node.meta.data_length + node.meta.thumb_length;
         } else if (node.is_video()) {
@@ -1875,36 +1883,36 @@ VaultResult Vault::compact(OpProgress* progress)
     return Ok;
 }
 
-VaultResult Vault::reclaim()
+VaultResult vault_reclaim(Vault& v)
 {
     using enum VaultResult;
-    if (!unlocked_ || !fp_) return Locked;
+    if (!v.unlocked_ || !v.fp_) return Locked;
 
     // Quiesce the commit lane first: it appends index blobs and flips
     // active_slot from another thread, and punching a region it is about to make
     // live would be catastrophic. flush() drains all pending + in-flight commits.
-    if (commit_router_ && commit_router_->running() && !commit_router_->flush()) {
+    if (v.commit_router_ && v.commit_router_->running() && !v.commit_router_->flush()) {
         return IoError;
     }
 
     // Hold write_mutex_ across the whole scan+punch so a worker append cannot
     // interleave; the lane's append path takes the same mutex.
-    std::lock_guard wlk(*write_mutex_);
+    std::lock_guard wlk(*v.write_mutex_);
 
     uint64_t fsize = 0;
-    if (!fileutil::file_size(fp_, fsize)) return IoError;
+    if (!fileutil::file_size(v.fp_, fsize)) return IoError;
 
     // Collect every LIVE span in the data region: the active index blob plus each
     // media chunk. The header [0, HEADER_SIZE) is live by construction (the scan
     // starts at HEADER_SIZE); the INACTIVE index slot is dead and thus reclaimed.
     std::vector<std::pair<uint64_t, uint64_t>> live;  // (offset, on-disk length)
     {
-        std::lock_guard hlk(*header_mutex_);
-        if (const IndexSlot& s = header_.slot[header_.active_slot]; s.length > 0) {
+        std::lock_guard hlk(*v.header_mutex_);
+        if (const IndexSlot& s = v.header_.slot[v.header_.active_slot]; s.length > 0) {
             live.emplace_back(s.offset, s.length);
         }
     }
-    for_each_media(root_, [&live](const IndexNode& n) { collect_media_spans(n, live); });
+    for_each_media(v.root_, [&live](const IndexNode& n) { collect_media_spans(n, live); });
     std::ranges::sort(live);
 
     // Punch every gap between consecutive live spans. `cursor` is the first byte
@@ -1913,12 +1921,12 @@ VaultResult Vault::reclaim()
     uint64_t cursor = HEADER_SIZE;
     for (const auto& [off, len] : live) {
         if (off > cursor) {
-            (void)fileutil::punch_hole(fp_, cursor, off - cursor);
+            (void)fileutil::punch_hole(v.fp_, cursor, off - cursor);
         }
         cursor = std::max(cursor, off + len);
     }
     if (cursor < fsize) {
-        (void)fileutil::punch_hole(fp_, cursor, fsize - cursor);
+        (void)fileutil::punch_hole(v.fp_, cursor, fsize - cursor);
     }
     return Ok;
 }
@@ -1929,15 +1937,15 @@ void Vault::auto_reclaim_space()
     // meaningful fraction of the file (rewriting to save a few KiB costs more I/O
     // than it saves). Same thresholds the two delete paths shared before.
     uint64_t size = 0;
-    if (const uint64_t waste = wasted_bytes(); waste < AUTO_COMPACT_MIN_WASTE ||
-                                               !fileutil::file_size(fp_, size) ||
-                                               waste * AUTO_COMPACT_WASTE_RATIO < size) {
+    if (const uint64_t waste = vault_wasted_bytes(*this); waste < AUTO_COMPACT_MIN_WASTE ||
+                                                        !fileutil::file_size(fp_, size) ||
+                                                        waste * AUTO_COMPACT_WASTE_RATIO < size) {
         return;
     }
 #if defined(__linux__)
     // In-place hole punching: reclaims the disk blocks without the transient
     // second copy compact() writes, so a delete never briefly doubles disk use.
-    (void)reclaim();
+    (void)vault_reclaim(*this);
 #else
     // No portable hole-punch: fall back to in-place compact (no disk spike).
     (void)compact();

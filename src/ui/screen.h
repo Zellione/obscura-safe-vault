@@ -13,7 +13,7 @@ namespace gfx { class Renderer; }
 namespace ui {
 
 enum class NavKind {
-    None, ToUnlock, ToGallery, ToViewer, ToFavoriteImages, ToFavoriteGalleries,
+    None, ToUnlock, ToGallery, ToDualGallery, ToViewer, ToFavoriteImages, ToFavoriteGalleries,
     ToFavoriteViewer, ToAdvancedSearch, ToTagOverview, ToTagGalleries,
     ToTagImages, ToTagViewer, ToImportStatus, ToDuplicates,
     ToVaultManager, LockActive, LockSecond, ToggleKeepUnlocked, ToSettings, Quit
