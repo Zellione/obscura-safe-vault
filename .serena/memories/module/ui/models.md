@@ -296,9 +296,17 @@ Pure SDL-free view/sort/model helpers, layout geometry, settings state, search i
   for thumbs; `DecodeWorker::submit_fetch` wires a Fetcher to vault's `read_thumbnail()`. Read
   failures memoized as empty Result (like decode failures) instead of retried every frame;
   hosts clear `failed` on refetch.
-- `waste_threshold.h` — vault-bloat thresholds: `should_display_waste(wasted,file_size)` (true
-  if waste > max(50 MiB, 10% of file_size)); `should_hint_cancelled_import_waste(wasted)` (true
-  if > 1 MiB). Drives GalleryGrid's `Shift+C` compact-confirm footer hint.
+- `waste_threshold.h` — vault-bloat thresholds. Three predicates, and **which one gates what
+  matters** (Phase 82 bug: the hint predicate was reused as the keypress gate, making compaction
+  unreachable on exactly the vaults that needed it):
+  - `should_display_waste(wasted, file_size)` — waste >= max(50 MiB, 10% of file). Gates the
+    **passive footer hint only**. Never gate a user action with it.
+  - `should_offer_compact(wasted)` — waste > 0. Gates GalleryGrid's **`Shift+C`** compact-confirm
+    modal, which states the exact amount and defaults to cancel, so the user makes the I/O
+    trade-off. Note `Vault::auto_reclaim_space` has its own, much stricter gate
+    (`waste >= 256 KiB && waste * 4 >= size`), so between the two there is a wide band where
+    nothing is reclaimed automatically and `Shift+C` is the only way to recover the space.
+  - `should_hint_cancelled_import_waste(wasted)` — waste >= 1 MiB.
 - `keybindings.h` — pure layout-independent key resolution: `bracket_key_for_scancode` maps the
   two physical keys right of `P` -> `BracketKey{Decrease,Increase}` by SDL SCANCODE (video
   volume `[`/`]` + slideshow dwell on any layout). Centralises the character-resolved

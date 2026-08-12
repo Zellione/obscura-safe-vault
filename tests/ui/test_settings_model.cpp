@@ -218,3 +218,52 @@ TEST(settings_security_value_cycles_and_wraps_both_ways)
     ui::settings_change_value(st, -1);          // wraps backward
     CHECK(st.second_vault_default == SecondVaultMode::KeepSession);
 }
+
+// ---------------------------------------------------------------------------
+// Phase 83 — the F2 footer keybar
+//
+// The arrow keys used to read "[↑↓] Move  [←→] Change". The glyph atlas baked
+// printable ASCII only and silently skipped every other byte, so the owner saw
+// "[] Move  [] Change" — empty brackets. Extending the atlas is not enough
+// here: the bundled Noto Sans subset carries no arrow glyphs at all, so the
+// keys stay spelled out. This test is the guard against a well-meaning revert.
+// ---------------------------------------------------------------------------
+
+TEST(settings_footer_hint_is_free_of_unrenderable_glyphs)
+{
+    ui::SettingsState st;
+    make_unlocked(st);
+
+    for (int variant = 0; variant < 3; ++variant) {
+        st.section   = (variant == 1) ? ui::SettingsSection::TagColours
+                                      : ui::SettingsSection::Appearance;
+        st.prompting = (variant == 2);
+
+        const std::string hint = ui::settings_footer_hint(st);
+        CHECK(!hint.empty());
+        for (unsigned char ch : hint) CHECK(ch >= 32 && ch < 127);
+    }
+}
+
+TEST(settings_footer_hint_names_the_arrow_keys)
+{
+    ui::SettingsState st;
+    make_unlocked(st);
+    st.section = ui::SettingsSection::TagColours;
+
+    const std::string hint = ui::settings_footer_hint(st);
+    CHECK(hint.find("Up/Dn") != std::string::npos);
+    CHECK(hint.find("Lt/Rt") != std::string::npos);
+    // The section-specific keys must survive alongside them.
+    CHECK(hint.find("[N] Add") != std::string::npos);
+    CHECK(hint.find("[Del] Remove") != std::string::npos);
+}
+
+TEST(settings_footer_hint_prompt_state_wins_over_section)
+{
+    ui::SettingsState st;
+    make_unlocked(st);
+    st.section   = ui::SettingsSection::TagColours;
+    st.prompting = true;
+    CHECK(ui::settings_footer_hint(st).find("[Enter] Confirm") != std::string::npos);
+}

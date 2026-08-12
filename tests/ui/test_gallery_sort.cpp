@@ -166,9 +166,9 @@ TEST(gallery_sort_label_hides_default_only_when_vault_default_is_insertion)
     // Untouched vault: the breadcrumb looks exactly as it did before Phase 49.
     CHECK(ui::sort_key_label(SortKey::Default, SortKey::Insertion).empty());
     // A vault default IS in force — say so rather than looking unsorted.
-    CHECK(ui::sort_key_label(SortKey::Default, SortKey::NameAsc) == "Name ↑");
+    CHECK(ui::sort_key_label(SortKey::Default, SortKey::NameAsc) == "Name asc");
     CHECK(ui::sort_key_label(SortKey::Insertion, SortKey::NameAsc) == "Insertion");
-    CHECK(ui::sort_key_label(SortKey::SizeDesc, SortKey::NameAsc) == "Size ↓");
+    CHECK(ui::sort_key_label(SortKey::SizeDesc, SortKey::NameAsc) == "Size desc");
 }
 
 TEST(prev_sort_key_inverts_next_sort_key)

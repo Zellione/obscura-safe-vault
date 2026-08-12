@@ -63,6 +63,17 @@ int settings_row_count(const SettingsState& state) noexcept
     return 0;
 }
 
+std::string settings_footer_hint(const SettingsState& state)
+{
+    if (state.prompting) {
+        return "[Enter] Confirm  [Esc] Cancel  [Backspace] Delete";
+    }
+    if (state.vault_unlocked && state.section == SettingsSection::TagColours) {
+        return "[Tab] Switch  [Up/Dn] Move  [Lt/Rt] Change  [N] Add  [R] Rename  [Del] Remove";
+    }
+    return "[Tab] Switch  [Up/Dn] Move  [Lt/Rt] Change  [Esc] Close";
+}
+
 namespace {
 
 // Handle theme value change.

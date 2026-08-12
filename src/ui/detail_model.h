@@ -34,7 +34,7 @@ struct DetailSection {
 
 struct DetailContent {
     std::string                heading;      // node name, or "N items selected"
-    std::string                subheading;   // marker line ("★ favorite"); may be empty
+    std::string                subheading;   // marker line ("* favorite"); may be empty
     std::vector<DetailSection> sections;
 };
 

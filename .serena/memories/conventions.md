@@ -22,8 +22,17 @@
 - **Any** string drawn into a fixed-width box must be elided first — never `draw_text` it raw. This is not only about unbounded vault-derived strings (paths, names, tags): a *static* hint authored to fit at an older font size is the recurring shape of this bug, and one of them ("Clear search? Resets all parameters." in the advanced-search confirm box) overflowed its fixed 440 px at every window size. Two helpers in `widgets.h`, and picking the wrong one makes it worse:
   - `ui::fit_text(font, s, max_w)` — **middle** elision, the default. Keeps both ends, so a modal hint retains its trailing `[Esc] Close`.
   - `ui::fit_text_tail(font, s, max_w)` — **tail** elision, for strings whose START carries the meaning. Help-popup lines read `[key]  description`, so middle elision mangles exactly the words being scanned for.
-  Both are thin bindings over the pure, unit-tested `ui::elide_middle` / `ui::elide_tail` templates (templated on the measure callable, ASCII `"..."` since the atlas bakes 32–126 only). PR #54 and PR #128 each swept the UI for this.
+  Both are thin bindings over the pure, unit-tested `ui::elide_middle` / `ui::elide_tail` templates (templated on the measure callable, ASCII `"..."` — the atlas can draw `…` since Phase 83, but three dots keep the ellipsis width predictable across fonts). PR #54 and PR #128 each swept the UI for this.
 - **Never hardcode a text-line pitch.** Derive it from `font.pixel_height()` via `ui::line_pitch(font_px)` → `ceil(font_px * 1.25)`. The 1.25 leading ensures each line exceeds the font height, so adjacent lines cannot touch and a clip band cannot cut a descender. The single source of truth prevents silent regressions from surface-specific constants drifting apart.
+
+## User-visible strings & glyph coverage (Phase 83)
+- The glyph atlas is UTF-8 aware, but the **bundled Noto Sans is a subset**. Before putting a
+  non-ASCII character in any drawn string, check `mem:module/gfx` "Glyph coverage": `— – … · •
+  − × ± § µ ‖` draw; **arrows, ✓, ✗, ★, ●, ▲, ▼ do not** and must be spelled out in ASCII.
+  A character the font lacks renders as `?`; before Phase 83 it rendered as nothing at all,
+  which is how ~120 invisible characters accumulated unnoticed across 82 phases.
+- Add any new typographic character to
+  `tests/gfx/test_text.cpp::font_atlas_renders_ui_typography` — that test is the guard.
 
 ## Paths are UTF-8 (Phase 70)
 - A `std::string` holding a filesystem path is **UTF-8 by definition**. The narrow
