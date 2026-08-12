@@ -122,12 +122,14 @@ std::string sort_key_label(vault::SortKey key, vault::SortKey vault_default)
     }
 
     switch (effective_sort_key(key, vault_default)) {
-    case NameAsc:   return "Name ↑";
-    case NameDesc:  return "Name ↓";
-    case DateAsc:   return "Date ↑";
-    case DateDesc:  return "Date ↓";
-    case SizeAsc:   return "Size ↑";
-    case SizeDesc:  return "Size ↓";
+    // Spelled out rather than ↑/↓: the bundled Noto Sans subset has no arrow
+    // glyphs, so those rendered as a bare "Name " (see Phase 83).
+    case NameAsc:   return "Name asc";
+    case NameDesc:  return "Name desc";
+    case DateAsc:   return "Date asc";
+    case DateDesc:  return "Date desc";
+    case SizeAsc:   return "Size asc";
+    case SizeDesc:  return "Size desc";
     case Insertion: return "Insertion";
     case Default:   return {};   // unreachable: effective_sort_key never returns Default
     }

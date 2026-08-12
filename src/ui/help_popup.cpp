@@ -150,12 +150,14 @@ void draw_help_scroll_affordance(gfx::Renderer& r, gfx::FontAtlas& font,
     using namespace gfx::theme;
     if (dims.longest <= visible_lines) return;
 
+    // "^" / "v", not ▲/▼: the bundled font subset has no geometric-shape
+    // glyphs, so both affordances drew nothing at all (Phase 83).
     const float affordance_x = dims.x + dims.w - 12.0f;
     if (scroll_line > 0) {
-        r.draw_text(font, affordance_x, content_top - 4.0f, "▲", TEXT_FAINT);
+        r.draw_text(font, affordance_x, content_top - 4.0f, "^", TEXT_FAINT);
     }
     if (scroll_line < dims.longest - visible_lines) {
-        r.draw_text(font, affordance_x, content_bottom + 4.0f, "▼", TEXT_FAINT);
+        r.draw_text(font, affordance_x, content_bottom + 4.0f, "v", TEXT_FAINT);
     }
 }
 

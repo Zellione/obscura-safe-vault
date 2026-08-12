@@ -51,6 +51,15 @@ void settings_change_value(SettingsState& state, int delta) noexcept;
 // Row count for the focused section.
 [[nodiscard]] int settings_row_count(const SettingsState& state) noexcept;
 
+// The keybar drawn in the overlay footer for the current state. Pure so the
+// wording is unit-testable; the caller elides it to the panel width.
+//
+// Phase 83: the arrow keys were written as "[↑↓]" / "[←→]", and the atlas baked
+// printable ASCII only — so they rendered as empty brackets. The bundled Noto
+// Sans subset has no arrow glyphs at all, so these stay spelled out even now
+// that the atlas can draw non-ASCII.
+[[nodiscard]] std::string settings_footer_hint(const SettingsState& state);
+
 // Add a category (trimmed, non-empty, non-duplicate, within size cap). Swatch
 // defaults to size() % TAG_SWATCH_COUNT.
 [[nodiscard]] bool settings_add_category(SettingsState& state, std::string name);

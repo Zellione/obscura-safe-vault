@@ -382,18 +382,16 @@ void draw_pane(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float pane_
 }
 
 // Draw the footer with hint text and error messages.
-void draw_footer(gfx::Renderer& r, gfx::FontAtlas& font, float panel_x, float footer_y,
-                 const SettingsState& state)
+void draw_footer(gfx::Renderer& r, gfx::FontAtlas& font, float panel_x, float panel_w,
+                 float footer_y, const SettingsState& state)
 {
-    std::string hint;
-    if (state.prompting) {
-        hint = "[Enter] Confirm  [Esc] Cancel  [Backspace] Delete";
-    } else if (state.vault_unlocked && state.section == SettingsSection::TagColours) {
-        hint = "[Tab] Switch  [↑↓] Move  [←→] Change  [N] Add  [R] Rename  [Del] Remove";
-    } else {
-        hint = "[Tab] Switch  [↑↓] Move  [←→] Change  [Esc] Close";
-    }
-    r.draw_text(font, panel_x + PAD, footer_y, hint, gfx::theme::TEXT_FAINT);
+    // Elided, not raw. Spelling the arrow keys out took the longest hint from
+    // 650 px to 760 px at the app's 28 px font — exactly the text budget of a
+    // maximum-width (800 px) panel, and over it on any smaller window, where
+    // the panel is win_w - 80. It was never bounded before; now it is.
+    const float text_w = panel_w - 2 * PAD;
+    r.draw_text(font, panel_x + PAD, footer_y, fit_text(font, settings_footer_hint(state), text_w),
+                gfx::theme::TEXT_FAINT);
 
     // Draw error message if present
     if (!state.error.empty()) {
@@ -477,7 +475,7 @@ void draw_settings_overlay(gfx::Renderer& r, gfx::FontAtlas& font,
 
     // Footer hint line and error message
     const float footer_y = panel_y + panel_h - footer_h;
-    draw_footer(r, font, panel_x, footer_y, state);
+    draw_footer(r, font, panel_x, panel_w, footer_y, state);
 
     // Draw prompt if active
     if (state.prompting) {

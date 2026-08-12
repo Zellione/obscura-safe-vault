@@ -10,7 +10,9 @@ namespace ui {
 
 std::string format_task_route(const ImportTaskInfo& task)
 {
-    return std::format("{} → {}", task.display_name,
+    // "->" not "→", and words not ✓/✗ below: the bundled Noto Sans subset has
+    // neither arrow nor check/ballot glyphs, so all three drew nothing (Phase 83).
+    return std::format("{} -> {}", task.display_name,
                        task.dest_gallery.empty() ? "root" : task.dest_gallery);
 }
 
@@ -23,12 +25,12 @@ std::string format_task_status(const ImportTaskInfo& task)
         case Queued:
             return std::format("Queued #{}", task.id & 0xFF);
         case Done:
-            return std::format("✓ {} imported, {} skipped", task.imported, task.skipped);
+            return std::format("Done — {} imported, {} skipped", task.imported, task.skipped);
         case Failed:
-            return task.error.empty() ? std::string("✗ Import failed")
-                                      : std::format("✗ {}", task.error);
+            return task.error.empty() ? std::string("Failed — import error")
+                                      : std::format("Failed — {}", task.error);
         case Cancelled:
-            return std::string("− Cancelled");
+            return std::string("Cancelled");
     }
     return std::string();
 }

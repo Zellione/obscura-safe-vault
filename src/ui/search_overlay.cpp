@@ -270,7 +270,7 @@ void SearchOverlay::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
 
     // Footer hint
     r.draw_text(font, mx + PAD, my + mh - PAD - 16,
-                "[Enter] Select  [Esc] Close  [↑↓] Navigate",
+                "[Enter] Select  [Esc] Close  [Up/Dn] Navigate",
                 TEXT_FAINT);
 }
 

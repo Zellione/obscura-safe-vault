@@ -24,24 +24,24 @@ ui::ImportTaskInfo task(ui::ImportTaskState state)
 TEST(route_line_shows_source_and_destination_while_queued)
 {
     CHECK_EQ(ui::format_task_route(task(ui::ImportTaskState::Queued)),
-             std::string("holiday.zip → Trips/2026"));
+             std::string("holiday.zip -> Trips/2026"));
 }
 
 TEST(route_line_survives_completion)
 {
     CHECK_EQ(ui::format_task_route(task(ui::ImportTaskState::Done)),
-             std::string("holiday.zip → Trips/2026"));
+             std::string("holiday.zip -> Trips/2026"));
     CHECK_EQ(ui::format_task_route(task(ui::ImportTaskState::Failed)),
-             std::string("holiday.zip → Trips/2026"));
+             std::string("holiday.zip -> Trips/2026"));
     CHECK_EQ(ui::format_task_route(task(ui::ImportTaskState::Cancelled)),
-             std::string("holiday.zip → Trips/2026"));
+             std::string("holiday.zip -> Trips/2026"));
 }
 
 TEST(route_line_names_the_root_gallery_explicitly)
 {
     ui::ImportTaskInfo t = task(ui::ImportTaskState::Running);
     t.dest_gallery.clear();
-    CHECK_EQ(ui::format_task_route(t), std::string("holiday.zip → root"));
+    CHECK_EQ(ui::format_task_route(t), std::string("holiday.zip -> root"));
 }
 
 TEST(status_line_reports_the_outcome_per_state)
@@ -49,20 +49,20 @@ TEST(status_line_reports_the_outcome_per_state)
     ui::ImportTaskInfo done = task(ui::ImportTaskState::Done);
     done.imported = 12;
     done.skipped  = 1;
-    CHECK_EQ(ui::format_task_status(done), std::string("✓ 12 imported, 1 skipped"));
+    CHECK_EQ(ui::format_task_status(done), std::string("Done — 12 imported, 1 skipped"));
 
     ui::ImportTaskInfo failed = task(ui::ImportTaskState::Failed);
     failed.error = "vault write failed";
-    CHECK_EQ(ui::format_task_status(failed), std::string("✗ vault write failed"));
+    CHECK_EQ(ui::format_task_status(failed), std::string("Failed — vault write failed"));
 
     CHECK_EQ(ui::format_task_status(task(ui::ImportTaskState::Cancelled)),
-             std::string("− Cancelled"));
+             std::string("Cancelled"));
 }
 
 TEST(status_line_falls_back_when_a_failure_has_no_message)
 {
     CHECK_EQ(ui::format_task_status(task(ui::ImportTaskState::Failed)),
-             std::string("✗ Import failed"));
+             std::string("Failed — import error"));
 }
 
 TEST(status_line_shows_queue_position_when_queued)

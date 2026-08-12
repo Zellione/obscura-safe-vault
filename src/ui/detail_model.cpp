@@ -22,7 +22,8 @@ std::string node_markers(const vault::IndexNode& n)
         if (!out.empty()) { out += " · "; }
         out += s;
     };
-    if (n.favorite) { add("★ favorite"); }
+    // "*" not "★": the bundled font subset has no BLACK STAR glyph (Phase 83).
+    if (n.favorite) { add("* favorite"); }
     // `animated` lives on ImageMeta only — a video has no such flag.
     if (n.is_image() && n.meta.animated) { add("A animated"); }
     return out;
