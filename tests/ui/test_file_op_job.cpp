@@ -2,6 +2,7 @@
 
 #include "crypto/kdf.h"
 #include "ui/file_op_job.h"
+#include "ui/waste_threshold.h"
 #include "ui/zip_test_helpers.h"   // make_vault, fake_jpeg, fresh_dir, cleanup_dir
 #include "vault/transfer.h"
 #include "vault/vault.h"
@@ -239,6 +240,24 @@ static std::vector<uint8_t> blob(size_t n, uint8_t seed)
 {
     std::vector<uint8_t> v(n);
     for (size_t i = 0; i < n; ++i) v[i] = static_cast<uint8_t>(i * 23 + seed);
+    return v;
+}
+
+// High-entropy bytes from a fixed-seed splitmix64: deterministic, but
+// incompressible, so a chunk's STORED size tracks its raw size. blob() above
+// repeats with period 256 and deflates to almost nothing, which would make any
+// "waste >= N" assertion a property of the compressor instead of the payload.
+static std::vector<uint8_t> incompressible(size_t n, uint64_t seed)
+{
+    std::vector<uint8_t> v(n);
+    uint64_t             x = seed;
+    for (size_t i = 0; i < n; ++i) {
+        x += 0x9E3779B97F4A7C15ULL;
+        uint64_t z = x;
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+        v[i] = static_cast<uint8_t>(z >> 31);
+    }
     return v;
 }
 
@@ -480,4 +499,46 @@ TEST(file_op_job_combine_move_empties_source)
         CHECK(oc->status.find("moved") != std::string::npos);
     }
     cleanup_dir(dir);
+}
+
+// Phase 82 regression: the reported "Shift+C says nothing to reclaim after
+// deleting 1000+ files". The compact JOB was always fine — the keypress was
+// gated behind should_display_waste (the passive footer-hint heuristic), whose
+// max(50 MiB, 10% of file) floor hides exactly the waste a bulk delete of small
+// files leaves behind. This pins the whole chain: real orphaned waste, invisible
+// to the hint, offered by should_offer_compact, and reclaimed by the job.
+//
+// Sizing follows the migration-job precedent: keep >> delete so waste stays
+// under auto_reclaim_space's `waste * 4 >= size` gate. That gate reclaims by
+// hole-punching on Linux but by a truncating compact() elsewhere, so letting it
+// fire would leave nothing for this test to compact on Windows.
+TEST(file_op_job_compacts_waste_the_footer_hint_hides)
+{
+    TempVault tv("compact_gate");
+    vault::Vault v;
+    using enum vault::VaultResult;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kKdf, v) == Ok);
+    REQUIRE(v.add_image("", incompressible(4u << 20, 1), "keep.png") == Ok);
+    REQUIRE(v.add_image("", incompressible(512u << 10, 2), "gone.png") == Ok);
+    REQUIRE(v.remove_image("", "gone.png") == Ok);
+
+    const uint64_t waste = vault::vault_wasted_bytes(v);
+    const uint64_t size  = vault::vault_file_bytes(v);
+    REQUIRE(waste > 0);
+    // The symptom: a real orphan the footer refuses to mention, because the
+    // vault is under 500 MiB so the 50 MiB absolute floor applies.
+    CHECK_FALSE(ui::should_display_waste(waste, size));
+    // The fix: an explicit keypress offers it anyway.
+    CHECK(ui::should_offer_compact(waste));
+
+    const std::uintmax_t before = fs::file_size(tv.path);
+    ui::FileOpJob job;
+    REQUIRE(job.start_compact(v));
+    auto oc = await_outcome(job);
+    REQUIRE(oc.has_value());
+    CHECK(oc->ok);
+    CHECK(oc->kind == ui::FileOpKind::Compact);
+    CHECK(fs::file_size(tv.path) < before);
+    REQUIRE(v.list("").size() == 1u);
+    CHECK_EQ(v.list("")[0]->name, std::string("keep.png"));
 }

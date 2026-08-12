@@ -817,14 +817,13 @@ void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
         return;
     }
 
-    const uint64_t file_sz = vault::vault_file_bytes(g.vault_);
-    const uint64_t waste_sz = vault::vault_wasted_bytes(g.vault_);
-    // Only show the compact option if there's significant waste to reclaim.
-    if (should_display_waste(waste_sz, file_sz)) {
+    // Any reclaimable waste opens the modal — see should_offer_compact for why
+    // the footer-hint threshold must not gate an explicit keypress.
+    if (should_offer_compact(vault::vault_wasted_bytes(g.vault_))) {
         g.naming_.confirm_compact = true;
         g.error_.clear();
     } else {
-        g.error_ = "No significant waste to reclaim.";
+        g.error_ = "Nothing to reclaim — the vault has no wasted space.";
     }
 }
 
