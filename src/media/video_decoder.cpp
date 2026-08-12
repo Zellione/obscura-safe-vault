@@ -560,8 +560,11 @@ std::optional<image::ImageData> VideoDecoder::decode_poster_rgb()
         return std::nullopt;
     }
 
-    const int w = width_;
-    const int h = height_;
+    // Use the DECODED frame's geometry, not the open()-time codecpar values: a
+    // container whose header lies about the stream's dimensions would otherwise
+    // make sws_scale read outside the actual frame planes.
+    const int w = frame_->width;
+    const int h = frame_->height;
     if (w <= 0 || h <= 0) {
         return std::nullopt;
     }
@@ -587,66 +590,52 @@ std::optional<image::ImageData> VideoDecoder::decode_poster_rgb()
         return std::nullopt;
     }
 
-    // Allocate destination frame for RGB24.
-    AVFrame* rgb_frame = av_frame_alloc();
-    if (!rgb_frame) {
-        sws_freeContext(sws_rgb);
-        return std::nullopt;
-    }
-
-    rgb_frame->format = AV_PIX_FMT_RGB24;
-    rgb_frame->width  = w;
-    rgb_frame->height = h;
-
-    // Allocate buffer for RGB24 data (w * h * 3 bytes, no linesize padding for tightly packed).
-    const int buffer_size = av_image_get_buffer_size(AV_PIX_FMT_RGB24, w, h, 1);
-    if (buffer_size <= 0) {
-        av_frame_free(&rgb_frame);
-        sws_freeContext(sws_rgb);
-        return std::nullopt;
-    }
-
-    auto* rgb_buffer = static_cast<uint8_t*>(av_malloc(buffer_size));
-    if (!rgb_buffer) {
-        av_frame_free(&rgb_frame);
-        sws_freeContext(sws_rgb);
-        return std::nullopt;
-    }
-
-    // Assign buffer to frame with tight packing.
-    if (av_image_fill_arrays(rgb_frame->data, rgb_frame->linesize, rgb_buffer,
-                             AV_PIX_FMT_RGB24, w, h, 1) < 0) {
-        av_free(rgb_buffer);
-        av_frame_free(&rgb_frame);
+    // Destination buffer with a PADDED linesize AND a padded tail — never a
+    // tight align=1 buffer. libswscale's vectorized RGB24 writers store whole
+    // SIMD vectors per row: with an exactly-sized buffer the final row's store
+    // runs past the allocation (measured up to 42 bytes over, and up to 16
+    // bytes past even a 64-aligned linesize*h — see the Phase 80 canary sweep).
+    // Surfaced as 0xc0000374 heap corruption on Windows, where av_malloc keeps
+    // its base pointer in the inter-block gap the overrun scribbles over.
+    // FFmpeg's own av_frame_get_buffer pads the tail of video allocations for
+    // the same reason. Aligned rows absorb mid-row overshoot; POSTER_TAIL_PAD
+    // absorbs the final row's.
+    constexpr int POSTER_TAIL_PAD = 128;
+    uint8_t*  dst_data[4]     = {};
+    int       dst_linesize[4] = {};
+    dst_linesize[0] = FFALIGN(w * 3, 64);
+    const size_t dst_alloc =
+        static_cast<size_t>(dst_linesize[0]) * h + POSTER_TAIL_PAD;
+    dst_data[0] = static_cast<uint8_t*>(av_malloc(dst_alloc));
+    if (!dst_data[0]) {
         sws_freeContext(sws_rgb);
         return std::nullopt;
     }
 
     // Convert (scale) the decoded frame to RGB24.
-    if (const int slices = sws_scale(sws_rgb, frame_->data, frame_->linesize, 0, h,
-                                     rgb_frame->data, rgb_frame->linesize);
-        slices != h) {
-        av_free(rgb_buffer);
-        av_frame_free(&rgb_frame);
-        sws_freeContext(sws_rgb);
-        return std::nullopt;
+    const int slices = sws_scale(sws_rgb, frame_->data, frame_->linesize, 0, h,
+                                 dst_data, dst_linesize);
+    std::optional<image::ImageData> out;
+    if (slices == h) {
+        // Copy row by row: the destination is padded to dst_linesize, the
+        // ImageData buffer is tight (w * 3 per row) — same pattern as the
+        // libheif plane copy in image/decode_heif.cpp.
+        image::ImageData result;
+        result.width  = w;
+        result.height = h;
+        result.format = image::ImageFormat::Unknown;
+        result.pixels.resize(static_cast<size_t>(w) * h * 3);
+        for (int y = 0; y < h; ++y) {
+            std::memcpy(result.pixels.data() + static_cast<size_t>(y) * w * 3,
+                        dst_data[0] + static_cast<size_t>(y) * dst_linesize[0],
+                        static_cast<size_t>(w) * 3);
+        }
+        out = std::move(result);
     }
 
-    // Copy RGB data to ImageData. Since we allocated with tight packing, we can
-    // memcpy the entire buffer.
-    image::ImageData result;
-    result.width  = w;
-    result.height = h;
-    result.format = image::ImageFormat::Unknown;
-    result.pixels.resize(w * h * 3);
-    std::memcpy(result.pixels.data(), rgb_buffer, result.pixels.size());
-
-    // Clean up.
-    av_free(rgb_buffer);
-    av_frame_free(&rgb_frame);
+    av_freep(&dst_data[0]);
     sws_freeContext(sws_rgb);
-
-    return result;
+    return out;
 }
 
 } // namespace media

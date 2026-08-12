@@ -154,6 +154,33 @@ TEST(probe_video_webm_av1_fills_metadata_and_poster)
     REQUIRE(poster_data.has_value());
 }
 
+// Phase 80 regression: a video whose width (106, mod 16 = 10) puts swscale's
+// final RGB24 vector store past a tight buffer end. decode_poster_rgb used to
+// hand sws_scale an exactly-sized align=1 destination; libswscale's vectorized
+// writers store whole vectors per row (measured up to 42 bytes past the end),
+// which corrupted the heap — 0xc0000374 on Windows, where av_malloc hides its
+// base pointer in the inter-block gap. ASAN cannot see the overrun (the store
+// happens in uninstrumented vendored asm); valgrind or the Phase 80 canary
+// sweep are the tools that catch this class.
+TEST(probe_video_odd_stride_poster_stays_in_bounds)
+{
+    auto video_bytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_oddstride.mp4");
+    REQUIRE(!video_bytes.empty());
+
+    media::VideoProbeResult result;
+    REQUIRE(media::probe_video(std::span(video_bytes), result));
+    CHECK_EQ(static_cast<int>(result.codec), static_cast<int>(vault::VideoCodec::H264));
+    CHECK_EQ(result.width, 106);
+    CHECK_EQ(result.height, 64);
+    REQUIRE(!result.poster_jpeg.empty());
+
+    // The poster must decode and preserve the odd-stride dims (no row shear).
+    auto poster = image::decode_from_memory(std::span(result.poster_jpeg));
+    REQUIRE(poster.has_value());
+    CHECK_EQ(poster->width, 106);
+    CHECK_EQ(poster->height, 64);
+}
+
 TEST(probe_video_rejects_garbage_data)
 {
     std::vector<uint8_t> junk(8192, 0);

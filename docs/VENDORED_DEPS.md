@@ -88,6 +88,21 @@ If new CVEs are discovered, follow the bump procedure (see below).
    ```
    Crypto KAT tests in `tests/crypto/` are the primary guard; they will fail if cipher/KDF behavior changes.
 
+   **FFmpeg bumps additionally require the swscale canary sweep** (Phase 80 —
+   ASAN cannot see stores made by vendored SIMD asm, so the suite alone does
+   not cover this class):
+   ```bash
+   gcc scripts/swscale_canary_sweep.c -I vendor/codecs-prefix/include \
+       -Wl,--start-group vendor/codecs-prefix/lib/libswscale.a \
+       vendor/codecs-prefix/lib/libavutil.a -Wl,--end-group \
+       -lm -lva -lva-drm -o /tmp/sws_sweep
+   /tmp/sws_sweep padded   # MUST print "0 overshooting case(s)"
+   ```
+   If `padded` mode ever reports overshoots, the new libswscale writes further
+   past row ends than the codebase's padding contract (`FFALIGN(w*bpp, 64)`
+   linesize + 128-byte tail — see CLAUDE.md § Hardening notes) absorbs; widen
+   the contract at every `sws_scale` site in `src/media/` before shipping.
+
 4. **Inspect the delta:**
    ```bash
    git -C vendor/<submodule> log <old-tag>..<new-tag> --oneline

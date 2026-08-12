@@ -443,6 +443,48 @@ TEST(migration_job_pool_handles_many_items_without_loss)
     for (const vault::IndexNode* n : v.list("")) CHECK(n->meta.animated);
 }
 
+// Phase 79: App::shutdown (window close during an upgrade) must be able to stop
+// a live job synchronously BEFORE the vault is locked and destroyed — tearing
+// down the Vault while the coordinator still holds a reference to it is a
+// use-after-free. abort_and_join cancels, joins, and deactivates without a
+// take_outcome() poll; the outcome is deliberately discarded.
+TEST(migration_job_abort_and_join_stops_job_without_polling)
+{
+    JobTempVault tv("abort_join");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), job_bytes("pw"), {}, kJobKdf, v)
+            == vault::VaultResult::Ok);
+
+    const std::vector<uint8_t> anim = fixtures::load_anim_webp();
+    constexpr int kCount = 32;
+    for (int i = 0; i < kCount; ++i) {
+        const std::string name = "a" + std::to_string(i) + ".webp";
+        REQUIRE(v.add_image("", anim, name) == vault::VaultResult::Ok);
+        REQUIRE(vault::apply_image_animated(v, name, false) == vault::VaultResult::Ok);
+    }
+
+    ui::MigrationJob job;
+    REQUIRE(job.start(v));
+    job.abort_and_join();
+
+    // The coordinator is gone and the job is inert: no poll required, and a
+    // later poll must not resurrect a discarded outcome.
+    CHECK(!job.active());
+    CHECK(!job.take_outcome());
+
+    // The vault outlived the job and is still fully usable.
+    CHECK(v.is_unlocked());
+    CHECK_EQ(v.list("").size(), static_cast<size_t>(kCount));
+}
+
+TEST(migration_job_abort_and_join_without_start_is_noop)
+{
+    ui::MigrationJob job;
+    job.abort_and_join();   // must not crash or hang on a never-started job
+    CHECK(!job.active());
+    CHECK(!job.take_outcome());
+}
+
 TEST(migration_job_skips_compaction_when_nothing_is_wasted)
 {
     JobTempVault tv("nocompact");

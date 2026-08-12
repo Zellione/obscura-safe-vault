@@ -78,6 +78,14 @@ public:
     // Join and hand back the outcome exactly once; nullopt while still running.
     [[nodiscard]] std::optional<MigrationOutcome> take_outcome();
 
+    // Phase 79: synchronous teardown for App::shutdown — cancel, join the
+    // coordinator, and deactivate WITHOUT a take_outcome() poll (the outcome is
+    // discarded). The caller may only lock/destroy the Vault after this returns;
+    // tearing the vault down under a live coordinator is a use-after-free.
+    // Cancel semantics are the normal ones: applied work is committed, the
+    // watermark is not stamped, so the upgrade is re-offered at the next unlock.
+    void abort_and_join();
+
 private:
     void run(vault::Vault& v);
 
