@@ -12,6 +12,7 @@
 #include "media/anim_decoder.h"
 #include "media/webp_anim_decoder.h"
 #include "ui/anim_model.h"
+#include "ui/widgets.h"
 #include "vault/index.h"
 #include "vault/vault.h"
 
@@ -154,9 +155,16 @@ struct AnimPlayback::Impl {
             return;
         }
 
-        // Lazy texture creation on first render
+        // Lazy texture creation on first render. Both backends emit frames whose
+        // bytes are R,G,B,A in memory order, which is SDL_PIXELFORMAT_RGBA32 —
+        // an alias that resolves to ABGR8888 on a little-endian CPU. The packed
+        // SDL_PIXELFORMAT_RGBA8888 is a *different* layout there (A,B,G,R in
+        // memory): it renders every frame with red pinned to the source alpha
+        // and green/blue transposed. Frames are opaque (the WebP backend
+        // flattens alpha, GIF palettes come through opaque), so blending is off
+        // — the draw then never depends on what alpha a decoder chose to emit.
         if (tex_ == nullptr) {
-            tex_ = SDL_CreateTexture(sdl_r, SDL_PIXELFORMAT_RGBA8888,
+            tex_ = SDL_CreateTexture(sdl_r, SDL_PIXELFORMAT_RGBA32,
                                     SDL_TEXTUREACCESS_STREAMING,
                                     current_.width, current_.height);
             if (tex_ == nullptr) {
@@ -164,6 +172,7 @@ struct AnimPlayback::Impl {
                              SDL_GetError());
                 return;
             }
+            SDL_SetTextureBlendMode(tex_, SDL_BLENDMODE_NONE);
         }
 
         // Upload the current frame to the texture if it changed
@@ -172,8 +181,21 @@ struct AnimPlayback::Impl {
             dirty_ = false;
         }
 
-        // Draw the texture at the destination rect
-        r.draw_image(tex_, dest);
+        // Aspect-fit rather than fill: the hover-preview call sites (gallery
+        // tiles, list rows, the viewer's thumbnail strip) pass the whole square
+        // cell, the same rect they pass ui::draw_tile_thumb and
+        // gfx::draw_thumbnail_strip — both of which fit into it. Filling would
+        // squash a non-square animation the instant the pointer touched its
+        // tile. In the viewer paths `dest` already carries the image's aspect,
+        // so the fit is a no-op and the backing below is skipped: no black seam
+        // can creep in around a zoomed image.
+        const SDL_FRect img =
+            fit_rect(static_cast<float>(current_.width),
+                     static_cast<float>(current_.height), dest);
+        if (img.w < dest.w - 0.5f || img.h < dest.h - 0.5f) {
+            r.draw_rect(dest, gfx::Color{0, 0, 0, 255});   // letterbox bands, as on static tiles
+        }
+        r.draw_image(tex_, img);
     }
 
     // Copy current_.rgba into the streaming texture, honoring SDL's row pitch.

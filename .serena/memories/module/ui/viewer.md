@@ -50,6 +50,17 @@ Full-screen image and video playback with zoom, pan, slideshow, and strip naviga
   (a file's declared loop count is deliberately IGNORED, so both formats behave alike), Space
   toggles pause, zoom/pan unchanged. Decrypted bytes held in mlock'd `crypto::SecureBytes`
   outliving the decoder. Frames uploaded row-by-row honoring `SDL_LockTexture` pitch.
+  **Two draw-side contracts, both fixed in Phase 81 after shipping broken since 47/57
+  (nothing had ever called `render()`):** (1) both backends emit **byte-order** R,G,B,A, so the
+  texture MUST be `SDL_PIXELFORMAT_RGBA32` — the packed `SDL_PIXELFORMAT_RGBA8888` is `A,B,G,R`
+  in memory on little-endian and renders red = source alpha with G/B transposed (`gfx/text.cpp`
+  has the same requirement for its glyph atlas); blend mode is explicitly `NONE` since frames
+  are opaque by construction. (2) `render()` **aspect-fits** `dest` via `ui::fit_rect` and paints
+  a black backing only when a band exists — the three hover call sites (grid tile, list row,
+  viewer strip) pass the whole SQUARE cell, exactly as they pass `ui::draw_tile_thumb` /
+  `gfx::draw_thumbnail_strip`, which fit; filling squashed non-square animations on hover. The
+  fit is a deliberate no-op in `render_fit`/`render_scroll`, whose rect already carries the
+  image's aspect, so no seam appears around a zoomed image.
   **Phase 57 fixed a latent break here:** the file used to open `namespace ui {` INSIDE its
   `#ifdef OSV_VENDORED_AV`, so the `#else` stub landed outside the namespace and the TU did not
   compile at all without vendored FFmpeg. `Impl` is now always compiled; only the GIF backend is

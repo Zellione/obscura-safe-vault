@@ -132,6 +132,41 @@ TEST(gif_decoder_reports_real_frame_delays)
     CHECK(frame_count == 4);
 }
 
+// Phase 81: sws_scale targets AV_PIX_FMT_RGBA, so a decoded frame's bytes are
+// R,G,B,A in *memory order* — the contract AnimPlayback's texture format has to
+// match. Pinning it here means a future pixel-format change in the decoder can
+// no longer silently mismatch the upload. tiny_anim.gif's first frame has a
+// green run at (8,0) and a yellow centre; both are exact palette colours.
+TEST(gif_decoder_frames_are_byte_order_rgba)
+{
+    const auto bytes = read_fixture("tiny_anim.gif");
+    REQUIRE(!bytes.empty());
+
+    media::GifDecoder d;
+    REQUIRE(d.open(bytes));
+
+    const auto f = d.next_frame();
+    REQUIRE(f.has_value());
+    REQUIRE(f->width == 32);
+    REQUIRE(f->height == 32);
+
+    const auto px = [&f](int x, int y) {
+        return f->rgba.data() + ((static_cast<size_t>(y) * 32 + static_cast<size_t>(x)) * 4);
+    };
+
+    const uint8_t* green = px(8, 0);
+    CHECK_EQ(green[0], 0);      // R
+    CHECK_EQ(green[1], 252);    // G
+    CHECK_EQ(green[2], 0);      // B
+    CHECK_EQ(green[3], 255);    // A
+
+    const uint8_t* yellow = px(16, 16);
+    CHECK_EQ(yellow[0], 252);
+    CHECK_EQ(yellow[1], 252);
+    CHECK_EQ(yellow[2], 0);
+    CHECK_EQ(yellow[3], 255);
+}
+
 // Phase 57: GifDecoder is one backend behind media::AnimDecoder, so playback can
 // drive it and WebpAnimDecoder through the same handle.
 TEST(gif_decoder_is_usable_through_the_anim_decoder_interface)
