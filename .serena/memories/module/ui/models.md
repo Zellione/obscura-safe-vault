@@ -303,6 +303,11 @@ Pure SDL-free view/sort/model helpers, layout geometry, settings state, search i
   two physical keys right of `P` -> `BracketKey{Decrease,Increase}` by SDL SCANCODE (video
   volume `[`/`]` + slideshow dwell on any layout). Centralises the character-resolved
   `is_search_key`/`is_advanced_search_key`/`is_quick_switch_key` helpers.
+  `is_unmodified(SDL_Keymod)` — the ONLY sanctioned "is this a bare key press" test: SDL3 keeps
+  the LOCK modifiers (`SDL_KMOD_NUM`/`CAPS`/`SCROLL`) in the same `modstate` word it copies into
+  every `SDL_KeyboardEvent::mod`, so `key.mod == 0` silently disables a bare shortcut for anyone
+  with Num Lock on (Phase 78 bug: split-view `Tab`/`M` were dead). It masks the locks out and
+  rejects only Shift/Ctrl/Alt/GUI/AltGr. Never write `key.mod == 0`.
 - `dup_model.*` (Phase 61, extended Phase 62) — pure duplicate-finder model: `dhash64` (RGB buffer → 9×8
   grayscale cells → 64-bit difference hash), `hamming64`, `cluster_similar` (union-find at
   Hamming ≤ `DUP_SIMILAR_MAX_BITS` = 5); `DupGroup` (Identical / Similar-N-bits, sorted
