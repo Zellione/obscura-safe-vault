@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <print>
 
-int main()
+int main(int argc, char** argv)
 {
     // Same LC_CTYPE init as the app (src/app/main.cpp): the libarchive-backed
     // import tests decode CJK entry names, which the "C" locale cannot.
@@ -17,5 +17,7 @@ int main()
     // crashed (see Phase 15 PR1 — an MSVC Release miscompile did exactly this).
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::println("Running osv crypto tests...\n");
-    return ::testing::run_all_tests();
+    // Optional argv[1]: substring filter, e.g. `osv_tests probe_video` — used to
+    // point valgrind/gdb at a single test.
+    return ::testing::run_all_tests(argc > 1 ? argv[1] : nullptr);
 }

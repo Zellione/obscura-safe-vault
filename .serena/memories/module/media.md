@@ -102,6 +102,19 @@ Files: `video_source.*`, `chunk_avio.*`, `mem_avio.*`, `video_decoder.*`, `audio
   state (NOT AV-gated): `saved_volume()`, `saved_loop_enabled()`/`set_saved_loop_enabled()`.
   Volume persists via `platform::VolumePref`; loop is process-lifetime only.
 
+### sws_scale destination contract (Phase 80)
+Every `sws_scale` destination in this module is PADDED, never exactly-sized:
+libswscale's vectorized writers store whole SIMD vectors per row and measurably
+overrun a tight (`align=1`) buffer by up to ~56 bytes at SIMD-unfriendly widths
+(canary-sweep proven; Windows heap corruption `0xc0000374` via av_malloc's
+inter-block base pointer — the Phase 80 owner crash). Pattern: `FFALIGN(w*bpp,
+64)` linesize + ≥128-byte tail, then row-copy into the tight result. Sites:
+`VideoDecoder::decode_poster_rgb` (RGB24 poster; also uses the DECODED frame's
+w/h, not open()-time codecpar), `GifDecoder` (RGBA playback frames).
+`FrameConverter::to_i420` writes into `av_frame_get_buffer` memory, which
+FFmpeg pads itself. ASAN cannot see violations (stores happen in uninstrumented
+vendored asm) — valgrind or the canary harness in the Phase 80 details doc.
+
 ### frame_convert.{h,cpp} — FrameConverter
 swscale-based YUV->I420 conversion shared by VideoDecoder + VideoDecodeWorker: `zero_copy()`
 for already-I420/NV12 frames, `to_i420()` otherwise, cached `SwsContext` reused per stream.

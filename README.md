@@ -231,7 +231,13 @@ ninja Debug_x64 && build/bin/Debug-asan/osv
 ```bash
 valgrind --leak-check=full --track-origins=yes build/bin/Debug/osv_tests
 valgrind --leak-check=full --track-origins=yes build/bin/Debug/osv
+# osv_tests accepts a substring filter — point valgrind/gdb at one test:
+valgrind build/bin/Debug/osv_tests probe_video_odd
 ```
+
+Valgrind matters here because it checks stores made by vendored *assembly*
+(FFmpeg/libaom SIMD), which ASAN cannot instrument — the Phase 80 sws_scale
+overrun class is only visible to valgrind or a canary harness.
 
 ### GDB
 

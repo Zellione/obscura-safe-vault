@@ -183,6 +183,16 @@ gen_video "tinylegacy_rv20.rm" "rv20" "rm" 160 120 3
 
 echo "Special fixtures (anamorphic)..."
 # 704x576 with SAR 16/15 creates display aspect ratio 16/9 or similar
+# SIMD-unfriendly width: w mod 16 = 10 puts the final row's RGB24 vector store
+# past a tight buffer end. Regression fixture for the Phase 80 poster heap
+# overrun: swscale (yuv420p->RGB24, SWS_BILINEAR) measurably writes up to 42
+# bytes past an align=1 destination at these widths — the canary sweep in the
+# Phase 80 details doc reproduces it. Every other video fixture has w*3 a
+# multiple of 32 (160->480, 320->960, 64->192), which is why the sanitizer
+# suite never tripped. Keep this width in the overshooting class (mod 16 in
+# {2..14}); the exact dispatch varies by CPU.
+gen_video "tiny_oddstride.mp4" "libx264" "mp4" 106 64 3 "-pix_fmt yuv420p"
+
 gen_video "tinylegacy_anamorphic.mkv" "libx264" "mkv" 704 576 3 \
     "-vf setsar=16/15 -crf 28 -preset ultrafast"
 

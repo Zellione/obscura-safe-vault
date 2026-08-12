@@ -87,11 +87,18 @@ inline bool bytes_equal(std::span<const uint8_t> a, std::span<const uint8_t> b)
     return std::memcmp(a.data(), b.data(), a.size()) == 0;
 }
 
-inline int run_all_tests()
+// `filter`: run only tests whose name contains it (substring match); nullptr
+// runs everything. Lets valgrind/gdb sessions target one test — memcheck over
+// the full 2000-test suite is impractical (see README's Debugging section).
+inline int run_all_tests(const char* filter = nullptr)
 {
     int total_failures = 0;
     int failed_tests   = 0;
+    int ran            = 0;
     for (const auto& tc : registry()) {
+        if (filter && std::string_view(tc.name).find(filter) == std::string_view::npos)
+            continue;
+        ++ran;
         // Progress marker on stderr (unbuffered by default): if a test crashes
         // the process mid-suite (e.g. an MSVC Release miscompile in a vendored
         // lib), the last RUN line still pinpoints the offending test, even when
@@ -109,7 +116,11 @@ inline int run_all_tests()
         total_failures += failures;
     }
     std::println("\n{} tests, {} failed ({} total check failures)",
-                registry().size(), failed_tests, total_failures);
+                ran, failed_tests, total_failures);
+    if (filter && ran == 0) {
+        std::println("no test name contains \"{}\"", filter);
+        return 1;
+    }
     return failed_tests == 0 ? 0 : 1;
 }
 
