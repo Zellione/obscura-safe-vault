@@ -601,8 +601,8 @@ std::optional<image::ImageData> VideoDecoder::decode_poster_rgb()
     // the same reason. Aligned rows absorb mid-row overshoot; POSTER_TAIL_PAD
     // absorbs the final row's.
     constexpr int POSTER_TAIL_PAD = 128;
-    uint8_t*  dst_data[4]     = {};
-    int       dst_linesize[4] = {};
+    std::array<uint8_t*, 4> dst_data{};
+    std::array<int, 4>      dst_linesize{};
     dst_linesize[0] = FFALIGN(w * 3, 64);
     const size_t dst_alloc =
         static_cast<size_t>(dst_linesize[0]) * h + POSTER_TAIL_PAD;
@@ -614,7 +614,7 @@ std::optional<image::ImageData> VideoDecoder::decode_poster_rgb()
 
     // Convert (scale) the decoded frame to RGB24.
     const int slices = sws_scale(sws_rgb, frame_->data, frame_->linesize, 0, h,
-                                 dst_data, dst_linesize);
+                                 dst_data.data(), dst_linesize.data());
     std::optional<image::ImageData> out;
     if (slices == h) {
         // Copy row by row: the destination is padded to dst_linesize, the
