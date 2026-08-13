@@ -1022,14 +1022,12 @@ void App::update(double dt)
         }
     }
 
-    if (vault_state_.active) {
-        // Start import session once migration is done (or skipped)
-        if (import_ui_.need_begin_session && !migration_ui_.offer_open &&
-            !migration_ui_.progress_open && (!migration_ui_.job || !migration_ui_.job->active())) {
-            import_ui_.need_begin_session = false;
-            // Phase 73: App-owned lane was started in promote_pending; pass to ImportQueue
-            import_ui_.queue.begin_session(*vault_state_.active, *import_ui_.lane);
-        }
+    // Start import session once migration is done (or skipped)
+    if (vault_state_.active && import_ui_.need_begin_session && !migration_ui_.offer_open &&
+        !migration_ui_.progress_open && (!migration_ui_.job || !migration_ui_.job->active())) {
+        import_ui_.need_begin_session = false;
+        // Phase 73: App-owned lane was started in promote_pending; pass to ImportQueue
+        import_ui_.queue.begin_session(*vault_state_.active, *import_ui_.lane);
     }
 
     // Phase 50: drain the import queue and refresh screens when records are applied

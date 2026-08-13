@@ -1,6 +1,7 @@
 #include "ui/spanned_zip.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <optional>
 
@@ -40,11 +41,11 @@ void write_u32_le(uint8_t* data, size_t offset, uint32_t val) {
 }
 
 // Marker signatures
-constexpr uint8_t PK_SPANNING_MARKER[] = {0x50, 0x4b, 0x07, 0x08};  // PK\x07\x08
-constexpr uint8_t PK_CD_ENTRY[]        = {0x50, 0x4b, 0x01, 0x02};  // PK\x01\x02
-constexpr uint8_t PK_EOCD[]            = {0x50, 0x4b, 0x05, 0x06};  // PK\x05\x06
-constexpr uint8_t PK_ZIP64_LOCATOR[]   = {0x50, 0x4b, 0x06, 0x07};  // PK\x06\x07
-constexpr uint8_t PK_ZIP64_EOCD[]      = {0x50, 0x4b, 0x06, 0x06};  // PK\x06\x06
+constexpr std::array<uint8_t, 4> PK_SPANNING_MARKER{0x50, 0x4b, 0x07, 0x08};  // PK\x07\x08
+constexpr std::array<uint8_t, 4> PK_CD_ENTRY{0x50, 0x4b, 0x01, 0x02};         // PK\x01\x02
+constexpr std::array<uint8_t, 4> PK_EOCD{0x50, 0x4b, 0x05, 0x06};             // PK\x05\x06
+constexpr std::array<uint8_t, 4> PK_ZIP64_LOCATOR{0x50, 0x4b, 0x06, 0x07};    // PK\x06\x07
+constexpr std::array<uint8_t, 4> PK_ZIP64_EOCD{0x50, 0x4b, 0x06, 0x06};       // PK\x06\x06
 
 // Rewrite every central-directory entry so the merged buffer is a single-disk
 // archive: disk_number_start to 0, and the local-header offset to an absolute
@@ -65,7 +66,7 @@ enum class CdStep : uint8_t { Rewritten, EndOfEntries, Malformed };
                                           const std::vector<size_t>& volume_offsets,
                                           size_t marker_size, size_t& consumed)
 {
-    if (std::memcmp(&merged[cd_absolute + cd_pos], PK_CD_ENTRY, 4) != 0) {
+    if (std::memcmp(&merged[cd_absolute + cd_pos], PK_CD_ENTRY.data(), 4) != 0) {
         return CdStep::EndOfEntries;
     }
 
@@ -131,8 +132,8 @@ enum class CdStep : uint8_t { Rewritten, EndOfEntries, Malformed };
 [[nodiscard]] bool has_zip64_markers(const std::vector<uint8_t>& merged)
 {
     for (size_t i = 0; i + 4 <= merged.size(); ++i) {
-        if (std::memcmp(&merged[i], PK_ZIP64_LOCATOR, 4) == 0 ||
-            std::memcmp(&merged[i], PK_ZIP64_EOCD, 4) == 0) {
+        if (std::memcmp(&merged[i], PK_ZIP64_LOCATOR.data(), 4) == 0 ||
+            std::memcmp(&merged[i], PK_ZIP64_EOCD.data(), 4) == 0) {
             return true;
         }
     }
@@ -147,7 +148,7 @@ enum class CdStep : uint8_t { Rewritten, EndOfEntries, Malformed };
     }
     const size_t search_start = merged.size() > 65557 ? merged.size() - 65557 : 0;
     for (size_t i = merged.size() - 22; ; --i) {
-        if (std::memcmp(&merged[i], PK_EOCD, 4) == 0) {
+        if (std::memcmp(&merged[i], PK_EOCD.data(), 4) == 0) {
             return i;
         }
         if (i == search_start) {
@@ -170,7 +171,7 @@ enum class CdStep : uint8_t { Rewritten, EndOfEntries, Malformed };
     size_t total_size = 0;
     size_t marker_size = 0;
 
-    if (volumes[0].size() >= 4 && std::memcmp(volumes[0].data(), PK_SPANNING_MARKER, 4) == 0) {
+    if (volumes[0].size() >= 4 && std::memcmp(volumes[0].data(), PK_SPANNING_MARKER.data(), 4) == 0) {
         marker_size = 4;
     }
 

@@ -101,7 +101,7 @@ TagDictImportSummary apply_tag_dict(VaultSettings& s, const TagDictParseResult& 
 
 std::vector<std::string> tag_dict_summary_lines(const TagDictImportSummary& s)
 {
-    std::vector<std::string> lines{
+    std::vector lines{
         std::format("Categories added:     {}", s.categories_added),
         std::format("Descriptions added:   {}", s.descriptions_added),
         std::format("Descriptions updated: {}", s.descriptions_updated),
