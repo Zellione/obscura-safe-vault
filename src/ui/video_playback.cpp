@@ -88,6 +88,7 @@ struct VideoPlayback::Impl {
         SDL_AudioStream* stream = nullptr;
         uint64_t samples_fed = 0;
         double seek_base = 0.0;
+        double skip_target = -1.0;   // >= 0 while resolving a seek: drop audio frames ending at/before it
         bool subsystem_owned = false;  // we brought up SDL_INIT_AUDIO; quit it in dtor
     };
     AudioState audio_;
@@ -392,6 +393,17 @@ struct VideoPlayback::Impl {
         while (SDL_GetAudioStreamQueued(audio_.stream) < target) {
             auto a = decoder_.next_audio_frame();
             if (!a) break;
+
+            if (audio_.skip_target >= 0.0) {
+                const size_t frames = a->samples.size() / static_cast<size_t>(ch > 0 ? ch : 1);
+                if (media::audio_seek_skip(a->pts_seconds, frames, sr, audio_.skip_target)
+                    == media::AudioSeekSkip::Drop)
+                    continue;                       // pre-target audio: never fed, never counted
+                audio_.seek_base   = a->pts_seconds; // honest base: first audible sample's pts
+                audio_.samples_fed = 0;              // stream was cleared in do_seek
+                audio_.skip_target = -1.0;
+            }
+
             SDL_PutAudioStreamData(audio_.stream, a->samples.data(),
                                    (int)(a->samples.size() * sizeof(float)));
             audio_.samples_fed += a->samples.size() / (ch > 0 ? ch : 1);
@@ -482,6 +494,7 @@ struct VideoPlayback::Impl {
         if (audio_.stream) SDL_ClearAudioStream(audio_.stream);
         audio_.samples_fed = 0;
         audio_.seek_base = tt;
+        audio_.skip_target = tt;  // drop audio frames ending at/before the target
         frame_.pending.reset();
         frame_.shown_pts = -1.0;
         frame_.eof = false;
@@ -743,6 +756,7 @@ struct VideoPlayback::Impl {
     }
     [[nodiscard]] float audio_gain() const { return media::effective_gain(vol_.level, vol_.muted); }
     [[nodiscard]] SDL_FRect debug_vol_bar() const { return vol_.bar; }
+    [[nodiscard]] double debug_audio_clock_base() const { return audio_.seek_base; }
     [[nodiscard]] size_t debug_in_flight_packets() const { return video_worker_->outstanding(); }
     void update(double dt)
     {
@@ -766,6 +780,7 @@ struct VideoPlayback::Impl {
     [[nodiscard]] uint64_t audio_samples_fed() const { return 0; }
     [[nodiscard]] float audio_gain() const { return 0.0f; }
     [[nodiscard]] SDL_FRect debug_vol_bar() const { return {0.0f, 0.0f, 0.0f, 0.0f}; }
+    [[nodiscard]] double debug_audio_clock_base() const { return 0.0; }
     [[nodiscard]] size_t debug_in_flight_packets() const { return 0; }
     void update(double) {}
     void render(gfx::Renderer&, gfx::FontAtlas&, const SDL_FRect&) {}
@@ -792,6 +807,7 @@ bool VideoPlayback::audio_active() const noexcept { return impl_->audio_active()
 uint64_t VideoPlayback::audio_samples_fed() const noexcept { return impl_->audio_samples_fed(); }
 float VideoPlayback::audio_gain() const noexcept { return impl_->audio_gain(); }
 SDL_FRect VideoPlayback::debug_vol_bar() const noexcept { return impl_->debug_vol_bar(); }
+double VideoPlayback::debug_audio_clock_base() const noexcept { return impl_->debug_audio_clock_base(); }
 size_t VideoPlayback::debug_in_flight_packets() const noexcept { return impl_->debug_in_flight_packets(); }
 void VideoPlayback::update(double dt) { impl_->update(dt); }
 

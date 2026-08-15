@@ -71,6 +71,10 @@ public:
     // Last-rendered volume-bar rect (zero-size when no audio). (Phase 16, testing/debug.)
     [[nodiscard]] SDL_FRect debug_vol_bar() const noexcept;
 
+    // Audio clock base after the last seek resolution — the pts of the first
+    // audio frame actually fed post-seek. (Phase 85, testing/debug.)
+    [[nodiscard]] double debug_audio_clock_base() const noexcept;
+
     // Number of decode jobs submitted to the background video decode worker
     // but not yet consumed as a presented/dropped frame. Should stay bounded
     // by the small fixed prefetch depth during steady (non-seeking) playback

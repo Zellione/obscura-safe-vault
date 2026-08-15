@@ -28,7 +28,7 @@ enum class AudioSeekSkip : uint8_t { Drop, Start };
                                  double ahead  = AV_SYNC_AHEAD,
                                  double behind = AV_SYNC_BEHIND) noexcept;
 
-// Audio clock in seconds = base (last seek target) + consumed / rate.
+// Audio clock in seconds = base (first kept audio frame's pts post-seek) + consumed / rate.
 // rate <= 0 collapses to `base_seconds`.
 [[nodiscard]] double audio_clock(double base_seconds, uint64_t samples_consumed,
                                  int sample_rate) noexcept;

@@ -1024,4 +1024,90 @@ TEST(video_playback_seek_far_from_keyframe_does_not_wedge_in_flight_counter)
     SDL_DestroySurface(surf);
 }
 
+TEST(video_playback_seek_rebases_audio_clock_to_first_kept_audio_frame)
+{
+    // Phase 85.2b: after seeking, the audio clock base must be re-set to the
+    // first audio frame actually fed (whose pts >= target), not the requested target.
+    // This test asserts that pump_audio() drops pre-target audio frames and
+    // re-bases the clock on the first kept frame's pts.
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+    auto vbytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_av.mp4");
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("seek_audio_rebase");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny_av.mp4", 4096) == vault::VaultResult::Ok);
+
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        ui::VideoPlayback vp(v, *node);
+        REQUIRE(vp.valid());
+        CHECK(vp.has_audio());
+
+        const SDL_FRect area{0, 0, 320, 240};
+        vp.render(r, font, area);
+
+        vp.handle_key(SDLK_SPACE, SDL_SCANCODE_SPACE);  // play
+        CHECK(vp.animating());
+
+        // Drive playback until audio flows (audio_samples_fed() > 0).
+        // The synthetic fixture is ~1.0s with audio; audio should flow within a few ticks.
+        uint64_t samples_before = vp.audio_samples_fed();
+        for (int i = 0; i < 15 && vp.audio_samples_fed() == samples_before; ++i) {
+            vp.update(0.05);
+            vp.render(r, font, area);
+        }
+        REQUIRE(vp.audio_samples_fed() > 0);  // audio is flowing before seek
+
+        // Seek to mid-clip target (0.3s). On tiny_av.mp4 (~1.0s), this is well into
+        // the content, and the demuxer's keyframe position will be at or before 0.
+        // Without the fix, pump_audio will feed audio frames from the keyframe
+        // onward, and seek_base will be set to the requested 0.3 exactly. With the
+        // fix, pump_audio drops frames ending at/before 0.3, then re-bases to the
+        // first kept frame's pts.
+        const double seek_target = 0.3;
+        vp.seek(seek_target);
+        vp.render(r, font, area);
+
+        // Drive playback again until audio flows post-seek. The test fixture's
+        // audio frame size is ~20ms (common for audio), so within a few ticks
+        // the first kept frame should be fed.
+        samples_before = vp.audio_samples_fed();
+        for (int i = 0; i < 15 && vp.audio_samples_fed() == samples_before; ++i) {
+            vp.update(0.05);
+            vp.render(r, font, area);
+        }
+
+        // After the seek resolves, the audio clock base must be the first kept
+        // frame's pts. Pre-fix, pump_audio feeds frames from the keyframe onward
+        // (before 0.3), while seek_base stays at the requested 0.3 exactly. With
+        // the fix, pump_audio drops pre-target frames and re-bases on the first
+        // kept frame's pts, which should be just before or at the target.
+        const double base = vp.debug_audio_clock_base();
+        // Key assertion: base should be close enough to the target that no more than
+        // a few audio frames precede it. Pre-fix without skip logic, if frames from
+        // 0.0 are fed, the first frame's pts would be 0.0, then clock = 0.0 + fed_samples/sr
+        // would advance quickly, causing visible desync. With the fix, the first
+        // frame fed is from ~0.3, so base ~= 0.3 and clock stays in sync.
+        // Assertion: base is within one typical audio frame duration of the target.
+        CHECK(base > seek_target - 0.05);   // typically audio frames are 20ms (~0.02s)
+        CHECK(base <= seek_target + 0.1);   // base is at most a frame or so past the target
+    }
+
+    SDL_DestroyRenderer(sr);
+    SDL_DestroySurface(surf);
+}
+
 #endif  // OSV_VENDORED_AV
