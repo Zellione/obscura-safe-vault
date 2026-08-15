@@ -11,6 +11,11 @@
 #include "image/image.h"
 #include "image/decode.h"
 
+// For Phase 85 MPEG-PS fixture decoding (uudecode).
+#ifdef OSV_VENDORED_ARCHIVE
+#include "ui/archive_test_helpers.h"
+#endif
+
 namespace {
 
 // Read a file into a vector.
@@ -188,5 +193,43 @@ TEST(probe_video_rejects_garbage_data)
     media::VideoProbeResult result;
     CHECK(!media::probe_video(std::span(junk), result));
 }
+
+#ifdef OSV_VENDORED_ARCHIVE
+TEST(probe_video_mpeg_ps_identifies_codec)
+{
+    // Phase 85: raw MPEG-PS needs the FFmpeg `mpegvideo` probe demuxer
+    // (mpegps defers video codec identification to codec probing).
+    namespace fs = std::filesystem;
+    const auto fixture_dir = fs::path(OSV_MEDIA_FIXTURE_DIR);
+    const auto temp_dir = fs::temp_directory_path();
+
+    // Decode MPEG-2 PS fixture (uuencoded to keep it checked in)
+    std::vector<uint8_t> ps2 = archivetest::uudecode(
+        fixture_dir / "mpeg2_ps.mpg.uu",
+        temp_dir / "mpeg2_ps.mpg");
+    REQUIRE(!ps2.empty());
+
+    media::VideoProbeResult r2;
+    REQUIRE(media::probe_video(std::span(ps2), r2));
+    CHECK_EQ(static_cast<int>(r2.container), static_cast<int>(vault::VideoContainer::MPEGPS));
+    CHECK_EQ(static_cast<int>(r2.codec), static_cast<int>(vault::VideoCodec::MPEG2));
+    CHECK_EQ(r2.width, 96u);
+
+    // FFmpeg's raw-ES probe initially tags MPEG-1-in-PS with the MPEG-2 codec
+    // id (demux.c: "mpegvideo" -> AV_CODEC_ID_MPEG2VIDEO), but stream-info
+    // frame parsing then refines it to MPEG-1 — verified empirically against
+    // this build.
+    std::vector<uint8_t> ps1 = archivetest::uudecode(
+        fixture_dir / "mpeg1_ps.mpg.uu",
+        temp_dir / "mpeg1_ps.mpg");
+    REQUIRE(!ps1.empty());
+
+    media::VideoProbeResult r1;
+    REQUIRE(media::probe_video(std::span(ps1), r1));
+    CHECK_EQ(static_cast<int>(r1.container), static_cast<int>(vault::VideoContainer::MPEGPS));
+    CHECK_EQ(static_cast<int>(r1.codec), static_cast<int>(vault::VideoCodec::MPEG1));
+    CHECK_EQ(r1.width, 96u);
+}
+#endif // OSV_VENDORED_ARCHIVE
 
 #endif // OSV_VENDORED_AV
