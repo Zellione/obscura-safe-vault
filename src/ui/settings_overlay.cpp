@@ -4,8 +4,10 @@
 #include "gfx/text.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "platform/gallery_view_pref.h"
 #include "platform/second_vault_pref.h"
 #include "platform/theme_pref.h"
+#include "ui/gallery_view.h"
 #include "ui/gallery_sort.h"
 #include "ui/settings_model.h"
 #include "ui/text_input_event.h"
@@ -102,10 +104,16 @@ namespace {
     if (key == SDLK_LEFT) {
         if (state.in_pane) {
             if (state.section == SettingsSection::Appearance) {
-                settings_change_value(state, -1);
-                gfx::set_theme(state.theme);
-                (void)platform::ThemePref::default_location().save(state.theme);
-                commit_out = false;  // theme is persisted by the pref save
+                if (state.row == 0) {
+                    settings_change_value(state, -1);
+                    gfx::set_theme(state.theme);
+                    (void)platform::ThemePref::default_location().save(state.theme);
+                    commit_out = false;  // theme is persisted by the pref save
+                } else if (state.row == 1) {
+                    settings_change_value(state, -1);
+                    (void)platform::GalleryViewPref::default_location().save(state.gallery_view);
+                    commit_out = false;
+                }
             } else if (state.section == SettingsSection::Security) {
                 settings_change_value(state, -1);
                 (void)platform::SecondVaultPref::default_location().save(state.second_vault_default);
@@ -120,10 +128,16 @@ namespace {
     if (key == SDLK_RIGHT) {
         if (state.in_pane) {
             if (state.section == SettingsSection::Appearance) {
-                settings_change_value(state, 1);
-                gfx::set_theme(state.theme);
-                (void)platform::ThemePref::default_location().save(state.theme);
-                commit_out = false;  // theme is persisted by the pref save
+                if (state.row == 0) {
+                    settings_change_value(state, 1);
+                    gfx::set_theme(state.theme);
+                    (void)platform::ThemePref::default_location().save(state.theme);
+                    commit_out = false;  // theme is persisted by the pref save
+                } else if (state.row == 1) {
+                    settings_change_value(state, 1);
+                    (void)platform::GalleryViewPref::default_location().save(state.gallery_view);
+                    commit_out = false;
+                }
             } else if (state.section == SettingsSection::Security) {
                 settings_change_value(state, 1);
                 (void)platform::SecondVaultPref::default_location().save(state.second_vault_default);
@@ -322,6 +336,9 @@ void draw_pane_row(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float p
         if (row_index == 0) {
             label = "Theme";
             value = gfx::theme_name(state.theme);
+        } else if (row_index == 1) {
+            label = "Default Gallery View";
+            value = std::string(gallery_view_label(state.gallery_view));
         }
     } else if (state.section == SettingsSection::Browsing) {
         if (row_index == 0) {

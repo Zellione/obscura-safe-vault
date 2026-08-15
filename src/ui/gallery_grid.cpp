@@ -1547,6 +1547,12 @@ bool vault_busy(const GalleryGrid& g)
 
 GalleryView current_gallery_view(const GalleryGrid& g) { return g.view_; }
 
+void set_gallery_view(GalleryGrid& g, GalleryView view)
+{
+    g.view_   = view;
+    g.follow_ = GalleryGrid::ScrollFollow::Ensure;
+}
+
 std::string current_gallery_path(const GalleryGrid& g) { return g.nav_.path(); }
 
 // Phase 78: snapshot one pane's exact configuration.

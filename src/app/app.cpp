@@ -675,6 +675,11 @@ struct App::OverlayDispatch {
         if (bool commit = false; ui::handle_settings_event(app.overlays_.settings, app.window_, e, commit)) {
             // Phase 66: sync the default mode whenever the event was handled
             app.second_.session.set_default_mode(app.overlays_.settings.second_vault_default);
+            // Phase 84: sync gallery view to session and live grid (if one is open behind overlay)
+            app.sessions_.gallery.view = app.overlays_.settings.gallery_view;
+            if (auto* grid = dynamic_cast<ui::GalleryGrid*>(app.screen_.get())) {
+                ui::set_gallery_view(*grid, app.overlays_.settings.gallery_view);
+            }
             // Commit vault settings if the commit flag was set
             if (commit && app.overlays_.settings.vault_unlocked && app.vault_state_.active &&
                 vault::set_vault_settings(*app.vault_state_.active, app.overlays_.settings.draft) !=
@@ -844,6 +849,7 @@ void App::open_settings_overlay()
     overlays_.settings.draft = overlays_.settings.vault_unlocked ? vault::vault_settings(*vault_state_.active)
                                                                   : vault::VaultSettings{};
     overlays_.settings.theme = gfx::active_theme_id();
+    overlays_.settings.gallery_view = sessions_.gallery.view;
     overlays_.settings.second_vault_default = second_.session.default_mode();   // Phase 66
     ui::open_settings(overlays_.settings, ui::SettingsSection::Appearance);
 }
