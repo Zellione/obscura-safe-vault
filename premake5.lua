@@ -517,6 +517,7 @@ project "osv_tests"
         "src/platform/paths.cpp",
         "src/platform/vault_registry.cpp",
         "src/platform/theme_pref.cpp",
+        "src/platform/gallery_view_pref.cpp",
         "src/platform/second_vault_pref.cpp",
         "src/platform/volume_pref.cpp",
         "src/platform/file_dialog.cpp",
