@@ -19,6 +19,7 @@
 #include "gfx/window.h"
 #include "platform/file_dialog.h"
 #include "platform/folder_dialog.h"
+#include "platform/gallery_view_pref.h"
 #include "platform/paths.h"
 #include "platform/perf.h"
 #include "platform/path_utf8.h"
@@ -960,6 +961,10 @@ bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& 
             // The tile geometry just changed under the selection — minimally
             // re-follow so the selected tile doesn't land off-screen.
             g.follow_ = GalleryGrid::ScrollFollow::Ensure;
+            // Phase 84: say which of the five modes we just landed on, and
+            // persist it machine-wide immediately (live-save, like the theme).
+            g.status_ = std::format("View: {}", gallery_view_label(g.view_));
+            (void)platform::GalleryViewPref::default_location().save(g.view_);
             return true;
         case SDLK_X: g.start_export(); return true;
         case SDLK_M:

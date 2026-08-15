@@ -11,6 +11,7 @@
 #include "gfx/renderer.h"
 #include "gfx/theme.h"
 #include "platform/error_log.h"
+#include "platform/gallery_view_pref.h"
 #include "platform/harden.h"
 #include "platform/paths.h"
 #include "platform/path_utf8.h"
@@ -117,6 +118,9 @@ bool App::init()
     // again on exit at the end of run().
     media::set_saved_volume(platform::VolumePref::default_location().load());
 
+    // Phase 84: seed the gallery view with the persisted preference
+    sessions_.gallery.view = platform::GalleryViewPref::default_location().load();
+
     // Phase 66: seed the warm slot with the persisted default mode
     second_.session.set_default_mode(platform::SecondVaultPref::default_location().load());
 
@@ -159,6 +163,9 @@ void App::promote_pending()
     sessions_.adv   = {};                          // new vault session -> fresh advanced search
     sessions_.dual.reset();                        // Phase 78: new vault session -> fresh dual-pane state
     sessions_.gallery.reset();                             // new vault session -> fresh gallery/viewer memory
+    // Phase 84: the view is machine-scoped now — a fresh vault session starts
+    // in the persisted view, not the enum default.
+    sessions_.gallery.view = platform::GalleryViewPref::default_location().load();
     keep_unlocked_ = false;                       // new session always starts with auto-lock on
     vault_state_.active        = std::move(vault_state_.pending);
     vault_state_.active_path   = std::move(vault_state_.pending_path);
