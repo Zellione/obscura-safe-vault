@@ -45,3 +45,30 @@ TEST(next_gallery_view_cycles_list_to_grid_s_to_m_to_l_to_xl_and_wraps)
     CHECK(ui::next_gallery_view(GridL)  == GridXL);
     CHECK(ui::next_gallery_view(GridXL) == List);
 }
+
+// --- gallery_view labels and slugs -------------------------------------------
+
+TEST(gallery_view_labels_and_slugs)
+{
+    using ui::GalleryView;
+    CHECK_EQ(ui::gallery_view_label(GalleryView::List), "List");
+    CHECK_EQ(ui::gallery_view_label(GalleryView::GridXL), "Grid XL");
+    CHECK_EQ(ui::gallery_view_slug(GalleryView::GridS), "grid-s");
+    CHECK_EQ(ui::gallery_view_from_slug("grid-l"), GalleryView::GridL);
+    CHECK_EQ(ui::gallery_view_from_slug("nonsense"), GalleryView::GridM);
+    CHECK_EQ(ui::gallery_view_from_slug(""), GalleryView::GridM);
+    // Round-trip every value.
+    for (auto v : {GalleryView::List, GalleryView::GridS, GalleryView::GridM,
+                   GalleryView::GridL, GalleryView::GridXL}) {
+        CHECK_EQ(ui::gallery_view_from_slug(ui::gallery_view_slug(v)), v);
+    }
+}
+
+TEST(prev_gallery_view_inverts_next)
+{
+    using ui::GalleryView;
+    for (auto v : {GalleryView::List, GalleryView::GridS, GalleryView::GridM,
+                   GalleryView::GridL, GalleryView::GridXL}) {
+        CHECK_EQ(ui::prev_gallery_view(ui::next_gallery_view(v)), v);
+    }
+}
