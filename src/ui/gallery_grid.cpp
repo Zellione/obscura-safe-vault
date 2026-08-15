@@ -1038,6 +1038,19 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
     // Shortcut-key dispatch (L/X/M/R/SPACE/G/B/F/T/S/U); extracted to reduce complexity
     if (gallery_grid_handle_shortcut_keys(*this, key)) { return; }
 
+    // Phase 84: jump to the first / last item. Center like a fresh entry —
+    // Ensure would leave the target hugging the viewport edge.
+    if (key.key == SDLK_HOME) {
+        nav_.select(0);
+        follow_ = ScrollFollow::Center;
+        return;
+    }
+    if (key.key == SDLK_END) {
+        nav_.select(nav_.count() - 1);
+        follow_ = ScrollFollow::Center;
+        return;
+    }
+
     if (is_search_key(key)) { search_.open(); return; }
     if (is_advanced_search_key(key)) { request(NavKind::ToAdvancedSearch); return; }
     if (handle_f3_key(*this, key)) { return; }
@@ -1902,6 +1915,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
         {"Enter", "Open"}, {"Space", "Select (export/move)"},
         {"Ctrl+A", "Select all / none"},
         {"Esc", "Back"}, {"`", "Switch vault"}, {"L", "Cycle view: list / grid size"},
+        {"Home/End", "Jump to first / last item"},
     };
     if (!embedded_) {
         nav_entries.emplace_back("F3", "Split view (side-by-side)");
