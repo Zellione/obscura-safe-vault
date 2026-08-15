@@ -31,4 +31,12 @@ float effective_gain(float volume, bool muted) noexcept
     return muted ? 0.0f : clamp_volume(volume);
 }
 
+AudioSeekSkip audio_seek_skip(double frame_pts, size_t frame_count,
+                              int sample_rate, double target) noexcept
+{
+    if (sample_rate <= 0 || frame_count == 0) return AudioSeekSkip::Start;
+    const double end = frame_pts + static_cast<double>(frame_count) / sample_rate;
+    return end <= target ? AudioSeekSkip::Drop : AudioSeekSkip::Start;
+}
+
 }  // namespace media

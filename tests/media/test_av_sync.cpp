@@ -86,3 +86,40 @@ TEST(audio_clock_no_drift_over_multi_hour_playback)
         CHECK(close(c, 0.5));
     }
 }
+
+TEST(audio_seek_skip_drops_frames_ending_before_target)
+{
+    // 1024 frames @ 48k starting at 9.0s end at ~9.021s — before a 10.0s target.
+    CHECK(audio_seek_skip(9.0, 1024, 48000, 10.0) == AudioSeekSkip::Drop);
+}
+
+TEST(audio_seek_skip_starts_on_frame_straddling_target)
+{
+    // Frame spans [9.99, 10.011) around a 10.0s target.
+    CHECK(audio_seek_skip(9.99, 1024, 48000, 10.0) == AudioSeekSkip::Start);
+}
+
+TEST(audio_seek_skip_frame_ending_exactly_at_target_is_dropped)
+{
+    // [9.9787.., 10.0) contains nothing at/after the target.
+    CHECK(audio_seek_skip(10.0 - 1024.0 / 48000.0, 1024, 48000, 10.0)
+          == AudioSeekSkip::Drop);
+}
+
+TEST(audio_seek_skip_frame_at_or_after_target_starts)
+{
+    CHECK(audio_seek_skip(10.0, 1024, 48000, 10.0) == AudioSeekSkip::Start);
+    CHECK(audio_seek_skip(12.5, 1024, 48000, 10.0) == AudioSeekSkip::Start);
+}
+
+TEST(audio_seek_skip_fails_open_on_bad_rate_or_empty_frame)
+{
+    // Never drop audio forever on degenerate input.
+    CHECK(audio_seek_skip(9.0, 1024, 0, 10.0) == AudioSeekSkip::Start);
+    CHECK(audio_seek_skip(9.0, 0, 48000, 10.0) == AudioSeekSkip::Start);
+}
+
+TEST(audio_seek_skip_seek_to_zero_keeps_first_frame)
+{
+    CHECK(audio_seek_skip(0.0, 1024, 48000, 0.0) == AudioSeekSkip::Start);
+}
