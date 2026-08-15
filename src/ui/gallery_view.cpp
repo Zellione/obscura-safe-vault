@@ -52,15 +52,14 @@ std::string_view gallery_view_label(GalleryView view) noexcept
 
 GalleryView prev_gallery_view(GalleryView view) noexcept
 {
-    using enum GalleryView;
-    switch (view) {
-        case List:   return GridXL;
-        case GridS:  return List;
-        case GridM:  return GridS;
-        case GridL:  return GridM;
-        case GridXL: return GridL;
+    for (size_t i = 0; i < GALLERY_VIEW_TABLE.size(); ++i) {
+        if (GALLERY_VIEW_TABLE[i].first == view) {
+            // Found the view at index i, return the previous row's view (wrap around).
+            size_t prev_index = (i == 0) ? (GALLERY_VIEW_TABLE.size() - 1) : (i - 1);
+            return GALLERY_VIEW_TABLE[prev_index].first;
+        }
     }
-    return List;
+    return GalleryView::List;
 }
 
 std::string_view gallery_view_slug(GalleryView view) noexcept
