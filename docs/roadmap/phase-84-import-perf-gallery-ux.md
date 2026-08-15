@@ -103,6 +103,6 @@ The section explains the threat model (local attacker with disk access) and clar
 | perf | O(n²) → O(n) reader opens in nested archive import; cache ties reader lifetime to buffer via frame-pop hook |
 | ux | persisted gallery view + F2 sync, Home/End keys |
 | docs | Windows crash-dump security model documented |
-| tests | 2081 tests / 0 failed; ASAN clean |
+| tests | 2080 tests / 0 failed; ASAN clean |
 
 No `.osv` format change; `INDEX_VERSION` stays 12.
