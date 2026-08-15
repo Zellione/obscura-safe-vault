@@ -247,6 +247,51 @@ gdb build/bin/Debug/osv
 (gdb) bt       # backtrace on crash
 ```
 
+### Windows crash dumps (WER LocalDumps)
+
+Windows has no core-dump equivalent enabled by default. To capture a crash
+dump of `osv.exe` for debugging, register it with Windows Error Reporting's
+LocalDumps facility (admin shell for HKLM, or use HKCU for the current user
+only):
+
+```bat
+reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\osv.exe" /v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f
+reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\osv.exe" /v DumpType /t REG_DWORD /d 2 /f
+reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\osv.exe" /v DumpCount /t REG_DWORD /d 3 /f
+```
+
+PowerShell equivalent:
+
+```powershell
+$k = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\osv.exe"
+New-Item -Path $k -Force | Out-Null
+Set-ItemProperty $k DumpFolder -Type ExpandString -Value "%LOCALAPPDATA%\CrashDumps"
+Set-ItemProperty $k DumpType  -Type DWord -Value 2   # 2 = full dump, 1 = mini dump
+Set-ItemProperty $k DumpCount -Type DWord -Value 3   # keep at most 3 dumps
+```
+
+- `DumpType`: `1` = mini dump (stacks + module list — usually enough for a
+  crash address), `2` = full dump (entire process memory — needed when heap
+  state matters, e.g. allocator corruption like the Phase 80 `0xc0000374`).
+- Dumps land in `%LOCALAPPDATA%\CrashDumps` as `osv.exe.<pid>.dmp` after the
+  next crash. Open them with WinDbg (`.ecxr; k`) or Visual Studio
+  (File → Open → the `.dmp`, then "Debug with Native Only").
+
+**Removing the configuration** (do this when you are done debugging):
+
+```bat
+reg delete "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\osv.exe" /f
+```
+
+…and delete any collected dumps from the dump folder.
+
+> ⚠️ **Security:** a dump of a running osv contains decrypted media and key
+> material — the exact data the vault exists to protect, and the reason
+> Linux Release builds disable core dumps outright
+> (`platform::disable_core_dumps()`). Treat crash dumps as debug-only
+> artifacts on a trusted machine: never share one, remove the LocalDumps
+> registration when finished, and delete every collected `.dmp`.
+
 ---
 
 ## Project structure
