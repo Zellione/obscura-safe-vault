@@ -23,6 +23,7 @@
 namespace ui {
 
 class MediaSink;
+class ArchiveReaderCache;
 
 // The import password copied into a wiping, best-effort-mlock'd buffer, shared
 // by the hook closures. `crypto::SecureBytes` crypto_wipe's its storage on
@@ -42,8 +43,9 @@ using SecurePassword = std::shared_ptr<crypto::SecureBytes>;
 // takes a password once at enqueue and cannot prompt mid-job, so a nested
 // archive needing a different one is tallied and skipped rather than stalling
 // the import.
-[[nodiscard]] RecursiveHooks make_recursive_hooks(MediaSink&       sink,
-                                                  std::string_view root_gallery,
-                                                  std::string_view password = {});
+[[nodiscard]] RecursiveHooks make_recursive_hooks(MediaSink&        sink,
+                                                  std::string_view  root_gallery,
+                                                  std::string_view  password = {},
+                                                  ArchiveReaderCache* cache = nullptr);
 
 } // namespace ui

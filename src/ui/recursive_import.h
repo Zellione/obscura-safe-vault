@@ -137,6 +137,10 @@ struct RecursiveHooks {
     std::function<void(int)>                                                           note_planned;
     // Polled between entries so a queued import stays cancellable.
     std::function<bool()>                                                              cancelled;
+    // Called when the walker finishes an archive (its frame pops) — the last
+    // moment the buffer is guaranteed alive. Optional; Phase 84 wires it to
+    // ArchiveReaderCache::drop so cached readers never outlive their bytes.
+    std::function<void(std::span<const uint8_t>)>                                      archive_done;
 };
 
 // Walk `root_bytes` depth-first, importing media and descending into nested

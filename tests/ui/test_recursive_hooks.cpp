@@ -241,3 +241,47 @@ TEST(make_secure_password_of_empty_is_non_null_and_empty)
     REQUIRE(pw != nullptr);
     CHECK_EQ(pw->size(), 0u);
 }
+
+#ifdef OSV_VENDORED_ARCHIVE
+
+#include "ui/archive_reader_cache.h"
+#include "archive_test_helpers.h"
+
+// Phase 84: a recursive import must open each archive ONCE, not once per
+// entry. Outer 7z: 3 media + 1 nested 7z (2 media) => 2 archives, 7 media/
+// nested extracts + 2 lists. Pre-cache that cost 9 reader opens; now 2.
+TEST(recursive_hooks_open_each_archive_once)
+{
+    const auto dir = ziptest::fresh_dir("rechooks_opens");
+
+    const auto inner_path = archivetest::make_archive({{"one.jpg", ziptest::fake_jpeg(1)},
+                                                       {"two.jpg", ziptest::fake_jpeg(2)}},
+                                                      "7zip", dir / "inner.7z");
+    const auto inner_bytes = archivetest::read_file(inner_path);
+    REQUIRE(!inner_bytes.empty());
+
+    const auto outer_path = archivetest::make_archive({{"a.jpg", ziptest::fake_jpeg(3)},
+                                                       {"b.jpg", ziptest::fake_jpeg(4)},
+                                                       {"c.jpg", ziptest::fake_jpeg(5)},
+                                                       {"bonus.7z", inner_bytes}},
+                                                      "7zip", dir / "outer.7z");
+    const auto outer_bytes = archivetest::read_file(outer_path);
+    REQUIRE(!outer_bytes.empty());
+
+    vault::Vault v;
+    ziptest::make_vault(v, dir / "v.osv");
+    REQUIRE(v.create_gallery("Dest") == vault::VaultResult::Ok);
+
+    ui::DirectVaultSink       sink(v, "Dest", "");
+    ui::ArchiveReaderCache    cache;
+    const auto hooks = ui::make_recursive_hooks(sink, "Dest", {}, &cache);
+    const auto tally = ui::walk_archive(outer_bytes, ui::ArchiveKind::SevenZip, "Dest", hooks);
+
+    CHECK_EQ(tally.media_placed, 5);
+    CHECK_EQ(tally.nested_archives, 1);
+    CHECK_EQ(cache.opens(), 2u);      // outer + inner, regardless of entry count
+
+    ziptest::cleanup_dir(dir);
+}
+
+#endif  // OSV_VENDORED_ARCHIVE

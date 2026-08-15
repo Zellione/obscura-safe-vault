@@ -227,6 +227,9 @@ void descend(const Frame& f, const ZipPlan& plan, const RecursiveHooks& hooks,
         ++tally.nested_archives;
         walk_one(child_frame, hooks, budget, tally);
         budget.leave(child_frame.owned.size());
+        if (hooks.archive_done) {
+            hooks.archive_done(child_frame.bytes);
+        }
     }
 }
 
@@ -294,6 +297,9 @@ RecursiveTally walk_archive(std::span<const uint8_t> root_bytes,
                          .gallery = std::string(dest_gallery),
                          .depth   = 0};
     walk_one(root, hooks, budget, tally);
+    if (hooks.archive_done) {
+        hooks.archive_done(root_bytes);
+    }
     return tally;
 }
 
