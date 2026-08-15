@@ -19,6 +19,7 @@
 #include "gfx/window.h"
 #include "platform/file_dialog.h"
 #include "platform/folder_dialog.h"
+#include "platform/gallery_view_pref.h"
 #include "platform/paths.h"
 #include "platform/perf.h"
 #include "platform/path_utf8.h"
@@ -960,6 +961,10 @@ bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& 
             // The tile geometry just changed under the selection — minimally
             // re-follow so the selected tile doesn't land off-screen.
             g.follow_ = GalleryGrid::ScrollFollow::Ensure;
+            // Phase 84: say which of the five modes we just landed on, and
+            // persist it machine-wide immediately (live-save, like the theme).
+            g.status_ = std::format("View: {}", gallery_view_label(g.view_));
+            (void)platform::GalleryViewPref::default_location().save(g.view_);
             return true;
         case SDLK_X: g.start_export(); return true;
         case SDLK_M:
@@ -1032,6 +1037,19 @@ void GalleryGrid::handle_key_down(const SDL_KeyboardEvent& key)
     }
     // Shortcut-key dispatch (L/X/M/R/SPACE/G/B/F/T/S/U); extracted to reduce complexity
     if (gallery_grid_handle_shortcut_keys(*this, key)) { return; }
+
+    // Phase 84: jump to the first / last item. Center like a fresh entry —
+    // Ensure would leave the target hugging the viewport edge.
+    if (key.key == SDLK_HOME) {
+        nav_.select(0);
+        follow_ = ScrollFollow::Center;
+        return;
+    }
+    if (key.key == SDLK_END) {
+        nav_.select(nav_.count() - 1);
+        follow_ = ScrollFollow::Center;
+        return;
+    }
 
     if (is_search_key(key)) { search_.open(); return; }
     if (is_advanced_search_key(key)) { request(NavKind::ToAdvancedSearch); return; }
@@ -1542,6 +1560,12 @@ bool vault_busy(const GalleryGrid& g)
 
 GalleryView current_gallery_view(const GalleryGrid& g) { return g.view_; }
 
+void set_gallery_view(GalleryGrid& g, GalleryView view)
+{
+    g.view_   = view;
+    g.follow_ = GalleryGrid::ScrollFollow::Ensure;
+}
+
 std::string current_gallery_path(const GalleryGrid& g) { return g.nav_.path(); }
 
 // Phase 78: snapshot one pane's exact configuration.
@@ -1891,6 +1915,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
         {"Enter", "Open"}, {"Space", "Select (export/move)"},
         {"Ctrl+A", "Select all / none"},
         {"Esc", "Back"}, {"`", "Switch vault"}, {"L", "Cycle view: list / grid size"},
+        {"Home/End", "Jump to first / last item"},
     };
     if (!embedded_) {
         nav_entries.emplace_back("F3", "Split view (side-by-side)");

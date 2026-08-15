@@ -39,3 +39,16 @@ TEST(nav_selection_clamp)
     m.set_count(0);
     CHECK_EQ(m.selected(), 0);     // empty resets
 }
+
+TEST(nav_model_select_clamps)
+{
+    ui::NavModel n;
+    n.set_count(5);
+    n.select(99);
+    CHECK_EQ(n.selected(), 4);
+    n.select(-3);
+    CHECK_EQ(n.selected(), 0);
+    n.set_count(0);
+    n.select(7);
+    CHECK_EQ(n.selected(), 0);
+}

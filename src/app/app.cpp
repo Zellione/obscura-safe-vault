@@ -11,6 +11,7 @@
 #include "gfx/renderer.h"
 #include "gfx/theme.h"
 #include "platform/error_log.h"
+#include "platform/gallery_view_pref.h"
 #include "platform/harden.h"
 #include "platform/paths.h"
 #include "platform/path_utf8.h"
@@ -117,6 +118,9 @@ bool App::init()
     // again on exit at the end of run().
     media::set_saved_volume(platform::VolumePref::default_location().load());
 
+    // Phase 84: seed the gallery view with the persisted preference
+    sessions_.gallery.view = platform::GalleryViewPref::default_location().load();
+
     // Phase 66: seed the warm slot with the persisted default mode
     second_.session.set_default_mode(platform::SecondVaultPref::default_location().load());
 
@@ -159,6 +163,9 @@ void App::promote_pending()
     sessions_.adv   = {};                          // new vault session -> fresh advanced search
     sessions_.dual.reset();                        // Phase 78: new vault session -> fresh dual-pane state
     sessions_.gallery.reset();                             // new vault session -> fresh gallery/viewer memory
+    // Phase 84: the view is machine-scoped now — a fresh vault session starts
+    // in the persisted view, not the enum default.
+    sessions_.gallery.view = platform::GalleryViewPref::default_location().load();
     keep_unlocked_ = false;                       // new session always starts with auto-lock on
     vault_state_.active        = std::move(vault_state_.pending);
     vault_state_.active_path   = std::move(vault_state_.pending_path);
@@ -668,6 +675,11 @@ struct App::OverlayDispatch {
         if (bool commit = false; ui::handle_settings_event(app.overlays_.settings, app.window_, e, commit)) {
             // Phase 66: sync the default mode whenever the event was handled
             app.second_.session.set_default_mode(app.overlays_.settings.second_vault_default);
+            // Phase 84: sync gallery view to session and live grid (if one is open behind overlay)
+            app.sessions_.gallery.view = app.overlays_.settings.gallery_view;
+            if (auto* grid = dynamic_cast<ui::GalleryGrid*>(app.screen_.get())) {
+                ui::set_gallery_view(*grid, app.overlays_.settings.gallery_view);
+            }
             // Commit vault settings if the commit flag was set
             if (commit && app.overlays_.settings.vault_unlocked && app.vault_state_.active &&
                 vault::set_vault_settings(*app.vault_state_.active, app.overlays_.settings.draft) !=
@@ -837,6 +849,7 @@ void App::open_settings_overlay()
     overlays_.settings.draft = overlays_.settings.vault_unlocked ? vault::vault_settings(*vault_state_.active)
                                                                   : vault::VaultSettings{};
     overlays_.settings.theme = gfx::active_theme_id();
+    overlays_.settings.gallery_view = sessions_.gallery.view;
     overlays_.settings.second_vault_default = second_.session.default_mode();   // Phase 66
     ui::open_settings(overlays_.settings, ui::SettingsSection::Appearance);
 }

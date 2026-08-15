@@ -46,7 +46,7 @@ TEST(settings_row_count_per_section)
     ui::SettingsState s;
     make_unlocked(s);
     s.section = ui::SettingsSection::Appearance;
-    CHECK_EQ(ui::settings_row_count(s), 1);                // theme
+    CHECK_EQ(ui::settings_row_count(s), 2);                // theme + default gallery view
     s.section = ui::SettingsSection::Browsing;
     CHECK_EQ(ui::settings_row_count(s), 2);                // default sort + tile tags
     s.section = ui::SettingsSection::TagColours;
@@ -63,7 +63,7 @@ TEST(settings_locked_vault_has_no_rows_in_vault_sections)
     s.section = ui::SettingsSection::TagColours;
     CHECK_EQ(ui::settings_row_count(s), 0);
     s.section = ui::SettingsSection::Appearance;
-    CHECK_EQ(ui::settings_row_count(s), 1);                // theme still works
+    CHECK_EQ(ui::settings_row_count(s), 2);                // theme + default gallery view still work
 }
 
 TEST(settings_row_navigation_clamps)
@@ -266,4 +266,30 @@ TEST(settings_footer_hint_prompt_state_wins_over_section)
     st.section   = ui::SettingsSection::TagColours;
     st.prompting = true;
     CHECK(ui::settings_footer_hint(st).find("[Enter] Confirm") != std::string::npos);
+}
+
+TEST(settings_appearance_has_gallery_view_row)
+{
+    ui::SettingsState s;
+    s.section = ui::SettingsSection::Appearance;
+    CHECK_EQ(ui::settings_row_count(s), 2);     // theme + default gallery view
+}
+
+TEST(settings_gallery_view_row_cycles_both_ways)
+{
+    ui::SettingsState s;
+    s.section = ui::SettingsSection::Appearance;
+    s.row     = 1;
+    s.gallery_view = ui::GalleryView::GridM;
+    ui::settings_change_value(s, 1);
+    CHECK_EQ(s.gallery_view, ui::GalleryView::GridL);
+    ui::settings_change_value(s, -1);
+    ui::settings_change_value(s, -1);
+    CHECK_EQ(s.gallery_view, ui::GalleryView::GridS);
+    // Row 0 still cycles the theme, untouched by the new row.
+    s.row = 0;
+    const auto theme_before = s.theme;
+    ui::settings_change_value(s, 1);
+    CHECK(s.theme != theme_before);
+    CHECK_EQ(s.gallery_view, ui::GalleryView::GridS);
 }

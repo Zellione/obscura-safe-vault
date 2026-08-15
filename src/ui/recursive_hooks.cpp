@@ -2,12 +2,16 @@
 
 #include "image/format_registry.h"
 #include "ui/archive_reader.h"
+#ifdef OSV_VENDORED_ARCHIVE
+#include "ui/archive_reader_cache.h"
+#endif
 #include "ui/media_sink.h"
 #include "ui/zip_encoding.h"
 
 #include "miniz.h"
 
 #include <cstring>
+#include <memory>
 #include <string>
 
 namespace ui {
@@ -66,31 +70,32 @@ bool zip_extract(std::span<const uint8_t> bytes, std::size_t index, crypto::Secu
 
 // --- libarchive path (7z / rar / tar) ---------------------------------------
 //
-// These hooks are stateless by design (span in, bytes out), so each call
-// builds a fresh reader. That forfeits ArchiveReader's forward stream cursor
-// (which only pays off across extracts on ONE reader) — acceptable here
-// because nested-archive candidates are rare, and the recursive walk extracts
-// the nested archive once and then imports from its in-memory bytes.
+// Phase 84: the hooks capture an ArchiveReaderCache, shared across closures,
+// so each archive buffer is opened ONCE. The cache keeps one ArchiveReader per
+// live buffer and reuses its forward stream cursor across entries — a
+// O(N^2)→O(N) win for each archive. The walker calls archive_done() to drop
+// the reader when its frame pops, before the buffer dies, so the cache never
+// outlives its data.
 
-bool arc_list(std::span<const uint8_t> bytes, std::string_view password,
-              std::vector<ZipEntry>& out)
+bool arc_list(ArchiveReaderCache& cache, std::span<const uint8_t> bytes,
+              std::string_view password, std::vector<ZipEntry>& out)
 {
-    ArchiveReader reader;
-    if (!reader.open(bytes, password)) {
+    const ArchiveReader* reader = cache.get(bytes, password);
+    if (reader == nullptr) {
         return false;
     }
-    out = reader.entries();
+    out = reader->entries();
     return true;
 }
 
-bool arc_extract(std::span<const uint8_t> bytes, std::string_view password, std::size_t index,
-                 crypto::SecureBytes& out)
+bool arc_extract(ArchiveReaderCache& cache, std::span<const uint8_t> bytes,
+                 std::string_view password, std::size_t index, crypto::SecureBytes& out)
 {
-    ArchiveReader reader;
-    if (!reader.open(bytes, password)) {
+    const ArchiveReader* reader = cache.get(bytes, password);
+    if (reader == nullptr) {
         return false;
     }
-    return reader.extract(index, out);
+    return reader->extract(index, out);
 }
 
 // walk_archive works in ABSOLUTE vault paths — a nested sub-gallery's path is
@@ -130,7 +135,7 @@ SecurePassword make_secure_password(std::string_view password)
 }
 
 RecursiveHooks make_recursive_hooks(MediaSink& sink, std::string_view root_gallery,
-                                    std::string_view password)
+                                    std::string_view password, ArchiveReaderCache* cache)
 {
     const std::string root(root_gallery);
     // The password lives in a shared, wiping SecureBytes rather than a plain
@@ -139,17 +144,36 @@ RecursiveHooks make_recursive_hooks(MediaSink& sink, std::string_view root_galle
     // closure is destroyed — invariant #2. Shared so both closures hold one copy.
     const SecurePassword pw = make_secure_password(password);
 
+#ifdef OSV_VENDORED_ARCHIVE
+    // Caller-owned when injected (tests observe opens()); otherwise the
+    // closures share ownership of an internal one. The non-owning aliasing
+    // shared_ptr keeps ONE capture type for both cases.
+    const std::shared_ptr<ArchiveReaderCache> rc =
+        cache != nullptr ? std::shared_ptr<ArchiveReaderCache>(cache, [](ArchiveReaderCache*) { /* non-owning: caller-owned cache, never deleted here */ })
+                         : std::make_shared<ArchiveReaderCache>();
+#else
+    (void)cache;
+#endif
+
     RecursiveHooks h;
 
-    h.list_entries = [pw](std::span<const uint8_t> bytes, ArchiveKind kind,
-                          std::vector<ZipEntry>& out) {
-        return kind_is_zip(kind) ? zip_list(bytes, out) : arc_list(bytes, pw_view(pw), out);
+    h.list_entries = [pw
+#ifdef OSV_VENDORED_ARCHIVE
+                       , rc
+#endif
+                      ](std::span<const uint8_t> bytes, ArchiveKind kind,
+                        std::vector<ZipEntry>& out) {
+        return kind_is_zip(kind) ? zip_list(bytes, out) : arc_list(*rc, bytes, pw_view(pw), out);
     };
 
-    h.extract_entry = [pw](std::span<const uint8_t> bytes, ArchiveKind kind, std::size_t index,
-                           crypto::SecureBytes& out) {
+    h.extract_entry = [pw
+#ifdef OSV_VENDORED_ARCHIVE
+                        , rc
+#endif
+                       ](std::span<const uint8_t> bytes, ArchiveKind kind, std::size_t index,
+                          crypto::SecureBytes& out) {
         return kind_is_zip(kind) ? zip_extract(bytes, index, out)
-                                 : arc_extract(bytes, pw_view(pw), index, out);
+                                 : arc_extract(*rc, bytes, pw_view(pw), index, out);
     };
 
     h.create_gallery = [&sink, root](std::string_view gallery) {
@@ -177,6 +201,10 @@ RecursiveHooks make_recursive_hooks(MediaSink& sink, std::string_view root_galle
     };
 
     h.cancelled = [&sink] { return sink.cancelled(); };
+
+#ifdef OSV_VENDORED_ARCHIVE
+    h.archive_done = [rc](std::span<const uint8_t> bytes) { rc->drop(bytes); };
+#endif
 
     return h;
 }

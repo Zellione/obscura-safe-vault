@@ -9,6 +9,7 @@
 #include "platform/second_vault_pref.h"
 #include "vault/index.h"
 
+#include "ui/gallery_view.h"
 #include "ui/text_input_model.h"
 #include "ui/widgets.h"
 
@@ -25,6 +26,8 @@ struct SettingsState {
     bool               vault_unlocked    = false;
     vault::VaultSettings draft;
     gfx::ThemeId       theme             = gfx::ThemeId::RefinedSlate;
+    // Phase 84: machine-scoped, like theme
+    GalleryView        gallery_view      = GalleryView::GridM;
     // Phase 66: machine-scoped, like theme
     platform::SecondVaultMode second_vault_default = platform::SecondVaultMode::LockNow;
     // Inline "add category" / "rename category" prompt (Phase 49). `prompt_row`

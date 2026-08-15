@@ -214,6 +214,9 @@ void toggle_select();          // toggle the current item in the export selectio
     // current_gallery_view is a free friend for the same S1448 reason: App reads it
     // (Phase 39 Part 2) to snapshot the outgoing grid's view mode into GallerySessionState.
     friend GalleryView current_gallery_view(const GalleryGrid& g);
+    // Phase 84: the F2 settings row changes the view while a grid is open behind
+    // the overlay — push it into the live instance so grid, session and pref agree.
+    friend void set_gallery_view(GalleryGrid& g, GalleryView view);
     // current_gallery_path (Phase 50): App uses it to derive back nav for import status screen
     friend std::string current_gallery_path(const GalleryGrid& g);
     // Phase 78: snapshot one pane's configuration / rebuild it
@@ -401,6 +404,9 @@ void handle_delete_key(GalleryGrid& g);
 void render_delete_confirm_modal(GalleryGrid& g, gfx::Renderer& r, float W, float H);
 void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);
 [[nodiscard]] GalleryView current_gallery_view(const GalleryGrid& g);
+// Phase 84: the F2 settings row changes the view while a grid is open behind
+// the overlay — push it into the live instance so grid, session and pref agree.
+void set_gallery_view(GalleryGrid& g, GalleryView view);
 [[nodiscard]] std::string current_gallery_path(const GalleryGrid& g);  // Phase 50: for import status back nav
 // Phase 78: snapshot one pane's exact configuration / rebuild it. The restore
 // clamps `selected` and drops out-of-range `selected_tiles` if the listing changed,

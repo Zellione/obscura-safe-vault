@@ -48,7 +48,7 @@ int settings_row_count(const SettingsState& state) noexcept
     using enum SettingsSection;
     switch (state.section) {
     case Appearance:
-        return 1; // theme
+        return 2; // theme, default gallery view
     case Browsing:
         return state.vault_unlocked ? 2 : 0; // default sort + tiles show tags
     case TagColours: {
@@ -76,15 +76,20 @@ std::string settings_footer_hint(const SettingsState& state)
 
 namespace {
 
-// Handle theme value change.
-void change_theme_value(SettingsState& state, int delta) noexcept
+// Handle appearance settings value change.
+void change_appearance_value(SettingsState& state, int delta) noexcept
 {
-    auto current = static_cast<int>(std::to_underlying(state.theme));
-    int  next    = (current + delta) % gfx::THEME_COUNT;
-    if (next < 0) {
-        next += gfx::THEME_COUNT;
+    if (state.row == 0) {
+        auto current = static_cast<int>(std::to_underlying(state.theme));
+        int  next    = (current + delta) % gfx::THEME_COUNT;
+        if (next < 0) {
+            next += gfx::THEME_COUNT;
+        }
+        state.theme = static_cast<gfx::ThemeId>(next);
+    } else if (state.row == 1) {
+        state.gallery_view = delta >= 0 ? next_gallery_view(state.gallery_view)
+                                        : prev_gallery_view(state.gallery_view);
     }
-    state.theme = static_cast<gfx::ThemeId>(next);
 }
 
 // Handle browsing settings value change.
@@ -146,7 +151,7 @@ void settings_change_value(SettingsState& state, int delta) noexcept
 {
     using enum SettingsSection;
     if (state.section == Appearance) {
-        change_theme_value(state, delta);
+        change_appearance_value(state, delta);
     } else if (state.section == Browsing) {
         change_browsing_value(state, delta);
     } else if (state.section == TagColours) {
