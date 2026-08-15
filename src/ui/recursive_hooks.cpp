@@ -80,7 +80,7 @@ bool zip_extract(std::span<const uint8_t> bytes, std::size_t index, crypto::Secu
 bool arc_list(ArchiveReaderCache& cache, std::span<const uint8_t> bytes,
               std::string_view password, std::vector<ZipEntry>& out)
 {
-    ArchiveReader* reader = cache.get(bytes, password);
+    const ArchiveReader* reader = cache.get(bytes, password);
     if (reader == nullptr) {
         return false;
     }
@@ -91,7 +91,7 @@ bool arc_list(ArchiveReaderCache& cache, std::span<const uint8_t> bytes,
 bool arc_extract(ArchiveReaderCache& cache, std::span<const uint8_t> bytes,
                  std::string_view password, std::size_t index, crypto::SecureBytes& out)
 {
-    ArchiveReader* reader = cache.get(bytes, password);
+    const ArchiveReader* reader = cache.get(bytes, password);
     if (reader == nullptr) {
         return false;
     }
@@ -149,7 +149,7 @@ RecursiveHooks make_recursive_hooks(MediaSink& sink, std::string_view root_galle
     // closures share ownership of an internal one. The non-owning aliasing
     // shared_ptr keeps ONE capture type for both cases.
     const std::shared_ptr<ArchiveReaderCache> rc =
-        cache != nullptr ? std::shared_ptr<ArchiveReaderCache>(cache, [](ArchiveReaderCache*) {})
+        cache != nullptr ? std::shared_ptr<ArchiveReaderCache>(cache, [](ArchiveReaderCache*) { /* non-owning: caller-owned cache, never deleted here */ })
                          : std::make_shared<ArchiveReaderCache>();
 #else
     (void)cache;

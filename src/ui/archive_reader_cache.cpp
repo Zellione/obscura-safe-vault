@@ -16,7 +16,7 @@ ArchiveReader* ArchiveReaderCache::get(std::span<const uint8_t> bytes,
         return nullptr;
     }
     ++opens_;
-    return readers_.emplace(key, std::move(reader)).first->second.get();
+    return readers_.try_emplace(key, std::move(reader)).first->second.get();
 }
 
 void ArchiveReaderCache::drop(std::span<const uint8_t> bytes) noexcept

@@ -98,54 +98,44 @@ namespace {
     return false;
 }
 
+// Apply a Left/Right value change at the focused row: cycle the value, do the
+// section's live persistence (theme / gallery view / second-vault mode), and
+// report whether the vault-backed draft needs a commit.
+void apply_value_delta(SettingsState& state, int delta, bool& commit_out)
+{
+    if (state.section == SettingsSection::Appearance) {
+        if (state.row == 0) {
+            settings_change_value(state, delta);
+            gfx::set_theme(state.theme);
+            (void)platform::ThemePref::default_location().save(state.theme);
+            commit_out = false;  // theme is persisted by the pref save
+        } else if (state.row == 1) {
+            settings_change_value(state, delta);
+            (void)platform::GalleryViewPref::default_location().save(state.gallery_view);
+            commit_out = false;
+        }
+    } else if (state.section == SettingsSection::Security) {
+        settings_change_value(state, delta);
+        (void)platform::SecondVaultPref::default_location().save(state.second_vault_default);
+        commit_out = false;
+    } else if (state.vault_unlocked) {
+        settings_change_value(state, delta);
+        commit_out = true;
+    }
+}
+
 // Handle value changes (LEFT/RIGHT arrows).
 [[nodiscard]] bool handle_value_change(SettingsState& state, SDL_Keycode key, bool& commit_out)
 {
     if (key == SDLK_LEFT) {
         if (state.in_pane) {
-            if (state.section == SettingsSection::Appearance) {
-                if (state.row == 0) {
-                    settings_change_value(state, -1);
-                    gfx::set_theme(state.theme);
-                    (void)platform::ThemePref::default_location().save(state.theme);
-                    commit_out = false;  // theme is persisted by the pref save
-                } else if (state.row == 1) {
-                    settings_change_value(state, -1);
-                    (void)platform::GalleryViewPref::default_location().save(state.gallery_view);
-                    commit_out = false;
-                }
-            } else if (state.section == SettingsSection::Security) {
-                settings_change_value(state, -1);
-                (void)platform::SecondVaultPref::default_location().save(state.second_vault_default);
-                commit_out = false;
-            } else if (state.vault_unlocked) {
-                settings_change_value(state, -1);
-                commit_out = true;
-            }
+            apply_value_delta(state, -1, commit_out);
         }
         return true;
     }
     if (key == SDLK_RIGHT) {
         if (state.in_pane) {
-            if (state.section == SettingsSection::Appearance) {
-                if (state.row == 0) {
-                    settings_change_value(state, 1);
-                    gfx::set_theme(state.theme);
-                    (void)platform::ThemePref::default_location().save(state.theme);
-                    commit_out = false;  // theme is persisted by the pref save
-                } else if (state.row == 1) {
-                    settings_change_value(state, 1);
-                    (void)platform::GalleryViewPref::default_location().save(state.gallery_view);
-                    commit_out = false;
-                }
-            } else if (state.section == SettingsSection::Security) {
-                settings_change_value(state, 1);
-                (void)platform::SecondVaultPref::default_location().save(state.second_vault_default);
-                commit_out = false;
-            } else if (state.vault_unlocked) {
-                settings_change_value(state, 1);
-                commit_out = true;
-            }
+            apply_value_delta(state, 1, commit_out);
         }
         return true;
     }
