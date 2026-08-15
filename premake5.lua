@@ -589,6 +589,7 @@ project "osv_tests"
         "src/ui/playback_model.cpp",
         "src/ui/video_playback.cpp",
         "src/ui/archive_reader.cpp",
+        "src/ui/archive_reader_cache.cpp",
         "src/ui/archive_import.cpp",
         "src/ui/archive_kind.cpp",
         "src/ui/recursive_import.cpp",
