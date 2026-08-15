@@ -75,7 +75,10 @@ watermark, so the pass re-runs at the next unlock.
 - Tile grid: sub-galleries (folder icon) and image thumbnails, rendered
   folders-first (Phase 46).
 - Breadcrumb bar at top shows current path.
-- Keyboard: `Enter`/`Space` open, `Backspace`/`Esc` up.
+- Keyboard: `Enter`/`Space` open, `Backspace`/`Esc` up. **Phase 84:**
+  `Home`/`End` jump to the first/last item (centered scroll); each `L` press
+  shows the newly selected mode as a footer status ("View: Grid M") and the
+  view persists machine-wide across restarts (`gallery_view.conf`).
 - **Phase 56:** `Right-click` is Esc — clears any active multi-selection first, then ascends
   to the parent gallery (exactly like Esc). At the root gallery, right-click exits to the vault
   manager.
@@ -217,7 +220,10 @@ change value, `N` add category, `R` rename, `Del` remove, `Esc` close. Three
 sections:
 - **Appearance — this machine.** Theme; changes apply live and persist to
   `theme.conf` immediately, exactly as the retired `C` theme picker did. The
-  preview IS the choice.
+  preview IS the choice. **Phase 84:** a second row, **Default Gallery View** —
+  cycles the five densities (List/Grid S/M/L/XL), live-saves
+  `gallery_view.conf`, and pushes straight into an open grid behind the
+  overlay.
 - **Browsing — this vault.** Vault-wide default sort order, and "show tags on
   tiles".
 - **Tag colours — this vault.** The category→swatch rows.
