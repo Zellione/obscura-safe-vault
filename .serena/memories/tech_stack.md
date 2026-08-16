@@ -43,7 +43,11 @@ resolution is single-pass and libwebpdemux depends on libwebp). The build passes
 decoders (pro `.mov` codecs Phase 28; `.webm` VP8/VP9 Phase 38; AV1 + legacy `.mov` codecs Phase 40);
 Phase 52 additions: mpeg1video/mpeg2video/mpeg4/msmpeg4v1/msmpeg4v2/msmpeg4v3/wmv1/wmv2/wmv3/vc1/h263/flv1/vp6/vp6a/vp6f/svq1/svq3/dvvideo/msvideo1/rpza/huffyuv/ffv1/theora/rv10/rv20/rv30/rv40 video decoders,
 aac/opus/mp3/vorbis/flac/ac3/mp2/wmav1/wmav2/cook/ra_144/ra_288/eac3/pcm_s16le/pcm_u8/adpcm_ms/adpcm_ima_wav audio decoders,
-mov/mp4/matroska/avi/mpegps/mpegts/asf/flv/ogg/rm demuxers,
+mov/mp4/matroska/avi/mpegps/mpegts/asf/flv/ogg/rm/mpegvideo demuxers
+(`mpegvideo` added Phase 85: it is the raw-ES PROBE demuxer that codec-identifies MPEG video
+inside a program stream — `mpegps` sets `request_probe` and defers to it, so without it raw
+`.mpg` probed as Unknown-codec; probe-only component, decode-only design unchanged; keep the
+Linux and Windows scripts' demuxer lists identical),
 parsers mpegvideo/mpeg4video/h263/vc1/mpegaudio,
 `--enable-libaom --enable-avfilter --enable-filter=yadif` (yadif deinterlacing),
 swscale + swresample; no encoders/muxers/protocols/network/programs).

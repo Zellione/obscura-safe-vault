@@ -75,14 +75,26 @@ Files: `video_source.*`, `chunk_avio.*`, `mem_avio.*`, `video_decoder.*`, `audio
   rejects a single-frame file. `rewind()` = `WebPAnimDecoderReset`.
 - `av_sync` = PURE logic (no SDL/FFmpeg) for audio-clock tracking: `decide(audio_clock,
   frame_pts,...)` → `FrameAction{Present,Hold,Drop}`; `audio_clock(base,samples_consumed,
-  rate)`; `clamp_volume`/`effective_gain` helpers; unit-tested.
+  rate)`; `clamp_volume`/`effective_gain` helpers; `audio_seek_skip(frame_pts, frame_count,
+  sample_rate, target)` → `AudioSeekSkip{Drop,Start}` (Phase 85: during a seek-resolve, Drop
+  audio frames ending at/before the target; Start on the first frame whose span reaches it —
+  its pts becomes the new audio clock base; degenerate rate/count fails open to Start);
+  unit-tested. Style note: `using enum` declarations here are FUNCTION-scoped — a
+  namespace-scope one made `FrameAction::Drop` shadow `AudioSeekSkip::Drop` (Sonar S1117).
 - `probe_video` = container/codec/dims/duration + first-frame poster; best-effort (succeeds
   with placeholder Unknown/0/empty if the container is detected but the codec isn't decodable
-  yet — `ui/video_repair.*` + `Vault::repair_video_metadata` heal such nodes later).
-  **Known limitation (Phase 52):** raw MPEG-PS (`.mpg`/`.mpeg`) files import (container
-  detected) but store as Unknown-codec video since the decode-only build cannot identify
-  the elementary-stream codec inside the PS wrapper (full system FFmpeg can — it is a
-  stripped build limitation). MPEG-1/2 are fully supported via MKV, MPEG-TS, MP4, MOV.
+  — the Phase 65 migration job (`ui/migration_job.*`) re-probes `codec == Unknown` nodes and
+  heals them). `PROBE_CAPS_GEN` (video_probe.h, currently 2) is the probe-capability
+  generation fed into `vault::migration_pending`: bump it whenever probing learns to identify
+  something it previously stored as Unknown, so stamped vaults re-offer the migration at
+  unlock. **Raw MPEG-PS (`.mpg`/`.mpeg`) is decodable since Phase 85** — the Phase 52
+  "stripped build limitation" was actually the missing raw `mpegvideo` PROBE demuxer: FFmpeg's
+  `mpegps` demuxer sets `request_probe` on video streams and defers codec identification to
+  the raw-ES probe demuxers, so `mpegps` alone leaves `codec_id` NONE. Both FFmpeg build
+  scripts now enable it (probe-only component; decode-only design unchanged). Empirical:
+  MPEG-1-in-PS identifies as MPEG1 after stream-info frame parsing (the raw-ES probe's
+  initial tag is MPEG2VIDEO). Probe test over committed uuencoded PS fixtures in
+  `tests/media/fixtures/`.
 - `media::map_codec_id(int)` (Phase 52) — testable mapping from FFmpeg's `AVCodecID` to the
   app's `VideoCodec` enum. Extracts all 27 Phase 52 + pre-existing codec mappings into one place.
   Registers modern codecs (H.264, HEVC, AV1) and Phase 52 legacy codecs (MPEG-1/2, MPEG-4 ASP,
@@ -98,9 +110,12 @@ Files: `video_source.*`, `chunk_avio.*`, `mem_avio.*`, `video_decoder.*`, `audio
   shim only — no software decode); QTRLE, Cinepak (native `.mov`); Phase 52 additions
   (see map_codec_id above). Tier-2 (decode unverified — no system encoder, real-file test deferred
   to release): wmv3/vc1, svq3, rv30/rv40, vp6/vp6a/vp6f, msmpeg4v1, cook, DV.
-- `volume_setting.*` / `loop_setting.*` — process-global in-memory volume + loop-toggle
-  state (NOT AV-gated): `saved_volume()`, `saved_loop_enabled()`/`set_saved_loop_enabled()`.
-  Volume persists via `platform::VolumePref`; loop is process-lifetime only.
+- `volume_setting.*` / `loop_setting.*` / `autoplay_setting.*` — process-global in-memory
+  playback settings (NOT AV-gated): `saved_volume()`, `saved_loop_enabled()`/
+  `set_saved_loop_enabled()`, `saved_autoplay_enabled()`/`set_saved_autoplay_enabled()`
+  (Phase 85, default TRUE). Volume persists via `platform::VolumePref` (saved on exit);
+  autoplay via `platform::AutoplayPref` (seeded at App::init, saved live by the F2 settings
+  toggle — settings is the only writer); loop is process-lifetime only.
 
 ### sws_scale destination contract (Phase 80)
 Every `sws_scale` destination in this module is PADDED, never exactly-sized:
@@ -112,8 +127,14 @@ inter-block base pointer — the Phase 80 owner crash). Pattern: `FFALIGN(w*bpp,
 `VideoDecoder::decode_poster_rgb` (RGB24 poster; also uses the DECODED frame's
 w/h, not open()-time codecpar), `GifDecoder` (RGBA playback frames).
 `FrameConverter::to_i420` writes into `av_frame_get_buffer` memory, which
-FFmpeg pads itself. ASAN cannot see violations (stores happen in uninstrumented
-vendored asm) — valgrind or the canary harness in the Phase 80 details doc.
+FFmpeg pads itself. `ui/dup_video_sig.cpp::frame_to_hash` (dup-scan perceptual
+hash, lives in ui/ but same contract) was the last tight-stride outlier — fixed
+Phase 85. Second contract, same phase: `sws_scale`'s dst/dst-stride arrays must
+be **4-element** regardless of the destination's plane count — `scale_internal`
+memcpy's four plane pointers from the caller's arrays, so a 1-element array is
+a 32-byte stack over-read (this one ASAN *does* catch, via the instrumented C
+path). Write overruns remain invisible to ASAN (uninstrumented vendored asm) —
+valgrind or the canary harness in the Phase 80 details doc.
 
 ### frame_convert.{h,cpp} — FrameConverter
 swscale-based YUV->I420 conversion shared by VideoDecoder + VideoDecodeWorker: `zero_copy()`

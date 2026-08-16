@@ -115,6 +115,16 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   overlay's LEFT/RIGHT value branches share ONE `apply_value_delta(state, delta, commit_out)`
   helper (Sonar S3776/S134; row 0 theme + ThemePref save, row 1 GalleryViewPref save, Security
   SecondVaultPref save — all commit_out=false; vault-backed sections commit_out=true).
+  **Phase 85:** `SettingsSection::Playback` inserted after Appearance (count 5→6, later
+  sections shift; no enum-indexed arrays exist — switches only, verified) with one row,
+  "Auto-play videos" On/Off on `SettingsState::autoplay` (default true, machine-scoped like
+  theme). `open_settings_overlay` seeds it from `media::saved_autoplay_enabled()`; the
+  handled branch of `OverlayDispatch::settings` syncs it back via
+  `media::set_saved_autoplay_enabled` + `platform::AutoplayPref::default_location().save`
+  (saved live; same placement rule as gallery_view — migration-trigger contract untouched).
+  Rendering-side, `settings_overlay.cpp` computes row text in `pane_row_text(state, row)` —
+  a `switch` over SettingsSection with function-scoped `using enum` (split out of
+  draw_pane_row for Sonar S3776; TagColours' swatch dot stays with the drawing).
 - `NavKind::ToSettings` (Phase 49, emitted by VaultManager's `C`) is one of the few kinds
   EXCLUDED from `apply_nav`'s screen teardown (alongside `ToggleKeepUnlocked`/`Quit`/`None`) —
   the overlay draws over the screen, so tearing it down would rebuild the vault manager
@@ -175,6 +185,10 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
 - `VolumePref` — `config_dir()/volume.conf`, one float [0,1], atomic write, missing/invalid
   -> 1.0; App loads at init + saves on clean exit (the in-memory global lives in
   `media/volume_setting.*`, not AV-gated).
+- `AutoplayPref` (Phase 85) — `config_dir()/autoplay.conf`, one "on"/"off" token, atomic
+  write, missing/invalid -> true (auto-play ON is the shipped default); App loads at init
+  into `media::autoplay_setting`, saved live by the F2 Playback section (settings is the only
+  writer — no exit-save). Exact VolumePref/ThemePref mirror.
 - `harden.{h,cpp}` — `disable_core_dumps()`: `prctl(PR_SET_DUMPABLE,0)` +
   `setrlimit(RLIMIT_CORE,{0,0})` on Linux, no-op on Windows (macOS removed — `#error` guard in
   `src/crypto/random.cpp`); called once at app init, Release (NDEBUG) builds only, before any

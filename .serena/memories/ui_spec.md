@@ -98,6 +98,11 @@ watermark, so the pass re-runs at the next unlock.
 - Bottom ~25%: horizontal thumbnail strip, scrolled to + highlighting the
   current image. `Left`/`Right` prev/next in the leaf gallery; `Up`/`Esc`
   back to gallery grid.
+- **Phase 85:** videos **auto-play on open** (and on in-viewer navigation onto
+  a video) while the F2 Playback toggle is On — its shipped default. With the
+  toggle Off, videos open paused (the pre-85 behavior). Seeking keeps audio
+  and video in sync (audio skips to the seek target instead of replaying from
+  the previous keyframe).
 - **Phase 56:** Viewer re-binds by path when the vault tree changes (background import commits),
   preserving zoom, pan, fill-scroll offset, video position and GIF frame. The current item's
   path is remembered and looked up in the refreshed list; if found, the index is updated and
@@ -216,14 +221,19 @@ what the user came from on `Esc`, which loses a paused video or a scroll
 position.
 
 Sidebar rail + content pane. `Tab` moves between rail and pane, `↑↓` row, `←→`
-change value, `N` add category, `R` rename, `Del` remove, `Esc` close. Three
-sections:
+change value, `N` add category, `R` rename, `Del` remove, `Esc` close.
+Sections:
 - **Appearance — this machine.** Theme; changes apply live and persist to
   `theme.conf` immediately, exactly as the retired `C` theme picker did. The
   preview IS the choice. **Phase 84:** a second row, **Default Gallery View** —
   cycles the five densities (List/Grid S/M/L/XL), live-saves
   `gallery_view.conf`, and pushes straight into an open grid behind the
   overlay.
+- **Playback — this machine (Phase 85).** One row, **Auto-play videos**
+  On/Off (default **On** — a newly opened video starts playing; the resume
+  bookmark still applies first, so it starts at the remembered position).
+  Live-saves `autoplay.conf`. Renders regardless of vault-unlocked state,
+  like Appearance.
 - **Browsing — this vault.** Vault-wide default sort order, and "show tags on
   tiles".
 - **Tag colours — this vault.** The category→swatch rows.
