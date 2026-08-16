@@ -318,6 +318,13 @@ compact (`queue_.busy()` → "Imports running — press Shift+I" status). The gr
 
 Four screen states (the chooser is a state, not a modal dialog class):
 1. **Choose:** "Exact duplicates" / "Exact + visually similar"; `Esc` leaves.
+   **Phase 86 scope:** when opened from inside a non-root gallery, a scope
+   line appears (`Left`/`Right` cycles): *Whole vault* (historical, the only
+   scope at root) / *This gallery only* (recursive subtree scan — cheaper) /
+   *This gallery vs whole vault* (full-vault scan, then only groups touching
+   the browsed subtree are kept; the copies OUTSIDE the gallery stay in their
+   groups so either side is removable). The review header names the scope;
+   review/marking/apply are identical in every scope.
 2. **Scanning:** progress (hashed/total candidates) + current name; `Esc`
    cancels gracefully between files. Files that fail to decrypt/decode are
    skipped and counted — the results show "couldn't examine N files".
@@ -460,7 +467,13 @@ sub-galleries as siblings) combine in either mode; the F1 line reads
 - **One selection convention everywhere:** Space toggles a tile into the
   multi-selection (Enter opens), `Ctrl+A` selects all — or clears when
   everything is already selected — on the gallery grid, the favorites/tag
-  screens, and the advanced-search result panel (Results focus). Selected
+  screens, and the advanced-search result panel (Results focus). **Phase 86:**
+  `Shift+Space` selects the RANGE from the anchor (last Space-selected item)
+  to the focused item on the same three surfaces — and when the focus still
+  sits on that anchor, it fills between the two most recently selected items
+  instead ("select A, select B, Shift+Space"). The grid's fill skips
+  non-selectable tiles; Ctrl+A never establishes an anchor. F1 help lists
+  `Shift+Space — Select range` on all three surfaces. Selected
   tiles carry the 18×18 accent square top-left (10×10 gutter marker on the
   search LIST rows).
 - **B / X / M act on the selection** (focused tile when empty): B batch
