@@ -765,6 +765,14 @@ struct VideoPlayback::Impl {
             apply_pause_resume();
         }
     }
+    void set_paused(bool paused)
+    {
+        if (!valid_) return;   // no-op when invalid
+        const bool playing = !paused;
+        if (model_.playing() == playing) return;  // already in requested state
+        model_.set_playing(playing);
+        apply_pause_resume();
+    }
 };
 
 #else  // !OSV_VENDORED_AV — playback unavailable; host falls back to the poster.
@@ -788,6 +796,7 @@ struct VideoPlayback::Impl {
     void mouse_down(float, float) {}
     void mouse_motion(float, float, bool) {}
     void mouse_up() {}
+    void set_paused(bool) {}  // no-op stub; valid() is always false without FFmpeg
 };
 
 #endif  // OSV_VENDORED_AV
@@ -803,6 +812,7 @@ bool VideoPlayback::animating() const noexcept { return impl_->animating(); }
 bool VideoPlayback::has_audio() const noexcept { return impl_->has_audio(); }
 double VideoPlayback::position() const noexcept { return impl_->position(); }
 void VideoPlayback::seek(double seconds) { impl_->do_seek(seconds); }
+void VideoPlayback::set_paused(bool paused) { impl_->set_paused(paused); }
 bool VideoPlayback::audio_active() const noexcept { return impl_->audio_active(); }
 uint64_t VideoPlayback::audio_samples_fed() const noexcept { return impl_->audio_samples_fed(); }
 float VideoPlayback::audio_gain() const noexcept { return impl_->audio_gain(); }

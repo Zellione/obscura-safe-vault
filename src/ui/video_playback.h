@@ -56,6 +56,11 @@ public:
     // bookmark right after construction, when playback is still paused.
     void seek(double seconds);
 
+    // Set the playing/paused state directly (Phase 85 auto-play). Routes
+    // through the same pause/resume path as the Space key; no-op when the
+    // playback is invalid or already in the requested state.
+    void set_paused(bool paused);
+
     // True if the audio output device actually opened (audio subsystem up +
     // device acquired). False on a non-FFmpeg build, a clip with no audio, or a
     // device-open failure. (Phase 16, for testing/debug.)

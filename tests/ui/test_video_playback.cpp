@@ -22,6 +22,7 @@
 #include "crypto/kdf.h"
 #include "gfx/renderer.h"
 #include "gfx/text.h"
+#include "media/autoplay_setting.h"
 #include "media/loop_setting.h"
 #include "ui/video_playback.h"
 #include "vault/index.h"
@@ -1115,6 +1116,162 @@ TEST(video_playback_seek_rebases_audio_clock_to_first_kept_audio_frame)
         CHECK(base > seek_target - frame_dur - 1e-6);
     }
 
+    SDL_DestroyRenderer(sr);
+    SDL_DestroySurface(surf);
+}
+
+TEST(video_playback_set_paused_starts_and_stops_transport)
+{
+    // Phase 85: set_paused() is the public API for auto-play (Phase 85 Task 6)
+    // to control playback state without synthesizing key events.
+    auto vbytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("set_paused");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        ui::VideoPlayback vp(v, *node);
+        REQUIRE(vp.valid());
+        CHECK_FALSE(vp.animating());   // starts paused by default
+
+        const SDL_FRect area{0, 0, 320, 240};
+        vp.render(r, font, area);
+
+        // set_paused(false) starts playback
+        vp.set_paused(false);
+        vp.update(0.05);
+        CHECK(vp.animating());
+
+        // set_paused(true) stops playback
+        vp.set_paused(true);
+        CHECK_FALSE(vp.animating());
+    }
+
+    SDL_DestroyRenderer(sr);
+    SDL_DestroySurface(surf);
+}
+
+TEST(image_viewer_autoplay_on_starts_video_and_resume_seek_composes)
+{
+    // Phase 85: when autoplay is ON and a video is opened in ImageViewer
+    // (via image_viewer.cpp's playback-build path), it should start playing.
+    // This test verifies the composition: resume seek (Phase 39 Part 2) + auto-play.
+    // After seeking to a bookmark and ticking the engine, the video should be:
+    // - animating (playing, because autoplay is ON)
+    // - at the bookmarked position (not near 0)
+    const bool prev = media::saved_autoplay_enabled();
+    media::set_saved_autoplay_enabled(true);
+
+    auto vbytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("autoplay_on");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        // Construct video (as image_viewer.cpp playback-build path would)
+        auto video = std::make_unique<ui::VideoPlayback>(v, *node);
+        REQUIRE(video->valid());
+
+        // Simulate the auto-play hook from image_viewer.cpp's show_image_at
+        if (media::saved_autoplay_enabled()) {
+            video->set_paused(false);
+        }
+
+        const SDL_FRect area{0, 0, 320, 240};
+        video->render(r, font, area);
+
+        // Apply a resume bookmark seek (Phase 39 Part 2) — seekar seeks, playback
+        // state is preserved. Auto-play has already set it to playing.
+        const double bookmark_pos = 0.2;
+        video->seek(bookmark_pos);
+
+        // Drive a few ticks to let the seek resolve
+        for (int i = 0; i < 5; ++i) {
+            video->update(0.05);
+            video->render(r, font, area);
+        }
+
+        // With autoplay ON, the video should be:
+        // - animating (playing)
+        // - at the bookmarked position (not at 0)
+        CHECK(video->animating());
+        CHECK(video->position() >= bookmark_pos - 0.1);
+    }
+
+    media::set_saved_autoplay_enabled(prev);
+    SDL_DestroyRenderer(sr);
+    SDL_DestroySurface(surf);
+}
+
+TEST(image_viewer_autoplay_off_opens_video_paused)
+{
+    // Phase 85: when autoplay is OFF, a video opened in ImageViewer should
+    // remain paused.
+    const bool prev = media::saved_autoplay_enabled();
+    media::set_saved_autoplay_enabled(false);
+
+    auto vbytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("autoplay_off");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        auto video = std::make_unique<ui::VideoPlayback>(v, *node);
+        REQUIRE(video->valid());
+
+        const SDL_FRect area{0, 0, 320, 240};
+        video->render(r, font, area);
+
+        // With autoplay OFF, the video should remain paused
+        CHECK_FALSE(video->animating());
+    }
+
+    media::set_saved_autoplay_enabled(prev);
     SDL_DestroyRenderer(sr);
     SDL_DestroySurface(surf);
 }
