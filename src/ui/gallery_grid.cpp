@@ -806,6 +806,27 @@ void GalleryGrid::toggle_or_open()
         open_selected();
 }
 
+// Shift+Space (Phase 86): select the whole span from the range anchor to the
+// focused tile — everything Space would accept, skipping the rest. Covers both
+// "anchor then extend" and "select two items, then fill between" (range_for).
+void GalleryGrid::select_range_to_focus()
+{
+    const auto r = sel_.range_for(nav_.selected());
+    if (!r) {
+        status_ = "Select an item first (Space), then Shift+Space selects the range.";
+        return;
+    }
+    const int lo = std::max(0, std::min(r->first, r->second));
+    const int hi = std::min(static_cast<int>(children_.size()) - 1,
+                            std::max(r->first, r->second));
+    for (int i = lo; i <= hi; ++i) {
+        if (is_selectable(*children_[i]) && !sel_.contains(i)) {
+            sel_.select(i);
+        }
+    }
+    status_.clear();
+}
+
 // Extract Shift+C compact handler to reduce handle_key_down's cognitive complexity (S3776).
 void handle_shift_c_key(GalleryGrid& g, const SDL_KeyboardEvent& key)
 {
@@ -973,7 +994,10 @@ bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& 
             g.start_transfer();
             return true;
         case SDLK_R: g.start_rename(); return true;
-        case SDLK_SPACE: g.toggle_or_open(); return true;
+        case SDLK_SPACE:
+            if (key.mod & SDL_KMOD_SHIFT) { g.select_range_to_focus(); return true; }
+            g.toggle_or_open();
+            return true;
         case SDLK_G: g.start_tag_editor((key.mod & SDL_KMOD_SHIFT) != 0); return true;
         case SDLK_B: toggle_favorite_selection(g); return true;
         case SDLK_F:
@@ -1913,6 +1937,7 @@ std::vector<ui::HelpGroup> GalleryGrid::help_groups() const
     // Build Navigate entries; F3 (split view) only shown when not embedded (Phase 78)
     std::vector<HelpEntry> nav_entries{
         {"Enter", "Open"}, {"Space", "Select (export/move)"},
+        {"Shift+Space", "Select range (from last selected)"},
         {"Ctrl+A", "Select all / none"},
         {"Esc", "Back"}, {"`", "Switch vault"}, {"L", "Cycle view: list / grid size"},
         {"Home/End", "Jump to first / last item"},

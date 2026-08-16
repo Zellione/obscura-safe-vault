@@ -1083,7 +1083,7 @@ std::vector<ui::HelpGroup> AdvancedSearchScreen::help_groups() const
         {"Results & saved searches", {
             {"Ctrl+S", "Save search"}, {"Ctrl+L", "Toggle list/grid view"},
             {"Ctrl+R", "Clear query"}, {"R", "Rename focused result"},
-            {"Space", "Select result"}, {"Ctrl+A", "Select all results"},
+            {"Space", "Select result"}, {"Shift+Space", "Select range"}, {"Ctrl+A", "Select all results"},
             {"B", "Favorite (acts on selection)"}, {"X", "Export selection"},
             {"M", "Move/copy selection"}, {"Del", "Delete selection"},
             {"Ctrl+D", "Toggle the detail panel"},

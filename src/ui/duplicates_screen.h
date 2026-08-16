@@ -129,6 +129,9 @@ private:
 
     State      state_       = State::Choose;
     int        choose_sel_  = 0;        // 0 = Exact, 1 = Exact + similar
+    // Phase 86: scan scope. The gallery scopes are offered only when the
+    // finder was opened from inside a non-root gallery (back_.path non-empty).
+    DupScope   scope_       = DupScope::WholeVault;
     DupScanJob job_;
     DupReview  review_;
     size_t     skipped_     = 0;

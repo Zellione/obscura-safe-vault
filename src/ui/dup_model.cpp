@@ -86,6 +86,37 @@ uint64_t group_reclaimable(const DupGroup& g)
     return sum - biggest;
 }
 
+std::string dup_scope_label(DupScope scope, std::string_view gallery_path)
+{
+    switch (scope) {
+        case DupScope::GalleryOnly:
+            return "This gallery only — " + std::string(gallery_path);
+        case DupScope::GalleryVsVault:
+            return "This gallery vs whole vault — " + std::string(gallery_path);
+        case DupScope::WholeVault:
+        default:
+            return "Whole vault";
+    }
+}
+
+size_t scope_filter_groups(std::vector<DupGroup>& groups, std::string_view gallery_path)
+{
+    if (gallery_path.empty()) return 0;
+    const auto within = [gallery_path](std::string_view path) {
+        // Component-boundary prefix: "a/…" is inside "a"; "ab/…" is not.
+        return path.size() > gallery_path.size() + 1 &&
+               path[gallery_path.size()] == '/' &&
+               path.compare(0, gallery_path.size(), gallery_path) == 0;
+    };
+    const size_t before = groups.size();
+    std::erase_if(groups, [&within](const DupGroup& g) {
+        return std::ranges::none_of(g.members, [&within](const DupMember& m) {
+            return within(m.node_path);
+        });
+    });
+    return before - groups.size();
+}
+
 DupReview::DupReview(std::vector<DupGroup> groups) : groups_(std::move(groups))
 {
     std::ranges::stable_sort(groups_, [](const DupGroup& a, const DupGroup& b) {

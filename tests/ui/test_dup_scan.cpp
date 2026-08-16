@@ -86,6 +86,42 @@ TEST(dup_scan_items_cover_whole_tree)
     CHECK(leaf.data_spans[0].second > 0);   // on-disk chunk length recorded
 }
 
+// --- Phase 86: scoped collection -------------------------------------------
+
+TEST(dup_scan_items_scoped_to_gallery_subtree)
+{
+    TempVault tv("scoped");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kFastKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("a/b") == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("ab") == vault::VaultResult::Ok);   // name-prefix decoy
+    REQUIRE(v.add_image("",    pattern(100, 1), "root.png")  == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("a",   pattern(200, 2), "mid.png")   == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("a/b", pattern(300, 3), "leaf.png")  == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("ab",  pattern(400, 4), "decoy.png") == vault::VaultResult::Ok);
+
+    auto items = ui::collect_scan_items(v, "a");
+    REQUIRE(items.size() == 2);
+    std::vector<std::string> paths{items[0].node_path, items[1].node_path};
+    std::ranges::sort(paths);
+    CHECK_EQ(paths[0], std::string("a/b/leaf.png"));
+    CHECK_EQ(paths[1], std::string("a/mid.png"));
+}
+
+TEST(dup_scan_items_empty_scope_covers_whole_vault)
+{
+    TempVault tv("scopeall");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kFastKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("a") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("",  pattern(100, 1), "root.png") == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("a", pattern(200, 2), "mid.png")  == vault::VaultResult::Ok);
+
+    CHECK_EQ(ui::collect_scan_items(v, "").size(), static_cast<size_t>(2));
+}
+
 // --- DupScanJob worker tests ---
 
 static ui::DupScanOutcome run_scan(const vault::Vault& v, bool perceptual)

@@ -559,6 +559,11 @@ void DuplicatesScreen::finish_scan(DupScanOutcome outcome)
         leave();
         return;
     }
+    // Phase 86: gallery-vs-vault keeps only groups touching the browsed
+    // gallery's subtree (outside copies stay in their groups for review).
+    if (scope_ == DupScope::GalleryVsVault && !back_.path.empty()) {
+        (void)scope_filter_groups(outcome.groups, back_.path);
+    }
     review_ = DupReview(std::move(outcome.groups));
     skipped_ = outcome.skipped;
     focus_group_ = 0;
@@ -586,6 +591,17 @@ void DuplicatesScreen::handle_key(const SDL_KeyboardEvent& key)
                 case SDLK_DOWN:
                     choose_sel_ = std::min(1, choose_sel_ + 1);
                     mark_dirty();
+                    break;
+                case SDLK_LEFT:
+                case SDLK_RIGHT:
+                    // Phase 86: cycle the scan scope; only offered when the
+                    // finder was opened from inside a gallery.
+                    if (!back_.path.empty()) {
+                        const int dir = (key.key == SDLK_RIGHT) ? 1 : DUP_SCOPE_COUNT - 1;
+                        scope_ = static_cast<DupScope>(
+                            (static_cast<int>(scope_) + dir) % DUP_SCOPE_COUNT);
+                        mark_dirty();
+                    }
                     break;
                 case SDLK_RETURN:
                 case SDLK_SPACE:
@@ -650,7 +666,11 @@ void DuplicatesScreen::start_scan(bool perceptual)
     totals_.waves_applied = 0;
     totals_.waves_skipped = 0;
     stale_ = false;      // a fresh scan supersedes any stale results
-    auto items = collect_scan_items(vault_);
+    // Phase 86: GalleryOnly hashes just the subtree; GalleryVsVault must hash
+    // the whole vault (matches can live anywhere) and filters at finish_scan.
+    auto items = (scope_ == DupScope::GalleryOnly && !back_.path.empty())
+                     ? collect_scan_items(vault_, back_.path)
+                     : collect_scan_items(vault_);
     job_.start(vault_, std::move(items), perceptual);
     state_ = State::Scanning;
     mark_dirty();
@@ -733,7 +753,17 @@ void DuplicatesScreen::render_choose(gfx::Renderer& r, float W, float H)
         r.draw_text(font_, OX + 20, y + (ROW_H - ph) * 0.5f, text, sel ? TEXT : TEXT_DIM);
     }
 
-    r.draw_text(font_, OX, H - 40, "Up/Down to select, Enter to start, Esc to back", TEXT_FAINT);
+    // Phase 86: scope line, only when opened from inside a gallery (Left/Right
+    // cycles Whole vault / This gallery only / This gallery vs whole vault).
+    if (!back_.path.empty()) {
+        const float sy = OY + 2 * (ROW_H + 12.0f) + 10.0f;
+        r.draw_text(font_, OX, sy, "Scope: " + dup_scope_label(scope_, back_.path), TEXT_DIM);
+        r.draw_text(font_, OX, H - 40,
+                    "Up/Down mode · Left/Right scope · Enter start · Esc back", TEXT_FAINT);
+    } else {
+        r.draw_text(font_, OX, H - 40, "Up/Down to select, Enter to start, Esc to back",
+                    TEXT_FAINT);
+    }
 }
 
 void DuplicatesScreen::render_scanning(gfx::Renderer& r, float W, float H)
@@ -810,10 +840,13 @@ void DuplicatesScreen::render_review(gfx::Renderer& r, float W, float H)
     }
     const size_t later = review_.groups().size() - review_.wave_size();
     const std::string header = std::format(
-        "Duplicates — wave {}/{} · {} groups · {} files · {} reclaimable{}",
+        "Duplicates — wave {}/{} · {} groups · {} files · {} reclaimable{}{}",
         review_.wave_index() + 1, review_.wave_count(), review_.wave_size(),
         wave_files, fmt_bytes(wave_reclaimable),
-        later > 0 ? std::format(" · {} groups in later waves", later) : "");
+        later > 0 ? std::format(" · {} groups in later waves", later) : "",
+        scope_ == DupScope::WholeVault
+            ? ""
+            : std::format(" · {}", dup_scope_label(scope_, back_.path)));
     r.draw_text(font_, OX, 40, header, TEXT_DIM);
 
     if (skipped_ > 0) {
@@ -854,6 +887,7 @@ std::vector<HelpGroup> DuplicatesScreen::help_groups() const
             return {
                 {"Scan", {
                     {"Up/Down", "Select scan mode"},
+                    {"Left/Right", "Scan scope (whole vault / this gallery)"},
                     {"Enter", "Start scan"},
                     {"Esc", "Cancel"},
                 }},

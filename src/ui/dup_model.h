@@ -9,6 +9,7 @@
 #include <functional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace ui {
@@ -55,6 +56,23 @@ struct DupGroup {
     std::vector<DupMember> members;
 };
 [[nodiscard]] uint64_t group_reclaimable(const DupGroup& g); // sum(bytes) - max(bytes)
+
+// Phase 86 "this gallery vs whole vault" scope: drop every group with NO
+// member inside the gallery subtree (component-boundary safe — gallery "a"
+// never matches "ab/x"). Surviving groups keep ALL their members, outside
+// copies included, so the review can remove either side of the duplication.
+// An empty gallery path is a no-op. Returns the number of groups dropped.
+size_t scope_filter_groups(std::vector<DupGroup>& groups, std::string_view gallery_path);
+
+// Phase 86: what the duplicate scan looks at. WholeVault is the historical
+// behavior; the gallery scopes are offered when the finder was opened from
+// inside a non-root gallery. GalleryOnly scans the subtree alone;
+// GalleryVsVault scans everything and keeps only groups touching the subtree.
+enum class DupScope : uint8_t { WholeVault, GalleryOnly, GalleryVsVault };
+inline constexpr int DUP_SCOPE_COUNT = 3;
+
+// Human-readable scope line for the chooser and the review header.
+[[nodiscard]] std::string dup_scope_label(DupScope scope, std::string_view gallery_path);
 
 class DupReview {
 public:
