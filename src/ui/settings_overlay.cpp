@@ -323,28 +323,39 @@ void draw_rail(gfx::Renderer& r, gfx::FontAtlas& font, float rail_x, float rail_
 // with the drawing in draw_pane_row.
 std::pair<std::string, std::string> pane_row_text(const SettingsState& state, int row_index)
 {
-    if (state.section == SettingsSection::Appearance) {
-        if (row_index == 0) return {"Theme", std::string(gfx::theme_name(state.theme))};
-        if (row_index == 1)
-            return {"Default Gallery View", std::string(gallery_view_label(state.gallery_view))};
-    } else if (state.section == SettingsSection::Playback) {
-        if (row_index == 0) return {"Auto-play videos", state.autoplay ? "On" : "Off"};
-    } else if (state.section == SettingsSection::Browsing) {
-        if (row_index == 0)
-            return {"Default Sort", sort_key_label(state.draft.default_sort, state.draft.default_sort)};
-        if (row_index == 1) return {"Show Tags on Tiles", state.draft.tiles_show_tags ? "On" : "Off"};
-    } else if (state.section == SettingsSection::TagColours) {
-        if (row_index < static_cast<int>(state.draft.categories.size())) {
-            const auto& cat = state.draft.categories[row_index];
-            return {cat.name, std::string(gfx::tag_swatch_name(cat.swatch))};
-        }
-    } else if (state.section == SettingsSection::VaultOps && row_index == 0) {
-        // Phase 65: vault operations (only available when unlocked)
-        return {"Re-check vault for upgrades", "[Enter]"};
-    } else if (state.section == SettingsSection::Security && row_index == 0) {
-        // Phase 66: machine-scoped keep-open default
-        return {"Keep 2nd vault after transfer",
-                std::string(second_vault_mode_label(state.second_vault_default))};
+    using enum SettingsSection;
+    switch (state.section) {
+        case Appearance:
+            if (row_index == 0) return {"Theme", std::string(gfx::theme_name(state.theme))};
+            if (row_index == 1)
+                return {"Default Gallery View", std::string(gallery_view_label(state.gallery_view))};
+            break;
+        case Playback:
+            if (row_index == 0) return {"Auto-play videos", state.autoplay ? "On" : "Off"};
+            break;
+        case Browsing:
+            if (row_index == 0)
+                return {"Default Sort",
+                        sort_key_label(state.draft.default_sort, state.draft.default_sort)};
+            if (row_index == 1)
+                return {"Show Tags on Tiles", state.draft.tiles_show_tags ? "On" : "Off"};
+            break;
+        case TagColours:
+            if (row_index < static_cast<int>(state.draft.categories.size())) {
+                const auto& cat = state.draft.categories[row_index];
+                return {cat.name, std::string(gfx::tag_swatch_name(cat.swatch))};
+            }
+            break;
+        case VaultOps:
+            // Phase 65: vault operations (only available when unlocked)
+            if (row_index == 0) return {"Re-check vault for upgrades", "[Enter]"};
+            break;
+        case Security:
+            // Phase 66: machine-scoped keep-open default
+            if (row_index == 0)
+                return {"Keep 2nd vault after transfer",
+                        std::string(second_vault_mode_label(state.second_vault_default))};
+            break;
     }
     return {};
 }

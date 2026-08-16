@@ -2,11 +2,10 @@
 
 namespace media {
 
-using enum FrameAction;
-
 FrameAction decide(double audio_clock, double frame_pts,
                    double ahead, double behind) noexcept
 {
+    using enum FrameAction;
     if (frame_pts > audio_clock + ahead)  return Hold;
     if (frame_pts < audio_clock - behind) return Drop;
     return Present;
