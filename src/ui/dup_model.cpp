@@ -88,12 +88,13 @@ uint64_t group_reclaimable(const DupGroup& g)
 
 std::string dup_scope_label(DupScope scope, std::string_view gallery_path)
 {
+    using enum DupScope;
     switch (scope) {
-        case DupScope::GalleryOnly:
+        case GalleryOnly:
             return "This gallery only — " + std::string(gallery_path);
-        case DupScope::GalleryVsVault:
+        case GalleryVsVault:
             return "This gallery vs whole vault — " + std::string(gallery_path);
-        case DupScope::WholeVault:
+        case WholeVault:
         default:
             return "Whole vault";
     }

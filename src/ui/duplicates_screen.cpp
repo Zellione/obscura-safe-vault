@@ -4,6 +4,7 @@
 #include <cstring>
 #include <format>
 #include <string>
+#include <utility>
 
 #include "crypto/secure_mem.h"
 #include "gfx/renderer.h"
@@ -561,7 +562,7 @@ void DuplicatesScreen::finish_scan(DupScanOutcome outcome)
     }
     // Phase 86: gallery-vs-vault keeps only groups touching the browsed
     // gallery's subtree (outside copies stay in their groups for review).
-    if (scope_ == DupScope::GalleryVsVault && !back_.path.empty()) {
+    if (choose_.scope == DupScope::GalleryVsVault && !back_.path.empty()) {
         (void)scope_filter_groups(outcome.groups, back_.path);
     }
     review_ = DupReview(std::move(outcome.groups));
@@ -585,11 +586,11 @@ void DuplicatesScreen::handle_key(const SDL_KeyboardEvent& key)
         case State::Choose:
             switch (key.key) {
                 case SDLK_UP:
-                    choose_sel_ = std::max(0, choose_sel_ - 1);
+                    choose_.sel = std::max(0, choose_.sel - 1);
                     mark_dirty();
                     break;
                 case SDLK_DOWN:
-                    choose_sel_ = std::min(1, choose_sel_ + 1);
+                    choose_.sel = std::min(1, choose_.sel + 1);
                     mark_dirty();
                     break;
                 case SDLK_LEFT:
@@ -598,14 +599,14 @@ void DuplicatesScreen::handle_key(const SDL_KeyboardEvent& key)
                     // finder was opened from inside a gallery.
                     if (!back_.path.empty()) {
                         const int dir = (key.key == SDLK_RIGHT) ? 1 : DUP_SCOPE_COUNT - 1;
-                        scope_ = static_cast<DupScope>(
-                            (static_cast<int>(scope_) + dir) % DUP_SCOPE_COUNT);
+                        choose_.scope = static_cast<DupScope>(
+                            (std::to_underlying(choose_.scope) + dir) % DUP_SCOPE_COUNT);
                         mark_dirty();
                     }
                     break;
                 case SDLK_RETURN:
                 case SDLK_SPACE:
-                    start_scan(choose_sel_ == 1);
+                    start_scan(choose_.sel == 1);
                     break;
                 case SDLK_ESCAPE:
                     leave();
@@ -631,7 +632,7 @@ void DuplicatesScreen::handle_key(const SDL_KeyboardEvent& key)
                 case SDLK_RETURN:
                     // Rescan
                     state_ = State::Choose;
-                    choose_sel_ = 0;
+                    choose_.sel = 0;
                     focus_group_ = 0;
                     focus_member_ = 0;
                     scroll_ = 0.0f;
@@ -668,7 +669,7 @@ void DuplicatesScreen::start_scan(bool perceptual)
     stale_ = false;      // a fresh scan supersedes any stale results
     // Phase 86: GalleryOnly hashes just the subtree; GalleryVsVault must hash
     // the whole vault (matches can live anywhere) and filters at finish_scan.
-    auto items = (scope_ == DupScope::GalleryOnly && !back_.path.empty())
+    auto items = (choose_.scope == DupScope::GalleryOnly && !back_.path.empty())
                      ? collect_scan_items(vault_, back_.path)
                      : collect_scan_items(vault_);
     job_.start(vault_, std::move(items), perceptual);
@@ -743,7 +744,7 @@ void DuplicatesScreen::render_choose(gfx::Renderer& r, float W, float H)
 
     for (int i = 0; i < 2; ++i) {
         const float y = OY + static_cast<float>(i) * (ROW_H + 12.0f);
-        const bool sel = (i == choose_sel_);
+        const bool sel = (i == choose_.sel);
         const std::string text = (i == 0) ? "Exact duplicates" : "Exact + visually similar";
 
         const SDL_FRect row{OX, y, W - 2 * OX, ROW_H};
@@ -757,7 +758,7 @@ void DuplicatesScreen::render_choose(gfx::Renderer& r, float W, float H)
     // cycles Whole vault / This gallery only / This gallery vs whole vault).
     if (!back_.path.empty()) {
         const float sy = OY + 2 * (ROW_H + 12.0f) + 10.0f;
-        r.draw_text(font_, OX, sy, "Scope: " + dup_scope_label(scope_, back_.path), TEXT_DIM);
+        r.draw_text(font_, OX, sy, "Scope: " + dup_scope_label(choose_.scope, back_.path), TEXT_DIM);
         r.draw_text(font_, OX, H - 40,
                     "Up/Down mode · Left/Right scope · Enter start · Esc back", TEXT_FAINT);
     } else {
@@ -844,9 +845,9 @@ void DuplicatesScreen::render_review(gfx::Renderer& r, float W, float H)
         review_.wave_index() + 1, review_.wave_count(), review_.wave_size(),
         wave_files, fmt_bytes(wave_reclaimable),
         later > 0 ? std::format(" · {} groups in later waves", later) : "",
-        scope_ == DupScope::WholeVault
+        choose_.scope == DupScope::WholeVault
             ? ""
-            : std::format(" · {}", dup_scope_label(scope_, back_.path)));
+            : std::format(" · {}", dup_scope_label(choose_.scope, back_.path)));
     r.draw_text(font_, OX, 40, header, TEXT_DIM);
 
     if (skipped_ > 0) {
