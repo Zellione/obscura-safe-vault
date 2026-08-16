@@ -4,6 +4,7 @@
 #include "gfx/text.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "platform/autoplay_pref.h"
 #include "platform/gallery_view_pref.h"
 #include "platform/second_vault_pref.h"
 #include "platform/theme_pref.h"
@@ -114,6 +115,10 @@ void apply_value_delta(SettingsState& state, int delta, bool& commit_out)
             (void)platform::GalleryViewPref::default_location().save(state.gallery_view);
             commit_out = false;
         }
+    } else if (state.section == SettingsSection::Playback) {
+        settings_change_value(state, delta);
+        (void)platform::AutoplayPref::default_location().save(state.autoplay);
+        commit_out = false;  // autoplay is persisted by the pref save
     } else if (state.section == SettingsSection::Security) {
         settings_change_value(state, delta);
         (void)platform::SecondVaultPref::default_location().save(state.second_vault_default);
@@ -293,6 +298,8 @@ void draw_rail(gfx::Renderer& r, gfx::FontAtlas& font, float rail_x, float rail_
         std::string sec_name;
         if (sec == Appearance) {
             sec_name = "Appearance";
+        } else if (sec == Playback) {
+            sec_name = "Playback";
         } else if (sec == Browsing) {
             sec_name = "Browsing";
         } else if (sec == TagColours) {
@@ -329,6 +336,11 @@ void draw_pane_row(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float p
         } else if (row_index == 1) {
             label = "Default Gallery View";
             value = std::string(gallery_view_label(state.gallery_view));
+        }
+    } else if (state.section == SettingsSection::Playback) {
+        if (row_index == 0) {
+            label = "Auto-play videos";
+            value = state.autoplay ? "On" : "Off";
         }
     } else if (state.section == SettingsSection::Browsing) {
         if (row_index == 0) {
@@ -373,7 +385,8 @@ void draw_pane(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float pane_
     const int row_count = settings_row_count(state);
 
     if (row_count == 0 && !state.vault_unlocked &&
-        state.section != SettingsSection::Appearance) {
+        state.section != SettingsSection::Appearance &&
+        state.section != SettingsSection::Playback) {
         // Show "Unlock a vault" message for locked vault sections
         r.draw_text(font, pane_x, content_top + 8.0f, "Unlock a vault to configure",
                    gfx::theme::TEXT_FAINT);

@@ -49,6 +49,8 @@ int settings_row_count(const SettingsState& state) noexcept
     switch (state.section) {
     case Appearance:
         return 2; // theme, default gallery view
+    case Playback:
+        return 1; // Phase 85: auto-play videos
     case Browsing:
         return state.vault_unlocked ? 2 : 0; // default sort + tiles show tags
     case TagColours: {
@@ -89,6 +91,16 @@ void change_appearance_value(SettingsState& state, int delta) noexcept
     } else if (state.row == 1) {
         state.gallery_view = delta >= 0 ? next_gallery_view(state.gallery_view)
                                         : prev_gallery_view(state.gallery_view);
+    }
+}
+
+// Handle playback settings value change.
+void change_playback_value(SettingsState& state, int delta) noexcept
+{
+    (void)delta;  // any nonzero delta toggles
+    if (state.row == 0) {
+        // Toggle autoplay on any nonzero delta
+        state.autoplay = !state.autoplay;
     }
 }
 
@@ -152,6 +164,8 @@ void settings_change_value(SettingsState& state, int delta) noexcept
     using enum SettingsSection;
     if (state.section == Appearance) {
         change_appearance_value(state, delta);
+    } else if (state.section == Playback) {
+        change_playback_value(state, delta);
     } else if (state.section == Browsing) {
         change_browsing_value(state, delta);
     } else if (state.section == TagColours) {

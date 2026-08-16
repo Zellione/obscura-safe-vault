@@ -15,8 +15,8 @@
 
 namespace ui {
 
-enum class SettingsSection : uint8_t { Appearance = 0, Browsing, TagColours, VaultOps, Security };
-inline constexpr int SETTINGS_SECTION_COUNT = 5;
+enum class SettingsSection : uint8_t { Appearance = 0, Playback, Browsing, TagColours, VaultOps, Security };
+inline constexpr int SETTINGS_SECTION_COUNT = 6;
 
 struct SettingsState {
     SettingsSection    section           = SettingsSection::Appearance;
@@ -28,6 +28,8 @@ struct SettingsState {
     gfx::ThemeId       theme             = gfx::ThemeId::RefinedSlate;
     // Phase 84: machine-scoped, like theme
     GalleryView        gallery_view      = GalleryView::GridM;
+    // Phase 85: machine-scoped, like theme
+    bool               autoplay          = true;
     // Phase 66: machine-scoped, like theme
     platform::SecondVaultMode second_vault_default = platform::SecondVaultMode::LockNow;
     // Inline "add category" / "rename category" prompt (Phase 49). `prompt_row`

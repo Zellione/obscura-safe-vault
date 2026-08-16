@@ -685,6 +685,9 @@ struct App::OverlayDispatch {
             if (auto* grid = dynamic_cast<ui::GalleryGrid*>(app.screen_.get())) {
                 ui::set_gallery_view(*grid, app.overlays_.settings.gallery_view);
             }
+            // Phase 85: sync autoplay whenever the event was handled
+            media::set_saved_autoplay_enabled(app.overlays_.settings.autoplay);
+            (void)platform::AutoplayPref::default_location().save(app.overlays_.settings.autoplay);
             // Commit vault settings if the commit flag was set
             if (commit && app.overlays_.settings.vault_unlocked && app.vault_state_.active &&
                 vault::set_vault_settings(*app.vault_state_.active, app.overlays_.settings.draft) !=
@@ -855,6 +858,7 @@ void App::open_settings_overlay()
                                                                   : vault::VaultSettings{};
     overlays_.settings.theme = gfx::active_theme_id();
     overlays_.settings.gallery_view = sessions_.gallery.view;
+    overlays_.settings.autoplay = media::saved_autoplay_enabled();   // Phase 85
     overlays_.settings.second_vault_default = second_.session.default_mode();   // Phase 66
     ui::open_settings(overlays_.settings, ui::SettingsSection::Appearance);
 }

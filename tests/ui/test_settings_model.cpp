@@ -26,7 +26,9 @@ TEST(settings_section_navigation_clamps)
     ui::settings_move_section(s, -1);
     CHECK(s.section == ui::SettingsSection::Appearance);   // already at the top
     ui::settings_move_section(s, 1);
-    CHECK(s.section == ui::SettingsSection::Browsing);
+    CHECK(s.section == ui::SettingsSection::Playback);     // Phase 85: inserted after Appearance
+    ui::settings_move_section(s, 1);
+    CHECK(s.section == ui::SettingsSection::Browsing);     // then Browsing
     ui::settings_move_section(s, 99);
     CHECK(s.section == ui::SettingsSection::Security);   // clamped at the end (Phase 66)
 }
@@ -292,4 +294,25 @@ TEST(settings_gallery_view_row_cycles_both_ways)
     ui::settings_change_value(s, 1);
     CHECK(s.theme != theme_before);
     CHECK_EQ(s.gallery_view, ui::GalleryView::GridS);
+}
+
+TEST(settings_playback_section_has_one_row_and_toggles_autoplay)
+{
+    ui::SettingsState s;
+    s.section = ui::SettingsSection::Playback;
+    CHECK_EQ(ui::settings_row_count(s), 1);
+    CHECK(s.autoplay == true);
+    s.in_pane = true; s.row = 0;
+    ui::settings_change_value(s, +1);
+    CHECK(s.autoplay == false);
+    ui::settings_change_value(s, -1);
+    CHECK(s.autoplay == true);
+}
+
+TEST(settings_section_count_includes_playback)
+{
+    CHECK_EQ(ui::SETTINGS_SECTION_COUNT, 6);
+    // Rail order: Appearance, Playback, Browsing, TagColours, VaultOps, Security.
+    CHECK(static_cast<int>(ui::SettingsSection::Playback) == 1);
+    CHECK(static_cast<int>(ui::SettingsSection::Browsing) == 2);
 }
