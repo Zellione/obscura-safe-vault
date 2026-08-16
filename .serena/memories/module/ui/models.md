@@ -6,7 +6,19 @@ Pure SDL-free view/sort/model helpers, layout geometry, settings state, search i
 - `selection_model.*` — multi-select state for export AND batch ops (Phase 68:
   the same Space/Ctrl+A selection drives B favorite-toggle, X export, and M
   move/copy on the grid, the favorites/tag screens, and the search-result
-  panel). Phase 53 adds
+  panel). **Phase 86 range selection:** tracks a range ANCHOR (last index
+  toggled ON, plus the one before it). `range_for(focus)` → the Shift+Space
+  span: `{anchor, focus}` when they differ, else `{prev_anchor, focus}` when
+  the focus sits ON the anchor (covers both "anchor then extend" and "select
+  two, then fill between"); nullopt when no anchor. `select_range(a,b)` selects
+  the inclusive span either order, ONE revision bump, anchor untouched (a fill
+  never moves the anchor — extending re-spans from the same item). `select(i)`
+  = anchor-free never-deselecting insert (the grid's filtered fill). Anchor
+  rules: toggle-OFF of the anchor demotes to prev_anchor; `clear()` resets
+  both; `select_all`/Ctrl+A deliberately never establishes one. Hosts:
+  GalleryGrid::select_range_to_focus (clamps + skips non-`is_selectable`
+  tiles via `select`; footer hint when no anchor), FavoritesScreen and
+  SearchResultView clamp + `select_range` directly. Phase 53 adds
   `select_all(count)` / `all_selected(count)` behind Ctrl+A; `select_all(0)` does NOT clear
   ("select all of nothing" is not a deselect) and `all_selected(0)` is false (else Ctrl+A on an
   empty gallery clears forever). Phase 48: gained
@@ -347,3 +359,12 @@ Pure SDL-free view/sort/model helpers, layout geometry, settings state, search i
   marked_bytes/marked_paths iterate the wave only. `refresh_members(fn)`:
   fn(DupMember&)→false drops the member, groups shrinking < 2 are dropped,
   default marks re-applied — call only right after `finish_wave()`.
+  **Phase 86 scan scope:** `DupScope{WholeVault,GalleryOnly,GalleryVsVault}`
+  (+`DUP_SCOPE_COUNT`=3), `dup_scope_label(scope, gallery_path)` (the ONE
+  label used by chooser + review header), and `scope_filter_groups(groups,
+  gallery_path)` — drops groups with NO member inside the gallery subtree
+  (component-boundary safe: "a" never matches "ab/x"; empty path = no-op;
+  returns dropped count). Surviving groups keep ALL members, outside copies
+  included, so the review can remove either side. `ui::collect_scan_items`
+  (dup_scan.h) gained a `scope_path` parameter (default empty = whole vault)
+  that starts the walk at that gallery.

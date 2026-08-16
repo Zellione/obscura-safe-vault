@@ -129,7 +129,19 @@ Core UI screens: unlock, gallery browsing, image favorites, tag management, vaul
   gallery grid (exclusive op gated on `queue_.busy()` like compact; F1 "Vault tools" group
   documents `Shift+C` + `Ctrl+D`). `State{Choose,Scanning,Review,Done}`: Choose is the mode
   chooser as the screen's initial STATE (exact / exact + visually similar — not a modal
-  dialog class); Scanning polls the `DupScanJob` with progress + graceful Esc-cancel; Review
+  dialog class). **Phase 86 scan scope:** Choose also carries a scope line
+  (Left/Right cycles Whole vault / This gallery only / This gallery vs whole
+  vault), shown only when `back_.path` is non-empty — the browsed gallery path
+  already arrives in the back-nav Nav from `App::to_duplicates` (grid or active
+  dual pane), so no new plumbing. Mode + scope live in the nested
+  `ChooseState choose_` struct (`sel` + `scope`; folded into one struct to keep
+  the class ≤ 20 fields, S1820). GalleryOnly passes the path to
+  `collect_scan_items` (subtree-only walk, proportionally cheaper);
+  GalleryVsVault scans the WHOLE vault and `finish_scan` runs
+  `scope_filter_groups` before building the review (outside copies stay in
+  surviving groups); the review header appends `dup_scope_label` when scoped;
+  rescan from Done keeps the scope; both scan modes work in every scope.
+  Scanning polls the `DupScanJob` with progress + graceful Esc-cancel; Review
   lists groups largest-reclaimable-first as side-by-side member tiles (thumb/poster, name,
   parent path, size, resolution) with KEEP/REMOVE badges — `Left/Right` member focus,
   `Up/Down` group focus, `Space` toggle (refused with a footer notice when the member is
