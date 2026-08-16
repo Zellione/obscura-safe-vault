@@ -17,8 +17,10 @@
 #include "platform/path_utf8.h"
 #include "platform/second_vault_pref.h"
 #include "media/volume_setting.h"
+#include "media/autoplay_setting.h"
 #include "platform/theme_pref.h"
 #include "platform/volume_pref.h"
+#include "platform/autoplay_pref.h"
 #include "platform/perf.h"
 #include "ui/advanced_search_screen.h"
 #include "ui/dual_gallery.h"
@@ -117,6 +119,9 @@ bool App::init()
     // Restore the remembered media playback volume (Phase 25 follow-up); persisted
     // again on exit at the end of run().
     media::set_saved_volume(platform::VolumePref::default_location().load());
+
+    // Phase 85: seed the auto-play-videos toggle from the persisted preference.
+    media::set_saved_autoplay_enabled(platform::AutoplayPref::default_location().load());
 
     // Phase 84: seed the gallery view with the persisted preference
     sessions_.gallery.view = platform::GalleryViewPref::default_location().load();
