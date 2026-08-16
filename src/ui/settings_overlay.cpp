@@ -14,6 +14,9 @@
 #include "ui/text_input_event.h"
 #include "ui/widgets.h"
 
+#include <string>
+#include <utility>
+
 namespace ui {
 
 namespace {
@@ -315,6 +318,37 @@ void draw_rail(gfx::Renderer& r, gfx::FontAtlas& font, float rail_x, float rail_
     }
 }
 
+// Label + value strings for a pane row of the current section. Split out of
+// draw_pane_row (cognitive-complexity budget); TagColours' swatch dot stays
+// with the drawing in draw_pane_row.
+std::pair<std::string, std::string> pane_row_text(const SettingsState& state, int row_index)
+{
+    if (state.section == SettingsSection::Appearance) {
+        if (row_index == 0) return {"Theme", std::string(gfx::theme_name(state.theme))};
+        if (row_index == 1)
+            return {"Default Gallery View", std::string(gallery_view_label(state.gallery_view))};
+    } else if (state.section == SettingsSection::Playback) {
+        if (row_index == 0) return {"Auto-play videos", state.autoplay ? "On" : "Off"};
+    } else if (state.section == SettingsSection::Browsing) {
+        if (row_index == 0)
+            return {"Default Sort", sort_key_label(state.draft.default_sort, state.draft.default_sort)};
+        if (row_index == 1) return {"Show Tags on Tiles", state.draft.tiles_show_tags ? "On" : "Off"};
+    } else if (state.section == SettingsSection::TagColours) {
+        if (row_index < static_cast<int>(state.draft.categories.size())) {
+            const auto& cat = state.draft.categories[row_index];
+            return {cat.name, std::string(gfx::tag_swatch_name(cat.swatch))};
+        }
+    } else if (state.section == SettingsSection::VaultOps && row_index == 0) {
+        // Phase 65: vault operations (only available when unlocked)
+        return {"Re-check vault for upgrades", "[Enter]"};
+    } else if (state.section == SettingsSection::Security && row_index == 0) {
+        // Phase 66: machine-scoped keep-open default
+        return {"Keep 2nd vault after transfer",
+                std::string(second_vault_mode_label(state.second_vault_default))};
+    }
+    return {};
+}
+
 // Draw a single row in the pane for the current section.
 void draw_pane_row(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float pane_w, float item_y,
                    int row_index, const SettingsState& state)
@@ -325,51 +359,15 @@ void draw_pane_row(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float p
                          gfx::theme::SURFACE_HI);
     }
 
-    // Row label and value
-    std::string label;
-    std::string value;
-
-    if (state.section == SettingsSection::Appearance) {
-        if (row_index == 0) {
-            label = "Theme";
-            value = gfx::theme_name(state.theme);
-        } else if (row_index == 1) {
-            label = "Default Gallery View";
-            value = std::string(gallery_view_label(state.gallery_view));
-        }
-    } else if (state.section == SettingsSection::Playback) {
-        if (row_index == 0) {
-            label = "Auto-play videos";
-            value = state.autoplay ? "On" : "Off";
-        }
-    } else if (state.section == SettingsSection::Browsing) {
-        if (row_index == 0) {
-            label = "Default Sort";
-            value = sort_key_label(state.draft.default_sort, state.draft.default_sort);
-        } else if (row_index == 1) {
-            label = "Show Tags on Tiles";
-            value = state.draft.tiles_show_tags ? "On" : "Off";
-        }
-    } else if (state.section == SettingsSection::TagColours) {
-        const auto category_count = static_cast<int>(state.draft.categories.size());
-        if (row_index < category_count) {
-            const auto& cat = state.draft.categories[row_index];
-            // Draw a swatch dot
-            const auto swatch_color = gfx::tag_swatch(cat.swatch);
-            r.draw_round_rect({.x = pane_x + 8.0f, .y = item_y + 8.0f, .w = 16.0f, .h = 16.0f},
-                             RADIUS_SMALL, swatch_color);
-            label = cat.name;
-            value = gfx::tag_swatch_name(cat.swatch);
-        }
-    } else if (state.section == SettingsSection::VaultOps && row_index == 0) {
-        // Phase 65: vault operations (only available when unlocked)
-        label = "Re-check vault for upgrades";
-        value = "[Enter]";
-    } else if (state.section == SettingsSection::Security && row_index == 0) {
-        // Phase 66: machine-scoped keep-open default
-        label = "Keep 2nd vault after transfer";
-        value = second_vault_mode_label(state.second_vault_default);
+    if (state.section == SettingsSection::TagColours &&
+        row_index < static_cast<int>(state.draft.categories.size())) {
+        // Draw a swatch dot
+        const auto swatch_color = gfx::tag_swatch(state.draft.categories[row_index].swatch);
+        r.draw_round_rect({.x = pane_x + 8.0f, .y = item_y + 8.0f, .w = 16.0f, .h = 16.0f},
+                         RADIUS_SMALL, swatch_color);
     }
+
+    const auto [label, value] = pane_row_text(state, row_index);
 
     r.draw_text(font, pane_x + 30.0f, item_y + 8.0f, label,
                focused ? gfx::theme::TEXT : gfx::theme::TEXT_DIM);

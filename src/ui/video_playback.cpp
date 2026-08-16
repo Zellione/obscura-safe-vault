@@ -395,8 +395,8 @@ struct VideoPlayback::Impl {
             if (!a) break;
 
             if (audio_.skip_target >= 0.0) {
-                const size_t frames = a->samples.size() / static_cast<size_t>(ch > 0 ? ch : 1);
-                if (media::audio_seek_skip(a->pts_seconds, frames, sr, audio_.skip_target)
+                if (const size_t frames = a->samples.size() / static_cast<size_t>(ch > 0 ? ch : 1);
+                    media::audio_seek_skip(a->pts_seconds, frames, sr, audio_.skip_target)
                     == media::AudioSeekSkip::Drop)
                     continue;                       // pre-target audio: never fed, never counted
                 audio_.seek_base   = a->pts_seconds; // honest base: first audible sample's pts
