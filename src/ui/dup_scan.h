@@ -13,6 +13,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -39,8 +40,11 @@ struct DupScanItem {
 };
 
 // Main-thread ONLY (walks the index tree via Vault::list). Every image and
-// video in the whole vault, recursively.
-[[nodiscard]] std::vector<DupScanItem> collect_scan_items(const vault::Vault& v);
+// video under `scope_path` (a gallery slash-path), recursively; the default
+// empty scope covers the whole vault. Phase 86: a non-empty scope backs the
+// "this gallery" duplicate scan.
+[[nodiscard]] std::vector<DupScanItem> collect_scan_items(const vault::Vault& v,
+                                                          std::string_view scope_path = {});
 
 // Post-apply re-resolution (Phase 64). remove_media_batch ends in
 // auto_reclaim_space(), which on Windows can compact() — relocating every

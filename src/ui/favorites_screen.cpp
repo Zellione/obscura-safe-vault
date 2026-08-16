@@ -291,7 +291,17 @@ void FavoritesScreen::handle_key_down(const SDL_KeyboardEvent& key)
     // Phase 68 multiselect: Space toggles (Enter still opens), Ctrl+A
     // selects all / clears, B/X/M act on the selection — grid parity.
     if (key.key == SDLK_SPACE) {
-        if (!favs_.empty()) { sel_.toggle(nav_.selected()); }
+        if (favs_.empty()) { return; }
+        // Phase 86: Shift+Space fills the span from the range anchor to the
+        // focused tile; plain Space toggles.
+        if (key.mod & SDL_KMOD_SHIFT) {
+            if (const auto r = sel_.range_for(nav_.selected())) {
+                sel_.select_range(std::clamp(r->first, 0, static_cast<int>(favs_.size()) - 1),
+                                  std::clamp(r->second, 0, static_cast<int>(favs_.size()) - 1));
+            }
+            return;
+        }
+        sel_.toggle(nav_.selected());
         return;
     }
     if (key.key == SDLK_A && (key.mod & SDL_KMOD_CTRL)) {
@@ -453,7 +463,7 @@ void FavoritesScreen::render(gfx::Renderer& r)
 std::vector<ui::HelpGroup> FavoritesScreen::help_groups() const
 {
     std::vector<ui::HelpEntry> nav{
-        {"Enter", "Open"}, {"Space", "Select"}, {"Ctrl+A", "Select all"},
+        {"Enter", "Open"}, {"Space", "Select"}, {"Shift+Space", "Select range"}, {"Ctrl+A", "Select all"},
         {"B", "Favorite (acts on selection)"}, {"X", "Export selection"},
         {"M", "Move/copy selection"}, {"Del", "Delete selection"}, {"R", "Rename"}, {"D", "Toggle the detail panel"},
         {"Shift+I", "Import status"}, {"`", "Switch vault"}, {"Esc", "Back"},

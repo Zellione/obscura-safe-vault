@@ -175,3 +175,129 @@ TEST(selection_all_selected_ignores_stale_out_of_range_indices)
     s.toggle(6);
     CHECK_FALSE(s.all_selected(2));
 }
+
+// --- Phase 86: Shift+Space range selection ----------------------------------
+
+TEST(selection_range_for_without_anchor_is_empty)
+{
+    ui::SelectionModel s;
+    CHECK_FALSE(s.range_for(4).has_value());
+}
+
+TEST(selection_range_for_extends_from_last_toggled_anchor)
+{
+    // Select A with Space, move focus to B, Shift+Space: span A..B.
+    ui::SelectionModel s;
+    s.toggle(2);
+    const auto r = s.range_for(5);
+    REQUIRE(r.has_value());
+    CHECK_EQ(r->first, 2);
+    CHECK_EQ(r->second, 5);
+}
+
+TEST(selection_range_for_fills_between_two_recent_selections)
+{
+    // The literal flow: select A, select B, press the range key while still on
+    // B — the span is between the two most recently selected items.
+    ui::SelectionModel s;
+    s.toggle(2);
+    s.toggle(6);
+    const auto r = s.range_for(6);
+    REQUIRE(r.has_value());
+    CHECK_EQ(r->first, 2);
+    CHECK_EQ(r->second, 6);
+}
+
+TEST(selection_range_for_lone_anchor_at_focus_is_empty)
+{
+    // One selected item and the focus sitting on it: there is nothing to span.
+    ui::SelectionModel s;
+    s.toggle(3);
+    CHECK_FALSE(s.range_for(3).has_value());
+}
+
+TEST(selection_range_for_deselected_anchor_falls_back_to_previous)
+{
+    // Deselecting the newest anchor hands the role back to the one before it.
+    ui::SelectionModel s;
+    s.toggle(2);
+    s.toggle(6);
+    s.toggle(6);                 // deselect the newest anchor
+    const auto r = s.range_for(4);
+    REQUIRE(r.has_value());
+    CHECK_EQ(r->first, 2);
+    CHECK_EQ(r->second, 4);
+}
+
+TEST(selection_range_for_deselected_only_anchor_is_empty)
+{
+    ui::SelectionModel s;
+    s.toggle(2);
+    s.toggle(2);
+    CHECK_FALSE(s.range_for(5).has_value());
+}
+
+TEST(selection_range_for_survives_a_range_fill)
+{
+    // A fill does not move the anchor: extending again re-spans from the same
+    // item, file-manager style.
+    ui::SelectionModel s;
+    s.toggle(2);
+    s.select_range(2, 5);
+    const auto r = s.range_for(7);
+    REQUIRE(r.has_value());
+    CHECK_EQ(r->first, 2);
+    CHECK_EQ(r->second, 7);
+}
+
+TEST(selection_clear_resets_the_anchor)
+{
+    ui::SelectionModel s;
+    s.toggle(2);
+    s.clear();
+    CHECK_FALSE(s.range_for(5).has_value());
+}
+
+TEST(selection_select_all_does_not_establish_an_anchor)
+{
+    // Ctrl+A is not a hand-picked selection; a later Shift+Space must not
+    // span from some arbitrary index.
+    ui::SelectionModel s;
+    s.select_all(4);
+    CHECK_FALSE(s.range_for(2).has_value());
+}
+
+TEST(selection_select_range_selects_inclusive_span_both_orders)
+{
+    ui::SelectionModel s;
+    s.select_range(5, 2);        // descending order works too
+    CHECK_EQ(s.count(), static_cast<std::size_t>(4));
+    CHECK(s.contains(2));
+    CHECK(s.contains(3));
+    CHECK(s.contains(4));
+    CHECK(s.contains(5));
+    CHECK_FALSE(s.contains(1));
+    CHECK_FALSE(s.contains(6));
+}
+
+TEST(selection_select_adds_without_establishing_an_anchor)
+{
+    // The gallery grid's filtered range fill selects item by item; the fill
+    // must not move the anchor the way a hand toggle does.
+    ui::SelectionModel s;
+    s.toggle(2);
+    s.select(9);
+    s.select(9);                 // idempotent, never deselects
+    CHECK(s.contains(9));
+    const auto r = s.range_for(5);
+    REQUIRE(r.has_value());
+    CHECK_EQ(r->first, 2);
+}
+
+TEST(selection_select_range_bumps_revision_once)
+{
+    ui::SelectionModel s;
+    const uint64_t before = s.revision();
+    s.select_range(1, 3);
+    CHECK_EQ(s.revision(), before + 1);
+}

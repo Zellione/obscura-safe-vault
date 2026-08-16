@@ -439,10 +439,10 @@ void video_perceptual_pass(const PassCtx& ctx, const std::vector<bool>& in_exact
 
 } // namespace
 
-std::vector<DupScanItem> collect_scan_items(const vault::Vault& v)
+std::vector<DupScanItem> collect_scan_items(const vault::Vault& v, std::string_view scope_path)
 {
     std::vector<DupScanItem> out;
-    walk(v, "", out);
+    walk(v, std::string(scope_path), out);
     return out;
 }
 

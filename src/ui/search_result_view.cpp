@@ -65,7 +65,17 @@ void SearchResultView::handle_key(const SDL_KeyboardEvent& key)
         // Phase 68 multiselect: Space toggles, Ctrl+A selects all — and clears
         // instead when everything is already selected (grid parity).
         case SDLK_SPACE:
-            if (count > 0) sel_.toggle(cur_result_);
+            if (count <= 0) break;
+            // Phase 86: Shift+Space fills the span from the range anchor to
+            // the focused result; plain Space toggles.
+            if ((key.mod & SDL_KMOD_SHIFT) != 0) {
+                if (const auto r = sel_.range_for(cur_result_)) {
+                    sel_.select_range(std::clamp(r->first, 0, count - 1),
+                                      std::clamp(r->second, 0, count - 1));
+                }
+                break;
+            }
+            sel_.toggle(cur_result_);
             break;
         case SDLK_A:
             if ((key.mod & SDL_KMOD_CTRL) != 0 && count > 0) {

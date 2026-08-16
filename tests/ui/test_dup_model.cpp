@@ -420,3 +420,88 @@ TEST(dup_refresh_reapplies_default_marks)
     CHECK(r.groups()[0].members[0].keep);      // a/1, re-defaulted to KEEP
     CHECK(!r.groups()[0].members[1].keep);     // a/2
 }
+
+// --- Phase 86: gallery-vs-vault scope filter --------------------------------
+
+static ui::DupGroup group_with_paths(std::vector<std::string> paths)
+{
+    ui::DupGroup g;
+    for (auto& p : paths) {
+        ui::DupMember m;
+        m.node_path = std::move(p);
+        g.members.push_back(std::move(m));
+    }
+    return g;
+}
+
+TEST(dup_scope_filter_keeps_groups_touching_the_gallery)
+{
+    // One member inside the scope is enough — and the OUTSIDE members stay in
+    // the group, so the review can remove either side of the duplication.
+    std::vector<ui::DupGroup> groups{
+        group_with_paths({"a/one.png", "elsewhere/two.png"})};
+    const size_t dropped = ui::scope_filter_groups(groups, "a");
+    CHECK_EQ(dropped, size_t{0});
+    REQUIRE(groups.size() == 1);
+    CHECK_EQ(groups[0].members.size(), size_t{2});
+}
+
+TEST(dup_scope_filter_drops_groups_outside_the_gallery)
+{
+    std::vector<ui::DupGroup> groups{
+        group_with_paths({"a/one.png", "elsewhere/two.png"}),
+        group_with_paths({"x/p.png", "y/q.png"})};
+    const size_t dropped = ui::scope_filter_groups(groups, "a");
+    CHECK_EQ(dropped, size_t{1});
+    REQUIRE(groups.size() == 1);
+    CHECK_EQ(groups[0].members[0].node_path, std::string("a/one.png"));
+}
+
+TEST(dup_scope_filter_respects_component_boundaries)
+{
+    // "ab/x.png" is NOT inside gallery "a" — a bare prefix match would leak
+    // sibling galleries that merely share a name prefix.
+    std::vector<ui::DupGroup> groups{
+        group_with_paths({"ab/x.png", "ab/y.png"})};
+    const size_t dropped = ui::scope_filter_groups(groups, "a");
+    CHECK_EQ(dropped, size_t{1});
+    CHECK(groups.empty());
+}
+
+TEST(dup_scope_filter_matches_nested_descendants)
+{
+    std::vector<ui::DupGroup> groups{
+        group_with_paths({"a/b/deep.png", "other/copy.png"})};
+    const size_t dropped = ui::scope_filter_groups(groups, "a");
+    CHECK_EQ(dropped, size_t{0});
+    CHECK_EQ(groups.size(), size_t{1});
+}
+
+TEST(dup_scope_filter_empty_scope_keeps_everything)
+{
+    std::vector<ui::DupGroup> groups{
+        group_with_paths({"x/p.png", "y/q.png"})};
+    const size_t dropped = ui::scope_filter_groups(groups, "");
+    CHECK_EQ(dropped, size_t{0});
+    CHECK_EQ(groups.size(), size_t{1});
+}
+
+// --- Phase 86: scan-scope labels --------------------------------------------
+
+TEST(dup_scope_label_whole_vault)
+{
+    CHECK_EQ(ui::dup_scope_label(ui::DupScope::WholeVault, "a/b"),
+             std::string("Whole vault"));
+}
+
+TEST(dup_scope_label_gallery_only_names_the_gallery)
+{
+    CHECK_EQ(ui::dup_scope_label(ui::DupScope::GalleryOnly, "a/b"),
+             std::string("This gallery only — a/b"));
+}
+
+TEST(dup_scope_label_gallery_vs_vault_names_the_gallery)
+{
+    CHECK_EQ(ui::dup_scope_label(ui::DupScope::GalleryVsVault, "a/b"),
+             std::string("This gallery vs whole vault — a/b"));
+}

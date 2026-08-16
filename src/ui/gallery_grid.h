@@ -156,6 +156,7 @@ private:
     void handle_naming_key(const SDL_Event& e);          // new-gallery text entry
     void handle_password_key(const SDL_Event& e);         // Phase 35: archive-password text entry
     void toggle_or_open();                               // Space: select image / open
+    void select_range_to_focus();                        // Shift+Space: range fill (Phase 86)
     [[nodiscard]] std::vector<std::string> selected_delete_paths() const;  // Phase 74: paths from live selection
     void refresh();
     void open_selected();
