@@ -4,6 +4,7 @@
 #include "gfx/text.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "platform/autoplay_pref.h"
 #include "platform/gallery_view_pref.h"
 #include "platform/second_vault_pref.h"
 #include "platform/theme_pref.h"
@@ -12,6 +13,9 @@
 #include "ui/settings_model.h"
 #include "ui/text_input_event.h"
 #include "ui/widgets.h"
+
+#include <string>
+#include <utility>
 
 namespace ui {
 
@@ -114,6 +118,10 @@ void apply_value_delta(SettingsState& state, int delta, bool& commit_out)
             (void)platform::GalleryViewPref::default_location().save(state.gallery_view);
             commit_out = false;
         }
+    } else if (state.section == SettingsSection::Playback) {
+        settings_change_value(state, delta);
+        (void)platform::AutoplayPref::default_location().save(state.autoplay);
+        commit_out = false;  // autoplay is persisted by the pref save
     } else if (state.section == SettingsSection::Security) {
         settings_change_value(state, delta);
         (void)platform::SecondVaultPref::default_location().save(state.second_vault_default);
@@ -293,6 +301,8 @@ void draw_rail(gfx::Renderer& r, gfx::FontAtlas& font, float rail_x, float rail_
         std::string sec_name;
         if (sec == Appearance) {
             sec_name = "Appearance";
+        } else if (sec == Playback) {
+            sec_name = "Playback";
         } else if (sec == Browsing) {
             sec_name = "Browsing";
         } else if (sec == TagColours) {
@@ -308,6 +318,48 @@ void draw_rail(gfx::Renderer& r, gfx::FontAtlas& font, float rail_x, float rail_
     }
 }
 
+// Label + value strings for a pane row of the current section. Split out of
+// draw_pane_row (cognitive-complexity budget); TagColours' swatch dot stays
+// with the drawing in draw_pane_row.
+std::pair<std::string, std::string> pane_row_text(const SettingsState& state, int row_index)
+{
+    using enum SettingsSection;
+    switch (state.section) {
+        case Appearance:
+            if (row_index == 0) return {"Theme", std::string(gfx::theme_name(state.theme))};
+            if (row_index == 1)
+                return {"Default Gallery View", std::string(gallery_view_label(state.gallery_view))};
+            break;
+        case Playback:
+            if (row_index == 0) return {"Auto-play videos", state.autoplay ? "On" : "Off"};
+            break;
+        case Browsing:
+            if (row_index == 0)
+                return {"Default Sort",
+                        sort_key_label(state.draft.default_sort, state.draft.default_sort)};
+            if (row_index == 1)
+                return {"Show Tags on Tiles", state.draft.tiles_show_tags ? "On" : "Off"};
+            break;
+        case TagColours:
+            if (row_index < static_cast<int>(state.draft.categories.size())) {
+                const auto& cat = state.draft.categories[row_index];
+                return {cat.name, std::string(gfx::tag_swatch_name(cat.swatch))};
+            }
+            break;
+        case VaultOps:
+            // Phase 65: vault operations (only available when unlocked)
+            if (row_index == 0) return {"Re-check vault for upgrades", "[Enter]"};
+            break;
+        case Security:
+            // Phase 66: machine-scoped keep-open default
+            if (row_index == 0)
+                return {"Keep 2nd vault after transfer",
+                        std::string(second_vault_mode_label(state.second_vault_default))};
+            break;
+    }
+    return {};
+}
+
 // Draw a single row in the pane for the current section.
 void draw_pane_row(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float pane_w, float item_y,
                    int row_index, const SettingsState& state)
@@ -318,46 +370,15 @@ void draw_pane_row(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float p
                          gfx::theme::SURFACE_HI);
     }
 
-    // Row label and value
-    std::string label;
-    std::string value;
-
-    if (state.section == SettingsSection::Appearance) {
-        if (row_index == 0) {
-            label = "Theme";
-            value = gfx::theme_name(state.theme);
-        } else if (row_index == 1) {
-            label = "Default Gallery View";
-            value = std::string(gallery_view_label(state.gallery_view));
-        }
-    } else if (state.section == SettingsSection::Browsing) {
-        if (row_index == 0) {
-            label = "Default Sort";
-            value = sort_key_label(state.draft.default_sort, state.draft.default_sort);
-        } else if (row_index == 1) {
-            label = "Show Tags on Tiles";
-            value = state.draft.tiles_show_tags ? "On" : "Off";
-        }
-    } else if (state.section == SettingsSection::TagColours) {
-        const auto category_count = static_cast<int>(state.draft.categories.size());
-        if (row_index < category_count) {
-            const auto& cat = state.draft.categories[row_index];
-            // Draw a swatch dot
-            const auto swatch_color = gfx::tag_swatch(cat.swatch);
-            r.draw_round_rect({.x = pane_x + 8.0f, .y = item_y + 8.0f, .w = 16.0f, .h = 16.0f},
-                             RADIUS_SMALL, swatch_color);
-            label = cat.name;
-            value = gfx::tag_swatch_name(cat.swatch);
-        }
-    } else if (state.section == SettingsSection::VaultOps && row_index == 0) {
-        // Phase 65: vault operations (only available when unlocked)
-        label = "Re-check vault for upgrades";
-        value = "[Enter]";
-    } else if (state.section == SettingsSection::Security && row_index == 0) {
-        // Phase 66: machine-scoped keep-open default
-        label = "Keep 2nd vault after transfer";
-        value = second_vault_mode_label(state.second_vault_default);
+    if (state.section == SettingsSection::TagColours &&
+        row_index < static_cast<int>(state.draft.categories.size())) {
+        // Draw a swatch dot
+        const auto swatch_color = gfx::tag_swatch(state.draft.categories[row_index].swatch);
+        r.draw_round_rect({.x = pane_x + 8.0f, .y = item_y + 8.0f, .w = 16.0f, .h = 16.0f},
+                         RADIUS_SMALL, swatch_color);
     }
+
+    const auto [label, value] = pane_row_text(state, row_index);
 
     r.draw_text(font, pane_x + 30.0f, item_y + 8.0f, label,
                focused ? gfx::theme::TEXT : gfx::theme::TEXT_DIM);
@@ -373,7 +394,8 @@ void draw_pane(gfx::Renderer& r, gfx::FontAtlas& font, float pane_x, float pane_
     const int row_count = settings_row_count(state);
 
     if (row_count == 0 && !state.vault_unlocked &&
-        state.section != SettingsSection::Appearance) {
+        state.section != SettingsSection::Appearance &&
+        state.section != SettingsSection::Playback) {
         // Show "Unlock a vault" message for locked vault sections
         r.draw_text(font, pane_x, content_top + 8.0f, "Unlock a vault to configure",
                    gfx::theme::TEXT_FAINT);

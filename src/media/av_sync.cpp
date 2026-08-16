@@ -2,11 +2,10 @@
 
 namespace media {
 
-using enum FrameAction;
-
 FrameAction decide(double audio_clock, double frame_pts,
                    double ahead, double behind) noexcept
 {
+    using enum FrameAction;
     if (frame_pts > audio_clock + ahead)  return Hold;
     if (frame_pts < audio_clock - behind) return Drop;
     return Present;
@@ -29,6 +28,15 @@ float clamp_volume(float v) noexcept
 float effective_gain(float volume, bool muted) noexcept
 {
     return muted ? 0.0f : clamp_volume(volume);
+}
+
+AudioSeekSkip audio_seek_skip(double frame_pts, size_t frame_count,
+                              int sample_rate, double target) noexcept
+{
+    using enum AudioSeekSkip;
+    if (sample_rate <= 0 || frame_count == 0) return Start;
+    const double end = frame_pts + static_cast<double>(frame_count) / sample_rate;
+    return end <= target ? Drop : Start;
 }
 
 }  // namespace media

@@ -69,7 +69,11 @@ Pure SDL-free view/sort/model helpers, layout geometry, settings state, search i
   thumbnail shrinks by row height, leaving grid metrics and hit-testing untouched.
 - `gallery_view.h/.cpp` — `GalleryView{List,GridS,GridM,GridL,GridXL}` shared enum;
   `cell_size_for(view)` (S=192/M=256/L=352/XL=448 since Phase 75; List unused) +
-  `next_gallery_view(view)` (the `L`-key cycle). GridM was 188 (the old fixed CELL) before the
+  `next_gallery_view(view)` (the `L`-key cycle). Phase 84 adds, all off ONE constexpr
+  `{view,label,slug}` table (single source, no drift): `gallery_view_label` ("List"/"Grid S"/…),
+  `gallery_view_slug`/`gallery_view_from_slug` (the `gallery_view.conf` token; unknown/empty →
+  GridM; slugs are STABLE — never rename), and `prev_gallery_view` (table-derived exact inverse
+  of next). GridM was 188 (the old fixed CELL) before the
   Phase 75 bump; stored thumbs are 512 px (`image::THUMB_MAX_SIDE`) so XL stays sharp. `gallery_view.cpp` is listed
   explicitly (not globbed) in osv_tests' premake5.lua files{}.
 - `gallery_session_state.h` — `GallerySessionState{view,strip_side,detail_open,last_media_path,
@@ -77,6 +81,10 @@ Pure SDL-free view/sort/model helpers, layout geometry, settings state, search i
   record(path,index)/recall(path) (0 default) + reset(). Phase 48: added `bool detail_open`,
   persisted across screen transitions within a session. App-owned; App writes most fields once
   at screen exit, but GalleryGrid writes `last_index_by_path` repeatedly during its lifetime.
+  **Phase 84:** `view` is machine-scoped — seeded from `platform::GalleryViewPref` in
+  `App::init()` and re-seeded right after the promote_pending session reset; lock-exit resets
+  deliberately do NOT re-seed because every gallery re-entry funnels through promote_pending
+  (verified to include the Phase 66 warm-vault promotion).
 - `nav_model.*`, `input.*`, `viewer_model.h`, `screen.h` — navigation model, input handling,
   viewer model, Screen base (with `help_groups()` virtual overridden by GalleryGrid,
   ImageViewer, FavoritesScreen, TagOverviewScreen, AdvancedSearchScreen, VaultManager,

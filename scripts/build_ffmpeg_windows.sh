@@ -67,7 +67,7 @@ echo "==> Building vendored ffmpeg for Windows (MSVC toolchain, decode-only, sta
         --enable-avfilter \
         --enable-libaom \
         --enable-decoder=h264,hevc,prores,dnxhd,mjpeg,vp8,vp9,libaom_av1,qtrle,cinepak,gif,aac,opus,mp3,vorbis,flac,ac3,eac3,mpeg1video,mpeg2video,mpeg4,msmpeg4v1,msmpeg4v2,msmpeg4v3,wmv1,wmv2,wmv3,vc1,h263,flv,vp6,vp6a,vp6f,svq1,svq3,dvvideo,msvideo1,rpza,huffyuv,ffv1,theora,rv10,rv20,rv30,rv40,mp2,wmav1,wmav2,cook,ra_144,ra_288,pcm_s16le,pcm_u8,adpcm_ms,adpcm_ima_wav \
-        --enable-demuxer=mov,matroska,webm,gif,avi,mpegps,mpegts,asf,flv,ogg,rm \
+        --enable-demuxer=mov,matroska,webm,gif,avi,mpegps,mpegts,asf,flv,ogg,rm,mpegvideo \
         --enable-parser=h264,hevc,dnxhd,mjpeg,gif,aac,vorbis,opus,flac,ac3,mpegaudio,mpegvideo,mpeg4video,h263,vc1 \
         --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb \
         --enable-swscale \

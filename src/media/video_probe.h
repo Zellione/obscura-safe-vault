@@ -23,7 +23,7 @@ struct VideoProbeResult {
 // vendored codec library). A vault whose migrated_probe_caps is below this has
 // videos worth re-probing; one at or above it does not, so an undecodable video
 // is not re-read on every unlock forever.
-inline constexpr uint16_t PROBE_CAPS_GEN = 1;
+inline constexpr uint16_t PROBE_CAPS_GEN = 2;
 
 // Probe a video file (plaintext in-memory data). Returns true if the container is
 // recognized; fills `out` with detected metadata.

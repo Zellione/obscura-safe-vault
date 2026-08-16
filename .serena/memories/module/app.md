@@ -105,6 +105,16 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   `vault_unlocked`/`draft`/`theme`, called from both the F2 handler and the `ToSettings` nav
   case — two copies would drift and a stale `vault_unlocked` is exactly the bug that survives
   review. `active_` is a nullable `unique_ptr<Vault>`, so every settings path guards it.
+  **Phase 84:** `open_settings_overlay` also seeds `settings_.gallery_view` from
+  `sessions_.gallery.view`; the Appearance section has TWO rows (theme, Default Gallery View —
+  `settings_change_value` routes by `state.row` through `change_appearance_value`). After the
+  overlay handles an event, `OverlayDispatch::settings` syncs `settings_.gallery_view` back
+  into the session AND pushes it into a live grid via the `ui::set_gallery_view` free friend
+  (dynamic_cast; sets `view_` + ScrollFollow::Ensure) — placed inside the handled branch, so
+  the VaultOps migration-trigger "deliberately not handled" contract is untouched. The
+  overlay's LEFT/RIGHT value branches share ONE `apply_value_delta(state, delta, commit_out)`
+  helper (Sonar S3776/S134; row 0 theme + ThemePref save, row 1 GalleryViewPref save, Security
+  SecondVaultPref save — all commit_out=false; vault-backed sections commit_out=true).
 - `NavKind::ToSettings` (Phase 49, emitted by VaultManager's `C`) is one of the few kinds
   EXCLUDED from `apply_nav`'s screen teardown (alongside `ToggleKeepUnlocked`/`Quit`/`None`) —
   the overlay draws over the screen, so tearing it down would rebuild the vault manager
@@ -150,6 +160,12 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   atomic temp+rename (mirrors vault_registry). Loaded in `App::init()`, saved live by the
   `F2` settings overlay's Appearance section (Phase 49; ThemePicker, which used to do this,
   was deleted).
+- `gallery_view_pref.*` (Phase 84) — persisted gallery view density: `config_dir()/
+  gallery_view.conf` holds the `ui::gallery_view_slug` token ONLY (no secrets);
+  `load()`->GalleryView (missing/unknown -> GridM), `save(view)`; atomic temp+rename (exact
+  ThemePref mirror, incl. platform/ including a ui/ header the way theme_pref includes
+  gfx/theme.h). Loaded in `App::init()` + re-seeded after promote_pending's session reset;
+  saved live by the grid's `L` key and the F2 Appearance row.
 - `second_vault_pref.*` (Phase 66) — per-machine default for cross-vault keep-open mode:
   `config_dir()/second_vault.conf` holds the mode (LockNow/KeepTimed/KeepSession) ONLY (no
   secrets); `load()`->SecondVaultMode (missing/unknown -> LockNow), `save(mode)`; atomic

@@ -17,8 +17,10 @@
 #include "platform/path_utf8.h"
 #include "platform/second_vault_pref.h"
 #include "media/volume_setting.h"
+#include "media/autoplay_setting.h"
 #include "platform/theme_pref.h"
 #include "platform/volume_pref.h"
+#include "platform/autoplay_pref.h"
 #include "platform/perf.h"
 #include "ui/advanced_search_screen.h"
 #include "ui/dual_gallery.h"
@@ -117,6 +119,9 @@ bool App::init()
     // Restore the remembered media playback volume (Phase 25 follow-up); persisted
     // again on exit at the end of run().
     media::set_saved_volume(platform::VolumePref::default_location().load());
+
+    // Phase 85: seed the auto-play-videos toggle from the persisted preference.
+    media::set_saved_autoplay_enabled(platform::AutoplayPref::default_location().load());
 
     // Phase 84: seed the gallery view with the persisted preference
     sessions_.gallery.view = platform::GalleryViewPref::default_location().load();
@@ -680,6 +685,9 @@ struct App::OverlayDispatch {
             if (auto* grid = dynamic_cast<ui::GalleryGrid*>(app.screen_.get())) {
                 ui::set_gallery_view(*grid, app.overlays_.settings.gallery_view);
             }
+            // Phase 85: sync autoplay whenever the event was handled
+            media::set_saved_autoplay_enabled(app.overlays_.settings.autoplay);
+            (void)platform::AutoplayPref::default_location().save(app.overlays_.settings.autoplay);
             // Commit vault settings if the commit flag was set
             if (commit && app.overlays_.settings.vault_unlocked && app.vault_state_.active &&
                 vault::set_vault_settings(*app.vault_state_.active, app.overlays_.settings.draft) !=
@@ -850,6 +858,7 @@ void App::open_settings_overlay()
                                                                   : vault::VaultSettings{};
     overlays_.settings.theme = gfx::active_theme_id();
     overlays_.settings.gallery_view = sessions_.gallery.view;
+    overlays_.settings.autoplay = media::saved_autoplay_enabled();   // Phase 85
     overlays_.settings.second_vault_default = second_.session.default_mode();   // Phase 66
     ui::open_settings(overlays_.settings, ui::SettingsSection::Appearance);
 }

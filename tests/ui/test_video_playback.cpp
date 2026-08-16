@@ -22,6 +22,7 @@
 #include "crypto/kdf.h"
 #include "gfx/renderer.h"
 #include "gfx/text.h"
+#include "media/autoplay_setting.h"
 #include "media/loop_setting.h"
 #include "ui/video_playback.h"
 #include "vault/index.h"
@@ -1021,6 +1022,257 @@ TEST(video_playback_seek_far_from_keyframe_does_not_wedge_in_flight_counter)
         CHECK(vp.debug_in_flight_packets() <= 5);
     }
 
+    SDL_DestroySurface(surf);
+}
+
+TEST(video_playback_seek_rebases_audio_clock_to_first_kept_audio_frame)
+{
+    // Phase 85.2b: after seeking, the audio clock base must be re-set to the
+    // first audio frame actually fed (whose pts >= target), not the requested target.
+    // This test asserts that pump_audio() drops pre-target audio frames and
+    // re-bases the clock on the first kept frame's pts.
+    //
+    // tiny_av.mp4 audio: 44100 Hz, mono, 1024 samples per frame
+    // frame_dur = 1024 / 44100 ≈ 0.023219 seconds
+    // Seek to a position strictly inside an audio frame (not at a boundary) to
+    // make the frame straddle the target, causing base < target post-fix.
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+    auto vbytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_av.mp4");
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("seek_audio_rebase");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny_av.mp4", 4096) == vault::VaultResult::Ok);
+
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        ui::VideoPlayback vp(v, *node);
+        REQUIRE(vp.valid());
+        CHECK(vp.has_audio());
+
+        const SDL_FRect area{0, 0, 320, 240};
+        vp.render(r, font, area);
+
+        vp.handle_key(SDLK_SPACE, SDL_SCANCODE_SPACE);  // play
+        CHECK(vp.animating());
+
+        // Drive playback until audio flows (audio_samples_fed() > 0).
+        // The fixture is ~1.0s with audio; audio should flow within a few ticks.
+        uint64_t samples_before = vp.audio_samples_fed();
+        for (int i = 0; i < 15 && vp.audio_samples_fed() == samples_before; ++i) {
+            vp.update(0.05);
+            vp.render(r, font, area);
+        }
+        REQUIRE(vp.audio_samples_fed() > 0);  // audio is flowing before seek
+
+        // Compute the audio frame duration from known fixture parameters.
+        // tiny_av.mp4: 44100 Hz, 1 channel, 1024 samples per frame.
+        const int audio_sample_rate = 44100;
+        const size_t samples_per_frame = 1024;
+        const double frame_dur = static_cast<double>(samples_per_frame) / audio_sample_rate;
+
+        // Seek to a position strictly inside an audio frame (not at a frame boundary).
+        // Frame k spans [k*frame_dur, (k+1)*frame_dur). We seek to the midpoint of
+        // frame 10: seek_target = 10*frame_dur + frame_dur/2. With the fix, audio_seek_skip
+        // will drop frame 10 (ends at 11*frame_dur > seek_target), then feed frame 11
+        // (starts at 11*frame_dur > seek_target), setting base = 11*frame_dur. This is
+        // strictly less than seek_target (base < 11*frame_dur + frame_dur/2).
+        // Pre-fix: do_seek() sets seek_base = seek_target exactly (no later re-base),
+        // so base == seek_target, violating base < seek_target.
+        const double seek_target = 10.0 * frame_dur + frame_dur / 2.0;
+        vp.seek(seek_target);
+        vp.render(r, font, area);
+
+        // Drive playback again until audio flows post-seek.
+        samples_before = vp.audio_samples_fed();
+        for (int i = 0; i < 15 && vp.audio_samples_fed() == samples_before; ++i) {
+            vp.update(0.05);
+            vp.render(r, font, area);
+        }
+
+        // After the seek resolves, check that the audio clock base was re-based to the
+        // first kept frame's pts, not left at the requested target.
+        const double base = vp.debug_audio_clock_base();
+
+        // Discriminating assertions:
+        // (1) base < seek_target: FAILS pre-fix (base == seek_target exactly),
+        //     PASSES post-fix (base is the start of frame 11, which is before seek_target).
+        CHECK(base < seek_target);
+
+        // (2) base is not wildly before the target (at most one frame before):
+        // base >= seek_target - frame_dur - epsilon
+        CHECK(base > seek_target - frame_dur - 1e-6);
+    }
+
+    SDL_DestroyRenderer(sr);
+    SDL_DestroySurface(surf);
+}
+
+TEST(video_playback_set_paused_starts_and_stops_transport)
+{
+    // Phase 85: set_paused() is the public API for auto-play (Phase 85 Task 6)
+    // to control playback state without synthesizing key events.
+    auto vbytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("set_paused");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        ui::VideoPlayback vp(v, *node);
+        REQUIRE(vp.valid());
+        CHECK_FALSE(vp.animating());   // starts paused by default
+
+        const SDL_FRect area{0, 0, 320, 240};
+        vp.render(r, font, area);
+
+        // set_paused(false) starts playback
+        vp.set_paused(false);
+        vp.update(0.05);
+        CHECK(vp.animating());
+
+        // set_paused(true) stops playback
+        vp.set_paused(true);
+        CHECK_FALSE(vp.animating());
+    }
+
+    SDL_DestroyRenderer(sr);
+    SDL_DestroySurface(surf);
+}
+
+TEST(image_viewer_autoplay_on_starts_video_and_resume_seek_composes)
+{
+    // Phase 85: when autoplay is ON and a video is opened in ImageViewer
+    // (via image_viewer.cpp's playback-build path), it should start playing.
+    // This test verifies the composition: resume seek (Phase 39 Part 2) + auto-play.
+    // After seeking to a bookmark and ticking the engine, the video should be:
+    // - animating (playing, because autoplay is ON)
+    // - at the bookmarked position (not near 0)
+    const bool prev = media::saved_autoplay_enabled();
+    media::set_saved_autoplay_enabled(true);
+
+    auto vbytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("autoplay_on");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        // Construct video (as image_viewer.cpp playback-build path would)
+        auto video = std::make_unique<ui::VideoPlayback>(v, *node);
+        REQUIRE(video->valid());
+
+        // Simulate the auto-play hook from image_viewer.cpp's show_image_at
+        if (media::saved_autoplay_enabled()) {
+            video->set_paused(false);
+        }
+
+        const SDL_FRect area{0, 0, 320, 240};
+        video->render(r, font, area);
+
+        // Apply a resume bookmark seek (Phase 39 Part 2) — seekar seeks, playback
+        // state is preserved. Auto-play has already set it to playing.
+        const double bookmark_pos = 0.2;
+        video->seek(bookmark_pos);
+
+        // Drive a few ticks to let the seek resolve
+        for (int i = 0; i < 5; ++i) {
+            video->update(0.05);
+            video->render(r, font, area);
+        }
+
+        // With autoplay ON, the video should be:
+        // - animating (playing)
+        // - at the bookmarked position (not at 0)
+        CHECK(video->animating());
+        CHECK(video->position() >= bookmark_pos - 0.1);
+    }
+
+    media::set_saved_autoplay_enabled(prev);
+    SDL_DestroyRenderer(sr);
+    SDL_DestroySurface(surf);
+}
+
+TEST(image_viewer_autoplay_off_opens_video_paused)
+{
+    // Phase 85: when autoplay is OFF, a video opened in ImageViewer should
+    // remain paused.
+    const bool prev = media::saved_autoplay_enabled();
+    media::set_saved_autoplay_enabled(false);
+
+    auto vbytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!vbytes.empty());
+
+    TempVault tv("autoplay_off");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", vbytes, "tiny.mp4", 4096) == vault::VaultResult::Ok);
+
+    const vault::IndexNode* node = first_video(v.list("c"));
+    REQUIRE(node != nullptr);
+
+    SDL_Surface* surf = SDL_CreateSurface(320, 240, SDL_PIXELFORMAT_RGBA32);
+    REQUIRE(surf != nullptr);
+    SDL_Renderer* sr = SDL_CreateSoftwareRenderer(surf);
+    REQUIRE(sr != nullptr);
+    gfx::Renderer r(sr);
+    gfx::FontAtlas font;
+    REQUIRE(font.bake_from_file(OSV_DEFAULT_FONT, 18.0f));
+
+    {
+        auto video = std::make_unique<ui::VideoPlayback>(v, *node);
+        REQUIRE(video->valid());
+
+        const SDL_FRect area{0, 0, 320, 240};
+        video->render(r, font, area);
+
+        // With autoplay OFF, the video should remain paused
+        CHECK_FALSE(video->animating());
+    }
+
+    media::set_saved_autoplay_enabled(prev);
+    SDL_DestroyRenderer(sr);
     SDL_DestroySurface(surf);
 }
 

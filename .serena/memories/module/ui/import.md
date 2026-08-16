@@ -21,8 +21,26 @@ Import infrastructure: archive handling, plan building, vault population, import
     meta.json tags the gallery IT produced. `RecursionBudget` = five guards (depth, total expanded,
     live bytes, nested count, expansion ratio), each failing only its BRANCH. Also
     `nested_gallery_name` / `unique_gallery_name`. Refuses unset hooks (a default std::function
-    throws, and the project is exception-free).
-  - `recursive_hooks.*` — the real backends: miniz for zip/cbz, ArchiveReader for the rest,
+    throws, and the project is exception-free) — EXCEPT the optional `note_planned` and (Phase
+    84) `archive_done`, which are null-checked at every call site. `archive_done(bytes)` fires
+    when a frame pops (each nested frame in `descend()` after `budget.leave`, and the root at
+    the end of `walk_archive`) — the last moment the buffer is alive; it exists so the reader
+    cache can evict (see archive_reader_cache above). Test pins `opens()==2` for a 7z-in-7z
+    regardless of entry count.
+  - `archive_reader_cache.*` (Phase 84, gated `OSV_VENDORED_ARCHIVE`) — `ArchiveReaderCache`:
+    ONE open `ArchiveReader` per live archive buffer (`get(bytes,pw)` opens on first sight,
+    nullptr on failure — failures NOT cached so a wrong password stays retryable; `drop(bytes)`
+    evicts; `opens()` counts successful opens — the scaling observable). Keyed on (data ptr,
+    size), safe ONLY because the walker drops an archive at frame-pop before its buffer dies;
+    eviction also bounds memory (each reader keeps a copy of the archive bytes). Exists because
+    Phase 53's stateless hooks opened a FRESH reader per media entry — a full solid-archive
+    rescan each time, the PR #124 O(n²) class reintroduced one layer up; every recursive/
+    multipart import paid it from Phase 53 to 84.
+  - `recursive_hooks.*` — the real backends: miniz for zip/cbz, ArchiveReader (via a shared
+    `ArchiveReaderCache` since Phase 84 — the list/extract closures hold a shared_ptr to one
+    cache; `make_recursive_hooks` gained a trailing `ArchiveReaderCache* cache = nullptr`
+    param, caller-owned when injected — tests observe `opens()` — else internal, captured via a
+    non-owning aliasing shared_ptr; `h.archive_done` wires `cache->drop`) for the rest,
     MediaSink for galleries/placement/tags. `create_gallery` treats AlreadyExists as success
     (every plan lists every ancestor, so it is the normal case). The archive password is held in
     a `SecurePassword` = `shared_ptr<crypto::SecureBytes>` (via `make_secure_password`), shared by

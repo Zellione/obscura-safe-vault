@@ -93,12 +93,12 @@ decode-unverified. All tests pass under `scripts/test.sh` and `--asan`.
 
 #### Known limitation
 
-**Raw MPEG-PS (`.mpg`/`.mpeg`) is not decodable in the decode-only build.** The
-vendored FFmpeg cannot identify the program-stream elementary-stream codec (full
-system FFmpeg reads it fine — it is a stripped decode-only build). A `.mpg` file
-still imports (container detected as MPEG-PS) but stores as an unplayable Unknown-codec
-video. **MPEG-1 and MPEG-2 are fully supported via MKV, MPEG-TS, MP4, and MOV**
-(all decode-tested end-to-end).
+**Raw MPEG-PS (`.mpg`/`.mpeg`) is now decodable as of Phase 85.** A previous Phase-52
+limitation identified that the decode-only build could not identify the program-stream
+elementary-stream codec; FFmpeg's `mpegps` demuxer defers codec identification to
+codec probing, which required the `mpegvideo` probe demuxer (disabled in Phase 52).
+Phase 85 enabled it, making `.mpg` files decodable end-to-end. **MPEG-1 and MPEG-2 are
+fully supported via MPEG-PS, MKV, MPEG-TS, MP4, and MOV** (all decode-tested).
 
 #### Tier-2 (decode unverified)
 

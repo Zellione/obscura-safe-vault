@@ -10,6 +10,7 @@
 #include "gfx/texture_cache.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "media/autoplay_setting.h"
 #include "platform/path_utf8.h"
 #include "platform/perf.h"
 #include "platform/safe_print.h"
@@ -280,6 +281,9 @@ void ImageViewer::show_image_at(int idx)
     video_.reset();
     if (mode_ == ViewMode::Fit && item_is_video(album_.images, index_)) {
         video_ = std::make_unique<VideoPlayback>(vault_, *album_.images[index_]);
+        if (video_->valid() && media::saved_autoplay_enabled()) {
+            video_->set_paused(false);
+        }
     }
     // Sync animated image playback for the current item; tears down the previous
     // decoder (RAII) before any vault lock if the index has changed.

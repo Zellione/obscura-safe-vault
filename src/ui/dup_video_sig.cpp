@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>   // SEEK_SET/CUR/END
+#include <cstring>  // memcpy
 #include <vector>
 
 #if defined(__GNUC__)
@@ -188,13 +189,26 @@ bool frame_to_hash(SigCtx& c, uint64_t& out_hash)
                                  SWS_AREA, nullptr, nullptr, nullptr);
     if (!c.sws) return false;
 
-    std::vector<uint8_t> rgb(static_cast<size_t>(HASH_SIDE) * HASH_SIDE * 3);
-    std::array<uint8_t*, 1>  dst{rgb.data()};
-    const std::array<int, 1> dst_stride{HASH_SIDE * 3};
+    // sws_scale destinations must be padded, never exactly-sized (Phase 80):
+    // libswscale's vectorized writers store whole SIMD vectors per row, so the
+    // destination needs 64-aligned linesizes plus a >=128-byte tail, with a
+    // row-copy into a tight buffer afterwards.
+    constexpr int    ROW    = HASH_SIDE * 3;
+    constexpr int    STRIDE = (ROW + 63) & ~63;
+    std::vector<uint8_t> padded(static_cast<size_t>(STRIDE) * HASH_SIDE + 128);
+    // sws_scale reads 4 plane pointers/strides from these arrays regardless of
+    // the destination format's plane count — they must be 4-element.
+    std::array<uint8_t*, 4>  dst{padded.data(), nullptr, nullptr, nullptr};
+    const std::array<int, 4> dst_stride{STRIDE, 0, 0, 0};
     if (const int scaled = sws_scale(c.sws, c.frame->data, c.frame->linesize, 0,
                                      c.frame->height, dst.data(), dst_stride.data());
         scaled <= 0)
         return false;
+
+    std::vector<uint8_t> rgb(static_cast<size_t>(ROW) * HASH_SIDE);
+    for (int y = 0; y < HASH_SIDE; ++y)
+        std::memcpy(rgb.data() + static_cast<size_t>(y) * ROW,
+                    padded.data() + static_cast<size_t>(y) * STRIDE, ROW);
 
     out_hash = dhash64(std::span(rgb.data(), rgb.size()), HASH_SIDE, HASH_SIDE);
     return true;
