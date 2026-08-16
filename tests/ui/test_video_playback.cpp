@@ -1030,6 +1030,11 @@ TEST(video_playback_seek_rebases_audio_clock_to_first_kept_audio_frame)
     // first audio frame actually fed (whose pts >= target), not the requested target.
     // This test asserts that pump_audio() drops pre-target audio frames and
     // re-bases the clock on the first kept frame's pts.
+    //
+    // tiny_av.mp4 audio: 44100 Hz, mono, 1024 samples per frame
+    // frame_dur = 1024 / 44100 ≈ 0.023219 seconds
+    // Seek to a position strictly inside an audio frame (not at a boundary) to
+    // make the frame straddle the target, causing base < target post-fix.
     SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
     auto vbytes = read_file(OSV_MEDIA_FIXTURE_DIR "/tiny_av.mp4");
     REQUIRE(!vbytes.empty());
@@ -1063,7 +1068,7 @@ TEST(video_playback_seek_rebases_audio_clock_to_first_kept_audio_frame)
         CHECK(vp.animating());
 
         // Drive playback until audio flows (audio_samples_fed() > 0).
-        // The synthetic fixture is ~1.0s with audio; audio should flow within a few ticks.
+        // The fixture is ~1.0s with audio; audio should flow within a few ticks.
         uint64_t samples_before = vp.audio_samples_fed();
         for (int i = 0; i < 15 && vp.audio_samples_fed() == samples_before; ++i) {
             vp.update(0.05);
@@ -1071,39 +1076,43 @@ TEST(video_playback_seek_rebases_audio_clock_to_first_kept_audio_frame)
         }
         REQUIRE(vp.audio_samples_fed() > 0);  // audio is flowing before seek
 
-        // Seek to mid-clip target (0.3s). On tiny_av.mp4 (~1.0s), this is well into
-        // the content, and the demuxer's keyframe position will be at or before 0.
-        // Without the fix, pump_audio will feed audio frames from the keyframe
-        // onward, and seek_base will be set to the requested 0.3 exactly. With the
-        // fix, pump_audio drops frames ending at/before 0.3, then re-bases to the
-        // first kept frame's pts.
-        const double seek_target = 0.3;
+        // Compute the audio frame duration from known fixture parameters.
+        // tiny_av.mp4: 44100 Hz, 1 channel, 1024 samples per frame.
+        const int audio_sample_rate = 44100;
+        const size_t samples_per_frame = 1024;
+        const double frame_dur = static_cast<double>(samples_per_frame) / audio_sample_rate;
+
+        // Seek to a position strictly inside an audio frame (not at a frame boundary).
+        // Frame k spans [k*frame_dur, (k+1)*frame_dur). We seek to the midpoint of
+        // frame 10: seek_target = 10*frame_dur + frame_dur/2. With the fix, audio_seek_skip
+        // will drop frame 10 (ends at 11*frame_dur > seek_target), then feed frame 11
+        // (starts at 11*frame_dur > seek_target), setting base = 11*frame_dur. This is
+        // strictly less than seek_target (base < 11*frame_dur + frame_dur/2).
+        // Pre-fix: do_seek() sets seek_base = seek_target exactly (no later re-base),
+        // so base == seek_target, violating base < seek_target.
+        const double seek_target = 10.0 * frame_dur + frame_dur / 2.0;
         vp.seek(seek_target);
         vp.render(r, font, area);
 
-        // Drive playback again until audio flows post-seek. The test fixture's
-        // audio frame size is ~20ms (common for audio), so within a few ticks
-        // the first kept frame should be fed.
+        // Drive playback again until audio flows post-seek.
         samples_before = vp.audio_samples_fed();
         for (int i = 0; i < 15 && vp.audio_samples_fed() == samples_before; ++i) {
             vp.update(0.05);
             vp.render(r, font, area);
         }
 
-        // After the seek resolves, the audio clock base must be the first kept
-        // frame's pts. Pre-fix, pump_audio feeds frames from the keyframe onward
-        // (before 0.3), while seek_base stays at the requested 0.3 exactly. With
-        // the fix, pump_audio drops pre-target frames and re-bases on the first
-        // kept frame's pts, which should be just before or at the target.
+        // After the seek resolves, check that the audio clock base was re-based to the
+        // first kept frame's pts, not left at the requested target.
         const double base = vp.debug_audio_clock_base();
-        // Key assertion: base should be close enough to the target that no more than
-        // a few audio frames precede it. Pre-fix without skip logic, if frames from
-        // 0.0 are fed, the first frame's pts would be 0.0, then clock = 0.0 + fed_samples/sr
-        // would advance quickly, causing visible desync. With the fix, the first
-        // frame fed is from ~0.3, so base ~= 0.3 and clock stays in sync.
-        // Assertion: base is within one typical audio frame duration of the target.
-        CHECK(base > seek_target - 0.05);   // typically audio frames are 20ms (~0.02s)
-        CHECK(base <= seek_target + 0.1);   // base is at most a frame or so past the target
+
+        // Discriminating assertions:
+        // (1) base < seek_target: FAILS pre-fix (base == seek_target exactly),
+        //     PASSES post-fix (base is the start of frame 11, which is before seek_target).
+        CHECK(base < seek_target);
+
+        // (2) base is not wildly before the target (at most one frame before):
+        // base >= seek_target - frame_dur - epsilon
+        CHECK(base > seek_target - frame_dur - 1e-6);
     }
 
     SDL_DestroyRenderer(sr);
