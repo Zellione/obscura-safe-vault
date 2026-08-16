@@ -32,7 +32,13 @@ Full-screen image and video playback with zoom, pan, slideshow, and strip naviga
   `current_strip_side`, `capture_video_resume` (snapshot outgoing viewer's video path+position
   into a GallerySessionState, or clear when the current item isn't a live video),
   `apply_video_resume` (seek a freshly (re)opened matching video to the remembered position,
-  called right after `on_enter()` builds video_). "Collection mode" (explicit image set +
+  called right after `on_enter()` builds video_). **Auto-play (Phase 85):** the live-playback
+  (re)build path starts a valid playback via `video_->set_paused(false)` when
+  `media::saved_autoplay_enabled()` (default ON — videos start playing on open unless the F2
+  toggle is off); covers both opening a video and in-viewer navigation, and does NOT apply to
+  the thumbnail-strip hover AnimPlayback. Composes with `apply_video_resume`: both run within
+  the same frame before the first update() tick, so playback starts already positioned at the
+  bookmark with no flash of the clip start. "Collection mode" (explicit image set +
   per-image path + exit Nav) lets the viewer serve favorites/tag sets, not just one gallery.
   **Strip fetch windowing (post-Phase-58 fix):** `render_strip` requests thumbnail textures
   ONLY for cells in `strip_visible_range(scroll, extent, thumb, gap, count,
@@ -74,7 +80,11 @@ Full-screen image and video playback with zoom, pan, slideshow, and strip naviga
   `SDL_AudioStream` (master audio clock) + seek bar (both tracks); mute/volume via
   `SDL_SetAudioStreamGain`; A/V sync via `av_sync::decide`; pause pauses both; pImpl gated on
   `OSV_VENDORED_AV` (non-AV build -> poster). `seek(seconds)` is clamped, does NOT touch
-  play/pause (restores a resume bookmark right after ctor; playback opens paused). Impl demuxes
+  play/pause (restores a resume bookmark right after ctor; playback opens paused).
+  `set_paused(bool)` (Phase 85) is the public transport control — routes through the same
+  pause/resume path as the Space key (audio device pause/resume included), no-op when
+  invalid/already there; used by the viewer's auto-play hook. `debug_audio_clock_base()`
+  exposes `audio_.seek_base` (testing/debug). Impl demuxes
   (`demux_next_video_packet()`) + submits packets by `generation_`, reads back Results. Shared
   helpers `feed_one_packet()`/`prefetch_upto()`/`consume_result()`: `decode_into_pending()`
   blocks (bounded by `wait_result()`'s ~20ms timeout, retried) — used ONLY by the ctor's first
@@ -90,6 +100,14 @@ Full-screen image and video playback with zoom, pan, slideshow, and strip naviga
   poll gate open so the seek gets ticks), `try_advance_pending()` tops up to `SEEK_FEED_DEPTH`
   (32) instead of `PREFETCH_DEPTH` and feeds uncapped on timeout (one-time GOP-bounded gap),
   and `consume_result()` realigns the transport to the decoded frame's actual pts on resolve.
+  **Audio-side seek resolution (Phase 85, the A/V-desync fix):** `do_seek()` also sets
+  `AudioState::skip_target`; `pump_audio()` then consults `media::audio_seek_skip` per decoded
+  audio frame — pre-target frames are dropped (never fed, never counted), and the FIRST kept
+  frame's own pts becomes `audio_.seek_base` with `samples_fed` reset, so the audio clock is
+  based on what is actually audible (NOT the requested target, NOT the video frame's pts —
+  before this, audio played from the demuxer's keyframe while the clock claimed the target,
+  a persistent audible offset). Near-EOF seeks may drop all remaining audio without re-basing
+  (intentional). Loop-at-EOF (`do_seek(0.0)`) keeps the first frame immediately.
   Stale-generation Results are discarded (the worker un-counts every finished job incl.
   silently-discarded seek frames, so no phantom backlog wedges feed). Impl's audio + pending-
   frame state each live in nested `AudioState`/`FrameState` structs (SonarQube struct-size).
