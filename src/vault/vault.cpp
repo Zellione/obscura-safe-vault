@@ -719,9 +719,9 @@ VaultResult Vault::unlock(std::span<const uint8_t> password, std::span<const uin
     }
 
     crypto::SecureBuffer<crypto::KEY_SIZE> kek;
-    const auto input_format = domain_separated_kdf(header_)
-        ? crypto::KdfInputFormat::DomainSeparatedV2 : crypto::KdfInputFormat::LegacyConcat;
-    if (!crypto::derive_key(password, keyfile, header_.salt, header_.kdf, kek, input_format)) {
+    if (const auto input_format = domain_separated_kdf(header_)
+            ? crypto::KdfInputFormat::DomainSeparatedV2 : crypto::KdfInputFormat::LegacyConcat;
+        !crypto::derive_key(password, keyfile, header_.salt, header_.kdf, kek, input_format)) {
         return CryptoError;
     }
 
@@ -767,9 +767,9 @@ VaultResult Vault::change_password(std::span<const uint8_t> old_password,
     // into a scratch buffer (the vault's own key state is untouched until the
     // new wrap is safely on disk).
     crypto::SecureBuffer<crypto::KEY_SIZE> kek;
-    const auto old_format = domain_separated_kdf(header_)
-        ? crypto::KdfInputFormat::DomainSeparatedV2 : crypto::KdfInputFormat::LegacyConcat;
-    if (!crypto::derive_key(old_password, old_keyfile, header_.salt, header_.kdf, kek,
+    if (const auto old_format = domain_separated_kdf(header_)
+            ? crypto::KdfInputFormat::DomainSeparatedV2 : crypto::KdfInputFormat::LegacyConcat;
+        !crypto::derive_key(old_password, old_keyfile, header_.salt, header_.kdf, kek,
                             old_format)) {
         return CryptoError;
     }

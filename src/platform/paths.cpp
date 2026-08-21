@@ -11,7 +11,9 @@
 #include <stdexcept>
 
 #if defined(_WIN32)
-#  define WIN32_LEAN_AND_MEAN
+#  if !defined(WIN32_LEAN_AND_MEAN)
+#    define WIN32_LEAN_AND_MEAN
+#  endif
 #  include <Windows.h>
 #  include <Aclapi.h>
 #  include <fcntl.h>
@@ -133,7 +135,9 @@ namespace {
 #endif
 }
 
-void discard_created_keyfile(std::FILE* fp, const std::filesystem::path& path) noexcept
+// FILE* cannot be pointer-to-const here: _fileno's C API requires FILE* even
+// though this helper only changes the underlying file's disposition.
+void discard_created_keyfile(std::FILE* fp, const std::filesystem::path& path) noexcept // NOSONAR cpp:S995
 {
 #if defined(_WIN32)
     (void)path;
@@ -243,7 +247,10 @@ bool write_new_keyfile(const std::filesystem::path& path)
         crypto_wipe(key.data(), key.size());
         return false;
     }
-    bool ok = std::fwrite(key.data(), 1, key.size(), f) == key.size() &&
+    // The key is intentionally persisted to the caller-selected keyfile. The
+    // path was normalized by the UI boundary and open_new_keyfile exclusively
+    // created it with an owner-only mode/DACL.
+    bool ok = std::fwrite(key.data(), 1, key.size(), f) == key.size() && // NOSONAR cpp:S2083
               std::fflush(f) == 0 && sync_file(f);
     if (!ok) discard_created_keyfile(f, path);
     (void)std::fclose(f);  // data was already flushed+synced; no new error remains to report

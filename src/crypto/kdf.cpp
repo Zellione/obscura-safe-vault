@@ -30,8 +30,8 @@ bool derive_key(std::span<const uint8_t>            password,
         'O','S','V','-','K','D','F','-','I','N','P','U','T','-','2',0};
     const size_t prefix_size = format == KdfInputFormat::DomainSeparatedV2
         ? domain.size() + sizeof(uint64_t) * 2 : 0;
-    constexpr size_t max_argon_input = std::numeric_limits<uint32_t>::max();
-    if (password.size() > max_argon_input || keyfile.size() > max_argon_input ||
+    if (constexpr size_t max_argon_input = std::numeric_limits<uint32_t>::max();
+        password.size() > max_argon_input || keyfile.size() > max_argon_input ||
         prefix_size > max_argon_input - password.size() ||
         keyfile.size() > max_argon_input - prefix_size - password.size()) {
         return false;
