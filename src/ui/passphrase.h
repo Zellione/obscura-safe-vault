@@ -2,7 +2,7 @@
 
 // Passphrase strength estimation + diceware-style generation (Phase 7).
 //
-// The password is the vault's real security boundary (CLAUDE.md), so the
+// The password is the vault's real security boundary (AGENTS.md), so the
 // create-vault flow shows a strength estimate and offers a randomly generated
 // passphrase. Estimation uses the standard character-class model: pool size
 // from the classes present, entropy = length * log2(pool). That overestimates

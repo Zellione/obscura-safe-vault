@@ -62,7 +62,7 @@ Full design, including the storage rationale and the recorded tradeoffs:
 - [x] Tests: union across a nested tree, excludes own+inherited, ci de-dupe; a gallery matches a deep descendant's tag; leaf gallery empty; `tag_overview` counts unchanged (Phase 22 regression guard); depth bound holds.
 
 **Cross-cutting**
-- [x] Update `CLAUDE.md` if conventions change, ROADMAP index row, and the affected Serena memories (`mem:vault_format` for v9, `mem:module/ui` for the new ui modules, `mem:module/vault` for the tag-description API, `mem:ui_spec` for the tag overview + help popup + tile changes).
+- [x] Update `AGENTS.md` if conventions change, ROADMAP index row, and the affected Serena memories (`mem:vault_format` for v9, `mem:module/ui` for the new ui modules, `mem:module/vault` for the tag-description API, `mem:ui_spec` for the tag overview + help popup + tile changes).
 - [x] `scripts/gen.sh` after adding source files so `compile_commands.json` stays accurate.
 
 > **Merge note:** this branch and `phase-52-legacy-video-codecs` each add one row to

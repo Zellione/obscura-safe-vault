@@ -236,7 +236,7 @@ TDD per the project workflow — tests first, then code.
 
 ## 8. Memory graph updates
 
-Per `CLAUDE.md`, this phase requires updating:
+Per `AGENTS.md`, this phase requires updating:
 - `mem:module/vault` — new `migration.*`, watermark fields, transfer change
 - `mem:module/ui` — new `migration_job.*`, removal of `video_repair.*` / `anim_repair.*`
 - `mem:vault_format` — `INDEX_VERSION 10` and the settings-block layout

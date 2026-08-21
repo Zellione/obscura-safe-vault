@@ -6,7 +6,7 @@
 // badge from it, both of which must work in builds without vendored FFmpeg, so
 // nothing here is gated on OSV_VENDORED_AV.
 //
-// A vault file is untrusted input (CLAUDE.md security invariant 6). The GIF walk
+// A vault file is untrusted input (AGENTS.md security invariant 6). The GIF walk
 // is fully bounds-checked: truncated, malformed, or non-GIF input returns false
 // rather than reading past the buffer. The WebP probe deliberately delegates to
 // libwebp's own header parser instead of hand-rolling a RIFF walker — libwebp

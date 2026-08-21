@@ -2,7 +2,7 @@
 
 // XChaCha20-Poly1305 AEAD chunk encryption (via Monocypher).
 //
-// On-disk chunk layout (matches CLAUDE.md / the .osv data region):
+// On-disk chunk layout (matches AGENTS.md / the .osv data region):
 //
 //     nonce[24] | ciphertext[plaintext_len] | tag[16]
 //

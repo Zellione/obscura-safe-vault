@@ -43,7 +43,7 @@ unsatisfiable password prompt.
   unmanaged buffer for the life of the `archive*` handle — a limitation of
   treating libarchive as a black box, not something this codebase controls;
   that handle's lifetime is already bounded to a single import attempt.
-- [x] Update `CLAUDE.md` / `mem:core`.
+- [x] Update `AGENTS.md` / `mem:core`.
 - [x] `tests/` — a ZipCrypto-encrypted zip/cbz fixture (built via libarchive's
   own writer, `zip:encryption=traditional`) requires the password prompt and
   imports correctly with the right passphrase; a wrong passphrase is

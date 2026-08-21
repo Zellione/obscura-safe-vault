@@ -9,7 +9,7 @@ cascading to descendants, and a scoped search across the whole vault.
 - [x] `Vault` API — `set_tags(node_path, tags)` / `add_tag` / `remove_tag` for both node kinds, persisted via the existing crash-safe double-buffer index swap; `search(query, scope)` where `scope ∈ {Images, Galleries, Both}` walks the decrypted in-memory tree and matches `name` + effective tags (case-insensitive substring). No OCR, no disk access.
 - [x] `src/ui/search_model.{h,cpp}` — pure query tokenisation + match/rank against name and effective tags; unit-tested.
 - [x] **UI** — `/` opens a search overlay (`src/ui/search_overlay.*`) with a live-filtered result list and an **Images / Galleries / Both** scope toggle (`Tab`); a tag-editor widget (`src/ui/tag_editor.*`, add/remove tags via `G`) reachable from the viewer and from a gallery tile.
-- [x] Update `CLAUDE.md` (index node now carries tags; `INDEX_VERSION` bump) and the relevant Serena `mem:core` memory.
+- [x] Update `AGENTS.md` (index node now carries tags; `INDEX_VERSION` bump) and the relevant Serena `mem:core` memory.
 - [x] `tests/` — tag round-trip across lock/reopen for images **and** galleries; a gallery tag is reported in a descendant image's effective tags; search scope correctly returns only images / only galleries / both; case-insensitive matching; a pre-tags vault opens with empty tags; the fuzz corpus is extended to tagged gallery + image nodes and stays crash-free.
 
 ### Acceptance criterion

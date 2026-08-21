@@ -10,7 +10,7 @@ added in Phase 16.
 - [x] **Index/format extension** — `IndexNode::Type::Video` + `VideoMeta` (container/codec/w/h/duration/orig_size/chunk list/poster), `INDEX_VERSION = 4` (v1–v3 read back-compat); `add_video` chunks the container + stores a first-frame JPEG poster; `read_thumbnail` returns the poster.
 - [x] `src/media/video_decoder.{h,cpp}` — demux + H.264/H.265 decode → `DecodedFrame` (yuv420p/nv12 direct, swscale fallback); keyframe-anchored seek; `gfx::YuvTexture` streaming upload (`SDL_UpdateYUVTexture`/`UpdateNVTexture`).
 - [x] **Viewer integration** — `src/ui/playback_model.{h,cpp}` (pure transport maths) + `src/ui/video_playback.{h,cpp}` (decoder + YUV texture + seek bar) hosted by `ImageViewer` when the current item `is_video()`: opens paused, `Space` play/pause, `J`/`L` ∓5 s, `,`/`.` frame-step, click/drag seek bar. Poster + play-badge on grid/list video tiles (`draw_tile_thumb`); list view shows duration + codec.
-- [x] Update `CLAUDE.md` tech table (FFmpeg/libav, nasm) + `mem:tech_stack`/`mem:core`.
+- [x] Update `AGENTS.md` tech table (FFmpeg/libav, nasm) + `mem:tech_stack`/`mem:core`.
 - [x] `tests/` — AVIO byte-exact read across chunk boundaries + SET/CUR/END/SIZE seek + **no-fs-write** assertion + auth-failure surfaced as `AVERROR(EIO)`; decoder frame-count/seek/swscale/malformed-reject; index v4 round-trip + v1–v3 back-compat; `add_video` reopen checksum + poster; transfer/search/favorites over video; `playback_model` transport maths; a headless `VideoPlayback` open→play→seek cycle that asserts **zero disk writes**.
 
 ### Acceptance criterion

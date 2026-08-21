@@ -32,7 +32,7 @@ libwebp (WebP), libheif (HEIC via libde265, AVIF via libaom). 154/154 tests pass
 >   buffers as the stb path; the security invariants are unchanged.
 > - **ASAN job:** now builds the codecs too (running the C decoders under the sanitisers is
 >   the highest-value place to have them). The old "no SDL3 in the ASAN job" note was stale —
->   the ASAN leg has provisioned SDL3 since Phase 4 — and was removed from CLAUDE.md.
+>   the ASAN leg has provisioned SDL3 since Phase 4 — and was removed from AGENTS.md.
 
 ---
 

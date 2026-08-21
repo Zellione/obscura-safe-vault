@@ -36,7 +36,7 @@ reuses it for the live gallery grid instead of writing a second comparator.
   key (`Manual → Name↑ → Name↓ → Date↑ → Date↓ → Size↑ → Size↓ → Manual`) and
   persists it immediately; the footer/HUD shows the active sort, mirroring the
   existing `T`/`L`/`U` indicator convention.
-- [x] Update `CLAUDE.md` (index format table, `INDEX_VERSION` bump, module
+- [x] Update `AGENTS.md` (index format table, `INDEX_VERSION` bump, module
   layout, the new `Shift+S` binding) and `mem:core`.
 - [x] `tests/` — `sort_key` round-trip across lock/reopen and back-compat
   (v1–v5 blobs read as `Manual` on every gallery); `gallery_sort` unit tests

@@ -10,7 +10,7 @@
 //
 // Accepted residual exposure: the OS clipboard itself still holds the plaintext
 // after a paste. That is the same exposure the Phase 45 copy-password action
-// already accepts and is outside the app's control (CLAUDE.md local-attacker
+// already accepts and is outside the app's control (AGENTS.md local-attacker
 // threat model). Wiping our own copy avoids a preventable SECOND exposure inside
 // the process.
 //

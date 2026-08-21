@@ -12,7 +12,7 @@ bulk operation.
 - [x] `src/platform/folder_dialog.{h,cpp}` — async destination-folder picker over `SDL_ShowOpenFolderDialog`, mirroring the existing `file_dialog` mutex-guarded result pattern.
 - [x] **Export writer** — for each selected image: decrypt the **original stored bytes** into an mlock'd `SecureBytes`, write them verbatim to `dest/<original_filename>`, `crypto_wipe` the buffer immediately after the write. Thumbnails are never exported. Name-collision handling appends ` (n)` rather than overwriting.
 - [x] **No bulk-tree export** — only the current explicit selection (or a single viewer image) is ever written; there is no "export entire vault" path.
-- [x] Update `CLAUDE.md`: record export as a documented, gated deviation from invariant #1; add `src/platform/folder_dialog.*` and the export module to the module layout.
+- [x] Update `AGENTS.md`: record export as a documented, gated deviation from invariant #1; add `src/platform/folder_dialog.*` and the export module to the module layout.
 - [x] `tests/` — exported files are byte-identical to the originally-imported bytes; collision suffixing; declining the consent dialog (`ExportConsent::Cancel`) writes **zero** files; a wiped-buffer assertion after each write.
 
 ### Acceptance criterion

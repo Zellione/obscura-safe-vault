@@ -2,7 +2,7 @@
 
 // SecureBuffer<N> — a fixed-size byte buffer for key material.
 //
-// Security invariants (CLAUDE.md):
+// Security invariants (AGENTS.md):
 //   * mlock'd on construction so the bytes never swap to disk.
 //   * crypto_wipe'd on destruction so freed memory holds no key material.
 //

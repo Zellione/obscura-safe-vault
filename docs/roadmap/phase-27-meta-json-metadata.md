@@ -20,7 +20,7 @@ Expected shape (all fields optional; unknown keys ignored):
   - `title.japanese`, when present, is added as a **tag** (so it stays searchable).
   - Each `tags[]` entry becomes a **type-prefixed** tag `"<type>:<name>"` (e.g. `artist:someone`, `tag:awesome tag`), applied through the existing `Vault::add_tag` merge (case-insensitive de-dupe).
 - [x] **Wire into import** — `build_zip_plan` / `build_cbz_plan` + `import_zip` / `import_cbz` detect a top-level `meta.json`; if present it overrides the default gallery name (the top gallery for zip, the single leaf for cbz) and seeds that gallery's tags. `meta.json` itself is **not** imported as a page. No `meta.json` → today's behaviour is byte-for-byte unchanged.
-- [x] Update `CLAUDE.md` / `mem:core`.
+- [x] Update `AGENTS.md` / `mem:core`.
 - [x] `tests/` — a fixture archive with `meta.json` imports under the english title, tagged with the japanese title and each `type:name`; a missing / partial / malformed `meta.json` degrades gracefully to a filename-named, untagged import.
 
 **Out of scope (YAGNI):** PDF metadata (PDFs carry no archive `meta.json` — a later phase could read the PDF info dict); writing `meta.json` back out; nested/per-folder `meta.json`; acting on fields beyond title + tags (the parser ignores extras without error).

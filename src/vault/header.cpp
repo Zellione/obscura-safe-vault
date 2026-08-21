@@ -6,7 +6,7 @@
 
 namespace vault {
 
-// Fixed byte offsets, reproduced exactly from the spec table in CLAUDE.md.
+// Fixed byte offsets, reproduced exactly from the spec table in AGENTS.md.
 // NOTE: the spec places slot B at offset 166, leaving an 8-byte reserved gap
 // after slot A's nonce (which ends at 158). We follow the documented offsets
 // verbatim so the on-disk layout matches the authoritative spec.

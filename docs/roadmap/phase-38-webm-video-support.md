@@ -33,7 +33,7 @@ support) for WebM's own pair of codecs.
   (Phase 16); a `.webm` with either audio codec should already A/V-sync
   correctly once video decode is wired up. No new audio work expected, but
   verify with a fixture that has an audio track.
-- [x] Update `CLAUDE.md` (FFmpeg decoder list, `VideoCodec` table) + the
+- [x] Update `AGENTS.md` (FFmpeg decoder list, `VideoCodec` table) + the
   README stack line + `docs/VENDORED_DEPS.md` (if the decoder list is
   tracked there) + `mem:tech_stack`.
 - [x] `tests/` — small `.webm` fixtures (VP8 and VP9, each with and without

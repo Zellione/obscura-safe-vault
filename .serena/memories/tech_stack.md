@@ -133,7 +133,7 @@ App tries `assets/…` relative to cwd first, then `SDL_GetBasePath()` (packaged
 ## CI
 `.github/workflows/` — ci.yml matrix covers Linux and Windows (macOS support dropped).
 
-The Windows legs compile with `/MP` (`flags { "MultiProcessorCompile" }` in premake5.lua)
+The Windows legs compile with `/MP` (`multiprocessorcompile "On"` in premake5.lua)
 and `/Z7` debug info (`debugformat "c7"` — no mspdbsrv serialisation, and the ccache
 prerequisite: ccache cannot cache `/Zi`). On top, ci.yml wires **ccache** for the app
 build: the REAL ccache.exe (NOT chocolatey's shim launcher — that re-launches with
@@ -152,6 +152,10 @@ attaches packages + SHA256SUMS.txt to the tag's GitHub release (draft-created if
 The ASAN job (Linux-only) builds vendored SDL3 (since Phase 4) and the image codecs (since
 Phase 9): running the C decoders under ASAN/UBSan on untrusted input is high value. nasm is
 installed on every leg for libaom.
+
+All remote GitHub Actions are pinned to immutable commit SHAs, with their major
+version retained in an inline comment for readability. `.github/dependabot.yml`
+checks those pins weekly and groups GitHub Actions updates into one PR.
 
 The ThreadSanitizer job (`tests-tsan`, Phase 42) also runs on every PR:
 `--tsan` premake option, gcc-14, Debug-only, Linux-only. Unlike the ASAN

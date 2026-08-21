@@ -169,7 +169,7 @@ void TextInputBase::insert(std::string_view text)
     // Walk the input as alternating acceptable / rejected runs so a paste with
     // embedded newlines or invalid bytes keeps everything around them. Each run
     // is a view into the caller's buffer, so a secure field never materialises
-    // an intermediate std::string (CLAUDE.md invariant #1/#2).
+    // an intermediate std::string (AGENTS.md invariant #1/#2).
     size_t i = skip_unacceptable(text, 0);
     while (i < text.size()) {
         const size_t run = acceptable_input_run(text.substr(i));

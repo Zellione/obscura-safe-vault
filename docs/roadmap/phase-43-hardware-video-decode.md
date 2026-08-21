@@ -112,7 +112,7 @@ mechanism, not a separate flag). Two platform-specific backends apply here:
   troubleshooting a bad driver, mirroring the existing persisted
   loop/volume settings (`media::saved_loop_enabled()`/`saved_volume()`
   pattern). Nice-to-have, not blocking.
-- [x] Update `CLAUDE.md` tech table + `mem:tech_stack` + `mem:core` (new
+- [x] Update `AGENTS.md` tech table + `mem:tech_stack` + `mem:core` (new
   build defines, the per-codec hwaccel-availability table, the fallback
   behavior).
 - [x] `tests/` — `VideoDecodeWorker` gains a case asserting identical

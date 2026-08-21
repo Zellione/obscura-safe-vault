@@ -318,7 +318,7 @@ workspace "ObscuraSafeVault"
     -- schedulers. Without it, msbuild /m only parallelises across the 4
     -- projects while every .cpp inside a project compiles serially, which is
     -- what made the Windows CI leg spend 10-15 min in cl.exe.
-    flags { "MultiProcessorCompile" }
+    multiprocessorcompile "On"
 
     -- Path (relative to the repo root / process cwd) of the bundled UI font.
     defines { 'OSV_DEFAULT_FONT="assets/fonts/NotoSans-Regular.ttf"' }

@@ -4,12 +4,12 @@
 //
 // The vault's directory structure is a tree of IndexNodes. A node is either a
 // Gallery (named, holding child nodes) or an Image (named, holding the metadata
-// and the data/thumbnail chunk locations). Per CLAUDE.md a gallery holds either
+// and the data/thumbnail chunk locations). Per AGENTS.md a gallery holds either
 // sub-galleries OR images, never a mix; that invariant is enforced by the Vault
 // layer, not here — the tree itself can represent any shape.
 //
 // The serialised form is a hand-rolled, versioned little-endian blob (see the
-// node layout in CLAUDE.md / ROADMAP.md). Deserialisation is fully bounds-checked
+// node layout in AGENTS.md / ROADMAP.md). Deserialisation is fully bounds-checked
 // and depth-limited so a corrupt or hostile blob can never crash the parser.
 
 #include <cstdint>

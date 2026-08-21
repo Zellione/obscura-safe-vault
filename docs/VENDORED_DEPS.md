@@ -100,7 +100,7 @@ If new CVEs are discovered, follow the bump procedure (see below).
    ```
    If `padded` mode ever reports overshoots, the new libswscale writes further
    past row ends than the codebase's padding contract (`FFALIGN(w*bpp, 64)`
-   linesize + 128-byte tail — see CLAUDE.md § Hardening notes) absorbs; widen
+   linesize + 128-byte tail — see AGENTS.md § Hardening notes) absorbs; widen
    the contract at every `sws_scale` site in `src/media/` before shipping.
 
 4. **Inspect the delta:**
@@ -132,4 +132,4 @@ If new CVEs are discovered, follow the bump procedure (see below).
 
 ## Related
 
-See [CLAUDE.md § Dependency management](../CLAUDE.md) for vendoring strategy and build instructions.
+See [AGENTS.md § Dependency management](../AGENTS.md) for vendoring strategy and build instructions.

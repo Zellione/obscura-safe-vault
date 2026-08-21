@@ -48,7 +48,7 @@ reseek.
   needs confirming the `mov` demuxer already routes the `vp09` box to it, no
   new code) actually work now. Only add a decoder whose fourCC the `mov`
   demuxer already maps by default — don't hand-roll new box-to-codec routing.
-- Update `CLAUDE.md` (FFmpeg decoder list, `VideoCodec` table), the README
+- Update `AGENTS.md` (FFmpeg decoder list, `VideoCodec` table), the README
   stack line, `docs/VENDORED_DEPS.md`, `mem:tech_stack`.
 - `tests/` — an AV1 `.webm` fixture (probe + poster + full decode through the
   encrypted-chunk path); one fixture per newly-added `.mov` codec; existing
@@ -187,7 +187,7 @@ one path-keyed position map, not two features.
   (`LockActive`, idle auto-lock, vault switch) — no new reset points, no
   vault-format change (this is in-memory session state only, like the rest
   of `GallerySessionState`).
-- Update `CLAUDE.md` (`GallerySessionState`'s new field) + `mem:core`.
+- Update `AGENTS.md` (`GallerySessionState`'s new field) + `mem:core`.
 - `tests/` — `record`/`recall` pure unit tests (empty-map default,
   overwrite-on-repeat-visit, independent entries per path); an App-level
   capture/restore test in the same style Phase 39 Part 2 used for its own

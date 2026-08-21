@@ -7,7 +7,7 @@ remembered across launches in global config (no secrets).
 - [x] **Runtime theme** — refactor `src/gfx/theme.h` from compile-time constants into a runtime `Theme` value (a struct of the existing colour tokens) plus a table of **built-in presets**: Refined Slate (current, default), a light theme, a high-contrast theme, and one more (e.g. sepia/midnight). A `gfx::active_theme()` accessor + `gfx::set_theme(id)` back the active selection; every `theme::…` call site reads the active theme (broad but mechanical — the token set is defined once and each preset fills it).
 - [x] `src/platform/theme_pref.{h,cpp}` — persist the chosen theme id in the config dir (atomic write, **stores no secrets**, mirroring `vault_registry`); loaded at startup, saved on change; an unknown/absent id falls back to the default.
 - [x] **UI** — a theme picker reachable from the **vault manager** (proposed key `C`) listing the presets with live apply-on-select; the choice persists immediately.
-- [x] Update `CLAUDE.md` (runtime theme + `platform/theme_pref.*`) + `mem:core`.
+- [x] Update `AGENTS.md` (runtime theme + `platform/theme_pref.*`) + `mem:core`.
 - [x] `tests/` — every preset defines every colour token (no missing/zeroed tokens); `theme_pref` round-trip (save id → reload id; unknown id → default); a pure "next/select theme" helper if one is added. The broad refactor is additionally validated by the existing test suite staying green and the app building on all platforms.
 
 ### Acceptance criterion

@@ -5,7 +5,7 @@
 // The header is the only unencrypted region of the vault. It carries everything
 // needed to derive the KEK (KDF params + salt), unwrap the master key, and locate
 // the active index blob. Its layout is a fixed table of byte offsets (see the
-// OFFSETS below and the spec table in CLAUDE.md / ROADMAP.md). The whole header
+// OFFSETS below and the spec table in AGENTS.md / ROADMAP.md). The whole header
 // occupies HEADER_SIZE bytes; the data region begins immediately after it.
 
 #include <array>

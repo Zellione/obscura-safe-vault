@@ -8,7 +8,7 @@ files whose video stream uses a codec the vendored FFmpeg doesn't currently deco
 - [x] **Add FFmpeg decoders** — extend the `--enable-decoder` set in `scripts/build_codecs.sh` with the codecs common in `.mov`: **ProRes** (`prores`), **DNxHD/DNxHR** (`dnxhd`), **MJPEG** (`mjpeg`) + the `dnxhd`/`mjpeg` parsers (FFmpeg has no prores parser; the mov demuxer frames its packets). The build stays **decode-only** (no encoders/muxers). `build_codecs.bat` is untouched — Windows never builds FFmpeg (video is `OSV_VENDORED_AV`-gated to Linux/macOS).
 - [x] Confirmed no format-detection change is needed — `vault::detect_video_container` maps any `ftyp` box to the ISO-BMFF/MP4 path (the probe tests assert `container == MP4` for the `.mov` fixtures), and `.mov` was already in the import dialog filter.
 - [x] Size impact measured: `libavcodec.a` 19.1 → 20.2 MiB (+1.0 MiB); linked Release `osv` 16.44 → 16.62 MiB (+172 KiB, ~1%).
-- [x] Update `CLAUDE.md` (FFmpeg decoder list) + the README stack line (+ `docs/VENDORED_DEPS.md`, `mem:tech_stack`).
+- [x] Update `AGENTS.md` (FFmpeg decoder list) + the README stack line (+ `docs/VENDORED_DEPS.md`, `mem:tech_stack`).
 - [x] `tests/` — small `.mov` fixtures (`tiny_prores.mov`, `tiny_dnxhr.mov`, `tiny_mjpeg.mov` — 160/256×120, 10 frames, generated with ffmpeg `testsrc`) probe with poster + full decode through the encrypted-chunk path; gated behind `OSV_VENDORED_AV`.
 
 **Out of scope (YAGNI):** encoding/transcoding; professional codecs beyond the above (CineForm, DNxHR HQX variants) unless a real fixture proves the need; new audio codecs.
