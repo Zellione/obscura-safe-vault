@@ -52,7 +52,7 @@ jobs:
       # Checkout
       # -----------------------------------------------------------------------
       - name: Checkout (with submodules)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
 
@@ -84,7 +84,7 @@ jobs:
       # cache and forces a rebuild — build_codecs skips when the lib already exists.
       # -----------------------------------------------------------------------
       - name: Cache vendored codecs build
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
@@ -112,7 +112,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Upload build artefact
         if: matrix.config == 'Debug' && matrix.compiler == 'gcc'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: osv-linux-debug
           path: build/bin/Debug/osv
@@ -127,7 +127,7 @@ jobs:
 
       - name: Upload package
         if: matrix.config == 'Release' && matrix.compiler == 'gcc'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: osv-linux-tarball
           path: dist/*.tar.gz
@@ -156,7 +156,7 @@ jobs:
 
     steps:
       - name: Checkout (with submodules)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
 
@@ -251,7 +251,7 @@ jobs:
       # Primary key never matches (sha suffix), so every run restores the
       # newest prior cache for this config and saves its own updated copy.
       - name: Cache ccache directory
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .ccache
           key: ccache-win2022-${{ matrix.config }}-${{ github.sha }}
@@ -291,7 +291,7 @@ jobs:
           ccache --zero-stats
 
       - name: Cache premake5 binary
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-premake5
         with:
           path: bin/premake5.exe
@@ -306,7 +306,7 @@ jobs:
           tar -xf "$env:TEMP\premake5.zip" -C bin
 
       - name: Cache vendored SDL3 build
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-sdl3
         with:
           path: vendor/SDL3/build
@@ -328,7 +328,7 @@ jobs:
           cmake --build vendor/SDL3/build --parallel
 
       - name: Cache vendored codecs build
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
@@ -407,7 +407,7 @@ jobs:
 
       - name: Upload package
         if: matrix.config == 'Release'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: osv-windows-zip
           path: dist/*.zip
@@ -437,7 +437,7 @@ jobs:
 
     steps:
       - name: Checkout (with submodules)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
 
@@ -459,7 +459,7 @@ jobs:
       # FFmpeg is dropped, and only by --no-av below; the cache is shared with
       # every other job and read as-is.
       - name: Cache vendored codecs build
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
@@ -500,7 +500,7 @@ jobs:
 
     steps:
       - name: Checkout (with submodules)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
 
@@ -520,7 +520,7 @@ jobs:
       # Build the decoders too: running libwebp/libheif/libaom under ASAN+UBSan on
       # untrusted input is the highest-value place to have the sanitisers.
       - name: Cache vendored codecs build
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
@@ -566,7 +566,7 @@ jobs:
 
     steps:
       - name: Checkout (with submodules)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
 
@@ -587,7 +587,7 @@ jobs:
       # builds and caches under this key — see the job-level comment above for
       # why this job does not need its own TSan-instrumented codec prefix.
       - name: Cache vendored codecs build
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
@@ -628,7 +628,7 @@ jobs:
 
     steps:
       - name: Checkout (with submodules)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
 
@@ -647,7 +647,7 @@ jobs:
 
       # Build ASAN-instrumented codecs with a separate cache key (-asan suffix).
       - name: Cache ASAN vendored codecs build
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-codecs-asan
         with:
           path: vendor/codecs-prefix-asan
@@ -700,14 +700,14 @@ jobs:
       # Full history so Sonar can attribute new-code and blame accurately.
       - name: Checkout (full history + submodules)
         if: env.SONAR_TOKEN != ''
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
           fetch-depth: 0
 
       - name: Cache apt packages
         if: env.SONAR_TOKEN != ''
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /tmp/apt-cache
           key: apt-sonar-${{ hashFiles('.github/workflows/ci.yml') }}
@@ -757,7 +757,7 @@ jobs:
 
       - name: Cache premake5 binary
         if: env.SONAR_TOKEN != ''
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-premake5
         with:
           path: bin/premake5
@@ -775,7 +775,7 @@ jobs:
 
       - name: Cache vendored SDL3 build
         if: env.SONAR_TOKEN != ''
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-sdl3
         with:
           path: vendor/SDL3/build
@@ -808,7 +808,7 @@ jobs:
       # osv links the image codecs, so the analysed compile below needs them.
       - name: Cache vendored codecs build
         if: env.SONAR_TOKEN != ''
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
@@ -849,7 +849,7 @@ jobs:
       # GITHUB_TOKEN lets SonarCloud post inline PR comments and status checks.
       - name: SonarQube scan
         if: env.SONAR_TOKEN != ''
-        uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6
+        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -886,7 +886,7 @@ jobs:
       # first-party src/ and tests/ are formatted, and skipping them drops the
       # large vendored checkouts.
       - name: Checkout (full history — needed for the merge-base diff)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
