@@ -36,4 +36,11 @@ void safe_println(std::FILE* stream, std::format_string<Args...> fmt, Args&&... 
     (void)std::fputs(line.c_str(), stream);
 }
 
+// stdout convenience overload matching std::println(fmt, ...).
+template <class... Args>
+void safe_println(std::format_string<Args...> fmt, Args&&... args) noexcept
+{
+    safe_println(stdout, fmt, std::forward<Args>(args)...);
+}
+
 } // namespace platform

@@ -364,6 +364,16 @@ workspace "ObscuraSafeVault"
         runtime "Release"
         defines { "_ITERATOR_DEBUG_LEVEL=0" }
 
+    -- Make exploit mitigations explicit instead of relying on distribution or
+    -- toolchain defaults, which differ between local builds and CI images.
+    filter { "system:linux", "configurations:Release", "toolset:gcc or clang" }
+        buildoptions { "-fPIE" }
+        linkoptions  { "-pie", "-Wl,-z,relro,-z,now" }
+
+    filter { "system:windows", "configurations:Release", "toolset:msc" }
+        buildoptions { "/guard:cf" }
+        linkoptions  { "/guard:cf", "/CETCOMPAT" }
+
     -- Opt-in sanitizers (gcc/clang). Applies to every project in the workspace.
     filter { "options:asan", "toolset:gcc or clang" }
         buildoptions { "-fsanitize=address,undefined", "-fno-omit-frame-pointer" }

@@ -2,7 +2,7 @@
 
 #include "platform/paths.h"
 
-#include <print>
+#include "platform/safe_print.h"
 
 namespace platform {
 
@@ -21,10 +21,10 @@ void SDLCALL FolderDialog::on_folder(void* userdata, const char* const* filelist
             if (auto norm = normalize_external_path_utf8(*p))
                 self->paths_.push_back(std::move(*norm));
             else
-                std::println(stderr, "[Platform] ignoring unusable path from folder dialog");
+                platform::safe_println(stderr, "[Platform] ignoring unusable path from folder dialog");
         }
     } else {
-        std::println(stderr, "[Platform] Folder dialog error: {}", SDL_GetError());
+        platform::safe_println(stderr, "[Platform] Folder dialog error: {}", SDL_GetError());
     }
     self->state_ = St::Done;
 }

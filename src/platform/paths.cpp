@@ -6,10 +6,20 @@
 
 #include <array>
 #include <cstdio>
-#include <print>
+#include <limits>
+#include <new>
+#include <stdexcept>
 
 #if defined(_WIN32)
+#  define WIN32_LEAN_AND_MEAN
+#  include <Windows.h>
+#  include <Aclapi.h>
+#  include <fcntl.h>
 #  include <io.h>
+#else
+#  include <fcntl.h>
+#  include <sys/stat.h>
+#  include <unistd.h>
 #endif
 
 #include "crypto/random.h"
@@ -43,6 +53,104 @@ namespace {
     return _fseeki64(fp, off, SEEK_SET) == 0;
 #else
     return fseeko(fp, static_cast<off_t>(off), SEEK_SET) == 0;
+#endif
+}
+
+[[nodiscard]] bool sync_file(std::FILE* fp) noexcept
+{
+#if defined(_WIN32)
+    return ::_commit(::_fileno(fp)) == 0;
+#else
+    return ::fsync(::fileno(fp)) == 0;
+#endif
+}
+
+// Atomically claim a brand-new keyfile. The exclusive-create operation closes
+// the exists/open race; POSIX mode 0600 does not depend on the caller's umask.
+[[nodiscard]] std::FILE* open_new_keyfile(const std::filesystem::path& path) noexcept
+{
+#if defined(_WIN32)
+    // Use a protected DACL granting only the current user access. Relying on
+    // directory inheritance can expose the keyfile in a shared folder.
+    HANDLE token = nullptr;
+    if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token)) return nullptr;
+    DWORD token_size = 0;
+    (void)::GetTokenInformation(token, TokenUser, nullptr, 0, &token_size);
+    auto* token_user = static_cast<TOKEN_USER*>(::LocalAlloc(LPTR, token_size));
+    if (!token_user || !::GetTokenInformation(token, TokenUser, token_user, token_size,
+                                               &token_size)) {
+        if (token_user) ::LocalFree(token_user);
+        ::CloseHandle(token);
+        return nullptr;
+    }
+    ::CloseHandle(token);
+
+    EXPLICIT_ACCESSW access{};
+    access.grfAccessPermissions = GENERIC_ALL;
+    access.grfAccessMode = SET_ACCESS;
+    access.grfInheritance = NO_INHERITANCE;
+    access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+    access.Trustee.TrusteeType = TRUSTEE_IS_USER;
+    access.Trustee.ptstrName = static_cast<LPWSTR>(token_user->User.Sid);
+    PACL acl = nullptr;
+    const DWORD acl_result = ::SetEntriesInAclW(1, &access, nullptr, &acl);
+    SECURITY_DESCRIPTOR descriptor{};
+    const bool descriptor_ok = acl_result == ERROR_SUCCESS &&
+        ::InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION) &&
+        ::SetSecurityDescriptorDacl(&descriptor, TRUE, acl, FALSE);
+    SECURITY_ATTRIBUTES attrs{sizeof(attrs), &descriptor, FALSE};
+    HANDLE handle = descriptor_ok
+        ? ::CreateFileW(path.c_str(), GENERIC_WRITE | DELETE, 0, &attrs, CREATE_NEW,
+                        FILE_ATTRIBUTE_NORMAL, nullptr)
+        : INVALID_HANDLE_VALUE;
+    if (acl) ::LocalFree(acl);
+    ::LocalFree(token_user);
+    if (handle == INVALID_HANDLE_VALUE) return nullptr;
+    const int fd = ::_open_osfhandle(reinterpret_cast<intptr_t>(handle),
+                                     _O_WRONLY | _O_BINARY);
+    if (fd == -1) {
+        ::CloseHandle(handle);
+        return nullptr;
+    }
+    std::FILE* fp = ::_fdopen(fd, "wb");
+    if (!fp) {
+        FILE_DISPOSITION_INFO disposition{TRUE};
+        (void)::SetFileInformationByHandle(handle, FileDispositionInfo, &disposition,
+                                           sizeof(disposition));
+        ::_close(fd);
+    }
+    return fp;
+#else
+    const int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC,
+                          S_IRUSR | S_IWUSR);
+    if (fd == -1) return nullptr;
+    std::FILE* fp = ::fdopen(fd, "wb");
+    if (!fp) {
+        (void)::unlink(path.c_str());
+        ::close(fd);
+    }
+    return fp;
+#endif
+}
+
+void discard_created_keyfile(std::FILE* fp, const std::filesystem::path& path) noexcept
+{
+#if defined(_WIN32)
+    (void)path;
+    const intptr_t native = ::_get_osfhandle(::_fileno(fp));
+    if (native != -1) {
+        FILE_DISPOSITION_INFO disposition{TRUE};
+        (void)::SetFileInformationByHandle(reinterpret_cast<HANDLE>(native),
+                                           FileDispositionInfo, &disposition,
+                                           sizeof(disposition));
+    }
+#else
+    (void)fp;
+    (void)path;
+    // POSIX permits another process to unlink and replace a pathname while our
+    // descriptor remains open. Unlinking by name here could therefore delete
+    // somebody else's replacement. Leave the owner-only short file in place;
+    // refusing to overwrite it is safer and makes the failed write visible.
 #endif
 }
 
@@ -88,7 +196,8 @@ std::filesystem::path default_vault_path()
     return dir.empty() ? std::filesystem::path{"vault.osv"} : dir / "vault.osv";
 }
 
-std::optional<std::vector<uint8_t>> read_file(const std::filesystem::path& path)
+std::optional<std::vector<uint8_t>> read_file(const std::filesystem::path& path,
+                                              size_t max_bytes)
 {
     std::FILE* f = fopen_path(path, "rb");
     if (!f) return std::nullopt;
@@ -100,39 +209,45 @@ std::optional<std::vector<uint8_t>> read_file(const std::filesystem::path& path)
     bool ok = file_size64(f, size) && seek_to64(f, 0);
 
     std::vector<uint8_t> buf;
-    if (ok && size > 0) {
-        buf.resize(static_cast<size_t>(size));
-        ok = std::fread(buf.data(), 1, buf.size(), f) == buf.size();
+    if (ok) {
+        const auto usize = static_cast<unsigned long long>(size);
+        ok = usize <= max_bytes && usize <= std::numeric_limits<size_t>::max();
+    }
+    try {
+        if (ok && size > 0) {
+            buf.resize(static_cast<size_t>(size));
+            ok = std::fread(buf.data(), 1, buf.size(), f) == buf.size();
+        }
+    } catch (const std::bad_alloc&) {
+        ok = false;
+    } catch (const std::length_error&) {
+        ok = false;
     }
     std::fclose(f);
     if (!ok) return std::nullopt;
     return buf;
 }
 
+std::optional<std::vector<uint8_t>> read_keyfile(const std::filesystem::path& path)
+{
+    return read_file(path, MAX_KEYFILE_BYTES);
+}
+
 bool write_new_keyfile(const std::filesystem::path& path)
 {
-    if (std::error_code ec; std::filesystem::exists(path, ec)) {
-        std::println(stderr, "[Platform] refusing to overwrite existing keyfile {}",
-                     path_to_utf8(path));
-        return false;
-    }
-
     std::array<uint8_t, KEYFILE_SIZE> key{};
     if (!crypto::fill_random(key)) return false;
 
-    std::FILE* f = fopen_path(path, "wb");
+    std::FILE* f = open_new_keyfile(path);
     if (!f) {
         crypto_wipe(key.data(), key.size());
         return false;
     }
-    const bool ok = std::fwrite(key.data(), 1, key.size(), f) == key.size() &&
-                    std::fflush(f) == 0;
-    std::fclose(f);
+    bool ok = std::fwrite(key.data(), 1, key.size(), f) == key.size() &&
+              std::fflush(f) == 0 && sync_file(f);
+    if (!ok) discard_created_keyfile(f, path);
+    (void)std::fclose(f);  // data was already flushed+synced; no new error remains to report
     crypto_wipe(key.data(), key.size());  // the keyfile IS key material
-    if (!ok) {
-        std::error_code rm_ec;
-        std::filesystem::remove(path, rm_ec);  // don't leave a short keyfile behind
-    }
     return ok;
 }
 

@@ -542,7 +542,7 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     h.kdf = params;
     h.kdf_algo = 0;  // Argon2id
     h.keyfile_required = keyfile.empty() ? 0 : 1;
-    h.flags |= FLAG_FRAMED_CHUNKS;  // Phase 26: new vaults frame chunk + index plaintext
+    h.flags |= FLAG_FRAMED_CHUNKS | FLAG_DOMAIN_SEPARATED_KDF;
 
     crypto::SecureBuffer<crypto::KEY_SIZE> master;
     crypto::SecureBuffer<crypto::KEY_SIZE> kek;
@@ -558,7 +558,10 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
 
     // Wrap the master key under the KEK (detached: cipher[32]||tag[16]).
     std::vector<uint8_t> wrapped;
-    crypto::seal(kek.as_span(), h.mk_nonce, master.as_span(), wrapped);
+    if (!crypto::seal(kek.as_span(), h.mk_nonce, master.as_span(), wrapped)) {
+        std::fclose(fp);
+        return VaultResult::CryptoError;
+    }
     std::memcpy(h.wrapped_master_key.data(), wrapped.data(), crypto::KEY_SIZE);
     std::memcpy(h.mk_tag.data(), wrapped.data() + crypto::KEY_SIZE, crypto::TAG_SIZE);
 
@@ -716,7 +719,9 @@ VaultResult Vault::unlock(std::span<const uint8_t> password, std::span<const uin
     }
 
     crypto::SecureBuffer<crypto::KEY_SIZE> kek;
-    if (!crypto::derive_key(password, keyfile, header_.salt, header_.kdf, kek)) {
+    const auto input_format = domain_separated_kdf(header_)
+        ? crypto::KdfInputFormat::DomainSeparatedV2 : crypto::KdfInputFormat::LegacyConcat;
+    if (!crypto::derive_key(password, keyfile, header_.salt, header_.kdf, kek, input_format)) {
         return CryptoError;
     }
 
@@ -762,7 +767,10 @@ VaultResult Vault::change_password(std::span<const uint8_t> old_password,
     // into a scratch buffer (the vault's own key state is untouched until the
     // new wrap is safely on disk).
     crypto::SecureBuffer<crypto::KEY_SIZE> kek;
-    if (!crypto::derive_key(old_password, old_keyfile, header_.salt, header_.kdf, kek)) {
+    const auto old_format = domain_separated_kdf(header_)
+        ? crypto::KdfInputFormat::DomainSeparatedV2 : crypto::KdfInputFormat::LegacyConcat;
+    if (!crypto::derive_key(old_password, old_keyfile, header_.salt, header_.kdf, kek,
+                            old_format)) {
         return CryptoError;
     }
     std::array<uint8_t, crypto::KEY_SIZE + crypto::TAG_SIZE> sealed{};
@@ -776,6 +784,7 @@ VaultResult Vault::change_password(std::span<const uint8_t> old_password,
     // Re-wrap under the new KEK with a fresh salt and nonce (never reuse
     // either — a reused salt would let one cracked password open both wraps).
     Header h = header_;
+    h.flags |= FLAG_DOMAIN_SEPARATED_KDF;
     if (!crypto::fill_random(h.salt) || !crypto::fill_random(h.mk_nonce)) {
         return CryptoError;
     }
@@ -783,7 +792,9 @@ VaultResult Vault::change_password(std::span<const uint8_t> old_password,
         return CryptoError;
     }
     std::vector<uint8_t> wrapped;
-    crypto::seal(kek.as_span(), h.mk_nonce, master.as_span(), wrapped);
+    if (!crypto::seal(kek.as_span(), h.mk_nonce, master.as_span(), wrapped)) {
+        return CryptoError;
+    }
     std::memcpy(h.wrapped_master_key.data(), wrapped.data(), crypto::KEY_SIZE);
     std::memcpy(h.mk_tag.data(), wrapped.data() + crypto::KEY_SIZE, crypto::TAG_SIZE);
     h.keyfile_required = new_keyfile.empty() ? 0 : 1;

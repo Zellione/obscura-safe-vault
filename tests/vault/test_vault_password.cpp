@@ -75,6 +75,18 @@ static bool read_header(const std::string& path, vault::Header& out)
     return ok;
 }
 
+static bool write_header(const std::string& path, const vault::Header& h)
+{
+    std::array<uint8_t, vault::HEADER_SIZE> raw{};
+    h.serialize(raw);
+    std::FILE* fp = std::fopen(path.c_str(), "r+b");
+    if (!fp) return false;
+    const bool ok = std::fwrite(raw.data(), 1, raw.size(), fp) == raw.size() &&
+                    std::fflush(fp) == 0;
+    std::fclose(fp);
+    return ok;
+}
+
 TEST(change_password_old_rejected_new_unlocks)
 {
     TempVault tv("change");
@@ -187,4 +199,47 @@ TEST(change_password_can_add_and_remove_keyfile)
     vault::Vault v2;
     REQUIRE(vault::Vault::open(tv.str(), v2) == vault::VaultResult::Ok);
     CHECK_EQ(v2.unlock(bytes("pw"), {}), vault::VaultResult::Ok);
+}
+
+TEST(change_password_migrates_legacy_kdf_encoding)
+{
+    TempVault tv("legacy_kdf");
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("ab"), bytes("c"), kTestKdf, v)
+                == vault::VaultResult::Ok);
+    }
+
+    // Convert the wrap to the original password||keyfile encoding, simulating
+    // an existing pre-v2 vault without touching its encrypted index/data.
+    vault::Header h;
+    REQUIRE(read_header(tv.str(), h));
+    crypto::SecureBuffer<crypto::KEY_SIZE> v2_kek;
+    crypto::SecureBuffer<crypto::KEY_SIZE> legacy_kek;
+    crypto::SecureBuffer<crypto::KEY_SIZE> master;
+    REQUIRE(crypto::derive_key(bytes("ab"), bytes("c"), h.salt, h.kdf, v2_kek));
+    std::array<uint8_t, crypto::KEY_SIZE + crypto::TAG_SIZE> sealed{};
+    std::memcpy(sealed.data(), h.wrapped_master_key.data(), crypto::KEY_SIZE);
+    std::memcpy(sealed.data() + crypto::KEY_SIZE, h.mk_tag.data(), crypto::TAG_SIZE);
+    REQUIRE(crypto::open_to(v2_kek.as_span(), h.mk_nonce, sealed, master.span()));
+    REQUIRE(crypto::derive_key(bytes("ab"), bytes("c"), h.salt, h.kdf, legacy_kek,
+                               crypto::KdfInputFormat::LegacyConcat));
+    std::vector<uint8_t> legacy_wrap;
+    REQUIRE(crypto::seal(legacy_kek.as_span(), h.mk_nonce, master.as_span(), legacy_wrap));
+    std::memcpy(h.wrapped_master_key.data(), legacy_wrap.data(), crypto::KEY_SIZE);
+    std::memcpy(h.mk_tag.data(), legacy_wrap.data() + crypto::KEY_SIZE, crypto::TAG_SIZE);
+    h.flags &= ~vault::FLAG_DOMAIN_SEPARATED_KDF;
+    REQUIRE(write_header(tv.str(), h));
+
+    vault::Vault legacy;
+    REQUIRE(vault::Vault::open(tv.str(), legacy) == vault::VaultResult::Ok);
+    REQUIRE(legacy.unlock(bytes("a"), bytes("bc")) == vault::VaultResult::Ok);
+    REQUIRE(legacy.change_password(bytes("ab"), bytes("c"), bytes("new"), {})
+            == vault::VaultResult::Ok);
+    REQUIRE(read_header(tv.str(), h));
+    CHECK(vault::domain_separated_kdf(h));
+
+    vault::Vault migrated;
+    REQUIRE(vault::Vault::open(tv.str(), migrated) == vault::VaultResult::Ok);
+    CHECK_EQ(migrated.unlock(bytes("new"), {}), vault::VaultResult::Ok);
 }

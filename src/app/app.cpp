@@ -2,7 +2,7 @@
 
 #include <SDL3/SDL.h>
 
-#include <print>
+#include "platform/safe_print.h"
 #include <string>
 
 #include "app/auto_lock.h"
@@ -89,13 +89,13 @@ bool App::init()
     // debugging tradeoff like the core-dump gate above.
     if (constexpr size_t SECURE_MEM_BUDGET = size_t{256} << 20;
         !platform::grow_secure_mem_budget(SECURE_MEM_BUDGET)) {
-        std::println(stderr, "[App] secure-memory budget below {} MiB — "
+        platform::safe_println(stderr, "[App] secure-memory budget below {} MiB — "
                      "large decoded images may not be page-locked.",
                      SECURE_MEM_BUDGET >> 20);
     }
 
     if (!window_.init()) {
-        std::println(stderr, "[App] Window initialisation failed.");
+        platform::safe_println(stderr, "[App] Window initialisation failed.");
         return false;
     }
 
@@ -109,7 +109,7 @@ bool App::init()
         }
     }
     if (!font_ready_)
-        std::println(stderr, "[App] Font atlas unavailable ('{}').", OSV_DEFAULT_FONT);
+        platform::safe_println(stderr, "[App] Font atlas unavailable ('{}').", OSV_DEFAULT_FONT);
 
     cache_ = std::make_unique<gfx::TextureCache>(window_.sdl_renderer());
 
@@ -136,7 +136,7 @@ bool App::init()
     // Deliberately carries no phase number: the previous form said "Phase 14"
     // long after Phase 14 shipped, because nothing ever forces a startup string
     // to be updated. A bare marker cannot go stale.
-    std::println("[App] Initialised.");
+    platform::safe_println("[App] Initialised.");
     return true;
 }
 
@@ -1004,7 +1004,7 @@ bool App::maybe_auto_lock(double dt)
     vault_state_.active.reset();
     vault_state_.active_path.clear();
     to_manager();
-    std::println("[App] Auto-locked after {} s idle.", static_cast<int>(IDLE_LOCK_SECS));
+    platform::safe_println("[App] Auto-locked after {} s idle.", static_cast<int>(IDLE_LOCK_SECS));
     return true;
 }
 
@@ -1176,7 +1176,7 @@ void App::shutdown()
     if (cache_) cache_->clear();        // destroy thumbnail textures before the renderer
     font_.release_texture();
     window_.shutdown();
-    std::println("[App] Clean shutdown.");
+    platform::safe_println("[App] Clean shutdown.");
 }
 
 } // namespace app

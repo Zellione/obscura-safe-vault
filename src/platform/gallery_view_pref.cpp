@@ -1,7 +1,7 @@
 #include "platform/gallery_view_pref.h"
 
 #include <fstream>
-#include <print>
+#include "platform/safe_print.h"
 #include <string>
 
 #include "platform/path_utf8.h"
@@ -42,20 +42,20 @@ bool GalleryViewPref::save(ui::GalleryView view) const
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         if (!out) {
-            std::println(stderr, "[GalleryViewPref] cannot write {}", path_to_utf8(tmp));
+            platform::safe_println(stderr, "[GalleryViewPref] cannot write {}", path_to_utf8(tmp));
             return false;
         }
         out << ui::gallery_view_slug(view) << '\n';
         out.flush();
         if (!out) {
-            std::println(stderr, "[GalleryViewPref] write error on {}", path_to_utf8(tmp));
+            platform::safe_println(stderr, "[GalleryViewPref] write error on {}", path_to_utf8(tmp));
             return false;
         }
     }
     std::error_code ec;
     std::filesystem::rename(tmp, file_, ec);
     if (ec) {
-        std::println(stderr, "[GalleryViewPref] rename failed: {}", ec.message());
+        platform::safe_println(stderr, "[GalleryViewPref] rename failed: {}", ec.message());
         std::filesystem::remove(tmp, ec);
         return false;
     }

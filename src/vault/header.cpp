@@ -71,14 +71,10 @@ namespace {
 // attempting a 4 TiB allocation. Argon2 itself requires nb_blocks >= 8 lanes.
 bool kdf_params_sane(uint8_t algo, const crypto::KdfParams& p) noexcept
 {
-    constexpr uint32_t MAX_T_COST      = 512;
-    constexpr uint32_t MAX_M_COST_KIB  = 4u * 1024 * 1024;  // 4 GiB
-    constexpr uint32_t MAX_PARALLELISM = 64;
-
     return algo == 0 &&  // Argon2id is the only defined KDF
-           p.t_cost >= 1 && p.t_cost <= MAX_T_COST &&
-           p.parallelism >= 1 && p.parallelism <= MAX_PARALLELISM &&
-           p.m_cost_kib >= 8 * p.parallelism && p.m_cost_kib <= MAX_M_COST_KIB;
+           p.t_cost >= 1 && p.t_cost <= crypto::MAX_KDF_T_COST &&
+           p.parallelism >= 1 && p.parallelism <= crypto::MAX_KDF_PARALLELISM &&
+           p.m_cost_kib >= 8 * p.parallelism && p.m_cost_kib <= crypto::MAX_KDF_M_COST_KIB;
 }
 
 } // namespace

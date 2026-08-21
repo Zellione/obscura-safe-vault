@@ -11,7 +11,7 @@
 #include "miniz.h"
 
 #include <cstring>
-#include <print>
+#include "platform/safe_print.h"
 #include <vector>
 
 namespace ui {
@@ -150,7 +150,7 @@ bool open_archive(const std::filesystem::path& path, const char* tag,
         mz_zip_reader_init_mem(&zip, archive.data(), archive.size(), 0))
         return true;
     out.error = "Could not open archive";
-    std::println(stderr, "[{}] open failed: {}", tag, platform::path_to_utf8(path));
+    platform::safe_println(stderr, "[{}] open failed: {}", tag, platform::path_to_utf8(path));
     return false;
 }
 

@@ -47,12 +47,24 @@ inline constexpr size_t MAX_USER_PATH_BYTES = 4096;
 // config_dir() / "vault.osv"  (just the filename if config_dir() is empty).
 [[nodiscard]] std::filesystem::path default_vault_path();
 
-// Read an entire file into a byte vector. nullopt if it cannot be opened/read.
+// Read an entire file into a byte vector, refusing files larger than max_bytes.
+// nullopt if it cannot be opened/read, exceeds the limit, or cannot be allocated.
 [[nodiscard]] std::optional<std::vector<uint8_t>>
-read_file(const std::filesystem::path& path);
+read_file(const std::filesystem::path& path, size_t max_bytes);
+
+// Public metadata imports are intentionally small. Keeping a shared limit here
+// prevents a picked file from becoming an unbounded allocation request.
+inline constexpr size_t MAX_METADATA_IMPORT_BYTES = 16U * 1024U * 1024U;
 
 // Bytes in a generated keyfile (512 bits — far beyond brute force).
 inline constexpr size_t KEYFILE_SIZE = 64;
+
+// User-supplied keyfiles may contain arbitrary bytes, but hashing a giant file
+// provides no useful security benefit and would make unlock an allocation DoS.
+inline constexpr size_t MAX_KEYFILE_BYTES = 16U * 1024U * 1024U;
+
+[[nodiscard]] std::optional<std::vector<uint8_t>>
+read_keyfile(const std::filesystem::path& path);
 
 // Create a fresh CSPRNG keyfile at `path`. Refuses to overwrite an existing
 // file: clobbering a keyfile with new random bytes would permanently lock

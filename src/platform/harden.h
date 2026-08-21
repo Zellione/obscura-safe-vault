@@ -1,3 +1,4 @@
+#include "platform/safe_print.h"
 #pragma once
 
 #include <cstddef>
@@ -36,7 +37,7 @@ bool redirect_stream_to_file(std::FILE* stream, const std::filesystem::path& pat
 // descriptor"), and C++23's std::print/std::println throw std::system_error
 // on such a failure (unlike old fprintf), which would crash the whole
 // process via std::terminate() the first time any of the many existing
-// std::println(stderr, "[Module] ...") diagnostics ran. Redirecting to a log
+// platform::safe_println(stderr, "[Module] ...") diagnostics ran. Redirecting to a log
 // file (rather than discarding to the null device) also means those
 // diagnostics — previously invisible in a windowless build — become visible
 // for the first time. Call once, early, at app startup (before any

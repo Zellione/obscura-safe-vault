@@ -5,7 +5,7 @@
 #include <cstring>
 #include <memory>
 #include <optional>
-#include <print>
+#include "platform/safe_print.h"
 
 #include "crypto/secure_mem.h"
 #include "gfx/renderer.h"
@@ -70,20 +70,20 @@ struct AnimPlayback::Impl {
 
         // Read the decrypted image into mlock'd SecureBytes
         if (vault.read_image(node, bytes_) != vault::VaultResult::Ok) {
-            std::println(stderr, "[AnimPlayback] read_image failed");
+            platform::safe_println(stderr, "[AnimPlayback] read_image failed");
             return;
         }
 
         // Open the decoder, which borrows bytes_ (must stay alive)
         if (!dec_->open(bytes_.as_span())) {
-            std::println(stderr, "[AnimPlayback] decoder open failed");
+            platform::safe_println(stderr, "[AnimPlayback] decoder open failed");
             return;
         }
 
         // Decode the first frame
         auto f = dec_->next_frame();
         if (!f) {
-            std::println(stderr, "[AnimPlayback] failed to decode first frame");
+            platform::safe_println(stderr, "[AnimPlayback] failed to decode first frame");
             return;
         }
         current_ = std::move(*f);
@@ -92,7 +92,7 @@ struct AnimPlayback::Impl {
         // already rejects single-frame files, but GifDecoder does not, so the
         // check stays here for both. Rewind so playback starts from the top.
         if (auto f2 = dec_->next_frame(); !f2) {
-            std::println(stderr, "[AnimPlayback] single-frame image, not animated");
+            platform::safe_println(stderr, "[AnimPlayback] single-frame image, not animated");
             return;
         }
         dec_->rewind();
@@ -168,7 +168,7 @@ struct AnimPlayback::Impl {
                                     SDL_TEXTUREACCESS_STREAMING,
                                     current_.width, current_.height);
             if (tex_ == nullptr) {
-                std::println(stderr, "[AnimPlayback] texture creation failed: {}",
+                platform::safe_println(stderr, "[AnimPlayback] texture creation failed: {}",
                              SDL_GetError());
                 return;
             }

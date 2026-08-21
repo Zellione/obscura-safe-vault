@@ -133,6 +133,12 @@ App tries `assets/…` relative to cwd first, then `SDL_GetBasePath()` (packaged
 ## CI
 `.github/workflows/` — ci.yml matrix covers Linux and Windows (macOS support dropped).
 
+Release executables opt into exploit mitigations explicitly in `premake5.lua`:
+Linux uses PIE plus full RELRO/immediate binding (`-fPIE -pie
+-Wl,-z,relro,-z,now`) in addition to stack protection and fortify; MSVC uses
+Control Flow Guard and CET compatibility (`/guard:cf /CETCOMPAT`). This avoids
+depending on host-distribution linker defaults.
+
 The Windows legs compile with `/MP` (`multiprocessorcompile "On"` in premake5.lua)
 and `/Z7` debug info (`debugformat "c7"` — no mspdbsrv serialisation, and the ccache
 prerequisite: ccache cannot cache `/Zi`). On top, ci.yml wires **ccache** for the app

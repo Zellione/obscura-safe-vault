@@ -17,7 +17,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
-#include <print>
+#include "platform/safe_print.h"
 
 #include "platform/path_utf8.h"
 
@@ -201,7 +201,7 @@ bool FontAtlas::bake_from_file(const char* path, float pixel_height)
     if (!path) return false;
     std::FILE* f = platform::fopen_path(platform::utf8_to_path(path), "rb");
     if (!f) {
-        std::println(stderr, "[gfx::FontAtlas] cannot open font '{}'", path);
+        platform::safe_println(stderr, "[gfx::FontAtlas] cannot open font '{}'", path);
         return false;
     }
     std::fseek(f, 0, SEEK_END);

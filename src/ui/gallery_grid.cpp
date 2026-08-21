@@ -98,7 +98,7 @@ std::string apply_tag_list_file(vault::Vault& v, const std::string& target,
                                 const std::vector<std::string>& picked, std::string& error)
 {
     if (target.empty() || picked.empty()) return {};
-    auto bytes = platform::read_file(picked.front());
+    auto bytes = platform::read_file(picked.front(), platform::MAX_METADATA_IMPORT_BYTES);
     if (!bytes) { error = "Could not read tag list."; return {}; }
     const auto counts = apply_tag_list(v, target, ui::parse_tag_list(*bytes));
     return std::format("Tag import: {} added, {} skipped", counts.added, counts.skipped);

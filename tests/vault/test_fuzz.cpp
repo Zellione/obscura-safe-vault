@@ -142,6 +142,9 @@ TEST(fuzz_header_parse_rejects_hostile_kdf_params)
     CHECK_FALSE(parses([](vault::Header& h) { h.active_slot = 2; }));   // slot index OOB
     // Argon2 requires nb_blocks >= 8 * nb_lanes.
     CHECK_FALSE(parses([](vault::Header& h) { h.kdf.parallelism = 4; h.kdf.m_cost_kib = 16; }));
+    CHECK_FALSE(parses([](vault::Header& h) { h.kdf.m_cost_kib = 262145; }));
+    CHECK_FALSE(parses([](vault::Header& h) { h.kdf.t_cost = 11; }));
+    CHECK_FALSE(parses([](vault::Header& h) { h.kdf.parallelism = 17; }));
 }
 
 TEST(fuzz_vault_open_survives_4000_malformed_files)
@@ -458,4 +461,3 @@ TEST(fuzz_framed_chunk_read)
 
     std::fclose(fp);
 }
-

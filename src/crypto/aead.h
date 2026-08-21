@@ -21,8 +21,8 @@ namespace crypto {
 
 // Encrypt `plaintext` under `key`. Writes `nonce|ciphertext|tag` into `out`
 // (resized to plaintext.size() + NONCE_SIZE + TAG_SIZE). `ad` is optional
-// associated data, authenticated but not encrypted. Returns false (logged) only
-// if the CSPRNG fails — in which case `out` is left empty.
+// associated data, authenticated but not encrypted. Returns false (logged) if
+// the CSPRNG or output allocation fails — in which case `out` is left empty.
 [[nodiscard]] bool encrypt_chunk(std::span<const uint8_t, KEY_SIZE> key,
                                  std::span<const uint8_t>           plaintext,
                                  std::vector<uint8_t>&              out,
@@ -37,7 +37,8 @@ namespace crypto {
 
 // Decrypt a `nonce|ciphertext|tag` chunk under `key`, verifying the tag first.
 // On success writes the plaintext into `out_plaintext` and returns true. On any
-// failure (short chunk or authentication failure) returns false and leaves
+// failure (short chunk, authentication failure, or output allocation failure)
+// returns false and leaves
 // `out_plaintext` empty — never exposes unauthenticated bytes.
 [[nodiscard]] bool decrypt_chunk(std::span<const uint8_t, KEY_SIZE> key,
                                  std::span<const uint8_t>           chunk,
@@ -66,16 +67,18 @@ namespace crypto {
 // generates a fresh random 24-byte nonce on every write (invariant #3).
 
 // Seal `plaintext` under `key`+`nonce`. Writes `ciphertext|tag` into `out`
-// (resized to plaintext.size() + TAG_SIZE). Cannot fail (no RNG, no auth).
-void seal(std::span<const uint8_t, KEY_SIZE>   key,
-          std::span<const uint8_t, NONCE_SIZE> nonce,
-          std::span<const uint8_t>             plaintext,
-          std::vector<uint8_t>&                out,
-          std::span<const uint8_t>             ad = {}) noexcept;
+// (resized to plaintext.size() + TAG_SIZE). Returns false if output allocation
+// fails; `out` is then left empty.
+[[nodiscard]] bool seal(std::span<const uint8_t, KEY_SIZE>   key,
+                        std::span<const uint8_t, NONCE_SIZE> nonce,
+                        std::span<const uint8_t>             plaintext,
+                        std::vector<uint8_t>&                out,
+                        std::span<const uint8_t>             ad = {}) noexcept;
 
 // Open a `ciphertext|tag` blob under `key`+`nonce`, verifying the tag first. On
 // success writes plaintext into `out_plaintext` and returns true. On any failure
-// (short input or authentication failure) returns false and leaves the output
+// (short input, authentication failure, or output allocation failure) returns
+// false and leaves the output
 // empty — never exposes unauthenticated bytes (invariant #4).
 [[nodiscard]] bool open(std::span<const uint8_t, KEY_SIZE>   key,
                         std::span<const uint8_t, NONCE_SIZE> nonce,

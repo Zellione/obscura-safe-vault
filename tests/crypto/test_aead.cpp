@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstring>
+#include <limits>
 #include <string_view>
 #include <vector>
 
@@ -150,4 +151,15 @@ TEST(nonce_is_fresh_per_call)
         std::span<const uint8_t>(b.data(), crypto::NONCE_SIZE)));
     CHECK_FALSE(::testing::bytes_equal(std::span<const uint8_t>(a),
                                        std::span<const uint8_t>(b)));
+}
+
+TEST(encrypt_rejects_unrepresentable_output_size_without_terminating)
+{
+    auto key = random_key();
+    std::vector<uint8_t> out = {0xAA};
+    const std::span<const uint8_t> impossible(
+        static_cast<const uint8_t*>(nullptr), std::numeric_limits<size_t>::max());
+
+    CHECK_FALSE(crypto::encrypt_chunk(key.as_span(), impossible, out));
+    CHECK_TRUE(out.empty());
 }

@@ -102,3 +102,26 @@ TEST(derive_key_keyfile_changes_output)
 
     CHECK_FALSE(::testing::bytes_equal(with.as_span(), without.as_span()));
 }
+
+TEST(derive_key_v2_separates_password_and_keyfile_boundaries)
+{
+    const std::array<uint8_t, crypto::SALT_SIZE> salt{};
+    const crypto::KdfParams params{.t_cost = 1, .m_cost_kib = 8, .parallelism = 1};
+    crypto::SecureBuffer<crypto::KEY_SIZE> ab_c;
+    crypto::SecureBuffer<crypto::KEY_SIZE> a_bc;
+    const auto b = [](std::string_view s) {
+        return std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(s.data()), s.size());
+    };
+
+    REQUIRE(crypto::derive_key(b("ab"), b("c"), salt, params, ab_c));
+    REQUIRE(crypto::derive_key(b("a"), b("bc"), salt, params, a_bc));
+    CHECK_FALSE(testing::bytes_equal(ab_c.as_span(), a_bc.as_span()));
+
+    crypto::SecureBuffer<crypto::KEY_SIZE> legacy_ab_c;
+    crypto::SecureBuffer<crypto::KEY_SIZE> legacy_a_bc;
+    REQUIRE(crypto::derive_key(b("ab"), b("c"), salt, params, legacy_ab_c,
+                               crypto::KdfInputFormat::LegacyConcat));
+    REQUIRE(crypto::derive_key(b("a"), b("bc"), salt, params, legacy_a_bc,
+                               crypto::KdfInputFormat::LegacyConcat));
+    CHECK_BYTES_EQ(legacy_ab_c.as_span(), legacy_a_bc.as_span());
+}

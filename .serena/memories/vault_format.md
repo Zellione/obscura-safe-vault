@@ -5,7 +5,7 @@
   magic     "OSVAULT\0"  (8 bytes)
   version   u16
   hdr_size  u16
-  flags     u32            (bit 0 = chunk/index plaintext framed, Phase 26)
+  flags     u32            (bit 0 = framed chunks; bit 1 = domain-separated KDF input)
   KDF block:
     algo        u8  (0 = Argon2id)
     t_cost      u32
@@ -128,7 +128,13 @@ failed to decode and was rejected at import.
 
 ## Key hierarchy
 
-`KEK = Argon2id(password [‖ keyfile_bytes], salt)` → unwraps a random 32-byte
+New vaults derive `KEK = Argon2id("OSV-KDF-INPUT-2" || len(password) ||
+len(keyfile) || password || keyfile, salt)`, with both lengths encoded as little-endian
+u64. Header flag bit 1 selects this encoding. When clear, readers use the original
+`password || keyfile` concatenation for compatibility; a successful password change
+rewraps the same master key using the new encoding and sets bit 1. KDF headers are
+bounded before allocation to 256 MiB, 10 passes, and 16 lanes. The Argon2 workspace is
+best-effort locked and always wiped. The KEK unwraps a random 32-byte
 **master key**. All data/thumbnail/index chunks use the master key with a
 fresh random 24-byte nonce per chunk.
 

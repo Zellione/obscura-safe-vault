@@ -6,7 +6,7 @@
 #include <archive_entry.h>
 
 #include <cstring>
-#include <print>
+#include "platform/safe_print.h"
 
 #include "platform/path_utf8.h"
 #include "ui/zip_encoding.h"
@@ -31,7 +31,7 @@ struct archive* open_stream(std::span<const uint8_t> data, const char* passphras
     archive_read_support_filter_all(a);
     if (passphrase) archive_read_add_passphrase(a, passphrase);
     if (archive_read_open_memory(a, data.data(), data.size()) != ARCHIVE_OK) {
-        std::println(stderr, "[ArchiveReader] open failed: {}", archive_error_string(a));
+        platform::safe_println(stderr, "[ArchiveReader] open failed: {}", archive_error_string(a));
         archive_read_free(a);
         return nullptr;
     }
@@ -80,7 +80,7 @@ struct archive* open_stream_files(const std::vector<std::filesystem::path>& file
     if (passphrase) archive_read_add_passphrase(a, passphrase);
 
     if (const int r = open_filenames_portable(a, file_paths); r != ARCHIVE_OK) {
-        std::println(stderr, "[ArchiveReader] open_files failed: {}", archive_error_string(a));
+        platform::safe_println(stderr, "[ArchiveReader] open_files failed: {}", archive_error_string(a));
         archive_read_free(a);
         return nullptr;
     }
@@ -129,7 +129,7 @@ bool read_entry_data(struct archive* a, crypto::SecureBytes& out, bool& needs_pa
         const la_ssize_t n = archive_read_data(a, out.data() + total, out.size() - total);
         if (n < 0) {
             const std::string_view msg = archive_error_string(a);
-            std::println(stderr, "[ArchiveReader] data read failed: {}", msg);
+            platform::safe_println(stderr, "[ArchiveReader] data read failed: {}", msg);
             needs_password = archive_error_is_passphrase_issue(msg);
             return false;
         }
@@ -145,7 +145,7 @@ bool finalize_entry(struct archive* a, bool& needs_password)
     uint8_t sentinel = 0;
     if (const la_ssize_t n = archive_read_data(a, &sentinel, 1); n < 0) {
         const std::string_view msg = archive_error_string(a);
-        std::println(stderr, "[ArchiveReader] entry finalize failed: {}", msg);
+        platform::safe_println(stderr, "[ArchiveReader] entry finalize failed: {}", msg);
         needs_password = archive_error_is_passphrase_issue(msg);
         return false;
     }
@@ -165,13 +165,13 @@ bool ArchiveReader::scan_entries(struct archive* a)
         if (r == ARCHIVE_FATAL || r < ARCHIVE_WARN) {
             // Hostile/corrupt archive mid-stream: fail closed rather than
             // return a partial entry list.
-            std::println(stderr, "[ArchiveReader] header read failed: {}", archive_error_string(a));
+            platform::safe_println(stderr, "[ArchiveReader] header read failed: {}", archive_error_string(a));
             return false;
         }
         if (entries_.size() >= MAX_ENTRIES) {
             // Too many entries to be a real gallery archive; refuse rather than
             // let an unbounded list exhaust memory.
-            std::println(stderr, "[ArchiveReader] archive declares more than {} entries — refusing",
+            platform::safe_println(stderr, "[ArchiveReader] archive declares more than {} entries — refusing",
                          MAX_ENTRIES);
             return false;
         }

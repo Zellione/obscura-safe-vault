@@ -122,3 +122,14 @@ TEST(header_flags_roundtrip_framed_bit)
     back.flags = 0;
     CHECK_FALSE(vault::framed_chunks(back));
 }
+
+TEST(header_flags_roundtrip_domain_separated_kdf_bit)
+{
+    vault::Header h = sample_header();
+    h.flags = vault::FLAG_DOMAIN_SEPARATED_KDF;
+    std::array<uint8_t, vault::HEADER_SIZE> raw{};
+    h.serialize(raw);
+    vault::Header back;
+    REQUIRE(vault::Header::parse(raw, back));
+    CHECK(vault::domain_separated_kdf(back));
+}

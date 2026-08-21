@@ -2,7 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <print>
+#include "platform/safe_print.h"
 
 #include "platform/path_utf8.h"
 #include "vault/safe_name.h"
@@ -59,7 +59,7 @@ vault::VaultResult export_one_media(const vault::Vault&          vault,
     scratch.wipe();
 
     if (!ok) {
-        std::println(stderr, "[Export] failed to write {}", platform::path_to_utf8(out_path));
+        platform::safe_println(stderr, "[Export] failed to write {}", platform::path_to_utf8(out_path));
         return vault::VaultResult::IoError;
     }
     return vault::VaultResult::Ok;
@@ -92,7 +92,7 @@ ExportSummary export_images(const vault::Vault&                      vault,
             const fs::path out =
                 unique_export_path(dest_dir, vault::sanitize_node_name(node->name), exists);
             if (!export_path_within(dest_dir, out)) {
-                std::println(stderr,
+                platform::safe_println(stderr,
                              "[Export] refusing to write outside the chosen folder: {}",
                              platform::path_to_utf8(out));
                 ++sum.failed;
