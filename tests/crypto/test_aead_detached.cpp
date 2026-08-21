@@ -1,6 +1,7 @@
 #include "test_framework.h"
 
 #include <array>
+#include <limits>
 #include <vector>
 
 #include "crypto/aead.h"
@@ -31,7 +32,7 @@ TEST(seal_open_roundtrip)
         for (size_t i = 0; i < n; ++i) plain[i] = static_cast<uint8_t>(i * 13 + 5);
 
         std::vector<uint8_t> sealed;
-        crypto::seal(key.as_span(), nonce, plain, sealed);
+        REQUIRE(crypto::seal(key.as_span(), nonce, plain, sealed));
         // No nonce prefix: output is exactly ciphertext + tag.
         CHECK_EQ(sealed.size(), n + crypto::TAG_SIZE);
 
@@ -50,8 +51,8 @@ TEST(seal_is_deterministic_for_fixed_nonce)
     std::array<uint8_t, 16> plain; plain.fill(0x5A);
 
     std::vector<uint8_t> a, b;
-    crypto::seal(key.as_span(), nonce, plain, a);
-    crypto::seal(key.as_span(), nonce, plain, b);
+    REQUIRE(crypto::seal(key.as_span(), nonce, plain, a));
+    REQUIRE(crypto::seal(key.as_span(), nonce, plain, b));
     // Same key+nonce+plaintext => identical output (no internal randomness).
     CHECK_BYTES_EQ(std::span<const uint8_t>(a), std::span<const uint8_t>(b));
 }
@@ -64,7 +65,7 @@ TEST(open_detects_tamper)
     std::array<uint8_t, 24> plain; plain.fill(0x11);
 
     std::vector<uint8_t> sealed;
-    crypto::seal(key.as_span(), nonce, plain, sealed);
+    REQUIRE(crypto::seal(key.as_span(), nonce, plain, sealed));
 
     for (size_t pos = 0; pos < sealed.size(); pos += 7) {
         std::vector<uint8_t> bad = sealed;
@@ -83,7 +84,7 @@ TEST(open_with_wrong_nonce_fails)
     std::array<uint8_t, 8> plain; plain.fill(0x77);
 
     std::vector<uint8_t> sealed;
-    crypto::seal(key.as_span(), nonce, plain, sealed);
+    REQUIRE(crypto::seal(key.as_span(), nonce, plain, sealed));
 
     std::array<uint8_t, crypto::NONCE_SIZE> wrong = nonce;
     wrong[0] ^= 0x01;
@@ -109,7 +110,7 @@ TEST(seal_authenticates_associated_data)
     std::array<uint8_t, 3> ad    = {9, 8, 7};
 
     std::vector<uint8_t> sealed;
-    crypto::seal(key.as_span(), nonce, plain, sealed, ad);
+    REQUIRE(crypto::seal(key.as_span(), nonce, plain, sealed, ad));
 
     std::vector<uint8_t> out;
     REQUIRE(crypto::open(key.as_span(), nonce, sealed, out, ad));
@@ -117,4 +118,16 @@ TEST(seal_authenticates_associated_data)
 
     std::array<uint8_t, 3> wrong_ad = {9, 8, 6};
     CHECK_FALSE(crypto::open(key.as_span(), nonce, sealed, out, wrong_ad));
+}
+
+TEST(detached_seal_rejects_unrepresentable_output_size_without_terminating)
+{
+    auto key = random_key();
+    std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
+    std::vector<uint8_t> out = {0xAA};
+    const std::span<const uint8_t> impossible(
+        static_cast<const uint8_t*>(nullptr), std::numeric_limits<size_t>::max());
+
+    CHECK_FALSE(crypto::seal(key.as_span(), nonce, impossible, out));
+    CHECK_TRUE(out.empty());
 }

@@ -3,8 +3,8 @@
 **Goal:** Establish the project structure, build system, and a compilable application that opens a window.
 
 ### Tasks
-- [x] Choose and record the full technology stack (see `CLAUDE.md`).
-- [x] Write `ROADMAP.md` and `CLAUDE.md`.
+- [x] Choose and record the full technology stack (see `AGENTS.md`).
+- [x] Write `ROADMAP.md` and `AGENTS.md`.
 - [x] Add vendored git submodules: `vendor/SDL3`, `vendor/monocypher`, `vendor/stb`.
 - [x] Write `premake5.lua` (workspace + monocypher static lib + osv app project).
 - [x] Write `scripts/setup.sh` — init submodules, download `bin/premake5`, cmake-build SDL3.

@@ -69,7 +69,7 @@ VaultResult commit_plain_blob(IndexIoContext& ctx, std::span<const uint8_t> plai
     std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
     if (!crypto::fill_random(nonce)) return CryptoError;
     std::vector<uint8_t> sealed;
-    crypto::seal(ctx.master_key_.as_span(), nonce, plain, sealed);
+    if (!crypto::seal(ctx.master_key_.as_span(), nonce, plain, sealed)) return CryptoError;
 
     ChunkStore store(ctx.fp_, ctx.master_key_.as_span(), framed_chunks(ctx.header_));
     uint64_t offset = 0;
@@ -97,7 +97,7 @@ VaultResult commit_plain_blob_at(IndexIoContext& ctx, std::span<const uint8_t> p
     std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
     if (!crypto::fill_random(nonce)) return CryptoError;
     std::vector<uint8_t> sealed;
-    crypto::seal(ctx.master_key_.as_span(), nonce, plain, sealed);
+    if (!crypto::seal(ctx.master_key_.as_span(), nonce, plain, sealed)) return CryptoError;
 
     ChunkStore store(ctx.fp_, ctx.master_key_.as_span(), framed_chunks(ctx.header_));
     if (!store.write_raw_at(offset, sealed)) return IoError;

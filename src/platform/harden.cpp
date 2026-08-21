@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
-#include <print>
+#include "platform/safe_print.h"
 
 #include "platform/paths.h"
 #include "platform/path_utf8.h"
@@ -28,12 +28,12 @@ void disable_core_dumps() noexcept
 #else
     // Linux: prefer prctl(PR_SET_DUMPABLE, 0) to prevent core dumps and ptrace attach.
     if (prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0) {
-        std::println(stderr, "[Platform] prctl(PR_SET_DUMPABLE, 0) failed");
+        platform::safe_println(stderr, "[Platform] prctl(PR_SET_DUMPABLE, 0) failed");
     }
     // Also use setrlimit for defense-in-depth.
     const struct rlimit zero_core{0, 0};
     if (setrlimit(RLIMIT_CORE, &zero_core) != 0) {
-        std::println(stderr, "[Platform] setrlimit(RLIMIT_CORE, 0) failed");
+        platform::safe_println(stderr, "[Platform] setrlimit(RLIMIT_CORE, 0) failed");
     }
 #endif
 }
@@ -74,7 +74,7 @@ bool grow_secure_mem_budget(size_t bytes) noexcept
     if (want_min == cur_min) return true;  // already big enough
 
     if (SetProcessWorkingSetSize(proc, want_min, want_max) == 0) {
-        std::println(stderr, "[Platform] SetProcessWorkingSetSize({} MiB) failed",
+        platform::safe_println(stderr, "[Platform] SetProcessWorkingSetSize({} MiB) failed",
                      want_min >> 20);
         return false;
     }

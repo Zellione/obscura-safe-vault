@@ -9,7 +9,7 @@
 //   unlock()  -> KEK derived, master key unwrapped, index loaded -> UNLOCKED
 //   lock()    -> master key wiped, index dropped -> LOCKED (re-unlockable)
 //
-// Security invariants upheld here (see CLAUDE.md):
+// Security invariants upheld here (see AGENTS.md):
 //   * The master key lives only in an mlock'd SecureBuffer, wiped on lock/destroy.
 //   * Decrypted image data is returned in an mlock'd SecureBytes — never an
 //     unlocked heap buffer, never a temp file (invariant #1).

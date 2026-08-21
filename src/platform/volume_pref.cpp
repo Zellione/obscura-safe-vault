@@ -4,7 +4,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <fstream>
-#include <print>
+#include "platform/safe_print.h"
 #include <string>
 
 #include "platform/path_utf8.h"
@@ -57,20 +57,20 @@ bool VolumePref::save(float volume) const
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         if (!out) {
-            std::println(stderr, "[VolumePref] cannot write {}", path_to_utf8(tmp));
+            platform::safe_println(stderr, "[VolumePref] cannot write {}", path_to_utf8(tmp));
             return false;
         }
         out << clamp01(volume) << '\n';
         out.flush();
         if (!out) {
-            std::println(stderr, "[VolumePref] write error on {}", path_to_utf8(tmp));
+            platform::safe_println(stderr, "[VolumePref] write error on {}", path_to_utf8(tmp));
             return false;
         }
     }
     std::error_code ec;
     std::filesystem::rename(tmp, file_, ec);
     if (ec) {
-        std::println(stderr, "[VolumePref] rename failed: {}", ec.message());
+        platform::safe_println(stderr, "[VolumePref] rename failed: {}", ec.message());
         std::filesystem::remove(tmp, ec);
         return false;
     }

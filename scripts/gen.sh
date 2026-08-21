@@ -10,6 +10,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
+"$REPO_ROOT/scripts/check_submodules.sh"
+
 PREMAKE="$REPO_ROOT/bin/premake5"
 if [[ ! -f "$PREMAKE" ]]; then
     echo "premake5 not found at bin/premake5 — run scripts/setup.sh first"

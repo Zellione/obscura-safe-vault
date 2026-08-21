@@ -23,7 +23,7 @@ extern "C" {
 #pragma GCC diagnostic pop
 #endif
 
-#include <print>
+#include "platform/safe_print.h"
 
 namespace media {
 
@@ -63,7 +63,7 @@ void FrameConverter::free_deint_graph()
 void FrameConverter::deint_warn_once(std::string_view msg)
 {
     if (deint_error_once_) return;
-    std::println(stderr, "[FrameConverter] {}", msg);
+    platform::safe_println(stderr, "[FrameConverter] {}", msg);
     deint_error_once_ = true;
 }
 
@@ -205,14 +205,14 @@ std::optional<DecodedFrame> FrameConverter::to_i420(const AVFrame* src, double p
                                     src->width, src->height, AV_PIX_FMT_YUV420P,
                                     SWS_BILINEAR, nullptr, nullptr, nullptr);
         if (!sws_) {
-            std::println(stderr, "[FrameConverter] Failed to create swscale context");
+            platform::safe_println(stderr, "[FrameConverter] Failed to create swscale context");
             return std::nullopt;
         }
     }
     if (!conv_) {
         conv_ = av_frame_alloc();
         if (!conv_) {
-            std::println(stderr, "[FrameConverter] Failed to allocate conversion frame");
+            platform::safe_println(stderr, "[FrameConverter] Failed to allocate conversion frame");
             return std::nullopt;
         }
     }
@@ -225,14 +225,14 @@ std::optional<DecodedFrame> FrameConverter::to_i420(const AVFrame* src, double p
     conv_->width  = src->width;
     conv_->height = src->height;
     if (int buf_ret = av_frame_get_buffer(conv_, 0); buf_ret < 0) {
-        std::println(stderr, "[FrameConverter] av_frame_get_buffer failed: {}", buf_ret);
+        platform::safe_println(stderr, "[FrameConverter] av_frame_get_buffer failed: {}", buf_ret);
         return std::nullopt;
     }
 
     if (int ret = sws_scale(sws_, src->data, src->linesize, 0, src->height,
                             conv_->data, conv_->linesize);
         ret < 0) {
-        std::println(stderr, "[FrameConverter] sws_scale failed: {}", ret);
+        platform::safe_println(stderr, "[FrameConverter] sws_scale failed: {}", ret);
         return std::nullopt;
     }
 

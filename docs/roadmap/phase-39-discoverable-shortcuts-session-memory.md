@@ -41,7 +41,7 @@ into the image viewer too; fixes the video-poster thumbnail gate.
   string is deleted and replaced with a fixed `[F1] Help` footer fragment.
 - [x] `ImageViewer::handle_key` gains an `SDLK_U` case
   (`request(NavKind::ToggleKeepUnlocked)`), matching the grid.
-- [x] Update `CLAUDE.md` (module table: `help_popup.*`, `tile_thumb.h`'s
+- [x] Update `AGENTS.md` (module table: `help_popup.*`, `tile_thumb.h`'s
   `thumb_key_for`; UI/UX spec section: `F1` help convention) + `mem:core`.
 - [x] `tests/` — pure tests for `thumb_key_for` (image vs. video gating,
   including a regression case for the always-zero `meta.thumb_length` on a
@@ -70,7 +70,7 @@ path/focus-index tracking, since `Nav.path`/`Nav.index` already carries that.
 - [x] Leaving the viewer on a video captures its playback position into
   `session_`; reopening the same video seeks there and stays paused; a
   different video (or an image) clears/ignores the bookmark.
-- [x] Update `CLAUDE.md` (`App`'s new `GallerySessionState` member,
+- [x] Update `AGENTS.md` (`App`'s new `GallerySessionState` member,
   `src/ui/gallery_session_state.h` module entry) + `mem:core`.
 - [x] `tests/` — pure `GallerySessionState::reset()` test; a real-fixture
   `VideoPlayback::seek()` test (moves position, stays paused). No

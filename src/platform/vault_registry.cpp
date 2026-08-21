@@ -1,7 +1,7 @@
 #include "platform/vault_registry.h"
 
 #include <fstream>
-#include <print>
+#include "platform/safe_print.h"
 #include <string>
 
 #include "platform/path_utf8.h"
@@ -79,7 +79,7 @@ bool VaultRegistry::write(const std::vector<std::filesystem::path>& entries) con
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         if (!out) {
-            std::println(stderr, "[VaultRegistry] cannot write {}", path_to_utf8(tmp));
+            platform::safe_println(stderr, "[VaultRegistry] cannot write {}", path_to_utf8(tmp));
             return false;
         }
         // generic_string(), not string(): list() normalizes every line it reads,
@@ -92,14 +92,14 @@ bool VaultRegistry::write(const std::vector<std::filesystem::path>& entries) con
         for (const auto& e : entries) out << path_to_utf8_generic(e) << '\n';
         out.flush();
         if (!out) {
-            std::println(stderr, "[VaultRegistry] write error on {}", path_to_utf8(tmp));
+            platform::safe_println(stderr, "[VaultRegistry] write error on {}", path_to_utf8(tmp));
             return false;
         }
     }
     std::error_code ec;
     std::filesystem::rename(tmp, file_, ec);
     if (ec) {
-        std::println(stderr, "[VaultRegistry] rename failed: {}", ec.message());
+        platform::safe_println(stderr, "[VaultRegistry] rename failed: {}", ec.message());
         std::filesystem::remove(tmp, ec);
         return false;
     }

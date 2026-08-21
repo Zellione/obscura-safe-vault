@@ -9,7 +9,7 @@ section.
 - [x] `Vault` API — `toggle_favorite(node_path)`; `list_favorite_images()` (flat, whole-tree) and `list_favorite_galleries()`; persisted via the crash-safe index swap.
 - [x] **Toggle UX** — a single key marks/unmarks the focused image or gallery (`B` for bookmark — `F`/`L`/`T` are already bound in the viewer); favorited tiles show a small gold star badge in the grid (and a gold bar in the list view).
 - [x] **Two distinct screens** — `src/ui/favorites_images.{h,cpp}` (a flat grid of every favorited image across the vault, opens the viewer on activate) and `src/ui/favorites_galleries.{h,cpp}` (a list/grid of favorited galleries; activating one navigates to that gallery in the normal grid). Both reachable via keys from the gallery grid (`F` images, `Shift+F` galleries).
-- [x] Update `CLAUDE.md` module layout + `mem:core`.
+- [x] Update `AGENTS.md` module layout + `mem:core`.
 - [x] `tests/` — favorite flag round-trip for images and galleries; favoriting images populates the image-favorites list across the tree; favoriting a gallery populates the gallery-favorites list; un-favorite removes from both; a pre-favorites vault opens with none favorited.
 
 ### Acceptance criterion

@@ -2,7 +2,7 @@
 
 // SecureBuffer<N> — a fixed-size byte buffer for key material.
 //
-// Security invariants (CLAUDE.md):
+// Security invariants (AGENTS.md):
 //   * mlock'd on construction so the bytes never swap to disk.
 //   * crypto_wipe'd on destruction so freed memory holds no key material.
 //
@@ -16,7 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <print>
+#include "platform/safe_print.h"
 #include <span>
 #include <utility>
 
@@ -63,7 +63,7 @@ inline const char* mlock_fail_hint() noexcept
 // otherwise only ever run on an end-user machine.
 inline void print_mlock_warning() noexcept
 {
-    std::println(stderr, "[SecureMem] WARNING: mlock failed — decoded data may be swappable ({}).",
+    platform::safe_println(stderr, "[SecureMem] WARNING: mlock failed — decoded data may be swappable ({}).",
                  mlock_fail_hint());
 }
 
@@ -216,7 +216,7 @@ public:
         try {
             data_ = std::make_unique<uint8_t[]>(n);
         } catch (const std::bad_alloc&) {
-            std::println(stderr, "[crypto] SecureBytes alloc of {} bytes failed", n);
+            platform::safe_println(stderr, "[crypto] SecureBytes alloc of {} bytes failed", n);
             return false;
         }
         size_   = n;

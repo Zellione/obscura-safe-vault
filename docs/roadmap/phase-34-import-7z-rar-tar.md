@@ -43,7 +43,7 @@ extraction into **locked memory only**, never a temp file.
   linked (no `#ifdef` at the call site) and returns a graceful
   "not supported" outcome on a build without `OSV_VENDORED_ARCHIVE`,
   mirroring `ui::VideoPlayback`'s non-AV fallback pattern.
-- [x] Updated `CLAUDE.md` (tech table + module layout) / `docs/VENDORED_DEPS.md`
+- [x] Updated `AGENTS.md` (tech table + module layout) / `docs/VENDORED_DEPS.md`
   + `mem:tech_stack` / `mem:core`.
 - [x] `tests/` — fixture `.7z`, `.tar`, `.tar.gz` archives import with
   matching per-entry checksums via the shared planner tests (`.txz`

@@ -2,11 +2,11 @@
 
 #include <cerrno>
 #include <fstream>
-#include <print>
 #include <string>
 
 #include "platform/path_utf8.h"
 #include "platform/paths.h"
+#include "platform/safe_print.h"
 
 namespace platform {
 
@@ -50,20 +50,20 @@ bool AutoplayPref::save(bool enabled) const
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         if (!out) {
-            std::println(stderr, "[AutoplayPref] cannot write {}", path_to_utf8(tmp));
+            safe_println(stderr, "[AutoplayPref] cannot write {}", path_to_utf8(tmp));
             return false;
         }
         out << (enabled ? "on" : "off") << '\n';
         out.flush();
         if (!out) {
-            std::println(stderr, "[AutoplayPref] write error on {}", path_to_utf8(tmp));
+            safe_println(stderr, "[AutoplayPref] write error on {}", path_to_utf8(tmp));
             return false;
         }
     }
     std::error_code ec;
     std::filesystem::rename(tmp, file_, ec);
     if (ec) {
-        std::println(stderr, "[AutoplayPref] rename failed: {}", ec.message());
+        safe_println(stderr, "[AutoplayPref] rename failed: {}", ec.message());
         std::filesystem::remove(tmp, ec);
         return false;
     }

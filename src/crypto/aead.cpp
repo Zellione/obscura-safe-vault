@@ -1,10 +1,13 @@
 #include "aead.h"
 
-#include <print>
+#include <limits>
+#include <new>
+#include <stdexcept>
 
 #include <monocypher.h>
 
 #include "random.h"
+#include "platform/safe_print.h"
 
 namespace crypto {
 
@@ -13,14 +16,22 @@ bool encrypt_chunk(std::span<const uint8_t, KEY_SIZE> key,
                    std::vector<uint8_t>&              out,
                    std::span<const uint8_t>           ad) noexcept
 {
-    out.assign(NONCE_SIZE + plaintext.size() + TAG_SIZE, 0);
+    out.clear();
+    if (plaintext.size() > out.max_size() - NONCE_SIZE - TAG_SIZE) return false;
+    try {
+        out.assign(NONCE_SIZE + plaintext.size() + TAG_SIZE, 0);
+    } catch (const std::bad_alloc&) {
+        return false;
+    } catch (const std::length_error&) {
+        return false;
+    }
 
     uint8_t* nonce  = out.data();
     uint8_t* cipher = out.data() + NONCE_SIZE;
     uint8_t* tag    = out.data() + NONCE_SIZE + plaintext.size();
 
     if (!fill_random(std::span<uint8_t>(nonce, NONCE_SIZE))) {
-        std::println(stderr, "[crypto::aead] nonce generation failed");
+        platform::safe_println(stderr, "[crypto::aead] nonce generation failed");
         out.clear();
         return false;
     }
@@ -64,7 +75,14 @@ bool decrypt_chunk(std::span<const uint8_t, KEY_SIZE> key,
                    std::vector<uint8_t>&              out_plaintext,
                    std::span<const uint8_t>           ad) noexcept
 {
-    out_plaintext.assign(chunk_plaintext_len(chunk.size()), 0);
+    out_plaintext.clear();
+    try {
+        out_plaintext.assign(chunk_plaintext_len(chunk.size()), 0);
+    } catch (const std::bad_alloc&) {
+        return false;
+    } catch (const std::length_error&) {
+        return false;
+    }
     if (!decrypt_chunk_to(key, chunk, std::span<uint8_t>(out_plaintext), ad)) {
         out_plaintext.clear();
         return false;
@@ -72,13 +90,21 @@ bool decrypt_chunk(std::span<const uint8_t, KEY_SIZE> key,
     return true;
 }
 
-void seal(std::span<const uint8_t, KEY_SIZE>   key,
+bool seal(std::span<const uint8_t, KEY_SIZE>   key,
           std::span<const uint8_t, NONCE_SIZE> nonce,
           std::span<const uint8_t>             plaintext,
           std::vector<uint8_t>&                out,
           std::span<const uint8_t>             ad) noexcept
 {
-    out.assign(plaintext.size() + TAG_SIZE, 0);
+    out.clear();
+    if (plaintext.size() > out.max_size() - TAG_SIZE) return false;
+    try {
+        out.assign(plaintext.size() + TAG_SIZE, 0);
+    } catch (const std::bad_alloc&) {
+        return false;
+    } catch (const std::length_error&) {
+        return false;
+    }
 
     uint8_t* cipher = out.data();
     uint8_t* tag    = out.data() + plaintext.size();
@@ -86,6 +112,7 @@ void seal(std::span<const uint8_t, KEY_SIZE>   key,
     crypto_aead_lock(cipher, tag, key.data(), nonce.data(),
                      ad.data(), ad.size(),
                      plaintext.data(), plaintext.size());
+    return true;
 }
 
 bool open_to(std::span<const uint8_t, KEY_SIZE>   key,
@@ -119,7 +146,14 @@ bool open(std::span<const uint8_t, KEY_SIZE>   key,
           std::vector<uint8_t>&                out_plaintext,
           std::span<const uint8_t>             ad) noexcept
 {
-    out_plaintext.assign(sealed.size() < TAG_SIZE ? 0 : sealed.size() - TAG_SIZE, 0);
+    out_plaintext.clear();
+    try {
+        out_plaintext.assign(sealed.size() < TAG_SIZE ? 0 : sealed.size() - TAG_SIZE, 0);
+    } catch (const std::bad_alloc&) {
+        return false;
+    } catch (const std::length_error&) {
+        return false;
+    }
     if (!open_to(key, nonce, sealed, std::span<uint8_t>(out_plaintext), ad)) {
         out_plaintext.clear();
         return false;

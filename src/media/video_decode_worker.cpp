@@ -15,7 +15,7 @@ extern "C" {
 #endif
 
 #include <chrono>
-#include <print>
+#include "platform/safe_print.h"
 #include <utility>
 
 #include "media/frame_convert.h"
@@ -45,7 +45,7 @@ VideoDecodeWorker::VideoDecodeWorker(const AVCodecParameters& params, double tim
             avcodec_free_context(&codec_ctx_);
         }
     }
-    if (!codec_ctx_) std::println(stderr, "[VideoDecodeWorker] failed to open codec context");
+    if (!codec_ctx_) platform::safe_println(stderr, "[VideoDecodeWorker] failed to open codec context");
     frame_ = av_frame_alloc();
     thread_ = std::jthread([this] { run(); });
 }

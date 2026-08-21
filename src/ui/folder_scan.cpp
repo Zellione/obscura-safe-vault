@@ -1,6 +1,6 @@
 #include "ui/folder_scan.h"
 
-#include <print>
+#include "platform/safe_print.h"
 #include <system_error>
 
 #include "platform/path_utf8.h"
@@ -24,7 +24,7 @@ std::vector<ZipEntry> scan_folder(const fs::path& root, ScanLimits limits)
 
     for (const fs::directory_entry& e : it) {
         if (out.size() >= limits.max_entries) {
-            std::println(stderr, "[FolderScan] entry cap reached; import truncated");
+            platform::safe_println(stderr, "[FolderScan] entry cap reached; import truncated");
             break;
         }
         if (e.is_symlink(ec) || ec) { ec.clear(); continue; }

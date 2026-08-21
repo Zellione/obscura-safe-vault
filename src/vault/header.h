@@ -5,7 +5,7 @@
 // The header is the only unencrypted region of the vault. It carries everything
 // needed to derive the KEK (KDF params + salt), unwrap the master key, and locate
 // the active index blob. Its layout is a fixed table of byte offsets (see the
-// OFFSETS below and the spec table in CLAUDE.md / ROADMAP.md). The whole header
+// OFFSETS below and the spec table in AGENTS.md / ROADMAP.md). The whole header
 // occupies HEADER_SIZE bytes; the data region begins immediately after it.
 
 #include <array>
@@ -30,6 +30,9 @@ inline constexpr size_t HEADER_SIZE = 4096;
 // vault::chunk_codec (method byte + optional deflate). Clear = legacy raw
 // vault; such vaults are read AND appended raw forever (no migration).
 inline constexpr uint32_t FLAG_FRAMED_CHUNKS = 1u << 0;
+// Bit 1: KDF input uses a domain tag and length-prefixed password/keyfile.
+// Clear preserves the original ambiguous password||keyfile encoding.
+inline constexpr uint32_t FLAG_DOMAIN_SEPARATED_KDF = 1u << 1;
 
 // One half of the crash-safe double-buffered index pointer. `offset`/`length`
 // locate the encrypted index blob (ciphertext|tag) in the data region; `nonce`
@@ -76,6 +79,11 @@ struct Header {
 [[nodiscard]] constexpr bool framed_chunks(const Header& h) noexcept
 {
     return (h.flags & FLAG_FRAMED_CHUNKS) != 0;
+}
+
+[[nodiscard]] constexpr bool domain_separated_kdf(const Header& h) noexcept
+{
+    return (h.flags & FLAG_DOMAIN_SEPARATED_KDF) != 0;
 }
 
 } // namespace vault

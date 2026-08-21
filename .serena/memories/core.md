@@ -54,7 +54,10 @@ vendor/      git submodules — pinned versions, build mechanics, CI matrix in m
 
 ## Key hierarchy
 
-`KEK = Argon2id(password [‖ keyfile], salt)` → unwraps a random 32-byte master key.
+`KEK = Argon2id(domain || len(password) || len(keyfile) || password || keyfile, salt)`
+→ unwraps a random 32-byte master key. Legacy vaults retain the original ambiguous
+`password || keyfile` encoding until the next successful password change, which migrates
+the wrap to the domain-separated encoding.
 All data/thumbnail/index chunks are encrypted with the master key + a fresh nonce per chunk.
 
 ## Vault write atomicity & concurrency

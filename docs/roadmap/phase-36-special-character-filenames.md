@@ -54,7 +54,7 @@ primitive on export. Fixed at three layers — see the tasks below.
   over-long, and collapses `..` and `.` components. It deliberately does *not*
   confine paths to a base directory — users legitimately keep vaults on arbitrary
   drives and removable media.
-- [x] Update `CLAUDE.md` / `mem:core`.
+- [x] Update `AGENTS.md` / `mem:core`.
 - [x] `tests/` — entries with `../`, `..\`, absolute paths, control characters,
   Windows-reserved characters/names, embedded NULs and >255-byte names all import
   safely; `sanitize_node_name`'s output is asserted to always satisfy

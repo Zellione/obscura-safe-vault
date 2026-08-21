@@ -16,7 +16,7 @@
 - [x] **CI** — GitHub Actions matrix: Linux (gcc + clang), Windows (MSVC), macOS (AppleClang). All tests run on each.
 - [x] **Packaging** — Linux: `.tar.gz` + `install.sh`; Windows: NSIS installer; macOS: `.app` bundle (ad-hoc signed).
 - [x] `scripts/setup.bat` — Windows equivalent of `setup.sh`.
-- [x] Update `CLAUDE.md` with platform-specific build notes.
+- [x] Update `AGENTS.md` with platform-specific build notes.
 
 ### Acceptance criterion
 CI passes on all three platforms. A developer can clone the repo on Windows or macOS and build a working app with a single setup script.

@@ -1,10 +1,12 @@
 #include "chunk_store.h"
 
-#include <print>
+#include <new>
+#include <stdexcept>
 
 #include "chunk_codec.h"
 #include "crypto/aead.h"
 #include "file_util.h"
+#include "platform/safe_print.h"
 
 namespace vault {
 
@@ -16,12 +18,12 @@ bool ChunkStore::append_at_end(std::span<const uint8_t> bytes, uint64_t& out_off
 {
     uint64_t end = 0;
     if (!seek_end(fp_, end)) {
-        std::println(stderr, "[vault::chunk_store] seek to end failed");
+        platform::safe_println(stderr, "[vault::chunk_store] seek to end failed");
         return false;
     }
     if (!bytes.empty() &&
         std::fwrite(bytes.data(), 1, bytes.size(), fp_) != bytes.size()) {
-        std::println(stderr, "[vault::chunk_store] write of {} bytes failed", bytes.size());
+        platform::safe_println(stderr, "[vault::chunk_store] write of {} bytes failed", bytes.size());
         return false;
     }
     // Push the append out of the stdio buffer to the fd. Every caller already
@@ -30,7 +32,7 @@ bool ChunkStore::append_at_end(std::span<const uint8_t> bytes, uint64_t& out_off
     // now that file_size() is fstat-based (position-independent) and no longer
     // flushes as a side effect of seeking to end.
     if (std::fflush(fp_) != 0) {
-        std::println(stderr, "[vault::chunk_store] flush after append failed");
+        platform::safe_println(stderr, "[vault::chunk_store] flush after append failed");
         return false;
     }
     out_offset = end;
@@ -75,7 +77,15 @@ bool ChunkStore::read_chunk(ChunkSpan span, std::vector<uint8_t>& out) const noe
 {
     out.clear();
     if (!span_in_file(span.offset, span.length)) return false;   // OOM guard (unchanged)
-    std::vector<uint8_t> disk(span.length);
+    if (span.length > std::vector<uint8_t>{}.max_size()) return false;
+    std::vector<uint8_t> disk;
+    try {
+        disk.resize(static_cast<size_t>(span.length));
+    } catch (const std::bad_alloc&) {
+        return false;
+    } catch (const std::length_error&) {
+        return false;
+    }
     if (!read_at(span.offset, disk)) return false;
     if (!framed_) return crypto::decrypt_chunk(key_, disk, out);
 
@@ -86,8 +96,20 @@ bool ChunkStore::read_chunk(ChunkSpan span, std::vector<uint8_t>& out) const noe
 
 bool ChunkStore::read_chunk(ChunkSpan span, crypto::SecureBytes& out) const noexcept
 {
+    // Every failure path must discard stale plaintext from a prior read.
+    (void)out.resize(0);
     if (!span_in_file(span.offset, span.length)) return false;
-    std::vector<uint8_t> disk(span.length);  // ciphertext is not secret
+    if (span.length > std::vector<uint8_t>{}.max_size()) return false;
+    std::vector<uint8_t> disk;  // ciphertext is not secret
+    try {
+        disk.resize(static_cast<size_t>(span.length));
+    } catch (const std::bad_alloc&) {
+        (void)out.resize(0);
+        return false;
+    } catch (const std::length_error&) {
+        (void)out.resize(0);
+        return false;
+    }
     if (!read_at(span.offset, disk)) return false;
 
     const size_t plain_len = crypto::chunk_plaintext_len(disk.size());
@@ -125,7 +147,14 @@ bool ChunkStore::read_raw(uint64_t offset, uint64_t length, std::vector<uint8_t>
 {
     out.clear();
     if (!span_in_file(offset, length)) return false;  // before the allocation
-    out.assign(length, 0);
+    if (length > out.max_size()) return false;
+    try {
+        out.assign(static_cast<size_t>(length), 0);
+    } catch (const std::bad_alloc&) {
+        return false;
+    } catch (const std::length_error&) {
+        return false;
+    }
     if (!read_at(offset, out)) {
         out.clear();
         return false;

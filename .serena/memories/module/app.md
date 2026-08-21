@@ -152,7 +152,13 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   `norm->string()`, which on Windows throws for CJK names inside the SDL callback (the
   Phase-72 import crash). Consumers convert the stored UTF-8 strings back with
   `utf8_to_path`, never the narrow `fs::path` ctor. `config_dir()` decodes SDL_GetPrefPath's
-  UTF-8 with `utf8_to_path` too.
+  UTF-8 with `utf8_to_path` too. Whole-file reads always take an explicit byte ceiling and
+  handle allocation failure; metadata imports are capped at 16 MiB. Keyfiles use the separate
+  `read_keyfile()` 16 MiB bound. New keyfiles are claimed with one atomic exclusive-create
+  operation (never an exists-then-open check), are owner-only (`0600` on POSIX; protected
+  current-user DACL on Windows), and are flushed+synced before success is reported. Windows
+  marks a failed partial creation for deletion through the still-open handle; POSIX leaves the
+  owner-only short file in place rather than risk unlinking a concurrently replaced pathname.
 - `folder_dialog.*` — export destination picker (same Phase-72 UTF-8 storage rule).
 - `locale_init.h` (Phase 72) — header-only `platform::init_locale()`: switches **LC_CTYPE
   only** (never LC_NUMERIC — decimal-comma corruption) to a UTF-8 locale; env locale with

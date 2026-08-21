@@ -55,7 +55,7 @@ without leaving the main view.
   the split state from before entry (if `split_active` was true, split remains
   on; panes return to their previous galleries; scroll/selection restored).
 - **No persistence across app restart:** split configuration lives only in
-  memory (session-only per CLAUDE.md Security).
+  memory (session-only per AGENTS.md Security).
 
 ### Exclusive ops gated in split mode
 

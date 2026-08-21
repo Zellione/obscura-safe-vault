@@ -235,6 +235,20 @@ TEST(chunk_store_framed_failed_read_leaves_out_empty)
     std::fclose(fp);
 }
 
+TEST(chunk_store_out_of_bounds_secure_read_clears_stale_output)
+{
+    auto key = random_key();
+    std::FILE* fp = std::tmpfile();
+    REQUIRE(fp != nullptr);
+    ChunkStore store(fp, key.as_span(), true);
+
+    crypto::SecureBytes out;
+    REQUIRE(out.resize(16));
+    CHECK_FALSE(store.read_chunk(ChunkSpan{.offset = 1, .length = 64}, out));
+    CHECK_EQ(out.size(), size_t(0));
+    std::fclose(fp);
+}
+
 // Covers ChunkStore::append_at_end's post-write flush-failure path. /dev/full
 // accepts a small buffered write but fails the fflush with ENOSPC — exactly the
 // case the flush guard exists for (a partial append must be reported, not

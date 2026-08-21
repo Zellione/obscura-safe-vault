@@ -8,7 +8,7 @@
 - [x] `src/ui/widgets.{h,cpp}` — pure layout/hit-testing (`grid_columns`, `grid_cell_rect`, `grid_hit`, `fit_rect`, `point_in_rect`) + thin `draw_button`/`draw_text_field` helpers. Masked password entry lives in `src/ui/secure_text_field.{h,cpp}` (an mlock'd buffer). (`ProgressBar`/`ScrollView` deferred — not needed by the Phase 5 screens.)
 - [x] `src/ui/unlock_screen.{h,cpp}`:
   - [x] Password field + keyfile picker button.
-  - [x] "Create New Vault" flow. (Passphrase-strength meter + random generation deferred to Phase 7, per `CLAUDE.md`.)
+  - [x] "Create New Vault" flow. (Passphrase-strength meter + random generation deferred to Phase 7, per `AGENTS.md`.)
   - [x] "Open Existing Vault" flow (with "Open other…" file picker).
   - [x] Error display for wrong password / bad keyfile.
   - [x] Submit validation extracted to a pure `src/ui/unlock_logic.{h,cpp}` (`decide_submit`).
@@ -41,4 +41,4 @@ pure, headlessly-tested units (`unlock_logic`, `nav_model`, `widgets`, `input`,
 >   `crypto_wipe`s it on `clear()` (invariant #2), so plaintext passwords never land in a plain
 >   `std::string`.
 > - **Passphrase-strength meter** and **random passphrase generation** are intentionally deferred
->   to Phase 7 (Hardening & polish), matching the deferral table in `CLAUDE.md`.
+>   to Phase 7 (Hardening & polish), matching the deferral table in `AGENTS.md`.

@@ -9,7 +9,7 @@ planning docs, flag the project as AI-driven).
 - [x] **Background file operations with progress** — move/copy (transfer within/between vaults), delete (a gallery subtree or a single item), and export currently block the UI and only surface a final one-line message. Run each on a worker thread with a live **“N / M items” progress modal + cancel**, reusing the Phase 24 `ZipImportJob` / `ImportProgress` pattern — preserving the single-thread vault-handle invariant and suppressing the idle auto-lock during the op (`Screen::blocks_idle_lock()`). Export keeps its consent modal; its background write is still the one gated plaintext-to-disk deviation.
 - [x] **Remove committed docs dir** — delete the only committed doc (`docs/superpowers/plans/2026-06-12-phase8-cross-platform.md`) and add `docs/` to `.gitignore` so AI planning artifacts stay out of the tree.
 - [x] **README note** — add a note at the very top of `README.md` stating this is an **AI-driven project, vibe-coded for educational purposes**.
-- [x] Update `CLAUDE.md` / `mem:*` if the keybindings or the transfer/delete/export flow change.
+- [x] Update `AGENTS.md` / `mem:*` if the keybindings or the transfer/delete/export flow change.
 - [x] `tests/` — unit-test the layout-independent key mapping (scancode → action, independent of layout); test the background-op progress/cancel reporting the way `ZipImportJob` is tested.
 
 **Out of scope (YAGNI):** fully user-remappable keybindings; UI text localisation; reworking the export consent/scope model (threading only).

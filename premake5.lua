@@ -318,7 +318,7 @@ workspace "ObscuraSafeVault"
     -- schedulers. Without it, msbuild /m only parallelises across the 4
     -- projects while every .cpp inside a project compiles serially, which is
     -- what made the Windows CI leg spend 10-15 min in cl.exe.
-    flags { "MultiProcessorCompile" }
+    multiprocessorcompile "On"
 
     -- Path (relative to the repo root / process cwd) of the bundled UI font.
     defines { 'OSV_DEFAULT_FONT="assets/fonts/NotoSans-Regular.ttf"' }
@@ -363,6 +363,16 @@ workspace "ObscuraSafeVault"
         -- (RuntimeLibrary / _ITERATOR_DEBUG_LEVEL mismatch) against them.
         runtime "Release"
         defines { "_ITERATOR_DEBUG_LEVEL=0" }
+
+    -- Make exploit mitigations explicit instead of relying on distribution or
+    -- toolchain defaults, which differ between local builds and CI images.
+    filter { "system:linux", "configurations:Release", "toolset:gcc or clang" }
+        buildoptions { "-fPIE" }
+        linkoptions  { "-pie", "-Wl,-z,relro,-z,now" }
+
+    filter { "system:windows", "configurations:Release", "toolset:msc" }
+        buildoptions { "/guard:cf" }
+        linkoptions  { "/guard:cf", "/CETCOMPAT" }
 
     -- Opt-in sanitizers (gcc/clang). Applies to every project in the workspace.
     filter { "options:asan", "toolset:gcc or clang" }

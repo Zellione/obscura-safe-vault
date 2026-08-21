@@ -52,7 +52,7 @@ jobs:
       # Checkout
       # -----------------------------------------------------------------------
       - name: Checkout (with submodules)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
 
@@ -84,7 +84,7 @@ jobs:
       # cache and forces a rebuild — build_codecs skips when the lib already exists.
       # -----------------------------------------------------------------------
       - name: Cache vendored codecs build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
@@ -112,7 +112,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Upload build artefact
         if: matrix.config == 'Debug' && matrix.compiler == 'gcc'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: osv-linux-debug
           path: build/bin/Debug/osv
@@ -127,7 +127,7 @@ jobs:
 
       - name: Upload package
         if: matrix.config == 'Release' && matrix.compiler == 'gcc'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: osv-linux-tarball
           path: dist/*.tar.gz
@@ -141,7 +141,7 @@ jobs:
   windows:
     name: MSVC / ${{ matrix.config }} / Windows
     # Pinned to windows-2022 (VS 2022 — the toolchain this project targets, see
-    # CLAUDE.md). The newer windows-latest image (VS 18 / MSVC 14.51) miscompiles
+    # AGENTS.md). The newer windows-latest image (VS 18 / MSVC 14.51) miscompiles
     # a freshly-built vendored lib (SDL3/codecs) in Release, crashing osv_tests;
     # main only masks it via a stale build cache. Phase 15 (PR1) surfaced it by
     # busting the cache (adding vendor/ffmpeg changed .gitmodules, which is in the
@@ -156,12 +156,12 @@ jobs:
 
     steps:
       - name: Checkout (with submodules)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
 
       - name: Set up MSVC environment
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
 
       # nasm is required to build libaom (Stage B); not preinstalled on the runner.
       # Unlike ccache, nasm is a hard requirement (libaom will not build without
@@ -192,7 +192,7 @@ jobs:
       # detects libaom via pkg-config against the aom.pc build_codecs.bat
       # installs into vendor/codecs-prefix.
       - name: Set up MSYS2 (for FFmpeg build)
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
         with:
           msystem: MSYS
           path-type: inherit
@@ -251,7 +251,7 @@ jobs:
       # Primary key never matches (sha suffix), so every run restores the
       # newest prior cache for this config and saves its own updated copy.
       - name: Cache ccache directory
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .ccache
           key: ccache-win2022-${{ matrix.config }}-${{ github.sha }}
@@ -291,7 +291,7 @@ jobs:
           ccache --zero-stats
 
       - name: Cache premake5 binary
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: cache-premake5
         with:
           path: bin/premake5.exe
@@ -306,7 +306,7 @@ jobs:
           tar -xf "$env:TEMP\premake5.zip" -C bin
 
       - name: Cache vendored SDL3 build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: cache-sdl3
         with:
           path: vendor/SDL3/build
@@ -328,7 +328,7 @@ jobs:
           cmake --build vendor/SDL3/build --parallel
 
       - name: Cache vendored codecs build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
@@ -407,7 +407,7 @@ jobs:
 
       - name: Upload package
         if: matrix.config == 'Release'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: osv-windows-zip
           path: dist/*.zip
@@ -437,7 +437,7 @@ jobs:
 
     steps:
       - name: Checkout (with submodules)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
 
@@ -459,7 +459,7 @@ jobs:
       # FFmpeg is dropped, and only by --no-av below; the cache is shared with
       # every other job and read as-is.
       - name: Cache vendored codecs build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
@@ -500,7 +500,7 @@ jobs:
 
     steps:
       - name: Checkout (with submodules)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
 
@@ -520,7 +520,7 @@ jobs:
       # Build the decoders too: running libwebp/libheif/libaom under ASAN+UBSan on
       # untrusted input is the highest-value place to have the sanitisers.
       - name: Cache vendored codecs build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
@@ -566,7 +566,7 @@ jobs:
 
     steps:
       - name: Checkout (with submodules)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
 
@@ -587,7 +587,7 @@ jobs:
       # builds and caches under this key — see the job-level comment above for
       # why this job does not need its own TSan-instrumented codec prefix.
       - name: Cache vendored codecs build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
@@ -628,7 +628,7 @@ jobs:
 
     steps:
       - name: Checkout (with submodules)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
 
@@ -647,7 +647,7 @@ jobs:
 
       # Build ASAN-instrumented codecs with a separate cache key (-asan suffix).
       - name: Cache ASAN vendored codecs build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: cache-codecs-asan
         with:
           path: vendor/codecs-prefix-asan
@@ -700,14 +700,14 @@ jobs:
       # Full history so Sonar can attribute new-code and blame accurately.
       - name: Checkout (full history + submodules)
         if: env.SONAR_TOKEN != ''
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
           fetch-depth: 0
 
       - name: Cache apt packages
         if: env.SONAR_TOKEN != ''
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: /tmp/apt-cache
           key: apt-sonar-${{ hashFiles('.github/workflows/ci.yml') }}
@@ -757,7 +757,7 @@ jobs:
 
       - name: Cache premake5 binary
         if: env.SONAR_TOKEN != ''
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: cache-premake5
         with:
           path: bin/premake5
@@ -775,7 +775,7 @@ jobs:
 
       - name: Cache vendored SDL3 build
         if: env.SONAR_TOKEN != ''
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: cache-sdl3
         with:
           path: vendor/SDL3/build
@@ -808,7 +808,7 @@ jobs:
       # osv links the image codecs, so the analysed compile below needs them.
       - name: Cache vendored codecs build
         if: env.SONAR_TOKEN != ''
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
@@ -849,7 +849,7 @@ jobs:
       # GITHUB_TOKEN lets SonarCloud post inline PR comments and status checks.
       - name: SonarQube scan
         if: env.SONAR_TOKEN != ''
-        uses: SonarSource/sonarqube-scan-action@v6
+        uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -886,7 +886,7 @@ jobs:
       # first-party src/ and tests/ are formatted, and skipping them drops the
       # large vendored checkouts.
       - name: Checkout (full history — needed for the merge-base diff)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 

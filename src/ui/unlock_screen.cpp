@@ -263,7 +263,7 @@ void UnlockScreen::submit()
 
     std::vector<uint8_t> keyfile;
     if (!keyfile_path_.empty()) {
-        auto kf = platform::read_file(platform::utf8_to_path(keyfile_path_));
+        auto kf = platform::read_keyfile(platform::utf8_to_path(keyfile_path_));
         if (!kf) { error_ = "Cannot read keyfile."; return; }
         keyfile = std::move(*kf);
     }

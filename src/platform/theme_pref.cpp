@@ -1,7 +1,7 @@
 #include "platform/theme_pref.h"
 
 #include <fstream>
-#include <print>
+#include "platform/safe_print.h"
 #include <string>
 
 #include "platform/path_utf8.h"
@@ -42,20 +42,20 @@ bool ThemePref::save(gfx::ThemeId id) const
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         if (!out) {
-            std::println(stderr, "[ThemePref] cannot write {}", path_to_utf8(tmp));
+            platform::safe_println(stderr, "[ThemePref] cannot write {}", path_to_utf8(tmp));
             return false;
         }
         out << gfx::theme_slug(id) << '\n';
         out.flush();
         if (!out) {
-            std::println(stderr, "[ThemePref] write error on {}", path_to_utf8(tmp));
+            platform::safe_println(stderr, "[ThemePref] write error on {}", path_to_utf8(tmp));
             return false;
         }
     }
     std::error_code ec;
     std::filesystem::rename(tmp, file_, ec);
     if (ec) {
-        std::println(stderr, "[ThemePref] rename failed: {}", ec.message());
+        platform::safe_println(stderr, "[ThemePref] rename failed: {}", ec.message());
         std::filesystem::remove(tmp, ec);
         return false;
     }

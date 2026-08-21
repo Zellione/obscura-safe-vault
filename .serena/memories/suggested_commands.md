@@ -38,6 +38,8 @@ scripts/test.sh --asan    # AddressSanitizer + UBSan + LSan
 scripts/test.sh --release
 scripts/test.sh --tsan    # ThreadSanitizer (mutually exclusive with --asan)
 ```
+`gen.sh`, `build.sh`, and `test.sh` run `scripts/check_submodules.sh` first and
+report any uninitialized vendored submodules with the exact recovery command.
 Sanitizer builds are isolated (PR #122): `--asan`/`--tsan` output to
 `build/bin/<Config>-asan` / `-tsan` (own objdirs too, so plain and sanitizer
 object trees stay warm side by side), and `test.sh` restores PLAIN build files

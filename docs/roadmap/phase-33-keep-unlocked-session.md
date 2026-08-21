@@ -25,7 +25,7 @@ app restart, so it cannot weaken the vault's at-rest security.
   active whenever `active_ && keep_unlocked_`. An App-level overlay (not a
   per-screen one), so it stays visible across every navigation without
   threading the flag through each screen's constructor.
-- [x] Updated `CLAUDE.md` (module layout) + `mem:core`.
+- [x] Updated `AGENTS.md` (module layout) + `mem:core`.
 - [x] `tests/app/test_auto_lock.cpp` — 5 pure unit tests for
   `should_auto_lock` (mirrors the existing `IdleTimer` tests): each
   suppression guard (no active vault / blocks_idle_lock / keep_unlocked)

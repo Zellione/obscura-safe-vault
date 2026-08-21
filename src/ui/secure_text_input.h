@@ -6,7 +6,7 @@
 // semantics as TextInputModel, but the bytes live in a single fixed-capacity
 // mlock'd buffer instead of a std::string. Capacity is allocated once so growth
 // never leaves a plaintext copy behind, every mutation crypto_wipe's the bytes
-// the shift vacates, and clear() wipes the whole buffer (CLAUDE.md invariant #2).
+// the shift vacates, and clear() wipes the whole buffer (AGENTS.md invariant #2).
 //
 // Replaced the append-only SecureTextField in Phase 54.
 //

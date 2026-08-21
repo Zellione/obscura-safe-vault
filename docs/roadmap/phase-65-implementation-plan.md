@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **Spec:** `docs/roadmap/phase-65-blocking-migration.md`. Every decision there is binding.
-- **Security invariants (CLAUDE.md):** no decrypted bytes to disk; `crypto_wipe` all key material; fresh 24-byte nonce per encrypt; authenticate before decrypt; never log keys/passwords/content; a vault file is untrusted input.
+- **Security invariants (AGENTS.md):** no decrypted bytes to disk; `crypto_wipe` all key material; fresh 24-byte nonce per encrypt; authenticate before decrypt; never log keys/passwords/content; a vault file is untrusted input.
 - **Phase 50 write protocol:** every append to `fp_` holds `write_mutex_`. Worker threads read **only** through `vault::read_thumb_span` (which uses `thumb_fp_` + `thumb_mutex_`); they must never touch `read_fp_` or the index tree.
 - **Persisted-byte rule:** an out-of-range persisted value is **rejected on deserialise, not clamped** (the Phase 37/47/49 rule).
 - **Layering:** `src/vault/` must not depend on `src/media/`. `vault.h` never includes `media/*.h`.
@@ -1901,7 +1901,7 @@ In the block at the tail of `ROADMAP.md`, matching the Phase 47/49 entries' styl
 
 - [ ] **Step 3: Update the Serena memories**
 
-Per CLAUDE.md's change→memory table. Each is a real edit, not a rubber stamp:
+Per AGENTS.md's change→memory table. Each is a real edit, not a rubber stamp:
 
 - `mem:module/vault` — add `migration.*`; the watermark fields; `apply_video_probe` / `apply_image_animated` / `commit_migration`; the transfer watermark-lowering rule; removal of `repair_video_metadata` / `repair_image_animated` if Task 9 removed them.
 - `mem:module/ui` — add `migration_job.*` and its threading contract; remove `video_repair.*` and `anim_repair.*`.

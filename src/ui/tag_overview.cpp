@@ -167,7 +167,7 @@ void TagOverviewScreen::import_tag_dict(const std::string& path)
     // A .json tag dictionary carries vocabulary only — no key material and no
     // decrypted vault content — so reading it is invariant-safe. The path came
     // back through platform::normalize_user_path in the dialog callback.
-    const auto bytes = platform::read_file(path);
+    const auto bytes = platform::read_file(path, platform::MAX_METADATA_IMPORT_BYTES);
     if (!bytes) { error_ = "Could not read the tag dictionary."; return; }
 
     const TagDictParseResult parsed = parse_tag_dict_json(*bytes);

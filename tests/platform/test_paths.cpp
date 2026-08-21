@@ -1,7 +1,12 @@
 #include "test_framework.h"
 
 #include <filesystem>
+#include <fstream>
 #include <string>
+
+#if !defined(_WIN32)
+#  include <sys/stat.h>
+#endif
 
 #include "platform/path_utf8.h"
 #include "platform/paths.h"
@@ -28,7 +33,7 @@ TEST(paths_read_file_roundtrip)
         std::fwrite(data.data(), 1, data.size(), f);
         std::fclose(f);
     }
-    auto got = platform::read_file(tmp);
+    auto got = platform::read_file(tmp, data.size());
     REQUIRE(got.has_value());
     CHECK_BYTES_EQ(std::span<const uint8_t>(*got), std::span<const uint8_t>(data));
     std::filesystem::remove(tmp);
@@ -36,7 +41,7 @@ TEST(paths_read_file_roundtrip)
 
 TEST(paths_read_file_missing_returns_nullopt)
 {
-    CHECK_FALSE(platform::read_file("/no/such/osv/file.xyz").has_value());
+    CHECK_FALSE(platform::read_file("/no/such/osv/file.xyz", 1024).has_value());
 }
 
 TEST(paths_read_file_empty_file_returns_empty_vector)
@@ -47,7 +52,7 @@ TEST(paths_read_file_empty_file_returns_empty_vector)
         REQUIRE(f != nullptr);
         std::fclose(f);
     }
-    const auto got = platform::read_file(tmp);
+    const auto got = platform::read_file(tmp, 0);
     REQUIRE(got.has_value());
     CHECK_TRUE(got->empty());
     std::filesystem::remove(tmp);
@@ -63,8 +68,8 @@ TEST(paths_write_new_keyfile_creates_random_bytes)
     REQUIRE(platform::write_new_keyfile(a));
     REQUIRE(platform::write_new_keyfile(b));
 
-    const auto fa = platform::read_file(a);
-    const auto fb = platform::read_file(b);
+    const auto fa = platform::read_keyfile(a);
+    const auto fb = platform::read_keyfile(b);
     REQUIRE(fa.has_value() && fb.has_value());
     CHECK_EQ(fa->size(), platform::KEYFILE_SIZE);
     CHECK_EQ(fb->size(), platform::KEYFILE_SIZE);
@@ -82,11 +87,11 @@ TEST(paths_write_new_keyfile_refuses_to_overwrite)
     const auto p = std::filesystem::temp_directory_path() / "osv_keyfile_keep.key";
     std::filesystem::remove(p);
     REQUIRE(platform::write_new_keyfile(p));
-    const auto before = platform::read_file(p);
+    const auto before = platform::read_keyfile(p);
     REQUIRE(before.has_value());
 
     CHECK_FALSE(platform::write_new_keyfile(p));
-    const auto after = platform::read_file(p);
+    const auto after = platform::read_keyfile(p);
     REQUIRE(after.has_value());
     CHECK_BYTES_EQ(std::span<const uint8_t>(*after), std::span<const uint8_t>(*before));
 
@@ -97,6 +102,38 @@ TEST(paths_write_new_keyfile_fails_on_bad_path)
 {
     CHECK_FALSE(platform::write_new_keyfile("/no/such/dir/osv.key"));
 }
+
+TEST(paths_read_file_refuses_file_over_limit)
+{
+    const auto p = std::filesystem::temp_directory_path() / "osv_read_limit.bin";
+    {
+        std::ofstream out(p, std::ios::binary | std::ios::trunc);
+        REQUIRE(out.good());
+        out << "12345";
+    }
+    CHECK_FALSE(platform::read_file(p, 4).has_value());
+    const auto exact = platform::read_file(p, 5);
+    REQUIRE(exact.has_value());
+    CHECK_EQ(exact->size(), size_t{5});
+    std::filesystem::remove(p);
+}
+
+#if !defined(_WIN32)
+TEST(paths_write_new_keyfile_is_owner_only_despite_umask)
+{
+    const auto p = std::filesystem::temp_directory_path() / "osv_keyfile_mode.key";
+    std::filesystem::remove(p);
+    const mode_t previous = ::umask(0);
+    const bool created = platform::write_new_keyfile(p);
+    ::umask(previous);
+    REQUIRE(created);
+
+    struct stat st {};
+    REQUIRE(::stat(p.c_str(), &st) == 0);
+    CHECK_EQ(st.st_mode & 0777, mode_t{0600});
+    std::filesystem::remove(p);
+}
+#endif
 
 // --- normalize_user_path ---------------------------------------------------
 //

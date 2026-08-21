@@ -17,8 +17,8 @@ with **zero size regression**. Fully transparent to every caller; invariant #1
 - [x] **Compressor** — miniz `tdefl`/`tinfl` (already vendored + premake-compiled with `MINIZ_NO_ZLIB_COMPATIBLE_NAMES`); **no new dependency**. Compress in `append_chunk`; keep the compressed form only when ≤ ~95% of the original, else store raw.
 - [x] **Decompress path** — decrypt into an mlock'd `SecureBytes` → inflate into a second mlock'd buffer sized by the validated `orig_len` → wipe the intermediate. No disk, ever.
 - [x] **Index blobs framing** — sealed via `crypto::seal` + `append_raw`, then framed explicitly at `commit_index`/`unlock`/`compact` sites; the method byte is inside the sealed blob, so compressibility is authenticated. Gallery names/tags on large vaults benefit from compression without extra code.
-- [x] **Document the side channel** — ciphertext length now reveals plaintext *compressibility*; record it as accepted for the local-attacker threat model (CLAUDE.md hardening notes).
-- [x] Update `CLAUDE.md` (chunk layout, deferred-decisions table) + the container-format reference section below + `mem:core`.
+- [x] **Document the side channel** — ciphertext length now reveals plaintext *compressibility*; record it as accepted for the local-attacker threat model (AGENTS.md hardening notes).
+- [x] Update `AGENTS.md` (chunk layout, deferred-decisions table) + the container-format reference section below + `mem:core`.
 - [x] `tests/` — round-trips (compressed + raw) with checksums; a BMP/TGA vault is measurably smaller while a JPEG vault stores raw (no growth); a legacy (flag-clear) vault fixture opens, reads, and appends unchanged; hostile `method`/`orig_len` fuzz corpus; export/transfer/compact still checksum-match on compressed vaults; ASAN clean.
 
 **Out of scope (YAGNI):** migrating/recompressing legacy vaults (even via compaction); zstd/LZ4; per-file or user-facing compression settings; compressing the plaintext header.

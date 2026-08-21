@@ -3,7 +3,7 @@
 #include "platform/paths.h"
 
 #include <array>
-#include <print>
+#include "platform/safe_print.h"
 
 namespace platform {
 
@@ -24,10 +24,10 @@ void SDLCALL FileDialog::on_files(void* userdata, const char* const* filelist, i
             if (auto norm = normalize_external_path_utf8(*p))
                 self->paths_.push_back(std::move(*norm));
             else
-                std::println(stderr, "[Platform] ignoring unusable path from file dialog");
+                platform::safe_println(stderr, "[Platform] ignoring unusable path from file dialog");
         }
     } else {
-        std::println(stderr, "[Platform] File dialog error: {}", SDL_GetError());
+        platform::safe_println(stderr, "[Platform] File dialog error: {}", SDL_GetError());
     }
     self->state_ = St::Done;
 }
