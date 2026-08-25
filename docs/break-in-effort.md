@@ -40,7 +40,10 @@ threat model in AGENTS.md — this extends it to the key material itself.)
 (`core.osv.1000.…223157.….zst`, pid 223157). Because the crashing build was a
 **Debug** build, the core still held the unlocked `Vault`'s master key.
 
-**Repro (evidence in `/tmp/osvbreakin/`).**
+**Repro.** The extraction tools are in the repo — `tools/breakin/`
+(`breakin.c` decrypts the index slot, `extract_photo.c` decrypts an image chunk;
+`make && ./breakin <vault> <key>` then `./extract_photo <vault> <key> index.bin`).
+Evidence artifacts were in `/tmp/osvbreakin/` (tmpfs — cleared on reboot):
 - `coredumpctl dump 223157 -o /tmp/osvbreakin/osv.core` → 621.8 MB core.
 - gdb (symbols present) read the **2nd-vault master key** straight out of the
   live `Vault` object:

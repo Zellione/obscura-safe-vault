@@ -235,8 +235,14 @@ notes"** before opening PRs (some may already be covered):
 
 ## 11. Durability warning (read before rebooting)
 
+- **The repro tools are now in the repo** — `tools/breakin/` (`breakin.c`,
+  `extract_photo.c`, `Makefile`, `README.md`). The break-in is **reproducible
+  from the repo alone** (needs the `.osv` vault + the key hex, both in the docs).
+  Verified: rebuilt + re-ran — index + image both **TAG VERIFIED**, photo md5
+  `6b97bcf4ae64020f745bd9c1c822e78c`.
 - **`/tmp` is tmpfs (7.7 GB, in RAM) → CLEARED ON REBOOT.** Everything in
-  `/tmp/osvbreakin/` (core copy, tools, decrypted index/photo) is lost on reboot.
+  `/tmp/osvbreakin/` (core copy, tools, decrypted index/photo) is lost on reboot
+  — but the tools are now in-repo, so only the *convenience* artifacts go.
 - **The original core is durable** (ext4 root):
   `/var/lib/systemd/coredump/core.osv.1000.3cd35ffc1d64420abeedbf19abb233d2.223157.1787679933000000.zst`
   — everything is **regenerable** from it via `coredumpctl dump 223157` + the
@@ -315,10 +321,12 @@ notes"** before opening PRs (some may already be covered):
   `cpp:S6004` CLOSED, quality gate OK).
 - **Files changed this effort:**
   - `src/app/migration_refresh.h` (new), `src/app/app.cpp` (fix + S6004)
-  - `tests/app/test_migration_refresh.cpp` (new),
+  - `tests/app/test_migration_refresh.cpp` (new)
   - `docs/roadmap/phase-87-migration-stale-pointers.md` (new), `ROADMAP.md`
     (Phase 87 row)
-  - `docs/break-in-effort.md` (new)
+  - `docs/break-in-effort.md` (new), `COLD_HANDOFF.md` (new)
+  - `tools/breakin/` (new: `breakin.c`, `extract_photo.c`, `Makefile`, `README.md`,
+    `.gitignore`) — the reproducible break-in tools
 - **Original core to delete** (owner, sudo): see §10 step 5.
 
 ---
@@ -340,6 +348,8 @@ notes"** before opening PRs (some may already be covered):
 ## 16. Cross-references
 
 - Effort plan + findings: `docs/break-in-effort.md`.
+- **Reproducible break-in tools: `tools/breakin/`** (`breakin.c`, `extract_photo.c`,
+  `Makefile`, `README.md`) — build + run to re-derive the index + photo.
 - App Phase 87: `docs/roadmap/phase-87-migration-stale-pointers.md`, **PR #203**.
 - Conventions / invariants / hardening: `AGENTS.md`.
 - Serena memories: `.serena/memories/` (start at `mem:core`); update per AGENTS.md
