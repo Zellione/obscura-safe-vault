@@ -1017,8 +1017,9 @@ void App::update(double dt)
     // The owning screen must not read the vault until take_outcome() returns
     // (migration_job.h contract), so pause its update for the duration — the App
     // polls progress and draws the modal directly, not through the screen.
-    const bool migration_active = migration_ui_.job && migration_ui_.job->active();
-    if (screen_ && !migration_active) screen_->update(dt);
+    if (const bool migration_active = migration_ui_.job && migration_ui_.job->active();
+        screen_ && !migration_active)
+        screen_->update(dt);
     badge_elapsed_ += dt;   // Phase 45 Part 6
 
     // Phase 66: tick the warm slot. Expiry is deferred while a background job
