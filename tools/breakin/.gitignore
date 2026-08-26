@@ -1,0 +1,10 @@
+# re-include THIS Makefile (the top-level .gitignore ignores the premake gmake
+# fallback "Makefile", which is generated, not committed)
+!Makefile
+
+# built binaries (make)
+/breakin
+/extract_photo
+# repro output blobs (generated when you run the tools)
+index_slot*.bin
+photo_decrypted.bin

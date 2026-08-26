@@ -8,6 +8,7 @@
 #include "app/auto_lock.h"
 #include "app/back_click.h"
 #include "app/keep_unlocked_badge.h"
+#include "app/migration_refresh.h"
 #include "gfx/renderer.h"
 #include "gfx/theme.h"
 #include "platform/error_log.h"
@@ -1011,7 +1012,14 @@ bool App::maybe_auto_lock(double dt)
 void App::update(double dt)
 {
     const platform::PerfScope perf("app.update", 10.0);
-    if (screen_) screen_->update(dt);
+    // Phase 87: while a MigrationJob is active it owns the vault EXCLUSIVELY and
+    // mutates the index tree (compact() frees the very tree the grid was listing).
+    // The owning screen must not read the vault until take_outcome() returns
+    // (migration_job.h contract), so pause its update for the duration — the App
+    // polls progress and draws the modal directly, not through the screen.
+    if (const bool migration_active = migration_ui_.job && migration_ui_.job->active();
+        screen_ && !migration_active)
+        screen_->update(dt);
     badge_elapsed_ += dt;   // Phase 45 Part 6
 
     // Phase 66: tick the warm slot. Expiry is deferred while a background job
@@ -1041,6 +1049,14 @@ void App::update(double dt)
 
             // Release exclusive hold on import queue (success, cancel, or error)
             import_ui_.queue.set_exclusive(false);
+
+            // Phase 87: the coordinator mutated the index tree (thumb/poster regen
+            // + compaction) while it owned the vault exclusively, so every
+            // IndexNode* the active screen cached is now stale. Re-list it — the
+            // same refresh the import drain does below — before the next render,
+            // or the grid reads a freed node name and crashes (Phase 87 core:
+            // SIGSEGV in byte_at on a torn std::string).
+            (void)apply_migration_refresh(vault_state_.active != nullptr, screen_.get());
         }
     }
 
@@ -1066,7 +1082,11 @@ void App::render_frame()
     window_.begin_frame(gfx::theme::BG.r, gfx::theme::BG.g, gfx::theme::BG.b);
     if (screen_) {
         gfx::Renderer r(window_.sdl_renderer());
-        screen_->render(r);
+        // Phase 87: while a MigrationJob owns the vault exclusively, the owning
+        // screen must not read the index tree (migration_job.h contract) — the
+        // coordinator may be mid-compact, having freed the tree the grid listed.
+        // Skip the screen's draw; the migration modal below is rendered directly.
+        if (!(migration_ui_.job && migration_ui_.job->active())) screen_->render(r);
         const bool keep_badge = vault_state_.active && should_show_badge(keep_unlocked_, badge_elapsed_, BADGE_WINDOW_SECS);
         if (keep_badge)
             draw_keep_unlocked_badge(r, font_, window_.width(), window_.height());
