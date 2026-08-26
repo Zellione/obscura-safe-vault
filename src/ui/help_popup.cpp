@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <format>
 #include <limits>
 
 #include "crypto/secure_mem.h"   // mlock_failure_seen()
@@ -38,11 +39,11 @@ std::string secure_mem_status_line(size_t budget_bytes, bool degraded)
     const bool unlimited = (budget_bytes == std::numeric_limits<size_t>::max());
     const std::string budget = unlimited
         ? "unlimited"
-        : std::to_string((budget_bytes + ((size_t{1} << 20) - 1)) >> 20) + " MiB";
+        : std::format("{} MiB", (budget_bytes + ((size_t{1} << 20) - 1)) >> 20);
     const std::string state = degraded
         ? "— some decoded data is swappable (mlock exhausted)"
         : "active (best-effort)";
-    return "Secure memory: " + budget + " page-lock budget " + state;
+    return std::format("Secure memory: {} page-lock budget {}", budget, state);
 }
 
 bool handle_help_key(HelpPopupState& s, SDL_Keycode key)

@@ -31,11 +31,19 @@
 
 namespace crypto {
 
-// Process-global record that at least one mlock/VirtualLock has failed this
+// Process-wide record that at least one mlock/VirtualLock has failed this
 // process. should_warn_mlock_once() flips it (returning true exactly once, to
 // log the warning); mlock_failure_seen() reports it, so the UI can surface
 // that some decoded data is sitting in swappable memory (Phase 6c).
-inline std::atomic_bool mlock_failed_ = false;
+// The flag lives as a function-local static behind this accessor rather than a
+// namespace-scope global (cpp:S5421). Semantics are unchanged: the inline
+// function's static is a single program-wide instance, initialized on first
+// use (thread-safe, immune to cross-translation-unit init order).
+[[nodiscard]] inline std::atomic_bool& mlock_failed_flag() noexcept
+{
+    static std::atomic_bool flag{false};
+    return flag;
+}
 
 // Thread-safe helper: should we warn about the first mlock failure?
 // Returns true exactly once per process; all subsequent calls return false.
@@ -44,14 +52,14 @@ inline std::atomic_bool mlock_failed_ = false;
 inline bool should_warn_mlock_once() noexcept
 {
     bool expected = false;
-    return mlock_failed_.compare_exchange_strong(expected, true);
+    return mlock_failed_flag().compare_exchange_strong(expected, true);
 }
 
 // True once any mlock/VirtualLock has failed (i.e. some secret buffer degraded
 // to swappable memory). Monotonic: never goes back to false in a process.
 [[nodiscard]] inline bool mlock_failure_seen() noexcept
 {
-    return mlock_failed_.load();
+    return mlock_failed_flag().load();
 }
 
 // Platform-appropriate remedy advice for the once-per-process mlock warning.
