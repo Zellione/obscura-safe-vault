@@ -93,6 +93,14 @@ enum class OwnerOnlyCreate {
 // Never fails the caller — logs a single generic diagnostic on failure.
 void ensure_owner_only_file(const std::filesystem::path& path);
 
+// Open an EXISTING file read-only. On Windows this goes through the same
+// CreateFileW + _open_osfhandle + _fdopen chain as create_owner_only_file,
+// NOT fopen(): the MSVC CRT's in-process "deny" table refuses a plain fopen()
+// of a file that is already open via a _open_osfhandle-backed FILE* (Vault
+// keeps fp_ open while opening read_fp_/thumb_fp_). On POSIX this is just
+// fopen_path(path, "rb"). Returns nullptr on failure.
+[[nodiscard]] std::FILE* open_existing_read(const std::filesystem::path& path);
+
 // Diagnostic: describe the last failed open() on this platform (errno, plus
 // the Win32 error code on Windows). Intended to be read immediately after a
 // failed fopen() — before any other system call overwrites the error state.

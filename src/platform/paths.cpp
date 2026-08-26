@@ -380,4 +380,25 @@ std::string last_open_error_str()
     return s;
 }
 
+std::FILE* open_existing_read(const std::filesystem::path& path)
+{
+#if defined(_WIN32)
+    // Same chain as create_owner_only_file so the CRT deny-table (which would
+    // reject this open because fp_ was opened via _open_osfhandle) is bypassed.
+    // OPEN_EXISTING: read-back must fail (not create) if the file is absent.
+    HANDLE handle = ::CreateFileW(path.c_str(), GENERIC_READ,
+                                  FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+                                  FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return nullptr;
+    const int fd = ::_open_osfhandle(reinterpret_cast<intptr_t>(handle), _O_RDONLY | _O_BINARY);
+    if (fd == -1) {
+        ::CloseHandle(handle);
+        return nullptr;
+    }
+    return ::_fdopen(fd, "rb");
+#else
+    return fopen_path(path, "rb");
+#endif
+}
+
 } // namespace platform
