@@ -171,10 +171,11 @@ static const char* unlock_error_message(vault::VaultResult r)
 {
     using enum vault::VaultResult;
     switch (r) {
-        case AuthFailed: return "Wrong password or keyfile.";
-        case BadFormat:  return "Not a valid vault file.";
-        case IoError:    return "Could not read/write the vault file.";
-        default:         return "Unlock failed.";
+        case AuthFailed:    return "Wrong password or keyfile.";
+        case BadFormat:     return "Not a valid vault file.";
+        case IoError:       return "Could not read/write the vault file.";
+        case AlreadyExists: return "A vault already exists at that path.";
+        default:            return "Unlock failed.";
     }
 }
 

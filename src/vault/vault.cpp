@@ -18,6 +18,7 @@
 #include "file_util.h"
 #include "safe_name.h"
 #include "platform/path_utf8.h"
+#include "platform/paths.h"
 
 #include "image/anim_info.h"
 #include "image/decode.h"
@@ -535,8 +536,14 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
 {
     out.reset();
 
-    std::FILE* fp = platform::fopen_path(platform::utf8_to_path(path), "w+b");
-    if (!fp) return VaultResult::IoError;
+    // A vault is secret material like a keyfile: claim the file atomically
+    // (never truncate an existing one) with owner-only permissions from the
+    // first byte, instead of "w+b" landing 0644 under a default umask.
+    std::FILE* fp = nullptr;
+    const platform::OwnerOnlyCreate created =
+        platform::create_owner_only_file(platform::utf8_to_path(path), fp);
+    if (created == platform::OwnerOnlyCreate::AlreadyExists) return VaultResult::AlreadyExists;
+    if (created != platform::OwnerOnlyCreate::Ok) return VaultResult::IoError;
 
     Header h;
     h.kdf = params;
@@ -632,6 +639,10 @@ VaultResult Vault::open(const std::string& path, Vault& out)
         std::fclose(fp);
         return VaultResult::BadFormat;
     }
+
+    // Phase 88: tighten a pre-existing vault to owner-only (best-effort — a
+    // vault on a share owned by someone else may not be tighten-able).
+    platform::ensure_owner_only_file(platform::utf8_to_path(path));
 
     out.path_ = path;
     out.fp_ = fp;

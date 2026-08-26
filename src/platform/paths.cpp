@@ -4,11 +4,15 @@
 
 #include <monocypher.h>
 
+#include <atomic>
 #include <array>
+#include <cerrno>
 #include <cstdio>
 #include <limits>
 #include <new>
 #include <stdexcept>
+
+#include "platform/error_log.h"
 
 #if defined(_WIN32)
 #  if !defined(WIN32_LEAN_AND_MEAN)
@@ -67,23 +71,33 @@ namespace {
 #endif
 }
 
-// Atomically claim a brand-new keyfile. The exclusive-create operation closes
-// the exists/open race; POSIX mode 0600 does not depend on the caller's umask.
-[[nodiscard]] std::FILE* open_new_keyfile(const std::filesystem::path& path) noexcept
-{
 #if defined(_WIN32)
-    // Use a protected DACL granting only the current user access. Relying on
-    // directory inheritance can expose the keyfile in a shared folder.
+// A current-user-only DACL (full control, no inheritance) plus the trustee
+// storage it references; the destructor frees both. Shared by open_new_keyfile
+// and create_owner_only_file — a vault is the same class of secret as a
+// keyfile. Relying on directory inheritance can expose the file in a shared
+// folder, so the DACL is explicit.
+struct OwnerOnlyAcl {
+    PACL acl = nullptr;
+    void* trustee = nullptr;
+    ~OwnerOnlyAcl() {
+        if (acl) ::LocalFree(acl);
+        if (trustee) ::LocalFree(trustee);
+    }
+};
+
+[[nodiscard]] bool build_owner_only_acl(OwnerOnlyAcl& out) noexcept
+{
     HANDLE token = nullptr;
-    if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token)) return nullptr;
+    if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token)) return false;
     DWORD token_size = 0;
     (void)::GetTokenInformation(token, TokenUser, nullptr, 0, &token_size);
     auto* token_user = static_cast<TOKEN_USER*>(::LocalAlloc(LPTR, token_size));
     if (!token_user || !::GetTokenInformation(token, TokenUser, token_user, token_size,
-                                               &token_size)) {
+                                              &token_size)) {
         if (token_user) ::LocalFree(token_user);
         ::CloseHandle(token);
-        return nullptr;
+        return false;
     }
     ::CloseHandle(token);
 
@@ -95,18 +109,33 @@ namespace {
     access.Trustee.TrusteeType = TRUSTEE_IS_USER;
     access.Trustee.ptstrName = static_cast<LPWSTR>(token_user->User.Sid);
     PACL acl = nullptr;
-    const DWORD acl_result = ::SetEntriesInAclW(1, &access, nullptr, &acl);
+    if (::SetEntriesInAclW(1, &access, nullptr, &acl) != ERROR_SUCCESS || !acl) {
+        if (acl) ::LocalFree(acl);
+        ::LocalFree(token_user);
+        return false;
+    }
+    out.acl = acl;
+    out.trustee = token_user;
+    return true;
+}
+#endif
+
+// Atomically claim a brand-new keyfile. The exclusive-create operation closes
+// the exists/open race; POSIX mode 0600 does not depend on the caller's umask.
+[[nodiscard]] std::FILE* open_new_keyfile(const std::filesystem::path& path) noexcept
+{
+#if defined(_WIN32)
+    OwnerOnlyAcl owner_only;
+    if (!build_owner_only_acl(owner_only)) return nullptr;
     SECURITY_DESCRIPTOR descriptor{};
-    const bool descriptor_ok = acl_result == ERROR_SUCCESS &&
+    const bool descriptor_ok =
         ::InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION) &&
-        ::SetSecurityDescriptorDacl(&descriptor, TRUE, acl, FALSE);
+        ::SetSecurityDescriptorDacl(&descriptor, TRUE, owner_only.acl, FALSE);
     SECURITY_ATTRIBUTES attrs{sizeof(attrs), &descriptor, FALSE};
     HANDLE handle = descriptor_ok
         ? ::CreateFileW(path.c_str(), GENERIC_WRITE | DELETE, 0, &attrs, CREATE_NEW,
                         FILE_ATTRIBUTE_NORMAL, nullptr)
         : INVALID_HANDLE_VALUE;
-    if (acl) ::LocalFree(acl);
-    ::LocalFree(token_user);
     if (handle == INVALID_HANDLE_VALUE) return nullptr;
     const int fd = ::_open_osfhandle(reinterpret_cast<intptr_t>(handle),
                                      _O_WRONLY | _O_BINARY);
@@ -256,6 +285,83 @@ bool write_new_keyfile(const std::filesystem::path& path)
     (void)std::fclose(f);  // data was already flushed+synced; no new error remains to report
     crypto_wipe(key.data(), key.size());  // the keyfile IS key material
     return ok;
+}
+
+OwnerOnlyCreate create_owner_only_file(const std::filesystem::path& path, std::FILE*& out)
+{
+    out = nullptr;
+#if defined(_WIN32)
+    OwnerOnlyAcl owner_only;
+    if (!build_owner_only_acl(owner_only)) return OwnerOnlyCreate::Error;
+    SECURITY_DESCRIPTOR descriptor{};
+    const bool descriptor_ok =
+        ::InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION) &&
+        ::SetSecurityDescriptorDacl(&descriptor, TRUE, owner_only.acl, FALSE);
+    SECURITY_ATTRIBUTES attrs{sizeof(attrs), descriptor_ok ? &descriptor : nullptr, FALSE};
+    HANDLE handle = ::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE, 0, &attrs,
+                                  CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        return ::GetLastError() == ERROR_FILE_EXISTS ? OwnerOnlyCreate::AlreadyExists
+                                                     : OwnerOnlyCreate::Error;
+    }
+    const int fd = ::_open_osfhandle(reinterpret_cast<intptr_t>(handle), _O_RDWR | _O_BINARY);
+    if (fd == -1) {
+        FILE_DISPOSITION_INFO disposition{TRUE};
+        (void)::SetFileInformationByHandle(handle, FileDispositionInfo, &disposition,
+                                           sizeof(disposition));
+        ::CloseHandle(handle);
+        return OwnerOnlyCreate::Error;
+    }
+    out = ::_fdopen(fd, "r+b");
+    if (!out) {
+        FILE_DISPOSITION_INFO disposition{TRUE};
+        (void)::SetFileInformationByHandle(
+            reinterpret_cast<HANDLE>(::_get_osfhandle(fd)), FileDispositionInfo, &disposition,
+            sizeof(disposition));
+        ::_close(fd);
+        return OwnerOnlyCreate::Error;
+    }
+    return OwnerOnlyCreate::Ok;
+#else
+    const int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC,
+                          S_IRUSR | S_IWUSR);
+    if (fd == -1) {
+        if (errno == EEXIST) return OwnerOnlyCreate::AlreadyExists;
+        return OwnerOnlyCreate::Error;
+    }
+    out = ::fdopen(fd, "r+b");
+    if (!out) {
+        (void)::unlink(path.c_str());
+        ::close(fd);
+        return OwnerOnlyCreate::Error;
+    }
+    return OwnerOnlyCreate::Ok;
+#endif
+}
+
+void ensure_owner_only_file(const std::filesystem::path& path)
+{
+    bool ok = false;
+#if defined(_WIN32)
+    if (OwnerOnlyAcl owner_only; build_owner_only_acl(owner_only)) {
+        // SetNamedSecurityInfoW returns an ERROR_* code directly (not via
+        // GetLastError). Failing needs WRITE_DAC — a vault on a share owned by
+        // somebody else can legitimately not be tightened.
+        ok = ::SetNamedSecurityInfoW(path.c_str(), SE_FILE_OBJECT,
+                                     DACL_SECURITY_INFORMATION, owner_only.acl, nullptr,
+                                     nullptr, nullptr) == ERROR_SUCCESS;
+    }
+#else
+    ok = ::chmod(path.c_str(), S_IRUSR | S_IWUSR) == 0;
+#endif
+    if (!ok) {
+        // Warn once per process: a vault on a share the user cannot tighten
+        // would otherwise log on every unlock.
+        static std::atomic_flag warned;
+        if (!warned.test_and_set()) {
+            log_error("vault", "could not enforce owner-only permissions on the vault file");
+        }
+    }
 }
 
 } // namespace platform
