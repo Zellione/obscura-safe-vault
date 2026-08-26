@@ -1,6 +1,6 @@
 # Vault break-in & hardening effort
 
-**Status:** Phase 1, 3, 4 done (findings recorded); Phase 3 fix shipped (app **Phase 87**, PR #203); Phases 5–6 pending.
+**Status:** Phases 1, 3, 4, 5 done (findings recorded); Phase 3 fix shipped (app **Phase 87**, PR #203); Phase 6 pending.
 **Opened:** 2026-08-25
 
 This is a deliberate **break-in exercise**: get into a real `.osv` vault through
@@ -31,7 +31,7 @@ threat model in AGENTS.md — this extends it to the key material itself.)
 | 2 | Live-repro on the primary vault | ⏭ SKIPPED (default) | Primary's key was not in the core; would need a manual unlock the owner declined |
 | 3 | Root-cause + fix the UAF crash | ✅ DONE → **app Phase 87**, PR #203 | Post-migration refresh + exclusivity honoured; CI + SonarCloud green |
 | 4 | Quantify mlock / RAM exposure | ✅ FINDINGS | Plaintext is an un-locked, swappable buffer; today it is **RAM-resident (zram), not on the NVMe** |
-| 5 | Argon2id benchmark → cold-attack estimate | ⬜ PENDING | Offline password-crack cost of the container *alone* |
+| 5 | Argon2id benchmark → cold-attack estimate | ✅ DONE | Measured 100 ms/guess (≈10/s) on Ryzen 7 8845HS; ≥8 random chars or 5 diceware words infeasible on a top GPU; unknown keyfile → effectively infinite space |
 | 6 | Remaining hardening (code PRs + system config) | ⬜ PENDING | To be scoped / de-duplicated against AGENTS.md hardening notes |
 
 ## Phase 1 — Break-in via the core dump (DONE)
@@ -127,12 +127,69 @@ luck of the current zram-only config — it is not locking the pixel buffer at a
 - If disk-strength is required: encrypted swap/hibernate (LUKS-backed) or a
   documented "no hibernate / no disk swap" policy.
 
-## Phase 5 — Argon2id benchmark → cold-attack estimate (PENDING)
+## Phase 5 — Argon2id benchmark → cold-attack estimate (DONE)
 
-Measure the real cost of the KDF (Argon2id **t=3 / m=64 MiB / p=1**) to produce
-an **offline password-crack estimate** for a vault whose key was *not* leaked —
-i.e. the honest strength of the container on its own, the complement to Phase 1
-(where the key *was* leaked).
+Measure the real cost of the KDF (Argon2id **t=3 / m=64 MiB / p=1**,
+`DEFAULT_KDF_PARAMS`, `src/crypto/kdf.h:28`) to produce an **offline
+password-crack estimate** for a vault whose key was *not* leaked — i.e. the
+honest strength of the container on its own, the complement to Phase 1 (where
+the key *was* leaked and the KDF is irrelevant).
+
+**Method.** `tools/kdf_bench/` (in-repo) times one `crypto_argon2`
+derivation — the *exact* Monocypher call the app makes
+(`src/crypto/kdf.cpp:78`) — with the production parameters. 20 timed
+iterations (1 warm-up), `CLOCK_MONOTONIC`.
+
+**Measured (this host, 2026-08-26):**
+- Host: **AMD Ryzen 7 8845HS** (Strix Point, 16 threads), Linux 7.1.9-arch1-2,
+  Monocypher (vendored) via `cc -O2`.
+- **Mean 100.0 ms/guess** (min 90.3, max 122.2) → **≈ 10 guesses/s per core**,
+  2.0 GB/s effective (192 MiB touched per guess: 3 passes × 64 MiB).
+- Argon2id is **memory-bound on a single dependent index chain** — the 64 MiB
+  working set misses L3 (16 MiB) and each block's address depends on the
+  previous one, so one core sustains only a few GB/s of the ~90 GB/s dual-channel
+  DDR5 peak. That is *by design*: it is the anti-GPU/ASIC tax.
+
+**GPU (high-end, e.g. RTX 4090-class) — labelled estimate, not measured here
+(no GPU runtime on this host).** The per-guess cost is fixed at 192 MiB of
+touched memory regardless of hardware; a high-end GPU (~1 TB/s) running many
+candidate streams in parallel (hashcat-style) plausibly sustains 10^1–10^2
+GB/s effective on this kernel, i.e. **≈ 10^4–10^6 guesses/s** (≈ 3–5 orders
+of magnitude above the measured CPU core). We design against a **conservative
+10^5 guesses/s**.
+
+**Offline crack time (median of the space = space/2):**
+
+| Password space | size | CPU @10/s (measured) | GPU @10^5/s (est.) |
+|---|---|---|---|
+| random 6 chars (95^6) | 7.4×10^11 | 1,200 y | **43 days** |
+| random 7 chars (95^7) | 7.0×10^13 | 1.1×10^5 y | **11 y** |
+| random 8 chars (95^8) | 6.6×10^15 | 1.05×10^7 y | **1,050 y** |
+| random 12 chars | 5.4×10^23 | 8.6×10^14 y | 8.6×10^10 y |
+| diceware 4 words (7776^4) | 3.7×10^15 | 5.8×10^6 y | **580 y** |
+| diceware 5 words | 2.8×10^19 | 4.5×10^10 y | **4.5×10^6 y** |
+| top-10k wordlist ×4 | 1×10^16 | 1.6×10^7 y | 1,600 y |
+
+(At the most optimistic 10^6 guesses/s: 6 chars → 4 days, 7 chars → 1 year,
+8 chars → 105 y. The *threshold* is stable: **≈ 8 random chars or 5 diceware
+words is the infeasibility line** on commodity hardware.)
+
+**Conclusion — the container alone is honest and strong:**
+1. A **≥ 8-char random** or **5-word diceware** password is infeasible to crack
+   offline on a single high-end GPU (≥ 10^3 y), and utterly infeasible on a
+   laptop CPU (≥ 10^7 y).
+2. **≤ 7 random chars / 4-word phrases are *not* safe** against a determined
+   offline attacker with a top GPU (days–years) — password *length*, not the
+   algorithm, is the variable that matters here.
+3. **A keyfile the attacker does not have makes the password space effectively
+   infinite** (the keyfile bytes enter the KDF input: an N-byte unknown keyfile
+   multiplies the search by 256^N — e.g. 64 bytes → ×10^192). This is why the
+   "password + keyfile" two-factor wrap is the real protection, and why losing
+   the keyfile (like losing the password) locks the vault forever.
+4. This quantifies the *complement* of Phase 1: with the key **leaked** (core
+   dump / cold boot / swap) the KDF cost is zero and the vault is trivially
+   decryptable; with the key **not** leaked, these KDF parameters make
+   password-only cracking infeasible at reasonable password lengths.
 
 ## Phase 6 — Remaining hardening (PENDING)
 
@@ -164,6 +221,8 @@ Candidate items to be **scoped and de-duplicated against the existing AGENTS.md
 
 ## Cross-references
 
+- **Reproducible break-in tools: `tools/breakin/`** (`breakin.c`, `extract_photo.c`) — build + run to re-derive the index + photo.
+- **KDF benchmark: `tools/kdf_bench/`** — re-run `./kdf_bench` to re-measure the per-guess cost on any host.
 - App ROADMAP Phase 87: `docs/roadmap/phase-87-migration-stale-pointers.md`, **PR #203**.
 - Crypto / container: AGENTS.md *Security invariants*; `mem:vault_format`.
 - mlock / hibernate / core-dump hardening: AGENTS.md *Hardening notes*.
