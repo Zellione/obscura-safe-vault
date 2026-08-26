@@ -11,6 +11,7 @@
 // the alternative — refusing to run — is worse for usability and we still get
 // the wipe guarantee. is_locked() exposes the outcome for diagnostics/tests.
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -230,6 +231,31 @@ public:
     [[nodiscard]] size_t         size()  const noexcept { return size_; }
     [[nodiscard]] bool           empty() const noexcept { return size_ == 0; }
     [[nodiscard]] bool           is_locked() const noexcept { return locked_; }
+
+    // Unchecked element access — callers own the bounds (the buffer is sized
+    // exactly for its contents, e.g. decoded pixels are always w*h*3 bytes).
+    [[nodiscard]] uint8_t& operator[](size_t i) noexcept { return data_[i]; }
+    [[nodiscard]] const uint8_t& operator[](size_t i) const noexcept { return data_[i]; }
+
+    // Copy from an external buffer, resizing (and wiping) first. Returns false
+    // — leaving the object empty — if the span is null with non-zero size or
+    // the allocation fails.
+    [[nodiscard]] bool assign(std::span<const uint8_t> src)
+    {
+        if (src.size() && !src.data()) return false;
+        if (!resize(src.size())) return false;
+        std::copy_n(src.data(), src.size(), data_.get());
+        return true;
+    }
+
+    // Resize to n and fill with v (solid-colour buffers). False on allocation
+    // failure, leaving the object empty.
+    [[nodiscard]] bool fill(size_t n, uint8_t v)
+    {
+        if (!resize(n)) return false;
+        std::fill_n(data_.get(), n, v);
+        return true;
+    }
 
     [[nodiscard]] std::span<uint8_t>       span()       noexcept { return {data_.get(), size_}; }
     [[nodiscard]] std::span<const uint8_t> as_span() const noexcept { return {data_.get(), size_}; }

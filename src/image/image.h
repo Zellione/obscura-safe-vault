@@ -1,7 +1,8 @@
 #pragma once
 
 #include <cstdint>
-#include <vector>
+
+#include "crypto/secure_mem.h"
 
 namespace image {
 
@@ -21,10 +22,11 @@ enum class ImageFormat : uint8_t {
 };
 
 // Decoded image: always 3-channel RGB, width*height*3 bytes, row-major.
-// std::vector is sufficient here; decoded pixels are transient (never written to
-// disk), so mlock is unnecessary for this intermediate buffer.
+// Pixels are plaintext image data, so they live in mlock'd SecureBytes
+// (invariant #1, best-effort page-lock + crypto_wipe on destruction) exactly
+// like the encrypted stored bytes — never in swappable memory unmarked.
 struct ImageData {
-    std::vector<uint8_t> pixels;
+    crypto::SecureBytes pixels;
     int         width  = 0;
     int         height = 0;
     ImageFormat format = ImageFormat::Unknown;

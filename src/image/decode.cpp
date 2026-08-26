@@ -58,7 +58,10 @@ std::optional<ImageData> decode_stb(std::span<const uint8_t> data, ImageFormat f
     img.width  = w;
     img.height = h;
     img.format = (fmt == ImageFormat::Unknown) ? ImageFormat::TGA : fmt;
-    img.pixels.assign(raw, raw + static_cast<size_t>(w) * h * 3);
+    if (!img.pixels.assign(std::span(raw, static_cast<size_t>(w) * h * 3))) {
+        stbi_image_free(raw);
+        return std::nullopt;
+    }
     stbi_image_free(raw);
     return img;
 }

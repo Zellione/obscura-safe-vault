@@ -87,6 +87,18 @@ TEST(decode_png_format_and_dims)
     CHECK_EQ(static_cast<int>(img->pixels.size()), 7 * 13 * 3);
 }
 
+// Phase 6b: decoded pixels are plaintext image data — invariant #1 says they
+// must live in best-effort mlock'd memory (MADV_DONTDUMP on Linux) and be
+// crypto_wipe'd on destruction, exactly like the encrypted stored bytes.
+TEST(decoded_pixels_are_mlocked)
+{
+    const auto buf = fixtures::solid_jpeg(16, 8, 200, 100, 50);
+    REQUIRE(!buf.empty());
+    const auto img = image::decode_from_memory(buf);
+    REQUIRE(img.has_value());
+    CHECK_TRUE(img->pixels.is_locked());
+}
+
 TEST(decode_bmp_format_and_dims)
 {
     const auto buf = fixtures::solid_bmp(5, 5, 0, 0, 255);
@@ -170,7 +182,8 @@ public:
         d.width  = 1;
         d.height = 1;
         d.format = tag_;
-        d.pixels = {1, 2, 3};
+        const uint8_t px[] = {1, 2, 3};
+        if (!d.pixels.assign(std::span(px))) return std::nullopt;
         return d;
     }
 
