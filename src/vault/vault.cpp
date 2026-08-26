@@ -560,10 +560,12 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     crypto::SecureBuffer<crypto::KEY_SIZE> kek;
     if (!crypto::fill_random(h.salt) || !crypto::fill_random(master.span()) ||
         !crypto::fill_random(h.mk_nonce)) {
+        platform::log_error("vault", "Vault::create: fill_random failed");
         std::fclose(fp);
         return VaultResult::CryptoError;
     }
     if (!crypto::derive_key(password, keyfile, h.salt, params, kek)) {
+        platform::log_error("vault", "Vault::create: derive_key failed");
         std::fclose(fp);
         return VaultResult::CryptoError;
     }
@@ -571,6 +573,7 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     // Wrap the master key under the KEK (detached: cipher[32]||tag[16]).
     std::vector<uint8_t> wrapped;
     if (!crypto::seal(kek.as_span(), h.mk_nonce, master.as_span(), wrapped)) {
+        platform::log_error("vault", "Vault::create: seal failed");
         std::fclose(fp);
         return VaultResult::CryptoError;
     }
@@ -581,6 +584,7 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     // The real header is written by commit_index() below.
     if (const std::array<uint8_t, HEADER_SIZE> placeholder{};
         std::fwrite(placeholder.data(), 1, placeholder.size(), fp) != placeholder.size()) {
+        platform::log_error("vault", "Vault::create: fwrite placeholder failed");
         std::fclose(fp);
         return VaultResult::IoError;
     }
@@ -602,6 +606,8 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
 
     // Write the initial (empty) index + a valid header via the crash-safe path.
     if (const VaultResult r = out.commit_index(); r != VaultResult::Ok) {
+        platform::log_error("vault", std::string{"Vault::create: commit_index failed: "} +
+                                         std::to_string(static_cast<int>(r)));
         out.reset();
         return r;
     }
@@ -609,6 +615,7 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     // Open read_fp_ after the initial commit so it sees the complete file.
     out.read_fp_ = platform::fopen_path(platform::utf8_to_path(path), "rb");
     if (!out.read_fp_) {
+        platform::log_error("vault", "Vault::create: fopen(read_fp_, rb) failed");
         out.reset();
         return VaultResult::IoError;
     }
@@ -619,6 +626,7 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     // Open thumb_fp_ the same way for thread-safe background thumbnail reads.
     out.thumb_fp_ = platform::fopen_path(platform::utf8_to_path(path), "rb");
     if (!out.thumb_fp_) {
+        platform::log_error("vault", "Vault::create: fopen(thumb_fp_, rb) failed");
         out.reset();
         return VaultResult::IoError;
     }
