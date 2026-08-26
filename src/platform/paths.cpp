@@ -298,20 +298,19 @@ OwnerOnlyCreate create_owner_only_file(const std::filesystem::path& path, std::F
         ::InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION) &&
         ::SetSecurityDescriptorDacl(&descriptor, TRUE, owner_only.acl, FALSE);
     SECURITY_ATTRIBUTES attrs{sizeof(attrs), descriptor_ok ? &descriptor : nullptr, FALSE};
-    HANDLE handle = ::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE, 0, &attrs,
-                                  CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+    // dwShareMode MUST allow read+write sharing: Vault::create keeps this write
+    // handle (fp_) open while it re-opens the same file for read_fp_ and
+    // thumb_fp_. FILE_SHARE_NONE (0) would give the first open an exclusive
+    // lock and the second open fails with ERROR_SHARING_VIOLATION.
+    HANDLE handle = ::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE,
+                                  FILE_SHARE_READ | FILE_SHARE_WRITE, &attrs, CREATE_NEW,
+                                  FILE_ATTRIBUTE_NORMAL, nullptr);
     if (handle == INVALID_HANDLE_VALUE) {
-        const DWORD err = ::GetLastError();  // diagnostic: identify the Windows failure
-        log_error("vault", std::string{"create_owner_only_file: CreateFileW failed, error "} +
-                               std::to_string(err) +
-                               (err == ERROR_FILE_EXISTS
-                                    ? " (ERROR_FILE_EXISTS: a file already exists at this path)"
-                                    : ""));
-        return err == ERROR_FILE_EXISTS ? OwnerOnlyCreate::AlreadyExists : OwnerOnlyCreate::Error;
+        return ::GetLastError() == ERROR_FILE_EXISTS ? OwnerOnlyCreate::AlreadyExists
+                                                     : OwnerOnlyCreate::Error;
     }
     const int fd = ::_open_osfhandle(reinterpret_cast<intptr_t>(handle), _O_RDWR | _O_BINARY);
     if (fd == -1) {
-        log_error("vault", "create_owner_only_file: _open_osfhandle failed");
         FILE_DISPOSITION_INFO disposition{TRUE};
         (void)::SetFileInformationByHandle(handle, FileDispositionInfo, &disposition,
                                            sizeof(disposition));
@@ -320,7 +319,6 @@ OwnerOnlyCreate create_owner_only_file(const std::filesystem::path& path, std::F
     }
     out = ::_fdopen(fd, "r+b");
     if (!out) {
-        log_error("vault", "create_owner_only_file: _fdopen(r+b) failed");
         FILE_DISPOSITION_INFO disposition{TRUE};
         (void)::SetFileInformationByHandle(
             reinterpret_cast<HANDLE>(::_get_osfhandle(fd)), FileDispositionInfo, &disposition,
