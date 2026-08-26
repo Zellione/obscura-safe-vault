@@ -542,6 +542,11 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     std::FILE* fp = nullptr;
     const platform::OwnerOnlyCreate created =
         platform::create_owner_only_file(platform::utf8_to_path(path), fp);
+    if (created != platform::OwnerOnlyCreate::Ok) {  // diagnostic: which result?
+        platform::log_error("vault", std::string{"Vault::create: create_owner_only_file returned "} +
+                                         std::to_string(static_cast<int>(created)) +
+                                         " (0=Ok,1=AlreadyExists,2=Error) for path " + path);
+    }
     if (created == platform::OwnerOnlyCreate::AlreadyExists) return VaultResult::AlreadyExists;
     if (created != platform::OwnerOnlyCreate::Ok) return VaultResult::IoError;
 
