@@ -50,8 +50,23 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
 - Phase 79 companions in App: `maybe_auto_lock` firing while the upgrade OFFER modal is up
   (job not started — lock is the right default there) also closes the offer + releases import
   exclusivity; the `take_outcome()` poll in `update()` is NOT gated on `vault_state_.active`
-  (a gated poll is what wedged the modal); `shutdown()` calls
-  `MigrationJob::abort_and_join()` before any vault teardown (window close mid-upgrade).
+   (a gated poll is what wedged the modal); `shutdown()` calls
+   `MigrationJob::abort_and_join()` before any vault teardown (window close mid-upgrade).
+- **Phase 87 (post-migration refresh + exclusivity):** the coordinator mutates the
+  index tree while owning the vault exclusively — `Vault::compact()` rebuilds into a
+  copy and publishes with `root_ = std::move(new_root)`, so EVERY cached
+  `const IndexNode*` (GalleryGrid `children_`) dangles the instant the outcome is
+  collected. `App::update` therefore calls the pure `app::apply_migration_refresh(
+  has_active, screen)` (new `app/migration_refresh.h` — `noexcept`,
+  vault-dereference-free so it is unit-testable with a Screen double;
+  `tests/app/test_migration_refresh.cpp`) right after `take_outcome()`:
+  `screen_->on_vault_changed()` + `mark_dirty()` — the same refresh the import drain
+  below performs. Without it the grid's next render reads a freed node's name (the
+  Phase 87 core: SIGSEGV in `byte_at()` on a torn `std::string`, 2026-08-25
+  2nd-vault dump). `App` now also honours the `migration_job.h` exclusivity contract
+  it previously missed: while `job->active()` the owning screen's `update(dt)` is
+  paused and its `render(r)` skipped (App draws the migration modal directly), so the
+  screen never reads the tree mid-compact. No `.osv`/`INDEX_VERSION` change.
 - `keep_unlocked_` is a plain App bool, flipped by GalleryGrid's `U` via
   `NavKind::ToggleKeepUnlocked` (`App::apply_nav` flips it in place — no screen swap); reset
   to false in `promote_pending()` + the LockActive nav case, so re-unlocking always starts
