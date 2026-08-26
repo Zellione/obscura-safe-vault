@@ -298,37 +298,32 @@ OwnerOnlyCreate create_owner_only_file(const std::filesystem::path& path, std::F
         ::InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION) &&
         ::SetSecurityDescriptorDacl(&descriptor, TRUE, owner_only.acl, FALSE);
     SECURITY_ATTRIBUTES attrs{sizeof(attrs), descriptor_ok ? &descriptor : nullptr, FALSE};
-    // Share mode MUST allow read + write + DELETE: Vault::create keeps this
-    // handle (which requests DELETE access) open while it re-opens the same
-    // file for read_fp_ and thumb_fp_. Windows share compatibility is checked
-    // in BOTH directions: the later handle's share mode must also cover THIS
-    // handle's desired access (READ|WRITE|DELETE), so FILE_SHARE_DELETE is
-    // required or the later open fails with ERROR_SHARING_VIOLATION (0x20). A
-    // plain fopen() never requests DELETE access, which is why pre-Phase-88
-    // code (fopen "w+b") coexisted with fopen "rb" handles.
-    HANDLE handle =
-        ::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE,
-                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &attrs, CREATE_NEW,
-                      FILE_ATTRIBUTE_NORMAL, nullptr);
+    // Desired access deliberately omits DELETE. Windows share compatibility is
+    // checked in BOTH directions: this handle stays open across Vault::lock()
+    // and must be re-openable by plain fopen()/_wfopen() (Vault::open, the
+    // tamper tests), which grant only FILE_SHARE_READ|WRITE and never
+    // FILE_SHARE_DELETE. If this handle requested DELETE access, every such
+    // reopen would fail with ERROR_SHARING_VIOLATION (0x20) — the same reason
+    // the pre-Phase-88 fopen("w+b") handle coexisted with fopen("rb") ones.
+    // Deletion is still possible on the ERROR paths via DeleteFileW, which
+    // needs only the owner-only DACL on the file, not DELETE on this handle.
+    HANDLE handle = ::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE,
+                                  FILE_SHARE_READ | FILE_SHARE_WRITE, &attrs, CREATE_NEW,
+                                  FILE_ATTRIBUTE_NORMAL, nullptr);
     if (handle == INVALID_HANDLE_VALUE) {
         return ::GetLastError() == ERROR_FILE_EXISTS ? OwnerOnlyCreate::AlreadyExists
                                                      : OwnerOnlyCreate::Error;
     }
     const int fd = ::_open_osfhandle(reinterpret_cast<intptr_t>(handle), _O_RDWR | _O_BINARY);
     if (fd == -1) {
-        FILE_DISPOSITION_INFO disposition{TRUE};
-        (void)::SetFileInformationByHandle(handle, FileDispositionInfo, &disposition,
-                                           sizeof(disposition));
         ::CloseHandle(handle);
+        (void)::DeleteFileW(path.c_str());  // clean up the just-created file (best-effort)
         return OwnerOnlyCreate::Error;
     }
     out = ::_fdopen(fd, "r+b");
     if (!out) {
-        FILE_DISPOSITION_INFO disposition{TRUE};
-        (void)::SetFileInformationByHandle(
-            reinterpret_cast<HANDLE>(::_get_osfhandle(fd)), FileDispositionInfo, &disposition,
-            sizeof(disposition));
         ::_close(fd);
+        (void)::DeleteFileW(path.c_str());  // clean up the just-created file (best-effort)
         return OwnerOnlyCreate::Error;
     }
     return OwnerOnlyCreate::Ok;
@@ -374,29 +369,6 @@ void ensure_owner_only_file(const std::filesystem::path& path)
             log_error("vault", "could not enforce owner-only permissions on the vault file");
         }
     }
-}
-
-std::FILE* open_existing_read(const std::filesystem::path& path)
-{
-#if defined(_WIN32)
-    // Same chain as create_owner_only_file so the CRT deny-table (which would
-    // reject this open because fp_ was opened via _open_osfhandle) is bypassed.
-    // OPEN_EXISTING: read-back must fail (not create) if the file is absent.
-    // FILE_SHARE_DELETE is required: the already-open fp_ handle requests
-    // DELETE access, so its desired access must be a subset of THIS share mode.
-    HANDLE handle = ::CreateFileW(path.c_str(), GENERIC_READ,
-                                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                  nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (handle == INVALID_HANDLE_VALUE) return nullptr;
-    const int fd = ::_open_osfhandle(reinterpret_cast<intptr_t>(handle), _O_RDONLY | _O_BINARY);
-    if (fd == -1) {
-        ::CloseHandle(handle);
-        return nullptr;
-    }
-    return ::_fdopen(fd, "rb");
-#else
-    return fopen_path(path, "rb");
-#endif
 }
 
 } // namespace platform

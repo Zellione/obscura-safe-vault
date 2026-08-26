@@ -602,7 +602,7 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     }
 
     // Open read_fp_ after the initial commit so it sees the complete file.
-    out.read_fp_ = platform::open_existing_read(platform::utf8_to_path(path));
+    out.read_fp_ = platform::fopen_path(platform::utf8_to_path(path), "rb");
     if (!out.read_fp_) {
         out.reset();
         return VaultResult::IoError;
@@ -612,7 +612,7 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     std::setvbuf(out.read_fp_, nullptr, _IONBF, 0);
 
     // Open thumb_fp_ the same way for thread-safe background thumbnail reads.
-    out.thumb_fp_ = platform::open_existing_read(platform::utf8_to_path(path));
+    out.thumb_fp_ = platform::fopen_path(platform::utf8_to_path(path), "rb");
     if (!out.thumb_fp_) {
         out.reset();
         return VaultResult::IoError;

@@ -72,3 +72,19 @@ But the vault file itself was not treated that way:
   not lock a user out of their vault; the warn-once log is the signal.
 - Non-POSIX filesystems (FAT/exFAT) have no real permission bits; `chmod`
   there is a no-op by OS design — nothing to harden in that case.
+
+## Windows sharing-mode lesson (found during CI bring-up)
+
+`create_owner_only_file`'s first version requested `DELETE` access on the
+long-lived vault write handle (`fp_`). Windows share compatibility is checked
+in **both** directions: a later handle must grant sharing for every access bit
+the earlier handle already holds. Since `fp_` stays open past `Vault::lock()`
+(only `reset()` closes it), the next `Vault::open` / raw `fopen` — which grant
+only `FILE_SHARE_READ|WRITE`, never `FILE_SHARE_DELETE` — failed with
+`ERROR_SHARING_VIOLATION`. Pre-Phase-88 the handle came from `fopen("w+b")`,
+which requests no `DELETE` access, so reopens coexisted. The fix: the create
+handle requests only `GENERIC_READ|GENERIC_WRITE` (the owner-only guarantee
+lives in the DACL, not the desired access); the error-path cleanup deletes via
+`DeleteFileW` instead of a `DELETE`-access delete-on-close handle. `open_new_keyfile`
+keeps its `DELETE` access because that handle is never open when the file is
+reopened.
