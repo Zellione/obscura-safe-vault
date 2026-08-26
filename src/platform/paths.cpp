@@ -347,7 +347,9 @@ void ensure_owner_only_file(const std::filesystem::path& path)
         // SetNamedSecurityInfoW returns an ERROR_* code directly (not via
         // GetLastError). Failing needs WRITE_DAC — a vault on a share owned by
         // somebody else can legitimately not be tightened.
-        ok = ::SetNamedSecurityInfoW(path.c_str(), SE_FILE_OBJECT,
+        // SetNamedSecurityInfoW takes LPWSTR (non-const) for a read-only name;
+        // const_cast is the standard idiom for this Windows API wart.
+        ok = ::SetNamedSecurityInfoW(const_cast<wchar_t*>(path.c_str()), SE_FILE_OBJECT,
                                      DACL_SECURITY_INFORMATION, owner_only.acl, nullptr,
                                      nullptr, nullptr) == ERROR_SUCCESS;
     }
