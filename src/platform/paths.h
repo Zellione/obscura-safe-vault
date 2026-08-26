@@ -93,4 +93,9 @@ enum class OwnerOnlyCreate {
 // Never fails the caller — logs a single generic diagnostic on failure.
 void ensure_owner_only_file(const std::filesystem::path& path);
 
+// Diagnostic: describe the last failed open() on this platform (errno, plus
+// the Win32 error code on Windows). Intended to be read immediately after a
+// failed fopen() — before any other system call overwrites the error state.
+[[nodiscard]] std::string last_open_error_str();
+
 } // namespace platform

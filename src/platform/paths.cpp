@@ -371,4 +371,13 @@ void ensure_owner_only_file(const std::filesystem::path& path)
     }
 }
 
+std::string last_open_error_str()
+{
+    std::string s = "errno=" + std::to_string(errno);
+#if defined(_WIN32)
+    s += " winerror=" + std::to_string(::GetLastError());
+#endif
+    return s;
+}
+
 } // namespace platform
