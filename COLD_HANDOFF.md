@@ -67,7 +67,7 @@ conventions live in `AGENTS.md`; this file is the *effort-specific* state.
 | 3 | Root-cause + fix the UAF crash | ✅ DONE → **app Phase 87**, PR #203 | Post-migration refresh + exclusivity honoured; CI + SonarCloud green |
 | 4 | Quantify mlock / RAM exposure | ✅ FINDINGS | Plaintext is an un-locked, swappable buffer; today **RAM-resident (zram), not on the NVMe** |
 | 5 | Argon2id benchmark → cold-attack estimate | ✅ DONE → PR #205 | `tools/kdf_bench`: 100 ms/guess (≈10/s) on 8845HS; GPU est. 10^4–10^6/s; ≥8 chars infeasible |
-| 6 | Remaining hardening (code + system config) | 🔄 IN PROGRESS | 6a ✅ (Phase 88, PR #206 carrier) · 6b pixels→SecureBytes · 6c budget UI · 6d system docs — **one PR at the end** |
+| 6 | Remaining hardening (code + system config) | ✅ CODE DONE | 6a vault perms ✅ · 6b pixels→SecureBytes ✅ · 6c budget in F1 ✅ · 6d system/core-dump docs ✅ — all committed, **one PR at the end** |
 
 Full narrative lives in `docs/break-in-effort.md`.
 

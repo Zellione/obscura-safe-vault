@@ -1,7 +1,7 @@
 # Vault break-in & hardening effort
 
-**Status:** Phases 1, 3, 4, 5 done (findings recorded); Phase 3 fix shipped (app **Phase 87**, PR #203); Phase 6 pending.
-**Opened:** 2026-08-25
+**Status:** ALL PHASES DONE. Phase 3 fix shipped (app **Phase 87**, PR #203); Phase 5 measured (`tools/kdf_bench/`); Phase 6 hardening shipped as app **Phases 88–90** (one PR).
+**Opened:** 2026-08-25 · **Closed:** 2026-08-26
 
 This is a deliberate **break-in exercise**: get into a real `.osv` vault through
 *exploits* (not brute force), surface the genuine attack vectors, then harden
@@ -32,7 +32,7 @@ threat model in AGENTS.md — this extends it to the key material itself.)
 | 3 | Root-cause + fix the UAF crash | ✅ DONE → **app Phase 87**, PR #203 | Post-migration refresh + exclusivity honoured; CI + SonarCloud green |
 | 4 | Quantify mlock / RAM exposure | ✅ FINDINGS | Plaintext is an un-locked, swappable buffer; today it is **RAM-resident (zram), not on the NVMe** |
 | 5 | Argon2id benchmark → cold-attack estimate | ✅ DONE | Measured 100 ms/guess (≈10/s) on Ryzen 7 8845HS; ≥8 random chars or 5 diceware words infeasible on a top GPU; unknown keyfile → effectively infinite space |
-| 6 | Remaining hardening (code PRs + system config) | ⬜ PENDING | To be scoped / de-duplicated against AGENTS.md hardening notes |
+| 6 | Remaining hardening (code PRs + system config) | ✅ DONE → **app Phases 88–90** | 6a vault perms 0600 + no silent truncate · 6b pixels→SecureBytes · 6c budget state in F1 · 6d system-config + core-dump docs |
 
 ## Phase 1 — Break-in via the core dump (DONE)
 
@@ -191,24 +191,42 @@ words is the infeasibility line** on commodity hardware.)
    decryptable; with the key **not** leaked, these KDF parameters make
    password-only cracking infeasible at reasonable password lengths.
 
-## Phase 6 — Remaining hardening (PENDING)
+## Phase 6 — Remaining hardening (DONE → app Phases 88–90)
 
-Candidate items to be **scoped and de-duplicated against the existing AGENTS.md
-"Hardening notes"** before opening PRs (some may already be covered):
+Scope **confirmed by the owner** and de-duplicated against the AGENTS.md
+"Hardening notes". Shipped as three app phases (one PR):
 
-- **Vault file perms** — ensure new/existing `.osv` files are `0600`.
-- **Core-dump exposure** — the crashing build was Debug (dumps on by design);
-  confirm the shipped (Release) suppression is sufficient and whether a Debug
-  build should ever be the one holding a live real vault.
-- **Decoded pixel buffer → `SecureBytes`** (Phase 4) — the plaintext image is a
-  plain `std::vector` (`image.h:26`); make it mlock'd so the degrade-to-swappable
-  path is explicit + `MADV_DONTDUMP`'d, consistent with the rest of the code.
-- **`SecureBytes` for index buffers** — keep the index tree in mlock'd memory.
-- **Clipboard gate** — keep copied paths/names from leaking vault-internal names.
-- **mlock budget check** — the app already warns when the budget < 256 MiB
-  (`app.cpp:93`); decide whether to also surface it as a first-class status
-  (e.g. in the `F1` help) so the "may be swappable" state is visible in-UI.
-- **System config** — `RLIMIT_MEMLOCK` budget, zram/hibernate policy.
+- **6a — Vault file perms → app Phase 88.** New vaults are now created
+  atomically and **owner-only** (`0600` / current-user DACL — the same
+  guarantee a keyfile already got), and an existing file at the target path is
+  **refused** (`AlreadyExists`) instead of being silently truncated by the old
+  `"w+b"`. Pre-existing vaults are tightened to owner-only (best-effort,
+  warn-once) on `Vault::open`, so they self-heal. *The more secret file no
+  longer had looser permissions than the less secret one, and the data-loss
+  clobber path is gone.*
+- **6b — Decoded pixels → `SecureBytes` → app Phase 89.** Closes the Phase 4
+  finding directly: `ImageData::pixels` is now mlock'd (best-effort) +
+  `MADV_DONTDUMP`'d + `crypto_wipe`'d on destruction, and the degrade-to-
+  swappable path is explicit (`is_locked()`) instead of a plain unmarked
+  vector. `SecureBytes` gained `operator[]` / `assign(span)` / `fill(n,v)`.
+- **6c — Secure-memory state in-UI → app Phase 90.** The F1 help now shows a
+  live `Secure memory: <budget> page-lock budget …` line — active, or "… some
+  decoded data is swappable (mlock exhausted)" — backed by
+  `platform::lockable_budget_bytes()` + `crypto::mlock_failure_seen()`. Both
+  wording paths verified in the running app (default budget, and `ulimit -l 0`).
+- **6d — System config + core-dump docs → app Phase 90.** README now documents
+  the 256 MiB startup grow, the F1 status line, the swap-vs-RAM / zram /
+  hibernate / `hiberfil.sys` caveat (a host-policy decision, not app-enforceable),
+  and — the exact Phase 1 vector — that Linux **Debug** builds keep core dumps
+  by design, so a Debug crash's core is as sensitive as the vault
+  (`coredumpctl list` / `sudo rm …`); prefer Release for a live vault.
+
+**Deferred (owner):** `SecureBytes` for the index tree; a clipboard gate for
+copied paths/names. Both are smaller than 6a–6d and can follow as their own
+phases.
+
+Test totals across the phase: 2144 / 0 failed; ASAN clean; TSan clean (only
+the known local `radeonsi_drv_video.so` driver race, absent on CI runners).
 
 ## Evidence (preserved in `/tmp/osvbreakin/`)
 
