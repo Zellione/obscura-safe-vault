@@ -108,3 +108,15 @@ TEST(secure_bytes_assign_replaces_previous_contents)
     CHECK_EQ(buf.size(), static_cast<size_t>(1));
     CHECK_EQ(buf[0], 9);
 }
+
+// Phase 6c: the UI needs to know whether ANY mlock has failed this process
+// (decoded data then sits in swappable memory). Order-independent: whatever
+// earlier tests did to the process-wide flag, seen() becomes true after the
+// first warn-gate call and stays true, while the gate itself stays exhausted.
+TEST(mlock_failure_seen_tracks_the_warn_gate)
+{
+    (void)crypto::should_warn_mlock_once();
+    CHECK_TRUE(crypto::mlock_failure_seen());
+    CHECK_FALSE(crypto::should_warn_mlock_once());
+    CHECK_TRUE(crypto::mlock_failure_seen());
+}

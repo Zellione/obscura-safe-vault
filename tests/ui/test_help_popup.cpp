@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <string>
 #include <SDL3/SDL.h>
 
 #include "gfx/renderer.h"
@@ -12,6 +14,38 @@
 using ui::HelpEntry;
 using ui::HelpGroup;
 using ui::HelpPopupState;
+
+// Phase 6c: the F1 Global group carries a one-line report of the page-lock
+// (mlock) state — pure function of (budget, degraded) so it's testable
+// without a platform.
+TEST(secure_mem_status_line_reports_active_budget)
+{
+    const std::string line = ui::secure_mem_status_line(size_t{256} << 20, false);
+    CHECK(line.find("256 MiB") != std::string::npos);
+    CHECK(line.find("swappable") == std::string::npos);
+}
+
+TEST(secure_mem_status_line_reports_degraded_budget)
+{
+    const std::string line = ui::secure_mem_status_line(size_t{8} << 20, true);
+    CHECK(line.find("8 MiB") != std::string::npos);
+    CHECK(line.find("swappable") != std::string::npos);
+}
+
+TEST(secure_mem_status_line_rounds_up_sub_mib_budgets)
+{
+    // 1 KiB is non-zero but < 1 MiB: it must read "1 MiB", not "0 MiB".
+    const std::string line = ui::secure_mem_status_line(1024, false);
+    CHECK(line.find("1 MiB") != std::string::npos);
+    CHECK(line.find("0 MiB") == std::string::npos);
+}
+
+TEST(secure_mem_status_line_reports_unlimited_budget)
+{
+    const std::string line =
+        ui::secure_mem_status_line(std::numeric_limits<size_t>::max(), false);
+    CHECK(line.find("unlimited") != std::string::npos);
+}
 
 TEST(help_popup_open_close_toggle)
 {

@@ -31,17 +31,27 @@
 
 namespace crypto {
 
+// Process-global record that at least one mlock/VirtualLock has failed this
+// process. should_warn_mlock_once() flips it (returning true exactly once, to
+// log the warning); mlock_failure_seen() reports it, so the UI can surface
+// that some decoded data is sitting in swappable memory (Phase 6c).
+inline std::atomic_bool mlock_failed_ = false;
+
 // Thread-safe helper: should we warn about the first mlock failure?
 // Returns true exactly once per process; all subsequent calls return false.
 // Used by both SecureBuffer and SecureBytes to log a prominent warning on the
 // first mlock failure, then stay silent on subsequent failures.
 inline bool should_warn_mlock_once() noexcept
 {
-    // Use a static atomic_flag (initialized to false by default).
-    // The test_and_set() returns the old value; the first call gets false and we
-    // set it to true. Subsequent calls get true and do nothing.
-    static std::atomic_flag warned;
-    return !warned.test_and_set();
+    bool expected = false;
+    return mlock_failed_.compare_exchange_strong(expected, true);
+}
+
+// True once any mlock/VirtualLock has failed (i.e. some secret buffer degraded
+// to swappable memory). Monotonic: never goes back to false in a process.
+[[nodiscard]] inline bool mlock_failure_seen() noexcept
+{
+    return mlock_failed_.load();
 }
 
 // Platform-appropriate remedy advice for the once-per-process mlock warning.

@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -35,6 +36,14 @@ void toggle_help(HelpPopupState& s);
 // per entry, plus one blank spacer line before every group after the first.
 // Used to size scroll clamping without touching SDL/FontAtlas.
 [[nodiscard]] int help_line_count(const std::vector<HelpGroup>& groups);
+
+// Phase 6c: one-line report of the page-lock (mlock) state, shown in the F1
+// Global group so a user can see how much memory is actually held out of swap.
+// Pure in (budget_bytes, degraded) — the caller queries the platform and the
+// process-wide mlock-failure flag and passes the results in.
+//   budget_bytes  — platform::lockable_budget_bytes() (SIZE_MAX = unlimited)
+//   degraded      — crypto::mlock_failure_seen() (some buffer failed to lock)
+[[nodiscard]] std::string secure_mem_status_line(size_t budget_bytes, bool degraded);
 
 // Up/Down/PageUp/PageDown scroll; Esc/Q close. Returns true if the popup was
 // open (i.e. the key was consumed) — a no-op returning false while closed.

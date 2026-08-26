@@ -60,4 +60,15 @@ void redirect_diagnostics_to_log_file() noexcept;
 // secure_mem.h keeps its warn-once + degrade-to-swappable behaviour.
 bool grow_secure_mem_budget(size_t bytes) noexcept;
 
+// The page-lockable budget this process currently has, in bytes.
+//
+// Linux: the soft RLIMIT_MEMLOCK (the cap on mlock/VirtualLock). Reported as
+// SIZE_MAX when the kernel says it is unlimited (RLIM_INFINITY).
+// Windows: the process minimum working-set size — VirtualLock's per-process
+// cap (see grow_secure_mem_budget).
+//
+// Returns 0 if the platform cannot report it. The UI uses this to show the
+// user how much memory can actually be held out of swap (Phase 6c).
+[[nodiscard]] size_t lockable_budget_bytes() noexcept;
+
 } // namespace platform

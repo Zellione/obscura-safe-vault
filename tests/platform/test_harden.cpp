@@ -127,6 +127,14 @@ TEST(grow_secure_mem_budget_small_request_succeeds)
     CHECK_TRUE(platform::grow_secure_mem_budget(1u << 20));
 }
 
+// Phase 6c: the UI shows the page-lock budget the user actually has; it must
+// be a positive, reportable value on every supported platform (this box's
+// RLIMIT_MEMLOCK default is 8 MiB; CI's is similar).
+TEST(lockable_budget_bytes_is_positive)
+{
+    CHECK(platform::lockable_budget_bytes() > 0);
+}
+
 #if defined(__linux__)
 // On Linux the call raises the soft RLIMIT_MEMLOCK to the hard limit (the
 // most an unprivileged process may lock without configuration changes).
