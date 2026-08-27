@@ -230,19 +230,27 @@ TEST(fuzz_index_deserialize_survives_3000_malformed_blobs)
     settings.default_sort    = vault::SortKey::DateDesc;
     settings.tiles_show_tags = false;
     settings.categories = {
-        {.name = crypto::SecureString("artist"), .swatch = 0, .fields = {crypto::SecureString("country"), crypto::SecureString("style")}},
+        {.name = crypto::SecureString("artist"),
+         .swatch = 0,
+         .fields = {crypto::SecureString("country"), crypto::SecureString("style")}},
         {.name = crypto::SecureString(std::string(vault::INDEX_MAX_CATEGORY_BYTES, 'x')),
-         .swatch = vault::TAG_SWATCH_COUNT - 1, .fields = {}},
-        {.name = crypto::SecureString("parody"), .swatch = 7,
+         .swatch = vault::TAG_SWATCH_COUNT - 1,
+         .fields = {}},
+        {.name = crypto::SecureString("parody"),
+         .swatch = 7,
          .fields = {crypto::SecureString(std::string(vault::INDEX_MAX_FIELD_BYTES, 'f'))}},
     };
     settings.tag_descriptions = {
         {.tag = crypto::SecureString("beach"), .text = crypto::SecureString("Coastal shots")},
-        {.tag = crypto::SecureString("archive"), .text = crypto::SecureString(std::string(vault::INDEX_MAX_TAG_DESC_BYTES, 'y'))},
+        {.tag = crypto::SecureString("archive"),
+         .text = crypto::SecureString(std::string(vault::INDEX_MAX_TAG_DESC_BYTES, 'y'))},
     };
     settings.tag_field_values = {
-        {.tag = crypto::SecureString("artist:bob"), .field = crypto::SecureString("country"), .value = crypto::SecureString("Japan")},
-        {.tag = crypto::SecureString("artist:bob"), .field = crypto::SecureString("style"),
+        {.tag = crypto::SecureString("artist:bob"),
+         .field = crypto::SecureString("country"),
+         .value = crypto::SecureString("Japan")},
+        {.tag = crypto::SecureString("artist:bob"),
+         .field = crypto::SecureString("style"),
          .value = crypto::SecureString(std::string(vault::INDEX_MAX_FIELD_VALUE_BYTES, 'v'))},
     };
     std::vector<uint8_t> valid;

@@ -18,12 +18,19 @@ IndexNode make_root() { return IndexNode::gallery(""); }
 TEST(tag_template_round_trips_through_serialisation)
 {
     VaultSettings s;
-    s.categories = {{.name = crypto::SecureString("artist"), .swatch = 3, .fields = {crypto::SecureString("country"), crypto::SecureString("style")}},
+    s.categories = {{.name = crypto::SecureString("artist"),
+                     .swatch = 3,
+                     .fields = {crypto::SecureString("country"), crypto::SecureString("style")}},
                     {.name = crypto::SecureString("parody"), .swatch = 7, .fields = {}}};
-    s.tag_field_values = {
-        {.tag = crypto::SecureString("artist:bob"), .field = crypto::SecureString("country"), .value = crypto::SecureString("Japan")},
-        {.tag = crypto::SecureString("artist:bob"), .field = crypto::SecureString("style"), .value = crypto::SecureString("digital")},
-        {.tag = crypto::SecureString("artist:ann"), .field = crypto::SecureString("country"), .value = crypto::SecureString("France")}};
+    s.tag_field_values = {{.tag = crypto::SecureString("artist:bob"),
+                           .field = crypto::SecureString("country"),
+                           .value = crypto::SecureString("Japan")},
+                          {.tag = crypto::SecureString("artist:bob"),
+                           .field = crypto::SecureString("style"),
+                           .value = crypto::SecureString("digital")},
+                          {.tag = crypto::SecureString("artist:ann"),
+                           .field = crypto::SecureString("country"),
+                           .value = crypto::SecureString("France")}};
 
     std::vector<uint8_t> blob;
     serialize_index(make_root(), {}, s, blob);
@@ -65,9 +72,10 @@ TEST(tag_template_writer_clamps_reader_rejects)
     for (int i = 0; i < vault::INDEX_MAX_TEMPLATE_FIELDS + 4; ++i)
         c.fields.emplace_back("f" + std::to_string(i));
     s.categories = {c};
-    s.tag_field_values = {{.tag = crypto::SecureString("artist:x"),
-                           .field = crypto::SecureString(std::string(vault::INDEX_MAX_FIELD_BYTES + 10, 'a')),
-                           .value = crypto::SecureString(std::string(vault::INDEX_MAX_FIELD_VALUE_BYTES + 10, 'b'))}};
+    s.tag_field_values = {
+        {.tag = crypto::SecureString("artist:x"),
+         .field = crypto::SecureString(std::string(vault::INDEX_MAX_FIELD_BYTES + 10, 'a')),
+         .value = crypto::SecureString(std::string(vault::INDEX_MAX_FIELD_VALUE_BYTES + 10, 'b'))}};
 
     std::vector<uint8_t> blob;
     serialize_index(make_root(), {}, s, blob);
@@ -91,8 +99,12 @@ TEST(tag_template_duplicate_pairs_dropped_ci)
     // Duplicate (tag, field) pairs (ci) keep the first occurrence, like
     // categories and descriptions do.
     VaultSettings s;
-    s.tag_field_values = {{.tag = crypto::SecureString("artist:bob"), .field = crypto::SecureString("Country"), .value = crypto::SecureString("Japan")},
-                          {.tag = crypto::SecureString("ARTIST:BOB"), .field = crypto::SecureString("country"), .value = crypto::SecureString("France")}};
+    s.tag_field_values = {{.tag = crypto::SecureString("artist:bob"),
+                           .field = crypto::SecureString("Country"),
+                           .value = crypto::SecureString("Japan")},
+                          {.tag = crypto::SecureString("ARTIST:BOB"),
+                           .field = crypto::SecureString("country"),
+                           .value = crypto::SecureString("France")}};
 
     std::vector<uint8_t> blob;
     serialize_index(make_root(), {}, s, blob);
@@ -158,8 +170,12 @@ TEST(tag_template_helpers_crud)
 TEST(tag_template_rename_rekeys_values)
 {
     VaultSettings s;
-    s.categories = {{.name = crypto::SecureString("artist"), .swatch = 0, .fields = {crypto::SecureString("country")}},
-                    {.name = crypto::SecureString("studio"), .swatch = 1, .fields = {crypto::SecureString("country")}}};
+    s.categories = {{.name = crypto::SecureString("artist"),
+                     .swatch = 0,
+                     .fields = {crypto::SecureString("country")}},
+                    {.name = crypto::SecureString("studio"),
+                     .swatch = 1,
+                     .fields = {crypto::SecureString("country")}}};
     vault::set_tag_field_value(s, "artist:bob", "country", "Japan");
     vault::set_tag_field_value(s, "studio:acme", "country", "France");
 
@@ -179,7 +195,9 @@ TEST(tag_template_rename_rekeys_values)
 TEST(tag_template_remove_field_erases_values)
 {
     VaultSettings s;
-    s.categories = {{.name = crypto::SecureString("artist"), .swatch = 0, .fields = {crypto::SecureString("country"), crypto::SecureString("style")}}};
+    s.categories = {{.name = crypto::SecureString("artist"),
+                     .swatch = 0,
+                     .fields = {crypto::SecureString("country"), crypto::SecureString("style")}}};
     vault::set_tag_field_value(s, "artist:bob", "country", "Japan");
     vault::set_tag_field_value(s, "artist:bob", "style", "digital");
 

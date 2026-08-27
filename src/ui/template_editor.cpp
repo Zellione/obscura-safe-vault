@@ -214,7 +214,8 @@ bool TemplateEditorPanel::handle_event_name_field(const SDL_Event& e)
             const auto field_tmpl = vault::category_template(s, cat_name_);
             std::vector<std::string> fields;
             fields.reserve(field_tmpl.size());
-            for (const auto& f : field_tmpl) fields.emplace_back(f.view());
+            for (const auto& f : field_tmpl)
+                fields.emplace_back(f.view());
 
             bool success = false;
             if (is_add_mode_) {
@@ -354,10 +355,9 @@ void TemplateEditorPanel::render_pick_category(gfx::Renderer& r, gfx::FontAtlas&
             r.draw_round_rect({l.box.x + 8, y, l.box.w - 16, row_h},
                             RADIUS / 2, ACCENT);
         }
-        const auto label = std::format("{}  ({} field{})",
-                                      cats[i].name.view(),
-                                      cats[i].fields.size(),
-                                      cats[i].fields.size() == 1 ? "" : "s");
+        const auto label =
+            std::format("{}  ({} field{})", cats[i].name.view(), cats[i].fields.size(),
+                        cats[i].fields.size() == 1 ? "" : "s");
         r.draw_text(font, l.box.x + PROMPT_PAD + 12, y + 2, label,
                    is_sel ? SURFACE : TEXT);
         y += row_h;
@@ -404,7 +404,7 @@ void TemplateEditorPanel::render_edit_fields(gfx::Renderer& r, gfx::FontAtlas& f
                             RADIUS / 2, ACCENT);
         }
         r.draw_text(font, l.box.x + PROMPT_PAD + 12, y + 2, tmpl[i].view(),
-                   is_sel ? SURFACE : TEXT);
+                    is_sel ? SURFACE : TEXT);
         y += row_h;
     }
 

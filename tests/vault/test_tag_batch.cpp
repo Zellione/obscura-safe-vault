@@ -81,8 +81,8 @@ TEST(add_tag_batch_tags_everything_in_one_commit)
     CHECK(syncs <= 3);   // ONE commit (the per-item path paid one commit each)
 
     for (const auto* c : v.list(""))
-        CHECK(std::ranges::count_if(c->tags,
-            [](const crypto::SecureString& t) { return t == "artist:bob"; }) == 1);
+        CHECK(std::ranges::count_if(
+                  c->tags, [](const crypto::SecureString& t) { return t == "artist:bob"; }) == 1);
 
     // Idempotent second batch: nothing changes, NO commit.
     vault::fileutil::sync_call_count().store(0);
@@ -150,6 +150,6 @@ TEST(tag_batch_through_commit_lane_is_async_and_durable)
     REQUIRE(Vault::open(tv.str(), v2) == VaultResult::Ok);
     REQUIRE(v2.unlock(bytes("pw"), {}) == VaultResult::Ok);
     for (const auto* c : v2.list(""))
-        CHECK(std::ranges::count_if(c->tags,
-            [](const crypto::SecureString& t) { return t == "artist:bob"; }) == 1);
+        CHECK(std::ranges::count_if(
+                  c->tags, [](const crypto::SecureString& t) { return t == "artist:bob"; }) == 1);
 }

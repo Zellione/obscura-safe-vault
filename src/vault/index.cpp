@@ -333,8 +333,7 @@ void write_categories_block(ByteWriter& w, const std::vector<vault::TagCategory>
                                       ? INDEX_MAX_FIELD_BYTES
                                       : static_cast<uint16_t>(field.size());
             w.u16(flen);
-            w.bytes(std::span<const uint8_t>(
-                reinterpret_cast<const uint8_t*>(field.data()), flen));
+            w.bytes(std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(field.data()), flen));
         }
     }
 }
@@ -426,7 +425,10 @@ bool read_category_fields_v11(ByteReader& r, TagCategory& c)
             if (!r.ok()) return false;
         }
         if (const bool fdupe = std::ranges::any_of(c.fields,
-                [&field](const crypto::SecureString& e) { return category_name_eq(e.view(), field.view()); });
+                                                   [&field](const crypto::SecureString& e) {
+                                                       return category_name_eq(e.view(),
+                                                                               field.view());
+                                                   });
             !fdupe) {
             c.fields.push_back(std::move(field));
         }
@@ -455,9 +457,12 @@ bool read_categories(ByteReader& r, std::vector<TagCategory>& categories, uint8_
         // Phase 73: the field sub-block exists only from v11 on.
         if (version >= 11 && !read_category_fields_v11(r, c)) return false;
 
-        if (const bool dupe = std::ranges::any_of(categories, [&c](const TagCategory& e) {
-                return category_name_eq(e.name.view(), c.name.view());
-            }); !dupe) {
+        if (const bool dupe = std::ranges::any_of(categories,
+                                                  [&c](const TagCategory& e) {
+                                                      return category_name_eq(e.name.view(),
+                                                                              c.name.view());
+                                                  });
+            !dupe) {
             categories.push_back(std::move(c));
         }
     }
@@ -486,8 +491,9 @@ bool read_descriptions(ByteReader& r, std::vector<TagDescription>& descriptions)
             r.bytes(std::span<uint8_t>(d.text.data(), text_len));
             if (!r.ok()) return false;
         }
-        const bool dupe = std::ranges::any_of(descriptions,
-            [&d](const TagDescription& e) { return category_name_eq(e.tag.view(), d.tag.view()); });
+        const bool dupe = std::ranges::any_of(descriptions, [&d](const TagDescription& e) {
+            return category_name_eq(e.tag.view(), d.tag.view());
+        });
         if (!dupe) descriptions.push_back(std::move(d));
     }
     return true;
@@ -516,8 +522,8 @@ bool read_field_values(ByteReader& r, std::vector<TagFieldValue>& values)
         if (!read_str(e.value, INDEX_MAX_FIELD_VALUE_BYTES)) return false;
 
         const bool dupe = std::ranges::any_of(values, [&e](const TagFieldValue& x) {
-            return category_name_eq(x.tag.view(), e.tag.view())
-                && category_name_eq(x.field.view(), e.field.view());
+            return category_name_eq(x.tag.view(), e.tag.view()) &&
+                   category_name_eq(x.field.view(), e.field.view());
         });
         if (!dupe) values.push_back(std::move(e));
     }
@@ -587,8 +593,14 @@ VaultSettings VaultSettings::seeded()
     std::vector<TagCategory> seeded_categories;
     seeded_categories.reserve(8);
     for (const auto [name, swatch] : std::array<std::pair<const char*, uint8_t>, 8>{{
-             {"artist", 0}, {"character", 1}, {"parody", 2},   {"group", 3},
-             {"language", 4}, {"series", 5},  {"male", 6},     {"female", 7},
+             {"artist", 0},
+             {"character", 1},
+             {"parody", 2},
+             {"group", 3},
+             {"language", 4},
+             {"series", 5},
+             {"male", 6},
+             {"female", 7},
          }}) {
         seeded_categories.push_back(
             TagCategory{.name = crypto::SecureString(name), .swatch = swatch, .fields = {}});
@@ -609,7 +621,8 @@ void set_tag_description(VaultSettings& s, std::string_view tag, std::string_vie
     for (auto it = s.tag_descriptions.begin(); it != s.tag_descriptions.end(); ++it) {
         if (!category_name_eq(it->tag.view(), tag)) continue;
         if (text.empty()) s.tag_descriptions.erase(it);
-        else              it->text = text;
+        else
+            it->text = text;
         return;
     }
     if (text.empty()) return;                                   // nothing to remove
@@ -656,9 +669,9 @@ bool set_category_template(VaultSettings& s, std::string_view category,
         for (auto& f : fields) {
             if (f.empty()) continue;
             if (f.size() > INDEX_MAX_FIELD_BYTES) f.resize(INDEX_MAX_FIELD_BYTES);
-            if (const bool dupe = std::ranges::any_of(cleaned,
-                    [&f](const crypto::SecureString& e)
-                        { return category_name_eq(e.view(), f); });
+            if (const bool dupe = std::ranges::any_of(
+                    cleaned,
+                    [&f](const crypto::SecureString& e) { return category_name_eq(e.view(), f); });
                 !dupe) {
                 cleaned.push_back(crypto::SecureString(std::string_view(f)));
             }
@@ -685,7 +698,8 @@ void set_tag_field_value(VaultSettings& s, std::string_view tag,
         if (!category_name_eq(it->tag.view(), tag) || !category_name_eq(it->field.view(), field))
             continue;
         if (value.empty()) s.tag_field_values.erase(it);
-        else               it->value = value;
+        else
+            it->value = value;
         return;
     }
     if (value.empty()) return;                                       // nothing to remove
@@ -703,20 +717,24 @@ bool rename_template_field(VaultSettings& s, std::string_view category,
     if (TagCategory* c = find_category(s, category); !c) {
         return false;
     } else {
-        auto it = std::ranges::find_if(c->fields,
-            [old_field](const crypto::SecureString& f)
-                { return category_name_eq(f.view(), old_field); });
+        auto it = std::ranges::find_if(c->fields, [old_field](const crypto::SecureString& f) {
+            return category_name_eq(f.view(), old_field);
+        });
         if (it == c->fields.end()) return false;
         const auto it_addr = std::to_address(it);
-        if (const bool clash = std::ranges::any_of(c->fields, [&](const crypto::SecureString& f) {
-                return std::to_address(&f) != it_addr && category_name_eq(f.view(), new_field);
-            }); clash) {
+        if (const bool clash = std::ranges::any_of(c->fields,
+                                                   [&](const crypto::SecureString& f) {
+                                                       return std::to_address(&f) != it_addr &&
+                                                              category_name_eq(f.view(), new_field);
+                                                   });
+            clash) {
             return false;
         }
 
         *it = new_field;
         for (auto& e : s.tag_field_values)
-            if (tag_in_category(e.tag.view(), category) && category_name_eq(e.field.view(), old_field))
+            if (tag_in_category(e.tag.view(), category) &&
+                category_name_eq(e.field.view(), old_field))
                 e.field = new_field;
         return true;
     }
@@ -729,14 +747,15 @@ bool remove_template_field(VaultSettings& s, std::string_view category,
         return false;
     } else {
         if (const auto removed = std::erase_if(c->fields,
-                [field](const crypto::SecureString& f)
-                    { return category_name_eq(f.view(), field); });
+                                               [field](const crypto::SecureString& f) {
+                                                   return category_name_eq(f.view(), field);
+                                               });
             removed == 0) {
             return false;
         }
         std::erase_if(s.tag_field_values, [&category, &field](const TagFieldValue& e) {
-            return tag_in_category(e.tag.view(), category)
-                && category_name_eq(e.field.view(), field);
+            return tag_in_category(e.tag.view(), category) &&
+                   category_name_eq(e.field.view(), field);
         });
         return true;
     }

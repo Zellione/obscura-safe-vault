@@ -155,10 +155,10 @@ void SavedSearchPanel::render(gfx::Renderer& r, float x, float max_w, float max_
         if (row_y + LINE < content_top || row_y >= content_bottom) continue;
 
         const bool sel = (i == cur_saved_ && hot);
-        r.draw_text(font_, x, row_y,
-                    fit_text(font_, std::format("{} {}", sel ? ">" : " ", saved_[i].name.view()),
-                             max_w),
-                    sel ? TEXT : TEXT_DIM);
+        r.draw_text(
+            font_, x, row_y,
+            fit_text(font_, std::format("{} {}", sel ? ">" : " ", saved_[i].name.view()), max_w),
+            sel ? TEXT : TEXT_DIM);
     }
 
     // Empty list message (if scrolled to top).

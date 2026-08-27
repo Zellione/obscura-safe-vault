@@ -250,7 +250,8 @@ bool settings_rename_category(SettingsState& state, int row, std::string name)
     }
 
     // Reject if renaming to itself (case-insensitive comparison)
-    if (const auto& current_name = state.draft.categories[row].name; tag_ci_equal(current_name.view(), name)) {
+    if (const auto& current_name = state.draft.categories[row].name;
+        tag_ci_equal(current_name.view(), name)) {
         return false;
     }
 

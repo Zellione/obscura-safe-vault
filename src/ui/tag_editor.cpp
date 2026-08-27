@@ -130,7 +130,8 @@ void TagEditor::add_chosen_tag()
         const auto tmpl = vault::category_template(s, sheet_category);
         std::vector<std::string> fields;
         fields.reserve(tmpl.size());
-        for (const auto& f : tmpl) fields.emplace_back(f.view());
+        for (const auto& f : tmpl)
+            fields.emplace_back(f.view());
         fields_form_.open(chosen, sheet_category, std::move(fields),
                           /*with_description=*/false);
     }
@@ -188,7 +189,8 @@ void TagEditor::load_per_node_tags()
             if (child->name == segs.back()) {
                 std::vector<std::string> tags;
                 tags.reserve(child->tags.size());
-                for (const auto& t : child->tags) tags.emplace_back(t.view());
+                for (const auto& t : child->tags)
+                    tags.emplace_back(t.view());
                 per_node_tags.push_back(std::move(tags));
                 ++resolved;
                 break;

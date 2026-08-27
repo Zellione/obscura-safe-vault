@@ -23,9 +23,11 @@ TEST(secure_string_default_is_empty)
 
 TEST(secure_string_constructs_from_string_view)
 {
-    crypto::SecureString s(std::string_view{"caf\xC3\xA9" ".jpg"});
+    crypto::SecureString s(std::string_view{"caf\xC3\xA9"
+                                            ".jpg"});
     CHECK_EQ(s.size(), static_cast<size_t>(9));
-    CHECK_EQ(s.view(), "caf\xC3\xA9" ".jpg"sv);
+    CHECK_EQ(s.view(), "caf\xC3\xA9"
+                       ".jpg"sv);
 }
 
 TEST(secure_string_constructs_from_literal_and_std_string)

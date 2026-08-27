@@ -277,7 +277,8 @@ void TagOverviewScreen::handle_key_down_in_browse_mode(const SDL_KeyboardEvent& 
                 auto tmpl = vault::category_template(s, cat);
                 std::vector<std::string> fields;
                 fields.reserve(tmpl.size());
-                for (const auto& f : tmpl) fields.emplace_back(f.view());
+                for (const auto& f : tmpl)
+                    fields.emplace_back(f.view());
                 fields_form_.open(tag, std::move(cat), std::move(fields),
                                   /*with_description=*/true);
                 fields_form_.skip_next_text_input();  // The 'E' that opened the form arrives as a text event

@@ -204,9 +204,9 @@ void rebuild_detail(GalleryGrid& g)
         return;
     }
     const vault::IndexNode& node = *g.children_[static_cast<size_t>(sel_idx)];
-    const std::string node_path =
-        g.nav_.path().empty() ? std::string(node.name.view())
-                             : g.nav_.path() + "/" + std::string(node.name.view());
+    const std::string node_path = g.nav_.path().empty()
+                                      ? std::string(node.name.view())
+                                      : g.nav_.path() + "/" + std::string(node.name.view());
     const auto from_contents = node.is_gallery() ? contents_tags(g.vault_, node_path) : std::vector<std::string>{};
     g.detail_.content = build_node_details(node, inherited_tags(g.vault_, node_path), from_contents, vault::vault_settings(g.vault_).default_sort);
 }
@@ -420,8 +420,9 @@ void start_transfer_focused(GalleryGrid& g)
     g.transfer_had_exclusive_ = true;
     g.transfer_.set_current_gallery(g.nav_.path());
     if (node->is_gallery()) {
-        const std::string path = g.nav_.path().empty() ? std::string(node->name.view())
-                                                        : g.nav_.path() + "/" + std::string(node->name.view());
+        const std::string path = g.nav_.path().empty()
+                                     ? std::string(node->name.view())
+                                     : g.nav_.path() + "/" + std::string(node->name.view());
         g.transfer_.open_gallery(path);
     } else {
         g.transfer_.open(g.nav_.path(), {std::string(node->name.view())});
@@ -448,7 +449,8 @@ void toggle_favorite_selection(GalleryGrid& g)
         if (idx < 0 || idx >= static_cast<int>(g.children_.size())) continue;
         const vault::IndexNode* n = g.children_[idx];
         nodes.push_back(n);
-        paths.push_back(base.empty() ? std::string(n->name.view()) : base + "/" + std::string(n->name.view()));
+        paths.push_back(base.empty() ? std::string(n->name.view())
+                                     : base + "/" + std::string(n->name.view()));
     }
     if (paths.empty()) {
         g.toggle_favorite_current();
@@ -471,7 +473,8 @@ void start_transfer_selection(GalleryGrid& g)
         if (n->is_media()) {
             media.emplace_back(n->name.view());
         } else if (n->is_gallery()) {
-            galleries.push_back(base.empty() ? std::string(n->name.view()) : base + "/" + std::string(n->name.view()));
+            galleries.push_back(base.empty() ? std::string(n->name.view())
+                                             : base + "/" + std::string(n->name.view()));
         }
     }
     if (media.empty() && galleries.empty()) {
@@ -639,7 +642,7 @@ void GalleryGrid::start_tag_editor(bool import_list)
             if (idx < 0 || idx >= static_cast<int>(children_.size())) continue;
             const auto& name = children_[idx]->name;
             paths.push_back(nav_.path().empty() ? std::string(name.view())
-                                    : nav_.path() + "/" + std::string(name.view()));
+                                                : nav_.path() + "/" + std::string(name.view()));
         }
         if (paths.size() < 2) return;   // stale selection somehow shrank — bail quietly
         tag_editor_.open_multi(std::move(paths));
@@ -651,8 +654,8 @@ void GalleryGrid::start_tag_editor(bool import_list)
 
     const vault::IndexNode* n = children_[s];
     const std::string base = nav_.path();
-    const std::string full_path = base.empty() ? std::string(n->name.view())
-                                           : base + "/" + std::string(n->name.view());
+    const std::string full_path =
+        base.empty() ? std::string(n->name.view()) : base + "/" + std::string(n->name.view());
 
     if (!import_list) { tag_editor_.open(full_path); return; }
 
@@ -672,8 +675,8 @@ void GalleryGrid::toggle_favorite_current()
 
     const vault::IndexNode* n = children_[s];
     const std::string base = nav_.path();
-    const std::string full_path = base.empty() ? std::string(n->name.view())
-                                           : base + "/" + std::string(n->name.view());
+    const std::string full_path =
+        base.empty() ? std::string(n->name.view()) : base + "/" + std::string(n->name.view());
     // The flag flips on the same in-memory node children_[s] points at, so the
     // star badge re-renders next frame; the key event already triggers a repaint.
     // No refresh() — that would needlessly clear the export selection.
@@ -716,7 +719,8 @@ static std::vector<std::string> tag_strings(const std::vector<crypto::SecureStri
 {
     std::vector<std::string> out;
     out.reserve(tags.size());
-    for (const auto& t : tags) out.emplace_back(t.view());
+    for (const auto& t : tags)
+        out.emplace_back(t.view());
     return out;
 }
 
@@ -727,7 +731,8 @@ std::vector<std::string> GalleryGrid::selected_delete_paths() const
     for (int i : sel_.indices()) {
         if (i < 0 || i >= static_cast<int>(children_.size())) continue;
         const auto& name = children_[static_cast<size_t>(i)]->name;
-        paths.push_back(base.empty() ? std::string(name.view()) : base + "/" + std::string(name.view()));
+        paths.push_back(base.empty() ? std::string(name.view())
+                                     : base + "/" + std::string(name.view()));
     }
     return prune_descendant_paths(paths);
 }
@@ -743,14 +748,16 @@ std::vector<std::string> selected_transfer_paths(const GalleryGrid& g)
         for (int i : g.sel_.indices()) {
             if (i < 0 || i >= static_cast<int>(g.children_.size())) continue;
             const auto& name = g.children_[static_cast<size_t>(i)]->name;
-            paths.push_back(base.empty() ? std::string(name.view()) : base + "/" + std::string(name.view()));
+            paths.push_back(base.empty() ? std::string(name.view())
+                                         : base + "/" + std::string(name.view()));
         }
     } else {
         // Fallback: focused tile
         const int s = g.nav_.selected();
         if (s >= 0 && s < static_cast<int>(g.children_.size())) {
             const auto& name = g.children_[static_cast<size_t>(s)]->name;
-            paths.push_back(base.empty() ? std::string(name.view()) : base + "/" + std::string(name.view()));
+            paths.push_back(base.empty() ? std::string(name.view())
+                                         : base + "/" + std::string(name.view()));
         }
     }
 
@@ -1155,7 +1162,8 @@ bool GalleryGrid::handle_delete_confirm_key(const SDL_Event& e)
             item_total = c.images + c.videos + c.galleries + 1;   // +1 for the gallery itself
         }
         queue_.set_exclusive(true);  // Phase 50: lock out new import tasks
-        naming_.file_op.start_delete(vault_, nav_.path(), std::string(n.name.view()), n.is_gallery(), item_total);
+        naming_.file_op.start_delete(vault_, nav_.path(), std::string(n.name.view()),
+                                     n.is_gallery(), item_total);
     }
     naming_.confirm_delete = false;
     mark_dirty();
@@ -2214,8 +2222,8 @@ void GalleryGrid::render_grid_tile(gfx::Renderer& r, int i, float W)
 
     if (chip_h > 0.0f) {
         draw_tag_chips(r, font_, cellr.x + 8,
-                       label_y + ph + label_gap + (chip_h - CHIP_ROW_H) * 0.5f,
-                       cell - 16, tag_strings(n->tags), cats);
+                       label_y + ph + label_gap + (chip_h - CHIP_ROW_H) * 0.5f, cell - 16,
+                       tag_strings(n->tags), cats);
     }
 
     if (counts_h > 0.0f && n->is_gallery()) {

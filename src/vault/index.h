@@ -166,11 +166,12 @@ enum class SortKey : uint8_t {
 struct IndexNode {
     enum class Type : uint8_t { Gallery = 0, Image = 1, Video = 2 };
 
-    Type                               type = Type::Gallery;
-    crypto::SecureString               name;  // Phase 91: mlock'd + wiped
-    std::vector<crypto::SecureString>  tags;  // per-node tags (Phase 12; secure since 91)
-    bool                               favorite = false;  // bookmark flag (Phase 13)
-    SortKey                            sort_key = SortKey::Default;  // children order (Phase 37); meaningful only when is_gallery()
+    Type type = Type::Gallery;
+    crypto::SecureString name;               // Phase 91: mlock'd + wiped
+    std::vector<crypto::SecureString> tags;  // per-node tags (Phase 12; secure since 91)
+    bool favorite = false;                   // bookmark flag (Phase 13)
+    SortKey sort_key =
+        SortKey::Default;  // children order (Phase 37); meaningful only when is_gallery()
 
     // Gallery payload (meaningful when type == Gallery).
     std::vector<IndexNode> children;
@@ -216,8 +217,8 @@ struct IndexNode {
 // ui::AdvancedQuery blob (see src/ui/advanced_search_model.h); the index treats
 // it as bytes so the vault layer stays decoupled from the UI query model.
 struct SavedSearch {
-    crypto::SecureString     name;   // Phase 91: mlock'd + wiped
-    std::vector<uint8_t>     query;  // opaque serialised ui::AdvancedQuery blob
+    crypto::SecureString name;   // Phase 91: mlock'd + wiped
+    std::vector<uint8_t> query;  // opaque serialised ui::AdvancedQuery blob
 };
 
 // One tag-category → colour-swatch mapping (Phase 49). `name` is the tag prefix
@@ -226,7 +227,7 @@ struct SavedSearch {
 // inside the .osv because a vault's categories describe its contents.
 struct TagCategory {
     crypto::SecureString name;  // Phase 91: mlock'd + wiped
-    uint8_t              swatch = 0;
+    uint8_t swatch = 0;
     // Phase 73: the category's optional template — ordered field names, empty =
     // no template. When a brand-new tag of this category is added, the UI
     // prompts for one value per field (skippable).
@@ -240,7 +241,7 @@ struct TagCategory {
 // plain per-node strings with no registry — so storing it here is the only
 // place it cannot go inconsistent between carriers.
 struct TagDescription {
-    crypto::SecureString tag;    // Phase 91: mlock'd + wiped
+    crypto::SecureString tag;  // Phase 91: mlock'd + wiped
     crypto::SecureString text;
 
     friend bool operator==(const TagDescription&, const TagDescription&) = default;
@@ -251,7 +252,7 @@ struct TagDescription {
 // node carrying it. `field` names a field of the tag's category template; the
 // pair (tag, field) is matched case-insensitively, first-seen casing kept.
 struct TagFieldValue {
-    crypto::SecureString tag;    // Phase 91: mlock'd + wiped
+    crypto::SecureString tag;  // Phase 91: mlock'd + wiped
     crypto::SecureString field;
     crypto::SecureString value;
 

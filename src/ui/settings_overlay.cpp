@@ -343,7 +343,8 @@ std::pair<std::string, std::string> pane_row_text(const SettingsState& state, in
         case TagColours:
             if (row_index < static_cast<int>(state.draft.categories.size())) {
                 const auto& cat = state.draft.categories[row_index];
-                return {std::string(cat.name.view()), std::string(gfx::tag_swatch_name(cat.swatch))};
+                return {std::string(cat.name.view()),
+                        std::string(gfx::tag_swatch_name(cat.swatch))};
             }
             break;
         case VaultOps:

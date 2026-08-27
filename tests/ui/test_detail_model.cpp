@@ -216,9 +216,13 @@ TEST(detail_selection_empty)
 TEST(detail_selection_shared_tags_are_the_intersection)
 {
     IndexNode a = make_image();
-    a.tags = {crypto::SecureString("travel"), crypto::SecureString("kyoto"), crypto::SecureString("2024")};;
+    a.tags = {crypto::SecureString("travel"), crypto::SecureString("kyoto"),
+              crypto::SecureString("2024")};
+    ;
     IndexNode b = make_image();
-    b.tags = {crypto::SecureString("travel"), crypto::SecureString("osaka"), crypto::SecureString("2024")};;
+    b.tags = {crypto::SecureString("travel"), crypto::SecureString("osaka"),
+              crypto::SecureString("2024")};
+    ;
 
     const std::vector<const IndexNode*> sel{&a, &b};
     const auto c = ui::build_selection_details(sel, {});

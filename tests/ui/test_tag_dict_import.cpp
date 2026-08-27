@@ -82,7 +82,8 @@ TEST(tag_dict_import_existing_category_keeps_its_colour)
 TEST(tag_dict_import_new_categories_take_the_lowest_free_swatch)
 {
     VaultSettings s;
-    s.categories = {{crypto::SecureString("a"), 0, {}}, {crypto::SecureString("b"), 2, {}}};   // 1 is free
+    s.categories = {{crypto::SecureString("a"), 0, {}},
+                    {crypto::SecureString("b"), 2, {}}};  // 1 is free
     const auto sum = apply_tag_dict(s, from({e("c", "x"),
                                              e("d", "y")}));
 
@@ -95,7 +96,8 @@ TEST(tag_dict_import_swatch_wraps_round_robin_once_all_sixteen_are_used)
 {
     VaultSettings s;
     for (int i = 0; i < vault::TAG_SWATCH_COUNT; ++i)
-        s.categories.push_back({crypto::SecureString("c" + std::to_string(i)), static_cast<uint8_t>(i), {}});
+        s.categories.push_back(
+            {crypto::SecureString("c" + std::to_string(i)), static_cast<uint8_t>(i), {}});
 
     const auto sum = apply_tag_dict(s, from({e("extra", "x")}));
     CHECK_EQ(sum.categories_added, static_cast<size_t>(1));

@@ -80,8 +80,9 @@ void ImageViewer::on_enter()
         for (const vault::IndexNode* n : listing) {
             if (!n->is_media()) continue;   // images and videos (mixed leaf galleries)
             album_.images.push_back(n);
-            album_.paths.push_back(album_.gallery_path.empty() ? std::string(n->name.view())
-                                                   : album_.gallery_path + "/" + std::string(n->name.view()));
+            album_.paths.push_back(album_.gallery_path.empty()
+                                       ? std::string(n->name.view())
+                                       : album_.gallery_path + "/" + std::string(n->name.view()));
         }
         // The grid and the search screens hand over an index into the FULL
         // listing (sub-galleries partition first); the album above is media
@@ -973,9 +974,9 @@ void ImageViewer::render_hud(gfx::Renderer& r)
                 hud = std::format("{}{}   {}/{}   fill", star, cur.name.view(), index_ + 1,
                                   album_.images.size());
             else
-                hud = std::format("{}{}   {}/{}   {}%", star, cur.name.view(), index_ + 1,
-                                  album_.images.size(),
-                                  static_cast<int>(fit_.zoom * 100.0f + 0.5f));
+                hud =
+                    std::format("{}{}   {}/{}   {}%", star, cur.name.view(), index_ + 1,
+                                album_.images.size(), static_cast<int>(fit_.zoom * 100.0f + 0.5f));
             r.draw_text(font_, hb.x + 16, hb.y + 12, fit_text(font_, hud, hb.w - 32),
                         cur.favorite ? gfx::theme::FAVORITE : gfx::theme::TEXT);
         }

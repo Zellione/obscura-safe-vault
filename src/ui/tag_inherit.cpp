@@ -54,7 +54,8 @@ std::vector<std::string> inherited_tags(const vault::Vault& vault, std::string_v
     const std::string parent = join_path(std::span(segs.data(), segs.size() - 1));
     if (const auto* node = child_named(vault, parent, segs.back())) {
         own.clear();
-        for (const auto& t : node->tags) own.emplace_back(t.view());
+        for (const auto& t : node->tags)
+            own.emplace_back(t.view());
     }
 
     // Union of every ancestor gallery's tags, root-first, ci-de-duplicated —
@@ -65,7 +66,8 @@ std::vector<std::string> inherited_tags(const vault::Vault& vault, std::string_v
         const auto* ancestor = child_named(vault, ancestor_parent, segs[len - 1]);
         if (!ancestor) continue;
         for (const auto& t : ancestor->tags)
-            if (!ci_contains(out, t.view()) && !ci_contains(own, t.view())) out.emplace_back(t.view());
+            if (!ci_contains(out, t.view()) && !ci_contains(own, t.view()))
+                out.emplace_back(t.view());
     }
     return out;
 }
@@ -88,8 +90,9 @@ void collect_descendant_tags(const vault::Vault& vault, const std::string& galle
 
         // If this child is a gallery, recurse into its descendants
         if (child->is_gallery()) {
-            const std::string child_path = gallery_path.empty() ? std::string(child->name.view())
-                                           : gallery_path + "/" + std::string(child->name.view());
+            const std::string child_path =
+                gallery_path.empty() ? std::string(child->name.view())
+                                     : gallery_path + "/" + std::string(child->name.view());
             collect_descendant_tags(vault, child_path, depth + 1, out);
         }
     }
@@ -106,7 +109,8 @@ std::vector<std::string> contents_tags(const vault::Vault& vault, std::string_vi
         if (const auto* node = child_named(vault, parent, segs.back()))
             if (node->is_gallery()) {
                 own.clear();
-                for (const auto& t : node->tags) own.emplace_back(t.view());
+                for (const auto& t : node->tags)
+                    own.emplace_back(t.view());
             }
     }
     // If segs.empty(), gallery_path doesn't resolve to a real gallery, so own remains empty

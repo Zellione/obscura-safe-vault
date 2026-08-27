@@ -44,8 +44,8 @@ std::vector<std::string> field_value_suggestions(std::string_view             bu
     for (const auto& e : settings.tag_field_values) {
         if (!tag_ci_equal(e.field.view(), field)) continue;
         if (!tag_ci_equal(vault::tag_category_prefix(e.tag.view()), category)) continue;
-        const bool dupe = std::ranges::any_of(pool,
-            [&e](const std::string& v) { return tag_ci_equal(v, e.value.view()); });
+        const bool dupe = std::ranges::any_of(
+            pool, [&e](const std::string& v) { return tag_ci_equal(v, e.value.view()); });
         if (!dupe) pool.emplace_back(e.value.view());
     }
 

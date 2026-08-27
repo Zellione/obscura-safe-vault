@@ -126,9 +126,9 @@ void SlideshowView::render(gfx::Renderer& r, gfx::FontAtlas& font, FullTexCache&
     const std::string tail =
         std::format("   {} of {}   {}   {:.0f}s per slide{}",
                     cur + 1, n, state, show_->dwell(), shuffle_ ? "   Shuffle on" : "");
-    const std::string hud =
-        fit_text(font, images[cur]->name.view(),
-                 vp.w - 32 - static_cast<float>(font.measure(tail))) + tail;
+    const std::string hud = fit_text(font, images[cur]->name.view(),
+                                     vp.w - 32 - static_cast<float>(font.measure(tail))) +
+                            tail;
     r.draw_text(font, vp.x + 16, vp.y + 12, hud, gfx::theme::TEXT);
     r.draw_text(font, vp.x + 16, vp.y + 44,
                 "[Space] Play/Pause   [<-/->] Prev/Next   [+/-] Slower/Faster   "

@@ -29,7 +29,8 @@ std::vector<std::string> names(const std::vector<const IndexNode*>& v)
 {
     std::vector<std::string> out;
     out.reserve(v.size());
-    for (const auto* n : v) out.emplace_back(n->name.view());
+    for (const auto* n : v)
+        out.emplace_back(n->name.view());
     return out;
 }
 

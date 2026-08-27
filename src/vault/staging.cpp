@@ -282,7 +282,8 @@ VaultResult attach_image_prestaged(Vault& v, std::string_view gallery_path,
 
     if (extras) {
         staged.node.tags.clear();
-        for (const auto& t : extras->tags) staged.node.tags.emplace_back(crypto::SecureString(std::string_view(t)));
+        for (const auto& t : extras->tags)
+            staged.node.tags.emplace_back(crypto::SecureString(std::string_view(t)));
         if (staged.node.tags.size() > INDEX_MAX_TAGS)
             staged.node.tags.resize(INDEX_MAX_TAGS);
         staged.node.favorite = extras->favorite;
@@ -335,7 +336,8 @@ VaultResult attach_video_prestaged(Vault& v, std::string_view gallery_path,
 
     if (extras) {
         staged.node.tags.clear();
-        for (const auto& t : extras->tags) staged.node.tags.emplace_back(crypto::SecureString(std::string_view(t)));
+        for (const auto& t : extras->tags)
+            staged.node.tags.emplace_back(crypto::SecureString(std::string_view(t)));
         if (staged.node.tags.size() > INDEX_MAX_TAGS)
             staged.node.tags.resize(INDEX_MAX_TAGS);
         staged.node.favorite = extras->favorite;

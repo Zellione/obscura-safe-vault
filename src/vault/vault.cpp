@@ -141,7 +141,8 @@ std::vector<std::string> tag_strings(const std::vector<crypto::SecureString>& ta
 {
     std::vector<std::string> out;
     out.reserve(tags.size());
-    for (const auto& t : tags) out.emplace_back(t.view());
+    for (const auto& t : tags)
+        out.emplace_back(t.view());
     return out;
 }
 
@@ -179,9 +180,8 @@ struct FieldTagMap {
     {
         FieldTagMap m;
         for (const auto& fv : s.tag_field_values) {
-            auto it = std::ranges::find_if(m.by_tag, [&fv](const auto& e) {
-                return tag_ci_equal(e.first, fv.tag.view());
-            });
+            auto it = std::ranges::find_if(
+                m.by_tag, [&fv](const auto& e) { return tag_ci_equal(e.first, fv.tag.view()); });
             if (it == m.by_tag.end()) {
                 m.by_tag.emplace_back(std::string(fv.tag.view()), std::vector<std::string>{});
                 it = std::prev(m.by_tag.end());
@@ -336,7 +336,8 @@ void collect_galleries_with_tag(const IndexNode& node, std::string_view prefix,
     for (const auto& child : node.children) {
         if (!child.is_gallery()) continue;
         const std::string full_path = join_child_path(prefix, child.name.view());
-        if (std::ranges::any_of(child.tags, [&](const auto& t) { return tag_ci_equal(t.view(), tag); }))
+        if (std::ranges::any_of(child.tags,
+                                [&](const auto& t) { return tag_ci_equal(t.view(), tag); }))
             out.push_back(SearchHit{
                 .path = full_path,
                 .is_gallery = true,
@@ -361,7 +362,8 @@ void collect_images_with_tag(const IndexNode& node, std::string_view prefix, std
             collect_images_with_tag(child, full_path, tag, out);
             continue;
         }
-        if (std::ranges::any_of(child.tags, [&](const auto& t) { return tag_ci_equal(t.view(), tag); }))
+        if (std::ranges::any_of(child.tags,
+                                [&](const auto& t) { return tag_ci_equal(t.view(), tag); }))
             out.push_back(SearchHit{
                 .path = full_path,
                 .is_gallery = false,
@@ -434,7 +436,8 @@ std::vector<std::string> adv_search_dfs(const IndexNode& node, std::string_view 
             }
         }
 
-        accumulate_subtree_union(subtree_tags, tag_strings(child.tags), child_subtree, child.is_gallery());
+        accumulate_subtree_union(subtree_tags, tag_strings(child.tags), child_subtree,
+                                 child.is_gallery());
     }
 
     return subtree_tags;
@@ -1300,8 +1303,10 @@ VaultResult add_tag_batch(Vault& v, std::span<const std::string> node_paths,
     bool changed = false;
     for (const std::string& path : node_paths) {
         if (IndexNode* node = v.resolve_node(path); node) {
-            const bool dup = std::ranges::any_of(node->tags,
-                [&trimmed](const crypto::SecureString& e) { return tag_ci_equal(e.view(), trimmed); });
+            const bool dup =
+                std::ranges::any_of(node->tags, [&trimmed](const crypto::SecureString& e) {
+                    return tag_ci_equal(e.view(), trimmed);
+                });
             if (!dup) {
                 node->tags.emplace_back(crypto::SecureString(std::string_view(trimmed)));
                 changed = true;
@@ -1325,8 +1330,9 @@ VaultResult remove_tag_batch(Vault& v, std::span<const std::string> node_paths,
     for (const std::string& path : node_paths) {
         IndexNode* node = v.resolve_node(path);
         if (!node) continue;
-        const auto removed = std::erase_if(node->tags,
-            [&trimmed](const crypto::SecureString& e) { return tag_ci_equal(e.view(), trimmed); });
+        const auto removed = std::erase_if(node->tags, [&trimmed](const crypto::SecureString& e) {
+            return tag_ci_equal(e.view(), trimmed);
+        });
         changed = changed || removed > 0;
     }
     return changed ? v.commit_index() : Ok;
@@ -1420,7 +1426,10 @@ VaultResult Vault::set_tags(std::string_view node_path, const std::vector<std::s
     bool same = normalised.size() == node->tags.size();
     if (same) {
         for (size_t i = 0; i < node->tags.size(); ++i) {
-            if (node->tags[i] != normalised[i]) { same = false; break; }
+            if (node->tags[i] != normalised[i]) {
+                same = false;
+                break;
+            }
         }
     }
     if (same) return Ok;
@@ -1458,8 +1467,8 @@ namespace {
 void prune_node_tags(IndexNode& node, const std::function<bool(std::string_view)>& keep,
                      PruneTagsStats& stats)
 {
-    if (const auto removed = std::erase_if(node.tags,
-                                           [&keep](const crypto::SecureString& t) { return !keep(t.view()); });
+    if (const auto removed = std::erase_if(
+            node.tags, [&keep](const crypto::SecureString& t) { return !keep(t.view()); });
         removed > 0) {
         stats.tags_removed += removed;
         ++stats.nodes_touched;
@@ -1516,7 +1525,8 @@ std::vector<SearchHit> Vault::search(std::string_view query, SearchScope scope) 
     // unnamed root itself is never a hit. The returned tag union bubbles up from
     // the root's children but is unused here (Phase 51 roll-up).
     const FieldTagMap fmap = FieldTagMap::build(settings_);
-    [[maybe_unused]] auto _ = search_dfs(root_, "", tag_strings(root_.tags), query, scope, out, fmap);
+    [[maybe_unused]] auto _ =
+        search_dfs(root_, "", tag_strings(root_.tags), query, scope, out, fmap);
     return out;
 }
 

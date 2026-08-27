@@ -28,7 +28,8 @@ std::vector<std::string> effective_tags(const Vault& v, std::string_view node_pa
     const IndexNode* node = v.resolve_node(node_path);
     if (!node) return {};
     std::vector<std::string> out;
-    for (const auto& t : node->tags) out.emplace_back(t.view());
+    for (const auto& t : node->tags)
+        out.emplace_back(t.view());
     auto add_ci = [&out](const std::vector<crypto::SecureString>& tags) {
         for (const auto& t : tags)
             if (!std::ranges::any_of(out, [&](const auto& o) { return tag_ci_equal(o, t.view()); }))
@@ -120,13 +121,16 @@ void snapshot_subtree(const Vault& src, std::string_view abs, const std::string&
     snap.rel = rel;
     std::vector<std::string> subgalleries;
     for (const auto* c : src.list(abs)) {
-        if (c->is_media())   snap.images.emplace_back(c->name.view());
-        else                 subgalleries.emplace_back(c->name.view());
+        if (c->is_media())
+            snap.images.emplace_back(c->name.view());
+        else
+            subgalleries.emplace_back(c->name.view());
     }
     // Capture the gallery's own tags and favorite at snapshot time
     if (const IndexNode* self = src.resolve_node(abs); self && self->is_gallery()) {
         snap.tags.clear();
-        for (const auto& t : self->tags) snap.tags.emplace_back(t.view());
+        for (const auto& t : self->tags)
+            snap.tags.emplace_back(t.view());
         snap.favorite = self->favorite;
     }
     out.push_back(std::move(snap));

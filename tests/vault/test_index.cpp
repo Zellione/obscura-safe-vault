@@ -719,7 +719,8 @@ TEST(index_settings_round_trip)
     vault::VaultSettings s;
     s.default_sort    = vault::SortKey::NameAsc;
     s.tiles_show_tags = false;
-    s.categories = {{crypto::SecureString("artist"), 3, {}}, {crypto::SecureString("parody"), 7, {}}};
+    s.categories = {{crypto::SecureString("artist"), 3, {}},
+                    {crypto::SecureString("parody"), 7, {}}};
 
     std::vector<uint8_t> blob;
     vault::serialize_index(root, {}, s, blob);
@@ -758,7 +759,9 @@ TEST(index_settings_dedupes_categories_case_insensitively)
 {
     IndexNode root = IndexNode::gallery("");
     vault::VaultSettings s;
-    s.categories = {{crypto::SecureString("Artist"), 1, {}}, {crypto::SecureString("artist"), 9, {}}, {crypto::SecureString("parody"), 2, {}}};
+    s.categories = {{crypto::SecureString("Artist"), 1, {}},
+                    {crypto::SecureString("artist"), 9, {}},
+                    {crypto::SecureString("parody"), 2, {}}};
 
     std::vector<uint8_t> blob;
     vault::serialize_index(root, {}, s, blob);
@@ -831,7 +834,8 @@ TEST(index_settings_rejects_over_long_category_name)
 {
     IndexNode root = IndexNode::gallery("");
     vault::VaultSettings s;
-    s.categories = {{crypto::SecureString(std::string(vault::INDEX_MAX_CATEGORY_BYTES + 1, 'a')), 0, {}}};
+    s.categories = {
+        {crypto::SecureString(std::string(vault::INDEX_MAX_CATEGORY_BYTES + 1, 'a')), 0, {}}};
 
     std::vector<uint8_t> blob;
     vault::serialize_index(root, {}, s, blob);   // writer clamps to the cap

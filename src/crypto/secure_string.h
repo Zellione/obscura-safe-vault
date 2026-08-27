@@ -30,6 +30,7 @@
 // `std::string_view`, so a name can never silently copy into a plain
 // `std::string` without an explicit, visible `.view()`.
 
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -38,7 +39,6 @@
 #include <new>
 #include <string>
 #include <string_view>
-#include <compare>
 #include <utility>
 
 #include "platform/safe_print.h"
@@ -54,13 +54,22 @@ public:
     // literals) via the common `string_view` conversion. Deliberately `explicit`:
     // implicit conversion from string-like input to SecureString is what makes
     // `s = "literal"` ambiguous with `operator=(string_view)` below.
-    explicit SecureString(std::string_view s) { (void)assign(s); }
+    explicit SecureString(std::string_view s)
+    {
+        (void)assign(s);
+    }
 
-    ~SecureString() { free_storage(); }
+    ~SecureString()
+    {
+        free_storage();
+    }
 
     // Copyable (deep copy into a freshly mlock'd buffer) — IndexNode relies on
     // being copyable, see the header comment.
-    SecureString(const SecureString& other) { (void)copy_from(other); }
+    SecureString(const SecureString& other)
+    {
+        (void)copy_from(other);
+    }
 
     SecureString& operator=(const SecureString& other)
     {
@@ -70,11 +79,9 @@ public:
 
     // Movable: steal the buffer (the source is left empty, not copied).
     SecureString(SecureString&& other) noexcept
-        : data_(std::move(other.data_))
-        , size_(other.size_)
-        , locked_(other.locked_)
+        : data_(std::move(other.data_)), size_(other.size_), locked_(other.locked_)
     {
-        other.size_   = 0;
+        other.size_ = 0;
         other.locked_ = false;
     }
 
@@ -82,10 +89,10 @@ public:
     {
         if (this != &other) {
             free_storage();
-            data_         = std::move(other.data_);
-            size_         = other.size_;
-            locked_       = other.locked_;
-            other.size_   = 0;
+            data_ = std::move(other.data_);
+            size_ = other.size_;
+            locked_ = other.locked_;
+            other.size_ = 0;
             other.locked_ = false;
         }
         return *this;
@@ -123,7 +130,7 @@ public:
             platform::safe_println(stderr, "[crypto] SecureString alloc of {} bytes failed", n);
             return false;
         }
-        size_   = n;
+        size_ = n;
         locked_ = detail::mem_lock(data_.get(), size_);
         if (!locked_) warn_mlock_failure_once();
         return true;
@@ -135,17 +142,38 @@ public:
     }
 
     // Writable byte access (deserialisation fills a resized buffer in place).
-    [[nodiscard]] uint8_t*       data()       noexcept { return data_.get(); }
-    [[nodiscard]] const uint8_t* data() const noexcept { return data_.get(); }
+    [[nodiscard]] uint8_t* data() noexcept
+    {
+        return data_.get();
+    }
+    [[nodiscard]] const uint8_t* data() const noexcept
+    {
+        return data_.get();
+    }
 
-    [[nodiscard]] bool empty() const noexcept { return size_ == 0; }
-    [[nodiscard]] size_t size() const noexcept { return size_; }
-    [[nodiscard]] bool is_locked() const noexcept { return locked_; }
+    [[nodiscard]] bool empty() const noexcept
+    {
+        return size_ == 0;
+    }
+    [[nodiscard]] size_t size() const noexcept
+    {
+        return size_;
+    }
+    [[nodiscard]] bool is_locked() const noexcept
+    {
+        return locked_;
+    }
 
-    void clear() noexcept { free_storage(); }
+    void clear() noexcept
+    {
+        free_storage();
+    }
 
     // Wipe now (idempotent; destruction wipes again harmlessly).
-    void wipe() noexcept { if (data_) crypto_wipe(data_.get(), size_); }
+    void wipe() noexcept
+    {
+        if (data_) crypto_wipe(data_.get(), size_);
+    }
 
     friend bool operator==(const SecureString& a, const SecureString& b) noexcept
     {
@@ -186,25 +214,24 @@ private:
         crypto_wipe(data_.get(), size_);
         if (locked_) detail::mem_unlock(data_.get(), size_);
         data_.reset();
-        size_   = 0;
+        size_ = 0;
         locked_ = false;
     }
 
     std::unique_ptr<uint8_t[]> data_;
-    size_t                     size_   = 0;
-    bool                       locked_ = false;
+    size_t size_ = 0;
+    bool locked_ = false;
 };
 
-} // namespace crypto
+}  // namespace crypto
 
 namespace std {
 
-template <>
-struct hash<crypto::SecureString> {
+template <> struct hash<crypto::SecureString> {
     [[nodiscard]] size_t operator()(const crypto::SecureString& s) const noexcept
     {
         return std::hash<std::string_view>{}(s.view());
     }
 };
 
-} // namespace std
+}  // namespace std
