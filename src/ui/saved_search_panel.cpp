@@ -100,7 +100,7 @@ bool SavedSearchPanel::load_focused(AdvancedQuery& out_query)
 void SavedSearchPanel::delete_focused()
 {
     if (cur_saved_ < 0 || cur_saved_ >= static_cast<int>(saved_.size())) return;
-    const std::string name = std::string(saved_[cur_saved_].name.view());
+    const auto name = saved_[cur_saved_].name.view();
     if (search_.delete_saved_search(name) == vault::VaultResult::Ok) {
         status_ = std::format("Deleted '{}'.", name);
         // Caller (AdvancedSearchScreen) will call reload_saved() to refresh saved_

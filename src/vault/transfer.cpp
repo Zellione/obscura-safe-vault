@@ -429,7 +429,7 @@ void apply_gallery_extras(Vault& dst, std::string_view dst_path,
     for (const auto& t : tags) {
         if (g->tags.size() >= INDEX_MAX_TAGS) break;
         if (!std::ranges::any_of(g->tags, [&](const auto& o) { return tag_ci_equal(o.view(), t); }))
-            g->tags.emplace_back(crypto::SecureString(std::string_view(t)));
+            g->tags.emplace_back(t);
     }
     if (favorite) g->favorite = true;
 }

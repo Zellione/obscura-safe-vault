@@ -187,27 +187,27 @@ struct IndexNode {
     [[nodiscard]] bool is_video()   const noexcept { return type == Type::Video; }
     [[nodiscard]] bool is_media()   const noexcept { return is_image() || is_video(); }
 
-    static IndexNode gallery(std::string name)
+    static IndexNode gallery(std::string_view name)
     {
         IndexNode n;
         n.type = Type::Gallery;
-        n.name = std::move(name);
+        n.name = name;
         return n;
     }
 
-    static IndexNode image(std::string name)
+    static IndexNode image(std::string_view name)
     {
         IndexNode n;
         n.type = Type::Image;
-        n.name = std::move(name);
+        n.name = name;
         return n;
     }
 
-    static IndexNode video(std::string name)
+    static IndexNode video(std::string_view name)
     {
         IndexNode n;
         n.type = Type::Video;
-        n.name = std::move(name);
+        n.name = name;
         return n;
     }
 };

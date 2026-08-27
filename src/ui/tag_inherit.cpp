@@ -22,6 +22,17 @@ bool ci_contains(const std::vector<std::string>& v, std::string_view s)
     return std::ranges::any_of(v, [&](const std::string& e) { return tag_ci_equal(e, s); });
 }
 
+// Phase 91: a node's secure tag list as transient plain strings (the wipe
+// guarantee lives in the stored copy, not this working set).
+std::vector<std::string> tag_strings(const std::vector<crypto::SecureString>& tags)
+{
+    std::vector<std::string> out;
+    out.reserve(tags.size());
+    for (const auto& t : tags)
+        out.emplace_back(t.view());
+    return out;
+}
+
 // The child of `parent_path` named `name`, or nullptr. Pointer is valid until
 // the next mutating vault call (same contract as Vault::list).
 const vault::IndexNode* child_named(const vault::Vault& vault,
@@ -107,11 +118,7 @@ std::vector<std::string> contents_tags(const vault::Vault& vault, std::string_vi
     if (const auto segs = split_path(gallery_path); !segs.empty()) {
         const std::string parent = join_path(std::span(segs.data(), segs.size() - 1));
         if (const auto* node = child_named(vault, parent, segs.back()))
-            if (node->is_gallery()) {
-                own.clear();
-                for (const auto& t : node->tags)
-                    own.emplace_back(t.view());
-            }
+            if (node->is_gallery()) own = tag_strings(node->tags);
     }
     // If segs.empty(), gallery_path doesn't resolve to a real gallery, so own remains empty
 

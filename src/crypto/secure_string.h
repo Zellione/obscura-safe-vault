@@ -169,12 +169,17 @@ public:
         free_storage();
     }
 
-    // Wipe now (idempotent; destruction wipes again harmlessly).
-    void wipe() noexcept
+    // Wipe now (idempotent; destruction wipes again harmlessly). Not const on
+    // purpose: crypto_wipe's C API needs a mutable pointer, and wiping the
+    // contained secret is a real mutation, not logical constness.
+    void wipe() noexcept  // NOSONAR cpp:S5817
     {
         if (data_) crypto_wipe(data_.get(), size_);
     }
 
+    // The reversed-than-natural directions (`string_view == SecureString`,
+    // `string_view <=> SecureString`) come from C++20's rewritten candidates —
+    // defining mirrors here would duplicate them.
     friend bool operator==(const SecureString& a, const SecureString& b) noexcept
     {
         return a.view() == b.view();
@@ -183,10 +188,6 @@ public:
     {
         return a.view() == b;
     }
-    friend bool operator==(std::string_view a, const SecureString& b) noexcept
-    {
-        return a == b.view();
-    }
     friend std::strong_ordering operator<=>(const SecureString& a, const SecureString& b) noexcept
     {
         return a.view() <=> b.view();
@@ -194,10 +195,6 @@ public:
     friend std::strong_ordering operator<=>(const SecureString& a, std::string_view b) noexcept
     {
         return a.view() <=> b;
-    }
-    friend std::strong_ordering operator<=>(std::string_view a, const SecureString& b) noexcept
-    {
-        return a <=> b.view();
     }
 
 private:
@@ -218,7 +215,10 @@ private:
         locked_ = false;
     }
 
-    std::unique_ptr<uint8_t[]> data_;
+    // `unique_ptr<uint8_t[]>` is the codebase's secure-buffer idiom (RawBytes)
+    // — raw, allocator-owned memory we mlock; std::vector/std::array cannot
+    // express that.
+    std::unique_ptr<uint8_t[]> data_;  // NOSONAR cpp:S5945
     size_t size_ = 0;
     bool locked_ = false;
 };

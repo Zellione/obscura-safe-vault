@@ -95,6 +95,21 @@ bool read_string(ByteReader& r, crypto::SecureString& out)
     return true;
 }
 
+// Read one length-prefixed string within a byte cap (Phase 73 field
+// values / template fields). The bound is checked BEFORE any allocation.
+// Shared by read_field_values to keep that function's cognitive load low.
+bool read_field_str(ByteReader& r, crypto::SecureString& out, uint32_t cap)
+{
+    const uint16_t len = r.u16();
+    if (!r.ok() || len > cap) return false;
+    if (!out.resize(len)) return false;
+    if (len > 0) {
+        r.bytes(std::span<uint8_t>(out.data(), len));
+        if (!r.ok()) return false;
+    }
+    return true;
+}
+
 // Read the Phase 12 tag block (u16 count + length-prefixed tags) into `tags`.
 // Bounded by INDEX_MAX_TAGS so a hostile count can't drive a huge allocation.
 bool read_tags(ByteReader& r, std::vector<crypto::SecureString>& tags)
@@ -507,19 +522,9 @@ bool read_field_values(ByteReader& r, std::vector<TagFieldValue>& values)
     if (!r.ok() || count > INDEX_MAX_TAG_FIELD_VALUES) return false;  // bound before alloc
     for (uint16_t i = 0; i < count; ++i) {
         TagFieldValue e;
-        auto read_str = [&r](crypto::SecureString& out, uint32_t cap) {
-            const uint16_t len = r.u16();
-            if (!r.ok() || len > cap) return false;
-            if (!out.resize(len)) return false;
-            if (len > 0) {
-                r.bytes(std::span<uint8_t>(out.data(), len));
-                if (!r.ok()) return false;
-            }
-            return true;
-        };
-        if (!read_str(e.tag, 0xFFFFu)) return false;
-        if (!read_str(e.field, INDEX_MAX_FIELD_BYTES)) return false;
-        if (!read_str(e.value, INDEX_MAX_FIELD_VALUE_BYTES)) return false;
+        if (!read_field_str(r, e.tag, 0xFFFFu)) return false;
+        if (!read_field_str(r, e.field, INDEX_MAX_FIELD_BYTES)) return false;
+        if (!read_field_str(r, e.value, INDEX_MAX_FIELD_VALUE_BYTES)) return false;
 
         const bool dupe = std::ranges::any_of(values, [&e](const TagFieldValue& x) {
             return category_name_eq(x.tag.view(), e.tag.view()) &&
@@ -673,7 +678,7 @@ bool set_category_template(VaultSettings& s, std::string_view category,
                     cleaned,
                     [&f](const crypto::SecureString& e) { return category_name_eq(e.view(), f); });
                 !dupe) {
-                cleaned.push_back(crypto::SecureString(std::string_view(f)));
+                cleaned.emplace_back(f);
             }
             if (cleaned.size() >= INDEX_MAX_TEMPLATE_FIELDS) break;
         }

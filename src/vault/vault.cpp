@@ -1308,7 +1308,7 @@ VaultResult add_tag_batch(Vault& v, std::span<const std::string> node_paths,
                     return tag_ci_equal(e.view(), trimmed);
                 });
             if (!dup) {
-                node->tags.emplace_back(crypto::SecureString(std::string_view(trimmed)));
+                node->tags.emplace_back(trimmed);
                 changed = true;
             }
         }
@@ -1407,7 +1407,7 @@ VaultResult rename_node(Vault& v, std::string_view gallery_path, std::string_vie
     for (const auto& c : g->children)
         if (&c != node && c.name == new_name) return AlreadyExists;
 
-    node->name = std::string(new_name);
+    node->name = new_name;
     return v.commit_index();
 }
 
@@ -1436,7 +1436,7 @@ VaultResult Vault::set_tags(std::string_view node_path, const std::vector<std::s
 
     node->tags.clear();
     for (const auto& t : normalised)
-        node->tags.emplace_back(crypto::SecureString(std::string_view(t)));
+        node->tags.emplace_back(t);
     return commit_index();
 }
 
@@ -1457,7 +1457,7 @@ VaultResult Vault::add_tag(std::string_view node_path, std::string_view tag)
     }
 
     // Not found, add it.
-    node->tags.emplace_back(crypto::SecureString(std::string_view(trimmed)));
+    node->tags.emplace_back(trimmed);
     return commit_index();
 }
 

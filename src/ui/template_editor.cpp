@@ -24,6 +24,17 @@ namespace {
 constexpr float PROMPT_PAD = 16.0f;
 constexpr float PROMPT_INPUT_H = 32.0f;
 constexpr float RADIUS = 4.0f;
+
+// Phase 91: a template field list (span of secure strings) as transient plain
+// strings for the editor (the wipe guarantee lives in the stored copy).
+std::vector<std::string> template_fields(std::span<const crypto::SecureString> fields)
+{
+    std::vector<std::string> out;
+    out.reserve(fields.size());
+    for (const auto& f : fields)
+        out.emplace_back(f.view());
+    return out;
+}
 }
 
 TemplateEditAction template_edit_action(SDL_Keycode key)
@@ -212,10 +223,7 @@ bool TemplateEditorPanel::handle_event_name_field(const SDL_Event& e)
 
             auto s = vault::vault_settings(vault_);
             const auto field_tmpl = vault::category_template(s, cat_name_);
-            std::vector<std::string> fields;
-            fields.reserve(field_tmpl.size());
-            for (const auto& f : field_tmpl)
-                fields.emplace_back(f.view());
+            std::vector<std::string> fields = template_fields(field_tmpl);
 
             bool success = false;
             if (is_add_mode_) {
