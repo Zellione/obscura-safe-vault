@@ -48,14 +48,14 @@ bool write_header(std::FILE* fp, const Header& h)
     return fileutil::sync(fp);
 }
 
-bool serialize_plain_index(const IndexIoContext& ctx, std::vector<uint8_t>& out)
+bool serialize_plain_index(const IndexIoContext& ctx, crypto::WipingBytes& out)
 {
     // Serialize the index (tree + saved searches + settings) using the 4-arg form.
     serialize_index(ctx.root_, ctx.saved_searches_, ctx.settings_, out);
 
     // Phase 26: framed vaults compress the index blob with the same codec.
     if (framed_chunks(ctx.header_)) {
-        std::vector<uint8_t> framed;
+        crypto::WipingBytes framed;
         if (!chunk_codec::encode_frame(out, framed)) return false;
         out = std::move(framed);
     }
@@ -83,15 +83,12 @@ VaultResult commit_index(IndexIoContext& ctx)
     using enum VaultResult;
 
     // Serialize the plaintext index blob.
-    std::vector<uint8_t> blob;
+    crypto::WipingBytes blob;
     if (!serialize_plain_index(ctx, blob)) return CryptoError;
 
-    // Seal and commit the blob in a crash-safe 3-phase swap. The plaintext blob
-    // is wiped immediately after sealing so the full tree's metadata never
-    // lingers in a plain heap buffer (Phase 91).
-    const VaultResult r = commit_plain_blob(ctx, blob);
-    crypto_wipe(blob.data(), blob.size());
-    return r;
+    // WipingBytes covers success, every early return, and old allocations
+    // released while the serializer grows/compresses the blob.
+    return commit_plain_blob(ctx, blob);
 }
 
 VaultResult commit_plain_blob_at(IndexIoContext& ctx, std::span<const uint8_t> plain,

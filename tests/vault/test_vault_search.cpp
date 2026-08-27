@@ -109,6 +109,7 @@ TEST(search_saved_searches_round_trip_across_reopen)
         auto saved = vault::VaultSearch(v).list_saved_searches();
         REQUIRE(saved.size() == 1);
         CHECK_EQ(saved[0].name, std::string("my cats"));
+        CHECK_TRUE(saved[0].query.is_locked());
 
         ui::AdvancedQuery back;
         REQUIRE(ui::deserialize_query(saved[0].query, back));

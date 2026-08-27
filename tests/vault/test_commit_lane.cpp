@@ -11,6 +11,7 @@ using ziptest::make_vault;
 
 TEST(commit_lane_persists_attached_nodes)
 {
+    const uint64_t wipes_before = crypto::detail::wiping_deallocation_count();
     const auto dir  = fresh_dir("lane1");
     const auto path = dir / "a.osv";
     {
@@ -29,6 +30,7 @@ TEST(commit_lane_persists_attached_nodes)
         REQUIRE(lane.flush());
         lane.stop();
     }
+    CHECK(crypto::detail::wiping_deallocation_count() > wipes_before);
     vault::Vault v2;
     REQUIRE(ziptest::open_vault(path, v2));
     CHECK_EQ(static_cast<int>(v2.list("g").size()), 10);

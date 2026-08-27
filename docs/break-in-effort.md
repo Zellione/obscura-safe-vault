@@ -224,11 +224,14 @@ Scope **confirmed by the owner** and de-duplicated against the AGENTS.md
 **Deferred (owner):** ~~`SecureBytes` for the index tree~~ → **app Phase 91**
 (delivered 2026-08-27: every index-tree string — node names, tags, categories,
 descriptions, field values, saved-search names — lives in `crypto::SecureString`,
-mlock'd best-effort and wiped on destroy, and the unlock/save index-blob paths
-no longer hold a plain un-wiped vector). Still deferred: a clipboard gate for
-copied paths/names — a smaller phase that can follow on its own.
+saved-search query clauses live in `crypto::SecureBlob`, all are mlock'd
+best-effort and wiped on destroy, and unlock/save/CommitLane index-blob paths
+use secure or wiping storage. Page-lock ownership is tracked per OS page so
+freeing one allocator neighbor cannot unlock another). Still deferred: a
+clipboard gate for copied paths/names — a smaller phase that can follow on its
+own.
 
-Test totals across the phase: 2144 / 0 failed; ASAN clean; TSan clean (only
+Test totals across the phase: 2168 / 0 failed; ASAN clean; TSan clean (only
 the known local `radeonsi_drv_video.so` driver race, absent on CI runners).
 
 ## Evidence (preserved in `/tmp/osvbreakin/`)

@@ -218,7 +218,7 @@ struct IndexNode {
 // it as bytes so the vault layer stays decoupled from the UI query model.
 struct SavedSearch {
     crypto::SecureString name;   // Phase 91: mlock'd + wiped
-    std::vector<uint8_t> query;  // opaque serialised ui::AdvancedQuery blob
+    crypto::SecureBlob query;    // contains human-readable clauses; secure since Phase 91
 };
 
 // One tag-category → colour-swatch mapping (Phase 49). `name` is the tag prefix
@@ -363,6 +363,8 @@ void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& sear
                      std::vector<uint8_t>& out);
 void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& searches,
                      const VaultSettings& settings, std::vector<uint8_t>& out);
+void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& searches,
+                     const VaultSettings& settings, crypto::WipingBytes& out);
 
 // Parse a tree from `in` into `out`. Returns false on any malformed input (bad
 // version, unknown node type, truncation, excessive depth). On failure `out` is

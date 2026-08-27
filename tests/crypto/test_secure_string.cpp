@@ -1,5 +1,7 @@
 #include "test_framework.h"
 
+#include <array>
+#include <atomic>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -8,6 +10,20 @@
 #include "crypto/secure_string.h"
 
 using namespace std::string_view_literals;
+
+namespace {
+
+std::atomic_int wipe_observations{0};
+std::atomic_bool wipe_observed_nonzero{false};
+
+void observe_wiped_allocation(std::span<const uint8_t> bytes) noexcept
+{
+    ++wipe_observations;
+    for (const uint8_t b : bytes)
+        if (b != 0) wipe_observed_nonzero.store(true);
+}
+
+}  // namespace
 
 // SecureString (Phase 91) is the secure string type for the index tree's
 // human-readable metadata: an mlock'd (best-effort), crypto_wipe'd-on-destroy,
@@ -49,6 +65,22 @@ TEST(secure_string_assign_replaces_contents)
     CHECK_EQ(s.view(), "second"sv);
     CHECK_FALSE(s.assign(std::string_view{nullptr, 5}));  // null+non-zero is rejected
     CHECK_EQ(s.view(), "second"sv);                       // rejection leaves contents intact
+}
+
+TEST(secure_string_assign_from_own_view_is_safe)
+{
+    crypto::SecureString s("abcdef");
+    REQUIRE(s.assign(s.view().substr(1, 4)));
+    CHECK_EQ(s.view(), "bcde"sv);
+}
+
+TEST(secure_string_failed_assign_preserves_original)
+{
+    crypto::SecureString s("keep-me");
+    crypto::detail::inject_secure_allocation_failure(0);
+    CHECK_FALSE(s.assign("replacement"));
+    crypto::detail::clear_secure_allocation_failure();
+    CHECK_EQ(s.view(), "keep-me"sv);
 }
 
 TEST(secure_string_assignment_operator_covers_string_like_inputs)
@@ -186,4 +218,37 @@ TEST(secure_string_is_mlocked)
     // fresh allocation is page-locked on any normal host (Phase 89's
     // decoded_pixels_are_mlocked pins the identical invariant for pixels).
     CHECK_TRUE(s.is_locked());
+}
+
+TEST(secure_mem_overlapping_page_locks_are_reference_counted)
+{
+    // Normal allocator blocks frequently share a page. Releasing one range
+    // must not munlock a page still occupied by another secure allocation.
+    alignas(65536) std::array<uint8_t, 65536> page{};
+    REQUIRE(crypto::detail::memory_page_size() <= page.size());
+    REQUIRE(crypto::detail::mem_lock(page.data(), 1));
+    REQUIRE(crypto::detail::mem_lock(page.data() + 1, 1));
+    CHECK_EQ(crypto::detail::locked_page_refcount_for_tests(page.data()),
+             static_cast<size_t>(2));
+    crypto::detail::mem_unlock(page.data(), 1);
+    CHECK_EQ(crypto::detail::locked_page_refcount_for_tests(page.data()),
+             static_cast<size_t>(1));
+    crypto::detail::mem_unlock(page.data() + 1, 1);
+    CHECK_EQ(crypto::detail::locked_page_refcount_for_tests(page.data()),
+             static_cast<size_t>(0));
+}
+
+TEST(wiping_bytes_zeroes_every_allocation_before_release)
+{
+    wipe_observations.store(0);
+    wipe_observed_nonzero.store(false);
+    crypto::detail::set_wipe_observer_for_tests(&observe_wiped_allocation);
+    {
+        crypto::WipingBytes bytes(64, 0xA5);
+        bytes.reserve(1024);  // exercises a reallocation, not only destruction
+        bytes.assign(80, 0x5A);
+    }
+    crypto::detail::set_wipe_observer_for_tests(nullptr);
+    CHECK(wipe_observations.load() >= 2);
+    CHECK_FALSE(wipe_observed_nonzero.load());
 }

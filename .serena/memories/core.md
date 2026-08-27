@@ -62,9 +62,13 @@ All data/thumbnail/index chunks are encrypted with the master key + a fresh nonc
 
 Since **Phase 91** the index tree's human-readable metadata is also secure: node
 names, tags, category names, tag descriptions, tag field values, and saved-search
-names are `crypto::SecureString` (see `src/crypto/secure_string.h` and
-`mem:module/vault`) — mlock'd best-effort + `crypto_wipe`'d on destroy, and the
-decrypted index blob on unlock lives in `crypto::SecureBytes`. This closes the
+names are `crypto::SecureString`, while encoded saved-search queries use
+`crypto::SecureBlob` (see `src/crypto/secure_string.h` and `mem:module/vault`) —
+mlock'd best-effort + `crypto_wipe`'d on destroy. Page-lock ownership is
+reference-counted per OS page so allocator neighbors cannot unlock one another.
+The decrypted index blob on unlock lives in `crypto::SecureBytes`; serialized
+save/CommitLane snapshots use an unlocked `WipingBytes` allocator that wipes
+every released capacity block. This closes the
 last large plaintext-without-wipe surface after Phase 89 (decoded pixels →
 `SecureBytes`). The `.osv` container is byte-identical; only the in-memory
 representation changed.

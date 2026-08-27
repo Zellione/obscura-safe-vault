@@ -113,6 +113,12 @@ Every human-readable string in the index tree (`IndexNode::name`/`tags`,
 `SavedSearch::name`, category / description / field-value fields) is a
 `crypto::SecureString` — mlock'd best-effort + `crypto_wipe`'d on destroy, no
 SSO, no implicit conversion to `std::string_view` or plain `std::string`.
+- `assign(view)` is fallible, self-view safe, and preserves the old value on
+  OOM. Constructors/copy/assignment terminate on allocation failure instead of
+  silently producing empty metadata that could be committed.
+- Opaque metadata bytes that contain human-readable content use
+  `crypto::SecureBlob`; transient serialized plaintext uses
+  `crypto::WipingBytes` so vector growth and destruction wipe every allocation.
 - **Read** via explicit `.view()` (or the provided `==`/`<=>` vs
   `std::string_view`, which keeps `node.name == "literal"` compiling).
 - **Build a `std::string` path concatenation** explicitly:

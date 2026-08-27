@@ -23,7 +23,9 @@
 //   * mlock is best-effort — a failed lock degrades that one buffer to swappable
 //     with the once-per-process warn (the two share the lockable budget).
 //   * `crypto_wipe` on destruction so freed heap holds no names/tags.
-//   * OOM returns false and leaves the object empty; no exceptions escape.
+//   * fallible assign() preserves the old value on OOM; resize() leaves empty.
+//     Infallible copy/construction/assignment terminate on OOM rather than let
+//     an empty name masquerade as a valid copy and reach an index commit.
 //   * `is_locked()` exposes the mlock outcome for diagnostics/tests.
 //
 // Read access goes through `view()`; there is NO implicit conversion to
@@ -34,9 +36,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <new>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -56,7 +61,7 @@ public:
     // `s = "literal"` ambiguous with `operator=(string_view)` below.
     explicit SecureString(std::string_view s)
     {
-        (void)assign(s);
+        assign_or_terminate(s);
     }
 
     ~SecureString()
@@ -68,12 +73,12 @@ public:
     // being copyable, see the header comment.
     SecureString(const SecureString& other)
     {
-        (void)copy_from(other);
+        assign_or_terminate(other.view());
     }
 
     SecureString& operator=(const SecureString& other)
     {
-        if (this != &other) (void)copy_from(other);
+        if (this != &other) assign_or_terminate(other.view());
         return *this;
     }
 
@@ -100,19 +105,22 @@ public:
 
     // Assignment from string-like input. `std::string`, `const char*` and string
     // literals convert to `std::string_view` implicitly, so this one operator
-    // covers them all. OOM leaves the object empty (use `assign` to check it).
+    // covers them all. Use fallible `assign` when OOM must be reported.
     SecureString& operator=(std::string_view s)
     {
-        (void)assign(s);
+        assign_or_terminate(s);
         return *this;
     }
 
-    // Replace contents with `s`. False on OOM, leaving the object empty.
+    // Replace contents with `s`. Allocation happens before the old storage is
+    // released, so self-views are safe and OOM preserves the original value.
     [[nodiscard]] bool assign(std::string_view s)
     {
         if (s.size() && !s.data()) return false;
-        if (!resize(s.size())) return false;
-        if (s.size()) std::memcpy(data_.get(), s.data(), s.size());
+        SecureString replacement;
+        if (!replacement.resize(s.size())) return false;
+        if (s.size()) std::memcpy(replacement.data_.get(), s.data(), s.size());
+        swap(replacement);
         return true;
     }
 
@@ -125,6 +133,7 @@ public:
         if (n == 0) return true;
 
         try {
+            if (detail::should_fail_secure_allocation()) throw std::bad_alloc{};
             data_ = std::make_unique<uint8_t[]>(n);
         } catch (const std::bad_alloc&) {
             platform::safe_println(stderr, "[crypto] SecureString alloc of {} bytes failed", n);
@@ -169,6 +178,13 @@ public:
         free_storage();
     }
 
+    void swap(SecureString& other) noexcept
+    {
+        data_.swap(other.data_);
+        std::swap(size_, other.size_);
+        std::swap(locked_, other.locked_);
+    }
+
     // Wipe now (idempotent; destruction wipes again harmlessly). Not const on
     // purpose: crypto_wipe's C API needs a mutable pointer, and wiping the
     // contained secret is a real mutation, not logical constness.
@@ -198,11 +214,12 @@ public:
     }
 
 private:
-    bool copy_from(const SecureString& other)
+    void assign_or_terminate(std::string_view s)
     {
-        if (!resize(other.size_)) return false;
-        if (other.size_) std::memcpy(data_.get(), other.data_.get(), other.size_);
-        return true;
+        // Constructors and assignment operators cannot report allocation
+        // failure. Terminating is preferable to silently manufacturing an
+        // empty name/tag that a later commit could persist as vault corruption.
+        if (!assign(s)) std::terminate();
     }
 
     void free_storage() noexcept
@@ -221,6 +238,45 @@ private:
     std::unique_ptr<uint8_t[]> data_;  // NOSONAR cpp:S5945
     size_t size_ = 0;
     bool locked_ = false;
+};
+
+// Copyable secure storage for opaque metadata blobs. Saved-search queries are
+// byte-encoded, but contain human-readable tags/group names/name filters and
+// therefore need the same mlock+wiping behavior as SecureString.
+class SecureBlob {
+public:
+    SecureBlob() noexcept = default;
+
+    explicit SecureBlob(std::span<const uint8_t> bytes)
+    {
+        if (!assign(bytes)) std::terminate();
+    }
+
+    SecureBlob(std::initializer_list<uint8_t> bytes)
+        : SecureBlob(std::span<const uint8_t>(bytes.begin(), bytes.size()))
+    {}
+
+    [[nodiscard]] bool assign(std::span<const uint8_t> bytes)
+    {
+        if (bytes.size() && !bytes.data()) return false;
+        if (bytes.empty()) return storage_.assign({});
+        return storage_.assign(std::string_view(reinterpret_cast<const char*>(bytes.data()),
+                                                bytes.size()));
+    }
+
+    [[nodiscard]] bool resize(size_t n) { return storage_.resize(n); }
+    [[nodiscard]] uint8_t* data() noexcept { return storage_.data(); }
+    [[nodiscard]] const uint8_t* data() const noexcept { return storage_.data(); }
+    [[nodiscard]] size_t size() const noexcept { return storage_.size(); }
+    [[nodiscard]] bool empty() const noexcept { return storage_.empty(); }
+    [[nodiscard]] bool is_locked() const noexcept { return storage_.is_locked(); }
+    [[nodiscard]] std::span<uint8_t> span() noexcept { return {data(), size()}; }
+    [[nodiscard]] std::span<const uint8_t> as_span() const noexcept { return {data(), size()}; }
+
+    [[nodiscard]] operator std::span<const uint8_t>() const noexcept { return as_span(); }
+
+private:
+    SecureString storage_;
 };
 
 }  // namespace crypto

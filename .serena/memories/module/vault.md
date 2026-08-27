@@ -287,11 +287,17 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   `fields`, `TagDescription::tag`/`text`, `TagFieldValue::tag`/`field`/`value` —
   is a `crypto::SecureString` (new `src/crypto/secure_string.h`: mlock'd
   best-effort, `crypto_wipe` on destroy, no SSO, copyable, explicit `.view()`,
-  `is_locked()`; OOM → empty). `SavedSearch::query` stays an opaque
-  `std::vector<uint8_t>`. Deserialise builds strings straight into
+  `is_locked()`; self-view-safe strong assignment; infallible value operations
+  terminate on OOM rather than create corrupt empty copies). `SavedSearch::query`
+  is a copyable `crypto::SecureBlob` because its opaque encoding contains
+  human-readable tags/group names/name filters. Deserialise builds strings straight into
   `SecureString`; the unlock path's decrypted index blob decrypts into
   `crypto::SecureBytes` (`try_load_slot` open_to + decode_frame SecureBytes
-  overload); `commit_index`/compact wipe the serialised plaintext after sealing.
+  overload); synchronous commits, compact, query serialization, and CommitLane
+  snapshots use `crypto::WipingBytes`, whose allocator wipes old capacities,
+  coalesced snapshots, failures, and final destruction. `secure_mem.h` tracks
+  locks per OS page so freeing one small allocator neighbor cannot unlock a
+  still-live secure string on the same page.
   Read sites use `.view()` / the provided `==`/`<=>` vs `std::string_view`;
   SearchHit/transient working sets copy to plain `std::string`. No `.osv`
   change — bytes are identical.

@@ -46,9 +46,21 @@ bool resize_buf(std::vector<uint8_t>& b, size_t n) noexcept
     return true;
 }
 
+bool resize_buf(crypto::WipingBytes& b, size_t n) noexcept
+{
+    try {
+        b.resize(n);
+    } catch (...) {
+        return false;
+    }
+    return true;
+}
+
 bool resize_buf(crypto::SecureBytes& b, size_t n) noexcept { return b.resize(n); }
 
 uint8_t* buf_data(std::vector<uint8_t>& b) noexcept { return b.data(); }
+
+uint8_t* buf_data(crypto::WipingBytes& b) noexcept { return b.data(); }
 
 uint8_t* buf_data(crypto::SecureBytes& b) noexcept { return b.data(); }
 
@@ -75,8 +87,8 @@ size_t try_deflate(std::span<const uint8_t> payload, std::span<uint8_t> dst) noe
 template <typename Buf>
 bool encode_impl(std::span<const uint8_t> payload, Buf& out) noexcept
 {
-    // Scratch for the compressed attempt. SecureBytes for both cases would be
-    // wasteful for the index; match the output buffer's locking.
+    // Scratch for the compressed attempt. Match the output buffer: SecureBytes is
+    // locked, WipingBytes is unlocked but wipes every released allocation.
     Buf scratch;
     const uint64_t bound =
         payload.size() > MZ_LEN_MAX
@@ -138,6 +150,9 @@ bool encode_frame(std::span<const uint8_t> payload, crypto::SecureBytes& out) no
 { return encode_impl(payload, out); }
 
 bool encode_frame(std::span<const uint8_t> payload, std::vector<uint8_t>& out) noexcept
+{ return encode_impl(payload, out); }
+
+bool encode_frame(std::span<const uint8_t> payload, crypto::WipingBytes& out) noexcept
 { return encode_impl(payload, out); }
 
 bool decode_frame(std::span<const uint8_t> framed, crypto::SecureBytes& out) noexcept

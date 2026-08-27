@@ -1623,7 +1623,9 @@ VaultResult VaultSearch::save_search(std::string_view name, const ui::AdvancedQu
     if (!v_.unlocked_) return Locked;
     if (name.empty()) return InvalidArg;
 
-    std::vector<uint8_t> blob = ui::serialize_query(query);
+    crypto::WipingBytes plain = ui::serialize_query(query);
+    crypto::SecureBlob blob;
+    if (!blob.assign(plain)) return CryptoError;
 
     // Upsert: replace an existing same-name entry, else append (bounded).
     for (auto& s : v_.saved_searches_) {
@@ -1915,7 +1917,7 @@ VaultResult Vault::compact(OpProgress* progress)
     // does not pin the dead tail. If that spot would overlap the currently
     // active blob (an already-tight vault), fall back to just after it —
     // the cost is one blob of slack, reclaimed by the next compact.
-    std::vector<uint8_t> plain;
+    crypto::WipingBytes plain;
     if (!index_io::serialize_plain_index(ctx, plain)) return CryptoError;
     const uint64_t sealed_len = plain.size() + crypto::TAG_SIZE;
     uint64_t dest = compact_plan::live_end(units, HEADER_SIZE);
@@ -1926,11 +1928,7 @@ VaultResult Vault::compact(OpProgress* progress)
             dest = s.offset + s.length;
         }
     }
-    if (index_io::commit_plain_blob_at(ctx, plain, dest) != Ok) {
-        crypto_wipe(plain.data(), plain.size());  // no plaintext lingers (Phase 91)
-        return IoError;
-    }
-    crypto_wipe(plain.data(), plain.size());
+    if (index_io::commit_plain_blob_at(ctx, plain, dest) != Ok) return IoError;
     if (!fileutil::truncate_file(fp_, dest + sealed_len)) return IoError;
 
     // Residual holes cost no physical disk where hole-punch exists (Linux;

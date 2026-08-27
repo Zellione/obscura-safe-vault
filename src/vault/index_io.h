@@ -35,7 +35,7 @@ namespace index_io {
 // Main-thread only (walks the tree). Pure memory operation — no I/O, no locks.
 // Returns true on success, false on serialization failure.
 [[nodiscard]] bool serialize_plain_index(const IndexIoContext& ctx,
-                                         std::vector<uint8_t>& out);
+                                         crypto::WipingBytes& out);
 
 // Seal `plain` (fresh nonce) and run the crash-safe 3-phase slot swap:
 //   Phase A: append sealed blob + fsync   (this fsync also flushes every chunk

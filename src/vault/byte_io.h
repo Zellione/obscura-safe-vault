@@ -69,16 +69,37 @@ inline uint64_t get_u64_at(std::span<const uint8_t> buf, size_t off) noexcept
 
 class ByteWriter {
 public:
-    explicit ByteWriter(std::vector<uint8_t>& out) noexcept : out_(out) {}
+    template <typename Alloc>
+    explicit ByteWriter(std::vector<uint8_t, Alloc>& out) noexcept
+        : out_(&out), push_(&push_impl<Alloc>), insert_(&insert_impl<Alloc>)
+    {}
 
-    void u8(uint8_t v)   { out_.push_back(v); }
-    void u16(uint16_t v) { for (int i = 0; i < 2; ++i) out_.push_back(static_cast<uint8_t>(v >> (8 * i))); }
-    void u32(uint32_t v) { for (int i = 0; i < 4; ++i) out_.push_back(static_cast<uint8_t>(v >> (8 * i))); }
-    void u64(uint64_t v) { for (int i = 0; i < 8; ++i) out_.push_back(static_cast<uint8_t>(v >> (8 * i))); }
-    void bytes(std::span<const uint8_t> b) { out_.insert(out_.end(), b.begin(), b.end()); }
+    void u8(uint8_t v)   { push_(out_, v); }
+    void u16(uint16_t v) { for (int i = 0; i < 2; ++i) push_(out_, static_cast<uint8_t>(v >> (8 * i))); }
+    void u32(uint32_t v) { for (int i = 0; i < 4; ++i) push_(out_, static_cast<uint8_t>(v >> (8 * i))); }
+    void u64(uint64_t v) { for (int i = 0; i < 8; ++i) push_(out_, static_cast<uint8_t>(v >> (8 * i))); }
+    void bytes(std::span<const uint8_t> b) { insert_(out_, b); }
 
 private:
-    std::vector<uint8_t>& out_;
+    template <typename Alloc>
+    static void push_impl(void* out, uint8_t value)
+    {
+        static_cast<std::vector<uint8_t, Alloc>*>(out)->push_back(value);
+    }
+
+    template <typename Alloc>
+    static void insert_impl(void* out, std::span<const uint8_t> bytes)
+    {
+        auto& v = *static_cast<std::vector<uint8_t, Alloc>*>(out);
+        v.insert(v.end(), bytes.begin(), bytes.end());
+    }
+
+    using PushFn = void (*)(void*, uint8_t);
+    using InsertFn = void (*)(void*, std::span<const uint8_t>);
+
+    void* out_;
+    PushFn push_;
+    InsertFn insert_;
 };
 
 // --- Bounds-checked reader (for parsing untrusted serialised blobs) ---------

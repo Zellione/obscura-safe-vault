@@ -279,7 +279,7 @@ void write_saved_searches(ByteWriter& w, const std::vector<SavedSearch>& searche
                                    ? INDEX_MAX_SAVED_QUERY_BYTES
                                    : static_cast<uint32_t>(q.size());
         w.u32(q_len);
-        w.bytes(std::span<const uint8_t>(q.data(), q_len));
+        w.bytes(q.as_span().first(q_len));
     }
 }
 
@@ -295,7 +295,7 @@ bool read_saved_searches(ByteReader& r, std::vector<SavedSearch>& searches)
         if (!read_string(r, s.name)) return false;
         const uint32_t q_len = r.u32();
         if (!r.ok() || q_len > INDEX_MAX_SAVED_QUERY_BYTES) return false;  // bound before alloc
-        s.query.resize(q_len);
+        if (!s.query.resize(q_len)) return false;
         if (q_len > 0) {
             r.bytes(std::span<uint8_t>(s.query.data(), q_len));
             if (!r.ok()) return false;
@@ -777,8 +777,9 @@ void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& sear
     serialize_index(root, searches, VaultSettings{}, out);
 }
 
-void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& searches,
-                     const VaultSettings& settings, std::vector<uint8_t>& out)
+template <typename Alloc>
+void serialize_index_to(const IndexNode& root, const std::vector<SavedSearch>& searches,
+                        const VaultSettings& settings, std::vector<uint8_t, Alloc>& out)
 {
     out.clear();
     ByteWriter w(out);
@@ -786,6 +787,18 @@ void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& sear
     write_node(w, root);
     write_saved_searches(w, searches);
     write_settings(w, settings);
+}
+
+void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& searches,
+                     const VaultSettings& settings, std::vector<uint8_t>& out)
+{
+    serialize_index_to(root, searches, settings, out);
+}
+
+void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& searches,
+                     const VaultSettings& settings, crypto::WipingBytes& out)
+{
+    serialize_index_to(root, searches, settings, out);
 }
 
 bool deserialize_index(std::span<const uint8_t> in, IndexNode& out)
