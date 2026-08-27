@@ -2,6 +2,7 @@
 
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -224,18 +225,19 @@ TEST(secure_mem_overlapping_page_locks_are_reference_counted)
 {
     // Normal allocator blocks frequently share a page. Releasing one range
     // must not munlock a page still occupied by another secure allocation.
-    alignas(65536) std::array<uint8_t, 65536> page{};
-    REQUIRE(crypto::detail::memory_page_size() <= page.size());
-    REQUIRE(crypto::detail::mem_lock(page.data(), 1));
-    REQUIRE(crypto::detail::mem_lock(page.data() + 1, 1));
-    CHECK_EQ(crypto::detail::locked_page_refcount_for_tests(page.data()),
-             static_cast<size_t>(2));
-    crypto::detail::mem_unlock(page.data(), 1);
-    CHECK_EQ(crypto::detail::locked_page_refcount_for_tests(page.data()),
-             static_cast<size_t>(1));
-    crypto::detail::mem_unlock(page.data() + 1, 1);
-    CHECK_EQ(crypto::detail::locked_page_refcount_for_tests(page.data()),
-             static_cast<size_t>(0));
+    std::array<uint8_t, 131072> storage{};
+    const size_t page_size = crypto::detail::memory_page_size();
+    REQUIRE(page_size <= storage.size() / 2);
+    const auto address = reinterpret_cast<std::uintptr_t>(storage.data());
+    const size_t offset = page_size - (address % page_size);
+    uint8_t* const page = storage.data() + offset;
+    REQUIRE(crypto::detail::mem_lock(page, 1));
+    REQUIRE(crypto::detail::mem_lock(page + 1, 1));
+    CHECK_EQ(crypto::detail::locked_page_refcount_for_tests(page), static_cast<size_t>(2));
+    crypto::detail::mem_unlock(page, 1);
+    CHECK_EQ(crypto::detail::locked_page_refcount_for_tests(page), static_cast<size_t>(1));
+    crypto::detail::mem_unlock(page + 1, 1);
+    CHECK_EQ(crypto::detail::locked_page_refcount_for_tests(page), static_cast<size_t>(0));
 }
 
 TEST(wiping_bytes_zeroes_every_allocation_before_release)
