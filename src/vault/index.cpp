@@ -592,7 +592,7 @@ VaultSettings VaultSettings::seeded()
     VaultSettings s;
     std::vector<TagCategory> seeded_categories;
     seeded_categories.reserve(8);
-    for (const auto [name, swatch] : std::array<std::pair<const char*, uint8_t>, 8>{{
+    for (const auto& [name, swatch] : std::array<std::pair<const char*, uint8_t>, 8>{{
              {"artist", 0},
              {"character", 1},
              {"parody", 2},

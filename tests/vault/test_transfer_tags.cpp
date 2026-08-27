@@ -28,7 +28,7 @@ static bool tags_eq(const std::vector<crypto::SecureString>& tags,
 {
     if (tags.size() != want.size()) return false;
     size_t i = 0;
-    for (const auto w : want) {
+    for (const auto& w : want) {
         if (tags[i] != w) return false;
         ++i;
     }
