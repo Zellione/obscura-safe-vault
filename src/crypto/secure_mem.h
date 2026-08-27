@@ -11,6 +11,7 @@
 // the alternative — refusing to run — is worse for usability and we still get
 // the wipe guarantee. is_locked() exposes the outcome for diagnostics/tests.
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -30,17 +31,35 @@
 
 namespace crypto {
 
+// Process-wide record that at least one mlock/VirtualLock has failed this
+// process. should_warn_mlock_once() flips it (returning true exactly once, to
+// log the warning); mlock_failure_seen() reports it, so the UI can surface
+// that some decoded data is sitting in swappable memory (Phase 6c).
+// The flag lives as a function-local static behind this accessor rather than a
+// namespace-scope global (cpp:S5421). Semantics are unchanged: the inline
+// function's static is a single program-wide instance, initialized on first
+// use (thread-safe, immune to cross-translation-unit init order).
+[[nodiscard]] inline std::atomic_bool& mlock_failed_flag() noexcept
+{
+    static std::atomic_bool flag{false};
+    return flag;
+}
+
 // Thread-safe helper: should we warn about the first mlock failure?
 // Returns true exactly once per process; all subsequent calls return false.
 // Used by both SecureBuffer and SecureBytes to log a prominent warning on the
 // first mlock failure, then stay silent on subsequent failures.
 inline bool should_warn_mlock_once() noexcept
 {
-    // Use a static atomic_flag (initialized to false by default).
-    // The test_and_set() returns the old value; the first call gets false and we
-    // set it to true. Subsequent calls get true and do nothing.
-    static std::atomic_flag warned;
-    return !warned.test_and_set();
+    bool expected = false;
+    return mlock_failed_flag().compare_exchange_strong(expected, true);
+}
+
+// True once any mlock/VirtualLock has failed (i.e. some secret buffer degraded
+// to swappable memory). Monotonic: never goes back to false in a process.
+[[nodiscard]] inline bool mlock_failure_seen() noexcept
+{
+    return mlock_failed_flag().load();
 }
 
 // Platform-appropriate remedy advice for the once-per-process mlock warning.
@@ -230,6 +249,31 @@ public:
     [[nodiscard]] size_t         size()  const noexcept { return size_; }
     [[nodiscard]] bool           empty() const noexcept { return size_ == 0; }
     [[nodiscard]] bool           is_locked() const noexcept { return locked_; }
+
+    // Unchecked element access — callers own the bounds (the buffer is sized
+    // exactly for its contents, e.g. decoded pixels are always w*h*3 bytes).
+    [[nodiscard]] uint8_t& operator[](size_t i) noexcept { return data_[i]; }
+    [[nodiscard]] const uint8_t& operator[](size_t i) const noexcept { return data_[i]; }
+
+    // Copy from an external buffer, resizing (and wiping) first. Returns false
+    // — leaving the object empty — if the span is null with non-zero size or
+    // the allocation fails.
+    [[nodiscard]] bool assign(std::span<const uint8_t> src)
+    {
+        if (src.size() && !src.data()) return false;
+        if (!resize(src.size())) return false;
+        std::copy_n(src.data(), src.size(), data_.get());
+        return true;
+    }
+
+    // Resize to n and fill with v (solid-colour buffers). False on allocation
+    // failure, leaving the object empty.
+    [[nodiscard]] bool fill(size_t n, uint8_t v)
+    {
+        if (!resize(n)) return false;
+        std::fill_n(data_.get(), n, v);
+        return true;
+    }
 
     [[nodiscard]] std::span<uint8_t>       span()       noexcept { return {data_.get(), size_}; }
     [[nodiscard]] std::span<const uint8_t> as_span() const noexcept { return {data_.get(), size_}; }

@@ -624,13 +624,14 @@ std::optional<image::ImageData> VideoDecoder::decode_poster_rgb()
         result.width  = w;
         result.height = h;
         result.format = image::ImageFormat::Unknown;
-        result.pixels.resize(static_cast<size_t>(w) * h * 3);
-        for (int y = 0; y < h; ++y) {
-            std::memcpy(result.pixels.data() + static_cast<size_t>(y) * w * 3,
-                        dst_data[0] + static_cast<size_t>(y) * dst_linesize[0],
-                        static_cast<size_t>(w) * 3);
+        if (result.pixels.resize(static_cast<size_t>(w) * h * 3)) {
+            for (int y = 0; y < h; ++y) {
+                std::memcpy(result.pixels.data() + static_cast<size_t>(y) * w * 3,
+                            dst_data[0] + static_cast<size_t>(y) * dst_linesize[0],
+                            static_cast<size_t>(w) * 3);
+            }
+            out = std::move(result);
         }
-        out = std::move(result);
     }
 
     av_freep(&dst_data[0]);

@@ -1,0 +1,6 @@
+# re-include THIS Makefile (the top-level .gitignore ignores the premake gmake
+# fallback "Makefile", which is generated, not committed)
+!Makefile
+
+# built binary (make)
+/kdf_bench

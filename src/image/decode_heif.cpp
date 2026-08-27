@@ -63,7 +63,7 @@ std::optional<ImageData> decode_heif_from_memory(std::span<const uint8_t> data)
         d.height = h;
         // The container brand decides the tag; libheif handles either decoder.
         d.format = (detect_format(data) == AVIF) ? AVIF : HEIC;
-        d.pixels.resize(static_cast<size_t>(w) * h * 3);
+        if (!d.pixels.resize(static_cast<size_t>(w) * h * 3)) return std::nullopt;
         // Copy row by row: the plane is padded to `stride`, our buffer is tight.
         for (int y = 0; y < h; ++y)
             std::memcpy(d.pixels.data() + static_cast<size_t>(y) * w * 3,

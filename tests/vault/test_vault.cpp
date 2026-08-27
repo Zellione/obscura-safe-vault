@@ -7,8 +7,13 @@
 #include <string>
 #include <vector>
 
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
+
 #include "image/fixtures.h"
 #include "platform/path_utf8.h"
+#include "vault/file_util.h"
 #include "vault/vault.h"
 #include "vault/vault_ops.h"
 
@@ -81,6 +86,72 @@ TEST(vault_create_leaves_vault_unlocked)
             == vault::VaultResult::Ok);
     CHECK_TRUE(v.is_unlocked());
 }
+
+// Phase 88: a new vault is owner-only secret material (like a keyfile) — it
+// must never be created with group/other read permission (0644 via umask), and
+// creating over an existing file must fail instead of truncating it.
+TEST(vault_create_refuses_existing_file)
+{
+    TempVault tv("exists");
+    {
+        std::ofstream f(tv.path, std::ios::binary);
+        f << "keep-me";
+    }
+    vault::Vault v;
+    CHECK(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+          == vault::VaultResult::AlreadyExists);
+    CHECK_FALSE(v.is_unlocked());
+
+    std::ifstream g(tv.path, std::ios::binary);
+    std::string kept((std::istreambuf_iterator<char>(g)), std::istreambuf_iterator<char>());
+    CHECK_EQ(kept, std::string("keep-me"));
+}
+
+TEST(vault_create_failure_removes_the_exclusively_created_file)
+{
+    TempVault tv("create-fail-cleanup");
+    vault::fileutil::inject_sync_failure(0);
+
+    vault::Vault v;
+    CHECK(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+          == vault::VaultResult::IoError);
+    vault::fileutil::inject_sync_failure(-1);
+
+    CHECK_FALSE(std::filesystem::exists(tv.path));
+    CHECK(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+          == vault::VaultResult::Ok);
+}
+
+#ifndef _WIN32
+TEST(vault_create_file_is_owner_only)
+{
+    TempVault tv("perm");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+            == vault::VaultResult::Ok);
+    struct stat sb{};
+    REQUIRE(::stat(tv.path.c_str(), &sb) == 0);
+    CHECK_EQ(static_cast<int>(sb.st_mode & 0777), 0600);
+}
+
+TEST(vault_open_enforces_owner_only)
+{
+    TempVault tv("enforce");
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+                == vault::VaultResult::Ok);
+    }
+    // Simulate a vault that arrived with group/other read permission.
+    REQUIRE(::chmod(tv.path.c_str(), 0644) == 0);
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
+    struct stat sb{};
+    REQUIRE(::stat(tv.path.c_str(), &sb) == 0);
+    CHECK_EQ(static_cast<int>(sb.st_mode & 0777), 0600);
+}
+#endif
 
 TEST(vault_add_and_read_image_same_session)
 {

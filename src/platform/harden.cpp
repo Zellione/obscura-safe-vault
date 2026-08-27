@@ -1,6 +1,7 @@
 #include "harden.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include "platform/safe_print.h"
@@ -91,6 +92,21 @@ bool grow_secure_mem_budget(size_t bytes) noexcept
         (void)getrlimit(RLIMIT_MEMLOCK, &rl);
     }
     return rl.rlim_cur == RLIM_INFINITY || rl.rlim_cur >= bytes;
+#endif
+}
+
+size_t lockable_budget_bytes() noexcept
+{
+#if defined(_WIN32)
+    SIZE_T cur_min = 0;
+    SIZE_T cur_max = 0;
+    if (GetProcessWorkingSetSize(GetCurrentProcess(), &cur_min, &cur_max) == 0)
+        return 0;
+    return static_cast<size_t>(cur_min);
+#else
+    struct rlimit rl{};
+    if (getrlimit(RLIMIT_MEMLOCK, &rl) != 0) return 0;
+    return rl.rlim_cur == RLIM_INFINITY ? SIZE_MAX : static_cast<size_t>(rl.rlim_cur);
 #endif
 }
 

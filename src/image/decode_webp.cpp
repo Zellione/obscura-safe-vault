@@ -45,7 +45,7 @@ std::optional<ImageData> decode_animated_webp_first_frame(std::span<const uint8_
         img.width  = static_cast<int>(info.canvas_width);
         img.height = static_cast<int>(info.canvas_height);
         img.format = ImageFormat::WebP;
-        img.pixels.resize(w * h * 3);
+        if (!img.pixels.resize(w * h * 3)) return std::nullopt;
 
         // Straight (non-premultiplied) alpha over black: dst = src * a.
         for (size_t px = 0; px < w * h; ++px) {
@@ -87,7 +87,7 @@ std::optional<ImageData> decode_webp_from_memory(std::span<const uint8_t> data)
     img.width  = w;
     img.height = h;
     img.format = ImageFormat::WebP;
-    img.pixels.resize(static_cast<size_t>(w) * h * 3);
+    if (!img.pixels.resize(static_cast<size_t>(w) * h * 3)) return std::nullopt;
 
     if (const int stride = w * 3;
         !WebPDecodeRGBInto(data.data(), data.size(),

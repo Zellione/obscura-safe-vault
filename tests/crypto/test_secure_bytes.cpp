@@ -75,3 +75,48 @@ TEST(secure_bytes_span_view_matches_data)
     REQUIRE(sp.size() == buf.size());
     CHECK(sp.data() == buf.data());
 }
+
+TEST(secure_bytes_operator_index_read_write)
+{
+    crypto::SecureBytes buf(8);
+    for (size_t i = 0; i < buf.size(); ++i) buf[i] = static_cast<uint8_t>(i * 7);
+    bool ok = true;
+    for (size_t i = 0; i < buf.size(); ++i)
+        if (buf[i] != static_cast<uint8_t>(i * 7)) ok = false;
+    CHECK_TRUE(ok);
+}
+
+TEST(secure_bytes_assign_copies_source)
+{
+    const uint8_t src[] = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02};
+    crypto::SecureBytes buf;
+    REQUIRE(buf.assign(std::span(src)));
+    CHECK_EQ(buf.size(), sizeof(src));
+    bool ok = true;
+    for (size_t i = 0; i < sizeof(src); ++i)
+        if (buf[i] != src[i]) ok = false;
+    CHECK_TRUE(ok);
+}
+
+TEST(secure_bytes_assign_replaces_previous_contents)
+{
+    const uint8_t first[] = {1, 2, 3, 4, 5, 6};
+    const uint8_t second[] = {9};
+    crypto::SecureBytes buf;
+    REQUIRE(buf.assign(std::span(first)));
+    REQUIRE(buf.assign(std::span(second)));
+    CHECK_EQ(buf.size(), static_cast<size_t>(1));
+    CHECK_EQ(buf[0], 9);
+}
+
+// Phase 6c: the UI needs to know whether ANY mlock has failed this process
+// (decoded data then sits in swappable memory). Order-independent: whatever
+// earlier tests did to the process-wide flag, seen() becomes true after the
+// first warn-gate call and stays true, while the gate itself stays exhausted.
+TEST(mlock_failure_seen_tracks_the_warn_gate)
+{
+    (void)crypto::should_warn_mlock_once();
+    CHECK_TRUE(crypto::mlock_failure_seen());
+    CHECK_FALSE(crypto::should_warn_mlock_once());
+    CHECK_TRUE(crypto::mlock_failure_seen());
+}
