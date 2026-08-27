@@ -535,13 +535,18 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
                           Vault& out)
 {
     out.reset();
+    const std::filesystem::path vault_path = platform::utf8_to_path(path);
+    const auto discard_failed_create = [&vault_path]() noexcept {
+        std::error_code ec;
+        (void)std::filesystem::remove(vault_path, ec);
+    };
 
     // A vault is secret material like a keyfile: claim the file atomically
     // (never truncate an existing one) with owner-only permissions from the
     // first byte, instead of "w+b" landing 0644 under a default umask.
     std::FILE* fp = nullptr;
     const platform::OwnerOnlyCreate created =
-        platform::create_owner_only_file(platform::utf8_to_path(path), fp);
+        platform::create_owner_only_file(vault_path, fp);
     if (created == platform::OwnerOnlyCreate::AlreadyExists) return VaultResult::AlreadyExists;
     if (created != platform::OwnerOnlyCreate::Ok) return VaultResult::IoError;
 
@@ -556,10 +561,12 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     if (!crypto::fill_random(h.salt) || !crypto::fill_random(master.span()) ||
         !crypto::fill_random(h.mk_nonce)) {
         std::fclose(fp);
+        discard_failed_create();
         return VaultResult::CryptoError;
     }
     if (!crypto::derive_key(password, keyfile, h.salt, params, kek)) {
         std::fclose(fp);
+        discard_failed_create();
         return VaultResult::CryptoError;
     }
 
@@ -567,6 +574,7 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     std::vector<uint8_t> wrapped;
     if (!crypto::seal(kek.as_span(), h.mk_nonce, master.as_span(), wrapped)) {
         std::fclose(fp);
+        discard_failed_create();
         return VaultResult::CryptoError;
     }
     std::memcpy(h.wrapped_master_key.data(), wrapped.data(), crypto::KEY_SIZE);
@@ -577,6 +585,7 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     if (const std::array<uint8_t, HEADER_SIZE> placeholder{};
         std::fwrite(placeholder.data(), 1, placeholder.size(), fp) != placeholder.size()) {
         std::fclose(fp);
+        discard_failed_create();
         return VaultResult::IoError;
     }
 
@@ -598,13 +607,15 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     // Write the initial (empty) index + a valid header via the crash-safe path.
     if (const VaultResult r = out.commit_index(); r != VaultResult::Ok) {
         out.reset();
+        discard_failed_create();
         return r;
     }
 
     // Open read_fp_ after the initial commit so it sees the complete file.
-    out.read_fp_ = platform::fopen_path(platform::utf8_to_path(path), "rb");
+    out.read_fp_ = platform::fopen_path(vault_path, "rb");
     if (!out.read_fp_) {
         out.reset();
+        discard_failed_create();
         return VaultResult::IoError;
     }
     // Disable buffering on read_fp_ so it always reads fresh from disk,
@@ -612,9 +623,10 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     std::setvbuf(out.read_fp_, nullptr, _IONBF, 0);
 
     // Open thumb_fp_ the same way for thread-safe background thumbnail reads.
-    out.thumb_fp_ = platform::fopen_path(platform::utf8_to_path(path), "rb");
+    out.thumb_fp_ = platform::fopen_path(vault_path, "rb");
     if (!out.thumb_fp_) {
         out.reset();
+        discard_failed_create();
         return VaultResult::IoError;
     }
     std::setvbuf(out.thumb_fp_, nullptr, _IONBF, 0);

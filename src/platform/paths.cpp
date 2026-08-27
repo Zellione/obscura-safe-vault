@@ -355,8 +355,8 @@ void ensure_owner_only_file(const std::filesystem::path& path)
         // SetNamedSecurityInfoW takes LPWSTR (non-const) for a read-only name;
         // const_cast is the standard idiom for this Windows API wart.
         ok = ::SetNamedSecurityInfoW(const_cast<wchar_t*>(path.c_str()), SE_FILE_OBJECT,
-                                     DACL_SECURITY_INFORMATION, owner_only.acl, nullptr,
-                                     nullptr, nullptr) == ERROR_SUCCESS;
+                                     DACL_SECURITY_INFORMATION, nullptr, nullptr,
+                                     owner_only.acl, nullptr) == ERROR_SUCCESS;
     }
 #else
     ok = ::chmod(path.c_str(), S_IRUSR | S_IWUSR) == 0;

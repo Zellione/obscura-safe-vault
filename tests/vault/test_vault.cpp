@@ -13,6 +13,7 @@
 
 #include "image/fixtures.h"
 #include "platform/path_utf8.h"
+#include "vault/file_util.h"
 #include "vault/vault.h"
 #include "vault/vault_ops.h"
 
@@ -104,6 +105,21 @@ TEST(vault_create_refuses_existing_file)
     std::ifstream g(tv.path, std::ios::binary);
     std::string kept((std::istreambuf_iterator<char>(g)), std::istreambuf_iterator<char>());
     CHECK_EQ(kept, std::string("keep-me"));
+}
+
+TEST(vault_create_failure_removes_the_exclusively_created_file)
+{
+    TempVault tv("create-fail-cleanup");
+    vault::fileutil::inject_sync_failure(0);
+
+    vault::Vault v;
+    CHECK(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+          == vault::VaultResult::IoError);
+    vault::fileutil::inject_sync_failure(-1);
+
+    CHECK_FALSE(std::filesystem::exists(tv.path));
+    CHECK(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
+          == vault::VaultResult::Ok);
 }
 
 #ifndef _WIN32
