@@ -76,7 +76,7 @@ void draw_batch_delete_confirm(gfx::Renderer& r, gfx::FontAtlas& font,
 {
     using namespace gfx::theme;
 
-    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});   // veil
+    r.draw_rect({0, 0, W, H}, MODAL_VEIL);   // veil
 
     const float pw = 560;
     const float ph = 200;

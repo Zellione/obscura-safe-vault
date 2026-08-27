@@ -9,6 +9,8 @@ Referenced from `mem:core`. Covers `src/gfx/`.
   `active_theme()` swap the active one; the `theme::X` tokens are references into it so every
   call site tracks a switch. `theme_slug`/`theme_from_slug`/`theme_name` are pure helpers.
   `THEME_COUNT` = 4.
+  Modal veils and neutral media black/white are theme tokens too; UI code must not
+  bypass the palette with literal `gfx::Color` values.
   Phase 49 tag palette: `TAG_SWATCH_COUNT` = 16, `gfx::tag_swatch(i)` and
   `gfx::tag_swatch_name(i)` (out-of-range indices are handled, not UB). Because a chip paints
   the tag TEXT, each swatch carries an **on-dark and an on-light RGB** and `tag_swatch`

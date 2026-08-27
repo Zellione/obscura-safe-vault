@@ -69,7 +69,7 @@ void VolumeSetDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, fl
     const float px = (W - pw) / 2;
     const float py = (H - ph) / 2;
 
-    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
+    r.draw_rect({0, 0, W, H}, MODAL_VEIL);
     r.draw_round_rect({px, py, pw, ph}, RADIUS, SURFACE);
     // The border says at a glance whether this is actionable at all.
     r.draw_round_rect({px, py, pw, ph}, RADIUS, summary_.can_import ? ACCENT : DANGER,

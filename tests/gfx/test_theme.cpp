@@ -7,12 +7,13 @@
 
 namespace {
 
-// The 16 colour tokens of a Theme, in one list, so a test can sweep them all.
-std::array<gfx::Color, 16> tokens(const gfx::Theme& t)
+// Every colour token of a Theme, in one list, so a test can sweep them all.
+std::array<gfx::Color, 19> opaque_tokens(const gfx::Theme& t)
 {
     return {t.bg, t.surface, t.surface_hi, t.border, t.accent, t.accent_dim,
             t.text, t.text_dim, t.text_faint, t.folder, t.favorite, t.danger,
-            t.warn, t.ok, t.img_bg, t.strip_bg};
+            t.warn, t.ok, t.img_bg, t.strip_bg, t.modal_veil,
+            t.media_black, t.media_white};
 }
 
 bool color_eq(const gfx::Color& a, const gfx::Color& b)
@@ -34,7 +35,7 @@ TEST(theme_presets_define_all_tokens_opaque)
     // half-transparent / zeroed sentinel.
     for (int i = 0; i < gfx::THEME_COUNT; ++i) {
         const auto& t = gfx::theme_preset(static_cast<gfx::ThemeId>(i));
-        for (const auto& c : tokens(t)) CHECK_EQ(static_cast<int>(c.a), 255);
+        for (const auto& c : opaque_tokens(t)) CHECK_EQ(static_cast<int>(c.a), 255);
     }
 }
 
@@ -92,6 +93,19 @@ TEST(set_theme_switches_active_and_tokens)
 
     gfx::set_theme(gfx::ThemeId::Midnight);
     CHECK_TRUE(color_eq(gfx::theme::ACCENT, gfx::theme_preset(gfx::ThemeId::Midnight).accent));
+    CHECK_TRUE(color_eq(gfx::theme::MODAL_VEIL,
+                        gfx::theme_preset(gfx::ThemeId::Midnight).modal_veil));
+}
+
+TEST(modal_and_media_tokens_have_their_required_alpha)
+{
+    for (int i = 0; i < gfx::THEME_COUNT; ++i) {
+        const auto& t = gfx::theme_preset(static_cast<gfx::ThemeId>(i));
+        CHECK_EQ(t.modal_veil.a, 255);
+        CHECK(t.modal_veil_translucent.a > 0 && t.modal_veil_translucent.a < 255);
+        CHECK_EQ(t.media_black.a, 255);
+        CHECK_EQ(t.media_white.a, 255);
+    }
 }
 
 TEST(set_theme_out_of_range_falls_back_to_default)

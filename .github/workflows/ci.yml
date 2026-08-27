@@ -609,6 +609,8 @@ jobs:
           # so SDL never tries to open a display on the CI runner.
           SDL_VIDEODRIVER: dummy
           TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+          LIBVA_DRIVER_NAME: null
+          LIBVA_DRIVERS_PATH: /nonexistent
         run: ./build/bin/Debug-tsan/osv_tests
 
   # ===========================================================================

@@ -34,6 +34,10 @@ struct Theme {
     Color ok;            // strong strength
     Color img_bg;        // viewer image backdrop
     Color strip_bg;      // thumbnail strip backdrop
+    Color modal_veil;    // opaque modal/input-focus veil
+    Color modal_veil_translucent; // overlay veil that preserves context beneath
+    Color media_black;   // neutral backing behind aspect-fitted media
+    Color media_white;   // neutral media glyph/modulation foreground
 };
 
 // Built-in presets. RefinedSlate is the default (the original palette).
@@ -96,6 +100,10 @@ extern const Color& WARN;
 extern const Color& OK;
 extern const Color& IMG_BG;
 extern const Color& STRIP_BG;
+extern const Color& MODAL_VEIL;
+extern const Color& MODAL_VEIL_TRANSLUCENT;
+extern const Color& MEDIA_BLACK;
+extern const Color& MEDIA_WHITE;
 
 } // namespace theme
 

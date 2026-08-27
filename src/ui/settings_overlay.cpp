@@ -468,7 +468,7 @@ void draw_settings_overlay(gfx::Renderer& r, gfx::FontAtlas& font,
     }
 
     // Veil
-    r.draw_rect({.x = 0, .y = 0, .w = win_w, .h = win_h}, gfx::Color{.r = 8, .g = 9, .b = 12, .a = 255});
+    r.draw_rect({.x = 0, .y = 0, .w = win_w, .h = win_h}, gfx::theme::MODAL_VEIL);
 
     // Panel dimensions
     const float panel_w = std::min(800.0f, win_w - 80.0f);

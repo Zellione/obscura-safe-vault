@@ -38,6 +38,10 @@ scripts/test.sh --asan    # AddressSanitizer + UBSan + LSan
 scripts/test.sh --release
 scripts/test.sh --tsan    # ThreadSanitizer (mutually exclusive with --asan)
 ```
+The TSan wrapper forces `LIBVA_DRIVER_NAME=null` and
+`LIBVA_DRIVERS_PATH=/nonexistent`; this prevents races in host Mesa VAAPI drivers
+from terminating the suite early. Hardware-unavailable fallback remains covered
+by deterministic project tests.
 `gen.sh`, `build.sh`, and `test.sh` run `scripts/check_submodules.sh` first and
 report any uninitialized vendored submodules with the exact recovery command.
 Sanitizer builds are isolated (PR #122): `--asan`/`--tsan` output to

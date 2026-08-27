@@ -330,7 +330,7 @@ void UnlockScreen::render(gfx::Renderer& r)
         btn(L0.new_keyfile_btn, "New keyfile...");
         if (password_.reveal && !password_.pw.empty()) {
             // string_view straight over the mlock'd buffer — no unlocked copy.
-            r.draw_text(font_, fx, 372, password_.pw.text_view(), gfx::Color{200, 210, 160, 255});
+            r.draw_text(font_, fx, 372, fit_text(font_, password_.pw.text_view(), fw), OK);
             r.draw_text(font_, fx, 398, "Write this down, then press Create.", TEXT_DIM);
         }
     }
