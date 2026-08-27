@@ -41,7 +41,7 @@ void ConsentDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, floa
 
     // Veil the whole window so the modal clearly owns input focus. A solid dark
     // fill keeps this deterministic regardless of the current render blend mode.
-    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
+    r.draw_rect({0, 0, W, H}, MODAL_VEIL);
 
     const float pw = 560;
     const float ph = 230;

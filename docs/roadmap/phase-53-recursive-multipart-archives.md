@@ -85,14 +85,15 @@ correctly and imported as flat archives; ZIP64 spanned is rejected with a messag
 `Ctrl+A` shortcut toggles all-selected on the current gallery's direct children,
 displayed in the `F1` help. All tests pass under `scripts/test.sh` and `--asan`.
 
-**Status:** 🔜 In progress — every planned task implemented; polish outstanding.
+**Status:** ✅ Complete — the remaining items below are accepted limitations and
+future polish, not incomplete acceptance criteria.
 
 Everything below the UI is implemented and tested: kind detection, nested planning,
 the depth-first walker + its five guards, real backends, queue integration, meta.json
 at every level, volume-set detection, all three assembly routes, and the spanned-ZIP
 merger. 1304 → 1438 tests, green under `scripts/test.sh`, `--asan` and `--tsan`.
 
-**Outstanding:**
+**Accepted limitations / future polish:**
 - Per-reason skip tallies on the Import Status screen (currently collapsed into one number).
 - Distinguishing an encrypted nested archive from an unreadable one.
 - An encrypted SPLIT set cannot be prompted for a password: encryption is not

@@ -28,6 +28,10 @@ constexpr std::array<Theme, THEME_COUNT> PRESETS = {{
         .ok         = {130, 220, 140, 255},
         .img_bg     = {12, 12, 16, 255},
         .strip_bg   = {20, 22, 27, 255},
+        .modal_veil = {8, 9, 12, 255},
+        .modal_veil_translucent = {8, 9, 12, 200},
+        .media_black = {0, 0, 0, 255},
+        .media_white = {255, 255, 255, 255},
     },
     // Light — bright surfaces, dark ink; the same violet accent darkened for
     // contrast on light backgrounds.
@@ -48,6 +52,10 @@ constexpr std::array<Theme, THEME_COUNT> PRESETS = {{
         .ok         = {40, 150, 70, 255},
         .img_bg     = {225, 227, 232, 255},
         .strip_bg   = {236, 238, 242, 255},
+        .modal_veil = {225, 227, 232, 255},
+        .modal_veil_translucent = {225, 227, 232, 200},
+        .media_black = {0, 0, 0, 255},
+        .media_white = {255, 255, 255, 255},
     },
     // HighContrast — pure black base, bright white ink, vivid yellow accent and
     // strong borders for maximum legibility.
@@ -68,6 +76,10 @@ constexpr std::array<Theme, THEME_COUNT> PRESETS = {{
         .ok         = {0, 255, 120, 255},
         .img_bg     = {0, 0, 0, 255},
         .strip_bg   = {12, 12, 12, 255},
+        .modal_veil = {0, 0, 0, 255},
+        .modal_veil_translucent = {0, 0, 0, 220},
+        .media_black = {0, 0, 0, 255},
+        .media_white = {255, 255, 255, 255},
     },
     // Midnight — deep navy base with an azure accent; a cooler dark theme.
     Theme{
@@ -87,6 +99,10 @@ constexpr std::array<Theme, THEME_COUNT> PRESETS = {{
         .ok         = {120, 214, 160, 255},
         .img_bg     = {6, 9, 20, 255},
         .strip_bg   = {12, 17, 32, 255},
+        .modal_veil = {5, 7, 14, 255},
+        .modal_veil_translucent = {5, 7, 14, 200},
+        .media_black = {0, 0, 0, 255},
+        .media_white = {255, 255, 255, 255},
     },
 }};
 
@@ -227,6 +243,10 @@ const Color& WARN       = mutable_active().warn;
 const Color& OK         = mutable_active().ok;
 const Color& IMG_BG     = mutable_active().img_bg;
 const Color& STRIP_BG   = mutable_active().strip_bg;
+const Color& MODAL_VEIL = mutable_active().modal_veil;
+const Color& MODAL_VEIL_TRANSLUCENT = mutable_active().modal_veil_translucent;
+const Color& MEDIA_BLACK = mutable_active().media_black;
+const Color& MEDIA_WHITE = mutable_active().media_white;
 
 } // namespace theme
 

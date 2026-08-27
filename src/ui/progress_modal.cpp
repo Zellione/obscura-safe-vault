@@ -11,7 +11,7 @@ void draw_op_progress(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
                       const OpProgressModal& m)
 {
     using namespace gfx::theme;
-    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});   // full veil
+    r.draw_rect({0, 0, W, H}, MODAL_VEIL);   // full veil
 
     // PAD is the uniform inset used for the title, the bar and the hint. The hint
     // is one full line tall (the font's pixel height), so its top must sit a line

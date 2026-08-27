@@ -934,7 +934,7 @@ void render_delete_confirm_modal(GalleryGrid& g, gfx::Renderer& r, float W, floa
         draw_batch_delete_confirm(r, g.font_, W, H, g.naming_.batch_summary);
     } else {
         // Single-item delete modal (kept byte-identical)
-        r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});   // veil
+        r.draw_rect({0, 0, W, H}, MODAL_VEIL);   // veil
 
         const float pw = 560;
         const float ph = 200;
@@ -2076,7 +2076,7 @@ void GalleryGrid::render(gfx::Renderer& r)
 
     // Compact-confirmation modal: shows the waste to reclaim (Phase 26).
     if (naming_.confirm_compact) {
-        r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});   // veil
+        r.draw_rect({0, 0, W, H}, MODAL_VEIL);   // veil
 
         const float pw = 560;
         const float ph = 200;
@@ -2110,7 +2110,7 @@ void GalleryGrid::render(gfx::Renderer& r)
     // needs_password (encrypted zip/cbz) — masked text entry, mirrors the
     // UnlockScreen password field's styling (Phase 35).
     if (naming_.password.active) {
-        r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});   // veil
+        r.draw_rect({0, 0, W, H}, MODAL_VEIL);   // veil
 
         const float pw = 480;
         const float ph = 160;

@@ -133,4 +133,4 @@ directly inside it without changing any grid metric. A gallery shows — and is 
 by searching for — the tags carried by its contents, with tag-overview counts
 unchanged. All tests pass under `scripts/test.sh` and `--asan`.
 
-**Status:** ⬜ Not started
+**Status:** ✅ Complete

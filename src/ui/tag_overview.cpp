@@ -433,7 +433,7 @@ void TagOverviewScreen::render_prune_confirm(gfx::Renderer& r, float win_w, floa
     using namespace gfx::theme;
     if (!confirm_prune_) return;
 
-    r.draw_rect({0, 0, win_w, win_h}, gfx::Color{8, 9, 12, 255});   // veil
+    r.draw_rect({0, 0, win_w, win_h}, MODAL_VEIL);   // veil
 
     const float pw = 560;
     const float ph = 160;

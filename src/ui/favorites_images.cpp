@@ -58,7 +58,7 @@ bool FavoritesImages::pump_thumbs()
 void FavoritesImages::draw_tile_content(gfx::Renderer& r, const vault::SearchHit& hit,
                                         const SDL_FRect& box)
 {
-    r.draw_rect(box, gfx::Color{0, 0, 0, 255});   // black backing, never stretched
+    r.draw_rect(box, gfx::theme::MEDIA_BLACK);   // black backing, never stretched
     if (SDL_Texture* tex = thumb_texture(*hit.node)) {
         float tw = 0;
         float th = 0;

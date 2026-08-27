@@ -117,7 +117,7 @@ void FailureListDialog::render(gfx::Renderer& r, gfx::FontAtlas& font, float W, 
 
     // Veil the whole window so the modal clearly owns input focus. A solid dark
     // fill keeps this deterministic regardless of the current render blend mode.
-    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
+    r.draw_rect({0, 0, W, H}, MODAL_VEIL);
 
     // Centered 0.7W × 0.7H modal with rounded corners.
     const float mw = W * 0.7f;

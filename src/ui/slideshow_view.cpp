@@ -112,8 +112,9 @@ void SlideshowView::render(gfx::Renderer& r, gfx::FontAtlas& font, FullTexCache&
         r.draw_image(prev_ft->tex, fit_dest(prev_ft->w, prev_ft->h, vp));
     if (cur_ft) {
         const auto a = static_cast<uint8_t>(std::clamp(p, 0.0f, 1.0f) * 255.0f + 0.5f);
-        r.draw_image(cur_ft->tex, fit_dest(cur_ft->w, cur_ft->h, vp),
-                     gfx::Color{255, 255, 255, prev_ft ? a : static_cast<uint8_t>(255)});
+        gfx::Color modulation = gfx::theme::MEDIA_WHITE;
+        modulation.a = prev_ft ? a : static_cast<uint8_t>(255);
+        r.draw_image(cur_ft->tex, fit_dest(cur_ft->w, cur_ft->h, vp), modulation);
     } else if (!cache.error().empty()) {
         r.draw_text(font, vp.x + 20, vp.y + vp.h * 0.5f, cache.error(), gfx::theme::DANGER);
     }

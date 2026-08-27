@@ -110,4 +110,11 @@ export ASAN_OPTIONS="${ASAN_OPTIONS:-}:detect_leaks=1"
 export UBSAN_OPTIONS="${UBSAN_OPTIONS:-}:print_stacktrace=1:halt_on_error=1"
 # Stop at the first race with a full report (no-op when not built with TSan).
 export TSAN_OPTIONS="${TSAN_OPTIONS:-}:halt_on_error=1:second_deadlock_stack=1"
+if [[ "$TSAN" == true ]]; then
+    # Mesa's VAAPI drivers contain races outside this project and can terminate
+    # TSan before the suite finishes. Hardware fallback is covered by forced
+    # project-level tests; keep this gate deterministic and complete.
+    export LIBVA_DRIVER_NAME=null
+    export LIBVA_DRIVERS_PATH=/nonexistent
+fi
 "$BIN"

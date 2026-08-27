@@ -206,7 +206,7 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
          }}};
     all_groups.insert(all_groups.end(), groups.begin(), groups.end());
 
-    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
+    r.draw_rect({0, 0, W, H}, MODAL_VEIL);
 
     const float LINE_H = line_pitch(font.pixel_height());
     constexpr float PAD    = 24.0f;

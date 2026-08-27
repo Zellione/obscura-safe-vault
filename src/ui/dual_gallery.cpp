@@ -481,7 +481,7 @@ void DualGalleryScreen::render(gfx::Renderer& r)
         const auto H = static_cast<float>(win_.height());
 
         // Modal background: semi-transparent overlay
-        r.draw_rect(SDL_FRect{0, 0, W, H}, gfx::Color{0, 0, 0, 180}, /*filled*/ true);
+        r.draw_rect(SDL_FRect{0, 0, W, H}, MODAL_VEIL_TRANSLUCENT, /*filled*/ true);
 
         // Modal panel: 400px wide, centered
         static constexpr float modal_w = 400.0f;

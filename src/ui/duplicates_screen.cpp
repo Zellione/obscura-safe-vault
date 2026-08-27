@@ -48,7 +48,7 @@ void draw_confirm_box(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
     using namespace gfx::theme;
 
     // Veil the whole window
-    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});
+    r.draw_rect({0, 0, W, H}, MODAL_VEIL);
 
     const float pw = 560;
     const float ph = 230;
@@ -75,7 +75,7 @@ void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, DuplicatesScreen& 
     using namespace gfx::theme;
 
     // Draw tile background
-    r.draw_rect(tile_rect, gfx::Color{0, 0, 0, 255});
+    r.draw_rect(tile_rect, MEDIA_BLACK);
 
     // Draw thumbnail or placeholder
     const uint64_t key = member.thumb_offset;
@@ -108,8 +108,8 @@ void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, DuplicatesScreen& 
         const SDL_FPoint b{cx - s * 0.5f, cy + s};
         const SDL_FPoint c{cx + s, cy};
         r.draw_triangle({a.x + 2, a.y + 2}, {b.x + 2, b.y + 2}, {c.x + 2, c.y + 2},
-                        gfx::Color{0, 0, 0, 255});
-        r.draw_triangle(a, b, c, gfx::Color{255, 255, 255, 255});
+                        MEDIA_BLACK);
+        r.draw_triangle(a, b, c, MEDIA_WHITE);
     }
 
     // Draw focused indicator and border
@@ -121,7 +121,7 @@ void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, DuplicatesScreen& 
     // Draw keep/remove badge (top-left)
     const SDL_FRect badge{tile_rect.x + 4, tile_rect.y + 4, BADGE_SIZE, BADGE_SIZE};
     const gfx::Color badge_color = member.keep ? OK : DANGER;
-    const gfx::Color badge_text = member.keep ? gfx::Color{0, 0, 0, 255} : gfx::Color{255, 255, 255, 255};
+    const gfx::Color badge_text = member.keep ? MEDIA_BLACK : MEDIA_WHITE;
     r.draw_round_rect(badge, 2, badge_color);
     r.draw_text(font, badge.x + 2, badge.y + 2,
                 member.keep ? "K" : "R", badge_text);
@@ -215,7 +215,7 @@ void draw_inspect_overlay(gfx::Renderer& r, gfx::FontAtlas& font, float W, float
     if (!screen.inspect_.key.has_value()) return;
 
     // Dimmed backdrop
-    r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 200});
+    r.draw_rect({0, 0, W, H}, MODAL_VEIL_TRANSLUCENT);
 
     if (screen.inspect_.decoding) {
         // Show "decoding..." message

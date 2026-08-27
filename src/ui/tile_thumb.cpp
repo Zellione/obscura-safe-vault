@@ -81,7 +81,7 @@ void draw_tile_thumb(gfx::Renderer& r, gfx::FontAtlas& font, const ThumbContext&
         const auto cells =
             cover_montage_rects(ff.inner, static_cast<int>(covers.size()));
         for (size_t i = 0; i < cells.size(); ++i) {
-            r.draw_rect(cells[i], gfx::Color{0, 0, 0, 255});   // backing, never stretched
+            r.draw_rect(cells[i], gfx::theme::MEDIA_BLACK);   // backing, never stretched
             if (SDL_Texture* tex = tile_cover_tex(ctx, covers[i])) {
                 float tw = 0;
                 float th = 0;
@@ -91,7 +91,7 @@ void draw_tile_thumb(gfx::Renderer& r, gfx::FontAtlas& font, const ThumbContext&
         }
         return;
     }
-    r.draw_rect(box, gfx::Color{0, 0, 0, 255});   // black backing, never stretched
+    r.draw_rect(box, gfx::theme::MEDIA_BLACK);   // black backing, never stretched
     if (SDL_Texture* tex = tile_thumb_texture(ctx, n)) {
         float tw = 0;
         float th = 0;
@@ -110,8 +110,8 @@ void draw_tile_thumb(gfx::Renderer& r, gfx::FontAtlas& font, const ThumbContext&
         const SDL_FPoint b{cx - s * 0.5f, cy + s};
         const SDL_FPoint c{cx + s, cy};
         r.draw_triangle({a.x + 2, a.y + 2}, {b.x + 2, b.y + 2}, {c.x + 2, c.y + 2},
-                        gfx::Color{0, 0, 0, 255});
-        r.draw_triangle(a, b, c, gfx::Color{255, 255, 255, 255});
+                        gfx::theme::MEDIA_BLACK);
+        r.draw_triangle(a, b, c, gfx::theme::MEDIA_WHITE);
     }
 }
 

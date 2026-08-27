@@ -9,6 +9,7 @@
 
 #include "crypto/secure_mem.h"
 #include "gfx/renderer.h"
+#include "gfx/theme.h"
 #include "media/anim_decoder.h"
 #include "media/webp_anim_decoder.h"
 #include "ui/anim_model.h"
@@ -193,7 +194,7 @@ struct AnimPlayback::Impl {
             fit_rect(static_cast<float>(current_.width),
                      static_cast<float>(current_.height), dest);
         if (img.w < dest.w - 0.5f || img.h < dest.h - 0.5f) {
-            r.draw_rect(dest, gfx::Color{0, 0, 0, 255});   // letterbox bands, as on static tiles
+            r.draw_rect(dest, gfx::theme::MEDIA_BLACK);   // letterbox bands, as on static tiles
         }
         r.draw_image(tex_, img);
     }
