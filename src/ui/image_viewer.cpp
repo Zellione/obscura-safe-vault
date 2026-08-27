@@ -80,8 +80,8 @@ void ImageViewer::on_enter()
         for (const vault::IndexNode* n : listing) {
             if (!n->is_media()) continue;   // images and videos (mixed leaf galleries)
             album_.images.push_back(n);
-            album_.paths.push_back(album_.gallery_path.empty() ? n->name
-                                                   : album_.gallery_path + "/" + n->name);
+            album_.paths.push_back(album_.gallery_path.empty() ? std::string(n->name.view())
+                                                   : album_.gallery_path + "/" + std::string(n->name.view()));
         }
         // The grid and the search screens hand over an index into the FULL
         // listing (sub-galleries partition first); the album above is media
@@ -127,8 +127,8 @@ void ImageViewer::on_vault_changed()
             if (!n->is_media()) continue;
             album_.images.push_back(n);
             album_.paths.push_back(album_.gallery_path.empty()
-                                       ? n->name
-                                       : album_.gallery_path + "/" + n->name);
+                                       ? std::string(n->name.view())
+                                       : album_.gallery_path + "/" + std::string(n->name.view()));
         }
     } else {
         // Phase 58: collection albums hold nodes from all over the tree; a
@@ -526,7 +526,7 @@ void ImageViewer::handle_key(SDL_Keycode key, SDL_Scancode sc)
             return;
         case SDLK_X:      // export the current image (consent modal first)
             if (!album_.images.empty())
-                export_.begin(std::format("Export \"{}\"?", album_.images[index_]->name));
+                export_.begin(std::format("Export \"{}\"?", album_.images[index_]->name.view()));
             return;
         default: break;
     }
@@ -966,14 +966,14 @@ void ImageViewer::render_hud(gfx::Renderer& r)
             const char* star = cur.favorite ? "* " : "";
             std::string hud;
             if (item_is_video(album_.images, index_))
-                hud = std::format("{}{}   {}/{}   {}   {}", star, cur.name, index_ + 1,
+                hud = std::format("{}{}   {}/{}   {}   {}", star, cur.name.view(), index_ + 1,
                                   album_.images.size(), video_type_label(cur.vmeta.codec),
                                   format_duration(cur.vmeta.duration_us));
             else if (mode_ == FillScroll)
-                hud = std::format("{}{}   {}/{}   fill", star, cur.name, index_ + 1,
+                hud = std::format("{}{}   {}/{}   fill", star, cur.name.view(), index_ + 1,
                                   album_.images.size());
             else
-                hud = std::format("{}{}   {}/{}   {}%", star, cur.name, index_ + 1,
+                hud = std::format("{}{}   {}/{}   {}%", star, cur.name.view(), index_ + 1,
                                   album_.images.size(),
                                   static_cast<int>(fit_.zoom * 100.0f + 0.5f));
             r.draw_text(font_, hb.x + 16, hb.y + 12, fit_text(font_, hud, hb.w - 32),

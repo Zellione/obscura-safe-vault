@@ -73,7 +73,7 @@ int count_media(const Vault& v, std::string_view gallery)
     int n = 0;
     for (const auto* c : v.list(gallery)) {
         if (c->is_media())        ++n;
-        else if (c->is_gallery()) n += count_media(v, child_path(gallery, c->name));
+        else if (c->is_gallery()) n += count_media(v, child_path(gallery, c->name.view()));
     }
     return n;
 }
@@ -82,7 +82,7 @@ void walk_all_galleries(const Vault& v, std::string_view gallery, std::vector<st
 {
     out.emplace_back(gallery);
     for (const auto* c : v.list(gallery))
-        if (c->is_gallery()) walk_all_galleries(v, child_path(gallery, c->name), out);
+        if (c->is_gallery()) walk_all_galleries(v, child_path(gallery, c->name.view()), out);
 }
 
 // Cycle check + endpoint existence. On success `src_node`
@@ -115,7 +115,7 @@ VaultResult move_media_children(MergeCtx& ctx, std::string_view src_gallery,
 {
     using enum VaultResult;
     std::vector<std::string> names;
-    for (const auto* c : ctx.src.list(src_gallery)) if (c->is_media()) names.push_back(c->name);
+    for (const auto* c : ctx.src.list(src_gallery)) if (c->is_media()) names.emplace_back(c->name.view());
     if (names.empty()) return Ok;
 
     const TransferTally t = transfer_images(ctx.src, src_gallery, names, ctx.dst, dst_gallery,
@@ -178,7 +178,7 @@ VaultResult move_subgalleries_children(MergeCtx& ctx, std::string_view src_galle
 {
     using enum VaultResult;
     std::vector<std::string> names;
-    for (const auto* c : ctx.src.list(src_gallery)) if (c->is_gallery()) names.push_back(c->name);
+    for (const auto* c : ctx.src.list(src_gallery)) if (c->is_gallery()) names.emplace_back(c->name.view());
 
     for (const auto& name : names) {
         if (ctx.progress && ctx.progress->cancel.load()) return Ok;
@@ -198,7 +198,7 @@ VaultResult combine_impl(MergeCtx& ctx, std::string_view src_gallery,
     if (const VaultResult r = validate_combine(ctx.src, src_gallery, ctx.dst, dst_gallery, src_node); r != Ok)
         return r;
 
-    for (const auto& t : src_node->tags) (void)ctx.dst.add_tag(dst_gallery, t);
+    for (const auto& t : src_node->tags) (void)ctx.dst.add_tag(dst_gallery, t.view());
 
     if (holds_media(ctx.src, src_gallery)) {
         if (const VaultResult r = move_media_children(ctx, src_gallery, dst_gallery); r != Ok) {

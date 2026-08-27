@@ -40,7 +40,7 @@ std::string templated_new_tag_category(std::string_view tag,
     const std::string_view prefix = vault::tag_category_prefix(tag);
     if (prefix.empty()) return {};
     for (const auto& c : settings.categories)
-        if (tag_ci_equal(c.name, prefix) && !c.fields.empty()) return c.name;
+        if (tag_ci_equal(c.name.view(), prefix) && !c.fields.empty()) return std::string(c.name.view());
     return {};
 }
 

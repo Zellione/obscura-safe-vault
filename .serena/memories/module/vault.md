@@ -282,7 +282,20 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   arrives at a migrated destination.
 
 ### index.* — the index tree
-- `IndexNode` carries `std::vector<std::string> tags` + `bool favorite` (gallery + image),
+- **Phase 91 (secure strings):** every human-readable string in the tree —
+  `IndexNode::name`, `IndexNode::tags`, `SavedSearch::name`, `TagCategory::name` +
+  `fields`, `TagDescription::tag`/`text`, `TagFieldValue::tag`/`field`/`value` —
+  is a `crypto::SecureString` (new `src/crypto/secure_string.h`: mlock'd
+  best-effort, `crypto_wipe` on destroy, no SSO, copyable, explicit `.view()`,
+  `is_locked()`; OOM → empty). `SavedSearch::query` stays an opaque
+  `std::vector<uint8_t>`. Deserialise builds strings straight into
+  `SecureString`; the unlock path's decrypted index blob decrypts into
+  `crypto::SecureBytes` (`try_load_slot` open_to + decode_frame SecureBytes
+  overload); `commit_index`/compact wipe the serialised plaintext after sealing.
+  Read sites use `.view()` / the provided `==`/`<=>` vs `std::string_view`;
+  SearchHit/transient working sets copy to plain `std::string`. No `.osv`
+  change — bytes are identical.
+- `IndexNode` carries `std::vector<crypto::SecureString> tags` + `bool favorite` (gallery + image),
   a `SortKey` u8 (meaningful only on Gallery nodes: Default/NameAsc/NameDesc/DateAsc/DateDesc/
   SizeAsc/SizeDesc/Insertion; out-of-range byte rejected, not clamped, bounded PER VERSION —
   v6/v7 max 6, v8 max 7), and Type::Video + VideoMeta (multi-chunk list + poster).

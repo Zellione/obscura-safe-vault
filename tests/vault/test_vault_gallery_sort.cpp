@@ -64,7 +64,7 @@ static std::vector<std::string> names(const std::vector<const vault::IndexNode*>
 {
     std::vector<std::string> out;
     out.reserve(v.size());
-    for (const auto* n : v) out.push_back(n->name);
+    for (const auto* n : v) out.emplace_back(n->name.view());
     return out;
 }
 

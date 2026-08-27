@@ -43,10 +43,10 @@ std::vector<const vault::IndexNode*> sort_children(std::span<const vault::IndexN
     std::function<bool(Node, Node)> less;
     switch (key) {
     case vault::SortKey::NameAsc:
-        less = [](Node a, Node b) { return natural_less(a->name, b->name); };
+        less = [](Node a, Node b) { return natural_less(a->name.view(), b->name.view()); };
         break;
     case vault::SortKey::NameDesc:
-        less = [](Node a, Node b) { return natural_less(b->name, a->name); };
+        less = [](Node a, Node b) { return natural_less(b->name.view(), a->name.view()); };
         break;
     case vault::SortKey::DateAsc:
         less = [](Node a, Node b) { return created_ts_of(*a) < created_ts_of(*b); };

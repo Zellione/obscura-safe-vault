@@ -1,6 +1,7 @@
 #include "index.h"
 
 #include <algorithm>
+#include <array>
 #include <utility>
 
 #include "byte_io.h"
@@ -15,7 +16,7 @@ void write_node(ByteWriter& w, const IndexNode& node)
 
     // name_len (u16) + name bytes (UTF-8). Names longer than 65535 bytes are
     // clamped — far beyond any real filename or gallery name.
-    const std::string& name = node.name;
+    const std::string_view name = node.name.view();
     const uint16_t name_len = name.size() > 0xFFFF ? 0xFFFF
                                                    : static_cast<uint16_t>(name.size());
     w.u16(name_len);
@@ -28,7 +29,7 @@ void write_node(ByteWriter& w, const IndexNode& node)
                                                                  : static_cast<uint16_t>(node.tags.size());
     w.u16(tag_count);
     for (uint16_t i = 0; i < tag_count; ++i) {
-        const auto& tag = node.tags[i];
+        const std::string_view tag = node.tags[i].view();
         const uint16_t tag_len = tag.size() > 0xFFFF ? 0xFFFF : static_cast<uint16_t>(tag.size());
         w.u16(tag_len);
         w.bytes(std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(tag.data()), tag_len));
@@ -80,14 +81,15 @@ void write_node(ByteWriter& w, const IndexNode& node)
 }
 
 // Read a length-prefixed UTF-8 string (u16 len + bytes) into `out`. Returns
-// false on truncation/malformed input.
-bool read_string(ByteReader& r, std::string& out)
+// false on truncation/malformed input or allocation failure (the string's
+// storage is a Phase 91 SecureString, so OOM is a deserialisation failure).
+bool read_string(ByteReader& r, crypto::SecureString& out)
 {
     const uint16_t len = r.u16();
     if (!r.ok()) return false;
-    out.resize(len);
+    if (!out.resize(len)) return false;
     if (len > 0) {
-        r.bytes(std::span<uint8_t>(reinterpret_cast<uint8_t*>(out.data()), len));
+        r.bytes(std::span<uint8_t>(out.data(), len));
         if (!r.ok()) return false;
     }
     return true;
@@ -95,13 +97,13 @@ bool read_string(ByteReader& r, std::string& out)
 
 // Read the Phase 12 tag block (u16 count + length-prefixed tags) into `tags`.
 // Bounded by INDEX_MAX_TAGS so a hostile count can't drive a huge allocation.
-bool read_tags(ByteReader& r, std::vector<std::string>& tags)
+bool read_tags(ByteReader& r, std::vector<crypto::SecureString>& tags)
 {
     tags.clear();
     const uint16_t tag_count = r.u16();
     if (!r.ok() || tag_count > INDEX_MAX_TAGS) return false;
     for (uint16_t i = 0; i < tag_count; ++i) {
-        std::string tag;
+        crypto::SecureString tag;
         if (!read_string(r, tag)) return false;
         tags.push_back(std::move(tag));
     }
@@ -252,7 +254,7 @@ void write_saved_searches(ByteWriter& w, const std::vector<SavedSearch>& searche
                                : static_cast<uint16_t>(searches.size());
     w.u16(count);
     for (uint16_t i = 0; i < count; ++i) {
-        const std::string& name = searches[i].name;
+        const std::string_view name = searches[i].name.view();
         const uint16_t name_len = name.size() > 0xFFFF ? 0xFFFF : static_cast<uint16_t>(name.size());
         w.u16(name_len);
         w.bytes(std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(name.data()), name_len));
@@ -310,7 +312,7 @@ void write_categories_block(ByteWriter& w, const std::vector<vault::TagCategory>
                                : static_cast<uint16_t>(categories.size());
     w.u16(count);
     for (uint16_t i = 0; i < count; ++i) {
-        const std::string& name = categories[i].name;
+        const std::string_view name = categories[i].name.view();
         const uint16_t name_len = name.size() > INDEX_MAX_CATEGORY_BYTES
                                       ? INDEX_MAX_CATEGORY_BYTES
                                       : static_cast<uint16_t>(name.size());
@@ -326,12 +328,13 @@ void write_categories_block(ByteWriter& w, const std::vector<vault::TagCategory>
                                         : static_cast<uint8_t>(fields.size());
         w.u8(field_count);
         for (uint8_t f = 0; f < field_count; ++f) {
-            const uint16_t flen = fields[f].size() > INDEX_MAX_FIELD_BYTES
+            const std::string_view field = fields[f].view();
+            const uint16_t flen = field.size() > INDEX_MAX_FIELD_BYTES
                                       ? INDEX_MAX_FIELD_BYTES
-                                      : static_cast<uint16_t>(fields[f].size());
+                                      : static_cast<uint16_t>(field.size());
             w.u16(flen);
             w.bytes(std::span<const uint8_t>(
-                reinterpret_cast<const uint8_t*>(fields[f].data()), flen));
+                reinterpret_cast<const uint8_t*>(field.data()), flen));
         }
     }
 }
@@ -344,14 +347,14 @@ void write_descriptions_block(ByteWriter& w, const std::vector<vault::TagDescrip
                                     : static_cast<uint16_t>(descriptions.size());
     w.u16(desc_count);
     for (uint16_t i = 0; i < desc_count; ++i) {
-        const std::string& tag = descriptions[i].tag;
+        const std::string_view tag = descriptions[i].tag.view();
         const uint16_t tag_len = tag.size() > 0xFFFFu ? 0xFFFFu
                                                       : static_cast<uint16_t>(tag.size());
         w.u16(tag_len);
         w.bytes(std::span<const uint8_t>(
             reinterpret_cast<const uint8_t*>(tag.data()), tag_len));
 
-        const std::string& text = descriptions[i].text;
+        const std::string_view text = descriptions[i].text.view();
         const uint16_t text_len = text.size() > INDEX_MAX_TAG_DESC_BYTES
                                       ? INDEX_MAX_TAG_DESC_BYTES
                                       : static_cast<uint16_t>(text.size());
@@ -377,9 +380,9 @@ void write_field_values_block(ByteWriter& w, const std::vector<vault::TagFieldVa
             w.bytes(std::span<const uint8_t>(
                 reinterpret_cast<const uint8_t*>(str.data()), len));
         };
-        write_str(e.tag, 0xFFFFu);
-        write_str(e.field, INDEX_MAX_FIELD_BYTES);
-        write_str(e.value, INDEX_MAX_FIELD_VALUE_BYTES);
+        write_str(e.tag.view(), 0xFFFFu);
+        write_str(e.field.view(), INDEX_MAX_FIELD_BYTES);
+        write_str(e.value.view(), INDEX_MAX_FIELD_VALUE_BYTES);
     }
 }
 
@@ -416,13 +419,14 @@ bool read_category_fields_v11(ByteReader& r, TagCategory& c)
     for (uint8_t f = 0; f < field_count; ++f) {
         const uint16_t flen = r.u16();
         if (!r.ok() || flen > INDEX_MAX_FIELD_BYTES) return false;
-        std::string field(flen, '\0');
+        crypto::SecureString field;
+        if (!field.resize(flen)) return false;
         if (flen > 0) {
-            r.bytes(std::span<uint8_t>(reinterpret_cast<uint8_t*>(field.data()), flen));
+            r.bytes(std::span<uint8_t>(field.data(), flen));
             if (!r.ok()) return false;
         }
         if (const bool fdupe = std::ranges::any_of(c.fields,
-                [&field](const std::string& e) { return category_name_eq(e, field); });
+                [&field](const crypto::SecureString& e) { return category_name_eq(e.view(), field.view()); });
             !fdupe) {
             c.fields.push_back(std::move(field));
         }
@@ -440,9 +444,9 @@ bool read_categories(ByteReader& r, std::vector<TagCategory>& categories, uint8_
         const uint16_t name_len = r.u16();
         if (!r.ok() || name_len > INDEX_MAX_CATEGORY_BYTES) return false;
         TagCategory c;
-        c.name.resize(name_len);
+        if (!c.name.resize(name_len)) return false;
         if (name_len > 0) {
-            r.bytes(std::span<uint8_t>(reinterpret_cast<uint8_t*>(c.name.data()), name_len));
+            r.bytes(std::span<uint8_t>(c.name.data(), name_len));
             if (!r.ok()) return false;
         }
         c.swatch = r.u8();
@@ -452,7 +456,7 @@ bool read_categories(ByteReader& r, std::vector<TagCategory>& categories, uint8_
         if (version >= 11 && !read_category_fields_v11(r, c)) return false;
 
         if (const bool dupe = std::ranges::any_of(categories, [&c](const TagCategory& e) {
-                return category_name_eq(e.name, c.name);
+                return category_name_eq(e.name.view(), c.name.view());
             }); !dupe) {
             categories.push_back(std::move(c));
         }
@@ -470,20 +474,20 @@ bool read_descriptions(ByteReader& r, std::vector<TagDescription>& descriptions)
         const uint16_t tag_len = r.u16();
         if (!r.ok()) return false;
         TagDescription d;
-        d.tag.resize(tag_len);
+        if (!d.tag.resize(tag_len)) return false;
         if (tag_len > 0) {
-            r.bytes(std::span<uint8_t>(reinterpret_cast<uint8_t*>(d.tag.data()), tag_len));
+            r.bytes(std::span<uint8_t>(d.tag.data(), tag_len));
             if (!r.ok()) return false;
         }
         const uint16_t text_len = r.u16();
         if (!r.ok() || text_len > INDEX_MAX_TAG_DESC_BYTES) return false;
-        d.text.resize(text_len);
+        if (!d.text.resize(text_len)) return false;
         if (text_len > 0) {
-            r.bytes(std::span<uint8_t>(reinterpret_cast<uint8_t*>(d.text.data()), text_len));
+            r.bytes(std::span<uint8_t>(d.text.data(), text_len));
             if (!r.ok()) return false;
         }
         const bool dupe = std::ranges::any_of(descriptions,
-            [&d](const TagDescription& e) { return category_name_eq(e.tag, d.tag); });
+            [&d](const TagDescription& e) { return category_name_eq(e.tag.view(), d.tag.view()); });
         if (!dupe) descriptions.push_back(std::move(d));
     }
     return true;
@@ -497,12 +501,12 @@ bool read_field_values(ByteReader& r, std::vector<TagFieldValue>& values)
     if (!r.ok() || count > INDEX_MAX_TAG_FIELD_VALUES) return false;  // bound before alloc
     for (uint16_t i = 0; i < count; ++i) {
         TagFieldValue e;
-        auto read_str = [&r](std::string& out, uint32_t cap) {
+        auto read_str = [&r](crypto::SecureString& out, uint32_t cap) {
             const uint16_t len = r.u16();
             if (!r.ok() || len > cap) return false;
-            out.resize(len);
+            if (!out.resize(len)) return false;
             if (len > 0) {
-                r.bytes(std::span<uint8_t>(reinterpret_cast<uint8_t*>(out.data()), len));
+                r.bytes(std::span<uint8_t>(out.data(), len));
                 if (!r.ok()) return false;
             }
             return true;
@@ -512,7 +516,8 @@ bool read_field_values(ByteReader& r, std::vector<TagFieldValue>& values)
         if (!read_str(e.value, INDEX_MAX_FIELD_VALUE_BYTES)) return false;
 
         const bool dupe = std::ranges::any_of(values, [&e](const TagFieldValue& x) {
-            return category_name_eq(x.tag, e.tag) && category_name_eq(x.field, e.field);
+            return category_name_eq(x.tag.view(), e.tag.view())
+                && category_name_eq(x.field.view(), e.field.view());
         });
         if (!dupe) values.push_back(std::move(e));
     }
@@ -579,31 +584,37 @@ VaultSettings VaultSettings::seeded()
     // The nhentai-style metadata categories, each on a distinct swatch. Users
     // add, rename and remove rows freely from the settings overlay.
     VaultSettings s;
-    s.categories = {
-        {"artist", 0, {}}, {"character", 1, {}}, {"parody", 2, {}},   {"group", 3, {}},
-        {"language", 4, {}}, {"series", 5, {}},  {"male", 6, {}},     {"female", 7, {}},
-    };
+    std::vector<TagCategory> seeded_categories;
+    seeded_categories.reserve(8);
+    for (const auto [name, swatch] : std::array<std::pair<const char*, uint8_t>, 8>{{
+             {"artist", 0}, {"character", 1}, {"parody", 2},   {"group", 3},
+             {"language", 4}, {"series", 5},  {"male", 6},     {"female", 7},
+         }}) {
+        seeded_categories.push_back(
+            TagCategory{.name = crypto::SecureString(name), .swatch = swatch, .fields = {}});
+    }
+    s.categories = std::move(seeded_categories);
     return s;
 }
 
 std::string_view find_tag_description(const VaultSettings& s, std::string_view tag)
 {
     for (const auto& d : s.tag_descriptions)
-        if (category_name_eq(d.tag, tag)) return d.text;
+        if (category_name_eq(d.tag.view(), tag)) return d.text.view();
     return {};
 }
 
 void set_tag_description(VaultSettings& s, std::string_view tag, std::string_view text)
 {
     for (auto it = s.tag_descriptions.begin(); it != s.tag_descriptions.end(); ++it) {
-        if (!category_name_eq(it->tag, tag)) continue;
+        if (!category_name_eq(it->tag.view(), tag)) continue;
         if (text.empty()) s.tag_descriptions.erase(it);
-        else              it->text = std::string(text);
+        else              it->text = text;
         return;
     }
     if (text.empty()) return;                                   // nothing to remove
     if (s.tag_descriptions.size() >= INDEX_MAX_TAG_DESCRIPTIONS) return;
-    s.tag_descriptions.emplace_back(std::string(tag), std::string(text));
+    s.tag_descriptions.emplace_back(crypto::SecureString(tag), crypto::SecureString(text));
 }
 
 std::string_view tag_category_prefix(std::string_view tag)
@@ -617,7 +628,7 @@ namespace {
 TagCategory* find_category(VaultSettings& s, std::string_view category)
 {
     for (auto& c : s.categories)
-        if (category_name_eq(c.name, category)) return &c;
+        if (category_name_eq(c.name.view(), category)) return &c;
     return nullptr;
 }
 // True when `tag` belongs to `category` by prefix (ci).
@@ -627,11 +638,11 @@ bool tag_in_category(std::string_view tag, std::string_view category)
 }
 }  // namespace
 
-std::span<const std::string> category_template(const VaultSettings& s,
-                                               std::string_view category)
+std::span<const crypto::SecureString> category_template(const VaultSettings& s,
+                                                        std::string_view category)
 {
     for (const auto& c : s.categories)
-        if (category_name_eq(c.name, category)) return c.fields;
+        if (category_name_eq(c.name.view(), category)) return c.fields;
     return {};
 }
 
@@ -641,14 +652,15 @@ bool set_category_template(VaultSettings& s, std::string_view category,
     if (TagCategory* c = find_category(s, category); !c) {
         return false;
     } else {
-        std::vector<std::string> cleaned;
+        std::vector<crypto::SecureString> cleaned;
         for (auto& f : fields) {
             if (f.empty()) continue;
             if (f.size() > INDEX_MAX_FIELD_BYTES) f.resize(INDEX_MAX_FIELD_BYTES);
             if (const bool dupe = std::ranges::any_of(cleaned,
-                    [&f](const std::string& e) { return category_name_eq(e, f); });
+                    [&f](const crypto::SecureString& e)
+                        { return category_name_eq(e.view(), f); });
                 !dupe) {
-                cleaned.push_back(std::move(f));
+                cleaned.push_back(crypto::SecureString(std::string_view(f)));
             }
             if (cleaned.size() >= INDEX_MAX_TEMPLATE_FIELDS) break;
         }
@@ -661,8 +673,8 @@ std::string_view find_tag_field_value(const VaultSettings& s, std::string_view t
                                       std::string_view field)
 {
     for (const auto& e : s.tag_field_values)
-        if (category_name_eq(e.tag, tag) && category_name_eq(e.field, field))
-            return e.value;
+        if (category_name_eq(e.tag.view(), tag) && category_name_eq(e.field.view(), field))
+            return e.value.view();
     return {};
 }
 
@@ -670,17 +682,18 @@ void set_tag_field_value(VaultSettings& s, std::string_view tag,
                          std::string_view field, std::string_view value)
 {
     for (auto it = s.tag_field_values.begin(); it != s.tag_field_values.end(); ++it) {
-        if (!category_name_eq(it->tag, tag) || !category_name_eq(it->field, field))
+        if (!category_name_eq(it->tag.view(), tag) || !category_name_eq(it->field.view(), field))
             continue;
         if (value.empty()) s.tag_field_values.erase(it);
-        else               it->value = std::string(value);
+        else               it->value = value;
         return;
     }
     if (value.empty()) return;                                       // nothing to remove
     if (s.tag_field_values.size() >= INDEX_MAX_TAG_FIELD_VALUES) return;
     std::string v(value);
     if (v.size() > INDEX_MAX_FIELD_VALUE_BYTES) v.resize(INDEX_MAX_FIELD_VALUE_BYTES);
-    s.tag_field_values.emplace_back(std::string(tag), std::string(field), std::move(v));
+    s.tag_field_values.emplace_back(crypto::SecureString(tag), crypto::SecureString(field),
+                                    crypto::SecureString(std::string_view(v)));
 }
 
 bool rename_template_field(VaultSettings& s, std::string_view category,
@@ -691,19 +704,20 @@ bool rename_template_field(VaultSettings& s, std::string_view category,
         return false;
     } else {
         auto it = std::ranges::find_if(c->fields,
-            [old_field](const std::string& f) { return category_name_eq(f, old_field); });
+            [old_field](const crypto::SecureString& f)
+                { return category_name_eq(f.view(), old_field); });
         if (it == c->fields.end()) return false;
         const auto it_addr = std::to_address(it);
-        if (const bool clash = std::ranges::any_of(c->fields, [&](const std::string& f) {
-                return std::to_address(&f) != it_addr && category_name_eq(f, new_field);
+        if (const bool clash = std::ranges::any_of(c->fields, [&](const crypto::SecureString& f) {
+                return std::to_address(&f) != it_addr && category_name_eq(f.view(), new_field);
             }); clash) {
             return false;
         }
 
-        *it = std::string(new_field);
+        *it = new_field;
         for (auto& e : s.tag_field_values)
-            if (tag_in_category(e.tag, category) && category_name_eq(e.field, old_field))
-                e.field = std::string(new_field);
+            if (tag_in_category(e.tag.view(), category) && category_name_eq(e.field.view(), old_field))
+                e.field = new_field;
         return true;
     }
 }
@@ -715,12 +729,14 @@ bool remove_template_field(VaultSettings& s, std::string_view category,
         return false;
     } else {
         if (const auto removed = std::erase_if(c->fields,
-                [field](const std::string& f) { return category_name_eq(f, field); });
+                [field](const crypto::SecureString& f)
+                    { return category_name_eq(f.view(), field); });
             removed == 0) {
             return false;
         }
         std::erase_if(s.tag_field_values, [&category, &field](const TagFieldValue& e) {
-            return tag_in_category(e.tag, category) && category_name_eq(e.field, field);
+            return tag_in_category(e.tag.view(), category)
+                && category_name_eq(e.field.view(), field);
         });
         return true;
     }

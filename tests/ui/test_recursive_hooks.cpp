@@ -216,8 +216,8 @@ TEST(recursive_hooks_tag_a_nested_gallery_from_its_own_meta_json)
     REQUIRE(sub != nullptr);
 
     bool has_inner = false;
-    for (const std::string& t : sub->tags) {
-        if (t.find("inner_artist") != std::string::npos) has_inner = true;
+    for (const crypto::SecureString& t : sub->tags) {
+        if (t.view().find("inner_artist") != std::string_view::npos) has_inner = true;
     }
     CHECK(has_inner);
 

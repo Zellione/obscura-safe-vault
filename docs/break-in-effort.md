@@ -221,9 +221,12 @@ Scope **confirmed by the owner** and de-duplicated against the AGENTS.md
   by design, so a Debug crash's core is as sensitive as the vault
   (`coredumpctl list` / `sudo rm …`); prefer Release for a live vault.
 
-**Deferred (owner):** `SecureBytes` for the index tree; a clipboard gate for
-copied paths/names. Both are smaller than 6a–6d and can follow as their own
-phases.
+**Deferred (owner):** ~~`SecureBytes` for the index tree~~ → **app Phase 91**
+(delivered 2026-08-27: every index-tree string — node names, tags, categories,
+descriptions, field values, saved-search names — lives in `crypto::SecureString`,
+mlock'd best-effort and wiped on destroy, and the unlock/save index-blob paths
+no longer hold a plain un-wiped vector). Still deferred: a clipboard gate for
+copied paths/names — a smaller phase that can follow on its own.
 
 Test totals across the phase: 2144 / 0 failed; ASAN clean; TSan clean (only
 the known local `radeonsi_drv_video.so` driver race, absent on CI runners).

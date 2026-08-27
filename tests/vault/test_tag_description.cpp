@@ -27,8 +27,8 @@ IndexNode make_root()
 TEST(tag_description_round_trips_through_serialisation)
 {
     VaultSettings s;
-    s.tag_descriptions = {{.tag = "beach", .text = "Coastal shots only"},
-                          {.tag = "artist:Kaguya", .text = "Active 2011-2019"}};
+    s.tag_descriptions = {{.tag = crypto::SecureString("beach"), .text = crypto::SecureString("Coastal shots only")},
+                          {.tag = crypto::SecureString("artist:Kaguya"), .text = crypto::SecureString("Active 2011-2019")}};
 
     std::vector<uint8_t> blob;
     serialize_index(make_root(), {}, s, blob);
@@ -69,7 +69,7 @@ TEST(tag_description_over_length_text_is_rejected_not_clamped)
     // Hand-build a v12 blob whose description length exceeds the cap. The reader
     // must FAIL the parse rather than truncate — the Phase 37/47/49 rule.
     VaultSettings s;
-    s.tag_descriptions = {{.tag = "beach", .text = "ok"}};
+    s.tag_descriptions = {{.tag = crypto::SecureString("beach"), .text = crypto::SecureString("ok")}};
     std::vector<uint8_t> blob;
     serialize_index(make_root(), {}, s, blob);
 

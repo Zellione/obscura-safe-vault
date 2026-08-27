@@ -255,7 +255,7 @@ TEST(expand_field_value_tags_produces_field_colon_value)
 {
     vault::VaultSettings settings;
     settings.tag_field_values = {
-        {"artist:bob", "country", "Japan"},
+        {crypto::SecureString("artist:bob"), crypto::SecureString("country"), crypto::SecureString("Japan")},
     };
     std::vector<std::string> tags{"artist:bob"};
     auto expanded = ui::expand_field_value_tags(tags, settings);
@@ -268,7 +268,7 @@ TEST(expand_field_value_tags_case_insensitive_tag_matching)
 {
     vault::VaultSettings settings;
     settings.tag_field_values = {
-        {"ARTIST:BOB", "country", "Japan"},
+        {crypto::SecureString("ARTIST:BOB"), crypto::SecureString("country"), crypto::SecureString("Japan")},
     };
     std::vector<std::string> tags{"artist:bob"};
     auto expanded = ui::expand_field_value_tags(tags, settings);
@@ -280,8 +280,8 @@ TEST(expand_field_value_tags_multiple_fields_per_tag)
 {
     vault::VaultSettings settings;
     settings.tag_field_values = {
-        {"artist:bob", "country", "Japan"},
-        {"artist:bob", "year", "2023"},
+        {crypto::SecureString("artist:bob"), crypto::SecureString("country"), crypto::SecureString("Japan")},
+        {crypto::SecureString("artist:bob"), crypto::SecureString("year"), crypto::SecureString("2023")},
     };
     std::vector<std::string> tags{"artist:bob"};
     auto expanded = ui::expand_field_value_tags(tags, settings);
@@ -301,7 +301,7 @@ TEST(expand_field_value_tags_unrelated_fields_not_added)
 {
     vault::VaultSettings settings;
     settings.tag_field_values = {
-        {"artist:ann", "country", "France"},
+        {crypto::SecureString("artist:ann"), crypto::SecureString("country"), crypto::SecureString("France")},
     };
     std::vector<std::string> tags{"artist:bob"};
     auto expanded = ui::expand_field_value_tags(tags, settings);
@@ -313,7 +313,7 @@ TEST(expand_field_value_tags_matches_with_virtual_tag)
 {
     vault::VaultSettings settings;
     settings.tag_field_values = {
-        {"artist:bob", "country", "Japan"},
+        {crypto::SecureString("artist:bob"), crypto::SecureString("country"), crypto::SecureString("Japan")},
     };
     std::vector<std::string> tags{"artist:bob"};
     auto expanded = ui::expand_field_value_tags(tags, settings);

@@ -93,14 +93,14 @@ bool SavedSearchPanel::load_focused(AdvancedQuery& out_query)
         status_ = "Could not load search.";
         return false;
     }
-    status_ = std::format("Loaded '{}'.", saved_[cur_saved_].name);
+    status_ = std::format("Loaded '{}'.", saved_[cur_saved_].name.view());
     return true;
 }
 
 void SavedSearchPanel::delete_focused()
 {
     if (cur_saved_ < 0 || cur_saved_ >= static_cast<int>(saved_.size())) return;
-    const std::string name = saved_[cur_saved_].name;
+    const std::string name = std::string(saved_[cur_saved_].name.view());
     if (search_.delete_saved_search(name) == vault::VaultResult::Ok) {
         status_ = std::format("Deleted '{}'.", name);
         // Caller (AdvancedSearchScreen) will call reload_saved() to refresh saved_
@@ -156,7 +156,7 @@ void SavedSearchPanel::render(gfx::Renderer& r, float x, float max_w, float max_
 
         const bool sel = (i == cur_saved_ && hot);
         r.draw_text(font_, x, row_y,
-                    fit_text(font_, std::format("{} {}", sel ? ">" : " ", saved_[i].name),
+                    fit_text(font_, std::format("{} {}", sel ? ">" : " ", saved_[i].name.view()),
                              max_w),
                     sel ? TEXT : TEXT_DIM);
     }

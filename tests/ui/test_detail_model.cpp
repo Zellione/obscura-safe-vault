@@ -122,7 +122,7 @@ TEST(detail_animated_marker_is_image_only)
 TEST(detail_own_and_inherited_tags_are_separate_sections)
 {
     IndexNode n = make_image();
-    n.tags = {"travel", "kyoto"};
+    n.tags = {crypto::SecureString("travel"), crypto::SecureString("kyoto")};
     const std::vector<std::string> inherited{"japan", "holiday"};
     const auto c = ui::build_node_details(n, inherited, {}, vault::SortKey::Insertion);
 
@@ -216,9 +216,9 @@ TEST(detail_selection_empty)
 TEST(detail_selection_shared_tags_are_the_intersection)
 {
     IndexNode a = make_image();
-    a.tags = {"travel", "kyoto", "2024"};
+    a.tags = {crypto::SecureString("travel"), crypto::SecureString("kyoto"), crypto::SecureString("2024")};;
     IndexNode b = make_image();
-    b.tags = {"travel", "osaka", "2024"};
+    b.tags = {crypto::SecureString("travel"), crypto::SecureString("osaka"), crypto::SecureString("2024")};;
 
     const std::vector<const IndexNode*> sel{&a, &b};
     const auto c = ui::build_selection_details(sel, {});
@@ -232,9 +232,9 @@ TEST(detail_selection_shared_tags_are_the_intersection)
 TEST(detail_selection_shared_tags_are_case_insensitive)
 {
     IndexNode a = make_image();
-    a.tags = {"Travel"};
+    a.tags = {crypto::SecureString("Travel")};
     IndexNode b = make_image();
-    b.tags = {"travel"};
+    b.tags = {crypto::SecureString("travel")};
 
     const std::vector<const IndexNode*> sel{&a, &b};
     const auto c = ui::build_selection_details(sel, {});
@@ -247,9 +247,9 @@ TEST(detail_selection_shared_tags_are_case_insensitive)
 TEST(detail_selection_no_overlap_says_so)
 {
     IndexNode a = make_image();
-    a.tags = {"kyoto"};
+    a.tags = {crypto::SecureString("kyoto")};
     IndexNode b = make_image();
-    b.tags = {"osaka"};
+    b.tags = {crypto::SecureString("osaka")};
 
     const std::vector<const IndexNode*> sel{&a, &b};
     const auto c = ui::build_selection_details(sel, {});
@@ -285,7 +285,7 @@ TEST(detail_selection_shows_inherited_once)
 TEST(detail_model_marks_tag_sections)
 {
     vault::IndexNode n = vault::IndexNode::image("a.jpg");
-    n.tags = {"artist:Kaguya", "ponytail"};
+    n.tags = {crypto::SecureString("artist:Kaguya"), crypto::SecureString("ponytail")};
     const std::vector<std::string> inherited{"parody:F/GO"};
     const auto c = ui::build_node_details(n, inherited, {}, vault::SortKey::Insertion);
 
@@ -316,7 +316,7 @@ TEST(detail_gallery_shows_a_from_contents_tag_section)
     vault::IndexNode g;
     g.type = vault::IndexNode::Type::Gallery;
     g.name = "trip";
-    g.tags = {"vacation"};
+    g.tags = {crypto::SecureString("vacation")};
 
     const std::vector<std::string> inherited;
     const std::vector<std::string> from_contents{"beach", "sunset"};

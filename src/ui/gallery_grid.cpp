@@ -205,7 +205,8 @@ void rebuild_detail(GalleryGrid& g)
     }
     const vault::IndexNode& node = *g.children_[static_cast<size_t>(sel_idx)];
     const std::string node_path =
-        g.nav_.path().empty() ? node.name : g.nav_.path() + "/" + node.name;
+        g.nav_.path().empty() ? std::string(node.name.view())
+                             : g.nav_.path() + "/" + std::string(node.name.view());
     const auto from_contents = node.is_gallery() ? contents_tags(g.vault_, node_path) : std::vector<std::string>{};
     g.detail_.content = build_node_details(node, inherited_tags(g.vault_, node_path), from_contents, vault::vault_settings(g.vault_).default_sort);
 }
@@ -319,7 +320,7 @@ void GalleryGrid::refresh()
     child_names_.clear();
     child_names_.reserve(children_.size());
     for (const auto* n : children_)
-        child_names_.push_back(n != nullptr ? n->name : std::string{});
+        child_names_.push_back(n != nullptr ? std::string(n->name.view()) : std::string{});
 }
 
 void GalleryGrid::open_selected()
@@ -329,7 +330,7 @@ void GalleryGrid::open_selected()
     const vault::IndexNode* n = children_[s];
     if (n->is_gallery()) {
         session_.record(nav_.path(), s);   // this level's selection is about to go stale
-        nav_.enter(n->name);
+        nav_.enter(std::string(n->name.view()));
         refresh();
         nav_.select(session_.recall(nav_.path()));   // restore this sub-gallery's remembered tile
         follow_ = ScrollFollow::Center;
@@ -419,11 +420,11 @@ void start_transfer_focused(GalleryGrid& g)
     g.transfer_had_exclusive_ = true;
     g.transfer_.set_current_gallery(g.nav_.path());
     if (node->is_gallery()) {
-        const std::string path = g.nav_.path().empty() ? node->name
-                                                        : g.nav_.path() + "/" + node->name;
+        const std::string path = g.nav_.path().empty() ? std::string(node->name.view())
+                                                        : g.nav_.path() + "/" + std::string(node->name.view());
         g.transfer_.open_gallery(path);
     } else {
-        g.transfer_.open(g.nav_.path(), {node->name});
+        g.transfer_.open(g.nav_.path(), {std::string(node->name.view())});
     }
 }
 
@@ -447,7 +448,7 @@ void toggle_favorite_selection(GalleryGrid& g)
         if (idx < 0 || idx >= static_cast<int>(g.children_.size())) continue;
         const vault::IndexNode* n = g.children_[idx];
         nodes.push_back(n);
-        paths.push_back(base.empty() ? n->name : base + "/" + n->name);
+        paths.push_back(base.empty() ? std::string(n->name.view()) : base + "/" + std::string(n->name.view()));
     }
     if (paths.empty()) {
         g.toggle_favorite_current();
@@ -468,9 +469,9 @@ void start_transfer_selection(GalleryGrid& g)
         if (idx < 0 || idx >= static_cast<int>(g.children_.size())) continue;
         const vault::IndexNode* n = g.children_[idx];
         if (n->is_media()) {
-            media.push_back(n->name);
+            media.emplace_back(n->name.view());
         } else if (n->is_gallery()) {
-            galleries.push_back(base.empty() ? n->name : base + "/" + n->name);
+            galleries.push_back(base.empty() ? std::string(n->name.view()) : base + "/" + std::string(n->name.view()));
         }
     }
     if (media.empty() && galleries.empty()) {
@@ -517,7 +518,7 @@ void GalleryGrid::start_rename()
         return;
     }
     error_.clear();
-    rename_.open(nav_.path(), children_[s]->name);
+    rename_.open(nav_.path(), std::string(children_[s]->name.view()));
 }
 
 void GalleryGrid::start_combine()
@@ -637,7 +638,8 @@ void GalleryGrid::start_tag_editor(bool import_list)
         for (int idx : sel_.indices()) {
             if (idx < 0 || idx >= static_cast<int>(children_.size())) continue;
             const auto& name = children_[idx]->name;
-            paths.push_back(nav_.path().empty() ? name : nav_.path() + "/" + name);
+            paths.push_back(nav_.path().empty() ? std::string(name.view())
+                                    : nav_.path() + "/" + std::string(name.view()));
         }
         if (paths.size() < 2) return;   // stale selection somehow shrank — bail quietly
         tag_editor_.open_multi(std::move(paths));
@@ -649,7 +651,8 @@ void GalleryGrid::start_tag_editor(bool import_list)
 
     const vault::IndexNode* n = children_[s];
     const std::string base = nav_.path();
-    const std::string full_path = base.empty() ? n->name : base + "/" + n->name;
+    const std::string full_path = base.empty() ? std::string(n->name.view())
+                                           : base + "/" + std::string(n->name.view());
 
     if (!import_list) { tag_editor_.open(full_path); return; }
 
@@ -669,7 +672,8 @@ void GalleryGrid::toggle_favorite_current()
 
     const vault::IndexNode* n = children_[s];
     const std::string base = nav_.path();
-    const std::string full_path = base.empty() ? n->name : base + "/" + n->name;
+    const std::string full_path = base.empty() ? std::string(n->name.view())
+                                           : base + "/" + std::string(n->name.view());
     // The flag flips on the same in-memory node children_[s] points at, so the
     // star badge re-renders next frame; the key event already triggers a repaint.
     // No refresh() — that would needlessly clear the export selection.
@@ -706,14 +710,24 @@ bool GalleryGrid::pump_thumbs()
     return any;
 }
 
+// Phase 91: the tile render converts a node's secure tag list to transient
+// plain strings for the chip drawer (which takes span<const std::string>).
+static std::vector<std::string> tag_strings(const std::vector<crypto::SecureString>& tags)
+{
+    std::vector<std::string> out;
+    out.reserve(tags.size());
+    for (const auto& t : tags) out.emplace_back(t.view());
+    return out;
+}
+
 std::vector<std::string> GalleryGrid::selected_delete_paths() const
 {
     std::vector<std::string> paths;
     const std::string& base = nav_.path();
     for (int i : sel_.indices()) {
         if (i < 0 || i >= static_cast<int>(children_.size())) continue;
-        const std::string& name = children_[static_cast<size_t>(i)]->name;
-        paths.push_back(base.empty() ? name : base + "/" + name);
+        const auto& name = children_[static_cast<size_t>(i)]->name;
+        paths.push_back(base.empty() ? std::string(name.view()) : base + "/" + std::string(name.view()));
     }
     return prune_descendant_paths(paths);
 }
@@ -728,15 +742,15 @@ std::vector<std::string> selected_transfer_paths(const GalleryGrid& g)
     if (!g.sel_.empty()) {
         for (int i : g.sel_.indices()) {
             if (i < 0 || i >= static_cast<int>(g.children_.size())) continue;
-            const std::string& name = g.children_[static_cast<size_t>(i)]->name;
-            paths.push_back(base.empty() ? name : base + "/" + name);
+            const auto& name = g.children_[static_cast<size_t>(i)]->name;
+            paths.push_back(base.empty() ? std::string(name.view()) : base + "/" + std::string(name.view()));
         }
     } else {
         // Fallback: focused tile
         const int s = g.nav_.selected();
         if (s >= 0 && s < static_cast<int>(g.children_.size())) {
-            const std::string& name = g.children_[static_cast<size_t>(s)]->name;
-            paths.push_back(base.empty() ? name : base + "/" + name);
+            const auto& name = g.children_[static_cast<size_t>(s)]->name;
+            paths.push_back(base.empty() ? std::string(name.view()) : base + "/" + std::string(name.view()));
         }
     }
 
@@ -951,7 +965,7 @@ void render_delete_confirm_modal(GalleryGrid& g, gfx::Renderer& r, float W, floa
         const int s = g.nav_.selected();
         const vault::IndexNode* node =
             (s >= 0 && s < static_cast<int>(g.children_.size())) ? g.children_[s] : nullptr;
-        const std::string name = node ? node->name : std::string{};
+        const std::string name = node ? std::string(node->name.view()) : std::string{};
         centered("Delete \"" + g.fit_name(name, pw - 80) + "\"?", py + 28, TEXT);
         if (node && node->is_gallery()) {
             SubtreeCounts c;
@@ -1141,7 +1155,7 @@ bool GalleryGrid::handle_delete_confirm_key(const SDL_Event& e)
             item_total = c.images + c.videos + c.galleries + 1;   // +1 for the gallery itself
         }
         queue_.set_exclusive(true);  // Phase 50: lock out new import tasks
-        naming_.file_op.start_delete(vault_, nav_.path(), n.name, n.is_gallery(), item_total);
+        naming_.file_op.start_delete(vault_, nav_.path(), std::string(n.name.view()), n.is_gallery(), item_total);
     }
     naming_.confirm_delete = false;
     mark_dirty();
@@ -2196,12 +2210,12 @@ void GalleryGrid::render_grid_tile(gfx::Renderer& r, int i, float W)
         draw_tile_thumb(r, *n, thumb_rect);
     }
 
-    r.draw_text(font_, cellr.x + 8, label_y, fit_name(n->name, cell - 16), TEXT);
+    r.draw_text(font_, cellr.x + 8, label_y, fit_name(n->name.view(), cell - 16), TEXT);
 
     if (chip_h > 0.0f) {
         draw_tag_chips(r, font_, cellr.x + 8,
                        label_y + ph + label_gap + (chip_h - CHIP_ROW_H) * 0.5f,
-                       cell - 16, n->tags, cats);
+                       cell - 16, tag_strings(n->tags), cats);
     }
 
     if (counts_h > 0.0f && n->is_gallery()) {
@@ -2340,12 +2354,12 @@ void GalleryGrid::render_list(gfx::Renderer& r, float W, float bottom)
 
         const float ty = font_.text_top_for_center(row.y + row.h * 0.5f);  // vertically centred
         const float nx = thumb.x + thumb.w + 12;
-        const std::string name = fit_name(n->name, dims_x - nx - 10);
+        const std::string name = fit_name(n->name.view(), dims_x - nx - 10);
         r.draw_text(font_, nx, ty, name, sel ? TEXT : TEXT_DIM);
         if (chip_h > 0.0f) {
             const float chips_x = nx + static_cast<float>(font_.measure(name)) + CHIP_SPACING;
             draw_tag_chips(r, font_, chips_x, row.y + (row.h - CHIP_ROW_H) * 0.5f,
-                           dims_x - 10 - chips_x, n->tags, cats);
+                           dims_x - 10 - chips_x, tag_strings(n->tags), cats);
         }
 
         // Draw metadata columns for this row (galleries/videos/images have different displays).

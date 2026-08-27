@@ -224,7 +224,7 @@ VaultResult attach_staged(Vault& v, std::string_view gallery_path, IndexNode&& n
     IndexNode* g = v.find_gallery(gallery_path);
     if (!g) return NotFound;
 
-    if (vault_ops::child_named(g, node.name)) return AlreadyExists;
+    if (vault_ops::child_named(g, node.name.view())) return AlreadyExists;
 
     if (!vault_ops::push_child(g->children, std::move(node))) {
         platform::log_error("Vault", "attach_staged: allocation failure");
@@ -281,7 +281,8 @@ VaultResult attach_image_prestaged(Vault& v, std::string_view gallery_path,
     if (created_ts != 0) staged.node.meta.created_ts = created_ts;
 
     if (extras) {
-        staged.node.tags = extras->tags;
+        staged.node.tags.clear();
+        for (const auto& t : extras->tags) staged.node.tags.emplace_back(crypto::SecureString(std::string_view(t)));
         if (staged.node.tags.size() > INDEX_MAX_TAGS)
             staged.node.tags.resize(INDEX_MAX_TAGS);
         staged.node.favorite = extras->favorite;
@@ -333,7 +334,8 @@ VaultResult attach_video_prestaged(Vault& v, std::string_view gallery_path,
     if (created_ts != 0) staged.node.vmeta.created_ts = created_ts;
 
     if (extras) {
-        staged.node.tags = extras->tags;
+        staged.node.tags.clear();
+        for (const auto& t : extras->tags) staged.node.tags.emplace_back(crypto::SecureString(std::string_view(t)));
         if (staged.node.tags.size() > INDEX_MAX_TAGS)
             staged.node.tags.resize(INDEX_MAX_TAGS);
         staged.node.favorite = extras->favorite;

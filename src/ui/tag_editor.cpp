@@ -128,8 +128,10 @@ void TagEditor::add_chosen_tag()
     // Open the template fields form if applicable (Phase 73)
     if (!sheet_category.empty()) {
         const auto tmpl = vault::category_template(s, sheet_category);
-        fields_form_.open(chosen, sheet_category,
-                          std::vector<std::string>(tmpl.begin(), tmpl.end()),
+        std::vector<std::string> fields;
+        fields.reserve(tmpl.size());
+        for (const auto& f : tmpl) fields.emplace_back(f.view());
+        fields_form_.open(chosen, sheet_category, std::move(fields),
                           /*with_description=*/false);
     }
 }
@@ -184,7 +186,10 @@ void TagEditor::load_per_node_tags()
         const auto& children = vault_.list(parent_path);
         for (const auto* child : children) {
             if (child->name == segs.back()) {
-                per_node_tags.push_back(child->tags);
+                std::vector<std::string> tags;
+                tags.reserve(child->tags.size());
+                for (const auto& t : child->tags) tags.emplace_back(t.view());
+                per_node_tags.push_back(std::move(tags));
                 ++resolved;
                 break;
             }

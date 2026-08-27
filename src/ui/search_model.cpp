@@ -113,8 +113,8 @@ std::vector<std::string> expand_field_value_tags(
     std::vector<std::string> out = tags;
     for (const auto& t : tags) {
         for (const auto& fv : settings.tag_field_values) {
-            if (tag_ci_equal(t, fv.tag)) {
-                out.push_back(fv.field + ":" + fv.value);
+            if (tag_ci_equal(t, fv.tag.view())) {
+                out.push_back(std::string(fv.field.view()) + ":" + std::string(fv.value.view()));
             }
         }
     }

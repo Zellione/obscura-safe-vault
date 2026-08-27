@@ -140,9 +140,9 @@ TEST(index_image_tags_roundtrip)
 {
     IndexNode root = IndexNode::gallery("");
     IndexNode img = make_image("photo.png", 777, 888);
-    img.tags.push_back("vacation");
-    img.tags.push_back("beach");
-    img.tags.push_back("2024");
+    img.tags.emplace_back("vacation");
+    img.tags.emplace_back("beach");
+    img.tags.emplace_back("2024");
     root.children.push_back(std::move(img));
 
     std::vector<uint8_t> blob;
@@ -162,8 +162,8 @@ TEST(index_gallery_tags_roundtrip)
 {
     IndexNode root = IndexNode::gallery("");
     IndexNode gal = IndexNode::gallery("my_gallery");
-    gal.tags.push_back("important");
-    gal.tags.push_back("archived");
+    gal.tags.emplace_back("important");
+    gal.tags.emplace_back("archived");
     root.children.push_back(std::move(gal));
 
     std::vector<uint8_t> blob;
@@ -181,14 +181,14 @@ TEST(index_gallery_tags_roundtrip)
 TEST(index_nested_tree_with_tags_roundtrips)
 {
     IndexNode root = IndexNode::gallery("");
-    root.tags.push_back("root_tag");
+    root.tags.emplace_back("root_tag");
 
     IndexNode a = IndexNode::gallery("vacation");
-    a.tags.push_back("gal_tag");
+    a.tags.emplace_back("gal_tag");
     IndexNode b = IndexNode::gallery("2024");
-    b.tags.push_back("year");
+    b.tags.emplace_back("year");
     b.children.push_back(make_image("beach.png", 4096, 9000));
-    b.children[0].tags.push_back("img_tag");
+    b.children[0].tags.emplace_back("img_tag");
     a.children.push_back(std::move(b));
     root.children.push_back(std::move(a));
 
@@ -323,10 +323,10 @@ TEST(index_favorite_combines_with_tags_in_nested_tree)
     IndexNode root = IndexNode::gallery("");
     IndexNode a = IndexNode::gallery("trip");
     a.favorite = true;
-    a.tags.push_back("gal_tag");
+    a.tags.emplace_back("gal_tag");
     IndexNode img = make_image("beach.png", 4096, 9000);
     img.favorite = true;
-    img.tags.push_back("img_tag");
+    img.tags.emplace_back("img_tag");
     a.children.push_back(std::move(img));
     root.children.push_back(std::move(a));
 
@@ -392,7 +392,7 @@ TEST(index_v4_video_node_round_trip)
     vid.vmeta.chunks      = { {100, 1048616}, {1049000, 1048616}, {2098000, 902800} };
     vid.vmeta.poster_offset = 0;
     vid.vmeta.poster_length = 0;
-    vid.tags = {"beach"};
+    vid.tags.emplace_back("beach");
     vid.favorite = true;
     root.children.push_back(vid);
 
@@ -445,8 +445,8 @@ TEST(index_v5_saved_searches_round_trip)
     root.children.push_back(make_image("a.png", 10, 20));
 
     std::vector<SavedSearch> searches = {
-        SavedSearch{"cats", {0x01, 0x02, 0x03}},
-        SavedSearch{"vacation 2024", {0xAA, 0xBB}},
+        SavedSearch{crypto::SecureString("cats"), {0x01, 0x02, 0x03}},
+        SavedSearch{crypto::SecureString("vacation 2024"), {0xAA, 0xBB}},
     };
 
     std::vector<uint8_t> blob;
@@ -719,7 +719,7 @@ TEST(index_settings_round_trip)
     vault::VaultSettings s;
     s.default_sort    = vault::SortKey::NameAsc;
     s.tiles_show_tags = false;
-    s.categories = {{"artist", 3, {}}, {"parody", 7, {}}};
+    s.categories = {{crypto::SecureString("artist"), 3, {}}, {crypto::SecureString("parody"), 7, {}}};
 
     std::vector<uint8_t> blob;
     vault::serialize_index(root, {}, s, blob);
@@ -758,7 +758,7 @@ TEST(index_settings_dedupes_categories_case_insensitively)
 {
     IndexNode root = IndexNode::gallery("");
     vault::VaultSettings s;
-    s.categories = {{"Artist", 1, {}}, {"artist", 9, {}}, {"parody", 2, {}}};
+    s.categories = {{crypto::SecureString("Artist"), 1, {}}, {crypto::SecureString("artist"), 9, {}}, {crypto::SecureString("parody"), 2, {}}};
 
     std::vector<uint8_t> blob;
     vault::serialize_index(root, {}, s, blob);
@@ -777,7 +777,7 @@ TEST(index_settings_rejects_out_of_range_swatch)
 {
     IndexNode root = IndexNode::gallery("");
     vault::VaultSettings s;
-    s.categories = {{"artist", 3, {}}};
+    s.categories = {{crypto::SecureString("artist"), 3, {}}};
 
     std::vector<uint8_t> blob;
     vault::serialize_index(root, {}, s, blob);
@@ -831,7 +831,7 @@ TEST(index_settings_rejects_over_long_category_name)
 {
     IndexNode root = IndexNode::gallery("");
     vault::VaultSettings s;
-    s.categories = {{std::string(vault::INDEX_MAX_CATEGORY_BYTES + 1, 'a'), 0, {}}};
+    s.categories = {{crypto::SecureString(std::string(vault::INDEX_MAX_CATEGORY_BYTES + 1, 'a')), 0, {}}};
 
     std::vector<uint8_t> blob;
     vault::serialize_index(root, {}, s, blob);   // writer clamps to the cap
@@ -912,4 +912,24 @@ TEST(index_settings_thumb_side_roundtrip)
     vault::VaultSettings got;
     CHECK(vault::deserialize_index(blob, out, searches, got));
     CHECK_EQ(got.migrated_thumb_side, 512);
+}
+
+// Phase 91: node names and tags deserialise into secure (mlock'd, best-effort)
+// storage — the tree's plaintext metadata no longer lives in plain heap strings.
+TEST(index_names_and_tags_are_mlocked)
+{
+    IndexNode root = IndexNode::gallery("");
+    IndexNode img = make_image("photo.png", 777, 888);
+    img.tags.emplace_back("vacation");
+    root.children.push_back(std::move(img));
+
+    std::vector<uint8_t> blob;
+    vault::serialize_index(root, blob);
+
+    IndexNode out;
+    REQUIRE(vault::deserialize_index(blob, out));
+    REQUIRE(out.children.size() == 1);
+    CHECK(out.children[0].name.is_locked());
+    REQUIRE(out.children[0].tags.size() == 1);
+    CHECK(out.children[0].tags[0].is_locked());
 }

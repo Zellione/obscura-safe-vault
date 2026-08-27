@@ -86,8 +86,12 @@ VaultResult commit_index(IndexIoContext& ctx)
     std::vector<uint8_t> blob;
     if (!serialize_plain_index(ctx, blob)) return CryptoError;
 
-    // Seal and commit the blob in a crash-safe 3-phase swap.
-    return commit_plain_blob(ctx, blob);
+    // Seal and commit the blob in a crash-safe 3-phase swap. The plaintext blob
+    // is wiped immediately after sealing so the full tree's metadata never
+    // lingers in a plain heap buffer (Phase 91).
+    const VaultResult r = commit_plain_blob(ctx, blob);
+    crypto_wipe(blob.data(), blob.size());
+    return r;
 }
 
 VaultResult commit_plain_blob_at(IndexIoContext& ctx, std::span<const uint8_t> plain,

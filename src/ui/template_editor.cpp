@@ -111,7 +111,7 @@ bool TemplateEditorPanel::handle_event_pick_category(const SDL_Event& e)
             if (const int sel = nav_.selected(); sel >= 0) {
                 const auto& cats = vault::vault_settings(vault_).categories;
                 if (sel >= static_cast<int>(cats.size())) return true;
-                cat_name_ = cats[sel].name;
+                cat_name_ = std::string(cats[sel].name.view());
                 transition(Stage::EditFields);
                 // Set up field list navigation
                 const auto& fields = cats[sel].fields;
@@ -154,7 +154,7 @@ bool TemplateEditorPanel::handle_event_edit_fields(const SDL_Event& e)
             // Rename selected field
             if (const int sel = nav_.selected(); sel >= 0 && sel < static_cast<int>(tmpl.size())) {
                 is_add_mode_ = false;
-                field_to_rename_ = std::string(tmpl[sel]);
+                field_to_rename_ = std::string(tmpl[sel].view());
                 name_buf_.set_text(field_to_rename_);
                 transition(Stage::NameField);
                 skip_text_input_ = true;  // The 'R' that opened the field also arrives as a text event
@@ -164,7 +164,7 @@ bool TemplateEditorPanel::handle_event_edit_fields(const SDL_Event& e)
         case SDLK_DELETE:
             // Remove selected field
             if (const int sel = nav_.selected(); sel >= 0 && sel < static_cast<int>(tmpl.size())) {
-                field_to_remove_ = std::string(tmpl[sel]);
+                field_to_remove_ = std::string(tmpl[sel].view());
                 transition(Stage::ConfirmRemove);
             }
             return true;
@@ -212,7 +212,9 @@ bool TemplateEditorPanel::handle_event_name_field(const SDL_Event& e)
 
             auto s = vault::vault_settings(vault_);
             const auto field_tmpl = vault::category_template(s, cat_name_);
-            auto fields = std::vector<std::string>(field_tmpl.begin(), field_tmpl.end());
+            std::vector<std::string> fields;
+            fields.reserve(field_tmpl.size());
+            for (const auto& f : field_tmpl) fields.emplace_back(f.view());
 
             bool success = false;
             if (is_add_mode_) {
@@ -353,7 +355,7 @@ void TemplateEditorPanel::render_pick_category(gfx::Renderer& r, gfx::FontAtlas&
                             RADIUS / 2, ACCENT);
         }
         const auto label = std::format("{}  ({} field{})",
-                                      cats[i].name,
+                                      cats[i].name.view(),
                                       cats[i].fields.size(),
                                       cats[i].fields.size() == 1 ? "" : "s");
         r.draw_text(font, l.box.x + PROMPT_PAD + 12, y + 2, label,
@@ -401,7 +403,7 @@ void TemplateEditorPanel::render_edit_fields(gfx::Renderer& r, gfx::FontAtlas& f
             r.draw_round_rect({l.box.x + 8, y, l.box.w - 16, row_h},
                             RADIUS / 2, ACCENT);
         }
-        r.draw_text(font, l.box.x + PROMPT_PAD + 12, y + 2, std::string_view(tmpl[i]),
+        r.draw_text(font, l.box.x + PROMPT_PAD + 12, y + 2, tmpl[i].view(),
                    is_sel ? SURFACE : TEXT);
         y += row_h;
     }

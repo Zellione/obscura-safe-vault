@@ -18,6 +18,23 @@ static std::span<const uint8_t> bytes(const std::string& s)
     return {reinterpret_cast<const uint8_t*>(s.data()), s.size()};
 }
 
+static bool has_tag(const auto& tags, std::string_view needle)
+{
+    return std::ranges::any_of(tags, [needle](const auto& t) { return t == needle; });
+}
+
+static bool tags_eq(const std::vector<crypto::SecureString>& tags,
+                    std::initializer_list<std::string_view> want)
+{
+    if (tags.size() != want.size()) return false;
+    size_t i = 0;
+    for (const auto w : want) {
+        if (tags[i] != w) return false;
+        ++i;
+    }
+    return true;
+}
+
 namespace {
 
 struct TempVault {
@@ -66,7 +83,7 @@ TEST(effective_tags_unions_own_and_ancestors) {
     CHECK(eff[1] == "Series");     // node's casing kept; ancestor "series" deduped
     // remaining two are "global" and "chapter" in root->parent order
     CHECK(std::ranges::find(eff, "global")  != eff.end());
-    CHECK(std::ranges::find(eff, "chapter") != eff.end());
+    CHECK(has_tag(eff, "chapter"));
 }
 
 TEST(effective_tags_locked_or_missing_is_empty) {
@@ -104,7 +121,7 @@ TEST(attach_prestaged_applies_extras_and_survives_reopen) {
 
     const vault::IndexNode* n = v.resolve_node("e.jpg");
     REQUIRE(n != nullptr);
-    CHECK(n->tags == std::vector<std::string>({"alpha", "Beta"}));
+    CHECK(tags_eq(n->tags, {"alpha", "Beta"}));
     CHECK(n->favorite);
 
     /* lock, reopen, unlock — assert tags + favorite persisted */
@@ -115,7 +132,7 @@ TEST(attach_prestaged_applies_extras_and_survives_reopen) {
 
     const vault::IndexNode* n2 = v2.resolve_node("e.jpg");
     REQUIRE(n2 != nullptr);
-    CHECK(n2->tags == std::vector<std::string>({"alpha", "Beta"}));
+    CHECK(tags_eq(n2->tags, {"alpha", "Beta"}));
     CHECK(n2->favorite);
 }
 
@@ -194,8 +211,8 @@ TEST(transfer_images_materializes_inherited_tags_cross_vault) {
     const vault::IndexNode* dst_node = dst.resolve_node("in/x.jpg");
     REQUIRE(dst_node != nullptr);
     REQUIRE(dst_node->tags.size() == 2);
-    CHECK(std::ranges::find(dst_node->tags, "own") != dst_node->tags.end());
-    CHECK(std::ranges::find(dst_node->tags, "series") != dst_node->tags.end());
+    CHECK(has_tag(dst_node->tags, "own"));
+    CHECK(has_tag(dst_node->tags, "series"));
     CHECK(dst_node->favorite);
 
     // Verify source is untouched (Copy mode)
@@ -230,8 +247,8 @@ TEST(transfer_image_move_out_of_tagged_gallery_same_vault) {
     const vault::IndexNode* dst_node = v.resolve_node("b/x.jpg");
     REQUIRE(dst_node != nullptr);
     REQUIRE(dst_node->tags.size() == 2);
-    CHECK(std::ranges::find(dst_node->tags, "own") != dst_node->tags.end());
-    CHECK(std::ranges::find(dst_node->tags, "series") != dst_node->tags.end());
+    CHECK(has_tag(dst_node->tags, "own"));
+    CHECK(has_tag(dst_node->tags, "series"));
 
     // Verify source is gone
     CHECK(v.resolve_node("a/x.jpg") == nullptr);
@@ -274,7 +291,7 @@ TEST(transfer_preserves_favorite_and_no_tag_duplication) {
     // Check that "series" appears only once (case-insensitive dedup in effective_tags)
     int series_count = 0;
     for (const auto& t : dst_node->tags) {
-        if (vault::tag_ci_equal(t, "series")) ++series_count;
+        if (vault::tag_ci_equal(t.view(), "series")) ++series_count;
     }
     CHECK_EQ(series_count, 1);
 }
@@ -317,8 +334,8 @@ TEST(transfer_video_carries_extras) {
     REQUIRE(dst_node != nullptr);
     CHECK(dst_node->favorite);
     REQUIRE(dst_node->tags.size() == 2);
-    CHECK(std::ranges::find(dst_node->tags, "action") != dst_node->tags.end());
-    CHECK(std::ranges::find(dst_node->tags, "videos") != dst_node->tags.end());
+    CHECK(has_tag(dst_node->tags, "action"));
+    CHECK(has_tag(dst_node->tags, "videos"));
 }
 
 TEST(transfer_gallery_root_materializes_ancestor_tags) {
@@ -356,8 +373,8 @@ TEST(transfer_gallery_root_materializes_ancestor_tags) {
     REQUIRE(top_node != nullptr);
     REQUIRE(top_node->is_gallery());
     REQUIRE(top_node->tags.size() >= 2);
-    CHECK(std::ranges::find(top_node->tags, "series") != top_node->tags.end());
-    CHECK(std::ranges::find(top_node->tags, "global") != top_node->tags.end());
+    CHECK(has_tag(top_node->tags, "series"));
+    CHECK(has_tag(top_node->tags, "global"));
 
     // Verify: dst/dest/top/sub has only "part" (own tags, no materialization for internal galleries)
     const vault::IndexNode* sub_node = dst.resolve_node("dest/top/sub");
@@ -369,7 +386,7 @@ TEST(transfer_gallery_root_materializes_ancestor_tags) {
         if (t == "part") ++part_count;
     CHECK(part_count == 1);
     // sub should NOT have "global" (it inherits, not materializes)
-    CHECK(std::ranges::find(sub_node->tags, "global") == sub_node->tags.end());
+    CHECK(!has_tag(sub_node->tags, "global"));
 
     // Verify: dst/dest/top/sub/x.jpg carries source effective tags (own + cascade)
     // The image has no own tags, but inherits from the src tree ("global", "series", "part")
@@ -377,9 +394,9 @@ TEST(transfer_gallery_root_materializes_ancestor_tags) {
     REQUIRE(img_node != nullptr);
     // Image carries effective tags from source: global (root), series (top), part (sub)
     REQUIRE(img_node->tags.size() >= 3);
-    CHECK(std::ranges::find(img_node->tags, "global") != img_node->tags.end());
-    CHECK(std::ranges::find(img_node->tags, "series") != img_node->tags.end());
-    CHECK(std::ranges::find(img_node->tags, "part") != img_node->tags.end());
+    CHECK(has_tag(img_node->tags, "global"));
+    CHECK(has_tag(img_node->tags, "series"));
+    CHECK(has_tag(img_node->tags, "part"));
 }
 
 TEST(transfer_gallery_carries_gallery_favorites) {
@@ -443,15 +460,15 @@ TEST(transfer_gallery_into_existing_parent_preserves_parent_tags) {
     const vault::IndexNode* par_node = dst.resolve_node("parent");
     REQUIRE(par_node != nullptr);
     REQUIRE(par_node->tags.size() == 1);
-    CHECK(vault::tag_ci_equal(par_node->tags[0], "old"));
+    CHECK(vault::tag_ci_equal(par_node->tags[0].view(), "old"));
     // Ensure parent does NOT have the subtree's tags
-    CHECK(std::ranges::find(par_node->tags, "series") == par_node->tags.end());
+    CHECK(!has_tag(par_node->tags, "series"));
 
     // Verify: parent/top carries "series" from the transfer
     const vault::IndexNode* top_node = dst.resolve_node("parent/top");
     REQUIRE(top_node != nullptr);
     REQUIRE(top_node->is_gallery());
-    CHECK(std::ranges::find(top_node->tags, "series") != top_node->tags.end());
+    CHECK(has_tag(top_node->tags, "series"));
     CHECK(dst.resolve_node("parent/top/pic.jpg") != nullptr);
 }
 
@@ -486,7 +503,7 @@ TEST(transfer_gallery_rerun_does_not_duplicate_tags) {
     REQUIRE(top1 != nullptr);
     int series_count_first = 0;
     for (const auto& t : top1->tags)
-        if (vault::tag_ci_equal(t, "series")) ++series_count_first;
+        if (vault::tag_ci_equal(t.view(), "series")) ++series_count_first;
     CHECK_EQ(series_count_first, 1);
 
     // Second transfer: with Fail policy (default), this hits AlreadyExists collision
@@ -500,7 +517,7 @@ TEST(transfer_gallery_rerun_does_not_duplicate_tags) {
     REQUIRE(top2 != nullptr);
     int series_count_second = 0;
     for (const auto& t : top2->tags)
-        if (vault::tag_ci_equal(t, "series")) ++series_count_second;
+        if (vault::tag_ci_equal(t.view(), "series")) ++series_count_second;
     CHECK_EQ(series_count_second, 1);  // Collision prevents duplication
     // Verify media unchanged (collision prevented re-add)
     CHECK(dst.resolve_node("dest/top/pic.jpg") != nullptr);

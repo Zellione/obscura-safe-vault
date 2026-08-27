@@ -21,7 +21,7 @@ TagDisplay resolve_tag(std::string_view tag,
     }
 
     const auto it = std::ranges::find_if(categories, [prefix](const vault::TagCategory& c) {
-        return tag_ci_equal(c.name, prefix);
+        return tag_ci_equal(c.name.view(), prefix);
     });
     if (it == categories.end()) {
         return {.text = tag, .swatch = -1};
