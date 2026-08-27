@@ -889,7 +889,7 @@ VaultResult Vault::create_gallery(std::string_view gallery_path)
             if (!child->is_gallery()) return InvalidArg;  // name is an image
             cur = child;
         } else {
-            cur->children.push_back(IndexNode::gallery(std::string(seg)));
+            cur->children.push_back(IndexNode::gallery(seg));
             cur = &cur->children.back();
             created = true;
         }

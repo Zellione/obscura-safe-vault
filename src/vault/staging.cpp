@@ -109,7 +109,7 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
     }
 
     // Build the fully-populated but UNATTACHED IndexNode.
-    IndexNode img = IndexNode::image(std::string(filename));
+    IndexNode img = IndexNode::image(filename);
     img.meta.format = format;
     img.meta.width = width;
     img.meta.height = height;
@@ -195,7 +195,7 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
     }
 
     // Build the fully-populated but UNATTACHED IndexNode.
-    IndexNode vid = IndexNode::video(std::string(filename));
+    IndexNode vid = IndexNode::video(filename);
     vid.vmeta.container   = precomputed ? precomputed->container   : probe.container;
     vid.vmeta.codec       = precomputed ? precomputed->codec       : probe.codec;
     vid.vmeta.width       = precomputed ? precomputed->width       : probe.width;
@@ -254,7 +254,7 @@ VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path)
             if (!child->is_gallery()) return InvalidArg;  // name is an image
             cur = child;
         } else {
-            cur->children.push_back(IndexNode::gallery(std::string(seg)));
+            cur->children.push_back(IndexNode::gallery(seg));
             cur = &cur->children.back();
         }
     }
