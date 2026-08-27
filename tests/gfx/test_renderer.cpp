@@ -34,7 +34,7 @@ image::ImageData solid(int w, int h, uint8_t v)
     d.width  = w;
     d.height = h;
     d.format = image::ImageFormat::PNG;
-    d.pixels.assign(static_cast<size_t>(w) * h * 3, v);
+    if (!d.pixels.fill(static_cast<size_t>(w) * h * 3, v)) return d;
     return d;
 }
 

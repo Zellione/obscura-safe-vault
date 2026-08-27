@@ -87,6 +87,22 @@ For desktop launches, raise it session-wide, e.g. on systemd distros set
 `DefaultLimitMEMLOCK=2G` in `/etc/systemd/user.conf` (or a
 `LimitMEMLOCK=` drop-in for your compositor's service) and log out/in.
 
+The app itself attempts to grow the budget to **256 MiB** at startup
+(soft → hard limit on Linux, no privilege needed; minimum working-set on
+Windows), so most hosts get a usable budget without any configuration. The
+budget you actually have — and whether any buffer has degraded to swappable
+memory — is visible live in the **F1 help popup** (Global group,
+"Secure memory: …" line).
+
+> **Caveat — mlock keeps data out of swap, not out of RAM.** On a host that
+> swaps to **zram** (compressed, RAM-resident) the degraded bytes still land
+> in RAM, just compressed; on a host with **true hibernation** (suspend-to-
+> disk), *every* resident page — locked or not — is written to the hibernate
+> image, and on Windows `VirtualLock` explicitly does not exclude pages from
+> `hiberfil.sys`. If your threat model includes the physical disk, that is a
+> host-policy decision (zram-only swap, no hibernate), not something the app
+> can enforce.
+
 ### Windows — manual build walkthrough (checkout → binary)
 
 Unless noted otherwise, every command below runs in a **"x64 Native Tools
@@ -246,6 +262,24 @@ gdb build/bin/Debug/osv
 (gdb) run
 (gdb) bt       # backtrace on crash
 ```
+
+### Linux core dumps (Debug builds)
+
+**Release** builds disable core dumps at startup (`platform::disable_core_dumps()`:
+`prctl(PR_SET_DUMPABLE, 0)` + `RLIMIT_CORE=0`) so a crash cannot leave
+decrypted media and key material on disk. **Debug** builds keep dumps — and
+ptrace attach — enabled by design so debuggers work. Consequence: a Debug
+`osv` that crashes on a shared machine leaves a core that is as sensitive as
+the vault itself (it holds the master key, KEK, and any decrypted buffers).
+After analysing one, remove it:
+
+```bash
+coredumpctl list osv                          # find it
+sudo rm /var/lib/systemd/coredump/core.osv.<uid>.<pid>.<ts>.zst
+```
+
+Prefer a Release build for day-to-day use with a live vault; use a Debug
+build against a disposable vault when you need to debug.
 
 ### Windows crash dumps (WER LocalDumps)
 

@@ -66,8 +66,8 @@ conventions live in `AGENTS.md`; this file is the *effort-specific* state.
 | 2 | Live-repro on the primary vault | ⏭ SKIPPED (default) | Primary's key wasn't in the core; needs a manual unlock the owner declined |
 | 3 | Root-cause + fix the UAF crash | ✅ DONE → **app Phase 87**, PR #203 | Post-migration refresh + exclusivity honoured; CI + SonarCloud green |
 | 4 | Quantify mlock / RAM exposure | ✅ FINDINGS | Plaintext is an un-locked, swappable buffer; today **RAM-resident (zram), not on the NVMe** |
-| 5 | Argon2id benchmark → cold-attack estimate | ⬜ PENDING | Offline password-crack cost of the container *alone* |
-| 6 | Remaining hardening (code PRs + system config) | ⬜ PENDING | To be scoped / de-duplicated against AGENTS.md hardening notes |
+| 5 | Argon2id benchmark → cold-attack estimate | ✅ DONE → PR #205 | `tools/kdf_bench`: 100 ms/guess (≈10/s) on 8845HS; GPU est. 10^4–10^6/s; ≥8 chars infeasible |
+| 6 | Remaining hardening (code + system config) | ✅ CODE DONE | 6a vault perms ✅ · 6b pixels→SecureBytes ✅ · 6c budget in F1 ✅ · 6d system/core-dump docs ✅ — all committed, **one PR at the end** |
 
 Full narrative lives in `docs/break-in-effort.md`.
 
@@ -188,25 +188,28 @@ Phase 1, where the key *was* leaked).
 
 ---
 
-## 9. Phase 6 — Remaining hardening (PENDING)
+## 9. Phase 6 — Remaining hardening (IN PROGRESS)
 
-Candidate items, to be **scoped and de-duplicated against AGENTS.md "Hardening
-notes"** before opening PRs (some may already be covered):
+Scope **confirmed by the owner** (de-duplicated against AGENTS.md hardening
+notes). **One PR at the end** (owner instruction 2026-08-26): commit every step
+to one branch, open a single PR covering all of it.
 
-- **Decoded pixel buffer → `SecureBytes`** (Phase 4) — the plaintext image is a
-  plain `std::vector` (`image.h:26`); make it mlock'd so the degrade-to-swappable
-  path is explicit + `MADV_DONTDUMP`'d. *Largest single code change; needs a TDD
-  pass (decode path + texture upload + a `SecureBytes` API for `std::vector`
-  ergonomics).*
-- **Vault file perms** — ensure new/existing `.osv` files are `0600`.
-- **Core-dump exposure** — the crashing build was Debug (dumps on by design);
-  confirm the shipped (Release) suppression is sufficient and whether a Debug
-  build should ever hold a live real vault.
-- **`SecureBytes` for index buffers** — keep the index tree in mlock'd memory.
-- **Clipboard gate** — keep copied paths/names from leaking vault-internal names.
-- **mlock budget check** — app already warns when budget < 256 MiB
-  (`app.cpp:93`); decide whether to surface it in-UI (e.g. `F1` help).
-- **System config** — `LimitMEMLOCK` budget, zram/hibernate policy.
+- **6a — Vault file perms** — ✅ DONE (app Phase 88, commit on
+  `phase-88-vault-file-perms`, PR #206 is the carrier): exclusive owner-only
+  create + best-effort tighten on open; 2134/0, ASan clean, CI green.
+- **6b — Decoded pixel buffer → `SecureBytes`** (Phase 4) — the plaintext image
+  is a plain `std::vector` (`image.h:26`); make it mlock'd so the
+  degrade-to-swappable path is explicit + `MADV_DONTDUMP`'d. *Largest single
+  code change; needs a TDD pass (decode path + texture upload + a
+  `SecureBytes` API for `std::vector` ergonomics).*
+- **6c — mlock budget in-UI** — app warns at startup when budget < 256 MiB;
+  surface the state (e.g. F1 help / status) so a degraded run is visible.
+- **6d — System config docs** — `LimitMEMLOCK` budget, zram/hibernate policy,
+  Debug-vs-Release core-dump exposure (Debug dumps on by design; confirm
+  Release suppression is sufficient, advise against a Debug build holding a
+  live vault).
+- **Deferred (owner):** `SecureBytes` for the index tree; clipboard gate for
+  copied paths/names.
 
 ---
 
@@ -338,8 +341,9 @@ notes"** before opening PRs (some may already be covered):
 - **LSP signedness** in `src/gfx/text.cpp`, `src/ui/gallery_grid.cpp`,
   `src/ui/import_queue.cpp`, `src/ui/tile_thumb.cpp` — pre-existing, unrelated.
 - **`/tmp` tmpfs** — cleared on reboot (see §11).
-- **One PR per phase; owner merges.** Keep follow-ups for a phase on that phase's
-  branch until the owner merges it.
+- **PR cadence (owner, 2026-08-26):** don't open a PR per step — commit each
+  step to one branch and open a **single PR at the end**. Owner merges; the
+  agent never merges (AGENTS.md step 7).
 - **`INDEX_VERSION` / `.osv` format** was NOT changed this effort — do not bump
   it unless a Phase 6 change requires it.
 

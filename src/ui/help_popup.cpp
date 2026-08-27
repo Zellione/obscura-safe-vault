@@ -2,10 +2,15 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <format>
+#include <limits>
 
+#include "crypto/secure_mem.h"   // mlock_failure_seen()
 #include "gfx/renderer.h"
 #include "gfx/text.h"
 #include "gfx/theme.h"
+#include "platform/harden.h"     // lockable_budget_bytes()
 #include "ui/help_layout.h"
 #include "ui/text_metrics.h"
 #include "ui/widgets.h"   // fit_text
@@ -25,6 +30,20 @@ int help_line_count(const std::vector<HelpGroup>& groups)
         lines += static_cast<int>(groups[i].entries.size());  // entries
     }
     return lines;
+}
+
+std::string secure_mem_status_line(size_t budget_bytes, bool degraded)
+{
+    // Round UP to MiB so a sub-MiB budget reads "1 MiB", not "0 MiB" (a 0 MiB
+    // budget would read as "no page-lock at all", which is not what it means).
+    const bool unlimited = (budget_bytes == std::numeric_limits<size_t>::max());
+    const std::string budget = unlimited
+        ? "unlimited"
+        : std::format("{} MiB", (budget_bytes + ((size_t{1} << 20) - 1)) >> 20);
+    const std::string state = degraded
+        ? "— some decoded data is swappable (mlock exhausted)"
+        : "active (best-effort)";
+    return std::format("Secure memory: {} page-lock budget {}", budget, state);
 }
 
 bool handle_help_key(HelpPopupState& s, SDL_Keycode key)
@@ -133,7 +152,11 @@ void draw_help_column(gfx::Renderer& r, gfx::FontAtlas& font,
         y += band.line_h;
         for (const auto& e : grp.entries) {
             if (y >= band.content_top - band.line_h && y <= band.content_bottom) {
-                const std::string line = "  [" + e.key + "]  " + e.description;
+                // An empty key is a status/info line (Phase 6c) — draw it
+                // without brackets rather than a bare "[]".
+                const std::string line = e.key.empty()
+                    ? "  " + e.description
+                    : "  [" + e.key + "]  " + e.description;
                 r.draw_text(font, col_x, y, fit_text_tail(font, line, text_w), TEXT_DIM);
             }
             y += band.line_h;
@@ -169,9 +192,18 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
     if (!s.open) return;
     using namespace gfx::theme;
 
+    // Phase 6c: the last Global entry is a live status line (empty key — drawn
+    // without brackets) reporting the page-lock budget and whether any buffer
+    // has degraded to swappable memory.
     std::vector<HelpGroup> all_groups = {
-        {.title = "Global", .entries = {{.key = "F1", .description = "Help"}, {.key = "F2", .description = "Settings"}, {.key = "Right-click", .description = "Back / up one level"}}}
-    };
+        {.title = "Global",
+         .entries = {
+            {.key = "F1", .description = "Help"},
+            {.key = "F2", .description = "Settings"},
+            {.key = "Right-click", .description = "Back / up one level"},
+            {.key = "", .description = secure_mem_status_line(platform::lockable_budget_bytes(),
+                                                              crypto::mlock_failure_seen())},
+         }}};
     all_groups.insert(all_groups.end(), groups.begin(), groups.end());
 
     r.draw_rect({0, 0, W, H}, gfx::Color{8, 9, 12, 255});

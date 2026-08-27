@@ -71,4 +71,26 @@ read_keyfile(const std::filesystem::path& path);
 // every vault bound to the old one. Returns false on RNG or I/O failure.
 [[nodiscard]] bool write_new_keyfile(const std::filesystem::path& path);
 
+// Outcome of create_owner_only_file.
+enum class OwnerOnlyCreate {
+    Ok,             // file created owner-only, *out open ready for I/O
+    AlreadyExists,  // the path held a file — nothing was created or modified
+    Error,          // any other failure (permissions, I/O, ...); no file left behind
+};
+
+// Atomically claim a brand-new file that is readable/writable ONLY by the
+// current user — 0600 on POSIX (independent of umask), a current-user-only
+// DACL on Windows — the same owner-only guarantee write_new_keyfile gives a
+// keyfile. A vault is the same class of secret: if it ever appears on disk
+// with group/other read permission, a local attacker can copy it before the
+// owner notices. CREATE_NEW / O_EXCL make creation race-free and refuse to
+// truncate an existing file.
+[[nodiscard]] OwnerOnlyCreate create_owner_only_file(const std::filesystem::path& path,
+                                                     std::FILE*& out);
+
+// Best-effort: enforce owner-only permissions on an EXISTING file (a vault
+// the user already had, possibly on a shared drive or with a loose umask).
+// Never fails the caller — logs a single generic diagnostic on failure.
+void ensure_owner_only_file(const std::filesystem::path& path);
+
 } // namespace platform
