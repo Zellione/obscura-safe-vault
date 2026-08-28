@@ -65,9 +65,14 @@ GalleryView next_grid_density(GalleryView view) noexcept
     return GridS;
 }
 
+GalleryView grid_view_for(GalleryView view) noexcept
+{
+    return view == GalleryView::List ? GalleryView::GridM : view;
+}
+
 float grid_cell_size(GalleryView view) noexcept
 {
-    return cell_size_for(view == GalleryView::List ? GalleryView::GridM : view);
+    return cell_size_for(grid_view_for(view));
 }
 
 // Lookup table for labels, slugs, and view enumeration.

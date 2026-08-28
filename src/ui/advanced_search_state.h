@@ -2,8 +2,7 @@
 
 #include <string>
 
-#include "ui/advanced_search_model.h"   // ui::AdvancedQuery
-#include "ui/gallery_view.h"            // ui::GalleryView
+#include "ui/advanced_search_model.h"  // ui::AdvancedQuery
 
 namespace ui {
 
@@ -36,7 +35,6 @@ struct AdvancedSearchState {
     int           cur_group  = 0;
     int           cur_saved  = 0;
 
-    GalleryView view = GalleryView::List;  // Phase 20 List / Phase 93 grid density
     bool          detail_open = false;   // Phase 48: detail panel state
 };
 

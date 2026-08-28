@@ -27,9 +27,9 @@ enum class GalleryView { List, GridS, GridM, GridL, GridXL, GridXXL };
 // read `List` from the shared setting lands on GridS rather than looping.
 [[nodiscard]] GalleryView next_grid_density(GalleryView view) noexcept;
 
-// The tile size a grid-only surface should render: `cell_size_for(view)`, but
-// with `List` falling back to GridM (a grid-only surface cannot show a list,
-// so it shows the middle density when the shared setting is List).
+// Normalize a shared view for a grid-only surface, then return its tile size.
+// List falls back to GridM because these surfaces have no list renderer.
+[[nodiscard]] GalleryView grid_view_for(GalleryView view) noexcept;
 [[nodiscard]] float grid_cell_size(GalleryView view) noexcept;
 
 // UI display label for a gallery view ("List", "Grid S", etc.), used in

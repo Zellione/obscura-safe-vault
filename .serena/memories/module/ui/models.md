@@ -84,7 +84,8 @@ Pure SDL-free view/sort/model helpers, layout geometry, settings state, search i
   75 values; List unused; XXL == `image::THUMB_MAX_SIDE` so no thumbnail migration) +
   `next_gallery_view(view)` (the `L`-key cycle) + **Phase 93** `next_grid_density(view)`
   (grid-density-only S→M→L→XL→XXL→S for the list-less collection screens; List→GridS) and
-  `grid_cell_size(view)` (cell_size_for with List→GridM fallback). Phase 84 adds, all off ONE
+  `grid_view_for(view)` / `grid_cell_size(view)` (view/cell size with List→GridM fallback).
+  Phase 84 adds, all off ONE
   constexpr `{view,label,slug}` table (single source, no drift): `gallery_view_label`
   ("List"/"Grid S"/…), `gallery_view_slug`/`gallery_view_from_slug` (the `gallery_view.conf`
   token; unknown/empty → GridM; slugs are STABLE — never rename), and `prev_gallery_view`

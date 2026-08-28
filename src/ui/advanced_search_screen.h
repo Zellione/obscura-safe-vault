@@ -47,6 +47,7 @@ public:
     void on_enter() override;
     void on_exit() override;
     void on_vault_changed() override;  // Phase 50: re-run search after tree reallocation
+    void on_gallery_view_changed(GalleryView view) override;
     void handle_event(const SDL_Event& e) override;
     void update(double dt) override;   // upload finished off-thread thumb decodes
     void render(gfx::Renderer& r) override;

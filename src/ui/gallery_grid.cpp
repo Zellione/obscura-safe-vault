@@ -1003,11 +1003,8 @@ bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& 
         case SDLK_L:
             // Phase 93: cycle from the shared setting — self-healing if any other
             // surface changed it since this grid was built — and write it back.
-            g.view_ = next_gallery_view(gallery_view_setting());
-            set_gallery_view_setting(g.view_);
-            // The tile geometry just changed under the selection — minimally
-            // re-follow so the selected tile doesn't land off-screen.
-            g.follow_ = GalleryGrid::ScrollFollow::Ensure;
+            set_gallery_view_setting(next_gallery_view(gallery_view_setting()));
+            g.on_gallery_view_changed(gallery_view_setting());
             // Phase 84: say which of the five modes we just landed on, and
             // persist it machine-wide immediately (live-save, like the theme).
             g.status_ = std::format("View: {}", gallery_view_label(g.view_));
@@ -1609,11 +1606,12 @@ bool vault_busy(const GalleryGrid& g)
     return g.naming_.file_op.active() || g.transfer_.job_active() || g.combine_.job_active();
 }
 
-void set_gallery_view(GalleryGrid& g, GalleryView view)
+void GalleryGrid::on_gallery_view_changed(GalleryView view)
 {
-    g.view_   = view;
-    set_gallery_view_setting(view);  // Phase 93: keep the shared setting in sync
-    g.follow_ = GalleryGrid::ScrollFollow::Ensure;
+    if (view_ == view) return;
+    view_ = view;
+    follow_ = ScrollFollow::Ensure;
+    mark_dirty();
 }
 
 std::string current_gallery_path(const GalleryGrid& g) { return g.nav_.path(); }
@@ -1630,8 +1628,8 @@ PaneState capture_pane_state(const GalleryGrid& g)
     return s;
 }
 
-// Phase 78: rebuild a pane from a snapshot. Grid is constructed at s.path/s.selected/s.view
-// via GridLocation; this function refines scroll, detail state, and multi-selection.
+// Phase 78: rebuild a pane from a snapshot. Grid is constructed at s.path/s.selected;
+// this function refines scroll, detail state, and multi-selection.
 void restore_pane_state(GalleryGrid& g, const PaneState& s)
 {
     // Clamp scroll to valid range, accounting for current content height.

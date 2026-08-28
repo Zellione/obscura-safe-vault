@@ -36,6 +36,7 @@ public:
     void on_enter() override;
     void on_exit() override;                 // snapshots both panes into dual_
     void on_vault_changed() override;        // forward to both panes + walk-up
+    void on_gallery_view_changed(GalleryView view) override;
     void handle_event(const SDL_Event& e) override;
     void update(double dt) override;
     void render(gfx::Renderer& r) override;

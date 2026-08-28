@@ -131,6 +131,7 @@ public:
     void on_enter() override;
     void on_exit() override;
     void on_vault_changed() override;  // Phase 50: re-fetch children_ after tree reallocation
+    void on_gallery_view_changed(GalleryView view) override;
     void handle_event(const SDL_Event& e) override;
     void update(double dt) override;
     void render(gfx::Renderer& r) override;
@@ -211,10 +212,8 @@ void toggle_select();          // toggle the current item in the export selectio
     friend bool handle_detail_key(GalleryGrid& g, const SDL_KeyboardEvent& key);     // detail panel scroll/toggle
     friend bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& key);  // L/X/M/R/SPACE/G/B/F/T/S/U shortcuts
     friend bool handle_f3_key(GalleryGrid& g, const SDL_KeyboardEvent& key);         // F3 enter split view (Phase 78)
-    friend void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);  // cancelled import waste hint
-    // Phase 84/93: the F2 settings row changes the view while a grid is open behind
-    // the overlay — push it into the live instance so grid, shared setting and pref agree.
-    friend void set_gallery_view(GalleryGrid& g, GalleryView view);
+    friend void set_cancelled_import_status(GalleryGrid& g, int imported,
+                                            const char* noun);  // cancelled import waste hint
     // current_gallery_path (Phase 50): App uses it to derive back nav for import status screen
     friend std::string current_gallery_path(const GalleryGrid& g);
     // Phase 78: snapshot one pane's configuration / rebuild it
@@ -402,9 +401,6 @@ void handle_delete_key(GalleryGrid& g);
 void render_delete_confirm_modal(GalleryGrid& g, gfx::Renderer& r, float W, float H);
 void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);
 [[nodiscard]] std::string current_gallery_path(const GalleryGrid& g);  // Phase 50: for import status back nav
-// Phase 84/93: the F2 settings row changes the view while a grid is open behind
-// the overlay — push it into the live instance so grid, shared setting and pref agree.
-void set_gallery_view(GalleryGrid& g, GalleryView view);
 // Phase 78: snapshot one pane's exact configuration / rebuild it. The restore
 // clamps `selected` and drops out-of-range `selected_tiles` if the listing changed,
 // then clamps scroll.

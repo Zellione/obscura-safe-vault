@@ -128,10 +128,10 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   Appearance section has TWO rows (theme, Default Gallery View —
   `settings_change_value` routes by `state.row` through `change_appearance_value`). After the
   overlay handles an event, `OverlayDispatch::settings` syncs `settings_.gallery_view` back
-  into the process-global via `ui::set_gallery_view_setting` AND pushes it into a live grid via
-  the `ui::set_gallery_view` free friend
-  (dynamic_cast; sets `view_` + ScrollFollow::Ensure + re-syncs the setting) — placed inside
-  the handled branch, so
+  into the process-global via `ui::set_gallery_view_setting` AND calls the active Screen's
+  virtual `on_gallery_view_changed`. GalleryGrid, FavoritesScreen, and AdvancedSearchScreen
+  refresh their cached layout; DualGalleryScreen forwards to both live panes. This is placed
+  inside the handled branch, so
   the VaultOps migration-trigger "deliberately not handled" contract is untouched. The
   overlay's LEFT/RIGHT value branches share ONE `apply_value_delta(state, delta, commit_out)`
   helper (Sonar S3776/S134; row 0 theme + ThemePref save, row 1 GalleryViewPref save, Security

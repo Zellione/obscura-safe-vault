@@ -151,7 +151,7 @@ AdvancedSearchScreen::AdvancedSearchScreen(gfx::Window& win, gfx::FontAtlas& fon
 
 void AdvancedSearchScreen::on_enter()
 {
-    // Restore the session-scoped state (query + builder buffers + cursor + view)
+    // Restore the session-scoped state (query + builder buffers + cursor)
     // so returning to the screen shows the previous search; a fresh session
     // (active == false) just keeps the default-constructed members.
     if (session_.active) {
@@ -206,6 +206,13 @@ void AdvancedSearchScreen::on_vault_changed()
     // Phase 50: vault's index tree changed (background import drain attached nodes).
     // results_ are now stale; re-run the search.
     rerun();
+    mark_dirty();
+}
+
+void AdvancedSearchScreen::on_gallery_view_changed(GalleryView view)
+{
+    if (result_view_.get_view() == view) return;
+    result_view_.set_view(view);
     mark_dirty();
 }
 

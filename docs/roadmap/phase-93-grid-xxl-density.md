@@ -36,7 +36,7 @@ Two gaps:
 XXL is exactly `THUMB_MAX_SIDE`, so existing stored thumbnails/posters render
 sharp with **no migration** and no `INDEX_VERSION` bump. New pure
 `next_grid_density` (grid-density-only cycle for the list-less collection
-screens) and `grid_cell_size` (renders `List` as `GridM`) in
+screens), `grid_view_for` (normalizes `List` to `GridM`), and `grid_cell_size` in
 `src/ui/gallery_view.{h,cpp}`; the `{view,label,slug}` table gains the
 `Grid XXL` / `grid-xxl` row.
 
@@ -47,16 +47,17 @@ New `ui::gallery_view_setting` process-global
 pattern): the single in-memory source of truth, seeded from
 `platform::GalleryViewPref` at `App::init` and `promote_pending`, written back
 (and persisted to `gallery_view.conf`) by every surface's `L` key and the F2
-"Default Gallery View" row. Because only one screen is active at a time, every
-surface simply **reads the setting on entry and writes it on `L`** — changing
-the density anywhere changes it everywhere (and the F2 row).
+"Default Gallery View" row. Screens read the setting on entry, and the Screen
+`on_gallery_view_changed` hook applies live changes to cached layouts; the
+dual-gallery host forwards it to both simultaneously visible panes. Changing
+the density anywhere therefore changes it everywhere (and the F2 row).
 
 The now-redundant per-session `.view` fields are retired:
 `GallerySessionState::view`, `DualSessionState::PaneState::view`, and
 `GridLocation::view`. `GalleryGrid` reads the setting at construction; its `L`
 handler cycles *from the setting* (self-healing if another surface changed it)
-and writes it back; `set_gallery_view` (F2 live-push into an open grid) keeps
-the setting in sync too.
+and writes it back. F2 updates the process-global, then notifies the active
+screen; a pane's `L` event is likewise mirrored to both live split panes.
 
 ### (c) The collection grids behave like the gallery grid
 

@@ -12,12 +12,13 @@
 #include "ui/dual_layout.h"
 #include "ui/dual_session_state.h"
 #include "ui/gallery_grid.h"
+#include "ui/gallery_view_setting.h"
 #include "ui/help_popup.h"
 #include "ui/keybindings.h"
 #include "ui/parent_group.h"
 #include "ui/widgets.h"
-#include "vault/vault.h"
 #include "vault/transfer.h"
+#include "vault/vault.h"
 
 namespace ui {
 
@@ -142,6 +143,13 @@ void DualGalleryScreen::on_vault_changed()
     }
 }
 
+void DualGalleryScreen::on_gallery_view_changed(GalleryView view)
+{
+    left_->on_gallery_view_changed(view);
+    right_->on_gallery_view_changed(view);
+    mark_dirty();
+}
+
 void DualGalleryScreen::handle_event(const SDL_Event& e)
 {
     // 1. Window resize: recompute the split, set_layout_override both panes
@@ -173,7 +181,13 @@ void DualGalleryScreen::handle_event(const SDL_Event& e)
     if (route_mouse(e)) return;
 
     // 8. Everything else: forward to active pane untranslated
+    const GalleryView view_before = gallery_view_setting();
     active().handle_event(e);
+    // A pane's L shortcut writes the process-global setting. Mirror it into
+    // both live panes before the same event is rendered.
+    if (const GalleryView view_after = gallery_view_setting(); view_after != view_before) {
+        on_gallery_view_changed(view_after);
+    }
     drain_nav(active());
 }
 

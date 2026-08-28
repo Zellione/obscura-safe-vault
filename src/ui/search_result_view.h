@@ -58,9 +58,9 @@ public:
     // (to be wired up by AdvancedSearchScreen).
     void activate_focused();
 
-    // Session-state accessors: cursor position and view mode (List/grid density).
-    // AdvancedSearchScreen uses these in on_enter/on_exit to restore/persist
-    // the view state across screen visits.
+    // Cursor session state plus the live shared view mode (List/grid density).
+    // AdvancedSearchScreen persists the cursor; the view comes from the
+    // machine-wide gallery-view setting.
     [[nodiscard]] int get_cursor() const { return cur_result_; }
     void set_cursor(int cursor) { cur_result_ = cursor; }
 

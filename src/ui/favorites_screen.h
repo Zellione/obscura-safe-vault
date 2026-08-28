@@ -49,6 +49,7 @@ public:
 
     void on_enter() override;
     void on_vault_changed() override;  // Phase 50: re-fetch favorites after tree reallocation
+    void on_gallery_view_changed(GalleryView view) override;
     void handle_event(const SDL_Event& e) override;
     void update(double dt) override;
     void render(gfx::Renderer& r) override;

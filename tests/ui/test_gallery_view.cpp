@@ -68,6 +68,9 @@ TEST(grid_cell_size_falls_back_to_grid_m_for_list)
 {
     using enum GalleryView;
     // Grid-only surfaces render GridM when the shared setting is List.
+    CHECK_EQ(ui::grid_view_for(List), GridM);
+    CHECK_EQ(ui::grid_view_for(GridS), GridS);
+    CHECK_EQ(ui::grid_view_for(GridXXL), GridXXL);
     CHECK_EQ(ui::grid_cell_size(List), ui::cell_size_for(GridM));
     CHECK_EQ(ui::grid_cell_size(GridS), ui::cell_size_for(GridS));
     CHECK_EQ(ui::grid_cell_size(GridXXL), ui::cell_size_for(GridXXL));

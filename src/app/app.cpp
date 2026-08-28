@@ -706,11 +706,10 @@ struct App::OverlayDispatch {
         if (bool commit = false; ui::handle_settings_event(app.overlays_.settings, app.window_, e, commit)) {
             // Phase 66: sync the default mode whenever the event was handled
             app.second_.session.set_default_mode(app.overlays_.settings.second_vault_default);
-            // Phase 93: sync gallery view to the shared setting and any open grid
+            // Phase 93: sync gallery view to the shared setting and the active
+            // screen (container screens forward it to their live children).
             ui::set_gallery_view_setting(app.overlays_.settings.gallery_view);
-            if (auto* grid = dynamic_cast<ui::GalleryGrid*>(app.screen_.get())) {
-                ui::set_gallery_view(*grid, app.overlays_.settings.gallery_view);
-            }
+            app.screen_->on_gallery_view_changed(app.overlays_.settings.gallery_view);
             // Phase 85: sync autoplay whenever the event was handled
             media::set_saved_autoplay_enabled(app.overlays_.settings.autoplay);
             (void)platform::AutoplayPref::default_location().save(app.overlays_.settings.autoplay);

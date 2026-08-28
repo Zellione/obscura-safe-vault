@@ -100,10 +100,18 @@ void FavoritesScreen::on_enter()
     // Phase 93: adopt the shared machine-wide density (the gallery grid, the
     // F2 "Default Gallery View" row, and the search results all use the same
     // value); List is rendered as GridM on these grid-only screens.
-    view_ =
-        gallery_view_setting() == GalleryView::List ? GalleryView::GridM : gallery_view_setting();
+    view_ = grid_view_for(gallery_view_setting());
     reload();
     scroll_ = 0.0f;  // reset scroll when entering
+}
+
+void FavoritesScreen::on_gallery_view_changed(GalleryView view)
+{
+    const GalleryView grid_view = grid_view_for(view);
+    if (view_ == grid_view) return;
+    view_ = grid_view;
+    follow_scroll_ = true;
+    mark_dirty();
 }
 
 void FavoritesScreen::on_vault_changed()

@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "ui/gallery_view.h"
 #include "ui/help_popup.h"
 
 namespace gfx { class Renderer; }
@@ -51,6 +52,13 @@ public:
     // cache node pointers across frames MUST override and re-fetch. Called on
     // the main thread, after records are applied, BEFORE the next render.
     virtual void on_vault_changed() { /* screens without cached pointers: no-op */ }
+
+    // The machine-wide gallery view changed while this screen is alive (for
+    // example through F2 Settings). Screens that cache layout state override
+    // this; container screens forward it to their children.
+    virtual void on_gallery_view_changed(GalleryView /*view*/)
+    { /* no-op by default */
+    }
 
     virtual void handle_event(const SDL_Event& e) = 0;
     virtual void update(double dt) { (void)dt; }
