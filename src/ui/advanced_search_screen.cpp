@@ -411,7 +411,7 @@ void AdvancedSearchScreen::handle_event(const SDL_Event& e)
         buf != nullptr && field_owns_event(*buf, e)) {
         const uint64_t rev = buf->revision();
         if (handle_text_input_event(*buf, e)) {
-            if (buf->revision() != rev) after_buffer_edit();
+            if (buf->revision() != rev) after_advanced_search_buffer_edit(*this);
             return;
         }
     }
@@ -460,14 +460,16 @@ void AdvancedSearchScreen::update(double dt)
     mark_dirty();   // mark screen dirty since thumbnails changed
 }
 
-void AdvancedSearchScreen::after_buffer_edit()
+// Everything that must follow a change to the active buffer's content. This is
+// a free friend so AdvancedSearchScreen stays within Sonar S1448's method cap.
+void after_advanced_search_buffer_edit(AdvancedSearchScreen& s)
 {
-    cur_.tag = -1;
-    if (!saved_panel_.active_buffer() && focus_ == Focus::Name) {
-        query_.name_query = edit_.name.str();
-        live_.rerun.arm();   // Phase 58: debounce name-query reruns to input silence
+    s.cur_.tag = -1;
+    if (!s.saved_panel_.active_buffer() && s.focus_ == AdvancedSearchScreen::Focus::Name) {
+        s.query_.name_query = s.edit_.name.str();
+        s.live_.rerun.arm();  // Phase 58: debounce name-query reruns to input silence
     }
-    refresh_suggestions();   // in-memory autocomplete is cheap; stays immediate
+    s.refresh_suggestions();  // in-memory autocomplete is cheap; stays immediate
 }
 
 void AdvancedSearchScreen::handle_clearing_key(const SDL_KeyboardEvent& key)

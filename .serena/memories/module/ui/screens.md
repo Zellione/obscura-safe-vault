@@ -103,6 +103,8 @@ Core UI screens: unlock, gallery browsing, image favorites, tag management, vaul
   `render_result_grid` free friend reuses the shared tile_thumb draw. Query/params/cursor
   persist across visits via session-scoped `ui::AdvancedSearchState` App owns + resets on vault
   change; restored on_enter / saved on_exit (results re-derived, node ptrs not persisted).
+  `after_advanced_search_buffer_edit` is also a free friend so the live-view override does not
+  push the screen past Sonar S1448's 35-method cap.
   Ctrl+R clears the query behind a Y/N modal. Phase 48: detail panel + `Ctrl+D` toggle (bare
   `D` types into query buffer); all result repopulation funnels through `rerun()`, which clears
   the cache key. **Phase 56:** list layout derives from `list_layout.*` module.
