@@ -17,12 +17,13 @@ enum class ClipboardGateAction { Copy, Confirm, Refuse };
 clipboard_gate_action(platform::ClipboardMode m) noexcept
 {
     using enum ClipboardGateAction;
+    using enum platform::ClipboardMode;
     switch (m) {
-    case platform::ClipboardMode::Allow:
+    case Allow:
         return Copy;
-    case platform::ClipboardMode::Warn:
+    case Warn:
         return Confirm;
-    case platform::ClipboardMode::Disable:
+    case Disable:
         return Refuse;
     }
     return Copy;

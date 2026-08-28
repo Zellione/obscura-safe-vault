@@ -84,7 +84,9 @@ bool clipboard_confirm_sensitive() noexcept
 
 bool confirm_clipboard_copy()
 {
-    Pending& p = pending_slot();
+    // `p` is read-only here: the pending slot is reset through the slot, never
+    // through this reference.
+    const Pending& p = pending_slot();
     if (!p.active) return false;
 
     const std::string_view text = clipboard_confirm_text();

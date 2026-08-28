@@ -649,7 +649,7 @@ struct App::OverlayDispatch {
     // confirmation, swallow every event; Enter/Y confirms (writes), Esc/N
     // cancels. Default-cancel by design — the pending payload is plaintext
     // waiting to leave the process. Its text is deliberately never drawn.
-    static bool clipboard_confirm(App& app, const SDL_Event& e)
+    static bool clipboard_confirm(const App& app, const SDL_Event& e)
     {
         (void)app;
         if (!ui::clipboard_confirm_pending()) return false;

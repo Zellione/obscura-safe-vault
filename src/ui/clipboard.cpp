@@ -93,14 +93,15 @@ bool paste_from_clipboard(ITextInput& field)
 // selection before the confirm lands.
 [[nodiscard]] std::optional<std::string> gate_selection(std::string sel)
 {
+    using enum ClipboardGateAction;
     switch (clipboard_gate_action(clipboard_gate())) {
-    case ClipboardGateAction::Refuse:
+    case Refuse:
         crypto_wipe(sel.data(), sel.size());
         return std::nullopt;
-    case ClipboardGateAction::Confirm:
+    case Confirm:
         (void)request_clipboard_confirm(std::move(sel), /*sensitive=*/false);
         return std::nullopt;
-    case ClipboardGateAction::Copy:
+    case Copy:
         return sel;
     }
     return sel;

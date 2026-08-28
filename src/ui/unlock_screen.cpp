@@ -255,19 +255,20 @@ void UnlockScreen::copy_password_to_clipboard()
 {
     if (password_.pw.empty()) return;
     std::string tmp(password_.pw.text_view());
+    using enum ClipboardGateAction;
     switch (clipboard_gate_action(clipboard_gate())) {
-    case ClipboardGateAction::Refuse:
+    case Refuse:
         // Disable: a deliberate no-op — the OS clipboard is a persistent
         // cross-process plaintext sink, and the user switched the gate off.
         crypto_wipe(tmp.data(), tmp.size());
         return;
-    case ClipboardGateAction::Confirm:
+    case Confirm:
         // Warn: park for the App's default-cancel confirm. The auto-clear
         // timer is armed only once the confirm actually writes (update()
         // polls take_confirmed_copy), so a declined copy never arms a clear.
         (void)request_clipboard_confirm(std::move(tmp), /*sensitive=*/true);
         return;
-    case ClipboardGateAction::Copy:
+    case Copy:
         break;
     }
     // Allow: today's behaviour, unchanged.
