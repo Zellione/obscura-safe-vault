@@ -8,6 +8,8 @@
 
 namespace ui {
 
+class ITextInput;
+
 // Policy outcome for a clipboard-write attempt (Phase 92). Pure mapping, so the
 // wording is unit-tested without a platform or SDL: Allow writes immediately,
 // Warn asks first (a default-cancel confirm), Disable refuses outright.
@@ -47,7 +49,13 @@ void set_clipboard_gate(platform::ClipboardMode m) noexcept;
 // marks a copy that the unlock screen arms its auto-clear timer for once it is
 // confirmed (Phase 45 behaviour preserved through the gate). A non-empty text
 // that cannot be stored (OOM) leaves no pending confirm and returns false.
-[[nodiscard]] bool request_clipboard_confirm(std::string text, bool sensitive);
+// `cut_target` is optional and UI-thread-only. When present, a successful
+// confirmation deletes the still-current selection; cancel or write failure
+// leaves it untouched. The App's modal blocks screen events while pending, so
+// the target remains alive, and the implementation also verifies its revision
+// and selection bounds before deleting.
+[[nodiscard]] bool request_clipboard_confirm(std::string text, bool sensitive,
+                                             ITextInput* cut_target = nullptr);
 
 [[nodiscard]] bool clipboard_confirm_pending() noexcept;
 
@@ -58,10 +66,10 @@ void set_clipboard_gate(platform::ClipboardMode m) noexcept;
 [[nodiscard]] bool clipboard_confirm_sensitive() noexcept;
 
 // Write the pending payload to the OS clipboard via the ui::ClipboardBackend
-// seam and clear the pending state. Returns the write's success. The payload is
-// retained (wiped on the next request/cancel/reset) so take_confirmed_copy()
-// can hand it to the unlock screen, which arms its auto-clear timer and needs
-// the exact text for the "only clear if it still matches" check.
+// seam and clear the pending state. Returns the write's success. Successful
+// sensitive copies alone are retained for take_confirmed_copy(), so the unlock
+// screen can arm auto-clear with the exact text it wrote. Ordinary and failed
+// copies never enter that plaintext channel.
 [[nodiscard]] bool confirm_clipboard_copy();
 
 // Abandon the pending payload: wipe it and clear state. No write.

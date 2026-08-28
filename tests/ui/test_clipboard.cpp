@@ -17,7 +17,9 @@ namespace {
 // test can assert the shim wiped it before letting go.
 class MockClipboard final : public ui::ClipboardBackend {
 public:
-    explicit MockClipboard(std::string contents = {}) : contents_(std::move(contents)) {}
+    explicit MockClipboard(std::string contents = {}, bool write_succeeds = true)
+        : contents_(std::move(contents)), write_succeeds_(write_succeeds)
+    {}
 
     ~MockClipboard() override
     {
@@ -48,7 +50,7 @@ public:
     {
         contents_ = std::string(s);
         set_calls_++;
-        return true;
+        return write_succeeds_;
     }
 
     void set_empty() { has_text_ = false; }
@@ -74,6 +76,7 @@ private:
     size_t             handed_len_ = 0;
     char*              released_   = nullptr;
     int                set_calls_  = 0;
+    bool write_succeeds_ = true;
 };
 
 // RAII installer so a failed CHECK cannot leave the mock installed.
@@ -336,6 +339,42 @@ TEST(clip_cut_under_a_warn_gate_parks_without_deleting_the_selection)
     // The delete is deferred until the copy is actually confirmed.
     CHECK_EQ(f.str(), std::string("hello world"));
     ui::cancel_clipboard_copy();
+}
+
+TEST(clip_cut_under_a_warn_gate_deletes_the_selection_after_a_successful_confirm)
+{
+    ui::reset_clipboard_gate();
+    ui::set_clipboard_gate(platform::ClipboardMode::Warn);
+    MockClipboard mock("untouched");
+    const InstalledMock guard(mock);
+
+    ui::TextInputModel f;
+    f.set_text("hello world");
+    f.move_home(false);
+    f.move_right(true, true);
+
+    CHECK(!ui::cut_selection_to_clipboard(f));
+    CHECK_EQ(f.str(), std::string("hello world"));
+    CHECK(ui::confirm_clipboard_copy());
+    CHECK_EQ(mock.contents(), std::string("hello"));
+    CHECK_EQ(f.str(), std::string(" world"));
+}
+
+TEST(clip_cut_under_a_warn_gate_keeps_the_selection_when_the_write_fails)
+{
+    ui::reset_clipboard_gate();
+    ui::set_clipboard_gate(platform::ClipboardMode::Warn);
+    MockClipboard mock("untouched", /*write_succeeds=*/false);
+    const InstalledMock guard(mock);
+
+    ui::TextInputModel f;
+    f.set_text("hello world");
+    f.move_home(false);
+    f.move_right(true, true);
+
+    CHECK(!ui::cut_selection_to_clipboard(f));
+    CHECK_FALSE(ui::confirm_clipboard_copy());
+    CHECK_EQ(f.str(), std::string("hello world"));
 }
 
 TEST(clip_copy_under_an_allow_gate_still_writes_immediately)

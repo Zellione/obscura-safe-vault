@@ -91,7 +91,8 @@ bool paste_from_clipboard(ITextInput& field)
 // cut so the policy cannot drift — and so cut, whose delete must wait for an
 // actual write, sees "not yet written" as a no-op instead of deleting the
 // selection before the confirm lands.
-[[nodiscard]] std::optional<std::string> gate_selection(std::string sel)
+[[nodiscard]] std::optional<std::string> gate_selection(std::string sel,
+                                                        ITextInput* cut_target = nullptr)
 {
     using enum ClipboardGateAction;
     switch (clipboard_gate_action(clipboard_gate())) {
@@ -99,7 +100,7 @@ bool paste_from_clipboard(ITextInput& field)
         crypto_wipe(sel.data(), sel.size());
         return std::nullopt;
     case Confirm:
-        (void)request_clipboard_confirm(std::move(sel), /*sensitive=*/false);
+        (void)request_clipboard_confirm(std::move(sel), /*sensitive=*/false, cut_target);
         return std::nullopt;
     case Copy:
         return sel;
@@ -127,7 +128,7 @@ bool cut_selection_to_clipboard(ITextInput& field)
     // The selection is deleted only when the clipboard write actually happened:
     // under Warn the copy is parked (gate_selection returns nullopt) and the
     // text stays put until the confirm lands, under Disable it is never written.
-    auto sel = gate_selection(field.selection_text());
+    auto sel = gate_selection(field.selection_text(), &field);
     if (!sel) return false;
     const bool ok = clipboard_backend().set_text(*sel);
     crypto_wipe(sel->data(), sel->size());

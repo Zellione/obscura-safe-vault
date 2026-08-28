@@ -13,7 +13,7 @@ namespace {
 // be verified through the same seam the live SDL backend uses.
 class RecordingClipboard final : public ui::ClipboardBackend {
 public:
-    RecordingClipboard() = default;
+    explicit RecordingClipboard(bool write_succeeds = true) : write_succeeds_(write_succeeds) {}
 
     ~RecordingClipboard() override
     {
@@ -37,7 +37,7 @@ public:
     {
         contents_ = std::string(s);
         set_calls_++;
-        return true;
+        return write_succeeds_;
     }
 
     [[nodiscard]] const std::string& contents() const
@@ -52,6 +52,7 @@ public:
 private:
     std::string contents_;
     int set_calls_ = 0;
+    bool write_succeeds_ = true;
 };
 
 // RAII installer so a failed CHECK cannot leave the mock installed.
@@ -130,6 +131,28 @@ TEST(clipboard_gate_confirm_writes_the_clipboard_and_clears_pending)
     CHECK_EQ(mock.contents(), std::string("tag:artist"));
     CHECK_FALSE(ui::clipboard_confirm_pending());
     CHECK(ui::clipboard_confirm_text().empty());
+}
+
+TEST(clipboard_gate_an_ordinary_confirm_is_not_retained_for_password_auto_clear)
+{
+    ui::reset_clipboard_gate();
+    RecordingClipboard mock;
+    const Installed guard(mock);
+
+    CHECK(ui::request_clipboard_confirm("tag:artist", /*sensitive=*/false));
+    CHECK(ui::confirm_clipboard_copy());
+    CHECK_FALSE(ui::take_confirmed_copy().has_value());
+}
+
+TEST(clipboard_gate_a_failed_sensitive_write_is_not_retained_for_auto_clear)
+{
+    ui::reset_clipboard_gate();
+    RecordingClipboard mock(/*write_succeeds=*/false);
+    const Installed guard(mock);
+
+    CHECK(ui::request_clipboard_confirm("correct horse", /*sensitive=*/true));
+    CHECK_FALSE(ui::confirm_clipboard_copy());
+    CHECK_FALSE(ui::take_confirmed_copy().has_value());
 }
 
 TEST(clipboard_gate_confirm_retains_the_copy_for_auto_clear_arming)
