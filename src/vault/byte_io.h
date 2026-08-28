@@ -12,6 +12,8 @@
 #include <span>
 #include <vector>
 
+#include "crypto/secure_mem.h"
+
 namespace vault {
 
 // --- Fixed-offset writers (into a caller-sized buffer) ---------------------
@@ -69,37 +71,39 @@ inline uint64_t get_u64_at(std::span<const uint8_t> buf, size_t off) noexcept
 
 class ByteWriter {
 public:
-    template <typename Alloc>
-    explicit ByteWriter(std::vector<uint8_t, Alloc>& out) noexcept
-        : out_(&out), push_(&push_impl<Alloc>), insert_(&insert_impl<Alloc>)
+    explicit ByteWriter(std::vector<uint8_t>& out) noexcept
+        : plain_(&out)
     {}
 
-    void u8(uint8_t v)   { push_(out_, v); }
-    void u16(uint16_t v) { for (int i = 0; i < 2; ++i) push_(out_, static_cast<uint8_t>(v >> (8 * i))); }
-    void u32(uint32_t v) { for (int i = 0; i < 4; ++i) push_(out_, static_cast<uint8_t>(v >> (8 * i))); }
-    void u64(uint64_t v) { for (int i = 0; i < 8; ++i) push_(out_, static_cast<uint8_t>(v >> (8 * i))); }
-    void bytes(std::span<const uint8_t> b) { insert_(out_, b); }
+    explicit ByteWriter(crypto::WipingBytes& out) noexcept
+        : wiping_(&out)
+    {}
+
+    void u8(uint8_t v)   { push(v); }
+    void u16(uint16_t v) { for (int i = 0; i < 2; ++i) push(static_cast<uint8_t>(v >> (8 * i))); }
+    void u32(uint32_t v) { for (int i = 0; i < 4; ++i) push(static_cast<uint8_t>(v >> (8 * i))); }
+    void u64(uint64_t v) { for (int i = 0; i < 8; ++i) push(static_cast<uint8_t>(v >> (8 * i))); }
+    void bytes(std::span<const uint8_t> b)
+    {
+        if (plain_) {
+            plain_->insert(plain_->end(), b.begin(), b.end());
+        } else {
+            wiping_->insert(wiping_->end(), b.begin(), b.end());
+        }
+    }
 
 private:
-    template <typename Alloc>
-    static void push_impl(void* out, uint8_t value)
+    void push(uint8_t value)
     {
-        static_cast<std::vector<uint8_t, Alloc>*>(out)->push_back(value);
+        if (plain_) {
+            plain_->push_back(value);
+        } else {
+            wiping_->push_back(value);
+        }
     }
 
-    template <typename Alloc>
-    static void insert_impl(void* out, std::span<const uint8_t> bytes)
-    {
-        auto& v = *static_cast<std::vector<uint8_t, Alloc>*>(out);
-        v.insert(v.end(), bytes.begin(), bytes.end());
-    }
-
-    using PushFn = void (*)(void*, uint8_t);
-    using InsertFn = void (*)(void*, std::span<const uint8_t>);
-
-    void* out_;
-    PushFn push_;
-    InsertFn insert_;
+    std::vector<uint8_t>* plain_ = nullptr;
+    crypto::WipingBytes* wiping_ = nullptr;
 };
 
 // --- Bounds-checked reader (for parsing untrusted serialised blobs) ---------

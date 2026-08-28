@@ -112,7 +112,7 @@ TEST(search_saved_searches_round_trip_across_reopen)
         CHECK_TRUE(saved[0].query.is_locked());
 
         ui::AdvancedQuery back;
-        REQUIRE(ui::deserialize_query(saved[0].query, back));
+        REQUIRE(ui::deserialize_query(saved[0].query.as_span(), back));
         REQUIRE(back.include.size() == 1);
         CHECK_EQ(back.include[0].tag, std::string("cat"));
         CHECK_EQ(back.include[0].weight, 2);
@@ -146,7 +146,7 @@ TEST(search_save_search_upserts_by_name)
     auto saved = vault::VaultSearch(v).list_saved_searches();
     REQUIRE(saved.size() == 1);
     ui::AdvancedQuery back;
-    REQUIRE(ui::deserialize_query(saved[0].query, back));
+    REQUIRE(ui::deserialize_query(saved[0].query.as_span(), back));
     CHECK_EQ(back.name_query, std::string("second"));
 
     CHECK(vault::VaultSearch(v).save_search("", q1) == vault::VaultResult::InvalidArg);  // empty name rejected

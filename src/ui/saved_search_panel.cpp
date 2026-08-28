@@ -89,7 +89,7 @@ void SavedSearchPanel::handle_wheel(float wheel_y, float max_h)
 bool SavedSearchPanel::load_focused(AdvancedQuery& out_query)
 {
     if (cur_saved_ < 0 || cur_saved_ >= static_cast<int>(saved_.size())) return false;
-    if (!deserialize_query(saved_[cur_saved_].query, out_query)) {
+    if (!deserialize_query(saved_[cur_saved_].query.as_span(), out_query)) {
         status_ = "Could not load search.";
         return false;
     }

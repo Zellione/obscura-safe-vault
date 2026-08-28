@@ -1,30 +1,18 @@
 #include "test_framework.h"
 
 #include <array>
-#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_set>
 
 #include "crypto/secure_string.h"
 
 using namespace std::string_view_literals;
 
-namespace {
-
-std::atomic_int wipe_observations{0};
-std::atomic_bool wipe_observed_nonzero{false};
-
-void observe_wiped_allocation(std::span<const uint8_t> bytes) noexcept
-{
-    ++wipe_observations;
-    for (const uint8_t b : bytes)
-        if (b != 0) wipe_observed_nonzero.store(true);
-}
-
-}  // namespace
+static_assert(!std::is_convertible_v<crypto::SecureBlob, std::span<const uint8_t>>);
 
 // SecureString (Phase 91) is the secure string type for the index tree's
 // human-readable metadata: an mlock'd (best-effort), crypto_wipe'd-on-destroy,
@@ -242,15 +230,12 @@ TEST(secure_mem_overlapping_page_locks_are_reference_counted)
 
 TEST(wiping_bytes_zeroes_every_allocation_before_release)
 {
-    wipe_observations.store(0);
-    wipe_observed_nonzero.store(false);
-    crypto::detail::set_wipe_observer_for_tests(&observe_wiped_allocation);
+    crypto::detail::reset_wipe_observations_for_tests();
     {
         crypto::WipingBytes bytes(64, 0xA5);
         bytes.reserve(1024);  // exercises a reallocation, not only destruction
         bytes.assign(80, 0x5A);
     }
-    crypto::detail::set_wipe_observer_for_tests(nullptr);
-    CHECK(wipe_observations.load() >= 2);
-    CHECK_FALSE(wipe_observed_nonzero.load());
+    CHECK(crypto::detail::wiping_deallocation_count() >= 2);
+    CHECK_TRUE(crypto::detail::all_wipe_observations_zero_for_tests());
 }

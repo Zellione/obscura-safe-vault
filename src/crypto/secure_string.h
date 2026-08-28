@@ -273,7 +273,7 @@ public:
     [[nodiscard]] std::span<uint8_t> span() noexcept { return {data(), size()}; }
     [[nodiscard]] std::span<const uint8_t> as_span() const noexcept { return {data(), size()}; }
 
-    [[nodiscard]] operator std::span<const uint8_t>() const noexcept { return as_span(); }
+    [[nodiscard]] explicit operator std::span<const uint8_t>() const noexcept { return as_span(); }
 
 private:
     SecureString storage_;

@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -22,6 +23,7 @@
 #include <new>
 #include "platform/safe_print.h"
 #include <span>
+#include <system_error>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -128,15 +130,21 @@ inline PageLockRegistry& page_lock_registry()
     return registry;
 }
 
-inline uintptr_t page_base(const void* p) noexcept
+template <typename T>
+inline uintptr_t pointer_address(const T* p) noexcept
+{
+    return std::bit_cast<uintptr_t>(p);
+}
+
+inline uintptr_t page_base(uintptr_t address) noexcept
 {
     const size_t page_size = memory_page_size();
-    return reinterpret_cast<uintptr_t>(p) / page_size * page_size;
+    return address / page_size * page_size;
 }
 
 inline bool os_lock_range(uintptr_t first, size_t length) noexcept
 {
-    auto* p = reinterpret_cast<uint8_t*>(first);
+    auto* p = std::bit_cast<std::byte*>(first);
 #if defined(_WIN32)
     return VirtualLock(p, length) != 0;
 #else
@@ -154,12 +162,129 @@ inline bool os_lock_range(uintptr_t first, size_t length) noexcept
 
 inline void os_unlock_range(uintptr_t first, size_t length) noexcept
 {
-    auto* p = reinterpret_cast<uint8_t*>(first);
 #if defined(_WIN32)
+    auto* p = std::bit_cast<std::byte*>(first);
     (void)VirtualUnlock(p, length);
 #else
+    const auto* p = std::bit_cast<const std::byte*>(first);
     (void)::munlock(p, length);
 #endif
+}
+
+struct AddedPageRefs {
+    bool success;
+    bool added_page;
+};
+
+inline void rollback_page_refs(PageLockRegistry& registry, uintptr_t first, uintptr_t stop,
+                               size_t page_size) noexcept
+{
+    for (uintptr_t page = first; page != stop; page += page_size) {
+        const auto it = registry.refs.find(page);
+        if (it == registry.refs.end()) continue;
+        --it->second;
+        if (it->second == 0) registry.refs.erase(it);
+    }
+}
+
+inline bool add_page_ref(PageLockRegistry& registry, uintptr_t page, bool& added_page) noexcept
+{
+    if (const auto it = registry.refs.find(page); it != registry.refs.end()) {
+        ++it->second;
+        return true;
+    }
+    try {
+        registry.refs.emplace(page, 1);
+        added_page = true;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+inline AddedPageRefs add_page_refs(PageLockRegistry& registry, uintptr_t first, uintptr_t last,
+                                   size_t page_size) noexcept
+{
+    bool added_page = false;
+    for (uintptr_t page = first;; page += page_size) {
+        if (!add_page_ref(registry, page, added_page)) {
+            rollback_page_refs(registry, first, page, page_size);
+            return {.success = false, .added_page = false};
+        }
+        if (page == last) break;
+    }
+    return {.success = true, .added_page = added_page};
+}
+
+inline bool is_new_page(const PageLockRegistry& registry, uintptr_t page) noexcept
+{
+    if (const auto it = registry.refs.find(page); it != registry.refs.end())
+        return it->second == 1;
+    return false;
+}
+
+inline void unlock_new_pages_before(const PageLockRegistry& registry, uintptr_t first,
+                                    uintptr_t stop, size_t page_size) noexcept
+{
+    uintptr_t range_first = 0;
+    for (uintptr_t page = first; page != stop; page += page_size) {
+        if (is_new_page(registry, page)) {
+            if (range_first == 0) range_first = page;
+        } else if (range_first != 0) {
+            os_unlock_range(range_first, static_cast<size_t>(page - range_first));
+            range_first = 0;
+        }
+    }
+    if (range_first != 0)
+        os_unlock_range(range_first, static_cast<size_t>(stop - range_first));
+}
+
+inline bool lock_new_pages(const PageLockRegistry& registry, uintptr_t first, uintptr_t last,
+                           size_t page_size) noexcept
+{
+    uintptr_t range_first = 0;
+    for (uintptr_t page = first;; page += page_size) {
+        if (is_new_page(registry, page)) {
+            if (range_first == 0) range_first = page;
+        } else if (range_first != 0) {
+            if (!os_lock_range(range_first, static_cast<size_t>(page - range_first))) {
+                unlock_new_pages_before(registry, first, range_first, page_size);
+                return false;
+            }
+            range_first = 0;
+        }
+        if (page == last) break;
+    }
+    if (range_first == 0) return true;
+    if (os_lock_range(range_first, static_cast<size_t>(last - range_first) + page_size))
+        return true;
+    unlock_new_pages_before(registry, first, range_first, page_size);
+    return false;
+}
+
+inline void release_page_refs(PageLockRegistry& registry, uintptr_t first, uintptr_t last,
+                              size_t page_size) noexcept
+{
+    uintptr_t range_first = 0;
+    for (uintptr_t page = first;; page += page_size) {
+        bool released = false;
+        if (const auto it = registry.refs.find(page); it != registry.refs.end()) {
+            --it->second;
+            if (it->second == 0) {
+                registry.refs.erase(it);
+                released = true;
+            }
+        }
+        if (released) {
+            if (range_first == 0) range_first = page;
+        } else if (range_first != 0) {
+            os_unlock_range(range_first, static_cast<size_t>(page - range_first));
+            range_first = 0;
+        }
+        if (page == last) break;
+    }
+    if (range_first != 0)
+        os_unlock_range(range_first, static_cast<size_t>(last - range_first) + page_size);
 }
 
 // mlock/munlock operate on whole pages and Linux locks do not stack. Normal
@@ -169,83 +294,25 @@ inline void os_unlock_range(uintptr_t first, size_t length) noexcept
 inline bool mem_lock(uint8_t* p, size_t n) noexcept
 {
     if (!p || n == 0) return false;
-    const uintptr_t addr = reinterpret_cast<uintptr_t>(p);
+    const auto addr = pointer_address(p);
     if (addr > std::numeric_limits<uintptr_t>::max() - (n - 1)) return false;
     const size_t page_size = memory_page_size();
-    const uintptr_t first = page_base(p);
-    const uintptr_t last = page_base(reinterpret_cast<const void*>(addr + n - 1));
+    const uintptr_t first = page_base(addr);
+    const uintptr_t last = page_base(addr + n - 1);
     if (last > std::numeric_limits<uintptr_t>::max() - page_size) return false;
 
     try {
         auto& registry = page_lock_registry();
         std::lock_guard lk(registry.mu);
-        const auto rollback_before = [&](uintptr_t stop) noexcept {
-            for (uintptr_t rollback = first; rollback != stop; rollback += page_size) {
-                const auto prev = registry.refs.find(rollback);
-                if (prev != registry.refs.end() && --prev->second == 0)
-                    registry.refs.erase(prev);
-            }
-        };
-        bool added_page = false;
-        for (uintptr_t page = first;; page += page_size) {
-            const auto it = registry.refs.find(page);
-            if (it != registry.refs.end()) {
-                ++it->second;
-            } else {
-                try {
-                    registry.refs.emplace(page, 1);
-                } catch (...) {
-                    rollback_before(page);
-                    return false;
-                }
-                added_page = true;
-            }
-            if (page == last) break;
-        }
-        if (!added_page) return true;
-
-        // Lock only pages newly owned by the registry. Re-locking an already
-        // tracked overlap is unnecessary and has platform-specific nesting
-        // semantics. The common large-buffer case is still one range syscall.
-        const auto unlock_new_before = [&](uintptr_t stop) noexcept {
-            uintptr_t unlock_first = 0;
-            for (uintptr_t page = first; page != stop; page += page_size) {
-                const auto it = registry.refs.find(page);
-                if (it != registry.refs.end() && it->second == 1) {
-                    if (unlock_first == 0) unlock_first = page;
-                } else if (unlock_first != 0) {
-                    os_unlock_range(unlock_first, static_cast<size_t>(page - unlock_first));
-                    unlock_first = 0;
-                }
-            }
-            if (unlock_first != 0)
-                os_unlock_range(unlock_first, static_cast<size_t>(stop - unlock_first));
-        };
-
-        uintptr_t lock_first = 0;
-        for (uintptr_t page = first;; page += page_size) {
-            const auto it = registry.refs.find(page);
-            const bool newly_added = it != registry.refs.end() && it->second == 1;
-            if (newly_added) {
-                if (lock_first == 0) lock_first = page;
-            } else if (lock_first != 0) {
-                if (!os_lock_range(lock_first, static_cast<size_t>(page - lock_first))) {
-                    unlock_new_before(lock_first);
-                    rollback_before(last + page_size);
-                    return false;
-                }
-                lock_first = 0;
-            }
-            if (page == last) break;
-        }
-        if (lock_first != 0 &&
-            !os_lock_range(lock_first, static_cast<size_t>(last - lock_first) + page_size)) {
-            unlock_new_before(lock_first);
-            rollback_before(last + page_size);
+        const AddedPageRefs added = add_page_refs(registry, first, last, page_size);
+        if (!added.success) return false;
+        if (!added.added_page) return true;
+        if (!lock_new_pages(registry, first, last, page_size)) {
+            rollback_page_refs(registry, first, last + page_size, page_size);
             return false;
         }
         return true;
-    } catch (...) {
+    } catch (const std::system_error&) {
         return false;
     }
 }
@@ -253,43 +320,31 @@ inline bool mem_lock(uint8_t* p, size_t n) noexcept
 inline void mem_unlock(uint8_t* p, size_t n) noexcept
 {
     if (!p || n == 0) return;
-    const uintptr_t addr = reinterpret_cast<uintptr_t>(p);
+    const auto addr = pointer_address(p);
     if (addr > std::numeric_limits<uintptr_t>::max() - (n - 1)) return;
     const size_t page_size = memory_page_size();
-    const uintptr_t first = page_base(p);
-    const uintptr_t last = page_base(reinterpret_cast<const void*>(addr + n - 1));
+    const uintptr_t first = page_base(addr);
+    const uintptr_t last = page_base(addr + n - 1);
 
     try {
         auto& registry = page_lock_registry();
         std::lock_guard lk(registry.mu);
-        uintptr_t unlock_first = 0;
-        for (uintptr_t page = first;; page += page_size) {
-            const auto it = registry.refs.find(page);
-            if (it != registry.refs.end() && --it->second == 0) {
-                registry.refs.erase(it);
-                if (unlock_first == 0) unlock_first = page;
-            } else if (unlock_first != 0) {
-                os_unlock_range(unlock_first, static_cast<size_t>(page - unlock_first));
-                unlock_first = 0;
-            }
-            if (page == last) {
-                if (unlock_first != 0)
-                    os_unlock_range(unlock_first,
-                                    static_cast<size_t>(page - unlock_first) + page_size);
-                break;
-            }
-        }
-    } catch (...) {
-        // Unlock is best-effort and called from destructors.
+        release_page_refs(registry, first, last, page_size);
+    } catch (const std::system_error& error) {
+        // Destructors cannot report failure to their caller, but the failure
+        // must remain visible rather than silently leaving pages registered.
+        platform::safe_println(stderr, "[SecureMem] WARNING: page unlock failed: {}",
+                               error.what());
     }
 }
 
-inline size_t locked_page_refcount_for_tests(const void* p) noexcept
+template <typename T>
+inline size_t locked_page_refcount_for_tests(const T* p) noexcept
 {
     try {
         auto& registry = page_lock_registry();
         std::lock_guard lk(registry.mu);
-        const auto it = registry.refs.find(page_base(p));
+        const auto it = registry.refs.find(page_base(pointer_address(p)));
         return it == registry.refs.end() ? 0 : it->second;
     } catch (...) {
         return 0;
@@ -327,28 +382,48 @@ inline bool should_fail_secure_allocation() noexcept
 
 namespace detail {
 
-using WipeObserver = void (*)(std::span<const uint8_t>) noexcept;
-
-inline std::atomic<WipeObserver>& wipe_observer_for_tests() noexcept
-{
-    static std::atomic<WipeObserver> observer{nullptr};
-    return observer;
-}
-
 inline std::atomic_uint64_t& wiping_deallocation_counter() noexcept
 {
     static std::atomic_uint64_t count{0};
     return count;
 }
 
-inline void set_wipe_observer_for_tests(WipeObserver observer) noexcept
+inline std::atomic_bool& all_wipe_observations_zero_flag() noexcept
 {
-    wipe_observer_for_tests().store(observer);
+    static std::atomic_bool all_zero{true};
+    return all_zero;
+}
+
+inline std::atomic_bool& wipe_observation_enabled_flag() noexcept
+{
+    static std::atomic_bool enabled{false};
+    return enabled;
 }
 
 inline uint64_t wiping_deallocation_count() noexcept
 {
     return wiping_deallocation_counter().load();
+}
+
+inline void reset_wipe_observations_for_tests() noexcept
+{
+    wiping_deallocation_counter().store(0);
+    all_wipe_observations_zero_flag().store(true);
+    wipe_observation_enabled_flag().store(true);
+}
+
+inline bool all_wipe_observations_zero_for_tests() noexcept
+{
+    wipe_observation_enabled_flag().store(false);
+    return all_wipe_observations_zero_flag().load();
+}
+
+inline void record_wipe_for_tests(std::span<const std::byte> bytes) noexcept
+{
+    ++wiping_deallocation_counter();
+    if (!wipe_observation_enabled_flag().load()) return;
+    if (std::ranges::any_of(bytes, [](std::byte b) { return b != std::byte{0}; }))
+        all_wipe_observations_zero_flag().store(false);
 }
 
 } // namespace detail
@@ -364,7 +439,7 @@ public:
 
     WipingAllocator() noexcept = default;
     template <typename U>
-    WipingAllocator(const WipingAllocator<U>&) noexcept
+    explicit WipingAllocator(const WipingAllocator<U>&) noexcept
     {}
 
     [[nodiscard]] T* allocate(size_t n)
@@ -372,14 +447,12 @@ public:
         return std::allocator<T>{}.allocate(n);
     }
 
-    void deallocate(T* p, size_t n) noexcept
+    void deallocate(T* p, size_t n) const noexcept
     {
         if (p && n > 0) {
             const size_t bytes = n * sizeof(T);
             crypto_wipe(p, bytes);
-            ++detail::wiping_deallocation_counter();
-            if (const auto observer = detail::wipe_observer_for_tests().load())
-                observer({reinterpret_cast<const uint8_t*>(p), bytes});
+            detail::record_wipe_for_tests(std::as_bytes(std::span(p, n)));
         }
         std::allocator<T>{}.deallocate(p, n);
     }
