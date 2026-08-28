@@ -100,7 +100,8 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
 - App also owns `HelpPopupState` (intercepts F1 globally, renders the overlay on top).
 - **Overlay dispatch structure (Phase 65 cleanup).** `dispatch_event` delegates to the static
   `App::dispatch_overlay_event`, which is now only a fan-out: it calls, in priority order,
-  `OverlayDispatch::help` → `::settings` → `::migration` → `::lock_confirm`, returning on the
+  `OverlayDispatch::help` → `::clipboard_confirm` (Phase 92) → `::settings` → `::migration` →
+  `::lock_confirm`, returning on the
   first that reports the event handled. `App::OverlayDispatch` is a nested struct declared in
   `app.h` and defined in `app.cpp`; nested rather than more App members because a nested class
   reaches the enclosing class's privates exactly as a member does, without growing App's own
@@ -140,6 +141,19 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   Rendering-side, `settings_overlay.cpp` computes row text in `pane_row_text(state, row)` —
   a `switch` over SettingsSection with function-scoped `using enum` (split out of
   draw_pane_row for Sonar S3776; TagColours' swatch dot stays with the drawing).
+- **Phase 92: clipboard gate.** App seeds `ui::set_clipboard_gate(
+  platform::ClipboardPref::default_location().load())` at init and
+  `overlays_.settings.clipboard` in `open_settings_overlay`; the handled branch of
+  `OverlayDispatch::settings` re-syncs the runtime gate from the draft (the pref is already
+  saved live in `apply_value_delta`'s Security branch — row-aware now: row 0 saves
+  `second_vault.conf`, row 1 saves `clipboard.conf`). New `OverlayDispatch::clipboard_confirm`
+  (priority between help and settings, so it can surface even from the settings prompt field):
+  while `ui::clipboard_confirm_pending()` it swallows every event and maps
+  `classify_lock_confirm_key` — Enter/Y → `ui::confirm_clipboard_copy()` (writes via the
+  ClipboardBackend seam), Esc/N → `ui::cancel_clipboard_copy()`. Rendered in `render_frame`
+  after lock_confirm (veil + WARN-bordered box, payload never drawn). `App::shutdown()` and the
+  lock branch of `maybe_auto_lock` both cancel any pending confirm, so a Warn-gated password
+  is never stranded without its unlock-screen auto-clear arming.
 - `NavKind::ToSettings` (Phase 49, emitted by VaultManager's `C`) is one of the few kinds
   EXCLUDED from `apply_nav`'s screen teardown (alongside `ToggleKeepUnlocked`/`Quit`/`None`) —
   the overlay draws over the screen, so tearing it down would rebuild the vault manager
@@ -203,6 +217,12 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   temp+rename. Loaded in `App::init()`, saved live by the `F2` settings overlay's Security
   section. Nothing persists per-vault or per-session state; only the per-machine default is
   stored.
+- `clipboard_pref.*` (Phase 92) — per-machine clipboard gate (Allow/Warn/Disable):
+  `config_dir()/clipboard.conf` holds the mode slug (`allow`/`warn`/`off`) ONLY (no secrets);
+  `load()`->ClipboardMode (missing/unknown -> Allow), `save(mode)`; atomic temp+rename (exact
+  SecondVaultPref mirror). Loaded in `App::init()`, saved live by the `F2` settings overlay's
+  Security section (row 1 of 2) and consumed by `ui::clipboard_gate` — the single choke
+  point for every clipboard write (see `mem:module/ui/text-input`).
 - `VolumePref` — `config_dir()/volume.conf`, one float [0,1], atomic write, missing/invalid
   -> 1.0; App loads at init + saves on clean exit (the in-memory global lives in
   `media/volume_setting.*`, not AV-gated).

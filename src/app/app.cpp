@@ -13,6 +13,7 @@
 #include "gfx/theme.h"
 #include "platform/error_log.h"
 #include "platform/gallery_view_pref.h"
+#include "platform/clipboard_pref.h"
 #include "platform/harden.h"
 #include "platform/paths.h"
 #include "platform/path_utf8.h"
@@ -24,6 +25,7 @@
 #include "platform/autoplay_pref.h"
 #include "platform/perf.h"
 #include "ui/advanced_search_screen.h"
+#include "ui/clipboard_gate.h"
 #include "ui/dual_gallery.h"
 #include "ui/duplicates_screen.h"
 #include "ui/favorites_galleries.h"
@@ -123,6 +125,9 @@ bool App::init()
 
     // Phase 85: seed the auto-play-videos toggle from the persisted preference.
     media::set_saved_autoplay_enabled(platform::AutoplayPref::default_location().load());
+
+    // Phase 92: seed the clipboard gate from the persisted preference.
+    ui::set_clipboard_gate(platform::ClipboardPref::default_location().load());
 
     // Phase 84: seed the gallery view with the persisted preference
     sessions_.gallery.view = platform::GalleryViewPref::default_location().load();
@@ -640,6 +645,26 @@ struct App::OverlayDispatch {
         return true;
     }
 
+    // Clipboard-confirm modal (Phase 92). While a Warn-gated copy awaits
+    // confirmation, swallow every event; Enter/Y confirms (writes), Esc/N
+    // cancels. Default-cancel by design — the pending payload is plaintext
+    // waiting to leave the process. Its text is deliberately never drawn.
+    static bool clipboard_confirm(App& app, const SDL_Event& e)
+    {
+        (void)app;
+        if (!ui::clipboard_confirm_pending()) return false;
+        if (e.type == SDL_EVENT_KEY_DOWN) {
+            using enum ui::LockConfirmKey;
+            const auto key = ui::classify_lock_confirm_key(e.key.key);
+            if (key == Confirm) {
+                (void)ui::confirm_clipboard_copy();
+            } else if (key == Cancel) {
+                ui::cancel_clipboard_copy();
+            }
+        }
+        return true;
+    }
+
     static bool settings(App& app, const SDL_Event& e)
     {
         // F2 toggles settings
@@ -689,6 +714,10 @@ struct App::OverlayDispatch {
             // Phase 85: sync autoplay whenever the event was handled
             media::set_saved_autoplay_enabled(app.overlays_.settings.autoplay);
             (void)platform::AutoplayPref::default_location().save(app.overlays_.settings.autoplay);
+            // Phase 92: sync the clipboard gate (the pref is already saved live in
+            // apply_value_delta; this keeps the runtime in sync even if that write
+            // failed).
+            ui::set_clipboard_gate(app.overlays_.settings.clipboard);
             // Commit vault settings if the commit flag was set
             if (commit && app.overlays_.settings.vault_unlocked && app.vault_state_.active &&
                 vault::set_vault_settings(*app.vault_state_.active, app.overlays_.settings.draft) !=
@@ -762,6 +791,7 @@ bool App::dispatch_overlay_event(App& app, const SDL_Event& e)
 {
     using D = OverlayDispatch;
     if (D::help(app, e)) return true;
+    if (D::clipboard_confirm(app, e)) return true;
     if (D::settings(app, e)) return true;
     if (D::migration(app, e)) return true;
     return D::lock_confirm(app, e);
@@ -861,6 +891,7 @@ void App::open_settings_overlay()
     overlays_.settings.gallery_view = sessions_.gallery.view;
     overlays_.settings.autoplay = media::saved_autoplay_enabled();   // Phase 85
     overlays_.settings.second_vault_default = second_.session.default_mode();   // Phase 66
+    overlays_.settings.clipboard = ui::clipboard_gate();                        // Phase 92
     ui::open_settings(overlays_.settings, ui::SettingsSection::Appearance);
 }
 
@@ -996,6 +1027,10 @@ bool App::maybe_auto_lock(double dt)
         migration_ui_.offer_open = false;
         import_ui_.queue.set_exclusive(false);
     }
+    // Phase 92: an idle-lock must not strand a pending clipboard confirm — the
+    // unlock screen that arms the password auto-clear is being torn down here,
+    // and a later confirm would write a password with no auto-clear. Wipe it.
+    ui::cancel_clipboard_copy();
     if (screen_) screen_->on_exit();
     sessions_.dual.reset();                       // Phase 78: fresh dual-pane state on idle lock
     sessions_.gallery.reset();                                  // Phase 39 Part 2: fresh session on idle lock
@@ -1133,6 +1168,33 @@ void App::render_frame()
             centered(ui::fit_text(font_, confirm_text, pw - 32), py + 28, TEXT);
             centered("[Y] Discard & lock        [N] Keep importing", py + ph - 50, TEXT_DIM);
         }
+        // Phase 92: clipboard-confirm modal (default-cancel; after the other
+        // modals so it stays on top). The pending payload is never drawn — it
+        // may be a password.
+        if (ui::clipboard_confirm_pending()) {
+            using namespace gfx::theme;
+
+            // Veil the whole window so the modal clearly owns input focus
+            r.draw_rect({0, 0, w, h}, gfx::Color{8, 9, 12, 255});
+
+            const float pw = 560;
+            const float ph = 230;
+            const float px = (w - pw) / 2;
+            const float py = (h - ph) / 2;
+            r.draw_round_rect({px, py, pw, ph}, RADIUS, SURFACE);
+            r.draw_round_rect({px, py, pw, ph}, RADIUS, WARN, /*filled*/ false);
+
+            auto centered = [&](const std::string& s, float y, gfx::Color c) {
+                const auto tw = static_cast<float>(font_.measure(s));
+                r.draw_text(font_, px + (pw - tw) / 2, y, s, c);
+            };
+
+            centered(ui::fit_text(font_, "Copy to the clipboard?", pw - 32), py + 28, TEXT);
+            centered(
+                ui::fit_text(font_, "This places plaintext where every app can read it.", pw - 32),
+                py + 56, TEXT_DIM);
+            centered("[Y] Copy        [Esc/N] Cancel", py + ph - 50, TEXT_DIM);
+        }
         ui::draw_help_popup(r, font_, static_cast<float>(window_.width()),
                             static_cast<float>(window_.height()),
                             screen_->help_groups(), overlays_.help);
@@ -1178,6 +1240,10 @@ void App::run()
 
 void App::shutdown()
 {
+    // Phase 92: abandon any unconfirmed clipboard copy — wipes the mlock'd
+    // pending payload so it cannot linger in memory after exit.
+    ui::cancel_clipboard_copy();
+
     // Phase 79: closing the window mid-upgrade reaches here with the coordinator
     // still holding a reference to the active vault — stop it BEFORE any vault
     // teardown (blocking, acceptable at shutdown; cancel commits applied work

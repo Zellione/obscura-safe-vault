@@ -5,6 +5,7 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "platform/autoplay_pref.h"
+#include "platform/clipboard_pref.h"
 #include "platform/gallery_view_pref.h"
 #include "platform/second_vault_pref.h"
 #include "platform/theme_pref.h"
@@ -123,8 +124,14 @@ void apply_value_delta(SettingsState& state, int delta, bool& commit_out)
         (void)platform::AutoplayPref::default_location().save(state.autoplay);
         commit_out = false;  // autoplay is persisted by the pref save
     } else if (state.section == SettingsSection::Security) {
+        // Decide which machine-scoped pref this row writes before cycling.
+        const bool is_second_vault_row = state.row == 0;
         settings_change_value(state, delta);
-        (void)platform::SecondVaultPref::default_location().save(state.second_vault_default);
+        if (is_second_vault_row) {
+            (void)platform::SecondVaultPref::default_location().save(state.second_vault_default);
+        } else {
+            (void)platform::ClipboardPref::default_location().save(state.clipboard);
+        }
         commit_out = false;
     } else if (state.vault_unlocked) {
         settings_change_value(state, delta);
@@ -275,6 +282,21 @@ namespace {
     return "Unknown";
 }
 
+// Convert ClipboardMode to a display label (Phase 92).
+[[nodiscard]] std::string clipboard_mode_label(platform::ClipboardMode mode) noexcept
+{
+    using enum platform::ClipboardMode;
+    switch (mode) {
+    case Allow:
+        return "Allow";
+    case Warn:
+        return "Warn";
+    case Disable:
+        return "Disable";
+    }
+    return "Allow";
+}
+
 constexpr float RADIUS       = 8.0f;
 constexpr float RADIUS_SMALL = 4.0f;
 constexpr float PAD          = 20.0f;
@@ -356,6 +378,9 @@ std::pair<std::string, std::string> pane_row_text(const SettingsState& state, in
             if (row_index == 0)
                 return {"Keep 2nd vault after transfer",
                         std::string(second_vault_mode_label(state.second_vault_default))};
+            // Phase 92: machine-scoped clipboard gate
+            if (row_index == 1)
+                return {"Clipboard", std::string(clipboard_mode_label(state.clipboard))};
             break;
     }
     return {};

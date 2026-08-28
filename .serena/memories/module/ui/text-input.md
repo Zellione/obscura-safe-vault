@@ -37,6 +37,24 @@ Shared text-input infrastructure used by every field in the app.
   backend's buffer directly into mlock'd storage; the SDL backend `crypto_wipe`s
   that buffer in `release_text()` before `SDL_free`. Copy/cut return false for a
   secure field. Orthogonal to `clipboard_secret.h` (Phase 45 auto-clear timer).
+- `clipboard_gate.*` (Phase 92) — machine-scoped **Allow / Warn / Disable**
+  gate over every clipboard WRITE. Process-global UI-thread mode seeded from
+  `platform::ClipboardPref` (`clipboard.conf`) at App init and synced from the
+  F2 Security → "Clipboard" row (lives in `settings_model` / `settings_overlay`,
+  same pref pattern as second-vault). Pure `clipboard_gate_action(mode)` maps
+  Allow→write now, Warn→Confirm (park), Disable→Refuse (no-op). Under Warn the
+  plaintext is parked in an mlock'd, wipe-on-destroy `crypto::SecureBytes`
+  (+ `sensitive` tag) and the App renders a default-cancel confirm
+  (`OverlayDispatch::clipboard_confirm`, Enter/Y → `confirm_clipboard_copy`
+  writes via the seam, Esc/N → `cancel_clipboard_copy` wipes; the payload is
+  never drawn). `copy`/`cut_selection_to_clipboard` share one `gate_selection`
+  helper; **cut deletes the selection only when the write actually landed**, so
+  a Warn cut parks and leaves the text put. `UnlockScreen::copy_password_to_
+  clipboard` routes through the gate (`sensitive=true`); the 25 s auto-clear is
+  armed only when a sensitive confirm writes (`update()` polls
+  `take_confirmed_copy()`). `App::shutdown()` and an idle auto-lock cancel any
+  pending confirm. The auto-clear *clear* (`SDL_SetClipboardText("")`) is
+  deliberately NOT gated.
 - `text_input_event.*` — `handle_text_input_event(ITextInput&, SDL_Event&)`, the ONE
   handler. **Key precedence: a focused field consumes Ctrl+A/C/X/V before its host
   screen** (else Phase 53's gallery Ctrl+A fires while the user selects typed text).

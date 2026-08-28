@@ -1,11 +1,14 @@
 #include "ui/clipboard.h"
 
 #include <cstddef>
+#include <optional>
 #include <string>
+#include <utility>
 
 #include <SDL3/SDL.h>
 #include <monocypher.h>
 
+#include "ui/clipboard_gate.h"
 #include "ui/text_input_model.h"
 
 namespace ui {
@@ -81,20 +84,53 @@ bool paste_from_clipboard(ITextInput& field)
     return true;
 }
 
+// Apply the clipboard gate (Phase 92) to a selection already materialised as a
+// plaintext string: Allow returns it for the caller to write; Refuse wipes it
+// and reports no-op; Warn hands it (moved) to the gate's mlock'd pending buffer
+// for the App's default-cancel confirm and reports no-op. Shared by copy and
+// cut so the policy cannot drift — and so cut, whose delete must wait for an
+// actual write, sees "not yet written" as a no-op instead of deleting the
+// selection before the confirm lands.
+[[nodiscard]] std::optional<std::string> gate_selection(std::string sel)
+{
+    switch (clipboard_gate_action(clipboard_gate())) {
+    case ClipboardGateAction::Refuse:
+        crypto_wipe(sel.data(), sel.size());
+        return std::nullopt;
+    case ClipboardGateAction::Confirm:
+        (void)request_clipboard_confirm(std::move(sel), /*sensitive=*/false);
+        return std::nullopt;
+    case ClipboardGateAction::Copy:
+        return sel;
+    }
+    return sel;
+}
+
 bool copy_selection_to_clipboard(const ITextInput& field)
 {
     if (field.secure()) return false;          // passwords never go out this way
     if (!field.has_selection()) return false;
 
-    std::string sel = field.selection_text();
-    const bool ok = clipboard_backend().set_text(sel);
-    crypto_wipe(sel.data(), sel.size());
+    auto sel = gate_selection(field.selection_text());
+    if (!sel) return false;
+    const bool ok = clipboard_backend().set_text(*sel);
+    crypto_wipe(sel->data(), sel->size());
     return ok;
 }
 
 bool cut_selection_to_clipboard(ITextInput& field)
 {
-    if (!copy_selection_to_clipboard(field)) return false;
+    if (field.secure()) return false;          // passwords never go out this way
+    if (!field.has_selection()) return false;
+
+    // The selection is deleted only when the clipboard write actually happened:
+    // under Warn the copy is parked (gate_selection returns nullopt) and the
+    // text stays put until the confirm lands, under Disable it is never written.
+    auto sel = gate_selection(field.selection_text());
+    if (!sel) return false;
+    const bool ok = clipboard_backend().set_text(*sel);
+    crypto_wipe(sel->data(), sel->size());
+    if (!ok) return false;
     field.delete_selection();
     return true;
 }

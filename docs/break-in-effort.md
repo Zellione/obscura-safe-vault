@@ -227,9 +227,14 @@ descriptions, field values, saved-search names — lives in `crypto::SecureStrin
 saved-search query clauses live in `crypto::SecureBlob`, all are mlock'd
 best-effort and wiped on destroy, and unlock/save/CommitLane index-blob paths
 use secure or wiping storage. Page-lock ownership is tracked per OS page so
-freeing one allocator neighbor cannot unlock another). Still deferred: a
-clipboard gate for copied paths/names — a smaller phase that can follow on its
-own.
+freeing one allocator neighbor cannot unlock another). ~~Clipboard gate for
+copied paths/names~~ → **app Phase 92** (delivered 2026-08-28: a machine-scoped
+Allow / Warn / Disable gate over both clipboard write sites via
+`platform::ClipboardPref` + `ui::clipboard_gate`; Warn parks plaintext in an
+mlock'd wiped buffer behind the App's default-cancel confirm, Disable refuses
+with no write, and the password auto-clear arms only when a sensitive confirm
+actually writes — see `docs/roadmap/phase-92-clipboard-gate.md`). No deferred
+items remain from the effort.
 
 Test totals across the phase: 2168 / 0 failed; ASAN clean; TSan clean (only
 the known local `radeonsi_drv_video.so` driver race, absent on CI runners).

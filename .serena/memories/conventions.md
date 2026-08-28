@@ -108,6 +108,16 @@
 ## Security invariants
 See `mem:core` — six hard invariants, never relax them.
 
+## Clipboard writes (Phase 92)
+The OS clipboard is a persistent, readable-by-any-process plaintext sink outside
+the app's mlock/wipe control. **Every clipboard write must go through
+`ui::clipboard_gate`** (Allow/Warn/Disable, seeded from
+`platform::ClipboardPref`); a new code path must not call `SDL_SetClipboardText`
+directly. The exceptions are the two deliberate *reads/clears*: paste (input,
+the clipboard's content is already external) and the Phase 45 auto-clear
+(`SDL_SetClipboardText("")` guarded by `should_clear_clipboard`). The pending
+Warn payload is an `mlock`'d `crypto::SecureBytes` and is never rendered.
+
 ## Index-tree strings are `crypto::SecureString` (Phase 91)
 Every human-readable string in the index tree (`IndexNode::name`/`tags`,
 `SavedSearch::name`, category / description / field-value fields) is a

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "ui/clipboard.h"
+#include "ui/clipboard_gate.h"
 #include "ui/secure_text_input.h"
 #include "ui/text_input_model.h"
 
@@ -237,4 +238,119 @@ TEST(clip_the_backend_buffer_is_handed_back_for_wiping_after_a_secure_paste)
     CHECK(ui::paste_from_clipboard(pw));
     CHECK(mock.released_the_buffer());
     CHECK(pw.text_view() == std::string_view("s3cret-passphrase"));
+}
+
+// --- The clipboard gate (Phase 92) ------------------------------------------
+// copy/cut consult the process-global gate. These tests reset it first so a
+// parked pending request from an earlier test cannot leak across test order.
+
+TEST(clip_copy_is_refused_by_a_disable_gate)
+{
+    ui::reset_clipboard_gate();
+    ui::set_clipboard_gate(platform::ClipboardMode::Disable);
+    MockClipboard mock("untouched");
+    const InstalledMock guard(mock);
+
+    ui::TextInputModel f;
+    f.set_text("hello world");
+    f.move_home(false);
+    f.move_right(true, true);               // select "hello"
+    CHECK(!ui::copy_selection_to_clipboard(f));
+    CHECK_EQ(mock.set_calls(), 0);
+    CHECK_EQ(mock.contents(), std::string("untouched"));
+    CHECK_FALSE(ui::clipboard_confirm_pending());
+}
+
+TEST(clip_cut_is_refused_by_a_disable_gate_and_keeps_the_text)
+{
+    ui::reset_clipboard_gate();
+    ui::set_clipboard_gate(platform::ClipboardMode::Disable);
+    MockClipboard mock("untouched");
+    const InstalledMock guard(mock);
+
+    ui::TextInputModel f;
+    f.set_text("hello world");
+    f.move_home(false);
+    f.move_right(true, true);
+    CHECK(!ui::cut_selection_to_clipboard(f));
+    CHECK_EQ(mock.set_calls(), 0);
+    // Cut must not destroy what the gate refused to copy.
+    CHECK_EQ(f.str(), std::string("hello world"));
+}
+
+TEST(clip_copy_under_a_warn_gate_parks_a_confirm_and_writes_nothing)
+{
+    ui::reset_clipboard_gate();
+    ui::set_clipboard_gate(platform::ClipboardMode::Warn);
+    MockClipboard mock("untouched");
+    const InstalledMock guard(mock);
+
+    ui::TextInputModel f;
+    f.set_text("hello world");
+    f.move_home(false);
+    f.move_right(true, true);
+    // Under Warn the copy is deferred, so nothing was written yet — the
+    // function reports false, and the pending request holds the payload.
+    CHECK(!ui::copy_selection_to_clipboard(f));
+    CHECK(ui::clipboard_confirm_pending());
+    CHECK_EQ(std::string(ui::clipboard_confirm_text()), std::string("hello"));
+    CHECK_FALSE(ui::clipboard_confirm_sensitive());
+    CHECK_EQ(mock.set_calls(), 0);
+    CHECK_EQ(mock.contents(), std::string("untouched"));
+    ui::cancel_clipboard_copy();
+}
+
+TEST(clip_copy_under_a_warn_gate_writes_on_confirm)
+{
+    ui::reset_clipboard_gate();
+    ui::set_clipboard_gate(platform::ClipboardMode::Warn);
+    MockClipboard mock;
+    const InstalledMock guard(mock);
+
+    ui::TextInputModel f;
+    f.set_text("hello world");
+    f.move_home(false);
+    f.move_right(true, true);
+    CHECK(!ui::copy_selection_to_clipboard(f));
+    CHECK(ui::clipboard_confirm_pending());
+    CHECK(ui::confirm_clipboard_copy());
+    CHECK_EQ(mock.set_calls(), 1);
+    CHECK_EQ(mock.contents(), std::string("hello"));
+    CHECK_FALSE(ui::clipboard_confirm_pending());
+}
+
+TEST(clip_cut_under_a_warn_gate_parks_without_deleting_the_selection)
+{
+    ui::reset_clipboard_gate();
+    ui::set_clipboard_gate(platform::ClipboardMode::Warn);
+    MockClipboard mock("untouched");
+    const InstalledMock guard(mock);
+
+    ui::TextInputModel f;
+    f.set_text("hello world");
+    f.move_home(false);
+    f.move_right(true, true);
+    CHECK(!ui::cut_selection_to_clipboard(f));
+    CHECK(ui::clipboard_confirm_pending());
+    CHECK_EQ(mock.set_calls(), 0);
+    // The delete is deferred until the copy is actually confirmed.
+    CHECK_EQ(f.str(), std::string("hello world"));
+    ui::cancel_clipboard_copy();
+}
+
+TEST(clip_copy_under_an_allow_gate_still_writes_immediately)
+{
+    ui::reset_clipboard_gate();
+    ui::set_clipboard_gate(platform::ClipboardMode::Allow);
+    MockClipboard mock;
+    const InstalledMock guard(mock);
+
+    ui::TextInputModel f;
+    f.set_text("hello world");
+    f.move_home(false);
+    f.move_right(true, true);
+    CHECK(ui::copy_selection_to_clipboard(f));
+    CHECK_EQ(mock.set_calls(), 1);
+    CHECK_EQ(mock.contents(), std::string("hello"));
+    CHECK_FALSE(ui::clipboard_confirm_pending());
 }
