@@ -1,11 +1,12 @@
 #include "platform/second_vault_pref.h"
 
 #include <fstream>
-#include "platform/safe_print.h"
 #include <string>
 
+#include "platform/atomic_write.h"
 #include "platform/path_utf8.h"
 #include "platform/paths.h"
+#include "platform/safe_print.h"
 
 namespace platform {
 
@@ -59,32 +60,7 @@ SecondVaultMode SecondVaultPref::load() const
 bool SecondVaultPref::save(SecondVaultMode m) const
 {
     if (file_.empty()) return false;
-
-    // Atomic replace: write a sibling temp file, then rename over the target so a
-    // crash mid-write never leaves a torn value.
-    std::filesystem::path tmp = file_;
-    tmp += ".tmp";
-    {
-        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        if (!out) {
-            platform::safe_println(stderr, "[Platform] cannot write {}", path_to_utf8(tmp));
-            return false;
-        }
-        out << mode_slug(m) << '\n';
-        out.flush();
-        if (!out) {
-            platform::safe_println(stderr, "[Platform] write error on {}", path_to_utf8(tmp));
-            return false;
-        }
-    }
-    std::error_code ec;
-    std::filesystem::rename(tmp, file_, ec);
-    if (ec) {
-        platform::safe_println(stderr, "[Platform] rename failed: {}", ec.message());
-        std::filesystem::remove(tmp, ec);
-        return false;
-    }
-    return true;
+    return platform::atomic_write_file(file_, std::string(mode_slug(m)) + "\n", "Platform");
 }
 
 } // namespace platform

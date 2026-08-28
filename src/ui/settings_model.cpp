@@ -60,7 +60,7 @@ int settings_row_count(const SettingsState& state) noexcept
     case VaultOps:
         return state.vault_unlocked ? 1 : 0; // Phase 65: re-check vault for upgrades
     case Security:
-        return 1; // machine-scoped: always 1
+        return 2; // machine-scoped: keep-open default + clipboard gate
     }
     return 0;
 }
@@ -146,15 +146,25 @@ void change_swatch_value(SettingsState& state, int delta) noexcept
     }
 }
 
-// Handle second vault default mode value change.
+// Handle second vault default mode / clipboard gate value change (Security).
 void change_security_value(SettingsState& state, int delta) noexcept
 {
-    auto current = static_cast<int>(std::to_underlying(state.second_vault_default));
-    int  next    = (current + delta + 3) % 3;
-    if (next < 0) {
-        next += 3;
+    if (state.row == 0) {
+        auto current = static_cast<int>(std::to_underlying(state.second_vault_default));
+        int  next    = (current + delta + 3) % 3;
+        if (next < 0) {
+            next += 3;
+        }
+        state.second_vault_default = static_cast<platform::SecondVaultMode>(next);
+    } else {
+        // Phase 92: Allow → Warn → Disable → Allow, both directions.
+        auto current = static_cast<int>(std::to_underlying(state.clipboard));
+        int  next    = (current + delta + 3) % 3;
+        if (next < 0) {
+            next += 3;
+        }
+        state.clipboard = static_cast<platform::ClipboardMode>(next);
     }
-    state.second_vault_default = static_cast<platform::SecondVaultMode>(next);
 }
 
 }  // namespace

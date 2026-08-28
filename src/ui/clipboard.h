@@ -48,12 +48,17 @@ void set_clipboard_backend(ClipboardBackend* backend) noexcept;
 // Returns false when the clipboard is empty or unreadable.
 bool paste_from_clipboard(ITextInput& field);
 
-// Put `field`'s selection on the clipboard. Always a no-op returning false for a
-// secure field.
+// Put `field`'s selection on the clipboard, subject to the Phase 92 gate: Allow
+// writes immediately (true); Warn parks the bytes for the App's default-cancel
+// confirm and returns false (nothing written yet); Disable wipes the selection
+// and returns false. Always a no-op returning false for a secure field.
 bool copy_selection_to_clipboard(const ITextInput& field);
 
-// Copy, then delete the selection. No-op returning false for a secure field, so
-// Ctrl+X cannot destroy a password it was not allowed to copy.
+// Copy, then delete the selection. Same gate as copy; the selection is deleted
+// only when the clipboard was actually written, so under Warn the text stays put
+// until the confirm lands and under Disable nothing is touched. No-op returning
+// false for a secure field, so Ctrl+X cannot destroy a password it was not
+// allowed to copy.
 bool cut_selection_to_clipboard(ITextInput& field);
 
 } // namespace ui

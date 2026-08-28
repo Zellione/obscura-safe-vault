@@ -39,6 +39,15 @@ invent its own key handling.
   defence. The Phase 45 copy-password action — which arms a visible auto-clear
   timer — stays the only way plaintext leaves a password field. Paste in adds no
   exposure the OS clipboard does not already have.
+- **The clipboard gate (Phase 92).** Every clipboard write obeys the
+  machine-scoped F2 Security → Clipboard setting (Allow / Warn / Disable).
+  Allow writes immediately (pre-92 behaviour); **Disable** makes copy/cut and
+  the password-copy button silent no-ops (nothing written, selection intact);
+  **Warn** opens a default-cancel confirm modal before any write — `Y`/`Enter`
+  copies, `Esc`/`N` cancels. The confirm never shows the payload (it may be a
+  password). The password auto-clear timer arms only when a Warn confirm
+  actually writes. Under Warn, cut parks the copy but does **not** delete the
+  selection until the write lands.
 - **Recorded limitation:** `gfx::FontAtlas` bakes printable ASCII 32–126 only.
   Non-ASCII is stored, pasted and round-tripped correctly but renders as
   nothing. Caret maths use the same `measure()` the renderer draws with, so
@@ -237,6 +246,11 @@ Sections:
 - **Browsing — this vault.** Vault-wide default sort order, and "show tags on
   tiles".
 - **Tag colours — this vault.** The category→swatch rows.
+- **Security — this machine (Phase 92).** Two rows: the Phase 66 **Keep 2nd
+  vault after transfer** default, and **Clipboard** Allow / Warn / Disable — a
+  gate over every clipboard write (the OS clipboard is a persistent,
+  readable-by-any-process plaintext sink outside the app's mlock/wipe control).
+  Live-saves `clipboard.conf`; missing/unknown → Allow.
 
 With no vault unlocked the two vault-scoped sections render a single dim
 "Unlock a vault to configure" line, and value keys are not routed there. A

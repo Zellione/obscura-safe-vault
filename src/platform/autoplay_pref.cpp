@@ -4,6 +4,7 @@
 #include <fstream>
 #include <string>
 
+#include "platform/atomic_write.h"
 #include "platform/path_utf8.h"
 #include "platform/paths.h"
 #include "platform/safe_print.h"
@@ -42,32 +43,7 @@ bool AutoplayPref::load() const
 bool AutoplayPref::save(bool enabled) const
 {
     if (file_.empty()) return false;
-
-    // Atomic replace: write a sibling temp file, then rename over the target so a
-    // crash mid-write never leaves a torn value.
-    std::filesystem::path tmp = file_;
-    tmp += ".tmp";
-    {
-        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        if (!out) {
-            safe_println(stderr, "[AutoplayPref] cannot write {}", path_to_utf8(tmp));
-            return false;
-        }
-        out << (enabled ? "on" : "off") << '\n';
-        out.flush();
-        if (!out) {
-            safe_println(stderr, "[AutoplayPref] write error on {}", path_to_utf8(tmp));
-            return false;
-        }
-    }
-    std::error_code ec;
-    std::filesystem::rename(tmp, file_, ec);
-    if (ec) {
-        safe_println(stderr, "[AutoplayPref] rename failed: {}", ec.message());
-        std::filesystem::remove(tmp, ec);
-        return false;
-    }
-    return true;
+    return platform::atomic_write_file(file_, enabled ? "on\n" : "off\n", "AutoplayPref");
 }
 
 } // namespace platform

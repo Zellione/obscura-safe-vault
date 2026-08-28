@@ -196,12 +196,12 @@ TEST(settings_default_sort_steps_backwards_and_skips_default)
     CHECK(s.draft.default_sort == vault::SortKey::Insertion);   // skipped Default
 }
 
-TEST(settings_security_section_always_has_one_row)
+TEST(settings_security_section_always_has_two_rows)
 {
     ui::SettingsState st;
     st.section = ui::SettingsSection::Security;
     st.vault_unlocked = false;                  // machine-scoped: no vault needed
-    CHECK_EQ(ui::settings_row_count(st), 1);
+    CHECK_EQ(ui::settings_row_count(st), 2);    // keep-open default + clipboard gate
 }
 
 TEST(settings_security_value_cycles_and_wraps_both_ways)
@@ -219,6 +219,26 @@ TEST(settings_security_value_cycles_and_wraps_both_ways)
     CHECK(st.second_vault_default == SecondVaultMode::LockNow);
     ui::settings_change_value(st, -1);          // wraps backward
     CHECK(st.second_vault_default == SecondVaultMode::KeepSession);
+}
+
+TEST(settings_security_row_one_cycles_the_clipboard_gate)
+{
+    using platform::ClipboardMode;
+    ui::SettingsState st;
+    st.section = ui::SettingsSection::Security;
+    st.in_pane = true;
+    st.row     = 1;
+    CHECK(st.clipboard == ClipboardMode::Allow);
+    ui::settings_change_value(st, 1);
+    CHECK(st.clipboard == ClipboardMode::Warn);
+    ui::settings_change_value(st, 1);
+    CHECK(st.clipboard == ClipboardMode::Disable);
+    ui::settings_change_value(st, 1);           // wraps forward
+    CHECK(st.clipboard == ClipboardMode::Allow);
+    ui::settings_change_value(st, -1);          // wraps backward
+    CHECK(st.clipboard == ClipboardMode::Disable);
+    // The first row is untouched by the clipboard row's cycling.
+    CHECK(st.second_vault_default == platform::SecondVaultMode::LockNow);
 }
 
 // ---------------------------------------------------------------------------

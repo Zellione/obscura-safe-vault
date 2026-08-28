@@ -4,6 +4,7 @@
 
 #include <optional>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "crypto/kdf.h"
@@ -14,6 +15,7 @@
 #include "platform/file_dialog.h"
 #include "platform/paths.h"
 #include "platform/path_utf8.h"
+#include "ui/clipboard_gate.h"
 #include "ui/clipboard_secret.h"
 #include "ui/passphrase.h"
 #include "ui/text_input_event.h"
@@ -181,6 +183,14 @@ static const char* unlock_error_message(vault::VaultResult r)
 
 void UnlockScreen::update(double dt)
 {
+    // Phase 92: a gated (Warn) password copy writes only once the App's confirm
+    // modal completes; arm the auto-clear timer here when that write lands.
+    if (auto copy = take_confirmed_copy(); copy && copy->sensitive) {
+        crypto_wipe(clipboard_.last_set.data(), clipboard_.last_set.size());
+        clipboard_.last_set    = std::move(copy->text);
+        clipboard_.clear_timer = 0.0;
+    }
+
     // Collect the KDF worker's outcome (animating() keeps frames ticking
     // while it runs, so this polls promptly).
     if (auto oc = job_.take_outcome()) {
@@ -245,9 +255,26 @@ void UnlockScreen::copy_password_to_clipboard()
 {
     if (password_.pw.empty()) return;
     std::string tmp(password_.pw.text_view());
+    using enum ClipboardGateAction;
+    switch (clipboard_gate_action(clipboard_gate())) {
+    case Refuse:
+        // Disable: a deliberate no-op — the OS clipboard is a persistent
+        // cross-process plaintext sink, and the user switched the gate off.
+        crypto_wipe(tmp.data(), tmp.size());
+        return;
+    case Confirm:
+        // Warn: park for the App's default-cancel confirm. The auto-clear
+        // timer is armed only once the confirm actually writes (update()
+        // polls take_confirmed_copy), so a declined copy never arms a clear.
+        (void)request_clipboard_confirm(std::move(tmp), /*sensitive=*/true);
+        return;
+    case Copy:
+        break;
+    }
+    // Allow: today's behaviour, unchanged.
     SDL_SetClipboardText(tmp.c_str());
     crypto_wipe(clipboard_.last_set.data(), clipboard_.last_set.size());
-    clipboard_.last_set   = tmp;
+    clipboard_.last_set    = tmp;
     clipboard_.clear_timer = 0.0;
     crypto_wipe(tmp.data(), tmp.size());
 }

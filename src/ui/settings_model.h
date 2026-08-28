@@ -6,6 +6,7 @@
 #include <string>
 
 #include "gfx/theme.h"
+#include "platform/clipboard_pref.h"
 #include "platform/second_vault_pref.h"
 #include "vault/index.h"
 
@@ -32,6 +33,8 @@ struct SettingsState {
     bool               autoplay          = true;
     // Phase 66: machine-scoped, like theme
     platform::SecondVaultMode second_vault_default = platform::SecondVaultMode::LockNow;
+    // Phase 92: machine-scoped, like theme
+    platform::ClipboardMode clipboard = platform::ClipboardMode::Allow;
     // Inline "add category" / "rename category" prompt (Phase 49). `prompt_row`
     // is the row being renamed, or -1 when adding.
     bool        prompting  = false;
