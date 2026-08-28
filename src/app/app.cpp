@@ -11,29 +11,35 @@
 #include "app/migration_refresh.h"
 #include "gfx/renderer.h"
 #include "gfx/theme.h"
+#include "image/thumbnail.h"
+#include "media/autoplay_setting.h"
+#include "media/video_probe.h"
+#include "media/volume_setting.h"
+#include "platform/autoplay_pref.h"
+#include "platform/clipboard_pref.h"
 #include "platform/error_log.h"
 #include "platform/gallery_view_pref.h"
-#include "platform/clipboard_pref.h"
 #include "platform/harden.h"
-#include "platform/paths.h"
 #include "platform/path_utf8.h"
+#include "platform/paths.h"
+#include "platform/perf.h"
 #include "platform/second_vault_pref.h"
-#include "media/volume_setting.h"
-#include "media/autoplay_setting.h"
 #include "platform/theme_pref.h"
 #include "platform/volume_pref.h"
-#include "platform/autoplay_pref.h"
-#include "platform/perf.h"
 #include "ui/advanced_search_screen.h"
 #include "ui/clipboard_gate.h"
+#include "ui/delete_summary.h"
 #include "ui/dual_gallery.h"
 #include "ui/duplicates_screen.h"
 #include "ui/favorites_galleries.h"
 #include "ui/favorites_images.h"
 #include "ui/gallery_grid.h"
+#include "ui/gallery_view_setting.h"
 #include "ui/image_viewer.h"
 #include "ui/import_model.h"
 #include "ui/import_status_screen.h"
+#include "ui/meta_format.h"
+#include "ui/progress_modal.h"
 #include "ui/settings_overlay.h"
 #include "ui/tag_galleries.h"
 #include "ui/tag_images.h"
@@ -41,12 +47,7 @@
 #include "ui/unlock_screen.h"
 #include "ui/vault_manager.h"
 #include "ui/widgets.h"
-#include "ui/progress_modal.h"
-#include "ui/delete_summary.h"
-#include "ui/meta_format.h"
 #include "vault/vault_search.h"
-#include "media/video_probe.h"
-#include "image/thumbnail.h"
 
 #ifndef OSV_DEFAULT_FONT
 #define OSV_DEFAULT_FONT "assets/fonts/NotoSans-Regular.ttf"
@@ -129,8 +130,8 @@ bool App::init()
     // Phase 92: seed the clipboard gate from the persisted preference.
     ui::set_clipboard_gate(platform::ClipboardPref::default_location().load());
 
-    // Phase 84: seed the gallery view with the persisted preference
-    sessions_.gallery.view = platform::GalleryViewPref::default_location().load();
+    // Phase 84+93: seed the shared gallery view with the persisted preference
+    ui::set_gallery_view_setting(platform::GalleryViewPref::default_location().load());
 
     // Phase 66: seed the warm slot with the persisted default mode
     second_.session.set_default_mode(platform::SecondVaultPref::default_location().load());
@@ -174,9 +175,9 @@ void App::promote_pending()
     sessions_.adv   = {};                          // new vault session -> fresh advanced search
     sessions_.dual.reset();                        // Phase 78: new vault session -> fresh dual-pane state
     sessions_.gallery.reset();                             // new vault session -> fresh gallery/viewer memory
-    // Phase 84: the view is machine-scoped now — a fresh vault session starts
+    // Phase 84+93: the view is machine-scoped now — a fresh vault session starts
     // in the persisted view, not the enum default.
-    sessions_.gallery.view = platform::GalleryViewPref::default_location().load();
+    ui::set_gallery_view_setting(platform::GalleryViewPref::default_location().load());
     keep_unlocked_ = false;                       // new session always starts with auto-lock on
     vault_state_.active        = std::move(vault_state_.pending);
     vault_state_.active_path   = std::move(vault_state_.pending_path);
@@ -231,8 +232,7 @@ void App::to_gallery(const std::string& path, int selected, bool explicit_index)
         ui::GalleryGrid::GridInitContext{window_, font_, *vault_state_.active, *cache_},
         ui::GalleryGrid::GridDialogs{dialog_, folder_dialog_},
         ui::GalleryGrid::GridVaultCtx{registry_, vault_state_.active_path, &second_.session},
-        sessions_.gallery, import_ui_.queue,
-        ui::GridLocation{path, seed, sessions_.gallery.view});
+        sessions_.gallery, import_ui_.queue, ui::GridLocation{path, seed});
     screen_->on_enter();
 }
 
@@ -706,11 +706,10 @@ struct App::OverlayDispatch {
         if (bool commit = false; ui::handle_settings_event(app.overlays_.settings, app.window_, e, commit)) {
             // Phase 66: sync the default mode whenever the event was handled
             app.second_.session.set_default_mode(app.overlays_.settings.second_vault_default);
-            // Phase 84: sync gallery view to session and live grid (if one is open behind overlay)
-            app.sessions_.gallery.view = app.overlays_.settings.gallery_view;
-            if (auto* grid = dynamic_cast<ui::GalleryGrid*>(app.screen_.get())) {
-                ui::set_gallery_view(*grid, app.overlays_.settings.gallery_view);
-            }
+            // Phase 93: sync gallery view to the shared setting and the active
+            // screen (container screens forward it to their live children).
+            ui::set_gallery_view_setting(app.overlays_.settings.gallery_view);
+            app.screen_->on_gallery_view_changed(app.overlays_.settings.gallery_view);
             // Phase 85: sync autoplay whenever the event was handled
             media::set_saved_autoplay_enabled(app.overlays_.settings.autoplay);
             (void)platform::AutoplayPref::default_location().save(app.overlays_.settings.autoplay);
@@ -863,12 +862,11 @@ bool App::pump_events(bool animating)
 
 void App::capture_session_state()
 {
-    // Snapshot the outgoing screen's view/strip-side/video-position into
+    // Snapshot the outgoing screen's strip-side/video-position into
     // sessions_.gallery before it is destroyed (Phase 39 Part 2) — must run before
-    // on_exit(), which tears down ImageViewer's live video_.
-    if (const auto* grid = dynamic_cast<const ui::GalleryGrid*>(screen_.get())) {
-        sessions_.gallery.view = ui::current_gallery_view(*grid);
-    } else if (const auto* viewer = dynamic_cast<const ui::ImageViewer*>(screen_.get())) {
+    // on_exit(), which tears down ImageViewer's live video_. The grid view/density
+    // is NOT captured: it is the shared machine-wide setting (Phase 93).
+    if (const auto* viewer = dynamic_cast<const ui::ImageViewer*>(screen_.get())) {
         sessions_.gallery.strip_side = ui::current_strip_side(*viewer);
         ui::capture_video_resume(*viewer, sessions_.gallery);
     } else if (const auto* fav = dynamic_cast<const ui::FavoritesScreen*>(screen_.get())) {
@@ -888,7 +886,7 @@ void App::open_settings_overlay()
     overlays_.settings.draft = overlays_.settings.vault_unlocked ? vault::vault_settings(*vault_state_.active)
                                                                   : vault::VaultSettings{};
     overlays_.settings.theme = gfx::active_theme_id();
-    overlays_.settings.gallery_view = sessions_.gallery.view;
+    overlays_.settings.gallery_view = ui::gallery_view_setting();
     overlays_.settings.autoplay = media::saved_autoplay_enabled();   // Phase 85
     overlays_.settings.second_vault_default = second_.session.default_mode();   // Phase 66
     overlays_.settings.clipboard = ui::clipboard_gate();                        // Phase 92

@@ -47,6 +47,7 @@ public:
     void on_enter() override;
     void on_exit() override;
     void on_vault_changed() override;  // Phase 50: re-run search after tree reallocation
+    void on_gallery_view_changed(GalleryView view) override;
     void handle_event(const SDL_Event& e) override;
     void update(double dt) override;   // upload finished off-thread thumb decodes
     void render(gfx::Renderer& r) override;
@@ -122,6 +123,7 @@ private:
     friend void start_export_results(AdvancedSearchScreen& s);      // X: consent first
     friend void start_transfer_results(AdvancedSearchScreen& s);    // M: grouped
     friend void start_delete_results(AdvancedSearchScreen& s);      // Del: batch delete
+    friend void after_advanced_search_buffer_edit(AdvancedSearchScreen& s);
 
     // Committed-tag selection within the focused tag field (Include/Exclude/Group).
     // Kept as free functions (friends) so they don't count against the class method
@@ -142,8 +144,6 @@ private:
     // The focused editable field, or nullptr when focus is not on one.
     [[nodiscard]] ITextInput* active_buffer();
 
-    // Everything that must follow a change to the active buffer's CONTENT.
-    void after_buffer_edit();
     [[nodiscard]] std::string accepted(const std::string& buf) const;  // suggestion-or-typed
 
     // --- rendering (split per column) ---

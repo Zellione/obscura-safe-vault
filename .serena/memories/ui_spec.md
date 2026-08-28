@@ -84,10 +84,13 @@ watermark, so the pass re-runs at the next unlock.
 - Tile grid: sub-galleries (folder icon) and image thumbnails, rendered
   folders-first (Phase 46).
 - Breadcrumb bar at top shows current path.
-- Keyboard: `Enter`/`Space` open, `Backspace`/`Esc` up. **Phase 84:**
-  `Home`/`End` jump to the first/last item (centered scroll); each `L` press
-  shows the newly selected mode as a footer status ("View: Grid M") and the
-  view persists machine-wide across restarts (`gallery_view.conf`).
+- Keyboard: `Enter`/`Space` open, `Backspace`/`Esc` up. **Phase 84+93:** `Home`/`End`
+  jump to the first/last item (centered scroll); each `L` press cycles the full density
+  sequence (`List → Grid S/M/L/XL/XXL` — **six** modes since Phase 93, live-saved) and shows
+  the newly selected mode as a footer status ("View: Grid M"), and the
+  view persists machine-wide across restarts (`gallery_view.conf`). **Phase 93:** the same
+  `L` density cycle now drives the favorites/tag screens (S/M/L/XL/XXL only — no List) and the
+  advanced-search results (List included), all sharing ONE machine-wide setting.
 - **Phase 56:** `Right-click` is Esc — clears any active multi-selection first, then ascends
   to the parent gallery (exactly like Esc). At the root gallery, right-click exits to the vault
   manager.
@@ -234,10 +237,11 @@ change value, `N` add category, `R` rename, `Del` remove, `Esc` close.
 Sections:
 - **Appearance — this machine.** Theme; changes apply live and persist to
   `theme.conf` immediately, exactly as the retired `C` theme picker did. The
-  preview IS the choice. **Phase 84:** a second row, **Default Gallery View** —
-  cycles the five densities (List/Grid S/M/L/XL), live-saves
+  preview IS the choice. **Phase 84+93:** a second row, **Default Gallery View** —
+  cycles the six modes (List/Grid S/M/L/XL/XXL), live-saves
   `gallery_view.conf`, and pushes straight into an open grid behind the
-  overlay.
+  overlay. The value is the shared machine-wide density — the gallery grid, the
+  favorites/tag screens, and advanced-search results all read and write it.
 - **Playback — this machine (Phase 85).** One row, **Auto-play videos**
   On/Off (default **On** — a newly opened video starts playing; the resume
   bookmark still applies first, so it starts at the remembered position).

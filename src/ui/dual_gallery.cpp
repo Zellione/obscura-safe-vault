@@ -12,12 +12,13 @@
 #include "ui/dual_layout.h"
 #include "ui/dual_session_state.h"
 #include "ui/gallery_grid.h"
+#include "ui/gallery_view_setting.h"
 #include "ui/help_popup.h"
 #include "ui/keybindings.h"
 #include "ui/parent_group.h"
 #include "ui/widgets.h"
-#include "vault/vault.h"
 #include "vault/transfer.h"
+#include "vault/vault.h"
 
 namespace ui {
 
@@ -27,12 +28,10 @@ DualGalleryScreen::DualGalleryScreen(GalleryGrid::GridInitContext ctx, GalleryGr
     : win_(ctx.win), font_(ctx.font), vault_(ctx.vault), dual_(dual), queue_(queue)
 {
     // Build both grids; don't call on_enter() yet
-    left_ = std::make_unique<GalleryGrid>(
-        ctx, dialogs, vault_ctx, session, queue,
-        GridLocation{dual.pane[0].path, dual.pane[0].selected, dual.pane[0].view});
-    right_ = std::make_unique<GalleryGrid>(
-        ctx, dialogs, vault_ctx, session, queue,
-        GridLocation{dual.pane[1].path, dual.pane[1].selected, dual.pane[1].view});
+    left_ = std::make_unique<GalleryGrid>(ctx, dialogs, vault_ctx, session, queue,
+                                          GridLocation{dual.pane[0].path, dual.pane[0].selected});
+    right_ = std::make_unique<GalleryGrid>(ctx, dialogs, vault_ctx, session, queue,
+                                           GridLocation{dual.pane[1].path, dual.pane[1].selected});
 
     // Mark both as embedded (pane mode)
     left_->set_embedded(true);
@@ -144,6 +143,13 @@ void DualGalleryScreen::on_vault_changed()
     }
 }
 
+void DualGalleryScreen::on_gallery_view_changed(GalleryView view)
+{
+    left_->on_gallery_view_changed(view);
+    right_->on_gallery_view_changed(view);
+    mark_dirty();
+}
+
 void DualGalleryScreen::handle_event(const SDL_Event& e)
 {
     // 1. Window resize: recompute the split, set_layout_override both panes
@@ -175,7 +181,13 @@ void DualGalleryScreen::handle_event(const SDL_Event& e)
     if (route_mouse(e)) return;
 
     // 8. Everything else: forward to active pane untranslated
+    const GalleryView view_before = gallery_view_setting();
     active().handle_event(e);
+    // A pane's L shortcut writes the process-global setting. Mirror it into
+    // both live panes before the same event is rendered.
+    if (const GalleryView view_after = gallery_view_setting(); view_after != view_before) {
+        on_gallery_view_changed(view_after);
+    }
     drain_nav(active());
 }
 

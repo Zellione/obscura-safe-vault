@@ -36,7 +36,9 @@ Index into the UI module's sub-memories. Covers `src/ui/`: every Screen, image/v
 **Phase 75 highlights:**
 - TransferDialog: pull direction (From/To), conflict stage (pre-scan for colliding galleries), multi-select on PickSrcGalleries.
 - CombineDialog: Move vs Copy mode (Move deletes emptied source).
-- Gallery tile sizes: S=192 / M=256 / L=352 / XL=448 px (was 188).
+- Gallery tile sizes: S=224 / M=288 / L=384 / XL=480 / XXL=512 px (Phase 93; was S=192/M=256/L=352/XL=448 after Phase 75, 188 before that). Axis legend:
+  the L-key density cycle is shared machine-wide ({gallery grid, favorites/tags, advanced
+  search}) via `ui::gallery_view_setting` + `gallery_view.conf`.
 - Thumbnail strip: manual scroll state (wheel anywhere in band), strip-visible-range windowing, ±8-cell prefetch margin.
 
 **No logging of key material; no temporary files for decrypted content; random nonces per XChaCha20-Poly1305 encrypt.**

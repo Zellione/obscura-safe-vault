@@ -15,23 +15,27 @@
 #include "gfx/text.h"
 #include "gfx/texture_cache.h"
 #include "gfx/theme.h"
-#include "ui/meta_format.h"
 #include "gfx/window.h"
 #include "platform/file_dialog.h"
 #include "platform/folder_dialog.h"
 #include "platform/gallery_view_pref.h"
+#include "platform/path_utf8.h"
 #include "platform/paths.h"
 #include "platform/perf.h"
-#include "platform/path_utf8.h"
+#include "ui/anim_model.h"
+#include "ui/batch_delete.h"
+#include "ui/child_counts.h"
 #include "ui/chrome_layout.h"
 #include "ui/delete_summary.h"
-#include "ui/batch_delete.h"
 #include "ui/detail_model.h"
 #include "ui/detail_panel.h"
 #include "ui/gallery_sort.h"
-#include "ui/anim_model.h"
+#include "ui/gallery_view.h"
+#include "ui/gallery_view_setting.h"
 #include "ui/grid_layout.h"
 #include "ui/input.h"
+#include "ui/meta_format.h"
+#include "ui/position_label.h"
 #include "ui/progress_modal.h"
 #include "ui/tag_chip.h"
 #include "ui/tag_inherit.h"
@@ -41,8 +45,6 @@
 #include "ui/waste_threshold.h"
 #include "ui/widgets.h"
 #include "ui/zip_import.h"
-#include "ui/child_counts.h"
-#include "ui/position_label.h"
 #include "vault/file_util.h"
 #include "vault/index.h"
 #include "vault/vault.h"
@@ -211,18 +213,18 @@ void rebuild_detail(GalleryGrid& g)
     g.detail_.content = build_node_details(node, inherited_tags(g.vault_, node_path), from_contents, vault::vault_settings(g.vault_).default_sort);
 }
 
-GalleryGrid::GalleryGrid(GridInitContext ctx, GridDialogs dialogs,
-                         GridVaultCtx vault_ctx, GallerySessionState& session, ImportQueue& queue,
-                         GridLocation at)
+GalleryGrid::GalleryGrid(GridInitContext ctx, GridDialogs dialogs, GridVaultCtx vault_ctx,
+                         GallerySessionState& session, ImportQueue& queue, GridLocation at)
     : win_(ctx.win), font_(ctx.font), vault_(ctx.vault), cache_(ctx.cache), dialogs_(dialogs),
-      session_(session), queue_(queue),
-      search_(ctx.vault, ctx.win), tag_editor_(ctx.vault, ctx.win),
+      session_(session), queue_(queue), search_(ctx.vault, ctx.win),
+      tag_editor_(ctx.vault, ctx.win),
       quick_switch_(vault_ctx.registry, vault_ctx.active_vault_path),
-      transfer_(ctx.vault, vault_ctx.active_vault_path, vault_ctx.registry,
-                dialogs.file, ctx.win, vault_ctx.second_vault),
-      rename_(ctx.win),
-      combine_(ctx.vault, vault_ctx.active_vault_path, vault_ctx.registry, dialogs.file, ctx.win, vault_ctx.second_vault),
-      initial_(std::move(at)), view_(initial_.view)
+      transfer_(ctx.vault, vault_ctx.active_vault_path, vault_ctx.registry, dialogs.file, ctx.win,
+                vault_ctx.second_vault),
+      rename_(ctx.win), combine_(ctx.vault, vault_ctx.active_vault_path, vault_ctx.registry,
+                                 dialogs.file, ctx.win, vault_ctx.second_vault),
+      initial_(std::move(at)),
+      view_(gallery_view_setting())  // Phase 93: shared machine-wide density
 {
     detail_.panel.open = session_.detail_open;
 }
@@ -999,10 +1001,10 @@ bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& 
     }
     switch (key.key) {
         case SDLK_L:
-            g.view_ = next_gallery_view(g.view_);
-            // The tile geometry just changed under the selection — minimally
-            // re-follow so the selected tile doesn't land off-screen.
-            g.follow_ = GalleryGrid::ScrollFollow::Ensure;
+            // Phase 93: cycle from the shared setting — self-healing if any other
+            // surface changed it since this grid was built — and write it back.
+            set_gallery_view_setting(next_gallery_view(gallery_view_setting()));
+            g.on_gallery_view_changed(gallery_view_setting());
             // Phase 84: say which of the five modes we just landed on, and
             // persist it machine-wide immediately (live-save, like the theme).
             g.status_ = std::format("View: {}", gallery_view_label(g.view_));
@@ -1604,12 +1606,12 @@ bool vault_busy(const GalleryGrid& g)
     return g.naming_.file_op.active() || g.transfer_.job_active() || g.combine_.job_active();
 }
 
-GalleryView current_gallery_view(const GalleryGrid& g) { return g.view_; }
-
-void set_gallery_view(GalleryGrid& g, GalleryView view)
+void GalleryGrid::on_gallery_view_changed(GalleryView view)
 {
-    g.view_   = view;
-    g.follow_ = GalleryGrid::ScrollFollow::Ensure;
+    if (view_ == view) return;
+    view_ = view;
+    follow_ = ScrollFollow::Ensure;
+    mark_dirty();
 }
 
 std::string current_gallery_path(const GalleryGrid& g) { return g.nav_.path(); }
@@ -1621,14 +1623,13 @@ PaneState capture_pane_state(const GalleryGrid& g)
     s.path = current_gallery_path(g);
     s.selected = g.nav_.selected();
     s.scroll = g.scroll_;
-    s.view = current_gallery_view(g);
     s.detail_open = g.detail_.panel.open;
     s.selected_tiles = g.sel_.indices();
     return s;
 }
 
-// Phase 78: rebuild a pane from a snapshot. Grid is constructed at s.path/s.selected/s.view
-// via GridLocation; this function refines scroll, detail state, and multi-selection.
+// Phase 78: rebuild a pane from a snapshot. Grid is constructed at s.path/s.selected;
+// this function refines scroll, detail state, and multi-selection.
 void restore_pane_state(GalleryGrid& g, const PaneState& s)
 {
     // Clamp scroll to valid range, accounting for current content height.

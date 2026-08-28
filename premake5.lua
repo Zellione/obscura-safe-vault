@@ -616,6 +616,7 @@ project "osv_tests"
         "src/ui/spanned_zip.cpp",
         "src/ui/gallery_sort.cpp",
         "src/ui/gallery_view.cpp",
+        "src/ui/gallery_view_setting.cpp",
         "src/ui/anim_model.cpp",
         "src/ui/anim_playback.cpp",
         "src/ui/help_popup.cpp",

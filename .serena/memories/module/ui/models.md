@@ -79,24 +79,33 @@ Pure SDL-free view/sort/model helpers, layout geometry, settings state, search i
   formatting ("3 galleries · 12 items" / "1 gallery · 1 item" / "12 items" / "empty"), collapsing images+videos
   to "items". Counts reserved per gallery listing (never per tile); cell does not grow; label moves up,
   thumbnail shrinks by row height, leaving grid metrics and hit-testing untouched.
-- `gallery_view.h/.cpp` — `GalleryView{List,GridS,GridM,GridL,GridXL}` shared enum;
-  `cell_size_for(view)` (S=192/M=256/L=352/XL=448 since Phase 75; List unused) +
-  `next_gallery_view(view)` (the `L`-key cycle). Phase 84 adds, all off ONE constexpr
-  `{view,label,slug}` table (single source, no drift): `gallery_view_label` ("List"/"Grid S"/…),
-  `gallery_view_slug`/`gallery_view_from_slug` (the `gallery_view.conf` token; unknown/empty →
-  GridM; slugs are STABLE — never rename), and `prev_gallery_view` (table-derived exact inverse
-  of next). GridM was 188 (the old fixed CELL) before the
-  Phase 75 bump; stored thumbs are 512 px (`image::THUMB_MAX_SIDE`) so XL stays sharp. `gallery_view.cpp` is listed
-  explicitly (not globbed) in osv_tests' premake5.lua files{}.
-- `gallery_session_state.h` — `GallerySessionState{view,strip_side,detail_open,last_media_path,
+- `gallery_view.h/.cpp` — `GalleryView{List,GridS,GridM,GridL,GridXL,GridXXL}` shared enum;
+  `cell_size_for(view)` (S=224/M=288/L=384/XL=480/XXL=512 since Phase 93, +32 bump of the Phase
+  75 values; List unused; XXL == `image::THUMB_MAX_SIDE` so no thumbnail migration) +
+  `next_gallery_view(view)` (the `L`-key cycle) + **Phase 93** `next_grid_density(view)`
+  (grid-density-only S→M→L→XL→XXL→S for the list-less collection screens; List→GridS) and
+  `grid_view_for(view)` / `grid_cell_size(view)` (view/cell size with List→GridM fallback).
+  Phase 84 adds, all off ONE
+  constexpr `{view,label,slug}` table (single source, no drift): `gallery_view_label`
+  ("List"/"Grid S"/…), `gallery_view_slug`/`gallery_view_from_slug` (the `gallery_view.conf`
+  token; unknown/empty → GridM; slugs are STABLE — never rename), and `prev_gallery_view`
+  (table-derived exact inverse of next). GridM was 188 (the old fixed CELL) before the
+  Phase 75 bump; stored thumbs are 512 px (`image::THUMB_MAX_SIDE`) so XXL stays sharp.
+  `gallery_view.cpp` is listed explicitly (not globbed) in osv_tests' premake5.lua files{}.
+  **Phase 93:** `gallery_view_setting.{h,cpp}` — process-global `gallery_view_setting()/
+  set_gallery_view_setting()` (the `media::autoplay_setting` pattern): the SINGLE in-memory
+  source of truth for the shared machine-wide density; seeded from GalleryViewPref at
+  App::init/promote; every surface (gallery grid, FavoritesScreen, search results) reads it on
+  entry and writes it (+ saves the pref) on `L`. Must be added to osv_tests' premake files{}
+  when new.
+- `gallery_session_state.h` — `GallerySessionState{strip_side,detail_open,last_media_path,
   video_resume_seconds}` + `last_index_by_path` (unordered_map, key=NavModel::path()) +
   record(path,index)/recall(path) (0 default) + reset(). Phase 48: added `bool detail_open`,
   persisted across screen transitions within a session. App-owned; App writes most fields once
   at screen exit, but GalleryGrid writes `last_index_by_path` repeatedly during its lifetime.
-  **Phase 84:** `view` is machine-scoped — seeded from `platform::GalleryViewPref` in
-  `App::init()` and re-seeded right after the promote_pending session reset; lock-exit resets
-  deliberately do NOT re-seed because every gallery re-entry funnels through promote_pending
-  (verified to include the Phase 66 warm-vault promotion).
+  **Phase 93:** the `view` field is GONE — the density is the shared machine-wide
+  `ui::gallery_view_setting` (gallery_view.conf), so no session field survives a grid<->viewer
+  round trip.
 - `nav_model.*`, `input.*`, `viewer_model.h`, `screen.h` — navigation model, input handling,
   viewer model, Screen base (with `help_groups()` virtual overridden by GalleryGrid,
   ImageViewer, FavoritesScreen, TagOverviewScreen, AdvancedSearchScreen, VaultManager,
@@ -163,9 +172,12 @@ Pure SDL-free view/sort/model helpers, layout geometry, settings state, search i
   per-keystroke walks on large result sets). Other rerun sites (simple/search overlay) use immediate
   (no debounce). Debounce flushes (immediate run) before result-open and saved-search save to avoid
   stale display.
-- `search_result_view.*` / `result_grid.*` — result grid+list view state (`ResultView{List,
-  Grid}` + toggle + move nav; List ±1 row, Grid ±1/±cols clamped, cols>=1). search_result_view
-  owns the off-thread decode worker + feeds the thumbnail cache. **Phase 56:** list layout
+- `search_result_view.*` / `result_grid.*` — result grid+list view state (`GalleryView`
+  since Phase 93: List = one-per-row, any grid density = thumbnail grid; `result_move_delta/
+  result_move` take `GalleryView`, grid iff != List, ±1/±cols clamped cols>=1; the old
+  `ResultView{List,Grid}` + Ctrl+L toggle are GONE). search_result_view owns the off-thread
+  decode worker + feeds the thumbnail cache; `L` (Results focus, handled by the host screen)
+  cycles the shared machine-wide density. **Phase 56:** list layout
   derives from `list_layout.*` module. **Phase 58:** `update_results(vault, hits)` invalidates
   CoverCache and clears failed thumbs. **Phase 68:** owns a `SelectionModel` (Space toggles,
   Ctrl+A select-all-or-clear in handle_key; accessors `selection()`/`clear_selection()`;

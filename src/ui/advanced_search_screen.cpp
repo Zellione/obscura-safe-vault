@@ -12,12 +12,15 @@
 #include "gfx/texture_cache.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "platform/gallery_view_pref.h"
 #include "platform/perf.h"
 #include "ui/favorite_batch.h"
+#include "ui/gallery_view.h"
+#include "ui/gallery_view_setting.h"
 #include "ui/grid_layout.h"
 #include "ui/list_layout.h"
-#include "ui/parent_group.h"
 #include "ui/nav_model.h"
+#include "ui/parent_group.h"
 #include "ui/position_label.h"
 #include "ui/text_input_event.h"
 #include "ui/text_metrics.h"
@@ -148,7 +151,7 @@ AdvancedSearchScreen::AdvancedSearchScreen(gfx::Window& win, gfx::FontAtlas& fon
 
 void AdvancedSearchScreen::on_enter()
 {
-    // Restore the session-scoped state (query + builder buffers + cursor + view)
+    // Restore the session-scoped state (query + builder buffers + cursor)
     // so returning to the screen shows the previous search; a fresh session
     // (active == false) just keeps the default-constructed members.
     if (session_.active) {
@@ -166,7 +169,9 @@ void AdvancedSearchScreen::on_enter()
 
     // Restore sub-view session state
     result_view_.set_cursor(session_.cur_result);
-    result_view_.set_view(session_.view);
+    // Phase 93: the view is the shared machine-wide setting — List or a grid
+    // density, exactly as the gallery grid left it.
+    result_view_.set_view(gallery_view_setting());
     saved_panel_.set_cursor(session_.cur_saved);
 
     SDL_StartTextInput(win_.sdl_window());
@@ -188,7 +193,9 @@ void AdvancedSearchScreen::on_exit()
 
     // Persist sub-view session state
     session_.cur_result = result_view_.get_cursor();
-    session_.view       = result_view_.get_view();
+    // Phase 93: the view is NOT stored here — it is the shared machine-wide
+    // setting (ui::gallery_view_setting + gallery_view.conf), so no session
+    // field to write.
     session_.cur_saved  = saved_panel_.get_cursor();
 
     SDL_StopTextInput(win_.sdl_window());
@@ -199,6 +206,13 @@ void AdvancedSearchScreen::on_vault_changed()
     // Phase 50: vault's index tree changed (background import drain attached nodes).
     // results_ are now stale; re-run the search.
     rerun();
+    mark_dirty();
+}
+
+void AdvancedSearchScreen::on_gallery_view_changed(GalleryView view)
+{
+    if (result_view_.get_view() == view) return;
+    result_view_.set_view(view);
     mark_dirty();
 }
 
@@ -397,7 +411,7 @@ void AdvancedSearchScreen::handle_event(const SDL_Event& e)
         buf != nullptr && field_owns_event(*buf, e)) {
         const uint64_t rev = buf->revision();
         if (handle_text_input_event(*buf, e)) {
-            if (buf->revision() != rev) after_buffer_edit();
+            if (buf->revision() != rev) after_advanced_search_buffer_edit(*this);
             return;
         }
     }
@@ -446,14 +460,16 @@ void AdvancedSearchScreen::update(double dt)
     mark_dirty();   // mark screen dirty since thumbnails changed
 }
 
-void AdvancedSearchScreen::after_buffer_edit()
+// Everything that must follow a change to the active buffer's content. This is
+// a free friend so AdvancedSearchScreen stays within Sonar S1448's method cap.
+void after_advanced_search_buffer_edit(AdvancedSearchScreen& s)
 {
-    cur_.tag = -1;
-    if (!saved_panel_.active_buffer() && focus_ == Focus::Name) {
-        query_.name_query = edit_.name.str();
-        live_.rerun.arm();   // Phase 58: debounce name-query reruns to input silence
+    s.cur_.tag = -1;
+    if (!s.saved_panel_.active_buffer() && s.focus_ == AdvancedSearchScreen::Focus::Name) {
+        s.query_.name_query = s.edit_.name.str();
+        s.live_.rerun.arm();  // Phase 58: debounce name-query reruns to input silence
     }
-    refresh_suggestions();   // in-memory autocomplete is cheap; stays immediate
+    s.refresh_suggestions();  // in-memory autocomplete is cheap; stays immediate
 }
 
 void AdvancedSearchScreen::handle_clearing_key(const SDL_KeyboardEvent& key)
@@ -507,9 +523,18 @@ void AdvancedSearchScreen::handle_key(const SDL_KeyboardEvent& key)
         saved_panel_.begin_naming();
         return;
     }
-    if ((key.mod & SDL_KMOD_CTRL) != 0 && key.key == SDLK_L) {
-        auto new_view = toggle_result_view(result_view_.get_view());
-        result_view_.set_view(new_view);   // List <-> thumbnail Grid
+    // Phase 93: plain L on Results focus cycles the full view sequence
+    // (List -> Grid S/M/L/XL/XXL -> List) and live-saves the shared machine-wide
+    // setting — the gallery grid's L-key behaviour. Bare letters elsewhere
+    // belong to the builder fields, so L is gated on Results focus (the old
+    // Phase 20 Ctrl+L List<->Grid toggle is superseded).
+    if (key.key == SDLK_L && focus_ == Focus::Results && !saved_panel_.active_buffer() &&
+        !clearing_) {
+        auto new_view = next_gallery_view(result_view_.get_view());
+        result_view_.set_view(new_view);
+        set_gallery_view_setting(new_view);
+        (void)platform::GalleryViewPref::default_location().save(new_view);
+        status_ = std::format("View: {}", gallery_view_label(new_view));
         return;
     }
     if ((key.mod & SDL_KMOD_CTRL) != 0 && key.key == SDLK_R) {
@@ -963,9 +988,12 @@ void AdvancedSearchScreen::render_results(gfx::Renderer& r, float x, float colw)
     using namespace gfx::theme;
     const float LINE = line_pitch(font_.pixel_height());
     const bool hot = (focus_ == Focus::Results && !saved_panel_.active_buffer() && !clearing_);
-    if (result_view_.get_view() == ResultView::Grid) { result_view_.render(r, x, colw, hot); return; }
+    if (result_view_.get_view() != GalleryView::List) {
+        result_view_.render(r, x, colw, hot);
+        return;
+    }
 
-    // List view rendering (when not in grid mode)
+    // List view rendering (when not in a grid density mode)
     if (hot) r.draw_text(font_, x - 16, TOP, ">", ACCENT);
 
     // Phase 68: Build results header with position counter if available
@@ -1075,19 +1103,30 @@ float AdvancedSearchScreen::render_exclude_section(gfx::Renderer& r, float x, fl
 std::vector<ui::HelpGroup> AdvancedSearchScreen::help_groups() const
 {
     return {
-        {"Build query", {
-            {"Tab", "Next field"}, {"Up/Down/Left/Right", "Navigate"},
-            {"Enter", "Add term / open result"}, {"+ / -", "Adjust weight"},
-            {"Del", "Remove term"}, {"Backspace", "Edit term"},
-        }},
-        {"Results & saved searches", {
-            {"Ctrl+S", "Save search"}, {"Ctrl+L", "Toggle list/grid view"},
-            {"Ctrl+R", "Clear query"}, {"R", "Rename focused result"},
-            {"Space", "Select result"}, {"Shift+Space", "Select range"}, {"Ctrl+A", "Select all results"},
-            {"B", "Favorite (acts on selection)"}, {"X", "Export selection"},
-            {"M", "Move/copy selection"}, {"Del", "Delete selection"},
-            {"Ctrl+D", "Toggle the detail panel"},
-        }},
+        {"Build query",
+         {
+             {"Tab", "Next field"},
+             {"Up/Down/Left/Right", "Navigate"},
+             {"Enter", "Add term / open result"},
+             {"+ / -", "Adjust weight"},
+             {"Del", "Remove term"},
+             {"Backspace", "Edit term"},
+         }},
+        {"Results & saved searches",
+         {
+             {"Ctrl+S", "Save search"},
+             {"L", "Cycle view: list / grid size"},
+             {"Ctrl+R", "Clear query"},
+             {"R", "Rename focused result"},
+             {"Space", "Select result"},
+             {"Shift+Space", "Select range"},
+             {"Ctrl+A", "Select all results"},
+             {"B", "Favorite (acts on selection)"},
+             {"X", "Export selection"},
+             {"M", "Move/copy selection"},
+             {"Del", "Delete selection"},
+             {"Ctrl+D", "Toggle the detail panel"},
+         }},
         {"Navigate", {{"Esc", "Back"}}},
         text_editing_help_group(),
     };
