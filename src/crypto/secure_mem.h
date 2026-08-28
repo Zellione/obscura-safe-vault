@@ -291,7 +291,7 @@ inline void release_page_refs(PageLockRegistry& registry, uintptr_t first, uintp
 // allocator blocks share pages, so a per-allocation munlock can otherwise make
 // a still-live neighbouring secret swappable. Keep one OS lock per page and a
 // process-wide reference count across every SecureBuffer/SecureBytes/String.
-inline bool mem_lock(uint8_t* p, size_t n) noexcept
+inline bool mem_lock(const uint8_t* p, size_t n) noexcept
 {
     if (!p || n == 0) return false;
     const auto addr = pointer_address(p);
