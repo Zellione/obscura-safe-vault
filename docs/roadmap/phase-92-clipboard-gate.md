@@ -29,9 +29,14 @@ mirroring the Phase 66/85 pref + F2-row pattern exactly:
 
 - **`platform::ClipboardMode { Allow, Warn, Disable }`** +
   **`platform::ClipboardPref`** (new `src/platform/clipboard_pref.{h,cpp}`) —
-  config-dir `clipboard.conf`, slugs `allow`/`warn`/`off`, atomic temp+rename,
-  missing/unknown → **Allow** (a corrupt file can never lock out a legitimate
-  copy or break startup).
+  config-dir `clipboard.conf`, slugs `allow`/`warn`/`off`, missing/unknown →
+  **Allow** (a corrupt file can never lock out a legitimate copy or break
+  startup). Its atomic save uses the new shared `platform::atomic_write_file`
+  (`src/platform/atomic_write.h`) — the temp+rename sequence every pref used to
+  hand-roll, extracted when cloning it a seventh time tripped SonarCloud's
+  new-code duplication gate; **ThemePref, VolumePref, GalleryViewPref,
+  AutoplayPref, SecondVaultPref, ClipboardPref and VaultRegistry** now call it
+  (193 duplicated lines removed, on-disk bytes unchanged).
 - **`ui::clipboard_gate`** (new `src/ui/clipboard_gate.{h,cpp}`) — a
   UI-thread-only process global (like `media::autoplay_setting`): the mode, a
   pure `clipboard_gate_action(mode) -> {Copy, Confirm, Refuse}` mapping, and the

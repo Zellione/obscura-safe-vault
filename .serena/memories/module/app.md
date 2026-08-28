@@ -218,9 +218,12 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   section. Nothing persists per-vault or per-session state; only the per-machine default is
   stored.
 - `clipboard_pref.*` (Phase 92) — per-machine clipboard gate (Allow/Warn/Disable):
-  `config_dir()/clipboard.conf` holds the mode slug (`allow`/`warn`/`off`) ONLY (no secrets);
-  `load()`->ClipboardMode (missing/unknown -> Allow), `save(mode)`; atomic temp+rename (exact
-  SecondVaultPref mirror). Loaded in `App::init()`, saved live by the `F2` settings overlay's
+  `config_dir()/clipboard.conf` holds the mode slug (`allow`/`warn`/`off`) ONLY (no
+  secrets); `load()`->ClipboardMode (missing/unknown -> Allow), `save(mode)`; the
+  atomic temp+rename save goes through the shared `platform::atomic_write_file`
+  (`platform/atomic_write.h`) used by every pref + VaultRegistry (extracted when
+  a seventh hand-rolled copy tipped the SonarCloud new-code duplication gate).
+  Loaded in `App::init()`, saved live by the `F2` settings overlay's
   Security section (row 1 of 2) and consumed by `ui::clipboard_gate` — the single choke
   point for every clipboard write (see `mem:module/ui/text-input`).
 - `VolumePref` — `config_dir()/volume.conf`, one float [0,1], atomic write, missing/invalid
