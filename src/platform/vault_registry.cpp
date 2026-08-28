@@ -1,11 +1,12 @@
 #include "platform/vault_registry.h"
 
 #include <fstream>
-#include "platform/safe_print.h"
 #include <string>
 
+#include "platform/atomic_write.h"
 #include "platform/path_utf8.h"
 #include "platform/paths.h"
+#include "platform/safe_print.h"
 
 namespace platform {
 
@@ -72,38 +73,17 @@ bool VaultRegistry::write(const std::vector<std::filesystem::path>& entries) con
 {
     if (file_.empty()) return false;
 
-    // Atomic replace: write a sibling temp file, then rename over the target so a
-    // crash mid-write never leaves a torn list.
-    std::filesystem::path tmp = file_;
-    tmp += ".tmp";
-    {
-        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        if (!out) {
-            platform::safe_println(stderr, "[VaultRegistry] cannot write {}", path_to_utf8(tmp));
-            return false;
-        }
-        // generic_string(), not string(): list() normalizes every line it reads,
-        // and lexically_normal() renders with the platform's preferred separator.
-        // add()/remove() rewrite the whole file from list(), so a native-format
-        // write would leave vaults.list holding a mix of "C:/x.osv" (just-added,
-        // as the caller spelled it) and "C:\y.osv" (round-tripped through list()).
-        // Writing the generic form keeps the file in one stable, portable shape;
-        // fs::path accepts '/' on Windows, so it reads back identically.
-        for (const auto& e : entries) out << path_to_utf8_generic(e) << '\n';
-        out.flush();
-        if (!out) {
-            platform::safe_println(stderr, "[VaultRegistry] write error on {}", path_to_utf8(tmp));
-            return false;
-        }
-    }
-    std::error_code ec;
-    std::filesystem::rename(tmp, file_, ec);
-    if (ec) {
-        platform::safe_println(stderr, "[VaultRegistry] rename failed: {}", ec.message());
-        std::filesystem::remove(tmp, ec);
-        return false;
-    }
-    return true;
+    // generic_string(), not string(): list() normalizes every line it reads,
+    // and lexically_normal() renders with the platform's preferred separator.
+    // add()/remove() rewrite the whole file from list(), so a native-format
+    // write would leave vaults.list holding a mix of "C:/x.osv" (just-added,
+    // as the caller spelled it) and "C:\y.osv" (round-tripped through list()).
+    // Writing the generic form keeps the file in one stable, portable shape;
+    // fs::path accepts '/' on Windows, so it reads back identically.
+    std::string content;
+    for (const auto& e : entries)
+        content += path_to_utf8_generic(e) + "\n";
+    return platform::atomic_write_file(file_, content, "VaultRegistry");
 }
 
 } // namespace platform

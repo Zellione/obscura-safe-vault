@@ -4,11 +4,13 @@
 #include <cerrno>
 #include <cstdlib>
 #include <fstream>
-#include "platform/safe_print.h"
+#include <sstream>
 #include <string>
 
+#include "platform/atomic_write.h"
 #include "platform/path_utf8.h"
 #include "platform/paths.h"
+#include "platform/safe_print.h"
 
 namespace platform {
 
@@ -49,32 +51,11 @@ float VolumePref::load() const
 bool VolumePref::save(float volume) const
 {
     if (file_.empty()) return false;
-
-    // Atomic replace: write a sibling temp file, then rename over the target so a
-    // crash mid-write never leaves a torn value.
-    std::filesystem::path tmp = file_;
-    tmp += ".tmp";
-    {
-        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        if (!out) {
-            platform::safe_println(stderr, "[VolumePref] cannot write {}", path_to_utf8(tmp));
-            return false;
-        }
-        out << clamp01(volume) << '\n';
-        out.flush();
-        if (!out) {
-            platform::safe_println(stderr, "[VolumePref] write error on {}", path_to_utf8(tmp));
-            return false;
-        }
-    }
-    std::error_code ec;
-    std::filesystem::rename(tmp, file_, ec);
-    if (ec) {
-        platform::safe_println(stderr, "[VolumePref] rename failed: {}", ec.message());
-        std::filesystem::remove(tmp, ec);
-        return false;
-    }
-    return true;
+    // Format through the same stream default the ofstream path used, so the
+    // on-disk bytes (e.g. "0.5", not "0.500000") are unchanged.
+    std::ostringstream oss;
+    oss << clamp01(volume) << '\n';
+    return platform::atomic_write_file(file_, oss.str(), "VolumePref");
 }
 
 } // namespace platform
