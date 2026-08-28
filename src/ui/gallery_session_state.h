@@ -4,7 +4,6 @@
 #include <string_view>
 #include <unordered_map>
 
-#include "ui/gallery_view.h"   // ui::GalleryView
 #include "ui/strip_layout.h"   // ui::StripSide
 
 namespace ui {
@@ -38,7 +37,8 @@ struct StringHash {
 // defaults at the same points AdvancedSearchState resets at: explicit lock,
 // idle auto-lock, and vault switch.
 struct GallerySessionState {
-    GalleryView view                 = GalleryView::GridM;   // last-used, session-global
+    // Phase 93: the grid view/density is NOT here — it is the shared
+    // machine-wide setting (ui::gallery_view_setting + gallery_view.conf).
     StripSide   strip_side           = StripSide::Bottom;    // last-used, session-global
     bool        detail_open          = false;                // detail panel toggle, session-global
 

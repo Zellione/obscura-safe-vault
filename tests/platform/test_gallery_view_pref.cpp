@@ -40,6 +40,8 @@ TEST(gallery_view_pref_round_trip)
     CHECK_EQ(pref.load(), ui::GalleryView::List);
     REQUIRE(pref.save(ui::GalleryView::GridXL));
     CHECK_EQ(pref.load(), ui::GalleryView::GridXL);
+    REQUIRE(pref.save(ui::GalleryView::GridXXL));
+    CHECK_EQ(pref.load(), ui::GalleryView::GridXXL);
 }
 
 TEST(gallery_view_pref_garbage_loads_default)
@@ -54,9 +56,9 @@ TEST(gallery_view_pref_stores_only_the_slug)
 {
     TempFile tf("slugonly");
     const platform::GalleryViewPref pref(tf.path);
-    REQUIRE(pref.save(ui::GalleryView::GridXL));
+    REQUIRE(pref.save(ui::GalleryView::GridXXL));
     // The raw file is exactly the stable slug + newline — nothing else.
-    CHECK_EQ(read_text(tf.path), std::string("grid-xl\n"));
+    CHECK_EQ(read_text(tf.path), std::string("grid-xxl\n"));
 }
 
 TEST(gallery_view_pref_empty_path_instance_is_safe_noop)

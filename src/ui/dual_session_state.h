@@ -4,17 +4,16 @@
 #include <string>
 #include <vector>
 
-#include "ui/gallery_view.h"
-
 namespace ui {
 
 // State for one pane of the dual-pane gallery (Phase 78). `selected_tiles`
 // are listing indices — clamped/dropped on restore if the listing changed.
+// The pane's view/density is NOT stored: it is the shared machine-wide
+// setting (Phase 93), so both panes — like every surface — follow it.
 struct PaneState {
     std::string      path;                 // gallery slash-path, "" = root
     int              selected = 0;         // focused tile index
-    float            scroll   = 0.0f;      // pane scroll offset
-    GalleryView      view     = GalleryView::GridM;
+    float scroll = 0.0f;                   // pane scroll offset
     bool             detail_open = false;
     std::vector<int> selected_tiles;       // multi-selection
 };

@@ -47,7 +47,8 @@ namespace ui {
 class SecondVaultSession;  // Phase 66: forward declare for GridVaultCtx
 
 // Layout width available to the grid: the window minus whatever the detail panel
-// reserves. A free friend for the same cpp:S1448 reason as current_gallery_view.
+// reserves. A free friend for the cpp:S1448 reason that motivates every grid
+// free friend (see set_gallery_view below).
 // Every layout site (render, scroll-to-selection, hit-test) MUST use this rather
 // than win_.width(), or picking and drawing disagree once the panel is open.
 [[nodiscard]] float content_width(const class GalleryGrid& g);
@@ -91,14 +92,13 @@ bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& 
 // host screen owns split-view toggling).
 bool handle_f3_key(GalleryGrid& g, const SDL_KeyboardEvent& key);
 
-// Where to (re)open the grid: a gallery path (empty = root), the selected
-// tile index, and the initial List/Grid view (Phase 39 Part 2 session
-// memory). Used to restore position + view mode when returning from the
-// image viewer.
+// Where to (re)open the grid: a gallery path (empty = root) and the selected
+// tile index (Phase 39 Part 2 session memory). The view/density is NOT part of
+// the location — it is the shared machine-wide setting (ui::gallery_view_setting),
+// read at construction (Phase 93).
 struct GridLocation {
     std::string path;
-    int         selected = 0;
-    GalleryView view     = GalleryView::GridM;
+    int selected = 0;
 };
 
 class GalleryGrid : public Screen {
@@ -212,11 +212,8 @@ void toggle_select();          // toggle the current item in the export selectio
     friend bool gallery_grid_handle_shortcut_keys(GalleryGrid& g, const SDL_KeyboardEvent& key);  // L/X/M/R/SPACE/G/B/F/T/S/U shortcuts
     friend bool handle_f3_key(GalleryGrid& g, const SDL_KeyboardEvent& key);         // F3 enter split view (Phase 78)
     friend void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);  // cancelled import waste hint
-    // current_gallery_view is a free friend for the same S1448 reason: App reads it
-    // (Phase 39 Part 2) to snapshot the outgoing grid's view mode into GallerySessionState.
-    friend GalleryView current_gallery_view(const GalleryGrid& g);
-    // Phase 84: the F2 settings row changes the view while a grid is open behind
-    // the overlay — push it into the live instance so grid, session and pref agree.
+    // Phase 84/93: the F2 settings row changes the view while a grid is open behind
+    // the overlay — push it into the live instance so grid, shared setting and pref agree.
     friend void set_gallery_view(GalleryGrid& g, GalleryView view);
     // current_gallery_path (Phase 50): App uses it to derive back nav for import status screen
     friend std::string current_gallery_path(const GalleryGrid& g);
@@ -404,11 +401,10 @@ void handle_ctrl_d_key(GalleryGrid& g);
 void handle_delete_key(GalleryGrid& g);
 void render_delete_confirm_modal(GalleryGrid& g, gfx::Renderer& r, float W, float H);
 void set_cancelled_import_status(GalleryGrid& g, int imported, const char* noun);
-[[nodiscard]] GalleryView current_gallery_view(const GalleryGrid& g);
-// Phase 84: the F2 settings row changes the view while a grid is open behind
-// the overlay — push it into the live instance so grid, session and pref agree.
-void set_gallery_view(GalleryGrid& g, GalleryView view);
 [[nodiscard]] std::string current_gallery_path(const GalleryGrid& g);  // Phase 50: for import status back nav
+// Phase 84/93: the F2 settings row changes the view while a grid is open behind
+// the overlay — push it into the live instance so grid, shared setting and pref agree.
+void set_gallery_view(GalleryGrid& g, GalleryView view);
 // Phase 78: snapshot one pane's exact configuration / rebuild it. The restore
 // clamps `selected` and drops out-of-range `selected_tiles` if the listing changed,
 // then clamps scroll.

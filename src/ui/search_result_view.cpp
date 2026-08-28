@@ -123,7 +123,7 @@ void SearchResultView::render(gfx::Renderer& r, float x, float colw, bool hot)
     // Note: render_results() in AdvancedSearchScreen dispatches to us, so we just
     // render the grid view (list view is handled by AdvancedSearchScreen).
 
-    if (grid_view_ != ResultView::Grid) return;
+    if (grid_view_ == GalleryView::List) return;
 
     // Grid view rendering
     if (hot) r.draw_text(font_, x - 16, TOP, ">", ACCENT);
@@ -136,7 +136,9 @@ void SearchResultView::render(gfx::Renderer& r, float x, float colw, bool hot)
     }
     r.draw_text(font_, x, TOP, header, TEXT_DIM);
 
-    constexpr float TILE = 92.0f;
+    // Phase 93: the grid density follows the shared GalleryView (cell_size_for),
+    // so S/M/L/XL/XXL resolve like the gallery grid's tiles.
+    const float TILE = cell_size_for(grid_view_);
     constexpr float TGAP = 12.0f;
     const float top   = TOP + LINE;
     const auto  H     = static_cast<float>(win_.height());

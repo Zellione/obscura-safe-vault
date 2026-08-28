@@ -89,12 +89,14 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   (`AdvancedSearchState`), `.dual` (`DualSessionState`, Phase 78 split view), and `.gallery`
   (`GallerySessionState`). All three reset at the same points: LockActive, idle auto-lock,
   and promote_pending (vault switch).
-- `sessions_.gallery`: last GalleryGrid view density (List/GridS/GridM/GridL/GridXL) +
-  ImageViewer strip side + a single "last video watched" resume bookmark, carried across
-  App's screen reconstruction on every nav transition. `capture_session_state()`
+- `sessions_.gallery`: ImageViewer strip side + a single "last video watched" resume bookmark,
+  carried across App's screen reconstruction on every nav transition. **Phase 93:** the view
+  density is NOT here — it is the shared machine-wide `ui::gallery_view_setting` (gallery_view.conf),
+  so `capture_session_state()` no longer reads it off the grid. `capture_session_state()`
   (dynamic_cast onto the active Screen) snapshots it right before `on_exit()`;
   `to_gallery`/`to_viewer`/`to_favorite_viewer`/`to_tag_viewer` feed
-  `sessions_.gallery.view`/`strip_side` back in as the new screen's initial ctor arg.
+  `sessions_.gallery`'s strip_side/bookmark fields back in as the new screen's initial ctor arg;
+  `GalleryGrid` reads `gallery_view_setting()` at construction.
   `enter_viewer()` is the shared tail of every ImageViewer construction: `on_enter()` then
   `ui::apply_video_resume()`.
 - App also owns `HelpPopupState` (intercepts F1 globally, renders the overlay on top).
@@ -122,11 +124,14 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   case — two copies would drift and a stale `vault_unlocked` is exactly the bug that survives
   review. `active_` is a nullable `unique_ptr<Vault>`, so every settings path guards it.
   **Phase 84:** `open_settings_overlay` also seeds `settings_.gallery_view` from
-  `sessions_.gallery.view`; the Appearance section has TWO rows (theme, Default Gallery View —
+  `ui::gallery_view_setting()` (Phase 93: the process-global, not a session field); the
+  Appearance section has TWO rows (theme, Default Gallery View —
   `settings_change_value` routes by `state.row` through `change_appearance_value`). After the
   overlay handles an event, `OverlayDispatch::settings` syncs `settings_.gallery_view` back
-  into the session AND pushes it into a live grid via the `ui::set_gallery_view` free friend
-  (dynamic_cast; sets `view_` + ScrollFollow::Ensure) — placed inside the handled branch, so
+  into the process-global via `ui::set_gallery_view_setting` AND pushes it into a live grid via
+  the `ui::set_gallery_view` free friend
+  (dynamic_cast; sets `view_` + ScrollFollow::Ensure + re-syncs the setting) — placed inside
+  the handled branch, so
   the VaultOps migration-trigger "deliberately not handled" contract is untouched. The
   overlay's LEFT/RIGHT value branches share ONE `apply_value_delta(state, delta, commit_out)`
   helper (Sonar S3776/S134; row 0 theme + ThemePref save, row 1 GalleryViewPref save, Security

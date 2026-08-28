@@ -27,12 +27,10 @@ DualGalleryScreen::DualGalleryScreen(GalleryGrid::GridInitContext ctx, GalleryGr
     : win_(ctx.win), font_(ctx.font), vault_(ctx.vault), dual_(dual), queue_(queue)
 {
     // Build both grids; don't call on_enter() yet
-    left_ = std::make_unique<GalleryGrid>(
-        ctx, dialogs, vault_ctx, session, queue,
-        GridLocation{dual.pane[0].path, dual.pane[0].selected, dual.pane[0].view});
-    right_ = std::make_unique<GalleryGrid>(
-        ctx, dialogs, vault_ctx, session, queue,
-        GridLocation{dual.pane[1].path, dual.pane[1].selected, dual.pane[1].view});
+    left_ = std::make_unique<GalleryGrid>(ctx, dialogs, vault_ctx, session, queue,
+                                          GridLocation{dual.pane[0].path, dual.pane[0].selected});
+    right_ = std::make_unique<GalleryGrid>(ctx, dialogs, vault_ctx, session, queue,
+                                           GridLocation{dual.pane[1].path, dual.pane[1].selected});
 
     // Mark both as embedded (pane mode)
     left_->set_embedded(true);

@@ -23,8 +23,9 @@ namespace ui {
 
 // SearchResultView encapsulates the result-grid display and navigation logic,
 // extracted from AdvancedSearchScreen (Phase 20) to manage the thumbnail grid view
-// (Ctrl+L toggle List <-> Grid), result-item navigation (Up/Down/Left/Right), and
-// off-thread thumbnail decoding.
+// (Phase 93: the shared GalleryView List/S/M/L/XL/XXL cycle — `L` on Results
+// focus), result-item navigation (Up/Down/Left/Right), and off-thread thumbnail
+// decoding.
 //
 // The view takes references to its dependencies (vault, window, font, cache) and
 // owns the results list, the current selection cursor, and grid-specific state
@@ -57,14 +58,20 @@ public:
     // (to be wired up by AdvancedSearchScreen).
     void activate_focused();
 
-    // Session-state accessors: cursor position and view mode (List/Grid).
+    // Session-state accessors: cursor position and view mode (List/grid density).
     // AdvancedSearchScreen uses these in on_enter/on_exit to restore/persist
     // the view state across screen visits.
     [[nodiscard]] int get_cursor() const { return cur_result_; }
     void set_cursor(int cursor) { cur_result_ = cursor; }
 
-    [[nodiscard]] ResultView get_view() const { return grid_view_; }
-    void set_view(ResultView view) { grid_view_ = view; }
+    [[nodiscard]] GalleryView get_view() const
+    {
+        return grid_view_;
+    }
+    void set_view(GalleryView view)
+    {
+        grid_view_ = view;
+    }
 
     // Accessor to check the last-rendered column count (drives Up/Down stride in
     // Grid mode). Written by render(), read by handle_key().
@@ -98,7 +105,7 @@ private:
 
     std::vector<vault::SearchHit> results_;  // results list (updated via update_results)
     int cur_result_ = 0;      // selected result index
-    ResultView grid_view_ = ResultView::List;  // List or Grid toggle (Ctrl+L)
+    GalleryView grid_view_ = GalleryView::List;  // L-key cycle: List <-> grid densities
     int grid_cols_ = 1;      // last-rendered column count (drives Up/Down stride)
 
     SelectionModel sel_;     // Phase 68 multiselect (Space / Ctrl+A)

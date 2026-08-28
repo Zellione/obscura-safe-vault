@@ -10,10 +10,13 @@
 #include "gfx/text.h"
 #include "gfx/theme.h"
 #include "gfx/window.h"
+#include "platform/gallery_view_pref.h"
 #include "platform/vault_registry.h"
 #include "ui/detail_model.h"
 #include "ui/detail_panel.h"
 #include "ui/favorite_batch.h"
+#include "ui/gallery_view.h"
+#include "ui/gallery_view_setting.h"
 #include "ui/grid_layout.h"
 #include "ui/input.h"
 #include "ui/parent_group.h"
@@ -27,15 +30,14 @@ namespace ui {
 namespace {
 constexpr float OX = 40;
 constexpr float OY = 160;
-constexpr float CELL = 188;
 constexpr float GAP = 16;
 
-GridSpec grid_spec(float win_w, int cols) noexcept
+GridSpec grid_spec(float win_w, int cols, float cell) noexcept
 {
-    const float used = static_cast<float>(cols) * CELL +
-                       static_cast<float>(cols > 0 ? cols - 1 : 0) * GAP;
+    const float used =
+        static_cast<float>(cols) * cell + static_cast<float>(cols > 0 ? cols - 1 : 0) * GAP;
     const float ox = std::max(OX, (win_w - used) * 0.5f);
-    return {cols, CELL, GAP, ox, OY};
+    return {cols, cell, GAP, ox, OY};
 }
 }
 
@@ -57,7 +59,8 @@ void FavoritesScreen::reload()
     nav_.select(0);
     sel_.clear();   // selection indices are only valid against the old listing
     const auto rw = static_cast<float>(win_.width());
-    cols_ = grid_columns(rw - detail_panel_width(detail_.panel.open, rw) - 2 * OX, CELL, GAP);
+    const float cell = grid_cell_size(view_);
+    cols_ = grid_columns(rw - detail_panel_width(detail_.panel.open, rw) - 2 * OX, cell, GAP);
     detail_.key.clear();  // SearchHit::node pointers are now invalid
 }
 
@@ -94,6 +97,11 @@ void FavoritesScreen::rebuild_detail()
 
 void FavoritesScreen::on_enter()
 {
+    // Phase 93: adopt the shared machine-wide density (the gallery grid, the
+    // F2 "Default Gallery View" row, and the search results all use the same
+    // value); List is rendered as GridM on these grid-only screens.
+    view_ =
+        gallery_view_setting() == GalleryView::List ? GalleryView::GridM : gallery_view_setting();
     reload();
     scroll_ = 0.0f;  // reset scroll when entering
 }
@@ -126,13 +134,14 @@ void FavoritesScreen::update(double)
     const auto W = static_cast<float>(win_.width());
     const auto H = static_cast<float>(win_.height());
     const auto cW = W - detail_panel_width(detail_.panel.open, W);
+    const float cell = grid_cell_size(view_);
     // Content height = number of rows * (cell_height + gap) - gap + top offset
-    const int cols = grid_columns(cW - 2 * OX, CELL, GAP);
+    const int cols = grid_columns(cW - 2 * OX, cell, GAP);
     const int total_rows = (static_cast<int>(favs_.size()) + cols - 1) / cols;
-    const float content_height = OY + static_cast<float>(total_rows) * (CELL + GAP);
+    const float content_height = OY + static_cast<float>(total_rows) * (cell + GAP);
     if (follow_scroll_ && sel_idx >= 0 && sel_idx < static_cast<int>(favs_.size())) {
-        const SDL_FRect cellr = grid_cell_rect(sel_idx, grid_spec(cW, cols_));
-        scroll_ = ui::ensure_visible(scroll_, cellr.y, cellr.y + CELL, OY, H);
+        const SDL_FRect cellr = grid_cell_rect(sel_idx, grid_spec(cW, cols_, cell));
+        scroll_ = ui::ensure_visible(scroll_, cellr.y, cellr.y + cell, OY, H);
     }
     follow_scroll_ = false;
     scroll_ = ui::clamp_scroll(scroll_, content_height, H);
@@ -271,47 +280,94 @@ void FavoritesScreen::start_delete_selection()
     mark_dirty();
 }
 
+// Phase 68/93: the single-letter / modifier shortcuts that act on the selection
+// (Space/Ctrl+A/B/X/M/Del), plus Shift+I (import status) and the L-key density
+// cycle. Free friend for the same cpp:S3776 reason as gallery_grid's shortcut
+// handler — keeps handle_key_down's cognitive complexity under the Sonar cap.
+bool favorites_handle_shortcut_keys(FavoritesScreen& s, const SDL_KeyboardEvent& key)
+{
+    // Phase 50: Shift+I opens import status
+    if ((key.key == SDLK_I) && (key.mod & SDL_KMOD_SHIFT)) {
+        s.request(NavKind::ToImportStatus);
+        return true;
+    }
+    // Phase 93: L cycles the tile density (S/M/L/XL/XXL) and live-saves the
+    // shared machine-wide setting, exactly like the gallery grid.
+    if (key.key == SDLK_L && (key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT)) == 0) {
+        s.view_ = next_grid_density(s.view_);
+        set_gallery_view_setting(s.view_);
+        (void)platform::GalleryViewPref::default_location().save(s.view_);
+        s.status_ = std::format("View: {}", gallery_view_label(s.view_));
+        s.follow_scroll_ = true;
+        return true;
+    }
+    // Phase 68 multiselect: Space toggles (Enter still opens), Ctrl+A
+    // selects all / clears, B/X/M act on the selection — grid parity.
+    if (key.key == SDLK_SPACE) {
+        if (s.favs_.empty()) {
+            return true;
+        }
+        // Phase 86: Shift+Space fills the span from the range anchor to the
+        // focused tile; plain Space toggles.
+        if (key.mod & SDL_KMOD_SHIFT) {
+            if (const auto r = s.sel_.range_for(s.nav_.selected())) {
+                s.sel_.select_range(std::clamp(r->first, 0, static_cast<int>(s.favs_.size()) - 1),
+                                    std::clamp(r->second, 0, static_cast<int>(s.favs_.size()) - 1));
+            }
+            return true;
+        }
+        s.sel_.toggle(s.nav_.selected());
+        return true;
+    }
+    if (key.key == SDLK_A && (key.mod & SDL_KMOD_CTRL)) {
+        s.toggle_select_all();
+        return true;
+    }
+    if (key.key == SDLK_B) {
+        s.toggle_favorite_batch();
+        return true;
+    }
+    if (key.key == SDLK_X) {
+        s.start_export();
+        return true;
+    }
+    if (key.key == SDLK_M && !(key.mod & SDL_KMOD_SHIFT)) {
+        s.start_transfer();
+        return true;
+    }
+    if (key.key == SDLK_DELETE) {
+        s.start_delete_selection();
+        return true;
+    }
+    return false;
+}
+
 void FavoritesScreen::handle_key_down(const SDL_KeyboardEvent& key)
 {
     using enum InputAction;
-    // Phase 50: Shift+I opens import status
-    if ((key.key == SDLK_I) && (key.mod & SDL_KMOD_SHIFT)) {
-        request(NavKind::ToImportStatus);
+    if (is_quick_switch_key(key)) {
+        quick_switch_.open();
+        return;
+    }  // switch vault (`)
+    if (key.key == SDLK_R) {
+        start_rename();
         return;
     }
-    if (is_quick_switch_key(key)) { quick_switch_.open(); return; }   // switch vault (`)
-    if (key.key == SDLK_R) { start_rename(); return; }
-    if (handle_detail_panel_scroll(key, detail_.panel)) { return; }
+    if (handle_detail_panel_scroll(key, detail_.panel)) {
+        return;
+    }
     if (key.key == SDLK_D && (key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT)) == 0) {
         detail_.panel.open = !detail_.panel.open;
         detail_.key.clear();
         return;
     }
-    if (handle_extra_key(key)) { return; }   // subclass consumed it (e.g. tag-view toggle)
-    // Phase 68 multiselect: Space toggles (Enter still opens), Ctrl+A
-    // selects all / clears, B/X/M act on the selection — grid parity.
-    if (key.key == SDLK_SPACE) {
-        if (favs_.empty()) { return; }
-        // Phase 86: Shift+Space fills the span from the range anchor to the
-        // focused tile; plain Space toggles.
-        if (key.mod & SDL_KMOD_SHIFT) {
-            if (const auto r = sel_.range_for(nav_.selected())) {
-                sel_.select_range(std::clamp(r->first, 0, static_cast<int>(favs_.size()) - 1),
-                                  std::clamp(r->second, 0, static_cast<int>(favs_.size()) - 1));
-            }
-            return;
-        }
-        sel_.toggle(nav_.selected());
+    if (handle_extra_key(key)) {
+        return;
+    }  // subclass consumed it (e.g. tag-view toggle)
+    // Phase 68/93: selection shortcuts + the L density cycle (free friend, S3776).
+    if (favorites_handle_shortcut_keys(*this, key)) {
         return;
     }
-    if (key.key == SDLK_A && (key.mod & SDL_KMOD_CTRL)) {
-        toggle_select_all();
-        return;
-    }
-    if (key.key == SDLK_B) { toggle_favorite_batch(); return; }
-    if (key.key == SDLK_X) { start_export(); return; }
-    if (key.key == SDLK_M && !(key.mod & SDL_KMOD_SHIFT)) { start_transfer(); return; }
-    if (key.key == SDLK_DELETE) { start_delete_selection(); return; }
     switch (map_key(key.key, key.mod)) {
         case NavLeft:  nav_.move(-1);     follow_scroll_ = true; break;
         case NavRight: nav_.move(1);      follow_scroll_ = true; break;
@@ -350,7 +406,7 @@ void FavoritesScreen::handle_event(const SDL_Event& e)
                 break;
             }
             // Scroll without moving selection.
-            const float scroll_step = (CELL + GAP) * 0.5f;
+            const float scroll_step = (grid_cell_size(view_) + GAP) * 0.5f;
             scroll_ -= e.wheel.y * scroll_step;
             break;
         }
@@ -365,7 +421,7 @@ int FavoritesScreen::hit_test(float mx, float my) const
     const auto W = static_cast<float>(win_.width());
     const auto cW = W - detail_panel_width(detail_.panel.open, W);
     return grid_hit(mx, my_doc, static_cast<int>(favs_.size()),
-                    grid_spec(cW, cols_));
+                    grid_spec(cW, cols_, grid_cell_size(view_)));
 }
 
 void FavoritesScreen::render(gfx::Renderer& r)
@@ -398,9 +454,10 @@ void FavoritesScreen::render(gfx::Renderer& r)
     if (favs_.empty())
         r.draw_text(font_, OX, OY, empty_hint(), TEXT_DIM);
 
-    cols_ = grid_columns(cW - 2 * OX, CELL, GAP);
-    const auto [first_idx, last_idx] = grid_visible_range(
-        scroll_, CELL, GAP, OY, H, cols_, static_cast<int>(favs_.size()));
+    const float cell = grid_cell_size(view_);
+    cols_ = grid_columns(cW - 2 * OX, cell, GAP);
+    const auto [first_idx, last_idx] =
+        grid_visible_range(scroll_, cell, GAP, OY, H, cols_, static_cast<int>(favs_.size()));
     // Clip scrolled tiles to below the fixed header: without this a tile scrolled
     // up past OY paints straight over the title / [F1] Help / status lines.
     const SDL_Rect content_clip{0, static_cast<int>(OY), static_cast<int>(W),
@@ -408,7 +465,7 @@ void FavoritesScreen::render(gfx::Renderer& r)
     SDL_SetRenderClipRect(r.sdl(), &content_clip);
     for (int i = first_idx; i <= last_idx; ++i) {
         if (i < 0 || i >= static_cast<int>(favs_.size())) continue;
-        SDL_FRect cellr = grid_cell_rect(i, grid_spec(cW, cols_));
+        SDL_FRect cellr = grid_cell_rect(i, grid_spec(cW, cols_, cell));
         // Apply scroll offset to cell Y position.
         cellr.y -= scroll_;
         const bool sel = (i == nav_.selected());
@@ -417,9 +474,9 @@ void FavoritesScreen::render(gfx::Renderer& r)
         r.draw_round_rect(cellr, RADIUS, sel ? ACCENT : BORDER, /*filled*/ false);
 
         const float ph      = font_.pixel_height();
-        const float label_y = cellr.y + CELL - ph - 12.0f;
+        const float label_y = cellr.y + cell - ph - 12.0f;
         draw_tile_content(r, favs_[i],
-                          {cellr.x + 6, cellr.y + 6, CELL - 12, label_y - cellr.y - 12.0f});
+                          {cellr.x + 6, cellr.y + 6, cell - 12, label_y - cellr.y - 12.0f});
 
         // Multi-select badge, top-left (Phase 68) — same accent square as the grid.
         if (sel_.contains(i)) {
@@ -428,14 +485,14 @@ void FavoritesScreen::render(gfx::Renderer& r)
             r.draw_round_rect(sbadge, RADIUS_SMALL, BG, /*filled*/ false);
         }
 
-        const std::string label = elide_middle(
-            favs_[i].name, static_cast<int>(CELL - 16),
-            [this](std::string_view s) { return font_.measure(s); });
+        const std::string label =
+            elide_middle(favs_[i].name, static_cast<int>(cell - 16),
+                         [this](std::string_view s) { return font_.measure(s); });
         r.draw_text(font_, cellr.x + 8, label_y, label, TEXT);
 
         // Gold favorite badge, top-right (favorites screens only — tag views opt out).
         if (show_favorite_badge()) {
-            const SDL_FRect badge{cellr.x + CELL - 8 - 18, cellr.y + 8, 18, 18};
+            const SDL_FRect badge{cellr.x + cell - 8 - 18, cellr.y + 8, 18, 18};
             r.draw_round_rect(badge, RADIUS_SMALL, FAVORITE);
             r.draw_round_rect(badge, RADIUS_SMALL, BG, /*filled*/ false);
         }
@@ -463,10 +520,20 @@ void FavoritesScreen::render(gfx::Renderer& r)
 std::vector<ui::HelpGroup> FavoritesScreen::help_groups() const
 {
     std::vector<ui::HelpEntry> nav{
-        {"Enter", "Open"}, {"Space", "Select"}, {"Shift+Space", "Select range"}, {"Ctrl+A", "Select all"},
-        {"B", "Favorite (acts on selection)"}, {"X", "Export selection"},
-        {"M", "Move/copy selection"}, {"Del", "Delete selection"}, {"R", "Rename"}, {"D", "Toggle the detail panel"},
-        {"Shift+I", "Import status"}, {"`", "Switch vault"}, {"Esc", "Back"},
+        {"Enter", "Open"},
+        {"Space", "Select"},
+        {"Shift+Space", "Select range"},
+        {"Ctrl+A", "Select all"},
+        {"L", "Cycle grid size"},
+        {"B", "Favorite (acts on selection)"},
+        {"X", "Export selection"},
+        {"M", "Move/copy selection"},
+        {"Del", "Delete selection"},
+        {"R", "Rename"},
+        {"D", "Toggle the detail panel"},
+        {"Shift+I", "Import status"},
+        {"`", "Switch vault"},
+        {"Esc", "Back"},
     };
     for (const auto& e : extra_help_entries()) nav.push_back(e);
     return {{"Navigate", nav}};

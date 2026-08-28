@@ -7,6 +7,7 @@
 #include "ui/collection_ops.h"
 #include "ui/detail_model.h"
 #include "ui/detail_panel.h"
+#include "ui/gallery_view.h"
 #include "ui/nav_model.h"
 #include "ui/quick_switch.h"
 #include "ui/rename_dialog.h"
@@ -122,6 +123,10 @@ private:
     NavModel        nav_;   // selection only (no path stack used here)
     std::vector<vault::SearchHit> favs_;
     int             cols_ = 1;
+    // Phase 93: shared grid density (S/M/L/XL/XXL) for the tile grid. Seeded
+    // from ui::gallery_view_setting() on entry; `L` cycles via
+    // next_grid_density and writes the result back to the shared setting.
+    GalleryView view_ = GalleryView::GridM;
     float           scroll_ = 0.0f;  // vertical scroll offset (pixels scrolled down)
     // One-shot scroll-follow request, applied then cleared by update(): set when
     // key navigation moves the selection. The mouse wheel scrolls WITHOUT moving
@@ -149,6 +154,10 @@ private:
     SelectionModel     sel_;
 
     friend bool current_detail_open(const FavoritesScreen& s);
+    // Phase 68/93 single-letter selection shortcuts (Shift+I, L, Space, Ctrl+A,
+    // B, X, M, Del). A free friend for the same cpp:S3776 reason as
+    // gallery_grid_handle_shortcut_keys — keeps handle_key_down under the cap.
+    friend bool favorites_handle_shortcut_keys(FavoritesScreen& s, const SDL_KeyboardEvent& key);
 };
 
 // App reads this to carry the panel's open state across screen transitions.

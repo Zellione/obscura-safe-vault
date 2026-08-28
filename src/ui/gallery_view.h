@@ -4,20 +4,33 @@
 
 namespace ui {
 
-// GalleryGrid's presentation mode: a flat metadata list, or one of four tiled
-// grid densities. Session-scoped (Phase 39 Part 2 — GallerySessionState
-// carries the last-used value across a grid<->viewer round trip); defaults
-// to GridM, whose tile size matches the pre-Phase-40-Part-3 fixed grid
-// exactly, so existing sessions render identically until a user opts into a
-// different density.
-enum class GalleryView { List, GridS, GridM, GridL, GridXL };
+// A presentation mode shared by the gallery grid AND the collection grids
+// (favorites/tag screens, advanced-search results, Phase 93): a flat metadata
+// list, or one of five tiled grid densities. Machine-scoped (Phase 84 +
+// Phase 93 — the value lives in `gallery_view.conf` via GalleryViewPref and
+// the ui::gallery_view_setting process-global, and every surface shares it);
+// defaults to GridM, whose tile size matches the pre-Phase-40-Part-3 fixed
+// grid exactly, so existing sessions render identically until a user opts into
+// a different density.
+enum class GalleryView { List, GridS, GridM, GridL, GridXL, GridXXL };
 
-// Tile side (px) for a grid density; meaningless for List. GridM is 256
-// (Phase 75 bump; was 188).
+// Tile side (px) for a grid density; meaningless for List. GridM is 288
+// (Phase 93 bump from 256, which was the Phase 75 bump from 188).
 [[nodiscard]] float cell_size_for(GalleryView view) noexcept;
 
-// L-key cycle order: List -> GridS -> GridM -> GridL -> GridXL -> List.
+// L-key cycle order: List -> GridS -> GridM -> GridL -> GridXL -> GridXXL -> List.
 [[nodiscard]] GalleryView next_gallery_view(GalleryView view) noexcept;
+
+// Grid-density-only cycle for surfaces that have no List mode (favorites and
+// the tag screens): GridS -> GridM -> GridL -> GridXL -> GridXXL -> GridS.
+// An input of List is treated as GridS, so pressing L right after a surface
+// read `List` from the shared setting lands on GridS rather than looping.
+[[nodiscard]] GalleryView next_grid_density(GalleryView view) noexcept;
+
+// The tile size a grid-only surface should render: `cell_size_for(view)`, but
+// with `List` falling back to GridM (a grid-only surface cannot show a list,
+// so it shows the middle density when the shared setting is List).
+[[nodiscard]] float grid_cell_size(GalleryView view) noexcept;
 
 // UI display label for a gallery view ("List", "Grid S", etc.), used in
 // footer/settings rows.

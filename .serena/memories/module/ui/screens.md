@@ -16,12 +16,13 @@ Core UI screens: unlock, gallery browsing, image favorites, tag management, vaul
   KdfParams).
 - `gallery_grid.*` — GalleryGrid: Grid + detailed List views (key `L`), live width reflow,
   centred/elided labels. `Shift+S` cycles a gallery's persisted sort_key; breadcrumb shows
-  "Sort: <label>" once non-Manual. Ctor takes `initial_view` (default Grid) + a
+  "Sort: <label>" once non-Manual. Ctor takes a
   `GallerySessionState& session_` member (written DURING the instance's lifetime, since a grid
   descends through sub-galleries without being destroyed): `open_selected()`/`go_up()` call
   `session_.record(nav_.path(),index)` just before `nav_.enter()`/`nav_.up()`, then
   `nav_.select(session_.recall(new path))` just after `refresh()`. Free friend
-  `current_gallery_view(const GalleryGrid&)` lets App read view_ on exit. `App::to_gallery`
+  `current_gallery_view(const GalleryGrid&)` reads view_ (Phase 93: App no longer uses it on
+  exit — the view is the shared `ui::gallery_view_setting`). `App::to_gallery`
   seeds a freshly constructed grid via `session_.recall(path)` unless `explicit_index` (App
   sets that only when the outgoing screen was an ImageViewer — the one nav.index that is a
   real freshly-known position); every other ToGallery source passes 0 ("no opinion").
@@ -60,7 +61,11 @@ Core UI screens: unlock, gallery browsing, image favorites, tag management, vaul
 - `favorites_screen.*` render clips scrolled tiles to below OY (the fixed header) and draws a
   BORDER hairline there — without the clip a scrolled tile paints over the title/[F1]/status.
   Covers all four subclasses. `tag_overview.*` paginates (rows never scroll partially), so it
-  needs no clip.
+  needs no clip. **Phase 93:** the fixed `CELL = 188` tile is replaced by the shared density —
+  `view_` (seeded from `ui::gallery_view_setting` on_enter, List→GridM) drives every layout/
+  scroll/hit-test/elide/badge site via `grid_cell_size`; `L` cycles `next_grid_density`
+  (S/M/L/XL/XXL only) and live-saves the shared setting + pref with a "View: <label>" status.
+  F1 gains `L — Cycle grid size`.
 - `favorites_images.*` — flat grid of favorited images across the vault; opens a
   favorites-scoped viewer (ToFavoriteViewer: prev/next iterate the favorites set, Esc returns
   to the grid). `favorites_screen.*` is the shared base (grid/selection/badge) with
@@ -88,9 +93,12 @@ Core UI screens: unlock, gallery browsing, image favorites, tag management, vaul
 - `advanced_search_screen.*` — `Shift+/` (`NavKind::ToAdvancedSearch`) dedicated screen:
   keyboard query builder (Tab cycles fields, autocomplete dropdown) + live result list +
   saved-searches sidebar (Ctrl+S save, Enter load/open, Del delete). Image result -> gallery
-  viewer; gallery result -> ToGallery. Coexists with the `/` overlay. Ctrl+L toggles the
-  result panel List <-> thumbnail Grid; owns its own `DecodeWorker` (update() pumps it);
-  `render_result_grid` free friend reuses the shared tile_thumb draw. Query/params/cursor/view
+  viewer; gallery result -> ToGallery. Coexists with the `/` overlay. **Phase 93:** `L` on
+  Results focus cycles the shared `GalleryView` (List → S/M/L/XL/XXL) live-saved like the
+  gallery grid — the Phase 20 `Ctrl+L` List↔Grid toggle is superseded and the view is no longer
+  stored in `AdvancedSearchState` (it is `ui::gallery_view_setting`); result grid tiles size
+  via `cell_size_for`. Owns its own `DecodeWorker` (update() pumps it);
+  `render_result_grid` free friend reuses the shared tile_thumb draw. Query/params/cursor
   persist across visits via session-scoped `ui::AdvancedSearchState` App owns + resets on vault
   change; restored on_enter / saved on_exit (results re-derived, node ptrs not persisted).
   Ctrl+R clears the query behind a Y/N modal. Phase 48: detail panel + `Ctrl+D` toggle (bare
