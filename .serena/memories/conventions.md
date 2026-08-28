@@ -107,3 +107,28 @@
 
 ## Security invariants
 See `mem:core` — six hard invariants, never relax them.
+
+## Index-tree strings are `crypto::SecureString` (Phase 91)
+Every human-readable string in the index tree (`IndexNode::name`/`tags`,
+`SavedSearch::name`, category / description / field-value fields) is a
+`crypto::SecureString` — mlock'd best-effort + `crypto_wipe`'d on destroy, no
+SSO, no implicit conversion to `std::string_view` or plain `std::string`.
+- `assign(view)` is fallible, self-view safe, and preserves the old value on
+  OOM. Constructors/copy/assignment terminate on allocation failure instead of
+  silently producing empty metadata that could be committed.
+- Opaque metadata bytes that contain human-readable content use
+  `crypto::SecureBlob`; transient serialized plaintext uses
+  `crypto::WipingBytes` so vector growth and destruction wipe every allocation.
+- **Read** via explicit `.view()` (or the provided `==`/`<=>` vs
+  `std::string_view`, which keeps `node.name == "literal"` compiling).
+- **Build a `std::string` path concatenation** explicitly:
+  `std::string(a.view()) + "/" + std::string(b.view())`.
+- **Do NOT** assign a `SecureString` into a `std::string` binding
+  (`const std::string& name = node->name` no longer compiles) — use
+  `const auto& name` and `name.view()`.
+- **Hand a secure tag list to a `span<const std::string>`** helper via a
+  transient `tag_strings(...)` conversion (the wipe guarantee lives in the
+  stored copy, not the ephemeral view).
+- `std::ranges::find/count` over a `std::vector<crypto::SecureString>` does NOT
+  work against a `const char*`/`std::string` needle (no common reference) — use
+  `any_of`/`count_if` with `t == needle`.

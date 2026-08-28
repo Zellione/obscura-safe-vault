@@ -90,7 +90,7 @@ ExportSummary export_images(const vault::Vault&                      vault,
             // The vault's index is untrusted input: defang the name, then verify
             // the path it produced really is inside dest_dir before writing.
             const fs::path out =
-                unique_export_path(dest_dir, vault::sanitize_node_name(node->name), exists);
+                unique_export_path(dest_dir, vault::sanitize_node_name(node->name.view()), exists);
             if (!export_path_within(dest_dir, out)) {
                 platform::safe_println(stderr,
                              "[Export] refusing to write outside the chosen folder: {}",

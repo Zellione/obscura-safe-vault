@@ -28,6 +28,17 @@ namespace ui {
 
 namespace {
 constexpr float MODAL_W = 500.0f;
+
+// Phase 91: a node's secure tag list as transient plain strings for the tag
+// editor's working set (the wipe guarantee lives in the stored copy).
+std::vector<std::string> tag_strings(const std::vector<crypto::SecureString>& tags)
+{
+    std::vector<std::string> out;
+    out.reserve(tags.size());
+    for (const auto& t : tags)
+        out.emplace_back(t.view());
+    return out;
+}
 constexpr float MODAL_H = 450.0f;
 constexpr float PAD = 16.0f;
 constexpr float INPUT_BOX_H = 40.0f;
@@ -128,8 +139,11 @@ void TagEditor::add_chosen_tag()
     // Open the template fields form if applicable (Phase 73)
     if (!sheet_category.empty()) {
         const auto tmpl = vault::category_template(s, sheet_category);
-        fields_form_.open(chosen, sheet_category,
-                          std::vector<std::string>(tmpl.begin(), tmpl.end()),
+        std::vector<std::string> fields;
+        fields.reserve(tmpl.size());
+        for (const auto& f : tmpl)
+            fields.emplace_back(f.view());
+        fields_form_.open(chosen, sheet_category, std::move(fields),
                           /*with_description=*/false);
     }
 }
@@ -184,7 +198,7 @@ void TagEditor::load_per_node_tags()
         const auto& children = vault_.list(parent_path);
         for (const auto* child : children) {
             if (child->name == segs.back()) {
-                per_node_tags.push_back(child->tags);
+                per_node_tags.push_back(tag_strings(child->tags));
                 ++resolved;
                 break;
             }

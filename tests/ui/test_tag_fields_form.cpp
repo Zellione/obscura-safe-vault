@@ -8,8 +8,11 @@
 TEST(templated_new_tag_category_detection)
 {
     vault::VaultSettings s;
-    s.categories = {{.name = "artist", .swatch = 0, .fields = {"country"}},
-                    {.name = "parody", .swatch = 1, .fields = {}}};   // no template
+    s.categories = {
+        {.name = crypto::SecureString("artist"),
+         .swatch = 0,
+         .fields = {crypto::SecureString("country")}},
+        {.name = crypto::SecureString("parody"), .swatch = 1, .fields = {}}};  // no template
     const std::vector<std::string> vocab = {"artist:known", "plain"};
 
     // New tag of a templated category → that category's name.

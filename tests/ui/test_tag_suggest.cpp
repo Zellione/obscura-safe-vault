@@ -64,8 +64,12 @@ TEST(tag_suggest_dedupes_ci_keeping_first_casing)
 TEST(field_value_suggestions_scoped_and_ranked)
 {
     vault::VaultSettings s;
-    s.categories = {{.name = "artist", .swatch = 0, .fields = {"country"}},
-                    {.name = "studio", .swatch = 1, .fields = {"country"}}};
+    s.categories = {{.name = crypto::SecureString("artist"),
+                     .swatch = 0,
+                     .fields = {crypto::SecureString("country")}},
+                    {.name = crypto::SecureString("studio"),
+                     .swatch = 1,
+                     .fields = {crypto::SecureString("country")}}};
     vault::set_tag_field_value(s, "artist:bob", "country", "Japan");
     vault::set_tag_field_value(s, "artist:ann", "country", "France");
     vault::set_tag_field_value(s, "artist:cat", "country", "japan");     // ci dupe

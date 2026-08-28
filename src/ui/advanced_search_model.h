@@ -18,6 +18,8 @@
 #include <string_view>
 #include <vector>
 
+#include "crypto/secure_mem.h"
+
 namespace ui {
 
 // How a group's tags combine, and how the groups combine at the top level.
@@ -70,7 +72,7 @@ struct EvalResult {
 
 // Serialise the query into a self-describing versioned blob (used as the opaque
 // payload of a saved search). Always non-empty.
-[[nodiscard]] std::vector<uint8_t> serialize_query(const AdvancedQuery& query);
+[[nodiscard]] crypto::WipingBytes serialize_query(const AdvancedQuery& query);
 
 // Parse a blob produced by serialize_query. Returns false (leaving `out` in an
 // unspecified-but-valid state) on any malformed/truncated/over-large input.

@@ -85,7 +85,8 @@ void collect(const vault::Vault& v, const std::string& path, std::vector<Item>& 
              bool thumbs_stale)
 {
     for (const vault::IndexNode* n : v.list(path)) {
-        const std::string child = path.empty() ? n->name : path + "/" + n->name;
+        const std::string child =
+            path.empty() ? std::string(n->name.view()) : path + "/" + std::string(n->name.view());
         if (n->is_gallery()) { collect(v, child, out, thumbs_stale); continue; }
 
         if (n->is_video()) {

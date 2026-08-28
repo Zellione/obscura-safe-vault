@@ -18,6 +18,8 @@
 #include <string_view>
 #include <vector>
 
+#include "crypto/secure_string.h"
+
 namespace vault {
 
 // On-disk image format tag. Values 0-8 match the spec; Unknown is used in Phase 2
@@ -164,11 +166,12 @@ enum class SortKey : uint8_t {
 struct IndexNode {
     enum class Type : uint8_t { Gallery = 0, Image = 1, Video = 2 };
 
-    Type                       type = Type::Gallery;
-    std::string                name;
-    std::vector<std::string>   tags;  // per-node tags (Phase 12)
-    bool                       favorite = false;  // bookmark flag (Phase 13)
-    SortKey                    sort_key = SortKey::Default;  // children order (Phase 37); meaningful only when is_gallery()
+    Type type = Type::Gallery;
+    crypto::SecureString name;               // Phase 91: mlock'd + wiped
+    std::vector<crypto::SecureString> tags;  // per-node tags (Phase 12; secure since 91)
+    bool favorite = false;                   // bookmark flag (Phase 13)
+    SortKey sort_key =
+        SortKey::Default;  // children order (Phase 37); meaningful only when is_gallery()
 
     // Gallery payload (meaningful when type == Gallery).
     std::vector<IndexNode> children;
@@ -184,27 +187,27 @@ struct IndexNode {
     [[nodiscard]] bool is_video()   const noexcept { return type == Type::Video; }
     [[nodiscard]] bool is_media()   const noexcept { return is_image() || is_video(); }
 
-    static IndexNode gallery(std::string name)
+    static IndexNode gallery(std::string_view name)
     {
         IndexNode n;
         n.type = Type::Gallery;
-        n.name = std::move(name);
+        n.name = name;
         return n;
     }
 
-    static IndexNode image(std::string name)
+    static IndexNode image(std::string_view name)
     {
         IndexNode n;
         n.type = Type::Image;
-        n.name = std::move(name);
+        n.name = name;
         return n;
     }
 
-    static IndexNode video(std::string name)
+    static IndexNode video(std::string_view name)
     {
         IndexNode n;
         n.type = Type::Video;
-        n.name = std::move(name);
+        n.name = name;
         return n;
     }
 };
@@ -214,8 +217,8 @@ struct IndexNode {
 // ui::AdvancedQuery blob (see src/ui/advanced_search_model.h); the index treats
 // it as bytes so the vault layer stays decoupled from the UI query model.
 struct SavedSearch {
-    std::string          name;
-    std::vector<uint8_t> query;
+    crypto::SecureString name;   // Phase 91: mlock'd + wiped
+    crypto::SecureBlob query;    // contains human-readable clauses; secure since Phase 91
 };
 
 // One tag-category → colour-swatch mapping (Phase 49). `name` is the tag prefix
@@ -223,12 +226,12 @@ struct SavedSearch {
 // `swatch` indexes gfx's fixed 16-colour table. Vault-global metadata, stored
 // inside the .osv because a vault's categories describe its contents.
 struct TagCategory {
-    std::string name;
-    uint8_t     swatch = 0;
+    crypto::SecureString name;  // Phase 91: mlock'd + wiped
+    uint8_t swatch = 0;
     // Phase 73: the category's optional template — ordered field names, empty =
     // no template. When a brand-new tag of this category is added, the UI
     // prompts for one value per field (skippable).
-    std::vector<std::string> fields;
+    std::vector<crypto::SecureString> fields;
 
     friend bool operator==(const TagCategory&, const TagCategory&) = default;
 };
@@ -238,8 +241,8 @@ struct TagCategory {
 // plain per-node strings with no registry — so storing it here is the only
 // place it cannot go inconsistent between carriers.
 struct TagDescription {
-    std::string tag;    // matched case-insensitively, first-seen casing kept
-    std::string text;
+    crypto::SecureString tag;  // Phase 91: mlock'd + wiped
+    crypto::SecureString text;
 
     friend bool operator==(const TagDescription&, const TagDescription&) = default;
 };
@@ -249,9 +252,9 @@ struct TagDescription {
 // node carrying it. `field` names a field of the tag's category template; the
 // pair (tag, field) is matched case-insensitively, first-seen casing kept.
 struct TagFieldValue {
-    std::string tag;
-    std::string field;
-    std::string value;
+    crypto::SecureString tag;  // Phase 91: mlock'd + wiped
+    crypto::SecureString field;
+    crypto::SecureString value;
 
     friend bool operator==(const TagFieldValue&, const TagFieldValue&) = default;
 };
@@ -360,6 +363,8 @@ void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& sear
                      std::vector<uint8_t>& out);
 void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& searches,
                      const VaultSettings& settings, std::vector<uint8_t>& out);
+void serialize_index(const IndexNode& root, const std::vector<SavedSearch>& searches,
+                     const VaultSettings& settings, crypto::WipingBytes& out);
 
 // Parse a tree from `in` into `out`. Returns false on any malformed input (bad
 // version, unknown node type, truncation, excessive depth). On failure `out` is
@@ -397,8 +402,8 @@ void set_tag_description(VaultSettings& s, std::string_view tag, std::string_vie
 
 // `category`'s template fields. Empty when the category is absent or has no
 // template. The returned span BORROWS from `s` — never call on a temporary.
-[[nodiscard]] std::span<const std::string> category_template(const VaultSettings& s,
-                                                             std::string_view category);
+[[nodiscard]] std::span<const crypto::SecureString> category_template(const VaultSettings& s,
+                                                                      std::string_view category);
 
 // Replace `category`'s template. False when the category does not exist.
 // Fields are ci de-duped keeping first casing, clamped to

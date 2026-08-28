@@ -14,12 +14,19 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
+#include <mutex>
+#include <new>
 #include "platform/safe_print.h"
 #include <span>
+#include <system_error>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include <monocypher.h>
 
@@ -27,6 +34,7 @@
 #  include <windows.h>
 #else
 #  include <sys/mman.h>
+#  include <unistd.h>
 #endif
 
 namespace crypto {
@@ -94,40 +102,369 @@ inline void warn_mlock_failure_once() noexcept
 
 namespace detail {
 
-// Best-effort page-lock. Returns true on success. Never throws.
-// On Linux, after a successful mlock, also attempts madvise(MADV_DONTDUMP)
-// for defense-in-depth (harmless if it fails).
-inline bool mem_lock(uint8_t* p, size_t n) noexcept
+inline size_t memory_page_size() noexcept
 {
 #if defined(_WIN32)
-    return VirtualLock(p, n) != 0;
+    static const size_t page_size = [] {
+        SYSTEM_INFO info{};
+        GetSystemInfo(&info);
+        return static_cast<size_t>(info.dwPageSize);
+    }();
 #else
-    if (::mlock(p, n) != 0) return false;
+    static const size_t page_size = [] {
+        const long n = ::sysconf(_SC_PAGESIZE);
+        return n > 0 ? static_cast<size_t>(n) : static_cast<size_t>(4096);
+    }();
+#endif
+    return page_size;
+}
+
+struct PageLockRegistry {
+    std::mutex mu;
+    std::unordered_map<uintptr_t, size_t> refs;
+};
+
+inline PageLockRegistry& page_lock_registry()
+{
+    static PageLockRegistry registry;
+    return registry;
+}
+
+template <typename T>
+inline uintptr_t pointer_address(const T* p) noexcept
+{
+    return std::bit_cast<uintptr_t>(p);
+}
+
+inline uintptr_t page_base(uintptr_t address) noexcept
+{
+    const size_t page_size = memory_page_size();
+    return address / page_size * page_size;
+}
+
+inline bool os_lock_range(uintptr_t first, size_t length) noexcept
+{
+    auto* p = std::bit_cast<std::byte*>(first);
+#if defined(_WIN32)
+    return VirtualLock(p, length) != 0;
+#else
+    if (::mlock(p, length) != 0) return false;
 
     // Defense-in-depth: mark the page as not dumpable (Linux only).
     // This prevents the page from being included in core dumps even if the
     // process is still dumpable. Ignore failures silently.
 #  ifdef __linux__
-    (void)::madvise(p, n, MADV_DONTDUMP);
+    (void)::madvise(p, length, MADV_DONTDUMP);
 #  endif
     return true;
 #endif
 }
 
-inline void mem_unlock(uint8_t* p, size_t n) noexcept
+inline void os_unlock_range(uintptr_t first, size_t length) noexcept
 {
 #if defined(_WIN32)
-    // NOTE: S995 (const param): VirtualUnlock takes LPVOID (void*, not const void*),
-    // so the param cannot be const without a const_cast. POSIX munlock accepts const void*,
-    // but Windows does not. We keep the param non-const to avoid const_cast. This is
-    // acceptable as S859 (API compatibility) outranks S995 (const-correctness).
-    VirtualUnlock(p, n);
+    auto* p = std::bit_cast<std::byte*>(first);
+    (void)VirtualUnlock(p, length);
 #else
-    ::munlock(p, n);
+    const auto* p = std::bit_cast<const std::byte*>(first);
+    (void)::munlock(p, length);
 #endif
 }
 
+struct AddedPageRefs {
+    bool success;
+    bool added_page;
+};
+
+inline void rollback_page_refs(PageLockRegistry& registry, uintptr_t first, uintptr_t stop,
+                               size_t page_size) noexcept
+{
+    for (uintptr_t page = first; page != stop; page += page_size) {
+        const auto it = registry.refs.find(page);
+        if (it == registry.refs.end()) continue;
+        --it->second;
+        if (it->second == 0) registry.refs.erase(it);
+    }
+}
+
+inline bool add_page_ref(PageLockRegistry& registry, uintptr_t page, bool& added_page) noexcept
+{
+    if (const auto it = registry.refs.find(page); it != registry.refs.end()) {
+        ++it->second;
+        return true;
+    }
+    try {
+        registry.refs.emplace(page, 1);
+        added_page = true;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+inline AddedPageRefs add_page_refs(PageLockRegistry& registry, uintptr_t first, uintptr_t last,
+                                   size_t page_size) noexcept
+{
+    bool added_page = false;
+    for (uintptr_t page = first;; page += page_size) {
+        if (!add_page_ref(registry, page, added_page)) {
+            rollback_page_refs(registry, first, page, page_size);
+            return {.success = false, .added_page = false};
+        }
+        if (page == last) break;
+    }
+    return {.success = true, .added_page = added_page};
+}
+
+inline bool is_new_page(const PageLockRegistry& registry, uintptr_t page) noexcept
+{
+    if (const auto it = registry.refs.find(page); it != registry.refs.end())
+        return it->second == 1;
+    return false;
+}
+
+inline void unlock_new_pages_before(const PageLockRegistry& registry, uintptr_t first,
+                                    uintptr_t stop, size_t page_size) noexcept
+{
+    uintptr_t range_first = 0;
+    for (uintptr_t page = first; page != stop; page += page_size) {
+        if (is_new_page(registry, page)) {
+            if (range_first == 0) range_first = page;
+        } else if (range_first != 0) {
+            os_unlock_range(range_first, static_cast<size_t>(page - range_first));
+            range_first = 0;
+        }
+    }
+    if (range_first != 0)
+        os_unlock_range(range_first, static_cast<size_t>(stop - range_first));
+}
+
+inline bool lock_new_pages(const PageLockRegistry& registry, uintptr_t first, uintptr_t last,
+                           size_t page_size) noexcept
+{
+    uintptr_t range_first = 0;
+    for (uintptr_t page = first;; page += page_size) {
+        if (is_new_page(registry, page)) {
+            if (range_first == 0) range_first = page;
+        } else if (range_first != 0) {
+            if (!os_lock_range(range_first, static_cast<size_t>(page - range_first))) {
+                unlock_new_pages_before(registry, first, range_first, page_size);
+                return false;
+            }
+            range_first = 0;
+        }
+        if (page == last) break;
+    }
+    if (range_first == 0) return true;
+    if (os_lock_range(range_first, static_cast<size_t>(last - range_first) + page_size))
+        return true;
+    unlock_new_pages_before(registry, first, range_first, page_size);
+    return false;
+}
+
+inline void release_page_refs(PageLockRegistry& registry, uintptr_t first, uintptr_t last,
+                              size_t page_size) noexcept
+{
+    uintptr_t range_first = 0;
+    for (uintptr_t page = first;; page += page_size) {
+        bool released = false;
+        if (const auto it = registry.refs.find(page); it != registry.refs.end()) {
+            --it->second;
+            if (it->second == 0) {
+                registry.refs.erase(it);
+                released = true;
+            }
+        }
+        if (released) {
+            if (range_first == 0) range_first = page;
+        } else if (range_first != 0) {
+            os_unlock_range(range_first, static_cast<size_t>(page - range_first));
+            range_first = 0;
+        }
+        if (page == last) break;
+    }
+    if (range_first != 0)
+        os_unlock_range(range_first, static_cast<size_t>(last - range_first) + page_size);
+}
+
+// mlock/munlock operate on whole pages and Linux locks do not stack. Normal
+// allocator blocks share pages, so a per-allocation munlock can otherwise make
+// a still-live neighbouring secret swappable. Keep one OS lock per page and a
+// process-wide reference count across every SecureBuffer/SecureBytes/String.
+inline bool mem_lock(const uint8_t* p, size_t n) noexcept
+{
+    if (!p || n == 0) return false;
+    const auto addr = pointer_address(p);
+    if (addr > std::numeric_limits<uintptr_t>::max() - (n - 1)) return false;
+    const size_t page_size = memory_page_size();
+    const uintptr_t first = page_base(addr);
+    const uintptr_t last = page_base(addr + n - 1);
+    if (last > std::numeric_limits<uintptr_t>::max() - page_size) return false;
+
+    try {
+        auto& registry = page_lock_registry();
+        std::lock_guard lk(registry.mu);
+        const AddedPageRefs added = add_page_refs(registry, first, last, page_size);
+        if (!added.success) return false;
+        if (!added.added_page) return true;
+        if (!lock_new_pages(registry, first, last, page_size)) {
+            rollback_page_refs(registry, first, last + page_size, page_size);
+            return false;
+        }
+        return true;
+    } catch (const std::system_error&) {
+        return false;
+    }
+}
+
+inline void mem_unlock(uint8_t* p, size_t n) noexcept
+{
+    if (!p || n == 0) return;
+    const auto addr = pointer_address(p);
+    if (addr > std::numeric_limits<uintptr_t>::max() - (n - 1)) return;
+    const size_t page_size = memory_page_size();
+    const uintptr_t first = page_base(addr);
+    const uintptr_t last = page_base(addr + n - 1);
+
+    try {
+        auto& registry = page_lock_registry();
+        std::lock_guard lk(registry.mu);
+        release_page_refs(registry, first, last, page_size);
+    } catch (const std::system_error& error) {
+        // Destructors cannot report failure to their caller, but the failure
+        // must remain visible rather than silently leaving pages registered.
+        platform::safe_println(stderr, "[SecureMem] WARNING: page unlock failed: {}",
+                               error.what());
+    }
+}
+
+template <typename T>
+inline size_t locked_page_refcount_for_tests(const T* p) noexcept
+{
+    try {
+        auto& registry = page_lock_registry();
+        std::lock_guard lk(registry.mu);
+        const auto it = registry.refs.find(page_base(pointer_address(p)));
+        return it == registry.refs.end() ? 0 : it->second;
+    } catch (...) {
+        return 0;
+    }
+}
+
+inline std::atomic_int& secure_allocation_fail_after() noexcept
+{
+    static std::atomic_int value{-1};
+    return value;
+}
+
+inline void inject_secure_allocation_failure(int after_calls) noexcept
+{
+    secure_allocation_fail_after().store(after_calls);
+}
+
+inline void clear_secure_allocation_failure() noexcept
+{
+    secure_allocation_fail_after().store(-1);
+}
+
+inline bool should_fail_secure_allocation() noexcept
+{
+    int value = secure_allocation_fail_after().load();
+    while (value >= 0) {
+        const int next = value == 0 ? -1 : value - 1;
+        if (secure_allocation_fail_after().compare_exchange_weak(value, next))
+            return value == 0;
+    }
+    return false;
+}
+
 } // namespace detail
+
+namespace detail {
+
+inline std::atomic_uint64_t& wiping_deallocation_counter() noexcept
+{
+    static std::atomic_uint64_t count{0};
+    return count;
+}
+
+inline std::atomic_bool& all_wipe_observations_zero_flag() noexcept
+{
+    static std::atomic_bool all_zero{true};
+    return all_zero;
+}
+
+inline std::atomic_bool& wipe_observation_enabled_flag() noexcept
+{
+    static std::atomic_bool enabled{false};
+    return enabled;
+}
+
+inline uint64_t wiping_deallocation_count() noexcept
+{
+    return wiping_deallocation_counter().load();
+}
+
+inline void reset_wipe_observations_for_tests() noexcept
+{
+    wiping_deallocation_counter().store(0);
+    all_wipe_observations_zero_flag().store(true);
+    wipe_observation_enabled_flag().store(true);
+}
+
+inline bool all_wipe_observations_zero_for_tests() noexcept
+{
+    wipe_observation_enabled_flag().store(false);
+    return all_wipe_observations_zero_flag().load();
+}
+
+inline void record_wipe_for_tests(std::span<const std::byte> bytes) noexcept
+{
+    ++wiping_deallocation_counter();
+    if (!wipe_observation_enabled_flag().load()) return;
+    if (std::ranges::any_of(bytes, [](std::byte b) { return b != std::byte{0}; }))
+        all_wipe_observations_zero_flag().store(false);
+}
+
+} // namespace detail
+
+// Allocator for transient plaintext vectors. Every allocation is wiped before
+// release, including old capacity released during vector growth or move
+// assignment. It deliberately does not mlock: a multi-MiB commit snapshot would
+// evict the tree itself from the finite lock budget.
+template <typename T>
+class WipingAllocator {
+public:
+    using value_type = T;
+
+    WipingAllocator() noexcept = default;
+    template <typename U>
+    explicit WipingAllocator(const WipingAllocator<U>&) noexcept
+    {}
+
+    [[nodiscard]] T* allocate(size_t n)
+    {
+        return std::allocator<T>{}.allocate(n);
+    }
+
+    void deallocate(T* p, size_t n) const noexcept
+    {
+        if (p && n > 0) {
+            const size_t bytes = n * sizeof(T);
+            crypto_wipe(p, bytes);
+            detail::record_wipe_for_tests(std::as_bytes(std::span(p, n)));
+        }
+        std::allocator<T>{}.deallocate(p, n);
+    }
+
+    template <typename U>
+    friend bool operator==(const WipingAllocator&, const WipingAllocator<U>&) noexcept
+    {
+        return true;
+    }
+};
+
+using WipingBytes = std::vector<uint8_t, WipingAllocator<uint8_t>>;
 
 template <size_t N>
 class SecureBuffer {

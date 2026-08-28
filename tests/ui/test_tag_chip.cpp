@@ -145,7 +145,7 @@ TEST(any_chips_to_show_is_false_without_tags)
 TEST(any_chips_to_show_is_true_when_a_child_has_any_tag)
 {
     vault::IndexNode a = vault::IndexNode::image("a.jpg");
-    a.tags = {"ponytail"};                       // uncategorised still draws
+    a.tags.emplace_back("ponytail");  // uncategorised still draws
     const std::vector<const vault::IndexNode*> kids{&a};
     CHECK(ui::any_chips_to_show(kids));
 }
@@ -158,7 +158,7 @@ TEST(any_chips_to_show_handles_an_empty_listing)
 TEST(any_chips_to_show_skips_null_children)
 {
     vault::IndexNode a = vault::IndexNode::image("a.jpg");
-    a.tags = {"ponytail"};
+    a.tags.emplace_back("ponytail");
     const std::vector<const vault::IndexNode*> kids{nullptr, &a};
     CHECK(ui::any_chips_to_show(kids));          // must not deref the null
 }

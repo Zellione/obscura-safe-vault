@@ -10,7 +10,8 @@ namespace {
 void walk(const Vault& v, const std::string& path, MigrationScan& out, bool thumbs_stale)
 {
     for (const IndexNode* n : v.list(path)) {
-        const std::string child = path.empty() ? n->name : path + "/" + n->name;
+        const std::string child =
+            path.empty() ? std::string(n->name.view()) : path + "/" + std::string(n->name.view());
         if (n->is_gallery()) {
             walk(v, child, out, thumbs_stale);
             continue;

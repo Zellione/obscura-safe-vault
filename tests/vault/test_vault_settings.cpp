@@ -97,7 +97,7 @@ TEST(vault_settings_persist_across_lock_unlock)
 
     VaultSettings s = vault::vault_settings(tv.v);
     s.default_sort = SortKey::NameAsc;
-    s.categories.push_back({.name = "studio", .swatch = 11, .fields = {}});
+    s.categories.push_back({.name = crypto::SecureString("studio"), .swatch = 11, .fields = {}});
     CHECK(vault::set_vault_settings(tv.v, s) == VaultResult::Ok);
 
     REQUIRE(tv.relock_and_unlock() == VaultResult::Ok);
@@ -122,7 +122,7 @@ TEST(vault_settings_survive_compaction)
 
     VaultSettings s = vault::vault_settings(tv.v);
     s.default_sort = SortKey::DateDesc;
-    s.categories.push_back({.name = "studio", .swatch = 11, .fields = {}});
+    s.categories.push_back({.name = crypto::SecureString("studio"), .swatch = 11, .fields = {}});
     CHECK(vault::set_vault_settings(tv.v, s) == VaultResult::Ok);
 
     CHECK(tv.v.compact() == VaultResult::Ok);

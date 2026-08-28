@@ -132,6 +132,20 @@ std::vector<std::string> compute_effective_tags(const std::vector<std::string>& 
     return out;
 }
 
+// Phase 91: the search walk (compute_effective_tags, cascades, union) uses plain
+// transient `std::vector<std::string>` working sets; this converts a node's
+// SecureString tag list into one. The strings are copies of the stored names, so
+// the wipe guarantee lives with the tree — the transient copies are freed with
+// the working set.
+std::vector<std::string> tag_strings(const std::vector<crypto::SecureString>& tags)
+{
+    std::vector<std::string> out;
+    out.reserve(tags.size());
+    for (const auto& t : tags)
+        out.emplace_back(t.view());
+    return out;
+}
+
 // --- search helpers (Phase 12) --------------------------------------------
 
 bool node_in_scope(const IndexNode& n, SearchScope scope)
@@ -166,14 +180,13 @@ struct FieldTagMap {
     {
         FieldTagMap m;
         for (const auto& fv : s.tag_field_values) {
-            auto it = std::ranges::find_if(m.by_tag, [&fv](const auto& e) {
-                return tag_ci_equal(e.first, fv.tag);
-            });
+            auto it = std::ranges::find_if(
+                m.by_tag, [&fv](const auto& e) { return tag_ci_equal(e.first, fv.tag.view()); });
             if (it == m.by_tag.end()) {
-                m.by_tag.emplace_back(fv.tag, std::vector<std::string>{});
+                m.by_tag.emplace_back(std::string(fv.tag.view()), std::vector<std::string>{});
                 it = std::prev(m.by_tag.end());
             }
-            it->second.push_back(fv.field + ":" + fv.value);
+            it->second.push_back(std::string(fv.field.view()) + ":" + std::string(fv.value.view()));
         }
         return m;
     }
@@ -204,8 +217,8 @@ std::vector<std::string> search_dfs(const IndexNode& node, std::string_view pref
     std::vector<std::string> subtree_tags;
 
     for (const auto& child : node.children) {
-        auto effective = compute_effective_tags(child.tags, inherited);
-        const std::string full_path = join_child_path(prefix, child.name);
+        auto effective = compute_effective_tags(tag_strings(child.tags), inherited);
+        const std::string full_path = join_child_path(prefix, child.name.view());
 
         // Recurse first to get the child's subtree tags.
         std::vector<std::string> child_subtree;
@@ -220,12 +233,12 @@ std::vector<std::string> search_dfs(const IndexNode& node, std::string_view pref
         }
 
         if (node_in_scope(child, scope) &&
-            node_matches(child.name, query,
+            node_matches(child.name.view(), query,
                          fmap.empty() ? match_tags : fmap.expand(match_tags))) {
             out.push_back(SearchHit{
                 .path = full_path,
                 .is_gallery = child.is_gallery(),
-                .name = child.name,
+                .name = std::string(child.name.view()),
                 .effective_tags = effective,
                 .node = &child,
             });
@@ -233,9 +246,9 @@ std::vector<std::string> search_dfs(const IndexNode& node, std::string_view pref
 
         // Accumulate this child's tags into the subtree union.
         // For galleries, include the subtree recursion result.
-        std::vector<std::string> to_union = child.tags;
+        std::vector<std::string> to_union = tag_strings(child.tags);
         if (child.is_gallery()) {
-            to_union = compute_effective_tags(child_subtree, child.tags);
+            to_union = compute_effective_tags(child_subtree, tag_strings(child.tags));
         }
 
         // Union into subtree_tags (case-insensitive).
@@ -257,14 +270,14 @@ void collect_favorites(const IndexNode& node, std::string_view prefix, bool want
                        std::vector<SearchHit>& out)
 {
     for (const auto& child : node.children) {
-        const std::string full_path = join_child_path(prefix, child.name);
+        const std::string full_path = join_child_path(prefix, child.name.view());
 
         if (const bool matches = want_galleries ? child.is_gallery() : child.is_media();
             child.favorite && matches) {
             out.push_back(SearchHit{
                 .path = full_path,
                 .is_gallery = child.is_gallery(),
-                .name = child.name,
+                .name = std::string(child.name.view()),
                 .effective_tags = {},
                 .node = &child,
             });
@@ -279,8 +292,8 @@ void collect_favorites(const IndexNode& node, std::string_view prefix, bool want
 void collect_tags(const IndexNode& node, std::vector<std::string>& out)
 {
     for (const auto& t : node.tags) {
-        if (!std::ranges::any_of(out, [&](const auto& x) { return tag_ci_equal(x, t); }))
-            out.push_back(t);
+        if (!std::ranges::any_of(out, [&](const auto& x) { return tag_ci_equal(x, t.view()); }))
+            out.emplace_back(t.view());
     }
     for (const auto& c : node.children)
         collect_tags(c, out);
@@ -309,7 +322,7 @@ void count_direct_tags(const IndexNode& node, std::vector<ui::TagTally>& tallies
 {
     for (const auto& child : node.children) {
         for (const auto& t : child.tags)
-            bump_tag_tally(tallies, t, child.is_gallery());
+            bump_tag_tally(tallies, t.view(), child.is_gallery());
         if (child.is_gallery()) count_direct_tags(child, tallies);
     }
 }
@@ -322,12 +335,13 @@ void collect_galleries_with_tag(const IndexNode& node, std::string_view prefix,
 {
     for (const auto& child : node.children) {
         if (!child.is_gallery()) continue;
-        const std::string full_path = join_child_path(prefix, child.name);
-        if (std::ranges::any_of(child.tags, [&](const auto& t) { return tag_ci_equal(t, tag); }))
+        const std::string full_path = join_child_path(prefix, child.name.view());
+        if (std::ranges::any_of(child.tags,
+                                [&](const auto& t) { return tag_ci_equal(t.view(), tag); }))
             out.push_back(SearchHit{
                 .path = full_path,
                 .is_gallery = true,
-                .name = child.name,
+                .name = std::string(child.name.view()),
                 .effective_tags = {},
                 .node = &child,
             });
@@ -343,16 +357,17 @@ void collect_images_with_tag(const IndexNode& node, std::string_view prefix, std
                              std::vector<SearchHit>& out)
 {
     for (const auto& child : node.children) {
-        const std::string full_path = join_child_path(prefix, child.name);
+        const std::string full_path = join_child_path(prefix, child.name.view());
         if (child.is_gallery()) {
             collect_images_with_tag(child, full_path, tag, out);
             continue;
         }
-        if (std::ranges::any_of(child.tags, [&](const auto& t) { return tag_ci_equal(t, tag); }))
+        if (std::ranges::any_of(child.tags,
+                                [&](const auto& t) { return tag_ci_equal(t.view(), tag); }))
             out.push_back(SearchHit{
                 .path = full_path,
                 .is_gallery = false,
-                .name = child.name,
+                .name = std::string(child.name.view()),
                 .effective_tags = {},
                 .node = &child,
             });
@@ -390,8 +405,8 @@ std::vector<std::string> adv_search_dfs(const IndexNode& node, std::string_view 
     std::vector<std::string> subtree_tags;
 
     for (const auto& child : node.children) {
-        auto effective = compute_effective_tags(child.tags, inherited);
-        const std::string full_path = join_child_path(prefix, child.name);
+        auto effective = compute_effective_tags(tag_strings(child.tags), inherited);
+        const std::string full_path = join_child_path(prefix, child.name.view());
 
         // Recurse first to get the child's subtree tags.
         std::vector<std::string> child_subtree;
@@ -409,19 +424,20 @@ std::vector<std::string> adv_search_dfs(const IndexNode& node, std::string_view 
             }
 
             const ui::EvalResult r = ui::evaluate(
-                query, child.name, fmap.empty() ? match_tags : fmap.expand(match_tags));
+                query, child.name.view(), fmap.empty() ? match_tags : fmap.expand(match_tags));
             if (r.matched) {
                 out.emplace_back(r.score, SearchHit{
                                               .path = full_path,
                                               .is_gallery = child.is_gallery(),
-                                              .name = child.name,
+                                              .name = std::string(child.name.view()),
                                               .effective_tags = effective,
                                               .node = &child,
                                           });
             }
         }
 
-        accumulate_subtree_union(subtree_tags, child.tags, child_subtree, child.is_gallery());
+        accumulate_subtree_union(subtree_tags, tag_strings(child.tags), child_subtree,
+                                 child.is_gallery());
     }
 
     return subtree_tags;
@@ -701,18 +717,23 @@ namespace {
     if (s.length == 0) {
         return false;
     }
-    std::vector<uint8_t> on_disk;
+    std::vector<uint8_t> on_disk;  // ciphertext — need not be page-locked
     if (ChunkStore store(fp, master_key, framed_chunks(header));
         !store.read_raw(s.offset, s.length, on_disk)) {
         return false;
     }
-    std::vector<uint8_t> blob;
-    if (!crypto::open(master_key, s.nonce, on_disk, blob)) {
+    // Decrypt straight into mlock'd SecureBytes (invariant #1): the decoded
+    // index blob is the whole tree's plaintext metadata, wiped on scope exit
+    // (Phase 91) instead of a never-wiped plain heap vector.
+    if (on_disk.size() < crypto::TAG_SIZE) return false;
+    crypto::SecureBytes blob;
+    if (!blob.resize(on_disk.size() - crypto::TAG_SIZE)) return false;
+    if (!crypto::open_to(master_key, s.nonce, on_disk, blob.span())) {
         return false;
     }
     if (framed_chunks(header)) {
-        std::vector<uint8_t> plain;
-        if (!chunk_codec::decode_frame(blob, plain)) {
+        crypto::SecureBytes plain;
+        if (!chunk_codec::decode_frame(blob.as_span(), plain)) {
             return false;
         }
         blob = std::move(plain);
@@ -720,7 +741,7 @@ namespace {
     IndexNode tmp;
     std::vector<SavedSearch> tmp_searches;
     VaultSettings tmp_settings;
-    if (!deserialize_index(blob, tmp, tmp_searches, tmp_settings)) {
+    if (!deserialize_index(blob.as_span(), tmp, tmp_searches, tmp_settings)) {
         return false;
     }
     root_out = std::move(tmp);
@@ -868,7 +889,7 @@ VaultResult Vault::create_gallery(std::string_view gallery_path)
             if (!child->is_gallery()) return InvalidArg;  // name is an image
             cur = child;
         } else {
-            cur->children.push_back(IndexNode::gallery(std::string(seg)));
+            cur->children.push_back(IndexNode::gallery(seg));
             cur = &cur->children.back();
             created = true;
         }
@@ -1282,8 +1303,10 @@ VaultResult add_tag_batch(Vault& v, std::span<const std::string> node_paths,
     bool changed = false;
     for (const std::string& path : node_paths) {
         if (IndexNode* node = v.resolve_node(path); node) {
-            const bool dup = std::ranges::any_of(node->tags,
-                [&trimmed](const std::string& e) { return tag_ci_equal(e, trimmed); });
+            const bool dup =
+                std::ranges::any_of(node->tags, [&trimmed](const crypto::SecureString& e) {
+                    return tag_ci_equal(e.view(), trimmed);
+                });
             if (!dup) {
                 node->tags.emplace_back(trimmed);
                 changed = true;
@@ -1307,8 +1330,9 @@ VaultResult remove_tag_batch(Vault& v, std::span<const std::string> node_paths,
     for (const std::string& path : node_paths) {
         IndexNode* node = v.resolve_node(path);
         if (!node) continue;
-        const auto removed = std::erase_if(node->tags,
-            [&trimmed](const std::string& e) { return tag_ci_equal(e, trimmed); });
+        const auto removed = std::erase_if(node->tags, [&trimmed](const crypto::SecureString& e) {
+            return tag_ci_equal(e.view(), trimmed);
+        });
         changed = changed || removed > 0;
     }
     return changed ? v.commit_index() : Ok;
@@ -1383,7 +1407,7 @@ VaultResult rename_node(Vault& v, std::string_view gallery_path, std::string_vie
     for (const auto& c : g->children)
         if (&c != node && c.name == new_name) return AlreadyExists;
 
-    node->name = std::string(new_name);
+    node->name = new_name;
     return v.commit_index();
 }
 
@@ -1397,10 +1421,22 @@ VaultResult Vault::set_tags(std::string_view node_path, const std::vector<std::s
 
     auto normalised = normalise_tags(tags);
 
-    // Only commit if the tags changed.
-    if (node->tags == normalised) return Ok;
+    // Only commit if the tags changed (compare case-insensitively against the
+    // stored secure tags, then replace in place).
+    bool same = normalised.size() == node->tags.size();
+    if (same) {
+        for (size_t i = 0; i < node->tags.size(); ++i) {
+            if (node->tags[i] != normalised[i]) {
+                same = false;
+                break;
+            }
+        }
+    }
+    if (same) return Ok;
 
-    node->tags = std::move(normalised);
+    node->tags.clear();
+    for (const auto& t : normalised)
+        node->tags.emplace_back(t);
     return commit_index();
 }
 
@@ -1417,7 +1453,7 @@ VaultResult Vault::add_tag(std::string_view node_path, std::string_view tag)
 
     // Check for case-insensitive duplicate.
     for (const auto& existing : node->tags) {
-        if (tag_ci_equal(existing, trimmed)) return Ok;
+        if (tag_ci_equal(existing.view(), trimmed)) return Ok;
     }
 
     // Not found, add it.
@@ -1431,8 +1467,8 @@ namespace {
 void prune_node_tags(IndexNode& node, const std::function<bool(std::string_view)>& keep,
                      PruneTagsStats& stats)
 {
-    if (const auto removed = std::erase_if(node.tags,
-                                           [&keep](const std::string& t) { return !keep(t); });
+    if (const auto removed = std::erase_if(
+            node.tags, [&keep](const crypto::SecureString& t) { return !keep(t.view()); });
         removed > 0) {
         stats.tags_removed += removed;
         ++stats.nodes_touched;
@@ -1471,7 +1507,7 @@ VaultResult Vault::remove_tag(std::string_view node_path, std::string_view tag)
 
     // Find and remove the tag case-insensitively.
     for (auto it = node->tags.begin(); it != node->tags.end(); ++it) {
-        if (tag_ci_equal(*it, trimmed)) {
+        if (tag_ci_equal(it->view(), trimmed)) {
             node->tags.erase(it);
             return commit_index();
         }
@@ -1489,7 +1525,8 @@ std::vector<SearchHit> Vault::search(std::string_view query, SearchScope scope) 
     // unnamed root itself is never a hit. The returned tag union bubbles up from
     // the root's children but is unused here (Phase 51 roll-up).
     const FieldTagMap fmap = FieldTagMap::build(settings_);
-    [[maybe_unused]] auto _ = search_dfs(root_, "", root_.tags, query, scope, out, fmap);
+    [[maybe_unused]] auto _ =
+        search_dfs(root_, "", tag_strings(root_.tags), query, scope, out, fmap);
     return out;
 }
 
@@ -1520,7 +1557,7 @@ std::vector<SearchHit> VaultSearch::run_search(const ui::AdvancedQuery& query) c
     std::vector<std::pair<int, SearchHit>> scored;
     const FieldTagMap fmap = FieldTagMap::build(v_.settings_);
     [[maybe_unused]] auto _ =
-        adv_search_dfs(v_.root_, "", v_.root_.tags, query, query.scope, scored, fmap);
+        adv_search_dfs(v_.root_, "", tag_strings(v_.root_.tags), query, query.scope, scored, fmap);
 
     // Rank by descending score, breaking ties by ascending path for stability.
     std::ranges::sort(scored, [](const auto& a, const auto& b) {
@@ -1586,7 +1623,9 @@ VaultResult VaultSearch::save_search(std::string_view name, const ui::AdvancedQu
     if (!v_.unlocked_) return Locked;
     if (name.empty()) return InvalidArg;
 
-    std::vector<uint8_t> blob = ui::serialize_query(query);
+    crypto::WipingBytes plain = ui::serialize_query(query);
+    crypto::SecureBlob blob;
+    if (!blob.assign(plain)) return CryptoError;
 
     // Upsert: replace an existing same-name entry, else append (bounded).
     for (auto& s : v_.saved_searches_) {
@@ -1596,7 +1635,7 @@ VaultResult VaultSearch::save_search(std::string_view name, const ui::AdvancedQu
         }
     }
     if (v_.saved_searches_.size() >= INDEX_MAX_SAVED_SEARCHES) return InvalidArg;
-    v_.saved_searches_.emplace_back(std::string(name), std::move(blob));
+    v_.saved_searches_.emplace_back(crypto::SecureString(name), std::move(blob));
     return v_.commit_index();
 }
 
@@ -1878,7 +1917,7 @@ VaultResult Vault::compact(OpProgress* progress)
     // does not pin the dead tail. If that spot would overlap the currently
     // active blob (an already-tight vault), fall back to just after it —
     // the cost is one blob of slack, reclaimed by the next compact.
-    std::vector<uint8_t> plain;
+    crypto::WipingBytes plain;
     if (!index_io::serialize_plain_index(ctx, plain)) return CryptoError;
     const uint64_t sealed_len = plain.size() + crypto::TAG_SIZE;
     uint64_t dest = compact_plan::live_end(units, HEADER_SIZE);

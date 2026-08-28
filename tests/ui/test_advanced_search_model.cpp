@@ -153,7 +153,7 @@ TEST(adv_query_serialisation_round_trip)
     q.name_query = "vacation";
     q.scope      = SearchScope::Galleries;
 
-    std::vector<uint8_t> blob = ui::serialize_query(q);
+    auto blob = ui::serialize_query(q);
     REQUIRE(!blob.empty());
 
     AdvancedQuery back;

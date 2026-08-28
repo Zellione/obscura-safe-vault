@@ -186,9 +186,9 @@ EvalResult evaluate(const AdvancedQuery& query, std::string_view name,
     return {true, score};
 }
 
-std::vector<uint8_t> serialize_query(const AdvancedQuery& query)
+crypto::WipingBytes serialize_query(const AdvancedQuery& query)
 {
-    std::vector<uint8_t> out;
+    crypto::WipingBytes out;
     vault::ByteWriter w(out);
     w.u8(QUERY_VERSION);
 

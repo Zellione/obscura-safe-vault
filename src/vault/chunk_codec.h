@@ -30,6 +30,7 @@ inline constexpr uint64_t INFLATE_SLACK     = 64;
 
 [[nodiscard]] bool encode_frame(std::span<const uint8_t> payload, crypto::SecureBytes& out) noexcept;
 [[nodiscard]] bool encode_frame(std::span<const uint8_t> payload, std::vector<uint8_t>& out) noexcept;
+[[nodiscard]] bool encode_frame(std::span<const uint8_t> payload, crypto::WipingBytes& out) noexcept;
 [[nodiscard]] bool decode_frame(std::span<const uint8_t> framed, crypto::SecureBytes& out) noexcept;
 [[nodiscard]] bool decode_frame(std::span<const uint8_t> framed, std::vector<uint8_t>& out) noexcept;
 

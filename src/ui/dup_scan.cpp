@@ -20,14 +20,15 @@ void walk(const vault::Vault& v, const std::string& path,
           std::vector<DupScanItem>& out)
 {
     for (const vault::IndexNode* n : v.list(path)) {
-        const std::string child = path.empty() ? n->name : path + "/" + n->name;
+        const std::string child =
+            path.empty() ? std::string(n->name.view()) : path + "/" + std::string(n->name.view());
         if (n->is_gallery()) {
             walk(v, child, out);
             continue;
         }
         DupScanItem it;
         it.node_path   = child;
-        it.name        = n->name;
+        it.name = std::string(n->name.view());
         it.parent_path = path;
         it.is_video    = n->is_video();
         if (n->is_image()) {

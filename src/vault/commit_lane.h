@@ -15,6 +15,8 @@
 #include <thread>
 #include <vector>
 
+#include "crypto/secure_mem.h"
+
 namespace vault {
 
 class Vault;
@@ -54,7 +56,7 @@ public:
 
 private:
     struct Pending {
-        std::vector<uint8_t> plain;
+        crypto::WipingBytes plain;
         uint64_t generation = 0;
     };
 

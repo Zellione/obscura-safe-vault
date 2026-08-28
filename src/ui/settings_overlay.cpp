@@ -172,7 +172,7 @@ void apply_value_delta(SettingsState& state, int delta, bool& commit_out)
             if (state.row >= 0 && state.row < count) {
                 state.prompting = true;
                 state.prompt_row = state.row;
-                state.prompt_buf.set_text(state.draft.categories[state.row].name);
+                state.prompt_buf.set_text(state.draft.categories[state.row].name.view());
                 state.error.clear();
                 SDL_StartTextInput(window.sdl_window());
             }
@@ -343,7 +343,8 @@ std::pair<std::string, std::string> pane_row_text(const SettingsState& state, in
         case TagColours:
             if (row_index < static_cast<int>(state.draft.categories.size())) {
                 const auto& cat = state.draft.categories[row_index];
-                return {cat.name, std::string(gfx::tag_swatch_name(cat.swatch))};
+                return {std::string(cat.name.view()),
+                        std::string(gfx::tag_swatch_name(cat.swatch))};
             }
             break;
         case VaultOps:

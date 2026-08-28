@@ -109,7 +109,7 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
     }
 
     // Build the fully-populated but UNATTACHED IndexNode.
-    IndexNode img = IndexNode::image(std::string(filename));
+    IndexNode img = IndexNode::image(filename);
     img.meta.format = format;
     img.meta.width = width;
     img.meta.height = height;
@@ -195,7 +195,7 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
     }
 
     // Build the fully-populated but UNATTACHED IndexNode.
-    IndexNode vid = IndexNode::video(std::string(filename));
+    IndexNode vid = IndexNode::video(filename);
     vid.vmeta.container   = precomputed ? precomputed->container   : probe.container;
     vid.vmeta.codec       = precomputed ? precomputed->codec       : probe.codec;
     vid.vmeta.width       = precomputed ? precomputed->width       : probe.width;
@@ -224,7 +224,7 @@ VaultResult attach_staged(Vault& v, std::string_view gallery_path, IndexNode&& n
     IndexNode* g = v.find_gallery(gallery_path);
     if (!g) return NotFound;
 
-    if (vault_ops::child_named(g, node.name)) return AlreadyExists;
+    if (vault_ops::child_named(g, node.name.view())) return AlreadyExists;
 
     if (!vault_ops::push_child(g->children, std::move(node))) {
         platform::log_error("Vault", "attach_staged: allocation failure");
@@ -254,7 +254,7 @@ VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path)
             if (!child->is_gallery()) return InvalidArg;  // name is an image
             cur = child;
         } else {
-            cur->children.push_back(IndexNode::gallery(std::string(seg)));
+            cur->children.push_back(IndexNode::gallery(seg));
             cur = &cur->children.back();
         }
     }
@@ -281,7 +281,9 @@ VaultResult attach_image_prestaged(Vault& v, std::string_view gallery_path,
     if (created_ts != 0) staged.node.meta.created_ts = created_ts;
 
     if (extras) {
-        staged.node.tags = extras->tags;
+        staged.node.tags.clear();
+        for (const auto& t : extras->tags)
+            staged.node.tags.emplace_back(t);
         if (staged.node.tags.size() > INDEX_MAX_TAGS)
             staged.node.tags.resize(INDEX_MAX_TAGS);
         staged.node.favorite = extras->favorite;
@@ -333,7 +335,9 @@ VaultResult attach_video_prestaged(Vault& v, std::string_view gallery_path,
     if (created_ts != 0) staged.node.vmeta.created_ts = created_ts;
 
     if (extras) {
-        staged.node.tags = extras->tags;
+        staged.node.tags.clear();
+        for (const auto& t : extras->tags)
+            staged.node.tags.emplace_back(t);
         if (staged.node.tags.size() > INDEX_MAX_TAGS)
             staged.node.tags.resize(INDEX_MAX_TAGS);
         staged.node.favorite = extras->favorite;

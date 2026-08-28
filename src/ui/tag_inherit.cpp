@@ -22,6 +22,17 @@ bool ci_contains(const std::vector<std::string>& v, std::string_view s)
     return std::ranges::any_of(v, [&](const std::string& e) { return tag_ci_equal(e, s); });
 }
 
+// Phase 91: a node's secure tag list as transient plain strings (the wipe
+// guarantee lives in the stored copy, not this working set).
+std::vector<std::string> tag_strings(const std::vector<crypto::SecureString>& tags)
+{
+    std::vector<std::string> out;
+    out.reserve(tags.size());
+    for (const auto& t : tags)
+        out.emplace_back(t.view());
+    return out;
+}
+
 // The child of `parent_path` named `name`, or nullptr. Pointer is valid until
 // the next mutating vault call (same contract as Vault::list).
 const vault::IndexNode* child_named(const vault::Vault& vault,
@@ -52,7 +63,11 @@ std::vector<std::string> inherited_tags(const vault::Vault& vault, std::string_v
     // The node's own tags: an inherited duplicate is hidden (own tags win).
     std::vector<std::string> own;
     const std::string parent = join_path(std::span(segs.data(), segs.size() - 1));
-    if (const auto* node = child_named(vault, parent, segs.back())) own = node->tags;
+    if (const auto* node = child_named(vault, parent, segs.back())) {
+        own.clear();
+        for (const auto& t : node->tags)
+            own.emplace_back(t.view());
+    }
 
     // Union of every ancestor gallery's tags, root-first, ci-de-duplicated —
     // the same cascade search matches the node by (compute_effective_tags).
@@ -61,8 +76,9 @@ std::vector<std::string> inherited_tags(const vault::Vault& vault, std::string_v
         const std::string ancestor_parent = join_path(std::span(segs.data(), len - 1));
         const auto* ancestor = child_named(vault, ancestor_parent, segs[len - 1]);
         if (!ancestor) continue;
-        for (const std::string& t : ancestor->tags)
-            if (!ci_contains(out, t) && !ci_contains(own, t)) out.push_back(t);
+        for (const auto& t : ancestor->tags)
+            if (!ci_contains(out, t.view()) && !ci_contains(own, t.view()))
+                out.emplace_back(t.view());
     }
     return out;
 }
@@ -80,13 +96,14 @@ void collect_descendant_tags(const vault::Vault& vault, const std::string& galle
         if (!child) continue;
 
         // Collect this child's tags
-        for (const std::string& t : child->tags)
-            if (!ci_contains(out, t)) out.push_back(t);
+        for (const crypto::SecureString& t : child->tags)
+            if (!ci_contains(out, t.view())) out.emplace_back(t.view());
 
         // If this child is a gallery, recurse into its descendants
         if (child->is_gallery()) {
-            const std::string child_path = gallery_path.empty() ? child->name
-                                           : gallery_path + "/" + child->name;
+            const std::string child_path =
+                gallery_path.empty() ? std::string(child->name.view())
+                                     : gallery_path + "/" + std::string(child->name.view());
             collect_descendant_tags(vault, child_path, depth + 1, out);
         }
     }
@@ -101,7 +118,7 @@ std::vector<std::string> contents_tags(const vault::Vault& vault, std::string_vi
     if (const auto segs = split_path(gallery_path); !segs.empty()) {
         const std::string parent = join_path(std::span(segs.data(), segs.size() - 1));
         if (const auto* node = child_named(vault, parent, segs.back()))
-            if (node->is_gallery()) own = node->tags;
+            if (node->is_gallery()) own = tag_strings(node->tags);
     }
     // If segs.empty(), gallery_path doesn't resolve to a real gallery, so own remains empty
 

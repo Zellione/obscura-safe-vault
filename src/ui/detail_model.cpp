@@ -82,17 +82,31 @@ std::vector<std::string> shared_tags(std::span<const vault::IndexNode* const> no
     std::vector<std::string> out;
     for (const auto& tag : first->tags) {
         const bool in_all = std::ranges::all_of(nodes, [&tag](const vault::IndexNode* n) {
-            return n == nullptr || std::ranges::any_of(
-                       n->tags, [&tag](const std::string& t) { return tag_ci_equal(tag, t); });
+            return n == nullptr ||
+                   std::ranges::any_of(n->tags, [&tag](const crypto::SecureString& t) {
+                       return tag_ci_equal(tag.view(), t.view());
+                   });
         });
         if (in_all) {
-            out.push_back(tag);
+            out.emplace_back(tag.view());
         }
     }
     return out;
 }
 
 }  // namespace
+
+// Phase 91: the detail panel reads a node's secure tag list through a transient
+// plain-string copy (the stored tree keeps the wipe guarantee; the copy lives
+// only for the render).
+static std::vector<std::string> tag_strings(const std::vector<crypto::SecureString>& tags)
+{
+    std::vector<std::string> out;
+    out.reserve(tags.size());
+    for (const auto& t : tags)
+        out.emplace_back(t.view());
+    return out;
+}
 
 void append_tag_sections(DetailContent&               out,
                          std::span<const std::string> own,
@@ -118,7 +132,8 @@ DetailContent build_node_details(const vault::IndexNode&      node,
                                  std::span<const std::string> from_contents,
                                  vault::SortKey               vault_default)
 {
-    DetailContent out{.heading = node.name, .subheading = node_markers(node), .sections = {}};
+    DetailContent out{
+        .heading = std::string(node.name.view()), .subheading = node_markers(node), .sections = {}};
     if (node.is_image()) {
         out.sections.push_back(image_rows(node));
     } else if (node.is_video()) {
@@ -126,7 +141,7 @@ DetailContent build_node_details(const vault::IndexNode&      node,
     } else {
         out.sections.push_back(gallery_rows(node, vault_default));
     }
-    append_tag_sections(out, node.tags, inherited, "Tags");
+    append_tag_sections(out, tag_strings(node.tags), inherited, "Tags");
 
     // Add "From contents" section only for galleries with non-empty from_contents
     if (node.is_gallery() && !from_contents.empty()) {

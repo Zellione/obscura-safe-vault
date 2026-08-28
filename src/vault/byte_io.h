@@ -12,6 +12,8 @@
 #include <span>
 #include <vector>
 
+#include "crypto/secure_mem.h"
+
 namespace vault {
 
 // --- Fixed-offset writers (into a caller-sized buffer) ---------------------
@@ -69,16 +71,39 @@ inline uint64_t get_u64_at(std::span<const uint8_t> buf, size_t off) noexcept
 
 class ByteWriter {
 public:
-    explicit ByteWriter(std::vector<uint8_t>& out) noexcept : out_(out) {}
+    explicit ByteWriter(std::vector<uint8_t>& out) noexcept
+        : plain_(&out)
+    {}
 
-    void u8(uint8_t v)   { out_.push_back(v); }
-    void u16(uint16_t v) { for (int i = 0; i < 2; ++i) out_.push_back(static_cast<uint8_t>(v >> (8 * i))); }
-    void u32(uint32_t v) { for (int i = 0; i < 4; ++i) out_.push_back(static_cast<uint8_t>(v >> (8 * i))); }
-    void u64(uint64_t v) { for (int i = 0; i < 8; ++i) out_.push_back(static_cast<uint8_t>(v >> (8 * i))); }
-    void bytes(std::span<const uint8_t> b) { out_.insert(out_.end(), b.begin(), b.end()); }
+    explicit ByteWriter(crypto::WipingBytes& out) noexcept
+        : wiping_(&out)
+    {}
+
+    void u8(uint8_t v)   { push(v); }
+    void u16(uint16_t v) { for (int i = 0; i < 2; ++i) push(static_cast<uint8_t>(v >> (8 * i))); }
+    void u32(uint32_t v) { for (int i = 0; i < 4; ++i) push(static_cast<uint8_t>(v >> (8 * i))); }
+    void u64(uint64_t v) { for (int i = 0; i < 8; ++i) push(static_cast<uint8_t>(v >> (8 * i))); }
+    void bytes(std::span<const uint8_t> b)
+    {
+        if (plain_) {
+            plain_->insert(plain_->end(), b.begin(), b.end());
+        } else {
+            wiping_->insert(wiping_->end(), b.begin(), b.end());
+        }
+    }
 
 private:
-    std::vector<uint8_t>& out_;
+    void push(uint8_t value)
+    {
+        if (plain_) {
+            plain_->push_back(value);
+        } else {
+            wiping_->push_back(value);
+        }
+    }
+
+    std::vector<uint8_t>* plain_ = nullptr;
+    crypto::WipingBytes* wiping_ = nullptr;
 };
 
 // --- Bounds-checked reader (for parsing untrusted serialised blobs) ---------

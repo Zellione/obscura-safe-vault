@@ -192,7 +192,7 @@ bool settings_add_category(SettingsState& state, std::string name)
 
     // Reject case-insensitive duplicate
     for (const auto& cat : state.draft.categories) {
-        if (tag_ci_equal(cat.name, name)) {
+        if (tag_ci_equal(cat.name.view(), name)) {
             return false;
         }
     }
@@ -250,13 +250,14 @@ bool settings_rename_category(SettingsState& state, int row, std::string name)
     }
 
     // Reject if renaming to itself (case-insensitive comparison)
-    if (const auto& current_name = state.draft.categories[row].name; tag_ci_equal(current_name, name)) {
+    if (const auto& current_name = state.draft.categories[row].name;
+        tag_ci_equal(current_name.view(), name)) {
         return false;
     }
 
     // Reject case-insensitive duplicate with OTHER categories
     for (int i = 0; i < size; ++i) {
-        if (i != row && tag_ci_equal(state.draft.categories[i].name, name)) {
+        if (i != row && tag_ci_equal(state.draft.categories[i].name.view(), name)) {
             return false;
         }
     }

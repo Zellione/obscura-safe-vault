@@ -38,7 +38,7 @@ bool CommitLane::enqueue_snapshot()
         .header_mutex_ = v_->header_mutex_.get(),
     };
 
-    std::vector<uint8_t> blob;
+    crypto::WipingBytes blob;
     if (!index_io::serialize_plain_index(ctx, blob)) {
         return false;
     }

@@ -205,21 +205,21 @@ TEST(fuzz_index_deserialize_survives_3000_malformed_blobs)
     // Valid serialised tree as a mutation base. Tags exercise Phase 12 parsing;
     // favorite flags exercise the Phase 13 (v3) parsing.
     vault::IndexNode root = vault::IndexNode::gallery("");
-    root.tags.push_back("root_tag");
+    root.tags.emplace_back("root_tag");
     root.children.push_back(vault::IndexNode::gallery("a"));
-    root.children[0].tags.push_back("gal_tag");
-    root.children[0].tags.push_back("another");
+    root.children[0].tags.emplace_back("gal_tag");
+    root.children[0].tags.emplace_back("another");
     root.children[0].favorite = true;
     root.children[0].sort_key = vault::SortKey::NameDesc;
     root.children[0].children.push_back(vault::IndexNode::image("i.jpg"));
-    root.children[0].children[0].tags.push_back("img_tag");
+    root.children[0].children[0].tags.emplace_back("img_tag");
     root.children[0].children[0].favorite = true;
     root.children[0].children[0].meta.data_offset = 4096;
     root.children[0].children[0].meta.data_length = 1234;
     // A v5 saved-searches block exercises the Phase 18 parsing path.
     std::vector<vault::SavedSearch> searches = {
-        vault::SavedSearch{"cats", {0x01, 0x05, 0x00, 0x00, 0x00, 0x02}},
-        vault::SavedSearch{"trips", {0xAA, 0xBB, 0xCC}},
+        vault::SavedSearch{crypto::SecureString("cats"), {0x01, 0x05, 0x00, 0x00, 0x00, 0x02}},
+        vault::SavedSearch{crypto::SecureString("trips"), {0xAA, 0xBB, 0xCC}},
     };
     // A v9 settings block exercises the Phase 49 parsing path (categories) and
     // Phase 51 parsing path (descriptions): a non-default sort key, the tiles
@@ -230,20 +230,28 @@ TEST(fuzz_index_deserialize_survives_3000_malformed_blobs)
     settings.default_sort    = vault::SortKey::DateDesc;
     settings.tiles_show_tags = false;
     settings.categories = {
-        {.name = "artist", .swatch = 0, .fields = {"country", "style"}},
-        {.name = std::string(vault::INDEX_MAX_CATEGORY_BYTES, 'x'),
-         .swatch = vault::TAG_SWATCH_COUNT - 1, .fields = {}},
-        {.name = "parody", .swatch = 7,
-         .fields = {std::string(vault::INDEX_MAX_FIELD_BYTES, 'f')}},
+        {.name = crypto::SecureString("artist"),
+         .swatch = 0,
+         .fields = {crypto::SecureString("country"), crypto::SecureString("style")}},
+        {.name = crypto::SecureString(std::string(vault::INDEX_MAX_CATEGORY_BYTES, 'x')),
+         .swatch = vault::TAG_SWATCH_COUNT - 1,
+         .fields = {}},
+        {.name = crypto::SecureString("parody"),
+         .swatch = 7,
+         .fields = {crypto::SecureString(std::string(vault::INDEX_MAX_FIELD_BYTES, 'f'))}},
     };
     settings.tag_descriptions = {
-        {.tag = "beach", .text = "Coastal shots"},
-        {.tag = "archive", .text = std::string(vault::INDEX_MAX_TAG_DESC_BYTES, 'y')},
+        {.tag = crypto::SecureString("beach"), .text = crypto::SecureString("Coastal shots")},
+        {.tag = crypto::SecureString("archive"),
+         .text = crypto::SecureString(std::string(vault::INDEX_MAX_TAG_DESC_BYTES, 'y'))},
     };
     settings.tag_field_values = {
-        {.tag = "artist:bob", .field = "country", .value = "Japan"},
-        {.tag = "artist:bob", .field = "style",
-         .value = std::string(vault::INDEX_MAX_FIELD_VALUE_BYTES, 'v')},
+        {.tag = crypto::SecureString("artist:bob"),
+         .field = crypto::SecureString("country"),
+         .value = crypto::SecureString("Japan")},
+        {.tag = crypto::SecureString("artist:bob"),
+         .field = crypto::SecureString("style"),
+         .value = crypto::SecureString(std::string(vault::INDEX_MAX_FIELD_VALUE_BYTES, 'v'))},
     };
     std::vector<uint8_t> valid;
     vault::serialize_index(root, searches, settings, valid);

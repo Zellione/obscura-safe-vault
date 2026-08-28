@@ -19,7 +19,7 @@ using vault::VaultSettings;
 const TagCategory* find_category(const VaultSettings& s, std::string_view name)
 {
     const auto it = std::ranges::find_if(
-        s.categories, [name](const TagCategory& c) { return tag_ci_equal(c.name, name); });
+        s.categories, [name](const TagCategory& c) { return tag_ci_equal(c.name.view(), name); });
     return it == s.categories.end() ? nullptr : std::to_address(it);
 }
 
@@ -49,7 +49,8 @@ void register_category(VaultSettings& s, const TagDictEntry& e, TagDictImportSum
         ++sum.categories_skipped_over_cap;
         return;
     }
-    s.categories.push_back({.name = e.category, .swatch = next_swatch(s), .fields = {}});
+    s.categories.push_back(
+        {.name = crypto::SecureString(e.category), .swatch = next_swatch(s), .fields = {}});
     ++sum.categories_added;
 }
 
