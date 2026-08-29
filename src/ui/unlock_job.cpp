@@ -1,7 +1,7 @@
 #include "ui/unlock_job.h"
 
 #include <cstring>
-#include <exception>
+#include <new>
 #include <system_error>
 #include <utility>
 
@@ -80,6 +80,12 @@ bool UnlockJob::launch(std::span<const uint8_t> password, std::span<const uint8_
 
     done_.store(false);
     active_.store(true);
+    const auto discard_secrets = [this]() noexcept {
+        pw_ = crypto::SecureBytes{};
+        keyfile_ = crypto::SecureBytes{};
+        active_.store(false);
+        done_.store(true);
+    };
     try {
         if (unlock_thread_creation_fail_flag().load()) {
             throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again),
@@ -94,14 +100,14 @@ bool UnlockJob::launch(std::span<const uint8_t> password, std::span<const uint8_
             done_.store(true);
         });
         return true;
-    } catch (const std::exception&) {
-        // The worker thread could not be created (or an allocation in thread
-        // machinery failed): the secrets must not stay resident waiting for a
-        // worker that will never run.
-        pw_ = crypto::SecureBytes{};
-        keyfile_ = crypto::SecureBytes{};
-        active_.store(false);
-        done_.store(true);
+    } catch (const std::system_error&) {
+        // The OS could not create the worker thread: the secrets must not stay
+        // resident waiting for a worker that will never run.
+        discard_secrets();
+        return false;
+    } catch (const std::bad_alloc&) {
+        // An allocation inside the thread machinery failed; same rollback.
+        discard_secrets();
         return false;
     }
 }
