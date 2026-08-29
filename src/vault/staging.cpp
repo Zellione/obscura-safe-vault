@@ -18,11 +18,11 @@ namespace vault {
 namespace {
     // Decode image and generate thumbnail from decoded pixels (pure CPU, no lock)
     struct DecodedThumb {
-        ImageFormat format;
-        uint32_t width;
-        uint32_t height;
-        bool animated;
-        std::vector<uint8_t> thumb_bytes;
+        ImageFormat         format;
+        uint32_t            width;
+        uint32_t            height;
+        bool                animated;
+        crypto::SecureBytes thumb_bytes;   // Phase 96 (OSV-AUD-003): secure bytes
     };
 
     DecodedThumb decode_and_thumbnail(std::span<const uint8_t> file_data)
@@ -34,7 +34,7 @@ namespace {
             result.height = static_cast<uint32_t>(decoded->height);
             result.animated = image::is_animated(decoded->format, file_data);
             if (auto thumb_jpeg = image::make_thumbnail(*decoded, image::THUMB_MAX_SIDE, 85)) {
-                result.thumb_bytes = *thumb_jpeg;
+                result.thumb_bytes = std::move(*thumb_jpeg);
             }
         }
         return result;
@@ -85,7 +85,7 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
         // Append precomputed thumbnail if non-empty.
         if (!precomputed->thumb_jpeg.empty()) {
             std::lock_guard lk(*v.write_mutex_);
-            if (!store.append_chunk(precomputed->thumb_jpeg, thumb_span)) {
+            if (!store.append_chunk(precomputed->thumb_jpeg.as_span(), thumb_span)) {
                 return {IoError, {}};
             }
             std::fflush(v.fp_);
@@ -101,7 +101,7 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
         // Append thumbnail if generated (holding lock for chunk write)
         if (!decoded_thumb.thumb_bytes.empty()) {
             std::lock_guard lk(*v.write_mutex_);
-            if (!store.append_chunk(decoded_thumb.thumb_bytes, thumb_span)) {
+            if (!store.append_chunk(decoded_thumb.thumb_bytes.as_span(), thumb_span)) {
                 return {IoError, {}};
             }
             std::fflush(v.fp_);
@@ -179,8 +179,7 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
     uint64_t poster_offset = 0;
     uint64_t poster_length = 0;
     if (const std::span<const uint8_t> poster =
-            precomputed ? std::span<const uint8_t>(precomputed->poster_jpeg)
-                        : std::span<const uint8_t>(probe.poster_jpeg);
+            precomputed ? precomputed->poster_jpeg.as_span() : probe.poster_jpeg.as_span();
         !poster.empty()) {
         ChunkSpan poster_span;
         {

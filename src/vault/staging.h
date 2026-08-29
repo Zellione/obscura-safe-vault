@@ -13,8 +13,8 @@
 #include <cstdint>
 #include <span>
 #include <string_view>
-#include <vector>
 
+#include "crypto/secure_mem.h"
 #include "index.h"
 #include "vault.h"
 
@@ -23,11 +23,11 @@ namespace vault {
 // Pool-computed decode result for an image (Task 7 fills this from the decode
 // pool; nullptr => stage_image decodes inline, exactly like add_image today).
 struct StagedThumb {
-    std::vector<uint8_t> thumb_jpeg;                    // empty => no thumbnail
-    ImageFormat          format   = ImageFormat::Unknown;
-    uint32_t             width    = 0;
-    uint32_t             height   = 0;
-    bool                 animated = false;
+    crypto::SecureBytes thumb_jpeg;                 // empty => no thumbnail
+    ImageFormat         format   = ImageFormat::Unknown;
+    uint32_t            width    = 0;
+    uint32_t            height   = 0;
+    bool                animated = false;
 };
 
 // Source-vault-supplied video metadata for a cross-vault transfer (Phase 67).
@@ -36,12 +36,12 @@ struct StagedThumb {
 // migration skips undecodable ones) must transfer as-is, not be re-probed and
 // rejected at the destination.
 struct StagedVideoInfo {
-    std::vector<uint8_t> poster_jpeg;   // empty => no poster
-    VideoContainer       container   = VideoContainer::Unknown;
-    VideoCodec           codec       = VideoCodec::Unknown;
-    uint32_t             width       = 0;
-    uint32_t             height      = 0;
-    uint64_t             duration_us = 0;
+    crypto::SecureBytes poster_jpeg;    // empty => no poster
+    VideoContainer     container   = VideoContainer::Unknown;
+    VideoCodec         codec       = VideoCodec::Unknown;
+    uint32_t           width       = 0;
+    uint32_t           height      = 0;
+    uint64_t           duration_us = 0;
 };
 
 struct StagedNode {

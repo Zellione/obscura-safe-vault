@@ -242,7 +242,9 @@ VaultResult prestage_image_info(const Vault& src, const IndexNode& node, StagedT
     if (node.meta.thumb_length == 0) return Ok;   // source has no thumbnail
     crypto::SecureBytes blob;
     if (VaultResult r = src.read_thumbnail(node, blob); r != Ok) return r;
-    out.thumb_jpeg.assign(blob.data(), blob.data() + blob.size());
+    // Phase 96 (OSV-AUD-003): move straight from the decrypted SecureBytes into
+    // the destination's SecureBytes — never through an ordinary vector copy.
+    if (!out.thumb_jpeg.assign(blob.as_span())) return IoError;
     return Ok;
 }
 
@@ -258,7 +260,7 @@ VaultResult prestage_video_info(const Vault& src, const IndexNode& node, StagedV
     if (node.vmeta.poster_length == 0) return Ok;
     crypto::SecureBytes blob;
     if (VaultResult r = src.read_thumbnail(node, blob); r != Ok) return r;
-    out.poster_jpeg.assign(blob.data(), blob.data() + blob.size());
+    if (!out.poster_jpeg.assign(blob.as_span())) return IoError;
     return Ok;
 }
 

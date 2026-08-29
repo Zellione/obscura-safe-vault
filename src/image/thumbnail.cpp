@@ -19,10 +19,12 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <span>
+#include <utility>
 
 namespace image {
 
-std::optional<std::vector<uint8_t>>
+std::optional<crypto::SecureBytes>
 make_thumbnail(const ImageData& src, int max_side, int quality)
 {
     if (src.pixels.empty() || src.width <= 0 || src.height <= 0 || max_side <= 0)
@@ -39,7 +41,12 @@ make_thumbnail(const ImageData& src, int max_side, int quality)
         tw = std::max(1, static_cast<int>(static_cast<int64_t>(src.width) * th / src.height));
     }
 
-    std::vector<uint8_t> resized(static_cast<size_t>(tw) * th * 3);
+    // Phase 96 (OSV-AUD-003): resized RGB pixels are plaintext derived content —
+    // mlock'd, wipe-on-release SecureBytes, never std::vector<uint8_t>.
+    crypto::SecureBytes resized;
+    if (const size_t resized_bytes = static_cast<size_t>(tw) * static_cast<size_t>(th) * 3;
+        !resized.resize(resized_bytes))
+        return std::nullopt;
     // STBIR_RGB == 3; cast documented as valid for back-compat with old channel-count API.
     if (!stbir_resize_uint8_linear(
             src.pixels.data(), src.width, src.height, 0,
@@ -47,18 +54,27 @@ make_thumbnail(const ImageData& src, int max_side, int quality)
             static_cast<stbir_pixel_layout>(3)))
         return std::nullopt;
 
-    std::vector<uint8_t> jpeg;
-    // NOSONAR cpp:S5008 — void* is mandated by the stbi_write_func C callback signature.
-    auto write_fn = [](void* ctx, void* data, int size) { // NOSONAR cpp:S5008
-        auto& out = *static_cast<std::vector<uint8_t>*>(ctx);
-        const auto* p = static_cast<const uint8_t*>(data);
-        out.insert(out.end(), p, p + size);
+    crypto::SecureBytes jpeg;
+    // NOSONAR cpp:S5008 — void* is mandated by the stbi_write_func C callback
+    // signature. The callback is capture-less (stbi writes want a function
+    // pointer), so the growable secure sink rides in `ctx`. `failed` turns a
+    // mid-encode allocation failure into a failed thumbnail (never a silently
+    // truncated JPEG): stbi's void callback can't report OOM.
+    struct JpegSink {
+        crypto::SecureBytes bytes;
+        bool                failed = false;
     };
-    if (!stbi_write_jpg_to_func(write_fn, &jpeg, tw, th, 3, resized.data(), quality) ||
-        jpeg.empty())
+    JpegSink sink;
+    auto write_fn = [](void* ctx, void* data, int size) { // NOSONAR cpp:S5008
+        auto& out     = *static_cast<JpegSink*>(ctx);
+        const auto* p = static_cast<const uint8_t*>(data);
+        if (!out.bytes.append(std::span(p, static_cast<size_t>(size)))) out.failed = true;
+    };
+    if (!stbi_write_jpg_to_func(write_fn, &sink, tw, th, 3, resized.data(), quality) ||
+        sink.failed || sink.bytes.empty())
         return std::nullopt;
 
-    return jpeg;
+    return std::move(sink.bytes);
 }
 
 } // namespace image

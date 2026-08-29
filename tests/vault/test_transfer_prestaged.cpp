@@ -9,6 +9,7 @@
 #include "vault/staging.h"
 #include "vault/transfer.h"
 #include "vault/vault.h"
+#include "crypto/secure_mem.h"
 
 namespace fs = std::filesystem;
 
@@ -47,6 +48,16 @@ static std::vector<uint8_t> pattern(size_t n, uint8_t seed)
     return v;
 }
 
+// Phase 96 (OSV-AUD-003): precomputed thumb/poster bytes must live in
+// SecureBytes — the fixtures build them through this helper (a move-only type
+// has no initializer-list assignment). A 4-byte fixture cannot OOM.
+static crypto::SecureBytes secure_jpeg(std::initializer_list<uint8_t> bytes)
+{
+    crypto::SecureBytes out;
+    (void)out.assign(std::span<const uint8_t>(bytes.begin(), bytes.size()));
+    return out;
+}
+
 // Find a media (image or video) node by name in a gallery; nullptr if absent.
 [[maybe_unused]] static const vault::IndexNode* find_image(const vault::Vault& v, std::string_view gallery,
                                           std::string_view name)
@@ -68,7 +79,7 @@ TEST(stage_video_precomputed_skips_probe)
     const auto garbage = pattern(3u << 20, 9);   // 3 MiB of non-video bytes
 
     vault::StagedVideoInfo info;
-    info.poster_jpeg = {0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3, 4};
+    info.poster_jpeg = secure_jpeg({0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3, 4});
     info.container   = vault::VideoContainer::MKV;
     info.codec       = vault::VideoCodec::Unknown;   // legacy carry-through
     info.width       = 640;
@@ -124,7 +135,7 @@ TEST(add_image_prestaged_carries_thumb_and_ts)
     REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kKdf, v) == Ok);
 
     vault::StagedThumb thumb;
-    thumb.thumb_jpeg = {0xFF, 0xD8, 9, 8, 7, 6};
+    thumb.thumb_jpeg = secure_jpeg({0xFF, 0xD8, 9, 8, 7, 6});
     thumb.format     = vault::ImageFormat::Unknown;
     thumb.width      = 123;
     thumb.height     = 45;
@@ -143,7 +154,7 @@ TEST(add_image_prestaged_carries_thumb_and_ts)
 
     crypto::SecureBytes tb;
     REQUIRE(v.read_thumbnail(*n, tb) == Ok);
-    CHECK_BYTES_EQ(tb.as_span(), std::span<const uint8_t>(thumb.thumb_jpeg));
+    CHECK_BYTES_EQ(tb.as_span(), thumb.thumb_jpeg.as_span());
 }
 
 // add_video_prestaged: Unknown codec + garbage bytes accepted, poster verbatim,
@@ -154,7 +165,7 @@ TEST(add_video_prestaged_roundtrip_across_reopen)
     TempVault tv("v5");
     const auto data = pattern(2u << 20, 6);
     vault::StagedVideoInfo info;
-    info.poster_jpeg = {0xFF, 0xD8, 1, 2, 3};
+    info.poster_jpeg = secure_jpeg({0xFF, 0xD8, 1, 2, 3});
     info.codec       = vault::VideoCodec::Unknown;
     info.container   = vault::VideoContainer::Unknown;
     info.width = 320; info.height = 240; info.duration_us = 99;
@@ -176,7 +187,7 @@ TEST(add_video_prestaged_roundtrip_across_reopen)
     CHECK_BYTES_EQ(out.as_span(), std::span<const uint8_t>(data));
     crypto::SecureBytes poster;
     REQUIRE(v2.read_thumbnail(*n, poster) == Ok);
-    CHECK_BYTES_EQ(poster.as_span(), std::span<const uint8_t>(info.poster_jpeg));
+    CHECK_BYTES_EQ(poster.as_span(), info.poster_jpeg.as_span());
 }
 
 // Prestaged adds still enforce the vault ingress boundary (safe name, collision).
@@ -207,7 +218,7 @@ TEST(transfer_unknown_codec_video_succeeds)
 
     vault::StagedVideoInfo info;
     info.codec = vault::VideoCodec::Unknown;
-    info.poster_jpeg = {0xFF, 0xD8, 5, 5};
+    info.poster_jpeg = secure_jpeg({0xFF, 0xD8, 5, 5});
     REQUIRE(vault::add_video_prestaged(src, "", pattern(1u << 20, 3), "legacy.avi",
                                        info, 1111) == Ok);
 
@@ -219,7 +230,7 @@ TEST(transfer_unknown_codec_video_succeeds)
     CHECK_EQ(moved->vmeta.created_ts, 1111u);         // timestamp preserved
     crypto::SecureBytes poster;
     REQUIRE(dst.read_thumbnail(*moved, poster) == Ok); // poster carried verbatim
-    CHECK_BYTES_EQ(poster.as_span(), std::span<const uint8_t>(info.poster_jpeg));
+    CHECK_BYTES_EQ(poster.as_span(), info.poster_jpeg.as_span());
     CHECK(find_image(src, "", "legacy.avi") == nullptr);
 }
 
@@ -234,7 +245,7 @@ TEST(transfer_image_carries_thumb_verbatim)
     REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
 
     vault::StagedThumb thumb;
-    thumb.thumb_jpeg = {0xFF, 0xD8, 7, 7, 7};
+    thumb.thumb_jpeg = secure_jpeg({0xFF, 0xD8, 7, 7, 7});
     thumb.format = vault::ImageFormat::Unknown;
     thumb.width = 11; thumb.height = 22; thumb.animated = false;
     REQUIRE(vault::add_image_prestaged(src, "", pattern(5000, 4), "odd.bin",
@@ -249,7 +260,7 @@ TEST(transfer_image_carries_thumb_verbatim)
     CHECK_EQ(copied->meta.created_ts, 2222u);
     crypto::SecureBytes tb;
     REQUIRE(dst.read_thumbnail(*copied, tb) == Ok);
-    CHECK_BYTES_EQ(tb.as_span(), std::span<const uint8_t>(thumb.thumb_jpeg));
+    CHECK_BYTES_EQ(tb.as_span(), thumb.thumb_jpeg.as_span());
 }
 
 // A source item without a thumbnail transfers without one (no regeneration).
@@ -268,4 +279,60 @@ TEST(transfer_image_no_thumb_stays_no_thumb)
     const auto* copied = find_image(dst, "", "n.bin");
     REQUIRE(copied != nullptr);
     CHECK_EQ(copied->meta.thumb_length, 0u);
+}
+
+// --- Phase 96 (OSV-AUD-003): staging/transfer teardown wipes ---------------
+
+// Precomputed thumbnail bytes must be wiped when their staging struct is torn
+// down — even though they were already copied (encrypted) into the vault.
+TEST(stage_image_precomputed_thumb_wiped_on_teardown)
+{
+    using enum vault::VaultResult;
+    TempVault tv("w1");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kKdf, v) == Ok);
+
+    crypto::detail::reset_wipe_observations_for_tests();
+    const uint64_t before = crypto::detail::wiping_deallocation_count();
+    {
+        vault::StagedThumb thumb;
+        thumb.thumb_jpeg = secure_jpeg({0xFF, 0xD8, 0xA5, 0x5A, 0x01, 0x02});
+        thumb.width = 3; thumb.height = 2;
+        REQUIRE(vault::stage_image(v, pattern(100, 3), "t.bin", &thumb).status == Ok);
+    }
+    // The staging struct's destruction wiped every precomputed thumbnail byte.
+    CHECK(crypto::detail::wiping_deallocation_count() > before);
+    CHECK_TRUE(crypto::detail::all_wipe_observations_zero_for_tests());
+}
+
+// Cross-vault transfer must carry decrypted thumbnail bytes straight from one
+// SecureBytes into another — never through an ordinary std::vector<uint8_t>.
+// Observable proof: after the transfer the decrypted source blob AND the
+// destination staging buffer are wiped SecureBytes, all observed zeroed.
+TEST(transfer_decrypted_thumb_never_plain_vectors)
+{
+    using enum vault::VaultResult;
+    TempVault sa("w2s"), da("w2d");
+    vault::Vault src, dst;
+    REQUIRE(vault::Vault::create(sa.str(), bytes("p"), {}, kKdf, src) == Ok);
+    REQUIRE(vault::Vault::create(da.str(), bytes("p"), {}, kKdf, dst) == Ok);
+
+    vault::StagedThumb src_thumb;
+    src_thumb.thumb_jpeg = secure_jpeg({0xFF, 0xD8, 0xDE, 0xAD, 0xBE, 0xEF});
+    src_thumb.width = 4; src_thumb.height = 3;
+    REQUIRE(vault::add_image_prestaged(src, "", pattern(2000, 7), "bitmap.bin",
+                                       src_thumb, 0) == Ok);
+
+    crypto::detail::reset_wipe_observations_for_tests();
+    const uint64_t before = crypto::detail::wiping_deallocation_count();
+    REQUIRE(vault::transfer_image(src, "", "bitmap.bin", dst, "",
+                                  vault::TransferMode::Copy) == Ok);
+    CHECK(crypto::detail::wiping_deallocation_count() > before);
+    CHECK_TRUE(crypto::detail::all_wipe_observations_zero_for_tests());
+
+    const auto* n = find_image(dst, "", "bitmap.bin");
+    REQUIRE(n != nullptr);
+    crypto::SecureBytes tb;
+    REQUIRE(dst.read_thumbnail(*n, tb) == Ok);
+    CHECK_BYTES_EQ(tb.as_span(), src_thumb.thumb_jpeg.as_span());
 }

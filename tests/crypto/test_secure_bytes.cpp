@@ -144,3 +144,93 @@ TEST(secure_bytes_injected_allocation_failure_returns_false)
     crypto::detail::clear_secure_allocation_failure();
     CHECK_TRUE(buf.empty());
 }
+
+// --- Phase 96 (OSV-AUD-003): growable SecureBytes -------------------------
+//
+// make_thumbnail() outputs resized RGB pixels and JPEG bytes into a buffer
+// that grows one chunk at a time (the stbi_write callback appends per row).
+// Before Phase 96 those sinks were std::vector<uint8_t> — never wiped, never
+// page-locked. The growth API below extends SecureBytes so thumbnail/staging/
+// transfer buffers get the same mlock + wipe guarantees as every other secret.
+
+TEST(secure_bytes_append_copies_and_extends)
+{
+    const std::array<uint8_t, 4> a{{1, 2, 3, 4}};
+    const std::array<uint8_t, 3> b{{5, 6, 7}};
+    crypto::SecureBytes buf;
+    REQUIRE(buf.append(a));
+    REQUIRE(buf.append(b));
+    CHECK_EQ(buf.size(), static_cast<size_t>(7));
+    const std::array<uint8_t, 7> expected{{1, 2, 3, 4, 5, 6, 7}};
+    CHECK_BYTES_EQ(buf.as_span(), std::span(expected));
+}
+
+TEST(secure_bytes_push_back_appends_byte)
+{
+    crypto::SecureBytes buf;
+    REQUIRE(buf.push_back(0xAB));
+    REQUIRE(buf.push_back(0xCD));
+    CHECK_EQ(buf.size(), static_cast<size_t>(2));
+    CHECK_EQ(buf[0], uint8_t{0xAB});
+    CHECK_EQ(buf[1], uint8_t{0xCD});
+}
+
+TEST(secure_bytes_reserve_grows_capacity_without_realloc_on_append)
+{
+    crypto::SecureBytes buf;
+    REQUIRE(buf.reserve(256));
+    CHECK(buf.capacity() >= 256);
+    const uint8_t* p = buf.data();
+    REQUIRE(buf.append(std::array<uint8_t, 64>{1}));
+    CHECK(buf.data() == p);                             // no reallocation happened
+    CHECK_EQ(buf.size(), static_cast<size_t>(64));
+}
+
+TEST(secure_bytes_reserve_zero_is_noop)
+{
+    crypto::SecureBytes buf;
+    CHECK_TRUE(buf.reserve(0));
+    CHECK_TRUE(buf.reserve(8));
+    CHECK(buf.capacity() >= 8);
+}
+
+TEST(secure_bytes_growth_realloc_wipes_released_capacity)
+{
+    // Every capacity bump releases the old locked block; each release must be
+    // wiped (OSV-AUD-003: wipe-before-reallocation). Observed via the seam.
+    crypto::detail::reset_wipe_observations_for_tests();
+    const uint64_t before = crypto::detail::wiping_deallocation_count();
+    crypto::SecureBytes buf;
+    for (int i = 0; i < 2000; ++i)
+        REQUIRE(buf.push_back(static_cast<uint8_t>(i % 251)));
+    CHECK(crypto::detail::wiping_deallocation_count() > before);
+    CHECK_EQ(buf.size(), static_cast<size_t>(2000));
+    // Every released block was actually zeroed (record_wipe observes 0s).
+    CHECK_TRUE(crypto::detail::all_wipe_observations_zero_for_tests());
+}
+
+TEST(secure_bytes_growth_alloc_failure_preserves_contents)
+{
+    crypto::SecureBytes buf;
+    const std::array<uint8_t, 4> seed{{1, 2, 3, 4}};
+    REQUIRE(buf.append(seed));
+    crypto::detail::inject_secure_allocation_failure(0);
+    const std::array<uint8_t, 16> more{{9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9}};
+    CHECK_FALSE(buf.append(more));
+    crypto::detail::clear_secure_allocation_failure();
+    CHECK_EQ(buf.size(), static_cast<size_t>(4));   // contents fully intact
+    CHECK_BYTES_EQ(buf.as_span(), std::span(seed));
+}
+
+TEST(secure_bytes_clear_wipes_and_releases)
+{
+    crypto::detail::reset_wipe_observations_for_tests();
+    crypto::SecureBytes buf;
+    const std::array<uint8_t, 8> seed{{0xA5, 0x5A, 0xA5, 0x5A, 0xA5, 0x5A, 0xA5, 0x5A}};
+    REQUIRE(buf.append(seed));
+    buf.clear();
+    CHECK_TRUE(buf.empty());
+    CHECK_EQ(buf.size(), static_cast<size_t>(0));
+    CHECK_EQ(buf.capacity(), static_cast<size_t>(0));   // lock budget released
+    CHECK_TRUE(crypto::detail::all_wipe_observations_zero_for_tests());
+}

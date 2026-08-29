@@ -59,6 +59,15 @@ static std::vector<uint8_t> pattern(size_t n, uint8_t seed)
     return v;
 }
 
+// Phase 96 (OSV-AUD-003): StagedVideoInfo::poster_jpeg is a SecureBytes (a
+// move-only type has no initializer-list assignment).
+static crypto::SecureBytes secure_jpeg(std::initializer_list<uint8_t> bytes)
+{
+    crypto::SecureBytes out;
+    (void)out.assign(std::span<const uint8_t>(bytes.begin(), bytes.size()));
+    return out;
+}
+
 TEST(effective_tags_unions_own_and_ancestors) {
     using enum vault::VaultResult;
     TempVault tv("efftags");
@@ -312,7 +321,7 @@ TEST(transfer_video_carries_extras) {
 
     const auto video_data = pattern(2u << 20, 13);
     vault::StagedVideoInfo info;
-    info.poster_jpeg = {0xFF, 0xD8, 1, 2, 3};
+    info.poster_jpeg = secure_jpeg({0xFF, 0xD8, 1, 2, 3});
     info.codec       = vault::VideoCodec::Unknown;
     info.container   = vault::VideoContainer::Unknown;
     info.width = 320; info.height = 240; info.duration_us = 99;
