@@ -1,6 +1,7 @@
 #include "ui/unlock_job.h"
 
 #include <cstring>
+#include <exception>
 #include <system_error>
 #include <utility>
 
@@ -93,7 +94,7 @@ bool UnlockJob::launch(std::span<const uint8_t> password, std::span<const uint8_
             done_.store(true);
         });
         return true;
-    } catch (...) {
+    } catch (const std::exception&) {
         // The worker thread could not be created (or an allocation in thread
         // machinery failed): the secrets must not stay resident waiting for a
         // worker that will never run.
