@@ -83,7 +83,7 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
 - **`read_fp_`** — second read-only unbuffered FILE* (opened at unlock, closed+wiped at lock). All read paths move to it: thumbnail decrypt, full-image fetch, `VideoSource` (chunks are immutable once appended, so reads never race worker appends). No contention with worker writes.
 - **`write_fp_` + `write_mutex_`** — original write handle guarded by a std::mutex. Worker appends chunks under lock (whole chunks, no bounded slices to avoid interleaving hazards).
 - **`header_mutex_`** — separate guard for slot-field mutations during commit (active_slot flip + generation update), to reduce lock hold time contention.
-- **`Vault::lock()` auto-stops the CommitLane** before key wipe, preventing mid-flight commits after the key is gone.
+- **`Vault::lock()` auto-stops the CommitLane** before key wipe, preventing mid-flight commits after the key is gone. **Phase 94 (OSV-AUD-001):** lock() then clears `settings_ = VaultSettings{}` too — a lock is a complete decrypted-state boundary; the category names / descriptions / template fields / field values are index-derived plaintext that must not outlive the key and tree wipe. A re-unlock re-populates `settings_` from the index slot.
 
 ### Phase 58 concurrency: `thumb_fp_` + `thumb_mutex_` (async-safe thumbnail reads)
 - **`thumb_fp_`** — THIRD dedicated file handle, separate from `read_fp_`, for thread-safe
@@ -136,8 +136,11 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   `ui/gallery_sort.*` (see `mem:module/ui`).
 - `vault::vault_settings(v)` / `vault::set_vault_settings(v,VaultSettings)` (Phase 49) —
   vault-global settings; the setter persists through the same crash-safe commit_index swap and
-  returns `Locked` on a locked vault. Held in `Vault::settings_`; `reset()` clears it and
-  `create()` seeds it. **Both move operations must carry `settings_`** — they originally
+  returns `Locked` on a locked vault. Held in `Vault::settings_`; `reset()` clears it,
+  `create()` seeds it, and `lock()` clears it. **Phase 94 (OSV-AUD-001):** the getter returns an
+  immutable process-wide empty object while `!unlocked_` (locked or not-yet-unlocked), never the
+  retained copy — defense in depth over the lock-time clear. **Both move operations must carry
+  `settings_`** — they originally
   omitted it, silently dropping settings on a move (fixed, regression-tested).
 - `vault::find_tag_description(settings, tag_name)` / `vault::set_tag_description(settings, tag_name, description)` (Phase 51) —
   key-value store on a `VaultSettings` (NOT Vault methods — `Vault` is at its `cpp:S1448` 35-method cap). Keys matched

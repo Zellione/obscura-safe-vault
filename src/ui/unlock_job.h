@@ -65,4 +65,10 @@ private:
     std::jthread        thread_;
 };
 
+// Test-only (OSV-AUD-006): when set, the next UnlockJob::launch() fails at
+// worker-thread creation (simulating std::system_error from the OS), so a
+// deterministic test can prove both copied secrets are wiped when a job cannot
+// launch. Disarmed by default.
+void test_only_force_unlock_thread_failure(bool on) noexcept;
+
 } // namespace ui

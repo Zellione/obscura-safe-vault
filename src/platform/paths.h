@@ -6,6 +6,8 @@
 #include <string_view>
 #include <vector>
 
+#include "crypto/secure_mem.h"
+
 namespace platform {
 
 // Longest path we will hand to fopen(). Generous next to PATH_MAX (4096 on
@@ -63,8 +65,20 @@ inline constexpr size_t KEYFILE_SIZE = 64;
 // provides no useful security benefit and would make unlock an allocation DoS.
 inline constexpr size_t MAX_KEYFILE_BYTES = 16U * 1024U * 1024U;
 
-[[nodiscard]] std::optional<std::vector<uint8_t>>
-read_keyfile(const std::filesystem::path& path);
+// Read a keyfile into mlock'd, wipe-on-release SecureBytes (OSV-AUD-006): key
+// material must never be strewn across freed heap blocks by a plain vector, and
+// EVERY failure path (partial read, too-large file, allocation failure) must
+// wipe the bytes already read. nullopt if it cannot be opened/read, exceeds the
+// limit, or the secure allocation fails.
+[[nodiscard]] std::optional<crypto::SecureBytes> read_keyfile(const std::filesystem::path& path);
+
+// Fault-injection (OSV-AUD-006): make the next read_keyfile read perform a
+// SHORT read (returning only half the file) and report it as the partial-read
+// failure it is, so the failure path proves the bytes already read are wiped.
+// Mirrors vault's inject_sync_failure test-hook convention; disarmed by default
+// and after one short read.
+void inject_keyfile_short_read() noexcept;
+void clear_keyfile_short_read() noexcept;
 
 // Create a fresh CSPRNG keyfile at `path`. Refuses to overwrite an existing
 // file: clobbering a keyfile with new random bytes would permanently lock

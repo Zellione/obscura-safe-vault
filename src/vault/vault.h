@@ -547,7 +547,9 @@ private:
 
 // The vault's global settings — tag categories, default sort, tile-tag flag
 // (Phase 49). Returns the seeded set for a vault that has never stored any.
-// Safe to call while locked (returns the last-loaded value).
+// While locked (or before unlock) returns an immutable EMPTY object —
+// lock() clears the decrypted copy and the getter never reports a stale one
+// (OSV-AUD-001). Callers may only read the reference while the vault is open.
 [[nodiscard]] const VaultSettings& vault_settings(const Vault& v) noexcept;
 
 // Replace the vault's global settings and persist them via the crash-safe index

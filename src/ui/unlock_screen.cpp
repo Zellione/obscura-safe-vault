@@ -289,7 +289,7 @@ void UnlockScreen::submit()
         return;
     }
 
-    std::vector<uint8_t> keyfile;
+    crypto::SecureBytes keyfile;
     if (!keyfile_path_.empty()) {
         auto kf = platform::read_keyfile(platform::utf8_to_path(keyfile_path_));
         if (!kf) { error_ = "Cannot read keyfile."; return; }
@@ -299,20 +299,19 @@ void UnlockScreen::submit()
     const SubmitDecision d = decide_submit(create_mode_, password_.pw.bytes(), password_.confirm.bytes());
     if (d.error) {
         error_ = d.error;
-        if (!keyfile.empty()) crypto_wipe(keyfile.data(), keyfile.size());
-        return;
+        return;  // keyfile (a SecureBytes) wipes itself on scope exit
     }
 
     // Hand the KDF to the worker; the job copies password + keyfile into its
     // own mlock'd buffers before returning, so both can be wiped/kept here.
     // update() collects the outcome and navigates / reports the error.
     if (d.action == SubmitAction::Create) {
-        job_.start_create(vault_, platform::path_to_utf8(vault_path_), password_.pw.bytes(), keyfile,
-                          crypto::DEFAULT_KDF_PARAMS);
+        job_.start_create(vault_, platform::path_to_utf8(vault_path_), password_.pw.bytes(),
+                          keyfile.as_span(), crypto::DEFAULT_KDF_PARAMS);
     } else {
-        job_.start_unlock(vault_, platform::path_to_utf8(vault_path_), password_.pw.bytes(), keyfile);
+        job_.start_unlock(vault_, platform::path_to_utf8(vault_path_), password_.pw.bytes(),
+                          keyfile.as_span());
     }
-    if (!keyfile.empty()) crypto_wipe(keyfile.data(), keyfile.size());
 }
 
 

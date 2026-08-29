@@ -514,6 +514,11 @@ void Vault::lock() noexcept
     unlocked_ = false;
     root_ = IndexNode::gallery("");
     saved_searches_.clear();
+    // OSV-AUD-001: lock must be a complete decrypted-state boundary. settings_
+    // holds decrypted index-derived metadata (tag category names, descriptions,
+    // template field names, tag field values) that must not outlive the key
+    // and index wipe. A re-unlock re-populates it from the index slot.
+    settings_ = VaultSettings{};
 }
 
 void Vault::reset() noexcept
@@ -1378,6 +1383,15 @@ VaultResult set_gallery_sort(Vault& v, std::string_view gallery_path, SortKey ke
 
 const VaultSettings& vault_settings(const Vault& v) noexcept
 {
+    if (!v.unlocked_) {
+        // OSV-AUD-001: a locked (or not-yet-unlocked) vault must never expose
+        // retained decrypted settings. A function-local static is one
+        // process-wide immutable empty instance (the cpp:S5421 idiom used by
+        // crypto::mlock_failed_flag); the const& is read-only, so retaining it
+        // across an unlock is harmless.
+        static const VaultSettings empty;
+        return empty;
+    }
     return v.settings_;
 }
 

@@ -1,5 +1,6 @@
 #include "test_framework.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -119,4 +120,27 @@ TEST(mlock_failure_seen_tracks_the_warn_gate)
     CHECK_TRUE(crypto::mlock_failure_seen());
     CHECK_FALSE(crypto::should_warn_mlock_once());
     CHECK_TRUE(crypto::mlock_failure_seen());
+}
+
+TEST(secure_bytes_destruction_records_wipe_observation)
+{
+    // OSV-AUD-006: read_keyfile/unlock_job secrets are SecureBytes; the wipe
+    // observation seam must therefore cover SecureBytes deallocation so a
+    // partial-read/launch-failure test can prove bytes already read are wiped.
+    crypto::detail::reset_wipe_observations_for_tests();
+    {
+        crypto::SecureBytes buf(64);
+        std::fill_n(buf.data(), buf.size(), 0xA5);
+    }
+    CHECK(crypto::detail::wiping_deallocation_count() >= 1);
+    CHECK_TRUE(crypto::detail::all_wipe_observations_zero_for_tests());
+}
+
+TEST(secure_bytes_injected_allocation_failure_returns_false)
+{
+    crypto::SecureBytes buf;
+    crypto::detail::inject_secure_allocation_failure(0);
+    CHECK_FALSE(buf.resize(32));
+    crypto::detail::clear_secure_allocation_failure();
+    CHECK_TRUE(buf.empty());
 }

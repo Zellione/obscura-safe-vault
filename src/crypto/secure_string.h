@@ -227,6 +227,7 @@ private:
         if (!data_) return;
         crypto_wipe(data_.get(), size_);
         if (locked_) detail::mem_unlock(data_.get(), size_);
+        detail::record_wipe_for_tests(std::as_bytes(std::span(data_.get(), size_)));
         data_.reset();
         size_ = 0;
         locked_ = false;

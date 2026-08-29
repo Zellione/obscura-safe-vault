@@ -1,13 +1,16 @@
 #include "test_framework.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #if !defined(_WIN32)
 #  include <sys/stat.h>
 #endif
 
+#include "crypto/secure_mem.h"
 #include "platform/path_utf8.h"
 #include "platform/paths.h"
 
@@ -74,7 +77,7 @@ TEST(paths_write_new_keyfile_creates_random_bytes)
     CHECK_EQ(fa->size(), platform::KEYFILE_SIZE);
     CHECK_EQ(fb->size(), platform::KEYFILE_SIZE);
     // Two CSPRNG keyfiles colliding is a 2^-512 event.
-    CHECK_FALSE(testing::bytes_equal(*fa, *fb));
+    CHECK_FALSE(testing::bytes_equal(fa->as_span(), fb->as_span()));
 
     std::filesystem::remove(a);
     std::filesystem::remove(b);
@@ -93,7 +96,50 @@ TEST(paths_write_new_keyfile_refuses_to_overwrite)
     CHECK_FALSE(platform::write_new_keyfile(p));
     const auto after = platform::read_keyfile(p);
     REQUIRE(after.has_value());
-    CHECK_BYTES_EQ(std::span<const uint8_t>(*after), std::span<const uint8_t>(*before));
+    CHECK_BYTES_EQ(after->as_span(), before->as_span());
+
+    std::filesystem::remove(p);
+}
+
+TEST(paths_read_keyfile_returns_secure_bytes)
+{
+    // OSV-AUD-006: read_keyfile must hand back a wiping SecureBytes (not a
+    // plain vector), so bytes already read are wiped on ANY failure path.
+    const auto p = std::filesystem::temp_directory_path() / "osv_keyfile_secure.key";
+    std::filesystem::remove(p);
+    REQUIRE(platform::write_new_keyfile(p));
+
+    auto got = platform::read_keyfile(p);
+    REQUIRE(got.has_value());
+    CHECK_EQ(got->size(), platform::KEYFILE_SIZE);
+    CHECK_TRUE(got->is_locked());  // a keyfile is exactly the sort of secret mlock exists for
+
+    std::filesystem::remove(p);
+}
+
+TEST(paths_read_keyfile_partial_read_wipes_bytes_already_read)
+{
+    const auto p = std::filesystem::temp_directory_path() / "osv_keyfile_partial.key";
+    std::filesystem::remove(p);
+    const std::vector<uint8_t> data(4096, 0xAB);  // recognizable non-zero bytes
+    {
+        std::FILE* f = std::fopen(p.string().c_str(), "wb");
+        REQUIRE(f != nullptr);
+        std::fwrite(data.data(), 1, data.size(), f);
+        std::fclose(f);
+    }
+
+    crypto::detail::reset_wipe_observations_for_tests();
+    const uint64_t before = crypto::detail::wiping_deallocation_count();
+
+    platform::inject_keyfile_short_read();
+    CHECK_FALSE(platform::read_keyfile(p).has_value());
+    platform::clear_keyfile_short_read();
+
+    // The short read filled (half of) the SecureBytes with 0xAB; the failed
+    // read must have released that buffer and wiped the bytes it held.
+    CHECK(crypto::detail::wiping_deallocation_count() > before);
+    CHECK_TRUE(crypto::detail::all_wipe_observations_zero_for_tests());
 
     std::filesystem::remove(p);
 }
