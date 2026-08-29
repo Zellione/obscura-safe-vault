@@ -44,8 +44,9 @@ make_thumbnail(const ImageData& src, int max_side, int quality)
     // Phase 96 (OSV-AUD-003): resized RGB pixels are plaintext derived content —
     // mlock'd, wipe-on-release SecureBytes, never std::vector<uint8_t>.
     crypto::SecureBytes resized;
-    const size_t resized_bytes = static_cast<size_t>(tw) * static_cast<size_t>(th) * 3;
-    if (!resized.resize(resized_bytes)) return std::nullopt;
+    if (const size_t resized_bytes = static_cast<size_t>(tw) * static_cast<size_t>(th) * 3;
+        !resized.resize(resized_bytes))
+        return std::nullopt;
     // STBIR_RGB == 3; cast documented as valid for back-compat with old channel-count API.
     if (!stbir_resize_uint8_linear(
             src.pixels.data(), src.width, src.height, 0,
