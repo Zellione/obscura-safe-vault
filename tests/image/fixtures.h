@@ -41,4 +41,11 @@ inline std::vector<uint8_t> load_anim_webp_alpha() { return load_fixture("sample
 inline std::vector<uint8_t> load_heic() { return load_fixture("sample.heic"); }
 inline std::vector<uint8_t> load_avif() { return load_fixture("sample.avif"); }
 
+// Phase 95 (security audit OSV-AUD-002): decode regressions for the grid-image
+// pixel-initialization path (GHSA-2vh6) and the overlay-compositing path
+// (GHSA-hg7q), fixed by the libheif 1.23.2 upgrade. Generated fixtures, see
+// fixtures/README.md.
+inline std::vector<uint8_t> load_grid_avif()      { return load_fixture("sample_grid.avif"); }
+inline std::vector<uint8_t> load_overlay_heic()   { return load_fixture("sample_overlay.heic"); }
+
 } // namespace fixtures

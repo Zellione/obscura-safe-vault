@@ -11,9 +11,9 @@ This document tracks the pinned versions of all vendored third-party libraries a
 | **stb** | master | Header-only image decode (JPEG/PNG/GIF/BMP), text rendering | **Yes** |
 | **miniz** | e78dfd2 (master) | ZIP archive decompression | **Yes** |
 | **libwebp** | 1.4.0 | WebP image decoding (decode-only) | **Yes** |
-| **libde265** | v0.1-2267-g17bb8d9f | HEVC video codec (decode-only, internal to libheif) | **Yes** |
+| **libde265** | 1.0.15 (v1.0.15, 17bb8d9f) | HEVC video codec (decode-only, internal to libheif) | **Yes** |
 | **libaom** | 3.14.1 | AV1 video codec (decode-only); AVIF stills via libheif, and (Phase 40) linked a second time into FFmpeg as its `libaom-av1` decoder for AV1 video | **Yes** |
-| **libheif** | 1.18.2 | HEIF container format parser (HEIC/AVIF) | **Yes** |
+| **libheif** | 1.23.2 | HEIF container format parser (HEIC/AVIF) | **Yes** |
 | **FFmpeg** | 7.1.1 (n7.1.1) | Video and audio frame decoding (decode-only, static linked; H.264/H.265 + ProRes/DNxHD/MJPEG since Phase 28; VP8/VP9 since Phase 38; AV1 via libaom + QTRLE/Cinepak since Phase 40; GIF demuxer + decoder since Phase 47; legacy containers AVI/MPEG-PS/MPEG-TS/ASF/FLV/Ogg/RealMedia + ~34 legacy codecs since Phase 52; libavfilter linked for yadif deinterlacing since Phase 52; VAAPI/D3D11VA hwaccels enabled since Phase 52) | **Yes** |
 | **nlohmann/json** | v3.12.0 | Header-only JSON parsing (archive `meta.json`, Phase 27) | **Yes** |
 | **zlib** | 1.3.2 | gzip filter for libarchive (`.tar.gz`) | **Yes** |
@@ -61,6 +61,40 @@ Then cross-reference against:
   - xz/liblzma: https://github.com/tukaani-project/xz/security/advisories (note: unrelated to the 2024 XZ Utils backdoor, CVE-2024-3094, which targeted the `liblzma` build's injected `.so` — we build a static lib from source with no such injected artifact)
 
 If new CVEs are discovered, follow the bump procedure (see below).
+
+### libheif advisory review (Phase 95 / OSV-AUD-002, reviewed 2026-08-29)
+
+Target of the upgrade: **1.18.2 → 1.23.2**. Every libheif advisory published
+after 1.18.2 was checked against the project's enabled decode path
+(HEIC via vendored libde265, AVIF via vendored libaom, plugin loading OFF,
+decode-only, no encoders). 1.23.2 fixes all reviewed advisories and is
+ABI/API-compatible with 1.23.1:
+
+| Advisory | Affected ≤ | Component | Fixed by |
+|---|---|---|---|
+| GHSA-9h96-c44j-jpq9 (heap stride-integer-overflow, undersized plane allocs) | 1.19.8 | HEVC/AV1 plane allocation | 1.19.x |
+| GHSA-2vh6-whr3-cmq3 (heap info disclosure via uninitialized grid pixels) | 1.21.2 | grid-image decode | 1.21.2+ |
+| GHSA-hg7q-rjr2-8x46 (heap OOB reads in overlay compositing) | 1.21.2 | overlay (iovl) composite | 1.21.2+ |
+| GHSA-g89c-p67h-r497 (heap overflow in `scale_nearest_neighbor`, duplicate alpha planes; **critical**) | 1.23.1 | derived-item decode | **1.23.2** |
+| GHSA-2jg2-4ch7-h545 (OOB R/W in derived-item/pixel-plane handling; **critical**, confirmed code-exec) | 1.23.1 | iden/auxl chains | **1.23.2** |
+| GHSA-24wx-9w62-c96w (brotli/zlib decompression bomb in mime/unci) | 1.23.1 | decompression limits | **1.23.2** |
+| GHSA-x8xm-cm2c-cfc8 (CPU/memory amplification via derived-image ref chains) | 1.23.1 | decode caching/limits | **1.23.2** |
+| GHSA-xw34-mjcp-jqh8 (non-terminating decode loop via sequence sample timing) | 1.23.1 | sequence decode | **1.23.2** |
+| GHSA-j264-xvrp-5v7q (OOB write in unci encoder) | 1.23.1 | unci encoder — **not shipped** (decode-only) | — |
+| GHSA-p58j-h3vm-3fp5 (heap OOB read in inline-mask region API) | 1.23.1 | region API — not exercised by Decoder | **1.23.2** |
+
+**Build changes required by the 1.23.x surface:** libheif now builds at
+**C++20** and gained a `plugin_option` mechanism where `WITH_X264` and
+`WITH_OpenH264_DECODER` default **ON** — both must stay **OFF** in
+`scripts/build_codecs.{sh,bat}` or libheif pulls in an unwanted AVC
+encoder/decoder (Phase 95). The decoder-only build keeps `WITH_LIBDE265=ON`,
+`WITH_AOM_DECODER=ON`, `ENABLE_PLUGIN_LOADING=OFF` — libde265 and libaom stay
+statically baked in. The 1.23.2 hardening "C++ exceptions cannot escape the C
+API read/decode entry points" also matches this project's no-exceptions policy.
+
+Transitive compatibility confirmed at build time: vendored **libde265 1.0.15**
+and **libaom 3.14.1** both satisfy 1.23.2's `find_package` minimums and stay
+linked statically into `libheif.a` (verified by undefined-symbol scan).
 
 ## How to Bump a Dependency
 

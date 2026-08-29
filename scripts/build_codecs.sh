@@ -100,9 +100,14 @@ build_codec aom "$REPO_ROOT/vendor/libaom"                             \
 
 # libheif ties it together; decoders are baked in statically (no plugin loading)
 # and it finds libde265/libaom via CMAKE_PREFIX_PATH (the staging prefix).
+# libheif >= 1.19 adds the plugin_option mechanism (WITH_<name> + WITH_<name>_PLUGIN)
+# and requires C++20; WITH_X264 and WITH_OpenH264_DECODER default ON since 1.19 and
+# MUST be disabled explicitly or libheif pulls in an unwanted AVC encoder/decoder
+# (find_package succeeds whenever the system ships one). Phase 95 (OSV-AUD-002).
 build_codec heif "$REPO_ROOT/vendor/libheif"                           \
     -DWITH_LIBDE265=ON -DWITH_AOM_DECODER=ON -DWITH_AOM_ENCODER=OFF     \
-    -DWITH_X265=OFF -DWITH_EXAMPLES=OFF -DWITH_GDK_PIXBUF=OFF           \
+    -DWITH_X265=OFF -DWITH_X264=OFF -DWITH_OpenH264_DECODER=OFF         \
+    -DWITH_EXAMPLES=OFF -DWITH_GDK_PIXBUF=OFF                           \
     -DENABLE_PLUGIN_LOADING=OFF -DBUILD_TESTING=OFF                     \
     -DCMAKE_DISABLE_FIND_PACKAGE_Doxygen=ON                            \
     -DCMAKE_C_FLAGS=-DLIBDE265_STATIC_BUILD                            \
