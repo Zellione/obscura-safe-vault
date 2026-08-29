@@ -28,6 +28,33 @@ and `src/media/` (FFmpeg video/audio, whole subsystem gated `OSV_VENDORED_AV`).
   `read_thumbnail()` and cache strategy; a false return yields an empty Result (memoized as
   failed). `image/` stays vault-agnostic: the caller brings the fetch logic.
 
+### thumbnail/posters secure-buffer ownership (Phase 96 / OSV-AUD-003)
+`make_thumbnail()` returns `std::optional<crypto::SecureBytes>`; the resized RGB buffer and the
+JPEG encoder sink are both **growable `SecureBytes`** (capacity-aware `reserve`/`append`/
+`push_back` — see `crypto::SecureBytes` in `secure_mem.h`), never `std::vector<uint8_t>`. The
+stbi_write callback is capture-less (stbi wants a function pointer), so the sink rides in `ctx`
+as a `{crypto::SecureBytes bytes; bool failed;}` struct; an append OOM marks `failed` and
+`make_thumbnail` returns `nullopt` — never a truncated JPEG.
+
+Application-owned thumbnail/poster intermediates, converted to `crypto::SecureBytes`:
+
+| Buffer | Was | Now |
+|---|---|---|
+| `make_thumbnail` returned JPEG | `std::optional<std::vector<uint8_t>>` | `std::optional<crypto::SecureBytes>` |
+| resized RGB / JPEG encoder sink | `std::vector<uint8_t>` | growable `crypto::SecureBytes` |
+| `StagedThumb::thumb_jpeg`, `StagedVideoInfo::poster_jpeg` | `std::vector<uint8_t>` | `crypto::SecureBytes` |
+| `VideoProbeResult::poster_jpeg` | `std::vector<uint8_t>` | `crypto::SecureBytes` |
+| migration `Result::{thumb_jpeg, poster_jpeg}` | `std::vector<uint8_t>` | `crypto::SecureBytes` |
+| staging `DecodedThumb::thumb_bytes` | `std::vector<uint8_t>` | `crypto::SecureBytes` |
+| transfer `prestage_image/video_info` | `assign(ptr, len)` into a vector | `assign(blob.as_span())` — SecureBytes→SecureBytes, no plain copy |
+
+Non-owning consumers (`append_chunk`, `apply_image_thumb`, `apply_video_poster`,
+`VideoProbeApply`) take `std::span<const uint8_t>` and read via `.as_span()`. All growth
+releases wipe the old locked block (observed by the wipe-observation seam). **Opaque
+codec-owned planes stay library-owned** — libwebp AnimDecoder canvas, libheif `heif_image`,
+FFmpeg AVFrame/packet buffers — the application copy is already `SecureBytes`; libheif and
+animated-WebP have no caller-supplied-buffer decode API, and FFmpeg internals are Phase D.
+
 ## media/ (gated OSV_VENDORED_AV except anim_decoder.h + webp_anim_decoder.*)
 Files: `video_source.*`, `chunk_avio.*`, `mem_avio.*`, `video_decoder.*`, `audio_decoder.*`,
 `av_sync.*`, `audio_frame.h`, `volume_setting.*`, `loop_setting.*`, `video_probe.*`,

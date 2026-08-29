@@ -473,7 +473,7 @@ TEST(thumbnail_small_image_not_upscaled)
     const auto thumb = image::make_thumbnail(*img, 256);
     REQUIRE(thumb.has_value());
 
-    const auto decoded = image::decode_from_memory(*thumb);
+    const auto decoded = image::decode_from_memory(thumb->as_span());
     REQUIRE(decoded.has_value());
     CHECK_EQ(decoded->width,  10);
     CHECK_EQ(decoded->height, 10);
@@ -489,7 +489,7 @@ TEST(thumbnail_wide_image_scaled_down)
     const auto thumb = image::make_thumbnail(*img, 100);
     REQUIRE(thumb.has_value());
 
-    const auto decoded = image::decode_from_memory(*thumb);
+    const auto decoded = image::decode_from_memory(thumb->as_span());
     REQUIRE(decoded.has_value());
     CHECK(decoded->width  <= 100);
     CHECK(decoded->height <= 100);
@@ -507,7 +507,7 @@ TEST(thumbnail_tall_image_scaled_down)
     const auto thumb = image::make_thumbnail(*img, 50);
     REQUIRE(thumb.has_value());
 
-    const auto decoded = image::decode_from_memory(*thumb);
+    const auto decoded = image::decode_from_memory(thumb->as_span());
     REQUIRE(decoded.has_value());
     CHECK(decoded->width  <= 50);
     CHECK(decoded->height <= 50);
@@ -526,6 +526,61 @@ TEST(thumbnail_produces_jpeg_magic_bytes)
     // JPEG always starts with 0xFF 0xD8.
     CHECK_EQ((*thumb)[0], uint8_t{0xFF});
     CHECK_EQ((*thumb)[1], uint8_t{0xD8});
+}
+
+// --- Phase 96 (OSV-AUD-003): thumbnails are secure, wiping buffers ----------
+//
+// make_thumbnail once returned std::vector<uint8_t> (resized pixels + JPEG in
+// ordinary, unwiped heap). Both buffers are now SecureBytes; these tests prove
+// the mlock placement and that every released allocation is wiped.
+
+TEST(thumbnail_output_is_secure_and_locked)
+{
+    const auto buf = fixtures::solid_jpeg(400, 200, 110, 120, 130);
+    const auto img = image::decode_from_memory(buf);
+    REQUIRE(img.has_value());
+
+    const auto thumb = image::make_thumbnail(*img, 100);
+    REQUIRE(thumb.has_value());
+    // The returned JPEG is a SecureBytes (mlock'd best-effort), not a vector.
+    CHECK_TRUE(thumb->is_locked());
+    CHECK_FALSE(thumb->empty());
+}
+
+TEST(thumbnail_pipeline_release_blocks_are_wiped)
+{
+    // The resized RGB buffer is released when make_thumbnail returns, and every
+    // JPEG-capacity bump during encoding releases an earlier block. The wipe
+    // seam must observe them all as fully zeroed.
+    crypto::detail::reset_wipe_observations_for_tests();
+    const uint64_t before = crypto::detail::wiping_deallocation_count();
+    const auto buf = fixtures::solid_png(512, 512, 3, 90, 200);
+    const auto img = image::decode_from_memory(buf);
+    REQUIRE(img.has_value());
+    {
+        const auto thumb = image::make_thumbnail(*img, 256);
+        REQUIRE(thumb.has_value());
+    }
+    CHECK(crypto::detail::wiping_deallocation_count() > before);
+    CHECK_TRUE(crypto::detail::all_wipe_observations_zero_for_tests());
+}
+
+TEST(thumbnail_encoder_callback_allocation_failure_returns_nullopt)
+{
+    // Injection #0 fails the resized-RGB buffer; injection #1 fails the first
+    // JPEG-encoder callback append (resized succeeded). Both must surface as a
+    // failed thumbnail — never a truncated JPEG or a partial result.
+    const auto buf = fixtures::solid_png(400, 200, 5, 6, 7);
+    const auto img = image::decode_from_memory(buf);
+    REQUIRE(img.has_value());
+
+    crypto::detail::inject_secure_allocation_failure(0);
+    CHECK_FALSE(image::make_thumbnail(*img, 100).has_value());
+    crypto::detail::clear_secure_allocation_failure();
+
+    crypto::detail::inject_secure_allocation_failure(1);
+    CHECK_FALSE(image::make_thumbnail(*img, 100).has_value());
+    crypto::detail::clear_secure_allocation_failure();
 }
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -543,10 +544,12 @@ public:
     SecureBytes& operator=(const SecureBytes&) = delete;
 
     SecureBytes(SecureBytes&& other) noexcept
-        : data_(std::move(other.data_)), size_(other.size_), locked_(other.locked_)
+        : data_(std::move(other.data_)), size_(other.size_), capacity_(other.capacity_),
+          locked_(other.locked_)
     {
-        other.size_   = 0;
-        other.locked_ = false;
+        other.size_     = 0;
+        other.capacity_ = 0;
+        other.locked_   = false;
     }
 
     SecureBytes& operator=(SecureBytes&& other) noexcept
@@ -555,8 +558,10 @@ public:
             free_storage();
             data_         = std::move(other.data_);
             size_         = other.size_;
+            capacity_     = other.capacity_;
             locked_       = other.locked_;
             other.size_   = 0;
+            other.capacity_ = 0;
             other.locked_ = false;
         }
         return *this;
@@ -576,8 +581,9 @@ public:
             platform::safe_println(stderr, "[crypto] SecureBytes alloc of {} bytes failed", n);
             return false;
         }
-        size_   = n;
-        locked_ = detail::mem_lock(data_.get(), size_);
+        size_     = n;
+        capacity_ = n;
+        locked_   = detail::mem_lock(data_.get(), capacity_);
         if (!locked_) warn_mlock_failure_once();
         return true;
     }
@@ -613,6 +619,75 @@ public:
         return true;
     }
 
+    // Phase 96 (OSV-AUD-003) growth API. The thumbnail pipeline (resized RGB,
+    // JPEG encoder callback) appends to a buffer it cannot size up front.
+    // Every capacity bump wipes+unlocks+releases the old locked block (observed
+    // by the wipe seam), never copying secret bytes into ordinary vectors.
+
+    // Ensure capacity for at least `n` bytes, growing the block and wiping the
+    // released block on reallocation. Contents are preserved; false on OOM
+    // leaves the object exactly as it was (stb-resize-friendly semantics).
+    [[nodiscard]] bool reserve(size_t n)
+    {
+        if (n <= capacity_) return true;
+
+        size_t new_cap = n;
+        constexpr size_t kMinGrow = 16;
+        if (capacity_ == 0) {
+            new_cap = std::max(n, kMinGrow);
+        } else {
+            const size_t grown = (capacity_ <= std::numeric_limits<size_t>::max() / 2)
+                                     ? capacity_ * 2
+                                     : capacity_;
+            new_cap = std::max(n, grown);
+        }
+
+        try {
+            if (detail::should_fail_secure_allocation()) throw std::bad_alloc{};
+            auto fresh = std::make_unique<uint8_t[]>(new_cap);
+            if (size_) std::memcpy(fresh.get(), data_.get(), size_);
+            const size_t old_size = size_;
+            free_storage();   // wipes + unlocks + releases the old block
+            data_     = std::move(fresh);
+            size_     = old_size;
+            capacity_ = new_cap;
+            locked_   = detail::mem_lock(data_.get(), capacity_);
+            if (!locked_) warn_mlock_failure_once();
+            return true;
+        } catch (const std::bad_alloc&) {
+            platform::safe_println(stderr, "[crypto] SecureBytes grow to {} bytes failed",
+                                   new_cap);
+            return false;
+        }
+    }
+
+    // Append `src` to the end. False on OOM (contents fully preserved).
+    [[nodiscard]] bool append(std::span<const uint8_t> src)
+    {
+        if (src.empty()) return true;
+        if (src.data() == nullptr) return false;
+        if (size_ > std::numeric_limits<size_t>::max() - src.size()) return false;
+        if (!reserve(size_ + src.size())) return false;
+        std::memcpy(data_.get() + size_, src.data(), src.size());
+        size_ += src.size();
+        return true;
+    }
+
+    // Append a single byte. False on OOM (contents fully preserved).
+    [[nodiscard]] bool push_back(uint8_t b)
+    {
+        if (size_ == capacity_ && !reserve(size_ + 1)) return false;
+        data_[size_++] = b;
+        return true;
+    }
+
+    // Wipe contents and release the whole locked block (size_ == capacity_
+    // == 0 after). Unlike std::vector::clear the memory AND page lock go too:
+    // transient thumbnail/posters should not hold the lock budget.
+    void clear() noexcept { free_storage(); }
+
+    [[nodiscard]] size_t capacity() const noexcept { return capacity_; }
+
     [[nodiscard]] std::span<uint8_t>       span()       noexcept { return {data_.get(), size_}; }
     [[nodiscard]] std::span<const uint8_t> as_span() const noexcept { return {data_.get(), size_}; }
 
@@ -622,17 +697,19 @@ private:
     void free_storage() noexcept
     {
         if (!data_) return;
-        crypto_wipe(data_.get(), size_);
-        if (locked_) detail::mem_unlock(data_.get(), size_);
-        detail::record_wipe_for_tests(std::as_bytes(std::span(data_.get(), size_)));
+        crypto_wipe(data_.get(), capacity_);
+        if (locked_) detail::mem_unlock(data_.get(), capacity_);
+        detail::record_wipe_for_tests(std::as_bytes(std::span(data_.get(), capacity_)));
         data_.reset();
-        size_   = 0;
-        locked_ = false;
+        size_     = 0;
+        capacity_ = 0;
+        locked_   = false;
     }
 
     std::unique_ptr<uint8_t[]> data_;
-    size_t                     size_   = 0;
-    bool                       locked_ = false;
+    size_t                     size_     = 0;
+    size_t                     capacity_ = 0;
+    bool                       locked_   = false;
 };
 
 } // namespace crypto

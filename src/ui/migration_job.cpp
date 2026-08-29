@@ -45,8 +45,8 @@ struct Result {
     uint32_t width = 0;
     uint32_t height = 0;
     uint64_t duration_us = 0;
-    std::vector<uint8_t> poster_jpeg;
-    std::vector<uint8_t> thumb_jpeg;      // ImageThumb / VideoPoster output (Phase 75)
+    crypto::SecureBytes poster_jpeg;
+    crypto::SecureBytes thumb_jpeg;     // ImageThumb / VideoPoster output (Phase 75)
     bool     sniff_animated = false;      // ImageThumb also sniffed (format can animate)
     bool     animated = false;    // images only
 };
@@ -271,7 +271,7 @@ void apply_image_thumb_item(vault::Vault& v, const Item& it, const Result& r,
 {
     // Phase 75: apply the regenerated thumbnail
     if (!r.thumb_jpeg.empty()) {
-        if (vault::apply_image_thumb(v, it.node_path, r.thumb_jpeg, /*sync=*/false) ==
+        if (vault::apply_image_thumb(v, it.node_path, r.thumb_jpeg.as_span(), /*sync=*/false) ==
             vault::VaultResult::Ok) {
             ++out.thumbs_fixed;
         } else {
@@ -294,7 +294,7 @@ void apply_video_poster_item(vault::Vault& v, const Item& it, const Result& r,
 {
     // Phase 75: apply the regenerated poster
     if (!r.thumb_jpeg.empty()) {
-        if (vault::apply_video_poster(v, it.node_path, r.thumb_jpeg, /*sync=*/false) ==
+        if (vault::apply_video_poster(v, it.node_path, r.thumb_jpeg.as_span(), /*sync=*/false) ==
             vault::VaultResult::Ok) {
             ++out.thumbs_fixed;
         } else {
@@ -317,7 +317,7 @@ void apply_video_probe_item(vault::Vault& v, const Item& it, const Result& r,
             .width       = r.width,
             .height      = r.height,
             .duration_us = r.duration_us,
-            .poster_jpeg = std::span<const uint8_t>(r.poster_jpeg),
+            .poster_jpeg = r.poster_jpeg.as_span(),
         };
         vault::apply_video_probe(v, it.node_path, apply, /*sync=*/false) ==
         vault::VaultResult::Ok)
@@ -330,7 +330,7 @@ void apply_video_probe_item(vault::Vault& v, const Item& it, const Result& r,
     // Phase 75: if thumbs_stale and we have a new poster, also replace the old one
     // (apply_video_probe only fills EMPTY poster spans)
     if (it.thumbs_stale && !r.poster_jpeg.empty() &&
-        vault::apply_video_poster(v, it.node_path, r.poster_jpeg, /*sync=*/false) ==
+        vault::apply_video_poster(v, it.node_path, r.poster_jpeg.as_span(), /*sync=*/false) ==
             vault::VaultResult::Ok)
         ++out.thumbs_fixed;
     // If poster replace fails, the probe already succeeded, so don't fail the

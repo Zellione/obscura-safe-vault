@@ -43,7 +43,7 @@ TEST(probe_video_mp4_succeeds_and_fills_metadata)
     CHECK(!result.poster_jpeg.empty());
 
     // Verify the poster decodes successfully.
-    auto poster_data = image::decode_from_memory(std::span(result.poster_jpeg));
+    auto poster_data = image::decode_from_memory(result.poster_jpeg.as_span());
     REQUIRE(poster_data.has_value());
     CHECK(poster_data->width <= 256);
     CHECK(poster_data->height <= 256);
@@ -74,7 +74,7 @@ TEST(probe_video_mov_pro_codecs_fill_metadata_and_poster)
         CHECK(result.duration_us > 0);
         CHECK(!result.poster_jpeg.empty());
 
-        auto poster_data = image::decode_from_memory(std::span(result.poster_jpeg));
+        auto poster_data = image::decode_from_memory(result.poster_jpeg.as_span());
         REQUIRE(poster_data.has_value());
     }
 }
@@ -105,7 +105,7 @@ TEST(probe_video_webm_vp8_vp9_fill_metadata_and_poster)
         CHECK(result.duration_us > 0);
         CHECK(!result.poster_jpeg.empty());
 
-        auto poster_data = image::decode_from_memory(std::span(result.poster_jpeg));
+        auto poster_data = image::decode_from_memory(result.poster_jpeg.as_span());
         REQUIRE(poster_data.has_value());
     }
 }
@@ -133,7 +133,7 @@ TEST(probe_video_mov_legacy_codecs_fill_metadata_and_poster)
         CHECK(result.duration_us > 0);
         CHECK(!result.poster_jpeg.empty());
 
-        auto poster_data = image::decode_from_memory(std::span(result.poster_jpeg));
+        auto poster_data = image::decode_from_memory(result.poster_jpeg.as_span());
         REQUIRE(poster_data.has_value());
     }
 }
@@ -155,7 +155,7 @@ TEST(probe_video_webm_av1_fills_metadata_and_poster)
     CHECK(result.duration_us > 0);
     CHECK(!result.poster_jpeg.empty());
 
-    auto poster_data = image::decode_from_memory(std::span(result.poster_jpeg));
+    auto poster_data = image::decode_from_memory(result.poster_jpeg.as_span());
     REQUIRE(poster_data.has_value());
 }
 
@@ -180,7 +180,7 @@ TEST(probe_video_odd_stride_poster_stays_in_bounds)
     REQUIRE(!result.poster_jpeg.empty());
 
     // The poster must decode and preserve the odd-stride dims (no row shear).
-    auto poster = image::decode_from_memory(std::span(result.poster_jpeg));
+    auto poster = image::decode_from_memory(result.poster_jpeg.as_span());
     REQUIRE(poster.has_value());
     CHECK_EQ(poster->width, 106);
     CHECK_EQ(poster->height, 64);

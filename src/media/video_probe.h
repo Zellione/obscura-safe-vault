@@ -2,8 +2,8 @@
 
 #include <cstdint>
 #include <span>
-#include <vector>
 
+#include "crypto/secure_mem.h"
 #include "vault/index.h"
 
 namespace media {
@@ -15,7 +15,10 @@ struct VideoProbeResult {
     uint32_t width                  = 0;
     uint32_t height                 = 0;
     uint64_t duration_us            = 0;
-    std::vector<uint8_t> poster_jpeg;  // empty if poster generation failed or FFmpeg unavailable
+    // Phase 96 (OSV-AUD-003): the poster JPEG is derived plaintext — mlock'd,
+    // wipe-on-release SecureBytes. Empty if poster generation failed or FFmpeg
+    // unavailable.
+    crypto::SecureBytes poster_jpeg;
 };
 
 // Phase 65: decode-capability generation. Bump whenever this build can decode a
