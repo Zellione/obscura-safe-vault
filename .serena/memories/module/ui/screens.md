@@ -10,6 +10,9 @@ Core UI screens: unlock, gallery browsing, image favorites, tag management, vaul
   `std::jthread` so the screen never freezes; copies password+keyfile into mlock'd
   SecureBytes on start (worker wipes them after the vault call), `active()` /
   `take_outcome()` polling like FileOpJob, no cancel (KDF not interruptible; dtor joins).
+  **Phase 94 (OSV-AUD-006):** every failed launch wipes both secrets — a partial copy
+  (keyfile allocation failure) OR a worker-thread creation failure rolls `pw_`/`keyfile_`
+  back to empty rather than leaving the copied password resident.
   While active the screen swallows ALL input (incl. Esc — a nav would tear the screen down
   under a worker holding &vault_), `animating()` returns true to keep frames ticking, and
   render shows "Deriving key…". Tests: `test_unlock_job.cpp` (real temp vaults, tiny

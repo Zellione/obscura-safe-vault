@@ -62,6 +62,17 @@ namespace {
 #endif
 }
 
+// Fault-injection for read_keyfile (OSV-AUD-006). Armed, the next read reports
+// a short read as the failure it is, so the partial-read path deterministically
+// proves the bytes already read are wiped. The inject_sync_failure convention:
+// a single cold branch on the read path, disarmed before and after one short
+// read.
+[[nodiscard]] std::atomic_bool& keyfile_short_read_flag() noexcept
+{
+    static std::atomic_bool flag{false};
+    return flag;
+}
+
 [[nodiscard]] bool sync_file(std::FILE* fp) noexcept
 {
 #if defined(_WIN32)
@@ -261,9 +272,47 @@ std::optional<std::vector<uint8_t>> read_file(const std::filesystem::path& path,
     return buf;
 }
 
-std::optional<std::vector<uint8_t>> read_keyfile(const std::filesystem::path& path)
+void inject_keyfile_short_read() noexcept
 {
-    return read_file(path, MAX_KEYFILE_BYTES);
+    keyfile_short_read_flag().store(true);
+}
+
+void clear_keyfile_short_read() noexcept
+{
+    keyfile_short_read_flag().store(false);
+}
+
+std::optional<crypto::SecureBytes> read_keyfile(const std::filesystem::path& path)
+{
+    std::FILE* f = fopen_path(path, "rb");
+    if (!f) return std::nullopt;
+
+    // Size first, then one allocation and one read — a chunk-growing buffer
+    // would strew stale copies of key material across freed heap blocks on
+    // every reallocation. The buffer is a SecureBytes, so every failure path
+    // (partial read, too-large file, allocation failure) releases the bytes
+    // already read into a wiping, mlock'd blob instead of a plain vector
+    // (OSV-AUD-006).
+    long long size = -1;
+    bool ok = file_size64(f, size) && seek_to64(f, 0);
+    if (ok) {
+        const auto usize = static_cast<unsigned long long>(size);
+        ok = usize <= MAX_KEYFILE_BYTES && usize <= std::numeric_limits<size_t>::max();
+    }
+    crypto::SecureBytes buf;
+    if (ok && size > 0) ok = buf.resize(static_cast<size_t>(size));
+    if (ok && size > 0) {
+        size_t want = buf.size();
+        if (keyfile_short_read_flag().load()) {
+            keyfile_short_read_flag().store(false);  // armed once
+            want = want / 2;                         // deliberately short read
+        }
+        const size_t got = std::fread(buf.data(), 1, want, f);
+        ok = got == (size_t)size;  // a short read is a partial-read failure
+    }
+    std::fclose(f);
+    if (!ok) return std::nullopt;  // buf is wiped on destruction
+    return buf;
 }
 
 bool write_new_keyfile(const std::filesystem::path& path)

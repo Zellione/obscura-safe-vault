@@ -239,3 +239,16 @@ TEST(wiping_bytes_zeroes_every_allocation_before_release)
     CHECK(crypto::detail::wiping_deallocation_count() >= 2);
     CHECK_TRUE(crypto::detail::all_wipe_observations_zero_for_tests());
 }
+
+TEST(secure_string_destruction_records_wipe_observation)
+{
+    // OSV-AUD-001: lock() releases VaultSettings (SecureString fields) and the
+    // regression test proves the release wipes. The observation seam must cover
+    // SecureString deallocation, not only WipingAllocator.
+    crypto::detail::reset_wipe_observations_for_tests();
+    {
+        crypto::SecureString s(static_cast<std::string_view>("category-name"));
+    }
+    CHECK(crypto::detail::wiping_deallocation_count() >= 1);
+    CHECK_TRUE(crypto::detail::all_wipe_observations_zero_for_tests());
+}

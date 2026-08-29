@@ -7,6 +7,7 @@
 #include <string>
 #include <thread>
 
+#include "crypto/secure_mem.h"
 #include "ui/unlock_job.h"
 #include "vault/vault.h"
 
@@ -127,4 +128,58 @@ TEST(unlock_job_refuses_overlapping_start)
     auto oc = wait_outcome(job);
     REQUIRE(oc.has_value());
     CHECK_TRUE(*oc == Ok);
+}
+
+// --- OSV-AUD-006: failed launches must not leave secrets resident ----------
+
+TEST(unlock_job_keyfile_copy_failure_wipes_password)
+{
+    using enum vault::VaultResult;
+    TempVault tv("keyfail");
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kKdf, v) == Ok);
+    }
+
+    vault::Vault target;
+    ui::UnlockJob job;
+    crypto::detail::reset_wipe_observations_for_tests();
+    const uint64_t before = crypto::detail::wiping_deallocation_count();
+
+    // copy_secret(pw_) succeeds first; the keyfile copy then fails (value=1
+    // leaves the 2nd SecureBytes allocation as the failure). A partially copied
+    // secret must not survive the failed launch.
+    crypto::detail::inject_secure_allocation_failure(1);
+    CHECK_FALSE(job.start_unlock(target, tv.str(), bytes("pw"), bytes("kf")));
+    crypto::detail::clear_secure_allocation_failure();
+
+    CHECK_FALSE(job.active());
+    CHECK(crypto::detail::wiping_deallocation_count() > before);
+    CHECK_TRUE(crypto::detail::all_wipe_observations_zero_for_tests());
+}
+
+TEST(unlock_job_thread_launch_failure_wipes_secrets)
+{
+    using enum vault::VaultResult;
+    TempVault tv("thrdfail");
+    {
+        vault::Vault v;
+        REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kKdf, v) == Ok);
+    }
+
+    vault::Vault target;
+    ui::UnlockJob job;
+    crypto::detail::reset_wipe_observations_for_tests();
+    const uint64_t before = crypto::detail::wiping_deallocation_count();
+
+    ui::test_only_force_unlock_thread_failure(true);
+    CHECK_FALSE(job.start_unlock(target, tv.str(), bytes("pw"), bytes("kf")));
+    ui::test_only_force_unlock_thread_failure(false);
+
+    CHECK_FALSE(job.active());
+    // Both copies made it into mlock'd storage; the failed launch must release
+    // and wipe them rather than leave them resident for a worker that never ran.
+    CHECK_FALSE(job.take_outcome().has_value());
+    CHECK(crypto::detail::wiping_deallocation_count() > before);
+    CHECK_TRUE(crypto::detail::all_wipe_observations_zero_for_tests());
 }

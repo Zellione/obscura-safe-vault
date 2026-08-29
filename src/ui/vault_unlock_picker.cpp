@@ -125,7 +125,7 @@ void VaultUnlockPicker::try_unlock()
 {
     using enum vault::VaultResult;
 
-    std::vector<uint8_t> keyfile;
+    crypto::SecureBytes keyfile;
     if (!dest_.keyfile_path.empty()) {
         auto kf = platform::read_keyfile(platform::utf8_to_path(dest_.keyfile_path));
         if (!kf) { error_ = "Cannot read keyfile."; return; }
@@ -133,8 +133,8 @@ void VaultUnlockPicker::try_unlock()
     }
 
     vault::VaultResult r = vault::Vault::open(dest_.path, dest_.vault);
-    if (r == Ok) r = dest_.vault.unlock(dest_.pw.bytes(), keyfile);
-    if (!keyfile.empty()) crypto_wipe(keyfile.data(), keyfile.size());
+    if (r == Ok) r = dest_.vault.unlock(dest_.pw.bytes(), keyfile.as_span());
+    // keyfile (a SecureBytes) wipes itself on scope exit.
 
     if (r != Ok) {
         error_ = unlock_error_message(r);

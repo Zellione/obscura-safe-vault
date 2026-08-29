@@ -3,11 +3,13 @@
 
 #include "test_framework.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <span>
 #include <string>
 #include <vector>
 
+#include "crypto/secure_mem.h"
 #include "vault/vault.h"
 
 namespace fs = std::filesystem;
@@ -227,4 +229,66 @@ TEST(vault_settings_thumb_side_pre_v12_reads_zero)
     vault::VaultSettings got;
     CHECK(vault::deserialize_index(v11, out, searches, got));
     CHECK_EQ(got.migrated_thumb_side, 0);
+}
+
+// --- OSV-AUD-001: lock() is a complete decrypted-state boundary ------------
+
+TEST(vault_lock_clears_settings_metadata)
+{
+    // A lock must clear every decrypted index-derived setting: category names,
+    // tag descriptions, template field names, and tag field values.
+    TempVault tv;
+    REQUIRE(tv.create_and_unlock() == VaultResult::Ok);
+
+    VaultSettings s = vault::vault_settings(tv.v);
+    s.default_sort = SortKey::NameAsc;
+    s.categories.push_back({.name = crypto::SecureString("studio"), .swatch = 11,
+                            .fields = {crypto::SecureString("room")}});
+    s.tag_descriptions.push_back({.tag = crypto::SecureString("studio"),
+                                  .text = crypto::SecureString("a description")});
+    s.tag_field_values.push_back({.tag = crypto::SecureString("studio"),
+                                  .field = crypto::SecureString("room"),
+                                  .value = crypto::SecureString("11")});
+    REQUIRE(vault::set_vault_settings(tv.v, std::move(s)) == VaultResult::Ok);
+
+    tv.v.lock();
+
+    const auto& got = vault::vault_settings(tv.v);
+    CHECK(got.categories.empty());
+    CHECK(got.tag_descriptions.empty());
+    CHECK(got.tag_field_values.empty());
+}
+
+TEST(vault_settings_opened_not_unlocked_returns_empty)
+{
+    // The getter must not hand out an uninitialized settings object between
+    // open() and unlock() — nothing has been authenticated or deserialised yet.
+    TempVault tv;
+    REQUIRE(tv.create_and_unlock() == VaultResult::Ok);
+
+    Vault again;
+    REQUIRE(Vault::open(tv.str(), again) == VaultResult::Ok);
+    CHECK_FALSE(again.is_unlocked());
+
+    const auto& s = vault::vault_settings(again);
+    CHECK(s.categories.empty());
+    CHECK(s.tag_descriptions.empty());
+}
+
+TEST(vault_lock_wipe_observation_clears_settings_allocations)
+{
+    TempVault tv;
+    REQUIRE(tv.create_and_unlock() == VaultResult::Ok);
+
+    crypto::detail::reset_wipe_observations_for_tests();
+    const uint64_t before = crypto::detail::wiping_deallocation_count();
+    tv.v.lock();
+
+    // lock() must RELEASE the seeded settings (8 category-name SecureStrings).
+    // On a fresh empty vault nothing else that lock() does frees a recorded
+    // allocation, so the increase is the settings release — and
+    // all_wipe_observations_zero proves each released buffer was actually
+    // zeroed before free.
+    CHECK(crypto::detail::wiping_deallocation_count() > before);
+    CHECK_TRUE(crypto::detail::all_wipe_observations_zero_for_tests());
 }
