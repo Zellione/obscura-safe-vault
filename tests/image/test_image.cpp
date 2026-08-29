@@ -22,6 +22,15 @@ namespace fs = std::filesystem;
 
 static const crypto::KdfParams kFastKdf{.t_cost = 1, .m_cost_kib = 8, .parallelism = 1};
 
+// Phase 95: decoded-pixel colour assertions tolerate ±tol LSB round-trip noise
+// from lossless HEVC/AV1 YUV conversion. A free function rather than a lambda —
+// MSVC's parser mis-parses an `auto near = [...]` following this file's
+// `auto px = [&]...` (C2513 when a lambda returns std::array via braced-init).
+static bool within_channel(uint8_t v, int target, int tol)
+{
+    return static_cast<int>(v) >= target - tol && static_cast<int>(v) <= target + tol;
+}
+
 // ---------------------------------------------------------------------------
 // RAII vault in /tmp
 // ---------------------------------------------------------------------------
@@ -419,15 +428,15 @@ TEST(decode_heic_overlay_composites_children_in_order)
         return std::array<uint8_t, 3>{img->pixels[off], img->pixels[off + 1],
                                       img->pixels[off + 2]};
     };
-    auto near = [](int a, int b, int tol) { return a >= b - tol && a <= b + tol; };
 
     // Bottom child: 40x24 solid #3366cc at (0,0).
     const auto bottom = px(4, 4);
-    CHECK(near(bottom[0], 0x33, 3) && near(bottom[1], 0x66, 3) &&
-          near(bottom[2], 0xcc, 3));
+    CHECK(within_channel(bottom[0], 0x33, 3) && within_channel(bottom[1], 0x66, 3) &&
+          within_channel(bottom[2], 0xcc, 3));
     // Top child: 16x16 solid #cc6633 at (8,8), composited over the bottom.
     const auto top = px(10, 10);
-    CHECK(near(top[0], 0xcc, 3) && near(top[1], 0x66, 3) && near(top[2], 0x33, 3));
+    CHECK(within_channel(top[0], 0xcc, 3) && within_channel(top[1], 0x66, 3) &&
+          within_channel(top[2], 0x33, 3));
     // Neither child covers the far bottom-right corner: the opaque black
     // background shows through, proving the canvas is fully initialized.
     const auto bg1 = px(30, 30);
