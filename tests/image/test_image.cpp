@@ -22,6 +22,15 @@ namespace fs = std::filesystem;
 
 static const crypto::KdfParams kFastKdf{.t_cost = 1, .m_cost_kib = 8, .parallelism = 1};
 
+// Phase 95: decoded-pixel colour assertions tolerate ±tol LSB round-trip noise
+// from lossless HEVC/AV1 YUV conversion. A free function rather than a lambda —
+// MSVC's parser mis-parses an `auto near = [...]` following this file's
+// `auto px = [&]...` (C2513 when a lambda returns std::array via braced-init).
+static bool within_channel(uint8_t v, int target, int tol)
+{
+    return static_cast<int>(v) >= target - tol && static_cast<int>(v) <= target + tol;
+}
+
 // ---------------------------------------------------------------------------
 // RAII vault in /tmp
 // ---------------------------------------------------------------------------
@@ -357,6 +366,83 @@ TEST(decode_malformed_heif_returns_nullopt)
     // A truncated ISO-BMFF ftyp box with an HEIC brand but no image payload.
     const std::vector<uint8_t> bad{0,0,0,0x18, 'f','t','y','p', 'h','e','i','c'};
     CHECK_FALSE(image::decode_from_memory(bad).has_value());
+}
+
+// Phase 95 (OSV-AUD-002) decode regressions. Both fixtures exercise libheif
+// paths that carried security advisories fixed by the 1.23.2 upgrade:
+// GHSA-2vh6 (uninitialized grid-image pixels) and GHSA-hg7q (out-of-bounds
+// reads during overlay compositing). A grid fixture decodes to the fully
+// assembled image; an overlay fixture composites its children in order over a
+// background. Colors are asserted with tolerance: lossless HEVC/AV1 still
+// round-trips through a YUV coloursapce, so channel bits can shift by a couple
+// of LSBs (measured: green's chroma sub-samples to 0x80 under AV1).
+
+TEST(decode_avif_grid_reassembles_cells_with_initialized_pixels)
+{
+    const auto buf = fixtures::load_grid_avif();
+    REQUIRE(!buf.empty());  // fixture present
+    const auto img = image::decode_from_memory(buf);
+    REQUIRE(img.has_value());
+    CHECK_EQ(img->format, image::ImageFormat::AVIF);
+    CHECK_EQ(img->width,  128);
+    CHECK_EQ(img->height, 128);
+    CHECK_EQ(img->pixels.size(), static_cast<size_t>(128 * 128 * 3));
+
+    auto px = [&](int x, int y) {
+        const size_t off =
+            (static_cast<size_t>(y) * static_cast<size_t>(img->width) +
+             static_cast<size_t>(x)) *
+            3;
+        return std::array<uint8_t, 3>{img->pixels[off], img->pixels[off + 1],
+                                      img->pixels[off + 2]};
+    };
+
+    // Each 64x64 cell is a different solid colour; assert each quadrant lands
+    // in the right place — the grid assembles, and never publishes stale or
+    // uninitialized pixels.
+    const auto tl = px(10, 10);  // red
+    CHECK(tl[0] > 200 && tl[1] < 80 && tl[2] < 80);
+    const auto tr = px(70, 10);  // green (chroma sub-samples, so G dominates)
+    CHECK(tr[1] > tr[0] && tr[1] > tr[2]);
+    const auto bl = px(10, 70);  // blue
+    CHECK(bl[2] > 200 && bl[0] < 80 && bl[1] < 80);
+    const auto br = px(70, 70);  // white
+    CHECK(br[0] > 200 && br[1] > 200 && br[2] > 200);
+}
+
+TEST(decode_heic_overlay_composites_children_in_order)
+{
+    const auto buf = fixtures::load_overlay_heic();
+    REQUIRE(!buf.empty());  // fixture present
+    const auto img = image::decode_from_memory(buf);
+    REQUIRE(img.has_value());
+    CHECK_EQ(img->format, image::ImageFormat::HEIC);
+    CHECK_EQ(img->width,  64);
+    CHECK_EQ(img->height, 48);
+
+    auto px = [&](int x, int y) {
+        const size_t off =
+            (static_cast<size_t>(y) * static_cast<size_t>(img->width) +
+             static_cast<size_t>(x)) *
+            3;
+        return std::array<uint8_t, 3>{img->pixels[off], img->pixels[off + 1],
+                                      img->pixels[off + 2]};
+    };
+
+    // Bottom child: 40x24 solid #3366cc at (0,0).
+    const auto bottom = px(4, 4);
+    CHECK(within_channel(bottom[0], 0x33, 3) && within_channel(bottom[1], 0x66, 3) &&
+          within_channel(bottom[2], 0xcc, 3));
+    // Top child: 16x16 solid #cc6633 at (8,8), composited over the bottom.
+    const auto top = px(10, 10);
+    CHECK(within_channel(top[0], 0xcc, 3) && within_channel(top[1], 0x66, 3) &&
+          within_channel(top[2], 0x33, 3));
+    // Neither child covers the far bottom-right corner: the opaque black
+    // background shows through, proving the canvas is fully initialized.
+    const auto bg1 = px(30, 30);
+    CHECK(bg1[0] == 0 && bg1[1] == 0 && bg1[2] == 0);
+    const auto bg2 = px(45, 12);
+    CHECK(bg2[0] == 0 && bg2[1] == 0 && bg2[2] == 0);
 }
 
 // ---------------------------------------------------------------------------
