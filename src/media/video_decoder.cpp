@@ -27,6 +27,8 @@ extern "C" {
 #endif
 
 #include <cstring>
+#include "crypto/secure_mem.h"
+#include "media/ffmpeg_secure.h"
 #include "platform/safe_print.h"
 
 #endif  // OSV_VENDORED_AV
@@ -226,6 +228,8 @@ bool VideoDecoder::open(AVIOContext* pb)
     if (avcodec_parameters_to_context(codec_ctx_, stream->codecpar) < 0) {
         return fail_open("avcodec_parameters_to_context failed");
     }
+    codec_ctx_->get_buffer2 = &secure_get_buffer2;
+    mark_ffmpeg_opaque_storage();
     if (avcodec_open2(codec_ctx_, decoder, nullptr) < 0) {
         return fail_open("avcodec_open2 failed");
     }
@@ -336,6 +340,7 @@ bool VideoDecoder::read_and_route()
     if (int ret = av_read_frame(fmt_, pkt_); ret == AVERROR_EOF || ret < 0) {
         return false;
     }
+    if (!secure_packet_storage(pkt_)) mark_ffmpeg_opaque_storage();
 
     // Route packet to the appropriate stream queue
     if (pkt_->stream_index == stream_index_) {
@@ -374,6 +379,7 @@ bool VideoDecoder::pump_one_packet()
         // Read error — terminate gracefully
         return false;
     }
+    if (!secure_packet_storage(pkt_)) mark_ffmpeg_opaque_storage();
 
     // Only send our video stream packets
     if (pkt_->stream_index == stream_index_) {
@@ -606,11 +612,12 @@ std::optional<image::ImageData> VideoDecoder::decode_poster_rgb()
     dst_linesize[0] = FFALIGN(w * 3, 64);
     const size_t dst_alloc =
         static_cast<size_t>(dst_linesize[0]) * h + POSTER_TAIL_PAD;
-    dst_data[0] = static_cast<uint8_t*>(av_malloc(dst_alloc));
-    if (!dst_data[0]) {
+    crypto::SecureBytes scratch;
+    if (!scratch.resize(dst_alloc)) {
         sws_freeContext(sws_rgb);
         return std::nullopt;
     }
+    dst_data[0] = scratch.data();
 
     // Convert (scale) the decoded frame to RGB24.
     const int slices = sws_scale(sws_rgb, frame_->data, frame_->linesize, 0, h,
@@ -634,7 +641,6 @@ std::optional<image::ImageData> VideoDecoder::decode_poster_rgb()
         }
     }
 
-    av_freep(&dst_data[0]);
     sws_freeContext(sws_rgb);
     return out;
 }

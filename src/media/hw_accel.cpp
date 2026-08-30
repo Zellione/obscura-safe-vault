@@ -19,6 +19,8 @@ extern "C" {
 #include <mutex>
 #include <optional>
 
+#include "media/ffmpeg_secure.h"
+
 namespace media {
 
 namespace {
@@ -115,6 +117,7 @@ bool transfer_hw_frame(const AVFrame* frame, AVFrame* sw_frame)
     if (frame->format != kHwPixFmt) return false;
     av_frame_unref(sw_frame);
     if (av_hwframe_transfer_data(sw_frame, frame, 0) < 0) return false;
+    if (!secure_frame_storage(sw_frame)) mark_ffmpeg_opaque_storage();
     // av_hwframe_transfer_data() only copies pixel data, not frame
     // properties — publish_decoded_frame() reads best_effort_timestamp.
     sw_frame->best_effort_timestamp = frame->best_effort_timestamp;

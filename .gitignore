@@ -30,6 +30,9 @@ compile_commands.json
 # roadmap doc to be added with `git add -f`.
 docs/superpowers/
 
+# Ephemeral cold-start handoff (not part of the repo; was historically tracked)
+COLD_HANDOFF.md
+
 # IDE / editor
 .vscode/
 .idea/

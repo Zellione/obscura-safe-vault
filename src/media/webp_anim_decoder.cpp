@@ -99,7 +99,11 @@ std::optional<AnimFrame> WebpAnimDecoder::next_frame()
     frame.width   = impl_->width;
     frame.height  = impl_->height;
     frame.delay_s = webp_frame_delay_s(impl_->prev_ts, timestamp_ms);
-    frame.rgba.resize(w * h * 4);
+    try {
+        frame.rgba.resize(w * h * 4);
+    } catch (const std::bad_alloc&) {
+        return std::nullopt;
+    }
 
     // libwebp's pointer is only valid until the next GetNext/Reset call, so copy
     // it out. Alpha is flattened over black in the same pass: the app carries no

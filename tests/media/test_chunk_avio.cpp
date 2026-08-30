@@ -114,6 +114,31 @@ TEST(chunk_avio_reads_and_seeks_byte_exact)
     CHECK(!fs::exists(tv.str() + ".compact"));
 }
 
+TEST(chunk_avio_buffer_is_locked_and_wiped_on_destroy)
+{
+    auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");
+    REQUIRE(!video_bytes.empty());
+
+    TempVault tv("chunk_avio_secure_buffer");
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v) == vault::VaultResult::Ok);
+    REQUIRE(v.create_gallery("c") == vault::VaultResult::Ok);
+    REQUIRE(v.add_video("c", video_bytes, "v.mp4", 4096) == vault::VaultResult::Ok);
+    auto children = v.list("c");
+    REQUIRE(children.size() == 1);
+
+    crypto::detail::reset_wipe_observations_for_tests();
+    const auto before = crypto::detail::wiping_deallocation_count();
+    {
+        media::ChunkAvio avio(media::VideoSource::open(v, *children[0]));
+        REQUIRE(avio.valid());
+        REQUIRE(avio.buffer_is_locked());
+        std::memset(avio.ctx()->buffer, 0x5C, static_cast<size_t>(avio.ctx()->buffer_size));
+    }
+    CHECK(crypto::detail::wiping_deallocation_count() > before);
+    CHECK(crypto::detail::all_wipe_observations_zero_for_tests());
+}
+
 TEST(chunk_avio_surfaces_decrypt_failure)
 {
     auto video_bytes = read_file(OSV_VAULT_FIXTURE_DIR "/tiny.mp4");

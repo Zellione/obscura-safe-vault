@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "crypto/secure_mem.h"
 #include "media/decoded_frame.h"
 
 #if defined(__GNUC__)
@@ -104,7 +105,8 @@ private:
 // outlive the returned DecodedFrame. Chroma-plane row counts use
 // (height + 1) / 2 for I420/NV12, matching FFmpeg's own subsampling
 // rounding for odd dimensions.
-[[nodiscard]] DecodedFrame copy_owned_frame(const DecodedFrame& src, std::vector<uint8_t>& storage);
+[[nodiscard]] std::optional<DecodedFrame> copy_owned_frame(const DecodedFrame& src,
+                                                           crypto::SecureBytes& storage);
 
 } // namespace media
 

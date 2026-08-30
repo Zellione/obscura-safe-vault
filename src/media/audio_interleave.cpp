@@ -62,8 +62,8 @@ inline float read_sample_as_float<uint8_t>(const uint8_t* plane, int index)
 
 // Interleave planar samples (one plane per channel) to F32.
 template <typename T>
-inline void interleave_planar(const uint8_t* const* planes, int nb_samples,
-                              int channels, std::vector<float>& out) noexcept
+inline void interleave_planar(const uint8_t* const* planes, int nb_samples, int channels,
+                              crypto::SecureVector<float>& out)
 {
     out.resize(nb_samples * channels);
     for (int s = 0; s < nb_samples; ++s) {
@@ -76,8 +76,8 @@ inline void interleave_planar(const uint8_t* const* planes, int nb_samples,
 
 // Interleave packed samples (all channels in one plane) to F32.
 template <typename T>
-inline void interleave_packed(const uint8_t* const* planes, int nb_samples,
-                              int channels, std::vector<float>& out) noexcept
+inline void interleave_packed(const uint8_t* const* planes, int nb_samples, int channels,
+                              crypto::SecureVector<float>& out)
 {
     out.resize(nb_samples * channels);
     const uint8_t* src = planes[0];
@@ -88,9 +88,8 @@ inline void interleave_packed(const uint8_t* const* planes, int nb_samples,
 
 }  // namespace
 
-bool interleave_to_f32(const uint8_t* const* planes, int n_planes,
-                        int nb_samples, int channels, int av_sample_fmt,
-                        std::vector<float>& out) noexcept
+bool interleave_to_f32(const uint8_t* const* planes, int n_planes, int nb_samples, int channels,
+                       int av_sample_fmt, crypto::SecureVector<float>& out) noexcept
 {
     // Input validation: avoid crashes on bad parameters
     if (!planes || n_planes <= 0 || nb_samples < 0 || channels <= 0) {
@@ -102,7 +101,8 @@ bool interleave_to_f32(const uint8_t* const* planes, int n_planes,
 
     auto fmt = static_cast<AVSampleFormat>(av_sample_fmt);
 
-    switch (fmt) {
+    try {
+        switch (fmt) {
         case AV_SAMPLE_FMT_FLTP:
             // Planar float32
             interleave_planar<float>(planes, nb_samples, channels, out);
@@ -146,6 +146,10 @@ bool interleave_to_f32(const uint8_t* const* planes, int n_planes,
         default:
             // Unsupported format
             return false;
+        }
+    } catch (const std::bad_alloc&) {
+        out.clear();
+        return false;
     }
 }
 

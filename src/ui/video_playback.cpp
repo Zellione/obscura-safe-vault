@@ -69,7 +69,7 @@ struct VideoPlayback::Impl {
     // present_pending(), driven by advance() against the playback clock.
     struct FrameState {
         std::optional<media::DecodedFrame> pending;  // next decoded frame (planes valid)
-        std::vector<uint8_t> pending_storage;  // backs pending->planes (owned copy from the worker)
+        crypto::SecureBytes pending_storage;  // backs pending->planes (owned copy from the worker)
         double pending_pts = 0.0;
         double shown_pts = -1.0;             // last presented frame's pts
         double frame_dt = DEFAULT_FRAME_DT;  // estimated, for backward step

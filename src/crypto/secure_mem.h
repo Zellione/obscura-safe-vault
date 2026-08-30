@@ -71,6 +71,36 @@ inline bool should_warn_mlock_once() noexcept
     return mlock_failed_flag().load();
 }
 
+// FFmpeg and some codec/driver APIs retain internal plaintext allocations for
+// which no caller-supplied allocator or final-release callback exists. Track
+// that technically unavoidable boundary separately from a real mlock failure,
+// then fold both into the status shown in F1.
+[[nodiscard]] inline std::atomic_bool& opaque_plaintext_flag() noexcept
+{
+    static std::atomic_bool flag{false};
+    return flag;
+}
+
+inline void mark_opaque_plaintext_seen() noexcept
+{
+    opaque_plaintext_flag().store(true);
+}
+
+[[nodiscard]] inline bool opaque_plaintext_seen() noexcept
+{
+    return opaque_plaintext_flag().load();
+}
+
+[[nodiscard]] inline bool secure_memory_degraded() noexcept
+{
+    return mlock_failure_seen() || opaque_plaintext_seen();
+}
+
+inline void clear_opaque_plaintext_seen_for_tests() noexcept
+{
+    opaque_plaintext_flag().store(false);
+}
+
 // Platform-appropriate remedy advice for the once-per-process mlock warning.
 // On Windows the cap is the process's minimum working-set size (VirtualLock),
 // not RLIMIT_MEMLOCK, so ulimit advice would be meaningless there. Startup
@@ -288,6 +318,18 @@ inline void release_page_refs(PageLockRegistry& registry, uintptr_t first, uintp
         os_unlock_range(range_first, static_cast<size_t>(last - range_first) + page_size);
 }
 
+inline void forget_page_refs(PageLockRegistry& registry, uintptr_t first, uintptr_t last,
+                             size_t page_size) noexcept
+{
+    for (uintptr_t page = first;; page += page_size) {
+        if (const auto it = registry.refs.find(page); it != registry.refs.end()) {
+            --it->second;
+            if (it->second == 0) registry.refs.erase(it);
+        }
+        if (page == last) break;
+    }
+}
+
 // mlock/munlock operate on whole pages and Linux locks do not stack. Normal
 // allocator blocks share pages, so a per-allocation munlock can otherwise make
 // a still-live neighbouring secret swappable. Keep one OS lock per page and a
@@ -335,6 +377,29 @@ inline void mem_unlock(uint8_t* p, size_t n) noexcept
         // Destructors cannot report failure to their caller, but the failure
         // must remain visible rather than silently leaving pages registered.
         platform::safe_println(stderr, "[SecureMem] WARNING: page unlock failed: {}",
+                               error.what());
+    }
+}
+
+// Drop registry ownership without touching the virtual address. This is only
+// for an allocator that may already have realloc'd/freed the registered block:
+// munlock/VirtualUnlock on that stale address could affect unrelated storage
+// subsequently mapped at the same location.
+inline void mem_forget_lock(uint8_t* p, size_t n) noexcept
+{
+    if (!p || n == 0) return;
+    const auto addr = pointer_address(p);
+    if (addr > std::numeric_limits<uintptr_t>::max() - (n - 1)) return;
+    const size_t page_size = memory_page_size();
+    const uintptr_t first = page_base(addr);
+    const uintptr_t last = page_base(addr + n - 1);
+
+    try {
+        auto& registry = page_lock_registry();
+        std::lock_guard lk(registry.mu);
+        forget_page_refs(registry, first, last, page_size);
+    } catch (const std::system_error& error) {
+        platform::safe_println(stderr, "[SecureMem] WARNING: page-lock bookkeeping failed: {}",
                                error.what());
     }
 }
@@ -466,6 +531,63 @@ public:
 };
 
 using WipingBytes = std::vector<uint8_t, WipingAllocator<uint8_t>>;
+
+// Vector allocator for variable-length plaintext values that need both sides
+// of the secure-memory contract: page-lock while live and wipe before release.
+// A header immediately before the payload records whether locking succeeded;
+// deallocate must not guess, because an unconditional mem_unlock after a failed
+// lock could release a neighboring live secret that shares the same OS page.
+template <typename T> class SecureAllocator {
+    struct alignas(std::max_align_t) Header {
+        size_t bytes;
+        bool locked;
+    };
+
+    static_assert(alignof(T) <= alignof(std::max_align_t),
+                  "SecureAllocator does not support over-aligned values");
+
+public:
+    using value_type = T;
+
+    SecureAllocator() noexcept = default;
+    template <typename U> explicit SecureAllocator(const SecureAllocator<U>&) noexcept {}
+
+    [[nodiscard]] T* allocate(size_t n)
+    {
+        if (n > std::numeric_limits<size_t>::max() / sizeof(T)) throw std::bad_array_new_length{};
+        const size_t bytes = n * sizeof(T);
+        if (bytes > std::numeric_limits<size_t>::max() - sizeof(Header))
+            throw std::bad_array_new_length{};
+        if (detail::should_fail_secure_allocation()) throw std::bad_alloc{};
+
+        auto* raw = static_cast<std::byte*>(::operator new(sizeof(Header) + bytes));
+        auto* header = ::new (raw) Header{.bytes = bytes, .locked = false};
+        auto* payload = reinterpret_cast<T*>(raw + sizeof(Header));
+        header->locked = detail::mem_lock(reinterpret_cast<const uint8_t*>(payload), bytes);
+        if (!header->locked) warn_mlock_failure_once();
+        return payload;
+    }
+
+    void deallocate(T* p, size_t) const noexcept
+    {
+        if (!p) return;
+        auto* raw = reinterpret_cast<std::byte*>(p) - sizeof(Header);
+        auto* header = reinterpret_cast<Header*>(raw);
+        crypto_wipe(p, header->bytes);
+        detail::record_wipe_for_tests(std::as_bytes(std::span(p, header->bytes / sizeof(T))));
+        if (header->locked) detail::mem_unlock(reinterpret_cast<uint8_t*>(p), header->bytes);
+        header->~Header();
+        ::operator delete(raw);
+    }
+
+    template <typename U>
+    friend bool operator==(const SecureAllocator&, const SecureAllocator<U>&) noexcept
+    {
+        return true;
+    }
+};
+
+template <typename T> using SecureVector = std::vector<T, SecureAllocator<T>>;
 
 template <size_t N>
 class SecureBuffer {

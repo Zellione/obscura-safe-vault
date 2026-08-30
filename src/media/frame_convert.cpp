@@ -23,6 +23,7 @@ extern "C" {
 #pragma GCC diagnostic pop
 #endif
 
+#include "media/ffmpeg_secure.h"
 #include "platform/safe_print.h"
 
 namespace media {
@@ -78,6 +79,12 @@ bool FrameConverter::build_deint_graph(const AVFrame* src)
 {
     filter_graph_ = avfilter_graph_alloc();
     if (!filter_graph_) return fail_deint_graph("Failed to allocate filter graph");
+
+    // Keep yadif synchronous with the caller.  FFmpeg's slice-thread barrier is
+    // not visible to ThreadSanitizer, and more importantly the secure AVBuffer
+    // release callback must never wipe a frame while a filter worker can still
+    // be writing it.  Video decoding itself remains independently threaded.
+    filter_graph_->nb_threads = 1;
 
     // buffer source args. time_base can be 1/1 since we carry pts separately.
     const std::string args =
@@ -165,6 +172,7 @@ const AVFrame* FrameConverter::deinterlace(const AVFrame* src)
         deint_warn_once(std::format("av_buffersink_get_frame failed: {}", ret));
         return nullptr;
     }
+    if (!secure_frame_storage(deint_out_)) mark_ffmpeg_opaque_storage();
 
     return deint_out_;
 }
@@ -228,6 +236,7 @@ std::optional<DecodedFrame> FrameConverter::to_i420(const AVFrame* src, double p
         platform::safe_println(stderr, "[FrameConverter] av_frame_get_buffer failed: {}", buf_ret);
         return std::nullopt;
     }
+    if (!secure_frame_storage(conv_)) mark_ffmpeg_opaque_storage();
 
     if (int ret = sws_scale(sws_, src->data, src->linesize, 0, src->height,
                             conv_->data, conv_->linesize);
@@ -248,7 +257,7 @@ std::optional<DecodedFrame> FrameConverter::to_i420(const AVFrame* src, double p
     return result;
 }
 
-DecodedFrame copy_owned_frame(const DecodedFrame& src, std::vector<uint8_t>& storage)
+std::optional<DecodedFrame> copy_owned_frame(const DecodedFrame& src, crypto::SecureBytes& storage)
 {
     const int chroma_h = (src.height + 1) / 2;
     const int plane_count = src.pix_fmt == FramePixelFormat::I420 ? 3 : 2;
@@ -261,7 +270,7 @@ DecodedFrame copy_owned_frame(const DecodedFrame& src, std::vector<uint8_t>& sto
         plane_bytes[2] = static_cast<size_t>(src.linesizes[2]) * static_cast<size_t>(chroma_h);
 
     size_t total = plane_bytes[0] + plane_bytes[1] + plane_bytes[2];
-    storage.resize(total);
+    if (!storage.resize(total)) return std::nullopt;
 
     DecodedFrame out{};
     out.width       = src.width;

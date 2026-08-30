@@ -6,6 +6,7 @@
 #include <cstring>
 #include <memory>
 
+#include "media/ffmpeg_secure.h"
 #include "media/mem_avio.h"
 
 #if defined(__GNUC__)
@@ -90,6 +91,7 @@ struct GifDecoder::Impl {
             if (read_ret < 0) {
                 return false;
             }
+            if (!secure_packet_storage(pkt)) mark_ffmpeg_opaque_storage();
 
             if (pkt->stream_index == stream_idx) {
                 const int send_ret = avcodec_send_packet(codec, pkt);
@@ -158,6 +160,8 @@ bool GifDecoder::open(std::span<const uint8_t> data)
         impl_->close();
         return false;
     }
+    impl_->codec->get_buffer2 = &secure_get_buffer2;
+    mark_ffmpeg_opaque_storage();
     if (avcodec_open2(impl_->codec, dec, nullptr) < 0) {
         // Try opening without a codec context (let FFmpeg infer it)
         impl_->close();
@@ -227,8 +231,9 @@ std::optional<AnimFrame> GifDecoder::next_frame()
     // absorbs the final row's. Rows are copied to the tight buffer below.
     constexpr int kTailPad = 128;
     const int pad_linesize = FFALIGN(impl_->frame->width * 4, 64);
-    std::vector<uint8_t> scratch(
-        static_cast<size_t>(pad_linesize) * impl_->frame->height + kTailPad);
+    crypto::SecureBytes scratch;
+    if (!scratch.resize(static_cast<size_t>(pad_linesize) * impl_->frame->height + kTailPad))
+        return std::nullopt;
 
     // Set up destination frame pointers
     std::array<uint8_t*, 4> dst_data = {scratch.data(), nullptr, nullptr, nullptr};
@@ -267,7 +272,11 @@ std::optional<AnimFrame> GifDecoder::next_frame()
 
     // Tight row copy out of the padded scratch (consumers assume stride == w*4).
     AnimFrame result;
-    result.rgba.resize(static_cast<size_t>(frame_width) * frame_height * 4);
+    try {
+        result.rgba.resize(static_cast<size_t>(frame_width) * frame_height * 4);
+    } catch (const std::bad_alloc&) {
+        return std::nullopt;
+    }
     for (int y = 0; y < frame_height; ++y) {
         std::memcpy(result.rgba.data() + static_cast<size_t>(y) * frame_width * 4,
                     scratch.data() + static_cast<size_t>(y) * pad_linesize,

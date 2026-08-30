@@ -18,6 +18,7 @@ extern "C" {
 #include "platform/safe_print.h"
 #include <utility>
 
+#include "media/ffmpeg_secure.h"
 #include "media/frame_convert.h"
 #include "media/hw_accel.h"
 
@@ -39,6 +40,8 @@ VideoDecodeWorker::VideoDecodeWorker(const AVCodecParameters& params, double tim
         codec_ctx_ = avcodec_alloc_context3(decoder);
         if (codec_ctx_ && avcodec_parameters_to_context(codec_ctx_, &params) >= 0) {
             hw_active_ = try_attach_hwaccel(codec_ctx_, decoder);
+            codec_ctx_->get_buffer2 = &secure_get_buffer2;
+            mark_ffmpeg_opaque_storage();
             if (avcodec_open2(codec_ctx_, decoder, nullptr) < 0)
                 avcodec_free_context(&codec_ctx_);
         } else if (codec_ctx_) {
@@ -244,8 +247,9 @@ bool VideoDecodeWorker::publish_decoded_frame(const Job& job)
 
     Result r;
     r.generation = job.generation;
-    std::vector<uint8_t> storage;
+    crypto::SecureBytes storage;
     r.frame = copy_owned_frame(*decoded, storage);
+    if (!r.frame) return false;
     r.storage = std::move(storage);
     publish_result(std::move(r));
     return true;
@@ -298,8 +302,13 @@ bool VideoDecodeWorker::reopen_software_only()
     if (!decoder) return false;
     codec_ctx_ = avcodec_alloc_context3(decoder);
     if (!codec_ctx_) return false;
-    if (avcodec_parameters_to_context(codec_ctx_, saved_params_) < 0 ||
-        avcodec_open2(codec_ctx_, decoder, nullptr) < 0) {
+    if (avcodec_parameters_to_context(codec_ctx_, saved_params_) < 0) {
+        avcodec_free_context(&codec_ctx_);
+        return false;
+    }
+    codec_ctx_->get_buffer2 = &secure_get_buffer2;
+    mark_ffmpeg_opaque_storage();
+    if (avcodec_open2(codec_ctx_, decoder, nullptr) < 0) {
         avcodec_free_context(&codec_ctx_);
         return false;
     }

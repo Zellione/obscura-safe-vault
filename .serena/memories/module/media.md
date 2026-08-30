@@ -69,6 +69,28 @@ therefore locked + wiped; `decode_stb` needed no logic change. Peak transient lo
 about 2× image size during a decode (raw + SecureBytes copy before the raw frees) — within
 the 256 MiB budget for one in-flight decode.
 
+### FFmpeg secure ownership (Phase 97 / OSV-AUD-003)
+`ffmpeg_secure.*` wraps the actual `AVBufferRef` exposed by demux packets and software frames.
+The wrapper owns the original reference, page-locks its bytes, and wipes/unlocks from its custom
+free callback; because FFmpeg clones the wrapper ref itself, intermediate packet/frame unrefs
+cannot wipe shared live data. Every software codec context installs `secure_get_buffer2`;
+`FrameConverter` filter/conversion outputs and hardware-transfer CPU frames that bypass the hook
+call `secure_frame_storage()` after allocation. Hardware pixel formats are opaque device handles
+and are never treated as CPU byte planes.
+
+`ChunkAvio`/`MemAvio` lock their initial `av_malloc` buffer and wipe the actual final
+`AVIOContext::buffer`; a library replacement is detected and reported as opaque. App-owned PCM
+and animated RGBA are `crypto::SecureVector<float/u8>`; poster/GIF swscale scratch and the
+VideoDecodeWorker→render-thread frame copy are `crypto::SecureBytes`. `SecureAllocator<T>` is a
+header-prefixed vector allocator in `secure_mem.h` recording `{bytes, locked}` so deallocation can
+wipe-before-unlock without guessing after a failed lock.
+
+Enforceable boundary: codec/filter scratch, GPU surfaces, libwebp/libheif internal canvases, and
+SDL audio-stream copies expose no complete allocator/final-release hook. FFmpeg pipeline use calls
+`mark_ffmpeg_opaque_storage()`; `crypto::secure_memory_degraded()` combines that monotonic flag
+with actual mlock failures, and F1 says some codec/decoded data *may* be swappable. This is not a
+claim that opaque library memory is locked. See `docs/roadmap/phase-97-secure-video-buffers.md`.
+
 ## media/ (gated OSV_VENDORED_AV except anim_decoder.h + webp_anim_decoder.*)
 Files: `video_source.*`, `chunk_avio.*`, `mem_avio.*`, `video_decoder.*`, `audio_decoder.*`,
 `av_sync.*`, `audio_frame.h`, `volume_setting.*`, `loop_setting.*`, `video_probe.*`,
@@ -181,8 +203,9 @@ valgrind or the canary harness in the Phase 80 details doc.
 swscale-based YUV->I420 conversion shared by VideoDecoder + VideoDecodeWorker: `zero_copy()`
 for already-I420/NV12 frames, `to_i420()` otherwise, cached `SwsContext` reused per stream.
 `copy_owned_frame()` copies a DecodedFrame's planes into a caller-owned
-`std::vector<uint8_t>` for safe cross-thread handoff (FFmpeg's internal AVFrame buffers are
-unsafe to alias once the next decode call can run concurrently).
+`crypto::SecureBytes` for safe cross-thread handoff (FFmpeg's internal AVFrame buffers are
+unsafe to alias once the next decode call can run concurrently); allocation failure returns
+`nullopt`, never a frame with null backing storage.
 
 **Phase 52 addition:** deinterlacing via yadif (Yet Another Deinterlacing Filter). `should_deinterlace(int flags)`
 predicate (conditional on `AV_FRAME_FLAG_INTERLACED` in frame flags). Lazily-built cached avfilter

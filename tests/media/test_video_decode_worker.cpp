@@ -128,6 +128,7 @@ TEST(video_decode_worker_decodes_submitted_packets_in_order)
         while (auto r = worker.take_result()) {
             if (r->eof) { saw_eof = true; continue; }
             if (!r->frame.has_value()) return false;
+            if (!r->storage.is_locked()) return false;
             pts_seen.push_back(r->frame->pts_seconds);
         }
         return saw_eof;

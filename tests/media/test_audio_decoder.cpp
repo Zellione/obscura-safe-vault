@@ -2,6 +2,7 @@
 
 #ifdef OSV_VENDORED_AV
 
+#include "crypto/secure_mem.h"
 #include "media/audio_decoder.h"
 #include "media/mem_avio.h"
 
@@ -56,6 +57,7 @@ TEST(audio_decoder_decodes_aac_to_f32)
                 REQUIRE(f.channels == 1);
                 REQUIRE(f.sample_rate == 44100);
                 total_samples += f.samples.size();
+                CHECK(crypto::detail::locked_page_refcount_for_tests(f.samples.data()) > 0);
             }
         }
         av_packet_unref(pkt);
@@ -71,6 +73,19 @@ TEST(audio_decoder_decodes_aac_to_f32)
     // ~1s mono @ 44100 -> within a couple AAC frames (1024 samples) of 44100.
     REQUIRE(total_samples >= 40000);
     REQUIRE(total_samples <= 48000);
+}
+
+TEST(audio_frame_samples_wipe_on_release)
+{
+    crypto::detail::reset_wipe_observations_for_tests();
+    const auto before = crypto::detail::wiping_deallocation_count();
+    {
+        media::AudioFrame frame;
+        frame.samples.resize(256, 0.75F);
+        REQUIRE(crypto::detail::locked_page_refcount_for_tests(frame.samples.data()) > 0);
+    }
+    CHECK(crypto::detail::wiping_deallocation_count() > before);
+    CHECK(crypto::detail::all_wipe_observations_zero_for_tests());
 }
 
 #endif

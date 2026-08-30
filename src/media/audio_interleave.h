@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
-#include <vector>
+#include "crypto/secure_mem.h"
 
 #ifdef OSV_VENDORED_AV
 
@@ -29,10 +29,9 @@ namespace media {
 // @param channels: number of audio channels
 // @param av_sample_fmt: AVSampleFormat enum value (AV_SAMPLE_FMT_* int)
 // @param out: output vector, resized to nb_samples * channels
-[[nodiscard]] bool interleave_to_f32(const uint8_t* const* planes, int n_planes,
-                                      int nb_samples, int channels,
-                                      int av_sample_fmt,
-                                      std::vector<float>& out) noexcept;
+[[nodiscard]] bool interleave_to_f32(const uint8_t* const* planes, int n_planes, int nb_samples,
+                                     int channels, int av_sample_fmt,
+                                     crypto::SecureVector<float>& out) noexcept;
 
 }  // namespace media
 

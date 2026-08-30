@@ -19,12 +19,13 @@
 #include <cstdint>
 #include <optional>
 #include <span>
-#include <vector>
+
+#include "crypto/secure_mem.h"
 
 namespace media {
 
 struct AnimFrame {
-    std::vector<uint8_t> rgba;      // width*height*4; alpha is always 255
+    crypto::SecureVector<uint8_t> rgba;  // width*height*4; alpha is always 255
     int    width   = 0;
     int    height  = 0;
     double delay_s = 0.0;           // >= kMinFrameDelay

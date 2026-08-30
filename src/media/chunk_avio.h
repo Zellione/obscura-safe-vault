@@ -32,6 +32,10 @@ public:
 
     [[nodiscard]] AVIOContext* ctx()   const noexcept { return ctx_; }
     [[nodiscard]] bool         valid() const noexcept { return ctx_ != nullptr; }
+    [[nodiscard]] bool buffer_is_locked() const noexcept
+    {
+        return buffer_locked_;
+    }
 
 private:
     static int     read_cb(void* opaque, uint8_t* buf, int buf_size);
@@ -40,6 +44,8 @@ private:
     VideoSource  source_;
     uint64_t     pos_ = 0;
     AVIOContext* ctx_ = nullptr;
+    uint8_t* initial_buffer_ = nullptr;
+    bool buffer_locked_ = false;
 };
 
 } // namespace media
