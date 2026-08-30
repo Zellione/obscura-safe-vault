@@ -1,26 +1,16 @@
-#include <cstdlib>
-#include <cstring>
+#include "image/stb_secure_alloc.h"
 
-// Zero-initialise every stb_image allocation. On malformed JPEGs stb's colour
-// conversion can read plane regions the aborted decode never wrote; with plain
-// malloc those pixels would expose stale heap bytes (e.g. a previously decoded
-// image) in the output. Grow via a fresh calloc + copy so the tail stays zero.
-// Must keep realloc semantics: on failure the old block stays alive (stb's
-// error paths still free it). void* and the pre-#include placement are both
-// mandated by stb's C allocator macro contract (call sites pass char*/int*).
-static void* stbi_realloc_zeroed(void* p, size_t oldsz, size_t newsz) // NOSONAR cpp:S5008 cpp:S954
-{
-    void* q = std::calloc(1, newsz); // NOSONAR cpp:S1231 — stb frees via STBI_FREE, so the shim must stay malloc-family
-    if (!q) return nullptr;
-    if (p) {
-        std::memcpy(q, p, oldsz < newsz ? oldsz : newsz);
-        std::free(p); // NOSONAR cpp:S1231 — releasing a block stb allocated through this same C contract
-    }
-    return q;
-}
-#define STBI_MALLOC(sz) std::calloc(1, (sz))
-#define STBI_REALLOC_SIZED(p, oldsz, newsz) stbi_realloc_zeroed((p), (oldsz), (newsz))
-#define STBI_FREE(p) std::free(p)
+// Phase 96b (OSV-AUD-003): route stb's every allocation through the secure,
+// zero-initialised, wiping allocator (stb_secure_alloc.h). Zero-init preserves
+// the malformed-JPEG defence — on aborted decodes stb's colour conversion reads
+// plane regions the decode never wrote, so the buffer must not expose stale heap
+// bytes (e.g. previously decoded content). The old calloc shim was never
+// page-locked and never wiped on free; the secure allocator adds best-effort
+// mlock + crypto_wipe-before-release. void* and the pre-#include placement are
+// both mandated by stb's C allocator macro contract (call sites pass char*/int*).
+#define STBI_MALLOC(sz) image::stbi_secure_malloc((sz))
+#define STBI_REALLOC_SIZED(p, oldsz, newsz) image::stbi_secure_realloc((p), (oldsz), (newsz))
+#define STBI_FREE(p) image::stbi_secure_free(p)
 
 #if defined(__GNUC__)
 #pragma GCC diagnostic push

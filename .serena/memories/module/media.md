@@ -55,6 +55,20 @@ codec-owned planes stay library-owned** — libwebp AnimDecoder canvas, libheif 
 FFmpeg AVFrame/packet buffers — the application copy is already `SecureBytes`; libheif and
 animated-WebP have no caller-supplied-buffer decode API, and FFmpeg internals are Phase D.
 
+### stb_image secure allocator (Phase 96b / OSV-AUD-003)
+`src/image/decode.cpp` routes `STBI_MALLOC`/`STBI_REALLOC_SIZED`/`STBI_FREE` through
+`src/image/stb_secure_alloc.h` — `image::stbi_secure_malloc/free/realloc`, a
+header-prefixed allocator (`StbAllocHeader{size, locked}` stored before the payload so
+`STBI_FREE`'s size-less C contract can recover the length — no global map, thread-safe
+across the DecodeWorker + main thread). Blocks are `calloc`-zeroed (malformed-JPEG defence:
+stb's colour conversion reads planes a failed decode never wrote — the zeroed tail is
+preserved on grow), best-effort page-locked via the shared page registry, and
+`crypto_wipe`'d before every free/realloc (realloc keeps stb's failure contract — old block
+stays alive; honours `inject_secure_allocation_failure`). The full-size stb decode buffer is
+therefore locked + wiped; `decode_stb` needed no logic change. Peak transient locked memory
+about 2× image size during a decode (raw + SecureBytes copy before the raw frees) — within
+the 256 MiB budget for one in-flight decode.
+
 ## media/ (gated OSV_VENDORED_AV except anim_decoder.h + webp_anim_decoder.*)
 Files: `video_source.*`, `chunk_avio.*`, `mem_avio.*`, `video_decoder.*`, `audio_decoder.*`,
 `av_sync.*`, `audio_frame.h`, `volume_setting.*`, `loop_setting.*`, `video_probe.*`,
