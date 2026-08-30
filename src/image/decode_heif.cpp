@@ -55,6 +55,12 @@ std::optional<ImageData> decode_heif_from_memory(std::span<const uint8_t> data)
     const uint8_t* plane =
         heif_image_get_plane_readonly(img, heif_channel_interleaved, &stride);
 
+    // The `plane` is libheif-owned (`heif_decode_image` allocates it; there is
+    // no caller-supplied-buffer decode API — Phase 96b / OSV-AUD-003). The app
+    // cannot page-lock or wipe it; the row-by-row copy into SecureBytes below
+    // is secure, and the codec's scratch is documented as library-owned
+    // (FFmpeg's equivalent internals are Phase D).
+
     std::optional<ImageData> out;
     if (plane && w > 0 && h > 0 && stride >= w * 3) {
         using enum ImageFormat;

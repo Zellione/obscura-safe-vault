@@ -35,6 +35,12 @@ std::optional<ImageData> decode_animated_webp_first_frame(std::span<const uint8_
     int          timestamp_ms = 0;
     std::optional<ImageData> out;
 
+    // The `rgba` canvas is libwebp-owned (no caller-supplied-buffer decode API
+    // exists for the animation decoder — Phase 96b / OSV-AUD-003): the app
+    // cannot page-lock or wipe it. The application copy into SecureBytes below
+    // is secure; the codec's scratch is documented as library-owned. FFmpeg's
+    // equivalent internals are Phase D.
+
     if (WebPAnimDecoderGetInfo(dec, &info) != 0 && info.canvas_width > 0
         && info.canvas_height > 0 && WebPAnimDecoderHasMoreFrames(dec) != 0
         && WebPAnimDecoderGetNext(dec, &rgba, &timestamp_ms) != 0 && rgba != nullptr) {

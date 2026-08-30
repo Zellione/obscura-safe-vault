@@ -1,17 +1,16 @@
 # Secure thumbnail / decoded intermediates (Phase 96)
 
-**Status:** 🔜 ready for review (PR 96a — Phase C part 1)
+**Status:** 🔜 ready for review (PR 96a + PR 96b — Phase C delivered as two PRs)
 **Date:** 2026-08-30
 
 This is **Phase C** of the 2026-08-29 security audit remediation
 (`AUDIT.md` / `AUDIT_IMPLEMENTATION.md`, phases A–G mapping to app phases
 94–100). Phase C fixes **OSV-AUD-003** (High — decrypted media bypasses
 secure-memory storage) for the *image and thumbnail* half. It is delivered
-as **two PRs on the `phase-96-secure-media-buffers` branch**: this document
-covers **96a** (secure growable buffer primitive + thumbnail/staging/
-transfer/probe/migration conversion). **96b** (secure stb allocator +
-codec-owned-plane documentation) lands as the second PR. No `.osv` byte
-change; `INDEX_VERSION` stays 12.
+as **two PRs**: this document covers **96a** (secure growable buffer
+primitive + thumbnail/staging/transfer/probe/migration conversion) and
+**96b** (secure stb allocator). No `.osv` byte change; `INDEX_VERSION`
+stays 12.
 
 ## Finding being fixed
 
@@ -118,16 +117,73 @@ helper replaces the removed `std::vector` initializer-list assignments).
 2221/0; no-FFmpeg parity leg 2043/0 (baseline 2031 + 12 — the AV-gated video
 tests are naturally absent).
 
+## What shipped (96b) — secure stb allocator
+
+**OSV-AUD-003 point #1:** stb decodes the full-size RGB image into a buffer
+allocated through `STBI_MALLOC`; before 96b that shim was `calloc` + `free`
+— zero-initialised (the malformed-JPEG defence) but **never page-locked and
+never wiped on release**. The full-size decode was copied into
+`ImageData::pixels` (a `SecureBytes`) and the ordinary, un-locked original
+was then `free()`'d.
+
+### `src/image/stb_secure_alloc.h` (new)
+
+A header-prefixed secure allocator backing `STBI_MALLOC` /
+`STBI_REALLOC_SIZED` / `STBI_FREE`:
+
+- The block header (`{size_t size; bool locked;}`) is stored immediately
+  **before** the payload so `STBI_FREE` — which stb's C contract hands no
+  size — recovers the length from the header rather than a global map
+  (thread-safe: decode runs on both the main and the DecodeWorker thread).
+- **Zero-initialised** via `calloc` (the malformed-JPEG defence is
+  preserved; on grow the zeroed tail is preserved, `realloc`-style).
+- **Best-effort page-locked** through the shared page registry
+  (`crypto::detail::mem_lock`), with the once-per-process mlock warning on
+  failure — so these allocations now participate in the F1 degraded-lock
+  reporting.
+- **`crypto_wipe`'d before every free/realloc** (observed by the wipe
+  seam), honouring stb's realloc-failure contract (old block stays alive).
+- Length arithmetic is validated (header + payload overflow checked) and
+  allocation failures honour `inject_secure_allocation_failure` for
+  deterministic tests.
+
+`src/image/decode.cpp` now routes the three macros through these functions;
+`decode_stb` needs no logic change. Inline codec-plane boundary comments were
+added to `decode_webp.cpp` (animated canvas) and `decode_heif.cpp`
+(`heif_image`) — both are library-owned with no caller-supplied-buffer API;
+the app copy is secure and FFmpeg internals are Phase D.
+
+### 96b tests (7 new, `tests/image/test_stb_alloc.cpp`)
+
+`stb_secure_alloc_zero_initializes`,
+`stb_secure_alloc_realloc_zeroes_tail_and_preserves_head`,
+`stb_secure_alloc_wipes_on_free`,
+`stb_secure_alloc_wipes_released_block_on_realloc`,
+`stb_secure_alloc_locks_payload_best_effort` (page-registry refcount rises
+on alloc, drops on free),
+`stb_secure_alloc_realloc_failure_keeps_old_block`, and
+`decode_stb_wipes_intermediate_raw_buffer` (a full stb decode's intermediate
+is wiped on `stbi_image_free`).
+
+**Peak transient locked memory during a decode roughly doubles** (the
+full-size stb raw buffer is now locked alongside the `SecureBytes` pixel
+copy before the raw is freed) — well inside the 256 MiB budget for a single
+in-flight decode, and consistent with the existing "best-effort, degrade one
+buffer" semantics.
+
 ## Verification notes
 
-- `scripts/test.sh` / `--asan` / `--tsan` / `--release` all green at
-  2221/0; the no-FFmpeg leg (`premake5 --no-av` + direct binary run, since
-  `test.sh` re-generates with AV) at 2043/0; `git diff --check` clean.
+- 96a + 96b suites: `scripts/test.sh` / `--asan` / `--tsan` / `--release` all
+  green at 2228/0 (96b adds 7); the no-FFmpeg leg (`premake5 --no-av` +
+  direct binary run, since `test.sh` re-generates with AV) at 2050/0
+  (2043 + 7); `git diff --check` clean.
+- The README valgrind run targeting `decode_malformed_jpeg_returns_nullopt`
+  keeps guarding the zero-init defence under the 96b allocator swap.
 - The audit's `ulimit -l 0` degraded-lock smoke is manual: run the app with
   a zero memlock budget and confirm the F1 "some decoded data is swappable"
-  line appears when thumbnail/posters are generated — the mechanism is
+  line appears when image/thumbnail paths run — the mechanism is
   process-global (`mlock_failure_seen`) and covered by the Phase 90 status
-  test at the unit level; the Phase 96 tests run with a normal budget.
+  test at the unit level; the Phase 96/96b tests run with a normal budget.
 
 ## Deliberately unchanged
 
@@ -135,18 +191,18 @@ tests are naturally absent).
 - **Ciphertext stays in ordinary vectors** — only decrypted/derived content
   needs secure storage (the audit's design note; `std::vector<uint8_t>`
   remains correct for ciphertext and non-secret metadata).
-- **stb_image allocator** (`STBI_MALLOC`/`STBI_REALLOC_SIZED`/`STBI_FREE`)
-  is unchanged in this PR — 96b replaces it with a header-prefixed secure
-  allocator (zero-init + mlock + wipe-before-free) and documents the
-  codec-owned-plane boundary.
-- **FFmpeg buffers** (`ChunkAvio` etc.) are Phase D.
+- **Opaque codec internals stay library-owned** — libwebp's animated-decoder
+  canvas and libheif's decoded `heif_image` planes have no
+  caller-supplied-buffer decode API (documented inline in 96b); the app copy
+  is `SecureBytes`.
+- **FFmpeg buffers** (`ChunkAvio`, packets, frames, audio, filters) are
+  Phase D.
 
 ## Memory graph updates
 
-- `mem:module/media` — new *thumbnail/posters secure-buffer ownership*
-  section with the conversion table and the codec-owned-plane boundary.
-- AGENTS.md hardening notes — new bullet capturing the Phase 96
-  thumbnail/poster `SecureBytes` coverage and the opaque-codec boundary.
-
-Phase 96b (same branch, second PR): secure stb allocation and the
-codec-plane documentation.
+- `mem:module/media` — *thumbnail/posters secure-buffer ownership* section
+  with the conversion table and the codec-owned-plane boundary; 96b adds the
+  secure stb allocator to the picture.
+- AGENTS.md hardening notes — updated stb bullet (secure, zero-initialised,
+  wiping allocator) + the Phase 96 thumbnail/poster bullet and the
+  opaque-codec boundary.
