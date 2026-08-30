@@ -57,9 +57,12 @@ inline void* stbi_secure_malloc(size_t sz) // NOSONAR cpp:S5008 — mandated by 
     const size_t payload = sz == 0 ? 1 : sz;
     const size_t total   = detail::kStbAllocHeaderSize + payload;
 
-    // NOSONAR cpp:S1231 — stb frees via STBI_FREE, so the shim must stay malloc-family.
-    auto* block = static_cast<detail::StbAllocHeader*>(std::calloc(1, total));
+    auto* block = static_cast<detail::StbAllocHeader*>(std::calloc(1, total)); // NOSONAR cpp:S1231 — stb frees via STBI_FREE, so the shim must stay malloc-family
     if (!block) return nullptr;
+    // NOSONAR cpp:S6022 — byte-oriented pointer arithmetic inside a C-allocator
+    // shim: the payload must be handed to stb as void* and to the codebase's
+    // uint8_t secure-memory APIs (mem_lock/crypto_wipe), so uint8_t is the
+    // canonical byte type here, not std::byte.
     auto* data    = reinterpret_cast<uint8_t*>(block + 1);
     block->size   = sz;
     block->locked = crypto::detail::mem_lock(data, payload);
