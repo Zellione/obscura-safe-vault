@@ -1298,33 +1298,27 @@ VaultResult apply_context_rewrite(Vault& v, std::string_view node_path)
     // Decrypt one legacy record and re-append it as a context-bound v2 record
     // under the node's (new) identity, persisting the fresh span + record id.
     // A zero-length span (no thumb / no poster) is a no-op.
-    auto reencode = [&](uint64_t off, uint64_t len, crypto::ChunkDomain domain, uint32_t seq,
-                        std::array<uint8_t, crypto::NODE_ID_SIZE>& id_out,
-                        ChunkSpan& span_out) {
-        if (len == 0) return Ok;
-        crypto::SecureBytes plain;
-        crypto::ChunkTag old;
-        old.domain        = domain;
-        old.sequence      = seq;
-        old.context_bound = false;   // the legacy record has no AD
-        if (!reader.read_chunk({off, len}, old, plain)) return AuthFailed;
-        std::lock_guard lk(*v.write_mutex_);
-        crypto::ChunkTag nt;
-        nt.domain        = domain;
-        nt.owner         = n->node_id;
-        nt.sequence      = seq;
-        nt.context_bound = true;
-        if (ChunkStore writer(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
-            !writer.append_chunk(plain.as_span(), nt, span_out))
-            return IoError;
-        std::fflush(v.fp_);
-        id_out = nt.record;
-        return Ok;
-    };
+auto reencode = [&](uint64_t off, uint64_t len, crypto::ChunkDomain domain, uint32_t seq,
+                    std::array<uint8_t, crypto::NODE_ID_SIZE>& id_out, ChunkSpan& span_out) {
+    if (len == 0) return Ok;
+    crypto::SecureBytes plain;
+    crypto::ChunkTag old{.domain = domain, .sequence = seq};
+    if (!reader.read_chunk({off, len}, old, plain)) return AuthFailed;
+    std::lock_guard lk(*v.write_mutex_);
+    crypto::ChunkTag nt{.domain = domain, .owner = n->node_id, .sequence = seq,
+                        .context_bound = true};
+    if (ChunkStore writer(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+        !writer.append_chunk(plain.as_span(), nt, span_out))
+        return IoError;
+    std::fflush(v.fp_);
+    id_out = nt.record;
+    return Ok;
+};
 
     if (n->is_image()) {
         ImageMeta& m = n->meta;
-        ChunkSpan data_out, thumb_out;
+        ChunkSpan data_out;
+        ChunkSpan thumb_out;
         if (VaultResult r = reencode(m.data_offset, m.data_length, crypto::ChunkDomain::Data, 0,
                                      m.data_id, data_out);
             r != Ok)
@@ -1418,8 +1412,7 @@ bool uses_context_chunks(const Vault& v) noexcept
 // The branchiness is inherent (image/video, optional thumb/poster/chunks, the
 // header tail); it is a linear, test-only sequence, so the complexity rule is
 // suppressed here rather than disassembled into contrived helpers.
-// NOSONAR cpp:S3776
-void test_only_downgrade_to_legacy(Vault& v)
+void test_only_downgrade_to_legacy(Vault& v)  // NOSONAR cpp:S3776
 {
     using enum crypto::ChunkDomain;
     if (!v.unlocked_) return;
@@ -1451,8 +1444,8 @@ void test_only_downgrade_to_legacy(Vault& v)
             m.data_length = out.length;
         }
         if (m.thumb_length > 0) {
-            const auto tt = chunk_tag(Thumb, c, m.thumb_id);
-            if (to_legacy(m.thumb_offset, m.thumb_length, tt, Thumb, 0, out)) {
+            if (const auto tt = chunk_tag(Thumb, c, m.thumb_id);
+                to_legacy(m.thumb_offset, m.thumb_length, tt, Thumb, 0, out)) {
                 m.thumb_offset = out.offset;
                 m.thumb_length = out.length;
             }
@@ -1471,8 +1464,7 @@ void test_only_downgrade_to_legacy(Vault& v)
             const auto t = chunk_tag(Video, c, ck.id, ck.sequence);
             ChunkSpan out;
             if (!to_legacy(ck.offset, ck.length, t, Video, ck.sequence, out)) continue;
-            legacy.push_back(VideoChunk{.offset = out.offset, .length = out.length,
-                                        .sequence = ck.sequence});
+            legacy.push_back(VideoChunk{out.offset, out.length, ck.sequence});
         }
         m.chunks = std::move(legacy);
         if (m.poster_length > 0) {
@@ -1483,9 +1475,7 @@ void test_only_downgrade_to_legacy(Vault& v)
                 m.poster_length = out.length;
             }
         }
-        m.poster_id.fill(0);
-        m.context_bound = false;
-        c.node_id.fill(0);
+        m.poster_id.fill(0); m.context_bound = false; c.node_id.fill(0);
     };
 
     std::function<void(IndexNode&)> walk = [&](IndexNode& g) {
