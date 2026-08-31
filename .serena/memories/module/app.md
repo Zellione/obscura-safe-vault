@@ -197,6 +197,18 @@ Referenced from `mem:core`. Covers `src/app/` (state machine + event loop) and
   marks a failed partial creation for deletion through the still-open handle; POSIX leaves the
   owner-only short file in place rather than risk unlinking a concurrently replaced pathname.
 - `folder_dialog.*` — export destination picker (same Phase-72 UTF-8 storage rule).
+- `atomic_file.*` (Phase 98 / OSV-AUD-005) — the ONLY sanctioned export sink.
+  `create_new_file_within(dir, safe_component)` returns an already-open, exclusively-created
+  `NewOutputFile` (move-only, RAII-closed; `display_path` for logs only, never reopened).
+  Linux: holds the directory open and creates relative to its fd with
+  `openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS)` (openat `O_NOFOLLOW|O_EXCL` fallback;
+  `ELOOP` from the no-symlink resolve = collision → suffix). Windows: `CreateFileW(CREATE_NEW)`
+  then `GetFinalPathNameByHandleW` final-handle containment vs the directory's own resolved
+  path (intermediate-junction redirection discards the file). Collision naming
+  (`"name (n).ext"`) rides the exclusive create (10k bound) — there is no probe-then-open
+  window; symlinks/reparse points at the candidate count as collisions and are suffixed past.
+  Rejects separators/`.`/`..`/NUL/≥256-byte components up front. `inject_atomic_create_collision()`
+  is the deterministic attacker-race seam. SDL-free, layering exception like path_utf8.h.
 - `locale_init.h` (Phase 72) — header-only `platform::init_locale()`: switches **LC_CTYPE
   only** (never LC_NUMERIC — decimal-comma corruption) to a UTF-8 locale; env locale with
   `C.UTF-8` fallback on POSIX. **Deliberate NO-OP on Windows** — libarchive keeps the wide

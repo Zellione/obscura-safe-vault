@@ -16,17 +16,21 @@
 // "/etc/cron.d/x" would steer the write out of the folder the user picked. Two
 // layers stop that, in the order Sonar's cpp:S2083 prescribes (normalize, then
 // validate, then use): the name is run through vault::sanitize_node_name, and
-// the resulting path is containment-checked with export_path_within below.
+// the resulting component is claimed ATOMICALLY by
+// platform::create_new_file_within (Phase 98 / OSV-AUD-005) — an exclusive
+// no-follow, containment-enforced create that doubles as the collision test and
+// returns an already-open handle, so the write happens strictly inside the
+// picked folder and a path that was merely "checked earlier" is never reopened.
+// export_path_within remains as a post-create invariant assertion.
 //
 // SDL-free by design so the write/collision logic stays headlessly testable;
 // the consent dialog and folder picker live in the UI/platform layers.
 
 #include <filesystem>
-#include <format>
 #include <span>
 #include <string>
-#include <string_view>
 
+#include "platform/atomic_file.h"
 #include "platform/path_utf8.h"
 #include "vault/op_progress.h"
 #include "vault/vault.h"
@@ -43,52 +47,36 @@ struct ExportSummary {
 
 // True iff `candidate` resolves to a location strictly inside `dest_dir`.
 //
-// The second half of the traversal defence (the first is sanitizing the node
-// name — see vault::sanitize_node_name). Normalizes both operands with
-// weakly_canonical, which resolves ".." and symlinks and, unlike canonical,
-// tolerates an output file that does not exist yet; then confirms containment
-// with lexically_relative. A relative path that is empty, is ".", or contains
-// any ".." component means the candidate escaped. Fails closed: a filesystem
-// error resolving either operand returns false.
+// Phase 98 (OSV-AUD-005) retired the old check-then-truncating-open path, so
+// this is no longer the security boundary — it is a post-create invariant
+// assertion on the ATOMICALLY created display path (weakly_canonical both
+// operands, containment via lexically_relative). Kept because it is cheap,
+// harmless, and catches a buggy helper returning an escaping name. A relative
+// path that is empty, is ".", or contains any ".." component means the
+// candidate escaped. Fails closed: a filesystem error resolving either operand
+// returns false.
 [[nodiscard]] bool export_path_within(const std::filesystem::path& dest_dir,
                                       const std::filesystem::path& candidate);
 
-// Resolve a non-colliding output path. Returns `dir/filename` if `exists`
-// reports it free; otherwise appends " (1)", " (2)", ... before the extension
-// until a free name is found. Pure — `exists(path) -> bool` injects the
-// filesystem probe (templated on the callable to avoid a std::function alloc).
-//
-// `filename` must already be a safe single component (vault::sanitize_node_name):
-// `dir / filename` does NOT contain, and an absolute `filename` would discard
-// `dir` outright.
-template <class Exists>
-[[nodiscard]] std::filesystem::path unique_export_path(
-    const std::filesystem::path& dir, std::string_view filename, Exists&& exists)
-{
-    std::filesystem::path candidate = dir / filename;
-    if (!exists(candidate)) return candidate;
-
-    // Split "name.ext" so the counter goes before the extension: "name (1).ext".
-    const std::filesystem::path base(filename);
-    const std::string stem = platform::path_to_utf8(base.stem());
-    const std::string ext  = platform::path_to_utf8(base.extension());
-    for (int n = 1;; ++n) {
-        candidate = dir / std::format("{} ({}){}", stem, n, ext);
-        if (!exists(candidate)) return candidate;
-    }
-}
-
 // Decrypt `node`'s ORIGINAL stored bytes into `scratch` (mlock'd) and write them
-// verbatim to `out_path`, then crypto_wipe `scratch`. `scratch` is reused/resized
-// by the caller across a batch. Handles images AND videos (Phase 53 made videos
-// selectable); a video's chunks are concatenated into the same mlock'd buffer.
+// verbatim to the ALREADY-OPEN `out` handle, then crypto_wipe `scratch`.
+// `scratch` is reused/resized by the caller across a batch. Handles images AND
+// videos (Phase 53 made videos selectable); a video's chunks are concatenated
+// into the same mlock'd buffer.
+//
+// Phase 98 (OSV-AUD-005): `out` comes from platform::create_new_file_within —
+// an atomically claimed, symlink-safe handle. export_one_media NEVER reopens a
+// path ("a path that was merely checked earlier" is the race the audit found):
+// the caller does not build a path, probe it, and hand it in, it hands in the
+// open handle. Ownership of `out.fp` transfers here (closed by this call).
+//
 // Returns InvalidArg for anything else — notably a gallery, which has no stored
 // bytes of its own — whatever the read returns on failure, or IoError if the
-// file write fails.
-[[nodiscard]] vault::VaultResult export_one_media(const vault::Vault&            vault,
-                                                  const vault::IndexNode&        node,
-                                                  const std::filesystem::path&   out_path,
-                                                  crypto::SecureBytes&           scratch);
+// file write, flush, or close fails. The scratch buffer is wiped on EVERY path.
+[[nodiscard]] vault::VaultResult export_one_media(const vault::Vault&      vault,
+                                                  const vault::IndexNode&  node,
+                                                  platform::NewOutputFile  out,
+                                                  crypto::SecureBytes&     scratch);
 
 // Export every image/video in `images` to `dest_dir`, collision-suffixing names.
 // A no-op returning {0,0} unless `consent == Confirm`. Gallery / failed nodes

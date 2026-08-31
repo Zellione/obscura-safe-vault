@@ -525,6 +525,7 @@ project "osv_tests"
         "src/platform/perf.cpp",
         "src/platform/harden.cpp",
         "src/platform/paths.cpp",
+        "src/platform/atomic_file.cpp",
         "src/platform/vault_registry.cpp",
         "src/platform/theme_pref.cpp",
         "src/platform/gallery_view_pref.cpp",

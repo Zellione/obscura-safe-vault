@@ -9,6 +9,8 @@
 
 #include "ui/export.h"
 #include "vault/vault.h"
+#include "platform/atomic_file.h"
+#include "platform/path_utf8.h"
 
 namespace fs = std::filesystem;
 
@@ -79,32 +81,6 @@ struct TempVault {
 
 }  // namespace
 
-// --- unique_export_path (pure) --------------------------------------------
-
-TEST(export_unique_path_no_collision_returns_plain_name)
-{
-    auto never = [](const fs::path&) { return false; };
-    auto p = ui::unique_export_path("/out", "cat.jpg", never);
-    CHECK_EQ(p, fs::path("/out") / "cat.jpg");
-}
-
-TEST(export_unique_path_appends_suffix_before_extension)
-{
-    // "a.jpg" and "a (1).jpg" already exist; the resolver must skip to "a (2).jpg".
-    auto exists = [](const fs::path& p) {
-        return p.filename() == "a.jpg" || p.filename() == "a (1).jpg";
-    };
-    auto p = ui::unique_export_path("/out", "a.jpg", exists);
-    CHECK_EQ(p.filename().string(), std::string("a (2).jpg"));
-}
-
-TEST(export_unique_path_handles_name_without_extension)
-{
-    auto exists = [](const fs::path& p) { return p.filename() == "README"; };
-    auto p = ui::unique_export_path("/out", "README", exists);
-    CHECK_EQ(p.filename().string(), std::string("README (1)"));
-}
-
 // --- export_one_media: decrypt -> write verbatim -> wipe scratch -----------
 
 TEST(export_one_media_writes_verbatim_and_wipes_buffer)
@@ -120,15 +96,57 @@ TEST(export_one_media_writes_verbatim_and_wipes_buffer)
     auto kids = v.list("");
     REQUIRE(kids.size() == 1);
 
-    fs::path dest = out.path / "photo.png";
+    auto f = platform::create_new_file_within(out.path, "photo.png");
+    REQUIRE(f.has_value());
+    CHECK_TRUE(f->display_path == out.path / "photo.png");
+
     crypto::SecureBytes scratch;
-    REQUIRE(ui::export_one_media(v, *kids[0], dest, scratch) == vault::VaultResult::Ok);
+    REQUIRE(ui::export_one_media(v, *kids[0], std::move(*f), scratch) == vault::VaultResult::Ok);
 
     // File on disk is byte-identical to the originally-imported bytes.
-    auto written = read_file(dest);
+    auto written = read_file(out.path / "photo.png");
     CHECK_BYTES_EQ(std::span<const uint8_t>(written), std::span<const uint8_t>(img));
 
     // The decrypted scratch buffer is wiped (all zero) after the write.
+    REQUIRE(scratch.size() == img.size());
+    bool all_zero = true;
+    for (uint8_t b : scratch.as_span()) all_zero = all_zero && (b == 0);
+    CHECK_TRUE(all_zero);
+}
+
+// A failed export write must still wipe the decrypted scratch buffer — the
+// OSV-AUD-005 sink is atomic (never a truncating reopen), and the wipe is
+// unconditional whether or not the bytes landed (invariant #1).
+TEST(export_one_media_write_failure_wipes_scratch)
+{
+    TempVault tv("wr");
+    TempDir   out("wr");
+    auto img = pattern(2000, 11);
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kExpKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", img, "photo.png") == vault::VaultResult::Ok);
+    auto kids = v.list("");
+    REQUIRE(kids.size() == 1);
+
+    const fs::path dest = out.path / "photo.png";
+    // An empty read-only file: the caller handed export_one_media an open handle
+    // that CANNOT accept the write (read-only). Deterministic write failure
+    // without needing a full-disk seam.
+    {
+        std::ofstream f(dest, std::ios::binary);
+        f << "x";
+    }
+    std::FILE* ro = platform::fopen_path(dest, "rb");
+    REQUIRE(ro != nullptr);
+    platform::NewOutputFile ro_out{ro, dest};
+
+    crypto::SecureBytes scratch;
+    REQUIRE(ui::export_one_media(v, *kids[0], std::move(ro_out), scratch)
+            == vault::VaultResult::IoError);
+
+    // The decrypted bytes were still wiped on the failure path.
     REQUIRE(scratch.size() == img.size());
     bool all_zero = true;
     for (uint8_t b : scratch.as_span()) all_zero = all_zero && (b == 0);
@@ -235,6 +253,45 @@ TEST(export_images_collision_suffixes_without_overwriting)
     CHECK_BYTES_EQ(std::span<const uint8_t>(read_file(out.path / "a (1).png")),
                    std::span<const uint8_t>(img));
 }
+
+// OSV-AUD-005 / Phase 98: a symlink placed at the natural candidate (or that
+// replaces a candidate between one export's suffix attempts) must never be
+// followed into a truncating open. The atomic exclusive create sees the name
+// taken and suffixes instead; the symlink target stays untouched.
+#if !defined(_WIN32)
+TEST(export_symlink_candidate_is_not_followed)
+{
+    TempVault tv("sym");
+    TempDir   out("sym");
+    TempDir   victim("sym_victim");
+    auto img = pattern(1200, 13);
+
+    // The natural output name is a symlink pointing OUTSIDE the destination.
+    std::error_code ec;
+    fs::create_symlink(victim.path / "stolen.bin", out.path / "a.png", ec);
+    REQUIRE(!ec);
+
+    vault::Vault v;
+    REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kExpKdf, v)
+            == vault::VaultResult::Ok);
+    REQUIRE(v.add_image("", img, "a.png") == vault::VaultResult::Ok);
+    auto kids = v.list("");
+    REQUIRE(kids.size() == 1);
+
+    auto sum = ui::export_images(v, kids, out.path, ui::ExportConsent::Confirm);
+    CHECK_EQ(sum.written, 1);
+    CHECK_EQ(sum.failed, 0);
+
+    // Nothing landed outside the chosen folder; the victim path was never
+    // created, let alone truncated with decrypted bytes.
+    CHECK_FALSE(fs::exists(victim.path / "stolen.bin"));
+
+    // The decrypted bytes landed as a suffixed, real file inside dest_dir.
+    CHECK_BYTES_EQ(std::span<const uint8_t>(read_file(out.path / "a (1).png")),
+                   std::span<const uint8_t>(img));
+    CHECK_TRUE(fs::is_symlink(out.path / "a.png", ec));
+}
+#endif
 
 // --- Path traversal: a vault is UNTRUSTED INPUT ----------------------------
 //
