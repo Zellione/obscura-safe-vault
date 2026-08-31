@@ -1297,9 +1297,11 @@ VaultResult apply_context_rewrite(Vault& v, std::string_view node_path)
 
     // Decrypt one legacy record and re-append it as a context-bound v2 record
     // under the node's (new) identity, persisting the fresh span + record id.
+    // A zero-length span (no thumb / no poster) is a no-op.
     auto reencode = [&](uint64_t off, uint64_t len, crypto::ChunkDomain domain, uint32_t seq,
                         std::array<uint8_t, crypto::NODE_ID_SIZE>& id_out,
                         ChunkSpan& span_out) {
+        if (len == 0) return Ok;
         crypto::SecureBytes plain;
         crypto::ChunkTag old;
         old.domain        = domain;
@@ -1312,8 +1314,9 @@ VaultResult apply_context_rewrite(Vault& v, std::string_view node_path)
         nt.owner         = n->node_id;
         nt.sequence      = seq;
         nt.context_bound = true;
-        ChunkStore writer(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
-        if (!writer.append_chunk(plain.as_span(), nt, span_out)) return IoError;
+        if (ChunkStore writer(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+            !writer.append_chunk(plain.as_span(), nt, span_out))
+            return IoError;
         std::fflush(v.fp_);
         id_out = nt.record;
         return Ok;
@@ -1321,22 +1324,19 @@ VaultResult apply_context_rewrite(Vault& v, std::string_view node_path)
 
     if (n->is_image()) {
         ImageMeta& m = n->meta;
-        ChunkSpan data_out;
+        ChunkSpan data_out, thumb_out;
         if (VaultResult r = reencode(m.data_offset, m.data_length, crypto::ChunkDomain::Data, 0,
                                      m.data_id, data_out);
             r != Ok)
             return r;
+        if (VaultResult r = reencode(m.thumb_offset, m.thumb_length, crypto::ChunkDomain::Thumb,
+                                     0, m.thumb_id, thumb_out);
+            r != Ok)
+            return r;
         m.data_offset = data_out.offset;
         m.data_length = data_out.length;
-        if (m.thumb_length > 0) {
-            ChunkSpan thumb_out;
-            if (VaultResult r = reencode(m.thumb_offset, m.thumb_length,
-                                         crypto::ChunkDomain::Thumb, 0, m.thumb_id, thumb_out);
-                r != Ok)
-                return r;
-            m.thumb_offset = thumb_out.offset;
-            m.thumb_length = thumb_out.length;
-        }
+        m.thumb_offset = thumb_out.offset;
+        m.thumb_length = thumb_out.length;
         m.context_bound = true;
         return Ok;
     }
@@ -1360,17 +1360,15 @@ VaultResult apply_context_rewrite(Vault& v, std::string_view node_path)
         fresh.push_back(std::move(fc));
     }
     m.chunks = std::move(fresh);
-    if (m.poster_length > 0) {
-        ChunkSpan     out;
-        std::array<uint8_t, crypto::NODE_ID_SIZE> id{};
-        if (VaultResult r = reencode(m.poster_offset, m.poster_length,
-                                     crypto::ChunkDomain::Poster, 0, id, out);
-            r != Ok)
-            return r;
-        m.poster_offset = out.offset;
-        m.poster_length = out.length;
-        m.poster_id     = id;
-    }
+    ChunkSpan poster_out;
+    std::array<uint8_t, crypto::NODE_ID_SIZE> poster_id{};
+    if (VaultResult r = reencode(m.poster_offset, m.poster_length, crypto::ChunkDomain::Poster, 0,
+                                 poster_id, poster_out);
+        r != Ok)
+        return r;
+    m.poster_offset = poster_out.offset;
+    m.poster_length = poster_out.length;
+    m.poster_id     = poster_id;
     m.context_bound = true;
     return Ok;
 }
@@ -1416,8 +1414,14 @@ bool uses_context_chunks(const Vault& v) noexcept
     return context_bound_chunks(v.header_);
 }
 
+// Test seam — converts a freshly-created v2 vault into a genuine legacy one.
+// The branchiness is inherent (image/video, optional thumb/poster/chunks, the
+// header tail); it is a linear, test-only sequence, so the complexity rule is
+// suppressed here rather than disassembled into contrived helpers.
+// NOSONAR cpp:S3776
 void test_only_downgrade_to_legacy(Vault& v)
 {
+    using enum crypto::ChunkDomain;
     if (!v.unlocked_) return;
 
     ChunkStore reader(v.read_fp_, v.master_key_.as_span(), framed_chunks(v.header_));
@@ -1430,24 +1434,25 @@ void test_only_downgrade_to_legacy(Vault& v)
         if (!reader.read_chunk({off, len}, tag_in, plain)) return false;
         std::lock_guard lk(*v.write_mutex_);
         crypto::ChunkTag lt{.domain = domain, .sequence = seq};   // context_bound stays false
-        ChunkStore writer(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
-        const bool ok = writer.append_chunk(plain.as_span(), lt, out);
+        if (ChunkStore writer(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+            !writer.append_chunk(plain.as_span(), lt, out))
+            return false;
         std::fflush(v.fp_);
-        return ok;
+        return true;
     };
 
     // Re-encode an image node's records to legacy and wipe its identity.
     auto downgrade_image = [&](IndexNode& c) {
         ImageMeta& m = c.meta;
         ChunkSpan out;
-        const crypto::ChunkTag t = chunk_tag(crypto::ChunkDomain::Data, c, m.data_id);
-        if (to_legacy(m.data_offset, m.data_length, t, crypto::ChunkDomain::Data, 0, out)) {
+        const crypto::ChunkTag t = chunk_tag(Data, c, m.data_id);
+        if (to_legacy(m.data_offset, m.data_length, t, Data, 0, out)) {
             m.data_offset = out.offset;
             m.data_length = out.length;
         }
         if (m.thumb_length > 0) {
-            const auto tt = chunk_tag(crypto::ChunkDomain::Thumb, c, m.thumb_id);
-            if (to_legacy(m.thumb_offset, m.thumb_length, tt, crypto::ChunkDomain::Thumb, 0, out)) {
+            const auto tt = chunk_tag(Thumb, c, m.thumb_id);
+            if (to_legacy(m.thumb_offset, m.thumb_length, tt, Thumb, 0, out)) {
                 m.thumb_offset = out.offset;
                 m.thumb_length = out.length;
             }
@@ -1463,18 +1468,17 @@ void test_only_downgrade_to_legacy(Vault& v)
         VideoMeta& m = c.vmeta;
         std::vector<VideoChunk> legacy;
         for (const VideoChunk& ck : m.chunks) {
-            const auto t = chunk_tag(crypto::ChunkDomain::Video, c, ck.id, ck.sequence);
+            const auto t = chunk_tag(Video, c, ck.id, ck.sequence);
             ChunkSpan out;
-            if (!to_legacy(ck.offset, ck.length, t, crypto::ChunkDomain::Video, ck.sequence, out))
-                continue;
+            if (!to_legacy(ck.offset, ck.length, t, Video, ck.sequence, out)) continue;
             legacy.push_back(VideoChunk{.offset = out.offset, .length = out.length,
                                         .sequence = ck.sequence});
         }
         m.chunks = std::move(legacy);
         if (m.poster_length > 0) {
-            const auto t = chunk_tag(crypto::ChunkDomain::Poster, c, m.poster_id);
+            const auto t = chunk_tag(Poster, c, m.poster_id);
             ChunkSpan out;
-            if (to_legacy(m.poster_offset, m.poster_length, t, crypto::ChunkDomain::Poster, 0, out)) {
+            if (to_legacy(m.poster_offset, m.poster_length, t, Poster, 0, out)) {
                 m.poster_offset = out.offset;
                 m.poster_length = out.length;
             }
@@ -1502,16 +1506,15 @@ void test_only_downgrade_to_legacy(Vault& v)
     v.header_.flags &= ~FLAG_CONTEXT_BOUND_CHUNKS;
     if (v.kek_valid_) {
         std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
-        if (crypto::fill_random(nonce)) {
-            std::array<uint8_t, crypto::AD_SIZE> scratch{};
-            const auto ad = header_record_ad(crypto::ChunkDomain::MkWrap, v.header_, scratch);
-            std::vector<uint8_t> wrapped;
-            if (crypto::seal(v.kek_.as_span(), nonce, v.master_key_.as_span(), wrapped, ad)) {
-                std::memcpy(v.header_.wrapped_master_key.data(), wrapped.data(), crypto::KEY_SIZE);
-                std::memcpy(v.header_.mk_tag.data(), wrapped.data() + crypto::KEY_SIZE,
-                            crypto::TAG_SIZE);
-                v.header_.mk_nonce = nonce;
-            }
+        std::array<uint8_t, crypto::AD_SIZE> scratch{};
+        std::vector<uint8_t> wrapped;
+        if (crypto::fill_random(nonce) &&
+            crypto::seal(v.kek_.as_span(), nonce, v.master_key_.as_span(), wrapped,
+                         header_record_ad(MkWrap, v.header_, scratch))) {
+            std::memcpy(v.header_.wrapped_master_key.data(), wrapped.data(), crypto::KEY_SIZE);
+            std::memcpy(v.header_.mk_tag.data(), wrapped.data() + crypto::KEY_SIZE,
+                        crypto::TAG_SIZE);
+            v.header_.mk_nonce = nonce;
         }
     }
     (void)v.commit_index();
