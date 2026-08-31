@@ -7,6 +7,7 @@
 // touch disk: the context is an in-memory buffer over decrypt-on-demand chunks.
 
 #include <cstdint>
+#include "media/ffmpeg_secure.h"
 #include "media/video_source.h"
 
 #if defined(__GNUC__)
@@ -34,7 +35,7 @@ public:
     [[nodiscard]] bool         valid() const noexcept { return ctx_ != nullptr; }
     [[nodiscard]] bool buffer_is_locked() const noexcept
     {
-        return buffer_locked_;
+        return buffer_state_.locked;
     }
 
 private:
@@ -44,8 +45,7 @@ private:
     VideoSource  source_;
     uint64_t     pos_ = 0;
     AVIOContext* ctx_ = nullptr;
-    uint8_t* initial_buffer_ = nullptr;
-    bool buffer_locked_ = false;
+    SecureAvioBufferState buffer_state_;
 };
 
 } // namespace media

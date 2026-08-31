@@ -2,11 +2,29 @@
 
 #ifdef OSV_VENDORED_AV
 
+#include <cstdint>
+
 struct AVCodecContext;
 struct AVFrame;
+struct AVIOContext;
 struct AVPacket;
 
 namespace media {
+
+struct SecureAvioBufferState {
+    uint8_t* initial = nullptr;
+    bool locked = false;
+};
+
+using AvioReadCallback = int (*)(void*, uint8_t*, int);
+using AvioSeekCallback = int64_t (*)(void*, int64_t, int);
+
+// Allocate and release the shared page-locked, final-wipe AVIO buffer used by
+// both encrypted ChunkAvio and borrowed-memory MemAvio readers.
+[[nodiscard]] AVIOContext* secure_avio_alloc(void* opaque, AvioReadCallback read,
+                                             AvioSeekCallback seek,
+                                             SecureAvioBufferState& state) noexcept;
+void secure_avio_free(AVIOContext*& ctx, SecureAvioBufferState& state) noexcept;
 
 // Attach a reference-counted secure-lifetime sidecar to a demuxed packet.
 // Clones share the sidecar; the bytes are wiped only after its final release.

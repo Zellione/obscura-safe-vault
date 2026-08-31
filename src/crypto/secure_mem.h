@@ -334,7 +334,7 @@ inline void forget_page_refs(PageLockRegistry& registry, uintptr_t first, uintpt
 // allocator blocks share pages, so a per-allocation munlock can otherwise make
 // a still-live neighbouring secret swappable. Keep one OS lock per page and a
 // process-wide reference count across every SecureBuffer/SecureBytes/String.
-inline bool mem_lock(const uint8_t* p, size_t n) noexcept
+inline bool mem_lock(const void* p, size_t n) noexcept
 {
     if (!p || n == 0) return false;
     const auto addr = pointer_address(p);
@@ -360,7 +360,7 @@ inline bool mem_lock(const uint8_t* p, size_t n) noexcept
     }
 }
 
-inline void mem_unlock(uint8_t* p, size_t n) noexcept
+inline void mem_unlock(const void* p, size_t n) noexcept
 {
     if (!p || n == 0) return;
     const auto addr = pointer_address(p);
@@ -385,7 +385,7 @@ inline void mem_unlock(uint8_t* p, size_t n) noexcept
 // for an allocator that may already have realloc'd/freed the registered block:
 // munlock/VirtualUnlock on that stale address could affect unrelated storage
 // subsequently mapped at the same location.
-inline void mem_forget_lock(uint8_t* p, size_t n) noexcept
+inline void mem_forget_lock(const void* p, size_t n) noexcept
 {
     if (!p || n == 0) return;
     const auto addr = pointer_address(p);
@@ -561,9 +561,10 @@ public:
         if (detail::should_fail_secure_allocation()) throw std::bad_alloc{};
 
         auto* raw = static_cast<std::byte*>(::operator new(sizeof(Header) + bytes));
-        auto* header = ::new (raw) Header{.bytes = bytes, .locked = false};
-        auto* payload = reinterpret_cast<T*>(raw + sizeof(Header));
-        header->locked = detail::mem_lock(reinterpret_cast<const uint8_t*>(payload), bytes);
+        auto* header = std::construct_at(static_cast<Header*>(static_cast<void*>(raw)),
+                                         Header{.bytes = bytes, .locked = false});
+        auto* payload = static_cast<T*>(static_cast<void*>(raw + sizeof(Header)));
+        header->locked = detail::mem_lock(payload, bytes);
         if (!header->locked) warn_mlock_failure_once();
         return payload;
     }
@@ -571,12 +572,12 @@ public:
     void deallocate(T* p, size_t) const noexcept
     {
         if (!p) return;
-        auto* raw = reinterpret_cast<std::byte*>(p) - sizeof(Header);
-        auto* header = reinterpret_cast<Header*>(raw);
+        auto* raw = static_cast<std::byte*>(static_cast<void*>(p)) - sizeof(Header);
+        auto* header = std::launder(static_cast<Header*>(static_cast<void*>(raw)));
         crypto_wipe(p, header->bytes);
         detail::record_wipe_for_tests(std::as_bytes(std::span(p, header->bytes / sizeof(T))));
-        if (header->locked) detail::mem_unlock(reinterpret_cast<uint8_t*>(p), header->bytes);
-        header->~Header();
+        if (header->locked) detail::mem_unlock(p, header->bytes);
+        std::destroy_at(header);
         ::operator delete(raw);
     }
 

@@ -269,8 +269,9 @@ std::optional<DecodedFrame> copy_owned_frame(const DecodedFrame& src, crypto::Se
     if (plane_count == 3)
         plane_bytes[2] = static_cast<size_t>(src.linesizes[2]) * static_cast<size_t>(chroma_h);
 
-    size_t total = plane_bytes[0] + plane_bytes[1] + plane_bytes[2];
-    if (!storage.resize(total)) return std::nullopt;
+    if (const size_t total = plane_bytes[0] + plane_bytes[1] + plane_bytes[2];
+        !storage.resize(total))
+        return std::nullopt;
 
     DecodedFrame out{};
     out.width       = src.width;

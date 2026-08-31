@@ -3,7 +3,7 @@
 #ifdef OSV_VENDORED_AV
 
 #include <cstddef>
-#include <new>
+#include <memory>
 
 #include "crypto/secure_mem.h"
 
@@ -14,7 +14,9 @@
 #endif
 extern "C" {
 #include <libavcodec/avcodec.h>
+#include <libavformat/avio.h>
 #include <libavutil/buffer.h>
+#include <libavutil/mem.h>
 #include <libavutil/pixdesc.h>
 }
 #if defined(__GNUC__)
@@ -24,6 +26,8 @@ extern "C" {
 namespace media {
 namespace {
 
+constexpr int AVIO_BUFFER_SIZE = 1 << 16;
+
 struct SecureBufferOwner {
     AVBufferRef* original = nullptr;
     bool locked = false;
@@ -31,10 +35,9 @@ struct SecureBufferOwner {
 
 void release_secure_buffer(void* opaque, uint8_t*) noexcept
 {
-    auto* owner = static_cast<SecureBufferOwner*>(opaque);
+    std::unique_ptr<SecureBufferOwner> owner(static_cast<SecureBufferOwner*>(opaque));
     if (!owner) return;
-    AVBufferRef* original = owner->original;
-    if (original && original->data && original->size > 0) {
+    if (AVBufferRef* original = owner->original; original && original->data && original->size > 0) {
         if (av_buffer_get_ref_count(original) == 1) {
             crypto_wipe(original->data, original->size);
             crypto::detail::record_wipe_for_tests(
@@ -45,26 +48,29 @@ void release_secure_buffer(void* opaque, uint8_t*) noexcept
         if (owner->locked) crypto::detail::mem_unlock(original->data, original->size);
     }
     av_buffer_unref(&owner->original);
-    delete owner;
 }
 
 bool wrap_buffer(AVBufferRef*& slot) noexcept
 {
     if (!slot || !slot->data || slot->size == 0) return true;
-    auto* owner = new (std::nothrow) SecureBufferOwner;
-    if (!owner) return false;
+    std::unique_ptr<SecureBufferOwner> owner;
+    try {
+        owner = std::make_unique<SecureBufferOwner>();
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
     owner->original = slot;
     owner->locked = crypto::detail::mem_lock(slot->data, slot->size);
     if (!owner->locked) crypto::warn_mlock_failure_once();
 
     AVBufferRef* wrapper =
-        av_buffer_create(slot->data, slot->size, &release_secure_buffer, owner, 0);
+        av_buffer_create(slot->data, slot->size, &release_secure_buffer, owner.get(), 0);
     if (!wrapper) {
         if (owner->locked) crypto::detail::mem_unlock(slot->data, slot->size);
         owner->original = nullptr;
-        delete owner;
         return false;
     }
+    owner.release();
     slot = wrapper;
     return true;
 }
@@ -77,6 +83,48 @@ bool frame_is_hardware(const AVFrame* frame) noexcept
 }
 
 }  // namespace
+
+AVIOContext* secure_avio_alloc(void* opaque, AvioReadCallback read, AvioSeekCallback seek,
+                               SecureAvioBufferState& state) noexcept
+{
+    auto* buffer = static_cast<uint8_t*>(av_malloc(AVIO_BUFFER_SIZE));
+    if (!buffer) return nullptr;
+    state.initial = buffer;
+    state.locked = crypto::detail::mem_lock(buffer, AVIO_BUFFER_SIZE);
+    if (!state.locked) crypto::warn_mlock_failure_once();
+
+    AVIOContext* ctx = avio_alloc_context(buffer, AVIO_BUFFER_SIZE, 0, opaque, read, nullptr, seek);
+    if (ctx) return ctx;
+
+    crypto_wipe(buffer, AVIO_BUFFER_SIZE);
+    if (state.locked) crypto::detail::mem_unlock(buffer, AVIO_BUFFER_SIZE);
+    crypto::detail::record_wipe_for_tests(
+        std::as_bytes(std::span(buffer, size_t{AVIO_BUFFER_SIZE})));
+    av_free(buffer);
+    state = {};
+    return nullptr;
+}
+
+void secure_avio_free(AVIOContext*& ctx, SecureAvioBufferState& state) noexcept
+{
+    if (!ctx) return;
+    auto* final_buffer = ctx->buffer;
+    const size_t final_size = ctx->buffer_size > 0 ? static_cast<size_t>(ctx->buffer_size) : 0;
+    if (final_buffer == state.initial) {
+        crypto_wipe(final_buffer, final_size);
+        if (state.locked) crypto::detail::mem_unlock(final_buffer, final_size);
+    } else {
+        if (state.locked) crypto::detail::mem_forget_lock(state.initial, AVIO_BUFFER_SIZE);
+        mark_ffmpeg_opaque_storage();
+        const bool final_locked = crypto::detail::mem_lock(final_buffer, final_size);
+        crypto_wipe(final_buffer, final_size);
+        if (final_locked) crypto::detail::mem_unlock(final_buffer, final_size);
+    }
+    crypto::detail::record_wipe_for_tests(std::as_bytes(std::span(final_buffer, final_size)));
+    av_freep(&ctx->buffer);
+    avio_context_free(&ctx);
+    state = {};
+}
 
 bool secure_packet_storage(AVPacket* packet) noexcept
 {
@@ -100,8 +148,7 @@ bool secure_frame_storage(AVFrame* frame) noexcept
 
 int secure_get_buffer2(AVCodecContext* ctx, AVFrame* frame, int flags) noexcept
 {
-    const int ret = avcodec_default_get_buffer2(ctx, frame, flags);
-    if (ret < 0) return ret;
+    if (const int ret = avcodec_default_get_buffer2(ctx, frame, flags); ret < 0) return ret;
     if (!secure_frame_storage(frame)) mark_ffmpeg_opaque_storage();
     return 0;
 }
