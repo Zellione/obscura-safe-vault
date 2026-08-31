@@ -34,6 +34,7 @@
 #include "header.h"
 #include "index.h"
 #include "op_progress.h"
+#include "chunk_ref.h"
 
 namespace media { class VideoSource; }
 
@@ -62,6 +63,8 @@ struct StagedThumb;
 struct StagedVideoInfo;
 struct StagedNode;
 struct NodeExtras;
+// Phase 99: full definition follows the class (ChunkRef builders take IndexNode).
+struct ChunkRef;
 
 enum class SearchScope { Images, Galleries, Both };
 
@@ -309,8 +312,8 @@ public:
 
     // Gallery cover montages read a descendant's thumbnail by raw span. Kept a
     // free friend (not a member) to keep Vault under the cpp:S1448 method cap.
-    friend VaultResult read_thumb_span(const Vault& v, uint64_t offset,
-                                       uint64_t length, crypto::SecureBytes& out);
+    friend VaultResult read_thumb_span(const Vault& v, const ChunkRef& ref,
+                                       crypto::SecureBytes& out);
 
     // UI needs the vault file size for waste display (Phase 26). Kept a free friend
     // to keep Vault under the cpp:S1448 method cap.
@@ -458,12 +461,24 @@ private:
     CommitLane*                            commit_router_ = nullptr;
 };
 
-// Decrypt a thumbnail/poster chunk by its raw (offset, length) span into mlock'd
-// memory. Used by gallery cover montages (Phase 19), which reference descendant
-// nodes' thumbnail spans without holding the nodes. InvalidArg if length is 0;
-// Locked if the vault is locked; AuthFailed on tamper/corruption.
-[[nodiscard]] VaultResult read_thumb_span(const Vault& v, uint64_t offset,
-                                          uint64_t length, crypto::SecureBytes& out);
+// Phase 99 (OSV-AUD-004): a stored chunk's decrypt context — the offset/length
+// span PLUS the logical identity the AEAD binds (owner node_id, per-record id,
+// domain, sequence, and the legacy/migrated flag). See vault/chunk_ref.h.
+using vault::ChunkRef;
+
+// Build a ChunkRef for a media node's thumbnail (video: poster) / an image's
+// data chunk / one video chunk (by vector index). Cheap value construction.
+[[nodiscard]] ChunkRef media_thumb_chunk_ref(const IndexNode& node) noexcept;
+[[nodiscard]] ChunkRef image_data_chunk_ref(const IndexNode& node) noexcept;
+[[nodiscard]] ChunkRef video_chunk_ref(const IndexNode& node, size_t index) noexcept;
+
+// Decrypt a thumbnail/poster chunk by its ChunkRef into mlock'd memory. Used by
+// gallery cover montages (Phase 19) and the any-thread span readers (Phase 58),
+// which reference descendant nodes' thumbnail spans without holding the nodes.
+// InvalidArg if length is 0; Locked if the vault is locked; AuthFailed on
+// tamper/corruption.
+[[nodiscard]] VaultResult read_thumb_span(const Vault& v, const ChunkRef& ref,
+                                          crypto::SecureBytes& out);
 
 // Batch media removal (duplicate finder): erase every media node named by
 // `node_paths` (full slash-paths). Missing / non-media paths are counted, not

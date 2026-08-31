@@ -9,19 +9,29 @@
 namespace media {
 
 VideoSource::VideoSource(std::FILE* fp, std::span<const uint8_t, crypto::KEY_SIZE> key,
-                         const vault::VideoMeta& meta, bool framed)
+                         const vault::VideoMeta& meta, bool framed,
+                         std::array<uint8_t, crypto::NODE_ID_SIZE> node_id)
     : store_(fp, key, framed), chunks_(meta.chunks), chunk_size_(meta.chunk_size),
-      total_size_(meta.orig_size) {}
+      total_size_(meta.orig_size), node_id_(std::move(node_id)),
+      context_bound_(meta.context_bound) {}
 
 // Copy up to one chunk's worth of plaintext covering `offset` into `dst`,
-// decrypting that chunk on demand. Returns bytes copied, 0 on a corrupt
-// chunk/size mismatch, or -1 on an auth/decrypt failure (cache wiped).
-int64_t VideoSource::fill_one(uint64_t offset, std::span<uint8_t> dst) noexcept
-{
-    const uint64_t idx = offset / chunk_size_;
+    // decrypting that chunk on demand. Returns bytes copied, 0 on a corrupt
+    // chunk/size mismatch, or -1 on an auth/decrypt failure (cache wiped).
+    int64_t VideoSource::fill_one(uint64_t offset, std::span<uint8_t> dst) noexcept
+    {
+        const uint64_t idx = offset / chunk_size_;
     if (idx >= chunks_.size()) return 0;                    // metadata/size mismatch
     if (cached_index_ != static_cast<int64_t>(idx)) {
-        if (!store_.read_chunk({chunks_[idx].offset, chunks_[idx].length}, cache_)) {
+        crypto::ChunkTag tag;
+        tag.domain        = crypto::ChunkDomain::Video;
+        tag.owner         = node_id_;
+        tag.record        = chunks_[static_cast<size_t>(idx)].id;
+        tag.sequence      = chunks_[static_cast<size_t>(idx)].sequence;
+        tag.context_bound = context_bound_;
+        if (!store_.read_chunk({chunks_[static_cast<size_t>(idx)].offset,
+                                chunks_[static_cast<size_t>(idx)].length},
+                               tag, cache_)) {
             (void)cache_.resize(0);                         // wipe any stale plaintext
             cached_index_ = -1;
             return -1;                                      // auth/decrypt failure
@@ -51,7 +61,8 @@ int64_t VideoSource::read(uint64_t offset, std::span<uint8_t> dst) noexcept
 
 VideoSource VideoSource::open(const vault::Vault& v, const vault::IndexNode& node)
 {
-    return VideoSource(v.read_fp_, v.master_key_.as_span(), node.vmeta, framed_chunks(v.header_));
+    return VideoSource(v.read_fp_, v.master_key_.as_span(), node.vmeta, framed_chunks(v.header_),
+                       node.node_id);
 }
 
 } // namespace media

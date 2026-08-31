@@ -32,23 +32,21 @@ void walk(const vault::Vault& v, const std::string& path,
         it.parent_path = path;
         it.is_video    = n->is_video();
         if (n->is_image()) {
-            it.bytes        = n->meta.orig_size;
-            it.width        = n->meta.width;
-            it.height       = n->meta.height;
-            it.data_spans   = {{n->meta.data_offset, n->meta.data_length}};
-            it.thumb_offset = n->meta.thumb_offset;
-            it.thumb_length = n->meta.thumb_length;
+            it.bytes  = n->meta.orig_size;
+            it.width  = n->meta.width;
+            it.height = n->meta.height;
+            it.data   = {vault::image_data_chunk_ref(*n)};
+            it.thumb  = vault::media_thumb_chunk_ref(*n);
         } else {
             it.bytes  = n->vmeta.orig_size;
             it.width  = n->vmeta.width;
             it.height = n->vmeta.height;
-            it.data_spans.reserve(n->vmeta.chunks.size());
-            for (const vault::VideoChunk& c : n->vmeta.chunks)
-                it.data_spans.emplace_back(c.offset, c.length);
-            it.thumb_offset = n->vmeta.poster_offset;
-            it.thumb_length = n->vmeta.poster_length;
-            it.duration_us  = n->vmeta.duration_us;
-            it.chunk_size   = n->vmeta.chunk_size;
+            it.data.reserve(n->vmeta.chunks.size());
+            for (size_t i = 0; i < n->vmeta.chunks.size(); ++i)
+                it.data.push_back(vault::video_chunk_ref(*n, i));
+            it.thumb       = vault::media_thumb_chunk_ref(*n);
+            it.duration_us = n->vmeta.duration_us;
+            it.chunk_size  = n->vmeta.chunk_size;
         }
         out.push_back(std::move(it));
     }
@@ -66,16 +64,15 @@ enum class HashResult {
 DupMember to_member(const DupScanItem& it)
 {
     DupMember m;
-    m.node_path    = it.node_path;
-    m.name         = it.name;
-    m.parent_path  = it.parent_path;
-    m.is_video     = it.is_video;
-    m.bytes        = it.bytes;
-    m.width        = it.width;
-    m.height       = it.height;
-    m.thumb_offset = it.thumb_offset;
-    m.thumb_length = it.thumb_length;
-    m.data_spans   = it.data_spans;
+    m.node_path   = it.node_path;
+    m.name        = it.name;
+    m.parent_path = it.parent_path;
+    m.is_video    = it.is_video;
+    m.bytes       = it.bytes;
+    m.width       = it.width;
+    m.height      = it.height;
+    m.thumb       = it.thumb;
+    m.data        = it.data;
     return m;
 }
 
@@ -87,18 +84,16 @@ bool refresh_member(const vault::Vault& v, DupMember& m)
         return false;
     }
     if (n->is_image()) {
-        m.bytes        = n->meta.orig_size;
-        m.data_spans   = {{n->meta.data_offset, n->meta.data_length}};
-        m.thumb_offset = n->meta.thumb_offset;
-        m.thumb_length = n->meta.thumb_length;
+        m.bytes = n->meta.orig_size;
+        m.data  = {vault::image_data_chunk_ref(*n)};
+        m.thumb = vault::media_thumb_chunk_ref(*n);
     } else {
         m.bytes = n->vmeta.orig_size;
-        m.data_spans.clear();
-        m.data_spans.reserve(n->vmeta.chunks.size());
-        for (const vault::VideoChunk& c : n->vmeta.chunks)
-            m.data_spans.emplace_back(c.offset, c.length);
-        m.thumb_offset = n->vmeta.poster_offset;
-        m.thumb_length = n->vmeta.poster_length;
+        m.data.clear();
+        m.data.reserve(n->vmeta.chunks.size());
+        for (size_t i = 0; i < n->vmeta.chunks.size(); ++i)
+            m.data.push_back(vault::video_chunk_ref(*n, i));
+        m.thumb = vault::media_thumb_chunk_ref(*n);
     }
     return true;
 }
@@ -108,12 +103,12 @@ bool refresh_member(const vault::Vault& v, DupMember& m)
 // or Locked if vault was locked under us (must stop immediately).
 HashResult hash_item(const vault::Vault& v, const DupScanItem& it, Digest& out)
 {
-    if (it.data_spans.empty()) return HashResult::Failed;
+    if (it.data.empty()) return HashResult::Failed;
     crypto_blake2b_ctx ctx;
     crypto_blake2b_init(&ctx, out.size());
     crypto::SecureBytes scratch;
-    for (const auto& [off, len] : it.data_spans) {
-        const auto res = vault::read_thumb_span(v, off, len, scratch);
+    for (const vault::ChunkRef& ref : it.data) {
+        const auto res = vault::read_thumb_span(v, ref, scratch);
         if (res == vault::VaultResult::Locked) return HashResult::Locked;
         if (res != vault::VaultResult::Ok) return HashResult::Failed;
         crypto_blake2b_update(&ctx, scratch.data(), scratch.size());
@@ -212,7 +207,7 @@ void perceptual_pass(const PassCtx& ctx, const std::vector<bool>& in_exact, bool
 
     for (size_t i = 0; i < ctx.items.size(); ++i) {
         const auto& it = ctx.items[i];
-        if (it.is_video || it.thumb_length == 0 || in_exact[i]) continue;
+        if (it.is_video || it.thumb.length == 0 || in_exact[i]) continue;
 
         if (ctx.cancel.load()) {
             out.cancelled = true;
@@ -224,7 +219,7 @@ void perceptual_pass(const PassCtx& ctx, const std::vector<bool>& in_exact, bool
         }
 
         crypto::SecureBytes thumb;
-        const auto read_res = vault::read_thumb_span(ctx.v, it.thumb_offset, it.thumb_length, thumb);
+        const auto read_res = vault::read_thumb_span(ctx.v, it.thumb, thumb);
         if (read_res == vault::VaultResult::Locked) {
             out.cancelled = true;
             return;
@@ -291,10 +286,10 @@ struct VideoStream {
     {
         if (item.chunk_size == 0 || offset >= item.bytes) return offset >= item.bytes ? 0 : -1;
         const auto idx = static_cast<int64_t>(offset / item.chunk_size);
-        if (idx >= static_cast<int64_t>(item.data_spans.size())) return 0;
+        if (idx >= static_cast<int64_t>(item.data.size())) return 0;
         if (idx != cached_index) {
-            const auto& [off, len] = item.data_spans[static_cast<size_t>(idx)];
-            if (const auto res = vault::read_thumb_span(v, off, len, cache);
+            const vault::ChunkRef& ref = item.data[static_cast<size_t>(idx)];
+            if (const auto res = vault::read_thumb_span(v, ref, cache);
                 res != vault::VaultResult::Ok) {
                 locked = res == vault::VaultResult::Locked;
                 cached_index = -1;
@@ -315,9 +310,9 @@ struct VideoStream {
 vault::VaultResult poster_hash(const PassCtx& ctx, const DupScanItem& it, VideoSig& sig)
 {
     using enum vault::VaultResult;
-    if (it.thumb_length == 0) return Ok;
+    if (it.thumb.length == 0) return Ok;
     crypto::SecureBytes poster;
-    if (const auto res = vault::read_thumb_span(ctx.v, it.thumb_offset, it.thumb_length, poster);
+    if (const auto res = vault::read_thumb_span(ctx.v, it.thumb, poster);
         res != Ok)
         return res;
     const auto decoded = image::decode_from_memory(poster.as_span());
@@ -516,7 +511,7 @@ void DupScanJob::run(const vault::Vault& v, std::vector<DupScanItem> items, bool
     size_t total_perceptual = 0;
     if (perceptual) {
         for (const auto& it : items) {
-            if (!it.is_video && it.thumb_length > 0) total_perceptual++;
+            if (!it.is_video && it.thumb.length > 0) total_perceptual++;
         }
     }
 

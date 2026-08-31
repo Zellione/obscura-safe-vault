@@ -401,12 +401,12 @@ TEST(dup_refresh_applies_field_updates)
 {
     ui::DupReview r(std::vector<ui::DupGroup>{make_group("a", 2)});
     r.refresh_members([](ui::DupMember& m) {
-        m.thumb_offset = 777;
-        m.data_spans   = {{123, 456}};
+        m.thumb.offset = 777;
+        m.thumb.length = 456;
         return true;
     });
-    CHECK_EQ(r.groups()[0].members[0].thumb_offset, uint64_t{777});
-    CHECK_EQ(r.groups()[0].members[1].data_spans[0].first, uint64_t{123});
+    CHECK_EQ(r.groups()[0].members[0].thumb.offset, uint64_t{777});
+    CHECK_EQ(r.groups()[0].members[1].thumb.length, uint64_t{456});
 }
 
 TEST(dup_refresh_reapplies_default_marks)

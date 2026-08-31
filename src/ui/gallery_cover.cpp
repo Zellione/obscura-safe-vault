@@ -1,17 +1,17 @@
 #include "ui/gallery_cover.h"
 
+#include "vault/vault.h"   // vault::media_thumb_chunk_ref
+
 namespace ui {
 
 namespace {
-// The cover span stored directly on a media node, or nullopt if it has no
-// thumbnail/poster (length 0).
+// The cover chunk reference stored directly on a media node, or nullopt if it
+// has no thumbnail/poster (length 0).
 std::optional<CoverSpan> media_span(const vault::IndexNode& n) noexcept
 {
-    if (n.is_image() && n.meta.thumb_length != 0)
-        return CoverSpan{n.meta.thumb_offset, n.meta.thumb_length};
-    if (n.is_video() && n.vmeta.poster_length != 0)
-        return CoverSpan{n.vmeta.poster_offset, n.vmeta.poster_length};
-    return std::nullopt;
+    const vault::ChunkRef r = vault::media_thumb_chunk_ref(n);
+    if (r.length == 0) return std::nullopt;
+    return CoverSpan{r};
 }
 }  // namespace
 

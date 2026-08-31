@@ -82,8 +82,8 @@ TEST(dup_scan_items_cover_whole_tree)
     CHECK_EQ(leaf.parent_path, std::string("a/b"));
     CHECK(!leaf.is_video);
     CHECK_EQ(leaf.bytes, uint64_t{300});
-    REQUIRE(leaf.data_spans.size() == 1);
-    CHECK(leaf.data_spans[0].second > 0);   // on-disk chunk length recorded
+    REQUIRE(leaf.data.size() == 1);
+    CHECK(leaf.data[0].length > 0);   // on-disk chunk length recorded
 }
 
 // --- Phase 86: scoped collection -------------------------------------------

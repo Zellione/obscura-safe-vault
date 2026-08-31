@@ -335,8 +335,7 @@ TEST(vault_read_thumb_span_matches_read_thumbnail)
     REQUIRE(v.read_thumbnail(*kids[0], via_node) == vault::VaultResult::Ok);
 
     crypto::SecureBytes via_span;
-    REQUIRE(vault::read_thumb_span(v, kids[0]->meta.thumb_offset,
-                                   kids[0]->meta.thumb_length, via_span)
+    REQUIRE(vault::read_thumb_span(v, vault::media_thumb_chunk_ref(*kids[0]), via_span)
             == vault::VaultResult::Ok);
     CHECK_BYTES_EQ(via_span.as_span(), via_node.as_span());
 }
@@ -350,11 +349,14 @@ TEST(vault_read_thumb_span_rejects_empty_and_locked)
         REQUIRE(vault::Vault::create(tv.str(), bytes("pw"), {}, kTestKdf, v)
                 == vault::VaultResult::Ok);
         // A zero-length span is never a valid thumbnail.
-        CHECK_EQ(vault::read_thumb_span(v, 0, 0, out), vault::VaultResult::InvalidArg);
+        CHECK_EQ(vault::read_thumb_span(v, vault::ChunkRef{}, out),
+                 vault::VaultResult::InvalidArg);
     }
     vault::Vault v2;
     REQUIRE(vault::Vault::open(tv.str(), v2) == vault::VaultResult::Ok);
-    CHECK_EQ(vault::read_thumb_span(v2, 0, 16, out), vault::VaultResult::Locked);
+    vault::ChunkRef locked_ref;
+    locked_ref.length = 16;
+    CHECK_EQ(vault::read_thumb_span(v2, locked_ref, out), vault::VaultResult::Locked);
 }
 
 TEST(vault_operations_require_unlock)

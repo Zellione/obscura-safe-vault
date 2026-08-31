@@ -24,20 +24,31 @@ static std::vector<uint8_t> pattern(size_t n, uint8_t seed)
     return v;
 }
 
+// These tests exercise the raw chunk plumbing; a contextless tag (Phase 99
+// legacy records: context_bound == false, no associated data) keeps bytes
+// byte-identical to the pre-Phase-99 layout.
+static crypto::ChunkTag contextless_tag()
+{
+    crypto::ChunkTag t;
+    t.context_bound = false;
+    return t;
+}
+
 TEST(chunk_store_append_read_roundtrip)
 {
     auto key = random_key();
     std::FILE* fp = std::tmpfile();
     REQUIRE(fp != nullptr);
     ChunkStore store(fp, key.as_span(), false);
+    crypto::ChunkTag tag = contextless_tag();
 
     auto plain = pattern(5000, 3);
     ChunkSpan span;
-    REQUIRE(store.append_chunk(plain, span));
+    REQUIRE(store.append_chunk(plain, tag, span));
     CHECK_EQ(span.length, plain.size() + crypto::NONCE_SIZE + crypto::TAG_SIZE);
 
     std::vector<uint8_t> out;
-    REQUIRE(store.read_chunk(span, out));
+    REQUIRE(store.read_chunk(span, tag, out));
     CHECK_BYTES_EQ(std::span<const uint8_t>(out), std::span<const uint8_t>(plain));
     std::fclose(fp);
 }
@@ -48,20 +59,21 @@ TEST(chunk_store_appends_are_contiguous)
     std::FILE* fp = std::tmpfile();
     REQUIRE(fp != nullptr);
     ChunkStore store(fp, key.as_span(), false);
+    crypto::ChunkTag tag = contextless_tag();
 
     auto p1 = pattern(100, 1);
     auto p2 = pattern(200, 2);
     ChunkSpan s1, s2;
-    REQUIRE(store.append_chunk(p1, s1));
-    REQUIRE(store.append_chunk(p2, s2));
+    REQUIRE(store.append_chunk(p1, tag, s1));
+    REQUIRE(store.append_chunk(p2, tag, s2));
 
     CHECK_EQ(s1.offset, static_cast<uint64_t>(0));
     CHECK_EQ(s2.offset, s1.offset + s1.length);
 
     // Both still read back correctly and independently.
     std::vector<uint8_t> o1, o2;
-    REQUIRE(store.read_chunk(s1, o1));
-    REQUIRE(store.read_chunk(s2, o2));
+    REQUIRE(store.read_chunk(s1, tag, o1));
+    REQUIRE(store.read_chunk(s2, tag, o2));
     CHECK_BYTES_EQ(std::span<const uint8_t>(o1), std::span<const uint8_t>(p1));
     CHECK_BYTES_EQ(std::span<const uint8_t>(o2), std::span<const uint8_t>(p2));
     std::fclose(fp);
@@ -73,13 +85,14 @@ TEST(chunk_store_reads_into_secure_bytes)
     std::FILE* fp = std::tmpfile();
     REQUIRE(fp != nullptr);
     ChunkStore store(fp, key.as_span(), false);
+    crypto::ChunkTag tag = contextless_tag();
 
     auto plain = pattern(4096, 9);
     ChunkSpan span;
-    REQUIRE(store.append_chunk(plain, span));
+    REQUIRE(store.append_chunk(plain, tag, span));
 
     crypto::SecureBytes secure;
-    REQUIRE(store.read_chunk(span, secure));
+    REQUIRE(store.read_chunk(span, tag, secure));
     REQUIRE(secure.size() == plain.size());
     CHECK_BYTES_EQ(secure.as_span(), std::span<const uint8_t>(plain));
     std::fclose(fp);
@@ -91,10 +104,11 @@ TEST(chunk_store_read_detects_tamper)
     std::FILE* fp = std::tmpfile();
     REQUIRE(fp != nullptr);
     ChunkStore store(fp, key.as_span(), false);
+    crypto::ChunkTag tag = contextless_tag();
 
     auto plain = pattern(64, 5);
     ChunkSpan span;
-    REQUIRE(store.append_chunk(plain, span));
+    REQUIRE(store.append_chunk(plain, tag, span));
 
     // Flip a byte inside the ciphertext region directly in the file.
     const long cipher_pos = static_cast<long>(span.offset + crypto::NONCE_SIZE + 3);
@@ -106,7 +120,7 @@ TEST(chunk_store_read_detects_tamper)
     std::fflush(fp);
 
     std::vector<uint8_t> out;
-    CHECK_FALSE(store.read_chunk(span, out));
+    CHECK_FALSE(store.read_chunk(span, tag, out));
     CHECK_TRUE(out.empty());
     std::fclose(fp);
 }
@@ -136,15 +150,16 @@ TEST(chunk_store_read_rejects_out_of_range_span)
     std::FILE* fp = std::tmpfile();
     REQUIRE(fp != nullptr);
     ChunkStore store(fp, key.as_span(), false);
+    crypto::ChunkTag tag = contextless_tag();
 
     auto plain = pattern(32, 1);
     ChunkSpan span;
-    REQUIRE(store.append_chunk(plain, span));
+    REQUIRE(store.append_chunk(plain, tag, span));
 
     // A span claiming far more than the file holds must fail, not read garbage.
     ChunkSpan bogus{.offset = span.offset, .length = span.length + 100000};
     std::vector<uint8_t> out;
-    CHECK_FALSE(store.read_chunk(bogus, out));
+    CHECK_FALSE(store.read_chunk(bogus, tag, out));
     std::fclose(fp);
 }
 
@@ -154,19 +169,20 @@ TEST(chunk_store_framed_roundtrip_both_overloads)
     std::FILE* fp = std::tmpfile();
     REQUIRE(fp != nullptr);
     ChunkStore store(fp, key.as_span(), true);
+    crypto::ChunkTag tag = contextless_tag();
 
     const std::vector<uint8_t> compressible(200 * 1024, 0x42);
     ChunkSpan span{};
-    REQUIRE(store.append_chunk(compressible, span));
+    REQUIRE(store.append_chunk(compressible, tag, span));
     // Framed + deflated: ciphertext is much smaller than the payload.
     CHECK(span.length < compressible.size() / 4);
 
     std::vector<uint8_t> out_vec;
-    REQUIRE(store.read_chunk(span, out_vec));
+    REQUIRE(store.read_chunk(span, tag, out_vec));
     CHECK(out_vec == compressible);
 
     crypto::SecureBytes out_sec;
-    REQUIRE(store.read_chunk(span, out_sec));
+    REQUIRE(store.read_chunk(span, tag, out_sec));
     REQUIRE(out_sec.size() == compressible.size());
     CHECK(std::memcmp(out_sec.data(), compressible.data(), compressible.size()) == 0);
     std::fclose(fp);
@@ -178,14 +194,15 @@ TEST(chunk_store_framed_incompressible_overhead_is_one_byte)
     std::FILE* fp = std::tmpfile();
     REQUIRE(fp != nullptr);
     ChunkStore store(fp, key.as_span(), true);
+    crypto::ChunkTag tag = contextless_tag();
     std::vector<uint8_t> noise(4096);
     (void)crypto::fill_random(noise);
     ChunkSpan span{};
-    REQUIRE(store.append_chunk(noise, span));
+    REQUIRE(store.append_chunk(noise, tag, span));
     // raw frame: 1 method byte + AEAD overhead (nonce 24 + tag 16).
     CHECK(span.length == noise.size() + 1 + 40);
     std::vector<uint8_t> out;
-    REQUIRE(store.read_chunk(span, out));
+    REQUIRE(store.read_chunk(span, tag, out));
     CHECK(out == noise);
     std::fclose(fp);
 }
@@ -196,12 +213,13 @@ TEST(chunk_store_unframed_layout_unchanged)
     std::FILE* fp = std::tmpfile();
     REQUIRE(fp != nullptr);
     ChunkStore store(fp, key.as_span(), false);
+    crypto::ChunkTag tag = contextless_tag();
     const auto payload = pattern(1000, 3);
     ChunkSpan span{};
-    REQUIRE(store.append_chunk(payload, span));
+    REQUIRE(store.append_chunk(payload, tag, span));
     CHECK(span.length == payload.size() + 40);    // exactly as before Phase 26
     std::vector<uint8_t> out;
-    REQUIRE(store.read_chunk(span, out));
+    REQUIRE(store.read_chunk(span, tag, out));
     CHECK(out == payload);
     std::fclose(fp);
 }
@@ -212,10 +230,11 @@ TEST(chunk_store_framed_failed_read_leaves_out_empty)
     std::FILE* fp = std::tmpfile();
     REQUIRE(fp != nullptr);
     ChunkStore store(fp, key.as_span(), true);
+    crypto::ChunkTag tag = contextless_tag();
 
     const std::vector<uint8_t> compressible(200 * 1024, 0x42);
     ChunkSpan span{};
-    REQUIRE(store.append_chunk(compressible, span));
+    REQUIRE(store.append_chunk(compressible, tag, span));
 
     // Flip a byte inside the ciphertext region to trigger decrypt failure.
     const long cipher_pos = static_cast<long>(span.offset + crypto::NONCE_SIZE + 30);
@@ -230,7 +249,7 @@ TEST(chunk_store_framed_failed_read_leaves_out_empty)
     crypto::SecureBytes out;
     REQUIRE(out.resize(16));
     // read_chunk must fail AND leave out empty (not with stale caller content).
-    CHECK_FALSE(store.read_chunk(span, out));
+    CHECK_FALSE(store.read_chunk(span, tag, out));
     CHECK_EQ(out.size(), size_t(0));
     std::fclose(fp);
 }
@@ -241,10 +260,11 @@ TEST(chunk_store_out_of_bounds_secure_read_clears_stale_output)
     std::FILE* fp = std::tmpfile();
     REQUIRE(fp != nullptr);
     ChunkStore store(fp, key.as_span(), true);
+    crypto::ChunkTag tag = contextless_tag();
 
     crypto::SecureBytes out;
     REQUIRE(out.resize(16));
-    CHECK_FALSE(store.read_chunk(ChunkSpan{.offset = 1, .length = 64}, out));
+    CHECK_FALSE(store.read_chunk(ChunkSpan{.offset = 1, .length = 64}, tag, out));
     CHECK_EQ(out.size(), size_t(0));
     std::fclose(fp);
 }

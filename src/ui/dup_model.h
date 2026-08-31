@@ -12,6 +12,8 @@
 #include <string_view>
 #include <vector>
 
+#include "vault/chunk_ref.h"   // vault::ChunkRef (pure value snapshots of the index)
+
 namespace ui {
 
 // Perceptual-match threshold: max Hamming distance (bits of 64) between two
@@ -44,9 +46,11 @@ struct DupMember {
     uint64_t    bytes = 0;     // plaintext orig_size
     uint32_t    width  = 0;
     uint32_t    height = 0;
-    uint64_t    thumb_offset = 0;   // tile span; 0 length = none
-    uint64_t    thumb_length = 0;
-    std::vector<std::pair<uint64_t, uint64_t>> data_spans;  // (offset,length) for full original
+    // Phase 99: chunk references (span + decrypt context) copied from the
+    // authenticated index at snapshot/refresh time, so any-thread reads never
+    // hold the (possibly dangled) IndexNode.
+    vault::ChunkRef            thumb;   // tile span; length 0 = none
+    std::vector<vault::ChunkRef> data;  // full-original chunk refs
     bool        keep = true;
 };
 struct DupGroup {

@@ -435,8 +435,8 @@ SDL_Texture* ImageViewer::thumb_texture(const vault::IndexNode& node)
     // Phase 58: async fetch via worker thread (thread-safe vault read).
     if (thumbs_.failed.contains(k.key) || thumbs_.worker.pending(k.key)) return nullptr;
     thumbs_.worker.submit_fetch(k.key,
-        [&v = vault_, off = k.offset, len = k.length](crypto::SecureBytes& out) {
-            return vault::read_thumb_span(v, off, len, out) == vault::VaultResult::Ok;
+        [&v = vault_, ref = k.ref](crypto::SecureBytes& out) {
+            return vault::read_thumb_span(v, ref, out) == vault::VaultResult::Ok;
         });
     return nullptr;
 }

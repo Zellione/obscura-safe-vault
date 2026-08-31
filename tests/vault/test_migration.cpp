@@ -45,7 +45,7 @@ TEST(migration_watermark_round_trips_at_v10)
     vault::serialize_index(root, {}, s, blob);
     CHECK(!blob.empty());
     CHECK_EQ(blob[0], vault::INDEX_VERSION);
-    CHECK_EQ(vault::INDEX_VERSION, 12);
+    CHECK_EQ(vault::INDEX_VERSION, 13);
 
     vault::IndexNode out;
     std::vector<vault::SavedSearch> searches;

@@ -23,13 +23,15 @@
 namespace ui {
 namespace {
 
-// One unit of migration work, holding COPIED chunk spans rather than an
-// IndexNode* — the pool added in Task 5 must never hold a tree pointer.
+// One unit of migration work, holding COPIED chunk refs rather than an
+// IndexNode* — the pool added in Task 5 must never hold a tree pointer. The
+// refs carry the Phase 99 decrypt context so the any-thread worker can
+// authenticate each chunk it reads.
 struct Item {
     enum class Kind : uint8_t { VideoProbe, ImageAnimated, ImageThumb, VideoPoster };
     Kind        kind = Kind::ImageAnimated;
     std::string node_path;
-    std::vector<std::pair<uint64_t, uint64_t>> data_spans;
+    std::vector<vault::ChunkRef> refs;
     uint64_t    bytes      = 0;
     uint32_t    chunk_size = 0;   // videos only
     uint8_t     format     = 0;   // images only
@@ -51,33 +53,34 @@ struct Result {
     bool     animated = false;    // images only
 };
 
-// Build a video item from VideoCodec metadata. Workers never mutate the tree.
+// Build a video item from a video node. Workers never mutate the tree. The
+// per-chunk refs carry each chunk's record id + sequence + the node's identity.
 void collect_video_item(Item::Kind kind, std::string_view child,
-                        const vault::VideoMeta& vmeta, bool thumbs_stale,
+                        const vault::IndexNode& n, bool thumbs_stale,
                         std::vector<Item>& out)
 {
     Item it;
     it.kind         = kind;
     it.node_path    = child;
-    it.bytes        = vmeta.orig_size;
-    it.chunk_size   = vmeta.chunk_size;
+    it.bytes        = n.vmeta.orig_size;
+    it.chunk_size   = n.vmeta.chunk_size;
     it.thumbs_stale = thumbs_stale;
-    it.data_spans.reserve(vmeta.chunks.size());
-    for (const vault::VideoChunk& c : vmeta.chunks)
-        it.data_spans.emplace_back(c.offset, c.length);
+    it.refs.reserve(n.vmeta.chunks.size());
+    for (size_t i = 0; i < n.vmeta.chunks.size(); ++i)
+        it.refs.push_back(vault::video_chunk_ref(n, i));
     out.push_back(std::move(it));
 }
 
 // Build an image item. Workers never mutate the tree.
 void collect_image_item(Item::Kind kind, std::string_view child,
-                        const vault::ImageMeta& meta, std::vector<Item>& out)
+                        const vault::IndexNode& n, std::vector<Item>& out)
 {
     Item it;
-    it.kind       = kind;
-    it.node_path  = child;
-    it.bytes      = meta.orig_size;
-    it.format     = std::to_underlying(meta.format);
-    it.data_spans = {{meta.data_offset, meta.data_length}};
+    it.kind      = kind;
+    it.node_path = child;
+    it.bytes     = n.meta.orig_size;
+    it.format    = std::to_underlying(n.meta.format);
+    it.refs      = {vault::image_data_chunk_ref(n)};
     out.push_back(std::move(it));
 }
 
@@ -91,12 +94,12 @@ void collect(const vault::Vault& v, const std::string& path, std::vector<Item>& 
 
         if (n->is_video()) {
             if (n->vmeta.codec == vault::VideoCodec::Unknown) {
-                collect_video_item(Item::Kind::VideoProbe, child, n->vmeta, thumbs_stale, out);
+                collect_video_item(Item::Kind::VideoProbe, child, *n, thumbs_stale, out);
                 continue;
             }
             if (thumbs_stale && n->vmeta.codec != vault::VideoCodec::Unknown) {
                 // Phase 75: known-codec videos need poster regen at new budget
-                collect_video_item(Item::Kind::VideoPoster, child, n->vmeta, thumbs_stale, out);
+                collect_video_item(Item::Kind::VideoPoster, child, *n, thumbs_stale, out);
             }
             continue;
         }
@@ -105,32 +108,31 @@ void collect(const vault::Vault& v, const std::string& path, std::vector<Item>& 
             if (thumbs_stale && n->meta.thumb_length > 0) {
                 // Phase 75: existing images with thumbnails need regen at the new budget.
                 // This SUBSUMES the animated arm: process() will sniff animated.
-                collect_image_item(Item::Kind::ImageThumb, child, n->meta, out);
+                collect_image_item(Item::Kind::ImageThumb, child, *n, out);
             } else if (vault::format_can_animate(n->meta.format) && !n->meta.animated) {
                 // Animated arm: detect animated flag regardless of thumbs_stale.
                 // During thumb-stale pass, only no-thumb images reach here (those with
                 // thumb_length > 0 become ImageThumb above). During thumb-fresh pass,
                 // all animatable un-sniffed images reach here.
-                collect_image_item(Item::Kind::ImageAnimated, child, n->meta, out);
+                collect_image_item(Item::Kind::ImageAnimated, child, *n, out);
             }
         }
     }
 }
 
-// Concatenate an item's chunk spans into mlock'd memory using ONLY
+// Concatenate an item's chunk refs into mlock'd memory using ONLY
 // vault::read_thumb_span — the any-thread-safe decrypt path. Never touches
 // read_fp_ or the tree.
 bool read_item(const vault::Vault& v, const Item& it, crypto::SecureBytes& out)
 {
-    if (it.data_spans.size() == 1) {
-        const auto& [off, len] = it.data_spans[0];
-        return vault::read_thumb_span(v, off, len, out) == vault::VaultResult::Ok;
+    if (it.refs.size() == 1) {
+        return vault::read_thumb_span(v, it.refs[0], out) == vault::VaultResult::Ok;
     }
     std::vector<uint8_t> joined;          // wiped below via SecureBytes copy
     joined.reserve(static_cast<size_t>(it.bytes));
     crypto::SecureBytes chunk;
-    for (const auto& [off, len] : it.data_spans) {
-        if (vault::read_thumb_span(v, off, len, chunk) != vault::VaultResult::Ok) {
+    for (const vault::ChunkRef& ref : it.refs) {
+        if (vault::read_thumb_span(v, ref, chunk) != vault::VaultResult::Ok) {
             crypto_wipe(joined.data(), joined.size());
             return false;
         }

@@ -7,6 +7,12 @@ using ui::CoverSpan;
 using vault::IndexNode;
 
 namespace {
+// Cover resolution's contract is the span (offset/length); node id / record /
+// domain live in the ref but are not what resolution asserts.
+bool spans_equal(const ui::CoverSpan& c, uint64_t off, uint64_t len)
+{
+    return c.ref.offset == off && c.ref.length == len;
+}
 // An image node with a stored thumbnail at (offset, length).
 IndexNode img(std::string name, uint64_t off, uint64_t len)
 {
@@ -34,11 +40,11 @@ TEST(cover_leaf_uses_first_image_thumb)
 
     const auto c = ui::resolve_single_cover(g);
     CHECK(c.has_value());
-    CHECK(*c == (CoverSpan{100, 20}));
+    CHECK(spans_equal(*c, 100, 20));
 
     const auto covers = ui::resolve_covers(g);
     CHECK_EQ(static_cast<int>(covers.size()), 1);
-    CHECK(covers[0] == (CoverSpan{100, 20}));
+    CHECK(spans_equal(covers[0], 100, 20));
 }
 
 TEST(cover_leaf_first_child_video_uses_poster)
@@ -49,7 +55,7 @@ TEST(cover_leaf_first_child_video_uses_poster)
 
     const auto c = ui::resolve_single_cover(g);
     CHECK(c.has_value());
-    CHECK(*c == (CoverSpan{500, 40}));
+    CHECK(spans_equal(*c, 500, 40));
 }
 
 TEST(cover_leaf_skips_media_without_thumbnail)
@@ -60,7 +66,7 @@ TEST(cover_leaf_skips_media_without_thumbnail)
 
     const auto c = ui::resolve_single_cover(g);
     CHECK(c.has_value());
-    CHECK(*c == (CoverSpan{200, 30}));
+    CHECK(spans_equal(*c, 200, 30));
 }
 
 TEST(cover_folder_of_folders_montage_in_child_order)
@@ -80,14 +86,14 @@ TEST(cover_folder_of_folders_montage_in_child_order)
 
     const auto covers = ui::resolve_covers(root);
     CHECK_EQ(static_cast<int>(covers.size()), 3);
-    CHECK(covers[0] == (CoverSpan{11, 1}));
-    CHECK(covers[1] == (CoverSpan{22, 2}));
-    CHECK(covers[2] == (CoverSpan{33, 3}));
+    CHECK(spans_equal(covers[0], 11, 1));
+    CHECK(spans_equal(covers[1], 22, 2));
+    CHECK(spans_equal(covers[2], 33, 3));
 
     // The single representative cover descends the first sub-gallery.
     const auto one = ui::resolve_single_cover(root);
     CHECK(one.has_value());
-    CHECK(*one == (CoverSpan{11, 1}));
+    CHECK(spans_equal(*one, 11, 1));
 }
 
 TEST(cover_montage_caps_at_four_subgalleries)
@@ -100,8 +106,8 @@ TEST(cover_montage_caps_at_four_subgalleries)
     }
     const auto covers = ui::resolve_covers(root);
     CHECK_EQ(static_cast<int>(covers.size()), 4);
-    CHECK(covers[0] == (CoverSpan{10, 1}));
-    CHECK(covers[3] == (CoverSpan{40, 1}));
+    CHECK(spans_equal(covers[0], 10, 1));
+    CHECK(spans_equal(covers[3], 40, 1));
 }
 
 TEST(cover_recurses_through_mixed_depths)
@@ -116,7 +122,7 @@ TEST(cover_recurses_through_mixed_depths)
 
     const auto covers = ui::resolve_covers(root);
     CHECK_EQ(static_cast<int>(covers.size()), 1);
-    CHECK(covers[0] == (CoverSpan{77, 7}));
+    CHECK(spans_equal(covers[0], 77, 7));
 }
 
 TEST(cover_skips_empty_subgalleries)
@@ -133,7 +139,7 @@ TEST(cover_skips_empty_subgalleries)
 
     const auto covers = ui::resolve_covers(root);
     CHECK_EQ(static_cast<int>(covers.size()), 1);
-    CHECK(covers[0] == (CoverSpan{99, 9}));
+    CHECK(spans_equal(covers[0], 99, 9));
 }
 
 TEST(cover_empty_gallery_yields_nothing)

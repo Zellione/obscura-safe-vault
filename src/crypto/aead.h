@@ -11,13 +11,62 @@
 // The Poly1305 tag is always verified before any plaintext is returned
 // (invariant #4).
 
+#include <array>
 #include <cstdint>
 #include <span>
 #include <vector>
 
-#include "crypto_sizes.h"   // KEY_SIZE, NONCE_SIZE, TAG_SIZE
+#include "crypto_sizes.h"   // KEY_SIZE, NONCE_SIZE, TAG_SIZE, NODE_ID_SIZE
 
 namespace crypto {
+
+// --- Context-bound AEAD associated data (Phase 99 / OSV-AUD-004) ------------
+//
+// Every encrypted record's authentication is bound to a logical identity so a
+// complete-record swap/splice/replay fails verification instead of silently
+// substituting content under the same master key. `build_chunk_ad` turns a
+// ChunkTag into the exact 38-byte canonical AD (byte-for-byte deterministic,
+// so Linux and Windows verify identically):
+//
+//   byte   0    : domain        (u8)
+//   byte   1    : version       (u8, CHUNK_AD_VERSION)
+//   bytes  2..17: owner         (the node's node_id, or the vault's header salt
+//                                for Index / MkWrap records)
+//   bytes 18..33: record        (a fresh random per-record id, stored in the
+//                                authenticated index; zero for Index / MkWrap)
+//   bytes 34..37: sequence      (u32 LE; nonzero only for VIDEO chunks)
+//
+// All lengths are fixed-width little-endian, so no length prefixes are needed
+// and the encoding cannot drift between platforms.
+
+enum class ChunkDomain : uint8_t {
+    Data   = 0,  // image main data chunk
+    Thumb  = 1,  // stored image thumbnail
+    Poster = 2,  // video poster frame
+    Video  = 3,  // one video data chunk (sequence-numbered)
+    Index  = 4,  // sealed index blob                          (owner = vault salt)
+    MkWrap = 5,  // master-key wrap in the header              (owner = vault salt)
+};
+
+inline constexpr uint8_t CHUNK_AD_VERSION = 1;
+
+inline constexpr size_t AD_SIZE = 1 + 1 + NODE_ID_SIZE + NODE_ID_SIZE + 4;  // 38
+
+// The logical identity of one chunk record. `context_bound == false` means a
+// LEGACY record encrypted with NO associated data (unchanged pre-Phase-99
+// behavior) — carried on media nodes during the v1→v2 migration window.
+struct ChunkTag {
+    ChunkDomain domain = ChunkDomain::Data;
+    std::array<uint8_t, NODE_ID_SIZE> owner{};    // node_id, or header salt for Index/MkWrap
+    std::array<uint8_t, NODE_ID_SIZE> record{};   // per-record random id (zeros for Index/MkWrap)
+    uint32_t   sequence      = 0;
+    bool       context_bound = false;
+};
+
+// Build the canonical 38-byte AD for `t`. Always deterministic; the caller
+// passes the result (or an empty span when `context_bound` is false) to the
+// encrypt/seal/open functions as `ad`.
+[[nodiscard]] std::array<uint8_t, AD_SIZE> build_chunk_ad(const ChunkTag& t) noexcept;
 
 // Encrypt `plaintext` under `key`. Writes `nonce|ciphertext|tag` into `out`
 // (resized to plaintext.size() + NONCE_SIZE + TAG_SIZE). `ad` is optional

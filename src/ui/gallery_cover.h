@@ -4,19 +4,20 @@
 #include <optional>
 #include <vector>
 
+#include "vault/chunk_ref.h"   // vault::ChunkRef
 #include "vault/index.h"
 
 // Pure, SDL-free, vault-free cover resolution for gallery tiles (Phase 19).
-// Walks the in-memory index tree and returns *thumbnail chunk spans* only — it
-// reads nothing, decodes nothing, and touches no disk. Rendering decrypts the
-// returned spans on demand via the existing thumbnail texture cache.
+// Walks the in-memory index tree and returns *thumbnail chunk references* only
+// — it reads nothing, decodes nothing, and touches no disk. Rendering decrypts
+// the returned refs on demand via the existing thumbnail texture cache.
 namespace ui {
 
-// Location of one cover's thumbnail chunk in the vault's data region. `length`
-// of 0 is never returned (such a node is skipped during resolution).
+// Location + Phase 99 identity of one cover's thumbnail chunk in the vault's
+// data region. `length` of 0 is never returned (such a node is skipped during
+// resolution).
 struct CoverSpan {
-    uint64_t offset = 0;
-    uint64_t length = 0;
+    vault::ChunkRef ref;
 
     [[nodiscard]] bool operator==(const CoverSpan&) const noexcept = default;
 };

@@ -8,6 +8,7 @@
 #include "ui/gallery_cover.h"   // ui::CoverSpan
 #include "ui/cover_cache.h"       // ui::CoverCache
 #include "ui/anim_model.h"        // anim_within_hover_dimension_budget
+#include "vault/chunk_ref.h"      // vault::ChunkRef (value member)
 
 namespace gfx { class Renderer; class FontAtlas; class TextureCache; }
 namespace image { class DecodeWorker; }
@@ -42,12 +43,12 @@ struct ThumbContext {
 // exists at all. A video's thumbnail is its poster frame (vmeta.poster_*) —
 // the image thumbnail fields (meta.thumb_*) are always zero on a video node,
 // so gating on those alone always reports "no thumbnail" for every video.
-// offset/length are the span to READ from the vault (thumb chunk / poster chunk).
+// `ref` carries the span AND the Phase 99 decrypt context (node id, record id,
+// domain, legacy flag) so the fetch stage authenticates the right chunk.
 struct ThumbKey {
     uint64_t key;      // texture-cache identity (unchanged from today)
-    uint64_t offset;   // span to read (thumb chunk / poster chunk)
-    uint64_t length;
-    bool     present;
+    vault::ChunkRef ref;
+    bool          present;
 };
 
 [[nodiscard]] ThumbKey thumb_key_for(const vault::IndexNode& node);

@@ -437,7 +437,8 @@ TEST(fuzz_framed_chunk_read)
             }
 
             vault::ChunkSpan span;
-            const bool ok = unframed.append_chunk(hostile_plaintext, span);
+            crypto::ChunkTag tag;   // contextless (context_bound=false → no AD)
+            const bool ok = unframed.append_chunk(hostile_plaintext, tag, span);
             REQUIRE(ok);  // unframed append should always work
 
             // Now read via framed store; expect failure.
@@ -451,8 +452,8 @@ TEST(fuzz_framed_chunk_read)
 
                 // read_chunk should reject the hostile frame (or succeed only if the
                 // random plaintext happened to be valid, which is negligible).
-                (void)framed.read_chunk(span, out_vec);  // may fail or succeed
-                const bool res_sec = framed.read_chunk(span, out_sec);
+                (void)framed.read_chunk(span, tag, out_vec);  // may fail or succeed
+                const bool res_sec = framed.read_chunk(span, tag, out_sec);
 
                 // Contract: SecureBytes overload leaves out_sec empty on failure.
                 // (When it fails, it clears the buffer; when it succeeds, it holds the

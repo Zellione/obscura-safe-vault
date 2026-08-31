@@ -11,6 +11,21 @@
 
 namespace crypto {
 
+std::array<uint8_t, AD_SIZE> build_chunk_ad(const ChunkTag& t) noexcept
+{
+    std::array<uint8_t, AD_SIZE> ad{};
+    ad[0] = static_cast<uint8_t>(t.domain);
+    ad[1] = CHUNK_AD_VERSION;
+    for (size_t i = 0; i < NODE_ID_SIZE; ++i) {
+        ad[2 + i]         = t.owner[i];
+        ad[2 + NODE_ID_SIZE + i] = t.record[i];
+    }
+    for (size_t i = 0; i < 4; ++i) {
+        ad[2 + 2 * NODE_ID_SIZE + i] = static_cast<uint8_t>(t.sequence >> (8 * i));
+    }
+    return ad;
+}
+
 bool encrypt_chunk(std::span<const uint8_t, KEY_SIZE> key,
                    std::span<const uint8_t>           plaintext,
                    std::vector<uint8_t>&              out,
