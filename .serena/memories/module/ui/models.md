@@ -27,7 +27,11 @@ Pure SDL-free view/sort/model helpers, layout geometry, settings state, search i
 - `export_ui.*` — shared consent + folder-pick plumbing used by gallery + viewer.
 - `export.*` — decrypt→write-verbatim→wipe export (SDL-free/tested). The ONE deliberate
   deviation from invariant #1: writes decrypted originals to disk on explicit user consent
-  (selection-only, never thumbnails, buffer wiped right after write).
+  (selection-only, never thumbnails, buffer wiped right after write). Phase 98: the sink is
+  `platform::create_new_file_within(dest_dir, sanitize_node_name(name))` — an atomic
+  no-follow, containment-enforced exclusive create returning an already-open
+  `platform::NewOutputFile`; `export_one_media` writes only to that handle and never reopens
+  a path. `unique_export_path` deleted; `export_path_within` kept as a post-create assertion.
 - `favorite_batch.*` — `batch_favorite_target(nodes)` (pure/tested): the batch
   favorite rule — any node unfavorited → favorite all (true), else unfavorite
   all. Persisted by `vault::set_favorites_batch` (one commit). Used by the

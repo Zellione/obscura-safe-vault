@@ -27,10 +27,14 @@ bool export_path_within(const fs::path& dest_dir, const fs::path& candidate)
 // Phase 53: videos became selectable, so a selection can legitimately contain
 // one. A gallery still has no stored bytes of its own and is rejected — calling
 // that an "export" would be a lie.
-vault::VaultResult export_one_media(const vault::Vault&          vault,
-                                    const vault::IndexNode&      node,
-                                    const fs::path&              out_path,
-                                    crypto::SecureBytes&         scratch)
+//
+// Phase 98 (OSV-AUD-005): `out` is an ALREADY-OPEN handle produced by
+// platform::create_new_file_within (atomic exclusive create, symlink-safe,
+// contained). We write to the handle only — never reopen out.display_path.
+vault::VaultResult export_one_media(const vault::Vault&         vault,
+                                    const vault::IndexNode&     node,
+                                    platform::NewOutputFile     out,
+                                    crypto::SecureBytes&        scratch)
 {
     const bool image = node.is_image();
     if (const bool video = node.is_video(); !image && !video) {
@@ -48,18 +52,20 @@ vault::VaultResult export_one_media(const vault::Vault&          vault,
 
     // Deliberate, gated deviation from invariant #1: write the plaintext to disk.
     bool ok = false;
-    if (std::FILE* fp = platform::fopen_path(out_path, "wb")) {
+    if (out.fp) {
         const size_t n = scratch.size();
-        ok = (n == 0) || (std::fwrite(scratch.data(), 1, n, fp) == n);
-        ok = (std::fflush(fp) == 0) && ok;
-        ok = (std::fclose(fp) == 0) && ok;
+        ok = (n == 0) || (std::fwrite(scratch.data(), 1, n, out.fp) == n);
+        ok = (std::fflush(out.fp) == 0) && ok;
+        ok = (std::fclose(out.fp) == 0) && ok;
+        out.fp = nullptr;   // detach: the call above already closed the stream
     }
 
     // Wipe the decrypted bytes immediately, whether or not the write succeeded.
     scratch.wipe();
 
     if (!ok) {
-        platform::safe_println(stderr, "[Export] failed to write {}", platform::path_to_utf8(out_path));
+        platform::safe_println(stderr, "[Export] failed to write {}",
+                               platform::path_to_utf8(out.display_path));
         return vault::VaultResult::IoError;
     }
     return vault::VaultResult::Ok;
@@ -74,11 +80,6 @@ ExportSummary export_images(const vault::Vault&                      vault,
     ExportSummary sum;
     if (consent != ExportConsent::Confirm) return sum;  // decline writes nothing
 
-    auto exists = [](const fs::path& p) {
-        std::error_code ec;
-        return fs::exists(p, ec);
-    };
-
     if (progress) progress->total.store(static_cast<int>(images.size()));
 
     crypto::SecureBytes scratch;
@@ -87,16 +88,32 @@ ExportSummary export_images(const vault::Vault&                      vault,
         if (node == nullptr || !(node->is_image() || node->is_video())) {
             ++sum.failed;
         } else {
-            // The vault's index is untrusted input: defang the name, then verify
-            // the path it produced really is inside dest_dir before writing.
-            const fs::path out =
-                unique_export_path(dest_dir, vault::sanitize_node_name(node->name.view()), exists);
-            if (!export_path_within(dest_dir, out)) {
+            // Phase 98 (OSV-AUD-005): no check-then-open. The vault's index is
+            // untrusted input, so the name is first defanged
+            // (vault::sanitize_node_name), then ATOMICALLY claimed inside
+            // dest_dir by the platform helper — the exclusive create doubles as
+            // the collision test and the containment enforcement, and it never
+            // follows a symlink or truncates an existing entry. export_one_media
+            // then writes only to the returned handle, never reopening a path.
+            auto out = platform::create_new_file_within(
+                dest_dir, vault::sanitize_node_name(node->name.view()));
+
+            if (!out) {
                 platform::safe_println(stderr,
-                             "[Export] refusing to write outside the chosen folder: {}",
-                             platform::path_to_utf8(out));
+                             "[Export] could not create a new file in {}",
+                             platform::path_to_utf8(dest_dir));
                 ++sum.failed;
-            } else if (export_one_media(vault, *node, out, scratch) == vault::VaultResult::Ok) {
+            } else if (!export_path_within(dest_dir, out->display_path)) {
+                // Invariant assertion (defense in depth): the atomic helper must
+                // never hand back an escaping name. A single hostile vault name
+                // already passed sanitize_node_name; if containment still fails,
+                // something is very wrong — refuse rather than write.
+                platform::safe_println(stderr,
+                             "[Export] refusing a resolved path outside the chosen folder: {}",
+                             platform::path_to_utf8(out->display_path));
+                ++sum.failed;
+            } else if (export_one_media(vault, *node, std::move(*out), scratch)
+                       == vault::VaultResult::Ok) {
                 ++sum.written;
             } else {
                 ++sum.failed;

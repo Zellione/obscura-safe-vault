@@ -122,9 +122,13 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   on a UTF-8 codepoint boundary). Bytes >=0x80 stay opaque (CJK).
 - WHY: a `.osv` is UNTRUSTED INPUT (portable/shareable). `index.cpp` reads `name` as opaque
   bytes; `ui::export_*` turns it back into a real path. `dest_dir / name` does NOT contain
-  — an ABSOLUTE name discards `dest_dir` (CWE-22). Sink-side guard `ui::export_path_within`
-  (weakly_canonical + lexically_relative, fails closed) is required because vaults already
-  on disk can carry hostile names — ingress validation alone is not enough.
+  — an ABSOLUTE name discards `dest_dir` (CWE-22). The sink is therefore ATOMIC (Phase 98):
+  `platform::create_new_file_within(dest_dir, sanitize_node_name(name))` claims the file with
+  an exclusive no-follow create (Linux openat2 RESOLVE_BENEATH|NO_SYMLINKS / openat O_NOFOLLOW,
+  Windows CREATE_NEW + final-handle containment) and `export_one_media` writes to the returned
+  handle only. `export_path_within` (weakly_canonical + lexically_relative, fails closed)
+  remains as a post-create invariant assertion because vaults already on disk can carry
+  hostile names — ingress validation alone is not enough.
 
 ### Free friends (kept off Vault to stay under the cpp:S1448 35-method cap)
 - `vault::read_thumb_span(v,offset,length,out)` — decrypt a thumb/poster chunk by raw span
