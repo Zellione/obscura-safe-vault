@@ -66,6 +66,15 @@ vendor/      git submodules — pinned versions, build mechanics, CI matrix in m
 `password || keyfile` encoding until the next successful password change, which migrates
 the wrap to the domain-separated encoding.
 All data/thumbnail/index chunks are encrypted with the master key + a fresh nonce per chunk.
+Since **Phase 99 (OSV-AUD-004)** every record's AEAD is context-bound: the AD carries a
+domain tag (DATA/THUMB/POSTER/VIDEO/INDEX/MKWrap), the node's persistent 128-bit
+`node_id`, a fresh per-record 128-bit `record` id, and (video only) a logical `sequence`
+— so equal-length record swap/replay/splice (and any substitution of a complete
+ciphertext record) fails authentication. Physical offsets stay OUT of the AD so
+`compact()` moves ciphertext byte-for-byte. `INDEX_VERSION` is 13; new vaults set the
+header's `FLAG_CONTEXT_BOUND_CHUNKS`, legacy vaults gain it via the one-time v1→v2
+migration (the per-record `context_bound` bit fuses the window). Full byte layout:
+`mem:vault_format` "Context-bound AEAD".
 
 Since **Phase 91** the index tree's human-readable metadata is also secure: node
 names, tags, category names, tag descriptions, tag field values, and saved-search

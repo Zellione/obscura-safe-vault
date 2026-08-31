@@ -312,7 +312,11 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   a `SortKey` u8 (meaningful only on Gallery nodes: Default/NameAsc/NameDesc/DateAsc/DateDesc/
   SizeAsc/SizeDesc/Insertion; out-of-range byte rejected, not clamped, bounded PER VERSION —
   v6/v7 max 6, v8 max 7), and Type::Video + VideoMeta (multi-chunk list + poster).
-- `INDEX_VERSION=12` (Phase 75; v11 = Phase 73 category-template fields + tag-field-values block, v12 = `migrated_thumb_side` u16 appended LAST in the settings block). Vault-global SavedSearch block after the root (name + opaque
+- `INDEX_VERSION=13` (Phase 99; v12 = `migrated_thumb_side` u16 appended LAST in the settings block, v11 = Phase 73 category-template fields + tag-field-values block). Every node carries a
+  `node_id` (u8[16]); `ImageMeta`/`VideoMeta` carry per-chunk `*_id` records and a
+  `context_bound` flag; `VideoChunk` carries a logical `sequence`. See
+  `mem:vault_format` "Context-bound AEAD". Pre-v13 blobs read zeros /
+  `context_bound=false` (all records legacy). Vault-global SavedSearch block after the root (name + opaque
   `ui::AdvancedQuery` blob, `INDEX_MAX_SAVED_SEARCHES=4096`), then the Phase 49 vault-global
   **settings block**, then the Phase 51 **tag-descriptions block**, then the Phase 65
   **migration watermark** — see `mem:vault_format` for their byte layouts. `INDEX_MAX_TAGS=4096`.
@@ -395,3 +399,15 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   alloc-failure exception there would terminate() the process); `resize_fail_after` fault
   injection makes the failure path deterministically testable. Legacy vaults (header flag
   unset) read AND append raw forever — no migration.
+- **Phase 99 (OSV-AUD-004) context-bound AEAD:** `ChunkStore::append_chunk`/`read_chunk`
+  take a `crypto::ChunkTag` (domain, owner node_id, per-record id, sequence,
+  context_bound). New-vault appends regenerate a fresh random per-record id; reads derive
+  byte-identical AD from the authenticated index alone. `header.h` gained
+  `FLAG_CONTEXT_BOUND_CHUNKS` + the immutable `vault_id` (owner of the Index/MkWrap AD —
+  NOT the salt, which `change_password` rotates). The index blob (`index_io`) and
+  master-key wrap (`vault.cpp` create/unlock/change_password) seal with the vault_id-
+  bound AD, gated on the flag, so legacy vaults stay contextless. `read_thumb_span` now
+  takes a `vault::ChunkRef` (see `vault/chunk_ref.h`) so any-thread span readers
+  (gallery covers, duplicate scan, migration workers) carry the full decrypt context
+  without danging an `IndexNode`. In-place `compact()` still moves ciphertext verbatim —
+  offsets stay out of the AD by construction.
