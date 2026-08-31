@@ -196,6 +196,14 @@ public:
 
     [[nodiscard]] bool is_unlocked() const noexcept { return unlocked_; }
 
+    // Phase 99: true when this vault's index blob + master-key wrap are sealed
+    // with the context-bound AEAD (header FLAG_CONTEXT_BOUND_CHUNKS). A clear
+    // bit on an unlocked legacy vault means the v1→v2 chunk migration is owed.
+    [[nodiscard]] bool uses_context_chunks() const noexcept
+    {
+        return context_bound_chunks(header_);
+    }
+
     // Create a gallery at `gallery_path` (slash-separated), creating intermediate
     // galleries as needed. Fails with InvalidArg if any path segment is an image.
     // A gallery already holding media may gain a sub-gallery (Phase 46).
@@ -356,6 +364,24 @@ public:
                                           std::span<const uint8_t> poster_jpeg, bool sync);
     friend VaultResult commit_migration(Vault& v, VaultSettings settings);
 
+    // Phase 99 (OSV-AUD-004) v1→v2 context migration.
+    // apply_context_rewrite: coordinator-thread re-encode of one media node's
+    // records (legacy → context-bound AEAD, fresh per-record ids, node_id
+    // assigned if zero). NO commit — the migration batches one at the end.
+    friend VaultResult apply_context_rewrite(Vault& v, std::string_view node_path);
+    // finalize_context_migration: re-seal the master key under the session KEK
+    // with the vid-bound AD (needs no password — the KEK is captured at unlock),
+    // mint a vault_id if the legacy header has none, and set
+    // FLAG_CONTEXT_BOUND_CHUNKS in-memory. NO commit; the caller commits so the
+    // index blob is sealed with the flag's AD and the slot-swap writes the flag
+    // header atomically (crash-safe via the slot-fallback).
+    friend VaultResult finalize_context_migration(Vault& v);
+    // Phase 99 test seam: convert a freshly-created v2 vault into a GENUINE
+    // legacy v1 vault (header flag clear, every media record re-encrypted with
+    // empty AD, node/spans ids wiped, master key re-wrapped without AD, index
+    // re-committed without AD). Simulation of a vault predating Phase 99.
+    friend void test_only_downgrade_to_legacy(Vault& v);
+
     // Phase 50: while the import queue is active, App points this at the
     // CommitLane; Vault::commit_index() then routes through the lane
     // (serialize + enqueue, async durability) instead of committing
@@ -452,6 +478,12 @@ private:
     Header                                 header_;
     bool                                   unlocked_ = false;
     crypto::SecureBuffer<crypto::KEY_SIZE> master_key_;
+    // Phase 99: the session KEK, captured at unlock/change/create so the
+    // v1→v2 migration can re-seal the master-key wrap with its new AD without
+    // re-deriving from the password. As secret as the master key, held only
+    // while unlocked and wiped at lock/reset (Phase A boundary).
+    crypto::SecureBuffer<crypto::KEY_SIZE> kek_;
+    bool                                   kek_valid_ = false;
     IndexNode                              root_ = IndexNode::gallery("");
     std::vector<SavedSearch>               saved_searches_;  // vault-global (Phase 18)
     VaultSettings                          settings_;        // vault-global (Phase 49)
@@ -615,6 +647,25 @@ using vault::ChunkRef;
 // the commit fails (the tree is already mutated — the remove_media_batch
 // contract).
 [[nodiscard]] VaultResult commit_migration(Vault& v, VaultSettings settings);
+
+// Phase 99: re-encode one media node's records with the context-bound AEAD
+// (fresh per-record ids; assigns a node_id first if the legacy node has none).
+// Coordinator-thread only — mutates the tree and appends to fp_. NO commit.
+// Ok when the node is already context-bound (idempotent / resumable).
+[[nodiscard]] VaultResult apply_context_rewrite(Vault& v, std::string_view node_path);
+
+// Phase 99: finish the v1→v2 migration — re-seal the master-key wrap under the
+// session KEK with the vault_id-bound MkWrap AD, mint a vault_id if zero, and
+// set FLAG_CONTEXT_BOUND_CHUNKS in-memory. NO commit; call before the migration's
+// final commit_index so the blob is AD-sealed and the slot-swap persists the
+// flag+wrap atomically. Locked if locked; CryptoError if the KEK is absent or
+// randomness fails. Ok (no-op) when the flag is already set.
+[[nodiscard]] VaultResult finalize_context_migration(Vault& v);
+
+// Phase 99 test seam (defined in src/vault/vault.cpp): convert a freshly-created
+// v2 vault into a genuine legacy v1 vault so migration tests start from a
+// pre-Phase-99 state. Friend of Vault; callable from tests only.
+void test_only_downgrade_to_legacy(Vault& v);
 
 // Rename an image, video, or gallery's own `name` field in place — a pure
 // leaf-field edit. Descendants, tags, favorite flag, sort key, and cover all

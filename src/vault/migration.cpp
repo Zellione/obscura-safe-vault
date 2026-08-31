@@ -7,15 +7,29 @@
 namespace vault {
 namespace {
 
-void walk(const Vault& v, const std::string& path, MigrationScan& out, bool thumbs_stale)
+void walk(const Vault& v, const std::string& path, MigrationScan& out, bool thumbs_stale,
+          bool context_stale)
 {
     for (const IndexNode* n : v.list(path)) {
         const std::string child =
             path.empty() ? std::string(n->name.view()) : path + "/" + std::string(n->name.view());
         if (n->is_gallery()) {
-            walk(v, child, out, thumbs_stale);
+            walk(v, child, out, thumbs_stale, context_stale);
             continue;
         }
+
+        // Phase 99: a legacy (or not-yet-finalized) vault rewrites every media
+        // record still lacking the context-bound AEAD. The flag being clear IS
+        // the pending signal; the per-record context_bound bit tracks progress.
+        if (context_stale) {
+            const bool bound = n->is_video() ? n->vmeta.context_bound : n->meta.context_bound;
+            if (!bound) {
+                ++out.context;
+                out.bytes += n->is_video() ? n->vmeta.orig_size : n->meta.orig_size;
+            }
+            continue;   // the context arm re-encodes in place; no decode arm on it
+        }
+
         if (n->is_video()) {
             if (n->vmeta.codec == VideoCodec::Unknown) {
                 ++out.videos;
@@ -45,9 +59,10 @@ void walk(const Vault& v, const std::string& path, MigrationScan& out, bool thum
 } // namespace
 
 bool migration_pending(const VaultSettings& s, uint16_t probe_caps_gen,
-                       uint16_t thumb_side) noexcept
+                       uint16_t thumb_side, bool context_stale) noexcept
 {
-    return s.migrated_index_version < MIGRATION_INDEX_VERSION ||
+    return context_stale ||
+           s.migrated_index_version < MIGRATION_INDEX_VERSION ||
            s.migrated_probe_caps    < probe_caps_gen ||
            s.migrated_thumb_side    < thumb_side;
 }
@@ -61,10 +76,10 @@ VaultSettings stamp_migrated(VaultSettings s, uint16_t probe_caps_gen,
     return s;
 }
 
-MigrationScan scan_migration(const Vault& v, bool thumbs_stale)
+MigrationScan scan_migration(const Vault& v, bool thumbs_stale, bool context_stale)
 {
     MigrationScan scan;
-    walk(v, "", scan, thumbs_stale);
+    walk(v, "", scan, thumbs_stale, context_stale);
     return scan;
 }
 

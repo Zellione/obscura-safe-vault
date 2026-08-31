@@ -190,16 +190,21 @@ void App::promote_pending()
     migration_ui_.progress_open = false;
     migration_ui_.result_open = false;
     migration_ui_.job.reset();  // reset migration job from previous vault
+    const bool context_stale = !vault_state_.active->uses_context_chunks();   // Phase 99
     if (vault::migration_pending(vault::vault_settings(*vault_state_.active), media::PROBE_CAPS_GEN,
-                                 static_cast<uint16_t>(image::THUMB_MAX_SIDE))) {
+                                 static_cast<uint16_t>(image::THUMB_MAX_SIDE), context_stale)) {
         // Phase 75: compute thumbs_stale to include thumbnail regen in the scan
         const vault::VaultSettings settings = vault::vault_settings(*vault_state_.active);
         const bool thumbs_stale =
             settings.migrated_thumb_side < static_cast<uint16_t>(image::THUMB_MAX_SIDE);
-        const vault::MigrationScan scan = vault::scan_migration(*vault_state_.active, thumbs_stale);
+        const vault::MigrationScan scan =
+            vault::scan_migration(*vault_state_.active, thumbs_stale, context_stale);
         if (scan.empty()) {
             // Nothing to do: stamp and move on silently, so this vault is never
-            // asked again.
+            // asked again. A legacy vault whose records are ALREADY all
+            // context-bound (cancelled after the rewrite, pre-finalize) must
+            // still finalize — otherwise the clear flag re-offers forever.
+            if (context_stale) (void)vault::finalize_context_migration(*vault_state_.active);
             (void)vault::commit_migration(
                 *vault_state_.active, vault::stamp_migrated(vault::vault_settings(*vault_state_.active),
                                                              media::PROBE_CAPS_GEN,
@@ -541,8 +546,15 @@ void draw_migration_offer(gfx::Renderer& r, gfx::FontAtlas& font, float win_w, f
     const float line_h = 20;
 
     // Phase 75: include thumbnail count in the offer message
+    // Phase 99: a legacy vault also reports the records being re-encrypted with
+    // the context-bound AEAD (the dominant work for a pre-Phase-99 vault).
     std::string summary;
-    if (scan.thumbs > 0) {
+    if (scan.context > 0) {
+        summary = std::format("This vault has {} record(s) to secure{}", scan.context,
+                              scan.total() > scan.context ? std::format(", plus {} other item(s)",
+                                                                        scan.total() - scan.context)
+                                                          : std::string{});
+    } else if (scan.thumbs > 0) {
         summary = std::format("This vault has {} thumbnail(s), {} video(s), and {} image(s)",
                               scan.thumbs, scan.videos, scan.images);
     } else {
@@ -612,6 +624,7 @@ void draw_migration_result(gfx::Renderer& r, gfx::FontAtlas& font, float win_w, 
              {std::format("Fixed {} video(s)", res.videos_fixed),
               std::format("Fixed {} image(s)", res.images_fixed),
               std::format("Skipped {} video(s)", res.videos_skipped),
+              std::format("Secured {} record(s)", res.context_fixed),
               std::format("Reclaimed {}", ui::format_size(res.reclaimed_bytes))}) {
             r.draw_text(font, px + 20, text_y, line, gfx::theme::TEXT);
             text_y += line_h;
@@ -690,8 +703,10 @@ struct App::OverlayDispatch {
             const vault::VaultSettings settings = vault::vault_settings(*app.vault_state_.active);
             const bool thumbs_stale =
                 settings.migrated_thumb_side < static_cast<uint16_t>(image::THUMB_MAX_SIDE);
-            const vault::MigrationScan scan = vault::scan_migration(*app.vault_state_.active, thumbs_stale);
-            if (scan.empty()) {
+            const bool context_stale = !app.vault_state_.active->uses_context_chunks();   // Phase 99
+            const vault::MigrationScan scan =
+                vault::scan_migration(*app.vault_state_.active, thumbs_stale, context_stale);
+            if (scan.empty() && !context_stale) {
                 // Nothing to do: inform the user and keep settings open
                 app.overlays_.settings.error = "Nothing to upgrade";
                 return true;
