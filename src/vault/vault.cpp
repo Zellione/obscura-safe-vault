@@ -1300,10 +1300,11 @@ VaultResult apply_context_rewrite(Vault& v, std::string_view node_path)
     // A zero-length span (no thumb / no poster) is a no-op.
 auto reencode = [&](uint64_t off, uint64_t len, crypto::ChunkDomain domain, uint32_t seq,
                     std::array<uint8_t, crypto::NODE_ID_SIZE>& id_out, ChunkSpan& span_out) {
-    if (len == 0) return Ok;
-    crypto::SecureBytes plain;
-    crypto::ChunkTag old{.domain = domain, .sequence = seq};
-    if (!reader.read_chunk({off, len}, old, plain)) return AuthFailed;
+if (len == 0) return Ok;
+        crypto::SecureBytes plain;
+        if (crypto::ChunkTag old{.domain = domain, .sequence = seq};
+            !reader.read_chunk({off, len}, old, plain))
+            return AuthFailed;
     std::lock_guard lk(*v.write_mutex_);
     crypto::ChunkTag nt{.domain = domain, .owner = n->node_id, .sequence = seq,
                         .context_bound = true};
@@ -1438,8 +1439,8 @@ void test_only_downgrade_to_legacy(Vault& v)  // NOSONAR cpp:S3776
     auto downgrade_image = [&](IndexNode& c) {
         ImageMeta& m = c.meta;
         ChunkSpan out;
-        const crypto::ChunkTag t = chunk_tag(Data, c, m.data_id);
-        if (to_legacy(m.data_offset, m.data_length, t, Data, 0, out)) {
+        if (const auto t = chunk_tag(Data, c, m.data_id);
+            to_legacy(m.data_offset, m.data_length, t, Data, 0, out)) {
             m.data_offset = out.offset;
             m.data_length = out.length;
         }
@@ -1464,7 +1465,7 @@ void test_only_downgrade_to_legacy(Vault& v)  // NOSONAR cpp:S3776
             const auto t = chunk_tag(Video, c, ck.id, ck.sequence);
             ChunkSpan out;
             if (!to_legacy(ck.offset, ck.length, t, Video, ck.sequence, out)) continue;
-            legacy.push_back(VideoChunk{out.offset, out.length, ck.sequence});
+            legacy.emplace_back(out.offset, out.length, ck.sequence);
         }
         m.chunks = std::move(legacy);
         if (m.poster_length > 0) {
