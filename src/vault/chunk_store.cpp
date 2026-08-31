@@ -71,12 +71,10 @@ bool ChunkStore::read_at(uint64_t offset, std::span<uint8_t> dst) const noexcept
 bool ChunkStore::append_chunk(std::span<const uint8_t> plaintext, crypto::ChunkTag& tag,
                               ChunkSpan& out) noexcept
 {
-    if (tag.context_bound) {
-        // A fresh random record id per write: a replayed old record of the same
-        // node/role/sequence (e.g. a regenerated thumbnail's dead predecessor)
-        // then cannot authenticate — its record id differs.
-        if (!crypto::fill_random(tag.record)) return false;
-    }
+    // A fresh random record id per write: a replayed old record of the same
+    // node/role/sequence (e.g. a regenerated thumbnail's dead predecessor)
+    // then cannot authenticate — its record id differs.
+    if (tag.context_bound && !crypto::fill_random(tag.record)) return false;
     const std::array<uint8_t, crypto::AD_SIZE> ad_arr = crypto::build_chunk_ad(tag);
     const std::span<const uint8_t> ad =
         tag.context_bound ? std::span<const uint8_t>(ad_arr) : std::span<const uint8_t>{};

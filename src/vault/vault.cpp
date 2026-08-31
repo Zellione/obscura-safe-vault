@@ -617,8 +617,8 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     // Wrap the master key under the KEK (detached: cipher[32]||tag[16]). New
     // vaults (FLAG_CONTEXT_BOUND_CHUNKS set above) bind the wrap to the salt.
     std::vector<uint8_t> wrapped;
-    std::array<uint8_t, crypto::AD_SIZE> wrap_ad{};
-    if (!crypto::seal(kek.as_span(), h.mk_nonce, master.as_span(), wrapped,
+    if (std::array<uint8_t, crypto::AD_SIZE> wrap_ad{};
+        !crypto::seal(kek.as_span(), h.mk_nonce, master.as_span(), wrapped,
                       header_record_ad(crypto::ChunkDomain::MkWrap, h, wrap_ad))) {
         std::fclose(fp);
         discard_failed_create();
@@ -641,8 +641,8 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     out.header_ = h;
     out.master_key_ = std::move(master);
     out.root_ = IndexNode::gallery("");
-    const bool ctx = context_bound_chunks(h);
-    if (ctx && !crypto::fill_random(out.root_.node_id)) {
+    if (const bool ctx = context_bound_chunks(h);
+        ctx && !crypto::fill_random(out.root_.node_id)) {
         out.reset();
         discard_failed_create();
         return VaultResult::CryptoError;
@@ -765,8 +765,8 @@ namespace {
     if (on_disk.size() < crypto::TAG_SIZE) return false;
     crypto::SecureBytes blob;
     if (!blob.resize(on_disk.size() - crypto::TAG_SIZE)) return false;
-    std::array<uint8_t, crypto::AD_SIZE> idx_ad{};
-    if (!crypto::open_to(master_key, s.nonce, on_disk, blob.span(),
+    if (std::array<uint8_t, crypto::AD_SIZE> idx_ad{};
+        !crypto::open_to(master_key, s.nonce, on_disk, blob.span(),
                          header_record_ad(crypto::ChunkDomain::Index, header, idx_ad))) {
         return false;
     }
@@ -812,8 +812,8 @@ VaultResult Vault::unlock(std::span<const uint8_t> password, std::span<const uin
     std::array<uint8_t, crypto::KEY_SIZE + crypto::TAG_SIZE> sealed{};
     std::memcpy(sealed.data(), header_.wrapped_master_key.data(), crypto::KEY_SIZE);
     std::memcpy(sealed.data() + crypto::KEY_SIZE, header_.mk_tag.data(), crypto::TAG_SIZE);
-    std::array<uint8_t, crypto::AD_SIZE> wrap_ad{};
-    if (!crypto::open_to(kek.as_span(), header_.mk_nonce, sealed, master_key_.span(),
+    if (std::array<uint8_t, crypto::AD_SIZE> wrap_ad{};
+        !crypto::open_to(kek.as_span(), header_.mk_nonce, sealed, master_key_.span(),
                          header_record_ad(crypto::ChunkDomain::MkWrap, header_, wrap_ad))) {
         master_key_.wipe();
         return AuthFailed;  // wrong password / keyfile / tampered wrap
@@ -862,8 +862,8 @@ VaultResult Vault::change_password(std::span<const uint8_t> old_password,
     std::memcpy(sealed.data(), header_.wrapped_master_key.data(), crypto::KEY_SIZE);
     std::memcpy(sealed.data() + crypto::KEY_SIZE, header_.mk_tag.data(), crypto::TAG_SIZE);
     crypto::SecureBuffer<crypto::KEY_SIZE> master;
-    std::array<uint8_t, crypto::AD_SIZE> chk_ad{};
-    if (!crypto::open_to(kek.as_span(), header_.mk_nonce, sealed, master.span(),
+    if (std::array<uint8_t, crypto::AD_SIZE> chk_ad{};
+        !crypto::open_to(kek.as_span(), header_.mk_nonce, sealed, master.span(),
                          header_record_ad(crypto::ChunkDomain::MkWrap, header_, chk_ad))) {
         return AuthFailed;  // wrong old password / keyfile
     }
@@ -879,8 +879,8 @@ VaultResult Vault::change_password(std::span<const uint8_t> old_password,
         return CryptoError;
     }
     std::vector<uint8_t> wrapped;
-    std::array<uint8_t, crypto::AD_SIZE> nw_ad{};
-    if (!crypto::seal(kek.as_span(), h.mk_nonce, master.as_span(), wrapped,
+    if (std::array<uint8_t, crypto::AD_SIZE> nw_ad{};
+        !crypto::seal(kek.as_span(), h.mk_nonce, master.as_span(), wrapped,
                       header_record_ad(crypto::ChunkDomain::MkWrap, h, nw_ad))) {
         return CryptoError;
     }

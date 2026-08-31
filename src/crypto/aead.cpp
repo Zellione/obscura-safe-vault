@@ -3,6 +3,7 @@
 #include <limits>
 #include <new>
 #include <stdexcept>
+#include <utility>
 
 #include <monocypher.h>
 
@@ -14,7 +15,7 @@ namespace crypto {
 std::array<uint8_t, AD_SIZE> build_chunk_ad(const ChunkTag& t) noexcept
 {
     std::array<uint8_t, AD_SIZE> ad{};
-    ad[0] = static_cast<uint8_t>(t.domain);
+    ad[0] = std::to_underlying(t.domain);
     ad[1] = CHUNK_AD_VERSION;
     for (size_t i = 0; i < NODE_ID_SIZE; ++i) {
         ad[2 + i]         = t.owner[i];
