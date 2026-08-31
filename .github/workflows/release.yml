@@ -31,10 +31,15 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - name: Checkout (with submodules)
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          submodules: recursive
+          submodules: false
+
+      # Same retried submodule fetch as ci.yml — aomedia.googlesource.com 503d
+      # mid-checkout on 2026-08-31 and took the whole pipeline down.
+      - name: Checkout submodules (retried)
+        uses: ./.github/actions/checkout-submodules
 
       - name: Cache apt packages
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -164,10 +169,15 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - name: Checkout (with submodules)
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          submodules: recursive
+          submodules: false
+
+      # Same retried submodule fetch as ci.yml — aomedia.googlesource.com 503d
+      # mid-checkout on 2026-08-31 and took the whole pipeline down.
+      - name: Checkout submodules (retried)
+        uses: ./.github/actions/checkout-submodules
 
       - name: Set up MSVC environment
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
