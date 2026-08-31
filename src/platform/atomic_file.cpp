@@ -50,7 +50,7 @@ inline constexpr int MAX_COLLISION_ATTEMPTS = 10000;
     if (name.empty() || name.size() > MAX_EXPORT_COMPONENT_BYTES) return false;
     if (name == "." || name == "..") return false;
     if (name.find_first_of("/\\") != std::string_view::npos) return false;
-    if (name.find('\0') != std::string_view::npos) return false;
+    if (name.contains('\0')) return false;  // NUL truncates the C syscall string
     return true;
 }
 
@@ -117,19 +117,26 @@ struct FdGuard {
 // errno set (EEXIST means the name is taken).
 [[nodiscard]] int openat_creat(int dirfd, const std::string& name) noexcept
 {
-    constexpr mode_t kMode = 0666;  // respect umask: exports are readable user files
+    constexpr mode_t kMode = 0666;  // NOSONAR cpp:S2612 — see rationale at the fallback open
 #if defined(__linux__) && defined(SYS_openat2)
     struct open_how how {};
     how.flags   = static_cast<unsigned long long>(O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC
                                                   | O_NOFOLLOW);
     how.mode    = kMode & 0777;
     how.resolve = RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS;
-    const long rc = ::syscall(SYS_openat2, dirfd, name.c_str(), &how, sizeof(how));
-    if (rc >= 0) return static_cast<int>(rc);
+    if (const long rc = ::syscall(SYS_openat2, dirfd, name.c_str(), &how, sizeof(how));
+        rc >= 0) {
+        return static_cast<int>(rc);
+    }
     if (errno != ENOSYS && errno != EINVAL && errno != EPERM) return -1;
     // kernel without openat2 (or the syscall blocked): fall through to openat.
 #endif
-    return ::openat(dirfd, name.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,
+    // Exported media is the USER'S readable content, deliberately NOT owner-only:
+    // Phase 98's contract matches the pre-P98 fopen("wb") 0666&~umask behaviour
+    // (the OPPOSITE of the owner-only keyfile/vault rule) — readable by the user
+    // and their tools, never a permission escalation beyond the pre-existing
+    // export path. Suppressed here and at the open_how match below (cpp:S2612).  // NOSONAR cpp:S2612
+    return ::openat(dirfd, name.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,  // NOSONAR cpp:S2612
                     kMode);
 }
 
@@ -157,8 +164,7 @@ create_new_file_within(const std::filesystem::path& directory, std::string_view 
 
         const std::string name = (n == 0) ? std::string{safe_component}
                                           : collided_name(safe_component, n);
-        const int fd = openat_creat(dir.fd, name);
-        if (fd >= 0) {
+        if (const int fd = openat_creat(dir.fd, name); fd >= 0) {
             std::FILE* fp = ::fdopen(fd, "wb");
             if (!fp) {
                 const int saved = errno;
