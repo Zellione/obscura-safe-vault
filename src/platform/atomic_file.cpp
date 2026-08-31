@@ -136,8 +136,8 @@ struct FdGuard {
     // (the OPPOSITE of the owner-only keyfile/vault rule) — readable by the user
     // and their tools, never a permission escalation beyond the pre-existing
     // export path. Suppressed here and at the open_how match below (cpp:S2612).  // NOSONAR cpp:S2612
-    return ::openat(dirfd, name.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,  // NOSONAR cpp:S2612
-                    kMode);
+    return ::openat(dirfd, name.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,
+                    kMode);  // NOSONAR cpp:S2612 — readable user content, not secret
 }
 
 }  // namespace
