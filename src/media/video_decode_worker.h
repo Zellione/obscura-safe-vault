@@ -14,6 +14,7 @@
 #include <thread>
 #include <vector>
 
+#include "crypto/secure_mem.h"
 #include "media/decoded_frame.h"
 #include "media/frame_convert.h"
 #include "media/hw_accel.h"
@@ -41,7 +42,7 @@ public:
         uint64_t generation = 0;
         bool     eof        = false;   // true: end of stream for `generation`; frame unset
         std::optional<DecodedFrame> frame;
-        std::vector<uint8_t>        storage;   // owns frame's plane bytes
+        crypto::SecureBytes storage;  // owns frame's plane bytes
     };
 
     // `wake_event` is an SDL event type (e.g. image::decode_wake_event()) pushed

@@ -63,8 +63,8 @@ build/bin/Release/osv
 
 #### Locked-memory limit (`RLIMIT_MEMLOCK`)
 
-Decrypted data is held in `mlock`'d buffers so it can never be swapped to
-disk. Locking is **best-effort**: if the OS refuses, the app prints one
+Application-controlled decrypted data is held in `mlock`'d buffers so it is
+kept out of swap where the OS permits. Locking is **best-effort**: if the OS refuses, the app prints one
 warning per run —
 
 ```
@@ -93,6 +93,14 @@ Windows), so most hosts get a usable budget without any configuration. The
 budget you actually have — and whether any buffer has degraded to swappable
 memory — is visible live in the **F1 help popup** (Global group,
 "Secure memory: …" line).
+
+FFmpeg video/audio decode has an additional boundary: the app locks and wipes
+its AVIO buffers, demux packets, software frames, PCM, conversion scratch, and
+published frame copies, but FFmpeg codec/filter scratch, GPU-driver surfaces,
+and SDL's internal audio-stream copies do not expose complete caller allocator
+hooks. Once that pipeline is used, F1 therefore reports that some codec/decoded
+data *may* be swappable even when every application-owned lock succeeded. This
+is an honest capability status, not an mlock-budget failure.
 
 > **Caveat — mlock keeps data out of swap, not out of RAM.** On a host that
 > swaps to **zram** (compressed, RAM-resident) the degraded bytes still land

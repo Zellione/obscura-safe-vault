@@ -6,6 +6,7 @@
 #include <span>
 #include <vector>
 
+#include "crypto/secure_mem.h"
 #include "media/mem_avio.h"
 
 extern "C" {
@@ -39,6 +40,20 @@ TEST(mem_avio_read_sequential)
     REQUIRE(n == 8);
     CHECK(buf[0] == 0x08);
     CHECK(buf[7] == 0x0f);
+}
+
+TEST(mem_avio_buffer_is_locked_and_wiped_on_destroy)
+{
+    crypto::detail::reset_wipe_observations_for_tests();
+    const auto before = crypto::detail::wiping_deallocation_count();
+    {
+        media::MemAvio avio(kTestData);
+        REQUIRE(avio.valid());
+        REQUIRE(avio.buffer_is_locked());
+        std::memset(avio.ctx()->buffer, 0xA7, static_cast<size_t>(avio.ctx()->buffer_size));
+    }
+    CHECK(crypto::detail::wiping_deallocation_count() > before);
+    CHECK(crypto::detail::all_wipe_observations_zero_for_tests());
 }
 
 TEST(mem_avio_seek_set)

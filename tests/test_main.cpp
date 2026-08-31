@@ -1,5 +1,6 @@
 #include "test_framework.h"
 
+#include "platform/harden.h"
 #include "platform/locale_init.h"
 
 #include <cstdio>
@@ -10,6 +11,11 @@ int main(int argc, char** argv)
     // Same LC_CTYPE init as the app (src/app/main.cpp): the libarchive-backed
     // import tests decode CJK entry names, which the "C" locale cannot.
     platform::init_locale();
+
+    // Match App::init(): Windows VirtualLock is capped by the process minimum
+    // working set, so secure-buffer tests need the production lock budget too.
+    constexpr size_t SECURE_MEM_BUDGET = size_t{256} << 20;
+    (void)platform::grow_secure_mem_budget(SECURE_MEM_BUDGET);
 
     // Unbuffer stdout so progress survives an abnormal exit. std::println is
     // block-buffered to a pipe (CI), so a crash mid-suite would otherwise lose

@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <span>
+#include "media/ffmpeg_secure.h"
 
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -33,6 +34,10 @@ public:
 
     [[nodiscard]] AVIOContext* ctx()   const noexcept { return ctx_; }
     [[nodiscard]] bool         valid() const noexcept { return ctx_ != nullptr; }
+    [[nodiscard]] bool buffer_is_locked() const noexcept
+    {
+        return buffer_state_.locked;
+    }
 
 private:
     static int     read_cb(void* opaque, uint8_t* buf, int buf_size);
@@ -41,6 +46,7 @@ private:
     std::span<const uint8_t> data_;
     uint64_t                 pos_ = 0;
     AVIOContext*             ctx_ = nullptr;
+    SecureAvioBufferState buffer_state_;
 };
 
 } // namespace media

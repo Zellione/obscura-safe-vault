@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "crypto/secure_mem.h"
 #include "media/anim_decoder.h"
 #include "media/gif_decoder.h"
 
@@ -63,6 +64,25 @@ TEST(gif_decoder_yields_multiple_rgba_frames)
         ++n;
     }
     CHECK(n >= 2);
+}
+
+TEST(gif_decoder_rgba_frame_is_locked_and_wiped)
+{
+    const auto bytes = read_fixture("tiny_anim.gif");
+    REQUIRE(!bytes.empty());
+    media::GifDecoder d;
+    REQUIRE(d.open(bytes));
+
+    crypto::detail::reset_wipe_observations_for_tests();
+    const auto before = crypto::detail::wiping_deallocation_count();
+    {
+        auto frame = d.next_frame();
+        REQUIRE(frame.has_value());
+        REQUIRE(!frame->rgba.empty());
+        CHECK(crypto::detail::locked_page_refcount_for_tests(frame->rgba.data()) > 0);
+    }
+    CHECK(crypto::detail::wiping_deallocation_count() > before);
+    CHECK(crypto::detail::all_wipe_observations_zero_for_tests());
 }
 
 TEST(gif_decoder_rewind_replays_the_same_frame_count)

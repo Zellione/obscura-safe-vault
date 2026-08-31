@@ -1,8 +1,9 @@
 # obscura-safe-vault — Core (memory graph root)
 
 Multi-platform (Linux → Windows; no macOS) encrypted photo gallery. A single `.osv` vault
-file. Decrypted data lives only in `mlock`'d heap — never written to disk, except the one
-gated deviation (`ui::export.*`). Galleries freely nest and may hold any mix of images,
+file. Application-owned decrypted data lives only in `mlock`'d, wipe-on-release heap;
+opaque codec/driver buffers are minimized and surfaced as a degraded F1 status (Phase 97).
+Plaintext is never written to disk except the one gated deviation (`ui::export.*`). Galleries freely nest and may hold any mix of images,
 videos, and sub-galleries as direct children (no leaf-only restriction — sub-galleries display
 first, then media).
 
@@ -39,7 +40,9 @@ vendor/      git submodules — pinned versions, build mechanics, CI matrix in m
 
 ## Project-wide invariants (NEVER violate)
 
-1. No decrypted bytes to disk — only `mlock`'d heap buffers.
+1. No decrypted bytes to disk. Application-owned plaintext uses best-effort `mlock`'d,
+   wipe-on-release heap buffers; opaque third-party codec/driver allocations that cannot accept
+   caller storage are documented and must set the F1 degraded status (Phase 97).
    EXCEPTION (documented, gated): `src/ui/export.*` deliberately writes decrypted originals to
    disk on explicit user consent (selection-only, never thumbnails, buffer wiped right after
    write). No other path may write plaintext.

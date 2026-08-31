@@ -124,15 +124,18 @@ TEST(video_decode_worker_decodes_submitted_packets_in_order)
 
     std::vector<double> pts_seen;
     bool saw_eof = false;
+    bool all_storage_locked = true;
     REQUIRE(wait_for([&] {
         while (auto r = worker.take_result()) {
             if (r->eof) { saw_eof = true; continue; }
             if (!r->frame.has_value()) return false;
+            all_storage_locked &= r->storage.is_locked();
             pts_seen.push_back(r->frame->pts_seconds);
         }
         return saw_eof;
     }));
 
+    REQUIRE(all_storage_locked);
     REQUIRE(pts_seen.size() == 10);
     for (size_t i = 1; i < pts_seen.size(); ++i)
         CHECK(pts_seen[i] >= pts_seen[i - 1]);   // presentation order preserved

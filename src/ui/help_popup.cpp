@@ -40,9 +40,8 @@ std::string secure_mem_status_line(size_t budget_bytes, bool degraded)
     const std::string budget = unlimited
         ? "unlimited"
         : std::format("{} MiB", (budget_bytes + ((size_t{1} << 20) - 1)) >> 20);
-    const std::string state = degraded
-        ? "— some decoded data is swappable (mlock exhausted)"
-        : "active (best-effort)";
+    const std::string state =
+        degraded ? "— some codec/decoded data may be swappable" : "active (best-effort)";
     return std::format("Secure memory: {} page-lock budget {}", budget, state);
 }
 
@@ -198,11 +197,12 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
     std::vector<HelpGroup> all_groups = {
         {.title = "Global",
          .entries = {
-            {.key = "F1", .description = "Help"},
-            {.key = "F2", .description = "Settings"},
-            {.key = "Right-click", .description = "Back / up one level"},
-            {.key = "", .description = secure_mem_status_line(platform::lockable_budget_bytes(),
-                                                              crypto::mlock_failure_seen())},
+             {.key = "F1", .description = "Help"},
+             {.key = "F2", .description = "Settings"},
+             {.key = "Right-click", .description = "Back / up one level"},
+             {.key = "",
+              .description = secure_mem_status_line(platform::lockable_budget_bytes(),
+                                                    crypto::secure_memory_degraded())},
          }}};
     all_groups.insert(all_groups.end(), groups.begin(), groups.end());
 

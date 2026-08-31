@@ -7,6 +7,7 @@
 #include <cstring>
 #include <vector>
 
+#include "crypto/secure_mem.h"
 #include "media/frame_convert.h"
 
 #if defined(__GNUC__)
@@ -242,8 +243,10 @@ TEST(copy_owned_frame_i420_preserves_pixel_data_and_survives_source_mutation)
     src.linesizes[1] = 2;
     src.linesizes[2] = 2;
 
-    std::vector<uint8_t> storage;
-    media::DecodedFrame owned = media::copy_owned_frame(src, storage);
+    crypto::SecureBytes storage;
+    auto maybe_owned = media::copy_owned_frame(src, storage);
+    REQUIRE(maybe_owned.has_value());
+    const media::DecodedFrame& owned = *maybe_owned;
 
     CHECK(owned.width == 4);
     CHECK(owned.height == 2);
@@ -279,8 +282,10 @@ TEST(copy_owned_frame_nv12_has_two_planes_third_null)
     src.linesizes[1]  = 2;
     src.linesizes[2]  = 0;
 
-    std::vector<uint8_t> storage;
-    media::DecodedFrame owned = media::copy_owned_frame(src, storage);
+    crypto::SecureBytes storage;
+    auto maybe_owned = media::copy_owned_frame(src, storage);
+    REQUIRE(maybe_owned.has_value());
+    const media::DecodedFrame& owned = *maybe_owned;
 
     CHECK(owned.pix_fmt == media::FramePixelFormat::NV12);
     REQUIRE(owned.planes[0] != nullptr);
@@ -288,6 +293,32 @@ TEST(copy_owned_frame_nv12_has_two_planes_third_null)
     CHECK(owned.planes[2] == nullptr);
     CHECK(std::memcmp(owned.planes[0], y_plane.data(), 4) == 0);
     CHECK(std::memcmp(owned.planes[1], uv_plane.data(), 2) == 0);
+}
+
+TEST(copy_owned_frame_storage_is_locked_and_wiped)
+{
+    std::vector<uint8_t> y_plane(64, 0xA5);
+    std::vector<uint8_t> uv_plane(32, 0x5A);
+    media::DecodedFrame src{};
+    src.width = 8;
+    src.height = 8;
+    src.pix_fmt = media::FramePixelFormat::NV12;
+    src.planes[0] = y_plane.data();
+    src.planes[1] = uv_plane.data();
+    src.linesizes[0] = 8;
+    src.linesizes[1] = 8;
+
+    crypto::detail::reset_wipe_observations_for_tests();
+    const auto before = crypto::detail::wiping_deallocation_count();
+    {
+        crypto::SecureBytes storage;
+        auto owned = media::copy_owned_frame(src, storage);
+        REQUIRE(owned.has_value());
+        REQUIRE(owned->planes[0] != nullptr);
+        CHECK(storage.is_locked());
+    }
+    CHECK(crypto::detail::wiping_deallocation_count() > before);
+    CHECK(crypto::detail::all_wipe_observations_zero_for_tests());
 }
 
 #endif // OSV_VENDORED_AV

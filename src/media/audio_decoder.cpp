@@ -18,6 +18,7 @@ extern "C" {
 #pragma GCC diagnostic pop
 #endif
 
+#include "media/ffmpeg_secure.h"
 #include "platform/safe_print.h"
 
 namespace media {
@@ -68,6 +69,9 @@ bool AudioDecoder::open(const AVStream* stream)
         reset();
         return false;
     }
+
+    ctx_->get_buffer2 = &secure_get_buffer2;
+    mark_ffmpeg_opaque_storage();
 
     if (avcodec_open2(ctx_, codec, nullptr) < 0) {
         platform::safe_println(stderr, "[AudioDecoder] avcodec_open2 failed");

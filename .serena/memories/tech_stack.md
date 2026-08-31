@@ -52,6 +52,13 @@ parsers mpegvideo/mpeg4video/h263/vc1/mpegaudio,
 `--enable-libaom --enable-avfilter --enable-filter=yadif` (yadif deinterlacing),
 swscale + swresample; no encoders/muxers/protocols/network/programs).
 See the FFmpeg row above for the `libaom_av1` naming/link-order gotchas.
+**Phase 97 secure-memory integration (no dependency/version change):** codec contexts install a
+custom `get_buffer2`; `media/ffmpeg_secure.*` wraps packet/software-frame `AVBufferRef`s so their
+final shared release wipes and unlocks before returning storage to FFmpeg. AVIO, app-owned PCM,
+swscale scratch, and published frames are secure owners. Internal codec/filter scratch, GPU
+surfaces, and SDL audio copies remain opaque third-party allocations and set the F1 degraded
+status through `crypto::secure_memory_degraded()`. All wrappers are `OSV_VENDORED_AV`-gated; the
+no-FFmpeg parity suite is 2051/0.
 **CRITICAL GOTCHA (Phase 52):** After changing the decoder list in `build_codecs.sh`, **`rm -rf build/` before `scripts/gen.sh`**.
 Ninja does not treat a rebuilt `libavcodec.a` as a build edge (it's a prebuilt external file), so the test binary
 silently keeps running against the stale archive. This cost a debugging session. Recorded in this memory.

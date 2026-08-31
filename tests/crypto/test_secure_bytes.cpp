@@ -136,6 +136,18 @@ TEST(secure_bytes_destruction_records_wipe_observation)
     CHECK_TRUE(crypto::detail::all_wipe_observations_zero_for_tests());
 }
 
+TEST(page_lock_registry_can_forget_allocator_replaced_storage)
+{
+    crypto::SecureBytes buf(64);
+    if (buf.is_locked()) {
+        const size_t before = crypto::detail::locked_page_refcount_for_tests(buf.data());
+        REQUIRE(crypto::detail::mem_lock(buf.data(), buf.size()));
+        CHECK_EQ(crypto::detail::locked_page_refcount_for_tests(buf.data()), before + 1);
+        crypto::detail::mem_forget_lock(buf.data(), buf.size());
+        CHECK_EQ(crypto::detail::locked_page_refcount_for_tests(buf.data()), before);
+    }
+}
+
 TEST(secure_bytes_injected_allocation_failure_returns_false)
 {
     crypto::SecureBytes buf;

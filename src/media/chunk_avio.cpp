@@ -11,7 +11,6 @@
 #endif
 extern "C" {
 #include <libavutil/error.h>
-#include <libavutil/mem.h>
 }
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
@@ -19,23 +18,18 @@ extern "C" {
 
 namespace media {
 
-namespace { constexpr int AVIO_BUF = 1 << 16; }   // 64 KiB
-
 ChunkAvio::ChunkAvio(VideoSource source) : source_(std::move(source))
 {
-    auto* buffer = static_cast<unsigned char*>(av_malloc(AVIO_BUF));
-    if (!buffer) return;                            // ctx_ stays null → valid()==false
-    ctx_ = avio_alloc_context(buffer, AVIO_BUF, /*write_flag=*/0, this,
-                              &read_cb, /*write=*/nullptr, &seek_cb);
-    if (!ctx_) av_free(buffer);
+    auto* buffer = secure_avio_buffer_alloc(buffer_state_);
+    if (!buffer) return;
+    ctx_ =
+        avio_alloc_context(buffer, SECURE_AVIO_BUFFER_SIZE, 0, this, &read_cb, nullptr, &seek_cb);
+    if (!ctx_) secure_avio_buffer_discard(buffer, buffer_state_);
 }
 
 ChunkAvio::~ChunkAvio()
 {
-    if (ctx_) {
-        av_freep(&ctx_->buffer);                    // FFmpeg may have realloc'd it
-        avio_context_free(&ctx_);
-    }
+    secure_avio_free(ctx_, buffer_state_);
 }
 
 int ChunkAvio::read_cb(void* opaque, uint8_t* buf, int buf_size)

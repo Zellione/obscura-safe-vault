@@ -2,6 +2,7 @@
 
 #ifdef OSV_VENDORED_AV
 
+#include "crypto/secure_mem.h"
 #include "media/audio_interleave.h"
 
 #include <cstring>
@@ -67,7 +68,7 @@ TEST(interleave_fltp_mono_basic)
     auto planes = make_planar_planes(1, 3, samples);
     auto ptrs = get_plane_ptrs(planes);
 
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(media::interleave_to_f32(ptrs.data(), 1, 3, 1, AV_SAMPLE_FMT_FLTP, out));
     REQUIRE(out.size() == 3);
     REQUIRE(out[0] == 0.1f);
@@ -87,7 +88,7 @@ TEST(interleave_fltp_stereo_basic)
     std::memcpy(planes[1].data(), right, 2 * sizeof(float));
     auto ptrs = get_plane_ptrs(planes);
 
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(media::interleave_to_f32(ptrs.data(), 2, 2, 2, AV_SAMPLE_FMT_FLTP, out));
     REQUIRE(out.size() == 4);
     REQUIRE(out[0] == 0.1f);
@@ -106,7 +107,7 @@ TEST(interleave_flt_mono_basic)
     auto planes = make_packed_plane(1, 3, samples);
     auto ptrs = get_plane_ptrs(planes);
 
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(media::interleave_to_f32(ptrs.data(), 1, 3, 1, AV_SAMPLE_FMT_FLT, out));
     REQUIRE(out.size() == 3);
     REQUIRE(out[0] == 0.1f);
@@ -121,7 +122,7 @@ TEST(interleave_flt_stereo_basic)
     auto planes = make_packed_plane(2, 2, samples);
     auto ptrs = get_plane_ptrs(planes);
 
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(media::interleave_to_f32(ptrs.data(), 1, 2, 2, AV_SAMPLE_FMT_FLT, out));
     REQUIRE(out.size() == 4);
     REQUIRE(out[0] == 0.1f);
@@ -140,7 +141,7 @@ TEST(interleave_s16p_mono_basic)
     auto planes = make_planar_planes(1, 3, samples);
     auto ptrs = get_plane_ptrs(planes);
 
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(media::interleave_to_f32(ptrs.data(), 1, 3, 1, AV_SAMPLE_FMT_S16P, out));
     REQUIRE(out.size() == 3);
     // 16384 / 32768 = 0.5
@@ -162,7 +163,7 @@ TEST(interleave_s16p_stereo_basic)
     std::memcpy(planes[1].data(), right, 2 * sizeof(int16_t));
     auto ptrs = get_plane_ptrs(planes);
 
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(media::interleave_to_f32(ptrs.data(), 2, 2, 2, AV_SAMPLE_FMT_S16P, out));
     REQUIRE(out.size() == 4);
     REQUIRE(out[0] > 0.4999f && out[0] < 0.5001f);    // 16384/32768
@@ -181,7 +182,7 @@ TEST(interleave_s16_mono_basic)
     auto planes = make_packed_plane(1, 3, samples);
     auto ptrs = get_plane_ptrs(planes);
 
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(media::interleave_to_f32(ptrs.data(), 1, 3, 1, AV_SAMPLE_FMT_S16, out));
     REQUIRE(out.size() == 3);
     REQUIRE(out[0] > 0.4999f && out[0] < 0.5001f);
@@ -196,7 +197,7 @@ TEST(interleave_s16_stereo_basic)
     auto planes = make_packed_plane(2, 2, samples);
     auto ptrs = get_plane_ptrs(planes);
 
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(media::interleave_to_f32(ptrs.data(), 1, 2, 2, AV_SAMPLE_FMT_S16, out));
     REQUIRE(out.size() == 4);
     REQUIRE(out[0] > 0.4999f && out[0] < 0.5001f);
@@ -215,7 +216,7 @@ TEST(interleave_s32p_mono_basic)
     auto planes = make_planar_planes(1, 3, samples);
     auto ptrs = get_plane_ptrs(planes);
 
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(media::interleave_to_f32(ptrs.data(), 1, 3, 1, AV_SAMPLE_FMT_S32P, out));
     REQUIRE(out.size() == 3);
     // 1073741824 / 2147483648 = 0.5
@@ -237,7 +238,7 @@ TEST(interleave_s32p_stereo_basic)
     std::memcpy(planes[1].data(), right, 2 * sizeof(int32_t));
     auto ptrs = get_plane_ptrs(planes);
 
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(media::interleave_to_f32(ptrs.data(), 2, 2, 2, AV_SAMPLE_FMT_S32P, out));
     REQUIRE(out.size() == 4);
     REQUIRE(out[0] > 0.4999f && out[0] < 0.5001f);    // 1073741824/2147483648
@@ -256,7 +257,7 @@ TEST(interleave_s32_mono_basic)
     auto planes = make_packed_plane(1, 3, samples);
     auto ptrs = get_plane_ptrs(planes);
 
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(media::interleave_to_f32(ptrs.data(), 1, 3, 1, AV_SAMPLE_FMT_S32, out));
     REQUIRE(out.size() == 3);
     REQUIRE(out[0] > 0.4999f && out[0] < 0.5001f);
@@ -270,7 +271,7 @@ TEST(interleave_s32_stereo_basic)
     auto planes = make_packed_plane(2, 2, samples);
     auto ptrs = get_plane_ptrs(planes);
 
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(media::interleave_to_f32(ptrs.data(), 1, 2, 2, AV_SAMPLE_FMT_S32, out));
     REQUIRE(out.size() == 4);
     REQUIRE(out[0] > 0.4999f && out[0] < 0.5001f);
@@ -289,7 +290,7 @@ TEST(interleave_u8p_mono_basic)
     auto planes = make_planar_planes(1, 3, samples);
     auto ptrs = get_plane_ptrs(planes);
 
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(media::interleave_to_f32(ptrs.data(), 1, 3, 1, AV_SAMPLE_FMT_U8P, out));
     REQUIRE(out.size() == 3);
     REQUIRE(out[0] > -0.0001f && out[0] < 0.0001f);    // (128-128)/128 = 0
@@ -308,7 +309,7 @@ TEST(interleave_u8p_stereo_basic)
     std::memcpy(planes[1].data(), right, 2);
     auto ptrs = get_plane_ptrs(planes);
 
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(media::interleave_to_f32(ptrs.data(), 2, 2, 2, AV_SAMPLE_FMT_U8P, out));
     REQUIRE(out.size() == 4);
     REQUIRE(out[0] > -0.0001f && out[0] < 0.0001f);    // (128-128)/128
@@ -327,7 +328,7 @@ TEST(interleave_u8_mono_basic)
     auto planes = make_packed_plane(1, 3, samples);
     auto ptrs = get_plane_ptrs(planes);
 
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(media::interleave_to_f32(ptrs.data(), 1, 3, 1, AV_SAMPLE_FMT_U8, out));
     REQUIRE(out.size() == 3);
     REQUIRE(out[0] > -0.0001f && out[0] < 0.0001f);
@@ -342,7 +343,7 @@ TEST(interleave_u8_stereo_basic)
     auto planes = make_packed_plane(2, 2, samples);
     auto ptrs = get_plane_ptrs(planes);
 
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(media::interleave_to_f32(ptrs.data(), 1, 2, 2, AV_SAMPLE_FMT_U8, out));
     REQUIRE(out.size() == 4);
     REQUIRE(out[0] > -0.0001f && out[0] < 0.0001f);
@@ -357,14 +358,14 @@ TEST(interleave_u8_stereo_basic)
 
 TEST(interleave_rejects_null_planes)
 {
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(!media::interleave_to_f32(nullptr, 1, 3, 1, AV_SAMPLE_FMT_FLTP, out));
 }
 
 TEST(interleave_rejects_null_plane_zero)
 {
     const uint8_t* ptrs[] = {nullptr};
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(!media::interleave_to_f32(ptrs, 1, 3, 1, AV_SAMPLE_FMT_FLTP, out));
 }
 
@@ -374,7 +375,7 @@ TEST(interleave_rejects_negative_samples)
     auto planes = make_planar_planes(1, 1, samples);
     auto ptrs = get_plane_ptrs(planes);
 
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(!media::interleave_to_f32(ptrs.data(), 1, -1, 1, AV_SAMPLE_FMT_FLTP, out));
 }
 
@@ -384,7 +385,7 @@ TEST(interleave_rejects_zero_channels)
     auto planes = make_planar_planes(1, 1, samples);
     auto ptrs = get_plane_ptrs(planes);
 
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     REQUIRE(!media::interleave_to_f32(ptrs.data(), 1, 1, 0, AV_SAMPLE_FMT_FLTP, out));
 }
 
@@ -394,7 +395,7 @@ TEST(interleave_rejects_unsupported_format)
     auto planes = make_planar_planes(1, 1, samples);
     auto ptrs = get_plane_ptrs(planes);
 
-    std::vector<float> out;
+    crypto::SecureVector<float> out;
     // Use an invalid format code
     REQUIRE(!media::interleave_to_f32(ptrs.data(), 1, 1, 1, -999, out));
 }
