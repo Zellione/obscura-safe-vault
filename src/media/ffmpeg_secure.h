@@ -11,19 +11,17 @@ struct AVPacket;
 
 namespace media {
 
+inline constexpr int SECURE_AVIO_BUFFER_SIZE = 1 << 16;
+
 struct SecureAvioBufferState {
     uint8_t* initial = nullptr;
     bool locked = false;
 };
 
-using AvioReadCallback = int (*)(void*, uint8_t*, int);
-using AvioSeekCallback = int64_t (*)(void*, int64_t, int);
-
 // Allocate and release the shared page-locked, final-wipe AVIO buffer used by
 // both encrypted ChunkAvio and borrowed-memory MemAvio readers.
-[[nodiscard]] AVIOContext* secure_avio_alloc(void* opaque, AvioReadCallback read,
-                                             AvioSeekCallback seek,
-                                             SecureAvioBufferState& state) noexcept;
+[[nodiscard]] uint8_t* secure_avio_buffer_alloc(SecureAvioBufferState& state) noexcept;
+void secure_avio_buffer_discard(uint8_t* buffer, SecureAvioBufferState& state) noexcept;
 void secure_avio_free(AVIOContext*& ctx, SecureAvioBufferState& state) noexcept;
 
 // Attach a reference-counted secure-lifetime sidecar to a demuxed packet.

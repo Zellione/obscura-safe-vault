@@ -334,7 +334,7 @@ inline void forget_page_refs(PageLockRegistry& registry, uintptr_t first, uintpt
 // allocator blocks share pages, so a per-allocation munlock can otherwise make
 // a still-live neighbouring secret swappable. Keep one OS lock per page and a
 // process-wide reference count across every SecureBuffer/SecureBytes/String.
-inline bool mem_lock(const void* p, size_t n) noexcept
+template <typename T> inline bool mem_lock(const T* p, size_t n) noexcept
 {
     if (!p || n == 0) return false;
     const auto addr = pointer_address(p);
@@ -360,7 +360,7 @@ inline bool mem_lock(const void* p, size_t n) noexcept
     }
 }
 
-inline void mem_unlock(const void* p, size_t n) noexcept
+template <typename T> inline void mem_unlock(const T* p, size_t n) noexcept
 {
     if (!p || n == 0) return;
     const auto addr = pointer_address(p);
@@ -385,7 +385,7 @@ inline void mem_unlock(const void* p, size_t n) noexcept
 // for an allocator that may already have realloc'd/freed the registered block:
 // munlock/VirtualUnlock on that stale address could affect unrelated storage
 // subsequently mapped at the same location.
-inline void mem_forget_lock(const void* p, size_t n) noexcept
+template <typename T> inline void mem_forget_lock(const T* p, size_t n) noexcept
 {
     if (!p || n == 0) return;
     const auto addr = pointer_address(p);

@@ -21,7 +21,11 @@ namespace media {
 
 MemAvio::MemAvio(std::span<const uint8_t> data) : data_(data)
 {
-    ctx_ = secure_avio_alloc(this, &read_cb, &seek_cb, buffer_state_);
+    auto* buffer = secure_avio_buffer_alloc(buffer_state_);
+    if (!buffer) return;
+    ctx_ =
+        avio_alloc_context(buffer, SECURE_AVIO_BUFFER_SIZE, 0, this, &read_cb, nullptr, &seek_cb);
+    if (!ctx_) secure_avio_buffer_discard(buffer, buffer_state_);
 }
 
 MemAvio::~MemAvio()

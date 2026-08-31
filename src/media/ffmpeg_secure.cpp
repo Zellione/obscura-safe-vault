@@ -26,8 +26,6 @@ extern "C" {
 namespace media {
 namespace {
 
-constexpr int AVIO_BUFFER_SIZE = 1 << 16;
-
 struct SecureBufferOwner {
     AVBufferRef* original = nullptr;
     bool locked = false;
@@ -84,25 +82,25 @@ bool frame_is_hardware(const AVFrame* frame) noexcept
 
 }  // namespace
 
-AVIOContext* secure_avio_alloc(void* opaque, AvioReadCallback read, AvioSeekCallback seek,
-                               SecureAvioBufferState& state) noexcept
+uint8_t* secure_avio_buffer_alloc(SecureAvioBufferState& state) noexcept
 {
-    auto* buffer = static_cast<uint8_t*>(av_malloc(AVIO_BUFFER_SIZE));
+    auto* buffer = static_cast<uint8_t*>(av_malloc(SECURE_AVIO_BUFFER_SIZE));
     if (!buffer) return nullptr;
     state.initial = buffer;
-    state.locked = crypto::detail::mem_lock(buffer, AVIO_BUFFER_SIZE);
+    state.locked = crypto::detail::mem_lock(buffer, SECURE_AVIO_BUFFER_SIZE);
     if (!state.locked) crypto::warn_mlock_failure_once();
+    return buffer;
+}
 
-    AVIOContext* ctx = avio_alloc_context(buffer, AVIO_BUFFER_SIZE, 0, opaque, read, nullptr, seek);
-    if (ctx) return ctx;
-
-    crypto_wipe(buffer, AVIO_BUFFER_SIZE);
-    if (state.locked) crypto::detail::mem_unlock(buffer, AVIO_BUFFER_SIZE);
+void secure_avio_buffer_discard(uint8_t* buffer, SecureAvioBufferState& state) noexcept
+{
+    if (!buffer) return;
+    crypto_wipe(buffer, SECURE_AVIO_BUFFER_SIZE);
+    if (state.locked) crypto::detail::mem_unlock(buffer, SECURE_AVIO_BUFFER_SIZE);
     crypto::detail::record_wipe_for_tests(
-        std::as_bytes(std::span(buffer, size_t{AVIO_BUFFER_SIZE})));
+        std::as_bytes(std::span(buffer, size_t{SECURE_AVIO_BUFFER_SIZE})));
     av_free(buffer);
     state = {};
-    return nullptr;
 }
 
 void secure_avio_free(AVIOContext*& ctx, SecureAvioBufferState& state) noexcept
@@ -114,7 +112,7 @@ void secure_avio_free(AVIOContext*& ctx, SecureAvioBufferState& state) noexcept
         crypto_wipe(final_buffer, final_size);
         if (state.locked) crypto::detail::mem_unlock(final_buffer, final_size);
     } else {
-        if (state.locked) crypto::detail::mem_forget_lock(state.initial, AVIO_BUFFER_SIZE);
+        if (state.locked) crypto::detail::mem_forget_lock(state.initial, SECURE_AVIO_BUFFER_SIZE);
         mark_ffmpeg_opaque_storage();
         const bool final_locked = crypto::detail::mem_lock(final_buffer, final_size);
         crypto_wipe(final_buffer, final_size);
