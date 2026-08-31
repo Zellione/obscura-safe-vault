@@ -35,9 +35,9 @@
 
 Header flag bit 2 `FLAG_CONTEXT_BOUND_CHUNKS`: this vault's index blob and
 master-key wrap are sealed with context-bound AD, and (once migrated) every
-media chunk is too. New vaults set it at `create`; legacy vaults get it set
-only when the v1→v2 migration rewrites every live record (Phase 99 PR 2), in
-the same commit that re-wraps the master key and rewrites the index blob.
+media chunk is too. New vaults set it at `create`; legacy vaults get it set by
+the v1→v2 migration, in the same commit that re-seals the master-key wrap
+(Phase 99 PR 2).
 
 Canonical AD bytes (fixed-width little-endian, deterministic cross-platform;
 built by `crypto::build_chunk_ad(crypto::ChunkTag)`), 38 bytes total:
