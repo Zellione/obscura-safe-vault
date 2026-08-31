@@ -479,7 +479,8 @@ Vault::Vault(Vault&& o) noexcept
     : path_(std::move(o.path_)), fp_(o.fp_), read_fp_(o.read_fp_), thumb_fp_(o.thumb_fp_),
       thumb_mutex_(std::move(o.thumb_mutex_)), write_mutex_(std::move(o.write_mutex_)),
       header_mutex_(std::move(o.header_mutex_)), header_(o.header_), unlocked_(o.unlocked_),
-      master_key_(std::move(o.master_key_)), root_(std::move(o.root_)),
+      master_key_(std::move(o.master_key_)), kek_(std::move(o.kek_)),
+      kek_valid_(o.kek_valid_), root_(std::move(o.root_)),
       saved_searches_(std::move(o.saved_searches_)), settings_(std::move(o.settings_))
 {
     // Phase 50: A bound CommitLane holds a raw Vault* to &o. App holds the active
@@ -491,6 +492,7 @@ Vault::Vault(Vault&& o) noexcept
     o.read_fp_ = nullptr;
     o.thumb_fp_ = nullptr;
     o.unlocked_ = false;
+    o.kek_valid_ = false;
 }
 
 Vault& Vault::operator=(Vault&& o) noexcept
@@ -512,6 +514,8 @@ Vault& Vault::operator=(Vault&& o) noexcept
         header_ = o.header_;
         unlocked_ = o.unlocked_;
         master_key_ = std::move(o.master_key_);
+        kek_ = std::move(o.kek_);
+        kek_valid_ = o.kek_valid_;
         root_ = std::move(o.root_);
         saved_searches_ = std::move(o.saved_searches_);
         settings_ = std::move(o.settings_);
@@ -519,6 +523,7 @@ Vault& Vault::operator=(Vault&& o) noexcept
         o.read_fp_ = nullptr;
         o.thumb_fp_ = nullptr;
         o.unlocked_ = false;
+        o.kek_valid_ = false;
     }
     return *this;
 }
@@ -534,6 +539,8 @@ void Vault::lock() noexcept
     }
 
     master_key_.wipe();
+    kek_.wipe();
+    kek_valid_ = false;
     unlocked_ = false;
     root_ = IndexNode::gallery("");
     saved_searches_.clear();
@@ -640,6 +647,8 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     out.fp_ = fp;
     out.header_ = h;
     out.master_key_ = std::move(master);
+    out.kek_ = std::move(kek);
+    out.kek_valid_ = true;
     out.root_ = IndexNode::gallery("");
     if (const bool ctx = context_bound_chunks(h);
         ctx && !crypto::fill_random(out.root_.node_id)) {
@@ -837,6 +846,11 @@ VaultResult Vault::unlock(std::span<const uint8_t> password, std::span<const uin
     }
 
     unlocked_ = true;
+    // Phase 99: keep the session KEK (mlock'd) so the v1→v2 migration can
+    // re-seal the master-key wrap without re-deriving from the password.
+    // Wiped at lock()/reset() — the Phase A boundary.
+    kek_ = std::move(kek);
+    kek_valid_ = true;
     return Ok;
 }
 
@@ -890,6 +904,10 @@ VaultResult Vault::change_password(std::span<const uint8_t> old_password,
 
     header_ = h;
     if (!write_header()) return IoError;
+    // Phase 99: refresh the session KEK so a later v1→v2 finalize re-seals
+    // under the CURRENT credentials.
+    kek_ = std::move(kek);
+    kek_valid_ = true;
     return Ok;
 }
 
@@ -1256,6 +1274,244 @@ VaultResult commit_migration(Vault& v, VaultSettings settings)
     if (!v.unlocked_) return Locked;
     v.settings_ = std::move(settings);
     return v.commit_index();
+}
+
+VaultResult apply_context_rewrite(Vault& v, std::string_view node_path)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+    IndexNode* n = v.resolve_node(node_path);
+    if (!n) return NotFound;
+    if (!n->is_media()) return Ok;
+    if (const bool already = n->is_video() ? n->vmeta.context_bound : n->meta.context_bound;
+        already)
+        return Ok;
+
+    // A legacy node has an all-zero node_id; mint one before re-encoding so the
+    // fresh records bind to it.
+    if (std::ranges::all_of(n->node_id, [](uint8_t b) { return b == 0; }) &&
+        !crypto::fill_random(n->node_id))
+        return CryptoError;
+
+    ChunkStore reader(v.read_fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+
+    // Decrypt one legacy record and re-append it as a context-bound v2 record
+    // under the node's (new) identity, persisting the fresh span + record id.
+    // Decrypt one legacy record and re-append it as a context-bound v2 record
+    // under the node's (new) identity, persisting the fresh span + record id.
+    // A zero-length span (no thumb / no poster) is a no-op.
+    auto reencode = [&](uint64_t off, uint64_t len, crypto::ChunkDomain domain, uint32_t seq,
+                        std::array<uint8_t, crypto::NODE_ID_SIZE>& id_out,
+                        ChunkSpan& span_out) {
+        if (len == 0) return Ok;
+        crypto::SecureBytes plain;
+        if (crypto::ChunkTag old{.domain = domain, .sequence = seq};
+            !reader.read_chunk({off, len}, old, plain))
+            return AuthFailed;
+        std::lock_guard lk(*v.write_mutex_);
+        crypto::ChunkTag nt{.domain = domain, .owner = n->node_id, .sequence = seq,
+                            .context_bound = true};
+        if (ChunkStore writer(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+            !writer.append_chunk(plain.as_span(), nt, span_out))
+            return IoError;
+        std::fflush(v.fp_);
+        id_out = nt.record;
+        return Ok;
+    };
+
+    if (n->is_image()) {
+        ImageMeta& m = n->meta;
+        ChunkSpan data_out;
+        ChunkSpan thumb_out;
+        if (VaultResult r = reencode(m.data_offset, m.data_length, crypto::ChunkDomain::Data, 0,
+                                     m.data_id, data_out);
+            r != Ok)
+            return r;
+        if (VaultResult r = reencode(m.thumb_offset, m.thumb_length, crypto::ChunkDomain::Thumb,
+                                     0, m.thumb_id, thumb_out);
+            r != Ok)
+            return r;
+        m.data_offset = data_out.offset;
+        m.data_length = data_out.length;
+        m.thumb_offset = thumb_out.offset;
+        m.thumb_length = thumb_out.length;
+        m.context_bound = true;
+        return Ok;
+    }
+
+    VideoMeta& m = n->vmeta;
+    std::vector<VideoChunk> fresh;
+    fresh.reserve(m.chunks.size());
+    for (size_t i = 0; i < m.chunks.size(); ++i) {
+        const VideoChunk& c = m.chunks[i];
+        ChunkSpan     out;
+        std::array<uint8_t, crypto::NODE_ID_SIZE> id{};
+        if (VaultResult r = reencode(c.offset, c.length, crypto::ChunkDomain::Video,
+                                     static_cast<uint32_t>(i), id, out);
+            r != Ok)
+            return r;
+        VideoChunk fc;
+        fc.offset   = out.offset;
+        fc.length   = out.length;
+        fc.sequence = static_cast<uint32_t>(i);
+        fc.id       = id;
+        fresh.push_back(std::move(fc));
+    }
+    m.chunks = std::move(fresh);
+    ChunkSpan poster_out;
+    std::array<uint8_t, crypto::NODE_ID_SIZE> poster_id{};
+    if (VaultResult r = reencode(m.poster_offset, m.poster_length, crypto::ChunkDomain::Poster, 0,
+                                 poster_id, poster_out);
+        r != Ok)
+        return r;
+    m.poster_offset = poster_out.offset;
+    m.poster_length = poster_out.length;
+    m.poster_id     = poster_id;
+    m.context_bound = true;
+    return Ok;
+}
+
+VaultResult finalize_context_migration(Vault& v)
+{
+    using enum VaultResult;
+    if (!v.unlocked_) return Locked;
+    if (context_bound_chunks(v.header_)) return Ok;
+    if (!v.kek_valid_) return CryptoError;
+
+    // The AD owner is the immutable vault_id; legacy headers carry all-zero
+    // padding there, so mint one (it never changes afterwards).
+    if (std::ranges::all_of(v.header_.vault_id, [](uint8_t b) { return b == 0; }) &&
+        !crypto::fill_random(v.header_.vault_id))
+        return CryptoError;
+
+    // Re-seal the master-key wrap under the SESSION KEK with the vault_id-bound
+    // MkWrap AD (fresh nonce). No password re-derivation is needed — the KEK
+    // was captured at unlock. The next commit's slot-swap persists this wrap
+    // and the flag together.
+    crypto::ChunkTag t;
+    t.domain        = crypto::ChunkDomain::MkWrap;
+    t.owner         = v.header_.vault_id;
+    t.context_bound = true;
+    const std::array<uint8_t, crypto::AD_SIZE> ad = crypto::build_chunk_ad(t);
+
+    std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
+    if (!crypto::fill_random(nonce)) return CryptoError;
+    std::vector<uint8_t> wrapped;
+    if (!crypto::seal(v.kek_.as_span(), nonce, v.master_key_.as_span(), wrapped, ad))
+        return CryptoError;
+    std::memcpy(v.header_.wrapped_master_key.data(), wrapped.data(), crypto::KEY_SIZE);
+    std::memcpy(v.header_.mk_tag.data(), wrapped.data() + crypto::KEY_SIZE, crypto::TAG_SIZE);
+    v.header_.mk_nonce = nonce;
+
+    v.header_.flags |= FLAG_CONTEXT_BOUND_CHUNKS;
+    return Ok;
+}
+
+bool uses_context_chunks(const Vault& v) noexcept
+{
+    return context_bound_chunks(v.header_);
+}
+
+// Test seam — converts a freshly-created v2 vault into a genuine legacy one.
+// The branchiness is inherent (image/video, optional thumb/poster/chunks, the
+// header tail); it is a linear, test-only sequence, so the complexity rule is
+// suppressed here rather than disassembled into contrived helpers.
+void test_only_downgrade_to_legacy(Vault& v)  // NOSONAR cpp:S3776
+{
+    using enum crypto::ChunkDomain;
+    if (!v.unlocked_) return;
+
+    ChunkStore reader(v.read_fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+
+    // Re-append ONE currently-v2 record as an empty-AD legacy record.
+    // `tag_in` is the node's CURRENT v2 tag (used to decrypt it).
+    auto to_legacy = [&](uint64_t off, uint64_t len, const crypto::ChunkTag& tag_in,
+                         crypto::ChunkDomain domain, uint32_t seq, ChunkSpan& out) {
+        crypto::SecureBytes plain;
+        if (!reader.read_chunk({off, len}, tag_in, plain)) return false;
+        std::lock_guard lk(*v.write_mutex_);
+        crypto::ChunkTag lt{.domain = domain, .sequence = seq};   // context_bound stays false
+        if (ChunkStore writer(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+            !writer.append_chunk(plain.as_span(), lt, out))
+            return false;
+        std::fflush(v.fp_);
+        return true;
+    };
+
+    // Re-encode an image node's records to legacy and wipe its identity.
+    auto downgrade_image = [&](IndexNode& c) {
+        ImageMeta& m = c.meta;
+        ChunkSpan out;
+        if (const auto t = chunk_tag(Data, c, m.data_id);
+            to_legacy(m.data_offset, m.data_length, t, Data, 0, out)) {
+            m.data_offset = out.offset;
+            m.data_length = out.length;
+        }
+        if (m.thumb_length > 0) {
+            if (const auto tt = chunk_tag(Thumb, c, m.thumb_id);
+                to_legacy(m.thumb_offset, m.thumb_length, tt, Thumb, 0, out)) {
+                m.thumb_offset = out.offset;
+                m.thumb_length = out.length;
+            }
+        }
+        m.data_id.fill(0);
+        m.thumb_id.fill(0);
+        m.context_bound = false;
+        c.node_id.fill(0);
+    };
+
+    // Re-encode a video node's records to legacy and wipe its identity.
+    auto downgrade_video = [&](IndexNode& c) {
+        VideoMeta& m = c.vmeta;
+        std::vector<VideoChunk> legacy;
+        for (const VideoChunk& ck : m.chunks) {
+            const auto t = chunk_tag(Video, c, ck.id, ck.sequence);
+            ChunkSpan out;
+            if (!to_legacy(ck.offset, ck.length, t, Video, ck.sequence, out)) continue;
+            legacy.emplace_back(out.offset, out.length, ck.sequence);
+        }
+        m.chunks = std::move(legacy);
+        if (m.poster_length > 0) {
+            const auto t = chunk_tag(Poster, c, m.poster_id);
+            ChunkSpan out;
+            if (to_legacy(m.poster_offset, m.poster_length, t, Poster, 0, out)) {
+                m.poster_offset = out.offset;
+                m.poster_length = out.length;
+            }
+        }
+        m.poster_id.fill(0); m.context_bound = false; c.node_id.fill(0);
+    };
+
+    std::function<void(IndexNode&)> walk = [&](IndexNode& g) {
+        for (auto& c : g.children) {
+            if (c.is_gallery()) {
+                walk(c);
+            } else if (c.is_image()) {
+                downgrade_image(c);
+            } else {
+                downgrade_video(c);
+            }
+        }
+    };
+    walk(v.root_);
+
+    // Legacy header: clear the flag, re-wrap the master key WITHOUT AD, then
+    // re-seal the index WITHOUT AD and persist the legacy header via the swap.
+    v.header_.flags &= ~FLAG_CONTEXT_BOUND_CHUNKS;
+    if (v.kek_valid_) {
+        std::array<uint8_t, crypto::NONCE_SIZE> nonce{};
+        std::array<uint8_t, crypto::AD_SIZE> scratch{};
+        std::vector<uint8_t> wrapped;
+        if (crypto::fill_random(nonce) &&
+            crypto::seal(v.kek_.as_span(), nonce, v.master_key_.as_span(), wrapped,
+                         header_record_ad(MkWrap, v.header_, scratch))) {
+            std::memcpy(v.header_.wrapped_master_key.data(), wrapped.data(), crypto::KEY_SIZE);
+            std::memcpy(v.header_.mk_tag.data(), wrapped.data() + crypto::KEY_SIZE,
+                        crypto::TAG_SIZE);
+            v.header_.mk_nonce = nonce;
+        }
+    }
+    (void)v.commit_index();
 }
 
 VaultResult Vault::remove_image(std::string_view gallery_path, std::string_view filename)

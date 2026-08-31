@@ -410,4 +410,13 @@ The index tree is **main-thread-only**; no tree locks exist. The vault file open
   takes a `vault::ChunkRef` (see `vault/chunk_ref.h`) so any-thread span readers
   (gallery covers, duplicate scan, migration workers) carry the full decrypt context
   without danging an `IndexNode`. In-place `compact()` still moves ciphertext verbatim —
-  offsets stay out of the AD by construction.
+  offsets stay out of the AD by construction. **v1→v2 migration (Phase 99 PR 2):** a
+  legacy vault (flag clear) is detected at unlock (`migration_pending(..., context_stale)`
+  + `scan_migration(v, thumbs_stale, context_stale)`); the migration coordinator
+  re-encodes every live media record via `apply_context_rewrite` (per-record
+  `context_bound` bit tracks resume), then `finalize_context_migration` re-seals the
+  master-key wrap under the SESSION KEK (`Vault::kek_`, captured at unlock/create/
+  change_password, wiped at lock — no password re-derivation), mints `vault_id` if
+  zero, and sets the flag; the one `commit_index()` writes an AD-sealed blob and the
+  slot-swap persists flag+wrap+slot atomically (crash between swap phases → the
+  existing slot-fallback; cancel commits rewrites but skips finalize → re-offered).

@@ -120,6 +120,24 @@ void collect(const vault::Vault& v, const std::string& path, std::vector<Item>& 
     }
 }
 
+// Phase 99: every media node whose records still lack the context-bound AEAD
+// (a legacy / not-yet-finalized vault). Coordinator rewrites these IN PLACE
+// (no decode, no worker pool) — re-encrypt each record under the node's id.
+void collect_context_paths(const vault::Vault& v, const std::string& path,
+                           std::vector<std::string>& out)
+{
+    for (const vault::IndexNode* n : v.list(path)) {
+        const std::string child =
+            path.empty() ? std::string(n->name.view()) : path + "/" + std::string(n->name.view());
+        if (n->is_gallery()) {
+            collect_context_paths(v, child, out);
+            continue;
+        }
+        const bool bound = n->is_video() ? n->vmeta.context_bound : n->meta.context_bound;
+        if (!bound) out.push_back(child);
+    }
+}
+
 // Concatenate an item's chunk refs into mlock'd memory using ONLY
 // vault::read_thumb_span — the any-thread-safe decrypt path. Never touches
 // read_fp_ or the tree.
@@ -373,8 +391,10 @@ void apply_one(vault::Vault& v, const Item& it, const Result& r, MigrationOutcom
 // Workers only ever read through the any-thread-safe decrypt path; the caller is
 // the coordinator, and the only thread that mutates the tree or fp_.
 // Precondition: `items` is non-empty (so at least one worker is spawned).
+// `done_base` lets the caller run the decode pool AFTER a coordinator-only arm
+// (the Phase 99 context rewrite) without clobbering its progress.
 void run_pool(vault::Vault& v, const std::vector<Item>& items,
-              vault::OpProgress& progress, MigrationOutcome& out)
+              vault::OpProgress& progress, MigrationOutcome& out, int done_base = 0)
 {
     const unsigned hw = std::thread::hardware_concurrency();
     const size_t   workers =
@@ -404,7 +424,7 @@ void run_pool(vault::Vault& v, const std::vector<Item>& items,
     while (collected < expect && results.pop(r)) {
         apply_one(v, items[r.index], r, out);
         ++collected;
-        progress.done.store(collected);
+        progress.done.store(done_base + collected);
         if (progress.cancel.load()) { out.cancelled = true; break; }
     }
     // Close the queue if the workers have not already (e.g. we broke out early).
@@ -488,15 +508,38 @@ void MigrationJob::run(vault::Vault& v)
     const vault::VaultSettings settings = vault::vault_settings(v);
     const bool thumbs_stale =
         settings.migrated_thumb_side < static_cast<uint16_t>(image::THUMB_MAX_SIDE);
+    // Phase 99: a legacy / not-yet-finalized vault owes the context rewrite.
+    const bool context_stale = !vault::uses_context_chunks(v);
 
     std::vector<Item> items;
     collect(v, "", items, thumbs_stale);
     out.total = static_cast<int>(items.size());
+
+    std::vector<std::string> ctx_paths;
+    if (context_stale) {
+        collect_context_paths(v, "", ctx_paths);
+        out.total += static_cast<int>(ctx_paths.size());
+    }
     progress_.total.store(out.total);
 
     phase_.store(MigrationPhase::Repairing);
 
-    if (!items.empty()) run_pool(v, items, progress_, out);
+    // Phase 99: rewrite every v1 record IN PLACE (coordinator-only — pure
+    // re-encrypt, no decode). Runs BEFORE the decode pool so the pool's
+    // thumb/poster appends (apply_*) go straight to the context-bound AEAD.
+    if (context_stale && !ctx_paths.empty()) {
+        for (const std::string& p : ctx_paths) {
+            if (progress_.cancel.load()) { out.cancelled = true; break; }
+            if (vault::apply_context_rewrite(v, p) == vault::VaultResult::Ok)
+                ++out.context_fixed;
+            else
+                ++out.failed;
+            progress_.done.store(out.context_fixed + out.failed);
+        }
+    }
+
+    if (!items.empty() && !out.cancelled)
+        run_pool(v, items, progress_, out, out.context_fixed + out.failed);
 
     phase_.store(MigrationPhase::Committing);
     // The watermark is stamped ONLY on a full pass. A cancel still commits the
@@ -505,6 +548,19 @@ void MigrationJob::run(vault::Vault& v)
     // Re-read cancel before stamping to catch a cancel arriving after loop exit.
     if (progress_.cancel.load()) {
         out.cancelled = true;
+    }
+
+    // Phase 99: on a full pass, re-seal the master-key wrap + set the flag so
+    // the COMMIT below seals the index blob with the flag's AD and the slot
+    // swap persists the flag + wrap atomically (crash → slot-fallback recovers).
+    if (!out.cancelled && context_stale &&
+        vault::finalize_context_migration(v) != vault::VaultResult::Ok) {
+        out.ok    = false;
+        out.error = "Context migration could not be finalized; the vault is unchanged.";
+        phase_.store(MigrationPhase::Done);
+        outcome_ = std::move(out);
+        done_.store(true);
+        return;
     }
 
     vault::VaultSettings stamped_settings = vault::vault_settings(v);

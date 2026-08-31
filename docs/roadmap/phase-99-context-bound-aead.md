@@ -1,15 +1,15 @@
 # Context-bound AEAD and vault-format migration (Phase 99)
 
-**Status:** 🔜 in progress — **PR 1 shipped** (primitives + context writer,
-legacy vaults still readable); **PR 2 pending** (v1→v2 chunk migration +
-watermark + compaction of dead v1 records).
+**Status:** ✅ shipped
 **Date:** 2026-08-31
 
 This is **Phase F** of the 2026-08-29 security audit remediation
 (`AUDIT.md` / `AUDIT_IMPLEMENTATION.md`, phases A–G mapping to app phases
 94–100). It fixes **OSV-AUD-004** (Medium — AEAD ciphertext is not bound to
 logical chunk identity, CWE-345). This phase is a **format change**: the only
-audit phase that requires one.
+audit phase that requires one. Delivered as **two PRs**: PR 1 (primitives +
+v13 context writer, legacy vaults still readable) and PR 2 (the v1→v2
+migration).
 
 ## The finding
 
@@ -25,8 +25,8 @@ flips but not substitution.
 
 * **Format signal:** a new header flag `FLAG_CONTEXT_BOUND_CHUNKS` (bit 2) on
   the existing v1 header (not a `FORMAT_VERSION` bump). New vaults set it at
-  `create`; legacy vaults get it set only once the v1→v2 chunk migration has
-  rewritten every live record (PR 2).
+  `create`; legacy vaults get it set by the v1→v2 chunk migration (PR 2), in
+  the same atomic commit that re-seals the master-key wrap.
 * **Stable identity:** every node (media **and** gallery) carries a persistent
   random 128-bit `node_id`; every chunk record carries its own random 128-bit
   `record` id; video chunks carry a logical `sequence`.
@@ -85,19 +85,46 @@ flips but not substitution.
 * `git diff --check` clean. Windows CI + SonarCloud results recorded on the
   Phase 99 PR 1.
 
-## PR 2 (pending) — v1→v2 migration
+## PR 2 (shipped) — v1→v2 migration
 
-* Reuse the Phase 65 `MigrationJob` pattern: decrypt one record into
-  `SecureBytes` → re-encrypt a v2 record with a fresh `record` id + context →
-  append → update an index copy → bounded crash-safe batch commits. A
-  per-record `context_bound` bit (already in the index) keeps the reader
-  correct while the active index references a mix of v1/v2 records.
-* Assign a `vault_id` (if zero) and re-wrap the master key with the MkWrap AD
-  in the same commit that sets `FLAG_CONTEXT_BOUND_CHUNKS`.
-* Stamp a `migrated_context_version` watermark only when all live records are
-  v2, then `compact()` the dead v1 ciphertext.
-* Cancel/crash/reopen must land in a valid resumable partial state; fuzz both
-  the v1 and v2 readers.
+* **Detection:** a legacy vault owes the context migration whenever its header
+  `FLAG_CONTEXT_BOUND_CHUNKS` is clear (`vault::uses_context_chunks`). The
+  per-record `context_bound` bit (v13 index) tracks per-node progress, so a
+  cancelled run resumes where it stopped.
+* **Rewrite:** `vault::apply_context_rewrite` re-encodes ONE media node's
+  records in place on the coordinator (no worker pool, no decode): decrypt
+  each v1 record → re-append as a v2 record with a fresh per-record id + the
+  node's id (minted if the legacy node has none) + preserved video sequence.
+  Idempotent per node; a crash mid-node re-runs from the last commit (the
+  half-rewritten node's legacy spans are still valid in the committed index).
+  The `MigrationJob` runs the context rewrites BEFORE the decode pool so the
+  pool's thumb/poster appends go straight to the context-bound AEAD.
+* **Finalize:** `vault::finalize_context_migration` re-seals the master-key
+  wrap under the **session KEK** (captured at unlock/create/change_password
+  into `Vault::kek_`, wiped at lock — no password re-derivation needed), mints
+  a `vault_id` if the legacy header has none, and sets the header flag. The
+  migration's one `commit_index()` then writes an AD-sealed index blob, and
+  the slot-swap persists the flag + wrap + vault_id + slot **atomically**:
+  a crash before phase B leaves the legacy header (recovered → re-offered), a
+  crash between B and C recovers via the existing slot-fallback. Cancel
+  commits the rewrites done so far but skips finalize (flag stays clear, the
+  vault re-opens on per-record bits and is re-offered).
+* **Watermark:** `stamp_migrated` runs as before; the flag is the context
+  watermark, and the unlock-time offer detects and finalizes an already
+  rewritten-but-unfinalized vault instead of re-offering forever.
+* **Tests** (`tests/vault/test_migration_context.cpp`, + a `test_only_downgrade
+  _to_legacy` seam that converts a fresh v2 vault into a genuine legacy one):
+  scan counts legacy records only; rewrite+finalize+reopen round-trips content
+  and the re-wrapped wrap/index; a post-migration equal-record swap → AuthFailed
+  (context now active); a cancelled (mixed) vault reopens with both legacy and
+  context-bound records readable and the scan reporting the remainder; video
+  chunks keep 0-based sequences and re-read byte-identically.
+
+### Verification
+
+* `scripts/test.sh`: **2262 tests / 0 failed**.
+* `--asan`, `--tsan`, `--release`: 2262/0 each; no-FFmpeg leg 2076/0.
+* `git diff --check` clean. Windows CI + SonarCloud: PR #218.
 
 ## Deliberately unchanged
 

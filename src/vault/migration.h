@@ -24,15 +24,29 @@ struct MigrationScan {
     size_t   videos = 0;   // is_video() && vmeta.codec == VideoCodec::Unknown
     size_t   images = 0;   // is_image() && format_can_animate() && !meta.animated
     size_t   thumbs = 0;   // Phase 75: thumbs/posters to regenerate at the new budget
-    uint64_t bytes  = 0;   // total orig_size over both arms
+    size_t   context = 0;  // Phase 99: media records still encrypted WITHOUT the
+                           // context-bound AEAD (v1 records of a legacy vault);
+                           // nonzero only while the vault's header flag is clear
+                           // (context_stale). Re-encoded in place, no decode.
+    uint64_t bytes  = 0;   // total orig_size over all arms
 
-    [[nodiscard]] bool   empty() const noexcept { return videos == 0 && images == 0 && thumbs == 0; }
-    [[nodiscard]] size_t total() const noexcept { return videos + images + thumbs; }
+    [[nodiscard]] bool empty() const noexcept
+    {
+        return videos == 0 && images == 0 && thumbs == 0 && context == 0;
+    }
+    [[nodiscard]] size_t total() const noexcept
+    {
+        return videos + images + thumbs + context;
+    }
 };
 
 // True when this build knows a backfill this vault has not recorded running.
+// `context_stale` (the vault's FLAG_CONTEXT_BOUND_CHUNKS is clear — a legacy
+// or not-yet-finalized vault) makes a context migration always pending for a
+// legacy vault, independent of any watermark.
 [[nodiscard]] bool migration_pending(const VaultSettings& s, uint16_t probe_caps_gen,
-                                     uint16_t thumb_side) noexcept;
+                                     uint16_t thumb_side,
+                                     bool context_stale = false) noexcept;
 
 // Stamp `s` as fully migrated by this build. Returned by value; the caller
 // persists it via vault::set_vault_settings.
@@ -41,6 +55,7 @@ struct MigrationScan {
 
 // Walk the whole tree and count outstanding work. Main-thread only (touches the
 // index tree via Vault::list). No I/O.
-[[nodiscard]] MigrationScan scan_migration(const Vault& v, bool thumbs_stale);
+[[nodiscard]] MigrationScan scan_migration(const Vault& v, bool thumbs_stale,
+                                           bool context_stale = false);
 
 } // namespace vault
