@@ -7,6 +7,33 @@
 namespace vault {
 namespace {
 
+// Phase 75: known-codec videos whose poster must regenerate at the new budget.
+// Regenerating the poster requires reading the original (orig_size).
+void count_video_pending(const IndexNode& n, MigrationScan& out, bool thumbs_stale)
+{
+    if (n.vmeta.codec == VideoCodec::Unknown) {
+        ++out.videos;
+        out.bytes += n.vmeta.orig_size;
+    } else if (thumbs_stale) {
+        ++out.thumbs;
+        out.bytes += n.vmeta.orig_size;
+    }
+}
+
+// The animated arm deliberately over-counts: a genuinely static GIF is
+// indistinguishable from an un-backfilled one without decrypting it, so it
+// IS work. The watermark, not this walk, prevents recurrence.
+void count_image_pending(const IndexNode& n, MigrationScan& out, bool thumbs_stale)
+{
+    if (format_can_animate(n.meta.format) && !n.meta.animated) {
+        ++out.images;
+        out.bytes += n.meta.orig_size;
+    } else if (thumbs_stale && n.meta.thumb_length > 0) {
+        ++out.thumbs;
+        out.bytes += n.meta.orig_size;
+    }
+}
+
 void walk(const Vault& v, const std::string& path, MigrationScan& out, bool thumbs_stale,
           bool context_stale)
 {
@@ -22,8 +49,8 @@ void walk(const Vault& v, const std::string& path, MigrationScan& out, bool thum
         // record still lacking the context-bound AEAD. The flag being clear IS
         // the pending signal; the per-record context_bound bit tracks progress.
         if (context_stale) {
-            const bool bound = n->is_video() ? n->vmeta.context_bound : n->meta.context_bound;
-            if (!bound) {
+            if (const bool bound = n->is_video() ? n->vmeta.context_bound : n->meta.context_bound;
+                !bound) {
                 ++out.context;
                 out.bytes += n->is_video() ? n->vmeta.orig_size : n->meta.orig_size;
             }
@@ -31,28 +58,10 @@ void walk(const Vault& v, const std::string& path, MigrationScan& out, bool thum
         }
 
         if (n->is_video()) {
-            if (n->vmeta.codec == VideoCodec::Unknown) {
-                ++out.videos;
-                out.bytes += n->vmeta.orig_size;
-            } else if (thumbs_stale && n->vmeta.codec != VideoCodec::Unknown) {
-                // Phase 75: known-codec videos that need poster regen count toward thumbs.
-                // Regenerating the poster requires reading the original (orig_size).
-                ++out.thumbs;
-                out.bytes += n->vmeta.orig_size;
-            }
+            count_video_pending(*n, out, thumbs_stale);
             continue;
         }
-        // The animated arm deliberately over-counts: a genuinely static GIF is
-        // indistinguishable from an un-backfilled one without decrypting it, so
-        // it IS work. The watermark, not this walk, prevents recurrence.
-        if (n->is_image() && format_can_animate(n->meta.format) && !n->meta.animated) {
-            ++out.images;
-            out.bytes += n->meta.orig_size;
-        } else if (thumbs_stale && n->is_image() && n->meta.thumb_length > 0) {
-            // Phase 75: existing images with thumbnails need regen at the new budget.
-            ++out.thumbs;
-            out.bytes += n->meta.orig_size;
-        }
+        count_image_pending(*n, out, thumbs_stale);
     }
 }
 

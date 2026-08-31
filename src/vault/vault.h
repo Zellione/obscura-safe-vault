@@ -199,10 +199,8 @@ public:
     // Phase 99: true when this vault's index blob + master-key wrap are sealed
     // with the context-bound AEAD (header FLAG_CONTEXT_BOUND_CHUNKS). A clear
     // bit on an unlocked legacy vault means the v1→v2 chunk migration is owed.
-    [[nodiscard]] bool uses_context_chunks() const noexcept
-    {
-        return context_bound_chunks(header_);
-    }
+    // Free friend to stay under the cpp:S1448 method cap.
+    friend bool uses_context_chunks(const Vault& v) noexcept;
 
     // Create a gallery at `gallery_path` (slash-separated), creating intermediate
     // galleries as needed. Fails with InvalidArg if any path segment is an image.
@@ -666,6 +664,11 @@ using vault::ChunkRef;
 // v2 vault into a genuine legacy v1 vault so migration tests start from a
 // pre-Phase-99 state. Friend of Vault; callable from tests only.
 void test_only_downgrade_to_legacy(Vault& v);
+
+// Phase 99: true when the vault is sealed with the context-bound AEAD
+// (header FLAG_CONTEXT_BOUND_CHUNKS set). A clear bit on an unlocked legacy
+// vault means the v1→v2 chunk migration is owed. Free friend (S1448).
+[[nodiscard]] bool uses_context_chunks(const Vault& v) noexcept;
 
 // Rename an image, video, or gallery's own `name` field in place — a pure
 // leaf-field edit. Descendants, tags, favorite flag, sort key, and cover all

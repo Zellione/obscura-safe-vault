@@ -1283,8 +1283,9 @@ VaultResult apply_context_rewrite(Vault& v, std::string_view node_path)
     IndexNode* n = v.resolve_node(node_path);
     if (!n) return NotFound;
     if (!n->is_media()) return Ok;
-    const bool already = n->is_video() ? n->vmeta.context_bound : n->meta.context_bound;
-    if (already) return Ok;
+    if (const bool already = n->is_video() ? n->vmeta.context_bound : n->meta.context_bound;
+        already)
+        return Ok;
 
     // A legacy node has an all-zero node_id; mint one before re-encoding so the
     // fresh records bind to it.
@@ -1298,25 +1299,23 @@ VaultResult apply_context_rewrite(Vault& v, std::string_view node_path)
     // under the node's (new) identity, persisting the fresh span + record id.
     auto reencode = [&](uint64_t off, uint64_t len, crypto::ChunkDomain domain, uint32_t seq,
                         std::array<uint8_t, crypto::NODE_ID_SIZE>& id_out,
-                        ChunkSpan& span_out) -> VaultResult {
+                        ChunkSpan& span_out) {
         crypto::SecureBytes plain;
         crypto::ChunkTag old;
         old.domain        = domain;
         old.sequence      = seq;
         old.context_bound = false;   // the legacy record has no AD
         if (!reader.read_chunk({off, len}, old, plain)) return AuthFailed;
-        {
-            std::lock_guard lk(*v.write_mutex_);
-            ChunkStore writer(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
-            crypto::ChunkTag nt;
-            nt.domain        = domain;
-            nt.owner         = n->node_id;
-            nt.sequence      = seq;
-            nt.context_bound = true;
-            if (!writer.append_chunk(plain.as_span(), nt, span_out)) return IoError;
-            std::fflush(v.fp_);
-            id_out = nt.record;
-        }
+        std::lock_guard lk(*v.write_mutex_);
+        crypto::ChunkTag nt;
+        nt.domain        = domain;
+        nt.owner         = n->node_id;
+        nt.sequence      = seq;
+        nt.context_bound = true;
+        ChunkStore writer(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+        if (!writer.append_chunk(plain.as_span(), nt, span_out)) return IoError;
+        std::fflush(v.fp_);
+        id_out = nt.record;
         return Ok;
     };
 
@@ -1412,6 +1411,11 @@ VaultResult finalize_context_migration(Vault& v)
     return Ok;
 }
 
+bool uses_context_chunks(const Vault& v) noexcept
+{
+    return context_bound_chunks(v.header_);
+}
+
 void test_only_downgrade_to_legacy(Vault& v)
 {
     if (!v.unlocked_) return;
@@ -1421,75 +1425,73 @@ void test_only_downgrade_to_legacy(Vault& v)
     // Re-append ONE currently-v2 record as an empty-AD legacy record.
     // `tag_in` is the node's CURRENT v2 tag (used to decrypt it).
     auto to_legacy = [&](uint64_t off, uint64_t len, const crypto::ChunkTag& tag_in,
-                         crypto::ChunkDomain domain, uint32_t seq, ChunkSpan& out) -> bool {
+                         crypto::ChunkDomain domain, uint32_t seq, ChunkSpan& out) {
         crypto::SecureBytes plain;
         if (!reader.read_chunk({off, len}, tag_in, plain)) return false;
         std::lock_guard lk(*v.write_mutex_);
+        crypto::ChunkTag lt{.domain = domain, .sequence = seq};   // context_bound stays false
         ChunkStore writer(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
-        crypto::ChunkTag lt;
-        lt.domain        = domain;
-        lt.sequence      = seq;
-        lt.context_bound = false;   // legacy: no associated data
-        if (!writer.append_chunk(plain.as_span(), lt, out)) return false;
+        const bool ok = writer.append_chunk(plain.as_span(), lt, out);
         std::fflush(v.fp_);
-        return true;
+        return ok;
+    };
+
+    // Re-encode an image node's records to legacy and wipe its identity.
+    auto downgrade_image = [&](IndexNode& c) {
+        ImageMeta& m = c.meta;
+        ChunkSpan out;
+        const crypto::ChunkTag t = chunk_tag(crypto::ChunkDomain::Data, c, m.data_id);
+        if (to_legacy(m.data_offset, m.data_length, t, crypto::ChunkDomain::Data, 0, out)) {
+            m.data_offset = out.offset;
+            m.data_length = out.length;
+        }
+        if (m.thumb_length > 0) {
+            const auto tt = chunk_tag(crypto::ChunkDomain::Thumb, c, m.thumb_id);
+            if (to_legacy(m.thumb_offset, m.thumb_length, tt, crypto::ChunkDomain::Thumb, 0, out)) {
+                m.thumb_offset = out.offset;
+                m.thumb_length = out.length;
+            }
+        }
+        m.data_id.fill(0);
+        m.thumb_id.fill(0);
+        m.context_bound = false;
+        c.node_id.fill(0);
+    };
+
+    // Re-encode a video node's records to legacy and wipe its identity.
+    auto downgrade_video = [&](IndexNode& c) {
+        VideoMeta& m = c.vmeta;
+        std::vector<VideoChunk> legacy;
+        for (const VideoChunk& ck : m.chunks) {
+            const auto t = chunk_tag(crypto::ChunkDomain::Video, c, ck.id, ck.sequence);
+            ChunkSpan out;
+            if (!to_legacy(ck.offset, ck.length, t, crypto::ChunkDomain::Video, ck.sequence, out))
+                continue;
+            legacy.push_back(VideoChunk{.offset = out.offset, .length = out.length,
+                                        .sequence = ck.sequence});
+        }
+        m.chunks = std::move(legacy);
+        if (m.poster_length > 0) {
+            const auto t = chunk_tag(crypto::ChunkDomain::Poster, c, m.poster_id);
+            ChunkSpan out;
+            if (to_legacy(m.poster_offset, m.poster_length, t, crypto::ChunkDomain::Poster, 0, out)) {
+                m.poster_offset = out.offset;
+                m.poster_length = out.length;
+            }
+        }
+        m.poster_id.fill(0);
+        m.context_bound = false;
+        c.node_id.fill(0);
     };
 
     std::function<void(IndexNode&)> walk = [&](IndexNode& g) {
         for (auto& c : g.children) {
             if (c.is_gallery()) {
                 walk(c);
-                continue;
-            }
-            if (c.is_image()) {
-                ImageMeta& m = c.meta;
-                {
-                    const crypto::ChunkTag t = chunk_tag(crypto::ChunkDomain::Data, c, m.data_id);
-                    ChunkSpan out;
-                    if (to_legacy(m.data_offset, m.data_length, t, crypto::ChunkDomain::Data, 0, out)) {
-                        m.data_offset = out.offset;
-                        m.data_length = out.length;
-                    }
-                }
-                if (m.thumb_length > 0) {
-                    const crypto::ChunkTag t = chunk_tag(crypto::ChunkDomain::Thumb, c, m.thumb_id);
-                    ChunkSpan out;
-                    if (to_legacy(m.thumb_offset, m.thumb_length, t, crypto::ChunkDomain::Thumb, 0,
-                                  out)) {
-                        m.thumb_offset = out.offset;
-                        m.thumb_length = out.length;
-                    }
-                }
-                m.data_id.fill(0);
-                m.thumb_id.fill(0);
-                m.context_bound = false;
-                c.node_id.fill(0);
+            } else if (c.is_image()) {
+                downgrade_image(c);
             } else {
-                VideoMeta& m = c.vmeta;
-                std::vector<VideoChunk> legacy;
-                for (size_t i = 0; i < m.chunks.size(); ++i) {
-                    const VideoChunk& ck = m.chunks[i];
-                    const crypto::ChunkTag t = chunk_tag(crypto::ChunkDomain::Video, c, ck.id, ck.sequence);
-                    ChunkSpan out;
-                    if (!to_legacy(ck.offset, ck.length, t, crypto::ChunkDomain::Video, ck.sequence,
-                                   out))
-                        continue;
-                    VideoChunk fc{.offset = out.offset, .length = out.length, .sequence = ck.sequence};
-                    legacy.push_back(std::move(fc));
-                }
-                m.chunks = std::move(legacy);
-                if (m.poster_length > 0) {
-                    const crypto::ChunkTag t = chunk_tag(crypto::ChunkDomain::Poster, c, m.poster_id);
-                    ChunkSpan out;
-                    if (to_legacy(m.poster_offset, m.poster_length, t, crypto::ChunkDomain::Poster, 0,
-                                  out)) {
-                        m.poster_offset = out.offset;
-                        m.poster_length = out.length;
-                    }
-                }
-                m.poster_id.fill(0);
-                m.context_bound = false;
-                c.node_id.fill(0);
+                downgrade_video(c);
             }
         }
     };

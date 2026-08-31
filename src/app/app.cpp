@@ -190,8 +190,8 @@ void App::promote_pending()
     migration_ui_.progress_open = false;
     migration_ui_.result_open = false;
     migration_ui_.job.reset();  // reset migration job from previous vault
-    const bool context_stale = !vault_state_.active->uses_context_chunks();   // Phase 99
-    if (vault::migration_pending(vault::vault_settings(*vault_state_.active), media::PROBE_CAPS_GEN,
+    if (const bool context_stale = !vault::uses_context_chunks(*vault_state_.active);   // Phase 99
+        vault::migration_pending(vault::vault_settings(*vault_state_.active), media::PROBE_CAPS_GEN,
                                  static_cast<uint16_t>(image::THUMB_MAX_SIDE), context_stale)) {
         // Phase 75: compute thumbs_stale to include thumbnail regen in the scan
         const vault::VaultSettings settings = vault::vault_settings(*vault_state_.active);
@@ -703,7 +703,7 @@ struct App::OverlayDispatch {
             const vault::VaultSettings settings = vault::vault_settings(*app.vault_state_.active);
             const bool thumbs_stale =
                 settings.migrated_thumb_side < static_cast<uint16_t>(image::THUMB_MAX_SIDE);
-            const bool context_stale = !app.vault_state_.active->uses_context_chunks();   // Phase 99
+            const bool context_stale = !vault::uses_context_chunks(*app.vault_state_.active);   // Phase 99
             const vault::MigrationScan scan =
                 vault::scan_migration(*app.vault_state_.active, thumbs_stale, context_stale);
             if (scan.empty() && !context_stale) {

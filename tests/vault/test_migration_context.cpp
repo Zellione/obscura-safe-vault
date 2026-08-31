@@ -77,7 +77,7 @@ bool build_legacy(vault::Vault& out, const std::string& path, const std::vector<
     if (out.create_gallery("g") != vault::VaultResult::Ok) return false;
     if (out.add_image("g", img, "pic.bin") != vault::VaultResult::Ok) return false;
     vault::test_only_downgrade_to_legacy(out);
-    return !out.uses_context_chunks();
+    return !vault::uses_context_chunks(out);
 }
 }  // namespace
 
@@ -124,7 +124,7 @@ TEST(context_rewrite_and_finalize_migrate_the_vault_and_reopen)
 
     // Finalize + one commit (what commit_migration does).
     REQUIRE(vault::finalize_context_migration(v) == vault::VaultResult::Ok);
-    CHECK(v.uses_context_chunks());
+    CHECK(vault::uses_context_chunks(v));
     REQUIRE(vault::commit_migration(v, vault::stamp_migrated(vault::vault_settings(v), 1, 512))
             == vault::VaultResult::Ok);
 
@@ -224,7 +224,7 @@ TEST(context_cancel_leaves_mixed_vault_reopenable)
         REQUIRE(vault::commit_migration(v, vault::stamp_migrated(vault::vault_settings(v), 1, 512))
                 == vault::VaultResult::Ok);
         // The flag is still clear => still owed at the next unlock.
-        CHECK_FALSE(v.uses_context_chunks());
+        CHECK_FALSE(vault::uses_context_chunks(v));
     }
     vault::Vault v;
     REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
@@ -254,7 +254,7 @@ TEST(context_migration_reencodes_video_chunks)
         REQUIRE(v.create_gallery("g") == vault::VaultResult::Ok);
         REQUIRE(v.add_video("g", video, "clip.mp4", 2048) == vault::VaultResult::Ok);
         vault::test_only_downgrade_to_legacy(v);
-        CHECK_FALSE(v.uses_context_chunks());
+        CHECK_FALSE(vault::uses_context_chunks(v));
         REQUIRE(vault::apply_context_rewrite(v, "g/clip.mp4") == vault::VaultResult::Ok);
         REQUIRE(vault::finalize_context_migration(v) == vault::VaultResult::Ok);
         REQUIRE(vault::commit_migration(v, vault::stamp_migrated(vault::vault_settings(v), 1, 512))
@@ -263,7 +263,7 @@ TEST(context_migration_reencodes_video_chunks)
     vault::Vault v;
     REQUIRE(vault::Vault::open(tv.str(), v) == vault::VaultResult::Ok);
     REQUIRE(v.unlock(bytes("pw"), {}) == vault::VaultResult::Ok);
-    CHECK(v.uses_context_chunks());
+    CHECK(vault::uses_context_chunks(v));
     auto nodes = v.list("g");
     REQUIRE(nodes.size() == 1);
     REQUIRE(nodes[0]->vmeta.context_bound);

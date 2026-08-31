@@ -509,7 +509,7 @@ void MigrationJob::run(vault::Vault& v)
     const bool thumbs_stale =
         settings.migrated_thumb_side < static_cast<uint16_t>(image::THUMB_MAX_SIDE);
     // Phase 99: a legacy / not-yet-finalized vault owes the context rewrite.
-    const bool context_stale = !v.uses_context_chunks();
+    const bool context_stale = !vault::uses_context_chunks(v);
 
     std::vector<Item> items;
     collect(v, "", items, thumbs_stale);
