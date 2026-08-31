@@ -40,6 +40,29 @@ namespace vault {
 
 namespace {
 
+// Phase 99 (OSV-AUD-004): the AD that binds a non-chunk sealed record (the
+// master-key wrap in the header, the slot index blob) to this vault. Owner =
+// the immutable vault_id (NOT the salt, which change_password regenerates and
+// must not invalidate the sealed index blob); record id zero; domain chosen by
+// the caller. GATED on the header flag: legacy vaults stay contextless until
+// the v1→v2 migration flips the flag, in the same commit that re-wraps the
+// master key and rewrites every index blob.
+std::span<const uint8_t> header_record_ad(crypto::ChunkDomain domain, const Header& h,
+                                          std::array<uint8_t, crypto::AD_SIZE>& scratch) noexcept
+{
+    if (!context_bound_chunks(h)) return {};
+    crypto::ChunkTag t;
+    t.domain        = domain;
+    t.owner         = h.vault_id;
+    t.context_bound = true;
+    scratch         = crypto::build_chunk_ad(t);
+    return scratch;
+}
+
+}  // namespace
+
+namespace {
+
 // Wrappers around vault_ops functions for backward compatibility in this TU,
 // avoiding the need to update every call site.
 using vault_ops::child_named;
@@ -575,12 +598,12 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     h.kdf = params;
     h.kdf_algo = 0;  // Argon2id
     h.keyfile_required = keyfile.empty() ? 0 : 1;
-    h.flags |= FLAG_FRAMED_CHUNKS | FLAG_DOMAIN_SEPARATED_KDF;
+    h.flags |= FLAG_FRAMED_CHUNKS | FLAG_DOMAIN_SEPARATED_KDF | FLAG_CONTEXT_BOUND_CHUNKS;
 
     crypto::SecureBuffer<crypto::KEY_SIZE> master;
     crypto::SecureBuffer<crypto::KEY_SIZE> kek;
-    if (!crypto::fill_random(h.salt) || !crypto::fill_random(master.span()) ||
-        !crypto::fill_random(h.mk_nonce)) {
+    if (!crypto::fill_random(h.salt) || !crypto::fill_random(h.vault_id) ||
+        !crypto::fill_random(master.span()) || !crypto::fill_random(h.mk_nonce)) {
         std::fclose(fp);
         discard_failed_create();
         return VaultResult::CryptoError;
@@ -591,9 +614,12 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
         return VaultResult::CryptoError;
     }
 
-    // Wrap the master key under the KEK (detached: cipher[32]||tag[16]).
+    // Wrap the master key under the KEK (detached: cipher[32]||tag[16]). New
+    // vaults (FLAG_CONTEXT_BOUND_CHUNKS set above) bind the wrap to the salt.
     std::vector<uint8_t> wrapped;
-    if (!crypto::seal(kek.as_span(), h.mk_nonce, master.as_span(), wrapped)) {
+    if (std::array<uint8_t, crypto::AD_SIZE> wrap_ad{};
+        !crypto::seal(kek.as_span(), h.mk_nonce, master.as_span(), wrapped,
+                      header_record_ad(crypto::ChunkDomain::MkWrap, h, wrap_ad))) {
         std::fclose(fp);
         discard_failed_create();
         return VaultResult::CryptoError;
@@ -615,6 +641,12 @@ VaultResult Vault::create(const std::string& path, std::span<const uint8_t> pass
     out.header_ = h;
     out.master_key_ = std::move(master);
     out.root_ = IndexNode::gallery("");
+    if (const bool ctx = context_bound_chunks(h);
+        ctx && !crypto::fill_random(out.root_.node_id)) {
+        out.reset();
+        discard_failed_create();
+        return VaultResult::CryptoError;
+    }
     out.unlocked_ = true;
     out.settings_ = VaultSettings::seeded();
     // Stamp migration watermarks: fresh vaults already have 512px thumbs and current index format
@@ -733,7 +765,9 @@ namespace {
     if (on_disk.size() < crypto::TAG_SIZE) return false;
     crypto::SecureBytes blob;
     if (!blob.resize(on_disk.size() - crypto::TAG_SIZE)) return false;
-    if (!crypto::open_to(master_key, s.nonce, on_disk, blob.span())) {
+    if (std::array<uint8_t, crypto::AD_SIZE> idx_ad{};
+        !crypto::open_to(master_key, s.nonce, on_disk, blob.span(),
+                         header_record_ad(crypto::ChunkDomain::Index, header, idx_ad))) {
         return false;
     }
     if (framed_chunks(header)) {
@@ -778,7 +812,9 @@ VaultResult Vault::unlock(std::span<const uint8_t> password, std::span<const uin
     std::array<uint8_t, crypto::KEY_SIZE + crypto::TAG_SIZE> sealed{};
     std::memcpy(sealed.data(), header_.wrapped_master_key.data(), crypto::KEY_SIZE);
     std::memcpy(sealed.data() + crypto::KEY_SIZE, header_.mk_tag.data(), crypto::TAG_SIZE);
-    if (!crypto::open_to(kek.as_span(), header_.mk_nonce, sealed, master_key_.span())) {
+    if (std::array<uint8_t, crypto::AD_SIZE> wrap_ad{};
+        !crypto::open_to(kek.as_span(), header_.mk_nonce, sealed, master_key_.span(),
+                         header_record_ad(crypto::ChunkDomain::MkWrap, header_, wrap_ad))) {
         master_key_.wipe();
         return AuthFailed;  // wrong password / keyfile / tampered wrap
     }
@@ -826,7 +862,9 @@ VaultResult Vault::change_password(std::span<const uint8_t> old_password,
     std::memcpy(sealed.data(), header_.wrapped_master_key.data(), crypto::KEY_SIZE);
     std::memcpy(sealed.data() + crypto::KEY_SIZE, header_.mk_tag.data(), crypto::TAG_SIZE);
     crypto::SecureBuffer<crypto::KEY_SIZE> master;
-    if (!crypto::open_to(kek.as_span(), header_.mk_nonce, sealed, master.span())) {
+    if (std::array<uint8_t, crypto::AD_SIZE> chk_ad{};
+        !crypto::open_to(kek.as_span(), header_.mk_nonce, sealed, master.span(),
+                         header_record_ad(crypto::ChunkDomain::MkWrap, header_, chk_ad))) {
         return AuthFailed;  // wrong old password / keyfile
     }
 
@@ -841,7 +879,9 @@ VaultResult Vault::change_password(std::span<const uint8_t> old_password,
         return CryptoError;
     }
     std::vector<uint8_t> wrapped;
-    if (!crypto::seal(kek.as_span(), h.mk_nonce, master.as_span(), wrapped)) {
+    if (std::array<uint8_t, crypto::AD_SIZE> nw_ad{};
+        !crypto::seal(kek.as_span(), h.mk_nonce, master.as_span(), wrapped,
+                      header_record_ad(crypto::ChunkDomain::MkWrap, h, nw_ad))) {
         return CryptoError;
     }
     std::memcpy(h.wrapped_master_key.data(), wrapped.data(), crypto::KEY_SIZE);
@@ -896,6 +936,8 @@ VaultResult Vault::create_gallery(std::string_view gallery_path)
         } else {
             cur->children.push_back(IndexNode::gallery(seg));
             cur = &cur->children.back();
+            if (context_bound_chunks(header_) && !crypto::fill_random(cur->node_id))
+                return CryptoError;
             created = true;
         }
     }
@@ -938,8 +980,9 @@ VaultResult Vault::read_image(const IndexNode& node, crypto::SecureBytes& out) c
     if (!unlocked_) return Locked;
     if (!node.is_image()) return InvalidArg;
 
+    const auto tag = chunk_tag(crypto::ChunkDomain::Data, node, node.meta.data_id);
     if (ChunkStore store(read_fp_, master_key_.as_span(), framed_chunks(header_));
-        !store.read_chunk({node.meta.data_offset, node.meta.data_length}, out)) {
+        !store.read_chunk({node.meta.data_offset, node.meta.data_length}, tag, out)) {
         return AuthFailed;  // corrupt / tampered / unreadable chunk
     }
     return Ok;
@@ -955,29 +998,87 @@ VaultResult Vault::read_thumbnail(const IndexNode& node, crypto::SecureBytes& ou
     const uint64_t thumb_off = node.is_video() ? node.vmeta.poster_offset : node.meta.thumb_offset;
     if (thumb_len == 0) return NotFound;
 
+    const auto tag = node.is_video()
+                         ? chunk_tag(crypto::ChunkDomain::Poster, node, node.vmeta.poster_id)
+                         : chunk_tag(crypto::ChunkDomain::Thumb, node, node.meta.thumb_id);
+
     // Phase 58: Use dedicated thumb_fp_ + mutex for thread-safe background reads.
     if (!thumb_mutex_) return Locked;
     const std::lock_guard lk(*thumb_mutex_);
     if (!unlocked_) return Locked;
     if (ChunkStore store(thumb_fp_, master_key_.as_span(), framed_chunks(header_));
-        !store.read_chunk({thumb_off, thumb_len}, out)) {
+        !store.read_chunk({thumb_off, thumb_len}, tag, out)) {
         return AuthFailed;
     }
     return Ok;
 }
 
-VaultResult read_thumb_span(const Vault& v, uint64_t offset, uint64_t length,
-                            crypto::SecureBytes& out)
+ChunkRef media_thumb_chunk_ref(const IndexNode& node) noexcept
+{
+    ChunkRef r;
+    if (node.is_video()) {
+        r.offset        = node.vmeta.poster_offset;
+        r.length        = node.vmeta.poster_length;
+        r.domain        = crypto::ChunkDomain::Poster;
+        r.record        = node.vmeta.poster_id;
+        r.context_bound = node.vmeta.context_bound;
+    } else {
+        r.offset        = node.meta.thumb_offset;
+        r.length        = node.meta.thumb_length;
+        r.domain        = crypto::ChunkDomain::Thumb;
+        r.record        = node.meta.thumb_id;
+        r.context_bound = node.meta.context_bound;
+    }
+    r.node_id = node.node_id;
+    return r;
+}
+
+ChunkRef image_data_chunk_ref(const IndexNode& node) noexcept
+{
+    ChunkRef r;
+    r.offset        = node.meta.data_offset;
+    r.length        = node.meta.data_length;
+    r.domain        = crypto::ChunkDomain::Data;
+    r.record        = node.meta.data_id;
+    r.context_bound = node.meta.context_bound;
+    r.node_id       = node.node_id;
+    return r;
+}
+
+ChunkRef video_chunk_ref(const IndexNode& node, size_t index) noexcept
+{
+    ChunkRef r;
+    if (index < node.vmeta.chunks.size()) {
+        const VideoChunk& c = node.vmeta.chunks[index];
+        r.offset        = c.offset;
+        r.length        = c.length;
+        r.domain        = crypto::ChunkDomain::Video;
+        r.record        = c.id;
+        r.sequence      = c.sequence;
+    }
+    r.context_bound = node.vmeta.context_bound;
+    r.node_id       = node.node_id;
+    return r;
+}
+
+VaultResult read_thumb_span(const Vault& v, const ChunkRef& ref, crypto::SecureBytes& out)
 {
     using enum VaultResult;
-    if (length == 0) return InvalidArg;
+    if (ref.length == 0) return InvalidArg;
 
     // Phase 58: Use dedicated thumb_fp_ + mutex for thread-safe background reads.
     if (!v.thumb_mutex_) return Locked;
     const std::lock_guard lk(*v.thumb_mutex_);
     if (!v.unlocked_) return Locked;
+
+    crypto::ChunkTag tag;
+    tag.domain        = ref.domain;
+    tag.owner         = ref.node_id;
+    tag.record        = ref.record;
+    tag.sequence      = ref.sequence;
+    tag.context_bound = ref.context_bound;
     if (ChunkStore store(v.thumb_fp_, v.master_key_.as_span(), framed_chunks(v.header_));
-        !store.read_chunk({offset, length}, out)) {
+        !store.read_chunk({ref.offset, ref.length}, tag, out)) {
         return AuthFailed;
     }
     return Ok;
@@ -1033,8 +1134,9 @@ VaultResult Vault::read_video(const IndexNode& node, crypto::SecureBytes& out) c
     ChunkStore store(read_fp_, master_key_.as_span(), framed_chunks(header_));
     size_t pos = 0;
     for (const VideoChunk& c : node.vmeta.chunks) {
+        const auto tag = chunk_tag(crypto::ChunkDomain::Video, node, c.id, c.sequence);
         crypto::SecureBytes piece;
-        if (!store.read_chunk({c.offset, c.length}, piece)) {
+        if (!store.read_chunk({c.offset, c.length}, tag, piece)) {
             (void)out.resize(0);
             return AuthFailed;
         }
@@ -1072,11 +1174,16 @@ VaultResult apply_video_probe(Vault& v, std::string_view node_path,
         // Phase 50 protocol: every append to fp_ holds write_mutex_.
         std::lock_guard lk(*v.write_mutex_);
         ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+        crypto::ChunkTag tag;
+        tag.domain        = crypto::ChunkDomain::Poster;
+        tag.owner         = n->node_id;
+        tag.context_bound = n->vmeta.context_bound;
         ChunkSpan poster_span;
-        if (!store.append_chunk(probe.poster_jpeg, poster_span)) return IoError;
+        if (!store.append_chunk(probe.poster_jpeg, tag, poster_span)) return IoError;
         if (sync && !store.sync()) return IoError;
         n->vmeta.poster_offset = poster_span.offset;
         n->vmeta.poster_length = poster_span.length;
+        n->vmeta.poster_id     = tag.record;
     }
     return Ok;
 }
@@ -1092,11 +1199,16 @@ VaultResult apply_image_thumb(Vault& v, std::string_view node_path,
 
     std::lock_guard lk(*v.write_mutex_);
     ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+    crypto::ChunkTag tag;
+    tag.domain        = crypto::ChunkDomain::Thumb;
+    tag.owner         = n->node_id;
+    tag.context_bound = n->meta.context_bound;
     ChunkSpan span;
-    if (!store.append_chunk(thumb_jpeg, span)) return IoError;
+    if (!store.append_chunk(thumb_jpeg, tag, span)) return IoError;
     if (sync && !store.sync()) return IoError;
     n->meta.thumb_offset = span.offset;
     n->meta.thumb_length = span.length;
+    n->meta.thumb_id     = tag.record;
     return Ok;
 }
 
@@ -1111,11 +1223,16 @@ VaultResult apply_video_poster(Vault& v, std::string_view node_path,
 
     std::lock_guard lk(*v.write_mutex_);
     ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+    crypto::ChunkTag tag;
+    tag.domain        = crypto::ChunkDomain::Poster;
+    tag.owner         = n->node_id;
+    tag.context_bound = n->vmeta.context_bound;
     ChunkSpan span;
-    if (!store.append_chunk(poster_jpeg, span)) return IoError;
+    if (!store.append_chunk(poster_jpeg, tag, span)) return IoError;
     if (sync && !store.sync()) return IoError;
     n->vmeta.poster_offset = span.offset;
     n->vmeta.poster_length = span.length;
+    n->vmeta.poster_id     = tag.record;
     return Ok;
 }
 

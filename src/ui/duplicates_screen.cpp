@@ -78,8 +78,8 @@ void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, DuplicatesScreen& 
     r.draw_rect(tile_rect, MEDIA_BLACK);
 
     // Draw thumbnail or placeholder
-    const uint64_t key = member.thumb_offset;
-    if (member.thumb_length == 0) {
+    const uint64_t key = member.thumb.offset;
+    if (member.thumb.length == 0) {
         // No thumbnail available
         r.draw_text(font, tile_rect.x + 6, tile_rect.y + tile_rect.h * 0.5f - 14,
                     "(no thumb)", TEXT_DIM);
@@ -93,8 +93,8 @@ void draw_member_tile(gfx::Renderer& r, gfx::FontAtlas& font, DuplicatesScreen& 
         } else if (!screen.worker_.pending(key)) {
             // Submit fetch for this thumbnail
             screen.worker_.submit_fetch(key,
-                [&v = screen.vault_, off = member.thumb_offset, len = member.thumb_length](crypto::SecureBytes& out) {
-                    return vault::read_thumb_span(v, off, len, out) == vault::VaultResult::Ok;
+                [&v = screen.vault_, ref = member.thumb](crypto::SecureBytes& out) {
+                    return vault::read_thumb_span(v, ref, out) == vault::VaultResult::Ok;
                 });
         }
     }
@@ -391,17 +391,16 @@ void handle_review_key(DuplicatesScreen& screen, const SDL_KeyboardEvent& key)
 
 namespace {
 
-// Concatenate a member's decrypted payload for inspect: the poster span for a
-// video, every data span for an image.
+// Concatenate a member's decrypted payload for inspect: the poster chunk for
+// a video, every data chunk for an image.
 bool read_inspect_payload(const vault::Vault& v, const DupMember& m, crypto::SecureBytes& out)
 {
     if (m.is_video) {
-        return vault::read_thumb_span(v, m.thumb_offset, m.thumb_length, out)
-               == vault::VaultResult::Ok;
+        return vault::read_thumb_span(v, m.thumb, out) == vault::VaultResult::Ok;
     }
-    for (const auto& [off, len] : m.data_spans) {
+    for (const vault::ChunkRef& ref : m.data) {
         crypto::SecureBytes span;
-        if (vault::read_thumb_span(v, off, len, span) != vault::VaultResult::Ok) return false;
+        if (vault::read_thumb_span(v, ref, span) != vault::VaultResult::Ok) return false;
         const size_t old_size = out.size();
         if (!out.resize(old_size + span.size())) return false;
         std::memcpy(out.data() + old_size, span.data(), span.size());
@@ -500,8 +499,8 @@ void DuplicatesScreen::request_inspect()
     if (focus_member_ >= members.size()) return;
     const DupMember& member = members[focus_member_];
 
-    if (const bool no_payload = member.is_video ? member.thumb_length == 0
-                                                : member.data_spans.empty();
+    if (const bool no_payload = member.is_video ? member.thumb.length == 0
+                                                : member.data.empty();
         no_payload) {
         status_ = "Nothing to inspect for this file";
         mark_dirty();
@@ -510,8 +509,8 @@ void DuplicatesScreen::request_inspect()
 
     // Unique request key: chunk/poster offset with bit 63 set (never collides
     // with a thumbnail key; offset is nonzero after the payload guard).
-    const uint64_t base_offset = member.is_video ? member.thumb_offset
-                                                 : member.data_spans[0].first;
+    const uint64_t base_offset = member.is_video ? member.thumb.offset
+                                                 : member.data[0].offset;
     const uint64_t inspect_key = base_offset | INSPECT_KEY_BIT;
 
     crypto::SecureBytes payload;
@@ -826,7 +825,7 @@ void DuplicatesScreen::render_review(gfx::Renderer& r, float W, float H)
     std::vector<uint64_t> keep;
     for (size_t g = first; g < last; ++g)
         for (const DupMember& m : review_.groups()[g].members)
-            if (m.thumb_length > 0) keep.push_back(m.thumb_offset);
+            if (m.thumb.length > 0) keep.push_back(m.thumb.offset);
     if (inspect_.key.has_value()) keep.push_back(*inspect_.key);
     worker_.retain(keep);
 

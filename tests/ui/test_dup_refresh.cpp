@@ -44,16 +44,16 @@ struct TempVault {
 };
 
 // A review member that names a real node but carries deliberately WRONG
-// spans — refresh must overwrite them from the index.
+// span refs — refresh must overwrite them from the index.
 ui::DupMember stale_member(std::string node_path)
 {
     ui::DupMember m;
-    m.node_path    = std::move(node_path);
-    m.name         = "x";
-    m.bytes        = 1;
-    m.data_spans   = {{1, 1}};
-    m.thumb_offset = 42;
-    m.thumb_length = 42;
+    m.node_path     = std::move(node_path);
+    m.name          = "x";
+    m.bytes         = 1;
+    m.thumb.offset  = 42;
+    m.thumb.length  = 42;
+    m.thumb.record.fill(0xEE);
     return m;
 }
 } // namespace
@@ -79,11 +79,11 @@ TEST(dup_refresh_review_rereads_spans_from_index)
     REQUIRE(a != nullptr);
     const auto& m0 = review.groups()[0].members[0];   // sorted order == insertion
     CHECK_EQ(m0.bytes, a->meta.orig_size);
-    REQUIRE(m0.data_spans.size() == 1);
-    CHECK_EQ(m0.data_spans[0].first,  a->meta.data_offset);
-    CHECK_EQ(m0.data_spans[0].second, a->meta.data_length);
-    CHECK_EQ(m0.thumb_offset, a->meta.thumb_offset);
-    CHECK_EQ(m0.thumb_length, a->meta.thumb_length);
+    REQUIRE(m0.data.size() == 1);
+    CHECK_EQ(m0.data[0].offset,  a->meta.data_offset);
+    CHECK_EQ(m0.data[0].length,  a->meta.data_length);
+    CHECK_EQ(m0.thumb.offset,    a->meta.thumb_offset);
+    CHECK_EQ(m0.thumb.length,    a->meta.thumb_length);
 }
 
 TEST(dup_refresh_review_drops_vanished_member)

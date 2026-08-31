@@ -5,6 +5,7 @@
 
 #include "chunk_codec.h"
 #include "crypto/aead.h"
+#include "crypto/random.h"
 #include "file_util.h"
 #include "platform/safe_print.h"
 
@@ -13,6 +14,19 @@ namespace vault {
 using fileutil::file_size;
 using fileutil::seek_end;
 using fileutil::seek_to;
+
+crypto::ChunkTag chunk_tag(crypto::ChunkDomain domain, const IndexNode& node,
+                           const std::array<uint8_t, crypto::NODE_ID_SIZE>& record,
+                           uint32_t sequence) noexcept
+{
+    crypto::ChunkTag t;
+    t.domain        = domain;
+    t.owner         = node.node_id;
+    t.record        = record;
+    t.sequence      = sequence;
+    t.context_bound = node.is_video() ? node.vmeta.context_bound : node.meta.context_bound;
+    return t;
+}
 
 bool ChunkStore::append_at_end(std::span<const uint8_t> bytes, uint64_t& out_offset) noexcept
 {
@@ -54,16 +68,25 @@ bool ChunkStore::read_at(uint64_t offset, std::span<uint8_t> dst) const noexcept
     return std::fread(dst.data(), 1, dst.size(), fp_) == dst.size();
 }
 
-bool ChunkStore::append_chunk(std::span<const uint8_t> plaintext, ChunkSpan& out) noexcept
+bool ChunkStore::append_chunk(std::span<const uint8_t> plaintext, crypto::ChunkTag& tag,
+                              ChunkSpan& out) noexcept
 {
+    // A fresh random record id per write: a replayed old record of the same
+    // node/role/sequence (e.g. a regenerated thumbnail's dead predecessor)
+    // then cannot authenticate — its record id differs.
+    if (tag.context_bound && !crypto::fill_random(tag.record)) return false;
+    const std::array<uint8_t, crypto::AD_SIZE> ad_arr = crypto::build_chunk_ad(tag);
+    const std::span<const uint8_t> ad =
+        tag.context_bound ? std::span<const uint8_t>(ad_arr) : std::span<const uint8_t>{};
+
     std::vector<uint8_t> chunk;
     if (framed_) {
         // The frame holds (possibly compressed) decrypted content: mlock'd.
         crypto::SecureBytes framed;
         if (!chunk_codec::encode_frame(plaintext, framed)) return false;
-        if (!crypto::encrypt_chunk(key_, framed.as_span(), chunk)) return false;
+        if (!crypto::encrypt_chunk(key_, framed.as_span(), chunk, ad)) return false;
     } else {
-        if (!crypto::encrypt_chunk(key_, plaintext, chunk)) return false;  // RNG failure
+        if (!crypto::encrypt_chunk(key_, plaintext, chunk, ad)) return false;  // RNG failure
     }
 
     uint64_t offset = 0;
@@ -73,7 +96,8 @@ bool ChunkStore::append_chunk(std::span<const uint8_t> plaintext, ChunkSpan& out
     return true;
 }
 
-bool ChunkStore::read_chunk(ChunkSpan span, std::vector<uint8_t>& out) const noexcept
+bool ChunkStore::read_chunk(ChunkSpan span, const crypto::ChunkTag& tag,
+                            std::vector<uint8_t>& out) const noexcept
 {
     out.clear();
     if (!span_in_file(span.offset, span.length)) return false;   // OOM guard (unchanged)
@@ -87,14 +111,18 @@ bool ChunkStore::read_chunk(ChunkSpan span, std::vector<uint8_t>& out) const noe
         return false;
     }
     if (!read_at(span.offset, disk)) return false;
-    if (!framed_) return crypto::decrypt_chunk(key_, disk, out);
+    const std::array<uint8_t, crypto::AD_SIZE> ad_arr = crypto::build_chunk_ad(tag);
+    const std::span<const uint8_t> ad =
+        tag.context_bound ? std::span<const uint8_t>(ad_arr) : std::span<const uint8_t>{};
+    if (!framed_) return crypto::decrypt_chunk(key_, disk, out, ad);
 
     std::vector<uint8_t> framed;
-    if (!crypto::decrypt_chunk(key_, disk, framed)) return false;
+    if (!crypto::decrypt_chunk(key_, disk, framed, ad)) return false;
     return chunk_codec::decode_frame(framed, out);
 }
 
-bool ChunkStore::read_chunk(ChunkSpan span, crypto::SecureBytes& out) const noexcept
+bool ChunkStore::read_chunk(ChunkSpan span, const crypto::ChunkTag& tag,
+                            crypto::SecureBytes& out) const noexcept
 {
     // Every failure path must discard stale plaintext from a prior read.
     (void)out.resize(0);
@@ -112,10 +140,14 @@ bool ChunkStore::read_chunk(ChunkSpan span, crypto::SecureBytes& out) const noex
     }
     if (!read_at(span.offset, disk)) return false;
 
+    const std::array<uint8_t, crypto::AD_SIZE> ad_arr = crypto::build_chunk_ad(tag);
+    const std::span<const uint8_t> ad =
+        tag.context_bound ? std::span<const uint8_t>(ad_arr) : std::span<const uint8_t>{};
+
     const size_t plain_len = crypto::chunk_plaintext_len(disk.size());
     if (!framed_) {
         if (!out.resize(plain_len)) return false;
-        if (!crypto::decrypt_chunk_to(key_, disk, out.span())) {
+        if (!crypto::decrypt_chunk_to(key_, disk, out.span(), ad)) {
             (void)out.resize(0);
             return false;
         }
@@ -127,7 +159,7 @@ bool ChunkStore::read_chunk(ChunkSpan span, crypto::SecureBytes& out) const noex
         (void)out.resize(0);  // allocation failure must wipe out
         return false;
     }
-    if (!crypto::decrypt_chunk_to(key_, disk, framed.span())) {
+    if (!crypto::decrypt_chunk_to(key_, disk, framed.span(), ad)) {
         (void)out.resize(0);  // decryption failure must wipe out (critical)
         return false;
     }

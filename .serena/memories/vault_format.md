@@ -20,6 +20,9 @@
   Index slot A: offset u64 | length u64 | nonce u8[24]   ─┐ double-buffered
   Index slot B: offset u64 | length u64 | nonce u8[24]   ─┘ crash-safe swap
   active_slot  u8
+  vault_id     u8[16]   (Phase 99 — immutable per-vault identity, in the former
+                         reserved region at byte 208; owner of the Index/MkWrap
+                         AEAD AD. Never changes on change_password.)
   [reserved padding to fixed header_size]
 
 [ Data region — append-only ]
@@ -27,6 +30,39 @@
 
 [ Index blobs (in data region) — encrypted, binary-serialised tree ]
 ```
+
+## Context-bound AEAD (Phase 99 / OSV-AUD-004)
+
+Header flag bit 2 `FLAG_CONTEXT_BOUND_CHUNKS`: this vault's index blob and
+master-key wrap are sealed with context-bound AD, and (once migrated) every
+media chunk is too. New vaults set it at `create`; legacy vaults get it set
+only when the v1→v2 migration rewrites every live record (Phase 99 PR 2), in
+the same commit that re-wraps the master key and rewrites the index blob.
+
+Canonical AD bytes (fixed-width little-endian, deterministic cross-platform;
+built by `crypto::build_chunk_ad(crypto::ChunkTag)`), 38 bytes total:
+
+```
+byte    0        : domain   u8  (0=DATA 1=THUMB 2=POSTER 3=VIDEO 4=INDEX 5=MKWRAP)
+byte    1        : version  u8  (CHUNK_AD_VERSION = 1)
+bytes   2..17    : owner    u8[16]  (node_id for media; header vault_id for
+                                    Index/MkWrap)
+bytes  18..33    : record   u8[16]  (fresh random per-record id, stored in the
+                                    authenticated index; zero for Index/MkWrap)
+bytes  34..37    : sequence u32 LE  (video chunk logical sequence; 0 otherwise)
+```
+
+Physical offsets are deliberately NOT bound, so `compact()` moves ciphertext
+byte-for-byte. The AD owner is the immutable `vault_id`, NOT the salt: a
+password change rotates the salt and must not invalidate the sealed index blob.
+
+Index v13 (Phase 99) stores the identity fields the reader re-derives the AD
+from: `IndexNode::node_id` (16 B, uniform on every node), `ImageMeta`
+`data_id`/`thumb_id` + `context_bound`, `VideoChunk` `sequence` (u32 LE) + `id`,
+`VideoMeta` `poster_id` + `context_bound`. A `context_bound == false` record is
+encrypted with NO associated data (legacy; the migration window's
+per-record discriminator). Pre-v13 blobs read zero ids and `context_bound =
+false` everywhere.
 
 ## Index versions
 

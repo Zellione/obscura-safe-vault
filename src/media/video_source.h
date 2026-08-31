@@ -4,12 +4,13 @@
 // FFmpeg-free; ChunkAvio wraps it for libav. Borrows the unlocked vault's file
 // handle + master key — valid only while that vault outlives this source.
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <span>
 #include <vector>
 
-#include "crypto/crypto.h"        // KEY_SIZE
+#include "crypto/crypto.h"        // KEY_SIZE, NODE_ID_SIZE
 #include "crypto/secure_mem.h"    // SecureBytes
 #include "vault/chunk_store.h"    // ChunkStore, ChunkSpan
 #include "vault/index.h"          // VideoMeta, VideoChunk
@@ -36,7 +37,8 @@ public:
 
 private:
     VideoSource(std::FILE* fp, std::span<const uint8_t, crypto::KEY_SIZE> key,
-                const vault::VideoMeta& meta, bool framed);
+                const vault::VideoMeta& meta, bool framed,
+                std::array<uint8_t, crypto::NODE_ID_SIZE> node_id);
 
     // Copy up to one chunk's worth covering `offset` into `dst`: bytes copied,
     // 0 on a corrupt mapping, -1 on an auth/decrypt failure.
@@ -46,6 +48,10 @@ private:
     std::vector<vault::VideoChunk> chunks_;
     uint32_t                       chunk_size_ = 0;
     uint64_t                       total_size_ = 0;
+    // Phase 99 (OSV-AUD-004): the identity every chunk AD binds to. Copied from
+    // the node at open() so the source stays valid without holding the node.
+    std::array<uint8_t, crypto::NODE_ID_SIZE> node_id_{};
+    bool context_bound_ = false;
     crypto::SecureBytes            cache_;          // currently-decrypted chunk
     int64_t                        cached_index_ = -1;
 };

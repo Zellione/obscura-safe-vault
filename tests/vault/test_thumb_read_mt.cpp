@@ -35,9 +35,8 @@ TEST(thumbnail_reads_are_thread_safe)
     REQUIRE(node_a->meta.thumb_length > 0);
     REQUIRE(node_b->meta.thumb_length > 0);
 
-    // Collect thumbnail spans from node_b for read_thumb_span testing.
-    const uint64_t span_b_off = node_b->meta.thumb_offset;
-    const uint64_t span_b_len = node_b->meta.thumb_length;
+    // Collect node_b's thumbnail chunk ref for read_thumb_span testing.
+    const vault::ChunkRef node_b_thumb = vault::media_thumb_chunk_ref(*node_b);
 
     // Basic test: can we read thumbnails?
     {
@@ -57,7 +56,7 @@ TEST(thumbnail_reads_are_thread_safe)
                         ++failures;
                     }
                     crypto::SecureBytes out2;
-                    if (vault::read_thumb_span(v, span_b_off, span_b_len, out2)
+                    if (vault::read_thumb_span(v, node_b_thumb, out2)
                         != vault::VaultResult::Ok) {
                         ++failures;
                     }
@@ -103,8 +102,7 @@ TEST(thumbnail_read_after_lock_returns_locked)
 
     // Copy the node data (it is a value struct) because lock() will clear the tree.
     const auto node_copy = *node;
-    const uint64_t span_off = node->meta.thumb_offset;
-    const uint64_t span_len = node->meta.thumb_length;
+    const vault::ChunkRef node_thumb = vault::media_thumb_chunk_ref(*node);
 
     // Lock the vault (clears the tree, wipes the master key, sets unlocked_ = false).
     v.lock();
@@ -113,9 +111,9 @@ TEST(thumbnail_read_after_lock_returns_locked)
     crypto::SecureBytes out;
     CHECK_EQ(v.read_thumbnail(node_copy, out), vault::VaultResult::Locked);
 
-    // read_thumb_span with remembered offsets should also return Locked.
+    // read_thumb_span with a remembered ref should also return Locked.
     crypto::SecureBytes out2;
-    CHECK_EQ(vault::read_thumb_span(v, span_off, span_len, out2), vault::VaultResult::Locked);
+    CHECK_EQ(vault::read_thumb_span(v, node_thumb, out2), vault::VaultResult::Locked);
 
     cleanup_dir(dir);
 }
@@ -181,8 +179,7 @@ TEST(vault_open_initializes_thumb_handle_for_reads)
     const auto* node_before_open = nodes.at(0);
     REQUIRE(node_before_open->meta.thumb_length > 0);
 
-    const uint64_t thumb_off = node_before_open->meta.thumb_offset;
-    const uint64_t thumb_len = node_before_open->meta.thumb_length;
+    const vault::ChunkRef node_ref = vault::media_thumb_chunk_ref(*node_before_open);
 
     // Read thumbnail to verify it exists.
     {
@@ -210,7 +207,7 @@ TEST(vault_open_initializes_thumb_handle_for_reads)
 
     // Also verify read_thumb_span works with the opened vault's thumb_fp_.
     crypto::SecureBytes span_out;
-    CHECK(vault::read_thumb_span(v2, thumb_off, thumb_len, span_out) == vault::VaultResult::Ok);
+    CHECK(vault::read_thumb_span(v2, node_ref, span_out) == vault::VaultResult::Ok);
 
     cleanup_dir(dir);
 }

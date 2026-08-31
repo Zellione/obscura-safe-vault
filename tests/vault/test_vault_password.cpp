@@ -221,11 +221,20 @@ TEST(change_password_migrates_legacy_kdf_encoding)
     std::array<uint8_t, crypto::KEY_SIZE + crypto::TAG_SIZE> sealed{};
     std::memcpy(sealed.data(), h.wrapped_master_key.data(), crypto::KEY_SIZE);
     std::memcpy(sealed.data() + crypto::KEY_SIZE, h.mk_tag.data(), crypto::TAG_SIZE);
-    REQUIRE(crypto::open_to(v2_kek.as_span(), h.mk_nonce, sealed, master.span()));
+    // Phase 99: a fresh vault's master-key wrap is bound to the vault_id.
+    crypto::ChunkTag mk_tag2;
+    mk_tag2.domain        = crypto::ChunkDomain::MkWrap;
+    mk_tag2.owner         = h.vault_id;
+    mk_tag2.context_bound = true;
+    const auto mk_ad = crypto::build_chunk_ad(mk_tag2);
+    REQUIRE(crypto::open_to(v2_kek.as_span(), h.mk_nonce, sealed, master.span(), mk_ad));
     REQUIRE(crypto::derive_key(bytes("ab"), bytes("c"), h.salt, h.kdf, legacy_kek,
                                crypto::KdfInputFormat::LegacyConcat));
     std::vector<uint8_t> legacy_wrap;
-    REQUIRE(crypto::seal(legacy_kek.as_span(), h.mk_nonce, master.as_span(), legacy_wrap));
+    // The legacy-KEK wrap still rides the SAME Phase 99 MkWrap AD — only the
+    // KDF input encoding is legacy here; the vault's AEAD context flag stays
+    // set (its index blob is already context-bound and must keep opening).
+    REQUIRE(crypto::seal(legacy_kek.as_span(), h.mk_nonce, master.as_span(), legacy_wrap, mk_ad));
     std::memcpy(h.wrapped_master_key.data(), legacy_wrap.data(), crypto::KEY_SIZE);
     std::memcpy(h.mk_tag.data(), legacy_wrap.data() + crypto::KEY_SIZE, crypto::TAG_SIZE);
     h.flags &= ~vault::FLAG_DOMAIN_SEPARATED_KDF;

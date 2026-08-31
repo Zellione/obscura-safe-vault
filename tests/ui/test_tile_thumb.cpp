@@ -14,8 +14,8 @@ TEST(thumb_key_image_with_thumbnail_uses_data_offset)
     n.meta.thumb_length = 20;
     const auto k = thumb_key_for(n);
     CHECK_EQ(k.key, static_cast<uint64_t>(111));
-    CHECK_EQ(k.offset, static_cast<uint64_t>(222));
-    CHECK_EQ(k.length, static_cast<uint64_t>(20));
+    CHECK_EQ(k.ref.offset, static_cast<uint64_t>(222));
+    CHECK_EQ(k.ref.length, static_cast<uint64_t>(20));
     CHECK(k.present);
 }
 
@@ -34,8 +34,8 @@ TEST(thumb_key_video_uses_poster_offset_and_length)
     n.vmeta.poster_length = 40;
     const auto k = thumb_key_for(n);
     CHECK_EQ(k.key, static_cast<uint64_t>(500));
-    CHECK_EQ(k.offset, static_cast<uint64_t>(500));
-    CHECK_EQ(k.length, static_cast<uint64_t>(40));
+    CHECK_EQ(k.ref.offset, static_cast<uint64_t>(500));
+    CHECK_EQ(k.ref.length, static_cast<uint64_t>(40));
     CHECK(k.present);
 }
 

@@ -11,6 +11,7 @@
 // The vault is responsible for opening/closing the file and for the fsync
 // ordering that makes writes crash-safe.
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <span>
@@ -18,6 +19,7 @@
 
 #include "crypto/crypto.h"
 #include "crypto/secure_mem.h"
+#include "index.h"          // IndexNode (for chunk_tag below)
 
 namespace vault {
 
@@ -28,6 +30,18 @@ struct ChunkSpan {
     uint64_t length = 0;
 };
 
+// Phase 99 (OSV-AUD-004): build the AEAD tag for one of a media node's chunk
+// records. `domain` must be a media domain (Data/Thumb/Poster/Video); `record`
+// is the node's STORED per-record id for that exact chunk (ImageMeta::data_id,
+// ImageMeta::thumb_id, VideoChunk::id or VideoMeta::poster_id); `sequence` is
+// nonzero only for Video chunks. The tag's owner is `node.node_id` and its
+// context_bound comes from the node's stored legacy/migrated flag — so the
+// reader derives byte-identical AD from the authenticated index alone.
+[[nodiscard]] crypto::ChunkTag chunk_tag(crypto::ChunkDomain domain,
+                                         const IndexNode& node,
+                                         const std::array<uint8_t, crypto::NODE_ID_SIZE>& record,
+                                         uint32_t sequence = 0) noexcept;
+
 class ChunkStore {
 public:
     // `fp` must be opened read+write binary and outlive the store. `key` is
@@ -37,15 +51,24 @@ public:
     ChunkStore(std::FILE* fp, std::span<const uint8_t, crypto::KEY_SIZE> key, bool framed) noexcept
         : fp_(fp), key_(key), framed_(framed) {}
 
-    // Encrypt `plaintext` (random nonce) and append at end of file. On success
-    // fills `out` with the written location. Returns false on RNG or I/O failure.
-    [[nodiscard]] bool append_chunk(std::span<const uint8_t> plaintext, ChunkSpan& out) noexcept;
+    // Encrypt `plaintext` (random nonce) and append at end of file. When
+    // `tag.context_bound` is set, `tag.record` is replaced with a fresh random
+    // per-record id and the chunk is authenticated against the full context AD;
+    // the caller persists the regenerated `tag.record` into the node's index
+    // fields. When clear (legacy vault / migration window), `tag.record` is
+    // untouched and no associated data is used. On success fills `out`.
+    // Returns false on RNG or I/O failure.
+    [[nodiscard]] bool append_chunk(std::span<const uint8_t> plaintext,
+                                    crypto::ChunkTag& tag, ChunkSpan& out) noexcept;
 
     // Read + decrypt the chunk at `span`, verifying the tag. Plaintext into `out`.
-    [[nodiscard]] bool read_chunk(ChunkSpan span, std::vector<uint8_t>& out) const noexcept;
+    // `tag` must match what was written (owner, record, sequence, context_bound).
+    [[nodiscard]] bool read_chunk(ChunkSpan span, const crypto::ChunkTag& tag,
+                                  std::vector<uint8_t>& out) const noexcept;
 
     // Same, but decrypts straight into mlock'd memory (for decrypted image data).
-    [[nodiscard]] bool read_chunk(ChunkSpan span, crypto::SecureBytes& out) const noexcept;
+    [[nodiscard]] bool read_chunk(ChunkSpan span, const crypto::ChunkTag& tag,
+                                  crypto::SecureBytes& out) const noexcept;
 
     // Append already-prepared bytes verbatim (the sealed index blob). Returns the
     // offset they were written at.

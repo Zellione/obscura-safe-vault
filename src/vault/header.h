@@ -33,6 +33,13 @@ inline constexpr uint32_t FLAG_FRAMED_CHUNKS = 1u << 0;
 // Bit 1: KDF input uses a domain tag and length-prefixed password/keyfile.
 // Clear preserves the original ambiguous password||keyfile encoding.
 inline constexpr uint32_t FLAG_DOMAIN_SEPARATED_KDF = 1u << 1;
+// Bit 2 (Phase 99, OSV-AUD-004): this vault's index blob and master-key wrap
+// are sealed with the context-bound AEAD associated data built by
+// crypto::build_chunk_ad (domains Index / MkWrap, owner = the header salt).
+// New vaults set it at create; legacy vaults get it set only once the v1→v2
+// chunk migration has rewritten every live record (per-record
+// `context_bound` fuses the gap / migration window).
+inline constexpr uint32_t FLAG_CONTEXT_BOUND_CHUNKS = 1u << 2;
 
 // One half of the crash-safe double-buffered index pointer. `offset`/`length`
 // locate the encrypted index blob (ciphertext|tag) in the data region; `nonce`
@@ -54,6 +61,18 @@ struct Header {
     crypto::KdfParams kdf      = crypto::DEFAULT_KDF_PARAMS;
     std::array<uint8_t, crypto::SALT_SIZE> salt{};
     uint8_t           keyfile_required = 0;
+
+    // Phase 99 (OSV-AUD-004): an immutable per-vault identity bound into the
+    // index-blob and master-key-wrap AEAD associated data (owner field).
+    // Deliberately NOT the salt: change_password regenerates the salt (fresh
+    // KDF input), and the index's AD must not change with it — so the sealed
+    // index blob would otherwise fail to open after a password change. Fixed
+    // at create(), preserved verbatim by change_password(), and set fresh by
+    // the v1→v2 migration for legacy vaults (zero = pre-Phase-99 header
+    // padding, only ever used by legacy vaults whose flag is clear). Stored in
+    // the header's reserved region so the on-disk layout of the documented
+    // fields is untouched.
+    std::array<uint8_t, crypto::SALT_SIZE> vault_id{};
 
     // Master-key wrap (XChaCha20-Poly1305, detached): wrapped_master_key|mk_tag
     // sealed under the KEK with mk_nonce.
@@ -84,6 +103,15 @@ struct Header {
 [[nodiscard]] constexpr bool domain_separated_kdf(const Header& h) noexcept
 {
     return (h.flags & FLAG_DOMAIN_SEPARATED_KDF) != 0;
+}
+
+// Phase 99: true when this vault's index blob + master-key wrap are sealed
+// with context-bound AD (see FLAG_CONTEXT_BOUND_CHUNKS). Media chunk records
+// are gated per-node (context_bound bit) because the v1→v2 migration rewrites
+// records incrementally while the flag stays clear until the final commit.
+[[nodiscard]] constexpr bool context_bound_chunks(const Header& h) noexcept
+{
+    return (h.flags & FLAG_CONTEXT_BOUND_CHUNKS) != 0;
 }
 
 } // namespace vault

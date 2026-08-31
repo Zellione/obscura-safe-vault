@@ -19,11 +19,11 @@ namespace ui {
 
 ThumbKey thumb_key_for(const vault::IndexNode& node)
 {
-    if (node.is_video())
-        return {node.vmeta.poster_offset, node.vmeta.poster_offset,
-                node.vmeta.poster_length, node.vmeta.poster_length > 0};
-    return {node.meta.data_offset, node.meta.thumb_offset,
-            node.meta.thumb_length, node.meta.thumb_length > 0};
+    const vault::ChunkRef r = vault::media_thumb_chunk_ref(node);
+    // Texture-cache identity: an image keys off its DATA chunk (the original's
+    // root), a video off its poster chunk — unchanged from pre-Phase-99.
+    const uint64_t key = node.is_video() ? node.vmeta.poster_offset : node.meta.data_offset;
+    return {key, r, r.length > 0};
 }
 
 SDL_Texture* tile_thumb_texture(const ThumbContext& ctx, const vault::IndexNode& node)
@@ -40,24 +40,24 @@ SDL_Texture* tile_thumb_texture(const ThumbContext& ctx, const vault::IndexNode&
     if (ctx.failed.contains(k.key) || ctx.worker.pending(k.key)) return nullptr;
 
     ctx.worker.submit_fetch(k.key,
-        [&v = ctx.vault, off = k.offset, len = k.length](crypto::SecureBytes& out) {
+        [&v = ctx.vault, ref = k.ref](crypto::SecureBytes& out) {
             const platform::PerfScope perf("thumb.fetch", 5.0);
-            return vault::read_thumb_span(v, off, len, out) == vault::VaultResult::Ok;
+            return vault::read_thumb_span(v, ref, out) == vault::VaultResult::Ok;
         });
     return nullptr;
 }
 
 SDL_Texture* tile_cover_tex(const ThumbContext& ctx, const CoverSpan& span)
 {
-    const uint64_t key = span.offset;
+    const uint64_t key = span.ref.offset;
     if (SDL_Texture* t = ctx.cache.get(key)) return t;
     if (ctx.failed.contains(key) || ctx.worker.pending(key)) return nullptr;
 
     // Phase 58: async fetch via worker thread (thread-safe vault read).
     ctx.worker.submit_fetch(key,
-        [&v = ctx.vault, off = span.offset, len = span.length](crypto::SecureBytes& out) {
+        [&v = ctx.vault, ref = span.ref](crypto::SecureBytes& out) {
             const platform::PerfScope perf("thumb.fetch", 5.0);
-            return vault::read_thumb_span(v, off, len, out) == vault::VaultResult::Ok;
+            return vault::read_thumb_span(v, ref, out) == vault::VaultResult::Ok;
         });
     return nullptr;
 }

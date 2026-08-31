@@ -12,6 +12,7 @@
 // node layout in AGENTS.md / ROADMAP.md). Deserialisation is fully bounds-checked
 // and depth-limited so a corrupt or hostile blob can never crash the parser.
 
+#include <array>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -19,6 +20,7 @@
 #include <vector>
 
 #include "crypto/secure_string.h"
+#include "crypto/crypto_sizes.h"   // NODE_ID_SIZE
 
 namespace vault {
 
@@ -61,12 +63,23 @@ struct ImageMeta {
     uint64_t    thumb_offset = 0;
     uint64_t    thumb_length = 0;
     bool        animated     = false; // multi-frame GIF (Phase 47)
+    // Phase 99 (OSV-AUD-004): per-record random ids bound into the chunk's
+    // AEAD associated data. `context_bound == false` marks a LEGACY record
+    // encrypted with no AD (the migration window), never a v13 write.
+    std::array<uint8_t, crypto::NODE_ID_SIZE> data_id{};   // main image chunk
+    std::array<uint8_t, crypto::NODE_ID_SIZE> thumb_id{};  // thumbnail chunk
+    bool context_bound = false;
 };
 
-// Metadata for one encrypted video chunk (Phase 15 PR2).
+// Metadata for one encrypted video chunk (Phase 15 PR2). Phase 99 adds the
+// logical `sequence` (0-based; the AD binding — replaces the implicit vector
+// order for authentication purposes) and a per-record random `id` bound into
+// the chunk's associated data, exactly like ImageMeta's data_id/thumb_id.
 struct VideoChunk {
     uint64_t offset = 0;  // location in data region
     uint64_t length = 0;  // on-disk chunk length (nonce|cipher|tag)
+    uint32_t sequence = 0;
+    std::array<uint8_t, crypto::NODE_ID_SIZE> id{};
 };
 
 // Video container formats (Phase 15 PR2; legacy containers Phase 52).
@@ -142,6 +155,9 @@ struct VideoMeta {
     std::vector<VideoChunk> chunks;              // ordered encrypted-chunk locations
     uint64_t               poster_offset  = 0;   // first-frame JPEG poster (Phase 15 PR4); 0 length = none
     uint64_t               poster_length  = 0;
+    // Phase 99 (OSV-AUD-004): per-record id + legacy-bound flag (see ImageMeta).
+    std::array<uint8_t, crypto::NODE_ID_SIZE> poster_id{};
+    bool context_bound = false;
 };
 
 // Per-gallery children display order (Phase 37). Persisted on Gallery nodes
@@ -172,6 +188,12 @@ struct IndexNode {
     bool favorite = false;                   // bookmark flag (Phase 13)
     SortKey sort_key =
         SortKey::Default;  // children order (Phase 37); meaningful only when is_gallery()
+    // Phase 99 (OSV-AUD-004): stable random 128-bit identity bound into every
+    // descendant chunk's AEAD associated data. Media nodes' ADs carry it
+    // directly; galleries carry one so a subtree (or the galleries themselves)
+    // can be role-bound later. All-zero on a pre-v13 blob (all media records
+    // there are legacy / context_bound == false).
+    std::array<uint8_t, crypto::NODE_ID_SIZE> node_id{};
 
     // Gallery payload (meaningful when type == Gallery).
     std::vector<IndexNode> children;
@@ -306,7 +328,11 @@ struct VaultSettings {
 // (Phase 73); pre-v11 blobs read with no templates and no values.
 // v12: migrated_thumb_side u16 appended after the tag-field-values block
 // (Phase 75); pre-v12 blobs read 0 (thumbnails never regenerated).
-inline constexpr uint8_t INDEX_VERSION = 12;
+// v13: every node gains a 16-byte node_id; ImageMeta/VideoMeta gain per-record
+// chunk ids + an `animated`-style context_bound flag; VideoChunk gains a u32
+// `sequence` and a per-record id (Phase 99 OSV-AUD-004). Pre-v13 blobs read
+// zero ids and context_bound == false (all chunks legacy, encrypted with no AD).
+inline constexpr uint8_t INDEX_VERSION = 13;
 
 // Phase 65: the index version whose content backfills the migration performs.
 // Bump ONLY when a NEW index version adds a field needing a content backfill —

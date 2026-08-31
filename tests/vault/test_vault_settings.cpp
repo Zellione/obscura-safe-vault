@@ -214,15 +214,28 @@ TEST(vault_settings_thumb_side_roundtrip)
 
 TEST(vault_settings_thumb_side_pre_v12_reads_zero)
 {
-    // A v11 blob: serialize with current version, then strip the v12 thumb_side
-    // field to create a v11 blob and verify it reads back as 0.
-    vault::IndexNode root = vault::IndexNode::gallery("");
-    std::vector<uint8_t> v12;
-    vault::serialize_index(root, {}, vault::VaultSettings{}, v12);
-
-    // v12 adds a u16 (2 bytes) at the very end. Strip it to create a v11 blob.
-    std::vector<uint8_t> v11(v12.begin(), v12.end() - 2);
-    v11[0] = 11;
+    // A hand-crafted v11 blob (serialization always writes v13 now, and a v13
+    // tree carries node_id bytes a v11 reader cannot skip): empty gallery,
+    // empty saved-searches + a v11 settings block WITHOUT the v12 thumb_side
+    // field. Verify it reads back as 0.
+    constexpr std::array<uint8_t, 25> v11 = {
+        0x0b,                    // INDEX_VERSION = 11
+        0x00,                    // type = Gallery
+        0x00, 0x00,              // name_len = 0
+        0x00, 0x00,              // tag_count = 0
+        0x00,                    // favorite = false
+        0x00,                    // sort_key = Default
+        0x00, 0x00, 0x00, 0x00,  // child_count = 0
+        0x00, 0x00,              // saved_searches: count = 0
+        0x00,                    // settings default_sort = Insertion(0)
+        0x01,                    // tiles_show_tags = true
+        0x00, 0x00,              // categories: count = 0
+        0x00, 0x00,              // descriptions: count = 0
+        0x00,                    // watermark migrated_index_version = 0
+        0x00, 0x00,              // watermark migrated_probe_caps = 0
+        0x00, 0x00,              // field_values: count = 0 (v11, no thumb_side)
+    };
+    static_assert(v11.size() == 25);
 
     vault::IndexNode out;
     std::vector<vault::SavedSearch> searches;

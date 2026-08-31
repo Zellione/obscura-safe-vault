@@ -31,6 +31,7 @@ inline constexpr size_t SLOT_B_OFFSET      = 166;  // 8
 inline constexpr size_t SLOT_B_LENGTH      = 174;  // 8
 inline constexpr size_t SLOT_B_NONCE       = 182;  // 24
 inline constexpr size_t ACTIVE_SLOT        = 206;  // 1
+inline constexpr size_t VAULT_ID           = 208;  // 16 (Phase 99 — reserved region)
 } // namespace off
 
 void Header::serialize(std::span<uint8_t, HEADER_SIZE> out) const noexcept
@@ -61,6 +62,8 @@ void Header::serialize(std::span<uint8_t, HEADER_SIZE> out) const noexcept
     put_bytes_at(out, off::SLOT_B_NONCE, slot[1].nonce);
 
     out[off::ACTIVE_SLOT] = active_slot;
+
+    put_bytes_at(out, off::VAULT_ID, vault_id);
 }
 
 namespace {
@@ -114,7 +117,10 @@ bool Header::parse(std::span<const uint8_t> raw, Header& out) noexcept
 
     // active_slot indexes the 2-entry slot array; anything else is hostile.
     out.active_slot = raw[off::ACTIVE_SLOT];
-    return out.active_slot <= 1;
+    if (out.active_slot > 1) return false;
+
+    std::memcpy(out.vault_id.data(), raw.data() + off::VAULT_ID, crypto::SALT_SIZE);
+    return true;
 }
 
 } // namespace vault

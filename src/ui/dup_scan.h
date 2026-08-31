@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "ui/dup_model.h"
+#include "vault/chunk_ref.h"   // vault::ChunkRef
 
 namespace vault { class Vault; }
 
@@ -32,9 +33,9 @@ struct DupScanItem {
     uint64_t    bytes = 0;
     uint32_t    width  = 0;
     uint32_t    height = 0;
-    std::vector<std::pair<uint64_t, uint64_t>> data_spans;  // (offset,length)
-    uint64_t    thumb_offset = 0;   // thumb / poster span; 0 length = none
-    uint64_t    thumb_length = 0;
+    // Phase 99: chunk references (span + decrypt context).
+    std::vector<vault::ChunkRef> data;   // full-original chunk refs
+    vault::ChunkRef              thumb;  // thumb / poster span; length 0 = none
     uint64_t    duration_us  = 0;   // videos only (Phase 62 duration gate)
     uint32_t    chunk_size   = 0;   // videos only: plaintext chunk split size
 };

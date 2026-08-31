@@ -606,13 +606,13 @@ TEST(index_animated_flag_round_trips)
     CHECK(!out.children[1].meta.animated);
 }
 
-TEST(index_version_is_twelve)
+TEST(index_version_is_thirteen)
 {
     IndexNode root = IndexNode::gallery("root");
     std::vector<uint8_t> blob;
     vault::serialize_index(root, blob);
     REQUIRE(!blob.empty());
-    CHECK_EQ(blob[0], uint8_t{12});
+    CHECK_EQ(blob[0], vault::INDEX_VERSION);
 }
 
 TEST(index_v6_blob_reads_animated_as_false)
@@ -689,7 +689,7 @@ TEST(index_v8_accepts_insertion_sort_key)
     std::vector<uint8_t> blob;
     serialize_index(root, blob);
     CHECK_EQ(blob[0], INDEX_VERSION);
-    CHECK_EQ(blob[0], 12);
+    CHECK_EQ(blob[0], INDEX_VERSION);
 
     IndexNode out;
     CHECK(deserialize_index(blob, out));
@@ -863,24 +863,25 @@ TEST(index_settings_rejects_over_long_category_name)
 
 TEST(index_pre_v8_blob_reads_seeded_settings)
 {
-    // A v7 blob: same tree, version byte forced back to 7 and the settings
-    // block stripped. Pre-v8 vaults must come back seeded, sorted Insertion.
-    IndexNode root = IndexNode::gallery("");
-    std::vector<uint8_t> v8;
-    vault::serialize_index(root, {}, vault::VaultSettings{}, v8);
-
-    // With desc_count added in v9, the settings block is now 6 bytes (was 4 in v8).
-    // With watermark added in v10, the settings block is now 9 bytes.
-    // With field_values_count added in v11, the settings block is now 11 bytes.
-    // With thumb_side added in v12, the settings block is now 13 bytes.
-    // We strip the entire v12 settings block to create a v7 blob.
-    std::vector<uint8_t> v7(v8.begin(), v8.end() - 13);   // drop the settings block
-    v7[0] = 7;
+    // A hand-crafted v7 blob: an empty gallery, no saved-searches (v5+) and no
+    // settings block (v8+). Pre-v8 vaults must come back seeded, sorted
+    // Insertion. Hand-crafted because serialization always writes the current
+    // version (v13 adds node_id bytes per node that a v7 reader cannot skip).
+    constexpr std::array<uint8_t, 14> v7_blob = {
+        0x07,                    // INDEX_VERSION = 7
+        0x00,                    // type = Gallery
+        0x00, 0x00,              // name_len = 0
+        0x00, 0x00,              // tag_count = 0
+        0x00,                    // favorite = false
+        0x00,                    // sort_key = Default
+        0x00, 0x00, 0x00, 0x00,  // child_count = 0
+        0x00, 0x00,              // saved_searches: count = 0 (block exists v5+)
+    };
 
     IndexNode out;
     std::vector<vault::SavedSearch> searches;
     vault::VaultSettings got;
-    CHECK(vault::deserialize_index(v7, out, searches, got));
+    CHECK(vault::deserialize_index(v7_blob, out, searches, got));
     CHECK(got.default_sort == vault::SortKey::Insertion);
     CHECK(got.tiles_show_tags);
     CHECK(got.categories == vault::VaultSettings::seeded().categories);

@@ -10,7 +10,7 @@ using ziptest::cleanup_dir;
 using ziptest::fresh_dir;
 using ziptest::make_vault;
 
-// ThumbKey carries both the cache identity and the span to read.
+// ThumbKey carries both the cache identity and the span to read (via ChunkRef).
 TEST(thumb_key_carries_read_span_image)
 {
     vault::IndexNode img = vault::IndexNode::image("a.png");
@@ -19,8 +19,8 @@ TEST(thumb_key_carries_read_span_image)
     img.meta.thumb_length = 512;
     const ui::ThumbKey k = ui::thumb_key_for(img);
     CHECK_EQ(k.key, 1000u);
-    CHECK_EQ(k.offset, 4096u);
-    CHECK_EQ(k.length, 512u);
+    CHECK_EQ(k.ref.offset, 4096u);
+    CHECK_EQ(k.ref.length, 512u);
     CHECK(k.present);
 }
 
@@ -32,8 +32,8 @@ TEST(thumb_key_carries_read_span_video)
     vid.vmeta.poster_length = 40;
     const ui::ThumbKey k = ui::thumb_key_for(vid);
     CHECK_EQ(k.key, 500u);
-    CHECK_EQ(k.offset, 500u);
-    CHECK_EQ(k.length, 40u);
+    CHECK_EQ(k.ref.offset, 500u);
+    CHECK_EQ(k.ref.length, 40u);
     CHECK(k.present);
 }
 
@@ -57,13 +57,13 @@ TEST(worker_fetches_and_decodes_a_real_vault_thumbnail)
 
     const ui::ThumbKey k = ui::thumb_key_for(*node);
     REQUIRE(k.present);
-    REQUIRE(k.offset == node->meta.thumb_offset);
-    REQUIRE(k.length == node->meta.thumb_length);
+    REQUIRE(k.ref.offset == node->meta.thumb_offset);
+    REQUIRE(k.ref.length == node->meta.thumb_length);
 
     // Submit a fetch to the worker.
     image::DecodeWorker w(0);
-    w.submit_fetch(k.key, [&v, off = k.offset, len = k.length](crypto::SecureBytes& out) {
-        return vault::read_thumb_span(v, off, len, out) == vault::VaultResult::Ok;
+    w.submit_fetch(k.key, [&v, ref = k.ref](crypto::SecureBytes& out) {
+        return vault::read_thumb_span(v, ref, out) == vault::VaultResult::Ok;
     });
 
     // Poll for the result (bounded wait).
@@ -108,8 +108,8 @@ TEST(locked_vault_fetch_lands_as_failure)
 
     // Submit a fetch that will fail because the vault is locked.
     image::DecodeWorker w(0);
-    w.submit_fetch(k.key, [&v, off = k.offset, len = k.length](crypto::SecureBytes& out) {
-        return vault::read_thumb_span(v, off, len, out) == vault::VaultResult::Ok;
+    w.submit_fetch(k.key, [&v, ref = k.ref](crypto::SecureBytes& out) {
+        return vault::read_thumb_span(v, ref, out) == vault::VaultResult::Ok;
     });
 
     // Poll for the result.

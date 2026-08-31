@@ -45,6 +45,10 @@ void write_node(ByteWriter& w, const IndexNode& node)
     // reader never branches on type for this field either.
     w.u8(std::to_underlying(node.sort_key));
 
+    // Phase 99 (OSV-AUD-004): the stable per-node node_id, uniform like the
+    // sort key. Always written for the current version; the reader gates on v13.
+    w.bytes(node.node_id);
+
     if (node.type == IndexNode::Type::Gallery) {
         w.u32(static_cast<uint32_t>(node.children.size()));
         for (const auto& child : node.children) write_node(w, child);
@@ -60,6 +64,9 @@ void write_node(ByteWriter& w, const IndexNode& node)
         w.u64(m.thumb_offset);
         w.u64(m.thumb_length);
         w.u8(m.animated ? 1 : 0);
+        w.u8(m.context_bound ? 1 : 0);
+        w.bytes(m.data_id);
+        w.bytes(m.thumb_id);
     } else if (node.type == IndexNode::Type::Video) {
         const VideoMeta& m = node.vmeta;
         w.u8(std::to_underlying(m.container));
@@ -74,9 +81,16 @@ void write_node(ByteWriter& w, const IndexNode& node)
                                ? INDEX_MAX_VIDEO_CHUNKS
                                : static_cast<uint32_t>(m.chunks.size());
         w.u32(n);
-        for (uint32_t i = 0; i < n; ++i) { w.u64(m.chunks[i].offset); w.u64(m.chunks[i].length); }
+        for (uint32_t i = 0; i < n; ++i) {
+            w.u64(m.chunks[i].offset);
+            w.u64(m.chunks[i].length);
+            w.u32(m.chunks[i].sequence);
+            w.bytes(m.chunks[i].id);
+        }
         w.u64(m.poster_offset);
         w.u64(m.poster_length);
+        w.u8(m.context_bound ? 1 : 0);
+        w.bytes(m.poster_id);
     }
 }
 
@@ -150,13 +164,32 @@ bool read_image_meta(ByteReader& r, ImageMeta& m, uint8_t version)
         }
         m.animated = (a == 1);
     }
-    return r.ok();
+
+    // Phase 99: context-bound flag + per-record ids exist only from v13 on.
+    // Pre-v13 blobs are all legacy: context_bound == false, zero ids.
+    m.context_bound = false;
+    m.data_id.fill(0);
+    m.thumb_id.fill(0);
+    if (version >= 13) {
+        const uint8_t cb = r.u8();
+        if (!r.ok() || cb > 1) {
+            return false;
+        }
+        m.context_bound = (cb == 1);
+        r.bytes(m.data_id);
+        r.bytes(m.thumb_id);
+        if (!r.ok()) {
+            return false;
+        }
+    }
+    return true;
 }
 
 // Read VideoMeta from the deserialisation stream (Phase 15 PR2). Returns false
 // on malformed input, particularly on a chunk_count that would cause OOM.
 // The bound check happens BEFORE any allocation to defend against hostile input.
-bool read_video_meta(ByteReader& r, VideoMeta& m)
+// `version` gates the Phase 99 sequence/id/context-bound fields (v13+).
+bool read_video_meta(ByteReader& r, VideoMeta& m, uint8_t version)
 {
     m.container   = static_cast<VideoContainer>(r.u8());
     m.codec       = static_cast<VideoCodec>(r.u8());
@@ -174,11 +207,28 @@ bool read_video_meta(ByteReader& r, VideoMeta& m)
         VideoChunk c;
         c.offset = r.u64();
         c.length = r.u64();
+        if (version >= 13) {
+            c.sequence = r.u32();
+            r.bytes(c.id);
+        }
         if (!r.ok()) return false;
         m.chunks.push_back(c);
     }
     m.poster_offset = r.u64();
     m.poster_length = r.u64();
+    m.context_bound = false;
+    m.poster_id.fill(0);
+    if (version >= 13) {
+        const uint8_t cb = r.u8();
+        if (!r.ok() || cb > 1) {
+            return false;
+        }
+        m.context_bound = (cb == 1);
+        r.bytes(m.poster_id);
+        if (!r.ok()) {
+            return false;
+        }
+    }
     return r.ok();
 }
 
@@ -239,12 +289,20 @@ bool read_node(ByteReader& r, IndexNode& node, uint32_t depth, uint8_t version)
         return false;
     }
 
+    // Phase 99: the stable node_id exists only from v13 on; pre-v13 blobs read
+    // zero (every media record there is legacy / context_bound == false).
+    node.node_id.fill(0);
+    if (version >= 13) {
+        r.bytes(node.node_id);
+        if (!r.ok()) return false;
+    }
+
     if (node.type == IndexNode::Type::Image) {
         return read_image_meta(r, node.meta, version);
     }
 
     if (node.type == IndexNode::Type::Video) {
-        return read_video_meta(r, node.vmeta);
+        return read_video_meta(r, node.vmeta, version);
     }
 
     const uint32_t child_count = r.u32();

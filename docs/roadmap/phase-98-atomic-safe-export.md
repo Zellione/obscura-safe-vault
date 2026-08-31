@@ -1,6 +1,6 @@
 # Atomic, link-safe export creation (Phase 98)
 
-**Status:** 🔜 ready for review
+**Status:** ✅ shipped
 **Date:** 2026-08-31
 
 This is **Phase E** of the 2026-08-29 security audit remediation

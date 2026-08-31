@@ -163,3 +163,124 @@ TEST(encrypt_rejects_unrepresentable_output_size_without_terminating)
     CHECK_FALSE(crypto::encrypt_chunk(key.as_span(), impossible, out));
     CHECK_TRUE(out.empty());
 }
+
+// --- Phase 99 / OSV-AUD-004: context-bound AEAD associated data -------------
+
+// Exact-byte KAT for the canonical AD encoding. Locks the byte layout so a
+// change silently breaking Linux/Windows parity (or vault reopening) is caught.
+TEST(build_chunk_ad_exact_bytes)
+{
+    crypto::ChunkTag t;
+    t.domain = crypto::ChunkDomain::Video;
+    for (size_t i = 0; i < t.owner.size(); ++i)    t.owner[i]  = static_cast<uint8_t>(0xA0 + i);
+    for (size_t i = 0; i < t.record.size(); ++i)   t.record[i] = static_cast<uint8_t>(0x10 + i);
+    t.sequence      = 0xDEADBEEF;
+    t.context_bound = true;
+
+    const auto ad = crypto::build_chunk_ad(t);
+    CHECK_EQ(ad.size(), crypto::AD_SIZE);
+    static constexpr std::array<uint8_t, crypto::AD_SIZE> expected = {{
+        0x03,                       // domain = Video
+        0x01,                       // CHUNK_AD_VERSION
+        0xA0,0xA1,0xA2,0xA3,0xA4,0xA5,0xA6,0xA7,   // owner
+        0xA8,0xA9,0xAA,0xAB,0xAC,0xAD,0xAE,0xAF,
+        0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,   // record
+        0x18,0x19,0x1A,0x1B,0x1C,0x1D,0x1E,0x1F,
+        0xEF,0xBE,0xAD,0xDE,                       // sequence 0xDEADBEEF LE
+    }};
+    CHECK_BYTES_EQ(std::span<const uint8_t>(ad), std::span<const uint8_t>(expected));
+}
+
+TEST(build_chunk_ad_is_fixed_width_across_empty_fields)
+{
+    crypto::ChunkTag t;   // all fields default/zero
+    CHECK_EQ(crypto::build_chunk_ad(t).size(), crypto::AD_SIZE);
+    CHECK_EQ(crypto::build_chunk_ad(t)[0], static_cast<uint8_t>(crypto::ChunkDomain::Data));
+}
+
+// Same key + nonce + plaintext under different domains must not authenticate
+// against the other domain's AD. encrypt_chunk uses a fresh random nonce per
+// call; to compare like-for-like we seal the identical (key, nonce, plaintext)
+// under two ADs via crypto::seal and confirm both the tags differ and each
+// opens under its own AD only.
+TEST(context_domains_produce_distinct_tags)
+{
+    auto key = random_key();
+    std::array<uint8_t, crypto::NONCE_SIZE> nonce;
+    (void)crypto::fill_random(nonce);
+    std::array<uint8_t, 16> plain;
+    plain.fill(0x42);
+
+    auto make_tag = [](crypto::ChunkDomain d) {
+        crypto::ChunkTag t;
+        t.domain = d;
+        t.context_bound = true;
+        for (size_t i = 0; i < t.owner.size(); ++i) t.owner[i] = static_cast<uint8_t>(i * 7 + 1);
+        for (size_t i = 0; i < t.record.size(); ++i) t.record[i] = static_cast<uint8_t>(i * 3 + 5);
+        return t;
+    };
+
+    const auto ad_data = crypto::build_chunk_ad(make_tag(crypto::ChunkDomain::Data));
+    const auto ad_thumb = crypto::build_chunk_ad(make_tag(crypto::ChunkDomain::Thumb));
+    const auto ad_video = crypto::build_chunk_ad(make_tag(crypto::ChunkDomain::Video));
+
+    std::vector<uint8_t> s_data, s_thumb;
+    REQUIRE(crypto::seal(key.as_span(), nonce, plain, s_data, ad_data));
+    REQUIRE(crypto::seal(key.as_span(), nonce, plain, s_thumb, ad_thumb));
+    // Tags differ across domains even with identical key/nonce/plaintext.
+    CHECK_FALSE(std::equal(s_data.end() - crypto::TAG_SIZE, s_data.end(),
+                           s_thumb.end() - crypto::TAG_SIZE));
+
+    std::vector<uint8_t> ok;
+    REQUIRE(crypto::open(key.as_span(), nonce, s_data, ok, ad_data));       // own AD opens
+    CHECK_BYTES_EQ(std::span<const uint8_t>(ok), std::span<const uint8_t>(plain));
+    std::vector<uint8_t> bad;
+    CHECK_FALSE(crypto::open(key.as_span(), nonce, s_data, bad, ad_thumb));  // other AD fails
+    CHECK_FALSE(crypto::open(key.as_span(), nonce, s_data, bad, ad_video));
+}
+
+// A wrong owner, record, or sequence in the AD must fail authentication.
+TEST(context_ad_binds_every_identity_field)
+{
+    auto key = random_key();
+    std::array<uint8_t, crypto::NONCE_SIZE> nonce;
+    (void)crypto::fill_random(nonce);
+    std::array<uint8_t, 16> plain;
+    plain.fill(0x99);
+
+    crypto::ChunkTag t;
+    t.domain = crypto::ChunkDomain::Data;
+    t.context_bound = true;
+    for (size_t i = 0; i < t.owner.size(); ++i)  t.owner[i]  = 1;
+    for (size_t i = 0; i < t.record.size(); ++i) t.record[i] = 2;
+
+    const auto good_ad = crypto::build_chunk_ad(t);
+    std::vector<uint8_t> sealed;
+    REQUIRE(crypto::seal(key.as_span(), nonce, plain, sealed, good_ad));
+
+    // Mutate one identity field at a time; each must fail to open.
+    {
+        auto t2 = t; ++t2.owner[0];
+        std::vector<uint8_t> out;
+        CHECK_FALSE(crypto::open(key.as_span(), nonce, sealed, out, crypto::build_chunk_ad(t2)));
+    }
+    {
+        auto t2 = t; ++t2.record[0];
+        std::vector<uint8_t> out;
+        CHECK_FALSE(crypto::open(key.as_span(), nonce, sealed, out, crypto::build_chunk_ad(t2)));
+    }
+    {
+        auto t2 = t; ++t2.sequence;
+        std::vector<uint8_t> out;
+        CHECK_FALSE(crypto::open(key.as_span(), nonce, sealed, out, crypto::build_chunk_ad(t2)));
+    }
+    {
+        auto t2 = t; t2.domain = crypto::ChunkDomain::Thumb;
+        std::vector<uint8_t> out;
+        CHECK_FALSE(crypto::open(key.as_span(), nonce, sealed, out, crypto::build_chunk_ad(t2)));
+    }
+    // And the correct AD still opens it.
+    std::vector<uint8_t> ok;
+    REQUIRE(crypto::open(key.as_span(), nonce, sealed, ok, good_ad));
+    CHECK_BYTES_EQ(std::span<const uint8_t>(ok), std::span<const uint8_t>(plain));
+}

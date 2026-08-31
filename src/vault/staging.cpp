@@ -2,6 +2,7 @@
 #include <cstdio>
 
 #include "chunk_store.h"
+#include "crypto/random.h"
 #include "safe_name.h"
 #include "vault.h"
 #include "staging.h"
@@ -39,6 +40,15 @@ namespace {
         }
         return result;
     }
+
+    // Phase 99: a new node in a context-bound vault needs a fresh node_id (all
+    // its chunks bind to it). Legacy vaults keep an all-zero id and write
+    // contextless chunks. Returns false on RNG failure (impossible in practice).
+    [[nodiscard]] bool assign_fresh_node_id(IndexNode& n, bool context_bound)
+    {
+        if (!context_bound) return true;
+        return crypto::fill_random(n.node_id);
+    }
 }  // namespace
 
 StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
@@ -55,13 +65,26 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
 
     ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
 
+    // Build the fully-populated but UNATTACHED IndexNode FIRST so its node_id
+    // exists before any chunk append (every chunk AD binds to it).
+    IndexNode img        = IndexNode::image(filename);
+    img.meta.context_bound = context_bound_chunks(v.header_);
+    if (!assign_fresh_node_id(img, img.meta.context_bound)) {
+        return {CryptoError, {}};
+    }
+
     // Append the main image data chunk, holding the write mutex for the entire chunk.
     ChunkSpan data_span;
     {
         std::lock_guard lk(*v.write_mutex_);
-        if (!store.append_chunk(file_data, data_span)) {
+        crypto::ChunkTag tag;
+        tag.domain        = crypto::ChunkDomain::Data;
+        tag.owner         = img.node_id;
+        tag.context_bound = img.meta.context_bound;
+        if (!store.append_chunk(file_data, tag, data_span)) {
             return {IoError, {}};
         }
+        img.meta.data_id = tag.record;
         // Phase 50: flush buffered writes to fp_ so they become readable via read_fp_.
         // The synchronous add_image path additionally calls ChunkStore::sync() before
         // commit, but staged chunks must be immediately visible to concurrent reads
@@ -85,9 +108,14 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
         // Append precomputed thumbnail if non-empty.
         if (!precomputed->thumb_jpeg.empty()) {
             std::lock_guard lk(*v.write_mutex_);
-            if (!store.append_chunk(precomputed->thumb_jpeg.as_span(), thumb_span)) {
+            crypto::ChunkTag tag;
+            tag.domain        = crypto::ChunkDomain::Thumb;
+            tag.owner         = img.node_id;
+            tag.context_bound = img.meta.context_bound;
+            if (!store.append_chunk(precomputed->thumb_jpeg.as_span(), tag, thumb_span)) {
                 return {IoError, {}};
             }
+            img.meta.thumb_id = tag.record;
             std::fflush(v.fp_);
         }
     } else {
@@ -101,15 +129,18 @@ StagedNode stage_image(Vault& v, std::span<const uint8_t> file_data,
         // Append thumbnail if generated (holding lock for chunk write)
         if (!decoded_thumb.thumb_bytes.empty()) {
             std::lock_guard lk(*v.write_mutex_);
-            if (!store.append_chunk(decoded_thumb.thumb_bytes.as_span(), thumb_span)) {
+            crypto::ChunkTag tag;
+            tag.domain        = crypto::ChunkDomain::Thumb;
+            tag.owner         = img.node_id;
+            tag.context_bound = img.meta.context_bound;
+            if (!store.append_chunk(decoded_thumb.thumb_bytes.as_span(), tag, thumb_span)) {
                 return {IoError, {}};
             }
+            img.meta.thumb_id = tag.record;
             std::fflush(v.fp_);
         }
     }
 
-    // Build the fully-populated but UNATTACHED IndexNode.
-    IndexNode img = IndexNode::image(filename);
     img.meta.format = format;
     img.meta.width = width;
     img.meta.height = height;
@@ -155,6 +186,13 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
 
     ChunkStore store(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
 
+    // Build the node's identity before appending (chunk ADs bind to it).
+    IndexNode vid            = IndexNode::video(filename);
+    vid.vmeta.context_bound  = context_bound_chunks(v.header_);
+    if (!assign_fresh_node_id(vid, vid.vmeta.context_bound)) {
+        return {CryptoError, {}};
+    }
+
     // Append video data chunks, one per 1-MiB chunk, with a lock_guard per chunk.
     std::vector<VideoChunk> chunks;
     for (size_t off = 0; off < file_data.size(); off += chunk_size) {
@@ -162,12 +200,22 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
         ChunkSpan span;
         {
             std::lock_guard lk(*v.write_mutex_);
-            if (!store.append_chunk(file_data.subspan(off, len), span)) {
+            crypto::ChunkTag tag;
+            tag.domain        = crypto::ChunkDomain::Video;
+            tag.owner         = vid.node_id;
+            tag.sequence      = static_cast<uint32_t>(chunks.size());
+            tag.context_bound = vid.vmeta.context_bound;
+            if (!store.append_chunk(file_data.subspan(off, len), tag, span)) {
                 return {IoError, {}};
             }
             std::fflush(v.fp_);
+            VideoChunk c;
+            c.offset   = span.offset;
+            c.length   = span.length;
+            c.sequence = tag.sequence;
+            c.id       = tag.record;
+            chunks.push_back(c);
         }
-        chunks.push_back({span.offset, span.length});
     }
 
     // An empty file would store zero chunks; treat as invalid (no video stream).
@@ -184,17 +232,20 @@ StagedNode stage_video(Vault& v, std::span<const uint8_t> file_data,
         ChunkSpan poster_span;
         {
             std::lock_guard lk(*v.write_mutex_);
-            if (!store.append_chunk(poster, poster_span)) {
+            crypto::ChunkTag tag;
+            tag.domain        = crypto::ChunkDomain::Poster;
+            tag.owner         = vid.node_id;
+            tag.context_bound = vid.vmeta.context_bound;
+            if (!store.append_chunk(poster, tag, poster_span)) {
                 return {IoError, {}};
             }
             std::fflush(v.fp_);
+            vid.vmeta.poster_id = tag.record;
         }
         poster_offset = poster_span.offset;
         poster_length = poster_span.length;
     }
 
-    // Build the fully-populated but UNATTACHED IndexNode.
-    IndexNode vid = IndexNode::video(filename);
     vid.vmeta.container   = precomputed ? precomputed->container   : probe.container;
     vid.vmeta.codec       = precomputed ? precomputed->codec       : probe.codec;
     vid.vmeta.width       = precomputed ? precomputed->width       : probe.width;
@@ -255,6 +306,8 @@ VaultResult ensure_gallery_path(Vault& v, std::string_view gallery_path)
         } else {
             cur->children.push_back(IndexNode::gallery(seg));
             cur = &cur->children.back();
+            if (context_bound_chunks(v.header_) && !crypto::fill_random(cur->node_id))
+                return CryptoError;
         }
     }
 
