@@ -1,0 +1,39 @@
+name: Checkout submodules (retried)
+description: >
+  Recursively initialises and updates the vendored git submodules AFTER
+  actions/checkout has run with `submodules: false`. Retries the update with
+  linear backoff so a transient submodule-host outage self-heals instead of
+  failing the job. On 2026-08-31 CI #741 the TSan and MSVC-Debug jobs died at
+  checkout because aomedia.googlesource.com (host of the `vendor/libaom`
+  submodule) returned HTTP 503 mid-fetch — "git exited 128". git skips
+  submodules already at the recorded commit, so a partial failure leaves the
+  fetched submodules alone and a retry only re-fetches what failed. Same
+  retry-vs-outage posture already applied to apt and Chocolatey in this CI.
+inputs:
+  retries:
+    description: Number of git submodule update attempts before giving up.
+    required: false
+    default: "4"
+runs:
+  using: composite
+  steps:
+    - name: git submodule update (retried)
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        attempts=${{ inputs.retries }}
+        attempt=0
+        while :; do
+          attempt=$((attempt + 1))
+          if git submodule update --init --recursive; then
+            echo "submodules: ok on attempt $attempt"
+            exit 0
+          fi
+          if [ "$attempt" -ge "$attempts" ]; then
+            break
+          fi
+          echo "::warning::git submodule update failed (attempt $attempt/$attempts) — transient submodule-host outage? retrying"
+          sleep "$((10 * attempt))"
+        done
+        echo "::error::git submodule update failed after $attempts attempts — one or more submodule hosts (e.g. aomedia.googlesource.com) unreachable"
+        exit 1

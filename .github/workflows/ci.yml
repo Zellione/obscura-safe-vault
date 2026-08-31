@@ -51,10 +51,18 @@ jobs:
       # -----------------------------------------------------------------------
       # Checkout
       # -----------------------------------------------------------------------
-      - name: Checkout (with submodules)
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          submodules: recursive
+          submodules: false
+
+      # Submodules fetched separately (not via actions/checkout) so the fetch
+      # can be retried against a transient submodule-host outage — 2026-08-31
+      # CI #741 died here: aomedia.googlesource.com (vendor/libaom) returned
+      # HTTP 503 mid-checkout, failing the TSan + MSVC-Debug jobs with "git
+      # exited 128". See .github/actions/checkout-submodules.
+      - name: Checkout submodules (retried)
+        uses: ./.github/actions/checkout-submodules
 
       # -----------------------------------------------------------------------
       # System packages + premake5 + vendored SDL3 (shared composite actions)
@@ -155,10 +163,18 @@ jobs:
         config: [Debug, Release]
 
     steps:
-      - name: Checkout (with submodules)
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          submodules: recursive
+          submodules: false
+
+      # Submodules fetched separately (not via actions/checkout) so the fetch
+      # can be retried against a transient submodule-host outage — 2026-08-31
+      # CI #741 died here: aomedia.googlesource.com (vendor/libaom) returned
+      # HTTP 503 mid-checkout, failing the TSan + MSVC-Debug jobs with "git
+      # exited 128". See .github/actions/checkout-submodules.
+      - name: Checkout submodules (retried)
+        uses: ./.github/actions/checkout-submodules
 
       - name: Set up MSVC environment
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
@@ -436,10 +452,18 @@ jobs:
     if: github.event_name != 'schedule'
 
     steps:
-      - name: Checkout (with submodules)
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          submodules: recursive
+          submodules: false
+
+      # Submodules fetched separately (not via actions/checkout) so the fetch
+      # can be retried against a transient submodule-host outage — 2026-08-31
+      # CI #741 died here: aomedia.googlesource.com (vendor/libaom) returned
+      # HTTP 503 mid-checkout, failing the TSan + MSVC-Debug jobs with "git
+      # exited 128". See .github/actions/checkout-submodules.
+      - name: Checkout submodules (retried)
+        uses: ./.github/actions/checkout-submodules
 
       - name: Install build dependencies
         uses: ./.github/actions/setup-apt-deps
@@ -499,10 +523,18 @@ jobs:
     if: github.event_name != 'schedule'
 
     steps:
-      - name: Checkout (with submodules)
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          submodules: recursive
+          submodules: false
+
+      # Submodules fetched separately (not via actions/checkout) so the fetch
+      # can be retried against a transient submodule-host outage — 2026-08-31
+      # CI #741 died here: aomedia.googlesource.com (vendor/libaom) returned
+      # HTTP 503 mid-checkout, failing the TSan + MSVC-Debug jobs with "git
+      # exited 128". See .github/actions/checkout-submodules.
+      - name: Checkout submodules (retried)
+        uses: ./.github/actions/checkout-submodules
 
       - name: Install build dependencies
         uses: ./.github/actions/setup-apt-deps
@@ -565,10 +597,18 @@ jobs:
     if: github.event_name != 'schedule'
 
     steps:
-      - name: Checkout (with submodules)
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          submodules: recursive
+          submodules: false
+
+      # Submodules fetched separately (not via actions/checkout) so the fetch
+      # can be retried against a transient submodule-host outage — 2026-08-31
+      # CI #741 died here: aomedia.googlesource.com (vendor/libaom) returned
+      # HTTP 503 mid-checkout, failing the TSan + MSVC-Debug jobs with "git
+      # exited 128". See .github/actions/checkout-submodules.
+      - name: Checkout submodules (retried)
+        uses: ./.github/actions/checkout-submodules
 
       - name: Install build dependencies
         uses: ./.github/actions/setup-apt-deps
@@ -629,10 +669,18 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
 
     steps:
-      - name: Checkout (with submodules)
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          submodules: recursive
+          submodules: false
+
+      # Submodules fetched separately (not via actions/checkout) so the fetch
+      # can be retried against a transient submodule-host outage — 2026-08-31
+      # CI #741 died here: aomedia.googlesource.com (vendor/libaom) returned
+      # HTTP 503 mid-checkout, failing the TSan + MSVC-Debug jobs with "git
+      # exited 128". See .github/actions/checkout-submodules.
+      - name: Checkout submodules (retried)
+        uses: ./.github/actions/checkout-submodules
 
       - name: Install build dependencies
         uses: ./.github/actions/setup-apt-deps
@@ -700,12 +748,16 @@ jobs:
           echo "Add the SONAR_TOKEN repository secret to enable it."
 
       # Full history so Sonar can attribute new-code and blame accurately.
-      - name: Checkout (full history + submodules)
+      - name: Checkout (full history)
         if: env.SONAR_TOKEN != ''
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          submodules: recursive
+          submodules: false
           fetch-depth: 0
+
+      - name: Checkout submodules (retried)
+        if: env.SONAR_TOKEN != ''
+        uses: ./.github/actions/checkout-submodules
 
       - name: Cache apt packages
         if: env.SONAR_TOKEN != ''

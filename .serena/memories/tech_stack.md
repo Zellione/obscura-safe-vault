@@ -186,6 +186,18 @@ local composite actions, `.github/actions/setup-apt-deps/` and
 out — its `if: env.SONAR_TOKEN != ''` guard on every step is a pre-existing
 special case).
 
+`.github/actions/checkout-submodules/` (added after CI #741, 2026-08-31) is a
+third shared composite action: it runs `git submodule update --init
+--recursive` with retry + linear backoff AFTER `actions/checkout` runs with
+`submodules: false`, replacing checkout's built-in submodule recursion in every
+job of ci.yml and release.yml (sonarqube included). Rationale: CI #741 died at
+checkout because `aomedia.googlesource.com` (host of `vendor/libaom`) returned
+HTTP 503 mid-fetch — git exited 128, failing the TSan + MSVC-Debug jobs on a
+source tree that builds fine. git skips submodules already at the recorded
+commit, so a partial failure leaves the fetched ones alone and a retry only
+resumes the failed one. Same retry-vs-outage posture as the apt/Chocolatey
+hardening above.
+
 The no-FFmpeg job (`tests-no-av`, Phase 57 follow-up) also runs on every PR:
 `--no-av` premake option, gcc-14, Debug-only, Linux-only. It makes `link_av()`
 return early so `OSV_VENDORED_AV` stays undefined, WITHOUT touching the shared
