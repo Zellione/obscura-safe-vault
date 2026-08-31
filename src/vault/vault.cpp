@@ -1297,24 +1297,27 @@ VaultResult apply_context_rewrite(Vault& v, std::string_view node_path)
 
     // Decrypt one legacy record and re-append it as a context-bound v2 record
     // under the node's (new) identity, persisting the fresh span + record id.
+    // Decrypt one legacy record and re-append it as a context-bound v2 record
+    // under the node's (new) identity, persisting the fresh span + record id.
     // A zero-length span (no thumb / no poster) is a no-op.
-auto reencode = [&](uint64_t off, uint64_t len, crypto::ChunkDomain domain, uint32_t seq,
-                    std::array<uint8_t, crypto::NODE_ID_SIZE>& id_out, ChunkSpan& span_out) {
-if (len == 0) return Ok;
+    auto reencode = [&](uint64_t off, uint64_t len, crypto::ChunkDomain domain, uint32_t seq,
+                        std::array<uint8_t, crypto::NODE_ID_SIZE>& id_out,
+                        ChunkSpan& span_out) {
+        if (len == 0) return Ok;
         crypto::SecureBytes plain;
         if (crypto::ChunkTag old{.domain = domain, .sequence = seq};
             !reader.read_chunk({off, len}, old, plain))
             return AuthFailed;
-    std::lock_guard lk(*v.write_mutex_);
-    crypto::ChunkTag nt{.domain = domain, .owner = n->node_id, .sequence = seq,
-                        .context_bound = true};
-    if (ChunkStore writer(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
-        !writer.append_chunk(plain.as_span(), nt, span_out))
-        return IoError;
-    std::fflush(v.fp_);
-    id_out = nt.record;
-    return Ok;
-};
+        std::lock_guard lk(*v.write_mutex_);
+        crypto::ChunkTag nt{.domain = domain, .owner = n->node_id, .sequence = seq,
+                            .context_bound = true};
+        if (ChunkStore writer(v.fp_, v.master_key_.as_span(), framed_chunks(v.header_));
+            !writer.append_chunk(plain.as_span(), nt, span_out))
+            return IoError;
+        std::fflush(v.fp_);
+        id_out = nt.record;
+        return Ok;
+    };
 
     if (n->is_image()) {
         ImageMeta& m = n->meta;
