@@ -8,6 +8,7 @@
 #include "app/auto_lock.h"
 #include "app/back_click.h"
 #include "app/keep_unlocked_badge.h"
+#include "app/hwaccel_toast.h"
 #include "app/migration_refresh.h"
 #include "gfx/renderer.h"
 #include "gfx/theme.h"
@@ -502,6 +503,31 @@ void draw_keep_unlocked_badge(gfx::Renderer& r, gfx::FontAtlas& font, int win_w,
     r.draw_text(font, box.x + PAD, box.y + PAD, LABEL, WARN);
 }
 
+// Phase 102: brief centered top-of-screen toast that fires when the user
+// toggles a hwaccel runtime override (Ctrl+Shift+H, Ctrl+Shift+F, or F2
+// Playback cycle). Renders only while hwaccel_toast_elapsed_ is below
+// HWACCEL_TOAST_SECS. Same visual language as the keep_unlocked badge
+// (rounded surface with a coloured outline, padded text) but anchored
+// top-center so it doesn't fight with the corner badges for screen real
+// estate.
+void draw_hwaccel_toast(gfx::Renderer& r, gfx::FontAtlas& font, int win_w,
+                       const std::string& text)
+{
+    using namespace gfx::theme;
+    constexpr float PAD    = 12.0f;
+    constexpr float MARGIN = 24.0f;
+
+    const float tw = static_cast<float>(font.measure(text));
+    const float th = font.pixel_height();
+    const float bw = tw + (PAD * 2);
+    const float bh = th + (PAD * 2);
+    const SDL_FRect box{(static_cast<float>(win_w) - bw) / 2.0f,
+                        MARGIN, bw, bh};
+    r.draw_round_rect(box, RADIUS_SMALL, SURFACE);
+    r.draw_round_rect(box, RADIUS_SMALL, WARN, /*filled*/ false);
+    r.draw_text(font, box.x + PAD, box.y + PAD, text.c_str(), WARN);
+}
+
 // Phase 66: corner badge shown while a SECOND vault's key is in memory. Never
 // fades (unlike the Phase 45 keep-unlocked badge): visibility must match key
 // lifetime exactly. Stacks above the keep-unlocked badge when both are shown.
@@ -706,12 +732,16 @@ struct App::OverlayDispatch {
         // on the NEXT clip opened (VideoDecodeWorker re-reads both
         // for_attach_hwaccel() on construction; the current playback is
         // unaffected). Live-saved via HwAccelPref so a fresh launch picks
-        // up the user's choice.
+        // up the user's choice, and a brief on-screen toast confirms the
+        // keystroke landed.
         if (e.type == SDL_EVENT_KEY_DOWN && (e.key.mod & SDL_KMOD_CTRL) != 0 &&
             (e.key.mod & SDL_KMOD_SHIFT) != 0) {
             const SDL_Keycode k = e.key.key;
             if (k == SDLK_H) {
                 media::set_enable_hardware_decode(!media::enable_hardware_decode());
+                app.hwaccel_toast_text_ = std::format("Hardware decode: {}",
+                    media::enable_hardware_decode() ? "ON" : "OFF");
+                app.hwaccel_toast_elapsed_ = 0.0;
                 (void)platform::HwAccelPref::default_location().save({
                     media::enable_hardware_decode(),
                     media::force_software_decode(),
@@ -720,6 +750,9 @@ struct App::OverlayDispatch {
             }
             if (k == SDLK_F) {
                 media::set_force_software_decode(!media::force_software_decode());
+                app.hwaccel_toast_text_ = std::format("Force software decode: {}",
+                    media::force_software_decode() ? "ON" : "OFF");
+                app.hwaccel_toast_elapsed_ = 0.0;
                 (void)platform::HwAccelPref::default_location().save({
                     media::enable_hardware_decode(),
                     media::force_software_decode(),
@@ -768,9 +801,24 @@ struct App::OverlayDispatch {
             (void)platform::AutoplayPref::default_location().save(app.overlays_.settings.autoplay);
             // Phase 102: sync the two hwaccel runtime overrides whenever the event
             // was handled (the pref is already saved live in apply_value_delta; this
-            // keeps the runtime in sync even if that write failed).
+            // keeps the runtime in sync even if that write failed). Detect which
+            // one (if any) the user just toggled and fire the corresponding toast —
+            // works for both the F2 Playback cycle AND the global Ctrl+Shift hotkeys
+            // (the latter have already set the toast themselves before this block).
+            const bool hw_before   = media::enable_hardware_decode();
+            const bool sw_before   = media::force_software_decode();
             media::set_enable_hardware_decode(app.overlays_.settings.enable_hardware);
             media::set_force_software_decode(app.overlays_.settings.force_software);
+            if (e.type == SDL_EVENT_KEY_DOWN && media::enable_hardware_decode() != hw_before) {
+                app.hwaccel_toast_text_ = std::format("Hardware decode: {}",
+                    media::enable_hardware_decode() ? "ON" : "OFF");
+                app.hwaccel_toast_elapsed_ = 0.0;
+            }
+            if (e.type == SDL_EVENT_KEY_DOWN && media::force_software_decode() != sw_before) {
+                app.hwaccel_toast_text_ = std::format("Force software decode: {}",
+                    media::force_software_decode() ? "ON" : "OFF");
+                app.hwaccel_toast_elapsed_ = 0.0;
+            }
             // Phase 92: sync the clipboard gate (the pref is already saved live in
             // apply_value_delta; this keeps the runtime in sync even if that write
             // failed).
@@ -1114,6 +1162,7 @@ void App::update(double dt)
         screen_ && !migration_active)
         screen_->update(dt);
     badge_elapsed_ += dt;   // Phase 45 Part 6
+    hwaccel_toast_elapsed_ += dt;   // Phase 102: tick the toggle-toast window
 
     // Phase 66: tick the warm slot. Expiry is deferred while a background job
     // owns a vault handle (same signals that suppress the idle auto-lock).
@@ -1185,6 +1234,12 @@ void App::render_frame()
             draw_keep_unlocked_badge(r, font_, window_.width(), window_.height());
         if (second_.session.occupied())
             draw_second_vault_badge(r, font_, window_.width(), window_.height(), keep_badge);
+        // Phase 102: hwaccel toggle toast (visible for HWACCEL_TOAST_SECS
+        // after the most recent toggle). Draws LAST so it sits above every
+        // other overlay's chrome.
+        if (should_show_hwaccel_toast(hwaccel_toast_text_.c_str(), hwaccel_toast_elapsed_, HWACCEL_TOAST_SECS)) {
+            draw_hwaccel_toast(r, font_, window_.width(), hwaccel_toast_text_);
+        }
         if (overlays_.settings.open) {
             ui::draw_settings_overlay(r, font_, static_cast<float>(window_.width()),
                                       static_cast<float>(window_.height()), overlays_.settings);
