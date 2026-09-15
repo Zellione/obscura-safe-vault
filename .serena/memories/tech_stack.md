@@ -85,6 +85,21 @@ binary level; see `docs/superpowers/specs/2026-07-17-hardware-video-decode-desig
 VAAPI backend survives (`OSV_HWACCEL_VAAPI`); the `src/media/hw_accel.cpp` file has been
 collapsed to a single `#if defined(OSV_HWACCEL_VAAPI)` block, no more `#elif D3D11VA` branch.
 
+**Phase 102 (VAAPI diagnostics + force-software toggle):** the silent-no-op
+runtime failure mode of `av_hwdevice_ctx_create` (wrong driver name, missing
+`/dev/dri/renderD*` for the user, driver without the codec's VAProfile) is
+surfaced as a one-time `[HwAccel]` log line on the first probe attempt —
+`OK; LIBVA_DRIVER_NAME=…` on success, `failed: … — software decode will be
+used; run \`vainfo\` for details` on any failure. Companion log fires once per
+`AVCodec` name when the decoder doesn't advertise a VAAPI `hw_config`.
+Two persisted runtime overrides gate the path: `Ctrl+Shift+H` toggles
+"hardware decode enabled" (default on), `Ctrl+Shift+F` toggles "force
+software decode" (default off); both live-saved to `hwaccel.conf` via
+`platform::HwAccelPref`. New `media::hwaccel_status()` exposes the cached
+probe outcome for the F1 popup's new "Video decode:" row. New `[HwAccel]`
+module log tag joins `[Vault]`/`[Crypto]`/`[SecureMem]`/`[Platform]`/
+`[VideoDecodeWorker]`/`[ArchiveReader]`.
+
 **Phase 43 Part 2:** `vendor/libva` (headers-only submodule, pinned to tag 2.22.0/commit 217da1c28336d6a7e9c0c4cb8f1c303968a675f1) supplies the `va.h`/`va_drm.h` headers needed for FFmpeg's `hwcontext_vaapi.c` configure-time link probe. `vendor/vaapi-shim` (static library, osv_vaapi_shim.a) provides the ~36 `va*` symbols FFmpeg's hwcontext_vaapi.c/vaapi_decode.c/vaapi_h264.c/vaapi_hevc.c/vaapi_vp8.c/vaapi_vp9.c/vaapi_mjpeg.c reference, implemented as dlopen("libva.so.2"/"libva-drm.so.2") + dlsym() forwarding — this keeps the real libva.so.2 dependency 100% optional at runtime (no DT_NEEDED entry, silently unavailable if absent, matching the "linked only when present" pattern link_av()/link_archive() use). `--enable-vaapi` added to FFmpeg's configure in `scripts/build_codecs.sh`; `premake5.lua` defines `OSV_HWACCEL_VAAPI` only on Linux, gated on `OSV_VENDORED_AV` already being present. `media::HwAccelContext` (same file as Part 1) gains the VAAPI backend (AV_HWDEVICE_TYPE_VAAPI, DRM render-node path — no X11 dependency). `vaGetDisplay` (X11 variant) and `vaGetDisplayWin32` are excluded from the shim; only `vaGetDisplayDRM` is forwarded.
 
 `link_av()` links avformat/avcodec/swscale/swresample/avutil and defines `OSV_VENDORED_AV` **only
