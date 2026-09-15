@@ -1261,7 +1261,7 @@ void App::render_frame()
         // after the most recent toggle). Draws LAST so it sits above every
         // other overlay's chrome.
         if (should_show_hwaccel_toast(hwaccel_toast_.text.c_str(), hwaccel_toast_.elapsed,
-                                     hwaccel_toast_.WINDOW_SECS)) {
+                                     App::HwAccelToastState::WINDOW_SECS)) {
             draw_hwaccel_toast(r, font_, window_.width(), hwaccel_toast_.text);
         }
         if (overlays_.settings.open) {

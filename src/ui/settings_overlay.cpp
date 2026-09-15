@@ -357,14 +357,14 @@ void draw_rail(gfx::Renderer& r, gfx::FontAtlas& font, float rail_x, float rail_
 // section has its own helper since the row layouts differ enough that
 // merging them costs more than it saves.
 
-static std::pair<std::string, std::string> appearance_row(int row_index, const SettingsState& state)
+std::pair<std::string, std::string> appearance_row(int row_index, const SettingsState& state)
 {
     if (row_index == 0) return {"Theme", std::string(gfx::theme_name(state.theme))};
     if (row_index == 1) return {"Default Gallery View", std::string(gallery_view_label(state.gallery_view))};
     return {};
 }
 
-static std::pair<std::string, std::string> playback_row(int row_index, const SettingsState& state)
+std::pair<std::string, std::string> playback_row(int row_index, const SettingsState& state)
 {
     if (row_index == 0) return {"Auto-play videos", state.autoplay ? "On" : "Off"};
     // Phase 102: hardware-decode gate + force-software override.
@@ -373,7 +373,7 @@ static std::pair<std::string, std::string> playback_row(int row_index, const Set
     return {};
 }
 
-static std::pair<std::string, std::string> browsing_row(int row_index, const SettingsState& state)
+std::pair<std::string, std::string> browsing_row(int row_index, const SettingsState& state)
 {
     if (row_index == 0)
         return {"Default Sort",
@@ -383,7 +383,7 @@ static std::pair<std::string, std::string> browsing_row(int row_index, const Set
     return {};
 }
 
-static std::pair<std::string, std::string> tagcolours_row(int row_index, const SettingsState& state)
+std::pair<std::string, std::string> tagcolours_row(int row_index, const SettingsState& state)
 {
     if (row_index < static_cast<int>(state.draft.categories.size())) {
         const auto& cat = state.draft.categories[row_index];
@@ -393,14 +393,14 @@ static std::pair<std::string, std::string> tagcolours_row(int row_index, const S
     return {};
 }
 
-static std::pair<std::string, std::string> vaultops_row(int row_index, const SettingsState&)
+std::pair<std::string, std::string> vaultops_row(int row_index, const SettingsState&)
 {
     // Phase 65: vault operations (only available when unlocked).
     if (row_index == 0) return {"Re-check vault for upgrades", "[Enter]"};
     return {};
 }
 
-static std::pair<std::string, std::string> security_row(int row_index, const SettingsState& state)
+std::pair<std::string, std::string> security_row(int row_index, const SettingsState& state)
 {
     // Phase 66: machine-scoped keep-open default.
     if (row_index == 0)

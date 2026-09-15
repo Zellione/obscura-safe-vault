@@ -62,8 +62,11 @@ std::string hwaccel_status_line(int probe_status, bool hw_enabled, bool sw_force
     if (!hw_enabled)
         return "Video decode: software-only (hardware disabled by Ctrl+Shift+H)";
 #if defined(OSV_VENDORED_AV) && defined(OSV_HWACCEL_VAAPI)
-    // Then the probe outcome — the actual device-context state.
-    using media::HwAccelStatus;
+    // Then the probe outcome — the actual device-context state. Every
+    // reference is fully-qualified (media::HwAccelStatus::Ok etc.) so no
+    // local using-declaration is needed; this also dodges cpp:S6177
+    // (which would otherwise insist on `using enum media::HwAccelStatus;`
+    // — a form GCC 16 rejects for fully-qualified namespace paths).
     switch (static_cast<media::HwAccelStatus>(probe_status)) {
         case media::HwAccelStatus::Ok:
             return "Video decode: VAAPI OK (run `vainfo` for driver name)";
