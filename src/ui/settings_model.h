@@ -35,6 +35,11 @@ struct SettingsState {
     platform::SecondVaultMode second_vault_default = platform::SecondVaultMode::LockNow;
     // Phase 92: machine-scoped, like theme
     platform::ClipboardMode clipboard = platform::ClipboardMode::Allow;
+    // Phase 102: machine-scoped hwaccel runtime overrides (Ctrl+Shift+H / F).
+    // Both persist via platform::HwAccelPref and live-sync to media:: setting
+    // slots in app.cpp; new clips opened after a toggle honour the new value.
+    bool enable_hardware = true;        // default ON (matches media::enable_hardware_decode)
+    bool force_software  = false;       // default OFF (matches media::force_software_decode)
     // Inline "add category" / "rename category" prompt (Phase 49). `prompt_row`
     // is the row being renamed, or -1 when adding.
     bool        prompting  = false;

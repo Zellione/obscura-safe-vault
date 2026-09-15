@@ -13,6 +13,7 @@
 #include "gfx/theme.h"
 #include "image/thumbnail.h"
 #include "media/autoplay_setting.h"
+#include "media/hwaccel_setting.h"
 #include "media/video_probe.h"
 #include "media/volume_setting.h"
 #include "platform/autoplay_pref.h"
@@ -20,6 +21,7 @@
 #include "platform/error_log.h"
 #include "platform/gallery_view_pref.h"
 #include "platform/harden.h"
+#include "platform/hwaccel_pref.h"
 #include "platform/path_utf8.h"
 #include "platform/paths.h"
 #include "platform/perf.h"
@@ -126,6 +128,13 @@ bool App::init()
 
     // Phase 85: seed the auto-play-videos toggle from the persisted preference.
     media::set_saved_autoplay_enabled(platform::AutoplayPref::default_location().load());
+
+    // Phase 102: seed the two VAAPI runtime overrides from the persisted pref.
+    {
+        const auto s = platform::HwAccelPref::default_location().load();
+        media::set_enable_hardware_decode(s.enable_hardware);
+        media::set_force_software_decode(s.force_software);
+    }
 
     // Phase 92: seed the clipboard gate from the persisted preference.
     ui::set_clipboard_gate(platform::ClipboardPref::default_location().load());
@@ -689,6 +698,35 @@ struct App::OverlayDispatch {
             }
             return true;
         }
+        // Phase 102: Ctrl+Shift+H toggles hardware decode; Ctrl+Shift+F
+        // toggles force-software. Both are global (work whether or not a
+        // clip is currently playing) but only when neither the help popup
+        // nor the settings overlay nor any modal is open — see
+        // dispatch_overlay_event() ordering below. The toggles take effect
+        // on the NEXT clip opened (VideoDecodeWorker re-reads both
+        // for_attach_hwaccel() on construction; the current playback is
+        // unaffected). Live-saved via HwAccelPref so a fresh launch picks
+        // up the user's choice.
+        if (e.type == SDL_EVENT_KEY_DOWN && (e.key.mod & SDL_KMOD_CTRL) != 0 &&
+            (e.key.mod & SDL_KMOD_SHIFT) != 0) {
+            const SDL_Keycode k = e.key.key;
+            if (k == SDLK_H) {
+                media::set_enable_hardware_decode(!media::enable_hardware_decode());
+                (void)platform::HwAccelPref::default_location().save({
+                    media::enable_hardware_decode(),
+                    media::force_software_decode(),
+                });
+                return true;
+            }
+            if (k == SDLK_F) {
+                media::set_force_software_decode(!media::force_software_decode());
+                (void)platform::HwAccelPref::default_location().save({
+                    media::enable_hardware_decode(),
+                    media::force_software_decode(),
+                });
+                return true;
+            }
+        }
         // Phase 65: manual migration trigger from the VaultOps section, handled
         // before the settings panel swallows input. On a non-empty scan this
         // deliberately does NOT report the event as handled: settings closes and the
@@ -728,6 +766,11 @@ struct App::OverlayDispatch {
             // Phase 85: sync autoplay whenever the event was handled
             media::set_saved_autoplay_enabled(app.overlays_.settings.autoplay);
             (void)platform::AutoplayPref::default_location().save(app.overlays_.settings.autoplay);
+            // Phase 102: sync the two hwaccel runtime overrides whenever the event
+            // was handled (the pref is already saved live in apply_value_delta; this
+            // keeps the runtime in sync even if that write failed).
+            media::set_enable_hardware_decode(app.overlays_.settings.enable_hardware);
+            media::set_force_software_decode(app.overlays_.settings.force_software);
             // Phase 92: sync the clipboard gate (the pref is already saved live in
             // apply_value_delta; this keeps the runtime in sync even if that write
             // failed).
@@ -905,6 +948,8 @@ void App::open_settings_overlay()
     overlays_.settings.autoplay = media::saved_autoplay_enabled();   // Phase 85
     overlays_.settings.second_vault_default = second_.session.default_mode();   // Phase 66
     overlays_.settings.clipboard = ui::clipboard_gate();                        // Phase 92
+    overlays_.settings.enable_hardware = media::enable_hardware_decode();       // Phase 102
+    overlays_.settings.force_software  = media::force_software_decode();        // Phase 102
     ui::open_settings(overlays_.settings, ui::SettingsSection::Appearance);
 }
 

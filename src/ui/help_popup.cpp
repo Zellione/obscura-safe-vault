@@ -11,6 +11,8 @@
 #include "gfx/text.h"
 #include "gfx/theme.h"
 #include "platform/harden.h"     // lockable_budget_bytes()
+#include "media/hw_accel.h"      // HwAccelStatus (Phase 102)
+#include "media/hwaccel_setting.h"  // enable_hardware_decode / force_software_decode (Phase 102)
 #include "ui/help_layout.h"
 #include "ui/text_metrics.h"
 #include "ui/widgets.h"   // fit_text
@@ -43,6 +45,32 @@ std::string secure_mem_status_line(size_t budget_bytes, bool degraded)
     const std::string state =
         degraded ? "— some codec/decoded data may be swappable" : "active (best-effort)";
     return std::format("Secure memory: {} page-lock budget {}", budget, state);
+}
+
+// Phase 102: one-line VAAPI status for the F1 popup. The two user-toggled
+// overrides (enable_hardware_decode + force_software_decode) take priority
+// over the probe outcome — once the user has explicitly chosen software,
+// the line reflects that choice, not whatever the probe happened to find.
+std::string hwaccel_status_line(int probe_status, bool hw_enabled, bool sw_forced)
+{
+    // Override wins: force-software is the explicit "always software" signal.
+    if (sw_forced)
+        return "Video decode: software-only (force-software by Ctrl+Shift+F)";
+    // Then hardware-disabled: the user explicitly turned the auto-probe off.
+    if (!hw_enabled)
+        return "Video decode: software-only (hardware disabled by Ctrl+Shift+H)";
+    // Then the probe outcome — the actual device-context state.
+    using media::HwAccelStatus;
+    switch (static_cast<HwAccelStatus>(probe_status)) {
+        case HwAccelStatus::Ok:
+            return "Video decode: VAAPI OK (run `vainfo` for driver name)";
+        case HwAccelStatus::Unavailable:
+            return "Video decode: VAAPI unavailable (see error.log; run `vainfo`)";
+        case HwAccelStatus::NotAttempted:
+            return "Video decode: not attempted (no clip played yet)";
+        default:
+            return "Video decode: status unknown";
+    }
 }
 
 bool handle_help_key(HelpPopupState& s, SDL_Keycode key)
@@ -191,18 +219,25 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
     if (!s.open) return;
     using namespace gfx::theme;
 
-    // Phase 6c: the last Global entry is a live status line (empty key — drawn
-    // without brackets) reporting the page-lock budget and whether any buffer
-    // has degraded to swappable memory.
+    // Phase 6c: the last Global entries are live status lines (empty keys —
+    // drawn without brackets) reporting the page-lock budget and whether any
+    // buffer has degraded to swappable memory, plus the Phase 102 VAAPI
+    // hwaccel status + override state.
     std::vector<HelpGroup> all_groups = {
         {.title = "Global",
          .entries = {
-             {.key = "F1", .description = "Help"},
-             {.key = "F2", .description = "Settings"},
+             {.key = "F1",          .description = "Help"},
+             {.key = "F2",          .description = "Settings"},
              {.key = "Right-click", .description = "Back / up one level"},
              {.key = "",
               .description = secure_mem_status_line(platform::lockable_budget_bytes(),
                                                     crypto::secure_memory_degraded())},
+#if defined(OSV_VENDORED_AV) && defined(OSV_HWACCEL_VAAPI)
+             {.key = "",
+              .description = hwaccel_status_line(static_cast<int>(media::hwaccel_status()),
+                                                 media::enable_hardware_decode(),
+                                                 media::force_software_decode())},
+#endif
          }}};
     all_groups.insert(all_groups.end(), groups.begin(), groups.end());
 

@@ -5,6 +5,7 @@
 #include "gfx/theme.h"
 #include "gfx/window.h"
 #include "platform/autoplay_pref.h"
+#include "platform/hwaccel_pref.h"
 #include "platform/clipboard_pref.h"
 #include "platform/gallery_view_pref.h"
 #include "platform/second_vault_pref.h"
@@ -121,8 +122,18 @@ void apply_value_delta(SettingsState& state, int delta, bool& commit_out)
         }
     } else if (state.section == SettingsSection::Playback) {
         settings_change_value(state, delta);
-        (void)platform::AutoplayPref::default_location().save(state.autoplay);
-        commit_out = false;  // autoplay is persisted by the pref save
+        // Phase 102 row routing: row 0 is autoplay (existing), rows 1 + 2
+        // are the two hwaccel runtime overrides — both persisted via a
+        // single HwAccelPref save.
+        if (state.row == 0) {
+            (void)platform::AutoplayPref::default_location().save(state.autoplay);
+        } else {
+            (void)platform::HwAccelPref::default_location().save({
+                state.enable_hardware,
+                state.force_software,
+            });
+        }
+        commit_out = false;  // both prefs are persisted by the pref save
     } else if (state.section == SettingsSection::Security) {
         // Decide which machine-scoped pref this row writes before cycling.
         const bool is_second_vault_row = state.row == 0;
@@ -354,6 +365,9 @@ std::pair<std::string, std::string> pane_row_text(const SettingsState& state, in
             break;
         case Playback:
             if (row_index == 0) return {"Auto-play videos", state.autoplay ? "On" : "Off"};
+            // Phase 102: hardware-decode gate + force-software override.
+            if (row_index == 1) return {"Hardware video decode", state.enable_hardware ? "On" : "Off"};
+            if (row_index == 2) return {"Force software decode", state.force_software ? "On" : "Off"};
             break;
         case Browsing:
             if (row_index == 0)
