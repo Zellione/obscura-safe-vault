@@ -443,6 +443,7 @@ project "osv_tests"
         "src/platform/clipboard_pref.cpp",
         "src/platform/volume_pref.cpp",
         "src/platform/autoplay_pref.cpp",
+        "src/platform/hwaccel_pref.cpp",
         "src/platform/file_dialog.cpp",
         "src/platform/folder_dialog.cpp",
         "src/app/back_click.cpp",
