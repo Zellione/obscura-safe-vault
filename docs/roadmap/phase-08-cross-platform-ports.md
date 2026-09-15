@@ -7,6 +7,14 @@
 > — the installer did nothing a folder copy didn't, and left Start Menu/uninstaller
 > traces on the system for what is deliberately a leave-no-trace tool. This
 > historical record is preserved as-shipped and not rewritten.
+>
+> **Phase 101 follow-up:** Windows support itself was later removed entirely
+> (CI, build pipeline, source-level `#ifdef _WIN32` branches) in Phase 101.
+> The portable `.zip` packaging, the entire `system:windows` build pipeline,
+> the MSVC + ccache + MSYS2 + NASM CI dance, and the `OSV_HWACCEL_D3D11VA`
+> backend were all deleted. Platform support is now Linux-only. See
+> [`phase-101-remove-windows.md`](phase-101-remove-windows.md) for the full
+> change list. This historical record is preserved as-shipped and not rewritten.
 
 **Goal:** Windows and macOS build configs and CI pipeline.
 

@@ -50,15 +50,6 @@
   and `src/gfx/` — like a std header. `std::fopen` may appear only in `crypto/random.cpp`
   (`/dev/urandom` literal, POSIX-only) and inside `path_utf8.h` itself.
 
-## Cross-platform (MSVC vs libstdc++)
-- `std::array`/`std::vector` iterators are raw pointers in libstdc++ but class types in MSVC's STL.
-  Never declare one as `auto*`: `const auto* it = std::ranges::find_if(...)` compiles clean on Linux
-  and fails MSVC with C3535/C2440/C2679. Use plain `const auto`.
-- clang-tidy's `readability-qualified-auto` will keep suggesting `auto*` for these on Linux, where
-  they happen to be pointers. Do not take the fix — leave a comment saying why. Lint warnings are
-  non-fatal in CI, so the suggestion costs nothing to ignore; following it breaks the Windows legs.
-- Local runs are Linux-only and cannot catch this class of break. The MSVC CI legs are the gate.
-
 ## Module boundaries
 - `src/crypto/` wraps Monocypher — no SDL or UI deps.
 - `src/vault/` depends on crypto only.

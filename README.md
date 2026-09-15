@@ -4,7 +4,11 @@
 > line was written with AI assistance and the design decisions live in
 > [`AGENTS.md`](AGENTS.md). Do not trust it with data you cannot afford to lose.
 
-A multi-platform native encrypted photo gallery. All photos live inside a single `.osv` vault file — images are decrypted **into locked memory only**, never written to a temporary file or disk. The gallery is browsable with a freely-nestable folder tree, a zoomable full-screen image viewer, and a thumbnail strip navigable with arrow keys.
+A native Linux encrypted photo gallery. All photos live inside a single
+`.osv` vault file — images are decrypted **into locked memory only**, never
+written to a temporary file or disk. The gallery is browsable with a freely
+nestable folder tree, a zoomable full-screen image viewer, and a thumbnail
+strip navigable with arrow keys.
 
 **Stack:** C++23 · SDL3 · SDL_Renderer · Monocypher (XChaCha20-Poly1305 + Argon2id) · stb_image · libwebp / libheif (WebP / HEIC / AVIF) · FFmpeg decode-only (H.264 / H.265 / ProRes / DNxHD / MJPEG / VP8 / VP9 / AV1 / QTRLE / Cinepak video, AAC / Opus / MP3 / Vorbis / FLAC / AC-3 audio) · miniz (ZIP/CBZ) · libarchive (7z/RAR/TAR) · nlohmann/json · premake5 → Ninja
 
@@ -20,22 +24,18 @@ See [`AGENTS.md`](AGENTS.md) for all technology decisions and [`ROADMAP.md`](ROA
 
 | Tool | Why | Install |
 |---|---|---|
-| C++23 compiler | building the app | gcc 14+ / clang 17+ / MSVC 2022 |
-| `cmake`, `ninja` | configure + build vendored libs | Arch: `sudo pacman -S cmake ninja` · Debian/Ubuntu: `sudo apt install cmake ninja-build` · Windows: VS 2022 + `choco install ninja` |
-| `nasm` | assembler for the vendored **libaom** (AVIF decode) | Arch: `sudo pacman -S nasm` · Debian/Ubuntu: `sudo apt install nasm` · Windows: `choco install nasm` |
-| `pkg-config` (or `pkgconf`) | FFmpeg's configure detects the vendored **libaom** through it, for AV1 video decode | Arch: `sudo pacman -S pkgconf` · Debian/Ubuntu: `sudo apt install pkg-config` · Windows (MSYS2): `pkgconf` package |
-
-> **Windows:** a complete step-by-step guide — prerequisites with install
-> commands, checkout, setup, and Debug/Release builds — is in
-> [Windows — manual build walkthrough](#windows--manual-build-walkthrough-checkout--binary) below.
+| C++23 compiler | building the app | gcc 14+ / clang 17+ |
+| `cmake`, `ninja` | configure + build vendored libs | Arch: `sudo pacman -S cmake ninja` · Debian/Ubuntu: `sudo apt install cmake ninja-build` |
+| `nasm` | assembler for the vendored **libaom** (AVIF decode + AV1 video) | Arch: `sudo pacman -S nasm` · Debian/Ubuntu: `sudo apt install nasm` |
+| `pkg-config` (or `pkgconf`) | FFmpeg's configure detects the vendored **libaom** through it, for AV1 video decode | Arch: `sudo pacman -S pkgconf` · Debian/Ubuntu: `sudo apt install pkg-config` |
+| `libva` + a vendor driver (AMD: `libva-mesa-driver`; Intel: `intel-media-driver` / `libva-intel-driver`) | optional — Linux VAAPI hardware video decode (Phase 43); see "Hardware decode on Linux" below | Arch: `sudo pacman -S libva libva-mesa-driver` · Debian/Ubuntu: `sudo apt install libva-driver-video` (+ vendor driver) |
 
 ### First-time setup
 
 Initialises git submodules, downloads the `premake5` binary, and cmake-builds the vendored static libraries (SDL3, plus the image codecs libwebp / libde265 / libaom / libheif into `vendor/codecs-prefix/`).
 
 ```bash
-scripts/setup.sh         # Linux
-scripts\setup.bat        # Windows (VS 2022 Developer prompt)
+scripts/setup.sh
 ```
 
 > **Development shortcut:** if SDL3 is already installed system-wide (e.g. `sudo pacman -S sdl3` on Arch), you can skip `setup.sh` and go straight to generating build files. The system SDL3 is used as a fallback automatically.
@@ -60,6 +60,29 @@ scripts/build.sh --release   # Release
 build/bin/Debug/osv
 build/bin/Release/osv
 ```
+
+#### Hardware decode on Linux (optional)
+
+FFmpeg is configured with `--enable-vaapi` and `--enable-hwaccel=h264_vaapi,hevc_vaapi,vp8_vaapi,vp9_vaapi,av1_vaapi,mpeg2_vaapi,mpeg4_vaapi,vc1_vaapi,wmv3_vaapi,h263_vaapi`. The hw decode is **opportunistic** — Phase 41's software `VideoDecodeWorker` is the automatic silent fallback whenever hardware is unavailable (no GPU decode block, missing/outdated driver, codec/profile the GPU can't handle), so every clip plays either way. To enable it:
+
+1. Install `libva` + a vendor driver (`libva-mesa-driver` for AMD/Radeon, `intel-media-driver` for Intel iGPU/Arc).
+2. Make sure your user is in the `render` group for `/dev/dri/renderD128` access; log out/in after the change.
+3. Verify with `vainfo` — look for `VAProfileVP9Profile0` (AMD Vega+, Intel Broadwell+) and the others you care about.
+4. Run the app. Check `~/.config/ObscuraSafeVault/ObscuraSafeVault/error.log` (the F1 help popup's **Video decode** section also shows the live state) for a one-time line per process:
+   ```
+   [HwAccel] VAAPI probe: OK (<driver-name> via <node>)
+   ```
+   Any other outcome (`driver_not_found`, `render_node_open_failed (errno=N)`, `vaInitialize_failed`) tells you exactly which step blocked it.
+5. Confirm the GPU block is engaged (vs. CPU decoding) by tailing `cat /sys/class/drm/card*/device/gpu_busy_percent` or `radeontop` while a clip plays.
+
+Two persisted settings gate the path when you want to A/B test:
+
+| Hotkey | Setting | Default | Effect |
+|---|---|---|---|
+| `Ctrl+Shift+H` | Hardware decode on/off | on | off → `try_attach_hwaccel` is skipped entirely |
+| `Ctrl+Shift+F` | Force software decode | off | on → always software (overrides `Ctrl+Shift+H`) |
+
+Both are live-toggled and persisted across sessions; the F1 help popup shows their state.
 
 #### Locked-memory limit (`RLIMIT_MEMLOCK`)
 
@@ -87,12 +110,11 @@ For desktop launches, raise it session-wide, e.g. on systemd distros set
 `DefaultLimitMEMLOCK=2G` in `/etc/systemd/user.conf` (or a
 `LimitMEMLOCK=` drop-in for your compositor's service) and log out/in.
 
-The app itself attempts to grow the budget to **256 MiB** at startup
-(soft → hard limit on Linux, no privilege needed; minimum working-set on
-Windows), so most hosts get a usable budget without any configuration. The
-budget you actually have — and whether any buffer has degraded to swappable
-memory — is visible live in the **F1 help popup** (Global group,
-"Secure memory: …" line).
+The app itself attempts to grow the budget at startup (soft → hard limit
+on Linux, no privilege needed), so most hosts get a usable budget without
+any configuration. The budget you actually have — and whether any buffer
+has degraded to swappable memory — is visible live in the **F1 help
+popup** (Global group, "Secure memory: …" line).
 
 FFmpeg video/audio decode has an additional boundary: the app locks and wipes
 its AVIO buffers, demux packets, software frames, PCM, conversion scratch, and
@@ -106,112 +128,9 @@ is an honest capability status, not an mlock-budget failure.
 > swaps to **zram** (compressed, RAM-resident) the degraded bytes still land
 > in RAM, just compressed; on a host with **true hibernation** (suspend-to-
 > disk), *every* resident page — locked or not — is written to the hibernate
-> image, and on Windows `VirtualLock` explicitly does not exclude pages from
-> `hiberfil.sys`. If your threat model includes the physical disk, that is a
+> image. If your threat model includes the physical disk, that is a
 > host-policy decision (zram-only swap, no hibernate), not something the app
 > can enforce.
-
-### Windows — manual build walkthrough (checkout → binary)
-
-Unless noted otherwise, every command below runs in a **"x64 Native Tools
-Command Prompt for VS 2022"** (Developer prompt) from the repository root —
-the build needs `cl.exe` and `msbuild` on `PATH`.
-
-**1. Prerequisites (once per machine)**
-
-| Tool | Needed for | How to install |
-|---|---|---|
-| **Visual Studio 2022** (*Desktop development with C++* workload) | MSVC compiler, `msbuild`, the Developer prompt | Installer from <https://visualstudio.microsoft.com/downloads/> (Community is fine), or `winget install Microsoft.VisualStudio.2022.Community` — then tick *Desktop development with C++* in the VS Installer |
-| **git** | checkout + submodules | <https://git-scm.com/download/win>, or `winget install Git.Git` |
-| **cmake** | building the vendored static libs | `choco install cmake` or `winget install Kitware.CMake` (VS 2022's bundled cmake works too) |
-| **ninja** | cmake generator for the vendored libs | `choco install ninja` or `winget install Ninja-build.Ninja` |
-| **nasm** | assembler for libaom (AVIF stills + AV1 video) | `choco install nasm`, `winget install -e --id NASM.NASM` (**from an elevated prompt** — non-admin winget silently installs nothing), or installer from <https://nasm.us> — then add `C:\Program Files\NASM` to `PATH` yourself (none of them do it for you) |
-| **MSYS2** — *optional, only for video/audio support* | POSIX shell + make for FFmpeg's `./configure` (MSVC still does the compiling) | <https://www.msys2.org> installer, or `winget install MSYS2.MSYS2` (default location `C:\msys64`) |
-
-Notes:
-
-- Stick with **VS 2022's** MSVC: the newer VS 18 / MSVC 14.51 toolchain
-  miscompiles freshly-built vendored libs in Release (CI pins `windows-2022`
-  for the same reason — see `.github/workflows/ci.yml`).
-- Chocolatey (`choco`) itself installs per <https://chocolatey.org/install>;
-  `winget` ships with Windows 10/11. Either works — pick one.
-- After installing, verify from a **fresh** VS 2022 Developer prompt that
-  `git`, `cmake`, `ninja`, and `nasm` all resolve (`where cmake` etc.) —
-  PATH edits only apply to newly-opened prompts.
-
-**2. Checkout**
-
-```bat
-git clone --recurse-submodules https://github.com/Zellione/obscura-safe-vault.git
-cd obscura-safe-vault
-```
-
-(After a plain clone, `git submodule update --init --recursive` — `setup.bat`
-also does this for you.)
-
-**3. One-time setup**
-
-```bat
-scripts\setup.bat
-```
-
-Initialises submodules, downloads `bin\premake5.exe`, and cmake-builds the
-vendored static libs: SDL3 into `vendor\SDL3\build\`, and the image/archive
-codecs (libwebp, libde265, libaom, libheif, zlib, xz, libarchive) into
-`vendor\codecs-prefix\`. Already-built libs are skipped, so re-running is cheap.
-
-**4. Optional — vendored FFmpeg (video/audio decode)**
-
-`setup.bat` does **not** build FFmpeg. Without it the app still builds and
-runs fine — the video code paths are simply compiled out. To include them,
-launch an MSYS2 shell **from the same VS Developer prompt** so it inherits the
-MSVC environment:
-
-```bat
-C:\msys64\msys2_shell.cmd -msys -use-full-path -here
-```
-
-then, inside that MSYS2 shell:
-
-```bash
-pacman -S --needed make diffutils pkgconf
-mv /usr/bin/link.exe /usr/bin/link.exe.msys2-bak   # MSYS2's link.exe shadows MSVC's linker
-scripts/build_ffmpeg_windows.sh
-```
-
-This builds a decode-only, MSVC-ABI static FFmpeg into `vendor\codecs-prefix\`
-(see the header of `scripts/build_ffmpeg_windows.sh` for the details). Back in
-the Developer prompt, continue with step 5 — premake picks the FFmpeg prefix
-up automatically.
-
-**5. Generate the Visual Studio solution**
-
-```bat
-bin\premake5.exe vs2022
-```
-
-This writes `ObscuraSafeVault.sln`. Re-run it after adding, moving, or
-removing source files.
-
-**6. Build**
-
-```bat
-msbuild ObscuraSafeVault.sln /m /p:Configuration=Debug /p:Platform=x64
-msbuild ObscuraSafeVault.sln /m /p:Configuration=Release /p:Platform=x64
-```
-
-(Or open `ObscuraSafeVault.sln` in the VS IDE and build the wanted
-configuration there.)
-
-**7. Result**
-
-```
-build\bin\Debug\osv.exe       build\bin\Debug\osv_tests.exe
-build\bin\Release\osv.exe     build\bin\Release\osv_tests.exe
-```
-
-Day-to-day rebuilds only need step 6; step 5 after source-file changes; step 3
-(and 4) only when vendored submodules change.
 
 ---
 
@@ -226,6 +145,7 @@ scripts/test.sh             # Debug build, run all tests
 scripts/test.sh --asan      # build + run under AddressSanitizer + UBSan/LSan
 scripts/test.sh --release   # optimised build
 scripts/test.sh --gmake     # GNU Make instead of Ninja
+scripts/test.sh --tsan      # ThreadSanitizer (debug)
 ```
 
 You can also run the binary directly after a build:
@@ -289,51 +209,6 @@ sudo rm /var/lib/systemd/coredump/core.osv.<uid>.<pid>.<ts>.zst
 Prefer a Release build for day-to-day use with a live vault; use a Debug
 build against a disposable vault when you need to debug.
 
-### Windows crash dumps (WER LocalDumps)
-
-Windows has no core-dump equivalent enabled by default. To capture a crash
-dump of `osv.exe` for debugging, register it with Windows Error Reporting's
-LocalDumps facility (admin shell for HKLM, or use HKCU for the current user
-only):
-
-```bat
-reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\osv.exe" /v DumpFolder /t REG_EXPAND_SZ /d "%LOCALAPPDATA%\CrashDumps" /f
-reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\osv.exe" /v DumpType /t REG_DWORD /d 2 /f
-reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\osv.exe" /v DumpCount /t REG_DWORD /d 3 /f
-```
-
-PowerShell equivalent:
-
-```powershell
-$k = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\osv.exe"
-New-Item -Path $k -Force | Out-Null
-Set-ItemProperty $k DumpFolder -Type ExpandString -Value "%LOCALAPPDATA%\CrashDumps"
-Set-ItemProperty $k DumpType  -Type DWord -Value 2   # 2 = full dump, 1 = mini dump
-Set-ItemProperty $k DumpCount -Type DWord -Value 3   # keep at most 3 dumps
-```
-
-- `DumpType`: `1` = mini dump (stacks + module list — usually enough for a
-  crash address), `2` = full dump (entire process memory — needed when heap
-  state matters, e.g. allocator corruption like the Phase 80 `0xc0000374`).
-- Dumps land in `%LOCALAPPDATA%\CrashDumps` as `osv.exe.<pid>.dmp` after the
-  next crash. Open them with WinDbg (`.ecxr; k`) or Visual Studio
-  (File → Open → the `.dmp`, then "Debug with Native Only").
-
-**Removing the configuration** (do this when you are done debugging):
-
-```bat
-reg delete "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\osv.exe" /f
-```
-
-…and delete any collected dumps from the dump folder.
-
-> ⚠️ **Security:** a dump of a running osv contains decrypted media and key
-> material — the exact data the vault exists to protect, and the reason
-> Linux Release builds disable core dumps outright
-> (`platform::disable_core_dumps()`). Treat crash dumps as debug-only
-> artifacts on a trusted machine: never share one, remove the LocalDumps
-> registration when finished, and delete every collected `.dmp`.
-
 ---
 
 ## Project structure
@@ -357,13 +232,15 @@ vendor/
   libaom/      git submodule — AVIF stills (via libheif) + FFmpeg AV1 video decode
   libheif/     git submodule — HEIC/AVIF container
   ffmpeg/      git submodule — video/audio decode-only
+  libva/       git submodule — VA-API public headers (Linux hw decode, headers only)
+  vaapi-shim/  — VAAPI dlopen-forwarding shim (Phase 43 Part 2)
   miniz/       git submodule — ZIP/CBZ import
   json/        git submodule — nlohmann/json (archive meta.json)
   libarchive/  git submodule — 7z/RAR/TAR import (read-only)
   zlib/ xz/    git submodules — libarchive's gzip/LZMA2 filter deps
 tests/         Unit and integration tests (Phase 1+)
 scripts/       setup.sh · gen.sh · build.sh · test.sh · build_codecs.sh ·
-               build_ffmpeg_windows.sh · package.sh · fix_ninja_deps.sh
+               package.sh · fix_ninja_deps.sh
 ```
 
 ---

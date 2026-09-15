@@ -63,14 +63,6 @@ no-FFmpeg parity suite is 2051/0.
 Ninja does not treat a rebuilt `libavcodec.a` as a build edge (it's a prebuilt external file), so the test binary
 silently keeps running against the stale archive. This cost a debugging session. Recorded in this memory.
 
-**Windows `.a` → `.lib` rename (`scripts/build_ffmpeg_windows.sh`):** premake emits bare
-`links{"<name>"}` on every platform, which MSVC resolves to `<name>.lib`, but FFmpeg always installs
-`lib<name>.a`. The script copies each one after `make install` — **every FFmpeg library premake links
-must appear in that loop's name list** (`avfilter avformat avcodec swscale swresample avutil`).
-avfilter was missed when Phase 52 enabled yadif: `libavfilter.a` existed, so premake's
-`os.isfile(lib/libavfilter.a)` guard fired and emitted the link, while `avfilter.lib` never did —
-both MSVC legs died at link with LNK1181/LNK1104 while every Linux leg stayed green.
-
 **Phase 47 addition:** the `gif` **decoder**, **demuxer**, AND **parser** are enabled.
 The parser is essential: FFmpeg n7.1.1's gif demuxer emits raw 1024-byte chunks and sets
 `need_parsing = AVSTREAM_PARSE_FULL_RAW` (libavformat/gifdec.c:224), delegating frame reassembly
@@ -78,28 +70,20 @@ to libavcodec/gif_parser.c. Without the parser, `av_read_frame` returns unparsed
 decoding fails on the second chunk with `AVERROR_INVALIDDATA`. **Document this in the build scripts
 — a future FFmpeg bump must not silently regress it.**
 
-**Phase 43 Part 1:** `--enable-d3d11va` added to the Windows FFmpeg configure
-invocation (`scripts/build_ffmpeg_windows.sh`) — a hwaccel dispatch-registration
-flag, not a new dependency (FFmpeg's `hwcontext_d3d11va.c` loads `d3d11.dll`/
-`dxgi.dll` via `LoadLibrary`/`GetProcAddress` at runtime). `premake5.lua`
-defines `OSV_HWACCEL_D3D11VA` only on Windows, gated on `OSV_VENDORED_AV`
-already being present. `media::HwAccelContext` (`src/media/hw_accel.{h,cpp}`)
-attempts real hw device creation once per process (cached outcome) and
-`VideoDecodeWorker` (`src/media/video_decode_worker.{h,cpp}`) attaches it via
-`try_attach_hwaccel()` when opening its codec context; any hard decode
-failure with a hw context active drops it and reopens a fresh software-only
-context for the rest of that clip (`reopen_software_only()`).
-`media::test_only_force_hwaccel_unavailable(bool)` makes this fallback path
-deterministic in tests, since no CI runner has a real GPU decode block.
-
 **PHASE 43 GAP (FIXED IN PHASE 52):** Phase 43 declared `--enable-d3d11va` / `--enable-vaapi`
 but never passed `--enable-hwaccel=`, so `CONFIG_HWACCELS` remained 0 and NO hwaccel symbols
 were compiled. Hardware decode was a silent no-op from Phase 43 through Phase 51. Phase 52 adds
-the complete `--enable-hwaccel=` lists: VAAPI (Linux): h264,hevc,vp8,vp9,av1,mpeg2,mpeg4,vc1,wmv3,h263;
-D3D11VA (Windows): h264,hevc,vp9,av1,mpeg2,vc1,wmv3. Now hwaccels actually compile and function.
-Codec coverage confirmed against `vendor/ffmpeg/configure`'s `*_d3d11va_hwaccel_deps`/`*_vaapi_hwaccel_deps`
-entries. Linux VAAPI (`OSV_HWACCEL_VAAPI`) requires the dlopen shim (not a direct system `libva`
-link) to keep hw decode optional at the binary level; see `docs/superpowers/specs/2026-07-17-hardware-video-decode-design.md`.
+the complete `--enable-hwaccel=` lists: VAAPI (Linux): h264,hevc,vp8,vp9,av1,mpeg2,mpeg4,vc1,wmv3,h263.
+Now hwaccels actually compile and function. Codec coverage confirmed against
+`vendor/ffmpeg/configure`'s `*_vaapi_hwaccel_deps` entries. Linux VAAPI (`OSV_HWACCEL_VAAPI`)
+requires the dlopen shim (not a direct system `libva` link) to keep hw decode optional at the
+binary level; see `docs/superpowers/specs/2026-07-17-hardware-video-decode-design.md`.
+
+**Phase 101 (Windows removal):** the D3D11VA branch in `src/media/hw_accel.{h,cpp}` (the
+`OSV_HWACCEL_D3D11VA` define + the `AV_HWDEVICE_TYPE_D3D11VA` constexpr + the Windows-only
+`pick_hw_format`/`try_attach_hwaccel`/`transfer_hw_frame` paths) is gone. Only the Linux
+VAAPI backend survives (`OSV_HWACCEL_VAAPI`); the `src/media/hw_accel.cpp` file has been
+collapsed to a single `#if defined(OSV_HWACCEL_VAAPI)` block, no more `#elif D3D11VA` branch.
 
 **Phase 43 Part 2:** `vendor/libva` (headers-only submodule, pinned to tag 2.22.0/commit 217da1c28336d6a7e9c0c4cb8f1c303968a675f1) supplies the `va.h`/`va_drm.h` headers needed for FFmpeg's `hwcontext_vaapi.c` configure-time link probe. `vendor/vaapi-shim` (static library, osv_vaapi_shim.a) provides the ~36 `va*` symbols FFmpeg's hwcontext_vaapi.c/vaapi_decode.c/vaapi_h264.c/vaapi_hevc.c/vaapi_vp8.c/vaapi_vp9.c/vaapi_mjpeg.c reference, implemented as dlopen("libva.so.2"/"libva-drm.so.2") + dlsym() forwarding — this keeps the real libva.so.2 dependency 100% optional at runtime (no DT_NEEDED entry, silently unavailable if absent, matching the "linked only when present" pattern link_av()/link_archive() use). `--enable-vaapi` added to FFmpeg's configure in `scripts/build_codecs.sh`; `premake5.lua` defines `OSV_HWACCEL_VAAPI` only on Linux, gated on `OSV_VENDORED_AV` already being present. `media::HwAccelContext` (same file as Part 1) gains the VAAPI backend (AV_HWDEVICE_TYPE_VAAPI, DRM render-node path — no X11 dependency). `vaGetDisplay` (X11 variant) and `vaGetDisplayWin32` are excluded from the shim; only `vaGetDisplayDRM` is forwarded.
 
@@ -130,9 +114,8 @@ vendored static libs.
 - RNG shim: `src/crypto/random.*` — `getrandom` (Linux), `BCryptGenRandom` (Windows)
 
 ## Platforms
-- Primary: Linux x86_64 (Arch). Also: Windows x86_64. macOS is not supported
-  (dropped from CI/build/source — see `#error` guard in `src/crypto/random.cpp`).
-- Windows Release builds as `WindowedApp` (no console); Debug keeps console.
+- Primary: Linux x86_64 (Arch). Windows support removed (Phase 101);
+  macOS was dropped earlier (see `#error` guard in `src/crypto/random.cpp`).
 
 ## Asset loading
 App tries `assets/…` relative to cwd first, then `SDL_GetBasePath()` (packaged installs).
@@ -211,8 +194,9 @@ un-compilable in that configuration from Phase 47 to Phase 57 (it opened
 test files broken the same way. It is also CI's only proof that animated WebP
 plays without FFmpeg.
 
-**Codec cache auto-bust (Phase 52):** The CI cache key for the vendored codec build
-is generated from the hash of `.gitmodules` + `scripts/build_codecs.sh` + `scripts/build_ffmpeg_windows.sh`.
-When either build script changes (e.g., new decoder list, new demuxer, new hwaccel registration),
-the cache automatically misses and a full FFmpeg rebuild is triggered on both CI legs — no
-manual version bump needed.
+**Codec cache auto-bust (Phase 52, bumped to v6 in Phase 101):** The CI cache key for the
+vendored codec build is generated from the hash of `.gitmodules` + `scripts/build_codecs.sh`.
+When the build script changes (e.g., new decoder list, new demuxer, new hwaccel registration),
+the cache automatically misses and a full FFmpeg rebuild is triggered on the Linux leg — no
+manual version bump needed. Phase 101 bumped the cache key from `-v4-` to `-v6-` because the
+hashed build-script set shrank (`build_codecs.bat` + `build_ffmpeg_windows.sh` are gone).
