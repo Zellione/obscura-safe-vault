@@ -8,43 +8,29 @@
 #include <fstream>
 #include <string>
 
-#if defined(__linux__)
-#  include <sys/prctl.h>
-#  include <sys/resource.h>
-#elif defined(__APPLE__)
-#  include <sys/resource.h>
-#elif defined(_WIN32)
-// _dup / _dup2 / _close / _fileno
-#  include <io.h>
-#endif
+#include <sys/prctl.h>
+#include <sys/resource.h>
 
 namespace fs = std::filesystem;
 
-// Test that disable_core_dumps() can be called without crashing.
-// On Linux, also verify that prctl(PR_GET_DUMPABLE) returns 0 after the call.
+// Test that disable_core_dumps() can be called without crashing, and verify
+// that prctl(PR_GET_DUMPABLE) returns 0 after the call.
 TEST(disable_core_dumps_call)
 {
     // Capture original state for restoration (test isolation).
-#if defined(__linux__) || defined(__APPLE__)
     struct rlimit old_limit;
     getrlimit(RLIMIT_CORE, &old_limit);
-#endif
 
-    // The function should not crash or throw.
     platform::disable_core_dumps();
 
-#if defined(__linux__)
-    // On Linux, verify that PR_GET_DUMPABLE is now 0 (dumps disabled).
+    // Verify PR_GET_DUMPABLE is now 0 (dumps disabled).
     int dumpable = prctl(PR_GET_DUMPABLE);
     CHECK_EQ(dumpable, 0);
     // restore: keep the shared test process dumpable for later tests
     (void)prctl(PR_SET_DUMPABLE, 1);
-#endif
 
-#if defined(__linux__) || defined(__APPLE__)
     // Restore original rlimit.
     setrlimit(RLIMIT_CORE, &old_limit);
-#endif
 }
 
 TEST(redirect_stream_to_file_succeeds_and_writes_land_in_the_file)
@@ -74,8 +60,7 @@ TEST(redirect_stream_to_file_returns_false_for_an_unopenable_path)
     // the real stdout/stderr this function targets in production — rather
     // than a freshly heap-allocated one: per POSIX, a stream's state after a
     // failed freopen() is undefined, so deciding whether to fclose() a fresh
-    // allocation afterward is inherently unsafe (observed in practice: one
-    // libc leaves it allocated, another frees it, depending on the platform).
+    // allocation afterward is inherently unsafe.
     // Nothing else in this test binary reads from stdin.
     fs::path bad = fs::temp_directory_path() / "osv_no_such_dir_xyz" / "file.log";
     CHECK_FALSE(platform::redirect_stream_to_file(stdin, bad));
@@ -83,45 +68,13 @@ TEST(redirect_stream_to_file_returns_false_for_an_unopenable_path)
 
 TEST(redirect_diagnostics_to_log_file_call)
 {
-    // No-op outside Windows Release; must be callable without crashing
-    // everywhere (it's called unconditionally from App::init() in Release).
-    //
-    // On Windows it is NOT a no-op: it freopen()s this process's real stdout and
-    // stderr onto config_dir()/console.log. Left that way it would swallow every
-    // remaining line of the test run — including the FAIL line of any later test,
-    // leaving CI with a bare "exit code 1" and no idea which test broke (that is
-    // exactly what happened here). So duplicate both fds first and restore them
-    // afterwards, keeping the redirect scoped to this test.
-#if defined(_WIN32)
-    const int saved_out = _dup(_fileno(stdout));
-    const int saved_err = _dup(_fileno(stderr));
-#endif
-
+    // POSIX logs go directly to stderr; the function is a no-op and must be
+    // callable without crashing (called unconditionally from App::init()).
     platform::redirect_diagnostics_to_log_file();
-
-#if defined(_WIN32)
-    std::fflush(stdout);
-    std::fflush(stderr);
-    if (saved_out >= 0) {
-        _dup2(saved_out, _fileno(stdout));
-        _close(saved_out);
-    }
-    if (saved_err >= 0) {
-        _dup2(saved_err, _fileno(stderr));
-        _close(saved_err);
-    }
-    std::clearerr(stdout);
-    std::clearerr(stderr);
-
-    // If the restore silently failed, every later test's output is lost, so say
-    // so now while this line can still be seen.
-    CHECK_TRUE(saved_out >= 0 && saved_err >= 0);
-#endif
 }
 
-// grow_secure_mem_budget() must report success for a small request on every
-// supported platform: 1 MiB is below both the Linux RLIMIT_MEMLOCK default
-// (8 MiB) and anything a grown Windows working set provides.
+// grow_secure_mem_budget() must report success for a small request: 1 MiB is
+// below the Linux RLIMIT_MEMLOCK default (8 MiB).
 TEST(grow_secure_mem_budget_small_request_succeeds)
 {
     CHECK_TRUE(platform::grow_secure_mem_budget(1u << 20));
@@ -135,7 +88,6 @@ TEST(lockable_budget_bytes_is_positive)
     CHECK(platform::lockable_budget_bytes() > 0);
 }
 
-#if defined(__linux__)
 // On Linux the call raises the soft RLIMIT_MEMLOCK to the hard limit (the
 // most an unprivileged process may lock without configuration changes).
 TEST(grow_secure_mem_budget_raises_soft_memlock_to_hard)
@@ -145,19 +97,3 @@ TEST(grow_secure_mem_budget_raises_soft_memlock_to_hard)
     REQUIRE(getrlimit(RLIMIT_MEMLOCK, &rl) == 0);
     CHECK_TRUE(rl.rlim_cur == rl.rlim_max);
 }
-#endif
-
-#if defined(_WIN32)
-// The point of the Windows path: VirtualLock's per-process cap is the minimum
-// working-set size (~200 KB by default — below a single decoded thumbnail
-// strip, let alone an image), so without growing it every multi-MiB
-// SecureBytes silently degrades to swappable memory. After growing the
-// budget, a 4 MiB lock must actually succeed.
-TEST(grow_secure_mem_budget_makes_multi_mib_lock_succeed)
-{
-    REQUIRE(platform::grow_secure_mem_budget(64u << 20));
-    crypto::SecureBytes sb;
-    REQUIRE(sb.resize(4u << 20));
-    CHECK_TRUE(sb.is_locked());
-}
-#endif

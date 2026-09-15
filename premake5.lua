@@ -53,30 +53,20 @@ local san_suffix = _OPTIONS["asan"] and "-asan" or (_OPTIONS["tsan"] and "-tsan"
 -- falls back to a system SDL3 install.
 -- ---------------------------------------------------------------------------
 local function link_sdl3()
-    -- CMake names the static lib libSDL3.a on Linux but SDL3-static.lib
-    -- on Windows; the Visual Studio generator nests it in a per-config dir.
+    -- Linux only (Phase 101): cmake names the static lib libSDL3.a on every
+    -- supported platform (Ninja/Make); the Windows SDL3-static.lib + VS
+    -- generator variants are gone.
     local sdl3_build = path.join(os.getcwd(), "vendor/SDL3/build")
-    local candidates = {
-        { lib = "SDL3",        file = "libSDL3.a",               dir = sdl3_build },                        -- Linux (Ninja/Make)
-        { lib = "SDL3-static", file = "SDL3-static.lib",         dir = sdl3_build },                        -- Windows (Ninja)
-        { lib = "SDL3-static", file = "Release/SDL3-static.lib", dir = path.join(sdl3_build, "Release") },  -- Windows (VS generator)
-    }
-    for _, c in ipairs(candidates) do
-        if os.isfile(path.join(sdl3_build, c.file)) then
-            includedirs { "vendor/SDL3/include" }
-            libdirs     { c.dir }
-            links       { c.lib }
-            defines     { "OSV_VENDORED_SDL3" }
-            return
-        end
+    if os.isfile(path.join(sdl3_build, "libSDL3.a")) then
+        includedirs { "vendor/SDL3/include" }
+        libdirs     { sdl3_build }
+        links       { "SDL3" }
+        defines     { "OSV_VENDORED_SDL3" }
+        return
     end
     -- Fall back to a system SDL3 install.
     filter "system:linux"
         includedirs { "/usr/include/SDL3" }
-        links       { "SDL3" }
-    filter "system:windows"
-        includedirs { "C:/SDL3/include" }
-        libdirs     { "C:/SDL3/lib/x64" }
         links       { "SDL3" }
     filter {}
 end
@@ -86,11 +76,6 @@ end
 local function link_platform_extras()
     filter "system:linux"
         links { "dl", "pthread", "m" }
-    filter "system:windows"
-        -- bcrypt: crypto/random.cpp. The rest: static SDL3.
-        links { "bcrypt", "winmm", "imm32", "version", "setupapi",
-                "ole32", "oleaut32", "advapi32", "shell32", "user32",
-                "gdi32", "uuid" }
     filter {}
 end
 
@@ -128,19 +113,17 @@ local function link_image_codecs()
         defines { "OSV_VENDORED_CODECS", "LIBHEIF_STATIC_BUILD" }
         -- libwebpdemux (Phase 57) provides WebPAnimDecoder for animated WebP and
         -- depends on libwebp, so it must precede it in the static link order.
-        filter "system:windows"
-            links { "heif", "libde265", "aom", "libwebpdemux", "libwebp", "libsharpyuv" }
-        filter { "system:not windows" }
-            links { "heif", "de265", "aom", "webpdemux", "webp", "sharpyuv" }
-        filter {}
+        -- Linux-only (Phase 101): the lib-de265 / libwebp / libsharpyuv prefixes
+        -- were a Windows cmake quirk and are no longer needed.
+        links { "heif", "de265", "aom", "webpdemux", "webp", "sharpyuv" }
     end
 end
 
 -- ---------------------------------------------------------------------------
--- FFmpeg/libav (decode-only static; Phase 15; Windows leg via MSYS2 +
--- --toolchain=msvc, see scripts/build_ffmpeg_windows.sh). Same staging prefix
--- as the image codecs. Linked only when present so a build missing it stays
--- green; OSV_VENDORED_AV gates the dependent code/tests.
+-- FFmpeg/libav (decode-only static; Phase 15). Linux-only build script
+-- (scripts/build_codecs.sh) since Phase 101. Same staging prefix as the image
+-- codecs. Linked only when present so a build missing it stays green;
+-- OSV_VENDORED_AV gates the dependent code/tests.
 -- Static-link order: dependents before dependencies (format → codec → swscale → util).
 -- When --asan is passed, prefer vendor/codecs-prefix-asan/ (built by
 -- scripts/build_codecs.sh --asan) with a fallback + warning to the normal prefix.
@@ -201,63 +184,35 @@ local function link_av()
             links { "aom" }
         end
 
-        -- Hardware video decode dispatch (Phase 43 Part 1: Windows D3D11VA;
-        -- Phase 43 Part 2: Linux VAAPI). Defined only on Windows, since
-        -- scripts/build_ffmpeg_windows.sh is the only configure invocation
-        -- passing --enable-d3d11va so far — same "define only when the
-        -- underlying capability is actually present" pattern as
-        -- OSV_VENDORED_AV itself. No new link dependency: FFmpeg's
-        -- hwcontext_d3d11va.c loads d3d11.dll/dxgi.dll via LoadLibrary/
-        -- GetProcAddress at runtime, not a link-time .lib.
-        filter "system:windows"
-            defines { "OSV_HWACCEL_D3D11VA" }
-        filter {}
-
-        -- Linux VAAPI (Phase 43 Part 2). Unlike D3D11VA, hwcontext_vaapi.c's
-        -- va* symbol references DO need an actual link-time provider (no
-        -- LoadLibrary-style indirection in FFmpeg's own code for VAAPI) —
-        -- vendor/vaapi-shim (osv_vaapi_shim.a) supplies them via its own
-        -- internal dlopen("libva.so.2")/dlsym() forwarding, so this app
-        -- itself never gets a DT_NEEDED entry on libva (see the design
-        -- spec's "VAAPI linking: why dlopen, not a system link"). Must be
-        -- linked AFTER avcodec/avutil above — same static-archive
+        -- Hardware video decode dispatch (Phase 43 Part 2: Linux VAAPI).
+        -- hwcontext_vaapi.c's va* symbol references DO need an actual
+        -- link-time provider (no LoadLibrary-style indirection in FFmpeg's own
+        -- code for VAAPI) — vendor/vaapi-shim (osv_vaapi_shim.a) supplies
+        -- them via its own internal dlopen("libva.so.2")/dlsym() forwarding,
+        -- so this app itself never gets a DT_NEEDED entry on libva (see the
+        -- design spec's "VAAPI linking: why dlopen, not a system link"). Must
+        -- be linked AFTER avcodec/avutil above — same static-archive
         -- dependents-before-dependencies reasoning as the "aom" relisting
         -- above.
-        filter "system:linux"
-            if os.isfile(path.join(prefix, "lib/libosv_vaapi_shim.a")) then
-                defines { "OSV_HWACCEL_VAAPI" }
-                links   { "osv_vaapi_shim" }
-                externalincludedirs {
-                    path.join(os.getcwd(), "vendor/vaapi-shim"),
-                    path.join(os.getcwd(), "vendor/libva"),
-                }
-            end
-        filter {}
+        if os.isfile(path.join(prefix, "lib/libosv_vaapi_shim.a")) then
+            defines { "OSV_HWACCEL_VAAPI" }
+            links   { "osv_vaapi_shim" }
+            externalincludedirs {
+                path.join(os.getcwd(), "vendor/vaapi-shim"),
+                path.join(os.getcwd(), "vendor/libva"),
+            }
+        end
     end
 end
 
 -- ---------------------------------------------------------------------------
--- Locate a CMake-built static lib in a codec staging prefix. CMake's default
--- static-lib naming differs by toolchain: GCC/Clang (Linux Ninja/gmake2)
--- follow the Unix convention lib<name>.a; MSVC (Windows Ninja build) has no
--- "lib" prefix and uses <name>.lib instead. None of the vendored codecs
--- (archive, aom, ...) override CMAKE_STATIC_LIBRARY_PREFIX/SUFFIX — they only
--- set OUTPUT_NAME (e.g. libarchive/libarchive/CMakeLists.txt's
--- archive_static -> "archive") — so the platform-default naming applies and
--- checking only for the Unix name silently no-ops the whole feature on
--- Windows even though the lib built fine (unlike FFmpeg's own non-cmake build,
--- which always emits lib<name>.a regardless of platform; see
--- scripts/build_ffmpeg_windows.sh). Returns the found path, or nil.
+-- Locate a CMake-built static lib in a codec staging prefix. Linux-only
+-- (Phase 101): cmake's Unix convention lib<name>.a applies on the only
+-- supported platform.
 -- ---------------------------------------------------------------------------
 local function cmake_static_lib(prefix, name)
-    local candidates = {
-        path.join(prefix, "lib/lib" .. name .. ".a"),   -- Linux/GCC/Clang
-        path.join(prefix, "lib/" .. name .. ".lib"),    -- Windows/MSVC
-    }
-    for _, f in ipairs(candidates) do
-        if os.isfile(f) then return f end
-    end
-    return nil
+    return os.isfile(path.join(prefix, "lib/lib" .. name .. ".a")) and
+           path.join(prefix, "lib/lib" .. name .. ".a") or nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -293,14 +248,9 @@ local function link_archive()
         -- unresolved __imp_archive_* at link time. Same pattern as
         -- LIBHEIF_STATIC_BUILD above for libheif's own dllexport/dllimport guard.
         defines     { "OSV_VENDORED_ARCHIVE", "LIBARCHIVE_STATIC" }
-        -- zlib's static target is named "zs" on Windows (its CMakeLists appends
-        -- a static-only suffix there) but plain "z" everywhere else; liblzma and
-        -- libarchive itself keep the same OUTPUT_NAME on every platform.
-        filter "system:windows"
-            links { "archive", "lzma", "zs" }
-        filter "system:not windows"
-            links { "archive", "lzma", "z" }
-        filter {}
+        -- Linux-only (Phase 101): zlib's "zs" Windows-only static suffix is
+        -- gone; zlib + liblzma + libarchive all use their canonical Linux names.
+        links { "archive", "lzma", "z" }
     end
 end
 
@@ -313,13 +263,6 @@ workspace "ObscuraSafeVault"
     cppdialect "C++23"
     warnings   "Extra"
 
-    -- MSVC: compile each project's sources in parallel (/MP). Only the Visual
-    -- Studio generator consumes this — Ninja/gmake parallelise via their own
-    -- schedulers. Without it, msbuild /m only parallelises across the 4
-    -- projects while every .cpp inside a project compiles serially, which is
-    -- what made the Windows CI leg spend 10-15 min in cl.exe.
-    multiprocessorcompile "On"
-
     -- Path (relative to the repo root / process cwd) of the bundled UI font.
     defines { 'OSV_DEFAULT_FONT="assets/fonts/NotoSans-Regular.ttf"' }
 
@@ -330,11 +273,7 @@ workspace "ObscuraSafeVault"
         defines  { "OSV_DEBUG" }
         symbols  "On"
         optimize "Off"
-    -- _DEBUG selects the debug CRT + _ITERATOR_DEBUG_LEVEL=2 on MSVC, which can't
-    -- link against our Release-built vendored static libs (SDL3/codecs). Keep it
-    -- off on Windows; see the system:windows filter below which pins the release
-    -- runtime there for all configs.
-    filter { "configurations:Debug", "system:not windows" }
+    filter { "configurations:Debug", "system:linux" }
         defines  { "_DEBUG" }
 
     filter "configurations:Release"
@@ -342,37 +281,15 @@ workspace "ObscuraSafeVault"
         optimize "Speed"
         symbols  "Off"
 
-    -- The "x64" platform name sets architecture x86_64 on Linux/Windows.
+    -- The "x64" platform name sets architecture x86_64 on Linux.
     filter { "platforms:x64" }
         architecture "x86_64"
-
-    -- Windows: stop windows.h defining min/max macros (they break std::min/max),
-    -- trim its include surface, and silence MSVC's fopen_s nagging (portable
-    -- stdio is deliberate; see vault/file_util.h).
-    filter "system:windows"
-        defines { "NOMINMAX", "WIN32_LEAN_AND_MEAN", "_CRT_SECURE_NO_WARNINGS" }
-        -- /Z7 (C7-compatible debug info embedded in the .obj) instead of /Zi:
-        -- /Zi funnels every parallel cl.exe instance through one mspdbsrv.exe
-        -- to serialise PDB writes, which throttles the /MP parallelism enabled
-        -- above. /Z7 needs no PDB server, and it is also what a future
-        -- ccache/sccache integration would require (neither can cache /Zi).
-        debugformat "c7"
-        -- All vendored static libs (SDL3, libheif/libde265/libaom/libwebp) are
-        -- built Release, so pin the whole workspace to the release dynamic CRT and
-        -- release iterators in every config; otherwise a Debug build hits LNK2038
-        -- (RuntimeLibrary / _ITERATOR_DEBUG_LEVEL mismatch) against them.
-        runtime "Release"
-        defines { "_ITERATOR_DEBUG_LEVEL=0" }
 
     -- Make exploit mitigations explicit instead of relying on distribution or
     -- toolchain defaults, which differ between local builds and CI images.
     filter { "system:linux", "configurations:Release", "toolset:gcc or clang" }
         buildoptions { "-fPIE" }
         linkoptions  { "-pie", "-Wl,-z,relro,-z,now" }
-
-    filter { "system:windows", "configurations:Release", "toolset:msc" }
-        buildoptions { "/guard:cf" }
-        linkoptions  { "/guard:cf", "/CETCOMPAT" }
 
     -- Opt-in sanitizers (gcc/clang). Applies to every project in the workspace.
     filter { "options:asan", "toolset:gcc or clang" }
@@ -480,13 +397,6 @@ project "osv"
         defines { "_FORTIFY_SOURCE=3" }
     filter {}
 
-    -- GUI app on Windows (no console window) for Release; keep the console in
-    -- Debug so stderr logging is visible.
-    filter { "system:windows", "configurations:Release" }
-        kind "WindowedApp"
-        entrypoint "mainCRTStartup"   -- keep standard main(), not WinMain
-    filter {}
-
 -- ---------------------------------------------------------------------------
 -- osv_tests — unit/integration tests for the crypto layer (Phase 1+)
 -- Compiles the test harness + the crypto sources directly (NOT src/app/main.cpp).
@@ -533,6 +443,7 @@ project "osv_tests"
         "src/platform/clipboard_pref.cpp",
         "src/platform/volume_pref.cpp",
         "src/platform/autoplay_pref.cpp",
+        "src/platform/hwaccel_pref.cpp",
         "src/platform/file_dialog.cpp",
         "src/platform/folder_dialog.cpp",
         "src/app/back_click.cpp",

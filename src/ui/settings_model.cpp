@@ -50,7 +50,7 @@ int settings_row_count(const SettingsState& state) noexcept
     case Appearance:
         return 2; // theme, default gallery view
     case Playback:
-        return 1; // Phase 85: auto-play videos
+        return 3; // Phase 85: auto-play videos + Phase 102: hwaccel overrides
     case Browsing:
         return state.vault_unlocked ? 2 : 0; // default sort + tiles show tags
     case TagColours: {
@@ -101,6 +101,12 @@ void change_playback_value(SettingsState& state, int delta) noexcept
     if (state.row == 0) {
         // Toggle autoplay on any nonzero delta
         state.autoplay = !state.autoplay;
+    } else if (state.row == 1) {
+        // Phase 102: toggle the hardware-decode gate
+        state.enable_hardware = !state.enable_hardware;
+    } else if (state.row == 2) {
+        // Phase 102: toggle the force-software override
+        state.force_software = !state.force_software;
     }
 }
 

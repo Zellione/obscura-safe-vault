@@ -87,16 +87,19 @@ jobs:
 
       # -----------------------------------------------------------------------
       # Vendored image codecs (libwebp + HEIC/AVIF stack) + FFmpeg -> vendor/codecs-prefix.
-      # Keyed on the submodule set (.gitmodules) AND scripts/build_codecs.{sh,bat}, so a
-      # change to the codec/FFmpeg configure flags (e.g. enabling audio decoders) busts the
-      # cache and forces a rebuild — build_codecs skips when the lib already exists.
+      # Keyed on the submodule set (.gitmodules) AND scripts/build_codecs.sh,
+      # so a change to the codec/FFmpeg configure flags (e.g. enabling audio
+      # decoders) busts the cache and forces a rebuild — build_codecs skips
+      # when the lib already exists. Phase 101: build_codecs.bat and
+      # build_ffmpeg_windows.sh are gone, so only build_codecs.sh is hashed.
+      # Cache key bumped to v6 because the build-script set shrank.
       # -----------------------------------------------------------------------
       - name: Cache vendored codecs build
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v4-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
+          key: codecs-v6-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
@@ -139,294 +142,6 @@ jobs:
         with:
           name: osv-linux-tarball
           path: dist/*.tar.gz
-          retention-days: 7
-
-  # ===========================================================================
-  # Windows — MSVC via premake vs2022 + MSBuild. The vendored SDL3 static lib
-  # is cmake-built with Ninja (cl on PATH via msvc-dev-cmd) and lands at
-  # vendor/SDL3/build/SDL3-static.lib, which premake's link_sdl3() picks up.
-  # ===========================================================================
-  windows:
-    name: MSVC / ${{ matrix.config }} / Windows
-    # Pinned to windows-2022 (VS 2022 — the toolchain this project targets, see
-    # AGENTS.md). The newer windows-latest image (VS 18 / MSVC 14.51) miscompiles
-    # a freshly-built vendored lib (SDL3/codecs) in Release, crashing osv_tests;
-    # main only masks it via a stale build cache. Phase 15 (PR1) surfaced it by
-    # busting the cache (adding vendor/ffmpeg changed .gitmodules, which is in the
-    # SDL3 + codec cache keys). Revisit when the newer image's MSVC is fixed.
-    runs-on: windows-2022
-    if: github.event_name != 'schedule'
-
-    strategy:
-      fail-fast: false
-      matrix:
-        config: [Debug, Release]
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          submodules: false
-
-      # Submodules fetched separately (not via actions/checkout) so the fetch
-      # can be retried against a transient submodule-host outage — 2026-08-31
-      # CI #741 died here: aomedia.googlesource.com (vendor/libaom) returned
-      # HTTP 503 mid-checkout, failing the TSan + MSVC-Debug jobs with "git
-      # exited 128". See .github/actions/checkout-submodules.
-      - name: Checkout submodules (retried)
-        uses: ./.github/actions/checkout-submodules
-
-      - name: Set up MSVC environment
-        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
-
-      # nasm is required to build libaom (Stage B); not preinstalled on the runner.
-      # Unlike ccache, nasm is a hard requirement (libaom will not build without
-      # it), so this cannot degrade — but it fails the same way: `choco install`
-      # exits 0 after installing nothing when the community feed 503s, and the
-      # build then dies much later with an unrelated-looking error. Retry, then
-      # fail HERE with a message that names the actual cause.
-      - name: Install nasm
-        shell: pwsh
-        run: |
-          foreach ($attempt in 1..3) {
-            choco install nasm --no-progress -y
-            if (Test-Path "C:\Program Files\NASM\nasm.exe") { break }
-            Write-Host "::warning::nasm install attempt $attempt produced no nasm.exe (Chocolatey feed down?)"
-            if ($attempt -lt 3) { Start-Sleep -Seconds (15 * $attempt) }
-          }
-          if (-not (Test-Path "C:\Program Files\NASM\nasm.exe")) {
-            Write-Host "::error::nasm could not be installed after 3 attempts (Chocolatey feed unavailable); libaom cannot build"
-            exit 1
-          }
-          echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      # FFmpeg's ./configure needs a POSIX shell + standard unix tools; MSVC
-      # itself (cl/link/lib) still does the actual compiling via
-      # --toolchain=msvc. path-type: inherit carries the MSVC env (from
-      # msvc-dev-cmd above) and nasm's PATH entry into the MSYS2 shell.
-      # pkgconf: configure's --enable-libaom (Phase 40, AV1 software decode)
-      # detects libaom via pkg-config against the aom.pc build_codecs.bat
-      # installs into vendor/codecs-prefix.
-      - name: Set up MSYS2 (for FFmpeg build)
-        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
-        with:
-          msystem: MSYS
-          path-type: inherit
-          install: make diffutils pkgconf
-
-      # MSYS2 ships its own coreutils link.exe (a symlink tool) in /usr/bin,
-      # which shadows MSVC's link.exe on PATH — rename it out of the way so
-      # FFmpeg's --toolchain=msvc build finds the real linker.
-      - name: Hide MSYS2's link.exe (avoid MSVC link.exe collision)
-        shell: msys2 {0}
-        run: |
-          if [ -f /usr/bin/link.exe ]; then
-            mv /usr/bin/link.exe /usr/bin/link.exe.msys2-bak
-          fi
-
-      # ---------------------------------------------------------------------
-      # ccache for the app build (MSVC support, ccache >= 4.8). Wiring follows
-      # ccache's documented MSBuild recipe: a copy of ccache.exe named cl.exe
-      # is handed to MSBuild via /p:CLToolPath (the shim dir is NOT on PATH,
-      # so ccache resolves the *real* cl.exe through the msvc-dev-cmd PATH
-      # without recursing), /p:TrackFileAccess=false disables the FileTracker
-      # (incompatible with a wrapped compiler; CI builds are full builds, so
-      # nothing is lost), and /p:UseMultiToolTask=true schedules one cl.exe
-      # per source file — replacing /MP, which ccache cannot cache (it would
-      # silently fall back to the real compiler on every TU). Debug info is
-      # /Z7 (premake `debugformat "c7"`), the other ccache prerequisite.
-      # Fallback is safe by construction: an invocation ccache can't cache is
-      # forwarded to the real cl.exe — worst case is an uncached compile.
-      # ---------------------------------------------------------------------
-      # ccache is an ACCELERATOR, never a correctness requirement — the comment
-      # block above already states the fallback is safe by construction. That
-      # intent was not honoured for the *install*: Chocolatey's community feed is
-      # a third-party service, and when it returned 503 on 2026-08-05 the whole
-      # Windows matrix went red on a source tree that builds fine. Worse,
-      # `choco install` exits 0 even when it installs nothing ("Chocolatey
-      # installed 0/0 packages"), so the real cause surfaced two steps later as a
-      # confusing "Cannot find path ...\lib\ccache\".
-      # Retry the transient case, then degrade to an uncached build.
-      - name: Install ccache (best-effort)
-        shell: pwsh
-        run: |
-          $found = $null
-          foreach ($attempt in 1..3) {
-            choco install ccache --no-progress -y
-            $found = Get-ChildItem "C:\ProgramData\chocolatey\lib\ccache\tools" `
-                       -Recurse -Filter ccache.exe -ErrorAction SilentlyContinue |
-                     Select-Object -First 1
-            if ($found) { break }
-            Write-Host "::warning::ccache install attempt $attempt produced no ccache.exe (Chocolatey feed down?)"
-            if ($attempt -lt 3) { Start-Sleep -Seconds (15 * $attempt) }
-          }
-          if (-not $found) {
-            Write-Host "::warning::ccache unavailable — building WITHOUT compiler caching (slower, still correct)"
-          }
-
-      # Primary key never matches (sha suffix), so every run restores the
-      # newest prior cache for this config and saves its own updated copy.
-      - name: Cache ccache directory
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .ccache
-          key: ccache-win2022-${{ matrix.config }}-${{ github.sha }}
-          restore-keys: |
-            ccache-win2022-${{ matrix.config }}-
-
-      - name: Set up ccache cl.exe shim
-        shell: pwsh
-        run: |
-          $shim = Join-Path $env:RUNNER_TEMP "ccache-cl"
-          New-Item -ItemType Directory -Force -Path $shim | Out-Null
-          # (Get-Command ccache) resolves to Chocolatey's SHIM exe; copying
-          # that as cl.exe breaks masquerading (the shim re-launches the real
-          # ccache with argv[0]="ccache", which then expects a compiler as its
-          # first argument and dies with exit -1 on "/c"). Copy the real
-          # binary out of the package's tools dir instead.
-          $real = Get-ChildItem "C:\ProgramData\chocolatey\lib\ccache\tools" `
-                    -Recurse -Filter ccache.exe -ErrorAction SilentlyContinue |
-                  Select-Object -First 1
-          if (-not $real) {
-            # No ccache (see the install step). Leave OSV_CCACHE_SHIM empty; the
-            # build step then omits every ccache-specific MSBuild property and
-            # compiles with the real cl.exe and /MP as it did before ccache existed.
-            Write-Host "::warning::ccache.exe not found — skipping the cl.exe shim"
-            Add-Content -Path $env:GITHUB_ENV -Encoding utf8 -Value "OSV_CCACHE_SHIM="
-            exit 0
-          }
-          Copy-Item $real.FullName (Join-Path $shim "cl.exe")
-          Add-Content -Path $env:GITHUB_ENV -Encoding utf8 -Value @(
-            "OSV_CCACHE_SHIM=$shim",
-            "CCACHE_DIR=$env:GITHUB_WORKSPACE\.ccache",
-            # content: re-hash the compiler binary instead of trusting mtime,
-            # so a runner-image MSVC update invalidates cleanly.
-            "CCACHE_COMPILERCHECK=content",
-            "CCACHE_MAXSIZE=800M"
-          )
-          ccache --zero-stats
-
-      - name: Cache premake5 binary
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: cache-premake5
-        with:
-          path: bin/premake5.exe
-          key: premake5-5.0.0-beta8-windows
-
-      - name: Download premake5
-        if: steps.cache-premake5.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path bin | Out-Null
-          curl.exe -fsSL "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-windows.zip" -o "$env:TEMP\premake5.zip"
-          tar -xf "$env:TEMP\premake5.zip" -C bin
-
-      - name: Cache vendored SDL3 build
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: cache-sdl3
-        with:
-          path: vendor/SDL3/build
-          # Cache key includes the toolchain tag (win2022) so a runner-image /
-          # MSVC change rebuilds the static libs with the matching compiler.
-          # Without it, libs built by one MSVC get linked into an app built by
-          # another → ABI mismatch / static-init crash (Phase 15 PR1).
-          key: sdl3-win2022-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
-
-      - name: Build vendored SDL3
-        if: steps.cache-sdl3.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          cmake -S vendor/SDL3 -B vendor/SDL3/build `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DSDL_STATIC=ON -DSDL_SHARED=OFF `
-            -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_INSTALL_TESTS=OFF `
-            -G "Ninja"
-          cmake --build vendor/SDL3/build --parallel
-
-      - name: Cache vendored codecs build
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: cache-codecs
-        with:
-          path: vendor/codecs-prefix
-          # win2022 toolchain tag — see the SDL3 cache key note above. Bumped
-          # to v5 (from v4): the key previously hashed only .gitmodules, so a
-          # decoder-flag-only change to build_codecs.bat / build_ffmpeg_windows.sh
-          # (e.g. Phase 38's vp8/vp9 addition) silently reused a stale prefix —
-          # mirror the Linux leg's key, which already hashes its build scripts.
-          key: codecs-v5-${{ runner.os }}-win2022-${{ hashFiles('.gitmodules', 'scripts/build_codecs.bat', 'scripts/build_ffmpeg_windows.sh') }}-${{ runner.arch }}
-
-      - name: Build vendored codecs
-        if: steps.cache-codecs.outputs.cache-hit != 'true'
-        shell: cmd
-        run: scripts\build_codecs.bat
-
-      # Decode-only static FFmpeg, built separately from build_codecs.bat since
-      # it needs FFmpeg's own configure/make (not cmake) — see
-      # scripts/build_ffmpeg_windows.sh for the --toolchain=msvc details.
-      - name: Build vendored FFmpeg (Windows, MSVC toolchain)
-        if: steps.cache-codecs.outputs.cache-hit != 'true'
-        shell: msys2 {0}
-        run: scripts/build_ffmpeg_windows.sh
-
-      - name: Generate VS2022 solution
-        run: bin\premake5.exe vs2022
-
-      # CLToolPath/TrackFileAccess/UseMultiToolTask: see the ccache comment
-      # block above. EnforceProcessCountAcrossBuilds keeps the per-file cl
-      # scheduling within the machine's core budget across the /m project nodes.
-      # The ccache-specific properties are added ONLY when the shim exists. Without
-      # ccache they would be actively harmful: UseMultiToolTask replaces /MP, so
-      # passing it with no compiler cache gives up parallel compilation and buys
-      # nothing. `$args` is a PowerShell automatic variable — hence $msbuildArgs.
-      - name: Build (${{ matrix.config }})
-        shell: pwsh
-        run: |
-          $msbuildArgs = @(
-            "ObscuraSafeVault.sln", "/m",
-            "/p:Configuration=${{ matrix.config }}", "/p:Platform=x64"
-          )
-          if ($env:OSV_CCACHE_SHIM) {
-            $msbuildArgs += @(
-              "/p:CLToolPath=$env:OSV_CCACHE_SHIM",
-              "/p:TrackFileAccess=false",
-              "/p:UseMultiToolTask=true",
-              "/p:EnforceProcessCountAcrossBuilds=true"
-            )
-          } else {
-            Write-Host "::warning::building without ccache (uncached compile)"
-          }
-          msbuild @msbuildArgs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      # Hit/miss numbers for this run — the tell-tale if ccache ever starts
-      # falling back (e.g. "unsupported compiler option" after a flag change).
-      - name: ccache stats
-        if: env.OSV_CCACHE_SHIM != ''
-        shell: pwsh
-        run: ccache --show-stats -v
-
-      - name: Run tests (${{ matrix.config }})
-        env:
-          SDL_VIDEODRIVER: dummy
-        run: ./build/bin/${{ matrix.config }}/osv_tests.exe
-
-      # -----------------------------------------------------------------------
-      # Packaging (Release leg only) — portable zip, same script the Release
-      # workflow runs (there with the tag's version instead of "dev").
-      # -----------------------------------------------------------------------
-      - name: Package (portable zip)
-        if: matrix.config == 'Release'
-        shell: pwsh
-        env:
-          OSV_VERSION: dev
-        run: scripts\package.ps1
-
-      - name: Upload package
-        if: matrix.config == 'Release'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: osv-windows-zip
-          path: dist/*.zip
           retention-days: 7
 
   # ===========================================================================
@@ -487,7 +202,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v4-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
+          key: codecs-v6-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
@@ -556,7 +271,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v4-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
+          key: codecs-v6-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
@@ -631,7 +346,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v4-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
+          key: codecs-v6-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
@@ -701,7 +416,7 @@ jobs:
         id: cache-codecs-asan
         with:
           path: vendor/codecs-prefix-asan
-          key: codecs-asan-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
+          key: codecs-asan-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh') }}-${{ runner.arch }}
 
       - name: Build ASAN-instrumented vendored codecs
         if: steps.cache-codecs-asan.outputs.cache-hit != 'true'
@@ -866,7 +581,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v4-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
+          key: codecs-v6-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: env.SONAR_TOKEN != '' && steps.cache-codecs.outputs.cache-hit != 'true'

@@ -32,11 +32,11 @@
 #include <monocypher.h>
 
 #if defined(_WIN32)
-#  include <windows.h>
-#else
+#  error "Windows is no longer supported (Linux only since Phase 101)"
+#endif
+
 #  include <sys/mman.h>
 #  include <unistd.h>
-#endif
 
 namespace crypto {
 
@@ -102,18 +102,11 @@ inline void clear_opaque_plaintext_seen_for_tests() noexcept
 }
 
 // Platform-appropriate remedy advice for the once-per-process mlock warning.
-// On Windows the cap is the process's minimum working-set size (VirtualLock),
-// not RLIMIT_MEMLOCK, so ulimit advice would be meaningless there. Startup
-// grows the budget via platform::grow_secure_mem_budget() (harden.h); a
-// failure after that means the machine is under real memory pressure.
+// Startup grows the budget via platform::grow_secure_mem_budget() (harden.h);
+// a failure after that means the machine is under real memory pressure.
 inline const char* mlock_fail_hint() noexcept
 {
-#if defined(_WIN32)
-    return "process working set too small — startup grows it via "
-           "SetProcessWorkingSetSize, so the system is likely low on memory";
-#else
     return "RLIMIT_MEMLOCK too low? Raise with: ulimit -l / systemd LimitMEMLOCK";
-#endif
 }
 
 // Body of the once-per-process mlock warning. Split from the once-gate so the
@@ -135,18 +128,10 @@ namespace detail {
 
 inline size_t memory_page_size() noexcept
 {
-#if defined(_WIN32)
-    static const size_t page_size = [] {
-        SYSTEM_INFO info{};
-        GetSystemInfo(&info);
-        return static_cast<size_t>(info.dwPageSize);
-    }();
-#else
     static const size_t page_size = [] {
         const long n = ::sysconf(_SC_PAGESIZE);
         return n > 0 ? static_cast<size_t>(n) : static_cast<size_t>(4096);
     }();
-#endif
     return page_size;
 }
 
@@ -176,9 +161,6 @@ inline uintptr_t page_base(uintptr_t address) noexcept
 inline bool os_lock_range(uintptr_t first, size_t length) noexcept
 {
     auto* p = std::bit_cast<std::byte*>(first);
-#if defined(_WIN32)
-    return VirtualLock(p, length) != 0;
-#else
     if (::mlock(p, length) != 0) return false;
 
     // Defense-in-depth: mark the page as not dumpable (Linux only).
@@ -188,18 +170,12 @@ inline bool os_lock_range(uintptr_t first, size_t length) noexcept
     (void)::madvise(p, length, MADV_DONTDUMP);
 #  endif
     return true;
-#endif
 }
 
 inline void os_unlock_range(uintptr_t first, size_t length) noexcept
 {
-#if defined(_WIN32)
-    auto* p = std::bit_cast<std::byte*>(first);
-    (void)VirtualUnlock(p, length);
-#else
     const auto* p = std::bit_cast<const std::byte*>(first);
     (void)::munlock(p, length);
-#endif
 }
 
 struct AddedPageRefs {

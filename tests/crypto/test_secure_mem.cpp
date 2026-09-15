@@ -93,15 +93,10 @@ TEST(mlock_warning_prints_without_crashing)
     CHECK_TRUE(true);  // reaching here is the assertion — neither call may throw
 }
 
-// The once-per-process mlock warning must give remedy advice for THIS
-// platform: "ulimit -l" means nothing on Windows, where the cap is the
-// process's minimum working-set size, not RLIMIT_MEMLOCK.
+// The once-per-process mlock warning must give remedy advice: raising the soft
+// RLIMIT_MEMLOCK to the hard limit covers the common case.
 TEST(mlock_fail_hint_names_platform_remedy)
 {
     const std::string_view hint = crypto::mlock_fail_hint();
-#if defined(_WIN32)
-    CHECK_TRUE(hint.find("working set") != std::string_view::npos);
-#else
     CHECK_TRUE(hint.find("ulimit") != std::string_view::npos);
-#endif
 }

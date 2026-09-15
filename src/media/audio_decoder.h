@@ -43,6 +43,10 @@ public:
 
 private:
     void reset();
+    // Convert the current frame_ into an AudioFrame and push it onto `out`.
+    // Phase 104: extracted from the decode() lambda so the lambda itself
+    // stays under SonarQube's 20-line cap.
+    void push_frame(std::vector<AudioFrame>& out);
 
     AVCodecContext* ctx_         = nullptr;
     AVFrame*        frame_       = nullptr;

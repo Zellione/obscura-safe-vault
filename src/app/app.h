@@ -152,6 +152,22 @@ private:
     static constexpr double            BADGE_WINDOW_SECS = 10.0;
     double                             badge_elapsed_ = BADGE_WINDOW_SECS;
 
+    // Phase 102: brief on-screen toast confirming a hwaccel toggle. Shows
+    // the new value of whichever toggle was just pressed (Ctrl+Shift+H or
+    // Ctrl+Shift+F) so the user has visible feedback that the keystroke
+    // landed. Same shape as the keep_unlocked badge: time-bounded visibility,
+    // pure predicate, drawing lives in app.cpp.
+    // Phase 104: bundled into HwAccelToastState (was 3 fields, now 1) so App
+    // stays at ≤ 20 instance fields (cpp:S1820). The visibility predicate in
+    // app/hwaccel_toast.h takes (text, elapsed, window) — same shape as
+    // keep_unlocked_badge.h's should_show_badge.
+    struct HwAccelToastState {
+        std::string text;
+        double      elapsed = WINDOW_SECS;
+        static constexpr double WINDOW_SECS = 2.5;
+    };
+    HwAccelToastState                  hwaccel_toast_;
+
     // The two global overlays App owns and intercepts a function key for.
     struct Overlays {
         ui::HelpPopupState help;       // Phase 39: F1 help popup

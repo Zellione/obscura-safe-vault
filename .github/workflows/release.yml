@@ -130,7 +130,7 @@ jobs:
         id: cache-codecs
         with:
           path: vendor/codecs-prefix
-          key: codecs-v4-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh', 'scripts/build_codecs.bat') }}-${{ runner.arch }}
+          key: codecs-v6-${{ runner.os }}-${{ hashFiles('.gitmodules', 'scripts/build_codecs.sh') }}-${{ runner.arch }}
 
       - name: Build vendored codecs
         if: steps.cache-codecs.outputs.cache-hit != 'true'
@@ -157,134 +157,6 @@ jobs:
           name: osv-linux-tarball
           path: dist/*.tar.gz
           retention-days: 7
-
-  # ===========================================================================
-  # Windows — MSVC Release portable zip (mirrors ci.yml windows, Release)
-  # ===========================================================================
-  windows:
-    name: Package / Windows
-    # windows-2022 pin: see the note in ci.yml (newer image's MSVC miscompiles
-    # freshly-built vendored libs in Release).
-    runs-on: windows-2022
-    timeout-minutes: 120
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          submodules: false
-
-      # Same retried submodule fetch as ci.yml — aomedia.googlesource.com 503d
-      # mid-checkout on 2026-08-31 and took the whole pipeline down.
-      - name: Checkout submodules (retried)
-        uses: ./.github/actions/checkout-submodules
-
-      - name: Set up MSVC environment
-        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
-
-      - name: Install nasm
-        shell: pwsh
-        run: |
-          choco install nasm --no-progress -y
-          echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      # See ci.yml's Windows leg for the full rationale (FFmpeg needs a POSIX
-      # shell + configure/make; MSVC itself still does the compiling via
-      # --toolchain=msvc).
-      - name: Set up MSYS2 (for FFmpeg build)
-        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
-        with:
-          msystem: MSYS
-          path-type: inherit
-          install: make diffutils
-
-      - name: Hide MSYS2's link.exe (avoid MSVC link.exe collision)
-        shell: msys2 {0}
-        run: |
-          if [ -f /usr/bin/link.exe ]; then
-            mv /usr/bin/link.exe /usr/bin/link.exe.msys2-bak
-          fi
-
-      - name: Cache premake5 binary
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: cache-premake5
-        with:
-          path: bin/premake5.exe
-          key: premake5-5.0.0-beta8-windows
-
-      - name: Download premake5
-        if: steps.cache-premake5.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path bin | Out-Null
-          curl.exe -fsSL "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-windows.zip" -o "$env:TEMP\premake5.zip"
-          tar -xf "$env:TEMP\premake5.zip" -C bin
-
-      - name: Cache vendored SDL3 build
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: cache-sdl3
-        with:
-          path: vendor/SDL3/build
-          key: sdl3-win2022-${{ hashFiles('.gitmodules') }}-${{ runner.arch }}
-
-      - name: Build vendored SDL3
-        if: steps.cache-sdl3.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          cmake -S vendor/SDL3 -B vendor/SDL3/build `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DSDL_STATIC=ON -DSDL_SHARED=OFF `
-            -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_INSTALL_TESTS=OFF `
-            -G "Ninja"
-          cmake --build vendor/SDL3/build --parallel
-
-      - name: Cache vendored codecs build
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: cache-codecs
-        with:
-          path: vendor/codecs-prefix
-          # Bumped to v5 (from v4): mirror ci.yml's Windows leg — the key
-          # previously hashed only .gitmodules, so a decoder-flag-only change
-          # to build_codecs.bat / build_ffmpeg_windows.sh silently reused a
-          # stale prefix instead of rebuilding.
-          key: codecs-v5-${{ runner.os }}-win2022-${{ hashFiles('.gitmodules', 'scripts/build_codecs.bat', 'scripts/build_ffmpeg_windows.sh') }}-${{ runner.arch }}
-
-      - name: Build vendored codecs
-        if: steps.cache-codecs.outputs.cache-hit != 'true'
-        shell: cmd
-        run: scripts\build_codecs.bat
-
-      - name: Build vendored FFmpeg (Windows, MSVC toolchain)
-        if: steps.cache-codecs.outputs.cache-hit != 'true'
-        shell: msys2 {0}
-        run: scripts/build_ffmpeg_windows.sh
-
-      - name: Generate VS2022 solution
-        run: bin\premake5.exe vs2022
-
-      - name: Build (Release)
-        run: msbuild ObscuraSafeVault.sln /m /p:Configuration=Release /p:Platform=x64
-
-      - name: Run tests (Release)
-        env:
-          SDL_VIDEODRIVER: dummy
-        run: ./build/bin/Release/osv_tests.exe
-
-      - name: Package (portable zip)
-        shell: pwsh
-        env:
-          OSV_VERSION: ${{ github.ref_name }}
-        run: |
-          $env:OSV_VERSION = $env:OSV_VERSION -replace '^v', ''
-          scripts\package.ps1
-
-      - name: Upload package
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: osv-windows-zip
-          path: dist/*.zip
-          retention-days: 7
-
   # ===========================================================================
   # Publish — gather the packages, checksum them, and attach everything
   # to the tag's GitHub release (created as a draft if it doesn't exist yet).
@@ -293,7 +165,7 @@ jobs:
     name: Publish release assets
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [linux, windows]
+    needs: [linux]
     permissions:
       contents: write
 

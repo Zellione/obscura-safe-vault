@@ -1,7 +1,7 @@
 # obscura-safe-vault — Core (memory graph root)
 
-Multi-platform (Linux → Windows; no macOS) encrypted photo gallery. A single `.osv` vault
-file. Application-owned decrypted data lives only in `mlock`'d, wipe-on-release heap;
+Linux-only encrypted photo gallery. A single `.osv` vault file.
+Application-owned decrypted data lives only in `mlock`'d, wipe-on-release heap;
 opaque codec/driver buffers are minimized and surfaced as a degraded F1 status (Phase 97).
 Plaintext is never written to disk except the one gated deviation (`ui::export.*`). Galleries freely nest and may hold any mix of images,
 videos, and sub-galleries as direct children (no leaf-only restriction — sub-galleries display

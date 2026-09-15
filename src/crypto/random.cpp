@@ -2,12 +2,8 @@
 
 #include "platform/safe_print.h"
 
-#if defined(_WIN32)
-#  include <windows.h>
-#  include <bcrypt.h>
-#  pragma comment(lib, "bcrypt.lib")
-#elif defined(__APPLE__)
-#  error "macOS is no longer supported (Linux and Windows only)"
+#if defined(__APPLE__)
+#  error "macOS is no longer supported (Linux only since Phase 101)"
 #else
 #  include <cerrno>
 #  include <cstdio>
@@ -15,23 +11,6 @@
 #endif
 
 namespace crypto {
-
-#if defined(_WIN32)
-
-bool fill_random(std::span<uint8_t> out) noexcept
-{
-    NTSTATUS s = BCryptGenRandom(
-        nullptr, out.data(), static_cast<ULONG>(out.size()),
-        BCRYPT_USE_SYSTEM_PREFERRED_RNG);
-    if (s != 0) {
-        platform::safe_println(stderr, "[crypto] BCryptGenRandom failed (0x{:08x})",
-                     static_cast<uint32_t>(s));
-        return false;
-    }
-    return true;
-}
-
-#else // Linux / other POSIX with getrandom
 
 static bool fill_from_urandom(std::span<uint8_t> out) noexcept
 {
@@ -66,7 +45,5 @@ bool fill_random(std::span<uint8_t> out) noexcept
     }
     return true;
 }
-
-#endif
 
 } // namespace crypto

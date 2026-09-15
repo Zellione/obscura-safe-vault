@@ -47,6 +47,60 @@ TEST(secure_mem_status_line_reports_unlimited_budget)
     CHECK(line.find("unlimited") != std::string::npos);
 }
 
+// Phase 102: hwaccel_status_line is a pure helper that renders the F1 popup's
+// "Video decode" row. The user toggles (sw_forced, hw_enabled) take priority
+// over the probe outcome — once the user explicitly chose software, the line
+// reflects that choice regardless of whether the probe would have succeeded.
+// Phase 104: gated on OSV_VENDORED_AV so a build without FFmpeg (--no-av)
+// compiles cleanly — media::HwAccelStatus doesn't exist there and the
+// probe-outcome strings ("VAAPI OK", "unavailable", "not attempted")
+// don't apply. The override strings ("force-software", "disabled by
+// Ctrl+Shift+H") DO apply on every build since they reflect user choice,
+// not the codec probe.
+#if defined(OSV_VENDORED_AV) && defined(OSV_HWACCEL_VAAPI)
+
+TEST(hwaccel_status_line_force_software_overrides_everything)
+{
+    // sw_forced=true wins regardless of probe outcome and hw_enabled state.
+    const std::string line = ui::hwaccel_status_line(
+        /*probe_status=*/2 /*Unavailable*/, /*hw_enabled=*/true,  /*sw_forced=*/true);
+    CHECK(line.find("force-software") != std::string::npos);
+    CHECK(line.find("vainfo") == std::string::npos);   // probe outcome is suppressed
+}
+
+TEST(hwaccel_status_line_hardware_disabled_overrides_probe)
+{
+    // hw_enabled=false (and sw_forced=false) wins over a successful probe —
+    // the user explicitly turned the auto-probe off.
+    const std::string line = ui::hwaccel_status_line(
+        /*probe_status=*/1 /*Ok*/, /*hw_enabled=*/false, /*sw_forced=*/false);
+    CHECK(line.find("disabled by Ctrl+Shift+H") != std::string::npos);
+}
+
+TEST(hwaccel_status_line_ok_when_probe_succeeds_and_no_overrides)
+{
+    const std::string line = ui::hwaccel_status_line(
+        /*probe_status=*/1 /*Ok*/, /*hw_enabled=*/true, /*sw_forced=*/false);
+    CHECK(line.find("VAAPI OK") != std::string::npos);
+}
+
+TEST(hwaccel_status_line_unavailable_when_probe_fails_and_no_overrides)
+{
+    const std::string line = ui::hwaccel_status_line(
+        /*probe_status=*/2 /*Unavailable*/, /*hw_enabled=*/true, /*sw_forced=*/false);
+    CHECK(line.find("unavailable") != std::string::npos);
+    CHECK(line.find("vainfo") != std::string::npos);
+}
+
+TEST(hwaccel_status_line_not_attempted_before_first_clip)
+{
+    const std::string line = ui::hwaccel_status_line(
+        /*probe_status=*/0 /*NotAttempted*/, /*hw_enabled=*/true, /*sw_forced=*/false);
+    CHECK(line.find("not attempted") != std::string::npos);
+}
+
+#endif   // OSV_VENDORED_AV && OSV_HWACCEL_VAAPI
+
 TEST(help_popup_open_close_toggle)
 {
     HelpPopupState s;

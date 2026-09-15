@@ -16,10 +16,14 @@ extern "C" {
 #pragma GCC diagnostic pop
 #endif
 
+#include <cstdlib>
 #include <mutex>
 #include <optional>
+#include <string>
 
 #include "media/ffmpeg_secure.h"
+#include "media/hwaccel_setting.h"
+#include "platform/safe_print.h"
 
 namespace media {
 
@@ -40,37 +44,83 @@ void test_only_force_is_hw_format_frame(std::optional<bool> force)
     force_is_hw_format_state() = force;
 }
 
-#if defined(OSV_HWACCEL_D3D11VA) || defined(OSV_HWACCEL_VAAPI)
+#if defined(OSV_HWACCEL_VAAPI)
 
-#if defined(OSV_HWACCEL_D3D11VA)
-constexpr AVHWDeviceType kHwDeviceType = AV_HWDEVICE_TYPE_D3D11VA;
-constexpr AVPixelFormat  kHwPixFmt     = AV_PIX_FMT_D3D11;
-#elif defined(OSV_HWACCEL_VAAPI)
 constexpr AVHWDeviceType kHwDeviceType = AV_HWDEVICE_TYPE_VAAPI;
 constexpr AVPixelFormat  kHwPixFmt     = AV_PIX_FMT_VAAPI;
-#endif
 
 namespace {
-bool         g_force_unavailable = false;
-bool         g_device_attempted  = false;
-AVBufferRef* g_device_ctx        = nullptr;
-std::mutex   g_device_mutex;
 
-// Attempts real hw device creation exactly once per process; every call
-// after the first returns the cached outcome — mirrors
-// should_warn_mlock_once()'s cache-the-outcome pattern (src/crypto/secure_mem.h)
-// for a best-effort platform capability. g_device_mutex guards all reads/
-// writes of the three globals above (not just this function) since
-// test_only_force_hwaccel_unavailable() also mutates them from test code.
+// Phase 102: cached outcome of the first probe attempt. Once true, every
+// subsequent try_attach_hwaccel() call returns the same answer without
+// retrying — mirrors the should_warn_mlock_once() / should_warn_mlock_once
+// pattern (src/crypto/secure_mem.h) for a best-effort platform capability.
+// Phase 104: the test-only force-unavailable flag and the mutex moved in
+// here too, so there are no namespace-scope globals left in this TU
+// (clears cpp:S5421) and the force-flag is now mutex-protected (was a
+// latent thread-safety bug).
+struct ProbeCache {
+    std::once_flag       once;
+    AVBufferRef*         device_ctx        = nullptr;
+    HwAccelStatus        status            = HwAccelStatus::NotAttempted;
+    std::optional<int>   va_status;
+    std::optional<int>   open_errno;
+    const char*          vendor            = nullptr;
+    bool                 force_unavailable = false;   // test-only override
+    std::mutex           mtx;
+};
+ProbeCache& probe_cache() noexcept
+{
+    static ProbeCache cache;
+    return cache;
+}
+
+// The once-per-process device-creation attempt + diagnostic logging.
+// Outcome is captured into probe_cache() and mirrored into the F1 status
+// (media::hwaccel_status). Thread-safe: every caller gates on the same
+// std::once_flag, so parallel VideoDecodeWorker constructors see one
+// probe run.
 AVBufferRef* cached_device_ctx()
 {
-    std::lock_guard lock(g_device_mutex);
-    if (g_device_attempted) return g_device_ctx;
-    g_device_attempted = true;
-    if (g_force_unavailable) return nullptr;
-    if (av_hwdevice_ctx_create(&g_device_ctx, kHwDeviceType, nullptr, nullptr, 0) < 0)
-        g_device_ctx = nullptr;
-    return g_device_ctx;
+    auto& cache = probe_cache();
+    std::lock_guard lock(cache.mtx);
+    if (cache.device_ctx || cache.status == HwAccelStatus::Unavailable ||
+        cache.status == HwAccelStatus::Ok) {
+        return cache.device_ctx;
+    }
+    if (cache.force_unavailable) {
+        cache.status = HwAccelStatus::Unavailable;
+        return nullptr;
+    }
+
+    // Snapshot the levers the user can actually change at runtime, so the
+    // single log line names the cause + the knobs.
+    const char* libva_driver_name = std::getenv("LIBVA_DRIVER_NAME");
+    const char* libva_drivers_path = std::getenv("LIBVA_DRIVERS_PATH");
+
+    if (av_hwdevice_ctx_create(&cache.device_ctx, kHwDeviceType, nullptr, nullptr, 0) < 0) {
+        // av_hwdevice_ctx_create fails internally at the same steps our
+        // vendor/vaapi-shim surfaces (render-node open / vaInitialize). The
+        // FFmpeg call swallows the specific errno / VAStatus; we can't
+        // recover the exact code without re-running the probe ourselves.
+        // Log the levers + a "see vainfo for details" hint and treat as
+        // Unavailable so callers fall back to software silently. The user
+        // can run `vainfo` from a shell to see exactly which step failed.
+        cache.device_ctx = nullptr;
+        cache.status      = HwAccelStatus::Unavailable;
+        platform::safe_println(stderr,
+            "[HwAccel] VAAPI probe failed: LIBVA_DRIVER_NAME={} LIBVA_DRIVERS_PATH={} — software decode will be used; run `vainfo` for details",
+            libva_driver_name ? libva_driver_name : "(unset)",
+            libva_drivers_path ? libva_drivers_path : "(unset)");
+        return nullptr;
+    }
+
+    cache.status = HwAccelStatus::Ok;
+    platform::safe_println(stderr,
+        "[HwAccel] VAAPI probe: OK; LIBVA_DRIVER_NAME={} LIBVA_DRIVERS_PATH={}",
+        libva_driver_name ? libva_driver_name : "(unset)",
+        libva_drivers_path ? libva_drivers_path : "(unset)");
+    return cache.device_ctx;
 }
 
 bool decoder_supports_hw(const AVCodec* decoder)
@@ -94,7 +144,26 @@ enum AVPixelFormat pick_hw_format(AVCodecContext*, const enum AVPixelFormat* fmt
 
 bool try_attach_hwaccel(AVCodecContext* ctx, const AVCodec* decoder)
 {
-    if (!decoder_supports_hw(decoder)) return false;
+    // Phase 102: user-toggled overrides. Both skip the entire hwaccel path
+    // and keep the worker on a pure software codec context. Tested in
+    // tests/media/test_vaapi_shim.cpp (force_software_decode_pref +
+    // enable_hardware_decode_pref tests).
+    if (!media::enable_hardware_decode()) return false;
+    if (media::force_software_decode()) return false;
+
+    if (!decoder_supports_hw(decoder)) {
+        // Log once per decoder name per process. "no VAAPI hw_config" is
+        // FFmpeg's way of saying the decoder was built without VAAPI
+        // support (codec coverage is controlled by FFmpeg's configure-time
+        // --enable-hwaccel= list).
+        static std::optional<std::string> logged;
+        if (const std::string name = decoder ? decoder->name : "(null)";
+            !logged.has_value() || *logged != name) {
+            platform::safe_println(stderr, "[HwAccel] decoder {} reports no VAAPI hw_config — using software", name);
+            logged = name;
+        }
+        return false;
+    }
     const AVBufferRef* dev = cached_device_ctx();
     if (!dev) return false;
     AVBufferRef* ref = av_buffer_ref(dev);
@@ -106,10 +175,12 @@ bool try_attach_hwaccel(AVCodecContext* ctx, const AVCodec* decoder)
 
 void test_only_force_hwaccel_unavailable(bool force)
 {
-    std::lock_guard lock(g_device_mutex);
-    g_force_unavailable = force;
-    g_device_attempted  = false;   // re-evaluate on the next try_attach_hwaccel() call
-    if (g_device_ctx) av_buffer_unref(&g_device_ctx);
+    auto& cache = probe_cache();
+    std::lock_guard lock(cache.mtx);
+    cache.force_unavailable = force;
+    if (cache.device_ctx) av_buffer_unref(&cache.device_ctx);
+    cache.status = HwAccelStatus::NotAttempted;
+    cache.vendor = nullptr;
 }
 
 bool transfer_hw_frame(const AVFrame* frame, AVFrame* sw_frame)
@@ -130,16 +201,25 @@ bool is_hw_format_frame(const AVFrame* frame)
     return force_is_hw_format_state().value_or(frame->format == kHwPixFmt);
 }
 
-#else  // no OSV_HWACCEL_* compiled in this build (Linux, until Part 2)
+HwAccelStatus hwaccel_status() noexcept
+{
+    auto& cache = probe_cache();
+    std::lock_guard lock(cache.mtx);
+    return cache.status;
+}
+
+#else  // no OSV_HWACCEL_VAAPI compiled in this build
 
 bool try_attach_hwaccel(AVCodecContext*, const AVCodec*) { return false; }
-void test_only_force_hwaccel_unavailable(bool) { /* no OSV_HWACCEL_* macro compiled in; nothing to reset */ }
+void test_only_force_hwaccel_unavailable(bool) { /* no OSV_HWACCEL_VAAPI macro compiled in; nothing to reset */ }
 bool transfer_hw_frame(const AVFrame*, AVFrame*) { return false; }
 
 bool is_hw_format_frame(const AVFrame*)
 {
-    return force_is_hw_format_state().value_or(false);   // no OSV_HWACCEL_* macro compiled in; frames are always software format
+    return force_is_hw_format_state().value_or(false);   // no OSV_HWACCEL_VAAPI macro compiled in; frames are always software format
 }
+
+HwAccelStatus hwaccel_status() noexcept { return HwAccelStatus::NotAttempted; }
 
 #endif
 

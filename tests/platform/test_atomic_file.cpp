@@ -151,7 +151,6 @@ TEST(atomic_create_rejects_unsafe_components)
 
 // --- Symlink at the candidate is never followed (POSIX) --------------------
 
-#if !defined(_WIN32)
 TEST(atomic_create_does_not_follow_a_symlink_at_the_candidate)
 {
     TempDir d("symlink");
@@ -201,7 +200,6 @@ TEST(atomic_create_refuses_a_destination_that_is_a_file)
     // The "directory" is actually a regular file: open(O_DIRECTORY) must fail.
     CHECK_FALSE(platform::create_new_file_within(file, "x.png").has_value());
 }
-#endif
 
 // --- Injected attacker race (deterministic seam) ----------------------------
 

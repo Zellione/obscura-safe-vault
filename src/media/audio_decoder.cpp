@@ -101,44 +101,87 @@ void AudioDecoder::decode(const AVPacket* pkt, std::vector<AudioFrame>& out)
         return;
     }
 
-    // Send packet (may be nullptr to flush/drain)
-    if (avcodec_send_packet(ctx_, pkt) < 0) {
-        platform::safe_println(stderr, "[AudioDecoder] avcodec_send_packet failed");
+    // Phase 103 fix: drain every ready frame into `out`. Logs (once per call,
+    // not per frame) on a non-EAGAIN/non-EOF receive error. Used both BEFORE
+    // and AFTER send_packet — see comments inline.
+    //
+    // Phase 104: the per-frame build (push_frame) was extracted from this
+    // lambda so the lambda itself stays under SonarQube's 20-line cap.
+    auto drain = [&](const char* context) {
+        int ret;
+        while ((ret = avcodec_receive_frame(ctx_, frame_)) == 0) {
+            push_frame(out);
+        }
+        if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) {
+            platform::safe_println(stderr, "[AudioDecoder] receive_frame {} error: {} ({})",
+                        context, ret, av_err2str(ret));
+        }
+    };
+
+    // Always drain whatever the codec has ready BEFORE we send the next
+    // packet. The production caller (VideoDecoder::decode_audio_packet)
+    // pushes one packet per decode() call with no external receive between
+    // calls, so the codec's internal packet queue accumulates — without
+    // this drain, send_packet would return AVERROR(EAGAIN) and (under the
+    // OLD code) the packet would be silently dropped.
+    drain("pre-send");
+
+    // Send the packet (nullptr = drain/flush the decoder).
+    // AVERROR(EAGAIN) means the codec's input queue is full — drain, retry.
+    // Cap the retries so a pathological codec can't loop forever; if the
+    // cap is hit, fall through to the failure branch which logs + returns.
+    constexpr int MAX_SEND_RETRIES = 8;
+    int send_ret = avcodec_send_packet(ctx_, pkt);
+    int attempt = 0;
+    while (send_ret == AVERROR(EAGAIN) && attempt < MAX_SEND_RETRIES) {
+        drain("mid-send retry");
+        send_ret = avcodec_send_packet(ctx_, pkt);
+        ++attempt;
+    }
+
+    if (send_ret < 0) {
+        // Genuine failure (not EAGAIN, or EAGAIN past the retry cap). Log
+        // the actual AVERROR + av_err2str — under the OLD code this branch
+        // also fired for the normal EAGAIN case, swamping stderr with
+        // ~hundreds of "failed" lines per video and dropping the packets.
+        platform::safe_println(stderr,
+            "[AudioDecoder] avcodec_send_packet failed: {} ({})",
+            send_ret, av_err2str(send_ret));
         return;
     }
 
-    // Receive all available frames
-    int ret;
-    while ((ret = avcodec_receive_frame(ctx_, frame_)) == 0) {
-        // Build AudioFrame from the decoded frame
-        const int n = frame_->nb_samples;
-        const int ch = channels_;
+    // Send succeeded — collect any frames the decoder produced.
+    drain("post-send");
+}
 
-        AudioFrame af;
-        af.channels = ch;
-        af.sample_rate = sample_rate_;
+// Convert the current frame_ into an AudioFrame and push it onto `out`.
+// Phase 104: extracted from the decode() lambda so the lambda itself stays
+// under SonarQube's 20-line cap. Caller is responsible for ensuring frame_
+// is in the receive-succeeded state (avcodec_receive_frame returned 0).
+void AudioDecoder::push_frame(std::vector<AudioFrame>& out)
+{
+    const int n = frame_->nb_samples;
+    const int ch = channels_;
 
-        // Calculate PTS in seconds
-        if (frame_->pts != AV_NOPTS_VALUE) {
-            af.pts_seconds = static_cast<double>(frame_->pts) * av_q2d(time_base_);
-        } else {
-            af.pts_seconds = 0.0;
-        }
+    AudioFrame af;
+    af.channels = ch;
+    af.sample_rate = sample_rate_;
 
-        // Use pure interleave function to convert all sample formats to F32
-        if (!interleave_to_f32(frame_->data, frame_->ch_layout.nb_channels, n, ch,
-                               frame_->format, af.samples)) {
-            platform::safe_println(stderr, "[AudioDecoder] Unsupported sample format: {}",
-                        frame_->format);
-            continue;
-        }
-
-        out.push_back(std::move(af));
+    if (frame_->pts != AV_NOPTS_VALUE) {
+        af.pts_seconds = static_cast<double>(frame_->pts) * av_q2d(time_base_);
+    } else {
+        af.pts_seconds = 0.0;
     }
 
-    if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) {
-        platform::safe_println(stderr, "[AudioDecoder] avcodec_receive_frame error: {}", ret);
+    // Use pure interleave function to convert all sample formats to F32
+    if (!interleave_to_f32(frame_->data, frame_->ch_layout.nb_channels, n, ch,
+                           frame_->format, af.samples)) {
+        platform::safe_println(stderr, "[AudioDecoder] Unsupported sample format: {}",
+                    frame_->format);
+        return;
     }
+
+    out.push_back(std::move(af));
 }
 
 

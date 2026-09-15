@@ -33,6 +33,9 @@ docs/superpowers/
 # Ephemeral cold-start handoff (not part of the repo; was historically tracked)
 COLD_HANDOFF.md
 
+# Local scratch plan (untracked working notes for in-flight work)
+PLAN.md
+
 # IDE / editor
 .vscode/
 .idea/

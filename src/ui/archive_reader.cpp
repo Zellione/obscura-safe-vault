@@ -44,22 +44,11 @@ struct archive* open_stream(std::span<const uint8_t> data, const char* passphras
 // `file_paths` is a vector of filesystem::path; ownership remains with caller.
 // The multi-volume open call itself, isolated so the temporary name storage
 // lives exactly as long as the call (libarchive copies each filename at open).
-// Wide variant on Windows: the narrow archive_read_open_filenames() reaches
-// fopen() through the ANSI code page and cannot open a CJK volume name
-// (Phase 72). Narrow UTF-8 elsewhere.
+// Linux paths are already UTF-8, so the narrow archive_read_open_filenames()
+// + path_to_utf8 conversion is correct for every volume name.
 int open_filenames_portable(struct archive* a,
                             const std::vector<std::filesystem::path>& file_paths)
 {
-#if defined(_WIN32)
-    std::vector<std::wstring> vol_strings;
-    vol_strings.reserve(file_paths.size());
-    for (const auto& vol : file_paths) vol_strings.push_back(vol.native());
-    std::vector<const wchar_t*> vol_cstrs;
-    vol_cstrs.reserve(vol_strings.size() + 1);
-    for (const auto& vol_str : vol_strings) vol_cstrs.push_back(vol_str.c_str());
-    vol_cstrs.push_back(nullptr);  // NULL-terminate
-    return archive_read_open_filenames_w(a, vol_cstrs.data(), 10240);
-#else
     std::vector<std::string> vol_strings;
     vol_strings.reserve(file_paths.size());
     for (const auto& vol : file_paths) vol_strings.push_back(platform::path_to_utf8(vol));
@@ -68,7 +57,6 @@ int open_filenames_portable(struct archive* a,
     for (const auto& vol_str : vol_strings) vol_cstrs.push_back(vol_str.c_str());
     vol_cstrs.push_back(nullptr);  // NULL-terminate
     return archive_read_open_filenames(a, vol_cstrs.data(), 10240);
-#endif
 }
 
 struct archive* open_stream_files(const std::vector<std::filesystem::path>& file_paths,

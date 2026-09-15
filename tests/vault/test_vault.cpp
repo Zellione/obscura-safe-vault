@@ -7,9 +7,7 @@
 #include <string>
 #include <vector>
 
-#ifndef _WIN32
 #include <sys/stat.h>
-#endif
 
 #include "image/fixtures.h"
 #include "platform/path_utf8.h"
@@ -122,7 +120,6 @@ TEST(vault_create_failure_removes_the_exclusively_created_file)
           == vault::VaultResult::Ok);
 }
 
-#ifndef _WIN32
 TEST(vault_create_file_is_owner_only)
 {
     TempVault tv("perm");
@@ -151,7 +148,6 @@ TEST(vault_open_enforces_owner_only)
     REQUIRE(::stat(tv.path.c_str(), &sb) == 0);
     CHECK_EQ(static_cast<int>(sb.st_mode & 0777), 0600);
 }
-#endif
 
 TEST(vault_add_and_read_image_same_session)
 {

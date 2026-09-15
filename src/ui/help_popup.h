@@ -45,6 +45,21 @@ void toggle_help(HelpPopupState& s);
 //   degraded      — crypto::mlock_failure_seen() (some buffer failed to lock)
 [[nodiscard]] std::string secure_mem_status_line(size_t budget_bytes, bool degraded);
 
+// Phase 102: one-line report of the VAAPI hwaccel status + the user-toggled
+// overrides, shown in the F1 Global group so a user can see whether hardware
+// decode is actually engaging AND whether the user toggled it off.
+// Pure in (probe_status, hw_enabled, sw_forced) — the caller queries
+// media::hwaccel_status(), media::enable_hardware_decode(), and
+// media::force_software_decode() and passes the results in.
+//
+// The probe outcomes:
+//   NotAttempted      — "not attempted (no clip played yet)"
+//   Ok                — "VAAPI OK (probe succeeded; run `vainfo` for driver name)"
+//   Unavailable        — "VAAPI unavailable (see error.log / run `vainfo`)"
+//   HardwareDisabled   — "software-only (hardware disabled by Ctrl+Shift+H)"
+//   ForceSoftware      — "software-only (force-software by Ctrl+Shift+F)"
+[[nodiscard]] std::string hwaccel_status_line(int probe_status, bool hw_enabled, bool sw_forced);
+
 // Up/Down/PageUp/PageDown scroll; Esc/Q close. Returns true if the popup was
 // open (i.e. the key was consumed) — a no-op returning false while closed.
 bool handle_help_key(HelpPopupState& s, SDL_Keycode key);
