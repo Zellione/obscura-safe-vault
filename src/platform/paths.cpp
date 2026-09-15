@@ -221,20 +221,21 @@ bool write_new_keyfile(const std::filesystem::path& path)
 
 OwnerOnlyCreate create_owner_only_file(const std::filesystem::path& path, std::FILE*& out)
 {
+    using enum OwnerOnlyCreate;
     out = nullptr;
     const int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC,
                           S_IRUSR | S_IWUSR);
     if (fd == -1) {
-        if (errno == EEXIST) return OwnerOnlyCreate::AlreadyExists;
-        return OwnerOnlyCreate::Error;
+        if (errno == EEXIST) return AlreadyExists;
+        return Error;
     }
     out = ::fdopen(fd, "r+b");
     if (!out) {
         (void)::unlink(path.c_str());
         ::close(fd);
-        return OwnerOnlyCreate::Error;
+        return Error;
     }
-    return OwnerOnlyCreate::Ok;
+    return Ok;
 }
 
 void ensure_owner_only_file(const std::filesystem::path& path)

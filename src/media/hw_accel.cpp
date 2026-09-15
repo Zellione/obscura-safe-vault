@@ -55,22 +55,25 @@ namespace {
 // subsequent try_attach_hwaccel() call returns the same answer without
 // retrying — mirrors the should_warn_mlock_once() / should_warn_mlock_once
 // pattern (src/crypto/secure_mem.h) for a best-effort platform capability.
+// Phase 104: the test-only force-unavailable flag and the mutex moved in
+// here too, so there are no namespace-scope globals left in this TU
+// (clears cpp:S5421) and the force-flag is now mutex-protected (was a
+// latent thread-safety bug).
 struct ProbeCache {
-    std::once_flag     once;
-    AVBufferRef*       device_ctx = nullptr;
-    HwAccelStatus      status     = HwAccelStatus::NotAttempted;
-    std::optional<int> va_status;             // VAStatus if av_hwdevice_ctx_create returned < 0
-    std::optional<int> open_errno;            // errno if render-node open failed
-    const char*        vendor      = nullptr;  // vaQueryVendorString result if probe succeeded
+    std::once_flag       once;
+    AVBufferRef*         device_ctx        = nullptr;
+    HwAccelStatus        status            = HwAccelStatus::NotAttempted;
+    std::optional<int>   va_status;
+    std::optional<int>   open_errno;
+    const char*          vendor            = nullptr;
+    bool                 force_unavailable = false;   // test-only override
+    std::mutex           mtx;
 };
 ProbeCache& probe_cache() noexcept
 {
     static ProbeCache cache;
     return cache;
 }
-
-bool g_force_unavailable = false;
-std::mutex g_probe_mutex;
 
 // The once-per-process device-creation attempt + diagnostic logging.
 // Outcome is captured into probe_cache() and mirrored into the F1 status
@@ -79,13 +82,14 @@ std::mutex g_probe_mutex;
 // probe run.
 AVBufferRef* cached_device_ctx()
 {
-    std::lock_guard lock(g_probe_mutex);
-    if (probe_cache().device_ctx || probe_cache().status == HwAccelStatus::Unavailable ||
-        probe_cache().status == HwAccelStatus::Ok) {
-        return probe_cache().device_ctx;
+    auto& cache = probe_cache();
+    std::lock_guard lock(cache.mtx);
+    if (cache.device_ctx || cache.status == HwAccelStatus::Unavailable ||
+        cache.status == HwAccelStatus::Ok) {
+        return cache.device_ctx;
     }
-    if (g_force_unavailable) {
-        probe_cache().status = HwAccelStatus::Unavailable;
+    if (cache.force_unavailable) {
+        cache.status = HwAccelStatus::Unavailable;
         return nullptr;
     }
 
@@ -94,7 +98,7 @@ AVBufferRef* cached_device_ctx()
     const char* libva_driver_name = std::getenv("LIBVA_DRIVER_NAME");
     const char* libva_drivers_path = std::getenv("LIBVA_DRIVERS_PATH");
 
-    if (av_hwdevice_ctx_create(&probe_cache().device_ctx, kHwDeviceType, nullptr, nullptr, 0) < 0) {
+    if (av_hwdevice_ctx_create(&cache.device_ctx, kHwDeviceType, nullptr, nullptr, 0) < 0) {
         // av_hwdevice_ctx_create fails internally at the same steps our
         // vendor/vaapi-shim surfaces (render-node open / vaInitialize). The
         // FFmpeg call swallows the specific errno / VAStatus; we can't
@@ -102,8 +106,8 @@ AVBufferRef* cached_device_ctx()
         // Log the levers + a "see vainfo for details" hint and treat as
         // Unavailable so callers fall back to software silently. The user
         // can run `vainfo` from a shell to see exactly which step failed.
-        probe_cache().device_ctx = nullptr;
-        probe_cache().status      = HwAccelStatus::Unavailable;
+        cache.device_ctx = nullptr;
+        cache.status      = HwAccelStatus::Unavailable;
         platform::safe_println(stderr,
             "[HwAccel] VAAPI probe failed: LIBVA_DRIVER_NAME={} LIBVA_DRIVERS_PATH={} — software decode will be used; run `vainfo` for details",
             libva_driver_name ? libva_driver_name : "(unset)",
@@ -111,12 +115,12 @@ AVBufferRef* cached_device_ctx()
         return nullptr;
     }
 
-    probe_cache().status = HwAccelStatus::Ok;
+    cache.status = HwAccelStatus::Ok;
     platform::safe_println(stderr,
         "[HwAccel] VAAPI probe: OK; LIBVA_DRIVER_NAME={} LIBVA_DRIVERS_PATH={}",
         libva_driver_name ? libva_driver_name : "(unset)",
         libva_drivers_path ? libva_drivers_path : "(unset)");
-    return probe_cache().device_ctx;
+    return cache.device_ctx;
 }
 
 bool decoder_supports_hw(const AVCodec* decoder)
@@ -153,8 +157,8 @@ bool try_attach_hwaccel(AVCodecContext* ctx, const AVCodec* decoder)
         // support (codec coverage is controlled by FFmpeg's configure-time
         // --enable-hwaccel= list).
         static std::optional<std::string> logged;
-        const std::string name = decoder ? decoder->name : "(null)";
-        if (!logged.has_value() || *logged != name) {
+        if (const std::string name = decoder ? decoder->name : "(null)";
+            !logged.has_value() || *logged != name) {
             platform::safe_println(stderr, "[HwAccel] decoder {} reports no VAAPI hw_config — using software", name);
             logged = name;
         }
@@ -171,11 +175,12 @@ bool try_attach_hwaccel(AVCodecContext* ctx, const AVCodec* decoder)
 
 void test_only_force_hwaccel_unavailable(bool force)
 {
-    std::lock_guard lock(g_probe_mutex);
-    g_force_unavailable = force;
-    if (probe_cache().device_ctx) av_buffer_unref(&probe_cache().device_ctx);
-    probe_cache().status = HwAccelStatus::NotAttempted;
-    probe_cache().vendor = nullptr;
+    auto& cache = probe_cache();
+    std::lock_guard lock(cache.mtx);
+    cache.force_unavailable = force;
+    if (cache.device_ctx) av_buffer_unref(&cache.device_ctx);
+    cache.status = HwAccelStatus::NotAttempted;
+    cache.vendor = nullptr;
 }
 
 bool transfer_hw_frame(const AVFrame* frame, AVFrame* sw_frame)
@@ -198,8 +203,9 @@ bool is_hw_format_frame(const AVFrame* frame)
 
 HwAccelStatus hwaccel_status() noexcept
 {
-    std::lock_guard lock(g_probe_mutex);
-    return probe_cache().status;
+    auto& cache = probe_cache();
+    std::lock_guard lock(cache.mtx);
+    return cache.status;
 }
 
 #else  // no OSV_HWACCEL_VAAPI compiled in this build

@@ -51,6 +51,8 @@ std::string secure_mem_status_line(size_t budget_bytes, bool degraded)
 // overrides (enable_hardware_decode + force_software_decode) take priority
 // over the probe outcome — once the user has explicitly chosen software,
 // the line reflects that choice, not whatever the probe happened to find.
+// Phase 104: gated on OSV_VENDORED_AV so a build without FFmpeg
+// (--no-av) compiles cleanly — media::HwAccelStatus doesn't exist there.
 std::string hwaccel_status_line(int probe_status, bool hw_enabled, bool sw_forced)
 {
     // Override wins: force-software is the explicit "always software" signal.
@@ -59,18 +61,23 @@ std::string hwaccel_status_line(int probe_status, bool hw_enabled, bool sw_force
     // Then hardware-disabled: the user explicitly turned the auto-probe off.
     if (!hw_enabled)
         return "Video decode: software-only (hardware disabled by Ctrl+Shift+H)";
+#if defined(OSV_VENDORED_AV) && defined(OSV_HWACCEL_VAAPI)
     // Then the probe outcome — the actual device-context state.
     using media::HwAccelStatus;
-    switch (static_cast<HwAccelStatus>(probe_status)) {
-        case HwAccelStatus::Ok:
+    switch (static_cast<media::HwAccelStatus>(probe_status)) {
+        case media::HwAccelStatus::Ok:
             return "Video decode: VAAPI OK (run `vainfo` for driver name)";
-        case HwAccelStatus::Unavailable:
+        case media::HwAccelStatus::Unavailable:
             return "Video decode: VAAPI unavailable (see error.log; run `vainfo`)";
-        case HwAccelStatus::NotAttempted:
+        case media::HwAccelStatus::NotAttempted:
             return "Video decode: not attempted (no clip played yet)";
         default:
             return "Video decode: status unknown";
     }
+#else
+    (void)probe_status;   // hwaccel not built; the override strings above already told the truth
+    return "Video decode: hwaccel not built";
+#endif
 }
 
 bool handle_help_key(HelpPopupState& s, SDL_Keycode key)
@@ -234,7 +241,7 @@ void draw_help_popup(gfx::Renderer& r, gfx::FontAtlas& font, float W, float H,
                                                     crypto::secure_memory_degraded())},
 #if defined(OSV_VENDORED_AV) && defined(OSV_HWACCEL_VAAPI)
              {.key = "",
-              .description = hwaccel_status_line(static_cast<int>(media::hwaccel_status()),
+              .description = hwaccel_status_line(std::to_underlying(media::hwaccel_status()),
                                                  media::enable_hardware_decode(),
                                                  media::force_software_decode())},
 #endif
