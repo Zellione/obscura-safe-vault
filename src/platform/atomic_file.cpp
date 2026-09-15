@@ -8,23 +8,14 @@
 
 #include "platform/path_utf8.h"
 
-#if defined(_WIN32)
-#  if !defined(WIN32_LEAN_AND_MEAN)
-#    define WIN32_LEAN_AND_MEAN
-#  endif
-#  include <Windows.h>
-#  include <fcntl.h>
-#  include <io.h>
-#else
-#  include <fcntl.h>
-#  include <sys/stat.h>
-#  include <sys/types.h>
-#  include <unistd.h>
-#  if defined(__linux__)
-#    include <sys/syscall.h>
-#    if defined(SYS_openat2)
-#      include <linux/openat2.h>
-#    endif
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#if defined(__linux__)
+#  include <sys/syscall.h>
+#  if defined(SYS_openat2)
+#    include <linux/openat2.h>
 #  endif
 #endif
 
@@ -92,8 +83,6 @@ void clear_atomic_create_collision() noexcept
 {
     create_collision_flag().store(false);
 }
-
-#if !defined(_WIN32)
 
 namespace {
 
@@ -188,112 +177,5 @@ create_new_file_within(const std::filesystem::path& directory, std::string_view 
     }
     return std::nullopt;  // collision streak exhausted
 }
-
-#else  // defined(_WIN32)
-
-namespace {
-
-// Resolve a path to its TRUE location (junctions / mount points resolved), as
-// the "\\?\C:\..." or plain extended form GetFinalPathNameByHandleW returns.
-// Both the directory and the created file are normalized through the SAME API,
-// so the containment prefix comparison below stays valid.
-[[nodiscard]] std::wstring final_native_path(const std::filesystem::path& p,
-                                             bool as_directory) noexcept
-{
-    const DWORD share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
-    const DWORD flags = as_directory ? FILE_FLAG_BACKUP_SEMANTICS : FILE_ATTRIBUTE_NORMAL;
-    HANDLE h = ::CreateFileW(p.c_str(), FILE_READ_ATTRIBUTES, share, nullptr, OPEN_EXISTING,
-                             flags, nullptr);
-    if (h == INVALID_HANDLE_VALUE) return {};
-    std::wstring buf(4096, L'\0');
-    const DWORD n =
-        ::GetFinalPathNameByHandleW(h, buf.data(), static_cast<DWORD>(buf.size()), 0);
-    ::CloseHandle(h);
-    if (n == 0 || n >= buf.size()) return {};
-    buf.resize(n);
-    return buf;
-}
-
-// True iff `file` (a freshly-created file's final path) lies strictly beneath
-// the directory's final path — i.e. no intermediate junction redirected the
-// create outside the folder the user picked. A reparse point AT the candidate
-// name is impossible here (CREATE_NEW fails on an existing entry), so the
-// final-handle comparison is the only reparse check the create needs.
-[[nodiscard]] bool final_path_within(const std::wstring& dir_native,
-                                     const std::wstring& file_native) noexcept
-{
-    if (dir_native.size() >= file_native.size()) return false;
-    if (file_native.compare(0, dir_native.size(), dir_native) != 0) return false;
-    const wchar_t sep = file_native[dir_native.size()];
-    return sep == L'\\' || sep == L'/';
-}
-
-}  // namespace
-
-std::optional<NewOutputFile>
-create_new_file_within(const std::filesystem::path& directory, std::string_view safe_component)
-{
-    if (!is_plain_component(safe_component)) return std::nullopt;
-
-    const std::wstring dir_native = final_native_path(directory, /*as_directory=*/true);
-    if (dir_native.empty()) return std::nullopt;
-
-    for (int n = 0; n <= MAX_COLLISION_ATTEMPTS; ++n) {
-        if (create_collision_flag().exchange(false)) continue;  // -> next suffix
-
-        const std::string name = (n == 0) ? std::string{safe_component}
-                                          : collided_name(safe_component, n);
-        const std::filesystem::path candidate = directory / utf8_to_path(name);
-
-        // CREATE_NEW atomically claims the name; an existing entry (file, dir,
-        // symlink, junction) fails with ERROR_FILE_EXISTS and is NEVER followed
-        // or truncated.
-        HANDLE h = ::CreateFileW(candidate.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
-                                 CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (h == INVALID_HANDLE_VALUE) {
-            const DWORD err = ::GetLastError();
-            if (err == ERROR_FILE_EXISTS || err == ERROR_ALREADY_EXISTS) continue;
-            return std::nullopt;  // permission / quota / I/O / a dir component: fail closed
-        }
-
-        // Ask the OS where the handle REALLY points and reject any redirection
-        // out of the chosen directory (intermediate junction/mount-point case).
-        std::wstring file_native(4096, L'\0');
-        const DWORD f =
-            ::GetFinalPathNameByHandleW(h, file_native.data(), static_cast<DWORD>(file_native.size()),
-                                        FILE_NAME_NORMALIZED);
-        if (f == 0 || f >= file_native.size()) {
-            ::CloseHandle(h);
-            (void)::DeleteFileW(candidate.c_str());
-            return std::nullopt;
-        }
-        file_native.resize(f);
-        if (!final_path_within(dir_native, file_native)) {
-            ::CloseHandle(h);
-            (void)::DeleteFileW(candidate.c_str());
-            return std::nullopt;
-        }
-
-        const int fd = ::_open_osfhandle(reinterpret_cast<intptr_t>(h), _O_WRONLY | _O_BINARY);
-        if (fd == -1) {
-            ::CloseHandle(h);
-            (void)::DeleteFileW(candidate.c_str());
-            return std::nullopt;
-        }
-        std::FILE* fp = ::_fdopen(fd, "wb");
-        if (!fp) {
-            ::_close(fd);
-            (void)::DeleteFileW(candidate.c_str());
-            return std::nullopt;
-        }
-        NewOutputFile out;
-        out.fp = fp;
-        out.display_path = candidate;
-        return out;
-    }
-    return std::nullopt;  // collision streak exhausted
-}
-
-#endif  // _WIN32
 
 }  // namespace platform

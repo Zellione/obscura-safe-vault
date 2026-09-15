@@ -79,15 +79,11 @@ static uint64_t size_on_disk(const fs::path& p)
 // so a sparse file (post hole-punch) reports less here than size_on_disk.
 static uint64_t allocated_on_disk(const fs::path& p)
 {
-#if defined(_WIN32)
-    return size_on_disk(p);
-#else
     struct stat st{};
     if (::stat(p.string().c_str(), &st) != 0 || st.st_blocks < 0) {
         return 0;
     }
     return static_cast<uint64_t>(st.st_blocks) * 512U;
-#endif
 }
 
 // Whether the temp filesystem actually supports hole punching, so physical

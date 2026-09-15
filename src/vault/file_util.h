@@ -1,44 +1,31 @@
 #pragma once
 
-// Small cross-platform stdio helpers for 64-bit positioning and durable flush.
+// Small stdio helpers for 64-bit positioning and durable flush.
 // Shared by chunk_store (append/read) and vault (header writes). premake builds
-// 64-bit only, so off_t / _ftelli64 are wide enough for any vault.
+// 64-bit only, so off_t is wide enough for any vault.
 
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <sys/stat.h>
 
-#if defined(_WIN32)
-#  include <io.h>
-#else
-#  include <fcntl.h>
-#  include <unistd.h>
-#  if defined(__linux__)
-#    include <linux/falloc.h>  // FALLOC_FL_PUNCH_HOLE / FALLOC_FL_KEEP_SIZE
-#  endif
+#include <fcntl.h>
+#include <unistd.h>
+#if defined(__linux__)
+#  include <linux/falloc.h>  // FALLOC_FL_PUNCH_HOLE / FALLOC_FL_KEEP_SIZE
 #endif
 
 namespace vault::fileutil {
 
 [[nodiscard]] inline bool seek_to(std::FILE* fp, uint64_t off) noexcept
 {
-#if defined(_WIN32)
-    return _fseeki64(fp, static_cast<long long>(off), SEEK_SET) == 0;
-#else
     return fseeko(fp, static_cast<off_t>(off), SEEK_SET) == 0;
-#endif
 }
 
 [[nodiscard]] inline bool seek_end(std::FILE* fp, uint64_t& out_pos) noexcept
 {
-#if defined(_WIN32)
-    if (_fseeki64(fp, 0, SEEK_END) != 0) return false;
-    const long long p = _ftelli64(fp);
-#else
     if (fseeko(fp, 0, SEEK_END) != 0) return false;
     const off_t p = ftello(fp);
-#endif
     if (p < 0) return false;
     out_pos = static_cast<uint64_t>(p);
     return true;
@@ -53,13 +40,8 @@ namespace vault::fileutil {
 // lane's header swap raced main-thread file_size calls on the same handle.)
 [[nodiscard]] inline bool file_size(std::FILE* fp, uint64_t& out_size) noexcept
 {
-#if defined(_WIN32)
-    struct _stat64 st{};
-    if (_fstat64(_fileno(fp), &st) != 0 || st.st_size < 0) return false;
-#else
     struct stat st{};
     if (::fstat(::fileno(fp), &st) != 0 || st.st_size < 0) return false;
-#endif
     out_size = static_cast<uint64_t>(st.st_size);
     return true;
 }
@@ -67,20 +49,15 @@ namespace vault::fileutil {
 // Report the file's ALLOCATED size (physical blocks actually on disk), which
 // differs from file_size() once a file is sparse. Used to measure how much disk
 // in-place hole-punching actually reclaimed. POSIX: st_blocks is in 512-byte
-// units by definition. Windows has no cheap portable equivalent, so it falls
-// back to the logical size (hole-punching is a no-op there anyway).
+// units by definition.
 [[nodiscard]] inline bool file_allocated_bytes(std::FILE* fp, uint64_t& out_size) noexcept
 {
-#if defined(_WIN32)
-    return file_size(fp, out_size);
-#else
     struct stat st{};
     if (::fstat(::fileno(fp), &st) != 0 || st.st_blocks < 0) {
         return false;
     }
     out_size = static_cast<uint64_t>(st.st_blocks) * 512U;
     return true;
-#endif
 }
 
 // Deallocate the file blocks backing [offset, offset+len), leaving a hole: the
@@ -117,11 +94,7 @@ namespace vault::fileutil {
 [[nodiscard]] inline bool truncate_file(std::FILE* fp, uint64_t new_size) noexcept
 {
     if (std::fflush(fp) != 0) return false;
-#if defined(_WIN32)
-    return _chsize_s(_fileno(fp), static_cast<long long>(new_size)) == 0;
-#else
     return ::ftruncate(::fileno(fp), static_cast<off_t>(new_size)) == 0;
-#endif
 }
 
 // --- fault injection (crash-safety tests) ---------------------------------
@@ -158,11 +131,7 @@ inline std::atomic<uint64_t>& sync_call_count() noexcept
         --n;
     }
     if (std::fflush(fp) != 0) return false;
-#if defined(_WIN32)
-    return _commit(_fileno(fp)) == 0;
-#else
     return fsync(fileno(fp)) == 0;
-#endif
 }
 
 } // namespace vault::fileutil

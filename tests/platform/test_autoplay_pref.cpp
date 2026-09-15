@@ -40,11 +40,7 @@ struct ScopedDataHome {
         fs::remove_all(dir, ec);
         if (!fs::create_directories(dir, ec) && ec) return;
 
-#if defined(_WIN32)
-        constexpr const char* name = "APPDATA";
-#else
         constexpr const char* name = "XDG_DATA_HOME";
-#endif
         if (const char* old = std::getenv(name)) {
             previous = old;
             had_previous = true;
@@ -54,11 +50,7 @@ struct ScopedDataHome {
 
     ~ScopedDataHome()
     {
-#if defined(_WIN32)
-        constexpr const char* name = "APPDATA";
-#else
         constexpr const char* name = "XDG_DATA_HOME";
-#endif
         if (had_previous) (void)SDL_setenv_unsafe(name, previous.c_str(), 1);
         else (void)SDL_unsetenv_unsafe(name);
         std::error_code ec;

@@ -6,9 +6,7 @@
 #include <string>
 #include <vector>
 
-#if !defined(_WIN32)
-#  include <sys/stat.h>
-#endif
+#include <sys/stat.h>
 
 #include "crypto/secure_mem.h"
 #include "platform/path_utf8.h"
@@ -164,7 +162,6 @@ TEST(paths_read_file_refuses_file_over_limit)
     std::filesystem::remove(p);
 }
 
-#if !defined(_WIN32)
 TEST(paths_write_new_keyfile_is_owner_only_despite_umask)
 {
     const auto p = std::filesystem::temp_directory_path() / "osv_keyfile_mode.key";
@@ -179,7 +176,6 @@ TEST(paths_write_new_keyfile_is_owner_only_despite_umask)
     CHECK_EQ(st.st_mode & 0777, mode_t{0600});
     std::filesystem::remove(p);
 }
-#endif
 
 // --- normalize_user_path ---------------------------------------------------
 //

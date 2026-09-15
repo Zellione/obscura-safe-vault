@@ -258,7 +258,6 @@ TEST(export_images_collision_suffixes_without_overwriting)
 // replaces a candidate between one export's suffix attempts) must never be
 // followed into a truncating open. The atomic exclusive create sees the name
 // taken and suffixes instead; the symlink target stays untouched.
-#if !defined(_WIN32)
 TEST(export_symlink_candidate_is_not_followed)
 {
     TempVault tv("sym");
@@ -291,7 +290,6 @@ TEST(export_symlink_candidate_is_not_followed)
                    std::span<const uint8_t>(img));
     CHECK_TRUE(fs::is_symlink(out.path / "a.png", ec));
 }
-#endif
 
 // --- Path traversal: a vault is UNTRUSTED INPUT ----------------------------
 //

@@ -272,8 +272,7 @@ TEST(chunk_store_out_of_bounds_secure_read_clears_stale_output)
 // Covers ChunkStore::append_at_end's post-write flush-failure path. /dev/full
 // accepts a small buffered write but fails the fflush with ENOSPC — exactly the
 // case the flush guard exists for (a partial append must be reported, not
-// silently accepted). Linux-only device; skipped elsewhere.
-#ifndef _WIN32
+// silently accepted). The test skips itself on environments without /dev/full.
 TEST(chunk_store_append_reports_flush_failure)
 {
     auto key = random_key();
@@ -288,7 +287,6 @@ TEST(chunk_store_append_reports_flush_failure)
 
     std::fclose(fp);
 }
-#endif
 
 TEST(chunk_store_write_raw_at_overwrites_in_place)
 {
